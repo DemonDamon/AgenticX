@@ -69,7 +69,7 @@ class MessageRouter:
                         source=platform,
                         reply_to_sender_id=sender,
                         chat_id=message.chat_id,
-                        content="绑定码无效或已过期。请在 Machi 设置中查看当前绑定码，或在网关配置中登记 binding_code。",
+                        content="绑定码无效或已过期。请在 Near 设置中查看当前绑定码，或在网关配置中登记 binding_code。",
                     )
                 )
                 return
@@ -115,7 +115,7 @@ class MessageRouter:
                     source=platform,
                     reply_to_sender_id=sender,
                     chat_id=message.chat_id,
-                    content="当前版本无法通过消息取消进行中的对话；请在 Machi 桌面端操作。",
+                    content="当前版本无法通过消息取消进行中的对话；请在 Near 桌面端操作。",
                 )
             )
             return
@@ -129,7 +129,7 @@ class MessageRouter:
                     reply_to_sender_id=sender,
                     chat_id=message.chat_id,
                     content=(
-                        "尚未绑定设备。请在本机 Machi 设置中查看「远程指令」绑定码，"
+                        "尚未绑定设备。请在本机 Near 设置中查看「远程指令」绑定码，"
                         "然后向机器人发送：绑定 <你的绑定码>"
                     ),
                 )
@@ -178,7 +178,7 @@ class MessageRouter:
                     source=platform,
                     reply_to_sender_id=sender,
                     chat_id=message.chat_id,
-                    content="执行超时或无回复，请稍后重试或查看 Machi 桌面端。",
+                    content="执行超时或无回复，请稍后重试或查看 Near 桌面端。",
                 )
             )
             return
@@ -186,7 +186,7 @@ class MessageRouter:
         content = reply.content
         if len(content) > _SUMMARY_MAX:
             head = content[: _SUMMARY_MAX - 80]
-            content = f"{head}\n\n...(全文共 {len(reply.content)} 字，请在 Machi 查看完整回复)"
+            content = f"{head}\n\n...(全文共 {len(reply.content)} 字，请在 Near 查看完整回复)"
         reply = GatewayReply(
             message_id=reply.message_id or message.message_id,
             source=reply.source or platform,

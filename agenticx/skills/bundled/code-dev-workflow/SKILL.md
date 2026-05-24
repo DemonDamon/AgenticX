@@ -1,6 +1,6 @@
 ---
 name: code-dev-workflow
-description: Machi code_dev harness — Explore, Read, Author phases with outline-first context discipline.
+description: Near code_dev harness — Explore, Read, Author phases with outline-first context discipline.
 requires_tools:
   - code_outline
   - file_read

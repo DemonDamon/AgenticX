@@ -1,6 +1,6 @@
 ---
 name: agenticx-automation-crontask
-description: Build and maintain Machi Desktop scheduled (cron) tasks — default workspace ~/.agenticx/crontask, schedule_task tool, execution contract, and user-facing output. Use when the user wants recurring automation, crontab-style jobs, or to author/fix automation task prompts.
+description: Build and maintain Near Desktop scheduled (cron) tasks — default workspace ~/.agenticx/crontask, schedule_task tool, execution contract, and user-facing output. Use when the user wants recurring automation, crontab-style jobs, or to author/fix automation task prompts.
 metadata:
   author: AgenticX
   version: "0.1.2"
@@ -20,7 +20,7 @@ metadata:
 
 ## Meta-Agent：调用 `schedule_task` 之前（运行环境）
 
-定时任务**以后**在 **automation 专属会话**里执行，不会在当时的 Machi 对话里自动装包。在调用 `schedule_task` **之前**应代用户准备好任务根下的环境：
+定时任务**以后**在 **automation 专属会话**里执行，不会在当时的 Near 对话里自动装包。在调用 `schedule_task` **之前**应代用户准备好任务根下的环境：
 
 1. 先拿到 **任务根**：用户指定的 `workspace`，或创建任务后默认的 `~/.agenticx/crontask/<task_id>/`（`schedule_task` 返回的 `task_id` 可用于路径）。
 2. 在任务根下 **`python3 -m venv .venv`**（若尚无），**`.venv/bin/pip install …`**。

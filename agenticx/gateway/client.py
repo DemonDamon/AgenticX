@@ -199,7 +199,7 @@ class GatewayClient:
                     source=str(payload.get("source") or ""),
                     reply_to_sender_id=str(payload.get("sender_id") or ""),
                     chat_id=str(payload.get("chat_id") or ""),
-                    content=f"[Machi] 执行出错: {exc}",
+                    content=f"[Near] 执行出错: {exc}",
                     content_type="text",
                 )
                 await ws.send(
@@ -220,9 +220,9 @@ class GatewayClient:
             await self._delete_session(sid)
             return "已开始新对话。"
         if UserDeviceMap.is_status_command(text):
-            return "状态正常（本机 Machi 已连接网关）。"
+            return "状态正常（本机 Near 已连接网关）。"
         if UserDeviceMap.is_cancel_command(text):
-            return "当前版本请在本机 Machi 取消进行中的任务。"
+            return "当前版本请在本机 Near 取消进行中的任务。"
 
         session_id = _session_id_for_im(msg)
         sender_key = f"{msg.source}:{msg.sender_id}"

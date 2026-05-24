@@ -1431,8 +1431,8 @@ def _agenticx_desktop_use_dir() -> Path:
 
 def _desktop_use_blocked_message() -> str:
     return (
-        "ERROR: 桌面操控工具未启用。请在 Machi 设置中开启「桌面操控」（写入 ~/.agenticx/config.yaml 的 "
-        "computer_use.enabled）后完全重启 Machi。"
+        "ERROR: 桌面操控工具未启用。请在 Near 设置中开启「桌面操控」（写入 ~/.agenticx/config.yaml 的 "
+        "computer_use.enabled）后完全重启 Near。"
     )
 
 

@@ -18,6 +18,8 @@ import time
 from pathlib import Path
 from typing import Any, Callable, Coroutine, Dict, Optional
 
+from agenticx.branding import DEFAULT_META_PRODUCT_LABEL
+
 import httpx
 
 from agenticx.gateway.im_confirm import (
@@ -138,7 +140,7 @@ class WeChatILinkAdapter:
         self._studio_token = studio_token
         self._running = False
         self._task: Optional[asyncio.Task[None]] = None
-        self._reply_name = os.getenv("AGX_WECHAT_REPLY_NAME", "Machi").strip()
+        self._reply_name = os.getenv("AGX_WECHAT_REPLY_NAME", DEFAULT_META_PRODUCT_LABEL).strip()
 
     def _resolve_sidecar_url(self) -> str:
         if self._sidecar_url:

@@ -656,7 +656,7 @@ def feishu_longconn(
     ),
     debug: bool = typer.Option(False, "--debug", help="开启 DEBUG 日志"),
 ):
-    """通过飞书长连接（WebSocket）接收消息并转发给本机 Machi 执行。
+    """通过飞书长连接（WebSocket）接收消息并转发给本机 Near 执行。
 
     无需公网 IP，使用飞书官方 SDK 主动连接飞书服务器。
 
@@ -702,7 +702,7 @@ def feishu_longconn(
 
     console.print(f"[green]飞书长连接启动中...[/green] app_id={resolved_app_id}")
     console.print(f"  本机 agx serve: [cyan]{resolved_studio}[/cyan]")
-    console.print("  在飞书里给机器人发消息即可触发 Machi 执行。")
+    console.print("  在飞书里给机器人发消息即可触发 Near 执行。")
     console.print("  发送「新对话」可重置会话上下文，「状态」可检查连接。")
 
     runner = FeishuLongConnRunner(
@@ -1029,7 +1029,7 @@ def project_resume(
 
     console.print(
         "\n[bold]How to resume in a new session:[/bold]\n"
-        "  1. Open Machi (or `agx serve` + Desktop) and start a session with mode=feature_loop in this workspace.\n"
+        "  1. Open Near (or `agx serve` + Desktop) and start a session with mode=feature_loop in this workspace.\n"
         "  2. Send a single user message asking to continue. The system prompt block will already include the on-disk state.\n"
         "  3. The agent must first call `project_status` (single source of truth on disk).\n"
         "  4. Then `feature_select` (auto picks the right feature) → code_dev loop → `verify_run` → git commit → `feature_complete`.\n"

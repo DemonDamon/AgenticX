@@ -24,7 +24,7 @@ def _resolve_codebase_path(raw: str, session: Any) -> Path:
 def _require_enabled() -> None:
     if not is_enabled():
         raise RuntimeError(
-            "未挂载代码脑且 code_index.enabled 为 false。请在 Machi 设置 → 知识库 创建代码脑，"
+            "未挂载代码脑且 code_index.enabled 为 false。请在 Near 设置 → 知识库 创建代码脑，"
             "或在 ~/.agenticx/config.yaml 启用 code_index。"
         )
 

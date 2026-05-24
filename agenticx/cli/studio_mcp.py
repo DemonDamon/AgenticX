@@ -85,7 +85,7 @@ def _exception_detail_for_mcp_call(exc: BaseException, *, max_chain: int = 4) ->
     return " | ".join(parts)
 
 
-# Shipped defaults for first-time Machi / agx users
+# Shipped defaults for first-time Near / agx users
 # (no secrets on disk; env inherits os.environ).
 _DEFAULT_MCP_ENTRIES: Dict[str, Dict[str, Any]] = {
     "browser-use": {

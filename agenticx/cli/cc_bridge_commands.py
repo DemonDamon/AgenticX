@@ -41,7 +41,7 @@ def cc_bridge_serve(
             os.environ["CC_BRIDGE_TOKEN"] = resolved
             console.print(
                 "[dim]Using token from ~/.agenticx/config.yaml (cc_bridge.token) or newly generated; "
-                "Machi cc_bridge_* tools use the same value.[/dim]"
+                "Near cc_bridge_* tools use the same value.[/dim]"
             )
     console.print(f"[green]CC bridge listening[/green] http://{host}:{port}")
     console.print(
