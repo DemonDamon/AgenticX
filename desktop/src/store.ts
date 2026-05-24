@@ -3,6 +3,7 @@ import { create } from "zustand";
 import { isSettingsTab } from "./settings-tab";
 import type { SettingsTab } from "./settings-tab";
 import { clearPaneAwaitingFreshSession } from "./utils/pane-fresh-session";
+import { META_AGENT_DISPLAY_NAME } from "./constants/branding";
 
 export type UiStatus = "idle" | "listening" | "processing";
 export type MsgRole = "user" | "assistant" | "tool";
@@ -343,7 +344,7 @@ type AppState = {
   focusExitScrollBottomPaneId: string | null;
   clearFocusExitScrollBottomPaneId: () => void;
   theme: ThemeMode;
-  /** Machi 官网账号登录状态（与 AccountTab / Topbar 共享，首屏和事件回调同步）。 */
+  /** Near 官网账号登录状态（与 AccountTab / Topbar 共享，首屏和事件回调同步）。 */
   agxAccount: { loggedIn: boolean; email: string; displayName: string };
   chatStyle: ChatStyle;
   themeColor: ThemeColor;
@@ -353,7 +354,7 @@ type AppState = {
   userAvatarUrl: string;
   /** Free-text user preference/style injected into every agent system prompt. Max 500 chars. */
   userPreference: string;
-  /** Custom avatar for Meta-Agent (Machi). */
+  /** Custom avatar for Meta-Agent (Near). */
   metaAvatarUrl: string;
   confirmStrategy: ConfirmStrategy;
   mcpServers: McpServer[];
@@ -560,7 +561,7 @@ function makeDefaultPane(): ChatPane {
   return {
     id: "pane-meta",
     avatarId: null,
-    avatarName: "Machi",
+    avatarName: META_AGENT_DISPLAY_NAME,
     sessionId: "",
     modelProvider: "",
     modelName: "",

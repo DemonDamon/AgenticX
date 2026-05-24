@@ -7,6 +7,8 @@ import { mapLoadedSessionMessage, type LoadedSessionMessage } from "../utils/ses
 import { getVisibleBoundSession, isSessionVisibleInPane } from "../utils/session-history-logic";
 import { clearPaneLazyInheritParent, markPaneAwaitingFreshSession } from "../utils/pane-fresh-session";
 import { FeishuBadge } from "./FeishuBadge";
+import { META_AGENT_DISPLAY_NAME } from "../constants/branding";
+import { resolveMetaDisplayName } from "../utils/display-name";
 
 function timeAgo(ts: number): string {
   const diff = Date.now() / 1000 - ts;
@@ -244,7 +246,7 @@ export const SessionHistoryPanel = memo(function SessionHistoryPanel({ pane, onC
     el.style.top = `${top}px`;
   }, [contextMenu]);
 
-  const title = useMemo(() => (pane.avatarName || "Machi").trim(), [pane.avatarName]);
+  const title = useMemo(() => resolveMetaDisplayName(pane.avatarName), [pane.avatarName]);
 
   const feishuMarkedSessionId = useMemo(() => {
     if (isAutomationPaneAvatarId(pane.avatarId)) return null;
@@ -881,7 +883,7 @@ export const SessionHistoryPanel = memo(function SessionHistoryPanel({ pane, onC
       return;
     }
     if (action === "open_new_tab") {
-      const paneId = addPane(item.avatar_id ?? null, item.avatar_name || "Machi", item.session_id);
+      const paneId = addPane(item.avatar_id ?? null, item.avatar_name || META_AGENT_DISPLAY_NAME, item.session_id);
       const terms = buildHighlightTermsFromQuery(sessionSearchTrim);
       await switchSession(item.session_id, paneId, terms);
       return;

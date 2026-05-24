@@ -173,7 +173,7 @@ export class OpenAIRealtimeRtcSession implements RealtimeVoiceSession {
       // IMPORTANT: do NOT switch to listening here. OpenAI Realtime emits
       // transcript.done well before the audio finishes streaming/playing,
       // so flipping the phase now would prematurely show "收听..." while
-      // Machi is still speaking out loud. Let the audio-energy watchdog
+      // Near is still speaking out loud. Let the audio-energy watchdog
       // (rafOut) flip back to "listening" once playback truly drained.
       this.transcriptDone = true;
     }

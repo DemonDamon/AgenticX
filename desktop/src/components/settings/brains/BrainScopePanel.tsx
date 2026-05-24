@@ -145,7 +145,7 @@ export function BrainScopePanel({ brain, brainsApi, onUpdated }: Props) {
                 全局可见
               </div>
               <p className="mt-1 text-[11px] leading-snug text-text-faint">
-                Machi（Meta）与分身均可检索；适合团队共享资料与代码库。
+                Near（Meta）与分身均可检索；适合团队共享资料与代码库。
               </p>
             </button>
             <button

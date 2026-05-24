@@ -15,6 +15,8 @@ import type { Message, ProviderEntry } from "./store";
 import { useAppStore } from "./store";
 import { stopSpeak } from "./voice/tts";
 import { matchKeybinding } from "./core/keybinding-manager";
+import { META_AGENT_DISPLAY_NAME } from "./constants/branding";
+import { resolveMetaDisplayName } from "./utils/display-name";
 
 const WORKSPACE_STATE_STORAGE_KEY = "agx-workspace-state-v1";
 
@@ -1076,7 +1078,7 @@ export function App() {
           store.addPaneMessage(
             matchingPane.id,
             "tool",
-            `⚠️ 子智能体已结束，但 Machi 自动汇报暂未成功。先给你直接结果：\n${lines}`,
+            `⚠️ 子智能体已结束，但 ${META_AGENT_DISPLAY_NAME} 自动汇报暂未成功。先给你直接结果：\n${lines}`,
             "meta"
           );
         };
@@ -1772,7 +1774,7 @@ export function App() {
       const state = useAppStore.getState();
       const sameSid = state.panes.filter((pane) => String(pane.sessionId ?? "").trim() === sid);
       if (sameSid.length === 0) return;
-      // 定时任务会话只应刷新 automation:* 窗格，避免与 Machi 窗格误绑同一 sessionId 时被错误覆盖
+      // 定时任务会话只应刷新 automation:* 窗格，避免与 Near 窗格误绑同一 sessionId 时被错误覆盖
       const autoPanes = sameSid.filter((p) => String(p.avatarId ?? "").startsWith("automation:"));
       const targets = autoPanes.length > 0 ? autoPanes : sameSid;
       try {
@@ -1809,7 +1811,7 @@ export function App() {
         }
         return existingByAvatar.id;
       }
-      // 必须与当前任务的 automation:<id> 一致，不能把 Machi/分身窗格当成定时窗格复用
+      // 必须与当前任务的 automation:<id> 一致，不能把 Near/分身窗格当成定时窗格复用
       const existingBySession = state.panes.find(
         (pane) => (pane.sessionId || "").trim() === sid && pane.avatarId === avatarId
       );
@@ -1915,11 +1917,11 @@ export function App() {
         feishuBindingSidRef.current = newSid;
 
         if (!newSid) {
-          // _desktop was cleared (/unbind) — switch back to the Meta/Machi pane
+          // _desktop was cleared (/unbind) — switch back to the Meta/Near pane
           if (!prevSid) return; // was already unbound at startup, nothing to do
           const state = useAppStore.getState();
           // Prefer the pane whose session was previously bound (to deactivate it),
-          // then fall back to the first pane with no avatarId (Meta/Machi),
+          // then fall back to the first pane with no avatarId (Meta/Near),
           // then fall back to panes[0].
           const metaPane =
             state.panes.find((p) => !p.avatarId || p.avatarId === "") ??
@@ -1941,8 +1943,12 @@ export function App() {
         } else {
           const avatarId = (desk?.avatar_id ?? "").trim() || null;
           const rawName = (desk?.avatar_name ?? "").trim();
-          // avatar_id 为空表示飞书默认路由到 Machi；勿用「分身」占位，否则顶栏/气泡会与元智能体不一致且无 meta 头像
-          const avatarName = rawName || (avatarId ? "分身" : "Machi");
+          // avatar_id 为空表示飞书默认路由到 Near；勿用「分身」占位，否则顶栏/气泡会与元智能体不一致且无 meta 头像
+          const avatarName = rawName
+            ? resolveMetaDisplayName(rawName)
+            : avatarId
+              ? "分身"
+              : META_AGENT_DISPLAY_NAME;
           const reusableMetaPane =
             !avatarId
               ? state.panes.find((pane) => !String(pane.avatarId ?? "").trim())

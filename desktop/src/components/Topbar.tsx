@@ -54,7 +54,7 @@ export function Topbar({ sidebarCollapsed, onToggleSidebar }: Props) {
     setUserMenuOpen(false);
     const r = await window.agenticxDesktop.confirmDialog({
       title: "退出官网账号",
-      message: "确定要清除本机已保存的 Machi 官网登录状态吗？",
+      message: "确定要清除本机已保存的 Near 官网登录状态吗？",
       confirmText: "退出",
       destructive: true,
     });
@@ -171,7 +171,7 @@ export function Topbar({ sidebarCollapsed, onToggleSidebar }: Props) {
             className="agx-topbar-btn"
             onClick={() => void onLoginClick()}
             disabled={loginBusy}
-            title="登录 Machi 官网账号"
+            title="登录 Near 官网账号"
             aria-label="登录"
           >
             <LogIn className="h-[18px] w-[18px]" strokeWidth={1.8} />

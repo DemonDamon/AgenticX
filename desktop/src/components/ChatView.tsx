@@ -1826,7 +1826,7 @@ export function ChatView({ onOpenConfirm, mode = "pro" }: Props) {
               onClick={async () => {
                 const r = await window.agenticxDesktop.confirmDialog({
                   title: "退出官网账号",
-                  message: "确定要清除本机已保存的 Machi 官网登录状态吗？",
+                  message: "确定要清除本机已保存的 Near 官网登录状态吗？",
                   confirmText: "退出",
                   destructive: true,
                 });
@@ -1870,7 +1870,7 @@ export function ChatView({ onOpenConfirm, mode = "pro" }: Props) {
                   setLoginBusy(false);
                 }
               }}
-              title="登录 Machi 官网账号"
+              title="登录 Near 官网账号"
             >
               {loginBusy ? "登录中..." : "登录"}
             </button>
@@ -1898,7 +1898,7 @@ export function ChatView({ onOpenConfirm, mode = "pro" }: Props) {
                     <MessageRenderer
                       message={m}
                       assistantBadge={!isLite && m.role === "assistant" ? <ModelBadge provider={m.provider} model={m.model} /> : undefined}
-                      assistantName="Machi"
+                      assistantName="Near"
                       imAssistantVisual={
                         m.role === "assistant" && reactWorkCol ? "compact-inline" : "default"
                       }
@@ -1966,7 +1966,7 @@ export function ChatView({ onOpenConfirm, mode = "pro" }: Props) {
                 <ImBubble
                   message={{ id: "__stream__", role: "assistant", content: streamedAssistantText || "" }}
                   badge={!isLite && streamingModel ? <ModelBadge provider={streamingModel.provider} model={streamingModel.model} /> : undefined}
-                  assistantName="Machi"
+                  assistantName="Near"
                 />
               )}
             </div>

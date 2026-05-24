@@ -14,7 +14,7 @@ type Props = {
   selectable?: boolean;
   selectedIds?: Set<string>;
   onToggleSelectMessage?: (message: Message) => void;
-  /** Parent ReAct column already shows Machi avatar — drop left spacer. */
+  /** Parent ReAct column already shows Near avatar — drop left spacer. */
   omitLeadingSpacer?: boolean;
   /** When true, remove outer border/rounded so parent unified container provides the single border. */
   flat?: boolean;

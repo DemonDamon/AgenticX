@@ -397,7 +397,7 @@ export function KnowledgeConfigPanel({
                   extensions: [...defaultKBConfig().file_filters.extensions],
                 })
               }
-              title="恢复 Machi 内置的全量支持列表（含 LiteParse 覆盖的旧版 Office、表格、图片）"
+              title="恢复 Near 内置的全量支持列表（含 LiteParse 覆盖的旧版 Office、表格、图片）"
             >
               恢复默认
             </button>
