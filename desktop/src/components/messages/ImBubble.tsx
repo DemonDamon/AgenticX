@@ -51,6 +51,8 @@ type Props = {
   onFollowupClick?: (text: string) => void;
   /** Suppress in-bubble chips; used when parent renders them outside a unified ReAct container. */
   omitSuggestedQuestions?: boolean;
+  /** Render-only hint when this assistant reply was cut off by session token budget. */
+  budgetIncompleteHint?: boolean;
 };
 
 /** Cycling 1→3 dots for group-chat typing rows (name shown in header only). */
@@ -139,6 +141,7 @@ export function ImBubble({
   noBubbleBorder = false,
   onFollowupClick,
   omitSuggestedQuestions = false,
+  budgetIncompleteHint = false,
 }: Props) {
   const isUser = message.role === "user";
   const displayName = isUser ? (userName || "我") : (assistantName || "AI");
@@ -274,7 +277,7 @@ export function ImBubble({
     : bubbleStyle;
 
   const assistantIconButtons =
-    !hideActions && !isUser ? (
+    !hideActions && !isUser && !isStreaming && !isGroupTyping && !isMetaPendingWork && hasBody ? (
       <>
         <HoverTip label="复制">
           <button
@@ -521,6 +524,11 @@ export function ImBubble({
                 )}
               </div>
             </div>
+            {budgetIncompleteHint ? (
+              <p className="-mt-0.5 mb-1 px-3 text-[11px] leading-relaxed text-text-faint">
+                此回复因会话预算上限被截停，未完成
+              </p>
+            ) : null}
             {showAssistantFollowups && assistantIconButtons ? (
               <div className="mb-6 -mt-0.5 flex min-w-0 flex-col gap-2 self-stretch">
                 <div className="flex w-fit flex-wrap items-center gap-0.5 text-text-faint" style={assistantActionStyle}>
@@ -596,7 +604,7 @@ export function ImBubble({
                   </button>
                 </HoverTip>
               </div>
-            ) : showAssistantFollowups ? null : (
+            ) : showAssistantFollowups || !assistantIconButtons ? null : (
               <div className="-mt-0.5 mb-6 min-w-0 self-stretch">
                 <div className="flex w-fit max-w-full flex-wrap items-center gap-0.5 text-text-faint" style={assistantActionStyle}>{assistantIconButtons}</div>
               </div>

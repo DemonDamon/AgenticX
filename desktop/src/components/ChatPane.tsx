@@ -78,6 +78,12 @@ import {
   shouldTriggerIncompleteEndStall,
 } from "../utils/task-stall-policy";
 import {
+  budgetExceededInfoFromPayload,
+  findBudgetExceededInMessages,
+  type BudgetExceededInfo,
+} from "../utils/budget-exceeded";
+import { buildBudgetResumeDraft } from "../utils/budget-resume-draft";
+import {
   continueSessionUrl,
   inferContinueReason,
   type ContinueReason,
@@ -2022,7 +2028,12 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
   });
   const [unattendedGlobalEnabled, setUnattendedGlobalEnabled] = useState(false);
   const [unattendedMaxContinuations, setUnattendedMaxContinuations] = useState(20);
+  const [unattendedStallContinueAfterSeconds, setUnattendedStallContinueAfterSeconds] = useState(120);
+  const [unattendedContinueCount, setUnattendedContinueCount] = useState(0);
+  const unattendedContinueTriggeredRef = useRef<Record<string, number>>({});
+  const unattendedContinueBucketRef = useRef<Record<string, number>>({});
   const [sessionUnattended, setSessionUnattended] = useState(false);
+  const [budgetExceededInfo, setBudgetExceededInfo] = useState<BudgetExceededInfo | null>(null);
   const lastSseEventAtRef = useRef(0);
   const lastProgressAtRef = useRef(0);
   const sessionEnteredAtRef = useRef<Record<string, number>>({});
@@ -3843,6 +3854,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
         stall_auto_nudge_max_per_session?: number;
         unattended_enabled?: boolean;
         unattended_max_continuations_per_session?: number;
+        unattended_stall_continue_after_seconds?: number;
       };
       const detectSec = Math.max(
         30,
@@ -3864,6 +3876,12 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
       setUnattendedMaxContinuations(
         Math.max(1, Math.min(100, Number(cfg.unattended_max_continuations_per_session ?? 20) || 20))
       );
+      setUnattendedStallContinueAfterSeconds(
+        Math.max(
+          30,
+          Math.min(600, Number(cfg.unattended_stall_continue_after_seconds ?? 120) || 120),
+        ),
+      );
     });
   }, []);
 
@@ -3876,11 +3894,21 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
     try {
       const raw = localStorage.getItem("agx-session-unattended-v1");
       const map = raw ? (JSON.parse(raw) as Record<string, boolean>) : {};
-      setSessionUnattended(Boolean(map[sid]));
+      const enabled = Boolean(map[sid]);
+      setSessionUnattended(enabled);
+      if (enabled && apiBase) {
+        void fetch(`${apiBase.replace(/\/$/, "")}/api/sessions/${encodeURIComponent(sid)}/unattended`, {
+          method: "PUT",
+          headers: { "Content-Type": "application/json", "x-agx-desktop-token": apiToken },
+          body: JSON.stringify({ enabled: true }),
+        }).catch(() => {
+          /* best-effort sync after restart */
+        });
+      }
     } catch {
       setSessionUnattended(false);
     }
-  }, [pane.sessionId]);
+  }, [apiBase, apiToken, pane.sessionId]);
 
   const toggleSessionUnattended = useCallback(async () => {
     const sid = (pane.sessionId || "").trim();
@@ -3908,6 +3936,14 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
     if (!sid) return;
     sessionEnteredAtRef.current[sid] = Date.now();
     setAutoNudgeCount(autoNudgeTriggeredRef.current[sid] ?? 0);
+    const priorUnattended = (pane.messages ?? []).filter(
+      (m) =>
+        m.role === "tool" &&
+        typeof m.content === "string" &&
+        (m.content.includes("无人值守续跑") || m.content.includes("自动续跑提醒")),
+    ).length;
+    unattendedContinueTriggeredRef.current[sid] = priorUnattended;
+    setUnattendedContinueCount(priorUnattended);
     void window.agenticxDesktop.listSessions(pane.avatarId ?? undefined).then((r) => {
       if (!r.ok) return;
       const row = (r.sessions ?? []).find((s) => s.session_id === sid);
@@ -3916,6 +3952,16 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
       prevExecutionStateRef.current = st;
     });
   }, [pane.sessionId, pane.avatarId]);
+
+  useEffect(() => {
+    const sid = (pane.sessionId || "").trim();
+    const found = findBudgetExceededInMessages(pane.messages ?? []);
+    if (found) {
+      setBudgetExceededInfo({ ...found, sessionId: sid || found.sessionId });
+    } else {
+      setBudgetExceededInfo(null);
+    }
+  }, [pane.messages, pane.sessionId]);
 
   useEffect(() => {
     if ((pane.messages ?? []).length > 0) {
@@ -4100,7 +4146,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
 
   useEffect(() => {
     if (!stallRuntimeConfig.stall_auto_nudge_enabled) return;
-    if (!shouldAllowStallAutoNudge(stallState, sessionExecutionState)) return;
+    if (!shouldAllowStallAutoNudge(stallState, sessionExecutionState, Boolean(budgetExceededInfo))) return;
     const sid = (pane.sessionId || "").trim();
     if (!sid) return;
     if (silentSeconds < stallRuntimeConfig.stall_auto_nudge_after_seconds) return;
@@ -4129,6 +4175,44 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
     silentSeconds,
     stallRuntimeConfig,
     stallState,
+    budgetExceededInfo,
+  ]);
+
+  useEffect(() => {
+    if (!sessionUnattended || !unattendedGlobalEnabled) return;
+    if (Boolean(budgetExceededInfo)) return;
+    if (!shouldAllowStallAutoNudge(stallState, sessionExecutionState, false)) return;
+    const sid = (pane.sessionId || "").trim();
+    if (!sid) return;
+    if (silentSeconds < unattendedStallContinueAfterSeconds) return;
+    const count = unattendedContinueTriggeredRef.current[sid] ?? 0;
+    if (count >= unattendedMaxContinuations) return;
+    const bucket = Math.floor(
+      silentSeconds / Math.max(1, unattendedStallContinueAfterSeconds),
+    );
+    if ((unattendedContinueBucketRef.current[sid] ?? -1) >= bucket) return;
+    unattendedContinueBucketRef.current[sid] = bucket;
+    unattendedContinueTriggeredRef.current[sid] = count + 1;
+    setUnattendedContinueCount(count + 1);
+    const reason: ContinueReason =
+      sessionExecutionState === "interrupted"
+        ? "interrupted"
+        : stallState === "exhausted"
+          ? "exhausted"
+          : "stall";
+    void sendChatRef.current("", {
+      continuation: { reason, source: "supervisor" },
+    });
+  }, [
+    budgetExceededInfo,
+    pane.sessionId,
+    sessionExecutionState,
+    sessionUnattended,
+    silentSeconds,
+    stallState,
+    unattendedGlobalEnabled,
+    unattendedMaxContinuations,
+    unattendedStallContinueAfterSeconds,
   ]);
 
   useEffect(() => {
@@ -4274,6 +4358,11 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
               selected={rowSelectable && isSelected}
               onFollowupClick={sendFollowupChip}
               omitSuggestedQuestions={omitSuggestedQuestions}
+              budgetExceededActive={Boolean(budgetExceededInfo)}
+              allMessages={pane.messages ?? []}
+              sessionId={(pane.sessionId || "").trim() || undefined}
+              onResumeInNewSession={() => resumeInNewSessionRef.current()}
+              onOpenBudgetSettings={() => useAppStore.getState().openSettings("automation")}
             />
           </div>
         );
@@ -4596,7 +4685,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
       )}
     </>
     );
-  }, [autoNudgeCount, chatStyle, copyMessage, copyReActBlock, currentModelLabel, exhaustedRounds, favoriteMessage, forwardOneMessage, groupTyping, groupedVisibleMessages, hideStreamOverlayAsDuplicate, input, isGroupPane, isRunGuardCurrentSession, isStreamingCurrentSession, pane.historySearchTerms, pane.sessionId, paneAvatarMeta, paneId, readyAttachments.length, resolveGroupInlineConfirm, resolveQuoteBody, resumeCurrentTask, resumeWithModel, revealFileInTaskspace, retryUserMessage, selectUpTo, selectedMessageIds, sendFollowupChip, sessionWorkInProgress, setQuoteTarget, showInlineAssistantModelBadge, stallModelOptions, stallRuntimeConfig.stall_auto_nudge_max_per_session, stallState, stopCurrentRun, streamTextForCurrentSession, streamingModel, toggleSelectBlock, toggleSelectMessage, topLevelRowsIm, userAvatarUrl, userBubbleLabel]);
+  }, [autoNudgeCount, budgetExceededInfo, chatStyle, copyMessage, copyReActBlock, currentModelLabel, exhaustedRounds, favoriteMessage, forwardOneMessage, groupTyping, groupedVisibleMessages, hideStreamOverlayAsDuplicate, input, isGroupPane, isRunGuardCurrentSession, isStreamingCurrentSession, pane.historySearchTerms, pane.messages, pane.sessionId, paneAvatarMeta, paneId, readyAttachments.length, resolveGroupInlineConfirm, resolveQuoteBody, resumeCurrentTask, resumeWithModel, revealFileInTaskspace, retryUserMessage, selectUpTo, selectedMessageIds, sendFollowupChip, sessionWorkInProgress, setQuoteTarget, showInlineAssistantModelBadge, stallModelOptions, stallRuntimeConfig.stall_auto_nudge_max_per_session, stallState, stopCurrentRun, streamTextForCurrentSession, streamingModel, toggleSelectBlock, toggleSelectMessage, topLevelRowsIm, userAvatarUrl, userBubbleLabel]);
 
   const removeAttachment = useCallback((key: string) => {
     setContextFiles((prev) => {
@@ -4734,6 +4823,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
   ) => Promise<void>>(
     async () => {}
   );
+  const resumeInNewSessionRef = useRef<() => void>(() => {});
 
   /** Send a team-mode action (ADD_TASK / PAUSE / RESUME / STOP) to TaskLock via Studio API. */
   const sendGroupTeamAction = async (action: string, data?: Record<string, unknown>) => {
@@ -5900,7 +5990,28 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
               const errText = String(payload.data?.text ?? "未知错误");
               const severity = String(payload.data?.severity ?? "").trim();
               const detector = String(payload.data?.detector ?? "").trim();
-              if (severity === "warning" || detector === "token_budget_compress" || detector === "compactor_circuit_breaker") {
+              const budgetInfo = budgetExceededInfoFromPayload(
+                payload.data as Record<string, unknown> | undefined,
+              );
+              if (budgetInfo) {
+                const sid = (pane.sessionId || "").trim();
+                setBudgetExceededInfo({ ...budgetInfo, sessionId: sid || budgetInfo.sessionId });
+                addPaneMessageIfSessionActive(
+                  pane.id,
+                  "tool",
+                  errText,
+                  eventAgentId || "meta",
+                  undefined,
+                  undefined,
+                  undefined,
+                  {
+                    noticeKind: "budget_exceeded",
+                    budgetSource: budgetInfo.source,
+                    budgetCurrent: budgetInfo.current,
+                    budgetMax: budgetInfo.maxAllowed,
+                  },
+                );
+              } else if (severity === "warning" || detector === "token_budget_compress" || detector === "compactor_circuit_breaker") {
                 // FR-4 / FR-5: non-fatal warnings render as flat context notices, not tool cards.
                 const noticeKind =
                   detector === "compactor_circuit_breaker" ? "compactor_cb" : "budget_compress";
@@ -6051,6 +6162,13 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
     setPaneLazyInheritParent(pane.id, inherit && prevSessionId ? prevSessionId : undefined);
     // Defer server createSession until the user sends the first message so an
     // empty session never appears in the history sidebar with an id-only title.
+  };
+
+  resumeInNewSessionRef.current = () => {
+    const draft = buildBudgetResumeDraft(pane.messages ?? []);
+    createNewTopic(false, pane.sessionMode ?? "daily_office");
+    setBudgetExceededInfo(null);
+    setInput(draft);
   };
 
   const maxTaskspaceWidth = paneWidth > 0 ? Math.max(240, Math.floor(paneWidth * 0.4)) : 480;
@@ -6729,7 +6847,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
             onRemove={(id) => removePendingMessage(paneId, id)}
             onSendNow={sendQueuedMessageNow}
           />
-          {(sessionExecutionState === "running" || stallState === "stall" || sessionUnattended) && (
+          {(sessionExecutionState === "running" || stallState === "stall" || sessionUnattended || budgetExceededInfo) && (
             <div className="mb-1 flex flex-wrap items-center gap-2 text-[11px] text-text-muted">
               <span className="rounded-full bg-surface-panel/75 px-2 py-0.5">
                 {currentModelLabel}
@@ -6743,10 +6861,19 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
                   ? ` · ${lastToolProgress.name}${lastToolProgress.sec > 0 ? ` ${lastToolProgress.sec}s` : ""}`
                   : ""}
               </span>
-              {sessionUnattended && unattendedGlobalEnabled ? (
+              {sessionUnattended && unattendedGlobalEnabled && !budgetExceededInfo ? (
                 <span className="rounded-full bg-violet-500/10 px-2 py-0.5 text-violet-200">
-                  无人值守 · 续跑 {autoNudgeCount}/{unattendedMaxContinuations}
+                  无人值守 · 续跑 {unattendedContinueCount}/{unattendedMaxContinuations}
                 </span>
+              ) : null}
+              {budgetExceededInfo ? (
+                <button
+                  type="button"
+                  onClick={() => resumeInNewSessionRef.current()}
+                  className="rounded-full bg-rose-500/15 px-2 py-0.5 text-rose-200 transition hover:bg-rose-500/25"
+                >
+                  已达预算上限 · 续跑无效
+                </button>
               ) : null}
               {unattendedGlobalEnabled ? (
                 <button

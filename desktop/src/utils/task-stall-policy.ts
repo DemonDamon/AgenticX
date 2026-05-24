@@ -4,6 +4,7 @@
 
 import type { ParsedTodo, TodoItem } from "../components/TodoUpdateCard";
 import type { Message } from "../store";
+import { assistantBodyText, looksLikeUnfinishedAssistantBody } from "./budget-incomplete-message";
 
 /** Default stall warning threshold (seconds) — overridable via Settings → 工具 → 长任务停滞与续跑. */
 export const DEFAULT_STALL_DETECT_SILENCE_SECONDS = 90;
@@ -35,9 +36,10 @@ export type StallPhase = "none" | "stall" | "exhausted";
 export function messageLooksLikeAssistantFinal(message: Message | undefined): boolean {
   if (!message) return false;
   if (message.role !== "assistant") return false;
-  const content = String(message.content ?? "").trim();
-  if (!content) return false;
   if (message.id === "__stream__") return false;
+  const content = assistantBodyText(message);
+  if (!content) return false;
+  if (looksLikeUnfinishedAssistantBody(content)) return false;
   return true;
 }
 
@@ -45,7 +47,9 @@ export function messageLooksLikeAssistantFinal(message: Message | undefined): bo
 export function shouldAllowStallAutoNudge(
   stallState: StallPhase,
   executionState: string | undefined,
+  budgetExceeded = false,
 ): boolean {
+  if (budgetExceeded) return false;
   if (stallState !== "stall") return false;
   const state = (executionState || "").trim();
   return state === "running" || state === "interrupted" || state === "idle";
