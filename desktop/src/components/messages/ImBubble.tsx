@@ -17,6 +17,11 @@ import {
   MarkdownContext,
 } from "./markdown-components";
 import { renderUserMessageInlineBody } from "./user-message-inline";
+import {
+  getAssistantActionStyle,
+  getAssistantTextClassName,
+  getAssistantTextStyle,
+} from "./im-layout";
 import { resolveMetaDisplayName } from "../../utils/display-name";
 
 type Props = {
