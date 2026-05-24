@@ -231,7 +231,7 @@ type AgxConfig = {
   };
   automation?: { prevent_sleep?: boolean };
   skills?: { non_high_risk_auto_install?: boolean };
-  /** Machi 官网 / Supabase 账号（桌面端轮询写入，勿在日志中打印 token） */
+  /** Near 官网 / Supabase 账号（桌面端轮询写入，勿在日志中打印 token） */
   agx_account?: {
     user_email?: string;
     user_display_name?: string;
@@ -664,7 +664,7 @@ async function invokeAutomationUserTurnWithSignal(
   const chatBody: Record<string, unknown> = {
     session_id: sessionId,
     user_input: userInput,
-    // interactive：不把任务提示词包进 AutoSolve 长模板写入历史；避免与飞书/Machi 会话混淆且便于删除持久化
+    // interactive：不把任务提示词包进 AutoSolve 长模板写入历史；避免与飞书/Near 会话混淆且便于删除持久化
     mode: "interactive",
   };
   if (prov && mod) {
@@ -2218,7 +2218,7 @@ function createWindow(): void {
   // awaits later resolve, the whenReady callback calls `createWindow()`
   // again, which used to unconditionally `new BrowserWindow(...)` and
   // overwrite the `mainWindow` pointer, leaving window A orphaned but
-  // still visible. That's the "two Machi windows on DMG launch" bug.
+  // still visible. That's the "two Near windows on DMG launch" bug.
   // Bail out early when a live main window already exists.
   if (mainWindow && !mainWindow.isDestroyed()) {
     if (mainWindow.isMinimized()) mainWindow.restore();
@@ -2295,7 +2295,7 @@ function createWindow(): void {
   const mainWindowBackgroundColor = transparentMainWindow ? "#00000000" : "#14141c";
   mainWindow = new BrowserWindow({
     ...boundsOverride,
-    title: "Machi",
+    title: "Near",
     minWidth: 680,
     minHeight: 480,
     show: false,
@@ -2379,7 +2379,7 @@ function createWindow(): void {
       void mainWindow
         ?.loadURL(
           `data:text/html;charset=utf-8,${encodeURIComponent(
-            `<!DOCTYPE html><html><head><meta charset="utf-8"></head><body style="margin:0;height:100vh;display:flex;align-items:center;justify-content:center;font-family:SF Pro Text,PingFang SC,sans-serif;background:#14141c;color:rgba(255,255,255,.7);padding:1.5rem;box-sizing:border-box;-webkit-app-region:drag"><div style="text-align:center;max-width:36rem"><h3 style="margin:0">无法加载 Machi 界面</h3><p style="margin-top:.75rem;font-size:.85rem;opacity:.85;white-space:pre-wrap;word-break:break-all">${detail}</p><p style="margin-top:.5rem;font-size:.8rem;opacity:.6">请重新安装应用或从源码构建。</p></div></body></html>`
+            `<!DOCTYPE html><html><head><meta charset="utf-8"></head><body style="margin:0;height:100vh;display:flex;align-items:center;justify-content:center;font-family:SF Pro Text,PingFang SC,sans-serif;background:#14141c;color:rgba(255,255,255,.7);padding:1.5rem;box-sizing:border-box;-webkit-app-region:drag"><div style="text-align:center;max-width:36rem"><h3 style="margin:0">无法加载 Near 界面</h3><p style="margin-top:.75rem;font-size:.85rem;opacity:.85;white-space:pre-wrap;word-break:break-all">${detail}</p><p style="margin-top:.5rem;font-size:.8rem;opacity:.6">请重新安装应用或从源码构建。</p></div></body></html>`
           )}`
         )
         .then(() => {
@@ -2455,7 +2455,7 @@ function createTray(): void {
       mainWindow.focus();
     }
   });
-  tray.setToolTip("Machi");
+  tray.setToolTip("Near");
 }
 
 /**
@@ -5524,7 +5524,7 @@ if (!gotTheLock) {
     }
   });
 
-  app.setName("Machi");
+  app.setName("Near");
 
   app.whenReady().then(async () => {
     try {
@@ -5617,7 +5617,7 @@ if (!gotTheLock) {
             const { response } = await dialog.showMessageBox({
               type: "warning",
               title: "缺少 agx 命令行工具",
-              message: "Machi 需要本地 agx CLI 或内嵌后端才能启动",
+              message: "Near 需要本地 agx CLI 或内嵌后端才能启动",
               detail: [
                 ctxHint,
                 "",
@@ -5663,7 +5663,7 @@ if (!gotTheLock) {
       createTray();
     } catch (error) {
       await dialog.showErrorBox(
-        "Machi 启动失败",
+        "Near 启动失败",
         remoteConfig
           ? `无法连接远程服务器。\n\n${String(error)}`
           : `无法启动本地服务，请检查 agx 是否可用。\n\n${String(error)}`

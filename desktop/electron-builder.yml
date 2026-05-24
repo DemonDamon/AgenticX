@@ -1,5 +1,5 @@
 appId: com.agenticx.desktop
-productName: Machi
+productName: Near
 directories:
   output: release
 files:
