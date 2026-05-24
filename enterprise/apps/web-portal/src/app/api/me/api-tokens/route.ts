@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { createPat, listPats, revokePat } from "@agenticx/auth";
+import { createPat, listPats, revokePat } from "@agenticx/iam-core";
 import { getSessionFromCookies } from "../../../../lib/session";
 
 export async function GET() {

@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { revokePat } from "@agenticx/auth";
+import { revokePat } from "@agenticx/iam-core";
 import { requireAdminScope } from "../../../../../lib/admin-auth";
 
 export async function DELETE(_request: Request, ctx: { params: Promise<{ id: string }> }) {

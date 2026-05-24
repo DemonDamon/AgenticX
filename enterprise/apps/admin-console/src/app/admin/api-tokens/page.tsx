@@ -86,7 +86,7 @@ export default function ApiTokensPage() {
           expireDays: Number(form.expireDays) || 90,
         }),
       });
-      const json = await readJsonBody(res, { code: "50000", message: "empty response" });
+      const json = await readJsonBody(res, { code: "50000", message: "empty response", data: {} as { token?: string } });
       if (!res.ok || json.code !== "00000") throw new Error(json.message || "create failed");
       setPlainToken(json.data?.token ?? null);
       setOpen(false);

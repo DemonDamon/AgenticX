@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
-import { requireAdminScope } from "../../../../../lib/admin-auth";
-import { probeGatewayChannel } from "../../../../../lib/gateway-ops-store";
-import { updateChannel } from "../../../../../lib/gateway-channels-store";
+import { requireAdminScope } from "../../../../../../lib/admin-auth";
+import { probeGatewayChannel } from "../../../../../../lib/gateway-ops-store";
+import { updateChannel } from "../../../../../../lib/gateway-channels-store";
 
 export async function POST(_request: Request, ctx: { params: Promise<{ id: string }> }) {
   const auth = await requireAdminScope(["provider:update"]);
