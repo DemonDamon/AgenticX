@@ -14,6 +14,34 @@
 | Turbo TUI Ctrl+C 无反应 | TUI 捕获信号 | 先 Esc 再 q，或 `--ui=stream` |
 | 手动 pnpm 前台登录缺 JWT key | 未展开 `*_FILE` | 见 [local-dev.md](./local-dev.md) 手动 export |
 
+### Docker CLI 卡住 / daemon 无响应
+
+现象：`start-dev-with-infra.sh` 停在 `booting middleware...`，或 `docker info` / `docker version` **长时间无输出**；Docker Desktop 托盘图标仍在，但 CLI 不返回。
+
+常见原因（本机曾复现）：
+
+| 原因 | 信号 | 处置 |
+|---|---|---|
+| **Docker 引擎卡死** | 多个 `docker info` 进程堆积 | `pkill -f 'docker info'`；**Quit** Docker Desktop 后重开 |
+| **系统盘几乎满** | `df -h` 使用率 >90% | 腾出 ≥20GB；Docker Desktop → Settings → 清理镜像/Build cache |
+| **Docker.raw 过大** | `~/Library/Containers/com.docker.docker/.../Docker.raw` 占满数据盘 | 同上；必要时 Settings → Resources 缩小 disk image 后 Reset |
+| **Shell 代理** | `http_proxy`/`all_proxy` 指向本机 Clash 等 | Docker API 走 unix socket，建议：`env -u http_proxy -u https_proxy -u all_proxy docker version` |
+
+**中间件已在跑、仅 CLI 挂掉时**：若 `5432`/`6379` 能连通，可直接跳过 Docker 起应用：
+
+```bash
+bash scripts/start-dev-with-infra.sh --skip-infra --ui=stream
+```
+
+相关：`AGENTS.md`（Docker MCP 与代理）、`runbooks/cloudflare-quick-tunnel-setup.md`（`env -u ...` 绕过代理模式）、`examples/browser-use-mcp.md`（子进程代理隔离）。
+
+验证 Docker 恢复：
+
+```bash
+env -u http_proxy -u https_proxy -u all_proxy docker version
+curl --noproxy '*' -s -o /dev/null -w '%{http_code}\n' http://127.0.0.1:3000
+```
+
 ---
 
 ## 登录与 IAM
