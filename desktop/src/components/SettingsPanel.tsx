@@ -59,6 +59,11 @@ import {
   UnattendedConfigSection,
   type UnattendedConfig,
 } from "./automation/UnattendedConfigSection";
+import {
+  TokenBudgetConfigSection,
+  normalizeTokenBudgetConfig,
+  type TokenBudgetConfig,
+} from "./automation/TokenBudgetConfigSection";
 import { AccountTab } from "./AccountTab";
 import { KnowledgeSettings, type KnowledgeSettingsHandle } from "./settings/knowledge/KnowledgeSettings";
 import { getProviderDisplayName, makeCustomOpenAIProviderId } from "../utils/provider-display";
@@ -1942,6 +1947,9 @@ const ToolsTab = forwardRef<ToolsTabHandle, Record<string, never>>(function Tool
     unattended_auto_resume_exhausted: true,
     unattended_auto_resume_interrupted: true,
   });
+  const [tokenBudget, setTokenBudget] = useState<TokenBudgetConfig>(
+    normalizeTokenBudgetConfig(undefined),
+  );
   const [runtimeLoadError, setRuntimeLoadError] = useState("");
 
   const loadAll = useCallback(async () => {
@@ -2020,6 +2028,12 @@ const ToolsTab = forwardRef<ToolsTabHandle, Record<string, never>>(function Tool
             runtimeResult.unattended_auto_resume_interrupted ?? true,
           ),
         });
+        setTokenBudget(
+          normalizeTokenBudgetConfig({
+            max_tokens_per_session: Number(runtimeResult.max_tokens_per_session),
+            max_tokens_per_turn: Number(runtimeResult.max_tokens_per_turn),
+          }),
+        );
       } else {
         setRuntimeLoadError("读取运行时参数失败，仍可按当前滑块值保存。");
       }
@@ -2108,6 +2122,8 @@ const ToolsTab = forwardRef<ToolsTabHandle, Record<string, never>>(function Tool
           unattended_stall_continue_after_seconds: unattended.unattended_stall_continue_after_seconds,
           unattended_auto_resume_exhausted: unattended.unattended_auto_resume_exhausted,
           unattended_auto_resume_interrupted: unattended.unattended_auto_resume_interrupted,
+          max_tokens_per_session: tokenBudget.max_tokens_per_session,
+          max_tokens_per_turn: tokenBudget.max_tokens_per_turn,
         });
         if (!rtRes?.ok) {
           return {
@@ -2122,7 +2138,7 @@ const ToolsTab = forwardRef<ToolsTabHandle, Record<string, never>>(function Tool
         return bridge.save();
       },
     }),
-    [loading, maxToolRounds, saveBashDefaultTimeout, stallNudge, unattended],
+    [loading, maxToolRounds, saveBashDefaultTimeout, stallNudge, tokenBudget, unattended],
   );
 
   const startInstall = async (tool: ToolStatusItem) => {
@@ -2189,6 +2205,7 @@ const ToolsTab = forwardRef<ToolsTabHandle, Record<string, never>>(function Tool
         onChange={setMaxToolRounds}
         disabled={loading}
       />
+      <TokenBudgetConfigSection value={tokenBudget} onChange={setTokenBudget} disabled={loading} />
       <StallNudgeConfigSection value={stallNudge} onChange={setStallNudge} disabled={loading} />
       <UnattendedConfigSection value={unattended} onChange={setUnattended} disabled={loading} />
       {runtimeLoadError ? (

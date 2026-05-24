@@ -453,12 +453,16 @@ declare global {
         unattended_stall_continue_after_seconds?: number;
         unattended_auto_resume_exhausted?: boolean;
         unattended_auto_resume_interrupted?: boolean;
+        max_tokens_per_session?: number;
+        max_tokens_per_turn?: number;
         error?: string;
       }>;
       saveRuntimeConfig: (payload: {
         max_tool_rounds?: number;
         auto_resume_on_exhaustion?: boolean;
         max_auto_resumes?: number;
+        max_tokens_per_session?: number;
+        max_tokens_per_turn?: number;
         stall_detect_silence_seconds?: number;
         stall_auto_nudge_enabled?: boolean;
         stall_auto_nudge_after_seconds?: number;
