@@ -3,7 +3,7 @@ import type { MouseEvent as ReactMouseEvent } from "react";
 import { Ban, ChevronDown, ChevronRight, Loader2 } from "lucide-react";
 import { AutomationTaskIcon } from "./icons/AutomationTaskIcon";
 import { useAppStore, type Avatar, type GroupChat } from "../store";
-import { APP_DISPLAY_NAME, META_AGENT_DISPLAY_NAME } from "../constants/branding";
+import { APP_DISPLAY_NAME, APP_VERSION, META_AGENT_DISPLAY_NAME } from "../constants/branding";
 import { DEFAULT_META_AVATAR_URL } from "../constants/meta-avatar";
 import { getRememberedSessionForAvatar } from "../utils/avatar-last-session";
 import { avatarBgClass, avatarDotColor, groupColorByIndex } from "../utils/avatar-color";
@@ -707,13 +707,12 @@ export function AvatarSidebar() {
       <aside className="flex h-full w-full flex-col bg-surface-sidebar">
         {/* macOS traffic-light safe zone */}
         <div className="drag-region h-[38px] shrink-0" />
-        {/* Meta-Agent entry */}
+        {/* Meta-Agent entry — WorkBuddy-style brand row */}
         <button
-          className={`mx-2 mb-1 flex items-center gap-2.5 rounded-[10px] px-2.5 py-2 text-left transition-all ${
-            activeAvatarId === null
-              ? "bg-surface-card text-text-strong"
-              : "text-text-muted hover:bg-surface-card hover:text-text-strong"
+          className={`group flex w-full items-center gap-2.5 px-4 py-2.5 text-left transition-colors ${
+            activeAvatarId === null ? "" : "hover:bg-surface-hover"
           }`}
+          aria-current={activeAvatarId === null ? "page" : undefined}
           onClick={() => void openOrFocusPane(null, META_AGENT_DISPLAY_NAME)}
           onContextMenu={(e) => {
             e.preventDefault();
@@ -725,11 +724,15 @@ export function AvatarSidebar() {
           <img
             src={metaAvatarUrl.trim() || DEFAULT_META_AVATAR_URL}
             alt={APP_DISPLAY_NAME}
-            className="h-8 w-8 shrink-0 rounded-full object-cover"
+            className="h-8 w-8 shrink-0 rounded-[7px] object-cover"
           />
-          <div className="min-w-0 flex-1">
-            <div className="truncate text-[15px] font-medium">{APP_DISPLAY_NAME}</div>
-            {/* <div className="truncate text-xs text-text-faint">全局调度</div> */}
+          <div className="flex min-w-0 items-baseline gap-1.5">
+            <span className="truncate text-[20px] font-bold leading-none text-text-strong">
+              {APP_DISPLAY_NAME}
+            </span>
+            <span className="shrink-0 text-[11px] font-medium leading-none text-text-faint">
+              {APP_VERSION}
+            </span>
           </div>
         </button>
 
