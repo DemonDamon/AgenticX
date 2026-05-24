@@ -22,7 +22,6 @@ import {
   Loader2,
   ChevronRight,
   Anchor,
-  Clock,
   User,
   Activity,
   RefreshCw,
@@ -46,6 +45,7 @@ import { shouldDisableMcpToggle } from "../utils/mcp-toggle-state";
 import { ForwardPicker, type ForwardConfirmPayload } from "./ForwardPicker";
 import { QrConnectModal } from "./QrConnectModal";
 import { AutomationTab } from "./automation/AutomationTab";
+import { AutomationTaskIcon } from "./icons/AutomationTaskIcon";
 import {
   RuntimeConfigSection,
   RUNTIME_MAX_TOOL_ROUNDS,
@@ -680,7 +680,7 @@ const TABS: { id: SettingsTab; label: string; icon: typeof Settings2 }[] = [
   // Plan-Id: machi-kb-stage1-local-mvp
   { id: "knowledge", label: "知识库", icon: Library },
   { id: "hooks", label: "钩子", icon: Anchor },
-  { id: "automation", label: "自动化", icon: Clock },
+  { id: "automation", label: "自动化", icon: AutomationTaskIcon },
   { id: "voice", label: "语音", icon: Mic },
   { id: "email", label: "邮件通知", icon: Mail },
   { id: "workspace", label: "工作区", icon: FolderOpen },

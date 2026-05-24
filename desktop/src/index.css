@@ -127,6 +127,18 @@ body {
   scrollbar-gutter: stable;
 }
 
+/* 定时任务闹钟：表盘 currentColor 填充，指针与表盘形成对比 */
+.automation-task-icon__hand {
+  stroke: var(--automation-clock-hand, #ffffff);
+}
+:root[data-theme="dark"] .automation-task-icon__hand,
+:root[data-theme="dim"] .automation-task-icon__hand {
+  stroke: rgb(38, 38, 42);
+}
+.bg-btnPrimary .automation-task-icon__hand {
+  stroke: var(--ui-btn-primary-bg);
+}
+
 /* Logo invert behavior per theme */
 :root[data-theme="light"] .theme-invert-logo {
   filter: none;
