@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { MouseEvent as ReactMouseEvent } from "react";
-import { Ban, ChevronDown, ChevronRight, Clock3, Loader2 } from "lucide-react";
+import { Ban, ChevronDown, ChevronRight, Loader2 } from "lucide-react";
+import { AutomationTaskIcon } from "./icons/AutomationTaskIcon";
 import { useAppStore, type Avatar, type GroupChat } from "../store";
 import { DEFAULT_META_AVATAR_URL } from "../constants/meta-avatar";
 import { getRememberedSessionForAvatar } from "../utils/avatar-last-session";
@@ -973,7 +974,7 @@ export function AvatarSidebar() {
                           {isRunning ? (
                             <Loader2 className="h-4 w-4 animate-spin text-emerald-400" />
                           ) : (
-                            <Clock3 className="h-4 w-4 text-text-muted" />
+                            <AutomationTaskIcon className="h-4 w-4 text-text-muted" />
                           )}
                           {hasPane && (
                             <span className="absolute -bottom-0.5 -right-0.5 h-3 w-3 rounded-full border-2 border-surface-sidebar bg-emerald-500" />
