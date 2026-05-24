@@ -1,12 +1,12 @@
-# Build Machi Desktop: macOS DMG + Windows NSIS (bundled agx-server + wechat sidecar).
+# Build Near Desktop: macOS DMG + Windows NSIS (bundled agx-server + wechat sidecar).
 # Optional secrets: CSC_LINK, CSC_KEY_PASSWORD, APPLE_ID, APPLE_ID_PASSWORD, APPLE_TEAM_ID
 
-name: Machi Desktop Build
+name: Near Desktop Build
 
 run-name: >-
   ${{ github.event_name == 'workflow_dispatch'
-      && format('Machi Desktop Build manual {0}', github.event.inputs.arch)
-      || format('Machi Desktop Build {0}', github.ref_name) }}
+      && format('Near Desktop Build manual {0}', github.event.inputs.arch)
+      || format('Near Desktop Build {0}', github.ref_name) }}
 
 on:
   workflow_dispatch:
@@ -99,7 +99,7 @@ jobs:
       - name: Verify bundled backend in app
         working-directory: desktop
         run: |
-          APP_DIR="release/mac-${{ matrix.arch }}/Machi.app/Contents/Resources/backend"
+          APP_DIR="release/mac-${{ matrix.arch }}/Near.app/Contents/Resources/backend"
           test -x "${APP_DIR}/agx-server"
           test -x "${APP_DIR}/agx-wechat-sidecar"
           echo "Verified backend binaries in ${APP_DIR}:"
@@ -153,7 +153,7 @@ jobs:
         uses: actions/upload-artifact@v6
         with:
           name: machi-windows-x64
-          path: desktop/release/Machi-*-win-x64.exe
+          path: desktop/release/Near-*-win-x64.exe
 
   build-dispatch:
     if: github.event_name == 'workflow_dispatch' && github.event.inputs.arch != 'windows-amd64'
@@ -232,7 +232,7 @@ jobs:
       - name: Verify bundled backend in app
         working-directory: desktop
         run: |
-          APP_DIR="release/mac-${{ env.ARCH }}/Machi.app/Contents/Resources/backend"
+          APP_DIR="release/mac-${{ env.ARCH }}/Near.app/Contents/Resources/backend"
           test -x "${APP_DIR}/agx-server"
           test -x "${APP_DIR}/agx-wechat-sidecar"
           echo "Verified backend binaries in ${APP_DIR}:"
@@ -286,4 +286,4 @@ jobs:
         uses: actions/upload-artifact@v6
         with:
           name: machi-windows-x64
-          path: desktop/release/Machi-*-win-x64.exe
+          path: desktop/release/Near-*-win-x64.exe
