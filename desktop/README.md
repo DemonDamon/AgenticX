@@ -1,4 +1,4 @@
-# Machi Desktop — macOS Alpha Preview
+# Near Desktop — macOS Alpha Preview
 
 > **注意：当前为 Alpha 预览版，macOS 签名/公证尚未接入，首次打开需要手动放行（见下方说明）。**
 
@@ -10,8 +10,8 @@
 
 | 机型 | 下载文件 |
 |------|---------|
-| Apple M1 / M2 / M3 / M4（ARM） | `Machi-x.x.x-arm64.dmg` |
-| Intel Mac（2020 年前机型） | `Machi-x.x.x-x64.dmg` |
+| Apple M1 / M2 / M3 / M4（ARM） | `Near-x.x.x-arm64.dmg` |
+| Intel Mac（2020 年前机型） | `Near-x.x.x-x64.dmg` |
 
 **如何判断我的 Mac 是哪种芯片？**  
 点击左上角苹果菜单 → 关于本机，查看"芯片"一栏。
@@ -24,7 +24,7 @@
 
 **方式 B — 自行安装 agx CLI**
 
-若未使用自包含 DMG，Machi 需要 `agx` 命令行工具来运行本地 AI 服务。打开终端，运行：
+若未使用自包含 DMG，Near 需要 `agx` 命令行工具来运行本地 AI 服务。打开终端，运行：
 
 ```bash
 curl -sSL https://raw.githubusercontent.com/agenticx/agenticx/main/install.sh | bash
@@ -48,19 +48,19 @@ agx --version
 
 **方式 A（推荐，图形化）：**
 
-1. 双击 `.dmg` 将 Machi.app 拖入 Applications
-2. 在 Finder 里找到 Machi.app，**右键 → 打开**
+1. 双击 `.dmg` 将 Near.app 拖入 Applications
+2. 在 Finder 里找到 Near.app，**右键 → 打开**
 3. 在弹窗中点击"打开"确认（只需第一次）
 
 **方式 B（终端命令）：**
 
 ```bash
-xattr -cr /Applications/Machi.app
+xattr -cr /Applications/Near.app
 ```
 
-### Step 4 — 启动 Machi
+### Step 4 — 启动 Near
 
-双击 Machi.app，等待约 5-15 秒完成初始化即可使用。
+双击 Near.app，等待约 5-15 秒完成初始化即可使用。
 
 ---
 
@@ -128,7 +128,7 @@ SKIP_BACKEND=1 ./packaging/build_dmg.sh arm64
 |------|--------|-------------------|
 | 一体脚本 | `packaging/build_dmg.sh` | `packaging/build_windows_installer.ps1` |
 | 预置目录 | `desktop/bundled-backend/<arch>/` | `desktop/bundled-backend/win-amd64/` |
-| 产物 | `.dmg` | `Machi-<version>-win-x64.exe`（NSIS） |
+| 产物 | `.dmg` | `Near-<version>-win-x64.exe`（NSIS） |
 | 本机要求 | bash、Python、Node、Go | **Windows**、PowerShell 7+（`pwsh`）、Python ≥3.10、Node 20、Go 1.22+；`curl.exe`（系统自带）用于冒烟 |
 
 在**仓库根目录**打开 PowerShell：
@@ -154,7 +154,7 @@ $env:SKIP_BACKEND = '1'
 
 **注意**：`electron-builder` 的 `win.extraResources` 指向 `bundled-backend/win-amd64`。若未先运行上述脚本就执行 `npm run build:win`，会因缺少该目录而打包失败——与 mac 侧未预置 `bundled-backend/<arch>` 时类似。
 
-**CI**：推送 `v*` tag 或手动 `workflow_dispatch` 选择 `windows-amd64` 时，会运行同一脚本并上传 `Machi-*-win-x64.exe` 构件。Windows 代码签名未接入（与 mac 无证书构建一致）。
+**CI**：推送 `v*` tag 或手动 `workflow_dispatch` 选择 `windows-amd64` 时，会运行同一脚本并上传 `Near-*-win-x64.exe` 构件。Windows 代码签名未接入（与 mac 无证书构建一致）。
 
 ### 仅 Electron 壳（不含内嵌后端）
 
@@ -162,8 +162,8 @@ $env:SKIP_BACKEND = '1'
 
 ```bash
 cd desktop
-npm run build:mac:arm64   # M 系列芯片 → Machi-x.x.x-arm64.dmg
-npm run build:mac:x64     # Intel 芯片  → Machi-x.x.x-x64.dmg
+npm run build:mac:arm64   # M 系列芯片 → Near-x.x.x-arm64.dmg
+npm run build:mac:x64     # Intel 芯片  → Near-x.x.x-x64.dmg
 ```
 
 或同时打出两个包：
