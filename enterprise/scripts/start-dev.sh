@@ -176,21 +176,29 @@ wait_for_http() {
 }
 
 # 5) 先拉起 Next 应用（gateway 依赖 admin internal API，须 admin 就绪后再启 gateway）
-TURBO_ARGS=(run dev "--ui=$TURBO_UI")
+# 用 pnpm --parallel + --filter，不用 turbo run dev：本机若 clone 了 customers/*，
+# pnpm workspace 会链到 enterprise 目录外，turbo 2.9+ discovery 会直接失败。
+PNPM_DEV_FILTERS=(
+  --filter=@agenticx/app-web-portal
+  --filter=@agenticx/app-admin-console
+)
 if [ "$ALL_APPS" -eq 0 ]; then
-  TURBO_ARGS+=(
-    --filter=@agenticx/app-web-portal
-    --filter=@agenticx/app-admin-console
-  )
   SCOPE="enterprise only (web-portal :3000 + admin-console :3001)"
 else
+  PNPM_DEV_FILTERS+=(
+    --filter=@customer-hechuang/portal
+    --filter=@customer-hechuang/admin
+  )
   SCOPE="ALL workspace apps (enterprise + customers/*)"
 fi
 
 echo "[start-dev] booting Next apps → $SCOPE"
+if [ "$TURBO_UI" = "tui" ]; then
+  echo "[start-dev] 提示：pnpm parallel 无 Turbo TUI；要看纯日志可加 --ui=stream（行为相同）。"
+fi
 (
   cd "$ENTERPRISE_DIR"
-  exec pnpm exec turbo "${TURBO_ARGS[@]}"
+  exec pnpm "${PNPM_DEV_FILTERS[@]}" --parallel dev
 ) &
 PIDS+=("$!")
 
