@@ -43,6 +43,7 @@ class EventType(str, Enum):
     SUBAGENT_COMPLETED = "subagent_completed"
     SUBAGENT_ERROR = "subagent_error"
     COMPACTION = "compaction"
+    CONTEXT_STATS = "context_stats"
 
 
 @dataclass

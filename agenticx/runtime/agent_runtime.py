@@ -30,6 +30,15 @@ from agenticx.cli.agent_tools import (
 from agenticx.cli.studio_mcp import build_mcp_tools_context
 from agenticx.cli.studio_skill import get_all_skill_summaries
 from agenticx.runtime.compactor import ContextCompactor
+from agenticx.runtime.tool_result_budget import (
+    apply_tool_result_budget,
+    approx_tokens,
+    archive_tool_result,
+    get_result_class,
+    load_config as load_tool_result_budget_config,
+    persist_context_stats,
+    record_tool_result_meta,
+)
 from agenticx.runtime.tool_orchestrator import partition_tool_calls
 from agenticx.runtime.confirm import ConfirmGate
 from agenticx.runtime.events import EventType, RuntimeEvent
@@ -79,6 +88,7 @@ def _build_user_goal_anchor(
     max_rounds: int,
     tools_used_so_far: int,
     messages_total_chars: int,
+    tool_result_tokens_session: int = 0,
 ) -> Optional[Dict[str, Any]]:
     """Build user goal anchor message for long-horizon task context management (FR-2/FR-3).
 
@@ -88,6 +98,8 @@ def _build_user_goal_anchor(
     # NFR-6: Escape hatch to disable anchor injection
     if os.environ.get("AGX_GOAL_ANCHOR_DISABLE", "").strip() == "1":
         return None
+
+    session._goal_anchor_prepend = False
 
     user_intent_raw = getattr(session, "current_user_intent", None)
     # NFR-4: Skip if None or whitespace-only (including empty string)
@@ -104,12 +116,17 @@ def _build_user_goal_anchor(
     # inputs from blowing up the per-round anchor cost. Minimal mode caps independently below.
     user_intent_full = str(user_intent_raw)[:2000]
 
+    restrengthen_threshold = _env_int_runtime("AGX_ANCHOR_RESTRENGTHEN_THRESHOLD", 12000)
+    force_prepend = tool_result_tokens_session >= restrengthen_threshold
+
     is_first_round = round_idx == 1 and tools_used_so_far == 0
     is_complex = (
         tools_used_so_far >= full_trigger_tools
         or messages_total_chars >= full_trigger_chars
         or agent_msg_count >= 8
+        or force_prepend
     )
+    session._goal_anchor_prepend = bool(force_prepend and not is_first_round)
 
     if is_first_round:
         # First round: minimal anchor (≤80 chars as per FR-3)
@@ -154,6 +171,7 @@ def _build_user_goal_anchor(
         mode,
     )
 
+    session._goal_anchor_mode = mode
     return {"role": "system", "content": anchor_text}
 
 
@@ -1166,9 +1184,13 @@ class AgentRuntime:
                 messages = _sanitize_context_messages(messages)
                 if provider_name.strip().lower() == "minimax":
                     messages = _merge_consecutive_simple_roles_for_minimax(messages)
-                # P1-T4 (v2): Inject ephemeral user goal anchor as a temporary view for THIS LLM call only.
-                # Critical: do NOT mutate `messages` itself—anchor must not survive into the next round
-                # (NFR-3 ephemeral semantics). All downstream LLM calls in this round use messages_for_llm.
+                budget_cfg = load_tool_result_budget_config()
+                messages, budget_stats = apply_tool_result_budget(
+                    messages,
+                    current_round=round_idx,
+                    session=session,
+                    cfg=budget_cfg,
+                )
                 messages_total_chars = sum(
                     len(str(m.get("content", ""))) for m in messages if isinstance(m, dict)
                 )
@@ -1178,11 +1200,40 @@ class AgentRuntime:
                     max_rounds=self.max_tool_rounds,
                     tools_used_so_far=len(executed_tool_names),
                     messages_total_chars=messages_total_chars,
+                    tool_result_tokens_session=budget_stats.tool_result_tokens_session,
                 )
                 if anchor_message:
-                    messages_for_llm = list(messages) + [anchor_message]
+                    prepend = bool(getattr(session, "_goal_anchor_prepend", False))
+                    if prepend:
+                        insert_idx = 0
+                        for i, m in enumerate(messages):
+                            if isinstance(m, dict) and str(m.get("role", "")).lower() == "system":
+                                insert_idx = i + 1
+                            else:
+                                break
+                        messages_for_llm = list(messages)
+                        messages_for_llm.insert(insert_idx, anchor_message)
+                    else:
+                        messages_for_llm = list(messages) + [anchor_message]
                 else:
                     messages_for_llm = messages
+                context_payload = {
+                    "round": round_idx,
+                    "prompt_tokens_approx": approx_tokens(
+                        "\n".join(str(m.get("content", "")) for m in messages_for_llm if isinstance(m, dict))
+                    ),
+                    "tool_result_tokens_round": budget_stats.tool_result_tokens_round,
+                    "tool_result_tokens_session": budget_stats.tool_result_tokens_session,
+                    "archived_tool_calls": budget_stats.archived_replaced,
+                    "anchor_mode": getattr(session, "_goal_anchor_mode", None),
+                    "anchor_prepend": bool(getattr(session, "_goal_anchor_prepend", False)),
+                }
+                persist_context_stats(session, context_payload)
+                yield RuntimeEvent(
+                    type=EventType.CONTEXT_STATS.value,
+                    data=context_payload,
+                    agent_id=agent_id,
+                )
                 if provider_name.strip().lower() == "minimax":
                     messages_for_llm = _merge_consecutive_simple_roles_for_minimax(messages_for_llm)
                 response_text = ""
@@ -2296,8 +2347,28 @@ class AgentRuntime:
                         status_query_total = max(0, status_query_total - 1)
                         repeated_status_query_count = 0
                 result = await self.hooks.run_after_tool_call(tool_name, result, session)
-                result = _maybe_persist_large_tool_result(session, tool_call_id, tool_name, str(result))
-                result = self.compactor.micro_compact_tool_result(tool_name, str(result))
+                budget_cfg = load_tool_result_budget_config()
+                raw_result = str(result)
+                rclass = get_result_class(tool_name, raw_result)
+                archive_path = None
+                if rclass in {"large", "blob"} or approx_tokens(raw_result) >= budget_cfg.large_threshold_tokens:
+                    archive_path = archive_tool_result(
+                        session,
+                        round_idx=round_idx,
+                        tool_call_id=tool_call_id,
+                        tool_name=tool_name,
+                        content=raw_result,
+                        cfg=budget_cfg,
+                    )
+                result = self.compactor.micro_compact_tool_result(tool_name, raw_result)
+                record_tool_result_meta(
+                    session,
+                    round_idx=round_idx,
+                    tool_call_id=tool_call_id,
+                    tool_name=tool_name,
+                    content=raw_result,
+                    archive_path=archive_path,
+                )
                 # Learning counters for SessionReviewHook threshold checks
                 session._total_tool_calls = getattr(session, "_total_tool_calls", 0) + 1
                 if tool_name == "skill_manage":
