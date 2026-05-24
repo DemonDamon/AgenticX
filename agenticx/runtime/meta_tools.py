@@ -21,6 +21,7 @@ from typing import Any, Dict, List, Optional, TYPE_CHECKING
 _meta_log = logging.getLogger(__name__)
 
 from agenticx.cli.agent_tools import STUDIO_TOOLS
+from agenticx.branding import DEFAULT_META_PRODUCT_LABEL as _DEFAULT_META_PRODUCT_LABEL
 from agenticx.cli.studio_mcp import import_mcp_config, load_available_servers
 from agenticx.cli.studio_skill import get_all_skill_summaries
 from agenticx.cli.config_manager import ConfigManager
@@ -37,9 +38,8 @@ from agenticx.workspace.loader import (
 if TYPE_CHECKING:
     from agenticx.cli.studio import StudioSession
 
-# Set each /api/chat turn by Studio from ChatRequest.meta_leader_display_name (default Machi).
+# Set each /api/chat turn by Studio from ChatRequest.meta_leader_display_name (default Near).
 META_LEADER_LABEL_SCRATCH_KEY = "__meta_leader_display_name__"
-_DEFAULT_META_PRODUCT_LABEL = "Machi"
 
 TASK_CATEGORIES: Dict[str, str] = {
     "visual": "Visual/UI/frontend focused tasks",
@@ -2860,7 +2860,7 @@ async def dispatch_meta_tool_async(
             if prov and mod:
                 task_obj["provider"] = prov
                 task_obj["model"] = mod
-            # 不写入 sessionId：若绑定 Machi/当前对话的会话 ID，侧栏打开「定时」窗格会错误加载该会话历史。
+            # 不写入 sessionId：若绑定 Near/当前对话的会话 ID，侧栏打开「定时」窗格会错误加载该会话历史。
             # 专属会话应在 Desktop 侧栏点击该任务时由 automation:<task_id> 创建并回写。
 
             tasks = load_automation_tasks()

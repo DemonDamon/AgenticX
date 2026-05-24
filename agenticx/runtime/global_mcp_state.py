@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Persistent store for the last-connected MCP server names.
 
-Written to ~/.agenticx/mcp_state.json so that Machi can restore
+Written to ~/.agenticx/mcp_state.json so that Near can restore
 connections across restarts without requiring the user to reconnect
 manually every time.
 

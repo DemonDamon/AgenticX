@@ -285,7 +285,7 @@ def _is_model_param_compat_error(exc: Exception) -> bool:
 
 
 # ---------------------------------------------------------------------------
-# Feishu ↔ Machi session binding (shared with Desktop via JSON file)
+# Feishu ↔ Near session binding (shared with Desktop via JSON file)
 # ---------------------------------------------------------------------------
 
 def _read_bindings_file() -> Dict[str, Any]:
@@ -511,19 +511,19 @@ async def _feishu_cmd_reply(
     """Handle /bind /unbind /sessions; returns text for Feishu."""
     if cmd == "bind_help":
         return (
-            "**飞书绑定 Machi 会话**\n\n"
+            "**飞书绑定 Near 会话**\n\n"
             "• `/bind 分身名` — 绑定到该分身最近的会话（如 `/bind cole`）\n"
             "• `/bind <session_uuid>` — 绑定到指定会话（从 `/sessions` 复制 id）\n"
             "• `/unbind` — 取消绑定，恢复默认 im 会话\n"
             "• `/sessions` — 列出近期会话\n\n"
-            "也可在 Machi 客户端当前窗格点「绑定飞书」按钮。"
+            "也可在 Near 客户端当前窗格点「绑定飞书」按钮。"
         )
     if cmd == "unbind":
         if not open_id:
             return "无法识别飞书用户身份，请使用机器人**单聊**发送 `/unbind`。"
         _clear_binding_key(open_id)
         _clear_binding_key(_DESKTOP_BINDING_KEY)
-        return "已取消飞书账号的会话绑定。后续消息将使用默认 Machi 会话。"
+        return "已取消飞书账号的会话绑定。后续消息将使用默认 Near 会话。"
 
     if cmd == "sessions":
         try:
@@ -608,7 +608,7 @@ async def _feishu_cmd_reply(
                     found = a
                     break
         if not found:
-            return f"未找到名为「{name_query}」的分身。检查 Machi 里的分身显示名。"
+            return f"未找到名为「{name_query}」的分身。检查 Near 里的分身显示名。"
         avatar_id = str(found.get("id") or found.get("avatar_id") or "").strip()
         avatar_name = str(found.get("name") or found.get("display_name") or "").strip()
         if not avatar_id:
@@ -1181,7 +1181,7 @@ class FeishuLongConnRunner:
                 )
             except Exception as exc:
                 logger.exception("feishu confirm command failed: %s", exc)
-                reply = f"[Machi] 确认指令执行出错：{exc}"
+                reply = f"[Near] 确认指令执行出错：{exc}"
         elif cmd is not None:
             cname, carg = cmd
             try:
@@ -1190,12 +1190,12 @@ class FeishuLongConnRunner:
                 )
             except Exception as exc:
                 logger.exception("feishu command failed: %s", exc)
-                reply = f"[Machi] 指令执行出错：{exc}"
+                reply = f"[Near] 指令执行出错：{exc}"
         elif _is_new_chat(text):
             await _delete_session(self._studio_base, effective_sid, headers)
             reply = "已开始新对话。"
         elif _is_status(text):
-            reply = "Machi 在线，飞书长连接正常。"
+            reply = "Near 在线，飞书长连接正常。"
             if binding:
                 an = binding.get("avatar_name") or binding.get("avatar_id") or ""
                 reply += f"\n当前绑定会话：`{effective_sid}`"
@@ -1228,7 +1228,7 @@ class FeishuLongConnRunner:
                         logger.warning("feishu binding rebound failed: %s", bind_exc)
             except Exception as exc:
                 logger.exception("chat_turn failed: %s", exc)
-                reply = f"[Machi] 执行出错：{exc}"
+                reply = f"[Near] 执行出错：{exc}"
 
         # Prefer reply-in-thread; for group chats use chat_id
         receive_id = open_id

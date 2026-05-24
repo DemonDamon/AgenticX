@@ -36,7 +36,7 @@ def render_connect_page(sess: "ConnectSession", *, page_url: str) -> str:
 <head>
   <meta charset="utf-8"/>
   <meta name="viewport" content="width=device-width, initial-scale=1"/>
-  <title>Machi 绑定</title>
+  <title>Near 绑定</title>
   <style>
     body {{ font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
       margin: 0; padding: 16px; background: #0f1014; color: #e8e8ec; }}
@@ -54,7 +54,7 @@ def render_connect_page(sess: "ConnectSession", *, page_url: str) -> str:
   </style>
 </head>
 <body>
-  <h1>连接 Machi 远程指令</h1>
+  <h1>连接 Near 远程指令</h1>
   <div class="card">
     <div>绑定码（复制后在飞书/企微机器人对话中发送）</div>
     <div class="code" id="code">{code_display}</div>
@@ -63,7 +63,7 @@ def render_connect_page(sess: "ConnectSession", *, page_url: str) -> str:
     <p class="hint">
       1. 点上方按钮复制整句消息。<br/>
       2. 打开飞书或企业微信，进入已配置好的机器人会话，粘贴发送。<br/>
-      3. 收到「已绑定设备」即完成；Machi 桌面将显示已连接。
+      3. 收到「已绑定设备」即完成；Near 桌面将显示已连接。
     </p>
     <a class="btn secondary" href="https://open.feishu.cn/" target="_blank" rel="noopener">打开飞书开放平台文档</a>
     <a class="btn secondary" href="https://work.weixin.qq.com/" target="_blank" rel="noopener" style="margin-top:8px">打开企业微信</a>
@@ -85,7 +85,7 @@ def render_connect_page(sess: "ConnectSession", *, page_url: str) -> str:
     const timerEl = document.getElementById('timer');
     setInterval(function() {{
       const left = Math.max(0, Math.floor((end - Date.now()) / 1000));
-      timerEl.textContent = left > 0 ? ('剩余有效时间约 ' + left + ' 秒') : '已过期，请回到 Machi 重新生成二维码';
+      timerEl.textContent = left > 0 ? ('剩余有效时间约 ' + left + ' 秒') : '已过期，请回到 Near 重新生成二维码';
     }}, 1000);
   </script>
 </body>

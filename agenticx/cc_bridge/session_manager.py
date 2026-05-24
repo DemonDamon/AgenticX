@@ -508,7 +508,7 @@ class BridgeSessionManager:
                     pass
 
     def write_pty_raw(self, session_id: str, data: str) -> None:
-        """Write user keystrokes / paste to visible_tui PTY (no Machi anchor)."""
+        """Write user keystrokes / paste to visible_tui PTY (no Near anchor)."""
         session = self.get(session_id)
         if session is None:
             raise KeyError("unknown session")

@@ -1021,7 +1021,7 @@ def _read_with_liteparse(path: Path) -> str:
             f"解析 {ext} 需要 LibreOffice（LiteParse 内部用 soffice 做格式转换）。"
             f" 未检测到本机已安装。\n"
             f"建议安装命令：{install_cmd}\n"
-            f"安装完成后在资料列表重建该条索引即可，无需重启 Machi。"
+            f"安装完成后在资料列表重建该条索引即可，无需重启 Near。"
         )
 
     adapter = LiteParseAdapter(config={"debug": False})

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Process-level singleton for MCP connections.
 
-All Machi sessions share a single MCPHub and a single ``connected_servers``
+All Near sessions share a single MCPHub and a single ``connected_servers``
 set.  New sessions are therefore MCP-ready instantly without spawning extra
 child processes.
 
@@ -10,7 +10,7 @@ Lifecycle
 1. ``GlobalMcpManager.load_or_init()`` is called once at ``agx serve`` startup
    (inside the FastAPI lifespan or create_studio_app).
 2. ``restore_from_last_session()`` runs in the background to reconnect servers
-   that were connected the last time Machi ran.
+   that were connected the last time Near ran.
 3. On shutdown ``close_all()`` gracefully terminates every stdio child.
 """
 

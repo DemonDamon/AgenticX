@@ -33,6 +33,7 @@ from jsonschema import Draft202012Validator
 
 from agenticx.avatar.group_chat import GroupChatRegistry
 from agenticx.avatar.registry import AvatarRegistry
+from agenticx.branding import DEFAULT_META_PRODUCT_LABEL
 from agenticx.cli.config_manager import ConfigManager
 from agenticx.cli.mcp_discovery import detect_all
 from agenticx.hooks import load_discovered_hooks
@@ -463,7 +464,7 @@ def _build_automation_runner_system_prompt(
 
     lines: list[str] = [
         "# 定时 / 自动化任务执行器",
-        "你是 Machi 的**定时任务执行器**。本轮用户输入即任务说明（含输出格式、数据来源与失败处理等硬性要求）。",
+        "你是 Near 的**定时任务执行器**。本轮用户输入即任务说明（含输出格式、数据来源与失败处理等硬性要求）。",
         "- **当前是执行阶段，不是建任务阶段**：禁止询问执行频率、日期、时间等调度参数；这些参数已由调度器确定。",
         "## 任务根目录（与 Desktop 配置一致）",
         "- **定义**：用户在自动化设置里填写的 **工作区**；若留空，则为 `~/.agenticx/crontask/<task_id>`（每个定时任务独占一个子目录，与对话一一对应）。",
@@ -2014,7 +2015,7 @@ def create_studio_app() -> FastAPI:
                         provider_name=provider or session.provider_name,
                         model=model or session.model_name,
                     )
-                    meta_leader_label = str(getattr(payload, "meta_leader_display_name", None) or "").strip() or "Machi"
+                    meta_leader_label = str(getattr(payload, "meta_leader_display_name", None) or "").strip() or DEFAULT_META_PRODUCT_LABEL
                     if isinstance(session.scratchpad, dict):
                         session.scratchpad[META_LEADER_LABEL_SCRATCH_KEY] = meta_leader_label
                     router = GroupChatRouter(
@@ -2314,7 +2315,7 @@ def create_studio_app() -> FastAPI:
                         "bound_avatar_id",
                         active_avatar_id if is_avatar_session else None,
                     )
-                    _meta_label = str(getattr(payload, "meta_leader_display_name", None) or "").strip() or "Machi"
+                    _meta_label = str(getattr(payload, "meta_leader_display_name", None) or "").strip() or DEFAULT_META_PRODUCT_LABEL
                     if isinstance(session.scratchpad, dict):
                         session.scratchpad[META_LEADER_LABEL_SCRATCH_KEY] = _meta_label
                     auto = AutoSolveMode()

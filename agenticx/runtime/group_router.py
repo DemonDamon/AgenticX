@@ -20,6 +20,7 @@ from agenticx.runtime import AgentRuntime
 from agenticx.runtime import AsyncConfirmGate
 from agenticx.runtime.events import EventType
 from agenticx.runtime.group_context import GroupChatContext
+from agenticx.branding import DEFAULT_META_PRODUCT_LABEL, LEGACY_META_LABELS
 
 META_LEADER_AGENT_ID = "__meta__"
 META_LEADER_NAME = "组长"
@@ -97,7 +98,7 @@ _MULTISTEP_MIN_LENGTH_FOR_WEAK = 20  # Weak markers require some prose around th
 
 # Open-call markers — phrases where the user is broadcasting a question to the
 # group rather than addressing one specific role. When matched and no member is
-# explicitly @-mentioned, we prefer Machi (the meta leader / project manager)
+# explicitly @-mentioned, we prefer Near (the meta leader / project manager)
 # to answer first and optionally point to one relevant member, instead of
 # silently picking a single member via single-target route_to.
 _OPEN_CALL_MARKERS_CN: tuple[str, ...] = (
@@ -189,7 +190,7 @@ def user_addresses_meta_leader(user_input: str, meta_label: str) -> bool:
     ml = str(meta_label or "").strip()
     if ml:
         labels.append(ml)
-    for alias in (META_LEADER_NAME, "meta-agent", "meta agent"):
+    for alias in (META_LEADER_NAME, "meta-agent", "meta agent", *LEGACY_META_LABELS):
         if alias and alias not in labels:
             labels.append(alias)
     for lab in labels:
@@ -278,7 +279,7 @@ class GroupChatRouter:
         self.llm_factory = llm_factory
         self.max_tool_rounds = max(1, int(max_tool_rounds))
         label = str(meta_leader_display_name or "").strip()
-        self._meta_leader_label = label or "Machi"
+        self._meta_leader_label = label or DEFAULT_META_PRODUCT_LABEL
         self._confirm_gate_factory = confirm_gate_factory
 
     @staticmethod
@@ -318,6 +319,8 @@ class GroupChatRouter:
         ml = str(self._meta_leader_label or "").strip().casefold()
         if ml:
             m[ml] = META_LEADER_AGENT_ID
+        for legacy in LEGACY_META_LABELS:
+            m[str(legacy).casefold()] = META_LEADER_AGENT_ID
         m[META_LEADER_NAME.casefold()] = META_LEADER_AGENT_ID
         return m
 
@@ -1075,9 +1078,9 @@ class GroupChatRouter:
             ):
                 yield reply
             return
-        # ── Open-call broadcast questions go to Machi first ─────────────────
+        # ── Open-call broadcast questions go to Near first ─────────────────
         # When the user is broadcasting to the group ("群里谁能…", "哪位…")
-        # without naming anyone, prefer the meta leader (Machi) as the
+        # without naming anyone, prefer the meta leader (Near) as the
         # primary responder and let her optionally point to one relevant
         # member at the end. This avoids silently funnelling every open
         # question to a single member via single-target route_to.

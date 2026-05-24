@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Tencent SkillHub marketplace search for Machi / agx serve.
+"""Tencent SkillHub marketplace search for Near / agx serve.
 
 Attempts the local ``skillhub`` CLI (JSON output) when available; otherwise
 falls back to ClawHub results from the user's configured registries, since
