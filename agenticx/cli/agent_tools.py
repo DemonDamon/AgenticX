@@ -355,14 +355,21 @@ STUDIO_TOOLS: List[Dict[str, Any]] = [
         "type": "function",
         "function": {
             "name": "file_write",
-            "description": "Write full file content; show unified diff and ask confirmation before writing.",
+            "description": (
+                "Write full file content; show unified diff and ask confirmation before writing. "
+                "Use from_path to copy from a local file instead of inline content."
+            ),
             "parameters": {
                 "type": "object",
                 "properties": {
                     "path": {"type": "string", "description": "File path."},
-                    "content": {"type": "string", "description": "New full content."},
+                    "content": {"type": "string", "description": "New full content (omit when using from_path)."},
+                    "from_path": {
+                        "type": "string",
+                        "description": "Copy content from this local file path (workspace-relative or absolute).",
+                    },
                 },
-                "required": ["path", "content"],
+                "required": ["path"],
                 "additionalProperties": False,
             },
         },
@@ -628,10 +635,11 @@ STUDIO_TOOLS: List[Dict[str, Any]] = [
             "name": "skill_manage",
             "description": (
                 "Create, patch, or delete skills stored under ~/.agenticx/skills/. "
-                "For 'create': provide action + name + content (the full SKILL.md text). "
+                "For 'create': provide action + name + content, or use from_path/from_url "
+                "instead of inline content for large SKILL.md files. "
                 "For 'patch': provide action + name + old_string + new_string. "
                 "For 'delete': provide action + name. "
-                "Sub-paths are supported (e.g. name='ima/notes' creates ~/.agenticx/skills/ima/notes/SKILL.md). "
+                "Sub-paths are supported (e.g. name='ima/notes'). "
                 "IMPORTANT: never call with empty arguments — action and name are always required."
             ),
             "parameters": {
@@ -653,15 +661,69 @@ STUDIO_TOOLS: List[Dict[str, Any]] = [
                     "content": {
                         "type": "string",
                         "description": (
-                            "Required for 'create': the full SKILL.md text, starting with a YAML frontmatter block "
-                            "(--- name: ... description: ... ---) followed by the skill body. "
-                            "Must not be empty."
+                            "For 'create': full SKILL.md text with YAML frontmatter. "
+                            "Prefer from_path/from_url for large files instead of inline content."
+                        ),
+                    },
+                    "from_path": {
+                        "type": "string",
+                        "description": (
+                            "For 'create': read SKILL.md from this local path (workspace or ~/.agenticx/). "
+                            "Mutually exclusive with content/from_url."
+                        ),
+                    },
+                    "from_url": {
+                        "type": "string",
+                        "description": (
+                            "For 'create': download SKILL.md from an allowlisted https URL "
+                            "(raw.githubusercontent.com, gist, registry.clawhub.ai). "
+                            "Mutually exclusive with content/from_path."
                         ),
                     },
                     "old_string": {"type": "string", "description": "Required for 'patch': exact substring to find and replace in the existing SKILL.md."},
                     "new_string": {"type": "string", "description": "Required for 'patch': replacement text for old_string."},
                 },
                 "required": ["action", "name"],
+                "additionalProperties": False,
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "skill_import_repo",
+            "description": (
+                "Bulk install skills from a GitHub repository into ~/.agenticx/skills/. "
+                "Use dry_run=true first to list pending skills without writing. "
+                "Preferred for installing many skills (e.g. mattpocock/skills)."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "repo": {
+                        "type": "string",
+                        "description": "GitHub repo as owner/name (e.g. mattpocock/skills).",
+                    },
+                    "branch": {"type": "string", "description": "Branch name (default main)."},
+                    "path_glob": {
+                        "type": "string",
+                        "description": "Glob for SKILL.md paths in the repo tree (default skills/**/SKILL.md).",
+                    },
+                    "exclude": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "Glob patterns to exclude (default deprecated/in-progress).",
+                    },
+                    "dry_run": {
+                        "type": "boolean",
+                        "description": "If true, only return pending/skipped lists without installing.",
+                    },
+                    "overwrite": {
+                        "type": "boolean",
+                        "description": "If true, replace existing skills with the same name.",
+                    },
+                },
+                "required": ["repo"],
                 "additionalProperties": False,
             },
         },
@@ -2520,12 +2582,26 @@ async def _tool_file_write(
             "ERROR: missing required parameter 'path'. "
             "You must provide a full file path, e.g. file_write(path='/Users/.../file.py', content='...')"
         )
+    from_path_arg = str(arguments.get("from_path", "") or "").strip()
     raw_content = arguments.get("content")
-    if raw_content is None:
+    if from_path_arg:
+        try:
+            src = _resolve_workspace_path(from_path_arg, session, pick_existing=True)
+        except ValueError as exc:
+            return f"ERROR: {exc}"
+        if not src.is_file():
+            return f"ERROR: from_path not found: {src}"
+        try:
+            new_text = _strip_tool_metadata_noise_lines(src.read_text(encoding="utf-8", errors="replace"))
+        except OSError as exc:
+            return f"ERROR: read from_path failed: {exc}"
+    elif raw_content is None:
         return (
-            "ERROR: missing required parameter 'content'. "
+            "ERROR: missing required parameter 'content' or 'from_path'. "
             "You must provide file content, e.g. file_write(path='/Users/.../file.py', content='...')"
         )
+    else:
+        new_text = _strip_tool_metadata_noise_lines(str(raw_content))
     try:
         path = _resolve_workspace_path(raw_path, session)
     except ValueError as exc:
@@ -2535,7 +2611,6 @@ async def _tool_file_write(
             "ERROR: direct writes to ~/.agenticx/config.yaml are blocked for safety. "
             "Use update_email_config meta tool for notifications.email.* updates."
         )
-    new_text = _strip_tool_metadata_noise_lines(str(raw_content))
     old_text = ""
     if path.exists():
         if not path.is_file():
@@ -3771,6 +3846,98 @@ def _agent_created_skill_root() -> Path:
     return Path.home() / ".agenticx" / "skills"
 
 
+def _skill_url_allowlist() -> List[str]:
+    defaults = [
+        "raw.githubusercontent.com",
+        "gist.githubusercontent.com",
+        "registry.clawhub.ai",
+    ]
+    try:
+        from agenticx.cli.config_manager import ConfigManager
+
+        raw = ConfigManager.get_value("skill_manage.url_allowlist")
+        if isinstance(raw, list) and raw:
+            return [str(x).strip().lower() for x in raw if str(x).strip()]
+    except Exception:
+        pass
+    return defaults
+
+
+def _skill_max_url_bytes() -> int:
+    try:
+        from agenticx.cli.config_manager import ConfigManager
+
+        raw = ConfigManager.get_value("skill_manage.max_url_payload_bytes")
+        if raw is not None:
+            return max(1024, int(raw))
+    except Exception:
+        pass
+    return 1_048_576
+
+
+def _resolve_skill_content_path(path_arg: str, session: Optional[StudioSession]) -> Path:
+    """Resolve a local path for skill content (workspace or ~/.agenticx/)."""
+    agx_root = (Path.home() / ".agenticx").resolve()
+    try:
+        resolved = _resolve_workspace_path(path_arg, session, pick_existing=True)
+    except ValueError:
+        raw = _path_from_arg(path_arg)
+        if not raw.is_absolute():
+            raw = (Path.home() / raw).resolve(strict=False)
+        else:
+            raw = raw.resolve(strict=False)
+        if not _is_path_under_root(raw, agx_root) and not _desktop_unrestricted_fs_enabled():
+            raise ValueError(f"path must be under workspace or ~/.agenticx/: {raw}") from None
+        resolved = raw
+    if not resolved.is_file():
+        raise ValueError(f"file not found: {resolved}")
+    return resolved
+
+
+def _fetch_skill_content_from_url(url: str) -> str:
+    from urllib.parse import urlparse
+    import urllib.request
+
+    parsed = urlparse(str(url or "").strip())
+    if parsed.scheme != "https":
+        raise ValueError("only https URLs are allowed for from_url")
+    host = (parsed.hostname or "").lower()
+    allow = _skill_url_allowlist()
+    if host not in allow:
+        raise ValueError(f"host not in skill_manage.url_allowlist: {host}")
+    req = urllib.request.Request(url)
+    with urllib.request.urlopen(req, timeout=30) as resp:
+        data = resp.read()
+    max_bytes = _skill_max_url_bytes()
+    if len(data) > max_bytes:
+        raise ValueError(f"URL payload exceeds max_url_payload_bytes ({max_bytes})")
+    return data.decode("utf-8")
+
+
+def _resolve_skill_create_content(arguments: Dict[str, Any], session: Optional[StudioSession]) -> Tuple[Optional[str], Optional[str]]:
+    from_path = str(arguments.get("from_path", "") or "").strip()
+    from_url = str(arguments.get("from_url", "") or "").strip()
+    content = str(arguments.get("content", "") or "")
+    if from_path and from_url:
+        return None, "ERROR: from_path and from_url are mutually exclusive"
+    if from_path:
+        try:
+            path = _resolve_skill_content_path(from_path, session)
+            return path.read_text(encoding="utf-8"), None
+        except ValueError as exc:
+            return None, f"ERROR: {exc}"
+        except OSError as exc:
+            return None, f"ERROR: read failed: {exc}"
+    if from_url:
+        try:
+            return _fetch_skill_content_from_url(from_url), None
+        except Exception as exc:
+            return None, f"ERROR: from_url fetch failed: {exc}"
+    if not content.strip():
+        return None, "ERROR: content is required for create (or provide from_path/from_url)"
+    return content, None
+
+
 def _tool_session_search(arguments: Dict[str, Any], session: Optional[StudioSession]) -> str:
     _ = session
     from agenticx.memory.session_store import session_fts_enabled
@@ -3857,9 +4024,10 @@ def _tool_skill_manage(arguments: Dict[str, Any], session: Optional[StudioSessio
         return "ERROR: skill path outside skills root"
 
     if action == "create":
-        content = str(arguments.get("content", "") or "")
-        if not content.strip():
-            return "ERROR: content is required for create"
+        content, content_err = _resolve_skill_create_content(arguments, session)
+        if content_err:
+            return content_err
+        assert content is not None
         if skill_dir.exists():
             return "ERROR: skill already exists"
         skill_dir.mkdir(parents=True, exist_ok=True)
@@ -3931,6 +4099,37 @@ def _tool_skill_manage(arguments: Dict[str, Any], session: Optional[StudioSessio
         return json.dumps({"ok": True, "action": "delete", "removed": True}, ensure_ascii=False)
 
     return "ERROR: unknown action"
+
+
+def _tool_skill_import_repo(arguments: Dict[str, Any], session: Optional[StudioSession]) -> str:
+    _ = session
+    if not _skill_manage_enabled():
+        return (
+            "ERROR: skill_import_repo is disabled. Set AGX_SKILL_MANAGE=1 "
+            "or AGX_CONFIRM_STRATEGY=auto (Run Everything hook)."
+        )
+    repo = str(arguments.get("repo", "") or "").strip()
+    if not repo:
+        return "ERROR: repo is required (owner/name)"
+    branch = str(arguments.get("branch", "main") or "main").strip() or "main"
+    path_glob = str(arguments.get("path_glob", "skills/**/SKILL.md") or "skills/**/SKILL.md").strip()
+    exclude_raw = arguments.get("exclude")
+    exclude: Optional[List[str]] = None
+    if isinstance(exclude_raw, list):
+        exclude = [str(x) for x in exclude_raw if str(x).strip()]
+    dry_run = bool(arguments.get("dry_run", False))
+    overwrite = bool(arguments.get("overwrite", False))
+    from agenticx.skills.import_repo import import_skills_from_repo, result_to_json
+
+    result = import_skills_from_repo(
+        repo=repo,
+        branch=branch,
+        path_glob=path_glob,
+        exclude=exclude,
+        dry_run=dry_run,
+        overwrite=overwrite,
+    )
+    return result_to_json(result)
 
 
 def _tool_ask_user(arguments: Dict[str, Any], *, service_mode: bool = False) -> str:
@@ -4304,7 +4503,10 @@ async def dispatch_tool_async(
             ),
             "skill_manage": (
                 "action（create / patch / delete）, name（skill 名称，可含子路径如 ima/notes）, "
-                "以及对应 action 所需的 markdown / old_string / new_string 字段"
+                "以及 content / from_path / from_url（create）或 old_string / new_string（patch）"
+            ),
+            "skill_import_repo": (
+                "repo（owner/name）, 可选 branch/path_glob/exclude/dry_run/overwrite"
             ),
             "schedule_task": (
                 "name（任务名）、frequency / time / date 至少一项、instruction（具体指令）、workspace（执行目录）"
@@ -4382,6 +4584,8 @@ async def dispatch_tool_async(
             return _tool_skill_list(session)
         if name == "skill_manage":
             return _tool_skill_manage(arguments, session)
+        if name == "skill_import_repo":
+            return _tool_skill_import_repo(arguments, session)
         if name == "todo_write":
             return _tool_todo_write(arguments, session)
         if name == "scratchpad_write":
