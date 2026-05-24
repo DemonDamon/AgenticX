@@ -14,7 +14,6 @@ export * from "./services/saml-state";
 export * from "./services/saml-attribute-mapper";
 export * from "./services/saml-protocol-handler";
 export * from "./services/secret-cipher";
-export * from "./services/pat-service";
 export * from "./middleware/next";
 export * from "./providers/types";
 export * from "./providers/password-provider";

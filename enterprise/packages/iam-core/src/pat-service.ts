@@ -3,9 +3,9 @@
  */
 
 import { apiTokens as patTable } from "@agenticx/db-schema";
-import { getIamDb } from "@agenticx/iam-core";
 import { createHash, randomBytes } from "node:crypto";
 import { and, desc, eq } from "drizzle-orm";
+import { getIamDb } from "./db";
 
 export type PatStatus = "active" | "revoked" | "expired";
 

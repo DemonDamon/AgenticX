@@ -144,6 +144,9 @@ export class MeteringService {
       InputTokens?: number;
       OutputTokens?: number;
       TotalTokens?: number;
+      CachedTokens?: number;
+      CacheReadInputTokens?: number;
+      CacheCreationInputTokens?: number;
       CostUSD?: number;
     };
     type AggRow = {
@@ -151,6 +154,9 @@ export class MeteringService {
       input_tokens: number;
       output_tokens: number;
       total_tokens: number;
+      cached_tokens: number;
+      cache_read_input_tokens: number;
+      cache_creation_input_tokens: number;
       cost_usd: number;
     };
 
@@ -195,11 +201,17 @@ export class MeteringService {
         input_tokens: 0,
         output_tokens: 0,
         total_tokens: 0,
+        cached_tokens: 0,
+        cache_read_input_tokens: 0,
+        cache_creation_input_tokens: 0,
         cost_usd: 0,
       };
       current.input_tokens += Number(parsed.InputTokens ?? 0);
       current.output_tokens += Number(parsed.OutputTokens ?? 0);
       current.total_tokens += Number(parsed.TotalTokens ?? 0);
+      current.cached_tokens += Number(parsed.CachedTokens ?? 0);
+      current.cache_read_input_tokens += Number(parsed.CacheReadInputTokens ?? 0);
+      current.cache_creation_input_tokens += Number(parsed.CacheCreationInputTokens ?? 0);
       current.cost_usd += Number(parsed.CostUSD ?? 0);
       buckets.set(key, current);
     }

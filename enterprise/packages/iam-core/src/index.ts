@@ -9,3 +9,4 @@ export * from "./repos/departments";
 export * from "./repos/roles";
 export * from "./repos/sso-providers";
 export * from "./repos/users";
+export * from "./pat-service";

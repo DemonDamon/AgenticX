@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
-import { requireAdminScope } from "../../../../lib/admin-auth";
-import { fetchGatewayKeypoolStats, resetGatewayKeypoolCooldown } from "../../../../lib/gateway-channels-store";
+import { requireAdminScope } from "../../../../../../../lib/admin-auth";
+import { fetchGatewayKeypoolStats, resetGatewayKeypoolCooldown } from "../../../../../../../lib/gateway-channels-store";
 
 export async function GET(request: Request, ctx: { params: Promise<{ id: string }> }) {
   const auth = await requireAdminScope(["provider:read"]);

@@ -12,7 +12,6 @@
   },
   "dependencies": {
     "@agenticx/db-schema": "workspace:*",
-    "@agenticx/iam-core": "workspace:*",
     "@node-saml/node-saml": "^5",
     "bcryptjs": "^3.0.3",
     "drizzle-orm": "^0.45.2",
