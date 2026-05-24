@@ -31,6 +31,7 @@ export function parseContextNotice(
   message: Pick<Message, "role" | "content" | "toolName" | "toolCallId" | "noticeKind">
 ): { kind: ContextNoticeKind; text: string } | null {
   if (message.role !== "tool") return null;
+  if (message.noticeKind === "budget_exceeded") return null;
   if ((message.toolName ?? "").trim()) return null;
   if ((message.toolCallId ?? "").trim()) return null;
 
