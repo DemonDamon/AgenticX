@@ -113,7 +113,7 @@ import { buildCompactionNoticeText } from "../utils/context-notice";
 import { usePaneSortableHandle } from "./pane-sortable-context";
 import { FeishuBadge } from "./FeishuBadge";
 import machiEmptyState from "../assets/machi-logo-transparent.png";
-import { APP_DISPLAY_NAME, META_AGENT_DISPLAY_NAME } from "../constants/branding";
+import { APP_DISPLAY_NAME, APP_TAGLINE, META_AGENT_DISPLAY_NAME } from "../constants/branding";
 import { DEFAULT_META_AVATAR_URL } from "../constants/meta-avatar";
 import { resolveMetaDisplayName } from "../utils/display-name";
 import { createKbApi } from "./settings/knowledge/api";
@@ -2021,6 +2021,11 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
   const stopInFlightRef = useRef<Record<string, boolean>>({});
   const interruptNoticeSentRef = useRef<Record<string, boolean>>({});
   const [lastToolProgress, setLastToolProgress] = useState<{ name: string; sec: number } | null>(null);
+  const [contextLoopStats, setContextLoopStats] = useState<{
+    round: number;
+    tool_result_tokens_session: number;
+    archived_tool_calls: number;
+  } | null>(null);
   const [stallRuntimeConfig, setStallRuntimeConfig] = useState({
     stall_detect_silence_seconds: 90,
     stall_auto_nudge_enabled: false,
@@ -5987,6 +5992,12 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
                 noticeKind: reactive ? "compaction_reactive" : "compaction_proactive",
               });
             }
+            if (payload.type === "context_stats") {
+              const round = Number(payload.data?.round ?? 0) || 0;
+              const toolSession = Number(payload.data?.tool_result_tokens_session ?? 0) || 0;
+              const archived = Number(payload.data?.archived_tool_calls ?? 0) || 0;
+              setContextLoopStats({ round, tool_result_tokens_session: toolSession, archived_tool_calls: archived });
+            }
             if (payload.type === "error") {
               const errText = String(payload.data?.text ?? "未知错误");
               const severity = String(payload.data?.severity ?? "").trim();
@@ -6700,12 +6711,12 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
                 className="w-[13.2rem] max-w-[42vw] select-none opacity-[0.85] theme-invert-logo"
                 draggable={false}
               />
-              <div className="space-y-1.5 select-none">
-                <div className="text-[15px] font-medium text-text-primary tracking-wide">
-                  {APP_DISPLAY_NAME}
+              <div className="space-y-2 select-none">
+                <div className="text-[22px] font-semibold text-text-primary tracking-[0.24em]">
+                  {APP_DISPLAY_NAME.toUpperCase()}
                 </div>
-                <div className="text-text-faint tracking-wider uppercase text-[11px]">
-                  Orchestrated by {APP_DISPLAY_NAME} · Executed by AgenticX
+                <div className="text-text-faint tracking-[0.22em] uppercase text-[12px]">
+                  {APP_TAGLINE}
                 </div>
               </div>
               {isAutomationTaskPane && automationTaskErrorHint ? (
@@ -6862,6 +6873,12 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
                   ? ` · ${lastToolProgress.name}${lastToolProgress.sec > 0 ? ` ${lastToolProgress.sec}s` : ""}`
                   : ""}
               </span>
+              {contextLoopStats ? (
+                <span className="rounded-full bg-surface-panel/75 px-2 py-0.5 text-text-muted">
+                  context: {(contextLoopStats.tool_result_tokens_session / 1000).toFixed(1)}k ·{" "}
+                  {contextLoopStats.round} rounds · {contextLoopStats.archived_tool_calls} archived
+                </span>
+              ) : null}
               {sessionUnattended && unattendedGlobalEnabled && !budgetExceededInfo ? (
                 <span className="rounded-full bg-violet-500/10 px-2 py-0.5 text-violet-200">
                   无人值守 · 续跑 {unattendedContinueCount}/{unattendedMaxContinuations}
