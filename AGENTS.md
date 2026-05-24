@@ -1,5 +1,7 @@
 # AGENTS.md
 
+> **Brand note (2026-05-24):** The Desktop app was renamed from **Machi** to **Near**. Existing references to "Machi" in plan files, conclusions, and historical docs are intentionally preserved.
+
 ## Learned User Preferences
 - 默认使用中文回复；技术术语可按需保留英文。
 - 进行 git commit 时，提交信息必须包含 `Made-with: Damon Li`，并偏好按功能点分组、附结构化需求块（如 FR/NFR/AC）。
