@@ -135,7 +135,8 @@ export type ContextNoticeKind =
   | "budget_compress"
   | "compactor_cb"
   | "compaction_reactive"
-  | "compaction_proactive";
+  | "compaction_proactive"
+  | "budget_exceeded";
 
 export type Message = {
   id: string;
@@ -168,6 +169,10 @@ export type Message = {
   suggestedQuestions?: string[];
   /** Renders as flat ContextNoticeLine instead of ToolCallCard. */
   noticeKind?: ContextNoticeKind;
+  /** Token budget exceeded metadata for BudgetExceededCard rendering. */
+  budgetSource?: string;
+  budgetCurrent?: number;
+  budgetMax?: number;
 };
 
 /** Extras allowed on tool messages from `addPaneMessage` / `addMessage`. */
@@ -184,6 +189,9 @@ export type MessageToolExtras = Pick<
   | "inlineConfirm"
   | "suggestedQuestions"
   | "noticeKind"
+  | "budgetSource"
+  | "budgetCurrent"
+  | "budgetMax"
 >;
 
 export type ForwardedHistoryItem = {
