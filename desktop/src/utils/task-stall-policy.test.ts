@@ -1,6 +1,11 @@
 import { describe, expect, it } from "vitest";
 import type { ParsedTodo } from "../components/TodoUpdateCard";
-import { resolveStickyTodoDisplay, shouldSuppressStallDetection } from "./task-stall-policy";
+import type { Message } from "../store";
+import {
+  messageLooksLikeAssistantFinal,
+  resolveStickyTodoDisplay,
+  shouldSuppressStallDetection,
+} from "./task-stall-policy";
 
 const sampleTodo: ParsedTodo = {
   items: [{ status: "in_progress", content: "定位代码模块" }],
@@ -40,5 +45,29 @@ describe("shouldSuppressStallDetection", () => {
   it("returns false when guard is empty or session differs", () => {
     expect(shouldSuppressStallDetection("", "sess-1")).toBe(false);
     expect(shouldSuppressStallDetection("sess-1", "sess-2")).toBe(false);
+  });
+});
+
+describe("messageLooksLikeAssistantFinal", () => {
+  const base: Message = {
+    id: "a1",
+    role: "assistant",
+    content: "done",
+    timestamp: Date.now(),
+  };
+
+  it("treats colon-ending replies as unfinished", () => {
+    expect(
+      messageLooksLikeAssistantFinal({ ...base, content: "继续安装 diagnose:" }),
+    ).toBe(false);
+    expect(
+      messageLooksLikeAssistantFinal({ ...base, content: "下一步：" }),
+    ).toBe(false);
+  });
+
+  it("accepts complete assistant replies", () => {
+    expect(
+      messageLooksLikeAssistantFinal({ ...base, content: "安装已完成。" }),
+    ).toBe(true);
   });
 });

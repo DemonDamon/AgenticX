@@ -15,16 +15,32 @@ CHANNEL_C_GRACE_SEC = 5.0
 
 ContinuationReason = Literal["stall", "interrupted", "exhausted", "rate_limit", "manual"]
 
+# Trailing punctuation that suggests the model stopped mid-thought (often before a tool call).
+_UNFINISHED_TRAILING_RE = re.compile(r"[:：,，;；、—…]+$", re.UNICODE)
+
+
+def _assistant_body_text(message: dict[str, Any]) -> str:
+    return str(message.get("content", "")).strip()
+
+
+def _looks_like_unfinished_assistant_body(text: str) -> bool:
+    trimmed = str(text or "").strip()
+    if not trimmed:
+        return False
+    return bool(_UNFINISHED_TRAILING_RE.search(trimmed))
+
 
 def message_looks_like_assistant_final(message: Optional[dict[str, Any]]) -> bool:
     if not message or not isinstance(message, dict):
         return False
     if str(message.get("role", "")).strip() != "assistant":
         return False
-    content = str(message.get("content", "")).strip()
+    if str(message.get("id", "")).strip() == "__stream__":
+        return False
+    content = _assistant_body_text(message)
     if not content:
         return False
-    if str(message.get("id", "")).strip() == "__stream__":
+    if _looks_like_unfinished_assistant_body(content):
         return False
     return True
 

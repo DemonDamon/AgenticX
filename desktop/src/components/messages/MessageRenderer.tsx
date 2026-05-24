@@ -7,7 +7,10 @@ import { CleanBlock } from "./CleanBlock";
 import { ToolCallCard } from "./ToolCallCard";
 import { SystemNotice } from "./SystemNotice";
 import { ContextNoticeLine } from "./ContextNoticeLine";
+import { BudgetExceededCard } from "./BudgetExceededCard";
 import { parseContextNotice } from "../../utils/context-notice";
+import { parseBudgetExceededFromText } from "../../utils/budget-exceeded";
+import { shouldShowBudgetIncompleteHint } from "../../utils/budget-incomplete-message";
 import { parseTodoMessage, TodoUpdateCard } from "../TodoUpdateCard";
 
 type Props = {
@@ -37,8 +40,12 @@ type Props = {
   selected?: boolean;
   onResolveInlineConfirm?: (confirm: NonNullable<Message["inlineConfirm"]>, approved: boolean) => void;
   onFollowupClick?: (text: string) => void;
-  /** When true, assistant suggested-question chips are not rendered here (parent renders them outside unified ReAct card). */
-  omitSuggestedQuestions?: boolean;
+  /** When true, assistant messages cut off before budget_exceeded may show an incomplete hint. */
+  budgetExceededActive?: boolean;
+  allMessages?: Message[];
+  sessionId?: string;
+  onResumeInNewSession?: () => void;
+  onOpenBudgetSettings?: () => void;
 };
 
 function extractPathFromToolResult(msg: string): string {
@@ -129,6 +136,11 @@ export function MessageRenderer({
   noBubbleBorder = false,
   onFollowupClick,
   omitSuggestedQuestions = false,
+  budgetExceededActive = false,
+  allMessages = [],
+  sessionId,
+  onResumeInNewSession,
+  onOpenBudgetSettings,
 }: Props) {
   const chatStyle = useAppStore((s) => s.chatStyle);
   if (message.role === "user" || message.role === "assistant") {
@@ -163,12 +175,35 @@ export function MessageRenderer({
         selected={selected}
         onFollowupClick={onFollowupClick}
         omitSuggestedQuestions={omitSuggestedQuestions}
+        budgetIncompleteHint={
+          budgetExceededActive && allMessages.length > 0
+            ? shouldShowBudgetIncompleteHint(message, allMessages, budgetExceededActive)
+            : false
+        }
       />
     );
   }
   if (message.role === "tool") {
     if (isNoisyToolStatusMessage(message)) {
       return null;
+    }
+    if (message.noticeKind === "budget_exceeded" || /Token budget exceeded/i.test(String(message.content ?? ""))) {
+      const current = Number(message.budgetCurrent);
+      const maxAllowed = Number(message.budgetMax);
+      const source = String(message.budgetSource ?? "session").trim() || "session";
+      const parsed =
+        Number.isFinite(current) && Number.isFinite(maxAllowed)
+          ? { source, current, maxAllowed }
+          : parseBudgetExceededFromText(message.content);
+      if (parsed) {
+        return (
+          <BudgetExceededCard
+            info={{ ...parsed, sessionId }}
+            onResumeInNewSession={() => onResumeInNewSession?.()}
+            onOpenSettings={() => onOpenBudgetSettings?.()}
+          />
+        );
+      }
     }
     const contextNotice = parseContextNotice(message);
     if (contextNotice) {
