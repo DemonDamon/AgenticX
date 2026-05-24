@@ -348,8 +348,24 @@ class TestGoalAnchorEdgeCases:
         # Default keeps "5" so existing behavior preserved.
         assert "工具调用累计 >= 5 次" in result["content"]
 
+    def test_tool_result_tokens_trigger_full_mode_and_prepend(self):
+        """M4: high cumulative tool_result tokens force complex anchor + prepend flag."""
+        session = MockStudioSession(current_user_intent="Install skills from repo")
+        with patch.dict(os.environ, {"AGX_ANCHOR_RESTRENGTHEN_THRESHOLD": "1000"}):
+            result = _build_user_goal_anchor(
+                session=session,
+                round_idx=2,
+                max_rounds=10,
+                tools_used_so_far=1,
+                messages_total_chars=1000,
+                tool_result_tokens_session=5000,
+            )
+        assert result is not None
+        assert "执行纪律：" in result["content"]
+        assert getattr(session, "_goal_anchor_prepend", False) is True
+
     def test_function_does_not_mutate_session(self):
-        """_build_user_goal_anchor must be a pure function w.r.t. session state."""
+        """_build_user_goal_anchor must not alter intent or agent_messages."""
         session = MockStudioSession(current_user_intent="Original intent")
         snapshot_intent = session.current_user_intent
         snapshot_msgs = list(session.agent_messages)
