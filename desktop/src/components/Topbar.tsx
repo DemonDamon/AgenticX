@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { Gauge, LogIn, LogOut, Moon, PanelLeftOpen, Settings, Sun, User } from "lucide-react";
 import { useAppStore } from "../store";
+import { formatBackendChipLabel, getBackendScope, getConnectionModeSync } from "../utils/backend-scope";
 
 type Props = {
   sidebarCollapsed: boolean;
@@ -20,6 +21,14 @@ export function Topbar({ sidebarCollapsed, onToggleSidebar }: Props) {
   const userMenuRef = useRef<HTMLDivElement>(null);
 
   const isDarkLike = theme === "dark" || theme === "dim";
+
+  const connectionMode = getConnectionModeSync();
+  const backendScope = getBackendScope();
+  const backendChipLabel = formatBackendChipLabel(backendScope, connectionMode);
+  const backendChipTooltip =
+    connectionMode === "remote"
+      ? `当前连接到远程后端 ${backendScope}。到「设置 → 服务器」可切换。`
+      : "当前使用本机 agx serve。到「设置 → 服务器」可切换远程模式。";
 
   const onThemeToggle = () => {
     // Topbar 快速切换仅在 dark/light 之间切换，dim 仍保留在「设置」里可选
@@ -96,6 +105,18 @@ export function Topbar({ sidebarCollapsed, onToggleSidebar }: Props) {
         >
           <PanelLeftOpen className="h-[18px] w-[18px]" strokeWidth={1.8} />
         </button>
+        <span
+          className="inline-flex max-w-[140px] items-center gap-1.5 rounded-full border border-border bg-surface-card px-2 py-0.5 text-[11px] text-text-subtle"
+          title={backendChipTooltip}
+        >
+          <span
+            className={`h-1.5 w-1.5 shrink-0 rounded-full ${
+              connectionMode === "remote" ? "bg-sky-400" : "bg-emerald-400"
+            }`}
+            aria-hidden
+          />
+          <span className="truncate">{backendChipLabel}</span>
+        </span>
       </div>
       <div className="agx-topbar-right">
         <button
