@@ -1,0 +1,265 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Near</title>
+    <script>
+      (function () {
+        var params = new URLSearchParams(window.location.search);
+        var theme = params.get("theme");
+        if (theme !== "light") theme = "dark";
+        document.documentElement.setAttribute("data-theme", theme);
+      })();
+    </script>
+    <style>
+      :root {
+        color-scheme: dark;
+        --bg: #14141c;
+        --text: rgba(255, 255, 255, 0.92);
+        --text-muted: rgba(255, 255, 255, 0.52);
+        --track: rgba(255, 255, 255, 0.14);
+        --shimmer: rgba(255, 255, 255, 0.88);
+        --cancel-border: rgba(255, 255, 255, 0.18);
+        --cancel-text: rgba(255, 255, 255, 0.72);
+      }
+
+      :root[data-theme="light"] {
+        color-scheme: light;
+        --bg: #ffffff;
+        --text: #111111;
+        --text-muted: rgba(17, 17, 17, 0.52);
+        --track: rgba(17, 17, 17, 0.12);
+        --shimmer: rgba(17, 17, 17, 0.88);
+        --cancel-border: rgba(17, 17, 17, 0.14);
+        --cancel-text: rgba(17, 17, 17, 0.72);
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      html,
+      body {
+        margin: 0;
+        width: 100%;
+        height: 100%;
+        overflow: hidden;
+        background: var(--bg);
+        font-family: "SF Pro Text", "PingFang SC", "Helvetica Neue", sans-serif;
+        -webkit-font-smoothing: antialiased;
+      }
+
+      body {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        opacity: 1;
+        transition: opacity 150ms ease-out;
+      }
+
+      body.fade-out {
+        opacity: 0;
+      }
+
+      .shell {
+        width: 100%;
+        padding: 28px 36px 24px;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 18px;
+        user-select: none;
+        -webkit-user-select: none;
+      }
+
+      .brand {
+        display: flex;
+        align-items: center;
+        gap: 14px;
+      }
+
+      .brand img {
+        width: 52px;
+        height: 52px;
+        border-radius: 12px;
+        object-fit: cover;
+        flex-shrink: 0;
+      }
+
+      .brand-text {
+        display: flex;
+        flex-direction: column;
+        gap: 4px;
+        min-width: 0;
+      }
+
+      .brand-name {
+        font-size: 28px;
+        font-weight: 700;
+        letter-spacing: -0.02em;
+        color: var(--text);
+        line-height: 1.1;
+      }
+
+      .brand-tagline {
+        font-size: 12px;
+        color: var(--text-muted);
+        line-height: 1.3;
+      }
+
+      .progress-wrap {
+        width: 100%;
+        max-width: 280px;
+        display: flex;
+        flex-direction: column;
+        gap: 10px;
+        align-items: center;
+      }
+
+      .progress-track {
+        width: 100%;
+        height: 3px;
+        border-radius: 999px;
+        background: var(--track);
+        overflow: hidden;
+        position: relative;
+      }
+
+      .progress-shimmer {
+        position: absolute;
+        top: 0;
+        left: -40%;
+        width: 40%;
+        height: 100%;
+        border-radius: 999px;
+        background: var(--shimmer);
+        animation: shimmer 1.2s ease-in-out infinite;
+      }
+
+      @keyframes shimmer {
+        0% {
+          transform: translateX(0);
+        }
+        100% {
+          transform: translateX(350%);
+        }
+      }
+
+      .stage-text {
+        font-size: 12px;
+        color: var(--text-muted);
+        min-height: 18px;
+        text-align: center;
+      }
+
+      .escape {
+        display: none;
+        flex-direction: column;
+        align-items: center;
+        gap: 8px;
+        margin-top: 2px;
+      }
+
+      .escape.visible {
+        display: flex;
+      }
+
+      .escape-hint {
+        font-size: 11px;
+        color: var(--text-muted);
+        text-align: center;
+        line-height: 1.45;
+        max-width: 280px;
+      }
+
+      .cancel-btn {
+        appearance: none;
+        border: 1px solid var(--cancel-border);
+        background: transparent;
+        color: var(--cancel-text);
+        font-size: 12px;
+        line-height: 1;
+        padding: 7px 14px;
+        border-radius: 999px;
+        cursor: pointer;
+      }
+
+      .cancel-btn:hover {
+        opacity: 0.85;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="shell">
+      <div class="brand">
+        <img id="logo" alt="Near" />
+        <div class="brand-text">
+          <div class="brand-name">Near</div>
+          <div class="brand-tagline">Near, Always Near.</div>
+        </div>
+      </div>
+
+      <div class="progress-wrap">
+        <div class="progress-track" aria-hidden="true">
+          <div class="progress-shimmer"></div>
+        </div>
+        <div id="stage" class="stage-text">正在初始化…</div>
+      </div>
+
+      <div id="escape" class="escape">
+        <div class="escape-hint">如长时间无响应，可点击取消退出</div>
+        <button id="cancel-btn" type="button" class="cancel-btn">取消</button>
+      </div>
+    </div>
+
+    <script>
+      (function () {
+        var STAGE_LABELS = {
+          initializing: "正在初始化…",
+          "backend-starting": "正在启动本地后端服务…",
+          "backend-waiting": "正在等待后端就绪…",
+          "pinging-remote": "正在连接远程服务器…",
+          "loading-ui": "正在加载界面…",
+          "restoring-session": "正在恢复上次会话…",
+          ready: "准备就绪",
+        };
+
+        var params = new URLSearchParams(window.location.search);
+        var logo = params.get("logo");
+        var logoEl = document.getElementById("logo");
+        if (logo && logoEl) {
+          logoEl.src = logo;
+        }
+
+        var stageEl = document.getElementById("stage");
+        var escapeEl = document.getElementById("escape");
+        var cancelBtn = document.getElementById("cancel-btn");
+
+        function setStage(stage) {
+          var label = STAGE_LABELS[stage] || STAGE_LABELS.initializing;
+          if (stageEl) stageEl.textContent = label;
+          if (stage === "ready") {
+            document.body.classList.add("fade-out");
+          }
+        }
+
+        if (window.nearSplash && window.nearSplash.onStage) {
+          window.nearSplash.onStage(setStage);
+        }
+
+        setTimeout(function () {
+          if (escapeEl) escapeEl.classList.add("visible");
+        }, 25000);
+
+        if (cancelBtn) {
+          cancelBtn.addEventListener("click", function () {
+            if (window.nearSplash && window.nearSplash.requestQuit) {
+              void window.nearSplash.requestQuit();
+            }
+          });
+        }
+      })();
+    </script>
+  </body>
+</html>

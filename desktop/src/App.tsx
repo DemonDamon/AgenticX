@@ -275,6 +275,7 @@ export function App() {
   const denyScopesRef = useRef<Set<string>>(new Set());
   const sessionInitDoneRef = useRef(false);
   const workspaceHydratedRef = useRef(false);
+  const startupRendererReadyRef = useRef(false);
   const [windowResizing, setWindowResizing] = useState(false);
   const [responsiveStage, setResponsiveStage] = useState<0 | 1 | 2>(0);
   const [startupOptimizing, setStartupOptimizing] = useState(true);
@@ -757,6 +758,19 @@ export function App() {
     })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [ensureMcpAutoConnectOnStartup, refreshMcpStatus]);
+
+  useEffect(() => {
+    if (!configLoaded || !workspaceHydratedRef.current) return;
+    const activePane = panes.find((pane) => pane.id === activePaneId);
+    const sid = String(activePane?.sessionId ?? sessionId ?? "").trim();
+    if (!sid) return;
+    if (startupRendererReadyRef.current) return;
+    startupRendererReadyRef.current = true;
+    void window.agenticxDesktop.startupRendererReady().catch((err) => {
+      console.warn("[App init] startupRendererReady failed:", err);
+      startupRendererReadyRef.current = false;
+    });
+  }, [configLoaded, panes, activePaneId, sessionId]);
 
   useEffect(() => {
     if (!workspaceHydratedRef.current) return;
@@ -2006,9 +2020,7 @@ export function App() {
       }`}
     >
       {!configLoaded ? (
-        <div className="flex h-full min-h-0 w-full items-center justify-center text-sm text-text-faint">
-          正在加载配置…
-        </div>
+        <div className="h-full min-h-0 w-full" aria-hidden />
       ) : focusMode && apiBase ? (
         <VoiceFocusMode />
       ) : focusMode ? (
@@ -2050,9 +2062,7 @@ export function App() {
           </div>
         </>
       ) : (
-        <div className="flex flex-1 items-center justify-center text-text-faint">
-          正在连接 AgenticX 服务...
-        </div>
+        <div className="flex-1" aria-hidden />
       )}
 
       <ConfirmDialog

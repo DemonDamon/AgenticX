@@ -33,6 +33,15 @@ import crypto from "node:crypto";
 import http from "node:http";
 import https from "node:https";
 import yaml from "js-yaml";
+import {
+  closeSplash,
+  configureSplashLayoutThemeReader,
+  createSplashWindow,
+  onMainWindowDidFinishLoad,
+  registerSplashIpcHandlers,
+  scheduleSplashForceShowFallback,
+  updateSplashStage,
+} from "./splash";
 
 /** Node fetch honors HTTP_PROXY; localhost cc-bridge POSTs then fail (e.g. 502) and PTY input never reaches Claude. */
 function ccBridgeUrlIsLoopback(urlStr: string): boolean {
@@ -1313,6 +1322,18 @@ function validateTrinityConfigPayload(input: unknown): { ok: true; config: Trini
 }
 
 let mainWindow: BrowserWindow | null = null;
+
+function showMainWindowSafely(): void {
+  if (!mainWindow || mainWindow.isDestroyed()) return;
+  if (mainWindow.isMinimized()) mainWindow.restore();
+  mainWindow.show();
+  mainWindow.focus();
+}
+
+async function revealMainWindowAfterSplash(options?: { fade?: boolean }): Promise<void> {
+  await closeSplash({ fade: options?.fade ?? true });
+  showMainWindowSafely();
+}
 let tray: Tray | null = null;
 const WIN_TITLE_BAR_OVERLAY_HEIGHT = 44;
 type WinTitleBarTheme = "dark" | "light" | "dim";
@@ -2432,6 +2453,8 @@ function createWindow(): void {
   mainWindow.on("resize", scheduleBoundsSave);
   mainWindow.on("maximize", scheduleBoundsSave);
   mainWindow.on("unmaximize", scheduleBoundsSave);
+  updateSplashStage("loading-ui");
+
   const tryOpenExternalBrowser = (targetUrl: string): boolean => {
     if (!shouldOpenInExternalBrowser(targetUrl, appEntryUrl)) return false;
     void shell.openExternal(targetUrl);
@@ -2445,9 +2468,10 @@ function createWindow(): void {
     if (!tryOpenExternalBrowser(url)) return;
     event.preventDefault();
   });
-  mainWindow.once("ready-to-show", () => {
-    mainWindow?.show();
+  mainWindow.webContents.once("did-finish-load", () => {
+    onMainWindowDidFinishLoad();
   });
+  scheduleSplashForceShowFallback(showMainWindowSafely);
   if (app.isPackaged) {
     const indexPath = path.join(__dirname, "..", "dist", "index.html");
     void mainWindow.loadFile(indexPath).catch((err) => {
@@ -2459,7 +2483,7 @@ function createWindow(): void {
           )}`
         )
         .then(() => {
-          mainWindow?.show();
+          void revealMainWindowAfterSplash({ fade: false });
         });
     });
   } else {
@@ -2478,7 +2502,7 @@ function createWindow(): void {
               )}`
             )
             .then(() => {
-              mainWindow?.show();
+              void revealMainWindowAfterSplash({ fade: false });
             })
             .catch(swallow);
         });
@@ -2488,7 +2512,7 @@ function createWindow(): void {
             `<!DOCTYPE html><html><head><meta charset="utf-8"></head><body style="margin:0;height:100vh;display:flex;align-items:center;justify-content:center;font-family:SF Pro Text,PingFang SC,sans-serif;background:#14141c;color:rgba(255,255,255,.7);-webkit-app-region:drag"><div style="text-align:center"><h3 style="margin:0">无法连接到开发服务器</h3><p style="margin-top:.5rem;font-size:.85rem;opacity:.6">请确保已运行 <code>npm run dev</code></p></div></body></html>`
           )}`)
           .then(() => {
-            mainWindow?.show();
+            void revealMainWindowAfterSplash({ fade: false });
           })
           .catch(swallow);
       }
@@ -5713,6 +5737,16 @@ if (!gotTheLock) {
         }
       }
 
+      configureSplashLayoutThemeReader(() => {
+        const theme = loadLayoutData().theme;
+        return theme === "light" ? "light" : "dark";
+      });
+      registerSplashIpcHandlers({
+        showMainWindow: showMainWindowSafely,
+        quitApp: () => app.quit(),
+      });
+      createSplashWindow();
+
       // Register basic IPC handlers immediately so the renderer never hits
       // "No handler registered" errors during the agx serve startup delay.
       registerEarlyIpc();
@@ -5753,6 +5787,7 @@ if (!gotTheLock) {
             const ctxHint = app.isPackaged
               ? "当前为发布版安装包但未内嵌后端，且未检测到 agx 命令。可选："
               : "当前为开发构建，且未检测到 agx 命令。可选：";
+            await closeSplash({ fade: false });
             const { response } = await dialog.showMessageBox({
               type: "warning",
               title: "缺少 agx 命令行工具",
@@ -5780,7 +5815,9 @@ if (!gotTheLock) {
           }
         }
 
+        updateSplashStage("backend-starting");
         await startStudioServe();
+        updateSplashStage("backend-waiting");
         await waitServeReady();
         markStudioReady();
         startFeishuProcess();
@@ -5803,8 +5840,10 @@ if (!gotTheLock) {
       };
 
       if (remoteConfig) {
+        updateSplashStage("pinging-remote");
         let connected = await pingRemoteServer(remoteConfig);
         while (!connected) {
+          await closeSplash({ fade: false });
           const { response } = await dialog.showMessageBox({
             type: "warning",
             title: "无法连接远程服务器",
@@ -5861,6 +5900,7 @@ if (!gotTheLock) {
       startSkillsDirWatcher();
       createTray();
     } catch (error) {
+      await closeSplash({ fade: false });
       await dialog.showErrorBox(
         "Near 启动失败",
         remoteConfig
