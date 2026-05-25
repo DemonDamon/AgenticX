@@ -328,10 +328,17 @@ declare global {
       platform: () => Promise<string>;
       syncTitleBarOverlay: (theme: "dark" | "light" | "dim") => Promise<{ ok: boolean; skipped?: boolean; error?: string }>;
       getConnectionMode: () => Promise<"local" | "remote">;
+      getBackendScopeSync: () => string;
+      getConnectionModeSync: () => "local" | "remote";
+      appRelaunch: () => Promise<{ ok: boolean }>;
       focusModeEnter: () => Promise<{ ok: boolean; alreadyActive?: boolean; error?: string }>;
       focusModeExit: () => Promise<{ ok: boolean; alreadyInactive?: boolean; error?: string }>;
       loadRemoteServer: () => Promise<{ enabled: boolean; url: string; token: string }>;
-      saveRemoteServer: (payload: { enabled: boolean; url: string; token: string }) => Promise<{ ok: boolean; restart_required?: boolean }>;
+      saveRemoteServer: (payload: { enabled: boolean; url: string; token: string }) => Promise<{
+        ok: boolean;
+        restart_required?: boolean;
+        mode_changed?: boolean;
+      }>;
       testRemoteServer: (payload: { url: string; token: string }) => Promise<{ ok: boolean; status?: number; error?: string }>;
       loadGatewayIm: () => Promise<{
         enabled: boolean;

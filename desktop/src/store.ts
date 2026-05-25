@@ -3,6 +3,7 @@ import { create } from "zustand";
 import { isSettingsTab } from "./settings-tab";
 import type { SettingsTab } from "./settings-tab";
 import { clearPaneAwaitingFreshSession } from "./utils/pane-fresh-session";
+import { readScopedLocalStorage, writeScopedLocalStorage } from "./utils/backend-scope";
 import { META_AGENT_DISPLAY_NAME } from "./constants/branding";
 
 export type UiStatus = "idle" | "listening" | "processing";
@@ -672,7 +673,7 @@ function toNonNegativeInt(raw: unknown): number {
 
 function readSessionTokenCache(): SessionTokenCache {
   try {
-    const raw = window.localStorage.getItem(SESSION_TOKEN_CACHE_KEY);
+    const raw = readScopedLocalStorage(SESSION_TOKEN_CACHE_KEY);
     const parsed = raw ? (JSON.parse(raw) as unknown) : {};
     if (!parsed || typeof parsed !== "object") return {};
     const out: SessionTokenCache = {};
@@ -697,7 +698,7 @@ function writeSessionTokenCache(cache: SessionTokenCache): void {
     const trimmed = entries.slice(0, 500);
     const normalized: SessionTokenCache = {};
     for (const [sid, row] of trimmed) normalized[sid] = row;
-    window.localStorage.setItem(SESSION_TOKEN_CACHE_KEY, JSON.stringify(normalized));
+    writeScopedLocalStorage(SESSION_TOKEN_CACHE_KEY, JSON.stringify(normalized));
   } catch {
     // ignore storage errors
   }

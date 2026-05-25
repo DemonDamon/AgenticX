@@ -1,3 +1,5 @@
+import { readScopedLocalStorage, writeScopedLocalStorage } from "./backend-scope";
+
 const AVATAR_LAST_SESSION_STORAGE_KEY = "agx-avatar-last-session-v1";
 
 type AvatarLastSessionMap = Record<string, string>;
@@ -9,7 +11,7 @@ function avatarSessionMapKey(avatarId?: string | null): string {
 
 function readAvatarLastSessionMap(): AvatarLastSessionMap {
   try {
-    const raw = window.localStorage.getItem(AVATAR_LAST_SESSION_STORAGE_KEY);
+    const raw = readScopedLocalStorage(AVATAR_LAST_SESSION_STORAGE_KEY);
     if (!raw) return {};
     const parsed = JSON.parse(raw) as unknown;
     if (!parsed || typeof parsed !== "object") return {};
@@ -27,11 +29,7 @@ function readAvatarLastSessionMap(): AvatarLastSessionMap {
 }
 
 function writeAvatarLastSessionMap(data: AvatarLastSessionMap): void {
-  try {
-    window.localStorage.setItem(AVATAR_LAST_SESSION_STORAGE_KEY, JSON.stringify(data));
-  } catch {
-    // ignore storage failures
-  }
+  writeScopedLocalStorage(AVATAR_LAST_SESSION_STORAGE_KEY, JSON.stringify(data));
 }
 
 export function getRememberedSessionForAvatar(avatarId?: string | null): string | null {

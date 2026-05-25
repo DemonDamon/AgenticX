@@ -82,7 +82,36 @@ import {
   saveSettingsPanelSize,
   type SettingsPanelSize,
 } from "../utils/settings-panel-size";
+import {
+  formatBackendChipLabel,
+  getBackendScope,
+  getConnectionModeSync,
+  readScopedLocalStorage,
+  writeScopedLocalStorage,
+} from "../utils/backend-scope";
 export type { SettingsTab } from "../settings-tab";
+
+const MCP_MARKETPLACE_ID_MAP_KEY = "agenticx:mcp:marketplaceIdToNames";
+
+function RemoteBackendHintBanner() {
+  const mode = getConnectionModeSync();
+  if (mode !== "remote") return null;
+  const host = getBackendScope();
+  const hostLabel = formatBackendChipLabel(host, "remote");
+  return (
+    <div className="rounded-md border border-border bg-surface-card px-3 py-2.5 text-xs leading-relaxed text-text-subtle">
+      <p>
+        当前为<strong className="text-text-muted">远程模式</strong>，本页修改写入本机{" "}
+        <code className="text-[10px] text-text-muted">~/.agenticx/config.yaml</code>，但模型调用与 MCP
+        服务在远端 <strong className="text-text-muted">{hostLabel}</strong> 上加载。
+      </p>
+      <p className="mt-1.5 text-text-faint">
+        如需修改远端配置，请直接编辑远端 <code className="text-[10px]">~/.agenticx/config.yaml</code>
+        （远程配置同步能力规划中）。
+      </p>
+    </div>
+  );
+}
 
 export type FavoriteForwardContext = {
   sourceSessionId: string;
@@ -5013,7 +5042,7 @@ export function SettingsPanel({
   } | null>(null);
   const [mcpMarketplaceIdToNames, setMcpMarketplaceIdToNames] = useState<Record<string, string[]>>(() => {
     try {
-      const raw = window.localStorage.getItem("agenticx:mcp:marketplaceIdToNames");
+      const raw = readScopedLocalStorage(MCP_MARKETPLACE_ID_MAP_KEY);
       if (!raw) return {};
       const parsed = JSON.parse(raw);
       if (parsed && typeof parsed === "object") {
@@ -5628,7 +5657,7 @@ export function SettingsPanel({
       normalized[name] = { ...entry, baseUrl: normalizeBaseUrl(entry.baseUrl) };
     }
     await onSave({ defaultProvider: defProv, providers: normalized });
-    await window.agenticxDesktop.saveRemoteServer({
+    const remoteSave = await window.agenticxDesktop.saveRemoteServer({
       enabled: serverMode === "remote",
       url: serverUrl.trim().replace(/\/+$/, ""),
       token: serverToken.trim(),
@@ -5645,6 +5674,26 @@ export function SettingsPanel({
       appId: feishuAppId.trim(),
       appSecret: feishuAppSecret.trim(),
     });
+    if (remoteSave.mode_changed) {
+      const restartDlg = await window.agenticxDesktop.confirmDialog({
+        title: "需要重启 Near",
+        message: "连接模式已切换，需要重启 Near 以加载新后端工作区。",
+        detail:
+          "会话、窗格、分身与 MCP 状态将按新后端隔离，不会与上一套后端混用。",
+        confirmText: "立即重启",
+        cancelText: "稍后手动重启",
+      });
+      if (restartDlg.confirmed) {
+        await window.agenticxDesktop.appRelaunch();
+        return;
+      }
+      await window.agenticxDesktop.confirmDialog({
+        title: "请稍后重启",
+        message: "重启后连接模式切换才会生效。",
+        confirmText: "知道了",
+      });
+      return;
+    }
     onClose();
   };
 
@@ -5954,14 +6003,7 @@ export function SettingsPanel({
   }, [mcpMarketplaceStatus]);
 
   useEffect(() => {
-    try {
-      window.localStorage.setItem(
-        "agenticx:mcp:marketplaceIdToNames",
-        JSON.stringify(mcpMarketplaceIdToNames),
-      );
-    } catch {
-      // ignore quota errors
-    }
+    writeScopedLocalStorage(MCP_MARKETPLACE_ID_MAP_KEY, JSON.stringify(mcpMarketplaceIdToNames));
   }, [mcpMarketplaceIdToNames]);
 
   useEffect(() => {
@@ -6510,6 +6552,8 @@ export function SettingsPanel({
 
             {/* === PROVIDER TAB === */}
             {tab === "provider" && (
+              <div className="flex flex-col gap-3">
+                <RemoteBackendHintBanner />
               <div className="flex gap-3">
                 {/* Provider sub-list */}
                 <div className="flex w-[140px] shrink-0 flex-col rounded-md border border-border bg-surface-card">
@@ -7087,12 +7131,14 @@ export function SettingsPanel({
                       </Modal>
                 </div>
               </div>
+              </div>
             )}
 
             {/* === MCP TAB === */}
             {tab === "mcp" && (() => {
               return (
               <div className="space-y-5">
+                <RemoteBackendHintBanner />
                 <div className="space-y-1">
                   <div className="text-sm text-text-subtle">
                     MCP（模型上下文协议）服务为 Agent 扩展外部工具 — 文件系统、数据库、网页搜索等。
@@ -7428,6 +7474,7 @@ export function SettingsPanel({
             {/* === SKILLS TAB === */}
             {tab === "skills" && (
               <div className="space-y-4">
+                <RemoteBackendHintBanner />
                 <SkillsTab />
                 <SkillAdvancedPanel />
               </div>

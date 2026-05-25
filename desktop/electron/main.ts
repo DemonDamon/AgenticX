@@ -1387,6 +1387,30 @@ function loadRemoteConfig(): ResolvedRemoteConfig | null {
   return { url, token: (rs.token || "").trim() };
 }
 
+/** Stable localStorage namespace key for renderer (host:port, lowercased). */
+function backendScopeFromRemoteConfig(cfg: ResolvedRemoteConfig | null): string {
+  if (!cfg) return "local";
+  const url = cfg.url.trim().replace(/\/+$/, "");
+  if (!url) return "local";
+  try {
+    const withProto = /^[a-zA-Z][a-zA-Z0-9+.-]*:/.test(url) ? url : `http://${url}`;
+    const u = new URL(withProto);
+    const host = u.hostname.toLowerCase();
+    const port = u.port || (u.protocol === "https:" ? "443" : "80");
+    return `${host}:${port}`;
+  } catch {
+    return url.toLowerCase();
+  }
+}
+
+function getInjectedConnectionMode(): "local" | "remote" {
+  return remoteConfig ? "remote" : "local";
+}
+
+function getInjectedBackendScope(): string {
+  return backendScopeFromRemoteConfig(remoteConfig);
+}
+
 async function pingRemoteServer(config: ResolvedRemoteConfig, timeoutMs = 10000): Promise<boolean> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
@@ -2318,7 +2342,11 @@ function createWindow(): void {
     backgroundColor: mainWindowBackgroundColor,
     roundedCorners: true,
     webPreferences: {
-      preload: path.join(__dirname, "preload.js")
+      preload: path.join(__dirname, "preload.js"),
+      additionalArguments: [
+        `--agx-backend-scope=${encodeURIComponent(getInjectedBackendScope())}`,
+        `--agx-connection-mode=${getInjectedConnectionMode()}`,
+      ],
     }
   });
   if (savedBounds.isMaximized) {
@@ -2467,7 +2495,9 @@ function registerEarlyIpc(): void {
   ipcMain.handle("get-api-base", async () => getStudioUrl());
   ipcMain.handle("get-api-auth-token", async () => getStudioToken());
   ipcMain.handle("get-platform", async () => process.platform);
-  ipcMain.handle("get-connection-mode", async () => remoteConfig ? "remote" : "local");
+  ipcMain.handle("get-connection-mode", async () => getInjectedConnectionMode());
+  ipcMain.handle("get-backend-scope-sync", async () => getInjectedBackendScope());
+  ipcMain.handle("get-connection-mode-sync", async () => getInjectedConnectionMode());
   ipcMain.handle("sync-title-bar-overlay", async (_event, theme: unknown) => {
     if (process.platform !== "win32") return { ok: true, skipped: true };
     const mode: WinTitleBarTheme =
@@ -2739,13 +2769,25 @@ function registerIpc(): void {
     token: string;
   }) => {
     const cfg = loadAgxConfig();
+    const prev = cfg.remote_server ?? {};
+    const prevEnabled = Boolean(prev.enabled);
+    const prevUrl = String(prev.url ?? "").trim().replace(/\/+$/, "");
+    const nextEnabled = Boolean(payload.enabled);
+    const nextUrl = String(payload.url || "").trim().replace(/\/+$/, "");
+    const modeChanged = prevEnabled !== nextEnabled || (nextEnabled && prevUrl !== nextUrl);
     cfg.remote_server = {
-      enabled: payload.enabled,
-      url: (payload.url || "").trim().replace(/\/+$/, ""),
+      enabled: nextEnabled,
+      url: nextUrl,
       token: (payload.token || "").trim(),
     };
     saveAgxConfig(cfg);
-    return { ok: true, restart_required: true };
+    return { ok: true, restart_required: true, mode_changed: modeChanged };
+  });
+
+  ipcMain.handle("app-relaunch", async () => {
+    app.relaunch();
+    app.exit(0);
+    return { ok: true };
   });
 
   ipcMain.handle("test-remote-server", async (_event, payload: {

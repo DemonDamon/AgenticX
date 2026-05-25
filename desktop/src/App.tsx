@@ -17,6 +17,7 @@ import { stopSpeak } from "./voice/tts";
 import { matchKeybinding } from "./core/keybinding-manager";
 import { META_AGENT_DISPLAY_NAME } from "./constants/branding";
 import { resolveMetaDisplayName } from "./utils/display-name";
+import { readScopedLocalStorage, writeScopedLocalStorage } from "./utils/backend-scope";
 
 const WORKSPACE_STATE_STORAGE_KEY = "agx-workspace-state-v1";
 
@@ -523,7 +524,7 @@ export function App() {
 
       let recovered = false;
       try {
-        const raw = window.localStorage.getItem(WORKSPACE_STATE_STORAGE_KEY);
+        const raw = readScopedLocalStorage(WORKSPACE_STATE_STORAGE_KEY);
         const parsed = raw ? JSON.parse(raw) : null;
         const saved = normalizePersistedWorkspaceState(parsed);
         const sessionsCache = new Map<string, SessionListItem[]>();
@@ -782,7 +783,7 @@ export function App() {
       })),
     };
     try {
-      window.localStorage.setItem(WORKSPACE_STATE_STORAGE_KEY, JSON.stringify(snapshot));
+      writeScopedLocalStorage(WORKSPACE_STATE_STORAGE_KEY, JSON.stringify(snapshot));
     } catch {
       // ignore storage failures
     }

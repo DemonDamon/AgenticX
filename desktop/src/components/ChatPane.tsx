@@ -129,6 +129,9 @@ import {
   type PaneSessionMode,
 } from "../utils/pane-fresh-session";
 import { getRememberedSessionForAvatar } from "../utils/avatar-last-session";
+import { readScopedLocalStorage, writeScopedLocalStorage } from "../utils/backend-scope";
+
+const SESSION_UNATTENDED_STORAGE_KEY = "agx-session-unattended-v1";
 
 /** Shown in the user bubble and sent as user_input when sending attachments without typed text (API min_length=1). */
 const ATTACHMENT_ONLY_USER_PROMPT = "（见附件，请结合附件回答。）";
@@ -3898,7 +3901,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
       return;
     }
     try {
-      const raw = localStorage.getItem("agx-session-unattended-v1");
+      const raw = readScopedLocalStorage(SESSION_UNATTENDED_STORAGE_KEY);
       const map = raw ? (JSON.parse(raw) as Record<string, boolean>) : {};
       const enabled = Boolean(map[sid]);
       setSessionUnattended(enabled);
@@ -3926,11 +3929,11 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
         headers: { "Content-Type": "application/json", "x-agx-desktop-token": apiToken },
         body: JSON.stringify({ enabled: next }),
       });
-      const raw = localStorage.getItem("agx-session-unattended-v1");
+      const raw = readScopedLocalStorage(SESSION_UNATTENDED_STORAGE_KEY);
       const map = raw ? (JSON.parse(raw) as Record<string, boolean>) : {};
       if (next) map[sid] = true;
       else delete map[sid];
-      localStorage.setItem("agx-session-unattended-v1", JSON.stringify(map));
+      writeScopedLocalStorage(SESSION_UNATTENDED_STORAGE_KEY, JSON.stringify(map));
       setSessionUnattended(next);
     } catch {
       setStallHintToast("无人值守开关保存失败");
