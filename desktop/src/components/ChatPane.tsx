@@ -6965,6 +6965,41 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
               onBlur={() => {
                 imeComposingRef.current = false;
               }}
+              onDragOver={(e) => {
+                if (e.dataTransfer?.types?.includes("Files")) {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  try {
+                    e.dataTransfer.dropEffect = "copy";
+                  } catch {}
+                }
+              }}
+              onDragEnter={(e) => {
+                if (e.dataTransfer?.types?.includes("Files")) {
+                  e.preventDefault();
+                  e.stopPropagation();
+                }
+              }}
+              onDrop={(e) => {
+                const dt = e.dataTransfer;
+                if (!dt) return;
+                const files = dt.files ? Array.from(dt.files) : [];
+                if (files.length === 0) return;
+                e.preventDefault();
+                e.stopPropagation();
+                let showedVisionToast = false;
+                for (const file of files) {
+                  if (isImageFile(file) && isKnownNonVisionChatModel(chatProvider, chatModel)) {
+                    if (!showedVisionToast) {
+                      setAttachToastOpen(true);
+                      showedVisionToast = true;
+                    }
+                    continue;
+                  }
+                  const key = `${file.name}:${file.size}:${file.lastModified}`;
+                  parseLocalFile(file, key);
+                }
+              }}
               onPaste={(e) => {
                 const dt = e.clipboardData;
                 const raw = extractClipboardImageFiles(dt);
