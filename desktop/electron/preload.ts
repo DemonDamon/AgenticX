@@ -1,5 +1,22 @@
 import { contextBridge, ipcRenderer } from "electron";
 
+function parseArgvFlag(prefix: string, fallback: string): string {
+  for (const arg of process.argv) {
+    if (arg.startsWith(prefix)) {
+      try {
+        return decodeURIComponent(arg.slice(prefix.length));
+      } catch {
+        return arg.slice(prefix.length);
+      }
+    }
+  }
+  return fallback;
+}
+
+const injectedBackendScope = parseArgvFlag("--agx-backend-scope=", "local");
+const injectedConnectionMode =
+  parseArgvFlag("--agx-connection-mode=", "local") === "remote" ? "remote" : "local";
+
 async function desktopApiFetch<T>(path: string, init?: RequestInit): Promise<T> {
   try {
     const base = (await ipcRenderer.invoke("get-api-base")) as string;
@@ -29,6 +46,9 @@ contextBridge.exposeInMainWorld("agenticxDesktop", {
   syncTitleBarOverlay: async (theme: "dark" | "light" | "dim") =>
     ipcRenderer.invoke("sync-title-bar-overlay", theme) as Promise<{ ok: boolean; skipped?: boolean; error?: string }>,
   getConnectionMode: async (): Promise<"local" | "remote"> => ipcRenderer.invoke("get-connection-mode"),
+  getBackendScopeSync: (): string => injectedBackendScope,
+  getConnectionModeSync: (): "local" | "remote" => injectedConnectionMode,
+  appRelaunch: async (): Promise<{ ok: boolean }> => ipcRenderer.invoke("app-relaunch"),
   focusModeEnter: async (): Promise<{ ok: boolean; alreadyActive?: boolean; error?: string }> =>
     ipcRenderer.invoke("focus-mode-enter"),
   focusModeExit: async (): Promise<{ ok: boolean; alreadyInactive?: boolean; error?: string }> =>
