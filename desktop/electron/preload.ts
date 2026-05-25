@@ -586,4 +586,6 @@ contextBridge.exposeInMainWorld("agenticxDesktop", {
     ipcRenderer.on("agx-account-login-timeout", handler);
     return () => ipcRenderer.removeListener("agx-account-login-timeout", handler);
   },
+  startupRendererReady: async (): Promise<{ ok: boolean; duplicate?: boolean }> =>
+    ipcRenderer.invoke("startup:renderer-ready") as Promise<{ ok: boolean; duplicate?: boolean }>,
 });

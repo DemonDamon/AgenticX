@@ -590,6 +590,7 @@ declare global {
       }>;
       onAgxAccountChanged: (cb: (payload: { email: string; displayName: string }) => void) => () => void;
       onAgxAccountLoginTimeout: (cb: () => void) => () => void;
+      startupRendererReady: () => Promise<{ ok: boolean; duplicate?: boolean }>;
       loadMetaSoul: () => Promise<{ ok: boolean; content: string; error?: string }>;
       saveMetaSoul: (payload: { content: string }) => Promise<{ ok: boolean; error?: string }>;
       loadAvatarSoul: (payload: { avatarId: string }) => Promise<{ ok: boolean; content: string; error?: string }>;
