@@ -1411,6 +1411,11 @@ function getInjectedBackendScope(): string {
   return backendScopeFromRemoteConfig(remoteConfig);
 }
 
+function notifyRendererConnectionModeChanged(): void {
+  if (!mainWindow || mainWindow.isDestroyed()) return;
+  mainWindow.webContents.send("agx-connection-mode-changed");
+}
+
 async function pingRemoteServer(config: ResolvedRemoteConfig, timeoutMs = 10000): Promise<boolean> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
@@ -2458,6 +2463,10 @@ function createWindow(): void {
         });
     });
   } else {
+    const swallow = (_err: unknown) => {
+      // Window may be destroyed mid-load when user picks "退出" from the
+      // startup dialog; ignore those rejections rather than crashing.
+    };
     void mainWindow.loadURL(devUrl).catch(() => {
       const distFallback = path.join(__dirname, "..", "dist", "index.html");
       if (fs.existsSync(distFallback)) {
@@ -2470,14 +2479,18 @@ function createWindow(): void {
             )
             .then(() => {
               mainWindow?.show();
-            });
+            })
+            .catch(swallow);
         });
       } else {
-        void mainWindow?.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(
-          `<!DOCTYPE html><html><head><meta charset="utf-8"></head><body style="margin:0;height:100vh;display:flex;align-items:center;justify-content:center;font-family:SF Pro Text,PingFang SC,sans-serif;background:#14141c;color:rgba(255,255,255,.7);-webkit-app-region:drag"><div style="text-align:center"><h3 style="margin:0">无法连接到开发服务器</h3><p style="margin-top:.5rem;font-size:.85rem;opacity:.6">请确保已运行 <code>npm run dev</code></p></div></body></html>`
-        )}`).then(() => {
-          mainWindow?.show();
-        });
+        void mainWindow
+          ?.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(
+            `<!DOCTYPE html><html><head><meta charset="utf-8"></head><body style="margin:0;height:100vh;display:flex;align-items:center;justify-content:center;font-family:SF Pro Text,PingFang SC,sans-serif;background:#14141c;color:rgba(255,255,255,.7);-webkit-app-region:drag"><div style="text-align:center"><h3 style="margin:0">无法连接到开发服务器</h3><p style="margin-top:.5rem;font-size:.85rem;opacity:.6">请确保已运行 <code>npm run dev</code></p></div></body></html>`
+          )}`)
+          .then(() => {
+            mainWindow?.show();
+          })
+          .catch(swallow);
       }
     });
   }
@@ -2541,6 +2554,12 @@ function registerEarlyIpc(): void {
   ipcMain.handle("get-connection-mode", async () => getInjectedConnectionMode());
   ipcMain.handle("get-backend-scope-sync", async () => getInjectedBackendScope());
   ipcMain.handle("get-connection-mode-sync", async () => getInjectedConnectionMode());
+  ipcMain.on("agx-query-backend-scope", (event) => {
+    event.returnValue = getInjectedBackendScope();
+  });
+  ipcMain.on("agx-query-connection-mode", (event) => {
+    event.returnValue = getInjectedConnectionMode();
+  });
   ipcMain.handle("sync-title-bar-overlay", async (_event, theme: unknown) => {
     if (process.platform !== "win32") return { ok: true, skipped: true };
     const mode: WinTitleBarTheme =
@@ -5725,39 +5744,7 @@ if (!gotTheLock) {
       // only created inside startStudioServe / waitServeReady.
       registerIpc();
 
-      if (remoteConfig) {
-        const ok = await pingRemoteServer(remoteConfig);
-        if (ok) {
-          markStudioReady();
-        } else {
-          const { response } = await dialog.showMessageBox({
-            type: "warning",
-            title: "无法连接远程服务器",
-            message: `无法连接到 ${remoteConfig.url}`,
-            detail: [
-              "请检查：",
-              "1. 云主机上 agx serve 是否已启动",
-              "2. URL 和端口是否正确",
-              "3. 防火墙是否放行",
-              "4. Token 是否匹配",
-            ].join("\n"),
-            buttons: ["重试", "退出"],
-            defaultId: 0,
-            cancelId: 1,
-          });
-          if (response === 0) {
-            const retryOk = await pingRemoteServer(remoteConfig);
-            if (!retryOk) {
-              app.quit();
-              return;
-            }
-            markStudioReady();
-          } else {
-            app.quit();
-            return;
-          }
-        }
-      } else {
+      const startLocalBackendFlow = async (): Promise<boolean> => {
         const bundledPath = resolveBundledBackend();
         if (!bundledPath) {
           const agxOk = await checkAgxCli();
@@ -5789,7 +5776,7 @@ if (!gotTheLock) {
               void shell.openExternal(installDocsUrl);
             }
             app.quit();
-            return;
+            return false;
           }
         }
 
@@ -5798,6 +5785,66 @@ if (!gotTheLock) {
         markStudioReady();
         startFeishuProcess();
         void startWechatSidecar();
+        return true;
+      };
+
+      // Persist `remote_server.enabled = false` so subsequent launches stay
+      // on local mode after the user falls back from an unreachable remote.
+      const disableRemoteInConfig = (): void => {
+        try {
+          const cfg = loadAgxConfig();
+          if (cfg.remote_server) {
+            cfg.remote_server = { ...cfg.remote_server, enabled: false };
+            saveAgxConfig(cfg);
+          }
+        } catch (err) {
+          console.warn("[main] failed to disable remote_server in config:", err);
+        }
+      };
+
+      if (remoteConfig) {
+        let connected = await pingRemoteServer(remoteConfig);
+        while (!connected) {
+          const { response } = await dialog.showMessageBox({
+            type: "warning",
+            title: "无法连接远程服务器",
+            message: `无法连接到 ${remoteConfig.url}`,
+            detail: [
+              "你之前配置了远程后端（公司/云服务器），现在似乎不可达。",
+              "",
+              "请检查：",
+              "1. 云主机上 agx serve 是否已启动",
+              "2. URL 和端口是否正确（是否需要在内网/VPN 环境）",
+              "3. 防火墙是否放行",
+              "4. Token 是否匹配",
+              "",
+              "或者切换回本地模式：使用本机内嵌/本地安装的 agx serve 启动。",
+            ].join("\n"),
+            buttons: ["重试", "切换到本地模式", "退出"],
+            defaultId: 0,
+            cancelId: 2,
+          });
+          if (response === 0) {
+            connected = await pingRemoteServer(remoteConfig);
+            continue;
+          }
+          if (response === 1) {
+            disableRemoteInConfig();
+            remoteConfig = null;
+            notifyRendererConnectionModeChanged();
+            const ok = await startLocalBackendFlow();
+            if (!ok) return;
+            break;
+          }
+          app.quit();
+          return;
+        }
+        if (remoteConfig && connected) {
+          markStudioReady();
+        }
+      } else {
+        const ok = await startLocalBackendFlow();
+        if (!ok) return;
       }
 
       // registerIpc() was moved above the backend-await block so the
@@ -5825,6 +5872,9 @@ if (!gotTheLock) {
   });
 
   app.on("activate", () => {
+    // Avoid creating the window before backend mode is resolved — otherwise
+    // preload argv bakes in stale remote scope until a full reload.
+    if (!studioReady) return;
     if (!mainWindow) {
       createWindow();
       return;

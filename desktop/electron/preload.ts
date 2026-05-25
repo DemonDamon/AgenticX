@@ -17,6 +17,27 @@ const injectedBackendScope = parseArgvFlag("--agx-backend-scope=", "local");
 const injectedConnectionMode =
   parseArgvFlag("--agx-connection-mode=", "local") === "remote" ? "remote" : "local";
 
+/** Live query from main process (argv injection can be stale if window opened early). */
+function queryBackendScopeSync(): string {
+  try {
+    const v = ipcRenderer.sendSync("agx-query-backend-scope") as unknown;
+    if (typeof v === "string" && v.trim()) return v.trim();
+  } catch {
+    // fall through
+  }
+  return injectedBackendScope;
+}
+
+function queryConnectionModeSync(): "local" | "remote" {
+  try {
+    const v = ipcRenderer.sendSync("agx-query-connection-mode") as unknown;
+    if (v === "remote" || v === "local") return v;
+  } catch {
+    // fall through
+  }
+  return injectedConnectionMode;
+}
+
 async function desktopApiFetch<T>(path: string, init?: RequestInit): Promise<T> {
   try {
     const base = (await ipcRenderer.invoke("get-api-base")) as string;
@@ -46,8 +67,13 @@ contextBridge.exposeInMainWorld("agenticxDesktop", {
   syncTitleBarOverlay: async (theme: "dark" | "light" | "dim") =>
     ipcRenderer.invoke("sync-title-bar-overlay", theme) as Promise<{ ok: boolean; skipped?: boolean; error?: string }>,
   getConnectionMode: async (): Promise<"local" | "remote"> => ipcRenderer.invoke("get-connection-mode"),
-  getBackendScopeSync: (): string => injectedBackendScope,
-  getConnectionModeSync: (): "local" | "remote" => injectedConnectionMode,
+  getBackendScopeSync: (): string => queryBackendScopeSync(),
+  getConnectionModeSync: (): "local" | "remote" => queryConnectionModeSync(),
+  onConnectionModeChanged: (callback: () => void): (() => void) => {
+    const handler = () => callback();
+    ipcRenderer.on("agx-connection-mode-changed", handler);
+    return () => ipcRenderer.removeListener("agx-connection-mode-changed", handler);
+  },
   appRelaunch: async (): Promise<{ ok: boolean }> => ipcRenderer.invoke("app-relaunch"),
   focusModeEnter: async (): Promise<{ ok: boolean; alreadyActive?: boolean; error?: string }> =>
     ipcRenderer.invoke("focus-mode-enter"),
