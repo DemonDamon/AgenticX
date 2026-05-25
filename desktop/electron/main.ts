@@ -1435,6 +1435,49 @@ function getStudioToken(): string {
   return remoteConfig ? remoteConfig.token : apiToken;
 }
 
+function isRemoteMode(): boolean {
+  return Boolean(remoteConfig);
+}
+
+/**
+ * Fetch JSON from the studio backend (local or remote depending on mode) with
+ * the Desktop auth token attached. Used by remote-mode provider IPC bridges.
+ */
+async function studioFetchJson(
+  path: string,
+  init?: { method?: string; body?: unknown },
+): Promise<{ ok: boolean; status: number; data?: any; error?: string }> {
+  const url = `${getStudioUrl()}${path}`;
+  const headers: Record<string, string> = {
+    "x-agx-desktop-token": getStudioToken(),
+  };
+  let body: BodyInit | undefined;
+  if (init?.body !== undefined) {
+    headers["Content-Type"] = "application/json";
+    body = JSON.stringify(init.body);
+  }
+  try {
+    const resp = await fetch(url, { method: init?.method ?? "GET", headers, body });
+    let data: any = undefined;
+    try {
+      data = await resp.json();
+    } catch {
+      // ignore body decode errors
+    }
+    if (!resp.ok) {
+      return {
+        ok: false,
+        status: resp.status,
+        data,
+        error: `HTTP ${resp.status}${data?.detail ? `: ${data.detail}` : ""}`,
+      };
+    }
+    return { ok: true, status: resp.status, data };
+  } catch (err) {
+    return { ok: false, status: 0, error: String(err) };
+  }
+}
+
 // ── Studio readiness barrier ─────────────────────────────────────
 // Background:
 // On macOS `app.on("activate")` may fire while we are still inside
@@ -2696,14 +2739,37 @@ function registerEarlyIpc(): void {
       saveAgxConfig(cfg);
     }
     const acct = cfg.agx_account;
+    // Provider/active model fields: in remote mode, read from the connected
+    // backend so the UI reflects the actually-used config (the local file is
+    // not what the remote model loader sees). Other fields — userMode,
+    // onboarding, agxAccount — remain Desktop-local concerns.
+    let defaultProvider = cfg.default_provider ?? "";
+    let providers: Record<string, ProviderConfig> = cfg.providers ?? {};
+    let activeProvider = cfg.active_provider ?? "";
+    let activeModel = cfg.active_model ?? "";
+    if (isRemoteMode()) {
+      try {
+        await waitForStudio();
+      } catch {
+        // best-effort
+      }
+      const r = await studioFetchJson("/api/config/providers");
+      if (r.ok && r.data && r.data.ok !== false) {
+        defaultProvider = String(r.data.defaultProvider ?? "");
+        const p = r.data.providers;
+        providers = p && typeof p === "object" ? (p as Record<string, ProviderConfig>) : {};
+        activeProvider = String(r.data.activeProvider ?? "");
+        activeModel = String(r.data.activeModel ?? "");
+      }
+    }
     return {
-      defaultProvider: cfg.default_provider ?? "",
-      providers: cfg.providers ?? {},
+      defaultProvider,
+      providers,
       userMode: cfg.user_mode ?? "pro",
       onboardingCompleted: true,
       confirmStrategy: cfg.confirm_strategy ?? "semi-auto",
-      activeProvider: cfg.active_provider ?? "",
-      activeModel: cfg.active_model ?? "",
+      activeProvider,
+      activeModel,
       agxAccount: {
         loggedIn: Boolean(acct?.access_token),
         email: acct?.user_email ?? "",
@@ -4915,6 +4981,13 @@ function registerIpc(): void {
     displayName?: string;
     interface?: "openai";
   }) => {
+    if (isRemoteMode()) {
+      const r = await studioFetchJson(
+        `/api/config/providers/${encodeURIComponent(payload.name)}`,
+        { method: "PUT", body: payload },
+      );
+      return r.ok ? { ok: true } : { ok: false, error: r.error || "remote save-provider failed" };
+    }
     const cfg = loadAgxConfig();
     if (!cfg.providers) cfg.providers = {};
     const prev = cfg.providers[payload.name] ?? {};
@@ -4949,6 +5022,13 @@ function registerIpc(): void {
   });
 
   ipcMain.handle("set-default-provider", async (_event, name: string) => {
+    if (isRemoteMode()) {
+      const r = await studioFetchJson("/api/config/default-provider", {
+        method: "PUT",
+        body: { name },
+      });
+      return r.ok ? { ok: true } : { ok: false, error: r.error || "remote set-default failed" };
+    }
     const cfg = loadAgxConfig();
     cfg.default_provider = name;
     saveAgxConfig(cfg);
@@ -4956,6 +5036,13 @@ function registerIpc(): void {
   });
 
   ipcMain.handle("delete-provider", async (_event, name: string) => {
+    if (isRemoteMode()) {
+      const r = await studioFetchJson(
+        `/api/config/providers/${encodeURIComponent(name)}`,
+        { method: "DELETE" },
+      );
+      return r.ok ? { ok: true } : { ok: false, error: r.error || "remote delete-provider failed" };
+    }
     const cfg = loadAgxConfig();
     if (cfg.providers) delete cfg.providers[name];
     if (cfg.default_provider === name) cfg.default_provider = Object.keys(cfg.providers ?? {})[0] ?? "";
@@ -5071,6 +5158,29 @@ function registerIpc(): void {
 
   // Legacy compatibility
   ipcMain.handle("save-config", async (_event, payload: { provider?: string; model?: string; apiKey?: string; activeProvider?: string; activeModel?: string }) => {
+    if (isRemoteMode()) {
+      const name = (payload.provider || "").trim();
+      if (name && (payload.apiKey || payload.model)) {
+        await studioFetchJson(`/api/config/providers/${encodeURIComponent(name)}`, {
+          method: "PUT",
+          body: {
+            apiKey: payload.apiKey,
+            model: payload.model,
+          },
+        });
+        await studioFetchJson("/api/config/default-provider", {
+          method: "PUT",
+          body: { name },
+        });
+      }
+      if (payload.activeProvider || payload.activeModel) {
+        await studioFetchJson("/api/config/active-model", {
+          method: "PUT",
+          body: { provider: payload.activeProvider, model: payload.activeModel },
+        });
+      }
+      return { ok: true, path: "remote" };
+    }
     const cfg = loadAgxConfig();
     const name = payload.provider || cfg.default_provider || "openai";
     if (!cfg.providers) cfg.providers = {};
