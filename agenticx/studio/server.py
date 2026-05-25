@@ -4913,6 +4913,159 @@ def create_studio_app() -> FastAPI:
             logger.warning("put_permissions error: %s", exc)
             raise HTTPException(status_code=500, detail=str(exc)) from exc
 
+    # --- Provider config (Desktop remote-mode source of truth) ---
+
+    @app.get("/api/config/providers")
+    async def get_config_providers(
+        x_agx_desktop_token: str | None = Header(default=None),
+    ) -> dict:
+        """Return provider configuration (providers map + default/active selections).
+
+        Mirrors the shape that Desktop's local ``load-config`` IPC returns for the
+        provider-related fields, so the renderer can transparently swap between
+        local YAML reads and remote API reads in remote mode.
+        """
+        _check_token(x_agx_desktop_token)
+        try:
+            from agenticx.cli.config_manager import ConfigManager
+
+            providers_raw = ConfigManager.get_value("providers") or {}
+            providers: dict[str, Any] = {}
+            if isinstance(providers_raw, dict):
+                for name, entry in providers_raw.items():
+                    if not isinstance(entry, dict):
+                        continue
+                    providers[str(name)] = dict(entry)
+            return {
+                "ok": True,
+                "defaultProvider": str(ConfigManager.get_value("default_provider") or ""),
+                "providers": providers,
+                "activeProvider": str(ConfigManager.get_value("active_provider") or ""),
+                "activeModel": str(ConfigManager.get_value("active_model") or ""),
+            }
+        except Exception as exc:
+            logger.warning("get_config_providers error: %s", exc)
+            return {"ok": False, "providers": {}, "error": str(exc)}
+
+    @app.put("/api/config/providers/{name}")
+    async def put_config_provider(
+        name: str,
+        payload: dict,
+        x_agx_desktop_token: str | None = Header(default=None),
+    ) -> dict:
+        """Upsert a single provider entry by name.
+
+        Body fields are optional; missing fields preserve the previous value
+        (parity with Desktop's local ``save-provider`` IPC semantics).
+        """
+        _check_token(x_agx_desktop_token)
+        try:
+            from agenticx.cli.config_manager import ConfigManager
+
+            cleaned = str(name or "").strip()
+            if not cleaned:
+                raise HTTPException(status_code=400, detail="provider name required")
+            existing = ConfigManager.get_value(f"providers.{cleaned}") or {}
+            if not isinstance(existing, dict):
+                existing = {}
+            entry: dict[str, Any] = dict(existing)
+            for src_key, dst_key in (
+                ("apiKey", "api_key"),
+                ("baseUrl", "base_url"),
+                ("model", "model"),
+                ("models", "models"),
+            ):
+                if src_key in payload and payload[src_key] is not None:
+                    entry[dst_key] = payload[src_key]
+            if "enabled" in payload and isinstance(payload["enabled"], bool):
+                entry["enabled"] = payload["enabled"]
+            elif not isinstance(entry.get("enabled"), bool):
+                entry["enabled"] = True
+            if payload.get("dropParams") is True:
+                entry["drop_params"] = True
+            elif payload.get("dropParams") is False and "drop_params" in entry:
+                del entry["drop_params"]
+            if "displayName" in payload:
+                disp = str(payload.get("displayName") or "").strip()
+                if disp:
+                    entry["display_name"] = disp
+                elif "display_name" in entry:
+                    del entry["display_name"]
+            if "interface" in payload:
+                if payload["interface"] == "openai":
+                    entry["interface"] = "openai"
+                elif "interface" in entry:
+                    del entry["interface"]
+            ConfigManager.set_value(f"providers.{cleaned}", entry)
+            return {"ok": True}
+        except HTTPException:
+            raise
+        except Exception as exc:
+            logger.warning("put_config_provider error name=%s: %s", name, exc)
+            raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+    @app.delete("/api/config/providers/{name}")
+    async def delete_config_provider(
+        name: str,
+        x_agx_desktop_token: str | None = Header(default=None),
+    ) -> dict:
+        """Remove a provider entry; promotes the first remaining as default if needed."""
+        _check_token(x_agx_desktop_token)
+        try:
+            from agenticx.cli.config_manager import ConfigManager
+
+            cleaned = str(name or "").strip()
+            if not cleaned:
+                raise HTTPException(status_code=400, detail="provider name required")
+            providers_raw = ConfigManager.get_value("providers") or {}
+            if not isinstance(providers_raw, dict):
+                providers_raw = {}
+            providers = {str(k): v for k, v in providers_raw.items() if str(k) != cleaned}
+            ConfigManager.set_value("providers", providers)
+            current_default = str(ConfigManager.get_value("default_provider") or "")
+            if current_default == cleaned:
+                fallback = next(iter(providers.keys())) if providers else ""
+                ConfigManager.set_value("default_provider", fallback)
+            return {"ok": True}
+        except HTTPException:
+            raise
+        except Exception as exc:
+            logger.warning("delete_config_provider error name=%s: %s", name, exc)
+            raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+    @app.put("/api/config/default-provider")
+    async def put_config_default_provider(
+        payload: dict,
+        x_agx_desktop_token: str | None = Header(default=None),
+    ) -> dict:
+        _check_token(x_agx_desktop_token)
+        try:
+            from agenticx.cli.config_manager import ConfigManager
+
+            ConfigManager.set_value("default_provider", str(payload.get("name") or "").strip())
+            return {"ok": True}
+        except Exception as exc:
+            logger.warning("put_config_default_provider error: %s", exc)
+            raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+    @app.put("/api/config/active-model")
+    async def put_config_active_model(
+        payload: dict,
+        x_agx_desktop_token: str | None = Header(default=None),
+    ) -> dict:
+        _check_token(x_agx_desktop_token)
+        try:
+            from agenticx.cli.config_manager import ConfigManager
+
+            if "provider" in payload:
+                ConfigManager.set_value("active_provider", str(payload.get("provider") or "").strip())
+            if "model" in payload:
+                ConfigManager.set_value("active_model", str(payload.get("model") or "").strip())
+            return {"ok": True}
+        except Exception as exc:
+            logger.warning("put_config_active_model error: %s", exc)
+            raise HTTPException(status_code=500, detail=str(exc)) from exc
+
     # --- CC Bridge (local Claude Code HTTP) config ---
 
     @app.get("/api/cc-bridge/config")

@@ -93,21 +93,32 @@ export type { SettingsTab } from "../settings-tab";
 
 const MCP_MARKETPLACE_ID_MAP_KEY = "agenticx:mcp:marketplaceIdToNames";
 
-function RemoteBackendHintBanner() {
+function RemoteBackendHintBanner({ kind = "local-only" }: { kind?: "synced" | "local-only" }) {
   const mode = getConnectionModeSync();
   if (mode !== "remote") return null;
   const host = getBackendScope();
   const hostLabel = formatBackendChipLabel(host, "remote");
+  if (kind === "synced") {
+    return (
+      <div className="rounded-md border border-border bg-surface-card px-3 py-2.5 text-xs leading-relaxed text-text-subtle">
+        <p>
+          当前为<strong className="text-text-muted">远程模式</strong>，本页配置直接同步到远端{" "}
+          <strong className="text-text-muted">{hostLabel}</strong> 的{" "}
+          <code className="text-[10px] text-text-muted">~/.agenticx/config.yaml</code>，对模型调用立即生效。
+        </p>
+      </div>
+    );
+  }
   return (
     <div className="rounded-md border border-border bg-surface-card px-3 py-2.5 text-xs leading-relaxed text-text-subtle">
       <p>
         当前为<strong className="text-text-muted">远程模式</strong>，本页修改写入本机{" "}
-        <code className="text-[10px] text-text-muted">~/.agenticx/config.yaml</code>，但模型调用与 MCP
-        服务在远端 <strong className="text-text-muted">{hostLabel}</strong> 上加载。
+        <code className="text-[10px] text-text-muted">~/.agenticx/config.yaml</code>，但实际加载发生在远端{" "}
+        <strong className="text-text-muted">{hostLabel}</strong>。
       </p>
       <p className="mt-1.5 text-text-faint">
         如需修改远端配置，请直接编辑远端 <code className="text-[10px]">~/.agenticx/config.yaml</code>
-        （远程配置同步能力规划中）。
+        （此 Tab 的远程同步能力规划中）。
       </p>
     </div>
   );
@@ -6553,7 +6564,7 @@ export function SettingsPanel({
             {/* === PROVIDER TAB === */}
             {tab === "provider" && (
               <div className="flex flex-col gap-3">
-                <RemoteBackendHintBanner />
+                <RemoteBackendHintBanner kind="synced" />
               <div className="flex gap-3">
                 {/* Provider sub-list */}
                 <div className="flex w-[140px] shrink-0 flex-col rounded-md border border-border bg-surface-card">
