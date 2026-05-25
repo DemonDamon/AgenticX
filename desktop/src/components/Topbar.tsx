@@ -18,10 +18,19 @@ export function Topbar({ sidebarCollapsed, onToggleSidebar }: Props) {
 
   const [loginBusy, setLoginBusy] = useState(false);
   const [userMenuOpen, setUserMenuOpen] = useState(false);
+  const [backendChipTick, setBackendChipTick] = useState(0);
   const userMenuRef = useRef<HTMLDivElement>(null);
 
   const isDarkLike = theme === "dark" || theme === "dim";
 
+  useEffect(() => {
+    return window.agenticxDesktop?.onConnectionModeChanged?.(() => {
+      setBackendChipTick((n) => n + 1);
+    });
+  }, []);
+
+  // Re-read on each render and when main notifies mode changes.
+  void backendChipTick;
   const connectionMode = getConnectionModeSync();
   const backendScope = getBackendScope();
   const backendChipLabel = formatBackendChipLabel(backendScope, connectionMode);

@@ -330,6 +330,7 @@ declare global {
       getConnectionMode: () => Promise<"local" | "remote">;
       getBackendScopeSync: () => string;
       getConnectionModeSync: () => "local" | "remote";
+      onConnectionModeChanged: (callback: () => void) => () => void;
       appRelaunch: () => Promise<{ ok: boolean }>;
       focusModeEnter: () => Promise<{ ok: boolean; alreadyActive?: boolean; error?: string }>;
       focusModeExit: () => Promise<{ ok: boolean; alreadyInactive?: boolean; error?: string }>;
