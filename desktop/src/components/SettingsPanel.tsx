@@ -6557,7 +6557,7 @@ export function SettingsPanel({
                 <ComputerUseGeneralPanel />
                 <SessionMemoryPanel />
                 <div className="rounded-md border border-border bg-surface-card px-3 py-2.5 text-xs text-text-subtle">
-                  当前版本：AgenticX Desktop v0.2.1
+                  当前版本：AgenticX Desktop v0.2.2
                 </div>
             </div>
 
