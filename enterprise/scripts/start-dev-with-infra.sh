@@ -110,7 +110,7 @@ fi
 if [ "$SKIP_INFRA" -eq 0 ]; then
   require_docker
   echo "[start-dev-with-infra] booting middleware containers (postgres + redis)..."
-  docker_cmd compose -f "$COMPOSE_FILE" up -d postgres redis --progress plain
+  docker_cmd compose --progress plain -f "$COMPOSE_FILE" up -d postgres redis
 
   echo "[start-dev-with-infra] waiting postgres health..."
   for i in $(seq 1 60); do
