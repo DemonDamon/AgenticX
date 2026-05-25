@@ -1,6 +1,7 @@
 import { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState } from "react";
 import { Panel } from "../../ds/Panel";
 import { META_AGENT_DISPLAY_NAME } from "../../../constants/branding";
+import { useAppStore } from "../../../store";
 
 type VoiceForm = {
   provider: string;
