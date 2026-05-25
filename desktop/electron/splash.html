@@ -121,12 +121,12 @@
       }
 
       .hero-wrap {
-        flex: 0 0 46%;
+        flex: 0 0 34%;
         height: 100%;
         display: flex;
         align-items: center;
         justify-content: center;
-        width: 46%;
+        width: 34%;
         position: relative;
         min-height: 0;
       }
@@ -137,6 +137,7 @@
         max-width: 360px;
         display: flex;
         flex-direction: column;
+        align-items: center;
         justify-content: center;
         align-self: stretch;
         gap: 34px;
@@ -144,8 +145,8 @@
 
       .hero-aura {
         position: absolute;
-        width: min(300px, 86%);
-        height: min(300px, 86%);
+        width: min(150px, 72%);
+        height: min(150px, 72%);
         border-radius: 50%;
         background:
           radial-gradient(circle, rgba(255, 255, 255, 0.11) 0%, transparent 63%),
@@ -175,8 +176,8 @@
 
       .hero-img {
         position: relative;
-        width: min(350px, 92%);
-        max-height: 92%;
+        width: min(175px, 72%);
+        max-height: 72%;
         object-fit: contain;
         opacity: 0;
         transform: translateY(10px) scale(0.965);
@@ -280,16 +281,26 @@
       .brand-block {
         display: flex;
         flex-direction: column;
-        align-items: flex-start;
+        align-items: center;
         gap: 9px;
         margin: 0;
+        width: max-content;
+        max-width: 100%;
+      }
+
+      .brand-name,
+      .brand-tagline {
+        display: block;
+        margin: 0;
+        white-space: nowrap;
+        text-align: center;
       }
 
       .brand-name {
         font-size: 36px;
         font-weight: 700;
         letter-spacing: 0.24em;
-        text-indent: 0.24em;
+        padding-left: 0.24em;
         color: var(--text);
         line-height: 1;
       }
@@ -297,17 +308,27 @@
       .brand-tagline {
         font-size: 10px;
         letter-spacing: 0.18em;
+        padding-left: 0.18em;
         text-transform: uppercase;
         color: var(--text-muted);
+        line-height: 1.35;
+      }
+
+      .content-stack {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 34px;
+        width: max-content;
+        max-width: 100%;
       }
 
       .footer {
         width: 100%;
-        max-width: 320px;
         display: flex;
         flex-direction: column;
         gap: 10px;
-        align-items: flex-start;
+        align-items: center;
       }
 
       .progress-track {
@@ -346,12 +367,11 @@
         }
 
         .hero-wrap {
-          flex-basis: 42%;
-          width: 42%;
+          flex-basis: 32%;
+          width: 32%;
         }
 
-        .content {
-          min-width: 220px;
+        .content-stack {
           gap: 26px;
         }
 
@@ -364,14 +384,14 @@
         font-size: 10.5px;
         color: var(--text-muted);
         min-height: 16px;
-        text-align: left;
+        text-align: center;
         letter-spacing: 0.08em;
       }
 
       .escape {
         display: none;
         flex-direction: column;
-        align-items: flex-start;
+        align-items: center;
         gap: 8px;
         margin-top: 4px;
       }
@@ -417,20 +437,22 @@
       </div>
 
       <div class="content">
-        <div class="brand-block">
-          <div class="brand-name">NEAR</div>
-          <div class="brand-tagline">Near, Always Near.</div>
-        </div>
-
-        <div class="footer">
-          <div class="progress-track" aria-hidden="true">
-            <div class="progress-shimmer"></div>
+        <div class="content-stack">
+          <div class="brand-block">
+            <span class="brand-name">NEAR</span>
+            <span class="brand-tagline">Near, Always Near.</span>
           </div>
-          <div id="stage" class="stage-text">正在初始化…</div>
 
-          <div id="escape" class="escape">
-            <div class="escape-hint">如长时间无响应，可点击取消退出</div>
-            <button id="cancel-btn" type="button" class="cancel-btn">取消</button>
+          <div class="footer">
+            <div class="progress-track" aria-hidden="true">
+              <div class="progress-shimmer"></div>
+            </div>
+            <div id="stage" class="stage-text">正在初始化…</div>
+
+            <div id="escape" class="escape">
+              <div class="escape-hint">如长时间无响应，可点击取消退出</div>
+              <button id="cancel-btn" type="button" class="cancel-btn">取消</button>
+            </div>
           </div>
         </div>
       </div>
