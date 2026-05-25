@@ -484,6 +484,14 @@ export function App() {
       } finally {
         // 配置已经载入（或出错），让 UI 立刻渲染，避免被后续会话恢复挡住。
         setConfigLoaded(true);
+        // Splash 只应覆盖「后端 + 首屏可渲染」，会话恢复/MCP 在后台继续，不得阻塞进主窗。
+        if (!startupRendererReadyRef.current) {
+          startupRendererReadyRef.current = true;
+          void window.agenticxDesktop.startupRendererReady().catch((err) => {
+            console.warn("[App init] startupRendererReady failed:", err);
+            startupRendererReadyRef.current = false;
+          });
+        }
       }
 
       // Preload avatar list into the store BEFORE pane hydration, so the
@@ -758,19 +766,6 @@ export function App() {
     })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [ensureMcpAutoConnectOnStartup, refreshMcpStatus]);
-
-  useEffect(() => {
-    if (!configLoaded || !workspaceHydratedRef.current) return;
-    const activePane = panes.find((pane) => pane.id === activePaneId);
-    const sid = String(activePane?.sessionId ?? sessionId ?? "").trim();
-    if (!sid) return;
-    if (startupRendererReadyRef.current) return;
-    startupRendererReadyRef.current = true;
-    void window.agenticxDesktop.startupRendererReady().catch((err) => {
-      console.warn("[App init] startupRendererReady failed:", err);
-      startupRendererReadyRef.current = false;
-    });
-  }, [configLoaded, panes, activePaneId, sessionId]);
 
   useEffect(() => {
     if (!workspaceHydratedRef.current) return;

@@ -1322,9 +1322,14 @@ function validateTrinityConfigPayload(input: unknown): { ok: true; config: Trini
 }
 
 let mainWindow: BrowserWindow | null = null;
+let mainWindowReadyToShow = false;
+let mainWindowRevealPending = false;
 
 function showMainWindowSafely(): void {
   if (!mainWindow || mainWindow.isDestroyed()) return;
+  mainWindowRevealPending = true;
+  if (!mainWindowReadyToShow) return;
+  mainWindowRevealPending = false;
   if (mainWindow.isMinimized()) mainWindow.restore();
   mainWindow.show();
   mainWindow.focus();
@@ -2319,6 +2324,8 @@ function createWindow(): void {
     mainWindow.focus();
     return;
   }
+  mainWindowReadyToShow = false;
+  mainWindowRevealPending = false;
   const vibrancyEnabled = process.env.AGX_ENABLE_VIBRANCY === "1";
   const devUrl = process.env.VITE_DEV_SERVER_URL ?? "http://localhost:5173";
   const appEntryUrl = app.isPackaged
@@ -2467,6 +2474,12 @@ function createWindow(): void {
   mainWindow.webContents.on("will-navigate", (event, url) => {
     if (!tryOpenExternalBrowser(url)) return;
     event.preventDefault();
+  });
+  mainWindow.once("ready-to-show", () => {
+    mainWindowReadyToShow = true;
+    if (mainWindowRevealPending) {
+      showMainWindowSafely();
+    }
   });
   mainWindow.webContents.once("did-finish-load", () => {
     onMainWindowDidFinishLoad();

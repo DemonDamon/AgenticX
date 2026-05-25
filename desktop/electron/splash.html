@@ -15,24 +15,30 @@
     <style>
       :root {
         color-scheme: dark;
-        --bg: #14141c;
-        --text: rgba(255, 255, 255, 0.92);
-        --text-muted: rgba(255, 255, 255, 0.52);
-        --track: rgba(255, 255, 255, 0.14);
-        --shimmer: rgba(255, 255, 255, 0.88);
+        --bg: #030305;
+        --panel: rgba(255, 255, 255, 0.045);
+        --text: rgba(255, 255, 255, 0.96);
+        --text-muted: rgba(255, 255, 255, 0.46);
+        --hairline: rgba(255, 255, 255, 0.14);
+        --track: rgba(255, 255, 255, 0.11);
+        --shimmer: rgba(255, 255, 255, 0.92);
+        --particle: 255, 255, 255;
         --cancel-border: rgba(255, 255, 255, 0.18);
-        --cancel-text: rgba(255, 255, 255, 0.72);
+        --cancel-text: rgba(255, 255, 255, 0.68);
       }
 
       :root[data-theme="light"] {
         color-scheme: light;
-        --bg: #ffffff;
-        --text: #111111;
-        --text-muted: rgba(17, 17, 17, 0.52);
-        --track: rgba(17, 17, 17, 0.12);
-        --shimmer: rgba(17, 17, 17, 0.88);
-        --cancel-border: rgba(17, 17, 17, 0.14);
-        --cancel-text: rgba(17, 17, 17, 0.72);
+        --bg: #f8f8f6;
+        --panel: rgba(0, 0, 0, 0.035);
+        --text: rgba(10, 10, 10, 0.92);
+        --text-muted: rgba(10, 10, 10, 0.48);
+        --hairline: rgba(10, 10, 10, 0.13);
+        --track: rgba(10, 10, 10, 0.12);
+        --shimmer: rgba(10, 10, 10, 0.88);
+        --particle: 10, 10, 10;
+        --cancel-border: rgba(10, 10, 10, 0.16);
+        --cancel-text: rgba(10, 10, 10, 0.64);
       }
 
       * {
@@ -45,81 +51,268 @@
         width: 100%;
         height: 100%;
         overflow: hidden;
-        background: var(--bg);
-        font-family: "SF Pro Text", "PingFang SC", "Helvetica Neue", sans-serif;
+        background:
+          radial-gradient(circle at 50% 27%, var(--panel), transparent 34%),
+          linear-gradient(180deg, rgba(255, 255, 255, 0.025), transparent 36%),
+          var(--bg);
+        font-family: "SF Pro Display", "SF Pro Text", "PingFang SC", "Helvetica Neue", sans-serif;
         -webkit-font-smoothing: antialiased;
       }
 
       body {
-        display: flex;
-        align-items: center;
-        justify-content: center;
         opacity: 1;
-        transition: opacity 150ms ease-out;
+        transition: opacity 180ms ease-out;
       }
 
       body.fade-out {
         opacity: 0;
       }
 
-      .shell {
+      #particle-canvas {
+        position: fixed;
+        inset: 0;
         width: 100%;
-        padding: 28px 36px 24px;
+        height: 100%;
+        pointer-events: none;
+        z-index: 0;
+      }
+
+      .grid {
+        position: fixed;
+        inset: 22px;
+        border: 1px solid var(--hairline);
+        border-radius: 22px;
+        opacity: 0.58;
+        pointer-events: none;
+      }
+
+      .grid::before,
+      .grid::after {
+        content: "";
+        position: absolute;
+        inset: 0;
+        border-radius: inherit;
+        background:
+          linear-gradient(var(--hairline) 1px, transparent 1px),
+          linear-gradient(90deg, var(--hairline) 1px, transparent 1px);
+        background-size: 48px 48px;
+        mask-image: radial-gradient(circle at 50% 42%, rgba(0, 0, 0, 0.6), transparent 62%);
+        opacity: 0.22;
+      }
+
+      .grid::after {
+        background: radial-gradient(circle at 50% 40%, transparent 0 42%, var(--hairline) 43%, transparent 44%);
+        opacity: 0.62;
+      }
+
+      .shell {
+        position: relative;
+        z-index: 1;
+        width: 100%;
+        height: 100%;
+        padding: 38px 46px;
         display: flex;
-        flex-direction: column;
+        flex-direction: row;
         align-items: center;
-        gap: 18px;
+        justify-content: center;
+        gap: 44px;
         user-select: none;
         -webkit-user-select: none;
       }
 
-      .brand {
+      .hero-wrap {
+        flex: 0 0 46%;
+        height: 100%;
         display: flex;
         align-items: center;
-        gap: 14px;
+        justify-content: center;
+        width: 46%;
+        position: relative;
+        min-height: 0;
       }
 
-      .brand img {
-        width: 52px;
-        height: 52px;
-        border-radius: 12px;
-        object-fit: cover;
-        flex-shrink: 0;
-      }
-
-      .brand-text {
+      .content {
+        flex: 1 1 auto;
+        min-width: 260px;
+        max-width: 360px;
         display: flex;
         flex-direction: column;
-        gap: 4px;
-        min-width: 0;
+        justify-content: center;
+        align-self: stretch;
+        gap: 34px;
+      }
+
+      .hero-aura {
+        position: absolute;
+        width: min(300px, 86%);
+        height: min(300px, 86%);
+        border-radius: 50%;
+        background:
+          radial-gradient(circle, rgba(255, 255, 255, 0.11) 0%, transparent 63%),
+          conic-gradient(from 120deg, transparent, rgba(255, 255, 255, 0.18), transparent 36%);
+        filter: blur(12px);
+        opacity: 0.72;
+        animation: aura 4s ease-in-out infinite;
+      }
+
+      :root[data-theme="light"] .hero-aura {
+        background:
+          radial-gradient(circle, rgba(0, 0, 0, 0.07) 0%, transparent 64%),
+          conic-gradient(from 120deg, transparent, rgba(0, 0, 0, 0.12), transparent 36%);
+      }
+
+      @keyframes aura {
+        0%,
+        100% {
+          transform: scale(0.96) rotate(0deg);
+          opacity: 0.5;
+        }
+        50% {
+          transform: scale(1.05) rotate(8deg);
+          opacity: 0.82;
+        }
+      }
+
+      .hero-img {
+        position: relative;
+        width: min(350px, 92%);
+        max-height: 92%;
+        object-fit: contain;
+        opacity: 0;
+        transform: translateY(10px) scale(0.965);
+        clip-path: inset(100% 0 0 0);
+        filter: drop-shadow(0 0 18px rgba(255, 255, 255, 0.12));
+        animation:
+          reveal-hero 1.5s cubic-bezier(0.16, 1, 0.3, 1) 160ms forwards,
+          breathe 4.2s ease-in-out 1.6s infinite;
+      }
+
+      :root[data-theme="light"] .hero-img {
+        filter: drop-shadow(0 0 18px rgba(0, 0, 0, 0.08));
+      }
+
+      @keyframes reveal-hero {
+        45% {
+          opacity: 0.72;
+        }
+        to {
+          opacity: 1;
+          transform: translateY(0) scale(1);
+          clip-path: inset(0 0 0 0);
+        }
+      }
+
+      @keyframes breathe {
+        0%,
+        100% {
+          transform: translateY(0) scale(1);
+          opacity: 0.94;
+        }
+        50% {
+          transform: translateY(-2px) scale(1.008);
+          opacity: 1;
+        }
+      }
+
+      .scanline {
+        position: absolute;
+        left: 4%;
+        right: 4%;
+        height: 2px;
+        background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.72), transparent);
+        opacity: 0;
+        pointer-events: none;
+        filter: blur(0.4px);
+        animation: scan 3.4s ease-in-out 0.5s infinite;
+      }
+
+      :root[data-theme="light"] .scanline {
+        background: linear-gradient(90deg, transparent, rgba(0, 0, 0, 0.35), transparent);
+      }
+
+      @keyframes scan {
+        0% {
+          top: 10%;
+          opacity: 0;
+        }
+        12% {
+          opacity: 0.85;
+        }
+        88% {
+          opacity: 0.85;
+        }
+        100% {
+          top: 88%;
+          opacity: 0;
+        }
+      }
+
+      .eye-pulse {
+        position: absolute;
+        width: 7px;
+        height: 7px;
+        left: 43.5%;
+        top: 41%;
+        border-radius: 50%;
+        background: rgba(255, 255, 255, 0.85);
+        box-shadow: 0 0 18px rgba(255, 255, 255, 0.75);
+        opacity: 0;
+        animation: eye 4.8s ease-in-out 1.35s infinite;
+      }
+
+      @keyframes eye {
+        0%,
+        62%,
+        100% {
+          opacity: 0;
+          transform: scale(0.6);
+        }
+        68% {
+          opacity: 0.95;
+          transform: scale(1);
+        }
+        75% {
+          opacity: 0.15;
+          transform: scale(1.8);
+        }
+      }
+
+      .brand-block {
+        display: flex;
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 9px;
+        margin: 0;
       }
 
       .brand-name {
-        font-size: 28px;
+        font-size: 36px;
         font-weight: 700;
-        letter-spacing: -0.02em;
+        letter-spacing: 0.24em;
+        text-indent: 0.24em;
         color: var(--text);
-        line-height: 1.1;
+        line-height: 1;
       }
 
       .brand-tagline {
-        font-size: 12px;
+        font-size: 10px;
+        letter-spacing: 0.18em;
+        text-transform: uppercase;
         color: var(--text-muted);
-        line-height: 1.3;
       }
 
-      .progress-wrap {
+      .footer {
         width: 100%;
-        max-width: 280px;
+        max-width: 320px;
         display: flex;
         flex-direction: column;
         gap: 10px;
-        align-items: center;
+        align-items: flex-start;
       }
 
       .progress-track {
         width: 100%;
-        height: 3px;
+        height: 2px;
         border-radius: 999px;
         background: var(--track);
         overflow: hidden;
@@ -129,12 +322,12 @@
       .progress-shimmer {
         position: absolute;
         top: 0;
-        left: -40%;
-        width: 40%;
+        left: -35%;
+        width: 35%;
         height: 100%;
         border-radius: 999px;
         background: var(--shimmer);
-        animation: shimmer 1.2s ease-in-out infinite;
+        animation: shimmer 1.1s ease-in-out infinite;
       }
 
       @keyframes shimmer {
@@ -142,23 +335,45 @@
           transform: translateX(0);
         }
         100% {
-          transform: translateX(350%);
+          transform: translateX(380%);
+        }
+      }
+
+      @media (max-width: 620px) {
+        .shell {
+          padding: 30px 28px;
+          gap: 26px;
+        }
+
+        .hero-wrap {
+          flex-basis: 42%;
+          width: 42%;
+        }
+
+        .content {
+          min-width: 220px;
+          gap: 26px;
+        }
+
+        .brand-name {
+          font-size: 30px;
         }
       }
 
       .stage-text {
-        font-size: 12px;
+        font-size: 10.5px;
         color: var(--text-muted);
-        min-height: 18px;
-        text-align: center;
+        min-height: 16px;
+        text-align: left;
+        letter-spacing: 0.08em;
       }
 
       .escape {
         display: none;
         flex-direction: column;
-        align-items: center;
+        align-items: flex-start;
         gap: 8px;
-        margin-top: 2px;
+        margin-top: 4px;
       }
 
       .escape.visible {
@@ -166,11 +381,10 @@
       }
 
       .escape-hint {
-        font-size: 11px;
+        font-size: 10px;
         color: var(--text-muted);
         text-align: center;
         line-height: 1.45;
-        max-width: 280px;
       }
 
       .cancel-btn {
@@ -178,9 +392,9 @@
         border: 1px solid var(--cancel-border);
         background: transparent;
         color: var(--cancel-text);
-        font-size: 12px;
+        font-size: 11px;
         line-height: 1;
-        padding: 7px 14px;
+        padding: 6px 14px;
         border-radius: 999px;
         cursor: pointer;
       }
@@ -191,25 +405,34 @@
     </style>
   </head>
   <body>
+    <canvas id="particle-canvas" aria-hidden="true"></canvas>
+    <div class="grid" aria-hidden="true"></div>
+
     <div class="shell">
-      <div class="brand">
-        <img id="logo" alt="Near" />
-        <div class="brand-text">
-          <div class="brand-name">Near</div>
+      <div class="hero-wrap">
+        <div class="hero-aura" aria-hidden="true"></div>
+        <div class="scanline" aria-hidden="true"></div>
+        <div class="eye-pulse" aria-hidden="true"></div>
+        <img id="hero" class="hero-img" alt="Near wireframe" />
+      </div>
+
+      <div class="content">
+        <div class="brand-block">
+          <div class="brand-name">NEAR</div>
           <div class="brand-tagline">Near, Always Near.</div>
         </div>
-      </div>
 
-      <div class="progress-wrap">
-        <div class="progress-track" aria-hidden="true">
-          <div class="progress-shimmer"></div>
+        <div class="footer">
+          <div class="progress-track" aria-hidden="true">
+            <div class="progress-shimmer"></div>
+          </div>
+          <div id="stage" class="stage-text">正在初始化…</div>
+
+          <div id="escape" class="escape">
+            <div class="escape-hint">如长时间无响应，可点击取消退出</div>
+            <button id="cancel-btn" type="button" class="cancel-btn">取消</button>
+          </div>
         </div>
-        <div id="stage" class="stage-text">正在初始化…</div>
-      </div>
-
-      <div id="escape" class="escape">
-        <div class="escape-hint">如长时间无响应，可点击取消退出</div>
-        <button id="cancel-btn" type="button" class="cancel-btn">取消</button>
       </div>
     </div>
 
@@ -226,20 +449,140 @@
         };
 
         var params = new URLSearchParams(window.location.search);
-        var logo = params.get("logo");
-        var logoEl = document.getElementById("logo");
-        if (logo && logoEl) {
-          logoEl.src = logo;
-        }
-
+        var hero = params.get("hero");
+        var heroEl = document.getElementById("hero");
         var stageEl = document.getElementById("stage");
         var escapeEl = document.getElementById("escape");
         var cancelBtn = document.getElementById("cancel-btn");
+        var canvas = document.getElementById("particle-canvas");
+        var ctx = canvas.getContext("2d");
+        var isLight = document.documentElement.getAttribute("data-theme") === "light";
+        var particleColor = isLight ? "rgba(10,10,10," : "rgba(255,255,255,";
+        var disperse = false;
+        var rafId = 0;
+        var particles = [];
+        var samplePoints = [];
+
+        function resizeCanvas() {
+          var dpr = window.devicePixelRatio || 1;
+          canvas.width = Math.floor(window.innerWidth * dpr);
+          canvas.height = Math.floor(window.innerHeight * dpr);
+          canvas.style.width = window.innerWidth + "px";
+          canvas.style.height = window.innerHeight + "px";
+          ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+        }
+
+        function spawnParticle(x, y, vx, vy, size, alpha) {
+          return {
+            x: x,
+            y: y,
+            ox: x,
+            oy: y,
+            vx: vx,
+            vy: vy,
+            size: size,
+            alpha: alpha,
+            phase: Math.random() * Math.PI * 2,
+          };
+        }
+
+        function initAmbientParticles() {
+          particles = [];
+          var count = 34;
+          for (var i = 0; i < count; i++) {
+            particles.push(
+              spawnParticle(
+                Math.random() * window.innerWidth,
+                Math.random() * window.innerHeight,
+                (Math.random() - 0.5) * 0.18,
+                (Math.random() - 0.5) * 0.18,
+                Math.random() * 0.9 + 0.3,
+                Math.random() * 0.22 + 0.1
+              )
+            );
+          }
+        }
+
+        function sampleHero(img) {
+          samplePoints = [];
+          var off = document.createElement("canvas");
+          var maxW = 260;
+          var scale = Math.min(1, maxW / img.naturalWidth);
+          off.width = Math.floor(img.naturalWidth * scale);
+          off.height = Math.floor(img.naturalHeight * scale);
+          var octx = off.getContext("2d");
+          octx.drawImage(img, 0, 0, off.width, off.height);
+          var data = octx.getImageData(0, 0, off.width, off.height).data;
+          var rect = img.getBoundingClientRect();
+          var cx = rect.left + rect.width / 2;
+          var cy = rect.top + rect.height / 2;
+          for (var y = 0; y < off.height; y += 3) {
+            for (var x = 0; x < off.width; x += 3) {
+              var idx = (y * off.width + x) * 4;
+              var r = data[idx];
+              var g = data[idx + 1];
+              var b = data[idx + 2];
+              var a = data[idx + 3];
+              var lum = 0.299 * r + 0.587 * g + 0.114 * b;
+              if (a > 36 && lum > 60) {
+                var px = cx + (x - off.width / 2) * (rect.width / off.width);
+                var py = cy + (y - off.height / 2) * (rect.height / off.height);
+                samplePoints.push({ x: px, y: py });
+              }
+            }
+          }
+          var meshCount = Math.min(180, samplePoints.length);
+          for (var j = 0; j < meshCount; j++) {
+            var pt = samplePoints[(Math.random() * samplePoints.length) | 0];
+            if (!pt) continue;
+            var p = spawnParticle(
+              pt.x + (Math.random() - 0.5) * 18,
+              pt.y + (Math.random() - 0.5) * 18,
+              (Math.random() - 0.5) * 0.1,
+              (Math.random() - 0.5) * 0.1,
+              Math.random() * 0.85 + 0.35,
+              Math.random() * 0.45 + 0.18
+            );
+            p.ox = pt.x;
+            p.oy = pt.y;
+            particles.push(p);
+          }
+        }
+
+        function drawParticles(t) {
+          ctx.clearRect(0, 0, window.innerWidth, window.innerHeight);
+          for (var i = 0; i < particles.length; i++) {
+            var p = particles[i];
+            if (disperse) {
+              p.x += p.vx * 6;
+              p.y += p.vy * 6;
+              p.alpha *= 0.94;
+            } else if (p.ox != null) {
+              p.x += (p.ox - p.x) * 0.018 + Math.sin(t * 0.0015 + p.phase) * 0.25;
+              p.y += (p.oy - p.y) * 0.018 + Math.cos(t * 0.0013 + p.phase) * 0.25;
+              p.alpha = 0.25 + Math.abs(Math.sin(t * 0.002 + p.phase)) * 0.45;
+            } else {
+              p.x += p.vx;
+              p.y += p.vy;
+              if (p.x < 0) p.x = window.innerWidth;
+              if (p.x > window.innerWidth) p.x = 0;
+              if (p.y < 0) p.y = window.innerHeight;
+              if (p.y > window.innerHeight) p.y = 0;
+              p.alpha = 0.12 + Math.abs(Math.sin(t * 0.0018 + p.phase)) * 0.28;
+            }
+            ctx.beginPath();
+            ctx.arc(p.x, p.y, p.size, 0, Math.PI * 2);
+            ctx.fillStyle = particleColor + p.alpha + ")";
+            ctx.fill();
+          }
+          rafId = requestAnimationFrame(drawParticles);
+        }
 
         function setStage(stage) {
           var label = STAGE_LABELS[stage] || STAGE_LABELS.initializing;
           if (stageEl) stageEl.textContent = label;
           if (stage === "ready") {
+            disperse = true;
             document.body.classList.add("fade-out");
           }
         }
@@ -248,9 +591,21 @@
           window.nearSplash.onStage(setStage);
         }
 
+        resizeCanvas();
+        initAmbientParticles();
+        rafId = requestAnimationFrame(drawParticles);
+        window.addEventListener("resize", resizeCanvas);
+
+        if (hero && heroEl) {
+          heroEl.addEventListener("load", function () {
+            sampleHero(heroEl);
+          });
+          heroEl.src = hero;
+        }
+
         setTimeout(function () {
           if (escapeEl) escapeEl.classList.add("visible");
-        }, 25000);
+        }, 12000);
 
         if (cancelBtn) {
           cancelBtn.addEventListener("click", function () {
@@ -259,6 +614,10 @@
             }
           });
         }
+
+        window.addEventListener("beforeunload", function () {
+          if (rafId) cancelAnimationFrame(rafId);
+        });
       })();
     </script>
   </body>

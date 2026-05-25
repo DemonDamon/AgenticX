@@ -12,10 +12,8 @@ export type SplashStage =
   | "restoring-session"
   | "ready";
 
-const SPLASH_WIDTH = 420;
-const SPLASH_HEIGHT = 260;
 const SPLASH_FADE_MS = 180;
-const SPLASH_FORCE_SHOW_MS = 60_000;
+const SPLASH_FORCE_SHOW_MS = 12_000;
 
 let splashWindow: BrowserWindow | null = null;
 let splashShownOnce = false;
@@ -63,19 +61,39 @@ function resolveSplashIconPath(): string {
   return iconPath;
 }
 
+function resolveSplashHeroPath(): string {
+  const heroPath = app.isPackaged
+    ? path.join(process.resourcesPath, "assets", "splash-wireframe-cutout.png")
+    : path.resolve(process.cwd(), "assets", "splash-wireframe-cutout.png");
+  if (fs.existsSync(heroPath)) return heroPath;
+  const rawHeroPath = app.isPackaged
+    ? path.join(process.resourcesPath, "assets", "splash-wireframe.png")
+    : path.resolve(process.cwd(), "assets", "splash-wireframe.png");
+  if (fs.existsSync(rawHeroPath)) return rawHeroPath;
+  return resolveSplashIconPath();
+}
+
 function resolveSplashTheme(): "light" | "dark" {
   const theme = readLayoutTheme();
   return theme === "light" ? "light" : "dark";
 }
 
 function splashBackgroundColor(theme: "light" | "dark"): string {
-  return theme === "light" ? "#ffffff" : "#14141c";
+  return theme === "light" ? "#ffffff" : "#000000";
+}
+
+function clamp(value: number, min: number, max: number): number {
+  return Math.max(min, Math.min(max, value));
 }
 
 function centerSplashBounds(): { x: number; y: number; width: number; height: number } {
   const { workArea } = screen.getPrimaryDisplay();
-  const width = SPLASH_WIDTH;
-  const height = SPLASH_HEIGHT;
+  const availableWidth = Math.max(360, workArea.width - 48);
+  const availableHeight = Math.max(280, workArea.height - 48);
+  const targetWidth = clamp(Math.round(workArea.width * 0.54), 660, 860);
+  const width = Math.min(targetWidth, availableWidth);
+  const targetHeight = clamp(Math.round(width * 0.56), 360, 480);
+  const height = Math.min(targetHeight, availableHeight);
   return {
     width,
     height,
@@ -164,8 +182,8 @@ export function createSplashWindow(): BrowserWindow | null {
   rendererReadyReceived = false;
 
   const theme = resolveSplashTheme();
-  const iconPath = resolveSplashIconPath();
-  const logoUrl = fs.existsSync(iconPath) ? pathToFileURL(iconPath).href : "";
+  const heroPath = resolveSplashHeroPath();
+  const heroUrl = fs.existsSync(heroPath) ? pathToFileURL(heroPath).href : "";
 
   splashWindow = new BrowserWindow({
     ...centerSplashBounds(),
@@ -205,7 +223,7 @@ export function createSplashWindow(): BrowserWindow | null {
   const query: Record<string, string> = {
     theme,
   };
-  if (logoUrl) query.logo = logoUrl;
+  if (heroUrl) query.hero = heroUrl;
 
   if (fs.existsSync(htmlPath)) {
     void splashWindow.loadFile(htmlPath, { query }).catch((err) => {
