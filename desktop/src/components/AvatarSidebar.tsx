@@ -79,6 +79,12 @@ type ContextMenuState =
 type GroupContextMenuState = { x: number; y: number; groupId: string } | null;
 type AutomationContextMenuState = { x: number; y: number; taskId: string } | null;
 
+/** Fixed width so meta-agent (1 item) and avatar (3 items) menus align visually. */
+const SIDEBAR_CONTEXT_MENU_CLASS =
+  "fixed z-[200] w-[120px] rounded-md border border-border bg-surface-base py-1 shadow-2xl";
+const SIDEBAR_CONTEXT_MENU_ITEM_CLASS =
+  "w-full whitespace-nowrap px-3 py-1.5 text-left text-[13px] transition";
+
 export function AvatarSidebar() {
   const avatars = useAppStore((s) => s.avatars);
   const activeAvatarId = useAppStore((s) => s.activeAvatarId);
@@ -1051,7 +1057,7 @@ export function AvatarSidebar() {
       {contextMenu && (
         <div
           ref={menuRef}
-          className="fixed z-50 min-w-[120px] rounded-lg border border-border bg-surface-panel py-1 shadow-xl"
+          className={SIDEBAR_CONTEXT_MENU_CLASS}
           style={{ left: contextMenu.x, top: contextMenu.y }}
         >
           {[
@@ -1072,7 +1078,7 @@ export function AvatarSidebar() {
           ].map((item) => (
             <button
               key={item.id}
-              className={`w-full px-3 py-2 text-left text-[13px] transition ${
+              className={`${SIDEBAR_CONTEXT_MENU_ITEM_CLASS} ${
                 item.id === "delete"
                   ? "text-rose-400 hover:bg-rose-500/10"
                   : "text-text-muted hover:bg-surface-hover"
@@ -1088,11 +1094,11 @@ export function AvatarSidebar() {
       {groupContextMenu && (
         <div
           ref={groupMenuRef}
-          className="fixed z-50 min-w-[180px] rounded-lg border border-border bg-surface-panel py-1 shadow-xl"
+          className={SIDEBAR_CONTEXT_MENU_CLASS}
           style={{ left: groupContextMenu.x, top: groupContextMenu.y }}
         >
           <button
-            className="w-full px-3 py-2 text-left text-[13px] text-text-muted transition hover:bg-surface-hover"
+            className={`${SIDEBAR_CONTEXT_MENU_ITEM_CLASS} text-text-muted hover:bg-surface-hover`}
             onClick={() => void handleGroupContextAction("view")}
           >
             查看群聊
@@ -1103,12 +1109,12 @@ export function AvatarSidebar() {
       {automationContextMenu && (
         <div
           ref={automationMenuRef}
-          className="fixed z-50 min-w-[120px] rounded-lg border border-border bg-surface-panel py-1 shadow-xl"
+          className={SIDEBAR_CONTEXT_MENU_CLASS}
           style={{ left: automationContextMenu.x, top: automationContextMenu.y }}
         >
           <button
             type="button"
-            className="w-full px-3 py-2 text-left text-[13px] text-text-muted transition hover:bg-surface-hover"
+            className={`${SIDEBAR_CONTEXT_MENU_ITEM_CLASS} text-text-muted hover:bg-surface-hover`}
             onClick={() => {
               const { taskId } = automationContextMenu;
               setAutomationContextMenu(null);
