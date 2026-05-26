@@ -8,7 +8,7 @@
 // 用 undici 的 ProxyAgent 走代理；NO_PROXY 命中的目标走直连；什么都没设置就
 // 等价于直接调用 globalThis.fetch。
 
-import { ProxyAgent } from "undici";
+import { ProxyAgent, fetch as undiciFetch } from "undici";
 
 function pickEnv(...names: string[]): string | undefined {
   for (const name of names) {
@@ -79,8 +79,13 @@ export async function proxyAwareFetch(input: string, init?: RequestInit): Promis
   }
 
   const agent = getProxyAgent(proxyUrl);
-  // undici fetch 透过 globalThis.fetch 的 dispatcher 选项注入
-  return fetch(input, { ...(init ?? {}), dispatcher: agent } as RequestInit & { dispatcher: ProxyAgent });
+  // Electron 主进程的 globalThis.fetch 实际是 Electron net.fetch（走 Chromium 网络栈），
+  // 不会响应 dispatcher 选项。必须直接调用 undici 自己的 fetch 才能让 ProxyAgent 生效。
+  // undici 的 RequestInit / Response 与 DOM lib 类型签名不完全一致（Blob / ReadableStream
+  // 流路径在 TS lib 里被建模成不同实例），但运行时结构兼容，调用方按标准 Response 使用即可。
+  const initWithAgent = { ...(init ?? {}), dispatcher: agent } as unknown as Parameters<typeof undiciFetch>[1];
+  const resp = await undiciFetch(input, initWithAgent);
+  return resp as unknown as Response;
 }
 
 export function logProxyConfig(): void {
