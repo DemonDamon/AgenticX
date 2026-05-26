@@ -1,6 +1,6 @@
 // Plan-Id: machi-kb-stage1-local-mvp
 import { useEffect, useMemo, useState } from "react";
-import { Eye, EyeOff, RotateCcw } from "lucide-react";
+import { AlertTriangle, Check, Eye, EyeOff, Loader2, RotateCcw } from "lucide-react";
 import { Panel } from "../../ds/Panel";
 import type { KBApi, ParserStatus } from "./api";
 import {
@@ -373,141 +373,91 @@ export function KnowledgeConfigPanel({
       </Panel>
 
       <Panel title="文件过滤">
-        <Field label="扩展名（逗号分隔）">
-          <div className="flex items-start gap-2">
+        <div className="space-y-4">
+          <Field label="扩展名（逗号分隔）">
+            <div className="flex items-start gap-2">
+              <input
+                className={`min-w-0 flex-1 ${KB_FIELD_BASE}`}
+                value={config.file_filters.extensions.join(",")}
+                onChange={(e) =>
+                  patch("file_filters", {
+                    ...config.file_filters,
+                    extensions: e.target.value
+                      .split(",")
+                      .map((s) => s.trim())
+                      .filter(Boolean),
+                  })
+                }
+              />
+              <button
+                type="button"
+                className="shrink-0 rounded-md border border-border px-3 py-1.5 text-xs font-medium text-text-subtle transition hover:bg-surface-hover hover:text-text-primary"
+                onClick={() =>
+                  patch("file_filters", {
+                    ...config.file_filters,
+                    extensions: [...defaultKBConfig().file_filters.extensions],
+                  })
+                }
+                title="恢复 Near 内置的全量支持列表（含 LiteParse 覆盖的旧版 Office、表格、图片）"
+              >
+                恢复默认
+              </button>
+            </div>
+          </Field>
+          <ParserCapabilitySection parserStatus={parserStatus} />
+          <Field label="单文件上限 (MB)">
             <input
-              className={`min-w-0 flex-1 ${KB_FIELD_BASE}`}
-              value={config.file_filters.extensions.join(",")}
+              type="number"
+              className={`w-full ${KB_FIELD_BASE}`}
+              value={config.file_filters.max_file_size_mb}
+              min={1}
               onChange={(e) =>
                 patch("file_filters", {
                   ...config.file_filters,
-                  extensions: e.target.value
-                    .split(",")
-                    .map((s) => s.trim())
-                    .filter(Boolean),
+                  max_file_size_mb: Number(e.target.value) || 1,
                 })
               }
             />
-            <button
-              type="button"
-              className="shrink-0 rounded-md border border-border px-3 py-1.5 text-xs font-medium text-text-subtle transition hover:bg-surface-hover hover:text-text-primary"
-              onClick={() =>
-                patch("file_filters", {
-                  ...config.file_filters,
-                  extensions: [...defaultKBConfig().file_filters.extensions],
-                })
-              }
-              title="恢复 Near 内置的全量支持列表（含 LiteParse 覆盖的旧版 Office、表格、图片）"
-            >
-              恢复默认
-            </button>
-          </div>
-        </Field>
-        <div className="md:col-span-2 -mt-1 flex flex-col gap-y-1 text-[11px] leading-snug text-text-faint">
-          <span className="flex items-center gap-1.5">
-            <span className="inline-block h-2 w-2 rounded-full bg-emerald-500" />
-            内置解析器 已就绪（纯文本 / PDF / DOCX / PPTX / HTML / JSON / CSV / YAML）
-          </span>
-          <span className="flex items-center gap-1.5">
-            <span
-              className={`inline-block h-2 w-2 rounded-full ${
-                parserStatus?.liteparse?.available ? "bg-emerald-500" : "bg-amber-500"
-              }`}
-            />
-            {parserStatus == null ? (
-              "LiteParse 检测中…"
-            ) : parserStatus.liteparse.available ? (
-              <>
-                LiteParse 已安装
-                {parserStatus.liteparse.version ? ` v${parserStatus.liteparse.version}` : ""}
-                <span className="ml-1 text-text-subtle">
-                  （覆盖 .doc / .ppt / .xls / .xlsx / 图片 OCR）
-                </span>
-              </>
-            ) : (
-              <>
-                未检测到 LiteParse — 旧版 Office、表格与图片暂不可解析。安装命令：
-                <code className="ml-1 rounded bg-surface-hover px-1">
-                  {parserStatus.install_hint || "npm i -g @llamaindex/liteparse"}
-                </code>
-              </>
-            )}
-          </span>
-          {parserStatus?.libreoffice ? (
-            <span className="flex flex-wrap items-center gap-1.5">
-              <span
-                className={`inline-block h-2 w-2 rounded-full ${
-                  parserStatus.libreoffice.available ? "bg-emerald-500" : "bg-amber-500"
-                }`}
-              />
-              {parserStatus.libreoffice.available ? (
-                <>
-                  LibreOffice 已安装
-                  <span className="ml-1 text-text-subtle">
-                    （LiteParse 用于解析 .doc / .ppt / .xls / .xlsx）
-                  </span>
-                </>
-              ) : (
-                <>
-                  未检测到 LibreOffice — 解析 .doc / .ppt / .xls / .xlsx 需要它做格式转换。安装命令：
-                  <code className="ml-1 rounded bg-surface-hover px-1">
-                    brew install --cask libreoffice
-                  </code>
-                </>
-              )}
-            </span>
-          ) : null}
+          </Field>
         </div>
-        <Field label="单文件上限 (MB)">
-          <input
-            type="number"
-            className={`w-full ${KB_FIELD_BASE}`}
-            value={config.file_filters.max_file_size_mb}
-            min={1}
-            onChange={(e) =>
-              patch("file_filters", {
-                ...config.file_filters,
-                max_file_size_mb: Number(e.target.value) || 1,
-              })
-            }
-          />
-        </Field>
       </Panel>
 
       <Panel title="检索">
-        <Field label="触发模式">
-          <select
-            className={`w-full ${KB_FIELD_BASE}`}
-            value={config.retrieval.mode === "always" ? "always" : "auto"}
-            onChange={(e) =>
-              patch("retrieval", {
-                ...config.retrieval,
-                mode: (e.target.value as "auto" | "always") || "auto",
-              })
-            }
-          >
-            <option value="auto">智能检索（推荐）</option>
-            <option value="always">始终检索</option>
-          </select>
-        </Field>
-        <Field label="默认 Top-K">
-          <input
-            type="number"
-            className={`w-full ${KB_FIELD_BASE}`}
-            min={1}
-            max={20}
-            value={config.retrieval.top_k}
-            onChange={(e) =>
-              patch("retrieval", {
-                ...config.retrieval,
-                top_k: Math.min(20, Math.max(1, Number(e.target.value) || 5)),
-              })
-            }
-          />
-        </Field>
-        <p className="mt-2 text-[11px] leading-snug text-text-faint">
-          智能检索：由模型判断何时检索，包含你主动要求“查知识库”的场景；始终检索：每轮都先检索后再回答。
-        </p>
+        <div className="space-y-4">
+          <Field label="触发模式">
+            <select
+              className={`w-full ${KB_FIELD_BASE}`}
+              value={config.retrieval.mode === "always" ? "always" : "auto"}
+              onChange={(e) =>
+                patch("retrieval", {
+                  ...config.retrieval,
+                  mode: (e.target.value as "auto" | "always") || "auto",
+                })
+              }
+            >
+              <option value="auto">智能检索（推荐）</option>
+              <option value="always">始终检索</option>
+            </select>
+          </Field>
+          <Field label="默认 Top-K">
+            <input
+              type="number"
+              className={`w-full ${KB_FIELD_BASE}`}
+              min={1}
+              max={20}
+              value={config.retrieval.top_k}
+              onChange={(e) =>
+                patch("retrieval", {
+                  ...config.retrieval,
+                  top_k: Math.min(20, Math.max(1, Number(e.target.value) || 5)),
+                })
+              }
+            />
+          </Field>
+          <p className="text-[11px] leading-snug text-text-faint">
+            智能检索：由模型判断何时检索，包含你主动要求「查知识库」的场景；始终检索：每轮都先检索后再回答。
+          </p>
+        </div>
       </Panel>
 
       <div className="flex flex-wrap items-center justify-end gap-2">
@@ -521,6 +471,124 @@ export function KnowledgeConfigPanel({
         >
           <RotateCcw className="h-3.5 w-3.5" /> 重置为默认
         </button>
+      </div>
+    </div>
+  );
+}
+
+function ParserCapabilitySection({ parserStatus }: { parserStatus: ParserStatus | null }) {
+  const liteparseOk = parserStatus?.liteparse?.available === true;
+  const liteparseLoading = parserStatus == null;
+  const libreofficeOk = parserStatus?.libreoffice?.available === true;
+  const showLibreoffice = parserStatus?.libreoffice != null;
+
+  return (
+    <div className="space-y-2">
+      <div className="text-xs font-medium text-text-subtle">解析能力</div>
+      <div className="overflow-hidden rounded-lg border border-border bg-surface-panel/60">
+        <ParserCapabilityRow
+          title="内置解析器"
+          state="ok"
+          statusLabel="已就绪"
+          detail="纯文本、PDF、DOCX、PPTX、HTML、JSON、CSV、YAML"
+        />
+        <ParserCapabilityDivider />
+        <ParserCapabilityRow
+          title="LiteParse"
+          state={liteparseLoading ? "loading" : liteparseOk ? "ok" : "warn"}
+          statusLabel={
+            liteparseLoading
+              ? "检测中"
+              : liteparseOk
+                ? `已安装${parserStatus?.liteparse?.version ? ` v${parserStatus.liteparse.version}` : ""}`
+                : "未安装"
+          }
+          detail={
+            liteparseLoading ? (
+              "正在检测本机是否已安装 LiteParse…"
+            ) : liteparseOk ? (
+              "覆盖 .doc / .ppt / .xls / .xlsx 与图片 OCR"
+            ) : (
+              <>
+                旧版 Office、表格与图片暂不可解析。安装：
+                <code className="ml-1 rounded bg-surface-hover px-1 py-0.5 text-[11px] text-text-primary">
+                  {parserStatus?.install_hint || "npm i -g @llamaindex/liteparse"}
+                </code>
+              </>
+            )
+          }
+        />
+        {showLibreoffice ? (
+          <>
+            <ParserCapabilityDivider />
+            <ParserCapabilityRow
+              title="LibreOffice"
+              state={libreofficeOk ? "ok" : "warn"}
+              statusLabel={libreofficeOk ? "已安装" : "未安装"}
+              detail={
+                libreofficeOk ? (
+                  "LiteParse 解析 .doc / .ppt / .xls / .xlsx 时用于格式转换"
+                ) : (
+                  <>
+                    解析旧版 Office 与表格需要它。安装：
+                    <code className="ml-1 rounded bg-surface-hover px-1 py-0.5 text-[11px] text-text-primary">
+                      brew install --cask libreoffice
+                    </code>
+                  </>
+                )
+              }
+            />
+          </>
+        ) : null}
+      </div>
+    </div>
+  );
+}
+
+function ParserCapabilityDivider() {
+  return <div className="h-px bg-[var(--border-muted)]" aria-hidden="true" />;
+}
+
+function ParserCapabilityRow({
+  title,
+  state,
+  statusLabel,
+  detail,
+}: {
+  title: string;
+  state: "ok" | "warn" | "loading";
+  statusLabel: string;
+  detail: React.ReactNode;
+}) {
+  const statusClass =
+    state === "ok"
+      ? "bg-[var(--brain-scope-enabled-bg)] text-[var(--brain-scope-enabled-fg)]"
+      : state === "warn"
+        ? "bg-amber-500/15 text-[var(--status-warning)]"
+        : "bg-surface-hover text-text-muted";
+
+  return (
+    <div className="flex items-start gap-3 px-3 py-2.5">
+      <span
+        className={`mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full ${statusClass}`}
+        aria-hidden="true"
+      >
+        {state === "ok" ? (
+          <Check className="h-3 w-3" strokeWidth={2.5} />
+        ) : state === "warn" ? (
+          <AlertTriangle className="h-3 w-3" strokeWidth={2.5} />
+        ) : (
+          <Loader2 className="h-3 w-3 animate-spin" />
+        )}
+      </span>
+      <div className="min-w-0 flex-1">
+        <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5">
+          <span className="text-xs font-medium text-text-primary">{title}</span>
+          <span className={`rounded-full px-2 py-0.5 text-[10px] font-medium ${statusClass}`}>
+            {statusLabel}
+          </span>
+        </div>
+        <p className="mt-1 text-xs leading-relaxed text-text-muted">{detail}</p>
       </div>
     </div>
   );

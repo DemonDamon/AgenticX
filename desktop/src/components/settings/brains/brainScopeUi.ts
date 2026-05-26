@@ -1,13 +1,19 @@
+export const BRAIN_SCOPE_GLOBAL_BADGE =
+  "bg-[var(--brain-scope-global-bg)] text-[var(--brain-scope-global-fg)] ring-1 ring-[var(--brain-scope-global-ring)]";
+
+export const BRAIN_SCOPE_PRIVATE_BADGE =
+  "bg-[var(--brain-scope-private-bg)] text-[var(--brain-scope-private-fg)] ring-1 ring-[var(--brain-scope-private-ring)]";
+
 export function brainScopeBadge(scope: string): { label: string; className: string } {
   if (scope === "private") {
     return {
       label: "专属",
-      className: "bg-amber-500/15 text-amber-100 ring-amber-400/20",
+      className: BRAIN_SCOPE_PRIVATE_BADGE,
     };
   }
   return {
     label: "全局",
-    className: "bg-violet-500/15 text-violet-200 ring-violet-400/20",
+    className: BRAIN_SCOPE_GLOBAL_BADGE,
   };
 }
 
