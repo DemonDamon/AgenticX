@@ -21,6 +21,7 @@ import {
 import { ContextMenu } from "../ContextMenu";
 import { Toast } from "../ds/Toast";
 import { buildGlobalSearchContextMenuItems } from "./global-search-context-menu";
+import { GlobalSearchIdleView, type SearchSuggestion } from "./GlobalSearchIdleView";
 
 type Props = {
   open: boolean;
@@ -116,18 +117,31 @@ export function GlobalSearchPanel({ open, onClose }: Props) {
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [open, onClose]);
 
+  const handlePickSuggestion = useCallback(
+    (suggestion: SearchSuggestion) => {
+      if (suggestion.category) search.setCategory(suggestion.category);
+      search.setQuery(suggestion.query);
+      search.submitQuery(suggestion.query);
+    },
+    [search.setCategory, search.setQuery, search.submitQuery]
+  );
+
   if (!open) return null;
 
-  const showHistory = !search.query.trim() && search.history.length > 0;
+  const isIdle = !search.query.trim();
   const filteredGroups = search.groupedResults;
 
   return createPortal(
     <div
-      className="fixed inset-0 z-[70] flex items-start justify-center bg-black/70 p-4 pt-[8vh] backdrop-blur-none"
+      className="fixed inset-0 z-[70] flex items-center justify-center bg-black/70 p-4 backdrop-blur-none"
       onClick={onClose}
     >
       <div
-        className="flex h-[min(720px,calc(100vh-12vh))] w-full max-w-4xl flex-col overflow-hidden rounded-2xl border border-border shadow-2xl"
+        className={`flex w-full max-w-4xl flex-col overflow-hidden rounded-2xl border border-border shadow-2xl ${
+          isIdle
+            ? "h-auto max-h-[min(560px,calc(100vh-12vh))]"
+            : "h-[min(720px,calc(100vh-12vh))]"
+        }`}
         style={{ backgroundColor: "var(--surface-base-fallback, var(--surface-panel))" }}
         onClick={(event) => event.stopPropagation()}
         role="dialog"
@@ -169,6 +183,7 @@ export function GlobalSearchPanel({ open, onClose }: Props) {
               <X className="h-4 w-4" />
             </button>
           </div>
+
         </div>
 
         {/* 分类 tab：Marvis 式带竖线分隔 */}
@@ -216,48 +231,28 @@ export function GlobalSearchPanel({ open, onClose }: Props) {
         ) : null}
 
         {/* 结果区：单列 + 分组 + 每行点击展开元信息 */}
-        <div className="relative min-h-0 flex-1">
+        <div className={isIdle ? "relative shrink-0" : "relative min-h-0 flex-1"}>
           <div
             ref={resultsScrollRef}
-            className="h-full overflow-y-auto px-5 py-4"
+            className={
+              isIdle
+                ? "overflow-y-auto px-5 pb-3 pt-2"
+                : "h-full overflow-y-auto px-5 py-4"
+            }
             onScroll={(event) => {
               setShowScrollTop(event.currentTarget.scrollTop > 120);
             }}
           >
-          {showHistory ? (
-            <div className="mb-4">
-              <div className="mb-2 flex items-center justify-between">
-                <div className="text-xs font-medium text-text-subtle">最近搜索</div>
-                <button
-                  type="button"
-                  className="text-xs text-text-faint transition hover:text-text-strong"
-                  onClick={search.clearHistory}
-                >
-                  清空
-                </button>
-              </div>
-              <div className="flex flex-wrap gap-2">
-                {search.history.map((item) => (
-                  <button
-                    key={item}
-                    type="button"
-                    className="rounded-full border border-border bg-surface-card px-3 py-1 text-xs text-text-subtle transition hover:bg-surface-hover hover:text-text-strong"
-                    onClick={() => {
-                      search.setQuery(item);
-                      search.submitQuery(item);
-                    }}
-                  >
-                    {item}
-                  </button>
-                ))}
-              </div>
-            </div>
-          ) : null}
-
-          {!search.query.trim() && !showHistory ? (
-            <div className="py-16 text-center text-sm text-text-faint">
-              输入关键词开始搜索本机文件
-            </div>
+          {isIdle ? (
+            <GlobalSearchIdleView
+              history={search.history}
+              onPickHistory={(value) => {
+                search.setQuery(value);
+                search.submitQuery(value);
+              }}
+              onClearHistory={search.clearHistory}
+              onPickSuggestion={handlePickSuggestion}
+            />
           ) : search.loading && search.results.length === 0 ? (
             <div className="flex items-center justify-center gap-2 py-16 text-sm text-text-subtle">
               <Loader2 className="h-4 w-4 animate-spin" />

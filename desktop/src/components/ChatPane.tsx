@@ -6261,7 +6261,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
     };
     const onWorkspaceAdded = (event: Event) => {
       const detail = (event as CustomEvent<{ paneId?: string }>).detail;
-      if (detail?.paneId && detail.paneId !== pane.id) return;
+      if (!detail?.paneId || detail.paneId !== pane.id) return;
       setTaskspaceAutoRefreshKey((k) => k + 1);
     };
     window.addEventListener(GLOBAL_SEARCH_REFERENCE_FILE, onReference);
@@ -6289,16 +6289,25 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
   const overlaySpawnsWidth = clampOverlayAside(spawnsWidth, minSpawnsWidth);
 
   useEffect(() => {
-    setTaskspaceWidth((prev) => Math.min(maxTaskspaceWidth, Math.max(minTaskspaceWidth, prev)));
-  }, [maxTaskspaceWidth]);
+    setTaskspaceWidth((prev) => {
+      const next = Math.min(maxTaskspaceWidth, Math.max(minTaskspaceWidth, prev));
+      return next === prev ? prev : next;
+    });
+  }, [maxTaskspaceWidth, minTaskspaceWidth]);
 
   useEffect(() => {
-    setSpawnsWidth((prev) => Math.min(maxSpawnsWidth, Math.max(minSpawnsWidth, prev)));
-  }, [maxSpawnsWidth]);
+    setSpawnsWidth((prev) => {
+      const next = Math.min(maxSpawnsWidth, Math.max(minSpawnsWidth, prev));
+      return next === prev ? prev : next;
+    });
+  }, [maxSpawnsWidth, minSpawnsWidth]);
 
   useEffect(() => {
-    setHistoryWidth((prev) => Math.min(maxHistoryWidth, Math.max(minHistoryWidth, prev)));
-  }, [maxHistoryWidth]);
+    setHistoryWidth((prev) => {
+      const next = Math.min(maxHistoryWidth, Math.max(minHistoryWidth, prev));
+      return next === prev ? prev : next;
+    });
+  }, [maxHistoryWidth, minHistoryWidth]);
 
   useEffect(() => {
     try {
@@ -6515,19 +6524,27 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
     else if (p.historyOpen) keep = "history";
     else if (p.membersPanelOpen) keep = "members";
     else keep = "spawns";
-    useAppStore.setState((s) => ({
-      panes: s.panes.map((row) =>
-        row.id !== p.id
-          ? row
-          : {
-              ...row,
-              taskspacePanelOpen: keep === "workspace",
-              historyOpen: keep === "history",
-              membersPanelOpen: keep === "members",
-              spawnsColumnOpen: keep === "spawns",
-            }
-      ),
-    }));
+    const desired = {
+      taskspacePanelOpen: keep === "workspace",
+      historyOpen: keep === "history",
+      membersPanelOpen: keep === "members",
+      spawnsColumnOpen: keep === "spawns",
+    };
+    useAppStore.setState((s) => {
+      const row = s.panes.find((r) => r.id === p.id);
+      if (!row) return s;
+      if (
+        row.taskspacePanelOpen === desired.taskspacePanelOpen &&
+        row.historyOpen === desired.historyOpen &&
+        row.membersPanelOpen === desired.membersPanelOpen &&
+        row.spawnsColumnOpen === desired.spawnsColumnOpen
+      ) {
+        return s;
+      }
+      return {
+        panes: s.panes.map((r) => (r.id !== p.id ? r : { ...r, ...desired })),
+      };
+    });
   }, [
     compactSidePanels,
     pane.id,
