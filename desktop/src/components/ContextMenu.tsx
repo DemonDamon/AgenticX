@@ -1,9 +1,11 @@
 import { useEffect, useLayoutEffect, useRef } from "react";
 
 export type ContextMenuItem = {
-  label: string;
-  onSelect: () => void;
+  label?: string;
+  onSelect?: () => void;
   danger?: boolean;
+  /** Visual divider between menu groups */
+  separator?: boolean;
 };
 
 type Props = {
@@ -57,24 +59,28 @@ export function ContextMenu({ open, x, y, items, onClose }: Props) {
       style={{ left: x, top: y }}
       role="menu"
     >
-      {items.map((item, i) => (
-        <button
-          key={i}
-          type="button"
-          role="menuitem"
-          className={`flex w-full px-3 py-2 text-left text-[13px] transition ${
-            item.danger 
-              ? "text-rose-500 hover:bg-surface-hover hover:text-rose-600 hover:font-semibold" 
-              : "text-text-primary hover:bg-surface-hover"
-          }`}
-          onClick={() => {
-            item.onSelect();
-            onClose();
-          }}
-        >
-          {item.label}
-        </button>
-      ))}
+      {items.map((item, i) =>
+        item.separator ? (
+          <div key={i} className="my-1 border-t border-border" role="separator" />
+        ) : (
+          <button
+            key={i}
+            type="button"
+            role="menuitem"
+            className={`flex w-full px-3 py-2 text-left text-[13px] transition ${
+              item.danger
+                ? "text-rose-500 hover:bg-surface-hover hover:text-rose-600 hover:font-semibold"
+                : "text-text-primary hover:bg-surface-hover"
+            }`}
+            onClick={() => {
+              item.onSelect?.();
+              onClose();
+            }}
+          >
+            {item.label}
+          </button>
+        )
+      )}
     </div>
   );
 }

@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type MouseEvent } from "react";
 import { createPortal } from "react-dom";
 import {
   ChevronUp,
@@ -18,6 +18,9 @@ import {
   useGlobalSearch,
   type GlobalSearchItem,
 } from "../../hooks/useGlobalSearch";
+import { ContextMenu } from "../ContextMenu";
+import { Toast } from "../ds/Toast";
+import { buildGlobalSearchContextMenuItems } from "./global-search-context-menu";
 
 type Props = {
   open: boolean;
@@ -49,12 +52,43 @@ function truncatePathMiddle(filePath: string, max = 64): string {
   return `${filePath.slice(0, head)}…${filePath.slice(-tail)}`;
 }
 
+type CtxMenuState = {
+  x: number;
+  y: number;
+  item: GlobalSearchItem;
+};
+
 export function GlobalSearchPanel({ open, onClose }: Props) {
   const inputRef = useRef<HTMLInputElement>(null);
   const resultsScrollRef = useRef<HTMLDivElement>(null);
   const [composing, setComposing] = useState(false);
   const [showScrollTop, setShowScrollTop] = useState(false);
+  const [ctxMenu, setCtxMenu] = useState<CtxMenuState | null>(null);
+  const [hostPlatform, setHostPlatform] = useState("darwin");
+  const [toastOpen, setToastOpen] = useState(false);
+  const [toastMessage, setToastMessage] = useState("");
+  const [toastVariant, setToastVariant] = useState<"default" | "warning">("default");
   const search = useGlobalSearch(open);
+
+  const showToast = useCallback((message: string, variant: "default" | "warning" = "default") => {
+    setToastMessage(message);
+    setToastVariant(variant);
+    setToastOpen(true);
+  }, []);
+
+  const revealLabel = useMemo(() => {
+    if (hostPlatform === "darwin") return "在访达中显示";
+    if (hostPlatform === "win32") return "在资源管理器中显示";
+    return "在文件管理器中显示";
+  }, [hostPlatform]);
+
+  useEffect(() => {
+    void window.agenticxDesktop.platform().then((p) => setHostPlatform(p || "darwin"));
+  }, []);
+
+  useEffect(() => {
+    if (!open) setCtxMenu(null);
+  }, [open]);
 
   useEffect(() => {
     if (!open) return;
@@ -259,6 +293,10 @@ export function GlobalSearchPanel({ open, onClose }: Props) {
                           search.setSelectedPath(item.path);
                           void search.revealSelected();
                         }}
+                        onContextMenu={(event) => {
+                          event.preventDefault();
+                          setCtxMenu({ x: event.clientX, y: event.clientY, item });
+                        }}
                       />
                     );
                   })}
@@ -282,6 +320,31 @@ export function GlobalSearchPanel({ open, onClose }: Props) {
           ) : null}
         </div>
       </div>
+
+      <ContextMenu
+        open={!!ctxMenu}
+        x={ctxMenu?.x ?? 0}
+        y={ctxMenu?.y ?? 0}
+        onClose={() => setCtxMenu(null)}
+        items={
+          ctxMenu
+            ? buildGlobalSearchContextMenuItems({
+                item: ctxMenu.item,
+                revealLabel,
+                hostPlatform,
+                onToast: showToast,
+                onClosePanel: onClose,
+              })
+            : []
+        }
+      />
+
+      <Toast
+        open={toastOpen}
+        message={toastMessage}
+        variant={toastVariant}
+        onClose={() => setToastOpen(false)}
+      />
     </div>,
     document.body
   );
@@ -293,12 +356,14 @@ function ResultRow({
   onSelect,
   onOpen,
   onReveal,
+  onContextMenu,
 }: {
   item: GlobalSearchItem;
   active: boolean;
   onSelect: () => void;
   onOpen: () => void;
   onReveal: () => void;
+  onContextMenu: (event: MouseEvent) => void;
 }) {
   return (
     <div className="mb-1 last:mb-0">
@@ -309,6 +374,7 @@ function ResultRow({
         }`}
         onClick={onSelect}
         onDoubleClick={onOpen}
+        onContextMenu={onContextMenu}
       >
         <span className="shrink-0">{itemIcon(item)}</span>
         <span className="truncate text-[13px] text-text-strong">{item.name}</span>

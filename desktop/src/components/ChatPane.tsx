@@ -130,6 +130,12 @@ import {
 } from "../utils/pane-fresh-session";
 import { getRememberedSessionForAvatar } from "../utils/avatar-last-session";
 import { readScopedLocalStorage, writeScopedLocalStorage } from "../utils/backend-scope";
+import {
+  GLOBAL_SEARCH_REFERENCE_FILE,
+  GLOBAL_SEARCH_WORKSPACE_ADDED,
+  type GlobalSearchReferenceFileDetail,
+} from "./global-search/global-search-events";
+import { buildFileMentionAppend, fileNameFromPath } from "../utils/chat-file-mention";
 
 const SESSION_UNATTENDED_STORAGE_KEY = "agx-session-unattended-v1";
 
@@ -6185,6 +6191,86 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
     setBudgetExceededInfo(null);
     setInput(draft);
   };
+
+  const insertGlobalSearchFileReference = useCallback(
+    async (filePath: string, mode: "current" | "new") => {
+      const trimmed = filePath.trim();
+      if (!trimmed) return;
+
+      if (mode === "new") {
+        setContextFiles({});
+        clearPaneMessages(pane.id);
+        setPaneContextInherited(pane.id, false);
+        setPaneSessionId(pane.id, "");
+        clearPaneAwaitingFreshSession(pane.id);
+        await initSession(false);
+      }
+
+      const fileName = fileNameFromPath(trimmed);
+      let content = `[文件引用] ${trimmed}`;
+      try {
+        const preview = await window.agenticxDesktop.systemSearchPreview(trimmed);
+        if (preview.ok) {
+          if (preview.kind === "text" && preview.content) {
+            content = preview.content.slice(0, TEXT_ATTACHMENT_LIMIT);
+          } else if (preview.kind === "metadata" && preview.content) {
+            content = preview.content.slice(0, TEXT_ATTACHMENT_LIMIT);
+          } else if (preview.kind === "image") {
+            content = `[图片: ${fileName}]`;
+          }
+        }
+      } catch {
+        // keep fallback content
+      }
+
+      setContextFiles((prev) => ({
+        ...prev,
+        [trimmed]: {
+          name: fileName,
+          size: content.length,
+          mimeType: "text/plain",
+          status: "ready",
+          content,
+          sourcePath: trimmed,
+          referenceToken: true,
+        },
+      }));
+
+      const base = mode === "new" ? "" : extractComposerText();
+      const { next, tokenNames } = buildFileMentionAppend(base, fileName);
+      setComposerText(next, { tokenNames });
+      focusComposerEnd();
+    },
+    [
+      clearPaneMessages,
+      extractComposerText,
+      focusComposerEnd,
+      initSession,
+      pane.id,
+      setComposerText,
+      setPaneContextInherited,
+      setPaneSessionId,
+    ]
+  );
+
+  useEffect(() => {
+    const onReference = (event: Event) => {
+      const detail = (event as CustomEvent<GlobalSearchReferenceFileDetail>).detail;
+      if (!detail || detail.paneId !== pane.id) return;
+      void insertGlobalSearchFileReference(detail.filePath, detail.mode);
+    };
+    const onWorkspaceAdded = (event: Event) => {
+      const detail = (event as CustomEvent<{ paneId?: string }>).detail;
+      if (detail?.paneId && detail.paneId !== pane.id) return;
+      setTaskspaceAutoRefreshKey((k) => k + 1);
+    };
+    window.addEventListener(GLOBAL_SEARCH_REFERENCE_FILE, onReference);
+    window.addEventListener(GLOBAL_SEARCH_WORKSPACE_ADDED, onWorkspaceAdded);
+    return () => {
+      window.removeEventListener(GLOBAL_SEARCH_REFERENCE_FILE, onReference);
+      window.removeEventListener(GLOBAL_SEARCH_WORKSPACE_ADDED, onWorkspaceAdded);
+    };
+  }, [insertGlobalSearchFileReference, pane.id]);
 
   const maxTaskspaceWidth = paneWidth > 0 ? Math.max(240, Math.floor(paneWidth * 0.4)) : 480;
   const minTaskspaceWidth = 220;

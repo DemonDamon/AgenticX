@@ -43,7 +43,9 @@ import {
   updateSplashStage,
 } from "./splash";
 import {
+  getSystemSearchInfo,
   openSystemSearchPath,
+  openSystemSearchWith,
   previewSystemSearchFile,
   revealSystemSearchPath,
   runSystemSearch,
@@ -2896,6 +2898,14 @@ function registerEarlyIpc(): void {
 
   ipcMain.handle("system-search:reveal", async (_event, filePath: unknown) => {
     return revealSystemSearchPath(String(filePath ?? ""));
+  });
+
+  ipcMain.handle("system-search:get-info", async (_event, filePath: unknown) => {
+    return getSystemSearchInfo(String(filePath ?? ""));
+  });
+
+  ipcMain.handle("system-search:open-with", async (_event, filePath: unknown) => {
+    return openSystemSearchWith(String(filePath ?? ""));
   });
 }
 

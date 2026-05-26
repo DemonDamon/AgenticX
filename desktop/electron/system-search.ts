@@ -584,6 +584,58 @@ export async function revealSystemSearchPath(filePath: string): Promise<{ ok: bo
   }
 }
 
+function escapeAppleScriptPath(filePath: string): string {
+  return filePath.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
+}
+
+/** macOS Finder Get Info; other platforms fall back to reveal in file manager. */
+export async function getSystemSearchInfo(filePath: string): Promise<{ ok: boolean; error?: string }> {
+  const resolved = path.resolve(filePath);
+  if (process.platform === "darwin") {
+    try {
+      const script = `tell application "Finder" to open information window of (POSIX file "${escapeAppleScriptPath(resolved)}" as alias)`;
+      await execFileAsync("osascript", ["-e", script]);
+      return { ok: true };
+    } catch (error) {
+      const fallback = await revealSystemSearchPath(filePath);
+      if (fallback.ok) return { ok: true };
+      return { ok: false, error: String(error) };
+    }
+  }
+  return revealSystemSearchPath(filePath);
+}
+
+/** Open-with picker (Windows) or reveal + hint (macOS/Linux). */
+export async function openSystemSearchWith(
+  filePath: string
+): Promise<{ ok: boolean; hint?: string; error?: string }> {
+  const resolved = path.resolve(filePath);
+  try {
+    const st = await fs.promises.stat(resolved);
+    if (st.isDirectory()) {
+      const reveal = await revealSystemSearchPath(filePath);
+      return reveal.ok
+        ? { ok: true, hint: "文件夹请在访达/资源管理器中右键选择打开方式" }
+        : reveal;
+    }
+    if (process.platform === "win32") {
+      await execFileAsync("rundll32.exe", ["shell32.dll,OpenAs_RunDLL", resolved]);
+      return { ok: true };
+    }
+    const reveal = await revealSystemSearchPath(filePath);
+    if (!reveal.ok) return reveal;
+    return {
+      ok: true,
+      hint:
+        process.platform === "darwin"
+          ? "请在访达中右键该文件选择打开方式"
+          : "当前平台不支持打开方式选择，已在文件管理器中定位",
+    };
+  } catch (error) {
+    return { ok: false, error: String(error) };
+  }
+}
+
 export function formatFileSize(bytes: number): string {
   if (bytes <= 0) return "—";
   if (bytes < 1024) return `${bytes}B`;
