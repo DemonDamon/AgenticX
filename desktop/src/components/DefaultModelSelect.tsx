@@ -1,6 +1,6 @@
 import { useMemo } from "react";
 import { useAppStore } from "../store";
-import { getProviderDisplayName } from "../utils/provider-display";
+import { formatModelOptionLabel } from "../utils/model-display";
 
 type Props = {
   provider: string;
@@ -25,12 +25,11 @@ export function DefaultModelSelect({ provider, model, onChange, inheritLabel }: 
     for (const [provName, entry] of Object.entries(settings.providers)) {
       if (entry.enabled === false) continue;
       if (!entry.apiKey) continue;
-      const provLabel = getProviderDisplayName(provName, entry);
       if (entry.models.length > 0) {
         for (const m of entry.models) {
           rows.push({
             value: `${provName}|${m}`,
-            label: `${provLabel} | ${m}`,
+            label: formatModelOptionLabel(provName, m, entry, " | "),
             provider: provName,
             model: m,
           });
@@ -38,7 +37,7 @@ export function DefaultModelSelect({ provider, model, onChange, inheritLabel }: 
       } else if (entry.model) {
         rows.push({
           value: `${provName}|${entry.model}`,
-          label: `${provLabel} | ${entry.model}`,
+          label: formatModelOptionLabel(provName, entry.model, entry, " | "),
           provider: provName,
           model: entry.model,
         });
@@ -71,7 +70,7 @@ export function DefaultModelSelect({ provider, model, onChange, inheritLabel }: 
     >
       <option value="">{placeholder}</option>
       {!currentKnown && current ? (
-        <option value={current}>{`${provider} | ${model}`}（已保存，但当前 Provider 不可用）</option>
+        <option value={current}>{formatModelOptionLabel(provider, model, settings.providers[provider], " | ")}（已保存，但当前 Provider 不可用）</option>
       ) : null}
       {options.map((opt) => (
         <option key={opt.value} value={opt.value}>

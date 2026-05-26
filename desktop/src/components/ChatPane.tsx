@@ -99,7 +99,7 @@ import { filterPersistedMessagesForDeletion } from "../utils/retry-trim-policy";
 import { favoriteStorageMessageId } from "../utils/favorite-selection";
 import { createResizeRafScheduler } from "../utils/resize-raf";
 import { avatarTintBg } from "../utils/avatar-color";
-import { getProviderDisplayName } from "../utils/provider-display";
+import { formatModelOptionLabel } from "../utils/model-display";
 import { isAutomationPaneAvatarId } from "../utils/automation-pane";
 import {
   ccBridgeSendToolProgressLabel,
@@ -662,11 +662,16 @@ function PaneModelPicker({ paneId }: { paneId: string }) {
     for (const [provName, entry] of Object.entries(settings.providers)) {
       if (entry.enabled === false) continue;
       if (!entry.apiKey) continue;
-      const provLabel = getProviderDisplayName(provName, entry);
       if (entry.models.length > 0) {
-        for (const m of entry.models) result.push({ provider: provName, model: m, label: `${provLabel}/${m}` });
+        for (const m of entry.models) {
+          result.push({ provider: provName, model: m, label: formatModelOptionLabel(provName, m, entry) });
+        }
       } else if (entry.model) {
-        result.push({ provider: provName, model: entry.model, label: `${provLabel}/${entry.model}` });
+        result.push({
+          provider: provName,
+          model: entry.model,
+          label: formatModelOptionLabel(provName, entry.model, entry),
+        });
       }
     }
     return result;
@@ -678,8 +683,7 @@ function PaneModelPicker({ paneId }: { paneId: string }) {
     if (!currentModel) return "未选模型";
     if (!currentProvider) return currentModel;
     const entry = settings.providers[currentProvider];
-    const provLabel = getProviderDisplayName(currentProvider, entry);
-    return `${provLabel}/${currentModel}`;
+    return formatModelOptionLabel(currentProvider, currentModel, entry);
   }, [currentModel, currentProvider, settings.providers]);
 
   const syncPanelPosition = useCallback(() => {
@@ -1066,8 +1070,7 @@ function ModelBadge({ provider, model }: { provider?: string; model?: string }) 
   const providers = useAppStore((s) => s.settings.providers);
   if (!model) return null;
   const entry = provider ? providers[provider] : undefined;
-  const provLabel = provider ? getProviderDisplayName(provider, entry) : "";
-  const label = provLabel ? `${provLabel}/${model}` : model;
+  const label = provider ? formatModelOptionLabel(provider, model, entry) : model;
   return (
     <span className="mb-1 inline-block rounded bg-surface-card-strong px-1.5 py-0.5 text-[10px] text-text-faint">
       {label}
@@ -3779,13 +3782,16 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
     for (const [provName, entry] of Object.entries(settings.providers)) {
       if (entry.enabled === false) continue;
       if (!entry.apiKey) continue;
-      const provLabel = getProviderDisplayName(provName, entry);
       if (entry.models.length > 0) {
         for (const m of entry.models) {
-          result.push({ provider: provName, model: m, label: `${provLabel}/${m}` });
+          result.push({ provider: provName, model: m, label: formatModelOptionLabel(provName, m, entry) });
         }
       } else if (entry.model) {
-        result.push({ provider: provName, model: entry.model, label: `${provLabel}/${entry.model}` });
+        result.push({
+          provider: provName,
+          model: entry.model,
+          label: formatModelOptionLabel(provName, entry.model, entry),
+        });
       }
     }
     return result;
@@ -3795,7 +3801,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
     if (!chatModel) return "未选模型";
     if (!chatProvider) return chatModel;
     const entry = settings.providers[chatProvider];
-    return `${getProviderDisplayName(chatProvider, entry)}/${chatModel}`;
+    return formatModelOptionLabel(chatProvider, chatModel, entry);
   }, [chatModel, chatProvider, settings.providers]);
 
   const silentSeconds = useMemo(() => {

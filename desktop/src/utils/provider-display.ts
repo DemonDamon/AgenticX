@@ -12,12 +12,35 @@ const PROVIDER_DISPLAY_NAME: Record<string, string> = {
   ollama: "Ollama",
 };
 
+export type ProviderDisplayEntry = {
+  displayName?: string;
+  baseUrl?: string;
+  interface?: "openai";
+};
+
+function normalizeBaseUrl(baseUrl: string): string {
+  return baseUrl.trim().replace(/\/+$/, "").toLowerCase();
+}
+
+/** Official OpenAI API bases — anything else on the built-in openai provider is a proxy/gateway. */
+export function isOfficialOpenAIBase(baseUrl: string): boolean {
+  const base = normalizeBaseUrl(baseUrl);
+  if (!base) return true;
+  return base === "https://api.openai.com" || base === "https://api.openai.com/v1";
+}
+
 export function getProviderDisplayName(
   providerId: string,
-  entry?: { displayName?: string } | null,
+  entry?: ProviderDisplayEntry | null,
 ): string {
   const custom = entry?.displayName?.trim();
   if (custom) return custom;
+  if (providerId === "openai") {
+    const baseUrl = (entry?.baseUrl ?? "").trim();
+    if (baseUrl && !isOfficialOpenAIBase(baseUrl)) {
+      return "OpenAI 兼容";
+    }
+  }
   return PROVIDER_DISPLAY_NAME[providerId] ?? providerId;
 }
 
