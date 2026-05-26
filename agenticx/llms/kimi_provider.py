@@ -139,9 +139,31 @@ class KimiProvider(BaseLLMProvider):
             out.append(patched)
         return out
 
+    @staticmethod
+    def _drop_empty_assistant_content(messages: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """Moonshot rejects assistant rows whose content is an empty string."""
+        out: List[Dict[str, Any]] = []
+        for msg in messages:
+            if not isinstance(msg, dict):
+                out.append(msg)
+                continue
+            if str(msg.get("role", "")).strip() != "assistant":
+                out.append(msg)
+                continue
+            content = msg.get("content")
+            if isinstance(content, str) and not content.strip():
+                if msg.get("tool_calls"):
+                    patched = dict(msg)
+                    patched["content"] = " "
+                    out.append(patched)
+                continue
+            out.append(msg)
+        return out
+
     def _prepare_request_messages(
         self, messages: List[Dict[str, Any]], kwargs: Dict[str, Any]
     ) -> List[Dict[str, Any]]:
+        messages = self._drop_empty_assistant_content(messages)
         if not self._should_patch_reasoning_content_for_tool_calls(kwargs):
             return messages
         return self._fill_reasoning_content_for_tool_call_messages(messages)
