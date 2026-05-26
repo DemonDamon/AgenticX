@@ -100,6 +100,7 @@ import { favoriteStorageMessageId } from "../utils/favorite-selection";
 import { createResizeRafScheduler } from "../utils/resize-raf";
 import { avatarTintBg } from "../utils/avatar-color";
 import { formatModelOptionLabel } from "../utils/model-display";
+import { collectSelectableModelOptions, coerceSelectableModel, isModelSelectable } from "../utils/model-options";
 import { isAutomationPaneAvatarId } from "../utils/automation-pane";
 import {
   ccBridgeSendToolProgressLabel,
@@ -695,31 +696,19 @@ function PaneModelPicker({ paneId }: { paneId: string }) {
     }
   };
 
-  const options = useMemo(() => {
-    const result: { provider: string; model: string; label: string }[] = [];
-    for (const [provName, entry] of Object.entries(settings.providers)) {
-      if (entry.enabled === false) continue;
-      if (!entry.apiKey) continue;
-      if (entry.models.length > 0) {
-        for (const m of entry.models) {
-          result.push({ provider: provName, model: m, label: formatModelOptionLabel(provName, m, entry) });
-        }
-      } else if (entry.model) {
-        result.push({
-          provider: provName,
-          model: entry.model,
-          label: formatModelOptionLabel(provName, entry.model, entry),
-        });
-      }
-    }
-    return result;
-  }, [settings.providers]);
+  const options = useMemo(
+    () => collectSelectableModelOptions(settings.providers),
+    [settings.providers],
+  );
 
   const currentProvider = (paneModel?.modelProvider || "").trim();
   const currentModel = (paneModel?.modelName || "").trim();
   const currentLabel = useMemo(() => {
     if (!currentModel) return "未选模型";
     if (!currentProvider) return currentModel;
+    if (!isModelSelectable(currentProvider, currentModel, settings.providers)) {
+      return "未选模型";
+    }
     const entry = settings.providers[currentProvider];
     return formatModelOptionLabel(currentProvider, currentModel, entry);
   }, [currentModel, currentProvider, settings.providers]);
@@ -1981,13 +1970,30 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
   const storeActiveModel = useAppStore((s) => s.activeModel);
   const settings = useAppStore((s) => s.settings);
   const setPaneModel = useAppStore((s) => s.setPaneModel);
+  const reconcilePaneModels = useAppStore((s) => s.reconcilePaneModels);
   const setForwardAutoReply = useAppStore((s) => s.setForwardAutoReply);
   const { chatProvider, chatModel } = useMemo(() => {
     const pp = (pane?.modelProvider ?? "").trim();
     const pm = (pane?.modelName ?? "").trim();
-    if (pp && pm) return { chatProvider: pp, chatModel: pm };
-    return { chatProvider: storeActiveProvider, chatModel: storeActiveModel };
-  }, [pane?.modelProvider, pane?.modelName, storeActiveProvider, storeActiveModel]);
+    const rawProvider = pp || storeActiveProvider;
+    const rawModel = pm || storeActiveModel;
+    const coerced = coerceSelectableModel(
+      settings.providers,
+      rawProvider,
+      rawModel,
+      rawProvider,
+    );
+    if (!coerced) return { chatProvider: "", chatModel: "" };
+    return { chatProvider: coerced.provider, chatModel: coerced.model };
+  }, [pane?.modelProvider, pane?.modelName, storeActiveProvider, storeActiveModel, settings.providers]);
+
+  useEffect(() => {
+    const pp = (pane?.modelProvider ?? "").trim();
+    const pm = (pane?.modelName ?? "").trim();
+    if (!pp || !pm) return;
+    if (isModelSelectable(pp, pm, settings.providers)) return;
+    reconcilePaneModels();
+  }, [pane?.modelProvider, pane?.modelName, settings.providers, reconcilePaneModels]);
   const selectedSubAgent = useAppStore((s) => s.selectedSubAgent);
   const setSelectedSubAgent = useAppStore((s) => s.setSelectedSubAgent);
   const addSubAgent = useAppStore((s) => s.addSubAgent);
@@ -3826,29 +3832,15 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
     sessionWorkInProgress,
   });
 
-  const stallModelOptions = useMemo(() => {
-    const result: { provider: string; model: string; label: string }[] = [];
-    for (const [provName, entry] of Object.entries(settings.providers)) {
-      if (entry.enabled === false) continue;
-      if (!entry.apiKey) continue;
-      if (entry.models.length > 0) {
-        for (const m of entry.models) {
-          result.push({ provider: provName, model: m, label: formatModelOptionLabel(provName, m, entry) });
-        }
-      } else if (entry.model) {
-        result.push({
-          provider: provName,
-          model: entry.model,
-          label: formatModelOptionLabel(provName, entry.model, entry),
-        });
-      }
-    }
-    return result;
-  }, [settings.providers]);
+  const stallModelOptions = useMemo(
+    () => collectSelectableModelOptions(settings.providers),
+    [settings.providers],
+  );
 
   const currentModelLabel = useMemo(() => {
     if (!chatModel) return "未选模型";
     if (!chatProvider) return chatModel;
+    if (!isModelSelectable(chatProvider, chatModel, settings.providers)) return "未选模型";
     const entry = settings.providers[chatProvider];
     return formatModelOptionLabel(chatProvider, chatModel, entry);
   }, [chatModel, chatProvider, settings.providers]);

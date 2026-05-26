@@ -1,6 +1,6 @@
 import { useMemo } from "react";
 import { useAppStore } from "../store";
-import { formatModelOptionLabel } from "../utils/model-display";
+import { collectSelectableModelOptions } from "../utils/model-options";
 
 type ModelOption = { provider: string; model: string; label: string };
 
@@ -14,25 +14,10 @@ type Props = {
 export function ModelPicker({ open, onSelect, onClose }: Props) {
   const settings = useAppStore((s) => s.settings);
 
-  const options = useMemo<ModelOption[]>(() => {
-    const result: ModelOption[] = [];
-    for (const [provName, entry] of Object.entries(settings.providers)) {
-      if (entry.enabled === false) continue;
-      if (!entry.apiKey) continue;
-      if (entry.models.length > 0) {
-        for (const m of entry.models) {
-          result.push({ provider: provName, model: m, label: formatModelOptionLabel(provName, m, entry, " | ") });
-        }
-      } else if (entry.model) {
-        result.push({
-          provider: provName,
-          model: entry.model,
-          label: formatModelOptionLabel(provName, entry.model, entry, " | "),
-        });
-      }
-    }
-    return result;
-  }, [settings.providers]);
+  const options = useMemo<ModelOption[]>(
+    () => collectSelectableModelOptions(settings.providers, " | "),
+    [settings.providers],
+  );
 
   if (!open) return null;
 

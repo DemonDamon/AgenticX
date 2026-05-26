@@ -1,6 +1,7 @@
 import { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState, type KeyboardEventHandler } from "react";
 import { useAppStore, type Message, type QueuedMessage } from "../store";
 import { formatModelOptionLabel } from "../utils/model-display";
+import { collectSelectableModelOptions, isModelSelectable } from "../utils/model-options";
 import { SubAgentPanel } from "./SubAgentPanel";
 import { interruptOnInterimResult, interruptTtsOnUserSpeech } from "../voice/interrupt";
 import { speak } from "../voice/tts";
@@ -466,29 +467,15 @@ export function ChatView({ onOpenConfirm, mode = "pro" }: Props) {
 
   const canSend = useMemo(() => !!(apiBase && sessionId), [apiBase, sessionId]);
 
-  const stallModelOptions = useMemo(() => {
-    const result: { provider: string; model: string; label: string }[] = [];
-    for (const [provName, entry] of Object.entries(settings.providers)) {
-      if (entry.enabled === false) continue;
-      if (!entry.apiKey) continue;
-      if (entry.models.length > 0) {
-        for (const m of entry.models) {
-          result.push({ provider: provName, model: m, label: formatModelOptionLabel(provName, m, entry) });
-        }
-      } else if (entry.model) {
-        result.push({
-          provider: provName,
-          model: entry.model,
-          label: formatModelOptionLabel(provName, entry.model, entry),
-        });
-      }
-    }
-    return result;
-  }, [settings.providers]);
+  const stallModelOptions = useMemo(
+    () => collectSelectableModelOptions(settings.providers),
+    [settings.providers],
+  );
 
   const currentModelLabel = useMemo(() => {
     if (!activeModel) return "未选模型";
     if (!activeProvider) return activeModel;
+    if (!isModelSelectable(activeProvider, activeModel, settings.providers)) return "未选模型";
     const entry = settings.providers[activeProvider];
     return formatModelOptionLabel(activeProvider, activeModel, entry);
   }, [activeModel, activeProvider, settings.providers]);
@@ -2132,25 +2119,10 @@ export function ChatView({ onOpenConfirm, mode = "pro" }: Props) {
 
 function ModelPickerDropdown({ onSelect, onClose }: { onSelect: (p: string, m: string) => void; onClose: () => void }) {
   const settings = useAppStore((s) => s.settings);
-  const options = useMemo(() => {
-    const result: { provider: string; model: string; label: string }[] = [];
-    for (const [provName, entry] of Object.entries(settings.providers)) {
-      if (entry.enabled === false) continue;
-      if (!entry.apiKey) continue;
-      if (entry.models.length > 0) {
-        for (const m of entry.models) {
-          result.push({ provider: provName, model: m, label: formatModelOptionLabel(provName, m, entry, " | ") });
-        }
-      } else if (entry.model) {
-        result.push({
-          provider: provName,
-          model: entry.model,
-          label: formatModelOptionLabel(provName, entry.model, entry, " | "),
-        });
-      }
-    }
-    return result;
-  }, [settings.providers]);
+  const options = useMemo(
+    () => collectSelectableModelOptions(settings.providers, " | "),
+    [settings.providers],
+  );
 
   if (options.length === 0) {
     return <div className="px-3 py-4 text-center text-xs text-text-faint">请先在设置中配置 Provider 和模型</div>;
