@@ -467,9 +467,9 @@ export const VoiceSettingsPanel = forwardRef<VoiceSettingsPanelHandle>(function 
         ) : (
           <div className="space-y-2 border-t border-border pt-3">
             <div className="text-text-subtle text-xs uppercase tracking-wide">豆包 / 火山</div>
-            <div className="rounded-md border border-yellow-600/40 bg-yellow-500/10 px-3 py-2 text-xs text-yellow-300">
+            <p className="text-xs text-amber-500">
               豆包模式下，语音采集走实时链路，工具执行（含 MCP/CLI）由本地 Meta 运行时桥接处理；若系统语音不可用，将仅返回文本结果。
-            </div>
+            </p>
             <label className="block">
               App ID
               <input
