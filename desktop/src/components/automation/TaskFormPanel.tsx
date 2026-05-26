@@ -4,7 +4,7 @@ import { FrequencyPicker } from "./FrequencyPicker";
 import type { AutomationTask, AutomationFrequency } from "./types";
 import { deleteAutomationTaskWithConfirm } from "../../utils/automation-delete";
 import { useAppStore } from "../../store";
-import { formatModelOptionLabel } from "../../utils/model-display";
+import { collectSelectableModelOptions, isModelSelectable } from "../../utils/model-options";
 
 function encodeLlm(provider: string, model: string): string {
   return `${provider}:${model}`;
@@ -59,23 +59,18 @@ export function TaskFormPanel({ initial, onSave, onCancel, onAfterDelete }: Prop
   });
 
   const llmOptions = useMemo(() => {
-    const result: { value: string; label: string }[] = [];
-    for (const [provName, entry] of Object.entries(settings.providers)) {
-      if (entry.enabled === false) continue;
-      if (!entry.apiKey) continue;
-      if (entry.models.length > 0) {
-        for (const m of entry.models) {
-          result.push({ value: encodeLlm(provName, m), label: formatModelOptionLabel(provName, m, entry) });
-        }
-      } else if (entry.model) {
-        result.push({
-          value: encodeLlm(provName, entry.model),
-          label: formatModelOptionLabel(provName, entry.model, entry),
-        });
-      }
-    }
-    return result;
+    return collectSelectableModelOptions(settings.providers).map((row) => ({
+      value: encodeLlm(row.provider, row.model),
+      label: row.label,
+    }));
   }, [settings.providers]);
+
+  useEffect(() => {
+    const decoded = decodeLlm(llmValue.trim());
+    if (!decoded) return;
+    if (isModelSelectable(decoded.provider, decoded.model, settings.providers)) return;
+    setLlmValue("");
+  }, [llmValue, settings.providers]);
 
   const pickWorkspaceFolder = useCallback(async () => {
     setWsHint("");

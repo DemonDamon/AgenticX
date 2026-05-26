@@ -26,6 +26,11 @@ import {
 } from "./components/global-search/global-search-events";
 import { Toast } from "./components/ds/Toast";
 import { addFolderToActiveWorkspace } from "./utils/global-search-workspace";
+import {
+  coerceSelectableModel,
+  normalizeAllProviders,
+  normalizeProviderEntry,
+} from "./utils/model-options";
 
 const WORKSPACE_STATE_STORAGE_KEY = "agx-workspace-state-v1";
 
@@ -85,7 +90,7 @@ function toProviderEntries(
     };
     if (displayName) row.displayName = displayName;
     if (cfg.interface === "openai") row.interface = "openai";
-    result[name] = row;
+    result[name] = normalizeProviderEntry(row);
   }
   return result;
 }
@@ -314,6 +319,27 @@ export function App() {
   }>>([]);
   const autoReportingRef = useRef(false);
   const directNoticeSentRef = useRef<Set<string>>(new Set());
+  const persistReconciledPaneModels = useCallback(async () => {
+    const before = useAppStore.getState();
+    const { changedPaneIds, activeChanged } = before.reconcilePaneModels();
+    if (changedPaneIds.length === 0 && !activeChanged) return;
+    const next = useAppStore.getState();
+    if (next.activeProvider && next.activeModel) {
+      await window.agenticxDesktop.saveConfig({
+        activeProvider: next.activeProvider,
+        activeModel: next.activeModel,
+      });
+    }
+    for (const paneId of changedPaneIds) {
+      const pane = next.panes.find((item) => item.id === paneId);
+      const sid = String(pane?.sessionId ?? "").trim();
+      const provider = String(pane?.modelProvider ?? "").trim();
+      const model = String(pane?.modelName ?? "").trim();
+      if (sid && provider && model) {
+        await window.agenticxDesktop.setSessionModel({ sessionId: sid, provider, model });
+      }
+    }
+  }, []);
   // Track live automation-triggered sessions; used to poll and refresh tool/message progress.
   const automationRunningRef = useRef<Map<string, Set<string>>>(new Map());
   const automationPollTimerRef = useRef<number | null>(null);
@@ -494,20 +520,31 @@ export function App() {
         const savedActiveProvider = cfgEarly.activeProvider ?? "";
         const savedActiveModel = cfgEarly.activeModel ?? "";
         if (savedActiveProvider && savedActiveModel) {
-          setActiveModel(savedActiveProvider, savedActiveModel);
-          const currentPaneId = useAppStore.getState().activePaneId;
-          const currentPane = useAppStore.getState().panes.find((pane) => pane.id === currentPaneId);
-          const hasPaneModel = Boolean(currentPane?.modelProvider?.trim() && currentPane?.modelName?.trim());
-          if (!hasPaneModel) {
-            setPaneModel(currentPaneId, savedActiveProvider, savedActiveModel);
+          const coerced = coerceSelectableModel(
+            entries,
+            savedActiveProvider,
+            savedActiveModel,
+            savedActiveProvider,
+          );
+          if (coerced) {
+            setActiveModel(coerced.provider, coerced.model);
+            const currentPaneId = useAppStore.getState().activePaneId;
+            const currentPane = useAppStore.getState().panes.find((pane) => pane.id === currentPaneId);
+            const hasPaneModel = Boolean(currentPane?.modelProvider?.trim() && currentPane?.modelName?.trim());
+            if (!hasPaneModel) {
+              setPaneModel(currentPaneId, coerced.provider, coerced.model);
+            }
           }
-        } else if (defP && defEntry?.model) {
-          setActiveModel(defP, defEntry.model);
-          const currentPaneId = useAppStore.getState().activePaneId;
-          const currentPane = useAppStore.getState().panes.find((pane) => pane.id === currentPaneId);
-          const hasPaneModel = Boolean(currentPane?.modelProvider?.trim() && currentPane?.modelName?.trim());
-          if (!hasPaneModel) {
-            setPaneModel(currentPaneId, defP, defEntry.model);
+        } else if (defP) {
+          const coerced = coerceSelectableModel(entries, defP, defEntry?.model ?? "", defP);
+          if (coerced) {
+            setActiveModel(coerced.provider, coerced.model);
+            const currentPaneId = useAppStore.getState().activePaneId;
+            const currentPane = useAppStore.getState().panes.find((pane) => pane.id === currentPaneId);
+            const hasPaneModel = Boolean(currentPane?.modelProvider?.trim() && currentPane?.modelName?.trim());
+            if (!hasPaneModel) {
+              setPaneModel(currentPaneId, coerced.provider, coerced.model);
+            }
           }
         }
       } catch (err) {
@@ -785,6 +822,7 @@ export function App() {
       if ((!paneProvider || !paneModel) && cfgProvider && cfgModel) {
         bootState.setPaneModel(bootState.activePaneId, cfgProvider, cfgModel);
       }
+      await persistReconciledPaneModels();
 
       window.agenticxDesktop.onOpenSettings(() => openSettings());
       workspaceHydratedRef.current = true;
@@ -1555,20 +1593,9 @@ export function App() {
     defaultProvider: string;
     providers: Record<string, ProviderEntry>;
   }) => {
-    const resolveFallbackModel = (): { provider: string; model: string } | null => {
-      const candidates = Object.entries(result.providers)
-        .filter(([, entry]) => entry.enabled !== false)
-        .map(([provider, entry]) => {
-          const model = entry.model || entry.models[0] || "";
-          return { provider, model };
-        })
-        .filter((row) => row.model);
-      if (candidates.length === 0) return null;
-      const preferred = candidates.find((row) => row.provider === result.defaultProvider);
-      return preferred ?? candidates[0];
-    };
+    const normalizedProviders = normalizeAllProviders(result.providers);
 
-    for (const [name, entry] of Object.entries(result.providers)) {
+    for (const [name, entry] of Object.entries(normalizedProviders)) {
       const hasCustomVendorMeta = Boolean(entry.displayName?.trim()) || entry.interface === "openai";
       if (
         !hasCustomVendorMeta &&
@@ -1595,36 +1622,27 @@ export function App() {
     }
     await window.agenticxDesktop.setDefaultProvider(result.defaultProvider);
 
-    const defEntry = result.providers[result.defaultProvider];
+    const defEntry = normalizedProviders[result.defaultProvider];
     updateSettings({
       defaultProvider: result.defaultProvider,
-      providers: result.providers,
+      providers: normalizedProviders,
       provider: result.defaultProvider,
       model: defEntry?.model ?? "",
       apiKey: defEntry?.apiKey ?? "",
     });
 
-    // Only switch active model if user hasn't manually chosen a different one yet
-    const curProvider = useAppStore.getState().activeProvider;
-    const curModel = useAppStore.getState().activeModel;
-    const currentEntry = result.providers[curProvider];
-    const currentModelStillVisible =
-      !!curProvider &&
-      !!curModel &&
-      currentEntry?.enabled !== false &&
-      (currentEntry?.model === curModel || currentEntry?.models.includes(curModel));
-    if (!currentModelStillVisible) {
-      const fallback = resolveFallbackModel();
-      if (fallback) {
-        setActiveModel(fallback.provider, fallback.model);
-        const currentPaneId = useAppStore.getState().activePaneId;
-        setPaneModel(currentPaneId, fallback.provider, fallback.model);
-      }
-    }
+    await persistReconciledPaneModels();
+    const nextState = useAppStore.getState();
     await window.agenticxDesktop.saveConfig({
       provider: result.defaultProvider,
       model: defEntry?.model ?? "",
       apiKey: defEntry?.apiKey ?? "",
+      ...(nextState.activeProvider && nextState.activeModel
+        ? {
+            activeProvider: nextState.activeProvider,
+            activeModel: nextState.activeModel,
+          }
+        : {}),
     });
     stopSpeak();
   };

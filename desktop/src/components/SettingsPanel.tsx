@@ -67,6 +67,7 @@ import {
 import { AccountTab } from "./AccountTab";
 import { KnowledgeSettings, type KnowledgeSettingsHandle } from "./settings/knowledge/KnowledgeSettings";
 import { getProviderDisplayName, makeCustomOpenAIProviderId } from "../utils/provider-display";
+import { normalizeProviderEntry } from "../utils/model-options";
 import type { SettingsTab } from "../settings-tab";
 import type { MCPDiscoveryHit } from "./settings/mcp/MCPDiscoveryPanel";
 import { MCPMarketplacePanel } from "./settings/mcp/MCPMarketplacePanel";
@@ -5537,7 +5538,27 @@ export function SettingsPanel({
     }
   };
 
-  const onRemoveModel = (model: string) => updateField("models", current.models.filter((m) => m !== model));
+  const onRemoveModel = (model: string) => {
+    setDraft((prev) => {
+      const prevEntry = prev[active] ?? {
+        apiKey: "",
+        baseUrl: "",
+        model: "",
+        models: [],
+        enabled: false,
+        dropParams: false,
+      };
+      const nextModels = prevEntry.models.filter((m) => m !== model);
+      let nextModel = prevEntry.model;
+      if (nextModel === model || (nextModels.length > 0 && !nextModels.includes(nextModel))) {
+        nextModel = nextModels[0] ?? "";
+      }
+      return {
+        ...prev,
+        [active]: normalizeProviderEntry({ ...prevEntry, models: nextModels, model: nextModel }),
+      };
+    });
+  };
 
   const closeAddModelModal = () => {
     setAddModelModalOpen(false);
@@ -5667,7 +5688,7 @@ export function SettingsPanel({
     }
     const normalized: Record<string, ProviderEntry> = {};
     for (const [name, entry] of Object.entries(draft)) {
-      normalized[name] = { ...entry, baseUrl: normalizeBaseUrl(entry.baseUrl) };
+      normalized[name] = normalizeProviderEntry({ ...entry, baseUrl: normalizeBaseUrl(entry.baseUrl) });
     }
     await onSave({ defaultProvider: defProv, providers: normalized });
     const remoteSave = await window.agenticxDesktop.saveRemoteServer({

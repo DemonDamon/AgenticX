@@ -5,6 +5,10 @@ import type { SettingsTab } from "./settings-tab";
 import { clearPaneAwaitingFreshSession } from "./utils/pane-fresh-session";
 import { readScopedLocalStorage, writeScopedLocalStorage } from "./utils/backend-scope";
 import { META_AGENT_DISPLAY_NAME } from "./constants/branding";
+import {
+  coerceSelectableModel,
+  reconcilePaneModelsWithSettings as reconcilePaneModelsPure,
+} from "./utils/model-options";
 
 export type UiStatus = "idle" | "listening" | "processing";
 export type MsgRole = "user" | "assistant" | "tool";
@@ -399,6 +403,8 @@ type AppState = {
   setStatus: (status: UiStatus) => void;
   setActiveModel: (provider: string, model: string) => void;
   setPaneModel: (paneId: string, provider: string, model: string) => void;
+  /** Migrate pane/global picks that are no longer in the visible model catalog. */
+  reconcilePaneModels: () => { changedPaneIds: string[]; activeChanged: boolean };
   setUserMode: (mode: "pro" | "lite") => void;
   setOnboardingCompleted: (v: boolean) => void;
   setCommandPaletteOpen: (v: boolean) => void;
@@ -774,8 +780,25 @@ export const useAppStore = create<AppState>((set, get) => ({
   setActiveModel: (activeProvider, activeModel) => set({ activeProvider, activeModel }),
   setPaneModel: (paneId, provider, model) =>
     set((state) => {
-      const nextProvider = String(provider ?? "").trim();
-      const nextModel = String(model ?? "").trim();
+      const rawProvider = String(provider ?? "").trim();
+      const rawModel = String(model ?? "").trim();
+      let nextProvider = rawProvider;
+      let nextModel = rawModel;
+      if (rawProvider || rawModel) {
+        const coerced = coerceSelectableModel(
+          state.settings.providers,
+          rawProvider,
+          rawModel,
+          rawProvider,
+        );
+        if (coerced) {
+          nextProvider = coerced.provider;
+          nextModel = coerced.model;
+        } else {
+          nextProvider = "";
+          nextModel = "";
+        }
+      }
       const paneExists = state.panes.some((pane) => pane.id === paneId);
       if (!paneExists) return state;
       const nextPanes = state.panes.map((pane) =>
@@ -792,6 +815,37 @@ export const useAppStore = create<AppState>((set, get) => ({
         activeModel: nextModel,
       };
     }),
+  reconcilePaneModels: () => {
+    let changedPaneIds: string[] = [];
+    let activeChanged = false;
+    set((state) => {
+      const result = reconcilePaneModelsPure({
+        panes: state.panes,
+        activePaneId: state.activePaneId,
+        activeProvider: state.activeProvider,
+        activeModel: state.activeModel,
+        providers: state.settings.providers,
+      });
+      changedPaneIds = result.changedPaneIds;
+      activeChanged = result.activeChanged;
+      if (changedPaneIds.length === 0 && !activeChanged) return state;
+      const paneById = new Map(result.panes.map((pane) => [pane.id, pane]));
+      return {
+        panes: state.panes.map((pane) => {
+          const next = paneById.get(pane.id);
+          if (!next) return pane;
+          return {
+            ...pane,
+            modelProvider: next.modelProvider ?? "",
+            modelName: next.modelName ?? "",
+          };
+        }),
+        activeProvider: result.activeProvider,
+        activeModel: result.activeModel,
+      };
+    });
+    return { changedPaneIds, activeChanged };
+  },
   setUserMode: (userMode) => set({ userMode }),
   setOnboardingCompleted: (onboardingCompleted) => set({ onboardingCompleted }),
   setCommandPaletteOpen: (commandPaletteOpen) => set({ commandPaletteOpen }),
@@ -943,13 +997,33 @@ export const useAppStore = create<AppState>((set, get) => ({
         const avatarProvider = (avatar?.defaultProvider || "").trim();
         const avatarModel = (avatar?.defaultModel || "").trim();
         const defaultProvider = (state.settings.defaultProvider || "").trim();
-        const defaultModel = (state.settings.providers[defaultProvider]?.model || "").trim();
         if (avatarProvider && avatarModel) {
           provider = avatarProvider;
           model = avatarModel;
-        } else if (defaultProvider && defaultModel) {
-          provider = defaultProvider;
-          model = defaultModel;
+        } else {
+          const fallback = coerceSelectableModel(
+            state.settings.providers,
+            defaultProvider,
+            "",
+            defaultProvider,
+          );
+          if (fallback) {
+            provider = fallback.provider;
+            model = fallback.model;
+          }
+        }
+        const coerced = coerceSelectableModel(
+          state.settings.providers,
+          provider,
+          model,
+          provider,
+        );
+        if (coerced) {
+          provider = coerced.provider;
+          model = coerced.model;
+        } else {
+          provider = "";
+          model = "";
         }
         if (provider && model) {
           return {
@@ -965,10 +1039,38 @@ export const useAppStore = create<AppState>((set, get) => ({
         }
         return { activePaneId };
       }
+      const coerced = coerceSelectableModel(
+        state.settings.providers,
+        provider,
+        model,
+        provider,
+      );
+      if (coerced) {
+        provider = coerced.provider;
+        model = coerced.model;
+      } else {
+        provider = "";
+        model = "";
+      }
+      if (!provider || !model) {
+        return { activePaneId };
+      }
+      const paneNeedsPatch =
+        (target.modelProvider || "").trim() !== provider ||
+        (target.modelName || "").trim() !== model;
       return {
         activePaneId,
         activeProvider: provider,
         activeModel: model,
+        ...(paneNeedsPatch
+          ? {
+              panes: state.panes.map((pane) =>
+                pane.id === activePaneId
+                  ? { ...pane, modelProvider: provider, modelName: model }
+                  : pane
+              ),
+            }
+          : {}),
       };
     }),
   hydratePanes: (panes, activePaneId) =>
@@ -978,11 +1080,27 @@ export const useAppStore = create<AppState>((set, get) => ({
       const hasActive = nextPanes.some((p) => p.id === activePaneId);
       const nextActiveId = hasActive ? activePaneId : nextPanes[0]?.id ?? state.activePaneId;
       const active = nextPanes.find((p) => p.id === nextActiveId) ?? nextPanes[0];
-      return {
+      const reconciled = reconcilePaneModelsPure({
         panes: nextPanes,
         activePaneId: nextActiveId,
-        activeProvider: (active?.modelProvider || "").trim(),
-        activeModel: (active?.modelName || "").trim(),
+        activeProvider: (active?.modelProvider || "").trim() || state.activeProvider,
+        activeModel: (active?.modelName || "").trim() || state.activeModel,
+        providers: state.settings.providers,
+      });
+      const paneById = new Map(reconciled.panes.map((pane) => [pane.id, pane]));
+      return {
+        panes: nextPanes.map((pane) => {
+          const next = paneById.get(pane.id);
+          if (!next) return pane;
+          return {
+            ...pane,
+            modelProvider: next.modelProvider ?? pane.modelProvider,
+            modelName: next.modelName ?? pane.modelName,
+          };
+        }),
+        activePaneId: nextActiveId,
+        activeProvider: reconciled.activeProvider,
+        activeModel: reconciled.activeModel,
       };
     }),
   setForwardAutoReply: (forwardAutoReply) => set({ forwardAutoReply }),
@@ -1043,7 +1161,20 @@ export const useAppStore = create<AppState>((set, get) => ({
     })),
   addPane: (avatarId, avatarName, sessionId) => {
     const paneId = uid();
-    set((state) => ({
+    set((state) => {
+      const av = avatarId ? state.avatars.find((a) => a.id === avatarId) : null;
+      const rawProvider =
+        (av?.defaultProvider || "").trim() || (state.activeProvider || "").trim();
+      const rawModel = (av?.defaultModel || "").trim() || (state.activeModel || "").trim();
+      const coerced = coerceSelectableModel(
+        state.settings.providers,
+        rawProvider,
+        rawModel,
+        rawProvider,
+      );
+      const modelProvider = coerced?.provider ?? "";
+      const modelName = coerced?.model ?? "";
+      return {
       // New pane should prefer avatar defaults so "click avatar" does not
       // inherit a random model from the currently active pane.
       panes: [
@@ -1053,14 +1184,8 @@ export const useAppStore = create<AppState>((set, get) => ({
           avatarId,
           avatarName,
           sessionId,
-          modelProvider: (() => {
-            const av = avatarId ? state.avatars.find((a) => a.id === avatarId) : null;
-            return (av?.defaultProvider || "").trim() || state.activeProvider;
-          })(),
-          modelName: (() => {
-            const av = avatarId ? state.avatars.find((a) => a.id === avatarId) : null;
-            return (av?.defaultModel || "").trim() || state.activeModel;
-          })(),
+          modelProvider,
+          modelName,
           messages: [],
           historyOpen: false,
           contextInherited: false,
@@ -1078,7 +1203,8 @@ export const useAppStore = create<AppState>((set, get) => ({
         },
       ],
       activePaneId: paneId,
-    }));
+    };
+    });
     return paneId;
   },
   removePane: (paneId) =>
@@ -1323,12 +1449,25 @@ export const useAppStore = create<AppState>((set, get) => ({
           if (!resolvedModel) resolvedModel = avatarModel;
         } else {
           const dp = (state.settings.defaultProvider || "").trim();
-          const dm = (state.settings.providers[dp]?.model || "").trim();
-          if (dp && dm) {
-            if (!resolvedProvider) resolvedProvider = dp;
-            if (!resolvedModel) resolvedModel = dm;
+          const fallback = coerceSelectableModel(state.settings.providers, dp, "", dp);
+          if (fallback) {
+            if (!resolvedProvider) resolvedProvider = fallback.provider;
+            if (!resolvedModel) resolvedModel = fallback.model;
           }
         }
+      }
+      const coerced = coerceSelectableModel(
+        state.settings.providers,
+        resolvedProvider,
+        resolvedModel,
+        resolvedProvider,
+      );
+      if (coerced) {
+        resolvedProvider = coerced.provider;
+        resolvedModel = coerced.model;
+      } else {
+        resolvedProvider = "";
+        resolvedModel = "";
       }
       const isActive = state.activePaneId === paneId;
       const nextPanes = state.panes.map((p) => {

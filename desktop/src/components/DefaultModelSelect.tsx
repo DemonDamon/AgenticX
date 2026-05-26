@@ -1,6 +1,6 @@
 import { useMemo } from "react";
 import { useAppStore } from "../store";
-import { formatModelOptionLabel } from "../utils/model-display";
+import { collectSelectableModelOptions, isModelSelectable } from "../utils/model-options";
 
 type Props = {
   provider: string;
@@ -10,50 +10,29 @@ type Props = {
   inheritLabel?: string;
 };
 
-/** Compact inline dropdown for picking an avatar's default provider/model.
- *
- * The dropdown lists every enabled provider × configured model tuple drawn from
- * settings, plus a leading "inherit global default" entry (empty value).
- * Two separate strings are emitted to the caller so the Avatar record can keep
- * provider and model as orthogonal fields (matches backend avatar.yaml).
- */
+/** Compact inline dropdown for picking an avatar's default provider/model. */
 export function DefaultModelSelect({ provider, model, onChange, inheritLabel }: Props) {
   const settings = useAppStore((s) => s.settings);
 
-  const options = useMemo<Array<{ value: string; label: string; provider: string; model: string }>>(() => {
-    const rows: Array<{ value: string; label: string; provider: string; model: string }> = [];
-    for (const [provName, entry] of Object.entries(settings.providers)) {
-      if (entry.enabled === false) continue;
-      if (!entry.apiKey) continue;
-      if (entry.models.length > 0) {
-        for (const m of entry.models) {
-          rows.push({
-            value: `${provName}|${m}`,
-            label: formatModelOptionLabel(provName, m, entry, " | "),
-            provider: provName,
-            model: m,
-          });
-        }
-      } else if (entry.model) {
-        rows.push({
-          value: `${provName}|${entry.model}`,
-          label: formatModelOptionLabel(provName, entry.model, entry, " | "),
-          provider: provName,
-          model: entry.model,
-        });
-      }
-    }
-    return rows;
+  const options = useMemo(() => {
+    return collectSelectableModelOptions(settings.providers, " | ").map((row) => ({
+      value: `${row.provider}|${row.model}`,
+      label: row.label,
+      provider: row.provider,
+      model: row.model,
+    }));
   }, [settings.providers]);
 
   const current = provider && model ? `${provider}|${model}` : "";
   const placeholder = inheritLabel ?? "继承全局默认";
-  const currentKnown = current === "" || options.some((opt) => opt.value === current);
+  const currentKnown =
+    current === "" || isModelSelectable(provider, model, settings.providers);
+  const selectValue = currentKnown ? current : "";
 
   return (
     <select
       className="mt-1 w-full rounded-md border border-border bg-surface-panel px-3 py-2 text-sm text-text-primary"
-      value={current}
+      value={selectValue}
       onChange={(e) => {
         const v = e.target.value;
         if (!v) {
@@ -69,9 +48,6 @@ export function DefaultModelSelect({ provider, model, onChange, inheritLabel }: 
       }}
     >
       <option value="">{placeholder}</option>
-      {!currentKnown && current ? (
-        <option value={current}>{formatModelOptionLabel(provider, model, settings.providers[provider], " | ")}（已保存，但当前 Provider 不可用）</option>
-      ) : null}
       {options.map((opt) => (
         <option key={opt.value} value={opt.value}>
           {opt.label}
