@@ -113,7 +113,31 @@ const IMAGE_EXTENSIONS = new Set([".png", ".jpg", ".jpeg", ".gif", ".webp", ".bm
 
 const VIDEO_EXTENSIONS = new Set([".mp4", ".mov", ".avi", ".mkv", ".webm", ".m4v", ".wmv", ".flv"]);
 
-const NOISE_DIR_NAMES = new Set(["node_modules", ".git", ".Trash", ".trash", "__pycache__"]);
+const NOISE_DIR_NAMES = new Set([
+  "node_modules",
+  ".git",
+  ".Trash",
+  ".trash",
+  "__pycache__",
+  ".npm",
+  ".cache",
+  ".venv",
+  "venv",
+  ".cursor",
+  "Application Support",
+  "Caches",
+  "Containers",
+]);
+
+function defaultSearchRoots(): string[] {
+  const home = os.homedir();
+  return [
+    home,
+    path.join(home, "Desktop"),
+    path.join(home, "Documents"),
+    path.join(home, "Downloads"),
+  ];
+}
 
 function escapeMdfindToken(value: string): string {
   return value.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
@@ -138,7 +162,10 @@ function inferKind(filePath: string, isDirectory: boolean): SystemSearchKind {
 
 function shouldSkipPath(filePath: string): boolean {
   const parts = filePath.split(path.sep);
-  return parts.some((part) => NOISE_DIR_NAMES.has(part));
+  if (parts.some((part) => NOISE_DIR_NAMES.has(part))) return true;
+  // Spotlight / walk：跳过 Library，避免 Cursor/Chrome 等噪声路径
+  if (parts.includes("Library")) return true;
+  return false;
 }
 
 function statItem(filePath: string, isDirectory = false): SystemSearchItem | null {
@@ -235,9 +262,79 @@ function parsePathLines(stdout: string): string[] {
     .filter(Boolean);
 }
 
-async function searchMac(query: string, category: SystemSearchCategory): Promise<SystemSearchResult> {
+function kindCategoryFilter(category: SystemSearchCategory): (item: SystemSearchItem) => boolean {
+  return (item) => {
+    if (category === "all") return true;
+    if (category === "folders") return item.kind === "folder";
+    if (category === "documents") return item.kind === "document";
+    if (category === "applications") return item.kind === "application";
+    if (category === "images") return item.kind === "image";
+    if (category === "videos") return item.kind === "video";
+    return true;
+  };
+}
+
+async function walkSearchByName(
+  query: string,
+  category: SystemSearchCategory,
+  options: { maxDepth?: number; timeoutMs?: number; roots?: string[] } = {}
+): Promise<{ items: SystemSearchItem[]; timedOut: boolean }> {
+  const maxDepth = options.maxDepth ?? 6;
+  const timeoutMs = options.timeoutMs ?? SEARCH_TIMEOUT_MS;
+  const roots = options.roots ?? defaultSearchRoots();
+  const needle = query.trim().toLowerCase();
+  if (!needle) return { items: [], timedOut: false };
+
+  const found: SystemSearchItem[] = [];
+  const seenRoots = new Set<string>();
+
+  async function walk(dir: string, depth: number): Promise<void> {
+    if (found.length >= MAX_RESULTS || depth > maxDepth) return;
+    let entries: fs.Dirent[];
+    try {
+      entries = await fs.promises.readdir(dir, { withFileTypes: true });
+    } catch {
+      return;
+    }
+    for (const entry of entries) {
+      if (found.length >= MAX_RESULTS) return;
+      if (NOISE_DIR_NAMES.has(entry.name)) continue;
+      const full = path.join(dir, entry.name);
+      if (shouldSkipPath(full)) continue;
+      const nameMatch = entry.name.toLowerCase().includes(needle);
+      if (entry.isDirectory()) {
+        if (nameMatch) {
+          const item = statItem(full, true);
+          if (item) found.push(item);
+        }
+        await walk(full, depth + 1);
+      } else if (nameMatch) {
+        const item = statItem(full, false);
+        if (item) found.push(item);
+      }
+    }
+  }
+
+  const started = Date.now();
+  for (const root of roots) {
+    if (Date.now() - started > timeoutMs) break;
+    const resolved = path.resolve(root);
+    if (seenRoots.has(resolved)) continue;
+    seenRoots.add(resolved);
+    await walk(resolved, 0);
+  }
+
+  const timedOut = Date.now() - started >= timeoutMs;
+  const items = dedupeAndLimit(found.filter(kindCategoryFilter(category)));
+  return { items, timedOut };
+}
+
+async function searchMacMdfind(
+  query: string,
+  category: SystemSearchCategory
+): Promise<{ paths: string[]; timedOut: boolean; stderr: string }> {
   const token = escapeMdfindToken(query.trim());
-  if (!token) return { ok: true, items: [], engine: "mdfind" };
+  if (!token) return { paths: [], timedOut: false, stderr: "" };
 
   let expr = `(kMDItemDisplayName == "*${token}*"cd || kMDItemFSName == "*${token}*"cd)`;
   if (category === "folders") {
@@ -254,18 +351,42 @@ async function searchMac(query: string, category: SystemSearchCategory): Promise
 
   const { stdout, stderr, timedOut } = await runSpawn("mdfind", [expr]);
   const paths = parsePathLines(stdout).filter((p) => !shouldSkipPath(p));
-  const items = dedupeAndLimit(
-    paths
-      .map((p) => statItem(p))
-      .filter((item): item is SystemSearchItem => item !== null)
-  );
+  return { paths, timedOut, stderr };
+}
+
+async function searchMac(query: string, category: SystemSearchCategory): Promise<SystemSearchResult> {
+  const trimmed = query.trim();
+  if (!trimmed) return { ok: true, items: [], engine: "mdfind+walk" };
+
+  const [mdfindRes, walkRes] = await Promise.all([
+    searchMacMdfind(trimmed, "all"),
+    walkSearchByName(trimmed, "all", { maxDepth: 6 }),
+  ]);
+
+  const mergedItems: SystemSearchItem[] = [];
+  const seen = new Set<string>();
+  for (const filePath of mdfindRes.paths) {
+    if (seen.has(filePath)) continue;
+    const item = statItem(filePath);
+    if (!item) continue;
+    seen.add(filePath);
+    mergedItems.push(item);
+  }
+  for (const item of walkRes.items) {
+    if (seen.has(item.path)) continue;
+    seen.add(item.path);
+    mergedItems.push(item);
+  }
+
+  const items = filterByCategory(dedupeAndLimit(mergedItems), category);
+  const timedOut = mdfindRes.timedOut || walkRes.timedOut;
 
   return {
     ok: true,
-    items: filterByCategory(items, category),
+    items,
     timedOut,
-    engine: "mdfind",
-    error: timedOut ? "搜索超时（5s），请缩小关键词" : stderr.trim() || undefined,
+    engine: "mdfind+walk",
+    error: timedOut ? "搜索超时（5s），请缩小关键词" : mdfindRes.stderr.trim() || undefined,
   };
 }
 
@@ -287,18 +408,6 @@ async function findEverythingExe(): Promise<string | null> {
   return null;
 }
 
-function windowsKindFilter(category: SystemSearchCategory): (item: SystemSearchItem) => boolean {
-  return (item) => {
-    if (category === "all") return true;
-    if (category === "folders") return item.kind === "folder";
-    if (category === "documents") return item.kind === "document";
-    if (category === "applications") return item.kind === "application";
-    if (category === "images") return item.kind === "image";
-    if (category === "videos") return item.kind === "video";
-    return true;
-  };
-}
-
 async function searchWindowsEverything(
   exePath: string,
   query: string,
@@ -313,54 +422,12 @@ async function searchWindowsEverything(
     paths
       .map((p) => statItem(p))
       .filter((item): item is SystemSearchItem => item !== null)
-      .filter(windowsKindFilter(category))
+      .filter(kindCategoryFilter(category))
   );
 }
 
 async function searchWindowsFallback(query: string, category: SystemSearchCategory): Promise<SystemSearchResult> {
-  const roots = [
-    os.homedir(),
-    path.join(os.homedir(), "Desktop"),
-    path.join(os.homedir(), "Documents"),
-    path.join(os.homedir(), "Downloads"),
-  ];
-  const needle = query.toLowerCase();
-  const found: SystemSearchItem[] = [];
-
-  async function walk(dir: string, depth: number): Promise<void> {
-    if (found.length >= MAX_RESULTS || depth > 4) return;
-    let entries: fs.Dirent[];
-    try {
-      entries = await fs.promises.readdir(dir, { withFileTypes: true });
-    } catch {
-      return;
-    }
-    for (const entry of entries) {
-      if (found.length >= MAX_RESULTS) return;
-      if (NOISE_DIR_NAMES.has(entry.name)) continue;
-      const full = path.join(dir, entry.name);
-      const nameMatch = entry.name.toLowerCase().includes(needle);
-      if (entry.isDirectory()) {
-        if (nameMatch) {
-          const item = statItem(full, true);
-          if (item) found.push(item);
-        }
-        await walk(full, depth + 1);
-      } else if (nameMatch) {
-        const item = statItem(full, false);
-        if (item) found.push(item);
-      }
-    }
-  }
-
-  const started = Date.now();
-  for (const root of roots) {
-    if (Date.now() - started > SEARCH_TIMEOUT_MS) break;
-    await walk(root, 0);
-  }
-
-  const timedOut = Date.now() - started >= SEARCH_TIMEOUT_MS;
-  const items = dedupeAndLimit(found.filter(windowsKindFilter(category)));
+  const { items, timedOut } = await walkSearchByName(query, category, { maxDepth: 4 });
   return {
     ok: true,
     items,
@@ -393,7 +460,7 @@ async function searchLinuxFd(query: string, category: SystemSearchCategory): Pro
     paths
       .map((p) => statItem(p))
       .filter((item): item is SystemSearchItem => item !== null)
-      .filter(windowsKindFilter(category))
+      .filter(kindCategoryFilter(category))
   );
 }
 
@@ -411,45 +478,19 @@ async function searchLinuxLocate(query: string, category: SystemSearchCategory):
     paths
       .map((p) => statItem(p))
       .filter((item): item is SystemSearchItem => item !== null)
-      .filter(windowsKindFilter(category))
+      .filter(kindCategoryFilter(category))
   );
 }
 
 async function searchLinuxFind(query: string, category: SystemSearchCategory): Promise<SystemSearchResult> {
-  const needle = query.toLowerCase();
-  const found: SystemSearchItem[] = [];
-  const roots = [os.homedir()];
-
-  async function walk(dir: string, depth: number): Promise<void> {
-    if (found.length >= MAX_RESULTS || depth > 4) return;
-    let entries: fs.Dirent[];
-    try {
-      entries = await fs.promises.readdir(dir, { withFileTypes: true });
-    } catch {
-      return;
-    }
-    for (const entry of entries) {
-      if (found.length >= MAX_RESULTS) return;
-      if (NOISE_DIR_NAMES.has(entry.name)) continue;
-      const full = path.join(dir, entry.name);
-      if (entry.name.toLowerCase().includes(needle)) {
-        const item = statItem(full, entry.isDirectory());
-        if (item) found.push(item);
-      }
-      if (entry.isDirectory()) await walk(full, depth + 1);
-    }
-  }
-
-  const started = Date.now();
-  for (const root of roots) {
-    if (Date.now() - started > SEARCH_TIMEOUT_MS) break;
-    await walk(root, 0);
-  }
-
+  const { items, timedOut } = await walkSearchByName(query, category, {
+    maxDepth: 4,
+    roots: [os.homedir()],
+  });
   return {
     ok: true,
-    items: dedupeAndLimit(found.filter(windowsKindFilter(category))),
-    timedOut: Date.now() - started >= SEARCH_TIMEOUT_MS,
+    items,
+    timedOut,
     engine: "find-fallback",
     warning: "未检测到 fd/locate，已使用慢速目录扫描",
   };

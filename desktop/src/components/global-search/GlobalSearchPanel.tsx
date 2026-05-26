@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import {
+  ChevronUp,
   File,
   FileImage,
   FileText,
@@ -8,7 +9,6 @@ import {
   Folder,
   Loader2,
   Search,
-  SlidersHorizontal,
   X,
 } from "lucide-react";
 import {
@@ -51,7 +51,9 @@ function truncatePathMiddle(filePath: string, max = 64): string {
 
 export function GlobalSearchPanel({ open, onClose }: Props) {
   const inputRef = useRef<HTMLInputElement>(null);
+  const resultsScrollRef = useRef<HTMLDivElement>(null);
   const [composing, setComposing] = useState(false);
+  const [showScrollTop, setShowScrollTop] = useState(false);
   const search = useGlobalSearch(open);
 
   useEffect(() => {
@@ -59,6 +61,14 @@ export function GlobalSearchPanel({ open, onClose }: Props) {
     const timer = window.setTimeout(() => inputRef.current?.focus(), 0);
     return () => window.clearTimeout(timer);
   }, [open]);
+
+  useEffect(() => {
+    if (!open) {
+      setShowScrollTop(false);
+      return;
+    }
+    resultsScrollRef.current?.scrollTo({ top: 0 });
+  }, [open, search.query, search.category]);
 
   useEffect(() => {
     if (!open) return;
@@ -116,16 +126,6 @@ export function GlobalSearchPanel({ open, onClose }: Props) {
                 {(search.elapsedMs / 1000).toFixed(1)}s
               </div>
             ) : null}
-            {search.query ? (
-              <button
-                type="button"
-                className="rounded-md p-1 text-text-subtle transition hover:bg-surface-hover hover:text-text-strong"
-                onClick={() => search.setQuery("")}
-                aria-label="清空"
-              >
-                <X className="h-3.5 w-3.5" />
-              </button>
-            ) : null}
             <button
               type="button"
               className="rounded-md p-1 text-text-subtle transition hover:bg-surface-hover hover:text-text-strong"
@@ -166,9 +166,6 @@ export function GlobalSearchPanel({ open, onClose }: Props) {
                 </div>
               );
             })}
-            <div className="ml-auto shrink-0 rounded-md p-1 text-text-faint">
-              <SlidersHorizontal className="h-4 w-4" />
-            </div>
           </div>
         </div>
 
@@ -185,7 +182,14 @@ export function GlobalSearchPanel({ open, onClose }: Props) {
         ) : null}
 
         {/* 结果区：单列 + 分组 + 每行点击展开元信息 */}
-        <div className="min-h-0 flex-1 overflow-y-auto px-5 py-4">
+        <div className="relative min-h-0 flex-1">
+          <div
+            ref={resultsScrollRef}
+            className="h-full overflow-y-auto px-5 py-4"
+            onScroll={(event) => {
+              setShowScrollTop(event.currentTarget.scrollTop > 120);
+            }}
+          >
           {showHistory ? (
             <div className="mb-4">
               <div className="mb-2 flex items-center justify-between">
@@ -262,6 +266,20 @@ export function GlobalSearchPanel({ open, onClose }: Props) {
               </div>
             ))
           )}
+          </div>
+
+          {showScrollTop ? (
+            <button
+              type="button"
+              className="absolute bottom-4 right-5 flex h-9 w-9 items-center justify-center rounded-full border border-border bg-surface-card text-text-subtle shadow-lg transition hover:bg-surface-hover hover:text-text-strong"
+              onClick={() => {
+                resultsScrollRef.current?.scrollTo({ top: 0, behavior: "smooth" });
+              }}
+              aria-label="回到顶部"
+            >
+              <ChevronUp className="h-4 w-4" strokeWidth={2.25} />
+            </button>
+          ) : null}
         </div>
       </div>
     </div>,
