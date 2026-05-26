@@ -291,3 +291,42 @@ def test_summarize_tool_calls_for_history_removes_runtime_ids() -> None:
         }
     ]
     assert "call_abc123" not in str(summary)
+
+
+def test_sanitize_context_messages_drops_empty_assistant_without_tools() -> None:
+    from agenticx.runtime.agent_runtime import _sanitize_context_messages
+
+    history = [
+        {"role": "user", "content": "hello"},
+        {"role": "assistant", "content": ""},
+        {"role": "user", "content": "forwarded card"},
+    ]
+    sanitized = _sanitize_context_messages(history)
+    assert sanitized == [
+        {"role": "user", "content": "hello"},
+        {"role": "user", "content": "forwarded card"},
+    ]
+
+
+def test_sanitize_context_messages_placeholders_empty_assistant_with_tools() -> None:
+    from agenticx.runtime.agent_runtime import _sanitize_context_messages
+
+    history = [
+        {
+            "role": "assistant",
+            "content": "",
+            "tool_calls": [
+                {
+                    "id": "call-1",
+                    "type": "function",
+                    "function": {"name": "bash_exec", "arguments": "{}"},
+                }
+            ],
+        },
+        {"role": "tool", "tool_call_id": "call-1", "content": "ok"},
+    ]
+    sanitized = _sanitize_context_messages(history)
+    assert len(sanitized) == 2
+    assert sanitized[0]["role"] == "assistant"
+    assert sanitized[0]["content"] == " "
+    assert sanitized[0]["tool_calls"]

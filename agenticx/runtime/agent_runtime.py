@@ -668,11 +668,31 @@ def _summarize_tool_calls_for_history(tool_calls: List[Dict[str, Any]]) -> List[
     return summarized
 
 
+def _message_content_is_empty(content: Any) -> bool:
+    """True when message content carries no visible text for strict chat APIs."""
+    if content is None:
+        return True
+    if isinstance(content, str):
+        return not content.strip()
+    if isinstance(content, list):
+        for block in content:
+            if not isinstance(block, dict):
+                continue
+            if str(block.get("type", "")).strip() != "text":
+                continue
+            if str(block.get("text", "")).strip():
+                return False
+        return True
+    return not str(content).strip()
+
+
 def _sanitize_context_messages(messages: Sequence[Dict[str, Any]]) -> List[Dict[str, Any]]:
     """
     Repair history to satisfy strict tool-call pairing providers.
 
     Rules:
+    - Drop assistant rows with empty content and no tool_calls (Kimi/Moonshot 400).
+    - Assistant tool_calls rows with empty content get a single-space placeholder.
     - Keep tool messages only when their tool_call_id is declared by some assistant tool_calls.
     - Keep assistant tool_calls only when each call id has a corresponding tool response in history.
       Unmatched calls are removed from that assistant message.
@@ -695,6 +715,9 @@ def _sanitize_context_messages(messages: Sequence[Dict[str, Any]]) -> List[Dict[
 
         tool_calls = msg.get("tool_calls") or []
         if not tool_calls:
+            if _message_content_is_empty(msg.get("content")):
+                idx += 1
+                continue
             sanitized.append(msg)
             idx += 1
             continue
@@ -734,12 +757,17 @@ def _sanitize_context_messages(messages: Sequence[Dict[str, Any]]) -> List[Dict[
         if kept_calls:
             msg_copy = dict(msg)
             msg_copy["tool_calls"] = kept_calls
+            if _message_content_is_empty(msg_copy.get("content")):
+                msg_copy["content"] = " "
             sanitized.append(msg_copy)
             sanitized.extend(contiguous_tool_rows)
         else:
             # Remove dangling tool_calls but keep assistant content text.
             msg_copy = dict(msg)
             msg_copy.pop("tool_calls", None)
+            if _message_content_is_empty(msg_copy.get("content")):
+                idx = j
+                continue
             sanitized.append(msg_copy)
 
         # Skip contiguous tool block, whether kept or dropped.
