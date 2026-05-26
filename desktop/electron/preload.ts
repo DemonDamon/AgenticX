@@ -621,4 +621,12 @@ contextBridge.exposeInMainWorld("agenticxDesktop", {
     ipcRenderer.invoke("system-search:open", filePath) as Promise<{ ok: boolean; error?: string }>,
   systemSearchReveal: async (filePath: string) =>
     ipcRenderer.invoke("system-search:reveal", filePath) as Promise<{ ok: boolean; error?: string }>,
+  systemSearchGetInfo: async (filePath: string) =>
+    ipcRenderer.invoke("system-search:get-info", filePath) as Promise<{ ok: boolean; error?: string }>,
+  systemSearchOpenWith: async (filePath: string) =>
+    ipcRenderer.invoke("system-search:open-with", filePath) as Promise<{
+      ok: boolean;
+      hint?: string;
+      error?: string;
+    }>,
 });

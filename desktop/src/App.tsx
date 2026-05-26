@@ -19,7 +19,13 @@ import { META_AGENT_DISPLAY_NAME } from "./constants/branding";
 import { resolveMetaDisplayName } from "./utils/display-name";
 import { readScopedLocalStorage, writeScopedLocalStorage } from "./utils/backend-scope";
 import { GlobalSearchHost } from "./components/global-search/GlobalSearchPanel";
-import { openGlobalSearch } from "./components/global-search/global-search-events";
+import {
+  GLOBAL_SEARCH_ADD_TO_WORKSPACE,
+  openGlobalSearch,
+  type GlobalSearchAddToWorkspaceDetail,
+} from "./components/global-search/global-search-events";
+import { Toast } from "./components/ds/Toast";
+import { addFolderToActiveWorkspace } from "./utils/global-search-workspace";
 
 const WORKSPACE_STATE_STORAGE_KEY = "agx-workspace-state-v1";
 
@@ -281,6 +287,11 @@ export function App() {
   const [responsiveStage, setResponsiveStage] = useState<0 | 1 | 2>(0);
   const [startupOptimizing, setStartupOptimizing] = useState(true);
   const [configLoaded, setConfigLoaded] = useState(false);
+  const [globalSearchToastOpen, setGlobalSearchToastOpen] = useState(false);
+  const [globalSearchToastMessage, setGlobalSearchToastMessage] = useState("");
+  const [globalSearchToastVariant, setGlobalSearchToastVariant] = useState<"default" | "warning">(
+    "default"
+  );
   const windowResizeTimerRef = useRef<number | null>(null);
   const responsiveStageRef = useRef<0 | 1 | 2>(0);
   const responsiveSnapshotRef = useRef<{
@@ -310,6 +321,25 @@ export function App() {
     () => panes.find((pane) => pane.id === activePaneId)?.sessionId ?? sessionId,
     [activePaneId, panes, sessionId]
   );
+
+  useEffect(() => {
+    const onAddWorkspace = (event: Event) => {
+      const detail = (event as CustomEvent<GlobalSearchAddToWorkspaceDetail>).detail;
+      if (!detail?.folderPath) return;
+      void addFolderToActiveWorkspace(detail.folderPath).then((result) => {
+        if (result.ok) {
+          setGlobalSearchToastMessage("已添加至工作区");
+          setGlobalSearchToastVariant("default");
+        } else {
+          setGlobalSearchToastMessage(result.error ?? "添加工作区失败");
+          setGlobalSearchToastVariant("warning");
+        }
+        setGlobalSearchToastOpen(true);
+      });
+    };
+    window.addEventListener(GLOBAL_SEARCH_ADD_TO_WORKSPACE, onAddWorkspace);
+    return () => window.removeEventListener(GLOBAL_SEARCH_ADD_TO_WORKSPACE, onAddWorkspace);
+  }, []);
 
   useEffect(() => {
     const activePane = panes.find((pane) => pane.id === activePaneId);
@@ -2114,6 +2144,12 @@ export function App() {
       />
       <TokenDashboardPanel open={tokenDashboardOpen} onClose={() => closeTokenDashboard()} />
       <GlobalSearchHost />
+      <Toast
+        open={globalSearchToastOpen}
+        message={globalSearchToastMessage}
+        variant={globalSearchToastVariant}
+        onClose={() => setGlobalSearchToastOpen(false)}
+      />
     </div>
   );
 }

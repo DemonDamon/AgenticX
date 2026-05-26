@@ -864,6 +864,12 @@ declare global {
       }>;
       systemSearchOpen: (filePath: string) => Promise<{ ok: boolean; error?: string }>;
       systemSearchReveal: (filePath: string) => Promise<{ ok: boolean; error?: string }>;
+      systemSearchGetInfo: (filePath: string) => Promise<{ ok: boolean; error?: string }>;
+      systemSearchOpenWith: (filePath: string) => Promise<{
+        ok: boolean;
+        hint?: string;
+        error?: string;
+      }>;
     };
   }
 }
