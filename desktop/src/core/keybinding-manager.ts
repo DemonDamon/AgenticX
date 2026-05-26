@@ -1,5 +1,5 @@
 export type KeybindingAction =
-  | "open-command-palette"
+  | "open-global-search"
   | "open-settings"
   | "clear-messages"
   | "toggle-mode"
@@ -17,7 +17,7 @@ type MatchRule = {
 };
 
 const RULES: MatchRule[] = [
-  { action: "open-command-palette", key: "k", ctrlOrMeta: true, mode: "pro" },
+  { action: "open-global-search", key: "k", ctrlOrMeta: true, mode: "pro" },
   { action: "open-settings", key: ",", ctrlOrMeta: true, mode: "both" },
   { action: "clear-messages", key: "l", ctrlOrMeta: true, mode: "pro" },
   { action: "toggle-mode", key: "m", ctrlOrMeta: true, shift: true, mode: "both" },
