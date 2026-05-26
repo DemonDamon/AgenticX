@@ -6550,6 +6550,14 @@ export function SettingsPanel({
                   <p className="mt-2 text-[11px] text-text-faint">
                     下方「路径 / 命令 / 工具拒绝」修改后，请点击窗口底部「保存」写入 Studio（与失焦保存等效）。未配置远程 URL 时使用本机内置 API；若仍出现 HTTP 404，请升级远端 agenticx 版本或核对服务器地址是否指向当前 Near 使用的同一 Studio。
                   </p>
+                  <div className="mt-3 rounded-md border border-amber-500/35 bg-amber-500/10 px-3 py-2.5 text-xs text-text-subtle">
+                    <div className="font-medium text-amber-200/95">凭据安全</div>
+                    <p className="mt-1 leading-relaxed">
+                      API Key、Token、密码<strong className="font-medium text-text-primary">请勿在对话中发送</strong>
+                      ——聊天记录会保存在本机。模型密钥请在侧栏「模型服务」配置；MCP 密钥请在「MCP 服务」安装或编辑时的环境变量中填写（写入{" "}
+                      <code className="text-[10px]">~/.agenticx/mcp.json</code>）。Near 不会要求你在聊天里粘贴密钥来代为配置。
+                    </p>
+                  </div>
                 </Panel>
                 <PermissionsAdvancedPanel ref={permissionsPanelRef} />
                 <WebSearchSettingsPanel />
@@ -7156,6 +7164,9 @@ export function SettingsPanel({
                   </div>
                   <div className="text-[11px] text-text-faint">
                     已连接的 MCP 服务是 Near <strong>进程级</strong>资源，所有对话共享；Near 启动时自动恢复上次的连接记录，新建对话不会触发额外连接或断开。
+                  </div>
+                  <div className="text-[11px] text-amber-200/80">
+                    所需 API Key 请在本页安装弹窗或 JSON 的 <code className="text-[10px]">env</code> 中填写，勿在聊天里发送给 Agent。
                   </div>
                 </div>
 

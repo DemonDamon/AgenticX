@@ -351,9 +351,17 @@ class AgentTeamManager:
             if context.persona_prompt
             else ""
         )
+        credential_safety = ""
+        try:
+            from agenticx.runtime.prompts.credential_safety import CREDENTIAL_SAFETY_BLOCK
+
+            credential_safety = f"{CREDENTIAL_SAFETY_BLOCK}\n\n"
+        except Exception:
+            pass
         return (
             "你是 AgenticX Studio 的子智能体。\n"
             "你的核心目标：在指定工作目录中完成被委派任务，并持续汇报可验证进展。\n\n"
+            f"{credential_safety}"
             "## 你的身份\n"
             f"- agent_id: {context.agent_id}\n"
             f"- name: {context.name}\n"
