@@ -17,6 +17,10 @@ import { AvatarSettingsPanel } from "./AvatarSettingsPanel";
 import { GlobalSearchTrigger } from "./global-search/GlobalSearchTrigger";
 import { TaskFormPanel } from "./automation/TaskFormPanel";
 import type { AutomationTask } from "./automation/types";
+import {
+  loadSidebarSectionHeights,
+  saveSidebarSectionHeights,
+} from "../utils/sidebar-section-heights";
 
 function avatarInitials(name: string): string {
   const parts = name.trim().split(/\s+/);
@@ -109,10 +113,26 @@ export function AvatarSidebar() {
   // (issue #11).
   const [avatarsLoaded, setAvatarsLoaded] = useState(false);
   const [groupsLoaded, setGroupsLoaded] = useState(false);
-  const [avatarsHeight, setAvatarsHeight] = useState<number | null>(null);
-  const [groupsHeight, setGroupsHeight] = useState<number | null>(null);
+  const [avatarsHeight, setAvatarsHeight] = useState<number | null>(() => {
+    const saved = loadSidebarSectionHeights();
+    return saved.avatarsHeight;
+  });
+  const [groupsHeight, setGroupsHeight] = useState<number | null>(() => {
+    const saved = loadSidebarSectionHeights();
+    return saved.groupsHeight;
+  });
   const avatarsContainerRef = useRef<HTMLDivElement>(null);
   const groupsContainerRef = useRef<HTMLDivElement>(null);
+  const avatarsHeightRef = useRef<number | null>(avatarsHeight);
+  const groupsHeightRef = useRef<number | null>(groupsHeight);
+
+  useEffect(() => {
+    avatarsHeightRef.current = avatarsHeight;
+  }, [avatarsHeight]);
+
+  useEffect(() => {
+    groupsHeightRef.current = groupsHeight;
+  }, [groupsHeight]);
   const [settingsPanel, setSettingsPanel] = useState<
     | { mode: "avatar"; avatarId: string }
     | { mode: "machi" }
@@ -675,6 +695,10 @@ export function AvatarSidebar() {
     const onUp = () => {
       window.removeEventListener("mousemove", onMove);
       window.removeEventListener("mouseup", onUp);
+      saveSidebarSectionHeights({
+        avatarsHeight: avatarsHeightRef.current,
+        groupsHeight: groupsHeightRef.current,
+      });
     };
     window.addEventListener("mousemove", onMove);
     window.addEventListener("mouseup", onUp);
@@ -698,6 +722,10 @@ export function AvatarSidebar() {
     const onUp = () => {
       window.removeEventListener("mousemove", onMove);
       window.removeEventListener("mouseup", onUp);
+      saveSidebarSectionHeights({
+        avatarsHeight: avatarsHeightRef.current,
+        groupsHeight: groupsHeightRef.current,
+      });
     };
     window.addEventListener("mousemove", onMove);
     window.addEventListener("mouseup", onUp);
