@@ -835,6 +835,35 @@ declare global {
       terminalKill: (id: string) => Promise<{ ok: boolean }>;
       onTerminalData: (cb: (payload: { id: string; data: string }) => void) => () => void;
       onTerminalExit: (cb: (payload: { id: string }) => void) => () => void;
+
+      systemSearch: (payload: {
+        query: string;
+        category?: "all" | "documents" | "applications" | "images" | "folders" | "videos";
+      }) => Promise<{
+        ok: boolean;
+        items: Array<{
+          path: string;
+          name: string;
+          ext: string;
+          kind: "folder" | "document" | "application" | "image" | "video" | "other";
+          size: number;
+          mtime: number;
+        }>;
+        error?: string;
+        warning?: string;
+        timedOut?: boolean;
+        engine?: string;
+      }>;
+      systemSearchPreview: (filePath: string) => Promise<{
+        ok: boolean;
+        kind: "text" | "image" | "metadata";
+        content?: string;
+        fileUrl?: string;
+        truncated?: boolean;
+        error?: string;
+      }>;
+      systemSearchOpen: (filePath: string) => Promise<{ ok: boolean; error?: string }>;
+      systemSearchReveal: (filePath: string) => Promise<{ ok: boolean; error?: string }>;
     };
   }
 }

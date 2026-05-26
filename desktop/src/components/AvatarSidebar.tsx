@@ -14,6 +14,7 @@ import {
 } from "../utils/group-editor-utils";
 import { AvatarCreateDialog } from "./AvatarCreateDialog";
 import { AvatarSettingsPanel } from "./AvatarSettingsPanel";
+import { GlobalSearchTrigger } from "./global-search/GlobalSearchTrigger";
 import { TaskFormPanel } from "./automation/TaskFormPanel";
 import type { AutomationTask } from "./automation/types";
 
@@ -735,6 +736,8 @@ export function AvatarSidebar() {
             </span>
           </div>
         </button>
+
+        <GlobalSearchTrigger />
 
         <div className="flex-1 flex flex-col py-1 min-h-0">
           {/* Avatar list */}

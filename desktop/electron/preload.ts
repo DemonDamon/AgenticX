@@ -588,4 +588,37 @@ contextBridge.exposeInMainWorld("agenticxDesktop", {
   },
   startupRendererReady: async (): Promise<{ ok: boolean; duplicate?: boolean }> =>
     ipcRenderer.invoke("startup:renderer-ready") as Promise<{ ok: boolean; duplicate?: boolean }>,
+
+  systemSearch: async (payload: {
+    query: string;
+    category?: "all" | "documents" | "applications" | "images" | "folders" | "videos";
+  }) =>
+    ipcRenderer.invoke("system-search", payload) as Promise<{
+      ok: boolean;
+      items: Array<{
+        path: string;
+        name: string;
+        ext: string;
+        kind: "folder" | "document" | "application" | "image" | "video" | "other";
+        size: number;
+        mtime: number;
+      }>;
+      error?: string;
+      warning?: string;
+      timedOut?: boolean;
+      engine?: string;
+    }>,
+  systemSearchPreview: async (filePath: string) =>
+    ipcRenderer.invoke("system-search:preview", filePath) as Promise<{
+      ok: boolean;
+      kind: "text" | "image" | "metadata";
+      content?: string;
+      fileUrl?: string;
+      truncated?: boolean;
+      error?: string;
+    }>,
+  systemSearchOpen: async (filePath: string) =>
+    ipcRenderer.invoke("system-search:open", filePath) as Promise<{ ok: boolean; error?: string }>,
+  systemSearchReveal: async (filePath: string) =>
+    ipcRenderer.invoke("system-search:reveal", filePath) as Promise<{ ok: boolean; error?: string }>,
 });

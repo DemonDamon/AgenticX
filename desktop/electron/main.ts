@@ -42,6 +42,13 @@ import {
   scheduleSplashForceShowFallback,
   updateSplashStage,
 } from "./splash";
+import {
+  openSystemSearchPath,
+  previewSystemSearchFile,
+  revealSystemSearchPath,
+  runSystemSearch,
+  type SystemSearchCategory,
+} from "./system-search";
 
 /** Node fetch honors HTTP_PROXY; localhost cc-bridge POSTs then fail (e.g. 502) and PTY input never reaches Claude. */
 function ccBridgeUrlIsLoopback(urlStr: string): boolean {
@@ -2868,6 +2875,27 @@ function registerEarlyIpc(): void {
     } catch (err) {
       return { ok: false, error: String(err) };
     }
+  });
+
+  ipcMain.handle(
+    "system-search",
+    async (_event, payload: { query?: string; category?: SystemSearchCategory }) => {
+      const query = String(payload?.query ?? "");
+      const category = (payload?.category ?? "all") as SystemSearchCategory;
+      return runSystemSearch(query, category);
+    }
+  );
+
+  ipcMain.handle("system-search:preview", async (_event, filePath: unknown) => {
+    return previewSystemSearchFile(String(filePath ?? ""));
+  });
+
+  ipcMain.handle("system-search:open", async (_event, filePath: unknown) => {
+    return openSystemSearchPath(String(filePath ?? ""));
+  });
+
+  ipcMain.handle("system-search:reveal", async (_event, filePath: unknown) => {
+    return revealSystemSearchPath(String(filePath ?? ""));
   });
 }
 

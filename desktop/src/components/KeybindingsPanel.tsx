@@ -5,7 +5,7 @@ type Props = {
 };
 
 const PRO_ITEMS = [
-  ["Ctrl/Cmd+K", "打开命令面板"],
+  ["Ctrl/Cmd+K", "打开全局搜索"],
   ["Ctrl+,", "打开设置"],
   ["Ctrl+L", "清空消息"],
   ["Ctrl+Shift+P", "切换计划模式"],

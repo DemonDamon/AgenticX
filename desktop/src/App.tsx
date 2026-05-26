@@ -18,6 +18,8 @@ import { matchKeybinding } from "./core/keybinding-manager";
 import { META_AGENT_DISPLAY_NAME } from "./constants/branding";
 import { resolveMetaDisplayName } from "./utils/display-name";
 import { readScopedLocalStorage, writeScopedLocalStorage } from "./utils/backend-scope";
+import { GlobalSearchHost } from "./components/global-search/GlobalSearchPanel";
+import { openGlobalSearch } from "./components/global-search/global-search-events";
 
 const WORKSPACE_STATE_STORAGE_KEY = "agx-workspace-state-v1";
 
@@ -235,7 +237,6 @@ export function App() {
   const setPaneSessionId = useAppStore((s) => s.setPaneSessionId);
   const setUserMode = useAppStore((s) => s.setUserMode);
   const setOnboardingCompleted = useAppStore((s) => s.setOnboardingCompleted);
-  const setCommandPaletteOpen = useAppStore((s) => s.setCommandPaletteOpen);
   const setKeybindingsPanelOpen = useAppStore((s) => s.setKeybindingsPanelOpen);
   const sidebarCollapsed = useAppStore((s) => s.sidebarCollapsed);
   const setSidebarCollapsed = useAppStore((s) => s.setSidebarCollapsed);
@@ -1462,8 +1463,8 @@ export function App() {
       const action = matchKeybinding(event, userMode);
       if (!action) return;
       event.preventDefault();
-      if (action === "open-command-palette") {
-        setCommandPaletteOpen(true);
+      if (action === "open-global-search") {
+        openGlobalSearch();
       } else if (action === "open-settings") {
         openSettings();
       } else if (action === "clear-messages") {
@@ -1484,7 +1485,6 @@ export function App() {
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [
     userMode,
-    setCommandPaletteOpen,
     setKeybindingsPanelOpen,
     openSettings,
     clearMessages,
@@ -2113,6 +2113,7 @@ export function App() {
         onForwardFavorite={handleForwardFavorite}
       />
       <TokenDashboardPanel open={tokenDashboardOpen} onClose={() => closeTokenDashboard()} />
+      <GlobalSearchHost />
     </div>
   );
 }
