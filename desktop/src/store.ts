@@ -1093,9 +1093,17 @@ export const useAppStore = create<AppState>((set, get) => ({
       const activePane = nextPanes.find((pane) => pane.id === nextActive) ?? nextPanes[0];
       const provider = (activePane?.modelProvider || "").trim();
       const model = (activePane?.modelName || "").trim();
+      const nextAv = activePane?.avatarId ?? null;
+      const activeAvatarId =
+        nextAv &&
+        !String(nextAv).startsWith("automation:") &&
+        !String(nextAv).startsWith("group:")
+          ? String(nextAv)
+          : null;
       return {
         panes: nextPanes,
         activePaneId: nextActive,
+        activeAvatarId,
         ...(provider && model
           ? { activeProvider: provider, activeModel: model }
           : {}),

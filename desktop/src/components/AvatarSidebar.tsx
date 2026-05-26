@@ -811,7 +811,9 @@ export function AvatarSidebar() {
                 </div>
               )}
               {sortedAvatars.map((avatar) => {
-                const isActive = activeAvatarId === avatar.id;
+                const isActive = panes.some(
+                  (item) => item.avatarId === avatar.id && item.id === activePaneId,
+                );
                 const hasPane = panes.some((item) => item.avatarId === avatar.id);
                 return (
                   <div key={avatar.id}>
