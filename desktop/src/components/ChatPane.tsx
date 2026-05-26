@@ -115,7 +115,7 @@ import { FeishuBadge } from "./FeishuBadge";
 import machiEmptyState from "../assets/machi-logo-transparent.png";
 import { APP_DISPLAY_NAME, APP_TAGLINE, META_AGENT_DISPLAY_NAME } from "../constants/branding";
 import { DEFAULT_META_AVATAR_URL } from "../constants/meta-avatar";
-import { resolveMetaDisplayName } from "../utils/display-name";
+import { isMetaLeaderIdentity, resolveMetaDisplayName } from "../utils/display-name";
 import { createKbApi } from "./settings/knowledge/api";
 import {
   clearPaneAwaitingFreshSession,
@@ -160,6 +160,44 @@ function resolveForwardSender(message: Message, userLabel = "我"): string {
   const raw = String(message.avatarName || message.agentId || "AI").trim();
   if (!raw) return "AI";
   return resolveMetaDisplayName(raw.toLowerCase() === "meta" ? null : raw);
+}
+
+function resolveGroupChatSender(
+  message: Pick<Message, "role" | "avatarName" | "avatarUrl" | "agentId">,
+  opts: {
+    groupMembers: Avatar[];
+    metaAvatarUrl: string;
+    userLabel: string;
+    userAvatarUrl: string;
+  }
+): { name: string; url?: string; avatarId?: string } {
+  if (message.role === "user") {
+    return {
+      name: opts.userLabel.trim() || "用户",
+      url: opts.userAvatarUrl.trim() || undefined,
+    };
+  }
+  const agentId = String(message.agentId ?? "").trim();
+  const rawName = String(message.avatarName ?? "").trim();
+  if (isMetaLeaderIdentity(agentId, rawName)) {
+    return {
+      name: resolveMetaDisplayName(null),
+      url: opts.metaAvatarUrl.trim() || DEFAULT_META_AVATAR_URL,
+      avatarId: "meta",
+    };
+  }
+  const url = String(message.avatarUrl ?? "").trim() || undefined;
+  const member = agentId ? opts.groupMembers.find((a) => a.id === agentId) : undefined;
+  if (member) {
+    return {
+      name: member.name || rawName || agentId,
+      url: url || member.avatarUrl || undefined,
+      avatarId: member.id,
+    };
+  }
+  const name =
+    rawName && rawName !== "分身" ? rawName : agentId || resolveMetaDisplayName(null);
+  return { name, url, avatarId: agentId || undefined };
 }
 
 function shellSingleQuote(input: string): string {
@@ -1964,6 +2002,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
   const userNickname = useAppStore((s) => s.userNickname);
   const userPreference = useAppStore((s) => s.userPreference);
   const userBubbleLabel = useMemo(() => userNickname.trim() || "我", [userNickname]);
+  const groupChatUserLabel = useMemo(() => userNickname.trim() || "用户", [userNickname]);
   const isGroupPane = Boolean(pane?.avatarId?.startsWith("group:"));
   /** 元智能体窗格：顶栏已展示当前模型，气泡内不再重复展示模型徽章 */
   const isMachiMetaPane = pane.avatarId === null;
@@ -1983,6 +2022,16 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
         .map((id) => avatars.find((a) => a.id === id))
         .filter((a): a is Avatar => Boolean(a)),
     [activeGroup, avatars]
+  );
+  const resolveGroupSender = useCallback(
+    (message: Pick<Message, "role" | "avatarName" | "avatarUrl" | "agentId">) =>
+      resolveGroupChatSender(message, {
+        groupMembers,
+        metaAvatarUrl: metaAvatarUrl.trim() || DEFAULT_META_AVATAR_URL,
+        userLabel: groupChatUserLabel,
+        userAvatarUrl: userAvatarUrl || "",
+      }),
+    [groupMembers, groupChatUserLabel, metaAvatarUrl, userAvatarUrl]
   );
   const workspacePanelOpen = !!pane?.taskspacePanelOpen;
 
@@ -4334,6 +4383,10 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
         const isSelecting = selectedMessageIds.size > 0;
         const rowSelectable = isSelecting && !reactCol;
         const isSelected = selectedMessageIds.has(message.id);
+        const groupSender = isGroupPane ? resolveGroupSender(message) : null;
+        const imUserName = isGroupPane ? groupChatUserLabel : userBubbleLabel;
+        const imAssistantName = groupSender?.name ?? paneAvatarMeta.name;
+        const imAssistantAvatarUrl = groupSender?.url ?? paneAvatarMeta.url;
         return (
           <div key={message.id} className="group/sel relative">
             {rowSelectable && !isSelected && (
@@ -4361,10 +4414,13 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
               noBubbleBorder={reactFlat}
               toolCardOmitLeadingSpacer={message.role === "tool" && reactCol}
               onRevealPath={(path) => void revealFileInTaskspace(path)}
-              assistantName={paneAvatarMeta.name}
-              assistantAvatarUrl={paneAvatarMeta.url}
-              userName={userBubbleLabel}
+              assistantName={imAssistantName}
+              assistantAvatarUrl={imAssistantAvatarUrl}
+              userName={imUserName}
               userAvatarUrl={userAvatarUrl || undefined}
+              showSenderIdentity={isGroupPane}
+              senderAvatarVariant="rounded-square"
+              senderAvatarId={groupSender?.avatarId}
               onCopyMessage={copyMessage}
               onQuoteMessage={(msg, selectedText) =>
                 setQuoteTarget({ message: msg, body: resolveQuoteBody(msg, selectedText) })
@@ -4629,13 +4685,25 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
     return (
     <>
       {mainRows}
-      {Object.entries(groupTyping).map(([agentId, name]) => (
-        <ImBubble
-          key={`typing-${agentId}`}
-          message={{ id: `typing-${agentId}`, role: "assistant", content: "", avatarName: name, agentId }}
-          assistantName={name}
-        />
-      ))}
+      {Object.entries(groupTyping).map(([agentId, name]) => {
+        const typingSender = resolveGroupSender({
+          role: "assistant",
+          avatarName: name,
+          avatarUrl: undefined,
+          agentId,
+        });
+        return (
+          <ImBubble
+            key={`typing-${agentId}`}
+            message={{ id: `typing-${agentId}`, role: "assistant", content: "", avatarName: name, agentId }}
+            assistantName={typingSender.name}
+            assistantAvatarUrl={typingSender.url}
+            showSenderIdentity={isGroupPane}
+            senderAvatarVariant="rounded-square"
+            senderAvatarId={typingSender.avatarId}
+          />
+        );
+      })}
       {sessionWorkInProgress && !isStreamingCurrentSession && !isGroupPane ? (
         <ImBubble
           key="typing-meta"
@@ -4706,7 +4774,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
       )}
     </>
     );
-  }, [autoNudgeCount, budgetExceededInfo, chatStyle, copyMessage, copyReActBlock, currentModelLabel, exhaustedRounds, favoriteMessage, forwardOneMessage, groupTyping, groupedVisibleMessages, hideStreamOverlayAsDuplicate, input, isGroupPane, isRunGuardCurrentSession, isStreamingCurrentSession, pane.historySearchTerms, pane.messages, pane.sessionId, paneAvatarMeta, paneId, readyAttachments.length, resolveGroupInlineConfirm, resolveQuoteBody, resumeCurrentTask, resumeWithModel, revealFileInTaskspace, retryUserMessage, selectUpTo, selectedMessageIds, sendFollowupChip, sessionWorkInProgress, setQuoteTarget, showInlineAssistantModelBadge, stallModelOptions, stallRuntimeConfig.stall_auto_nudge_max_per_session, stallState, stopCurrentRun, streamTextForCurrentSession, streamingModel, toggleSelectBlock, toggleSelectMessage, topLevelRowsIm, userAvatarUrl, userBubbleLabel]);
+  }, [autoNudgeCount, budgetExceededInfo, chatStyle, copyMessage, copyReActBlock, currentModelLabel, exhaustedRounds, favoriteMessage, forwardOneMessage, groupChatUserLabel, groupTyping, groupedVisibleMessages, hideStreamOverlayAsDuplicate, input, isGroupPane, isRunGuardCurrentSession, isStreamingCurrentSession, pane.historySearchTerms, pane.messages, pane.sessionId, paneAvatarMeta, paneId, readyAttachments.length, resolveGroupInlineConfirm, resolveGroupSender, resolveQuoteBody, resumeCurrentTask, resumeWithModel, revealFileInTaskspace, retryUserMessage, selectUpTo, selectedMessageIds, sendFollowupChip, sessionWorkInProgress, setQuoteTarget, showInlineAssistantModelBadge, stallModelOptions, stallRuntimeConfig.stall_auto_nudge_max_per_session, stallState, stopCurrentRun, streamTextForCurrentSession, streamingModel, toggleSelectBlock, toggleSelectMessage, topLevelRowsIm, userAvatarUrl, userBubbleLabel]);
 
   const removeAttachment = useCallback((key: string) => {
     setContextFiles((prev) => {
@@ -5205,9 +5273,12 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
         body.group_id = groupChatId;
         body.mentioned_avatar_ids = mentionedAvatarIds;
         body.meta_leader_display_name = metaLeaderDisplayName;
-        body.user_display_name = userBubbleLabel;
+        body.user_display_name = groupChatUserLabel;
       }
-      if (userBubbleLabel && userBubbleLabel !== "我") body.user_nickname = userBubbleLabel;
+      const outboundUserNickname = isGroupPane ? groupChatUserLabel : userBubbleLabel;
+      if (outboundUserNickname && outboundUserNickname !== "我" && outboundUserNickname !== "用户") {
+        body.user_nickname = outboundUserNickname;
+      }
       if (userPreference.trim()) body.user_preference = userPreference.trim();
       // Extract @skill:// references from message text
       const skillSlugMatches = messageText.match(/@skill:\/\/([^\s@,，。！？\n]+)/g);
@@ -5308,6 +5379,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
         }
       }
       lastGroupProgressRef.current = {};
+      const groupProgressRunId = crypto.randomUUID();
       if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
 
       const reader = resp.body?.getReader();
@@ -5352,21 +5424,37 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
               const avatarName = String(payload.data?.avatar_name ?? eventAgentId);
               const avatarUrl = String(payload.data?.avatar_url ?? "");
               const progressText = String(payload.data?.content ?? "").trim();
+              const progressTitle = `${avatarName}：${progressText}`;
+              const progressCallId = `${groupProgressRunId}:group-progress:${eventAgentId}`;
               setGroupTyping((prev) => ({ ...prev, [eventAgentId]: avatarName }));
               if (!progressText) continue;
               const prevText = lastGroupProgressRef.current[eventAgentId] ?? "";
               if (prevText === progressText) continue;
               lastGroupProgressRef.current[eventAgentId] = progressText;
-              addPaneMessageIfSessionActive(
-                pane.id,
-                "tool",
-                `${avatarName}：${progressText}`,
-                eventAgentId,
-                chatProvider,
-                chatModel,
-                undefined,
-                { avatarName, avatarUrl: avatarUrl || undefined }
-              );
+              const merged = updatePaneMessageByToolCallId(pane.id, progressCallId, {
+                content: "",
+                toolStatus: "running",
+                toolResultPreview: progressTitle,
+              });
+              if (!merged) {
+                addPaneMessageIfSessionActive(
+                  pane.id,
+                  "tool",
+                  "",
+                  eventAgentId,
+                  chatProvider,
+                  chatModel,
+                  undefined,
+                  {
+                    avatarName,
+                    avatarUrl: avatarUrl || undefined,
+                    toolCallId: progressCallId,
+                    toolName: "group_progress",
+                    toolStatus: "running",
+                    toolResultPreview: progressTitle,
+                  }
+                );
+              }
               continue;
             }
             if (payload.type === "group_blocked") {
@@ -5435,6 +5523,9 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
               const avatarUrl = String(payload.data?.avatar_url ?? "");
               const content = String(payload.data?.content ?? "");
               const errorText = String(payload.data?.error ?? "");
+              updatePaneMessageByToolCallId(pane.id, `${groupProgressRunId}:group-progress:${eventAgentId}`, {
+                toolStatus: errorText.trim() ? "error" : "done",
+              });
               setGroupTyping((prev) => {
                 const next = { ...prev };
                 delete next[eventAgentId];
@@ -5484,6 +5575,9 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
               continue;
             }
             if (payload.type === "group_skipped") {
+              updatePaneMessageByToolCallId(pane.id, `${groupProgressRunId}:group-progress:${eventAgentId}`, {
+                toolStatus: "cancelled",
+              });
               setGroupTyping((prev) => {
                 const next = { ...prev };
                 delete next[eventAgentId];

@@ -43,6 +43,9 @@ function extractToolSummary(content: string): string {
 export function buildToolCardTitle(message: Message): string {
   const name = (message.toolName ?? "").trim();
   const args = message.toolArgs ?? {};
+  if (name === "group_progress") {
+    return String(message.toolResultPreview || message.content || "群聊成员处理中").trim();
+  }
   if (name === "file_read" || name === "file_write" || name === "file_edit") {
     const p = String(args.path ?? "").trim();
     const sl = args.start_line;

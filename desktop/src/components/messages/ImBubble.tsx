@@ -23,6 +23,7 @@ import {
   getAssistantTextStyle,
 } from "./im-layout";
 import { resolveMetaDisplayName } from "../../utils/display-name";
+import { avatarBgClass } from "../../utils/avatar-color";
 
 type Props = {
   message: Message;
@@ -54,6 +55,12 @@ type Props = {
   omitSuggestedQuestions?: boolean;
   /** Render-only hint when this assistant reply was cut off by session token budget. */
   budgetIncompleteHint?: boolean;
+  /** Group chat: show avatar + display name on every bubble (WeChat-style). */
+  showSenderIdentity?: boolean;
+  /** Group member avatars use rounded square; user stays circular. */
+  senderAvatarVariant?: "circle" | "rounded-square";
+  /** Fallback tint when no imageUrl (avatar id for color hash). */
+  senderAvatarId?: string;
 };
 
 /** Cycling 1→3 dots for group-chat typing rows (name shown in header only). */
@@ -97,24 +104,40 @@ function StreamingDots() {
 }
 
 /** Shared with ReAct block shell so top-of-stack avatar matches IM bubbles. */
-export function ChatImAvatar({ label, imageUrl }: { label: string; imageUrl?: string }) {
+export function ChatImAvatar({
+  label,
+  imageUrl,
+  variant = "circle",
+  avatarId,
+}: {
+  label: string;
+  imageUrl?: string;
+  variant?: "circle" | "rounded-square";
+  avatarId?: string;
+}) {
   const char = label.slice(0, 1) || "?";
+  const rounded = variant === "rounded-square" ? "rounded-[6px]" : "rounded-full";
   if (imageUrl) {
     return (
       <img
         src={imageUrl}
         alt={label}
-        className="h-8 w-8 shrink-0 rounded-full object-cover"
+        className={`h-8 w-8 shrink-0 object-cover ${rounded}`}
       />
     );
   }
+  const tintClass = avatarId ? `${avatarBgClass(avatarId)} text-white` : "";
   return (
     <div
-      className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-xs font-bold"
-      style={{
-        background: "var(--chat-im-avatar-bg)",
-        color: "var(--text-strong)",
-      }}
+      className={`flex h-8 w-8 shrink-0 items-center justify-center text-xs font-bold ${rounded} ${tintClass}`}
+      style={
+        avatarId
+          ? undefined
+          : {
+              background: "var(--chat-im-avatar-bg)",
+              color: "var(--text-strong)",
+            }
+      }
     >
       {char}
     </div>
@@ -143,6 +166,9 @@ export function ImBubble({
   onFollowupClick,
   omitSuggestedQuestions = false,
   budgetIncompleteHint = false,
+  showSenderIdentity = false,
+  senderAvatarVariant = "circle",
+  senderAvatarId,
 }: Props) {
   const isUser = message.role === "user";
   const displayName = isUser ? (userName || "我") : (assistantName || "AI");
@@ -159,6 +185,7 @@ export function ImBubble({
     (assistantVisual === "compact-inline" || assistantVisual === "compact-inline-with-actions") &&
     !isGroupTyping &&
     !isMetaPendingWork;
+  const showIdentityRail = showSenderIdentity && !compactAssistant;
   const hideActions = compactAssistant && assistantVisual !== "compact-inline-with-actions";
   const parsed = !isUser ? parseReasoningContent(message.content) : null;
   const hasThinkTag = parsed?.hasReasoningTag ?? false;
@@ -267,13 +294,17 @@ export function ImBubble({
     : undefined;
   const assistantActionStyle = getAssistantActionStyle({ inReActRow: compactAssistant });
   const USER_BUBBLE_GUTTER_PX = 14;
+  const groupIdentityLayout = showIdentityRail && !compactAssistant;
+  const headerBadge = groupIdentityLayout && !isUser ? badge : null;
+  const contentBadge = headerBadge ? null : badge;
+  const userBubbleGutterPx = groupIdentityLayout && isUser ? 0 : USER_BUBBLE_GUTTER_PX;
   const userBubbleStyle = isUser
     ? {
         ...bubbleStyle,
-        marginLeft: USER_BUBBLE_GUTTER_PX,
-        marginRight: USER_BUBBLE_GUTTER_PX,
+        marginLeft: userBubbleGutterPx,
+        marginRight: userBubbleGutterPx,
         width: "fit-content",
-        maxWidth: `calc(100% - ${USER_BUBBLE_GUTTER_PX * 2}px)`,
+        maxWidth: `calc(100% - ${userBubbleGutterPx * 2}px)`,
       }
     : bubbleStyle;
 
@@ -350,7 +381,9 @@ export function ImBubble({
 
   return (
     <div
-      className={`group relative flex min-w-0 items-start gap-2${isStreaming ? " !mt-1" : ""}`}
+      className={`group relative flex min-w-0 items-start gap-2${isStreaming ? " !mt-1" : ""}${
+        groupIdentityLayout && !isUser ? " pl-4" : ""
+      }`}
       onContextMenu={openContextMenu}
     >
       {selectable ? (
@@ -369,9 +402,30 @@ export function ImBubble({
           </svg>
         </button>
       ) : null}
+      {groupIdentityLayout && isUser ? <div className="min-h-px min-w-0 flex-1" aria-hidden /> : null}
+      {groupIdentityLayout && !isUser ? (
+        <div className="mt-0.5 shrink-0 self-start">
+          <ChatImAvatar
+            label={displayName}
+            imageUrl={avatarUrl}
+            variant={senderAvatarVariant}
+            avatarId={senderAvatarId}
+          />
+        </div>
+      ) : null}
       <div
-        className={`flex min-w-0 flex-1 flex-col ${isUser ? "items-end" : "items-start"}`}
+        className={`flex min-w-0 flex-col ${isUser ? "items-end" : "items-start"}${groupIdentityLayout && isUser ? " w-auto max-w-[calc(100%-2.5rem)] shrink-0" : " min-w-0 flex-1"}`}
       >
+        {groupIdentityLayout && isUser ? (
+          <div className="mb-1 w-full min-w-0 text-right">
+            <span className="max-w-full truncate text-[12px] font-medium text-text-muted">{displayName}</span>
+          </div>
+        ) : groupIdentityLayout && !isUser ? (
+          <div className="mb-0.5 flex max-w-full items-center gap-2 px-3 text-[12px] font-medium text-text-muted">
+            <span className="min-w-0 truncate">{displayName}</span>
+            {headerBadge ? <span className="shrink-0">{headerBadge}</span> : null}
+          </div>
+        ) : null}
         {isEditing ? (
           <div className="flex w-full max-w-3xl items-end gap-2">
             <button
@@ -434,7 +488,9 @@ export function ImBubble({
                   ? "relative min-w-0 w-full overflow-x-auto overflow-y-visible px-3 py-0 text-[var(--agx-chat-im-body-font-size)] leading-relaxed"
                   : isUser
                     ? "agx-im-user-bubble relative min-w-0 w-fit max-w-full overflow-x-auto overflow-y-visible rounded-xl border px-3 py-3 text-[var(--agx-chat-im-body-font-size)] leading-relaxed rounded-tr-[4px]"
-                    : "relative min-w-0 w-full overflow-x-auto overflow-y-visible px-3 pt-3 pb-0 text-[var(--agx-chat-im-body-font-size)] leading-relaxed"
+                    : groupIdentityLayout
+                      ? "relative min-w-0 w-full overflow-x-auto overflow-y-visible px-3 pt-1 pb-0 text-[var(--agx-chat-im-body-font-size)] leading-relaxed"
+                      : "relative min-w-0 w-full overflow-x-auto overflow-y-visible px-3 pt-3 pb-0 text-[var(--agx-chat-im-body-font-size)] leading-relaxed"
               }
               style={compactAssistant && noBubbleBorder ? undefined : userBubbleStyle}
             >
@@ -449,7 +505,7 @@ export function ImBubble({
                 </div>
               ) : null}
               <div ref={msgContentRef} className="msg-content min-w-0 break-words">
-                {badge}
+                {contentBadge}
                 {message.quotedContent ? (
                   <div className="mb-2 rounded-md border border-border bg-surface-panel/70 px-2 py-1 text-xs text-text-faint">
                     <span className="line-clamp-2">{message.quotedContent}</span>
@@ -613,6 +669,16 @@ export function ImBubble({
           </>
         )}
       </div>
+      {groupIdentityLayout && isUser ? (
+        <div className="mt-0.5 shrink-0 self-start">
+          <ChatImAvatar
+            label={displayName}
+            imageUrl={avatarUrl}
+            variant={senderAvatarVariant}
+            avatarId={senderAvatarId ?? "user-self"}
+          />
+        </div>
+      ) : null}
       {menuOpen && !compactAssistant ? (
         <div
           ref={menuRef}

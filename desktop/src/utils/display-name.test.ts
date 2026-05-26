@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { resolveMetaDisplayName } from "./display-name";
+import {
+  isMetaLeaderAgentId,
+  isMetaLeaderIdentity,
+  resolveMetaDisplayName,
+} from "./display-name";
 
 describe("resolveMetaDisplayName", () => {
   it("maps legacy Machi variants to Near", () => {
@@ -18,5 +22,16 @@ describe("resolveMetaDisplayName", () => {
   it("preserves custom display names", () => {
     expect(resolveMetaDisplayName("自定义名")).toBe("自定义名");
     expect(resolveMetaDisplayName("  Research Bot  ")).toBe("Research Bot");
+  });
+});
+
+describe("isMetaLeaderIdentity", () => {
+  it("recognizes meta agent ids and legacy Machi labels", () => {
+    expect(isMetaLeaderAgentId("meta")).toBe(true);
+    expect(isMetaLeaderAgentId("__meta__")).toBe(true);
+    expect(isMetaLeaderAgentId("avatar-1")).toBe(false);
+    expect(isMetaLeaderIdentity("__meta__", "Machi")).toBe(true);
+    expect(isMetaLeaderIdentity("", "Machi")).toBe(true);
+    expect(isMetaLeaderIdentity("avatar-1", "飞坦")).toBe(false);
   });
 });
