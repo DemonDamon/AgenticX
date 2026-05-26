@@ -187,8 +187,8 @@ export const BrainsSettings = forwardRef<BrainsSettingsHandle>(function BrainsSe
 
   return (
     <div className="flex min-h-0 flex-1 flex-col gap-3">
-      <p className="shrink-0 text-xs text-text-faint">
-        每个<strong className="text-text-subtle">知识脑</strong>是独立实例（文档库或代码库）。分身可在设置中挂载 0–N
+      <p className="shrink-0 text-xs leading-relaxed text-text-muted">
+        每个<strong className="font-medium text-text-primary">知识脑</strong>是独立实例（文档库或代码库）。分身可在设置中挂载 0–N
         个脑；Meta 默认仅使用全局脑。
       </p>
       <div className="flex min-h-0 flex-1 gap-3">
@@ -205,7 +205,7 @@ export const BrainsSettings = forwardRef<BrainsSettingsHandle>(function BrainsSe
             </button>
           </div>
           {loading ? (
-            <div className="flex items-center gap-2 px-2 py-4 text-xs text-text-faint">
+            <div className="flex items-center gap-2 px-2 py-4 text-xs text-text-muted">
               <Loader2 className="h-3.5 w-3.5 animate-spin" /> 加载…
             </div>
           ) : (
@@ -220,7 +220,7 @@ export const BrainsSettings = forwardRef<BrainsSettingsHandle>(function BrainsSe
                     className={`w-full rounded-lg px-2 py-2 text-left text-xs transition ${
                       selectedId === b.id
                         ? "bg-[var(--settings-accent-solid)] text-[var(--settings-accent-solid-text)]"
-                        : "hover:bg-surface-hover text-text-subtle"
+                        : "hover:bg-surface-hover text-text-muted"
                     }`}
                   >
                     <div className="flex items-center gap-1.5 font-medium">
@@ -234,7 +234,11 @@ export const BrainsSettings = forwardRef<BrainsSettingsHandle>(function BrainsSe
                         {badge.label}
                       </span>
                     </div>
-                    <div className="mt-0.5 truncate text-[10px] opacity-80">
+                    <div
+                      className={`mt-0.5 truncate text-[11px] ${
+                        selectedId === b.id ? "opacity-90" : "text-text-subtle"
+                      }`}
+                    >
                       {brainTypeShort(b.type)}
                       {b.scope === "private" && b.owner_avatar_id
                         ? ` · ${b.owner_avatar_id.slice(0, 8)}`
@@ -249,7 +253,7 @@ export const BrainsSettings = forwardRef<BrainsSettingsHandle>(function BrainsSe
 
         <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden rounded-lg border border-border bg-surface-card">
           {!selected ? (
-            <div className="flex flex-1 items-center justify-center py-12 text-center text-sm text-text-faint">
+            <div className="flex flex-1 items-center justify-center py-12 text-center text-sm text-text-muted">
               选择或新建一个知识脑
             </div>
           ) : (
@@ -259,7 +263,7 @@ export const BrainsSettings = forwardRef<BrainsSettingsHandle>(function BrainsSe
                   <h3 className="text-sm font-medium text-text-primary">
                     {selected.name}
                     {selected.id === "default_docs" ? (
-                      <span className="ml-2 text-xs font-normal text-text-faint">系统默认</span>
+                      <span className="ml-2 text-xs font-normal text-text-muted">系统默认</span>
                     ) : null}
                   </h3>
                   {selected.type === "code" ? (
@@ -290,7 +294,7 @@ export const BrainsSettings = forwardRef<BrainsSettingsHandle>(function BrainsSe
                         className={`px-3 py-1 transition ${
                           detailTab === t.id
                             ? "bg-[var(--settings-accent-solid)] font-medium text-[var(--settings-accent-solid-text)]"
-                            : "bg-transparent text-text-subtle hover:bg-surface-hover"
+                            : "bg-transparent text-text-muted hover:bg-surface-hover"
                         }`}
                         onClick={() => setDetailTab(t.id)}
                       >

@@ -70,6 +70,19 @@
   --status-warning: rgba(255, 175, 85, 0.95);
   --status-error: rgba(255, 110, 110, 0.95);
 
+  --brain-scope-global-bg: rgba(139, 92, 246, 0.18);
+  --brain-scope-global-fg: #ddd6fe;
+  --brain-scope-global-ring: rgba(167, 139, 250, 0.35);
+  --brain-scope-global-icon: #c4b5fd;
+  --brain-scope-private-bg: rgba(245, 158, 11, 0.16);
+  --brain-scope-private-fg: #fde68a;
+  --brain-scope-private-ring: rgba(251, 191, 36, 0.35);
+  --brain-scope-private-icon: #fcd34d;
+  --brain-scope-enabled-bg: rgba(16, 185, 129, 0.16);
+  --brain-scope-enabled-fg: #6ee7b7;
+  --brain-scope-type-bg: rgba(255, 255, 255, 0.1);
+  --brain-scope-type-fg: rgba(255, 255, 255, 0.72);
+
   --ui-btn-primary-bg: rgba(var(--theme-color-rgb), 1);
   --ui-btn-primary-bg-hover: rgba(var(--theme-color-rgb), 0.9);
   --ui-btn-primary-text: var(--theme-color-text);
