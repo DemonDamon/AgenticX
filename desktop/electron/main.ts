@@ -51,6 +51,7 @@ import {
   runSystemSearch,
   type SystemSearchCategory,
 } from "./system-search";
+import { proxyAwareFetch, logProxyConfig } from "./proxy-fetch";
 
 /** Node fetch honors HTTP_PROXY; localhost cc-bridge POSTs then fail (e.g. 502) and PTY input never reaches Claude. */
 function ccBridgeUrlIsLoopback(urlStr: string): boolean {
@@ -5157,7 +5158,7 @@ function registerIpc(): void {
       const controller = new AbortController();
       const timer = setTimeout(() => controller.abort(), 10000);
       const resp = isMinimax
-        ? await fetch(url, {
+        ? await proxyAwareFetch(url, {
             method: "POST",
             headers: {
               Authorization: `Bearer ${payload.apiKey}`,
@@ -5170,7 +5171,7 @@ function registerIpc(): void {
             }),
             signal: controller.signal,
           })
-        : await fetch(url, {
+        : await proxyAwareFetch(url, {
             headers: { Authorization: `Bearer ${payload.apiKey}` },
             signal: controller.signal,
           });
@@ -5194,7 +5195,7 @@ function registerIpc(): void {
     try {
       const controller = new AbortController();
       const timer = setTimeout(() => controller.abort(), 15000);
-      const resp = await fetch(url, {
+      const resp = await proxyAwareFetch(url, {
         headers: { Authorization: `Bearer ${payload.apiKey}` },
         signal: controller.signal,
       });
@@ -5227,7 +5228,7 @@ function registerIpc(): void {
       const controller = new AbortController();
       const timer = setTimeout(() => controller.abort(), 15000);
       const t0 = performance.now();
-      const resp = await fetch(url, {
+      const resp = await proxyAwareFetch(url, {
         method: "POST",
         headers: {
           Authorization: `Bearer ${payload.apiKey}`,
@@ -5774,6 +5775,7 @@ if (!gotTheLock) {
 
   app.whenReady().then(async () => {
     try {
+      logProxyConfig();
       if (process.platform === "win32" || process.platform === "linux") {
         Menu.setApplicationMenu(null);
       } else {
