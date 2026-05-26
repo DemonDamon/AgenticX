@@ -347,35 +347,17 @@ def _extract_cc_bridge_status_event(event_type: str, event_data: dict[str, Any])
 
 
 def _minimax_m2_family_no_vision(model_name: str) -> bool:
-    """MiniMax M2 chat line does not accept image/audio input (vendor docs).
+    """MiniMax M2 chat line does not accept image/audio input (vendor docs)."""
+    from agenticx.llms.vision import _minimax_m2_family_no_vision as _impl
 
-    Applies to MiniMax-M2, M2.1, M2.5, M2.7 and *-highspeed SKUs; exclude ids containing vl/vision.
-    """
-    raw = str(model_name or "").strip().lower()
-    if not raw:
-        return False
-    if "/" in raw:
-        raw = raw.rsplit("/", 1)[-1]
-    if "vl" in raw or "vision" in raw:
-        return False
-    if raw.startswith("minimax-m2"):
-        return True
-    return bool(re.match(r"^m2[.\-_]?\d", raw))
+    return _impl(model_name)
 
 
 def _zhipu_glm5_family_no_vision(model_name: str) -> bool:
-    """GLM-5 chat SKUs on BigModel v4 reject multimodal message parts (image_url).
+    """GLM-5 chat SKUs on BigModel v4 reject multimodal message parts (image_url)."""
+    from agenticx.llms.vision import _zhipu_glm5_family_no_vision as _impl
 
-    Vision-capable ids typically include 4v/5v, vl, or vision; those must stay allowed.
-    """
-    raw = str(model_name or "").strip().lower()
-    if not raw:
-        return False
-    if "/" in raw:
-        raw = raw.rsplit("/", 1)[-1]
-    if "vl" in raw or "vision" in raw or "4v" in raw or "5v" in raw:
-        return False
-    return raw == "glm-5" or raw.startswith("glm-5-")
+    return _impl(model_name)
 
 
 async def _llm_suggest_session_title_job(manager: SessionManager, session_id: str) -> None:

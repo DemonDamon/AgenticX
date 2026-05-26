@@ -130,6 +130,8 @@ _CONCURRENCY_SAFE_STUDIO_TOOLS = frozenset(
         "cc_bridge_list",
         "knowledge_search",  # Plan-Id: machi-kb-stage1-local-mvp — read-only vector search.
         "web_search",
+        "web_fetch",
+        "view_image",
     }
 )
 
@@ -1174,6 +1176,63 @@ STUDIO_TOOLS: List[Dict[str, Any]] = [
                     },
                 },
                 "required": ["query"],
+                "additionalProperties": False,
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "web_fetch",
+            "description": (
+                "Fetch a single web URL and return its readable text content plus a list of "
+                "in-page image URLs. Use this when the user provides a URL whose content you "
+                "need to understand. Returns markdown-ish text (HTML stripped) and a structured "
+                "tail block '[discovered_images]' listing absolute image URLs in source order. "
+                "Combine with view_image when visual content matters. Max page size 2 MB."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "url": {
+                        "type": "string",
+                        "description": "Absolute http(s) URL to fetch.",
+                    },
+                    "max_images": {
+                        "type": "integer",
+                        "description": "Cap on how many image URLs to return (default 20, hard max 50).",
+                    },
+                },
+                "required": ["url"],
+                "additionalProperties": False,
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "view_image",
+            "description": (
+                "Load an image so the model can visually inspect it in the next turn. Accepts a "
+                "local absolute/relative file path, a http(s) URL (e.g. one returned by "
+                "web_fetch's [discovered_images]), or a data:image/* URL. Use when visual content "
+                "is necessary to answer (e.g. user asked 'describe the first image'). Returns an "
+                "error if the current model is not vision-capable. Each turn caps total attached "
+                "images at 4."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "target": {
+                        "type": "string",
+                        "description": "File path, http(s) URL, or data:image/* URL.",
+                    },
+                    "note": {
+                        "type": "string",
+                        "description": "Optional short label used in the placeholder text (e.g. 'cover image').",
+                    },
+                },
+                "required": ["target"],
                 "additionalProperties": False,
             },
         },
@@ -3787,6 +3846,264 @@ def _tool_web_search(arguments: Dict[str, Any]) -> str:
         return f"ERROR: web_search failed: {exc}"
 
 
+PENDING_VISUAL_ATTACHMENTS_KEY = "__pending_visual_attachments__"
+_WEB_FETCH_MAX_BYTES = 2 * 1024 * 1024
+_WEB_FETCH_BODY_CHAR_LIMIT = 12_000
+_VIEW_IMAGE_MAX_BYTES = 8 * 1024 * 1024
+_VIEW_IMAGE_MAX_PENDING = 4
+_ALLOWED_WEB_FETCH_CONTENT_TYPES = (
+    "text/html",
+    "application/xhtml",
+    "text/plain",
+    "text/markdown",
+)
+
+
+def _httpx_transport_for_url(url: str):
+    import httpx
+
+    host = (urlparse(url).hostname or "").lower()
+    if host in {"127.0.0.1", "localhost", "::1"}:
+        return httpx.AsyncHTTPTransport()
+    return None
+
+
+def _detect_image_mime(data: bytes) -> str | None:
+    if len(data) >= 8 and data[:8] == b"\x89PNG\r\n\x1a\n":
+        return "image/png"
+    if len(data) >= 3 and data[:3] == b"\xff\xd8\xff":
+        return "image/jpeg"
+    if len(data) >= 6 and data[:6] in {b"GIF87a", b"GIF89a"}:
+        return "image/gif"
+    if len(data) >= 12 and data[:4] == b"RIFF" and data[8:12] == b"WEBP":
+        return "image/webp"
+    if len(data) >= 2 and data[:2] == b"BM":
+        return "image/bmp"
+    return None
+
+
+def _filename_from_url(url: str, mime: str) -> str:
+    path = urlparse(url).path.rsplit("/", 1)[-1].strip()
+    if path and "." in path:
+        return path
+    ext = "png"
+    if "jpeg" in mime or "jpg" in mime:
+        ext = "jpg"
+    elif "webp" in mime:
+        ext = "webp"
+    elif "gif" in mime:
+        ext = "gif"
+    elif "bmp" in mime:
+        ext = "bmp"
+    return f"image.{ext}"
+
+
+def _data_url_from_bytes(data: bytes, mime: str) -> str:
+    encoded = base64.b64encode(data).decode("ascii")
+    return f"data:{mime};base64,{encoded}"
+
+
+def _parse_data_image_url(target: str) -> tuple[bytes, str] | None:
+    raw = str(target or "").strip()
+    if not raw.startswith("data:image/"):
+        return None
+    header, _, payload = raw.partition(",")
+    if not payload:
+        return None
+    mime = header[5:].split(";", 1)[0].strip() or "image/png"
+    try:
+        if ";base64" in header.lower():
+            data = base64.b64decode(payload, validate=False)
+        else:
+            from urllib.parse import unquote_to_bytes
+
+            data = unquote_to_bytes(payload)
+    except Exception:
+        return None
+    return data, mime
+
+
+async def _fetch_http_bytes(url: str, *, timeout: float, max_bytes: int) -> tuple[bytes, str, str]:
+    import httpx
+
+    transport = _httpx_transport_for_url(url)
+    async with httpx.AsyncClient(
+        timeout=timeout,
+        follow_redirects=True,
+        transport=transport,
+    ) as client:
+        response = await client.get(url)
+        final_url = str(response.url)
+        if response.status_code != 200:
+            raise ValueError(f"http {response.status_code}")
+        content_type = str(response.headers.get("content-type", "") or "").split(";", 1)[0].strip().lower()
+        data = response.content
+        if len(data) > max_bytes:
+            raise ValueError("too-large")
+        return data, content_type, final_url
+
+
+def _pending_visual_attachments(session: Optional[StudioSession]) -> list[dict[str, Any]]:
+    if session is None:
+        return []
+    scratchpad = getattr(session, "scratchpad", None)
+    if not isinstance(scratchpad, dict):
+        session.scratchpad = {}
+        scratchpad = session.scratchpad
+    pending = scratchpad.get(PENDING_VISUAL_ATTACHMENTS_KEY)
+    if not isinstance(pending, list):
+        pending = []
+        scratchpad[PENDING_VISUAL_ATTACHMENTS_KEY] = pending
+    return pending
+
+
+def _session_vision_capable(session: Optional[StudioSession]) -> bool:
+    from agenticx.llms.vision import is_vision_capable
+
+    provider = str(getattr(session, "provider_name", "") or "")
+    model = str(getattr(session, "model_name", "") or "")
+    return is_vision_capable(provider, model)
+
+
+async def _tool_web_fetch(arguments: Dict[str, Any], session: Optional[StudioSession] = None) -> str:
+    url = str(arguments.get("url", "") or "").strip()
+    if not url:
+        return "ERROR: missing required parameter 'url'"
+    parsed = urlparse(url)
+    if parsed.scheme not in {"http", "https"}:
+        return "ERROR: only http(s) URLs are supported"
+    raw_max_images = arguments.get("max_images")
+    try:
+        max_images = int(raw_max_images) if raw_max_images is not None else 20
+    except (TypeError, ValueError):
+        max_images = 20
+    max_images = max(1, min(max_images, 50))
+    try:
+        body, content_type, final_url = await _fetch_http_bytes(
+            url,
+            timeout=15.0,
+            max_bytes=_WEB_FETCH_MAX_BYTES,
+        )
+    except ValueError as exc:
+        reason = str(exc)
+        if reason == "too-large":
+            return "ERROR: page exceeds 2MB limit"
+        if reason.startswith("http "):
+            return f"ERROR: {reason}"
+        return f"ERROR: network"
+    except Exception:
+        return "ERROR: network"
+    if not any(content_type.startswith(prefix) for prefix in _ALLOWED_WEB_FETCH_CONTENT_TYPES):
+        return f"ERROR: unsupported content-type {content_type or '(missing)'}"
+    from agenticx.tools.html_extractor import extract_readable_text
+
+    html = body.decode("utf-8", errors="replace")
+    extracted = extract_readable_text(html, final_url)
+    title = str(extracted.get("title", "") or "").strip() or "(untitled)"
+    text = str(extracted.get("text", "") or "").strip()
+    total_chars = len(text)
+    truncated = False
+    if total_chars > _WEB_FETCH_BODY_CHAR_LIMIT:
+        text = text[:_WEB_FETCH_BODY_CHAR_LIMIT]
+        truncated = True
+    lines = [f"Title: {title}", f"URL: {final_url}", "", text]
+    if truncated:
+        lines.append(f"...[truncated, total ~{total_chars} chars]")
+    images = list(extracted.get("images") or [])[:max_images]
+    if images:
+        lines.append("")
+        lines.append("[discovered_images]")
+        for idx, image_url in enumerate(images, start=1):
+            lines.append(f"{idx}. {image_url}")
+    return "\n".join(lines).strip()
+
+
+async def _tool_view_image(arguments: Dict[str, Any], session: Optional[StudioSession] = None) -> str:
+    target = str(arguments.get("target", "") or "").strip()
+    note = str(arguments.get("note", "") or "").strip()
+    if not target:
+        return "ERROR: missing required parameter 'target'"
+    if not _session_vision_capable(session):
+        model = str(getattr(session, "model_name", "") or "unknown")
+        return (
+            f"ERROR: current model '{model}' does not support vision; "
+            "switch to a vision-capable model first."
+        )
+    pending = _pending_visual_attachments(session)
+    if len(pending) >= _VIEW_IMAGE_MAX_PENDING:
+        return "ERROR: too many pending visual attachments (max 4 per turn)"
+    data: bytes
+    mime: str
+    name: str
+    source = target
+    parsed = urlparse(target)
+    if target.startswith("data:image/"):
+        parsed_data = _parse_data_image_url(target)
+        if parsed_data is None:
+            return "ERROR: unsupported image type"
+        data, mime = parsed_data
+        name = "clipboard-image"
+    elif parsed.scheme in {"http", "https"}:
+        try:
+            data, content_type, final_url = await _fetch_http_bytes(
+                target,
+                timeout=10.0,
+                max_bytes=_VIEW_IMAGE_MAX_BYTES,
+            )
+        except ValueError as exc:
+            reason = str(exc)
+            if reason == "too-large":
+                return "ERROR: image exceeds 8MB limit"
+            if reason.startswith("http "):
+                return f"ERROR: {reason}"
+            return "ERROR: network"
+        except Exception:
+            return "ERROR: network"
+        mime = _detect_image_mime(data) or (
+            content_type if content_type.startswith("image/") else None
+        )
+        if not mime:
+            return "ERROR: unsupported image type"
+        source = final_url
+        name = _filename_from_url(final_url, mime)
+    elif parsed.scheme in {"file", ""} or target.startswith("/") or (len(target) > 2 and target[1] == ":"):
+        try:
+            path = _resolve_workspace_path(target, session, pick_existing=True)
+        except ValueError as exc:
+            return f"ERROR: {exc}"
+        if not path.exists() or not path.is_file():
+            return f"ERROR: file not found: {path}"
+        data = path.read_bytes()
+        if len(data) > _VIEW_IMAGE_MAX_BYTES:
+            return "ERROR: image exceeds 8MB limit"
+        mime = _detect_image_mime(data)
+        if not mime:
+            return "ERROR: unsupported image type"
+        name = path.name
+        source = str(path)
+    else:
+        return "ERROR: only http(s) URLs, data:image/* URLs, and local file paths are supported"
+    if len(data) > _VIEW_IMAGE_MAX_BYTES:
+        return "ERROR: image exceeds 8MB limit"
+    data_url = _data_url_from_bytes(data, mime)
+    pending.append(
+        {
+            "name": name,
+            "data_url": data_url,
+            "mime_type": mime,
+            "size": len(data),
+            "source": source,
+            "note": note,
+        }
+    )
+    size_kb = max(1, len(data) // 1024)
+    note_clause = f" ({note})" if note else ""
+    return (
+        f"[image loaded: {name} ({size_kb} KB, {mime}); "
+        f"will be visually attached in next turn{note_clause}]"
+    )
+
+
 def _tool_memory_search(arguments: Dict[str, Any]) -> str:
     query = str(arguments.get("query", "")).strip()
     if not query:
@@ -4613,6 +4930,10 @@ async def dispatch_tool_async(
             return await asyncio.to_thread(_tool_knowledge_search, arguments, session)
         if name == "web_search":
             return await asyncio.to_thread(_tool_web_search, arguments)
+        if name == "web_fetch":
+            return await _tool_web_fetch(arguments, session)
+        if name == "view_image":
+            return await _tool_view_image(arguments, session)
         if name == "session_search":
             return _tool_session_search(arguments, session)
         if name == "code_search":

@@ -506,6 +506,20 @@ def _build_web_search_capability_block() -> str:
     )
 
 
+def _build_url_vision_capability_block() -> str:
+    """Describe built-in web_fetch + view_image workflow for URL visual tasks."""
+    return (
+        "## URL content and visual inspection\n"
+        "- When the user provides a URL whose content matters, prefer `web_fetch(url=...)` to "
+        "retrieve the page text plus its `[discovered_images]` list.\n"
+        "- If visual analysis is required (e.g. user asks about an image, cover, screenshot), "
+        "follow up with `view_image(target=...)` using either an image URL from "
+        "`[discovered_images]`, a local file path produced by other tools, or a `data:image/*` URL.\n"
+        "- Only call `view_image` when visual content is necessary to answer; do not "
+        "preemptively view every image. Each turn caps total visual attachments at 4.\n\n"
+    )
+
+
 def _build_followup_questions_block() -> str:
     """Ask the model for <followups> lines consumed by Desktop chips."""
     try:
@@ -714,6 +728,7 @@ def build_meta_agent_system_prompt(
         "- 需要回忆历史信息时，调用 `memory_search(query='...')` 查询。\n\n"
         f"{kb_retrieval_block}"
         f"{_build_web_search_capability_block()}"
+        f"{_build_url_vision_capability_block()}"
         f"{_build_followup_questions_block()}"
         "## 子智能体完成后的主动汇报（关键）\n"
         "- 当「当前子智能体状态」或「历史子智能体结果」中出现 completed 或 failed 的子智能体，你 **必须在本轮回复中主动汇报**，包括：\n"

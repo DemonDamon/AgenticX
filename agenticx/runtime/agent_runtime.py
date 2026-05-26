@@ -21,6 +21,7 @@ import uuid
 from typing import TYPE_CHECKING, Any, AsyncGenerator, Awaitable, Callable, Dict, List, Optional, Sequence
 
 from agenticx.cli.agent_tools import (
+    PENDING_VISUAL_ATTACHMENTS_KEY,
     STUDIO_TOOLS,
     studio_tools_for_session,
     _TOOL_REQUIRED_PARAMS,
@@ -515,6 +516,55 @@ def _serialize_scratchpad(session: StudioSession) -> str:
         preview = value if len(value) <= 200 else value[:200] + "..."
         lines.append(f"- {key}: {preview.replace(chr(10), ' ')}")
     return "\n".join(lines)
+
+
+def _inject_pending_visual_attachments(
+    session: StudioSession,
+    messages: List[Dict[str, Any]],
+    *,
+    is_system_trigger: bool,
+) -> None:
+    scratchpad = getattr(session, "scratchpad", None)
+    if not isinstance(scratchpad, dict):
+        return
+    pending = scratchpad.pop(PENDING_VISUAL_ATTACHMENTS_KEY, [])
+    if not isinstance(pending, list) or not pending:
+        return
+    content_blocks: List[Dict[str, Any]] = [
+        {
+            "type": "text",
+            "text": "<system-injected> attached images requested via view_image tool:",
+        },
+    ]
+    simplified: List[Dict[str, Any]] = []
+    for item in pending:
+        if not isinstance(item, dict):
+            continue
+        data_url = str(item.get("data_url", "")).strip()
+        if not data_url.startswith("data:image/"):
+            continue
+        content_blocks.append({"type": "image_url", "image_url": {"url": data_url}})
+        simplified.append(
+            {
+                "name": str(item.get("name", "") or "image"),
+                "mime_type": str(item.get("mime_type", "") or "image/png"),
+                "size": int(item.get("size", 0) or 0),
+                "source": str(item.get("source", "") or ""),
+            }
+        )
+    if len(content_blocks) <= 1:
+        return
+    injected = {"role": "user", "content": content_blocks}
+    messages.append(injected)
+    session.agent_messages.append(injected)
+    if not is_system_trigger:
+        session.chat_history.append(
+            {
+                "role": "user",
+                "content": "<system-injected> attached images requested via view_image tool:",
+                "visual_attachments": simplified,
+            }
+        )
 
 
 def _build_agent_system_prompt(session: StudioSession) -> str:
@@ -2616,6 +2666,12 @@ class AgentRuntime:
                         agent_id=agent_id,
                     )
                     return
+
+            _inject_pending_visual_attachments(
+                session,
+                messages,
+                is_system_trigger=_is_system_trigger,
+            )
 
         message = (
             "已达到最大工具调用轮数，已暂停自动执行。"
