@@ -424,7 +424,10 @@ STUDIO_TOOLS: List[Dict[str, Any]] = [
         "type": "function",
         "function": {
             "name": "mcp_connect",
-            "description": "Connect one configured MCP server.",
+            "description": (
+                "Connect one configured MCP server. API keys belong in Near Settings → MCP "
+                "(~/.agenticx/mcp.json env) or OS environment—never ask the user to paste secrets in chat."
+            ),
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -587,7 +590,10 @@ STUDIO_TOOLS: List[Dict[str, Any]] = [
         "type": "function",
         "function": {
             "name": "mcp_import",
-            "description": "Import MCP server configs from external mcp.json into AgenticX workspace config.",
+            "description": (
+                "Import MCP server configs from external mcp.json into AgenticX workspace config. "
+                "Do not collect API keys in chat; user fills env in Settings → MCP."
+            ),
             "parameters": {
                 "type": "object",
                 "properties": {

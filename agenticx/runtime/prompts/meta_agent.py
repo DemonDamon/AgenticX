@@ -15,6 +15,10 @@ from agenticx.cli.studio import StudioSession
 from agenticx.cli.studio_skill import get_all_skill_summaries
 from agenticx.skills.meta_skill import MetaSkillInjector
 from agenticx.runtime.prompts.code_mode import build_code_dev_prompt_blocks
+from agenticx.runtime.prompts.credential_safety import (
+    CREDENTIAL_SAFETY_BLOCK,
+    CREDENTIAL_SAFETY_MCP_HINT,
+)
 from agenticx.workspace.loader import load_workspace_context
 
 
@@ -671,6 +675,7 @@ def build_meta_agent_system_prompt(
         "- `mcp_call` 参数对象字段应使用 `arguments`（兼容 `args`）；调用前先核对目标工具所需字段。\n"
         "- 若存在配置但未连接，先明确告知用户需在 MCP 管理接口完成连接。\n"
         "- 若用户明确提供外部 mcp.json 路径，先调用 `mcp_import` 导入，再连接。\n"
+        f"{CREDENTIAL_SAFETY_MCP_HINT}"
         "- MCP 连接失败时，要求子智能体进入闭环：读取错误 -> 诊断原因 -> 执行修复 -> 重试连接（最多 3 轮）。\n"
         "- 修复优先级：依赖缺失、命令路径错误、环境变量缺失、配置字段错误。\n"
         "- 向用户汇报时必须给出可验证结果：已连接服务器名、可用工具数量、失败原因与下一步建议。\n"
@@ -720,6 +725,7 @@ def build_meta_agent_system_prompt(
         "- 严禁通过 `file_write` / `file_edit` 直接修改 `~/.agenticx/config.yaml`。\n"
         "- 当用户要求“帮我配置邮箱”时，只能调用 `update_email_config`，且仅允许写入 notifications.email.* 白名单字段。\n"
         "- 禁止修改 provider/model/mcp/权限策略等非邮件配置项；如用户有此诉求，必须先解释风险并征求明确确认。\n\n"
+        f"{CREDENTIAL_SAFETY_BLOCK}\n"
         "## 记忆管理（重要）\n"
         "- 当用户说\u201c帮我记住/记一下/remember/保存这个信息\u201d时，**必须**调用 `memory_append(target='long_term', content='...')` 将信息写入持久记忆。\n"
         "- 禁止把用户要求记住的信息写到随意文件（如 ~/xxx.md）；所有记忆必须通过 `memory_append` 写入 workspace 索引范围内。\n"

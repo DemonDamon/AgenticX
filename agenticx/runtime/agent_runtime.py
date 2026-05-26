@@ -614,6 +614,7 @@ def _build_agent_system_prompt(session: StudioSession) -> str:
         "应用 `allowed_domains` 限制域名以降低风险。需要逐步可见过程时，可改用 `browser_navigate`、"
         "`browser_get_state`、`browser_click` 等低层工具分步执行。\n"
         "- 未连接 MCP 或缺少对应工具时，说明如何配置（如 `~/.agenticx/mcp.json`），不要假装已执行浏览器操作。\n\n"
+        f"{_credential_safety_block_for_agent()}"
         "## 安全与确认规则（必须遵守）\n"
         "- bash_exec 仅对白名单命令自动执行；非白名单命令必须先征得用户确认。\n"
         "- file_write 与 file_edit 必须先展示 unified diff，再征得用户确认。\n"
@@ -622,6 +623,15 @@ def _build_agent_system_prompt(session: StudioSession) -> str:
         "- 对中间结果优先写入 scratchpad_write，后续步骤先 scratchpad_read 复用。\n"
         "- 优先最小改动，避免无关重构。\n"
     )
+
+
+def _credential_safety_block_for_agent() -> str:
+    try:
+        from agenticx.runtime.prompts.credential_safety import CREDENTIAL_SAFETY_BLOCK
+
+        return f"{CREDENTIAL_SAFETY_BLOCK}\n"
+    except Exception:
+        return ""
 
 
 def _parse_tool_arguments(raw_args: Any) -> Dict[str, Any]:
