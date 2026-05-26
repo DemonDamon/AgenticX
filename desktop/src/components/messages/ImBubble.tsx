@@ -682,7 +682,7 @@ export function ImBubble({
       {menuOpen && !compactAssistant ? (
         <div
           ref={menuRef}
-          className="fixed z-[80] w-36 rounded-lg border border-border bg-surface-panel p-1 shadow-2xl"
+          className="fixed z-[80] w-36 rounded-lg border border-border bg-surface-base p-1 shadow-2xl"
           style={{ left: menuPos.x, top: menuPos.y }}
         >
           <button
