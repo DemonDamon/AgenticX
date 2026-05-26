@@ -1,6 +1,6 @@
 import { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState, type KeyboardEventHandler } from "react";
 import { useAppStore, type Message, type QueuedMessage } from "../store";
-import { getProviderDisplayName } from "../utils/provider-display";
+import { formatModelOptionLabel } from "../utils/model-display";
 import { SubAgentPanel } from "./SubAgentPanel";
 import { interruptOnInterimResult, interruptTtsOnUserSpeech } from "../voice/interrupt";
 import { speak } from "../voice/tts";
@@ -256,8 +256,7 @@ function ModelBadge({ provider, model }: { provider?: string; model?: string }) 
   const providers = useAppStore((s) => s.settings.providers);
   if (!model) return null;
   const entry = provider ? providers[provider] : undefined;
-  const provLabel = provider ? getProviderDisplayName(provider, entry) : "";
-  const label = provLabel ? `${provLabel}/${model}` : model;
+  const label = provider ? formatModelOptionLabel(provider, model, entry) : model;
   return (
     <span className="mb-1 inline-block rounded bg-surface-card px-1.5 py-0.5 text-[10px] text-text-subtle">
       {label}
@@ -472,13 +471,16 @@ export function ChatView({ onOpenConfirm, mode = "pro" }: Props) {
     for (const [provName, entry] of Object.entries(settings.providers)) {
       if (entry.enabled === false) continue;
       if (!entry.apiKey) continue;
-      const provLabel = getProviderDisplayName(provName, entry);
       if (entry.models.length > 0) {
         for (const m of entry.models) {
-          result.push({ provider: provName, model: m, label: `${provLabel}/${m}` });
+          result.push({ provider: provName, model: m, label: formatModelOptionLabel(provName, m, entry) });
         }
       } else if (entry.model) {
-        result.push({ provider: provName, model: entry.model, label: `${provLabel}/${entry.model}` });
+        result.push({
+          provider: provName,
+          model: entry.model,
+          label: formatModelOptionLabel(provName, entry.model, entry),
+        });
       }
     }
     return result;
@@ -488,7 +490,7 @@ export function ChatView({ onOpenConfirm, mode = "pro" }: Props) {
     if (!activeModel) return "未选模型";
     if (!activeProvider) return activeModel;
     const entry = settings.providers[activeProvider];
-    return `${getProviderDisplayName(activeProvider, entry)}/${activeModel}`;
+    return formatModelOptionLabel(activeProvider, activeModel, entry);
   }, [activeModel, activeProvider, settings.providers]);
 
   const showStopButton = shouldShowStopButton({
@@ -2135,11 +2137,16 @@ function ModelPickerDropdown({ onSelect, onClose }: { onSelect: (p: string, m: s
     for (const [provName, entry] of Object.entries(settings.providers)) {
       if (entry.enabled === false) continue;
       if (!entry.apiKey) continue;
-      const provLabel = getProviderDisplayName(provName, entry);
       if (entry.models.length > 0) {
-        for (const m of entry.models) result.push({ provider: provName, model: m, label: `${provLabel} | ${m}` });
+        for (const m of entry.models) {
+          result.push({ provider: provName, model: m, label: formatModelOptionLabel(provName, m, entry, " | ") });
+        }
       } else if (entry.model) {
-        result.push({ provider: provName, model: entry.model, label: `${provLabel} | ${entry.model}` });
+        result.push({
+          provider: provName,
+          model: entry.model,
+          label: formatModelOptionLabel(provName, entry.model, entry, " | "),
+        });
       }
     }
     return result;

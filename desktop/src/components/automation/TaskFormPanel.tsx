@@ -4,7 +4,7 @@ import { FrequencyPicker } from "./FrequencyPicker";
 import type { AutomationTask, AutomationFrequency } from "./types";
 import { deleteAutomationTaskWithConfirm } from "../../utils/automation-delete";
 import { useAppStore } from "../../store";
-import { getProviderDisplayName } from "../../utils/provider-display";
+import { formatModelOptionLabel } from "../../utils/model-display";
 
 function encodeLlm(provider: string, model: string): string {
   return `${provider}:${model}`;
@@ -63,13 +63,15 @@ export function TaskFormPanel({ initial, onSave, onCancel, onAfterDelete }: Prop
     for (const [provName, entry] of Object.entries(settings.providers)) {
       if (entry.enabled === false) continue;
       if (!entry.apiKey) continue;
-      const provLabel = getProviderDisplayName(provName, entry);
       if (entry.models.length > 0) {
         for (const m of entry.models) {
-          result.push({ value: encodeLlm(provName, m), label: `${provLabel}/${m}` });
+          result.push({ value: encodeLlm(provName, m), label: formatModelOptionLabel(provName, m, entry) });
         }
       } else if (entry.model) {
-        result.push({ value: encodeLlm(provName, entry.model), label: `${provLabel}/${entry.model}` });
+        result.push({
+          value: encodeLlm(provName, entry.model),
+          label: formatModelOptionLabel(provName, entry.model, entry),
+        });
       }
     }
     return result;
