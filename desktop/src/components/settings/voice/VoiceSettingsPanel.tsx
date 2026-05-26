@@ -1,4 +1,5 @@
 import { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState } from "react";
+import { Eye, EyeOff } from "lucide-react";
 import { Panel } from "../../ds/Panel";
 import { META_AGENT_DISPLAY_NAME } from "../../../constants/branding";
 import { useAppStore } from "../../../store";
@@ -95,6 +96,39 @@ export type VoiceSettingsPanelHandle = {
   /** 由设置弹窗底部「保存」触发，写入 `PUT /api/voice/settings`（未打开语音 Tab 时组件未挂载，跳过）。 */
   persist: () => Promise<{ ok: boolean; error?: string }>;
 };
+
+function SecretInput({
+  value,
+  onChange,
+  placeholder,
+}: {
+  value: string;
+  onChange: (next: string) => void;
+  placeholder?: string;
+}) {
+  const [visible, setVisible] = useState(false);
+  return (
+    <div className="relative mt-1">
+      <input
+        type={visible ? "text" : "password"}
+        autoComplete="off"
+        placeholder={placeholder}
+        className="w-full rounded-md border border-border bg-surface-panel py-1 pl-2 pr-11 text-sm text-text-primary"
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+      />
+      <button
+        type="button"
+        tabIndex={-1}
+        aria-label={visible ? "隐藏密钥" : "显示密钥"}
+        className="absolute right-1.5 top-1/2 flex h-8 w-8 -translate-y-1/2 items-center justify-center rounded-md text-text-faint transition hover:bg-surface-hover hover:text-text-subtle"
+        onClick={() => setVisible((v) => !v)}
+      >
+        {visible ? <EyeOff className="h-4 w-4 shrink-0" aria-hidden /> : <Eye className="h-4 w-4 shrink-0" aria-hidden />}
+      </button>
+    </div>
+  );
+}
 
 /** 灵巧模式语音：Realtime Provider、凭证与麦克风选择（服务端落盘 ~/.agenticx/config.yaml `voice:`） */
 export const VoiceSettingsPanel = forwardRef<VoiceSettingsPanelHandle>(function VoiceSettingsPanel(_props, ref) {
@@ -385,12 +419,10 @@ export const VoiceSettingsPanel = forwardRef<VoiceSettingsPanelHandle>(function 
             <div className="text-text-subtle text-xs uppercase tracking-wide">OpenAI Realtime</div>
             <label className="block">
               API Key
-              <input
-                type="password"
+              <SecretInput
                 placeholder="仅在覆盖时填写；留空保持不变"
-                className="mt-1 w-full rounded-md border border-border bg-surface-panel px-2 py-1 text-sm text-text-primary"
                 value={draft.openai_realtime.api_key}
-                onChange={(e) => setDraft((d) => ({ ...d, openai_realtime: { ...d.openai_realtime, api_key: e.target.value } }))}
+                onChange={(api_key) => setDraft((d) => ({ ...d, openai_realtime: { ...d.openai_realtime, api_key } }))}
               />
             </label>
             <label className="block">
@@ -453,30 +485,26 @@ export const VoiceSettingsPanel = forwardRef<VoiceSettingsPanelHandle>(function 
             </label>
             <label className="block">
               Access Key
-              <input
-                type="password"
+              <SecretInput
                 placeholder="仅在覆盖时填写"
-                className="mt-1 w-full rounded-md border border-border bg-surface-panel px-2 py-1 text-sm text-text-primary"
                 value={draft.doubao_realtime.access_key}
-                onChange={(e) =>
+                onChange={(access_key) =>
                   setDraft((d) => ({
                     ...d,
-                    doubao_realtime: { ...d.doubao_realtime, access_key: e.target.value },
+                    doubao_realtime: { ...d.doubao_realtime, access_key },
                   }))
                 }
               />
             </label>
             <label className="block">
               Secret Key（可选）
-              <input
-                type="password"
+              <SecretInput
                 placeholder="部分账号需要填写"
-                className="mt-1 w-full rounded-md border border-border bg-surface-panel px-2 py-1 text-sm text-text-primary"
                 value={draft.doubao_realtime.secret_key}
-                onChange={(e) =>
+                onChange={(secret_key) =>
                   setDraft((d) => ({
                     ...d,
-                    doubao_realtime: { ...d.doubao_realtime, secret_key: e.target.value },
+                    doubao_realtime: { ...d.doubao_realtime, secret_key },
                   }))
                 }
               />
