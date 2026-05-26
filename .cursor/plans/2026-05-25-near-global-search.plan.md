@@ -1,3 +1,10 @@
+---
+name: ""
+overview: ""
+todos: []
+isProject: false
+---
+
 # Near 桌面端：全局电脑搜索（侧栏搜索框 + Spotlight 面板）
 
 > Plan-Id: 2026-05-25-near-global-search
