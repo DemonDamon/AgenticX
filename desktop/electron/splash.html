@@ -140,7 +140,41 @@
         align-items: center;
         justify-content: center;
         align-self: stretch;
+        text-align: center;
+      }
+
+      .brand-block {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 8px;
+        margin: 0;
+        width: 100%;
+        text-align: center;
+      }
+
+      .brand-name {
+        font-size: 36px;
+        font-weight: 700;
+        letter-spacing: 0.24em;
+        color: var(--text);
+        line-height: 1;
+      }
+
+      .brand-tagline {
+        font-size: 10px;
+        letter-spacing: 0.22em;
+        text-transform: uppercase;
+        color: var(--text-muted);
+        line-height: 1.35;
+      }
+
+      .content-stack {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
         gap: 34px;
+        width: 100%;
       }
 
       .hero-aura {
@@ -278,51 +312,6 @@
         }
       }
 
-      .brand-block {
-        display: flex;
-        flex-direction: column;
-        align-items: center;
-        gap: 9px;
-        margin: 0;
-        width: max-content;
-        max-width: 100%;
-      }
-
-      .brand-name,
-      .brand-tagline {
-        display: block;
-        margin: 0;
-        white-space: nowrap;
-        text-align: center;
-      }
-
-      .brand-name {
-        font-size: 36px;
-        font-weight: 700;
-        letter-spacing: 0.24em;
-        padding-left: 0.24em;
-        color: var(--text);
-        line-height: 1;
-      }
-
-      .brand-tagline {
-        font-size: 10px;
-        letter-spacing: 0.18em;
-        padding-left: 0.18em;
-        text-transform: uppercase;
-        color: var(--text-muted);
-        line-height: 1.35;
-      }
-
-      .content-stack {
-        display: flex;
-        flex-direction: column;
-        align-items: center;
-        gap: 34px;
-        width: max-content;
-        max-width: 100%;
-      }
-
       .footer {
         width: 100%;
         display: flex;
@@ -439,8 +428,8 @@
       <div class="content">
         <div class="content-stack">
           <div class="brand-block">
-            <span class="brand-name">NEAR</span>
-            <span class="brand-tagline">Near, Always Near.</span>
+            <div class="brand-name">NEAR</div>
+            <div class="brand-tagline">Near, Always Near.</div>
           </div>
 
           <div class="footer">

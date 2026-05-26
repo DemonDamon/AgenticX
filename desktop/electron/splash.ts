@@ -34,11 +34,11 @@ export function hasSplashBeenShown(): boolean {
 }
 
 function resolveSplashHtmlPath(): string {
+  const dev = path.join(process.cwd(), "electron", "splash.html");
+  if (!app.isPackaged && fs.existsSync(dev)) return dev;
   const packaged = path.join(__dirname, "splash.html");
   if (fs.existsSync(packaged)) return packaged;
-  const dev = path.join(process.cwd(), "electron", "splash.html");
-  if (fs.existsSync(dev)) return dev;
-  return packaged;
+  return dev;
 }
 
 function resolveSplashPreloadPath(): string {
