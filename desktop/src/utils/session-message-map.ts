@@ -1,4 +1,6 @@
 import type { Message, MessageAttachment, MsgRole } from "../store";
+import { META_AGENT_DISPLAY_NAME } from "../constants/branding";
+import { isMetaLeaderIdentity } from "./display-name";
 
 /** Snapshot row from GET /api/session/messages (snake_case). */
 export function attachmentsFromSessionRow(raw: unknown): MessageAttachment[] | undefined {
@@ -97,12 +99,15 @@ export function mapLoadedSessionMessage(item: LoadedSessionMessage, idPrefix: st
     : [];
   const storedId = item.id != null ? String(item.id).trim() : "";
   const id = `${idPrefix}-i${index}${storedId ? `-${storedId}` : ""}`;
+  const agentId = item.agent_id ?? "meta";
+  const rawAvatarName = item.avatar_name != null ? String(item.avatar_name).trim() : "";
+  const metaLeaderRow = isMetaLeaderIdentity(agentId, rawAvatarName);
   const mapped: Message = {
     id,
     role: item.role,
     content: item.content,
-    agentId: item.agent_id ?? "meta",
-    avatarName: item.avatar_name,
+    agentId,
+    avatarName: metaLeaderRow ? META_AGENT_DISPLAY_NAME : item.avatar_name,
     avatarUrl: item.avatar_url,
     provider: item.provider,
     model: item.model,

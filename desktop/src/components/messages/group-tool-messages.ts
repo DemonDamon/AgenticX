@@ -13,6 +13,7 @@ export type GroupedChatRow =
 
 function canGroupToolMessage(message: Message): boolean {
   if (message.role !== "tool") return false;
+  if ((message.toolName ?? "").trim() === "group_progress") return false;
   // Only group the structured tool rows produced by the new SSE path.
   // Legacy history rows often persist as plain text like "工具调用:" /
   // "工具结果(...):"; grouping those together loses the original ReAct
