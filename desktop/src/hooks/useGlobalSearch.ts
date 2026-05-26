@@ -283,8 +283,22 @@ export function useGlobalSearch(open: boolean) {
   useEffect(() => {
     if (!open) return;
     if (debounceRef.current !== null) window.clearTimeout(debounceRef.current);
+    const trimmed = query.trim();
+    if (!trimmed) {
+      debounceRef.current = null;
+      reqIdRef.current += 1;
+      setResults([]);
+      setSelectedPath(null);
+      setLoading(false);
+      setError(null);
+      setWarning(null);
+      setTimedOut(false);
+      stopElapsedTimer();
+      setElapsedMs(0);
+      return;
+    }
     debounceRef.current = window.setTimeout(() => {
-      void runSearch(query, "all");
+      void runSearch(trimmed, category);
     }, DEBOUNCE_MS);
     return () => {
       if (debounceRef.current !== null) {
@@ -292,12 +306,12 @@ export function useGlobalSearch(open: boolean) {
         debounceRef.current = null;
       }
     };
-  }, [open, query, runSearch]);
+  }, [open, query, category, runSearch, stopElapsedTimer]);
 
   useEffect(() => {
-    if (!visibleResults.some((item) => item.path === selectedPath)) {
-      setSelectedPath(visibleResults[0]?.path ?? null);
-    }
+    if (visibleResults.some((item) => item.path === selectedPath)) return;
+    const next = visibleResults[0]?.path ?? null;
+    setSelectedPath((prev) => (prev === next ? prev : next));
   }, [visibleResults, selectedPath]);
 
   useEffect(() => {
