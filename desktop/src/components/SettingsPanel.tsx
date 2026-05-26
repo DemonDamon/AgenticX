@@ -82,6 +82,7 @@ import {
   saveSettingsPanelSize,
   type SettingsPanelSize,
 } from "../utils/settings-panel-size";
+import { useScrollbarOnScroll } from "../hooks/useScrollbarOnScroll";
 import {
   formatBackendChipLabel,
   getBackendScope,
@@ -5005,6 +5006,7 @@ export function SettingsPanel({
     window.addEventListener("mouseup", onUp);
   }, [panelSize.height, panelSize.width]);
   const [active, setActive] = useState(defaultProvider || ALL_PROVIDERS[0]);
+  const providerListScrollRef = useScrollbarOnScroll<HTMLDivElement>();
   const [draft, setDraft] = useState<Record<string, ProviderEntry>>({});
   const [defProv, setDefProv] = useState(defaultProvider);
   const [keyStatus, setKeyStatus] = useState<Record<string, "idle" | "checking" | "ok" | "fail">>({});
@@ -6576,7 +6578,10 @@ export function SettingsPanel({
               <div className="flex gap-3">
                 {/* Provider sub-list */}
                 <div className="flex w-[140px] shrink-0 flex-col rounded-md border border-border bg-surface-card">
-                  <div className="max-h-[min(60vh,420px)] space-y-0.5 overflow-y-auto py-1">
+                  <div
+                    ref={providerListScrollRef}
+                    className="agx-scrollbar-on-scroll max-h-[min(60vh,420px)] space-y-0.5 overflow-y-auto py-1"
+                  >
                     {providerNames.map((name) => {
                       const entry = draft[name];
                       const dotClass = providerEffectiveOn(entry) ? "bg-emerald-400" : "bg-rose-400";

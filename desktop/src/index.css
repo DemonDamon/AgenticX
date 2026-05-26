@@ -186,6 +186,28 @@ body {
   background-color: color-mix(in srgb, var(--text-subtle) 75%, transparent);
 }
 
+/* 滚动时短暂显示滚动条，静止后隐藏（Provider 侧栏等窄列表） */
+.agx-scrollbar-on-scroll {
+  scrollbar-width: thin;
+  scrollbar-color: transparent transparent;
+}
+.agx-scrollbar-on-scroll.is-scrolling {
+  scrollbar-color: color-mix(in srgb, var(--text-faint) 70%, transparent) transparent;
+}
+.agx-scrollbar-on-scroll::-webkit-scrollbar {
+  width: 5px;
+}
+.agx-scrollbar-on-scroll::-webkit-scrollbar-thumb {
+  background-color: transparent;
+  border-radius: 999px;
+}
+.agx-scrollbar-on-scroll.is-scrolling::-webkit-scrollbar-thumb {
+  background-color: color-mix(in srgb, var(--text-faint) 70%, transparent);
+}
+.agx-scrollbar-on-scroll.is-scrolling::-webkit-scrollbar-thumb:hover {
+  background-color: color-mix(in srgb, var(--text-subtle) 75%, transparent);
+}
+
 .agx-code-stream {
   background:
     linear-gradient(180deg, color-mix(in srgb, var(--surface-card-strong) 90%, transparent), color-mix(in srgb, var(--surface-card) 90%, transparent));
