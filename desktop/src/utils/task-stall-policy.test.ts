@@ -31,6 +31,34 @@ describe("resolveStickyTodoDisplay", () => {
     expect(out.items[0]?.status).toBe("pending");
     expect(out.completed).toBe(0);
   });
+
+  it("promotes residual pending to completed when promotePending is set on idle", () => {
+    const todo: ParsedTodo = {
+      items: [
+        { status: "completed", content: "step 1" },
+        { status: "pending", content: "step 2" },
+      ],
+      completed: 1,
+      total: 2,
+    };
+    const out = resolveStickyTodoDisplay(todo, "idle", "idle", { promotePending: true });
+    expect(out.items[1]?.status).toBe("completed");
+    expect(out.completed).toBe(2);
+  });
+
+  it("does not promote pending when promotePending is set but state is interrupted", () => {
+    const todo: ParsedTodo = {
+      items: [
+        { status: "completed", content: "step 1" },
+        { status: "pending", content: "step 2" },
+      ],
+      completed: 1,
+      total: 2,
+    };
+    const out = resolveStickyTodoDisplay(todo, "idle", "interrupted", { promotePending: true });
+    expect(out.items[1]?.status).toBe("pending");
+    expect(out.completed).toBe(1);
+  });
 });
 
 describe("shouldSuppressStallDetection", () => {

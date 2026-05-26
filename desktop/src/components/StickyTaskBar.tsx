@@ -2,7 +2,10 @@ import { useEffect, useMemo, useState } from "react";
 import { AlertTriangle, ChevronDown, ChevronUp, ListChecks, Check, Circle, Loader2 } from "lucide-react";
 import { parseTodoMessage, type ParsedTodo } from "./TodoUpdateCard";
 import type { Message } from "../store";
-import { resolveStickyTodoDisplay } from "../utils/task-stall-policy";
+import {
+  messageLooksLikeAssistantFinal,
+  resolveStickyTodoDisplay,
+} from "../utils/task-stall-policy";
 import type { SessionExecutionState } from "../utils/streaming-stop-policy";
 
 /**
@@ -15,13 +18,15 @@ import type { SessionExecutionState } from "../utils/streaming-stop-policy";
  *   2. Any message whose content parses as a todo render — fallback for paths
  *      that lost the toolName metadata.
  */
-function pickLatestTodoFromMessages(messages: Message[]): ParsedTodo | null {
+function pickLatestTodoFromMessages(
+  messages: Message[],
+): { parsed: ParsedTodo; index: number } | null {
   for (let i = messages.length - 1; i >= 0; i -= 1) {
     const m = messages[i];
     if (!m) continue;
     if (m.role === "tool" && (m.toolName ?? "").trim() === "todo_write") {
       const parsed = parseTodoMessage(typeof m.content === "string" ? m.content : "");
-      if (parsed) return parsed;
+      if (parsed) return { parsed, index: i };
     }
   }
   for (let i = messages.length - 1; i >= 0; i -= 1) {
@@ -30,9 +35,43 @@ function pickLatestTodoFromMessages(messages: Message[]): ParsedTodo | null {
     const content = typeof m.content === "string" ? m.content : "";
     if (!content) continue;
     const parsed = parseTodoMessage(content);
-    if (parsed) return parsed;
+    if (parsed) return { parsed, index: i };
   }
   return null;
+}
+
+/**
+ * Detect "agent kept working but forgot to update todo_write at the end".
+ *
+ * Conditions:
+ *   - There is at least one further tool call after the last todo_write
+ *     snapshot (proves work continued beyond the snapshot).
+ *   - The final assistant message looks like a complete reply (not a
+ *     half-sentence / `:` ending).
+ *
+ * When both hold, callers may safely promote residual `pending` todos to
+ * `completed` to avoid a stale "1/2" sticky bar after the agent already
+ * delivered.
+ */
+function detectModelForgotFinalTodoUpdate(
+  messages: Message[],
+  lastTodoIndex: number,
+): boolean {
+  if (lastTodoIndex < 0 || lastTodoIndex >= messages.length - 1) return false;
+  let sawLaterToolCall = false;
+  let lastAssistant: Message | undefined;
+  for (let i = lastTodoIndex + 1; i < messages.length; i += 1) {
+    const m = messages[i];
+    if (!m) continue;
+    if (m.role === "tool") {
+      const name = (m.toolName ?? "").trim();
+      if (name && name !== "todo_write") sawLaterToolCall = true;
+    } else if (m.role === "assistant" && m.id !== "__stream__") {
+      lastAssistant = m;
+    }
+  }
+  if (!sawLaterToolCall) return false;
+  return messageLooksLikeAssistantFinal(lastAssistant);
 }
 
 type HarnessPhase = "explore" | "read" | "author";
@@ -79,10 +118,19 @@ export function StickyTaskBar({
   toolBudget,
   readFiles,
 }: StickyTaskBarProps) {
-  const rawParsed = useMemo(() => pickLatestTodoFromMessages(messages), [messages]);
+  const rawSnapshot = useMemo(() => pickLatestTodoFromMessages(messages), [messages]);
+  const rawParsed = rawSnapshot?.parsed ?? null;
+  const promotePending = useMemo(() => {
+    if (!rawSnapshot) return false;
+    if (liveness !== "idle") return false;
+    return detectModelForgotFinalTodoUpdate(messages, rawSnapshot.index);
+  }, [messages, rawSnapshot, liveness]);
   const parsed = useMemo(
-    () => (rawParsed ? resolveStickyTodoDisplay(rawParsed, liveness, executionState) : null),
-    [rawParsed, liveness, executionState]
+    () =>
+      rawParsed
+        ? resolveStickyTodoDisplay(rawParsed, liveness, executionState, { promotePending })
+        : null,
+    [rawParsed, liveness, executionState, promotePending]
   );
   const [expanded, setExpanded] = useState(true);
   const [dismissed, setDismissed] = useState(false);
