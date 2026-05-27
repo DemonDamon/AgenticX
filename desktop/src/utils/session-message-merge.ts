@@ -21,7 +21,8 @@ export function mergeSessionMessagesTail(
           ...row,
           toolStreamLines: prior.toolStreamLines ?? row.toolStreamLines,
           suggestedQuestions: prior.suggestedQuestions ?? row.suggestedQuestions,
-          reasoning: prior.reasoning ?? row.reasoning,
+          references: prior.references ?? row.references,
+          searchedQueries: prior.searchedQueries ?? row.searchedQueries,
           toolStatus: prior.toolStatus ?? row.toolStatus,
           toolElapsedSec: prior.toolElapsedSec ?? row.toolElapsedSec,
         };

@@ -1,21 +1,14 @@
 import { useEffect, useRef, useState } from "react";
 import type { CSSProperties, ReactNode, MouseEvent as ReactMouseEvent } from "react";
-import ReactMarkdown from "react-markdown";
 import { Bookmark, Copy, LayoutList, Quote, RotateCcw, Share2, Pencil, X, ArrowUp, ArrowRight } from "lucide-react";
 import type { Message, MessageAttachment } from "../../store";
 import { AttachmentCard } from "./AttachmentCard";
 import { ReasoningBlock } from "./ReasoningBlock";
+import { ReferencesCard } from "./ReferencesCard";
 import { parseReasoningContent } from "./reasoning-parser";
 import { getContainedSelectionText } from "../../utils/favorite-selection";
 import { HoverTip } from "../ds/HoverTip";
-import {
-  chatMarkdownComponents,
-  chatRehypePlugins,
-  chatRemarkPlugins,
-  chatUrlTransform,
-  normalizeChatMarkdownContent,
-  MarkdownContext,
-} from "./markdown-components";
+import { CitationMarkdownBody } from "./CitationMarkdownBody";
 import { renderUserMessageInlineBody } from "./user-message-inline";
 import {
   getAssistantActionStyle,
@@ -490,7 +483,9 @@ export function ImBubble({
                     ? "agx-im-user-bubble relative min-w-0 w-fit max-w-full overflow-x-auto overflow-y-visible rounded-xl border px-3 py-3 text-[var(--agx-chat-im-body-font-size)] leading-relaxed rounded-tr-[4px]"
                     : groupIdentityLayout
                       ? "relative min-w-0 w-full overflow-x-auto overflow-y-visible px-3 pt-1 pb-0 text-[var(--agx-chat-im-body-font-size)] leading-relaxed"
-                      : "relative min-w-0 w-full overflow-x-auto overflow-y-visible px-3 pt-3 pb-0 text-[var(--agx-chat-im-body-font-size)] leading-relaxed"
+                      : (message.references?.length ?? 0) > 0
+                        ? "relative min-w-0 w-full overflow-x-auto overflow-y-visible px-3 pt-1 pb-0 text-[var(--agx-chat-im-body-font-size)] leading-relaxed"
+                        : "relative min-w-0 w-full overflow-x-auto overflow-y-visible px-3 pt-3 pb-0 text-[var(--agx-chat-im-body-font-size)] leading-relaxed"
               }
               style={compactAssistant && noBubbleBorder ? undefined : userBubbleStyle}
             >
@@ -541,6 +536,12 @@ export function ImBubble({
                   </span>
                 ) : (
                   <>
+                    {!isUser && (message.references?.length ?? 0) > 0 ? (
+                      <ReferencesCard
+                        references={message.references ?? []}
+                        searchedQueries={message.searchedQueries}
+                      />
+                    ) : null}
                     {!isUser && isStreaming && hasThinkTag ? (
                       <ReasoningBlock
                         text={parsed?.reasoning ?? ""}
@@ -559,21 +560,12 @@ export function ImBubble({
                         </div>
                       ) : (
                         <div className={assistantTextClassName} style={assistantTextStyle}>
-                          <MarkdownContext.Provider
-                            value={{
-                              isStreaming,
-                              onQuoteText: (text) => onQuoteMessage?.(message, text),
-                            }}
-                          >
-                            <ReactMarkdown
-                              remarkPlugins={chatRemarkPlugins}
-                              rehypePlugins={chatRehypePlugins}
-                              components={chatMarkdownComponents}
-                              urlTransform={chatUrlTransform}
-                            >
-                              {normalizeChatMarkdownContent(bodyText, { isStreaming })}
-                            </ReactMarkdown>
-                          </MarkdownContext.Provider>
+                          <CitationMarkdownBody
+                            content={bodyText}
+                            references={message.references}
+                            isStreaming={isStreaming}
+                            onQuoteText={(text) => onQuoteMessage?.(message, text)}
+                          />
                         </div>
                       )
                     ) : null}

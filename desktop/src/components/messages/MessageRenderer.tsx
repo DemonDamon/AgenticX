@@ -42,6 +42,7 @@ type Props = {
   selected?: boolean;
   onResolveInlineConfirm?: (confirm: NonNullable<Message["inlineConfirm"]>, approved: boolean) => void;
   onFollowupClick?: (text: string) => void;
+  omitSuggestedQuestions?: boolean;
   /** When true, assistant messages cut off before budget_exceeded may show an incomplete hint. */
   budgetExceededActive?: boolean;
   allMessages?: Message[];
@@ -175,8 +176,12 @@ export function MessageRenderer({
 }: Props) {
   const chatStyle = useAppStore((s) => s.chatStyle);
   if (message.role === "user" || message.role === "assistant") {
-    if (chatStyle === "terminal") return <TerminalLine message={message} badge={assistantBadge} />;
-    if (chatStyle === "clean") return <CleanBlock message={message} badge={assistantBadge} />;
+    if (chatStyle === "terminal") {
+      return <TerminalLine message={message} badge={assistantBadge} />;
+    }
+    if (chatStyle === "clean") {
+      return <CleanBlock message={message} badge={assistantBadge} />;
+    }
     const rawAssist = (message.avatarName ?? "").trim();
     const metaLeaderRow = message.role === "assistant" && isMetaLeaderIdentity(message.agentId, rawAssist);
     const mergedAssistName =

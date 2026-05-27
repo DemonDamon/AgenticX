@@ -11,11 +11,15 @@ import { MermaidBlock } from "./MermaidBlock";
 import { highlightChatCode } from "./highlight-chat-code";
 import { Modal } from "../ds/Modal";
 import { HoverTip } from "../ds/HoverTip";
+import type { SearchReference } from "../../types/search-references";
+
 export { normalizeChatMarkdownContent, normalizeLenientEmphasisInText } from "./markdown-normalize";
+import { openExternalUrl } from "../../utils/open-external";
 
 export const MarkdownContext = createContext<{
   isStreaming?: boolean;
   onQuoteText?: (text: string) => void;
+  references?: SearchReference[];
 }>({});
 
 const MERMAID_LANG = new Set(["mermaid", "mmd"]);
@@ -407,5 +411,27 @@ export const chatMarkdownComponents: Partial<Components> = {
   },
   img({ src, alt, title }) {
     return <MarkdownImage src={src} alt={alt} title={title} />;
+  },
+  a({ href, children, ...rest }) {
+    const url = String(href ?? "").trim();
+    const external = /^https?:\/\//i.test(url);
+    return (
+      <a
+        {...rest}
+        href={url || undefined}
+        target={external ? "_blank" : rest.target}
+        rel={external ? "noopener noreferrer" : rest.rel}
+        onClick={
+          external
+            ? (event) => {
+                event.preventDefault();
+                openExternalUrl(url);
+              }
+            : rest.onClick
+        }
+      >
+        {children}
+      </a>
+    );
   },
 };

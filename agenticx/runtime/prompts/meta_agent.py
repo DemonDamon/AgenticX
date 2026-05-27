@@ -478,7 +478,8 @@ def _build_kb_retrieval_policy_block() -> str:
         f"- 当前检索模式：`{mode}`；默认 Top-K：`{top_k}`。{mode_hint}\n"
         f"- 除非用户显式指定，优先省略 `top_k` 参数，让系统自动采用默认 Top-K={top_k}。\n"
         "- 返回 JSON 形如 `{ok, hits:[{id,score,text,source:{uri,title,chunk_index}}], used_top_k, source:'local'}`。\n"
-        "- 回答必须基于 `hits[].text` 给出，并在结尾用行内引用格式标注来源（例如：“根据 `notes.md` 第 3 段…”）。若 `hits` 为空，明确告知用户未在知识库命中，并询问是否需要兜底到一般知识。\n"
+        "- 回答必须基于 `hits[].text` 给出，并在句末用 `[N]` 标注来源编号（N 与本轮 references id 对应）。若 `hits` 为空，明确告知用户未在知识库命中，并询问是否需要兜底到一般知识。\n"
+        "- 多来源并列：`[1][2]`；不要造 `【1】`、`(来源 1)`、`[来源1]` 等变体。\n"
         "- 不要把 `hits` 原始 JSON 复读给用户；只呈现有用片段与来源。\n"
         "- 与记忆的边界：长期文档资料走 `knowledge_search`；个人偏好/动作项走 `memory_search`/`memory_append`，不要混用。\n\n"
     )
@@ -506,7 +507,12 @@ def _build_web_search_capability_block() -> str:
         "## 联网搜索\n"
         "- 你 **内置** `web_search` 工具，可检索公开网页，获取最新资讯、实时数据、以及超出你知识截止日期的信息。\n"
         "- 当用户问题明显依赖时效性、当前事实或外部网页时，应 **主动** 调用 `web_search`，无需用户额外开启开关。\n"
-        "- 需要登录态、复杂页面交互或深度正文提取时，仍可依据 MCP 章节使用已连接的 browser-use / firecrawl 等能力。\n\n"
+        "- 需要登录态、复杂页面交互或深度正文提取时，仍可依据 MCP 章节使用已连接的 browser-use / firecrawl 等能力。\n"
+        "## 引用规范\n"
+        "- 每条来自 `web_search` / `knowledge_search` 的事实，必须在句末用 `[N]` 标注来源编号，N 与本轮返回的 references id 对应。\n"
+        "- 多来源并列：`[1][2]`。\n"
+        "- 不要造 `【1】`、`(来源 1)`、`[来源1]` 等变体；不要在角标前后加多余空格。\n"
+        "- 模型自身常识不需要角标。\n\n"
     )
 
 
