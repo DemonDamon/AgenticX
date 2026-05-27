@@ -1,14 +1,7 @@
 import type { Message } from "../../store";
 import type { ReactNode } from "react";
-import ReactMarkdown from "react-markdown";
-import {
-  chatMarkdownComponents,
-  chatRehypePlugins,
-  chatRemarkPlugins,
-  chatUrlTransform,
-  normalizeChatMarkdownContent,
-  MarkdownContext,
-} from "./markdown-components";
+import { CitationMarkdownBody } from "./CitationMarkdownBody";
+import { ReferencesCard } from "./ReferencesCard";
 
 type Props = {
   message: Message;
@@ -19,17 +12,11 @@ export function AssistantBubble({ message, badge }: Props) {
   const isStreaming = message.id === "__stream__";
   return (
     <div className="mr-8 min-w-0 overflow-hidden rounded-xl rounded-tl-sm border border-border bg-surface-bubble px-3 py-2 text-[15px] leading-relaxed">
+      {(message.references?.length ?? 0) > 0 ? (
+        <ReferencesCard references={message.references ?? []} searchedQueries={message.searchedQueries} />
+      ) : null}
       {badge}
-      <MarkdownContext.Provider value={{ isStreaming }}>
-        <ReactMarkdown
-          remarkPlugins={chatRemarkPlugins}
-          rehypePlugins={chatRehypePlugins}
-          components={chatMarkdownComponents}
-          urlTransform={chatUrlTransform}
-        >
-          {normalizeChatMarkdownContent(message.content, { isStreaming })}
-        </ReactMarkdown>
-      </MarkdownContext.Provider>
+      <CitationMarkdownBody content={message.content} references={message.references} isStreaming={isStreaming} />
     </div>
   );
 }

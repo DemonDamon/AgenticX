@@ -1083,6 +1083,12 @@ class AgentRuntime:
         self._pending_loop_nudge = None
         self._last_persist_time = time.time()
         self._tools_since_persist = 0
+        try:
+            from agenticx.studio.references import reset_turn_references
+
+            reset_turn_references(session)
+        except Exception:
+            pass
         # Reset per-turn exploratory tracking so each turn starts with a
         # fresh "schema discovery" budget.
         self._recent_exploratory_fps.clear()
@@ -1955,12 +1961,32 @@ class AgentRuntime:
                     _hist_assistant: Dict[str, Any] = {"role": "assistant", "content": final_text}
                     if sug_list:
                         _hist_assistant["suggested_questions"] = list(sug_list)
+                    try:
+                        from agenticx.studio.references import turn_reference_payload
+
+                        _ref_payload = turn_reference_payload(session)
+                        if _ref_payload.get("references"):
+                            _hist_assistant["references"] = list(_ref_payload["references"])
+                        if _ref_payload.get("searched_queries"):
+                            _hist_assistant["searched_queries"] = list(_ref_payload["searched_queries"])
+                    except Exception:
+                        pass
                     session.chat_history.append(_hist_assistant)
                 await self.hooks.run_on_agent_end(final_text, session)
                 _um = usage_metadata_from_llm_response(response)
                 _final_data: dict[str, Any] = {"text": final_text}
                 if sug_list:
                     _final_data["suggested_questions"] = list(sug_list)
+                try:
+                    from agenticx.studio.references import turn_reference_payload
+
+                    _ref_payload = turn_reference_payload(session)
+                    if _ref_payload.get("references"):
+                        _final_data["references"] = list(_ref_payload["references"])
+                    if _ref_payload.get("searched_queries"):
+                        _final_data["searched_queries"] = list(_ref_payload["searched_queries"])
+                except Exception:
+                    pass
                 if _um:
                     _final_data["usage_metadata"] = {
                         **_um,
@@ -2601,9 +2627,25 @@ class AgentRuntime:
                 self._tools_since_persist += 1
                 self._maybe_mid_turn_persist()
 
+                _tool_result_data: dict[str, Any] = {
+                    "name": tool_name,
+                    "result": result,
+                    "tool_call_id": tool_call_id,
+                }
+                try:
+                    from agenticx.studio.references import structured_payload_for_tool_result
+
+                    _structured = structured_payload_for_tool_result(
+                        session, tool_name, arguments, result
+                    )
+                    if _structured:
+                        _tool_result_data["structured"] = _structured
+                except Exception:
+                    pass
+
                 yield RuntimeEvent(
                     type=EventType.TOOL_RESULT.value,
-                    data={"name": tool_name, "result": result, "tool_call_id": tool_call_id},
+                    data=_tool_result_data,
                     agent_id=agent_id,
                 )
 

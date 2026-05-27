@@ -870,6 +870,7 @@ declare global {
         hint?: string;
         error?: string;
       }>;
+      openExternal: (url: string) => Promise<{ ok: boolean; error?: string }>;
     };
   }
 }

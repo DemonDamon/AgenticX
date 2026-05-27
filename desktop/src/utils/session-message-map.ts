@@ -1,6 +1,7 @@
 import type { Message, MessageAttachment, MsgRole } from "../store";
 import { META_AGENT_DISPLAY_NAME } from "../constants/branding";
 import { isMetaLeaderIdentity } from "./display-name";
+import { parseSearchReferences } from "../types/search-references";
 
 /** Snapshot row from GET /api/session/messages (snake_case). */
 export function attachmentsFromSessionRow(raw: unknown): MessageAttachment[] | undefined {
@@ -82,6 +83,16 @@ export type LoadedSessionMessage = {
   tool_stream_lines?: string[];
   /** From `<followups>` / FINAL payload */
   suggested_questions?: string[];
+  references?: Array<{
+    id?: number;
+    title?: string;
+    url?: string;
+    snippet?: string;
+    source?: string;
+    provider?: string;
+    domain?: string;
+  }>;
+  searched_queries?: string[];
 };
 
 export function mapLoadedSessionMessage(item: LoadedSessionMessage, idPrefix: string, index: number): Message {
@@ -129,6 +140,12 @@ export function mapLoadedSessionMessage(item: LoadedSessionMessage, idPrefix: st
     const sq = item.suggested_questions;
     if (Array.isArray(sq) && sq.length > 0) {
       mapped.suggestedQuestions = sq.map((x) => String(x).trim()).filter(Boolean).slice(0, 3);
+    }
+    const refs = parseSearchReferences(item.references);
+    if (refs.length > 0) mapped.references = refs;
+    const queries = item.searched_queries;
+    if (Array.isArray(queries) && queries.length > 0) {
+      mapped.searchedQueries = queries.map((x) => String(x).trim()).filter(Boolean);
     }
   }
   if (item.role === "tool") {

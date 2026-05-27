@@ -2595,6 +2595,15 @@ function createTray(): void {
  * so they need to be registered as early as possible in app.whenReady().
  */
 function registerEarlyIpc(): void {
+  ipcMain.handle("open-external", async (_event, url: unknown) => {
+    const href = String(url ?? "").trim();
+    if (!/^https?:\/\//i.test(href)) {
+      return { ok: false, error: "Only http(s) URLs are allowed" };
+    }
+    await shell.openExternal(href);
+    return { ok: true };
+  });
+
   ipcMain.handle("get-api-base", async () => getStudioUrl());
   ipcMain.handle("get-api-auth-token", async () => getStudioToken());
   ipcMain.handle("get-platform", async () => process.platform);

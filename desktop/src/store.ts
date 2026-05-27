@@ -9,6 +9,7 @@ import {
   coerceSelectableModel,
   reconcilePaneModelsWithSettings as reconcilePaneModelsPure,
 } from "./utils/model-options";
+import type { SearchReference } from "./types/search-references";
 
 export type UiStatus = "idle" | "listening" | "processing";
 export type MsgRole = "user" | "assistant" | "tool";
@@ -173,6 +174,10 @@ export type Message = {
   toolStreamLines?: string[];
   /** Parsed from model `<followups>` block; shown as chips after reply completes. */
   suggestedQuestions?: string[];
+  /** web_search / knowledge_search references for this assistant turn. */
+  references?: SearchReference[];
+  /** Distinct search queries used in this assistant turn. */
+  searchedQueries?: string[];
   /** Renders as flat ContextNoticeLine instead of ToolCallCard. */
   noticeKind?: ContextNoticeKind;
   /** Token budget exceeded metadata for BudgetExceededCard rendering. */
@@ -454,6 +459,8 @@ type AppState = {
         | "forwardedHistory"
         | "inlineConfirm"
         | "suggestedQuestions"
+        | "references"
+        | "searchedQueries"
       >
     > &
       Partial<MessageToolExtras>
@@ -522,6 +529,8 @@ type AppState = {
         | "timestamp"
         | "forwardedHistory"
         | "inlineConfirm"
+        | "references"
+        | "searchedQueries"
       >
     > &
       Partial<MessageToolExtras>

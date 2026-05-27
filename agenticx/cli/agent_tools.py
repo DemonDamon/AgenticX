@@ -3834,19 +3834,27 @@ def _tool_knowledge_search(
     return json.dumps(payload, ensure_ascii=False)
 
 
-def _tool_web_search(arguments: Dict[str, Any]) -> str:
+def _tool_web_search(arguments: Dict[str, Any], session: Optional["StudioSession"] = None) -> str:
     query = str(arguments.get("query", "")).strip()
     if not query:
         return "ERROR: web_search requires a non-empty query"
     raw_mr = arguments.get("max_results")
     try:
         from agenticx.studio.web_search.service import WebSearchService
+        from agenticx.studio.references import queue_web_search_batch
 
         svc = WebSearchService.from_config()
         mr: int | None = None
         if raw_mr is not None and str(raw_mr).strip() != "":
             mr = int(raw_mr)
         hits = svc.search(query, max_results=mr)
+        if session is not None:
+            queue_web_search_batch(
+                session,
+                query=query,
+                hits=hits,
+                provider=str(svc._cfg.default_provider or "duckduckgo"),
+            )
         return WebSearchService.format_results(hits)
     except Exception as exc:
         return f"ERROR: web_search failed: {exc}"
@@ -4935,7 +4943,7 @@ async def dispatch_tool_async(
         if name == "knowledge_search":
             return await asyncio.to_thread(_tool_knowledge_search, arguments, session)
         if name == "web_search":
-            return await asyncio.to_thread(_tool_web_search, arguments)
+            return await asyncio.to_thread(_tool_web_search, arguments, session)
         if name == "web_fetch":
             return await _tool_web_fetch(arguments, session)
         if name == "view_image":

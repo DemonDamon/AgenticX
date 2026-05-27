@@ -1,16 +1,9 @@
 import type { ReactNode } from "react";
-import ReactMarkdown from "react-markdown";
 import type { Message } from "../../store";
+import { ReferencesCard } from "./ReferencesCard";
 import { ReasoningBlock } from "./ReasoningBlock";
 import { parseReasoningContent } from "./reasoning-parser";
-import {
-  chatMarkdownComponents,
-  chatRehypePlugins,
-  chatRemarkPlugins,
-  chatUrlTransform,
-  normalizeChatMarkdownContent,
-  MarkdownContext,
-} from "./markdown-components";
+import { CitationMarkdownBody } from "./CitationMarkdownBody";
 import { renderUserMessageInlineBody } from "./user-message-inline";
 
 type Props = {
@@ -39,6 +32,9 @@ export function TerminalLine({ message, badge }: Props) {
           style={{ color: isUser ? "var(--chat-terminal-user)" : "var(--chat-terminal-assistant)" }}
         >
           {badge}
+          {!isUser && (message.references?.length ?? 0) > 0 ? (
+            <ReferencesCard references={message.references ?? []} searchedQueries={message.searchedQueries} />
+          ) : null}
           {!isUser && isStreaming && (hasThinkTag || !hasBody) ? (
             <ReasoningBlock text={parsed?.reasoning ?? ""} streaming />
           ) : !isUser && !isStreaming && parsed?.reasoning ? (
@@ -51,16 +47,7 @@ export function TerminalLine({ message, badge }: Props) {
                 (message.attachments ?? []).filter((a) => !!a.referenceToken)
               )
             ) : (
-              <MarkdownContext.Provider value={{ isStreaming }}>
-                <ReactMarkdown
-                  remarkPlugins={chatRemarkPlugins}
-                  rehypePlugins={chatRehypePlugins}
-                  components={chatMarkdownComponents}
-                  urlTransform={chatUrlTransform}
-                >
-                  {normalizeChatMarkdownContent(bodyText, { isStreaming })}
-                </ReactMarkdown>
-              </MarkdownContext.Provider>
+              <CitationMarkdownBody content={bodyText} references={message.references} isStreaming={isStreaming} />
             )
           ) : null}
         </div>

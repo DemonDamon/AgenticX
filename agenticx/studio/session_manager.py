@@ -874,6 +874,15 @@ class SessionManager:
             if first:
                 managed.session_name = self._build_auto_title(first)
         managed.created_at = self._to_float(metadata.get("created_at"), managed.created_at)
+        # Restore last-activity timestamp from persisted metadata so the desktop
+        # history panel can correctly bucket sessions into Today / Previous 7 days
+        # after restart or on-demand reload. Without this, ManagedSession defaults
+        # to time.time() and every loaded session looks like it was just active.
+        restored_updated_at = self._to_float(metadata.get("updated_at"), 0.0)
+        if restored_updated_at > 0:
+            managed.updated_at = restored_updated_at
+        elif managed.created_at > 0:
+            managed.updated_at = managed.created_at
         managed.pinned = bool(metadata.get("pinned", False))
         managed.archived = bool(metadata.get("archived", False))
         managed.taskspaces = self._sanitize_taskspaces(session_id, metadata.get("taskspaces"))
@@ -1131,6 +1140,38 @@ class SessionManager:
                 if isinstance(raw_sq, list) and raw_sq:
                     row["suggested_questions"] = [
                         str(x).strip() for x in raw_sq[:5] if str(x).strip()
+                    ]
+                raw_refs = item.get("references")
+                if isinstance(raw_refs, list) and raw_refs:
+                    clean_refs: list[dict[str, Any]] = []
+                    for ref in raw_refs[:50]:
+                        if not isinstance(ref, dict):
+                            continue
+                        rid = ref.get("id")
+                        title = str(ref.get("title", "") or "").strip()
+                        url = str(ref.get("url", "") or "").strip()
+                        if not title and not url:
+                            continue
+                        entry: dict[str, Any] = {
+                            "id": int(rid) if rid is not None else len(clean_refs) + 1,
+                            "title": title or url,
+                            "url": url,
+                            "snippet": str(ref.get("snippet", "") or "").strip()[:240],
+                            "source": str(ref.get("source", "") or "web").strip() or "web",
+                        }
+                        provider = str(ref.get("provider", "") or "").strip()
+                        domain = str(ref.get("domain", "") or "").strip()
+                        if provider:
+                            entry["provider"] = provider
+                        if domain:
+                            entry["domain"] = domain
+                        clean_refs.append(entry)
+                    if clean_refs:
+                        row["references"] = clean_refs
+                raw_queries = item.get("searched_queries")
+                if isinstance(raw_queries, list) and raw_queries:
+                    row["searched_queries"] = [
+                        str(x).strip() for x in raw_queries[:20] if str(x).strip()
                     ]
             normalized.append(row)
         return normalized

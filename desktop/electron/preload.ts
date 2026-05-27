@@ -629,4 +629,6 @@ contextBridge.exposeInMainWorld("agenticxDesktop", {
       hint?: string;
       error?: string;
     }>,
+  openExternal: async (url: string) =>
+    ipcRenderer.invoke("open-external", url) as Promise<{ ok: boolean; error?: string }>,
 });

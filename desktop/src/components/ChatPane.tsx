@@ -37,7 +37,12 @@ import {
   type PendingConfirm,
   type QueuedMessage,
 } from "../store";
-import { startRecording, stopRecording } from "../voice/stt";
+import {
+  appendDictationText,
+  cancelDictation,
+  startDictation,
+  type SttPhase,
+} from "../voice/stt";
 import { SessionHistoryPanel } from "./SessionHistoryPanel";
 import { StickyTaskBar } from "./StickyTaskBar";
 import { WorkspacePanel } from "./WorkspacePanel";
@@ -137,6 +142,15 @@ import {
   type GlobalSearchReferenceFileDetail,
 } from "./global-search/global-search-events";
 import { buildFileMentionAppend, fileNameFromPath } from "../utils/chat-file-mention";
+import {
+  accumulateReferenceTurn,
+  applyFinalReferencePayload,
+  referenceExtrasFromTurn,
+} from "../utils/search-reference-sse";
+import { mergeSearchedQueries } from "../types/search-references";
+import type { SearchReference } from "../types/search-references";
+
+const SEARCH_REFERENCE_TOOLS = new Set(["web_search", "knowledge_search"]);
 
 const SESSION_UNATTENDED_STORAGE_KEY = "agx-session-unattended-v1";
 
@@ -952,12 +966,21 @@ type ActionCircleButtonProps = {
   hasInput: boolean;
   streaming: boolean;
   recording: boolean;
+  transcribing?: boolean;
   onSend: () => void;
   onMic: () => void;
   onStop: () => void;
 };
 
-function ActionCircleButton({ hasInput, streaming, recording, onSend, onMic, onStop }: ActionCircleButtonProps) {
+function ActionCircleButton({
+  hasInput,
+  streaming,
+  recording,
+  transcribing = false,
+  onSend,
+  onMic,
+  onStop,
+}: ActionCircleButtonProps) {
   let onClick: () => void;
   let title: string;
   let icon: ReactNode;
@@ -978,6 +1001,13 @@ function ActionCircleButton({ hasInput, streaming, recording, onSend, onMic, onS
     title = "发送";
     icon = <SendIcon />;
     filled = true;
+  } else if (transcribing) {
+    onClick = onMic;
+    title = "识别中";
+    icon = (
+      <span className="inline-block h-3.5 w-3.5 animate-spin rounded-full border-2 border-current border-t-transparent" />
+    );
+    filled = false;
   } else if (recording) {
     onClick = onMic;
     title = "停止录音";
@@ -1124,6 +1154,9 @@ function formatToolResultMessage(toolNameRaw: unknown, resultRaw: unknown): { co
   const toolName = String(toolNameRaw ?? "tool");
   const resultText = String(resultRaw ?? "");
   if (toolName === "check_resources") {
+    return { content: "", silent: true };
+  }
+  if (SEARCH_REFERENCE_TOOLS.has(toolName)) {
     return { content: "", silent: true };
   }
   if (toolName === "delegate_to_avatar") {
@@ -2059,6 +2092,9 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
   const [input, setInput] = useState("");
   const [streaming, setStreaming] = useState(false);
   const [recording, setRecording] = useState(false);
+  const [voiceTranscribing, setVoiceTranscribing] = useState(false);
+  const [voiceInputHint, setVoiceInputHint] = useState("");
+  const dictationSessionRef = useRef<{ stop: () => void; cancel: () => void } | null>(null);
   const [streamedAssistantText, setStreamedAssistantText] = useState("");
   const [streamingSessionId, setStreamingSessionId] = useState("");
   const [runGuardSessionId, setRunGuardSessionId] = useState("");
@@ -2677,7 +2713,9 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
 
   useEffect(() => {
     return () => {
-      stopRecording();
+      dictationSessionRef.current?.cancel();
+      dictationSessionRef.current = null;
+      cancelDictation();
     };
   }, []);
 
@@ -4870,26 +4908,60 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
     }));
   }, [chatProvider, chatModel]);
 
+  useEffect(() => {
+    if (!voiceInputHint) return;
+    const t = window.setTimeout(() => setVoiceInputHint(""), 4200);
+    return () => window.clearTimeout(t);
+  }, [voiceInputHint]);
+
+  const applyVoiceTranscript = useCallback(
+    (text: string) => {
+      const trimmed = text.trim();
+      if (!trimmed) return;
+      const next = appendDictationText(extractComposerText(), trimmed);
+      setComposerText(next);
+    },
+    [extractComposerText, setComposerText]
+  );
+
   const onMicClick = () => {
-    if (recording) {
-      stopRecording();
+    if (recording || voiceTranscribing) {
+      dictationSessionRef.current?.stop();
+      dictationSessionRef.current = null;
       setRecording(false);
+      setVoiceTranscribing(false);
       return;
     }
-    setRecording(true);
-    void startRecording(
-      async (text) => {
-        setRecording(false);
-        await sendChat(text);
+    setVoiceInputHint("");
+    void startDictation(
+      {
+        onPhase: (phase: SttPhase) => {
+          setRecording(phase === "recording");
+          setVoiceTranscribing(phase === "transcribing");
+        },
+        onInterim: (interim) => {
+          if (!interim.trim()) return;
+          setVoiceInputHint(interim.trim());
+        },
+        onFinal: (text) => {
+          dictationSessionRef.current = null;
+          setRecording(false);
+          setVoiceTranscribing(false);
+          setVoiceInputHint("");
+          applyVoiceTranscript(text);
+        },
+        onError: (message) => {
+          setVoiceInputHint(message);
+        },
       },
-      () => {
-        // Keep UI simple in pane mode: no interim transcript rendering.
+      {
+        apiBase,
+        apiToken,
+        language: "zh",
       }
-    );
-    window.setTimeout(() => {
-      stopRecording();
-      setRecording(false);
-    }, 5000);
+    ).then((session) => {
+      dictationSessionRef.current = session;
+    });
   };
 
   const sendChatRef = useRef<(
@@ -5381,6 +5453,8 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
       let full = "";
       let cumulativeFull = "";
       let pendingSuggestedQuestions: string[] = [];
+      let pendingReferences: SearchReference[] = [];
+      let pendingSearchedQueries: string[] = [];
       let buffer = "";
       while (true) {
         const { value: chunk, done } = await reader.read();
@@ -5724,6 +5798,11 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
               const toolNameStr = String(payload.data?.name ?? "tool");
               const toolArgs = (payload.data?.arguments ?? payload.data?.args ?? {}) as Record<string, unknown>;
               const toolCallId = String(payload.data?.tool_call_id ?? payload.data?.id ?? "").trim();
+              if (SEARCH_REFERENCE_TOOLS.has(toolNameStr)) {
+                const q = String(toolArgs.query ?? "").trim();
+                if (q) pendingSearchedQueries = mergeSearchedQueries(pendingSearchedQueries, [q]);
+                continue;
+              }
               if (eventAgentId === "meta" && toolNameStr === "cc_bridge_start") {
                 const callKey = toolCallId || `${requestSessionId || "session"}:cc_bridge_start`;
                 const modeHint = parseCcBridgeModeFromPayload(toolArgs);
@@ -5782,6 +5861,16 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
             }
             if (payload.type === "tool_result") {
               const toolName = String(payload.data?.name ?? "");
+              if (SEARCH_REFERENCE_TOOLS.has(toolName)) {
+                const accumulated = accumulateReferenceTurn(
+                  pendingReferences,
+                  pendingSearchedQueries,
+                  payload.data,
+                );
+                pendingReferences = accumulated.references;
+                pendingSearchedQueries = accumulated.queries;
+                continue;
+              }
               const formatted = formatToolResultMessage(toolName, payload.data?.result);
               if (formatted.silent) continue;
               const resultCallId = String(payload.data?.tool_call_id ?? payload.data?.id ?? "").trim();
@@ -6064,6 +6153,13 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
                 pendingSuggestedQuestions = Array.isArray(sqRaw)
                   ? sqRaw.map((x: unknown) => String(x).trim()).filter(Boolean).slice(0, 3)
                   : [];
+                const appliedRefs = applyFinalReferencePayload(
+                  pendingReferences,
+                  pendingSearchedQueries,
+                  payload.data,
+                );
+                pendingReferences = appliedRefs.references;
+                pendingSearchedQueries = appliedRefs.queries;
                 // Final payload is authoritative. Replacing (instead of merging) avoids
                 // duplicate concatenation when token stream shape differs from final text.
                 if (finalText.trim() && !isThinkingPlaceholderText(finalText)) {
@@ -6148,16 +6244,18 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
       }
 
       const trimmedFull = full.trim();
+      const refExtras = referenceExtrasFromTurn(pendingReferences, pendingSearchedQueries);
       const sugExtras =
         pendingSuggestedQuestions.length > 0
           ? { suggestedQuestions: pendingSuggestedQuestions.slice(0, 3) }
           : undefined;
+      const turnExtras = refExtras || sugExtras ? { ...refExtras, ...sugExtras } : undefined;
       if (trimmedFull && !isThinkingPlaceholderText(full) && !streamCommittedRef.current) {
         const mid = lastMidStreamAssistantCommitRef.current;
         if (mid !== null && trimmedFull === mid) {
           streamCommittedRef.current = true;
-          if (sugExtras) {
-            useAppStore.getState().mergeLastPaneMessageByRole(pane.id, "assistant", sugExtras);
+          if (turnExtras) {
+            useAppStore.getState().mergeLastPaneMessageByRole(pane.id, "assistant", turnExtras);
           }
         } else {
           addPaneMessageIfSessionActive(
@@ -6168,7 +6266,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
             chatProvider,
             chatModel,
             undefined,
-            sugExtras,
+            turnExtras,
           );
           streamCommittedRef.current = true;
         }
@@ -7109,6 +7207,14 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
               ) : null}
             </div>
           )}
+          {voiceInputHint ? (
+            <div className="mb-2 flex justify-center px-1">
+              <span className="inline-flex max-w-full items-center gap-1.5 rounded-full border border-amber-500/35 bg-amber-500/10 px-3 py-1 text-[12px] text-amber-100/95">
+                <span aria-hidden>!</span>
+                <span className="truncate">{voiceInputHint}</span>
+              </span>
+            </div>
+          ) : null}
           <div className="agx-pane-composer-body agx-theme-focus-ring relative rounded-2xl border border-transparent bg-surface-card transition-all duration-300 ease-out">
             {visibleAttachmentEntries.length > 0 ? (
               <div className="flex flex-wrap gap-2 px-3 pt-3">
@@ -7450,6 +7556,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
                    * 后端 `interruptSession` 对任意 session_id 生效。 */
                   streaming={showStopButton}
                   recording={recording}
+                  transcribing={voiceTranscribing}
                   onSend={() => {
                     lastComposerEnterAtRef.current = 0;
                     void sendChat(extractComposerText());
