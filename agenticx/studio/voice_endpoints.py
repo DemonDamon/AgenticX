@@ -7,19 +7,29 @@ Author: Damon Li
 from __future__ import annotations
 
 import asyncio
+import base64
 import contextlib
 import copy
 import json
 import logging
+import os
 import time
 import uuid
 from typing import Any, Callable
 
 import httpx
 import websockets
-from fastapi import FastAPI, Header, HTTPException, WebSocket
+from fastapi import FastAPI, File, Header, HTTPException, UploadFile, WebSocket
 from fastapi.responses import Response
 
+from agenticx.studio.doubao_sauc_asr import (
+    DOUBAO_SAUC_RESOURCE_ID,
+    DOUBAO_SAUC_WS,
+    build_audio_only_request,
+    build_default_start_payload,
+    build_full_client_request,
+    parse_server_frame,
+)
 from agenticx.cli.agent_tools import STUDIO_TOOLS, dispatch_tool_async
 from agenticx.cli.config_manager import ConfigManager
 from agenticx.runtime.confirm import ConfirmGate
@@ -28,6 +38,8 @@ from agenticx.studio.session_manager import SessionManager
 logger = logging.getLogger(__name__)
 
 DOUBAO_REALTIME_WS = "wss://openspeech.bytedance.com/api/v3/realtime/dialogue"
+DOUBAO_FLASH_RECOGNIZE_URL = "https://openspeech.bytedance.com/api/v3/auc/bigmodel/recognize/flash"
+DOUBAO_FLASH_RESOURCE_ID = "volc.bigasr.auc_turbo"
 DEFAULT_DOUBAO_APP_KEY = "PlgvMymc7f3tQnJ6"
 VOICE_DEFAULT_TOOL_ALLOWLIST = {
     "knowledge_search",
@@ -180,6 +192,156 @@ def _mask_voice(voice: dict[str, Any]) -> dict[str, Any]:
     return out
 
 
+def _openai_transcribe_credentials() -> tuple[str, str]:
+    """Resolve OpenAI-compatible API key and base URL for chat dictation STT."""
+
+    voice = _voice_section()
+    oa = voice.get("openai_realtime") if isinstance(voice.get("openai_realtime"), dict) else {}
+    api_key = str(oa.get("api_key") or "").strip()
+    if not api_key:
+        api_key = str(os.environ.get("OPENAI_API_KEY", "") or "").strip()
+    base = str(oa.get("base_url") or "https://api.openai.com").rstrip("/")
+    return api_key, base
+
+
+def _doubao_transcribe_credentials() -> tuple[str, str]:
+    """Resolve Doubao/Volcano app id + access key for flash file ASR."""
+
+    voice = _voice_section()
+    db = voice.get("doubao_realtime") if isinstance(voice.get("doubao_realtime"), dict) else {}
+    app_id = str(db.get("app_id") or "").strip()
+    access_key = str(db.get("access_key") or "").strip()
+    return app_id, access_key
+
+
+def _resolve_transcribe_provider() -> str:
+    """Pick chat dictation backend: openai_whisper | doubao_flash | empty."""
+
+    voice = _voice_section()
+    flags = _voice_configured_flags(voice)
+    provider = flags["provider"]
+    openai_ready = flags["openai_ready"]
+    doubao_ready = flags["doubao_ready"]
+
+    if provider in {"doubao", "doubao_realtime"}:
+        if doubao_ready:
+            return "doubao_flash"
+        if openai_ready:
+            return "openai_whisper"
+        return ""
+
+    if provider in {"openai", "openai_realtime"}:
+        if openai_ready:
+            return "openai_whisper"
+        if doubao_ready:
+            return "doubao_flash"
+        return ""
+
+    if openai_ready:
+        return "openai_whisper"
+    if doubao_ready:
+        return "doubao_flash"
+    return ""
+
+
+def _doubao_compatible_audio(content_type: str, filename: str) -> bool:
+    ct = content_type.lower()
+    fn = filename.lower()
+    if "ogg" in ct or fn.endswith(".ogg"):
+        return True
+    if "wav" in ct or fn.endswith(".wav"):
+        return True
+    if "mpeg" in ct or "mp3" in ct or fn.endswith(".mp3"):
+        return True
+    return False
+
+
+async def _transcribe_openai_whisper(
+    raw: bytes,
+    *,
+    filename: str,
+    content_type: str,
+    language: str | None,
+) -> str:
+    api_key, base = _openai_transcribe_credentials()
+    if not api_key:
+        raise HTTPException(status_code=400, detail="OpenAI API key not configured for transcription")
+
+    url = f"{base}/v1/audio/transcriptions"
+    form_data: dict[str, str] = {"model": "whisper-1"}
+    lang = str(language or "zh").strip()
+    if lang:
+        form_data["language"] = lang
+
+    try:
+        async with httpx.AsyncClient(timeout=120.0) as client:
+            resp = await client.post(
+                url,
+                headers={"Authorization": f"Bearer {api_key}"},
+                files={"file": (filename, raw, content_type)},
+                data=form_data,
+            )
+    except httpx.RequestError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+    if resp.status_code >= 400:
+        raise HTTPException(status_code=resp.status_code, detail=(resp.text or "")[:2000])
+
+    try:
+        body = resp.json()
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"invalid transcription response: {exc}") from exc
+    return str(body.get("text") or "").strip() if isinstance(body, dict) else ""
+
+
+async def _transcribe_doubao_flash(raw: bytes) -> str:
+    app_id, access_key = _doubao_transcribe_credentials()
+    if not app_id or not access_key:
+        raise HTTPException(
+            status_code=400,
+            detail="Doubao app_id / access_key not configured for transcription",
+        )
+
+    headers = {
+        "X-Api-App-Key": app_id,
+        "X-Api-Access-Key": access_key,
+        "X-Api-Resource-Id": DOUBAO_FLASH_RESOURCE_ID,
+        "X-Api-Request-Id": str(uuid.uuid4()),
+        "X-Api-Sequence": "-1",
+        "Content-Type": "application/json",
+    }
+    payload = {
+        "user": {"uid": app_id},
+        "audio": {"data": base64.b64encode(raw).decode("ascii")},
+        "request": {"model_name": "bigmodel"},
+    }
+
+    try:
+        async with httpx.AsyncClient(timeout=120.0) as client:
+            resp = await client.post(DOUBAO_FLASH_RECOGNIZE_URL, headers=headers, json=payload)
+    except httpx.RequestError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+    status_code = str(resp.headers.get("X-Api-Status-Code") or "").strip()
+    message = str(resp.headers.get("X-Api-Message") or "").strip()
+    logid = str(resp.headers.get("X-Tt-Logid") or "").strip()
+    if status_code != "20000000":
+        detail = f"Doubao ASR failed ({status_code or 'unknown'}): {message or resp.text[:500]}"
+        if logid:
+            detail += f" [logid={logid}]"
+        http_status = 502 if status_code.startswith("550") else 400
+        raise HTTPException(status_code=http_status, detail=detail)
+
+    try:
+        body = resp.json()
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"invalid doubao transcription response: {exc}") from exc
+    result = body.get("result") if isinstance(body, dict) else None
+    if not isinstance(result, dict):
+        return ""
+    return str(result.get("text") or "").strip()
+
+
 def _voice_configured_flags(raw: dict[str, Any]) -> dict[str, bool]:
     oa = raw.get("openai_realtime") if isinstance(raw.get("openai_realtime"), dict) else {}
     db = raw.get("doubao_realtime") if isinstance(raw.get("doubao_realtime"), dict) else {}
@@ -292,6 +454,56 @@ def register_voice_endpoints(
         chosen = "advanced" if chosen == "advanced" else "default"
         tools = _voice_tool_schemas(chosen)
         return {"ok": True, "mode": chosen, "tools": tools}
+
+    @app.post("/api/voice/transcribe")
+    async def voice_transcribe(
+        file: UploadFile = File(...),
+        language: str | None = None,
+        x_agx_desktop_token: str | None = Header(default=None),
+    ) -> dict[str, Any]:
+        check_token(x_agx_desktop_token)
+        provider = _resolve_transcribe_provider()
+        if not provider:
+            raise HTTPException(
+                status_code=400,
+                detail="No transcription provider configured (OpenAI API key or Doubao app_id/access_key)",
+            )
+
+        raw = await file.read()
+        if not raw:
+            raise HTTPException(status_code=400, detail="empty audio file")
+        max_bytes = 100 * 1024 * 1024 if provider == "doubao_flash" else 25 * 1024 * 1024
+        if len(raw) > max_bytes:
+            raise HTTPException(status_code=413, detail="audio file too large")
+
+        filename = str(file.filename or "audio.webm").strip() or "audio.webm"
+        content_type = str(file.content_type or "audio/webm").strip() or "audio/webm"
+
+        if provider == "doubao_flash":
+            if not _doubao_compatible_audio(content_type, filename):
+                flags = _voice_configured_flags(_voice_section())
+                if flags["openai_ready"]:
+                    provider = "openai_whisper"
+                else:
+                    raise HTTPException(
+                        status_code=400,
+                        detail=(
+                            "Doubao flash ASR requires WAV, MP3, or OGG OPUS audio; "
+                            "record with OGG OPUS or configure OpenAI for webm fallback"
+                        ),
+                    )
+
+        if provider == "doubao_flash":
+            text = await _transcribe_doubao_flash(raw)
+            return {"ok": True, "text": text, "provider": "doubao_flash"}
+
+        text = await _transcribe_openai_whisper(
+            raw,
+            filename=filename,
+            content_type=content_type,
+            language=language,
+        )
+        return {"ok": True, "text": text, "provider": "openai_whisper"}
 
     @app.post("/api/voice/tool_call")
     async def voice_tool_call(
@@ -640,3 +852,140 @@ def register_voice_endpoints(
         finally:
             with contextlib.suppress(Exception):
                 await upstream.close()
+
+    @app.websocket("/ws/voice/stream-transcribe")
+    async def doubao_stream_transcribe_ws(websocket: WebSocket) -> None:
+        """Proxy Volcengine sauc/bigmodel streaming ASR for desktop push-to-talk."""
+
+        token_q = websocket.query_params.get("x_agx_desktop_token") or ""
+        token_h = websocket.headers.get("x-agx-desktop-token") or websocket.headers.get("X-Agx-Desktop-Token")
+        header_tok = (token_q or token_h or "").strip()
+        try:
+            check_token(header_tok or None)
+        except HTTPException:
+            await websocket.close(code=4401)
+            return
+
+        voice = _voice_section()
+        db = voice.get("doubao_realtime") if isinstance(voice.get("doubao_realtime"), dict) else {}
+        app_id = str(db.get("app_id") or "").strip()
+        access_key = str(db.get("access_key") or "").strip()
+        secret_raw = str(db.get("secret_key") or "").strip()
+        api_app_key = str(db.get("api_app_key") or DEFAULT_DOUBAO_APP_KEY).strip()
+
+        if not app_id or not access_key:
+            await websocket.close(code=4400)
+            return
+
+        await websocket.accept()
+
+        upstream: Any = None
+        stop_requested = asyncio.Event()
+        latest_text = ""
+
+        async def send_client(payload: dict[str, Any]) -> None:
+            await websocket.send_text(json.dumps(payload, ensure_ascii=False))
+
+        try:
+            raw_start = await asyncio.wait_for(websocket.receive_text(), timeout=15.0)
+            start_body = json.loads(raw_start)
+            if str(start_body.get("type") or "").lower() != "start":
+                await send_client({"type": "error", "message": "expected start message"})
+                await websocket.close(code=4400)
+                return
+            language = str(start_body.get("language") or "zh-CN").strip() or "zh-CN"
+            session_uid = str(uuid.uuid4())
+
+            connect_id = str(uuid.uuid4())
+            extra_headers = [
+                ("X-Api-App-Key", api_app_key),
+                ("X-Api-Access-Key", access_key),
+                ("X-Api-App-ID", app_id),
+                ("X-Api-Resource-Id", DOUBAO_SAUC_RESOURCE_ID),
+                ("X-Api-Connect-Id", connect_id),
+            ]
+            if secret_raw:
+                extra_headers.append(("X-Api-Secret-Key", secret_raw))
+
+            upstream = await websockets.connect(
+                DOUBAO_SAUC_WS,
+                additional_headers=extra_headers,
+                max_size=None,
+            )
+            start_payload = build_default_start_payload(uid=session_uid, language=language)
+            await upstream.send(build_full_client_request(start_payload))
+            await send_client({"type": "ready"})
+
+            async def client_to_upstream() -> None:
+                try:
+                    while not stop_requested.is_set():
+                        msg = await websocket.receive()
+                        if msg.get("type") == "websocket.disconnect":
+                            stop_requested.set()
+                            break
+                        if "text" in msg:
+                            try:
+                                body = json.loads(msg["text"])
+                            except Exception:
+                                continue
+                            if str(body.get("type") or "").lower() == "stop":
+                                stop_requested.set()
+                                assert upstream is not None
+                                await upstream.send(build_audio_only_request(b"", is_last=True))
+                                break
+                        elif "bytes" in msg:
+                            pcm = msg["bytes"]
+                            if pcm and upstream is not None:
+                                await upstream.send(build_audio_only_request(pcm, is_last=False))
+                except Exception:
+                    stop_requested.set()
+                    if upstream is not None:
+                        with contextlib.suppress(Exception):
+                            await upstream.send(build_audio_only_request(b"", is_last=True))
+
+            async def upstream_to_client() -> None:
+                nonlocal latest_text
+                assert upstream is not None
+                try:
+                    async for raw in upstream:
+                        if not isinstance(raw, (bytes, bytearray)):
+                            continue
+                        parsed = parse_server_frame(bytes(raw))
+                        kind = parsed.get("kind")
+                        if kind == "error":
+                            await send_client(
+                                {
+                                    "type": "error",
+                                    "message": str(parsed.get("message") or "豆包流式转写失败"),
+                                }
+                            )
+                            break
+                        if kind != "response":
+                            continue
+                        text = str(parsed.get("text") or "").strip()
+                        if text:
+                            latest_text = text
+                        msg_type = "final" if parsed.get("is_last") else "interim"
+                        await send_client({"type": msg_type, "text": text or latest_text})
+                        if parsed.get("is_last"):
+                            break
+                except Exception:
+                    pass
+
+            await asyncio.gather(client_to_upstream(), upstream_to_client())
+        except asyncio.TimeoutError:
+            with contextlib.suppress(Exception):
+                await send_client({"type": "error", "message": "等待 start 超时"})
+        except json.JSONDecodeError:
+            with contextlib.suppress(Exception):
+                await send_client({"type": "error", "message": "invalid start payload"})
+        except Exception as exc:
+            logger.warning("stream-transcribe failed: %s", exc)
+            with contextlib.suppress(Exception):
+                await send_client({"type": "error", "message": str(exc)[:300]})
+        finally:
+            if upstream is not None:
+                with contextlib.suppress(Exception):
+                    await upstream.close()
+            with contextlib.suppress(Exception):
+                await websocket.close()
