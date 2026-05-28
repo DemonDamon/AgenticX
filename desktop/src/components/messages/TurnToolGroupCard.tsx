@@ -65,8 +65,8 @@ export function TurnToolGroupCard({
         onClick={() => setExpanded((v) => !v)}
       >
         <span className="flex h-[20px] w-[20px] shrink-0 items-center justify-center" aria-hidden>
-          <span className="flex h-[18px] w-[18px] items-center justify-center rounded-full bg-[rgb(var(--theme-color-rgb,59,130,246))] ring-1 ring-[rgba(var(--theme-color-rgb,59,130,246),0.35)]">
-            <Check className="h-3 w-3 text-white" strokeWidth={2.4} />
+          <span className="flex h-4 w-4 items-center justify-center rounded-full bg-[rgb(var(--theme-color-rgb,59,130,246))] ring-1 ring-[rgba(var(--theme-color-rgb,59,130,246),0.35)]">
+            <Check className="h-2.5 w-2.5 text-white" strokeWidth={2.45} />
           </span>
         </span>
         <span className="flex min-w-0 shrink items-center gap-1.5">
