@@ -9,6 +9,7 @@ import { clearPaneLazyInheritParent, markPaneAwaitingFreshSession } from "../uti
 import { FeishuBadge } from "./FeishuBadge";
 import { META_AGENT_DISPLAY_NAME } from "../constants/branding";
 import { resolveMetaDisplayName } from "../utils/display-name";
+import { avatarPreloadKey } from "../utils/splash-preload-core";
 
 function timeAgo(ts: number): string {
   const diff = Date.now() / 1000 - ts;
@@ -236,7 +237,23 @@ export const SessionHistoryPanel = memo(function SessionHistoryPanel({ pane, onC
   const dropCachedSessionMessages = useAppStore((s) => s.dropCachedSessionMessages);
   const setPaneHistorySearchTerms = useAppStore((s) => s.setPaneHistorySearchTerms);
   const addPane = useAppStore((s) => s.addPane);
-  const [sessions, setSessions] = useState<SessionRow[]>([]);
+  const corePreloadAttempted = useAppStore((s) => s.corePreloadAttempted);
+  const preloadedSessionsKey = avatarPreloadKey(pane.avatarId ?? null);
+  const preloadedSessionsRaw = useAppStore(
+    (s) => s.preloadedSessionsByAvatarKey[preloadedSessionsKey]
+  );
+
+  const initialSessionsFromPreload = (): SessionRow[] => {
+    if (!corePreloadAttempted || preloadedSessionsRaw === undefined) return [];
+    return normalizeSessionRows(preloadedSessionsRaw).filter((row) =>
+      isSessionVisibleInPane(row, pane.avatarId ?? null)
+    );
+  };
+
+  const [sessionsLoadAttempted, setSessionsLoadAttempted] = useState(
+    () => corePreloadAttempted && preloadedSessionsRaw !== undefined
+  );
+  const [sessions, setSessions] = useState<SessionRow[]>(initialSessionsFromPreload);
   const [feishuBoundSessionId, setFeishuBoundSessionId] = useState<string | null>(null);
   const [wechatBoundSessionId, setWechatBoundSessionId] = useState<string | null>(null);
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -366,6 +383,7 @@ export const SessionHistoryPanel = memo(function SessionHistoryPanel({ pane, onC
         isSessionVisibleInPane(row, pane.avatarId ?? null)
       );
       setSessions(rows);
+      setSessionsLoadAttempted(true);
       for (const row of rows) {
         const hint = useAppStore.getState().sessionHistoryHints[row.session_id];
         if (!hint) continue;
@@ -382,6 +400,8 @@ export const SessionHistoryPanel = memo(function SessionHistoryPanel({ pane, onC
       setSelectedSessionIds((prev) => prev.filter((id) => rows.some((r) => r.session_id === id)));
     } catch (err) {
       console.error("[SessionHistoryPanel] loadSessions error:", err);
+    } finally {
+      setSessionsLoadAttempted(true);
     }
   };
 
@@ -1159,9 +1179,17 @@ export const SessionHistoryPanel = memo(function SessionHistoryPanel({ pane, onC
       </div>
       <div className="agx-session-history-scroll min-h-0 flex-1 overflow-y-auto pl-2 pr-[2px] pb-2 pt-0.5">
         {sessions.length === 0 ? (
-          <div className="rounded border border-dashed border-border p-3 text-center text-[13px] text-text-faint">
-            暂无会话
-          </div>
+          !sessionsLoadAttempted ? (
+            <div className="space-y-2 px-2 py-1">
+              {[0, 1, 2, 3].map((i) => (
+                <div key={i} className="h-9 animate-pulse rounded-md bg-surface-hover" />
+              ))}
+            </div>
+          ) : (
+            <div className="rounded border border-dashed border-border p-3 text-center text-[13px] text-text-faint">
+              暂无会话
+            </div>
+          )
         ) : !searchHasAnyMatch ? (
           <div className="rounded border border-dashed border-border p-3 text-center text-[13px] text-text-faint">
             未找到匹配会话

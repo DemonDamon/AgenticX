@@ -9,11 +9,13 @@ export type SplashStage =
   | "backend-waiting"
   | "pinging-remote"
   | "loading-ui"
+  | "preloading-core"
   | "restoring-session"
   | "ready";
 
 const SPLASH_FADE_MS = 180;
-const SPLASH_FORCE_SHOW_MS = 12_000;
+/** Must exceed splash preload overall timeout (~12s) + backend cold start. */
+const SPLASH_FORCE_SHOW_MS = 15_000;
 
 let splashWindow: BrowserWindow | null = null;
 let splashShownOnce = false;
@@ -162,6 +164,15 @@ export function registerSplashIpcHandlers(deps: {
     deps.quitApp();
     return { ok: true };
   });
+
+  ipcMain.handle("update-splash-stage", async (_event, stage: SplashStage) => {
+    updateSplashStage(stage);
+    return { ok: true };
+  });
+
+  ipcMain.handle("get-splash-preload-enabled", async () => ({
+    enabled: process.env.AGX_SPLASH_PRELOAD !== "0",
+  }));
 }
 
 export function scheduleSplashForceShowFallback(showMainWindow: () => void): void {

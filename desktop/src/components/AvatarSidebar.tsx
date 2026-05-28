@@ -117,8 +117,16 @@ export function AvatarSidebar() {
   // restart), we render a loading hint instead of "暂无分身/群聊", which
   // would otherwise be misleading because we simply haven't fetched yet
   // (issue #11).
+  const corePreloadAttempted = useAppStore((s) => s.corePreloadAttempted);
+  const avatarCount = useAppStore((s) => s.avatars.length);
   const [avatarsLoaded, setAvatarsLoaded] = useState(false);
   const [groupsLoaded, setGroupsLoaded] = useState(false);
+
+  useEffect(() => {
+    if (corePreloadAttempted || avatarCount > 0) {
+      setAvatarsLoaded(true);
+    }
+  }, [corePreloadAttempted, avatarCount]);
   const [avatarsHeight, setAvatarsHeight] = useState<number | null>(() => {
     const saved = loadSidebarSectionHeights();
     return saved.avatarsHeight;

@@ -373,6 +373,12 @@ type AppState = {
   avatars: Avatar[];
   activeAvatarId: string | null;
   avatarSessions: SessionItem[];
+  /** True after splash preload attempt (success or timeout). */
+  corePreloadAttempted: boolean;
+  /** Sessions list prefetched at startup, keyed by avatar id ("" = Meta). */
+  preloadedSessionsByAvatarKey: Record<string, unknown[]>;
+  /** Taskspaces prefetched at startup for the active session. */
+  preloadedTaskspacesBySessionId: Record<string, Taskspace[]>;
   groups: GroupChat[];
   panes: ChatPane[];
   activePaneId: string;
@@ -436,6 +442,12 @@ type AppState = {
   setConfirmStrategy: (v: ConfirmStrategy) => void;
   setMcpServers: (servers: McpServer[]) => void;
   setAvatars: (avatars: Avatar[]) => void;
+  applyCorePreloadBundle: (payload: {
+    sessionsKey: string;
+    sessions: unknown[];
+    taskspacesKey?: string;
+    taskspaces?: Taskspace[];
+  }) => void;
   setActiveAvatarId: (id: string | null) => void;
   setAvatarSessions: (sessions: SessionItem[]) => void;
   setGroups: (groups: GroupChat[]) => void;
@@ -788,6 +800,9 @@ export const useAppStore = create<AppState>((set, get) => ({
   avatars: [],
   activeAvatarId: null,
   avatarSessions: [],
+  corePreloadAttempted: false,
+  preloadedSessionsByAvatarKey: {},
+  preloadedTaskspacesBySessionId: {},
   groups: [],
   panes: [makeDefaultPane()],
   activePaneId: "pane-meta",
@@ -1031,6 +1046,24 @@ export const useAppStore = create<AppState>((set, get) => ({
   setConfirmStrategy: (confirmStrategy) => set({ confirmStrategy }),
   setMcpServers: (mcpServers) => set({ mcpServers }),
   setAvatars: (avatars) => set({ avatars }),
+  applyCorePreloadBundle: (payload) =>
+    set((state) => {
+      const sessionsKey = String(payload.sessionsKey ?? "");
+      const nextSessions = { ...state.preloadedSessionsByAvatarKey };
+      if (sessionsKey && Array.isArray(payload.sessions)) {
+        nextSessions[sessionsKey] = payload.sessions;
+      }
+      const nextTaskspaces = { ...state.preloadedTaskspacesBySessionId };
+      const taskspacesKey = String(payload.taskspacesKey ?? "").trim();
+      if (taskspacesKey && Array.isArray(payload.taskspaces)) {
+        nextTaskspaces[taskspacesKey] = payload.taskspaces;
+      }
+      return {
+        corePreloadAttempted: true,
+        preloadedSessionsByAvatarKey: nextSessions,
+        preloadedTaskspacesBySessionId: nextTaskspaces,
+      };
+    }),
   setActiveAvatarId: (activeAvatarId) => set({ activeAvatarId }),
   setAvatarSessions: (avatarSessions) => set({ avatarSessions }),
   setGroups: (groups) => set({ groups }),

@@ -142,7 +142,11 @@ export function WorkspacePanel({
   const paneAvatarName = useAppStore((s) => s.panes.find((p) => p.id === paneId)?.avatarName ?? "");
   const setPaneSessionId = useAppStore((s) => s.setPaneSessionId);
 
+  const corePreloadAttempted = useAppStore((s) => s.corePreloadAttempted);
+  const preloadedTaskspacesBySessionId = useAppStore((s) => s.preloadedTaskspacesBySessionId);
+
   const [taskspaces, setTaskspaces] = useState<Taskspace[]>([]);
+  const [workspaceLoadedOnce, setWorkspaceLoadedOnce] = useState(false);
   const [loading, setLoading] = useState(false);
   const [errorText, setErrorText] = useState("");
   const [expandedDirs, setExpandedDirs] = useState<Set<string>>(new Set());
@@ -223,6 +227,19 @@ export function WorkspacePanel({
     const browseSessionId = getBrowseSessionId();
     if (!browseSessionId) return undefined;
     setLoading(true);
+    if (corePreloadAttempted && preloadedTaskspacesBySessionId[browseSessionId]) {
+      const workspaces = preloadedTaskspacesBySessionId[browseSessionId];
+      setTaskspaces(workspaces);
+      if (workspaces.length > 0) {
+        const active = workspaces.find((item) => item.id === activeTaskspaceId) ?? workspaces[0];
+        if (!workspaces.some((item) => item.id === activeTaskspaceId)) {
+          onActiveTaskspaceChange(active.id);
+        }
+      }
+      setWorkspaceLoadedOnce(true);
+      setLoading(false);
+      return workspaces;
+    }
     const result = await window.agenticxDesktop.listTaskspaces(browseSessionId);
     if (!result.ok) {
       setErrorText(result.error ?? "加载工作区失败");
@@ -237,6 +254,7 @@ export function WorkspacePanel({
         onActiveTaskspaceChange(active.id);
       }
     }
+    setWorkspaceLoadedOnce(true);
     setLoading(false);
     return workspaces;
   };
@@ -794,8 +812,16 @@ export function WorkspacePanel({
           ) : null}
         </div>
         <div className="min-h-0 flex-1 overflow-y-auto px-2 py-2">
-          {loading ? <div className="text-[13px] text-text-faint">加载中...</div> : null}
-          {!loading && taskspaces.length === 0 ? <div className="text-[13px] text-text-faint">暂无工作区</div> : null}
+          {loading || !workspaceLoadedOnce ? (
+            <div className="space-y-2 py-1">
+              {[0, 1, 2].map((i) => (
+                <div key={i} className="h-7 animate-pulse rounded-md bg-surface-hover" />
+              ))}
+            </div>
+          ) : null}
+          {workspaceLoadedOnce && !loading && taskspaces.length === 0 ? (
+            <div className="text-[13px] text-text-faint">暂无工作区</div>
+          ) : null}
           {!loading && filteredFiles !== null ? (
             filteredFiles.length === 0 ? (
               <div className="text-[13px] text-text-faint">无匹配文件</div>

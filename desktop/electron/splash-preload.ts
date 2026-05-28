@@ -6,6 +6,7 @@ type SplashStage =
   | "backend-waiting"
   | "pinging-remote"
   | "loading-ui"
+  | "preloading-core"
   | "restoring-session"
   | "ready";
 

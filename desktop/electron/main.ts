@@ -1573,6 +1573,94 @@ function waitForStudio(timeoutMs = 30000): Promise<boolean> {
   });
 }
 
+const PRELOAD_ITEM_TIMEOUT_MS = 6000;
+
+function withPreloadItemTimeout<T>(promise: Promise<T>, fallback: T): Promise<T> {
+  return Promise.race([
+    promise,
+    new Promise<T>((resolve) => {
+      setTimeout(() => resolve(fallback), PRELOAD_ITEM_TIMEOUT_MS);
+    }),
+  ]);
+}
+
+async function fetchListAvatarsCore(): Promise<{ ok: boolean; avatars: unknown[] }> {
+  await waitForStudio();
+  try {
+    const resp = await fetch(`${getStudioUrl()}/api/avatars`, {
+      headers: { "x-agx-desktop-token": getStudioToken() },
+    });
+    if (!resp.ok) return { ok: false, avatars: [] };
+    const data = (await resp.json()) as { ok?: boolean; avatars?: unknown[] };
+    return { ok: Boolean(data.ok), avatars: Array.isArray(data.avatars) ? data.avatars : [] };
+  } catch {
+    return { ok: false, avatars: [] };
+  }
+}
+
+async function fetchListSessionsCore(avatarId?: string): Promise<{ ok: boolean; sessions: unknown[] }> {
+  await waitForStudio();
+  try {
+    const params = avatarId ? `?avatar_id=${encodeURIComponent(avatarId)}` : "";
+    const resp = await fetch(`${getStudioUrl()}/api/sessions${params}`, {
+      headers: { "x-agx-desktop-token": getStudioToken() },
+    });
+    if (!resp.ok) return { ok: false, sessions: [] };
+    const data = (await resp.json()) as { ok?: boolean; sessions?: unknown[] };
+    return { ok: Boolean(data.ok), sessions: Array.isArray(data.sessions) ? data.sessions : [] };
+  } catch {
+    return { ok: false, sessions: [] };
+  }
+}
+
+async function fetchListTaskspacesCore(
+  sessionId: string
+): Promise<{ ok: boolean; workspaces: unknown[]; error?: string }> {
+  const sid = String(sessionId || "").trim();
+  if (!sid) return { ok: false, workspaces: [], error: "sessionId is required" };
+  try {
+    const resp = await fetch(
+      `${getStudioUrl()}/api/taskspace/workspaces?session_id=${encodeURIComponent(sid)}`,
+      { headers: { "x-agx-desktop-token": getStudioToken() } }
+    );
+    if (!resp.ok) {
+      const body = await resp.text().catch(() => "");
+      return { ok: false, workspaces: [], error: `HTTP ${resp.status}: ${body.slice(0, 300)}` };
+    }
+    const data = (await resp.json()) as { ok?: boolean; workspaces?: unknown[] };
+    return {
+      ok: Boolean(data.ok),
+      workspaces: Array.isArray(data.workspaces) ? data.workspaces : [],
+    };
+  } catch (err) {
+    return { ok: false, workspaces: [], error: String(err) };
+  }
+}
+
+async function fetchSessionMessagesCore(
+  sessionId: string
+): Promise<{ ok: boolean; messages: unknown[]; error?: string }> {
+  const sid = String(sessionId || "").trim();
+  if (!sid) return { ok: false, messages: [], error: "sessionId is required" };
+  try {
+    const resp = await fetch(
+      `${getStudioUrl()}/api/session/messages?session_id=${encodeURIComponent(sid)}`,
+      { headers: { "x-agx-desktop-token": getStudioToken() } }
+    );
+    if (!resp.ok) {
+      const body = await resp.text().catch(() => "");
+      return { ok: false, messages: [], error: `HTTP ${resp.status}: ${body.slice(0, 300)}` };
+    }
+    const data = (await resp.json()) as { ok?: boolean; messages?: unknown[] };
+    return {
+      ok: Boolean(data.ok),
+      messages: Array.isArray(data.messages) ? data.messages : [],
+    };
+  } catch (err) {
+    return { ok: false, messages: [], error: String(err) };
+  }
+}
+
 function emitSkillsChanged(): void {
   if (skillsChangedDebounceTimer) {
     clearTimeout(skillsChangedDebounceTimer);
@@ -3251,21 +3339,47 @@ function registerIpc(): void {
     return { ok: true };
   });
 
-  ipcMain.handle("list-avatars", async () => {
-    try {
-      // Wait for studio cold start before fetching, otherwise the renderer
-      // would receive `{ ok: false, avatars: [] }` and silently render
-      // "暂无分身" until something else triggers a refresh (issue #11).
-      await waitForStudio();
-      const resp = await fetch(`${getStudioUrl()}/api/avatars`, {
-        headers: { "x-agx-desktop-token": getStudioToken() },
-      });
-      if (!resp.ok) return { ok: false, avatars: [] };
-      return await resp.json();
-    } catch {
-      return { ok: false, avatars: [] };
+  ipcMain.handle("list-avatars", async () => fetchListAvatarsCore());
+
+  ipcMain.handle(
+    "preload-core-data",
+    async (
+      _event,
+      payload: { avatarId?: string; sessionId?: string }
+    ): Promise<{
+      ok: boolean;
+      avatars: { ok: boolean; avatars: unknown[] };
+      sessions: { ok: boolean; sessions: unknown[] };
+      taskspaces: { ok: boolean; workspaces: unknown[]; error?: string };
+      messages: { ok: boolean; messages: unknown[]; error?: string };
+    }> => {
+      const avatarId = String(payload?.avatarId ?? "").trim() || undefined;
+      const sessionId = String(payload?.sessionId ?? "").trim() || undefined;
+
+      const [avatars, sessions, taskspaces, messages] = await Promise.all([
+        withPreloadItemTimeout(fetchListAvatarsCore(), { ok: false, avatars: [] }),
+        withPreloadItemTimeout(fetchListSessionsCore(avatarId), { ok: false, sessions: [] }),
+        sessionId
+          ? withPreloadItemTimeout(fetchListTaskspacesCore(sessionId), {
+              ok: false,
+              workspaces: [],
+              error: "timeout",
+            })
+          : Promise.resolve({ ok: false, workspaces: [] as unknown[], error: "skipped" }),
+        sessionId
+          ? withPreloadItemTimeout(fetchSessionMessagesCore(sessionId), {
+              ok: false,
+              messages: [],
+              error: "timeout",
+            })
+          : Promise.resolve({ ok: false, messages: [] as unknown[], error: "skipped" }),
+      ]);
+
+      const anyOk =
+        avatars.ok || sessions.ok || taskspaces.ok || messages.ok;
+      return { ok: anyOk, avatars, sessions, taskspaces, messages };
     }
-  });
+  );
 
   ipcMain.handle("create-avatar", async (_event, payload: {
     name: string;
