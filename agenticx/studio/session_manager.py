@@ -688,11 +688,36 @@ class SessionManager:
 
     def get_messages(self, session_id: str) -> list[dict]:
         """Return normalized chat messages for session."""
+        # PROFILE: see plan 2026-05-28-session-switch-latency-profile.
+        t_start = time.perf_counter()
         managed = self._sessions.get(session_id)
         if managed is not None:
-            return self._normalize_messages(getattr(managed.studio_session, "chat_history", []) or [])
+            raw = getattr(managed.studio_session, "chat_history", []) or []
+            t_load_end = time.perf_counter()
+            normalized = self._normalize_messages(raw)
+            t_norm_end = time.perf_counter()
+            _log.info(
+                "[get-messages] sid=%s src=memory count=%d load=%.0fms normalize=%.0fms total=%.0fms",
+                session_id[:8],
+                len(normalized),
+                (t_load_end - t_start) * 1000,
+                (t_norm_end - t_load_end) * 1000,
+                (t_norm_end - t_start) * 1000,
+            )
+            return normalized
         payload = self._load_messages_snapshot(session_id)
-        return self._normalize_messages(payload)
+        t_load_end = time.perf_counter()
+        normalized = self._normalize_messages(payload)
+        t_norm_end = time.perf_counter()
+        _log.info(
+            "[get-messages] sid=%s src=disk count=%d load=%.0fms normalize=%.0fms total=%.0fms",
+            session_id[:8],
+            len(normalized),
+            (t_load_end - t_start) * 1000,
+            (t_norm_end - t_load_end) * 1000,
+            (t_norm_end - t_start) * 1000,
+        )
+        return normalized
 
     def list_taskspaces(self, session_id: str) -> list[dict[str, str]]:
         managed = self.get(session_id, touch=False)

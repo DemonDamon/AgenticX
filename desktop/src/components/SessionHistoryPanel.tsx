@@ -558,17 +558,35 @@ export const SessionHistoryPanel = memo(function SessionHistoryPanel({ pane, onC
       return;
     }
 
+    // PROFILE: session-switch latency breakdown.
+    // Remove after the optimization direction is chosen (see plan
+    // 2026-05-28-session-switch-latency-profile).
+    const tClickStart = performance.now();
     try {
+      const tIpcStart = performance.now();
       const result = await window.agenticxDesktop.loadSessionMessages(sessionId);
+      const tIpcEnd = performance.now();
       if (result.ok && Array.isArray(result.messages)) {
+        const tMapStart = performance.now();
         const mapped: Message[] = result.messages.map((item, index) =>
           mapLoadedSessionMessage(item as LoadedSessionMessage, sessionId, index)
         );
+        const tMapEnd = performance.now();
         setPaneMessages(targetPaneId, mapped);
+        const tTotal = performance.now() - tClickStart;
+        console.info(
+          `[session-switch] sid=${sessionId.slice(0, 8)} count=${mapped.length} ipc=${(tIpcEnd - tIpcStart).toFixed(0)}ms map=${(tMapEnd - tMapStart).toFixed(0)}ms total=${tTotal.toFixed(0)}ms`,
+        );
         return;
       }
-    } catch {
-      /* fallback below */
+      console.warn(
+        `[session-switch] sid=${sessionId.slice(0, 8)} load failed ipc=${(tIpcEnd - tIpcStart).toFixed(0)}ms result=${JSON.stringify(result).slice(0, 200)}`,
+      );
+    } catch (err) {
+      console.warn(
+        `[session-switch] sid=${sessionId.slice(0, 8)} threw after ${(performance.now() - tClickStart).toFixed(0)}ms`,
+        err,
+      );
     }
     setPaneMessages(targetPaneId, []);
   };
