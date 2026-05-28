@@ -313,18 +313,120 @@ class SessionStore:
         return str(raw)
 
     @staticmethod
-    def _message_timestamp(msg: Dict[str, Any]) -> float | None:
+    def _normalize_epoch_seconds(value: Any) -> float:
+        """Normalize message timestamps to Unix seconds (handles ms epoch values)."""
+        try:
+            ts = float(value)
+        except (TypeError, ValueError):
+            return 0.0
+        if ts <= 0:
+            return 0.0
+        if ts > 1e11:
+            ts /= 1000.0
+        return ts
+
+    @classmethod
+    def _message_timestamp(cls, msg: Dict[str, Any]) -> float | None:
         for key in ("timestamp", "created_at", "ts"):
             v = msg.get(key)
             if v is None:
                 continue
-            if isinstance(v, (int, float)):
-                return float(v)
-            try:
-                return float(v)
-            except (TypeError, ValueError):
-                continue
+            ts = cls._normalize_epoch_seconds(v)
+            if ts > 0:
+                return ts
         return None
+
+    def _max_message_timestamps_sync(
+        self,
+        session_ids: List[str] | None = None,
+    ) -> Dict[str, float]:
+        """Return the latest indexed message timestamp per session (seconds)."""
+        with self._connect() as conn:
+            if session_ids:
+                ids = [str(sid or "").strip() for sid in session_ids if str(sid or "").strip()]
+                if not ids:
+                    return {}
+                placeholders = ",".join("?" for _ in ids)
+                rows = conn.execute(
+                    f"""
+                    SELECT session_id, MAX(timestamp) AS last_ts
+                    FROM session_messages
+                    WHERE session_id IN ({placeholders})
+                    GROUP BY session_id
+                    """,
+                    ids,
+                ).fetchall()
+            else:
+                rows = conn.execute(
+                    """
+                    SELECT session_id, MAX(timestamp) AS last_ts
+                    FROM session_messages
+                    GROUP BY session_id
+                    """
+                ).fetchall()
+        result: Dict[str, float] = {}
+        for row in rows:
+            sid = str(row["session_id"] or "").strip()
+            if not sid:
+                continue
+            ts = self._normalize_epoch_seconds(row["last_ts"])
+            if ts > 0:
+                result[sid] = ts
+        return result
+
+    def _recover_activity_from_summaries_bulk_sync(
+        self,
+        session_ids: List[str] | None = None,
+    ) -> Dict[str, float]:
+        """Infer last activity from summary rows with the fullest chat history."""
+        with self._connect() as conn:
+            if session_ids:
+                ids = [str(sid or "").strip() for sid in session_ids if str(sid or "").strip()]
+                if not ids:
+                    return {}
+                placeholders = ",".join("?" for _ in ids)
+                rows = conn.execute(
+                    f"""
+                    SELECT session_id, metadata
+                    FROM session_summaries
+                    WHERE session_id IN ({placeholders})
+                    """,
+                    ids,
+                ).fetchall()
+            else:
+                rows = conn.execute(
+                    "SELECT session_id, metadata FROM session_summaries"
+                ).fetchall()
+        per_session: Dict[str, tuple[int, list[float]]] = {}
+        for row in rows:
+            sid = str(row["session_id"] or "").strip()
+            if not sid:
+                continue
+            try:
+                meta = json.loads(str(row["metadata"] or "{}"))
+            except Exception:
+                continue
+            if not isinstance(meta, dict):
+                continue
+            try:
+                msg_count = int(meta.get("chat_messages") or 0)
+            except (TypeError, ValueError):
+                msg_count = 0
+            last_activity = self._normalize_epoch_seconds(meta.get("last_activity_at"))
+            updated_at = self._normalize_epoch_seconds(meta.get("updated_at"))
+            candidate = last_activity if last_activity > 0 else updated_at
+            if candidate <= 0:
+                continue
+            prev = per_session.get(sid)
+            if prev is None or msg_count > prev[0]:
+                per_session[sid] = (msg_count, [candidate])
+            elif msg_count == prev[0]:
+                prev[1].append(candidate)
+        result: Dict[str, float] = {}
+        for sid, (_count, candidates) in per_session.items():
+            if candidates:
+                result[sid] = min(candidates)
+        return result
 
     def _index_session_messages_sync(self, session_id: str, messages: List[Dict[str, Any]]) -> int:
         if not session_fts_enabled():

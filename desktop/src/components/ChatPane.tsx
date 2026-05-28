@@ -5264,6 +5264,8 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
     setRunGuardSessionId(requestSessionId);
     setSessionExecutionState("running");
     prevExecutionStateRef.current = "running";
+    useAppStore.getState().markSessionHistoryActive(requestSessionId);
+    useAppStore.getState().bumpSessionCatalogRevision();
     recordSseActivity();
     setStallState("none");
     setExhaustedRounds(null);
@@ -6393,7 +6395,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
         setPaneContextInherited(pane.id, false);
         setPaneSessionId(pane.id, "");
         clearPaneAwaitingFreshSession(pane.id);
-        await initSession(false);
+        markPaneAwaitingFreshSession(pane.id);
       }
 
       const fileName = fileNameFromPath(trimmed);

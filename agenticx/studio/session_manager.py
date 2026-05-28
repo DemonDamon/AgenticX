@@ -335,8 +335,9 @@ class SessionManager:
             if avatar_id and getattr(managed, "avatar_id", None) != avatar_id:
                 continue
             hist = getattr(managed.studio_session, "chat_history", None) or []
-            # 之前跳过 len(hist)==0 会把「刚创建、尚未写入首条消息」的会话从列表里藏起来，
-            # 桌面历史侧栏无法立刻显示当前会话；保留空会话条目以便 UI 及时对齐。
+            # Lazy-create UX: hide memory-only shells until the user sends at least one message.
+            if not self._session_has_listable_chat_history(hist):
+                continue
             seen_session_ids.add(sid)
             result.append({
                 "session_id": sid,
@@ -370,6 +371,35 @@ class SessionManager:
             )
             result.append(row)
             seen_session_ids.add(sid)
+        if result:
+            session_ids = [
+                str(row.get("session_id", "")).strip()
+                for row in result
+                if str(row.get("session_id", "")).strip()
+            ]
+            indexed_message_ts = self._session_store._max_message_timestamps_sync(session_ids)
+            summary_activity_ts = self._session_store._recover_activity_from_summaries_bulk_sync(
+                session_ids
+            )
+            for row in result:
+                sid = str(row.get("session_id", "")).strip()
+                managed = self._sessions.get(sid)
+                chat_history = (
+                    getattr(managed.studio_session, "chat_history", None) if managed else None
+                )
+                disk_message_ts = 0.0
+                if managed is None:
+                    disk_message_ts = self._last_message_activity_from_disk(sid)
+                row["updated_at"] = self._resolve_list_activity_at(
+                    chat_history=chat_history,
+                    metadata_updated_at=float(row.get("updated_at") or 0),
+                    metadata_created_at=float(row.get("created_at") or 0),
+                    indexed_message_ts=float(indexed_message_ts.get(sid, 0) or 0),
+                    metadata_last_activity_at=float(row.get("last_activity_at") or 0),
+                    disk_message_ts=disk_message_ts,
+                    summary_activity_ts=float(summary_activity_ts.get(sid, 0) or 0),
+                    live_touch_at=float(managed.updated_at) if managed is not None else 0.0,
+                )
         result.sort(
             key=lambda row: (
                 1 if row.get("pinned") else 0,
@@ -917,6 +947,13 @@ class SessionManager:
             self._session_store._save_scratchpad_sync(session_id, scratchpad)
             summary = self._build_session_summary(session)
             managed_ref = self._sessions.get(session_id)
+            metadata_updated_at = float(getattr(managed_ref, "updated_at", time.time()) or time.time())
+            metadata_created_at = float(getattr(managed_ref, "created_at", time.time()) or time.time())
+            last_activity_at = self._resolve_list_activity_at(
+                chat_history=getattr(session, "chat_history", None),
+                metadata_updated_at=metadata_updated_at,
+                metadata_created_at=metadata_created_at,
+            )
             metadata = {
                 "provider": session.provider_name or "",
                 "model": session.model_name or "",
@@ -925,8 +962,9 @@ class SessionManager:
                 "session_name": getattr(managed_ref, "session_name", None),
                 "avatar_id": getattr(managed_ref, "avatar_id", None),
                 "avatar_name": getattr(managed_ref, "avatar_name", None),
-                "created_at": getattr(managed_ref, "created_at", time.time()),
-                "updated_at": getattr(managed_ref, "updated_at", time.time()),
+                "created_at": metadata_created_at,
+                "updated_at": metadata_updated_at,
+                "last_activity_at": last_activity_at,
                 "pinned": bool(getattr(managed_ref, "pinned", False)),
                 "archived": bool(getattr(managed_ref, "archived", False)),
                 "taskspaces": list(getattr(managed_ref, "taskspaces", []) or []),
@@ -1222,7 +1260,105 @@ class SessionManager:
         if not first:
             return
         managed.session_name = self._build_auto_title(first)
-        managed.updated_at = time.time()
+
+    @staticmethod
+    def _session_has_listable_chat_history(chat_history: list | None) -> bool:
+        """True when the session has at least one visible user/assistant message."""
+        for item in chat_history or []:
+            if not isinstance(item, dict):
+                continue
+            role = str(item.get("role", "")).strip().lower()
+            if role not in {"user", "assistant"}:
+                continue
+            if str(item.get("content", "")).strip():
+                return True
+        return False
+
+    @staticmethod
+    def _normalize_epoch_seconds(value: Any) -> float:
+        try:
+            ts = float(value)
+        except (TypeError, ValueError):
+            return 0.0
+        if ts <= 0:
+            return 0.0
+        if ts > 1e11:
+            ts /= 1000.0
+        return ts
+
+    @classmethod
+    def _last_message_activity_from_history(cls, chat_history: list | None) -> float:
+        best = 0.0
+        for item in chat_history or []:
+            if not isinstance(item, dict):
+                continue
+            for key in ("timestamp", "created_at", "ts"):
+                ts = cls._normalize_epoch_seconds(item.get(key))
+                if ts > best:
+                    best = ts
+        return best
+
+    def _last_message_activity_from_disk(self, session_id: str) -> float:
+        sid = str(session_id or "").strip()
+        if not sid:
+            return 0.0
+        path = self._messages_path(sid)
+        try:
+            mtime = os.path.getmtime(path)
+        except OSError:
+            return 0.0
+        cached = getattr(self, "_disk_activity_cache", {}).get(sid)
+        if cached and cached[0] == mtime:
+            return cached[1]
+        activity = self._last_message_activity_from_history(self._load_messages_snapshot(sid))
+        cache = getattr(self, "_disk_activity_cache", None)
+        if cache is None:
+            cache = {}
+            setattr(self, "_disk_activity_cache", cache)
+        cache[sid] = (mtime, activity)
+        return activity
+
+    @classmethod
+    def _resolve_list_activity_at(
+        cls,
+        *,
+        chat_history: list | None,
+        metadata_updated_at: float,
+        metadata_created_at: float,
+        indexed_message_ts: float = 0.0,
+        metadata_last_activity_at: float = 0.0,
+        disk_message_ts: float = 0.0,
+        summary_activity_ts: float = 0.0,
+        live_touch_at: float = 0.0,
+    ) -> float:
+        """Pick the best last-activity timestamp for session list bucketing."""
+        message_based = max(
+            cls._last_message_activity_from_history(chat_history),
+            cls._normalize_epoch_seconds(indexed_message_ts),
+            cls._normalize_epoch_seconds(disk_message_ts),
+        )
+        touch_at = cls._normalize_epoch_seconds(live_touch_at)
+        if message_based > 0:
+            if touch_at > message_based:
+                return touch_at
+            return message_based
+        summary_based = cls._normalize_epoch_seconds(summary_activity_ts)
+        if summary_based > 0:
+            if touch_at > summary_based:
+                return touch_at
+            return summary_based
+        meta_last = cls._normalize_epoch_seconds(metadata_last_activity_at)
+        if meta_last > 0:
+            if touch_at > meta_last:
+                return touch_at
+            return meta_last
+        if touch_at > 0:
+            return touch_at
+        if metadata_updated_at > 0:
+            return metadata_updated_at
+        if metadata_created_at > 0:
+            return metadata_created_at
+        return 0.0
 
     def _build_fork_name(self, base_name: Optional[str]) -> str:
         text = str(base_name or "").strip()
@@ -1279,6 +1415,7 @@ class SessionManager:
                 continue
             created_at = self._to_float(metadata.get("created_at"), self._iso_to_epoch(item.get("created_at")))
             updated_at = self._to_float(metadata.get("updated_at"), self._iso_to_epoch(item.get("created_at")))
+            last_activity_at = self._to_float(metadata.get("last_activity_at"), updated_at)
             rows.append(
                 {
                     "session_id": sid,
@@ -1287,6 +1424,7 @@ class SessionManager:
                     "session_name": self._sanitize_session_name(metadata.get("session_name")),
                     "updated_at": updated_at,
                     "created_at": created_at,
+                    "last_activity_at": last_activity_at,
                     "pinned": bool(metadata.get("pinned", False)),
                     "archived": bool(metadata.get("archived", False)),
                     "execution_state": str(metadata.get("execution_state", "idle") or "idle"),

@@ -767,7 +767,7 @@ export function App() {
       }
 
       if (!recovered) {
-        let sessionCreated = false;
+        let sessionBound = false;
         const latestSid = await (async () => {
           try {
             const listed = await window.agenticxDesktop.listSessions();
@@ -784,29 +784,18 @@ export function App() {
             setPaneSessionId("pane-meta", sid);
             await refreshMcpStatus(sid).catch(() => {});
             await ensureMcpAutoConnectOnStartup(sid).catch(() => {});
-            sessionCreated = true;
+            sessionBound = true;
             recovered = true;
           } catch (err) {
             console.error("[App init] reuse latest session failed:", err);
           }
         }
-        for (let attempt = 0; attempt < 3; attempt++) {
-          if (sessionCreated) break;
-          try {
-            const sid = await requestSession(base, token);
-            setSessionId(sid);
-            setPaneSessionId("pane-meta", sid);
-            await refreshMcpStatus(sid).catch(() => {});
-            await ensureMcpAutoConnectOnStartup(sid).catch(() => {});
-            sessionCreated = true;
-            break;
-          } catch (err) {
-            console.error(`[App init] /api/session failed, attempt ${attempt + 1}:`, err);
-            await new Promise((r) => setTimeout(r, 1000 * (attempt + 1)));
-          }
-        }
-        if (!sessionCreated) {
-          console.error("[App init] all session creation attempts failed");
+        if (!sessionBound) {
+          // Align with ChatPane lazy-create: no empty server session on cold start.
+          setSessionId("");
+          setPaneSessionId("pane-meta", "");
+          await refreshMcpStatus("").catch(() => {});
+          recovered = true;
         }
       }
 
