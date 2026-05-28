@@ -3853,34 +3853,19 @@ function registerIpc(): void {
   ipcMain.handle("load-session-messages", async (_event, sessionId: string) => {
     const sid = String(sessionId || "").trim();
     if (!sid) return { ok: false, messages: [], error: "sessionId is required" };
-    // PROFILE: see plan 2026-05-28-session-switch-latency-profile.
-    const tStart = Date.now();
     try {
-      const tFetchStart = Date.now();
       const resp = await fetch(
         `${getStudioUrl()}/api/session/messages?session_id=${encodeURIComponent(sid)}`,
         {
           headers: { "x-agx-desktop-token": getStudioToken() },
         }
       );
-      const tFetchEnd = Date.now();
       if (!resp.ok) {
         const body = await resp.text().catch(() => "");
         return { ok: false, messages: [], error: `HTTP ${resp.status}: ${body.slice(0, 300)}` };
       }
-      const tParseStart = Date.now();
-      const payload = await resp.json();
-      const tParseEnd = Date.now();
-      const count = Array.isArray(payload?.messages) ? payload.messages.length : 0;
-      console.info(
-        `[ipc:load-session-messages] sid=${sid.slice(0, 8)} count=${count} fetch=${tFetchEnd - tFetchStart}ms parse=${tParseEnd - tParseStart}ms total=${Date.now() - tStart}ms`,
-      );
-      return payload;
+      return await resp.json();
     } catch (err) {
-      console.warn(
-        `[ipc:load-session-messages] sid=${sid.slice(0, 8)} threw after ${Date.now() - tStart}ms`,
-        err,
-      );
       return { ok: false, messages: [], error: String(err) };
     }
   });

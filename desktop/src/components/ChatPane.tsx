@@ -43,6 +43,8 @@ import {
   startDictation,
   type SttPhase,
 } from "../voice/stt";
+import { useVoicePushToTalk } from "../hooks/useVoicePushToTalk";
+import { VoicePttOverlay } from "./VoicePttOverlay";
 import { SessionHistoryPanel } from "./SessionHistoryPanel";
 import { StickyTaskBar } from "./StickyTaskBar";
 import { WorkspacePanel } from "./WorkspacePanel";
@@ -4924,7 +4926,20 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
     [extractComposerText, setComposerText]
   );
 
+  const { pttActive, pttLiveText, cancelPtt } = useVoicePushToTalk({
+    enabled: Boolean(pane.sessionId),
+    composerEmpty: !input.trim(),
+    apiBase,
+    apiToken,
+    language: "zh-CN",
+    onCommit: applyVoiceTranscript,
+    onError: (message) => setVoiceInputHint(message),
+  });
+
+  useEffect(() => () => cancelPtt(), [cancelPtt]);
+
   const onMicClick = () => {
+    cancelPtt();
     if (recording || voiceTranscribing) {
       dictationSessionRef.current?.stop();
       dictationSessionRef.current = null;
@@ -7218,6 +7233,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
             </div>
           ) : null}
           <div className="agx-pane-composer-body agx-theme-focus-ring relative rounded-2xl border border-transparent bg-surface-card transition-all duration-300 ease-out">
+            <VoicePttOverlay text={pttLiveText} visible={pttActive} />
             {visibleAttachmentEntries.length > 0 ? (
               <div className="flex flex-wrap gap-2 px-3 pt-3">
                 {visibleAttachmentEntries.map(([key, file]) => (
