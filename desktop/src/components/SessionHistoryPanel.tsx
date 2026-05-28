@@ -230,6 +230,10 @@ export const SessionHistoryPanel = memo(function SessionHistoryPanel({ pane, onC
   const setPaneSessionId = useAppStore((s) => s.setPaneSessionId);
   const setPaneSessionMode = useAppStore((s) => s.setPaneSessionMode);
   const setPaneMessages = useAppStore((s) => s.setPaneMessages);
+  const setPaneLoadingMessages = useAppStore((s) => s.setPaneLoadingMessages);
+  const getCachedSessionMessages = useAppStore((s) => s.getCachedSessionMessages);
+  const cacheSessionMessages = useAppStore((s) => s.cacheSessionMessages);
+  const dropCachedSessionMessages = useAppStore((s) => s.dropCachedSessionMessages);
   const setPaneHistorySearchTerms = useAppStore((s) => s.setPaneHistorySearchTerms);
   const addPane = useAppStore((s) => s.addPane);
   const [sessions, setSessions] = useState<SessionRow[]>([]);
@@ -558,35 +562,35 @@ export const SessionHistoryPanel = memo(function SessionHistoryPanel({ pane, onC
       return;
     }
 
-    // PROFILE: session-switch latency breakdown.
-    // Remove after the optimization direction is chosen (see plan
-    // 2026-05-28-session-switch-latency-profile).
-    const tClickStart = performance.now();
+    // Fast path: LRU cache hit — render previously-loaded messages instantly,
+    // no IPC, no skeleton (covers the "switch back to a session I just left"
+    // pattern that profile showed at 430ms+ per round trip).
+    const cached = getCachedSessionMessages(sessionId);
+    if (cached && cached.length > 0) {
+      setPaneMessages(targetPaneId, cached);
+      setPaneLoadingMessages(targetPaneId, false);
+      return;
+    }
+
+    // Slow path: clear old messages immediately + show skeleton so users see
+    // an instant switch instead of the previous session's bubbles hanging
+    // around for the full IPC roundtrip.
+    setPaneMessages(targetPaneId, []);
+    setPaneLoadingMessages(targetPaneId, true);
     try {
-      const tIpcStart = performance.now();
       const result = await window.agenticxDesktop.loadSessionMessages(sessionId);
-      const tIpcEnd = performance.now();
       if (result.ok && Array.isArray(result.messages)) {
-        const tMapStart = performance.now();
         const mapped: Message[] = result.messages.map((item, index) =>
           mapLoadedSessionMessage(item as LoadedSessionMessage, sessionId, index)
         );
-        const tMapEnd = performance.now();
         setPaneMessages(targetPaneId, mapped);
-        const tTotal = performance.now() - tClickStart;
-        console.info(
-          `[session-switch] sid=${sessionId.slice(0, 8)} count=${mapped.length} ipc=${(tIpcEnd - tIpcStart).toFixed(0)}ms map=${(tMapEnd - tMapStart).toFixed(0)}ms total=${tTotal.toFixed(0)}ms`,
-        );
+        cacheSessionMessages(sessionId, mapped);
         return;
       }
-      console.warn(
-        `[session-switch] sid=${sessionId.slice(0, 8)} load failed ipc=${(tIpcEnd - tIpcStart).toFixed(0)}ms result=${JSON.stringify(result).slice(0, 200)}`,
-      );
-    } catch (err) {
-      console.warn(
-        `[session-switch] sid=${sessionId.slice(0, 8)} threw after ${(performance.now() - tClickStart).toFixed(0)}ms`,
-        err,
-      );
+    } catch {
+      /* fallback below */
+    } finally {
+      setPaneLoadingMessages(targetPaneId, false);
     }
     setPaneMessages(targetPaneId, []);
   };
@@ -723,6 +727,7 @@ export const SessionHistoryPanel = memo(function SessionHistoryPanel({ pane, onC
       const successfullyDeleted = targets.filter((sid) => !failedSetForRefs.has(sid));
       // Clear stale references in other panes so their syncSubAgents poll stops 404'ing.
       clearDeletedSessionRefsInOtherPanes(successfullyDeleted);
+      dropCachedSessionMessages(successfullyDeleted);
       const activeDeleted = targets.includes(pane.sessionId);
       await loadSessions();
       if (activeDeleted) {
@@ -1011,6 +1016,7 @@ export const SessionHistoryPanel = memo(function SessionHistoryPanel({ pane, onC
       if (result.ok) {
         // Clear stale references in other panes so their syncSubAgents poll stops 404'ing.
         clearDeletedSessionRefsInOtherPanes([item.session_id]);
+        dropCachedSessionMessages(item.session_id);
         await loadSessions();
         if (pane.sessionId === item.session_id) {
           const next = sessions.find((row) => row.session_id !== item.session_id);

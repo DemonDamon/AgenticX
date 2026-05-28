@@ -132,6 +132,8 @@ export type ChatPane = {
   historySearchTerms: string[];
   /** Harness mode for this pane's session (code_dev vs daily_office). */
   sessionMode?: "code_dev" | "daily_office";
+  /** True while messages are being fetched after a session switch (shows skeleton). */
+  loadingMessages?: boolean;
 };
 
 /** Lifecycle for merged tool_call + tool_result rows in chat (desktop Meta pane). */
@@ -495,6 +497,11 @@ type AppState = {
   setPaneSessionId: (paneId: string, sessionId: string, modelHint?: { provider?: string; model?: string }) => void;
   setPaneSessionMode: (paneId: string, mode: "code_dev" | "daily_office") => void;
   setPaneMessages: (paneId: string, messages: Message[]) => void;
+  setPaneLoadingMessages: (paneId: string, loading: boolean) => void;
+  /** Per-session messages cache (LRU). Lets repeat session switches skip the IPC roundtrip. */
+  getCachedSessionMessages: (sessionId: string) => Message[] | undefined;
+  cacheSessionMessages: (sessionId: string, messages: Message[]) => void;
+  dropCachedSessionMessages: (sessionId: string | Iterable<string>) => void;
   setPaneHistorySearchTerms: (paneId: string, terms: string[]) => void;
   togglePaneHistory: (paneId: string) => void;
   /** @deprecated Prefer cycleSidePanel / openSidePanel */
@@ -599,8 +606,16 @@ function makeDefaultPane(): ChatPane {
     activeTerminalTabId: null,
     sessionTokens: { input: 0, output: 0 },
     historySearchTerms: [],
+    loadingMessages: false,
   };
 }
+
+/** Per-session messages LRU cache shared across panes in this renderer process.
+ *  Reading via Map iteration order works because we delete+re-insert on access
+ *  to bump the entry to the most-recent slot before set().
+ */
+const SESSION_MESSAGE_CACHE_MAX = 10;
+const sessionMessageCache: Map<string, Message[]> = new Map();
 
 const CHAT_STYLE_STORAGE_KEY = "agx-chat-style";
 const THEME_STORAGE_KEY = "agx-theme";
@@ -1541,6 +1556,43 @@ export const useAppStore = create<AppState>((set, get) => ({
     set((state) => ({
       panes: state.panes.map((pane) => (pane.id === paneId ? { ...pane, messages } : pane)),
     })),
+  setPaneLoadingMessages: (paneId, loading) =>
+    set((state) => ({
+      panes: state.panes.map((pane) =>
+        pane.id === paneId ? { ...pane, loadingMessages: loading } : pane,
+      ),
+    })),
+  getCachedSessionMessages: (sessionId) => {
+    const sid = String(sessionId ?? "").trim();
+    if (!sid) return undefined;
+    const entry = sessionMessageCache.get(sid);
+    if (!entry) return undefined;
+    sessionMessageCache.delete(sid);
+    sessionMessageCache.set(sid, entry);
+    return entry;
+  },
+  cacheSessionMessages: (sessionId, messages) => {
+    const sid = String(sessionId ?? "").trim();
+    if (!sid) return;
+    sessionMessageCache.delete(sid);
+    sessionMessageCache.set(sid, messages);
+    while (sessionMessageCache.size > SESSION_MESSAGE_CACHE_MAX) {
+      const oldest = sessionMessageCache.keys().next().value;
+      if (oldest === undefined) break;
+      sessionMessageCache.delete(oldest);
+    }
+  },
+  dropCachedSessionMessages: (sessionId) => {
+    if (typeof sessionId === "string") {
+      const sid = sessionId.trim();
+      if (sid) sessionMessageCache.delete(sid);
+      return;
+    }
+    for (const item of sessionId) {
+      const sid = String(item ?? "").trim();
+      if (sid) sessionMessageCache.delete(sid);
+    }
+  },
   setPaneHistorySearchTerms: (paneId, terms) =>
     set((state) => ({
       panes: state.panes.map((pane) =>
