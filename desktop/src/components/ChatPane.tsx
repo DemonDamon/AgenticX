@@ -7341,8 +7341,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
                 const isImeComposing =
                   e.nativeEvent.isComposing ||
                   imeComposingRef.current ||
-                  e.key === "Process" ||
-                  e.keyCode === 229;
+                  (e.key !== "Enter" && (e.key === "Process" || e.keyCode === 229));
                 if (isImeComposing) return;
                 if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "n") {
                   e.preventDefault();

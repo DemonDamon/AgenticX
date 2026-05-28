@@ -1672,8 +1672,7 @@ export function ChatView({ onOpenConfirm, mode = "pro" }: Props) {
     const isImeComposing =
       event.nativeEvent.isComposing ||
       imeComposingRef.current ||
-      event.key === "Process" ||
-      event.keyCode === 229;
+      (event.key !== "Enter" && (event.key === "Process" || event.keyCode === 229));
     if (isImeComposing) return;
     if (!isLite && event.altKey && event.key === "ArrowUp") {
       event.preventDefault();
