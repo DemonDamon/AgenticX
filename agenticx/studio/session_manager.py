@@ -739,7 +739,10 @@ class SessionManager:
         for sid, each in self._sessions.items():
             if self._taskspace_scope_key_for_managed(each) != scope_key:
                 continue
-            each.updated_at = time.time()
+            # Persist the new taskspace list but do NOT bump updated_at: workspace
+            # mutations are scope-level config changes, not session activity. Touching
+            # updated_at here would bulk-pollute Today bucketing for all sibling
+            # sessions (see plan 2026-05-28-near-history-bucket-taskspace-pollution).
             self._persist_session_state(sid, each.studio_session)
         return dict(taskspace)
 
@@ -760,7 +763,8 @@ class SessionManager:
         for sid, each in self._sessions.items():
             if self._taskspace_scope_key_for_managed(each) != scope_key:
                 continue
-            each.updated_at = time.time()
+            # See add_taskspace: workspace mutation must not bump updated_at,
+            # otherwise every sibling session would be shoved into Today.
             self._persist_session_state(sid, each.studio_session)
         return True
 
@@ -1339,8 +1343,12 @@ class SessionManager:
         )
         touch_at = cls._normalize_epoch_seconds(live_touch_at)
         if message_based > 0:
-            if touch_at > message_based:
-                return touch_at
+            # Real chat timestamps are the source of truth. We deliberately ignore
+            # touch_at here even when it's larger, because historically taskspace
+            # mutations and other non-activity code paths bulk-bumped updated_at
+            # and shoved unrelated sessions into Today. The "just sent, no message
+            # written yet" case is covered by the frontend sessionHistoryHints
+            # optimistic bump, not by touch_at on the backend.
             return message_based
         summary_based = cls._normalize_epoch_seconds(summary_activity_ts)
         if summary_based > 0:

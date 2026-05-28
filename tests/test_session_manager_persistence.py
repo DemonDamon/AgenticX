@@ -373,7 +373,14 @@ def test_list_sessions_normalizes_stale_interrupted_state(tmp_path: Path) -> Non
     assert fresh_row["execution_state"] == "idle"
 
 
-def test_list_sessions_prefers_touch_updated_at_over_last_message(tmp_path: Path) -> None:
+def test_list_sessions_prefers_message_timestamp_over_polluted_touch(tmp_path: Path) -> None:
+    """Real chat timestamps must win over a polluted managed.updated_at.
+
+    Regression: taskspace add/remove used to bulk-bump updated_at for every
+    sibling session, then the resolver's old `touch_at > message_based` branch
+    pushed all of them into the Today bucket after restart. With the fix, the
+    last user/assistant message timestamp is the source of truth.
+    """
     import time
 
     store = SessionStore(tmp_path / "sessions.sqlite")
@@ -385,9 +392,9 @@ def test_list_sessions_prefers_touch_updated_at_over_last_message(tmp_path: Path
 
     sid = "activity-bucket-session"
     old_activity = 1_700_000_000.0
-    fresh_touch = time.time()
+    polluted_touch = time.time()
     managed = manager.create(session_id=sid)
-    managed.updated_at = fresh_touch
+    managed.updated_at = polluted_touch
     managed.created_at = old_activity
     managed.studio_session.chat_history = [
         {
@@ -400,7 +407,47 @@ def test_list_sessions_prefers_touch_updated_at_over_last_message(tmp_path: Path
 
     rows = manager.list_sessions()
     row = next(item for item in rows if item["session_id"] == sid)
-    assert abs(float(row["updated_at"]) - fresh_touch) < 2.0
+    assert abs(float(row["updated_at"]) - old_activity) < 1.0
+
+
+def test_add_taskspace_does_not_bulk_bump_updated_at(tmp_path: Path) -> None:
+    """Adding a workspace folder must not shove sibling sessions into Today."""
+    store = SessionStore(tmp_path / "sessions.sqlite")
+    sessions_root = tmp_path / "sessions"
+    taskspaces_root = tmp_path / "taskspaces"
+
+    manager = SessionManager()
+    manager._session_store = store
+    manager._sessions_root = str(sessions_root)
+    manager._taskspaces_root = str(taskspaces_root)
+
+    sibling_sid = "sibling-session"
+    actor_sid = "taskspace-actor-session"
+    old_activity = 1_700_000_000.0
+
+    sibling = manager.create(session_id=sibling_sid)
+    sibling.updated_at = old_activity
+    sibling.created_at = old_activity
+    sibling.studio_session.chat_history = [
+        {"id": "u1", "role": "user", "content": "old", "timestamp": int(old_activity * 1000)},
+        {"id": "a1", "role": "assistant", "content": "reply", "timestamp": int(old_activity * 1000) + 1},
+    ]
+
+    actor = manager.create(session_id=actor_sid)
+    actor.updated_at = old_activity
+    actor.created_at = old_activity
+    actor.studio_session.chat_history = [
+        {"id": "u2", "role": "user", "content": "old2", "timestamp": int(old_activity * 1000)},
+    ]
+
+    folder = tmp_path / "newly-added-folder"
+    folder.mkdir()
+    manager.add_taskspace(actor_sid, path=str(folder), label="x")
+
+    assert abs(sibling.updated_at - old_activity) < 1.0
+    rows = manager.list_sessions()
+    sibling_row = next(item for item in rows if item["session_id"] == sibling_sid)
+    assert abs(float(sibling_row["updated_at"]) - old_activity) < 1.0
 
 
 def test_list_sessions_recovers_activity_from_summary_history(tmp_path: Path) -> None:
