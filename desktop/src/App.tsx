@@ -31,6 +31,7 @@ import {
   normalizeAllProviders,
   normalizeProviderEntry,
 } from "./utils/model-options";
+import { avatarPreloadKey, runSplashCorePreload } from "./utils/splash-preload-core";
 
 const WORKSPACE_STATE_STORAGE_KEY = "agx-workspace-state-v1";
 
@@ -549,54 +550,56 @@ export function App() {
         }
       } catch (err) {
         console.error("[App init] loadConfig failed:", err);
-      } finally {
-        // 配置已经载入（或出错），让 UI 立刻渲染，避免被后续会话恢复挡住。
-        setConfigLoaded(true);
-        // Splash 只应覆盖「后端 + 首屏可渲染」，会话恢复/MCP 在后台继续，不得阻塞进主窗。
-        if (!startupRendererReadyRef.current) {
-          startupRendererReadyRef.current = true;
-          void window.agenticxDesktop.startupRendererReady().catch((err) => {
-            console.warn("[App init] startupRendererReady failed:", err);
-            startupRendererReadyRef.current = false;
-          });
+      }
+
+      setConfigLoaded(true);
+
+      // Splash 预加载分身 / 会话列表 / 工作区 / 活跃 session 消息，再关 splash 进主窗。
+      await runSplashCorePreload();
+
+      if (!startupRendererReadyRef.current) {
+        startupRendererReadyRef.current = true;
+        try {
+          await window.agenticxDesktop.startupRendererReady();
+        } catch (err) {
+          console.warn("[App init] startupRendererReady failed:", err);
+          startupRendererReadyRef.current = false;
         }
       }
 
-      // Preload avatar list into the store BEFORE pane hydration, so the
-      // setPaneSessionId() fallback chain (session > avatar.default > global)
-      // can actually resolve an avatar's default_provider/default_model on
-      // cold start. Without this, the first render falls through to "未选模型"
-      // until the AvatarSidebar component finishes its own lazy refresh.
-      try {
-        const avResp = await window.agenticxDesktop.listAvatars();
-        if (avResp?.ok && Array.isArray(avResp.avatars)) {
-          useAppStore.getState().setAvatars(
-            avResp.avatars.map((a) => ({
-              id: a.id,
-              name: a.name,
-              role: a.role ?? "",
-              avatarUrl: a.avatar_url ?? "",
-              pinned: Boolean(a.pinned),
-              createdBy: a.created_by ?? "manual",
-              systemPrompt: a.system_prompt ?? "",
-              toolsEnabled: a.tools_enabled ?? {},
-              skillsEnabled:
-                a.skills_enabled && typeof a.skills_enabled === "object"
-                  ? { ...a.skills_enabled }
-                  : undefined,
-              brainsEnabled:
-                a.brains_enabled === "*"
-                  ? "*"
-                  : Array.isArray(a.brains_enabled)
-                    ? a.brains_enabled.map(String)
+      // Fallback when splash preload did not populate avatars (timeout / disabled).
+      if (useAppStore.getState().avatars.length === 0) {
+        try {
+          const avResp = await window.agenticxDesktop.listAvatars();
+          if (avResp?.ok && Array.isArray(avResp.avatars)) {
+            useAppStore.getState().setAvatars(
+              avResp.avatars.map((a) => ({
+                id: a.id,
+                name: a.name,
+                role: a.role ?? "",
+                avatarUrl: a.avatar_url ?? "",
+                pinned: Boolean(a.pinned),
+                createdBy: a.created_by ?? "manual",
+                systemPrompt: a.system_prompt ?? "",
+                toolsEnabled: a.tools_enabled ?? {},
+                skillsEnabled:
+                  a.skills_enabled && typeof a.skills_enabled === "object"
+                    ? { ...a.skills_enabled }
                     : undefined,
-              defaultProvider: a.default_provider ?? "",
-              defaultModel: a.default_model ?? "",
-            })),
-          );
+                brainsEnabled:
+                  a.brains_enabled === "*"
+                    ? "*"
+                    : Array.isArray(a.brains_enabled)
+                      ? a.brains_enabled.map(String)
+                      : undefined,
+                defaultProvider: a.default_provider ?? "",
+                defaultModel: a.default_model ?? "",
+              }))
+            );
+          }
+        } catch (err) {
+          console.error("[App init] preload avatars fallback failed:", err);
         }
-      } catch (err) {
-        console.error("[App init] preload avatars failed:", err);
       }
 
       let recovered = false;
@@ -609,6 +612,22 @@ export function App() {
         const getSessionsForAvatar = async (avatarId?: string | null): Promise<SessionListItem[]> => {
           const key = (avatarId ?? "").trim();
           if (sessionsCache.has(key)) return sessionsCache.get(key) ?? [];
+          const preloadState = useAppStore.getState();
+          const preloadKey = avatarPreloadKey(avatarId);
+          if (
+            preloadState.corePreloadAttempted &&
+            Object.prototype.hasOwnProperty.call(
+              preloadState.preloadedSessionsByAvatarKey,
+              preloadKey
+            )
+          ) {
+            const raw = preloadState.preloadedSessionsByAvatarKey[preloadKey];
+            const normalized = (Array.isArray(raw) ? raw : []).filter((item) =>
+              isSessionItemMatchingAvatar(item as SessionListItem, key || undefined)
+            ) as SessionListItem[];
+            sessionsCache.set(key, normalized);
+            return normalized;
+          }
           try {
             const listed = await window.agenticxDesktop.listSessions(key || undefined);
             if (!listed.ok || !Array.isArray(listed.sessions) || listed.sessions.length === 0) {
@@ -748,6 +767,15 @@ export function App() {
             const activePane = activeState.panes.find((p) => p.id === activeState.activePaneId);
             if (activePane?.modelProvider && activePane?.modelName) {
               activeState.setActiveModel(activePane.modelProvider, activePane.modelName);
+            }
+            if (activePane) {
+              const activeSid = String(activePane.sessionId ?? "").trim();
+              if (activeSid) {
+                const cached = activeState.getCachedSessionMessages(activeSid);
+                if (cached && cached.length > 0) {
+                  activeState.setPaneMessages(activePane.id, cached);
+                }
+              }
             }
             const metaPane = hydratedPanes.find((pane) => pane.id === "pane-meta");
             const nextSessionId =

@@ -590,6 +590,28 @@ declare global {
       }>;
       onAgxAccountChanged: (cb: (payload: { email: string; displayName: string }) => void) => () => void;
       onAgxAccountLoginTimeout: (cb: () => void) => () => void;
+      updateSplashStage: (
+        stage:
+          | "initializing"
+          | "backend-starting"
+          | "backend-waiting"
+          | "pinging-remote"
+          | "loading-ui"
+          | "preloading-core"
+          | "restoring-session"
+          | "ready"
+      ) => Promise<{ ok: boolean }>;
+      getSplashPreloadEnabled: () => Promise<{ enabled: boolean }>;
+      preloadCoreData: (payload: {
+        avatarId?: string;
+        sessionId?: string;
+      }) => Promise<{
+        ok: boolean;
+        avatars: { ok: boolean; avatars: AvatarItem[] };
+        sessions: { ok: boolean; sessions: Array<Record<string, unknown>> };
+        taskspaces: { ok: boolean; workspaces: TaskspaceItem[]; error?: string };
+        messages: { ok: boolean; messages: Array<Record<string, unknown>>; error?: string };
+      }>;
       startupRendererReady: () => Promise<{ ok: boolean; duplicate?: boolean }>;
       loadMetaSoul: () => Promise<{ ok: boolean; content: string; error?: string }>;
       saveMetaSoul: (payload: { content: string }) => Promise<{ ok: boolean; error?: string }>;

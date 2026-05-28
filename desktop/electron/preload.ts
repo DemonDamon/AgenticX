@@ -586,6 +586,12 @@ contextBridge.exposeInMainWorld("agenticxDesktop", {
     ipcRenderer.on("agx-account-login-timeout", handler);
     return () => ipcRenderer.removeListener("agx-account-login-timeout", handler);
   },
+  updateSplashStage: async (stage: string) =>
+    ipcRenderer.invoke("update-splash-stage", stage) as Promise<{ ok: boolean }>,
+  getSplashPreloadEnabled: async () =>
+    ipcRenderer.invoke("get-splash-preload-enabled") as Promise<{ enabled: boolean }>,
+  preloadCoreData: async (payload: { avatarId?: string; sessionId?: string }) =>
+    ipcRenderer.invoke("preload-core-data", payload),
   startupRendererReady: async (): Promise<{ ok: boolean; duplicate?: boolean }> =>
     ipcRenderer.invoke("startup:renderer-ready") as Promise<{ ok: boolean; duplicate?: boolean }>,
 
