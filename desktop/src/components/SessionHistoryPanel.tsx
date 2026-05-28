@@ -10,6 +10,7 @@ import { FeishuBadge } from "./FeishuBadge";
 import { META_AGENT_DISPLAY_NAME } from "../constants/branding";
 import { resolveMetaDisplayName } from "../utils/display-name";
 import { avatarPreloadKey } from "../utils/splash-preload-core";
+import { FitText } from "./ui/FitText";
 
 function timeAgo(ts: number): string {
   const diff = Date.now() / 1000 - ts;
@@ -1105,11 +1106,13 @@ export const SessionHistoryPanel = memo(function SessionHistoryPanel({ pane, onC
       style={tintColor ? { backgroundColor: tintColor } : undefined}
     >
       <div className="flex flex-col">
-        <div className="flex items-center justify-between px-3 py-2">
-          <div className="flex items-center gap-1.5 text-[13px] font-medium text-text-strong" title={title}>
-            历史对话
+        <div className="flex min-w-0 items-center gap-1 px-3 py-2">
+          <div className="min-w-0 flex-1 font-medium text-text-strong">
+            <FitText maxSize={13} minSize={10} title={title}>
+              历史对话
+            </FitText>
           </div>
-          <div className="flex items-center gap-0.5">
+          <div className="flex shrink-0 items-center gap-0.5">
             {!selectMode ? (
               <button
                 className="agx-topbar-btn !px-[5px]"
@@ -1124,32 +1127,39 @@ export const SessionHistoryPanel = memo(function SessionHistoryPanel({ pane, onC
             ) : (
               <>
                 <button
-                  className="agx-topbar-btn"
+                  className="agx-topbar-btn min-w-0 max-w-[4.5rem] shrink px-1.5"
                   onClick={toggleSelectAll}
                   disabled={batchDeleting}
                   title="全选或取消全选"
                 >
-                  {selectedSessionIds.length >= sessionsMatchingSearch.length && sessionsMatchingSearch.length > 0
-                    ? "取消全选"
-                    : "全选"}
+                  <FitText maxSize={12} minSize={9}>
+                    {selectedSessionIds.length >= sessionsMatchingSearch.length && sessionsMatchingSearch.length > 0
+                      ? "取消全选"
+                      : "全选"}
+                  </FitText>
                 </button>
                 <button
-                  className="agx-topbar-btn text-rose-400 hover:text-rose-500"
+                  className="agx-topbar-btn min-w-0 max-w-[4.75rem] shrink px-1.5 text-rose-400 hover:text-rose-500"
                   onClick={() => void deleteSelectedSessions()}
                   disabled={batchDeleting || selectedSessionIds.length === 0}
                   title={selectedSessionIds.length > 0 ? `删除 ${selectedSessionIds.length} 个会话` : "先勾选会话"}
                 >
-                  {batchDeleting ? "删除中..." : `删除${selectedSessionIds.length > 0 ? ` (${selectedSessionIds.length})` : ""}`}
+                  <FitText maxSize={12} minSize={9}>
+                    {batchDeleting ? "删除中..." : `删除${selectedSessionIds.length > 0 ? ` (${selectedSessionIds.length})` : ""}`}
+                  </FitText>
                 </button>
                 <button
-                  className="agx-topbar-btn"
+                  className="agx-topbar-btn min-w-0 max-w-[3rem] shrink px-1.5"
                   onClick={() => {
                     setSelectMode(false);
                     setSelectedSessionIds([]);
                   }}
                   disabled={batchDeleting}
+                  title="取消多选"
                 >
-                  取消
+                  <FitText maxSize={12} minSize={9}>
+                    取消
+                  </FitText>
                 </button>
               </>
             )}
