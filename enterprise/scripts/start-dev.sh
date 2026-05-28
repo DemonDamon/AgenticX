@@ -207,10 +207,13 @@ wait_for_http "admin-console" "http://127.0.0.1:3001/login" 90 || true
 wait_for_http "web-portal" "http://127.0.0.1:3000/auth" 90 || true
 
 # 6) admin 就绪后再拉起 gateway（避免 policy/providers 远程拉取 connection refused）
+# Go 访问 https 上游时优先读 HTTP_PROXY/HTTPS_PROXY（大写）。macOS/Clash 常把大写指到
+# 7890、shell 小写指到 7897，导致 proxyconnect 127.0.0.1:7890 connection refused。
+# 仅对 gateway 子进程去掉失效的大写代理，保留小写 http_proxy/https_proxy（7897）。
 echo "[start-dev] booting gateway (:8088) ..."
 (
   cd "$ENTERPRISE_DIR/apps/gateway"
-  exec go run ./cmd/gateway
+  exec env -u HTTP_PROXY -u HTTPS_PROXY -u ALL_PROXY go run ./cmd/gateway
 ) &
 PIDS+=("$!")
 

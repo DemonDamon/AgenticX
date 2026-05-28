@@ -64,6 +64,7 @@ curl --noproxy '*' -s -o /dev/null -w '%{http_code}\n' http://127.0.0.1:3000
 | 规则已保存仍不生效 | userIds 占位不匹配 | applies_to 留空或填真实 id |
 | blocked=false 但选了拦截 | 测试接口用库内旧 action | 用 `/api/policy/test` 合并表单预览 |
 | Channel 不健康 | `GATEWAY_INTERNAL_BASE_URL` 端口错 | 对齐 8088 与 internal token |
+| `proxyconnect … 127.0.0.1:7890: connection refused` | Go 读大写 `HTTP_PROXY`/`HTTPS_PROXY` 指向旧端口 7890，与小写 `http_proxy`（7897）不一致 | 重启 dev 栈（`start-dev.sh` 已对 gateway 去掉大写代理）；或 `unset HTTP_PROXY HTTPS_PROXY ALL_PROXY` 后重启；确认 `lsof -i :7897` 有 Clash |
 
 ---
 

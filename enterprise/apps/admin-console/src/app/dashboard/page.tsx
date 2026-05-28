@@ -127,6 +127,9 @@ export default function DashboardPage() {
           costSeries: series.map((row) => ({ v: Number(row.cost_usd.toFixed(4)) })),
         });
         setLastUpdated(new Date());
+      } catch {
+        // 会话过期跳转、dev 重启或本机 API 短暂不可达时不应触发 Next 运行时红屏
+        if (!active) return;
       } finally {
         if (active) setLoading(false);
       }
