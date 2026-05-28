@@ -3,6 +3,13 @@ import { Eye, EyeOff } from "lucide-react";
 import { Panel } from "../../ds/Panel";
 import { META_AGENT_DISPLAY_NAME } from "../../../constants/branding";
 import { useAppStore } from "../../../store";
+import {
+  formatPttShortcutLabel,
+  listPttShortcutPresets,
+  loadPttShortcutPreset,
+  savePttShortcutPreset,
+  type PttShortcutPreset,
+} from "../../../voice/ptt-config";
 
 type VoiceForm = {
   provider: string;
@@ -143,6 +150,7 @@ export const VoiceSettingsPanel = forwardRef<VoiceSettingsPanelHandle>(function 
   const [probeMsg, setProbeMsg] = useState("");
   const [draft, setDraft] = useState<VoiceForm>(emptyVoiceForm);
   const [devices, setDevices] = useState<MediaDeviceInfo[]>([]);
+  const [pttShortcutPreset, setPttShortcutPreset] = useState<PttShortcutPreset>(() => loadPttShortcutPreset());
   const draftRef = useRef(draft);
   const loadingRef = useRef(loading);
   draftRef.current = draft;
@@ -413,6 +421,33 @@ export const VoiceSettingsPanel = forwardRef<VoiceSettingsPanelHandle>(function 
             刷新设备列表
           </button>
         </div>
+
+        <fieldset className="space-y-2 rounded-md border border-border p-3">
+          <legend className="px-1 text-xs text-text-subtle">聊天输入 · 按住说话</legend>
+          <label className="block text-sm text-text-primary">
+            快捷键
+            <select
+              className="mt-1 w-full rounded-md border border-border bg-surface-panel px-2 py-1.5 text-sm text-text-primary"
+              value={pttShortcutPreset}
+              onChange={(e) => {
+                const preset = e.target.value as PttShortcutPreset;
+                setPttShortcutPreset(preset);
+                savePttShortcutPreset(preset);
+              }}
+            >
+              {listPttShortcutPresets().map((preset) => (
+                <option key={preset} value={preset}>
+                  {formatPttShortcutLabel(preset)}
+                </option>
+              ))}
+            </select>
+          </label>
+          <p className="text-[11px] leading-relaxed text-text-faint">
+            按住快捷键开始说话，松开后把识别文字写入输入框草稿（不自动发送）。默认{" "}
+            <span className="text-text-muted">{formatPttShortcutLabel("ctrl+space")}</span>
+            。macOS 的 Fn 键无法在应用内捕获，请改用组合键。
+          </p>
+        </fieldset>
 
         {draft.provider === "openai_realtime" ? (
           <div className="space-y-2 border-t border-border pt-3">

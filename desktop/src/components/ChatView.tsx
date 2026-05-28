@@ -11,6 +11,8 @@ import {
   startDictation,
   type SttPhase,
 } from "../voice/stt";
+import { useVoicePushToTalk } from "../hooks/useVoicePushToTalk";
+import { VoicePttOverlay } from "./VoicePttOverlay";
 import { CommandPalette } from "./CommandPalette";
 import { QuickActions } from "./QuickActions";
 import { ShortcutHints } from "./ShortcutHints";
@@ -1777,7 +1779,24 @@ export function ChatView({ onOpenConfirm, mode = "pro" }: Props) {
     }
   };
 
+  const applyVoiceTranscript = useCallback((text: string) => {
+    setInput((prev) => appendDictationText(prev, text));
+  }, []);
+
+  const { pttActive, pttLiveText, cancelPtt } = useVoicePushToTalk({
+    enabled: canSend,
+    composerEmpty: !input.trim(),
+    apiBase,
+    apiToken,
+    language: "zh-CN",
+    onCommit: applyVoiceTranscript,
+    onError: (message) => setVoiceInputHint(message),
+  });
+
+  useEffect(() => () => cancelPtt(), [cancelPtt]);
+
   const onMicClick = () => {
+    cancelPtt();
     if (voiceRecording || voiceTranscribing) {
       dictationSessionRef.current?.stop();
       dictationSessionRef.current = null;
@@ -2120,7 +2139,9 @@ export function ChatView({ onOpenConfirm, mode = "pro" }: Props) {
             </span>
           </div>
         ) : null}
-        <div className="mx-auto flex max-w-2xl items-end gap-2">
+        <div className="relative mx-auto max-w-2xl">
+          <VoicePttOverlay text={pttLiveText} visible={pttActive} />
+          <div className="flex items-end gap-2">
           <textarea
             value={input}
             onChange={(e) => {
@@ -2184,6 +2205,7 @@ export function ChatView({ onOpenConfirm, mode = "pro" }: Props) {
           ) : (
             <button className="flex h-10 shrink-0 items-center rounded-xl bg-btnPrimary px-4 text-sm font-medium text-btnPrimary-text transition hover:bg-btnPrimary-hover disabled:opacity-40 disabled:hover:bg-btnPrimary" disabled={!canSend || !input.trim()} onClick={() => void send()}>发送</button>
           )}
+          </div>
         </div>
         {!isLite && <ShortcutHints />}
       </div>
