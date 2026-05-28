@@ -60,10 +60,17 @@ function getSessionCreatedTimestamp(row: SessionRow): number {
   return 0;
 }
 
+/** Last activity time — used for Today / Previous 7 days grouping and list ordering. */
+function getSessionActivityTimestamp(row: SessionRow): number {
+  const updated = Number(row.updated_at ?? 0);
+  if (Number.isFinite(updated) && updated > 0) return updated;
+  return getSessionCreatedTimestamp(row);
+}
+
 function sortSessionRows(rows: SessionRow[]): SessionRow[] {
   return [...rows].sort((a, b) => {
     if (a.pinned !== b.pinned) return a.pinned ? -1 : 1;
-    const tsDiff = getSessionCreatedTimestamp(b) - getSessionCreatedTimestamp(a);
+    const tsDiff = getSessionActivityTimestamp(b) - getSessionActivityTimestamp(a);
     if (tsDiff !== 0) return tsDiff;
     return b.session_id.localeCompare(a.session_id);
   });
@@ -172,6 +179,13 @@ function buildHighlightTermsFromQuery(query: string): string[] {
   return Array.from(terms);
 }
 
+function isSessionIdOnlyHistoryLabel(item: SessionRow): boolean {
+  const raw = (item.session_name || "").trim();
+  if (raw && !isPlaceholderSessionTitle(raw)) return false;
+  const label = sessionHistoryLabel(item);
+  return /^·[0-9a-f]{6,8}$/i.test(label.trim());
+}
+
 function normalizeSessionRows(input: unknown): SessionRow[] {
   if (!Array.isArray(input)) return [];
   const rows: SessionRow[] = [];
@@ -190,7 +204,7 @@ function normalizeSessionRows(input: unknown): SessionRow[] {
       avatar_id: avatarId,
       avatar_name: avatarName,
       session_name: sessionName,
-      updated_at: Number.isFinite(updatedAtRaw) && updatedAtRaw > 0 ? updatedAtRaw : Date.now() / 1000,
+      updated_at: Number.isFinite(updatedAtRaw) && updatedAtRaw > 0 ? updatedAtRaw : 0,
       created_at: Number.isFinite(createdAtRaw) && createdAtRaw > 0 ? createdAtRaw : undefined,
       pinned: Boolean(row.pinned),
       archived: Boolean(row.archived),
@@ -211,6 +225,8 @@ function normalizeSessionRows(input: unknown): SessionRow[] {
 
 export const SessionHistoryPanel = memo(function SessionHistoryPanel({ pane, onClose, tintColor }: Props) {
   const sessionCatalogRevision = useAppStore((s) => s.sessionCatalogRevision);
+  const sessionHistoryHints = useAppStore((s) => s.sessionHistoryHints);
+  const clearSessionHistoryHint = useAppStore((s) => s.clearSessionHistoryHint);
   const setPaneSessionId = useAppStore((s) => s.setPaneSessionId);
   const setPaneSessionMode = useAppStore((s) => s.setPaneSessionMode);
   const setPaneMessages = useAppStore((s) => s.setPaneMessages);
@@ -289,8 +305,22 @@ export const SessionHistoryPanel = memo(function SessionHistoryPanel({ pane, onC
     messageSearchSnippets,
   ]);
 
+  const sessionsWithHints = useMemo(() => {
+    if (Object.keys(sessionHistoryHints).length === 0) return sessionsMatchingSearch;
+    const mapped = sessionsMatchingSearch.map((item) => {
+      const hint = sessionHistoryHints[item.session_id];
+      if (!hint) return item;
+      return {
+        ...item,
+        updated_at: Math.max(Number(item.updated_at ?? 0), hint.activityAt),
+        execution_state: hint.running ? "running" : item.execution_state,
+      };
+    });
+    return sortSessionRows(mapped);
+  }, [sessionsMatchingSearch, sessionHistoryHints]);
+
   const groupedSessions = useMemo<GroupedSessions>(() => {
-    const pool = sessionsMatchingSearch;
+    const pool = sessionsWithHints;
     const specialIds = new Set<string>();
     if (feishuMarkedSessionId) specialIds.add(feishuMarkedSessionId);
     if (wechatMarkedSessionId) specialIds.add(wechatMarkedSessionId);
@@ -311,17 +341,17 @@ export const SessionHistoryPanel = memo(function SessionHistoryPanel({ pane, onC
         grouped.pinned.push(item);
         continue;
       }
-      const createdAt = getSessionCreatedTimestamp(item);
-      if (createdAt >= startToday) {
+      const activityAt = getSessionActivityTimestamp(item);
+      if (activityAt >= startToday) {
         grouped.today.push(item);
-      } else if (createdAt >= startPrevious7Days) {
+      } else if (activityAt >= startPrevious7Days) {
         grouped.previous7Days.push(item);
       } else {
         grouped.older.push(item);
       }
     }
     return grouped;
-  }, [sessionsMatchingSearch, feishuMarkedSessionId, wechatMarkedSessionId]);
+  }, [sessionsWithHints, feishuMarkedSessionId, wechatMarkedSessionId]);
 
   const loadSessions = async () => {
     try {
@@ -332,6 +362,18 @@ export const SessionHistoryPanel = memo(function SessionHistoryPanel({ pane, onC
         isSessionVisibleInPane(row, pane.avatarId ?? null)
       );
       setSessions(rows);
+      for (const row of rows) {
+        const hint = useAppStore.getState().sessionHistoryHints[row.session_id];
+        if (!hint) continue;
+        const apiActivity = Number(row.updated_at ?? 0);
+        const apiRunning = row.execution_state === "running";
+        if (
+          (apiRunning && apiActivity >= hint.activityAt - 2) ||
+          (!apiRunning && apiActivity >= hint.activityAt - 2)
+        ) {
+          clearSessionHistoryHint(row.session_id);
+        }
+      }
       setUnreadSessionIds((prev) => prev.filter((id) => rows.some((r) => r.session_id === id)));
       setSelectedSessionIds((prev) => prev.filter((id) => rows.some((r) => r.session_id === id)));
     } catch (err) {
@@ -558,6 +600,31 @@ export const SessionHistoryPanel = memo(function SessionHistoryPanel({ pane, onC
     });
   };
 
+  /**
+   * Clear `pane.sessionId` on any *non-current* pane that still references a deleted session.
+   * Without this, the global subagent-status poll in App.tsx keeps hitting `/api/subagents/status?session_id=<deleted>` → 404 forever.
+   * The current pane is handled separately by the calling delete branch (which may switch to a sibling session).
+   */
+  const clearDeletedSessionRefsInOtherPanes = (deletedIds: Iterable<string>) => {
+    const idSet = new Set<string>();
+    for (const sid of deletedIds) {
+      const trimmed = String(sid || "").trim();
+      if (trimmed) idSet.add(trimmed);
+    }
+    if (idSet.size === 0) return;
+    const allPanes = useAppStore.getState().panes;
+    for (const p of allPanes) {
+      if (p.id === pane.id) continue;
+      const psid = String(p.sessionId || "").trim();
+      if (psid && idSet.has(psid)) {
+        markPaneAwaitingFreshSession(p.id);
+        clearPaneLazyInheritParent(p.id);
+        setPaneSessionId(p.id, "");
+        setPaneMessages(p.id, []);
+      }
+    }
+  };
+
   const deleteSelectedSessions = async () => {
     const api = window.agenticxDesktop;
     if (typeof api.deleteSession !== "function") return;
@@ -634,6 +701,10 @@ export const SessionHistoryPanel = memo(function SessionHistoryPanel({ pane, onC
         });
         window.alert(`有 ${failed.length} 个会话删除失败，已自动保留。你可以再次尝试删除。`);
       }
+      const failedSetForRefs = new Set(failed);
+      const successfullyDeleted = targets.filter((sid) => !failedSetForRefs.has(sid));
+      // Clear stale references in other panes so their syncSubAgents poll stops 404'ing.
+      clearDeletedSessionRefsInOtherPanes(successfullyDeleted);
       const activeDeleted = targets.includes(pane.sessionId);
       await loadSessions();
       if (activeDeleted) {
@@ -667,7 +738,7 @@ export const SessionHistoryPanel = memo(function SessionHistoryPanel({ pane, onC
     const active = item.session_id === pane.sessionId;
     const label = (labelOverride || sessionHistoryLabel(item)).trim() || sessionHistoryLabel(item);
     const unread = unreadSessionIds.includes(item.session_id);
-    const createdAt = getSessionCreatedTimestamp(item) || Date.now() / 1000;
+    const activityAt = getSessionActivityTimestamp(item) || Date.now() / 1000;
     const isRunning = item.execution_state === "running";
     const isInterrupted = item.execution_state === "interrupted";
     const feishuMarked = feishuMarkedSessionId === item.session_id;
@@ -678,7 +749,7 @@ export const SessionHistoryPanel = memo(function SessionHistoryPanel({ pane, onC
       imBadgeScope === "feishu-only" ? false : wechatMarked;
     const rowTitle = selectMode
       ? "点击勾选会话"
-      : `${label}\n${timeAgo(createdAt)} · 双击重命名 / 右键菜单`;
+      : `${label}\n${timeAgo(activityAt)} · 双击重命名 / 右键菜单`;
     return (
       <div key={item.session_id} className="mb-1 px-2">
         {editingId === item.session_id ? (
@@ -920,6 +991,8 @@ export const SessionHistoryPanel = memo(function SessionHistoryPanel({ pane, onC
       if (!confirmed) return;
       const result = await api.deleteSession(item.session_id);
       if (result.ok) {
+        // Clear stale references in other panes so their syncSubAgents poll stops 404'ing.
+        clearDeletedSessionRefsInOtherPanes([item.session_id]);
         await loadSessions();
         if (pane.sessionId === item.session_id) {
           const next = sessions.find((row) => row.session_id !== item.session_id);

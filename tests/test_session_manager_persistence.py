@@ -371,3 +371,65 @@ def test_list_sessions_normalizes_stale_interrupted_state(tmp_path: Path) -> Non
     fresh_rows = fresh.list_sessions()
     fresh_row = next(r for r in fresh_rows if r["session_id"] == sid)
     assert fresh_row["execution_state"] == "idle"
+
+
+def test_list_sessions_prefers_touch_updated_at_over_last_message(tmp_path: Path) -> None:
+    import time
+
+    store = SessionStore(tmp_path / "sessions.sqlite")
+    sessions_root = tmp_path / "sessions"
+
+    manager = SessionManager()
+    manager._session_store = store
+    manager._sessions_root = str(sessions_root)
+
+    sid = "activity-bucket-session"
+    old_activity = 1_700_000_000.0
+    fresh_touch = time.time()
+    managed = manager.create(session_id=sid)
+    managed.updated_at = fresh_touch
+    managed.created_at = old_activity
+    managed.studio_session.chat_history = [
+        {
+            "id": "u1",
+            "role": "user",
+            "content": "hello from the past",
+            "timestamp": int(old_activity * 1000),
+        }
+    ]
+
+    rows = manager.list_sessions()
+    row = next(item for item in rows if item["session_id"] == sid)
+    assert abs(float(row["updated_at"]) - fresh_touch) < 2.0
+
+
+def test_list_sessions_recovers_activity_from_summary_history(tmp_path: Path) -> None:
+    store = SessionStore(tmp_path / "sessions.sqlite")
+    sessions_root = tmp_path / "sessions"
+
+    manager = SessionManager()
+    manager._session_store = store
+    manager._sessions_root = str(sessions_root)
+
+    sid = "summary-recover-session"
+    created_at = 1_700_000_000.0
+    real_activity = created_at + 2 * 24 * 3600
+    bulk_activity = created_at + 9 * 24 * 3600
+    managed = manager.create(session_id=sid)
+    managed.created_at = created_at
+    managed.updated_at = real_activity
+    managed.studio_session.chat_history = [
+        {"id": "u1", "role": "user", "content": "first message"},
+        {"id": "a1", "role": "assistant", "content": "reply"},
+    ]
+    assert manager.persist(sid) is True
+
+    managed.updated_at = bulk_activity
+    assert manager.persist(sid) is True
+
+    fresh = SessionManager()
+    fresh._session_store = store
+    fresh._sessions_root = str(sessions_root)
+    rows = fresh.list_sessions()
+    row = next(item for item in rows if item["session_id"] == sid)
+    assert abs(float(row["updated_at"]) - real_activity) < 1.0

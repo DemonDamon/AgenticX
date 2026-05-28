@@ -377,6 +377,10 @@ type AppState = {
   /** Incremented when local session list should refresh (e.g. new session created). SessionHistoryPanel subscribes. */
   sessionCatalogRevision: number;
   bumpSessionCatalogRevision: () => void;
+  /** Optimistic last-activity hints so history sidebar moves to Today on send. */
+  sessionHistoryHints: Record<string, { activityAt: number; running: boolean }>;
+  markSessionHistoryActive: (sessionId: string) => void;
+  clearSessionHistoryHint: (sessionId: string) => void;
   /** After merge-forward, target pane runs one normal /api/chat with this text (cleared when consumed). */
   forwardAutoReply: {
     paneId: string;
@@ -775,6 +779,28 @@ export const useAppStore = create<AppState>((set, get) => ({
   sessionCatalogRevision: 0,
   bumpSessionCatalogRevision: () =>
     set((state) => ({ sessionCatalogRevision: state.sessionCatalogRevision + 1 })),
+  sessionHistoryHints: {},
+  markSessionHistoryActive: (sessionId) => {
+    const sid = String(sessionId ?? "").trim();
+    if (!sid) return;
+    const nowSec = Date.now() / 1000;
+    set((state) => ({
+      sessionHistoryHints: {
+        ...state.sessionHistoryHints,
+        [sid]: { activityAt: nowSec, running: true },
+      },
+    }));
+  },
+  clearSessionHistoryHint: (sessionId) => {
+    const sid = String(sessionId ?? "").trim();
+    if (!sid) return;
+    set((state) => {
+      if (!state.sessionHistoryHints[sid]) return state;
+      const next = { ...state.sessionHistoryHints };
+      delete next[sid];
+      return { sessionHistoryHints: next };
+    });
+  },
   forwardAutoReply: null,
   subAgents: [],
   selectedSubAgent: null,
