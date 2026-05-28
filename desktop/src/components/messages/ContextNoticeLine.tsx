@@ -1,3 +1,5 @@
+import { ChevronsDown } from "lucide-react";
+
 type Props = {
   text: string;
 };
@@ -7,8 +9,15 @@ export function ContextNoticeLine({ text }: Props) {
   return (
     <div className="flex min-w-0 items-center gap-2 px-3 py-1 text-[13px] text-text-muted">
       <span className="flex h-[20px] w-[20px] shrink-0 items-center justify-center" aria-hidden>
-        <span className="flex h-[18px] w-[18px] items-center justify-center rounded-full bg-amber-400/15 ring-1 ring-amber-400/35">
-          <span className="select-none text-[11px] leading-none text-amber-400/90">◈</span>
+        <span
+          className="flex h-[18px] w-[18px] items-center justify-center rounded-full"
+          style={{
+            backgroundColor: "rgba(var(--theme-color-rgb, 59, 130, 246), 0.14)",
+            boxShadow: "inset 0 0 0 1px rgba(var(--theme-color-rgb, 59, 130, 246), 0.34)",
+            color: "rgb(var(--theme-color-rgb, 59, 130, 246))",
+          }}
+        >
+          <ChevronsDown className="h-[11px] w-[11px]" strokeWidth={2.2} />
         </span>
       </span>
       <span className="min-w-0 break-words leading-[1.65]">{text}</span>
