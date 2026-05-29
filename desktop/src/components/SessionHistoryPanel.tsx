@@ -1,4 +1,4 @@
-import { PanelRightClose, ListChecks, MessageSquareMore, Smartphone } from "lucide-react";
+import { ChevronRight, PanelRightClose, ListChecks, MessageSquareMore, Smartphone } from "lucide-react";
 import { memo, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { useAppStore, type ChatPane, type Message } from "../store";
@@ -50,12 +50,23 @@ type SessionContextMenu = {
   item: SessionRow;
 };
 
+type HistoryGroupKey =
+  | "pinned"
+  | "today"
+  | "yesterday"
+  | "previous7Days"
+  | "previous30Days"
+  | "older"
+  | "archived";
+
 type GroupedSessions = {
   pinned: SessionRow[];
   today: SessionRow[];
+  yesterday: SessionRow[];
   previous7Days: SessionRow[];
   previous30Days: SessionRow[];
   older: SessionRow[];
+  archived: SessionRow[];
 };
 
 function sortRowsByActivityDesc(rows: SessionRow[]): SessionRow[] {
@@ -288,7 +299,12 @@ export const SessionHistoryPanel = memo(function SessionHistoryPanel({ pane, onC
   const [selectedSessionIds, setSelectedSessionIds] = useState<string[]>([]);
   const [batchDeleting, setBatchDeleting] = useState(false);
   const [sessionSearchQuery, setSessionSearchQuery] = useState("");
-  const [groupVisibleCounts, setGroupVisibleCounts] = useState<Record<string, number>>({});
+  const [groupVisibleCounts, setGroupVisibleCounts] = useState<Partial<Record<HistoryGroupKey, number>>>(
+    {}
+  );
+  const [collapsedGroups, setCollapsedGroups] = useState<Partial<Record<HistoryGroupKey, boolean>>>(
+    {}
+  );
   const [messageSearchSnippets, setMessageSearchSnippets] = useState<Record<string, string>>({});
   const messageSearchReq = useRef(0);
   const contextMenuRef = useRef<HTMLDivElement | null>(null);
@@ -375,16 +391,23 @@ export const SessionHistoryPanel = memo(function SessionHistoryPanel({ pane, onC
       : pool;
     const now = new Date();
     const startToday = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime() / 1000;
+    const startYesterday = startToday - 24 * 3600;
     const startPrevious7Days = startToday - 7 * 24 * 3600;
     const startPrevious30Days = startToday - 30 * 24 * 3600;
     const grouped: GroupedSessions = {
       pinned: [],
       today: [],
+      yesterday: [],
       previous7Days: [],
       previous30Days: [],
       older: [],
+      archived: [],
     };
     for (const item of visibleSessions) {
+      if (item.archived) {
+        grouped.archived.push(item);
+        continue;
+      }
       if (item.pinned) {
         grouped.pinned.push(item);
         continue;
@@ -392,6 +415,8 @@ export const SessionHistoryPanel = memo(function SessionHistoryPanel({ pane, onC
       const activityAt = getSessionActivityTimestamp(item);
       if (activityAt >= startToday) {
         grouped.today.push(item);
+      } else if (activityAt >= startYesterday) {
+        grouped.yesterday.push(item);
       } else if (activityAt >= startPrevious7Days) {
         grouped.previous7Days.push(item);
       } else if (activityAt >= startPrevious30Days) {
@@ -400,10 +425,13 @@ export const SessionHistoryPanel = memo(function SessionHistoryPanel({ pane, onC
         grouped.older.push(item);
       }
     }
+    grouped.pinned = sortRowsByActivityDesc(grouped.pinned);
     grouped.today = sortRowsByActivityDesc(grouped.today);
+    grouped.yesterday = sortRowsByActivityDesc(grouped.yesterday);
     grouped.previous7Days = sortRowsByActivityDesc(grouped.previous7Days);
     grouped.previous30Days = sortRowsByActivityDesc(grouped.previous30Days);
     grouped.older = sortRowsByActivityDesc(grouped.older);
+    grouped.archived = sortRowsByActivityDesc(grouped.archived);
     return grouped;
   }, [sessionsWithHints, feishuMarkedSessionId, wechatMarkedSessionId]);
 
@@ -455,6 +483,7 @@ export const SessionHistoryPanel = memo(function SessionHistoryPanel({ pane, onC
     if (!pane.historyOpen) {
       setSessionSearchQuery("");
       setGroupVisibleCounts({});
+      setCollapsedGroups({});
     }
   }, [pane.historyOpen]);
 
@@ -947,9 +976,23 @@ export const SessionHistoryPanel = memo(function SessionHistoryPanel({ pane, onC
     );
   };
 
-  const renderGroup = (groupTitle: string, groupKey: string, items: SessionRow[]) => {
+  const toggleHistoryGroupCollapsed = (groupKey: HistoryGroupKey) => {
+    setCollapsedGroups((prev) => {
+      const willCollapse = !prev[groupKey];
+      if (willCollapse) {
+        setGroupVisibleCounts((counts) => {
+          const { [groupKey]: _removed, ...rest } = counts;
+          return rest;
+        });
+      }
+      return { ...prev, [groupKey]: willCollapse };
+    });
+  };
+
+  const renderGroup = (groupTitle: string, groupKey: HistoryGroupKey, items: SessionRow[]) => {
     if (items.length === 0) return null;
     const searchActive = Boolean(sessionSearchTrim);
+    const collapsed = !searchActive && collapsedGroups[groupKey] === true;
     const visibleCount = resolveGroupVisibleCount(
       groupKey,
       items.length,
@@ -958,35 +1001,55 @@ export const SessionHistoryPanel = memo(function SessionHistoryPanel({ pane, onC
     );
     const visibleItems = items.slice(0, visibleCount);
     const hiddenCount = items.length - visibleCount;
-    const showMore = !searchActive && hiddenCount > 0;
+    const showMore = !searchActive && !collapsed && hiddenCount > 0;
     return (
-      <div className="mb-1.5" data-history-group={groupKey}>
-        <div className="agx-session-history-group-title px-2 py-1.5 text-[11px] font-semibold uppercase tracking-[0.08em] text-text-faint">
-          {groupTitle}
-        </div>
-        {visibleItems.map((item) =>
-          renderSessionItem(
-            item,
-            sessionSearchTrim ? messageSearchSnippets[item.session_id] : undefined
-          )
-        )}
-        {showMore ? (
-          <div className="px-2 pb-0.5">
-            <button
-              type="button"
-              className="agx-session-history-more flex w-full items-center gap-1.5 rounded-xl px-2.5 py-1.5 text-left text-[12px] font-normal text-text-faint transition hover:bg-surface-hover hover:text-text-muted"
-              onClick={() =>
-                setGroupVisibleCounts((prev) => ({
-                  ...prev,
-                  [groupKey]: visibleCount + HISTORY_GROUP_PAGE_SIZE,
-                }))
-              }
-              title={`再展开 ${Math.min(hiddenCount, HISTORY_GROUP_PAGE_SIZE)} 个会话`}
-            >
-              <span className="leading-none tracking-[0.12em]">…</span>
-              <span>More</span>
-            </button>
-          </div>
+      <div className="mb-1" data-history-group={groupKey}>
+        <button
+          type="button"
+          className="agx-session-history-group-title flex w-full items-center gap-1 rounded-lg px-2 py-1.5 text-left text-[11px] font-semibold uppercase tracking-[0.08em] text-text-faint transition hover:bg-surface-hover hover:text-text-muted"
+          onClick={() => toggleHistoryGroupCollapsed(groupKey)}
+          aria-expanded={!collapsed}
+          title={collapsed ? `展开 ${groupTitle}` : `折叠 ${groupTitle}`}
+        >
+          <ChevronRight
+            className={`h-3.5 w-3.5 shrink-0 transition-transform duration-150 ${collapsed ? "" : "rotate-90"}`}
+            strokeWidth={2}
+            aria-hidden
+          />
+          <span className="min-w-0 flex-1 truncate">{groupTitle}</span>
+          {collapsed ? (
+            <span className="shrink-0 text-[10px] font-normal normal-case tracking-normal text-text-faint">
+              {items.length}
+            </span>
+          ) : null}
+        </button>
+        {!collapsed ? (
+          <>
+            {visibleItems.map((item) =>
+              renderSessionItem(
+                item,
+                sessionSearchTrim ? messageSearchSnippets[item.session_id] : undefined
+              )
+            )}
+            {showMore ? (
+              <div className="px-2 pb-0.5">
+                <button
+                  type="button"
+                  className="agx-session-history-more flex w-full items-center gap-1.5 rounded-xl px-2.5 py-1.5 text-left text-[12px] font-normal text-text-faint transition hover:bg-surface-hover hover:text-text-muted"
+                  onClick={() =>
+                    setGroupVisibleCounts((prev) => ({
+                      ...prev,
+                      [groupKey]: visibleCount + HISTORY_GROUP_PAGE_SIZE,
+                    }))
+                  }
+                  title={`再展开 ${Math.min(hiddenCount, HISTORY_GROUP_PAGE_SIZE)} 个会话`}
+                >
+                  <span className="leading-none tracking-[0.12em]">…</span>
+                  <span>More</span>
+                </button>
+              </div>
+            ) : null}
+          </>
         ) : null}
       </div>
     );
@@ -1159,9 +1222,11 @@ export const SessionHistoryPanel = memo(function SessionHistoryPanel({ pane, onC
     showWechatBindSection ||
     groupedSessions.pinned.length +
       groupedSessions.today.length +
+      groupedSessions.yesterday.length +
       groupedSessions.previous7Days.length +
       groupedSessions.previous30Days.length +
-      groupedSessions.older.length >
+      groupedSessions.older.length +
+      groupedSessions.archived.length >
       0;
 
   return (
@@ -1324,9 +1389,11 @@ export const SessionHistoryPanel = memo(function SessionHistoryPanel({ pane, onC
             ) : null}
             {renderGroup("Pinned", "pinned", groupedSessions.pinned)}
             {renderGroup("Today", "today", groupedSessions.today)}
+            {renderGroup("Yesterday", "yesterday", groupedSessions.yesterday)}
             {renderGroup("Last 7 days", "previous7Days", groupedSessions.previous7Days)}
             {renderGroup("Last 30 days", "previous30Days", groupedSessions.previous30Days)}
             {renderGroup("Older", "older", groupedSessions.older)}
+            {renderGroup("Archived", "archived", groupedSessions.archived)}
           </>
         )}
       </div>
