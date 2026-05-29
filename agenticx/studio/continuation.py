@@ -218,9 +218,6 @@ def prepare_continue(
     session = managed.studio_session
     state = (execution_state or getattr(managed, "execution_state", "idle") or "idle").strip()
 
-    if state == "running" and source == "desktop_manual":
-        return False, "", get_continuation_round(session), {}
-
     if not skip_dedupe and should_dedupe_continue(session, reason):
         _log.info("continuation deduped session=%s reason=%s", managed.session_id, reason)
         return False, "", get_continuation_round(session), {}

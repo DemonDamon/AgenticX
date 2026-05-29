@@ -2118,6 +2118,12 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
   const [stallTick, setStallTick] = useState(0);
   const [bgCompleteToast, setBgCompleteToast] = useState(false);
   const [stallHintToast, setStallHintToast] = useState("");
+  const [stallRejectReason, setStallRejectReason] = useState("");
+  const [resumeInFlight, setResumeInFlight] = useState(false);
+  const resumeInFlightRef = useRef<Record<string, boolean>>({});
+  const resumeInFlightTimerRef = useRef<number | null>(null);
+  /** Mirrors stallState so SSE handlers can tell whether a recovery card is visible. */
+  const stallStateRef = useRef<"none" | "stall" | "exhausted">("none");
   const [autoNudgeCount, setAutoNudgeCount] = useState(0);
   const autoNudgeTriggeredRef = useRef<Record<string, number>>({});
   const autoNudgeBucketRef = useRef<Record<string, number>>({});
@@ -3899,6 +3905,44 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
     return "idle";
   }, [sessionWorkInProgress, stallState, sessionExecutionState]);
 
+  const sessionBusy = taskLiveness !== "idle" || stallState !== "none";
+
+  useEffect(() => {
+    stallStateRef.current = stallState;
+  }, [stallState]);
+
+  const lastAssistantMessageId = useMemo(() => {
+    for (let i = visibleMessages.length - 1; i >= 0; i--) {
+      if (visibleMessages[i].role === "assistant") return visibleMessages[i].id;
+    }
+    return null;
+  }, [visibleMessages]);
+
+  const clearResumeInFlight = useCallback((sid: string) => {
+    if (resumeInFlightTimerRef.current != null) {
+      window.clearTimeout(resumeInFlightTimerRef.current);
+      resumeInFlightTimerRef.current = null;
+    }
+    delete resumeInFlightRef.current[sid];
+    if ((pane.sessionId || "").trim() === sid) {
+      setResumeInFlight(false);
+    }
+  }, [pane.sessionId]);
+
+  const beginResumeInFlight = useCallback(
+    (sid: string) => {
+      resumeInFlightRef.current[sid] = true;
+      setResumeInFlight(true);
+      if (resumeInFlightTimerRef.current != null) {
+        window.clearTimeout(resumeInFlightTimerRef.current);
+      }
+      resumeInFlightTimerRef.current = window.setTimeout(() => {
+        clearResumeInFlight(sid);
+      }, 8000);
+    },
+    [clearResumeInFlight]
+  );
+
   const syncStreamingUiForCurrentSession = useCallback(() => {
     const sid = (pane.sessionId || "").trim();
     const st = sid ? sessionStreamStateRef.current[sid] : undefined;
@@ -3944,7 +3988,11 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
   /** 任一 SSE 帧视为仍有响应：刷新计时并在曾误判 stall 时立即收起提示 */
   const recordSseActivity = useCallback(() => {
     recordProgressActivity();
-  }, [recordProgressActivity]);
+    const sid = (pane.sessionId || "").trim();
+    if (sid && resumeInFlightRef.current[sid]) {
+      clearResumeInFlight(sid);
+    }
+  }, [clearResumeInFlight, pane.sessionId, recordProgressActivity]);
 
   useEffect(() => {
     void window.agenticxDesktop.loadRuntimeConfig().then((r) => {
@@ -4033,6 +4081,35 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
     }
   }, [apiBase, apiToken, pane.sessionId, sessionUnattended]);
 
+  /** Returns true only when disk merge actually added/changed rows (used to gate progress timer). */
+  const mergeTailFromDisk = useCallback(
+    async (sid: string): Promise<boolean> => {
+      try {
+        const msgs = await window.agenticxDesktop.loadSessionMessages(sid);
+        if (!msgs.ok || !Array.isArray(msgs.messages)) return false;
+        const current = useAppStore.getState().panes.find((p) => p.id === pane.id)?.messages ?? [];
+        const merged = mergeSessionMessagesTail(
+          current,
+          msgs.messages as LoadedSessionMessage[],
+          sid
+        );
+        const changed =
+          merged.length !== current.length ||
+          String(merged[merged.length - 1]?.content ?? "") !==
+            String(current[current.length - 1]?.content ?? "");
+        if (changed) {
+          setPaneMessages(pane.id, merged);
+          recordProgressActivity();
+        }
+        return changed;
+      } catch {
+        /* best effort */
+        return false;
+      }
+    },
+    [pane.id, recordProgressActivity, setPaneMessages]
+  );
+
   useEffect(() => {
     const sid = (pane.sessionId || "").trim();
     if (!sid) return;
@@ -4052,8 +4129,46 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
       const st = (row?.execution_state ?? "idle") as SessionExecutionState;
       setSessionExecutionState(st);
       prevExecutionStateRef.current = st;
+      if (st === "running" && !sessionStreamStateRef.current[sid]?.active) {
+        setRunGuardSessionId(sid);
+        void mergeTailFromDisk(sid);
+      }
     });
-  }, [pane.sessionId, pane.avatarId]);
+  }, [mergeTailFromDisk, pane.sessionId, pane.avatarId]);
+
+  useEffect(() => {
+    const sid = (pane.sessionId || "").trim();
+    if (!sid) return;
+    let cancelled = false;
+    let timer: number | undefined;
+
+    const syncBackgroundRun = async () => {
+      if (cancelled) return;
+      const sseActive = Boolean(sessionStreamStateRef.current[sid]?.active);
+      if (sseActive) return;
+      try {
+        const r = await window.agenticxDesktop.listSessions(pane.avatarId ?? undefined);
+        if (cancelled || !r.ok) return;
+        const row = (r.sessions ?? []).find((s) => s.session_id === sid);
+        const execState = (row?.execution_state ?? "idle") as SessionExecutionState;
+        if (execState !== "running") return;
+        setRunGuardSessionId(sid);
+        // mergeTailFromDisk only refreshes the progress timer when it actually
+        // appends new rows; do NOT unconditionally record activity here, or a
+        // backend that has silently hung would never trip the stall card.
+        await mergeTailFromDisk(sid);
+      } catch {
+        /* best effort */
+      }
+    };
+
+    void syncBackgroundRun();
+    timer = window.setInterval(() => void syncBackgroundRun(), 2000);
+    return () => {
+      cancelled = true;
+      if (timer != null) window.clearInterval(timer);
+    };
+  }, [mergeTailFromDisk, pane.avatarId, pane.sessionId]);
 
   useEffect(() => {
     const sid = (pane.sessionId || "").trim();
@@ -4070,26 +4185,6 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
       recordProgressActivity();
     }
   }, [pane.messages?.length, recordProgressActivity]);
-
-  const mergeTailFromDisk = useCallback(
-    async (sid: string) => {
-      try {
-        const msgs = await window.agenticxDesktop.loadSessionMessages(sid);
-        if (!msgs.ok || !Array.isArray(msgs.messages)) return;
-        const current = useAppStore.getState().panes.find((p) => p.id === pane.id)?.messages ?? [];
-        const merged = mergeSessionMessagesTail(
-          current,
-          msgs.messages as LoadedSessionMessage[],
-          sid
-        );
-        setPaneMessages(pane.id, merged);
-        recordProgressActivity();
-      } catch {
-        /* best effort */
-      }
-    },
-    [pane.id, recordProgressActivity, setPaneMessages]
-  );
 
   const stopCurrentRun = useCallback(async () => {
     const sid = (streamingSessionId || pane.sessionId || "").trim();
@@ -4143,6 +4238,35 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
       setStoppingSessionId((current) => (current === sid ? "" : current));
     }
   }, [addPaneMessage, pane.id, pane.sessionId, streamingSessionId]);
+
+  const interruptForResume = useCallback(
+    async (sid: string) => {
+      const prevAbort = sessionAbortControllersRef.current[sid];
+      if (prevAbort) {
+        try {
+          prevAbort.abort();
+        } catch {
+          /* already aborted */
+        }
+        delete sessionAbortControllersRef.current[sid];
+      }
+      const st = sessionStreamStateRef.current[sid];
+      if (st) {
+        st.active = false;
+        st.text = "";
+        sessionStreamStateRef.current[sid] = st;
+      }
+      if ((pane.sessionId || "").trim() === sid) {
+        syncStreamingUiForCurrentSession();
+      }
+      try {
+        await window.agenticxDesktop.interruptSession?.(sid);
+      } catch {
+        /* best effort */
+      }
+    },
+    [pane.sessionId, syncStreamingUiForCurrentSession]
+  );
 
   useEffect(() => {
     const sid = (pane.sessionId || "").trim();
@@ -4331,7 +4455,8 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
 
   const resumeCurrentTask = useCallback(async () => {
     const sid = (pane.sessionId || "").trim();
-    if (!sid) return;
+    if (!sid || resumeInFlightRef.current[sid]) return;
+    beginResumeInFlight(sid);
     delete userStoppedSessionRef.current[sid];
     let state: SessionExecutionState = sessionExecutionState;
     try {
@@ -4345,20 +4470,21 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
       /* ignore */
     }
 
-    if (state === "running") {
-      setStallHintToast("任务仍在后台执行中，可继续等待或主动中断");
-      return;
-    }
+    await interruptForResume(sid);
 
-    setStallState("none");
+    // Keep the stall/exhausted card mounted (now in "恢复中…" state) until the
+    // continuation succeeds (continuation_notice / first SSE frame) or is
+    // rejected. Clearing stallState here would unmount the card and hide the
+    // inline reject reason, regressing FR-4.
+    setStallRejectReason("");
     const reason = inferContinueReason({
       stallState,
-      executionState: state,
+      executionState: state === "running" ? "interrupted" : state,
     });
     void sendChatRef.current("", {
       continuation: { reason, source: "desktop_manual" },
     });
-  }, [pane.avatarId, pane.sessionId, sessionExecutionState, stallState]);
+  }, [beginResumeInFlight, interruptForResume, pane.avatarId, pane.sessionId, sessionExecutionState, stallState]);
 
   const resumeWithModel = useCallback(
     async (provider: string, model: string) => {
@@ -4472,6 +4598,10 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
               sessionId={(pane.sessionId || "").trim() || undefined}
               onResumeInNewSession={() => resumeInNewSessionRef.current()}
               onOpenBudgetSettings={() => useAppStore.getState().openSettings("automation")}
+              sessionBusy={sessionBusy}
+              isLastAssistantInPane={
+                message.role === "assistant" && message.id === lastAssistantMessageId
+              }
             />
           </div>
         );
@@ -4774,6 +4904,8 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
             }
             assistantName={paneAvatarMeta.name}
             assistantAvatarUrl={paneAvatarMeta.url}
+            streamStalled={stallState === "stall"}
+            streamStalledSeconds={silentSeconds}
           />
         )
       ) : null}
@@ -4784,6 +4916,8 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
           modelOptions={stallModelOptions}
           autoNudgeCount={autoNudgeCount}
           autoNudgeMax={stallRuntimeConfig.stall_auto_nudge_max_per_session}
+          resumeInFlight={resumeInFlight}
+          rejectReason={stallRejectReason}
           onResume={() => void resumeCurrentTask()}
           onResumeWithModel={(provider, model) => void resumeWithModel(provider, model)}
           onStop={() => void stopCurrentRun()}
@@ -4797,6 +4931,8 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
           maxRounds={exhaustedRounds?.maxRounds}
           currentModelLabel={currentModelLabel}
           modelOptions={stallModelOptions}
+          resumeInFlight={resumeInFlight}
+          rejectReason={stallRejectReason}
           onResume={() => void resumeCurrentTask()}
           onResumeWithModel={(provider, model) => void resumeWithModel(provider, model)}
           onStop={() => void stopCurrentRun()}
@@ -4806,7 +4942,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
       )}
     </>
     );
-  }, [autoNudgeCount, budgetExceededInfo, chatStyle, copyMessage, copyReActBlock, currentModelLabel, exhaustedRounds, favoriteMessage, forwardOneMessage, groupChatUserLabel, groupTyping, groupedVisibleMessages, hideStreamOverlayAsDuplicate, input, isGroupPane, isRunGuardCurrentSession, isStreamingCurrentSession, pane.historySearchTerms, pane.messages, pane.sessionId, paneAvatarMeta, paneId, readyAttachments.length, resolveGroupInlineConfirm, resolveGroupSender, resolveQuoteBody, resumeCurrentTask, resumeWithModel, revealFileInTaskspace, retryUserMessage, selectUpTo, selectedMessageIds, sendFollowupChip, sessionWorkInProgress, setQuoteTarget, showInlineAssistantModelBadge, stallModelOptions, stallRuntimeConfig.stall_auto_nudge_max_per_session, stallState, stopCurrentRun, streamTextForCurrentSession, streamingModel, toggleSelectBlock, toggleSelectMessage, topLevelRowsIm, userAvatarUrl, userBubbleLabel]);
+  }, [autoNudgeCount, budgetExceededInfo, chatStyle, copyMessage, copyReActBlock, currentModelLabel, exhaustedRounds, favoriteMessage, forwardOneMessage, groupChatUserLabel, groupTyping, groupedVisibleMessages, hideStreamOverlayAsDuplicate, input, isGroupPane, isRunGuardCurrentSession, isStreamingCurrentSession, lastAssistantMessageId, pane.historySearchTerms, pane.messages, pane.sessionId, paneAvatarMeta, paneId, readyAttachments.length, resolveGroupInlineConfirm, resolveGroupSender, resolveQuoteBody, resumeCurrentTask, resumeInFlight, resumeWithModel, revealFileInTaskspace, retryUserMessage, selectUpTo, selectedMessageIds, sendFollowupChip, sessionBusy, sessionWorkInProgress, setQuoteTarget, showInlineAssistantModelBadge, silentSeconds, stallModelOptions, stallRejectReason, stallRuntimeConfig.stall_auto_nudge_max_per_session, stallState, stopCurrentRun, streamTextForCurrentSession, streamingModel, toggleSelectBlock, toggleSelectMessage, topLevelRowsIm, userAvatarUrl, userBubbleLabel]);
 
   const removeAttachment = useCallback((key: string) => {
     setContextFiles((prev) => {
@@ -5491,11 +5627,25 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
               if (noticeText) {
                 addPaneMessageIfSessionActive(pane.id, "tool", noticeText, "meta");
               }
+              clearResumeInFlight(requestSessionId);
+              setStallRejectReason("");
+              // Continuation accepted: now safe to dismiss the stall/exhausted card.
+              setStallState("none");
               continue;
             }
             if (payload.type === "continuation_rejected") {
               const rejectText = String(payload.data?.text ?? "").trim();
-              if (rejectText) setStallHintToast(rejectText);
+              clearResumeInFlight(requestSessionId);
+              if (rejectText) {
+                setStallRejectReason(rejectText);
+                // Inline reject only shows inside a mounted recovery card. Fall
+                // back to a toast when the user has left the pane OR no card is
+                // currently visible (stallState === "none").
+                const samePane = (pane.sessionId || "").trim() === requestSessionId;
+                if (!samePane || stallStateRef.current === "none") {
+                  setStallHintToast(rejectText);
+                }
+              }
               continue;
             }
             if (payload.type === "group_typing") {
@@ -6289,6 +6439,9 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
         }
       }
     } catch (error) {
+      if (isContinuation) {
+        clearResumeInFlight(requestSessionId);
+      }
       if (!(error instanceof DOMException && error.name === "AbortError")) {
         addPaneMessageIfSessionActive(pane.id, "tool", `❌ 请求失败: ${String(error)}`, "meta");
       }
