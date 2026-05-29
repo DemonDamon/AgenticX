@@ -12,6 +12,9 @@ import { resolveMetaDisplayName } from "../utils/display-name";
 import { avatarPreloadKey } from "../utils/splash-preload-core";
 import { FitText } from "./ui/FitText";
 
+/** Cursor-style per-group pagination: show this many rows per group, "... More" reveals another page. */
+const HISTORY_GROUP_PAGE_SIZE = 6;
+
 function timeAgo(ts: number): string {
   const diff = Date.now() / 1000 - ts;
   if (diff < 60) return "刚刚";
@@ -265,6 +268,7 @@ export const SessionHistoryPanel = memo(function SessionHistoryPanel({ pane, onC
   const [selectedSessionIds, setSelectedSessionIds] = useState<string[]>([]);
   const [batchDeleting, setBatchDeleting] = useState(false);
   const [sessionSearchQuery, setSessionSearchQuery] = useState("");
+  const [groupVisibleCounts, setGroupVisibleCounts] = useState<Record<string, number>>({});
   const [messageSearchSnippets, setMessageSearchSnippets] = useState<Record<string, string>>({});
   const messageSearchReq = useRef(0);
   const contextMenuRef = useRef<HTMLDivElement | null>(null);
@@ -420,7 +424,10 @@ export const SessionHistoryPanel = memo(function SessionHistoryPanel({ pane, onC
   }, [pane.historyOpen, pane.avatarId, pane.sessionId, sessionCatalogRevision]);
 
   useEffect(() => {
-    if (!pane.historyOpen) setSessionSearchQuery("");
+    if (!pane.historyOpen) {
+      setSessionSearchQuery("");
+      setGroupVisibleCounts({});
+    }
   }, [pane.historyOpen]);
 
   useEffect(() => {
@@ -912,19 +919,43 @@ export const SessionHistoryPanel = memo(function SessionHistoryPanel({ pane, onC
     );
   };
 
-  const renderGroup = (groupTitle: string, items: SessionRow[]) => {
+  const renderGroup = (groupTitle: string, groupKey: string, items: SessionRow[]) => {
     if (items.length === 0) return null;
+    // While searching, show every match so a hit buried past page 1 is never hidden.
+    const visibleCount = sessionSearchTrim
+      ? items.length
+      : groupVisibleCounts[groupKey] ?? HISTORY_GROUP_PAGE_SIZE;
+    const visibleItems = items.slice(0, visibleCount);
+    const remaining = items.length - visibleItems.length;
     return (
       <div className="mb-1.5">
         <div className="agx-session-history-group-title px-2 py-1.5 text-[11px] font-semibold uppercase tracking-[0.08em] text-text-faint">
           {groupTitle}
         </div>
-        {items.map((item) =>
+        {visibleItems.map((item) =>
           renderSessionItem(
             item,
             sessionSearchTrim ? messageSearchSnippets[item.session_id] : undefined
           )
         )}
+        {remaining > 0 ? (
+          <div className="px-2">
+            <button
+              type="button"
+              className="agx-session-history-more flex w-full items-center gap-1.5 rounded-xl px-2.5 py-1.5 text-left text-[12px] font-normal text-text-faint transition hover:bg-surface-hover hover:text-text-muted"
+              onClick={() =>
+                setGroupVisibleCounts((prev) => ({
+                  ...prev,
+                  [groupKey]: visibleCount + HISTORY_GROUP_PAGE_SIZE,
+                }))
+              }
+              title={`再展开 ${Math.min(remaining, HISTORY_GROUP_PAGE_SIZE)} 个会话`}
+            >
+              <span className="leading-none tracking-[0.12em]">…</span>
+              <span>More ({remaining})</span>
+            </button>
+          </div>
+        ) : null}
       </div>
     );
   };
@@ -1258,10 +1289,10 @@ export const SessionHistoryPanel = memo(function SessionHistoryPanel({ pane, onC
                 )}
               </div>
             ) : null}
-            {renderGroup("Pinned", groupedSessions.pinned)}
-            {renderGroup("Today", groupedSessions.today)}
-            {renderGroup("Previous 7 days", groupedSessions.previous7Days)}
-            {renderGroup("Older", groupedSessions.older)}
+            {renderGroup("Pinned", "pinned", groupedSessions.pinned)}
+            {renderGroup("Today", "today", groupedSessions.today)}
+            {renderGroup("Previous 7 days", "previous7Days", groupedSessions.previous7Days)}
+            {renderGroup("Older", "older", groupedSessions.older)}
           </>
         )}
       </div>
