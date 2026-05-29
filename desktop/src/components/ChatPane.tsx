@@ -98,6 +98,7 @@ import {
   type ContinueSource,
 } from "../utils/session-continue";
 import { mergeSessionMessagesTail } from "../utils/session-message-merge";
+import { reattachSessionStreamUrl, parseSseFrame } from "../utils/session-reattach";
 import {
   attachmentsFromSessionRow,
   mapLoadedSessionMessage,
@@ -2107,6 +2108,9 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
   const sessionStreamStateRef = useRef<
     Record<string, { active: boolean; text: string; provider: string; model: string }>
   >({});
+  /** Live-reattach (FR-4): per-session abort controllers for read-only reattach streams. */
+  const reattachControllersRef = useRef<Record<string, AbortController>>({});
+  const liveReattachEnabledRef = useRef(false);
   const streamTextRef = useRef("");
   const streamCommittedRef = useRef(false);
   /** Text last committed at a tool_call boundary; avoids duplicating the same assistant bubble at stream end. */
@@ -4006,7 +4010,9 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
         unattended_enabled?: boolean;
         unattended_max_continuations_per_session?: number;
         unattended_stall_continue_after_seconds?: number;
+        live_reattach_enabled?: boolean;
       };
+      liveReattachEnabledRef.current = Boolean(cfg.live_reattach_enabled);
       const detectSec = Math.max(
         30,
         Math.min(300, Number(cfg.stall_detect_silence_seconds ?? 90) || 90),
@@ -4111,6 +4117,79 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
     [pane.id, recordProgressActivity, setPaneMessages]
   );
 
+  /**
+   * FR-4 live reattach: when re-entering a still-running session with no active
+   * foreground SSE, subscribe to the read-only reattach endpoint to resume
+   * token-level streaming in real time. Structured content (tool cards, refs,
+   * group progress) is reconciled from disk when the stream ends. Falls back to
+   * disk polling on any error or when the feature flag is off.
+   */
+  const reattachLiveStream = useCallback(
+    async (sid: string): Promise<void> => {
+      if (!sid || !apiBase) return;
+      if (reattachControllersRef.current[sid]) return; // already reattached
+      if (sessionStreamStateRef.current[sid]?.active) return; // foreground stream owns it
+      const ctrl = new AbortController();
+      reattachControllersRef.current[sid] = ctrl;
+      const prior = sessionStreamStateRef.current[sid];
+      let liveText = prior?.text ?? "";
+      sessionStreamStateRef.current[sid] = {
+        active: true,
+        text: liveText,
+        provider: prior?.provider ?? "",
+        model: prior?.model ?? "",
+      };
+      const isCurrent = () => (pane.sessionId || "").trim() === sid;
+      if (isCurrent()) syncStreamingUiForCurrentSession();
+      let lastSeq = 0;
+      try {
+        const resp = await fetch(reattachSessionStreamUrl(apiBase, sid, lastSeq), {
+          headers: { "x-agx-desktop-token": apiToken },
+          signal: ctrl.signal,
+        });
+        const reader = resp.ok ? resp.body?.getReader() : undefined;
+        if (!reader) return;
+        const decoder = new TextDecoder();
+        let buffer = "";
+        while (true) {
+          const { value, done } = await reader.read();
+          if (done) break;
+          buffer += decoder.decode(value, { stream: true });
+          const frames = buffer.split("\n\n");
+          buffer = frames.pop() ?? "";
+          for (const frame of frames) {
+            const { eventId, payload } = parseSseFrame(frame);
+            if (eventId != null) lastSeq = eventId;
+            if (!payload || typeof payload !== "object") continue;
+            const p = payload as { type?: string; data?: { text?: string; agent_id?: string } };
+            recordSseActivity();
+            if (p.type === "token" && (p.data?.agent_id ?? "meta") === "meta") {
+              const t = String(p.data?.text ?? "").replace(/⏳\s*/g, "");
+              if (!t) continue;
+              liveText += t;
+              const st = sessionStreamStateRef.current[sid];
+              if (st) st.text = liveText;
+              if (isCurrent()) setStreamedAssistantText(liveText);
+            }
+            // done/final/replay_gap: reconciled from disk in finally.
+          }
+        }
+      } catch {
+        /* aborted or network error — disk merge below reconciles state */
+      } finally {
+        delete reattachControllersRef.current[sid];
+        const st = sessionStreamStateRef.current[sid];
+        if (st) st.active = false;
+        if (isCurrent()) {
+          setStreamedAssistantText("");
+          syncStreamingUiForCurrentSession();
+        }
+        await mergeTailFromDisk(sid);
+      }
+    },
+    [apiBase, apiToken, pane.sessionId, recordSseActivity, mergeTailFromDisk, syncStreamingUiForCurrentSession]
+  );
+
   useEffect(() => {
     const sid = (pane.sessionId || "").trim();
     if (!sid) return;
@@ -4132,10 +4211,11 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
       prevExecutionStateRef.current = st;
       if (st === "running" && !sessionStreamStateRef.current[sid]?.active) {
         setRunGuardSessionId(sid);
-        void mergeTailFromDisk(sid);
+        if (liveReattachEnabledRef.current) void reattachLiveStream(sid);
+        else void mergeTailFromDisk(sid);
       }
     });
-  }, [mergeTailFromDisk, pane.sessionId, pane.avatarId]);
+  }, [mergeTailFromDisk, reattachLiveStream, pane.sessionId, pane.avatarId]);
 
   useEffect(() => {
     const sid = (pane.sessionId || "").trim();
@@ -4154,6 +4234,12 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
         const execState = (row?.execution_state ?? "idle") as SessionExecutionState;
         if (execState !== "running") return;
         setRunGuardSessionId(sid);
+        if (liveReattachEnabledRef.current) {
+          // Live reattach takes over: marks the stream active (gating future
+          // ticks) and resumes token-level streaming until the run ends.
+          void reattachLiveStream(sid);
+          return;
+        }
         // mergeTailFromDisk only refreshes the progress timer when it actually
         // appends new rows; do NOT unconditionally record activity here, or a
         // backend that has silently hung would never trip the stall card.
@@ -4168,8 +4254,14 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
     return () => {
       cancelled = true;
       if (timer != null) window.clearInterval(timer);
+      // Abort any live reattach stream for this session when leaving / switching.
+      const ctrl = reattachControllersRef.current[sid];
+      if (ctrl) {
+        ctrl.abort();
+        delete reattachControllersRef.current[sid];
+      }
     };
-  }, [mergeTailFromDisk, pane.avatarId, pane.sessionId]);
+  }, [mergeTailFromDisk, reattachLiveStream, pane.avatarId, pane.sessionId]);
 
   useEffect(() => {
     const sid = (pane.sessionId || "").trim();

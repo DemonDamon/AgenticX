@@ -4267,6 +4267,7 @@ function registerIpc(): void {
         ...readStallNudgeRuntime(raw),
         ...readUnattendedRuntime(raw),
         ...readTokenBudgetRuntime(raw),
+        live_reattach_enabled: Boolean(raw.live_reattach_enabled ?? false),
       };
     } catch (err) {
       return {
@@ -4287,6 +4288,7 @@ function registerIpc(): void {
         unattended_auto_resume_interrupted: true,
         max_tokens_per_session: 500_000,
         max_tokens_per_turn: 100_000,
+        live_reattach_enabled: false,
       };
     }
   });

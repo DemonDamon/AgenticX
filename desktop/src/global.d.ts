@@ -463,6 +463,7 @@ declare global {
         unattended_auto_resume_interrupted?: boolean;
         max_tokens_per_session?: number;
         max_tokens_per_turn?: number;
+        live_reattach_enabled?: boolean;
         error?: string;
       }>;
       saveRuntimeConfig: (payload: {

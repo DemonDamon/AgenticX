@@ -64,6 +64,7 @@ from agenticx.memory.session_store import SessionStore, session_fts_enabled
 from agenticx.runtime import AsyncConfirmGate
 from agenticx.runtime.team_manager import AgentTeamManager, SubAgentContext
 from agenticx.utils.atomic_writer import atomic_write_json
+from agenticx.studio.session_event_hub import SessionEventHub
 
 EventEmitter = Callable[[Any], Awaitable[None]]
 SummarySink = Callable[[str, SubAgentContext], Awaitable[None]]
@@ -104,6 +105,7 @@ class ManagedSession:
     archived: bool = False
     taskspaces: list[dict[str, str]] = field(default_factory=list)
     execution_state: str = "idle"  # idle | running | interrupted | failed
+    event_hub: SessionEventHub | None = None
 
     def get_confirm_gate(self, agent_id: str = "meta") -> AsyncConfirmGate:
         if not agent_id or agent_id == "meta":
@@ -216,6 +218,35 @@ class SessionManager:
         if managed is not None:
             managed.execution_state = state
             managed.updated_at = time.time()
+            if state in {"idle", "interrupted", "failed"}:
+                self.clear_event_hub(session_id)
+
+    def ensure_event_hub(self, session_id: str) -> SessionEventHub:
+        managed = self.get(session_id, touch=False)
+        if managed is None:
+            raise KeyError(f"unknown session_id: {session_id}")
+        hub = managed.event_hub
+        if hub is None or hub.is_closed or hub.is_runtime_done:
+            managed.event_hub = SessionEventHub(session_id)
+        return managed.event_hub
+
+    def get_event_hub(self, session_id: str) -> SessionEventHub | None:
+        managed = self._sessions.get(session_id)
+        if managed is None:
+            return None
+        hub = managed.event_hub
+        if hub is None or hub.is_closed:
+            return None
+        return hub
+
+    def clear_event_hub(self, session_id: str) -> None:
+        managed = self._sessions.get(session_id)
+        if managed is None:
+            return
+        hub = managed.event_hub
+        if hub is not None:
+            hub.close()
+        managed.event_hub = None
 
     def _normalize_execution_state_for_listing(self, session_id: str, state: Any) -> str:
         """Normalize execution_state for session list display.
@@ -317,6 +348,9 @@ class SessionManager:
         existed_in_persistence = self._session_exists_in_persistence(sid)
         managed = self._sessions.pop(sid, None)
         if managed is not None:
+            if managed.event_hub is not None:
+                managed.event_hub.close()
+                managed.event_hub = None
             if managed.team_manager is not None:
                 managed.team_manager.shutdown_now()
             # MCP hub is global; do NOT kill child processes on session delete.
