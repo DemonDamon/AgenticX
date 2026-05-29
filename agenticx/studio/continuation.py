@@ -40,6 +40,11 @@ def get_runtime_value(path: str, default: Any) -> Any:
         return default
 
 
+def live_reattach_enabled() -> bool:
+    """When True, chat SSE uses per-session event hub + reattach endpoint."""
+    return bool(get_runtime_value("runtime.live_reattach_enabled", False))
+
+
 def load_unattended_config() -> dict[str, Any]:
     """Load runtime.unattended.* with conservative defaults."""
     enabled = bool(get_runtime_value("runtime.unattended.enabled", False))
