@@ -54,8 +54,28 @@ type GroupedSessions = {
   pinned: SessionRow[];
   today: SessionRow[];
   previous7Days: SessionRow[];
+  previous30Days: SessionRow[];
   older: SessionRow[];
 };
+
+function sortRowsByActivityDesc(rows: SessionRow[]): SessionRow[] {
+  return [...rows].sort(
+    (a, b) => getSessionActivityTimestamp(b) - getSessionActivityTimestamp(a)
+  );
+}
+
+function resolveGroupVisibleCount(
+  groupKey: string,
+  itemCount: number,
+  searchActive: boolean,
+  visibleCounts: Record<string, number>
+): number {
+  if (searchActive || itemCount <= 0) return itemCount;
+  const expanded = visibleCounts[groupKey];
+  const page =
+    typeof expanded === "number" && expanded > 0 ? expanded : HISTORY_GROUP_PAGE_SIZE;
+  return Math.min(itemCount, page);
+}
 
 function getSessionCreatedTimestamp(row: SessionRow): number {
   const created = Number(row.created_at ?? 0);
@@ -356,10 +376,12 @@ export const SessionHistoryPanel = memo(function SessionHistoryPanel({ pane, onC
     const now = new Date();
     const startToday = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime() / 1000;
     const startPrevious7Days = startToday - 7 * 24 * 3600;
+    const startPrevious30Days = startToday - 30 * 24 * 3600;
     const grouped: GroupedSessions = {
       pinned: [],
       today: [],
       previous7Days: [],
+      previous30Days: [],
       older: [],
     };
     for (const item of visibleSessions) {
@@ -372,10 +394,16 @@ export const SessionHistoryPanel = memo(function SessionHistoryPanel({ pane, onC
         grouped.today.push(item);
       } else if (activityAt >= startPrevious7Days) {
         grouped.previous7Days.push(item);
+      } else if (activityAt >= startPrevious30Days) {
+        grouped.previous30Days.push(item);
       } else {
         grouped.older.push(item);
       }
     }
+    grouped.today = sortRowsByActivityDesc(grouped.today);
+    grouped.previous7Days = sortRowsByActivityDesc(grouped.previous7Days);
+    grouped.previous30Days = sortRowsByActivityDesc(grouped.previous30Days);
+    grouped.older = sortRowsByActivityDesc(grouped.older);
     return grouped;
   }, [sessionsWithHints, feishuMarkedSessionId, wechatMarkedSessionId]);
 
@@ -921,14 +949,18 @@ export const SessionHistoryPanel = memo(function SessionHistoryPanel({ pane, onC
 
   const renderGroup = (groupTitle: string, groupKey: string, items: SessionRow[]) => {
     if (items.length === 0) return null;
-    // While searching, show every match so a hit buried past page 1 is never hidden.
-    const visibleCount = sessionSearchTrim
-      ? items.length
-      : groupVisibleCounts[groupKey] ?? HISTORY_GROUP_PAGE_SIZE;
+    const searchActive = Boolean(sessionSearchTrim);
+    const visibleCount = resolveGroupVisibleCount(
+      groupKey,
+      items.length,
+      searchActive,
+      groupVisibleCounts
+    );
     const visibleItems = items.slice(0, visibleCount);
-    const remaining = items.length - visibleItems.length;
+    const hiddenCount = items.length - visibleCount;
+    const showMore = !searchActive && hiddenCount > 0;
     return (
-      <div className="mb-1.5">
+      <div className="mb-1.5" data-history-group={groupKey}>
         <div className="agx-session-history-group-title px-2 py-1.5 text-[11px] font-semibold uppercase tracking-[0.08em] text-text-faint">
           {groupTitle}
         </div>
@@ -938,8 +970,8 @@ export const SessionHistoryPanel = memo(function SessionHistoryPanel({ pane, onC
             sessionSearchTrim ? messageSearchSnippets[item.session_id] : undefined
           )
         )}
-        {remaining > 0 ? (
-          <div className="px-2">
+        {showMore ? (
+          <div className="px-2 pb-0.5">
             <button
               type="button"
               className="agx-session-history-more flex w-full items-center gap-1.5 rounded-xl px-2.5 py-1.5 text-left text-[12px] font-normal text-text-faint transition hover:bg-surface-hover hover:text-text-muted"
@@ -949,10 +981,10 @@ export const SessionHistoryPanel = memo(function SessionHistoryPanel({ pane, onC
                   [groupKey]: visibleCount + HISTORY_GROUP_PAGE_SIZE,
                 }))
               }
-              title={`再展开 ${Math.min(remaining, HISTORY_GROUP_PAGE_SIZE)} 个会话`}
+              title={`再展开 ${Math.min(hiddenCount, HISTORY_GROUP_PAGE_SIZE)} 个会话`}
             >
               <span className="leading-none tracking-[0.12em]">…</span>
-              <span>More ({remaining})</span>
+              <span>More</span>
             </button>
           </div>
         ) : null}
@@ -1128,6 +1160,7 @@ export const SessionHistoryPanel = memo(function SessionHistoryPanel({ pane, onC
     groupedSessions.pinned.length +
       groupedSessions.today.length +
       groupedSessions.previous7Days.length +
+      groupedSessions.previous30Days.length +
       groupedSessions.older.length >
       0;
 
@@ -1218,7 +1251,7 @@ export const SessionHistoryPanel = memo(function SessionHistoryPanel({ pane, onC
           />
         </div>
       </div>
-      <div className="agx-session-history-scroll min-h-0 flex-1 overflow-y-auto pl-2 pr-[2px] pb-2 pt-0.5">
+      <div className="agx-session-history-scroll min-h-0 flex-1 overflow-y-auto pl-2 pr-[2px] pb-6 pt-0.5">
         {sessions.length === 0 ? (
           !sessionsLoadAttempted ? (
             <div className="space-y-2 px-2 py-1">
@@ -1291,7 +1324,8 @@ export const SessionHistoryPanel = memo(function SessionHistoryPanel({ pane, onC
             ) : null}
             {renderGroup("Pinned", "pinned", groupedSessions.pinned)}
             {renderGroup("Today", "today", groupedSessions.today)}
-            {renderGroup("Previous 7 days", "previous7Days", groupedSessions.previous7Days)}
+            {renderGroup("Last 7 days", "previous7Days", groupedSessions.previous7Days)}
+            {renderGroup("Last 30 days", "previous30Days", groupedSessions.previous30Days)}
             {renderGroup("Older", "older", groupedSessions.older)}
           </>
         )}
