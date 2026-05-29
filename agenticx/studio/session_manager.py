@@ -991,6 +991,13 @@ class SessionManager:
 
     def _save_messages_snapshot(self, session_id: str, messages: list[dict]) -> None:
         path = self._messages_path(session_id)
+        # Stamp ms-epoch timestamp on messages missing one (in-memory + disk).
+        now_ms = int(time.time() * 1000)
+        for item in messages:
+            if not isinstance(item, dict):
+                continue
+            if not item.get("timestamp"):
+                item["timestamp"] = now_ms
         atomic_write_json(path, messages)
 
     def _load_messages_snapshot(self, session_id: str) -> list[dict]:
