@@ -47,4 +47,11 @@ describe("mergeSessionMessagesTail", () => {
     const again = mergeSessionMessagesTail(existing, [row("a", "hi")], "s");
     expect(again).toHaveLength(existing.length);
   });
+
+  it("keeps in-memory timestamp when disk row has none", () => {
+    const ts = 1_700_000_000_000;
+    const existing = [{ id: "s-i0-a", role: "assistant", content: "hi", timestamp: ts }] as never[];
+    const merged = mergeSessionMessagesTail(existing, [row("a", "hi")], "s");
+    expect(merged[0].timestamp).toBe(ts);
+  });
 });

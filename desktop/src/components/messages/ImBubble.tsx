@@ -18,6 +18,7 @@ import {
 import { resolveMetaDisplayName } from "../../utils/display-name";
 import { avatarBgClass } from "../../utils/avatar-color";
 import { shouldShowAssistantIconButtons } from "../../utils/im-bubble-actions";
+import { MessageTimestamp } from "./MessageTimestamp";
 
 type Props = {
   message: Message;
@@ -618,6 +619,7 @@ export function ImBubble({
               <div className="mb-6 -mt-0.5 flex min-w-0 flex-col gap-2 self-stretch">
                 <div className="flex w-fit flex-wrap items-center gap-0.5 text-text-faint" style={assistantActionStyle}>
                   {assistantIconButtons}
+                  <MessageTimestamp ts={message.timestamp} align="left" />
                 </div>
                 <div className="flex min-w-0 flex-col items-start gap-1.5 self-stretch" style={assistantActionStyle}>{assistantFollowupChipButtons}</div>
               </div>
@@ -626,6 +628,7 @@ export function ImBubble({
             ) : null}
             {hideActions ? null : isUser ? (
               <div className="mt-0.5 flex w-full flex-wrap items-center justify-end gap-0.5 pb-0 leading-none pr-2 text-text-faint">
+                <MessageTimestamp ts={message.timestamp} align="right" />
                 <HoverTip label="复制">
                   <button
                     type="button"
@@ -691,7 +694,10 @@ export function ImBubble({
               </div>
             ) : showAssistantFollowups || !assistantIconButtons ? null : (
               <div className="-mt-0.5 mb-6 min-w-0 self-stretch">
-                <div className="flex w-fit max-w-full flex-wrap items-center gap-0.5 text-text-faint" style={assistantActionStyle}>{assistantIconButtons}</div>
+                <div className="flex w-fit max-w-full flex-wrap items-center gap-0.5 text-text-faint" style={assistantActionStyle}>
+                  {assistantIconButtons}
+                  <MessageTimestamp ts={message.timestamp} align="left" />
+                </div>
               </div>
             )}
           </>

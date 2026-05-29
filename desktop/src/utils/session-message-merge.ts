@@ -19,6 +19,10 @@ export function mergeSessionMessagesTail(
       if (idx >= 0) {
         out[idx] = {
           ...row,
+          timestamp:
+            typeof row.timestamp === "number" && row.timestamp > 0
+              ? row.timestamp
+              : prior.timestamp,
           toolStreamLines: prior.toolStreamLines ?? row.toolStreamLines,
           suggestedQuestions: prior.suggestedQuestions ?? row.suggestedQuestions,
           references: prior.references ?? row.references,

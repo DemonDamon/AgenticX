@@ -55,6 +55,7 @@ import { expandMessagesToTopLevelRows } from "./messages/react-blocks";
 import { TurnToolGroupCard } from "./messages/TurnToolGroupCard";
 import { WorkingIndicator } from "./messages/WorkingIndicator";
 import { ChatImAvatar, ImBubble } from "./messages/ImBubble";
+import { MessageTimestamp } from "./messages/MessageTimestamp";
 import { getAssistantActionStyle } from "./messages/im-layout";
 import { TerminalLine } from "./messages/TerminalLine";
 import { ProviderIcon } from "./ProviderIcon";
@@ -4755,7 +4756,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
                     {isSelecting ? <div className="h-5 w-5 shrink-0" aria-hidden /> : null}
                     <div className="min-w-0 flex-1">
                       <div className="flex min-w-0 flex-col gap-2">
-                        <div className="flex w-fit flex-wrap items-center gap-0.5 text-text-faint" style={reactActionStyle}>
+                        <div className="group flex w-fit flex-wrap items-center gap-0.5 text-text-faint" style={reactActionStyle}>
                           <HoverTip label="复制">
                             <button
                               type="button"
@@ -4817,6 +4818,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
                               <LayoutList size={13} />
                             </button>
                           </HoverTip>
+                          <MessageTimestamp ts={lastAssistantInBlock?.timestamp} align="left" />
                         </div>
                         {peeledFollowupAssistant?.suggestedQuestions &&
                         peeledFollowupAssistant.suggestedQuestions.length > 0 ? (
@@ -6417,13 +6419,20 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
           ? { suggestedQuestions: pendingSuggestedQuestions.slice(0, 3) }
           : undefined;
       const turnExtras = refExtras || sugExtras ? { ...refExtras, ...sugExtras } : undefined;
+      const completedAt = Date.now();
+      const stampLastAssistantCompletedAt = () => {
+        useAppStore.getState().mergeLastPaneMessageByRole(pane.id, "assistant", {
+          timestamp: completedAt,
+        });
+      };
       if (trimmedFull && !isThinkingPlaceholderText(full) && !streamCommittedRef.current) {
         const mid = lastMidStreamAssistantCommitRef.current;
         if (mid !== null && trimmedFull === mid) {
           streamCommittedRef.current = true;
-          if (turnExtras) {
-            useAppStore.getState().mergeLastPaneMessageByRole(pane.id, "assistant", turnExtras);
-          }
+          useAppStore.getState().mergeLastPaneMessageByRole(pane.id, "assistant", {
+            ...(turnExtras ?? {}),
+            timestamp: completedAt,
+          });
         } else {
           addPaneMessageIfSessionActive(
             pane.id,
@@ -6433,9 +6442,18 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
             chatProvider,
             chatModel,
             undefined,
-            turnExtras,
+            { ...(turnExtras ?? {}), timestamp: completedAt },
           );
           streamCommittedRef.current = true;
+        }
+      } else if (trimmedFull && !isThinkingPlaceholderText(full) && streamCommittedRef.current) {
+        if (turnExtras) {
+          useAppStore.getState().mergeLastPaneMessageByRole(pane.id, "assistant", {
+            ...turnExtras,
+            timestamp: completedAt,
+          });
+        } else {
+          stampLastAssistantCompletedAt();
         }
       }
     } catch (error) {
