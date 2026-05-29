@@ -43,6 +43,8 @@ The framework is organized into 5 tiers: **User Interface** (Desktop / CLI / SDK
 
 ### Core Framework
 - **Agent Core**: Agent execution engine based on 12-Factor Agents methodology, with Meta-Agent CEO dispatcher, agent team management, think-act loop, event-driven architecture, self-repair, and overflow recovery
+- **Embeddable ReActAgent (SDK primitive)**: Canonical async function-calling ReAct loop (`ainvoke`/`astream`) with a typed `AgentEvent` stream, multi-turn history in/out, parallel tool execution, and optional loop-detector / compactor / offloader injection — zero Studio/CLI coupling (legacy text-JSON `TextReActAgent` facade kept for compatibility)
+- **Unified Offload**: `Offloader` protocol + filesystem-backed `FileOffloader` keep large tool results / compressed context out of live history (inline reference placeholders, retrieved on demand); plus an in-workspace MCP gateway that runs MCP servers inside the sandbox
 - **Orchestration Engine**: Graph-based workflow engine + Flow system with decorators, execution plans, conditional routing, and parallel execution
 - **Tool System**: Unified tool interface with function decorators, MCP Hub (multi-server aggregation), remote tools v2, OpenAPI toolset, sandbox tools, skill bundles, and document routers
 - **Memory System**: Hierarchical memory (core / episodic / semantic), Mem0 deep integration, workspace memory, short-term memory, memory decay, hybrid search, compaction flush, MCP memory, and memory intelligence engine
@@ -556,6 +558,8 @@ graph TD
 | **IM Channel Integration** | ✅ | Remote command gateway for Feishu / WeCom / DingTalk / personal WeChat (iLink) (`gateway`) |
 | **Claude Code Bridge** | ✅ | Token-protected local HTTP/NDJSON control plane, headless / visible TUI dual mode (`cc_bridge`) |
 | **Extension Ecosystem** | ✅ | AGX Bundle definitions, local install/uninstall, multi-source registry aggregated search (`extensions`) |
+| **Embeddable ReActAgent** | ✅ | Canonical async function-calling ReAct SDK primitive with typed event stream, multi-turn history, parallel tools, optional loop-detector / compactor / offloader, zero Studio/CLI coupling (`agents`) |
+| **Unified Offload & MCP Gateway** | ✅ | `Offloader` protocol + `FileOffloader` for out-of-history large payloads, plus in-workspace MCP gateway (AgentScope v2 P0 internalization, `core.offload` / `sandbox.mcp_gateway`) |
 
 ## Core Advantages
 
