@@ -12,7 +12,7 @@ Does **not** use ``AgentExecutor`` or any Studio/CLI runtime.
     async for event in agent.astream("hello"):
         ...
 
-The legacy text-JSON ReAct facade lives in ``text_react_agent.TextReActAgent``.
+The legacy text-JSON ReAct facade lives in ``react_agent.TextReActAgent``.
 
 Author: Damon Li
 """
