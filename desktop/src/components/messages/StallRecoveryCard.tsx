@@ -20,6 +20,8 @@ type Props = {
   onResumeWithModel: (provider: string, model: string) => void;
   onStop: () => void;
   stopInFlight?: boolean;
+  resumeInFlight?: boolean;
+  rejectReason?: string;
   onOpenSettings?: () => void;
 };
 
@@ -40,6 +42,8 @@ export function StallRecoveryCard({
   onResumeWithModel,
   onStop,
   stopInFlight = false,
+  resumeInFlight = false,
+  rejectReason = "",
   onOpenSettings,
 }: Props) {
   const isStall = kind === "stall";
@@ -58,6 +62,7 @@ export function StallRecoveryCard({
   }, [modelOptions]);
 
   const confirmSwitch = () => {
+    if (resumeInFlight) return;
     const key = picked || (options[0] ? `${options[0].provider}::${options[0].model}` : "");
     const row = options.find((o) => `${o.provider}::${o.model}` === key) ?? options[0];
     if (!row) return;
@@ -103,9 +108,10 @@ export function StallRecoveryCard({
                       <button
                         type="button"
                         onClick={onResume}
-                        className="rounded-md bg-btnPrimary px-3 py-1 text-xs font-medium text-btnPrimary-text transition hover:bg-btnPrimary-hover"
+                        disabled={resumeInFlight}
+                        className="rounded-md bg-btnPrimary px-3 py-1 text-xs font-medium text-btnPrimary-text transition hover:bg-btnPrimary-hover disabled:cursor-not-allowed disabled:opacity-50"
                       >
-                        {isStall ? "恢复执行" : "继续执行"}
+                        {resumeInFlight ? (isStall ? "恢复中…" : "续跑中…") : isStall ? "恢复执行" : "继续执行"}
                       </button>
 
                       {isStall ? (
@@ -113,7 +119,8 @@ export function StallRecoveryCard({
                           <button
                             type="button"
                             onClick={() => setSwitchOpen((v) => !v)}
-                            className="rounded-md border border-border bg-surface-hover px-3 py-1 text-xs font-medium text-text-strong transition hover:bg-surface-card"
+                            disabled={resumeInFlight}
+                            className="rounded-md border border-border bg-surface-hover px-3 py-1 text-xs font-medium text-text-strong transition hover:bg-surface-card disabled:cursor-not-allowed disabled:opacity-50"
                           >
                             换模型继续
                             <ChevronDown
@@ -141,6 +148,10 @@ export function StallRecoveryCard({
                       )}
                     </div>
 
+                    {rejectReason ? (
+                      <p className="mt-2 text-xs text-rose-400">续跑被拒：{rejectReason}</p>
+                    ) : null}
+
                     {isStall && switchOpen ? (
                       <SwitchModelPanel
                         options={options}
@@ -148,6 +159,7 @@ export function StallRecoveryCard({
                         onPick={setPicked}
                         onConfirm={confirmSwitch}
                         onCancel={() => setSwitchOpen(false)}
+                        resumeInFlight={resumeInFlight}
                       />
                     ) : null}
                   </div>
@@ -166,12 +178,14 @@ function SwitchModelPanel({
   onPick,
   onConfirm,
   onCancel,
+  resumeInFlight = false,
 }: {
   options: StallModelOption[];
   picked: string;
   onPick: (value: string) => void;
   onConfirm: () => void;
   onCancel: () => void;
+  resumeInFlight?: boolean;
 }) {
   return (
     <div className="mt-3 rounded-md border border-border/80 bg-surface-panel/80 p-2">
@@ -191,9 +205,10 @@ function SwitchModelPanel({
         <button
           type="button"
           onClick={onConfirm}
-          className="rounded-md bg-btnPrimary px-2.5 py-1 text-[11px] font-medium text-btnPrimary-text"
+          disabled={resumeInFlight}
+          className="rounded-md bg-btnPrimary px-2.5 py-1 text-[11px] font-medium text-btnPrimary-text disabled:cursor-not-allowed disabled:opacity-50"
         >
-          确认并续跑
+          {resumeInFlight ? "续跑中…" : "确认并续跑"}
         </button>
         <button
           type="button"

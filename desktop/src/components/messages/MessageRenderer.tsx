@@ -53,6 +53,10 @@ type Props = {
   showSenderIdentity?: boolean;
   senderAvatarVariant?: "circle" | "rounded-square";
   senderAvatarId?: string;
+  sessionBusy?: boolean;
+  isLastAssistantInPane?: boolean;
+  streamStalled?: boolean;
+  streamStalledSeconds?: number;
 };
 
 function extractPathFromToolResult(msg: string): string {
@@ -173,6 +177,10 @@ export function MessageRenderer({
   showSenderIdentity = false,
   senderAvatarVariant = "circle",
   senderAvatarId,
+  sessionBusy = false,
+  isLastAssistantInPane = false,
+  streamStalled = false,
+  streamStalledSeconds = 0,
 }: Props) {
   const chatStyle = useAppStore((s) => s.chatStyle);
   if (message.role === "user" || message.role === "assistant") {
@@ -225,6 +233,10 @@ export function MessageRenderer({
         showSenderIdentity={showSenderIdentity}
         senderAvatarVariant={showSenderIdentity ? senderAvatarVariant : "circle"}
         senderAvatarId={senderAvatarId ?? (showSenderIdentity && message.role === "user" ? "user-self" : undefined)}
+        sessionBusy={sessionBusy}
+        isLastAssistantInPane={isLastAssistantInPane}
+        streamStalled={streamStalled}
+        streamStalledSeconds={streamStalledSeconds}
       />
     );
   }

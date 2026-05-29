@@ -16,6 +16,7 @@ from agenticx.runtime.stall_policy import (
 )
 from agenticx.studio.continuation import (
     format_continuation_notice,
+    mark_continue_attempt,
     prepare_continue,
     resolve_continuation_prompt,
     should_dedupe_continue,
@@ -60,6 +61,35 @@ def test_prepare_continue_appends_tool_notice() -> None:
     assert prompt
     assert notice.get("role") == "tool"
     assert len(managed.studio_session.chat_history) == 1
+
+
+def test_prepare_continue_manual_running_skip_dedupe() -> None:
+    managed = _FakeManaged()
+    managed.execution_state = "running"
+    ok, prompt, round_n, notice = prepare_continue(
+        managed,
+        reason="stall",
+        source="desktop_manual",
+        execution_state="interrupted",
+        skip_dedupe=True,
+    )
+    assert ok is True
+    assert round_n == 1
+    assert prompt
+    assert notice.get("role") == "tool"
+
+
+def test_prepare_continue_manual_dedupe_bypass() -> None:
+    managed = _FakeManaged()
+    mark_continue_attempt(managed.studio_session, "stall", "desktop_manual")
+    ok, _prompt, _round_n, _notice = prepare_continue(
+        managed,
+        reason="stall",
+        source="desktop_manual",
+        execution_state="interrupted",
+        skip_dedupe=True,
+    )
+    assert ok is True
 
 
 def test_dedupe_continue_within_window() -> None:

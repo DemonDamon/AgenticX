@@ -2507,15 +2507,18 @@ def create_studio_app() -> FastAPI:
 
         exec_state = str(getattr(managed, "execution_state", "idle") or "idle")
         if source == "desktop_manual" and exec_state == "running":
-            async def _still_running() -> AsyncGenerator[str, None]:
-                evt = SseEvent(
-                    type="continuation_rejected",
-                    data={"text": "任务仍在后台执行中，可继续等待或主动中断"},
-                )
-                yield f"data: {json.dumps(evt.model_dump(), ensure_ascii=False)}\n\n"
-                yield 'data: {"type":"done","data":{}}\n\n'
-
-            return StreamingResponse(_still_running(), media_type="text/event-stream")
+            manager.request_interrupt(session_id)
+            # Give the in-flight run loop a brief window to observe the interrupt
+            # flag and exit before we start a new continuation stream; otherwise
+            # two runs race on execution_state / chat_history / tool sequence.
+            for _ in range(20):
+                await asyncio.sleep(0.1)
+                cur = str(getattr(managed, "execution_state", "idle") or "idle")
+                if cur in {"idle", "interrupted"}:
+                    break
+            manager.set_execution_state(session_id, "interrupted")
+            manager.persist(session_id)
+            exec_state = "interrupted"
 
         max_nudge = int(
             __import__("agenticx.studio.continuation", fromlist=["get_runtime_value"]).get_runtime_value(
@@ -2529,6 +2532,7 @@ def create_studio_app() -> FastAPI:
             source=source,  # type: ignore[arg-type]
             execution_state=exec_state,
             max_rounds=max_nudge if source == "desktop_auto_nudge" else None,
+            skip_dedupe=source == "desktop_manual",
         )
         if not ok:
             async def _deduped() -> AsyncGenerator[str, None]:

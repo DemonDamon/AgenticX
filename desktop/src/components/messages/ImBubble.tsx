@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import type { CSSProperties, ReactNode, MouseEvent as ReactMouseEvent } from "react";
-import { Bookmark, Copy, LayoutList, Quote, RotateCcw, Share2, Pencil, X, ArrowUp, ArrowRight } from "lucide-react";
+import { Bookmark, Copy, LayoutList, Quote, RotateCcw, Share2, Pencil, X, ArrowUp, ArrowRight, AlertTriangle } from "lucide-react";
 import type { Message, MessageAttachment } from "../../store";
 import { AttachmentCard } from "./AttachmentCard";
 import { ReasoningBlock } from "./ReasoningBlock";
@@ -17,6 +17,7 @@ import {
 } from "./im-layout";
 import { resolveMetaDisplayName } from "../../utils/display-name";
 import { avatarBgClass } from "../../utils/avatar-color";
+import { shouldShowAssistantIconButtons } from "../../utils/im-bubble-actions";
 
 type Props = {
   message: Message;
@@ -54,6 +55,12 @@ type Props = {
   senderAvatarVariant?: "circle" | "rounded-square";
   /** Fallback tint when no imageUrl (avatar id for color hash). */
   senderAvatarId?: string;
+  /** When true, suppress action buttons on the last assistant bubble while the session is busy/stalled. */
+  sessionBusy?: boolean;
+  isLastAssistantInPane?: boolean;
+  /** Replace animated streaming dots with a stalled indicator on the __stream__ placeholder. */
+  streamStalled?: boolean;
+  streamStalledSeconds?: number;
 };
 
 /** Cycling 1→3 dots for group-chat typing rows (name shown in header only). */
@@ -69,6 +76,19 @@ function TypingDots() {
     <span className="inline-block min-w-[1em] tabular-nums" aria-hidden>
       {".".repeat(count)}
     </span>
+  );
+}
+
+function StalledStreamIndicator({ silentSeconds }: { silentSeconds: number }) {
+  return (
+    <div
+      className="inline-flex items-center gap-1.5 py-1.5 text-xs text-amber-300/90"
+      aria-live="polite"
+      aria-label="任务已停滞"
+    >
+      <AlertTriangle className="h-3.5 w-3.5 shrink-0" aria-hidden />
+      <span>{silentSeconds > 0 ? `已停滞 ${silentSeconds}s` : "已停滞"}</span>
+    </div>
   );
 }
 
@@ -162,6 +182,10 @@ export function ImBubble({
   showSenderIdentity = false,
   senderAvatarVariant = "circle",
   senderAvatarId,
+  sessionBusy = false,
+  isLastAssistantInPane = false,
+  streamStalled = false,
+  streamStalledSeconds = 0,
 }: Props) {
   const isUser = message.role === "user";
   const displayName = isUser ? (userName || "我") : (assistantName || "AI");
@@ -301,8 +325,16 @@ export function ImBubble({
       }
     : bubbleStyle;
 
-  const assistantIconButtons =
-    !hideActions && !isUser && !isStreaming && !isGroupTyping && !isMetaPendingWork && hasBody ? (
+  const assistantIconButtons = shouldShowAssistantIconButtons({
+    hideActions,
+    isUser,
+    isStreaming,
+    isGroupTyping,
+    isMetaPendingWork,
+    hasBody,
+    sessionBusy,
+    isLastAssistantInPane,
+  }) ? (
       <>
         <HoverTip label="复制">
           <button
@@ -551,7 +583,11 @@ export function ImBubble({
                       <ReasoningBlock text={parsed.reasoning} />
                     ) : null}
                     {!isUser && isStreaming && !hasBody && (!hasThinkTag || reasoningClosed) ? (
-                      <StreamingDots />
+                      streamStalled ? (
+                        <StalledStreamIndicator silentSeconds={streamStalledSeconds} />
+                      ) : (
+                        <StreamingDots />
+                      )
                     ) : null}
                     {hasBody ? (
                       isUser ? (
