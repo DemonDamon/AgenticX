@@ -57,18 +57,31 @@ The framework is organized into 5 tiers: **User Interface** (Desktop / CLI / SDK
 
 ### Knowledge & Retrieval
 - **Knowledge Base**: Document processing pipeline with chunkers, readers, extractors, and graph builders (GraphRAG)
+- **Multi-Brain Knowledge**: Isolatable, per-avatar/session mountable "doc brain + code brain" architecture with cross-brain aggregated search
+- **Code Semantic Index**: Hybrid (vector + BM25) retrieval across multiple codebases, wired into the "code brain"
 - **Retrieval System**: Vector retriever, BM25 retriever, graph retriever, hybrid retriever, auto-retriever, and reranker
 - **Embeddings**: OpenAI, Bailian, SiliconFlow, LiteLLM, with smart routing
+
+### Skills & Self-Evolution
+- **Skill System**: Registration and full lifecycle management — dangerous-pattern security scan gate, 5-strategy fuzzy patch, `.changelog` versioning, source tagging, and per-skill enable/disable
+- **Skill Self-Evolution**: Captures tool-call observations at runtime and auto-distills new skills via background LLM session review; quality gate, usage stats, and deprecation form the lifecycle loop
+- **Extension Ecosystem (AGX Bundle)**: Bundle definitions (skills / mcp_servers / avatars / memory_templates), local install/uninstall, multi-source registry aggregated search
+
+### Long-Horizon Autonomous Coding
+- **Long-Run Orchestration**: Polls multiple task sources (manual queue / Cron / Linear / project features), per-task isolated workspaces, stall self-healing, continuation/failure dual-track backoff, incremental token accounting
+- **Project State Machine**: Disk-backed single source of truth with a versioned feature state machine, file locks / atomic writes, powering an auditable "init → implement → verify → commit" loop
 
 ### Developer Experience
 - **CLI Tools** (`agx`): serve, studio, loop, run, project, deploy, codegen, docs, skills, hooks, debug, scaffold, and config management
 - **Web UI (Studio)**: FastAPI-based management server with session management, real-time WebSocket, and protocol support
 - **Desktop App**: Electron + React + Zustand + Vite, Pro/Lite dual mode (multi-pane / single-pane), command palette, settings panel, avatar sidebar, sub-agent panel, session history, and workspace panel
+- **IM Remote Gateway**: Remote command relay and reply delivery for Feishu / WeCom / DingTalk / personal WeChat (iLink) → cloud → local Agent
+- **Claude Code Bridge**: Token-protected local HTTP / NDJSON control plane driving local Claude Code in headless (stream-json) or visible TUI (PTY) modes
 
 ### Enterprise Security
 - **Safety Layer**: Leak detection, input sanitizer, advanced injection detector, policy engine (rules / severity / actions), input validator, sandbox policy, and audit logging
-- **Sandbox**: Docker, Microsandbox, and Subprocess backends; Jupyter kernel manager, stateful code interpreter, sandbox templates
-- **Session Security**: Database-backed sessions, write locks, in-memory sessions
+- **Sandbox**: Docker / Microsandbox / Subprocess / remote HTTP backends (tiered factory auto-selection); Jupyter kernel manager, stateful code interpreter, sandbox templates, JSONL execution audit
+- **Session Security**: Database-backed sessions, write locks, in-memory sessions, session-level multi-tenant (tenant_id) isolation
 
 ### Observability & Evaluation
 - **Monitoring**: Complete callback system, real-time metrics, Prometheus/OpenTelemetry integration, trajectory analysis, span tree, WebSocket streaming
@@ -531,7 +544,18 @@ graph TD
 | Module | Status | Description |
 |---------|--------|-------------|
 | **M12** | 🚧 | Agent Evolution — Architecture search, knowledge distillation, adaptive planning |
-| **M18** | 🚧 | Multi-tenancy & RBAC — Per-tenant data isolation, fine-grained permission control |
+| **M18** | 🚧 | Multi-tenancy & RBAC — Session-level `tenant_id` isolation landed; fine-grained permission control in progress |
+
+### 🆕 Recent Capability Additions (H1 2026)
+
+| Capability | Status | Description |
+|------------|--------|-------------|
+| **Skill Self-Evolution** | ✅ | Runtime tool-call observation capture, auto-skill creation via session review, quality gate / usage stats / deprecation loop (`learning`) |
+| **Multi-Brain Knowledge** | ✅ | Isolatable/mountable "doc brain + code brain" with cross-brain search (`brain`) + multi-codebase hybrid semantic index (`code_index`) |
+| **Long-Horizon Coding** | ✅ | Long-run orchestration (multi-source / isolated workspaces / stall self-healing / continuation backoff, `longrun`) + disk-backed project state machine (`project_state`) |
+| **IM Channel Integration** | ✅ | Remote command gateway for Feishu / WeCom / DingTalk / personal WeChat (iLink) (`gateway`) |
+| **Claude Code Bridge** | ✅ | Token-protected local HTTP/NDJSON control plane, headless / visible TUI dual mode (`cc_bridge`) |
+| **Extension Ecosystem** | ✅ | AGX Bundle definitions, local install/uninstall, multi-source registry aggregated search (`extensions`) |
 
 ## Core Advantages
 
