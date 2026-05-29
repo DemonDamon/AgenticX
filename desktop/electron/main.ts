@@ -2646,6 +2646,9 @@ function createTray(): void {
     return;
   }
   const icon = nativeImage.createFromPath(iconPath);
+  if (process.platform === "darwin") {
+    icon.setTemplateImage(true);
+  }
   tray = new Tray(icon);
   const menu = Menu.buildFromTemplate([
     {
