@@ -5108,6 +5108,70 @@ function registerIpc(): void {
     }
   });
 
+  ipcMain.handle("get-guard-settings", async () => {
+    try {
+      const resp = await fetch(`${getStudioUrl()}/api/skills/guard-settings`, {
+        headers: { "x-agx-desktop-token": getStudioToken() },
+      });
+      if (!resp.ok) {
+        const body = await resp.text().catch(() => "");
+        return { ok: false, error: `HTTP ${resp.status}: ${body.slice(0, 300)}` };
+      }
+      return await resp.json();
+    } catch (err) {
+      return { ok: false, error: String(err) };
+    }
+  });
+
+  ipcMain.handle(
+    "put-guard-settings",
+    async (_event, payload: { version?: number; scan_mode?: string; llm_verify?: boolean }) => {
+      try {
+        const resp = await fetch(`${getStudioUrl()}/api/skills/guard-settings`, {
+          method: "PUT",
+          headers: {
+            "Content-Type": "application/json",
+            "x-agx-desktop-token": getStudioToken(),
+          },
+          body: JSON.stringify(payload ?? {}),
+        });
+        if (!resp.ok) {
+          const body = await resp.text().catch(() => "");
+          return { ok: false, error: `HTTP ${resp.status}: ${body.slice(0, 300)}` };
+        }
+        return await resp.json();
+      } catch (err) {
+        return { ok: false, error: String(err) };
+      }
+    },
+  );
+
+  ipcMain.handle(
+    "guard-scan-skill",
+    async (
+      _event,
+      payload: { skill_path?: string; markdown?: string; skill_name?: string; mode?: string },
+    ) => {
+      try {
+        const resp = await fetch(`${getStudioUrl()}/api/skills/guard-scan`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "x-agx-desktop-token": getStudioToken(),
+          },
+          body: JSON.stringify({ ...payload, html_report: false }),
+        });
+        if (!resp.ok) {
+          const body = await resp.text().catch(() => "");
+          return { ok: false, error: `HTTP ${resp.status}: ${body.slice(0, 300)}` };
+        }
+        return await resp.json();
+      } catch (err) {
+        return { ok: false, error: String(err) };
+      }
+    },
+  );
+
   ipcMain.handle(
     "put-skill-settings",
     async (

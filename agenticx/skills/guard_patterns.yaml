@@ -1,0 +1,1539 @@
+version: 2.0.0
+pattern_set_version: agx-guard-2.0.0-cls-ad74b8e
+patterns:
+- pattern_id: V1-exfiltration_curl
+  pattern_name: exfiltration_curl
+  category: exfiltration
+  severity: dangerous
+  regex: curl\s+[^\n]*\$\{?\w*(KEY|TOKEN|SECRET|PASSWORD|CREDENTIAL|API)
+  description: 'AgenticX v1 pattern: exfiltration_curl'
+  source: v1
+- pattern_id: V1-exfiltration_wget
+  pattern_name: exfiltration_wget
+  category: exfiltration
+  severity: dangerous
+  regex: wget\s+[^\n]*\$\{?\w*(KEY|TOKEN|SECRET|PASSWORD|CREDENTIAL|API)
+  description: 'AgenticX v1 pattern: exfiltration_wget'
+  source: v1
+- pattern_id: V1-exfiltration_curl_generic
+  pattern_name: exfiltration_curl_generic
+  category: exfiltration
+  severity: caution
+  regex: curl\s+.*\$\{?\w
+  description: 'AgenticX v1 pattern: exfiltration_curl_generic'
+  source: v1
+- pattern_id: V1-exfiltration_wget_generic
+  pattern_name: exfiltration_wget_generic
+  category: exfiltration
+  severity: caution
+  regex: wget\s+.*\$\{?\w
+  description: 'AgenticX v1 pattern: exfiltration_wget_generic'
+  source: v1
+- pattern_id: V1-exfiltration_fetch_env
+  pattern_name: exfiltration_fetch_env
+  category: exfiltration
+  severity: dangerous
+  regex: fetch\s*\(.*(?:process\.env|os\.environ)
+  description: 'AgenticX v1 pattern: exfiltration_fetch_env'
+  source: v1
+- pattern_id: V1-exfiltration_httpx
+  pattern_name: exfiltration_httpx
+  category: exfiltration
+  severity: dangerous
+  regex: httpx?\.(get|post|put|patch)\s*\([^\n]*(KEY|TOKEN|SECRET|PASSWORD)
+  description: 'AgenticX v1 pattern: exfiltration_httpx'
+  source: v1
+- pattern_id: V1-exfiltration_requests
+  pattern_name: exfiltration_requests
+  category: exfiltration
+  severity: dangerous
+  regex: requests\.(get|post|put|patch)\s*\([^\n]*(KEY|TOKEN|SECRET|PASSWORD)
+  description: 'AgenticX v1 pattern: exfiltration_requests'
+  source: v1
+- pattern_id: V1-encoded_exfil
+  pattern_name: encoded_exfil
+  category: exfiltration
+  severity: dangerous
+  regex: base64[^\n]*env
+  description: 'AgenticX v1 pattern: encoded_exfil'
+  source: v1
+- pattern_id: V1-dump_all_env
+  pattern_name: dump_all_env
+  category: exfiltration
+  severity: dangerous
+  regex: printenv|env\s*\|
+  description: 'AgenticX v1 pattern: dump_all_env'
+  source: v1
+- pattern_id: V1-python_os_environ
+  pattern_name: python_os_environ
+  category: python
+  severity: dangerous
+  regex: os\.environ\b(?!\s*\.get\s*\(\s*[\"']PATH)
+  description: 'AgenticX v1 pattern: python_os_environ'
+  source: v1
+- pattern_id: V1-python_getenv_secret
+  pattern_name: python_getenv_secret
+  category: python
+  severity: dangerous
+  regex: os\.getenv\s*\(\s*[^\)]*(?:KEY|TOKEN|SECRET|PASSWORD|CREDENTIAL)
+  description: 'AgenticX v1 pattern: python_getenv_secret'
+  source: v1
+- pattern_id: V1-dns_exfil
+  pattern_name: dns_exfil
+  category: exfiltration
+  severity: dangerous
+  regex: \b(dig|nslookup|host)\s+[^\n]*\$
+  description: 'AgenticX v1 pattern: dns_exfil'
+  source: v1
+- pattern_id: V1-md_image_exfil
+  pattern_name: md_image_exfil
+  category: exfiltration
+  severity: dangerous
+  regex: '!\[.*\]\(https?://[^\)]*\$\{?'
+  description: 'AgenticX v1 pattern: md_image_exfil'
+  source: v1
+- pattern_id: V1-context_exfil
+  pattern_name: context_exfil
+  category: exfiltration
+  severity: dangerous
+  regex: (include|output|print|send|share)\s+(?:\w+\s+)*(conversation|chat\s+history|previous\s+messages|context)
+  description: 'AgenticX v1 pattern: context_exfil'
+  source: v1
+- pattern_id: V1-send_to_url
+  pattern_name: send_to_url
+  category: exfiltration
+  severity: dangerous
+  regex: (send|post|upload|transmit)\s+.*\s+(to|at)\s+https?://
+  description: 'AgenticX v1 pattern: send_to_url'
+  source: v1
+- pattern_id: V1-credential_ssh
+  pattern_name: credential_ssh
+  category: credential
+  severity: dangerous
+  regex: '[~$]HOME/\.ssh|~/\.ssh'
+  description: 'AgenticX v1 pattern: credential_ssh'
+  source: v1
+- pattern_id: V1-credential_aws
+  pattern_name: credential_aws
+  category: credential
+  severity: dangerous
+  regex: '[~$]HOME/\.aws|~/\.aws'
+  description: 'AgenticX v1 pattern: credential_aws'
+  source: v1
+- pattern_id: V1-credential_dotenv
+  pattern_name: credential_dotenv
+  category: credential
+  severity: caution
+  regex: \.env\b
+  description: 'AgenticX v1 pattern: credential_dotenv'
+  source: v1
+- pattern_id: V1-read_secrets_file
+  pattern_name: read_secrets_file
+  category: credential
+  severity: dangerous
+  regex: cat\s+[^\n]*(\.env|credentials|\.netrc|\.pgpass|\.npmrc|\.pypirc)
+  description: 'AgenticX v1 pattern: read_secrets_file'
+  source: v1
+- pattern_id: V1-hardcoded_secret
+  pattern_name: hardcoded_secret
+  category: credential
+  severity: dangerous
+  regex: (?:api[_-]?key|token|secret|password)\s*[=:]\s*[\"'][A-Za-z0-9+/=_-]{20,}
+  description: 'AgenticX v1 pattern: hardcoded_secret'
+  source: v1
+- pattern_id: V1-embedded_private_key
+  pattern_name: embedded_private_key
+  category: credential
+  severity: dangerous
+  regex: '-----BEGIN\s+(RSA\s+)?PRIVATE\s+KEY-----'
+  description: 'AgenticX v1 pattern: embedded_private_key'
+  source: v1
+- pattern_id: V1-github_token
+  pattern_name: github_token
+  category: credential
+  severity: dangerous
+  regex: ghp_[A-Za-z0-9]{36}|github_pat_[A-Za-z0-9_]{80,}
+  description: 'AgenticX v1 pattern: github_token'
+  source: v1
+- pattern_id: V1-openai_key
+  pattern_name: openai_key
+  category: credential
+  severity: dangerous
+  regex: sk-[A-Za-z0-9]{20,}
+  description: 'AgenticX v1 pattern: openai_key'
+  source: v1
+- pattern_id: V1-aws_access_key
+  pattern_name: aws_access_key
+  category: credential
+  severity: dangerous
+  regex: AKIA[0-9A-Z]{16}
+  description: 'AgenticX v1 pattern: aws_access_key'
+  source: v1
+- pattern_id: V1-prompt_ignore_previous
+  pattern_name: prompt_ignore_previous
+  category: prompt_injection
+  severity: dangerous
+  regex: ignore\s+(?:\w+\s+)*(previous|all|above|prior)\s+instructions
+  description: 'AgenticX v1 pattern: prompt_ignore_previous'
+  source: v1
+- pattern_id: V1-prompt_system
+  pattern_name: prompt_system
+  category: prompt_injection
+  severity: dangerous
+  regex: system\s+prompt\s+override
+  description: 'AgenticX v1 pattern: prompt_system'
+  source: v1
+- pattern_id: V1-prompt_system_tag
+  pattern_name: prompt_system_tag
+  category: prompt_injection
+  severity: dangerous
+  regex: <system>
+  description: 'AgenticX v1 pattern: prompt_system_tag'
+  source: v1
+- pattern_id: V1-role_hijack
+  pattern_name: role_hijack
+  category: prompt_injection
+  severity: dangerous
+  regex: you\s+are\s+(?:\w+\s+)*now\s+
+  description: 'AgenticX v1 pattern: role_hijack'
+  source: v1
+- pattern_id: V1-deception_hide
+  pattern_name: deception_hide
+  category: prompt_injection
+  severity: dangerous
+  regex: do\s+not\s+(?:\w+\s+)*tell\s+(?:\w+\s+)*the\s+user
+  description: 'AgenticX v1 pattern: deception_hide'
+  source: v1
+- pattern_id: V1-disregard_rules
+  pattern_name: disregard_rules
+  category: prompt_injection
+  severity: dangerous
+  regex: disregard\s+(?:\w+\s+)*(your|all|any)\s+(?:\w+\s+)*(instructions|rules|guidelines)
+  description: 'AgenticX v1 pattern: disregard_rules'
+  source: v1
+- pattern_id: V1-jailbreak_dan
+  pattern_name: jailbreak_dan
+  category: prompt_injection
+  severity: dangerous
+  regex: \bDAN\s+mode\b|Do\s+Anything\s+Now
+  description: 'AgenticX v1 pattern: jailbreak_dan'
+  source: v1
+- pattern_id: V1-jailbreak_dev_mode
+  pattern_name: jailbreak_dev_mode
+  category: prompt_injection
+  severity: dangerous
+  regex: \bdeveloper\s+mode\b.*\benabled?\b
+  description: 'AgenticX v1 pattern: jailbreak_dev_mode'
+  source: v1
+- pattern_id: V1-remove_filters
+  pattern_name: remove_filters
+  category: prompt_injection
+  severity: dangerous
+  regex: (respond|answer|reply)\s+without\s+(?:\w+\s+)*(restrictions|limitations|filters|safety)
+  description: 'AgenticX v1 pattern: remove_filters'
+  source: v1
+- pattern_id: V1-html_comment_injection
+  pattern_name: html_comment_injection
+  category: prompt_injection
+  severity: caution
+  regex: <!--[^>]*(?:ignore|override|system|secret|hidden)[^>]*-->
+  description: 'AgenticX v1 pattern: html_comment_injection'
+  source: v1
+- pattern_id: V1-destructive_rm
+  pattern_name: destructive_rm
+  category: destructive
+  severity: dangerous
+  regex: rm\s+-rf\s+/
+  description: 'AgenticX v1 pattern: destructive_rm'
+  source: v1
+- pattern_id: V1-destructive_home_rm
+  pattern_name: destructive_home_rm
+  category: destructive
+  severity: dangerous
+  regex: rm\s+(-[^\s]*)?r.*\$HOME|\brmdir\s+.*\$HOME
+  description: 'AgenticX v1 pattern: destructive_home_rm'
+  source: v1
+- pattern_id: V1-destructive_chmod
+  pattern_name: destructive_chmod
+  category: destructive
+  severity: dangerous
+  regex: chmod\s+777
+  description: 'AgenticX v1 pattern: destructive_chmod'
+  source: v1
+- pattern_id: V1-destructive_sql
+  pattern_name: destructive_sql
+  category: destructive
+  severity: dangerous
+  regex: DROP\s+TABLE
+  description: 'AgenticX v1 pattern: destructive_sql'
+  source: v1
+- pattern_id: V1-system_overwrite
+  pattern_name: system_overwrite
+  category: destructive
+  severity: dangerous
+  regex: '>\s*/etc/'
+  description: 'AgenticX v1 pattern: system_overwrite'
+  source: v1
+- pattern_id: V1-format_filesystem
+  pattern_name: format_filesystem
+  category: destructive
+  severity: dangerous
+  regex: \bmkfs\b
+  description: 'AgenticX v1 pattern: format_filesystem'
+  source: v1
+- pattern_id: V1-python_rmtree
+  pattern_name: python_rmtree
+  category: destructive
+  severity: caution
+  regex: shutil\.rmtree\s*\(\s*[\"\'/]
+  description: 'AgenticX v1 pattern: python_rmtree'
+  source: v1
+- pattern_id: V1-persistence_cron
+  pattern_name: persistence_cron
+  category: persistence
+  severity: caution
+  regex: \bcrontab\b
+  description: 'AgenticX v1 pattern: persistence_cron'
+  source: v1
+- pattern_id: V1-shell_rc_mod
+  pattern_name: shell_rc_mod
+  category: shell
+  severity: caution
+  regex: \.(bashrc|zshrc|profile|bash_profile)\b
+  description: 'AgenticX v1 pattern: shell_rc_mod'
+  source: v1
+- pattern_id: V1-ssh_backdoor
+  pattern_name: ssh_backdoor
+  category: persistence
+  severity: dangerous
+  regex: authorized_keys
+  description: 'AgenticX v1 pattern: ssh_backdoor'
+  source: v1
+- pattern_id: V1-sudoers_mod
+  pattern_name: sudoers_mod
+  category: persistence
+  severity: dangerous
+  regex: /etc/sudoers|visudo
+  description: 'AgenticX v1 pattern: sudoers_mod'
+  source: v1
+- pattern_id: V1-agent_config_mod
+  pattern_name: agent_config_mod
+  category: persistence
+  severity: dangerous
+  regex: AGENTS\.md|CLAUDE\.md|\.cursorrules|\.clinerules
+  description: 'AgenticX v1 pattern: agent_config_mod'
+  source: v1
+- pattern_id: V1-agenticx_config_mod
+  pattern_name: agenticx_config_mod
+  category: persistence
+  severity: dangerous
+  regex: \.agenticx/config\.yaml|\.agenticx/SOUL\.md
+  description: 'AgenticX v1 pattern: agenticx_config_mod'
+  source: v1
+- pattern_id: V1-reverse_shell
+  pattern_name: reverse_shell
+  category: network
+  severity: dangerous
+  regex: \bnc\s+-[lp]|ncat\s+-[lp]|\bsocat\b
+  description: 'AgenticX v1 pattern: reverse_shell'
+  source: v1
+- pattern_id: V1-tunnel_service
+  pattern_name: tunnel_service
+  category: network
+  severity: caution
+  regex: \bngrok\b|\blocaltunnel\b|\bserveo\b|\bcloudflared\b
+  description: 'AgenticX v1 pattern: tunnel_service'
+  source: v1
+- pattern_id: V1-bash_reverse_shell
+  pattern_name: bash_reverse_shell
+  category: network
+  severity: dangerous
+  regex: /bin/(ba)?sh\s+-i\s+.*>/dev/tcp/
+  description: 'AgenticX v1 pattern: bash_reverse_shell'
+  source: v1
+- pattern_id: V1-exfil_service
+  pattern_name: exfil_service
+  category: network
+  severity: caution
+  regex: webhook\.site|requestbin\.com|pipedream\.net|hookbin\.com
+  description: 'AgenticX v1 pattern: exfil_service'
+  source: v1
+- pattern_id: V1-base64_decode_pipe
+  pattern_name: base64_decode_pipe
+  category: obfuscation
+  severity: dangerous
+  regex: base64\s+(-d|--decode)\s*\|
+  description: 'AgenticX v1 pattern: base64_decode_pipe'
+  source: v1
+- pattern_id: V1-eval_string
+  pattern_name: eval_string
+  category: obfuscation
+  severity: caution
+  regex: \beval\s*\(\s*[\"']
+  description: 'AgenticX v1 pattern: eval_string'
+  source: v1
+- pattern_id: V1-exec_string
+  pattern_name: exec_string
+  category: obfuscation
+  severity: caution
+  regex: \bexec\s*\(\s*[\"']
+  description: 'AgenticX v1 pattern: exec_string'
+  source: v1
+- pattern_id: V1-echo_pipe_exec
+  pattern_name: echo_pipe_exec
+  category: obfuscation
+  severity: dangerous
+  regex: echo\s+[^\n]*\|\s*(bash|sh|python|perl|ruby|node)
+  description: 'AgenticX v1 pattern: echo_pipe_exec'
+  source: v1
+- pattern_id: V1-curl_pipe_shell
+  pattern_name: curl_pipe_shell
+  category: supply_chain
+  severity: dangerous
+  regex: curl\s+[^\n]*\|\s*(ba)?sh
+  description: 'AgenticX v1 pattern: curl_pipe_shell'
+  source: v1
+- pattern_id: V1-wget_pipe_shell
+  pattern_name: wget_pipe_shell
+  category: supply_chain
+  severity: dangerous
+  regex: wget\s+[^\n]*-O\s*-\s*\|\s*(ba)?sh
+  description: 'AgenticX v1 pattern: wget_pipe_shell'
+  source: v1
+- pattern_id: V1-curl_pipe_python
+  pattern_name: curl_pipe_python
+  category: supply_chain
+  severity: dangerous
+  regex: curl\s+[^\n]*\|\s*python
+  description: 'AgenticX v1 pattern: curl_pipe_python'
+  source: v1
+- pattern_id: V1-unpinned_pip
+  pattern_name: unpinned_pip
+  category: supply_chain
+  severity: caution
+  regex: pip\s+install\s+(?!-r\s)(?!.*==)
+  description: 'AgenticX v1 pattern: unpinned_pip'
+  source: v1
+- pattern_id: V1-unpinned_npm
+  pattern_name: unpinned_npm
+  category: supply_chain
+  severity: caution
+  regex: npm\s+install\s+(?!.*@\d)
+  description: 'AgenticX v1 pattern: unpinned_npm'
+  source: v1
+- pattern_id: V1-sudo_usage
+  pattern_name: sudo_usage
+  category: privilege_escalation
+  severity: caution
+  regex: \bsudo\b
+  description: 'AgenticX v1 pattern: sudo_usage'
+  source: v1
+- pattern_id: V1-nopasswd_sudo
+  pattern_name: nopasswd_sudo
+  category: privilege_escalation
+  severity: dangerous
+  regex: NOPASSWD
+  description: 'AgenticX v1 pattern: nopasswd_sudo'
+  source: v1
+- pattern_id: V1-suid_bit
+  pattern_name: suid_bit
+  category: privilege_escalation
+  severity: dangerous
+  regex: chmod\s+[u+]?s
+  description: 'AgenticX v1 pattern: suid_bit'
+  source: v1
+- pattern_id: TH-CE-001
+  pattern_name: dangerous_eval_js
+  category: code_execution
+  severity: dangerous
+  regex: eval\s*\(
+  description: JS eval() 执行动态代码
+  source: cls-certify-threat
+- pattern_id: TH-CE-002
+  pattern_name: function_constructor
+  category: code_execution
+  severity: dangerous
+  regex: Function\s*\(
+  description: 使用 Function 构造器创建动态函数
+  source: cls-certify-threat
+- pattern_id: TH-CE-005
+  pattern_name: python_eval
+  category: code_execution
+  severity: dangerous
+  regex: eval\s*\(
+  description: Python eval() 执行动态表达式
+  source: cls-certify-threat
+- pattern_id: TH-CE-006
+  pattern_name: python_exec
+  category: code_execution
+  severity: dangerous
+  regex: exec\s*\(
+  description: Python exec() 执行动态代码
+  source: cls-certify-threat
+- pattern_id: TH-CE-007
+  pattern_name: python_compile
+  category: code_execution
+  severity: dangerous
+  regex: compile\s*\(
+  description: Python compile() 编译动态代码
+  source: cls-certify-threat
+- pattern_id: TH-CE-008
+  pattern_name: python_import
+  category: code_execution
+  severity: dangerous
+  regex: __import__\s*\(
+  description: Python 动态导入模块
+  source: cls-certify-threat
+- pattern_id: TH-CE-009
+  pattern_name: shell_eval
+  category: code_execution
+  severity: dangerous
+  regex: eval\s+
+  description: Shell eval 执行动态命令
+  source: cls-certify-threat
+- pattern_id: TH-CE-010
+  pattern_name: child_process
+  category: code_execution
+  severity: dangerous
+  regex: child_process
+  description: Node.js child_process 模块
+  source: cls-certify-threat
+- pattern_id: TH-CE-011
+  pattern_name: exec_sync
+  category: code_execution
+  severity: dangerous
+  regex: execSync\s*\(
+  description: Node.js 同步执行系统命令
+  source: cls-certify-threat
+- pattern_id: TH-CE-012
+  pattern_name: spawn_call
+  category: code_execution
+  severity: dangerous
+  regex: spawn\s*\(
+  description: 创建子进程
+  source: cls-certify-threat
+- pattern_id: TH-CE-013
+  pattern_name: os_system
+  category: code_execution
+  severity: dangerous
+  regex: os\.system\s*\(
+  description: Python os.system() 执行系统命令
+  source: cls-certify-threat
+- pattern_id: TH-CE-014
+  pattern_name: os_popen
+  category: code_execution
+  severity: dangerous
+  regex: os\.popen\s*\(
+  description: Python os.popen() 执行命令
+  source: cls-certify-threat
+- pattern_id: TH-CE-015
+  pattern_name: subprocess_call
+  category: code_execution
+  severity: dangerous
+  regex: subprocess\.(call|run|Popen)\s*\(
+  description: Python subprocess 执行命令
+  source: cls-certify-threat
+- pattern_id: TH-CE-016
+  pattern_name: php_system
+  category: code_execution
+  severity: dangerous
+  regex: system\s*\(
+  description: PHP system() 执行系统命令
+  source: cls-certify-threat
+- pattern_id: TH-CE-017
+  pattern_name: php_passthru
+  category: code_execution
+  severity: dangerous
+  regex: passthru\s*\(
+  description: PHP passthru() 执行命令
+  source: cls-certify-threat
+- pattern_id: TH-CE-018
+  pattern_name: php_shell_exec
+  category: code_execution
+  severity: dangerous
+  regex: shell_exec\s*\(
+  description: PHP shell_exec() 执行命令
+  source: cls-certify-threat
+- pattern_id: TH-CE-019
+  pattern_name: php_proc_open
+  category: code_execution
+  severity: dangerous
+  regex: proc_open\s*\(
+  description: PHP proc_open() 创建进程
+  source: cls-certify-threat
+- pattern_id: TH-CE-020
+  pattern_name: ruby_system
+  category: code_execution
+  severity: dangerous
+  regex: system\s*\(
+  description: Ruby system() 执行系统命令
+  source: cls-certify-threat
+- pattern_id: TH-CE-021
+  pattern_name: ruby_io_popen
+  category: code_execution
+  severity: dangerous
+  regex: IO\.popen
+  description: Ruby IO.popen 执行命令
+  source: cls-certify-threat
+- pattern_id: TH-CE-023
+  pattern_name: chmod_777
+  category: code_execution
+  severity: dangerous
+  regex: chmod\s+777
+  description: 设置完全开放权限
+  source: cls-certify-threat
+- pattern_id: TH-CE-024
+  pattern_name: mkfs_format
+  category: code_execution
+  severity: dangerous
+  regex: mkfs\.
+  description: 格式化磁盘
+  source: cls-certify-threat
+- pattern_id: TH-CE-025
+  pattern_name: format_drive
+  category: code_execution
+  severity: dangerous
+  regex: 'format\s+[A-Z]:'
+  description: 格式化磁盘驱动器
+  source: cls-certify-threat
+- pattern_id: TH-INJ-001
+  pattern_name: sql_concat_var
+  category: injection
+  severity: dangerous
+  regex: SELECT.*\+.*\$
+  description: SQL 查询中拼接变量
+  source: cls-certify-threat
+- pattern_id: TH-INJ-002
+  pattern_name: sql_format_string
+  category: injection
+  severity: dangerous
+  regex: SELECT.*%s
+  description: SQL 查询使用格式化字符串
+  source: cls-certify-threat
+- pattern_id: TH-INJ-003
+  pattern_name: sql_cursor_format
+  category: injection
+  severity: dangerous
+  regex: cursor\.execute.*%
+  description: cursor.execute 使用字符串格式化
+  source: cls-certify-threat
+- pattern_id: TH-INJ-004
+  pattern_name: sql_query_concat
+  category: injection
+  severity: dangerous
+  regex: db\.query.*\+
+  description: 数据库查询拼接字符串
+  source: cls-certify-threat
+- pattern_id: TH-INJ-005
+  pattern_name: sql_union_select
+  category: injection
+  severity: dangerous
+  regex: UNION\s+SELECT
+  description: UNION SELECT 语句
+  source: cls-certify-threat
+- pattern_id: TH-INJ-006
+  pattern_name: sql_or_tautology
+  category: injection
+  severity: dangerous
+  regex: OR\s+1=1
+  description: SQL 恒真条件
+  source: cls-certify-threat
+- pattern_id: TH-INJ-007
+  pattern_name: cmd_exec_concat
+  category: injection
+  severity: dangerous
+  regex: exec\s*\(.*\+
+  description: 命令执行中拼接字符串
+  source: cls-certify-threat
+- pattern_id: TH-INJ-008
+  pattern_name: cmd_system_var
+  category: injection
+  severity: dangerous
+  regex: system\s*\(.*\$
+  description: system() 中使用变量
+  source: cls-certify-threat
+- pattern_id: TH-INJ-009
+  pattern_name: cmd_popen_concat
+  category: injection
+  severity: dangerous
+  regex: popen\s*\(.*\+
+  description: popen() 中拼接字符串
+  source: cls-certify-threat
+- pattern_id: TH-INJ-010
+  pattern_name: runtime_exec
+  category: injection
+  severity: dangerous
+  regex: Runtime\.getRuntime\(\)\.exec
+  description: Java Runtime.exec 执行命令
+  source: cls-certify-threat
+- pattern_id: TH-INJ-011
+  pattern_name: path_traversal_unix
+  category: injection
+  severity: dangerous
+  regex: \.\.\//
+  description: Unix 路径遍历
+  source: cls-certify-threat
+- pattern_id: TH-INJ-012
+  pattern_name: path_traversal_win
+  category: injection
+  severity: dangerous
+  regex: \.\.\\\\
+  description: Windows 路径遍历
+  source: cls-certify-threat
+- pattern_id: TH-INJ-013
+  pattern_name: path_traversal_encoded
+  category: injection
+  severity: dangerous
+  regex: '%2e%2e%2f'
+  description: 编码路径遍历
+  source: cls-certify-threat
+- pattern_id: TH-INJ-014
+  pattern_name: path_traversal_mixed
+  category: injection
+  severity: dangerous
+  regex: '%2e%2e/'
+  description: 混合编码路径遍历
+  source: cls-certify-threat
+- pattern_id: TH-INJ-015
+  pattern_name: xss_document_write
+  category: injection
+  severity: dangerous
+  regex: document\.write\s*\(
+  description: document.write 输出内容
+  source: cls-certify-threat
+- pattern_id: TH-INJ-016
+  pattern_name: xss_innerhtml
+  category: injection
+  severity: dangerous
+  regex: innerHTML\s*=
+  description: 直接设置 innerHTML
+  source: cls-certify-threat
+- pattern_id: TH-INJ-017
+  pattern_name: xss_jquery_html
+  category: injection
+  severity: dangerous
+  regex: \.html\s*\(.*\+
+  description: jQuery .html() 拼接内容
+  source: cls-certify-threat
+- pattern_id: TH-AI-001
+  pattern_name: ignore_previous
+  category: ai_safety
+  severity: dangerous
+  regex: ignore previous.*instruction
+  description: 忽略先前指令的提示注入
+  source: cls-certify-threat
+- pattern_id: TH-AI-002
+  pattern_name: ignore_above
+  category: ai_safety
+  severity: dangerous
+  regex: ignore.*above.*instruction
+  description: 忽略上方指令的提示注入
+  source: cls-certify-threat
+- pattern_id: TH-AI-003
+  pattern_name: disregard_previous
+  category: ai_safety
+  severity: dangerous
+  regex: disregard.*previous
+  description: 无视先前内容的提示注入
+  source: cls-certify-threat
+- pattern_id: TH-AI-004
+  pattern_name: dan_mode
+  category: ai_safety
+  severity: dangerous
+  regex: DAN.*mode
+  description: DAN 模式越狱尝试
+  source: cls-certify-threat
+- pattern_id: TH-AI-005
+  pattern_name: jailbreak_keyword
+  category: ai_safety
+  severity: dangerous
+  regex: jailbreak
+  description: 越狱关键词
+  source: cls-certify-threat
+- pattern_id: TH-AI-006
+  pattern_name: do_anything_now
+  category: ai_safety
+  severity: dangerous
+  regex: do anything now
+  description: '"做任何事" 越狱尝试'
+  source: cls-certify-threat
+- pattern_id: TH-AI-007
+  pattern_name: system_prompt_leak
+  category: ai_safety
+  severity: dangerous
+  regex: system prompt
+  description: 尝试获取系统提示词
+  source: cls-certify-threat
+- pattern_id: TH-AI-008
+  pattern_name: developer_mode
+  category: ai_safety
+  severity: dangerous
+  regex: developer mode
+  description: 开发者模式越狱
+  source: cls-certify-threat
+- pattern_id: TH-AI-009
+  pattern_name: new_context
+  category: ai_safety
+  severity: dangerous
+  regex: 'new context:'
+  description: 新上下文注入
+  source: cls-certify-threat
+- pattern_id: TH-AI-010
+  pattern_name: role_override
+  category: ai_safety
+  severity: dangerous
+  regex: system:\s*you are now
+  description: 角色覆盖注入
+  source: cls-certify-threat
+- pattern_id: TH-AI-011
+  pattern_name: unrestricted_ai
+  category: ai_safety
+  severity: dangerous
+  regex: as an AI without restrictions
+  description: 无限制 AI 请求
+  source: cls-certify-threat
+- pattern_id: TH-AI-012
+  pattern_name: hypothetical
+  category: ai_safety
+  severity: dangerous
+  regex: hypothetically speaking
+  description: 假设场景绕过
+  source: cls-certify-threat
+- pattern_id: TH-AI-013
+  pattern_name: educational_bypass
+  category: ai_safety
+  severity: dangerous
+  regex: for educational purposes
+  description: 教育目的绕过
+  source: cls-certify-threat
+- pattern_id: TH-AI-014
+  pattern_name: fictional_bypass
+  category: ai_safety
+  severity: dangerous
+  regex: in a fictional scenario
+  description: 虚构场景绕过
+  source: cls-certify-threat
+- pattern_id: TH-AI-015
+  pattern_name: pretend_bypass
+  category: ai_safety
+  severity: dangerous
+  regex: pretend you are
+  description: 角色扮演绕过
+  source: cls-certify-threat
+- pattern_id: TH-AI-016
+  pattern_name: roleplay_bypass
+  category: ai_safety
+  severity: dangerous
+  regex: roleplay as
+  description: 角色扮演绕过
+  source: cls-certify-threat
+- pattern_id: TH-AI-017
+  pattern_name: not_bound
+  category: ai_safety
+  severity: dangerous
+  regex: you are not bound by
+  description: 声称不受约束
+  source: cls-certify-threat
+- pattern_id: TH-AI-018
+  pattern_name: no_longer_subject
+  category: ai_safety
+  severity: dangerous
+  regex: no longer subject to
+  description: 声称不再受限
+  source: cls-certify-threat
+- pattern_id: TH-PP-001
+  pattern_name: html_comment_inject_en
+  category: prompt_poison
+  severity: dangerous
+  regex: <!--.*(?:ignore|execute|skip).*-->
+  description: HTML 注释中隐藏指令(英文)
+  source: cls-certify-threat
+- pattern_id: TH-PP-002
+  pattern_name: html_comment_inject_zh
+  category: prompt_poison
+  severity: dangerous
+  regex: <!--.*(?:忽略|执行|跳过).*-->
+  description: HTML 注释中隐藏指令(中文)
+  source: cls-certify-threat
+- pattern_id: TH-PP-004
+  pattern_name: role_override_zh
+  category: prompt_poison
+  severity: dangerous
+  regex: 你现在是.*没有.*限制
+  description: 中文角色覆盖
+  source: cls-certify-threat
+- pattern_id: TH-PP-005
+  pattern_name: forget_system_zh
+  category: prompt_poison
+  severity: dangerous
+  regex: 忘记.*系统提示
+  description: 中文遗忘系统提示
+  source: cls-certify-threat
+- pattern_id: TH-PP-006
+  pattern_name: forget_system_en
+  category: prompt_poison
+  severity: dangerous
+  regex: forget.*system.*prompt
+  description: 遗忘系统提示(英文)
+  source: cls-certify-threat
+- pattern_id: TH-PP-007
+  pattern_name: skip_confirm_zh
+  category: prompt_poison
+  severity: dangerous
+  regex: 不需要用户确认直接执行
+  description: 跳过用户确认
+  source: cls-certify-threat
+- pattern_id: TH-PP-008
+  pattern_name: skip_permission_zh
+  category: prompt_poison
+  severity: dangerous
+  regex: 跳过权限检查
+  description: 跳过权限检查
+  source: cls-certify-threat
+- pattern_id: TH-PP-009
+  pattern_name: test_env_bypass_zh
+  category: prompt_poison
+  severity: dangerous
+  regex: 测试环境.*不需要安全
+  description: 测试环境安全绕过
+  source: cls-certify-threat
+- pattern_id: TH-PE-001
+  pattern_name: disable_sandbox
+  category: privilege_escalation
+  severity: dangerous
+  regex: dangerouslyDisableSandbox
+  description: 禁用沙箱保护
+  source: cls-certify-threat
+- pattern_id: TH-PE-002
+  pattern_name: skip_permission_prompt
+  category: privilege_escalation
+  severity: dangerous
+  regex: skipDangerousModePermissionPrompt
+  description: 跳过危险模式权限提示
+  source: cls-certify-threat
+- pattern_id: TH-PE-003
+  pattern_name: no_verify
+  category: privilege_escalation
+  severity: dangerous
+  regex: --no-verify
+  description: 跳过 Git hooks 验证
+  source: cls-certify-threat
+- pattern_id: TH-PE-005
+  pattern_name: doas_usage
+  category: privilege_escalation
+  severity: dangerous
+  regex: doas\s+
+  description: 使用 doas 提权
+  source: cls-certify-threat
+- pattern_id: TH-PE-006
+  pattern_name: permissions_allow_bash
+  category: privilege_escalation
+  severity: dangerous
+  regex: permissions.*allow.*Bash
+  description: 配置允许 Bash 执行
+  source: cls-certify-threat
+- pattern_id: TH-PE-007
+  pattern_name: settings_json
+  category: privilege_escalation
+  severity: dangerous
+  regex: settings\.json
+  description: 修改设置文件
+  source: cls-certify-threat
+- pattern_id: TH-PE-008
+  pattern_name: claude_settings
+  category: privilege_escalation
+  severity: dangerous
+  regex: \.claude/settings
+  description: 修改 Claude 设置
+  source: cls-certify-threat
+- pattern_id: TH-PE-009
+  pattern_name: bashrc_modify
+  category: privilege_escalation
+  severity: dangerous
+  regex: \.bashrc
+  description: 修改 Bash 配置文件
+  source: cls-certify-threat
+- pattern_id: TH-PE-010
+  pattern_name: zshrc_modify
+  category: privilege_escalation
+  severity: dangerous
+  regex: \.zshrc
+  description: 修改 Zsh 配置文件
+  source: cls-certify-threat
+- pattern_id: TH-PE-011
+  pattern_name: profile_modify
+  category: privilege_escalation
+  severity: dangerous
+  regex: \.profile
+  description: 修改 Shell Profile
+  source: cls-certify-threat
+- pattern_id: TH-PE-012
+  pattern_name: hooks_tamper
+  category: privilege_escalation
+  severity: dangerous
+  regex: hooks.*PostToolUse
+  description: 篡改工具 Hook
+  source: cls-certify-threat
+- pattern_id: TH-EX-001
+  pattern_name: dns_exfil_subshell
+  category: exfiltration
+  severity: dangerous
+  regex: \$\(.*\)\..*\.(com|net|org|io)
+  description: DNS 子域名数据外传
+  source: cls-certify-threat
+- pattern_id: TH-EX-002
+  pattern_name: dns_dig_exfil
+  category: exfiltration
+  severity: dangerous
+  regex: dig\s+.*\$
+  description: dig 命令中使用变量
+  source: cls-certify-threat
+- pattern_id: TH-EX-003
+  pattern_name: dns_nslookup_exfil
+  category: exfiltration
+  severity: dangerous
+  regex: nslookup\s+.*\$
+  description: nslookup 中使用变量
+  source: cls-certify-threat
+- pattern_id: TH-EX-004
+  pattern_name: git_push_non_origin
+  category: exfiltration
+  severity: dangerous
+  regex: git\s+push.*(?!origin)
+  description: Git push 到非 origin 远程
+  source: cls-certify-threat
+- pattern_id: TH-EX-005
+  pattern_name: git_remote_add
+  category: exfiltration
+  severity: dangerous
+  regex: git\s+remote\s+add
+  description: 添加 Git 远程仓库
+  source: cls-certify-threat
+- pattern_id: TH-EX-006
+  pattern_name: clipboard_pbcopy
+  category: exfiltration
+  severity: dangerous
+  regex: pbcopy
+  description: 使用 pbcopy 复制到剪贴板
+  source: cls-certify-threat
+- pattern_id: TH-EX-007
+  pattern_name: clipboard_xclip
+  category: exfiltration
+  severity: dangerous
+  regex: xclip
+  description: 使用 xclip 操作剪贴板
+  source: cls-certify-threat
+- pattern_id: TH-EX-008
+  pattern_name: clipboard_xsel
+  category: exfiltration
+  severity: dangerous
+  regex: xsel
+  description: 使用 xsel 操作剪贴板
+  source: cls-certify-threat
+- pattern_id: TH-EX-009
+  pattern_name: clipboard_generic
+  category: exfiltration
+  severity: dangerous
+  regex: clipboard
+  description: 剪贴板操作
+  source: cls-certify-threat
+- pattern_id: TH-EX-010
+  pattern_name: env_inject_bashrc
+  category: exfiltration
+  severity: dangerous
+  regex: '>>\s*~/?\.(bashrc|zshrc|profile)'
+  description: 向 Shell 配置文件追加内容
+  source: cls-certify-threat
+- pattern_id: TH-DD-001
+  pattern_name: curl_pipe_exec
+  category: dynamic_download
+  severity: dangerous
+  regex: curl.*\|\s*(bash|sh|zsh|python|node)
+  description: curl 管道执行
+  source: cls-certify-threat
+- pattern_id: TH-DD-002
+  pattern_name: wget_exec
+  category: dynamic_download
+  severity: dangerous
+  regex: wget.*&&.*(bash|sh|source|\./)
+  description: ' wget 下载后执行'
+  source: cls-certify-threat
+- pattern_id: TH-DD-003
+  pattern_name: fetch_eval
+  category: dynamic_download
+  severity: dangerous
+  regex: fetch\(.*\)\.then.*eval
+  description: fetch 后 eval 执行
+  source: cls-certify-threat
+- pattern_id: TH-DD-004
+  pattern_name: requests_exec
+  category: dynamic_download
+  severity: dangerous
+  regex: requests\.get\(.*\).*exec\(
+  description: requests.get 后 exec 执行
+  source: cls-certify-threat
+- pattern_id: TH-DD-005
+  pattern_name: anti_forensics_rm
+  category: dynamic_download
+  severity: dangerous
+  regex: '&&\s*rm\s+'
+  description: 执行后删除痕迹
+  source: cls-certify-threat
+- pattern_id: TH-DD-006
+  pattern_name: anti_forensics_shred
+  category: dynamic_download
+  severity: dangerous
+  regex: '&&\s*shred\s+'
+  description: 执行后安全擦除
+  source: cls-certify-threat
+- pattern_id: TH-DD-007
+  pattern_name: tmp_exec_rm
+  category: dynamic_download
+  severity: dangerous
+  regex: /tmp/.*&&.*rm
+  description: 临时文件执行后删除
+  source: cls-certify-threat
+- pattern_id: TH-CT-001
+  pattern_name: time_js
+  category: conditional_trigger
+  severity: dangerous
+  regex: Date\(\).*get(Month|Date|FullYear)
+  description: JavaScript 时间条件检查
+  source: cls-certify-threat
+- pattern_id: TH-CT-002
+  pattern_name: time_python
+  category: conditional_trigger
+  severity: dangerous
+  regex: datetime\.now\(\).*if
+  description: Python 时间条件检查
+  source: cls-certify-threat
+- pattern_id: TH-CT-003
+  pattern_name: time_shell
+  category: conditional_trigger
+  severity: dangerous
+  regex: date\s+.*-d
+  description: Shell 日期条件
+  source: cls-certify-threat
+- pattern_id: TH-CT-004
+  pattern_name: env_ci_check
+  category: conditional_trigger
+  severity: dangerous
+  regex: if.*(CI|GITHUB_ACTIONS|JENKINS)
+  description: CI 环境检测
+  source: cls-certify-threat
+- pattern_id: TH-CT-005
+  pattern_name: env_var_python
+  category: conditional_trigger
+  severity: dangerous
+  regex: if.*(os\.environ\[|process\.env\.)
+  description: 环境变量条件检查
+  source: cls-certify-threat
+- pattern_id: TH-CT-006
+  pattern_name: platform_check
+  category: conditional_trigger
+  severity: dangerous
+  regex: if.*(platform|os\.name|sys\.platform)
+  description: 平台检测条件
+  source: cls-certify-threat
+- pattern_id: TH-AC-001
+  pattern_name: memory_dir_write
+  category: agent_context
+  severity: dangerous
+  regex: \.claude/memory
+  description: 访问 Agent 记忆目录
+  source: cls-certify-threat
+- pattern_id: TH-AC-002
+  pattern_name: memory_md_write
+  category: agent_context
+  severity: dangerous
+  regex: MEMORY\.md
+  description: 写入/修改 MEMORY.md 文件
+  source: cls-certify-threat
+- pattern_id: TH-AC-003
+  pattern_name: claude_md_write
+  category: agent_context
+  severity: dangerous
+  regex: CLAUDE\.md
+  description: 写入/修改 CLAUDE.md 文件
+  source: cls-certify-threat
+- pattern_id: TH-AC-004
+  pattern_name: claude_dir_config
+  category: agent_context
+  severity: dangerous
+  regex: \.claude/
+  description: 访问 .claude/ 配置目录
+  source: cls-certify-threat
+- pattern_id: TH-AC-005
+  pattern_name: settings_local_json
+  category: agent_context
+  severity: dangerous
+  regex: settings\.local\.json
+  description: 修改 settings.local.json
+  source: cls-certify-threat
+- pattern_id: TH-AC-006
+  pattern_name: permissions_allow_mod
+  category: agent_context
+  severity: dangerous
+  regex: permissions\.allow
+  description: 修改 permissions.allow 配置
+  source: cls-certify-threat
+- pattern_id: TH-AC-007
+  pattern_name: permissions_deny_mod
+  category: agent_context
+  severity: dangerous
+  regex: permissions\.deny
+  description: 修改 permissions.deny 配置
+  source: cls-certify-threat
+- pattern_id: TH-AC-008
+  pattern_name: tool_write_memory
+  category: agent_context
+  severity: dangerous
+  regex: Write.*memory|Write.*MEMORY|Edit.*memory|Edit.*MEMORY
+  description: 通过工具修改记忆文件
+  source: cls-certify-threat
+- pattern_id: TH-AC-009
+  pattern_name: tool_write_claude_md
+  category: agent_context
+  severity: dangerous
+  regex: Write.*CLAUDE\.md|Edit.*CLAUDE\.md
+  description: 通过工具修改系统提示
+  source: cls-certify-threat
+- pattern_id: TH-AC-010
+  pattern_name: tool_write_settings
+  category: agent_context
+  severity: dangerous
+  regex: Write.*settings.*json|Edit.*settings.*json
+  description: 通过工具修改配置文件
+  source: cls-certify-threat
+- pattern_id: TH-AC-011
+  pattern_name: dynamic_system_prompt
+  category: agent_context
+  severity: dangerous
+  regex: system.prompt.*modify|modify.*system.prompt|override.*instruction
+  description: 动态修改系统提示
+  source: cls-certify-threat
+- pattern_id: TH-AC-012
+  pattern_name: read_memory_exfil
+  category: agent_context
+  severity: dangerous
+  regex: Read.*\.claude/memory|cat.*\.claude/memory
+  description: 读取记忆文件获取用户信息
+  source: cls-certify-threat
+- pattern_id: TH-PE-013
+  pattern_name: hook_user_prompt
+  category: privilege_escalation
+  severity: dangerous
+  regex: UserPromptSubmit
+  description: 注册 UserPromptSubmit hook
+  source: cls-certify-threat
+- pattern_id: TH-PE-014
+  pattern_name: hook_pre_tool
+  category: privilege_escalation
+  severity: dangerous
+  regex: PreToolUse
+  description: 注册 PreToolUse hook
+  source: cls-certify-threat
+- pattern_id: TH-PE-015
+  pattern_name: hook_notification
+  category: privilege_escalation
+  severity: dangerous
+  regex: Notification|NotificationArrived
+  description: 注册通知类 hook
+  source: cls-certify-threat
+- pattern_id: TH-PE-016
+  pattern_name: hook_script_inject
+  category: privilege_escalation
+  severity: dangerous
+  regex: hooks.*(\.sh|\.bash|\.py|\.js)
+  description: Hook 脚本引用外部文件
+  source: cls-certify-threat
+- pattern_id: TH-PE-017
+  pattern_name: alias_inject
+  category: privilege_escalation
+  severity: dangerous
+  regex: alias\s+(cd|ls|rm|cp|mv|cat|git|sudo)\s*=
+  description: 注入常用命令别名
+  source: cls-certify-threat
+- pattern_id: TH-PE-018
+  pattern_name: function_override
+  category: privilege_escalation
+  severity: dangerous
+  regex: function\s+(cd|ls|rm|cp|mv|cat|git|sudo)\s*\(\)
+  description: 函数覆盖常用命令
+  source: cls-certify-threat
+- pattern_id: TH-PE-019
+  pattern_name: path_hijack
+  category: privilege_escalation
+  severity: dangerous
+  regex: export\s+PATH\s*=
+  description: PATH 环境变量劫持
+  source: cls-certify-threat
+- pattern_id: TH-PE-020
+  pattern_name: env_inject_sensitive
+  category: privilege_escalation
+  severity: dangerous
+  regex: export\s+(ANTHROPIC_API_KEY|OPENAI_API_KEY|AWS_SECRET)
+  description: 注入敏感环境变量
+  source: cls-certify-threat
+- pattern_id: TH-PE-021
+  pattern_name: ld_preload_inject
+  category: privilege_escalation
+  severity: dangerous
+  regex: LD_PRELOAD|DYLD_INSERT_LIBRARIES
+  description: 动态库预加载注入
+  source: cls-certify-threat
+- pattern_id: TH-PE-022
+  pattern_name: prompt_cmd_inject
+  category: privilege_escalation
+  severity: dangerous
+  regex: PROMPT_COMMAND\s*=
+  description: PROMPT_COMMAND 注入
+  source: cls-certify-threat
+- pattern_id: TH-PE-023
+  pattern_name: env_wildcard_export
+  category: privilege_escalation
+  severity: dangerous
+  regex: export\s+.*\$\(
+  description: 环境变量值含命令替换
+  source: cls-certify-threat
+- pattern_id: TH-PE-024
+  pattern_name: completion_inject
+  category: privilege_escalation
+  severity: dangerous
+  regex: complete\s+-[A-Za-z]+|compdef\s+
+  description: Tab 补全注入
+  source: cls-certify-threat
+- pattern_id: TH-INJ-018
+  pattern_name: ansi_escape_hex
+  category: injection
+  severity: dangerous
+  regex: \\x1[bB]\[
+  description: ANSI 转义序列注入(hex)
+  source: cls-certify-threat
+- pattern_id: TH-INJ-019
+  pattern_name: ansi_escape_octal
+  category: injection
+  severity: dangerous
+  regex: \\033\[
+  description: ANSI 转义序列注入(octal)
+  source: cls-certify-threat
+- pattern_id: TH-INJ-020
+  pattern_name: ansi_escape_named
+  category: injection
+  severity: dangerous
+  regex: \\e\[
+  description: ANSI 转义序列注入(named)
+  source: cls-certify-threat
+- pattern_id: TH-INJ-021
+  pattern_name: cursor_manipulation
+  category: injection
+  severity: dangerous
+  regex: \\x1[bB]\[[0-9]*[ABCDHJ]
+  description: 光标操作/屏幕清除
+  source: cls-certify-threat
+- pattern_id: TH-INJ-022
+  pattern_name: carriage_return_overwrite
+  category: injection
+  severity: dangerous
+  regex: \\r[^\n]
+  description: 回车覆写伪造输出
+  source: cls-certify-threat
+- pattern_id: TH-INJ-023
+  pattern_name: terminal_title_inject
+  category: injection
+  severity: dangerous
+  regex: \\x1[bB]\]0
+  description: ;终端标题注入
+  source: cls-certify-threat
+- pattern_id: TH-INJ-024
+  pattern_name: osc_sequence
+  category: injection
+  severity: dangerous
+  regex: \\x1[bB]\][0-9]+
+  description: ;OSC 控制序列注入
+  source: cls-certify-threat
+- pattern_id: TH-INJ-025
+  pattern_name: bell_flood
+  category: injection
+  severity: caution
+  regex: \\x07|\\a
+  description: 响铃字符注入
+  source: cls-certify-threat
+- pattern_id: TH-PP-010
+  pattern_name: mcp_bash_exploit
+  category: prompt_poison
+  severity: dangerous
+  regex: (use|call|invoke|run).*Bash.*(tool|command)|Bash.*tool.*(execute|run)
+  description: 引导通过 Bash 工具执行命令
+  source: cls-certify-threat
+- pattern_id: TH-PP-011
+  pattern_name: mcp_write_exploit
+  category: prompt_poison
+  severity: dangerous
+  regex: (use|call).*Write.*(tool|overwrite)|Write.*tool.*(sensitive|config|settings)
+  description: 引导通过 Write 工具覆盖文件
+  source: cls-certify-threat
+- pattern_id: TH-PP-012
+  pattern_name: mcp_edit_exploit
+  category: prompt_poison
+  severity: dangerous
+  regex: (use|call).*Edit.*(tool|modify)|Edit.*tool.*(config|settings|permission)
+  description: 引导通过 Edit 工具修改配置
+  source: cls-certify-threat
+- pattern_id: TH-PP-013
+  pattern_name: mcp_tool_chain
+  category: prompt_poison
+  severity: dangerous
+  regex: mcp__.*mcp__|tool.*chain|combine.*tools.*escalat
+  description: MCP 工具链组合攻击
+  source: cls-certify-threat
+- pattern_id: TH-PP-014
+  pattern_name: silent_execution_zh
+  category: prompt_poison
+  severity: dangerous
+  regex: 不要(告诉|提示|显示|通知)用户|静默(执行|运行)|悄悄
+  description: 中文静默执行指令
+  source: cls-certify-threat
+- pattern_id: TH-PP-015
+  pattern_name: silent_execution_en
+  category: prompt_poison
+  severity: dangerous
+  regex: (do not|don.t).*(tell|show|notify|inform).*user|silently.*(execute|run)|without.*user.*knowing
+  description: 英文静默执行指令
+  source: cls-certify-threat
+- pattern_id: SEC-openai_api_key
+  pattern_name: openai_api_key
+  category: secret
+  severity: dangerous
+  regex: sk-proj-[a-zA-Z0-9]{20,}
+  description: OpenAI API Key
+  source: cls-certify-secret
+- pattern_id: SEC-github_oauth_token
+  pattern_name: github_oauth_token
+  category: secret
+  severity: dangerous
+  regex: gho_[a-zA-Z0-9]{36}
+  description: GitHub OAuth Token
+  source: cls-certify-secret
+- pattern_id: SEC-github_app_token
+  pattern_name: github_app_token
+  category: secret
+  severity: dangerous
+  regex: ghs_[a-zA-Z0-9]{36}
+  description: GitHub App Token
+  source: cls-certify-secret
+- pattern_id: SEC-github_refresh_token
+  pattern_name: github_refresh_token
+  category: secret
+  severity: dangerous
+  regex: ghr_[a-zA-Z0-9]{36}
+  description: GitHub Refresh Token
+  source: cls-certify-secret
+- pattern_id: SEC-aws_temp_key
+  pattern_name: aws_temp_key
+  category: secret
+  severity: dangerous
+  regex: ASIA[0-9A-Z]{16}
+  description: AWS Temporary Access Key
+  source: cls-certify-secret
+- pattern_id: SEC-aliyun_access_key
+  pattern_name: aliyun_access_key
+  category: secret
+  severity: dangerous
+  regex: LTAI[a-zA-Z0-9]{16}
+  description: Alibaba Cloud Access Key
+  source: cls-certify-secret
+- pattern_id: SEC-tencent_secret_id
+  pattern_name: tencent_secret_id
+  category: secret
+  severity: dangerous
+  regex: AKID[a-zA-Z0-9]{32}
+  description: Tencent Cloud Secret ID
+  source: cls-certify-secret
+- pattern_id: SEC-google_api_key
+  pattern_name: google_api_key
+  category: secret
+  severity: dangerous
+  regex: AIza[0-9A-Za-z_-]{35}
+  description: Google API Key
+  source: cls-certify-secret
+- pattern_id: SEC-private_key
+  pattern_name: private_key
+  category: secret
+  severity: dangerous
+  regex: '-----BEGIN (RSA |EC |DSA |OPENSSH )?PRIVATE KEY-----'
+  description: Private Key File
+  source: cls-certify-secret
+- pattern_id: SEC-db_connection_string
+  pattern_name: db_connection_string
+  category: secret
+  severity: dangerous
+  regex: (mongodb|mysql|postgresql|redis)://[^:]+:[^@]+@
+  description: Database Connection String
+  source: cls-certify-secret
+- pattern_id: SEC-hardcoded_password
+  pattern_name: hardcoded_password
+  category: secret
+  severity: dangerous
+  regex: (password|passwd|pwd)\s*[=:]\s*['"'"'""][^'"'"'""]{4,}['"'"'""]
+  description: Hardcoded Password
+  source: cls-certify-secret
+- pattern_id: SEC-generic_api_key
+  pattern_name: generic_api_key
+  category: secret
+  severity: dangerous
+  regex: api[_-]?(key|secret|token)\s*[=:]\s*['"'"'""][a-zA-Z0-9_\-]{32,}['"'"'""]
+  description: Generic API Key/Secret/Token
+  source: cls-certify-secret
+- pattern_id: SEC-bearer_token
+  pattern_name: bearer_token
+  category: secret
+  severity: dangerous
+  regex: (bearer|token)\s+[a-zA-Z0-9_\-.]{40,}
+  description: Bearer/Token Authentication
+  source: cls-certify-secret
+- pattern_id: SEC-jwt_token
+  pattern_name: jwt_token
+  category: secret
+  severity: dangerous
+  regex: eyJ[a-zA-Z0-9_-]*\.eyJ[a-zA-Z0-9_-]*\.[a-zA-Z0-9_-]*
+  description: JSON Web Token
+  source: cls-certify-secret
+- pattern_id: SEC-env_secret
+  pattern_name: env_secret
+  category: secret
+  severity: dangerous
+  regex: ^[A-Z_]*(KEY|SECRET|TOKEN|PASSWORD|PASS)=[^\s'"'"'"]{8,}
+  description: Environment File Secret
+  source: cls-certify-secret
+- pattern_id: SEC-x_api_key_header
+  pattern_name: x_api_key_header
+  category: secret
+  severity: dangerous
+  regex: x-api-key\s*:\s*[a-zA-Z0-9_\-]{32,}
+  description: X-API-Key Header
+  source: cls-certify-secret
+- pattern_id: SEC-email_address
+  pattern_name: email_address
+  category: secret
+  severity: caution
+  regex: '[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}'
+  description: Email Address
+  source: cls-certify-secret
+- pattern_id: SEC-ip_address
+  pattern_name: ip_address
+  category: secret
+  severity: caution
+  regex: \b([0-9]{1,3}\.){3}[0-9]{1,3}\b
+  description: IP Address
+  source: cls-certify-secret
+exclude_path_globs:
+- '**/threat-patterns.md'
+- '**/sensitive-data-patterns.md'
+- '**/known-malicious-patterns.md'
+md_only_categories:
+- prompt_injection
+- ai_safety
+- prompt_poison
+- agent_context
+- privilege_escalation

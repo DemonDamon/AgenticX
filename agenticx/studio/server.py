@@ -4801,6 +4801,105 @@ def create_studio_app() -> FastAPI:
             logger.warning("put_skill_settings error: %s", exc)
             raise HTTPException(status_code=500, detail=str(exc)) from exc
 
+    @app.get("/api/skills/guard-settings")
+    async def get_guard_settings(
+        x_agx_desktop_token: str | None = Header(default=None),
+    ) -> dict:
+        _check_token(x_agx_desktop_token)
+        try:
+            from agenticx.skills.guard_config import guard_settings_payload
+
+            return {"ok": True, **guard_settings_payload()}
+        except Exception as exc:
+            logger.warning("get_guard_settings error: %s", exc)
+            return {"ok": False, "error": str(exc)}
+
+    @app.put("/api/skills/guard-settings")
+    async def put_guard_settings(
+        payload: dict,
+        x_agx_desktop_token: str | None = Header(default=None),
+    ) -> dict:
+        _check_token(x_agx_desktop_token)
+        try:
+            from agenticx.skills.guard_config import guard_settings_payload, persist_guard_settings
+
+            version = payload.get("version")
+            scan_mode = payload.get("scan_mode")
+            llm_verify = payload.get("llm_verify")
+            if version is not None:
+                version = int(version)
+                if version not in (1, 2):
+                    raise HTTPException(status_code=400, detail="version must be 1 or 2")
+            if scan_mode is not None:
+                sm = str(scan_mode).strip().lower()
+                if sm not in {"quick", "standard", "full"}:
+                    raise HTTPException(status_code=400, detail="invalid scan_mode")
+                scan_mode = sm
+            if llm_verify is not None and not isinstance(llm_verify, bool):
+                raise HTTPException(status_code=400, detail="llm_verify must be boolean")
+            persist_guard_settings(
+                version=version,
+                scan_mode=scan_mode,
+                llm_verify=llm_verify,
+            )
+            return {"ok": True, **guard_settings_payload()}
+        except HTTPException:
+            raise
+        except Exception as exc:
+            logger.warning("put_guard_settings error: %s", exc)
+            raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+    @app.post("/api/skills/guard-scan")
+    async def post_guard_scan(
+        payload: dict,
+        x_agx_desktop_token: str | None = Header(default=None),
+    ) -> dict:
+        """Deep skill security scan by directory path or SKILL.md markdown body."""
+        _check_token(x_agx_desktop_token)
+        skill_path = str(payload.get("skill_path") or "").strip()
+        markdown = payload.get("markdown")
+        skill_name = str(payload.get("skill_name") or "").strip()
+        mode = str(payload.get("mode") or "standard").strip().lower()
+        if mode not in {"quick", "standard", "full"}:
+            raise HTTPException(status_code=400, detail="mode must be quick|standard|full")
+        verify_llm = bool(payload.get("verify_with_llm", False))
+        html_report = bool(payload.get("html_report", False))
+        try:
+            import tempfile
+            from pathlib import Path as _Path
+
+            from agenticx.skills.guard import scan_result_to_payload, scan_skill_deep, scan_skill_markdown_text
+            from agenticx.skills.guard_report import render_html_report
+
+            if markdown is not None:
+                text = str(markdown)
+                if mode == "full":
+                    with tempfile.TemporaryDirectory() as td:
+                        d = _Path(td) / "skill"
+                        d.mkdir()
+                        (d / "SKILL.md").write_text(text, encoding="utf-8")
+                        result = scan_skill_deep(
+                            d, source="community", mode=mode, verify_with_llm=verify_llm,
+                        )
+                else:
+                    result = scan_skill_markdown_text(text, source="community")
+            elif skill_path:
+                p = _Path(skill_path).expanduser()
+                if not p.exists():
+                    raise HTTPException(status_code=400, detail="skill_path not found")
+                result = scan_skill_deep(p, source="community", mode=mode, verify_with_llm=verify_llm)
+            else:
+                raise HTTPException(status_code=400, detail="skill_path or markdown required")
+            out: dict = {"ok": True, "scan": scan_result_to_payload(result, skill_name or skill_path or "skill")}
+            if html_report:
+                out["html"] = render_html_report(result, skill_name=skill_name, skill_path=skill_path)
+            return out
+        except HTTPException:
+            raise
+        except Exception as exc:
+            logger.warning("post_guard_scan error: %s", exc)
+            raise HTTPException(status_code=500, detail=str(exc)) from exc
+
     # -- Usage dashboard ---------------------------------------------------------
 
     def _usage_parse_range_ms(
