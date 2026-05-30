@@ -2153,6 +2153,9 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
   const [unattendedContinueCount, setUnattendedContinueCount] = useState(0);
   const unattendedContinueTriggeredRef = useRef<Record<string, number>>({});
   const unattendedContinueBucketRef = useRef<Record<string, number>>({});
+  // Tracks the id of the trailing "无人值守已停止" marker we've already reacted to
+  // per session, so the auto-disable effect does not fight a later manual re-enable.
+  const unattendedAutoStopAckRef = useRef<Record<string, string>>({});
   const [sessionUnattended, setSessionUnattended] = useState(false);
   const [budgetExceededInfo, setBudgetExceededInfo] = useState<BudgetExceededInfo | null>(null);
   const lastSseEventAtRef = useRef(0);
@@ -4039,6 +4042,30 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
     });
   }, []);
 
+  /**
+   * Returns the id of a trailing "无人值守已停止" marker — i.e. an auto-stop
+   * notice that is the most recent unattended event with no later user message.
+   * Used to detect that the supervisor has turned unattended off so the desktop
+   * stops re-enabling it. Returns null when no such trailing marker exists.
+   */
+  const detectTrailingUnattendedStop = useCallback(
+    (msgs: Message[]): string | null => {
+      for (let i = msgs.length - 1; i >= 0; i -= 1) {
+        const m = msgs[i];
+        if (m.role === "user") return null;
+        if (
+          m.role === "tool" &&
+          typeof m.content === "string" &&
+          m.content.includes("无人值守已停止")
+        ) {
+          return String(m.id ?? `idx-${i}`);
+        }
+      }
+      return null;
+    },
+    []
+  );
+
   useEffect(() => {
     const sid = (pane.sessionId || "").trim();
     if (!sid) {
@@ -4049,6 +4076,14 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
       const raw = readScopedLocalStorage(SESSION_UNATTENDED_STORAGE_KEY);
       const map = raw ? (JSON.parse(raw) as Record<string, boolean>) : {};
       const enabled = Boolean(map[sid]);
+      // If the session was already auto-stopped by the supervisor, do not push
+      // it back on — that caused the reopen → re-stop loop with repeated ⛔.
+      const stopId = detectTrailingUnattendedStop(pane.messages ?? []);
+      const autoStopped = stopId !== null && unattendedAutoStopAckRef.current[sid] !== stopId;
+      if (enabled && autoStopped) {
+        setSessionUnattended(false);
+        return;
+      }
       setSessionUnattended(enabled);
       if (enabled && apiBase) {
         void fetch(`${apiBase.replace(/\/$/, "")}/api/sessions/${encodeURIComponent(sid)}/unattended`, {
@@ -4062,7 +4097,40 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
     } catch {
       setSessionUnattended(false);
     }
-  }, [apiBase, apiToken, pane.sessionId]);
+  }, [apiBase, apiToken, pane.sessionId, pane.messages, detectTrailingUnattendedStop]);
+
+  // When the supervisor auto-stops unattended (trailing ⛔ marker), reflect that
+  // by clearing the local toggle and syncing the backend off, so it stays off.
+  useEffect(() => {
+    const sid = (pane.sessionId || "").trim();
+    if (!sid) return;
+    const stopId = detectTrailingUnattendedStop(pane.messages ?? []);
+    if (!stopId) return;
+    if (unattendedAutoStopAckRef.current[sid] === stopId) return;
+    unattendedAutoStopAckRef.current[sid] = stopId;
+    let cleared = false;
+    try {
+      const raw = readScopedLocalStorage(SESSION_UNATTENDED_STORAGE_KEY);
+      const map = raw ? (JSON.parse(raw) as Record<string, boolean>) : {};
+      if (map[sid]) {
+        delete map[sid];
+        writeScopedLocalStorage(SESSION_UNATTENDED_STORAGE_KEY, JSON.stringify(map));
+        cleared = true;
+      }
+    } catch {
+      /* best effort */
+    }
+    setSessionUnattended(false);
+    if (cleared && apiBase) {
+      void fetch(`${apiBase.replace(/\/$/, "")}/api/sessions/${encodeURIComponent(sid)}/unattended`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json", "x-agx-desktop-token": apiToken },
+        body: JSON.stringify({ enabled: false }),
+      }).catch(() => {
+        /* best effort */
+      });
+    }
+  }, [apiBase, apiToken, pane.sessionId, pane.messages, detectTrailingUnattendedStop]);
 
   const toggleSessionUnattended = useCallback(async () => {
     const sid = (pane.sessionId || "").trim();
@@ -4076,14 +4144,21 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
       });
       const raw = readScopedLocalStorage(SESSION_UNATTENDED_STORAGE_KEY);
       const map = raw ? (JSON.parse(raw) as Record<string, boolean>) : {};
-      if (next) map[sid] = true;
-      else delete map[sid];
+      if (next) {
+        map[sid] = true;
+        // Manual re-enable acknowledges any existing trailing stop marker so the
+        // auto-disable effect does not immediately turn it back off.
+        const stopId = detectTrailingUnattendedStop(pane.messages ?? []);
+        if (stopId) unattendedAutoStopAckRef.current[sid] = stopId;
+      } else {
+        delete map[sid];
+      }
       writeScopedLocalStorage(SESSION_UNATTENDED_STORAGE_KEY, JSON.stringify(map));
       setSessionUnattended(next);
     } catch {
       setStallHintToast("无人值守开关保存失败");
     }
-  }, [apiBase, apiToken, pane.sessionId, sessionUnattended]);
+  }, [apiBase, apiToken, pane.sessionId, pane.messages, sessionUnattended, detectTrailingUnattendedStop]);
 
   /** Returns true only when disk merge actually added/changed rows (used to gate progress timer). */
   const mergeTailFromDisk = useCallback(

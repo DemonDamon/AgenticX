@@ -69,8 +69,13 @@ def set_session_unattended_enabled(session: Any, enabled: bool) -> None:
         sp = {}
         setattr(session, "scratchpad", sp)
     sp[SESSION_META_UNATTENDED] = bool(enabled)
-    if enabled and SCRATCH_SUPERVISOR_STARTED_KEY not in sp:
-        sp[SCRATCH_SUPERVISOR_STARTED_KEY] = time.time()
+    if enabled:
+        if SCRATCH_SUPERVISOR_STARTED_KEY not in sp:
+            sp[SCRATCH_SUPERVISOR_STARTED_KEY] = time.time()
+    else:
+        # Reset the wall-clock anchor on disable so a later manual re-enable
+        # starts a fresh window instead of re-tripping the old (stale) limit.
+        sp.pop(SCRATCH_SUPERVISOR_STARTED_KEY, None)
 
 
 def _last_progress_ts(messages: list[dict[str, Any]]) -> float:
@@ -159,7 +164,8 @@ class SessionSupervisor:
             if max_hours > 0 and (now - started) > max_hours * 3600.0:
                 await self._fail_session(
                     managed,
-                    f"达到 max_wall_clock_hours={max_hours}",
+                    f"已连续运行约 {max_hours:g} 小时，达到自动运行时长上限",
+                    code="wall_clock",
                 )
                 continue
 
@@ -167,7 +173,8 @@ class SessionSupervisor:
             if round_n >= max_cont:
                 await self._fail_session(
                     managed,
-                    f"达到 max_continuations_per_session={max_cont}",
+                    f"已自动续跑 {max_cont} 次，达到次数上限",
+                    code="max_continuations",
                 )
                 continue
 
@@ -246,14 +253,21 @@ class SessionSupervisor:
         }
         managed.studio_session.chat_history.append(row)
 
-    async def _fail_session(self, managed: Any, reason: str) -> None:
+    async def _fail_session(
+        self, managed: Any, reason: str, *, code: Optional[str] = None
+    ) -> None:
         sid = managed.session_id
         row = {
             "id": __import__("uuid").uuid4().hex,
             "role": "tool",
             "content": f"⛔ 无人值守已停止：{reason}",
             "agent_id": "meta",
-            "metadata": {"kind": "unattended_failed", "source": "supervisor", "reason": reason},
+            "metadata": {
+                "kind": "unattended_failed",
+                "source": "supervisor",
+                "reason": reason,
+                "limit_code": code,
+            },
         }
         managed.studio_session.chat_history.append(row)
         self._manager.set_execution_state(sid, "failed")
