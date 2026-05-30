@@ -112,26 +112,59 @@ def load_fts_timestamps_ms(db_path: Path, session_id: str) -> list[int | None]:
     return out
 
 
+def existing_timestamp_bounds_ms(
+    messages: list[dict[str, Any]],
+) -> tuple[int | None, int | None]:
+    """Min/max of timestamps already present in the transcript (ms), or (None, None)."""
+    stamps = [read_timestamp_ms(m) for m in messages]
+    real = [t for t in stamps if t is not None and t > 0]
+    if not real:
+        return None, None
+    return min(real), max(real)
+
+
 def load_session_bounds_ms(
     store: SessionStore,
     session_id: str,
     messages_path: Path,
     message_count: int,
+    *,
+    messages: list[dict[str, Any]] | None = None,
 ) -> tuple[int, int]:
-    """Infer [start_ms, end_ms] window for spreading missing timestamps."""
+    """Infer [start_ms, end_ms] window for spreading missing timestamps.
+
+    The transcript's own real timestamps are authoritative for the upper bound:
+    we must NOT anchor a synthetic last-message timestamp later than the newest
+    real message just because ``metadata.updated_at`` was bumped by a non-message
+    touch (taskspace sync, session restore). Doing so used to shove old sessions
+    into the "last 7 days" bucket. Metadata / file mtime are only a fallback when
+    the transcript carries no real timestamp at all.
+    """
+    real_min_ms, real_max_ms = (
+        existing_timestamp_bounds_ms(messages) if messages is not None else (None, None)
+    )
     meta = store._load_latest_session_metadata_sync(session_id)
     created_ms = normalize_epoch_ms(meta.get("created_at"))
     updated_ms = normalize_epoch_ms(meta.get("updated_at"))
     last_ms = normalize_epoch_ms(meta.get("last_activity_at"))
-    end_ms = max(v for v in (updated_ms, last_ms) if v is not None) if (
-        updated_ms or last_ms
-    ) else None
-    if end_ms is None:
-        try:
-            end_ms = int(messages_path.stat().st_mtime * 1000)
-        except OSError:
-            end_ms = int(datetime.now(timezone.utc).timestamp() * 1000)
-    start_ms = created_ms
+
+    if real_max_ms is not None:
+        # Real data wins: never push the anchor past the newest real message.
+        end_ms = real_max_ms
+    else:
+        end_ms = max(v for v in (updated_ms, last_ms) if v is not None) if (
+            updated_ms or last_ms
+        ) else None
+        if end_ms is None:
+            try:
+                end_ms = int(messages_path.stat().st_mtime * 1000)
+            except OSError:
+                end_ms = int(datetime.now(timezone.utc).timestamp() * 1000)
+
+    if real_min_ms is not None:
+        start_ms = real_min_ms
+    else:
+        start_ms = created_ms
     if start_ms is None:
         start_ms = end_ms - max(1, message_count) * 60_000
     if start_ms >= end_ms:
@@ -238,7 +271,7 @@ def backfill_session_messages(
                 msg["timestamp"] = ts
                 filled += 1
     start_ms, end_ms = load_session_bounds_ms(
-        store, session_id, messages_path, len(messages)
+        store, session_id, messages_path, len(messages), messages=messages
     )
     filled += spread_missing_timestamps_ms(
         messages, start_ms=start_ms, end_ms=end_ms
