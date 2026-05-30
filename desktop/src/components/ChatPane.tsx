@@ -9,7 +9,6 @@ import {
   Database,
   GitBranch,
   GripVertical,
-  Layers,
   LayoutList,
   Quote,
   Search,
@@ -17,7 +16,6 @@ import {
   Sparkles,
   Radar,
   SquarePen,
-  Wand2,
   Wrench,
   Users,
   FolderOpen,
@@ -64,6 +62,7 @@ import { MessageQueuePanel } from "./messages/MessageQueuePanel";
 import { StallRecoveryCard } from "./messages/StallRecoveryCard";
 import { ForwardPicker, type ForwardConfirmPayload } from "./ForwardPicker";
 import { HoverTip } from "./ds/HoverTip";
+import { SkillPuzzleIcon, skillPuzzleIconInnerHtml } from "./icons/SkillPuzzleIcon";
 import { Toast } from "./ds/Toast";
 import { extractClipboardImageFiles, withClipboardImageNames } from "../utils/clipboard-images";
 import { clipboardPlainTextForPaste } from "../utils/clipboard-plain-text";
@@ -566,7 +565,7 @@ function SkillPickerButton({ apiBase, apiToken, onSelect }: SkillPickerButtonPro
                     }}
                   >
                     <span className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-md bg-[rgba(var(--theme-color-rgb,59,130,246),0.22)] text-[rgb(var(--theme-color-rgb,59,130,246))]">
-                      <Wand2 className="h-3 w-3" aria-hidden />
+                      <SkillPuzzleIcon className="h-3 w-3" />
                     </span>
                     <div className="min-w-0 flex-1">
                       <div className="truncate text-[12px] font-medium leading-tight text-text-strong">
@@ -597,7 +596,7 @@ function SkillPickerButton({ apiBase, apiToken, onSelect }: SkillPickerButtonPro
           aria-label="引用技能"
           onClick={open ? handleClose : handleOpen}
         >
-          <Layers className="h-[15px] w-[15px]" strokeWidth={2} aria-hidden />
+          <SkillPuzzleIcon className="h-[15px] w-[15px]" />
         </button>
       </HoverTip>
       {dropdown}
@@ -3119,10 +3118,8 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
     token.setAttribute("data-skill-name", name);
     token.className =
       "agx-composer-inline-chip mx-0.5 inline-flex max-w-[min(100%,280px)] items-center gap-1 rounded-md px-1.5 py-0.5 align-baseline text-[12px] font-medium leading-[1.2]";
-    // wrench SVG icon + name
     const icon = document.createElement("span");
-    icon.innerHTML =
-      '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:11px;height:11px;display:inline-block;vertical-align:middle;opacity:0.8"><path d="M14.7 6.3a1 1 0 000 1.4l1.6 1.6a1 1 0 001.4 0l3.77-3.77a6 6 0 01-7.94 7.94l-6.91 6.91a2.12 2.12 0 01-3-3l6.91-6.91a6 6 0 017.94-7.94l-3.76 3.76z"/></svg>';
+    icon.innerHTML = skillPuzzleIconInnerHtml(11);
     token.appendChild(icon);
     const label = document.createElement("span");
     label.className = "min-w-0 truncate";
