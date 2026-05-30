@@ -372,10 +372,18 @@ export const SessionHistoryPanel = memo(function SessionHistoryPanel({ pane, onC
     const mapped = sessionsMatchingSearch.map((item) => {
       const hint = sessionHistoryHints[item.session_id];
       if (!hint) return item;
+      // Once the backend's updated_at has caught up to this optimistic turn, trust
+      // the real backend execution_state (idle / interrupted / failed). Forcing
+      // "running" purely on hint existence leaves a stranded spinner whenever the
+      // separate clearing pass in loadSessions misses (panel closed, interrupted
+      // turn, pane switch, etc.) — the exact "answered but still spinning" bug.
+      const apiActivity = Number(item.updated_at ?? 0);
+      const backendCaughtUp = apiActivity >= hint.activityAt - 2;
       return {
         ...item,
-        updated_at: Math.max(Number(item.updated_at ?? 0), hint.activityAt),
-        execution_state: hint.running ? "running" : item.execution_state,
+        updated_at: Math.max(apiActivity, hint.activityAt),
+        execution_state:
+          !backendCaughtUp && hint.running ? "running" : item.execution_state,
       };
     });
     return sortSessionRows(mapped);
