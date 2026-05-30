@@ -76,7 +76,11 @@ export type CorePreloadApiResult = {
   messages: { ok: boolean; messages: unknown[]; error?: string };
 };
 
-export const SPLASH_PRELOAD_OVERALL_MS = 12_000;
+/** Keep in sync with `desktop/electron/main.ts` preload budgets. */
+export const SPLASH_PRELOAD_READY_BUDGET_MS = 40_000;
+export const SPLASH_PRELOAD_FETCH_BUDGET_MS = 10_000;
+export const SPLASH_PRELOAD_OVERALL_MS =
+  SPLASH_PRELOAD_READY_BUDGET_MS + SPLASH_PRELOAD_FETCH_BUDGET_MS;
 
 type AvatarApiRow = {
   id: string;
@@ -208,10 +212,56 @@ export async function runSplashCorePreload(): Promise<void> {
   if (result) {
     applySplashPreloadToStore(result as CorePreloadApiResult, targets);
   } else {
+    // Do not mark corePreloadAttempted with empty sessions — that would block
+    // App.tsx fallback from refetching after a slow cold start.
     console.warn("[App init] splash core preload overall timeout");
-    useAppStore.getState().applyCorePreloadBundle({
-      sessionsKey: avatarPreloadKey(targets.avatarId ?? null),
-      sessions: [],
-    });
   }
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+/** Bounded backoff retry for startup avatar fetch when splash preload missed. */
+export async function fetchAvatarsWithStartupRetry(
+  listAvatars: () => Promise<{ ok?: boolean; avatars?: unknown[] } | null | undefined>
+): Promise<Avatar[]> {
+  const maxAttempts = 5;
+  for (let attempt = 0; attempt < maxAttempts; attempt++) {
+    try {
+      const resp = await listAvatars();
+      if (resp?.ok && Array.isArray(resp.avatars)) {
+        return mapAvatarsFromApi(resp.avatars);
+      }
+    } catch (err) {
+      console.warn(`[App init] listAvatars attempt ${attempt + 1} failed:`, err);
+    }
+    if (attempt < maxAttempts - 1) {
+      await sleep(400 * (attempt + 1));
+    }
+  }
+  return [];
+}
+
+/** Bounded backoff retry for session list fetch at startup. */
+export async function fetchSessionsWithStartupRetry(
+  listSessions: (avatarId?: string) => Promise<{ ok?: boolean; sessions?: unknown[] } | null | undefined>,
+  avatarId?: string
+): Promise<unknown[]> {
+  const maxAttempts = 4;
+  const key = avatarId?.trim() || undefined;
+  for (let attempt = 0; attempt < maxAttempts; attempt++) {
+    try {
+      const listed = await listSessions(key);
+      if (listed?.ok && Array.isArray(listed.sessions)) {
+        return listed.sessions;
+      }
+    } catch (err) {
+      console.warn(`[App init] listSessions attempt ${attempt + 1} failed:`, err);
+    }
+    if (attempt < maxAttempts - 1) {
+      await sleep(400 * (attempt + 1));
+    }
+  }
+  return [];
 }

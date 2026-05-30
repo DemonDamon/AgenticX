@@ -14,8 +14,8 @@ export type SplashStage =
   | "ready";
 
 const SPLASH_FADE_MS = 180;
-/** Must exceed splash preload overall timeout (~12s) + backend cold start. */
-const SPLASH_FORCE_SHOW_MS = 15_000;
+/** After backend is ready: allow preload + session restore before force-showing main window. */
+const SPLASH_FORCE_SHOW_MS = 25_000;
 
 let splashWindow: BrowserWindow | null = null;
 let splashShownOnce = false;

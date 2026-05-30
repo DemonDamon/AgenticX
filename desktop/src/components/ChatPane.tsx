@@ -7275,6 +7275,21 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
                 重试
               </button>
             </div>
+          ) : pane.loadingMessages && pane.sessionId ? (
+            <div className="mx-auto flex h-full min-h-0 w-full max-w-4xl flex-col justify-center gap-4 px-2 py-6">
+              <div className="text-center text-xs text-text-faint animate-pulse">正在加载会话…</div>
+              <div className="flex flex-col gap-3">
+                {[0, 1, 2].map((row) => (
+                  <div key={row} className="flex animate-pulse gap-2.5">
+                    <div className="h-8 w-8 shrink-0 rounded-full bg-surface-hover" />
+                    <div
+                      className="h-14 flex-1 rounded-xl bg-surface-hover"
+                      style={{ maxWidth: row === 1 ? "72%" : "84%" }}
+                    />
+                  </div>
+                ))}
+              </div>
+            </div>
           ) : (!pane.sessionId && !isGroupPane && !isAutomationTaskPane) ||
             (pane.sessionId && visibleMessages.length === 0) ? (
             <div className="flex h-full flex-col items-center justify-center gap-5 px-4 text-center text-xs">
