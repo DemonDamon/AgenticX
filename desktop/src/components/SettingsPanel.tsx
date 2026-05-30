@@ -46,6 +46,7 @@ import { ForwardPicker, type ForwardConfirmPayload } from "./ForwardPicker";
 import { QrConnectModal } from "./QrConnectModal";
 import { AutomationTab } from "./automation/AutomationTab";
 import { AutomationTaskIcon } from "./icons/AutomationTaskIcon";
+import { SkillPuzzleIcon } from "./icons/SkillPuzzleIcon";
 import {
   RuntimeConfigSection,
   RUNTIME_MAX_TOOL_ROUNDS,
@@ -723,7 +724,7 @@ const TABS: { id: SettingsTab; label: string; icon: typeof Settings2 }[] = [
   { id: "provider", label: "模型服务", icon: Cpu },
   { id: "mcp", label: "MCP 服务", icon: Plug },
   { id: "tools", label: "工具", icon: Wrench },
-  { id: "skills", label: "技能", icon: Sparkles },
+  { id: "skills", label: "技能", icon: SkillPuzzleIcon },
   // Plan-Id: machi-kb-stage1-local-mvp
   { id: "knowledge", label: "知识库", icon: Library },
   { id: "hooks", label: "钩子", icon: Anchor },

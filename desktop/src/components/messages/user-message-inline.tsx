@@ -1,6 +1,7 @@
 import type { ReactNode } from "react";
 import ReactMarkdown from "react-markdown";
-import { Sparkles, Paperclip } from "lucide-react";
+import { Paperclip } from "lucide-react";
+import { SkillPuzzleIcon } from "../icons/SkillPuzzleIcon";
 import type { Components } from "react-markdown";
 import type { MessageAttachment } from "../../store";
 import {
@@ -36,7 +37,7 @@ export function UserSkillRefChip({ name }: { name: string }) {
       className="agx-composer-inline-chip mx-0.5 inline-flex max-w-[min(100%,280px)] items-center gap-1 rounded-md px-1.5 py-0.5 align-middle text-[12px] font-medium leading-[1.2]"
       title={`@skill://${name}`}
     >
-      <Sparkles className="h-3 w-3 shrink-0 opacity-80" strokeWidth={2} aria-hidden />
+      <SkillPuzzleIcon className="h-3 w-3 shrink-0 opacity-80" />
       <span className="min-w-0 truncate">{name}</span>
     </span>
   );
