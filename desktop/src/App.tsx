@@ -31,7 +31,7 @@ import {
   normalizeAllProviders,
   normalizeProviderEntry,
 } from "./utils/model-options";
-import { avatarPreloadKey, runSplashCorePreload } from "./utils/splash-preload-core";
+import { avatarPreloadKey, fetchAvatarsWithStartupRetry, fetchSessionsWithStartupRetry, mapAvatarsFromApi, runSplashCorePreload } from "./utils/splash-preload-core";
 
 const WORKSPACE_STATE_STORAGE_KEY = "agx-workspace-state-v1";
 
@@ -570,32 +570,11 @@ export function App() {
       // Fallback when splash preload did not populate avatars (timeout / disabled).
       if (useAppStore.getState().avatars.length === 0) {
         try {
-          const avResp = await window.agenticxDesktop.listAvatars();
-          if (avResp?.ok && Array.isArray(avResp.avatars)) {
-            useAppStore.getState().setAvatars(
-              avResp.avatars.map((a) => ({
-                id: a.id,
-                name: a.name,
-                role: a.role ?? "",
-                avatarUrl: a.avatar_url ?? "",
-                pinned: Boolean(a.pinned),
-                createdBy: a.created_by ?? "manual",
-                systemPrompt: a.system_prompt ?? "",
-                toolsEnabled: a.tools_enabled ?? {},
-                skillsEnabled:
-                  a.skills_enabled && typeof a.skills_enabled === "object"
-                    ? { ...a.skills_enabled }
-                    : undefined,
-                brainsEnabled:
-                  a.brains_enabled === "*"
-                    ? "*"
-                    : Array.isArray(a.brains_enabled)
-                      ? a.brains_enabled.map(String)
-                      : undefined,
-                defaultProvider: a.default_provider ?? "",
-                defaultModel: a.default_model ?? "",
-              }))
-            );
+          const avatars = await fetchAvatarsWithStartupRetry(() =>
+            window.agenticxDesktop.listAvatars()
+          );
+          if (avatars.length > 0) {
+            useAppStore.getState().setAvatars(avatars);
           }
         } catch (err) {
           console.error("[App init] preload avatars fallback failed:", err);
@@ -629,12 +608,17 @@ export function App() {
             return normalized;
           }
           try {
-            const listed = await window.agenticxDesktop.listSessions(key || undefined);
-            if (!listed.ok || !Array.isArray(listed.sessions) || listed.sessions.length === 0) {
+            const rawSessions = await fetchSessionsWithStartupRetry(
+              (avatarKey) => window.agenticxDesktop.listSessions(avatarKey),
+              key || undefined
+            );
+            if (rawSessions.length === 0) {
               sessionsCache.set(key, []);
               return [];
             }
-            const normalized = listed.sessions.filter((item) => isSessionItemMatchingAvatar(item, key || undefined));
+            const normalized = rawSessions.filter((item) =>
+              isSessionItemMatchingAvatar(item as SessionListItem, key || undefined)
+            ) as SessionListItem[];
             sessionsCache.set(key, normalized);
             return normalized;
           } catch {

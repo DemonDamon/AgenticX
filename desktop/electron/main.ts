@@ -1546,6 +1546,9 @@ function markStudioReady(): void {
   for (const cb of queued) {
     try { cb(); } catch { /* noop */ }
   }
+  // Only arm splash force-show after backend is ready so the main window
+  // does not appear with empty avatars/sessions during cold start.
+  scheduleSplashForceShowFallback(showMainWindowSafely);
 }
 
 function resetStudioReady(): void {
@@ -1573,19 +1576,25 @@ function waitForStudio(timeoutMs = 30000): Promise<boolean> {
   });
 }
 
-const PRELOAD_ITEM_TIMEOUT_MS = 6000;
+/** Keep in sync with `desktop/src/utils/splash-preload-core.ts`. */
+const PRELOAD_READY_BUDGET_MS = 40_000;
+const PRELOAD_FETCH_TIMEOUT_MS = 10_000;
+const SESSION_MESSAGES_FETCH_TIMEOUT_MS = 30_000;
 
-function withPreloadItemTimeout<T>(promise: Promise<T>, fallback: T): Promise<T> {
+function withFetchTimeout<T>(
+  promise: Promise<T>,
+  fallback: T,
+  timeoutMs = PRELOAD_FETCH_TIMEOUT_MS
+): Promise<T> {
   return Promise.race([
     promise,
     new Promise<T>((resolve) => {
-      setTimeout(() => resolve(fallback), PRELOAD_ITEM_TIMEOUT_MS);
+      setTimeout(() => resolve(fallback), timeoutMs);
     }),
   ]);
 }
 
-async function fetchListAvatarsCore(): Promise<{ ok: boolean; avatars: unknown[] }> {
-  await waitForStudio();
+async function fetchListAvatarsOnce(): Promise<{ ok: boolean; avatars: unknown[] }> {
   try {
     const resp = await fetch(`${getStudioUrl()}/api/avatars`, {
       headers: { "x-agx-desktop-token": getStudioToken() },
@@ -1598,8 +1607,9 @@ async function fetchListAvatarsCore(): Promise<{ ok: boolean; avatars: unknown[]
   }
 }
 
-async function fetchListSessionsCore(avatarId?: string): Promise<{ ok: boolean; sessions: unknown[] }> {
-  await waitForStudio();
+async function fetchListSessionsOnce(
+  avatarId?: string
+): Promise<{ ok: boolean; sessions: unknown[] }> {
   try {
     const params = avatarId ? `?avatar_id=${encodeURIComponent(avatarId)}` : "";
     const resp = await fetch(`${getStudioUrl()}/api/sessions${params}`, {
@@ -1611,6 +1621,16 @@ async function fetchListSessionsCore(avatarId?: string): Promise<{ ok: boolean; 
   } catch {
     return { ok: false, sessions: [] };
   }
+}
+
+async function fetchListAvatarsCore(): Promise<{ ok: boolean; avatars: unknown[] }> {
+  await waitForStudio();
+  return fetchListAvatarsOnce();
+}
+
+async function fetchListSessionsCore(avatarId?: string): Promise<{ ok: boolean; sessions: unknown[] }> {
+  await waitForStudio();
+  return fetchListSessionsOnce(avatarId);
 }
 
 async function fetchListTaskspacesCore(
@@ -2582,7 +2602,6 @@ function createWindow(): void {
   mainWindow.webContents.once("did-finish-load", () => {
     onMainWindowDidFinishLoad();
   });
-  scheduleSplashForceShowFallback(showMainWindowSafely);
   if (app.isPackaged) {
     const indexPath = path.join(__dirname, "..", "dist", "index.html");
     void mainWindow.loadFile(indexPath).catch((err) => {
@@ -3359,18 +3378,29 @@ function registerIpc(): void {
       const avatarId = String(payload?.avatarId ?? "").trim() || undefined;
       const sessionId = String(payload?.sessionId ?? "").trim() || undefined;
 
+      const studioOk = await waitForStudio(PRELOAD_READY_BUDGET_MS);
+      if (!studioOk) {
+        return {
+          ok: false,
+          avatars: { ok: false, avatars: [] },
+          sessions: { ok: false, sessions: [] },
+          taskspaces: { ok: false, workspaces: [], error: "studio_not_ready" },
+          messages: { ok: false, messages: [], error: "studio_not_ready" },
+        };
+      }
+
       const [avatars, sessions, taskspaces, messages] = await Promise.all([
-        withPreloadItemTimeout(fetchListAvatarsCore(), { ok: false, avatars: [] }),
-        withPreloadItemTimeout(fetchListSessionsCore(avatarId), { ok: false, sessions: [] }),
+        withFetchTimeout(fetchListAvatarsOnce(), { ok: false, avatars: [] }),
+        withFetchTimeout(fetchListSessionsOnce(avatarId), { ok: false, sessions: [] }),
         sessionId
-          ? withPreloadItemTimeout(fetchListTaskspacesCore(sessionId), {
+          ? withFetchTimeout(fetchListTaskspacesCore(sessionId), {
               ok: false,
               workspaces: [],
               error: "timeout",
             })
           : Promise.resolve({ ok: false, workspaces: [] as unknown[], error: "skipped" }),
         sessionId
-          ? withPreloadItemTimeout(fetchSessionMessagesCore(sessionId), {
+          ? withFetchTimeout(fetchSessionMessagesCore(sessionId), {
               ok: false,
               messages: [],
               error: "timeout",
@@ -3970,21 +4000,28 @@ function registerIpc(): void {
   ipcMain.handle("load-session-messages", async (_event, sessionId: string) => {
     const sid = String(sessionId || "").trim();
     if (!sid) return { ok: false, messages: [], error: "sessionId is required" };
-    try {
-      const resp = await fetch(
-        `${getStudioUrl()}/api/session/messages?session_id=${encodeURIComponent(sid)}`,
-        {
-          headers: { "x-agx-desktop-token": getStudioToken() },
+    await waitForStudio(PRELOAD_READY_BUDGET_MS);
+    return withFetchTimeout(
+      (async () => {
+        try {
+          const resp = await fetch(
+            `${getStudioUrl()}/api/session/messages?session_id=${encodeURIComponent(sid)}`,
+            {
+              headers: { "x-agx-desktop-token": getStudioToken() },
+            }
+          );
+          if (!resp.ok) {
+            const body = await resp.text().catch(() => "");
+            return { ok: false, messages: [], error: `HTTP ${resp.status}: ${body.slice(0, 300)}` };
+          }
+          return await resp.json();
+        } catch (err) {
+          return { ok: false, messages: [], error: String(err) };
         }
-      );
-      if (!resp.ok) {
-        const body = await resp.text().catch(() => "");
-        return { ok: false, messages: [], error: `HTTP ${resp.status}: ${body.slice(0, 300)}` };
-      }
-      return await resp.json();
-    } catch (err) {
-      return { ok: false, messages: [], error: String(err) };
-    }
+      })(),
+      { ok: false, messages: [], error: "timeout" },
+      SESSION_MESSAGES_FETCH_TIMEOUT_MS
+    );
   });
 
   ipcMain.handle("fork-avatar", async (_event, payload: { sessionId: string; name: string; role?: string }) => {
