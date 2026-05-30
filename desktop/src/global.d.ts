@@ -234,6 +234,34 @@ type SkillSettingsResult = {
   disabled_skills?: string[];
   error?: string;
 };
+type GuardSettingsResult = {
+  ok: boolean;
+  version?: number;
+  scan_mode?: string;
+  llm_verify?: boolean;
+  scan_timeout_seconds?: number;
+  error?: string;
+};
+type GuardScanResult = {
+  ok: boolean;
+  scan?: {
+    skill_name?: string;
+    verdict?: string;
+    score?: number;
+    grade?: string;
+    tier?: string;
+    pattern_set_version?: string;
+    findings?: Array<{
+      pattern_name: string;
+      severity?: string;
+      matched_text?: string;
+      file_path?: string;
+      line_number?: number;
+      category?: string;
+    }>;
+  };
+  error?: string;
+};
 type SkillDetailResult = {
   ok: boolean;
   name: string;
@@ -811,6 +839,18 @@ declare global {
       loadSkillDetail: (args: { name: string }) => Promise<SkillDetailResult>;
       refreshSkills: () => Promise<SkillRefreshResult>;
       getSkillSettings: () => Promise<SkillSettingsResult>;
+      getGuardSettings: () => Promise<GuardSettingsResult>;
+      putGuardSettings: (payload: {
+        version?: number;
+        scan_mode?: string;
+        llm_verify?: boolean;
+      }) => Promise<GuardSettingsResult>;
+      guardScanSkill: (payload: {
+        skill_path?: string;
+        markdown?: string;
+        skill_name?: string;
+        mode?: string;
+      }) => Promise<GuardScanResult>;
       putSkillSettings: (payload: {
         presetPaths: Array<{ id: string; enabled: boolean }>;
         customPaths: string[];

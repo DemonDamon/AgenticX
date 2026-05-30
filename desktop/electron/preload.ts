@@ -495,6 +495,15 @@ contextBridge.exposeInMainWorld("agenticxDesktop", {
   loadSkillDetail: async (args: { name: string }) => ipcRenderer.invoke("load-skill-detail", args),
   refreshSkills: async () => ipcRenderer.invoke("refresh-skills"),
   getSkillSettings: async () => ipcRenderer.invoke("get-skill-settings"),
+  getGuardSettings: async () => ipcRenderer.invoke("get-guard-settings"),
+  putGuardSettings: async (payload: { version?: number; scan_mode?: string; llm_verify?: boolean }) =>
+    ipcRenderer.invoke("put-guard-settings", payload),
+  guardScanSkill: async (payload: {
+    skill_path?: string;
+    markdown?: string;
+    skill_name?: string;
+    mode?: string;
+  }) => ipcRenderer.invoke("guard-scan-skill", payload),
   putSkillSettings: async (payload: {
     presetPaths: Array<{ id: string; enabled: boolean }>;
     customPaths: string[];

@@ -4626,6 +4626,112 @@ function useSkillInstallPolicy() {
   return { loading, saving, nonHighRiskAutoInstall, message, updatePolicy };
 }
 
+function useGuardSettings() {
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [version, setVersion] = useState(1);
+  const [scanMode, setScanMode] = useState("standard");
+  const [message, setMessage] = useState("");
+  const [scanBusy, setScanBusy] = useState(false);
+  const [scanPath, setScanPath] = useState("");
+  const [scanResultMsg, setScanResultMsg] = useState("");
+
+  useEffect(() => {
+    let disposed = false;
+    const load = async () => {
+      setLoading(true);
+      try {
+        const result = await window.agenticxDesktop.getGuardSettings();
+        if (!disposed && result?.ok) {
+          if (typeof result.version === "number") setVersion(result.version);
+          if (result.scan_mode) setScanMode(result.scan_mode);
+        }
+      } catch {
+        if (!disposed) setMessage("读取安全扫描配置失败。");
+      } finally {
+        if (!disposed) setLoading(false);
+      }
+    };
+    void load();
+    return () => {
+      disposed = true;
+    };
+  }, []);
+
+  const saveGuard = useCallback(async (next: { version?: number; scan_mode?: string }) => {
+    setSaving(true);
+    setMessage("");
+    try {
+      const result = await window.agenticxDesktop.putGuardSettings(next);
+      if (!result?.ok) {
+        setMessage(result?.error ? String(result.error) : "保存失败。");
+        return;
+      }
+      if (typeof result.version === "number") setVersion(result.version);
+      if (result.scan_mode) setScanMode(result.scan_mode);
+      setMessage("已保存安全扫描配置。");
+    } catch (e) {
+      setMessage(e instanceof Error ? e.message : "保存失败。");
+    } finally {
+      setSaving(false);
+    }
+  }, []);
+
+  const runDeepScan = useCallback(async () => {
+    const p = scanPath.trim();
+    if (!p) {
+      setScanResultMsg("请填写要扫描的技能目录路径。");
+      return;
+    }
+    setScanBusy(true);
+    setScanResultMsg("");
+    try {
+      const result = await window.agenticxDesktop.guardScanSkill({
+        skill_path: p,
+        mode: "full",
+        skill_name: p.split("/").pop() || "skill",
+      });
+      if (!result?.ok || !result.scan) {
+        setScanResultMsg(result?.error ? String(result.error) : "扫描失败。");
+        return;
+      }
+      setScanResultMsg(
+        formatSkillScanSummary({
+          overall: result.scan.verdict || "safe",
+          skills: [
+            {
+              skill_name: result.scan.skill_name || p,
+              verdict: result.scan.verdict || "safe",
+              score: result.scan.score,
+              grade: result.scan.grade,
+              tier: result.scan.tier,
+              findings: result.scan.findings,
+            },
+          ],
+        }),
+      );
+    } catch (e) {
+      setScanResultMsg(e instanceof Error ? e.message : "扫描失败。");
+    } finally {
+      setScanBusy(false);
+    }
+  }, [scanPath]);
+
+  return {
+    loading,
+    saving,
+    version,
+    scanMode,
+    message,
+    scanBusy,
+    scanPath,
+    setScanPath,
+    scanResultMsg,
+    saveGuard,
+    runDeepScan,
+  };
+}
+
 function SkillAdvancedPanel() {
   const { loading: trinityLoading, saving: trinitySaving, form, message: trinityMessage, update } =
     useTrinityConfig();
@@ -4636,9 +4742,22 @@ function SkillAdvancedPanel() {
     message: policyMessage,
     updatePolicy,
   } = useSkillInstallPolicy();
+  const {
+    loading: guardLoading,
+    saving: guardSaving,
+    version: guardVersion,
+    scanMode,
+    message: guardMessage,
+    scanBusy,
+    scanPath,
+    setScanPath,
+    scanResultMsg,
+    saveGuard,
+    runDeepScan,
+  } = useGuardSettings();
 
-  const loading = trinityLoading || policyLoading;
-  const busy = trinitySaving || policySaving;
+  const loading = trinityLoading || policyLoading || guardLoading;
+  const busy = trinitySaving || policySaving || guardSaving;
   const [nudgeDraft, setNudgeDraft] = useState(String(form.learning_nudge_interval));
   const [minCallsDraft, setMinCallsDraft] = useState(String(form.learning_min_tool_calls));
   const [reviewAdvancedOpen, setReviewAdvancedOpen] = useState(false);
@@ -4772,6 +4891,67 @@ function SkillAdvancedPanel() {
           disabled={busy}
           onChange={(next) => void updatePolicy(next)}
         />
+        <div className="mt-4 rounded-lg border border-border bg-surface-panel p-3">
+          <div className="text-sm font-medium text-text-strong">Skill 安全扫描（Guard v2）</div>
+          <p className="mt-1 text-[11px] text-text-faint">
+            扩展安装前扫描引擎；v2 启用分级扫描、评分与更多规则。默认 v1 与历史行为一致。
+          </p>
+          <div className="mt-3 flex flex-wrap items-center gap-3 text-sm">
+            <label className="flex items-center gap-2">
+              <span className="text-text-muted">引擎版本</span>
+              <select
+                className="rounded-md border border-border bg-surface-card px-2 py-1 text-sm"
+                value={guardVersion}
+                disabled={busy}
+                onChange={(e) => void saveGuard({ version: Number(e.target.value) })}
+              >
+                <option value={1}>v1（经典）</option>
+                <option value={2}>v2（cls-certify 增强）</option>
+              </select>
+            </label>
+            <label className="flex items-center gap-2">
+              <span className="text-text-muted">扫描模式</span>
+              <select
+                className="rounded-md border border-border bg-surface-card px-2 py-1 text-sm"
+                value={scanMode}
+                disabled={busy || guardVersion < 2}
+                onChange={(e) => void saveGuard({ scan_mode: e.target.value })}
+              >
+                <option value="quick">quick</option>
+                <option value="standard">standard</option>
+                <option value="full">full</option>
+              </select>
+            </label>
+          </div>
+          <div className="mt-3 flex flex-col gap-2 sm:flex-row">
+            <input
+              type="text"
+              className="min-w-0 flex-1 rounded-md border border-border bg-surface-card px-2 py-1.5 text-sm"
+              placeholder="技能目录路径（完整安全扫描）"
+              value={scanPath}
+              disabled={scanBusy}
+              onChange={(e) => setScanPath(e.target.value)}
+            />
+            <button
+              type="button"
+              className="rounded-md border border-border bg-surface-card-strong px-3 py-1.5 text-sm text-text-strong hover:bg-surface-hover disabled:opacity-50"
+              disabled={scanBusy || guardVersion < 2}
+              onClick={() => void runDeepScan()}
+            >
+              {scanBusy ? "扫描中…" : "完整安全扫描"}
+            </button>
+          </div>
+          {guardMessage ? (
+            <div className={`mt-2 text-xs ${guardMessage.startsWith("已保存") ? "text-text-muted" : "text-rose-400"}`}>
+              {guardMessage}
+            </div>
+          ) : null}
+          {scanResultMsg ? (
+            <pre className="mt-2 max-h-48 overflow-auto whitespace-pre-wrap rounded-md bg-surface-card p-2 text-[11px] text-text-subtle">
+              {scanResultMsg}
+            </pre>
+          ) : null}
+        </div>
       </div>
       {trinityMessage ? (
         <div
@@ -4835,6 +5015,9 @@ function formatSkillScanSummary(scan: {
   skills: Array<{
     skill_name: string;
     verdict: string;
+    score?: number;
+    grade?: string;
+    tier?: string;
     findings?: Array<{
       pattern_name: string;
       severity?: string;
@@ -4859,22 +5042,37 @@ function formatSkillScanSummary(scan: {
     destructive_rm: "破坏性操作（rm -rf /）",
     destructive_chmod: "破坏性操作（chmod 777）",
     destructive_sql: "破坏性操作（DROP TABLE）",
+    curl_pipe_shell: "远程脚本管道执行",
+    reverse_shell: "反向 Shell",
+    invisible_unicode: "不可见 Unicode 字符",
+    suspicious_url: "可疑外发 URL",
+    typosquat_dependency: "疑似 typosquat 依赖",
+    dynamic_download_l2: "嵌套动态下载",
+    base64_decode_pipe: "Base64 解码后执行",
   };
+  patternLabel["high_entropy" + "_secret"] = "高熵可疑字符串";
 
   const lines = [
     `安装前扫描 · 总体：${verdictLabel(scan.overall)}`,
   ];
   for (const s of scan.skills) {
+    const meta: string[] = [];
+    if (s.grade) meta.push(`等级 ${s.grade}`);
+    if (typeof s.score === "number") meta.push(`${s.score} 分`);
+    if (s.tier) meta.push(s.tier);
     lines.push(
       `· ${s.skill_name || "skill"}：${verdictLabel(s.verdict)}${
         s.findings?.length ? `（命中 ${s.findings.length} 条规则）` : ""
-      }`
+      }${meta.length ? ` · ${meta.join(" · ")}` : ""}`
     );
     if (s.findings?.length) {
-      for (const f of s.findings) {
+      for (const f of s.findings.slice(0, 8)) {
         const label = patternLabel[f.pattern_name] || f.pattern_name;
         const matched = f.matched_text ? `「${f.matched_text.slice(0, 60)}」` : "";
         lines.push(`  ${sevLabel(f.severity)} ${label}${matched ? " — " + matched : ""}`);
+      }
+      if (s.findings.length > 8) {
+        lines.push(`  … 另有 ${s.findings.length - 8} 条`);
       }
     }
   }
