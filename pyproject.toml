@@ -119,6 +119,10 @@ memory = [
     "pymilvus>=2.4.0,<3",
     "numpy>=1.24.0,<2",
 ]
+# ── Graphiti temporal memory graph (Near memory graph panel) ──
+graphiti = [
+    "graphiti-core[kuzu]>=0.29.1,<0.30",
+]
 # ── 文档处理 ──
 # 注意：pytesseract 需要 tesseract (brew install tesseract)
 #        pdf2image 需要 poppler (brew install poppler)
