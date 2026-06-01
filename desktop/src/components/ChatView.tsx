@@ -27,7 +27,7 @@ import { attachmentsFromSessionRow } from "../utils/session-message-map";
 import { MessageRenderer, renderToolMessageExtras } from "./messages/MessageRenderer";
 import { groupConsecutiveToolMessages, type GroupedChatRow } from "./messages/group-tool-messages";
 import { expandMessagesToTopLevelRows } from "./messages/react-blocks";
-import { shouldHideStreamOverlay } from "../utils/stream-overlay-policy";
+import { shouldHideStreamOverlay, shouldShowMidTurnStreamActivity } from "../utils/stream-overlay-policy";
 import { TurnToolGroupCard } from "./messages/TurnToolGroupCard";
 import { messagePlainTextForClipboard } from "../utils/markdown-copy-format";
 import { buildCompactionNoticeText } from "../utils/context-notice";
@@ -619,6 +619,10 @@ export function ChatView({ onOpenConfirm, mode = "pro" }: Props) {
   const hideStreamOverlayAsDuplicate = useMemo(
     () => shouldHideStreamOverlay(streaming, streamedAssistantText || "", visibleMessages),
     [streaming, streamedAssistantText, visibleMessages],
+  );
+  const midTurnStreamActivity = shouldShowMidTurnStreamActivity(
+    streaming,
+    hideStreamOverlayAsDuplicate,
   );
 
   const modelLabel = activeModel
@@ -2059,10 +2063,18 @@ export function ChatView({ onOpenConfirm, mode = "pro" }: Props) {
                   message={{ id: "__stream__", role: "assistant", content: streamedAssistantText || "" }}
                   badge={!isLite && streamingModel ? <ModelBadge provider={streamingModel.provider} model={streamingModel.model} /> : undefined}
                   assistantName="Near"
+                  streamStalled={stallState === "stall"}
                 />
               )}
             </div>
           )}
+          {midTurnStreamActivity && chatStyle === "im" ? (
+            <ImBubble
+              message={{ id: "typing-meta", role: "assistant", content: "" }}
+              assistantName="Near"
+              streamStalled={stallState === "stall"}
+            />
+          ) : null}
           {stallState === "stall" ? (
             <StallRecoveryCard
               kind="stall"

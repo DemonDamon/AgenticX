@@ -564,7 +564,11 @@ export function ImBubble({
                     </div>
                   </div>
                 ) : isMetaPendingWork ? (
-                  <StreamingDots />
+                  streamStalled ? (
+                    <StalledStreamIndicator silentSeconds={streamStalledSeconds} />
+                  ) : (
+                    <StreamingDots />
+                  )
                 ) : isGroupTyping ? (
                   <span className="inline-flex items-baseline gap-0.5" aria-live="polite" aria-label="正在输入">
                     <span>正在输入</span>
@@ -607,6 +611,16 @@ export function ImBubble({
                             onQuoteText={(text) => onQuoteMessage?.(message, text)}
                           />
                         </div>
+                      )
+                    ) : null}
+                    {!isUser &&
+                    isStreaming &&
+                    hasBody &&
+                    (!hasThinkTag || reasoningClosed) ? (
+                      streamStalled ? (
+                        <StalledStreamIndicator silentSeconds={streamStalledSeconds} />
+                      ) : (
+                        <StreamingDots />
                       )
                     ) : null}
                   </>
