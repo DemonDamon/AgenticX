@@ -2055,10 +2055,11 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
   /** 元智能体窗格：顶栏已展示当前模型，气泡内不再重复展示模型徽章 */
   const isMachiMetaPane = pane.avatarId === null;
   const isAutomationTaskPane = isAutomationPaneAvatarId(pane?.avatarId);
-  /** 单聊分身：对话区不展示「厂商/模型」徽章（人设对话而非调试底层模型）；群聊与定时自动化保留 */
+  /** 单聊分身：对话区不展示「厂商/模型」徽章；群聊保留；定时任务不展示（任务本身已绑定模型，避免干扰） */
   const isDedicatedAvatarPane =
     Boolean(pane?.avatarId) && !isGroupPane && !isAutomationTaskPane;
-  const showInlineAssistantModelBadge = !isMachiMetaPane && !isDedicatedAvatarPane;
+  const showInlineAssistantModelBadge =
+    !isMachiMetaPane && !isDedicatedAvatarPane && !isAutomationTaskPane;
   const groupChatId = isGroupPane && pane?.avatarId ? pane.avatarId.slice("group:".length) : "";
   const activeGroup = useMemo(
     () => (isGroupPane ? groups.find((g) => g.id === groupChatId) : undefined),
@@ -5056,7 +5057,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
       {stallState === "stall" && (
         <StallRecoveryCard
           kind="stall"
-          currentModelLabel={currentModelLabel}
+          currentModelLabel={isAutomationTaskPane ? undefined : currentModelLabel}
           modelOptions={stallModelOptions}
           autoNudgeCount={autoNudgeCount}
           autoNudgeMax={stallRuntimeConfig.stall_auto_nudge_max_per_session}
@@ -5073,7 +5074,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
           kind="exhausted"
           rounds={exhaustedRounds?.rounds}
           maxRounds={exhaustedRounds?.maxRounds}
-          currentModelLabel={currentModelLabel}
+          currentModelLabel={isAutomationTaskPane ? undefined : currentModelLabel}
           modelOptions={stallModelOptions}
           resumeInFlight={resumeInFlight}
           rejectReason={stallRejectReason}
@@ -7552,16 +7553,20 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
           {(sessionExecutionState === "running" || stallState === "stall" || sessionUnattended || budgetExceededInfo) && (
             <div className="mb-1 flex flex-wrap items-center gap-2 text-[11px] text-text-muted">
               <span className="rounded-full bg-surface-panel/75 px-2 py-0.5">
-                {currentModelLabel}
-                {sessionExecutionState === "running"
-                  ? " · 运行中"
-                  : sessionWorkInProgress
-                    ? " · 处理中"
-                    : ""}
-                {silentSeconds > 0 ? ` · 静默 ${silentSeconds}s` : ""}
-                {lastToolProgress?.name
-                  ? ` · ${lastToolProgress.name}${lastToolProgress.sec > 0 ? ` ${lastToolProgress.sec}s` : ""}`
-                  : ""}
+                {[
+                  !isAutomationTaskPane ? currentModelLabel : null,
+                  sessionExecutionState === "running"
+                    ? "运行中"
+                    : sessionWorkInProgress
+                      ? "处理中"
+                      : null,
+                  silentSeconds > 0 ? `静默 ${silentSeconds}s` : null,
+                  lastToolProgress?.name
+                    ? `${lastToolProgress.name}${lastToolProgress.sec > 0 ? ` ${lastToolProgress.sec}s` : ""}`
+                    : null,
+                ]
+                  .filter(Boolean)
+                  .join(" · ")}
               </span>
               {contextLoopStats ? (
                 <span className="rounded-full bg-surface-panel/75 px-2 py-0.5 text-text-muted">
