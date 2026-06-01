@@ -21,3 +21,23 @@ export function shouldShowAssistantIconButtons(args: {
   if (args.sessionBusy && args.isLastAssistantInPane) return false;
   return true;
 }
+
+export function shouldShowAssistantFollowups(args: {
+  isUser: boolean;
+  isStreaming: boolean;
+  isGroupTyping: boolean;
+  omitSuggestedQuestions?: boolean;
+  hasSuggestedQuestions: boolean;
+  hasFollowupHandler: boolean;
+  sessionBusy?: boolean;
+  isLastAssistantInPane?: boolean;
+}): boolean {
+  if (args.isUser) return false;
+  if (args.isStreaming) return false;
+  if (args.isGroupTyping) return false;
+  if (args.omitSuggestedQuestions) return false;
+  if (!args.hasSuggestedQuestions) return false;
+  if (!args.hasFollowupHandler) return false;
+  if (args.sessionBusy && args.isLastAssistantInPane) return false;
+  return true;
+}

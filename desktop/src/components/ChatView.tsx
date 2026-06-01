@@ -27,6 +27,7 @@ import { attachmentsFromSessionRow } from "../utils/session-message-map";
 import { MessageRenderer, renderToolMessageExtras } from "./messages/MessageRenderer";
 import { groupConsecutiveToolMessages, type GroupedChatRow } from "./messages/group-tool-messages";
 import { expandMessagesToTopLevelRows } from "./messages/react-blocks";
+import { shouldHideStreamOverlay } from "../utils/stream-overlay-policy";
 import { TurnToolGroupCard } from "./messages/TurnToolGroupCard";
 import { messagePlainTextForClipboard } from "../utils/markdown-copy-format";
 import { buildCompactionNoticeText } from "../utils/context-notice";
@@ -615,20 +616,10 @@ export function ChatView({ onOpenConfirm, mode = "pro" }: Props) {
     () => (chatStyle === "im" ? expandMessagesToTopLevelRows(visibleMessages) : null),
     [chatStyle, visibleMessages]
   );
-  /** Avoid showing __stream__ on top of an already-committed assistant bubble with identical text. */
-  const hideStreamOverlayAsDuplicate = useMemo(() => {
-    if (!streaming) return false;
-    const t = (streamedAssistantText || "").trim();
-    if (!t) return false;
-    for (let i = visibleMessages.length - 1; i >= 0; i--) {
-      const m = visibleMessages[i];
-      if (m.role === "user") break;
-      if (m.role === "assistant" && (!m.agentId || m.agentId === "meta")) {
-        return String(m.content ?? "").trim() === t;
-      }
-    }
-    return false;
-  }, [streaming, streamedAssistantText, visibleMessages]);
+  const hideStreamOverlayAsDuplicate = useMemo(
+    () => shouldHideStreamOverlay(streaming, streamedAssistantText || "", visibleMessages),
+    [streaming, streamedAssistantText, visibleMessages],
+  );
 
   const modelLabel = activeModel
     ? (activeProvider ? `${activeProvider} / ${activeModel}` : activeModel)
