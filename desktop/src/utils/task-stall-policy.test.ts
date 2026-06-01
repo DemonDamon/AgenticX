@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { ParsedTodo } from "../components/TodoUpdateCard";
 import type { Message } from "../store";
 import {
+  isTodoSnapshotSuperseded,
   messageLooksLikeAssistantFinal,
   resolveStickyTodoDisplay,
   shouldSuppressStallDetection,
@@ -13,6 +14,42 @@ const sampleTodo: ParsedTodo = {
   total: 1,
 };
 
+const msg = (partial: Partial<Message> & Pick<Message, "id" | "role">): Message => ({
+  content: "",
+  timestamp: Date.now(),
+  ...partial,
+});
+
+describe("isTodoSnapshotSuperseded", () => {
+  it("returns true when a user message follows the todo snapshot", () => {
+    const messages: Message[] = [
+      msg({ id: "t1", role: "tool", toolName: "todo_write", content: "[ ] task" }),
+      msg({ id: "a1", role: "assistant", content: "working" }),
+      msg({ id: "u1", role: "user", content: "新问题" }),
+    ];
+    expect(isTodoSnapshotSuperseded(messages, 0)).toBe(true);
+  });
+
+  it("returns false when only tool and assistant messages follow the todo snapshot", () => {
+    const messages: Message[] = [
+      msg({ id: "t1", role: "tool", toolName: "todo_write", content: "[ ] task" }),
+      msg({ id: "t2", role: "tool", toolName: "web_search", content: "results" }),
+      msg({ id: "a1", role: "assistant", content: "done" }),
+    ];
+    expect(isTodoSnapshotSuperseded(messages, 0)).toBe(false);
+  });
+
+  it("returns false for the latest todo snapshot with no user messages after it", () => {
+    const messages: Message[] = [
+      msg({ id: "t0", role: "tool", toolName: "todo_write", content: "[ ] old" }),
+      msg({ id: "u0", role: "user", content: "start" }),
+      msg({ id: "t1", role: "tool", toolName: "todo_write", content: "[ ] new" }),
+      msg({ id: "a1", role: "assistant", content: "working" }),
+    ];
+    expect(isTodoSnapshotSuperseded(messages, 2)).toBe(false);
+  });
+});
+
 describe("resolveStickyTodoDisplay", () => {
   it("keeps in_progress while agent is active", () => {
     const out = resolveStickyTodoDisplay(sampleTodo, "active", "running");
@@ -20,8 +57,14 @@ describe("resolveStickyTodoDisplay", () => {
     expect(out.completed).toBe(0);
   });
 
-  it("marks stale in_progress completed when run ended idle", () => {
+  it("falls back in_progress to pending when idle without promotePending evidence", () => {
     const out = resolveStickyTodoDisplay(sampleTodo, "idle", "idle");
+    expect(out.items[0]?.status).toBe("pending");
+    expect(out.completed).toBe(0);
+  });
+
+  it("marks in_progress completed when idle with promotePending evidence", () => {
+    const out = resolveStickyTodoDisplay(sampleTodo, "idle", "idle", { promotePending: true });
     expect(out.items[0]?.status).toBe("completed");
     expect(out.completed).toBe(1);
   });

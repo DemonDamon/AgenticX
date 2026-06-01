@@ -43,6 +43,18 @@ export function messageLooksLikeAssistantFinal(message: Message | undefined): bo
   return true;
 }
 
+/**
+ * True when a newer user turn started after this todo snapshot (and no newer
+ * todo_write replaced it — caller should pass the latest picked snapshot index).
+ */
+export function isTodoSnapshotSuperseded(messages: Message[], todoIndex: number): boolean {
+  if (todoIndex < 0 || todoIndex >= messages.length) return false;
+  for (let i = todoIndex + 1; i < messages.length; i += 1) {
+    if (messages[i]?.role === "user") return true;
+  }
+  return false;
+}
+
 /** Whether desktop auto-nudge may fire for the current stall + execution state. */
 export function shouldAllowStallAutoNudge(
   stallState: StallPhase,
@@ -83,7 +95,10 @@ export function resolveStickyTodoDisplay(
       if (state === "interrupted") {
         return { ...item, status: "pending" };
       }
-      return { ...item, status: "completed" };
+      if (promotePending) {
+        return { ...item, status: "completed" };
+      }
+      return { ...item, status: "pending" };
     }
     if (item.status === "pending" && promotePending) {
       return { ...item, status: "completed" };
