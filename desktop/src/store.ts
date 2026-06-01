@@ -111,6 +111,7 @@ export type ChatPane = {
   modelName: string;
   messages: Message[];
   historyOpen: boolean;
+  memoryGraphOpen: boolean;
   contextInherited: boolean;
   taskspacePanelOpen: boolean;
   membersPanelOpen: boolean;
@@ -516,6 +517,7 @@ type AppState = {
   dropCachedSessionMessages: (sessionId: string | Iterable<string>) => void;
   setPaneHistorySearchTerms: (paneId: string, terms: string[]) => void;
   togglePaneHistory: (paneId: string) => void;
+  togglePaneMemoryGraph: (paneId: string) => void;
   /** @deprecated Prefer cycleSidePanel / openSidePanel */
   toggleTaskspacePanel: (paneId: string) => void;
   toggleMembersPanel: (paneId: string) => void;
@@ -606,6 +608,7 @@ function makeDefaultPane(): ChatPane {
     modelName: "",
     messages: [],
     historyOpen: false,
+    memoryGraphOpen: false,
     contextInherited: false,
     taskspacePanelOpen: false,
     membersPanelOpen: false,
@@ -1271,6 +1274,7 @@ export const useAppStore = create<AppState>((set, get) => ({
           modelName,
           messages: [],
           historyOpen: false,
+          memoryGraphOpen: false,
           contextInherited: false,
           taskspacePanelOpen: false,
           membersPanelOpen: false,
@@ -1647,6 +1651,12 @@ export const useAppStore = create<AppState>((set, get) => ({
     set((state) => ({
       panes: state.panes.map((pane) =>
         pane.id === paneId ? { ...pane, historyOpen: !pane.historyOpen } : pane
+      ),
+    })),
+  togglePaneMemoryGraph: (paneId) =>
+    set((state) => ({
+      panes: state.panes.map((pane) =>
+        pane.id === paneId ? { ...pane, memoryGraphOpen: !pane.memoryGraphOpen } : pane
       ),
     })),
   cycleSidePanel: (paneId, tab) =>

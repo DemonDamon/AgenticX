@@ -43,6 +43,7 @@ type PersistedPaneState = {
   modelProvider?: string;
   modelName?: string;
   historyOpen: boolean;
+  memoryGraphOpen?: boolean;
   contextInherited: boolean;
   taskspacePanelOpen: boolean;
   membersPanelOpen: boolean;
@@ -154,6 +155,7 @@ function normalizePersistedWorkspaceState(raw: unknown): PersistedWorkspaceState
         modelProvider: String(row.modelProvider ?? "").trim(),
         modelName: String(row.modelName ?? "").trim(),
         historyOpen: Boolean(row.historyOpen),
+        memoryGraphOpen: Boolean(row.memoryGraphOpen),
         contextInherited: Boolean(row.contextInherited),
         taskspacePanelOpen: Boolean(row.taskspacePanelOpen),
         membersPanelOpen: Boolean(row.membersPanelOpen),
@@ -718,6 +720,7 @@ export function App() {
                 modelProvider: pane.modelProvider ?? "",
                 modelName: pane.modelName ?? "",
                 membersPanelOpen: pane.membersPanelOpen ?? false,
+                memoryGraphOpen: pane.memoryGraphOpen ?? false,
                 sidePanelTab: pane.sidePanelTab ?? "workspace",
                 spawnsColumnOpen: pane.spawnsColumnOpen ?? false,
                 spawnsColumnSuppressAuto: pane.spawnsColumnSuppressAuto ?? false,
@@ -850,6 +853,7 @@ export function App() {
         modelProvider: pane.modelProvider,
         modelName: pane.modelName,
         historyOpen: pane.historyOpen,
+        memoryGraphOpen: pane.memoryGraphOpen,
         contextInherited: pane.contextInherited,
         taskspacePanelOpen: pane.taskspacePanelOpen,
         membersPanelOpen: pane.membersPanelOpen,

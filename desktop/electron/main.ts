@@ -12,7 +12,7 @@ import {
   shell,
   Tray
 } from "electron";
-import { spawn, ChildProcess, execFile } from "node:child_process";
+import { spawn, ChildProcess, execFile, execFileSync } from "node:child_process";
 
 // Before app.ready: mitigate Chromium paint corruption (smearing/ghosting) on
 // some Windows + NVIDIA (or hybrid GPU) stacks.
@@ -2029,6 +2029,8 @@ async function checkAgxCli(): Promise<boolean> {
 }
 
 async function startStudioServe(): Promise<void> {
+  stopStudioServe();
+  terminateOrphanAgxServe();
   apiPort = await pickFreePort();
   const desktopHome = os.homedir();
 
@@ -2190,6 +2192,16 @@ function stopStudioServe(): void {
     serveStdoutBuffer = "";
     serveStderrBuffer = "";
     resetStudioReady();
+  }
+}
+
+/** Kill leftover agx serve from prior Near/dev sessions so Kuzu graph lock is not held twice. */
+function terminateOrphanAgxServe(): void {
+  if (process.platform === "win32") return;
+  try {
+    execFileSync("pkill", ["-TERM", "-f", "agx serve"], { stdio: "ignore" });
+  } catch {
+    // pkill exits 1 when no processes matched
   }
 }
 
