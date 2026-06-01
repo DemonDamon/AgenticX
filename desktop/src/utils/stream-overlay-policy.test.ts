@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { Message } from "../store";
-import { shouldHideStreamOverlay } from "./stream-overlay-policy";
+import { shouldHideStreamOverlay, shouldShowMidTurnStreamActivity } from "./stream-overlay-policy";
 
 const assistant = (content: string): Message => ({
   id: "a1",
@@ -38,5 +38,19 @@ describe("shouldHideStreamOverlay", () => {
     expect(
       shouldHideStreamOverlay(true, "继续补充", [user("记住"), assistant("已记入长期记忆。")]),
     ).toBe(false);
+  });
+});
+
+describe("shouldShowMidTurnStreamActivity", () => {
+  it("is true when streaming with hidden overlay (tool gap)", () => {
+    expect(shouldShowMidTurnStreamActivity(true, true)).toBe(true);
+  });
+
+  it("is false when stream overlay is visible", () => {
+    expect(shouldShowMidTurnStreamActivity(true, false)).toBe(false);
+  });
+
+  it("is false when not streaming", () => {
+    expect(shouldShowMidTurnStreamActivity(false, true)).toBe(false);
   });
 });

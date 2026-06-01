@@ -52,7 +52,7 @@ import { SpawnsColumn } from "./SpawnsColumn";
 import { MessageRenderer, renderToolMessageExtras } from "./messages/MessageRenderer";
 import { groupConsecutiveToolMessages, type GroupedChatRow } from "./messages/group-tool-messages";
 import { expandMessagesToTopLevelRows } from "./messages/react-blocks";
-import { shouldHideStreamOverlay } from "../utils/stream-overlay-policy";
+import { shouldHideStreamOverlay, shouldShowMidTurnStreamActivity } from "../utils/stream-overlay-policy";
 import { TurnToolGroupCard } from "./messages/TurnToolGroupCard";
 import { WorkingIndicator } from "./messages/WorkingIndicator";
 import { ChatImAvatar, ImBubble } from "./messages/ImBubble";
@@ -2270,6 +2270,10 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
         visibleMessages,
       ),
     [isStreamingCurrentSession, streamTextForCurrentSession, visibleMessages],
+  );
+  const midTurnStreamActivity = shouldShowMidTurnStreamActivity(
+    isStreamingCurrentSession,
+    hideStreamOverlayAsDuplicate,
   );
   const useReActImLayout = !isGroupPane && chatStyle === "im";
   const visibleMessagesWithStream = useMemo(() => {
@@ -4802,6 +4806,8 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
               isLastAssistantInPane={
                 message.role === "assistant" && message.id === lastAssistantMessageId
               }
+              streamStalled={message.id === "__stream__" && stallState === "stall"}
+              streamStalledSeconds={message.id === "__stream__" ? silentSeconds : 0}
             />
           </div>
         );
@@ -5043,12 +5049,15 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
           />
         );
       })}
-      {sessionWorkInProgress && !isStreamingCurrentSession && !isGroupPane ? (
+      {((sessionWorkInProgress && !isStreamingCurrentSession) || midTurnStreamActivity) &&
+      !isGroupPane ? (
         <ImBubble
           key="typing-meta"
           message={{ id: "typing-meta", role: "assistant", content: "" }}
           assistantName={paneAvatarMeta.name}
           assistantAvatarUrl={paneAvatarMeta.url}
+          streamStalled={stallState === "stall"}
+          streamStalledSeconds={silentSeconds}
         />
       ) : null}
       {isStreamingCurrentSession && !hideStreamOverlayAsDuplicate && !useReActImLayout ? (
@@ -5119,7 +5128,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
       )}
     </>
     );
-  }, [autoNudgeCount, budgetExceededInfo, chatStyle, copyMessage, copyReActBlock, currentModelLabel, exhaustedRounds, favoriteMessage, forwardOneMessage, groupChatUserLabel, groupTyping, groupedVisibleMessages, hideStreamOverlayAsDuplicate, input, isGroupPane, isRunGuardCurrentSession, isStreamingCurrentSession, lastAssistantMessageId, pane.historySearchTerms, pane.messages, pane.sessionId, paneAvatarMeta, paneId, readyAttachments.length, resolveGroupInlineConfirm, resolveGroupSender, resolveQuoteBody, resumeCurrentTask, resumeInFlight, resumeWithModel, revealFileInTaskspace, retryUserMessage, selectUpTo, selectedMessageIds, sendFollowupChip, sessionBusy, sessionWorkInProgress, setQuoteTarget, showInlineAssistantModelBadge, silentSeconds, stallModelOptions, stallRejectReason, stallRuntimeConfig.stall_auto_nudge_max_per_session, stallState, stopCurrentRun, streamTextForCurrentSession, streamingModel, toggleSelectBlock, toggleSelectMessage, topLevelRowsIm, userAvatarUrl, userBubbleLabel]);
+  }, [autoNudgeCount, budgetExceededInfo, chatStyle, copyMessage, copyReActBlock, currentModelLabel, exhaustedRounds, favoriteMessage, forwardOneMessage, groupChatUserLabel, groupTyping, groupedVisibleMessages, hideStreamOverlayAsDuplicate, input, isGroupPane, isRunGuardCurrentSession, isStreamingCurrentSession, lastAssistantMessageId, midTurnStreamActivity, pane.historySearchTerms, pane.messages, pane.sessionId, paneAvatarMeta, paneId, readyAttachments.length, resolveGroupInlineConfirm, resolveGroupSender, resolveQuoteBody, resumeCurrentTask, resumeInFlight, resumeWithModel, revealFileInTaskspace, retryUserMessage, selectUpTo, selectedMessageIds, sendFollowupChip, sessionBusy, sessionWorkInProgress, setQuoteTarget, showInlineAssistantModelBadge, silentSeconds, stallModelOptions, stallRejectReason, stallRuntimeConfig.stall_auto_nudge_max_per_session, stallState, stopCurrentRun, streamTextForCurrentSession, streamingModel, toggleSelectBlock, toggleSelectMessage, topLevelRowsIm, userAvatarUrl, userBubbleLabel]);
 
   const removeAttachment = useCallback((key: string) => {
     setContextFiles((prev) => {

@@ -34,3 +34,11 @@ export function shouldHideStreamOverlay(
   }
   return committed.length > 0 && committed === streamTrimmed;
 }
+
+/** SSE still open but __stream__ row hidden — show mid-turn activity dots elsewhere. */
+export function shouldShowMidTurnStreamActivity(
+  isStreaming: boolean,
+  hideStreamOverlay: boolean,
+): boolean {
+  return isStreaming && hideStreamOverlay;
+}
