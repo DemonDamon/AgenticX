@@ -1,4 +1,11 @@
-# Enterprise 部署说明（Vercel + 外部 Gateway）
+# Enterprise 部署说明
+
+部署有两条路径，按场景选择：
+
+- **本地化 / 私有化（Docker 自托管）**：[`local-selfhost.md`](./local-selfhost.md) —— 自有服务器/内网，Docker 起 Postgres/Redis，运行前台+后台+Gateway 三端，不依赖托管平台。
+- **Vercel 托管 + 外部 Gateway**：见下方密钥说明与 [`vercel-env-checklist.md`](./vercel-env-checklist.md)。
+
+---
 
 ## 明文密钥放哪里（不入库）
 
