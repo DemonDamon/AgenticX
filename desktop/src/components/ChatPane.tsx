@@ -3728,15 +3728,39 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
   );
 
   const truncateSessionAtUserMessage = useCallback(
-    async (sid: string, userContent: string, mode: "after" | "including"): Promise<boolean> => {
+    async (
+      sid: string,
+      userContent: string,
+      mode: "after" | "including",
+      userOccurrence: number,
+      expectRemoved: boolean
+    ): Promise<boolean> => {
       try {
         const resp = await fetch(`${apiBase}/api/session/messages/truncate`, {
           method: "POST",
           headers: { "Content-Type": "application/json", "x-agx-desktop-token": apiToken },
-          body: JSON.stringify({ session_id: sid, user_content: userContent, mode }),
+          body: JSON.stringify({
+            session_id: sid,
+            user_content: userContent,
+            mode,
+            user_occurrence: userOccurrence,
+          }),
         });
-        const data = (await resp.json()) as { ok?: boolean };
-        return resp.ok && data.ok === true;
+        const data = (await resp.json()) as {
+          ok?: boolean;
+          removed_chat?: number;
+          removed_agent?: number;
+          matched_chat?: boolean;
+          matched_agent?: boolean;
+        };
+        if (!resp.ok || !data.ok) return false;
+        const removedChat = typeof data.removed_chat === "number" ? data.removed_chat : 0;
+        const removedAgent = typeof data.removed_agent === "number" ? data.removed_agent : 0;
+        const matched = Boolean(data.matched_chat || data.matched_agent);
+        if (expectRemoved && removedChat === 0 && removedAgent === 0 && !matched) {
+          return false;
+        }
+        return true;
       } catch (err) {
         console.error("[ChatPane] truncate session failed:", err);
         return false;
@@ -3744,6 +3768,24 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
     },
     [apiBase, apiToken]
   );
+
+  const countUserOccurrenceThrough = useCallback((msgs: Message[], throughIdx: number, content: string) => {
+    let count = 0;
+    for (let i = 0; i <= throughIdx; i += 1) {
+      const row = msgs[i];
+      if (!row || row.role !== "user") continue;
+      if (row.content === content) count += 1;
+    }
+    return count;
+  }, []);
+
+  const hasTrailingTurnMessages = useCallback((msgs: Message[], userIdx: number) => {
+    let end = userIdx + 1;
+    while (end < msgs.length && msgs[end].role !== "user") {
+      end += 1;
+    }
+    return end > userIdx + 1;
+  }, []);
 
   const retryUserMessage = useCallback(
     async (msg: Message) => {
@@ -3753,9 +3795,17 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
       const msgs = pane.messages ?? [];
       const idx = msgs.findIndex((m) => m.id === msg.id);
       if (idx < 0) return;
+      const userOccurrence = countUserOccurrenceThrough(msgs, idx, msg.content);
+      const expectRemoved = hasTrailingTurnMessages(msgs, idx);
       // Truncate by user-message boundary so the model context (agent_messages,
       // including the [compacted] block) is reliably cut, not signature-matched.
-      const ok = await truncateSessionAtUserMessage(sid, msg.content, "after");
+      const ok = await truncateSessionAtUserMessage(
+        sid,
+        msg.content,
+        "after",
+        userOccurrence,
+        expectRemoved
+      );
       if (!ok) {
         await reloadSessionFromDisk(sid);
         return;
@@ -3769,6 +3819,8 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
     },
     [
       apiBase,
+      countUserOccurrenceThrough,
+      hasTrailingTurnMessages,
       pane.id,
       pane.messages,
       pane.sessionId,
@@ -3786,9 +3838,17 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
       const msgs = pane.messages ?? [];
       const idx = msgs.findIndex((m) => m.id === msg.id);
       if (idx < 0) return;
+      const userOccurrence = countUserOccurrenceThrough(msgs, idx, msg.content);
+      const expectRemoved = idx < msgs.length - 1 || msg.content !== newContent.trim();
       // Remove the edited user turn and everything after it (both UI history and
       // model context) before resending the new content as a fresh turn.
-      const ok = await truncateSessionAtUserMessage(sid, msg.content, "including");
+      const ok = await truncateSessionAtUserMessage(
+        sid,
+        msg.content,
+        "including",
+        userOccurrence,
+        expectRemoved
+      );
       if (!ok) {
         await reloadSessionFromDisk(sid);
         return;

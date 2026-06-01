@@ -1837,38 +1837,147 @@ def create_studio_app() -> FastAPI:
         mode = str(payload.get("mode", "after") or "after").strip().lower()
         if mode not in {"after", "including"}:
             raise HTTPException(status_code=400, detail="mode must be 'after' or 'including'")
+        try:
+            user_occurrence = int(payload.get("user_occurrence", 0) or 0)
+        except (TypeError, ValueError):
+            user_occurrence = 0
+        if user_occurrence < 0:
+            user_occurrence = 0
 
-        def _last_user_index(rows: list[dict[str, Any]]) -> int:
-            for idx in range(len(rows) - 1, -1, -1):
-                row = rows[idx]
+        def _user_content_matches(row_content: str, target: str) -> bool:
+            if row_content == target:
+                return True
+            # Server may persist quoted_content / attachment hints after the visible text.
+            if row_content.startswith(target + "\n"):
+                return True
+            return False
+
+        def _nth_user_index(rows: list[dict[str, Any]], *, from_end: bool) -> int:
+            if user_occurrence > 0:
+                seen = 0
+                indices: list[int] = []
+                for idx, row in enumerate(rows):
+                    if not isinstance(row, dict):
+                        continue
+                    if str(row.get("role", "") or "").strip() != "user":
+                        continue
+                    if not _user_content_matches(str(row.get("content", "") or ""), user_content):
+                        continue
+                    seen += 1
+                    indices.append(idx)
+                if seen >= user_occurrence:
+                    return indices[user_occurrence - 1]
+                return -1
+            if from_end:
+                for idx in range(len(rows) - 1, -1, -1):
+                    row = rows[idx]
+                    if not isinstance(row, dict):
+                        continue
+                    if str(row.get("role", "") or "").strip() != "user":
+                        continue
+                    if _user_content_matches(str(row.get("content", "") or ""), user_content):
+                        return idx
+                return -1
+            return -1
+
+        def _truncate(rows: list[dict[str, Any]], *, from_end: bool) -> tuple[int, bool]:
+            idx = _nth_user_index(rows, from_end=from_end)
+            if idx < 0:
+                return 0, False
+            if mode == "after":
+                cut_end = len(rows)
+                for j in range(idx + 1, len(rows)):
+                    row = rows[j]
+                    if not isinstance(row, dict):
+                        continue
+                    if str(row.get("role", "") or "").strip() == "user":
+                        cut_end = j
+                        break
+                cut_start = idx + 1
+                removed_local = cut_end - cut_start
+                if removed_local <= 0:
+                    return 0, True
+                del rows[cut_start:cut_end]
+                return removed_local, True
+            cut = idx
+            removed_local = len(rows) - cut
+            if removed_local <= 0:
+                return 0, True
+            del rows[cut:]
+            return removed_local, True
+
+        def _strip_compacted_blocks(rows: list[dict[str, Any]]) -> int:
+            removed_local = 0
+            i = 0
+            while i < len(rows):
+                row = rows[i]
+                if not isinstance(row, dict):
+                    i += 1
+                    continue
+                if str(row.get("role", "") or "").strip() != "system":
+                    i += 1
+                    continue
+                content = str(row.get("content", "") or "")
+                if "[compacted]" not in content:
+                    i += 1
+                    continue
+                rows.pop(i)
+                removed_local += 1
+            return removed_local
+
+        def _sync_agent_cut_from_chat(
+            chat_rows: list[dict[str, Any]], agent_rows: list[dict[str, Any]]
+        ) -> int:
+            user_count = sum(
+                1
+                for row in chat_rows
+                if isinstance(row, dict) and str(row.get("role", "") or "").strip() == "user"
+            )
+            if user_count <= 0:
+                return 0
+            seen = 0
+            cut_idx = -1
+            for idx, row in enumerate(agent_rows):
                 if not isinstance(row, dict):
                     continue
                 if str(row.get("role", "") or "").strip() != "user":
                     continue
-                if str(row.get("content", "") or "") == user_content:
-                    return idx
-            return -1
-
-        def _truncate(rows: list[dict[str, Any]]) -> int:
-            idx = _last_user_index(rows)
-            if idx < 0:
+                seen += 1
+                if seen == user_count:
+                    cut_idx = idx
+                    break
+            if cut_idx < 0:
                 return 0
-            cut = idx + 1 if mode == "after" else idx
-            removed_local = len(rows) - cut
-            if removed_local <= 0:
+            tail = len(agent_rows) - (cut_idx + 1)
+            if tail <= 0:
                 return 0
-            del rows[cut:]
-            return removed_local
+            del agent_rows[cut_idx + 1 :]
+            return tail
 
         session = managed.studio_session
         removed_chat = 0
         removed_agent = 0
+        matched_chat = False
+        matched_agent = False
         if isinstance(session.chat_history, list):
-            removed_chat = _truncate(session.chat_history)
+            removed_chat, matched_chat = _truncate(session.chat_history, from_end=user_occurrence <= 0)
         if isinstance(session.agent_messages, list):
-            removed_agent = _truncate(session.agent_messages)
+            removed_agent, matched_agent = _truncate(session.agent_messages, from_end=user_occurrence <= 0)
+            if mode == "after" and removed_chat > 0 and removed_agent == 0:
+                removed_agent = _sync_agent_cut_from_chat(
+                    session.chat_history or [], session.agent_messages
+                )
+                matched_agent = matched_agent or removed_agent > 0
+            if mode == "after" and (matched_chat or matched_agent):
+                removed_agent += _strip_compacted_blocks(session.agent_messages)
         manager.persist(session_id)
-        return {"ok": True, "removed_chat": removed_chat, "removed_agent": removed_agent}
+        return {
+            "ok": True,
+            "removed_chat": removed_chat,
+            "removed_agent": removed_agent,
+            "matched_chat": matched_chat,
+            "matched_agent": matched_agent,
+        }
 
     @app.post("/api/session/summary")
     async def get_session_summary(
