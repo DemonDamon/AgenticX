@@ -3,6 +3,7 @@ import { AlertTriangle, ChevronDown, ChevronUp, ListChecks, Check, Circle, Loade
 import { parseTodoMessage, type ParsedTodo } from "./TodoUpdateCard";
 import type { Message } from "../store";
 import {
+  isTodoSnapshotSuperseded,
   messageLooksLikeAssistantFinal,
   resolveStickyTodoDisplay,
 } from "../utils/task-stall-policy";
@@ -119,6 +120,10 @@ export function StickyTaskBar({
   readFiles,
 }: StickyTaskBarProps) {
   const rawSnapshot = useMemo(() => pickLatestTodoFromMessages(messages), [messages]);
+  const todoSuperseded = useMemo(() => {
+    if (!rawSnapshot) return false;
+    return isTodoSnapshotSuperseded(messages, rawSnapshot.index);
+  }, [messages, rawSnapshot]);
   const rawParsed = rawSnapshot?.parsed ?? null;
   const promotePending = useMemo(() => {
     if (!rawSnapshot) return false;
@@ -137,6 +142,7 @@ export function StickyTaskBar({
 
   const allDone = !!parsed && parsed.total > 0 && parsed.completed === parsed.total;
   const runEnded = liveness === "idle";
+  const runIncomplete = runEnded && !allDone && executionState !== "interrupted";
 
   // Guard against ghost task cards: when the model called `todo_write` but
   // never actually advanced any item (all pending, 0 in_progress, 0 completed)
@@ -159,6 +165,7 @@ export function StickyTaskBar({
   }, [runEnded, rawParsed?.total]);
 
   if (!parsed) return null;
+  if (todoSuperseded) return null;
   if (!hasAnyProgress) return null;
   if (dismissed && runEnded) return null;
 
@@ -206,9 +213,25 @@ export function StickyTaskBar({
             恢复
           </button>
         ) : null}
+        {runIncomplete && onResume ? (
+          <button
+            type="button"
+            className="text-[10px] font-medium text-[rgb(var(--theme-color-rgb,59,130,246))] hover:opacity-80"
+            onClick={(e) => {
+              e.stopPropagation();
+              onResume();
+            }}
+          >
+            继续
+          </button>
+        ) : null}
         {runEnded ? (
           <span className="text-[10px] text-text-muted">
-            {executionState === "interrupted" ? "已中断" : "已结束"}
+            {executionState === "interrupted"
+              ? "已中断"
+              : allDone
+                ? "已结束"
+                : "未完成"}
           </span>
         ) : null}
         {runEnded ? (
