@@ -13,6 +13,7 @@ import {
   Quote,
   Search,
   Share2,
+  Forward,
   Sparkles,
   Radar,
   SquarePen,
@@ -44,12 +45,14 @@ import {
 import { useVoicePushToTalk } from "../hooks/useVoicePushToTalk";
 import { VoicePttOverlay } from "./VoicePttOverlay";
 import { SessionHistoryPanel } from "./SessionHistoryPanel";
+import { MemoryGraphPanel } from "./memory/MemoryGraphPanel";
 import { StickyTaskBar } from "./StickyTaskBar";
 import { WorkspacePanel } from "./WorkspacePanel";
 import { SpawnsColumn } from "./SpawnsColumn";
 import { MessageRenderer, renderToolMessageExtras } from "./messages/MessageRenderer";
 import { groupConsecutiveToolMessages, type GroupedChatRow } from "./messages/group-tool-messages";
 import { expandMessagesToTopLevelRows } from "./messages/react-blocks";
+import { shouldHideStreamOverlay } from "../utils/stream-overlay-policy";
 import { TurnToolGroupCard } from "./messages/TurnToolGroupCard";
 import { WorkingIndicator } from "./messages/WorkingIndicator";
 import { ChatImAvatar, ImBubble } from "./messages/ImBubble";
@@ -252,6 +255,7 @@ function openWorkspaceSidebarForPane(
             taskspacePanelOpen: true,
             sidePanelTab: "workspace",
             historyOpen: false,
+            memoryGraphOpen: false,
             membersPanelOpen: false,
             spawnsColumnOpen: false,
           },
@@ -268,6 +272,7 @@ const FALLBACK_PANE: ChatPaneState = {
   modelName: "",
   messages: [],
   historyOpen: false,
+  memoryGraphOpen: false,
   contextInherited: false,
   taskspacePanelOpen: false,
   membersPanelOpen: false,
@@ -1974,6 +1979,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
   const addPane = useAppStore((s) => s.addPane);
   const setActivePaneId = useAppStore((s) => s.setActivePaneId);
   const togglePaneHistory = useAppStore((s) => s.togglePaneHistory);
+  const togglePaneMemoryGraph = useAppStore((s) => s.togglePaneMemoryGraph);
   const cycleSidePanel = useAppStore((s) => s.cycleSidePanel);
   const toggleFocusMode = useAppStore((s) => s.toggleFocusMode);
   const openSidePanel = useAppStore((s) => s.openSidePanel);
@@ -2255,20 +2261,16 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
     !!streamingSessionId &&
     streamingSessionId === (pane.sessionId || "").trim();
   const streamTextForCurrentSession = isStreamingCurrentSession ? (streamedAssistantText || "") : "";
-  /** Mid-turn commit can persist assistant text while SSE keeps streaming the same body — hide __stream__ so we don't show two identical bubbles (store still has correct count). */
-  const hideStreamOverlayAsDuplicate = useMemo(() => {
-    if (!isStreamingCurrentSession) return false;
-    const t = streamTextForCurrentSession.trim();
-    if (!t) return false;
-    for (let i = visibleMessages.length - 1; i >= 0; i--) {
-      const m = visibleMessages[i];
-      if (m.role === "user") break;
-      if (m.role === "assistant" && (!m.agentId || m.agentId === "meta")) {
-        return String(m.content ?? "").trim() === t;
-      }
-    }
-    return false;
-  }, [isStreamingCurrentSession, streamTextForCurrentSession, visibleMessages]);
+  /** Hide __stream__ when it duplicates committed text or is an empty mid-turn tool-gap placeholder. */
+  const hideStreamOverlayAsDuplicate = useMemo(
+    () =>
+      shouldHideStreamOverlay(
+        isStreamingCurrentSession,
+        streamTextForCurrentSession,
+        visibleMessages,
+      ),
+    [isStreamingCurrentSession, streamTextForCurrentSession, visibleMessages],
+  );
   const useReActImLayout = !isGroupPane && chatStyle === "im";
   const visibleMessagesWithStream = useMemo(() => {
     if (useReActImLayout && isStreamingCurrentSession && !hideStreamOverlayAsDuplicate) {
@@ -4885,35 +4887,11 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
                     </div>
                   )}
                 </div>
-                {useUnifiedReActCard &&
-                hasStreamingRow &&
-                peeledFollowupAssistant?.suggestedQuestions &&
-                peeledFollowupAssistant.suggestedQuestions.length > 0 ? (
-                  <div className="mb-4 flex min-w-0 items-start gap-2">
-                    {isSelecting ? <div className="h-5 w-5 shrink-0" aria-hidden /> : null}
-                    <div className="min-w-0 flex-1">
-                      <div className="flex min-w-0 flex-col items-start gap-1.5" style={reactActionStyle}>
-                        {peeledFollowupAssistant.suggestedQuestions.slice(0, 3).map((q, qi) => (
-                          <button
-                            key={`${qi}-${q}`}
-                            type="button"
-                            className="group flex max-w-full w-fit items-center gap-2 rounded-full border border-border bg-surface-hover/80 px-3.5 py-1.5 text-left text-[14px] text-text-subtle transition hover:bg-surface-hover hover:text-text-strong whitespace-normal"
-                            onMouseDown={(e) => e.preventDefault()}
-                            onClick={() => sendFollowupChip(q)}
-                          >
-                            <span>{q}</span>
-                            <ArrowRight className="h-3.5 w-3.5 shrink-0 opacity-60 transition group-hover:opacity-100" />
-                          </button>
-                        ))}
-                      </div>
-                    </div>
-                  </div>
-                ) : null}
                 {finalAssistant
                   ? renderGroupedRow({ kind: "message", message: finalAssistant }, segIdx + 1000, {})
                   : null}
                 {/* Block-level actions; peeled follow-ups on the next line below icons */}
-                {!hasStreamingRow && workMessages.length > 0 && useUnifiedReActCard ? (
+                {!hasStreamingRow && !sessionWorkInProgress && workMessages.length > 0 && useUnifiedReActCard ? (
                   <div
                     className={`!-mt-0.5 flex min-w-0 items-start gap-2 mb-6`}
                   >
@@ -4965,7 +4943,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
                                   onMouseDown={(e) => e.preventDefault()}
                                   onClick={() => forwardOneMessage(lastAssistantInBlock, undefined)}
                                 >
-                                  <Share2 size={13} />
+                                  <Forward size={13} />
                                 </button>
                               </HoverTip>
                             </>
@@ -6637,6 +6615,9 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
       }
       if ((pane.sessionId || "").trim() === requestSessionId) {
         syncStreamingUiForCurrentSession();
+        if (!abortController.signal.aborted) {
+          setSessionExecutionState("idle");
+        }
       }
       abortRef.current = null;
       cancelStreamRenderFrame();
@@ -7058,17 +7039,20 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
     const stacked =
       Number(!!p.taskspacePanelOpen) +
       Number(!!p.historyOpen) +
+      Number(!!p.memoryGraphOpen) +
       Number(!!p.membersPanelOpen) +
       Number(!!p.spawnsColumnOpen);
     if (stacked <= 1) return;
-    let keep: "workspace" | "history" | "members" | "spawns" = "workspace";
+    let keep: "workspace" | "history" | "memory-graph" | "members" | "spawns" = "workspace";
     if (p.taskspacePanelOpen) keep = "workspace";
     else if (p.historyOpen) keep = "history";
+    else if (p.memoryGraphOpen) keep = "memory-graph";
     else if (p.membersPanelOpen) keep = "members";
     else keep = "spawns";
     const desired = {
       taskspacePanelOpen: keep === "workspace",
       historyOpen: keep === "history",
+      memoryGraphOpen: keep === "memory-graph",
       membersPanelOpen: keep === "members",
       spawnsColumnOpen: keep === "spawns",
     };
@@ -7078,6 +7062,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
       if (
         row.taskspacePanelOpen === desired.taskspacePanelOpen &&
         row.historyOpen === desired.historyOpen &&
+        row.memoryGraphOpen === desired.memoryGraphOpen &&
         row.membersPanelOpen === desired.membersPanelOpen &&
         row.spawnsColumnOpen === desired.spawnsColumnOpen
       ) {
@@ -7092,6 +7077,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
     pane.id,
     pane.taskspacePanelOpen,
     pane.historyOpen,
+    pane.memoryGraphOpen,
     pane.membersPanelOpen,
     pane.spawnsColumnOpen,
   ]);
@@ -7105,10 +7091,17 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
               ...row,
               taskspacePanelOpen: false,
               historyOpen: false,
+              memoryGraphOpen: false,
               membersPanelOpen: false,
               spawnsColumnOpen: false,
             }
       ),
+    }));
+  };
+
+  const closeMemoryGraphPanelOnly = () => {
+    useAppStore.setState((s) => ({
+      panes: s.panes.map((row) => (row.id !== pane.id ? row : { ...row, memoryGraphOpen: false })),
     }));
   };
 
@@ -7145,10 +7138,34 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
               taskspacePanelOpen: true,
               sidePanelTab: "workspace",
               historyOpen: false,
+              memoryGraphOpen: false,
               membersPanelOpen: false,
               spawnsColumnOpen: false,
             }
           : { ...p, taskspacePanelOpen: false };
+      }),
+    }));
+  };
+
+  const toggleMemoryGraphSidePanel = () => {
+    if (!compactSidePanels) {
+      togglePaneMemoryGraph(pane.id);
+      return;
+    }
+    useAppStore.setState((s) => ({
+      panes: s.panes.map((p) => {
+        if (p.id !== pane.id) return p;
+        const opening = !p.memoryGraphOpen;
+        return opening
+          ? {
+              ...p,
+              memoryGraphOpen: true,
+              taskspacePanelOpen: false,
+              historyOpen: false,
+              membersPanelOpen: false,
+              spawnsColumnOpen: false,
+            }
+          : { ...p, memoryGraphOpen: false };
       }),
     }));
   };
@@ -7166,6 +7183,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
           ? {
               ...p,
               historyOpen: true,
+              memoryGraphOpen: false,
               taskspacePanelOpen: false,
               membersPanelOpen: false,
               spawnsColumnOpen: false,
@@ -7191,6 +7209,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
               sidePanelTab: "members",
               taskspacePanelOpen: false,
               historyOpen: false,
+              memoryGraphOpen: false,
               spawnsColumnOpen: false,
             }
           : { ...p, membersPanelOpen: false };
@@ -7220,6 +7239,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
           spawnsColumnBaselineIds: [],
           taskspacePanelOpen: false,
           historyOpen: false,
+          memoryGraphOpen: false,
           membersPanelOpen: false,
         };
       }),
@@ -7318,6 +7338,13 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
                 <Bot className="h-[18px] w-[18px]" strokeWidth={1.8} />
               </button>
             ) : null}
+            <button
+              className={`agx-topbar-btn !px-[5px] ${pane.memoryGraphOpen ? "agx-topbar-btn--active" : ""}`}
+              onClick={toggleMemoryGraphSidePanel}
+              title="切换记忆图谱面板"
+            >
+              <Share2 className="h-[18px] w-[18px]" strokeWidth={1.8} />
+            </button>
             <button
               className={`agx-topbar-btn !px-[5px] ${pane.historyOpen ? "agx-topbar-btn--active" : ""}`}
               onClick={toggleHistorySidePanel}
@@ -8060,6 +8087,11 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
           tintColor={paneTint}
         />
       ) : null}
+      {!compactSidePanels && pane.memoryGraphOpen ? (
+        <div className="relative h-full shrink-0 overflow-hidden border-l border-border" style={{ width: historyWidth }}>
+          <MemoryGraphPanel pane={pane} onClose={closeMemoryGraphPanelOnly} tintColor={paneTint} />
+        </div>
+      ) : null}
       {!compactSidePanels && pane.historyOpen ? (
         <div className="relative h-full shrink-0 overflow-hidden border-l border-border" style={{ width: historyWidth }}>
           <div
@@ -8078,6 +8110,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
       {compactSidePanels &&
       (workspacePanelOpen ||
         pane.historyOpen ||
+        pane.memoryGraphOpen ||
         (isGroupPane && pane.membersPanelOpen) ||
         pane.spawnsColumnOpen) ? (
         <>
@@ -8171,6 +8204,14 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
                 onConfirmResolve={(agentId, approved) => void resolvePaneSubAgentConfirm(agentId, approved)}
                 tintColor={paneTint}
               />
+            </div>
+          ) : null}
+          {pane.memoryGraphOpen ? (
+            <div
+              className="pointer-events-auto absolute bottom-0 right-0 top-10 z-50 shrink-0 overflow-hidden border-l border-border bg-surface-base shadow-[6px_0_24px_rgba(0,0,0,0.28)]"
+              style={{ width: overlayHistoryWidth, WebkitAppRegion: "no-drag" } as CSSProperties}
+            >
+              <MemoryGraphPanel pane={pane} onClose={closeMemoryGraphPanelOnly} tintColor={paneTint} />
             </div>
           ) : null}
           {pane.historyOpen ? (

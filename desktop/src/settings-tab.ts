@@ -7,6 +7,7 @@ export const SETTINGS_TAB_IDS = [
   "tools",
   "skills",
   "knowledge",
+  "memory",
   "hooks",
   "automation",
   "voice",

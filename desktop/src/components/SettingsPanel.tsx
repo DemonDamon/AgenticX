@@ -32,6 +32,7 @@ import {
   EyeOff,
   Library,
   Mic,
+  Network,
 } from "lucide-react";
 import { Panel } from "./ds/Panel";
 import { Modal } from "./ds/Modal";
@@ -67,6 +68,7 @@ import {
 } from "./automation/TokenBudgetConfigSection";
 import { AccountTab } from "./AccountTab";
 import { KnowledgeSettings, type KnowledgeSettingsHandle } from "./settings/knowledge/KnowledgeSettings";
+import { MemoryGraphExplorer } from "./memory/MemoryGraphExplorer";
 import { getProviderDisplayName, makeCustomOpenAIProviderId } from "../utils/provider-display";
 import { normalizeProviderEntry } from "../utils/model-options";
 import type { SettingsTab } from "../settings-tab";
@@ -727,6 +729,7 @@ const TABS: { id: SettingsTab; label: string; icon: typeof Settings2 }[] = [
   { id: "skills", label: "技能", icon: SkillPuzzleIcon },
   // Plan-Id: machi-kb-stage1-local-mvp
   { id: "knowledge", label: "知识库", icon: Library },
+  { id: "memory", label: "记忆", icon: Network },
   { id: "hooks", label: "钩子", icon: Anchor },
   { id: "automation", label: "自动化", icon: AutomationTaskIcon },
   { id: "voice", label: "语音", icon: Mic },
@@ -5152,6 +5155,8 @@ export function SettingsPanel({
   const effectiveMetaAvatarUrl = metaAvatarUrl.trim() || DEFAULT_META_AVATAR_URL;
   const setMetaAvatarUrl = useAppStore((s) => s.setMetaAvatarUrl);
   const settingsOpenToTab = useAppStore((s) => s.settings.openToTab);
+  const activePaneId = useAppStore((s) => s.activePaneId);
+  const memoryContextPane = panes.find((p) => p.id === activePaneId) ?? panes[0];
   const updateSettingsSlice = useAppStore((s) => s.updateSettings);
   const initializedForOpenRef = useRef(false);
   const toolsTabRef = useRef<ToolsTabHandle>(null);
@@ -6538,7 +6543,7 @@ export function SettingsPanel({
 
           <div
             className={`min-h-0 flex-1 px-4 py-3 ${
-              tab === "knowledge" ? "flex flex-col overflow-hidden" : "overflow-y-auto"
+              tab === "knowledge" || tab === "memory" ? "flex flex-col overflow-hidden" : "overflow-y-auto"
             }`}
           >
             {tab === "account" && <AccountTab />}
@@ -7729,6 +7734,20 @@ export function SettingsPanel({
 
             {/* === KNOWLEDGE TAB === Plan-Id: machi-kb-stage1-local-mvp */}
             {tab === "knowledge" && <KnowledgeSettings ref={knowledgeRef} />}
+
+            {/* === MEMORY TAB === Plan-Id: 2026-05-31-near-memory-graph-graphiti */}
+            {tab === "memory" && (
+              <MemoryGraphExplorer
+                apiBase={apiBase}
+                apiToken={apiToken}
+                avatarId={memoryContextPane?.avatarId ?? null}
+                sessionId={memoryContextPane?.sessionId ?? ""}
+                layout="dashboard"
+                showConfig
+                initialScope="meta"
+                providerOptions={providerNames}
+              />
+            )}
 
             {/* === HOOKS TAB === */}
             {tab === "hooks" && <HooksTab />}
