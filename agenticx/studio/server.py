@@ -2108,12 +2108,11 @@ def create_studio_app() -> FastAPI:
         if payload.model:
             session.model_name = payload.model
 
-        if str(session.provider_name or "").strip().lower() == "minimax" and _minimax_m2_family_no_vision(
-            str(session.model_name or "")
-        ):
-            image_inputs = []
-        if str(session.provider_name or "").strip().lower() == "zhipu" and _zhipu_glm5_family_no_vision(
-            str(session.model_name or "")
+        from agenticx.llms.vision import is_vision_capable
+
+        if not is_vision_capable(
+            str(session.provider_name or ""),
+            str(session.model_name or ""),
         ):
             image_inputs = []
 
