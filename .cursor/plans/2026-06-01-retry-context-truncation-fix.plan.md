@@ -91,3 +91,18 @@ Plan-File: .cursor/plans/2026-06-01-retry-context-truncation-fix.plan.md
 
 - 若同一 `user_content` 在历史中多次出现:取**最后一条**,符合 retry/edit 针对最近一轮的语义。
 - `agent_messages` 磁盘仅存 tail 40,但截断在内存全量上进行后再 persist,tail 落盘正确。
+
+## 跟进修复(2026-06-01 二轮)
+
+重启后仍出现「上下文窥视」,进一步根因:
+
+1. **`[compacted]` 摘要块**:上一轮若已压缩,摘要文本仍含「已创建 skill」;仅截断 user 之后 assistant/tool 不够,retry 时须清除 `[compacted]` system 行。
+2. **`user_occurrence`**:同文案多条 user 时「取最后一条」会锚错;前端按 pane 序号传第 N 次出现。
+3. **静默 noop**:truncate 未匹配时仍 `ok:true` 且前端继续重试;须校验 `matched_*` / `removed_*`。
+4. **agent/chat 不同步**:content 带引用后缀时 agent 侧匹配失败;增加 prefix 匹配 + 按 chat user 计数回切 agent。
+
+### 追加需求
+
+- FR-4: retry(`after`) 成功锚定后 strip `[compacted]` from `agent_messages`
+- FR-5: 支持 `user_occurrence`(1-based);前端从 pane 累计
+- FR-6: `expectRemoved` 时 removed/matched 全 0 则 abort retry
