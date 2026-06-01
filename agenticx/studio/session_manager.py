@@ -1034,15 +1034,35 @@ class SessionManager:
                 item["timestamp"] = now_ms
         atomic_write_json(path, messages)
 
+    @staticmethod
+    def _parse_messages_json_payload(data: Any) -> list[dict]:
+        """Accept Studio list snapshots or legacy ``{\"messages\": [...]}`` wrappers."""
+        if isinstance(data, list):
+            rows = data
+        elif isinstance(data, dict):
+            inner = data.get("messages") or data.get("chat_history")
+            rows = inner if isinstance(inner, list) else []
+        else:
+            rows = []
+        return [item for item in rows if isinstance(item, dict)]
+
     def _load_messages_snapshot(self, session_id: str) -> list[dict]:
         path = self._messages_path(session_id)
         if not os.path.exists(path):
             return []
         with open(path, "r", encoding="utf-8") as fh:
             data = json.load(fh)
-        if not isinstance(data, list):
-            return []
-        return [item for item in data if isinstance(item, dict)]
+        return self._parse_messages_json_payload(data)
+
+    def _derive_session_name_from_disk_messages(self, session_id: str) -> str | None:
+        """Build a list title from on-disk messages when metadata has no session_name."""
+        first = self._first_user_text_from_chat_history(
+            self._load_messages_snapshot(session_id)
+        )
+        if not first:
+            return None
+        title = self._build_auto_title(first)
+        return title or None
 
     def _agent_messages_path(self, session_id: str) -> str:
         return os.path.join(self._sessions_root, session_id, "agent_messages.json")
@@ -1465,12 +1485,17 @@ class SessionManager:
             created_at = self._to_float(metadata.get("created_at"), self._iso_to_epoch(item.get("created_at")))
             updated_at = self._to_float(metadata.get("updated_at"), self._iso_to_epoch(item.get("created_at")))
             last_activity_at = self._to_float(metadata.get("last_activity_at"), updated_at)
+            sess_nm = self._sanitize_session_name(metadata.get("session_name"))
+            if self.session_title_needs_auto_fill(sess_nm):
+                derived = self._derive_session_name_from_disk_messages(sid)
+                if derived:
+                    sess_nm = derived
             rows.append(
                 {
                     "session_id": sid,
                     "avatar_id": metadata.get("avatar_id"),
                     "avatar_name": metadata.get("avatar_name"),
-                    "session_name": self._sanitize_session_name(metadata.get("session_name")),
+                    "session_name": sess_nm,
                     "updated_at": updated_at,
                     "created_at": created_at,
                     "last_activity_at": last_activity_at,
@@ -1516,6 +1541,10 @@ class SessionManager:
                 raw_nm = fs_meta.get("avatar_name")
                 av_name = None if raw_nm is None else (str(raw_nm).strip() or None)
                 sess_nm = self._sanitize_session_name(fs_meta.get("session_name"))
+                if self.session_title_needs_auto_fill(sess_nm):
+                    derived = self._derive_session_name_from_disk_messages(sid)
+                    if derived:
+                        sess_nm = derived
                 rows.append(
                     {
                         "session_id": sid,
