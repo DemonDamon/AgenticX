@@ -106,3 +106,4 @@ Plan-File: .cursor/plans/2026-06-01-retry-context-truncation-fix.plan.md
 - FR-4: retry(`after`) 成功锚定后 strip `[compacted]` from `agent_messages`
 - FR-5: 支持 `user_occurrence`(1-based);前端从 pane 累计
 - FR-6: `expectRemoved` 时 removed/matched 全 0 则 abort retry
+- FR-7: 输入框再次发送与历史某条 user **同文案**且该 user 后已有 assistant/tool 回复时,按 implicit retry 走 truncate(`after`)+`skipUserHistory`,避免 proactive compaction 把旧结论写进 `[compacted]`

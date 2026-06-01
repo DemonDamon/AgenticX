@@ -5336,8 +5336,8 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
     const text = userText.trim();
     const messageText = isContinuation ? " " : text || ATTACHMENT_ONLY_USER_PROMPT;
     const retryAttachments = options?.retryAttachments;
-    const suppressUserEcho = isContinuation || !!options?.suppressUserEcho;
-    const skipUserHistory = isContinuation || !!options?.skipUserHistory;
+    let suppressUserEcho = isContinuation || !!options?.suppressUserEcho;
+    let skipUserHistory = isContinuation || !!options?.skipUserHistory;
     const readyEntries = attachmentEntries.filter(([, file]) => file.status === "ready");
     const composerAttachments: MessageAttachment[] = readyAttachments.map((file) => ({
       name: file.name,
@@ -5540,6 +5540,51 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
       }
       return;
     }
+
+    // Re-sending the same user text after a completed turn (input box, not the retry
+    // button) must truncate the prior assistant/tool tail and strip [compacted] blocks;
+    // otherwise run_turn proactive compaction re-summarizes the old answer into context.
+    if (
+      !isContinuation &&
+      !skipUserHistory &&
+      !options?.suppressUserEcho &&
+      messageText.length > 0 &&
+      requestSessionId
+    ) {
+      const currentMsgs =
+        useAppStore.getState().panes.find((p) => p.id === pane.id)?.messages ?? pane.messages ?? [];
+      let implicitRetryIdx = -1;
+      for (let i = currentMsgs.length - 1; i >= 0; i -= 1) {
+        const row = currentMsgs[i];
+        if (!row || row.role !== "user" || row.content !== messageText) continue;
+        if (hasTrailingTurnMessages(currentMsgs, i)) {
+          implicitRetryIdx = i;
+          break;
+        }
+      }
+      if (implicitRetryIdx >= 0) {
+        const userOccurrence = countUserOccurrenceThrough(
+          currentMsgs,
+          implicitRetryIdx,
+          messageText
+        );
+        const ok = await truncateSessionAtUserMessage(
+          requestSessionId,
+          messageText,
+          "after",
+          userOccurrence,
+          true
+        );
+        if (!ok) {
+          await reloadSessionFromDisk(requestSessionId);
+          return;
+        }
+        setPaneMessages(pane.id, currentMsgs.slice(0, implicitRetryIdx + 1));
+        suppressUserEcho = true;
+        skipUserHistory = true;
+      }
+    }
+
     const selectedIsPaneSubagent =
       !!selectedSubAgent && paneSubAgents.some((item) => item.id === selectedSubAgent);
     const targetAgentId = selectedIsPaneSubagent ? selectedSubAgent : "meta";
