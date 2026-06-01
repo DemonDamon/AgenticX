@@ -2634,6 +2634,67 @@ def _tool_file_read(arguments: Dict[str, Any], session: Optional[StudioSession] 
     return out
 
 
+def _autoheal_skill_md_after_write(path: Path, base_msg: str) -> str:
+    """Ensure a SKILL.md written via file tools is discoverable by the Skills system.
+
+    When ``path`` points at ``<...>/skills/<name>/SKILL.md`` we normalize the YAML
+    frontmatter (injecting ``name=<dir>`` / placeholder description when missing) and
+    verify the SkillBundleLoader can parse it.  This guarantees that any "saved"
+    reply for a skill equals "searchable in Settings → Skills".  Non-skill writes are
+    returned unchanged.
+    """
+    try:
+        if path.name != "SKILL.md":
+            return base_msg
+        parts = [p for p in path.parts]
+        if "skills" not in parts:
+            return base_msg
+        skill_dir = path.parent
+        # SKILL.md must live in skills/<name>/SKILL.md, not directly under skills/.
+        if not skill_dir.name or skill_dir.name == "skills":
+            return base_msg
+
+        from agenticx.skills.frontmatter import (
+            SkillFrontmatterError,
+            normalize_skill_md,
+            verify_skill_discoverable,
+        )
+
+        try:
+            content = path.read_text(encoding="utf-8")
+        except OSError:
+            return base_msg
+
+        try:
+            normalized, fixed = normalize_skill_md(content, skill_dir.name)
+        except SkillFrontmatterError as exc:
+            return (
+                f"ERROR: skill 不会被收录 — {exc}。"
+                "SKILL.md 必须以 YAML frontmatter（`---\\nname: <名称>\\ndescription: <描述>\\n---`）开头。"
+                f"文件已写入 {path}，但**不会**出现在设置 → Skills，请修正 frontmatter 后重写。"
+            )
+
+        if fixed:
+            try:
+                path.write_text(normalized, encoding="utf-8")
+            except OSError as exc:
+                return f"{base_msg}\n[warn] 自动补全 frontmatter 失败：{exc}（skill 可能无法被检索）"
+
+        discoverable, skill_name, errors = verify_skill_discoverable(skill_dir)
+        if not discoverable:
+            detail = "; ".join(errors) if errors else "unknown parse failure"
+            return (
+                f"ERROR: skill 写入后仍不可被检索（{detail}）。"
+                f"文件已写入 {path}，但**不会**出现在设置 → Skills。"
+            )
+
+        note = f"（已自动补全 frontmatter：{', '.join(fixed)}）" if fixed else ""
+        return f"{base_msg}\nOK: skill '{skill_name}' 已可在设置 → Skills 检索{note}"
+    except Exception:
+        # Never let auto-heal failures break the underlying write result.
+        return base_msg
+
+
 async def _tool_file_write(
     arguments: Dict[str, Any],
     session: StudioSession,
@@ -2702,7 +2763,7 @@ async def _tool_file_write(
     scratchpad = getattr(session, "scratchpad", None)
     if isinstance(scratchpad, dict):
         scratchpad["__taskspace_hint__"] = str(path)
-    return f"OK: wrote {path}"
+    return _autoheal_skill_md_after_write(path, f"OK: wrote {path}")
 
 
 async def _tool_file_edit(
@@ -2768,7 +2829,7 @@ async def _tool_file_edit(
         path.write_text(updated_text, encoding="utf-8")
     except OSError as exc:
         return f"ERROR: write failed: {exc}"
-    return f"OK: edited {path}"
+    return _autoheal_skill_md_after_write(path, f"OK: edited {path}")
 
 
 async def _tool_codegen(

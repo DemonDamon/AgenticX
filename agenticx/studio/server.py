@@ -578,6 +578,10 @@ def _build_automation_runner_system_prompt(
     )
     lines.extend(
         [
+            "## Skill 落盘规范（封装可复用经验时必须遵守）",
+            "- 把成功方法封装成 skill 时，**优先**调用 `skill_manage(action='create', name=..., content=...)`，不要用 `file_write` 直写 `~/.agenticx/skills/`。",
+            "- SKILL.md 内容**必须**以 YAML frontmatter 开头：`---\\nname: <与目录同名>\\ndescription: <一句话描述>\\n---`，后接正文；缺 `name` 的 skill 不会被 Skills 系统收录。",
+            "- 若确需用 `file_write` 写 `skills/<名称>/SKILL.md`，工具会自动校验可发现性：**仅当返回包含「已可在设置 → Skills 检索」时**，才允许声称「skill 已落盘且可检索」；若返回 `ERROR: skill 不会被收录`，必须按提示修正 frontmatter 后重写，禁止声称已成功。",
             "## 其他",
             "- 不要调用 `delegate_to_avatar`。",
             "- 禁止调用 `schedule_task` / `list_scheduled_tasks` / `cancel_scheduled_task`（防止递归建任务）。",
