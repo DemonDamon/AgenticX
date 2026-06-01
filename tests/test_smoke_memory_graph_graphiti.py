@@ -154,3 +154,18 @@ def test_graphiti_install_hint_uses_running_interpreter():
     hint = graphiti_install_hint()
     assert sys.executable in hint
     assert "graphiti-core" in hint
+
+
+def test_prepare_kuzu_driver_sets_database():
+    """Regression: Graphiti.add_episode must not raise on missing _database."""
+    pytest.importorskip("graphiti_core")
+    from graphiti_core.driver.kuzu_driver import KuzuDriver
+
+    from agenticx.memory.graph.store import _prepare_kuzu_driver
+
+    driver = KuzuDriver(db=":memory:")
+    assert not hasattr(driver, "_database")
+    _prepare_kuzu_driver(driver)
+    assert hasattr(driver, "_database")
+    cloned = driver.clone("meta_default")
+    assert cloned._database == "meta_default"
