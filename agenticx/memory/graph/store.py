@@ -43,6 +43,40 @@ def graphiti_available() -> bool:
         return False
 
 
+def _prepare_kuzu_driver(driver: Any) -> None:
+    """Patch graphiti-core KuzuDriver gaps (getzep/graphiti#1258, #1360).
+
+    Graphiti.add_episode compares ``group_id`` to ``driver._database``, but KuzuDriver
+    never sets that field. Kuzu also skips FTS index creation in build_indices.
+    """
+    if not hasattr(driver, "_database"):
+        driver._database = getattr(driver, "default_group_id", "") or ""
+
+    # Kuzu stores all groups in one file; clone should only update _database metadata.
+    def _clone_with_database(database: str) -> Any:
+        return driver.with_database(database)
+
+    driver.clone = _clone_with_database  # type: ignore[method-assign]
+
+    db_obj = getattr(driver, "db", None)
+    if db_obj is None:
+        return
+    try:
+        import kuzu
+        from graphiti_core.driver.driver import GraphProvider
+        from graphiti_core.graph_queries import get_fulltext_indices
+
+        conn = kuzu.Connection(db_obj)
+        for stmt in get_fulltext_indices(GraphProvider.KUZU):
+            try:
+                conn.execute(stmt)
+            except Exception as exc:
+                logger.debug("kuzu fts index skipped (%s): %s", stmt[:72], exc)
+        conn.close()
+    except Exception as exc:
+        logger.warning("kuzu fts bootstrap failed: %s", exc)
+
+
 def _dispose_kuzu_driver(driver: Any) -> None:
     """Release the Kuzu DB lock and file descriptors held by a driver.
 
@@ -134,6 +168,7 @@ class MemoryGraphStore:
         db_path = str(self.cfg.db_path.expanduser())
         self.cfg.db_path.parent.mkdir(parents=True, exist_ok=True)
         driver = KuzuDriver(db=db_path)
+        _prepare_kuzu_driver(driver)
         try:
             llm_client, embedder, cross_encoder = build_graphiti_clients(self.cfg)
         except BaseException:
