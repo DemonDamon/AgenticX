@@ -4320,6 +4320,97 @@ def _tool_session_search(arguments: Dict[str, Any], session: Optional[StudioSess
     return json.dumps({"mode": "search", "sessions": sessions_out}, ensure_ascii=False)
 
 
+def _skill_manage_success_payload(
+    *,
+    action: str,
+    skill_md: Path,
+    discoverable: bool,
+    skill_name: Optional[str],
+    frontmatter_fixed: List[str],
+    validation_warnings: List[str],
+    extra: Optional[Dict[str, Any]] = None,
+) -> str:
+    payload: Dict[str, Any] = {
+        "ok": True,
+        "action": action,
+        "path": str(skill_md),
+        "discoverable": discoverable,
+        "skill_name": skill_name,
+        "frontmatter_fixed": frontmatter_fixed,
+        "validation_warnings": validation_warnings,
+    }
+    if extra:
+        payload.update(extra)
+    return json.dumps(payload, ensure_ascii=False)
+
+
+def _write_skill_md_with_checks(
+    *,
+    action: str,
+    skill_dir: Path,
+    content: str,
+    canonical_name: str,
+    on_rollback: Optional[Any] = None,
+    extra: Optional[Dict[str, Any]] = None,
+) -> Tuple[Optional[str], Optional[str]]:
+    """Normalize, write, guard-scan, and verify discoverability.
+
+    Returns:
+        (success_json, error_message) — exactly one is non-None.
+    """
+    from agenticx.skills.frontmatter import (
+        SkillFrontmatterError,
+        normalize_skill_md,
+        verify_skill_discoverable,
+    )
+
+    try:
+        normalized, frontmatter_fixed = normalize_skill_md(content, canonical_name)
+    except SkillFrontmatterError as exc:
+        return None, f"ERROR: {exc}"
+
+    validation_warnings: List[str] = []
+    skill_md = skill_dir / "SKILL.md"
+    try:
+        skill_md.write_text(normalized, encoding="utf-8")
+        result = scan_skill(skill_dir, source="agent-created")
+        ok, reason = should_allow(result, "agent-created")
+        if not ok:
+            if on_rollback:
+                on_rollback()
+            else:
+                skill_md.unlink(missing_ok=True)
+            return None, f"ERROR: guard rejected write ({reason})"
+
+        discoverable, skill_name, errors = verify_skill_discoverable(skill_dir)
+        if not discoverable:
+            if on_rollback:
+                on_rollback()
+            else:
+                skill_md.unlink(missing_ok=True)
+            detail = "; ".join(errors) if errors else "unknown parse failure"
+            return None, f"ERROR: skill not discoverable after write ({detail})"
+
+        return (
+            _skill_manage_success_payload(
+                action=action,
+                skill_md=skill_md,
+                discoverable=discoverable,
+                skill_name=skill_name,
+                frontmatter_fixed=frontmatter_fixed,
+                validation_warnings=validation_warnings,
+                extra=extra,
+            ),
+            None,
+        )
+    except OSError as exc:
+        if on_rollback:
+            on_rollback()
+        else:
+            skill_md.unlink(missing_ok=True)
+        return None, f"ERROR: {exc}"
+
+
 def _tool_skill_manage(arguments: Dict[str, Any], session: Optional[StudioSession]) -> str:
     _ = session
     if not _skill_manage_enabled():
@@ -4361,24 +4452,31 @@ def _tool_skill_manage(arguments: Dict[str, Any], session: Optional[StudioSessio
         assert content is not None
         if skill_dir.exists():
             return "ERROR: skill already exists"
-        skill_dir.mkdir(parents=True, exist_ok=True)
-        skill_md = skill_dir / "SKILL.md"
+        from agenticx.skills.frontmatter import SkillFrontmatterError, normalize_skill_md
+
         try:
-            skill_md.write_text(content, encoding="utf-8")
-            result = scan_skill(skill_dir, source="agent-created")
-            ok, reason = should_allow(result, "agent-created")
-            if not ok:
-                shutil.rmtree(skill_dir, ignore_errors=True)
-                return f"ERROR: guard rejected create ({reason})"
-        except OSError as exc:
-            shutil.rmtree(skill_dir, ignore_errors=True)
+            normalize_skill_md(content, name)
+        except SkillFrontmatterError as exc:
             return f"ERROR: {exc}"
+        skill_dir.mkdir(parents=True, exist_ok=True)
+        success, err = _write_skill_md_with_checks(
+            action="create",
+            skill_dir=skill_dir,
+            content=content,
+            canonical_name=name,
+            on_rollback=lambda: shutil.rmtree(skill_dir, ignore_errors=True),
+        )
+        if err:
+            if skill_dir.exists() and not (skill_dir / "SKILL.md").is_file():
+                shutil.rmtree(skill_dir, ignore_errors=True)
+            return err
         try:
             from agenticx.skills.versioning import append_changelog
+
             append_changelog(skill_dir, action="create", summary="agent-created skill")
         except Exception:
             pass
-        return json.dumps({"ok": True, "action": "create", "path": str(skill_md)}, ensure_ascii=False)
+        return success or "ERROR: unknown create failure"
 
     if action == "patch":
         old_s = str(arguments.get("old_string", ""))
@@ -4392,28 +4490,41 @@ def _tool_skill_manage(arguments: Dict[str, Any], session: Optional[StudioSessio
         except OSError as exc:
             return f"ERROR: read failed: {exc}"
         from agenticx.skills.fuzzy_patch import fuzzy_find_and_replace
+
         updated, match_count, strategy, match_err = fuzzy_find_and_replace(
-            original, old_s, new_s, replace_all=replace_all,
+            original,
+            old_s,
+            new_s,
+            replace_all=replace_all,
         )
         if match_err:
             return f"ERROR: {match_err}"
         backup = original
-        try:
-            skill_md.write_text(updated, encoding="utf-8")
-            result = scan_skill(skill_dir, source="agent-created")
-            ok, reason = should_allow(result, "agent-created")
-            if not ok:
-                skill_md.write_text(backup, encoding="utf-8")
-                return f"ERROR: guard rejected patch ({reason})"
-        except OSError as exc:
+
+        def _rollback_patch() -> None:
             skill_md.write_text(backup, encoding="utf-8")
-            return f"ERROR: {exc}"
+
+        success, err = _write_skill_md_with_checks(
+            action="patch",
+            skill_dir=skill_dir,
+            content=updated,
+            canonical_name=name,
+            on_rollback=_rollback_patch,
+            extra={"strategy": strategy, "matches": match_count},
+        )
+        if err:
+            return err
         try:
             from agenticx.skills.versioning import append_changelog
-            append_changelog(skill_dir, action="patch", summary=f"fuzzy:{strategy}, {match_count} replacement(s)")
+
+            append_changelog(
+                skill_dir,
+                action="patch",
+                summary=f"fuzzy:{strategy}, {match_count} replacement(s)",
+            )
         except Exception:
             pass
-        return json.dumps({"ok": True, "action": "patch", "path": str(skill_md), "strategy": strategy, "matches": match_count}, ensure_ascii=False)
+        return success or "ERROR: unknown patch failure"
 
     if action == "delete":
         if not skill_dir.exists():

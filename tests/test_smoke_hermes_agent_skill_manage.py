@@ -115,6 +115,91 @@ def test_skill_manage_from_url_rejects_unknown_host(monkeypatch: pytest.MonkeyPa
     assert "allowlist" in out.lower()
 
 
+def test_skill_manage_create_title_only_injects_name(skill_home: Path) -> None:
+    body = (
+        "---\n"
+        "title: A股大盘指数数据采集与日报生成\n"
+        "version: 1.0.0\n"
+        "description: 采集A股7大主要指数的收盘价量数据并生成市场分析报告\n"
+        "---\n\n"
+        "# Body\n"
+    )
+    out = json.loads(
+        _tool_skill_manage(
+            {"action": "create", "name": "a-stock-daily-report", "content": body},
+            None,
+        ),
+    )
+    assert out.get("ok") is True
+    assert out.get("discoverable") is True
+    assert out.get("skill_name") == "a-stock-daily-report"
+    assert out.get("frontmatter_fixed")
+    p = Path(out["path"])
+    text = p.read_text(encoding="utf-8")
+    assert "name: a-stock-daily-report" in text
+    shutil.rmtree(p.parent, ignore_errors=True)
+
+
+def test_skill_manage_create_without_frontmatter_fails(skill_home: Path) -> None:
+    out = _tool_skill_manage(
+        {"action": "create", "name": "no-fm", "content": "# no frontmatter\n"},
+        None,
+    )
+    assert "ERROR" in out
+    d = skill_home / ".agenticx" / "skills" / "no-fm"
+    assert not d.exists()
+
+
+def test_skill_manage_create_discoverable_via_loader(skill_home: Path) -> None:
+    body = "---\nname: loader-test\n---\n\nSafe skill body.\n"
+    out = json.loads(
+        _tool_skill_manage({"action": "create", "name": "loader-test", "content": body}, None),
+    )
+    from agenticx.tools.skill_bundle import SkillBundleLoader
+
+    loader = SkillBundleLoader()
+    loader.refresh()
+    meta = loader.get_skill("loader-test")
+    assert meta is not None
+    assert out.get("discoverable") is True
+    shutil.rmtree(Path(out["path"]).parent, ignore_errors=True)
+
+
+def test_skill_manage_create_mismatched_name_is_aligned(skill_home: Path) -> None:
+    body = "---\nname: wrong-name\ndescription: test skill\n---\n\nBody\n"
+    out = json.loads(
+        _tool_skill_manage({"action": "create", "name": "right-name", "content": body}, None),
+    )
+    assert out.get("discoverable") is True
+    assert out.get("skill_name") == "right-name"
+    assert out.get("frontmatter_fixed")
+    text = Path(out["path"]).read_text(encoding="utf-8")
+    assert "name: right-name" in text
+    shutil.rmtree(Path(out["path"]).parent, ignore_errors=True)
+
+
+def test_skill_manage_patch_removing_frontmatter_rolls_back(skill_home: Path) -> None:
+    body = "---\nname: t-patch-fm\n---\n\nKEEP\n"
+    out_create = json.loads(
+        _tool_skill_manage({"action": "create", "name": "t-patch-fm", "content": body}, None),
+    )
+    p = Path(out_create["path"])
+    current = p.read_text(encoding="utf-8")
+    out = _tool_skill_manage(
+        {
+            "action": "patch",
+            "name": "t-patch-fm",
+            "old_string": current,
+            "new_string": "# no frontmatter anymore\n",
+        },
+        None,
+    )
+    assert "ERROR" in out
+    assert "frontmatter" in out.lower() or "discoverable" in out.lower()
+    assert "KEEP" in p.read_text(encoding="utf-8")
+    shutil.rmtree(p.parent, ignore_errors=True)
+
+
 def test_skill_manage_patch_old_string_missing(skill_home: Path) -> None:
     body = "---\nname: t3\n---\n\nhello\n"
     _tool_skill_manage({"action": "create", "name": "t3", "content": body}, None)
