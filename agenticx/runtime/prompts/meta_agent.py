@@ -13,6 +13,7 @@ from typing import Any
 
 from agenticx.cli.studio import StudioSession
 from agenticx.cli.studio_skill import get_all_skill_summaries
+from agenticx.runtime.prompts.skill_authoring import build_skill_authoring_prompt_block
 from agenticx.skills.meta_skill import MetaSkillInjector
 from agenticx.runtime.prompts.code_mode import build_code_dev_prompt_blocks
 from agenticx.runtime.prompts.credential_safety import (
@@ -709,23 +710,7 @@ def build_meta_agent_system_prompt(
         "- Desktop 服务模式下禁止调用不存在的 `confirm_*` 工具；`A/B/C` 不得替代工具授权确认。\n"
         "- **方括号标签纪律**：上下文中所有形如 `[xxx]` / `[/xxx]` 的标记（如 `[compacted]`、`[session_memory]`、`[user-pending-question]`、`[user-goal-anchor]`）都是系统注入的**只读**元数据标签；**禁止你在回复正文或工具参数里模仿造一个**，更**禁止用 `[/xxx]` 形式生成闭合标签**——否则会污染后续上下文，导致整段任务被判失败。\n"
         "- **任务主线自检（每轮必做）**：本会话每轮 LLM 请求都会注入一条 `[user-goal-anchor]` 系统消息，包含用户当前原始问题与执行纪律。你必须在调用工具或输出最终回复前，对照该 anchor 自检本轮工作是否仍直接服务原始问题；若已偏离（如重复上一轮已完成的对比/分析、或开始回答用户未问的相关问题），立即停止信息收集并直接产出最终方案。禁止以\"已经收集了大量信息\"为由输出与原始问题不对应的内容。\n\n"
-        "## Skill 学习协议\n"
-        "- 完成复杂任务（5+ 工具调用）后，考虑将成功方法保存为 skill（`skill_manage` action='create'）。\n"
-        "- 使用 skill 过程中发现不完整/过时/错误，**立即** `skill_manage` action='patch' 更新，不要等用户要求。\n"
-        "- 修复棘手错误或发现非显然工作流后，主动提议保存为 skill。\n"
-        "- 创建/删除 skill 前需与用户确认。\n"
-        "- 简单的一次性任务无需保存。\n\n"
-        "## skill_manage / skill_import_repo 使用规范（必须遵守）\n"
-        "- 安装/创建 skill 时，必须调用 `skill_manage` 或批量时使用 `skill_import_repo`，**所有参数必须在同一次调用中完整填写，禁止发出空参数 `{}`**。\n"
-        "- **单包 / 小文件 create**：`action='create'`、`name=<skill目录名>`、`content=<完整SKILL.md文本>`（仅当 SKILL.md 足够小）。\n"
-        "- **大文件 / bulk create**：禁止把 SKILL.md 全文塞进 `content` 经 LLM context 中转。优先：\n"
-        "  - `skill_import_repo(repo='owner/name', dry_run=true)` 预览 → `skill_import_repo(..., dry_run=false)` 一次安装；或\n"
-        "  - `skill_manage(action='create', name=..., from_url=<raw.githubusercontent.com/.../SKILL.md>)`；或\n"
-        "  - `bash_exec` 下载到本地后 `skill_manage(from_path=<绝对路径>)`。\n"
-        "- SKILL.md 内容必须以 YAML frontmatter 开头：`---\\nname: <名称>\\ndescription: <描述>\\n---`，后接技能正文。\n"
-        "- skill 名称规则：只含字母/数字/连字符/下划线，支持子路径如 `engineering/tdd`，禁止空格和前导点。\n"
-        "- ZIP 单包安装：`bash_exec` 下载解压 → `skill_manage(from_path=...)` 或 `from_url`，**不要** `file_read` 全文再 `content=`。\n"
-        "- **禁止在 `<think>` 里想好参数后发空调用**；若上一次 skill_manage 报参数缺失，必须重新构造完整参数重试，不得再次发空。\n\n"
+        f"{build_skill_authoring_prompt_block()}"
         "- 若用户提到“上报 bug/发邮件给团队”，先确认是否发送，再调用 `send_bug_report_email`；若邮箱未配置，先指导配置 notifications.email.*。\n\n"
         "## 配置安全红线（必须遵守）\n"
         "- 严禁通过 `file_write` / `file_edit` 直接修改 `~/.agenticx/config.yaml`。\n"
