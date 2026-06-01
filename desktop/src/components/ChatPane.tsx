@@ -106,7 +106,6 @@ import {
   mapLoadedSessionMessage,
   type LoadedSessionMessage,
 } from "../utils/session-message-map";
-import { filterPersistedMessagesForDeletion } from "../utils/retry-trim-policy";
 import { favoriteStorageMessageId } from "../utils/favorite-selection";
 import { createResizeRafScheduler } from "../utils/resize-raf";
 import { avatarTintBg } from "../utils/avatar-color";
@@ -3711,6 +3710,41 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
     }
   }, [apiBase, apiToken, pane.id, pane.messages, pane.sessionId, selectedMessages, setPaneMessages]);
 
+  const reloadSessionFromDisk = useCallback(
+    async (sid: string) => {
+      try {
+        const result = await window.agenticxDesktop.loadSessionMessages(sid);
+        if (result.ok && Array.isArray(result.messages)) {
+          const mapped = result.messages.map((item, midx) =>
+            mapLoadedSessionMessage(item as LoadedSessionMessage, sid, midx)
+          );
+          setPaneMessages(pane.id, mapped);
+        }
+      } catch (err) {
+        console.error("[ChatPane] reload session from disk failed:", err);
+      }
+    },
+    [pane.id, setPaneMessages]
+  );
+
+  const truncateSessionAtUserMessage = useCallback(
+    async (sid: string, userContent: string, mode: "after" | "including"): Promise<boolean> => {
+      try {
+        const resp = await fetch(`${apiBase}/api/session/messages/truncate`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json", "x-agx-desktop-token": apiToken },
+          body: JSON.stringify({ session_id: sid, user_content: userContent, mode }),
+        });
+        const data = (await resp.json()) as { ok?: boolean };
+        return resp.ok && data.ok === true;
+      } catch (err) {
+        console.error("[ChatPane] truncate session failed:", err);
+        return false;
+      }
+    },
+    [apiBase, apiToken]
+  );
+
   const retryUserMessage = useCallback(
     async (msg: Message) => {
       if (msg.role !== "user") return;
@@ -3719,62 +3753,29 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
       const msgs = pane.messages ?? [];
       const idx = msgs.findIndex((m) => m.id === msg.id);
       if (idx < 0) return;
-      let end = idx + 1;
-      while (end < msgs.length && msgs[end].role !== "user") {
-        end++;
+      // Truncate by user-message boundary so the model context (agent_messages,
+      // including the [compacted] block) is reliably cut, not signature-matched.
+      const ok = await truncateSessionAtUserMessage(sid, msg.content, "after");
+      if (!ok) {
+        await reloadSessionFromDisk(sid);
+        return;
       }
-      const toRemove = msgs.slice(idx + 1, end);
-      if (toRemove.length > 0) {
-        try {
-          let deletable: Array<Pick<Message, "role" | "content" | "timestamp" | "agentId">> = toRemove;
-          const persisted = await window.agenticxDesktop.loadSessionMessages(sid);
-          if (persisted.ok && Array.isArray(persisted.messages)) {
-            deletable = filterPersistedMessagesForDeletion(
-              toRemove,
-              persisted.messages as LoadedSessionMessage[]
-            );
-          }
-          if (deletable.length > 0) {
-            const resp = await fetch(`${apiBase}/api/session/messages/delete`, {
-              method: "POST",
-              headers: { "Content-Type": "application/json", "x-agx-desktop-token": apiToken },
-              body: JSON.stringify({
-                session_id: sid,
-                messages: deletable.map((m) => ({
-                  role: m.role,
-                  content: m.content,
-                  timestamp: m.timestamp,
-                  agent_id: m.agentId,
-                })),
-              }),
-            });
-            const data = (await resp.json()) as { ok?: boolean; removed?: number; requested?: number };
-            const removed = typeof data.removed === "number" ? data.removed : 0;
-            const requested = typeof data.requested === "number" ? data.requested : deletable.length;
-            if (!resp.ok || !data.ok || removed < requested) {
-              const result = await window.agenticxDesktop.loadSessionMessages(sid);
-              if (result.ok && Array.isArray(result.messages)) {
-                const mapped = result.messages.map((item, midx) =>
-                  mapLoadedSessionMessage(item as LoadedSessionMessage, sid, midx)
-                );
-                setPaneMessages(pane.id, mapped);
-              }
-              return;
-            }
-          }
-          setPaneMessages(pane.id, msgs.slice(0, idx + 1));
-        } catch (err) {
-          console.error("[ChatPane] retry trim messages failed:", err);
-          return;
-        }
-      }
+      setPaneMessages(pane.id, msgs.slice(0, idx + 1));
       await sendChatRef.current(msg.content, {
         retryAttachments: msg.attachments ?? [],
         suppressUserEcho: true,
         skipUserHistory: true,
       });
     },
-    [apiBase, apiToken, pane.id, pane.messages, pane.sessionId, setPaneMessages]
+    [
+      apiBase,
+      pane.id,
+      pane.messages,
+      pane.sessionId,
+      reloadSessionFromDisk,
+      setPaneMessages,
+      truncateSessionAtUserMessage,
+    ]
   );
 
   const editUserMessage = useCallback(
@@ -3785,56 +3786,27 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
       const msgs = pane.messages ?? [];
       const idx = msgs.findIndex((m) => m.id === msg.id);
       if (idx < 0) return;
-      const toRemove = msgs.slice(idx);
-      if (toRemove.length > 0) {
-        try {
-          let deletable: Array<Pick<Message, "role" | "content" | "timestamp" | "agentId">> = toRemove;
-          const persisted = await window.agenticxDesktop.loadSessionMessages(sid);
-          if (persisted.ok && Array.isArray(persisted.messages)) {
-            deletable = filterPersistedMessagesForDeletion(
-              toRemove,
-              persisted.messages as LoadedSessionMessage[]
-            );
-          }
-          if (deletable.length > 0) {
-            const resp = await fetch(`${apiBase}/api/session/messages/delete`, {
-              method: "POST",
-              headers: { "Content-Type": "application/json", "x-agx-desktop-token": apiToken },
-              body: JSON.stringify({
-                session_id: sid,
-                messages: deletable.map((m) => ({
-                  role: m.role,
-                  content: m.content,
-                  timestamp: m.timestamp,
-                  agent_id: m.agentId,
-                })),
-              }),
-            });
-            const data = (await resp.json()) as { ok?: boolean; removed?: number; requested?: number };
-            const removed = typeof data.removed === "number" ? data.removed : 0;
-            const requested = typeof data.requested === "number" ? data.requested : deletable.length;
-            if (!resp.ok || !data.ok || removed < requested) {
-              const result = await window.agenticxDesktop.loadSessionMessages(sid);
-              if (result.ok && Array.isArray(result.messages)) {
-                const mapped = result.messages.map((item, midx) =>
-                  mapLoadedSessionMessage(item as LoadedSessionMessage, sid, midx)
-                );
-                setPaneMessages(pane.id, mapped);
-              }
-              return;
-            }
-          }
-          setPaneMessages(pane.id, msgs.slice(0, idx));
-        } catch (err) {
-          console.error("[ChatPane] edit trim messages failed:", err);
-          return;
-        }
+      // Remove the edited user turn and everything after it (both UI history and
+      // model context) before resending the new content as a fresh turn.
+      const ok = await truncateSessionAtUserMessage(sid, msg.content, "including");
+      if (!ok) {
+        await reloadSessionFromDisk(sid);
+        return;
       }
+      setPaneMessages(pane.id, msgs.slice(0, idx));
       await sendChatRef.current(newContent, {
         retryAttachments: msg.attachments ?? [],
       });
     },
-    [apiBase, apiToken, pane.id, pane.messages, pane.sessionId, setPaneMessages]
+    [
+      apiBase,
+      pane.id,
+      pane.messages,
+      pane.sessionId,
+      reloadSessionFromDisk,
+      setPaneMessages,
+      truncateSessionAtUserMessage,
+    ]
   );
 
   // Group chats also have a real streaming run in flight; only the

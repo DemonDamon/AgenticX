@@ -212,6 +212,82 @@ def test_delete_selected_session_messages() -> None:
     assert [x["content"] for x in managed.studio_session.chat_history] == ["b"]
 
 
+def _seed_truncate_session(app):
+    client = TestClient(app)
+    session_id = client.get("/api/session").json()["session_id"]
+    managed = app.state.session_manager.get(session_id, touch=False)
+    assert managed is not None
+    # UI-side timestamps differ from persisted ones; truncate must not depend on them.
+    managed.studio_session.chat_history = [
+        {"role": "user", "content": "first", "timestamp": 1},
+        {"role": "assistant", "content": "ans1", "timestamp": 2},
+        {"role": "user", "content": "retry me", "timestamp": 3},
+        {"role": "assistant", "content": "已写好 skill", "timestamp": 4},
+    ]
+    managed.studio_session.agent_messages = [
+        {"role": "user", "content": "first"},
+        {"role": "assistant", "content": "ans1"},
+        {"role": "system", "content": "[compacted] 已压缩历史…"},
+        {"role": "user", "content": "retry me"},
+        {"role": "assistant", "content": "已写好 skill", "tool_calls": [{"id": "c1"}]},
+        {"role": "tool", "tool_call_id": "c1", "name": "skill_manage", "content": "ok"},
+    ]
+    return client, session_id, managed
+
+
+def test_truncate_after_clears_model_context_for_retry() -> None:
+    app = create_studio_app()
+    client, session_id, managed = _seed_truncate_session(app)
+
+    resp = client.post(
+        "/api/session/messages/truncate",
+        json={"session_id": session_id, "user_content": "retry me", "mode": "after"},
+    )
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["ok"] is True
+    # AC-1/AC-2: everything after the retried user message is gone in both stores.
+    assert [x["content"] for x in managed.studio_session.chat_history] == [
+        "first",
+        "ans1",
+        "retry me",
+    ]
+    agent_contents = [x["content"] for x in managed.studio_session.agent_messages]
+    assert agent_contents[-1] == "retry me"
+    assert "已写好 skill" not in agent_contents
+    assert not any(str(x.get("role")) == "tool" for x in managed.studio_session.agent_messages)
+
+
+def test_truncate_including_removes_user_turn_for_edit() -> None:
+    app = create_studio_app()
+    client, session_id, managed = _seed_truncate_session(app)
+
+    resp = client.post(
+        "/api/session/messages/truncate",
+        json={"session_id": session_id, "user_content": "retry me", "mode": "including"},
+    )
+    assert resp.status_code == 200
+    assert [x["content"] for x in managed.studio_session.chat_history] == ["first", "ans1"]
+    agent_contents = [x["content"] for x in managed.studio_session.agent_messages]
+    assert agent_contents == ["first", "ans1", "[compacted] 已压缩历史…"]
+
+
+def test_truncate_no_match_is_noop() -> None:
+    app = create_studio_app()
+    client, session_id, managed = _seed_truncate_session(app)
+
+    resp = client.post(
+        "/api/session/messages/truncate",
+        json={"session_id": session_id, "user_content": "not present", "mode": "after"},
+    )
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["ok"] is True
+    assert data["removed_chat"] == 0
+    assert data["removed_agent"] == 0
+    assert len(managed.studio_session.chat_history) == 4
+
+
 def test_server_chat_sse_stream(monkeypatch) -> None:
     from agenticx.studio import server as server_module
 

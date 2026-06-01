@@ -1813,6 +1813,63 @@ def create_studio_app() -> FastAPI:
         manager.persist(session_id)
         return {"ok": True, "removed": removed, "requested": len(targets)}
 
+    @app.post("/api/session/messages/truncate")
+    async def truncate_session_messages(
+        payload: dict,
+        x_agx_desktop_token: str | None = Header(default=None),
+    ) -> dict:
+        """Truncate session history at a user message boundary.
+
+        Used by retry / edit so the model context (agent_messages) is reliably
+        cut at the targeted user turn, instead of relying on per-row signature
+        matching that breaks on timestamp drift and the [compacted] block.
+        """
+        _check_token(x_agx_desktop_token)
+        session_id = str(payload.get("session_id", "") or "").strip()
+        if not session_id:
+            raise HTTPException(status_code=400, detail="session_id is required")
+        managed = manager.get(session_id, touch=False)
+        if managed is None:
+            raise HTTPException(status_code=404, detail="session not found")
+        user_content = str(payload.get("user_content", "") or "")
+        if not user_content:
+            raise HTTPException(status_code=400, detail="user_content is required")
+        mode = str(payload.get("mode", "after") or "after").strip().lower()
+        if mode not in {"after", "including"}:
+            raise HTTPException(status_code=400, detail="mode must be 'after' or 'including'")
+
+        def _last_user_index(rows: list[dict[str, Any]]) -> int:
+            for idx in range(len(rows) - 1, -1, -1):
+                row = rows[idx]
+                if not isinstance(row, dict):
+                    continue
+                if str(row.get("role", "") or "").strip() != "user":
+                    continue
+                if str(row.get("content", "") or "") == user_content:
+                    return idx
+            return -1
+
+        def _truncate(rows: list[dict[str, Any]]) -> int:
+            idx = _last_user_index(rows)
+            if idx < 0:
+                return 0
+            cut = idx + 1 if mode == "after" else idx
+            removed_local = len(rows) - cut
+            if removed_local <= 0:
+                return 0
+            del rows[cut:]
+            return removed_local
+
+        session = managed.studio_session
+        removed_chat = 0
+        removed_agent = 0
+        if isinstance(session.chat_history, list):
+            removed_chat = _truncate(session.chat_history)
+        if isinstance(session.agent_messages, list):
+            removed_agent = _truncate(session.agent_messages)
+        manager.persist(session_id)
+        return {"ok": True, "removed_chat": removed_chat, "removed_agent": removed_agent}
+
     @app.post("/api/session/summary")
     async def get_session_summary(
         payload: dict,
