@@ -1154,6 +1154,9 @@ class AgentRuntime:
                 agent_id=agent_id,
             )
             await self.hooks.run_on_compaction(compacted_count, compact_summary, session)
+            # FR-1: persist proactive compaction so later turns use compacted history
+            # instead of re-summarizing full agent_messages every turn.
+            session.agent_messages = list(compacted_history)
         _is_system_trigger = user_input.startswith("[系统通知]")
         user_content: Any = user_message_content if user_message_content is not None else user_input
         messages.append({"role": "user", "content": user_content})
