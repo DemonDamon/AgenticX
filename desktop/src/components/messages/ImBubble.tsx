@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import type { CSSProperties, ReactNode, MouseEvent as ReactMouseEvent } from "react";
-import { Bookmark, Copy, LayoutList, Quote, RotateCcw, Share2, Pencil, X, ArrowUp, ArrowRight, AlertTriangle } from "lucide-react";
+import { Bookmark, Copy, Forward, LayoutList, Quote, RotateCcw, Pencil, X, ArrowUp, ArrowRight, AlertTriangle } from "lucide-react";
 import type { Message, MessageAttachment } from "../../store";
 import { AttachmentCard } from "./AttachmentCard";
 import { ReasoningBlock } from "./ReasoningBlock";
@@ -17,7 +17,7 @@ import {
 } from "./im-layout";
 import { resolveMetaDisplayName } from "../../utils/display-name";
 import { avatarBgClass } from "../../utils/avatar-color";
-import { shouldShowAssistantIconButtons } from "../../utils/im-bubble-actions";
+import { shouldShowAssistantFollowups, shouldShowAssistantIconButtons } from "../../utils/im-bubble-actions";
 import { MessageTimestamp } from "./MessageTimestamp";
 
 type Props = {
@@ -294,13 +294,16 @@ export function ImBubble({
     setMenuOpen(true);
   };
 
-  const showAssistantFollowups =
-    !isUser &&
-    !isStreaming &&
-    !isGroupTyping &&
-    !omitSuggestedQuestions &&
-    Boolean(message.suggestedQuestions?.length) &&
-    !!onFollowupClick;
+  const showAssistantFollowups = shouldShowAssistantFollowups({
+    isUser,
+    isStreaming,
+    isGroupTyping,
+    omitSuggestedQuestions,
+    hasSuggestedQuestions: Boolean(message.suggestedQuestions?.length),
+    hasFollowupHandler: Boolean(onFollowupClick),
+    sessionBusy,
+    isLastAssistantInPane,
+  });
   const assistantTextClassName = !isUser
     ? getAssistantTextClassName({
         hasReasoning: Boolean(parsed?.reasoning),
@@ -359,7 +362,7 @@ export function ImBubble({
         </HoverTip>
         <HoverTip label="转发">
           <button type="button" className="rounded p-1 hover:bg-surface-hover hover:text-text-strong" onMouseDown={(e) => e.preventDefault()} onClick={runForward}>
-            <Share2 size={13} />
+            <Forward size={13} />
           </button>
         </HoverTip>
         {onRetryMessage ? (
@@ -651,7 +654,7 @@ export function ImBubble({
                 </HoverTip>
                 <HoverTip label="转发">
                   <button type="button" className="rounded p-1 hover:bg-surface-hover hover:text-text-strong" onMouseDown={(e) => e.preventDefault()} onClick={runForward}>
-                    <Share2 size={13} />
+                    <Forward size={13} />
                   </button>
                 </HoverTip>
                 {onEditMessage ? (
@@ -745,7 +748,7 @@ export function ImBubble({
             onMouseDown={(e) => e.preventDefault()}
             onClick={() => { setMenuOpen(false); runForward(); }}
           >
-            <Share2 size={12} className="shrink-0 text-text-faint" />转发
+            <Forward size={12} className="shrink-0 text-text-faint" />转发
           </button>
           {onEditMessage ? (
             <button

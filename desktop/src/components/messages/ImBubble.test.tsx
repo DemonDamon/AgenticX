@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { shouldShowAssistantIconButtons } from "../../utils/im-bubble-actions";
+import { shouldShowAssistantFollowups, shouldShowAssistantIconButtons } from "../../utils/im-bubble-actions";
 
 const baseVisible = {
   hideActions: false,
@@ -47,6 +47,47 @@ describe("shouldShowAssistantIconButtons", () => {
         ...baseVisible,
         sessionBusy: false,
         isLastAssistantInPane: true,
+      })
+    ).toBe(true);
+  });
+});
+
+const baseFollowups = {
+  isUser: false,
+  isStreaming: false,
+  isGroupTyping: false,
+  omitSuggestedQuestions: false,
+  hasSuggestedQuestions: true,
+  hasFollowupHandler: true,
+  sessionBusy: false,
+  isLastAssistantInPane: false,
+};
+
+describe("shouldShowAssistantFollowups", () => {
+  it("shows followups for a completed assistant message", () => {
+    expect(shouldShowAssistantFollowups(baseFollowups)).toBe(true);
+  });
+
+  it("hides followups while streaming placeholder is active", () => {
+    expect(shouldShowAssistantFollowups({ ...baseFollowups, isStreaming: true })).toBe(false);
+  });
+
+  it("suppresses last assistant followups when session is busy", () => {
+    expect(
+      shouldShowAssistantFollowups({
+        ...baseFollowups,
+        sessionBusy: true,
+        isLastAssistantInPane: true,
+      })
+    ).toBe(false);
+  });
+
+  it("keeps historical assistant followups when session is busy", () => {
+    expect(
+      shouldShowAssistantFollowups({
+        ...baseFollowups,
+        sessionBusy: true,
+        isLastAssistantInPane: false,
       })
     ).toBe(true);
   });
