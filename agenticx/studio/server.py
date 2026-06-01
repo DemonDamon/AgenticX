@@ -239,6 +239,32 @@ def _resolve_chat_end_execution_state(
     return "idle"
 
 
+def _flush_taskspace_hint(
+    manager: SessionManager,
+    session_id: str,
+    session_obj: Any,
+) -> bool:
+    scratchpad = getattr(session_obj, "scratchpad", None)
+    if not isinstance(scratchpad, dict):
+        return False
+    taskspace_hint = str(scratchpad.pop("__taskspace_hint__", "") or "").strip()
+    taskspace_label_hint = str(scratchpad.pop("__taskspace_label_hint__", "") or "").strip()
+    if not taskspace_hint:
+        return False
+    hint_path = Path(taskspace_hint).expanduser().resolve(strict=False)
+    target_dir = hint_path if hint_path.is_dir() else hint_path.parent
+    try:
+        manager.add_taskspace(
+            session_id,
+            path=str(target_dir),
+            label=taskspace_label_hint or target_dir.name or "taskspace",
+        )
+        return True
+    except Exception as exc:
+        logger.debug("register taskspace hint skipped: %s", exc)
+        return False
+
+
 def _runtime_event_to_sse_lines(event: RuntimeEvent) -> list[str]:
     """Serialize RuntimeEvent to SSE data line(s); emit token_usage after final when usage present."""
     event_data = dict(event.data)
@@ -293,7 +319,7 @@ def _parse_sse_since_seq(
     return 0
 
 
-def _finalize_chat_runtime(
+async def _finalize_chat_runtime(
     manager: SessionManager,
     session_id: str,
     session: Any,
@@ -301,7 +327,7 @@ def _finalize_chat_runtime(
     saw_final: bool,
     had_runtime_failure: bool,
 ) -> None:
-    _flush_taskspace_hint(session_id, session)
+    _flush_taskspace_hint(manager, session_id, session)
     end_state = _resolve_chat_end_execution_state(
         manager,
         session_id,
@@ -310,7 +336,24 @@ def _finalize_chat_runtime(
     )
     manager.clear_interrupt(session_id)
     manager.set_execution_state(session_id, end_state)
-    manager.persist(session_id)
+    # Persist touches SQLite (session_summaries upsert + FTS reindex over a
+    # potentially large sessions.sqlite). Run it off the event loop so a single
+    # turn-end persist cannot stall concurrent /api/chat, /api/usage/* and
+    # /api/memory/graph/* requests.
+    await asyncio.to_thread(manager.persist, session_id)
+    if not had_runtime_failure:
+        try:
+            from agenticx.memory.graph.writer import schedule_turn_ingest_from_session
+
+            managed = manager.get(session_id, touch=False)
+            avatar_id = getattr(managed, "avatar_id", None) if managed is not None else None
+            schedule_turn_ingest_from_session(
+                session_id,
+                avatar_id=avatar_id,
+                chat_history=getattr(session, "chat_history", None),
+            )
+        except Exception as exc:
+            logger.warning("memory graph turn ingest schedule failed session=%s: %s", session_id, exc)
 
 
 def _extract_cc_bridge_status_event(event_type: str, event_data: dict[str, Any]) -> dict[str, Any] | None:
@@ -609,6 +652,23 @@ def create_studio_app() -> FastAPI:
         except ImportError:
             pass
 
+        try:
+            from agenticx.memory.graph.config import load_memory_graph_config
+            from agenticx.memory.graph.deps import ensure_graphiti_if_enabled
+
+            if load_memory_graph_config().enabled:
+                asyncio.create_task(
+                    ensure_graphiti_if_enabled(),
+                    name="memory-graph-graphiti-bootstrap",
+                )
+                from agenticx.memory.graph.writer import MemoryGraphWriter
+
+                MemoryGraphWriter.singleton()._ensure_worker()
+        except ImportError:
+            pass
+        except Exception as exc:
+            logger.warning("memory graph graphiti bootstrap failed: %s", exc)
+
         async def _internal_continue(
             session_id: str,
             *,
@@ -902,27 +962,6 @@ def create_studio_app() -> FastAPI:
 
         task.add_done_callback(_cleanup)
 
-    def _flush_taskspace_hint(session_id: str, session_obj: Any) -> bool:
-        scratchpad = getattr(session_obj, "scratchpad", None)
-        if not isinstance(scratchpad, dict):
-            return False
-        taskspace_hint = str(scratchpad.pop("__taskspace_hint__", "") or "").strip()
-        taskspace_label_hint = str(scratchpad.pop("__taskspace_label_hint__", "") or "").strip()
-        if not taskspace_hint:
-            return False
-        hint_path = Path(taskspace_hint).expanduser().resolve(strict=False)
-        target_dir = hint_path if hint_path.is_dir() else hint_path.parent
-        try:
-            manager.add_taskspace(
-                session_id,
-                path=str(target_dir),
-                label=taskspace_label_hint or target_dir.name or "taskspace",
-            )
-            return True
-        except Exception as exc:
-            logger.debug("register taskspace hint skipped: %s", exc)
-            return False
-
     def _check_token(x_agx_desktop_token: str | None) -> None:
         if not desktop_token:
             return
@@ -932,6 +971,10 @@ def create_studio_app() -> FastAPI:
     _verify_desktop_token = _check_token
 
     register_voice_endpoints(app, manager=manager, check_token=_check_token)
+
+    from agenticx.memory.graph.routes import register_memory_graph_routes
+
+    register_memory_graph_routes(app, check_token=_check_token)
 
     def _check_mcp_admin_token(x_agx_desktop_token: str | None) -> None:
         if not desktop_token:
@@ -2354,7 +2397,7 @@ def create_studio_app() -> FastAPI:
             async def _track_runtime_event(event: RuntimeEvent) -> None:
                 nonlocal saw_final, had_runtime_failure
                 if event.agent_id == "meta" and event.type == EventType.TOOL_RESULT.value:
-                    _flush_taskspace_hint(payload.session_id, session)
+                    _flush_taskspace_hint(manager, payload.session_id, session)
                 if event.type in ("subagent_started", "subagent_completed", "subagent_error"):
                     logger.info("[sse] yielding %s agent=%s", event.type, event.agent_id)
                 if event.type == EventType.FINAL.value and event.agent_id == "meta":
@@ -2500,7 +2543,7 @@ def create_studio_app() -> FastAPI:
                     finally:
                         if event_hub is not None:
                             await event_hub.publish_done()
-                            _finalize_chat_runtime(
+                            await _finalize_chat_runtime(
                                 manager,
                                 payload.session_id,
                                 session,
@@ -2548,7 +2591,7 @@ def create_studio_app() -> FastAPI:
                             meta_done = True
                         else:
                             if event.agent_id == "meta" and event.type == EventType.TOOL_RESULT.value:
-                                _flush_taskspace_hint(payload.session_id, session)
+                                _flush_taskspace_hint(manager, payload.session_id, session)
                             if event.type in ("subagent_started", "subagent_completed", "subagent_error"):
                                 logger.info("[sse] yielding %s agent=%s", event.type, event.agent_id)
                             if not client_disconnected:
@@ -2597,16 +2640,13 @@ def create_studio_app() -> FastAPI:
                     if task_exc is not None and event_hub is None:
                         had_runtime_failure = True
                 if event_hub is None:
-                    _flush_taskspace_hint(payload.session_id, session)
-                    end_state = _resolve_chat_end_execution_state(
+                    await _finalize_chat_runtime(
                         manager,
                         payload.session_id,
+                        session,
                         saw_final=saw_final,
                         had_runtime_failure=had_runtime_failure,
                     )
-                    manager.clear_interrupt(payload.session_id)
-                    manager.set_execution_state(payload.session_id, end_state)
-                    manager.persist(payload.session_id)
             if not client_disconnected and event_hub is None:
                 yield 'data: {"type":"done","data":{}}\n\n'
 
@@ -2901,14 +2941,14 @@ def create_studio_app() -> FastAPI:
                     if await request.is_disconnected():
                         break
                     if event.agent_id == "meta" and event.type == EventType.TOOL_RESULT.value:
-                        _flush_taskspace_hint(session_id, session)
+                        _flush_taskspace_hint(manager, session_id, session)
                     for line in _runtime_event_to_sse_lines(event):
                         yield line
             except Exception as exc:
                 err = SseEvent(type="error", data={"text": f"Loop runtime error: {exc}"})
                 yield f"data: {json.dumps(err.model_dump(), ensure_ascii=False)}\n\n"
             finally:
-                _flush_taskspace_hint(session_id, session)
+                _flush_taskspace_hint(manager, session_id, session)
                 manager.persist(session_id)
             yield 'data: {"type":"done","data":{}}\n\n'
 
@@ -4639,6 +4679,21 @@ def create_studio_app() -> FastAPI:
                 memory_persisted = True
             except Exception:
                 pass
+            try:
+                from agenticx.memory.graph.writer import MemoryGraphWriter
+
+                avatar_id = getattr(managed, "avatar_id", None)
+                writer = MemoryGraphWriter.singleton()
+                asyncio.create_task(
+                    writer.enqueue_favorite(
+                        session_id=session_id,
+                        avatar_id=avatar_id,
+                        content=truncated,
+                        role=role,
+                    )
+                )
+            except Exception:
+                pass
 
         return {
             "ok": True,
@@ -4953,7 +5008,7 @@ def create_studio_app() -> FastAPI:
         from agenticx.runtime.usage_store import get_usage_store
 
         start_ms, end_ms = _usage_parse_range_ms(range_key, from_date, to_date)
-        return get_usage_store().summary_sync(start_ms, end_ms)
+        return await asyncio.to_thread(get_usage_store().summary_sync, start_ms, end_ms)
 
     @app.get("/api/usage/breakdown")
     async def usage_breakdown(
@@ -4970,7 +5025,9 @@ def create_studio_app() -> FastAPI:
         dim = (dimension or "provider").strip().lower()
         if dim not in {"provider", "model"}:
             raise HTTPException(status_code=400, detail="dimension must be provider or model")
-        rows = get_usage_store().breakdown_sync(start_ms, end_ms, dimension=dim)
+        rows = await asyncio.to_thread(
+            get_usage_store().breakdown_sync, start_ms, end_ms, dimension=dim
+        )
         return {"dimension": dim, "items": rows}
 
     @app.get("/api/usage/daily")
@@ -4984,7 +5041,7 @@ def create_studio_app() -> FastAPI:
         from agenticx.runtime.usage_store import get_usage_store
 
         start_ms, end_ms = _usage_parse_range_ms(range_key, from_date, to_date)
-        rows = get_usage_store().daily_sync(start_ms, end_ms)
+        rows = await asyncio.to_thread(get_usage_store().daily_sync, start_ms, end_ms)
         return {"items": rows}
 
     @app.get("/api/usage/heatmap")
@@ -4998,7 +5055,7 @@ def create_studio_app() -> FastAPI:
         from agenticx.runtime.usage_store import get_usage_store
 
         start_ms, end_ms = _usage_parse_range_ms(range_key, from_date, to_date)
-        rows = get_usage_store().heatmap_sync(start_ms, end_ms)
+        rows = await asyncio.to_thread(get_usage_store().heatmap_sync, start_ms, end_ms)
         return {"items": rows}
 
     @app.get("/api/usage/top-models")
@@ -5013,7 +5070,9 @@ def create_studio_app() -> FastAPI:
         from agenticx.runtime.usage_store import get_usage_store
 
         start_ms, end_ms = _usage_parse_range_ms(range_key, from_date, to_date)
-        rows = get_usage_store().top_models_sync(start_ms, end_ms, limit=limit)
+        rows = await asyncio.to_thread(
+            get_usage_store().top_models_sync, start_ms, end_ms, limit=limit
+        )
         return {"items": rows}
 
     @app.get("/api/usage/meta")
@@ -5025,16 +5084,17 @@ def create_studio_app() -> FastAPI:
 
         store = get_usage_store()
         now_ms = int(time.time() * 1000)
-        started = store.started_at_sync()
-        active_30 = store.active_days_sync(now_ms - 30 * 86400000, now_ms)
         now = datetime.now(timezone.utc)
         month_start_ms = int(datetime(now.year, now.month, 1, tzinfo=timezone.utc).timestamp() * 1000)
-        month_convs = store.month_conversations_sync(month_start_ms, now_ms)
-        return {
-            "started_at": started,
-            "active_days_30d": active_30,
-            "month_conversations": month_convs,
-        }
+
+        def _collect_meta() -> dict[str, Any]:
+            return {
+                "started_at": store.started_at_sync(),
+                "active_days_30d": store.active_days_sync(now_ms - 30 * 86400000, now_ms),
+                "month_conversations": store.month_conversations_sync(month_start_ms, now_ms),
+            }
+
+        return await asyncio.to_thread(_collect_meta)
 
     # -- Health Probe & Recovery ------------------------------------------------
 

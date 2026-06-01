@@ -143,6 +143,14 @@ class SessionStore:
                 )
                 """
             )
+            # session_summaries is append-only (one row per persist), so "load
+            # latest metadata for a session" must not full-scan + sort the whole
+            # table. Index (session_id, created_at) keeps that lookup cheap even
+            # as the table grows large.
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_ss_session_created "
+                "ON session_summaries(session_id, created_at)"
+            )
             conn.execute(
                 """
                 CREATE TABLE IF NOT EXISTS session_messages (

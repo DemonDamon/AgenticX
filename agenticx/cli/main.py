@@ -439,6 +439,14 @@ try:
 except Exception:
     pass
 
+# 注册 memory-graph 子命令 (延迟加载)
+try:
+    from agenticx.cli.memory_graph_commands import memory_graph_app
+
+    app.add_typer(memory_graph_app)
+except Exception:
+    pass
+
 # 注册 generate 子命令 (延迟加载)
 try:
     generate_app = _get_generate_app()
