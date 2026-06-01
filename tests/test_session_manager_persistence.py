@@ -480,3 +480,39 @@ def test_list_sessions_recovers_activity_from_summary_history(tmp_path: Path) ->
     rows = fresh.list_sessions()
     row = next(item for item in rows if item["session_id"] == sid)
     assert abs(float(row["updated_at"]) - real_activity) < 1.0
+
+
+def test_list_sessions_derives_title_from_wrapped_messages_json(tmp_path: Path) -> None:
+    """Filesystem-only sessions with {\"messages\": [...]} must not show id-prefix titles."""
+    import json
+
+    store = SessionStore(tmp_path / "sessions.sqlite")
+    sessions_root = tmp_path / "sessions"
+    sid = "repro-fix-wrap-test"
+    session_dir = sessions_root / sid
+    session_dir.mkdir(parents=True)
+    payload = {
+        "messages": [
+            {
+                "role": "user",
+                "content": "我叫 Damon，住在上海，同事 Alice 负责 Near 桌面端",
+            },
+            {"role": "assistant", "content": "已记下。"},
+        ]
+    }
+    (session_dir / "messages.json").write_text(
+        json.dumps(payload, ensure_ascii=False),
+        encoding="utf-8",
+    )
+
+    manager = SessionManager()
+    manager._session_store = store
+    manager._sessions_root = str(sessions_root)
+
+    rows = manager.list_sessions()
+    row = next(item for item in rows if item["session_id"] == sid)
+    assert row["session_name"] == "我叫 Damon，住在上海，同事 Alice 负责 Near 桌面端"
+
+    loaded = manager._load_messages_snapshot(sid)
+    assert len(loaded) == 2
+    assert loaded[0]["role"] == "user"
