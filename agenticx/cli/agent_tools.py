@@ -3565,15 +3565,9 @@ def _is_non_vision_model(session: StudioSession) -> bool:
     model = str(getattr(session, "model_name", "") or "").strip().lower()
     if not model:
         return False
-    from agenticx.studio.server import (
-        _minimax_m2_family_no_vision,
-        _zhipu_glm5_family_no_vision,
-    )
-    if provider == "minimax" and _minimax_m2_family_no_vision(model):
-        return True
-    if provider == "zhipu" and _zhipu_glm5_family_no_vision(model):
-        return True
-    return False
+    from agenticx.llms.vision import is_vision_capable
+
+    return not is_vision_capable(provider, model)
 
 
 _SCREENSHOT_NON_VISION_HINT = (

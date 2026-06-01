@@ -30,6 +30,7 @@ from agenticx.cli.agent_tools import (
 )
 from agenticx.cli.studio_mcp import build_mcp_tools_context
 from agenticx.cli.studio_skill import get_all_skill_summaries
+from agenticx.llms.vision import strip_nonvision_multimodal_messages
 from agenticx.runtime.compactor import ContextCompactor
 from agenticx.runtime.tool_result_budget import (
     apply_tool_result_budget,
@@ -1279,6 +1280,9 @@ class AgentRuntime:
                 session._turns_since_skill_manage = getattr(session, "_turns_since_skill_manage", 0) + 1
                 messages = await self.hooks.run_before_model(messages, session)
                 messages = _sanitize_context_messages(messages)
+                messages = strip_nonvision_multimodal_messages(
+                    messages, provider_name, model_name
+                )
                 if provider_name.strip().lower() == "minimax":
                     messages = _merge_consecutive_simple_roles_for_minimax(messages)
                 budget_cfg = load_tool_result_budget_config()
@@ -1330,6 +1334,9 @@ class AgentRuntime:
                     type=EventType.CONTEXT_STATS.value,
                     data=context_payload,
                     agent_id=agent_id,
+                )
+                messages_for_llm = strip_nonvision_multimodal_messages(
+                    messages_for_llm, provider_name, model_name
                 )
                 if provider_name.strip().lower() == "minimax":
                     messages_for_llm = _merge_consecutive_simple_roles_for_minimax(messages_for_llm)

@@ -25,6 +25,13 @@ function zhipuGlm5TextOnlySlug(slug: string): boolean {
   return s === "glm-5" || s.startsWith("glm-5-");
 }
 
+/** Bailian/DashScope text Qwen SKUs reject OpenAI-style image_url blocks (e.g. qwen3.7-max). */
+function bailianQwenTextOnlySlug(slug: string): boolean {
+  const s = slug.toLowerCase();
+  if (/vl|vision|omni/.test(s)) return false;
+  return s.startsWith("qwen");
+}
+
 /**
  * Returns true if we are confident the current model does not accept image input.
  * Empty model id → false (do not block).
@@ -40,5 +47,6 @@ export function isKnownNonVisionChatModel(provider: string, model: string): bool
   if (KNOWN_TEXT_ONLY_RE.test(combined) || KNOWN_TEXT_ONLY_RE.test(modelLower)) return true;
   if (p === "minimax" && minimaxM2TextOnlySlug(slug)) return true;
   if (p === "zhipu" && zhipuGlm5TextOnlySlug(slug)) return true;
+  if ((p === "bailian" || p === "dashscope") && bailianQwenTextOnlySlug(slug)) return true;
   return false;
 }
