@@ -18,9 +18,9 @@ import { KnowledgeWikiPanel } from "../knowledge/KnowledgeWikiPanel";
 import { createKbApi } from "../knowledge/api";
 import type { KBConfig, KBStats } from "../knowledge/types";
 import { defaultKBConfig } from "../knowledge/types";
-import { BrainScopePanel } from "./BrainScopePanel";
+import { BrainScopePanel, type BrainScopePanelHandle } from "./BrainScopePanel";
 import { brainScopeBadge, brainTypeShort } from "./brainScopeUi";
-import { CodeIndexBrainPanel } from "./CodeIndexBrainPanel";
+import { CodeIndexBrainPanel, type CodeIndexBrainPanelHandle } from "./CodeIndexBrainPanel";
 import { SettingsOnOffSwitch } from "../SettingsSwitch";
 import { BackendDepsPanel } from "../knowledge/BackendDepsPanel";
 
@@ -62,7 +62,13 @@ export const BrainsSettings = forwardRef<BrainsSettingsHandle>(function BrainsSe
   const [kbDraft, setKbDraft] = useState<KBConfig>(defaultKBConfig());
   const [kbStats, setKbStats] = useState<KBStats | null>(null);
   const [codeEnabledDraft, setCodeEnabledDraft] = useState(true);
+  const [scopeDirty, setScopeDirty] = useState(false);
+  const [codeDirty, setCodeDirty] = useState(false);
+  const [brainSaving, setBrainSaving] = useState(false);
+  const [brainSaveMsg, setBrainSaveMsg] = useState<string | null>(null);
   const kbDraftRef = useRef(kbDraft);
+  const scopePanelRef = useRef<BrainScopePanelHandle>(null);
+  const codePanelRef = useRef<CodeIndexBrainPanelHandle>(null);
   useEffect(() => {
     kbDraftRef.current = kbDraft;
   }, [kbDraft]);
@@ -122,31 +128,78 @@ export const BrainsSettings = forwardRef<BrainsSettingsHandle>(function BrainsSe
     setCodeEnabledDraft(Boolean(cfg.enabled ?? true));
   }, [selected?.id, selected?.type, selected?.config]);
 
-  useImperativeHandle(
-    ref,
-    () => ({
-      async flushIfDirty() {
-        if (!selectedId || selected?.type !== "docs") {
-          return { ok: true };
-        }
-        if (JSON.stringify(kbConfig) === JSON.stringify(kbDraftRef.current)) {
-          return { ok: true };
-        }
+  useEffect(() => {
+    setScopeDirty(false);
+    setCodeDirty(false);
+    setBrainSaveMsg(null);
+  }, [selectedId]);
+
+  const kbDirty =
+    selected?.type === "docs" && JSON.stringify(kbConfig) !== JSON.stringify(kbDraft);
+  const brainDirty = kbDirty || scopeDirty || codeDirty;
+
+  const saveSelectedBrain = useCallback(async (): Promise<{ ok: boolean; error?: string }> => {
+    if (!selectedId || !selected) return { ok: true };
+    if (!brainDirty) return { ok: true };
+
+    const scopeRes = await scopePanelRef.current?.flushIfDirty();
+    if (scopeRes && !scopeRes.ok) {
+      return { ok: false, error: scopeRes.error ?? "可见范围保存失败" };
+    }
+
+    if (selected.type === "docs") {
+      if (JSON.stringify(kbConfig) !== JSON.stringify(kbDraftRef.current)) {
         try {
           const result = await brainsApi.writeKbConfig(selectedId, kbDraftRef.current);
           setKbConfig(result.config);
           setKbDraft(result.config);
-          await reloadBrains();
-          return { ok: true };
         } catch (exc) {
           const msg = String((exc as Error).message ?? exc);
           setError(`保存知识脑配置失败：${msg}`);
           return { ok: false, error: msg };
         }
+      }
+    }
+
+    if (selected.type === "code") {
+      const codeRes = await codePanelRef.current?.flushIfDirty();
+      if (codeRes && !codeRes.ok) {
+        return { ok: false, error: codeRes.error ?? "代码库配置保存失败" };
+      }
+    }
+
+    await reloadBrains();
+    return { ok: true };
+  }, [brainDirty, brainsApi, kbConfig, reloadBrains, selected, selectedId]);
+
+  useImperativeHandle(
+    ref,
+    () => ({
+      async flushIfDirty() {
+        return saveSelectedBrain();
       },
     }),
-    [selectedId, selected?.type, kbConfig, brainsApi, reloadBrains],
+    [saveSelectedBrain],
   );
+
+  const handleSaveBrain = async () => {
+    const hadDirty = brainDirty;
+    setBrainSaving(true);
+    setBrainSaveMsg(null);
+    setError(null);
+    try {
+      const res = await saveSelectedBrain();
+      if (!res.ok) {
+        setBrainSaveMsg(res.error ?? "保存失败");
+        return;
+      }
+      if (hadDirty) {
+        setBrainSaveMsg("已保存，可继续在本页调试或测试");
+      }
+    } finally {
+      setBrainSaving(false);
+    }
+  };
 
   const handleCreate = async () => {
     try {
@@ -287,7 +340,13 @@ export const BrainsSettings = forwardRef<BrainsSettingsHandle>(function BrainsSe
               </div>
 
               <div className="min-h-0 flex-1 space-y-3 overflow-y-auto px-4 pb-4">
-                <BrainScopePanel brain={selected} brainsApi={brainsApi} onUpdated={reloadBrains} />
+                <BrainScopePanel
+                  ref={scopePanelRef}
+                  brain={selected}
+                  brainsApi={brainsApi}
+                  onUpdated={reloadBrains}
+                  onDirtyChange={setScopeDirty}
+                />
 
                 {selected.type === "docs" && kbApi ? (
                   <div className="flex overflow-hidden rounded-md border border-border text-xs">
@@ -335,26 +394,52 @@ export const BrainsSettings = forwardRef<BrainsSettingsHandle>(function BrainsSe
 
                 {selected.type === "code" ? (
                   <CodeIndexBrainPanel
+                    ref={codePanelRef}
                     brain={selected}
                     brainsApi={brainsApi}
                     onUpdated={reloadBrains}
                     enabled={codeEnabledDraft}
                     onEnabledChange={setCodeEnabledDraft}
+                    onDirtyChange={setCodeDirty}
                   />
                 ) : null}
               </div>
 
-              {selected.id !== "default_docs" ? (
-                <div className="shrink-0 border-t border-[var(--border-muted)] px-4 py-3">
-                  <button
-                    type="button"
-                    className="flex items-center gap-1 rounded border border-rose-500/40 px-2 py-1 text-xs text-rose-300 hover:bg-rose-500/10"
-                    onClick={() => void handleDelete()}
-                  >
-                    <Trash2 className="h-3.5 w-3.5" /> 删除
-                  </button>
+              <div className="shrink-0 border-t border-[var(--border-muted)] px-4 py-3">
+                <div className="flex flex-wrap items-center gap-2">
+                  {selected.id !== "default_docs" ? (
+                    <button
+                      type="button"
+                      className="flex items-center gap-1 rounded border border-rose-500/40 px-2 py-1 text-xs text-rose-300 hover:bg-rose-500/10"
+                      onClick={() => void handleDelete()}
+                    >
+                      <Trash2 className="h-3.5 w-3.5" /> 删除
+                    </button>
+                  ) : null}
+                  <div className="ml-auto flex flex-wrap items-center justify-end gap-2">
+                    {brainDirty ? (
+                      <span className="text-xs text-amber-500">有未保存的改动</span>
+                    ) : brainSaveMsg ? (
+                      <span className="text-xs text-text-muted">{brainSaveMsg}</span>
+                    ) : null}
+                    <button
+                      type="button"
+                      disabled={brainSaving || !brainDirty}
+                      className="rounded-lg bg-[var(--settings-accent-solid)] px-4 py-1.5 text-xs font-medium text-[var(--settings-accent-solid-text)] transition hover:bg-[var(--settings-accent-solid-hover)] disabled:opacity-40"
+                      onClick={() => void handleSaveBrain()}
+                    >
+                      {brainSaving ? (
+                        <>
+                          <Loader2 className="mr-1 inline h-3.5 w-3.5 animate-spin" />
+                          保存中…
+                        </>
+                      ) : (
+                        "保存"
+                      )}
+                    </button>
+                  </div>
                 </div>
-              ) : null}
+              </div>
             </>
           )}
         </div>
