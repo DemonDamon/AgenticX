@@ -57,8 +57,33 @@ chunk 索引、score 与片段预览。
 
 - **Top-K 检索**：直接输入自然语言查询，看命中片段、分数、来源，
   与线上 agent 行为完全一致（复用同一条 `/api/kb/search`）。
+- **检索通道**：可在调试面板切换 **向量 / BM25 / 混合 (Hybrid RRF) / 混合+图谱**；
+  混合模式会展示 `vector_score`、`bm25_score`、`fused_score` 分项。
 - **切片预览**：输入任意本地文件绝对路径，试不同 `chunk_size / chunk_overlap`
   组合，不产生向量写入 —— 便于在真正索引前调优。
+
+---
+
+## 检索通道与混合检索（2026-06 升级）
+
+| 通道 | 说明 |
+|------|------|
+| `vector` | 默认，与早期版本行为一致（仅向量） |
+| `bm25` | SQLite FTS5 关键词检索 |
+| `hybrid` | BM25 + 向量 RRF 融合（k 默认 60） |
+| `hybrid_graph` | 混合检索 + Wiki 图谱扩展（需启用 Wiki 编译并有编译页） |
+
+在「配置 → 检索通道」选择默认模式；「调试」面板可临时切换验证。
+
+**合成答案**（可选）：开启「合成答案」后，Agent 可调用 `knowledge_synthesize`
+获取带 `[N]` 引用与缺口分析的综合回答；原始片段检索仍用 `knowledge_search`。
+
+**增量入库**：同一文件内容、分块与嵌入配置未变时，二次 ingest 会跳过 re-embed（日志可见 `skipped unchanged source`）。
+
+**Contextual 分块**：在「分块策略」选 Contextual 时，每个 chunk 会注入文档标题/章节前缀，提升召回。
+
+**Wiki 编译**（可选）：开启后，资料入库成功会自动触发两步 LLM 编译，产物位于
+`~/.agenticx/brains/<brain_id>/wiki/`；可在「Wiki」子 tab 浏览与编辑 `purpose.md`。
 
 ---
 
