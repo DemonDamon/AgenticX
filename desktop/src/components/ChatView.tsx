@@ -105,9 +105,6 @@ function formatToolResultMessage(toolNameRaw: unknown, resultRaw: unknown): { co
   if (toolName === "check_resources") {
     return { content: "", silent: true };
   }
-  if (SEARCH_REFERENCE_TOOLS.has(toolName)) {
-    return { content: "", silent: true };
-  }
   if (toolName === "delegate_to_avatar") {
     try {
       const parsed = JSON.parse(resultText) as Record<string, unknown>;
@@ -1175,7 +1172,6 @@ export function ChatView({ onOpenConfirm, mode = "pro" }: Props) {
               if (SEARCH_REFERENCE_TOOLS.has(toolNameStr)) {
                 const q = String(toolArgs.query ?? "").trim();
                 if (q) pendingSearchedQueries = mergeSearchedQueries(pendingSearchedQueries, [q]);
-                continue;
               }
               if (eventAgentId === "meta" && toolNameStr === "cc_bridge_start") {
                 const modeHint = parseCcBridgeModeFromPayload(toolArgs);
@@ -1235,7 +1231,6 @@ export function ChatView({ onOpenConfirm, mode = "pro" }: Props) {
                 );
                 pendingReferences = accumulated.references;
                 pendingSearchedQueries = accumulated.queries;
-                continue;
               }
               let resultObjForCc: Record<string, unknown> | null = null;
               const resultRaw = payload.data?.result;
