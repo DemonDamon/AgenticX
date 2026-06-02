@@ -251,21 +251,24 @@ class SessionManager:
     def _normalize_execution_state_for_listing(self, session_id: str, state: Any) -> str:
         """Normalize execution_state for session list display.
 
-        In-memory sessions keep ``interrupted`` after LLM timeout / runtime failure
-        even though ``clear_interrupt`` removed the active stop flag. Only hide
-        stale ``interrupted`` rows loaded from disk without a live managed session.
+        Stale ``interrupted`` metadata (no active interrupt request, or the last
+        user turn already has a completed assistant reply on disk) is shown as
+        ``idle`` so the history badge does not contradict a finished answer.
         """
         raw = str(state or "idle").strip().lower()
         if raw not in {"idle", "running", "interrupted", "failed"}:
             raw = "idle"
-        if raw != "interrupted":
-            return raw
-        managed = self._sessions.get(session_id)
-        if managed is not None and str(getattr(managed, "execution_state", "")).strip().lower() == "interrupted":
-            return "interrupted"
         if self.should_interrupt(session_id):
             return "interrupted"
-        return "idle"
+        if raw == "running":
+            return "running"
+        if raw == "failed":
+            return "failed"
+        if self._last_turn_has_completed_reply(session_id):
+            return "idle"
+        if raw == "interrupted":
+            return "idle"
+        return raw
 
     def request_interrupt(self, session_id: str) -> bool:
         sid = str(session_id or "").strip()
@@ -283,38 +286,84 @@ class SessionManager:
         sid = str(session_id or "").strip()
         return bool(sid and sid in self._interrupt_requests)
 
+    def _last_turn_has_completed_reply(self, session_id: str) -> bool:
+        """True when the persisted messages show the last user turn already
+        produced a non-empty assistant reply.
+
+        Used at startup so a session left at ``running`` in metadata (e.g. the
+        client SSE was aborted on a pane switch and the off-loop finalize persist
+        never flushed ``idle``) is NOT mislabeled ``interrupted`` when its answer
+        was in fact written to disk — that mismatch shows a completed reply under
+        a stale "已中断" badge that only a restart used to surface.
+        """
+        try:
+            messages = self._load_messages_snapshot(session_id)
+        except Exception:
+            return False
+        if not messages:
+            return False
+        last_user_idx = -1
+        for idx, msg in enumerate(messages):
+            if str(msg.get("role", "")).strip() == "user":
+                last_user_idx = idx
+        if last_user_idx < 0:
+            return False
+        for msg in messages[last_user_idx + 1:]:
+            if str(msg.get("role", "")).strip() != "assistant":
+                continue
+            content = str(msg.get("content", "") or "").strip()
+            if not content:
+                continue
+            if content in {"（已中断）", "(已中断)"}:
+                continue
+            return True
+        return False
+
     def scan_interrupted_sessions(self) -> list[str]:
         """Scan persisted sessions for those left in 'running' state.
 
         Called at startup to detect sessions that were interrupted by a crash.
-        Marks them as 'interrupted' and returns their session IDs.
+        Marks them as 'interrupted' and returns their session IDs. Sessions whose
+        last turn already has a completed assistant reply on disk are normalized
+        to 'idle' instead — they finished, only the state flag lagged.
         """
         interrupted: list[str] = []
+        for row in self._iter_running_session_rows_for_scan():
+            sid = str(row.get("session_id", "")).strip()
+            meta = row.get("metadata")
+            if not isinstance(meta, dict):
+                continue
+            completed = self._last_turn_has_completed_reply(sid)
+            next_state = "idle" if completed else "interrupted"
+            if not completed:
+                interrupted.append(sid)
+            try:
+                self._session_store._save_session_summary_sync(
+                    sid,
+                    str(row.get("summary", "")),
+                    {**meta, "execution_state": next_state},
+                )
+            except Exception:
+                pass
+        if interrupted:
+            _log.info("Found %d interrupted sessions on startup: %s", len(interrupted), interrupted[:5])
+        return interrupted
+
+    def _iter_running_session_rows_for_scan(self) -> list[dict]:
         try:
             rows = self._session_store._list_latest_sessions_sync(limit=0)
         except Exception:
-            return interrupted
+            return []
+        out: list[dict] = []
         for row in rows:
-            sid = str(row.get("session_id", "")).strip()
-            if not sid:
+            if not str(row.get("session_id", "")).strip():
                 continue
             meta = row.get("metadata")
             if not isinstance(meta, dict):
                 continue
-            state = str(meta.get("execution_state", "idle")).strip()
-            if state == "running":
-                interrupted.append(sid)
-                try:
-                    self._session_store._save_session_summary_sync(
-                        sid,
-                        str(row.get("summary", "")),
-                        {**meta, "execution_state": "interrupted"},
-                    )
-                except Exception:
-                    pass
-        if interrupted:
-            _log.info("Found %d interrupted sessions on startup: %s", len(interrupted), interrupted[:5])
-        return interrupted
+            if str(meta.get("execution_state", "idle")).strip() == "running":
+                out.append(row)
+        return out
 
     def incremental_persist(self, session_id: str) -> bool:
         """Lightweight mid-turn persist: only flush messages + agent_messages.

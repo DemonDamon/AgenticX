@@ -82,6 +82,10 @@ class StudioSession:
     provider_hard_failure_providers: Set[str] = field(default_factory=set)
     # Current user intent for this session (not persisted to messages.json)
     current_user_intent: Optional[str] = None
+    # Per-session KB retrieval mode ("auto" | "always"); set from /api/chat
+    # payload so continue/loop prompt builds in the same process honor the
+    # session's choice instead of the global retrieval.mode config.
+    kb_retrieval_mode: Optional[str] = None
 
     # ------------------------------------------------------------------
     # MCP read-through properties → GlobalMcpManager

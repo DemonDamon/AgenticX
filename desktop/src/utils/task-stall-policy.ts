@@ -110,6 +110,24 @@ export function resolveStickyTodoDisplay(
   return { items, completed, total };
 }
 
+/**
+ * True when the displayed session changed and the pane must reset its
+ * per-session transient stall detectors (silence clock / stallState /
+ * prevExecutionState). Without this, a still-running (and possibly hung)
+ * background session leaks its "已停滞 Ns / 该任务可能已中断" state onto a
+ * sibling session that already finished, because those detectors live on the
+ * single ChatPane instance and are not keyed per session.
+ */
+export function shouldResetStallDetectorsOnSessionSwitch(
+  prevSessionId: string | undefined,
+  nextSessionId: string | undefined,
+): boolean {
+  const prev = (prevSessionId || "").trim();
+  const next = (nextSessionId || "").trim();
+  if (!next) return false;
+  return prev !== next;
+}
+
 /** While the user requested stop, suppress stall re-detection until execution settles. */
 export function shouldSuppressStallDetection(
   runGuardSessionId: string | undefined,

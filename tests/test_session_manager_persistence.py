@@ -516,3 +516,71 @@ def test_list_sessions_derives_title_from_wrapped_messages_json(tmp_path: Path) 
     loaded = manager._load_messages_snapshot(sid)
     assert len(loaded) == 2
     assert loaded[0]["role"] == "user"
+
+
+def test_scan_interrupted_normalizes_running_with_completed_reply_to_idle(tmp_path: Path) -> None:
+    """Startup scan must not mark a finished turn as interrupted."""
+    import json
+
+    store = SessionStore(tmp_path / "sessions.sqlite")
+    sessions_root = tmp_path / "sessions"
+    sid = "running-but-finished-session"
+    session_dir = sessions_root / sid
+    session_dir.mkdir(parents=True)
+    (session_dir / "messages.json").write_text(
+        json.dumps(
+            {
+                "messages": [
+                    {"role": "user", "content": "现在AI网关有什么特别的"},
+                    {"role": "assistant", "content": "团长，UToken 网关的几个特别之处…"},
+                ]
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    store._save_session_summary_sync(
+        sid,
+        "summary",
+        {
+            "session_name": "AI网关的新特点",
+            "execution_state": "running",
+            "chat_messages": 2,
+            "updated_at": 1.0,
+            "created_at": 1.0,
+        },
+    )
+
+    fresh = SessionManager()
+    fresh._session_store = store
+    fresh._sessions_root = str(sessions_root)
+    interrupted = fresh.scan_interrupted_sessions()
+    assert sid not in interrupted
+
+    rows = fresh.list_sessions()
+    row = next(r for r in rows if r["session_id"] == sid)
+    assert row["execution_state"] == "idle"
+
+
+def test_list_sessions_idle_when_interrupted_metadata_but_reply_on_disk(tmp_path: Path) -> None:
+    """History badge must not stay 已中断 when the last turn already completed on disk."""
+    store = SessionStore(tmp_path / "sessions.sqlite")
+    sessions_root = tmp_path / "sessions"
+
+    manager = SessionManager()
+    manager._session_store = store
+    manager._sessions_root = str(sessions_root)
+
+    sid = "interrupted-metadata-complete-reply"
+    managed = manager.create(session_id=sid)
+    managed.studio_session.chat_history = [
+        {"id": "u1", "role": "user", "content": "hello"},
+        {"id": "a1", "role": "assistant", "content": "full answer on disk"},
+    ]
+    manager.set_execution_state(sid, "interrupted")
+    assert manager.persist(sid) is True
+
+    rows = manager.list_sessions()
+    row = next(r for r in rows if r["session_id"] == sid)
+    assert row["execution_state"] == "idle"
+

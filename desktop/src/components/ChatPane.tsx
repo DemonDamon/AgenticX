@@ -89,6 +89,7 @@ import {
   stallDetectSilenceMs,
   messageLooksLikeAssistantFinal,
   shouldAllowStallAutoNudge,
+  shouldResetStallDetectorsOnSessionSwitch,
   shouldSuppressStallDetection,
   shouldTriggerIncompleteEndStall,
 } from "../utils/task-stall-policy";
@@ -98,6 +99,11 @@ import {
   type BudgetExceededInfo,
 } from "../utils/budget-exceeded";
 import { buildBudgetResumeDraft } from "../utils/budget-resume-draft";
+import {
+  getSessionKbRetrievalMode,
+  setSessionKbRetrievalMode,
+  type KbRetrievalMode,
+} from "../utils/kb-retrieval-mode";
 import {
   continueSessionUrl,
   inferContinueReason,
@@ -814,9 +820,11 @@ function PaneModelPicker({ paneId }: { paneId: string }) {
 function PaneKnowledgeRetrievalModeSwitch({
   apiToken,
   apiBase,
+  sessionId,
 }: {
   apiToken: string;
   apiBase: string;
+  sessionId: string;
 }) {
   const resolveApiBase = useCallback(async () => {
     const base = String(apiBase ?? "").trim();
@@ -825,11 +833,23 @@ function PaneKnowledgeRetrievalModeSwitch({
     return raw.replace(/\/+$/, "");
   }, [apiBase]);
   const api = useMemo(() => createKbApi(apiToken, resolveApiBase), [apiToken, resolveApiBase]);
-  const [mode, setMode] = useState<"auto" | "always">("auto");
+  const [mode, setMode] = useState<KbRetrievalMode>(
+    () => getSessionKbRetrievalMode(sessionId) ?? "auto",
+  );
   const [saving, setSaving] = useState(false);
   const [open, setOpen] = useState(false);
 
+  // Per-session binding: prefer the explicit per-session choice; only fall back
+  // to the global config value as the DEFAULT for sessions the user has not
+  // toggled yet. We never write the global config from here, so switching
+  // sessions no longer clobbers each other's mode.
   const refresh = useCallback(async () => {
+    const sid = String(sessionId || "").trim();
+    const perSession = getSessionKbRetrievalMode(sid);
+    if (perSession) {
+      setMode(perSession);
+      return;
+    }
     try {
       const body = await api.readConfig();
       const modeRaw = body.config.retrieval?.mode;
@@ -839,36 +859,31 @@ function PaneKnowledgeRetrievalModeSwitch({
     } catch {
       // Keep last known mode; Chat should still be usable if KB API is unavailable.
     }
-  }, [api]);
+  }, [api, sessionId]);
 
   useEffect(() => {
     void refresh();
   }, [refresh]);
 
   const saveMode = useCallback(
-    async (nextMode: "auto" | "always") => {
+    async (nextMode: KbRetrievalMode) => {
       if (saving) return;
+      const sid = String(sessionId || "").trim();
+      if (!sid) return;
       const previous = mode;
       setMode(nextMode);
       setSaving(true);
       try {
-        // Always re-read before write to avoid clobbering concurrent KB edits from settings.
-        const current = (await api.readConfig()).config;
-        const nextConfig = {
-          ...current,
-          retrieval: {
-            ...current.retrieval,
-            mode: nextMode,
-          },
-        };
-        await api.writeConfig(nextConfig);
+        // Bind the choice to this session only; the per-turn /api/chat payload
+        // carries it to the backend. Do NOT touch the global config here.
+        setSessionKbRetrievalMode(sid, nextMode);
       } catch {
         setMode(previous);
       } finally {
         setSaving(false);
       }
     },
-    [api, mode, saving],
+    [mode, saving, sessionId],
   );
 
   return (
@@ -2172,6 +2187,10 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
   const lastSseEventAtRef = useRef(0);
   const lastProgressAtRef = useRef(0);
   const sessionEnteredAtRef = useRef<Record<string, number>>({});
+  /** Last session id whose transient stall detectors were baselined; used to
+   * reset the silence clock / stallState only on a real displayed-session
+   * switch (not on every effect re-run). */
+  const lastStallBaselineSessionRef = useRef<string>("");
   const deferredSessionMessagesRef = useRef<Record<string, Array<Parameters<typeof addPaneMessage>>>>({});
   const lastComposerEnterAtRef = useRef(0);
   const streamRafRef = useRef<number | null>(null);
@@ -3750,6 +3769,46 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
     [pane.id, setPaneMessages]
   );
 
+  /**
+   * FR-B self-heal: when re-entering a displayed session whose foreground SSE is
+   * not active, the in-memory messages may have diverged from disk — either a
+   * retry truncation that never got the new reply merged back, or a turn that
+   * completed in the background while the user was on another session (the
+   * re-entry path only reconciled `running` sessions, so an already-`idle`
+   * session showed a stale/empty "已中断" state until restart). Disk is
+   * authoritative for completed turns (it already persists suggested_questions /
+   * references), so a clean full replace mirrors the restart behavior without
+   * losing enrichments. No-op when in-memory already matches disk.
+   */
+  const reconcileDisplayedSessionFromDisk = useCallback(
+    async (sid: string): Promise<void> => {
+      if (!sid) return;
+      if (sessionStreamStateRef.current[sid]?.active) return;
+      try {
+        const result = await window.agenticxDesktop.loadSessionMessages(sid);
+        if (!result.ok || !Array.isArray(result.messages)) return;
+        const latestSid = String(
+          useAppStore.getState().panes.find((p) => p.id === pane.id)?.sessionId ?? ""
+        ).trim();
+        if (latestSid !== sid) return;
+        if (sessionStreamStateRef.current[sid]?.active) return;
+        const current =
+          useAppStore.getState().panes.find((p) => p.id === pane.id)?.messages ?? [];
+        const mapped = result.messages.map((item, midx) =>
+          mapLoadedSessionMessage(item as LoadedSessionMessage, sid, midx)
+        );
+        const differs =
+          mapped.length !== current.length ||
+          String(mapped[mapped.length - 1]?.content ?? "") !==
+            String(current[current.length - 1]?.content ?? "");
+        if (differs) setPaneMessages(pane.id, mapped);
+      } catch {
+        /* best effort */
+      }
+    },
+    [pane.id, setPaneMessages]
+  );
+
   const truncateSessionAtUserMessage = useCallback(
     async (
       sid: string,
@@ -4221,9 +4280,23 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
   /** Returns true only when disk merge actually added/changed rows (used to gate progress timer). */
   const mergeTailFromDisk = useCallback(
     async (sid: string): Promise<boolean> => {
+      // A foreground SSE stream is the single source of truth while it runs;
+      // disk lags and uses a positional id scheme incompatible with the live
+      // `uid()` rows, so merging mid-stream re-introduces the just-truncated
+      // old reply (the retry "拼接"). Let the stream own the in-memory state.
+      if (sessionStreamStateRef.current[sid]?.active) return false;
       try {
         const msgs = await window.agenticxDesktop.loadSessionMessages(sid);
         if (!msgs.ok || !Array.isArray(msgs.messages)) return false;
+        // The displayed session may have changed while the disk load was in
+        // flight (e.g. a background timer for session B resolves after the user
+        // switched the pane to session A). Never merge B's disk tail into A's
+        // pane — that truncates/corrupts the in-memory messages until restart.
+        // Mirrors the same guard in the delegation poll path above.
+        const latestSid = String(
+          useAppStore.getState().panes.find((p) => p.id === pane.id)?.sessionId ?? ""
+        ).trim();
+        if (latestSid !== sid) return false;
         const current = useAppStore.getState().panes.find((p) => p.id === pane.id)?.messages ?? [];
         const merged = mergeSessionMessagesTail(
           current,
@@ -4323,7 +4396,24 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
   useEffect(() => {
     const sid = (pane.sessionId || "").trim();
     if (!sid) return;
-    sessionEnteredAtRef.current[sid] = Date.now();
+    const enteredAt = Date.now();
+    sessionEnteredAtRef.current[sid] = enteredAt;
+    // Per-session reset: switching the displayed session must NOT inherit a
+    // sibling (possibly hung) session's silence clock or stall/execution state.
+    // Otherwise a background session stuck at e.g. 148s silence leaks its
+    // "已停滞 Ns / 该任务可能已中断" card onto a session that already finished,
+    // and the stale silence clock makes evaluate() unable to self-heal. Baseline
+    // the silence clock to entry time (not 0) so a genuinely hung running session
+    // still trips detection counting from re-entry.
+    if (shouldResetStallDetectorsOnSessionSwitch(lastStallBaselineSessionRef.current, sid)) {
+      lastStallBaselineSessionRef.current = sid;
+      lastProgressAtRef.current = enteredAt;
+      lastSseEventAtRef.current = enteredAt;
+      prevExecutionStateRef.current = "idle";
+      setStallState("none");
+      setStallRejectReason("");
+      setStallTick((t) => t + 1);
+    }
     setAutoNudgeCount(autoNudgeTriggeredRef.current[sid] ?? 0);
     const priorUnattended = (pane.messages ?? []).filter(
       (m) =>
@@ -4343,9 +4433,15 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
         setRunGuardSessionId(sid);
         if (liveReattachEnabledRef.current) void reattachLiveStream(sid);
         else void mergeTailFromDisk(sid);
+      } else if (st !== "running" && !sessionStreamStateRef.current[sid]?.active) {
+        // FR-B: session is idle/interrupted/failed on re-entry. If it finished in
+        // the background (or a retry left the in-memory tail diverged), pull the
+        // authoritative disk state back so the completed reply shows without a
+        // restart instead of lingering as a stale "已中断"/empty view.
+        void reconcileDisplayedSessionFromDisk(sid);
       }
     });
-  }, [mergeTailFromDisk, reattachLiveStream, pane.sessionId, pane.avatarId]);
+  }, [mergeTailFromDisk, reattachLiveStream, reconcileDisplayedSessionFromDisk, pane.sessionId, pane.avatarId]);
 
   useEffect(() => {
     const sid = (pane.sessionId || "").trim();
@@ -5736,6 +5832,12 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
       if (chatProvider) body.provider = chatProvider;
       if (chatModel) body.model = chatModel;
       if (targetAgentId !== "meta") body.agent_id = targetAgentId;
+      // Per-session KB retrieval mode: carry the session's explicit choice so the
+      // backend prompt honors it instead of the single global config value.
+      if (!isGroupPane && targetAgentId === "meta") {
+        const kbMode = getSessionKbRetrievalMode(requestSessionId);
+        if (kbMode) body.retrieval_mode = kbMode;
+      }
       if (isGroupPane && targetAgentId === "meta") {
         body.group_id = groupChatId;
         body.mentioned_avatar_ids = mentionedAvatarIds;
@@ -7997,7 +8099,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
                   }}
                 />
                 <div className="flex items-center">
-                  <PaneKnowledgeRetrievalModeSwitch apiToken={apiToken} apiBase={apiBase} />
+                  <PaneKnowledgeRetrievalModeSwitch apiToken={apiToken} apiBase={apiBase} sessionId={pane.sessionId} />
                 </div>
                 <button
                   type="button"
