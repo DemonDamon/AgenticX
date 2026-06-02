@@ -135,6 +135,12 @@ export type ChatPane = {
   sessionMode?: "code_dev" | "daily_office";
   /** True while messages are being fetched after a session switch (shows skeleton). */
   loadingMessages?: boolean;
+  /** Absolute index of the earliest loaded row in the full session snapshot (0 = full load). */
+  oldestLoadedIndex?: number;
+  /** True when older rows exist above oldestLoadedIndex. */
+  hasOlderMessages?: boolean;
+  /** True while fetching an older page on scroll-up. */
+  loadingOlderMessages?: boolean;
 };
 
 /** Lifecycle for merged tool_call + tool_result rows in chat (desktop Meta pane). */
@@ -510,7 +516,13 @@ type AppState = {
   setPaneSessionId: (paneId: string, sessionId: string, modelHint?: { provider?: string; model?: string }) => void;
   setPaneSessionMode: (paneId: string, mode: "code_dev" | "daily_office") => void;
   setPaneMessages: (paneId: string, messages: Message[]) => void;
+  prependPaneMessages: (paneId: string, messages: Message[]) => void;
   setPaneLoadingMessages: (paneId: string, loading: boolean) => void;
+  setPaneMessagePaging: (
+    paneId: string,
+    paging: { oldestLoadedIndex?: number; hasOlderMessages?: boolean; loadingOlderMessages?: boolean }
+  ) => void;
+  resetPaneMessagePaging: (paneId: string) => void;
   /** Per-session messages cache (LRU). Lets repeat session switches skip the IPC roundtrip. */
   getCachedSessionMessages: (sessionId: string) => Message[] | undefined;
   cacheSessionMessages: (sessionId: string, messages: Message[]) => void;
@@ -622,6 +634,9 @@ function makeDefaultPane(): ChatPane {
     sessionTokens: { input: 0, output: 0 },
     historySearchTerms: [],
     loadingMessages: false,
+    oldestLoadedIndex: 0,
+    hasOlderMessages: false,
+    loadingOlderMessages: false,
   };
 }
 
@@ -1593,10 +1608,48 @@ export const useAppStore = create<AppState>((set, get) => ({
     set((state) => ({
       panes: state.panes.map((pane) => (pane.id === paneId ? { ...pane, messages } : pane)),
     })),
+  prependPaneMessages: (paneId, messages) =>
+    set((state) => ({
+      panes: state.panes.map((pane) =>
+        pane.id === paneId ? { ...pane, messages: [...messages, ...(pane.messages ?? [])] } : pane
+      ),
+    })),
   setPaneLoadingMessages: (paneId, loading) =>
     set((state) => ({
       panes: state.panes.map((pane) =>
         pane.id === paneId ? { ...pane, loadingMessages: loading } : pane,
+      ),
+    })),
+  setPaneMessagePaging: (paneId, paging) =>
+    set((state) => ({
+      panes: state.panes.map((pane) =>
+        pane.id === paneId
+          ? {
+              ...pane,
+              ...(paging.oldestLoadedIndex !== undefined
+                ? { oldestLoadedIndex: paging.oldestLoadedIndex }
+                : {}),
+              ...(paging.hasOlderMessages !== undefined
+                ? { hasOlderMessages: paging.hasOlderMessages }
+                : {}),
+              ...(paging.loadingOlderMessages !== undefined
+                ? { loadingOlderMessages: paging.loadingOlderMessages }
+                : {}),
+            }
+          : pane
+      ),
+    })),
+  resetPaneMessagePaging: (paneId) =>
+    set((state) => ({
+      panes: state.panes.map((pane) =>
+        pane.id === paneId
+          ? {
+              ...pane,
+              oldestLoadedIndex: 0,
+              hasOlderMessages: false,
+              loadingOlderMessages: false,
+            }
+          : pane
       ),
     })),
   getCachedSessionMessages: (sessionId) => {

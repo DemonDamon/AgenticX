@@ -608,6 +608,31 @@ declare global {
         }>;
         error?: string;
       }>;
+      loadSessionMessagesPage: (
+        sessionId: string,
+        options?: { tailRounds?: number; tailLimit?: number; beforeIndex?: number; limit?: number }
+      ) => Promise<{
+        ok: boolean;
+        messages: Array<{
+          id?: string;
+          role: "user" | "assistant" | "tool";
+          content: string;
+          agent_id?: string;
+          avatar_name?: string;
+          avatar_url?: string;
+          provider?: string;
+          model?: string;
+          quoted_message_id?: string;
+          quoted_content?: string;
+          timestamp?: number;
+          attachments?: Array<{ name?: string; mime_type?: string; size?: number; data_url?: string }>;
+          forwarded_history?: ForwardedHistoryCard;
+        }>;
+        start_index?: number;
+        total_count?: number;
+        has_older?: boolean;
+        error?: string;
+      }>;
       forkAvatar: (payload: { sessionId: string; name: string; role?: string }) => Promise<{ ok: boolean; avatar?: AvatarItem; error?: string }>;
       generateAvatar: (payload: { description: string }) => Promise<{ ok: boolean; avatar?: AvatarItem; error?: string }>;
 

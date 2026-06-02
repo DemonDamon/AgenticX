@@ -26,6 +26,7 @@ import {
   X,
   PanelRightClose,
   ArrowRight,
+  Loader2,
 } from "lucide-react";
 import {
   useAppStore,
@@ -296,6 +297,10 @@ const FALLBACK_PANE: ChatPaneState = {
   activeTerminalTabId: null,
   sessionTokens: { input: 0, output: 0 },
   historySearchTerms: [],
+  loadingMessages: false,
+  oldestLoadedIndex: 0,
+  hasOlderMessages: false,
+  loadingOlderMessages: false,
 };
 
 /** Compose-style primary action (豆包式「撰写」语义) + 下拉切换「全新对话」/「继承上下文」，默认前者。 */
@@ -2024,6 +2029,8 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
   const setPaneSessionId = useAppStore((s) => s.setPaneSessionId);
   const setPaneSessionMode = useAppStore((s) => s.setPaneSessionMode);
   const setPaneMessages = useAppStore((s) => s.setPaneMessages);
+  const prependPaneMessages = useAppStore((s) => s.prependPaneMessages);
+  const setPaneMessagePaging = useAppStore((s) => s.setPaneMessagePaging);
   const setActiveAvatarId = useAppStore((s) => s.setActiveAvatarId);
   const setPaneContextInherited = useAppStore((s) => s.setPaneContextInherited);
   const toolRoundCount = useMemo(
@@ -2212,6 +2219,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
   const streamRafRef = useRef<number | null>(null);
   const listRef = useRef<HTMLDivElement>(null);
   const autoScrollPinnedRef = useRef(true);
+  const loadingOlderMessagesRef = useRef(false);
   const [showJumpToBottomFab, setShowJumpToBottomFab] = useState(false);
   const imeComposingRef = useRef(false);
   const [atOpen, setAtOpen] = useState(false);
@@ -3801,6 +3809,13 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
       if (!sid) return;
       if (sessionStreamStateRef.current[sid]?.active) return;
       try {
+        const livePane = useAppStore.getState().panes.find((p) => p.id === pane.id);
+        if (
+          livePane?.hasOlderMessages ||
+          (livePane?.oldestLoadedIndex ?? 0) > 0
+        ) {
+          return;
+        }
         const result = await window.agenticxDesktop.loadSessionMessages(sid);
         if (!result.ok || !Array.isArray(result.messages)) return;
         const latestSid = String(
@@ -3824,6 +3839,92 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
     },
     [pane.id, setPaneMessages]
   );
+
+  const loadOlderSessionMessages = useCallback(async (): Promise<void> => {
+    const sid = String(pane.sessionId ?? "").trim();
+    if (!sid) return;
+    if (loadingOlderMessagesRef.current) return;
+    const livePane = useAppStore.getState().panes.find((p) => p.id === pane.id);
+    if (!livePane?.hasOlderMessages || livePane.loadingOlderMessages) return;
+    const beforeIndex = livePane.oldestLoadedIndex ?? 0;
+    if (beforeIndex <= 0) return;
+
+    loadingOlderMessagesRef.current = true;
+    setPaneMessagePaging(pane.id, { loadingOlderMessages: true });
+    const el = listRef.current;
+    const prevScrollHeight = el?.scrollHeight ?? 0;
+
+    try {
+      const page = await window.agenticxDesktop.loadSessionMessagesPage(sid, {
+        beforeIndex,
+        limit: 20,
+      });
+      const latestSid = String(
+        useAppStore.getState().panes.find((p) => p.id === pane.id)?.sessionId ?? ""
+      ).trim();
+      if (latestSid !== sid) return;
+      if (!page.ok || !Array.isArray(page.messages)) {
+        setPaneMessagePaging(pane.id, { loadingOlderMessages: false });
+        return;
+      }
+      if (page.messages.length === 0) {
+        setPaneMessagePaging(pane.id, {
+          hasOlderMessages: Boolean(page.has_older),
+          loadingOlderMessages: false,
+        });
+        return;
+      }
+      const startIndex = page.start_index ?? 0;
+      const mapped = page.messages.map((item, index) =>
+        mapLoadedSessionMessage(item as LoadedSessionMessage, sid, startIndex + index)
+      );
+      prependPaneMessages(pane.id, mapped);
+      setPaneMessagePaging(pane.id, {
+        oldestLoadedIndex: startIndex,
+        hasOlderMessages: Boolean(page.has_older),
+        loadingOlderMessages: false,
+      });
+      requestAnimationFrame(() => {
+        requestAnimationFrame(() => {
+          const inner = listRef.current;
+          if (inner) {
+            inner.scrollTop += inner.scrollHeight - prevScrollHeight;
+          }
+        });
+      });
+    } catch {
+      setPaneMessagePaging(pane.id, { loadingOlderMessages: false });
+    } finally {
+      loadingOlderMessagesRef.current = false;
+    }
+  }, [pane.id, pane.sessionId, prependPaneMessages, setPaneMessagePaging]);
+
+  useEffect(() => {
+    loadingOlderMessagesRef.current = false;
+  }, [pane.sessionId]);
+
+  useEffect(() => {
+    const el = listRef.current;
+    if (!el) return;
+    const onScrollUpLoad = () => {
+      if (
+        el.scrollTop <= 64 &&
+        pane.hasOlderMessages &&
+        !pane.loadingOlderMessages &&
+        !loadingOlderMessagesRef.current
+      ) {
+        void loadOlderSessionMessages();
+      }
+    };
+    el.addEventListener("scroll", onScrollUpLoad, { passive: true });
+    return () => {
+      el.removeEventListener("scroll", onScrollUpLoad);
+    };
+  }, [
+    pane.hasOlderMessages,
+    pane.loadingOlderMessages,
+    loadOlderSessionMessages,
+  ]);
 
   const truncateSessionAtUserMessage = useCallback(
     async (
@@ -7694,6 +7795,15 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
             </div>
           ) : (
             <div className="mx-auto flex min-w-0 w-full max-w-4xl flex-col gap-3">
+              {pane.loadingOlderMessages || (pane.hasOlderMessages && (pane.oldestLoadedIndex ?? 0) > 0) ? (
+                <div className="flex justify-center py-2">
+                  {pane.loadingOlderMessages ? (
+                    <Loader2 className="h-4 w-4 animate-spin text-text-faint" aria-label="加载更早消息" />
+                  ) : (
+                    <span className="text-[11px] text-text-faint">向上滚动加载更早消息</span>
+                  )}
+                </div>
+              ) : null}
               {renderedMessages}
             </div>
           )}

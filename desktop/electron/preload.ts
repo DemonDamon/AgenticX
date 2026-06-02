@@ -329,6 +329,10 @@ contextBridge.exposeInMainWorld("agenticxDesktop", {
     ),
   loadSessionMessages: async (sessionId: string) =>
     ipcRenderer.invoke("load-session-messages", sessionId),
+  loadSessionMessagesPage: async (
+    sessionId: string,
+    options: { tailRounds?: number; tailLimit?: number; beforeIndex?: number; limit?: number } = {}
+  ) => ipcRenderer.invoke("load-session-messages-page", sessionId, options),
   forkAvatar: async (payload: { sessionId: string; name: string; role?: string }) =>
     ipcRenderer.invoke("fork-avatar", payload),
   generateAvatar: async (payload: { description: string }) =>
