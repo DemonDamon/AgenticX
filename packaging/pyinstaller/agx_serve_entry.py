@@ -51,6 +51,29 @@ def _check_desktop_runtime() -> int:
         except Exception as exc:
             missing.append(f"{name}: {type(exc).__name__}: {exc}")
 
+    pdf_ok = False
+    for pdf_mod in ("fitz", "pypdf"):
+        try:
+            importlib.import_module(pdf_mod)
+            pdf_ok = True
+            break
+        except Exception:
+            pass
+    if not pdf_ok:
+        missing.append("pdf: no fitz (PyMuPDF) or pypdf importable")
+
+    import os
+
+    proxy_blob = "".join(
+        str(os.environ.get(k, ""))
+        for k in ("ALL_PROXY", "all_proxy", "HTTPS_PROXY", "https_proxy", "HTTP_PROXY", "http_proxy")
+    ).lower()
+    if "socks" in proxy_blob:
+        try:
+            importlib.import_module("socksio")
+        except Exception as exc:
+            missing.append(f"socksio: {type(exc).__name__}: {exc}")
+
     if missing:
         print("Desktop runtime dependency check failed:", file=sys.stderr)
         for item in missing:

@@ -55,6 +55,34 @@ from .rrf import reciprocal_rank_fusion
 
 logger = logging.getLogger(__name__)
 
+_PROXY_ENV_KEYS = (
+    "ALL_PROXY",
+    "all_proxy",
+    "HTTPS_PROXY",
+    "https_proxy",
+    "HTTP_PROXY",
+    "http_proxy",
+)
+
+
+def _check_socks_proxy_deps() -> None:
+    """Fail fast with a clear KBError when SOCKS proxy env is set but socksio is missing."""
+
+    blob = "".join(str(os.environ.get(k, "")) for k in _PROXY_ENV_KEYS).lower()
+    if "socks" not in blob:
+        return
+    try:
+        import importlib
+
+        importlib.import_module("socksio")
+    except Exception as exc:
+        raise KBError(
+            "检测到本机 SOCKS 代理（ALL_PROXY/HTTPS_PROXY 等），但后端 Python 缺少 socksio，"
+            "向量化无法发起 HTTPS 请求。请在 Near「设置 → 知识库」使用「一键修复」安装 "
+            "agenticx[desktop-runtime] 后完全退出并重启，或执行："
+            "pip install 'agenticx[desktop-runtime]'"
+        ) from exc
+
 
 def _format_traceback_tail(exc: BaseException, *, limit: int = 3) -> str:
     """Return the last ``limit`` traceback frames as a short string.
@@ -1396,6 +1424,8 @@ def _embed_texts(provider, texts: List[str]) -> List[List[float]]:
 
     if not texts:
         return []
+
+    _check_socks_proxy_deps()
 
     # aiohttp-based online providers (Bailian / SiliconFlow) cache a
     # ``ClientSession`` on ``self._session`` bound to the asyncio loop that

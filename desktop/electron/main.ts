@@ -1827,6 +1827,24 @@ function pathListSeparator(): string {
   return process.platform === "win32" ? ";" : ":";
 }
 
+/** Monorepo root when running `npm run dev` from desktop/ (has pyproject name=agenticx). */
+function findAgenticxSourceRoot(): string | null {
+  const cwd = process.cwd();
+  const candidates = [cwd, path.resolve(cwd, ".."), path.resolve(cwd, "../..")];
+  for (const root of candidates) {
+    const pp = path.join(root, "pyproject.toml");
+    try {
+      const text = fs.readFileSync(pp, "utf-8");
+      if (/name\s*=\s*["']agenticx["']/m.test(text)) {
+        return root;
+      }
+    } catch {
+      /* noop */
+    }
+  }
+  return null;
+}
+
 /** Editable / venv installs: agx lives under repo `.venv` while `npm run dev` cwd is usually `desktop/`. */
 function repoAdjacentVenvBinDirs(): string[] {
   const cwd = process.cwd();
@@ -1970,7 +1988,11 @@ function buildAugmentedPath(): string {
   const basePath =
     process.env.PATH ?? (process.platform === "win32" ? "" : "/usr/bin:/bin");
 
-  const venvDirs = repoAdjacentVenvBinDirs();
+  // User-managed venv (~/.agenticx/.venv) from「一键修复」must win over repo-adjacent
+  // .venv in dev trees; otherwise repair installs PDF/KB deps but agx serve still runs
+  // from an incomplete project venv.
+  const userVenvDirs = existingUserManagedVenvBinDirs();
+  const repoVenvDirs = repoAdjacentVenvBinDirs();
   let extraPaths: string[];
   let trailingPaths: string[] = [];
   if (process.platform === "win32") {
@@ -1984,8 +2006,8 @@ function buildAugmentedPath(): string {
       ? pyWinFolders.map((folder) => path.join(appDataRoaming, "Python", folder, "Scripts"))
       : [];
     extraPaths = [
-      ...venvDirs,
-      ...existingUserManagedVenvBinDirs(),
+      ...userVenvDirs,
+      ...repoVenvDirs,
       ...programsPythonScripts,
       ...userSiteScripts,
       path.join(home, "miniconda3", "Scripts"),
@@ -2003,8 +2025,8 @@ function buildAugmentedPath(): string {
       (v) => `${home}/Library/Python/${v}/bin`
     );
     extraPaths = [
-      ...venvDirs,
-      ...existingUserManagedVenvBinDirs(),
+      ...userVenvDirs,
+      ...repoVenvDirs,
       ...pyUserBins,
       ...nvmNodeBinDirs(home),
       "/opt/miniconda3/bin",
@@ -3543,9 +3565,38 @@ function registerIpc(): void {
   });
 
   // ── Backend Python dependency diagnose + one-click repair ──────────
-  // For end-users running Near without a bundled backend: detect missing KB
-  // runtime deps (chromadb/onnxruntime/numpy) and install them into a managed
-  // venv at ~/.agenticx/.venv via an explicit user action (no silent network).
+  // For end-users running Near without a bundled backend: detect missing
+  // desktop-runtime pieces (chromadb, onnxruntime, numpy, PDF libs, …) and
+  // install agenticx[desktop-runtime] into ~/.agenticx/.venv on user action.
+  const DESKTOP_RUNTIME_DIAGNOSE_PY = [
+    "import importlib, json, os, sys",
+    "missing = []",
+    'for n in ("chromadb", "onnxruntime", "numpy"):',
+    "    try:",
+    "        importlib.import_module(n)",
+    "    except Exception:",
+    "        missing.append(n)",
+    "pdf_ok = False",
+    'for n in ("fitz", "pypdf"):',
+    "    try:",
+    "        importlib.import_module(n)",
+    "        pdf_ok = True",
+    "        break",
+    "    except Exception:",
+    "        pass",
+    'if not pdf_ok:',
+    '    missing.append("pdf (PyMuPDF or pypdf)")',
+    "proxy_blob = ''.join(",
+    '    str(os.environ.get(k, "")) for k in ("ALL_PROXY", "all_proxy", "HTTPS_PROXY", "https_proxy", "HTTP_PROXY", "http_proxy")',
+    ").lower()",
+    "if 'socks' in proxy_blob:",
+    "    try:",
+    "        importlib.import_module('socksio')",
+    "    except Exception:",
+    '        missing.append("socksio (SOCKS 代理需要，向量化/Embedding 会用到)")',
+    'print(json.dumps({"executable": sys.executable, "missing": missing}))',
+  ].join("\n");
+
   ipcMain.handle("diagnose-backend-deps", async () => {
     const augmentedPath = buildAugmentedPath();
     const bundled = resolveBundledBackend();
@@ -3572,11 +3623,18 @@ function registerIpc(): void {
     }
     const py = resolveBackendPython(augmentedPath);
     if (!py) {
-      return { ok: false, error: "未找到可用的 Python 解释器（检测后端依赖需要）", missing: ["chromadb", "onnxruntime", "numpy"] };
+      return {
+        ok: false,
+        error: "未找到可用的 Python 解释器（检测后端依赖需要）",
+        missing: ["chromadb", "onnxruntime", "numpy", "pdf (PyMuPDF or pypdf)", "socksio (SOCKS 代理)"],
+      };
     }
-    const script = "import importlib,sys,json\nreq=['chromadb','onnxruntime','numpy']\nmiss=[]\nfor n in req:\n try: importlib.import_module(n)\n except Exception as e: miss.append(n)\nprint(json.dumps({'executable':sys.executable,'missing':miss}))";
     return new Promise((resolve) => {
-      const proc = spawn(py, ["-c", script], { stdio: ["ignore", "pipe", "pipe"], env: { ...process.env, PATH: augmentedPath }, shell: false });
+      const proc = spawn(py, ["-c", DESKTOP_RUNTIME_DIAGNOSE_PY], {
+        stdio: ["ignore", "pipe", "pipe"],
+        env: { ...process.env, PATH: augmentedPath },
+        shell: false,
+      });
       let out = "";
       let err = "";
       proc.stdout?.on("data", (c: Buffer) => { out += c.toString("utf-8"); });
@@ -3586,10 +3644,23 @@ function registerIpc(): void {
           const parsed = JSON.parse(out.trim().split("\n").pop() || "{}");
           resolve({ ok: true, usingBundled: false, pythonPath: String(parsed.executable || py), missing: Array.isArray(parsed.missing) ? parsed.missing : [] });
         } catch {
-          resolve({ ok: false, usingBundled: false, pythonPath: py, error: (err || out).slice(-2000), missing: ["chromadb", "onnxruntime", "numpy"] });
+          resolve({
+            ok: false,
+            usingBundled: false,
+            pythonPath: py,
+            error: (err || out).slice(-2000),
+            missing: ["chromadb", "onnxruntime", "numpy", "pdf (PyMuPDF or pypdf)", "socksio (SOCKS 代理)"],
+          });
         }
       });
-      proc.on("error", (e) => resolve({ ok: false, pythonPath: py, error: String(e), missing: ["chromadb", "onnxruntime", "numpy"] }));
+      proc.on("error", (e) =>
+        resolve({
+          ok: false,
+          pythonPath: py,
+          error: String(e),
+          missing: ["chromadb", "onnxruntime", "numpy", "pdf (PyMuPDF or pypdf)", "socksio (SOCKS 代理)"],
+        }),
+      );
     });
   });
 
@@ -3628,11 +3699,34 @@ function registerIpc(): void {
       }
       send("upgrading-pip", "升级 pip...", 20);
       await runStep(venvPy, ["-m", "pip", "install", "-q", "-U", "pip"], "upgrading-pip");
-      send("installing", "安装 agenticx[desktop-runtime]（含知识库依赖，可能耗时数分钟）...", 40);
-      const installCode = await runStep(venvPy, ["-m", "pip", "install", "agenticx[desktop-runtime]"], "installing");
+      const srcRoot = findAgenticxSourceRoot();
+      const installLabel = srcRoot
+        ? `从本地源码安装 agenticx[desktop-runtime]（${srcRoot}）…`
+        : "从 PyPI 安装 agenticx[desktop-runtime]（chromadb、PDF 等）…";
+      send("installing", installLabel, 35);
+      const installArgs = srcRoot
+        ? ["-m", "pip", "install", "-e", `${srcRoot}[desktop-runtime]`]
+        : ["-m", "pip", "install", "agenticx[desktop-runtime]"];
+      const installCode = await runStep(venvPy, installArgs, "installing");
       if (installCode !== 0) {
         send("error", "依赖安装失败，请查看上方日志");
         return { ok: false, error: "pip install failed" };
+      }
+      // PyPI 0.4.x desktop-runtime 可能尚未包含 socksio；SOCKS 代理下向量化必装。
+      send("installing", "安装 SOCKS 代理依赖 socksio（向量化/Embedding）…", 72);
+      const socksCode = await runStep(venvPy, ["-m", "pip", "install", "socksio>=1.0.0,<2"], "installing");
+      if (socksCode !== 0) {
+        send("error", "socksio 安装失败");
+        return { ok: false, error: "socksio install failed" };
+      }
+      const verifySocks = await runStep(
+        venvPy,
+        ["-c", "import importlib; importlib.import_module('socksio')"],
+        "installing",
+      );
+      if (verifySocks !== 0) {
+        send("error", "socksio 安装后仍无法导入，请查看上方 pip 日志");
+        return { ok: false, error: "socksio verify failed" };
       }
       send("done", "后端依赖修复完成。请完全退出并重启 Near 使其生效。", 100);
       return { ok: true, venvPython: venvPy };

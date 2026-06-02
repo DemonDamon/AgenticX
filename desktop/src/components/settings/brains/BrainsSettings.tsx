@@ -66,12 +66,16 @@ export const BrainsSettings = forwardRef<BrainsSettingsHandle>(function BrainsSe
   const [codeDirty, setCodeDirty] = useState(false);
   const [brainSaving, setBrainSaving] = useState(false);
   const [brainSaveMsg, setBrainSaveMsg] = useState<string | null>(null);
-  const kbDraftRef = useRef(kbDraft);
   const scopePanelRef = useRef<BrainScopePanelHandle>(null);
   const codePanelRef = useRef<CodeIndexBrainPanelHandle>(null);
-  useEffect(() => {
-    kbDraftRef.current = kbDraft;
-  }, [kbDraft]);
+
+  /** Keep draft ref in sync immediately — save must not read a stale ref from useEffect. */
+  const applyKbDraft = useCallback((next: KBConfig | ((prev: KBConfig) => KBConfig)) => {
+    setKbDraft((prev) => {
+      const resolved = typeof next === "function" ? next(prev) : next;
+      return resolved;
+    });
+  }, []);
 
   const selected = brains.find((b) => b.id === selectedId) ?? null;
 
@@ -114,13 +118,13 @@ export const BrainsSettings = forwardRef<BrainsSettingsHandle>(function BrainsSe
       try {
         const body = await brainsApi.readKbConfig(selectedId);
         setKbConfig(body.config);
-        setKbDraft(body.config);
+        applyKbDraft(body.config);
         setKbStats(body.stats);
       } catch (exc) {
         setError(String((exc as Error).message ?? exc));
       }
     })();
-  }, [selectedId, selected?.type, brainsApi]);
+  }, [applyKbDraft, selectedId, selected?.type, brainsApi]);
 
   useEffect(() => {
     if (selected?.type !== "code") return;
@@ -148,11 +152,11 @@ export const BrainsSettings = forwardRef<BrainsSettingsHandle>(function BrainsSe
     }
 
     if (selected.type === "docs") {
-      if (JSON.stringify(kbConfig) !== JSON.stringify(kbDraftRef.current)) {
+      if (JSON.stringify(kbConfig) !== JSON.stringify(kbDraft)) {
         try {
-          const result = await brainsApi.writeKbConfig(selectedId, kbDraftRef.current);
+          const result = await brainsApi.writeKbConfig(selectedId, kbDraft);
           setKbConfig(result.config);
-          setKbDraft(result.config);
+          applyKbDraft(result.config);
         } catch (exc) {
           const msg = String((exc as Error).message ?? exc);
           setError(`保存知识脑配置失败：${msg}`);
@@ -170,7 +174,7 @@ export const BrainsSettings = forwardRef<BrainsSettingsHandle>(function BrainsSe
 
     await reloadBrains();
     return { ok: true };
-  }, [brainDirty, brainsApi, kbConfig, reloadBrains, selected, selectedId]);
+  }, [applyKbDraft, brainDirty, brainsApi, kbConfig, kbDraft, reloadBrains, selected, selectedId]);
 
   useImperativeHandle(
     ref,
@@ -332,7 +336,7 @@ export const BrainsSettings = forwardRef<BrainsSettingsHandle>(function BrainsSe
                   ) : selected.type === "docs" ? (
                     <SettingsOnOffSwitch
                       checked={kbDraft.enabled}
-                      onChange={(enabled) => setKbDraft((prev) => ({ ...prev, enabled }))}
+                      onChange={(enabled) => applyKbDraft((prev) => ({ ...prev, enabled }))}
                       aria-label="启用此文档库"
                     />
                   ) : null}
@@ -374,7 +378,7 @@ export const BrainsSettings = forwardRef<BrainsSettingsHandle>(function BrainsSe
                         api={kbApi}
                         persistedConfig={kbConfig}
                         draft={kbDraft}
-                        onDraftChange={setKbDraft}
+                        onDraftChange={applyKbDraft}
                         initialStats={kbStats}
                       />
                     ) : null}
