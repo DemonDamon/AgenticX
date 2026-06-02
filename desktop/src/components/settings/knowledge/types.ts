@@ -45,6 +45,19 @@ export type RetrievalSpec = {
   top_k: number;
   score_floor: number;
   mode: "auto" | "always";
+  retrieval_mode?: "vector" | "bm25" | "hybrid" | "hybrid_graph";
+  rrf_k?: number;
+  bm25_weight?: number;
+  vector_weight?: number;
+  rerank_enabled?: boolean;
+};
+
+export type WikiCompilerSpec = {
+  enabled: boolean;
+};
+
+export type SynthesisSpec = {
+  enabled: boolean;
 };
 
 export type KBConfig = {
@@ -54,6 +67,8 @@ export type KBConfig = {
   chunking: ChunkingSpec;
   file_filters: FileFilterSpec;
   retrieval: RetrievalSpec;
+  wiki_compiler?: WikiCompilerSpec;
+  synthesis?: SynthesisSpec;
 };
 
 export type KBStats = {
@@ -104,6 +119,10 @@ export type RetrievalHit = {
   text: string;
   source: RetrievalHitSource;
   metadata: Record<string, unknown>;
+  vector_score?: number;
+  bm25_score?: number;
+  fused_score?: number;
+  retrieval_mode?: string;
 };
 
 export type PreviewChunk = {
@@ -165,7 +184,14 @@ export function defaultKBConfig(): KBConfig {
       top_k: 5,
       score_floor: 0,
       mode: "auto",
+      retrieval_mode: "vector",
+      rrf_k: 60,
+      bm25_weight: 1,
+      vector_weight: 1,
+      rerank_enabled: false,
     },
+    wiki_compiler: { enabled: false },
+    synthesis: { enabled: false },
   };
 }
 
@@ -180,6 +206,14 @@ export const EMBEDDING_PROVIDERS: { id: string; label: string; defaultModel: str
 
 export const CHUNKING_STRATEGIES = [
   { id: "recursive", label: "Recursive (默认)" },
+  { id: "contextual", label: "Contextual（标题前缀）" },
   { id: "fixed_size", label: "Fixed Size" },
   { id: "document", label: "Document" },
 ];
+
+export const RETRIEVAL_MODES = [
+  { id: "vector", label: "向量 (Vector)" },
+  { id: "bm25", label: "关键词 (BM25)" },
+  { id: "hybrid", label: "混合 (Hybrid RRF)" },
+  { id: "hybrid_graph", label: "混合 + 图谱 (Hybrid Graph)" },
+] as const;

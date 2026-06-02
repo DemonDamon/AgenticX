@@ -59,6 +59,10 @@ export type KBApi = {
   getStats: () => Promise<KBStats>;
   testEmbedding: (embedding: EmbeddingSpec) => Promise<EmbeddingTestResult>;
   getParserStatus: () => Promise<ParserStatus>;
+  listWikiPages: () => Promise<{ path: string; title: string; type: string }[]>;
+  getWikiPage: (path: string) => Promise<string>;
+  getPurpose: () => Promise<string>;
+  savePurpose: (content: string) => Promise<void>;
 };
 
 type ResolveBase = () => Promise<string>;
@@ -143,10 +147,14 @@ export function createKbApi(
       const body = await doJson<{ jobs: IngestJob[] }>(p("/jobs"));
       return body.jobs ?? [];
     },
-    async search(query: string, topK?: number) {
+    async search(query: string, topK?: number, retrievalMode?: string) {
       const body = await doJson<{ hits: RetrievalHit[]; used_top_k: number }>(p("/search"), {
         method: "POST",
-        body: JSON.stringify({ query, top_k: topK }),
+        body: JSON.stringify({
+          query,
+          top_k: topK,
+          retrieval_mode: retrievalMode,
+        }),
       });
       return body;
     },
@@ -169,6 +177,27 @@ export function createKbApi(
     },
     async getParserStatus() {
       return doJson<ParserStatus>(p("/parser_status"));
+    },
+    async listWikiPages() {
+      const body = await doJson<{ pages: { path: string; title: string; type: string }[] }>(
+        p("/wiki/pages"),
+      );
+      return body.pages ?? [];
+    },
+    async getWikiPage(path: string) {
+      const qs = new URLSearchParams({ path });
+      const body = await doJson<{ content: string }>(`${p("/wiki/page")}?${qs.toString()}`);
+      return body.content;
+    },
+    async getPurpose() {
+      const body = await doJson<{ content: string }>(p("/wiki/purpose"));
+      return body.content ?? "";
+    },
+    async savePurpose(content: string) {
+      await doJson(p("/wiki/purpose"), {
+        method: "PUT",
+        body: JSON.stringify({ content }),
+      });
     },
   };
 }

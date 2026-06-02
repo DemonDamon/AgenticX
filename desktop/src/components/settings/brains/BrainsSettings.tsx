@@ -14,6 +14,7 @@ import { createBrainsApi, type BrainRecord } from "./api";
 import { KnowledgeConfigPanel } from "../knowledge/KnowledgeConfigPanel";
 import { KnowledgeMaterialsPanel } from "../knowledge/KnowledgeMaterialsPanel";
 import { KnowledgeDebugPanel } from "../knowledge/KnowledgeDebugPanel";
+import { KnowledgeWikiPanel } from "../knowledge/KnowledgeWikiPanel";
 import { createKbApi } from "../knowledge/api";
 import type { KBConfig, KBStats } from "../knowledge/types";
 import { defaultKBConfig } from "../knowledge/types";
@@ -26,7 +27,7 @@ export type BrainsSettingsHandle = {
   flushIfDirty: () => Promise<{ ok: boolean; error?: string }>;
 };
 
-type DetailTab = "config" | "materials" | "debug";
+type DetailTab = "config" | "materials" | "debug" | "wiki";
 
 export const BrainsSettings = forwardRef<BrainsSettingsHandle>(function BrainsSettings(
   _props,
@@ -182,6 +183,7 @@ export const BrainsSettings = forwardRef<BrainsSettingsHandle>(function BrainsSe
   const detailTabs: { id: DetailTab; label: string }[] = [
     { id: "config", label: "配置" },
     { id: "materials", label: "资料" },
+    { id: "wiki", label: "Wiki" },
     { id: "debug", label: "调试" },
   ];
 
@@ -325,6 +327,7 @@ export const BrainsSettings = forwardRef<BrainsSettingsHandle>(function BrainsSe
                     {detailTab === "debug" ? (
                       <KnowledgeDebugPanel api={kbApi} config={kbConfig} />
                     ) : null}
+                    {detailTab === "wiki" ? <KnowledgeWikiPanel api={kbApi} /> : null}
                   </>
                 ) : null}
 

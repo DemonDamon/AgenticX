@@ -5,6 +5,7 @@ import { Panel } from "../../ds/Panel";
 import type { KBApi } from "./api";
 import type { KBConfig, PreviewChunk, RetrievalHit } from "./types";
 import { KB_FIELD_BASE } from "./kb-field-classes";
+import { RETRIEVAL_MODES } from "./types";
 
 type Props = {
   api: KBApi;
@@ -14,6 +15,9 @@ type Props = {
 export function KnowledgeDebugPanel({ api, config }: Props) {
   const [query, setQuery] = useState("");
   const [topK, setTopK] = useState<number>(config.retrieval.top_k);
+  const [retrievalMode, setRetrievalMode] = useState<string>(
+    config.retrieval.retrieval_mode ?? "vector",
+  );
   const [hits, setHits] = useState<RetrievalHit[]>([]);
   const [searching, setSearching] = useState(false);
   const [searchError, setSearchError] = useState<string | null>(null);
@@ -30,7 +34,7 @@ export function KnowledgeDebugPanel({ api, config }: Props) {
     setSearching(true);
     setSearchError(null);
     try {
-      const result = await api.search(query.trim(), topK);
+      const result = await api.search(query.trim(), topK, retrievalMode);
       setHits(result.hits);
     } catch (exc) {
       setSearchError(String((exc as Error).message ?? exc));
@@ -62,7 +66,19 @@ export function KnowledgeDebugPanel({ api, config }: Props) {
   return (
     <div className="space-y-3">
       <Panel title="Top-K 检索调试">
-        <div className="flex gap-2">
+        <div className="flex flex-wrap gap-2">
+          <select
+            className={`min-w-[140px] ${KB_FIELD_BASE}`}
+            value={retrievalMode}
+            onChange={(e) => setRetrievalMode(e.target.value)}
+            title="检索模式"
+          >
+            {RETRIEVAL_MODES.map((m) => (
+              <option key={m.id} value={m.id}>
+                {m.label}
+              </option>
+            ))}
+          </select>
           <input
             type="text"
             className={`min-w-0 flex-1 ${KB_FIELD_BASE}`}
@@ -116,6 +132,20 @@ export function KnowledgeDebugPanel({ api, config }: Props) {
                   #{idx + 1}
                 </span>
                 <span>score={h.score.toFixed(4)}</span>
+                {typeof h.fused_score === "number" ? (
+                  <span>fused={h.fused_score.toFixed(4)}</span>
+                ) : typeof h.metadata?.fused_score === "number" ? (
+                  <span>fused={Number(h.metadata.fused_score).toFixed(4)}</span>
+                ) : null}
+                {typeof h.vector_score === "number" || typeof h.metadata?.vector_score === "number" ? (
+                  <span>vec={Number(h.vector_score ?? h.metadata?.vector_score).toFixed(4)}</span>
+                ) : null}
+                {typeof h.bm25_score === "number" || typeof h.metadata?.bm25_score === "number" ? (
+                  <span>bm25={Number(h.bm25_score ?? h.metadata?.bm25_score).toFixed(4)}</span>
+                ) : null}
+                {(h.retrieval_mode ?? h.metadata?.retrieval_mode) ? (
+                  <span>{String(h.retrieval_mode ?? h.metadata?.retrieval_mode)}</span>
+                ) : null}
                 {h.source.chunk_index !== null && h.source.chunk_index !== undefined ? (
                   <span>chunk #{h.source.chunk_index}</span>
                 ) : null}
