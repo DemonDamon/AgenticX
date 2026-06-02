@@ -562,6 +562,60 @@ def test_scan_interrupted_normalizes_running_with_completed_reply_to_idle(tmp_pa
     assert row["execution_state"] == "idle"
 
 
+def test_list_sessions_idle_when_running_metadata_but_terminal_reply(tmp_path: Path) -> None:
+    """History spinner must clear when the turn finished but execution_state lagged."""
+    store = SessionStore(tmp_path / "sessions.sqlite")
+    sessions_root = tmp_path / "sessions"
+
+    manager = SessionManager()
+    manager._session_store = store
+    manager._sessions_root = str(sessions_root)
+
+    sid = "running-metadata-terminal-reply"
+    managed = manager.create(session_id=sid)
+    managed.studio_session.chat_history = [
+        {"id": "u1", "role": "user", "content": "查下知识库关于AI网关内容"},
+        {
+            "id": "a1",
+            "role": "assistant",
+            "content": "知识库中关于 AI 网关的内容命中 5 条记录。",
+            "suggested_questions": ["问题1", "问题2", "问题3"],
+        },
+    ]
+    manager.set_execution_state(sid, "running")
+    assert manager.persist(sid) is True
+
+    rows = manager.list_sessions()
+    row = next(r for r in rows if r["session_id"] == sid)
+    assert row["execution_state"] == "idle"
+
+
+def test_list_sessions_keeps_running_during_mid_turn_thinking_only(tmp_path: Path) -> None:
+    """Incremental thinking persist must not hide the running badge mid tool-loop."""
+    store = SessionStore(tmp_path / "sessions.sqlite")
+    sessions_root = tmp_path / "sessions"
+
+    manager = SessionManager()
+    manager._session_store = store
+    manager._sessions_root = str(sessions_root)
+
+    sid = "running-mid-turn-thinking"
+    managed = manager.create(session_id=sid)
+    managed.studio_session.chat_history = [
+        {"id": "u1", "role": "user", "content": "查下知识库"},
+        {
+            "id": "a1",
+            "role": "assistant",
+            "content": "用户要求查知识库",
+        },
+    ]
+    manager.set_execution_state(sid, "running")
+
+    rows = manager.list_sessions()
+    row = next(r for r in rows if r["session_id"] == sid)
+    assert row["execution_state"] == "running"
+
+
 def test_list_sessions_idle_when_interrupted_metadata_but_reply_on_disk(tmp_path: Path) -> None:
     """History badge must not stay 已中断 when the last turn already completed on disk."""
     store = SessionStore(tmp_path / "sessions.sqlite")
