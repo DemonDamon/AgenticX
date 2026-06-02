@@ -100,8 +100,9 @@ import {
 } from "../utils/budget-exceeded";
 import { buildBudgetResumeDraft } from "../utils/budget-resume-draft";
 import {
-  getSessionKbRetrievalMode,
-  setSessionKbRetrievalMode,
+  getKbRetrievalModeForPane,
+  migratePaneKbRetrievalModeToSession,
+  setKbRetrievalModeForPane,
   type KbRetrievalMode,
 } from "../utils/kb-retrieval-mode";
 import {
@@ -821,10 +822,12 @@ function PaneKnowledgeRetrievalModeSwitch({
   apiToken,
   apiBase,
   sessionId,
+  paneId,
 }: {
   apiToken: string;
   apiBase: string;
   sessionId: string;
+  paneId: string;
 }) {
   const resolveApiBase = useCallback(async () => {
     const base = String(apiBase ?? "").trim();
@@ -834,7 +837,7 @@ function PaneKnowledgeRetrievalModeSwitch({
   }, [apiBase]);
   const api = useMemo(() => createKbApi(apiToken, resolveApiBase), [apiToken, resolveApiBase]);
   const [mode, setMode] = useState<KbRetrievalMode>(
-    () => getSessionKbRetrievalMode(sessionId) ?? "auto",
+    () => getKbRetrievalModeForPane(sessionId, paneId) ?? "auto",
   );
   const [saving, setSaving] = useState(false);
   const [open, setOpen] = useState(false);
@@ -846,8 +849,9 @@ function PaneKnowledgeRetrievalModeSwitch({
   // sessions no longer clobbers each other's mode.
   const refresh = useCallback(async () => {
     const sid = String(sessionId || "").trim();
+    const pid = String(paneId || "").trim();
     const gen = ++refreshGenRef.current;
-    const perSession = getSessionKbRetrievalMode(sid);
+    const perSession = getKbRetrievalModeForPane(sid, pid);
     if (perSession) {
       setMode(perSession);
       return;
@@ -857,7 +861,7 @@ function PaneKnowledgeRetrievalModeSwitch({
       if (gen !== refreshGenRef.current) return;
       // User may have toggled while readConfig was in flight — honor per-session
       // choice and never let a stale global default clobber it.
-      const afterFetch = getSessionKbRetrievalMode(sid);
+      const afterFetch = getKbRetrievalModeForPane(sid, pid);
       if (afterFetch) {
         setMode(afterFetch);
         return;
@@ -869,7 +873,7 @@ function PaneKnowledgeRetrievalModeSwitch({
     } catch {
       // Keep last known mode; Chat should still be usable if KB API is unavailable.
     }
-  }, [api, sessionId]);
+  }, [api, paneId, sessionId]);
 
   useEffect(() => {
     void refresh();
@@ -879,7 +883,8 @@ function PaneKnowledgeRetrievalModeSwitch({
     async (nextMode: KbRetrievalMode) => {
       if (saving) return;
       const sid = String(sessionId || "").trim();
-      if (!sid) return;
+      const pid = String(paneId || "").trim();
+      if (!pid && !sid) return;
       const previous = mode;
       // Invalidate any in-flight refresh so global config cannot overwrite
       // the choice the user just made.
@@ -887,16 +892,15 @@ function PaneKnowledgeRetrievalModeSwitch({
       setMode(nextMode);
       setSaving(true);
       try {
-        // Bind the choice to this session only; the per-turn /api/chat payload
-        // carries it to the backend. Do NOT touch the global config here.
-        setSessionKbRetrievalMode(sid, nextMode);
+        // Bind the choice to this session (or lazy pane pending slot before first send).
+        setKbRetrievalModeForPane(sid, pid, nextMode);
       } catch {
         setMode(previous);
       } finally {
         setSaving(false);
       }
     },
-    [mode, saving, sessionId],
+    [mode, paneId, saving, sessionId],
   );
 
   return (
@@ -2199,6 +2203,8 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
   const [budgetExceededInfo, setBudgetExceededInfo] = useState<BudgetExceededInfo | null>(null);
   const lastSseEventAtRef = useRef(0);
   const lastProgressAtRef = useRef(0);
+  /** Per-session SSE progress timestamps — survive pane display switches. */
+  const sessionProgressAtRef = useRef<Record<string, number>>({});
   const sessionEnteredAtRef = useRef<Record<string, number>>({});
   /** Last session id whose transient stall detectors were baselined; used to
    * reset the silence clock / stallState only on a real displayed-session
@@ -4028,10 +4034,12 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
 
   const silentSeconds = useMemo(() => {
     void stallTick;
-    const t = lastProgressAtRef.current;
+    const sid = (pane.sessionId || "").trim();
+    const sessionT = sid ? sessionProgressAtRef.current[sid] ?? 0 : 0;
+    const t = Math.max(lastProgressAtRef.current, sessionT);
     if (!t) return 0;
     return Math.floor((Date.now() - t) / 1000);
-  }, [stallTick, stallState, sessionExecutionState]);
+  }, [stallTick, stallState, sessionExecutionState, pane.sessionId]);
 
   const taskLiveness = useMemo((): "active" | "stalled" | "idle" => {
     if (stallState === "stall") return "stalled";
@@ -4113,21 +4121,29 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
     syncStreamingUiForCurrentSession();
   }, [syncStreamingUiForCurrentSession]);
 
-  const recordProgressActivity = useCallback(() => {
+  const recordProgressActivity = useCallback((sessionKey?: string) => {
     const now = Date.now();
-    lastProgressAtRef.current = now;
-    lastSseEventAtRef.current = now;
-    setStallState((prev) => (prev === "stall" ? "none" : prev));
-  }, []);
+    const key = String(sessionKey || pane.sessionId || "").trim();
+    if (key) sessionProgressAtRef.current[key] = now;
+    const currentSid = (pane.sessionId || "").trim();
+    if (!key || key === currentSid) {
+      lastProgressAtRef.current = now;
+      lastSseEventAtRef.current = now;
+      setStallState((prev) => (prev === "stall" ? "none" : prev));
+    }
+  }, [pane.sessionId]);
 
   /** 任一 SSE 帧视为仍有响应：刷新计时并在曾误判 stall 时立即收起提示 */
-  const recordSseActivity = useCallback(() => {
-    recordProgressActivity();
-    const sid = (pane.sessionId || "").trim();
-    if (sid && resumeInFlightRef.current[sid]) {
-      clearResumeInFlight(sid);
-    }
-  }, [clearResumeInFlight, pane.sessionId, recordProgressActivity]);
+  const recordSseActivity = useCallback(
+    (sessionKey?: string) => {
+      const key = String(sessionKey || pane.sessionId || "").trim();
+      recordProgressActivity(key);
+      if (key && resumeInFlightRef.current[key]) {
+        clearResumeInFlight(key);
+      }
+    },
+    [clearResumeInFlight, pane.sessionId, recordProgressActivity],
+  );
 
   useEffect(() => {
     void window.agenticxDesktop.loadRuntimeConfig().then((r) => {
@@ -4378,7 +4394,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
             if (eventId != null) lastSeq = eventId;
             if (!payload || typeof payload !== "object") continue;
             const p = payload as { type?: string; data?: { text?: string; agent_id?: string } };
-            recordSseActivity();
+            recordSseActivity(sid);
             if (p.type === "token" && (p.data?.agent_id ?? "meta") === "meta") {
               const t = String(p.data?.text ?? "").replace(/⏳\s*/g, "");
               if (!t) continue;
@@ -4407,33 +4423,49 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
   );
 
   useEffect(() => {
-    const sid = (pane.sessionId || "").trim();
-    if (!sid) return;
     let cancelled = false;
     const enteredAt = Date.now();
-    sessionEnteredAtRef.current[sid] = enteredAt;
-    // Per-session reset: switching the displayed session must NOT inherit a
-    // sibling (possibly hung) session's silence clock or stall/execution state.
-    // Otherwise a background session stuck at e.g. 148s silence leaks its
-    // "已停滞 Ns / 该任务可能已中断" card onto a session that already finished,
-    // and the stale silence clock makes evaluate() unable to self-heal. Baseline
-    // the silence clock to entry time (not 0) so a genuinely hung running session
-    // still trips detection counting from re-entry.
-    if (shouldResetStallDetectorsOnSessionSwitch(lastStallBaselineSessionRef.current, sid)) {
-      lastStallBaselineSessionRef.current = sid;
-      lastProgressAtRef.current = enteredAt;
-      lastSseEventAtRef.current = enteredAt;
+    const sid = (pane.sessionId || "").trim();
+    const switchKey = sid || `__awaiting_fresh__:${pane.id}`;
+
+    if (shouldResetStallDetectorsOnSessionSwitch(lastStallBaselineSessionRef.current, switchKey)) {
+      lastStallBaselineSessionRef.current = switchKey;
       prevExecutionStateRef.current = "idle";
       setStallState("none");
       setStallRejectReason("");
       setStallTick((t) => t + 1);
-      // Pane-level execution chips (运行中 / knowledge_search / 后台运行中) are not
-      // keyed per session — clear immediately so a sibling background run cannot
-      // paint the newly opened session as "后台运行中" before listSessions returns.
       setSessionExecutionState("idle");
       setLastToolProgress(null);
       setContextLoopStats(null);
+
+      if (sid) {
+        const streamActive = Boolean(sessionStreamStateRef.current[sid]?.active);
+        const priorProgress = sessionProgressAtRef.current[sid] ?? 0;
+        if (priorProgress > 0) {
+          lastProgressAtRef.current = priorProgress;
+          lastSseEventAtRef.current = priorProgress;
+        } else {
+          lastProgressAtRef.current = enteredAt;
+          lastSseEventAtRef.current = enteredAt;
+        }
+        if (streamActive) {
+          setRunGuardSessionId(sid);
+        }
+      } else {
+        lastProgressAtRef.current = enteredAt;
+        lastSseEventAtRef.current = enteredAt;
+      }
     }
+
+    syncStreamingUiForCurrentSession();
+
+    if (!sid) {
+      return () => {
+        cancelled = true;
+      };
+    }
+
+    sessionEnteredAtRef.current[sid] = enteredAt;
     setAutoNudgeCount(autoNudgeTriggeredRef.current[sid] ?? 0);
     const priorUnattended = (pane.messages ?? []).filter(
       (m) =>
@@ -4450,22 +4482,30 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
       const st = (row?.execution_state ?? "idle") as SessionExecutionState;
       setSessionExecutionState(st);
       prevExecutionStateRef.current = st;
-      if (st === "running" && !sessionStreamStateRef.current[sid]?.active) {
+      if (st === "running") {
         setRunGuardSessionId(sid);
-        if (liveReattachEnabledRef.current) void reattachLiveStream(sid);
-        else void mergeTailFromDisk(sid);
-      } else if (st !== "running" && !sessionStreamStateRef.current[sid]?.active) {
-        // FR-B: session is idle/interrupted/failed on re-entry. If it finished in
-        // the background (or a retry left the in-memory tail diverged), pull the
-        // authoritative disk state back so the completed reply shows without a
-        // restart instead of lingering as a stale "已中断"/empty view.
+        if (sessionStreamStateRef.current[sid]?.active) {
+          syncStreamingUiForCurrentSession();
+        } else {
+          void mergeTailFromDisk(sid);
+          if (liveReattachEnabledRef.current) void reattachLiveStream(sid);
+        }
+      } else if (!sessionStreamStateRef.current[sid]?.active) {
         void reconcileDisplayedSessionFromDisk(sid);
       }
     });
     return () => {
       cancelled = true;
     };
-  }, [mergeTailFromDisk, reattachLiveStream, reconcileDisplayedSessionFromDisk, pane.sessionId, pane.avatarId]);
+  }, [
+    mergeTailFromDisk,
+    reattachLiveStream,
+    reconcileDisplayedSessionFromDisk,
+    pane.id,
+    pane.sessionId,
+    pane.avatarId,
+    syncStreamingUiForCurrentSession,
+  ]);
 
   useEffect(() => {
     const sid = (pane.sessionId || "").trim();
@@ -4619,7 +4659,8 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
     const evaluate = async () => {
       if (stallState === "exhausted") return;
       const sseActive = Boolean(sessionStreamStateRef.current[sid]?.active);
-      const lastProgress = lastProgressAtRef.current;
+      const sessionProgress = sessionProgressAtRef.current[sid] ?? 0;
+      const lastProgress = Math.max(lastProgressAtRef.current, sessionProgress);
       const now = Date.now();
       const silentMs = lastProgress > 0 ? now - lastProgress : 0;
 
@@ -5540,6 +5581,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
           return;
         }
         requestSessionId = created.session_id;
+        migratePaneKbRetrievalModeToSession(pane.id, requestSessionId);
         clearPaneLazyInheritParent(pane.id);
         clearPanePendingSessionMode(pane.id);
         setPaneSessionMode(pane.id, created.session_mode ?? pendingMode);
@@ -5787,7 +5829,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
     prevExecutionStateRef.current = "running";
     useAppStore.getState().markSessionHistoryActive(requestSessionId);
     useAppStore.getState().bumpSessionCatalogRevision();
-    recordSseActivity();
+    recordSseActivity(requestSessionId);
     setStallState("none");
     setExhaustedRounds(null);
     if ((pane.sessionId || "").trim() === requestSessionId) {
@@ -5859,7 +5901,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
       // Per-session KB retrieval mode: carry the session's explicit choice so the
       // backend prompt honors it instead of the single global config value.
       if (!isGroupPane && targetAgentId === "meta") {
-        const kbMode = getSessionKbRetrievalMode(requestSessionId);
+        const kbMode = getKbRetrievalModeForPane(requestSessionId, pane.id);
         if (kbMode) body.retrieval_mode = kbMode;
       }
       if (isGroupPane && targetAgentId === "meta") {
@@ -5997,9 +6039,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
           try {
             const payload = JSON.parse(line.slice(6));
             const sessionStillActive = isTargetSessionStillActive();
-            if (sessionStillActive) {
-              recordSseActivity();
-            }
+            recordSseActivity(requestSessionId);
             const eventAgentId = payload.data?.agent_id ?? "meta";
             if (payload.type === "continuation_notice") {
               const noticeText = String(payload.data?.text ?? "").trim();
@@ -6282,9 +6322,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
               continue;
             }
             if (payload.type === "tool_progress") {
-              if (sessionStillActive) {
-                recordProgressActivity();
-              }
+              recordProgressActivity(requestSessionId);
               const name = String(payload.data?.name ?? "tool");
               const sec = Number(payload.data?.elapsed_seconds ?? 0);
               if (eventAgentId === "meta" && sessionStillActive) {
@@ -8130,7 +8168,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
                   }}
                 />
                 <div className="flex items-center">
-                  <PaneKnowledgeRetrievalModeSwitch apiToken={apiToken} apiBase={apiBase} sessionId={pane.sessionId} />
+                  <PaneKnowledgeRetrievalModeSwitch apiToken={apiToken} apiBase={apiBase} sessionId={pane.sessionId} paneId={paneId} />
                 </div>
                 <button
                   type="button"

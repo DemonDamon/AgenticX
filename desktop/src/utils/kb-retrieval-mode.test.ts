@@ -1,7 +1,11 @@
 import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   clampKbRetrievalMode,
+  getKbRetrievalModeForPane,
   getSessionKbRetrievalMode,
+  kbRetrievalPanePendingKey,
+  migratePaneKbRetrievalModeToSession,
+  setKbRetrievalModeForPane,
   setSessionKbRetrievalMode,
 } from "./kb-retrieval-mode";
 
@@ -72,5 +76,18 @@ describe("per-session storage", () => {
   it("clamps stored value on write", () => {
     setSessionKbRetrievalMode("sess-a", "manual" as unknown as "auto");
     expect(getSessionKbRetrievalMode("sess-a")).toBe("auto");
+  });
+
+  it("stores lazy fresh pane choice before session id exists", () => {
+    setKbRetrievalModeForPane("", "pane-1", "auto");
+    expect(getKbRetrievalModeForPane("", "pane-1")).toBe("auto");
+    expect(getSessionKbRetrievalMode("")).toBeNull();
+  });
+
+  it("migrates pane pending choice to real session on first send", () => {
+    setKbRetrievalModeForPane("", "pane-1", "auto");
+    migratePaneKbRetrievalModeToSession("pane-1", "sess-new");
+    expect(getSessionKbRetrievalMode("sess-new")).toBe("auto");
+    expect(getSessionKbRetrievalMode(kbRetrievalPanePendingKey("pane-1"))).toBeNull();
   });
 });

@@ -65,3 +65,49 @@ export function setSessionKbRetrievalMode(sessionId: string, mode: KbRetrievalMo
   map[sid] = clampKbRetrievalMode(mode);
   writeMap(map);
 }
+
+/** Storage key for a lazy fresh pane before the first send creates a session id. */
+export function kbRetrievalPanePendingKey(paneId: string): string {
+  return `__pane_pending__:${String(paneId || "").trim()}`;
+}
+
+/** Resolve session id or pane-pending key used for read/write. */
+export function resolveKbRetrievalStorageKey(sessionId: string, paneId?: string): string | null {
+  const sid = String(sessionId || "").trim();
+  if (sid) return sid;
+  const pid = String(paneId || "").trim();
+  if (!pid) return null;
+  return kbRetrievalPanePendingKey(pid);
+}
+
+export function getKbRetrievalModeForPane(sessionId: string, paneId: string): KbRetrievalMode | null {
+  const key = resolveKbRetrievalStorageKey(sessionId, paneId);
+  if (!key) return null;
+  return getSessionKbRetrievalMode(key);
+}
+
+export function setKbRetrievalModeForPane(
+  sessionId: string,
+  paneId: string,
+  mode: KbRetrievalMode,
+): void {
+  const key = resolveKbRetrievalStorageKey(sessionId, paneId);
+  if (!key) return;
+  setSessionKbRetrievalMode(key, mode);
+}
+
+/** Copy lazy pane choice onto the real session id after createSession. */
+export function migratePaneKbRetrievalModeToSession(paneId: string, sessionId: string): void {
+  const pid = String(paneId || "").trim();
+  const sid = String(sessionId || "").trim();
+  if (!pid || !sid) return;
+  const pendingKey = kbRetrievalPanePendingKey(pid);
+  const pending = getSessionKbRetrievalMode(pendingKey);
+  if (!pending) return;
+  if (!getSessionKbRetrievalMode(sid)) {
+    setSessionKbRetrievalMode(sid, pending);
+  }
+  const map = readMap();
+  delete map[pendingKey];
+  writeMap(map);
+}
