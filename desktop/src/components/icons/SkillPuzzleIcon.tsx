@@ -31,6 +31,6 @@ export const SkillPuzzleIcon = forwardRef<SVGSVGElement, SVGProps<SVGSVGElement>
 );
 
 /** Inline SVG for contenteditable composer chips (non-React DOM). */
-export function skillPuzzleIconInnerHtml(sizePx = 11): string {
-  return `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" xmlns="http://www.w3.org/2000/svg" style="width:${sizePx}px;height:${sizePx}px;display:inline-block;vertical-align:middle;opacity:0.85"><path d="${PUZZLE_PATH}"/></svg>`;
+export function skillPuzzleIconInnerHtml(sizePx = 13): string {
+  return `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" xmlns="http://www.w3.org/2000/svg" class="agx-composer-inline-chip-icon" style="width:${sizePx}px;height:${sizePx}px;display:inline;vertical-align:-0.12em;margin-right:0.22em;opacity:0.92"><path d="${PUZZLE_PATH}"/></svg>`;
 }

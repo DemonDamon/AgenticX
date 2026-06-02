@@ -307,6 +307,15 @@ body.agx-settings-panel-resizing {
   border: 1px solid var(--chat-composer-chip-border);
   background-color: var(--chat-composer-chip-bg);
   color: var(--chat-composer-chip-fg);
+  box-decoration-break: clone;
+  -webkit-box-decoration-break: clone;
+}
+
+.agx-composer-inline-chip .agx-composer-inline-chip-icon,
+.agx-composer-inline-chip .skill-puzzle-icon {
+  display: inline;
+  vertical-align: -0.12em;
+  margin-right: 0.22em;
 }
 
 /* 在用户气泡内时，利用 text-primary 混合透明度产生色差，并增加微渐变和阴影使其更立体 */

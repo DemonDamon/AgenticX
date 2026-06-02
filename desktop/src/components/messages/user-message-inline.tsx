@@ -1,7 +1,11 @@
 import type { ReactNode } from "react";
 import ReactMarkdown from "react-markdown";
-import { Paperclip } from "lucide-react";
 import { SkillPuzzleIcon } from "../icons/SkillPuzzleIcon";
+import {
+  COMPOSER_INLINE_CHIP_CLASS,
+  ComposerRefIcon,
+  resolveComposerRefIconKindFromAttachments,
+} from "../icons/ComposerRefIcon";
 import type { Components } from "react-markdown";
 import type { MessageAttachment } from "../../store";
 import {
@@ -33,23 +37,24 @@ function tryConsumeSkillRef(text: string, at: number): { slug: string; len: numb
 
 export function UserSkillRefChip({ name }: { name: string }) {
   return (
-    <span
-      className="agx-composer-inline-chip mx-0.5 inline-flex max-w-[min(100%,280px)] items-center gap-1 rounded-md px-1.5 py-0.5 align-middle text-[12px] font-medium leading-[1.2]"
-      title={`@skill://${name}`}
-    >
-      <SkillPuzzleIcon className="h-3 w-3 shrink-0 opacity-80" />
+    <span className={COMPOSER_INLINE_CHIP_CLASS} title={`@skill://${name}`}>
+      <SkillPuzzleIcon className="agx-composer-inline-chip-icon h-[0.95em] w-[0.95em] shrink-0 opacity-90" />
       <span className="min-w-0 truncate">{name}</span>
     </span>
   );
 }
 
-export function UserFileRefChip({ name }: { name: string }) {
+export function UserFileRefChip({
+  name,
+  referenceAttachments = [],
+}: {
+  name: string;
+  referenceAttachments?: MessageAttachment[];
+}) {
+  const kind = resolveComposerRefIconKindFromAttachments(name, referenceAttachments);
   return (
-    <span
-      className="agx-composer-inline-chip mx-0.5 inline-flex max-w-[min(100%,280px)] items-center gap-1 rounded-md px-1.5 py-0.5 align-middle text-[12px] font-medium leading-[1.2]"
-      title={`@${name}`}
-    >
-      <Paperclip className="h-3 w-3 shrink-0 opacity-80" strokeWidth={2} aria-hidden />
+    <span className={COMPOSER_INLINE_CHIP_CLASS} title={`@${name}`}>
+      <ComposerRefIcon kind={kind} />
       <span className="min-w-0 truncate">{name}</span>
     </span>
   );
@@ -115,7 +120,13 @@ export function renderUserMessageInlineBody(
       return tail.length === 0 || /\s/.test(tail);
     });
     if (matched) {
-      chunks.push(<UserFileRefChip key={`ref-${chipKey++}`} name={matched} />);
+      chunks.push(
+        <UserFileRefChip
+          key={`ref-${chipKey++}`}
+          name={matched}
+          referenceAttachments={referenceAttachments}
+        />
+      );
       cursor += matched.length + 1;
       continue;
     }

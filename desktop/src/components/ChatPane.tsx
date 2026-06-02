@@ -66,6 +66,11 @@ import { StallRecoveryCard } from "./messages/StallRecoveryCard";
 import { ForwardPicker, type ForwardConfirmPayload } from "./ForwardPicker";
 import { HoverTip } from "./ds/HoverTip";
 import { SkillPuzzleIcon, skillPuzzleIconInnerHtml } from "./icons/SkillPuzzleIcon";
+import {
+  COMPOSER_INLINE_CHIP_CLASS,
+  composerRefIconInnerHtml,
+  resolveComposerRefIconKind,
+} from "./icons/ComposerRefIcon";
 import { Toast } from "./ds/Toast";
 import { extractClipboardImageFiles, withClipboardImageNames } from "../utils/clipboard-images";
 import { clipboardPlainTextForPaste } from "../utils/clipboard-plain-text";
@@ -3102,33 +3107,47 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
     selection.addRange(range);
   }, []);
 
-  const createFileRefToken = useCallback((name: string) => {
-    const token = document.createElement("span");
-    token.setAttribute("contenteditable", "false");
-    token.setAttribute("data-ref-token", "1");
-    token.setAttribute("data-ref-name", name);
-    token.className =
-      "agx-composer-inline-chip mx-0.5 inline-flex max-w-[min(100%,280px)] items-center gap-1 rounded-md px-1.5 py-0.5 align-baseline text-[12px] font-medium leading-[1.2]";
-    const icon = document.createElement("span");
-    icon.innerHTML =
-      '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:12px;height:12px;display:inline-block;vertical-align:middle;opacity:0.8"><path d="M21.44 11.05l-9.19 9.19a6 6 0 01-8.49-8.49l9.19-9.19a4 4 0 015.66 5.66l-9.2 9.19a2 2 0 01-2.83-2.83l8.49-8.48"/></svg>';
-    token.appendChild(icon);
-    const label = document.createElement("span");
-    label.className = "min-w-0 truncate";
-    label.textContent = name;
-    token.appendChild(label);
-    return token;
-  }, []);
+  const resolveRefIconKindForLabel = useCallback(
+    (label: string) => {
+      const meta = Object.values(contextFiles).find((file) => {
+        if (file.composerRefLabel === label) return true;
+        if (file.name === label) return true;
+        const base = String(file.name || "").split(/[\\/]/).pop();
+        return base === label;
+      });
+      return resolveComposerRefIconKind(label, meta);
+    },
+    [contextFiles]
+  );
+
+  const createFileRefToken = useCallback(
+    (name: string) => {
+      const kind = resolveRefIconKindForLabel(name);
+      const token = document.createElement("span");
+      token.setAttribute("contenteditable", "false");
+      token.setAttribute("data-ref-token", "1");
+      token.setAttribute("data-ref-name", name);
+      token.className = COMPOSER_INLINE_CHIP_CLASS;
+      const icon = document.createElement("span");
+      icon.innerHTML = composerRefIconInnerHtml(kind, 13);
+      token.appendChild(icon);
+      const label = document.createElement("span");
+      label.className = "min-w-0 truncate";
+      label.textContent = name;
+      token.appendChild(label);
+      return token;
+    },
+    [resolveRefIconKindForLabel]
+  );
 
   const createSkillRefToken = useCallback((name: string) => {
     const token = document.createElement("span");
     token.setAttribute("contenteditable", "false");
     token.setAttribute("data-skill-token", "1");
     token.setAttribute("data-skill-name", name);
-    token.className =
-      "agx-composer-inline-chip mx-0.5 inline-flex max-w-[min(100%,280px)] items-center gap-1 rounded-md px-1.5 py-0.5 align-baseline text-[12px] font-medium leading-[1.2]";
+    token.className = COMPOSER_INLINE_CHIP_CLASS;
     const icon = document.createElement("span");
-    icon.innerHTML = skillPuzzleIconInnerHtml(11);
+    icon.innerHTML = skillPuzzleIconInnerHtml(13);
     token.appendChild(icon);
     const label = document.createElement("span");
     label.className = "min-w-0 truncate";
