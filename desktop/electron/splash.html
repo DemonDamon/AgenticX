@@ -222,8 +222,13 @@
           breathe 4.2s ease-in-out 1.6s infinite;
       }
 
+      /* Wireframe asset is light-on-transparent; invert for readable contrast on light bg */
       :root[data-theme="light"] .hero-img {
-        filter: drop-shadow(0 0 18px rgba(0, 0, 0, 0.08));
+        filter:
+          invert(1)
+          contrast(1.12)
+          drop-shadow(0 2px 20px rgba(0, 0, 0, 0.12))
+          drop-shadow(0 0 1px rgba(0, 0, 0, 0.28));
       }
 
       @keyframes reveal-hero {
@@ -293,6 +298,11 @@
         box-shadow: 0 0 18px rgba(255, 255, 255, 0.75);
         opacity: 0;
         animation: eye 4.8s ease-in-out 1.35s infinite;
+      }
+
+      :root[data-theme="light"] .eye-pulse {
+        background: rgba(10, 10, 10, 0.82);
+        box-shadow: 0 0 16px rgba(0, 0, 0, 0.38);
       }
 
       @keyframes eye {
