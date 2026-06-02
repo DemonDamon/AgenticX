@@ -1,5 +1,10 @@
 import { PanelRightClose, RefreshCw, Search, Share2 } from "lucide-react";
 import { memo, useCallback, useEffect, useMemo, useState } from "react";
+import { useAppStore } from "../../store";
+import {
+  listProviderVisibleModelIds,
+  type ProviderCatalogEntry,
+} from "../../utils/model-options";
 import { MemoryGraphCanvas } from "./MemoryGraphCanvas";
 import { MemoryGraphDetail } from "./MemoryGraphDetail";
 import {
@@ -89,6 +94,19 @@ const MG_DIVIDER = "h-px shrink-0 bg-[var(--border-muted)]";
 const MG_FIELD =
   "rounded-md border border-border bg-surface-panel px-2 py-1.5 text-xs text-text-primary outline-none focus:border-[var(--settings-accent-focus)]";
 
+function buildProviderModelOptions(
+  providers: Record<string, ProviderCatalogEntry>,
+  providerId: string,
+  currentModel: string,
+): string[] {
+  const entry = providerId.trim() ? providers[providerId.trim()] : undefined;
+  const fromCatalog = entry ? listProviderVisibleModelIds(entry) : [];
+  const set = new Set(fromCatalog);
+  const cur = currentModel.trim();
+  if (cur && !set.has(cur)) set.add(cur);
+  return Array.from(set);
+}
+
 function StatRow({
   label,
   value,
@@ -147,6 +165,7 @@ function MemoryGraphExplorerInner({
   const [embedProvider, setEmbedProvider] = useState("");
   const [embedModel, setEmbedModel] = useState("");
   const [defaultProvider, setDefaultProvider] = useState("");
+  const providerCatalog = useAppStore((s) => s.settings.providers);
 
   const isDashboard = layout === "dashboard";
   const groupId = useMemo(
@@ -360,6 +379,16 @@ function MemoryGraphExplorerInner({
     return Array.from(set);
   }, [providerOptions, llmProvider, embedProvider]);
 
+  const llmModelOptions = useMemo(
+    () => buildProviderModelOptions(providerCatalog, llmProvider, llmModel),
+    [providerCatalog, llmProvider, llmModel],
+  );
+
+  const embedModelOptions = useMemo(
+    () => buildProviderModelOptions(providerCatalog, embedProvider, embedModel),
+    [providerCatalog, embedProvider, embedModel],
+  );
+
   const nodeCount = graph.meta.nodeCount ?? graph.nodes.length;
   const edgeCount = graph.meta.edgeCount ?? graph.edges.length;
   const entityCount = graph.nodes.filter((n) => n.kind === "entity").length;
@@ -384,7 +413,7 @@ function MemoryGraphExplorerInner({
             type="button"
             className={`px-2.5 py-1 transition ${
               scope === s
-                ? "bg-[var(--ui-btn-primary-bg)] font-medium text-[var(--ui-btn-primary-fg)]"
+                ? "bg-[var(--ui-btn-primary-bg)] font-medium text-[var(--ui-btn-primary-text)]"
                 : "bg-transparent text-text-muted hover:bg-surface-hover hover:text-text-primary"
             }`}
             onClick={() => setScope(s)}
@@ -409,7 +438,7 @@ function MemoryGraphExplorerInner({
         <button
           type="button"
           className="shrink-0 rounded-md px-3 py-1.5 text-xs font-medium transition hover:opacity-90"
-          style={{ background: "var(--ui-btn-primary-bg)", color: "var(--ui-btn-primary-fg)" }}
+          style={{ background: "var(--ui-btn-primary-bg)", color: "var(--ui-btn-primary-text)" }}
           onClick={() => void onSearch()}
         >
           搜索
@@ -434,12 +463,12 @@ function MemoryGraphExplorerInner({
   const alerts = (
     <>
       {statusHint ? (
-        <div className="rounded-lg border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-[11px] text-amber-200">
+        <div className="rounded-lg border border-status-warning/50 bg-status-warning/10 px-3 py-2 text-[11px] text-status-warning">
           {statusHint}
         </div>
       ) : null}
       {error ? (
-        <div className="rounded-lg border border-rose-500/40 bg-rose-500/10 px-3 py-2 text-[11px] text-rose-300">
+        <div className="rounded-lg border border-status-error/50 bg-status-error/10 px-3 py-2 text-[11px] text-status-error">
           {error}
         </div>
       ) : null}
@@ -629,7 +658,14 @@ function MemoryGraphExplorerInner({
             <select
               value={llmProvider}
               disabled={saving}
-              onChange={(e) => setLlmProvider(e.target.value)}
+              onChange={(e) => {
+                const next = e.target.value;
+                setLlmProvider(next);
+                const nextModels = buildProviderModelOptions(providerCatalog, next, "");
+                if (llmModel.trim() && !nextModels.includes(llmModel.trim())) {
+                  setLlmModel("");
+                }
+              }}
               className={MG_FIELD}
             >
               <option value="">默认 provider</option>
@@ -639,20 +675,43 @@ function MemoryGraphExplorerInner({
                 </option>
               ))}
             </select>
-            <input
+            <select
               value={llmModel}
-              disabled={saving}
+              disabled={saving || !llmProvider.trim()}
               onChange={(e) => setLlmModel(e.target.value)}
-              placeholder="模型名（留空用默认）"
               className={MG_FIELD}
-            />
+              title={
+                llmProvider.trim()
+                  ? undefined
+                  : "请先选择 provider，或在「模型服务」中配置可见模型"
+              }
+            >
+              <option value="">模型名（留空用默认）</option>
+              {llmModelOptions.map((m) => (
+                <option key={`llm-model-${m}`} value={m}>
+                  {m}
+                </option>
+              ))}
+              {llmProvider.trim() && llmModelOptions.length === 0 ? (
+                <option disabled value="__no_models">
+                  请先在「模型服务」添加可见模型
+                </option>
+              ) : null}
+            </select>
           </div>
           <div className="grid grid-cols-[64px_1fr_1.2fr] items-center gap-2">
             <span className="text-[11px] text-text-faint">向量化</span>
             <select
               value={embedProvider}
               disabled={saving}
-              onChange={(e) => setEmbedProvider(e.target.value)}
+              onChange={(e) => {
+                const next = e.target.value;
+                setEmbedProvider(next);
+                const nextModels = buildProviderModelOptions(providerCatalog, next, "");
+                if (embedModel.trim() && !nextModels.includes(embedModel.trim())) {
+                  setEmbedModel("");
+                }
+              }}
               className={MG_FIELD}
             >
               <option value="">默认 provider</option>
@@ -662,13 +721,29 @@ function MemoryGraphExplorerInner({
                 </option>
               ))}
             </select>
-            <input
+            <select
               value={embedModel}
-              disabled={saving}
+              disabled={saving || !embedProvider.trim()}
               onChange={(e) => setEmbedModel(e.target.value)}
-              placeholder="如 text-embedding-3-small"
               className={MG_FIELD}
-            />
+              title={
+                embedProvider.trim()
+                  ? undefined
+                  : "请先选择 provider，或在「模型服务」中配置可见模型"
+              }
+            >
+              <option value="">如 text-embedding-3-small（留空用默认）</option>
+              {embedModelOptions.map((m) => (
+                <option key={`emb-model-${m}`} value={m}>
+                  {m}
+                </option>
+              ))}
+              {embedProvider.trim() && embedModelOptions.length === 0 ? (
+                <option disabled value="__no_models">
+                  请先在「模型服务」添加可见模型
+                </option>
+              ) : null}
+            </select>
           </div>
           <div className="flex justify-end">
             <button
@@ -676,7 +751,7 @@ function MemoryGraphExplorerInner({
               disabled={saving}
               onClick={saveModels}
               className="rounded-md px-3 py-1.5 text-xs font-medium transition hover:opacity-90 disabled:opacity-50"
-              style={{ background: "var(--ui-btn-primary-bg)", color: "var(--ui-btn-primary-fg)" }}
+              style={{ background: "var(--ui-btn-primary-bg)", color: "var(--ui-btn-primary-text)" }}
             >
               保存模型设置
             </button>
@@ -685,7 +760,7 @@ function MemoryGraphExplorerInner({
         {configMsg ? (
           <>
             <div className={MG_DIVIDER} />
-            <div className={`py-1 text-xs ${configMsg === "已保存" ? "text-text-muted" : "text-rose-400"}`}>
+            <div className={`py-1 text-xs ${configMsg === "已保存" ? "text-text-muted" : "text-status-error"}`}>
               {configMsg}
             </div>
           </>
