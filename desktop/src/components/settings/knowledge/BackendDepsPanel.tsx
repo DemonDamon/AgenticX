@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { AlertTriangle, CheckCircle2, Loader2, Wrench } from "lucide-react";
+import { AlertTriangle, CheckCircle2, Loader2, RotateCw, Wrench } from "lucide-react";
 
 type Diag = {
   ok: boolean;
@@ -22,15 +22,15 @@ const PHASE_LABEL: Record<RepairPhase, string> = {
   idle: "",
   "creating-venv": "创建虚拟环境…",
   "upgrading-pip": "升级 pip…",
-  installing: "安装知识库依赖（可能耗时数分钟）…",
+  installing: "安装知识库与文档解析依赖（可能耗时数分钟）…",
   done: "修复完成",
   error: "修复失败",
 };
 
 /**
- * Diagnoses backend Python deps (chromadb/onnxruntime/numpy) and offers a
- * one-click repair that installs agenticx[desktop-runtime] into ~/.agenticx/.venv.
- * Only renders a banner when there is a problem; healthy state is collapsed.
+ * Diagnoses backend Python deps (chromadb, onnxruntime, numpy, PDF libs) and
+ * offers a one-click repair that installs agenticx[desktop-runtime] into
+ * ~/.agenticx/.venv. Only renders a banner when there is a problem.
  */
 export function BackendDepsPanel() {
   const [diag, setDiag] = useState<Diag | null>(null);
@@ -47,7 +47,11 @@ export function BackendDepsPanel() {
       const r = await window.agenticxDesktop.diagnoseBackendDeps();
       setDiag(r);
     } catch (err) {
-      setDiag({ ok: false, error: String(err), missing: ["chromadb"] });
+      setDiag({
+        ok: false,
+        error: String(err),
+        missing: ["chromadb", "pdf (PyMuPDF or pypdf)"],
+      });
     } finally {
       setBusy(false);
     }
@@ -92,7 +96,12 @@ export function BackendDepsPanel() {
     }
   }, [runDiagnose]);
 
+  const handleRelaunch = useCallback(async () => {
+    await window.agenticxDesktop.appRelaunch();
+  }, []);
+
   const missing = diag?.missing ?? [];
+  const needsRestart = phase === "done";
   const hasProblem = !!diag && (missing.length > 0 || diag.ok === false);
 
   // Healthy and not mid-repair: stay out of the way.
@@ -116,7 +125,8 @@ export function BackendDepsPanel() {
           ) : (
             <>
               <p className="text-xs font-medium text-amber-200">
-                知识库所需的后端依赖缺失{missing.length > 0 ? `：${missing.join("、")}` : ""}
+                知识库/文档解析所需的后端依赖缺失
+                {missing.length > 0 ? `：${missing.join("、")}` : ""}
               </p>
               {diag?.pythonPath ? (
                 <p className="mt-0.5 break-all text-[11px] text-text-subtle">
@@ -129,7 +139,7 @@ export function BackendDepsPanel() {
                 </p>
               ) : (
                 <p className="mt-0.5 text-[11px] text-text-subtle">
-                  点击修复将创建 ~/.agenticx/.venv 并安装 agenticx[desktop-runtime]（含 chromadb）。
+                  点击修复将创建 ~/.agenticx/.venv 并安装 agenticx[desktop-runtime]（含 chromadb、PDF 解析、SOCKS 代理 socksio 等）。
                 </p>
               )}
             </>
@@ -138,12 +148,22 @@ export function BackendDepsPanel() {
         {!diag?.usingBundled ? (
           <button
             type="button"
-            disabled={repairing || busy}
-            onClick={() => void handleRepair()}
-            className="flex shrink-0 items-center gap-1 rounded-md bg-btnPrimary px-2.5 py-1.5 text-xs font-medium text-btnPrimary-text transition hover:bg-btnPrimary-hover disabled:opacity-50"
+            disabled={repairing || (busy && !needsRestart)}
+            onClick={() => void (needsRestart ? handleRelaunch() : handleRepair())}
+            className={`flex shrink-0 items-center gap-1 rounded-md px-2.5 py-1.5 text-xs font-medium transition disabled:opacity-50 ${
+              needsRestart
+                ? "bg-emerald-600 text-white hover:bg-emerald-500"
+                : "bg-btnPrimary text-btnPrimary-text hover:bg-btnPrimary-hover"
+            }`}
           >
-            {repairing ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Wrench className="h-3.5 w-3.5" />}
-            {repairing ? "修复中…" : "一键修复"}
+            {repairing ? (
+              <Loader2 className="h-3.5 w-3.5 animate-spin" />
+            ) : needsRestart ? (
+              <RotateCw className="h-3.5 w-3.5" />
+            ) : (
+              <Wrench className="h-3.5 w-3.5" />
+            )}
+            {repairing ? "修复中…" : needsRestart ? "立即重启" : "一键修复"}
           </button>
         ) : null}
       </div>

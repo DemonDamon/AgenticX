@@ -61,6 +61,16 @@ for name in required:
         importlib.import_module(name)
     except Exception:
         missing.append(name)
+pdf_ok = False
+for pdf_mod in ("fitz", "pypdf"):
+    try:
+        importlib.import_module(pdf_mod)
+        pdf_ok = True
+        break
+    except Exception:
+        pass
+if not pdf_ok:
+    missing.append("pdf (fitz or pypdf)")
 
 if missing:
     print(f"✗ Missing desktop-runtime deps in packaging venv: {', '.join(missing)}")

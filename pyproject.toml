@@ -104,6 +104,9 @@ desktop-runtime = [
     "mcp>=1.0.0,<2",
     "semble>=0.1.10,<0.2.0",
     "pathspec>=1.0.0",
+    # 本机 shell / agx serve 继承 ALL_PROXY=socks5://… 时，httpx / OpenAI SDK / LiteLLM
+    # 向量化会走 SOCKS；缺 socksio 则入库阶段才抛 ImportError。
+    "socksio>=1.0.0,<2",
 ]
 # ── 额外 LLM 提供者 ──
 llm = [

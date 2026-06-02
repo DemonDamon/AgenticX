@@ -107,3 +107,12 @@
 「环境隔离 / 沙箱（Manus 式每会话云电脑）」的正确前置是**可插拔 ExecutionBackend**，按隔离强度分档：
 `shared local`（现状）→ `per-session workspace`（已有）→ `venv subprocess`（依赖隔离）→ `container`（真沙箱起点）→ `remote microVM`（云电脑）。
 venv 只是其中最弱一档，应直接奔容器 / 微VM，而非「每分身复制 venv」。该路线图另起 plan。
+
+---
+
+## 6. 追加修复（2026-06-02）：SOCKS 代理 + socksio + 知识脑配置保存
+
+- **socksio**：`desktop-runtime` 增加 `socksio`；一键修复在 PyPI 装完后**显式** `pip install socksio` 并校验；开发态优先 `pip install -e <repo>[desktop-runtime]`。
+- **诊断**：检测到 `ALL_PROXY`/`HTTPS_PROXY` 含 `socks` 时要求可 `import socksio`。
+- **入库**：`runtime._check_socks_proxy_deps()` 向量化前 fail-fast；资料页区分「缺依赖」与「依赖已装但 serve 进程需 ⌘Q 重启」。
+- **BrainsSettings**：保存知识脑配置改用 `kbDraft` 状态，修复 Wiki/合成答案勾选后保存被置空。

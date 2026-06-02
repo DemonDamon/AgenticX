@@ -27,7 +27,26 @@ export function KnowledgeMaterialsPanel({ api, enabled, extensions }: Props) {
   const [error, setError] = useState<string | null>(null);
   const [uploading, setUploading] = useState(false);
   const [activeJobs, setActiveJobs] = useState<Record<string, ActiveJob>>({});
+  /** null = checking; true = chromadb/PDF/SOCKS deps importable in backend Python */
+  const [backendDepsReady, setBackendDepsReady] = useState<boolean | null>(null);
+  const [depsMissing, setDepsMissing] = useState<string[]>([]);
   const dropRef = useRef<HTMLDivElement>(null);
+
+  const refreshBackendDeps = useCallback(async () => {
+    try {
+      const r = await window.agenticxDesktop.diagnoseBackendDeps();
+      const missing = r.missing ?? [];
+      setDepsMissing(missing);
+      setBackendDepsReady(missing.length === 0 && r.ok !== false);
+    } catch {
+      setDepsMissing(["后端依赖检测失败"]);
+      setBackendDepsReady(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    void refreshBackendDeps();
+  }, [refreshBackendDeps]);
 
   const reload = useCallback(async () => {
     try {
@@ -117,10 +136,13 @@ export function KnowledgeMaterialsPanel({ api, enabled, extensions }: Props) {
         }
       }
       if (changed) setActiveJobs(next);
-      if (anyTerminal) void reload();
+      if (anyTerminal) {
+        void reload();
+        void refreshBackendDeps();
+      }
     }, POLL_INTERVAL_MS);
     return () => clearInterval(iv);
-  }, [activeJobs, api, reload]);
+  }, [activeJobs, api, reload, refreshBackendDeps]);
 
   async function uploadFile(file: File) {
     setUploading(true);
@@ -201,8 +223,42 @@ export function KnowledgeMaterialsPanel({ api, enabled, extensions }: Props) {
     </div>
   ) : null;
 
+  const hasRuntimeIngestError = documents.some(
+    (d) => d.error && isDesktopRuntimeIngestError(d.error),
+  );
+  // 依赖已安装（磁盘上检测就绪）但仍有运行期失败 → 多半是当前后端进程在依赖
+  // 安装之前启动，Python 进程看不到后装入的包，必须完全重启 Near。
+  const depsInstalledButStale =
+    backendDepsReady === true && depsMissing.length === 0 && hasRuntimeIngestError;
+  const showDepsBanner =
+    backendDepsReady === false || depsMissing.length > 0 || hasRuntimeIngestError;
+
   return (
     <div className="space-y-3">
+      {showDepsBanner ? (
+        <div className="rounded-lg border border-amber-500/40 bg-amber-500/10 px-3 py-2.5 text-xs text-amber-200">
+          {depsInstalledButStale ? (
+            <>
+              <p className="font-medium">后端依赖已安装，但当前服务进程需要完全重启</p>
+              <p className="mt-1 text-[11px] leading-relaxed text-amber-100/90">
+                socksio 等依赖刚装好，但当前后端是在安装之前启动的，运行中的进程看不到新装的包。
+                请<strong>完全退出 Near（⌘Q）后重新打开</strong>，再对失败文件点右侧 ⟳ 重建索引即可，无需再次修复。
+              </p>
+            </>
+          ) : (
+            <>
+              <p className="font-medium">
+                后端 Python 环境不完整
+                {depsMissing.length > 0 ? `：${depsMissing.join("、")}` : ""}
+              </p>
+              <p className="mt-1 text-[11px] leading-relaxed text-amber-100/90">
+                向量化会走本机代理（如 SOCKS）；缺 socksio 时上传后才在「失败」里报错。请切换到本页左侧的「配置」子页，在页面最顶部点「一键修复」安装
+                agenticx[desktop-runtime]，再点「立即重启」；或对失败文件点右侧 ⟳ 重建索引。
+              </p>
+            </>
+          )}
+        </div>
+      ) : null}
       {disabledHint}
       {error ? (
         <div className="rounded-md border border-rose-500/40 bg-rose-500/10 px-3 py-2 text-xs text-rose-700 dark:text-rose-300">
@@ -288,6 +344,15 @@ export function KnowledgeMaterialsPanel({ api, enabled, extensions }: Props) {
                     {doc.error ? (
                       <div className="mt-1 break-words text-xs text-rose-600 dark:text-rose-400">
                         {doc.error}
+                        {isDesktopRuntimeIngestError(doc.error) ? (
+                          <p className="mt-1 text-amber-600 dark:text-amber-400">
+                            {backendDepsReady === false
+                              ? "请到本页顶部的「知识库」设置，使用「一键修复」安装依赖后点「立即重启」，再对本文件点右侧 ⟳ 重建索引。"
+                              : backendDepsReady === true
+                                ? "依赖已安装；若刚修复过，当前后端进程可能在安装前启动，请完全退出并重启 Near（⌘Q）后再点右侧 ⟳ 重建索引。"
+                                : "正在检测后端依赖…"}
+                          </p>
+                        ) : null}
                       </div>
                     ) : null}
                     {isRunning ? (
@@ -333,6 +398,18 @@ export function KnowledgeMaterialsPanel({ api, enabled, extensions }: Props) {
         )}
       </Panel>
     </div>
+  );
+}
+
+function isDesktopRuntimeIngestError(text: string): boolean {
+  const t = text.toLowerCase();
+  return (
+    t.includes("no pdf library") ||
+    t.includes("chromadb is required") ||
+    t.includes("onnxruntime python package is not installed") ||
+    t.includes("socksio") ||
+    t.includes("httpx[socks]") ||
+    t.includes("socks proxy")
   );
 }
 
