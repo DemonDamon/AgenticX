@@ -42,6 +42,57 @@ env -u http_proxy -u https_proxy -u all_proxy docker version
 curl --noproxy '*' -s -o /dev/null -w '%{http_code}\n' http://127.0.0.1:3000
 ```
 
+### 拉镜像超时 / `registry-1.docker.io ... Client.Timeout`（国内服务器无法访问 Docker Hub）
+
+现象：`start-dev-with-infra.sh` 在 `booting middleware...` 阶段卡住并报
+`Get "https://registry-1.docker.io/v2/": net/http: request canceled ... (Client.Timeout exceeded while awaiting headers)`。
+
+**先厘清一个误解**：Enterprise 安装脚本**不内置任何国内镜像地址**。`deploy/docker-compose/dev.yml`
+只声明标准镜像名 `postgres:16-alpine` 与 `redis:7-alpine`，**从哪个 registry 拉取完全由这台机器的 Docker
+守护进程决定**。看到 `registry-1.docker.io` 超时，说明**当前主机的镜像加速没生效**（常见：只在别的机器配过、
+改了 `daemon.json` 没重启 docker、配置路径不对），并非产品"没有国内镜像源"。
+
+处置（在目标服务器上按序执行）：
+
+1. **确认 daemon 真的有镜像加速并已重启**
+
+   ```bash
+   docker info 2>/dev/null | grep -A5 -i 'Registry Mirrors'   # 应列出国内镜像站
+   cat /etc/docker/daemon.json                                # 核对 registry-mirrors
+   sudo systemctl restart docker                              # 改完必须重启才生效
+   ```
+
+2. **单独验证能拉到这两个镜像**
+
+   ```bash
+   docker pull postgres:16-alpine
+   docker pull redis:7-alpine
+   ```
+
+   两条都成功后再重新执行 `bash scripts/start-dev-with-infra.sh --ui=stream`。
+
+3. **daemon 加速仍超时 → 用镜像站全路径预拉 + 打回标准 tag**（compose 命中本地标签后不再访问 Hub；
+   下例为阿里云 `library`，替换成客户实际镜像前缀）：
+
+   ```bash
+   docker pull registry.cn-hangzhou.aliyuncs.com/library/postgres:16-alpine
+   docker pull registry.cn-hangzhou.aliyuncs.com/library/redis:7-alpine
+   docker tag  registry.cn-hangzhou.aliyuncs.com/library/postgres:16-alpine postgres:16-alpine
+   docker tag  registry.cn-hangzhou.aliyuncs.com/library/redis:7-alpine     redis:7-alpine
+   ```
+
+4. **已有可用 Postgres/Redis → 干脆跳过 Docker 中间件**
+
+   ```bash
+   # 5432/6379 已在监听时
+   bash scripts/start-dev-with-infra.sh --skip-infra --ui=stream
+   # 或初始化用外部库
+   bash scripts/bootstrap.sh --skip-docker   # 需配置 DATABASE_URL
+   ```
+
+> 说明：`docker compose pull` 在镜像加速正确生效时一般**不会**卡在 Hub 超时；因此"超时"基本等价于
+> "这台机器的加速未真正生效"，按上述第 1 步排查即可。
+
 ---
 
 ## 登录与 IAM
