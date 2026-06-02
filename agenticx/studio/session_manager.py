@@ -261,6 +261,11 @@ class SessionManager:
         if self.should_interrupt(session_id):
             return "interrupted"
         if raw == "running":
+            # Stale ``running`` metadata (finalize persist lag, pane switch, or
+            # hub-mode off-loop timing) must not keep the history spinner after the
+            # turn already produced a terminal assistant payload (followups / SQ).
+            if self._last_turn_has_terminal_assistant_reply(session_id):
+                return "idle"
             return "running"
         if raw == "failed":
             return "failed"
@@ -286,6 +291,48 @@ class SessionManager:
         sid = str(session_id or "").strip()
         return bool(sid and sid in self._interrupt_requests)
 
+    def _messages_for_execution_state_check(self, session_id: str) -> list[dict]:
+        """Prefer in-memory chat_history so listing reflects a just-finished turn."""
+        managed = self._sessions.get(session_id)
+        if managed is not None:
+            hist = getattr(managed.studio_session, "chat_history", None) or []
+            if hist:
+                return [m for m in hist if isinstance(m, dict)]
+        try:
+            return self._load_messages_snapshot(session_id)
+        except Exception:
+            return []
+
+    def _last_turn_has_terminal_assistant_reply(self, session_id: str) -> bool:
+        """True when the last user turn already has a terminal assistant message.
+
+        Uses suggested_questions or a closed ``<followups>`` block so mid-turn
+        incremental persists (thinking-only partial assistant) do not clear the
+        running badge while tools are still executing.
+        """
+        try:
+            messages = self._messages_for_execution_state_check(session_id)
+        except Exception:
+            return False
+        if not messages:
+            return False
+        last_user_idx = -1
+        for idx, msg in enumerate(messages):
+            if str(msg.get("role", "")).strip() == "user":
+                last_user_idx = idx
+        if last_user_idx < 0:
+            return False
+        for msg in messages[last_user_idx + 1:]:
+            if str(msg.get("role", "")).strip() != "assistant":
+                continue
+            raw_sq = msg.get("suggested_questions")
+            if isinstance(raw_sq, list) and any(str(x).strip() for x in raw_sq):
+                return True
+            content = str(msg.get("content", "") or "")
+            if "</followups>" in content.lower():
+                return True
+        return False
+
     def _last_turn_has_completed_reply(self, session_id: str) -> bool:
         """True when the persisted messages show the last user turn already
         produced a non-empty assistant reply.
@@ -297,7 +344,7 @@ class SessionManager:
         a stale "已中断" badge that only a restart used to surface.
         """
         try:
-            messages = self._load_messages_snapshot(session_id)
+            messages = self._messages_for_execution_state_check(session_id)
         except Exception:
             return False
         if not messages:

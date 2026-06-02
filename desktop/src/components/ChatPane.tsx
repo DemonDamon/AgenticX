@@ -6735,6 +6735,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
             }
             if (payload.type === "final") {
               if (eventAgentId === "meta") {
+                useAppStore.getState().clearSessionHistoryHint(requestSessionId);
                 const finalText = String(payload.data?.text ?? "");
                 const sqRaw = payload.data?.suggested_questions;
                 pendingSuggestedQuestions = Array.isArray(sqRaw)
@@ -6902,6 +6903,9 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
       streamCommittedRef.current = false;
       setGroupTyping({});
       setContextFiles({});
+      if (!abortController.signal.aborted) {
+        useAppStore.getState().clearSessionHistoryHint(requestSessionId);
+      }
       useAppStore.getState().bumpSessionCatalogRevision();
       window.setTimeout(() => useAppStore.getState().bumpSessionCatalogRevision(), 500);
 
