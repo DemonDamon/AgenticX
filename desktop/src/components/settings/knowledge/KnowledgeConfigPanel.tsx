@@ -558,7 +558,7 @@ export function KnowledgeConfigPanel({
 
       <div className="flex flex-wrap items-center justify-end gap-2">
         {dirty ? (
-          <span className="text-xs text-amber-500">· 有未保存的改动（请使用页面底部「保存」）</span>
+          <span className="text-xs text-amber-500">· 有未保存的改动（请使用下方「保存」）</span>
         ) : null}
         <button
           type="button"

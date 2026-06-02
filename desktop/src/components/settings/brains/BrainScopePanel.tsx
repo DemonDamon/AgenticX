@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useState } from "react";
 import { Globe2, Lock, Loader2, Users } from "lucide-react";
 import { useAppStore } from "../../../store";
 import type { createBrainsApi, BrainRecord } from "./api";
@@ -6,10 +6,16 @@ import { BRAIN_SCOPE_GLOBAL_BADGE, BRAIN_SCOPE_PRIVATE_BADGE } from "./brainScop
 
 type ScopeMode = "global" | "private";
 
+export type BrainScopePanelHandle = {
+  isDirty: () => boolean;
+  flushIfDirty: () => Promise<{ ok: boolean; error?: string }>;
+};
+
 type Props = {
   brain: BrainRecord;
   brainsApi: ReturnType<typeof createBrainsApi>;
   onUpdated: () => void;
+  onDirtyChange?: (dirty: boolean) => void;
 };
 
 function scopeLabel(scope: string): string {
@@ -20,7 +26,10 @@ function typeLabel(type: string): string {
   return type === "code" ? "代码库" : "文档库";
 }
 
-export function BrainScopePanel({ brain, brainsApi, onUpdated }: Props) {
+export const BrainScopePanel = forwardRef<BrainScopePanelHandle, Props>(function BrainScopePanel(
+  { brain, brainsApi, onUpdated, onDirtyChange },
+  ref,
+) {
   const avatars = useAppStore((s) => s.avatars);
   const [scopeMode, setScopeMode] = useState<ScopeMode>(
     brain.scope === "private" ? "private" : "global",
@@ -49,14 +58,19 @@ export function BrainScopePanel({ brain, brainsApi, onUpdated }: Props) {
     (scopeMode !== persistedScope ||
       (scopeMode === "private" && ownerId.trim() !== persistedOwner));
 
-  const saveVisibility = useCallback(async () => {
-    if (isDefaultDocs) return;
+  useEffect(() => {
+    onDirtyChange?.(dirty);
+  }, [dirty, onDirtyChange]);
+
+  const saveVisibility = useCallback(async (): Promise<{ ok: boolean; error?: string }> => {
+    if (isDefaultDocs || !dirty) return { ok: true };
     setBusy(true);
     setMsg(null);
     try {
       if (scopeMode === "private" && !ownerId.trim()) {
-        setMsg("请选择所属分身");
-        return;
+        const err = "请选择所属分身";
+        setMsg(err);
+        return { ok: false, error: err };
       }
       await brainsApi.patchBrain(brain.id, {
         scope: scopeMode,
@@ -64,12 +78,24 @@ export function BrainScopePanel({ brain, brainsApi, onUpdated }: Props) {
       });
       setMsg("可见范围已更新");
       onUpdated();
+      return { ok: true };
     } catch (exc) {
-      setMsg(String((exc as Error).message ?? exc));
+      const err = String((exc as Error).message ?? exc);
+      setMsg(err);
+      return { ok: false, error: err };
     } finally {
       setBusy(false);
     }
-  }, [brain.id, brainsApi, isDefaultDocs, onUpdated, ownerId, scopeMode]);
+  }, [brain.id, brainsApi, dirty, isDefaultDocs, onUpdated, ownerId, scopeMode]);
+
+  useImperativeHandle(
+    ref,
+    () => ({
+      isDirty: () => dirty,
+      flushIfDirty: saveVisibility,
+    }),
+    [dirty, saveVisibility],
+  );
 
   const scopeBadgeClass =
     persistedScope === "global" ? BRAIN_SCOPE_GLOBAL_BADGE : BRAIN_SCOPE_PRIVATE_BADGE;
@@ -225,4 +251,4 @@ export function BrainScopePanel({ brain, brainsApi, onUpdated }: Props) {
       )}
     </section>
   );
-}
+});
