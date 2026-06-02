@@ -137,5 +137,6 @@ bash scripts/bootstrap.sh --mode=server
 | 前台无模型可选 | admin 未配模型 / 未分配可见模型 → 配置后或 `pnpm migrate:legacy-runtime` |
 | 端口被占（3000/3001/8088） | `lsof -i :8088` 后 kill 旧进程 |
 | Docker CLI 卡住无响应 | 见 [../development/troubleshooting.md](../development/troubleshooting.md#docker-cli-卡住--daemon-无响应) |
+| 拉镜像超时 `registry-1.docker.io`（国内服务器） | 脚本只用标准镜像名，须在本机 daemon 配国内加速并重启；见 [../development/troubleshooting.md](../development/troubleshooting.md#拉镜像超时--registry-1dockerio-clienttimeout国内服务器无法访问-docker-hub) |
 
 更完整排障见 [../development/troubleshooting.md](../development/troubleshooting.md) 与 [../../scripts/README.md](../../scripts/README.md)。
