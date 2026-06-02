@@ -1,5 +1,7 @@
 # Machi 对标 Anthropic Cowork 落地方案评估报告
 
+> **归档说明（2026-06）**：历史产品评估稿。桌面产品已 rebranding 为 **Near**（Machi 为旧称）；内容保留供路线对照，不代表当前 Near 完成度。
+
 ## 核心结论
 
 经过对 AgenticX (Machi) 最新代码的深度审查，你提出的“Machi 对标 Anthropic Cowork 的完整落地方案”**方向非常精准，且与当前代码库的演进路线高度契合**。

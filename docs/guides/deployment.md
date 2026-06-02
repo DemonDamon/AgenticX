@@ -99,6 +99,24 @@ curl http://localhost:8000/health
 # {"status": "ok", "version": "0.x.x"}
 ```
 
+## PyPI package (maintainers)
+
+Dependency and version metadata live in `pyproject.toml` (single source of truth).
+
+```bash
+pip install build twine
+python -m build                    # produces dist/*.whl and dist/*.tar.gz
+twine check dist/*
+twine upload dist/*                # PyPI (use testpypi first if unsure)
+```
+
+Reproducible installs from lock file:
+
+```bash
+uv pip compile pyproject.toml --extra desktop-runtime -o requirements.lock
+uv pip install -r requirements.lock
+```
+
 ## Scaling
 
 For high-throughput deployments:
