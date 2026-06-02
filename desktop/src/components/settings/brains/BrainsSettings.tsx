@@ -214,6 +214,21 @@ export const BrainsSettings = forwardRef<BrainsSettingsHandle>(function BrainsSe
     }
   };
 
+  const handleCancelBrain = () => {
+    if (!brainDirty) return;
+    setBrainSaveMsg(null);
+    setError(null);
+    scopePanelRef.current?.discardChanges();
+    if (selected?.type === "docs") {
+      applyKbDraft(kbConfig);
+    }
+    if (selected?.type === "code") {
+      codePanelRef.current?.discardChanges();
+      const cfg = (selected.config || {}) as Record<string, unknown>;
+      setCodeEnabledDraft(Boolean(cfg.enabled ?? true));
+    }
+  };
+
   const handleCreate = async () => {
     try {
       const b = await brainsApi.create({
@@ -435,6 +450,14 @@ export const BrainsSettings = forwardRef<BrainsSettingsHandle>(function BrainsSe
                     ) : brainSaveMsg ? (
                       <span className="text-xs text-text-muted">{brainSaveMsg}</span>
                     ) : null}
+                    <button
+                      type="button"
+                      disabled={brainSaving || !brainDirty}
+                      className="rounded-lg border border-border px-4 py-1.5 text-xs font-medium text-text-primary transition hover:bg-surface-hover disabled:opacity-40"
+                      onClick={handleCancelBrain}
+                    >
+                      取消
+                    </button>
                     <button
                       type="button"
                       disabled={brainSaving || !brainDirty}
