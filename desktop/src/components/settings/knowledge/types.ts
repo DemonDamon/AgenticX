@@ -216,24 +216,24 @@ export function defaultKBConfig(): KBConfig {
 }
 
 export const EMBEDDING_PROVIDERS: { id: string; label: string; defaultModel: string; defaultDim: number }[] = [
-  { id: "ollama", label: "Ollama (local)", defaultModel: "bge-m3", defaultDim: 1024 },
+  { id: "ollama", label: "Ollama 本地", defaultModel: "bge-m3", defaultDim: 1024 },
   { id: "openai", label: "OpenAI", defaultModel: "text-embedding-3-small", defaultDim: 1536 },
   { id: "siliconflow", label: "SiliconFlow", defaultModel: "BAAI/bge-m3", defaultDim: 1024 },
   // 百炼 text-embedding-v4（Qwen3-Embedding）支持 2048 / 1536 / 1024(默认) / 768 / 512 / 256 / 128 / 64；
   // 与官方默认对齐到 1024，需要更大维度（如 2048）时由用户在表单中手动调整。
-  { id: "bailian", label: "Bailian (DashScope)", defaultModel: "text-embedding-v4", defaultDim: 1024 },
+  { id: "bailian", label: "Bailian 百炼", defaultModel: "text-embedding-v4", defaultDim: 1024 },
 ];
 
 export const CHUNKING_STRATEGIES = [
-  { id: "recursive", label: "Recursive (默认)" },
-  { id: "contextual", label: "Contextual（标题前缀）" },
+  { id: "recursive", label: "Recursive · 默认" },
+  { id: "contextual", label: "Contextual · 标题前缀" },
   { id: "fixed_size", label: "Fixed Size" },
   { id: "document", label: "Document" },
 ];
 
 export const RETRIEVAL_MODES = [
-  { id: "vector", label: "向量 (Vector)" },
-  { id: "bm25", label: "关键词 (BM25)" },
-  { id: "hybrid", label: "混合 (Hybrid RRF)" },
-  { id: "hybrid_graph", label: "混合 + 图谱 (Hybrid Graph)" },
+  { id: "vector", label: "向量" },
+  { id: "bm25", label: "关键词 BM25" },
+  { id: "hybrid", label: "混合检索 RRF" },
+  { id: "hybrid_graph", label: "混合 + 知识图谱" },
 ] as const;
