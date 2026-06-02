@@ -39,13 +39,15 @@ PY_VERSION=$("$PYTHON" -c "import sys; print(f'{sys.version_info.major}.{sys.ver
 success "检测到 Python ${PY_VERSION} (${PYTHON})"
 
 # ── 2. 安装 agenticx ─────────────────────────────────────────────
-info "安装 agenticx 包..."
-if "$PYTHON" -m pip install --upgrade agenticx -q; then
+# 默认安装 desktop-runtime extras，确保知识库（chromadb/onnxruntime）、
+# PDF/Office 解析等桌面运行时依赖一次装齐，避免上传资料时报 "chromadb is required"。
+info "安装 agenticx 包（含知识库/文档运行时依赖）..."
+if "$PYTHON" -m pip install --upgrade "agenticx[desktop-runtime]" -q; then
   success "agenticx 安装成功"
 else
   warn "pip 直接安装失败，尝试 --user 模式..."
-  "$PYTHON" -m pip install --user --upgrade agenticx -q \
-    || die "安装失败，请尝试手动运行：$PYTHON -m pip install agenticx"
+  "$PYTHON" -m pip install --user --upgrade "agenticx[desktop-runtime]" -q \
+    || die "安装失败，请尝试手动运行：$PYTHON -m pip install 'agenticx[desktop-runtime]'"
 fi
 
 # ── 3. 确认 agx 命令可用 ──────────────────────────────────────────

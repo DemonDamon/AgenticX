@@ -173,6 +173,19 @@ contextBridge.exposeInMainWorld("agenticxDesktop", {
     return () => ipcRenderer.removeListener("automation-task-progress", handler);
   },
 
+  diagnoseBackendDeps: async () => ipcRenderer.invoke("diagnose-backend-deps"),
+  repairBackendDeps: async () => ipcRenderer.invoke("repair-backend-deps"),
+  onBackendDepsProgress: (
+    cb: (payload: { phase: string; line?: string; pct?: number }) => void,
+  ) => {
+    const handler = (
+      _e: unknown,
+      payload: { phase: string; line?: string; pct?: number },
+    ) => cb(payload);
+    ipcRenderer.on("backend-deps-progress", handler);
+    return () => ipcRenderer.removeListener("backend-deps-progress", handler);
+  },
+
   listAvatars: async () => ipcRenderer.invoke("list-avatars"),
   createAvatar: async (payload: {
     name: string;
@@ -181,8 +194,10 @@ contextBridge.exposeInMainWorld("agenticxDesktop", {
     system_prompt?: string;
     created_by?: string;
     tools_enabled?: Record<string, boolean>;
+    skills_enabled?: Record<string, boolean> | null;
     default_provider?: string;
     default_model?: string;
+    workspace_dir?: string;
   }) =>
     ipcRenderer.invoke("create-avatar", payload),
   updateAvatar: async (payload: {

@@ -138,11 +138,21 @@ class AvatarRegistry:
         tools_enabled: Optional[Dict[str, bool]] = None,
         skills_enabled: Optional[Dict[str, bool]] = None,
         brains_enabled: Optional[Any] = None,
+        workspace_dir: str = "",
     ) -> AvatarConfig:
-        """Create a new avatar with isolated workspace."""
+        """Create a new avatar with isolated workspace.
+
+        When ``workspace_dir`` is a non-empty string it is used as the avatar's
+        working directory (user-chosen, optional). Otherwise it defaults to the
+        per-avatar ``~/.agenticx/avatars/<id>/workspace``.
+        """
         avatar_id = uuid.uuid4().hex[:12]
         now = datetime.now(timezone.utc).isoformat()
-        workspace_dir = str(self._avatar_dir(avatar_id) / "workspace")
+        custom_ws = str(workspace_dir or "").strip()
+        if custom_ws:
+            workspace_dir = str(Path(custom_ws).expanduser().resolve())
+        else:
+            workspace_dir = str(self._avatar_dir(avatar_id) / "workspace")
         se: Optional[Dict[str, bool]] = None
         if skills_enabled is not None and len(skills_enabled) > 0:
             se = {str(k): bool(v) for k, v in skills_enabled.items() if str(k).strip()}

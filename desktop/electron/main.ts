@@ -1848,6 +1848,92 @@ function repoAdjacentVenvBinDirs(): string[] {
   return out;
 }
 
+/**
+ * User-level managed venv at ~/.agenticx/.venv. Created/repaired via the
+ * "repair backend deps" IPC (one-click fix). Used for end-users who run Near
+ * without a bundled backend and without a repo-adjacent dev `.venv`.
+ */
+function userManagedVenvBinDir(): string {
+  const sub = process.platform === "win32" ? "Scripts" : "bin";
+  return path.join(os.homedir(), ".agenticx", ".venv", sub);
+}
+
+/** Same as above but only returned when it actually exists on disk. */
+function existingUserManagedVenvBinDirs(): string[] {
+  const dir = userManagedVenvBinDir();
+  try {
+    if (fs.statSync(dir).isDirectory()) return [dir];
+  } catch {
+    /* not present */
+  }
+  return [];
+}
+
+/** Python interpreter inside the user-managed venv (may not exist yet). */
+function userManagedVenvPython(): string {
+  const exe = process.platform === "win32" ? "python.exe" : "python";
+  return path.join(userManagedVenvBinDir(), exe);
+}
+
+/** Find an executable by candidate names across the augmented PATH dirs. */
+function findExecOnPath(augmentedPath: string, names: string[]): string | null {
+  const dirs = augmentedPath.split(pathListSeparator());
+  for (const dir of dirs) {
+    for (const name of names) {
+      const candidate = path.join(dir, name);
+      try {
+        fs.accessSync(candidate, process.platform === "win32" ? fs.constants.F_OK : fs.constants.X_OK);
+        return candidate;
+      } catch {
+        /* not here */
+      }
+    }
+  }
+  return null;
+}
+
+/**
+ * Resolve the Python interpreter the backend currently uses, for dependency
+ * diagnosis. Prefers the managed venv, then python next to resolved agx,
+ * then python on PATH.
+ */
+function resolveBackendPython(augmentedPath: string): string | null {
+  const venvPy = userManagedVenvPython();
+  if (fs.existsSync(venvPy)) return venvPy;
+  const agx = findAgxBinaryOnPath(augmentedPath);
+  if (agx) {
+    const dir = path.dirname(agx);
+    const names = process.platform === "win32" ? ["python.exe", "python3.exe"] : ["python", "python3"];
+    for (const name of names) {
+      const candidate = path.join(dir, name);
+      if (fs.existsSync(candidate)) return candidate;
+    }
+  }
+  return findExecOnPath(augmentedPath, process.platform === "win32" ? ["python.exe", "python3.exe"] : ["python3", "python"]);
+}
+
+/**
+ * Find a base Python (>=3.10) to bootstrap the managed venv. Skips the managed
+ * venv itself to avoid a chicken-and-egg dependency.
+ */
+function findBasePython(augmentedPath: string): string | null {
+  const venvDir = userManagedVenvBinDir();
+  const dirs = augmentedPath.split(pathListSeparator()).filter((d) => path.normalize(d) !== path.normalize(venvDir));
+  const names = process.platform === "win32" ? ["python.exe", "python3.exe"] : ["python3", "python"];
+  for (const dir of dirs) {
+    for (const name of names) {
+      const candidate = path.join(dir, name);
+      try {
+        fs.accessSync(candidate, process.platform === "win32" ? fs.constants.F_OK : fs.constants.X_OK);
+        return candidate;
+      } catch {
+        /* not here */
+      }
+    }
+  }
+  return null;
+}
+
 function nvmNodeBinDirs(home: string): string[] {
   if (process.platform === "win32") return [];
   const root = path.join(home, ".nvm", "versions", "node");
@@ -1899,6 +1985,7 @@ function buildAugmentedPath(): string {
       : [];
     extraPaths = [
       ...venvDirs,
+      ...existingUserManagedVenvBinDirs(),
       ...programsPythonScripts,
       ...userSiteScripts,
       path.join(home, "miniconda3", "Scripts"),
@@ -1917,6 +2004,7 @@ function buildAugmentedPath(): string {
     );
     extraPaths = [
       ...venvDirs,
+      ...existingUserManagedVenvBinDirs(),
       ...pyUserBins,
       ...nvmNodeBinDirs(home),
       "/opt/miniconda3/bin",
@@ -3436,6 +3524,7 @@ function registerIpc(): void {
     skills_enabled?: Record<string, boolean> | null;
     default_provider?: string;
     default_model?: string;
+    workspace_dir?: string;
   }) => {
     try {
       const resp = await fetch(`${getStudioUrl()}/api/avatars`, {
@@ -3449,6 +3538,106 @@ function registerIpc(): void {
       }
       return await resp.json();
     } catch (err) {
+      return { ok: false, error: String(err) };
+    }
+  });
+
+  // ── Backend Python dependency diagnose + one-click repair ──────────
+  // For end-users running Near without a bundled backend: detect missing KB
+  // runtime deps (chromadb/onnxruntime/numpy) and install them into a managed
+  // venv at ~/.agenticx/.venv via an explicit user action (no silent network).
+  ipcMain.handle("diagnose-backend-deps", async () => {
+    const augmentedPath = buildAugmentedPath();
+    const bundled = resolveBundledBackend();
+    if (bundled) {
+      // Packaged build: deps are bundled. Report healthy unless the binary check fails.
+      return new Promise((resolve) => {
+        const proc = spawnBundledServer(bundled, ["--check-desktop-runtime"], {
+          stdio: ["ignore", "pipe", "pipe"],
+          env: { ...process.env, PATH: augmentedPath },
+        });
+        let err = "";
+        proc.stderr?.on("data", (c: Buffer) => { err += c.toString("utf-8"); });
+        proc.on("close", (code) => {
+          resolve({
+            ok: true,
+            usingBundled: true,
+            pythonPath: bundled,
+            missing: code === 0 ? [] : ["(bundled backend dependency check failed)"],
+            detail: err.slice(-2000),
+          });
+        });
+        proc.on("error", () => resolve({ ok: true, usingBundled: true, pythonPath: bundled, missing: ["(could not run bundled check)"] }));
+      });
+    }
+    const py = resolveBackendPython(augmentedPath);
+    if (!py) {
+      return { ok: false, error: "未找到可用的 Python 解释器（检测后端依赖需要）", missing: ["chromadb", "onnxruntime", "numpy"] };
+    }
+    const script = "import importlib,sys,json\nreq=['chromadb','onnxruntime','numpy']\nmiss=[]\nfor n in req:\n try: importlib.import_module(n)\n except Exception as e: miss.append(n)\nprint(json.dumps({'executable':sys.executable,'missing':miss}))";
+    return new Promise((resolve) => {
+      const proc = spawn(py, ["-c", script], { stdio: ["ignore", "pipe", "pipe"], env: { ...process.env, PATH: augmentedPath }, shell: false });
+      let out = "";
+      let err = "";
+      proc.stdout?.on("data", (c: Buffer) => { out += c.toString("utf-8"); });
+      proc.stderr?.on("data", (c: Buffer) => { err += c.toString("utf-8"); });
+      proc.on("close", () => {
+        try {
+          const parsed = JSON.parse(out.trim().split("\n").pop() || "{}");
+          resolve({ ok: true, usingBundled: false, pythonPath: String(parsed.executable || py), missing: Array.isArray(parsed.missing) ? parsed.missing : [] });
+        } catch {
+          resolve({ ok: false, usingBundled: false, pythonPath: py, error: (err || out).slice(-2000), missing: ["chromadb", "onnxruntime", "numpy"] });
+        }
+      });
+      proc.on("error", (e) => resolve({ ok: false, pythonPath: py, error: String(e), missing: ["chromadb", "onnxruntime", "numpy"] }));
+    });
+  });
+
+  ipcMain.handle("repair-backend-deps", async (event) => {
+    const augmentedPath = buildAugmentedPath();
+    const venvDir = path.join(os.homedir(), ".agenticx", ".venv");
+    const venvPy = userManagedVenvPython();
+    const send = (phase: string, line?: string, pct?: number) => {
+      if (!event.sender.isDestroyed()) {
+        event.sender.send("backend-deps-progress", { phase, line, pct });
+      }
+    };
+    const runStep = (cmd: string, args: string[], phase: string): Promise<number> =>
+      new Promise((resolve) => {
+        send(phase, `$ ${path.basename(cmd)} ${args.join(" ")}`);
+        const proc = spawn(cmd, args, { stdio: ["ignore", "pipe", "pipe"], env: { ...process.env, PATH: augmentedPath, PIP_DISABLE_PIP_VERSION_CHECK: "1" }, shell: false });
+        proc.stdout?.on("data", (c: Buffer) => { c.toString("utf-8").split("\n").forEach((l) => l.trim() && send(phase, l.trim())); });
+        proc.stderr?.on("data", (c: Buffer) => { c.toString("utf-8").split("\n").forEach((l) => l.trim() && send(phase, l.trim())); });
+        proc.on("close", (code) => resolve(code ?? 1));
+        proc.on("error", (e) => { send(phase, String(e)); resolve(1); });
+      });
+
+    try {
+      if (!fs.existsSync(venvPy)) {
+        const basePy = findBasePython(augmentedPath);
+        if (!basePy) {
+          send("error", "未找到 Python 3.10+，无法创建虚拟环境。请先安装 Python。");
+          return { ok: false, error: "no base python found" };
+        }
+        send("creating-venv", `使用 ${basePy} 创建 ${venvDir}`, 5);
+        const code = await runStep(basePy, ["-m", "venv", venvDir], "creating-venv");
+        if (code !== 0 || !fs.existsSync(venvPy)) {
+          send("error", "创建虚拟环境失败");
+          return { ok: false, error: "venv creation failed" };
+        }
+      }
+      send("upgrading-pip", "升级 pip...", 20);
+      await runStep(venvPy, ["-m", "pip", "install", "-q", "-U", "pip"], "upgrading-pip");
+      send("installing", "安装 agenticx[desktop-runtime]（含知识库依赖，可能耗时数分钟）...", 40);
+      const installCode = await runStep(venvPy, ["-m", "pip", "install", "agenticx[desktop-runtime]"], "installing");
+      if (installCode !== 0) {
+        send("error", "依赖安装失败，请查看上方日志");
+        return { ok: false, error: "pip install failed" };
+      }
+      send("done", "后端依赖修复完成。请完全退出并重启 Near 使其生效。", 100);
+      return { ok: true, venvPython: venvPy };
+    } catch (err) {
+      send("error", String(err));
       return { ok: false, error: String(err) };
     }
   });

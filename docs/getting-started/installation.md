@@ -7,6 +7,17 @@
 
 ## Install from PyPI (Recommended)
 
+For the Near desktop / knowledge-base experience, install the `desktop-runtime`
+extras so the local backend ships with the vector store (chromadb/onnxruntime)
+and PDF/Office parsing. Plain `pip install agenticx` does NOT include chromadb
+and will raise `chromadb is required for the knowledge base` when ingesting docs.
+
+```bash
+pip install "agenticx[desktop-runtime]"
+```
+
+Minimal core CLI only (no knowledge base):
+
 ```bash
 pip install agenticx
 ```
@@ -23,7 +34,10 @@ pip install "agenticx[all]"
 git clone https://github.com/DemonDamon/AgenticX.git
 cd AgenticX
 
-# Basic install
+# Desktop / knowledge-base runtime (recommended)
+pip install -e ".[desktop-runtime]"
+
+# Basic install (no knowledge base)
 pip install -e .
 
 # With all extras

@@ -22,6 +22,7 @@ import { BrainScopePanel } from "./BrainScopePanel";
 import { brainScopeBadge, brainTypeShort } from "./brainScopeUi";
 import { CodeIndexBrainPanel } from "./CodeIndexBrainPanel";
 import { SettingsOnOffSwitch } from "../SettingsSwitch";
+import { BackendDepsPanel } from "../knowledge/BackendDepsPanel";
 
 export type BrainsSettingsHandle = {
   flushIfDirty: () => Promise<{ ok: boolean; error?: string }>;
@@ -189,6 +190,7 @@ export const BrainsSettings = forwardRef<BrainsSettingsHandle>(function BrainsSe
 
   return (
     <div className="flex min-h-0 flex-1 flex-col gap-3">
+      <BackendDepsPanel />
       <p className="shrink-0 text-xs leading-relaxed text-text-muted">
         每个<strong className="font-medium text-text-primary">知识脑</strong>是独立实例（文档库或代码库）。分身可在设置中挂载 0–N
         个脑；Meta 默认仅使用全局脑。
