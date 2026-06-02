@@ -37,6 +37,7 @@ export const BrainsSettings = forwardRef<BrainsSettingsHandle>(function BrainsSe
   const apiToken = useAppStore((s) => s.apiToken);
   const backendUrl = useAppStore((s) => s.backendUrl);
   const avatars = useAppStore((s) => s.avatars);
+  const providerCatalog = useAppStore((s) => s.settings.providers);
 
   const resolveApiBase = useCallback(async () => {
     const u = (backendUrl ?? "").trim();
@@ -404,6 +405,7 @@ export const BrainsSettings = forwardRef<BrainsSettingsHandle>(function BrainsSe
                         draft={kbDraft}
                         onDraftChange={applyKbDraft}
                         initialStats={kbStats}
+                        providerCatalog={providerCatalog}
                       />
                     ) : null}
                     {detailTab === "materials" ? (
