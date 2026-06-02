@@ -232,7 +232,7 @@ export function KnowledgeConfigPanel({
               }
             />
           </Field>
-          <Field label="维度 (dim)">
+          <Field label="向量维度">
             <input
               type="number"
               className={`w-full ${KB_FIELD_BASE}`}
@@ -375,7 +375,7 @@ export function KnowledgeConfigPanel({
 
       <Panel title="文件过滤">
         <div className="space-y-4">
-          <Field label="扩展名（逗号分隔）">
+          <Field label="扩展名 · 逗号分隔">
             <div className="flex items-start gap-2">
               <input
                 className={`min-w-0 flex-1 ${KB_FIELD_BASE}`}
@@ -406,7 +406,7 @@ export function KnowledgeConfigPanel({
             </div>
           </Field>
           <ParserCapabilitySection parserStatus={parserStatus} />
-          <Field label="单文件上限 (MB)">
+          <Field label="单文件上限 MB">
             <input
               type="number"
               className={`w-full ${KB_FIELD_BASE}`}
@@ -436,7 +436,7 @@ export function KnowledgeConfigPanel({
                 })
               }
             >
-              <option value="auto">智能检索（推荐）</option>
+              <option value="auto">智能检索 · 推荐</option>
               <option value="always">始终检索</option>
             </select>
           </Field>
@@ -525,10 +525,11 @@ export function KnowledgeConfigPanel({
           <p className="text-[11px] leading-snug text-text-faint">
             智能检索：由模型判断何时检索，包含你主动要求「查知识库」的场景；始终检索：每轮都先检索后再回答。
           </p>
-          <div className="grid grid-cols-2 gap-2 border-t border-border pt-3">
-            <label className="flex items-center gap-2 text-xs text-text-subtle">
+          <div className="grid grid-cols-2 gap-3 border-t border-border pt-3">
+            <label className="flex gap-2 text-xs text-text-subtle">
               <input
                 type="checkbox"
+                className="mt-0.5 shrink-0"
                 checked={config.wiki_compiler?.enabled ?? false}
                 onChange={(e) =>
                   setConfig({
@@ -537,11 +538,17 @@ export function KnowledgeConfigPanel({
                   })
                 }
               />
-              Wiki 编译（入库后生成结构化页）
+              <span className="min-w-0">
+                <span className="block text-text-primary">Wiki 编译</span>
+                <span className="mt-0.5 block text-[10px] leading-snug text-text-faint">
+                  入库后生成结构化页
+                </span>
+              </span>
             </label>
-            <label className="flex items-center gap-2 text-xs text-text-subtle">
+            <label className="flex gap-2 text-xs text-text-subtle">
               <input
                 type="checkbox"
+                className="mt-0.5 shrink-0"
                 checked={config.synthesis?.enabled ?? false}
                 onChange={(e) =>
                   setConfig({
@@ -550,7 +557,12 @@ export function KnowledgeConfigPanel({
                   })
                 }
               />
-              合成答案（knowledge_synthesize）
+              <span className="min-w-0">
+                <span className="block text-text-primary">合成答案</span>
+                <span className="mt-0.5 block text-[10px] leading-snug text-text-faint">
+                  多段检索结果合并为一条回答
+                </span>
+              </span>
             </label>
           </div>
         </div>
@@ -558,7 +570,7 @@ export function KnowledgeConfigPanel({
 
       <div className="flex flex-wrap items-center justify-end gap-2">
         {dirty ? (
-          <span className="text-xs text-amber-500">· 有未保存的改动（请使用下方「保存」）</span>
+          <span className="text-xs text-amber-500">· 有未保存的改动，请使用下方「保存」</span>
         ) : null}
         <button
           type="button"
