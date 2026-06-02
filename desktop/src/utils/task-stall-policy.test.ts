@@ -5,6 +5,7 @@ import {
   isTodoSnapshotSuperseded,
   messageLooksLikeAssistantFinal,
   resolveStickyTodoDisplay,
+  shouldResetStallDetectorsOnSessionSwitch,
   shouldSuppressStallDetection,
 } from "./task-stall-policy";
 
@@ -116,6 +117,27 @@ describe("shouldSuppressStallDetection", () => {
   it("returns false when guard is empty or session differs", () => {
     expect(shouldSuppressStallDetection("", "sess-1")).toBe(false);
     expect(shouldSuppressStallDetection("sess-1", "sess-2")).toBe(false);
+  });
+});
+
+describe("shouldResetStallDetectorsOnSessionSwitch", () => {
+  it("resets when switching to a different session", () => {
+    expect(shouldResetStallDetectorsOnSessionSwitch("sess-b", "sess-a")).toBe(true);
+  });
+
+  it("resets on first entry (no prior session)", () => {
+    expect(shouldResetStallDetectorsOnSessionSwitch("", "sess-a")).toBe(true);
+    expect(shouldResetStallDetectorsOnSessionSwitch(undefined, "sess-a")).toBe(true);
+  });
+
+  it("does NOT reset when the displayed session is unchanged", () => {
+    expect(shouldResetStallDetectorsOnSessionSwitch("sess-a", "sess-a")).toBe(false);
+    expect(shouldResetStallDetectorsOnSessionSwitch("  sess-a  ", "sess-a")).toBe(false);
+  });
+
+  it("does NOT reset when there is no next session", () => {
+    expect(shouldResetStallDetectorsOnSessionSwitch("sess-a", "")).toBe(false);
+    expect(shouldResetStallDetectorsOnSessionSwitch("sess-a", undefined)).toBe(false);
   });
 });
 

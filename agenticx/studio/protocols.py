@@ -47,6 +47,9 @@ class ChatRequest(BaseModel):
     keep_runtime_after_disconnect: Optional[bool] = False
     # Skill slugs referenced via @skill:// tokens in the user message; content injected into context.
     skill_slugs: Optional[List[str]] = None
+    # Per-session KB retrieval mode override ("auto" | "always"). When set, this
+    # supersedes the global retrieval.mode config for this session's prompt build.
+    retrieval_mode: Optional[str] = None
 
 
 class ContinueRequest(BaseModel):

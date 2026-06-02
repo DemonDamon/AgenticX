@@ -2600,6 +2600,15 @@ def create_studio_app() -> FastAPI:
                         quoted_content = str(payload.quoted_content or "").strip()
                         if quoted_content:
                             effective_input = f"{effective_input}\n\n[用户引用内容]\n{quoted_content}"
+                        # Per-session KB retrieval mode: bind the desktop's choice to
+                        # this in-memory session so continue/loop prompt builds honor
+                        # it too (the global retrieval.mode is only the default).
+                        _kb_mode_req = str(getattr(payload, "retrieval_mode", None) or "").strip().lower()
+                        if _kb_mode_req in {"auto", "always"}:
+                            try:
+                                setattr(session, "kb_retrieval_mode", _kb_mode_req)
+                            except Exception:
+                                pass
                         if mode == "auto":
                             enriched = auto.enrich_prompt(payload.user_input)
                             effective_input = (
@@ -2652,6 +2661,7 @@ def create_studio_app() -> FastAPI:
                                 group_chat=_meta_group_chat_payload(managed),
                                 user_nickname=_u_nickname,
                                 user_preference=_u_preference,
+                                kb_retrieval_mode_override=_kb_mode_req or None,
                             )
                         user_message_content: Any | None = None
                         history_user_attachments: list[dict[str, Any]] | None = None

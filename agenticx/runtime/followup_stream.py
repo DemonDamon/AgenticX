@@ -6,12 +6,29 @@ Author: Damon Li
 
 from __future__ import annotations
 
+import re
 from typing import List, Tuple
 
 from agenticx.cli.config_manager import ConfigManager
 
 FOLLOWUP_OPEN = "<followups>"
 FOLLOWUP_CLOSE = "</followups>"
+
+# MiniMax models can leak mangled chat-template control tokens (e.g.
+# ``]<]minimax[>[`` or ``<minimax_end>``) into generated text — including the
+# tail of a <followups> line. Strip only the bracket/angle-wrapped forms so a
+# legitimate plain "MiniMax" word in prose is never touched.
+_MINIMAX_ARTIFACT_RE = re.compile(
+    r"[\]\[<>~!|]+\s*/?\s*minimax[a-z_:]*\s*[\]\[<>~!|]*",
+    re.IGNORECASE,
+)
+
+
+def strip_model_control_artifacts(text: str) -> str:
+    """Remove bracket-wrapped MiniMax control-token residue from *text*."""
+    if not text or "minimax" not in text.lower():
+        return text
+    return _MINIMAX_ARTIFACT_RE.sub("", text).strip()
 
 _OPEN_SUFFIXES: Tuple[str, ...] = tuple(FOLLOWUP_OPEN[:i] for i in range(1, len(FOLLOWUP_OPEN)))
 
@@ -63,9 +80,10 @@ def split_final_answer_and_followups(full: str) -> Tuple[str, List[str]]:
         merged = f"{merged}\n\n{tail}".strip() if merged else tail
     else:
         merged = merged.strip()
+    merged = strip_model_control_artifacts(merged)
     lines: List[str] = []
     for line in body_clean.splitlines():
-        t = line.strip()
+        t = strip_model_control_artifacts(line.strip())
         if t:
             lines.append(t)
         if len(lines) >= 3:

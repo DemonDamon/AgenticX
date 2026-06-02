@@ -9,7 +9,7 @@ from __future__ import annotations
 import os
 import time
 from pathlib import Path
-from typing import Any
+from typing import Any, Optional
 
 from agenticx.cli.studio import StudioSession
 from agenticx.cli.studio_skill import get_all_skill_summaries
@@ -439,9 +439,18 @@ def _build_provider_hard_failure_block(session: StudioSession) -> str:
     )
 
 
-def _build_kb_retrieval_policy_block() -> str:
-    """Build dynamic KB retrieval policy from persisted KB config."""
-    mode = "auto"
+def _build_kb_retrieval_policy_block(mode_override: Optional[str] = None) -> str:
+    """Build dynamic KB retrieval policy from persisted KB config.
+
+    Args:
+        mode_override: Per-session retrieval mode ("auto" | "always"). When a
+            valid value is provided it supersedes the global ``retrieval.mode``
+            config, enabling per-session binding of the KB retrieval policy.
+    """
+    override = str(mode_override or "").strip().lower()
+    # Per-session override wins over the global config value and survives a
+    # config-read failure below.
+    mode = override if override in {"auto", "always"} else "auto"
     top_k = 5
     enabled = True
     retrieval_mode = "vector"
@@ -457,9 +466,9 @@ def _build_kb_retrieval_policy_block() -> str:
         )
         synthesis_enabled = bool(getattr(getattr(cfg, "synthesis", None), "enabled", False))
         mode_raw = str(getattr(getattr(cfg, "retrieval", None), "mode", "auto") or "auto").strip().lower()
-        # Legacy ``manual`` has been folded into ``auto`` — treat any unknown
-        # value (including that legacy token) as ``auto``.
-        if mode_raw in {"auto", "always"}:
+        # Only consult the global config when there is no valid per-session
+        # override. Legacy ``manual`` is folded into ``auto``.
+        if override not in {"auto", "always"} and mode_raw in {"auto", "always"}:
             mode = mode_raw
     except Exception:
         # Keep conservative defaults if KB subsystem is unavailable at prompt-build time.
@@ -572,6 +581,7 @@ def build_meta_agent_system_prompt(
     group_chat: dict[str, Any] | None = None,
     user_nickname: str = "",
     user_preference: str = "",
+    kb_retrieval_mode_override: Optional[str] = None,
 ) -> str:
     bound_skill = str(getattr(session, "bound_avatar_id", "") or "").strip() or None
     try:
@@ -637,7 +647,11 @@ def build_meta_agent_system_prompt(
     )
     computer_use_block = _build_computer_use_capabilities_block()
     provider_fault_block = _build_provider_hard_failure_block(session)
-    kb_retrieval_block = _build_kb_retrieval_policy_block()
+    effective_kb_mode = (
+        str(kb_retrieval_mode_override or "").strip().lower()
+        or str(getattr(session, "kb_retrieval_mode", None) or "").strip().lower()
+    )
+    kb_retrieval_block = _build_kb_retrieval_policy_block(effective_kb_mode or None)
     base_prompt = (
         f"{workspace_context}\n"
         f"{provider_fault_block}"
