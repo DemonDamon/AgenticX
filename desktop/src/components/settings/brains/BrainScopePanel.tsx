@@ -1,5 +1,5 @@
 import { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useState } from "react";
-import { Globe2, Lock, Loader2, Users } from "lucide-react";
+import { Globe2, Lock, Users } from "lucide-react";
 import { useAppStore } from "../../../store";
 import type { createBrainsApi, BrainRecord } from "./api";
 import { BRAIN_SCOPE_GLOBAL_BADGE, BRAIN_SCOPE_PRIVATE_BADGE } from "./brainScopeUi";
@@ -9,6 +9,7 @@ type ScopeMode = "global" | "private";
 export type BrainScopePanelHandle = {
   isDirty: () => boolean;
   flushIfDirty: () => Promise<{ ok: boolean; error?: string }>;
+  discardChanges: () => void;
 };
 
 type Props = {
@@ -88,13 +89,20 @@ export const BrainScopePanel = forwardRef<BrainScopePanelHandle, Props>(function
     }
   }, [brain.id, brainsApi, dirty, isDefaultDocs, onUpdated, ownerId, scopeMode]);
 
+  const discardChanges = useCallback(() => {
+    setScopeMode(persistedScope);
+    setOwnerId(persistedOwner);
+    setMsg(null);
+  }, [persistedOwner, persistedScope]);
+
   useImperativeHandle(
     ref,
     () => ({
       isDirty: () => dirty,
       flushIfDirty: saveVisibility,
+      discardChanges,
     }),
-    [dirty, saveVisibility],
+    [dirty, discardChanges, saveVisibility],
   );
 
   const scopeBadgeClass =
@@ -226,27 +234,9 @@ export const BrainScopePanel = forwardRef<BrainScopePanelHandle, Props>(function
             </label>
           ) : null}
 
-          <div className="flex flex-wrap items-center gap-2">
-            <button
-              type="button"
-              disabled={busy || !dirty}
-              className="rounded-lg bg-[var(--settings-accent-solid)] px-3 py-1.5 text-xs font-medium text-[var(--settings-accent-solid-text)] disabled:opacity-40"
-              onClick={() => void saveVisibility()}
-            >
-              {busy ? <Loader2 className="mr-1 inline h-3.5 w-3.5 animate-spin" /> : null}
-              保存可见范围
-            </button>
-            {dirty ? (
-              <span className="text-xs text-[var(--status-warning)]">有未保存的可见范围变更</span>
-            ) : null}
-            {msg ? (
-              <span
-                className={`text-xs ${msg.includes("已更新") ? "text-[var(--status-success)]" : "text-[var(--status-error)]"}`}
-              >
-                {msg}
-              </span>
-            ) : null}
-          </div>
+          {msg && !msg.includes("已更新") ? (
+            <p className="text-xs text-[var(--status-error)]">{msg}</p>
+          ) : null}
         </div>
       )}
     </section>

@@ -6,6 +6,7 @@ import type { createBrainsApi, BrainRecord } from "./api";
 export type CodeIndexBrainPanelHandle = {
   isDirty: () => boolean;
   flushIfDirty: () => Promise<{ ok: boolean; error?: string }>;
+  discardChanges: () => void;
 };
 
 type Props = {
@@ -129,13 +130,23 @@ export const CodeIndexBrainPanel = forwardRef<CodeIndexBrainPanelHandle, Props>(
       }
     }, [brain.id, brainsApi, cfg, codebasePath, dirty, enabled, onUpdated]);
 
+    const discardChanges = useCallback(() => {
+      setCodebasePath(persistedPath);
+      if (!enabledControlled) {
+        setInternalEnabled(persistedEnabled);
+      }
+      setMsg("");
+      setPathHint("");
+    }, [enabledControlled, persistedEnabled, persistedPath]);
+
     useImperativeHandle(
       ref,
       () => ({
         isDirty: () => dirty,
         flushIfDirty: persistConfig,
+        discardChanges,
       }),
-      [dirty, persistConfig],
+      [dirty, discardChanges, persistConfig],
     );
 
     const saveConfig = async () => {
