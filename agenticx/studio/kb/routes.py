@@ -299,13 +299,17 @@ def register_kb_routes(app: FastAPI) -> None:
         if not query:
             raise HTTPException(status_code=400, detail="query is required")
         top_k = int(payload.get("top_k") or 0) or None
+        retrieval_mode = str(payload.get("retrieval_mode") or "").strip() or None
         manager = KBManager.instance()
         cfg = manager.read_config()
         if not cfg.enabled:
             return {"ok": True, "hits": [], "used_top_k": 0, "source": "local", "disabled": True}
         try:
             hits: List[RetrievalHit] = await asyncio.to_thread(
-                manager.runtime.search, query, top_k=top_k
+                manager.runtime.search,
+                query,
+                top_k=top_k,
+                retrieval_mode=retrieval_mode,
             )
         except KBError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc

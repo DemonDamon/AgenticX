@@ -45,6 +45,13 @@ from .contracts import (
     SUPPORTED_EXTENSIONS,
     VectorStoreSpec,
 )
+from .fts_index import ChunkFtsIndex
+from .ingest_cache import (
+    IngestCacheStore,
+    chunking_fingerprint,
+    compute_source_content_hash,
+)
+from .rrf import reciprocal_rank_fusion
 
 logger = logging.getLogger(__name__)
 
@@ -583,15 +590,25 @@ class KBRuntime:
         hits = runtime.search("how do I build?", top_k=5)
     """
 
-    def __init__(self, config: KBConfig, *, registry_dir: Optional[Path] = None) -> None:
+    def __init__(
+        self,
+        config: KBConfig,
+        *,
+        registry_dir: Optional[Path] = None,
+        brain_storage_root: Optional[Path] = None,
+    ) -> None:
         self._config = config
         base = registry_dir or Path(os.path.expanduser("~/.agenticx/storage/kb"))
         base.mkdir(parents=True, exist_ok=True)
+        self._registry_dir = base
+        self._brain_storage_root = brain_storage_root or base.parent
         self._registry = _DocumentRegistry(base / "documents.json")
         self._state_path = base / "state.json"
         self._lock = threading.RLock()
         self._embedding_provider = None
         self._backend: Optional[_ChromaBackend] = None
+        self._fts_index: Optional[ChunkFtsIndex] = None
+        self._ingest_cache: Optional[IngestCacheStore] = None
         self._indexed_fingerprint: Optional[str] = None
         self._load_state()
 
@@ -640,6 +657,18 @@ class KBRuntime:
                     expected_dim=self._config.embedding.dim,
                 )
             return self._backend
+
+    def _fts(self) -> ChunkFtsIndex:
+        with self._lock:
+            if self._fts_index is None:
+                self._fts_index = ChunkFtsIndex(self._registry_dir / "kb_chunks_fts.sqlite")
+            return self._fts_index
+
+    def _ingest_cache_store(self) -> IngestCacheStore:
+        with self._lock:
+            if self._ingest_cache is None:
+                self._ingest_cache = IngestCacheStore(self._registry_dir / ".ingest_cache.json")
+            return self._ingest_cache
 
     # ------------------------------ state ------------------------------- #
 
@@ -718,6 +747,14 @@ class KBRuntime:
                 type(exc).__name__,
                 exc,
             )
+        try:
+            self._fts().delete_document(doc_id)
+        except Exception as exc:
+            logger.warning("Failed to purge FTS rows for %s: %s", doc_id, exc)
+        try:
+            self._ingest_cache_store().remove(doc_id)
+        except Exception as exc:
+            logger.warning("Failed to purge ingest cache for %s: %s", doc_id, exc)
         return True
 
     def clear_all(self) -> None:
@@ -727,6 +764,14 @@ class KBRuntime:
                 self._store().clear()
             except KBError as exc:
                 logger.warning("Failed to clear vector store: %s", exc)
+            try:
+                self._fts().clear()
+            except Exception as exc:
+                logger.warning("Failed to clear FTS index: %s", exc)
+            try:
+                self._ingest_cache_store().clear()
+            except Exception as exc:
+                logger.warning("Failed to clear ingest cache: %s", exc)
             self._indexed_fingerprint = None
             self._save_state()
 
@@ -773,6 +818,16 @@ class KBRuntime:
                     progress_cb(status, message)
                 except Exception as exc:  # pragma: no cover - purely informational
                     logger.debug("progress callback failed: %s", exc)
+
+        # Incremental cache: skip re-embed when source + chunking + embedding unchanged.
+        if (
+            doc.status == KBDocumentStatus.DONE
+            and doc.chunks > 0
+            and self._ingest_cache_store().is_hit(doc.id, self._config, doc.source_path)
+        ):
+            _report(KBDocumentStatus.DONE, f"skipped unchanged source ({doc.chunks} chunks cached)")
+            report.success = 1
+            return report
 
         try:
             _report(KBDocumentStatus.PARSING, "reading document")
@@ -840,6 +895,17 @@ class KBRuntime:
                 embeddings=embeddings,
                 metadatas=metadatas,
             )
+            fts_rows = [
+                {
+                    "chunk_id": ids[i],
+                    "source_path": doc.source_path,
+                    "source_name": doc.source_name,
+                    "chunk_index": c["chunk_index"],
+                    "text": c["text"],
+                }
+                for i, c in enumerate(chunks)
+            ]
+            self._fts().upsert_chunks(document_id=doc.id, rows=fts_rows)
 
             updated = replace(
                 doc,
@@ -849,6 +915,17 @@ class KBRuntime:
                 embedding_fingerprint=self._config.embedding_fingerprint(),
             )
             self._registry.upsert(updated)
+            try:
+                source_hash = compute_source_content_hash(doc.source_path)
+                self._ingest_cache_store().put(
+                    doc.id,
+                    source_hash=source_hash,
+                    chunking_fp=chunking_fingerprint(self._config.chunking),
+                    embedding_fp=self._config.embedding_fingerprint(),
+                    chunks=len(chunks),
+                )
+            except Exception as exc:
+                logger.warning("ingest cache write failed for %s: %s", doc.id, exc)
             with self._lock:
                 self._indexed_fingerprint = self._config.embedding_fingerprint()
                 self._save_state()
@@ -887,33 +964,161 @@ class KBRuntime:
 
     # ---------------------------- search -------------------------------- #
 
-    def search(self, query: str, *, top_k: Optional[int] = None) -> List[RetrievalHit]:
+    def search(
+        self,
+        query: str,
+        *,
+        top_k: Optional[int] = None,
+        retrieval_mode: Optional[str] = None,
+    ) -> List[RetrievalHit]:
         q = (query or "").strip()
         if not q:
             return []
         k = max(1, min(20, int(top_k or self._config.retrieval.top_k)))
-        query_vec = _embed_texts(self._embedding(), [q])[0]
+        mode = (retrieval_mode or self._config.retrieval.retrieval_mode or "vector").strip().lower()
+        if mode == "vector":
+            return self._search_vector(q, k)
+        if mode == "bm25":
+            return self._search_bm25(q, k)
+        if mode in {"hybrid", "hybrid_graph"}:
+            hits = self._search_hybrid(q, k)
+            if mode == "hybrid_graph":
+                hits = self._apply_graph_expansion(q, hits, k)
+            return hits
+        return self._search_vector(q, k)
+
+    def _search_vector(self, query: str, k: int) -> List[RetrievalHit]:
+        query_vec = _embed_texts(self._embedding(), [query])[0]
         raw = self._store().query(query_embedding=query_vec, top_k=k)
         hits: List[RetrievalHit] = []
         for cid, score, text, meta in raw:
             if score < float(self._config.retrieval.score_floor or 0.0):
                 continue
-            src = RetrievalHitSource(
-                kind="local",
-                uri=str(meta.get("source_path", "")),
-                title=meta.get("source_name"),
-                chunk_index=int(meta["chunk_index"]) if meta.get("chunk_index") is not None else None,
-            )
-            hits.append(
-                RetrievalHit(
-                    id=cid,
-                    score=float(score),
-                    text=text,
-                    source=src,
-                    metadata=meta,
-                )
-            )
+            meta_out = dict(meta)
+            meta_out["vector_score"] = float(score)
+            meta_out["bm25_score"] = 0.0
+            meta_out["fused_score"] = float(score)
+            meta_out["retrieval_mode"] = "vector"
+            hits.append(self._hit_from_raw(cid, float(score), text, meta_out))
         return hits
+
+    def _search_bm25(self, query: str, k: int) -> List[RetrievalHit]:
+        raw = self._fts().search(query, top_k=k)
+        hits: List[RetrievalHit] = []
+        for cid, score, text, meta in raw:
+            if score < float(self._config.retrieval.score_floor or 0.0):
+                continue
+            meta_out = dict(meta)
+            meta_out["vector_score"] = 0.0
+            meta_out["bm25_score"] = float(score)
+            meta_out["fused_score"] = float(score)
+            meta_out["retrieval_mode"] = "bm25"
+            hits.append(self._hit_from_raw(cid, float(score), text, meta_out))
+        return hits
+
+    def _search_hybrid(self, query: str, k: int) -> List[RetrievalHit]:
+        fetch_k = min(20, max(k * 2, k))
+        vector_raw = self._search_vector(query, fetch_k)
+        bm25_raw = self._search_bm25(query, fetch_k)
+        vector_list = [
+            (h.id, float(h.metadata.get("vector_score") or h.score), h.text, dict(h.metadata))
+            for h in vector_raw
+        ]
+        bm25_list = [
+            (h.id, float(h.metadata.get("bm25_score") or h.score), h.text, dict(h.metadata))
+            for h in bm25_raw
+        ]
+        spec = self._config.retrieval
+        fused = reciprocal_rank_fusion(
+            [vector_list, bm25_list],
+            k=int(spec.rrf_k or 60),
+            weights=[float(spec.vector_weight or 1.0), float(spec.bm25_weight or 1.0)],
+        )
+        hits: List[RetrievalHit] = []
+        for cid, fused_score, text, meta, parts in fused[:k]:
+            if fused_score < float(spec.score_floor or 0.0):
+                continue
+            meta_out = dict(meta)
+            meta_out.update(parts)
+            meta_out["retrieval_mode"] = "hybrid"
+            hits.append(self._hit_from_raw(cid, fused_score, text, meta_out))
+        if spec.rerank_enabled:
+            hits = self._maybe_rerank(query, hits)
+        return hits
+
+    def _apply_graph_expansion(
+        self,
+        query: str,
+        hits: List[RetrievalHit],
+        k: int,
+    ) -> List[RetrievalHit]:
+        """Optional wiki-graph boost (Phase 5). Falls back to hybrid when wiki absent."""
+        try:
+            from agenticx.brain.wiki_graph import expand_hits_with_wiki_graph
+        except ImportError:
+            return hits
+        try:
+            return expand_hits_with_wiki_graph(
+                self._brain_storage_root,
+                query=query,
+                hits=hits,
+                top_k=k,
+            )
+        except Exception as exc:
+            logger.debug("wiki graph expansion skipped: %s", exc)
+            return hits
+
+    def _maybe_rerank(self, query: str, hits: List[RetrievalHit]) -> List[RetrievalHit]:
+        """P1 optional rerank — no-op unless provider exposes rerank API."""
+        provider = self._embedding()
+        rerank_fn = getattr(provider, "rerank", None)
+        if not callable(rerank_fn):
+            return hits
+        try:
+            docs = [h.text for h in hits]
+            scores = rerank_fn(query, docs)
+            if not scores or len(scores) != len(hits):
+                return hits
+            paired = list(zip(hits, scores))
+            paired.sort(key=lambda x: float(x[1]), reverse=True)
+            out: List[RetrievalHit] = []
+            for hit, rerank_score in paired:
+                meta = dict(hit.metadata)
+                meta["rerank_score"] = float(rerank_score)
+                out.append(
+                    RetrievalHit(
+                        id=hit.id,
+                        score=float(rerank_score),
+                        text=hit.text,
+                        source=hit.source,
+                        metadata=meta,
+                    )
+                )
+            return out
+        except Exception as exc:
+            logger.debug("rerank skipped: %s", exc)
+            return hits
+
+    @staticmethod
+    def _hit_from_raw(
+        cid: str,
+        score: float,
+        text: str,
+        meta: Dict[str, Any],
+    ) -> RetrievalHit:
+        src = RetrievalHitSource(
+            kind="local",
+            uri=str(meta.get("source_path", "")),
+            title=meta.get("source_name"),
+            chunk_index=int(meta["chunk_index"]) if meta.get("chunk_index") is not None else None,
+        )
+        return RetrievalHit(
+            id=cid,
+            score=float(score),
+            text=text,
+            source=src,
+            metadata=meta,
+        )
 
     # ------------------------- chunking preview ------------------------- #
 
@@ -1093,6 +1298,18 @@ def _read_document_text(source_path: str) -> str:
     return "\n\n".join(texts)
 
 
+def _document_context_prefix(source_path: str, text: str) -> str:
+    """Build a short title/section prefix for contextual chunking."""
+    path = Path(source_path)
+    title = path.stem or path.name
+    for line in text.splitlines()[:30]:
+        stripped = line.strip()
+        if stripped.startswith("# "):
+            title = stripped[2:].strip() or title
+            break
+    return f"[Document: {title}]\n"
+
+
 def _chunk_text(
     *,
     text: str,
@@ -1105,7 +1322,14 @@ def _chunk_text(
     The fallback exists because some chunker implementations in the repo need
     an LLM handle to operate (e.g. ``SemanticChunker``), but Stage-1 promises
     ``recursive`` which is LLM-free.
+
+    ``contextual`` uses recursive splitting then prefixes each chunk with a
+    document title line to improve keyword/semantic recall.
     """
+
+    strategy = (spec.strategy or "recursive").strip().lower()
+    chunker_strategy = "recursive" if strategy == "contextual" else (spec.strategy or "recursive")
+    context_prefix = _document_context_prefix(source_path, text) if strategy == "contextual" else ""
 
     try:
         from agenticx.knowledge.base import ChunkingConfig
@@ -1115,7 +1339,7 @@ def _chunk_text(
             chunk_size=int(spec.chunk_size),
             chunk_overlap=int(spec.chunk_overlap),
         )
-        chunker = get_chunker(spec.strategy or "recursive", config=config)
+        chunker = get_chunker(chunker_strategy, config=config)
         raw_chunks = chunker.chunk_text(text, metadata={"source_path": source_path})
     except Exception as exc:
         logger.warning("agenticx chunker failed (%s) — falling back to naive splitter", exc)
@@ -1139,6 +1363,8 @@ def _chunk_text(
         content = content.strip()
         if not content:
             continue
+        if context_prefix and not content.startswith(context_prefix):
+            content = f"{context_prefix}{content}"
         out.append(
             {
                 "text": content,
