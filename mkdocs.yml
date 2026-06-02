@@ -90,6 +90,8 @@ nav:
     - Avatar & Group Chat: guides/avatar.md
     - Extensions & Skill Ecosystem: guides/extensions.md
     - Knowledge & RAG: guides/knowledge.md
+    - Local Knowledge Base (Near): guides/knowledge-base-mvp.md
+    - Memory Graph (Graphiti): guides/memory-graph.md
     - Studio Server: guides/studio.md
     - Observability: guides/observability.md
     - Security & Sandbox: guides/security.md

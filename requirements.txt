@@ -1,76 +1,80 @@
 # ============================================================================
-# AgenticX Core Dependencies (与 pyproject.toml 保持同步，仅供参考)
-# 实际安装请用: pip install agenticx 或 pip install "agenticx[volcengine]"
+# AgenticX Core Dependencies (mirror of pyproject.toml [project.dependencies])
+# Source of truth: pyproject.toml — edit there first, then refresh this file.
 #
-# requirements.lock: 由 uv 生成的可复现锁文件，含精确版本号
-# 生成: uv pip compile pyproject.toml -o requirements.lock
-# 安装: uv pip install -r requirements.lock
+# Install (recommended):
+#   pip install -e .
+#   pip install -e ".[desktop-runtime]"   # Near Desktop / agx serve bundle
+#   pip install -e ".[dev]"               # pytest, formatters, etc.
+#
+# Reproducible lock (optional; Near Desktop / agx serve bundle):
+#   uv pip compile pyproject.toml --extra desktop-runtime -o requirements.lock
+#   uv pip install -r requirements.lock
 # ============================================================================
+
 # 基础框架
 pydantic>=2.0.0
-typing-extensions>=4.0.0
-loguru>=0.7.0
-rich>=13.0.0
-click>=8.0.0
-PyYAML>=6.0
-json5>=0.9.25
-tomli>=2.0; python_version<'3.11'
-jinja2>=3.0.0
-python-dotenv>=1.0.0
+typing-extensions>=4.0.0,<5
+loguru>=0.7.0,<1
+rich>=13.0.0,<14
+click>=8.0.0,<9
+PyYAML>=6.0,<7
+json5>=0.9.25,<1
+tomli>=2.0,<3; python_version<'3.11'
+jinja2>=3.0.0,<4
+python-dotenv>=1.0.0,<2
 
 # 网络 / HTTP
-httpx>=0.25.0
-requests>=2.31.0
-aiohttp>=3.9.0
-aiofiles>=23.0.0
+httpx>=0.25.0,<1
+requests>=2.31.0,<3
+aiohttp>=3.9.0,<4
+aiofiles>=23.0.0,<25
 websockets>=12.0
-lark-oapi>=1.3.0          # Feishu long-connection bot (agx feishu)
 
 # Web 框架
 fastapi>=0.100.0
 uvicorn>=0.23.0
-typer>=0.9.0
+python-multipart>=0.0.9,<1
+typer>=0.9.0,<1
 
 # LLM 核心
-openai>=1.50.0
-litellm>=1.50.0
-tiktoken>=0.7.0
-tokenizers>=0.19.0
-huggingface-hub>=0.24.0
-
-# MCP 协议（Studio / CLI / Desktop 强依赖：缺失时 MCPClientV2 的 stdio_client
-# 会静默退化为 None，所有 MCP 连接都会在启动子进程时抛
-# "TypeError: 'NoneType' object is not callable"。）
-mcp>=1.0.0,<2
+openai>=1.50.0,<3
+litellm>=1.50.0,<2
+tiktoken>=0.7.0,<1
+tokenizers>=0.19.0,<1
+huggingface-hub>=0.24.0,<1
 
 # 核心工具库
 docstring-parser>=0.11,<0.16
 
 # 通用工具
-ujson>=5.8.0
-tqdm>=4.65.0
-joblib>=1.3.0
-chardet>=5.0.0
-psutil>=5.9.0
-structlog>=23.1.0
+ujson>=5.8.0,<6
+tqdm>=4.65.0,<5
+joblib>=1.3.0,<2
+chardet>=5.0.0,<6
+psutil>=5.9.0,<6
+structlog>=23.1.0,<25
+watchdog>=3.0.0,<5
 
 # ============================================================================
-# Optional Dependencies (install with extras groups as needed)
+# Optional extras (install via pyproject.toml optional-dependencies groups)
 # ============================================================================
 #
-# pip install "agenticx[llm]"        # 额外 LLM 提供者: anthropic, ollama
-# pip install "agenticx[memory]"     # 记忆系统: mem0ai, chromadb, qdrant, redis, pymilvus, numpy
-# pip install "agenticx[document]"   # 文档处理: PyMuPDF, pypdf, python-docx, python-pptx ...
-# pip install "agenticx[ocr]"        # OCR (会拉入 torch ~2GB): easyocr
-# pip install "agenticx[graph]"      # 知识图谱: networkx, neo4j, cdlib ...
-# pip install "agenticx[data]"       # 数据分析: pandas, numpy, scikit-learn, scipy, matplotlib ...
-# pip install "agenticx[monitoring]" # 可观测性: prometheus-client, opentelemetry
-# pip install "agenticx[database]"   # 数据库后端: psycopg2, SQLAlchemy, cryptography
-# pip install "agenticx[mcp]"        # MCP 协议: mcp
-# pip install "agenticx[mqtt]"       # MQTT 协议: asyncio-mqtt
-# pip install "agenticx[text]"       # 文本相似度: python-Levenshtein, RapidFuzz
-# pip install "agenticx[volcengine]" # 火山引擎 AgentKit
-# pip install "agenticx[all]"        # 全部功能 (不含 dev/docs)
+# pip install -e ".[llm]"              # anthropic, ollama
+# pip install -e ".[memory]"           # mem0ai, chromadb, qdrant, redis, pymilvus, numpy
+# pip install -e ".[graphiti]"         # Near memory graph (Graphiti + Kuzu)
+# pip install -e ".[document]"         # PyMuPDF, pypdf, python-docx, python-pptx, OCR helpers
+# pip install -e ".[desktop-runtime]"  # chromadb, onnxruntime, mcp, socksio (Desktop / PyInstaller)
+# pip install -e ".[mcp]"              # mcp SDK only
+# pip install -e ".[ocr]"              # easyocr (pulls torch ~2GB)
+# pip install -e ".[graph]"            # networkx, neo4j, cdlib, ...
+# pip install -e ".[data]"             # pandas, numpy, matplotlib, ...
+# pip install -e ".[monitoring]"       # prometheus, opentelemetry
+# pip install -e ".[database]"         # psycopg2, SQLAlchemy
+# pip install -e ".[volcengine]"       # agentkit-sdk-python
+# pip install -e ".[dev]"              # pytest, black, flake8, ...
+# pip install -e ".[docs]"             # mkdocs, mkdocs-material, ...
+# pip install -e ".[all]"              # all feature extras (no dev/docs)
 #
-# pip install "agenticx[dev]"        # 开发工具: pytest, black, flake8 ...
-# pip install "agenticx[docs]"       # 文档构建: mkdocs, mkdocs-material ...
+# Feishu long-connection bot (agx feishu) — not in core deps:
+#   pip install lark-oapi>=1.3.0
