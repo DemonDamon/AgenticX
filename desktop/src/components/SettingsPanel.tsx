@@ -71,6 +71,7 @@ import { KnowledgeSettings, type KnowledgeSettingsHandle } from "./settings/know
 import { MemoryGraphExplorer } from "./memory/MemoryGraphExplorer";
 import { getProviderDisplayName, makeCustomOpenAIProviderId } from "../utils/provider-display";
 import { normalizeProviderEntry } from "../utils/model-options";
+import { classifyModelKind, isEmbeddingModelKind } from "../utils/model-kind";
 import type { SettingsTab } from "../settings-tab";
 import type { MCPDiscoveryHit } from "./settings/mcp/MCPDiscoveryPanel";
 import { MCPMarketplacePanel } from "./settings/mcp/MCPMarketplacePanel";
@@ -695,7 +696,32 @@ function formatHealthLatencyMs(ms: number): string {
   return `${ms}ms`;
 }
 
-function ModelCapabilityBadges({ className = "" }: { className?: string }) {
+function ModelCapabilityBadges({
+  className = "",
+  provider = "",
+  model = "",
+}: {
+  className?: string;
+  provider?: string;
+  model?: string;
+}) {
+  const kind = classifyModelKind(provider, model);
+  if (isEmbeddingModelKind(kind)) {
+    const label = kind === "multimodal_embedding" ? "多模态嵌入" : "嵌入";
+    return (
+      <div className={`flex items-center gap-1.5 ${className}`.trim()}>
+        <HoverTip label={label}>
+          <span
+            role="img"
+            aria-label={`${label}能力`}
+            className="inline-flex h-5 items-center justify-center rounded-full border border-teal-500/35 bg-teal-500/12 px-1.5 text-[11px] font-medium text-teal-400"
+          >
+            {label}
+          </span>
+        </HoverTip>
+      </div>
+    );
+  }
   return (
     <div className={`flex items-center gap-1.5 ${className}`.trim()}>
       <HoverTip label="推理">
@@ -7093,7 +7119,7 @@ export function SettingsPanel({
                                 <div className="truncate text-sm text-text-muted">{model}</div>
                               </div>
                               <div className="flex min-w-0 items-center justify-end gap-2">
-                                <ModelCapabilityBadges />
+                                <ModelCapabilityBadges provider={active} model={model} />
                                 {entry?.phase === "ok" ? (
                                   <>
                                     <span className="tabular-nums text-xs text-text-subtle">{formatHealthLatencyMs(entry.ms)}</span>
@@ -7185,7 +7211,7 @@ export function SettingsPanel({
                                         {isVisible ? "当前状态：可见" : "当前状态：不可见"}
                                       </div>
                                     </div>
-                                    <ModelCapabilityBadges className="justify-end" />
+                                    <ModelCapabilityBadges className="justify-end" provider={active} model={model} />
                                     <div className="flex items-center gap-1.5">
                                       <button
                                         type="button"

@@ -1113,6 +1113,46 @@ const KNOWN_BASE_URLS: Record<string, string> = {
   kimi: "https://api.moonshot.cn/v1",
 };
 
+// Bailian/DashScope vector models. The OpenAI-compatible `/models` endpoint
+// does not list embedding SKUs, so we merge this catalog into fetch-models for
+// the bailian provider (and any base URL pointing at dashscope). Keep in sync
+// with desktop/src/utils/model-kind.ts.
+const BAILIAN_TEXT_EMBEDDING_MODELS = [
+  "text-embedding-v4",
+  "text-embedding-v3",
+  "text-embedding-v2",
+  "text-embedding-v1",
+];
+
+const BAILIAN_MULTIMODAL_EMBEDDING_MODELS = [
+  "multimodal-embedding-v1",
+  "qwen3-vl-embedding",
+  "qwen2.5-vl-embedding",
+  "tongyi-embedding-vision-plus",
+  "tongyi-embedding-vision-flash",
+  "tongyi-embedding-vision-plus-2026-03-06",
+  "tongyi-embedding-vision-flash-2026-03-06",
+];
+
+const BAILIAN_EMBEDDING_MODELS = [
+  ...BAILIAN_TEXT_EMBEDDING_MODELS,
+  ...BAILIAN_MULTIMODAL_EMBEDDING_MODELS,
+];
+
+function isBailianLikeRequest(provider: string, base: string): boolean {
+  return provider === "bailian" || provider === "dashscope" || /dashscope\.aliyuncs\.com/i.test(base);
+}
+
+/** Heuristic: does a model id look like an embedding SKU (text or multimodal)? */
+function isEmbeddingModelId(model: string): boolean {
+  const slug = (model || "").trim().toLowerCase();
+  if (!slug) return false;
+  const tail = slug.includes("/") ? (slug.split("/").pop() ?? slug) : slug;
+  if (BAILIAN_EMBEDDING_MODELS.includes(tail)) return true;
+  if (/(vl|vision|multimodal)[-_]?embedding|embedding[-_]?vision/.test(tail)) return true;
+  return /embedding|bge-|gte-|e5-|text-embedding/.test(tail);
+}
+
 const PROVIDER_FALLBACK_MODELS: Record<string, string[]> = {
   minimax: [
     "MiniMax-M2.7",
@@ -5716,6 +5756,13 @@ function registerIpc(): void {
     const base = (payload.baseUrl || KNOWN_BASE_URLS[payload.provider] || "").replace(/\/+$/, "");
     if (!base) return { ok: false, models: [], error: "未知 API 地址" };
     const url = `${base}/models`;
+    // DashScope/Bailian compatible-mode `/models` omits embedding SKUs; merge
+    // the documented vector models so they show up (and get an "嵌入" badge).
+    const embeddingExtras = isBailianLikeRequest(payload.provider, base)
+      ? BAILIAN_EMBEDDING_MODELS
+      : [];
+    const mergeEmbeddings = (models: string[]): string[] =>
+      Array.from(new Set([...models, ...embeddingExtras]));
     try {
       const controller = new AbortController();
       const timer = setTimeout(() => controller.abort(), 15000);
@@ -5727,13 +5774,18 @@ function registerIpc(): void {
       if (!resp.ok) {
         const fallback = PROVIDER_FALLBACK_MODELS[payload.provider];
         if (resp.status === 404 && Array.isArray(fallback) && fallback.length > 0) {
-          return { ok: true, models: fallback };
+          return { ok: true, models: mergeEmbeddings(fallback) };
+        }
+        if (embeddingExtras.length > 0) {
+          // Even if the catalog endpoint fails, expose the known embeddings so
+          // users can still configure vectorization.
+          return { ok: true, models: mergeEmbeddings([]) };
         }
         return { ok: false, models: [], error: `HTTP ${resp.status}` };
       }
       const data = await resp.json() as { data?: Array<{ id: string }> };
-      const models = (data.data ?? []).map((m) => m.id).sort();
-      return { ok: true, models };
+      const models = (data.data ?? []).map((m) => m.id);
+      return { ok: true, models: mergeEmbeddings(models).sort() };
     } catch (err) {
       return { ok: false, models: [], error: String(err) };
     }
@@ -5747,7 +5799,17 @@ function registerIpc(): void {
   }) => {
     const base = (payload.baseUrl || KNOWN_BASE_URLS[payload.provider] || "").replace(/\/+$/, "");
     if (!base) return { ok: false, error: "未知 API 地址" };
-    const url = `${base}/chat/completions`;
+    // Embedding models reject /chat/completions; probe them via /embeddings so
+    // health check does not falsely report failure for vector models.
+    const isEmbedding = isEmbeddingModelId(payload.model);
+    const url = isEmbedding ? `${base}/embeddings` : `${base}/chat/completions`;
+    const body = isEmbedding
+      ? JSON.stringify({ model: payload.model, input: "hi" })
+      : JSON.stringify({
+          model: payload.model,
+          messages: [{ role: "user", content: "hi" }],
+          max_tokens: 1,
+        });
     try {
       const controller = new AbortController();
       const timer = setTimeout(() => controller.abort(), 15000);
@@ -5758,18 +5820,14 @@ function registerIpc(): void {
           Authorization: `Bearer ${payload.apiKey}`,
           "Content-Type": "application/json",
         },
-        body: JSON.stringify({
-          model: payload.model,
-          messages: [{ role: "user", content: "hi" }],
-          max_tokens: 1,
-        }),
+        body,
         signal: controller.signal,
       });
       clearTimeout(timer);
       const latencyMs = Math.round(performance.now() - t0);
       if (resp.ok) return { ok: true, latencyMs };
-      const body = await resp.text().catch(() => "");
-      return { ok: false, error: `HTTP ${resp.status}: ${body.slice(0, 200)}` };
+      const errBody = await resp.text().catch(() => "");
+      return { ok: false, error: `HTTP ${resp.status}: ${errBody.slice(0, 200)}` };
     } catch (err) {
       return { ok: false, error: String(err) };
     }
