@@ -1721,6 +1721,63 @@ async function fetchSessionMessagesCore(
   }
 }
 
+type SessionMessagesPageOptions = {
+  tailRounds?: number;
+  tailLimit?: number;
+  beforeIndex?: number;
+  limit?: number;
+};
+
+type SessionMessagesPageResult = {
+  ok: boolean;
+  messages: unknown[];
+  start_index?: number;
+  total_count?: number;
+  has_older?: boolean;
+  error?: string;
+};
+
+async function fetchSessionMessagesPageCore(
+  sessionId: string,
+  options: SessionMessagesPageOptions = {}
+): Promise<SessionMessagesPageResult> {
+  const sid = String(sessionId || "").trim();
+  if (!sid) {
+    return { ok: false, messages: [], error: "sessionId is required" };
+  }
+  const params = new URLSearchParams({ session_id: sid });
+  if (typeof options.tailRounds === "number" && Number.isFinite(options.tailRounds)) {
+    params.set("tail_rounds", String(Math.max(1, Math.floor(options.tailRounds))));
+    if (typeof options.tailLimit === "number" && Number.isFinite(options.tailLimit)) {
+      params.set("tail_limit", String(Math.max(1, Math.floor(options.tailLimit))));
+    }
+  } else if (typeof options.beforeIndex === "number" && Number.isFinite(options.beforeIndex)) {
+    params.set("before_index", String(Math.max(0, Math.floor(options.beforeIndex))));
+    params.set("limit", String(Math.max(1, Math.floor(options.limit ?? 20))));
+  } else {
+    return { ok: false, messages: [], error: "tailRounds or beforeIndex is required" };
+  }
+  try {
+    const resp = await fetch(`${getStudioUrl()}/api/session/messages?${params.toString()}`, {
+      headers: { "x-agx-desktop-token": getStudioToken() },
+    });
+    if (!resp.ok) {
+      const body = await resp.text().catch(() => "");
+      return { ok: false, messages: [], error: `HTTP ${resp.status}: ${body.slice(0, 300)}` };
+    }
+    const data = (await resp.json()) as SessionMessagesPageResult & { ok?: boolean };
+    return {
+      ok: Boolean(data.ok),
+      messages: Array.isArray(data.messages) ? data.messages : [],
+      start_index: typeof data.start_index === "number" ? data.start_index : undefined,
+      total_count: typeof data.total_count === "number" ? data.total_count : undefined,
+      has_older: typeof data.has_older === "boolean" ? data.has_older : undefined,
+    };
+  } catch (err) {
+    return { ok: false, messages: [], error: String(err) };
+  }
+}
+
 function emitSkillsChanged(): void {
   if (skillsChangedDebounceTimer) {
     clearTimeout(skillsChangedDebounceTimer);
@@ -4358,6 +4415,24 @@ function registerIpc(): void {
       SESSION_MESSAGES_FETCH_TIMEOUT_MS
     );
   });
+
+  ipcMain.handle(
+    "load-session-messages-page",
+    async (
+      _event,
+      sessionId: string,
+      options: SessionMessagesPageOptions = {}
+    ) => {
+      const sid = String(sessionId || "").trim();
+      if (!sid) return { ok: false, messages: [], error: "sessionId is required" };
+      await waitForStudio(PRELOAD_READY_BUDGET_MS);
+      return withFetchTimeout(
+        fetchSessionMessagesPageCore(sid, options),
+        { ok: false, messages: [], error: "timeout" },
+        SESSION_MESSAGES_FETCH_TIMEOUT_MS
+      );
+    }
+  );
 
   ipcMain.handle("fork-avatar", async (_event, payload: { sessionId: string; name: string; role?: string }) => {
     try {

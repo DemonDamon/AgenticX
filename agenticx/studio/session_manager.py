@@ -818,11 +818,105 @@ class SessionManager:
 
     def get_messages(self, session_id: str) -> list[dict]:
         """Return normalized chat messages for session."""
+        raw = self._get_raw_messages_list(session_id)
+        return self._normalize_messages(raw)
+
+    def _get_raw_messages_list(self, session_id: str) -> list[dict]:
+        """Return raw chat_history rows before normalization."""
         managed = self._sessions.get(session_id)
         if managed is not None:
-            return self._normalize_messages(getattr(managed.studio_session, "chat_history", []) or [])
-        payload = self._load_messages_snapshot(session_id)
-        return self._normalize_messages(payload)
+            raw = getattr(managed.studio_session, "chat_history", []) or []
+        else:
+            raw = self._load_messages_snapshot(session_id)
+        return [item for item in raw if isinstance(item, dict)]
+
+    @staticmethod
+    def _tail_start_index_for_rounds(raw: list[dict], tail_rounds: int) -> int:
+        """Index of the earliest message included in the last *tail_rounds* user turns."""
+        if not raw:
+            return 0
+        n = max(1, int(tail_rounds))
+        user_seen = 0
+        for idx in range(len(raw) - 1, -1, -1):
+            role = str(raw[idx].get("role", "assistant"))
+            if role != "user":
+                continue
+            user_seen += 1
+            if user_seen >= n:
+                return idx
+        return 0
+
+    @staticmethod
+    def _apply_tail_message_limit(
+        window: list[dict], abs_start: int, total_count: int, tail_limit: int | None
+    ) -> tuple[list[dict], int]:
+        if not tail_limit or len(window) <= tail_limit:
+            return window, abs_start
+        trimmed = window[-max(1, int(tail_limit)) :]
+        new_start = max(0, total_count - len(trimmed))
+        return trimmed, new_start
+
+    def get_messages_page(
+        self,
+        session_id: str,
+        *,
+        tail_rounds: int | None = None,
+        before_index: int | None = None,
+        limit: int = 20,
+        tail_limit: int | None = None,
+    ) -> dict[str, Any]:
+        """Return a normalized message window with pagination metadata."""
+        if tail_rounds is not None:
+            meta = self._load_messages_tail_snapshot(session_id)
+            if meta is not None:
+                raw_tail = meta["messages"]
+                total_count = int(meta["total_count"])
+                base_index = int(meta["start_index"])
+                rel_start = self._tail_start_index_for_rounds(raw_tail, tail_rounds)
+                window = raw_tail[rel_start:]
+                abs_start = base_index + rel_start
+                window, abs_start = self._apply_tail_message_limit(
+                    window, abs_start, total_count, tail_limit
+                )
+                return {
+                    "messages": self._normalize_messages(window),
+                    "start_index": abs_start,
+                    "total_count": total_count,
+                    "has_older": abs_start > 0,
+                }
+
+        raw = self._get_raw_messages_list(session_id)
+        total_count = len(raw)
+
+        if tail_rounds is not None:
+            start_index = self._tail_start_index_for_rounds(raw, tail_rounds)
+            window = raw[start_index:]
+            window, start_index = self._apply_tail_message_limit(
+                window, start_index, total_count, tail_limit
+            )
+            self._ensure_messages_tail_snapshot(session_id, raw)
+        elif before_index is not None:
+            end_index = max(0, min(int(before_index), total_count))
+            page_limit = max(1, min(int(limit), 100))
+            start_index = max(0, end_index - page_limit)
+            window = raw[start_index:end_index]
+        else:
+            start_index = 0
+            window = raw
+
+        return {
+            "messages": self._normalize_messages(window),
+            "start_index": start_index,
+            "total_count": total_count,
+            "has_older": start_index > 0,
+        }
+
+    def _ensure_messages_tail_snapshot(self, session_id: str, raw: list[dict]) -> None:
+        if not raw:
+            return
+        if os.path.exists(self._messages_tail_path(session_id)):
+            return
+        self._save_messages_tail_snapshot(session_id, raw)
 
     def list_taskspaces(self, session_id: str) -> list[dict[str, str]]:
         managed = self.get(session_id, touch=False)
@@ -1129,6 +1223,51 @@ class SessionManager:
             if not item.get("timestamp"):
                 item["timestamp"] = now_ms
         atomic_write_json(path, messages)
+        self._save_messages_tail_snapshot(session_id, messages)
+
+    _TAIL_SNAPSHOT_MAX = 120
+
+    def _messages_tail_path(self, session_id: str) -> str:
+        return os.path.join(self._sessions_root, session_id, "messages_tail.json")
+
+    def _save_messages_tail_snapshot(self, session_id: str, messages: list[dict]) -> None:
+        if not messages:
+            return
+        total = len(messages)
+        tail_rows = [item for item in messages[-self._TAIL_SNAPSHOT_MAX :] if isinstance(item, dict)]
+        if not tail_rows:
+            return
+        start_index = max(0, total - len(tail_rows))
+        atomic_write_json(
+            self._messages_tail_path(session_id),
+            {
+                "total_count": total,
+                "start_index": start_index,
+                "messages": tail_rows,
+            },
+        )
+
+    def _load_messages_tail_snapshot(self, session_id: str) -> dict[str, Any] | None:
+        path = self._messages_tail_path(session_id)
+        if not os.path.exists(path):
+            return None
+        try:
+            with open(path, "r", encoding="utf-8") as fh:
+                data = json.load(fh)
+        except (OSError, json.JSONDecodeError):
+            return None
+        if not isinstance(data, dict):
+            return None
+        rows = self._parse_messages_json_payload(data.get("messages"))
+        if not rows:
+            return None
+        total_count = int(data.get("total_count", len(rows)))
+        start_index = int(data.get("start_index", max(0, total_count - len(rows))))
+        return {
+            "total_count": total_count,
+            "start_index": start_index,
+            "messages": rows,
+        }
 
     @staticmethod
     def _parse_messages_json_payload(data: Any) -> list[dict]:
@@ -1148,7 +1287,10 @@ class SessionManager:
             return []
         with open(path, "r", encoding="utf-8") as fh:
             data = json.load(fh)
-        return self._parse_messages_json_payload(data)
+        rows = self._parse_messages_json_payload(data)
+        if rows and not os.path.exists(self._messages_tail_path(session_id)):
+            self._save_messages_tail_snapshot(session_id, rows)
+        return rows
 
     def _derive_session_name_from_disk_messages(self, session_id: str) -> str | None:
         """Build a list title from on-disk messages when metadata has no session_name."""

@@ -1612,13 +1612,26 @@ def create_studio_app() -> FastAPI:
     @app.get("/api/session/messages")
     async def get_session_messages(
         session_id: str = Query(...),
+        tail_rounds: int | None = Query(default=None, ge=1, le=100),
+        tail_limit: int | None = Query(default=None, ge=1, le=100),
+        before_index: int | None = Query(default=None, ge=0),
+        limit: int = Query(default=20, ge=1, le=100),
         x_agx_desktop_token: str | None = Header(default=None),
     ) -> dict:
         _check_token(x_agx_desktop_token)
         if not session_id:
             raise HTTPException(status_code=400, detail="session_id is required")
-        messages = manager.get_messages(session_id)
-        return {"ok": True, "messages": messages}
+        if tail_rounds is None and before_index is None:
+            messages = manager.get_messages(session_id)
+            return {"ok": True, "messages": messages}
+        page = manager.get_messages_page(
+            session_id,
+            tail_rounds=tail_rounds,
+            before_index=before_index,
+            limit=limit,
+            tail_limit=tail_limit,
+        )
+        return {"ok": True, **page}
 
     # -------------------------------------------------------------------
     # Project state harness — read-only views over .agx/project/

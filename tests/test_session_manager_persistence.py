@@ -638,3 +638,50 @@ def test_list_sessions_idle_when_interrupted_metadata_but_reply_on_disk(tmp_path
     row = next(r for r in rows if r["session_id"] == sid)
     assert row["execution_state"] == "idle"
 
+
+def test_get_messages_page_tail_rounds_and_before_index(tmp_path: Path) -> None:
+    manager = SessionManager()
+    manager._sessions_root = str(tmp_path / "sessions")
+
+    sid = "paged-session"
+    managed = manager.create(session_id=sid)
+    managed.studio_session.chat_history = [
+        {"id": "u0", "role": "user", "content": "turn0"},
+        {"id": "a0", "role": "assistant", "content": "reply0"},
+        {"id": "t0", "role": "tool", "content": "tool0"},
+        {"id": "u1", "role": "user", "content": "turn1"},
+        {"id": "a1", "role": "assistant", "content": "reply1"},
+        {"id": "u2", "role": "user", "content": "turn2"},
+        {"id": "a2", "role": "assistant", "content": "reply2"},
+    ]
+
+    tail = manager.get_messages_page(sid, tail_rounds=2)
+    assert tail["total_count"] == 7
+    assert tail["start_index"] == 3
+    assert tail["has_older"] is True
+    assert len(tail["messages"]) == 4
+    assert tail["messages"][0]["content"] == "turn1"
+
+    older = manager.get_messages_page(sid, before_index=tail["start_index"], limit=2)
+    assert older["start_index"] == 1
+    assert older["has_older"] is True
+    assert len(older["messages"]) == 2
+    assert older["messages"][0]["content"] == "reply0"
+
+    full = manager.get_messages(sid)
+    assert len(full) == 7
+
+    limited = manager.get_messages_page(sid, tail_rounds=3, tail_limit=2)
+    assert limited["total_count"] == 7
+    assert len(limited["messages"]) == 2
+    assert limited["start_index"] == 5
+
+    assert manager.persist(sid) is True
+    tail_path = tmp_path / "sessions" / sid / "messages_tail.json"
+    assert tail_path.is_file()
+    fast = SessionManager()
+    fast._sessions_root = str(tmp_path / "sessions")
+    page = fast.get_messages_page(sid, tail_rounds=1, tail_limit=40)
+    assert page["total_count"] == 7
+    assert len(page["messages"]) >= 1
+

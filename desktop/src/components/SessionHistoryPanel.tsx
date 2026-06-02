@@ -10,6 +10,14 @@ import { FeishuBadge } from "./FeishuBadge";
 import { META_AGENT_DISPLAY_NAME } from "../constants/branding";
 import { resolveMetaDisplayName } from "../utils/display-name";
 import { avatarPreloadKey } from "../utils/splash-preload-core";
+import { isPaneStillOnSession } from "../utils/session-pane-guard";
+import {
+  cacheSessionTail,
+  cancelPrefetchSessionTail,
+  fetchSessionTailPage,
+  getCachedSessionTail,
+  schedulePrefetchSessionTail,
+} from "../utils/session-tail-cache";
 import { FitText } from "./ui/FitText";
 
 /** Cursor-style per-group pagination: show this many rows per group, "... More" reveals another page. */
@@ -267,6 +275,8 @@ export const SessionHistoryPanel = memo(function SessionHistoryPanel({ pane, onC
   const setPaneSessionMode = useAppStore((s) => s.setPaneSessionMode);
   const setPaneMessages = useAppStore((s) => s.setPaneMessages);
   const setPaneLoadingMessages = useAppStore((s) => s.setPaneLoadingMessages);
+  const setPaneMessagePaging = useAppStore((s) => s.setPaneMessagePaging);
+  const resetPaneMessagePaging = useAppStore((s) => s.resetPaneMessagePaging);
   const getCachedSessionMessages = useAppStore((s) => s.getCachedSessionMessages);
   const cacheSessionMessages = useAppStore((s) => s.cacheSessionMessages);
   const dropCachedSessionMessages = useAppStore((s) => s.dropCachedSessionMessages);
@@ -655,37 +665,75 @@ export const SessionHistoryPanel = memo(function SessionHistoryPanel({ pane, onC
       return;
     }
 
-    // Fast path: LRU cache hit — render previously-loaded messages instantly,
-    // no IPC, no skeleton (covers the "switch back to a session I just left"
-    // pattern that profile showed at 430ms+ per round trip).
+    // Guard against stale async results when the pane has switched away
+    // (e.g. fast A→B clicks on the same pane) before our await resolves.
+    const paneStillOn = (sid: string) =>
+      isPaneStillOnSession(useAppStore.getState().panes, targetPaneId, sid);
+
+    const applyTailEntry = (
+      targetId: string,
+      entry: { messages: Message[]; startIndex: number; hasOlder: boolean }
+    ) => {
+      setPaneMessages(targetId, entry.messages);
+      setPaneLoadingMessages(targetId, false);
+      setPaneMessagePaging(targetId, {
+        oldestLoadedIndex: entry.startIndex,
+        hasOlderMessages: entry.hasOlder,
+        loadingOlderMessages: false,
+      });
+    };
+
+    // Fast path: LRU full cache hit — instant, no IPC.
     const cached = getCachedSessionMessages(sessionId);
     if (cached && cached.length > 0) {
       setPaneMessages(targetPaneId, cached);
       setPaneLoadingMessages(targetPaneId, false);
+      resetPaneMessagePaging(targetPaneId);
       return;
     }
 
-    // Slow path: clear old messages immediately + show skeleton so users see
-    // an instant switch instead of the previous session's bubbles hanging
-    // around for the full IPC roundtrip.
-    setPaneMessages(targetPaneId, []);
+    // Fast path: tail cache (prefetch or prior tail load).
+    const tailCached = getCachedSessionTail(sessionId);
+    if (tailCached && tailCached.messages.length > 0) {
+      applyTailEntry(targetPaneId, tailCached);
+      return;
+    }
+
+    // Slow path: show in-list skeleton (never NEAR empty logo) while tail loads.
     setPaneLoadingMessages(targetPaneId, true);
+    setPaneMessages(targetPaneId, []);
+    resetPaneMessagePaging(targetPaneId);
+    try {
+      const entry = await fetchSessionTailPage(sessionId);
+      if (entry && entry.messages.length > 0) {
+        cacheSessionTail(sessionId, entry); // cache regardless; the tail is valid for this sid
+        if (paneStillOn(sessionId)) applyTailEntry(targetPaneId, entry);
+        return;
+      }
+    } catch {
+      /* fallback below */
+    }
+
+    // Fallback: legacy full load when tail page fails.
     try {
       const result = await window.agenticxDesktop.loadSessionMessages(sessionId);
       if (result.ok && Array.isArray(result.messages)) {
         const mapped: Message[] = result.messages.map((item, index) =>
           mapLoadedSessionMessage(item as LoadedSessionMessage, sessionId, index)
         );
-        setPaneMessages(targetPaneId, mapped);
         cacheSessionMessages(sessionId, mapped);
+        if (paneStillOn(sessionId)) {
+          setPaneMessages(targetPaneId, mapped);
+          resetPaneMessagePaging(targetPaneId);
+        }
         return;
       }
     } catch {
       /* fallback below */
     } finally {
-      setPaneLoadingMessages(targetPaneId, false);
+      if (paneStillOn(sessionId)) setPaneLoadingMessages(targetPaneId, false);
     }
-    setPaneMessages(targetPaneId, []);
+    if (paneStillOn(sessionId)) setPaneMessages(targetPaneId, []);
   };
 
   const saveRename = async (sessionId: string) => {
@@ -895,6 +943,13 @@ export const SessionHistoryPanel = memo(function SessionHistoryPanel({ pane, onC
               }
               const terms = buildHighlightTermsFromQuery(sessionSearchTrim);
               void switchSession(item.session_id, pane.id, terms);
+            }}
+            onMouseEnter={() => {
+              if (selectMode || item.session_id === pane.sessionId) return;
+              schedulePrefetchSessionTail(item.session_id);
+            }}
+            onMouseLeave={() => {
+              cancelPrefetchSessionTail(item.session_id);
             }}
             onDoubleClick={() => {
               if (selectMode) return;

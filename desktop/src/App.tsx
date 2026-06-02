@@ -717,6 +717,12 @@ export function App() {
                 messages: [],
                 sessionTokens: pane.sessionTokens ?? { input: 0, output: 0 },
                 historySearchTerms: [],
+                loadingMessages: false,
+                // Paging state is runtime-only: restored panes start empty and
+                // re-run tail-first loading, so always reset to defaults here.
+                oldestLoadedIndex: 0,
+                hasOlderMessages: false,
+                loadingOlderMessages: false,
                 modelProvider: pane.modelProvider ?? "",
                 modelName: pane.modelName ?? "",
                 membersPanelOpen: pane.membersPanelOpen ?? false,
