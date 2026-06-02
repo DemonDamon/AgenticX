@@ -1,7 +1,9 @@
 // Plan-Id: machi-kb-stage1-local-mvp
 import { useEffect, useMemo, useState } from "react";
-import { AlertTriangle, Check, Eye, EyeOff, Loader2, RotateCcw } from "lucide-react";
+import { AlertTriangle, BookOpen, Check, Eye, EyeOff, Loader2, RotateCcw, Sparkles } from "lucide-react";
+import type { LucideIcon } from "lucide-react";
 import { Panel } from "../../ds/Panel";
+import { SettingsSwitch } from "../SettingsSwitch";
 import type { KBApi, ParserStatus } from "./api";
 import {
   CHUNKING_STRATEGIES,
@@ -529,51 +531,33 @@ export function KnowledgeConfigPanel({
       </Panel>
 
       <Panel title="增强能力">
-        <div className="space-y-4">
-          <div>
-            <div className="mb-2 text-[11px] font-medium text-text-subtle">入库后</div>
-            <label className="flex gap-2 text-xs text-text-subtle">
-              <input
-                type="checkbox"
-                className="mt-0.5 shrink-0"
-                checked={config.wiki_compiler?.enabled ?? false}
-                onChange={(e) =>
-                  setConfig({
-                    ...config,
-                    wiki_compiler: { enabled: e.target.checked },
-                  })
-                }
-              />
-              <span className="min-w-0">
-                <span className="block text-text-primary">Wiki 编译</span>
-                <span className="mt-0.5 block text-[10px] leading-snug text-text-faint">
-                  资料入库完成后，自动生成结构化 Wiki 页
-                </span>
-              </span>
-            </label>
-          </div>
-          <div>
-            <div className="mb-2 text-[11px] font-medium text-text-subtle">回答时</div>
-            <label className="flex gap-2 text-xs text-text-subtle">
-              <input
-                type="checkbox"
-                className="mt-0.5 shrink-0"
-                checked={config.synthesis?.enabled ?? false}
-                onChange={(e) =>
-                  setConfig({
-                    ...config,
-                    synthesis: { enabled: e.target.checked },
-                  })
-                }
-              />
-              <span className="min-w-0">
-                <span className="block text-text-primary">合成答案</span>
-                <span className="mt-0.5 block text-[10px] leading-snug text-text-faint">
-                  检索命中多段内容后，合并为一条带来源的回答
-                </span>
-              </span>
-            </label>
-          </div>
+        <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+          <KbCapabilityTile
+            phase="入库后"
+            icon={BookOpen}
+            title="Wiki 编译"
+            description="资料入库完成后，自动生成结构化 Wiki 页"
+            enabled={config.wiki_compiler?.enabled ?? false}
+            onChange={(enabled) =>
+              setConfig({
+                ...config,
+                wiki_compiler: { enabled },
+              })
+            }
+          />
+          <KbCapabilityTile
+            phase="回答时"
+            icon={Sparkles}
+            title="合成答案"
+            description="检索命中多段内容后，合并为一条带来源的回答"
+            enabled={config.synthesis?.enabled ?? false}
+            onChange={(enabled) =>
+              setConfig({
+                ...config,
+                synthesis: { enabled },
+              })
+            }
+          />
         </div>
       </Panel>
 
@@ -588,6 +572,56 @@ export function KnowledgeConfigPanel({
         >
           <RotateCcw className="h-3.5 w-3.5" /> 重置为默认
         </button>
+      </div>
+    </div>
+  );
+}
+
+function KbCapabilityTile({
+  phase,
+  icon: Icon,
+  title,
+  description,
+  enabled,
+  onChange,
+}: {
+  phase: string;
+  icon: LucideIcon;
+  title: string;
+  description: string;
+  enabled: boolean;
+  onChange: (enabled: boolean) => void;
+}) {
+  return (
+    <div
+      className={`flex h-full flex-col rounded-lg border px-3 py-3 transition ${
+        enabled
+          ? "border-[var(--settings-accent-border-strong)] bg-[var(--settings-accent-row-bg)] ring-1 ring-[var(--settings-accent-badge-bg)]"
+          : "border-border bg-surface-panel/60 hover:border-text-subtle/40 hover:bg-surface-hover"
+      }`}
+    >
+      <div className="flex items-start justify-between gap-3">
+        <div className="flex min-w-0 flex-1 items-start gap-2.5">
+          <span
+            className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-lg transition ${
+              enabled
+                ? "bg-[var(--settings-accent-badge-bg)] text-[var(--settings-accent-fg)]"
+                : "bg-surface-hover text-text-muted"
+            }`}
+          >
+            <Icon className="h-4 w-4" strokeWidth={2} />
+          </span>
+          <div className="min-w-0">
+            <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5">
+              <span className="text-sm font-medium text-text-primary">{title}</span>
+              <span className="rounded-full bg-surface-hover px-1.5 py-0.5 text-[10px] text-text-faint">
+                {phase}
+              </span>
+            </div>
+            <p className="mt-1 text-xs leading-snug text-text-muted">{description}</p>
+          </div>
+        </div>
+        <SettingsSwitch checked={enabled} onChange={onChange} size="sm" aria-label={title} />
       </div>
     </div>
   );
