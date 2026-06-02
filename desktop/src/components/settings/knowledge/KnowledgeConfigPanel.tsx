@@ -525,7 +525,13 @@ export function KnowledgeConfigPanel({
           <p className="text-[11px] leading-snug text-text-faint">
             智能检索：由模型判断何时检索，包含你主动要求「查知识库」的场景；始终检索：每轮都先检索后再回答。
           </p>
-          <div className="grid grid-cols-2 gap-3 border-t border-border pt-3">
+        </div>
+      </Panel>
+
+      <Panel title="增强能力">
+        <div className="space-y-4">
+          <div>
+            <div className="mb-2 text-[11px] font-medium text-text-subtle">入库后</div>
             <label className="flex gap-2 text-xs text-text-subtle">
               <input
                 type="checkbox"
@@ -541,10 +547,13 @@ export function KnowledgeConfigPanel({
               <span className="min-w-0">
                 <span className="block text-text-primary">Wiki 编译</span>
                 <span className="mt-0.5 block text-[10px] leading-snug text-text-faint">
-                  入库后生成结构化页
+                  资料入库完成后，自动生成结构化 Wiki 页
                 </span>
               </span>
             </label>
+          </div>
+          <div>
+            <div className="mb-2 text-[11px] font-medium text-text-subtle">回答时</div>
             <label className="flex gap-2 text-xs text-text-subtle">
               <input
                 type="checkbox"
@@ -560,7 +569,7 @@ export function KnowledgeConfigPanel({
               <span className="min-w-0">
                 <span className="block text-text-primary">合成答案</span>
                 <span className="mt-0.5 block text-[10px] leading-snug text-text-faint">
-                  多段检索结果合并为一条回答
+                  检索命中多段内容后，合并为一条带来源的回答
                 </span>
               </span>
             </label>
