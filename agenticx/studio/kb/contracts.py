@@ -108,6 +108,16 @@ class FileFilterSpec:
 
 
 @dataclass
+class WikiCompilerSpec:
+    enabled: bool = False
+
+
+@dataclass
+class SynthesisSpec:
+    enabled: bool = False
+
+
+@dataclass
 class RetrievalSpec:
     top_k: int = 5
     score_floor: float = 0.0
@@ -119,6 +129,12 @@ class RetrievalSpec:
     #         the decision is ultimately LLM-driven either way.
     # always: proactively search before most factual answers.
     mode: Literal["auto", "always"] = "auto"
+    # Search channel: vector-only (legacy default), bm25-only, or RRF hybrid.
+    retrieval_mode: Literal["vector", "bm25", "hybrid", "hybrid_graph"] = "vector"
+    rrf_k: int = 60
+    bm25_weight: float = 1.0
+    vector_weight: float = 1.0
+    rerank_enabled: bool = False
 
 
 @dataclass
@@ -131,6 +147,8 @@ class KBConfig:
     chunking: ChunkingSpec = field(default_factory=ChunkingSpec)
     file_filters: FileFilterSpec = field(default_factory=FileFilterSpec)
     retrieval: RetrievalSpec = field(default_factory=RetrievalSpec)
+    wiki_compiler: WikiCompilerSpec = field(default_factory=WikiCompilerSpec)
+    synthesis: SynthesisSpec = field(default_factory=SynthesisSpec)
 
     def to_dict(self) -> Dict[str, Any]:
         return asdict(self)
@@ -201,11 +219,28 @@ class KBConfig:
             # into ``auto`` (LLM decides when to search in both cases), so
             # legacy configs are silently migrated instead of erroring.
             mode = mode_raw if mode_raw in {"auto", "always"} else "auto"
+            mode_raw_retrieval = str(r.get("retrieval_mode", "vector")).strip().lower()
+            retrieval_mode = (
+                mode_raw_retrieval
+                if mode_raw_retrieval in {"vector", "bm25", "hybrid", "hybrid_graph"}
+                else "vector"
+            )
             merged.retrieval = RetrievalSpec(
                 top_k=int(r.get("top_k", 5)),
                 score_floor=float(r.get("score_floor", 0.0)),
                 mode=mode,
+                retrieval_mode=retrieval_mode,  # type: ignore[arg-type]
+                rrf_k=max(1, int(r.get("rrf_k", 60))),
+                bm25_weight=float(r.get("bm25_weight", 1.0)),
+                vector_weight=float(r.get("vector_weight", 1.0)),
+                rerank_enabled=bool(r.get("rerank_enabled", False)),
             )
+        if isinstance(data.get("wiki_compiler"), dict):
+            wc = data["wiki_compiler"]
+            merged.wiki_compiler = WikiCompilerSpec(enabled=bool(wc.get("enabled", False)))
+        if isinstance(data.get("synthesis"), dict):
+            syn = data["synthesis"]
+            merged.synthesis = SynthesisSpec(enabled=bool(syn.get("enabled", False)))
         return merged
 
     def embedding_fingerprint(self) -> str:
@@ -316,13 +351,17 @@ class RetrievalHit:
     metadata: Dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> Dict[str, Any]:
-        return {
+        out: Dict[str, Any] = {
             "id": self.id,
             "score": self.score,
             "text": self.text,
             "source": self.source.to_dict(),
             "metadata": self.metadata,
         }
+        for key in ("vector_score", "bm25_score", "fused_score", "retrieval_mode"):
+            if key in self.metadata:
+                out[key] = self.metadata[key]
+        return out
 
 
 @dataclass

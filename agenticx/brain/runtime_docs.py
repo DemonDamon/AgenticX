@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from typing import Any, Dict, List
+from pathlib import Path
+from typing import Any, Dict, List, Optional
 
 from agenticx.studio.kb.contracts import KBConfig, RetrievalHit
 from agenticx.studio.kb.jobs import JobRegistry
@@ -17,7 +18,11 @@ class DocsBrainRuntime:
         self.brain = brain
         self._registry_dir = BrainRegistry.instance().kb_registry_dir_for(brain)
         cfg = brain.docs_config()
-        self._runtime = KBRuntime(cfg, registry_dir=self._registry_dir)
+        self._runtime = KBRuntime(
+            cfg,
+            registry_dir=self._registry_dir,
+            brain_storage_root=Path(brain.storage_root).expanduser(),
+        )
         self._jobs = JobRegistry(max_workers=2)
 
     @property
@@ -40,8 +45,14 @@ class DocsBrainRuntime:
             self.brain = refreshed
         return result
 
-    def search(self, query: str, *, top_k: int = 5) -> List[RetrievalHit]:
-        return self._runtime.search(query, top_k=top_k)
+    def search(
+        self,
+        query: str,
+        *,
+        top_k: int = 5,
+        retrieval_mode: Optional[str] = None,
+    ) -> List[RetrievalHit]:
+        return self._runtime.search(query, top_k=top_k, retrieval_mode=retrieval_mode)
 
     def stats(self) -> Dict[str, Any]:
         return self._runtime.stats()
