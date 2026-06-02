@@ -132,6 +132,26 @@ export type PreviewChunk = {
   end_index: number | null;
 };
 
+/** Normalize API/draft payloads so nested optional flags are always defined. */
+export function normalizeKbConfig(config: KBConfig): KBConfig {
+  const base = defaultKBConfig();
+  return {
+    ...base,
+    ...config,
+    vector_store: { ...base.vector_store, ...config.vector_store },
+    embedding: { ...base.embedding, ...config.embedding },
+    chunking: { ...base.chunking, ...config.chunking },
+    file_filters: { ...base.file_filters, ...config.file_filters },
+    retrieval: { ...base.retrieval, ...config.retrieval },
+    wiki_compiler: {
+      enabled: config.wiki_compiler?.enabled ?? base.wiki_compiler!.enabled,
+    },
+    synthesis: {
+      enabled: config.synthesis?.enabled ?? base.synthesis!.enabled,
+    },
+  };
+}
+
 export function defaultKBConfig(): KBConfig {
   return {
     enabled: false,

@@ -17,7 +17,7 @@ import { KnowledgeDebugPanel } from "../knowledge/KnowledgeDebugPanel";
 import { KnowledgeWikiPanel } from "../knowledge/KnowledgeWikiPanel";
 import { createKbApi } from "../knowledge/api";
 import type { KBConfig, KBStats } from "../knowledge/types";
-import { defaultKBConfig } from "../knowledge/types";
+import { defaultKBConfig, normalizeKbConfig } from "../knowledge/types";
 import { BrainScopePanel, type BrainScopePanelHandle } from "./BrainScopePanel";
 import { brainScopeBadge, brainTypeShort } from "./brainScopeUi";
 import { CodeIndexBrainPanel, type CodeIndexBrainPanelHandle } from "./CodeIndexBrainPanel";
@@ -68,14 +68,21 @@ export const BrainsSettings = forwardRef<BrainsSettingsHandle>(function BrainsSe
   const [brainSaveMsg, setBrainSaveMsg] = useState<string | null>(null);
   const scopePanelRef = useRef<BrainScopePanelHandle>(null);
   const codePanelRef = useRef<CodeIndexBrainPanelHandle>(null);
+  /** Guards against stale readKbConfig responses overwriting a just-saved draft. */
+  const kbConfigLoadIdRef = useRef(0);
 
-  /** Keep draft ref in sync immediately — save must not read a stale ref from useEffect. */
   const applyKbDraft = useCallback((next: KBConfig | ((prev: KBConfig) => KBConfig)) => {
     setKbDraft((prev) => {
       const resolved = typeof next === "function" ? next(prev) : next;
-      return resolved;
+      return normalizeKbConfig(resolved);
     });
   }, []);
+
+  const applyKbConfigFromServer = useCallback((config: KBConfig) => {
+    const normalized = normalizeKbConfig(config);
+    setKbConfig(normalized);
+    applyKbDraft(normalized);
+  }, [applyKbDraft]);
 
   const selected = brains.find((b) => b.id === selectedId) ?? null;
 
@@ -114,17 +121,19 @@ export const BrainsSettings = forwardRef<BrainsSettingsHandle>(function BrainsSe
 
   useEffect(() => {
     if (!selectedId || selected?.type !== "docs") return;
+    const loadId = ++kbConfigLoadIdRef.current;
     void (async () => {
       try {
         const body = await brainsApi.readKbConfig(selectedId);
-        setKbConfig(body.config);
-        applyKbDraft(body.config);
+        if (kbConfigLoadIdRef.current !== loadId) return;
+        applyKbConfigFromServer(body.config);
         setKbStats(body.stats);
       } catch (exc) {
+        if (kbConfigLoadIdRef.current !== loadId) return;
         setError(String((exc as Error).message ?? exc));
       }
     })();
-  }, [applyKbDraft, selectedId, selected?.type, brainsApi]);
+  }, [applyKbConfigFromServer, selectedId, selected?.type, brainsApi]);
 
   useEffect(() => {
     if (selected?.type !== "code") return;
@@ -153,10 +162,10 @@ export const BrainsSettings = forwardRef<BrainsSettingsHandle>(function BrainsSe
 
     if (selected.type === "docs") {
       if (JSON.stringify(kbConfig) !== JSON.stringify(kbDraft)) {
+        kbConfigLoadIdRef.current += 1;
         try {
           const result = await brainsApi.writeKbConfig(selectedId, kbDraft);
-          setKbConfig(result.config);
-          applyKbDraft(result.config);
+          applyKbConfigFromServer(result.config);
         } catch (exc) {
           const msg = String((exc as Error).message ?? exc);
           setError(`保存知识脑配置失败：${msg}`);
@@ -174,7 +183,7 @@ export const BrainsSettings = forwardRef<BrainsSettingsHandle>(function BrainsSe
 
     await reloadBrains();
     return { ok: true };
-  }, [applyKbDraft, brainDirty, brainsApi, kbConfig, kbDraft, reloadBrains, selected, selectedId]);
+  }, [applyKbConfigFromServer, brainDirty, brainsApi, kbConfig, kbDraft, reloadBrains, selected, selectedId]);
 
   useImperativeHandle(
     ref,
