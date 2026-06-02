@@ -372,14 +372,32 @@ def register_brain_routes(app: FastAPI) -> None:
         retrieval_mode = str(payload.get("retrieval_mode") or "").strip() or None
         if brain.type == BrainType.DOCS:
             rt = _require_docs_brain(brain_id)
-            hits = rt.search(query, top_k=top_k, retrieval_mode=retrieval_mode)
+            # Run the blocking search in a worker thread. Embedding providers
+            # (Bailian / SiliconFlow) call ``asyncio.run()`` inside their sync
+            # ``embed()``; invoking it directly from this async route would hit
+            # "asyncio.run() cannot be called from a running event loop" and the
+            # uncaught 500 would skip CORS headers, surfacing as a bare
+            # "Failed to fetch" in the desktop renderer.
+            try:
+                hits = await asyncio.to_thread(
+                    rt.search, query, top_k=top_k, retrieval_mode=retrieval_mode
+                )
+            except KBError as exc:
+                raise HTTPException(status_code=400, detail=str(exc)) from exc
+            except Exception as exc:
+                logger.exception("brain search failed")
+                raise HTTPException(status_code=500, detail=f"search failed: {exc}") from exc
             return {"ok": True, "hits": [h.to_dict() for h in hits], "used_top_k": len(hits)}
         from agenticx.brain.runtime_code import CodeBrainRuntime
 
         rt_code = BrainManager.instance().get_runtime(brain_id)
         if not isinstance(rt_code, CodeBrainRuntime):
             raise HTTPException(status_code=500, detail="runtime mismatch")
-        hits = rt_code.search(query, top_k=top_k)
+        try:
+            hits = await asyncio.to_thread(rt_code.search, query, top_k=top_k)
+        except Exception as exc:
+            logger.exception("code brain search failed")
+            raise HTTPException(status_code=500, detail=f"search failed: {exc}") from exc
         from agenticx.code_index.format import format_hits_for_tool
 
         formatted = format_hits_for_tool(hits)
@@ -455,7 +473,18 @@ def register_brain_routes(app: FastAPI) -> None:
             raise HTTPException(status_code=400, detail="synthesis is disabled for this brain")
         top_k = max(1, min(20, int(payload.get("top_k") or cfg.retrieval.top_k or 5)))
         retrieval_mode = str(payload.get("retrieval_mode") or cfg.retrieval.retrieval_mode or "hybrid")
-        hits = rt.search(query, top_k=top_k, retrieval_mode=retrieval_mode)
+        # Same event-loop constraint as ``search_brain``: the embedding
+        # provider's sync ``embed()`` runs ``asyncio.run()`` internally, so the
+        # blocking search must execute off the running event loop.
+        try:
+            hits = await asyncio.to_thread(
+                rt.search, query, top_k=top_k, retrieval_mode=retrieval_mode
+            )
+        except KBError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        except Exception as exc:
+            logger.exception("brain synthesize search failed")
+            raise HTTPException(status_code=500, detail=f"search failed: {exc}") from exc
         from agenticx.brain.synthesis import synthesize_brain_query
 
         result = await asyncio.to_thread(
