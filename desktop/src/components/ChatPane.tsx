@@ -838,6 +838,7 @@ function PaneKnowledgeRetrievalModeSwitch({
   );
   const [saving, setSaving] = useState(false);
   const [open, setOpen] = useState(false);
+  const refreshGenRef = useRef(0);
 
   // Per-session binding: prefer the explicit per-session choice; only fall back
   // to the global config value as the DEFAULT for sessions the user has not
@@ -845,6 +846,7 @@ function PaneKnowledgeRetrievalModeSwitch({
   // sessions no longer clobbers each other's mode.
   const refresh = useCallback(async () => {
     const sid = String(sessionId || "").trim();
+    const gen = ++refreshGenRef.current;
     const perSession = getSessionKbRetrievalMode(sid);
     if (perSession) {
       setMode(perSession);
@@ -852,6 +854,14 @@ function PaneKnowledgeRetrievalModeSwitch({
     }
     try {
       const body = await api.readConfig();
+      if (gen !== refreshGenRef.current) return;
+      // User may have toggled while readConfig was in flight — honor per-session
+      // choice and never let a stale global default clobber it.
+      const afterFetch = getSessionKbRetrievalMode(sid);
+      if (afterFetch) {
+        setMode(afterFetch);
+        return;
+      }
       const modeRaw = body.config.retrieval?.mode;
       // Legacy configs may still carry "manual" — fold it into auto so the
       // switch stays in sync with the simplified two-state model.
@@ -871,6 +881,9 @@ function PaneKnowledgeRetrievalModeSwitch({
       const sid = String(sessionId || "").trim();
       if (!sid) return;
       const previous = mode;
+      // Invalidate any in-flight refresh so global config cannot overwrite
+      // the choice the user just made.
+      refreshGenRef.current += 1;
       setMode(nextMode);
       setSaving(true);
       try {
@@ -4396,6 +4409,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
   useEffect(() => {
     const sid = (pane.sessionId || "").trim();
     if (!sid) return;
+    let cancelled = false;
     const enteredAt = Date.now();
     sessionEnteredAtRef.current[sid] = enteredAt;
     // Per-session reset: switching the displayed session must NOT inherit a
@@ -4413,6 +4427,12 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
       setStallState("none");
       setStallRejectReason("");
       setStallTick((t) => t + 1);
+      // Pane-level execution chips (运行中 / knowledge_search / 后台运行中) are not
+      // keyed per session — clear immediately so a sibling background run cannot
+      // paint the newly opened session as "后台运行中" before listSessions returns.
+      setSessionExecutionState("idle");
+      setLastToolProgress(null);
+      setContextLoopStats(null);
     }
     setAutoNudgeCount(autoNudgeTriggeredRef.current[sid] ?? 0);
     const priorUnattended = (pane.messages ?? []).filter(
@@ -4424,6 +4444,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
     unattendedContinueTriggeredRef.current[sid] = priorUnattended;
     setUnattendedContinueCount(priorUnattended);
     void window.agenticxDesktop.listSessions(pane.avatarId ?? undefined).then((r) => {
+      if (cancelled) return;
       if (!r.ok) return;
       const row = (r.sessions ?? []).find((s) => s.session_id === sid);
       const st = (row?.execution_state ?? "idle") as SessionExecutionState;
@@ -4441,6 +4462,9 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
         void reconcileDisplayedSessionFromDisk(sid);
       }
     });
+    return () => {
+      cancelled = true;
+    };
   }, [mergeTailFromDisk, reattachLiveStream, reconcileDisplayedSessionFromDisk, pane.sessionId, pane.avatarId]);
 
   useEffect(() => {
@@ -5972,7 +5996,10 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
           if (!line) continue;
           try {
             const payload = JSON.parse(line.slice(6));
-            recordSseActivity();
+            const sessionStillActive = isTargetSessionStillActive();
+            if (sessionStillActive) {
+              recordSseActivity();
+            }
             const eventAgentId = payload.data?.agent_id ?? "meta";
             if (payload.type === "continuation_notice") {
               const noticeText = String(payload.data?.text ?? "").trim();
@@ -5980,21 +6007,22 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
                 addPaneMessageIfSessionActive(pane.id, "tool", noticeText, "meta");
               }
               clearResumeInFlight(requestSessionId);
-              setStallRejectReason("");
-              // Continuation accepted: now safe to dismiss the stall/exhausted card.
-              setStallState("none");
+              if (sessionStillActive) {
+                setStallRejectReason("");
+                // Continuation accepted: now safe to dismiss the stall/exhausted card.
+                setStallState("none");
+              }
               continue;
             }
             if (payload.type === "continuation_rejected") {
               const rejectText = String(payload.data?.text ?? "").trim();
               clearResumeInFlight(requestSessionId);
-              if (rejectText) {
+              if (rejectText && sessionStillActive) {
                 setStallRejectReason(rejectText);
                 // Inline reject only shows inside a mounted recovery card. Fall
                 // back to a toast when the user has left the pane OR no card is
                 // currently visible (stallState === "none").
-                const samePane = (pane.sessionId || "").trim() === requestSessionId;
-                if (!samePane || stallStateRef.current === "none") {
+                if (stallStateRef.current === "none") {
                   setStallHintToast(rejectText);
                 }
               }
@@ -6254,10 +6282,12 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
               continue;
             }
             if (payload.type === "tool_progress") {
-              recordProgressActivity();
+              if (sessionStillActive) {
+                recordProgressActivity();
+              }
               const name = String(payload.data?.name ?? "tool");
               const sec = Number(payload.data?.elapsed_seconds ?? 0);
-              if (eventAgentId === "meta") {
+              if (eventAgentId === "meta" && sessionStillActive) {
                 setLastToolProgress({ name, sec: Number.isFinite(sec) ? sec : 0 });
               }
               const outputLine = payload.data?.line as string | undefined;
@@ -6709,6 +6739,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
               });
             }
             if (payload.type === "context_stats") {
+              if (!sessionStillActive) continue;
               const round = Number(payload.data?.round ?? 0) || 0;
               const toolSession = Number(payload.data?.tool_result_tokens_session ?? 0) || 0;
               const archived = Number(payload.data?.archived_tool_calls ?? 0) || 0;
