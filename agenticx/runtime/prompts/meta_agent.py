@@ -444,12 +444,18 @@ def _build_kb_retrieval_policy_block() -> str:
     mode = "auto"
     top_k = 5
     enabled = True
+    retrieval_mode = "vector"
+    synthesis_enabled = False
     try:
         from agenticx.studio.kb import KBManager
 
         cfg = KBManager.instance().read_config()
         enabled = bool(getattr(cfg, "enabled", True))
         top_k = int(getattr(getattr(cfg, "retrieval", None), "top_k", 5) or 5)
+        retrieval_mode = str(
+            getattr(getattr(cfg, "retrieval", None), "retrieval_mode", "vector") or "vector"
+        )
+        synthesis_enabled = bool(getattr(getattr(cfg, "synthesis", None), "enabled", False))
         mode_raw = str(getattr(getattr(cfg, "retrieval", None), "mode", "auto") or "auto").strip().lower()
         # Legacy ``manual`` has been folded into ``auto`` — treat any unknown
         # value (including that legacy token) as ``auto``.
@@ -474,9 +480,15 @@ def _build_kb_retrieval_policy_block() -> str:
         if mode == "auto"
         else "始终检索（always）：回答前优先调用 knowledge_search，再结合结果作答。"
     )
+    synthesis_hint = (
+        "- 若用户需要「综合知识库写答案/带引用总结」而非只看原始片段，优先调用 `knowledge_synthesize`（返回带 [N] 引用与缺口分析）。\n"
+        if synthesis_enabled
+        else ""
+    )
     return (
         "## 知识库检索（Stage-1 MVP）\n"
-        f"- 当前检索模式：`{mode}`；默认 Top-K：`{top_k}`。{mode_hint}\n"
+        f"- 当前检索模式：`{mode}`；检索通道：`{retrieval_mode}`；默认 Top-K：`{top_k}`。{mode_hint}\n"
+        f"{synthesis_hint}"
         f"- 除非用户显式指定，优先省略 `top_k` 参数，让系统自动采用默认 Top-K={top_k}。\n"
         "- 返回 JSON 形如 `{ok, hits:[{id,score,text,source:{uri,title,chunk_index}}], used_top_k, source:'local'}`。\n"
         "- 回答必须基于 `hits[].text` 给出，并在句末用 `[N]` 标注来源编号（N 与本轮 references id 对应）。若 `hits` 为空，明确告知用户未在知识库命中，并询问是否需要兜底到一般知识。\n"

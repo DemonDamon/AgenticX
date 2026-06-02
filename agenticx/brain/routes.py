@@ -6,7 +6,7 @@ import asyncio
 import logging
 import shutil
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 
@@ -15,6 +15,15 @@ from agenticx.brain.registry import BrainError, BrainRegistry
 from agenticx.brain.runtime_docs import DocsBrainRuntime
 from agenticx.brain.search import search_code_brains, search_docs_brains
 from agenticx.brain.types import BrainScope, BrainType
+from agenticx.brain.wiki_compiler import WikiCompiler
+from agenticx.brain.wiki_ops import (
+    brain_storage_root,
+    list_wiki_pages,
+    maybe_compile_wiki_after_ingest,
+    purge_wiki_source,
+    read_wiki_page,
+    run_brain_maintenance,
+)
 from agenticx.studio.kb.contracts import ChunkingSpec, EmbeddingSpec, KBConfig, KBError
 from agenticx.studio.kb.runtime import (
     _build_embedding_provider,
@@ -23,6 +32,12 @@ from agenticx.studio.kb.runtime import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+def _wiki_ingest_on_done(rt: DocsBrainRuntime):
+    def _cb(job) -> None:
+        maybe_compile_wiki_after_ingest(rt, job)
+    return _cb
 
 
 def _require_docs_brain(brain_id: str) -> DocsBrainRuntime:
@@ -179,16 +194,23 @@ def register_brain_routes(app: FastAPI) -> None:
             doc = rt.runtime.register_document(str(abs_path))
         except KBError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
-        job = rt.jobs.submit_ingest(rt.runtime, doc.id)
+        job = rt.jobs.submit_ingest(rt.runtime, doc.id, on_done=_wiki_ingest_on_done(rt))
         return {"ok": True, "document": doc.to_dict(), "job_id": job.id}
 
     @app.delete("/api/brains/{brain_id}/materials/{doc_id}")
     async def delete_brain_material(brain_id: str, doc_id: str) -> Dict[str, Any]:
         rt = _require_docs_brain(brain_id)
+        doc = rt.runtime.get_document(doc_id)
+        source_name = doc.source_name if doc is not None else ""
         ok = rt.runtime.delete_document(doc_id)
         if not ok:
             raise HTTPException(status_code=404, detail=f"document {doc_id} not found")
-        return {"ok": True, "document_id": doc_id}
+        removed_wiki: List[str] = []
+        if source_name:
+            removed_wiki = await asyncio.to_thread(
+                purge_wiki_source, brain_storage_root(rt.brain), source_name
+            )
+        return {"ok": True, "document_id": doc_id, "removed_wiki_pages": removed_wiki}
 
     @app.post("/api/brains/{brain_id}/materials/{doc_id}/rebuild")
     async def rebuild_brain_material(brain_id: str, doc_id: str) -> Dict[str, Any]:
@@ -196,7 +218,7 @@ def register_brain_routes(app: FastAPI) -> None:
         doc = rt.runtime.get_document(doc_id)
         if doc is None:
             raise HTTPException(status_code=404, detail=f"document {doc_id} not found")
-        job = rt.jobs.submit_ingest(rt.runtime, doc.id)
+        job = rt.jobs.submit_ingest(rt.runtime, doc.id, on_done=_wiki_ingest_on_done(rt))
         return {"ok": True, "job_id": job.id}
 
     @app.get("/api/brains/{brain_id}/jobs")
@@ -347,9 +369,10 @@ def register_brain_routes(app: FastAPI) -> None:
         brain = BrainRegistry.instance().get(brain_id)
         if brain is None:
             raise HTTPException(status_code=404, detail="not found")
+        retrieval_mode = str(payload.get("retrieval_mode") or "").strip() or None
         if brain.type == BrainType.DOCS:
             rt = _require_docs_brain(brain_id)
-            hits = rt.search(query, top_k=top_k)
+            hits = rt.search(query, top_k=top_k, retrieval_mode=retrieval_mode)
             return {"ok": True, "hits": [h.to_dict() for h in hits], "used_top_k": len(hits)}
         from agenticx.brain.runtime_code import CodeBrainRuntime
 
@@ -361,6 +384,101 @@ def register_brain_routes(app: FastAPI) -> None:
 
         formatted = format_hits_for_tool(hits)
         return {"ok": True, "hits": formatted, "used_top_k": len(formatted)}
+
+    @app.get("/api/brains/{brain_id}/wiki/pages")
+    async def brain_wiki_pages(brain_id: str) -> Dict[str, Any]:
+        rt = _require_docs_brain(brain_id)
+        pages = await asyncio.to_thread(list_wiki_pages, brain_storage_root(rt.brain))
+        return {"ok": True, "pages": pages}
+
+    @app.get("/api/brains/{brain_id}/wiki/page")
+    async def brain_wiki_page(brain_id: str, path: str) -> Dict[str, Any]:
+        rt = _require_docs_brain(brain_id)
+        content = await asyncio.to_thread(read_wiki_page, brain_storage_root(rt.brain), path)
+        if content is None:
+            raise HTTPException(status_code=404, detail="wiki page not found")
+        return {"ok": True, "path": path, "content": content}
+
+    @app.get("/api/brains/{brain_id}/wiki/purpose")
+    async def brain_wiki_purpose_get(brain_id: str) -> Dict[str, Any]:
+        rt = _require_docs_brain(brain_id)
+        purpose_path = brain_storage_root(rt.brain) / "purpose.md"
+        content = ""
+        if purpose_path.is_file():
+            content = purpose_path.read_text(encoding="utf-8", errors="replace")
+        return {"ok": True, "content": content}
+
+    @app.put("/api/brains/{brain_id}/wiki/purpose")
+    async def brain_wiki_purpose_put(brain_id: str, payload: Dict[str, Any]) -> Dict[str, Any]:
+        if not isinstance(payload, dict):
+            raise HTTPException(status_code=400, detail="expected JSON object")
+        rt = _require_docs_brain(brain_id)
+        content = str(payload.get("content") or "")
+        purpose_path = brain_storage_root(rt.brain) / "purpose.md"
+        purpose_path.parent.mkdir(parents=True, exist_ok=True)
+        purpose_path.write_text(content, encoding="utf-8")
+        return {"ok": True}
+
+    @app.post("/api/brains/{brain_id}/wiki/compile/{doc_id}")
+    async def brain_wiki_compile(brain_id: str, doc_id: str) -> Dict[str, Any]:
+        rt = _require_docs_brain(brain_id)
+        doc = rt.runtime.get_document(doc_id)
+        if doc is None:
+            raise HTTPException(status_code=404, detail=f"document {doc_id} not found")
+        cfg = rt.read_config()
+
+        def _compile() -> Dict[str, Any]:
+            from agenticx.studio.kb.runtime import _read_document_text
+
+            text = _read_document_text(doc.source_path)
+            compiler = WikiCompiler(brain_storage_root(rt.brain))
+            result = compiler.compile_source(
+                source_path=doc.source_path,
+                source_text=text,
+                provider_name=cfg.embedding.provider,
+                model_name=None,
+            )
+            return {"ok": result.ok, "written": result.written, "error": result.error}
+
+        return await asyncio.to_thread(_compile)
+
+    @app.post("/api/brains/{brain_id}/synthesize")
+    async def brain_synthesize(brain_id: str, payload: Dict[str, Any]) -> Dict[str, Any]:
+        if not isinstance(payload, dict):
+            raise HTTPException(status_code=400, detail="expected JSON object")
+        query = str(payload.get("query") or "").strip()
+        if not query:
+            raise HTTPException(status_code=400, detail="query required")
+        rt = _require_docs_brain(brain_id)
+        cfg = rt.read_config()
+        if not getattr(getattr(cfg, "synthesis", None), "enabled", False):
+            raise HTTPException(status_code=400, detail="synthesis is disabled for this brain")
+        top_k = max(1, min(20, int(payload.get("top_k") or cfg.retrieval.top_k or 5)))
+        retrieval_mode = str(payload.get("retrieval_mode") or cfg.retrieval.retrieval_mode or "hybrid")
+        hits = rt.search(query, top_k=top_k, retrieval_mode=retrieval_mode)
+        from agenticx.brain.synthesis import synthesize_brain_query
+
+        result = await asyncio.to_thread(
+            synthesize_brain_query,
+            query=query,
+            hits=hits,
+            provider_name=str(payload.get("provider") or cfg.embedding.provider or "") or None,
+            model_name=str(payload.get("model") or "") or None,
+        )
+        return {
+            "ok": result.ok,
+            "error": result.error,
+            "answer": result.answer,
+            "gaps": result.gaps,
+            "references": result.references,
+            "hits": [h.to_dict() for h in result.hits],
+        }
+
+    @app.post("/api/brains/{brain_id}/maintenance")
+    async def brain_maintenance(brain_id: str) -> Dict[str, Any]:
+        rt = _require_docs_brain(brain_id)
+        report = await asyncio.to_thread(run_brain_maintenance, rt)
+        return report
 
     @app.post("/api/brains/{brain_id}/index")
     async def index_code_brain(brain_id: str) -> Dict[str, Any]:

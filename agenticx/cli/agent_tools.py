@@ -129,6 +129,7 @@ _CONCURRENCY_SAFE_STUDIO_TOOLS = frozenset(
         "get_automation_task_logs",
         "cc_bridge_list",
         "knowledge_search",  # Plan-Id: machi-kb-stage1-local-mvp — read-only vector search.
+        "knowledge_synthesize",
         "web_search",
         "web_fetch",
         "view_image",
@@ -1153,6 +1154,33 @@ STUDIO_TOOLS: List[Dict[str, Any]] = [
                     "brain_id": {
                         "type": "string",
                         "description": "Optional: search only this docs brain id (must be visible to the session avatar).",
+                    },
+                },
+                "required": ["query"],
+                "additionalProperties": False,
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "knowledge_synthesize",
+            "description": (
+                "Synthesize an answer from mounted document brains with [N] citations and gap analysis. "
+                "Use when the user wants a composed answer from the knowledge base rather than raw chunks. "
+                "Requires synthesis to be enabled in brain settings. For raw retrieval only, use knowledge_search."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "query": {"type": "string", "description": "Question to answer from the knowledge base."},
+                    "top_k": {
+                        "type": "integer",
+                        "description": "Maximum source chunks to retrieve before synthesis (1-20).",
+                    },
+                    "brain_id": {
+                        "type": "string",
+                        "description": "Optional: synthesize from a single docs brain id.",
                     },
                 },
                 "required": ["query"],
@@ -3705,7 +3733,21 @@ def _tool_skill_use(arguments: Dict[str, Any], session: StudioSession) -> str:
         session.context_files, name, bound_avatar_id=bound, quiet=True
     )
     if not ok:
-        return "ERROR: skill activation failed"
+        from pathlib import Path
+
+        hint = (
+            f"Skill '{name}' was not found in the skill index. "
+            "Common causes: SKILL.md missing YAML `name:` (only `title:` is not enough), "
+            "skill not under a scanned path, or name mismatch vs frontmatter. "
+            "Run skill_list for discoverable names, or fix frontmatter then retry skill_use."
+        )
+        guessed = Path.home() / ".agenticx" / "skills" / name / "SKILL.md"
+        if guessed.is_file():
+            hint += (
+                f" File exists at {guessed} but is not indexed — add "
+                f"`name: {name}` to frontmatter (or use skill_manage create/patch)."
+            )
+        return f"ERROR: skill activation failed. {hint}"
 
     meta = SkillBundleLoader().get_skill(name)
     try:
@@ -3884,6 +3926,53 @@ def _tool_knowledge_search(
     except Exception as exc:
         return json.dumps(
             {"ok": False, "error": f"search failed: {exc}", "hits": []},
+            ensure_ascii=False,
+        )
+    return json.dumps(payload, ensure_ascii=False)
+
+
+def _tool_knowledge_synthesize(
+    arguments: Dict[str, Any], session: Optional["StudioSession"] = None
+) -> str:
+    query = str(arguments.get("query", "")).strip()
+    if not query:
+        return json.dumps(
+            {"ok": False, "error": "query is required", "answer": ""},
+            ensure_ascii=False,
+        )
+    try:
+        from agenticx.brain.synthesis import synthesize_docs_brains
+        from agenticx.studio.kb import KBManager
+    except Exception as exc:
+        return json.dumps(
+            {"ok": False, "error": f"KB subsystem unavailable: {exc}", "answer": ""},
+            ensure_ascii=False,
+        )
+
+    cfg = KBManager.instance().read_config()
+    default_top_k = int(getattr(getattr(cfg, "retrieval", None), "top_k", 5) or 5)
+    raw_top_k = arguments.get("top_k")
+    try:
+        top_k = int(raw_top_k) if raw_top_k is not None else default_top_k
+    except (TypeError, ValueError):
+        top_k = default_top_k
+    top_k = max(1, min(20, top_k))
+
+    avatar_id = None
+    if session is not None:
+        avatar_id = str(getattr(session, "bound_avatar_id", "") or "").strip() or None
+    brain_id = str(arguments.get("brain_id") or "").strip() or None
+
+    try:
+        payload = synthesize_docs_brains(
+            query=query,
+            top_k=top_k,
+            avatar_id=avatar_id,
+            brain_id=brain_id,
+        )
+    except Exception as exc:
+        return json.dumps(
+            {"ok": False, "error": f"synthesis failed: {exc}", "answer": ""},
             ensure_ascii=False,
         )
     return json.dumps(payload, ensure_ascii=False)
@@ -5108,6 +5197,8 @@ async def dispatch_tool_async(
             return _tool_memory_search(arguments)
         if name == "knowledge_search":
             return await asyncio.to_thread(_tool_knowledge_search, arguments, session)
+        if name == "knowledge_synthesize":
+            return await asyncio.to_thread(_tool_knowledge_synthesize, arguments, session)
         if name == "web_search":
             return await asyncio.to_thread(_tool_web_search, arguments, session)
         if name == "web_fetch":
