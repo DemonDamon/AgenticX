@@ -411,6 +411,19 @@ declare global {
       onSkillsChanged: (cb: () => void) => () => void;
       onAutomationTaskProgress: (cb: (payload: AutomationTaskProgress) => void) => () => void;
 
+      diagnoseBackendDeps: () => Promise<{
+        ok: boolean;
+        usingBundled?: boolean;
+        pythonPath?: string;
+        missing?: string[];
+        detail?: string;
+        error?: string;
+      }>;
+      repairBackendDeps: () => Promise<{ ok: boolean; venvPython?: string; error?: string }>;
+      onBackendDepsProgress: (
+        cb: (payload: { phase: string; line?: string; pct?: number }) => void,
+      ) => () => void;
+
       listAvatars: () => Promise<{ ok: boolean; avatars: AvatarItem[] }>;
       createAvatar: (payload: {
         name: string;
@@ -422,6 +435,7 @@ declare global {
         skills_enabled?: Record<string, boolean> | null;
         default_provider?: string;
         default_model?: string;
+        workspace_dir?: string;
       }) => Promise<{ ok: boolean; avatar?: AvatarItem; error?: string }>;
       updateAvatar: (payload: {
         id: string;

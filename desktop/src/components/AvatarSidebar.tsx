@@ -367,6 +367,7 @@ export function AvatarSidebar() {
     skillsEnabled?: Record<string, boolean>;
     defaultProvider?: string;
     defaultModel?: string;
+    workspaceDir?: string;
   }) => {
     const se = data.skillsEnabled;
     const falses =
@@ -376,6 +377,7 @@ export function AvatarSidebar() {
     const skillsPayload = Object.keys(falses).length > 0 ? falses : undefined;
     const dp = (data.defaultProvider || "").trim();
     const dm = (data.defaultModel || "").trim();
+    const ws = (data.workspaceDir || "").trim();
     await window.agenticxDesktop.createAvatar({
       name: data.name,
       role: data.role,
@@ -384,6 +386,7 @@ export function AvatarSidebar() {
       ...(skillsPayload !== undefined ? { skills_enabled: skillsPayload } : {}),
       ...(dp ? { default_provider: dp } : {}),
       ...(dm ? { default_model: dm } : {}),
+      ...(ws ? { workspace_dir: ws } : {}),
     });
     await refreshAvatars();
   };

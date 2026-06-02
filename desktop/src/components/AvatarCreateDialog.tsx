@@ -16,6 +16,7 @@ type Props = {
     skillsEnabled?: Record<string, boolean>;
     defaultProvider?: string;
     defaultModel?: string;
+    workspaceDir?: string;
   }) => Promise<void>;
 };
 
@@ -37,6 +38,7 @@ export function AvatarCreateDialog({ open, onClose, onCreate }: Props) {
   const [skillsEnabledDraft, setSkillsEnabledDraft] = useState<Record<string, boolean>>({});
   const [defaultProvider, setDefaultProvider] = useState("");
   const [defaultModel, setDefaultModel] = useState("");
+  const [workspaceDir, setWorkspaceDir] = useState("");
   const customizedCount = Object.keys(toolsEnabled).filter((key) => toolsEnabled[key] !== undefined).length;
   const skillsCustomizedCount = Object.keys(skillsEnabledDraft).filter((k) => skillsEnabledDraft[k] === false).length;
 
@@ -77,6 +79,7 @@ export function AvatarCreateDialog({ open, onClose, onCreate }: Props) {
         ...(Object.keys(skillsOnlyFalse).length > 0 ? { skillsEnabled: skillsOnlyFalse } : {}),
         defaultProvider: defaultProvider.trim(),
         defaultModel: defaultModel.trim(),
+        workspaceDir: workspaceDir.trim(),
       });
       setName("");
       setRole("");
@@ -85,6 +88,7 @@ export function AvatarCreateDialog({ open, onClose, onCreate }: Props) {
       setSkillsEnabledDraft({});
       setDefaultProvider("");
       setDefaultModel("");
+      setWorkspaceDir("");
       setSkillsSectionOpen(false);
       setToolsDialogOpen(false);
       onClose();
@@ -124,6 +128,7 @@ export function AvatarCreateDialog({ open, onClose, onCreate }: Props) {
     setToolsDialogOpen(false);
     setDefaultProvider("");
     setDefaultModel("");
+    setWorkspaceDir("");
     onClose();
   };
 
@@ -192,6 +197,16 @@ export function AvatarCreateDialog({ open, onClose, onCreate }: Props) {
                     setDefaultProvider(p);
                     setDefaultModel(m);
                   }}
+                />
+              </label>
+              <label className="block text-sm text-text-muted">
+                工作区目录
+                <span className="ml-1 text-xs text-text-faint">(可选)</span>
+                <input
+                  className="mt-1 w-full rounded-md border border-border bg-surface-panel px-3 py-2 text-sm"
+                  value={workspaceDir}
+                  onChange={(e) => setWorkspaceDir(e.target.value)}
+                  placeholder="留空使用默认 ~/.agenticx/avatars/<id>/workspace"
                 />
               </label>
 

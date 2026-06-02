@@ -4143,6 +4143,7 @@ def create_studio_app() -> FastAPI:
             tools_enabled=tools_enabled,
             skills_enabled=skills_enabled,
             brains_enabled=brains_enabled,
+            workspace_dir=str(payload.get("workspace_dir", "")).strip(),
         )
         return {"ok": True, "avatar": config.to_dict()}
 
