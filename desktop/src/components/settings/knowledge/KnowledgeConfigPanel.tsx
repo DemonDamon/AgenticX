@@ -14,6 +14,8 @@ import {
   type KBStats,
 } from "./types";
 import { KB_FIELD_BASE } from "./kb-field-classes";
+import { listKbEmbeddingModelOptions } from "../../../utils/embedding-model-options";
+import type { ProviderCatalogEntry } from "../../../utils/model-options";
 
 type Props = {
   api: KBApi;
@@ -23,6 +25,8 @@ type Props = {
   draft: KBConfig;
   onDraftChange: (next: KBConfig) => void;
   initialStats: KBStats | null;
+  /** Model-service catalog (visible models from provider settings / API scan). */
+  providerCatalog?: Record<string, ProviderCatalogEntry>;
 };
 
 export function KnowledgeConfigPanel({
@@ -31,6 +35,7 @@ export function KnowledgeConfigPanel({
   draft,
   onDraftChange,
   initialStats,
+  providerCatalog = {},
 }: Props) {
   const config = draft;
   const setConfig = (updater: KBConfig | ((prev: KBConfig) => KBConfig)) => {
@@ -129,6 +134,16 @@ export function KnowledgeConfigPanel({
     };
   }, [config.embedding.provider, config.embedding.model, config.embedding.base_url]);
 
+  const embeddingModelOptions = useMemo(
+    () =>
+      listKbEmbeddingModelOptions(
+        config.embedding.provider,
+        providerCatalog,
+        config.embedding.model,
+      ),
+    [config.embedding.provider, config.embedding.model, providerCatalog],
+  );
+
   const embeddingChanged = useMemo(
     () =>
       persistedConfig.embedding.provider !== config.embedding.provider ||
@@ -152,12 +167,22 @@ export function KnowledgeConfigPanel({
 
   function patchEmbeddingProvider(providerId: string) {
     const preset = EMBEDDING_PROVIDERS.find((p) => p.id === providerId);
+    const options = listKbEmbeddingModelOptions(
+      providerId,
+      providerCatalog,
+      config.embedding.model,
+    );
+    const nextModel =
+      options.find((m) => m === config.embedding.model) ??
+      options[0] ??
+      preset?.defaultModel ??
+      config.embedding.model;
     setConfig((prev) => ({
       ...prev,
       embedding: {
         ...prev.embedding,
         provider: providerId,
-        model: preset?.defaultModel ?? prev.embedding.model,
+        model: nextModel,
         dim: preset?.defaultDim ?? prev.embedding.dim,
       },
     }));
@@ -226,13 +251,36 @@ export function KnowledgeConfigPanel({
             </select>
           </Field>
           <Field label="模型">
-            <input
-              className={`w-full ${KB_FIELD_BASE}`}
-              value={config.embedding.model}
-              onChange={(e) =>
-                patch("embedding", { ...config.embedding, model: e.target.value })
-              }
-            />
+            {embeddingModelOptions.length > 0 ? (
+              <select
+                className={`w-full ${KB_FIELD_BASE}`}
+                value={config.embedding.model}
+                onChange={(e) =>
+                  patch("embedding", { ...config.embedding, model: e.target.value })
+                }
+              >
+                {embeddingModelOptions.map((m) => (
+                  <option key={m} value={m}>
+                    {m}
+                  </option>
+                ))}
+              </select>
+            ) : (
+              <input
+                className={`w-full ${KB_FIELD_BASE}`}
+                value={config.embedding.model}
+                onChange={(e) =>
+                  patch("embedding", { ...config.embedding, model: e.target.value })
+                }
+                placeholder="请先在「模型服务」拉取并设为可见的嵌入模型"
+              />
+            )}
+            {embeddingModelOptions.length === 0 &&
+            config.embedding.provider !== "ollama" ? (
+              <p className="mt-1 text-[11px] text-text-faint">
+                在「模型服务」选择对应厂商，从 API 获取模型并将嵌入类模型设为可见后，此处会出现下拉选项。
+              </p>
+            ) : null}
           </Field>
           <Field label="向量维度">
             <input
