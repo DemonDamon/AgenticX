@@ -6,6 +6,7 @@ import type { KBApi, ParserStatus } from "./api";
 import {
   CHUNKING_STRATEGIES,
   EMBEDDING_PROVIDERS,
+  RETRIEVAL_MODES,
   defaultKBConfig,
   type KBConfig,
   type KBStats,
@@ -454,9 +455,104 @@ export function KnowledgeConfigPanel({
               }
             />
           </Field>
+          <Field label="检索通道">
+            <select
+              className={`w-full ${KB_FIELD_BASE}`}
+              value={config.retrieval.retrieval_mode ?? "vector"}
+              onChange={(e) =>
+                patch("retrieval", {
+                  ...config.retrieval,
+                  retrieval_mode: e.target.value as KBConfig["retrieval"]["retrieval_mode"],
+                })
+              }
+            >
+              {RETRIEVAL_MODES.map((m) => (
+                <option key={m.id} value={m.id}>
+                  {m.label}
+                </option>
+              ))}
+            </select>
+          </Field>
+          {(config.retrieval.retrieval_mode === "hybrid" ||
+            config.retrieval.retrieval_mode === "hybrid_graph") && (
+            <div className="grid grid-cols-2 gap-2">
+              <Field label="RRF k">
+                <input
+                  type="number"
+                  className={`w-full ${KB_FIELD_BASE}`}
+                  min={1}
+                  value={config.retrieval.rrf_k ?? 60}
+                  onChange={(e) =>
+                    patch("retrieval", {
+                      ...config.retrieval,
+                      rrf_k: Math.max(1, Number(e.target.value) || 60),
+                    })
+                  }
+                />
+              </Field>
+              <Field label="向量权重">
+                <input
+                  type="number"
+                  step="0.1"
+                  className={`w-full ${KB_FIELD_BASE}`}
+                  min={0}
+                  value={config.retrieval.vector_weight ?? 1}
+                  onChange={(e) =>
+                    patch("retrieval", {
+                      ...config.retrieval,
+                      vector_weight: Math.max(0, Number(e.target.value) || 1),
+                    })
+                  }
+                />
+              </Field>
+              <Field label="BM25 权重">
+                <input
+                  type="number"
+                  step="0.1"
+                  className={`w-full ${KB_FIELD_BASE}`}
+                  min={0}
+                  value={config.retrieval.bm25_weight ?? 1}
+                  onChange={(e) =>
+                    patch("retrieval", {
+                      ...config.retrieval,
+                      bm25_weight: Math.max(0, Number(e.target.value) || 1),
+                    })
+                  }
+                />
+              </Field>
+            </div>
+          )}
           <p className="text-[11px] leading-snug text-text-faint">
             智能检索：由模型判断何时检索，包含你主动要求「查知识库」的场景；始终检索：每轮都先检索后再回答。
           </p>
+          <div className="grid grid-cols-2 gap-2 border-t border-border pt-3">
+            <label className="flex items-center gap-2 text-xs text-text-subtle">
+              <input
+                type="checkbox"
+                checked={config.wiki_compiler?.enabled ?? false}
+                onChange={(e) =>
+                  setConfig({
+                    ...config,
+                    wiki_compiler: { enabled: e.target.checked },
+                  })
+                }
+              />
+              Wiki 编译（入库后生成结构化页）
+            </label>
+            <label className="flex items-center gap-2 text-xs text-text-subtle">
+              <input
+                type="checkbox"
+                checked={config.synthesis?.enabled ?? false}
+                onChange={(e) =>
+                  setConfig({
+                    ...config,
+                    synthesis: { enabled: e.target.checked },
+                  })
+                }
+              />
+              合成答案（knowledge_synthesize）
+            </label>
+          </div>
         </div>
       </Panel>
 
