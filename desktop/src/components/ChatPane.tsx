@@ -1200,9 +1200,6 @@ function formatToolResultMessage(toolNameRaw: unknown, resultRaw: unknown): { co
   if (toolName === "check_resources") {
     return { content: "", silent: true };
   }
-  if (SEARCH_REFERENCE_TOOLS.has(toolName)) {
-    return { content: "", silent: true };
-  }
   if (toolName === "delegate_to_avatar") {
     try {
       const parsed = JSON.parse(resultText) as Record<string, unknown>;
@@ -6388,7 +6385,6 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
               if (SEARCH_REFERENCE_TOOLS.has(toolNameStr)) {
                 const q = String(toolArgs.query ?? "").trim();
                 if (q) pendingSearchedQueries = mergeSearchedQueries(pendingSearchedQueries, [q]);
-                continue;
               }
               if (eventAgentId === "meta" && toolNameStr === "cc_bridge_start") {
                 const callKey = toolCallId || `${requestSessionId || "session"}:cc_bridge_start`;
@@ -6456,7 +6452,6 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
                 );
                 pendingReferences = accumulated.references;
                 pendingSearchedQueries = accumulated.queries;
-                continue;
               }
               const formatted = formatToolResultMessage(toolName, payload.data?.result);
               if (formatted.silent) continue;
