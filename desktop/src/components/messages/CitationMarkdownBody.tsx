@@ -12,11 +12,14 @@ import {
   normalizeChatMarkdownContent,
 } from "./markdown-components";
 import {
+  buildCitationRenderGroups,
+  escapeMarkdownOrderedListMarkers,
   normalizeCitationMarkers,
   relocateCitationMarkersForDisplay,
   splitCitationParagraphBlocks,
   splitCitationSegments,
   stripOrphanCitationMarkers,
+  type CitationSegment,
 } from "./citation-normalize";
 
 type Props = {
@@ -48,7 +51,53 @@ const inlineCitationMarkdownComponents: Partial<Components> = {
       </ul>
     );
   },
+  li({ children }) {
+    return <span className="inline align-baseline">{children}</span>;
+  },
 };
+
+function InlineCitationGroup({
+  segments,
+  refMap,
+  isStreaming,
+  groupIndex,
+}: {
+  segments: CitationSegment[];
+  refMap: Map<number, SearchReference>;
+  isStreaming?: boolean;
+  groupIndex: number;
+}) {
+  return (
+    <span className="inline max-w-full align-baseline leading-relaxed">
+      {segments.map((segment, index) => {
+        if (segment.kind === "citation") {
+          const id = Number(segment.value);
+          return (
+            <CitationBadge
+              key={`cite-g${groupIndex}-${index}-${id}`}
+              id={id}
+              reference={refMap.get(id)}
+            />
+          );
+        }
+        if (!segment.value) return null;
+        const mdSource = escapeMarkdownOrderedListMarkers(segment.value);
+        return (
+          <Fragment key={`md-g${groupIndex}-${index}`}>
+            <ReactMarkdown
+              remarkPlugins={chatRemarkPlugins}
+              rehypePlugins={chatRehypePlugins}
+              components={inlineCitationMarkdownComponents}
+              urlTransform={chatUrlTransform}
+            >
+              {normalizeChatMarkdownContent(mdSource, { isStreaming })}
+            </ReactMarkdown>
+          </Fragment>
+        );
+      })}
+    </span>
+  );
+}
 
 function InlineCitationRow({
   block,
@@ -59,35 +108,19 @@ function InlineCitationRow({
   refMap: Map<number, SearchReference>;
   isStreaming?: boolean;
 }) {
-  const segments = splitCitationSegments(block);
+  const groups = buildCitationRenderGroups(splitCitationSegments(block));
   return (
-    <span className="inline max-w-full align-baseline leading-relaxed">
-      {segments.map((segment, index) => {
-        if (segment.kind === "citation") {
-          const id = Number(segment.value);
-          return (
-            <CitationBadge
-              key={`cite-${index}-${id}`}
-              id={id}
-              reference={refMap.get(id)}
-            />
-          );
-        }
-        if (!segment.value) return null;
-        return (
-          <Fragment key={`md-${index}`}>
-            <ReactMarkdown
-              remarkPlugins={chatRemarkPlugins}
-              rehypePlugins={chatRehypePlugins}
-              components={inlineCitationMarkdownComponents}
-              urlTransform={chatUrlTransform}
-            >
-              {normalizeChatMarkdownContent(segment.value, { isStreaming })}
-            </ReactMarkdown>
-          </Fragment>
-        );
-      })}
-    </span>
+    <>
+      {groups.map((segments, groupIndex) => (
+        <InlineCitationGroup
+          key={`cite-group-${groupIndex}`}
+          segments={segments}
+          refMap={refMap}
+          isStreaming={isStreaming}
+          groupIndex={groupIndex}
+        />
+      ))}
+    </>
   );
 }
 

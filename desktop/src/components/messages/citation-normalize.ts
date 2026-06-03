@@ -44,13 +44,59 @@ export function stripOrphanCitationMarkers(text: string): string {
     .replace(/[ \t]+([，。、；：！？,.;:!?])/g, "$1");
 }
 
-export function splitCitationSegments(text: string): Array<{ kind: "text" | "citation"; value: string }> {
+export type CitationSegment = { kind: "text" | "citation"; value: string };
+
+export function splitCitationSegments(text: string): CitationSegment[] {
   const parts = text.split(/(\[\d+\])/g).filter((part) => part.length > 0);
   return parts.map((part) => {
     const match = part.match(/^\[(\d+)\]$/);
     if (match) return { kind: "citation" as const, value: match[1] };
     return { kind: "text" as const, value: part };
   });
+}
+
+/** Prevent `1. foo` from becoming a block-level <ol> beside inline citation pills. */
+export function escapeMarkdownOrderedListMarkers(text: string): string {
+  if (!text) return text;
+  return text.replace(/^(\d+)\.\s+/gm, "$1\\. ");
+}
+
+/**
+ * Group segments so trailing [N] before a paragraph break stays on the same inline
+ * run as the preceding sentence (not on its own row between title and body).
+ */
+export function buildCitationRenderGroups(segments: CitationSegment[]): CitationSegment[][] {
+  if (segments.length === 0) return [];
+  const groups: CitationSegment[][] = [];
+  let current: CitationSegment[] = [];
+
+  const flush = () => {
+    if (current.length > 0) {
+      groups.push(current);
+      current = [];
+    }
+  };
+
+  for (let i = 0; i < segments.length; i += 1) {
+    const seg = segments[i];
+    current.push(seg);
+    if (seg.kind !== "citation") continue;
+
+    let j = i;
+    while (j + 1 < segments.length && segments[j + 1].kind === "citation") {
+      j += 1;
+      current.push(segments[j]);
+    }
+    i = j;
+
+    const next = segments[i + 1];
+    if (next?.kind === "text" && /^\s*\n/.test(next.value)) {
+      flush();
+    }
+  }
+
+  flush();
+  return groups;
 }
 
 const CITATION_TOKEN_RE = /\[\d+\](?!\()/;
