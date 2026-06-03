@@ -111,3 +111,11 @@ test("buildCitationRenderGroups: mid-sentence cites stay in one group", () => {
   assert.equal(groups.length, 1);
   assert.equal(groups[0].length, 4);
 });
+
+test("buildCitationRenderGroups: h3 title cite then body splits into two groups", () => {
+  const block = "### 1. **UToken 网关产品（UCloud）** [1]  \n面向企业 Token";
+  const groups = buildCitationRenderGroups(splitCitationSegments(block));
+  assert.equal(groups.length, 2);
+  assert.equal(groups[0][groups[0].length - 1].kind, "citation");
+  assert.match(groups[1][0].value, /面向企业 Token/);
+});
