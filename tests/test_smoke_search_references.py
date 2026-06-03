@@ -57,6 +57,23 @@ def test_web_and_kb_share_number_space() -> None:
     assert assigned[0]["url"] == "agx://kb/doc1#2"
 
 
+def test_build_kb_references_snippet_is_chunk_text_only() -> None:
+    kb = build_kb_references(
+        {
+            "hits": [
+                {
+                    "text": "chunk only",
+                    "score": 0.912,
+                    "source": {"uri": "doc1", "title": "Doc"},
+                }
+            ]
+        }
+    )
+    assert len(kb) == 1
+    assert kb[0]["snippet"] == "chunk only"
+    assert "score=" not in kb[0]["snippet"]
+
+
 def test_queue_web_search_batch_and_payload() -> None:
     session = _session()
     reset_turn_references(session)

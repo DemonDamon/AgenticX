@@ -390,6 +390,8 @@ export function ChatView({ onOpenConfirm, mode = "pro" }: Props) {
   }, []);
   const [streaming, setStreaming] = useState(false);
   const [streamedAssistantText, setStreamedAssistantText] = useState("");
+  const [streamReferences, setStreamReferences] = useState<SearchReference[]>([]);
+  const [streamSearchedQueries, setStreamSearchedQueries] = useState<string[]>([]);
   const [streamingModel, setStreamingModel] = useState<{ provider: string; model: string } | null>(null);
   const [panelOpen, setPanelOpen] = useState(false);
   const [modelPickerOpen, setModelPickerOpen] = useState(false);
@@ -621,6 +623,23 @@ export function ChatView({ onOpenConfirm, mode = "pro" }: Props) {
     streaming,
     hideStreamOverlayAsDuplicate,
   );
+  const streamAssistantMessage = useMemo((): Message => {
+    return {
+      id: "__stream__",
+      role: "assistant",
+      content: streamedAssistantText || "",
+      references: streamReferences.length > 0 ? streamReferences : undefined,
+      searchedQueries: streamSearchedQueries.length > 0 ? streamSearchedQueries : undefined,
+      provider: streamingModel?.provider,
+      model: streamingModel?.model,
+    };
+  }, [
+    streamedAssistantText,
+    streamReferences,
+    streamSearchedQueries,
+    streamingModel?.provider,
+    streamingModel?.model,
+  ]);
 
   const modelLabel = activeModel
     ? (activeProvider ? `${activeProvider} / ${activeModel}` : activeModel)
@@ -955,6 +974,8 @@ export function ChatView({ onOpenConfirm, mode = "pro" }: Props) {
       streamTextRef.current = "";
       cancelStreamRenderFrame();
       setStreamedAssistantText("");
+      setStreamReferences([]);
+      setStreamSearchedQueries([]);
       setStreamingModel(null);
       setStatus("idle");
       setStreaming(false);
@@ -1059,6 +1080,8 @@ export function ChatView({ onOpenConfirm, mode = "pro" }: Props) {
     recordProgressActivity();
     cancelStreamRenderFrame();
     setStreamedAssistantText("");
+    setStreamReferences([]);
+    setStreamSearchedQueries([]);
     setStreamingModel(reqModel ? { provider: reqProvider, model: reqModel } : null);
     streamTextRef.current = "";
     streamCommittedRef.current = false;
@@ -1231,6 +1254,10 @@ export function ChatView({ onOpenConfirm, mode = "pro" }: Props) {
                 );
                 pendingReferences = accumulated.references;
                 pendingSearchedQueries = accumulated.queries;
+                if (isCurrentRequest()) {
+                  setStreamReferences([...pendingReferences]);
+                  setStreamSearchedQueries([...pendingSearchedQueries]);
+                }
               }
               let resultObjForCc: Record<string, unknown> | null = null;
               const resultRaw = payload.data?.result;
@@ -1514,6 +1541,8 @@ export function ChatView({ onOpenConfirm, mode = "pro" }: Props) {
       cancelStreamRenderFrame();
       streamTextRef.current = "";
       setStreamedAssistantText("");
+      setStreamReferences([]);
+      setStreamSearchedQueries([]);
       setStreamingModel(null);
       setStatus("idle");
       setStreaming(false);
@@ -2045,17 +2074,17 @@ export function ChatView({ onOpenConfirm, mode = "pro" }: Props) {
             <div className={["!mt-1.5", isLite ? "text-[15px]" : "text-sm"].join(" ")}>
               {chatStyle === "terminal" ? (
                 <TerminalLine
-                  message={{ id: "__stream__", role: "assistant", content: streamedAssistantText || "" }}
+                  message={streamAssistantMessage}
                   badge={!isLite && streamingModel ? <ModelBadge provider={streamingModel.provider} model={streamingModel.model} /> : undefined}
                 />
               ) : chatStyle === "clean" ? (
                 <CleanBlock
-                  message={{ id: "__stream__", role: "assistant", content: streamedAssistantText || "" }}
+                  message={streamAssistantMessage}
                   badge={!isLite && streamingModel ? <ModelBadge provider={streamingModel.provider} model={streamingModel.model} /> : undefined}
                 />
               ) : (
                 <ImBubble
-                  message={{ id: "__stream__", role: "assistant", content: streamedAssistantText || "" }}
+                  message={streamAssistantMessage}
                   badge={!isLite && streamingModel ? <ModelBadge provider={streamingModel.provider} model={streamingModel.model} /> : undefined}
                   assistantName="Near"
                   streamStalled={stallState === "stall"}
