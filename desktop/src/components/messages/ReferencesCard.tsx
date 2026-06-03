@@ -1,7 +1,7 @@
 import { useMemo, useState } from "react";
 import { ChevronDown, ChevronRight, ExternalLink, Search } from "lucide-react";
 import type { SearchReference } from "../../types/search-references";
-import { openExternalUrl } from "../../utils/open-external";
+import { openSearchReference } from "../../utils/open-kb-reference";
 
 type Props = {
   references: SearchReference[];
@@ -11,32 +11,107 @@ type Props = {
 const PREVIEW_LIMIT = 5;
 const QUERY_PREVIEW_LIMIT = 3;
 
+function buildSummary(
+  refCount: number,
+  kbCount: number,
+  webCount: number,
+  queryCount: number,
+): string {
+  if (kbCount > 0 && webCount === 0) {
+    return `找到了 ${kbCount} 篇知识库资料`;
+  }
+  if (kbCount > 0 && webCount > 0) {
+    return `参考 ${refCount} 篇资料（含知识库 ${kbCount} 篇）`;
+  }
+  if (queryCount > 0) {
+    return `已检索 ${queryCount} 个关键词，参考 ${refCount} 篇资料`;
+  }
+  return `参考 ${refCount} 篇资料`;
+}
+
 export function ReferencesCard({ references, searchedQueries }: Props) {
   const [expanded, setExpanded] = useState(false);
   const [showAll, setShowAll] = useState(false);
 
   const queryCount = searchedQueries?.length ?? 0;
   const refCount = references.length;
+  const kbRefs = useMemo(() => references.filter((r) => r.source === "kb"), [references]);
+  const webRefs = useMemo(() => references.filter((r) => r.source === "web"), [references]);
   const visible = showAll ? references : references.slice(0, PREVIEW_LIMIT);
   const hiddenCount = Math.max(0, references.length - PREVIEW_LIMIT);
   const queryPreview = (searchedQueries ?? []).slice(0, QUERY_PREVIEW_LIMIT);
   const hiddenQueryCount = Math.max(0, queryCount - QUERY_PREVIEW_LIMIT);
 
-  const grouped = useMemo(() => {
-    const web = visible.filter((r) => r.source === "web");
-    const kb = visible.filter((r) => r.source === "kb");
-    return [
-      { key: "web", label: "网络", items: web },
-      { key: "kb", label: "知识库", items: kb },
-    ].filter((g) => g.items.length > 0);
-  }, [visible]);
+  const visibleKb = visible.filter((r) => r.source === "kb");
+  const visibleWeb = visible.filter((r) => r.source === "web");
+  const kbOnly = kbRefs.length > 0 && webRefs.length === 0;
 
   if (refCount === 0) return null;
 
-  const summary =
-    queryCount > 0
-      ? `已检索 ${queryCount} 个关键词，参考 ${refCount} 篇资料`
-      : `参考 ${refCount} 篇资料`;
+  const summary = buildSummary(refCount, kbRefs.length, webRefs.length, queryCount);
+
+  const renderKbList = (items: SearchReference[]) => (
+    <ol
+      className="space-y-0.5 rounded-lg px-2 py-1.5"
+      style={{ backgroundColor: "var(--kb-citation-list-bg)" }}
+    >
+      {items.map((ref) => (
+        <li key={`kb-${ref.id}-${ref.url}`} className="flex min-w-0 items-start gap-2 py-0.5">
+          <span className="mt-0.5 w-5 shrink-0 text-right text-[12px] tabular-nums text-text-faint">
+            {ref.id}.
+          </span>
+          <button
+            type="button"
+            className="min-w-0 flex-1 truncate text-left text-[13px] font-medium transition-opacity hover:opacity-90"
+            style={{ color: "var(--kb-citation-fg)" }}
+            title={ref.title}
+            onClick={() => openSearchReference(ref)}
+          >
+            {ref.title}
+          </button>
+        </li>
+      ))}
+    </ol>
+  );
+
+  const renderWebList = (items: SearchReference[]) => (
+    <ol className="space-y-0.5">
+      {items.map((ref) => {
+        const domain = ref.domain || "";
+        const clickable = /^https?:\/\//i.test(ref.url);
+        return (
+          <li
+            key={`web-${ref.id}-${ref.url}`}
+            className="flex min-w-0 items-start gap-2 rounded-md px-1 py-0.5 transition-colors hover:bg-surface-hover/20"
+          >
+            <span className="mt-0.5 w-5 shrink-0 text-right text-[12px] tabular-nums text-text-faint">
+              {ref.id}.
+            </span>
+            <div className="min-w-0 flex-1 leading-relaxed">
+              {clickable ? (
+                <button
+                  type="button"
+                  className="inline-flex max-w-full items-center gap-1 text-left text-[rgba(var(--theme-color-rgb,6,182,212),0.92)] transition-colors hover:text-[rgba(var(--theme-color-rgb,6,182,212),1)] hover:underline focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[rgba(var(--theme-color-rgb,6,182,212),0.30)]"
+                  title={ref.url}
+                  onClick={() => openSearchReference(ref)}
+                >
+                  <span className="truncate">{ref.title}</span>
+                  <ExternalLink className="h-3 w-3 shrink-0 opacity-65" aria-hidden />
+                </button>
+              ) : (
+                <span className="block truncate text-text-subtle" title={ref.url}>
+                  {ref.title}
+                </span>
+              )}
+              {domain ? (
+                <span className="ml-1 whitespace-nowrap text-[11px] text-text-faint">· {domain}</span>
+              ) : null}
+            </div>
+          </li>
+        );
+      })}
+    </ol>
+  );
 
   return (
     <div className="bg-transparent text-text-primary">
@@ -85,49 +160,26 @@ export function ReferencesCard({ references, searchedQueries }: Props) {
           ) : null}
 
           <div className="space-y-2 pl-[28px] text-[13px] text-text-muted">
-            {grouped.map((group) => (
-              <div key={group.key} className="space-y-1">
-                {grouped.length > 1 ? (
-                  <div className="text-[11px] font-medium tracking-wide text-text-faint">{group.label}</div>
+            {kbOnly && visibleKb.length > 0 ? (
+              renderKbList(visibleKb)
+            ) : (
+              <>
+                {visibleKb.length > 0 ? (
+                  <div className="space-y-1">
+                    <div className="text-[11px] font-medium tracking-wide text-text-faint">知识库</div>
+                    {renderKbList(visibleKb)}
+                  </div>
                 ) : null}
-                <ol className="space-y-0.5">
-                  {group.items.map((ref) => {
-                    const domain = ref.domain || (ref.source === "kb" ? "KB" : "");
-                    const clickable = /^https?:\/\//i.test(ref.url);
-                    return (
-                      <li
-                        key={`${ref.source}-${ref.id}-${ref.url}`}
-                        className="flex min-w-0 items-start gap-2 rounded-md px-1 py-0.5 transition-colors hover:bg-surface-hover/20"
-                      >
-                        <span className="mt-0.5 w-5 shrink-0 text-right text-[12px] tabular-nums text-text-faint">
-                          {ref.id}.
-                        </span>
-                        <div className="min-w-0 flex-1 leading-relaxed">
-                          {clickable ? (
-                            <button
-                              type="button"
-                              className="inline-flex max-w-full items-center gap-1 text-left text-[rgba(var(--theme-color-rgb,6,182,212),0.92)] transition-colors hover:text-[rgba(var(--theme-color-rgb,6,182,212),1)] hover:underline focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[rgba(var(--theme-color-rgb,6,182,212),0.30)]"
-                              title={ref.url}
-                              onClick={() => openExternalUrl(ref.url)}
-                            >
-                              <span className="truncate">{ref.title}</span>
-                              <ExternalLink className="h-3 w-3 shrink-0 opacity-65" aria-hidden />
-                            </button>
-                          ) : (
-                            <span className="block truncate text-text-subtle" title={ref.url}>
-                              {ref.title}
-                            </span>
-                          )}
-                          {domain ? (
-                            <span className="ml-1 whitespace-nowrap text-[11px] text-text-faint">· {domain}</span>
-                          ) : null}
-                        </div>
-                      </li>
-                    );
-                  })}
-                </ol>
-              </div>
-            ))}
+                {visibleWeb.length > 0 ? (
+                  <div className="space-y-1">
+                    {visibleKb.length > 0 ? (
+                      <div className="text-[11px] font-medium tracking-wide text-text-faint">网络</div>
+                    ) : null}
+                    {renderWebList(visibleWeb)}
+                  </div>
+                ) : null}
+              </>
+            )}
             {!showAll && hiddenCount > 0 ? (
               <button
                 type="button"

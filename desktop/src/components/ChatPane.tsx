@@ -2146,6 +2146,8 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
   const [voiceInputHint, setVoiceInputHint] = useState("");
   const dictationSessionRef = useRef<{ stop: () => void; cancel: () => void } | null>(null);
   const [streamedAssistantText, setStreamedAssistantText] = useState("");
+  const [streamReferences, setStreamReferences] = useState<SearchReference[]>([]);
+  const [streamSearchedQueries, setStreamSearchedQueries] = useState<string[]>([]);
   const [streamingSessionId, setStreamingSessionId] = useState("");
   const [runGuardSessionId, setRunGuardSessionId] = useState("");
   const [streamingModel, setStreamingModel] = useState<{ provider: string; model: string } | null>(null);
@@ -2309,6 +2311,23 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
     !!streamingSessionId &&
     streamingSessionId === (pane.sessionId || "").trim();
   const streamTextForCurrentSession = isStreamingCurrentSession ? (streamedAssistantText || "") : "";
+  const streamAssistantMessage = useMemo((): Message => {
+    return {
+      id: "__stream__",
+      role: "assistant",
+      content: streamTextForCurrentSession,
+      references: streamReferences.length > 0 ? streamReferences : undefined,
+      searchedQueries: streamSearchedQueries.length > 0 ? streamSearchedQueries : undefined,
+      provider: streamingModel?.provider,
+      model: streamingModel?.model,
+    };
+  }, [
+    streamTextForCurrentSession,
+    streamReferences,
+    streamSearchedQueries,
+    streamingModel?.provider,
+    streamingModel?.model,
+  ]);
   /** Hide __stream__ when it duplicates committed text or is an empty mid-turn tool-gap placeholder. */
   const hideStreamOverlayAsDuplicate = useMemo(
     () =>
@@ -2326,16 +2345,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
   const useReActImLayout = !isGroupPane && chatStyle === "im";
   const visibleMessagesWithStream = useMemo(() => {
     if (useReActImLayout && isStreamingCurrentSession && !hideStreamOverlayAsDuplicate) {
-      return [
-        ...visibleMessages,
-        {
-          id: "__stream__",
-          role: "assistant",
-          content: streamTextForCurrentSession,
-          provider: streamingModel?.provider,
-          model: streamingModel?.model,
-        } as Message,
-      ];
+      return [...visibleMessages, streamAssistantMessage];
     }
     return visibleMessages;
   }, [
@@ -2343,8 +2353,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
     visibleMessages,
     isStreamingCurrentSession,
     hideStreamOverlayAsDuplicate,
-    streamTextForCurrentSession,
-    streamingModel,
+    streamAssistantMessage,
   ]);
 
   const topLevelRowsIm = useMemo(
@@ -5341,7 +5350,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
       {isStreamingCurrentSession && !hideStreamOverlayAsDuplicate && !useReActImLayout ? (
         chatStyle === "terminal" ? (
           <TerminalLine
-            message={{ id: "__stream__", role: "assistant", content: streamTextForCurrentSession }}
+            message={streamAssistantMessage}
             badge={
               showInlineAssistantModelBadge && streamingModel ? (
                 <ModelBadge provider={streamingModel.provider} model={streamingModel.model} />
@@ -5350,7 +5359,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
           />
         ) : chatStyle === "clean" ? (
           <CleanBlock
-            message={{ id: "__stream__", role: "assistant", content: streamTextForCurrentSession }}
+            message={streamAssistantMessage}
             badge={
               showInlineAssistantModelBadge && streamingModel ? (
                 <ModelBadge provider={streamingModel.provider} model={streamingModel.model} />
@@ -5359,7 +5368,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
           />
         ) : (
           <ImBubble
-            message={{ id: "__stream__", role: "assistant", content: streamTextForCurrentSession }}
+            message={streamAssistantMessage}
             highlightTerms={pane.historySearchTerms}
             badge={
               showInlineAssistantModelBadge && streamingModel ? (
@@ -5935,6 +5944,8 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
     }
     cancelStreamRenderFrame();
     setStreamedAssistantText("");
+    setStreamReferences([]);
+    setStreamSearchedQueries([]);
     streamTextRef.current = "";
     streamCommittedRef.current = false;
     lastMidStreamAssistantCommitRef.current = null;
@@ -6553,6 +6564,10 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
                 );
                 pendingReferences = accumulated.references;
                 pendingSearchedQueries = accumulated.queries;
+                if (isTargetSessionStillActive()) {
+                  setStreamReferences([...pendingReferences]);
+                  setStreamSearchedQueries([...pendingSearchedQueries]);
+                }
               }
               const formatted = formatToolResultMessage(toolName, payload.data?.result);
               if (formatted.silent) continue;

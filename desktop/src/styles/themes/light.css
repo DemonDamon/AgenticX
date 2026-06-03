@@ -84,4 +84,9 @@
   --ui-accent-text: #111827;
   --ui-accent-divider: rgba(0, 0, 0, 0.08);
   --ui-accent-divider-hover: rgba(0, 0, 0, 0.15);
+
+  --kb-citation-bg: #e8f5e9;
+  --kb-citation-bg-muted: #f1f8f2;
+  --kb-citation-fg: #2e7d32;
+  --kb-citation-list-bg: rgba(0, 0, 0, 0.04);
 }

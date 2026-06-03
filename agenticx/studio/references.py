@@ -95,24 +95,11 @@ def build_kb_references(payload: Dict[str, Any]) -> List[Dict[str, Any]]:
         title = str(source.get("title") or doc_id or "KB").strip() or "KB"
         chunk_label = f"#{chunk_idx}" if chunk_idx is not None else ""
         url = f"agx://kb/{doc_id}{chunk_label}" if doc_id else "agx://kb/unknown"
-        score = float(hit.get("score") or 0)
-        meta = hit.get("metadata") if isinstance(hit.get("metadata"), dict) else {}
-        fused = hit.get("fused_score", meta.get("fused_score"))
-        vec = hit.get("vector_score", meta.get("vector_score"))
-        bm25 = hit.get("bm25_score", meta.get("bm25_score"))
-        score_bits: List[str] = [f"score={score:.3f}"]
-        if fused is not None:
-            score_bits.append(f"fused={float(fused):.3f}")
-        if vec is not None:
-            score_bits.append(f"vec={float(vec):.3f}")
-        if bm25 is not None:
-            score_bits.append(f"bm25={float(bm25):.3f}")
-        score_label = " · ".join(score_bits)
         refs.append(
             {
                 "title": title,
                 "url": url,
-                "snippet": snippet_trim(f"{score_label}\n{str(hit.get('text') or '')}"),
+                "snippet": snippet_trim(str(hit.get("text") or "")),
                 "source": "kb",
             }
         )
