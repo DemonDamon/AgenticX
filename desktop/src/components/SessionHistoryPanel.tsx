@@ -14,7 +14,8 @@ import { isPaneStillOnSession } from "../utils/session-pane-guard";
 import {
   cacheSessionTail,
   cancelPrefetchSessionTail,
-  fetchSessionTailPage,
+  prefetchSessionTailsBatch,
+  resolveSessionTailForSwitch,
   getCachedSessionTail,
   schedulePrefetchSessionTail,
 } from "../utils/session-tail-cache";
@@ -463,6 +464,10 @@ export const SessionHistoryPanel = memo(function SessionHistoryPanel({ pane, onC
       );
       setSessions(rows);
       setSessionsLoadAttempted(true);
+      prefetchSessionTailsBatch(
+        rows.slice(0, 12).map((row) => row.session_id),
+        12
+      );
       for (const row of rows) {
         const hint = useAppStore.getState().sessionHistoryHints[row.session_id];
         if (!hint) continue;
@@ -699,14 +704,17 @@ export const SessionHistoryPanel = memo(function SessionHistoryPanel({ pane, onC
       return;
     }
 
-    // Slow path: show in-list skeleton (never NEAR empty logo) while tail loads.
+    // Slow path: skeleton while tail resolves (prefetch / in-flight / fetch).
     setPaneLoadingMessages(targetPaneId, true);
     setPaneMessages(targetPaneId, []);
     resetPaneMessagePaging(targetPaneId);
     try {
-      const entry = await fetchSessionTailPage(sessionId);
+      const entry = await resolveSessionTailForSwitch(sessionId);
       if (entry && entry.messages.length > 0) {
-        cacheSessionTail(sessionId, entry); // cache regardless; the tail is valid for this sid
+        cacheSessionTail(sessionId, entry);
+        if (!entry.hasOlder) {
+          cacheSessionMessages(sessionId, entry.messages);
+        }
         if (paneStillOn(sessionId)) applyTailEntry(targetPaneId, entry);
         return;
       }

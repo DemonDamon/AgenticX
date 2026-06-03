@@ -14,6 +14,7 @@ export type SessionTailCacheEntry = {
 const SESSION_TAIL_CACHE_MAX = 24;
 const tailCache = new Map<string, SessionTailCacheEntry>();
 const inflight = new Set<string>();
+const inflightPromises = new Map<string, Promise<SessionTailCacheEntry | null>>();
 const prefetchTimers = new Map<string, number>();
 
 export function peekCachedSessionTail(sessionId: string): SessionTailCacheEntry | undefined {
@@ -64,17 +65,55 @@ export async function fetchSessionTailPage(
   };
 }
 
-async function prefetchSessionTailNow(sessionId: string): Promise<void> {
+async function prefetchSessionTailNow(sessionId: string): Promise<SessionTailCacheEntry | null> {
   const sid = String(sessionId ?? "").trim();
-  if (!sid || inflight.has(sid) || peekCachedSessionTail(sid)) return;
+  if (!sid) return null;
+  const cached = peekCachedSessionTail(sid);
+  if (cached) return cached;
+  if (inflight.has(sid)) {
+    return inflightPromises.get(sid) ?? null;
+  }
   inflight.add(sid);
-  try {
-    const entry = await fetchSessionTailPage(sid);
-    if (entry) cacheSessionTail(sid, entry);
-  } catch {
-    /* best effort */
-  } finally {
-    inflight.delete(sid);
+  const promise = (async (): Promise<SessionTailCacheEntry | null> => {
+    try {
+      const entry = await fetchSessionTailPage(sid);
+      if (entry) cacheSessionTail(sid, entry);
+      return entry;
+    } catch {
+      return null;
+    } finally {
+      inflight.delete(sid);
+      inflightPromises.delete(sid);
+    }
+  })();
+  inflightPromises.set(sid, promise);
+  return promise;
+}
+
+/**
+ * Resolve tail messages for a session switch: cache hit, in-flight prefetch, or fetch.
+ */
+export async function resolveSessionTailForSwitch(
+  sessionId: string
+): Promise<SessionTailCacheEntry | null> {
+  const sid = String(sessionId ?? "").trim();
+  if (!sid) return null;
+  const cached = peekCachedSessionTail(sid);
+  if (cached) return cached;
+  const pending = inflightPromises.get(sid);
+  if (pending) return pending;
+  return fetchSessionTailPage(sid);
+}
+
+/** Warm tail cache for visible history rows (debounced list refresh). */
+export function prefetchSessionTailsBatch(sessionIds: string[], max = 8): void {
+  const unique = [...new Set(sessionIds.map((id) => String(id ?? "").trim()).filter(Boolean))].slice(
+    0,
+    max
+  );
+  for (const sid of unique) {
+    if (tailCache.has(sid) || inflight.has(sid)) continue;
+    void prefetchSessionTailNow(sid);
   }
 }
 
@@ -89,7 +128,7 @@ export function schedulePrefetchSessionTail(sessionId: string): void {
     window.setTimeout(() => {
       prefetchTimers.delete(sid);
       void prefetchSessionTailNow(sid);
-    }, 80)
+    }, 50)
   );
 }
 

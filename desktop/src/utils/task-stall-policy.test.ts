@@ -2,11 +2,15 @@ import { describe, expect, it } from "vitest";
 import type { ParsedTodo } from "../components/TodoUpdateCard";
 import type { Message } from "../store";
 import {
+  CHANNEL_C_GRACE_MS,
   isTodoSnapshotSuperseded,
+  lastTurnHasCompletedAssistantReply,
   messageLooksLikeAssistantFinal,
   resolveStickyTodoDisplay,
+  shouldAllowStallAutoNudge,
   shouldResetStallDetectorsOnSessionSwitch,
   shouldSuppressStallDetection,
+  shouldTriggerIncompleteEndStall,
 } from "./task-stall-policy";
 
 const sampleTodo: ParsedTodo = {
@@ -162,5 +166,111 @@ describe("messageLooksLikeAssistantFinal", () => {
     expect(
       messageLooksLikeAssistantFinal({ ...base, content: "安装已完成。" }),
     ).toBe(true);
+  });
+});
+
+describe("lastTurnHasCompletedAssistantReply", () => {
+  it("returns true when assistant reply exists before a trailing tool message", () => {
+    const messages: Message[] = [
+      msg({ id: "u1", role: "user", content: "查知识库" }),
+      msg({
+        id: "a1",
+        role: "assistant",
+        content: "费马大定理的核心是：没有正整数解满足 x^n+y^n=z^n（n>2）。",
+      }),
+      msg({ id: "t1", role: "tool", toolName: "knowledge_search", content: "hits" }),
+    ];
+    expect(lastTurnHasCompletedAssistantReply(messages)).toBe(true);
+  });
+
+  it("counts colon-ending assistant body as completed for the last turn", () => {
+    const messages: Message[] = [
+      msg({ id: "u1", role: "user", content: "说明" }),
+      msg({
+        id: "a1",
+        role: "assistant",
+        content: "上一次任务的未完成项我已检索确认，现在同步更新状态：",
+      }),
+    ];
+    expect(lastTurnHasCompletedAssistantReply(messages)).toBe(true);
+  });
+
+  it("returns false when only reasoning without response body", () => {
+    const messages: Message[] = [
+      msg({ id: "u1", role: "user", content: "问题" }),
+      msg({
+        id: "a1",
+        role: "assistant",
+        content: "<think>思考中</think>",
+      }),
+    ];
+    expect(lastTurnHasCompletedAssistantReply(messages)).toBe(false);
+  });
+
+  it("ignores interrupted placeholder assistant rows", () => {
+    const messages: Message[] = [
+      msg({ id: "u1", role: "user", content: "问题" }),
+      msg({ id: "a1", role: "assistant", content: "（已中断）" }),
+    ];
+    expect(lastTurnHasCompletedAssistantReply(messages)).toBe(false);
+  });
+});
+
+describe("shouldTriggerIncompleteEndStall", () => {
+  const completedWithToolTail: Message[] = [
+    msg({ id: "u1", role: "user", content: "费马大定理" }),
+    msg({ id: "a1", role: "assistant", content: "通俗解释如下：……" }),
+    msg({ id: "t1", role: "tool", toolName: "knowledge_search", content: "[]" }),
+  ];
+
+  it("does not stall idle session when last turn already has assistant body", () => {
+    expect(
+      shouldTriggerIncompleteEndStall("idle", false, completedWithToolTail, CHANNEL_C_GRACE_MS),
+    ).toBe(false);
+  });
+
+  it("stalls idle session when last turn has no assistant body after grace", () => {
+    const messages: Message[] = [
+      msg({ id: "u1", role: "user", content: "问题" }),
+      msg({ id: "t1", role: "tool", toolName: "knowledge_search", content: "[]" }),
+    ];
+    expect(shouldTriggerIncompleteEndStall("idle", false, messages, CHANNEL_C_GRACE_MS)).toBe(
+      true,
+    );
+  });
+
+  it("does not stall before channel C grace elapses", () => {
+    expect(
+      shouldTriggerIncompleteEndStall("idle", false, completedWithToolTail, CHANNEL_C_GRACE_MS - 1),
+    ).toBe(false);
+  });
+
+  it("does not stall while SSE is active", () => {
+    expect(
+      shouldTriggerIncompleteEndStall("idle", true, completedWithToolTail, CHANNEL_C_GRACE_MS),
+    ).toBe(false);
+  });
+});
+
+describe("shouldAllowStallAutoNudge", () => {
+  it("blocks auto nudge when budget exceeded", () => {
+    expect(shouldAllowStallAutoNudge("stall", "running", true)).toBe(false);
+  });
+
+  it("allows auto nudge for running stall with live work", () => {
+    expect(shouldAllowStallAutoNudge("stall", "running", false)).toBe(true);
+    expect(
+      shouldAllowStallAutoNudge("stall", "running", false, { sseActive: true, runInFlight: true }),
+    ).toBe(true);
+  });
+
+  it("blocks idle channel-C stall without SSE or in-flight request", () => {
+    expect(
+      shouldAllowStallAutoNudge("stall", "idle", false, { sseActive: false, runInFlight: false }),
+    ).toBe(false);
+  });
+
+  it("allows interrupted stall for auto nudge", () => {
+    expect(shouldAllowStallAutoNudge("stall", "interrupted", false)).toBe(true);
   });
 });

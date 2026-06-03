@@ -88,7 +88,7 @@ import {
 import {
   CHANNEL_C_GRACE_MS,
   stallDetectSilenceMs,
-  messageLooksLikeAssistantFinal,
+  lastTurnHasCompletedAssistantReply,
   shouldAllowStallAutoNudge,
   shouldResetStallDetectorsOnSessionSwitch,
   shouldSuppressStallDetection,
@@ -3824,12 +3824,15 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
       if (sessionStreamStateRef.current[sid]?.active) return;
       try {
         const livePane = useAppStore.getState().panes.find((p) => p.id === pane.id);
+        if (livePane?.loadingMessages) return;
         if (
           livePane?.hasOlderMessages ||
           (livePane?.oldestLoadedIndex ?? 0) > 0
         ) {
           return;
         }
+        const currentMsgs = livePane?.messages ?? [];
+        if (lastTurnHasCompletedAssistantReply(currentMsgs)) return;
         const result = await window.agenticxDesktop.loadSessionMessages(sid);
         if (!result.ok || !Array.isArray(result.messages)) return;
         const latestSid = String(
@@ -4802,7 +4805,6 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
       }
 
       const msgs = useAppStore.getState().panes.find((p) => p.id === pane.id)?.messages ?? [];
-      const lastMsg = msgs[msgs.length - 1];
       const enteredAt = sessionEnteredAtRef.current[sid] ?? now;
       const graceMs = now - enteredAt;
 
@@ -4824,7 +4826,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
         silentMs >= stallSilenceMs;
       const channelC =
         graceMs >= CHANNEL_C_GRACE_MS &&
-        shouldTriggerIncompleteEndStall(execState, sseActive, lastMsg, CHANNEL_C_GRACE_MS);
+        shouldTriggerIncompleteEndStall(execState, sseActive, msgs, graceMs);
 
       if (channelA || channelB || channelC) {
         setStallState("stall");
@@ -4833,7 +4835,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
 
       if (stallState === "stall") {
         const recovered =
-          execState === "idle" && messageLooksLikeAssistantFinal(lastMsg);
+          execState === "idle" && lastTurnHasCompletedAssistantReply(msgs);
         const progressOk = silentMs < stallSilenceMs;
         if (recovered || (progressOk && (sseActive || execState !== "running"))) {
           setStallState("none");
@@ -4870,8 +4872,18 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
 
   useEffect(() => {
     if (!stallRuntimeConfig.stall_auto_nudge_enabled) return;
-    if (!shouldAllowStallAutoNudge(stallState, sessionExecutionState, Boolean(budgetExceededInfo))) return;
     const sid = (pane.sessionId || "").trim();
+    const sseActive = Boolean(sessionStreamStateRef.current[sid]?.active);
+    const runInFlight =
+      runGuardSessionId === sid || Boolean(sessionAbortControllersRef.current[sid]);
+    if (
+      !shouldAllowStallAutoNudge(stallState, sessionExecutionState, Boolean(budgetExceededInfo), {
+        sseActive,
+        runInFlight,
+      })
+    ) {
+      return;
+    }
     if (!sid) return;
     if (silentSeconds < stallRuntimeConfig.stall_auto_nudge_after_seconds) return;
     const count = autoNudgeTriggeredRef.current[sid] ?? 0;
@@ -4895,6 +4907,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
   }, [
     pane.id,
     pane.sessionId,
+    runGuardSessionId,
     sessionExecutionState,
     silentSeconds,
     stallRuntimeConfig,
@@ -4905,8 +4918,18 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
   useEffect(() => {
     if (!sessionUnattended || !unattendedGlobalEnabled) return;
     if (Boolean(budgetExceededInfo)) return;
-    if (!shouldAllowStallAutoNudge(stallState, sessionExecutionState, false)) return;
     const sid = (pane.sessionId || "").trim();
+    const sseActive = Boolean(sessionStreamStateRef.current[sid]?.active);
+    const runInFlight =
+      runGuardSessionId === sid || Boolean(sessionAbortControllersRef.current[sid]);
+    if (
+      !shouldAllowStallAutoNudge(stallState, sessionExecutionState, false, {
+        sseActive,
+        runInFlight,
+      })
+    ) {
+      return;
+    }
     if (!sid) return;
     if (silentSeconds < unattendedStallContinueAfterSeconds) return;
     const count = unattendedContinueTriggeredRef.current[sid] ?? 0;

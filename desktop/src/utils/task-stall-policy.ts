@@ -31,7 +31,16 @@ export function stallDetectSilenceMs(seconds?: number): number {
 
 export const CHANNEL_C_GRACE_MS = 5_000;
 
+const INTERRUPTED_ASSISTANT_PLACEHOLDERS = new Set(["（已中断）", "(已中断)"]);
+
 export type StallPhase = "none" | "stall" | "exhausted";
+
+export type StallAutoNudgeContext = {
+  /** Live SSE subscription for the displayed session. */
+  sseActive?: boolean;
+  /** User stop guard or an in-flight chat request for this session. */
+  runInFlight?: boolean;
+};
 
 export function messageLooksLikeAssistantFinal(message: Message | undefined): boolean {
   if (!message) return false;
@@ -41,6 +50,31 @@ export function messageLooksLikeAssistantFinal(message: Message | undefined): bo
   if (!content) return false;
   if (looksLikeUnfinishedAssistantBody(content)) return false;
   return true;
+}
+
+/**
+ * True when the last user turn already has a non-empty assistant reply.
+ * Aligns with backend ``SessionManager._last_turn_has_completed_reply``:
+ * scan all assistant messages after the last user message, not only the
+ * array tail (tool rows / reasoning-only rows may follow the answer).
+ */
+export function lastTurnHasCompletedAssistantReply(messages: Message[]): boolean {
+  if (!messages.length) return false;
+  let lastUserIdx = -1;
+  for (let idx = 0; idx < messages.length; idx += 1) {
+    if (messages[idx]?.role === "user") lastUserIdx = idx;
+  }
+  if (lastUserIdx < 0) return false;
+  for (let idx = lastUserIdx + 1; idx < messages.length; idx += 1) {
+    const msg = messages[idx];
+    if (msg?.role !== "assistant") continue;
+    if (msg.id === "__stream__" || msg.id === "typing-meta") continue;
+    const content = assistantBodyText(msg);
+    if (!content) continue;
+    if (INTERRUPTED_ASSISTANT_PLACEHOLDERS.has(content)) continue;
+    return true;
+  }
+  return false;
 }
 
 /**
@@ -60,11 +94,19 @@ export function shouldAllowStallAutoNudge(
   stallState: StallPhase,
   executionState: string | undefined,
   budgetExceeded = false,
+  ctx?: StallAutoNudgeContext,
 ): boolean {
   if (budgetExceeded) return false;
   if (stallState !== "stall") return false;
   const state = (executionState || "").trim();
-  return state === "running" || state === "interrupted" || state === "idle";
+  if (state === "running" || state === "interrupted") return true;
+  if (state === "idle") {
+    // Channel C (idle, no live SSE): manual recovery only — auto /continue pollutes
+    // completed sessions after app restart when stall was a false positive.
+    if (!ctx?.sseActive && !ctx?.runInFlight) return false;
+    return true;
+  }
+  return false;
 }
 
 /**
@@ -141,19 +183,19 @@ export function shouldSuppressStallDetection(
   return Boolean(guard && guard === sid);
 }
 
-/** Channel C: session ended idle but last visible message is not a final assistant reply. */
+/** Channel C: session ended idle but the last user turn has no completed assistant reply. */
 export function shouldTriggerIncompleteEndStall(
   executionState: string | undefined,
   sseActive: boolean,
-  lastMessage: Message | undefined,
-  graceElapsedMs: number
+  messages: Message[],
+  graceElapsedMs: number,
 ): boolean {
   if (sseActive) return false;
   if (graceElapsedMs < CHANNEL_C_GRACE_MS) return false;
   const state = (executionState || "").trim();
   // Only idle — user-interrupted sessions are handled via userStopped stall suppress.
   if (state !== "idle") return false;
-  return !messageLooksLikeAssistantFinal(lastMessage);
+  return !lastTurnHasCompletedAssistantReply(messages);
 }
 
 /** Fast fallback model suggestions when current model stalls (display labels). */
