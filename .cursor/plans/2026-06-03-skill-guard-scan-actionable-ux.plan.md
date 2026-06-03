@@ -56,8 +56,8 @@ Plan-File: .cursor/plans/2026-06-03-skill-guard-scan-actionable-ux.plan.md
 4. Electron IPC + preload + global.d。
 5. 前端 UI 重构（扫描按钮、分组卡片、外部标识、禁用、忽略、撤销）。
 
-### P1（后续）
-6. AI 修复委派 + diff 确认。
+### P1（已完成）
+6. AI 修复：委派元智能体新会话（`buildGuardFixPrompt` + `setForwardAutoReply`）；写入走现有工具 diff 确认。
 
 ## 涉及文件
 - `agenticx/skills/guard_config.py`
