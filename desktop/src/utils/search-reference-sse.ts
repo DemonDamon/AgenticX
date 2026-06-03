@@ -5,6 +5,47 @@ import {
   type SearchReference,
 } from "../types/search-references";
 
+/** Client fallback when SSE omits `structured` but tool `result` JSON still has KB hits. */
+export function parseKbReferencesFromToolResult(resultRaw: unknown): SearchReference[] {
+  let parsed: unknown = resultRaw;
+  if (typeof resultRaw === "string") {
+    try {
+      parsed = JSON.parse(resultRaw);
+    } catch {
+      return [];
+    }
+  }
+  if (!parsed || typeof parsed !== "object") return [];
+  const row = parsed as { ok?: boolean; disabled?: boolean; hits?: unknown[] };
+  if (row.ok === false || row.disabled) return [];
+  const hits = row.hits;
+  if (!Array.isArray(hits)) return [];
+  const out: SearchReference[] = [];
+  for (const hit of hits) {
+    if (!hit || typeof hit !== "object") continue;
+    const h = hit as { text?: unknown; source?: Record<string, unknown> };
+    const source = h.source && typeof h.source === "object" ? h.source : {};
+    const docId = String(source.uri ?? source.id ?? "").trim();
+    const title = String(source.title ?? docId ?? "KB").trim() || "KB";
+    const chunkIdx = source.chunk_index;
+    const chunkLabel =
+      chunkIdx !== undefined && chunkIdx !== null ? `#${String(chunkIdx)}` : "";
+    const url = docId ? `agx://kb/${docId}${chunkLabel}` : "agx://kb/unknown";
+    const snippet = String(h.text ?? "")
+      .replace(/\s+/g, " ")
+      .trim()
+      .slice(0, 240);
+    out.push({
+      id: out.length + 1,
+      title,
+      url,
+      snippet,
+      source: "kb",
+    });
+  }
+  return out;
+}
+
 export function extractStructuredReferences(payloadData: unknown): {
   references: SearchReference[];
   query?: string;
@@ -33,6 +74,15 @@ export function accumulateReferenceTurn(
   let nextRefs = pendingReferences;
   if (references.length > 0) {
     nextRefs = mergeSearchReferences(pendingReferences, references);
+  } else if (payloadData && typeof payloadData === "object") {
+    const toolName = String((payloadData as { name?: unknown }).name ?? "").trim();
+    const resultRaw = (payloadData as { result?: unknown }).result;
+    if (toolName === "knowledge_search") {
+      const fallback = parseKbReferencesFromToolResult(resultRaw);
+      if (fallback.length > 0) {
+        nextRefs = mergeSearchReferences(pendingReferences, fallback);
+      }
+    }
   }
   const queryCandidates = [
     query,
