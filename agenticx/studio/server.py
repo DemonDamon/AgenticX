@@ -5089,10 +5089,31 @@ def create_studio_app() -> FastAPI:
                 scan_mode = sm
             if llm_verify is not None and not isinstance(llm_verify, bool):
                 raise HTTPException(status_code=400, detail="llm_verify must be boolean")
+
+            # ignored: full overwrite ("ignored") or incremental add/remove.
+            from agenticx.skills.guard_config import load_guard_config
+
+            ignored_arg: list[str] | None = None
+            raw_ignored = payload.get("ignored")
+            if raw_ignored is not None:
+                if not isinstance(raw_ignored, list):
+                    raise HTTPException(status_code=400, detail="ignored must be a list")
+                ignored_arg = [str(x).strip() for x in raw_ignored if str(x).strip()]
+            add_ignore = str(payload.get("add_ignore") or "").strip()
+            remove_ignore = str(payload.get("remove_ignore") or "").strip()
+            if add_ignore or remove_ignore:
+                current = list(load_guard_config().ignored_skills)
+                if add_ignore and add_ignore not in current:
+                    current.append(add_ignore)
+                if remove_ignore:
+                    current = [x for x in current if x != remove_ignore]
+                ignored_arg = current
+
             persist_guard_settings(
                 version=version,
                 scan_mode=scan_mode,
                 llm_verify=llm_verify,
+                ignored=ignored_arg,
             )
             return {"ok": True, **guard_settings_payload()}
         except HTTPException:
@@ -5150,6 +5171,72 @@ def create_studio_app() -> FastAPI:
             raise
         except Exception as exc:
             logger.warning("post_guard_scan error: %s", exc)
+            raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+    @app.post("/api/skills/guard-scan-all")
+    async def post_guard_scan_all(
+        payload: dict | None = None,
+        x_agx_desktop_token: str | None = Header(default=None),
+    ) -> dict:
+        """Scan every installed skill directory and return per-skill verdicts.
+
+        Skills listed in ``skills.guard.ignored`` are excluded. ``can_fix`` is
+        true only for skills stored under ``~/.agenticx/skills`` (market or
+        self-authored), so external sources (Cursor/Claude/etc.) are read-only.
+        """
+        _check_token(x_agx_desktop_token)
+        include_ignored = bool((payload or {}).get("include_ignored", False))
+        try:
+            from pathlib import Path as _Path
+
+            from agenticx.skills.guard import scan_result_to_payload, scan_skill_deep
+            from agenticx.skills.guard_config import load_guard_config
+            from agenticx.tools.skill_bundle import SkillBundleLoader
+
+            cfg = load_guard_config()
+            ignored = set(cfg.ignored_skills)
+            mode = cfg.scan_mode if cfg.version >= 2 else "standard"
+            agx_root = _Path("~/.agenticx/skills").expanduser().resolve(strict=False)
+
+            loader = SkillBundleLoader()
+            skills = loader.scan()
+            results: list[dict] = []
+            ignored_seen: list[str] = []
+            for s in skills:
+                if s.name in ignored:
+                    if s.name not in ignored_seen:
+                        ignored_seen.append(s.name)
+                    if not include_ignored:
+                        continue
+                base = _Path(str(s.base_dir)).expanduser().resolve(strict=False)
+                try:
+                    can_fix = base == agx_root or agx_root in base.parents
+                except Exception:
+                    can_fix = False
+                try:
+                    sr = scan_skill_deep(base, source=getattr(s, "source", "community"), mode=mode)
+                except Exception as scan_exc:  # noqa: BLE001
+                    logger.warning("guard-scan-all skill %s failed: %s", s.name, scan_exc)
+                    continue
+                if sr.verdict == "safe":
+                    continue
+                one = scan_result_to_payload(sr, s.name)
+                one["source"] = getattr(s, "source", "unknown")
+                one["base_dir"] = str(s.base_dir)
+                one["can_fix"] = can_fix
+                one["ignored"] = s.name in ignored
+                results.append(one)
+
+            severity_rank = {"dangerous": 2, "caution": 1, "safe": 0}
+            results.sort(key=lambda r: severity_rank.get(r.get("verdict", "safe"), 0), reverse=True)
+            return {
+                "ok": True,
+                "results": results,
+                "ignored": ignored_seen,
+                "scanned": len(skills),
+            }
+        except Exception as exc:
+            logger.warning("post_guard_scan_all error: %s", exc)
             raise HTTPException(status_code=500, detail=str(exc)) from exc
 
     # -- Usage dashboard ---------------------------------------------------------

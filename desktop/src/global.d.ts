@@ -240,6 +240,33 @@ type GuardSettingsResult = {
   scan_mode?: string;
   llm_verify?: boolean;
   scan_timeout_seconds?: number;
+  ignored?: string[];
+  error?: string;
+};
+type GuardScanAllItem = {
+  skill_name: string;
+  verdict: string;
+  score?: number;
+  grade?: string;
+  tier?: string;
+  source?: string;
+  base_dir?: string;
+  can_fix?: boolean;
+  ignored?: boolean;
+  findings?: Array<{
+    pattern_name: string;
+    severity?: string;
+    matched_text?: string;
+    file_path?: string;
+    line_number?: number;
+    category?: string;
+  }>;
+};
+type GuardScanAllResult = {
+  ok: boolean;
+  results?: GuardScanAllItem[];
+  ignored?: string[];
+  scanned?: number;
   error?: string;
 };
 type GuardScanResult = {
@@ -883,6 +910,9 @@ declare global {
         version?: number;
         scan_mode?: string;
         llm_verify?: boolean;
+        ignored?: string[];
+        add_ignore?: string;
+        remove_ignore?: string;
       }) => Promise<GuardSettingsResult>;
       guardScanSkill: (payload: {
         skill_path?: string;
@@ -890,6 +920,7 @@ declare global {
         skill_name?: string;
         mode?: string;
       }) => Promise<GuardScanResult>;
+      guardScanAll: (payload?: { include_ignored?: boolean }) => Promise<GuardScanAllResult>;
       putSkillSettings: (payload: {
         presetPaths: Array<{ id: string; enabled: boolean }>;
         customPaths: string[];

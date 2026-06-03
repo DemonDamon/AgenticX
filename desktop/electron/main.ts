@@ -5620,6 +5620,29 @@ function registerIpc(): void {
   );
 
   ipcMain.handle(
+    "guard-scan-all",
+    async (_event, payload?: { include_ignored?: boolean }) => {
+      try {
+        const resp = await fetch(`${getStudioUrl()}/api/skills/guard-scan-all`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "x-agx-desktop-token": getStudioToken(),
+          },
+          body: JSON.stringify(payload ?? {}),
+        });
+        if (!resp.ok) {
+          const body = await resp.text().catch(() => "");
+          return { ok: false, error: `HTTP ${resp.status}: ${body.slice(0, 300)}` };
+        }
+        return await resp.json();
+      } catch (err) {
+        return { ok: false, error: String(err) };
+      }
+    },
+  );
+
+  ipcMain.handle(
     "put-skill-settings",
     async (
       _event,
