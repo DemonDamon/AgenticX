@@ -193,6 +193,22 @@ def test_add_document_via_multipart_upload(client: TestClient):
     assert job["status"] == "done"
 
 
+def test_get_document_by_id(client: TestClient, tmp_path: Path):
+    doc = tmp_path / "get-by-id.md"
+    doc.write_text("lookup by id")
+    add = client.post("/api/kb/documents", data={"path": str(doc)})
+    doc_id = add.json()["document"]["id"]
+
+    resp = client.get(f"/api/kb/documents/{doc_id}")
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["document"]["id"] == doc_id
+    assert body["document"]["source_path"] == str(doc.resolve())
+
+    missing = client.get("/api/kb/documents/does-not-exist")
+    assert missing.status_code == 404
+
+
 def test_delete_document_removes_row(client: TestClient, tmp_path: Path):
     doc = tmp_path / "remove-me.md"
     doc.write_text("disposable content")

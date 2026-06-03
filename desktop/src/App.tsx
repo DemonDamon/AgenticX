@@ -25,6 +25,7 @@ import {
   type GlobalSearchAddToWorkspaceDetail,
 } from "./components/global-search/global-search-events";
 import { Toast } from "./components/ds/Toast";
+import { KbDocumentOpenOverlay } from "./components/kb/KbDocumentOpenOverlay";
 import { addFolderToActiveWorkspace } from "./utils/global-search-workspace";
 import {
   coerceSelectableModel,
@@ -2173,6 +2174,7 @@ export function App() {
       />
       <TokenDashboardPanel open={tokenDashboardOpen} onClose={() => closeTokenDashboard()} />
       <GlobalSearchHost />
+      <KbDocumentOpenOverlay />
       <Toast
         open={globalSearchToastOpen}
         message={globalSearchToastMessage}

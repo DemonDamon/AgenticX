@@ -249,6 +249,14 @@ def register_kb_routes(app: FastAPI) -> None:
         job = manager.jobs.submit_ingest(manager.runtime, doc.id)
         return {"ok": True, "document": doc.to_dict(), "job_id": job.id}
 
+    @app.get("/api/kb/documents/{doc_id}")
+    async def get_kb_document(doc_id: str) -> Dict[str, Any]:
+        manager = KBManager.instance()
+        doc = manager.runtime.get_document(doc_id)
+        if doc is None:
+            raise HTTPException(status_code=404, detail=f"document {doc_id} not found")
+        return {"ok": True, "document": doc.to_dict()}
+
     @app.delete("/api/kb/documents/{doc_id}")
     async def delete_kb_document(doc_id: str) -> Dict[str, Any]:
         manager = KBManager.instance()
