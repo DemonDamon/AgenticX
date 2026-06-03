@@ -5,6 +5,29 @@ from pydantic import Field  # type: ignore
 from .base import BaseLLMProvider, StreamChunk
 from .response import LLMResponse, TokenUsage, LLMChoice
 
+
+def _reasoning_detail_text(detail: Any) -> str:
+    if detail is None:
+        return ""
+    if isinstance(detail, dict):
+        return str(detail.get("text") or "")
+    return str(getattr(detail, "text", "") or "")
+
+
+def _iter_reasoning_delta_texts(delta: Any) -> List[str]:
+    """MiniMax M2.x may stream thinking via reasoning_details instead of reasoning_content."""
+    out: List[str] = []
+    rc = getattr(delta, "reasoning_content", None)
+    if isinstance(rc, str) and rc:
+        out.append(rc)
+    details = getattr(delta, "reasoning_details", None)
+    if details:
+        for detail in details:
+            text = _reasoning_detail_text(detail)
+            if text:
+                out.append(text)
+    return out
+
 class LiteLLMProvider(BaseLLMProvider):
     """
     An LLM provider that uses the LiteLLM library to interface with various models.
@@ -172,6 +195,13 @@ class LiteLLMProvider(BaseLLMProvider):
         # Ask provider to include usage in streamed chunks when available.
         stream_options["include_usage"] = True
         self._apply_drop_params_default(kwargs)
+        model_lower = str(self.model or "").lower()
+        if "minimax" in model_lower:
+            extra = kwargs.get("extra_body")
+            if not isinstance(extra, dict):
+                extra = {}
+                kwargs["extra_body"] = extra
+            extra.setdefault("reasoning_split", True)
         response_stream = litellm.completion(
             model=self.model,
             messages=messages,
@@ -229,8 +259,7 @@ class LiteLLMProvider(BaseLLMProvider):
                         # reasoning_content before content after tool results. Forward as
                         # <think> so the UI keeps receiving tokens and idle
                         # stall detection does not fire during the thinking phase.
-                        reasoning_delta = getattr(delta, "reasoning_content", None)
-                        if isinstance(reasoning_delta, str) and reasoning_delta:
+                        for reasoning_delta in _iter_reasoning_delta_texts(delta):
                             if not reasoning_started:
                                 reasoning_started = True
                                 yield {"type": "content", "text": "<think>"}
