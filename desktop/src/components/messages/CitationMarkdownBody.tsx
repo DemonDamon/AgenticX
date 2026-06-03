@@ -1,5 +1,6 @@
 import { Fragment, useMemo, type CSSProperties } from "react";
 import ReactMarkdown from "react-markdown";
+import type { Components } from "react-markdown";
 import type { SearchReference } from "../../types/search-references";
 import { CitationBadge } from "./CitationBadge";
 import {
@@ -12,6 +13,7 @@ import {
 } from "./markdown-components";
 import {
   normalizeCitationMarkers,
+  splitCitationParagraphBlocks,
   splitCitationSegments,
   stripOrphanCitationMarkers,
 } from "./citation-normalize";
@@ -24,6 +26,69 @@ type Props = {
   className?: string;
   style?: CSSProperties;
 };
+
+/** Keep citation pills on the same line as preceding list items / sentences. */
+const inlineCitationMarkdownComponents: Partial<Components> = {
+  ...chatMarkdownComponents,
+  p({ children }) {
+    return <p className="m-0 inline contents">{children}</p>;
+  },
+  ol({ children, ...rest }) {
+    return (
+      <ol className="m-0 inline list-inside align-baseline pl-0" {...rest}>
+        {children}
+      </ol>
+    );
+  },
+  ul({ children, ...rest }) {
+    return (
+      <ul className="m-0 inline list-inside align-baseline pl-0" {...rest}>
+        {children}
+      </ul>
+    );
+  },
+};
+
+function InlineCitationRow({
+  block,
+  refMap,
+  isStreaming,
+}: {
+  block: string;
+  refMap: Map<number, SearchReference>;
+  isStreaming?: boolean;
+}) {
+  const segments = splitCitationSegments(block);
+  return (
+    <span className="inline max-w-full align-baseline leading-relaxed">
+      {segments.map((segment, index) => {
+        if (segment.kind === "citation") {
+          const id = Number(segment.value);
+          return (
+            <CitationBadge
+              key={`cite-${index}-${id}`}
+              id={id}
+              reference={refMap.get(id)}
+            />
+          );
+        }
+        if (!segment.value) return null;
+        return (
+          <Fragment key={`md-${index}`}>
+            <ReactMarkdown
+              remarkPlugins={chatRemarkPlugins}
+              rehypePlugins={chatRehypePlugins}
+              components={inlineCitationMarkdownComponents}
+              urlTransform={chatUrlTransform}
+            >
+              {normalizeChatMarkdownContent(segment.value, { isStreaming })}
+            </ReactMarkdown>
+          </Fragment>
+        );
+      })}
+    </span>
+  );
+}
 
 export function CitationMarkdownBody({
   content,
@@ -41,39 +106,28 @@ export function CitationMarkdownBody({
 
   const hasReferences = (references?.length ?? 0) > 0;
   const normalized = normalizeCitationMarkers(content, hasReferences);
-  // 已完成（非流式）且本轮无 references 时，剥离模型编造的游离角标，避免展示假溯源。
-  // 流式阶段不剥离——references 可能稍后才随 tool_result 到达，避免角标闪烁。
   const displayText = hasReferences || isStreaming ? normalized : stripOrphanCitationMarkers(normalized);
-  const segments = hasReferences ? splitCitationSegments(normalized) : [{ kind: "text" as const, value: displayText }];
+  const blocks = hasReferences ? splitCitationParagraphBlocks(normalized) : [displayText];
 
   return (
     <div className={className} style={style}>
       <MarkdownContext.Provider value={{ isStreaming, onQuoteText, references }}>
-        {segments.map((segment, index) => {
-          if (segment.kind === "citation") {
-            const id = Number(segment.value);
-            return (
-              <CitationBadge
-                key={`cite-${index}-${id}`}
-                id={id}
-                reference={refMap.get(id)}
-              />
-            );
-          }
-          if (!segment.value) return null;
-          return (
-            <Fragment key={`md-${index}`}>
+        {blocks.map((block, blockIndex) => (
+          <div key={`cite-block-${blockIndex}`} className={blockIndex < blocks.length - 1 ? "mb-2" : undefined}>
+            {hasReferences ? (
+              <InlineCitationRow block={block} refMap={refMap} isStreaming={isStreaming} />
+            ) : (
               <ReactMarkdown
                 remarkPlugins={chatRemarkPlugins}
                 rehypePlugins={chatRehypePlugins}
                 components={chatMarkdownComponents}
                 urlTransform={chatUrlTransform}
               >
-                {normalizeChatMarkdownContent(segment.value, { isStreaming })}
+                {normalizeChatMarkdownContent(block, { isStreaming })}
               </ReactMarkdown>
-            </Fragment>
-          );
-        })}
+            )}
+          </div>
+        ))}
       </MarkdownContext.Provider>
     </div>
   );
