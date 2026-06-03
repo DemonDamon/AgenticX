@@ -13,6 +13,7 @@ import {
 } from "./markdown-components";
 import {
   normalizeCitationMarkers,
+  relocateCitationMarkersForDisplay,
   splitCitationParagraphBlocks,
   splitCitationSegments,
   stripOrphanCitationMarkers,
@@ -106,8 +107,16 @@ export function CitationMarkdownBody({
 
   const hasReferences = (references?.length ?? 0) > 0;
   const normalized = normalizeCitationMarkers(content, hasReferences);
-  const displayText = hasReferences || isStreaming ? normalized : stripOrphanCitationMarkers(normalized);
-  const blocks = hasReferences ? splitCitationParagraphBlocks(normalized) : [displayText];
+  const withCitationLayout = hasReferences
+    ? relocateCitationMarkersForDisplay(normalized)
+    : normalized;
+  const displayText =
+    hasReferences || isStreaming
+      ? withCitationLayout
+      : stripOrphanCitationMarkers(withCitationLayout);
+  const blocks = hasReferences
+    ? splitCitationParagraphBlocks(withCitationLayout)
+    : [displayText];
 
   return (
     <div className={className} style={style}>
