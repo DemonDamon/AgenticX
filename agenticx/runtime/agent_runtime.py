@@ -2645,8 +2645,13 @@ class AgentRuntime:
                 try:
                     from agenticx.studio.references import structured_payload_for_tool_result
 
+                    # References must be parsed from the FULL, un-compacted result:
+                    # `result` may already be micro-compacted (JSON truncated in the
+                    # middle), which makes json.loads fail and drops all references —
+                    # the assistant then has no references and the UI strips the
+                    # [N] citation markers as "orphans" after streaming ends.
                     _structured = structured_payload_for_tool_result(
-                        session, tool_name, arguments, result
+                        session, tool_name, arguments, raw_result
                     )
                     if _structured:
                         _tool_result_data["structured"] = _structured
