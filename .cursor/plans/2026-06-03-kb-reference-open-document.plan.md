@@ -28,5 +28,10 @@ isProject: false
 - `openKbDocumentFromReference`：拉取文档 → `shell.openPath`
 - `KbDocumentOpenOverlay`：挂到 `App.tsx` 全局 portal
 
+## 修复：点击后 Not Found（2026-06-03）
+
+- **根因**：`build_kb_references` / 前端 fallback 将 `source.uri`（本地绝对路径）当作 `doc_id`，`GET /api/kb/documents/{path}` 返回 404。
+- **修复**：优先 `metadata.document_id` → `hit.id` 去掉 `::chunk` → 非路径的 `uri`；附带 `kb_source_path`；打开时路径型 URL / 404 回退 `shellOpenPath`。
+
 Plan-Id: 2026-06-03-kb-reference-open-document
 Plan-File: .cursor/plans/2026-06-03-kb-reference-open-document.plan.md

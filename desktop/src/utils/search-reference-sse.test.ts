@@ -23,6 +23,31 @@ test("parseKbReferencesFromToolResult: builds refs from hits JSON", () => {
   assert.equal(refs[0].snippet, "网关能力说明");
 });
 
+test("parseKbReferencesFromToolResult: metadata.document_id wins over source.uri path", () => {
+  const refs = parseKbReferencesFromToolResult(
+    JSON.stringify({
+      ok: true,
+      hits: [
+        {
+          id: "doc_abc123::000000",
+          text: "chunk",
+          source: {
+            uri: "/tmp/uploads/report.pdf",
+            title: "report.pdf",
+            chunk_index: 1,
+          },
+          metadata: {
+            document_id: "doc_abc123",
+            source_path: "/tmp/uploads/report.pdf",
+          },
+        },
+      ],
+    }),
+  );
+  assert.equal(refs.length, 1);
+  assert.equal(refs[0].url, "agx://kb/doc_abc123#1");
+});
+
 test("accumulateReferenceTurn: falls back to tool result when structured missing", () => {
   const { references } = accumulateReferenceTurn(
     [],

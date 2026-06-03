@@ -84,25 +84,57 @@ def build_web_references(hits: Any, provider: str) -> List[Dict[str, Any]]:
     return refs
 
 
+def _resolve_kb_document_id(hit: Dict[str, Any]) -> str:
+    """Registry id (``doc_*``), not ``source.uri`` which is often a local file path."""
+    meta = hit.get("metadata") if isinstance(hit.get("metadata"), dict) else {}
+    doc_id = str(meta.get("document_id") or "").strip()
+    if doc_id.startswith("doc_"):
+        return doc_id
+    hit_id = str(hit.get("id") or "").strip()
+    if "::" in hit_id:
+        prefix = hit_id.split("::", 1)[0].strip()
+        if prefix.startswith("doc_"):
+            return prefix
+    source = hit.get("source") if isinstance(hit.get("source"), dict) else {}
+    uri = str(source.get("uri") or "").strip()
+    if uri and "/" not in uri and "\\" not in uri and "::" not in uri:
+        return uri
+    return ""
+
+
+def _resolve_kb_source_path(hit: Dict[str, Any]) -> str:
+    meta = hit.get("metadata") if isinstance(hit.get("metadata"), dict) else {}
+    path = str(meta.get("source_path") or "").strip()
+    if path:
+        return path
+    source = hit.get("source") if isinstance(hit.get("source"), dict) else {}
+    uri = str(source.get("uri") or "").strip()
+    if uri.startswith("/") or (len(uri) > 2 and uri[1] == ":"):
+        return uri
+    return ""
+
+
 def build_kb_references(payload: Dict[str, Any]) -> List[Dict[str, Any]]:
     refs: List[Dict[str, Any]] = []
     for hit in payload.get("hits") or []:
         if not isinstance(hit, dict):
             continue
         source = hit.get("source") if isinstance(hit.get("source"), dict) else {}
-        doc_id = str(source.get("uri") or hit.get("id") or "").strip()
+        doc_id = _resolve_kb_document_id(hit)
         chunk_idx = source.get("chunk_index")
         title = str(source.get("title") or doc_id or "KB").strip() or "KB"
         chunk_label = f"#{chunk_idx}" if chunk_idx is not None else ""
         url = f"agx://kb/{doc_id}{chunk_label}" if doc_id else "agx://kb/unknown"
-        refs.append(
-            {
-                "title": title,
-                "url": url,
-                "snippet": snippet_trim(str(hit.get("text") or "")),
-                "source": "kb",
-            }
-        )
+        ref: Dict[str, Any] = {
+            "title": title,
+            "url": url,
+            "snippet": snippet_trim(str(hit.get("text") or "")),
+            "source": "kb",
+        }
+        source_path = _resolve_kb_source_path(hit)
+        if source_path:
+            ref["kb_source_path"] = source_path
+        refs.append(ref)
     return refs
 
 

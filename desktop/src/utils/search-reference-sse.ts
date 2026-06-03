@@ -4,6 +4,7 @@ import {
   parseSearchReferences,
   type SearchReference,
 } from "../types/search-references";
+import { resolveKbDocumentIdFromHit } from "./kb-reference-id";
 
 /** Client fallback when SSE omits `structured` but tool `result` JSON still has KB hits. */
 export function parseKbReferencesFromToolResult(resultRaw: unknown): SearchReference[] {
@@ -23,9 +24,14 @@ export function parseKbReferencesFromToolResult(resultRaw: unknown): SearchRefer
   const out: SearchReference[] = [];
   for (const hit of hits) {
     if (!hit || typeof hit !== "object") continue;
-    const h = hit as { text?: unknown; source?: Record<string, unknown> };
+    const h = hit as {
+      id?: unknown;
+      text?: unknown;
+      metadata?: Record<string, unknown>;
+      source?: Record<string, unknown>;
+    };
     const source = h.source && typeof h.source === "object" ? h.source : {};
-    const docId = String(source.uri ?? source.id ?? "").trim();
+    const docId = resolveKbDocumentIdFromHit(h);
     const title = String(source.title ?? docId ?? "KB").trim() || "KB";
     const chunkIdx = source.chunk_index;
     const chunkLabel =

@@ -6,6 +6,7 @@ import {
   showKbDocumentOpenOverlay,
   updateKbDocumentOpenOverlay,
 } from "./kb-document-open-overlay";
+import { isFilesystemPath } from "./kb-reference-id";
 import { parseKbReferenceUrl } from "./open-kb-reference";
 
 type KbDocumentRow = {
@@ -50,12 +51,44 @@ function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => window.setTimeout(resolve, ms));
 }
 
+async function openLocalPathWithOverlay(filePath: string, title: string): Promise<void> {
+  showKbDocumentOpenOverlay(title, 12);
+  updateKbDocumentOpenOverlay(45);
+  await sleep(80);
+  updateKbDocumentOpenOverlay(88);
+  const opened = await window.agenticxDesktop.shellOpenPath(filePath);
+  if (!opened.ok) {
+    throw new Error(opened.error || "无法用系统默认应用打开该文件");
+  }
+  updateKbDocumentOpenOverlay(100);
+  finishKbDocumentOpenOverlay();
+}
+
 /** Resolve KB doc and open with the OS default app (ima-style), with loading overlay. */
 export async function openKbDocumentFromReference(ref: SearchReference): Promise<void> {
   const parsed = parseKbReferenceUrl(ref.url);
-  const docId = parsed?.docId?.trim();
+  const docId = parsed?.docId?.trim() ?? "";
   const title = String(ref.title || docId || "知识库文档").trim();
+
+  if (isFilesystemPath(docId)) {
+    try {
+      await openLocalPathWithOverlay(docId, title);
+    } catch (err) {
+      failKbDocumentOpenOverlay(err instanceof Error ? err.message : String(err));
+    }
+    return;
+  }
+
+  const fallbackPath = String(ref.kbSourcePath ?? "").trim();
   if (!docId) {
+    if (fallbackPath && isFilesystemPath(fallbackPath)) {
+      try {
+        await openLocalPathWithOverlay(fallbackPath, title);
+      } catch (err) {
+        failKbDocumentOpenOverlay(err instanceof Error ? err.message : String(err));
+      }
+      return;
+    }
     failKbDocumentOpenOverlay("无法解析知识库文档 ID");
     return;
   }
@@ -63,7 +96,16 @@ export async function openKbDocumentFromReference(ref: SearchReference): Promise
   showKbDocumentOpenOverlay(title, 8);
   try {
     updateKbDocumentOpenOverlay(22);
-    const doc = await fetchKbDocument(docId);
+    let doc: KbDocumentRow;
+    try {
+      doc = await fetchKbDocument(docId);
+    } catch (fetchErr) {
+      if (fallbackPath && isFilesystemPath(fallbackPath)) {
+        await openLocalPathWithOverlay(fallbackPath, title);
+        return;
+      }
+      throw fetchErr;
+    }
     updateKbDocumentOpenOverlay(58, doc.source_name || title);
     await sleep(80);
     updateKbDocumentOpenOverlay(82);

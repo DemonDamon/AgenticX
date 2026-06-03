@@ -6,6 +6,8 @@ export type SearchReference = {
   source: "web" | "kb";
   provider?: string;
   domain?: string;
+  /** Local file path for KB hits (fallback when url used a path as doc id). */
+  kbSourcePath?: string;
 };
 
 export function parseSearchReferences(raw: unknown): SearchReference[] {
@@ -20,6 +22,7 @@ export function parseSearchReferences(raw: unknown): SearchReference[] {
     const idRaw = row.id;
     const id = typeof idRaw === "number" && Number.isFinite(idRaw) ? idRaw : out.length + 1;
     const sourceRaw = String(row.source ?? "web").trim();
+    const kbPath = String(row.kb_source_path ?? row.kbSourcePath ?? "").trim();
     out.push({
       id,
       title: title || url,
@@ -28,6 +31,7 @@ export function parseSearchReferences(raw: unknown): SearchReference[] {
       source: sourceRaw === "kb" ? "kb" : "web",
       provider: String(row.provider ?? "").trim() || undefined,
       domain: String(row.domain ?? "").trim() || undefined,
+      kbSourcePath: kbPath || undefined,
     });
   }
   return out;
