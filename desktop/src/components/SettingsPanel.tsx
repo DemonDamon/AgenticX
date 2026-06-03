@@ -42,6 +42,8 @@ import { useAppStore } from "../store";
 import { DEFAULT_META_AVATAR_URL } from "../constants/meta-avatar";
 import { RECOMMENDED_SKILLS } from "../data/recommended-skills";
 import { buildSkillHubAgentInstallPrompt } from "../utils/skillhub-install-prompt";
+import { buildGuardFixPrompt, type GuardFixScanItem } from "../utils/guard-fix-prompt";
+import { META_AGENT_DISPLAY_NAME } from "../constants/branding";
 import { shouldDisableMcpToggle } from "../utils/mcp-toggle-state";
 import { ForwardPicker, type ForwardConfirmPayload } from "./ForwardPicker";
 import { QrConnectModal } from "./QrConnectModal";
@@ -4859,11 +4861,49 @@ function SkillAdvancedPanel() {
     disableSkill,
   } = useGuardSettings();
 
+  const addPane = useAppStore((s) => s.addPane);
+  const setForwardAutoReply = useAppStore((s) => s.setForwardAutoReply);
+  const closeSettings = useAppStore((s) => s.closeSettings);
+
   const loading = trinityLoading || policyLoading || guardLoading;
   const busy = trinitySaving || policySaving || guardSaving;
   const [nudgeDraft, setNudgeDraft] = useState(String(form.learning_nudge_interval));
   const [minCallsDraft, setMinCallsDraft] = useState(String(form.learning_min_tool_calls));
   const [reviewAdvancedOpen, setReviewAdvancedOpen] = useState(false);
+  const [guardFixBusy, setGuardFixBusy] = useState(false);
+  const [guardFixMsg, setGuardFixMsg] = useState("");
+
+  const runGuardFixInMetaAgent = useCallback(
+    async (item: GuardFixScanItem) => {
+      if (!form.skill_manage_enabled) {
+        setGuardFixMsg("请先在上方开启「允许助手改本地技能」，再使用 AI 修复。");
+        return;
+      }
+      const prompt = buildGuardFixPrompt(item);
+      if (!prompt.trim()) {
+        setGuardFixMsg("缺少技能目录，无法委派修复。");
+        return;
+      }
+      setGuardFixMsg("");
+      setGuardFixBusy(true);
+      try {
+        const created = await window.agenticxDesktop.createSession({});
+        if (!created.ok || !created.session_id) {
+          setGuardFixMsg(created.error ?? "创建元智能体会话失败");
+          return;
+        }
+        const sid = created.session_id;
+        const paneId = addPane(null, META_AGENT_DISPLAY_NAME, sid);
+        setForwardAutoReply({ paneId, sessionId: sid, text: prompt });
+        closeSettings();
+      } catch (e) {
+        setGuardFixMsg(e instanceof Error ? e.message : String(e));
+      } finally {
+        setGuardFixBusy(false);
+      }
+    },
+    [addPane, closeSettings, form.skill_manage_enabled, setForwardAutoReply],
+  );
 
   useEffect(() => {
     setNudgeDraft(String(form.learning_nudge_interval));
@@ -5060,6 +5100,13 @@ function SkillAdvancedPanel() {
             </div>
           ) : null}
           {scanMsg ? <div className="mt-2 text-xs text-rose-400">{scanMsg}</div> : null}
+          {guardFixMsg ? (
+            <div
+              className={`mt-2 text-xs ${guardFixMsg.includes("请先在上方") ? "text-amber-400" : "text-rose-400"}`}
+            >
+              {guardFixMsg}
+            </div>
+          ) : null}
           {scanned && !scanBusy ? (
             scanResults.length === 0 ? (
               <div className="mt-3 rounded-md border border-emerald-500/25 bg-emerald-500/5 px-3 py-2 text-xs text-emerald-400">
@@ -5071,8 +5118,13 @@ function SkillAdvancedPanel() {
                   <GuardScanResultCard
                     key={r.skill_name}
                     item={r}
-                    busy={actionBusy === r.skill_name}
-                    onAiFix={undefined}
+                    busy={actionBusy === r.skill_name || guardFixBusy}
+                    aiFixDisabled={!form.skill_manage_enabled}
+                    onAiFix={
+                      r.can_fix
+                        ? () => void runGuardFixInMetaAgent(r)
+                        : undefined
+                    }
                     onDisable={() => void disableSkill(r.skill_name)}
                     onIgnore={() => void ignoreSkill(r.skill_name)}
                   />
@@ -5197,12 +5249,14 @@ function guardVerdictLabel(v: string): string {
 function GuardScanResultCard({
   item,
   busy,
+  aiFixDisabled,
   onAiFix,
   onDisable,
   onIgnore,
 }: {
   item: GuardScanItem;
   busy: boolean;
+  aiFixDisabled?: boolean;
   onAiFix?: () => void;
   onDisable: () => void;
   onIgnore: () => void;
@@ -5261,11 +5315,15 @@ function GuardScanResultCard({
           <button
             type="button"
             className="rounded-md border border-[var(--settings-accent-border-strong)] bg-[var(--settings-accent-subtle-bg)] px-2.5 py-1 text-xs text-[var(--settings-accent-fg-muted)] transition hover:bg-[var(--settings-accent-subtle-bg-hover)] disabled:opacity-50"
-            disabled={busy || !onAiFix}
-            title={onAiFix ? "委派元智能体修复并预览改动" : "AI 修复即将支持"}
+            disabled={busy || !onAiFix || aiFixDisabled}
+            title={
+              aiFixDisabled
+                ? "请先在上方开启「允许助手改本地技能」"
+                : "委派元智能体新会话修复；写入前会展示 diff 供确认"
+            }
             onClick={onAiFix}
           >
-            AI 修复{onAiFix ? "" : "（即将支持）"}
+            AI 修复
           </button>
         ) : (
           <span className="text-[11px] text-text-faint">外部来源只读，可禁用或忽略</span>
