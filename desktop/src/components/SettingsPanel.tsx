@@ -4921,10 +4921,25 @@ function SkillAdvancedPanel() {
           onChange={(next) => void updatePolicy(next)}
         />
         <div className="mt-4 rounded-lg border border-border bg-surface-panel p-3">
-          <div className="text-sm font-medium text-text-strong">Skill 安全扫描（Guard v2）</div>
-          <p className="mt-1 text-[11px] text-text-faint">
-            扩展安装前扫描引擎；v2 启用分级扫描、评分与更多规则。默认 v1 与历史行为一致。
-          </p>
+          <div className="text-sm font-medium text-text-strong">技能安全扫描</div>
+          <div className="mt-1.5 space-y-1 text-[11px] leading-relaxed text-text-faint">
+            <p>
+              从技能市场、Bundle 或扩展安装前会<strong className="font-medium text-text-subtle">自动扫描</strong>
+              ，并展示摘要；命中高危须你确认后才可安装。本页配置写入{" "}
+              <code className="text-text-subtle">~/.agenticx/config.yaml</code>，重启后生效。
+            </p>
+            <p>
+              <span className="text-text-subtle">引擎 v1</span>：经典正则规则，与历史版本行为一致。
+              <span className="text-text-subtle">引擎 v2</span>：YAML 规则库，按技能体量分级扫描，并给出 0–100
+              分与安全等级，规则更全（推荐）。
+            </p>
+            <p>
+              <span className="text-text-subtle">扫描模式</span>（仅 v2 对安装流程生效）：
+              <span className="text-text-subtle">快速</span>—主要检查 SKILL.md，跳过重项，最快；
+              <span className="text-text-subtle">标准</span>—按目录文件量自动选深度，默认推荐；
+              <span className="text-text-subtle">完整</span>—尽量扫全目录与依赖，更严、更慢。
+            </p>
+          </div>
           <div className="mt-3 flex flex-wrap items-center gap-3 text-sm">
             <label className="flex items-center gap-2">
               <span className="text-text-muted">引擎版本</span>
@@ -4934,8 +4949,8 @@ function SkillAdvancedPanel() {
                 disabled={busy}
                 onChange={(e) => void saveGuard({ version: Number(e.target.value) })}
               >
-                <option value={1}>v1（经典）</option>
-                <option value={2}>v2（cls-certify 增强）</option>
+                <option value={1}>v1</option>
+                <option value={2}>v2</option>
               </select>
             </label>
             <label className="flex items-center gap-2">
@@ -4946,17 +4961,18 @@ function SkillAdvancedPanel() {
                 disabled={busy || guardVersion < 2}
                 onChange={(e) => void saveGuard({ scan_mode: e.target.value })}
               >
-                <option value="quick">quick</option>
-                <option value="standard">standard</option>
-                <option value="full">full</option>
+                <option value="quick">快速</option>
+                <option value="standard">标准</option>
+                <option value="full">完整</option>
               </select>
             </label>
           </div>
-          <div className="mt-3 flex flex-col gap-2 sm:flex-row">
+          <p className="mt-3 text-[11px] text-text-faint">手动审计（可选）：检查本机已有技能目录，与自动安装无关。</p>
+          <div className="mt-2 flex flex-col gap-2 sm:flex-row">
             <input
               type="text"
               className="min-w-0 flex-1 rounded-md border border-border bg-surface-card px-2 py-1.5 text-sm"
-              placeholder="技能目录路径（完整安全扫描）"
+              placeholder="例如 ~/.agenticx/skills/某技能"
               value={scanPath}
               disabled={scanBusy}
               onChange={(e) => setScanPath(e.target.value)}
@@ -4967,7 +4983,7 @@ function SkillAdvancedPanel() {
               disabled={scanBusy || guardVersion < 2}
               onClick={() => void runDeepScan()}
             >
-              {scanBusy ? "扫描中…" : "完整安全扫描"}
+              {scanBusy ? "扫描中…" : "扫描该目录"}
             </button>
           </div>
           {guardMessage ? (
