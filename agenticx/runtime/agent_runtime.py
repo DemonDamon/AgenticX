@@ -967,6 +967,40 @@ def _resolve_mid_turn_persist_tool_count() -> int:
     return 3
 
 
+# Forced tool_choice used to make weak function-calling models (e.g. qwen-plus)
+# actually invoke knowledge_search on the first round under KB "always" mode,
+# instead of narrating fake retrieval results in prose (no tool_calls -> no
+# tool card / no references / no citation badges).
+_KB_FORCED_TOOL_CHOICE: Dict[str, Any] = {
+    "type": "function",
+    "function": {"name": "knowledge_search"},
+}
+
+
+def _kb_retrieval_always_mode(session: Any) -> bool:
+    """Return True when the effective KB retrieval mode is "always".
+
+    Session-level override (``kb_retrieval_mode``) wins over the global KB
+    config, mirroring ``_build_kb_retrieval_policy_block``. Returns False when
+    the KB subsystem is unavailable or disabled.
+    """
+    mode = str(getattr(session, "kb_retrieval_mode", "") or "").strip().lower()
+    if mode in {"auto", "always"}:
+        return mode == "always"
+    try:
+        from agenticx.studio.kb import KBManager
+
+        cfg = KBManager.instance().read_config()
+        if not bool(getattr(cfg, "enabled", True)):
+            return False
+        cfg_mode = str(
+            getattr(getattr(cfg, "retrieval", None), "mode", "auto") or "auto"
+        ).strip().lower()
+        return cfg_mode == "always"
+    except Exception:
+        return False
+
+
 class AgentRuntime:
     """LLM-driven runtime that emits structured events."""
 
@@ -1104,6 +1138,12 @@ class AgentRuntime:
             for tool in active_tools
             if isinstance(tool, dict)
         }
+        # KB "always" mode: force knowledge_search on the first round so weak
+        # function-calling models (e.g. qwen-plus) actually invoke the tool
+        # instead of narrating fake retrieval results in prose.
+        _kb_force_always = (
+            "knowledge_search" in allowed_tool_names and _kb_retrieval_always_mode(session)
+        )
         history = _sanitize_context_messages(session.agent_messages)
         if getattr(session, "_code_dev_phase_compact_pending", False):
             setattr(session, "_code_dev_phase_compact_pending", False)
@@ -1356,9 +1396,16 @@ class AgentRuntime:
 
                         def _run_sync_stream_with_tools() -> None:
                             try:
+                                _round_tool_choice: Any = "auto"
+                                if (
+                                    _kb_force_always
+                                    and round_idx == 1
+                                    and provider_name.strip().lower() != "minimax"
+                                ):
+                                    _round_tool_choice = _KB_FORCED_TOOL_CHOICE
                                 stream_kwargs: Dict[str, Any] = {
                                     "tools": list(active_tools),
-                                    "tool_choice": "auto",
+                                    "tool_choice": _round_tool_choice,
                                     "temperature": 0.2,
                                     "max_tokens": 8192,
                                     "timeout": request_timeout_seconds,
@@ -1595,11 +1642,18 @@ class AgentRuntime:
                                 pass
                 if not used_stream_path:
                     def _invoke_once_with_fallback() -> Any:
+                        _fallback_tool_choice: Any = "auto"
+                        if (
+                            _kb_force_always
+                            and round_idx == 1
+                            and provider_name.strip().lower() != "minimax"
+                        ):
+                            _fallback_tool_choice = _KB_FORCED_TOOL_CHOICE
                         try:
                             return self.llm.invoke(
                                 messages_for_llm,
                                 tools=active_tools,
-                                tool_choice="auto",
+                                tool_choice=_fallback_tool_choice,
                                 temperature=0.2,
                                 max_tokens=8192,
                                 timeout=request_timeout_seconds,
