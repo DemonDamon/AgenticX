@@ -74,6 +74,43 @@ def test_build_kb_references_snippet_is_chunk_text_only() -> None:
     assert "score=" not in kb[0]["snippet"]
 
 
+def test_kb_structured_payload_from_full_result_then_truncated_yields_none() -> None:
+    """Regression: references must be parsed from the un-compacted raw result.
+
+    micro_compact_tool_result truncates the JSON middle ("... truncated ..."),
+    so json.loads on the compacted string fails and references vanish. The
+    runtime must pass the full raw_result here, not the compacted one.
+    """
+    full = (
+        '{"ok": true, "hits": [{"id": "doc1::0", "score": 0.5, '
+        '"text": "AI gateway chunk", "source": {"uri": "doc1", "title": "Doc", "chunk_index": 0}}]}'
+    )
+    session = _session()
+    reset_turn_references(session)
+    structured = structured_payload_for_tool_result(
+        session, "knowledge_search", {"query": "AI 网关"}, full
+    )
+    assert structured is not None
+    assert len(structured["references"]) == 1
+    assert structured["references"][0]["source"] == "kb"
+
+    # The micro-compacted form (truncated middle) is unparseable -> no references.
+    compacted = (
+        "[micro-compact tool=knowledge_search original_chars=14949]\n"
+        '{"ok": true, "hits": [{"id": "doc1::0", "score": 0.5, "text": "AI gat\n'
+        "... truncated (9000 chars omitted) ...\n"
+        '"chunk_index": 0}}]}'
+    )
+    session2 = _session()
+    reset_turn_references(session2)
+    assert (
+        structured_payload_for_tool_result(
+            session2, "knowledge_search", {"query": "AI 网关"}, compacted
+        )
+        is None
+    )
+
+
 def test_queue_web_search_batch_and_payload() -> None:
     session = _session()
     reset_turn_references(session)

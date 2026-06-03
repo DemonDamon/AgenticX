@@ -1,9 +1,9 @@
 import type { Message } from "../store";
 import {
   mergeSearchReferences,
-  parseKbReferencesFromToolResult,
   type SearchReference,
-} from "./search-reference-sse";
+} from "../types/search-references";
+import { parseKbReferencesFromToolResult } from "./search-reference-sse";
 
 /** Parse KB hits embedded in assistant prose (models that skip native tool_call UI). */
 export function tryParseEmbeddedKbSearchJson(text: string): SearchReference[] {
