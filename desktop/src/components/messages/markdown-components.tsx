@@ -1,7 +1,7 @@
 import type { Components } from "react-markdown";
 import type { Element as HastElement, ElementContent } from "hast";
 import type { HTMLAttributes, ReactElement, ReactNode } from "react";
-import { Children, isValidElement } from "react";
+import { Children, Fragment, isValidElement } from "react";
 import { useEffect, useMemo, useState, createContext, useContext } from "react";
 import remarkGfm from "remark-gfm";
 import remarkMath from "remark-math";
@@ -69,6 +69,21 @@ function extractMermaidFromHastPre(pre: HastElement | undefined): string | null 
   const trimmed = text.trim();
   if (!shouldRenderMermaid(lang, trimmed)) return null;
   return text;
+}
+
+const HTML_BR_IN_TEXT_RE = /<br\s*\/?>/gi;
+
+function renderCellContentWithBreaks(children: ReactNode): ReactNode {
+  const flat = reactNodeToPlainText(children);
+  if (!HTML_BR_IN_TEXT_RE.test(flat)) return children;
+  const segments = flat.split(HTML_BR_IN_TEXT_RE);
+  if (segments.length <= 1) return children;
+  return segments.map((segment, index) => (
+    <Fragment key={index}>
+      {index > 0 ? <br /> : null}
+      {segment}
+    </Fragment>
+  ));
 }
 
 function reactNodeToPlainText(node: ReactNode): string {
@@ -408,6 +423,12 @@ export const chatMarkdownComponents: Partial<Components> = {
         <table {...rest}>{children}</table>
       </div>
     );
+  },
+  td({ children, ...rest }) {
+    return <td {...rest}>{renderCellContentWithBreaks(children)}</td>;
+  },
+  th({ children, ...rest }) {
+    return <th {...rest}>{renderCellContentWithBreaks(children)}</th>;
   },
   img({ src, alt, title }) {
     return <MarkdownImage src={src} alt={alt} title={title} />;

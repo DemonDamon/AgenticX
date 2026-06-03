@@ -53,6 +53,63 @@ export function splitCitationSegments(text: string): Array<{ kind: "text" | "cit
   });
 }
 
+const CITATION_TOKEN_RE = /\[\d+\](?!\()/;
+
+/** Leading numeric citations not part of a markdown link (`[1](url)`). */
+const LEADING_CITATION_LINE_RE = new RegExp(
+  `^(\\s*)((?:${CITATION_TOKEN_RE.source})+)\\s*([\\s\\S]+)$`,
+);
+const CITATION_ONLY_LINE_RE = new RegExp(`^(\\s*)((?:${CITATION_TOKEN_RE.source})+)\\s*$`);
+
+function lastNonEmptyLineIndex(lines: string[]): number {
+  for (let i = lines.length - 1; i >= 0; i -= 1) {
+    if (lines[i]?.trim()) return i;
+  }
+  return -1;
+}
+
+/**
+ * Move line-leading [N] to the end of the previous non-empty line (ima-style: pill at
+ * end of title/sentence). Same-line leading [N]text becomes text[N].
+ */
+export function relocateCitationMarkersForDisplay(text: string): string {
+  if (!text) return text;
+  const lines = text.split("\n");
+  const out: string[] = [];
+
+  for (const rawLine of lines) {
+    let line = rawLine;
+
+    const onlyCites = line.match(CITATION_ONLY_LINE_RE);
+    if (onlyCites) {
+      const prevIdx = lastNonEmptyLineIndex(out);
+      if (prevIdx >= 0) {
+        out[prevIdx] = `${out[prevIdx].trimEnd()}${onlyCites[2]}`;
+        continue;
+      }
+      out.push(line);
+      continue;
+    }
+
+    const lead = line.match(LEADING_CITATION_LINE_RE);
+    if (lead) {
+      const cites = lead[2];
+      const body = lead[3];
+      const prevIdx = lastNonEmptyLineIndex(out);
+      if (prevIdx >= 0 && body.trim()) {
+        out[prevIdx] = `${out[prevIdx].trimEnd()}${cites}`;
+        line = `${lead[1]}${body}`;
+      } else if (body.trim()) {
+        line = `${lead[1]}${body.trimEnd()}${cites}`;
+      }
+    }
+
+    out.push(line);
+  }
+
+  return out.join("\n");
+}
+
 /** Split assistant text into paragraph blocks; citations stay inside the same block as adjacent prose. */
 export function splitCitationParagraphBlocks(text: string): string[] {
   if (!text) return [];

@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import {
   normalizeCitationMarkers,
+  relocateCitationMarkersForDisplay,
   splitCitationParagraphBlocks,
   splitCitationSegments,
   stripOrphanCitationMarkers,
@@ -57,4 +58,30 @@ test("stripOrphanCitationMarkers: preserves markdown links like [1](url)", () =>
     stripOrphanCitationMarkers(input),
     "参见 [1](https://example.com) 与文末",
   );
+});
+
+test("relocateCitationMarkersForDisplay: moves leading cite to previous line end", () => {
+  assert.equal(
+    relocateCitationMarkersForDisplay("1. UToken 网关产品 (PDF)\n[1]UCloud 推出的"),
+    "1. UToken 网关产品 (PDF)[1]\nUCloud 推出的",
+  );
+});
+
+test("relocateCitationMarkersForDisplay: moves cite-only line to previous line", () => {
+  assert.equal(
+    relocateCitationMarkersForDisplay("1. 标题行\n\n[1]\n\n正文"),
+    "1. 标题行[1]\n\n\n正文",
+  );
+});
+
+test("relocateCitationMarkersForDisplay: same-line leading cite goes to line end", () => {
+  assert.equal(
+    relocateCitationMarkersForDisplay("[1]单行说明"),
+    "单行说明[1]",
+  );
+});
+
+test("relocateCitationMarkersForDisplay: preserves markdown links at line start", () => {
+  const input = "[1](https://example.com) 说明";
+  assert.equal(relocateCitationMarkersForDisplay(input), input);
 });
