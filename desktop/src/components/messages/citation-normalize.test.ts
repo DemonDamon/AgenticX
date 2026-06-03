@@ -13,6 +13,10 @@ test("normalizeCitationMarkers: converts common variants when enabled", () => {
   );
 });
 
+test("normalizeCitationMarkers: converts circled numerals when enabled", () => {
+  assert.equal(normalizeCitationMarkers("UToken①与AIBOX②", true), "UToken[1]与AIBOX[2]");
+});
+
 test("normalizeCitationMarkers: no-op when disabled", () => {
   const input = "事实【1】";
   assert.equal(normalizeCitationMarkers(input, false), input);

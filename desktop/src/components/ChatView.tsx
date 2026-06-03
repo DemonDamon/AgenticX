@@ -1090,6 +1090,11 @@ export function ChatView({ onOpenConfirm, mode = "pro" }: Props) {
     const abortController = new AbortController();
     abortRef.current = abortController;
 
+    const turnRefsSnapshot = {
+      references: [] as SearchReference[],
+      queries: [] as string[],
+    };
+
     try {
       const body: Record<string, unknown> = { session_id: sessionId, user_input: effectiveUserText };
       if (reqProvider) body.provider = reqProvider;
@@ -1122,6 +1127,10 @@ export function ChatView({ onOpenConfirm, mode = "pro" }: Props) {
       let pendingSuggestedQuestions: string[] = [];
       let pendingReferences: SearchReference[] = [];
       let pendingSearchedQueries: string[] = [];
+      const syncTurnRefsSnapshot = () => {
+        turnRefsSnapshot.references = pendingReferences;
+        turnRefsSnapshot.queries = pendingSearchedQueries;
+      };
       let buffer = "";
       while (true) {
         if (!isCurrentRequest()) return;
@@ -1254,6 +1263,7 @@ export function ChatView({ onOpenConfirm, mode = "pro" }: Props) {
                 );
                 pendingReferences = accumulated.references;
                 pendingSearchedQueries = accumulated.queries;
+                syncTurnRefsSnapshot();
                 if (isCurrentRequest()) {
                   setStreamReferences([...pendingReferences]);
                   setStreamSearchedQueries([...pendingSearchedQueries]);
@@ -1363,6 +1373,11 @@ export function ChatView({ onOpenConfirm, mode = "pro" }: Props) {
               );
               pendingReferences = appliedRefs.references;
               pendingSearchedQueries = appliedRefs.queries;
+              syncTurnRefsSnapshot();
+              if (isCurrentRequest()) {
+                setStreamReferences([...pendingReferences]);
+                setStreamSearchedQueries([...pendingSearchedQueries]);
+              }
               const finalText = String(payload.data?.text ?? "");
               if (finalText) {
                 if (finalText.startsWith(cumulativeFull)) {
@@ -1506,6 +1521,7 @@ export function ChatView({ onOpenConfirm, mode = "pro" }: Props) {
       }
 
       const trimmedFull = full.trim();
+      syncTurnRefsSnapshot();
       const refExtras = referenceExtrasFromTurn(pendingReferences, pendingSearchedQueries);
       const sugExtras =
         pendingSuggestedQuestions.length > 0
@@ -1537,6 +1553,13 @@ export function ChatView({ onOpenConfirm, mode = "pro" }: Props) {
       }
     } finally {
       if (!isCurrentRequest()) return;
+      const refPatch = referenceExtrasFromTurn(
+        turnRefsSnapshot.references,
+        turnRefsSnapshot.queries,
+      );
+      if (refPatch && !abortController.signal.aborted) {
+        mergeLastMessageByRole("assistant", refPatch);
+      }
       abortRef.current = null;
       cancelStreamRenderFrame();
       streamTextRef.current = "";

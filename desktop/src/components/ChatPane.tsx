@@ -113,6 +113,10 @@ import {
   type ContinueSource,
 } from "../utils/session-continue";
 import { mergeSessionMessagesTail } from "../utils/session-message-merge";
+import {
+  enrichDiskMessagesWithInMemoryReferences,
+  referencesDifferBetweenTails,
+} from "../utils/session-reference-reconcile";
 import { reattachSessionStreamUrl, parseSseFrame } from "../utils/session-reattach";
 import {
   attachmentsFromSessionRow,
@@ -3837,11 +3841,13 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
         const mapped = result.messages.map((item, midx) =>
           mapLoadedSessionMessage(item as LoadedSessionMessage, sid, midx)
         );
+        const enriched = enrichDiskMessagesWithInMemoryReferences(current, mapped);
         const differs =
-          mapped.length !== current.length ||
-          String(mapped[mapped.length - 1]?.content ?? "") !==
-            String(current[current.length - 1]?.content ?? "");
-        if (differs) setPaneMessages(pane.id, mapped);
+          enriched.length !== current.length ||
+          String(enriched[enriched.length - 1]?.content ?? "") !==
+            String(current[current.length - 1]?.content ?? "") ||
+          referencesDifferBetweenTails(current, enriched);
+        if (differs) setPaneMessages(pane.id, enriched);
       } catch {
         /* best effort */
       }
@@ -5995,6 +6001,11 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
       });
     };
 
+    const turnRefsSnapshot = {
+      references: [] as SearchReference[],
+      queries: [] as string[],
+    };
+
     try {
       const body: Record<string, unknown> = { session_id: requestSessionId, user_input: messageText };
       if (skipUserHistory) body.skip_user_history = true;
@@ -6135,6 +6146,10 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
       let pendingSuggestedQuestions: string[] = [];
       let pendingReferences: SearchReference[] = [];
       let pendingSearchedQueries: string[] = [];
+      const syncTurnRefsSnapshot = () => {
+        turnRefsSnapshot.references = pendingReferences;
+        turnRefsSnapshot.queries = pendingSearchedQueries;
+      };
       let buffer = "";
       while (true) {
         const { value: chunk, done } = await reader.read();
@@ -6564,6 +6579,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
                 );
                 pendingReferences = accumulated.references;
                 pendingSearchedQueries = accumulated.queries;
+                syncTurnRefsSnapshot();
                 if (isTargetSessionStillActive()) {
                   setStreamReferences([...pendingReferences]);
                   setStreamSearchedQueries([...pendingSearchedQueries]);
@@ -6859,6 +6875,11 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
                 );
                 pendingReferences = appliedRefs.references;
                 pendingSearchedQueries = appliedRefs.queries;
+                syncTurnRefsSnapshot();
+                if (isTargetSessionStillActive()) {
+                  setStreamReferences([...pendingReferences]);
+                  setStreamSearchedQueries([...pendingSearchedQueries]);
+                }
                 // Final payload is authoritative. Replacing (instead of merging) avoids
                 // duplicate concatenation when token stream shape differs from final text.
                 if (finalText.trim() && !isThinkingPlaceholderText(finalText)) {
@@ -6944,6 +6965,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
       }
 
       const trimmedFull = full.trim();
+      syncTurnRefsSnapshot();
       const refExtras = referenceExtrasFromTurn(pendingReferences, pendingSearchedQueries);
       const sugExtras =
         pendingSuggestedQuestions.length > 0
@@ -7003,10 +7025,19 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
         sessionStreamStateRef.current[requestSessionId] = ended;
       }
       if ((pane.sessionId || "").trim() === requestSessionId) {
+        const refPatch = referenceExtrasFromTurn(
+          turnRefsSnapshot.references,
+          turnRefsSnapshot.queries,
+        );
+        if (refPatch && !abortController.signal.aborted) {
+          useAppStore.getState().mergeLastPaneMessageByRole(pane.id, "assistant", refPatch);
+        }
         syncStreamingUiForCurrentSession();
         if (!abortController.signal.aborted) {
           setSessionExecutionState("idle");
         }
+        setStreamReferences([]);
+        setStreamSearchedQueries([]);
       }
       abortRef.current = null;
       cancelStreamRenderFrame();
