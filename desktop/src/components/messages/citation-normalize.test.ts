@@ -1,6 +1,8 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import {
+  buildCitationRenderGroups,
+  escapeMarkdownOrderedListMarkers,
   normalizeCitationMarkers,
   relocateCitationMarkersForDisplay,
   splitCitationParagraphBlocks,
@@ -84,4 +86,28 @@ test("relocateCitationMarkersForDisplay: same-line leading cite goes to line end
 test("relocateCitationMarkersForDisplay: preserves markdown links at line start", () => {
   const input = "[1](https://example.com) 说明";
   assert.equal(relocateCitationMarkersForDisplay(input), input);
+});
+
+test("escapeMarkdownOrderedListMarkers: escapes line-start ordered list syntax", () => {
+  assert.equal(
+    escapeMarkdownOrderedListMarkers("1. UToken 网关\n正文"),
+    "1\\. UToken 网关\n正文",
+  );
+});
+
+test("buildCitationRenderGroups: keeps cite on title run before paragraph break", () => {
+  const segments = splitCitationSegments("1. UToken 网关[1]\n\nUCloud 推出");
+  assert.equal(segments.length, 3);
+  const groups = buildCitationRenderGroups(segments);
+  assert.equal(groups.length, 2);
+  assert.equal(groups[0].length, 2);
+  assert.equal(groups[0][0].kind, "text");
+  assert.equal(groups[0][1].kind, "citation");
+  assert.equal(groups[1][0].value.startsWith("\n"), true);
+});
+
+test("buildCitationRenderGroups: mid-sentence cites stay in one group", () => {
+  const groups = buildCitationRenderGroups(splitCitationSegments("功能[1][2]说明"));
+  assert.equal(groups.length, 1);
+  assert.equal(groups[0].length, 4);
 });

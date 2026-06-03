@@ -8,8 +8,11 @@ todos:
   - id: table-br
     content: td/th 将 <br> 转为 React 换行
     status: completed
+  - id: inline-group
+    content: buildCitationRenderGroups + 转义 1. 列表 + li 行内化
+    status: completed
   - id: tests
-    content: citation-normalize.test 覆盖角标挪位
+    content: citation-normalize.test 覆盖挪位与分组
     status: completed
 isProject: false
 ---
@@ -23,6 +26,8 @@ isProject: false
 ## 方案
 
 - `relocateCitationMarkersForDisplay`：行首 [N] 并到上一非空行末；仅 [N] 行并入上一行；单行 [N]text → text[N]
+- `buildCitationRenderGroups`：段前 [N] 与标题同组行内渲染，避免角标夹在块级 Markdown 之间单独成行
+- `escapeMarkdownOrderedListMarkers` + `li` 行内化：避免 `1. 标题` 变成块级 `<ol>` 把角标挤到下一行
 - `markdown-components` td/th：`renderCellContentWithBreaks`
 
 ## Requirements
