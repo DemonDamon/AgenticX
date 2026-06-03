@@ -4703,6 +4703,36 @@ function useGuardSettings() {
   const [scanned, setScanned] = useState(false);
   const [scanMsg, setScanMsg] = useState("");
   const [actionBusy, setActionBusy] = useState<string | null>(null);
+  const [snapshotMap, setSnapshotMap] = useState<Record<string, { id: string; ts: string }>>({});
+  const [restoreMsg, setRestoreMsg] = useState("");
+
+  const refreshSnapshotsFor = useCallback(async (items: GuardScanItem[]) => {
+    const fixable = items.filter((r) => r.can_fix && r.base_dir?.trim());
+    if (fixable.length === 0) return;
+    const entries = await Promise.all(
+      fixable.map(async (r) => {
+        try {
+          const res = await window.agenticxDesktop.skillSnapshotsList({
+            base_dir: r.base_dir!.trim(),
+          });
+          if (res?.ok && res.snapshots?.length) {
+            const latest = res.snapshots[0];
+            return [r.skill_name, { id: latest.id, ts: latest.ts }] as const;
+          }
+        } catch {
+          /* ignore per-skill list errors */
+        }
+        return null;
+      }),
+    );
+    const next: Record<string, { id: string; ts: string }> = {};
+    for (const row of entries) {
+      if (row) next[row[0]] = row[1];
+    }
+    if (Object.keys(next).length > 0) {
+      setSnapshotMap((prev) => ({ ...prev, ...next }));
+    }
+  }, []);
 
   useEffect(() => {
     let disposed = false;
@@ -4755,15 +4785,53 @@ function useGuardSettings() {
         setScanMsg(result?.error ? String(result.error) : "扫描失败。");
         return;
       }
-      setScanResults(Array.isArray(result.results) ? result.results : []);
+      const rows = Array.isArray(result.results) ? result.results : [];
+      setScanResults(rows);
       if (Array.isArray(result.ignored)) setIgnoredSkills(result.ignored);
       setScanned(true);
+      void refreshSnapshotsFor(rows);
     } catch (e) {
       setScanMsg(e instanceof Error ? e.message : "扫描失败。");
     } finally {
       setScanBusy(false);
     }
-  }, []);
+  }, [refreshSnapshotsFor]);
+
+  const restoreSnapshot = useCallback(
+    async (item: GuardScanItem) => {
+      const meta = snapshotMap[item.skill_name];
+      const base = item.base_dir?.trim();
+      if (!base || !meta?.id) {
+        setRestoreMsg("无可用的修复前备份。");
+        return;
+      }
+      setRestoreMsg("");
+      setActionBusy(item.skill_name);
+      try {
+        const res = await window.agenticxDesktop.skillSnapshotRestore({
+          base_dir: base,
+          snapshot_id: meta.id,
+        });
+        if (!res?.ok) {
+          setRestoreMsg(res?.error ? String(res.error) : "恢复失败。");
+          return;
+        }
+        setRestoreMsg(`已恢复到修复前备份（${formatGuardSnapshotTs(meta.ts)}）。`);
+        const scan = await window.agenticxDesktop.guardScanAll({});
+        if (scan?.ok) {
+          const rows = Array.isArray(scan.results) ? scan.results : [];
+          setScanResults(rows);
+          if (Array.isArray(scan.ignored)) setIgnoredSkills(scan.ignored);
+          void refreshSnapshotsFor(rows);
+        }
+      } catch (e) {
+        setRestoreMsg(e instanceof Error ? e.message : "恢复失败。");
+      } finally {
+        setActionBusy(null);
+      }
+    },
+    [refreshSnapshotsFor, snapshotMap],
+  );
 
   const ignoreSkill = useCallback(async (name: string) => {
     setActionBusy(name);
@@ -4829,6 +4897,10 @@ function useGuardSettings() {
     ignoreSkill,
     unignoreSkill,
     disableSkill,
+    snapshotMap,
+    restoreMsg,
+    restoreSnapshot,
+    setSnapshotMap,
   };
 }
 
@@ -4859,6 +4931,10 @@ function SkillAdvancedPanel() {
     ignoreSkill,
     unignoreSkill,
     disableSkill,
+    snapshotMap,
+    restoreMsg,
+    restoreSnapshot,
+    setSnapshotMap,
   } = useGuardSettings();
 
   const addPane = useAppStore((s) => s.addPane);
@@ -4887,6 +4963,25 @@ function SkillAdvancedPanel() {
       setGuardFixMsg("");
       setGuardFixBusy(true);
       try {
+        const base = item.base_dir?.trim();
+        if (base) {
+          const snap = await window.agenticxDesktop.skillSnapshot({
+            base_dir: base,
+            trigger: "guard_ai_fix",
+            skill_name: item.skill_name,
+          });
+          if (snap?.ok && snap.snapshot_id) {
+            setSnapshotMap((prev) => ({
+              ...prev,
+              [item.skill_name]: {
+                id: snap.snapshot_id!,
+                ts: snap.timestamp ?? snap.snapshot_id!,
+              },
+            }));
+          } else if (snap?.error) {
+            setGuardFixMsg(`备份未创建（${snap.error}），仍将继续修复。`);
+          }
+        }
         const created = await window.agenticxDesktop.createSession({});
         if (!created.ok || !created.session_id) {
           setGuardFixMsg(created.error ?? "创建元智能体会话失败");
@@ -4902,7 +4997,7 @@ function SkillAdvancedPanel() {
         setGuardFixBusy(false);
       }
     },
-    [addPane, closeSettings, form.skill_manage_enabled, setForwardAutoReply],
+    [addPane, closeSettings, form.skill_manage_enabled, setForwardAutoReply, setSnapshotMap],
   );
 
   useEffect(() => {
@@ -5102,9 +5197,16 @@ function SkillAdvancedPanel() {
           {scanMsg ? <div className="mt-2 text-xs text-rose-400">{scanMsg}</div> : null}
           {guardFixMsg ? (
             <div
-              className={`mt-2 text-xs ${guardFixMsg.includes("请先在上方") ? "text-amber-400" : "text-rose-400"}`}
+              className={`mt-2 text-xs ${guardFixMsg.includes("请先在上方") || guardFixMsg.includes("备份未创建") ? "text-amber-400" : "text-rose-400"}`}
             >
               {guardFixMsg}
+            </div>
+          ) : null}
+          {restoreMsg ? (
+            <div
+              className={`mt-2 text-xs ${restoreMsg.startsWith("已恢复") ? "text-emerald-400" : "text-rose-400"}`}
+            >
+              {restoreMsg}
             </div>
           ) : null}
           {scanned && !scanBusy ? (
@@ -5123,6 +5225,12 @@ function SkillAdvancedPanel() {
                     onAiFix={
                       r.can_fix
                         ? () => void runGuardFixInMetaAgent(r)
+                        : undefined
+                    }
+                    hasSnapshot={Boolean(r.can_fix && snapshotMap[r.skill_name]?.id)}
+                    onRestore={
+                      r.can_fix && snapshotMap[r.skill_name]?.id
+                        ? () => void restoreSnapshot(r)
                         : undefined
                     }
                     onDisable={() => void disableSkill(r.skill_name)}
@@ -5246,11 +5354,21 @@ function guardVerdictLabel(v: string): string {
   return v === "dangerous" ? "高危" : v === "caution" ? "需注意" : "未见高危规则";
 }
 
+function formatGuardSnapshotTs(ts: string): string {
+  const idMatch = ts.match(/^(\d{4})(\d{2})(\d{2})_(\d{2})(\d{2})(\d{2})/);
+  if (idMatch) {
+    return `${idMatch[1]}-${idMatch[2]}-${idMatch[3]} ${idMatch[4]}:${idMatch[5]}:${idMatch[6]} UTC`;
+  }
+  return ts;
+}
+
 function GuardScanResultCard({
   item,
   busy,
   aiFixDisabled,
   onAiFix,
+  hasSnapshot,
+  onRestore,
   onDisable,
   onIgnore,
 }: {
@@ -5258,6 +5376,8 @@ function GuardScanResultCard({
   busy: boolean;
   aiFixDisabled?: boolean;
   onAiFix?: () => void;
+  hasSnapshot?: boolean;
+  onRestore?: () => void;
   onDisable: () => void;
   onIgnore: () => void;
 }) {
@@ -5328,6 +5448,17 @@ function GuardScanResultCard({
         ) : (
           <span className="text-[11px] text-text-faint">外部来源只读，可禁用或忽略</span>
         )}
+        {item.can_fix && hasSnapshot ? (
+          <button
+            type="button"
+            className="rounded-md border border-amber-500/40 bg-amber-500/10 px-2.5 py-1 text-xs text-amber-300 transition hover:bg-amber-500/15 disabled:opacity-50"
+            disabled={busy || !onRestore}
+            title="恢复到本次 AI 修复前自动保存的快照"
+            onClick={onRestore}
+          >
+            恢复备份
+          </button>
+        ) : null}
         <button
           type="button"
           className="rounded-md border border-border px-2.5 py-1 text-xs text-text-subtle transition hover:bg-surface-hover hover:text-text-primary disabled:opacity-50"

@@ -269,6 +269,29 @@ type GuardScanAllResult = {
   scanned?: number;
   error?: string;
 };
+type SkillSnapshotEntry = {
+  id: string;
+  ts: string;
+  files_count: number;
+  trigger?: string;
+};
+type SkillSnapshotCreateResult = {
+  ok: boolean;
+  snapshot_id?: string;
+  timestamp?: string;
+  files_count?: number;
+  error?: string;
+};
+type SkillSnapshotsListResult = {
+  ok: boolean;
+  snapshots?: SkillSnapshotEntry[];
+  error?: string;
+};
+type SkillSnapshotRestoreResult = {
+  ok: boolean;
+  restored_files?: string[];
+  error?: string;
+};
 type GuardScanResult = {
   ok: boolean;
   scan?: {
@@ -921,6 +944,16 @@ declare global {
         mode?: string;
       }) => Promise<GuardScanResult>;
       guardScanAll: (payload?: { include_ignored?: boolean }) => Promise<GuardScanAllResult>;
+      skillSnapshot: (payload: {
+        base_dir: string;
+        trigger?: string;
+        skill_name?: string;
+      }) => Promise<SkillSnapshotCreateResult>;
+      skillSnapshotsList: (payload: { base_dir: string }) => Promise<SkillSnapshotsListResult>;
+      skillSnapshotRestore: (payload: {
+        base_dir: string;
+        snapshot_id: string;
+      }) => Promise<SkillSnapshotRestoreResult>;
       putSkillSettings: (payload: {
         presetPaths: Array<{ id: string; enabled: boolean }>;
         customPaths: string[];

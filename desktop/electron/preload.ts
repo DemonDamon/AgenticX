@@ -531,6 +531,15 @@ contextBridge.exposeInMainWorld("agenticxDesktop", {
   }) => ipcRenderer.invoke("guard-scan-skill", payload),
   guardScanAll: async (payload?: { include_ignored?: boolean }) =>
     ipcRenderer.invoke("guard-scan-all", payload ?? {}),
+  skillSnapshot: async (payload: {
+    base_dir: string;
+    trigger?: string;
+    skill_name?: string;
+  }) => ipcRenderer.invoke("skill-snapshot", payload),
+  skillSnapshotsList: async (payload: { base_dir: string }) =>
+    ipcRenderer.invoke("skill-snapshots-list", payload),
+  skillSnapshotRestore: async (payload: { base_dir: string; snapshot_id: string }) =>
+    ipcRenderer.invoke("skill-snapshot-restore", payload),
   putSkillSettings: async (payload: {
     presetPaths: Array<{ id: string; enabled: boolean }>;
     customPaths: string[];

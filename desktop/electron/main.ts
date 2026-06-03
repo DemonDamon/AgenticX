@@ -5643,6 +5643,77 @@ function registerIpc(): void {
   );
 
   ipcMain.handle(
+    "skill-snapshot",
+    async (
+      _event,
+      payload: { base_dir?: string; trigger?: string; skill_name?: string },
+    ) => {
+      try {
+        const resp = await fetch(`${getStudioUrl()}/api/skills/snapshot`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "x-agx-desktop-token": getStudioToken(),
+          },
+          body: JSON.stringify(payload ?? {}),
+        });
+        if (!resp.ok) {
+          const body = await resp.text().catch(() => "");
+          return { ok: false, error: `HTTP ${resp.status}: ${body.slice(0, 300)}` };
+        }
+        return await resp.json();
+      } catch (err) {
+        return { ok: false, error: String(err) };
+      }
+    },
+  );
+
+  ipcMain.handle(
+    "skill-snapshots-list",
+    async (_event, payload: { base_dir?: string }) => {
+      try {
+        const base = encodeURIComponent(String(payload?.base_dir ?? ""));
+        const resp = await fetch(
+          `${getStudioUrl()}/api/skills/snapshots?base_dir=${base}`,
+          {
+            headers: { "x-agx-desktop-token": getStudioToken() },
+          },
+        );
+        if (!resp.ok) {
+          const body = await resp.text().catch(() => "");
+          return { ok: false, error: `HTTP ${resp.status}: ${body.slice(0, 300)}` };
+        }
+        return await resp.json();
+      } catch (err) {
+        return { ok: false, error: String(err) };
+      }
+    },
+  );
+
+  ipcMain.handle(
+    "skill-snapshot-restore",
+    async (_event, payload: { base_dir?: string; snapshot_id?: string }) => {
+      try {
+        const resp = await fetch(`${getStudioUrl()}/api/skills/snapshot/restore`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "x-agx-desktop-token": getStudioToken(),
+          },
+          body: JSON.stringify(payload ?? {}),
+        });
+        if (!resp.ok) {
+          const body = await resp.text().catch(() => "");
+          return { ok: false, error: `HTTP ${resp.status}: ${body.slice(0, 300)}` };
+        }
+        return await resp.json();
+      } catch (err) {
+        return { ok: false, error: String(err) };
+      }
+    },
+  );
+
+  ipcMain.handle(
     "put-skill-settings",
     async (
       _event,
