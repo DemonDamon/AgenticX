@@ -1,5 +1,5 @@
 import type { SearchReference } from "../types/search-references";
-import { useAppStore } from "../store";
+import { openKbDocumentFromReference } from "./open-kb-document";
 
 /** Parse `agx://kb/{docId}#{chunk}` style URLs. */
 export function parseKbReferenceUrl(url: string): { docId: string; chunk?: string } | null {
@@ -13,18 +13,9 @@ export function parseKbReferenceUrl(url: string): { docId: string; chunk?: strin
   return { docId, chunk: chunk || undefined };
 }
 
-/** Open settings → knowledge tab; optional toast when document highlight is unavailable. */
+/** Open the KB source file in the system default app (with loading overlay). */
 export function openKbReference(ref: SearchReference): void {
-  const parsed = parseKbReferenceUrl(ref.url);
-  const title = String(ref.title || parsed?.docId || "知识库文档").trim();
-  useAppStore.getState().openSettings("knowledge");
-  if (typeof window !== "undefined") {
-    window.dispatchEvent(
-      new CustomEvent("agx:kb-reference-open", {
-        detail: { docId: parsed?.docId ?? "", title },
-      }),
-    );
-  }
+  void openKbDocumentFromReference(ref);
 }
 
 export function openSearchReference(ref: SearchReference): void {
