@@ -19,13 +19,14 @@ import agenticx.llms.litellm_provider as litellm_provider_module
 from agenticx.llms.litellm_provider import LiteLLMProvider
 
 
-def _chunk(*, reasoning=None, content=None, finish_reason=None):
+def _chunk(*, reasoning=None, reasoning_details=None, content=None, finish_reason=None):
     return SimpleNamespace(
         choices=[
             SimpleNamespace(
                 finish_reason=finish_reason,
                 delta=SimpleNamespace(
                     reasoning_content=reasoning,
+                    reasoning_details=reasoning_details,
                     content=content,
                     tool_calls=None,
                 ),
@@ -59,6 +60,24 @@ def test_stream_with_tools_forwards_reasoning_as_think_tags(monkeypatch):
     text = _collect_content(provider.stream_with_tools([{"role": "user", "content": "hi"}], tools=[]))
 
     assert text == "<think>thinking about AI gateway</think>\nfinal answer"
+
+
+def test_stream_with_tools_forwards_reasoning_details(monkeypatch):
+    chunks = [
+        _chunk(reasoning_details=[{"text": "plan "}]),
+        _chunk(reasoning_details=[{"text": "search"}]),
+        _chunk(content="answer", finish_reason="stop"),
+    ]
+
+    def _fake_completion(**kwargs):
+        return iter(chunks)
+
+    monkeypatch.setattr(litellm_provider_module.litellm, "completion", _fake_completion)
+
+    provider = LiteLLMProvider(model="openai/MiniMax-M2.7", api_key="k", base_url="https://example/v1")
+    text = _collect_content(provider.stream_with_tools([{"role": "user", "content": "hi"}], tools=[]))
+
+    assert text == "<think>plan search</think>\nanswer"
 
 
 def test_stream_with_tools_closes_think_when_only_reasoning(monkeypatch):

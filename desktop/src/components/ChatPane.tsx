@@ -117,6 +117,7 @@ import {
   enrichDiskMessagesWithInMemoryReferences,
   referencesDifferBetweenTails,
 } from "../utils/session-reference-reconcile";
+import { resolveReferencesForAssistant } from "../utils/turn-reference-context";
 import { reattachSessionStreamUrl, parseSseFrame } from "../utils/session-reattach";
 import {
   attachmentsFromSessionRow,
@@ -5375,6 +5376,10 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
         ) : (
           <ImBubble
             message={streamAssistantMessage}
+            resolvedReferences={resolveReferencesForAssistant(
+              streamAssistantMessage,
+              visibleMessagesWithStream,
+            )}
             highlightTerms={pane.historySearchTerms}
             badge={
               showInlineAssistantModelBadge && streamingModel ? (

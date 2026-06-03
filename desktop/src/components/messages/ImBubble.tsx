@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import type { CSSProperties, ReactNode, MouseEvent as ReactMouseEvent } from "react";
 import { Bookmark, Copy, Forward, LayoutList, Quote, RotateCcw, Pencil, X, ArrowUp, ArrowRight, AlertTriangle } from "lucide-react";
 import type { Message, MessageAttachment } from "../../store";
+import type { SearchReference } from "../../types/search-references";
 import { AttachmentCard } from "./AttachmentCard";
 import { ReasoningBlock } from "./ReasoningBlock";
 import { ReferencesCard } from "./ReferencesCard";
@@ -22,6 +23,8 @@ import { MessageTimestamp } from "./MessageTimestamp";
 
 type Props = {
   message: Message;
+  /** When message.references is empty, inherit from same-turn tool_result / embedded JSON. */
+  resolvedReferences?: SearchReference[];
   highlightTerms?: string[];
   badge?: ReactNode;
   assistantName?: string;
@@ -160,6 +163,7 @@ export function ChatImAvatar({
 
 export function ImBubble({
   message,
+  resolvedReferences,
   highlightTerms,
   badge,
   assistantName,
@@ -211,6 +215,8 @@ export function ImBubble({
   const reasoningClosed =
     hasThinkTag && /<\/think>/i.test(String(message.content ?? ""));
   const bodyText = !isUser && hasThinkTag ? (parsed?.response ?? "") : message.content;
+  const citationReferences =
+    (resolvedReferences?.length ?? 0) > 0 ? resolvedReferences : message.references;
   const referenceAttachments = isUser
     ? (message.attachments ?? []).filter((attachment) => !!attachment.referenceToken)
     : [];
@@ -576,9 +582,9 @@ export function ImBubble({
                   </span>
                 ) : (
                   <>
-                    {!isUser && (message.references?.length ?? 0) > 0 ? (
+                    {!isUser && (citationReferences?.length ?? 0) > 0 ? (
                       <ReferencesCard
-                        references={message.references ?? []}
+                        references={citationReferences ?? []}
                         searchedQueries={message.searchedQueries}
                       />
                     ) : null}
@@ -606,7 +612,7 @@ export function ImBubble({
                         <div className={assistantTextClassName} style={assistantTextStyle}>
                           <CitationMarkdownBody
                             content={bodyText}
-                            references={message.references}
+                            references={citationReferences}
                             isStreaming={isStreaming}
                             onQuoteText={(text) => onQuoteMessage?.(message, text)}
                           />

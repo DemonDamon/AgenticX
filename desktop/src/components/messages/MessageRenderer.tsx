@@ -1,5 +1,5 @@
 import type { Message } from "../../store";
-import type { ReactNode } from "react";
+import { useMemo, type ReactNode } from "react";
 import { Wrench } from "lucide-react";
 import { useAppStore } from "../../store";
 import { ImBubble } from "./ImBubble";
@@ -14,6 +14,7 @@ import { parseBudgetExceededFromText } from "../../utils/budget-exceeded";
 import { shouldShowBudgetIncompleteHint } from "../../utils/budget-incomplete-message";
 import { parseTodoMessage, TodoUpdateCard } from "../TodoUpdateCard";
 import { isMetaLeaderIdentity, resolveMetaDisplayName } from "../../utils/display-name";
+import { resolveReferencesForAssistant } from "../../utils/turn-reference-context";
 
 type Props = {
   message: Message;
@@ -183,6 +184,10 @@ export function MessageRenderer({
   streamStalledSeconds = 0,
 }: Props) {
   const chatStyle = useAppStore((s) => s.chatStyle);
+  const resolvedReferences = useMemo(() => {
+    if (message.role !== "assistant") return undefined;
+    return resolveReferencesForAssistant(message, allMessages);
+  }, [message, allMessages]);
   if (message.role === "user" || message.role === "assistant") {
     if (chatStyle === "terminal") {
       return <TerminalLine message={message} badge={assistantBadge} />;
@@ -206,6 +211,7 @@ export function MessageRenderer({
     return (
       <ImBubble
         message={message}
+        resolvedReferences={resolvedReferences}
         highlightTerms={highlightTerms}
         badge={assistantBadge}
         assistantName={mergedAssistName}

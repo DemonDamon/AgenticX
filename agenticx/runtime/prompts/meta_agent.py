@@ -504,6 +504,7 @@ def _build_kb_retrieval_policy_block(mode_override: Optional[str] = None) -> str
         "- 多来源并列：`[1][2]`；不要造 `【1】`、`(来源 1)`、`[来源1]` 等变体。\n"
         "- **关键**：`[N]` 角标只能在**本轮真正调用了 `knowledge_search` 并拿到 `hits`** 时使用。若用户重试/追问同一问题，**不要**用「我刚才已检索过」来复用上一轮结果并标注 `[N]`——要么本轮重新调用 `knowledge_search` 再带角标，要么用自然语言说明信息来自上一轮检索且本轮未重新核对，但此时**禁止**输出任何 `[N]` 角标。\n"
         "- 不要把 `hits` 原始 JSON 复读给用户；只呈现有用片段与来源。\n"
+        "- **禁止**在正文里手写「已调用知识库检索工具」并粘贴 JSON 代码块代替工具调用；必须通过 `knowledge_search` 的 function calling 执行，由客户端展示「本次调用 · knowledge_search」工具过程。\n"
         "- 与记忆的边界：长期文档资料走 `knowledge_search`；个人偏好/动作项走 `memory_search`/`memory_append`，不要混用。\n\n"
     )
 
