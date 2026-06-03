@@ -1001,6 +1001,126 @@ def _kb_retrieval_always_mode(session: Any) -> bool:
         return False
 
 
+def _eager_knowledge_search_query(user_input: str) -> str:
+    text = " ".join(str(user_input or "").split())
+    return text[:800] if text else "知识库检索"
+
+
+async def _eager_knowledge_search_events(
+    *,
+    runtime: "AgentRuntime",
+    session: Any,
+    user_input: str,
+    messages: List[Dict[str, Any]],
+    agent_id: str,
+    executed_tool_names: List[str],
+    is_system_trigger: bool,
+    team_manager: Any,
+) -> AsyncGenerator[RuntimeEvent, None]:
+    """Run knowledge_search before round-1 LLM when KB mode is always.
+
+    Weak FC models (e.g. qwen-plus) may ignore forced tool_choice with a large
+    tool schema and narrate fake ``[N]`` markers without references. Eager
+    execution guarantees tool_result + structured references for the UI.
+    """
+    tool_name = "knowledge_search"
+    tool_call_id = f"call_kb_{uuid.uuid4().hex[:8]}"
+    arguments = {"query": _eager_knowledge_search_query(user_input)}
+    dispatch_arguments = {**arguments, "__tool_call_id": tool_call_id, "__agent_id": agent_id}
+
+    yield RuntimeEvent(
+        type=EventType.TOOL_CALL.value,
+        data={"name": tool_name, "arguments": arguments, "tool_call_id": tool_call_id},
+        agent_id=agent_id,
+    )
+
+    hook_outcome = await runtime.hooks.run_before_tool_call(tool_name, arguments, session)
+    if hook_outcome.blocked:
+        blocked_message = hook_outcome.reason or f"工具 {tool_name} 被策略阻止。"
+        yield RuntimeEvent(
+            type=EventType.TOOL_RESULT.value,
+            data={"name": tool_name, "result": blocked_message, "tool_call_id": tool_call_id},
+            agent_id=agent_id,
+        )
+        return
+
+    effective_tm = team_manager or getattr(session, "_team_manager", None)
+    try:
+        result = await dispatch_tool_async(
+            tool_name,
+            dispatch_arguments,
+            session,
+            confirm_gate=runtime.confirm_gate,
+            team_manager=effective_tm,
+        )
+    except Exception as exc:
+        result = f"ERROR: {exc}"
+
+    raw_result = str(result)
+    executed_tool_names.append(tool_name)
+    compacted = runtime.compactor.micro_compact_tool_result(tool_name, raw_result)
+
+    assistant_tool_message: Dict[str, Any] = {
+        "role": "assistant",
+        "content": "",
+        "tool_calls": [
+            {
+                "id": tool_call_id,
+                "type": "function",
+                "function": {
+                    "name": tool_name,
+                    "arguments": json.dumps(arguments, ensure_ascii=False),
+                },
+            }
+        ],
+    }
+    tool_message: Dict[str, Any] = {
+        "role": "tool",
+        "tool_call_id": tool_call_id,
+        "name": tool_name,
+        "content": compacted,
+    }
+    messages.append(assistant_tool_message)
+    messages.append(tool_message)
+    session.agent_messages.append(assistant_tool_message)
+    session.agent_messages.append(tool_message)
+    if not is_system_trigger:
+        session.chat_history.append(
+            {
+                "role": "tool",
+                "content": compacted,
+                "tool_call_id": tool_call_id,
+                "tool_name": tool_name,
+                "tool_args": arguments,
+                "tool_status": "error" if str(result).startswith("ERROR:") else "done",
+            }
+        )
+
+    _tool_result_data: Dict[str, Any] = {
+        "name": tool_name,
+        "result": compacted,
+        "tool_call_id": tool_call_id,
+    }
+    try:
+        from agenticx.studio.references import structured_payload_for_tool_result
+
+        _structured = structured_payload_for_tool_result(
+            session, tool_name, arguments, raw_result
+        )
+        if _structured:
+            _tool_result_data["structured"] = _structured
+    except Exception:
+        pass
+
+    yield RuntimeEvent(
+        type=EventType.TOOL_RESULT.value,
+        data=_tool_result_data,
+        agent_id=agent_id,
+    )
+    runtime._tools_since_persist += 1
+    runtime._maybe_mid_turn_persist()
+
+
 class AgentRuntime:
     """LLM-driven runtime that emits structured events."""
 
@@ -1315,6 +1435,26 @@ class AgentRuntime:
             # FR-C: 标记本轮是否需要因流式工具调用截断而强制进入下一轮，
             # 而不是把空 tool_calls 当作模型最终回答处理。每轮起始重置。
             force_retry_next_round = False
+            if (
+                _kb_force_always
+                and round_idx == 1
+                and "knowledge_search" not in executed_tool_names
+                and not _is_system_trigger
+                and provider_name.strip().lower() != "minimax"
+            ):
+                async for _kb_evt in _eager_knowledge_search_events(
+                    runtime=self,
+                    session=session,
+                    user_input=user_input,
+                    messages=messages,
+                    agent_id=agent_id,
+                    executed_tool_names=executed_tool_names,
+                    is_system_trigger=_is_system_trigger,
+                    team_manager=self.team_manager,
+                ):
+                    yield _kb_evt
+                if "knowledge_search" in executed_tool_names:
+                    synced_session_message_count = len(session.agent_messages)
             try:
                 # Increment per-turn counter for SessionReviewHook nudge threshold
                 session._turns_since_skill_manage = getattr(session, "_turns_since_skill_manage", 0) + 1
@@ -1400,6 +1540,7 @@ class AgentRuntime:
                                 if (
                                     _kb_force_always
                                     and round_idx == 1
+                                    and "knowledge_search" not in executed_tool_names
                                     and provider_name.strip().lower() != "minimax"
                                 ):
                                     _round_tool_choice = _KB_FORCED_TOOL_CHOICE
@@ -1646,6 +1787,7 @@ class AgentRuntime:
                         if (
                             _kb_force_always
                             and round_idx == 1
+                            and "knowledge_search" not in executed_tool_names
                             and provider_name.strip().lower() != "minimax"
                         ):
                             _fallback_tool_choice = _KB_FORCED_TOOL_CHOICE
