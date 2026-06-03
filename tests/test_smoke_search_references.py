@@ -57,6 +57,31 @@ def test_web_and_kb_share_number_space() -> None:
     assert assigned[0]["url"] == "agx://kb/doc1#2"
 
 
+def test_build_kb_references_prefers_document_id_over_source_path_uri() -> None:
+    kb = build_kb_references(
+        {
+            "hits": [
+                {
+                    "id": "doc_6097da28cf1579b4::000000",
+                    "text": "chunk",
+                    "source": {
+                        "uri": "/Users/damon/.agenticx/storage/vector_db/uploads/foo.pdf",
+                        "title": "foo.pdf",
+                        "chunk_index": 0,
+                    },
+                    "metadata": {
+                        "document_id": "doc_6097da28cf1579b4",
+                        "source_path": "/Users/damon/.agenticx/storage/vector_db/uploads/foo.pdf",
+                    },
+                }
+            ]
+        }
+    )
+    assert len(kb) == 1
+    assert kb[0]["url"] == "agx://kb/doc_6097da28cf1579b4#0"
+    assert kb[0]["kb_source_path"].endswith("foo.pdf")
+
+
 def test_build_kb_references_snippet_is_chunk_text_only() -> None:
     kb = build_kb_references(
         {
