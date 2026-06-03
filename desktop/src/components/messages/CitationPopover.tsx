@@ -4,7 +4,8 @@ import { formatReferenceSnippet } from "../../utils/reference-snippet";
 import { openSearchReference } from "../../utils/open-kb-reference";
 
 type Props = {
-  reference: SearchReference;
+  /** One reference for a single citation, or several chunks of the same document (merged pill). */
+  references: SearchReference[];
   onClose?: () => void;
 };
 
@@ -16,9 +17,12 @@ function fileIconLabel(title: string): string {
   return "DOC";
 }
 
-export function CitationPopover({ reference }: Props) {
-  const snippet = formatReferenceSnippet(reference);
-  const isKb = reference.source === "kb" || reference.url.startsWith("agx://kb/");
+export function CitationPopover({ references }: Props) {
+  const primary = references[0];
+  if (!primary) return null;
+  const isKb = primary.source === "kb" || primary.url.startsWith("agx://kb/");
+  const snippets = references.map((ref) => formatReferenceSnippet(ref));
+  const hasAnySnippet = snippets.some((s) => s.length > 0);
 
   return (
     <div
@@ -32,8 +36,19 @@ export function CitationPopover({ reference }: Props) {
       <div className="mb-2 text-[22px] leading-none text-text-faint" aria-hidden>
         “
       </div>
-      {snippet ? (
-        <p className="line-clamp-5 text-[13px] leading-relaxed text-text-muted">{snippet}</p>
+      {hasAnySnippet ? (
+        <div className="space-y-2">
+          {snippets.map((snippet, idx) =>
+            snippet ? (
+              <p
+                key={`${references[idx].id}`}
+                className="line-clamp-5 text-[13px] leading-relaxed text-text-muted"
+              >
+                {snippet}
+              </p>
+            ) : null,
+          )}
+        </div>
       ) : (
         <p className="text-[12px] text-text-faint">暂无摘录</p>
       )}
@@ -44,7 +59,7 @@ export function CitationPopover({ reference }: Props) {
         onClick={(e) => {
           e.preventDefault();
           e.stopPropagation();
-          openSearchReference(reference);
+          openSearchReference(primary);
         }}
       >
         <span
@@ -54,15 +69,18 @@ export function CitationPopover({ reference }: Props) {
             color: "var(--kb-citation-fg)",
           }}
         >
-          {isKb ? fileIconLabel(reference.title) : <FileText className="h-3.5 w-3.5" aria-hidden />}
+          {isKb ? fileIconLabel(primary.title) : <FileText className="h-3.5 w-3.5" aria-hidden />}
         </span>
         <span
           className="min-w-0 flex-1 truncate text-[13px] font-medium"
           style={{ color: "var(--kb-citation-fg)" }}
-          title={reference.title}
+          title={primary.title}
         >
-          {reference.title}
+          {primary.title}
         </span>
+        {references.length > 1 ? (
+          <span className="shrink-0 text-[11px] text-text-faint">{references.length} 个片段</span>
+        ) : null}
       </button>
     </div>
   );

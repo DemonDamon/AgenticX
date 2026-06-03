@@ -55,6 +55,111 @@ export function splitCitationSegments(text: string): CitationSegment[] {
   });
 }
 
+/** GFM pipe table row or separator (`| --- |`). */
+export function isGfmTableLine(line: string): boolean {
+  const trimmed = line.trim();
+  return trimmed.length > 0 && /^\|.+\|$/.test(trimmed);
+}
+
+export function containsGfmTable(text: string): boolean {
+  if (!text) return false;
+  const lines = text.split("\n");
+  let run = 0;
+  for (const line of lines) {
+    if (isGfmTableLine(line)) {
+      run += 1;
+      if (run >= 2) return true;
+    } else {
+      run = 0;
+    }
+  }
+  return false;
+}
+
+/**
+ * Split on [N] markers but keep each contiguous GFM table as one text segment so
+ * remark-gfm can parse row/column structure; citations render inside cells.
+ */
+export function splitCitationSegmentsRespectingTables(text: string): CitationSegment[] {
+  if (!text) return [];
+  const lines = text.split("\n");
+  const segments: CitationSegment[] = [];
+  let normalBuf: string[] = [];
+  let i = 0;
+
+  const flushNormal = () => {
+    if (normalBuf.length === 0) return;
+    segments.push(...splitCitationSegments(normalBuf.join("\n")));
+    normalBuf = [];
+  };
+
+  while (i < lines.length) {
+    const line = lines[i];
+    if (!isGfmTableLine(line)) {
+      normalBuf.push(line);
+      i += 1;
+      continue;
+    }
+
+    let j = i;
+    while (j < lines.length && isGfmTableLine(lines[j])) j += 1;
+    const tableLineCount = j - i;
+
+    if (tableLineCount < 2) {
+      normalBuf.push(line);
+      i += 1;
+      continue;
+    }
+
+    flushNormal();
+    segments.push({ kind: "text", value: lines.slice(i, j).join("\n") });
+    i = j;
+  }
+
+  flushNormal();
+  return segments;
+}
+
+export type CitationRenderItem =
+  | { kind: "text"; value: string }
+  | { kind: "citation"; docNumber: number; ids: number[] };
+
+/**
+ * Collapse a run of *adjacent* citation segments that resolve to the same
+ * document number into a single citation render item carrying all chunk ids.
+ * Non-adjacent citations to the same document stay separate. Citations whose id
+ * is missing from `docNumberById` fall back to their raw id as the number.
+ */
+export function mergeAdjacentCitations(
+  segments: CitationSegment[],
+  docNumberById: Map<number, number>,
+): CitationRenderItem[] {
+  const items: CitationRenderItem[] = [];
+  let i = 0;
+  while (i < segments.length) {
+    const seg = segments[i];
+    if (seg.kind !== "citation") {
+      items.push({ kind: "text", value: seg.value });
+      i += 1;
+      continue;
+    }
+    const id = Number(seg.value);
+    const docNumber = docNumberById.get(id) ?? id;
+    const ids = [id];
+    let j = i + 1;
+    while (j < segments.length && segments[j].kind === "citation") {
+      const nextId = Number(segments[j].value);
+      const nextDoc = docNumberById.get(nextId) ?? nextId;
+      if (nextDoc !== docNumber) break;
+      ids.push(nextId);
+      j += 1;
+    }
+    items.push({ kind: "citation", docNumber, ids });
+    i = j;
+  }
+  return items;
+}
+
 /** Prevent `1. foo` from becoming a block-level <ol> beside inline citation pills. */
 export function escapeMarkdownOrderedListMarkers(text: string): string {
   if (!text) return text;

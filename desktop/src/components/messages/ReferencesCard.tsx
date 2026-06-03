@@ -2,6 +2,7 @@ import { useMemo, useState } from "react";
 import { ChevronDown, ChevronRight, ExternalLink, Search } from "lucide-react";
 import type { SearchReference } from "../../types/search-references";
 import { openSearchReference } from "../../utils/open-kb-reference";
+import { dedupeReferencesByDoc, type DocGroup } from "../../utils/citation-doc-grouping";
 
 type Props = {
   references: SearchReference[];
@@ -34,58 +35,75 @@ export function ReferencesCard({ references, searchedQueries }: Props) {
   const [showAll, setShowAll] = useState(false);
 
   const queryCount = searchedQueries?.length ?? 0;
-  const refCount = references.length;
-  const kbRefs = useMemo(() => references.filter((r) => r.source === "kb"), [references]);
-  const webRefs = useMemo(() => references.filter((r) => r.source === "web"), [references]);
-  const visible = showAll ? references : references.slice(0, PREVIEW_LIMIT);
-  const hiddenCount = Math.max(0, references.length - PREVIEW_LIMIT);
+  // Collapse chunk-level references into one entry per document so a single
+  // multi-chunk document (e.g. 南网技术实现需求.md) shows once, not 3x.
+  const docGroups = useMemo(() => dedupeReferencesByDoc(references), [references]);
+  const kbGroups = useMemo(() => docGroups.filter((g) => g.primary.source === "kb"), [docGroups]);
+  const webGroups = useMemo(() => docGroups.filter((g) => g.primary.source === "web"), [docGroups]);
+  const docCount = docGroups.length;
+  const visible = showAll ? docGroups : docGroups.slice(0, PREVIEW_LIMIT);
+  const hiddenCount = Math.max(0, docGroups.length - PREVIEW_LIMIT);
   const queryPreview = (searchedQueries ?? []).slice(0, QUERY_PREVIEW_LIMIT);
   const hiddenQueryCount = Math.max(0, queryCount - QUERY_PREVIEW_LIMIT);
 
-  const visibleKb = visible.filter((r) => r.source === "kb");
-  const visibleWeb = visible.filter((r) => r.source === "web");
-  const kbOnly = kbRefs.length > 0 && webRefs.length === 0;
+  const visibleKb = visible.filter((g) => g.primary.source === "kb");
+  const visibleWeb = visible.filter((g) => g.primary.source === "web");
+  const kbOnly = kbGroups.length > 0 && webGroups.length === 0;
 
-  if (refCount === 0) return null;
+  if (docCount === 0) return null;
 
-  const summary = buildSummary(refCount, kbRefs.length, webRefs.length, queryCount);
+  const summary = buildSummary(docCount, kbGroups.length, webGroups.length, queryCount);
 
-  const renderKbList = (items: SearchReference[]) => (
+  const renderKbList = (items: DocGroup[]) => (
     <ol
       className="space-y-0.5 rounded-lg px-2 py-1.5"
       style={{ backgroundColor: "var(--kb-citation-list-bg)" }}
     >
-      {items.map((ref) => (
-        <li key={`kb-${ref.id}-${ref.url}`} className="flex min-w-0 items-start gap-2 py-0.5">
-          <span className="mt-0.5 w-5 shrink-0 text-right text-[12px] tabular-nums text-text-faint">
-            {ref.id}.
-          </span>
-          <button
-            type="button"
-            className="min-w-0 flex-1 truncate text-left text-[13px] font-medium transition-opacity hover:opacity-90"
-            style={{ color: "var(--kb-citation-fg)" }}
-            title={ref.title}
-            onClick={() => openSearchReference(ref)}
-          >
-            {ref.title}
-          </button>
-        </li>
-      ))}
+      {items.map((group) => {
+        const ref = group.primary;
+        const fragmentCount = group.chunks.length;
+        return (
+          <li key={`kb-${group.docKey}`} className="flex min-w-0 items-start gap-2 py-0.5">
+            <span className="mt-0.5 w-5 shrink-0 text-right text-[12px] tabular-nums text-text-faint">
+              {group.docNumber}.
+            </span>
+            <button
+              type="button"
+              className="flex min-w-0 flex-1 items-baseline gap-1.5 text-left transition-opacity hover:opacity-90"
+              title={ref.title}
+              onClick={() => openSearchReference(ref)}
+            >
+              <span
+                className="min-w-0 truncate text-[13px] font-medium"
+                style={{ color: "var(--kb-citation-fg)" }}
+              >
+                {ref.title}
+              </span>
+              {fragmentCount > 1 ? (
+                <span className="shrink-0 whitespace-nowrap text-[11px] text-text-faint">
+                  · {fragmentCount} 个片段
+                </span>
+              ) : null}
+            </button>
+          </li>
+        );
+      })}
     </ol>
   );
 
-  const renderWebList = (items: SearchReference[]) => (
+  const renderWebList = (items: DocGroup[]) => (
     <ol className="space-y-0.5">
-      {items.map((ref) => {
+      {items.map((group) => {
+        const ref = group.primary;
         const domain = ref.domain || "";
         const clickable = /^https?:\/\//i.test(ref.url);
         return (
           <li
-            key={`web-${ref.id}-${ref.url}`}
+            key={`web-${group.docKey}`}
             className="flex min-w-0 items-start gap-2 rounded-md px-1 py-0.5 transition-colors hover:bg-surface-hover/20"
           >
             <span className="mt-0.5 w-5 shrink-0 text-right text-[12px] tabular-nums text-text-faint">
-              {ref.id}.
+              {group.docNumber}.
             </span>
             <div className="min-w-0 flex-1 leading-relaxed">
               {clickable ? (
