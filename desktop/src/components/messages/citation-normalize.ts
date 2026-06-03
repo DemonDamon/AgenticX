@@ -52,3 +52,12 @@ export function splitCitationSegments(text: string): Array<{ kind: "text" | "cit
     return { kind: "text" as const, value: part };
   });
 }
+
+/** Split assistant text into paragraph blocks; citations stay inside the same block as adjacent prose. */
+export function splitCitationParagraphBlocks(text: string): string[] {
+  if (!text) return [];
+  return text
+    .split(/\n{2,}/)
+    .map((part) => part.trim())
+    .filter((part) => part.length > 0);
+}

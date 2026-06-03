@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import {
   normalizeCitationMarkers,
+  splitCitationParagraphBlocks,
   splitCitationSegments,
   stripOrphanCitationMarkers,
 } from "./citation-normalize";
@@ -41,6 +42,13 @@ test("stripOrphanCitationMarkers: removes fabricated markers and tidies spacing"
 
 test("stripOrphanCitationMarkers: strips normalized variants", () => {
   assert.equal(stripOrphanCitationMarkers("事实【1】与(来源 2)及[来源3]结束"), "事实与及结束");
+});
+
+test("splitCitationParagraphBlocks: splits on blank lines only", () => {
+  assert.deepEqual(
+    splitCitationParagraphBlocks("条目[1]\n\n下一段"),
+    ["条目[1]", "下一段"],
+  );
 });
 
 test("stripOrphanCitationMarkers: preserves markdown links like [1](url)", () => {
