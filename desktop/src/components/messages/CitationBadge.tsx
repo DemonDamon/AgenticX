@@ -50,7 +50,6 @@ export function CitationBadge({ id, reference }: Props) {
   const openTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const closeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const resolved = Boolean(reference);
-  const isKb = reference?.source === "kb" || (reference?.url ?? "").startsWith("agx://kb/");
 
   const clearTimers = useCallback(() => {
     if (openTimerRef.current) clearTimeout(openTimerRef.current);
@@ -121,20 +120,10 @@ export function CitationBadge({ id, reference }: Props) {
     closeTimerRef.current = setTimeout(() => setOpen(false), HOVER_CLOSE_MS);
   };
 
-  const pillStyle = isKb
-    ? {
-        backgroundColor: resolved ? "var(--kb-citation-bg)" : "var(--kb-citation-bg-muted)",
-        color: "var(--kb-citation-fg)",
-      }
-    : resolved
-      ? {
-          backgroundColor: "rgba(var(--theme-color-rgb,6,182,212),0.18)",
-          color: "var(--text-subtle)",
-        }
-      : {
-          backgroundColor: "var(--kb-citation-bg-muted, rgba(0,0,0,0.06))",
-          color: "var(--text-faint)",
-        };
+  const pillStyle = {
+    backgroundColor: resolved ? "var(--kb-citation-bg)" : "var(--kb-citation-bg-muted)",
+    color: resolved ? "var(--kb-citation-fg)" : "var(--text-faint)",
+  };
 
   const popoverPortal =
     open && reference && placement
