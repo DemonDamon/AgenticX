@@ -41,7 +41,7 @@ import {
 import {
   CHANNEL_C_GRACE_MS,
   stallDetectSilenceMs,
-  messageLooksLikeAssistantFinal,
+  lastTurnHasCompletedAssistantReply,
   shouldAllowStallAutoNudge,
   shouldTriggerIncompleteEndStall,
 } from "../utils/task-stall-policy";
@@ -572,7 +572,6 @@ export function ChatView({ onOpenConfirm, mode = "pro" }: Props) {
       } catch {
         /* ignore */
       }
-      const lastMsg = messages[messages.length - 1];
       const graceMs = now - sessionEnteredAtRef.current;
       const stallSilenceMs = stallDetectSilenceMs(stallDetectSeconds);
       const channelA = sseActive && lastProgress > 0 && silentMs >= stallSilenceMs;
@@ -583,12 +582,15 @@ export function ChatView({ onOpenConfirm, mode = "pro" }: Props) {
         silentMs >= stallSilenceMs;
       const channelC =
         graceMs >= CHANNEL_C_GRACE_MS &&
-        shouldTriggerIncompleteEndStall(execState, sseActive, lastMsg, CHANNEL_C_GRACE_MS);
+        shouldTriggerIncompleteEndStall(execState, sseActive, messages, graceMs);
       if (channelA || channelB || channelC) {
         setStallState("stall");
         return;
       }
-      if (stallState === "stall" && (messageLooksLikeAssistantFinal(lastMsg) || silentMs < stallSilenceMs)) {
+      if (
+        stallState === "stall" &&
+        (lastTurnHasCompletedAssistantReply(messages) || silentMs < stallSilenceMs)
+      ) {
         setStallState("none");
       }
     };

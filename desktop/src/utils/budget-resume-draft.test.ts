@@ -108,4 +108,10 @@ describe("shouldAllowStallAutoNudge", () => {
   it("allows auto nudge for normal stall", () => {
     expect(shouldAllowStallAutoNudge("stall", "running", false)).toBe(true);
   });
+
+  it("blocks idle re-entry stall without live SSE", () => {
+    expect(
+      shouldAllowStallAutoNudge("stall", "idle", false, { sseActive: false, runInFlight: false }),
+    ).toBe(false);
+  });
 });
