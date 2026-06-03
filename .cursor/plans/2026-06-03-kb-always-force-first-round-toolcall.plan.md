@@ -1,4 +1,26 @@
+---
+name: kb-always-force-first-round-toolcall
+overview: KB「始终检索」模式下首轮强制 knowledge_search，修复弱 FC 模型（qwen-plus）不发 tool_calls、无工具条的问题。
+todos:
+  - id: runtime-force-tool-choice
+    content: agent_runtime 首轮 tool_choice 强制 knowledge_search（always + 非 minimax）
+    status: completed
+  - id: smoke-test
+    content: test_smoke_kb_force_first_round 覆盖 _kb_retrieval_always_mode
+    status: completed
+  - id: verify-qwen-plus
+    content: Near + agx serve 重启后 qwen-plus 可见 knowledge_search 工具调用
+    status: completed
+isProject: false
+---
+
 # KB「始终检索(always)」首轮强制 knowledge_search 工具调用
+
+## 验收（2026-06-03）
+
+- 用户确认：阿里云百炼 `qwen-plus`、KB 检索模式 `always`，提问「查下知识库关于 AI 网关内容」后**可看到工具调用过程**（`knowledge_search` 工具条正常出现）。
+- 实现 commit：`724e6560`（`agent_runtime.py` + `tests/test_smoke_kb_force_first_round.py`）。
+- 前置依赖：需 ⌘Q 重启 Near 使内嵌 `agx serve` 加载新 runtime；与 `3a3922c8`（工具卡流式实时插入）叠加生效。
 
 ## 背景 / 根因（已核实）
 
