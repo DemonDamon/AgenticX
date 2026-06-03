@@ -7,7 +7,7 @@ Author: Damon Li
 from __future__ import annotations
 
 import os
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Literal
 
 ScanMode = Literal["quick", "standard", "full"]
@@ -21,6 +21,7 @@ class GuardConfig:
     scan_mode: ScanMode = "standard"
     llm_verify: bool = False
     scan_timeout_seconds: float = 30.0
+    ignored_skills: list[str] = field(default_factory=list)
 
 
 def load_guard_config() -> GuardConfig:
@@ -51,6 +52,9 @@ def load_guard_config() -> GuardConfig:
                 cfg.llm_verify = bool(section["llm_verify"])
             if section.get("scan_timeout_seconds") is not None:
                 cfg.scan_timeout_seconds = max(5.0, float(section["scan_timeout_seconds"]))
+            ignored = section.get("ignored")
+            if isinstance(ignored, list):
+                cfg.ignored_skills = [str(x).strip() for x in ignored if str(x).strip()]
     except Exception:
         pass
     return cfg
@@ -64,6 +68,7 @@ def guard_settings_payload() -> dict[str, object]:
         "scan_mode": cfg.scan_mode,
         "llm_verify": cfg.llm_verify,
         "scan_timeout_seconds": cfg.scan_timeout_seconds,
+        "ignored": list(cfg.ignored_skills),
     }
 
 
@@ -72,6 +77,7 @@ def persist_guard_settings(
     version: int | None = None,
     scan_mode: str | None = None,
     llm_verify: bool | None = None,
+    ignored: list[str] | None = None,
 ) -> None:
     """Persist guard settings to ~/.agenticx/config.yaml skills.guard."""
     from agenticx.cli.config_manager import ConfigManager
@@ -84,4 +90,13 @@ def persist_guard_settings(
         section["scan_mode"] = scan_mode
     if llm_verify is not None:
         section["llm_verify"] = bool(llm_verify)
+    if ignored is not None:
+        seen: set[str] = set()
+        deduped: list[str] = []
+        for x in ignored:
+            name = str(x).strip()
+            if name and name not in seen:
+                seen.add(name)
+                deduped.append(name)
+        section["ignored"] = deduped
     ConfigManager.set_value("skills.guard", section)

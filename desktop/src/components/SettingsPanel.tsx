@@ -2878,7 +2878,12 @@ function SkillsTab() {
 
       const res = await window.agenticxDesktop.installBundle({ sourcePath });
       if (res.ok) {
-        setBundleMsg(`已安装扩展包 "${res.name ?? ""}" v${res.version ?? ""}`);
+        setBundleMsg(
+          formatInstallDoneMsg(
+            `已安装扩展包 "${res.name ?? ""}" v${res.version ?? ""}`,
+            res.scan_summary ?? prev.scan,
+          ),
+        );
         setBundleInstallPath("");
         await reloadSkillsAndBundles();
         return;
@@ -2924,7 +2929,12 @@ function SkillsTab() {
       setBundleNeedsConfirmHigh(false);
       setBundlePendingPath("");
       if (res.ok) {
-        setBundleMsg(`已安装扩展包 "${res.name ?? ""}" v${res.version ?? ""}`);
+        setBundleMsg(
+          formatInstallDoneMsg(
+            `已安装扩展包 "${res.name ?? ""}" v${res.version ?? ""}`,
+            res.scan_summary,
+          ),
+        );
         setBundleInstallPath("");
         await reloadSkillsAndBundles();
       } else {
@@ -3048,7 +3058,9 @@ function SkillsTab() {
         name: item.name,
       });
       if (res.ok) {
-        setMarketMsg(`已安装 "${item.name}"`);
+        setMarketMsg(
+          formatInstallDoneMsg(`已安装 "${item.name}"`, res.scan_summary ?? prev.scan),
+        );
         await reloadSkillsAfterMarketInstall(String(res.name ?? item.name));
         return;
       }
@@ -3107,7 +3119,9 @@ function SkillsTab() {
       setMarketNeedsConfirmHigh(false);
       setMarketPending(null);
       if (res.ok) {
-        setMarketMsg(`已安装 "${pending.name}"`);
+        setMarketMsg(
+          formatInstallDoneMsg(`已安装 "${pending.name}"`, res.scan_summary),
+        );
         await reloadSkillsAfterMarketInstall(String(res.name ?? pending.name));
       } else {
         setMarketMsg(`安装失败: ${res.error ?? "未知错误"}`);
@@ -4655,6 +4669,26 @@ function useSkillInstallPolicy() {
   return { loading, saving, nonHighRiskAutoInstall, message, updatePolicy };
 }
 
+type GuardScanItem = {
+  skill_name: string;
+  verdict: string;
+  score?: number;
+  grade?: string;
+  tier?: string;
+  source?: string;
+  base_dir?: string;
+  can_fix?: boolean;
+  ignored?: boolean;
+  findings?: Array<{
+    pattern_name: string;
+    severity?: string;
+    matched_text?: string;
+    file_path?: string;
+    line_number?: number;
+    category?: string;
+  }>;
+};
+
 function useGuardSettings() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -4662,8 +4696,11 @@ function useGuardSettings() {
   const [scanMode, setScanMode] = useState("standard");
   const [message, setMessage] = useState("");
   const [scanBusy, setScanBusy] = useState(false);
-  const [scanPath, setScanPath] = useState("");
-  const [scanResultMsg, setScanResultMsg] = useState("");
+  const [scanResults, setScanResults] = useState<GuardScanItem[]>([]);
+  const [ignoredSkills, setIgnoredSkills] = useState<string[]>([]);
+  const [scanned, setScanned] = useState(false);
+  const [scanMsg, setScanMsg] = useState("");
+  const [actionBusy, setActionBusy] = useState<string | null>(null);
 
   useEffect(() => {
     let disposed = false;
@@ -4674,6 +4711,7 @@ function useGuardSettings() {
         if (!disposed && result?.ok) {
           if (typeof result.version === "number") setVersion(result.version);
           if (result.scan_mode) setScanMode(result.scan_mode);
+          if (Array.isArray(result.ignored)) setIgnoredSkills(result.ignored);
         }
       } catch {
         if (!disposed) setMessage("读取安全扫描配置失败。");
@@ -4706,45 +4744,71 @@ function useGuardSettings() {
     }
   }, []);
 
-  const runDeepScan = useCallback(async () => {
-    const p = scanPath.trim();
-    if (!p) {
-      setScanResultMsg("请填写要扫描的技能目录路径。");
-      return;
-    }
+  const runScanAll = useCallback(async () => {
     setScanBusy(true);
-    setScanResultMsg("");
+    setScanMsg("");
     try {
-      const result = await window.agenticxDesktop.guardScanSkill({
-        skill_path: p,
-        mode: "full",
-        skill_name: p.split("/").pop() || "skill",
-      });
-      if (!result?.ok || !result.scan) {
-        setScanResultMsg(result?.error ? String(result.error) : "扫描失败。");
+      const result = await window.agenticxDesktop.guardScanAll({});
+      if (!result?.ok) {
+        setScanMsg(result?.error ? String(result.error) : "扫描失败。");
         return;
       }
-      setScanResultMsg(
-        formatSkillScanSummary({
-          overall: result.scan.verdict || "safe",
-          skills: [
-            {
-              skill_name: result.scan.skill_name || p,
-              verdict: result.scan.verdict || "safe",
-              score: result.scan.score,
-              grade: result.scan.grade,
-              tier: result.scan.tier,
-              findings: result.scan.findings,
-            },
-          ],
-        }),
-      );
+      setScanResults(Array.isArray(result.results) ? result.results : []);
+      if (Array.isArray(result.ignored)) setIgnoredSkills(result.ignored);
+      setScanned(true);
     } catch (e) {
-      setScanResultMsg(e instanceof Error ? e.message : "扫描失败。");
+      setScanMsg(e instanceof Error ? e.message : "扫描失败。");
     } finally {
       setScanBusy(false);
     }
-  }, [scanPath]);
+  }, []);
+
+  const ignoreSkill = useCallback(async (name: string) => {
+    setActionBusy(name);
+    try {
+      const result = await window.agenticxDesktop.putGuardSettings({ add_ignore: name });
+      if (result?.ok && Array.isArray(result.ignored)) setIgnoredSkills(result.ignored);
+      setScanResults((prev) => prev.filter((r) => r.skill_name !== name));
+    } finally {
+      setActionBusy(null);
+    }
+  }, []);
+
+  const unignoreSkill = useCallback(async (name: string) => {
+    setActionBusy(name);
+    try {
+      const result = await window.agenticxDesktop.putGuardSettings({ remove_ignore: name });
+      if (result?.ok && Array.isArray(result.ignored)) setIgnoredSkills(result.ignored);
+    } finally {
+      setActionBusy(null);
+    }
+  }, []);
+
+  const disableSkill = useCallback(async (name: string) => {
+    setActionBusy(name);
+    try {
+      const settings = await window.agenticxDesktop.getSkillSettings();
+      const presetPaths = Array.isArray(settings?.preset_paths)
+        ? settings.preset_paths.map((p) => ({ id: p.id, enabled: p.enabled }))
+        : [];
+      const customPaths = Array.isArray(settings?.custom_paths) ? settings.custom_paths : [];
+      const preferredSources =
+        settings?.preferred_sources && typeof settings.preferred_sources === "object"
+          ? settings.preferred_sources
+          : {};
+      const current = Array.isArray(settings?.disabled_skills) ? settings.disabled_skills : [];
+      const nextDisabled = current.includes(name) ? current : [...current, name];
+      await window.agenticxDesktop.putSkillSettings({
+        presetPaths,
+        customPaths,
+        preferredSources,
+        disabledSkills: nextDisabled,
+      });
+      setScanResults((prev) => prev.filter((r) => r.skill_name !== name));
+    } finally {
+      setActionBusy(null);
+    }
+  }, []);
 
   return {
     loading,
@@ -4753,11 +4817,16 @@ function useGuardSettings() {
     scanMode,
     message,
     scanBusy,
-    scanPath,
-    setScanPath,
-    scanResultMsg,
+    scanResults,
+    ignoredSkills,
+    scanned,
+    scanMsg,
+    actionBusy,
     saveGuard,
-    runDeepScan,
+    runScanAll,
+    ignoreSkill,
+    unignoreSkill,
+    disableSkill,
   };
 }
 
@@ -4778,11 +4847,16 @@ function SkillAdvancedPanel() {
     scanMode,
     message: guardMessage,
     scanBusy,
-    scanPath,
-    setScanPath,
-    scanResultMsg,
+    scanResults,
+    ignoredSkills,
+    scanned,
+    scanMsg,
+    actionBusy,
     saveGuard,
-    runDeepScan,
+    runScanAll,
+    ignoreSkill,
+    unignoreSkill,
+    disableSkill,
   } = useGuardSettings();
 
   const loading = trinityLoading || policyLoading || guardLoading;
@@ -4925,7 +4999,7 @@ function SkillAdvancedPanel() {
           <div className="mt-1 space-y-1 text-xs leading-relaxed text-text-muted">
             <p>
               从技能市场、Bundle 或扩展安装前会<strong className="font-medium text-text-subtle">自动扫描</strong>
-              ，并展示摘要；命中高危须你确认后才可安装。本页配置写入{" "}
+              ，命中高危须你确认后才可安装。已安装的技能可用下方「扫描已安装技能」复查，逐个列出问题并给出处置选项。本页配置写入{" "}
               <code className="text-text-subtle">~/.agenticx/config.yaml</code>，重启后生效。
             </p>
             <p>
@@ -4967,34 +5041,64 @@ function SkillAdvancedPanel() {
               </select>
             </label>
           </div>
-          <p className="mt-3 text-xs text-text-muted">手动审计（可选）：检查本机已有技能目录，与自动安装无关。</p>
-          <div className="mt-2 flex flex-col gap-2 sm:flex-row">
-            <input
-              type="text"
-              className="min-w-0 flex-1 rounded-md border border-border bg-surface-card px-2 py-1.5 text-sm"
-              placeholder="例如 ~/.agenticx/skills/某技能"
-              value={scanPath}
-              disabled={scanBusy}
-              onChange={(e) => setScanPath(e.target.value)}
-            />
+          <div className="mt-3 flex items-center gap-3 border-t border-border pt-3">
             <button
               type="button"
               className="rounded-md border border-border bg-surface-card-strong px-3 py-1.5 text-sm text-text-strong hover:bg-surface-hover disabled:opacity-50"
-              disabled={scanBusy || guardVersion < 2}
-              onClick={() => void runDeepScan()}
+              disabled={scanBusy}
+              onClick={() => void runScanAll()}
             >
-              {scanBusy ? "扫描中…" : "扫描该目录"}
+              {scanBusy ? "扫描中…" : "扫描已安装技能"}
             </button>
+            <span className="text-[11px] text-text-faint">
+              逐个技能扫描，仅列出有问题的。扫描只出报告，不会自动改动。
+            </span>
           </div>
           {guardMessage ? (
             <div className={`mt-2 text-xs ${guardMessage.startsWith("已保存") ? "text-text-muted" : "text-rose-400"}`}>
               {guardMessage}
             </div>
           ) : null}
-          {scanResultMsg ? (
-            <pre className="mt-2 max-h-48 overflow-auto whitespace-pre-wrap rounded-md bg-surface-card p-2 text-[11px] text-text-subtle">
-              {scanResultMsg}
-            </pre>
+          {scanMsg ? <div className="mt-2 text-xs text-rose-400">{scanMsg}</div> : null}
+          {scanned && !scanBusy ? (
+            scanResults.length === 0 ? (
+              <div className="mt-3 rounded-md border border-emerald-500/25 bg-emerald-500/5 px-3 py-2 text-xs text-emerald-400">
+                未发现有风险的已安装技能。
+              </div>
+            ) : (
+              <div className="mt-3 space-y-2">
+                {scanResults.map((r) => (
+                  <GuardScanResultCard
+                    key={r.skill_name}
+                    item={r}
+                    busy={actionBusy === r.skill_name}
+                    onAiFix={undefined}
+                    onDisable={() => void disableSkill(r.skill_name)}
+                    onIgnore={() => void ignoreSkill(r.skill_name)}
+                  />
+                ))}
+              </div>
+            )
+          ) : null}
+          {ignoredSkills.length > 0 ? (
+            <div className="mt-3 border-t border-border pt-3">
+              <div className="text-[11px] text-text-faint">已忽略（不再扫出）：</div>
+              <div className="mt-1.5 flex flex-wrap gap-1.5">
+                {ignoredSkills.map((name) => (
+                  <button
+                    key={name}
+                    type="button"
+                    className="inline-flex items-center gap-1 rounded-full border border-border bg-surface-panel px-2 py-0.5 text-[11px] text-text-muted transition hover:text-text-primary disabled:opacity-50"
+                    disabled={actionBusy === name}
+                    title="点击撤销忽略"
+                    onClick={() => void unignoreSkill(name)}
+                  >
+                    {name}
+                    <span className="text-text-faint">✕</span>
+                  </button>
+                ))}
+              </div>
+            </div>
           ) : null}
         </div>
       </div>
@@ -5052,6 +5156,140 @@ function SessionMemoryPanel() {
         </div>
       ) : null}
     </Panel>
+  );
+}
+
+function formatInstallDoneMsg(
+  successLine: string,
+  scan?: { overall: string; skills: Parameters<typeof formatSkillScanSummary>[0]["skills"] } | null,
+): string {
+  if (!scan?.skills?.length) return successLine;
+  return `${successLine}\n\n${formatSkillScanSummary(scan)}`;
+}
+
+const GUARD_PATTERN_LABELS: Record<string, string> = {
+  exfiltration_curl: "数据外泄（curl）",
+  exfiltration_wget: "数据外泄（wget）",
+  exfiltration_fetch_env: "读取环境变量并上传",
+  credential_ssh: "访问 SSH 密钥",
+  credential_dotenv: "引用 .env 文件",
+  credential_word: "涉及凭据/密码关键词",
+  prompt_ignore_previous: "提示词注入（忽略先前指令）",
+  prompt_system: "提示词注入（system prompt）",
+  prompt_system_tag: "提示词注入（<system> 标签）",
+  destructive_rm: "破坏性操作（rm -rf /）",
+  destructive_chmod: "破坏性操作（chmod 777）",
+  destructive_sql: "破坏性操作（DROP TABLE）",
+  curl_pipe_shell: "远程脚本管道执行",
+  reverse_shell: "反向 Shell",
+  invisible_unicode: "不可见 Unicode 字符",
+  suspicious_url: "可疑外发 URL",
+  typosquat_dependency: "疑似 typosquat 依赖",
+  dynamic_download_l2: "嵌套动态下载",
+  base64_decode_pipe: "Base64 解码后执行",
+};
+const GUARD_PATTERN_LABEL_HIGH_ENTROPY = "high_entropy_secret";
+
+function guardVerdictLabel(v: string): string {
+  return v === "dangerous" ? "高危" : v === "caution" ? "需注意" : "未见高危规则";
+}
+
+function GuardScanResultCard({
+  item,
+  busy,
+  onAiFix,
+  onDisable,
+  onIgnore,
+}: {
+  item: GuardScanItem;
+  busy: boolean;
+  onAiFix?: () => void;
+  onDisable: () => void;
+  onIgnore: () => void;
+}) {
+  const dangerous = item.verdict === "dangerous";
+  const findings = item.findings ?? [];
+  return (
+    <div className="rounded-xl border border-border bg-surface-card px-3.5 py-3">
+      <div className="flex flex-wrap items-center gap-2">
+        <span className="truncate text-sm font-medium text-text-primary">{item.skill_name}</span>
+        <span
+          className={`shrink-0 rounded-full px-1.5 text-[10px] ${
+            dangerous
+              ? "border border-rose-500/35 bg-rose-500/10 text-rose-300"
+              : "border border-amber-500/35 bg-amber-500/10 text-amber-300"
+          }`}
+        >
+          {guardVerdictLabel(item.verdict)}
+        </span>
+        {!item.can_fix ? (
+          <span className="shrink-0 rounded-full border border-border bg-surface-panel px-1.5 text-[10px] text-text-faint">
+            外部
+          </span>
+        ) : null}
+        <span className="ml-auto text-[11px] text-text-faint">
+          {[item.grade ? `等级 ${item.grade}` : "", typeof item.score === "number" ? `${item.score} 分` : "", item.tier]
+            .filter(Boolean)
+            .join(" · ")}
+        </span>
+      </div>
+      {findings.length > 0 ? (
+        <ul className="mt-2 space-y-0.5 text-[11px] text-text-subtle">
+          {findings.slice(0, 5).map((f, i) => (
+            <li key={`${item.skill_name}-f-${i}`} className="flex gap-1.5">
+              <span className={f.severity === "dangerous" ? "text-rose-400" : "text-amber-400"}>
+                {f.severity === "dangerous" ? "⛔" : "⚠"}
+              </span>
+              <span className="min-w-0">
+                {GUARD_PATTERN_LABELS[f.pattern_name] ||
+                  (f.pattern_name === GUARD_PATTERN_LABEL_HIGH_ENTROPY
+                    ? "高熵可疑字符串"
+                    : f.pattern_name)}
+                {f.matched_text ? (
+                  <span className="text-text-faint">：「{f.matched_text.slice(0, 50)}」</span>
+                ) : null}
+              </span>
+            </li>
+          ))}
+          {findings.length > 5 ? (
+            <li className="text-text-faint">… 另有 {findings.length - 5} 条</li>
+          ) : null}
+        </ul>
+      ) : null}
+      <div className="mt-2.5 flex flex-wrap items-center gap-2">
+        {item.can_fix ? (
+          <button
+            type="button"
+            className="rounded-md border border-[var(--settings-accent-border-strong)] bg-[var(--settings-accent-subtle-bg)] px-2.5 py-1 text-xs text-[var(--settings-accent-fg-muted)] transition hover:bg-[var(--settings-accent-subtle-bg-hover)] disabled:opacity-50"
+            disabled={busy || !onAiFix}
+            title={onAiFix ? "委派元智能体修复并预览改动" : "AI 修复即将支持"}
+            onClick={onAiFix}
+          >
+            AI 修复{onAiFix ? "" : "（即将支持）"}
+          </button>
+        ) : (
+          <span className="text-[11px] text-text-faint">外部来源只读，可禁用或忽略</span>
+        )}
+        <button
+          type="button"
+          className="rounded-md border border-border px-2.5 py-1 text-xs text-text-subtle transition hover:bg-surface-hover hover:text-text-primary disabled:opacity-50"
+          disabled={busy}
+          title="模型不再加载该技能，文件保留"
+          onClick={onDisable}
+        >
+          禁用
+        </button>
+        <button
+          type="button"
+          className="rounded-md border border-border px-2.5 py-1 text-xs text-text-subtle transition hover:bg-surface-hover hover:text-text-primary disabled:opacity-50"
+          disabled={busy}
+          title="后续扫描默认跳过该技能"
+          onClick={onIgnore}
+        >
+          忽略
+        </button>
+      </div>
+    </div>
   );
 }
 
