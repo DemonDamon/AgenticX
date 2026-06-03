@@ -187,6 +187,8 @@ class LiteLLMProvider(BaseLLMProvider):
             **kwargs,
         )
         last_finish_reason = ""
+        reasoning_started = False
+        reasoning_closed = False
         try:
             for chunk in response_stream:
                 chunk = cast(Any, chunk)
@@ -223,8 +225,21 @@ class LiteLLMProvider(BaseLLMProvider):
                         last_finish_reason = finish_reason
                     delta = getattr(choice0, "delta", None)
                     if delta is not None:
+                        # Reasoning models (MiniMax M2.x/M3, DeepSeek-R1, etc.) may stream
+                        # reasoning_content before content after tool results. Forward as
+                        # <think> so the UI keeps receiving tokens and idle
+                        # stall detection does not fire during the thinking phase.
+                        reasoning_delta = getattr(delta, "reasoning_content", None)
+                        if isinstance(reasoning_delta, str) and reasoning_delta:
+                            if not reasoning_started:
+                                reasoning_started = True
+                                yield {"type": "content", "text": "<think>"}
+                            yield {"type": "content", "text": reasoning_delta}
                         content = getattr(delta, "content", None)
                         if isinstance(content, str) and content:
+                            if reasoning_started and not reasoning_closed:
+                                reasoning_closed = True
+                                yield {"type": "content", "text": "</think>\n"}
                             yield {"type": "content", "text": content}
                         tool_calls = getattr(delta, "tool_calls", None)
                         if tool_calls:
@@ -247,6 +262,8 @@ class LiteLLMProvider(BaseLLMProvider):
                                 }
                 if usage_chunk:
                     yield {"type": "usage", "usage": usage_chunk}
+            if reasoning_started and not reasoning_closed:
+                yield {"type": "content", "text": "</think>"}
             yield {"type": "done", "finish_reason": last_finish_reason}
         except Exception as e:
             raise e

@@ -502,6 +502,7 @@ def _build_kb_retrieval_policy_block(mode_override: Optional[str] = None) -> str
         "- 返回 JSON 形如 `{ok, hits:[{id,score,text,source:{uri,title,chunk_index}}], used_top_k, source:'local'}`。\n"
         "- 回答必须基于 `hits[].text` 给出，并在句末用 `[N]` 标注来源编号（N 与本轮 references id 对应）。若 `hits` 为空，明确告知用户未在知识库命中，并询问是否需要兜底到一般知识。\n"
         "- 多来源并列：`[1][2]`；不要造 `【1】`、`(来源 1)`、`[来源1]` 等变体。\n"
+        "- **关键**：`[N]` 角标只能在**本轮真正调用了 `knowledge_search` 并拿到 `hits`** 时使用。若用户重试/追问同一问题，**不要**用「我刚才已检索过」来复用上一轮结果并标注 `[N]`——要么本轮重新调用 `knowledge_search` 再带角标，要么用自然语言说明信息来自上一轮检索且本轮未重新核对，但此时**禁止**输出任何 `[N]` 角标。\n"
         "- 不要把 `hits` 原始 JSON 复读给用户；只呈现有用片段与来源。\n"
         "- 与记忆的边界：长期文档资料走 `knowledge_search`；个人偏好/动作项走 `memory_search`/`memory_append`，不要混用。\n\n"
     )
@@ -534,7 +535,8 @@ def _build_web_search_capability_block() -> str:
         "- 每条来自 `web_search` / `knowledge_search` 的事实，必须在句末用 `[N]` 标注来源编号，N 与本轮返回的 references id 对应。\n"
         "- 多来源并列：`[1][2]`。\n"
         "- 不要造 `【1】`、`(来源 1)`、`[来源1]` 等变体；不要在角标前后加多余空格。\n"
-        "- 模型自身常识不需要角标。\n\n"
+        "- 模型自身常识不需要角标。\n"
+        "- **本轮未实际调用 `web_search`/`knowledge_search`（无新的 references）时，禁止输出 `[N]` 角标**；不要凭上一轮记忆复用编号，否则角标无法溯源会被前端剥除。\n\n"
     )
 
 

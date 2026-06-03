@@ -10,7 +10,11 @@ import {
   MarkdownContext,
   normalizeChatMarkdownContent,
 } from "./markdown-components";
-import { normalizeCitationMarkers, splitCitationSegments } from "./citation-normalize";
+import {
+  normalizeCitationMarkers,
+  splitCitationSegments,
+  stripOrphanCitationMarkers,
+} from "./citation-normalize";
 
 type Props = {
   content: string;
@@ -35,9 +39,12 @@ export function CitationMarkdownBody({
     return map;
   }, [references]);
 
-  const normalized = normalizeCitationMarkers(content, (references?.length ?? 0) > 0);
   const hasReferences = (references?.length ?? 0) > 0;
-  const segments = hasReferences ? splitCitationSegments(normalized) : [{ kind: "text" as const, value: normalized }];
+  const normalized = normalizeCitationMarkers(content, hasReferences);
+  // 已完成（非流式）且本轮无 references 时，剥离模型编造的游离角标，避免展示假溯源。
+  // 流式阶段不剥离——references 可能稍后才随 tool_result 到达，避免角标闪烁。
+  const displayText = hasReferences || isStreaming ? normalized : stripOrphanCitationMarkers(normalized);
+  const segments = hasReferences ? splitCitationSegments(normalized) : [{ kind: "text" as const, value: displayText }];
 
   return (
     <div className={className} style={style}>
