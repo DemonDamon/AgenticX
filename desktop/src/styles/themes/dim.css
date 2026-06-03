@@ -85,9 +85,9 @@
   --ui-accent-divider: rgba(255, 255, 255, 0.09);
   --ui-accent-divider-hover: rgba(255, 255, 255, 0.20);
 
-  --kb-citation-bg: rgba(56, 142, 60, 0.22);
-  --kb-citation-bg-muted: rgba(56, 142, 60, 0.12);
-  --kb-citation-fg: #a5d6a7;
-  --kb-citation-list-bg: rgba(255, 255, 255, 0.05);
+  --kb-citation-bg: rgba(var(--theme-color-rgb), 0.22);
+  --kb-citation-bg-muted: rgba(var(--theme-color-rgb), 0.11);
+  --kb-citation-fg: rgb(var(--theme-color-rgb));
+  --kb-citation-list-bg: rgba(var(--theme-color-rgb), 0.07);
 }
 
