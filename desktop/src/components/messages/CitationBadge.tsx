@@ -4,8 +4,10 @@ import type { SearchReference } from "../../types/search-references";
 import { CitationPopover } from "./CitationPopover";
 
 type Props = {
-  id: number;
-  reference?: SearchReference;
+  /** Document-level number shown on the pill. */
+  docNumber: number;
+  /** Chunk references behind this pill (1 = single, >1 = merged adjacent same-doc). */
+  references: SearchReference[];
 };
 
 const HOVER_OPEN_MS = 150;
@@ -42,14 +44,15 @@ function computePopoverPlacement(anchor: DOMRect): PopoverPlacement {
   return { top, left, placeAbove };
 }
 
-export function CitationBadge({ id, reference }: Props) {
+export function CitationBadge({ docNumber, references }: Props) {
   const [open, setOpen] = useState(false);
   const [placement, setPlacement] = useState<PopoverPlacement | null>(null);
   const anchorRef = useRef<HTMLSpanElement>(null);
   const popoverRef = useRef<HTMLDivElement>(null);
   const openTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const closeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const resolved = Boolean(reference);
+  const resolved = references.length > 0;
+  const primaryTitle = references[0]?.title ?? "";
 
   const clearTimers = useCallback(() => {
     if (openTimerRef.current) clearTimeout(openTimerRef.current);
@@ -95,7 +98,7 @@ export function CitationBadge({ id, reference }: Props) {
       : Math.min(window.innerHeight - VIEWPORT_MARGIN - measured.height, anchor.bottom + POPOVER_GAP);
 
     setPlacement({ top, left, placeAbove });
-  }, [open, reference?.id]);
+  }, [open, references]);
 
   useEffect(() => {
     if (!open) return;
@@ -126,7 +129,7 @@ export function CitationBadge({ id, reference }: Props) {
   };
 
   const popoverPortal =
-    open && reference && placement
+    open && resolved && placement
       ? createPortal(
           <div
             ref={popoverRef}
@@ -135,7 +138,7 @@ export function CitationBadge({ id, reference }: Props) {
             onMouseEnter={scheduleOpen}
             onMouseLeave={scheduleClose}
           >
-            <CitationPopover reference={reference} onClose={() => setOpen(false)} />
+            <CitationPopover references={references} onClose={() => setOpen(false)} />
           </div>,
           document.body,
         )
@@ -155,14 +158,14 @@ export function CitationBadge({ id, reference }: Props) {
             resolved ? "cursor-pointer hover:opacity-90" : "cursor-default opacity-70"
           }`}
           style={pillStyle}
-          aria-label={resolved ? `引用 ${id}: ${reference!.title}` : `引用 ${id}`}
+          aria-label={resolved ? `引用 ${docNumber}: ${primaryTitle}` : `引用 ${docNumber}`}
           aria-expanded={open}
           onClick={() => {
             if (!resolved) return;
             setOpen((v) => !v);
           }}
         >
-          {id}
+          {docNumber}
         </button>
       </span>
       {popoverPortal}

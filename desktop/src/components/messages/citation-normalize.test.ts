@@ -3,10 +3,13 @@ import assert from "node:assert/strict";
 import {
   buildCitationRenderGroups,
   escapeMarkdownOrderedListMarkers,
+  mergeAdjacentCitations,
   normalizeCitationMarkers,
   relocateCitationMarkersForDisplay,
+  containsGfmTable,
   splitCitationParagraphBlocks,
   splitCitationSegments,
+  splitCitationSegmentsRespectingTables,
   stripOrphanCitationMarkers,
 } from "./citation-normalize";
 
@@ -112,10 +115,77 @@ test("buildCitationRenderGroups: mid-sentence cites stay in one group", () => {
   assert.equal(groups[0].length, 4);
 });
 
+test("mergeAdjacentCitations: merges adjacent same-document numbers, keeps text", () => {
+  // ids 4,5 both map to document number 3; ids 1,2 are docs 1,2.
+  const docMap = new Map<number, number>([
+    [1, 1],
+    [2, 2],
+    [4, 3],
+    [5, 3],
+  ]);
+  const items = mergeAdjacentCitations(splitCitationSegments("功能[4][5]说明[1]"), docMap);
+  assert.deepEqual(items, [
+    { kind: "text", value: "功能" },
+    { kind: "citation", docNumber: 3, ids: [4, 5] },
+    { kind: "text", value: "说明" },
+    { kind: "citation", docNumber: 1, ids: [1] },
+  ]);
+});
+
+test("mergeAdjacentCitations: non-adjacent same document stays separate", () => {
+  const docMap = new Map<number, number>([
+    [3, 3],
+    [4, 3],
+  ]);
+  const items = mergeAdjacentCitations(splitCitationSegments("甲[3]乙[4]"), docMap);
+  assert.deepEqual(items, [
+    { kind: "text", value: "甲" },
+    { kind: "citation", docNumber: 3, ids: [3] },
+    { kind: "text", value: "乙" },
+    { kind: "citation", docNumber: 3, ids: [4] },
+  ]);
+});
+
+test("mergeAdjacentCitations: missing id falls back to raw number", () => {
+  const items = mergeAdjacentCitations(splitCitationSegments("X[7]"), new Map());
+  assert.deepEqual(items, [
+    { kind: "text", value: "X" },
+    { kind: "citation", docNumber: 7, ids: [7] },
+  ]);
+});
+
 test("buildCitationRenderGroups: h3 title cite then body splits into two groups", () => {
   const block = "### 1. **UToken 网关产品（UCloud）** [1]  \n面向企业 Token";
   const groups = buildCitationRenderGroups(splitCitationSegments(block));
   assert.equal(groups.length, 2);
   assert.equal(groups[0][groups[0].length - 1].kind, "citation");
   assert.match(groups[1][0].value, /面向企业 Token/);
+});
+
+test("splitCitationSegmentsRespectingTables: keeps GFM table as one segment", () => {
+  const table =
+    "| 产品 | 部门 |\n| --- | --- |\n| NewAPI [2] [3] | 支持多用户 |\n| LiteLLM [4] [5] | Team |";
+  const segments = splitCitationSegmentsRespectingTables(table);
+  assert.equal(segments.length, 1);
+  assert.equal(segments[0].kind, "text");
+  assert.match(segments[0].value, /NewAPI \[2\] \[3\]/);
+  assert.match(segments[0].value, /LiteLLM \[4\] \[5\]/);
+});
+
+test("splitCitationSegmentsRespectingTables: splits prose cites outside table", () => {
+  const input = "说明[1]\n\n| A [2] | B |\n| --- | --- |\n| C | D |";
+  const segments = splitCitationSegmentsRespectingTables(input);
+  assert.deepEqual(
+    segments.filter((s) => s.kind === "citation").map((s) => s.value),
+    ["1"],
+  );
+  assert.equal(segments.some((s) => s.kind === "text" && s.value === "说明"), true);
+  const tableSeg = segments.find((s) => s.kind === "text" && containsGfmTable(s.value));
+  assert.ok(tableSeg);
+  assert.match(tableSeg!.value, /\| A \[2\] \| B \|/);
+});
+
+test("containsGfmTable: detects pipe tables", () => {
+  assert.equal(containsGfmTable("| a | b |\n| --- | --- |"), true);
+  assert.equal(containsGfmTable("单行 | 不是表格 |"), false);
 });
