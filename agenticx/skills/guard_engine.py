@@ -362,6 +362,8 @@ def _levenshtein(a: str, b: str) -> int:
 
 
 def _iter_scan_files(skill_dir: Path, strategy: ScanStrategy) -> list[Path]:
+    from agenticx.skills.snapshot import path_under_snapshots
+
     files: list[Path] = []
     if strategy.scan_skill_md_only:
         skill_md = skill_dir / "SKILL.md"
@@ -369,10 +371,15 @@ def _iter_scan_files(skill_dir: Path, strategy: ScanStrategy) -> list[Path]:
             return [skill_md]
         for f in skill_dir.rglob("*.md"):
             if f.is_file():
-                files.append(f)
+                rel = str(f.relative_to(skill_dir))
+                if not path_under_snapshots(rel):
+                    files.append(f)
         return files[:20]
     for f in skill_dir.rglob("*"):
         if not f.is_file():
+            continue
+        rel = str(f.relative_to(skill_dir))
+        if path_under_snapshots(rel):
             continue
         ext = f.suffix.lower()
         if ext in SCANNABLE_EXTENSIONS or f.name == "SKILL.md":

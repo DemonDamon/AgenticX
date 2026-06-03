@@ -5239,6 +5239,93 @@ def create_studio_app() -> FastAPI:
             logger.warning("post_guard_scan_all error: %s", exc)
             raise HTTPException(status_code=500, detail=str(exc)) from exc
 
+    @app.post("/api/skills/snapshot")
+    async def post_skill_snapshot(
+        payload: dict,
+        x_agx_desktop_token: str | None = Header(default=None),
+    ) -> dict:
+        """Create a pre-fix snapshot of a skill directory."""
+        _check_token(x_agx_desktop_token)
+        base_dir = str((payload or {}).get("base_dir") or "").strip()
+        if not base_dir:
+            raise HTTPException(status_code=400, detail="base_dir required")
+        trigger = str((payload or {}).get("trigger") or "guard_ai_fix")
+        skill_name = str((payload or {}).get("skill_name") or "")
+        try:
+            from pathlib import Path as _Path
+
+            from agenticx.skills.snapshot import create_snapshot
+
+            out = create_snapshot(
+                _Path(base_dir),
+                trigger=trigger,
+                skill_name=skill_name,
+            )
+            return {"ok": True, **out}
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        except Exception as exc:
+            logger.warning("post_skill_snapshot error: %s", exc)
+            raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+    @app.get("/api/skills/snapshots")
+    async def get_skill_snapshots(
+        base_dir: str,
+        x_agx_desktop_token: str | None = Header(default=None),
+    ) -> dict:
+        """List snapshots for a skill directory (newest first)."""
+        _check_token(x_agx_desktop_token)
+        base = (base_dir or "").strip()
+        if not base:
+            raise HTTPException(status_code=400, detail="base_dir required")
+        try:
+            from pathlib import Path as _Path
+
+            from agenticx.skills.snapshot import list_snapshots
+
+            snaps = list_snapshots(_Path(base))
+            return {
+                "ok": True,
+                "snapshots": [
+                    {
+                        "id": s.id,
+                        "ts": s.timestamp,
+                        "files_count": s.files_count,
+                        "trigger": s.trigger,
+                    }
+                    for s in snaps
+                ],
+            }
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        except Exception as exc:
+            logger.warning("get_skill_snapshots error: %s", exc)
+            raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+    @app.post("/api/skills/snapshot/restore")
+    async def post_skill_snapshot_restore(
+        payload: dict,
+        x_agx_desktop_token: str | None = Header(default=None),
+    ) -> dict:
+        """Restore skill files from a snapshot (incremental overwrite)."""
+        _check_token(x_agx_desktop_token)
+        base_dir = str((payload or {}).get("base_dir") or "").strip()
+        snapshot_id = str((payload or {}).get("snapshot_id") or "").strip()
+        if not base_dir or not snapshot_id:
+            raise HTTPException(status_code=400, detail="base_dir and snapshot_id required")
+        try:
+            from pathlib import Path as _Path
+
+            from agenticx.skills.snapshot import restore_snapshot
+
+            restored = restore_snapshot(_Path(base_dir), snapshot_id)
+            return {"ok": True, "restored_files": restored}
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        except Exception as exc:
+            logger.warning("post_skill_snapshot_restore error: %s", exc)
+            raise HTTPException(status_code=500, detail=str(exc)) from exc
+
     # -- Usage dashboard ---------------------------------------------------------
 
     def _usage_parse_range_ms(

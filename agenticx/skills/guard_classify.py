@@ -73,8 +73,13 @@ def compute_code_stats(skill_dir: Path) -> CodeStats:
     if not skill_dir.is_dir():
         return stats
     stats.has_references_dir = (skill_dir / "references").is_dir()
+    from agenticx.skills.snapshot import path_under_snapshots
+
     for f in skill_dir.rglob("*"):
         if not f.is_file():
+            continue
+        rel = str(f.relative_to(skill_dir))
+        if path_under_snapshots(rel):
             continue
         stats.total_files += 1
         try:

@@ -143,10 +143,14 @@ def _check_structure(skill_dir: Path) -> list[ScanFinding]:
     findings: list[ScanFinding] = []
     file_count = 0
     total_size = 0
+    from agenticx.skills.snapshot import path_under_snapshots
+
     for f in skill_dir.rglob("*"):
         if not f.is_file() and not f.is_symlink():
             continue
         rel = str(f.relative_to(skill_dir))
+        if path_under_snapshots(rel):
+            continue
         file_count += 1
         if f.is_symlink():
             try:
