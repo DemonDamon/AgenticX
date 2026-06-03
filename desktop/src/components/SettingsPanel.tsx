@@ -4920,9 +4920,9 @@ function SkillAdvancedPanel() {
           disabled={busy}
           onChange={(next) => void updatePolicy(next)}
         />
-        <div className="mt-4 rounded-lg border border-border bg-surface-panel p-3">
-          <div className="text-sm font-medium text-text-strong">技能安全扫描</div>
-          <div className="mt-1.5 space-y-1 text-[11px] leading-relaxed text-text-faint">
+        <div className="rounded-xl border border-border bg-surface-card px-4 py-3.5">
+          <div className="text-sm font-semibold text-text-strong">技能安全扫描</div>
+          <div className="mt-1 space-y-1 text-xs leading-relaxed text-text-muted">
             <p>
               从技能市场、Bundle 或扩展安装前会<strong className="font-medium text-text-subtle">自动扫描</strong>
               ，并展示摘要；命中高危须你确认后才可安装。本页配置写入{" "}
@@ -4967,7 +4967,7 @@ function SkillAdvancedPanel() {
               </select>
             </label>
           </div>
-          <p className="mt-3 text-[11px] text-text-faint">手动审计（可选）：检查本机已有技能目录，与自动安装无关。</p>
+          <p className="mt-3 text-xs text-text-muted">手动审计（可选）：检查本机已有技能目录，与自动安装无关。</p>
           <div className="mt-2 flex flex-col gap-2 sm:flex-row">
             <input
               type="text"
