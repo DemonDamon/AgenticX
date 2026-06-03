@@ -31,9 +31,26 @@ type Props = {
   style?: CSSProperties;
 };
 
+/** Headings must stay inline so a trailing [N] segment is not forced onto the next line. */
+function inlineCitationHeading(className: string) {
+  return function InlineHeading({ children }: { children?: React.ReactNode }) {
+    return (
+      <span className={`m-0 inline align-baseline font-semibold text-text-strong ${className}`}>
+        {children}
+      </span>
+    );
+  };
+}
+
 /** Keep citation pills on the same line as preceding list items / sentences. */
 const inlineCitationMarkdownComponents: Partial<Components> = {
   ...chatMarkdownComponents,
+  h1: inlineCitationHeading("text-xl"),
+  h2: inlineCitationHeading("text-lg"),
+  h3: inlineCitationHeading("text-[16px] leading-6"),
+  h4: inlineCitationHeading("text-[15px] leading-6"),
+  h5: inlineCitationHeading("text-sm"),
+  h6: inlineCitationHeading("text-sm"),
   p({ children }) {
     return <p className="m-0 inline contents">{children}</p>;
   },
@@ -61,14 +78,24 @@ function InlineCitationGroup({
   refMap,
   isStreaming,
   groupIndex,
+  blockLayout,
 }: {
   segments: CitationSegment[];
   refMap: Map<number, SearchReference>;
   isStreaming?: boolean;
   groupIndex: number;
+  /** Body groups after heading+cite must start on a new line. */
+  blockLayout?: boolean;
 }) {
+  const Wrapper = blockLayout ? "div" : "span";
   return (
-    <span className="inline max-w-full align-baseline leading-relaxed">
+    <Wrapper
+      className={
+        blockLayout
+          ? "block w-full max-w-full leading-relaxed"
+          : "inline max-w-full align-baseline leading-relaxed"
+      }
+    >
       {segments.map((segment, index) => {
         if (segment.kind === "citation") {
           const id = Number(segment.value);
@@ -82,12 +109,13 @@ function InlineCitationGroup({
         }
         if (!segment.value) return null;
         const mdSource = escapeMarkdownOrderedListMarkers(segment.value);
+        const mdComponents = blockLayout ? chatMarkdownComponents : inlineCitationMarkdownComponents;
         return (
           <Fragment key={`md-g${groupIndex}-${index}`}>
             <ReactMarkdown
               remarkPlugins={chatRemarkPlugins}
               rehypePlugins={chatRehypePlugins}
-              components={inlineCitationMarkdownComponents}
+              components={mdComponents}
               urlTransform={chatUrlTransform}
             >
               {normalizeChatMarkdownContent(mdSource, { isStreaming })}
@@ -95,7 +123,7 @@ function InlineCitationGroup({
           </Fragment>
         );
       })}
-    </span>
+    </Wrapper>
   );
 }
 
@@ -110,7 +138,7 @@ function InlineCitationRow({
 }) {
   const groups = buildCitationRenderGroups(splitCitationSegments(block));
   return (
-    <>
+    <div className="max-w-full leading-relaxed">
       {groups.map((segments, groupIndex) => (
         <InlineCitationGroup
           key={`cite-group-${groupIndex}`}
@@ -118,9 +146,10 @@ function InlineCitationRow({
           refMap={refMap}
           isStreaming={isStreaming}
           groupIndex={groupIndex}
+          blockLayout={groupIndex > 0}
         />
       ))}
-    </>
+    </div>
   );
 }
 
