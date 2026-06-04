@@ -10,6 +10,7 @@ import {
   reconcilePaneModelsWithSettings as reconcilePaneModelsPure,
 } from "./utils/model-options";
 import type { SearchReference } from "./types/search-references";
+import { shouldClearMessagesOnSessionSwitch } from "./utils/pane-session-switch";
 
 export type UiStatus = "idle" | "listening" | "processing";
 export type MsgRole = "user" | "assistant" | "tool";
@@ -1572,19 +1573,41 @@ export const useAppStore = create<AppState>((set, get) => ({
         resolvedModel = "";
       }
       const isActive = state.activePaneId === paneId;
+      const nextTrimmed = String(sessionId ?? "").trim();
       const nextPanes = state.panes.map((p) => {
         if (p.id !== paneId) return p;
+        const prevTrimmed = String(p.sessionId ?? "").trim();
+        // Switching to a *different* non-empty session clears the previous
+        // session's messages here so no async path (history switch, 404
+        // migration, binding re-bind, automation reuse, etc.) can leave a stale
+        // pane that visually merges two sessions. Callers that immediately
+        // re-apply messages (cache hit / reload) still work — React batches the
+        // follow-up setPaneMessages within the same tick. This centralizes the
+        // "one pane shows exactly one session" invariant instead of relying on
+        // every call site to remember to wipe messages.
+        const isSwitchToDifferentSession = shouldClearMessagesOnSessionSwitch(
+          prevTrimmed,
+          nextTrimmed,
+        );
         const cached = getSessionTokensFromCache(sessionId);
         const baseTokens =
           cached
             ? cached
-            : String(p.sessionId ?? "").trim() === String(sessionId ?? "").trim()
+            : prevTrimmed === nextTrimmed
               ? p.sessionTokens ?? { input: 0, output: 0 }
               : { input: 0, output: 0 };
         return {
           ...p,
           sessionId,
           sessionTokens: baseTokens,
+          ...(isSwitchToDifferentSession
+            ? {
+                messages: [],
+                oldestLoadedIndex: 0,
+                hasOlderMessages: false,
+                loadingOlderMessages: false,
+              }
+            : {}),
           ...(resolvedProvider && resolvedModel
             ? { modelProvider: resolvedProvider, modelName: resolvedModel }
             : {}),
