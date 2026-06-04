@@ -6,6 +6,7 @@ Author: Damon Li
 
 from __future__ import annotations
 
+import asyncio
 from typing import Any, Optional
 
 from fastapi import APIRouter, Header, HTTPException, Query
@@ -181,19 +182,9 @@ def register_memory_graph_routes(app, *, check_token) -> None:
         x_agx_desktop_token: Optional[str] = Header(default=None),
     ) -> dict[str, Any]:
         _auth(x_agx_desktop_token)
-        from agenticx.memory.graph.deps import graphiti_runtime_info
+        from agenticx.studio.blocking_io import run_in_settings_pool
 
-        store = MemoryGraphStore.singleton()
-        status = store.get_status()
-        cfg = load_memory_graph_config()
-        status["config"] = memory_graph_config_to_dict(cfg)
-        try:
-            from agenticx.memory.graph.clients import resolve_effective_models
-
-            status["models"] = resolve_effective_models(cfg)
-        except Exception:  # 模型解析失败不应影响 status
-            status["models"] = None
-        status.update(graphiti_runtime_info())
+        status = await run_in_settings_pool(MemoryGraphStore.build_status_payload_sync)
         return {"ok": True, **status}
 
     @router.delete("/episode/{episode_uuid}")
