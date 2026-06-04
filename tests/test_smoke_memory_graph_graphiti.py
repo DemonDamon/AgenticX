@@ -14,6 +14,11 @@ from agenticx.memory.graph.clients import (
     model_supports_reasoning_effort,
     should_use_generic_openai_client,
 )
+from agenticx.memory.graph.json_compat import (
+    coerce_to_response_model,
+    parse_llm_json,
+    provider_supports_json_response_format,
+)
 from agenticx.memory.graph.config import load_memory_graph_config
 from agenticx.memory.graph.dto import build_graph_view, map_edge, map_node
 from agenticx.memory.graph.group_id import derive_group_id, validate_group_access
@@ -31,6 +36,61 @@ class _FakeEdge:
     def __init__(self, **kwargs):
         for k, v in kwargs.items():
             setattr(self, k, v)
+
+
+def test_provider_supports_json_response_format():
+    assert provider_supports_json_response_format("openai", None) is True
+    assert provider_supports_json_response_format("minimax", "https://api.minimax.chat/v1") is False
+    assert provider_supports_json_response_format("openai", "https://proxy.example/v1") is False
+
+
+def test_parse_llm_json():
+    assert parse_llm_json('{"nodes":[]}') == {"nodes": []}
+    assert parse_llm_json('```json\n{"a": 1}\n```') == {"a": 1}
+    assert parse_llm_json('Here is output:\n{"fact": "x"}\n') == {"fact": "x"}
+
+
+def test_parse_llm_json_empty_raises():
+    import pytest
+
+    with pytest.raises(ValueError, match="empty"):
+        parse_llm_json("")
+
+
+def test_coerce_to_response_model_renames_aliases():
+    from typing import List
+
+    from pydantic import BaseModel, Field
+
+    class ExtractedEntity(BaseModel):
+        name: str = ""
+
+    class ExtractedEntities(BaseModel):
+        extracted_entities: List[ExtractedEntity] = Field(...)
+
+    # MiniMax returns shortened key 'entities'
+    fixed = coerce_to_response_model({"entities": [{"name": "u"}]}, ExtractedEntities)
+    assert "extracted_entities" in fixed
+    assert "entities" not in fixed
+    assert fixed["extracted_entities"] == [{"name": "u"}]
+    # constructing the model must now succeed
+    assert ExtractedEntities(**fixed).extracted_entities[0].name == "u"
+
+
+def test_coerce_to_response_model_noop_when_correct():
+    from typing import List
+
+    from pydantic import BaseModel, Field
+
+    class NodeResolutions(BaseModel):
+        entity_resolutions: List[int] = Field(...)
+
+    data = {"entity_resolutions": [1, 2]}
+    assert coerce_to_response_model(data, NodeResolutions) == data
+    # alias 'resolutions' should also be mapped
+    assert coerce_to_response_model({"resolutions": [3]}, NodeResolutions) == {
+        "entity_resolutions": [3]
+    }
 
 
 def test_model_supports_reasoning_effort():

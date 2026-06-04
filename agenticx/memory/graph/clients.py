@@ -97,11 +97,11 @@ def build_graphiti_clients(cfg: MemoryGraphConfig) -> Tuple[Any, Any, Any]:
     llm_pc = agx.get_provider(llm_provider_name)
     embed_pc = agx.get_provider(embed_provider_name)
 
+    from agenticx.memory.graph.llm_client import CompatOpenAIGenericClient
     from graphiti_core.cross_encoder.openai_reranker_client import OpenAIRerankerClient
     from graphiti_core.embedder.openai import OpenAIEmbedder, OpenAIEmbedderConfig
     from graphiti_core.llm_client.config import LLMConfig
     from graphiti_core.llm_client.openai_client import OpenAIClient
-    from graphiti_core.llm_client.openai_generic_client import OpenAIGenericClient
 
     api_key = llm_pc.api_key or os.environ.get("OPENAI_API_KEY") or "not-set"
     base_url = (llm_pc.base_url or os.environ.get("OPENAI_BASE_URL") or "").strip() or None
@@ -117,7 +117,11 @@ def build_graphiti_clients(cfg: MemoryGraphConfig) -> Tuple[Any, Any, Any]:
 
     use_generic = should_use_generic_openai_client(llm_provider_name, base_url, model)
     if use_generic:
-        llm_client = OpenAIGenericClient(config=llm_config)
+        llm_client = CompatOpenAIGenericClient(
+            config=llm_config,
+            provider_name=llm_provider_name,
+            base_url=base_url,
+        )
     else:
         # Graphiti OpenAIClient defaults reasoning='minimal' -> reasoning.effort on Responses API.
         # Only pass these knobs when the configured model actually supports them.
