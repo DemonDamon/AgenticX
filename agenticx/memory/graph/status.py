@@ -76,9 +76,12 @@ class MemoryGraphStatusStore:
         with _lock:
             state = self._read_unlocked()
             state["pending_jobs"] = max(0, int(state.get("pending_jobs", 0)) + delta)
-            if delta > 0 and int(state.get("job_progress", 0) or 0) <= 0:
-                state["job_progress"] = 1
-                state["job_stage"] = "queued"
+            if delta > 0:
+                state["last_error"] = None
+                state["last_error_at"] = None
+                if int(state.get("job_progress", 0) or 0) <= 0:
+                    state["job_progress"] = 1
+                    state["job_stage"] = "queued"
             self._write_unlocked(state)
 
     def mark_job_started(self) -> None:
@@ -89,6 +92,8 @@ class MemoryGraphStatusStore:
             state["job_active"] = True
             state["job_progress"] = 12
             state["job_stage"] = "preparing"
+            state["last_error"] = None
+            state["last_error_at"] = None
             self._write_unlocked(state)
 
     def set_job_progress(self, percent: int, stage: Optional[str] = None) -> None:

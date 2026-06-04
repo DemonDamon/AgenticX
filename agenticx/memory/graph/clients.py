@@ -11,6 +11,16 @@ from typing import Any, Tuple
 
 from agenticx.memory.graph.config import MemoryGraphConfig
 
+def _memory_graph_async_openai_client(api_key: str, base_url: str | None) -> Any:
+    """OpenAI SDK default connect=5s is too tight for slow DashScope ingest chains."""
+    from openai import AsyncOpenAI, Timeout
+
+    return AsyncOpenAI(
+        api_key=api_key,
+        base_url=base_url,
+        timeout=Timeout(connect=30.0, read=300.0, write=120.0, pool=120.0),
+    )
+
 
 def _normalize_model_name(model: str) -> str:
     """Strip provider prefix (e.g. openai/gpt-4o-mini -> gpt-4o-mini)."""
@@ -116,10 +126,12 @@ def build_graphiti_clients(cfg: MemoryGraphConfig) -> Tuple[Any, Any, Any]:
         base_url=base_url,
     )
 
+    llm_http = _memory_graph_async_openai_client(api_key, base_url)
     use_generic = should_use_generic_openai_client(llm_provider_name, base_url, model)
     if use_generic:
         llm_client = CompatOpenAIGenericClient(
             config=llm_config,
+            client=llm_http,
             provider_name=llm_provider_name,
             base_url=base_url,
         )
@@ -128,12 +140,17 @@ def build_graphiti_clients(cfg: MemoryGraphConfig) -> Tuple[Any, Any, Any]:
         # Only pass these knobs when the configured model actually supports them.
         llm_client = OpenAIClient(
             config=llm_config,
+            client=llm_http,
             reasoning="minimal",
             verbosity="low",
         )
 
     embed_key = embed_pc.api_key or api_key
     embed_base = (embed_pc.base_url or base_url or "").strip() or None
+    embed_http = _memory_graph_async_openai_client(
+        embed_key,
+        embed_base,
+    )
     embed_model = _pick_model(cfg, "embedder", "text-embedding-3-small")
     if embed_provider_name == "ollama":
         embed_model = embed_model or "nomic-embed-text"
@@ -147,6 +164,7 @@ def build_graphiti_clients(cfg: MemoryGraphConfig) -> Tuple[Any, Any, Any]:
             base_url=embed_base,
             embedding_dim=embed_dim,
         ),
+        client=embed_http,
         provider_name=embed_provider_name,
         base_url=embed_base,
     )

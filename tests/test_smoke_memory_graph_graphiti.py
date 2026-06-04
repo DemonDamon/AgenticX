@@ -281,6 +281,21 @@ def test_extract_last_turn_messages():
     assert pair[1]["content"] == "reply two"
 
 
+def test_status_store_clears_last_error_on_new_job(tmp_path):
+    from agenticx.memory.graph.status import MemoryGraphStatusStore
+
+    store = MemoryGraphStatusStore(tmp_path / "graph_ingest.json")
+    store.record_failure("Request timed out.")
+    store.increment_pending(1)
+    state = store.read()
+    assert state["last_error"] is None
+    store.record_failure("again")
+    store.mark_job_started()
+    state = store.read()
+    assert state["last_error"] is None
+    assert state["job_active"] is True
+
+
 def test_disabled_config_skips_writer(monkeypatch):
     monkeypatch.setenv("AGX_MEMORY_GRAPH_ENABLED", "0")
     cfg = load_memory_graph_config()
