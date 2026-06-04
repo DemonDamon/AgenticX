@@ -239,7 +239,10 @@ def register_memory_graph_routes(app, *, check_token) -> None:
         raw = ConfigManager._load_yaml(path)
         raw["memory_graph"] = block
         ConfigManager._dump_yaml(path, raw)
-        MemoryGraphStore.singleton().refresh_config()
+        store = MemoryGraphStore.singleton()
+        store.refresh_config()
+        # LLM/embedder 变更后必须重建 Graphiti 客户端，否则会沿用旧 OpenAIClient + reasoning.effort
+        store.reset_runtime()
         return {"ok": True, "config": memory_graph_config_to_dict(load_memory_graph_config())}
 
     app.include_router(router)
