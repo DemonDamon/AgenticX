@@ -38,6 +38,8 @@ REPO_ROOT="$(cd "$ENTERPRISE_DIR/.." && pwd)"
 ENV_FILE="$ENTERPRISE_DIR/.env.local"
 SECRETS_DIR="$ENTERPRISE_DIR/.local-secrets"
 COMPOSE_FILE="$ENTERPRISE_DIR/deploy/docker-compose/dev.yml"
+# shellcheck source=lib/logging.sh
+source "$SCRIPT_DIR/lib/logging.sh"
 
 #################################
 # 1. 工具函数
@@ -379,16 +381,29 @@ fi
 # 7. db:migrate + db:seed
 #################################
 export DATABASE_URL
-log "running db:migrate"
-(cd "$ENTERPRISE_DIR" && pnpm --filter @agenticx/db-schema db:migrate)
+BOOTSTRAP_LOG="$(agx_new_log_file bootstrap)"
+log "running db:migrate (log: $BOOTSTRAP_LOG)"
+(
+  cd "$ENTERPRISE_DIR"
+  agx_run_with_log "db:migrate" "$BOOTSTRAP_LOG" \
+    pnpm --filter @agenticx/db-schema db:migrate
+)
 ok "db:migrate done"
 
-log "running db:seed"
-(cd "$ENTERPRISE_DIR" && pnpm --filter @agenticx/db-schema db:seed)
+log "running db:seed (log: $BOOTSTRAP_LOG)"
+(
+  cd "$ENTERPRISE_DIR"
+  agx_run_with_log "db:seed" "$BOOTSTRAP_LOG" \
+    pnpm --filter @agenticx/db-schema db:seed
+)
 ok "db:seed done"
 
-log "running migrate:legacy-runtime"
-(cd "$ENTERPRISE_DIR" && pnpm migrate:legacy-runtime)
+log "running migrate:legacy-runtime (log: $BOOTSTRAP_LOG)"
+(
+  cd "$ENTERPRISE_DIR"
+  agx_run_with_log "migrate:legacy-runtime" "$BOOTSTRAP_LOG" \
+    pnpm migrate:legacy-runtime
+)
 ok "migrate:legacy-runtime done"
 
 #################################
