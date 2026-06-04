@@ -17,6 +17,8 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ENTERPRISE_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 ENV_FILE="$ENTERPRISE_DIR/.env.local"
+# shellcheck source=lib/logging.sh
+source "$SCRIPT_DIR/lib/logging.sh"
 
 ALL_APPS=0
 TURBO_UI="tui"
@@ -100,11 +102,14 @@ fi
 AUTO_MIGRATE="${AGX_AUTO_DB_MIGRATE:-1}"
 if [[ "$AUTO_MIGRATE" = "1" ]]; then
   if [[ "$DATABASE_URL" == *"127.0.0.1"* || "$DATABASE_URL" == *"localhost"* ]]; then
-    echo "[start-dev] running local database migrations ..."
+    MIGRATE_LOG="$(agx_new_log_file db-migrate)"
+    echo "[start-dev] running local database migrations (log: $MIGRATE_LOG) ..."
     (
       cd "$ENTERPRISE_DIR"
-      pnpm --filter @agenticx/db-schema db:migrate
-      pnpm migrate:legacy-runtime
+      agx_run_with_log "db:migrate" "$MIGRATE_LOG" \
+        pnpm --filter @agenticx/db-schema db:migrate
+      agx_run_with_log "migrate:legacy-runtime" "$MIGRATE_LOG" \
+        pnpm migrate:legacy-runtime
     )
   else
     echo "[start-dev] skip auto migration (non-local DATABASE_URL)."

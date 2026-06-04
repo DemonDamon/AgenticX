@@ -93,6 +93,40 @@ curl --noproxy '*' -s -o /dev/null -w '%{http_code}\n' http://127.0.0.1:3000
 > 说明：`docker compose pull` 在镜像加速正确生效时一般**不会**卡在 Hub 超时；因此"超时"基本等价于
 > "这台机器的加速未真正生效"，按上述第 1 步排查即可。
 
+### `db:migrate` 失败但终端几乎无报错
+
+现象：`pnpm --filter @agenticx/db-schema db:migrate` 或 `start-dev-with-infra.sh` 在迁移阶段以
+`Exit status 1` / `ERR_PNPM_RECURSIVE_RUN_FIRST_FAIL` 退出，终端只有一行失败摘要，看不到具体 SQL 错误。
+
+原因：`drizzle-kit` 个别版本（如 `0.31.10`）在 migrate 失败时会**吞掉底层 Postgres 错误**；并非日志没采集。
+
+**第一步：看脚本落盘日志**（`bootstrap.sh` / `start-dev.sh` 已自动 `tee`）：
+
+```bash
+ls -lt enterprise/.runtime/logs/
+tail -n 80 enterprise/.runtime/logs/db-migrate-*.log
+# bootstrap 全流程：enterprise/.runtime/logs/bootstrap-*.log
+```
+
+失败时终端也会打印 `[log] db:migrate failed — full output: ...`，把该文件发给运维即可。
+
+**开发/POC 环境最短修复**（可清库）：
+
+```bash
+cd enterprise
+bash scripts/bootstrap.sh --reset-db
+bash scripts/start-dev-with-infra.sh --ui=stream
+```
+
+**不能清库时**：在日志仍不够时，临时降级 `drizzle-kit` 以暴露真实 PG 错误：
+
+```bash
+cd enterprise
+pnpm --filter @agenticx/db-schema add -D drizzle-kit@0.31.9
+set -a && source .env.local && set +a
+pnpm --filter @agenticx/db-schema db:migrate
+```
+
 ---
 
 ## 登录与 IAM
@@ -166,10 +200,13 @@ Runbooks：[sso-oidc-setup.md](../runbooks/sso-oidc-setup.md) · [sso-saml-setup
 
 | 组件 | 日志 |
 |---|---|
+| **DB 迁移 / bootstrap** | `enterprise/.runtime/logs/db-migrate-*.log`、`bootstrap-*.log`（`start-dev.sh` / `bootstrap.sh` 自动写入） |
 | Gateway 审计 JSONL | `apps/gateway/.runtime/audit/` |
 | Gateway 计量 JSONL | `GATEWAY_USAGE_LOG` 或 `apps/gateway/.runtime/usage.jsonl` |
 | PG pending 审计 | `apps/gateway/.runtime/audit/.pg-pending` |
 | Quota 本地 | `.runtime/gateway/quota-usage.json` |
+
+> 说明：`enterprise/.runtime/logs/` 为本地排障目录（已在 `.gitignore`），不接入 ELK/OTel；运行时服务日志标准化见后续 observability roadmap。
 
 ---
 
