@@ -170,6 +170,23 @@ export function shouldResetStallDetectorsOnSessionSwitch(
   return prev !== next;
 }
 
+/**
+ * True only when the displayed session's messages are confirmed hydrated, i.e.
+ * we actually have this session's persisted turns in memory (not the empty
+ * window that exists between `setPaneSessionId` clearing `messages: []` and the
+ * async re-load completing). Channel C must never fire while unhydrated — an
+ * empty array is indistinguishable from "no completed reply", which is exactly
+ * how a *completed* session gets a false「已停滞 / 已中断」when the user switches
+ * back to it while another session hogs the single backend event loop.
+ */
+export function sessionMessagesHydrated(opts: {
+  loadingMessages?: boolean;
+  messageCount: number;
+}): boolean {
+  if (opts.loadingMessages) return false;
+  return opts.messageCount > 0;
+}
+
 /** While the user requested stop, suppress stall re-detection until execution settles. */
 export function shouldSuppressStallDetection(
   runGuardSessionId: string | undefined,
@@ -183,15 +200,27 @@ export function shouldSuppressStallDetection(
   return Boolean(guard && guard === sid);
 }
 
-/** Channel C: session ended idle but the last user turn has no completed assistant reply. */
+/**
+ * Channel C: session ended idle but the last user turn has no completed
+ * assistant reply.
+ *
+ * `messagesHydrated` (default true for callers/tests that pass real history)
+ * gates the whole check: while the displayed session's messages are not yet
+ * hydrated (switch clears `messages: []` then re-loads async), an empty array
+ * must NOT be read as "no completed reply" — that is the root false-positive
+ * that makes a completed session show「已停滞 / 该任务可能已中断」when switched
+ * back to while another session is running.
+ */
 export function shouldTriggerIncompleteEndStall(
   executionState: string | undefined,
   sseActive: boolean,
   messages: Message[],
   graceElapsedMs: number,
+  messagesHydrated = true,
 ): boolean {
   if (sseActive) return false;
   if (graceElapsedMs < CHANNEL_C_GRACE_MS) return false;
+  if (!messagesHydrated) return false;
   const state = (executionState || "").trim();
   // Only idle — user-interrupted sessions are handled via userStopped stall suppress.
   if (state !== "idle") return false;

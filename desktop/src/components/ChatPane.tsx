@@ -89,6 +89,7 @@ import {
   CHANNEL_C_GRACE_MS,
   stallDetectSilenceMs,
   lastTurnHasCompletedAssistantReply,
+  sessionMessagesHydrated,
   shouldAllowStallAutoNudge,
   shouldResetStallDetectorsOnSessionSwitch,
   shouldSuppressStallDetection,
@@ -124,6 +125,7 @@ import {
   mapLoadedSessionMessage,
   type LoadedSessionMessage,
 } from "../utils/session-message-map";
+import { visibleMessagesForSession } from "../utils/message-ownership";
 import { favoriteStorageMessageId } from "../utils/favorite-selection";
 import { createResizeRafScheduler } from "../utils/resize-raf";
 import { avatarTintBg } from "../utils/avatar-color";
@@ -2172,7 +2174,9 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
   const [stoppingSessionId, setStoppingSessionId] = useState("");
   const [exhaustedRounds, setExhaustedRounds] = useState<{ rounds: number; maxRounds: number } | null>(null);
   const [sessionExecutionState, setSessionExecutionState] = useState<SessionExecutionState>("idle");
-  const prevExecutionStateRef = useRef<SessionExecutionState>("idle");
+  /** Per-session previous execution_state — keyed by sid so a running session's
+   * "running" never leaks onto a sibling and triggers a false「后台任务已完成」. */
+  const prevExecutionStateBySidRef = useRef<Record<string, SessionExecutionState>>({});
   const [stallTick, setStallTick] = useState(0);
   const [bgCompleteToast, setBgCompleteToast] = useState(false);
   const [stallHintToast, setStallHintToast] = useState("");
@@ -2299,12 +2303,15 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
 
   const visibleMessages = useMemo(
     () =>
-      (pane?.messages ?? []).filter((item) => {
+      // Cross-session ownership invariant: never render a row that belongs to a
+      // different session, even if a stray write landed in this pane's array
+      // during a session switch. Untagged (legacy / in-flight) rows still show.
+      visibleMessagesForSession(pane?.messages ?? [], pane?.sessionId).filter((item) => {
         if (isGroupPane) return true;
         if (item.role === "assistant" && isThinkingPlaceholderText(item.content || "")) return false;
         return !item.agentId || item.agentId === "meta";
       }),
-    [isGroupPane, pane?.messages]
+    [isGroupPane, pane?.messages, pane?.sessionId]
   );
   const groupedVisibleMessages = useMemo(
     () => groupConsecutiveToolMessages(visibleMessages),
@@ -2592,7 +2599,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
             const key = `${role}::${content.slice(0, 300)}::${attSig}`;
             if (seen.has(key)) continue;
             seen.add(key);
-            deduped.push(mapLoadedSessionMessage(item as LoadedSessionMessage, `dlgpoll-${currentSid}`, idx));
+            deduped.push(mapLoadedSessionMessage(item as LoadedSessionMessage, `dlgpoll-${currentSid}`, idx, currentSid));
           }
           setPaneMessages(pane.id, deduped);
         }
@@ -4547,7 +4554,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
 
     if (shouldResetStallDetectorsOnSessionSwitch(lastStallBaselineSessionRef.current, switchKey)) {
       lastStallBaselineSessionRef.current = switchKey;
-      prevExecutionStateRef.current = "idle";
+      if (sid) prevExecutionStateBySidRef.current[sid] = "idle";
       setStallState("none");
       setStallRejectReason("");
       setStallTick((t) => t + 1);
@@ -4598,7 +4605,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
       const row = (r.sessions ?? []).find((s) => s.session_id === sid);
       const st = (row?.execution_state ?? "idle") as SessionExecutionState;
       setSessionExecutionState(st);
-      prevExecutionStateRef.current = st;
+      prevExecutionStateBySidRef.current[sid] = st;
       if (st === "running") {
         setRunGuardSessionId(sid);
         if (sessionStreamStateRef.current[sid]?.active) {
@@ -4788,13 +4795,16 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
         const row = (r.sessions ?? []).find((s) => s.session_id === sid);
         if (row?.execution_state) {
           execState = row.execution_state as SessionExecutionState;
-          const prev = prevExecutionStateRef.current;
+          const prev = prevExecutionStateBySidRef.current[sid] ?? "idle";
           if (prev === "running" && execState === "idle" && runGuardSessionId !== sid) {
             setBgCompleteToast(true);
             addPaneMessage(pane.id, "tool", "后台任务已完成", "meta");
             await mergeTailFromDisk(sid);
+            // Re-check after the await: the user may have switched away while the
+            // tail merged — never write this session's exec state onto a sibling.
+            if (cancelled) return;
           }
-          prevExecutionStateRef.current = execState;
+          prevExecutionStateBySidRef.current[sid] = execState;
           setSessionExecutionState(execState);
           if (execState === "idle" && runGuardSessionId === sid) {
             setRunGuardSessionId("");
@@ -4804,7 +4814,16 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
         /* ignore */
       }
 
-      const msgs = useAppStore.getState().panes.find((p) => p.id === pane.id)?.messages ?? [];
+      const livePane = useAppStore.getState().panes.find((p) => p.id === pane.id);
+      const msgs = livePane?.messages ?? [];
+      // Channel C must not fire on the empty window between a session switch
+      // (which clears messages: []) and the async re-load completing — otherwise
+      // a completed session shows a false「已停滞/已中断」, especially when another
+      // running session is slowing the single backend event loop.
+      const messagesHydrated = sessionMessagesHydrated({
+        loadingMessages: livePane?.loadingMessages,
+        messageCount: msgs.length,
+      });
       const enteredAt = sessionEnteredAtRef.current[sid] ?? now;
       const graceMs = now - enteredAt;
 
@@ -4826,7 +4845,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
         silentMs >= stallSilenceMs;
       const channelC =
         graceMs >= CHANNEL_C_GRACE_MS &&
-        shouldTriggerIncompleteEndStall(execState, sseActive, msgs, graceMs);
+        shouldTriggerIncompleteEndStall(execState, sseActive, msgs, graceMs, messagesHydrated);
 
       if (channelA || channelB || channelC) {
         setStallState("stall");
@@ -5942,12 +5961,15 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
           undefined,
           undefined,
           userAttachments,
-          quoteTarget
-            ? {
-                quotedMessageId: quoteTarget.message.id,
-                quotedContent: `${quoteTarget.message.avatarName || quoteTarget.message.agentId || quoteTarget.message.role}: ${quoteTarget.body.slice(0, 120)}`,
-              }
-            : undefined
+          {
+            ownerSessionId: requestSessionId,
+            ...(quoteTarget
+              ? {
+                  quotedMessageId: quoteTarget.message.id,
+                  quotedContent: `${quoteTarget.message.avatarName || quoteTarget.message.agentId || quoteTarget.message.role}: ${quoteTarget.body.slice(0, 120)}`,
+                }
+              : {}),
+          }
         );
       }
     } else {
@@ -5967,7 +5989,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
     clearStopSuppressForSession(requestSessionId);
     setRunGuardSessionId(requestSessionId);
     setSessionExecutionState("running");
-    prevExecutionStateRef.current = "running";
+    prevExecutionStateBySidRef.current[requestSessionId] = "running";
     useAppStore.getState().markSessionHistoryActive(requestSessionId);
     useAppStore.getState().bumpSessionCatalogRevision();
     recordSseActivity(requestSessionId);
@@ -5993,13 +6015,18 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
       return (currentPane?.sessionId || "").trim() === requestSessionId;
     };
     const addPaneMessageIfSessionActive = (...args: Parameters<typeof addPaneMessage>) => {
+      // Stamp the owning session on every streamed/committed row so the render
+      // layer can never surface it under a different conversation, even if this
+      // write races a session switch. extras is the 8th positional arg.
+      const stamped = [...args] as Parameters<typeof addPaneMessage>;
+      stamped[7] = { ...(stamped[7] ?? {}), ownerSessionId: requestSessionId };
       if (!isTargetSessionStillActive()) {
         const bucket = deferredSessionMessagesRef.current[requestSessionId] ?? [];
-        bucket.push(args);
+        bucket.push(stamped);
         deferredSessionMessagesRef.current[requestSessionId] = bucket.slice(-80);
         return;
       }
-      addPaneMessage(...args);
+      addPaneMessage(...stamped);
     };
     const commitCurrentStreamIfNeeded = () => {
       const raw = streamTextRef.current.trim();

@@ -95,7 +95,12 @@ export type LoadedSessionMessage = {
   searched_queries?: string[];
 };
 
-export function mapLoadedSessionMessage(item: LoadedSessionMessage, idPrefix: string, index: number): Message {
+export function mapLoadedSessionMessage(
+  item: LoadedSessionMessage,
+  idPrefix: string,
+  index: number,
+  ownerSessionId?: string,
+): Message {
   const forwarded = item.forwarded_history;
   const forwardedItems = Array.isArray(forwarded?.items)
     ? forwarded.items
@@ -117,6 +122,7 @@ export function mapLoadedSessionMessage(item: LoadedSessionMessage, idPrefix: st
     id,
     role: item.role,
     content: item.content,
+    ownerSessionId: String(ownerSessionId ?? idPrefix ?? "").trim() || undefined,
     agentId,
     avatarName: metaLeaderRow ? META_AGENT_DISPLAY_NAME : item.avatar_name,
     avatarUrl: item.avatar_url,

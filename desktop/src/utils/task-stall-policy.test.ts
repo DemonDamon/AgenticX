@@ -7,6 +7,7 @@ import {
   lastTurnHasCompletedAssistantReply,
   messageLooksLikeAssistantFinal,
   resolveStickyTodoDisplay,
+  sessionMessagesHydrated,
   shouldAllowStallAutoNudge,
   shouldResetStallDetectorsOnSessionSwitch,
   shouldSuppressStallDetection,
@@ -249,6 +250,44 @@ describe("shouldTriggerIncompleteEndStall", () => {
     expect(
       shouldTriggerIncompleteEndStall("idle", true, completedWithToolTail, CHANNEL_C_GRACE_MS),
     ).toBe(false);
+  });
+
+  it("does not stall an unhydrated session even when it looks incomplete (switch empty window)", () => {
+    // The empty window between setPaneSessionId clearing messages and the async
+    // re-load: an idle session with [] messages must NOT be flagged stalled.
+    expect(
+      shouldTriggerIncompleteEndStall("idle", false, [], CHANNEL_C_GRACE_MS, false),
+    ).toBe(false);
+    // Even a non-empty array is suppressed while explicitly marked unhydrated.
+    const incomplete: Message[] = [msg({ id: "u1", role: "user", content: "问题" })];
+    expect(
+      shouldTriggerIncompleteEndStall("idle", false, incomplete, CHANNEL_C_GRACE_MS, false),
+    ).toBe(false);
+  });
+
+  it("still stalls a hydrated idle session with no completed reply", () => {
+    const incomplete: Message[] = [
+      msg({ id: "u1", role: "user", content: "问题" }),
+      msg({ id: "t1", role: "tool", toolName: "knowledge_search", content: "[]" }),
+    ];
+    expect(
+      shouldTriggerIncompleteEndStall("idle", false, incomplete, CHANNEL_C_GRACE_MS, true),
+    ).toBe(true);
+  });
+});
+
+describe("sessionMessagesHydrated", () => {
+  it("is false while messages are loading", () => {
+    expect(sessionMessagesHydrated({ loadingMessages: true, messageCount: 3 })).toBe(false);
+  });
+
+  it("is false during the empty switch window (no messages yet)", () => {
+    expect(sessionMessagesHydrated({ loadingMessages: false, messageCount: 0 })).toBe(false);
+  });
+
+  it("is true once persisted turns are in memory", () => {
+    expect(sessionMessagesHydrated({ loadingMessages: false, messageCount: 2 })).toBe(true);
+    expect(sessionMessagesHydrated({ messageCount: 1 })).toBe(true);
   });
 });
 
