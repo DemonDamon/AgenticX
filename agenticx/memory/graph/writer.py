@@ -101,6 +101,7 @@ class MemoryGraphWriter:
         while True:
             job = await self._queue.get()
             try:
+                self._status.mark_job_started()
                 await store.ingest_turn(
                     group_id=job.group_id,
                     session_id=job.session_id,

@@ -14,6 +14,7 @@ from agenticx.memory.graph.clients import (
     model_supports_reasoning_effort,
     should_use_generic_openai_client,
 )
+from agenticx.memory.graph.embedder import CompatOpenAIEmbedder, embedder_max_batch_size
 from agenticx.memory.graph.json_compat import (
     coerce_to_response_model,
     parse_llm_json,
@@ -44,10 +45,46 @@ def test_provider_supports_json_response_format():
     assert provider_supports_json_response_format("openai", "https://proxy.example/v1") is False
 
 
+def test_embedder_max_batch_size():
+    assert embedder_max_batch_size("bailian", None) == 10
+    assert embedder_max_batch_size("dashscope", "https://dashscope.aliyuncs.com/compatible-mode/v1") == 10
+    assert embedder_max_batch_size("openai", None) is None
+
+
+@pytest.mark.asyncio
+async def test_compat_openai_embedder_chunks_bailian_batches(monkeypatch):
+    from graphiti_core.embedder.openai import OpenAIEmbedder
+
+    embedder = CompatOpenAIEmbedder(provider_name="bailian")
+    calls: list[list[str]] = []
+
+    async def _fake_create_batch(self, input_data_list: list[str]) -> list[list[float]]:
+        calls.append(list(input_data_list))
+        return [[float(len(text))] for text in input_data_list]
+
+    monkeypatch.setattr(OpenAIEmbedder, "create_batch", _fake_create_batch)
+
+    texts = [f"t{i}" for i in range(23)]
+    vectors = await embedder.create_batch(texts)
+    assert len(vectors) == 23
+    assert [len(batch) for batch in calls] == [10, 10, 3]
+
+
 def test_parse_llm_json():
     assert parse_llm_json('{"nodes":[]}') == {"nodes": []}
     assert parse_llm_json('```json\n{"a": 1}\n```') == {"a": 1}
     assert parse_llm_json('Here is output:\n{"fact": "x"}\n') == {"fact": "x"}
+
+
+def test_parse_llm_json_tolerates_trailing_garbage():
+    # Weaker models append prose after the JSON object ("Extra data").
+    assert parse_llm_json('{"extracted_entities": []} 额外说明') == {"extracted_entities": []}
+    # Fenced block with trailing tokens after the closing fence.
+    assert parse_llm_json('```json\n{"a": 1}\n``` trailing') == {"a": 1}
+    # Multiple concatenated objects: keep the first valid one.
+    assert parse_llm_json('{"a": 1}\n{"b": 2}') == {"a": 1}
+    # Prose prefix before the JSON object.
+    assert parse_llm_json('好的，结果如下：{"a": 1}') == {"a": 1}
 
 
 def test_parse_llm_json_empty_raises():
@@ -64,6 +101,7 @@ def test_coerce_to_response_model_renames_aliases():
 
     class ExtractedEntity(BaseModel):
         name: str = ""
+        entity_type_id: int = 0
 
     class ExtractedEntities(BaseModel):
         extracted_entities: List[ExtractedEntity] = Field(...)
@@ -75,6 +113,67 @@ def test_coerce_to_response_model_renames_aliases():
     assert fixed["extracted_entities"] == [{"name": "u"}]
     # constructing the model must now succeed
     assert ExtractedEntities(**fixed).extracted_entities[0].name == "u"
+
+
+def test_coerce_to_response_model_wraps_singleton_entity():
+    from typing import List
+
+    from pydantic import BaseModel, Field
+
+    class ExtractedEntity(BaseModel):
+        name: str = Field(...)
+        entity_type_id: int = Field(default=0)
+
+    class ExtractedEntities(BaseModel):
+        extracted_entities: List[ExtractedEntity] = Field(...)
+
+    payload = {"entity_name": "user", "entity_type_id": 0}
+    fixed = coerce_to_response_model(payload, ExtractedEntities)
+    model = ExtractedEntities(**fixed)
+    assert model.extracted_entities[0].name == "user"
+    assert model.extracted_entities[0].entity_type_id == 0
+
+    # MiniMax sometimes uses ``entity`` (string) instead of ``name``.
+    payload = {"entity": "user", "entity_type_id": 0}
+    fixed = coerce_to_response_model(payload, ExtractedEntities)
+    model = ExtractedEntities(**fixed)
+    assert model.extracted_entities[0].name == "user"
+
+
+def test_coerce_to_response_model_wraps_singleton_edge():
+    from graphiti_core.prompts.extract_edges import ExtractedEdges
+
+    payload = {
+        "source_entity_name": "Machi",
+        "target_entity_name": "AgenticX",
+        "relation_type": "PART_OF",
+        "fact": "Machi is the Meta-Agent of AgenticX.",
+        "valid_at": "2026-06-04T00:00:00Z",
+        "invalid_at": None,
+    }
+    fixed = coerce_to_response_model(payload, ExtractedEdges)
+    model = ExtractedEdges(**fixed)
+    assert len(model.edges) == 1
+    assert model.edges[0].source_entity_name == "Machi"
+    assert model.edges[0].target_entity_name == "AgenticX"
+
+
+def test_coerce_to_response_model_wraps_top_level_entity_list():
+    from typing import List
+
+    from pydantic import BaseModel, Field
+
+    class ExtractedEntity(BaseModel):
+        name: str = Field(...)
+        entity_type_id: int = Field(default=0)
+
+    class ExtractedEntities(BaseModel):
+        extracted_entities: List[ExtractedEntity] = Field(...)
+
+    payload = [{"entity_name": "user", "entity_type_id": 0}]
+    fixed = coerce_to_response_model(payload, ExtractedEntities)
+    model = ExtractedEntities(**fixed)
+    assert model.extracted_entities[0].name == "user"
 
 
 def test_coerce_to_response_model_noop_when_correct():

@@ -49,6 +49,10 @@ export type MemoryGraphStatus = {
   install_hint?: string | null;
   auto_install_allowed?: boolean;
   pending_jobs?: number;
+  completed_jobs?: number;
+  job_progress?: number;
+  job_stage?: string | null;
+  job_active?: boolean;
   last_error?: string | null;
   node_count?: number;
   edge_count?: number;

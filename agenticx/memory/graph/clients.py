@@ -97,9 +97,10 @@ def build_graphiti_clients(cfg: MemoryGraphConfig) -> Tuple[Any, Any, Any]:
     llm_pc = agx.get_provider(llm_provider_name)
     embed_pc = agx.get_provider(embed_provider_name)
 
+    from agenticx.memory.graph.embedder import CompatOpenAIEmbedder
     from agenticx.memory.graph.llm_client import CompatOpenAIGenericClient
     from graphiti_core.cross_encoder.openai_reranker_client import OpenAIRerankerClient
-    from graphiti_core.embedder.openai import OpenAIEmbedder, OpenAIEmbedderConfig
+    from graphiti_core.embedder.openai import OpenAIEmbedderConfig
     from graphiti_core.llm_client.config import LLMConfig
     from graphiti_core.llm_client.openai_client import OpenAIClient
 
@@ -137,13 +138,17 @@ def build_graphiti_clients(cfg: MemoryGraphConfig) -> Tuple[Any, Any, Any]:
     if embed_provider_name == "ollama":
         embed_model = embed_model or "nomic-embed-text"
 
-    embedder = OpenAIEmbedder(
+    embed_dim = 768 if embed_provider_name == "ollama" else 1536
+
+    embedder = CompatOpenAIEmbedder(
         config=OpenAIEmbedderConfig(
             api_key=embed_key,
             embedding_model=embed_model,
             base_url=embed_base,
-            embedding_dim=768 if embed_provider_name == "ollama" else 1536,
-        )
+            embedding_dim=embed_dim,
+        ),
+        provider_name=embed_provider_name,
+        base_url=embed_base,
     )
 
     # Reranker expects AsyncOpenAI, not Graphiti LLM wrapper instances.

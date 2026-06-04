@@ -186,6 +186,32 @@ class MemoryGraphStore:
             raise
         return driver, llm_client, embedder, cross_encoder
 
+    def _touch_job_progress(self, percent: int, stage: str) -> None:
+        state = self._status.read()
+        if state.get("job_active") or int(state.get("pending_jobs", 0)) > 0:
+            self._status.set_job_progress(percent, stage)
+
+    async def _pulse_extracting_progress(self) -> None:
+        """Keep progress moving while Graphiti add_episode runs (LLM + embed can take minutes)."""
+        steps = (
+            (52, "extracting_entities"),
+            (60, "extracting_edges"),
+            (68, "embedding"),
+            (76, "linking"),
+        )
+        idx = 0
+        while True:
+            await asyncio.sleep(6)
+            if idx < len(steps):
+                pct, stage = steps[idx]
+                self._touch_job_progress(pct, stage)
+                idx += 1
+                continue
+            state = self._status.read()
+            cur = int(state.get("job_progress", 48) or 48)
+            if cur < 78:
+                self._touch_job_progress(cur + 1, "linking")
+
     async def ensure_ready(self) -> None:
         self.require_graphiti()
         if self._ready and self._graphiti is not None:
@@ -195,6 +221,7 @@ class MemoryGraphStore:
                 return
             from graphiti_core import Graphiti
 
+            self._touch_job_progress(12, "preparing")
             loop = asyncio.get_running_loop()
             try:
                 driver, llm_client, embedder, cross_encoder = await asyncio.wait_for(
@@ -216,6 +243,7 @@ class MemoryGraphStore:
                 raise
             graphiti = None
             try:
+                self._touch_job_progress(22, "preparing")
                 graphiti = Graphiti(
                     graph_driver=driver,
                     llm_client=llm_client,
@@ -223,6 +251,7 @@ class MemoryGraphStore:
                     cross_encoder=cross_encoder,
                     max_coroutines=self.cfg.ingest.semaphore_limit,
                 )
+                self._touch_job_progress(32, "preparing")
                 await asyncio.wait_for(
                     graphiti.build_indices_and_constraints(),
                     timeout=_INIT_TIMEOUT_SECONDS,
@@ -254,22 +283,30 @@ class MemoryGraphStore:
         await self.ensure_ready()
         from graphiti_core.nodes import EpisodeType
 
+        self._touch_job_progress(38, "formatting")
         body = _format_episode_body(messages, max_chars=self.cfg.ingest.max_chars_per_episode)
         if not body.strip():
             return ""
 
         ref = reference_time or datetime.now(timezone.utc)
         name = f"session:{session_id}:{int(ref.timestamp())}"
-        result = await self._graphiti.add_episode(
-            name=name,
-            episode_body=body,
-            source_description=source_description,
-            reference_time=ref,
-            source=EpisodeType.message,
-            group_id=group_id,
-        )
+        self._touch_job_progress(48, "extracting_entities")
+        pulse = asyncio.create_task(self._pulse_extracting_progress())
+        try:
+            result = await self._graphiti.add_episode(
+                name=name,
+                episode_body=body,
+                source_description=source_description,
+                reference_time=ref,
+                source=EpisodeType.message,
+                group_id=group_id,
+            )
+        finally:
+            pulse.cancel()
         episode_uuid = str(getattr(result.episode, "uuid", "") or "")
+        self._touch_job_progress(82, "updating")
         overview = await self.get_overview(group_id, limit_nodes=200, limit_edges=400)
+        self._touch_job_progress(95, "finalizing")
         meta = overview.get("meta") or {}
         self._status.set_counts(
             node_count=int(meta.get("nodeCount") or 0),

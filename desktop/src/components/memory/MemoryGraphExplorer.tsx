@@ -86,6 +86,44 @@ function scopeLabel(scope: MemoryGraphScope): string {
   return "元智能体";
 }
 
+const JOB_STAGE_LABELS: Record<string, string> = {
+  queued: "排队",
+  preparing: "准备引擎",
+  formatting: "整理对话",
+  extracting: "抽取实体与关系",
+  extracting_entities: "抽取实体",
+  extracting_edges: "抽取关系",
+  embedding: "向量化",
+  linking: "关联写入",
+  updating: "更新图谱",
+  finalizing: "收尾",
+};
+
+function resolveMemoryBuildUi(st: MemoryGraphStatus | null): {
+  hint: string | null;
+  progress: number | null;
+} {
+  if (!st) return { hint: null, progress: null };
+  const pending = st.pending_jobs ?? 0;
+  const active = Boolean(st.job_active);
+  const rawProgress = st.job_progress;
+  const progress =
+    typeof rawProgress === "number" && rawProgress > 0
+      ? Math.min(100, Math.max(0, Math.round(rawProgress)))
+      : null;
+  if (!active && pending <= 0 && (progress == null || progress <= 0)) {
+    return { hint: null, progress: null };
+  }
+  const stageKey = String(st.job_stage || "").trim();
+  const stageLabel = stageKey ? JOB_STAGE_LABELS[stageKey] || stageKey : null;
+  let hint = "正在构建记忆…";
+  if (pending > 0) hint += `（队列 ${pending}）`;
+  if (stageLabel) {
+    hint += pending > 0 ? ` · ${stageLabel}` : `（${stageLabel}）`;
+  }
+  return { hint, progress };
+}
+
 import { Panel } from "../ds/Panel";
 
 /** 与设置页 Panel / 知识库卡片一致的边线语义 */
@@ -155,6 +193,7 @@ function MemoryGraphExplorerInner({
   const [error, setError] = useState<string | null>(null);
   const [disabled, setDisabled] = useState(false);
   const [statusHint, setStatusHint] = useState<string | null>(null);
+  const [buildProgress, setBuildProgress] = useState<number | null>(null);
   const [configMsg, setConfigMsg] = useState("");
   const [saving, setSaving] = useState(false);
   const [enabled, setEnabled] = useState(false);
@@ -215,6 +254,7 @@ function MemoryGraphExplorerInner({
       if (!isMemoryGraphEnabled(st)) {
         setDisabled(true);
         setStatusHint("记忆图谱未启用。在下方配置中开启，或编辑 ~/.agenticx/config.yaml。");
+        setBuildProgress(null);
         setGraph(EMPTY_GRAPH);
         setEpisodes([]);
         return;
@@ -228,6 +268,7 @@ function MemoryGraphExplorerInner({
               ? "当前窗格不是群聊会话（请在群聊窗格查看其群体记忆）"
               : null,
         );
+        setBuildProgress(null);
         setGraph(EMPTY_GRAPH);
         setEpisodes([]);
         return;
@@ -239,15 +280,22 @@ function MemoryGraphExplorerInner({
             ? `graphiti-core 未安装于当前后端（${st.python_executable || "agx serve"}）。请执行：${hint}`
             : "graphiti-core 未安装于当前 agx serve 环境",
         );
+        setBuildProgress(null);
         setGraph(EMPTY_GRAPH);
         setEpisodes([]);
         return;
       } else if (st.last_error) {
         setStatusHint(`构建异常：${st.last_error}`);
-      } else if ((st.pending_jobs || 0) > 0) {
-        setStatusHint(`正在构建记忆…（队列 ${st.pending_jobs}）`);
+        setBuildProgress(null);
       } else {
-        setStatusHint(null);
+        const buildUi = resolveMemoryBuildUi(st);
+        if (buildUi.hint) {
+          setStatusHint(buildUi.hint);
+          setBuildProgress(buildUi.progress);
+        } else {
+          setStatusHint(null);
+          setBuildProgress(null);
+        }
       }
       const overview = await fetchMemoryGraphOverview(apiBase, apiToken, {
         scope,
@@ -267,6 +315,7 @@ function MemoryGraphExplorerInner({
       if (msg.includes("memory_graph_disabled")) {
         setDisabled(true);
         setStatusHint("记忆图谱未启用");
+        setBuildProgress(null);
       } else {
         setError(msg);
       }
@@ -286,6 +335,37 @@ function MemoryGraphExplorerInner({
   useEffect(() => {
     void reload();
   }, [reload]);
+
+  useEffect(() => {
+    const pending = status?.pending_jobs ?? 0;
+    const progress = status?.job_progress ?? 0;
+    if (!apiBase.trim() || (pending <= 0 && progress <= 0)) return;
+    const timer = window.setInterval(() => {
+      void (async () => {
+        try {
+          const st = await fetchMemoryGraphStatus(apiBase, apiToken);
+          setStatus(st);
+          if (st.last_error) {
+            setStatusHint(`构建异常：${st.last_error}`);
+            setBuildProgress(null);
+            return;
+          }
+          const buildUi = resolveMemoryBuildUi(st);
+          if (buildUi.hint) {
+            setStatusHint(buildUi.hint);
+            setBuildProgress(buildUi.progress);
+          } else {
+            setStatusHint(null);
+            setBuildProgress(null);
+            void reload();
+          }
+        } catch {
+          // ignore poll errors
+        }
+      })();
+    }, 2000);
+    return () => window.clearInterval(timer);
+  }, [apiBase, apiToken, reload, status?.job_progress, status?.pending_jobs]);
 
   const onSearch = async () => {
     if (!apiBase.trim() || !query.trim()) {
@@ -460,15 +540,46 @@ function MemoryGraphExplorerInner({
     </div>
   );
 
+  const isErrorHint = Boolean(statusHint?.startsWith("构建异常"));
+
   const alerts = (
     <>
       {statusHint ? (
-        <div className="rounded-lg border border-status-warning/50 bg-status-warning/10 px-3 py-2 text-[11px] text-status-warning">
-          {statusHint}
+        <div
+          className={`rounded-md px-3 py-2 text-[11px] leading-relaxed ${
+            isErrorHint
+              ? "bg-status-error/10 text-status-error"
+              : "bg-status-warning/10 text-status-warning"
+          }`}
+        >
+          {buildProgress != null ? (
+            <div className="flex items-start justify-between gap-2">
+              <span className="min-w-0 break-words">{statusHint}</span>
+              <span className="shrink-0 tabular-nums text-[10px] opacity-90">{buildProgress}%</span>
+            </div>
+          ) : (
+            <div className="max-h-36 min-w-0 overflow-y-auto break-words [overflow-wrap:anywhere] whitespace-pre-wrap">
+              {statusHint}
+            </div>
+          )}
+          {buildProgress != null ? (
+            <div
+              className="mt-1.5 h-1 overflow-hidden rounded-full bg-status-warning/15"
+              role="progressbar"
+              aria-valuemin={0}
+              aria-valuemax={100}
+              aria-valuenow={buildProgress}
+            >
+              <div
+                className="h-full rounded-full bg-status-warning transition-[width] duration-500 ease-out"
+                style={{ width: `${buildProgress}%` }}
+              />
+            </div>
+          ) : null}
         </div>
       ) : null}
       {error ? (
-        <div className="rounded-lg border border-status-error/50 bg-status-error/10 px-3 py-2 text-[11px] text-status-error">
+        <div className="max-h-36 overflow-y-auto rounded-md bg-status-error/10 px-3 py-2 text-[11px] leading-relaxed text-status-error break-words [overflow-wrap:anywhere] whitespace-pre-wrap">
           {error}
         </div>
       ) : null}
@@ -796,7 +907,7 @@ function MemoryGraphExplorerInner({
   return (
     <div className="flex h-full min-h-0 flex-col bg-surface-base text-text-subtle">
       {toolbar}
-      <div className="space-y-2 px-3 pt-2 empty:hidden">{alerts}</div>
+      <div className="min-w-0 space-y-2 px-3 pt-2 empty:hidden">{alerts}</div>
       <div className="min-h-0 flex-1 p-2">{canvasArea}</div>
       <div className="max-h-[42%] space-y-2 overflow-y-auto border-t border-border px-3 py-2">
         <MemoryGraphDetail node={selectedNode} edges={graph.edges} onDeleteEpisode={onDeleteEpisode} />
