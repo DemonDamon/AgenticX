@@ -160,6 +160,10 @@ export type Message = {
   role: MsgRole;
   content: string;
   timestamp?: number;
+  /** Session this message belongs to. Render layer hides messages whose owner
+   * does not match the pane's current session, so a stray cross-session write
+   * can never surface under the wrong conversation. */
+  ownerSessionId?: string;
   agentId?: string;
   avatarName?: string;
   avatarUrl?: string;
@@ -487,6 +491,7 @@ type AppState = {
         | "suggestedQuestions"
         | "references"
         | "searchedQueries"
+        | "ownerSessionId"
       >
     > &
       Partial<MessageToolExtras>
@@ -1389,7 +1394,23 @@ export const useAppStore = create<AppState>((set, get) => ({
               ...pane,
               messages: [
                 ...pane.messages,
-                { id: uid(), role, content, timestamp: Date.now(), agentId, provider, model, attachments, ...extras },
+                {
+                  id: uid(),
+                  role,
+                  content,
+                  timestamp: Date.now(),
+                  // Stamp the owning session so the render layer can never show
+                  // this row under a different conversation. Callers on hot
+                  // streaming paths pass an explicit ownerSessionId (the request
+                  // session) via extras; everyone else defaults to the pane's
+                  // current session, which is correct for all guarded writes.
+                  ownerSessionId: String(pane.sessionId ?? "").trim() || undefined,
+                  agentId,
+                  provider,
+                  model,
+                  attachments,
+                  ...extras,
+                },
               ],
             }
           : pane

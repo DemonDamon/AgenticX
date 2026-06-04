@@ -212,6 +212,12 @@ class SessionManager:
         self._persist_session_state(session_id, managed.studio_session)
         return True
 
+    async def persist_async(self, session_id: str) -> bool:
+        """Persist session state off the asyncio event loop (SQLite + FTS + snapshots)."""
+        from agenticx.studio.blocking_io import run_in_persist_pool
+
+        return await run_in_persist_pool(self.persist, session_id)
+
     def set_execution_state(self, session_id: str, state: str) -> None:
         """Update execution_state for a session (idle | running | interrupted | failed)."""
         managed = self._sessions.get(session_id)
@@ -1515,7 +1521,36 @@ class SessionManager:
                         str(x).strip() for x in raw_queries[:20] if str(x).strip()
                     ]
             normalized.append(row)
-        return normalized
+        return self._collapse_repeated_assistant_in_turn(normalized)
+
+    @staticmethod
+    def _collapse_repeated_assistant_in_turn(rows: list[dict]) -> list[dict]:
+        """Drop assistant rows that exactly repeat an earlier assistant reply
+        within the same user turn.
+
+        A single turn's reply must never appear twice. Spurious re-runs
+        (e.g. a false-stall auto-nudge re-answering a completed turn) or
+        in-memory/disk merge races can append identical assistant copies that
+        then accumulate across restarts. Repeats across *different* user turns
+        are legitimate (the user asked the same thing twice) and are kept: the
+        per-turn seen-set is cleared whenever a user message is encountered.
+        Empty (tool-call-only) assistant rows carry no visible text and are
+        never deduped.
+        """
+        deduped: list[dict] = []
+        seen_in_turn: set[str] = set()
+        for row in rows:
+            role = row.get("role")
+            if role == "user":
+                seen_in_turn.clear()
+            elif role == "assistant":
+                key = str(row.get("content", "") or "").strip()
+                if key:
+                    if key in seen_in_turn:
+                        continue
+                    seen_in_turn.add(key)
+            deduped.append(row)
+        return deduped
 
     def _build_session_summary(self, session: StudioSession) -> str:
         last_user = ""

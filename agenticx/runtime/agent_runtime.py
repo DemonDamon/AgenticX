@@ -1332,6 +1332,16 @@ class AgentRuntime:
             session.chat_history.append(hist_user)
             # Set current user intent for goal anchor injection (FR-1)
             session.current_user_intent = user_input
+            # Persist the user turn to disk immediately. Otherwise messages.json
+            # lags until the first mid-turn checkpoint, and a client that reloads
+            # this session (e.g. switching away and back) reads a stale snapshot
+            # missing the just-sent user turn -- the message appears to vanish.
+            if self._mid_turn_persist is not None:
+                try:
+                    self._mid_turn_persist()
+                    self._last_persist_time = time.time()
+                except Exception:
+                    pass
         status_query_total = 0
         status_query_attempts_total = 0
         max_status_queries_per_turn = _resolve_status_query_budget_per_turn()
