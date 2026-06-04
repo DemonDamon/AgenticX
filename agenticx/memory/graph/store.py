@@ -213,6 +213,12 @@ class MemoryGraphStore:
                 self._touch_job_progress(cur + 1, "linking")
 
     async def ensure_ready(self) -> None:
+        """Initialize Graphiti/Kuzu on the dedicated graphiti event-loop thread."""
+        from agenticx.memory.graph.executor import run_on_graphiti_loop
+
+        await run_on_graphiti_loop(self._ensure_ready_impl())
+
+    async def _ensure_ready_impl(self) -> None:
         self.require_graphiti()
         if self._ready and self._graphiti is not None:
             return
@@ -280,7 +286,29 @@ class MemoryGraphStore:
         source_description: str = "near-chat-turn",
     ) -> str:
         """Ingest one conversational turn as a Graphiti episode."""
-        await self.ensure_ready()
+        from agenticx.memory.graph.executor import run_on_graphiti_loop
+
+        return await run_on_graphiti_loop(
+            self._ingest_turn_impl(
+                group_id=group_id,
+                session_id=session_id,
+                messages=messages,
+                reference_time=reference_time,
+                source_description=source_description,
+            )
+        )
+
+    async def _ingest_turn_impl(
+        self,
+        *,
+        group_id: str,
+        session_id: str,
+        messages: List[Dict[str, Any]],
+        reference_time: Optional[datetime] = None,
+        source_description: str = "near-chat-turn",
+    ) -> str:
+        """Run ingest on the graphiti loop (internal)."""
+        await self._ensure_ready_impl()
         from graphiti_core.nodes import EpisodeType
 
         self._touch_job_progress(38, "formatting")
@@ -305,7 +333,7 @@ class MemoryGraphStore:
             pulse.cancel()
         episode_uuid = str(getattr(result.episode, "uuid", "") or "")
         self._touch_job_progress(82, "updating")
-        overview = await self.get_overview(group_id, limit_nodes=200, limit_edges=400)
+        overview = await self._get_overview_impl(group_id, limit_nodes=200, limit_edges=400)
         self._touch_job_progress(95, "finalizing")
         meta = overview.get("meta") or {}
         self._status.set_counts(
@@ -321,7 +349,20 @@ class MemoryGraphStore:
         limit_nodes: int = 80,
         limit_edges: int = 120,
     ) -> Dict[str, Any]:
-        await self.ensure_ready()
+        from agenticx.memory.graph.executor import run_on_graphiti_loop
+
+        return await run_on_graphiti_loop(
+            self._get_overview_impl(group_id, limit_nodes=limit_nodes, limit_edges=limit_edges)
+        )
+
+    async def _get_overview_impl(
+        self,
+        group_id: str,
+        *,
+        limit_nodes: int = 80,
+        limit_edges: int = 120,
+    ) -> Dict[str, Any]:
+        await self._ensure_ready_impl()
         episodes = await self._graphiti.retrieve_episodes(
             reference_time=datetime.now(timezone.utc),
             last_n=20,
@@ -346,7 +387,14 @@ class MemoryGraphStore:
         return view
 
     async def get_episode_subgraph(self, group_id: str, episode_uuid: str) -> Dict[str, Any]:
-        await self.ensure_ready()
+        from agenticx.memory.graph.executor import run_on_graphiti_loop
+
+        return await run_on_graphiti_loop(
+            self._get_episode_subgraph_impl(group_id, episode_uuid)
+        )
+
+    async def _get_episode_subgraph_impl(self, group_id: str, episode_uuid: str) -> Dict[str, Any]:
+        await self._ensure_ready_impl()
         results = await self._graphiti.get_nodes_and_edges_by_episode([episode_uuid])
         nodes = list(getattr(results, "nodes", []) or [])
         edges = list(getattr(results, "edges", []) or [])
@@ -361,7 +409,28 @@ class MemoryGraphStore:
         limit_nodes: int = 60,
         limit_edges: int = 80,
     ) -> Dict[str, Any]:
-        await self.ensure_ready()
+        from agenticx.memory.graph.executor import run_on_graphiti_loop
+
+        return await run_on_graphiti_loop(
+            self._search_subgraph_impl(
+                group_id,
+                query,
+                center_node_uuid=center_node_uuid,
+                limit_nodes=limit_nodes,
+                limit_edges=limit_edges,
+            )
+        )
+
+    async def _search_subgraph_impl(
+        self,
+        group_id: str,
+        query: str,
+        *,
+        center_node_uuid: Optional[str] = None,
+        limit_nodes: int = 60,
+        limit_edges: int = 80,
+    ) -> Dict[str, Any]:
+        await self._ensure_ready_impl()
         from graphiti_core.search.search_config_recipes import COMBINED_HYBRID_SEARCH_CROSS_ENCODER
 
         config = COMBINED_HYBRID_SEARCH_CROSS_ENCODER
@@ -377,7 +446,12 @@ class MemoryGraphStore:
         return build_graph_view(group_id=group_id, nodes=nodes, edges=edges, truncated=True)
 
     async def list_episodes(self, group_id: str, *, last_n: int = 20) -> List[Dict[str, Any]]:
-        await self.ensure_ready()
+        from agenticx.memory.graph.executor import run_on_graphiti_loop
+
+        return await run_on_graphiti_loop(self._list_episodes_impl(group_id, last_n=last_n))
+
+    async def _list_episodes_impl(self, group_id: str, *, last_n: int = 20) -> List[Dict[str, Any]]:
+        await self._ensure_ready_impl()
         episodes = await self._graphiti.retrieve_episodes(
             reference_time=datetime.now(timezone.utc),
             last_n=max(1, min(last_n, 100)),
@@ -386,7 +460,12 @@ class MemoryGraphStore:
         return [map_episode_timeline_item(ep) for ep in episodes]
 
     async def delete_episode(self, episode_uuid: str) -> None:
-        await self.ensure_ready()
+        from agenticx.memory.graph.executor import run_on_graphiti_loop
+
+        await run_on_graphiti_loop(self._delete_episode_impl(episode_uuid))
+
+    async def _delete_episode_impl(self, episode_uuid: str) -> None:
+        await self._ensure_ready_impl()
         await self._graphiti.remove_episode(episode_uuid)
 
     def get_status(self) -> Dict[str, Any]:
@@ -397,6 +476,25 @@ class MemoryGraphStore:
         state["backend"] = self.cfg.backend
         state["db_path"] = str(self.cfg.db_path)
         return state
+
+    @staticmethod
+    def build_status_payload_sync() -> Dict[str, Any]:
+        """Lightweight status snapshot for /api/memory/graph/status (worker-thread safe)."""
+        from agenticx.memory.graph.config import load_memory_graph_config, memory_graph_config_to_dict
+        from agenticx.memory.graph.deps import graphiti_runtime_info
+
+        store = MemoryGraphStore.singleton()
+        status = store.get_status()
+        cfg = load_memory_graph_config()
+        status["config"] = memory_graph_config_to_dict(cfg)
+        try:
+            from agenticx.memory.graph.clients import resolve_effective_models
+
+            status["models"] = resolve_effective_models(cfg)
+        except Exception:
+            status["models"] = None
+        status.update(graphiti_runtime_info())
+        return status
 
 
 def _format_episode_body(messages: List[Dict[str, Any]], *, max_chars: int) -> str:

@@ -340,7 +340,7 @@ async def _finalize_chat_runtime(
     # potentially large sessions.sqlite). Run it off the event loop so a single
     # turn-end persist cannot stall concurrent /api/chat, /api/usage/* and
     # /api/memory/graph/* requests.
-    await asyncio.to_thread(manager.persist, session_id)
+    await manager.persist_async(session_id)
     if not had_runtime_failure:
         try:
             from agenticx.memory.graph.writer import schedule_turn_ingest_from_session
@@ -696,7 +696,7 @@ def create_studio_app() -> FastAPI:
             )
             if not ok:
                 return False
-            manager.persist(sid)
+            await manager.persist_async(sid)
             chat_payload = ChatRequest(
                 session_id=sid,
                 user_input=prompt,
@@ -1181,14 +1181,6 @@ def create_studio_app() -> FastAPI:
                 "auto_installable": False,
             }
         raise ValueError(f"unsupported tool id: {tool_id}")
-
-    def _all_tools_status() -> list[dict[str, Any]]:
-        return [
-            _tool_status("liteparse"),
-            _tool_status("mineru"),
-            _tool_status("libreoffice"),
-            _tool_status("imagemagick"),
-        ]
 
     def _sanitize_tools_enabled(raw: Any) -> dict[str, bool]:
         if not isinstance(raw, dict):
@@ -1827,7 +1819,7 @@ def create_studio_app() -> FastAPI:
             removed += _remove_once(session.chat_history, targets)
         if isinstance(session.agent_messages, list):
             _remove_once(session.agent_messages, targets)
-        manager.persist(session_id)
+        await manager.persist_async(session_id)
         return {"ok": True, "removed": removed, "requested": len(targets)}
 
     @app.post("/api/session/messages/truncate")
@@ -1987,7 +1979,7 @@ def create_studio_app() -> FastAPI:
                 matched_agent = matched_agent or removed_agent > 0
             if mode == "after" and (matched_chat or matched_agent):
                 removed_agent += _strip_compacted_blocks(session.agent_messages)
-        manager.persist(session_id)
+        await manager.persist_async(session_id)
         return {
             "ok": True,
             "removed_chat": removed_chat,
@@ -2038,7 +2030,7 @@ def create_studio_app() -> FastAPI:
             raise HTTPException(status_code=404, detail="session not found")
         manager.request_interrupt(session_id)
         manager.set_execution_state(session_id, "interrupted")
-        manager.persist(session_id)
+        await manager.persist_async(session_id)
         return {"ok": True, "session_id": session_id}
 
     @app.post("/api/confirm")
@@ -2367,7 +2359,7 @@ def create_studio_app() -> FastAPI:
                 finally:
                     manager.clear_interrupt(payload.session_id)
                     manager.set_execution_state(payload.session_id, "idle")
-                    manager.persist(payload.session_id)
+                    await manager.persist_async(payload.session_id)
                 yield 'data: {"type":"done","data":{}}\n\n'
 
             return StreamingResponse(_group_chat_stream(), media_type="text/event-stream")
@@ -2882,7 +2874,7 @@ def create_studio_app() -> FastAPI:
                 if cur in {"idle", "interrupted"}:
                     break
             manager.set_execution_state(session_id, "interrupted")
-            manager.persist(session_id)
+            await manager.persist_async(session_id)
             exec_state = "interrupted"
 
         max_nudge = int(
@@ -2907,7 +2899,7 @@ def create_studio_app() -> FastAPI:
 
             return StreamingResponse(_deduped(), media_type="text/event-stream")
 
-        manager.persist(sid)
+        await manager.persist_async(sid)
 
         async def _wrapped_stream() -> AsyncGenerator[str, None]:
             notice_evt = SseEvent(
@@ -3037,7 +3029,7 @@ def create_studio_app() -> FastAPI:
         from agenticx.studio.supervisor import set_session_unattended_enabled
 
         set_session_unattended_enabled(managed.studio_session, enabled)
-        manager.persist(sid)
+        await manager.persist_async(sid)
         return {"ok": True, "session_id": sid, "unattended_enabled": enabled}
 
     @app.post("/api/loop")
@@ -3145,7 +3137,7 @@ def create_studio_app() -> FastAPI:
                 yield f"data: {json.dumps(err.model_dump(), ensure_ascii=False)}\n\n"
             finally:
                 _flush_taskspace_hint(manager, session_id, session)
-                manager.persist(session_id)
+                await manager.persist_async(session_id)
             yield 'data: {"type":"done","data":{}}\n\n'
 
         return StreamingResponse(_loop_stream(), media_type="text/event-stream")
@@ -3889,7 +3881,11 @@ def create_studio_app() -> FastAPI:
         x_agx_desktop_token: str | None = Header(default=None),
     ) -> dict:
         _check_token(x_agx_desktop_token)
-        return {"ok": True, "tools": _all_tools_status()}
+        from agenticx.studio.blocking_io import run_in_settings_pool
+        from agenticx.studio.tools_status_api import build_tools_status_sync
+
+        tools = await run_in_settings_pool(build_tools_status_sync, _tool_status)
+        return {"ok": True, "tools": tools}
 
     @app.get("/api/tools/registry")
     async def get_tools_registry(
@@ -4869,7 +4865,7 @@ def create_studio_app() -> FastAPI:
                 "saved_at": str(saved_at),
             })
             scratch["saved_messages"] = records[-200:]
-            manager.persist(session_id)
+            await manager.persist_async(session_id)
             try:
                 append_long_term_memory(workspace_dir, f"[用户收藏] {truncated}")
                 WorkspaceMemoryStore().index_workspace_sync(workspace_dir)
@@ -4976,7 +4972,7 @@ def create_studio_app() -> FastAPI:
         # run_turn reads agent_messages, not chat_history alone — mirror so the model sees the forward.
         session.agent_messages.append(copy.deepcopy(forward_entry))
         target_managed.updated_at = datetime.now().timestamp()
-        manager.persist(target_session_id)
+        await manager.persist_async(target_session_id)
         return {"ok": True, "forwarded": len(normalized_items), "appended_messages": 1}
 
     # --- Skills API ---
@@ -5048,6 +5044,11 @@ def create_studio_app() -> FastAPI:
                 dict(preferred) if isinstance(preferred, dict) else {},
                 disabled_skills=disabled_skills_arg,
             )
+            from agenticx.hooks.list_api import invalidate_hooks_list_cache
+            from agenticx.studio.skills_list_api import invalidate_skills_list_cache
+
+            invalidate_skills_list_cache()
+            invalidate_hooks_list_cache()
             return {"ok": True, **skill_scan_settings_payload()}
         except Exception as exc:
             logger.warning("put_skill_settings error: %s", exc)
@@ -5498,45 +5499,13 @@ def create_studio_app() -> FastAPI:
     ) -> dict:
         """List all available skills with metadata."""
         _check_token(x_agx_desktop_token)
-        try:
-            from agenticx.tools.skill_bundle import (
-                SkillBundleLoader,
-                get_disabled_skill_names_set,
-            )
+        from agenticx.studio.blocking_io import run_in_settings_pool
+        from agenticx.studio.skills_list_api import build_skills_list_payload_sync
 
-            loader = SkillBundleLoader()
-            skills = loader.scan()
-            disabled_set = get_disabled_skill_names_set()
-            items = [
-                {
-                    "skill_id": f"{getattr(s, 'source', 'unknown')}:{s.name}",
-                    "name": s.name,
-                    "description": s.description,
-                    "location": s.location,
-                    "base_dir": str(s.base_dir),
-                    "source": s.source,
-                    "tag": getattr(s, "tag", None),
-                    "icon": getattr(s, "icon", None),
-                    "content_hash": getattr(s, "content_hash", ""),
-                    "globally_disabled": s.name in disabled_set,
-                    "conflict_count": len(loader.get_skill_variants(s.name)),
-                    "variants": [
-                        {
-                            "skill_id": f"{getattr(v, 'source', 'unknown')}:{v.name}",
-                            "source": getattr(v, "source", "unknown"),
-                            "base_dir": str(getattr(v, "base_dir", "")),
-                            "location": getattr(v, "location", ""),
-                            "content_hash": getattr(v, "content_hash", ""),
-                        }
-                        for v in loader.get_skill_variants(s.name)
-                    ],
-                }
-                for s in skills
-            ]
-            return {"ok": True, "items": items, "count": len(items)}
-        except Exception as exc:
-            logger.warning("list_skills error: %s", exc)
-            return {"ok": False, "items": [], "count": 0, "error": str(exc)}
+        payload = await run_in_settings_pool(build_skills_list_payload_sync)
+        if not payload.get("ok"):
+            logger.warning("list_skills error: %s", payload.get("error"))
+        return payload
 
     @app.get("/api/skills/{name}")
     async def get_skill_detail(
@@ -5574,12 +5543,20 @@ def create_studio_app() -> FastAPI:
     ) -> dict:
         """Force rescan skill directories."""
         _check_token(x_agx_desktop_token)
-        try:
+
+        def _refresh_sync() -> dict:
+            from agenticx.studio.skills_list_api import invalidate_skills_list_cache
             from agenticx.tools.skill_bundle import SkillBundleLoader
 
+            invalidate_skills_list_cache()
             loader = SkillBundleLoader()
             skills = loader.refresh()
             return {"ok": True, "count": len(skills)}
+
+        from agenticx.studio.blocking_io import run_in_settings_pool
+
+        try:
+            return await run_in_settings_pool(_refresh_sync)
         except Exception as exc:
             logger.warning("refresh_skills error: %s", exc)
             return {"ok": False, "count": 0, "error": str(exc)}
@@ -5928,91 +5905,13 @@ def create_studio_app() -> FastAPI:
     ) -> dict:
         """Return curated + deduplicated imported hooks."""
         _check_token(x_agx_desktop_token)
-        try:
-            from agenticx.hooks.loader import (
-                build_hook_search_paths,
-                deduplicate_hooks,
-                discover_declarative_hooks,
-                discover_hooks,
-                get_hook_settings_from_config,
-            )
+        from agenticx.hooks.list_api import build_hooks_list_payload
+        from agenticx.studio.blocking_io import run_in_settings_pool
 
-            settings = get_hook_settings_from_config()
-            disabled_set = set(
-                str(item).strip()
-                for item in (settings.get("disabled") or [])
-                if str(item).strip()
-            )
-
-            bundled_dir = Path(__file__).resolve().parent.parent / "hooks" / "bundled"
-            curated_hooks: list[dict] = []
-            if bundled_dir.exists():
-                from pathlib import Path as _P
-                for child in sorted(bundled_dir.iterdir()):
-                    yaml_path = child / "HOOK.yaml"
-                    if not yaml_path.exists():
-                        continue
-                    try:
-                        import yaml as _yaml
-                        with open(yaml_path, "r", encoding="utf-8") as _f:
-                            meta = _yaml.safe_load(_f) or {}
-                    except Exception:
-                        meta = {}
-                    hook_name = meta.get("name", child.name)
-                    curated_hooks.append({
-                        "name": hook_name,
-                        "description": meta.get("description", ""),
-                        "events": meta.get("events", []),
-                        "enabled": hook_name not in disabled_set,
-                        "source": "bundled",
-                    })
-
-            raw_configs = discover_declarative_hooks(
-                workspace_dir=None,
-                preset_settings=settings.get("preset_paths"),
-                custom_paths=settings.get("custom_paths"),
-                declarative_entries=settings.get("declarative"),
-            )
-            imported_hooks = deduplicate_hooks(raw_configs)
-            for item in imported_hooks:
-                item["enabled"] = item["name"] not in disabled_set
-
-            scan_paths = build_hook_search_paths(
-                workspace_dir=None,
-                preset_settings=settings.get("preset_paths"),
-                custom_paths=settings.get("custom_paths"),
-            )
-            scan_path_items = [
-                {
-                    "source": source,
-                    "path": str(path.expanduser()),
-                    "exists": bool(path.expanduser().exists()),
-                }
-                for source, path in scan_paths
-            ]
-            from collections import Counter
-            source_counts = dict(Counter(c.source for c in raw_configs))
-            return {
-                "ok": True,
-                "curated_hooks": curated_hooks,
-                "imported_hooks": imported_hooks,
-                "scan_summary": {
-                    "raw_total": len(raw_configs),
-                    "deduped_total": len(imported_hooks),
-                    "source_counts": source_counts,
-                },
-                "scan_paths": scan_path_items,
-            }
-        except Exception as exc:
-            logger.warning("list_hooks error: %s", exc)
-            return {
-                "ok": False,
-                "curated_hooks": [],
-                "imported_hooks": [],
-                "scan_summary": {"raw_total": 0, "deduped_total": 0, "source_counts": {}},
-                "scan_paths": [],
-                "error": str(exc),
-            }
+        payload = await run_in_settings_pool(build_hooks_list_payload)
+        if not payload.get("ok"):
+            logger.warning("list_hooks error: %s", payload.get("error"))
+        return payload
 
     @app.get("/api/hooks/settings")
     async def get_hook_settings(
@@ -6124,6 +6023,9 @@ def create_studio_app() -> FastAPI:
                 auto_non_high=auto_non_high,
             )
             if result.success:
+                from agenticx.studio.skills_list_api import invalidate_skills_list_cache
+
+                invalidate_skills_list_cache()
                 return {
                     "ok": True,
                     "name": result.name,
@@ -6299,6 +6201,9 @@ def create_studio_app() -> FastAPI:
                 }
 
             md_path = hub.write_registry_skill(skill_name, content)
+            from agenticx.studio.skills_list_api import invalidate_skills_list_cache
+
+            invalidate_skills_list_cache()
             return {
                 "ok": True,
                 "name": skill_name,

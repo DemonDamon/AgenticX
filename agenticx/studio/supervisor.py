@@ -182,7 +182,7 @@ class SessionSupervisor:
             if todos_completed(messages):
                 self._append_done_notice(managed)
                 set_session_unattended_enabled(managed.studio_session, False)
-                self._manager.persist(sid)
+                await self._manager.persist_async(sid)
                 continue
 
             exec_state = str(
@@ -276,7 +276,7 @@ class SessionSupervisor:
         sp = getattr(managed.studio_session, "scratchpad", None)
         if isinstance(sp, dict):
             sp["__unattended_failure__"] = reason
-        self._manager.persist(sid)
+        await self._manager.persist_async(sid)
         _log_supervisor_event(sid, {"action": "failed", "reason": reason})
         _ = meta
 

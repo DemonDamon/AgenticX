@@ -679,7 +679,7 @@ def register_voice_endpoints(
 
         if appended:
             managed.updated_at = time.time()
-            persisted = manager.persist(session_id)
+            persisted = await manager.persist_async(session_id)
             logger.warning(
                 "[voice-focus] appended %s message(s) to session=%s persisted=%s chat_history=%s",
                 appended,
