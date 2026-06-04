@@ -10,6 +10,10 @@ import sys
 
 import pytest
 
+from agenticx.memory.graph.clients import (
+    model_supports_reasoning_effort,
+    should_use_generic_openai_client,
+)
 from agenticx.memory.graph.config import load_memory_graph_config
 from agenticx.memory.graph.dto import build_graph_view, map_edge, map_node
 from agenticx.memory.graph.group_id import derive_group_id, validate_group_access
@@ -27,6 +31,33 @@ class _FakeEdge:
     def __init__(self, **kwargs):
         for k, v in kwargs.items():
             setattr(self, k, v)
+
+
+def test_model_supports_reasoning_effort():
+    assert model_supports_reasoning_effort("gpt-5-mini") is True
+    assert model_supports_reasoning_effort("openai/gpt-5-nano") is True
+    assert model_supports_reasoning_effort("o3-mini") is True
+    assert model_supports_reasoning_effort("gpt-4o-mini") is False
+    assert model_supports_reasoning_effort("glm-4-flash") is False
+
+
+def test_should_use_generic_openai_client():
+    assert should_use_generic_openai_client("openai", None, "gpt-4o-mini") is True
+    assert should_use_generic_openai_client("openai", None, "gpt-5-mini") is False
+    assert should_use_generic_openai_client("ollama", "http://127.0.0.1:11434", "llama3") is True
+    assert should_use_generic_openai_client("minimax", "https://api.minimax.io/v1", "MiniMax-M3") is True
+    assert should_use_generic_openai_client(
+        "openai", "https://my-litellm.example/v1", "gpt-5-mini"
+    ) is True
+
+
+def test_store_reset_runtime_clears_ready_flag():
+    store = MemoryGraphStore()
+    store._ready = True
+    store._graphiti = object()
+    store.reset_runtime()
+    assert store._ready is False
+    assert store._graphiti is None
 
 
 def test_group_id_derivation():

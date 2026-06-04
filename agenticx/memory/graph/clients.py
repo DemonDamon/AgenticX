@@ -12,6 +12,41 @@ from typing import Any, Tuple
 from agenticx.memory.graph.config import MemoryGraphConfig
 
 
+def _normalize_model_name(model: str) -> str:
+    """Strip provider prefix (e.g. openai/gpt-4o-mini -> gpt-4o-mini)."""
+    return (model or "").strip().lower().split("/")[-1]
+
+
+def model_supports_reasoning_effort(model: str) -> bool:
+    """Graphiti OpenAIClient uses Responses API reasoning.effort — only o/gpt-5 families."""
+    name = _normalize_model_name(model)
+    return name.startswith(("gpt-5", "o1", "o3", "o4"))
+
+
+def _is_official_openai_base(base_url: str | None) -> bool:
+    if not base_url:
+        return True
+    return "api.openai.com" in base_url.lower()
+
+
+def should_use_generic_openai_client(
+    provider_name: str,
+    base_url: str | None,
+    model: str,
+) -> bool:
+    """Prefer chat.completions client when reasoning.effort / responses.parse are unsafe."""
+    provider = (provider_name or "").strip().lower()
+    if provider != "openai":
+        return True
+    if base_url and "11434" in base_url:
+        return True
+    if not _is_official_openai_base(base_url):
+        return True
+    if not model_supports_reasoning_effort(model):
+        return True
+    return False
+
+
 def _pick_provider_name(cfg: MemoryGraphConfig, role: str) -> str:
     from agenticx.cli.config_manager import ConfigManager
 
@@ -80,8 +115,17 @@ def build_graphiti_clients(cfg: MemoryGraphConfig) -> Tuple[Any, Any, Any]:
         base_url=base_url,
     )
 
-    use_generic = llm_provider_name == "ollama" or (base_url and "11434" in base_url)
-    llm_client = OpenAIGenericClient(config=llm_config) if use_generic else OpenAIClient(config=llm_config)
+    use_generic = should_use_generic_openai_client(llm_provider_name, base_url, model)
+    if use_generic:
+        llm_client = OpenAIGenericClient(config=llm_config)
+    else:
+        # Graphiti OpenAIClient defaults reasoning='minimal' -> reasoning.effort on Responses API.
+        # Only pass these knobs when the configured model actually supports them.
+        llm_client = OpenAIClient(
+            config=llm_config,
+            reasoning="minimal",
+            verbosity="low",
+        )
 
     embed_key = embed_pc.api_key or api_key
     embed_base = (embed_pc.base_url or base_url or "").strip() or None
@@ -98,5 +142,7 @@ def build_graphiti_clients(cfg: MemoryGraphConfig) -> Tuple[Any, Any, Any]:
         )
     )
 
-    cross_encoder = OpenAIRerankerClient(client=llm_client, config=llm_config)
+    # Reranker expects AsyncOpenAI, not Graphiti LLM wrapper instances.
+    async_openai = getattr(llm_client, "client", llm_client)
+    cross_encoder = OpenAIRerankerClient(client=async_openai, config=llm_config)
     return llm_client, embedder, cross_encoder

@@ -137,6 +137,15 @@ class MemoryGraphStore:
         self.cfg = load_memory_graph_config()
         return self.cfg
 
+    def reset_runtime(self) -> None:
+        """Drop cached Graphiti/Kuzu handles so provider/model changes take effect."""
+        self._ready = False
+        self._graphiti = None
+        if self._driver is not None:
+            _dispose_kuzu_driver(self._driver)
+        self._driver = None
+        self._status.write({"last_error": None, "last_error_at": None})
+
     def require_enabled(self) -> None:
         self.refresh_config()
         if not self.cfg.enabled:
