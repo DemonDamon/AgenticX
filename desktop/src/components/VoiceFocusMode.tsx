@@ -294,6 +294,7 @@ export function VoiceFocusMode() {
   >([]);
   const appendQueueRef = useRef<Promise<void>>(Promise.resolve());
   const draftTurnsRef = useRef<Partial<Record<"user" | "assistant", string>>>({});
+  const lastUserPartialRef = useRef("");
   const enqueuedTurnKeysRef = useRef<Set<string>>(new Set());
   const turnFlushTimerRef = useRef<number | null>(null);
 
@@ -363,9 +364,8 @@ export function VoiceFocusMode() {
       turnFlushTimerRef.current = null;
     }
     const drafts = draftTurnsRef.current;
-    const userText = String(drafts.user ?? "").trim();
     const assistantText = String(drafts.assistant ?? "").trim();
-    if (userText) enqueueVoiceTurn({ role: "user", content: userText });
+    // User rows are enqueued on user_final; only flush assistant drafts here.
     if (assistantText) enqueueVoiceTurn({ role: "assistant", content: assistantText });
   }, [enqueueVoiceTurn]);
 
@@ -406,6 +406,9 @@ export function VoiceFocusMode() {
         }, 3000);
         return;
       }
+      // Persist user text before Meta chat so messages.json never ends with a
+      // headless assistant if the SSE path skips user history or crashes mid-turn.
+      enqueueVoiceTurn({ role: "user", content: ut });
       const ac = new AbortController();
       bridgeAbortRef.current = ac;
       clearBridgeHintTimer();
@@ -850,6 +853,7 @@ export function VoiceFocusMode() {
 
         pendingVoiceTurnsRef.current = [];
         draftTurnsRef.current = {};
+        lastUserPartialRef.current = "";
         enqueuedTurnKeysRef.current = new Set();
         appendQueueRef.current = Promise.resolve();
         sessionRef.current = createRealtimeVoiceSession(kind);
@@ -909,6 +913,7 @@ export function VoiceFocusMode() {
               partialClearTimerRef.current = null;
             }
             const text = ev.text.trim();
+            lastUserPartialRef.current = text;
             draftTurnsRef.current.user = text;
             setPartial({ role: "user", text });
           }
@@ -923,8 +928,12 @@ export function VoiceFocusMode() {
           }
           if (ev.kind === "user_final" && ev.text.trim()) {
             const text = ev.text.trim();
+            lastUserPartialRef.current = text;
             draftTurnsRef.current.user = text;
             setPartial({ role: "user", text });
+            // Persist immediately — do not wait for assistant_final draft flush
+            // (reordering or missing user_final would drop the user bubble).
+            enqueueVoiceTurnRef.current({ role: "user", content: text });
             // Keep on-screen until next turn starts; do NOT auto-clear.
             if (partialClearTimerRef.current != null) {
               window.clearTimeout(partialClearTimerRef.current);
@@ -935,6 +944,13 @@ export function VoiceFocusMode() {
           }
           if (ev.kind === "assistant_final" && ev.text.trim()) {
             const text = ev.text.trim();
+            if (!String(draftTurnsRef.current.user ?? "").trim()) {
+              const fallbackUser = String(lastUserPartialRef.current ?? "").trim();
+              if (fallbackUser) {
+                draftTurnsRef.current.user = fallbackUser;
+                enqueueVoiceTurnRef.current({ role: "user", content: fallbackUser });
+              }
+            }
             draftTurnsRef.current.assistant = text;
             setPartial({ role: "assistant", text });
             // Keep Near's full final text on screen until the next turn
