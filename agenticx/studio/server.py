@@ -2095,6 +2095,23 @@ def create_studio_app() -> FastAPI:
         managed = manager.get(payload.session_id, touch=False)
         if managed is None:
             raise HTTPException(status_code=404, detail="session not found")
+        # Idempotency guard: dedupe a duplicate POST (double-click / chip burst /
+        # retry race) so the backend never persists a second identical user turn.
+        # Keyed by client_turn_id on the managed session (bounded recent set).
+        _ctid = str(getattr(payload, "client_turn_id", "") or "").strip()
+        if _ctid:
+            _seen = getattr(managed, "_recent_client_turn_ids", None)
+            if _seen is None:
+                from collections import deque
+
+                _seen = deque(maxlen=64)
+                setattr(managed, "_recent_client_turn_ids", _seen)
+            if _ctid in _seen:
+                async def _dup_noop_stream():
+                    yield 'data: {"type":"done","data":{"duplicate":true}}\n\n'
+
+                return StreamingResponse(_dup_noop_stream(), media_type="text/event-stream")
+            _seen.append(_ctid)
         setattr(managed.studio_session, "taskspaces", list(managed.taskspaces or []))
         active_ts = str(payload.active_taskspace_id or "").strip() or None
         setattr(managed.studio_session, "active_taskspace_id", active_ts)
