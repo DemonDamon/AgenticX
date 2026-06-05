@@ -2,12 +2,15 @@
 
 from __future__ import annotations
 
+import asyncio
+import time
 from dataclasses import dataclass
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Set, Tuple
 
 import pytest
 
-from agenticx.cli.studio_mcp import mcp_call_tool_async
+from agenticx.cli import studio_mcp as studio_mcp_module
+from agenticx.cli.studio_mcp import auto_connect_servers_async, mcp_call_tool_async
 from agenticx.tools.mcp_hub import MCPHub
 from agenticx.tools.remote_v2 import MCPToolInfo
 
@@ -71,3 +74,36 @@ async def test_dispatch_mcp_call_nested_asyncio() -> None:
     )
     assert "ERROR" not in result or "nested" not in result.lower()
     assert "ping" in result
+
+
+@pytest.mark.asyncio
+async def test_auto_connect_servers_async_runs_concurrently(monkeypatch) -> None:
+    """Four slow connects should overlap (not sum to 4x delay)."""
+    delay_s = 0.12
+
+    async def _slow_connect(
+        _hub: MCPHub,
+        _configs: Dict[str, Any],
+        connected: Set[str],
+        name: str,
+    ) -> Tuple[bool, str]:
+        await asyncio.sleep(delay_s)
+        connected.add(name)
+        return True, ""
+
+    monkeypatch.setattr(studio_mcp_module, "mcp_connect_async", _slow_connect)
+
+    hub = MCPHub(clients=[])
+    connected: Set[str] = set()
+    configs = {f"s{i}": object() for i in range(4)}
+
+    start = time.perf_counter()
+    results = await auto_connect_servers_async(
+        hub, configs, connected, ["s0", "s1", "s2", "s3"]
+    )
+    elapsed = time.perf_counter() - start
+
+    assert results == {"s0": True, "s1": True, "s2": True, "s3": True}
+    assert connected == {"s0", "s1", "s2", "s3"}
+    # Serial would be ~0.48s; with concurrency 4, ~0.12s (+ slack).
+    assert elapsed < delay_s * 2.5

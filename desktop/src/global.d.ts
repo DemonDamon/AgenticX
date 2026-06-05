@@ -727,6 +727,7 @@ declare global {
         ok: boolean;
         avatars: { ok: boolean; avatars: AvatarItem[] };
         sessions: { ok: boolean; sessions: Array<Record<string, unknown>> };
+        groups: { ok: boolean; groups: Array<Record<string, unknown>> };
         taskspaces: { ok: boolean; workspaces: TaskspaceItem[]; error?: string };
         messages: { ok: boolean; messages: Array<Record<string, unknown>>; error?: string };
       }>;
