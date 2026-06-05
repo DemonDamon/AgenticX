@@ -50,6 +50,9 @@ class ChatRequest(BaseModel):
     # Per-session KB retrieval mode override ("auto" | "always"). When set, this
     # supersedes the global retrieval.mode config for this session's prompt build.
     retrieval_mode: Optional[str] = None
+    # Idempotency key from desktop: a duplicate POST with the same id within a
+    # short window is short-circuited so no second user row is persisted.
+    client_turn_id: Optional[str] = None
 
 
 class ContinueRequest(BaseModel):

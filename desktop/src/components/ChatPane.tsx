@@ -135,6 +135,7 @@ import {
   shouldDropDuplicateUserSend,
   type SendDedupeEntry,
 } from "../utils/send-dedupe";
+import { resolveSendSessionId } from "../utils/send-lock";
 import { StreamCommitRegistry } from "../utils/stream-commit-registry";
 import { favoriteStorageMessageId } from "../utils/favorite-selection";
 import { createResizeRafScheduler } from "../utils/resize-raf";
@@ -4176,6 +4177,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
       }
       setPaneMessages(pane.id, msgs.slice(0, idx + 1));
       await sendChatRef.current(msg.content, {
+        lockedSessionId: sid,
         retryAttachments: msg.attachments ?? [],
         suppressUserEcho: true,
         skipUserHistory: true,
@@ -4219,6 +4221,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
       }
       setPaneMessages(pane.id, msgs.slice(0, idx));
       await sendChatRef.current(newContent, {
+        lockedSessionId: sid,
         retryAttachments: msg.attachments ?? [],
       });
     },
@@ -5063,6 +5066,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
           ? "exhausted"
           : "stall";
     void sendChatRef.current("", {
+      lockedSessionId: sid,
       continuation: { reason, source: "desktop_auto_nudge" },
     });
   }, [
@@ -5109,6 +5113,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
           ? "exhausted"
           : "stall";
     void sendChatRef.current("", {
+      lockedSessionId: sid,
       continuation: { reason, source: "supervisor" },
     });
   }, [
@@ -5164,6 +5169,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
       executionState: state === "running" ? "interrupted" : state,
     });
     void sendChatRef.current("", {
+      lockedSessionId: sid,
       continuation: { reason, source: "desktop_manual" },
     });
   }, [beginResumeInFlight, interruptForResume, pane.avatarId, pane.sessionId, sessionExecutionState, stallState]);
@@ -5205,7 +5211,11 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
     (msgId: string) => {
       const item = takePendingMessage(paneId, msgId);
       if (!item) return;
+      const lockedSessionId = (
+        useAppStore.getState().panes.find((p) => p.id === paneId)?.sessionId || ""
+      ).trim();
       void sendChatRef.current(item.text, {
+        lockedSessionId: lockedSessionId || undefined,
         retryAttachments: item.attachments,
         forceSend: true,
       });
@@ -5872,7 +5882,22 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
     if (!apiBase) return;
 
     const useLazySession = !isGroupPane && !isAutomationTaskPane;
-    let requestSessionId = String(options?.lockedSessionId ?? pane.sessionId ?? "").trim();
+    let requestSessionId = resolveSendSessionId(options?.lockedSessionId, pane.sessionId);
+    // Dev-only invariant: every async/system send (continuation / retry / queued /
+    // forward) MUST lock the session id captured at dispatch time. Reading the live
+    // pane.sessionId for these paths is the root cause of cross-session leakage.
+    const isSystemStyleSend =
+      isContinuation || !!options?.suppressUserEcho || !!options?.skipUserHistory;
+    if (
+      import.meta.env?.DEV &&
+      isSystemStyleSend &&
+      !String(options?.lockedSessionId ?? "").trim()
+    ) {
+      console.warn(
+        "[ChatPane] system-style send without lockedSessionId — potential cross-session leak source",
+        { source: options?.continuation?.source },
+      );
+    }
     const clearStopSuppressForSession = (sessionKey: string) => {
       const key = sessionKey.trim();
       if (!key) return;
@@ -6263,6 +6288,9 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
 
     try {
       const body: Record<string, unknown> = { session_id: requestSessionId, user_input: messageText };
+      // Idempotency key: backend short-circuits a duplicate POST (double-click /
+      // chip burst / retry race) so it never appends a second user row.
+      body.client_turn_id = crypto.randomUUID();
       if (skipUserHistory) body.skip_user_history = true;
       const ats = (pane.activeTaskspaceId || "").trim();
       if (ats) body.active_taskspace_id = ats;
@@ -7327,6 +7355,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
       if (nextQueued) {
         requestAnimationFrame(() => {
           void sendChatRef.current(nextQueued.text, {
+            lockedSessionId: requestSessionId,
             retryAttachments: nextQueued.attachments,
           });
         });
@@ -7343,6 +7372,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
     if ((pane.sessionId || "").trim() !== forwardAutoReply.sessionId.trim()) return;
     useAppStore.getState().setForwardAutoReply(null);
     void sendChatRef.current(forwardAutoReply.text, {
+      lockedSessionId: forwardAutoReply.sessionId,
       suppressUserEcho: forwardAutoReply.suppressUserEcho ?? true,
       skipUserHistory: forwardAutoReply.skipUserHistory ?? true,
     });
