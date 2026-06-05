@@ -837,7 +837,7 @@ export function VoiceFocusMode() {
         const resolved = chooseFromFlags();
         if (!resolved) {
           setPhase("error");
-          setErrorText('请先在 设置 → 语音 配置实时语音 Provider。');
+          setErrorText('请先在 设置 → 语音服务 配置实时语音 Provider。');
           openSettings("voice");
           errorExitTimerRef.current = window.setTimeout(() => void hangup(), 5000);
           return;
