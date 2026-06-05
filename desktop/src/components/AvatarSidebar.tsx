@@ -1010,7 +1010,7 @@ export function AvatarSidebar() {
               <div className="flex-1 overflow-y-auto pb-1">
                 {automationTasks.length === 0 && (
                   <div className="px-3 py-4 text-center text-xs text-text-faint">
-                    暂无定时任务，可在「设置 - 自动化」创建
+                    暂无定时任务，可在「设置 - 定时任务」创建
                   </div>
                 )}
                 {automationTasks.map((task) => {
