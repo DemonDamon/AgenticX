@@ -1650,7 +1650,16 @@ export const useAppStore = create<AppState>((set, get) => ({
     })),
   setPaneMessages: (paneId, messages) =>
     set((state) => ({
-      panes: state.panes.map((pane) => (pane.id === paneId ? { ...pane, messages } : pane)),
+      panes: state.panes.map((pane) => {
+        if (pane.id !== paneId) return pane;
+        const sid = String(pane.sessionId ?? "").trim();
+        if (!sid) return { ...pane, messages };
+        const stamped = messages.map((m) => {
+          if (String(m.ownerSessionId ?? "").trim()) return m;
+          return { ...m, ownerSessionId: sid };
+        });
+        return { ...pane, messages: stamped };
+      }),
     })),
   prependPaneMessages: (paneId, messages) =>
     set((state) => ({

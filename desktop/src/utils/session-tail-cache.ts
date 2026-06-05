@@ -141,3 +141,13 @@ export function cancelPrefetchSessionTail(sessionId: string): void {
     prefetchTimers.delete(sid);
   }
 }
+
+/** Drop cached tail after a turn completes so the next switch reloads fresh disk. */
+export function invalidateSessionTail(sessionId: string): void {
+  const sid = String(sessionId ?? "").trim();
+  if (!sid) return;
+  tailCache.delete(sid);
+  inflight.delete(sid);
+  inflightPromises.delete(sid);
+  cancelPrefetchSessionTail(sid);
+}

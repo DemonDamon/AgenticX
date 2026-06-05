@@ -48,7 +48,7 @@ type Props = {
   selectable?: boolean;
   selected?: boolean;
   /** Clicking a follow-up chip sends this text as the next user message (assistant only). */
-  onFollowupClick?: (text: string) => void;
+  onFollowupClick?: (text: string, ctx?: { ownerSessionId?: string }) => void;
   /** Suppress in-bubble chips; used when parent renders them outside a unified ReAct container. */
   omitSuggestedQuestions?: boolean;
   /** Render-only hint when this assistant reply was cut off by session token budget. */
@@ -405,7 +405,9 @@ export function ImBubble({
             type="button"
             className="group flex max-w-full w-fit items-center gap-2 rounded-full border border-border bg-surface-hover/80 px-3.5 py-1.5 text-left text-[14px] text-text-subtle transition hover:bg-surface-hover hover:text-text-strong whitespace-normal"
             onMouseDown={(e) => e.preventDefault()}
-            onClick={() => onFollowupClick?.(q)}
+            onClick={() =>
+              onFollowupClick?.(q, { ownerSessionId: message.ownerSessionId })
+            }
           >
             <span>{q}</span>
             <ArrowRight className="h-3.5 w-3.5 shrink-0 opacity-60 transition group-hover:opacity-100" />

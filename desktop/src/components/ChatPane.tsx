@@ -129,8 +129,12 @@ import {
   mapLoadedSessionMessage,
   type LoadedSessionMessage,
 } from "../utils/session-message-map";
-import { resolveSessionTailForSwitch } from "../utils/session-tail-cache";
+import { resolveSessionTailForSwitch, invalidateSessionTail } from "../utils/session-tail-cache";
 import { visibleMessagesForSession } from "../utils/message-ownership";
+import {
+  shouldDropDuplicateUserSend,
+  type SendDedupeEntry,
+} from "../utils/send-dedupe";
 import { StreamCommitRegistry } from "../utils/stream-commit-registry";
 import { favoriteStorageMessageId } from "../utils/favorite-selection";
 import { createResizeRafScheduler } from "../utils/resize-raf";
@@ -2274,6 +2278,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
   const autoScrollPinnedRef = useRef(true);
   const loadingOlderMessagesRef = useRef(false);
   const sessionBootstrapRef = useRef("");
+  const lastUserSendDedupeRef = useRef<SendDedupeEntry | null>(null);
   const [showJumpToBottomFab, setShowJumpToBottomFab] = useState(false);
   const imeComposingRef = useRef(false);
   const [atOpen, setAtOpen] = useState(false);
@@ -2367,16 +2372,19 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
     streamingSessionId === (pane.sessionId || "").trim();
   const streamTextForCurrentSession = isStreamingCurrentSession ? (streamedAssistantText || "") : "";
   const streamAssistantMessage = useMemo((): Message => {
+    const sid = (pane.sessionId || "").trim();
     return {
       id: "__stream__",
       role: "assistant",
       content: streamTextForCurrentSession,
+      ownerSessionId: sid || undefined,
       references: streamReferences.length > 0 ? streamReferences : undefined,
       searchedQueries: streamSearchedQueries.length > 0 ? streamSearchedQueries : undefined,
       provider: streamingModel?.provider,
       model: streamingModel?.model,
     };
   }, [
+    pane.sessionId,
     streamTextForCurrentSession,
     streamReferences,
     streamSearchedQueries,
@@ -4002,7 +4010,8 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
     // Actively streaming this session: live + reattach rows are authoritative;
     // never overwrite them mid-stream. Mark bootstrapped so the post-stream
     // effect re-run does not trigger a redundant disk reload.
-    if (streamingSessionId === sid) {
+    const streamActiveForSid = Boolean(sessionStreamStateRef.current[sid]?.active);
+    if (streamActiveForSid) {
       if ((live.messages ?? []).length > 0) sessionBootstrapRef.current = sid;
       return;
     }
@@ -5172,11 +5181,25 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
     [pane.id, pane.sessionId, resumeCurrentTask, setPaneModel]
   );
 
-  const sendFollowupChip = useCallback((text: string) => {
-    const t = String(text || "").trim();
-    if (!t) return;
-    void sendChatRef.current(t);
-  }, []);
+  const sendFollowupChip = useCallback(
+    (text: string, ctx?: { ownerSessionId?: string }) => {
+      const t = String(text || "").trim();
+      if (!t) return;
+      const paneSid = (pane.sessionId || "").trim();
+      const ownerSid = String(ctx?.ownerSessionId ?? paneSid).trim();
+      if (!ownerSid) return;
+      if (paneSid && ownerSid !== paneSid) {
+        console.warn(
+          "[ChatPane] followup ignored — chip owner %s but pane shows %s",
+          ownerSid,
+          paneSid,
+        );
+        return;
+      }
+      void sendChatRef.current(t, { lockedSessionId: ownerSid });
+    },
+    [pane.sessionId],
+  );
 
   const sendQueuedMessageNow = useCallback(
     (msgId: string) => {
@@ -5479,7 +5502,11 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
                                 type="button"
                                 className="group flex max-w-full w-fit items-center gap-2 rounded-full border border-border bg-surface-hover/80 px-3.5 py-1.5 text-left text-[14px] text-text-subtle transition hover:bg-surface-hover hover:text-text-strong whitespace-normal"
                                 onMouseDown={(e) => e.preventDefault()}
-                                onClick={() => sendFollowupChip(q)}
+                                onClick={() =>
+                                  sendFollowupChip(q, {
+                                    ownerSessionId: peeledFollowupAssistant?.ownerSessionId,
+                                  })
+                                }
                               >
                                 <span>{q}</span>
                                 <ArrowRight className="h-3.5 w-3.5 shrink-0 opacity-60 transition group-hover:opacity-100" />
@@ -5782,6 +5809,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
       suppressUserEcho?: boolean;
       skipUserHistory?: boolean;
       forceSend?: boolean;
+      lockedSessionId?: string;
       continuation?: { reason: ContinueReason; source: ContinueSource };
     }
   ) => Promise<void>>(
@@ -5811,6 +5839,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
       suppressUserEcho?: boolean;
       skipUserHistory?: boolean;
       forceSend?: boolean;
+      lockedSessionId?: string;
       continuation?: { reason: ContinueReason; source: ContinueSource };
     }
   ) => {
@@ -5843,7 +5872,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
     if (!apiBase) return;
 
     const useLazySession = !isGroupPane && !isAutomationTaskPane;
-    let requestSessionId = (pane.sessionId || "").trim();
+    let requestSessionId = String(options?.lockedSessionId ?? pane.sessionId ?? "").trim();
     const clearStopSuppressForSession = (sessionKey: string) => {
       const key = sessionKey.trim();
       if (!key) return;
@@ -6023,6 +6052,37 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
         console.error("[ChatPane] failed to create isolated session:", err);
       }
       return;
+    }
+
+    if (
+      !isContinuation &&
+      !skipUserHistory &&
+      !options?.suppressUserEcho &&
+      messageText.trim() &&
+      requestSessionId &&
+      !options?.forceSend
+    ) {
+      const now = Date.now();
+      if (
+        shouldDropDuplicateUserSend(
+          lastUserSendDedupeRef.current,
+          requestSessionId,
+          messageText,
+          now,
+        )
+      ) {
+        console.warn(
+          "[ChatPane] dropped duplicate user send within dedupe window",
+          requestSessionId,
+          messageText.slice(0, 48),
+        );
+        return;
+      }
+      lastUserSendDedupeRef.current = {
+        sessionId: requestSessionId,
+        text: messageText,
+        at: now,
+      };
     }
 
     // Re-sending the same user text after a completed turn (input box, not the retry
@@ -7258,6 +7318,10 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
       }
       useAppStore.getState().bumpSessionCatalogRevision();
       window.setTimeout(() => useAppStore.getState().bumpSessionCatalogRevision(), 500);
+
+      invalidateSessionTail(requestSessionId);
+      useAppStore.getState().dropCachedSessionMessages(requestSessionId);
+      void mergeTailFromDisk(requestSessionId);
 
       const nextQueued = useAppStore.getState().dequeuePaneMessage(pane.id);
       if (nextQueued) {

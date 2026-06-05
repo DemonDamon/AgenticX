@@ -13,9 +13,9 @@ describe("messageBelongsToSession", () => {
     expect(messageBelongsToSession({ ownerSessionId: "A" }, "B")).toBe(false);
   });
 
-  it("shows an untagged message (legacy / in-flight, never vanish)", () => {
-    expect(messageBelongsToSession({}, "B")).toBe(true);
-    expect(messageBelongsToSession({ ownerSessionId: "" }, "B")).toBe(true);
+  it("hides untagged messages when pane is bound to a session", () => {
+    expect(messageBelongsToSession({}, "B")).toBe(false);
+    expect(messageBelongsToSession({ ownerSessionId: "" }, "B")).toBe(false);
   });
 
   it("when pane has no bound session, hides rows bound to any real session", () => {
@@ -38,14 +38,14 @@ describe("visibleMessagesForSession", () => {
     { id: "4", ownerSessionId: "A" },
   ];
 
-  it("keeps only same-session + untagged rows, preserving order", () => {
+  it("keeps only same-session rows, preserving order", () => {
     const out = visibleMessagesForSession(msgs, "A");
-    expect(out.map((m) => m.id)).toEqual(["1", "3", "4"]);
+    expect(out.map((m) => m.id)).toEqual(["1", "4"]);
   });
 
   it("hides the foreign-session row when showing B", () => {
     const out = visibleMessagesForSession(msgs, "B");
-    expect(out.map((m) => m.id)).toEqual(["2", "3"]);
+    expect(out.map((m) => m.id)).toEqual(["2"]);
   });
 
   it("when no session bound, keeps only unbound rows", () => {
