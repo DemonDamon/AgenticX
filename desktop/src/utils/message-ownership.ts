@@ -22,15 +22,21 @@ export interface OwnedMessage {
  * Whether *msg* may render while the pane is showing *sessionId*.
  *
  * Backward compatible: an untagged message (no `ownerSessionId`) is always
- * visible so legacy / in-flight rows never vanish. When the pane has no bound
- * session (`""`, e.g. awaiting a fresh session), nothing is filtered.
+ * visible so legacy / in-flight rows never vanish.
+ *
+ * Important for "全新对话" lazy mode: when the pane has no bound session
+ * (`""`), only show rows that are also unbound. This prevents any late async
+ * write from the previous real session from bleeding into the fresh composer.
  */
 export function messageBelongsToSession(
   msg: OwnedMessage,
   sessionId: string | undefined | null,
 ): boolean {
   const sid = String(sessionId ?? "").trim();
-  if (!sid) return true; // no bound session → never hide
+  if (!sid) {
+    const ownerWhenUnbound = String(msg.ownerSessionId ?? "").trim();
+    return ownerWhenUnbound.length === 0;
+  }
   const owner = String(msg.ownerSessionId ?? "").trim();
   if (!owner) return true; // untagged (legacy / not yet stamped) → show
   return owner === sid;
@@ -44,7 +50,5 @@ export function visibleMessagesForSession<T extends OwnedMessage>(
   messages: readonly T[],
   sessionId: string | undefined | null,
 ): T[] {
-  const sid = String(sessionId ?? "").trim();
-  if (!sid) return messages.slice();
-  return messages.filter((m) => messageBelongsToSession(m, sid));
+  return messages.filter((m) => messageBelongsToSession(m, sessionId));
 }
