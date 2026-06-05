@@ -102,8 +102,12 @@ import {
 } from "../utils/budget-exceeded";
 import { buildBudgetResumeDraft } from "../utils/budget-resume-draft";
 import {
+  getCachedGlobalKbRetrievalMode,
   getKbRetrievalModeForPane,
   migratePaneKbRetrievalModeToSession,
+  resolveDisplayKbRetrievalMode,
+  resolveEffectiveKbRetrievalMode,
+  setCachedGlobalKbRetrievalMode,
   setKbRetrievalModeForPane,
   type KbRetrievalMode,
 } from "../utils/kb-retrieval-mode";
@@ -835,11 +839,15 @@ function PaneKnowledgeRetrievalModeSwitch({
   apiBase,
   sessionId,
   paneId,
+  globalDefaultMode,
+  onNewSessionDefaultChange,
 }: {
   apiToken: string;
   apiBase: string;
   sessionId: string;
   paneId: string;
+  globalDefaultMode: KbRetrievalMode;
+  onNewSessionDefaultChange?: (mode: KbRetrievalMode) => void;
 }) {
   const resolveApiBase = useCallback(async () => {
     const base = String(apiBase ?? "").trim();
@@ -848,44 +856,35 @@ function PaneKnowledgeRetrievalModeSwitch({
     return raw.replace(/\/+$/, "");
   }, [apiBase]);
   const api = useMemo(() => createKbApi(apiToken, resolveApiBase), [apiToken, resolveApiBase]);
-  const [mode, setMode] = useState<KbRetrievalMode>(
-    () => getKbRetrievalModeForPane(sessionId, paneId) ?? "auto",
+  const [mode, setMode] = useState<KbRetrievalMode>(() =>
+    resolveDisplayKbRetrievalMode(sessionId, paneId, globalDefaultMode),
   );
   const [saving, setSaving] = useState(false);
   const [open, setOpen] = useState(false);
   const refreshGenRef = useRef(0);
 
-  // Per-session binding: prefer the explicit per-session choice; only fall back
-  // to the global config value as the DEFAULT for sessions the user has not
-  // toggled yet. We never write the global config from here, so switching
-  // sessions no longer clobbers each other's mode.
+  // Sync toolbar icon immediately when session/pane/global default changes —
+  // never wait for async readConfig (avoids 2–3s flash of the previous session mode).
+  useLayoutEffect(() => {
+    setMode(resolveDisplayKbRetrievalMode(sessionId, paneId, globalDefaultMode));
+  }, [sessionId, paneId, globalDefaultMode]);
+
   const refresh = useCallback(async () => {
     const sid = String(sessionId || "").trim();
     const pid = String(paneId || "").trim();
     const gen = ++refreshGenRef.current;
-    const perSession = getKbRetrievalModeForPane(sid, pid);
-    if (perSession) {
-      setMode(perSession);
-      return;
-    }
     try {
       const body = await api.readConfig();
       if (gen !== refreshGenRef.current) return;
-      // User may have toggled while readConfig was in flight — honor per-session
-      // choice and never let a stale global default clobber it.
-      const afterFetch = getKbRetrievalModeForPane(sid, pid);
-      if (afterFetch) {
-        setMode(afterFetch);
-        return;
-      }
-      const modeRaw = body.config.retrieval?.mode;
-      // Legacy configs may still carry "manual" — fold it into auto so the
-      // switch stays in sync with the simplified two-state model.
-      setMode(modeRaw === "always" ? "always" : "auto");
+      const resolvedDefault =
+        body.config.retrieval?.mode === "always" ? "always" : "auto";
+      setCachedGlobalKbRetrievalMode(resolvedDefault);
+      onNewSessionDefaultChange?.(resolvedDefault);
+      setMode(resolveDisplayKbRetrievalMode(sid, pid, resolvedDefault));
     } catch {
-      // Keep last known mode; Chat should still be usable if KB API is unavailable.
+      setMode(resolveDisplayKbRetrievalMode(sid, pid, globalDefaultMode));
     }
-  }, [api, paneId, sessionId]);
+  }, [api, globalDefaultMode, onNewSessionDefaultChange, paneId, sessionId]);
 
   useEffect(() => {
     void refresh();
@@ -1051,7 +1050,7 @@ function ActionCircleButton({
     onClick = onStop;
     title = "中断生成";
     icon = <StopIcon />;
-    filled = false;
+    filled = true;
   } else if (hasInput) {
     onClick = onSend;
     title = "发送";
@@ -2055,6 +2054,42 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
   const clearSpawnsColumnSuppress = useAppStore((s) => s.clearSpawnsColumnSuppress);
   const apiBase = useAppStore((s) => s.apiBase);
   const apiToken = useAppStore((s) => s.apiToken);
+  const kbGlobalDefaultInit = getCachedGlobalKbRetrievalMode() ?? "auto";
+  const kbNewSessionDefaultRef = useRef<KbRetrievalMode>(kbGlobalDefaultInit);
+  const [kbGlobalDefaultMode, setKbGlobalDefaultMode] =
+    useState<KbRetrievalMode>(kbGlobalDefaultInit);
+  const onKbNewSessionDefaultChange = useCallback((mode: KbRetrievalMode) => {
+    kbNewSessionDefaultRef.current = mode;
+    setKbGlobalDefaultMode(mode);
+    setCachedGlobalKbRetrievalMode(mode);
+  }, []);
+
+  useEffect(() => {
+    if (!apiToken) return;
+    const resolveBase = async () => {
+      const base = String(apiBase ?? "").trim();
+      if (base) return base.replace(/\/+$/, "");
+      const raw = String((await window.agenticxDesktop.getApiBase()) || "").trim();
+      return raw.replace(/\/+$/, "");
+    };
+    const kbApi = createKbApi(apiToken, resolveBase);
+    let cancelled = false;
+    void (async () => {
+      try {
+        const body = await kbApi.readConfig();
+        if (cancelled) return;
+        const mode = body.config.retrieval?.mode === "always" ? "always" : "auto";
+        kbNewSessionDefaultRef.current = mode;
+        setKbGlobalDefaultMode(mode);
+        setCachedGlobalKbRetrievalMode(mode);
+      } catch {
+        // keep cached / auto
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [apiBase, apiToken]);
   const storeActiveProvider = useAppStore((s) => s.activeProvider);
   const storeActiveModel = useAppStore((s) => s.activeModel);
   const settings = useAppStore((s) => s.settings);
@@ -6076,8 +6111,12 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
       // Per-session KB retrieval mode: carry the session's explicit choice so the
       // backend prompt honors it instead of the single global config value.
       if (!isGroupPane && targetAgentId === "meta") {
-        const kbMode = getKbRetrievalModeForPane(requestSessionId, pane.id);
-        if (kbMode) body.retrieval_mode = kbMode;
+        const kbMode = resolveEffectiveKbRetrievalMode(
+          requestSessionId,
+          pane.id,
+          kbNewSessionDefaultRef.current,
+        );
+        body.retrieval_mode = kbMode;
       }
       if (isGroupPane && targetAgentId === "meta") {
         body.group_id = groupChatId;
@@ -7175,6 +7214,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
     setPaneContextInherited(pane.id, false);
     setPanePendingSessionMode(pane.id, sessionMode);
     setPaneSessionMode(pane.id, sessionMode);
+    setKbRetrievalModeForPane("", pane.id, kbNewSessionDefaultRef.current);
     // Mark this pane as explicitly awaiting a brand-new session, so
     // WorkspacePanel's auto-restore effect will not snap it back to the
     // previously-running session (which would trap new messages in the
@@ -8378,7 +8418,14 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
                   }}
                 />
                 <div className="flex items-center">
-                  <PaneKnowledgeRetrievalModeSwitch apiToken={apiToken} apiBase={apiBase} sessionId={pane.sessionId} paneId={paneId} />
+                  <PaneKnowledgeRetrievalModeSwitch
+                    apiToken={apiToken}
+                    apiBase={apiBase}
+                    sessionId={pane.sessionId}
+                    paneId={paneId}
+                    globalDefaultMode={kbGlobalDefaultMode}
+                    onNewSessionDefaultChange={onKbNewSessionDefaultChange}
+                  />
                 </div>
                 <button
                   type="button"
