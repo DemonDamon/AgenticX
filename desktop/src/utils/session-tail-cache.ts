@@ -1,8 +1,8 @@
 import type { Message } from "../store";
 import { mapLoadedSessionMessage, type LoadedSessionMessage } from "./session-message-map";
 
-/** Initial paint: last user turn, capped — tool-heavy turns stay bounded. */
-export const INITIAL_SESSION_TAIL_ROUNDS = 1;
+/** Initial paint: last few user turns, capped — tool-heavy turns stay bounded. */
+export const INITIAL_SESSION_TAIL_ROUNDS = 3;
 export const INITIAL_SESSION_TAIL_LIMIT = 40;
 
 export type SessionTailCacheEntry = {
@@ -55,12 +55,13 @@ export async function fetchSessionTailPage(
     tailLimit: INITIAL_SESSION_TAIL_LIMIT,
   });
   if (!page.ok || !Array.isArray(page.messages)) return null;
+  const startIndex = page.start_index ?? 0;
   const messages = page.messages.map((item, index) =>
-    mapLoadedSessionMessage(item as LoadedSessionMessage, sid, index)
+    mapLoadedSessionMessage(item as LoadedSessionMessage, sid, startIndex + index, sid)
   );
   return {
     messages,
-    startIndex: page.start_index ?? 0,
+    startIndex,
     hasOlder: Boolean(page.has_older),
   };
 }

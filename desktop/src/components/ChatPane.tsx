@@ -129,6 +129,7 @@ import {
   mapLoadedSessionMessage,
   type LoadedSessionMessage,
 } from "../utils/session-message-map";
+import { resolveSessionTailForSwitch } from "../utils/session-tail-cache";
 import { visibleMessagesForSession } from "../utils/message-ownership";
 import { favoriteStorageMessageId } from "../utils/favorite-selection";
 import { createResizeRafScheduler } from "../utils/resize-raf";
@@ -2037,6 +2038,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
   const setPaneMessages = useAppStore((s) => s.setPaneMessages);
   const prependPaneMessages = useAppStore((s) => s.prependPaneMessages);
   const setPaneMessagePaging = useAppStore((s) => s.setPaneMessagePaging);
+  const setPaneLoadingMessages = useAppStore((s) => s.setPaneLoadingMessages);
   const setActiveAvatarId = useAppStore((s) => s.setActiveAvatarId);
   const setPaneContextInherited = useAppStore((s) => s.setPaneContextInherited);
   const toolRoundCount = useMemo(
@@ -2266,6 +2268,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
   const listRef = useRef<HTMLDivElement>(null);
   const autoScrollPinnedRef = useRef(true);
   const loadingOlderMessagesRef = useRef(false);
+  const sessionBootstrapRef = useRef("");
   const [showJumpToBottomFab, setShowJumpToBottomFab] = useState(false);
   const imeComposingRef = useRef(false);
   const [atOpen, setAtOpen] = useState(false);
@@ -3937,7 +3940,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
       }
       const startIndex = page.start_index ?? 0;
       const mapped = page.messages.map((item, index) =>
-        mapLoadedSessionMessage(item as LoadedSessionMessage, sid, startIndex + index)
+        mapLoadedSessionMessage(item as LoadedSessionMessage, sid, startIndex + index, sid)
       );
       prependPaneMessages(pane.id, mapped);
       setPaneMessagePaging(pane.id, {
@@ -3960,32 +3963,88 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
     }
   }, [pane.id, pane.sessionId, prependPaneMessages, setPaneMessagePaging]);
 
+  const tryLoadOlderIfNeeded = useCallback(() => {
+    const el = listRef.current;
+    if (!el) return;
+    const livePane = useAppStore.getState().panes.find((p) => p.id === pane.id);
+    if (!livePane?.hasOlderMessages || livePane.loadingOlderMessages || loadingOlderMessagesRef.current) {
+      return;
+    }
+    const atTop = el.scrollTop <= 64;
+    const fitsViewport = el.scrollHeight <= el.clientHeight + 8;
+    if (atTop || fitsViewport) {
+      void loadOlderSessionMessages();
+    }
+  }, [pane.id, loadOlderSessionMessages]);
+
   useEffect(() => {
     loadingOlderMessagesRef.current = false;
+    sessionBootstrapRef.current = "";
   }, [pane.sessionId]);
+
+  /** App restore / direct bind: sessionId exists but messages never loaded via history panel. */
+  useEffect(() => {
+    const sid = (pane.sessionId || "").trim();
+    if (!sid) return;
+    const live = useAppStore.getState().panes.find((p) => p.id === pane.id);
+    if (!live || live.loadingMessages) return;
+    if ((live.messages ?? []).length > 0) {
+      sessionBootstrapRef.current = sid;
+      return;
+    }
+    if (sessionBootstrapRef.current === sid) return;
+    sessionBootstrapRef.current = sid;
+    let cancelled = false;
+    void (async () => {
+      setPaneLoadingMessages(pane.id, true);
+      try {
+        const entry = await resolveSessionTailForSwitch(sid);
+        if (cancelled) return;
+        const latestSid = String(
+          useAppStore.getState().panes.find((p) => p.id === pane.id)?.sessionId ?? ""
+        ).trim();
+        if (latestSid !== sid) return;
+        if (entry && entry.messages.length > 0) {
+          setPaneMessages(pane.id, entry.messages);
+          setPaneMessagePaging(pane.id, {
+            oldestLoadedIndex: entry.startIndex,
+            hasOlderMessages: entry.hasOlder,
+            loadingOlderMessages: false,
+          });
+        }
+      } catch {
+        /* history panel / manual refresh may recover */
+      } finally {
+        if (!cancelled) setPaneLoadingMessages(pane.id, false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    pane.id,
+    pane.sessionId,
+    pane.messages?.length,
+    setPaneLoadingMessages,
+    setPaneMessagePaging,
+    setPaneMessages,
+  ]);
 
   useEffect(() => {
     const el = listRef.current;
     if (!el) return;
-    const onScrollUpLoad = () => {
-      if (
-        el.scrollTop <= 64 &&
-        pane.hasOlderMessages &&
-        !pane.loadingOlderMessages &&
-        !loadingOlderMessagesRef.current
-      ) {
-        void loadOlderSessionMessages();
-      }
-    };
+    const onScrollUpLoad = () => tryLoadOlderIfNeeded();
     el.addEventListener("scroll", onScrollUpLoad, { passive: true });
+    requestAnimationFrame(() => tryLoadOlderIfNeeded());
     return () => {
       el.removeEventListener("scroll", onScrollUpLoad);
     };
-  }, [
-    pane.hasOlderMessages,
-    pane.loadingOlderMessages,
-    loadOlderSessionMessages,
-  ]);
+  }, [tryLoadOlderIfNeeded]);
+
+  useEffect(() => {
+    if (!pane.hasOlderMessages) return;
+    requestAnimationFrame(() => tryLoadOlderIfNeeded());
+  }, [pane.messages?.length, pane.hasOlderMessages, tryLoadOlderIfNeeded]);
 
   const truncateSessionAtUserMessage = useCallback(
     async (
@@ -7791,8 +7850,16 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
               />
             ) : null}
             <div className="min-w-0">
-              <div className="flex items-center gap-1.5 truncate text-sm font-medium text-text-strong">
-                {paneAvatarMeta.name}
+              <div className="flex flex-wrap items-center gap-x-1.5 gap-y-0.5 text-sm font-medium text-text-strong">
+                <span className="shrink-0">{paneAvatarMeta.name}</span>
+                {(pane.sessionId || "").trim() ? (
+                  <span
+                    className="select-all font-mono text-[9px] font-normal leading-snug text-text-faint"
+                    title="会话 ID（便于排查）"
+                  >
+                    {(pane.sessionId || "").trim()}
+                  </span>
+                ) : null}
                 {shouldShowFeishuBadge && (
                   <FeishuBadge variant="topbar" />
                 )}
@@ -7941,7 +8008,13 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
                   {pane.loadingOlderMessages ? (
                     <Loader2 className="h-4 w-4 animate-spin text-text-faint" aria-label="加载更早消息" />
                   ) : (
-                    <span className="text-[11px] text-text-faint">向上滚动加载更早消息</span>
+                    <button
+                      type="button"
+                      className="text-[11px] text-text-faint transition hover:text-text-subtle"
+                      onClick={() => void loadOlderSessionMessages()}
+                    >
+                      向上滚动加载更早消息
+                    </button>
                   )}
                 </div>
               ) : null}
