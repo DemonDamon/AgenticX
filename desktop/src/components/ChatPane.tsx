@@ -131,6 +131,7 @@ import {
 } from "../utils/session-message-map";
 import { resolveSessionTailForSwitch } from "../utils/session-tail-cache";
 import { visibleMessagesForSession } from "../utils/message-ownership";
+import { StreamCommitRegistry } from "../utils/stream-commit-registry";
 import { favoriteStorageMessageId } from "../utils/favorite-selection";
 import { createResizeRafScheduler } from "../utils/resize-raf";
 import { avatarTintBg } from "../utils/avatar-color";
@@ -2203,11 +2204,15 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
   /** Live-reattach (FR-4): per-session abort controllers for read-only reattach streams. */
   const reattachControllersRef = useRef<Record<string, AbortController>>({});
   const liveReattachEnabledRef = useRef(false);
+  /** RAF mirror for the currently displayed session's stream overlay only. */
   const streamTextRef = useRef("");
-  const streamCommittedRef = useRef(false);
-  /** Text last committed at a tool_call boundary; avoids duplicating the same assistant bubble at stream end. */
-  const lastMidStreamAssistantCommitRef = useRef<string | null>(null);
+  const streamCommitRegistryRef = useRef(new StreamCommitRegistry());
   const [stallState, setStallState] = useState<"none" | "stall" | "exhausted">("none");
+  // Distinguish a stall caused by an actively-running-but-silent turn ("silent")
+  // from one where the turn already ENDED without producing a visible reply
+  // ("incomplete", e.g. think-only / degenerate). Drives non-misleading copy so
+  // an ended-incomplete turn is never shown as "处理中 · 静默 Ns / 长时间无响应".
+  const [stallReason, setStallReason] = useState<"silent" | "incomplete">("silent");
   const [stoppingSessionId, setStoppingSessionId] = useState("");
   const [exhaustedRounds, setExhaustedRounds] = useState<{ rounds: number; maxRounds: number } | null>(null);
   const [sessionExecutionState, setSessionExecutionState] = useState<SessionExecutionState>("idle");
@@ -3982,28 +3987,38 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
     sessionBootstrapRef.current = "";
   }, [pane.sessionId]);
 
-  /** App restore / direct bind: sessionId exists but messages never loaded via history panel. */
+  /** App restore / direct bind / switch-back: ensure the pane shows this session's
+   *  complete persisted history. We must NOT trust stray rows already sitting in the
+   *  pane — a switch-back can leave either stale owner-mismatched rows (the render
+   *  layer filters them to a blank screen) or a partial deferred-stream flush that is
+   *  missing the user turn and earlier history. Both previously tripped a
+   *  `messages.length > 0` shortcut that skipped the disk load and left the
+   *  conversation permanently blank/partial with no self-heal. */
   useEffect(() => {
     const sid = (pane.sessionId || "").trim();
     if (!sid) return;
     const live = useAppStore.getState().panes.find((p) => p.id === pane.id);
     if (!live || live.loadingMessages) return;
-    if ((live.messages ?? []).length > 0) {
-      sessionBootstrapRef.current = sid;
+    // Actively streaming this session: live + reattach rows are authoritative;
+    // never overwrite them mid-stream. Mark bootstrapped so the post-stream
+    // effect re-run does not trigger a redundant disk reload.
+    if (streamingSessionId === sid) {
+      if ((live.messages ?? []).length > 0) sessionBootstrapRef.current = sid;
       return;
     }
+    // Already loaded this binding's persisted history from disk.
     if (sessionBootstrapRef.current === sid) return;
     sessionBootstrapRef.current = sid;
     let cancelled = false;
+    const paneStillOnSid = () =>
+      String(
+        useAppStore.getState().panes.find((p) => p.id === pane.id)?.sessionId ?? ""
+      ).trim() === sid;
     void (async () => {
       setPaneLoadingMessages(pane.id, true);
       try {
         const entry = await resolveSessionTailForSwitch(sid);
-        if (cancelled) return;
-        const latestSid = String(
-          useAppStore.getState().panes.find((p) => p.id === pane.id)?.sessionId ?? ""
-        ).trim();
-        if (latestSid !== sid) return;
+        if (cancelled || !paneStillOnSid()) return;
         if (entry && entry.messages.length > 0) {
           setPaneMessages(pane.id, entry.messages);
           setPaneMessagePaging(pane.id, {
@@ -4011,9 +4026,29 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
             hasOlderMessages: entry.hasOlder,
             loadingOlderMessages: false,
           });
+          return;
+        }
+        // Tail page empty/unavailable — fall back to a full load so a transient
+        // pagination miss never leaves the pane blank (mirrors history panel).
+        const full = await window.agenticxDesktop.loadSessionMessages(sid);
+        if (cancelled || !paneStillOnSid()) return;
+        if (full.ok && Array.isArray(full.messages) && full.messages.length > 0) {
+          const mapped = full.messages.map((item, index) =>
+            mapLoadedSessionMessage(item as LoadedSessionMessage, sid, index, sid)
+          );
+          setPaneMessages(pane.id, mapped);
+          setPaneMessagePaging(pane.id, {
+            oldestLoadedIndex: 0,
+            hasOlderMessages: false,
+            loadingOlderMessages: false,
+          });
+        } else if (sessionBootstrapRef.current === sid) {
+          // Nothing on disk for this sid — release the bootstrap latch so a later
+          // trigger can retry rather than leaving the pane permanently blank.
+          sessionBootstrapRef.current = "";
         }
       } catch {
-        /* history panel / manual refresh may recover */
+        if (sessionBootstrapRef.current === sid) sessionBootstrapRef.current = "";
       } finally {
         if (!cancelled) setPaneLoadingMessages(pane.id, false);
       }
@@ -4025,6 +4060,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
     pane.id,
     pane.sessionId,
     pane.messages?.length,
+    streamingSessionId,
     setPaneLoadingMessages,
     setPaneMessagePaging,
     setPaneMessages,
@@ -4942,6 +4978,9 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
         shouldTriggerIncompleteEndStall(execState, sseActive, msgs, graceMs, messagesHydrated);
 
       if (channelA || channelB || channelC) {
+        // channelC = idle session whose last turn produced no visible reply
+        // (ended-incomplete); channelA/B = a running turn gone silent.
+        setStallReason(channelA || channelB ? "silent" : "incomplete");
         setStallState("stall");
         return;
       }
@@ -5532,6 +5571,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
       {stallState === "stall" && (
         <StallRecoveryCard
           kind="stall"
+          reason={stallReason}
           currentModelLabel={isAutomationTaskPane ? undefined : currentModelLabel}
           modelOptions={stallModelOptions}
           autoNudgeCount={autoNudgeCount}
@@ -6096,9 +6136,8 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
     setStreamedAssistantText("");
     setStreamReferences([]);
     setStreamSearchedQueries([]);
+    streamCommitRegistryRef.current.beginSession(requestSessionId);
     streamTextRef.current = "";
-    streamCommittedRef.current = false;
-    lastMidStreamAssistantCommitRef.current = null;
     const abortController = new AbortController();
     sessionAbortControllersRef.current[requestSessionId] = abortController;
     if ((pane.sessionId || "").trim() === requestSessionId) {
@@ -6123,17 +6162,24 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
       addPaneMessage(...stamped);
     };
     const commitCurrentStreamIfNeeded = () => {
-      const raw = streamTextRef.current.trim();
+      const raw = streamCommitRegistryRef.current.getText(requestSessionId).trim();
       // Trim trailing colon ("：" or ":") that model writes just before calling a tool
       // — prevents orphaned "检查文件：" bubbles before a ToolCallCard.
       const partial = raw.replace(/[：:]\s*$/, "").trimEnd();
-      if (!partial || isThinkingPlaceholderText(partial) || streamCommittedRef.current) return false;
+      if (
+        !partial ||
+        isThinkingPlaceholderText(partial) ||
+        streamCommitRegistryRef.current.isCommitted(requestSessionId)
+      ) {
+        return false;
+      }
       addPaneMessageIfSessionActive(pane.id, "assistant", partial, "meta", chatProvider, chatModel);
-      streamCommittedRef.current = true;
-      lastMidStreamAssistantCommitRef.current = partial;
+      streamCommitRegistryRef.current.markCommitted(requestSessionId);
+      streamCommitRegistryRef.current.setMidCommit(requestSessionId, partial);
       return true;
     };
     const scheduleStreamTextUpdate = (nextText: string) => {
+      streamCommitRegistryRef.current.setText(requestSessionId, nextText);
       streamTextRef.current = nextText;
       const state = sessionStreamStateRef.current[requestSessionId];
       if (state) {
@@ -6684,10 +6730,9 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
                 if (eventAgentId === "meta") {
                   commitCurrentStreamIfNeeded();
                   full = "";
-                  streamTextRef.current = "";
+                  streamCommitRegistryRef.current.resetTurnSegment(requestSessionId);
                   cancelStreamRenderFrame();
                   scheduleStreamTextUpdate("");
-                  streamCommittedRef.current = false;
                   const pan = useAppStore.getState().panes.find((p) => p.id === pane.id);
                   const lastMsg = pan?.messages.length ? pan.messages[pan.messages.length - 1] : undefined;
                   const toolGroupId =
@@ -7131,10 +7176,14 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
           timestamp: completedAt,
         });
       };
-      if (trimmedFull && !isThinkingPlaceholderText(full) && !streamCommittedRef.current) {
-        const mid = lastMidStreamAssistantCommitRef.current;
+      if (
+        trimmedFull &&
+        !isThinkingPlaceholderText(full) &&
+        !streamCommitRegistryRef.current.isCommitted(requestSessionId)
+      ) {
+        const mid = streamCommitRegistryRef.current.getMidCommit(requestSessionId);
         if (mid !== null && trimmedFull === mid) {
-          streamCommittedRef.current = true;
+          streamCommitRegistryRef.current.markCommitted(requestSessionId);
           useAppStore.getState().mergeLastPaneMessageByRole(pane.id, "assistant", {
             ...(turnExtras ?? {}),
             timestamp: completedAt,
@@ -7150,9 +7199,13 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
             undefined,
             { ...(turnExtras ?? {}), timestamp: completedAt },
           );
-          streamCommittedRef.current = true;
+          streamCommitRegistryRef.current.markCommitted(requestSessionId);
         }
-      } else if (trimmedFull && !isThinkingPlaceholderText(full) && streamCommittedRef.current) {
+      } else if (
+        trimmedFull &&
+        !isThinkingPlaceholderText(full) &&
+        streamCommitRegistryRef.current.isCommitted(requestSessionId)
+      ) {
         if (turnExtras) {
           useAppStore.getState().mergeLastPaneMessageByRole(pane.id, "assistant", {
             ...turnExtras,
@@ -7171,6 +7224,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
       }
     } finally {
       delete sessionAbortControllersRef.current[requestSessionId];
+      streamCommitRegistryRef.current.clearSession(requestSessionId);
       const ended = sessionStreamStateRef.current[requestSessionId];
       if (ended) {
         ended.active = false;
@@ -7194,8 +7248,9 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
       }
       abortRef.current = null;
       cancelStreamRenderFrame();
-      streamTextRef.current = "";
-      streamCommittedRef.current = false;
+      if ((pane.sessionId || "").trim() === requestSessionId) {
+        streamTextRef.current = "";
+      }
       setGroupTyping({});
       setContextFiles({});
       if (!abortController.signal.aborted) {
@@ -8156,10 +8211,17 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
                   !isAutomationTaskPane ? currentModelLabel : null,
                   sessionExecutionState === "running"
                     ? "运行中"
-                    : sessionWorkInProgress
-                      ? "处理中"
-                      : null,
-                  silentSeconds > 0 ? `静默 ${silentSeconds}s` : null,
+                    : stallState === "stall" && stallReason === "incomplete"
+                      ? "未完成"
+                      : sessionWorkInProgress
+                        ? "处理中"
+                        : null,
+                  // An ended-incomplete turn is not "running" — suppress the silence
+                  // timer so it never reads as "still processing / no response".
+                  silentSeconds > 0 &&
+                  !(stallState === "stall" && stallReason === "incomplete")
+                    ? `静默 ${silentSeconds}s`
+                    : null,
                   lastToolProgress?.name
                     ? `${lastToolProgress.name}${lastToolProgress.sec > 0 ? ` ${lastToolProgress.sec}s` : ""}`
                     : null,

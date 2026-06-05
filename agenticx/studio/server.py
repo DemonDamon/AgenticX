@@ -91,6 +91,7 @@ from agenticx.studio.continuation import (
 from agenticx.studio.session_event_hub import BufferedEvent
 from agenticx.studio.session_manager import (
     SessionManager,
+    _visible_assistant_body,
     managed_session_binding_matches_avatar_query,
 )
 from agenticx.tools.mcp_hub import MCPHub
@@ -317,6 +318,38 @@ def _parse_sse_since_seq(
         except ValueError:
             continue
     return 0
+
+
+def _accumulate_meta_partial_text(partial: str, event: RuntimeEvent) -> str:
+    """Append meta TOKEN text for interrupted-turn partial finalize."""
+    if event.agent_id != "meta" or event.type != EventType.TOKEN.value:
+        return partial
+    tok = str((event.data or {}).get("text", "") or "")
+    if tok == "⏳":
+        return partial
+    return partial + tok
+
+
+def _finalize_partial_assistant_if_needed(
+    session: Any,
+    partial_meta_text: str,
+    *,
+    saw_final: bool,
+) -> bool:
+    """Append interrupted partial assistant to chat_history when FINAL never arrived."""
+    if saw_final:
+        return False
+    body = _visible_assistant_body(partial_meta_text)
+    if not body:
+        return False
+    session.chat_history.append(
+        {
+            "role": "assistant",
+            "content": partial_meta_text,
+            "metadata": {"source": "interrupted-partial"},
+        }
+    )
+    return True
 
 
 async def _finalize_chat_runtime(
@@ -2563,6 +2596,7 @@ def create_studio_app() -> FastAPI:
             meta_done = False
             saw_final = False
             had_runtime_failure = False
+            partial_meta_text = ""
             keep_runtime_after_disconnect = bool(
                 getattr(payload, "keep_runtime_after_disconnect", False)
             )
@@ -2573,7 +2607,8 @@ def create_studio_app() -> FastAPI:
             hub_sub_q: asyncio.Queue[BufferedEvent] | None = None
 
             async def _track_runtime_event(event: RuntimeEvent) -> None:
-                nonlocal saw_final, had_runtime_failure
+                nonlocal saw_final, had_runtime_failure, partial_meta_text
+                partial_meta_text = _accumulate_meta_partial_text(partial_meta_text, event)
                 if event.agent_id == "meta" and event.type == EventType.TOOL_RESULT.value:
                     _flush_taskspace_hint(manager, payload.session_id, session)
                 if event.type in ("subagent_started", "subagent_completed", "subagent_error"):
@@ -2731,6 +2766,11 @@ def create_studio_app() -> FastAPI:
                     finally:
                         if event_hub is not None:
                             await event_hub.publish_done()
+                            _finalize_partial_assistant_if_needed(
+                                session,
+                                partial_meta_text,
+                                saw_final=saw_final,
+                            )
                             await _finalize_chat_runtime(
                                 manager,
                                 payload.session_id,
@@ -2778,6 +2818,9 @@ def create_studio_app() -> FastAPI:
                         elif event is None:
                             meta_done = True
                         else:
+                            partial_meta_text = _accumulate_meta_partial_text(
+                                partial_meta_text, event
+                            )
                             if event.agent_id == "meta" and event.type == EventType.TOOL_RESULT.value:
                                 _flush_taskspace_hint(manager, payload.session_id, session)
                             if event.type in ("subagent_started", "subagent_completed", "subagent_error"):
@@ -2828,6 +2871,11 @@ def create_studio_app() -> FastAPI:
                     if task_exc is not None and event_hub is None:
                         had_runtime_failure = True
                 if event_hub is None:
+                    _finalize_partial_assistant_if_needed(
+                        session,
+                        partial_meta_text,
+                        saw_final=saw_final,
+                    )
                     await _finalize_chat_runtime(
                         manager,
                         payload.session_id,
