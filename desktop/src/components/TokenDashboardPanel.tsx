@@ -1,17 +1,12 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { X } from "lucide-react";
 import { useAppStore, type ThemeMode, type TokenDashboardRange } from "../store";
+import { fetchUsageDashboard, type UsageBreakdownItem, type UsageDailyRow, type UsageSummary, type UsageTopModel } from "../services/usageApi";
 import {
-  fetchUsageBreakdown,
-  fetchUsageDaily,
-  fetchUsageMeta,
-  fetchUsageSummary,
-  fetchUsageTopModels,
-  type UsageBreakdownItem,
-  type UsageDailyRow,
-  type UsageSummary,
-  type UsageTopModel,
-} from "../services/usageApi";
+  readUsageDashboardCache,
+  usageDashboardCacheKey,
+  writeUsageDashboardCache,
+} from "../utils/usage-dashboard-cache";
 
 const RANGE_LABELS: { id: TokenDashboardRange; label: string }[] = [
   { id: "day", label: "DAY" },
@@ -43,10 +38,39 @@ type Props = {
   onClose: () => void;
 };
 
+function applyDashboardPayload(
+  payload: {
+    summary: UsageSummary;
+    breakdown: UsageBreakdownItem[];
+    daily: UsageDailyRow[];
+    top_models: UsageTopModel[];
+    meta: { started_at: number | null; active_days_30d: number; month_conversations: number };
+    week_chip: UsageSummary;
+    month_chip: UsageSummary;
+  },
+  setters: {
+    setSummary: (v: UsageSummary | null) => void;
+    setBreakdown: (v: UsageBreakdownItem[]) => void;
+    setDaily: (v: UsageDailyRow[]) => void;
+    setTopModels: (v: UsageTopModel[]) => void;
+    setMeta: (v: { started_at: number | null; active_days_30d: number; month_conversations: number } | null) => void;
+    setWeekChip: (v: UsageSummary | null) => void;
+    setMonthChip: (v: UsageSummary | null) => void;
+  },
+) {
+  setters.setSummary(payload.summary);
+  setters.setBreakdown(payload.breakdown ?? []);
+  setters.setDaily(payload.daily ?? []);
+  setters.setTopModels(payload.top_models ?? []);
+  setters.setMeta(payload.meta);
+  setters.setWeekChip(payload.week_chip);
+  setters.setMonthChip(payload.month_chip);
+}
+
 export function TokenDashboardPanel({ open, onClose }: Props) {
   const theme = useAppStore((s) => s.theme);
   const apiToken = useAppStore((s) => s.apiToken);
-  const backendUrl = useAppStore((s) => s.backendUrl);
+  const apiBase = useAppStore((s) => s.apiBase);
   const range = useAppStore((s) => s.tokenDashboard.range);
   const customFrom = useAppStore((s) => s.tokenDashboard.customFrom);
   const customTo = useAppStore((s) => s.tokenDashboard.customTo);
@@ -54,6 +78,7 @@ export function TokenDashboardPanel({ open, onClose }: Props) {
   const setTokenDashboardCustomRange = useAppStore((s) => s.setTokenDashboardCustomRange);
 
   const [busy, setBusy] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const [summary, setSummary] = useState<UsageSummary | null>(null);
   const [weekChip, setWeekChip] = useState<UsageSummary | null>(null);
@@ -66,11 +91,11 @@ export function TokenDashboardPanel({ open, onClose }: Props) {
   );
 
   const resolveApiBase = useCallback(async () => {
-    const u = (backendUrl ?? "").trim();
+    const u = (apiBase ?? "").trim();
     if (u) return u.replace(/\/+$/, "");
     const raw = String((await window.agenticxDesktop.getApiBase()) || "").trim();
     return raw.replace(/\/+$/, "");
-  }, [backendUrl]);
+  }, [apiBase]);
 
   const customParams = useMemo(() => {
     if (range !== "custom") return undefined;
@@ -90,50 +115,84 @@ export function TokenDashboardPanel({ open, onClose }: Props) {
     if (!open) return;
 
     let cancelled = false;
+    const cacheKey = usageDashboardCacheKey(range, customFrom, customTo);
+    const cached = readUsageDashboardCache();
+    const hasMatchingCache =
+      cached != null &&
+      usageDashboardCacheKey(cached.range, cached.customFrom, cached.customTo) === cacheKey;
+
+    if (hasMatchingCache) {
+      applyDashboardPayload(cached.payload, {
+        setSummary,
+        setBreakdown,
+        setDaily,
+        setTopModels,
+        setMeta,
+        setWeekChip,
+        setMonthChip,
+      });
+    }
+
     async function load() {
-      setBusy(true);
+      const customIncomplete = range === "custom" && (!customParams?.from || !customParams?.to);
+      if (customIncomplete) {
+        setErr("请选择自定义区间的开始与结束日期");
+        if (!hasMatchingCache) setBusy(true);
+        else setRefreshing(true);
+        try {
+          const base = await resolveApiBase();
+          const tok = apiToken ?? "";
+          const payload = await fetchUsageDashboard(base, tok, "month");
+          if (cancelled) return;
+          setMeta(payload.meta);
+          setWeekChip(payload.week_chip);
+          setMonthChip(payload.month_chip);
+        } catch (e) {
+          if (!cancelled && !hasMatchingCache) {
+            setErr(e instanceof Error ? e.message : String(e));
+          }
+        } finally {
+          if (!cancelled) {
+            setBusy(false);
+            setRefreshing(false);
+          }
+        }
+        return;
+      }
+
+      if (!hasMatchingCache) setBusy(true);
+      else setRefreshing(true);
       setErr(null);
       try {
         const base = await resolveApiBase();
         const tok = apiToken ?? "";
-        const customIncomplete = range === "custom" && (!customParams?.from || !customParams?.to);
-
-        if (customIncomplete) {
-          setErr("请选择自定义区间的开始与结束日期");
-          const [m, wChip, mChip] = await Promise.all([
-            fetchUsageMeta(base, tok),
-            fetchUsageSummary(base, tok, "week"),
-            fetchUsageSummary(base, tok, "month"),
-          ]);
-          if (cancelled) return;
-          setMeta(m);
-          setWeekChip(wChip);
-          setMonthChip(mChip);
-          return;
-        }
-
-        const [s, prov, dRows, tm, m, wChip, mChip] = await Promise.all([
-          fetchUsageSummary(base, tok, range, customParams),
-          fetchUsageBreakdown(base, tok, range, "provider", customParams),
-          fetchUsageDaily(base, tok, range, customParams),
-          fetchUsageTopModels(base, tok, range, 3, customParams),
-          fetchUsageMeta(base, tok),
-          fetchUsageSummary(base, tok, "week"),
-          fetchUsageSummary(base, tok, "month"),
-        ]);
-
+        const payload = await fetchUsageDashboard(base, tok, range, customParams, 3);
         if (cancelled) return;
-        setSummary(s);
-        setBreakdown(prov.items ?? []);
-        setDaily(dRows.items ?? []);
-        setTopModels(tm.items ?? []);
-        setMeta(m);
-        setWeekChip(wChip);
-        setMonthChip(mChip);
+        applyDashboardPayload(payload, {
+          setSummary,
+          setBreakdown,
+          setDaily,
+          setTopModels,
+          setMeta,
+          setWeekChip,
+          setMonthChip,
+        });
+        writeUsageDashboardCache({
+          savedAt: Date.now(),
+          range,
+          customFrom,
+          customTo,
+          payload,
+        });
       } catch (e) {
-        if (!cancelled) setErr(e instanceof Error ? e.message : String(e));
+        if (!cancelled && !hasMatchingCache) {
+          setErr(e instanceof Error ? e.message : String(e));
+        }
       } finally {
-        if (!cancelled) setBusy(false);
+        if (!cancelled) {
+          setBusy(false);
+          setRefreshing(false);
+        }
       }
     }
 
@@ -141,7 +200,7 @@ export function TokenDashboardPanel({ open, onClose }: Props) {
     return () => {
       cancelled = true;
     };
-  }, [open, range, customParams?.from, customParams?.to, apiToken, resolveApiBase]);
+  }, [open, range, customFrom, customTo, customParams?.from, customParams?.to, apiToken, resolveApiBase]);
 
   const trendBars = useMemo(() => {
     const rows = [...daily];
@@ -304,6 +363,9 @@ export function TokenDashboardPanel({ open, onClose }: Props) {
               <div className="rounded-lg bg-red-500/15 px-4 py-3 text-base text-status-error">{err}</div>
             ) : null}
             {busy ? <div className="text-sm font-medium text-[var(--text-primary)]">加载中…</div> : null}
+            {!busy && refreshing ? (
+              <div className="text-sm font-medium text-[var(--text-primary)]">正在刷新…</div>
+            ) : null}
 
             <div className="rounded-xl border border-border bg-surface-card px-5 py-5">
               <div className="text-sm font-medium uppercase tracking-wider text-[var(--text-primary)]">TOTAL TOKENS</div>

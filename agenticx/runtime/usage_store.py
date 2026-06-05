@@ -352,6 +352,199 @@ class UsageStore:
                 conn.close()
         return int(row[0] or 0) if row else 0
 
+    def dashboard_sync(
+        self,
+        *,
+        range_start_ms: int,
+        range_end_ms: int,
+        week_start_ms: int,
+        week_end_ms: int,
+        month_start_ms: int,
+        month_end_ms: int,
+        calendar_month_start_ms: int,
+        now_ms: int,
+        top_limit: int = 3,
+    ) -> dict[str, Any]:
+        """Batch all token-dashboard queries in one lock + connection."""
+        lim = max(1, min(20, int(top_limit or 3)))
+
+        def _summary_row(conn: sqlite3.Connection, start_ms: int, end_ms: int) -> dict[str, Any]:
+            row = conn.execute(
+                """
+                SELECT
+                    COALESCE(SUM(total_tokens), 0),
+                    COALESCE(SUM(input_tokens), 0),
+                    COALESCE(SUM(output_tokens), 0),
+                    COALESCE(SUM(cached_tokens), 0),
+                    COALESCE(SUM(reasoning_tokens), 0),
+                    COALESCE(SUM(cost_usd), 0),
+                    COUNT(DISTINCT CASE WHEN session_id != '' THEN session_id END)
+                FROM usage_events
+                WHERE ts_ms >= ? AND ts_ms <= ?
+                """,
+                (start_ms, end_ms),
+            ).fetchone()
+            if not row:
+                return {
+                    "tokens": 0,
+                    "input": 0,
+                    "output": 0,
+                    "cached": 0,
+                    "reasoning": 0,
+                    "cost_usd": 0.0,
+                    "conversations": 0,
+                }
+            return {
+                "tokens": int(row[0] or 0),
+                "input": int(row[1] or 0),
+                "output": int(row[2] or 0),
+                "cached": int(row[3] or 0),
+                "reasoning": int(row[4] or 0),
+                "cost_usd": float(row[5] or 0.0),
+                "conversations": int(row[6] or 0),
+            }
+
+        def _breakdown_rows(conn: sqlite3.Connection, start_ms: int, end_ms: int) -> list[dict[str, Any]]:
+            rows = conn.execute(
+                """
+                SELECT provider,
+                       SUM(total_tokens),
+                       SUM(cost_usd),
+                       COUNT(DISTINCT CASE WHEN model != '' THEN model END)
+                FROM usage_events
+                WHERE ts_ms >= ? AND ts_ms <= ?
+                GROUP BY provider
+                ORDER BY SUM(total_tokens) DESC
+                """,
+                (start_ms, end_ms),
+            ).fetchall()
+            total_tokens = sum(int(r[1] or 0) for r in rows)
+            out: list[dict[str, Any]] = []
+            for r in rows:
+                key = str(r[0] or "(unknown)")
+                tks = int(r[1] or 0)
+                cst = float(r[2] or 0.0)
+                pct = (100.0 * tks / total_tokens) if total_tokens > 0 else 0.0
+                out.append(
+                    {
+                        "key": key,
+                        "tokens": tks,
+                        "percent": round(pct, 2),
+                        "cost_usd": round(cst, 4),
+                        "model_count": int(r[3] or 0),
+                    }
+                )
+            return out
+
+        def _daily_rows(conn: sqlite3.Connection, start_ms: int, end_ms: int) -> list[dict[str, Any]]:
+            rows = conn.execute(
+                """
+                SELECT
+                    strftime('%Y-%m-%d', ts_ms / 1000, 'unixepoch') AS d,
+                    SUM(total_tokens),
+                    SUM(input_tokens),
+                    SUM(output_tokens),
+                    SUM(cached_tokens),
+                    SUM(reasoning_tokens),
+                    COUNT(DISTINCT CASE WHEN session_id != '' THEN session_id END)
+                FROM usage_events
+                WHERE ts_ms >= ? AND ts_ms <= ?
+                GROUP BY d
+                ORDER BY d ASC
+                """,
+                (start_ms, end_ms),
+            ).fetchall()
+            return [
+                {
+                    "date": str(r[0] or ""),
+                    "total": int(r[1] or 0),
+                    "input": int(r[2] or 0),
+                    "output": int(r[3] or 0),
+                    "cached": int(r[4] or 0),
+                    "reasoning": int(r[5] or 0),
+                    "convs": int(r[6] or 0),
+                }
+                for r in rows
+            ]
+
+        def _top_models(conn: sqlite3.Connection, start_ms: int, end_ms: int) -> list[dict[str, Any]]:
+            rows = conn.execute(
+                """
+                SELECT model, SUM(total_tokens) AS t
+                FROM usage_events
+                WHERE ts_ms >= ? AND ts_ms <= ? AND model != ''
+                GROUP BY model
+                ORDER BY t DESC
+                LIMIT ?
+                """,
+                (start_ms, end_ms, lim),
+            ).fetchall()
+            total_row = conn.execute(
+                """
+                SELECT COALESCE(SUM(total_tokens), 0)
+                FROM usage_events
+                WHERE ts_ms >= ? AND ts_ms <= ?
+                """,
+                (start_ms, end_ms),
+            ).fetchone()
+            grand = int(total_row[0] or 0) if total_row else 0
+            out: list[dict[str, Any]] = []
+            for r in rows:
+                m = str(r[0] or "")
+                tks = int(r[1] or 0)
+                pct = (100.0 * tks / grand) if grand > 0 else 0.0
+                out.append({"model": m, "tokens": tks, "percent": round(pct, 2)})
+            return out
+
+        with self._lock:
+            conn = self._connect()
+            try:
+                summary = _summary_row(conn, range_start_ms, range_end_ms)
+                breakdown = _breakdown_rows(conn, range_start_ms, range_end_ms)
+                daily = _daily_rows(conn, range_start_ms, range_end_ms)
+                top_models = _top_models(conn, range_start_ms, range_end_ms)
+                week_chip = _summary_row(conn, week_start_ms, week_end_ms)
+                month_chip = _summary_row(conn, month_start_ms, month_end_ms)
+
+                started_row = conn.execute("SELECT MIN(ts_ms) FROM usage_events").fetchone()
+                started_at = int(started_row[0]) if started_row and started_row[0] is not None else None
+
+                active_row = conn.execute(
+                    """
+                    SELECT COUNT(DISTINCT strftime('%Y-%m-%d', ts_ms / 1000, 'unixepoch'))
+                    FROM usage_events
+                    WHERE ts_ms >= ? AND ts_ms <= ?
+                    """,
+                    (now_ms - 30 * 86400000, now_ms),
+                ).fetchone()
+                active_days_30d = int(active_row[0] or 0) if active_row else 0
+
+                conv_row = conn.execute(
+                    """
+                    SELECT COUNT(DISTINCT session_id)
+                    FROM usage_events
+                    WHERE ts_ms >= ? AND ts_ms <= ? AND session_id != ''
+                    """,
+                    (calendar_month_start_ms, now_ms),
+                ).fetchone()
+                month_conversations = int(conv_row[0] or 0) if conv_row else 0
+            finally:
+                conn.close()
+
+        return {
+            "summary": summary,
+            "breakdown": breakdown,
+            "daily": daily,
+            "top_models": top_models,
+            "meta": {
+                "started_at": started_at,
+                "active_days_30d": active_days_30d,
+                "month_conversations": month_conversations,
+            },
+            "week_chip": week_chip,
+            "month_chip": month_chip,
+        }
+
 
 _store_singleton: UsageStore | None = None
 _store_lock = threading.Lock()
