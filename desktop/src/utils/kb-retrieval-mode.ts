@@ -4,18 +4,60 @@
  * The KB retrieval mode (智能检索 "auto" / 始终检索 "always") used to be a single
  * global value in ~/.agenticx/config.yaml, which meant concurrent sessions
  * clobbered each other's choice when switching panes. This module persists the
- * user's choice keyed by sessionId so each session keeps its own mode. The
- * global config value is only consulted as the default for sessions the user
- * has not explicitly toggled.
+ * user's choice keyed by sessionId so each session keeps its own mode. When no
+ * per-session choice exists, fall back to global ``retrieval.mode`` (default ``auto``).
  */
 
 export type KbRetrievalMode = "auto" | "always";
 
 const STORAGE_KEY = "agx-kb-retrieval-mode-by-session-v1";
+const GLOBAL_DEFAULT_CACHE_KEY = "agx-kb-global-retrieval-mode-v1";
 
 /** Fold legacy/unknown values into the simplified two-state model. */
 export function clampKbRetrievalMode(raw: unknown): KbRetrievalMode {
   return raw === "always" ? "always" : "auto";
+}
+
+/** Last known global ``retrieval.mode`` from settings (sync read, no network). */
+export function getCachedGlobalKbRetrievalMode(): KbRetrievalMode | null {
+  if (typeof window === "undefined") return null;
+  try {
+    const raw = window.localStorage.getItem(GLOBAL_DEFAULT_CACHE_KEY);
+    return raw === "always" || raw === "auto" ? raw : null;
+  } catch {
+    return null;
+  }
+}
+
+export function setCachedGlobalKbRetrievalMode(mode: KbRetrievalMode): void {
+  if (typeof window === "undefined") return;
+  try {
+    window.localStorage.setItem(GLOBAL_DEFAULT_CACHE_KEY, clampKbRetrievalMode(mode));
+  } catch {
+    // ignore storage failures
+  }
+}
+
+/** Per-session choice wins; otherwise use global retrieval.mode (default auto). */
+export function resolveEffectiveKbRetrievalMode(
+  sessionId: string,
+  paneId: string,
+  globalDefault: KbRetrievalMode = "auto",
+): KbRetrievalMode {
+  return (
+    getKbRetrievalModeForPane(sessionId, paneId) ??
+    getCachedGlobalKbRetrievalMode() ??
+    clampKbRetrievalMode(globalDefault)
+  );
+}
+
+/** Synchronous display mode for the chat toolbar (no async config fetch). */
+export function resolveDisplayKbRetrievalMode(
+  sessionId: string,
+  paneId: string,
+  globalDefault: KbRetrievalMode = "auto",
+): KbRetrievalMode {
+  return resolveEffectiveKbRetrievalMode(sessionId, paneId, globalDefault);
 }
 
 function readMap(): Record<string, KbRetrievalMode> {

@@ -474,22 +474,11 @@ export function KnowledgeConfigPanel({
       </Panel>
 
       <Panel title="检索">
+        <p className="text-[11px] leading-relaxed text-text-muted">
+          对话侧的「智能 / 始终检索」在页面上方<strong className="font-medium text-text-primary">对话检索</strong>
+          中统一配置；此处仅配置本知识脑的索引与检索通道参数。
+        </p>
         <div className="space-y-4">
-          <Field label="触发模式">
-            <select
-              className={`w-full ${KB_FIELD_BASE}`}
-              value={config.retrieval.mode === "always" ? "always" : "auto"}
-              onChange={(e) =>
-                patch("retrieval", {
-                  ...config.retrieval,
-                  mode: (e.target.value as "auto" | "always") || "auto",
-                })
-              }
-            >
-              <option value="auto">智能检索 · 推荐</option>
-              <option value="always">始终检索</option>
-            </select>
-          </Field>
           <Field label="默认 Top-K">
             <input
               type="number"
@@ -793,10 +782,21 @@ function ParserCapabilityRow({
   );
 }
 
-function Field({ label, children }: { label: string; children: React.ReactNode }) {
+function Field({
+  label,
+  hint,
+  children,
+}: {
+  label: string;
+  hint?: string;
+  children: React.ReactNode;
+}) {
   return (
     <label className="block text-xs text-text-subtle">
       <span className="mb-1 inline-block">{label}</span>
+      {hint ? (
+        <p className="mb-1.5 text-[11px] leading-relaxed text-text-muted">{hint}</p>
+      ) : null}
       {children}
     </label>
   );

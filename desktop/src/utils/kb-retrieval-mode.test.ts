@@ -1,10 +1,14 @@
 import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   clampKbRetrievalMode,
+  getCachedGlobalKbRetrievalMode,
   getKbRetrievalModeForPane,
   getSessionKbRetrievalMode,
   kbRetrievalPanePendingKey,
   migratePaneKbRetrievalModeToSession,
+  resolveDisplayKbRetrievalMode,
+  resolveEffectiveKbRetrievalMode,
+  setCachedGlobalKbRetrievalMode,
   setKbRetrievalModeForPane,
   setSessionKbRetrievalMode,
 } from "./kb-retrieval-mode";
@@ -89,5 +93,20 @@ describe("per-session storage", () => {
     migratePaneKbRetrievalModeToSession("pane-1", "sess-new");
     expect(getSessionKbRetrievalMode("sess-new")).toBe("auto");
     expect(getSessionKbRetrievalMode(kbRetrievalPanePendingKey("pane-1"))).toBeNull();
+  });
+
+  it("resolveEffectiveKbRetrievalMode uses new-session default when unset", () => {
+    expect(resolveEffectiveKbRetrievalMode("sess-x", "pane-1", "auto")).toBe("auto");
+    expect(resolveEffectiveKbRetrievalMode("sess-x", "pane-1", "always")).toBe("always");
+    setSessionKbRetrievalMode("sess-x", "always");
+    expect(resolveEffectiveKbRetrievalMode("sess-x", "pane-1", "auto")).toBe("always");
+  });
+
+  it("cached global default applies before network fetch", () => {
+    setCachedGlobalKbRetrievalMode("auto");
+    expect(getCachedGlobalKbRetrievalMode()).toBe("auto");
+    expect(resolveDisplayKbRetrievalMode("", "pane-new", "always")).toBe("auto");
+    setKbRetrievalModeForPane("", "pane-new", "always");
+    expect(resolveDisplayKbRetrievalMode("", "pane-new", "auto")).toBe("always");
   });
 });
