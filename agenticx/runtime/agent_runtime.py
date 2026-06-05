@@ -1342,6 +1342,31 @@ class AgentRuntime:
                     self._last_persist_time = time.time()
                 except Exception:
                     pass
+        elif not _is_system_trigger:
+            # skip_user_history still feeds the model, but Desktop must show the
+            # user bubble after reload. Append a display row when the tail does
+            # not already contain this utterance (retry keeps the truncated row).
+            from agenticx.studio.continuation import is_continuation_user_prompt
+
+            ui_text = str(user_input or "").strip()
+            if ui_text and not is_continuation_user_prompt(ui_text):
+                last_user_text = ""
+                for item in reversed(session.chat_history or []):
+                    if item.get("role") == "user":
+                        last_user_text = str(item.get("content", "")).strip()
+                        break
+                if last_user_text != ui_text:
+                    hist_user: dict[str, Any] = {"role": "user", "content": user_input}
+                    if history_user_attachments:
+                        hist_user["attachments"] = list(history_user_attachments)
+                    session.chat_history.append(hist_user)
+                    session.current_user_intent = user_input
+                    if self._mid_turn_persist is not None:
+                        try:
+                            self._mid_turn_persist()
+                            self._last_persist_time = time.time()
+                        except Exception:
+                            pass
         status_query_total = 0
         status_query_attempts_total = 0
         max_status_queries_per_turn = _resolve_status_query_budget_per_turn()

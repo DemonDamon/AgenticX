@@ -308,6 +308,46 @@ def test_sanitize_context_messages_drops_empty_assistant_without_tools() -> None
     ]
 
 
+async def test_skip_user_history_still_persists_display_user() -> None:
+    runtime = AgentRuntime(_TextOnlyLLM(), _ApproveGate())
+    session = StudioSession()
+    persisted: list[int] = []
+
+    def _persist() -> None:
+        persisted.append(len(session.chat_history))
+
+    runtime._mid_turn_persist = _persist  # type: ignore[attr-defined]
+
+    async for _ in runtime.run_turn(
+        "能不能听到？",
+        session,
+        persist_user_message=False,
+    ):
+        pass
+
+    user_rows = [m for m in session.agent_messages if m.get("role") == "user"]
+    assert user_rows == []
+    assert session.chat_history[0] == {"role": "user", "content": "能不能听到？"}
+    assert persisted == [1]
+
+
+async def test_skip_user_history_dedupes_existing_tail_user() -> None:
+    runtime = AgentRuntime(_TextOnlyLLM(), _ApproveGate())
+    session = StudioSession()
+    session.chat_history = [{"role": "user", "content": "能不能听到？"}]
+
+    async for _ in runtime.run_turn(
+        "能不能听到？",
+        session,
+        persist_user_message=False,
+    ):
+        pass
+
+    user_rows = [m for m in session.chat_history if m.get("role") == "user"]
+    assert len(user_rows) == 1
+    assert user_rows[0]["content"] == "能不能听到？"
+
+
 def test_sanitize_context_messages_placeholders_empty_assistant_with_tools() -> None:
     from agenticx.runtime.agent_runtime import _sanitize_context_messages
 

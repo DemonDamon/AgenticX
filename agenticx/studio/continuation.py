@@ -80,6 +80,24 @@ def load_unattended_config() -> dict[str, Any]:
     }
 
 
+def is_continuation_user_prompt(text: str) -> bool:
+    """True when *text* is an internal continuation/nudge prompt, not end-user chat."""
+    t = (text or "").strip()
+    if not t:
+        return True
+    if t.startswith("[系统通知]") or t.startswith("[auto-nudge]"):
+        return True
+    known = (
+        resolve_continuation_prompt("exhausted"),
+        resolve_continuation_prompt("interrupted"),
+        resolve_continuation_prompt("rate_limit"),
+        resolve_continuation_prompt("stall"),
+        resolve_continuation_prompt("manual"),
+        resolve_continuation_prompt("interrupted", execution_state="interrupted"),
+    )
+    return t in known
+
+
 def resolve_continuation_prompt(
     reason: ContinuationReason,
     *,

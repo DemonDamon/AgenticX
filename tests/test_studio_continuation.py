@@ -16,6 +16,7 @@ from agenticx.runtime.stall_policy import (
 )
 from agenticx.studio.continuation import (
     format_continuation_notice,
+    is_continuation_user_prompt,
     mark_continue_attempt,
     prepare_continue,
     resolve_continuation_prompt,
@@ -39,6 +40,18 @@ class _FakeManaged:
 def test_resolve_continuation_prompt_interrupted() -> None:
     text = resolve_continuation_prompt("interrupted", execution_state="interrupted")
     assert "todo" in text.lower()
+
+
+def test_is_continuation_user_prompt_real_user() -> None:
+    assert is_continuation_user_prompt("能不能听到？") is False
+    assert is_continuation_user_prompt("  hello  ") is False
+
+
+def test_is_continuation_user_prompt_internal() -> None:
+    assert is_continuation_user_prompt("") is True
+    assert is_continuation_user_prompt("[auto-nudge] 停滞") is True
+    assert is_continuation_user_prompt(resolve_continuation_prompt("stall")) is True
+    assert is_continuation_user_prompt(resolve_continuation_prompt("exhausted")) is True
 
 
 def test_format_continuation_notice_auto() -> None:
