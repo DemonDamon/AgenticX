@@ -1647,6 +1647,19 @@ async function fetchListAvatarsOnce(): Promise<{ ok: boolean; avatars: unknown[]
   }
 }
 
+async function fetchListGroupsOnce(): Promise<{ ok: boolean; groups: unknown[] }> {
+  try {
+    const resp = await fetch(`${getStudioUrl()}/api/groups`, {
+      headers: { "x-agx-desktop-token": getStudioToken() },
+    });
+    if (!resp.ok) return { ok: false, groups: [] };
+    const data = (await resp.json()) as { ok?: boolean; groups?: unknown[] };
+    return { ok: Boolean(data.ok), groups: Array.isArray(data.groups) ? data.groups : [] };
+  } catch {
+    return { ok: false, groups: [] };
+  }
+}
+
 async function fetchListSessionsOnce(
   avatarId?: string
 ): Promise<{ ok: boolean; sessions: unknown[] }> {
@@ -3591,6 +3604,7 @@ function registerIpc(): void {
       ok: boolean;
       avatars: { ok: boolean; avatars: unknown[] };
       sessions: { ok: boolean; sessions: unknown[] };
+      groups: { ok: boolean; groups: unknown[] };
       taskspaces: { ok: boolean; workspaces: unknown[]; error?: string };
       messages: { ok: boolean; messages: unknown[]; error?: string };
     }> => {
@@ -3603,14 +3617,16 @@ function registerIpc(): void {
           ok: false,
           avatars: { ok: false, avatars: [] },
           sessions: { ok: false, sessions: [] },
+          groups: { ok: false, groups: [] },
           taskspaces: { ok: false, workspaces: [], error: "studio_not_ready" },
           messages: { ok: false, messages: [], error: "studio_not_ready" },
         };
       }
 
-      const [avatars, sessions, taskspaces, messages] = await Promise.all([
+      const [avatars, sessions, groups, taskspaces, messages] = await Promise.all([
         withFetchTimeout(fetchListAvatarsOnce(), { ok: false, avatars: [] }),
         withFetchTimeout(fetchListSessionsOnce(avatarId), { ok: false, sessions: [] }),
+        withFetchTimeout(fetchListGroupsOnce(), { ok: false, groups: [] }),
         sessionId
           ? withFetchTimeout(fetchListTaskspacesCore(sessionId), {
               ok: false,
@@ -3628,8 +3644,8 @@ function registerIpc(): void {
       ]);
 
       const anyOk =
-        avatars.ok || sessions.ok || taskspaces.ok || messages.ok;
-      return { ok: anyOk, avatars, sessions, taskspaces, messages };
+        avatars.ok || sessions.ok || groups.ok || taskspaces.ok || messages.ok;
+      return { ok: anyOk, avatars, sessions, groups, taskspaces, messages };
     }
   );
 
@@ -4469,16 +4485,8 @@ function registerIpc(): void {
   });
 
   ipcMain.handle("list-groups", async () => {
-    try {
-      await waitForStudio();
-      const resp = await fetch(`${getStudioUrl()}/api/groups`, {
-        headers: { "x-agx-desktop-token": getStudioToken() },
-      });
-      if (!resp.ok) return { ok: false, groups: [] };
-      return await resp.json();
-    } catch {
-      return { ok: false, groups: [] };
-    }
+    await waitForStudio();
+    return fetchListGroupsOnce();
   });
 
   ipcMain.handle("create-group", async (_event, payload: { name: string; avatar_ids: string[]; routing?: string }) => {

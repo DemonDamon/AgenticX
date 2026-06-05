@@ -906,6 +906,14 @@ class SessionManager:
             page_limit = max(1, min(int(limit), 100))
             start_index = max(0, end_index - page_limit)
             window = raw[start_index:end_index]
+            self._diagnose_page_source(
+                session_id,
+                requested_before_index=int(before_index),
+                in_memory=self._sessions.get(session_id) is not None,
+                raw=raw,
+                window=window,
+                window_start=start_index,
+            )
         else:
             start_index = 0
             window = raw
@@ -916,6 +924,76 @@ class SessionManager:
             "total_count": total_count,
             "has_older": start_index > 0,
         }
+
+    def _diagnose_page_source(
+        self,
+        session_id: str,
+        *,
+        requested_before_index: int,
+        in_memory: bool,
+        raw: list[dict],
+        window: list[dict],
+        window_start: int,
+    ) -> None:
+        """One-shot diagnostic: detect cross-session contamination on scroll-up.
+
+        Compares the served before_index window against the on-disk messages.json
+        for the SAME session. Any window row whose (role, content-prefix) does not
+        appear on disk is a candidate "leaked" row (in-memory source diverged from
+        the persisted file). Logs role/content fingerprints so we can confirm
+        whether the leak originates from in-memory chat_history or the snapshot.
+
+        Diagnostic only -- no behavior change. Remove once root cause is confirmed.
+        """
+        try:
+            disk_rows = self._load_messages_snapshot(session_id)
+            disk_keys: dict[str, int] = {}
+            for item in disk_rows:
+                if not isinstance(item, dict):
+                    continue
+                role = str(item.get("role", "")).strip()
+                content = str(item.get("content", "")).strip()[:160]
+                key = f"{role}::{content}"
+                disk_keys[key] = disk_keys.get(key, 0) + 1
+
+            leaked: list[dict[str, Any]] = []
+            for offset, item in enumerate(window):
+                if not isinstance(item, dict):
+                    continue
+                role = str(item.get("role", "")).strip()
+                content = str(item.get("content", "")).strip()[:160]
+                key = f"{role}::{content}"
+                if disk_keys.get(key, 0) > 0:
+                    disk_keys[key] -= 1
+                    continue
+                leaked.append(
+                    {
+                        "abs_index": window_start + offset,
+                        "role": role,
+                        "content_prefix": content[:80],
+                    }
+                )
+
+            _log.warning(
+                "[page-diag] session=%s before_index=%d in_memory=%s "
+                "raw_len=%d disk_len=%d window_len=%d leaked_rows=%d",
+                session_id,
+                requested_before_index,
+                in_memory,
+                len(raw),
+                len(disk_rows),
+                len(window),
+                len(leaked),
+            )
+            if leaked:
+                _log.warning(
+                    "[page-diag] session=%s LEAK candidates (in-memory has rows "
+                    "absent from messages.json): %s",
+                    session_id,
+                    leaked[:8],
+                )
+        except Exception as exc:  # pragma: no cover - diagnostic must never break paging
+            _log.warning("[page-diag] session=%s diagnostic failed: %s", session_id, exc)
 
     def _ensure_messages_tail_snapshot(self, session_id: str, raw: list[dict]) -> None:
         if not raw:

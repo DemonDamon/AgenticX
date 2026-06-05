@@ -119,14 +119,25 @@ export function AvatarSidebar() {
   // (issue #11).
   const corePreloadAttempted = useAppStore((s) => s.corePreloadAttempted);
   const avatarCount = useAppStore((s) => s.avatars.length);
-  const [avatarsLoaded, setAvatarsLoaded] = useState(false);
-  const [groupsLoaded, setGroupsLoaded] = useState(false);
+  const groupCount = useAppStore((s) => s.groups.length);
+  const [avatarsLoaded, setAvatarsLoaded] = useState(
+    () => corePreloadAttempted || avatarCount > 0
+  );
+  const [groupsLoaded, setGroupsLoaded] = useState(
+    () => corePreloadAttempted || groupCount > 0
+  );
 
   useEffect(() => {
     if (corePreloadAttempted || avatarCount > 0) {
       setAvatarsLoaded(true);
     }
   }, [corePreloadAttempted, avatarCount]);
+
+  useEffect(() => {
+    if (corePreloadAttempted || groupCount > 0) {
+      setGroupsLoaded(true);
+    }
+  }, [corePreloadAttempted, groupCount]);
   const [avatarsHeight, setAvatarsHeight] = useState<number | null>(() => {
     const saved = loadSidebarSectionHeights();
     return saved.avatarsHeight;
@@ -234,12 +245,7 @@ export function AvatarSidebar() {
 
   useEffect(() => {
     let cancelled = false;
-    // The studio backend may still be cold-booting when the sidebar mounts.
-    // The IPC handlers in main.ts now wait up to 30s for the studio to be
-    // ready, but if that wait times out (or the user starts in a degraded
-    // state) we still want the UI to recover automatically rather than sit
-    // on the misleading "暂无分身/群聊" empty state. Retry with a small
-    // backoff for up to ~1 minute (issue #11).
+    const preloaded = useAppStore.getState().corePreloadAttempted;
     const delays = [2000, 4000, 8000, 16000, 30000];
     const runWithRetries = async (
       label: "avatars" | "groups",
@@ -255,8 +261,19 @@ export function AvatarSidebar() {
         console.warn(`[AvatarSidebar] ${label} refresh failed, retrying...`);
       }
     };
-    void runWithRetries("avatars", refreshAvatars);
-    void runWithRetries("groups", refreshGroups);
+
+    // Splash preload already hydrated the store: show lists immediately, one
+    // background refresh instead of the long cold-start retry loop (issue #11).
+    if (preloaded) {
+      setAvatarsLoaded(true);
+      setGroupsLoaded(true);
+      void refreshAvatars();
+      void refreshGroups();
+    } else {
+      void runWithRetries("avatars", refreshAvatars);
+      void runWithRetries("groups", refreshGroups);
+    }
+
     void refreshAutomationTasks();
     return () => {
       cancelled = true;

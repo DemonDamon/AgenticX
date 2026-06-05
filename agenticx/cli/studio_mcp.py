@@ -26,6 +26,11 @@ if TYPE_CHECKING:
 console = Console()
 logger = logging.getLogger(__name__)
 
+# Parallel MCP handshakes (auto-connect + restore). Matches GlobalMcpManager restore.
+_MCP_CONNECT_CONCURRENCY = 4
+
+_mcp_hub_connect_lock: asyncio.Lock | None = None
+
 # mcp_call_tool_async failure messages (agent/UI); keep bounded to avoid context blow-up.
 _MCP_CALL_ERR_MAX_LEN = 2000
 _MCP_CALL_ERR_PREFIX = "ERROR: mcp_call:"
@@ -439,6 +444,18 @@ def preflight_browser_use_install(*, echo: bool = True) -> Tuple[bool, str]:
     return True, "ok"
 
 
+async def preflight_browser_use_install_async(*, echo: bool = True) -> Tuple[bool, str]:
+    """Run browser-use install off the event loop (subprocess.run can block minutes)."""
+    return await asyncio.to_thread(preflight_browser_use_install, echo=echo)
+
+
+def _hub_connect_lock() -> asyncio.Lock:
+    global _mcp_hub_connect_lock
+    if _mcp_hub_connect_lock is None:
+        _mcp_hub_connect_lock = asyncio.Lock()
+    return _mcp_hub_connect_lock
+
+
 def _serialize_server_config(cfg: "MCPServerConfig") -> Dict[str, Any]:
     """Serialize MCPServerConfig to JSON-compatible dict."""
     data: Dict[str, Any] = {
@@ -678,7 +695,7 @@ async def mcp_connect_async(
         return False, cmd_err
 
     if name == "browser-use" and _is_stock_browser_use_mcp_config(cfg):
-        ok_install, err = preflight_browser_use_install(echo=True)
+        ok_install, err = await preflight_browser_use_install_async(echo=True)
         if not ok_install:
             console.print(
                 "[dim]提示：仍可在 ~/.agenticx/mcp.json 中改用自定义 command/args；"
@@ -733,44 +750,46 @@ async def mcp_connect_async(
             pass
         return False, str(exc)
 
-    hub.clients.append(client)
-    try:
-        await asyncio.wait_for(hub.discover_all_tools(), timeout=connect_timeout)
-    except asyncio.CancelledError:
+    async with _hub_connect_lock():
+        hub.clients.append(client)
         try:
-            hub.clients.remove(client)
-        except ValueError:
-            pass
-        try:
-            await client.close()
-        except Exception:
-            pass
-        return False, "连接已取消"
-    except asyncio.TimeoutError:
-        msg = f"合并工具路由超时（{int(connect_timeout)}s）；可能有其它 MCP 连接卡住，请逐个排查。"
-        console.print(f"[red]连接 {name} 失败:[/red] {msg}")
-        try:
-            hub.clients.remove(client)
-        except ValueError:
-            pass
-        try:
-            await client.close()
-        except Exception:
-            pass
-        return False, msg
-    except Exception as exc:
-        console.print(f"[red]连接 {name} 失败:[/red] {exc}")
-        try:
-            hub.clients.remove(client)
-        except ValueError:
-            pass
-        try:
-            await client.close()
-        except Exception:
-            pass
-        return False, str(exc)
+            await asyncio.wait_for(hub.discover_all_tools(), timeout=connect_timeout)
+        except asyncio.CancelledError:
+            try:
+                hub.clients.remove(client)
+            except ValueError:
+                pass
+            try:
+                await client.close()
+            except Exception:
+                pass
+            return False, "连接已取消"
+        except asyncio.TimeoutError:
+            msg = f"合并工具路由超时（{int(connect_timeout)}s）；可能有其它 MCP 连接卡住，请逐个排查。"
+            console.print(f"[red]连接 {name} 失败:[/red] {msg}")
+            try:
+                hub.clients.remove(client)
+            except ValueError:
+                pass
+            try:
+                await client.close()
+            except Exception:
+                pass
+            return False, msg
+        except Exception as exc:
+            console.print(f"[red]连接 {name} 失败:[/red] {exc}")
+            try:
+                hub.clients.remove(client)
+            except ValueError:
+                pass
+            try:
+                await client.close()
+            except Exception:
+                pass
+            return False, str(exc)
 
-    connected.add(name)
+        connected.add(name)
+
     console.print(
         f"[green]已连接 {name}[/green]，本服务提供 {len(own_tools)} 个工具，路由表共计 {len(hub._merged_tools)} 个："
     )
@@ -807,16 +826,37 @@ async def auto_connect_servers_async(
     connected: Set[str],
     auto_connect_list: Optional[List[str]] = None,
 ) -> Dict[str, bool]:
-    """Auto-connect MCP servers (async). Safe from FastAPI / running event loops."""
+    """Auto-connect MCP servers concurrently (async). Safe from FastAPI / running loops.
+
+    Previously connected one server at a time; a single slow handshake blocked all
+    later servers and could starve the studio event loop during startup.
+    """
     if not configs:
         return {}
     if auto_connect_list is None:
         candidates = sorted(configs.keys())
     else:
         candidates = [name for name in auto_connect_list if name in configs]
+    if not candidates:
+        return {}
+
+    semaphore = asyncio.Semaphore(_MCP_CONNECT_CONCURRENCY)
+
+    async def _connect_one(name: str) -> Tuple[str, bool]:
+        async with semaphore:
+            ok, _detail = await mcp_connect_async(hub, configs, connected, name)
+            return name, ok
+
+    gathered = await asyncio.gather(
+        *(_connect_one(name) for name in candidates),
+        return_exceptions=True,
+    )
     results: Dict[str, bool] = {}
-    for name in candidates:
-        ok, _detail = await mcp_connect_async(hub, configs, connected, name)
+    for item in gathered:
+        if isinstance(item, BaseException):
+            logger.warning("MCP auto-connect task failed: %s", item)
+            continue
+        name, ok = item
         results[name] = ok
     return results
 

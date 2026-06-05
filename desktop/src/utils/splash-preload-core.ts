@@ -1,8 +1,9 @@
 /** Splash-time core data preload helpers (avatars / sessions / taskspaces). */
 
-import type { Avatar, Message, Taskspace } from "../store";
+import type { Avatar, GroupChat, Message, Taskspace } from "../store";
 import { useAppStore } from "../store";
 import { mapLoadedSessionMessage, type LoadedSessionMessage } from "./session-message-map";
+import { prefetchSessionTailsBatch } from "./session-tail-cache";
 
 const WORKSPACE_STATE_STORAGE_KEY = "agx-workspace-state-v1";
 
@@ -72,6 +73,7 @@ export type CorePreloadApiResult = {
   ok: boolean;
   avatars: { ok: boolean; avatars: unknown[] };
   sessions: { ok: boolean; sessions: unknown[] };
+  groups: { ok: boolean; groups: unknown[] };
   taskspaces: { ok: boolean; workspaces: unknown[]; error?: string };
   messages: { ok: boolean; messages: unknown[]; error?: string };
 };
@@ -126,6 +128,22 @@ export function mapAvatarsFromApi(rows: unknown[]): Avatar[] {
     }));
 }
 
+/** Map `/api/groups` rows into store `GroupChat` shape. */
+export function mapGroupsFromApi(rows: unknown[]): GroupChat[] {
+  if (!Array.isArray(rows)) return [];
+  return rows
+    .filter((row): row is Record<string, unknown> => !!row && typeof row === "object")
+    .map((g) => ({
+      id: String(g.id ?? "").trim(),
+      name: String(g.name ?? "").trim() || "群聊",
+      avatarIds: Array.isArray(g.avatar_ids)
+        ? g.avatar_ids.map((id) => String(id).trim()).filter(Boolean)
+        : [],
+      routing: String(g.routing ?? "intelligent").trim() || "intelligent",
+    }))
+    .filter((g) => g.id.length > 0);
+}
+
 export function mapTaskspacesFromApi(rows: unknown[]): Taskspace[] {
   if (!Array.isArray(rows)) return [];
   return rows
@@ -155,6 +173,10 @@ export function applySplashPreloadToStore(
     store.setAvatars(mapAvatarsFromApi(result.avatars.avatars));
   }
 
+  if (result.groups.ok && Array.isArray(result.groups.groups)) {
+    store.setGroups(mapGroupsFromApi(result.groups.groups));
+  }
+
   const bundle: {
     sessionsKey: string;
     sessions: unknown[];
@@ -174,6 +196,18 @@ export function applySplashPreloadToStore(
   }
 
   store.applyCorePreloadBundle(bundle);
+
+  const preloadedSessions = bundle.sessions;
+  if (Array.isArray(preloadedSessions) && preloadedSessions.length > 0) {
+    const sessionIds = preloadedSessions
+      .map((row) => {
+        if (!row || typeof row !== "object") return "";
+        return String((row as Record<string, unknown>).session_id ?? "").trim();
+      })
+      .filter(Boolean)
+      .slice(0, 12);
+    prefetchSessionTailsBatch(sessionIds, 12);
+  }
 
   if (sid && result.messages.ok && Array.isArray(result.messages.messages)) {
     const mapped: Message[] = result.messages.messages.map((item, index) =>
