@@ -44,6 +44,18 @@ export type UsageTopModel = {
   percent: number;
 };
 
+export type UsageDashboardPayload = {
+  summary: UsageSummary;
+  breakdown: UsageBreakdownItem[];
+  daily: UsageDailyRow[];
+  top_models: UsageTopModel[];
+  meta: UsageMeta;
+  week_chip: UsageSummary;
+  month_chip: UsageSummary;
+};
+
+const USAGE_FETCH_TIMEOUT_MS = 10_000;
+
 function hdr(token: string): HeadersInit {
   const h: Record<string, string> = {};
   if (token) h["x-agx-desktop-token"] = token;
@@ -74,6 +86,42 @@ async function j<T>(res: Response): Promise<T> {
   return res.json() as Promise<T>;
 }
 
+async function fetchJson<T>(
+  url: string,
+  token: string,
+  timeoutMs = USAGE_FETCH_TIMEOUT_MS,
+): Promise<T> {
+  const ctrl = new AbortController();
+  const timer = window.setTimeout(() => ctrl.abort(), timeoutMs);
+  try {
+    const res = await fetch(url, { headers: hdr(token), signal: ctrl.signal });
+    return await j<T>(res);
+  } catch (e) {
+    if (e instanceof DOMException && e.name === "AbortError") {
+      throw new Error(`请求超时（${Math.round(timeoutMs / 1000)}s），后端可能仍在启动或繁忙`);
+    }
+    throw e;
+  } finally {
+    window.clearTimeout(timer);
+  }
+}
+
+export async function fetchUsageDashboard(
+  apiBase: string,
+  token: string,
+  range: TokenDashboardRange,
+  custom?: { from: string; to: string },
+  limit = 3,
+): Promise<UsageDashboardPayload> {
+  const q = qp(range, custom?.from, custom?.to);
+  const sp = new URLSearchParams(q);
+  sp.set("limit", String(limit));
+  return fetchJson<UsageDashboardPayload>(
+    `${apiBase}/api/usage/dashboard?${sp.toString()}`,
+    token,
+  );
+}
+
 export async function fetchUsageSummary(
   apiBase: string,
   token: string,
@@ -81,8 +129,7 @@ export async function fetchUsageSummary(
   custom?: { from: string; to: string },
 ): Promise<UsageSummary> {
   const q = qp(range, custom?.from, custom?.to);
-  const res = await fetch(`${apiBase}/api/usage/summary?${q}`, { headers: hdr(token) });
-  return j<UsageSummary>(res);
+  return fetchJson<UsageSummary>(`${apiBase}/api/usage/summary?${q}`, token);
 }
 
 export async function fetchUsageBreakdown(
@@ -93,10 +140,7 @@ export async function fetchUsageBreakdown(
   custom?: { from: string; to: string },
 ): Promise<{ dimension: string; items: UsageBreakdownItem[] }> {
   const q = qp(range, custom?.from, custom?.to);
-  const res = await fetch(`${apiBase}/api/usage/breakdown?${q}&dimension=${encodeURIComponent(dimension)}`, {
-    headers: hdr(token),
-  });
-  return j(res);
+  return fetchJson(`${apiBase}/api/usage/breakdown?${q}&dimension=${encodeURIComponent(dimension)}`, token);
 }
 
 export async function fetchUsageDaily(
@@ -106,8 +150,7 @@ export async function fetchUsageDaily(
   custom?: { from: string; to: string },
 ): Promise<{ items: UsageDailyRow[] }> {
   const q = qp(range, custom?.from, custom?.to);
-  const res = await fetch(`${apiBase}/api/usage/daily?${q}`, { headers: hdr(token) });
-  return j(res);
+  return fetchJson(`${apiBase}/api/usage/daily?${q}`, token);
 }
 
 export async function fetchUsageHeatmap(
@@ -117,8 +160,7 @@ export async function fetchUsageHeatmap(
   custom?: { from: string; to: string },
 ): Promise<{ items: { date: string; total: number }[] }> {
   const q = qp(range, custom?.from, custom?.to);
-  const res = await fetch(`${apiBase}/api/usage/heatmap?${q}`, { headers: hdr(token) });
-  return j(res);
+  return fetchJson(`${apiBase}/api/usage/heatmap?${q}`, token);
 }
 
 export async function fetchUsageTopModels(
@@ -129,14 +171,11 @@ export async function fetchUsageTopModels(
   custom?: { from: string; to: string },
 ): Promise<{ items: UsageTopModel[] }> {
   const q = qp(range, custom?.from, custom?.to);
-  const res = await fetch(
-    `${apiBase}/api/usage/top-models?${q}&limit=${encodeURIComponent(String(limit))}`,
-    { headers: hdr(token) },
-  );
-  return j(res);
+  const sp = new URLSearchParams(q);
+  sp.set("limit", String(limit));
+  return fetchJson(`${apiBase}/api/usage/top-models?${sp.toString()}`, token);
 }
 
 export async function fetchUsageMeta(apiBase: string, token: string): Promise<UsageMeta> {
-  const res = await fetch(`${apiBase}/api/usage/meta`, { headers: hdr(token) });
-  return j<UsageMeta>(res);
+  return fetchJson<UsageMeta>(`${apiBase}/api/usage/meta`, token);
 }

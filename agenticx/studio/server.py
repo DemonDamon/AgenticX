@@ -5369,6 +5369,42 @@ def create_studio_app() -> FastAPI:
             return start_ms, end_ms
         raise HTTPException(status_code=400, detail="invalid range")
 
+    def _usage_run_in_pool(func, /, *args: Any, **kwargs: Any):
+        from agenticx.studio.blocking_io import run_in_settings_pool
+
+        return run_in_settings_pool(func, *args, **kwargs)
+
+    @app.get("/api/usage/dashboard")
+    async def usage_dashboard(
+        range_key: str = Query("month", alias="range"),
+        from_date: str | None = Query(None, alias="from"),
+        to_date: str | None = Query(None, alias="to"),
+        limit: int = Query(3, ge=1, le=20),
+        x_agx_desktop_token: str | None = Header(default=None),
+    ) -> dict[str, Any]:
+        _check_token(x_agx_desktop_token)
+        from agenticx.runtime.usage_store import get_usage_store
+
+        start_ms, end_ms = _usage_parse_range_ms(range_key, from_date, to_date)
+        now_ms = int(time.time() * 1000)
+        now = datetime.now(timezone.utc)
+        month_start_ms = int(datetime(now.year, now.month, 1, tzinfo=timezone.utc).timestamp() * 1000)
+
+        def _collect() -> dict[str, Any]:
+            return get_usage_store().dashboard_sync(
+                range_start_ms=start_ms,
+                range_end_ms=end_ms,
+                week_start_ms=now_ms - 7 * 86400000,
+                week_end_ms=now_ms,
+                month_start_ms=now_ms - 30 * 86400000,
+                month_end_ms=now_ms,
+                calendar_month_start_ms=month_start_ms,
+                now_ms=now_ms,
+                top_limit=limit,
+            )
+
+        return await _usage_run_in_pool(_collect)
+
     @app.get("/api/usage/summary")
     async def usage_summary(
         range_key: str = Query("month", alias="range"),
@@ -5380,7 +5416,7 @@ def create_studio_app() -> FastAPI:
         from agenticx.runtime.usage_store import get_usage_store
 
         start_ms, end_ms = _usage_parse_range_ms(range_key, from_date, to_date)
-        return await asyncio.to_thread(get_usage_store().summary_sync, start_ms, end_ms)
+        return await _usage_run_in_pool(get_usage_store().summary_sync, start_ms, end_ms)
 
     @app.get("/api/usage/breakdown")
     async def usage_breakdown(
@@ -5397,7 +5433,7 @@ def create_studio_app() -> FastAPI:
         dim = (dimension or "provider").strip().lower()
         if dim not in {"provider", "model"}:
             raise HTTPException(status_code=400, detail="dimension must be provider or model")
-        rows = await asyncio.to_thread(
+        rows = await _usage_run_in_pool(
             get_usage_store().breakdown_sync, start_ms, end_ms, dimension=dim
         )
         return {"dimension": dim, "items": rows}
@@ -5413,7 +5449,7 @@ def create_studio_app() -> FastAPI:
         from agenticx.runtime.usage_store import get_usage_store
 
         start_ms, end_ms = _usage_parse_range_ms(range_key, from_date, to_date)
-        rows = await asyncio.to_thread(get_usage_store().daily_sync, start_ms, end_ms)
+        rows = await _usage_run_in_pool(get_usage_store().daily_sync, start_ms, end_ms)
         return {"items": rows}
 
     @app.get("/api/usage/heatmap")
@@ -5427,7 +5463,7 @@ def create_studio_app() -> FastAPI:
         from agenticx.runtime.usage_store import get_usage_store
 
         start_ms, end_ms = _usage_parse_range_ms(range_key, from_date, to_date)
-        rows = await asyncio.to_thread(get_usage_store().heatmap_sync, start_ms, end_ms)
+        rows = await _usage_run_in_pool(get_usage_store().heatmap_sync, start_ms, end_ms)
         return {"items": rows}
 
     @app.get("/api/usage/top-models")
@@ -5442,7 +5478,7 @@ def create_studio_app() -> FastAPI:
         from agenticx.runtime.usage_store import get_usage_store
 
         start_ms, end_ms = _usage_parse_range_ms(range_key, from_date, to_date)
-        rows = await asyncio.to_thread(
+        rows = await _usage_run_in_pool(
             get_usage_store().top_models_sync, start_ms, end_ms, limit=limit
         )
         return {"items": rows}
@@ -5466,7 +5502,7 @@ def create_studio_app() -> FastAPI:
                 "month_conversations": store.month_conversations_sync(month_start_ms, now_ms),
             }
 
-        return await asyncio.to_thread(_collect_meta)
+        return await _usage_run_in_pool(_collect_meta)
 
     # -- Health Probe & Recovery ------------------------------------------------
 
