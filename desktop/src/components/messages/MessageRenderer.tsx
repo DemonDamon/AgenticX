@@ -42,7 +42,7 @@ type Props = {
   selectable?: boolean;
   selected?: boolean;
   onResolveInlineConfirm?: (confirm: NonNullable<Message["inlineConfirm"]>, approved: boolean) => void;
-  onFollowupClick?: (text: string) => void;
+  onFollowupClick?: (text: string, ctx?: { ownerSessionId?: string }) => void;
   omitSuggestedQuestions?: boolean;
   /** When true, assistant messages cut off before budget_exceeded may show an incomplete hint. */
   budgetExceededActive?: boolean;

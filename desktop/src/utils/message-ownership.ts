@@ -21,8 +21,9 @@ export interface OwnedMessage {
 /**
  * Whether *msg* may render while the pane is showing *sessionId*.
  *
- * Backward compatible: an untagged message (no `ownerSessionId`) is always
- * visible so legacy / in-flight rows never vanish.
+ * When the pane is bound to a real session, only rows stamped with that
+ * `ownerSessionId` render. Untagged rows are hidden — callers must stamp via
+ * `setPaneMessages` / `addPaneMessage` extras before display.
  *
  * Important for "全新对话" lazy mode: when the pane has no bound session
  * (`""`), only show rows that are also unbound. This prevents any late async
@@ -38,7 +39,7 @@ export function messageBelongsToSession(
     return ownerWhenUnbound.length === 0;
   }
   const owner = String(msg.ownerSessionId ?? "").trim();
-  if (!owner) return true; // untagged (legacy / not yet stamped) → show
+  if (!owner) return false;
   return owner === sid;
 }
 
