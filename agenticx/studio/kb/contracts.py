@@ -219,6 +219,11 @@ class KBConfig:
             # into ``auto`` (LLM decides when to search in both cases), so
             # legacy configs are silently migrated instead of erroring.
             mode = mode_raw if mode_raw in {"auto", "always"} else "auto"
+            # Legacy split field (removed from UI): fold into ``mode`` when only
+            # ``new_session_default`` was written.
+            nsd_raw = str(r.get("new_session_default", "")).strip().lower()
+            if nsd_raw in {"auto", "always"} and "mode" not in r:
+                mode = nsd_raw
             mode_raw_retrieval = str(r.get("retrieval_mode", "vector")).strip().lower()
             retrieval_mode = (
                 mode_raw_retrieval

@@ -23,6 +23,10 @@ import { brainScopeBadge, brainTypeShort } from "./brainScopeUi";
 import { CodeIndexBrainPanel, type CodeIndexBrainPanelHandle } from "./CodeIndexBrainPanel";
 import { SettingsOnOffSwitch } from "../SettingsSwitch";
 import { BackendDepsPanel } from "../knowledge/BackendDepsPanel";
+import {
+  KbGlobalChatRetrievalPanel,
+  type KbGlobalChatRetrievalHandle,
+} from "../knowledge/KbGlobalChatRetrievalPanel";
 
 export type BrainsSettingsHandle = {
   flushIfDirty: () => Promise<{ ok: boolean; error?: string }>;
@@ -69,6 +73,8 @@ export const BrainsSettings = forwardRef<BrainsSettingsHandle>(function BrainsSe
   const [brainSaveMsg, setBrainSaveMsg] = useState<string | null>(null);
   const scopePanelRef = useRef<BrainScopePanelHandle>(null);
   const codePanelRef = useRef<CodeIndexBrainPanelHandle>(null);
+  const globalKbRetrievalRef = useRef<KbGlobalChatRetrievalHandle>(null);
+  const [globalKbRetrievalDirty, setGlobalKbRetrievalDirty] = useState(false);
   /** Guards against stale readKbConfig responses overwriting a just-saved draft. */
   const kbConfigLoadIdRef = useRef(0);
 
@@ -150,11 +156,17 @@ export const BrainsSettings = forwardRef<BrainsSettingsHandle>(function BrainsSe
 
   const kbDirty =
     selected?.type === "docs" && JSON.stringify(kbConfig) !== JSON.stringify(kbDraft);
-  const brainDirty = kbDirty || scopeDirty || codeDirty;
+  const brainDirty = kbDirty || scopeDirty || codeDirty || globalKbRetrievalDirty;
 
   const saveSelectedBrain = useCallback(async (): Promise<{ ok: boolean; error?: string }> => {
-    if (!selectedId || !selected) return { ok: true };
     if (!brainDirty) return { ok: true };
+
+    const globalRes = await globalKbRetrievalRef.current?.flushIfDirty();
+    if (globalRes && !globalRes.ok) {
+      return { ok: false, error: globalRes.error ?? "对话检索设置保存失败" };
+    }
+
+    if (!selectedId || !selected) return { ok: true };
 
     const scopeRes = await scopePanelRef.current?.flushIfDirty();
     if (scopeRes && !scopeRes.ok) {
@@ -273,6 +285,12 @@ export const BrainsSettings = forwardRef<BrainsSettingsHandle>(function BrainsSe
   return (
     <div className="flex min-h-0 flex-1 flex-col gap-3">
       <BackendDepsPanel />
+      <KbGlobalChatRetrievalPanel
+        ref={globalKbRetrievalRef}
+        apiToken={apiToken}
+        resolveApiBase={resolveApiBase}
+        onDirtyChange={setGlobalKbRetrievalDirty}
+      />
       <p className="shrink-0 text-xs leading-relaxed text-text-muted">
         每个<strong className="font-medium text-text-primary">知识脑</strong>是独立实例（文档库或代码库）。分身可在设置中挂载 0–N
         个脑；Meta 默认仅使用全局脑。
