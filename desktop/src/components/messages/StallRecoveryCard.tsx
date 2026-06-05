@@ -10,6 +10,10 @@ export type StallModelOption = {
 
 type Props = {
   kind: "stall" | "exhausted";
+  /** For kind="stall": "silent" = a running turn went quiet (may be hung);
+   *  "incomplete" = the turn ended without a visible reply (think-only /
+   *  degenerate / cut) — phrased as "未产出回答", never "长时间无响应". */
+  reason?: "silent" | "incomplete";
   rounds?: number;
   maxRounds?: number;
   currentModelLabel?: string;
@@ -32,6 +36,7 @@ const borderAccent: Record<Props["kind"], string> = {
 
 export function StallRecoveryCard({
   kind,
+  reason = "silent",
   rounds,
   maxRounds,
   currentModelLabel,
@@ -47,6 +52,7 @@ export function StallRecoveryCard({
   onOpenSettings,
 }: Props) {
   const isStall = kind === "stall";
+  const isIncomplete = isStall && reason === "incomplete";
   const [switchOpen, setSwitchOpen] = useState(false);
   const [picked, setPicked] = useState("");
 
@@ -90,12 +96,16 @@ export function StallRecoveryCard({
                   <div className="min-w-0 flex-1">
                     <p className="text-[15px] font-medium text-text-strong">
                       {isStall
-                        ? "该任务可能已中断（长时间无响应）"
+                        ? isIncomplete
+                          ? "上一轮未产出回答"
+                          : "该任务可能已中断（长时间无响应）"
                         : `已达到最大工具调用轮数（${rounds ?? "?"}/${maxRounds ?? "?"}）`}
                     </p>
                     {isStall && currentModelLabel ? (
                       <p className="mt-1 text-xs text-text-muted">
-                        当前模型：{currentModelLabel}。若长时间无响应，可尝试切换模型后继续。
+                        {isIncomplete
+                          ? `当前模型：${currentModelLabel}。可重试或换模型继续。`
+                          : `当前模型：${currentModelLabel}。若长时间无响应，可尝试切换模型后继续。`}
                       </p>
                     ) : null}
                     {isStall && autoNudgeMax > 0 && autoNudgeCount >= autoNudgeMax ? (

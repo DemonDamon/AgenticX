@@ -10,6 +10,7 @@ import asyncio
 import json
 import logging
 import os
+import re
 import shutil
 import time
 import uuid
@@ -17,9 +18,53 @@ from copy import deepcopy
 from datetime import datetime
 from pathlib import Path
 from dataclasses import dataclass, field
-from typing import Any, Awaitable, Callable, Dict, Optional
+from typing import Any, Awaitable, Callable, Dict, List, Optional
 
 _log = logging.getLogger(__name__)
+
+_THINK_BLOCK_RE = re.compile(
+    r"<think>.*?</think>", re.IGNORECASE | re.DOTALL
+)
+_THINK_OPEN_TAIL_RE = re.compile(
+    r"<think>.*\Z", re.IGNORECASE | re.DOTALL
+)
+_INTERRUPTED_PLACEHOLDER_MARKERS = ("（已中断）", "(已中断)")
+
+
+def _visible_assistant_body(content: str) -> str:
+    """Assistant text with <think> reasoning stripped (closed blocks AND an
+    unclosed trailing <think>...). Mirrors desktop assistantBodyText so backend
+    and frontend agree on whether a turn produced a real reply.
+    """
+    text = str(content or "")
+    text = _THINK_BLOCK_RE.sub("", text)
+    text = _THINK_OPEN_TAIL_RE.sub("", text)
+    return text.strip()
+
+
+def _messages_last_turn_has_completed_reply(messages: List[Dict[str, Any]]) -> bool:
+    """Pure helper: whether the last user turn has a completed assistant reply."""
+    if not messages:
+        return False
+    last_user_idx = -1
+    for idx, msg in enumerate(messages):
+        if str(msg.get("role", "")).strip() == "user":
+            last_user_idx = idx
+    if last_user_idx < 0:
+        return False
+    for msg in messages[last_user_idx + 1 :]:
+        if str(msg.get("role", "")).strip() != "assistant":
+            continue
+        content = str(msg.get("content", "") or "")
+        visible = _visible_assistant_body(content)
+        if visible and not any(marker in visible for marker in _INTERRUPTED_PLACEHOLDER_MARKERS):
+            return True
+        raw_sq = msg.get("suggested_questions")
+        if isinstance(raw_sq, list) and any(str(x).strip() for x in raw_sq):
+            return True
+        if "</followups>" in content.lower():
+            return True
+    return False
 
 # Titles that should be replaced by the first real user message (case-insensitive ASCII).
 _PLACEHOLDER_SESSION_TITLE_CF: frozenset[str] = frozenset(
@@ -341,7 +386,8 @@ class SessionManager:
 
     def _last_turn_has_completed_reply(self, session_id: str) -> bool:
         """True when the persisted messages show the last user turn already
-        produced a non-empty assistant reply.
+        produced a visible assistant reply (reasoning stripped), suggested_questions,
+        or a closed ``</followups>`` terminal marker.
 
         Used at startup so a session left at ``running`` in metadata (e.g. the
         client SSE was aborted on a pane switch and the off-loop finalize persist
@@ -353,24 +399,7 @@ class SessionManager:
             messages = self._messages_for_execution_state_check(session_id)
         except Exception:
             return False
-        if not messages:
-            return False
-        last_user_idx = -1
-        for idx, msg in enumerate(messages):
-            if str(msg.get("role", "")).strip() == "user":
-                last_user_idx = idx
-        if last_user_idx < 0:
-            return False
-        for msg in messages[last_user_idx + 1:]:
-            if str(msg.get("role", "")).strip() != "assistant":
-                continue
-            content = str(msg.get("content", "") or "").strip()
-            if not content:
-                continue
-            if content in {"（已中断）", "(已中断)"}:
-                continue
-            return True
-        return False
+        return _messages_last_turn_has_completed_reply(messages)
 
     def scan_interrupted_sessions(self) -> list[str]:
         """Scan persisted sessions for those left in 'running' state.
