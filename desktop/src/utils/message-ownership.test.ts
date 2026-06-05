@@ -18,9 +18,11 @@ describe("messageBelongsToSession", () => {
     expect(messageBelongsToSession({ ownerSessionId: "" }, "B")).toBe(true);
   });
 
-  it("never filters when the pane has no bound session", () => {
-    expect(messageBelongsToSession({ ownerSessionId: "A" }, "")).toBe(true);
-    expect(messageBelongsToSession({ ownerSessionId: "A" }, undefined)).toBe(true);
+  it("when pane has no bound session, hides rows bound to any real session", () => {
+    expect(messageBelongsToSession({ ownerSessionId: "A" }, "")).toBe(false);
+    expect(messageBelongsToSession({ ownerSessionId: "A" }, undefined)).toBe(false);
+    expect(messageBelongsToSession({}, "")).toBe(true);
+    expect(messageBelongsToSession({ ownerSessionId: "" }, undefined)).toBe(true);
   });
 
   it("trims whitespace on both sides before comparing", () => {
@@ -46,9 +48,8 @@ describe("visibleMessagesForSession", () => {
     expect(out.map((m) => m.id)).toEqual(["2", "3"]);
   });
 
-  it("returns a copy (no mutation) and shows all when no session bound", () => {
+  it("when no session bound, keeps only unbound rows", () => {
     const out = visibleMessagesForSession(msgs, "");
-    expect(out).toEqual(msgs);
-    expect(out).not.toBe(msgs);
+    expect(out.map((m) => m.id)).toEqual(["3"]);
   });
 });
