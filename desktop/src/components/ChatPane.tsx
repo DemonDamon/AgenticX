@@ -4864,6 +4864,10 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
       if (r?.ok) {
         setSessionExecutionState("interrupted");
         setStallState("none");
+        // Stop must clear the optimistic "running" hint immediately so the
+        // history sidebar spinner disappears at once instead of waiting for the
+        // 1.5s list poll (which can lag behind a bloated session list query).
+        useAppStore.getState().clearSessionHistoryHint(sid);
         if (!interruptNoticeSentRef.current[sid]) {
           interruptNoticeSentRef.current[sid] = true;
           addPaneMessage(pane.id, "tool", "已中断任务", "meta");

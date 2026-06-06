@@ -56,6 +56,10 @@ def _sanitize_fts5_query(query: str) -> str:
 class SessionStore:
     """Store todo/scratchpad/session summaries in SQLite."""
 
+    # Max summary rows retained per session. Bounds append growth while keeping
+    # enough history for the activity-recovery heuristic.
+    _SUMMARY_HISTORY_KEEP: int = 8
+
     def __init__(self, db_path: Path | None = None) -> None:
         self.db_path = Path(db_path or DEFAULT_SESSION_DB_PATH).expanduser().resolve(strict=False)
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
@@ -264,6 +268,26 @@ class SessionStore:
                     json.dumps(metadata, ensure_ascii=False),
                     now,
                 ),
+            )
+            # Bounded history: keep only the most recent rows per session. This was
+            # historically append-only and grew without bound (tens of thousands of
+            # rows for a few hundred sessions), turning the GROUP BY MAX(created_at)
+            # listing query into a full scan. We retain a small window so the
+            # activity-recovery heuristic (which inspects same-message-count history
+            # to pick the earliest real activity) still works, while preventing the
+            # unbounded growth that degraded the session list query.
+            conn.execute(
+                """
+                DELETE FROM session_summaries
+                WHERE session_id = ?
+                  AND id NOT IN (
+                    SELECT id FROM session_summaries
+                    WHERE session_id = ?
+                    ORDER BY created_at DESC, id DESC
+                    LIMIT ?
+                  )
+                """,
+                (session_id, session_id, self._SUMMARY_HISTORY_KEEP),
             )
             conn.commit()
 
