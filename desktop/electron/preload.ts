@@ -60,7 +60,7 @@ async function desktopApiFetch<T>(path: string, init?: RequestInit): Promise<T> 
 }
 
 contextBridge.exposeInMainWorld("agenticxDesktop", {
-  version: "0.2.4",
+  version: "0.2.5",
   getApiBase: async (): Promise<string> => ipcRenderer.invoke("get-api-base"),
   getApiAuthToken: async (): Promise<string> => ipcRenderer.invoke("get-api-auth-token"),
   platform: async (): Promise<string> => ipcRenderer.invoke("get-platform"),
