@@ -22,6 +22,9 @@ on:
           - windows-amd64
   push:
     tags:
+      # Desktop 专属前缀：只 bump desktop 时用 `desktop-v0.2.5` 独立触发，不必绑 agenticx 版本。
+      - "desktop-v*"
+      # 兼容旧的单线联合 tag（agenticx 发版顺带构建 desktop）。
       - "v*"
 
 jobs:
