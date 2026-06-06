@@ -317,6 +317,17 @@ class SessionManager:
             # turn already produced a terminal assistant payload (followups / SQ).
             if self._last_turn_has_terminal_assistant_reply(session_id):
                 return "idle"
+            # When the session is NOT live in this process (no in-memory runtime /
+            # active stream), a ``running`` flag is necessarily stale disk residue
+            # — there is nothing actually executing. Accept a plain visible reply
+            # body as terminal so a finished-but-no-followups answer does not show
+            # a permanent false spinner. Live in-memory sessions keep the strict
+            # check above so a mid-turn (thinking-only partial, tools still running)
+            # turn is never prematurely cleared.
+            if self._sessions.get(session_id) is None and self._last_turn_has_completed_reply(
+                session_id
+            ):
+                return "idle"
             return "running"
         if raw == "failed":
             return "failed"
