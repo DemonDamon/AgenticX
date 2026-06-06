@@ -640,7 +640,9 @@ def test_list_sessions_idle_when_interrupted_metadata_but_reply_on_disk(tmp_path
 
 
 def test_get_messages_page_tail_rounds_and_before_index(tmp_path: Path) -> None:
+    store = SessionStore(tmp_path / "sessions.sqlite")
     manager = SessionManager()
+    manager._session_store = store  # test override: never touch the real DB
     manager._sessions_root = str(tmp_path / "sessions")
 
     sid = "paged-session"
@@ -680,6 +682,7 @@ def test_get_messages_page_tail_rounds_and_before_index(tmp_path: Path) -> None:
     tail_path = tmp_path / "sessions" / sid / "messages_tail.json"
     assert tail_path.is_file()
     fast = SessionManager()
+    fast._session_store = store  # test override: never touch the real DB
     fast._sessions_root = str(tmp_path / "sessions")
     page = fast.get_messages_page(sid, tail_rounds=1, tail_limit=40)
     assert page["total_count"] == 7
