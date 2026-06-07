@@ -1,4 +1,4 @@
-export type PolicyRuleKind = "keyword" | "regex" | "pii";
+export type PolicyRuleKind = "keyword" | "regex" | "pii" | "field";
 export type PolicyRuleAction = "block" | "redact" | "warn";
 export type PolicyRuleSeverity = "low" | "medium" | "high" | "critical";
 export type PolicyRuleStatus = "draft" | "active" | "disabled";
@@ -45,6 +45,9 @@ export type PolicyRulePayload = {
   keywords?: string[];
   pattern?: string;
   piiType?: string;
+  jsonPath?: string;
+  target?: "request" | "response";
+  fieldAction?: "allow" | "deny" | "redact";
 };
 
 export type PolicyRule = {

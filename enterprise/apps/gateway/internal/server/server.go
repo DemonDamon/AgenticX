@@ -73,6 +73,7 @@ type Server struct {
 	relayExecutor      *relay.Executor
 	billingService     *billing.Service
 	patVerifier        *gatewayauth.PATVerifier
+	sessionGrants      *gatewayauth.SessionGrantStore
 	cacheService       *cache.Service
 	pricing            *metering.PricingTable
 	pricingLoader      *metering.PricingLoader
@@ -192,6 +193,7 @@ func New(cfg config.Config, logger *slog.Logger) (*Server, error) {
 		adminLoader:        adminLoader,
 		quotaTracker:       quota.NewTracker(quotaCfgPath, quotaUsagePath),
 		patVerifier:        patVerifier,
+		sessionGrants:      gatewayauth.NewSessionGrantStore(pgPool),
 		cacheService:       initCacheService(logger),
 		pricingLoader:      initPricingLoader(logger),
 		metrics:            observability.NewRegistryFromEnv(),
@@ -269,6 +271,16 @@ func snapshotManifestsFromRaw(raw []byte, mod time.Time) ([]policyengine.RulePac
 				case policyengine.RuleKindPII:
 					if value, ok := rule.Payload["piiType"].(string); ok {
 						nextRule.PIIType = value
+					}
+				case policyengine.RuleKindField:
+					if value, ok := rule.Payload["jsonPath"].(string); ok {
+						nextRule.JSONPath = value
+					}
+					if value, ok := rule.Payload["target"].(string); ok {
+						nextRule.FieldTarget = value
+					}
+					if value, ok := rule.Payload["fieldAction"].(string); ok {
+						nextRule.FieldAction = value
 					}
 				}
 				manifest.Rules = append(manifest.Rules, nextRule)
@@ -593,7 +605,7 @@ func (s *Server) handleChatCompletions(w http.ResponseWriter, r *http.Request) {
 		}
 		return
 	}
-	if !hasScope(identity.Scopes, "workspace:chat") {
+	if !s.hasEffectiveScope(r, identity, "workspace:chat") {
 		writeAPIError(w, openai.Forbidden("missing workspace:chat scope"))
 		return
 	}
@@ -783,6 +795,16 @@ func (s *Server) handleChatCompletions(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	if fieldOut, fieldResult := s.applyResponseFieldPolicy(identity, resp); fieldResult.Blocked {
+		s.writeFieldPolicyBlock(w, identity, r, fieldResult)
+		return
+	} else if rawField, err := json.Marshal(fieldOut); err == nil {
+		var patched openai.ChatCompletionResponse
+		if err := json.Unmarshal(rawField, &patched); err == nil {
+			resp = patched
+		}
+	}
+
 	s.transformChatResponseJSON(pluginCtx, &resp)
 	if len(resp.Choices) > 0 {
 		responseContent = openai.ComposeMessageContent(resp.Choices[0].Message.Content, resp.Choices[0].Message.ReasoningContent)
@@ -835,7 +857,7 @@ func (s *Server) handleEmbeddings(w http.ResponseWriter, r *http.Request) {
 		}
 		return
 	}
-	if !hasScope(identity.Scopes, "workspace:chat") {
+	if !s.hasEffectiveScope(r, identity, "workspace:chat") {
 		writeAPIError(w, openai.Forbidden("missing workspace:chat scope"))
 		return
 	}

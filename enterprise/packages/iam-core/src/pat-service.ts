@@ -6,6 +6,7 @@ import { apiTokens as patTable } from "@agenticx/db-schema";
 import { createHash, randomBytes } from "node:crypto";
 import { and, desc, eq } from "drizzle-orm";
 import { getIamDb } from "./db";
+import { recordPatRevocation } from "./pat-revocation-store";
 
 export type PatStatus = "active" | "revoked" | "expired";
 
@@ -126,11 +127,19 @@ export async function listPats(filter: {
 
 export async function revokePat(id: number, tenantId: string): Promise<PatRecord | null> {
   const db = getIamDb();
+  const [existing] = await db
+    .select({ tokenHash: patTable.tokenHash })
+    .from(patTable)
+    .where(and(eq(patTable.id, id), eq(patTable.tenantId, tenantId)))
+    .limit(1);
   const updated = await db
     .update(patTable)
     .set({ status: "revoked", updatedAt: new Date() })
     .where(and(eq(patTable.id, id), eq(patTable.tenantId, tenantId)))
     .returning();
+  if (updated[0] && existing?.tokenHash) {
+    await recordPatRevocation(existing.tokenHash);
+  }
   return updated[0] ? rowToRecord(updated[0]) : null;
 }
 

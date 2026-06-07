@@ -52,6 +52,10 @@ func compileRule(rule Rule) (compiledRule, error) {
 			return compiledRule{}, fmt.Errorf("unsupported pii type: %s", rule.PIIType)
 		}
 		out.piiRegexp = re
+	case RuleKindField:
+		if strings.TrimSpace(rule.JSONPath) == "" {
+			return compiledRule{}, fmt.Errorf("field rule missing json_path")
+		}
 	default:
 		return compiledRule{}, fmt.Errorf("unsupported rule kind: %s", rule.Kind)
 	}

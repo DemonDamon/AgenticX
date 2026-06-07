@@ -30,21 +30,23 @@ type patCacheEntry struct {
 
 // PATVerifier validates agx-pat-* tokens against api_tokens table.
 type PATVerifier struct {
-	pool          *pgxpool.Pool
-	mu            sync.RWMutex
-	cache         map[string]patCacheEntry
-	ttl           time.Duration
-	touchMu       sync.Mutex
-	touchPending  map[int64]struct{}
-	touchStarted  bool
+	pool            *pgxpool.Pool
+	mu              sync.RWMutex
+	cache           map[string]patCacheEntry
+	ttl             time.Duration
+	touchMu         sync.Mutex
+	touchPending    map[int64]struct{}
+	touchStarted    bool
+	revocationStore *PATRevocationStore
 }
 
 func NewPATVerifier(pool *pgxpool.Pool) *PATVerifier {
 	v := &PATVerifier{
-		pool:         pool,
-		cache:        map[string]patCacheEntry{},
-		ttl:          60 * time.Second,
-		touchPending: map[int64]struct{}{},
+		pool:            pool,
+		cache:           map[string]patCacheEntry{},
+		ttl:             patCacheTTLFromEnv(),
+		touchPending:    map[int64]struct{}{},
+		revocationStore: NewPATRevocationStore(),
 	}
 	if pool != nil {
 		v.startTouchFlusher()
@@ -106,6 +108,9 @@ func (v *PATVerifier) Verify(ctx context.Context, token string) (PATIdentity, er
 		return PATIdentity{}, errors.New("auth:pat:invalid_format")
 	}
 	hash := hashPAT(token)
+	if v.revocationStore != nil && v.revocationStore.IsRevoked(hash) {
+		return PATIdentity{}, errors.New("auth:pat_revoked")
+	}
 	if cached, ok := v.cached(hash); ok {
 		if cached.revoked {
 			return PATIdentity{}, errors.New("auth:pat_revoked")
@@ -149,6 +154,16 @@ func (v *PATVerifier) Invalidate(token string) {
 	v.mu.Lock()
 	delete(v.cache, hash)
 	v.mu.Unlock()
+	if v.revocationStore != nil {
+		v.revocationStore.InvalidateLocal(hash)
+	}
+}
+
+func (v *PATVerifier) RevocationStore() *PATRevocationStore {
+	if v == nil {
+		return nil
+	}
+	return v.revocationStore
 }
 
 func (v *PATVerifier) cached(hash string) (patCacheEntry, bool) {

@@ -87,7 +87,7 @@ func (s *Server) parseProtocolRequest(
 	if err != nil {
 		return openai.ChatCompletionRequest{}, requestIdentity{}, err
 	}
-	if !hasScope(identity.Scopes, "workspace:chat") {
+	if !s.hasEffectiveScope(r, identity, "workspace:chat") {
 		return openai.ChatCompletionRequest{}, requestIdentity{}, fmt.Errorf("missing workspace:chat scope")
 	}
 	if identity.AuthViaPAT && identity.APITokenID > 0 && s.patVerifier != nil {
