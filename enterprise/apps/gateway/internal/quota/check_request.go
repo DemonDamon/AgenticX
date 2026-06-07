@@ -84,7 +84,7 @@ func (t *Tracker) CheckRequest(ctx RequestContext, tokens int64, costUSD float64
 		}
 	}
 
-	monthly := t.CheckAndAdd(ctx.UserID, ctx.DeptID, ctx.Role, ctx.Model, tokens)
+	monthly := t.CheckAndAddContext(ctx, tokens, LedgerEventReserve)
 	if !monthly.Allowed {
 		t.ReleaseConcurrency(ctx)
 		return CheckResult{

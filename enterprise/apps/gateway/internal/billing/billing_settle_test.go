@@ -16,7 +16,7 @@ func TestSettleRefundsOverReservation(t *testing.T) {
 	if err := os.WriteFile(cfgPath, []byte(cfg), 0o600); err != nil {
 		t.Fatalf("write config: %v", err)
 	}
-	tracker := quota.NewTracker(cfgPath, usagePath)
+	tracker := quota.NewTracker(cfgPath, usagePath, nil)
 	svc := NewService(tracker)
 	res := svc.Reserve("u1", "", "staff", "m", 1000)
 	if !res.Allowed {

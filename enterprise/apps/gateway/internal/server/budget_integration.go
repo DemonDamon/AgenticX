@@ -113,6 +113,6 @@ func (s *Server) runChatQuotaGate(
 }
 
 func (s *Server) rollbackChatQuotaAndBudget(identity requestIdentity, model string, tokens int, check quota.CheckResult) {
-	s.rollbackQuotaReservation(identity, tokens)
+	s.rollbackQuotaReservation(s.quotaContext(identity, model), tokens)
 	s.rollbackBudgetReservation(identity, model, check)
 }

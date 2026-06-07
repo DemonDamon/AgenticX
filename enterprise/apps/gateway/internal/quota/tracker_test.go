@@ -16,8 +16,8 @@ func TestRollbackUsesSharedUsageFileAsSourceOfTruth(t *testing.T) {
 		t.Fatalf("write config: %v", err)
 	}
 
-	first := NewTracker(cfgPath, usagePath)
-	second := NewTracker(cfgPath, usagePath)
+	first := NewTracker(cfgPath, usagePath, nil)
+	second := NewTracker(cfgPath, usagePath, nil)
 
 	if decision := first.CheckAndAdd("u1", "", "staff", "m", 100); !decision.Allowed {
 		t.Fatalf("first reservation denied: %+v", decision)

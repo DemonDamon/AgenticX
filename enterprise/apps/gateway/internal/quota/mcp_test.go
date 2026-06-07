@@ -3,7 +3,7 @@ package quota
 import "testing"
 
 func TestCheckMCPToolCallRateLimit(t *testing.T) {
-	tr := NewTracker("", "")
+	tr := NewTracker("", "", nil)
 	ctx := RequestContext{UserID: "u-mcp", TenantID: "t1"}
 	for i := 0; i < 3; i++ {
 		check := tr.CheckMCPToolCall(ctx, "demo", 3)

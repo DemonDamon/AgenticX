@@ -162,6 +162,13 @@
       "when": 1779400000000,
       "tag": "0022_agent_token_traces",
       "breakpoints": true
+    },
+    {
+      "idx": 23,
+      "version": "7",
+      "when": 1779500000000,
+      "tag": "0023_gateway_quota_pool",
+      "breakpoints": true
     }
   ]
 }

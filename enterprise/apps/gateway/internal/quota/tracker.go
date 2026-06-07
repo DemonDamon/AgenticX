@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/agenticx/enterprise/gateway/internal/gatewayinternal"
+	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 type Action string
@@ -24,12 +25,13 @@ const (
 )
 
 type Rule struct {
-	MonthlyTokens        int64  `json:"monthlyTokens"`
-	TPM                  int    `json:"tpm,omitempty"`
-	RPM                  int    `json:"rpm,omitempty"`
-	MaxConcurrency       int    `json:"maxConcurrency,omitempty"`
-	ToolCallsPerMinute   int    `json:"toolCallsPerMinute,omitempty"`
-	Action               Action `json:"action"`
+	MonthlyTokens      int64  `json:"monthlyTokens"`
+	TPM                int    `json:"tpm,omitempty"`
+	RPM                int    `json:"rpm,omitempty"`
+	MaxConcurrency     int    `json:"maxConcurrency,omitempty"`
+	ToolCallsPerMinute int    `json:"toolCallsPerMinute,omitempty"`
+	PoolScope          string `json:"poolScope,omitempty"`
+	Action             Action `json:"action"`
 }
 
 type Config struct {
@@ -60,6 +62,7 @@ type Decision struct {
 type Tracker struct {
 	cfgPath              string
 	usagePath            string
+	poolUsagePath        string
 	remoteURL            string
 	remoteFetched        time.Time
 	remoteCfgSnapshot    Config
@@ -73,9 +76,10 @@ type Tracker struct {
 	budgetRemoteMu       sync.Mutex
 	usageCache           map[string]int64
 	budgetAlertSink      BudgetAlertSink
+	poolCounter          PoolCounter
 }
 
-func NewTracker(cfgPath, usagePath string) *Tracker {
+func NewTracker(cfgPath, usagePath string, pgPool *pgxpool.Pool) *Tracker {
 	budgetCfgPath := strings.TrimSpace(os.Getenv("GATEWAY_BUDGET_CONFIG_FILE"))
 	if budgetCfgPath == "" {
 		budgetCfgPath = DefaultBudgetConfigPath()
@@ -84,14 +88,20 @@ func NewTracker(cfgPath, usagePath string) *Tracker {
 	if budgetUsagePath == "" {
 		budgetUsagePath = DefaultBudgetUsagePath()
 	}
+	poolUsagePath := strings.TrimSpace(os.Getenv("GATEWAY_QUOTA_POOL_USAGE_FILE"))
+	if poolUsagePath == "" {
+		poolUsagePath = DefaultPoolUsagePath()
+	}
 	return &Tracker{
 		cfgPath:         cfgPath,
 		usagePath:       usagePath,
+		poolUsagePath:   poolUsagePath,
 		remoteURL:       strings.TrimSpace(os.Getenv("GATEWAY_REMOTE_QUOTA_CONFIG_URL")),
 		budgetCfgPath:   budgetCfgPath,
 		budgetUsagePath: budgetUsagePath,
 		budgetRemoteURL: strings.TrimSpace(os.Getenv("GATEWAY_REMOTE_BUDGET_CONFIG_URL")),
 		usageCache:      map[string]int64{},
+		poolCounter:     newPoolCounter(pgPool, poolUsagePath),
 	}
 }
 
@@ -112,13 +122,73 @@ func DefaultUsagePath() string {
 }
 
 func (t *Tracker) CheckAndAdd(userID, deptID, role, model string, tokens int64) Decision {
+	return t.CheckAndAddContext(RequestContext{
+		UserID: userID,
+		DeptID: deptID,
+		Role:   role,
+		Model:  model,
+	}, tokens, LedgerEventReserve)
+}
+
+func (t *Tracker) CheckAndAddContext(ctx RequestContext, tokens int64, ledgerEvent string) Decision {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	cfg := t.loadConfig()
-	rule := selectRule(cfg, userID, deptID, role, model)
+	rule := selectRule(cfg, ctx.UserID, ctx.DeptID, ctx.Role, ctx.Model)
 	if rule.MonthlyTokens <= 0 {
 		return Decision{Allowed: true, Rule: rule, Description: "no quota"}
 	}
+	month := time.Now().UTC().Format("2006-01")
+	if poolKey, ok := poolKeyFor(rule, ctx, month); ok && t.poolCounter != nil {
+		return t.checkAndAddSharedPool(rule, poolKey, tokens, ledgerEvent)
+	}
+	return t.checkAndAddUserLocked(rule, ctx.UserID, month, tokens)
+}
+
+func (t *Tracker) checkAndAddSharedPool(rule Rule, key PoolKey, tokens int64, ledgerEvent string) Decision {
+	event := strings.TrimSpace(ledgerEvent)
+	if event == "" {
+		event = LedgerEventReserve
+	}
+	used, err := t.poolCounter.Current(key)
+	if err != nil && rule.Action == ActionBlock {
+		return Decision{
+			Allowed:     false,
+			Rule:        rule,
+			Description: "quota pool read failed in block mode",
+		}
+	}
+	after := used + max64(tokens, 0)
+	allowed := after <= rule.MonthlyTokens || rule.Action != ActionBlock
+	if allowed && tokens != 0 {
+		usedAfter, addErr := t.poolCounter.Add(key, tokens, event, "")
+		if addErr != nil {
+			log.Printf("[quota] pool persist failed key=%s event=%s err=%v", key.cacheKey(), event, addErr)
+			if rule.Action == ActionBlock {
+				return Decision{
+					Allowed:     false,
+					Rule:        rule,
+					UsedBefore:  used,
+					UsedAfter:   used,
+					Description: "quota pool persist failed in block mode",
+				}
+			}
+		} else {
+			after = usedAfter
+		}
+	}
+	desc := fmt.Sprintf("pool %s %d/%d", key.cacheKey(), after, rule.MonthlyTokens)
+	return Decision{
+		Allowed:     allowed,
+		Rule:        rule,
+		UsedBefore:  used,
+		UsedAfter:   after,
+		ExceededBy:  max64(after-rule.MonthlyTokens, 0),
+		Description: desc,
+	}
+}
+
+func (t *Tracker) checkAndAddUserLocked(rule Rule, userID, month string, tokens int64) Decision {
 	unlock, lockOK := t.lockUsageFile()
 	if !lockOK {
 		if rule.Action == ActionBlock {
@@ -132,7 +202,6 @@ func (t *Tracker) CheckAndAdd(userID, deptID, role, model string, tokens int64) 
 		defer unlock()
 	}
 	rows := t.readUsage()
-	month := time.Now().UTC().Format("2006-01")
 	key := cacheKey(userID, month)
 	used := int64(0)
 	for _, row := range rows {
@@ -187,18 +256,32 @@ func (t *Tracker) CheckAndAdd(userID, deptID, role, model string, tokens int64) 
 }
 
 func (t *Tracker) Rollback(userID string, tokens int64) bool {
+	return t.RollbackContext(RequestContext{UserID: userID}, tokens)
+}
+
+func (t *Tracker) RollbackContext(ctx RequestContext, tokens int64) bool {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	if tokens <= 0 {
 		return true
 	}
+	cfg := t.loadConfig()
+	rule := selectRule(cfg, ctx.UserID, ctx.DeptID, ctx.Role, ctx.Model)
+	month := time.Now().UTC().Format("2006-01")
+	if poolKey, ok := poolKeyFor(rule, ctx, month); ok && t.poolCounter != nil {
+		_, err := t.poolCounter.Add(poolKey, -tokens, LedgerEventRefund, "")
+		return err == nil
+	}
+	return t.rollbackUserLocked(ctx.UserID, month, tokens)
+}
+
+func (t *Tracker) rollbackUserLocked(userID, month string, tokens int64) bool {
 	unlock, lockOK := t.lockUsageFile()
 	if !lockOK {
 		return false
 	}
 	defer unlock()
 	rows := t.readUsage()
-	month := time.Now().UTC().Format("2006-01")
 	key := cacheKey(userID, month)
 	changed := false
 	for i := range rows {
@@ -360,6 +443,12 @@ func sanitizeRule(in Rule) Rule {
 	r := in
 	if r.MonthlyTokens < 0 {
 		r.MonthlyTokens = 0
+	}
+	switch strings.TrimSpace(r.PoolScope) {
+	case PoolScopeDept, PoolScopeTenant:
+		r.PoolScope = strings.TrimSpace(r.PoolScope)
+	default:
+		r.PoolScope = ""
 	}
 	switch strings.TrimSpace(string(r.Action)) {
 	case string(ActionBlock):

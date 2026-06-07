@@ -11,6 +11,7 @@ import (
 	"github.com/agenticx/enterprise/gateway/internal/audit"
 	"github.com/agenticx/enterprise/gateway/internal/cache"
 	"github.com/agenticx/enterprise/gateway/internal/openai"
+	"github.com/agenticx/enterprise/gateway/internal/quota"
 	"github.com/agenticx/enterprise/gateway/internal/relay"
 	"github.com/agenticx/enterprise/gateway/internal/routing"
 	"github.com/agenticx/enterprise/gateway/internal/wasmhost"
@@ -25,11 +26,12 @@ func (s *Server) handleChatCompleteRelay(
 	estimatedInputTokens int,
 	reservedTokens int64,
 	pluginCtx *wasmhost.HookContext,
+	qctx quota.RequestContext,
 ) {
 	result, err := s.relayExecutor.Complete(r.Context(), req, req.Model, channelIdentity(identity))
 	decision := routingDecisionFromRelay(result, req.Model, s.decider.Decide(r, req.Model))
 	if err != nil {
-		s.billingService.Rollback(identity.UserID, reservedTokens)
+		s.billingService.RollbackContext(qctx, reservedTokens)
 		s.recordUpstreamError(identity.TenantID, makeID("req"), result.Channel.ID, 500, []byte(err.Error()))
 		writeAPIError(w, openai.Internal(err.Error()))
 		return
@@ -51,14 +53,7 @@ func (s *Server) handleChatCompleteRelay(
 		providerOutputTokens = estimateTextTokens(responseContent)
 	}
 	actualTotal := int64(providerInputTokens + providerOutputTokens)
-	settle := s.billingService.Settle(
-		identity.UserID,
-		identity.DepartmentID,
-		roleFromScopes(identity.Scopes),
-		req.Model,
-		reservedTokens,
-		actualTotal,
-	)
+	settle := s.billingService.SettleContext(qctx, reservedTokens, actualTotal)
 	s.reportUsageDetailed(identity, decision, resp.Usage, nil)
 
 	s.writeChatCache(identity.TenantID, identity.UserID, req, cache.Entry{
