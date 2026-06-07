@@ -109,3 +109,29 @@ export type RoiReportResult = {
   dimension: HeatmapDimension;
   rows: RoiReportRow[];
 };
+
+export type UsageRecordInput = {
+  tenant_id: string;
+  id?: string;
+  dept_id?: string | null;
+  user_id?: string | null;
+  api_token_id?: number | null;
+  provider: string;
+  model: string;
+  route?: string;
+  time_bucket: string;
+  input_tokens?: number;
+  output_tokens?: number;
+  total_tokens?: number;
+  cost_usd: number;
+  pricing_version?: string | null;
+};
+
+export type UsageRecordWriteResult = {
+  id: string;
+  tenant_id: string;
+  cost_usd: number;
+  time_bucket: string;
+  provider: string;
+  model: string;
+};

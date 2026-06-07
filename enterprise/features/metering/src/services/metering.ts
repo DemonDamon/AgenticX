@@ -11,8 +11,11 @@ import type {
   MeteringPivotRow,
   MeteringQueryInput,
   MeteringQueryResult,
+  UsageRecordInput,
+  UsageRecordWriteResult,
 } from "../types";
 import { buildHeatmapMatrix, emptyHeatmapResult, formatTimeSlot, type RawHeatmapRow } from "./heatmap-utils";
+import { ulid } from "ulid";
 
 const GROUP_COLUMN: Record<MeteringGroupKey, string> = {
   dept: "dept_id",
@@ -336,6 +339,53 @@ export class MeteringService {
     return {
       rows: Array.from(buckets.values()),
     };
+  }
+
+  public async recordUsage(input: UsageRecordInput): Promise<UsageRecordWriteResult | null> {
+    const id = input.id?.trim() || ulid();
+    const route = input.route?.trim() || "chat";
+    const inputTokens = input.input_tokens ?? 0;
+    const outputTokens = input.output_tokens ?? 0;
+    const totalTokens = input.total_tokens ?? inputTokens + outputTokens;
+    try {
+      await this.pool.query(
+        `
+          insert into usage_records (
+            id, tenant_id, dept_id, user_id, api_token_id, provider, model, route, time_bucket,
+            input_tokens, output_tokens, total_tokens, cost_usd, pricing_version, created_at, updated_at
+          ) values (
+            $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14, now(), now()
+          )
+          on conflict (id) do nothing
+        `,
+        [
+          id,
+          input.tenant_id,
+          input.dept_id ?? null,
+          input.user_id ?? null,
+          input.api_token_id ?? null,
+          input.provider,
+          input.model,
+          route,
+          input.time_bucket,
+          inputTokens,
+          outputTokens,
+          totalTokens,
+          input.cost_usd,
+          input.pricing_version ?? null,
+        ]
+      );
+      return {
+        id,
+        tenant_id: input.tenant_id,
+        cost_usd: input.cost_usd,
+        time_bucket: input.time_bucket,
+        provider: input.provider,
+        model: input.model,
+      };
+    } catch {
+      return null;
+    }
   }
 }
 

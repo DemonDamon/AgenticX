@@ -20,6 +20,7 @@
     "@agenticx/core-api": "workspace:*",
     "@agenticx/db-schema": "workspace:*",
     "@agenticx/feature-audit": "workspace:*",
+    "@agenticx/feature-billing": "workspace:*",
     "@agenticx/feature-iam": "workspace:*",
     "@agenticx/feature-metering": "workspace:*",
     "@agenticx/feature-model-service": "workspace:*",
