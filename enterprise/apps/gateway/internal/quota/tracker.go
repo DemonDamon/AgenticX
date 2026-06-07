@@ -58,23 +58,46 @@ type Decision struct {
 }
 
 type Tracker struct {
-	cfgPath           string
-	usagePath         string
-	remoteURL         string
-	remoteFetched     time.Time
-	remoteCfgSnapshot Config
-	mu                sync.Mutex
-	remoteMu          sync.Mutex
-	usageCache        map[string]int64
+	cfgPath              string
+	usagePath            string
+	remoteURL            string
+	remoteFetched        time.Time
+	remoteCfgSnapshot    Config
+	budgetCfgPath        string
+	budgetUsagePath      string
+	budgetRemoteURL      string
+	budgetRemoteFetched  time.Time
+	budgetRemoteSnapshot BudgetConfig
+	mu                   sync.Mutex
+	remoteMu             sync.Mutex
+	budgetRemoteMu       sync.Mutex
+	usageCache           map[string]int64
+	budgetAlertSink      BudgetAlertSink
 }
 
 func NewTracker(cfgPath, usagePath string) *Tracker {
-	return &Tracker{
-		cfgPath:    cfgPath,
-		usagePath:  usagePath,
-		remoteURL:  strings.TrimSpace(os.Getenv("GATEWAY_REMOTE_QUOTA_CONFIG_URL")),
-		usageCache: map[string]int64{},
+	budgetCfgPath := strings.TrimSpace(os.Getenv("GATEWAY_BUDGET_CONFIG_FILE"))
+	if budgetCfgPath == "" {
+		budgetCfgPath = DefaultBudgetConfigPath()
 	}
+	budgetUsagePath := strings.TrimSpace(os.Getenv("GATEWAY_BUDGET_USAGE_FILE"))
+	if budgetUsagePath == "" {
+		budgetUsagePath = DefaultBudgetUsagePath()
+	}
+	return &Tracker{
+		cfgPath:         cfgPath,
+		usagePath:       usagePath,
+		remoteURL:       strings.TrimSpace(os.Getenv("GATEWAY_REMOTE_QUOTA_CONFIG_URL")),
+		budgetCfgPath:   budgetCfgPath,
+		budgetUsagePath: budgetUsagePath,
+		budgetRemoteURL: strings.TrimSpace(os.Getenv("GATEWAY_REMOTE_BUDGET_CONFIG_URL")),
+		usageCache:      map[string]int64{},
+	}
+}
+
+func DefaultBudgetConfigPath() string {
+	cwd, _ := os.Getwd()
+	return filepath.Clean(filepath.Join(cwd, "../../.runtime/admin/budgets.json"))
 }
 
 func DefaultConfigPath() string {

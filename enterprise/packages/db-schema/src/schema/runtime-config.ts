@@ -4,6 +4,7 @@
  */
 import {
   boolean,
+  index,
   jsonb,
   pgTable,
   primaryKey,
@@ -11,6 +12,7 @@ import {
   timestamp,
   uniqueIndex,
   varchar,
+  numeric,
 } from "drizzle-orm/pg-core";
 
 import { auditColumns } from "./_shared";
@@ -74,6 +76,37 @@ export const enterpriseRuntimePricing = pgTable("enterprise_runtime_pricing", {
   config: jsonb("config").notNull().$type<Record<string, unknown>>(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
 });
+
+/** 租户成本/词元预算整包 JSON。 */
+export const enterpriseRuntimeBudgets = pgTable("enterprise_runtime_budgets", {
+  tenantId: varchar("tenant_id", { length: 26 }).primaryKey(),
+  config: jsonb("config").notNull().$type<Record<string, unknown>>(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+});
+
+/** 网关预算预警/熔断事件（admin 只读查询）。 */
+export const gatewayBudgetAlerts = pgTable(
+  "gateway_budget_alerts",
+  {
+    id: varchar("id", { length: 64 }).primaryKey(),
+    tenantId: varchar("tenant_id", { length: 26 }).notNull(),
+    deptId: varchar("dept_id", { length: 64 }),
+    userId: varchar("user_id", { length: 64 }),
+    dimension: varchar("dimension", { length: 16 }).notNull(),
+    dimensionKey: varchar("dimension_key", { length: 128 }).notNull(),
+    period: varchar("period", { length: 16 }).notNull(),
+    unit: varchar("unit", { length: 16 }).notNull(),
+    alertType: varchar("alert_type", { length: 16 }).notNull(),
+    usedValue: numeric("used_value", { precision: 18, scale: 8 }).default("0").notNull(),
+    limitValue: numeric("limit_value", { precision: 18, scale: 8 }).default("0").notNull(),
+    warnThresholdPct: numeric("warn_threshold_pct", { precision: 5, scale: 2 }).default("0").notNull(),
+    description: text("description"),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => ({
+    tenantTimeIdx: index("gateway_budget_alerts_tenant_time_idx").on(table.tenantId, table.createdAt),
+  })
+);
 
 /** web-portal refresh token 会话（多副本 serverless）。 */
 export const authRefreshSessions = pgTable("auth_refresh_sessions", {

@@ -14,6 +14,7 @@ import (
 	"github.com/agenticx/enterprise/gateway/internal/inbound"
 	"github.com/agenticx/enterprise/gateway/internal/openai"
 	"github.com/agenticx/enterprise/gateway/internal/outbound"
+	"github.com/agenticx/enterprise/gateway/internal/quota"
 	"github.com/agenticx/enterprise/gateway/internal/relay"
 	"github.com/agenticx/enterprise/gateway/internal/routing"
 	"github.com/agenticx/enterprise/gateway/internal/transform"
@@ -152,20 +153,10 @@ func (s *Server) dispatchProtocol(
 
 	estimatedInputTokens := estimateTextTokens(joinMessages(req.Messages))
 	reserveTokens := estimateTokensWithMax(estimatedInputTokens, maxTokensFromRequest(req))
-	if s.useChannelRelay() {
-		quotaReservation := s.billingService.ReserveContext(qctx, reserveTokens)
-		if !quotaReservation.Allowed {
-			s.writeQuotaError(w, quotaReservation.Check)
-			return
-		}
-		s.applyQuotaHeaders(w, quotaReservation.Check)
-	} else {
-		check := s.quotaTracker.CheckRequest(qctx, int64(estimatedInputTokens))
-		if !check.Allowed {
-			s.writeQuotaError(w, check)
-			return
-		}
-		s.applyQuotaHeaders(w, check)
+	probeDecision := routing.Decision{Model: req.Model}
+	budgetCheck, _, ok := s.runChatQuotaGate(w, r, qctx, identity, &req, &probeDecision, estimatedInputTokens, reserveTokens)
+	if !ok {
+		return
 	}
 
 	decision := s.decider.Decide(r, req.Model)
@@ -173,15 +164,16 @@ func (s *Server) dispatchProtocol(
 		w: w, r: r, req: req, identity: identity, decision: decision, startedAt: startedAt,
 		estimatedInputTokens: estimatedInputTokens, reservedTokens: reserveTokens,
 		inboundProtocol: inboundProtocolLabel(session.inbound),
+		budgetCheck: &budgetCheck,
 	}, session) {
 		return
 	}
 
 	if req.Stream {
-		s.protocolStream(w, r, req, identity, session, derived, thinkingMode, startedAt, estimatedInputTokens, reserveTokens)
+		s.protocolStream(w, r, req, identity, session, derived, thinkingMode, startedAt, estimatedInputTokens, reserveTokens, budgetCheck)
 		return
 	}
-	s.protocolComplete(w, r, req, identity, session, derived, thinkingMode, startedAt, estimatedInputTokens, reserveTokens)
+	s.protocolComplete(w, r, req, identity, session, derived, thinkingMode, startedAt, estimatedInputTokens, reserveTokens, budgetCheck)
 }
 
 func (s *Server) protocolComplete(
@@ -195,6 +187,7 @@ func (s *Server) protocolComplete(
 	startedAt time.Time,
 	estimatedInputTokens int,
 	reservedTokens int64,
+	budgetCheck quota.CheckResult,
 ) {
 	if !s.useChannelRelay() {
 		writeAPIError(w, openai.Internal("channel relay required for multi-protocol inbound"))
@@ -204,6 +197,7 @@ func (s *Server) protocolComplete(
 	decision := routingDecisionFromRelay(result, req.Model, s.decider.Decide(r, req.Model))
 	if err != nil {
 		s.billingService.Rollback(identity.UserID, reservedTokens)
+		s.rollbackBudgetReservation(identity, req.Model, budgetCheck)
 		if up, ok := err.(*adaptor.UpstreamError); ok {
 			writeAPIError(w, adaptor.MapUpstreamError(up.StatusCode, up.Body, session.inbound))
 			return
@@ -240,7 +234,7 @@ func (s *Server) protocolComplete(
 		reservedTokens,
 		actualTotal,
 	)
-	s.reportUsageDetailed(identity, decision, resp.Usage)
+	s.reportUsageDetailed(identity, decision, resp.Usage, &budgetCheck)
 	s.writeChatCache(identity.TenantID, identity.UserID, req, cache.Entry{
 		Stream: false, Response: resp, Usage: resp.Usage,
 	})
@@ -282,6 +276,7 @@ func (s *Server) protocolStream(
 	startedAt time.Time,
 	estimatedInputTokens int,
 	reservedTokens int64,
+	budgetCheck quota.CheckResult,
 ) {
 	w.Header().Set("Content-Type", "text/event-stream")
 	w.Header().Set("Cache-Control", "no-cache")
@@ -379,6 +374,7 @@ func (s *Server) protocolStream(
 
 	if streamErr != nil {
 		s.billingService.Rollback(identity.UserID, reservedTokens)
+		s.rollbackBudgetReservation(identity, req.Model, budgetCheck)
 		if len(blockedHits) > 0 {
 			writeStreamPolicyError(w, flusher, "90002", "响应触发合规拦截", blockedHits)
 			return
@@ -405,7 +401,9 @@ func (s *Server) protocolStream(
 		reservedTokens,
 		int64(inputTokens+outputTokens),
 	)
-	s.reportUsage(identity, decision, inputTokens, outputTokens)
+	s.reportUsageDetailed(identity, decision, openai.Usage{
+		PromptTokens: inputTokens, CompletionTokens: outputTokens, TotalTokens: inputTokens + outputTokens,
+	}, &budgetCheck)
 
 	usage := openai.Usage{PromptTokens: inputTokens, CompletionTokens: outputTokens, TotalTokens: inputTokens + outputTokens}
 	switch session.outbound {

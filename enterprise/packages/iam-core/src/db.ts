@@ -5,9 +5,11 @@ import {
   enterpriseRuntimeModelProviders,
   enterpriseRuntimePolicySnapshots,
   enterpriseRuntimePricing,
+  enterpriseRuntimeBudgets,
   enterpriseRuntimeTokenQuotas,
   enterpriseRuntimeUserVisibleModels,
   gatewayAuditEvents,
+  gatewayBudgetAlerts,
   organizations,
   roles,
   ssoProviders,
@@ -31,6 +33,8 @@ const schema = {
   enterpriseRuntimeTokenQuotas,
   enterpriseRuntimePolicySnapshots,
   enterpriseRuntimePricing,
+  enterpriseRuntimeBudgets,
+  gatewayBudgetAlerts,
   authRefreshSessions,
 };
 

@@ -44,10 +44,10 @@ func TestCheckRequestDeptTPM(t *testing.T) {
 	}
 	tracker := NewTracker(cfgPath, usagePath)
 	ctx := RequestContext{DeptID: "d1", UserID: "u1", Role: "staff", Model: "m"}
-	if r := tracker.CheckRequest(ctx, 5); !r.Allowed {
+	if r := tracker.CheckRequest(ctx, 5, 0); !r.Allowed {
 		t.Fatal("first check should pass")
 	}
-	r2 := tracker.CheckRequest(ctx, 6)
+	r2 := tracker.CheckRequest(ctx, 6, 0)
 	if r2.Allowed {
 		t.Fatal("second check should block tpm")
 	}

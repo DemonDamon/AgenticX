@@ -199,6 +199,13 @@ func New(cfg config.Config, logger *slog.Logger) (*Server, error) {
 	}
 	srv.initMCPHost()
 	srv.initChannelRelay()
+	if dbURL != "" {
+		if budgetReporter, err := quota.NewBudgetAlertReporter(dbURL, logger); err != nil {
+			logger.Warn("budget alert reporter unavailable", "error", err)
+		} else {
+			srv.quotaTracker.SetBudgetAlertSink(budgetReporter.Emit)
+		}
+	}
 	srv.errorStore = gwerrors.NewStore()
 	srv.channelProber = channel.NewProber()
 	srv.initWasmHost()
@@ -684,34 +691,24 @@ func (s *Server) handleChatCompletions(w http.ResponseWriter, r *http.Request) {
 	}
 	estimatedInputTokens := estimateTextTokens(joinMessages(req.Messages))
 	reserveTokens := estimateTokensWithMax(estimatedInputTokens, maxTokensFromRequest(req))
-	var quotaReservation billing.Reservation
-	if s.useChannelRelay() {
-		quotaReservation = s.billingService.ReserveContext(qctx, reserveTokens)
-		if !quotaReservation.Allowed {
-			s.writeQuotaError(w, quotaReservation.Check)
-			return
-		}
-		s.applyQuotaHeaders(w, quotaReservation.Check)
-	} else {
-		check := s.quotaTracker.CheckRequest(qctx, int64(estimatedInputTokens))
-		if !check.Allowed {
-			s.writeQuotaError(w, check)
-			return
-		}
-		s.applyQuotaHeaders(w, check)
+	budgetCheck, quotaReservation, ok := s.runChatQuotaGate(w, r, qctx, identity, &req, &decision, estimatedInputTokens, reserveTokens)
+	if !ok {
+		return
 	}
+	_ = quotaReservation
 
 	cacheCtx := cacheServeContext{
 		w: w, r: r, req: req, identity: identity, decision: decision, startedAt: startedAt,
 		estimatedInputTokens: estimatedInputTokens, reservedTokens: reserveTokens,
 		inboundProtocol: inboundProtocolLabel("openai-chat"),
+		budgetCheck: &budgetCheck,
 	}
 	if s.tryServeFromCache(cacheCtx) {
 		return
 	}
 
 	if req.Stream {
-		s.handleStream(w, r, req, decision, startedAt, identity, estimatedInputTokens, reserveTokens, pluginCtx)
+		s.handleStream(w, r, req, decision, startedAt, identity, estimatedInputTokens, reserveTokens, pluginCtx, budgetCheck)
 		return
 	}
 
@@ -722,7 +719,7 @@ func (s *Server) handleChatCompletions(w http.ResponseWriter, r *http.Request) {
 
 	resp, err := s.provider.Complete(r.Context(), req, decision)
 	if err != nil {
-		s.rollbackQuotaReservation(identity, estimatedInputTokens)
+		s.rollbackChatQuotaAndBudget(identity, req.Model, estimatedInputTokens, budgetCheck)
 		writeAPIError(w, openai.Internal(err.Error()))
 		return
 	}
@@ -741,7 +738,7 @@ func (s *Server) handleChatCompletions(w http.ResponseWriter, r *http.Request) {
 	if providerOutputTokens == 0 {
 		providerOutputTokens = estimateTextTokens(responseContent)
 	}
-	s.reportUsageDetailed(identity, decision, resp.Usage)
+	s.reportUsageDetailed(identity, decision, resp.Usage, &budgetCheck)
 	s.reconcileQuotaUsage(identity, req.Model, estimatedInputTokens, providerInputTokens+providerOutputTokens)
 
 	s.writeChatCache(identity.TenantID, identity.UserID, req, cache.Entry{
@@ -975,6 +972,7 @@ func (s *Server) handleStream(
 	estimatedInputTokens int,
 	reservedTokens int64,
 	pluginCtx *wasmhost.HookContext,
+	budgetCheck quota.CheckResult,
 ) {
 	w.Header().Set("Content-Type", "text/event-stream")
 	w.Header().Set("Cache-Control", "no-cache")
@@ -1121,7 +1119,7 @@ func (s *Server) handleStream(
 		CompletionTokens: outputTokens,
 		TotalTokens:      inputTokens + outputTokens,
 	}
-	s.reportUsageDetailed(identity, decision, streamUsage)
+	s.reportUsageDetailed(identity, decision, streamUsage, &budgetCheck)
 	if s.metrics != nil && !firstTokenAt.IsZero() {
 		s.metrics.ObserveTPS(req.Model, decision.ChannelID, outputTokens, time.Since(firstTokenAt))
 	}
@@ -1495,7 +1493,7 @@ func (s *Server) reportUsage(identity requestIdentity, decision routing.Decision
 		PromptTokens:     inputTokens,
 		CompletionTokens: outputTokens,
 		TotalTokens:      inputTokens + outputTokens,
-	})
+	}, nil)
 }
 
 func (s *Server) reconcileQuotaUsage(
