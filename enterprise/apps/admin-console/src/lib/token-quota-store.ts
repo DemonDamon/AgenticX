@@ -142,3 +142,72 @@ export async function setQuotaConfig(input: Partial<QuotaConfig>): Promise<Quota
 export function quotaFilePath(): string {
   return LEGACY_FILE;
 }
+
+export type PlanScopeType = "tenant" | "dept" | "user";
+
+export type QuotaPlanSources = Record<string, string>;
+
+function planSourceKey(scopeType: PlanScopeType, scopeId: string): string {
+  return `${scopeType}:${scopeId}`;
+}
+
+/** 读取套餐映射来源表（存于 config 元数据，网关忽略）。 */
+export function getPlanSources(config: QuotaConfig): QuotaPlanSources {
+  const raw = (config as QuotaConfig & { _planSources?: QuotaPlanSources })._planSources;
+  return raw && typeof raw === "object" ? { ...raw } : {};
+}
+
+/** 将套餐额度写入 token-quota 配置对应 scope，并记录 plan 来源。 */
+export function applyPlanRuleToScope(
+  config: QuotaConfig,
+  scopeType: PlanScopeType,
+  scopeId: string,
+  rule: QuotaRule,
+  planId: string,
+): QuotaConfig {
+  const next = normalizeQuota(config);
+  const normalized = normalizeRule(rule);
+  const sources = getPlanSources(next);
+  sources[planSourceKey(scopeType, scopeId)] = planId;
+  (next as QuotaConfig & { _planSources?: QuotaPlanSources })._planSources = sources;
+
+  if (scopeType === "user") {
+    next.users[scopeId] = normalized;
+  } else if (scopeType === "dept") {
+    next.departments[scopeId] = { ...normalized, poolScope: "dept" };
+  } else {
+    next.defaults.role["_plan_tenant"] = { ...normalized, poolScope: "tenant" };
+  }
+  return next;
+}
+
+/** 移除套餐写入的 scope 规则（仅当来源 planId 匹配或未指定 planId）。 */
+export function removePlanRuleFromScope(
+  config: QuotaConfig,
+  scopeType: PlanScopeType,
+  scopeId: string,
+  planId?: string,
+): QuotaConfig {
+  const next = normalizeQuota(config);
+  const sources = getPlanSources(next);
+  const key = planSourceKey(scopeType, scopeId);
+  if (planId && sources[key] && sources[key] !== planId) {
+    return next;
+  }
+  delete sources[key];
+  (next as QuotaConfig & { _planSources?: QuotaPlanSources })._planSources = sources;
+
+  if (scopeType === "user") {
+    delete next.users[scopeId];
+  } else if (scopeType === "dept") {
+    delete next.departments[scopeId];
+  } else {
+    delete next.defaults.role["_plan_tenant"];
+  }
+  return next;
+}
+
+/** 整包写回 PG（供套餐发布映射调用）。 */
+export async function persistQuotaConfig(config: QuotaConfig): Promise<QuotaConfig> {
+  return setQuotaConfig(config);
+}

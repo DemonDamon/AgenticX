@@ -169,6 +169,13 @@
       "when": 1779500000000,
       "tag": "0023_gateway_quota_pool",
       "breakpoints": true
+    },
+    {
+      "idx": 24,
+      "version": "7",
+      "when": 1779600000000,
+      "tag": "0024_enterprise_quota_plans",
+      "breakpoints": true
     }
   ]
 }

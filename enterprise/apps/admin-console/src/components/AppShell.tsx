@@ -102,6 +102,7 @@ const NAV_GROUPS: NavGroup[] = [
       { href: "/admin/compliance", labelKey: "compliance", icon: Shield },
       { href: "/metering", labelKey: "metering", icon: BarChart3 },
       { href: "/metering/quota", labelKey: "quota", icon: Sliders },
+      { href: "/metering/plans", labelKey: "quotaPlans", icon: Package },
       { href: "/metering/split", labelKey: "billingSplit", icon: Gauge },
       { href: "/metering/agent-traces", labelKey: "agentTraces", icon: Activity },
     ],
