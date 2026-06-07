@@ -12,6 +12,22 @@ SMOKE_MOCK_PORT="${SMOKE_MOCK_PORT:-29199}"
 SMOKE_GATEWAY_BASE="http://127.0.0.1:${SMOKE_GATEWAY_PORT}"
 SMOKE_MOCK_ADDR="127.0.0.1:${SMOKE_MOCK_PORT}"
 
+wait_gateway_ready() {
+  local base="$1"
+  local attempts="${2:-60}"
+  local delay="${3:-0.25}"
+  local i body
+  for i in $(seq 1 "$attempts"); do
+    body="$(curl -sf --noproxy '*' "${base}/readyz" 2>/dev/null || true)"
+    if echo "$body" | grep -q '"status"[[:space:]]*:[[:space:]]*"ready"'; then
+      return 0
+    fi
+    sleep "$delay"
+  done
+  echo "[smoke-deploy] gateway not ready at ${base} after ${attempts} attempts" >&2
+  return 1
+}
+
 echo "[smoke-deploy] go test (health + hybrid routing)"
 (cd "$GW_DIR" && go test ./internal/server/... ./internal/observability/... -count=1)
 
@@ -66,12 +82,7 @@ run_local_smoke() {
   ) &
   GW_PID=$!
 
-  for _ in $(seq 1 60); do
-    if curl -sf --noproxy '*' "${SMOKE_GATEWAY_BASE}/readyz" | rg -q '"ready"'; then
-      break
-    fi
-    sleep 0.25
-  done
+  wait_gateway_ready "$SMOKE_GATEWAY_BASE" 60 0.25
 
   bash "$ROOT/enterprise/scripts/smoke-gateway-probes.sh" "$SMOKE_GATEWAY_BASE"
 }
@@ -86,12 +97,7 @@ if command -v docker >/dev/null 2>&1 && docker info >/dev/null 2>&1; then
     (cd "$DEPLOY_DIR" && docker compose -f compose.smoke.yml down -v --remove-orphans) || true
   }
   trap cleanup EXIT
-  for _ in $(seq 1 60); do
-    if curl -sf --noproxy '*' http://127.0.0.1:18088/readyz | rg -q '"ready"'; then
-      break
-    fi
-    sleep 0.5
-  done
+  wait_gateway_ready "http://127.0.0.1:18088" 60 0.5
   bash "$ROOT/enterprise/scripts/smoke-gateway-probes.sh" http://127.0.0.1:18088
 else
   echo "[smoke-deploy] docker unavailable; local go run probe fallback"

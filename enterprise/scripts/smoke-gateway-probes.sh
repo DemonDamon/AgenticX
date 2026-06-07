@@ -23,7 +23,7 @@ probe "/healthz" 200
 probe "/readyz" 200
 
 metrics="$(curl -sf --noproxy '*' "${BASE}/metrics" || true)"
-if ! echo "$metrics" | rg -q 'agx_gateway_http_requests_total'; then
+if ! echo "$metrics" | grep -q 'agx_gateway_http_requests_total'; then
   echo "[smoke] FAIL /metrics missing agx_gateway_http_requests_total" >&2
   exit 1
 fi
