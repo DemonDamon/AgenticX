@@ -1,0 +1,14 @@
+http_addr: ":8088"
+default_route: third-party
+local_route_header: x-agenticx-route
+policy_manifest: /app/plugins/moderation-perf/manifest.yaml
+audit_dir: /runtime/audit
+models:
+  - name: perf-mock-model
+    provider: perf-mock
+    route: third-party
+    endpoint: http://mock-cloud:9099/v1
+  - name: local-ollama-llama3
+    provider: edge-agent
+    route: local
+    endpoint: http://mock-cloud:9099/v1

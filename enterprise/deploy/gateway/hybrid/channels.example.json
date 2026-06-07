@@ -1,0 +1,76 @@
+{
+  "channels": [
+    {
+      "id": "cloud-deepseek-primary",
+      "tenantId": "default",
+      "name": "DeepSeek Cloud",
+      "providerType": "openai-compatible",
+      "baseUrl": "https://api.deepseek.com/v1",
+      "weight": 80,
+      "priority": 10,
+      "status": "active",
+      "route": "third-party",
+      "providerLabel": "deepseek",
+      "region": "cn-north",
+      "supportedModels": ["deepseek-chat", "deepseek-reasoner"],
+      "metadata": {
+        "pool": "public-cloud",
+        "description": "公有云模型池 — 高吞吐、按量计费"
+      }
+    },
+    {
+      "id": "cloud-moonshot-fallback",
+      "tenantId": "default",
+      "name": "Moonshot Cloud",
+      "providerType": "openai-compatible",
+      "baseUrl": "https://api.moonshot.cn/v1",
+      "weight": 20,
+      "priority": 20,
+      "status": "active",
+      "route": "private-cloud",
+      "providerLabel": "moonshot",
+      "region": "cn-east",
+      "supportedModels": ["moonshot-v1-8k", "moonshot-v1-32k"],
+      "metadata": {
+        "pool": "public-cloud",
+        "description": "公有云备用池"
+      }
+    },
+    {
+      "id": "private-ollama-local",
+      "tenantId": "default",
+      "name": "Local Ollama",
+      "providerType": "openai-compatible",
+      "baseUrl": "http://ollama.private.svc.cluster.local:11434/v1",
+      "weight": 100,
+      "priority": 5,
+      "status": "active",
+      "route": "local",
+      "providerLabel": "edge-agent",
+      "region": "on-prem",
+      "supportedModels": ["llama3", "qwen2.5", "local-ollama-llama3"],
+      "metadata": {
+        "pool": "private-token-pool",
+        "description": "私有化词元池 — 本地 Ollama / 自建推理"
+      }
+    },
+    {
+      "id": "private-vllm-cluster",
+      "tenantId": "default",
+      "name": "Private vLLM",
+      "providerType": "openai-compatible",
+      "baseUrl": "http://vllm.private.svc.cluster.local:8000/v1",
+      "weight": 50,
+      "priority": 15,
+      "status": "active",
+      "route": "local",
+      "providerLabel": "private-vllm",
+      "region": "on-prem",
+      "supportedModels": ["qwen2.5-72b-instruct"],
+      "metadata": {
+        "pool": "private-token-pool",
+        "description": "私有化 GPU 集群"
+      }
+    }
+  ]
+}

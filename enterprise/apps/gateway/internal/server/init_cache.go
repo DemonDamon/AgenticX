@@ -9,22 +9,24 @@ import (
 	"github.com/agenticx/enterprise/gateway/internal/metering"
 )
 
-func initCacheService(logger *slog.Logger) *cache.Service {
+func initCacheService(logger *slog.Logger) (*cache.Service, *cache.RedisStore) {
 	cfg := cache.ConfigFromEnv()
 	if adminCfg, err := cache.LoadAdminConfig(cacheConfigPath()); err == nil {
 		cfg = adminCfg.Apply(cfg)
 	}
 	var store cache.Store = cache.NewMemoryStore(4096)
+	var redisStore *cache.RedisStore
 	if redisURL := strings.TrimSpace(os.Getenv("REDIS_URL")); redisURL != "" {
-		redisStore, err := cache.NewRedisStore(redisURL, "")
+		rs, err := cache.NewRedisStore(redisURL, "")
 		if err != nil {
 			logger.Warn("redis cache unavailable, using memory store", "error", err)
 		} else {
-			store = redisStore
+			store = rs
+			redisStore = rs
 			logger.Info("cache using redis store")
 		}
 	}
-	return cache.NewService(cfg, store)
+	return cache.NewService(cfg, store), redisStore
 }
 
 func initPricingLoader(logger *slog.Logger) *metering.PricingLoader {

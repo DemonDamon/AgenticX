@@ -1,0 +1,16 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: agenticx-gateway
+  labels:
+    app.kubernetes.io/name: agenticx-gateway
+    app.kubernetes.io/component: gateway
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: agenticx-gateway
+  ports:
+    - name: http
+      port: 8088
+      targetPort: http
+      protocol: TCP
