@@ -1,5 +1,6 @@
 "use client";
 import { adminFetch } from "../../../lib/admin-client-auth";
+import { QuotaUsageBar, type UsageSnapshot } from "../../../components/QuotaUsageBar";
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
@@ -134,18 +135,65 @@ const EMPTY: QuotaConfig = {
 
 const EMPTY_RULE: QuotaRule = { monthlyTokens: 0, tpm: 0, rpm: 0, maxConcurrency: 0, poolScope: "", action: "warn" };
 
+function usageKey(scope: string, id: string): string {
+  return `${scope}:${id}`;
+}
+
+async function fetchUsage(scope: string, id: string): Promise<UsageSnapshot | null> {
+  const res = await adminFetch(
+    `/api/metering/quota/usage?scope=${encodeURIComponent(scope)}&id=${encodeURIComponent(id)}`,
+    { cache: "no-store" },
+  );
+  if (!res.ok) return null;
+  const json = (await res.json()) as { data?: UsageSnapshot };
+  return json.data ?? null;
+}
+
+async function loadAllUsages(config: QuotaConfig): Promise<Record<string, UsageSnapshot>> {
+  const tasks: Array<Promise<[string, UsageSnapshot | null]>> = [];
+  for (const id of Object.keys(config.departments)) {
+    tasks.push(
+      fetchUsage("dept", id).then((row) => [usageKey("dept", id), row] as [string, UsageSnapshot | null]),
+    );
+  }
+  for (const id of Object.keys(config.users)) {
+    tasks.push(
+      fetchUsage("user", id).then((row) => [usageKey("user", id), row] as [string, UsageSnapshot | null]),
+    );
+  }
+  for (const id of Object.keys(config.apiTokens ?? {})) {
+    tasks.push(
+      fetchUsage("pat", id).then((row) => [usageKey("pat", id), row] as [string, UsageSnapshot | null]),
+    );
+  }
+  const tenantPool = Object.values(config.defaults.role).some((r) => r.poolScope === "tenant");
+  if (tenantPool) {
+    tasks.push(fetchUsage("tenant", "current").then((row) => [usageKey("tenant", "current"), row] as [string, UsageSnapshot | null]));
+  }
+  const entries = await Promise.all(tasks);
+  const next: Record<string, UsageSnapshot> = {};
+  for (const [key, row] of entries) {
+    if (row) next[key] = row;
+  }
+  return next;
+}
+
 function RuleEditor({
   label,
   rule,
   onChange,
   onRemove,
   showPoolScope = false,
+  usage,
+  usageLoading = false,
 }: {
   label: string;
   rule: QuotaRule;
   onChange: (patch: Partial<QuotaRule>) => void;
   onRemove?: () => void;
   showPoolScope?: boolean;
+  usage?: UsageSnapshot | null;
+  usageLoading?: boolean;
 }) {
   const tf = useTranslations("pages.ops.quota.fields");
 
@@ -197,10 +245,13 @@ function RuleEditor({
               <SelectItem value="tenant">租户共享池</SelectItem>
             </SelectContent>
           </Select>
-          <p className="text-xs text-muted-foreground">池用量：—</p>
+          <QuotaUsageBar usage={usage} loading={usageLoading} />
         </div>
       ) : (
-        <div />
+        <div className="space-y-1">
+          <Label className="text-xs opacity-0">用量</Label>
+          <QuotaUsageBar usage={usage} loading={usageLoading} />
+        </div>
       )}
       {onRemove ? (
         <Button type="button" variant="ghost" size="icon" className="text-destructive" onClick={onRemove}>
@@ -290,6 +341,8 @@ export default function MeteringQuotaPage() {
   const [pricing, setPricing] = useState<PricingConfig>(EMPTY_PRICING);
   const [budget, setBudget] = useState<BudgetConfig>(EMPTY_BUDGET);
   const [budgetAlerts, setBudgetAlerts] = useState<BudgetAlert[]>([]);
+  const [usageByKey, setUsageByKey] = useState<Record<string, UsageSnapshot>>({});
+  const [usageLoading, setUsageLoading] = useState(false);
   const [loading, setLoading] = useState(false);
   const [newDept, setNewDept] = useState("");
   const [newUser, setNewUser] = useState("");
@@ -310,10 +363,15 @@ export default function MeteringQuotaPage() {
       const pricingJson = (await pricingRes.json()) as { data?: { pricing?: PricingConfig } };
       const budgetJson = (await budgetRes.json()) as { data?: { budget?: BudgetConfig } };
       const alertsJson = (await alertsRes.json()) as { data?: { alerts?: BudgetAlert[] } };
-      setQuota({ ...EMPTY, ...(quotaJson.data?.quota ?? EMPTY), apiTokens: quotaJson.data?.quota?.apiTokens ?? {} });
+      const nextQuota = { ...EMPTY, ...(quotaJson.data?.quota ?? EMPTY), apiTokens: quotaJson.data?.quota?.apiTokens ?? {} };
+      setQuota(nextQuota);
       setPricing({ ...EMPTY_PRICING, ...(pricingJson.data?.pricing ?? EMPTY_PRICING) });
       setBudget({ ...EMPTY_BUDGET, ...(budgetJson.data?.budget ?? EMPTY_BUDGET) });
       setBudgetAlerts(alertsJson.data?.alerts ?? []);
+      setUsageLoading(true);
+      void loadAllUsages(nextQuota)
+        .then(setUsageByKey)
+        .finally(() => setUsageLoading(false));
     } catch (error) {
       toast.error(error instanceof Error ? error.message : tc("toast.loadFailed"));
     } finally {
@@ -458,7 +516,18 @@ export default function MeteringQuotaPage() {
             </CardHeader>
             <CardContent className="space-y-3">
               {Object.entries(quota.defaults.role).map(([role, rule]) => (
-                <RuleEditor key={role} label={role} rule={rule} showPoolScope onChange={(patch) =>
+                <RuleEditor
+                  key={role}
+                  label={role}
+                  rule={rule}
+                  showPoolScope
+                  usage={
+                    rule.poolScope === "tenant"
+                      ? usageByKey[usageKey("tenant", "current")]
+                      : undefined
+                  }
+                  usageLoading={usageLoading}
+                  onChange={(patch) =>
                   setQuota((prev) => ({
                     ...prev,
                     defaults: {
@@ -466,7 +535,8 @@ export default function MeteringQuotaPage() {
                       role: { ...prev.defaults.role, [role]: { ...rule, ...patch } },
                     },
                   }))
-                } />
+                }
+                />
               ))}
             </CardContent>
           </Card>
@@ -480,7 +550,16 @@ export default function MeteringQuotaPage() {
             </Button>
           </div>
           {Object.entries(quota.departments).map(([id, rule]) => (
-            <RuleEditor key={id} label={id} rule={rule} showPoolScope onChange={(patch) => updateMap("departments", id, patch)} onRemove={() => removeMapKey("departments", id)} />
+            <RuleEditor
+              key={id}
+              label={id}
+              rule={rule}
+              showPoolScope
+              usage={usageByKey[usageKey("dept", id)]}
+              usageLoading={usageLoading}
+              onChange={(patch) => updateMap("departments", id, patch)}
+              onRemove={() => removeMapKey("departments", id)}
+            />
           ))}
         </TabsContent>
 
@@ -492,7 +571,15 @@ export default function MeteringQuotaPage() {
             </Button>
           </div>
           {Object.entries(quota.users).map(([id, rule]) => (
-            <RuleEditor key={id} label={id} rule={rule} onChange={(patch) => updateMap("users", id, patch)} onRemove={() => removeMapKey("users", id)} />
+            <RuleEditor
+              key={id}
+              label={id}
+              rule={rule}
+              usage={usageByKey[usageKey("user", id)]}
+              usageLoading={usageLoading}
+              onChange={(patch) => updateMap("users", id, patch)}
+              onRemove={() => removeMapKey("users", id)}
+            />
           ))}
         </TabsContent>
 
@@ -504,7 +591,15 @@ export default function MeteringQuotaPage() {
             </Button>
           </div>
           {Object.entries(quota.apiTokens ?? {}).map(([id, rule]) => (
-            <RuleEditor key={id} label={t("patLabel", { id })} rule={rule} onChange={(patch) => updateMap("apiTokens", id, patch)} onRemove={() => removeMapKey("apiTokens", id)} />
+            <RuleEditor
+              key={id}
+              label={t("patLabel", { id })}
+              rule={rule}
+              usage={usageByKey[usageKey("pat", id)]}
+              usageLoading={usageLoading}
+              onChange={(patch) => updateMap("apiTokens", id, patch)}
+              onRemove={() => removeMapKey("apiTokens", id)}
+            />
           ))}
         </TabsContent>
 

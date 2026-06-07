@@ -44,6 +44,7 @@ import {
 } from "lucide-react";
 import { useChatStore } from "@agenticx/feature-chat";
 import { MachiChatView } from "./MachiChatView";
+import { QuotaCard } from "./QuotaCard";
 import { SettingsPanel } from "./settings/SettingsPanel";
 
 type WorkspaceShellProps = {
@@ -285,6 +286,8 @@ export function WorkspaceShell({ userEmail, userScopes }: WorkspaceShellProps) {
               {!collapsed && t("deepResearch")}
             </Button>
           </div>
+
+          <QuotaCard collapsed={collapsed} />
 
           <Separator className="bg-sidebar-border" />
 

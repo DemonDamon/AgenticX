@@ -13,3 +13,4 @@ export * from "./pat-service";
 export * from "./pat-revocation-store";
 export * from "./session-grant-service";
 export * from "./compliance-service";
+export * from "./quota-remaining";
