@@ -3,10 +3,13 @@ package observability
 import (
 	"net/http"
 	"os"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
 
+	"github.com/go-chi/chi/v5"
+	"github.com/go-chi/chi/v5/middleware"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 )
@@ -26,6 +29,8 @@ type Registry struct {
 	pluginInvocations *prometheus.CounterVec
 	pluginErrors      *prometheus.CounterVec
 	pluginLatency     *prometheus.HistogramVec
+	httpRequests      *prometheus.CounterVec
+	httpDuration      *prometheus.HistogramVec
 
 	once sync.Once
 }
@@ -91,6 +96,15 @@ func (r *Registry) register() {
 		Help:    "Wasm plugin hook latency in seconds",
 		Buckets: prometheus.ExponentialBuckets(0.00001, 2, 14),
 	}, []string{"plugin"})
+	r.httpRequests = prometheus.NewCounterVec(prometheus.CounterOpts{
+		Name: "agx_gateway_http_requests_total",
+		Help: "Total HTTP requests handled by the gateway",
+	}, []string{"method", "route", "status"})
+	r.httpDuration = prometheus.NewHistogramVec(prometheus.HistogramOpts{
+		Name:    "agx_gateway_http_request_duration_seconds",
+		Help:    "HTTP request latency in seconds",
+		Buckets: prometheus.DefBuckets,
+	}, []string{"method", "route"})
 
 	r.reg.MustRegister(
 		r.ttftSeconds,
@@ -103,6 +117,8 @@ func (r *Registry) register() {
 		r.pluginInvocations,
 		r.pluginErrors,
 		r.pluginLatency,
+		r.httpRequests,
+		r.httpDuration,
 	)
 }
 
@@ -180,6 +196,41 @@ func (r *Registry) RecordUpstreamError(channel, reason string) {
 		return
 	}
 	r.upstreamErrors.WithLabelValues(safeLabel(channel), safeLabel(reason)).Inc()
+}
+
+func (r *Registry) ObserveHTTP(method, route string, status int, elapsed time.Duration) {
+	if !r.Enabled() {
+		return
+	}
+	method = safeLabel(method)
+	route = safeLabel(route)
+	statusLabel := strconv.Itoa(status)
+	if r.httpRequests != nil {
+		r.httpRequests.WithLabelValues(method, route, statusLabel).Inc()
+	}
+	if r.httpDuration != nil {
+		r.httpDuration.WithLabelValues(method, route).Observe(elapsed.Seconds())
+	}
+}
+
+// HTTPMiddleware records request counts and latency for Prometheus scraping.
+func (r *Registry) HTTPMiddleware() func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+			if !r.Enabled() {
+				next.ServeHTTP(w, req)
+				return
+			}
+			started := time.Now()
+			ww := middleware.NewWrapResponseWriter(w, req.ProtoMajor)
+			next.ServeHTTP(ww, req)
+			route := req.URL.Path
+			if rc := chi.RouteContext(req.Context()); rc != nil && rc.RoutePattern() != "" {
+				route = rc.RoutePattern()
+			}
+			r.ObserveHTTP(req.Method, route, ww.Status(), time.Since(started))
+		})
+	}
 }
 
 func (r *Registry) Handler() http.Handler {

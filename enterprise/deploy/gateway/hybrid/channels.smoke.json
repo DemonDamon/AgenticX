@@ -1,0 +1,32 @@
+{
+  "channels": [
+    {
+      "id": "smoke-cloud-mock",
+      "tenantId": "default",
+      "name": "Mock Public Cloud",
+      "providerType": "openai-compatible",
+      "baseUrl": "http://mock-cloud:9099/v1",
+      "weight": 100,
+      "priority": 10,
+      "status": "active",
+      "route": "third-party",
+      "providerLabel": "perf-mock",
+      "supportedModels": ["deepseek-chat", "perf-mock-model"],
+      "metadata": { "pool": "public-cloud" }
+    },
+    {
+      "id": "smoke-local-mock",
+      "tenantId": "default",
+      "name": "Mock Private Pool",
+      "providerType": "openai-compatible",
+      "baseUrl": "http://mock-cloud:9099/v1",
+      "weight": 100,
+      "priority": 5,
+      "status": "active",
+      "route": "local",
+      "providerLabel": "edge-agent",
+      "supportedModels": ["local-ollama-llama3"],
+      "metadata": { "pool": "private-token-pool" }
+    }
+  ]
+}

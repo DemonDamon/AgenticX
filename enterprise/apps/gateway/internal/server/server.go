@@ -82,6 +82,7 @@ type Server struct {
 	pricingLoader      *metering.PricingLoader
 	metrics            *observability.Registry
 	pgPool             *pgxpool.Pool
+	redisStore         *cache.RedisStore
 	mcpHost            *mcphost.Host
 	mcpStreamable      mcphost.StreamableHTTPTransport
 	mcpSSE             *mcphost.SSETransport
@@ -208,11 +209,14 @@ func New(cfg config.Config, logger *slog.Logger) (*Server, error) {
 		patVerifier:        patVerifier,
 		sessionGrants:      gatewayauth.NewSessionGrantStore(pgPool),
 		compliance:         residency.NewComplianceStore(pgPool),
-		cacheService:       initCacheService(logger),
+		cacheService:       nil,
 		pricingLoader:      initPricingLoader(logger),
 		metrics:            observability.NewRegistryFromEnv(),
 		pgPool:             pgPool,
 	}
+	cacheSvc, redisStore := initCacheService(logger)
+	srv.cacheService = cacheSvc
+	srv.redisStore = redisStore
 	srv.initMCPHost()
 	srv.initChannelRelay()
 	if dbURL != "" {
@@ -558,8 +562,12 @@ func (s *Server) Router() http.Handler {
 	r.Use(middleware.RealIP)
 	r.Use(middleware.Recoverer)
 	r.Use(middleware.Timeout(10 * time.Minute))
+	if s.metrics != nil && s.metrics.Enabled() {
+		r.Use(s.metrics.HTTPMiddleware())
+	}
 
 	r.Get("/healthz", s.handleHealth)
+	r.Get("/readyz", s.handleReady)
 	if s.metrics != nil && s.metrics.Enabled() {
 		r.Handle("/metrics", s.metrics.Handler())
 	}
@@ -593,18 +601,6 @@ func (s *Server) Router() http.Handler {
 	s.registerMCPRoutes(r)
 
 	return r
-}
-
-func (s *Server) handleHealth(w http.ResponseWriter, _ *http.Request) {
-	writeJSON(w, http.StatusOK, map[string]any{
-		"code":    "00000",
-		"message": "ok",
-		"data": map[string]any{
-			"service": "agenticx-gateway",
-			"status":  "healthy",
-			"time":    time.Now().UTC().Format(time.RFC3339),
-		},
-	})
 }
 
 func (s *Server) handleChatCompletions(w http.ResponseWriter, r *http.Request) {

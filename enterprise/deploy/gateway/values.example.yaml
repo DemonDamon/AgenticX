@@ -1,0 +1,53 @@
+# Gateway image tag (override at deploy time)
+image:
+  repository: ghcr.io/agenticx/enterprise-gateway
+  tag: latest
+  pullPolicy: IfNotPresent
+
+replicaCount: 2
+
+service:
+  type: ClusterIP
+  port: 8088
+
+resources:
+  requests:
+    cpu: 250m
+    memory: 256Mi
+  limits:
+    cpu: "2"
+    memory: 1Gi
+
+hpa:
+  enabled: true
+  minReplicas: 2
+  maxReplicas: 10
+  targetCPUUtilizationPercentage: 70
+  # Optional custom metric (requires Prometheus Adapter / metrics-server extension)
+  customMetric:
+    enabled: false
+    name: agx_gateway_active_streams
+    targetAverageValue: "20"
+
+env:
+  GATEWAY_HTTP_ADDR: ":8088"
+  GATEWAY_METRICS: "on"
+  GATEWAY_CHANNEL_REGISTRY: "on"
+  # Set via Secret in production
+  DATABASE_URL: ""
+  REDIS_URL: ""
+  AUTH_JWT_PUBLIC_KEY: ""
+
+probes:
+  liveness:
+    path: /healthz
+    initialDelaySeconds: 5
+    periodSeconds: 10
+  readiness:
+    path: /readyz
+    initialDelaySeconds: 10
+    periodSeconds: 10
+
+volumes:
+  runtimeMount: /runtime
+  configMount: /app/config

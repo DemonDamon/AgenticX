@@ -1,0 +1,98 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: agenticx-gateway
+  labels:
+    app.kubernetes.io/name: agenticx-gateway
+    app.kubernetes.io/component: gateway
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: agenticx-gateway
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: agenticx-gateway
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/path: /metrics
+        prometheus.io/port: "8088"
+    spec:
+      containers:
+        - name: gateway
+          image: ghcr.io/agenticx/enterprise-gateway:latest
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 8088
+              protocol: TCP
+          env:
+            - name: GATEWAY_HTTP_ADDR
+              value: ":8088"
+            - name: GATEWAY_METRICS
+              value: "on"
+            - name: GATEWAY_CHANNEL_REGISTRY
+              value: "on"
+            - name: GATEWAY_CONFIG_PATH
+              value: /app/config/policies.yaml
+            - name: GATEWAY_QUOTA_CONFIG_FILE
+              value: /runtime/admin/quotas.json
+            - name: GATEWAY_POLICY_SNAPSHOT_FILE
+              value: /runtime/admin/policy-snapshot.json
+            - name: GATEWAY_ADMIN_CHANNELS_FILE
+              value: /runtime/admin/channels.json
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: agenticx-gateway-env
+                  key: DATABASE_URL
+                  optional: true
+            - name: REDIS_URL
+              valueFrom:
+                secretKeyRef:
+                  name: agenticx-gateway-env
+                  key: REDIS_URL
+                  optional: true
+            - name: AUTH_JWT_PUBLIC_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: agenticx-gateway-env
+                  key: AUTH_JWT_PUBLIC_KEY
+                  optional: true
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: http
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            timeoutSeconds: 3
+            failureThreshold: 3
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            timeoutSeconds: 3
+            failureThreshold: 3
+          resources:
+            requests:
+              cpu: 250m
+              memory: 256Mi
+            limits:
+              cpu: "2"
+              memory: 1Gi
+          volumeMounts:
+            - name: runtime
+              mountPath: /runtime
+            - name: gateway-config
+              mountPath: /app/config
+              readOnly: true
+      volumes:
+        - name: runtime
+          emptyDir: {}
+        - name: gateway-config
+          configMap:
+            name: agenticx-gateway-config
+            optional: true

@@ -36,6 +36,14 @@ func (r *RedisStore) redisKey(key string) string {
 	return r.prefix + key
 }
 
+// Ping verifies Redis connectivity for readiness probes.
+func (r *RedisStore) Ping(ctx context.Context) error {
+	if r == nil || r.client == nil {
+		return redis.ErrClosed
+	}
+	return r.client.Ping(ctx).Err()
+}
+
 func (r *RedisStore) Get(key string) (Entry, bool) {
 	ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
 	defer cancel()

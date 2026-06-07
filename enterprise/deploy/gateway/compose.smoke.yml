@@ -1,0 +1,39 @@
+# 本地冒烟：网关 + mock 公有云上游 + 可选 Redis
+# 用法: docker compose -f compose.smoke.yml up -d --build
+# 探针: bash ../../scripts/smoke-gateway-probes.sh http://127.0.0.1:18088
+
+services:
+  mock-cloud:
+    build:
+      context: ../../scripts/perf/mock-upstream
+    ports:
+      - "19099:9099"
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+
+  gateway:
+    build:
+      context: ../..
+      dockerfile: apps/gateway/Dockerfile
+    depends_on:
+      - mock-cloud
+      - redis
+    ports:
+      - "18088:8088"
+    environment:
+      GATEWAY_HTTP_ADDR: ":8088"
+      GATEWAY_METRICS: "on"
+      GATEWAY_CHANNEL_REGISTRY: "on"
+      REDIS_URL: redis://redis:6379/0
+      GATEWAY_CONFIG_PATH: /app/config/policies.yaml
+      GATEWAY_ADMIN_CHANNELS_FILE: /runtime/admin/channels.json
+      GATEWAY_QUOTA_CONFIG_FILE: /runtime/admin/quotas.json
+      GATEWAY_POLICY_SNAPSHOT_FILE: /runtime/admin/policy-snapshot.json
+    volumes:
+      - ./hybrid/smoke-policies.yaml:/app/config/policies.yaml:ro
+      - ./hybrid/channels.smoke.json:/runtime/admin/channels.json:ro
+      - ./hybrid/smoke-runtime:/runtime/admin:ro
+      - ../../scripts/perf/fixtures/moderation-perf:/app/plugins/moderation-perf:ro

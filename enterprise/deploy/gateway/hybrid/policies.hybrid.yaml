@@ -1,0 +1,32 @@
+# 混合部署路由配置样例（挂载为 GATEWAY_CONFIG_PATH）
+# 与 channels.example.json 配合：channel registry 按 priority/weight 选路，
+# YAML models 段提供无 registry 时的模型级回落。
+
+http_addr: ":8088"
+default_route: third-party
+local_route_header: x-agenticx-route
+policy_manifest: /app/plugins/moderation-*/manifest.yaml
+audit_dir: /runtime/audit
+
+models:
+  # 公有云默认模型
+  - name: deepseek-chat
+    provider: deepseek
+    route: third-party
+    endpoint: https://api.deepseek.com/v1
+
+  - name: moonshot-v1-8k
+    provider: moonshot
+    route: private-cloud
+    endpoint: https://api.moonshot.cn/v1
+
+  # 私有化词元池（本地 Ollama / 自建 vLLM）
+  - name: local-ollama-llama3
+    provider: edge-agent
+    route: local
+    endpoint: http://ollama.private.svc.cluster.local:11434/v1
+
+  - name: qwen2.5-72b-instruct
+    provider: private-vllm
+    route: local
+    endpoint: http://vllm.private.svc.cluster.local:8000/v1

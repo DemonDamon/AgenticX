@@ -6,6 +6,7 @@
 - `docker-compose/prod.yml`：生产模板（Nginx 入口 + 双网关 + 前后台 + PostgreSQL 主从 + Redis）。
 - `nginx/gateway.conf`：公网入口反向代理与基础限流模板。
 - `config/policies.yaml`：网关策略包装载清单（生产可按客户策略扩展）。
+- `gateway/`：K8s Deployment / Service / HPA、混合部署样例与 compose 冒烟（见 `gateway/README.md`）。
 
 ## Usage
 
