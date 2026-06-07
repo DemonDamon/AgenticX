@@ -43,6 +43,7 @@
         "compliance": "合规留存",
         "metering": "四维消耗",
         "quota": "额度控制",
+        "quotaPlans": "Token 套餐",
         "billingSplit": "分账结算",
         "agentTraces": "词元追踪",
         "policy": "策略规则",
@@ -1124,6 +1125,60 @@
           "loadFailed": "加载失败",
           "saveSuccess": "额度配置已保存",
           "saveFailed": "保存失败"
+        }
+      },
+      "quotaPlans": {
+        "title": "Token 套餐 SKU",
+        "description": "档位化套餐定义、绑定与发布映射；发布后写入 token-quota 快照供网关 enforcement。",
+        "listTitle": "套餐列表",
+        "listDesc": "draft 套餐不会进入映射；active 套餐可绑定并发布。",
+        "createTitle": "新建套餐",
+        "createDesc": "创建 draft 套餐，填写月度 Token 与速率限制。",
+        "editTitle": "编辑套餐",
+        "editDesc": "保存后需发布才会映射到网关配额快照。",
+        "assignTitle": "绑定管理",
+        "assignDesc": "绑定 tenant / 部门 / 用户；升档可勾选「下周期生效」。",
+        "empty": "暂无套餐",
+        "pendingUpgrade": "待升档",
+        "period": { "month": "按月", "week": "按周" },
+        "status": { "draft": "草稿", "active": "已发布", "archived": "已归档" },
+        "scope": { "tenant": "租户", "dept": "部门", "user": "用户" },
+        "fields": {
+          "name": "套餐名称",
+          "monthlyTokens": "月 Token 额度",
+          "maxConcurrency": "最大并发",
+          "models": "模型白名单",
+          "period": "计费周期",
+          "status": "状态",
+          "scopeType": "绑定范围",
+          "scopeId": "范围 ID",
+          "periodEnd": "周期结束",
+          "effectiveNextPeriod": "下周期生效（升档）"
+        },
+        "placeholders": {
+          "name": "例如：团队 10M/月",
+          "models": "gpt-4o, claude-sonnet（留空表示不限）",
+          "scopeId": "部门或用户 ID",
+          "tenantScope": "租户级自动使用当前租户"
+        },
+        "actions": {
+          "publish": "发布映射",
+          "archive": "归档",
+          "assign": "绑定",
+          "unassign": "解除绑定",
+          "rollover": "周期滚动"
+        },
+        "toast": {
+          "nameRequired": "请填写套餐名称",
+          "scopeRequired": "请填写范围 ID",
+          "created": "套餐已创建",
+          "saved": "套餐已保存",
+          "published": "已发布映射（{count} 条生效）",
+          "archived": "套餐已归档，绑定已解除",
+          "deleted": "草稿套餐已删除",
+          "assigned": "绑定已创建",
+          "unassigned": "绑定已解除",
+          "rollover": "周期滚动完成（{count} 条）"
         }
       }
     },

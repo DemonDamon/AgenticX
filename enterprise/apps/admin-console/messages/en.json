@@ -43,6 +43,7 @@
         "compliance": "Compliance",
         "metering": "Metering",
         "quota": "Quota Control",
+        "quotaPlans": "Token Plans",
         "billingSplit": "Billing Split",
         "agentTraces": "Agent Traces",
         "policy": "Policy Rules",
@@ -1124,6 +1125,60 @@
           "loadFailed": "Failed to load",
           "saveSuccess": "Quota config saved",
           "saveFailed": "Save failed"
+        }
+      },
+      "quotaPlans": {
+        "title": "Token plan SKUs",
+        "description": "Tiered plan definitions, assignments, and publish mapping into the token-quota snapshot for gateway enforcement.",
+        "listTitle": "Plans",
+        "listDesc": "Draft plans are not mapped; active plans can be assigned and published.",
+        "createTitle": "New plan",
+        "createDesc": "Create a draft plan with monthly token and rate limits.",
+        "editTitle": "Edit plan",
+        "editDesc": "Publish to map limits into the gateway quota snapshot.",
+        "assignTitle": "Assignments",
+        "assignDesc": "Bind tenant / department / user; upgrades can apply next period only.",
+        "empty": "No plans yet",
+        "pendingUpgrade": "Pending upgrade",
+        "period": { "month": "Monthly", "week": "Weekly" },
+        "status": { "draft": "Draft", "active": "Active", "archived": "Archived" },
+        "scope": { "tenant": "Tenant", "dept": "Department", "user": "User" },
+        "fields": {
+          "name": "Plan name",
+          "monthlyTokens": "Monthly token limit",
+          "maxConcurrency": "Max concurrency",
+          "models": "Model allowlist",
+          "period": "Billing period",
+          "status": "Status",
+          "scopeType": "Scope type",
+          "scopeId": "Scope ID",
+          "periodEnd": "Period end",
+          "effectiveNextPeriod": "Effective next period (upgrade)"
+        },
+        "placeholders": {
+          "name": "e.g. Team 10M/month",
+          "models": "gpt-4o, claude-sonnet (empty = all models)",
+          "scopeId": "Department or user ID",
+          "tenantScope": "Tenant scope uses current tenant automatically"
+        },
+        "actions": {
+          "publish": "Publish mapping",
+          "archive": "Archive",
+          "assign": "Assign",
+          "unassign": "Unassign",
+          "rollover": "Run rollover"
+        },
+        "toast": {
+          "nameRequired": "Plan name is required",
+          "scopeRequired": "Scope ID is required",
+          "created": "Plan created",
+          "saved": "Plan saved",
+          "published": "Published mapping ({count} active)",
+          "archived": "Plan archived; assignments removed",
+          "deleted": "Draft plan deleted",
+          "assigned": "Assignment created",
+          "unassigned": "Assignment removed",
+          "rollover": "Rollover completed ({count} assignments)"
         }
       }
     },
