@@ -4,6 +4,7 @@ import {
   departments,
   enterpriseRuntimeModelProviders,
   enterpriseRuntimePolicySnapshots,
+  enterpriseRuntimePricing,
   enterpriseRuntimeTokenQuotas,
   enterpriseRuntimeUserVisibleModels,
   gatewayAuditEvents,
@@ -29,6 +30,7 @@ const schema = {
   enterpriseRuntimeUserVisibleModels,
   enterpriseRuntimeTokenQuotas,
   enterpriseRuntimePolicySnapshots,
+  enterpriseRuntimePricing,
   authRefreshSessions,
 };
 

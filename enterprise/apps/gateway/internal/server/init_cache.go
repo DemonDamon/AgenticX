@@ -27,16 +27,25 @@ func initCacheService(logger *slog.Logger) *cache.Service {
 	return cache.NewService(cfg, store)
 }
 
-func initPricingTable(logger *slog.Logger) *metering.PricingTable {
+func initPricingLoader(logger *slog.Logger) *metering.PricingLoader {
 	path := strings.TrimSpace(os.Getenv("GATEWAY_PRICING_FILE"))
 	if path == "" {
 		path = metering.DefaultPricingPath()
 	}
-	table, err := metering.LoadPricingTable(path)
+	loader, err := metering.NewPricingLoader(path)
 	if err != nil {
-		logger.Warn("pricing table unavailable, using defaults", "error", err, "path", path)
-		fallback, _ := metering.LoadPricingTable("")
-		return fallback
+		logger.Warn("pricing loader unavailable, using defaults", "error", err, "path", path)
+		return nil
 	}
-	return table
+	if strings.TrimSpace(os.Getenv("GATEWAY_REMOTE_PRICING_CONFIG_URL")) != "" {
+		logger.Info("pricing using remote snapshot with local fallback", "path", path)
+	}
+	return loader
+}
+
+func (s *Server) activePricingTable() *metering.PricingTable {
+	if s.pricingLoader != nil {
+		return s.pricingLoader.Table()
+	}
+	return s.pricing
 }

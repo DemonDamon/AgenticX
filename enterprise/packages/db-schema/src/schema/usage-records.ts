@@ -25,6 +25,7 @@ export const usageRecords = pgTable(
     reasoningTokens: numeric("reasoning_tokens", { precision: 20, scale: 0 }).default("0").notNull(),
     usageSource: varchar("usage_source", { length: 32 }),
     costUsd: numeric("cost_usd", { precision: 18, scale: 8 }).default("0").notNull(),
+    pricingVersion: varchar("pricing_version", { length: 128 }),
     ...auditColumns,
   },
   (table) => ({
