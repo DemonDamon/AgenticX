@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
-import { getAgentTrace, listAgentTraceIds } from "../../../../lib/agent-trace-store";
-import { requireAdminScope } from "../../../../lib/admin-auth";
+import { getAgentTrace, listAgentTraceIds } from "../../../lib/agent-trace-store";
+import { requireAdminScope } from "../../../lib/admin-auth";
 
 export async function GET(request: Request) {
   const guard = await requireAdminScope(["metering:read"]);
