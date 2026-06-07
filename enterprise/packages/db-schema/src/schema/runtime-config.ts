@@ -5,6 +5,7 @@
 import {
   boolean,
   index,
+  integer,
   jsonb,
   pgTable,
   primaryKey,
@@ -132,6 +133,16 @@ export const enterpriseRuntimePatRevocation = pgTable("enterprise_runtime_pat_re
   tenantId: varchar("tenant_id", { length: 26 }).primaryKey(),
   version: numeric("version", { precision: 20, scale: 0 }).default("0").notNull(),
   revokedHashes: jsonb("revoked_hashes").default([]).notNull().$type<string[]>(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+});
+
+/** 租户合规：数据驻留、跨境策略、审计留存（HIPAA 式可配）。 */
+export const enterpriseRuntimeCompliance = pgTable("enterprise_runtime_compliance", {
+  tenantId: varchar("tenant_id", { length: 26 }).primaryKey(),
+  dataResidency: varchar("data_residency", { length: 16 }),
+  crossBorderAction: varchar("cross_border_action", { length: 32 }).default("allow").notNull(),
+  auditRetentionYears: integer("audit_retention_years").default(6).notNull(),
+  appendOnly: boolean("append_only").default(true).notNull(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
 });
 

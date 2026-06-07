@@ -40,6 +40,7 @@
         "roles": "角色",
         "bulkImport": "批量导入",
         "audit": "审计日志",
+        "compliance": "合规留存",
         "metering": "四维消耗",
         "quota": "额度控制",
         "policy": "策略规则",

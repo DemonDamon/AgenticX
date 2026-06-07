@@ -87,6 +87,8 @@ docker build -f apps/gateway/Dockerfile -t agenticx-gateway:latest .
 | `GATEWAY_PAT_CACHE_TTL` | PAT 校验内存缓存 TTL（默认 `5s`） |
 | `GATEWAY_REMOTE_PAT_REVOCATION_URL` | admin `GET /api/internal/pat-revocation-snapshot`（吊销 hash 列表 + version） |
 | `GATEWAY_REMOTE_SESSION_GRANTS_URL` | admin `GET /api/internal/session-grants-snapshot`（会话临时 scope） |
+| `GATEWAY_REMOTE_COMPLIANCE_URL` | admin `GET /api/internal/compliance-snapshot`（数据驻留 / 跨境策略） |
+| `GATEWAY_DEFAULT_UPSTREAM_REGION` | 非 channel 路由时上游地域默认（如 `us`），用于跨境判定 |
 | `GATEWAY_PRICING_FILE` | 本地计价表路径（默认 `internal/metering/pricing.yaml`） |
 
 未配置上述远程 URL 时，仍使用 `GATEWAY_ADMIN_PROVIDERS_FILE`、`GATEWAY_QUOTA_CONFIG_FILE`、`GATEWAY_POLICY_SNAPSHOT_FILE` 等本地路径逻辑。

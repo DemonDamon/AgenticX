@@ -55,6 +55,11 @@ export interface AuditEvent {
   prev_checksum: string;
   checksum: string;
   signature?: string;
+
+  src_region?: string;
+  dst_region?: string;
+  cross_border?: boolean;
+  residency_rule?: string;
 }
 
 export type AuditQueryInput = {
@@ -64,6 +69,7 @@ export type AuditQueryInput = {
   provider?: string;
   model?: string;
   policy_hit?: string;
+  cross_border?: boolean;
   start?: string;
   end?: string;
   limit?: number;

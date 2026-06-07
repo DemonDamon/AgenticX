@@ -1,4 +1,4 @@
-import { bigint, index, integer, jsonb, pgTable, timestamp, uniqueIndex, varchar } from "drizzle-orm/pg-core";
+import { bigint, boolean, index, integer, jsonb, pgTable, timestamp, uniqueIndex, varchar } from "drizzle-orm/pg-core";
 import { auditColumns, ulid } from "./_shared";
 import { tenants } from "./tenants";
 
@@ -36,6 +36,10 @@ export const gatewayAuditEvents = pgTable(
     mcpInputHash: varchar("mcp_input_hash", { length: 128 }),
     mcpOutputHash: varchar("mcp_output_hash", { length: 128 }),
     mcpStatus: varchar("mcp_status", { length: 32 }),
+    srcRegion: varchar("src_region", { length: 16 }),
+    dstRegion: varchar("dst_region", { length: 16 }),
+    crossBorder: boolean("cross_border"),
+    residencyRule: varchar("residency_rule", { length: 64 }),
     prevChecksum: varchar("prev_checksum", { length: 128 }).notNull(),
     checksum: varchar("checksum", { length: 128 }).notNull(),
     signature: varchar("signature", { length: 256 }),
@@ -60,6 +64,11 @@ export const gatewayAuditEvents = pgTable(
       table.eventTime
     ),
     policiesHitGin: index("gateway_audit_events_policies_hit_gin").using("gin", table.policiesHit),
+    crossBorderIdx: index("gateway_audit_events_cross_border_idx").on(
+      table.tenantId,
+      table.crossBorder,
+      table.eventTime
+    ),
   })
 );
 

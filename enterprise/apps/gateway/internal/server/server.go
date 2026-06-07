@@ -36,6 +36,7 @@ import (
 	"github.com/agenticx/enterprise/gateway/internal/provider"
 	"github.com/agenticx/enterprise/gateway/internal/quota"
 	"github.com/agenticx/enterprise/gateway/internal/relay"
+	"github.com/agenticx/enterprise/gateway/internal/residency"
 	"github.com/agenticx/enterprise/gateway/internal/routing"
 	"github.com/agenticx/enterprise/gateway/internal/runtimeconfig"
 	"github.com/agenticx/enterprise/gateway/internal/wasmhost"
@@ -74,6 +75,7 @@ type Server struct {
 	billingService     *billing.Service
 	patVerifier        *gatewayauth.PATVerifier
 	sessionGrants      *gatewayauth.SessionGrantStore
+	compliance         *residency.ComplianceStore
 	cacheService       *cache.Service
 	pricing            *metering.PricingTable
 	pricingLoader      *metering.PricingLoader
@@ -194,6 +196,7 @@ func New(cfg config.Config, logger *slog.Logger) (*Server, error) {
 		quotaTracker:       quota.NewTracker(quotaCfgPath, quotaUsagePath),
 		patVerifier:        patVerifier,
 		sessionGrants:      gatewayauth.NewSessionGrantStore(pgPool),
+		compliance:         residency.NewComplianceStore(pgPool),
 		cacheService:       initCacheService(logger),
 		pricingLoader:      initPricingLoader(logger),
 		metrics:            observability.NewRegistryFromEnv(),
@@ -640,6 +643,11 @@ func (s *Server) handleChatCompletions(w http.ResponseWriter, r *http.Request) {
 		"endpoint", decision.Endpoint,
 	)
 
+	cbResult, crossOk := s.enforceCrossBorder(w, r, identity, decision, startedAt, joinMessages(req.Messages))
+	if !crossOk {
+		return
+	}
+
 	pluginCtx := s.newPluginHookContext(identity, r, pluginRouteFromRequest(r))
 	if s.runWasmRequestHooks(w, pluginCtx, rawBody) {
 		_ = s.writeAuditEvent(audit.Event{
@@ -837,6 +845,7 @@ func (s *Server) handleChatCompletions(w http.ResponseWriter, r *http.Request) {
 			ResponseSummary: summarize(responseContent, 120),
 		},
 	}, cache.LayerNone, "", 0, time.Since(startedAt).Milliseconds())
+	applyCrossBorderAuditFields(&chatAudit, cbResult)
 	applyPluginsInvoked(&chatAudit, pluginCtx)
 	if err := s.writeAuditEvent(chatAudit); err != nil {
 		writeAPIError(w, openai.Internal("audit write failed"))
@@ -1319,6 +1328,7 @@ type requestIdentity struct {
 	RoleCodes     []string
 	ClientType    string
 	Scopes        []string
+	DataResidency string
 	APITokenID    int64
 	AuthViaPAT    bool
 }
@@ -1402,6 +1412,7 @@ type accessClaims struct {
 	SessionID      string   `json:"sessionId"`
 	RoleCodes      []string `json:"roleCodes"`
 	ClientType     string   `json:"clientType"`
+	DataResidency  string   `json:"dataResidency"`
 	Scopes         []string `json:"scopes"`
 	Type           string   `json:"typ"`
 	jwt.RegisteredClaims
@@ -1441,6 +1452,7 @@ func parseIdentityFromJWT(token string) (requestIdentity, error) {
 		RoleCodes:     sanitizeRoleCodes(claims.RoleCodes),
 		ClientType:    sanitizeClientType(claims.ClientType),
 		Scopes:        sanitizeScopes(claims.Scopes),
+		DataResidency: residency.NormalizeRegion(claims.DataResidency),
 	}, nil
 }
 

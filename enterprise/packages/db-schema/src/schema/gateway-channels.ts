@@ -17,6 +17,7 @@ export const gatewayChannels = pgTable(
     priority: integer("priority").default(0).notNull(),
     status: varchar("status", { length: 16 }).default("active").notNull(),
     supportedModels: jsonb("supported_models").default([]).notNull().$type<string[]>(),
+    region: varchar("region", { length: 16 }),
     metadata: jsonb("metadata").default({}).notNull().$type<Record<string, unknown>>(),
     ...auditColumns,
   },

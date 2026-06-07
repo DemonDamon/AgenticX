@@ -23,6 +23,7 @@ export interface GatewayChannelRecord {
   priority: number;
   status: ChannelStatus;
   supportedModels: string[];
+  region?: string | null;
   metadata: Record<string, unknown>;
   createdAt: string;
   updatedAt: string;
@@ -42,6 +43,7 @@ export interface CreateChannelInput {
   priority?: number;
   status?: ChannelStatus;
   supportedModels: string[];
+  region?: string;
   metadata?: Record<string, unknown>;
 }
 
@@ -54,6 +56,7 @@ export interface UpdateChannelInput {
   priority?: number;
   status?: ChannelStatus;
   supportedModels?: string[];
+  region?: string | null;
   metadata?: Record<string, unknown>;
 }
 
@@ -91,6 +94,7 @@ function rowToRecord(row: typeof chTable.$inferSelect): GatewayChannelRecord {
     priority: row.priority ?? 0,
     status: (row.status as ChannelStatus) || "active",
     supportedModels: models.map(String),
+    region: row.region ?? null,
     metadata,
     createdAt: row.createdAt instanceof Date ? row.createdAt.toISOString() : String(row.createdAt),
     updatedAt: row.updatedAt instanceof Date ? row.updatedAt.toISOString() : String(row.updatedAt),
@@ -127,6 +131,7 @@ function toGatewayPayload(record: GatewayChannelRecord) {
     status: record.status,
     supportedModels: record.supportedModels,
     metadata: record.metadata,
+    region: record.region ?? undefined,
     providerLabel,
     route,
   };
@@ -177,6 +182,7 @@ export async function createChannel(input: CreateChannelInput): Promise<PublicGa
     priority: input.priority ?? 0,
     status: input.status ?? "active",
     supportedModels: input.supportedModels,
+    region: input.region?.trim() || null,
     metadata: input.metadata ?? {},
     createdAt: new Date(ts),
     updatedAt: new Date(ts),
@@ -207,6 +213,7 @@ export async function updateChannel(id: string, input: UpdateChannelInput): Prom
   if (input.priority !== undefined) patch.priority = input.priority;
   if (input.status !== undefined) patch.status = input.status;
   if (input.supportedModels !== undefined) patch.supportedModels = input.supportedModels;
+  if (input.region !== undefined) patch.region = input.region?.trim() || null;
   if (input.metadata !== undefined) patch.metadata = { ...existing.metadata, ...input.metadata };
 
   await db.update(chTable).set(patch).where(and(eq(chTable.tenantId, tenantId), eq(chTable.id, id)));
