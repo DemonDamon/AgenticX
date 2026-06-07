@@ -931,6 +931,8 @@
         "totalCost": "Total cost",
         "recordCount": "Records",
         "tabCharts": "Charts",
+        "tabHeatmap": "Heatmap",
+        "tabRoi": "ROI",
         "tabTable": "Pivot table",
         "trendTitle": "Token usage trend",
         "trendDescription": "Daily aggregation",
@@ -957,6 +959,53 @@
         "toast": {
           "queryFailed": "Query failed",
           "exportSuccess": "Exported {count} records"
+        },
+        "heatmap": {
+          "title": "Token usage heatmap",
+          "description": "Business dimension × time slot to spot high-value usage",
+          "dimension": "Dimension",
+          "granularity": "Time granularity",
+          "granularityDay": "Daily",
+          "granularityHour": "Hourly",
+          "metric": "Metric",
+          "dimHeader": "Dimension"
+        },
+        "roi": {
+          "title": "ROI report",
+          "description": "Token cost vs business revenue, sorted by ROI",
+          "dimension": "Cost grouping",
+          "exportCsv": "Export ROI CSV",
+          "emptyTitle": "No ROI data",
+          "emptyDescription": "Add revenue entries or adjust the date range",
+          "revenueTitle": "Business revenue",
+          "revenueDescription": "Scenario label must match the cost dimension value (dept id, model name, etc.)",
+          "revenueEmptyTitle": "No revenue entries",
+          "revenueEmptyDescription": "Use the form below to add scenario revenue",
+          "form": {
+            "label": "Scenario label",
+            "labelPlaceholder": "Same as dept/model/PAT dimension value",
+            "amount": "Revenue (USD)",
+            "notes": "Notes",
+            "save": "Save revenue",
+            "saving": "Saving…",
+            "delete": "Delete"
+          },
+          "table": {
+            "label": "Scenario",
+            "revenue": "Revenue",
+            "net": "Net",
+            "roi": "ROI",
+            "actions": "Actions"
+          },
+          "toast": {
+            "exportSuccess": "ROI report exported",
+            "labelRequired": "Scenario label is required",
+            "amountInvalid": "Invalid revenue amount",
+            "saveSuccess": "Revenue saved",
+            "saveFailed": "Save failed",
+            "deleteSuccess": "Deleted",
+            "deleteFailed": "Delete failed"
+          }
         }
       },
       "quota": {

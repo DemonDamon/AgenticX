@@ -931,6 +931,8 @@
         "totalCost": "总成本",
         "recordCount": "记录数",
         "tabCharts": "可视化",
+        "tabHeatmap": "热力图",
+        "tabRoi": "ROI 分析",
         "tabTable": "透视表",
         "trendTitle": "Token 消耗趋势",
         "trendDescription": "按天聚合",
@@ -957,6 +959,53 @@
         "toast": {
           "queryFailed": "查询失败",
           "exportSuccess": "已导出 {count} 条记录"
+        },
+        "heatmap": {
+          "title": "词元消耗热力图",
+          "description": "按业务维度 × 时段识别高消耗场景",
+          "dimension": "业务维度",
+          "granularity": "时段粒度",
+          "granularityDay": "按天",
+          "granularityHour": "按小时",
+          "metric": "展示指标",
+          "dimHeader": "维度"
+        },
+        "roi": {
+          "title": "ROI 分析报表",
+          "description": "词元成本 vs 业务收益，按 ROI 排序",
+          "dimension": "成本分组维度",
+          "exportCsv": "导出 ROI CSV",
+          "emptyTitle": "暂无 ROI 数据",
+          "emptyDescription": "录入业务收益或调整筛选区间后重试",
+          "revenueTitle": "业务收益录入",
+          "revenueDescription": "场景标签需与上方成本维度值一致（如部门 ID、模型名）",
+          "revenueEmptyTitle": "暂无收益录入",
+          "revenueEmptyDescription": "在下方表单添加业务场景收益",
+          "form": {
+            "label": "场景标签",
+            "labelPlaceholder": "与部门/模型/PAT 等维度值一致",
+            "amount": "收益 (USD)",
+            "notes": "备注",
+            "save": "保存收益",
+            "saving": "保存中…",
+            "delete": "删除"
+          },
+          "table": {
+            "label": "场景",
+            "revenue": "收益",
+            "net": "净收益",
+            "roi": "ROI",
+            "actions": "操作"
+          },
+          "toast": {
+            "exportSuccess": "ROI 报表已导出",
+            "labelRequired": "请填写场景标签",
+            "amountInvalid": "收益金额无效",
+            "saveSuccess": "收益已保存",
+            "saveFailed": "保存失败",
+            "deleteSuccess": "已删除",
+            "deleteFailed": "删除失败"
+          }
         }
       },
       "quota": {

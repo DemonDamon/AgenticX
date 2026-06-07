@@ -37,7 +37,8 @@ import {
   toast,
 } from "@agenticx/ui";
 import { useTranslations } from "next-intl";
-import { BarChart3, Download, FileSpreadsheet, Filter, RefreshCcw, Search } from "lucide-react";
+import { BarChart3, Download, FileSpreadsheet, Filter, RefreshCcw, Search, Trash2 } from "lucide-react";
+import { TokenHeatmap, type HeatmapCell } from "../../components/metering/TokenHeatmap";
 
 type MeteringRow = {
   dims: Record<string, string | null>;
@@ -48,6 +49,27 @@ type MeteringRow = {
   cache_read_input_tokens: number;
   cache_creation_input_tokens: number;
   cost_usd: number;
+};
+
+type HeatmapDimension = "dept" | "user" | "model" | "pat" | "provider";
+type HeatmapGranularity = "hour" | "day";
+type HeatmapMetric = "total_tokens" | "cost_usd";
+
+type RoiRow = {
+  label: string;
+  cost_usd: number;
+  revenue_usd: number;
+  net_usd: number;
+  roi: number | null;
+};
+
+type RevenueRecord = {
+  id: string;
+  scenario_label: string;
+  period_start: string;
+  period_end: string;
+  revenue_usd: number;
+  notes: string | null;
 };
 
 type UserOption = { id: string; name: string; deptId: string | null };
@@ -78,6 +100,23 @@ export default function MeteringPage() {
   const [start, setStart] = useState(new Date(Date.now() - 7 * 24 * 3600 * 1000).toISOString().slice(0, 10));
   const [end, setEnd] = useState(new Date().toISOString().slice(0, 10));
   const [rows, setRows] = useState<MeteringRow[]>([]);
+  const [heatmapDimensions, setHeatmapDimensions] = useState<string[]>([]);
+  const [heatmapTimeSlots, setHeatmapTimeSlots] = useState<string[]>([]);
+  const [heatmapCells, setHeatmapCells] = useState<HeatmapCell[]>([]);
+  const [heatmapDimension, setHeatmapDimension] = useState<HeatmapDimension>("dept");
+  const [heatmapGranularity, setHeatmapGranularity] = useState<HeatmapGranularity>("day");
+  const [heatmapMetric, setHeatmapMetric] = useState<HeatmapMetric>("total_tokens");
+  const [heatmapLoading, setHeatmapLoading] = useState(false);
+  const [roiRows, setRoiRows] = useState<RoiRow[]>([]);
+  const [roiDimension, setRoiDimension] = useState<HeatmapDimension>("dept");
+  const [roiLoading, setRoiLoading] = useState(false);
+  const [revenues, setRevenues] = useState<RevenueRecord[]>([]);
+  const [revenueLabel, setRevenueLabel] = useState("");
+  const [revenueStart, setRevenueStart] = useState(start);
+  const [revenueEnd, setRevenueEnd] = useState(end);
+  const [revenueAmount, setRevenueAmount] = useState("");
+  const [revenueNotes, setRevenueNotes] = useState("");
+  const [revenueSaving, setRevenueSaving] = useState(false);
   const [usersData, setUsersData] = useState<UserOption[]>([]);
   const [patOptions, setPatOptions] = useState<PatOption[]>([]);
   const [providersData, setProvidersData] = useState<ProviderOption[]>([]);
@@ -200,9 +239,88 @@ export default function MeteringPage() {
     }
   }, [dept, user, apiToken, provider, model, start, end]);
 
+  const filterPayload = useMemo(
+    () => ({
+      dept_id: dept !== ALL ? [dept] : [],
+      user_id: user !== ALL ? [user] : [],
+      api_token_id: apiToken !== ALL ? [apiToken] : [],
+      provider: provider !== ALL ? [provider] : [],
+      model: model !== ALL ? [model] : [],
+      start: `${start}T00:00:00.000Z`,
+      end: `${end}T23:59:59.999Z`,
+    }),
+    [dept, user, apiToken, provider, model, start, end]
+  );
+
+  const queryHeatmap = useCallback(async () => {
+    setHeatmapLoading(true);
+    try {
+      const response = await adminFetch("/api/metering/heatmap", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          ...filterPayload,
+          dimension: heatmapDimension,
+          time_granularity: heatmapGranularity,
+          metric: heatmapMetric,
+        }),
+      });
+      const payload = await readJsonBody<{
+        data?: { dimensions?: string[]; time_slots?: string[]; cells?: HeatmapCell[] };
+      }>(response, { data: { dimensions: [], time_slots: [], cells: [] } });
+      setHeatmapDimensions(payload.data?.dimensions ?? []);
+      setHeatmapTimeSlots(payload.data?.time_slots ?? []);
+      setHeatmapCells(payload.data?.cells ?? []);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : t("toast.queryFailed"));
+      setHeatmapDimensions([]);
+      setHeatmapTimeSlots([]);
+      setHeatmapCells([]);
+    } finally {
+      setHeatmapLoading(false);
+    }
+  }, [filterPayload, heatmapDimension, heatmapGranularity, heatmapMetric, t]);
+
+  const loadRevenues = useCallback(async () => {
+    try {
+      const response = await adminFetch("/api/metering/roi?mode=revenues", { cache: "no-store" });
+      const payload = await readJsonBody<{ data?: { items?: RevenueRecord[] } }>(response, { data: { items: [] } });
+      setRevenues(payload.data?.items ?? []);
+    } catch {
+      setRevenues([]);
+    }
+  }, []);
+
+  const queryRoi = useCallback(async () => {
+    setRoiLoading(true);
+    try {
+      const params = new URLSearchParams({
+        dimension: roiDimension,
+        start: filterPayload.start,
+        end: filterPayload.end,
+      });
+      for (const key of ["dept_id", "user_id", "api_token_id", "provider", "model"] as const) {
+        for (const value of filterPayload[key]) {
+          params.append(key, value);
+        }
+      }
+      const response = await adminFetch(`/api/metering/roi?${params.toString()}`, { cache: "no-store" });
+      const payload = await readJsonBody<{ data?: { rows?: RoiRow[] } }>(response, { data: { rows: [] } });
+      setRoiRows(payload.data?.rows ?? []);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : t("toast.queryFailed"));
+      setRoiRows([]);
+    } finally {
+      setRoiLoading(false);
+    }
+  }, [filterPayload, roiDimension, t]);
+
   useEffect(() => {
     void query();
-  }, [query]);
+    void queryHeatmap();
+    void queryRoi();
+    void loadRevenues();
+  }, [query, queryHeatmap, queryRoi, loadRevenues]);
 
   const exportCsv = async () => {
     const response = await adminFetch("/api/metering/export", {
@@ -227,6 +345,85 @@ export default function MeteringPage() {
     anchor.click();
     URL.revokeObjectURL(url);
     toast.success(t("toast.exportSuccess", { count: rows.length }));
+  };
+
+  const exportRoiCsv = async () => {
+    const params = new URLSearchParams({
+      dimension: roiDimension,
+      start: filterPayload.start,
+      end: filterPayload.end,
+      format: "csv",
+    });
+    for (const key of ["dept_id", "user_id", "api_token_id", "provider", "model"] as const) {
+      for (const value of filterPayload[key]) {
+        params.append(key, value);
+      }
+    }
+    const response = await adminFetch(`/api/metering/roi?${params.toString()}`, { cache: "no-store" });
+    const csv = await response.text();
+    const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement("a");
+    anchor.href = url;
+    anchor.download = `roi-report-${new Date().toISOString().slice(0, 10)}.csv`;
+    anchor.click();
+    URL.revokeObjectURL(url);
+    toast.success(t("roi.toast.exportSuccess"));
+  };
+
+  const saveRevenue = async () => {
+    if (!revenueLabel.trim()) {
+      toast.error(t("roi.toast.labelRequired"));
+      return;
+    }
+    const amount = Number(revenueAmount);
+    if (!Number.isFinite(amount)) {
+      toast.error(t("roi.toast.amountInvalid"));
+      return;
+    }
+    setRevenueSaving(true);
+    try {
+      const response = await adminFetch("/api/metering/roi", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          scenario_label: revenueLabel.trim(),
+          period_start: `${revenueStart}T00:00:00.000Z`,
+          period_end: `${revenueEnd}T23:59:59.999Z`,
+          revenue_usd: amount,
+          notes: revenueNotes.trim() || null,
+        }),
+      });
+      const payload = await readJsonBody<{ code?: string; message?: string }>(response, {});
+      if (payload.code && payload.code !== "00000") {
+        throw new Error(payload.message ?? t("roi.toast.saveFailed"));
+      }
+      setRevenueLabel("");
+      setRevenueAmount("");
+      setRevenueNotes("");
+      toast.success(t("roi.toast.saveSuccess"));
+      await loadRevenues();
+      await queryRoi();
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : t("roi.toast.saveFailed"));
+    } finally {
+      setRevenueSaving(false);
+    }
+  };
+
+  const removeRevenue = async (id: string) => {
+    try {
+      const response = await adminFetch(`/api/metering/roi?id=${encodeURIComponent(id)}`, { method: "DELETE" });
+      const payload = await readJsonBody<{ code?: string; message?: string }>(response, {});
+      if (payload.code && payload.code !== "00000") {
+        throw new Error(payload.message ?? t("roi.toast.deleteFailed"));
+      }
+      toast.success(t("roi.toast.deleteSuccess"));
+      await loadRevenues();
+      await queryRoi();
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : t("roi.toast.deleteFailed"));
+    }
   };
 
   const callsSeriesKey = t("callsSeries");
@@ -278,7 +475,17 @@ export default function MeteringPage() {
         description={t("description")}
         actions={
           <>
-            <Button variant="outline" size="sm" onClick={() => void query()} disabled={loading}>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => {
+                void query();
+                void queryHeatmap();
+                void queryRoi();
+                void loadRevenues();
+              }}
+              disabled={loading || heatmapLoading || roiLoading}
+            >
               <RefreshCcw />
               {tc("actions.refresh")}
             </Button>
@@ -432,6 +639,8 @@ export default function MeteringPage() {
       <Tabs defaultValue="charts" className="space-y-4">
         <TabsList>
           <TabsTrigger value="charts">{t("tabCharts")}</TabsTrigger>
+          <TabsTrigger value="heatmap">{t("tabHeatmap")}</TabsTrigger>
+          <TabsTrigger value="roi">{t("tabRoi")}</TabsTrigger>
           <TabsTrigger value="table">{t("tabTable")}</TabsTrigger>
         </TabsList>
 
@@ -459,6 +668,210 @@ export default function MeteringPage() {
               hideLegend
             />
           </div>
+        </TabsContent>
+
+        <TabsContent value="heatmap" className="space-y-4">
+          <Card>
+            <CardHeader className="pb-3">
+              <CardTitle className="text-base">{t("heatmap.title")}</CardTitle>
+              <CardDescription>{t("heatmap.description")}</CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div className="grid gap-3 sm:grid-cols-3">
+                <div className="space-y-1.5">
+                  <Label>{t("heatmap.dimension")}</Label>
+                  <Select value={heatmapDimension} onValueChange={(value) => setHeatmapDimension(value as HeatmapDimension)}>
+                    <SelectTrigger>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="dept">{t("dept")}</SelectItem>
+                      <SelectItem value="user">{t("user")}</SelectItem>
+                      <SelectItem value="pat">{t("apiToken")}</SelectItem>
+                      <SelectItem value="provider">{t("provider")}</SelectItem>
+                      <SelectItem value="model">{t("model")}</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="space-y-1.5">
+                  <Label>{t("heatmap.granularity")}</Label>
+                  <Select value={heatmapGranularity} onValueChange={(value) => setHeatmapGranularity(value as HeatmapGranularity)}>
+                    <SelectTrigger>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="day">{t("heatmap.granularityDay")}</SelectItem>
+                      <SelectItem value="hour">{t("heatmap.granularityHour")}</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="space-y-1.5">
+                  <Label>{t("heatmap.metric")}</Label>
+                  <Select value={heatmapMetric} onValueChange={(value) => setHeatmapMetric(value as HeatmapMetric)}>
+                    <SelectTrigger>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="total_tokens">{t("totalTokens")}</SelectItem>
+                      <SelectItem value="cost_usd">{t("costSeries")}</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
+              <TokenHeatmap
+                dimensions={heatmapDimensions}
+                timeSlots={heatmapTimeSlots}
+                cells={heatmapCells}
+                metric={heatmapMetric}
+                loading={heatmapLoading}
+                emptyTitle={heatmapLoading ? t("emptyLoadingTitle") : t("emptyTitle")}
+                emptyDescription={heatmapLoading ? t("emptyLoadingDescription") : t("emptyDescription")}
+                dimHeader={t("heatmap.dimHeader")}
+              />
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        <TabsContent value="roi" className="space-y-4">
+          <Card>
+            <CardHeader className="pb-3">
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <div>
+                  <CardTitle className="text-base">{t("roi.title")}</CardTitle>
+                  <CardDescription>{t("roi.description")}</CardDescription>
+                </div>
+                <Button variant="outline" size="sm" onClick={() => void exportRoiCsv()}>
+                  <Download className="mr-1.5 h-4 w-4" />
+                  {t("roi.exportCsv")}
+                </Button>
+              </div>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div className="grid gap-3 sm:grid-cols-4">
+                <div className="space-y-1.5 sm:col-span-2">
+                  <Label>{t("roi.dimension")}</Label>
+                  <Select value={roiDimension} onValueChange={(value) => setRoiDimension(value as HeatmapDimension)}>
+                    <SelectTrigger>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="dept">{t("dept")}</SelectItem>
+                      <SelectItem value="user">{t("user")}</SelectItem>
+                      <SelectItem value="pat">{t("apiToken")}</SelectItem>
+                      <SelectItem value="provider">{t("provider")}</SelectItem>
+                      <SelectItem value="model">{t("model")}</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
+              {roiRows.length === 0 ? (
+                <EmptyState
+                  icon={<FileSpreadsheet className="h-5 w-5" />}
+                  title={roiLoading ? t("emptyLoadingTitle") : t("roi.emptyTitle")}
+                  description={roiLoading ? t("emptyLoadingDescription") : t("roi.emptyDescription")}
+                  size="default"
+                  className="border border-dashed"
+                />
+              ) : (
+                <div className="overflow-x-auto rounded-lg border border-border">
+                  <table className="w-full text-sm">
+                    <thead className="bg-muted/40">
+                      <tr className="border-b border-border">
+                        <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-muted-foreground">{t("roi.table.label")}</th>
+                        <th className="px-4 py-3 text-right text-xs font-semibold uppercase tracking-wide text-muted-foreground">{t("costSeries")}</th>
+                        <th className="px-4 py-3 text-right text-xs font-semibold uppercase tracking-wide text-muted-foreground">{t("roi.table.revenue")}</th>
+                        <th className="px-4 py-3 text-right text-xs font-semibold uppercase tracking-wide text-muted-foreground">{t("roi.table.net")}</th>
+                        <th className="px-4 py-3 text-right text-xs font-semibold uppercase tracking-wide text-muted-foreground">{t("roi.table.roi")}</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {roiRows.map((row) => (
+                        <tr key={row.label} className="border-b border-border last:border-0 hover:bg-muted/30">
+                          <td className="px-4 py-2.5 font-medium">{row.label}</td>
+                          <td className="px-4 py-2.5 text-right font-mono">${row.cost_usd.toFixed(6)}</td>
+                          <td className="px-4 py-2.5 text-right font-mono">${row.revenue_usd.toFixed(6)}</td>
+                          <td className="px-4 py-2.5 text-right font-mono">${row.net_usd.toFixed(6)}</td>
+                          <td className="px-4 py-2.5 text-right font-mono">{row.roi == null ? "—" : `${(row.roi * 100).toFixed(2)}%`}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader className="pb-3">
+              <CardTitle className="text-base">{t("roi.revenueTitle")}</CardTitle>
+              <CardDescription>{t("roi.revenueDescription")}</CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
+                <div className="space-y-1.5 lg:col-span-2">
+                  <Label htmlFor="roi-label">{t("roi.form.label")}</Label>
+                  <Input id="roi-label" value={revenueLabel} onChange={(event) => setRevenueLabel(event.target.value)} placeholder={t("roi.form.labelPlaceholder")} />
+                </div>
+                <div className="space-y-1.5">
+                  <Label htmlFor="roi-rev-start">{t("startDate")}</Label>
+                  <Input id="roi-rev-start" type="date" value={revenueStart} onChange={(event) => setRevenueStart(event.target.value)} />
+                </div>
+                <div className="space-y-1.5">
+                  <Label htmlFor="roi-rev-end">{t("endDate")}</Label>
+                  <Input id="roi-rev-end" type="date" value={revenueEnd} onChange={(event) => setRevenueEnd(event.target.value)} />
+                </div>
+                <div className="space-y-1.5">
+                  <Label htmlFor="roi-amount">{t("roi.form.amount")}</Label>
+                  <Input id="roi-amount" type="number" step="0.01" value={revenueAmount} onChange={(event) => setRevenueAmount(event.target.value)} />
+                </div>
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="roi-notes">{t("roi.form.notes")}</Label>
+                <Input id="roi-notes" value={revenueNotes} onChange={(event) => setRevenueNotes(event.target.value)} />
+              </div>
+              <Button onClick={() => void saveRevenue()} disabled={revenueSaving}>
+                {revenueSaving ? t("roi.form.saving") : t("roi.form.save")}
+              </Button>
+              {revenues.length === 0 ? (
+                <EmptyState
+                  icon={<FileSpreadsheet className="h-5 w-5" />}
+                  title={t("roi.revenueEmptyTitle")}
+                  description={t("roi.revenueEmptyDescription")}
+                  size="sm"
+                  className="border border-dashed"
+                />
+              ) : (
+                <div className="overflow-x-auto rounded-lg border border-border">
+                  <table className="w-full text-sm">
+                    <thead className="bg-muted/40">
+                      <tr className="border-b border-border">
+                        <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-muted-foreground">{t("roi.table.label")}</th>
+                        <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-muted-foreground">{t("startDate")}</th>
+                        <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-muted-foreground">{t("endDate")}</th>
+                        <th className="px-4 py-3 text-right text-xs font-semibold uppercase tracking-wide text-muted-foreground">{t("roi.table.revenue")}</th>
+                        <th className="px-4 py-3 text-right text-xs font-semibold uppercase tracking-wide text-muted-foreground">{t("roi.table.actions")}</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {revenues.map((item) => (
+                        <tr key={item.id} className="border-b border-border last:border-0 hover:bg-muted/30">
+                          <td className="px-4 py-2.5 font-medium">{item.scenario_label}</td>
+                          <td className="px-4 py-2.5 font-mono text-xs">{item.period_start.slice(0, 10)}</td>
+                          <td className="px-4 py-2.5 font-mono text-xs">{item.period_end.slice(0, 10)}</td>
+                          <td className="px-4 py-2.5 text-right font-mono">${item.revenue_usd.toFixed(6)}</td>
+                          <td className="px-4 py-2.5 text-right">
+                            <Button variant="ghost" size="icon" onClick={() => void removeRevenue(item.id)} aria-label={t("roi.form.delete")}>
+                              <Trash2 className="h-4 w-4 text-destructive" />
+                            </Button>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </CardContent>
+          </Card>
         </TabsContent>
 
         <TabsContent value="table">

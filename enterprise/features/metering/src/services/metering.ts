@@ -1,7 +1,18 @@
 import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { Pool } from "pg";
-import type { MeteringGroupKey, MeteringPivotRow, MeteringQueryInput, MeteringQueryResult } from "../types";
+import type {
+  HeatmapDimension,
+  HeatmapMetric,
+  HeatmapQueryInput,
+  HeatmapQueryResult,
+  HeatmapTimeGranularity,
+  MeteringGroupKey,
+  MeteringPivotRow,
+  MeteringQueryInput,
+  MeteringQueryResult,
+} from "../types";
+import { buildHeatmapMatrix, emptyHeatmapResult, formatTimeSlot, type RawHeatmapRow } from "./heatmap-utils";
 
 const GROUP_COLUMN: Record<MeteringGroupKey, string> = {
   dept: "dept_id",
@@ -19,6 +30,19 @@ const ALIAS: Record<MeteringGroupKey, string> = {
   model: "model",
   day: "day",
   pat: "pat",
+};
+
+const HEATMAP_DIM_COLUMN: Record<HeatmapDimension, string> = {
+  dept: "dept_id",
+  user: "user_id",
+  model: "model",
+  pat: "api_token_id",
+  provider: "provider",
+};
+
+const MAX_HEATMAP_TIME_SLOTS: Record<HeatmapTimeGranularity, number> = {
+  hour: 168,
+  day: 90,
 };
 
 export class MeteringService {
@@ -46,13 +70,14 @@ export class MeteringService {
     params.push(...values);
   }
 
-  public async query(input: MeteringQueryInput): Promise<MeteringQueryResult> {
-    const groups: MeteringGroupKey[] = input.group_by.length > 0 ? input.group_by : ["day"];
-    const selectGroup = groups.map((group) => `${GROUP_COLUMN[group]} as ${ALIAS[group]}`);
-    const groupBy = groups.map((group) => GROUP_COLUMN[group]);
-
-    const where: string[] = [];
-    const params: Array<string | number | Date> = [];
+  private buildUsageFilters(
+    input: Pick<
+      MeteringQueryInput,
+      "tenant_id" | "start" | "end" | "dept_id" | "user_id" | "api_token_id" | "provider" | "model"
+    >,
+    where: string[],
+    params: Array<string | number | Date>
+  ): void {
     where.push(`tenant_id = $${params.length + 1}`);
     params.push(input.tenant_id);
     where.push(`time_bucket >= $${params.length + 1}`);
@@ -64,6 +89,99 @@ export class MeteringService {
     this.pushInClause("api_token_id", input.api_token_id, where, params);
     this.pushInClause("provider", input.provider, where, params);
     this.pushInClause("model", input.model, where, params);
+  }
+
+  public async queryHeatmap(input: HeatmapQueryInput): Promise<HeatmapQueryResult> {
+    const metric: HeatmapMetric = input.metric ?? "total_tokens";
+    const timeExpr =
+      input.time_granularity === "hour" ? "date_trunc('hour', time_bucket)" : "date_trunc('day', time_bucket)";
+    const dimExpr = `coalesce(${HEATMAP_DIM_COLUMN[input.dimension]}::text, '(none)')`;
+    const where: string[] = [];
+    const params: Array<string | number | Date> = [];
+    this.buildUsageFilters(input, where, params);
+
+    const maxTimeSlots = MAX_HEATMAP_TIME_SLOTS[input.time_granularity];
+    const limitDimensions = input.limit_dimensions ?? 30;
+    const rowLimit = Math.max(limitDimensions * maxTimeSlots, 1);
+
+    const sql = `
+      select
+        ${dimExpr} as dim,
+        ${timeExpr} as time_slot,
+        coalesce(sum(total_tokens), 0)::bigint as total_tokens,
+        coalesce(sum(cost_usd), 0)::numeric(18,8) as cost_usd
+      from usage_records
+      where ${where.join(" and ")}
+      group by 1, 2
+      order by 2 asc, 1 asc
+      limit ${rowLimit}
+    `;
+
+    try {
+      const result = await this.pool.query(sql, params);
+      const rawRows: RawHeatmapRow[] = result.rows.map((row: Record<string, unknown>) => ({
+        dim: String(row.dim ?? "(none)"),
+        time: formatTimeSlot(row.time_slot, input.time_granularity),
+        total_tokens: Number(row.total_tokens ?? 0),
+        cost_usd: Number(row.cost_usd ?? 0),
+      }));
+      const matrix = buildHeatmapMatrix(rawRows, {
+        limitDimensions,
+        timeGranularity: input.time_granularity,
+      });
+      return {
+        dimension: input.dimension,
+        time_granularity: input.time_granularity,
+        metric,
+        ...matrix,
+      };
+    } catch {
+      if (process.env.GATEWAY_USAGE_JSONL_FALLBACK === "1") {
+        return this.queryHeatmapFromUsageLog(input, metric);
+      }
+      return {
+        dimension: input.dimension,
+        time_granularity: input.time_granularity,
+        metric,
+        ...emptyHeatmapResult(),
+      };
+    }
+  }
+
+  private async queryHeatmapFromUsageLog(input: HeatmapQueryInput, metric: HeatmapMetric): Promise<HeatmapQueryResult> {
+    const pivot = await this.queryFromUsageLog(
+      {
+        ...input,
+        group_by: [input.dimension === "pat" ? "pat" : input.dimension, "day"],
+      },
+      [input.dimension === "pat" ? "pat" : input.dimension, "day"]
+    );
+    const rawRows: RawHeatmapRow[] = pivot.rows.map((row) => ({
+      dim: String(row.dims[input.dimension === "pat" ? "pat" : input.dimension] ?? "(none)"),
+      time: String(row.dims.day ?? ""),
+      total_tokens: row.total_tokens,
+      cost_usd: row.cost_usd,
+    }));
+    const matrix = buildHeatmapMatrix(rawRows, {
+      limitDimensions: input.limit_dimensions ?? 30,
+      timeGranularity: input.time_granularity,
+    });
+    return {
+      dimension: input.dimension,
+      time_granularity: input.time_granularity,
+      metric,
+      ...matrix,
+    };
+  }
+
+  public async query(input: MeteringQueryInput): Promise<MeteringQueryResult> {
+    const groups: MeteringGroupKey[] = input.group_by.length > 0 ? input.group_by : ["day"];
+    const selectGroup = groups.map((group) => `${GROUP_COLUMN[group]} as ${ALIAS[group]}`);
+    const groupBy = groups.map((group) => GROUP_COLUMN[group]);
+
+    const where: string[] = [];
+    const params: Array<string | number | Date> = [];
+    this.buildUsageFilters(input, where, params);
 
     const sql = `
       select
