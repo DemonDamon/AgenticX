@@ -1119,6 +1119,9 @@
           "tpm": "TPM",
           "rpm": "RPM",
           "concurrency": "Concurrency",
+          "requestsPerDay": "Requests/day",
+          "requestsPerWeek": "Requests/week",
+          "requestsPerMonth": "Requests/month",
           "policy": "Policy"
         },
         "toast": {

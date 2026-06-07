@@ -40,6 +40,9 @@ type QuotaRule = {
   tpm?: number;
   rpm?: number;
   maxConcurrency?: number;
+  requestsPerDay?: number;
+  requestsPerWeek?: number;
+  requestsPerMonth?: number;
   poolScope?: "" | "dept" | "tenant";
   action: QuotaAction;
 };
@@ -133,7 +136,17 @@ const EMPTY: QuotaConfig = {
   updatedAt: "",
 };
 
-const EMPTY_RULE: QuotaRule = { monthlyTokens: 0, tpm: 0, rpm: 0, maxConcurrency: 0, poolScope: "", action: "warn" };
+const EMPTY_RULE: QuotaRule = {
+  monthlyTokens: 0,
+  tpm: 0,
+  rpm: 0,
+  maxConcurrency: 0,
+  requestsPerDay: 0,
+  requestsPerWeek: 0,
+  requestsPerMonth: 0,
+  poolScope: "",
+  action: "warn",
+};
 
 function usageKey(scope: string, id: string): string {
   return `${scope}:${id}`;
@@ -198,7 +211,7 @@ function RuleEditor({
   const tf = useTranslations("pages.ops.quota.fields");
 
   return (
-    <div className="grid grid-cols-[160px_repeat(6,minmax(0,1fr))_auto] items-end gap-2 rounded-md border border-border px-3 py-3">
+    <div className="grid grid-cols-[140px_repeat(9,minmax(0,1fr))_auto] items-end gap-2 rounded-md border border-border px-3 py-3">
       <div className="font-medium text-sm pb-2">{label}</div>
       <div className="space-y-1">
         <Label className="text-xs">{tf("monthlyTokens")}</Label>
@@ -215,6 +228,18 @@ function RuleEditor({
       <div className="space-y-1">
         <Label className="text-xs">{tf("concurrency")}</Label>
         <Input type="number" value={rule.maxConcurrency ?? 0} onChange={(e) => onChange({ maxConcurrency: Number(e.target.value || 0) })} />
+      </div>
+      <div className="space-y-1">
+        <Label className="text-xs">{tf("requestsPerDay")}</Label>
+        <Input type="number" value={rule.requestsPerDay ?? 0} onChange={(e) => onChange({ requestsPerDay: Number(e.target.value || 0) })} />
+      </div>
+      <div className="space-y-1">
+        <Label className="text-xs">{tf("requestsPerWeek")}</Label>
+        <Input type="number" value={rule.requestsPerWeek ?? 0} onChange={(e) => onChange({ requestsPerWeek: Number(e.target.value || 0) })} />
+      </div>
+      <div className="space-y-1">
+        <Label className="text-xs">{tf("requestsPerMonth")}</Label>
+        <Input type="number" value={rule.requestsPerMonth ?? 0} onChange={(e) => onChange({ requestsPerMonth: Number(e.target.value || 0) })} />
       </div>
       <div className="space-y-1">
         <Label className="text-xs">{tf("policy")}</Label>

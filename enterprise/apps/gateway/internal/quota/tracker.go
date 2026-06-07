@@ -30,6 +30,9 @@ type Rule struct {
 	RPM                int    `json:"rpm,omitempty"`
 	MaxConcurrency     int    `json:"maxConcurrency,omitempty"`
 	ToolCallsPerMinute int    `json:"toolCallsPerMinute,omitempty"`
+	RequestsPerDay     int    `json:"requestsPerDay,omitempty"`
+	RequestsPerWeek    int    `json:"requestsPerWeek,omitempty"`
+	RequestsPerMonth   int    `json:"requestsPerMonth,omitempty"`
 	PoolScope          string `json:"poolScope,omitempty"`
 	Action             Action `json:"action"`
 }
@@ -77,6 +80,7 @@ type Tracker struct {
 	usageCache           map[string]int64
 	budgetAlertSink      BudgetAlertSink
 	poolCounter          PoolCounter
+	requestCounter       *RequestCountCounter
 }
 
 func NewTracker(cfgPath, usagePath string, pgPool *pgxpool.Pool) *Tracker {
@@ -102,6 +106,7 @@ func NewTracker(cfgPath, usagePath string, pgPool *pgxpool.Pool) *Tracker {
 		budgetRemoteURL: strings.TrimSpace(os.Getenv("GATEWAY_REMOTE_BUDGET_CONFIG_URL")),
 		usageCache:      map[string]int64{},
 		poolCounter:     newPoolCounter(pgPool, poolUsagePath),
+		requestCounter:  newRequestCountCounter(pgPool, poolUsagePath),
 	}
 }
 
