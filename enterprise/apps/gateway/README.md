@@ -84,6 +84,9 @@ docker build -f apps/gateway/Dockerfile -t agenticx-gateway:latest .
 | `GATEWAY_REMOTE_BUDGET_CONFIG_URL` | admin `GET /api/internal/budget-snapshot`（JSON 成本/词元预算快照），约 **10 秒** 本地缓存；失败回落 `GATEWAY_BUDGET_CONFIG_FILE` |
 | `GATEWAY_BUDGET_CONFIG_FILE` | 本地预算配置路径（默认 `../../.runtime/admin/budgets.json`） |
 | `GATEWAY_BUDGET_USAGE_FILE` | 本地预算累计用量路径（默认 `../../.runtime/gateway/budget-usage.json`） |
+| `GATEWAY_PAT_CACHE_TTL` | PAT 校验内存缓存 TTL（默认 `5s`） |
+| `GATEWAY_REMOTE_PAT_REVOCATION_URL` | admin `GET /api/internal/pat-revocation-snapshot`（吊销 hash 列表 + version） |
+| `GATEWAY_REMOTE_SESSION_GRANTS_URL` | admin `GET /api/internal/session-grants-snapshot`（会话临时 scope） |
 | `GATEWAY_PRICING_FILE` | 本地计价表路径（默认 `internal/metering/pricing.yaml`） |
 
 未配置上述远程 URL 时，仍使用 `GATEWAY_ADMIN_PROVIDERS_FILE`、`GATEWAY_QUOTA_CONFIG_FILE`、`GATEWAY_POLICY_SNAPSHOT_FILE` 等本地路径逻辑。

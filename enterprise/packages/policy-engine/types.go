@@ -6,6 +6,7 @@ const (
 	RuleKindKeyword RuleKind = "keyword"
 	RuleKindRegex   RuleKind = "regex"
 	RuleKindPII     RuleKind = "pii"
+	RuleKindField   RuleKind = "field"
 )
 
 type Action string
@@ -28,6 +29,10 @@ type Rule struct {
 	Keywords []string `yaml:"keywords" json:"keywords,omitempty"`
 	Pattern  string   `yaml:"pattern" json:"pattern,omitempty"`
 	PIIType  string   `yaml:"pii_type" json:"pii_type,omitempty"`
+
+	JSONPath    string `yaml:"json_path" json:"json_path,omitempty"`
+	FieldTarget string `yaml:"target" json:"target,omitempty"`
+	FieldAction string `yaml:"field_action" json:"field_action,omitempty"`
 }
 
 type RulePackManifest struct {

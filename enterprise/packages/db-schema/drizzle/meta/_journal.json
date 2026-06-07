@@ -127,6 +127,13 @@
       "when": 1778900000000,
       "tag": "0017_gateway_budget_alert",
       "breakpoints": true
+    },
+    {
+      "idx": 18,
+      "version": "7",
+      "when": 1779000000000,
+      "tag": "0018_session_grants_pat_revocation",
+      "breakpoints": true
     }
   ]
 }

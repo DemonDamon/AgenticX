@@ -6,10 +6,12 @@ import {
   enterpriseRuntimePolicySnapshots,
   enterpriseRuntimePricing,
   enterpriseRuntimeBudgets,
+  enterpriseRuntimePatRevocation,
   enterpriseRuntimeTokenQuotas,
   enterpriseRuntimeUserVisibleModels,
   gatewayAuditEvents,
   gatewayBudgetAlerts,
+  sessionGrants,
   organizations,
   roles,
   ssoProviders,
@@ -35,6 +37,8 @@ const schema = {
   enterpriseRuntimePricing,
   enterpriseRuntimeBudgets,
   gatewayBudgetAlerts,
+  sessionGrants,
+  enterpriseRuntimePatRevocation,
   authRefreshSessions,
 };
 

@@ -108,6 +108,33 @@ export const gatewayBudgetAlerts = pgTable(
   })
 );
 
+/** 会话级临时 scope 授权（智能体协作 TTL 授予）。 */
+export const sessionGrants = pgTable(
+  "session_grants",
+  {
+    id: varchar("id", { length: 64 }).primaryKey(),
+    tenantId: varchar("tenant_id", { length: 26 }).notNull(),
+    sessionId: varchar("session_id", { length: 128 }).notNull(),
+    scopes: jsonb("scopes").notNull().$type<string[]>(),
+    expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+    revokedAt: timestamp("revoked_at", { withTimezone: true }),
+    createdBy: varchar("created_by", { length: 64 }),
+    description: text("description"),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => ({
+    tenantSessionIdx: index("session_grants_tenant_session_idx").on(table.tenantId, table.sessionId, table.expiresAt),
+  })
+);
+
+/** PAT 吊销版本与 hash 列表（网关近实时拉取）。 */
+export const enterpriseRuntimePatRevocation = pgTable("enterprise_runtime_pat_revocation", {
+  tenantId: varchar("tenant_id", { length: 26 }).primaryKey(),
+  version: numeric("version", { precision: 20, scale: 0 }).default("0").notNull(),
+  revokedHashes: jsonb("revoked_hashes").default([]).notNull().$type<string[]>(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+});
+
 /** web-portal refresh token 会话（多副本 serverless）。 */
 export const authRefreshSessions = pgTable("auth_refresh_sessions", {
   sessionId: varchar("session_id", { length: 160 }).primaryKey(),

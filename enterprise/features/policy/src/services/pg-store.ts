@@ -34,7 +34,7 @@ import {
 
 type BuiltinManifestRule = {
   id: string;
-  kind: "keyword" | "regex" | "pii";
+  kind: "keyword" | "regex" | "pii" | "field";
   action: "block" | "redact" | "warn";
   severity: "low" | "medium" | "high" | "critical";
   message?: string;

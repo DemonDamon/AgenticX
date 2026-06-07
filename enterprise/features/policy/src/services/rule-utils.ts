@@ -42,6 +42,14 @@ export function normalizeRulePayload(
     if (!pattern) throw new Error("正则规则缺少 pattern");
     return { pattern };
   }
+  if (kind === "field") {
+    const jsonPath = payload.jsonPath?.trim();
+    if (!jsonPath) throw new Error("字段规则缺少 jsonPath");
+    const target = payload.target === "request" ? "request" : "response";
+    const fieldAction =
+      payload.fieldAction === "deny" || payload.fieldAction === "allow" ? payload.fieldAction : "redact";
+    return { jsonPath, target, fieldAction };
+  }
   const piiType = payload.piiType?.trim();
   if (!piiType) throw new Error("PII 规则缺少 piiType");
   return { piiType };
