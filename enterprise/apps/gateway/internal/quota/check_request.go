@@ -61,6 +61,10 @@ func (t *Tracker) CheckRequest(ctx RequestContext, tokens int64, costUSD float64
 		}
 	}
 
+	if result, ok := t.checkRequestCountLimits(ctx, rule); ok {
+		return result
+	}
+
 	if rule.TPM > 0 {
 		key := rateKey("tpm", ctx)
 		add := max64(tokens, 1)
@@ -227,7 +231,47 @@ func sanitizeRuleExtended(in Rule) Rule {
 	if r.ToolCallsPerMinute < 0 {
 		r.ToolCallsPerMinute = 0
 	}
+	if r.RequestsPerDay < 0 {
+		r.RequestsPerDay = 0
+	}
+	if r.RequestsPerWeek < 0 {
+		r.RequestsPerWeek = 0
+	}
+	if r.RequestsPerMonth < 0 {
+		r.RequestsPerMonth = 0
+	}
 	return r
+}
+
+func (t *Tracker) checkRequestCountLimits(ctx RequestContext, rule Rule) (CheckResult, bool) {
+	if t == nil || t.requestCounter == nil || !requestCountFeatureEnabled() {
+		return CheckResult{}, false
+	}
+	checks := []struct {
+		kind  string
+		limit int
+	}{
+		{"day", rule.RequestsPerDay},
+		{"week", rule.RequestsPerWeek},
+		{"month", rule.RequestsPerMonth},
+	}
+	for _, c := range checks {
+		if c.limit <= 0 {
+			continue
+		}
+		ok, used, err := t.requestCounter.Increment(ctx, c.kind, c.limit)
+		if err != nil && rule.Action == ActionBlock {
+			return blockedResult("requests", rule, used, int64(c.limit)), true
+		}
+		if !ok {
+			kind := "requests"
+			if rule.Action == ActionBlock {
+				return blockedResult(kind, rule, used, int64(c.limit)), true
+			}
+			return warnResult(kind, rule), true
+		}
+	}
+	return CheckResult{}, false
 }
 
 func rateKey(kind string, ctx RequestContext) string {

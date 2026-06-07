@@ -1119,6 +1119,9 @@
           "tpm": "TPM",
           "rpm": "RPM",
           "concurrency": "并发",
+          "requestsPerDay": "日请求数",
+          "requestsPerWeek": "周请求数",
+          "requestsPerMonth": "月请求数",
           "policy": "策略"
         },
         "toast": {
