@@ -170,10 +170,10 @@ func (s *Server) dispatchProtocol(
 	}
 
 	if req.Stream {
-		s.protocolStream(w, r, req, identity, session, derived, thinkingMode, startedAt, estimatedInputTokens, reserveTokens, budgetCheck)
+		s.protocolStream(w, r, req, identity, session, derived, thinkingMode, startedAt, estimatedInputTokens, reserveTokens, budgetCheck, qctx)
 		return
 	}
-	s.protocolComplete(w, r, req, identity, session, derived, thinkingMode, startedAt, estimatedInputTokens, reserveTokens, budgetCheck)
+	s.protocolComplete(w, r, req, identity, session, derived, thinkingMode, startedAt, estimatedInputTokens, reserveTokens, budgetCheck, qctx)
 }
 
 func (s *Server) protocolComplete(
@@ -188,6 +188,7 @@ func (s *Server) protocolComplete(
 	estimatedInputTokens int,
 	reservedTokens int64,
 	budgetCheck quota.CheckResult,
+	qctx quota.RequestContext,
 ) {
 	if !s.useChannelRelay() {
 		writeAPIError(w, openai.Internal("channel relay required for multi-protocol inbound"))
@@ -196,7 +197,7 @@ func (s *Server) protocolComplete(
 	result, err := s.relayExecutor.Complete(r.Context(), req, req.Model, channelIdentity(identity))
 	decision := routingDecisionFromRelay(result, req.Model, s.decider.Decide(r, req.Model))
 	if err != nil {
-		s.billingService.Rollback(identity.UserID, reservedTokens)
+		s.billingService.RollbackContext(qctx, reservedTokens)
 		s.rollbackBudgetReservation(identity, req.Model, budgetCheck)
 		if up, ok := err.(*adaptor.UpstreamError); ok {
 			writeAPIError(w, adaptor.MapUpstreamError(up.StatusCode, up.Body, session.inbound))
@@ -226,14 +227,7 @@ func (s *Server) protocolComplete(
 		providerOutputTokens = estimateTextTokens(responseContent)
 	}
 	actualTotal := int64(providerInputTokens + providerOutputTokens)
-	settle := s.billingService.Settle(
-		identity.UserID,
-		identity.DepartmentID,
-		roleFromScopes(identity.Scopes),
-		req.Model,
-		reservedTokens,
-		actualTotal,
-	)
+	settle := s.billingService.SettleContext(qctx, reservedTokens, actualTotal)
 	s.reportUsageDetailed(identity, decision, resp.Usage, &budgetCheck)
 	s.writeChatCache(identity.TenantID, identity.UserID, req, cache.Entry{
 		Stream: false, Response: resp, Usage: resp.Usage,
@@ -277,6 +271,7 @@ func (s *Server) protocolStream(
 	estimatedInputTokens int,
 	reservedTokens int64,
 	budgetCheck quota.CheckResult,
+	qctx quota.RequestContext,
 ) {
 	w.Header().Set("Content-Type", "text/event-stream")
 	w.Header().Set("Cache-Control", "no-cache")
@@ -373,7 +368,7 @@ func (s *Server) protocolStream(
 	decision := routingDecisionFromStream(streamResult, req.Model, s.decider.Decide(r, req.Model))
 
 	if streamErr != nil {
-		s.billingService.Rollback(identity.UserID, reservedTokens)
+		s.billingService.RollbackContext(qctx, reservedTokens)
 		s.rollbackBudgetReservation(identity, req.Model, budgetCheck)
 		if len(blockedHits) > 0 {
 			writeStreamPolicyError(w, flusher, "90002", "响应触发合规拦截", blockedHits)
@@ -393,11 +388,8 @@ func (s *Server) protocolStream(
 	}
 	inputTokens := estimatedInputTokens
 	outputTokens := estimateTextTokens(responseText)
-	settle := s.billingService.Settle(
-		identity.UserID,
-		identity.DepartmentID,
-		roleFromScopes(identity.Scopes),
-		req.Model,
+	settle := s.billingService.SettleContext(
+		qctx,
 		reservedTokens,
 		int64(inputTokens+outputTokens),
 	)

@@ -205,7 +205,7 @@ func New(cfg config.Config, logger *slog.Logger) (*Server, error) {
 		metering:           sink,
 		traceReporter:      traceReporter,
 		adminLoader:        adminLoader,
-		quotaTracker:       quota.NewTracker(quotaCfgPath, quotaUsagePath),
+		quotaTracker:       quota.NewTracker(quotaCfgPath, quotaUsagePath, pgPool),
 		patVerifier:        patVerifier,
 		sessionGrants:      gatewayauth.NewSessionGrantStore(pgPool),
 		compliance:         residency.NewComplianceStore(pgPool),
@@ -735,12 +735,12 @@ func (s *Server) handleChatCompletions(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if req.Stream {
-		s.handleStream(w, r, req, decision, startedAt, identity, estimatedInputTokens, reserveTokens, pluginCtx, budgetCheck)
+		s.handleStream(w, r, req, decision, startedAt, identity, estimatedInputTokens, reserveTokens, pluginCtx, budgetCheck, qctx)
 		return
 	}
 
 	if s.useChannelRelay() {
-		s.handleChatCompleteRelay(w, r, req, startedAt, identity, estimatedInputTokens, reserveTokens, pluginCtx)
+		s.handleChatCompleteRelay(w, r, req, startedAt, identity, estimatedInputTokens, reserveTokens, pluginCtx, qctx)
 		return
 	}
 
@@ -959,7 +959,7 @@ func (s *Server) handleEmbeddings(w http.ResponseWriter, r *http.Request) {
 	}
 	resp, err := s.provider.Embeddings(r.Context(), req, decision)
 	if err != nil {
-		s.rollbackQuotaReservation(identity, estimatedInputTokens)
+		s.rollbackQuotaReservation(s.quotaContext(identity, req.Model), estimatedInputTokens)
 		writeAPIError(w, openai.Internal(err.Error()))
 		return
 	}
@@ -1011,6 +1011,7 @@ func (s *Server) handleStream(
 	reservedTokens int64,
 	pluginCtx *wasmhost.HookContext,
 	budgetCheck quota.CheckResult,
+	qctx quota.RequestContext,
 ) {
 	w.Header().Set("Content-Type", "text/event-stream")
 	w.Header().Set("Cache-Control", "no-cache")
@@ -1080,7 +1081,7 @@ func (s *Server) handleStream(
 
 	if streamErr != nil {
 		if s.useChannelRelay() {
-			s.billingService.Rollback(identity.UserID, reservedTokens)
+			s.billingService.RollbackContext(qctx, reservedTokens)
 		}
 		if len(blockedHits) > 0 {
 			ev := audit.Event{
@@ -1120,11 +1121,8 @@ func (s *Server) handleStream(
 		s.reportUsage(identity, decision, estimatedInputTokens, partialOutputTokens)
 		if s.useChannelRelay() {
 			actualTotal := int64(estimatedInputTokens + partialOutputTokens)
-			s.billingService.Settle(
-				identity.UserID,
-				identity.DepartmentID,
-				roleFromScopes(identity.Scopes),
-				req.Model,
+			s.billingService.SettleContext(
+				qctx,
 				reservedTokens,
 				actualTotal,
 			)
@@ -1164,11 +1162,8 @@ func (s *Server) handleStream(
 	s.writeChatCache(identity.TenantID, identity.UserID, req, cache.BuildStreamEntry(streamChunks, streamUsage, req.Model))
 	var settleDelta int64
 	if s.useChannelRelay() {
-		settle := s.billingService.Settle(
-			identity.UserID,
-			identity.DepartmentID,
-			roleFromScopes(identity.Scopes),
-			req.Model,
+		settle := s.billingService.SettleContext(
+			qctx,
 			reservedTokens,
 			int64(inputTokens+outputTokens),
 		)
@@ -1549,17 +1544,12 @@ func (s *Server) reconcileQuotaUsage(
 	if delta == 0 {
 		return
 	}
+	qctx := s.quotaContext(identity, model)
 	if delta < 0 {
-		s.rollbackQuotaReservation(identity, -delta)
+		s.rollbackQuotaReservation(qctx, -delta)
 		return
 	}
-	decision := s.quotaTracker.CheckAndAdd(
-		identity.UserID,
-		identity.DepartmentID,
-		roleFromScopes(identity.Scopes),
-		model,
-		int64(delta),
-	)
+	decision := s.quotaTracker.CheckAndAddContext(qctx, int64(delta), quota.LedgerEventSettle)
 	if !decision.Allowed {
 		if usedAfter, ok := s.quotaTracker.AddUsage(identity.UserID, int64(delta)); !ok {
 			s.logger.Warn("quota settle persist failed",
@@ -1589,13 +1579,13 @@ func (s *Server) reconcileQuotaUsage(
 	}
 }
 
-func (s *Server) rollbackQuotaReservation(identity requestIdentity, tokens int) {
+func (s *Server) rollbackQuotaReservation(qctx quota.RequestContext, tokens int) {
 	if tokens <= 0 {
 		return
 	}
-	if ok := s.quotaTracker.Rollback(identity.UserID, int64(tokens)); !ok {
+	if ok := s.quotaTracker.RollbackContext(qctx, int64(tokens)); !ok {
 		s.logger.Warn("quota rollback failed",
-			"user_id", identity.UserID,
+			"user_id", qctx.UserID,
 			"tokens", tokens,
 		)
 	}

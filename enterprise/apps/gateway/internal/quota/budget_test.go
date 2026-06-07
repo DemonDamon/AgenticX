@@ -35,7 +35,7 @@ func TestBudgetWarnAtThreshold(t *testing.T) {
 			},
 		},
 	})
-	tracker := NewTracker(filepath.Join(dir, "quotas.json"), usagePath)
+	tracker := NewTracker(filepath.Join(dir, "quotas.json"), usagePath, nil)
 	tracker.budgetCfgPath = cfgPath
 	tracker.budgetUsagePath = usagePath
 
@@ -68,7 +68,7 @@ func TestBudgetBlockAtHardLimit(t *testing.T) {
 			},
 		},
 	})
-	tracker := NewTracker(filepath.Join(dir, "quotas.json"), usagePath)
+	tracker := NewTracker(filepath.Join(dir, "quotas.json"), usagePath, nil)
 	tracker.budgetCfgPath = cfgPath
 	tracker.budgetUsagePath = usagePath
 
@@ -94,7 +94,7 @@ func TestBudgetPeriodReset(t *testing.T) {
 			},
 		},
 	})
-	tracker := NewTracker(filepath.Join(dir, "quotas.json"), usagePath)
+	tracker := NewTracker(filepath.Join(dir, "quotas.json"), usagePath, nil)
 	tracker.budgetCfgPath = cfgPath
 	tracker.budgetUsagePath = usagePath
 
@@ -131,7 +131,7 @@ func TestCheckRequestBudgetIntegration(t *testing.T) {
 			},
 		},
 	})
-	tracker := NewTracker(filepath.Join(dir, "quotas.json"), usagePath)
+	tracker := NewTracker(filepath.Join(dir, "quotas.json"), usagePath, nil)
 	tracker.budgetCfgPath = cfgPath
 	tracker.budgetUsagePath = filepath.Join(dir, "budget-usage.json")
 

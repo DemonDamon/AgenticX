@@ -10,6 +10,7 @@ export type QuotaRule = {
   tpm?: number;
   rpm?: number;
   maxConcurrency?: number;
+  poolScope?: "" | "dept" | "tenant";
   action: QuotaAction;
 };
 
@@ -47,11 +48,15 @@ function normalizeRule(input: Partial<QuotaRule> | undefined): QuotaRule {
   const rpm = Number(input?.rpm ?? 0);
   const maxConcurrency = Number(input?.maxConcurrency ?? 0);
   const action = input?.action ?? "warn";
+  const poolScopeRaw = String(input?.poolScope ?? "").trim();
+  const poolScope =
+    poolScopeRaw === "dept" || poolScopeRaw === "tenant" ? poolScopeRaw : ("" as const);
   return {
     monthlyTokens: Number.isFinite(monthlyTokens) && monthlyTokens > 0 ? Math.floor(monthlyTokens) : 0,
     tpm: Number.isFinite(tpm) && tpm > 0 ? Math.floor(tpm) : 0,
     rpm: Number.isFinite(rpm) && rpm > 0 ? Math.floor(rpm) : 0,
     maxConcurrency: Number.isFinite(maxConcurrency) && maxConcurrency > 0 ? Math.floor(maxConcurrency) : 0,
+    poolScope,
     action: action === "block" || action === "fallback" ? action : "warn",
   };
 }

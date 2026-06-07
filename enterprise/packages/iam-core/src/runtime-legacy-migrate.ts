@@ -51,6 +51,7 @@ export type QuotaRule = {
   tpm?: number;
   rpm?: number;
   maxConcurrency?: number;
+  poolScope?: "" | "dept" | "tenant";
   action: QuotaAction;
 };
 

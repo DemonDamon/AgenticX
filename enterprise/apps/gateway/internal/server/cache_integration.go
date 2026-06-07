@@ -57,11 +57,8 @@ func (s *Server) tryServeFromCache(ctx cacheServeContext) bool {
 	s.reportUsageDetailed(ctx.identity, ctx.decision, usage, ctx.budgetCheck)
 	if s.useChannelRelay() {
 		actual := int64(usage.PromptTokens + usage.CompletionTokens)
-		s.billingService.Settle(
-			ctx.identity.UserID,
-			ctx.identity.DepartmentID,
-			roleFromScopes(ctx.identity.Scopes),
-			ctx.req.Model,
+		s.billingService.SettleContext(
+			s.quotaContext(ctx.identity, ctx.req.Model),
 			ctx.reservedTokens,
 			actual,
 		)
@@ -227,11 +224,8 @@ func (s *Server) tryServeProtocolCache(w http.ResponseWriter, ctx cacheServeCont
 	s.reportUsageDetailed(ctx.identity, ctx.decision, usage, ctx.budgetCheck)
 	if s.useChannelRelay() {
 		actual := int64(usage.PromptTokens + usage.CompletionTokens)
-		s.billingService.Settle(
-			ctx.identity.UserID,
-			ctx.identity.DepartmentID,
-			roleFromScopes(ctx.identity.Scopes),
-			ctx.req.Model,
+		s.billingService.SettleContext(
+			s.quotaContext(ctx.identity, ctx.req.Model),
 			ctx.reservedTokens,
 			actual,
 		)

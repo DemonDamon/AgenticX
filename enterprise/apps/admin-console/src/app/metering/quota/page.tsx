@@ -39,6 +39,7 @@ type QuotaRule = {
   tpm?: number;
   rpm?: number;
   maxConcurrency?: number;
+  poolScope?: "" | "dept" | "tenant";
   action: QuotaAction;
 };
 type QuotaConfig = {
@@ -131,23 +132,25 @@ const EMPTY: QuotaConfig = {
   updatedAt: "",
 };
 
-const EMPTY_RULE: QuotaRule = { monthlyTokens: 0, tpm: 0, rpm: 0, maxConcurrency: 0, action: "warn" };
+const EMPTY_RULE: QuotaRule = { monthlyTokens: 0, tpm: 0, rpm: 0, maxConcurrency: 0, poolScope: "", action: "warn" };
 
 function RuleEditor({
   label,
   rule,
   onChange,
   onRemove,
+  showPoolScope = false,
 }: {
   label: string;
   rule: QuotaRule;
   onChange: (patch: Partial<QuotaRule>) => void;
   onRemove?: () => void;
+  showPoolScope?: boolean;
 }) {
   const tf = useTranslations("pages.ops.quota.fields");
 
   return (
-    <div className="grid grid-cols-[160px_repeat(5,minmax(0,1fr))_auto] items-end gap-2 rounded-md border border-border px-3 py-3">
+    <div className="grid grid-cols-[160px_repeat(6,minmax(0,1fr))_auto] items-end gap-2 rounded-md border border-border px-3 py-3">
       <div className="font-medium text-sm pb-2">{label}</div>
       <div className="space-y-1">
         <Label className="text-xs">{tf("monthlyTokens")}</Label>
@@ -178,6 +181,27 @@ function RuleEditor({
           </SelectContent>
         </Select>
       </div>
+      {showPoolScope ? (
+        <div className="space-y-1">
+          <Label className="text-xs">共享池</Label>
+          <Select
+            value={rule.poolScope || "none"}
+            onValueChange={(v) => onChange({ poolScope: v === "none" ? "" : (v as "dept" | "tenant") })}
+          >
+            <SelectTrigger>
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="none">每成员独立</SelectItem>
+              <SelectItem value="dept">部门共享池</SelectItem>
+              <SelectItem value="tenant">租户共享池</SelectItem>
+            </SelectContent>
+          </Select>
+          <p className="text-xs text-muted-foreground">池用量：—</p>
+        </div>
+      ) : (
+        <div />
+      )}
       {onRemove ? (
         <Button type="button" variant="ghost" size="icon" className="text-destructive" onClick={onRemove}>
           <Trash2 className="h-4 w-4" />
@@ -434,7 +458,7 @@ export default function MeteringQuotaPage() {
             </CardHeader>
             <CardContent className="space-y-3">
               {Object.entries(quota.defaults.role).map(([role, rule]) => (
-                <RuleEditor key={role} label={role} rule={rule} onChange={(patch) =>
+                <RuleEditor key={role} label={role} rule={rule} showPoolScope onChange={(patch) =>
                   setQuota((prev) => ({
                     ...prev,
                     defaults: {
@@ -456,7 +480,7 @@ export default function MeteringQuotaPage() {
             </Button>
           </div>
           {Object.entries(quota.departments).map(([id, rule]) => (
-            <RuleEditor key={id} label={id} rule={rule} onChange={(patch) => updateMap("departments", id, patch)} onRemove={() => removeMapKey("departments", id)} />
+            <RuleEditor key={id} label={id} rule={rule} showPoolScope onChange={(patch) => updateMap("departments", id, patch)} onRemove={() => removeMapKey("departments", id)} />
           ))}
         </TabsContent>
 

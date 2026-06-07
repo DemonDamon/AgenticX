@@ -42,7 +42,7 @@ func TestCheckRequestDeptTPM(t *testing.T) {
 	if err := os.WriteFile(cfgPath, []byte(`{"defaults":{"role":{},"model":{}},"users":{},"departments":{"d1":{"monthlyTokens":0,"tpm":10,"rpm":0,"action":"block"}},"apiTokens":{}}`), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	tracker := NewTracker(cfgPath, usagePath)
+	tracker := NewTracker(cfgPath, usagePath, nil)
 	ctx := RequestContext{DeptID: "d1", UserID: "u1", Role: "staff", Model: "m"}
 	if r := tracker.CheckRequest(ctx, 5, 0); !r.Allowed {
 		t.Fatal("first check should pass")

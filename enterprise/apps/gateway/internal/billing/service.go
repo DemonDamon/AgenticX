@@ -60,6 +60,15 @@ func (s *Service) ReserveContext(ctx quota.RequestContext, estimate int64, costU
 }
 
 func (s *Service) Settle(userID, deptID, role, model string, reserved, actual int64) SettleResult {
+	return s.SettleContext(quota.RequestContext{
+		UserID: userID,
+		DeptID: deptID,
+		Role:   role,
+		Model:  model,
+	}, reserved, actual)
+}
+
+func (s *Service) SettleContext(ctx quota.RequestContext, reserved, actual int64) SettleResult {
 	result := SettleResult{Reserved: reserved, Actual: actual, Delta: actual - reserved}
 	if s == nil || s.tracker == nil {
 		return result
@@ -68,10 +77,10 @@ func (s *Service) Settle(userID, deptID, role, model string, reserved, actual in
 		return result
 	}
 	if result.Delta < 0 {
-		s.tracker.Rollback(userID, -result.Delta)
+		s.tracker.RollbackContext(ctx, -result.Delta)
 		return result
 	}
-	s.tracker.CheckAndAdd(userID, deptID, role, model, result.Delta)
+	s.tracker.CheckAndAddContext(ctx, result.Delta, quota.LedgerEventSettle)
 	return result
 }
 
@@ -83,8 +92,12 @@ func (s *Service) ReleaseContext(ctx quota.RequestContext) {
 }
 
 func (s *Service) Rollback(userID string, reserved int64) {
+	s.RollbackContext(quota.RequestContext{UserID: userID}, reserved)
+}
+
+func (s *Service) RollbackContext(ctx quota.RequestContext, reserved int64) {
 	if s == nil || s.tracker == nil || reserved <= 0 {
 		return
 	}
-	s.tracker.Rollback(userID, reserved)
+	s.tracker.RollbackContext(ctx, reserved)
 }
