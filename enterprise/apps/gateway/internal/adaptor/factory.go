@@ -2,9 +2,11 @@ package adaptor
 
 // Factory 按 providerType 选择 Adaptor。
 type Factory struct {
-	openai Adaptor
-	claude Adaptor
-	gemini Adaptor
+	openai  Adaptor
+	claude  Adaptor
+	gemini  Adaptor
+	azure   Adaptor
+	bedrock Adaptor
 }
 
 func NewFactory(openaiAdaptor Adaptor) *Factory {
@@ -12,9 +14,11 @@ func NewFactory(openaiAdaptor Adaptor) *Factory {
 		openaiAdaptor = NewOpenAIAdaptor()
 	}
 	return &Factory{
-		openai: openaiAdaptor,
-		claude: NewClaudeAdaptor(),
-		gemini: NewGeminiAdaptor(),
+		openai:  openaiAdaptor,
+		claude:  NewClaudeAdaptor(),
+		gemini:  NewGeminiAdaptor(),
+		azure:   NewAzureAdaptor(),
+		bedrock: NewBedrockAdaptor(),
 	}
 }
 
