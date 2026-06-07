@@ -44,6 +44,7 @@
         "metering": "四维消耗",
         "quota": "额度控制",
         "billingSplit": "分账结算",
+        "agentTraces": "词元追踪",
         "policy": "策略规则",
         "models": "模型服务",
         "channels": "Channel 管理",
@@ -1072,6 +1073,29 @@
           "webhookSaved": "Webhook 已保存",
           "synced": "已同步 {count} 条"
         }
+      },
+      "agentTraces": {
+        "breadcrumbMetering": "四维消耗",
+        "title": "智能体词元追踪",
+        "description": "按 agent step 展示沙箱任务中的词元消耗路径与累计成本",
+        "recentTraces": "最近 Trace",
+        "recentTracesHint": "来自网关计量与 edge-agent 上报的 trace",
+        "traceDetail": "Trace 详情",
+        "traceDetailHint": "逐步查看 input/output/reasoning tokens 与耗时",
+        "traceId": "Trace ID",
+        "lookup": "查询",
+        "refresh": "刷新",
+        "empty": "暂无 trace",
+        "selectTrace": "选择或输入 trace_id 查看详情",
+        "step": "步骤",
+        "kind": "类型",
+        "status": "状态",
+        "model": "模型",
+        "tokens": "Tokens",
+        "costUsd": "成本 (USD)",
+        "duration": "耗时",
+        "totalTokens": "总 Tokens",
+        "inputTokens": "Input Tokens"
       },
       "quota": {
         "breadcrumbQuota": "额度控制",

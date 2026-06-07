@@ -31,6 +31,8 @@ type UsageRecord struct {
 	UsageSource              string
 	CostUSD                  float64
 	PricingVersion           string
+	TraceID                  string
+	TraceStep                int
 }
 
 type Reporter struct {
@@ -73,9 +75,9 @@ func (r *Reporter) ReportAsync(record UsageRecord) {
         id, tenant_id, dept_id, user_id, api_token_id, provider, model, route, time_bucket,
         input_tokens, output_tokens, total_tokens,
         cached_tokens, cache_read_input_tokens, cache_creation_input_tokens, reasoning_tokens, usage_source,
-        cost_usd, pricing_version, created_at, updated_at
+        cost_usd, pricing_version, trace_id, trace_step, created_at, updated_at
       ) values (
-        $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19, now(), now()
+        $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21, now(), now()
       )
     `,
 			record.ID,
@@ -97,6 +99,8 @@ func (r *Reporter) ReportAsync(record UsageRecord) {
 			nullIfEmpty(record.UsageSource),
 			record.CostUSD,
 			nullIfEmpty(record.PricingVersion),
+			nullIfEmpty(record.TraceID),
+			nullTraceStep(record.TraceStep),
 		); err != nil {
 			r.logger.Error("usage report write failed", "error", err)
 		}
@@ -115,6 +119,13 @@ func nullInt64(value int64) any {
 		return nil
 	}
 	return value
+}
+
+func nullTraceStep(step int) any {
+	if step <= 0 {
+		return nil
+	}
+	return step
 }
 
 func normalizeTenantID(value string) (string, bool) {

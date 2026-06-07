@@ -1,4 +1,5 @@
 import {
+  agentTokenTraces,
   auditEvents,
   authRefreshSessions,
   departments,
@@ -42,6 +43,7 @@ const schema = {
   enterpriseRuntimeCompliance,
   enterpriseRuntimePatRevocation,
   authRefreshSessions,
+  agentTokenTraces,
 };
 
 export type IamDbSchema = typeof schema;

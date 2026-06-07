@@ -8,6 +8,16 @@
 
 ---
 
+## v0.2 已落地能力（沙箱 + 词元追踪 MVP）
+
+- `EDGE_AGENT_ENABLED=1` 启动本地 HTTP 服务（默认 `127.0.0.1:7420`）
+- `POST /v1/tasks/run`：在隔离临时目录执行 agent step（model / exec / write）
+- `GET /v1/traces/{id}`：查看 step → token 路径（本地 JSONL）
+- 模型 step 经企业 Gateway 转发并携带 `X-AgenticX-Trace-Id` / `X-AgenticX-Trace-Step` 头
+- 可选 `EDGE_AGENT_TRACE_INGEST_URL` 将 span 上报 admin-console `/api/agent-traces/ingest`
+
+---
+
 ## 定位与边界
 
 ```

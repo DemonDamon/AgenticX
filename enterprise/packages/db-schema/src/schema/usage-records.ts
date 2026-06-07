@@ -1,4 +1,4 @@
-import { bigint, index, numeric, pgTable, timestamp, varchar } from "drizzle-orm/pg-core";
+import { bigint, index, integer, numeric, pgTable, timestamp, varchar } from "drizzle-orm/pg-core";
 import { tenants } from "./tenants";
 import { auditColumns, ulid } from "./_shared";
 
@@ -26,6 +26,8 @@ export const usageRecords = pgTable(
     usageSource: varchar("usage_source", { length: 32 }),
     costUsd: numeric("cost_usd", { precision: 18, scale: 8 }).default("0").notNull(),
     pricingVersion: varchar("pricing_version", { length: 128 }),
+    traceId: varchar("trace_id", { length: 128 }),
+    traceStep: integer("trace_step"),
     ...auditColumns,
   },
   (table) => ({
