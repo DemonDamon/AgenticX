@@ -68,6 +68,7 @@ type EditForm = {
   models: string;
   status: "active" | "disabled";
   providerLabel: string;
+  region: string;
   metadata: Record<string, unknown>;
 };
 
@@ -87,6 +88,7 @@ export default function ChannelsPage() {
     weight: "1",
     models: "",
     providerLabel: "",
+    region: "",
   });
 
   const load = useCallback(async () => {
@@ -123,6 +125,7 @@ export default function ChannelsPage() {
           apiKey: form.apiKey,
           weight: Number(form.weight) || 1,
           supportedModels: models,
+          region: form.region.trim() || undefined,
           metadata: form.providerLabel ? { provider: form.providerLabel, route: "third-party" } : {},
         }),
       });
@@ -130,7 +133,7 @@ export default function ChannelsPage() {
       if (json.code !== "00000") throw new Error(json.message || "create failed");
       toast.success(t("toast.createSuccess"));
       setOpen(false);
-      setForm({ name: "", baseUrl: "", apiKey: "", weight: "1", models: "", providerLabel: "" });
+      setForm({ name: "", baseUrl: "", apiKey: "", weight: "1", models: "", providerLabel: "", region: "" });
       await load();
     } catch (e) {
       toast.error(e instanceof Error ? e.message : t("toast.createFailed"));
@@ -151,7 +154,7 @@ export default function ChannelsPage() {
   const openEdit = async (ch: ChannelRow) => {
     const res = await fetch(`/api/admin/channels/${ch.id}`);
     const json = await res.json();
-    const detail = json.data?.channel as { metadata?: Record<string, unknown> } | undefined;
+    const detail = json.data?.channel as { metadata?: Record<string, unknown>; region?: string | null } | undefined;
     const metadata = detail?.metadata && typeof detail.metadata === "object" ? detail.metadata : {};
     const rawRefs = metadata.keyRefs;
     const keyRefs = Array.isArray(rawRefs)
@@ -172,6 +175,7 @@ export default function ChannelsPage() {
       models: (ch.supportedModels ?? []).join(", "),
       status: ch.status === "disabled" ? "disabled" : "active",
       providerLabel,
+      region: detail?.region ?? "",
       metadata,
     });
     const refs = keyRefs
@@ -195,6 +199,7 @@ export default function ChannelsPage() {
         priority: Number(editing.priority) || 0,
         status: editing.status,
         supportedModels: models,
+        region: editing.region.trim() || null,
       };
       if (editing.apiKey.trim() !== "") body.apiKey = editing.apiKey;
       const keyRefList = editing.keyRefs
@@ -375,6 +380,10 @@ export default function ChannelsPage() {
               <Input value={form.providerLabel} onChange={(e) => setForm({ ...form, providerLabel: e.target.value })} placeholder="deepseek" />
             </div>
             <div>
+              <Label>Region（cn / us / eu）</Label>
+              <Input value={form.region} onChange={(e) => setForm({ ...form, region: e.target.value })} placeholder="us" />
+            </div>
+            <div>
               <Label>{t("modelsLabel")}</Label>
               <Input value={form.models} onChange={(e) => setForm({ ...form, models: e.target.value })} placeholder="deepseek-chat" />
             </div>
@@ -472,6 +481,10 @@ export default function ChannelsPage() {
               <div>
                 <Label>{t("providerLabel")}</Label>
                 <Input value={editing.providerLabel} onChange={(e) => setEditing({ ...editing, providerLabel: e.target.value })} />
+              </div>
+              <div>
+                <Label>Region（cn / us / eu）</Label>
+                <Input value={editing.region} onChange={(e) => setEditing({ ...editing, region: e.target.value })} placeholder="us" />
               </div>
               <div>
                 <Label>{t("modelsLabel")}</Label>

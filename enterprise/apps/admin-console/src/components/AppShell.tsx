@@ -99,6 +99,7 @@ const NAV_GROUPS: NavGroup[] = [
     label: "ops",
     items: [
       { href: "/audit", labelKey: "audit", icon: FileWarning },
+      { href: "/admin/compliance", labelKey: "compliance", icon: Shield },
       { href: "/metering", labelKey: "metering", icon: BarChart3 },
       { href: "/metering/quota", labelKey: "quota", icon: Sliders },
     ],

@@ -23,6 +23,7 @@ type Channel struct {
 	Priority        int               `json:"priority"`
 	Status          string            `json:"status"`
 	SupportedModels []string          `json:"supportedModels"`
+	Region          string            `json:"region,omitempty"`
 	Metadata        map[string]any    `json:"metadata,omitempty"`
 	MaxRetries      int               `json:"maxRetries,omitempty"`
 	Route           string            `json:"route,omitempty"`

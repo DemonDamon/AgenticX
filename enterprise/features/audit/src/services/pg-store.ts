@@ -1,8 +1,8 @@
 import { createHash } from "node:crypto";
 import type { AuditDigest, AuditPolicyHit } from "@agenticx/core-api";
 import { gatewayAuditEvents } from "@agenticx/db-schema";
-import { getIamDb } from "@agenticx/iam-core";
-import { and, asc, count, desc, eq, gte, lte, sql } from "drizzle-orm";
+import { getAuditRetentionCutoff, getIamDb } from "@agenticx/iam-core";
+import { and, asc, count, desc, eq, gte, lte, sql, type SQL } from "drizzle-orm";
 import { ulid } from "ulid";
 import type { AuditActor, AuditEvent, AuditQueryInput, AuditQueryResult, AuditStore } from "../types";
 
@@ -60,6 +60,10 @@ function rowToAuditEvent(row: typeof gatewayAuditEvents.$inferSelect): AuditEven
     prev_checksum: row.prevChecksum,
     checksum: row.checksum,
     signature: row.signature ?? undefined,
+    src_region: row.srcRegion ?? undefined,
+    dst_region: row.dstRegion ?? undefined,
+    cross_border: row.crossBorder ?? undefined,
+    residency_rule: row.residencyRule ?? undefined,
   };
 }
 
@@ -85,6 +89,13 @@ function checkChainSlice(items: AuditEvent[]): { valid: boolean; at?: string; re
   return { valid: true };
 }
 
+async function applyRetentionWindow(tenantId: string, conditions: SQL[]): Promise<void> {
+  const cutoff = await getAuditRetentionCutoff(tenantId);
+  if (cutoff) {
+    conditions.push(gte(gatewayAuditEvents.eventTime, cutoff));
+  }
+}
+
 export class PgAuditStore implements AuditStore {
   public async query(actor: AuditActor, input: AuditQueryInput): Promise<AuditQueryResult> {
     const db = getIamDb();
@@ -94,6 +105,8 @@ export class PgAuditStore implements AuditStore {
     if (vis) {
       conditions.push(vis);
     }
+
+    await applyRetentionWindow(input.tenant_id, conditions);
 
     if (input.user_id) {
       conditions.push(eq(gatewayAuditEvents.userId, input.user_id));
@@ -113,6 +126,9 @@ export class PgAuditStore implements AuditStore {
         const needle = JSON.stringify([{ policy_id: pid }]);
         conditions.push(sql`${gatewayAuditEvents.policiesHit}::jsonb @> ${needle}::jsonb`);
       }
+    }
+    if (input.cross_border === true) {
+      conditions.push(eq(gatewayAuditEvents.crossBorder, true));
     }
     if (input.start) {
       const t = new Date(input.start);
@@ -170,6 +186,8 @@ export class PgAuditStore implements AuditStore {
       conditions.push(vis);
     }
 
+    await applyRetentionWindow(input.tenant_id, conditions);
+
     if (input.user_id) conditions.push(eq(gatewayAuditEvents.userId, input.user_id));
     if (input.department_id) conditions.push(eq(gatewayAuditEvents.departmentId, input.department_id));
     if (input.provider) conditions.push(eq(gatewayAuditEvents.provider, input.provider));
@@ -180,6 +198,9 @@ export class PgAuditStore implements AuditStore {
         const needle = JSON.stringify([{ policy_id: pid }]);
         conditions.push(sql`${gatewayAuditEvents.policiesHit}::jsonb @> ${needle}::jsonb`);
       }
+    }
+    if (input.cross_border === true) {
+      conditions.push(eq(gatewayAuditEvents.crossBorder, true));
     }
     if (input.start) {
       const t = new Date(input.start);
@@ -213,6 +234,10 @@ export class PgAuditStore implements AuditStore {
       "provider",
       "model",
       "route",
+      "src_region",
+      "dst_region",
+      "cross_border",
+      "residency_rule",
       "total_tokens",
       "latency_ms",
       "checksum",
@@ -241,6 +266,10 @@ export class PgAuditStore implements AuditStore {
           ev.provider ?? "",
           ev.model ?? "",
           ev.route,
+          ev.src_region ?? "",
+          ev.dst_region ?? "",
+          ev.cross_border ? "true" : "",
+          ev.residency_rule ?? "",
           String(ev.total_tokens ?? 0),
           String(ev.latency_ms ?? 0),
           ev.checksum,

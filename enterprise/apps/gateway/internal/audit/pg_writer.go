@@ -67,6 +67,7 @@ INSERT INTO gateway_audit_events (
   input_tokens, output_tokens, total_tokens, latency_ms,
   digest, policies_hit, tools_called,
   mcp_server, mcp_tool_name, mcp_input_hash, mcp_output_hash, mcp_status,
+  src_region, dst_region, cross_border, residency_rule,
   prev_checksum, checksum, signature,
   created_at, updated_at
 ) VALUES (
@@ -76,8 +77,9 @@ INSERT INTO gateway_audit_events (
   $14,$15,$16,
   $17,$18,$19,$20,
   $21,$22,$23,
-  $24,$25,$26,$27,$28,$29,
-  $30,$31,$32,
+  $24,$25,$26,$27,$28,
+  $29,$30,$31,$32,
+  $33,$34,$35,
   timezone('utc', now()), timezone('utc', now())
 )
 ON CONFLICT (id) DO NOTHING`,
@@ -109,6 +111,10 @@ ON CONFLICT (id) DO NOTHING`,
 		nullStr(e.MCPInputHash),
 		nullStr(e.MCPOutputHash),
 		nullStr(e.MCPStatus),
+		nullStr(e.SrcRegion),
+		nullStr(e.DstRegion),
+		nullBool(e.CrossBorder),
+		nullStr(e.ResidencyRule),
 		strings.TrimSpace(e.PrevChecksum),
 		strings.TrimSpace(e.Checksum),
 		nil, // signature
@@ -128,6 +134,13 @@ func nullJSON(b []byte) any {
 
 func nullInt64(v int64) any {
 	if v <= 0 {
+		return nil
+	}
+	return v
+}
+
+func nullBool(v bool) any {
+	if !v {
 		return nil
 	}
 	return v

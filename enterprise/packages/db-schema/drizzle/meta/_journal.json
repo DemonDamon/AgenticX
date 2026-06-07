@@ -134,6 +134,13 @@
       "when": 1779000000000,
       "tag": "0018_session_grants_pat_revocation",
       "breakpoints": true
+    },
+    {
+      "idx": 19,
+      "version": "7",
+      "when": 1779100000000,
+      "tag": "0019_cross_border_compliance",
+      "breakpoints": true
     }
   ]
 }

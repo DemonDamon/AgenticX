@@ -63,6 +63,10 @@ type Event struct {
 	MCPInputHash   string      `json:"mcp_input_hash,omitempty"`
 	MCPOutputHash  string      `json:"mcp_output_hash,omitempty"`
 	PluginsInvoked []string    `json:"plugins_invoked,omitempty"`
+	SrcRegion      string      `json:"src_region,omitempty"`
+	DstRegion      string      `json:"dst_region,omitempty"`
+	CrossBorder    bool        `json:"cross_border,omitempty"`
+	ResidencyRule  string      `json:"residency_rule,omitempty"`
 	PrevChecksum string      `json:"prev_checksum"`
 	Checksum     string      `json:"checksum"`
 }

@@ -58,6 +58,7 @@ export default function AuditPage() {
   const [userId, setUserId] = useState("");
   const [model, setModel] = useState("");
   const [policyHit, setPolicyHit] = useState("");
+  const [crossBorderOnly, setCrossBorderOnly] = useState(false);
   const [loading, setLoading] = useState(false);
 
   const [chainFull, setChainFull] = useState<{
@@ -89,6 +90,7 @@ export default function AuditPage() {
           user_id: userId || undefined,
           model: model || undefined,
           policy_hit: policyHit || undefined,
+          cross_border: crossBorderOnly ? true : undefined,
         }),
       });
       const payload = (await response.json()) as { code?: string; data?: QueryResult; message?: string };
@@ -109,7 +111,7 @@ export default function AuditPage() {
     } finally {
       setLoading(false);
     }
-  }, [userId, model, policyHit, loadChainVerify, t]);
+  }, [userId, model, policyHit, crossBorderOnly, loadChainVerify, t]);
 
   useEffect(() => {
     void load();
@@ -123,6 +125,7 @@ export default function AuditPage() {
         user_id: userId || undefined,
         model: model || undefined,
         policy_hit: policyHit || undefined,
+        cross_border: crossBorderOnly ? true : undefined,
       }),
     });
     const csv = await response.text();
@@ -175,6 +178,18 @@ export default function AuditPage() {
           ),
       },
       {
+        accessorKey: "cross_border",
+        header: "跨境",
+        cell: ({ row }) =>
+          row.original.cross_border ? (
+            <Badge variant="warning" className="font-mono text-[10px]">
+              {row.original.src_region ?? "?"}→{row.original.dst_region ?? "?"}
+            </Badge>
+          ) : (
+            <span className="text-muted-foreground">—</span>
+          ),
+      },
+      {
         accessorKey: "policies_hit",
         header: t("columns.policy"),
         cell: ({ row }) => {
@@ -204,8 +219,9 @@ export default function AuditPage() {
     if (userId) list.push({ id: "user", label: `${t("filterLabels.user")}${userId}`, onRemove: () => setUserId("") });
     if (model) list.push({ id: "model", label: `${t("filterLabels.model")}${model}`, onRemove: () => setModel("") });
     if (policyHit) list.push({ id: "policy", label: `${t("filterLabels.policy")}${policyHit}`, onRemove: () => setPolicyHit("") });
+    if (crossBorderOnly) list.push({ id: "cross", label: "仅跨境", onRemove: () => setCrossBorderOnly(false) });
     return list;
-  }, [userId, model, policyHit, t]);
+  }, [userId, model, policyHit, crossBorderOnly, t]);
 
   const headerChainOk = chainFull != null ? chainFull.valid : chainValid;
   const headerChainAt =
@@ -275,6 +291,7 @@ export default function AuditPage() {
               setUserId("");
               setModel("");
               setPolicyHit("");
+              setCrossBorderOnly(false);
             }}
             onRowClick={(row) => setSelected(row.original)}
             onExport={handleExport}
@@ -334,6 +351,14 @@ export default function AuditPage() {
                         placeholder="finance-keyword-insider"
                       />
                     </div>
+                    <label className="flex items-center gap-2 text-sm">
+                      <input
+                        type="checkbox"
+                        checked={crossBorderOnly}
+                        onChange={(e) => setCrossBorderOnly(e.target.checked)}
+                      />
+                      仅跨境流动事件
+                    </label>
                     <div className="flex items-center justify-between gap-2">
                       <Button
                         variant="ghost"
@@ -342,6 +367,7 @@ export default function AuditPage() {
                           setUserId("");
                           setModel("");
                           setPolicyHit("");
+                          setCrossBorderOnly(false);
                         }}
                       >
                         {t("clearFilters")}
@@ -406,6 +432,14 @@ export default function AuditPage() {
                     <DetailField label={t("detail.inputTokens")} value={<span className="font-mono">{selected.input_tokens ?? "—"}</span>} />
                     <DetailField label={t("detail.outputTokens")} value={<span className="font-mono">{selected.output_tokens ?? "—"}</span>} />
                     <DetailField label={t("detail.latency")} value={selected.latency_ms ? `${selected.latency_ms} ms` : "—"} />
+                    <DetailField
+                      label="数据域 → 上游"
+                      value={
+                        selected.cross_border
+                          ? `${selected.src_region ?? "?"} → ${selected.dst_region ?? "?"} (${selected.residency_rule ?? "cross_border"})`
+                          : "—"
+                      }
+                    />
                   </dl>
                 </TabsContent>
 
