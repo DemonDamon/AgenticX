@@ -44,6 +44,7 @@
         "metering": "Metering",
         "quota": "Quota Control",
         "billingSplit": "Billing Split",
+        "agentTraces": "Agent Traces",
         "policy": "Policy Rules",
         "models": "Model Services",
         "channels": "Channel Management",
@@ -1072,6 +1073,29 @@
           "webhookSaved": "Webhook saved",
           "synced": "Synced {count} records"
         }
+      },
+      "agentTraces": {
+        "breadcrumbMetering": "Metering",
+        "title": "Agent token traces",
+        "description": "Step-by-step token usage path and cumulative cost for sandbox agent runs",
+        "recentTraces": "Recent traces",
+        "recentTracesHint": "From gateway metering and edge-agent ingest",
+        "traceDetail": "Trace detail",
+        "traceDetailHint": "Inspect per-step input/output/reasoning tokens and latency",
+        "traceId": "Trace ID",
+        "lookup": "Lookup",
+        "refresh": "Refresh",
+        "empty": "No traces yet",
+        "selectTrace": "Select or enter a trace_id to inspect",
+        "step": "Step",
+        "kind": "Kind",
+        "status": "Status",
+        "model": "Model",
+        "tokens": "Tokens",
+        "costUsd": "Cost (USD)",
+        "duration": "Duration",
+        "totalTokens": "Total tokens",
+        "inputTokens": "Input tokens"
       },
       "quota": {
         "breadcrumbQuota": "Quota control",

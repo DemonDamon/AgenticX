@@ -156,7 +156,26 @@ func (s *Server) reportUsageDetailed(identity requestIdentity, decision routing.
 		UsageSource:              n.Source,
 		CostUSD:                  cost,
 		PricingVersion:           pricingVersion,
+		TraceID:                  identity.TraceID,
+		TraceStep:                identity.TraceStep,
 	})
+	if s.traceReporter != nil && strings.TrimSpace(identity.TraceID) != "" && identity.TraceStep > 0 {
+		s.traceReporter.ReportAsync(metering.TraceSpanRecord{
+			ID:              makeID("trace"),
+			TenantID:        identity.TenantID,
+			TraceID:         identity.TraceID,
+			StepNo:          identity.TraceStep,
+			StepKind:        "model",
+			Status:          "ok",
+			Model:           decision.Model,
+			Provider:        decision.Provider,
+			InputTokens:     n.PromptTokens,
+			OutputTokens:    n.CompletionTokens,
+			ReasoningTokens: n.ReasoningTokens,
+			TotalTokens:     n.TotalTokens,
+			CostUSD:         cost,
+		})
+	}
 }
 
 func (s *Server) auditChatCall(ev audit.Event, cacheLayer cache.Layer, keyHash string, sim float64, upstreamMS int64) audit.Event {

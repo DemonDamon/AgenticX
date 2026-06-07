@@ -62,6 +62,7 @@ type Server struct {
 	policyOverrideMod  time.Time
 	audit              audit.EventWriter
 	metering           metering.Sink
+	traceReporter      *metering.TraceReporter
 	adminLoader        *runtimeconfig.Loader
 	quotaTracker       *quota.Tracker
 	policySnapBodyHash string
@@ -123,6 +124,15 @@ func New(cfg config.Config, logger *slog.Logger) (*Server, error) {
 		}
 		sink = fileSink
 		logger.Info("metering using file sink", "path", usageLogPath)
+	}
+
+	var traceReporter *metering.TraceReporter
+	if dbURL != "" {
+		if reporter, err := metering.NewTraceReporter(dbURL, logger); err != nil {
+			logger.Warn("trace reporter unavailable", "error", err)
+		} else {
+			traceReporter = reporter
+		}
 	}
 
 	adminLoader := runtimeconfig.New(logger)
@@ -192,6 +202,7 @@ func New(cfg config.Config, logger *slog.Logger) (*Server, error) {
 		policySnapBodyHash: snapBodyHash,
 		audit:              auditWriter,
 		metering:           sink,
+		traceReporter:      traceReporter,
 		adminLoader:        adminLoader,
 		quotaTracker:       quota.NewTracker(quotaCfgPath, quotaUsagePath),
 		patVerifier:        patVerifier,
@@ -1331,6 +1342,8 @@ type requestIdentity struct {
 	DataResidency string
 	APITokenID    int64
 	AuthViaPAT    bool
+	TraceID       string
+	TraceStep     int
 }
 
 func (s *Server) quotaContext(identity requestIdentity, model string) quota.RequestContext {
@@ -1375,7 +1388,7 @@ func (s *Server) identityFromRequest(r *http.Request) (requestIdentity, error) {
 		if err != nil {
 			return requestIdentity{}, err
 		}
-		return requestIdentity{
+		return enrichTraceFromRequest(requestIdentity{
 			TenantID:     pat.TenantID,
 			UserID:       pat.UserID,
 			DepartmentID: pat.DeptID,
@@ -1383,13 +1396,13 @@ func (s *Server) identityFromRequest(r *http.Request) (requestIdentity, error) {
 			ClientType:   "api-token",
 			APITokenID:   pat.APITokenID,
 			AuthViaPAT:   true,
-		}, nil
+		}, r), nil
 	}
 	fromJWT, err := parseIdentityFromJWT(token)
 	if err != nil {
 		return requestIdentity{}, err
 	}
-	return fromJWT, nil
+	return enrichTraceFromRequest(fromJWT, r), nil
 }
 
 func bearerToken(authHeader string) string {
