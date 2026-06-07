@@ -118,8 +118,11 @@ func (s *Server) writeChatCache(tenantID, userID string, req openai.ChatCompleti
 func (s *Server) reportUsageDetailed(identity requestIdentity, decision routing.Decision, usage openai.Usage) {
 	n := metering.NormalizeUsage(usage)
 	cost := float64(n.TotalTokens) * 0.000001
-	if s.pricing != nil {
-		cost = s.pricing.ComputeCostUSD(decision.Model, usage)
+	pricingVersion := ""
+	if table := s.activePricingTable(); table != nil {
+		result := table.ComputeCost(decision.Model, usage, metering.CostContext{At: time.Now().UTC()})
+		cost = result.CostUSD
+		pricingVersion = result.PricingVersion
 	}
 	s.metering.ReportAsync(metering.UsageRecord{
 		ID:                       makeID("usage"),
@@ -140,6 +143,7 @@ func (s *Server) reportUsageDetailed(identity requestIdentity, decision routing.
 		ReasoningTokens:          n.ReasoningTokens,
 		UsageSource:              n.Source,
 		CostUSD:                  cost,
+		PricingVersion:           pricingVersion,
 	})
 }
 

@@ -30,6 +30,7 @@ type UsageRecord struct {
 	ReasoningTokens          int
 	UsageSource              string
 	CostUSD                  float64
+	PricingVersion           string
 }
 
 type Reporter struct {
@@ -72,9 +73,9 @@ func (r *Reporter) ReportAsync(record UsageRecord) {
         id, tenant_id, dept_id, user_id, api_token_id, provider, model, route, time_bucket,
         input_tokens, output_tokens, total_tokens,
         cached_tokens, cache_read_input_tokens, cache_creation_input_tokens, reasoning_tokens, usage_source,
-        cost_usd, created_at, updated_at
+        cost_usd, pricing_version, created_at, updated_at
       ) values (
-        $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18, now(), now()
+        $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19, now(), now()
       )
     `,
 			record.ID,
@@ -95,6 +96,7 @@ func (r *Reporter) ReportAsync(record UsageRecord) {
 			record.ReasoningTokens,
 			nullIfEmpty(record.UsageSource),
 			record.CostUSD,
+			nullIfEmpty(record.PricingVersion),
 		); err != nil {
 			r.logger.Error("usage report write failed", "error", err)
 		}

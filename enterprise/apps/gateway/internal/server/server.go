@@ -75,6 +75,7 @@ type Server struct {
 	patVerifier        *gatewayauth.PATVerifier
 	cacheService       *cache.Service
 	pricing            *metering.PricingTable
+	pricingLoader      *metering.PricingLoader
 	metrics            *observability.Registry
 	pgPool             *pgxpool.Pool
 	mcpHost            *mcphost.Host
@@ -192,7 +193,7 @@ func New(cfg config.Config, logger *slog.Logger) (*Server, error) {
 		quotaTracker:       quota.NewTracker(quotaCfgPath, quotaUsagePath),
 		patVerifier:        patVerifier,
 		cacheService:       initCacheService(logger),
-		pricing:            initPricingTable(logger),
+		pricingLoader:      initPricingLoader(logger),
 		metrics:            observability.NewRegistryFromEnv(),
 		pgPool:             pgPool,
 	}
