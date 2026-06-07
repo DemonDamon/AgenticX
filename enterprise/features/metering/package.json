@@ -7,13 +7,16 @@
   "types": "./src/index.ts",
   "scripts": {
     "lint": "echo 'lint placeholder'",
-    "typecheck": "tsc --noEmit -p tsconfig.json"
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test": "vitest run"
   },
   "dependencies": {
-    "pg": "^8.20.0"
+    "pg": "^8.20.0",
+    "ulid": "^3.0.1"
   },
   "devDependencies": {
     "@types/node": "^20.11.0",
-    "@types/pg": "^8.15.6"
+    "@types/pg": "^8.15.6",
+    "vitest": "^4.1.5"
   }
 }

@@ -1,11 +1,21 @@
-import { MeteringApi, MeteringService, type MeteringGroupKey } from "@agenticx/feature-metering";
+import {
+  HeatmapApi,
+  MeteringApi,
+  MeteringService,
+  RoiApi,
+  RoiService,
+  type HeatmapDimension,
+  type HeatmapMetric,
+  type HeatmapTimeGranularity,
+  type MeteringGroupKey,
+} from "@agenticx/feature-metering";
 
-const service = new MeteringService();
-const api = new MeteringApi(service);
+const meteringService = new MeteringService();
+const meteringApi = new MeteringApi(meteringService);
+const heatmapApi = new HeatmapApi(meteringService);
+const roiService = new RoiService();
+const roiApi = new RoiApi(roiService);
 
-// 与 enterprise/scripts/bootstrap.sh 默认值保持一致（dev 默认租户 ULID）。
-// 注意：此处必须按调用时取 env，不能在模块顶层缓存；否则 .env.local 注入或修改后
-// 必须重启 admin-console 进程才能生效，会导致 metering 长期查到空集。
 const FALLBACK_TENANT_ID = "01J00000000000000000000001";
 
 function resolveTenantId(): string {
@@ -23,9 +33,93 @@ export async function queryMetering(input: {
   end: string;
   group_by: MeteringGroupKey[];
 }) {
-  return api.query({
+  return meteringApi.query({
     tenant_id: resolveTenantId(),
     ...input,
   });
 }
 
+export async function queryHeatmap(input: {
+  dimension: HeatmapDimension;
+  time_granularity: HeatmapTimeGranularity;
+  metric?: HeatmapMetric;
+  dept_id?: string[];
+  user_id?: string[];
+  api_token_id?: string[];
+  provider?: string[];
+  model?: string[];
+  start: string;
+  end: string;
+  limit_dimensions?: number;
+}) {
+  return heatmapApi.query({
+    tenant_id: resolveTenantId(),
+    ...input,
+  });
+}
+
+export async function queryRoiReport(input: {
+  dimension: HeatmapDimension;
+  start: string;
+  end: string;
+  dept_id?: string[];
+  user_id?: string[];
+  api_token_id?: string[];
+  provider?: string[];
+  model?: string[];
+}) {
+  return roiApi.report({
+    tenant_id: resolveTenantId(),
+    ...input,
+  });
+}
+
+export async function exportRoiReportCsv(input: {
+  dimension: HeatmapDimension;
+  start: string;
+  end: string;
+  dept_id?: string[];
+  user_id?: string[];
+  api_token_id?: string[];
+  provider?: string[];
+  model?: string[];
+}) {
+  return roiApi.reportCsv({
+    tenant_id: resolveTenantId(),
+    ...input,
+  });
+}
+
+export async function listBusinessRevenues() {
+  return roiApi.listRevenues(resolveTenantId());
+}
+
+export async function createBusinessRevenue(input: {
+  scenario_label: string;
+  period_start: string;
+  period_end: string;
+  revenue_usd: number;
+  notes?: string | null;
+}) {
+  return roiApi.createRevenue({
+    tenant_id: resolveTenantId(),
+    ...input,
+  });
+}
+
+export async function updateBusinessRevenue(
+  id: string,
+  patch: {
+    scenario_label?: string;
+    period_start?: string;
+    period_end?: string;
+    revenue_usd?: number;
+    notes?: string | null;
+  }
+) {
+  return roiApi.updateRevenue(resolveTenantId(), id, patch);
+}
+
+export async function deleteBusinessRevenue(id: string) {
+  return roiApi.deleteRevenue(resolveTenantId(), id);
+}
