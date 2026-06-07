@@ -1,0 +1,12 @@
+name: moderation-perf
+version: 0.1.0
+type: rule-pack
+description: perf baseline keyword block marker
+rules:
+  - id: perf-policy-block
+    kind: keyword
+    action: block
+    severity: high
+    message: perf policy block hit
+    keywords:
+      - __PERF_POLICY_BLOCK__

@@ -1,0 +1,16 @@
+{
+  "defaults": {
+    "role": {
+      "staff": {
+        "monthlyTokens": 999999999,
+        "tpm": 999999,
+        "rpm": 999999,
+        "concurrency": 9999,
+        "action": "block"
+      }
+    },
+    "model": {}
+  },
+  "users": {},
+  "departments": {}
+}

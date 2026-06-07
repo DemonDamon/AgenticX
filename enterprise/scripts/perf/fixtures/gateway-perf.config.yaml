@@ -1,0 +1,10 @@
+http_addr: ":18088"
+default_route: third-party
+local_route_header: x-agenticx-route
+policy_manifest: PLACEHOLDER_POLICY_MANIFEST
+audit_dir: PLACEHOLDER_AUDIT_DIR
+models:
+  - name: perf-mock-model
+    provider: perf-mock
+    route: third-party
+    endpoint: PLACEHOLDER_MOCK_ENDPOINT
