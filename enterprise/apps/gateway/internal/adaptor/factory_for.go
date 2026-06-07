@@ -18,6 +18,10 @@ func (f *Factory) For(ch channel.Channel) (Adaptor, error) {
 		return f.claude, nil
 	case "gemini", "google":
 		return f.gemini, nil
+	case "azure", "azure-openai":
+		return f.azure, nil
+	case "bedrock", "aws-bedrock":
+		return f.bedrock, nil
 	default:
 		return f.openai, nil
 	}

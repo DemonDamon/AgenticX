@@ -31,6 +31,7 @@ export async function POST(request: Request) {
       priority: typeof body.priority === "number" ? body.priority : undefined,
       status: parseStatus(body.status),
       supportedModels: models,
+      region: typeof body.region === "string" ? body.region : undefined,
       metadata: body.metadata && typeof body.metadata === "object" ? (body.metadata as Record<string, unknown>) : undefined,
     };
     const created = await createChannel(input);

@@ -28,6 +28,42 @@ import {
 import { Activity, Circle, Pencil, Plus, RefreshCcw, Trash2 } from "lucide-react";
 import { useTranslations } from "next-intl";
 
+const PROVIDER_TYPES = [
+  "openai",
+  "openai-compatible",
+  "claude",
+  "gemini",
+  "azure",
+  "bedrock",
+] as const;
+
+type ProviderType = (typeof PROVIDER_TYPES)[number];
+
+function buildChannelMetadata(input: {
+  providerLabel: string;
+  providerType: ProviderType;
+  deployment: string;
+  apiVersion: string;
+  accessKeyId: string;
+  secretAccessKey: string;
+  existing?: Record<string, unknown>;
+}): Record<string, unknown> {
+  const metadata: Record<string, unknown> = {
+    ...(input.existing ?? {}),
+    route: "third-party",
+  };
+  if (input.providerLabel.trim()) metadata.provider = input.providerLabel.trim();
+  if (input.providerType === "azure") {
+    if (input.deployment.trim()) metadata.deployment = input.deployment.trim();
+    if (input.apiVersion.trim()) metadata.apiVersion = input.apiVersion.trim();
+  }
+  if (input.providerType === "bedrock") {
+    if (input.accessKeyId.trim()) metadata.accessKeyId = input.accessKeyId.trim();
+    if (input.secretAccessKey.trim()) metadata.secretAccessKey = input.secretAccessKey.trim();
+  }
+  return metadata;
+}
+
 interface ChannelRow {
   id: string;
   name: string;
@@ -60,6 +96,7 @@ type KeypoolStat = {
 type EditForm = {
   id: string;
   name: string;
+  providerType: ProviderType;
   baseUrl: string;
   apiKey: string;
   keyRefs: string;
@@ -69,6 +106,10 @@ type EditForm = {
   status: "active" | "disabled";
   providerLabel: string;
   region: string;
+  deployment: string;
+  apiVersion: string;
+  accessKeyId: string;
+  secretAccessKey: string;
   metadata: Record<string, unknown>;
 };
 
@@ -83,12 +124,17 @@ export default function ChannelsPage() {
   const [keypoolStats, setKeypoolStats] = useState<KeypoolStat[]>([]);
   const [form, setForm] = useState({
     name: "",
+    providerType: "openai" as ProviderType,
     baseUrl: "",
     apiKey: "",
     weight: "1",
     models: "",
     providerLabel: "",
     region: "",
+    deployment: "",
+    apiVersion: "2024-02-01",
+    accessKeyId: "",
+    secretAccessKey: "",
   });
 
   const load = useCallback(async () => {
@@ -116,24 +162,54 @@ export default function ChannelsPage() {
         .split(/[\n,]/)
         .map((s) => s.trim())
         .filter(Boolean);
+      let baseUrl = form.baseUrl.trim();
+      if (form.providerType === "bedrock" && !baseUrl) {
+        const region = form.region.trim() || "us-east-1";
+        baseUrl = `https://bedrock-runtime.${region}.amazonaws.com`;
+      }
+      if (!baseUrl) {
+        toast.error(t("toast.createFailed"));
+        return;
+      }
       const res = await adminFetch("/api/admin/channels", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           name: form.name,
-          baseUrl: form.baseUrl,
+          providerType: form.providerType,
+          baseUrl,
           apiKey: form.apiKey,
           weight: Number(form.weight) || 1,
           supportedModels: models,
           region: form.region.trim() || undefined,
-          metadata: form.providerLabel ? { provider: form.providerLabel, route: "third-party" } : {},
+          metadata: buildChannelMetadata({
+            providerLabel: form.providerLabel,
+            providerType: form.providerType,
+            deployment: form.deployment,
+            apiVersion: form.apiVersion,
+            accessKeyId: form.accessKeyId,
+            secretAccessKey: form.secretAccessKey,
+          }),
         }),
       });
       const json = await res.json();
       if (json.code !== "00000") throw new Error(json.message || "create failed");
       toast.success(t("toast.createSuccess"));
       setOpen(false);
-      setForm({ name: "", baseUrl: "", apiKey: "", weight: "1", models: "", providerLabel: "", region: "" });
+      setForm({
+        name: "",
+        providerType: "openai",
+        baseUrl: "",
+        apiKey: "",
+        weight: "1",
+        models: "",
+        providerLabel: "",
+        region: "",
+        deployment: "",
+        apiVersion: "2024-02-01",
+        accessKeyId: "",
+        secretAccessKey: "",
+      });
       await load();
     } catch (e) {
       toast.error(e instanceof Error ? e.message : t("toast.createFailed"));
@@ -167,6 +243,9 @@ export default function ChannelsPage() {
     setEditing({
       id: ch.id,
       name: ch.name,
+      providerType: (PROVIDER_TYPES.includes(ch.providerType as ProviderType)
+        ? ch.providerType
+        : "openai") as ProviderType,
       baseUrl: ch.baseUrl,
       apiKey: "",
       keyRefs,
@@ -176,6 +255,10 @@ export default function ChannelsPage() {
       status: ch.status === "disabled" ? "disabled" : "active",
       providerLabel,
       region: detail?.region ?? "",
+      deployment: typeof metadata.deployment === "string" ? metadata.deployment : "",
+      apiVersion: typeof metadata.apiVersion === "string" ? metadata.apiVersion : "2024-02-01",
+      accessKeyId: typeof metadata.accessKeyId === "string" ? metadata.accessKeyId : "",
+      secretAccessKey: "",
       metadata,
     });
     const refs = keyRefs
@@ -194,6 +277,7 @@ export default function ChannelsPage() {
         .filter(Boolean);
       const body: Record<string, unknown> = {
         name: editing.name,
+        providerType: editing.providerType,
         baseUrl: editing.baseUrl,
         weight: Number(editing.weight) || 1,
         priority: Number(editing.priority) || 0,
@@ -206,11 +290,15 @@ export default function ChannelsPage() {
         .split(/[\n,]/)
         .map((s) => s.trim())
         .filter(Boolean);
-      const metadata: Record<string, unknown> = {
-        ...editing.metadata,
-        route: "third-party",
-      };
-      if (editing.providerLabel.trim() !== "") metadata.provider = editing.providerLabel.trim();
+      const metadata = buildChannelMetadata({
+        providerLabel: editing.providerLabel,
+        providerType: editing.providerType,
+        deployment: editing.deployment,
+        apiVersion: editing.apiVersion,
+        accessKeyId: editing.accessKeyId,
+        secretAccessKey: editing.secretAccessKey,
+        existing: editing.metadata,
+      });
       if (keyRefList.length > 0) metadata.keyRefs = keyRefList;
       else delete metadata.keyRefs;
       body.metadata = metadata;
@@ -368,8 +456,32 @@ export default function ChannelsPage() {
               <Input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} />
             </div>
             <div>
+              <Label>Provider Type</Label>
+              <select
+                className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-sm"
+                value={form.providerType}
+                onChange={(e) => setForm({ ...form, providerType: e.target.value as ProviderType })}
+              >
+                {PROVIDER_TYPES.map((pt) => (
+                  <option key={pt} value={pt}>
+                    {pt}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div>
               <Label>{t("baseUrlLabel")}</Label>
-              <Input value={form.baseUrl} onChange={(e) => setForm({ ...form, baseUrl: e.target.value })} placeholder="https://api.example.com/v1" />
+              <Input
+                value={form.baseUrl}
+                onChange={(e) => setForm({ ...form, baseUrl: e.target.value })}
+                placeholder={
+                  form.providerType === "azure"
+                    ? "https://{resource}.openai.azure.com"
+                    : form.providerType === "bedrock"
+                      ? "https://bedrock-runtime.{region}.amazonaws.com（可选，网关自动拼接）"
+                      : "https://api.example.com/v1"
+                }
+              />
             </div>
             <div>
               <Label>{t("apiKeyLabel")}</Label>
@@ -381,8 +493,49 @@ export default function ChannelsPage() {
             </div>
             <div>
               <Label>Region（cn / us / eu）</Label>
-              <Input value={form.region} onChange={(e) => setForm({ ...form, region: e.target.value })} placeholder="us" />
+              <Input value={form.region} onChange={(e) => setForm({ ...form, region: e.target.value })} placeholder="us-east-1" />
             </div>
+            {form.providerType === "azure" ? (
+              <>
+                <div>
+                  <Label>Deployment</Label>
+                  <Input
+                    value={form.deployment}
+                    onChange={(e) => setForm({ ...form, deployment: e.target.value })}
+                    placeholder="gpt-4o"
+                  />
+                </div>
+                <div>
+                  <Label>API Version</Label>
+                  <Input
+                    value={form.apiVersion}
+                    onChange={(e) => setForm({ ...form, apiVersion: e.target.value })}
+                    placeholder="2024-02-01"
+                  />
+                </div>
+              </>
+            ) : null}
+            {form.providerType === "bedrock" ? (
+              <>
+                <div>
+                  <Label>Access Key ID</Label>
+                  <Input
+                    value={form.accessKeyId}
+                    onChange={(e) => setForm({ ...form, accessKeyId: e.target.value })}
+                    placeholder="AKIA..."
+                  />
+                </div>
+                <div>
+                  <Label>Secret Access Key</Label>
+                  <Input
+                    type="password"
+                    value={form.secretAccessKey}
+                    onChange={(e) => setForm({ ...form, secretAccessKey: e.target.value })}
+                  />
+                </div>
+                <p className="text-xs text-muted-foreground">或在 API Key 中填写 accessKeyId:secretAccessKey</p>
+              </>
+            ) : null}
             <div>
               <Label>{t("modelsLabel")}</Label>
               <Input value={form.models} onChange={(e) => setForm({ ...form, models: e.target.value })} placeholder="deepseek-chat" />
@@ -411,6 +564,20 @@ export default function ChannelsPage() {
               <div>
                 <Label>{t("nameLabel")}</Label>
                 <Input value={editing.name} onChange={(e) => setEditing({ ...editing, name: e.target.value })} />
+              </div>
+              <div>
+                <Label>Provider Type</Label>
+                <select
+                  className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-sm"
+                  value={editing.providerType}
+                  onChange={(e) => setEditing({ ...editing, providerType: e.target.value as ProviderType })}
+                >
+                  {PROVIDER_TYPES.map((pt) => (
+                    <option key={pt} value={pt}>
+                      {pt}
+                    </option>
+                  ))}
+                </select>
               </div>
               <div>
                 <Label>{t("baseUrlLabel")}</Label>
@@ -484,8 +651,46 @@ export default function ChannelsPage() {
               </div>
               <div>
                 <Label>Region（cn / us / eu）</Label>
-                <Input value={editing.region} onChange={(e) => setEditing({ ...editing, region: e.target.value })} placeholder="us" />
+                <Input value={editing.region} onChange={(e) => setEditing({ ...editing, region: e.target.value })} placeholder="us-east-1" />
               </div>
+              {editing.providerType === "azure" ? (
+                <>
+                  <div>
+                    <Label>Deployment</Label>
+                    <Input
+                      value={editing.deployment}
+                      onChange={(e) => setEditing({ ...editing, deployment: e.target.value })}
+                    />
+                  </div>
+                  <div>
+                    <Label>API Version</Label>
+                    <Input
+                      value={editing.apiVersion}
+                      onChange={(e) => setEditing({ ...editing, apiVersion: e.target.value })}
+                    />
+                  </div>
+                </>
+              ) : null}
+              {editing.providerType === "bedrock" ? (
+                <>
+                  <div>
+                    <Label>Access Key ID</Label>
+                    <Input
+                      value={editing.accessKeyId}
+                      onChange={(e) => setEditing({ ...editing, accessKeyId: e.target.value })}
+                    />
+                  </div>
+                  <div>
+                    <Label>Secret Access Key（留空则不修改）</Label>
+                    <Input
+                      type="password"
+                      value={editing.secretAccessKey}
+                      onChange={(e) => setEditing({ ...editing, secretAccessKey: e.target.value })}
+                      placeholder="******"
+                    />
+                  </div>
+                </>
+              ) : null}
               <div>
                 <Label>{t("modelsLabel")}</Label>
                 <Input value={editing.models} onChange={(e) => setEditing({ ...editing, models: e.target.value })} />
