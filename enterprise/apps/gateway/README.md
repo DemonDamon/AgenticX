@@ -81,6 +81,9 @@ docker build -f apps/gateway/Dockerfile -t agenticx-gateway:latest .
 | `GATEWAY_REMOTE_PROVIDERS_URL` | HTTPS URL（JSON 等价于桌面态 `providers.json`），后台约 5s 轮询 |
 | `GATEWAY_REMOTE_QUOTA_CONFIG_URL` | HTTPS URL（JSON 等价于 `quotas.json`），约 **10 秒** 本地缓存 |
 | `GATEWAY_REMOTE_PRICING_CONFIG_URL` | admin `GET /api/internal/pricing-snapshot`（JSON 计价快照），约 **10 秒** 本地缓存；失败回落 `GATEWAY_PRICING_FILE` / 默认 `pricing.yaml` |
+| `GATEWAY_REMOTE_BUDGET_CONFIG_URL` | admin `GET /api/internal/budget-snapshot`（JSON 成本/词元预算快照），约 **10 秒** 本地缓存；失败回落 `GATEWAY_BUDGET_CONFIG_FILE` |
+| `GATEWAY_BUDGET_CONFIG_FILE` | 本地预算配置路径（默认 `../../.runtime/admin/budgets.json`） |
+| `GATEWAY_BUDGET_USAGE_FILE` | 本地预算累计用量路径（默认 `../../.runtime/gateway/budget-usage.json`） |
 | `GATEWAY_PRICING_FILE` | 本地计价表路径（默认 `internal/metering/pricing.yaml`） |
 
 未配置上述远程 URL 时，仍使用 `GATEWAY_ADMIN_PROVIDERS_FILE`、`GATEWAY_QUOTA_CONFIG_FILE`、`GATEWAY_POLICY_SNAPSHOT_FILE` 等本地路径逻辑。

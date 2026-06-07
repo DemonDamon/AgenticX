@@ -59,7 +59,7 @@ func (s *Server) handleChatCompleteRelay(
 		reservedTokens,
 		actualTotal,
 	)
-	s.reportUsageDetailed(identity, decision, resp.Usage)
+	s.reportUsageDetailed(identity, decision, resp.Usage, nil)
 
 	s.writeChatCache(identity.TenantID, identity.UserID, req, cache.Entry{
 		Stream:   false,

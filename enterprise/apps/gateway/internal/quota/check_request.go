@@ -32,17 +32,20 @@ type RequestContext struct {
 
 // CheckResult aggregates quota decision across dimensions.
 type CheckResult struct {
-	Allowed     bool
-	Warn        bool
-	Kind        string
-	Rule        Rule
-	Used        int64
-	Limit       int64
-	Description string
-	Headers     map[string]string
+	Allowed              bool
+	Warn                 bool
+	Kind                 string
+	Rule                 Rule
+	Used                 int64
+	Limit                int64
+	Description          string
+	Headers              map[string]string
+	FallbackModel        string
+	BudgetReservedTokens int64
+	BudgetReservedCost   float64
 }
 
-func (t *Tracker) CheckRequest(ctx RequestContext, tokens int64) CheckResult {
+func (t *Tracker) CheckRequest(ctx RequestContext, tokens int64, costUSD float64) CheckResult {
 	cfg := t.loadConfig()
 	rule := selectRuleExtended(cfg, ctx)
 	lim := sharedLimiter()
@@ -108,7 +111,39 @@ func (t *Tracker) CheckRequest(ctx RequestContext, tokens int64) CheckResult {
 		}
 	}
 
-	return CheckResult{Allowed: true, Rule: rule, Description: "ok"}
+	budget := t.CheckBudget(ctx, tokens, costUSD)
+	if !budget.Allowed {
+		t.ReleaseConcurrency(ctx)
+		return budgetDecisionToCheckResult(budget)
+	}
+	if budget.Warn || budget.FallbackModel != "" {
+		result := CheckResult{
+			Allowed:              true,
+			Warn:                 budget.Warn,
+			Kind:                 "budget",
+			Description:          budget.Description,
+			Headers:              map[string]string{},
+			FallbackModel:        budget.FallbackModel,
+			BudgetReservedTokens: budget.ReservedTokens,
+			BudgetReservedCost:   budget.ReservedCost,
+		}
+		if budget.Warn {
+			result.Headers["X-AgenticX-Budget-Warn"] = budget.Description
+		}
+		if budget.Limit > 0 {
+			result.Headers["X-AgenticX-Budget-Used"] = fmt.Sprintf("%.6f", budget.Used)
+			result.Headers["X-AgenticX-Budget-Limit"] = fmt.Sprintf("%.6f", budget.Limit)
+		}
+		return result
+	}
+
+	return CheckResult{
+		Allowed:              true,
+		Rule:                 rule,
+		Description:          "ok",
+		BudgetReservedTokens: budget.ReservedTokens,
+		BudgetReservedCost:   budget.ReservedCost,
+	}
 }
 
 // CheckMCPToolCall enforces per-minute MCP tool invocation limits.

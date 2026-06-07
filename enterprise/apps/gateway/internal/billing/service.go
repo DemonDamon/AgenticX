@@ -41,14 +41,14 @@ func (s *Service) quotaCtx(userID, deptID, role, model, tenantID, apiTokenID str
 }
 
 func (s *Service) Reserve(userID, deptID, role, model string, estimate int64) Reservation {
-	return s.ReserveContext(s.quotaCtx(userID, deptID, role, model, "", ""), estimate)
+	return s.ReserveContext(s.quotaCtx(userID, deptID, role, model, "", ""), estimate, 0)
 }
 
-func (s *Service) ReserveContext(ctx quota.RequestContext, estimate int64) Reservation {
+func (s *Service) ReserveContext(ctx quota.RequestContext, estimate int64, costUSD float64) Reservation {
 	if s == nil || s.tracker == nil {
 		return Reservation{Allowed: true, EstimatedTokens: estimate}
 	}
-	check := s.tracker.CheckRequest(ctx, estimate)
+	check := s.tracker.CheckRequest(ctx, estimate, costUSD)
 	decision := quota.Decision{Allowed: check.Allowed, Rule: check.Rule, Description: check.Description}
 	return Reservation{
 		ID:              ctx.UserID + "::" + ctx.Model,

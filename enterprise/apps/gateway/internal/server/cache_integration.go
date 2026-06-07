@@ -11,6 +11,7 @@ import (
 	"github.com/agenticx/enterprise/gateway/internal/metering"
 	"github.com/agenticx/enterprise/gateway/internal/openai"
 	"github.com/agenticx/enterprise/gateway/internal/outbound"
+	"github.com/agenticx/enterprise/gateway/internal/quota"
 	"github.com/agenticx/enterprise/gateway/internal/routing"
 )
 
@@ -24,6 +25,7 @@ type cacheServeContext struct {
 	estimatedInputTokens int
 	reservedTokens       int64
 	inboundProtocol      string
+	budgetCheck          *quota.CheckResult
 }
 
 func (s *Server) tryServeFromCache(ctx cacheServeContext) bool {
@@ -52,7 +54,7 @@ func (s *Server) tryServeFromCache(ctx cacheServeContext) bool {
 	if hit.Layer == cache.LayerL1 || hit.Layer == cache.LayerL2 {
 		usage = s.cacheService.GatewayCacheUsage(hit.Entry, s.cacheService.Config().CacheDiscountRatio)
 	}
-	s.reportUsageDetailed(ctx.identity, ctx.decision, usage)
+	s.reportUsageDetailed(ctx.identity, ctx.decision, usage, ctx.budgetCheck)
 	if s.useChannelRelay() {
 		actual := int64(usage.PromptTokens + usage.CompletionTokens)
 		s.billingService.Settle(
@@ -115,7 +117,7 @@ func (s *Server) writeChatCache(tenantID, userID string, req openai.ChatCompleti
 	s.cacheService.Write(tenantID, userID, req, entry)
 }
 
-func (s *Server) reportUsageDetailed(identity requestIdentity, decision routing.Decision, usage openai.Usage) {
+func (s *Server) reportUsageDetailed(identity requestIdentity, decision routing.Decision, usage openai.Usage, budgetCheck *quota.CheckResult) {
 	n := metering.NormalizeUsage(usage)
 	cost := float64(n.TotalTokens) * 0.000001
 	pricingVersion := ""
@@ -123,6 +125,16 @@ func (s *Server) reportUsageDetailed(identity requestIdentity, decision routing.
 		result := table.ComputeCost(decision.Model, usage, metering.CostContext{At: time.Now().UTC()})
 		cost = result.CostUSD
 		pricingVersion = result.PricingVersion
+	}
+	if budgetCheck != nil && s.quotaTracker != nil {
+		qctx := s.quotaContext(identity, decision.Model)
+		s.quotaTracker.SettleBudget(
+			qctx,
+			budgetCheck.BudgetReservedTokens,
+			budgetCheck.BudgetReservedCost,
+			int64(n.TotalTokens),
+			cost,
+		)
 	}
 	s.metering.ReportAsync(metering.UsageRecord{
 		ID:                       makeID("usage"),
@@ -193,7 +205,7 @@ func (s *Server) tryServeProtocolCache(w http.ResponseWriter, ctx cacheServeCont
 	if hit.Layer == cache.LayerL1 || hit.Layer == cache.LayerL2 {
 		usage = s.cacheService.GatewayCacheUsage(hit.Entry, s.cacheService.Config().CacheDiscountRatio)
 	}
-	s.reportUsageDetailed(ctx.identity, ctx.decision, usage)
+	s.reportUsageDetailed(ctx.identity, ctx.decision, usage, ctx.budgetCheck)
 	if s.useChannelRelay() {
 		actual := int64(usage.PromptTokens + usage.CompletionTokens)
 		s.billingService.Settle(
