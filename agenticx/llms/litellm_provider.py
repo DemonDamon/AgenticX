@@ -63,6 +63,10 @@ class LiteLLMProvider(BaseLLMProvider):
             raise ValueError(f"Unsupported prompt type: {type(prompt)}")
             
         timeout = kwargs.pop("timeout", self.timeout)
+        if timeout is None:
+            from agenticx.runtime.provider_fallback import _resolve_llm_round_timeout_seconds_from_config
+
+            timeout = _resolve_llm_round_timeout_seconds_from_config()
         max_retries = kwargs.pop("max_retries", self.max_retries)
         fallbacks = kwargs.pop("fallbacks", self.fallbacks)
         self._apply_drop_params_default(kwargs)
@@ -95,6 +99,10 @@ class LiteLLMProvider(BaseLLMProvider):
             raise ValueError(f"Unsupported prompt type: {type(prompt)}")
             
         timeout = kwargs.pop("timeout", self.timeout)
+        if timeout is None:
+            from agenticx.runtime.provider_fallback import _resolve_llm_round_timeout_seconds_from_config
+
+            timeout = _resolve_llm_round_timeout_seconds_from_config()
         max_retries = kwargs.pop("max_retries", self.max_retries)
         fallbacks = kwargs.pop("fallbacks", self.fallbacks)
         self._apply_drop_params_default(kwargs)
@@ -126,6 +134,10 @@ class LiteLLMProvider(BaseLLMProvider):
             raise ValueError(f"Unsupported prompt type: {type(prompt)}")
             
         timeout = kwargs.pop("timeout", self.timeout)
+        if timeout is None:
+            from agenticx.runtime.provider_fallback import _resolve_llm_round_timeout_seconds_from_config
+
+            timeout = _resolve_llm_round_timeout_seconds_from_config()
         max_retries = kwargs.pop("max_retries", self.max_retries)
         fallbacks = kwargs.pop("fallbacks", self.fallbacks)
         self._apply_drop_params_default(kwargs)
@@ -187,6 +199,10 @@ class LiteLLMProvider(BaseLLMProvider):
             raise ValueError(f"Unsupported prompt type: {type(prompt)}")
 
         timeout = kwargs.pop("timeout", self.timeout)
+        if timeout is None:
+            from agenticx.runtime.provider_fallback import _resolve_llm_round_timeout_seconds_from_config
+
+            timeout = _resolve_llm_round_timeout_seconds_from_config()
         max_retries = kwargs.pop("max_retries", self.max_retries)
         fallbacks = kwargs.pop("fallbacks", self.fallbacks)
         stream_options = kwargs.pop("stream_options", None)
@@ -309,6 +325,10 @@ class LiteLLMProvider(BaseLLMProvider):
             
         # 获取流式响应
         timeout = kwargs.pop("timeout", self.timeout)
+        if timeout is None:
+            from agenticx.runtime.provider_fallback import _resolve_llm_round_timeout_seconds_from_config
+
+            timeout = _resolve_llm_round_timeout_seconds_from_config()
         max_retries = kwargs.pop("max_retries", self.max_retries)
         fallbacks = kwargs.pop("fallbacks", self.fallbacks)
         self._apply_drop_params_default(kwargs)

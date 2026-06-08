@@ -37,6 +37,7 @@ class LoopDetector:
         self.critical_threshold = max(self.warning_threshold + 1, critical_threshold)
         self._calls: Deque[Tuple[str, str]] = deque(maxlen=self.history_size)
         self._progress_marks: Deque[bool] = deque(maxlen=self.history_size)
+        self._guard_rejections: Deque[str] = deque(maxlen=self.history_size)
         self._last_success_fingerprint: Dict[str, str] = {}
 
     @staticmethod
@@ -62,6 +63,13 @@ class LoopDetector:
         joined = "; ".join(found)
         return joined[:256]
 
+    @staticmethod
+    def is_guard_rejection(result: str) -> bool:
+        text = str(result or "").strip().lower()
+        if not text.startswith("error"):
+            return False
+        return "guard rejected" in text or "安全策略拦截" in text
+
     def record_call(
         self,
         tool_name: str,
@@ -69,9 +77,12 @@ class LoopDetector:
         *,
         has_progress: bool,
         result_fingerprint: Optional[str] = None,
+        result_text: Optional[str] = None,
     ) -> None:
         self._calls.append((tool_name, args_signature))
         self._progress_marks.append(bool(has_progress))
+        if result_text and self.is_guard_rejection(result_text):
+            self._guard_rejections.append(tool_name)
         if result_fingerprint:
             snap = result_fingerprint[:256]
             if snap:
@@ -101,6 +112,7 @@ class LoopDetector:
 
     def check(self) -> Optional[LoopCheckResult]:
         for detector in (
+            self._detect_guard_rejection_loop,
             self._detect_generic_repeat,
             self._detect_ping_pong,
             self._detect_no_progress,
@@ -113,6 +125,24 @@ class LoopDetector:
 
     def _classify(self, count: int) -> str:
         return "critical" if count >= self.critical_threshold else "warning"
+
+    def _detect_guard_rejection_loop(self) -> Optional[LoopCheckResult]:
+        threshold = 3
+        if len(self._guard_rejections) < threshold:
+            return None
+        tail = list(self._guard_rejections)[-threshold:]
+        tool_name = tail[-1]
+        if any(name != tool_name for name in tail):
+            return None
+        return LoopCheckResult(
+            stuck=True,
+            level="critical",
+            detector="guard_rejection",
+            message=(
+                f"工具 {tool_name} 已连续 {threshold} 次被安全策略拦截。"
+                "请停止 delete/create 绕路，向用户说明命中类别与建议改写方式。"
+            ),
+        )
 
     def _detect_generic_repeat(self) -> Optional[LoopCheckResult]:
         if len(self._calls) < self.warning_threshold:

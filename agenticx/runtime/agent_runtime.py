@@ -55,6 +55,12 @@ from agenticx.runtime.followup_stream import (
     suggested_questions_enabled_from_config,
 )
 from agenticx.llms.provider_fault import classify_provider_fault, record_session_provider_hard_failure
+from agenticx.runtime.provider_fallback import (
+    maybe_apply_provider_fallback,
+    record_provider_timeout,
+    reset_provider_timeout_streak,
+    resolve_provider_read_timeout,
+)
 
 if TYPE_CHECKING:
     from agenticx.cli.studio import StudioSession
@@ -250,6 +256,8 @@ DEFAULT_STATUS_QUERY_BUDGET_PER_TURN = 2
 DEFAULT_STATUS_QUERY_COOLDOWN_SECONDS = 8.0
 DEFAULT_LLM_HEARTBEAT_TIMEOUT_SECONDS = 60.0
 DEFAULT_LLM_HARD_TIMEOUT_SECONDS = 300.0
+DEFAULT_LLM_ROUND_TIMEOUT_SECONDS = 180.0
+LLM_ROUND_TIMEOUT_RETRY_LIMIT = 1
 logger = logging.getLogger(__name__)
 
 
@@ -375,8 +383,9 @@ def _resolve_llm_heartbeat_timeout_seconds(session: StudioSession) -> float:
     return DEFAULT_LLM_HEARTBEAT_TIMEOUT_SECONDS
 
 
-def _resolve_llm_hard_timeout_seconds(session: StudioSession) -> float:
-    env_raw = os.getenv("AGX_LLM_HARD_TIMEOUT_SECONDS", "").strip()
+def _resolve_llm_round_timeout_seconds(session: StudioSession) -> float:
+    """Per-round LLM stall ceiling (FR-P0-1); defaults to 180s."""
+    env_raw = os.getenv("AGX_LLM_ROUND_TIMEOUT_SECONDS", "").strip()
     if env_raw:
         try:
             value = float(env_raw)
@@ -387,14 +396,63 @@ def _resolve_llm_hard_timeout_seconds(session: StudioSession) -> float:
     try:
         from agenticx.cli.config_manager import ConfigManager
 
-        cfg_value = ConfigManager.get_value("runtime.llm_hard_timeout_seconds")
+        cfg_value = ConfigManager.get_value("runtime.llm_round_timeout_seconds")
         if cfg_value is not None:
             value = float(cfg_value)
             if value > 0:
                 return value
     except Exception:
         pass
-    return DEFAULT_LLM_HARD_TIMEOUT_SECONDS
+    return DEFAULT_LLM_ROUND_TIMEOUT_SECONDS
+
+
+def _resolve_llm_hard_timeout_seconds(session: StudioSession) -> float:
+    round_cap = _resolve_llm_round_timeout_seconds(session)
+    env_raw = os.getenv("AGX_LLM_HARD_TIMEOUT_SECONDS", "").strip()
+    if env_raw:
+        try:
+            value = float(env_raw)
+            if value > 0:
+                return min(value, round_cap)
+        except ValueError:
+            pass
+    try:
+        from agenticx.cli.config_manager import ConfigManager
+
+        cfg_value = ConfigManager.get_value("runtime.llm_hard_timeout_seconds")
+        if cfg_value is not None:
+            value = float(cfg_value)
+            if value > 0:
+                return min(value, round_cap)
+    except Exception:
+        pass
+    return min(DEFAULT_LLM_HARD_TIMEOUT_SECONDS, round_cap)
+
+
+def _llm_timeout_retry_count(session: StudioSession) -> int:
+    sp = getattr(session, "scratchpad", None)
+    if not isinstance(sp, dict):
+        return 0
+    try:
+        return int(sp.get("_llm_round_timeout_count", 0) or 0)
+    except (TypeError, ValueError):
+        return 0
+
+
+def _bump_llm_timeout_retry_count(session: StudioSession) -> int:
+    sp = getattr(session, "scratchpad", None)
+    if not isinstance(sp, dict):
+        sp = {}
+        setattr(session, "scratchpad", sp)
+    n = _llm_timeout_retry_count(session) + 1
+    sp["_llm_round_timeout_count"] = n
+    return n
+
+
+def _reset_llm_timeout_retry_count(session: StudioSession) -> None:
+    sp = getattr(session, "scratchpad", None)
+    if isinstance(sp, dict):
+        sp.pop("_llm_round_timeout_count", None)
 
 
 def _streamed_tool_call_truncated(name: str, args_obj: Dict[str, Any]) -> bool:
@@ -1383,10 +1441,12 @@ class AgentRuntime:
         invoke_timeout_seconds = _resolve_llm_invoke_timeout_seconds(session)
         heartbeat_timeout_seconds = _resolve_llm_heartbeat_timeout_seconds(session)
         hard_timeout_seconds = _resolve_llm_hard_timeout_seconds(session)
+        provider_read_timeout = resolve_provider_read_timeout(session)
         request_timeout_seconds = max(
             invoke_timeout_seconds,
             heartbeat_timeout_seconds,
             hard_timeout_seconds,
+            provider_read_timeout,
         ) + 15.0
         first_feedback_seconds = _resolve_llm_first_feedback_seconds(session)
         provider_name = str(getattr(session, "provider_name", "") or "").strip()
@@ -2038,16 +2098,67 @@ class AgentRuntime:
                 if budget_level == BudgetLevel.WARNING:
                     messages.append({"role": "user", "content": self.token_budget.convergence_hint()})
             except asyncio.TimeoutError:
+                round_timeout = _resolve_llm_round_timeout_seconds(session)
+                retries = _llm_timeout_retry_count(session)
                 provider_hint = provider_name or "(unknown)"
                 model_hint = model_name or "(unknown)"
+                streak = record_provider_timeout(session)
+                applied, fallback_msg = maybe_apply_provider_fallback(session)
+                if applied and fallback_msg:
+                    provider_name = str(getattr(session, "provider_name", "") or provider_name)
+                    model_name = str(getattr(session, "model_name", "") or model_name)
+                    yield RuntimeEvent(
+                        type=EventType.TOOL_RESULT.value,
+                        data={
+                            "tool_name": "system",
+                            "content": fallback_msg,
+                            "tool_call_id": f"llm-fallback-{round_idx}",
+                        },
+                        agent_id=agent_id,
+                    )
+                if retries < LLM_ROUND_TIMEOUT_RETRY_LIMIT:
+                    attempt = _bump_llm_timeout_retry_count(session)
+                    notice = (
+                        f"模型 {int(round_timeout)}s 内无响应（provider={provider_hint}, "
+                        f"model={model_hint}），正在重试（{attempt}/{LLM_ROUND_TIMEOUT_RETRY_LIMIT + 1}）。"
+                    )
+                    if applied and fallback_msg:
+                        notice = f"{fallback_msg} {notice}"
+                    yield RuntimeEvent(
+                        type=EventType.TOOL_RESULT.value,
+                        data={
+                            "tool_name": "system",
+                            "content": notice,
+                            "tool_call_id": f"llm-timeout-retry-{round_idx}-{attempt}",
+                        },
+                        agent_id=agent_id,
+                    )
+                    messages.append({"role": "user", "content": f"[系统通知] {notice}"})
+                    continue
+                yield RuntimeEvent(
+                    type=EventType.STALL.value,
+                    data={
+                        "text": (
+                            f"模型响应超时（>{int(round_timeout)}s），任务已暂停。"
+                            "可点击「继续」或切换更快模型后重试。"
+                        ),
+                        "detector": "llm_round_timeout",
+                        "silent_seconds": int(round_timeout),
+                        "provider": provider_hint,
+                        "model": model_hint,
+                        "timeout_streak": streak,
+                    },
+                    agent_id=agent_id,
+                )
                 yield RuntimeEvent(
                     type=EventType.ERROR.value,
                     data={
                         "text": (
-                            f"模型响应超时（>{int(invoke_timeout_seconds)}s，provider={provider_hint}, model={model_hint}）。"
-                            "当前轮为工具可调用模式，模型可能在内部思考/函数规划后才返回。"
-                            "可切换更快模型，或提高 AGX_LLM_INVOKE_TIMEOUT_SECONDS。"
-                        )
+                            f"模型响应超时（>{int(round_timeout)}s，provider={provider_hint}, "
+                            f"model={model_hint}）。已重试仍无响应，任务已中断。"
+                        ),
+                        "detector": "llm_round_timeout",
+                        "severity": "error",
                     },
                     agent_id=agent_id,
                 )
@@ -2088,6 +2199,8 @@ class AgentRuntime:
                     agent_id=agent_id,
                 )
                 return
+            _reset_llm_timeout_retry_count(session)
+            reset_provider_timeout_streak(session)
             response_text = (response.content or "").strip()
             raw_tc = response.tool_calls or []
             tool_calls = [
@@ -2822,6 +2935,7 @@ class AgentRuntime:
                         or logical_progress
                     ),
                     result_fingerprint=result_fp,
+                    result_text=result if isinstance(result, str) else None,
                 )
                 loop_issue = self.loop_detector.check()
                 if loop_issue is not None and loop_issue.nudge:

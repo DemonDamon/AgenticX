@@ -369,6 +369,25 @@ async def _finalize_chat_runtime(
     )
     manager.clear_interrupt(session_id)
     manager.set_execution_state(session_id, end_state)
+    if not had_runtime_failure and end_state != "interrupted":
+        try:
+            from agenticx.runtime.todo_disk_reconcile import reconcile_todos_with_disk
+
+            notice = reconcile_todos_with_disk(session)
+            if notice:
+                import uuid
+
+                session.chat_history.append(
+                    {
+                        "id": uuid.uuid4().hex,
+                        "role": "tool",
+                        "content": notice,
+                        "agent_id": "meta",
+                        "metadata": {"kind": "todo_disk_reconcile", "source": "runtime"},
+                    }
+                )
+        except Exception as exc:
+            logger.debug("todo disk reconcile skipped session=%s: %s", session_id, exc)
     # Persist touches SQLite (session_summaries upsert + FTS reindex over a
     # potentially large sessions.sqlite). Run it off the event loop so a single
     # turn-end persist cannot stall concurrent /api/chat, /api/usage/* and
@@ -720,6 +739,10 @@ def create_studio_app() -> FastAPI:
             if managed is None:
                 return False
             exec_state = str(getattr(managed, "execution_state", "idle") or "idle")
+            if source == "supervisor" and exec_state == "running":
+                from agenticx.studio.continuation import interrupt_running_for_continue
+
+                exec_state = await interrupt_running_for_continue(manager, sid)
             ok, prompt, _round_n, _notice = prepare_continue(
                 managed,
                 reason=reason,  # type: ignore[arg-type]
@@ -2928,19 +2951,10 @@ def create_studio_app() -> FastAPI:
             source = "desktop_manual"
 
         exec_state = str(getattr(managed, "execution_state", "idle") or "idle")
-        if source == "desktop_manual" and exec_state == "running":
-            manager.request_interrupt(session_id)
-            # Give the in-flight run loop a brief window to observe the interrupt
-            # flag and exit before we start a new continuation stream; otherwise
-            # two runs race on execution_state / chat_history / tool sequence.
-            for _ in range(20):
-                await asyncio.sleep(0.1)
-                cur = str(getattr(managed, "execution_state", "idle") or "idle")
-                if cur in {"idle", "interrupted"}:
-                    break
-            manager.set_execution_state(session_id, "interrupted")
-            await manager.persist_async(session_id)
-            exec_state = "interrupted"
+        if source in {"desktop_manual", "supervisor"} and exec_state == "running":
+            from agenticx.studio.continuation import interrupt_running_for_continue
+
+            exec_state = await interrupt_running_for_continue(manager, sid)
 
         max_nudge = int(
             __import__("agenticx.studio.continuation", fromlist=["get_runtime_value"]).get_runtime_value(

@@ -6,6 +6,7 @@ Author: Damon Li
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import time
 import uuid
@@ -223,6 +224,32 @@ def append_continuation_notice(
     }
     chat_history.append(row)
     return row
+
+
+async def interrupt_running_for_continue(manager: Any, session_id: str) -> str:
+    """Request interrupt on a running session and wait until it settles."""
+    sid = str(session_id or "").strip()
+    if not sid:
+        return "idle"
+    managed = manager.get(sid, touch=False)
+    if managed is None:
+        return "idle"
+    exec_state = str(getattr(managed, "execution_state", "idle") or "idle")
+    if exec_state != "running":
+        return exec_state
+    manager.request_interrupt(sid)
+    for _ in range(20):
+        await asyncio.sleep(0.1)
+        managed = manager.get(sid, touch=False)
+        if managed is None:
+            break
+        cur = str(getattr(managed, "execution_state", "idle") or "idle")
+        if cur in {"idle", "interrupted"}:
+            exec_state = cur
+            break
+    manager.set_execution_state(sid, "interrupted")
+    await manager.persist_async(sid)
+    return "interrupted"
 
 
 def prepare_continue(
