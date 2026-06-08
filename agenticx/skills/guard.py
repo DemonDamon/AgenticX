@@ -189,3 +189,43 @@ def should_allow(result: ScanResult, source: str | None = None) -> tuple[bool, s
     if safe_a == "block":
         return False, f"blocked: policy ({trust})"
     return True, f"allowed: safe ({trust})"
+
+
+_CATEGORY_LABELS: dict[str, str] = {
+    "exfiltration": "数据外泄",
+    "credential": "凭据泄露",
+    "injection": "命令/提示注入",
+    "destructive": "破坏性操作",
+}
+
+
+def format_guard_rejection_message(
+    result: ScanResult,
+    *,
+    action: str = "write",
+    trust: str | None = None,
+) -> str:
+    """Human-readable guard rejection for skill_manage and similar tools."""
+    effective_trust = trust or resolve_trust_level(result.source or "agent-created")
+    verdict_label = {"safe": "安全", "caution": "需警惕", "dangerous": "高危"}.get(
+        result.verdict, result.verdict
+    )
+    lines = [
+        "ERROR: 技能内容被安全策略拦截，无法写入。",
+        f"判定：{verdict_label}（来源信任级 {effective_trust}，{len(result.findings)} 条命中）",
+    ]
+    seen: set[str] = set()
+    for finding in result.findings[:6]:
+        cat = (finding.category or finding.pattern_name or "unknown").strip()
+        if cat in seen:
+            continue
+        seen.add(cat)
+        label = _CATEGORY_LABELS.get(cat, cat)
+        snippet = (finding.matched_text or finding.pattern_name or "")[:80]
+        lines.append(f"- {label}：{snippet}")
+    lines.append(
+        "建议：移除或改写上述片段后使用 skill_manage patch；"
+        "勿反复 delete/create 或 file_write 绕路。"
+    )
+    return "\n".join(lines)
+

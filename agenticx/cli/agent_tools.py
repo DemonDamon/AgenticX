@@ -4524,7 +4524,9 @@ def _write_skill_md_with_checks(
                 on_rollback()
             else:
                 skill_md.unlink(missing_ok=True)
-            return None, f"ERROR: guard rejected write ({reason})"
+            from agenticx.skills.guard import format_guard_rejection_message
+
+            return None, format_guard_rejection_message(result, action=action)
 
         discoverable, skill_name, errors = verify_skill_discoverable(skill_dir)
         if not discoverable:

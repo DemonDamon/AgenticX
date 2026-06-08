@@ -1215,7 +1215,9 @@ class SessionManager:
                 session.todo_manager.load_payload(todos)
             scratchpad = self._session_store._load_scratchpad_sync(session_id)
             if scratchpad:
-                session.scratchpad = dict(scratchpad)
+                from agenticx.runtime.scratchpad_utils import normalize_scratchpad_loaded
+
+                session.scratchpad = normalize_scratchpad_loaded(dict(scratchpad))
             messages = self._load_messages_snapshot(session_id)
             if messages:
                 session.chat_history = self._normalize_messages(messages)

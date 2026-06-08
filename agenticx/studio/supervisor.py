@@ -20,6 +20,7 @@ from agenticx.runtime.stall_policy import (
     latest_todo_from_messages,
     todos_completed,
 )
+from agenticx.runtime.scratchpad_utils import scratchpad_truthy
 from agenticx.studio.continuation import (
     SCRATCH_SUPERVISOR_STARTED_KEY,
     format_continuation_notice,
@@ -53,13 +54,8 @@ def _log_supervisor_event(session_id: str, payload: dict[str, Any]) -> None:
 def _session_unattended_enabled(managed: Any) -> bool:
     session = managed.studio_session
     sp = getattr(session, "scratchpad", None)
-    if isinstance(sp, dict) and sp.get(SESSION_META_UNATTENDED) is True:
+    if isinstance(sp, dict) and scratchpad_truthy(sp.get(SESSION_META_UNATTENDED)):
         return True
-    try:
-        meta_path = Path(os.path.expanduser("~/.agenticx/sessions")) / managed.session_id
-        # Metadata also on session store — check scratchpad set by desktop.
-    except Exception:
-        pass
     return False
 
 
