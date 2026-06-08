@@ -486,5 +486,6 @@ func (s *Server) protocolAuditEvent(
 		},
 	}
 	enrichAuditFromAttempts(&ev, streamResult.Attempts)
+	enrichAuditRoutingPolicy(&ev, streamResult.PickDecision)
 	return ev
 }

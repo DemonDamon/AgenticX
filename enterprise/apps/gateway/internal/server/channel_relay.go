@@ -83,6 +83,17 @@ func enrichAuditFromAttempts(event *audit.Event, attempts []channel.Attempt) {
 	}
 }
 
+func enrichAuditRoutingPolicy(event *audit.Event, decision channel.PickDecision) {
+	if event == nil || decision.ChannelID == "" {
+		return
+	}
+	raw, err := json.Marshal(decision)
+	if err != nil {
+		return
+	}
+	event.RoutingPolicy = raw
+}
+
 func (s *Server) initChannelRelay() {
 	openaiAdaptor := adaptor.NewOpenAIAdaptor()
 	s.adaptorFactory = adaptor.NewFactory(openaiAdaptor)

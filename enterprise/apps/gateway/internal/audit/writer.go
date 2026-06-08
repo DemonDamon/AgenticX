@@ -62,6 +62,7 @@ type Event struct {
 	MCPToolName    string      `json:"mcp_tool_name,omitempty"`
 	MCPInputHash   string      `json:"mcp_input_hash,omitempty"`
 	MCPOutputHash  string      `json:"mcp_output_hash,omitempty"`
+	RoutingPolicy  json.RawMessage `json:"routing_policy,omitempty"`
 	PluginsInvoked []string    `json:"plugins_invoked,omitempty"`
 	SrcRegion      string      `json:"src_region,omitempty"`
 	DstRegion      string      `json:"dst_region,omitempty"`

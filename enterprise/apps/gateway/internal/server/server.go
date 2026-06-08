@@ -1114,6 +1114,7 @@ func (s *Server) handleStream(
 				LatencyMS:   time.Since(startedAt).Milliseconds(),
 			}
 			enrichAuditFromAttempts(&ev, streamResult.Attempts)
+			enrichAuditRoutingPolicy(&ev, streamResult.PickDecision)
 			_ = s.writeAuditEvent(ev)
 			writeStreamPolicyError(w, flusher, "90002", "响应触发合规拦截", blockedHits)
 			partialOutputTokens := estimateTextTokens(responseBuilder.String())
@@ -1209,6 +1210,7 @@ func (s *Server) handleStream(
 		},
 	}
 	enrichAuditFromAttempts(&ev, streamResult.Attempts)
+	enrichAuditRoutingPolicy(&ev, streamResult.PickDecision)
 	applyPluginsInvoked(&ev, pluginCtx)
 	if err := s.writeAuditEvent(ev); err != nil {
 		writeStreamError(w, flusher, "audit write failed")
