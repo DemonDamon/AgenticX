@@ -88,6 +88,7 @@ func (s *Server) handleChatCompleteRelay(
 				SettleDelta:     settle.Delta,
 			}
 			enrichAuditFromAttempts(&ev, result.Attempts)
+			enrichAuditRoutingPolicy(&ev, result.PickDecision)
 			if err := s.writeAuditEvent(ev); err != nil {
 				writeAPIError(w, openai.Internal("audit write failed"))
 				return
@@ -139,6 +140,7 @@ func (s *Server) handleChatCompleteRelay(
 		},
 	}
 	enrichAuditFromAttempts(&ev, result.Attempts)
+	enrichAuditRoutingPolicy(&ev, result.PickDecision)
 	applyPluginsInvoked(&ev, pluginCtx)
 	if err := s.writeAuditEvent(ev); err != nil {
 		writeAPIError(w, openai.Internal("audit write failed"))

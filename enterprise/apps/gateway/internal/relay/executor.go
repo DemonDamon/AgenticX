@@ -41,12 +41,14 @@ type CompleteResult struct {
 	Channel       channel.Channel
 	KeyRef        string
 	Attempts      []channel.Attempt
+	PickDecision  channel.PickDecision
 }
 
 type StreamResult struct {
-	Channel  channel.Channel
-	KeyRef   string
-	Attempts []channel.Attempt
+	Channel      channel.Channel
+	KeyRef       string
+	Attempts     []channel.Attempt
+	PickDecision channel.PickDecision
 }
 
 func (e *Executor) Complete(
@@ -61,7 +63,7 @@ func (e *Executor) Complete(
 	maxRetries := defaultMaxRetries
 
 	for attempt := 0; attempt <= maxRetries; attempt++ {
-		ch, ok := e.picker.Pick(model, id, excludeChannels)
+		ch, pick, ok := e.picker.PickWithPrefix(model, id, excludeChannels, req.Messages)
 		if !ok {
 			if lastErr != nil {
 				return CompleteResult{Attempts: attempts}, lastErr
@@ -77,10 +79,11 @@ func (e *Executor) Complete(
 		if err == nil {
 			e.picker.MarkSuccess(id, model, ch, result.latencyMS)
 			return CompleteResult{
-				Response: result.response,
-				Channel:  ch,
-				KeyRef:   result.keyRef,
-				Attempts: attempts,
+				Response:     result.response,
+				Channel:      ch,
+				KeyRef:       result.keyRef,
+				Attempts:     attempts,
+				PickDecision: pick,
 			}, nil
 		}
 		lastErr = err
@@ -182,7 +185,7 @@ func (e *Executor) Stream(
 	maxRetries := defaultMaxRetries
 
 	for attempt := 0; attempt <= maxRetries; attempt++ {
-		ch, ok := e.picker.Pick(model, id, excludeChannels)
+		ch, pick, ok := e.picker.PickWithPrefix(model, id, excludeChannels, req.Messages)
 		if !ok {
 			if lastErr != nil {
 				return StreamResult{Attempts: attempts}, lastErr
@@ -197,7 +200,7 @@ func (e *Executor) Stream(
 		attempts = append(attempts, result.attempts...)
 		if err == nil {
 			e.picker.MarkSuccess(id, model, ch, result.latencyMS)
-			return StreamResult{Channel: ch, KeyRef: result.keyRef, Attempts: attempts}, nil
+			return StreamResult{Channel: ch, KeyRef: result.keyRef, Attempts: attempts, PickDecision: pick}, nil
 		}
 		lastErr = err
 		if !IsChannelRetryable(err) {
