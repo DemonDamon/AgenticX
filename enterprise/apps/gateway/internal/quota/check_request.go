@@ -2,7 +2,6 @@ package quota
 
 import (
 	"fmt"
-	"os"
 	"strings"
 	"sync"
 )
@@ -12,10 +11,7 @@ var sharedRateLimiter *RateLimiter
 
 func sharedLimiter() *RateLimiter {
 	rateLimiterOnce.Do(func() {
-		sharedRateLimiter = NewRateLimiter()
-		if os.Getenv("GATEWAY_REDIS_URL") == "" && os.Getenv("REDIS_URL") == "" {
-			fmt.Println("quota: redis disabled, falling back to in-process limiter")
-		}
+		sharedRateLimiter = buildSharedRateLimiter()
 	})
 	return sharedRateLimiter
 }
