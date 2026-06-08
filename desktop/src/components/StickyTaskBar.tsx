@@ -6,6 +6,7 @@ import {
   isTodoSnapshotSuperseded,
   messageLooksLikeAssistantFinal,
   resolveStickyTodoDisplay,
+  detectDiskEvidenceForInProgressTodos,
 } from "../utils/task-stall-policy";
 import type { SessionExecutionState } from "../utils/streaming-stop-policy";
 
@@ -128,8 +129,9 @@ export function StickyTaskBar({
   const promotePending = useMemo(() => {
     if (!rawSnapshot) return false;
     if (liveness !== "idle") return false;
+    if (rawParsed && detectDiskEvidenceForInProgressTodos(messages, rawParsed)) return true;
     return detectModelForgotFinalTodoUpdate(messages, rawSnapshot.index);
-  }, [messages, rawSnapshot, liveness]);
+  }, [messages, rawSnapshot, liveness, rawParsed]);
   const parsed = useMemo(
     () =>
       rawParsed
