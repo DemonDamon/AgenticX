@@ -212,6 +212,13 @@
         "notSelected": "Not selected",
         "importTools": "Import tools",
         "confirmDelete": "Delete this MCP Server?",
+        "proxyTitle": "MCP Upstream Proxy",
+        "proxyDescription": "Register upstream streamable-HTTP MCP servers; clients use gateway `/v1/mcp/{server_id}/*`.",
+        "proxyUpstreamUrl": "Upstream URL",
+        "proxyAuthHeader": "Upstream auth header (optional)",
+        "proxyRateLimit": "Tool calls per minute",
+        "proxyGatewayPath": "Gateway entry",
+        "proxyEmpty": "No proxy servers",
         "toast": {
           "loadFailed": "Failed to load MCP servers",
           "nameRequired": "Name is required",

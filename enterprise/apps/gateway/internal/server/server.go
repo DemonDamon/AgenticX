@@ -30,6 +30,7 @@ import (
 	"github.com/agenticx/enterprise/gateway/internal/gwerrors"
 	"github.com/agenticx/enterprise/gateway/internal/keypool"
 	"github.com/agenticx/enterprise/gateway/internal/mcphost"
+	"github.com/agenticx/enterprise/gateway/internal/mcp"
 	"github.com/agenticx/enterprise/gateway/internal/metering"
 	"github.com/agenticx/enterprise/gateway/internal/observability"
 	"github.com/agenticx/enterprise/gateway/internal/openai"
@@ -86,6 +87,9 @@ type Server struct {
 	mcpHost            *mcphost.Host
 	mcpStreamable      mcphost.StreamableHTTPTransport
 	mcpSSE             *mcphost.SSETransport
+	mcpRegistry        *mcp.Registry
+	mcpLoader          *mcp.Loader
+	mcpProxy           *mcp.Handler
 	wasmManager        *wasmhost.Manager
 	errorStore         *gwerrors.Store
 	channelProber      *channel.Prober
@@ -218,6 +222,7 @@ func New(cfg config.Config, logger *slog.Logger) (*Server, error) {
 	srv.cacheService = cacheSvc
 	srv.redisStore = redisStore
 	srv.initMCPHost()
+	srv.initMCPProxy()
 	srv.initChannelRelay()
 	if dbURL != "" {
 		if budgetReporter, err := quota.NewBudgetAlertReporter(dbURL, logger); err != nil {
@@ -599,6 +604,7 @@ func (s *Server) Router() http.Handler {
 		r.Post("/v1/responses", s.handleResponses)
 	}
 	s.registerMCPRoutes(r)
+	s.registerMCPProxyRoutes(r)
 
 	return r
 }
