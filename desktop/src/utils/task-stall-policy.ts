@@ -233,3 +233,103 @@ export const STALL_MODEL_FALLBACKS: Array<{ provider: string; model: string; lab
   { provider: "zhipu", model: "glm-4-flash", label: "智谱 / glm-4-flash" },
   { provider: "openai", model: "gpt-4o-mini", label: "OpenAI / gpt-4o-mini" },
 ];
+
+export type SilenceTier = "thinking" | "slow" | "stuck";
+
+export type SessionHealth = "normal" | "slow" | "stuck";
+
+/** Map silent seconds to UI tier (threshold = stall_detect_silence_seconds). */
+export function resolveSilenceTier(
+  silentSeconds: number,
+  thresholdSeconds: number,
+): SilenceTier {
+  const threshold = Math.max(1, thresholdSeconds);
+  const silent = Math.max(0, silentSeconds);
+  if (silent <= threshold) return "thinking";
+  if (silent <= threshold * 2) return "slow";
+  return "stuck";
+}
+
+export function resolveSilenceTierLabel(
+  tier: SilenceTier,
+  silentSeconds: number,
+): string {
+  if (tier === "thinking") return "正在思考…";
+  if (tier === "slow") return `模型响应较慢（已等 ${silentSeconds}s）`;
+  return `可能已卡住（已等 ${silentSeconds}s）`;
+}
+
+export function resolveSessionHealth(
+  silentSeconds: number,
+  thresholdSeconds: number,
+  executionState?: string,
+  stallState?: StallPhase,
+): SessionHealth {
+  const state = (executionState || "").trim();
+  if (stallState === "stall" || stallState === "exhausted") return "stuck";
+  if (state !== "running") return "normal";
+  const tier = resolveSilenceTier(silentSeconds, thresholdSeconds);
+  if (tier === "stuck") return "stuck";
+  if (tier === "slow") return "slow";
+  return "normal";
+}
+
+const DISK_WRITE_PATH_RE =
+  /(?:OK:\s*(?:wrote|saved|updated)|file_write|wrote\s+(?:to\s+)?)[`'"]?\s*([^\s`"'\n]+)/gi;
+const FILENAME_HINT_RE =
+  /([A-Za-z0-9_./-]+\.(?:md|txt|py|json|yaml|yml|sh|ts|tsx|js|jsx))/gi;
+
+/** Collect filesystem paths mentioned in successful tool writes. */
+export function extractDiskWritePathsFromMessages(messages: Message[]): string[] {
+  const paths = new Set<string>();
+  for (const msg of messages) {
+    if (msg.role !== "tool") continue;
+    const content = typeof msg.content === "string" ? msg.content : "";
+    if (!content) continue;
+    let match: RegExpExecArray | null;
+    DISK_WRITE_PATH_RE.lastIndex = 0;
+    while ((match = DISK_WRITE_PATH_RE.exec(content)) !== null) {
+      const raw = match[1]?.trim().replace(/[.,;)]+$/, "");
+      if (raw) paths.add(raw);
+    }
+    if ((msg.toolName || "").trim() === "file_write" && !content.startsWith("ERROR")) {
+      const abs = content.match(/\/[\w./+-]+\.[A-Za-z0-9]+/g);
+      abs?.forEach((p) => paths.add(p));
+    }
+  }
+  return [...paths];
+}
+
+function filenameHints(text: string): string[] {
+  const hints: string[] = [];
+  let match: RegExpExecArray | null;
+  FILENAME_HINT_RE.lastIndex = 0;
+  while ((match = FILENAME_HINT_RE.exec(text)) !== null) {
+    const token = match[1]?.trim();
+    if (token && !hints.includes(token)) hints.push(token);
+  }
+  const bare = text.trim().split(/[/\\]/).pop();
+  if (bare && bare.includes(".") && !hints.includes(bare)) hints.push(bare);
+  return hints;
+}
+
+/** Promote sticky todos when in_progress items match on-disk write evidence. */
+export function detectDiskEvidenceForInProgressTodos(
+  messages: Message[],
+  parsed: ParsedTodo,
+): boolean {
+  const inProgress = parsed.items.filter((item) => item.status === "in_progress");
+  if (inProgress.length === 0) return false;
+  const paths = extractDiskWritePathsFromMessages(messages);
+  if (paths.length === 0) return false;
+  const normalized = paths.map((p) => p.replace(/\\/g, "/"));
+  return inProgress.every((item) => {
+    const hints = filenameHints(item.content);
+    return hints.some((hint) => {
+      const hintNorm = hint.replace(/\\/g, "/");
+      return normalized.some(
+        (path) => path.includes(hintNorm) || path.endsWith(hintNorm) || path.split("/").pop() === hintNorm.split("/").pop(),
+      );
+    });
+  });
+}

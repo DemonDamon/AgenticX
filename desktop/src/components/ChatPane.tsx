@@ -89,11 +89,15 @@ import {
   CHANNEL_C_GRACE_MS,
   stallDetectSilenceMs,
   lastTurnHasCompletedAssistantReply,
+  resolveSessionHealth,
+  resolveSilenceTier,
+  resolveSilenceTierLabel,
   sessionMessagesHydrated,
   shouldAllowStallAutoNudge,
   shouldResetStallDetectorsOnSessionSwitch,
   shouldSuppressStallDetection,
   shouldTriggerIncompleteEndStall,
+  STALL_MODEL_FALLBACKS,
 } from "../utils/task-stall-policy";
 import {
   budgetExceededInfoFromPayload,
@@ -4307,6 +4311,22 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
     return Math.floor((Date.now() - t) / 1000);
   }, [stallTick, stallState, sessionExecutionState, pane.sessionId]);
 
+  const stallThresholdSeconds = stallRuntimeConfig.stall_detect_silence_seconds;
+  const silenceTier = useMemo(
+    () => resolveSilenceTier(silentSeconds, stallThresholdSeconds),
+    [silentSeconds, stallThresholdSeconds],
+  );
+  const sessionHealth = useMemo(
+    () =>
+      resolveSessionHealth(
+        silentSeconds,
+        stallThresholdSeconds,
+        sessionExecutionState,
+        stallState,
+      ),
+    [silentSeconds, stallThresholdSeconds, sessionExecutionState, stallState],
+  );
+
   const taskLiveness = useMemo((): "active" | "stalled" | "idle" => {
     if (stallState === "stall") return "stalled";
     if (sessionWorkInProgress) return "active";
@@ -4920,6 +4940,14 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
     },
     [pane.sessionId, syncStreamingUiForCurrentSession]
   );
+
+  const takeoverSession = useCallback(async () => {
+    const sid = (pane.sessionId || "").trim();
+    if (!sid) return;
+    userStoppedSessionRef.current[sid] = true;
+    await stopCurrentRun();
+    window.setTimeout(() => composerRef.current?.focus(), 50);
+  }, [pane.sessionId, stopCurrentRun]);
 
   useEffect(() => {
     const sid = (pane.sessionId || "").trim();
@@ -8317,8 +8345,11 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
                   // An ended-incomplete turn is not "running" — suppress the silence
                   // timer so it never reads as "still processing / no response".
                   silentSeconds > 0 &&
+                  sessionExecutionState === "running" &&
                   !(stallState === "stall" && stallReason === "incomplete")
-                    ? `静默 ${silentSeconds}s`
+                    ? silenceTier === "thinking"
+                      ? "正在思考…"
+                      : resolveSilenceTierLabel(silenceTier, silentSeconds)
                     : null,
                   lastToolProgress?.name
                     ? `${lastToolProgress.name}${lastToolProgress.sec > 0 ? ` ${lastToolProgress.sec}s` : ""}`
@@ -8327,7 +8358,17 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
                   .filter(Boolean)
                   .join(" · ")}
               </span>
-              {contextLoopStats ? (
+              {sessionHealth !== "normal" ? (
+                <span
+                  className={`rounded-full px-2 py-0.5 ${
+                    sessionHealth === "stuck"
+                      ? "bg-amber-500/15 text-amber-200"
+                      : "bg-surface-panel/75 text-text-muted"
+                  }`}
+                >
+                  健康度：{sessionHealth === "stuck" ? "卡住" : "偏慢"}
+                </span>
+              ) : null}
                 <span className="rounded-full bg-surface-panel/75 px-2 py-0.5 text-text-muted">
                   context: {(contextLoopStats.tool_result_tokens_session / 1000).toFixed(1)}k ·{" "}
                   {contextLoopStats.round} rounds · {contextLoopStats.archived_tool_calls} archived
@@ -8365,6 +8406,54 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
               ) : null}
             </div>
           )}
+          {sessionExecutionState === "running" &&
+          (silenceTier === "slow" || silenceTier === "stuck") &&
+          !(stallState === "stall" && stallReason === "incomplete") ? (
+            <div className="mb-2 flex justify-center px-1">
+              <div
+                className={`inline-flex max-w-full flex-wrap items-center justify-center gap-2 rounded-full border px-3 py-1.5 text-[12px] ${
+                  silenceTier === "stuck"
+                    ? "border-amber-500/35 bg-amber-500/10 text-amber-100/95"
+                    : "border-border bg-surface-panel/80 text-text-muted"
+                }`}
+              >
+                <span>{resolveSilenceTierLabel(silenceTier, silentSeconds)}</span>
+                <button
+                  type="button"
+                  className="rounded-full bg-surface-hover px-2 py-0.5 transition hover:bg-surface-card-strong"
+                  onClick={() => void resumeCurrentTask()}
+                >
+                  立即重试
+                </button>
+                <button
+                  type="button"
+                  className="rounded-full bg-surface-hover px-2 py-0.5 transition hover:bg-surface-card-strong"
+                  onClick={() => {
+                    const fb = stallModelOptions[0] ?? STALL_MODEL_FALLBACKS[0];
+                    if (fb) void resumeWithModel(fb.provider, fb.model);
+                  }}
+                >
+                  换模型
+                </button>
+                <button
+                  type="button"
+                  className="rounded-full bg-surface-hover px-2 py-0.5 transition hover:bg-surface-card-strong"
+                  onClick={() => void stopCurrentRun()}
+                >
+                  停止
+                </button>
+                {silenceTier === "stuck" ? (
+                  <button
+                    type="button"
+                    className="rounded-full bg-amber-500/20 px-2 py-0.5 text-amber-100 transition hover:bg-amber-500/30"
+                    onClick={() => void takeoverSession()}
+                  >
+                    我来接管
+                  </button>
+                ) : null}
+              </div>
+            </div>
+          ) : null}
           {voiceInputHint ? (
             <div className="mb-2 flex justify-center px-1">
               <span className="inline-flex max-w-full items-center gap-1.5 rounded-full border border-amber-500/35 bg-amber-500/10 px-3 py-1 text-[12px] text-amber-100/95">
