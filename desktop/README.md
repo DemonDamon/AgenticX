@@ -120,7 +120,19 @@ SKIP_BACKEND=1 ./packaging/build_dmg.sh arm64
 产物在 `desktop/release/` 下的 `.dmg` / `.zip`。
 
 **可选：签名与公证**（分发给别人时建议配置）  
-在构建环境中设置 `APPLE_ID`、`APPLE_ID_PASSWORD`（App 专用密码）、`APPLE_TEAM_ID`，以及 `CSC_LINK` / `CSC_KEY_PASSWORD`（Developer ID 证书）。未设置时脚本会跳过公证（`desktop/scripts/mac/notarize.js` 会打印 skip）。
+在构建环境中设置 `APPLE_ID`、`APPLE_ID_PASSWORD`（App 专用密码）、`APPLE_TEAM_ID`，以及 `CSC_LINK` / `CSC_KEY_PASSWORD`（Developer ID 证书）。未设置时走 `electron-builder.yml` 免签名构建；注入 `CSC_LINK` 后 CI 自动切换 `electron-builder.signing.yml` 并尝试公证（`desktop/scripts/mac/notarize.js` 在缺 `APPLE_*` 时 skip）。
+
+**GitHub Actions Secrets**（仓库 Settings → Secrets and variables → Actions）：
+
+| Secret | 值 |
+|--------|-----|
+| `CSC_LINK` | `base64 -i ~/Documents/AppleCerts/DeveloperID.p12` 的完整输出 |
+| `CSC_KEY_PASSWORD` | `.p12` 导出密码 |
+| `APPLE_ID` | Apple ID 邮箱（如 `zli221@hawk.iit.edu`） |
+| `APPLE_ID_PASSWORD` | [App 专用密码](https://appleid.apple.com)（`xxxx-xxxx-xxxx-xxxx`） |
+| `APPLE_TEAM_ID` | `57B7L2XXTJ` |
+
+触发构建：推送 tag `desktop-v*` / `v*`，或在 Actions 页手动 **Run workflow**（`workflow_dispatch`）。产物在对应 run 的 **Artifacts**（`machi-arm64` / `machi-x64`）。
 
 ### Windows 自包含 NSIS（内嵌 agx-server.exe + 微信 sidecar）
 
