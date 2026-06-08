@@ -146,6 +146,13 @@ export const enterpriseRuntimeCompliance = pgTable("enterprise_runtime_complianc
   updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
 });
 
+/** 租户 MCP 反代 Server 整包 JSON（gateway /v1/mcp/{server_id}/* 拉取）。 */
+export const enterpriseRuntimeMcpServers = pgTable("enterprise_runtime_mcp_servers", {
+  tenantId: varchar("tenant_id", { length: 26 }).primaryKey(),
+  config: jsonb("config").notNull().$type<{ servers: unknown[] }>(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+});
+
 /** web-portal refresh token 会话（多副本 serverless）。 */
 export const authRefreshSessions = pgTable("auth_refresh_sessions", {
   sessionId: varchar("session_id", { length: 160 }).primaryKey(),

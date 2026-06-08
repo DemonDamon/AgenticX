@@ -212,6 +212,13 @@
         "notSelected": "未选择",
         "importTools": "导入工具",
         "confirmDelete": "确认删除该 MCP Server？",
+        "proxyTitle": "MCP 反代（Upstream）",
+        "proxyDescription": "注册上游 streamable-HTTP MCP Server，客户端经网关 `/v1/mcp/{server_id}/*` 访问。",
+        "proxyUpstreamUrl": "上游 URL",
+        "proxyAuthHeader": "上游鉴权 Header（可选）",
+        "proxyRateLimit": "工具调用 RPM 上限",
+        "proxyGatewayPath": "网关入口",
+        "proxyEmpty": "暂无反代 Server",
         "toast": {
           "loadFailed": "加载 MCP Server 失败",
           "nameRequired": "请填写 name",

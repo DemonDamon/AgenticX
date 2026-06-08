@@ -19,6 +19,14 @@ import {
 import { Plug, Plus, RefreshCcw, Trash2 } from "lucide-react";
 import { useTranslations } from "next-intl";
 
+type McpProxyServer = {
+  id: string;
+  name: string;
+  upstreamUrl: string;
+  enabled: boolean;
+  toolRateLimit?: number;
+};
+
 type McpServer = {
   id: string;
   name: string;
@@ -47,6 +55,21 @@ export default function AdminMcpServersPage() {
   const [openApiSpec, setOpenApiSpec] = useState("");
   const [allowedOps, setAllowedOps] = useState("");
   const [baseUrl, setBaseUrl] = useState("https://petstore3.swagger.io/api/v3");
+  const [proxyServers, setProxyServers] = useState<McpProxyServer[]>([]);
+  const [proxyName, setProxyName] = useState("");
+  const [proxyUpstream, setProxyUpstream] = useState("");
+  const [proxyAuth, setProxyAuth] = useState("");
+  const [proxyRpm, setProxyRpm] = useState("60");
+
+  const loadProxy = useCallback(async () => {
+    try {
+      const res = await adminFetch("/api/admin/mcp-proxy-servers");
+      const json = (await res.json()) as { data?: { servers?: McpProxyServer[] } };
+      setProxyServers(json.data?.servers ?? []);
+    } catch {
+      toast.error(t("toast.loadFailed"));
+    }
+  }, [t]);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -54,12 +77,13 @@ export default function AdminMcpServersPage() {
       const res = await adminFetch("/api/admin/mcp-servers");
       const json = (await res.json()) as { data?: { servers?: McpServer[] } };
       setServers(json.data?.servers ?? []);
+      await loadProxy();
     } catch {
       toast.error(t("toast.loadFailed"));
     } finally {
       setLoading(false);
     }
-  }, [t]);
+  }, [t, loadProxy]);
 
   useEffect(() => {
     void load();
@@ -117,6 +141,59 @@ export default function AdminMcpServersPage() {
       await load();
     } catch (err) {
       toast.error(err instanceof Error ? err.message : t("toast.importFailed"));
+    }
+  }
+
+  async function createProxyServer() {
+    if (!proxyName.trim() || !proxyUpstream.trim()) {
+      toast.error(t("toast.nameRequired"));
+      return;
+    }
+    try {
+      const res = await adminFetch("/api/admin/mcp-proxy-servers", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          name: proxyName.trim(),
+          upstreamUrl: proxyUpstream.trim(),
+          authHeader: proxyAuth.trim() || undefined,
+          toolRateLimit: Number(proxyRpm) || undefined,
+        }),
+      });
+      if (!res.ok) throw new Error(await res.text());
+      toast.success(t("toast.createSuccess"));
+      setProxyName("");
+      setProxyUpstream("");
+      setProxyAuth("");
+      await loadProxy();
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : t("toast.createFailed"));
+    }
+  }
+
+  async function toggleProxyServer(server: McpProxyServer) {
+    try {
+      const res = await adminFetch(`/api/admin/mcp-proxy-servers/${server.id}`, {
+        method: "PUT",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ enabled: !server.enabled }),
+      });
+      if (!res.ok) throw new Error(await res.text());
+      await loadProxy();
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : t("toast.createFailed"));
+    }
+  }
+
+  async function removeProxyServer(id: string) {
+    if (!confirm(t("confirmDelete"))) return;
+    try {
+      const res = await adminFetch(`/api/admin/mcp-proxy-servers/${id}`, { method: "DELETE" });
+      if (!res.ok) throw new Error(await res.text());
+      toast.success(t("toast.deleteSuccess"));
+      await loadProxy();
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : t("toast.deleteFailed"));
     }
   }
 
@@ -202,6 +279,68 @@ export default function AdminMcpServersPage() {
               })}
             </div>
           )}
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>{t("proxyTitle")}</CardTitle>
+          <CardDescription>{t("proxyDescription")}</CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="flex flex-wrap items-end gap-3">
+            <div className="space-y-1">
+              <Label htmlFor="proxy-name">Name</Label>
+              <Input id="proxy-name" value={proxyName} onChange={(e) => setProxyName(e.target.value)} />
+            </div>
+            <div className="space-y-1 min-w-[280px]">
+              <Label htmlFor="proxy-upstream">{t("proxyUpstreamUrl")}</Label>
+              <Input
+                id="proxy-upstream"
+                value={proxyUpstream}
+                onChange={(e) => setProxyUpstream(e.target.value)}
+                placeholder="https://mcp.example.com"
+              />
+            </div>
+            <div className="space-y-1 min-w-[240px]">
+              <Label htmlFor="proxy-auth">{t("proxyAuthHeader")}</Label>
+              <Input
+                id="proxy-auth"
+                value={proxyAuth}
+                onChange={(e) => setProxyAuth(e.target.value)}
+                placeholder="Authorization: Bearer …"
+              />
+            </div>
+            <div className="space-y-1 w-28">
+              <Label htmlFor="proxy-rpm">{t("proxyRateLimit")}</Label>
+              <Input id="proxy-rpm" value={proxyRpm} onChange={(e) => setProxyRpm(e.target.value)} />
+            </div>
+            <Button onClick={() => void createProxyServer()}>{tc("actions.create")}</Button>
+          </div>
+          {proxyServers.length === 0 && (
+            <p className="text-sm text-muted-foreground">{t("proxyEmpty")}</p>
+          )}
+          {proxyServers.map((s) => (
+            <div key={s.id} className="flex flex-wrap items-center justify-between gap-2 rounded-lg border p-3">
+              <div>
+                <div className="font-medium">{s.name}</div>
+                <div className="text-xs text-muted-foreground">
+                  {t("proxyGatewayPath")}: /v1/mcp/{s.id}/* · {s.upstreamUrl}
+                </div>
+              </div>
+              <div className="flex items-center gap-2">
+                <Badge variant={s.enabled ? "default" : "secondary"}>
+                  {s.enabled ? "enabled" : "disabled"}
+                </Badge>
+                <Button size="sm" variant="outline" onClick={() => void toggleProxyServer(s)}>
+                  {s.enabled ? "Disable" : "Enable"}
+                </Button>
+                <Button size="sm" variant="ghost" onClick={() => void removeProxyServer(s.id)}>
+                  <Trash2 className="size-4" />
+                </Button>
+              </div>
+            </div>
+          ))}
         </CardContent>
       </Card>
 
