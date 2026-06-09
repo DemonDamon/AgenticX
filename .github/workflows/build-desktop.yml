@@ -1,5 +1,6 @@
 # Build Near Desktop: macOS DMG + Windows NSIS (bundled agx-server + wechat sidecar).
 # Optional secrets: CSC_LINK, CSC_KEY_PASSWORD, APPLE_ID, APPLE_ID_PASSWORD, APPLE_TEAM_ID
+# APPLE_APP_SPECIFIC_PASSWORD is mirrored from APPLE_ID_PASSWORD at runtime (electron-builder 25 convention).
 
 name: Near Desktop Build
 
@@ -100,6 +101,7 @@ jobs:
           CSC_KEY_PASSWORD: ${{ secrets.CSC_KEY_PASSWORD }}
           APPLE_ID: ${{ secrets.APPLE_ID }}
           APPLE_ID_PASSWORD: ${{ secrets.APPLE_ID_PASSWORD }}
+          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_ID_PASSWORD }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
         run: bash scripts/mac/ci-package-mac.sh "${{ matrix.arch }}"
 
@@ -237,6 +239,7 @@ jobs:
           CSC_KEY_PASSWORD: ${{ secrets.CSC_KEY_PASSWORD }}
           APPLE_ID: ${{ secrets.APPLE_ID }}
           APPLE_ID_PASSWORD: ${{ secrets.APPLE_ID_PASSWORD }}
+          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_ID_PASSWORD }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
         run: bash scripts/mac/ci-package-mac.sh "${{ env.ARCH }}"
 

@@ -4,8 +4,18 @@ set -euo pipefail
 
 ARCH="${1:?usage: ci-package-mac.sh <arm64|x64>}"
 
+mirror_apple_notarize_env() {
+  if [[ -n "${APPLE_ID_PASSWORD:-}" && -z "${APPLE_APP_SPECIFIC_PASSWORD:-}" ]]; then
+    export APPLE_APP_SPECIFIC_PASSWORD="${APPLE_ID_PASSWORD}"
+  fi
+  if [[ -n "${APPLE_APP_SPECIFIC_PASSWORD:-}" && -z "${APPLE_ID_PASSWORD:-}" ]]; then
+    export APPLE_ID_PASSWORD="${APPLE_APP_SPECIFIC_PASSWORD}"
+  fi
+}
+
 report_signing_env() {
-  local names=(CSC_LINK CSC_KEY_PASSWORD APPLE_ID APPLE_ID_PASSWORD APPLE_TEAM_ID)
+  mirror_apple_notarize_env
+  local names=(CSC_LINK CSC_KEY_PASSWORD APPLE_ID APPLE_ID_PASSWORD APPLE_APP_SPECIFIC_PASSWORD APPLE_TEAM_ID)
   for n in "${names[@]}"; do
     local v="${!n:-}"
     if [[ -n "${v}" ]]; then
@@ -66,6 +76,7 @@ if [[ -z "${CSC_LINK:-}" && "${GITHUB_EVENT_NAME:-}" == "workflow_dispatch" ]]; 
 fi
 
 if prepare_signing_cert; then
+  mirror_apple_notarize_env
   export CSC_IDENTITY_AUTO_DISCOVERY=true
   CONFIG="electron-builder.signing.yml"
   echo "==> macOS package: signed + notarize (when APPLE_* set)"
