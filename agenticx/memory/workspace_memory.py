@@ -19,6 +19,40 @@ from typing import Any, Dict, Iterable, List, Tuple
 
 DEFAULT_WORKSPACE_MEMORY_DB = Path.home() / ".agenticx" / "memory" / "main.sqlite"
 
+_CJK_RE = re.compile(r"[\u4e00-\u9fff\u3400-\u4dbf\uf900-\ufaff]")
+_CJK_SEQ_RE = re.compile(r"[\u4e00-\u9fff\u3400-\u4dbf\uf900-\ufaff]{2,8}")
+
+
+def extract_search_terms(query: str) -> List[str]:
+    """Extract English and CJK search terms from a query string."""
+    q = (query or "").strip()
+    if not q:
+        return []
+    terms: List[str] = []
+    seen: set[str] = set()
+    for token in q.split():
+        t = token.strip().lower()
+        if len(t) >= 2 and re.search(r"[a-z0-9]", t, re.I):
+            if t not in seen:
+                seen.add(t)
+                terms.append(t)
+    for match in _CJK_SEQ_RE.finditer(q):
+        seq = match.group(0)
+        if seq not in seen:
+            seen.add(seq)
+            terms.append(seq)
+    if len(q) <= 4 and _CJK_RE.search(q):
+        for ch in q:
+            if _CJK_RE.match(ch) and ch not in seen:
+                seen.add(ch)
+                terms.append(ch)
+    terms.sort(key=len, reverse=True)
+    return terms
+
+
+def _like_escape(term: str) -> str:
+    return term.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+
 
 @dataclass
 class MemoryChunk:
@@ -155,7 +189,13 @@ class WorkspaceMemoryStore:
             return self._search_fts(q, n)
         if mode == "semantic":
             return self._search_semantic(q, n)
-        merged = self._merge_ranked(self._search_fts(q, n * 2), self._search_semantic(q, n * 2))
+        fts = self._search_fts(q, n * 2)
+        sem = self._search_semantic(q, n * 2)
+        terms = extract_search_terms(q)
+        sub: List[Dict[str, Any]] = []
+        if self._should_use_substring(terms, fts):
+            sub = self._search_substring(terms, n * 2)
+        merged = self._merge_ranked(fts, sem, sub) if sub else self._merge_ranked(fts, sem)
         return merged[:n]
 
     async def get_recent_memories(self, days: int = 7, limit: int = 10) -> List[Dict[str, Any]]:
@@ -286,6 +326,39 @@ class WorkspaceMemoryStore:
                 i += 1
         return out
 
+    def _should_use_substring(self, terms: List[str], fts: List[Dict[str, Any]]) -> bool:
+        if not terms:
+            return False
+        if not fts:
+            return True
+        return any(_CJK_RE.search(t) for t in terms)
+
+    def _search_substring(self, terms: List[str], limit: int) -> List[Dict[str, Any]]:
+        if not terms:
+            return []
+        scored: Dict[str, Tuple[float, sqlite3.Row]] = {}
+        cap = max(limit * 3, 20)
+        with self._connect() as conn:
+            for term in terms:
+                pattern = f"%{_like_escape(term)}%"
+                weight = min(1.0, 0.5 + len(term) * 0.08)
+                rows = conn.execute(
+                    """
+                    SELECT id, path, source, start_line, end_line, model, text, created_at
+                    FROM chunks
+                    WHERE text LIKE ? ESCAPE '\\'
+                    LIMIT ?
+                    """,
+                    (pattern, cap),
+                ).fetchall()
+                for row in rows:
+                    chunk_id = str(row["id"])
+                    prev = scored.get(chunk_id)
+                    add = weight if prev is None else prev[0] + weight * 0.5
+                    scored[chunk_id] = (add, row)
+        ranked = sorted(scored.values(), key=lambda item: item[0], reverse=True)[: max(1, limit)]
+        return [self._row_to_result(row, score=score) for score, row in ranked]
+
     def _search_fts(self, query: str, limit: int) -> List[Dict[str, Any]]:
         with self._connect() as conn:
             rows = conn.execute(
@@ -320,18 +393,18 @@ class WorkspaceMemoryStore:
         scored.sort(key=lambda item: item[0], reverse=True)
         return [self._row_to_result(row, score=score) for score, row in scored[: max(1, limit)]]
 
-    def _merge_ranked(self, fts: List[Dict[str, Any]], semantic: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    def _merge_ranked(self, *ranked_lists: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         merged: Dict[str, Dict[str, Any]] = {}
-        for idx, row in enumerate(fts):
-            merged[row["id"]] = dict(row)
-            merged[row["id"]]["score"] = max(float(row.get("score", 0.0)), 1.0 - idx * 0.02)
-        for idx, row in enumerate(semantic):
-            existing = merged.get(row["id"])
-            semantic_score = float(row.get("score", 0.0))
-            if existing is None:
-                merged[row["id"]] = dict(row)
-                continue
-            existing["score"] = max(float(existing.get("score", 0.0)), semantic_score)
+        for ranked in ranked_lists:
+            for idx, row in enumerate(ranked):
+                chunk_id = row["id"]
+                rank_score = max(float(row.get("score", 0.0)), 1.0 - idx * 0.02)
+                existing = merged.get(chunk_id)
+                if existing is None:
+                    merged[chunk_id] = dict(row)
+                    merged[chunk_id]["score"] = rank_score
+                    continue
+                existing["score"] = max(float(existing.get("score", 0.0)), rank_score)
         result = list(merged.values())
         result.sort(key=lambda item: float(item.get("score", 0.0)), reverse=True)
         return result
@@ -375,6 +448,9 @@ class WorkspaceMemoryStore:
         dim = 64
         vec = [0.0] * dim
         tokens = [token.strip().lower() for token in text.split() if token.strip()]
+        for term in extract_search_terms(text):
+            if _CJK_RE.search(term) and term not in tokens:
+                tokens.append(term)
         if not tokens:
             return vec
         for token in tokens:
