@@ -1,6 +1,7 @@
 /**
  * electron-builder afterSign: submit Near.app for Apple notarization when credentials exist.
- * Skips silently if APPLE_ID / APPLE_ID_PASSWORD / APPLE_TEAM_ID are unset.
+ * Skips silently if APPLE_ID / password / APPLE_TEAM_ID are unset.
+ * Password: APPLE_APP_SPECIFIC_PASSWORD（electron-builder 约定）或 APPLE_ID_PASSWORD（GitHub Secret 名）。
  */
 
 const { execFileSync } = require("node:child_process");
@@ -41,11 +42,14 @@ exports.default = async function notarizing(context) {
 
   const appName = context.packager.appInfo.productFilename;
   const appleId = process.env.APPLE_ID;
-  const appleIdPassword = process.env.APPLE_ID_PASSWORD;
+  const appleIdPassword =
+    process.env.APPLE_APP_SPECIFIC_PASSWORD || process.env.APPLE_ID_PASSWORD;
   const teamId = process.env.APPLE_TEAM_ID;
 
   if (!appleId || !appleIdPassword || !teamId) {
-    console.log("Skipping notarization: APPLE_ID / APPLE_ID_PASSWORD / APPLE_TEAM_ID not all set");
+    console.log(
+      "Skipping notarization: APPLE_ID / APPLE_APP_SPECIFIC_PASSWORD (or APPLE_ID_PASSWORD) / APPLE_TEAM_ID not all set",
+    );
     return;
   }
 

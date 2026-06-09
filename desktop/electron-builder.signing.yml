@@ -23,6 +23,8 @@ mac:
   entitlements: scripts/mac/entitlements.mac.plist
   entitlementsInherit: scripts/mac/entitlements.mac.plist
   gatekeeperAssess: false
+  # electron-builder 25 内置公证读 APPLE_APP_SPECIFIC_PASSWORD；自定义 afterSign 时须关闭，避免双轨冲突
+  notarize: false
   extraResources:
     - from: bundled-backend/${arch}
       to: backend

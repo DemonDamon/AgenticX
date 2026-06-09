@@ -131,7 +131,7 @@ SKIP_BACKEND=1 ./packaging/build_dmg.sh arm64
 | `CSC_LINK` | `base64 -i ~/Documents/AppleCerts/DeveloperID.p12` 的完整输出 |
 | `CSC_KEY_PASSWORD` | `.p12` 导出密码 |
 | `APPLE_ID` | Apple ID 邮箱（如 `zli221@hawk.iit.edu`） |
-| `APPLE_ID_PASSWORD` | [App 专用密码](https://appleid.apple.com)（`xxxx-xxxx-xxxx-xxxx`） |
+| `APPLE_ID_PASSWORD` | [App 专用密码](https://appleid.apple.com)（`xxxx-xxxx-xxxx-xxxx`）；CI 会同步注入为 `APPLE_APP_SPECIFIC_PASSWORD`（electron-builder 25 内置公证变量名） |
 | `APPLE_TEAM_ID` | `57B7L2XXTJ` |
 
 触发构建：推送 tag `desktop-v*` / `v*`，或在 Actions 页手动 **Run workflow**（`workflow_dispatch`）。产物在对应 run 的 **Artifacts**（`near-arm64` / `near-x64`）。
@@ -144,6 +144,7 @@ SKIP_BACKEND=1 ./packaging/build_dmg.sh arm64
 | `desktop not a file` / base64 解码失败 | `CSC_LINK` 不是合法 base64 | 本机执行 `base64 -i ~/Documents/AppleCerts/DeveloperID.p12`，**整段**粘贴到 Secret |
 | `Cannot open .p12` | 密码与导出时不一致 | 核对 `CSC_KEY_PASSWORD` 或重新导出 `.p12` |
 | `code has no resources but signature indicates they must be present` / `Signature=adhoc` | `electron-builder.signing.yml` 写了 `identity: null` 导致整包跳过签名 | 删除 `identity: null`，由 `CSC_LINK` 自动匹配 Developer ID |
+| `APPLE_APP_SPECIFIC_PASSWORD env var needs to be set` | electron-builder 25 内置公证变量名与 `APPLE_ID_PASSWORD` 不同 | 确保 workflow 注入 `APPLE_APP_SPECIFIC_PASSWORD`（可与 `APPLE_ID_PASSWORD` 同值） |
 
 五个 Secret 须**同时**存在：`CSC_LINK`、`CSC_KEY_PASSWORD`、`APPLE_ID`、`APPLE_ID_PASSWORD`、`APPLE_TEAM_ID`。
 
