@@ -143,6 +143,7 @@ SKIP_BACKEND=1 ./packaging/build_dmg.sh arm64
 | `CSC_KEY_PASSWORD is not defined` | 只配了 `CSC_LINK` 没配密码 | 新增 Secret `CSC_KEY_PASSWORD`（`.p12` 导出密码） |
 | `desktop not a file` / base64 解码失败 | `CSC_LINK` 不是合法 base64 | 本机执行 `base64 -i ~/Documents/AppleCerts/DeveloperID.p12`，**整段**粘贴到 Secret |
 | `Cannot open .p12` | 密码与导出时不一致 | 核对 `CSC_KEY_PASSWORD` 或重新导出 `.p12` |
+| `code has no resources but signature indicates they must be present` / `Signature=adhoc` | `electron-builder.signing.yml` 写了 `identity: null` 导致整包跳过签名 | 删除 `identity: null`，由 `CSC_LINK` 自动匹配 Developer ID |
 
 五个 Secret 须**同时**存在：`CSC_LINK`、`CSC_KEY_PASSWORD`、`APPLE_ID`、`APPLE_ID_PASSWORD`、`APPLE_TEAM_ID`。
 
