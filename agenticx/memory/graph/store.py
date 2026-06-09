@@ -20,6 +20,7 @@ from agenticx.memory.graph.status import MemoryGraphStatusStore
 logger = logging.getLogger(__name__)
 
 _INIT_TIMEOUT_SECONDS = 120.0
+_SEARCH_TIMEOUT_SECONDS = 25.0
 
 
 def _kuzu_lock_help() -> str:
@@ -431,16 +432,26 @@ class MemoryGraphStore:
         limit_edges: int = 80,
     ) -> Dict[str, Any]:
         await self._ensure_ready_impl()
-        from graphiti_core.search.search_config_recipes import COMBINED_HYBRID_SEARCH_CROSS_ENCODER
+        # RRF hybrid search avoids cross_encoder reranking (logprobs + N LLM calls), which is
+        # slow/unsupported on bailian/qwen and caused UI search timeouts.
+        from graphiti_core.search.search_config_recipes import COMBINED_HYBRID_SEARCH_RRF
 
-        config = COMBINED_HYBRID_SEARCH_CROSS_ENCODER
+        config = COMBINED_HYBRID_SEARCH_RRF.model_copy(deep=True)
         config.limit = max(limit_nodes, limit_edges)
-        results = await self._graphiti.search_(
-            query=query,
-            config=config,
-            group_ids=[group_id],
-            center_node_uuid=center_node_uuid,
-        )
+        try:
+            results = await asyncio.wait_for(
+                self._graphiti.search_(
+                    query=query,
+                    config=config,
+                    group_ids=[group_id],
+                    center_node_uuid=center_node_uuid,
+                ),
+                timeout=_SEARCH_TIMEOUT_SECONDS,
+            )
+        except asyncio.TimeoutError as exc:
+            raise MemoryGraphUnavailableError(
+                f"图谱搜索超时（>{_SEARCH_TIMEOUT_SECONDS:.0f}s），请稍后重试"
+            ) from exc
         nodes = list(getattr(results, "nodes", []) or [])[:limit_nodes]
         edges = list(getattr(results, "edges", []) or [])[:limit_edges]
         return build_graph_view(group_id=group_id, nodes=nodes, edges=edges, truncated=True)
@@ -484,6 +495,14 @@ class MemoryGraphStore:
         from agenticx.memory.graph.deps import graphiti_runtime_info
 
         store = MemoryGraphStore.singleton()
+        try:
+            from agenticx.memory.graph import writer as writer_mod
+
+            writer = writer_mod._writer_singleton
+            queue_size = writer._queue.qsize() if writer is not None else 0
+        except Exception:
+            queue_size = 0
+        MemoryGraphStatusStore(store.cfg.status_path).reconcile_after_restart(queue_size=queue_size)
         status = store.get_status()
         cfg = load_memory_graph_config()
         status["config"] = memory_graph_config_to_dict(cfg)

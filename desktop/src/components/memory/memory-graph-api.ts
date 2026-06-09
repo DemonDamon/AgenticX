@@ -195,7 +195,10 @@ export async function searchMemoryGraph(
     },
     30000,
   );
-  if (!r.ok) throw new Error(`search ${r.status}`);
+  if (!r.ok) {
+    const body = await r.json().catch(() => ({}));
+    throw new Error(formatMemoryGraphApiError(body, `search ${r.status}`));
+  }
   const data = (await r.json()) as GraphViewDTO;
   return data;
 }

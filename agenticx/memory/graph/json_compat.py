@@ -27,6 +27,11 @@ _EDGE_ITEM_KEYS = frozenset(
     }
 )
 
+# Explicit list-field aliases when fuzzy key matching fails (e.g. bailian/qwen uses ``facts``).
+_EXPLICIT_LIST_FIELD_ALIASES: dict[str, tuple[str, ...]] = {
+    "edges": ("facts", "extracted_facts", "relationships", "relations", "extracted_edges"),
+}
+
 
 def _norm_key(name: str) -> str:
     return re.sub(r"[^a-z0-9]", "", str(name).lower())
@@ -225,6 +230,11 @@ def coerce_to_response_model(data: Any, response_model: Any) -> Any:
                 (k for k in candidates if target and (target in _norm_key(k) or _norm_key(k) in target)),
                 None,
             )
+        if match is None:
+            for alias in _EXPLICIT_LIST_FIELD_ALIASES.get(name, ()):
+                if alias in result:
+                    match = alias
+                    break
         if match is not None:
             result[name] = result.pop(match)
 

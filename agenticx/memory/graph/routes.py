@@ -7,9 +7,12 @@ Author: Damon Li
 from __future__ import annotations
 
 import asyncio
+import logging
 from typing import Any, Optional
 
 from fastapi import APIRouter, Header, HTTPException, Query
+
+logger = logging.getLogger(__name__)
 
 from agenticx.memory.graph.config import load_memory_graph_config, memory_graph_config_to_dict
 from agenticx.memory.graph.group_id import derive_group_id, resolve_scope_group_id, validate_group_access
@@ -136,6 +139,9 @@ def register_memory_graph_routes(app, *, check_token) -> None:
             )
             return {"ok": True, **view}
         except (MemoryGraphDisabledError, MemoryGraphUnavailableError) as exc:
+            raise _map_error(exc) from exc
+        except Exception as exc:
+            logger.warning("memory graph search failed: %s", exc, exc_info=True)
             raise _map_error(exc) from exc
 
     @router.post("/ingest")

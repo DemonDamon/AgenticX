@@ -99,6 +99,17 @@ const JOB_STAGE_LABELS: Record<string, string> = {
   finalizing: "收尾",
 };
 
+function shouldShowBuildError(st: MemoryGraphStatus | null): boolean {
+  const err = st?.last_error?.trim();
+  if (!err) return false;
+  const errAt = st?.last_error_at ? Date.parse(st.last_error_at) : Number.NaN;
+  const okAt = st?.last_success_at ? Date.parse(st.last_success_at) : Number.NaN;
+  if (Number.isFinite(errAt) && Number.isFinite(okAt)) {
+    return errAt > okAt;
+  }
+  return true;
+}
+
 function resolveMemoryBuildUi(st: MemoryGraphStatus | null): {
   hint: string | null;
   progress: number | null;
@@ -284,7 +295,7 @@ function MemoryGraphExplorerInner({
         setGraph(EMPTY_GRAPH);
         setEpisodes([]);
         return;
-      } else if (st.last_error) {
+      } else if (shouldShowBuildError(st)) {
         setStatusHint(`构建异常：${st.last_error}`);
         setBuildProgress(null);
       } else {
@@ -345,7 +356,7 @@ function MemoryGraphExplorerInner({
         try {
           const st = await fetchMemoryGraphStatus(apiBase, apiToken);
           setStatus(st);
-          if (st.last_error) {
+          if (shouldShowBuildError(st)) {
             setStatusHint(`构建异常：${st.last_error}`);
             setBuildProgress(null);
             return;

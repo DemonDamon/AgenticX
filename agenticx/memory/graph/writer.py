@@ -46,6 +46,7 @@ class MemoryGraphWriter:
         self._worker_task: Optional[asyncio.Task[None]] = None
         self._seq = 0
         self._status = MemoryGraphStatusStore(self.cfg.status_path)
+        self._status.reconcile_after_restart(queue_size=0)
 
     @classmethod
     def singleton(cls) -> "MemoryGraphWriter":
