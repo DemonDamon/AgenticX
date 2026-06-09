@@ -134,7 +134,7 @@ SKIP_BACKEND=1 ./packaging/build_dmg.sh arm64
 | `APPLE_ID_PASSWORD` | [App 专用密码](https://appleid.apple.com)（`xxxx-xxxx-xxxx-xxxx`） |
 | `APPLE_TEAM_ID` | `57B7L2XXTJ` |
 
-触发构建：推送 tag `desktop-v*` / `v*`，或在 Actions 页手动 **Run workflow**（`workflow_dispatch`）。产物在对应 run 的 **Artifacts**（`machi-arm64` / `machi-x64`）。
+触发构建：推送 tag `desktop-v*` / `v*`，或在 Actions 页手动 **Run workflow**（`workflow_dispatch`）。产物在对应 run 的 **Artifacts**（`near-arm64` / `near-x64`）。
 
 **常见 CI 报错**
 

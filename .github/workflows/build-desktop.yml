@@ -115,7 +115,7 @@ jobs:
       - name: Upload artifacts
         uses: actions/upload-artifact@v6
         with:
-          name: machi-${{ matrix.arch }}
+          name: near-${{ matrix.arch }}
           path: desktop/release/*-${{ matrix.arch }}.dmg
 
   build-tag-windows:
@@ -159,7 +159,7 @@ jobs:
       - name: Upload artifacts
         uses: actions/upload-artifact@v6
         with:
-          name: machi-windows-x64
+          name: near-windows-x64
           path: desktop/release/Near-*-win-x64.exe
 
   build-dispatch:
@@ -252,7 +252,7 @@ jobs:
       - name: Upload artifacts
         uses: actions/upload-artifact@v6
         with:
-          name: machi-${{ env.ARCH }}
+          name: near-${{ env.ARCH }}
           path: desktop/release/*-${{ env.ARCH }}.dmg
 
   build-dispatch-windows:
@@ -296,5 +296,5 @@ jobs:
       - name: Upload artifacts
         uses: actions/upload-artifact@v6
         with:
-          name: machi-windows-x64
+          name: near-windows-x64
           path: desktop/release/Near-*-win-x64.exe

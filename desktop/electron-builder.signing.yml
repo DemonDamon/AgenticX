@@ -16,7 +16,8 @@ mac:
     - target: dmg
   icon: assets/icon.icns
   category: public.app-category.developer-tools
-  identity: "Developer ID Application: Ziran LI (57B7L2XXTJ)"
+  # electron-builder 25+ 不接受 "Developer ID Application:" 前缀，留空则按 CSC_LINK 自动匹配
+  identity: null
   hardenedRuntime: true
   entitlements: scripts/mac/entitlements.mac.plist
   entitlementsInherit: scripts/mac/entitlements.mac.plist
