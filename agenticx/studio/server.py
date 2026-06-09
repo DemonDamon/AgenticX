@@ -2035,6 +2035,10 @@ def create_studio_app() -> FastAPI:
                 matched_agent = matched_agent or removed_agent > 0
             if mode == "after" and (matched_chat or matched_agent):
                 removed_agent += _strip_compacted_blocks(session.agent_messages)
+        if matched_chat or matched_agent:
+            from agenticx.runtime.session_summary_store import delete_session_summary
+
+            delete_session_summary(session_id)
         await manager.persist_async(session_id)
         return {
             "ok": True,
