@@ -1212,6 +1212,11 @@ class AgentRuntime:
         self._exploratory_error_budget: int = 3
         self.team_manager = team_manager
         self.token_budget = TokenBudgetGuard()
+        # Per-turn latches: token budget stays >= COMPRESS after compaction (counters
+        # are not reduced), so without these every tool round would re-summarize and
+        # re-emit the same UI warning.
+        self._forced_budget_compact_this_turn = False
+        self._budget_compress_notice_sent_this_turn = False
         self._mid_turn_persist = mid_turn_persist
         self._persist_interval_sec = _resolve_mid_turn_persist_interval()
         self._persist_tool_count = _resolve_mid_turn_persist_tool_count()
@@ -1293,6 +1298,8 @@ class AgentRuntime:
                 return False
 
         self.token_budget.reset_turn()
+        self._forced_budget_compact_this_turn = False
+        self._budget_compress_notice_sent_this_turn = False
         self._pending_loop_nudge = None
         self._last_persist_time = time.time()
         self._tools_since_persist = 0
@@ -2020,21 +2027,30 @@ class AgentRuntime:
                     )
                     return
                 if budget_level == BudgetLevel.COMPRESS:
-                    hist_compact = _sanitize_context_messages(session.agent_messages)
-                    react_hist, did_react, react_summary, react_count, _pending_q_react = await self.compactor.maybe_compact(
-                        hist_compact,
-                        force=True,
-                        model=model_name,
-                    )
-                    if did_react:
-                        session.agent_messages = react_hist
-                        messages[:] = [{"role": "system", "content": current_system_prompt}, *list(react_hist)]
-                        try:
-                            await self.hooks.run_on_compaction(react_count, react_summary, session)
-                        except Exception:
-                            pass
+                    did_react = False
+                    react_summary = ""
+                    react_count = 0
+                    if not self._forced_budget_compact_this_turn:
+                        self._forced_budget_compact_this_turn = True
+                        hist_compact = _sanitize_context_messages(session.agent_messages)
+                        react_hist, did_react, react_summary, react_count, _pending_q_react = await self.compactor.maybe_compact(
+                            hist_compact,
+                            force=True,
+                            model=model_name,
+                        )
+                        if did_react:
+                            session.agent_messages = react_hist
+                            messages[:] = [{"role": "system", "content": current_system_prompt}, *list(react_hist)]
+                            try:
+                                await self.hooks.run_on_compaction(react_count, react_summary, session)
+                            except Exception:
+                                pass
                     budget_level, budget_source, budget_current, budget_max = self.token_budget.check_with_source()
-                    if budget_level == BudgetLevel.COMPRESS:
+                    if (
+                        budget_level == BudgetLevel.COMPRESS
+                        and not self._budget_compress_notice_sent_this_turn
+                    ):
+                        self._budget_compress_notice_sent_this_turn = True
                         messages.append(
                             {
                                 "role": "user",
