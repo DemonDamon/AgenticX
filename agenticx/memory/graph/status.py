@@ -138,3 +138,21 @@ class MemoryGraphStatusStore:
 
     def set_counts(self, *, node_count: int, edge_count: int) -> None:
         self.write({"node_count": node_count, "edge_count": edge_count})
+
+    def reconcile_after_restart(self, *, queue_size: int = 0) -> None:
+        """Drop phantom queue counters left in JSON when agx serve restarted with an empty in-memory queue."""
+        with _lock:
+            state = self._read_unlocked()
+            patch: Dict[str, Any] = {}
+            pending = int(state.get("pending_jobs", 0))
+            active = bool(state.get("job_active"))
+            if queue_size <= 0 and not active and pending > 0:
+                patch["pending_jobs"] = 0
+            if queue_size <= 0 and active:
+                patch["job_active"] = False
+                patch["job_progress"] = 0
+                patch["job_stage"] = None
+            if not patch:
+                return
+            state.update(patch)
+            self._write_unlocked(state)

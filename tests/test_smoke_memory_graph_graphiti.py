@@ -140,6 +140,15 @@ def test_coerce_to_response_model_wraps_singleton_entity():
     assert model.extracted_entities[0].name == "user"
 
 
+def test_coerce_to_response_model_maps_facts_to_edges():
+    from graphiti_core.prompts.extract_edges import ExtractedEdges
+
+    # bailian/qwen often returns ``facts`` instead of Graphiti's ``edges`` key.
+    fixed = coerce_to_response_model({"facts": []}, ExtractedEdges)
+    model = ExtractedEdges(**fixed)
+    assert model.edges == []
+
+
 def test_coerce_to_response_model_wraps_singleton_edge():
     from graphiti_core.prompts.extract_edges import ExtractedEdges
 
@@ -294,6 +303,27 @@ def test_status_store_clears_last_error_on_new_job(tmp_path):
     state = store.read()
     assert state["last_error"] is None
     assert state["job_active"] is True
+
+
+def test_search_subgraph_uses_rrf_not_cross_encoder():
+    import inspect
+
+    from agenticx.memory.graph import store as store_mod
+
+    src = inspect.getsource(store_mod.MemoryGraphStore._search_subgraph_impl)
+    assert "COMBINED_HYBRID_SEARCH_RRF" in src
+    assert "COMBINED_HYBRID_SEARCH_CROSS_ENCODER" not in src
+
+
+def test_status_reconcile_after_restart_clears_phantom_pending(tmp_path):
+    from agenticx.memory.graph.status import MemoryGraphStatusStore
+
+    store = MemoryGraphStatusStore(tmp_path / "graph_ingest.json")
+    store.write({"pending_jobs": 10, "job_active": False, "job_progress": 32, "job_stage": "preparing"})
+    store.reconcile_after_restart(queue_size=0)
+    state = store.read()
+    assert state["pending_jobs"] == 0
+    assert state["job_progress"] == 32
 
 
 def test_disabled_config_skips_writer(monkeypatch):

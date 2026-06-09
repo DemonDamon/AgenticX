@@ -75,3 +75,27 @@ class CompatOpenAIGenericClient(OpenAIGenericClient):
         except Exception as exc:
             logger.error("memory graph LLM call failed (provider=%s): %s", self._provider_name, exc)
             raise
+
+    async def generate_response(
+        self,
+        messages: list[Message],
+        response_model: type[BaseModel] | None = None,
+        max_tokens: int | None = None,
+        model_size: ModelSize = ModelSize.medium,
+        group_id: str | None = None,
+        prompt_name: str | None = None,
+        *,
+        attribute_extraction: bool = False,
+    ) -> dict[str, Any]:
+        result = await super().generate_response(
+            messages,
+            response_model=response_model,
+            max_tokens=max_tokens,
+            model_size=model_size,
+            group_id=group_id,
+            prompt_name=prompt_name,
+            attribute_extraction=attribute_extraction,
+        )
+        if response_model is not None and isinstance(result, dict):
+            return coerce_to_response_model(result, response_model)
+        return result
