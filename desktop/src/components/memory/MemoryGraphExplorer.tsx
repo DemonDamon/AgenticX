@@ -7,6 +7,7 @@ import {
 } from "../../utils/model-options";
 import { MemoryGraphCanvas } from "./MemoryGraphCanvas";
 import { MemoryGraphDetail } from "./MemoryGraphDetail";
+import { WorkspaceMemoryList } from "./WorkspaceMemoryList";
 import {
   deleteMemoryGraphEpisode,
   deriveGroupId,
@@ -83,6 +84,7 @@ const EMPTY_GRAPH: GraphViewDTO = {
 function scopeLabel(scope: MemoryGraphScope): string {
   if (scope === "avatar") return "分身";
   if (scope === "group") return "群聊";
+  if (scope === "user") return "用户";
   return "元智能体";
 }
 
@@ -258,6 +260,15 @@ function MemoryGraphExplorerInner({
     }
     setLoading(true);
     setError(null);
+    if (scope === "user") {
+      setDisabled(false);
+      setStatusHint(null);
+      setBuildProgress(null);
+      setGraph(EMPTY_GRAPH);
+      setEpisodes([]);
+      setLoading(false);
+      return;
+    }
     try {
       const st = await fetchMemoryGraphStatus(apiBase, apiToken);
       setStatus(st);
@@ -379,6 +390,10 @@ function MemoryGraphExplorerInner({
   }, [apiBase, apiToken, reload, status?.job_progress, status?.pending_jobs]);
 
   const onSearch = async () => {
+    if (scope === "user") {
+      void reload();
+      return;
+    }
     if (!apiBase.trim() || !query.trim()) {
       void reload();
       return;
@@ -498,7 +513,7 @@ function MemoryGraphExplorerInner({
         </div>
       ) : null}
       <div className="flex overflow-hidden rounded-md border border-border text-[11px]">
-        {(["avatar", "meta", "group"] as MemoryGraphScope[]).map((s) => (
+        {(["avatar", "meta", "group", "user"] as MemoryGraphScope[]).map((s) => (
           <button
             key={s}
             type="button"
@@ -891,6 +906,9 @@ function MemoryGraphExplorerInner({
     </Panel>
   ) : null;
 
+  const isUserScope = scope === "user";
+  const userListArea = <WorkspaceMemoryList apiBase={apiBase} apiToken={apiToken} />;
+
   if (isDashboard) {
     return (
       <div className="flex h-full min-h-0 flex-col gap-4 overflow-y-auto pr-1">
@@ -902,14 +920,18 @@ function MemoryGraphExplorerInner({
         </div>
         {toolbar}
         {alerts}
-        <div className="flex h-[440px] shrink-0 gap-3">
-          {leftRail}
-          <div className="flex min-w-0 flex-1 flex-col gap-2">
-            <div className="min-h-0 flex-1">{canvasArea}</div>
-            {legend}
+        {isUserScope ? (
+          <div className="h-[440px] shrink-0 overflow-y-auto">{userListArea}</div>
+        ) : (
+          <div className="flex h-[440px] shrink-0 gap-3">
+            {leftRail}
+            <div className="flex min-w-0 flex-1 flex-col gap-2">
+              <div className="min-h-0 flex-1">{canvasArea}</div>
+              {legend}
+            </div>
+            {rightRail}
           </div>
-          {rightRail}
-        </div>
+        )}
         {configStrip}
       </div>
     );
@@ -919,25 +941,31 @@ function MemoryGraphExplorerInner({
     <div className="flex h-full min-h-0 flex-col bg-surface-base text-text-subtle">
       {toolbar}
       <div className="min-w-0 space-y-2 px-3 pt-2 empty:hidden">{alerts}</div>
-      <div className="min-h-0 flex-1 p-2">{canvasArea}</div>
-      <div className="max-h-[42%] space-y-2 overflow-y-auto border-t border-border px-3 py-2">
-        <MemoryGraphDetail node={selectedNode} edges={graph.edges} onDeleteEpisode={onDeleteEpisode} />
-        {episodes.length > 0 ? (
-          <div className="max-h-24 overflow-y-auto text-[10px]">
-            <div className="mb-1 font-medium text-text-faint">Episode 时间轴</div>
-            {episodes.map((ep) => (
-              <button
-                key={ep.id}
-                type="button"
-                className="mb-1 block w-full truncate rounded px-1 py-0.5 text-left hover:bg-surface-card"
-                onClick={() => setSelectedId(ep.id)}
-              >
-                {ep.preview || ep.name}
-              </button>
-            ))}
+      {isUserScope ? (
+        <div className="min-h-0 flex-1 overflow-y-auto p-2">{userListArea}</div>
+      ) : (
+        <>
+          <div className="min-h-0 flex-1 p-2">{canvasArea}</div>
+          <div className="max-h-[42%] space-y-2 overflow-y-auto border-t border-border px-3 py-2">
+            <MemoryGraphDetail node={selectedNode} edges={graph.edges} onDeleteEpisode={onDeleteEpisode} />
+            {episodes.length > 0 ? (
+              <div className="max-h-24 overflow-y-auto text-[10px]">
+                <div className="mb-1 font-medium text-text-faint">Episode 时间轴</div>
+                {episodes.map((ep) => (
+                  <button
+                    key={ep.id}
+                    type="button"
+                    className="mb-1 block w-full truncate rounded px-1 py-0.5 text-left hover:bg-surface-card"
+                    onClick={() => setSelectedId(ep.id)}
+                  >
+                    {ep.preview || ep.name}
+                  </button>
+                ))}
+              </div>
+            ) : null}
           </div>
-        ) : null}
-      </div>
+        </>
+      )}
     </div>
   );
 }

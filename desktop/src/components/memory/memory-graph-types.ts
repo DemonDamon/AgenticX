@@ -39,7 +39,7 @@ export type GraphEpisodeDTO = {
   preview?: string;
 };
 
-export type MemoryGraphScope = "avatar" | "meta" | "group";
+export type MemoryGraphScope = "avatar" | "meta" | "group" | "user";
 
 export type MemoryGraphStatus = {
   ok?: boolean;
@@ -68,3 +68,7 @@ export type MemoryGraphStatus = {
     default_provider?: string;
   } | null;
 };
+
+export type WorkspaceMemoryEntry = { index: number; text: string; line: number };
+export type WorkspaceMemorySection = { section: string; entries: WorkspaceMemoryEntry[] };
+export type WorkspaceMemoryDoc = { sections: WorkspaceMemorySection[]; path: string };

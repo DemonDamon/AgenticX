@@ -3,6 +3,7 @@ import type {
   GraphViewDTO,
   MemoryGraphScope,
   MemoryGraphStatus,
+  WorkspaceMemoryDoc,
 } from "./memory-graph-types";
 
 function headers(token: string): HeadersInit {
@@ -46,6 +47,7 @@ export function deriveGroupId(
   scope: MemoryGraphScope,
   avatarId: string | null,
 ): string {
+  if (scope === "user") return "";
   if (scope === "meta") return "meta_default";
   const aid = (avatarId || "").trim();
   if (scope === "group") {
@@ -252,4 +254,57 @@ export async function updateMemoryGraphConfig(
     15000,
   );
   if (!r.ok) throw new Error(`config ${r.status}`);
+}
+
+export async function fetchWorkspaceMemory(
+  apiBase: string,
+  apiToken: string,
+): Promise<WorkspaceMemoryDoc> {
+  const r = await fetch(`${apiBase}/api/memory/workspace`, { headers: headers(apiToken) });
+  if (!r.ok) throw new Error(`workspace memory ${r.status}`);
+  const data = (await r.json()) as Partial<WorkspaceMemoryDoc>;
+  return { sections: data.sections || [], path: data.path || "" };
+}
+
+export async function createWorkspaceEntry(
+  apiBase: string,
+  apiToken: string,
+  section: string,
+  text: string,
+): Promise<void> {
+  const r = await fetch(`${apiBase}/api/memory/workspace/entry`, {
+    method: "POST",
+    headers: headers(apiToken),
+    body: JSON.stringify({ section, text }),
+  });
+  if (!r.ok) throw new Error(`create entry ${r.status}`);
+}
+
+export async function updateWorkspaceEntry(
+  apiBase: string,
+  apiToken: string,
+  section: string,
+  index: number,
+  text: string,
+): Promise<void> {
+  const r = await fetch(`${apiBase}/api/memory/workspace/entry`, {
+    method: "PATCH",
+    headers: headers(apiToken),
+    body: JSON.stringify({ section, index, text }),
+  });
+  if (!r.ok) throw new Error(`update entry ${r.status}`);
+}
+
+export async function deleteWorkspaceEntry(
+  apiBase: string,
+  apiToken: string,
+  section: string,
+  index: number,
+): Promise<void> {
+  const r = await fetch(`${apiBase}/api/memory/workspace/entry`, {
+    method: "DELETE",
+    headers: headers(apiToken),
+    body: JSON.stringify({ section, index }),
+  });
+  if (!r.ok) throw new Error(`delete entry ${r.status}`);
 }

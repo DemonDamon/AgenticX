@@ -8,8 +8,9 @@ from __future__ import annotations
 
 from datetime import date
 import json
+import re
 from pathlib import Path
-from typing import Dict, Optional
+from typing import Dict, List, Optional
 
 from agenticx.cli.config_manager import ConfigManager
 
@@ -85,14 +86,43 @@ def append_daily_memory(workspace_dir: Path, note: str) -> None:
         return
 
 
-def append_long_term_memory(workspace_dir: Path, note: str) -> None:
-    """Append one note to long-term MEMORY.md."""
+_MEMORY_LIST_ITEM_RE = re.compile(r"^\s*[-*]\s+(.*)$")
+
+
+def append_long_term_memory(workspace_dir: Path, note: str, *, section: str | None = None) -> None:
+    """Append one note to long-term MEMORY.md, optionally under a ## section."""
     memory_path = workspace_dir / "MEMORY.md"
     if not memory_path.exists() or not memory_path.is_file():
-        return
+        workspace_dir.mkdir(parents=True, exist_ok=True)
+        memory_path.write_text(MEMORY_TEMPLATE, encoding="utf-8")
     try:
-        with memory_path.open("a", encoding="utf-8") as handle:
-            handle.write(f"\n- {note}\n")
+        section_name = (section or "").strip()
+        if not section_name:
+            with memory_path.open("a", encoding="utf-8") as handle:
+                handle.write(f"\n- {note}\n")
+            return
+        heading = f"## {section_name}"
+        lines = memory_path.read_text(encoding="utf-8", errors="replace").split("\n")
+        insert_at = len(lines)
+        found = False
+        for i, raw in enumerate(lines):
+            if raw.strip() == heading:
+                found = True
+                insert_at = i + 1
+                j = i + 1
+                while j < len(lines):
+                    if lines[j].strip().startswith("## "):
+                        break
+                    insert_at = j + 1
+                    j += 1
+                break
+        if not found:
+            if lines and lines[-1].strip():
+                lines.append("")
+            lines.extend([heading, ""])
+            insert_at = len(lines)
+        lines.insert(insert_at, f"- {note.strip()}")
+        memory_path.write_text("\n".join(lines), encoding="utf-8")
     except OSError:
         return
 
@@ -349,3 +379,90 @@ def load_workspace_context() -> Dict[str, str]:
         "daily_memory": _load_today_memory(workspace_dir),
         "workspace_dir": str(workspace_dir),
     }
+
+
+def read_memory_entries(workspace_dir: Path) -> List[dict]:
+    """Parse MEMORY.md into structured list entries grouped by section.
+
+    Args:
+        workspace_dir: The workspace directory.
+
+    Returns:
+        A flat list of entries, each with section, index (0-based within the
+        section), text (marker stripped) and 1-based line number.
+    """
+    memory_file = workspace_dir / "MEMORY.md"
+    if not memory_file.exists():
+        return []
+    lines = memory_file.read_text(encoding="utf-8", errors="replace").splitlines()
+    current_section = ""
+    counters: dict[str, int] = {}
+    entries: List[dict] = []
+    for i, raw in enumerate(lines):
+        stripped = raw.strip()
+        if stripped.startswith("## "):
+            current_section = stripped[3:].strip()
+            counters.setdefault(current_section, 0)
+            continue
+        match = _MEMORY_LIST_ITEM_RE.match(raw)
+        if match and current_section:
+            idx = counters[current_section]
+            entries.append(
+                {
+                    "section": current_section,
+                    "index": idx,
+                    "text": match.group(1).strip(),
+                    "line": i + 1,
+                }
+            )
+            counters[current_section] = idx + 1
+    return entries
+
+
+def _locate_entry_line(lines: List[str], section: str, index: int) -> int:
+    """Return the 0-based line number of the index-th list item under section.
+
+    Raises:
+        ValueError: When the section or the index-th item cannot be found.
+    """
+    current_section = ""
+    counter = 0
+    for i, raw in enumerate(lines):
+        stripped = raw.strip()
+        if stripped.startswith("## "):
+            current_section = stripped[3:].strip()
+            counter = 0
+            continue
+        if current_section != section:
+            continue
+        if _MEMORY_LIST_ITEM_RE.match(raw):
+            if counter == index:
+                return i
+            counter += 1
+    raise ValueError(f"memory entry not found: section={section!r} index={index}")
+
+
+def _ensure_memory_file(workspace_dir: Path) -> Path:
+    memory_file = workspace_dir / "MEMORY.md"
+    if not memory_file.exists():
+        workspace_dir.mkdir(parents=True, exist_ok=True)
+        memory_file.write_text(MEMORY_TEMPLATE, encoding="utf-8")
+    return memory_file
+
+
+def update_memory_entry(workspace_dir: Path, section: str, index: int, new_text: str) -> None:
+    """Replace the text of one MEMORY.md list entry, preserving everything else."""
+    memory_file = _ensure_memory_file(workspace_dir)
+    lines = memory_file.read_text(encoding="utf-8", errors="replace").split("\n")
+    target = _locate_entry_line(lines, section, index)
+    lines[target] = f"- {new_text.strip()}"
+    memory_file.write_text("\n".join(lines), encoding="utf-8")
+
+
+def delete_memory_entry(workspace_dir: Path, section: str, index: int) -> None:
+    """Delete one MEMORY.md list entry, keeping the section heading intact."""
+    memory_file = _ensure_memory_file(workspace_dir)
+    lines = memory_file.read_text(encoding="utf-8", errors="replace").split("\n")
+    target = _locate_entry_line(lines, section, index)
+    del lines[target]
+    memory_file.write_text("\n".join(lines), encoding="utf-8")

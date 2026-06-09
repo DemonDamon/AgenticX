@@ -103,11 +103,14 @@ from agenticx.memory.workspace_memory import WorkspaceMemoryStore
 from agenticx.workspace.loader import (
     append_long_term_memory,
     delete_favorite,
+    delete_memory_entry,
     ensure_workspace,
     load_favorites,
+    read_memory_entries,
     remove_favorite_memory_note,
     resolve_workspace_dir,
     update_favorite_tags,
+    update_memory_entry,
     upsert_favorite,
 )
 
@@ -4977,6 +4980,103 @@ def create_studio_app() -> FastAPI:
             "memory_persisted": memory_persisted,
             "already_saved": already_saved,
         }
+
+    @app.get("/api/memory/workspace")
+    async def get_memory_workspace(
+        x_agx_desktop_token: str | None = Header(default=None),
+    ) -> dict:
+        _check_token(x_agx_desktop_token)
+        workspace_dir = resolve_workspace_dir()
+        entries = read_memory_entries(workspace_dir)
+        sections_map: dict[str, list[dict]] = {}
+        sections_order: list[str] = []
+        for entry in entries:
+            sec = str(entry.get("section") or "")
+            if sec not in sections_map:
+                sections_map[sec] = []
+                sections_order.append(sec)
+            sections_map[sec].append(
+                {
+                    "index": int(entry.get("index", 0)),
+                    "text": str(entry.get("text") or ""),
+                    "line": int(entry.get("line") or 0),
+                }
+            )
+        sections = [{"section": sec, "entries": sections_map[sec]} for sec in sections_order]
+        return {
+            "ok": True,
+            "sections": sections,
+            "path": str(workspace_dir / "MEMORY.md"),
+        }
+
+    @app.post("/api/memory/workspace/entry")
+    async def create_memory_workspace_entry(
+        payload: dict,
+        x_agx_desktop_token: str | None = Header(default=None),
+    ) -> dict:
+        _check_token(x_agx_desktop_token)
+        text = str(payload.get("text") or "").strip()
+        if not text:
+            raise HTTPException(status_code=400, detail="empty text")
+        section = str(payload.get("section") or "Key Facts").strip() or "Key Facts"
+        workspace_dir = resolve_workspace_dir()
+        append_long_term_memory(workspace_dir, text, section=section)
+        try:
+            WorkspaceMemoryStore().index_workspace_sync(workspace_dir)
+        except Exception as exc:
+            logger.warning("workspace reindex after memory edit failed: %s", exc)
+        return {"ok": True}
+
+    @app.patch("/api/memory/workspace/entry")
+    async def patch_memory_workspace_entry(
+        payload: dict,
+        x_agx_desktop_token: str | None = Header(default=None),
+    ) -> dict:
+        _check_token(x_agx_desktop_token)
+        section = str(payload.get("section") or "").strip()
+        text = str(payload.get("text") or "").strip()
+        if not section:
+            raise HTTPException(status_code=400, detail="section is required")
+        if not text:
+            raise HTTPException(status_code=400, detail="empty text")
+        try:
+            index = int(payload.get("index"))
+        except (TypeError, ValueError):
+            raise HTTPException(status_code=400, detail="index must be an integer")
+        workspace_dir = resolve_workspace_dir()
+        try:
+            update_memory_entry(workspace_dir, section, index, text)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        try:
+            WorkspaceMemoryStore().index_workspace_sync(workspace_dir)
+        except Exception as exc:
+            logger.warning("workspace reindex after memory edit failed: %s", exc)
+        return {"ok": True}
+
+    @app.delete("/api/memory/workspace/entry")
+    async def delete_memory_workspace_entry(
+        payload: dict,
+        x_agx_desktop_token: str | None = Header(default=None),
+    ) -> dict:
+        _check_token(x_agx_desktop_token)
+        section = str(payload.get("section") or "").strip()
+        if not section:
+            raise HTTPException(status_code=400, detail="section is required")
+        try:
+            index = int(payload.get("index"))
+        except (TypeError, ValueError):
+            raise HTTPException(status_code=400, detail="index must be an integer")
+        workspace_dir = resolve_workspace_dir()
+        try:
+            delete_memory_entry(workspace_dir, section, index)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        try:
+            WorkspaceMemoryStore().index_workspace_sync(workspace_dir)
+        except Exception as exc:
+            logger.warning("workspace reindex after memory edit failed: %s", exc)
+        return {"ok": True}
 
     @app.post("/api/messages/forward")
     async def forward_messages(
