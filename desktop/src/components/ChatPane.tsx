@@ -2210,6 +2210,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
   const sessionStreamStateRef = useRef<
     Record<string, { active: boolean; text: string; provider: string; model: string }>
   >({});
+  const retryInFlightRef = useRef<Record<string, boolean>>({});
   /** Live-reattach (FR-4): per-session abort controllers for read-only reattach streams. */
   const reattachControllersRef = useRef<Record<string, AbortController>>({});
   const liveReattachEnabledRef = useRef(false);
@@ -4156,50 +4157,6 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
     return end > userIdx + 1;
   }, []);
 
-  const retryUserMessage = useCallback(
-    async (msg: Message) => {
-      if (msg.role !== "user") return;
-      const sid = (pane.sessionId || "").trim();
-      if (!sid || !apiBase) return;
-      const msgs = pane.messages ?? [];
-      const idx = msgs.findIndex((m) => m.id === msg.id);
-      if (idx < 0) return;
-      const userOccurrence = countUserOccurrenceThrough(msgs, idx, msg.content);
-      const expectRemoved = hasTrailingTurnMessages(msgs, idx);
-      // Truncate by user-message boundary so the model context (agent_messages,
-      // including the [compacted] block) is reliably cut, not signature-matched.
-      const ok = await truncateSessionAtUserMessage(
-        sid,
-        msg.content,
-        "after",
-        userOccurrence,
-        expectRemoved
-      );
-      if (!ok) {
-        await reloadSessionFromDisk(sid);
-        return;
-      }
-      setPaneMessages(pane.id, msgs.slice(0, idx + 1));
-      await sendChatRef.current(msg.content, {
-        lockedSessionId: sid,
-        retryAttachments: msg.attachments ?? [],
-        suppressUserEcho: true,
-        skipUserHistory: true,
-      });
-    },
-    [
-      apiBase,
-      countUserOccurrenceThrough,
-      hasTrailingTurnMessages,
-      pane.id,
-      pane.messages,
-      pane.sessionId,
-      reloadSessionFromDisk,
-      setPaneMessages,
-      truncateSessionAtUserMessage,
-    ]
-  );
-
   const editUserMessage = useCallback(
     async (msg: Message, newContent: string) => {
       if (msg.role !== "user") return;
@@ -4939,6 +4896,69 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
       }
     },
     [pane.sessionId, syncStreamingUiForCurrentSession]
+  );
+
+  const retryUserMessage = useCallback(
+    async (msg: Message) => {
+      if (msg.role !== "user") return;
+      const sid = (pane.sessionId || "").trim();
+      if (!sid || !apiBase) return;
+      if (retryInFlightRef.current[sid]) return;
+      retryInFlightRef.current[sid] = true;
+      try {
+        await interruptForResume(sid);
+        await new Promise((resolve) => window.setTimeout(resolve, 60));
+
+        const msgs = pane.messages ?? [];
+        const idx = msgs.findIndex((m) => m.id === msg.id);
+        if (idx < 0) return;
+        const userOccurrence = countUserOccurrenceThrough(msgs, idx, msg.content);
+        const expectRemoved = hasTrailingTurnMessages(msgs, idx);
+        const ok = await truncateSessionAtUserMessage(
+          sid,
+          msg.content,
+          "after",
+          userOccurrence,
+          expectRemoved
+        );
+        if (!ok) {
+          addPaneMessage(
+            pane.id,
+            "tool",
+            "⚠️ 重试失败：无法裁剪会话历史，请稍后再试。",
+            "meta"
+          );
+          await reloadSessionFromDisk(sid);
+          return;
+        }
+        setPaneMessages(pane.id, msgs.slice(0, idx + 1));
+        await sendChatRef.current(msg.content, {
+          lockedSessionId: sid,
+          retryAttachments: msg.attachments ?? [],
+          suppressUserEcho: true,
+          skipUserHistory: true,
+          forceSend: true,
+        });
+      } catch (err) {
+        console.error("[ChatPane] retry user message failed:", err);
+        addPaneMessage(pane.id, "tool", `⚠️ 重试失败：${String(err)}`, "meta");
+      } finally {
+        retryInFlightRef.current[sid] = false;
+      }
+    },
+    [
+      addPaneMessage,
+      apiBase,
+      countUserOccurrenceThrough,
+      hasTrailingTurnMessages,
+      interruptForResume,
+      pane.id,
+      pane.messages,
+      pane.sessionId,
+      reloadSessionFromDisk,
+      setPaneMessages,
+      truncateSessionAtUserMessage,
+    ]
   );
 
   const takeoverSession = useCallback(async () => {
