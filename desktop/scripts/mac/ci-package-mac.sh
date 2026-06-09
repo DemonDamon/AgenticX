@@ -81,7 +81,16 @@ npx electron-builder --mac "--${ARCH}" --config "${CONFIG}" --publish never
 if [[ "${CONFIG}" == "electron-builder.signing.yml" ]]; then
   APP="release/mac-${ARCH}/Near.app"
   echo "==> Verifying code signature on ${APP}"
-  codesign -dv --verbose=2 "${APP}" 2>&1 | head -20
+  SIG_INFO="$(codesign -dv --verbose=2 "${APP}" 2>&1 || true)"
+  echo "${SIG_INFO}" | head -20
+  if echo "${SIG_INFO}" | grep -q "Signature=adhoc"; then
+    echo "::error::${APP} is adhoc-signed — electron-builder skipped signing (do not set mac.identity: null in signing config)"
+    exit 1
+  fi
+  if echo "${SIG_INFO}" | grep -q "TeamIdentifier=not set"; then
+    echo "::error::${APP} has no TeamIdentifier — Developer ID certificate was not applied"
+    exit 1
+  fi
   codesign --verify --deep --strict --verbose=2 "${APP}"
   if command -v spctl >/dev/null 2>&1; then
     spctl -a -vv --type execute "${APP}" 2>&1 || true
