@@ -4,13 +4,27 @@ set -euo pipefail
 
 ARCH="${1:?usage: ci-package-mac.sh <arm64|x64>}"
 
+report_signing_env() {
+  local names=(CSC_LINK CSC_KEY_PASSWORD APPLE_ID APPLE_ID_PASSWORD APPLE_TEAM_ID)
+  for n in "${names[@]}"; do
+    local v="${!n:-}"
+    if [[ -n "${v}" ]]; then
+      echo "  ${n}: set (${#v} chars)"
+    else
+      echo "  ${n}: MISSING"
+    fi
+  done
+}
+
 prepare_signing_cert() {
+  # workflow 里 secrets 未配置时，GitHub 会注入空字符串；须 unset 避免 electron-builder 把 cwd 当证书路径
   if [[ -z "${CSC_LINK:-}" ]]; then
+    unset CSC_LINK CSC_KEY_PASSWORD 2>/dev/null || true
     return 1
   fi
 
   if [[ -z "${CSC_KEY_PASSWORD:-}" ]]; then
-    echo "::error::CSC_KEY_PASSWORD is not set. GitHub → Settings → Secrets → add CSC_KEY_PASSWORD (your .p12 export password)."
+    echo "::error::CSC_KEY_PASSWORD is not set. GitHub → Settings → Secrets and variables → Actions → Repository secrets → add CSC_KEY_PASSWORD"
     exit 1
   fi
 
@@ -20,7 +34,6 @@ prepare_signing_cert() {
     p12_file="${CSC_LINK}"
     echo "==> Using CSC_LINK file path: ${p12_file}"
   else
-    # GitHub Secret 应为 base64 -i DeveloperID.p12 的整段输出（可含换行，下面会剥掉）
     local clean_b64
     clean_b64="$(printf '%s' "${CSC_LINK}" | tr -d '[:space:]')"
     if ! printf '%s' "${clean_b64}" | base64 -d > "${p12_file}" 2>/dev/null; then
@@ -42,11 +55,22 @@ prepare_signing_cert() {
   export CSC_LINK="${p12_file}"
 }
 
+echo "==> Signing env preflight:"
+report_signing_env
+
+if [[ -z "${CSC_LINK:-}" && "${GITHUB_EVENT_NAME:-}" == "workflow_dispatch" ]]; then
+  echo "::error::No GitHub Repository secrets detected for macOS signing."
+  echo "::error::Add ALL of: CSC_LINK, CSC_KEY_PASSWORD, APPLE_ID, APPLE_ID_PASSWORD, APPLE_TEAM_ID"
+  echo "::error::Path: Repo → Settings → Secrets and variables → Actions → Repository secrets (not Environment-only)"
+  exit 1
+fi
+
 if prepare_signing_cert; then
   export CSC_IDENTITY_AUTO_DISCOVERY=true
   CONFIG="electron-builder.signing.yml"
   echo "==> macOS package: signed + notarize (when APPLE_* set)"
 else
+  unset CSC_LINK CSC_KEY_PASSWORD APPLE_ID APPLE_ID_PASSWORD APPLE_TEAM_ID 2>/dev/null || true
   export CSC_IDENTITY_AUTO_DISCOVERY=false
   CONFIG="electron-builder.yml"
   echo "==> macOS package: unsigned (no CSC_LINK)"
