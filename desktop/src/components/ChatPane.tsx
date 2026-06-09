@@ -8369,6 +8369,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
                   健康度：{sessionHealth === "stuck" ? "卡住" : "偏慢"}
                 </span>
               ) : null}
+              {contextLoopStats ? (
                 <span className="rounded-full bg-surface-panel/75 px-2 py-0.5 text-text-muted">
                   context: {(contextLoopStats.tool_result_tokens_session / 1000).toFixed(1)}k ·{" "}
                   {contextLoopStats.round} rounds · {contextLoopStats.archived_tool_calls} archived
