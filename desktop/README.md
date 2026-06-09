@@ -134,6 +134,16 @@ SKIP_BACKEND=1 ./packaging/build_dmg.sh arm64
 
 触发构建：推送 tag `desktop-v*` / `v*`，或在 Actions 页手动 **Run workflow**（`workflow_dispatch`）。产物在对应 run 的 **Artifacts**（`machi-arm64` / `machi-x64`）。
 
+**常见 CI 报错**
+
+| 日志 | 原因 | 处理 |
+|------|------|------|
+| `CSC_KEY_PASSWORD is not defined` | 只配了 `CSC_LINK` 没配密码 | 新增 Secret `CSC_KEY_PASSWORD`（`.p12` 导出密码） |
+| `desktop not a file` / base64 解码失败 | `CSC_LINK` 不是合法 base64 | 本机执行 `base64 -i ~/Documents/AppleCerts/DeveloperID.p12`，**整段**粘贴到 Secret |
+| `Cannot open .p12` | 密码与导出时不一致 | 核对 `CSC_KEY_PASSWORD` 或重新导出 `.p12` |
+
+五个 Secret 须**同时**存在：`CSC_LINK`、`CSC_KEY_PASSWORD`、`APPLE_ID`、`APPLE_ID_PASSWORD`、`APPLE_TEAM_ID`。
+
 ### Windows 自包含 NSIS（内嵌 agx-server.exe + 微信 sidecar）
 
 | 项目 | macOS | Windows（本方案） |
