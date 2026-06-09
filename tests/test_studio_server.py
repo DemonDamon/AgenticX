@@ -5,7 +5,10 @@ from __future__ import annotations
 
 import json
 import time
+from pathlib import Path
 from typing import Any, Dict, List
+
+import pytest
 
 from fastapi.testclient import TestClient
 
@@ -257,6 +260,26 @@ def test_truncate_after_clears_model_context_for_retry() -> None:
     assert "已写好 skill" not in agent_contents
     assert not any(str(x.get("role")) == "tool" for x in managed.studio_session.agent_messages)
     assert not any("[compacted]" in c for c in agent_contents)
+
+
+def test_truncate_after_deletes_session_summary_file(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("AGX_SESSION_SUMMARY", "true")
+    monkeypatch.setattr("agenticx.runtime.session_summary_store.Path.home", lambda: tmp_path)
+    app = create_studio_app()
+    client, session_id, managed = _seed_truncate_session(app)
+    summary_file = tmp_path / ".agenticx" / "workspace" / "sessions" / f"{session_id}.md"
+    summary_file.parent.mkdir(parents=True, exist_ok=True)
+    summary_file.write_text("# Session Summary\n- old answer", encoding="utf-8")
+
+    resp = client.post(
+        "/api/session/messages/truncate",
+        json={"session_id": session_id, "user_content": "retry me", "mode": "after"},
+    )
+    assert resp.status_code == 200
+    assert resp.json()["ok"] is True
+    assert not summary_file.exists()
 
 
 def test_truncate_after_uses_user_occurrence_not_last_duplicate() -> None:

@@ -331,26 +331,32 @@ def _build_memory_recall_context(session: StudioSession) -> str:
 
 
 def _build_session_summary_context(session: StudioSession, max_age_days: int = 7) -> str:
-    flag = os.getenv("AGX_SESSION_SUMMARY", "false").strip().lower()
-    if flag not in {"1", "true", "on", "yes"}:
+    from agenticx.runtime.session_summary_store import (
+        chat_history_ends_with_pending_user,
+        is_session_summary_enabled,
+        list_cross_session_summaries,
+        resolve_session_key,
+    )
+
+    if not is_session_summary_enabled():
         return ""
-    sessions_dir = Path.home() / ".agenticx" / "workspace" / "sessions"
-    if not sessions_dir.exists():
+    if chat_history_ends_with_pending_user(session):
         return ""
-    session_files = sorted(sessions_dir.glob("*.md"), key=lambda f: f.stat().st_mtime, reverse=True)
-    now = time.time()
-    for file_path in session_files:
-        try:
-            if now - file_path.stat().st_mtime > max_age_days * 86400:
-                continue
-            content = file_path.read_text(encoding="utf-8").strip()
-        except Exception:
-            continue
-        if not content:
-            continue
-        preview = content[:2000]
-        return f"## Previous Session Summary\n{preview}\n"
-    return ""
+    current_key = resolve_session_key(session)
+    candidates = list_cross_session_summaries(
+        exclude_session_key=current_key,
+        max_age_days=max_age_days,
+    )
+    if not candidates:
+        return ""
+    try:
+        content = candidates[0].read_text(encoding="utf-8").strip()
+    except OSError:
+        return ""
+    if not content:
+        return ""
+    preview = content[:2000]
+    return f"## 其他会话摘要（跨会话延续）\n{preview}\n"
 
 
 def _build_taskspaces_context(taskspaces: list[dict[str, str]] | None) -> str:
