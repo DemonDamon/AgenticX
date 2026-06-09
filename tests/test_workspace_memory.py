@@ -50,3 +50,23 @@ def test_workspace_memory_incremental_index(tmp_path: Path) -> None:
     assert changed >= 1
     rows = store.search_sync("banana", mode="fts", limit=3)
     assert rows
+
+
+def test_workspace_memory_cjk_substring_search(tmp_path: Path) -> None:
+    workspace = tmp_path / "workspace"
+    workspace.mkdir(parents=True, exist_ok=True)
+    (workspace / "MEMORY.md").write_text(
+        "# MEMORY.md\n- 用户喜欢《黑夜传说》系列电影\n",
+        encoding="utf-8",
+    )
+
+    store = WorkspaceMemoryStore(tmp_path / "main.sqlite")
+    store.index_workspace_sync(workspace)
+
+    hybrid_rows = store.search_sync("黑夜传说 是我喜欢的吗", mode="hybrid", limit=5)
+    assert hybrid_rows
+    assert any("黑夜传说" in row["text"] for row in hybrid_rows)
+
+    substring_rows = store.search_sync("黑夜传说", mode="hybrid", limit=5)
+    assert substring_rows
+    assert any("喜欢" in row["text"] for row in substring_rows)
