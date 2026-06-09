@@ -47,6 +47,8 @@ class MemoryGraphConfig:
     embedder: MemoryGraphProviderConfig = field(default_factory=MemoryGraphProviderConfig)
     telemetry: bool = False
     status_path: Path = field(default_factory=lambda: DEFAULT_STATUS_PATH)
+    search_in_chat: bool = True
+    search_in_chat_graph_limit: int = 2
 
 
 def _coerce_bool(value: Any, default: bool) -> bool:
@@ -81,6 +83,15 @@ def load_memory_graph_config() -> MemoryGraphConfig:
         env_enabled = False
     if env_enabled is not None:
         cfg.enabled = env_enabled
+
+    raw_search_in_chat = os.environ.get("AGX_MEMORY_GRAPH_SEARCH_IN_CHAT", "").strip().lower()
+    env_search_in_chat: Optional[bool] = None
+    if raw_search_in_chat in {"1", "true", "yes", "on"}:
+        env_search_in_chat = True
+    elif raw_search_in_chat in {"0", "false", "no", "off"}:
+        env_search_in_chat = False
+    if env_search_in_chat is not None:
+        cfg.search_in_chat = env_search_in_chat
 
     try:
         from agenticx.cli.config_manager import ConfigManager
@@ -129,6 +140,13 @@ def load_memory_graph_config() -> MemoryGraphConfig:
             target.model = str(block.get("model", target.model) or "").strip()
 
     cfg.telemetry = _coerce_bool(section.get("telemetry"), cfg.telemetry)
+    if env_search_in_chat is None:
+        cfg.search_in_chat = _coerce_bool(section.get("search_in_chat"), cfg.search_in_chat)
+    cfg.search_in_chat_graph_limit = _coerce_int(
+        section.get("search_in_chat_graph_limit"),
+        cfg.search_in_chat_graph_limit,
+        minimum=0,
+    )
     if not cfg.telemetry:
         os.environ.setdefault("GRAPHITI_TELEMETRY_ENABLED", "false")
 
@@ -155,4 +173,6 @@ def memory_graph_config_to_dict(cfg: MemoryGraphConfig) -> Dict[str, Any]:
         "llm": {"provider": cfg.llm.provider, "model": cfg.llm.model},
         "embedder": {"provider": cfg.embedder.provider, "model": cfg.embedder.model},
         "telemetry": cfg.telemetry,
+        "search_in_chat": cfg.search_in_chat,
+        "search_in_chat_graph_limit": cfg.search_in_chat_graph_limit,
     }

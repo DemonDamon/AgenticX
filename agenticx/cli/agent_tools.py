@@ -816,7 +816,11 @@ STUDIO_TOOLS: List[Dict[str, Any]] = [
         "type": "function",
         "function": {
             "name": "memory_search",
-            "description": "Search indexed workspace memory via fts/semantic/hybrid.",
+            "description": (
+                "Search workspace Markdown memory (MEMORY.md, memory/*.md). "
+                "When memory graph is enabled, merges graph facts for the current pane partition. "
+                "Chinese keywords use substring matching; English supports FTS."
+            ),
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -4262,15 +4266,25 @@ async def _tool_view_image(arguments: Dict[str, Any], session: Optional[StudioSe
     )
 
 
-def _tool_memory_search(arguments: Dict[str, Any]) -> str:
+async def _tool_memory_search(arguments: Dict[str, Any], session: StudioSession) -> str:
     query = str(arguments.get("query", "")).strip()
     if not query:
         return "ERROR: query is required"
     mode = str(arguments.get("mode", "hybrid") or "hybrid").strip().lower()
     limit = int(arguments.get("limit", 5) or 5)
+    avatar_id = str(getattr(session, "bound_avatar_id", "") or "").strip() or None
+    session_id = str(getattr(session, "session_id", "") or "").strip() or None
     try:
-        store = WorkspaceMemoryStore()
-        rows = store.search_sync(query=query, mode=mode, limit=max(1, limit))
+        from agenticx.memory.recall import search_memory_for_chat
+
+        recall = await search_memory_for_chat(
+            query,
+            limit=max(1, limit),
+            mode=mode,
+            avatar_id=avatar_id,
+            session_id=session_id,
+        )
+        rows = recall.matches
     except Exception as exc:
         return f"ERROR: memory search failed: {exc}"
     if not rows:
@@ -4280,11 +4294,14 @@ def _tool_memory_search(arguments: Dict[str, Any]) -> str:
         text = str(row.get("text", "")).replace("\n", " ")
         if len(text) > 240:
             text = text[:240] + "..."
+        source = str(row.get("source") or "workspace")
+        path = str(row.get("path") or "")
+        loc = f"path={path}:{row.get('start_line')}-{row.get('end_line')}" if path else f"source={source}"
         lines.append(
-            f"{idx}. score={row.get('score', 0.0)} "
-            f"path={row.get('path')}:{row.get('start_line')}-{row.get('end_line')} "
-            f"text={text}"
+            f"{idx}. score={row.get('score', 0.0)} {loc} text={text}"
         )
+    if recall.graph_skipped_reason:
+        lines.append(f"(graph skipped: {recall.graph_skipped_reason})")
     return "\n".join(lines)
 
 
@@ -5196,7 +5213,7 @@ async def dispatch_tool_async(
         if name == "memory_append":
             return await _tool_memory_append(arguments, confirm_gate=gate, emit_event=event_callback)
         if name == "memory_search":
-            return _tool_memory_search(arguments)
+            return await _tool_memory_search(arguments, session)
         if name == "knowledge_search":
             return await asyncio.to_thread(_tool_knowledge_search, arguments, session)
         if name == "knowledge_synthesize":
