@@ -122,7 +122,9 @@ SKIP_BACKEND=1 ./packaging/build_dmg.sh arm64
 **可选：签名与公证**（分发给别人时建议配置）  
 在构建环境中设置 `APPLE_ID`、`APPLE_ID_PASSWORD`（App 专用密码）、`APPLE_TEAM_ID`，以及 `CSC_LINK` / `CSC_KEY_PASSWORD`（Developer ID 证书）。未设置时走 `electron-builder.yml` 免签名构建；注入 `CSC_LINK` 后 CI 自动切换 `electron-builder.signing.yml` 并尝试公证（`desktop/scripts/mac/notarize.js` 在缺 `APPLE_*` 时 skip）。
 
-**GitHub Actions Secrets**（仓库 Settings → Secrets and variables → Actions）：
+**GitHub Actions Secrets**（必须在 **Repository secrets** 里配置，不要只建在 Environment 里除非 workflow 绑了 `environment:`）：
+
+路径：**仓库首页 → Settings → Secrets and variables → Actions → Repository secrets → New repository secret**
 
 | Secret | 值 |
 |--------|-----|

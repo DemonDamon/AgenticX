@@ -15,6 +15,7 @@ mac:
     - target: dmg
   icon: assets/icon.icns
   category: public.app-category.developer-tools
+  identity: null
   gatekeeperAssess: false
   extraResources:
     - from: bundled-backend/${arch}
