@@ -36,3 +36,6 @@ packages/sdk-py/.pytest_cache/
 *.tsbuildinfo
 .DS_Store
 .vercel
+
+# 本地模块结论文档（仅供本机阅读，不入库）
+conclusions/
