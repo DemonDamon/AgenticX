@@ -125,16 +125,16 @@ export function WorkspaceMemoryList({ apiBase, apiToken }: Props) {
   }
 
   return (
-    <div className="flex h-full min-h-0 flex-col gap-3">
-      <div className="rounded-lg border border-border bg-surface-card p-3">
+    <div className="flex h-full min-h-0 min-w-0 flex-col gap-3">
+      <div className="min-w-0 rounded-lg border border-border bg-surface-card p-3">
         <div className="mb-2 text-xs font-medium text-text-strong">+ 新增记忆</div>
-        <div className="flex flex-wrap items-end gap-2">
-          <label className="flex min-w-[140px] flex-1 flex-col gap-1 text-[11px] text-text-faint">
+        <div className="flex min-w-0 flex-col gap-2">
+          <label className="flex min-w-0 flex-col gap-1 text-[11px] text-text-faint">
             分组
             <select
               value={newSection}
               onChange={(e) => setNewSection(e.target.value)}
-              className="rounded-md border border-border bg-surface-panel px-2 py-1.5 text-xs text-text-primary"
+              className="w-full min-w-0 rounded-md border border-border bg-surface-panel px-2 py-1.5 text-xs text-text-primary"
             >
               {sectionOptions.map((name) => (
                 <option key={name} value={name}>
@@ -143,7 +143,7 @@ export function WorkspaceMemoryList({ apiBase, apiToken }: Props) {
               ))}
             </select>
           </label>
-          <label className="flex min-w-[200px] flex-[2] flex-col gap-1 text-[11px] text-text-faint">
+          <label className="flex min-w-0 flex-col gap-1 text-[11px] text-text-faint">
             内容
             <input
               value={newText}
@@ -152,14 +152,14 @@ export function WorkspaceMemoryList({ apiBase, apiToken }: Props) {
                 if (e.key === "Enter") void onCreate();
               }}
               placeholder="输入长期记忆内容…"
-              className="rounded-md border border-border bg-surface-panel px-2 py-1.5 text-xs text-text-primary"
+              className="w-full min-w-0 rounded-md border border-border bg-surface-panel px-2 py-1.5 text-xs text-text-primary"
             />
           </label>
           <button
             type="button"
             disabled={busy || !newText.trim()}
             onClick={() => void onCreate()}
-            className="inline-flex items-center gap-1 rounded-md px-3 py-1.5 text-xs font-medium transition hover:opacity-90 disabled:opacity-50"
+            className="inline-flex w-fit items-center gap-1 rounded-md px-3 py-1.5 text-xs font-medium transition hover:opacity-90 disabled:opacity-50"
             style={{ background: "var(--ui-btn-primary-bg)", color: "var(--ui-btn-primary-text)" }}
           >
             <Plus className="h-3.5 w-3.5" />

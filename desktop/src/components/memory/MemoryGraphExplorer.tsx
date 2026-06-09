@@ -921,7 +921,7 @@ function MemoryGraphExplorerInner({
         {toolbar}
         {alerts}
         {isUserScope ? (
-          <div className="h-[440px] shrink-0 overflow-y-auto">{userListArea}</div>
+          <div className="h-[440px] min-w-0 shrink-0 overflow-y-auto">{userListArea}</div>
         ) : (
           <div className="flex h-[440px] shrink-0 gap-3">
             {leftRail}
@@ -942,7 +942,7 @@ function MemoryGraphExplorerInner({
       {toolbar}
       <div className="min-w-0 space-y-2 px-3 pt-2 empty:hidden">{alerts}</div>
       {isUserScope ? (
-        <div className="min-h-0 flex-1 overflow-y-auto p-2">{userListArea}</div>
+        <div className="min-h-0 min-w-0 flex-1 overflow-y-auto p-2">{userListArea}</div>
       ) : (
         <>
           <div className="min-h-0 flex-1 p-2">{canvasArea}</div>
