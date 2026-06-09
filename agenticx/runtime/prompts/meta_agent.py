@@ -262,11 +262,10 @@ def _build_active_subagents_context(session: StudioSession) -> str:
 
 
 def _build_memory_recall_context(session: StudioSession) -> str:
-    """Query WorkspaceMemoryStore for relevant memories based on recent conversation."""
+    """Query workspace + optional graph memory based on recent conversation."""
     try:
-        from agenticx.memory.workspace_memory import WorkspaceMemoryStore
+        from agenticx.memory.recall import search_memory_for_chat_sync
         from agenticx.workspace.loader import load_favorites, resolve_workspace_dir
-        store = WorkspaceMemoryStore()
         query_parts: list[str] = []
         for msg in (session.chat_history or [])[-5:]:
             if str(msg.get("role", "")) == "user":
@@ -296,16 +295,24 @@ def _build_memory_recall_context(session: StudioSession) -> str:
                 if len(lines) > 1:
                     sections.append("\n".join(lines))
 
-        results = store.search_sync(query, limit=5, mode="hybrid")
+        avatar_id = str(getattr(session, "bound_avatar_id", "") or "").strip() or None
+        session_id = str(getattr(session, "session_id", "") or "").strip() or None
+        recall = search_memory_for_chat_sync(
+            query,
+            limit=5,
+            mode="hybrid",
+            avatar_id=avatar_id,
+            session_id=session_id,
+        )
         lines = ["## 相关历史记忆（自动召回）"]
         total = 0
         seen_snippets: set[str] = set()
-        for item in results:
+        for item in recall.matches:
             text = str(item.get("text", "")).strip()
             if not text:
                 continue
-            snippet = text[:200]
-            # Skip duplicated snippets to avoid repetitive answers.
+            prefix = "[图谱] " if item.get("source") == "graph" else ""
+            snippet = f"{prefix}{text[:200]}"
             snippet_key = " ".join(snippet.split())
             if snippet_key in seen_snippets:
                 continue

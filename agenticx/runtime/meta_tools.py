@@ -442,7 +442,11 @@ _META_ONLY_TOOLS: List[Dict[str, Any]] = [
         "type": "function",
         "function": {
             "name": "memory_search",
-            "description": "Search indexed workspace memory via fts/semantic/hybrid.",
+            "description": (
+                "Search workspace Markdown memory (MEMORY.md, memory/*.md). "
+                "When memory graph is enabled, merges graph facts for the current pane partition. "
+                "Chinese keywords use substring matching; English supports FTS."
+            ),
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -2568,12 +2572,27 @@ async def dispatch_meta_tool_async(
             limit = int(arguments.get("limit", 5) or 5)
         except (TypeError, ValueError):
             return json.dumps({"ok": False, "error": "limit must be integer"}, ensure_ascii=False)
+        avatar_id = None
+        session_id = None
+        if session is not None:
+            avatar_id = str(getattr(session, "bound_avatar_id", "") or "").strip() or None
+            session_id = str(getattr(session, "session_id", "") or "").strip() or None
         try:
-            store = WorkspaceMemoryStore()
-            rows = store.search_sync(query=query, mode=mode, limit=max(1, limit))
+            from agenticx.memory.recall import search_memory_for_chat
+
+            recall = await search_memory_for_chat(
+                query,
+                limit=max(1, limit),
+                mode=mode,
+                avatar_id=avatar_id,
+                session_id=session_id,
+            )
         except Exception as exc:
             return json.dumps({"ok": False, "error": f"memory search failed: {exc}"}, ensure_ascii=False)
-        return json.dumps({"ok": True, "matches": rows}, ensure_ascii=False)
+        payload: Dict[str, Any] = {"ok": True, "matches": recall.matches}
+        if recall.graph_skipped_reason:
+            payload["graph_skipped_reason"] = recall.graph_skipped_reason
+        return json.dumps(payload, ensure_ascii=False)
 
     if name == "delegate_to_avatar":
         avatar_id = str(arguments.get("avatar_id", "")).strip()
