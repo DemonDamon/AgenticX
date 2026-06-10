@@ -800,7 +800,11 @@ STUDIO_TOOLS: List[Dict[str, Any]] = [
         "type": "function",
         "function": {
             "name": "memory_append",
-            "description": "Append note to workspace daily memory or long-term MEMORY.md.",
+            "description": (
+                "Append note to workspace daily memory or long-term MEMORY.md. "
+                "Content must be a concise, self-contained fact (max ~400 chars). "
+                "Never pass raw conversation text, <think> blocks, code blocks, or file lists."
+            ),
             "parameters": {
                 "type": "object",
                 "properties": {

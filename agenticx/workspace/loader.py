@@ -89,8 +89,37 @@ def append_daily_memory(workspace_dir: Path, note: str) -> None:
 _MEMORY_LIST_ITEM_RE = re.compile(r"^\s*[-*]\s+(.*)$")
 
 
+_MEMORY_ENTRY_MAX_CHARS = 400
+_MEMORY_NOISE_PATTERNS = re.compile(
+    r"(<think>|</think>|```|\buser\b.*\bask|用户.*要求|用户.*让我|创建的文件列表|简历文件路径)",
+    re.IGNORECASE,
+)
+
+
+def _sanitize_memory_note(note: str) -> str | None:
+    """Return a sanitised single-line note, or None when the note looks like noise.
+
+    Rules:
+    - Strip leading/trailing whitespace and collapse internal newlines to spaces.
+    - Reject if the result is longer than _MEMORY_ENTRY_MAX_CHARS.
+    - Reject if the text matches known noise patterns (think blocks, file lists, etc.).
+    """
+    collapsed = " ".join(note.split())
+    if not collapsed:
+        return None
+    if len(collapsed) > _MEMORY_ENTRY_MAX_CHARS:
+        return None
+    if _MEMORY_NOISE_PATTERNS.search(collapsed):
+        return None
+    return collapsed
+
+
 def append_long_term_memory(workspace_dir: Path, note: str, *, section: str | None = None) -> None:
     """Append one note to long-term MEMORY.md, optionally under a ## section."""
+    sanitised = _sanitize_memory_note(note)
+    if sanitised is None:
+        return
+    note = sanitised
     memory_path = workspace_dir / "MEMORY.md"
     if not memory_path.exists() or not memory_path.is_file():
         workspace_dir.mkdir(parents=True, exist_ok=True)
