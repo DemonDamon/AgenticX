@@ -757,7 +757,7 @@ const TABS: { id: SettingsTab; label: string; icon: typeof Settings2 }[] = [
   { id: "skills", label: "技能", icon: SkillPuzzleIcon },
   // Plan-Id: machi-kb-stage1-local-mvp
   { id: "knowledge", label: "知识库", icon: Library },
-  { id: "memory", label: "记忆", icon: Network },
+  { id: "memory", label: "记忆管理", icon: Network },
   { id: "hooks", label: "钩子", icon: Anchor },
   { id: "automation", label: "定时任务", icon: AutomationTaskIcon },
   { id: "voice", label: "语音服务", icon: Mic },
