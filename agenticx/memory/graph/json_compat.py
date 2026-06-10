@@ -260,13 +260,111 @@ def coerce_to_response_model(data: Any, response_model: Any) -> Any:
 
 
 def provider_supports_json_response_format(provider_name: str, base_url: str | None) -> bool:
-    """Only official OpenAI chat.completions reliably honor response_format=json_object."""
+    """Providers that accept OpenAI-style response_format=json_object on chat.completions."""
     provider = (provider_name or "").strip().lower()
-    if provider != "openai":
-        return False
-    if not base_url:
+    base = (base_url or "").lower()
+    if provider == "openai":
+        if not base_url:
+            return True
+        return "api.openai.com" in base
+    if provider in {"bailian", "dashscope", "aliyun"}:
         return True
-    return "api.openai.com" in base_url.lower()
+    if "dashscope.aliyuncs.com" in base:
+        return True
+    return False
+
+
+def provider_requires_disable_thinking(provider_name: str, base_url: str | None, model: str) -> bool:
+    """Thinking/reasoning models may return empty ``content`` and break JSON extraction."""
+    provider = (provider_name or "").strip().lower()
+    base = (base_url or "").lower()
+    model_l = (model or "").strip().lower()
+    if provider in {"bailian", "dashscope", "aliyun"} or "dashscope.aliyuncs.com" in base:
+        if "qwen" in model_l or "qvq" in model_l:
+            return True
+    if provider == "kimi" or "moonshot" in base:
+        return True
+    if "thinking" in model_l or model_l.startswith(("o1", "o3", "o4")):
+        return True
+    return False
+
+
+def memory_graph_chat_request_extras(
+    provider_name: str,
+    base_url: str | None,
+    model: str,
+) -> dict[str, Any]:
+    """Provider-specific chat.completions kwargs for Graphiti extraction calls."""
+    provider = (provider_name or "").strip().lower()
+    base = (base_url or "").lower()
+    extras: dict[str, Any] = {}
+    body: dict[str, Any] = {}
+    if provider_requires_disable_thinking(provider_name, base_url, model):
+        extras["enable_thinking"] = False
+        body["enable_thinking"] = False
+    if provider == "kimi" or "moonshot" in base:
+        body["thinking"] = {"type": "disabled"}
+    if body:
+        extras["extra_body"] = body
+    return extras
+
+
+def extract_chat_message_text(message: Any) -> str:
+    """Collect assistant text from content and provider-specific reasoning fields."""
+    content = getattr(message, "content", None)
+    if content is None and isinstance(message, dict):
+        content = message.get("content")
+    parts: list[str] = []
+    if isinstance(content, str):
+        stripped = content.strip()
+        if stripped:
+            parts.append(stripped)
+    elif isinstance(content, list):
+        for block in content:
+            if isinstance(block, dict):
+                text = block.get("text")
+                if isinstance(text, str) and text.strip():
+                    parts.append(text.strip())
+            elif isinstance(block, str) and block.strip():
+                parts.append(block.strip())
+    for attr in ("reasoning_content", "reasoning"):
+        value = getattr(message, attr, None)
+        if value is None and isinstance(message, dict):
+            value = message.get(attr)
+        if isinstance(value, str) and value.strip():
+            parts.append(value.strip())
+    return "\n".join(parts).strip()
+
+
+def empty_payload_for_response_model(response_model: Any) -> dict[str, Any] | None:
+    """Best-effort empty payload when an extractor model returns no parseable JSON."""
+    if response_model is None:
+        return None
+    fields = getattr(response_model, "model_fields", None)
+    if not isinstance(fields, dict):
+        return None
+    payload: dict[str, Any] = {}
+    for name, field in fields.items():
+        inner = _list_inner_model(field)
+        if inner is not None:
+            payload[name] = []
+            continue
+        try:
+            required = field.is_required()
+        except Exception:
+            required = True
+        if not required:
+            continue
+        ann = getattr(field, "annotation", None)
+        if ann is str:
+            payload[name] = ""
+        else:
+            return None
+    try:
+        response_model(**payload)
+    except Exception:
+        return None
+    return payload
 
 
 def _decode_first_object(text: str) -> dict[str, Any] | None:

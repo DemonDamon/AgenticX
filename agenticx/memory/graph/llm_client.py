@@ -6,6 +6,7 @@ Author: Damon Li
 
 from __future__ import annotations
 
+import json
 import logging
 from typing import Any
 
@@ -15,6 +16,9 @@ from pydantic import BaseModel
 
 from agenticx.memory.graph.json_compat import (
     coerce_to_response_model,
+    empty_payload_for_response_model,
+    extract_chat_message_text,
+    memory_graph_chat_request_extras,
     parse_llm_json,
     provider_supports_json_response_format,
 )
@@ -42,6 +46,39 @@ class CompatOpenAIGenericClient(OpenAIGenericClient):
         self._provider_name = (provider_name or "").strip().lower()
         self._base_url = (base_url or "").strip() or None
 
+    def _parse_completion(
+        self,
+        message: Any,
+        response_model: type[BaseModel] | None,
+    ) -> dict[str, Any]:
+        raw_text = extract_chat_message_text(message)
+        if not raw_text:
+            empty = empty_payload_for_response_model(response_model)
+            if empty is not None:
+                logger.warning(
+                    "memory graph LLM returned empty content; using empty extraction payload "
+                    "(provider=%s model=%s)",
+                    self._provider_name,
+                    self.model,
+                )
+                return coerce_to_response_model(empty, response_model)
+            raise ValueError("LLM returned empty response; expected a JSON object")
+        try:
+            parsed = parse_llm_json(raw_text)
+        except (json.JSONDecodeError, ValueError) as exc:
+            empty = empty_payload_for_response_model(response_model)
+            if empty is not None:
+                logger.warning(
+                    "memory graph JSON parse failed; using empty extraction payload "
+                    "(provider=%s model=%s): %s",
+                    self._provider_name,
+                    self.model,
+                    exc,
+                )
+                return coerce_to_response_model(empty, response_model)
+            raise
+        return coerce_to_response_model(parsed, response_model)
+
     async def _generate_response(
         self,
         messages: list[Message],
@@ -63,13 +100,15 @@ class CompatOpenAIGenericClient(OpenAIGenericClient):
             "temperature": self.temperature,
             "max_tokens": max_tokens or self.max_tokens,
         }
+        request.update(
+            memory_graph_chat_request_extras(self._provider_name, self._base_url, self.model or "")
+        )
         if provider_supports_json_response_format(self._provider_name, self._base_url):
             request["response_format"] = {"type": "json_object"}
 
         try:
             response = await self.client.chat.completions.create(**request)
-            content = response.choices[0].message.content or ""
-            return coerce_to_response_model(parse_llm_json(content), response_model)
+            return self._parse_completion(response.choices[0].message, response_model)
         except openai.RateLimitError as exc:
             raise RateLimitError from exc
         except Exception as exc:
