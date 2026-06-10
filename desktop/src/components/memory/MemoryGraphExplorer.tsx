@@ -275,7 +275,7 @@ function MemoryGraphExplorerInner({
       if (st.models?.default_provider) setDefaultProvider(st.models.default_provider);
       if (!isMemoryGraphEnabled(st)) {
         setDisabled(true);
-        setStatusHint("记忆图谱未启用。在下方配置中开启，或编辑 ~/.agenticx/config.yaml。");
+        setStatusHint("记忆图谱未启用。在上方配置中开启，或编辑 ~/.agenticx/config.yaml。");
         setBuildProgress(null);
         setGraph(EMPTY_GRAPH);
         setEpisodes([]);
@@ -737,8 +737,12 @@ function MemoryGraphExplorerInner({
   );
 
   const configStrip = showConfig ? (
-    <Panel title="图谱配置" collapsible defaultCollapsed={false}>
+    <Panel title="记忆图谱设置" collapsible defaultCollapsed={false}>
       <div className="space-y-0 text-sm text-text-subtle">
+        <p className="pb-2 text-[11px] leading-relaxed text-text-faint">
+          结构化时态记忆的可视化视图。文本检索仍走 WorkspaceMemoryStore，二者并行不替换。
+        </p>
+        <div className={MG_DIVIDER} />
         <div className="flex items-center justify-between gap-4 py-1">
           <div>
             <div>启用记忆图谱</div>
@@ -912,12 +916,7 @@ function MemoryGraphExplorerInner({
   if (isDashboard) {
     return (
       <div className="flex h-full min-h-0 flex-col gap-4 overflow-y-auto pr-1">
-        <div>
-          <h2 className="text-base font-semibold text-text-strong">记忆图谱</h2>
-          <p className="mt-1 text-xs leading-relaxed text-text-faint">
-            结构化时态记忆的可视化视图。文本检索仍走 WorkspaceMemoryStore，二者并行不替换。
-          </p>
-        </div>
+        {configStrip}
         {toolbar}
         {alerts}
         {isUserScope ? (
@@ -932,7 +931,6 @@ function MemoryGraphExplorerInner({
             {rightRail}
           </div>
         )}
-        {configStrip}
       </div>
     );
   }
