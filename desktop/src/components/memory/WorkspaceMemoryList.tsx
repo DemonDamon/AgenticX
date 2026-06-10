@@ -2,6 +2,7 @@ import { Pencil, Plus, Trash2 } from "lucide-react";
 import { useCallback, useEffect, useId, useMemo, useState } from "react";
 import { Button } from "../ds/Button";
 import { Modal } from "../ds/Modal";
+import { Panel } from "../ds/Panel";
 import {
   createWorkspaceEntry,
   deleteWorkspaceEntry,
@@ -26,9 +27,11 @@ export function WorkspaceMemoryList({ apiBase, apiToken }: Props) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
-  const [newSection, setNewSection] = useState("");
+  const [groupPick, setGroupPick] = useState(FALLBACK_SECTION);
+  const [isNewGroup, setIsNewGroup] = useState(false);
+  const [newGroupName, setNewGroupName] = useState("");
   const [newText, setNewText] = useState("");
-  const sectionListId = useId();
+  const newGroupInputId = useId();
   const [editingKey, setEditingKey] = useState<string | null>(null);
   const [editText, setEditText] = useState("");
   const [pendingDelete, setPendingDelete] = useState<PendingDelete>(null);
@@ -36,15 +39,15 @@ export function WorkspaceMemoryList({ apiBase, apiToken }: Props) {
   const sectionNames = useMemo(() => sections.map((s) => s.section), [sections]);
 
   useEffect(() => {
-    setNewSection((prev) => {
-      const trimmed = prev.trim();
-      if (trimmed && sectionNames.includes(trimmed)) return trimmed;
-      // Preserve a custom section name the user is typing before first save.
-      if (trimmed && trimmed !== "Key Facts" && trimmed !== FALLBACK_SECTION) return trimmed;
+    if (isNewGroup) return;
+    setGroupPick((prev) => {
+      if (sectionNames.includes(prev)) return prev;
       if (sectionNames.length > 0) return sectionNames[0];
       return FALLBACK_SECTION;
     });
-  }, [sectionNames]);
+  }, [sectionNames, isNewGroup]);
+
+  const resolvedSection = isNewGroup ? newGroupName.trim() : groupPick.trim() || FALLBACK_SECTION;
 
   const reload = useCallback(async () => {
     if (!apiBase.trim()) {
@@ -73,13 +76,16 @@ export function WorkspaceMemoryList({ apiBase, apiToken }: Props) {
 
   const onCreate = async () => {
     const text = newText.trim();
-    const section = newSection.trim() || FALLBACK_SECTION;
-    if (!text || !apiBase.trim()) return;
+    const section = resolvedSection;
+    if (!text || !section || !apiBase.trim()) return;
     setBusy(true);
     setError(null);
     try {
       await createWorkspaceEntry(apiBase, apiToken, section, text);
       setNewText("");
+      setIsNewGroup(false);
+      setNewGroupName("");
+      setGroupPick(section);
       await reload();
     } catch (e) {
       setError(e instanceof Error ? e.message : "新增失败");
@@ -132,27 +138,66 @@ export function WorkspaceMemoryList({ apiBase, apiToken }: Props) {
 
   return (
     <div className="flex h-full min-h-0 min-w-0 flex-col gap-3">
-      <div className="min-w-0 rounded-lg border border-border bg-surface-card p-3">
-        <div className="mb-2 text-xs font-medium text-text-strong">+ 新增记忆</div>
+      <Panel title="新增记忆" collapsible defaultCollapsed={totalEntries > 0}>
         <div className="flex min-w-0 flex-col gap-2">
-          <label className="flex min-w-0 flex-col gap-1 text-[11px] text-text-faint">
-            分组
-            <input
-              list={sectionListId}
-              value={newSection}
-              onChange={(e) => setNewSection(e.target.value)}
-              placeholder="选择已有分组或输入新分组名"
-              className="w-full min-w-0 rounded-md border border-border bg-surface-panel px-2 py-1.5 text-xs text-text-primary"
-            />
-            <datalist id={sectionListId}>
-              {sectionNames.map((name) => (
-                <option key={name} value={name} />
-              ))}
-            </datalist>
+          <div className="flex min-w-0 flex-col gap-1 text-[11px] text-text-faint">
+            <div className="flex items-center justify-between gap-2">
+              <span>分组</span>
+              {!isNewGroup ? (
+                <button
+                  type="button"
+                  className="shrink-0 text-[10px] text-text-muted transition hover:text-text-strong"
+                  onClick={() => {
+                    setIsNewGroup(true);
+                    setNewGroupName("");
+                  }}
+                >
+                  + 新建分组
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  className="shrink-0 text-[10px] text-text-muted transition hover:text-text-strong"
+                  onClick={() => {
+                    setIsNewGroup(false);
+                    setNewGroupName("");
+                  }}
+                >
+                  取消
+                </button>
+              )}
+            </div>
+            {isNewGroup ? (
+              <input
+                id={newGroupInputId}
+                value={newGroupName}
+                onChange={(e) => setNewGroupName(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" && newText.trim() && newGroupName.trim()) void onCreate();
+                }}
+                placeholder="输入新分组名，如「工作偏好」"
+                autoFocus
+                className="w-full min-w-0 rounded-md border border-border bg-surface-panel px-2 py-1.5 text-xs text-text-primary"
+              />
+            ) : (
+              <select
+                value={groupPick}
+                onChange={(e) => setGroupPick(e.target.value)}
+                className="w-full min-w-0 rounded-md border border-border bg-surface-panel px-2 py-1.5 text-xs text-text-primary"
+              >
+                {(sectionNames.length > 0 ? sectionNames : [FALLBACK_SECTION]).map((name) => (
+                  <option key={name} value={name}>
+                    {name}
+                  </option>
+                ))}
+              </select>
+            )}
             <span className="text-[10px] leading-relaxed text-text-faint">
-              分组对应 MEMORY.md 中的 ## 标题，由文件内容决定（非固定列表）。
+              {isNewGroup
+                ? "保存首条记忆后会在 MEMORY.md 中创建对应的 ## 分组标题。"
+                : "分组对应 MEMORY.md 中的 ## 标题；也可点「新建分组」添加。"}
             </span>
-          </label>
+          </div>
           <label className="flex min-w-0 flex-col gap-1 text-[11px] text-text-faint">
             内容
             <input
@@ -167,7 +212,7 @@ export function WorkspaceMemoryList({ apiBase, apiToken }: Props) {
           </label>
           <button
             type="button"
-            disabled={busy || !newText.trim() || !newSection.trim()}
+            disabled={busy || !newText.trim() || !resolvedSection}
             onClick={() => void onCreate()}
             className="inline-flex w-fit items-center gap-1 rounded-md px-3 py-1.5 text-xs font-medium transition hover:opacity-90 disabled:opacity-50"
             style={{ background: "var(--ui-btn-primary-bg)", color: "var(--ui-btn-primary-text)" }}
@@ -176,7 +221,7 @@ export function WorkspaceMemoryList({ apiBase, apiToken }: Props) {
             添加
           </button>
         </div>
-      </div>
+      </Panel>
 
       {error ? (
         <div className="rounded-md bg-status-error/10 px-3 py-2 text-[11px] text-status-error">{error}</div>

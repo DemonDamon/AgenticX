@@ -82,7 +82,7 @@ const EMPTY_GRAPH: GraphViewDTO = {
 };
 
 function scopeLabel(scope: MemoryGraphScope): string {
-  if (scope === "avatar") return "分身";
+  if (scope === "avatar") return "数字分身";
   if (scope === "group") return "群聊";
   if (scope === "user") return "用户";
   return "元智能体";
@@ -513,7 +513,7 @@ function MemoryGraphExplorerInner({
         </div>
       ) : null}
       <div className="flex overflow-hidden rounded-md border border-border text-[11px]">
-        {(["avatar", "meta", "group", "user"] as MemoryGraphScope[]).map((s) => (
+        {(["user", "meta", "avatar", "group"] as MemoryGraphScope[]).map((s) => (
           <button
             key={s}
             type="button"
