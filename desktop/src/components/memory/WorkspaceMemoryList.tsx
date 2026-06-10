@@ -1,5 +1,5 @@
 import { Pencil, Plus, Trash2 } from "lucide-react";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useId, useMemo, useState } from "react";
 import { Button } from "../ds/Button";
 import { Modal } from "../ds/Modal";
 import {
@@ -10,7 +10,8 @@ import {
 } from "./memory-graph-api";
 import type { WorkspaceMemorySection } from "./memory-graph-types";
 
-const DEFAULT_SECTIONS = ["User Preferences", "Key Facts", "Important Context", "User Anchors", "Agent Notes"];
+/** Fallback when MEMORY.md has no sections yet; matches loader.MEMORY_TEMPLATE. */
+const FALLBACK_SECTION = "User Anchors";
 
 type Props = {
   apiBase: string;
@@ -25,20 +26,25 @@ export function WorkspaceMemoryList({ apiBase, apiToken }: Props) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
-  const [newSection, setNewSection] = useState("Key Facts");
+  const [newSection, setNewSection] = useState("");
   const [newText, setNewText] = useState("");
+  const sectionListId = useId();
   const [editingKey, setEditingKey] = useState<string | null>(null);
   const [editText, setEditText] = useState("");
   const [pendingDelete, setPendingDelete] = useState<PendingDelete>(null);
 
-  const sectionOptions = useMemo(() => {
-    const fromDoc = sections.map((s) => s.section);
-    const merged = [...DEFAULT_SECTIONS];
-    for (const name of fromDoc) {
-      if (!merged.includes(name)) merged.push(name);
-    }
-    return merged;
-  }, [sections]);
+  const sectionNames = useMemo(() => sections.map((s) => s.section), [sections]);
+
+  useEffect(() => {
+    setNewSection((prev) => {
+      const trimmed = prev.trim();
+      if (trimmed && sectionNames.includes(trimmed)) return trimmed;
+      // Preserve a custom section name the user is typing before first save.
+      if (trimmed && trimmed !== "Key Facts" && trimmed !== FALLBACK_SECTION) return trimmed;
+      if (sectionNames.length > 0) return sectionNames[0];
+      return FALLBACK_SECTION;
+    });
+  }, [sectionNames]);
 
   const reload = useCallback(async () => {
     if (!apiBase.trim()) {
@@ -67,7 +73,7 @@ export function WorkspaceMemoryList({ apiBase, apiToken }: Props) {
 
   const onCreate = async () => {
     const text = newText.trim();
-    const section = newSection.trim() || "Key Facts";
+    const section = newSection.trim() || FALLBACK_SECTION;
     if (!text || !apiBase.trim()) return;
     setBusy(true);
     setError(null);
@@ -131,17 +137,21 @@ export function WorkspaceMemoryList({ apiBase, apiToken }: Props) {
         <div className="flex min-w-0 flex-col gap-2">
           <label className="flex min-w-0 flex-col gap-1 text-[11px] text-text-faint">
             分组
-            <select
+            <input
+              list={sectionListId}
               value={newSection}
               onChange={(e) => setNewSection(e.target.value)}
+              placeholder="选择已有分组或输入新分组名"
               className="w-full min-w-0 rounded-md border border-border bg-surface-panel px-2 py-1.5 text-xs text-text-primary"
-            >
-              {sectionOptions.map((name) => (
-                <option key={name} value={name}>
-                  {name}
-                </option>
+            />
+            <datalist id={sectionListId}>
+              {sectionNames.map((name) => (
+                <option key={name} value={name} />
               ))}
-            </select>
+            </datalist>
+            <span className="text-[10px] leading-relaxed text-text-faint">
+              分组对应 MEMORY.md 中的 ## 标题，由文件内容决定（非固定列表）。
+            </span>
           </label>
           <label className="flex min-w-0 flex-col gap-1 text-[11px] text-text-faint">
             内容
@@ -157,7 +167,7 @@ export function WorkspaceMemoryList({ apiBase, apiToken }: Props) {
           </label>
           <button
             type="button"
-            disabled={busy || !newText.trim()}
+            disabled={busy || !newText.trim() || !newSection.trim()}
             onClick={() => void onCreate()}
             className="inline-flex w-fit items-center gap-1 rounded-md px-3 py-1.5 text-xs font-medium transition hover:opacity-90 disabled:opacity-50"
             style={{ background: "var(--ui-btn-primary-bg)", color: "var(--ui-btn-primary-text)" }}
