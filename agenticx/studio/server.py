@@ -5018,7 +5018,7 @@ def create_studio_app() -> FastAPI:
         text = str(payload.get("text") or "").strip()
         if not text:
             raise HTTPException(status_code=400, detail="empty text")
-        section = str(payload.get("section") or "Key Facts").strip() or "Key Facts"
+        section = str(payload.get("section") or "User Anchors").strip() or "User Anchors"
         workspace_dir = resolve_workspace_dir()
         append_long_term_memory(workspace_dir, text, section=section)
         try:
