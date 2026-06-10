@@ -17,7 +17,11 @@ from agenticx.memory.graph.clients import (
 from agenticx.memory.graph.embedder import CompatOpenAIEmbedder, embedder_max_batch_size
 from agenticx.memory.graph.json_compat import (
     coerce_to_response_model,
+    empty_payload_for_response_model,
+    extract_chat_message_text,
+    memory_graph_chat_request_extras,
     parse_llm_json,
+    provider_requires_disable_thinking,
     provider_supports_json_response_format,
 )
 from agenticx.memory.graph.config import load_memory_graph_config
@@ -41,8 +45,48 @@ class _FakeEdge:
 
 def test_provider_supports_json_response_format():
     assert provider_supports_json_response_format("openai", None) is True
+    assert provider_supports_json_response_format("bailian", "https://dashscope.aliyuncs.com/compatible-mode/v1") is True
     assert provider_supports_json_response_format("minimax", "https://api.minimax.chat/v1") is False
     assert provider_supports_json_response_format("openai", "https://proxy.example/v1") is False
+
+
+def test_provider_requires_disable_thinking_for_qwen():
+    assert provider_requires_disable_thinking(
+        "bailian",
+        "https://dashscope.aliyuncs.com/compatible-mode/v1",
+        "qwen3.5-plus",
+    )
+    assert provider_requires_disable_thinking("openai", None, "gpt-4o-mini") is False
+
+
+def test_memory_graph_chat_request_extras_disables_thinking():
+    extras = memory_graph_chat_request_extras(
+        "bailian",
+        "https://dashscope.aliyuncs.com/compatible-mode/v1",
+        "qwen3.5-plus",
+    )
+    assert extras.get("enable_thinking") is False
+    assert extras.get("extra_body", {}).get("enable_thinking") is False
+
+    kimi = memory_graph_chat_request_extras("kimi", "https://api.moonshot.cn/v1", "moonshot-v1-8k")
+    assert kimi.get("extra_body", {}).get("thinking") == {"type": "disabled"}
+
+
+def test_extract_chat_message_text_prefers_content_then_reasoning():
+    class _Msg:
+        content = ""
+        reasoning_content = '{"edges": []}'
+
+    assert extract_chat_message_text(_Msg()) == '{"edges": []}'
+    assert extract_chat_message_text(type("M", (), {"content": '{"a": 1}'})()) == '{"a": 1}'
+
+
+def test_empty_payload_for_response_model_edges():
+    from graphiti_core.prompts.extract_edges import ExtractedEdges
+
+    payload = empty_payload_for_response_model(ExtractedEdges)
+    assert payload == {"edges": []}
+    assert ExtractedEdges(**payload).edges == []
 
 
 def test_embedder_max_batch_size():
@@ -92,6 +136,34 @@ def test_parse_llm_json_empty_raises():
 
     with pytest.raises(ValueError, match="empty"):
         parse_llm_json("")
+
+
+def test_compat_llm_client_empty_content_falls_back_to_empty_edges():
+    from graphiti_core.prompts.extract_edges import ExtractedEdges
+
+    from agenticx.memory.graph.llm_client import CompatOpenAIGenericClient
+
+    class _Choice:
+        message = type("M", (), {"content": "", "reasoning_content": None})()
+
+    class _Response:
+        choices = [_Choice()]
+
+    class _FakeCompletions:
+        async def create(self, **_kwargs):
+            return _Response()
+
+    class _FakeClient:
+        chat = type("Chat", (), {"completions": _FakeCompletions()})()
+
+    client = CompatOpenAIGenericClient(
+        client=_FakeClient(),
+        provider_name="bailian",
+        base_url="https://dashscope.aliyuncs.com/compatible-mode/v1",
+    )
+    client.model = "qwen3.5-plus"
+    result = client._parse_completion(_Choice.message, ExtractedEdges)
+    assert result == {"edges": []}
 
 
 def test_coerce_to_response_model_renames_aliases():
