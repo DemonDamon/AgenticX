@@ -127,6 +127,12 @@ body {
   scrollbar-gutter: stable;
 }
 
+/* 记忆管理列表滚动区：内容与滚动条留出间距，避免贴边 */
+.agx-memory-list-scroll {
+  scrollbar-gutter: stable;
+  padding-right: 10px;
+}
+
 /* 定时任务闹钟：表盘 currentColor 填充，指针与表盘形成对比 */
 .automation-task-icon__hand {
   stroke: var(--automation-clock-hand, #ffffff);

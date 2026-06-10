@@ -914,16 +914,18 @@ function MemoryGraphExplorerInner({
 
   if (isDashboard) {
     return (
-      <div className="flex h-full min-h-0 flex-col gap-4 overflow-y-auto pr-1">
-        {configStrip}
-        {toolbar}
-        {alerts}
+      <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-hidden">
+        <div className="shrink-0 space-y-4">
+          {configStrip}
+          {toolbar}
+          {alerts}
+        </div>
         {isUserScope ? (
-          <div className="h-[440px] min-w-0 shrink-0 overflow-y-auto">{userListArea}</div>
+          <div className="min-h-0 min-w-0 flex-1 overflow-hidden">{userListArea}</div>
         ) : (
-          <div className="flex h-[440px] shrink-0 gap-3">
+          <div className="flex min-h-0 flex-1 gap-3 overflow-hidden">
             {leftRail}
-            <div className="flex min-w-0 flex-1 flex-col gap-2">
+            <div className="flex min-w-0 flex-1 flex-col gap-2 overflow-hidden">
               <div className="min-h-0 flex-1">{canvasArea}</div>
               {legend}
             </div>
@@ -939,7 +941,7 @@ function MemoryGraphExplorerInner({
       {toolbar}
       <div className="min-w-0 space-y-2 px-3 pt-2 empty:hidden">{alerts}</div>
       {isUserScope ? (
-        <div className="min-h-0 min-w-0 flex-1 overflow-y-auto p-2">{userListArea}</div>
+        <div className="min-h-0 min-w-0 flex-1 overflow-hidden p-2">{userListArea}</div>
       ) : (
         <>
           <div className="min-h-0 flex-1 p-2">{canvasArea}</div>

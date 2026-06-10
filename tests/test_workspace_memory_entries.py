@@ -10,6 +10,7 @@ import pytest
 
 from agenticx.workspace.loader import (
     MEMORY_TEMPLATE,
+    delete_memory_entries_batch,
     delete_memory_entry,
     read_memory_entries,
     update_memory_entry,
@@ -86,3 +87,29 @@ def test_delete_memory_entry_out_of_range_raises(tmp_path):
     memory_file.write_text(SAMPLE_MEMORY, encoding="utf-8")
     with pytest.raises(ValueError, match="memory entry not found"):
         delete_memory_entry(tmp_path, "User Anchors", 9)
+
+
+def test_delete_memory_entries_batch_removes_multiple_entries(tmp_path):
+    memory_file = tmp_path / "MEMORY.md"
+    memory_file.write_text(SAMPLE_MEMORY, encoding="utf-8")
+    deleted = delete_memory_entries_batch(
+        tmp_path,
+        [
+            ("User Anchors", 0),
+            ("User Anchors", 1),
+            ("Agent Notes", 0),
+        ],
+    )
+    assert deleted == 3
+    raw = memory_file.read_text(encoding="utf-8")
+    assert "- Name: Alice" not in raw
+    assert "- Keep this file short and curated." not in raw
+    assert "- Move transient details into daily memory files." in raw
+    assert read_memory_entries(tmp_path) == [
+        {
+            "section": "Agent Notes",
+            "index": 0,
+            "text": "Move transient details into daily memory files.",
+            "line": 6,
+        }
+    ]

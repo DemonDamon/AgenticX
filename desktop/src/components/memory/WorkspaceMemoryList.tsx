@@ -5,6 +5,7 @@ import { Modal } from "../ds/Modal";
 import { Panel } from "../ds/Panel";
 import {
   createWorkspaceEntry,
+  deleteWorkspaceEntriesBatch,
   deleteWorkspaceEntry,
   fetchWorkspaceMemory,
   updateWorkspaceEntry,
@@ -21,6 +22,17 @@ type Props = {
 
 type PendingDelete = { section: string; index: number; text: string } | null;
 
+const entryKey = (section: string, index: number) => `${section}::${index}`;
+
+function parseEntryKey(key: string): { section: string; index: number } | null {
+  const sep = key.lastIndexOf("::");
+  if (sep <= 0) return null;
+  const section = key.slice(0, sep);
+  const index = Number.parseInt(key.slice(sep + 2), 10);
+  if (!section || Number.isNaN(index)) return null;
+  return { section, index };
+}
+
 export function WorkspaceMemoryList({ apiBase, apiToken }: Props) {
   const [sections, setSections] = useState<WorkspaceMemorySection[]>([]);
   const [path, setPath] = useState("");
@@ -35,9 +47,60 @@ export function WorkspaceMemoryList({ apiBase, apiToken }: Props) {
   const [editingKey, setEditingKey] = useState<string | null>(null);
   const [editText, setEditText] = useState("");
   const [pendingDelete, setPendingDelete] = useState<PendingDelete>(null);
+  const [pendingBatchDelete, setPendingBatchDelete] = useState(false);
+  const [selectMode, setSelectMode] = useState(false);
+  const [selectedKeys, setSelectedKeys] = useState<Set<string>>(() => new Set());
   const [expandedSections, setExpandedSections] = useState<Set<string>>(() => new Set());
 
   const sectionNames = useMemo(() => sections.map((s) => s.section), [sections]);
+
+  const allEntryKeys = useMemo(
+    () =>
+      sections.flatMap((group) =>
+        group.entries.map((entry) => entryKey(group.section, entry.index)),
+      ),
+    [sections],
+  );
+
+  const selectedCount = selectedKeys.size;
+
+  const exitSelectMode = () => {
+    setSelectMode(false);
+    setSelectedKeys(new Set());
+  };
+
+  const toggleEntrySelect = (key: string) => {
+    setSelectedKeys((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+  };
+
+  const toggleSectionSelect = (group: WorkspaceMemorySection) => {
+    const keys = group.entries.map((entry) => entryKey(group.section, entry.index));
+    const allSelected = keys.length > 0 && keys.every((key) => selectedKeys.has(key));
+    setSelectedKeys((prev) => {
+      const next = new Set(prev);
+      if (allSelected) {
+        for (const key of keys) next.delete(key);
+      } else {
+        for (const key of keys) next.add(key);
+      }
+      return next;
+    });
+  };
+
+  const sectionSelectionState = (group: WorkspaceMemorySection): "none" | "partial" | "all" => {
+    if (group.entries.length === 0) return "none";
+    const selectedInSection = group.entries.filter((entry) =>
+      selectedKeys.has(entryKey(group.section, entry.index)),
+    ).length;
+    if (selectedInSection === 0) return "none";
+    if (selectedInSection === group.entries.length) return "all";
+    return "partial";
+  };
 
   const toggleSection = (section: string) => {
     setExpandedSections((prev) => {
@@ -81,8 +144,6 @@ export function WorkspaceMemoryList({ apiBase, apiToken }: Props) {
   useEffect(() => {
     void reload();
   }, [reload]);
-
-  const entryKey = (section: string, index: number) => `${section}::${index}`;
 
   const onCreate = async () => {
     const text = newText.trim();
@@ -137,6 +198,26 @@ export function WorkspaceMemoryList({ apiBase, apiToken }: Props) {
     }
   };
 
+  const onConfirmBatchDelete = async () => {
+    if (selectedKeys.size === 0) return;
+    const entries = Array.from(selectedKeys)
+      .map((key) => parseEntryKey(key))
+      .filter((item): item is { section: string; index: number } => item != null);
+    if (entries.length === 0) return;
+    setBusy(true);
+    setError(null);
+    try {
+      await deleteWorkspaceEntriesBatch(apiBase, apiToken, entries);
+      setPendingBatchDelete(false);
+      exitSelectMode();
+      await reload();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "批量删除失败");
+    } finally {
+      setBusy(false);
+    }
+  };
+
   const totalEntries = sections.reduce((sum, sec) => sum + sec.entries.length, 0);
 
   if (loading) {
@@ -149,6 +230,7 @@ export function WorkspaceMemoryList({ apiBase, apiToken }: Props) {
 
   return (
     <div className="flex h-full min-h-0 min-w-0 flex-col gap-3">
+      <div className="flex shrink-0 flex-col gap-3">
       <Panel title="新增记忆" collapsible defaultCollapsed={totalEntries > 0}>
         <div className="flex min-w-0 flex-col gap-2">
           <div className="flex min-w-0 flex-col gap-1 text-[11px] text-text-faint">
@@ -238,7 +320,6 @@ export function WorkspaceMemoryList({ apiBase, apiToken }: Props) {
         <div className="rounded-md bg-status-error/10 px-3 py-2 text-[11px] text-status-error">{error}</div>
       ) : null}
 
-      <div className="min-h-0 flex-1 min-w-0 flex flex-col gap-2">
         <div>
           <div className="flex flex-wrap items-center gap-2">
             <h3 className="text-xs font-semibold text-text-strong">记忆列表</h3>
@@ -246,14 +327,66 @@ export function WorkspaceMemoryList({ apiBase, apiToken }: Props) {
               长期记忆
             </span>
             <span className="text-[10px] text-text-faint">{totalEntries} 条</span>
+            {totalEntries > 0 ? (
+              selectMode ? (
+                <div className="ml-auto flex flex-wrap items-center gap-2">
+                  <span className="text-[10px] text-text-muted">已选 {selectedCount} 条</span>
+                  <button
+                    type="button"
+                    disabled={busy || allEntryKeys.length === 0}
+                    onClick={() => setSelectedKeys(new Set(allEntryKeys))}
+                    className="text-[10px] text-text-muted transition hover:text-text-strong disabled:opacity-50"
+                  >
+                    全选
+                  </button>
+                  <button
+                    type="button"
+                    disabled={busy}
+                    onClick={() => setSelectedKeys(new Set())}
+                    className="text-[10px] text-text-muted transition hover:text-text-strong disabled:opacity-50"
+                  >
+                    清空
+                  </button>
+                  <button
+                    type="button"
+                    disabled={busy || selectedCount === 0}
+                    onClick={() => setPendingBatchDelete(true)}
+                    className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-[10px] font-medium text-status-error transition hover:bg-status-error/10 disabled:opacity-50"
+                  >
+                    <Trash2 className="h-3 w-3" />
+                    删除所选
+                  </button>
+                  <button
+                    type="button"
+                    disabled={busy}
+                    onClick={exitSelectMode}
+                    className="text-[10px] text-text-muted transition hover:text-text-strong disabled:opacity-50"
+                  >
+                    取消
+                  </button>
+                </div>
+              ) : (
+                <button
+                  type="button"
+                  disabled={busy}
+                  onClick={() => setSelectMode(true)}
+                  className="ml-auto text-[10px] text-text-muted transition hover:text-text-strong disabled:opacity-50"
+                >
+                  批量管理
+                </button>
+              )
+            ) : null}
           </div>
           <p className="mt-1 text-[11px] leading-relaxed text-text-faint">
             长期记忆写入 MEMORY.md，跨会话保留并参与对话侧文本检索；日记类短期记忆在 memory/ 目录，不在此列表展示。
+            {selectMode ? " 勾选多条后可一次性删除。" : ""}
           </p>
         </div>
-        <div className="min-h-0 flex-1 overflow-y-auto rounded-lg border border-border bg-surface-panel/60 p-2">
+      </div>
+
+      <div className="agx-memory-list-scroll min-h-0 flex-1 overflow-y-auto overscroll-contain">
         {totalEntries === 0 ? (
-          <div className="flex h-full flex-col items-center justify-center gap-2 px-4 py-8 text-center">
+          <div className="flex flex-col items-center justify-center gap-2 px-4 py-8 text-center">
             <p className="text-sm font-medium text-text-subtle">暂无长期记忆条目</p>
             <p className="max-w-sm text-xs leading-relaxed text-text-faint">
               展开上方「新增记忆」添加内容后会写入 MEMORY.md，并参与 memory_search 检索。
@@ -263,23 +396,45 @@ export function WorkspaceMemoryList({ apiBase, apiToken }: Props) {
         ) : (
           <div className="space-y-3">
             {sections.map((group) => {
-              const expanded = expandedSections.has(group.section);
+              const expanded = expandedSections.has(group.section) || selectMode;
+              const sectionSelect = sectionSelectionState(group);
               return (
               <section key={group.section} className="rounded-md border border-border bg-surface-card">
                 <header className={expanded ? "border-b border-[var(--border-muted)]" : ""}>
-                  <button
-                    type="button"
-                    className="flex w-full items-center gap-1.5 px-3 py-2 text-left text-xs font-semibold text-text-strong transition hover:text-text-primary"
-                    onClick={() => toggleSection(group.section)}
-                    aria-expanded={expanded}
-                  >
-                    <ChevronDown
-                      className={`h-3.5 w-3.5 shrink-0 text-text-faint transition-transform ${expanded ? "" : "-rotate-90"}`}
-                      aria-hidden
-                    />
-                    <span className="min-w-0 flex-1 truncate">{group.section}</span>
-                    <span className="shrink-0 font-normal text-text-faint">{group.entries.length} 条</span>
-                  </button>
+                  <div className="flex w-full items-center gap-1.5 px-3 py-2">
+                    {selectMode ? (
+                      <input
+                        type="checkbox"
+                        checked={sectionSelect === "all"}
+                        ref={(el) => {
+                          if (el) el.indeterminate = sectionSelect === "partial";
+                        }}
+                        onChange={() => toggleSectionSelect(group)}
+                        className="h-3.5 w-3.5 shrink-0 accent-[var(--ui-btn-primary-bg)]"
+                        onClick={(e) => e.stopPropagation()}
+                        aria-label={`选择分组 ${group.section}`}
+                      />
+                    ) : null}
+                    <button
+                      type="button"
+                      className="flex min-w-0 flex-1 items-center gap-1.5 text-left text-xs font-semibold text-text-strong transition hover:text-text-primary"
+                      onClick={() => {
+                        if (selectMode) {
+                          toggleSectionSelect(group);
+                          return;
+                        }
+                        toggleSection(group.section);
+                      }}
+                      aria-expanded={expanded}
+                    >
+                      <ChevronDown
+                        className={`h-3.5 w-3.5 shrink-0 text-text-faint transition-transform ${expanded ? "" : "-rotate-90"}`}
+                        aria-hidden
+                      />
+                      <span className="min-w-0 flex-1 truncate">{group.section}</span>
+                      <span className="shrink-0 font-normal text-text-faint">{group.entries.length} 条</span>
+                    </button>
+                  </div>
                 </header>
                 {expanded ? (
                 <ul className="divide-y divide-[var(--border-muted)]">
@@ -288,7 +443,19 @@ export function WorkspaceMemoryList({ apiBase, apiToken }: Props) {
                     const isEditing = editingKey === key;
                     return (
                       <li key={key} className="px-3 py-2">
-                        {isEditing ? (
+                        {selectMode ? (
+                          <label className="flex cursor-pointer items-start gap-2">
+                            <input
+                              type="checkbox"
+                              checked={selectedKeys.has(key)}
+                              onChange={() => toggleEntrySelect(key)}
+                              className="mt-0.5 h-3.5 w-3.5 shrink-0 accent-[var(--ui-btn-primary-bg)]"
+                            />
+                            <p className="min-w-0 flex-1 whitespace-pre-wrap break-words text-xs leading-relaxed text-text-primary">
+                              {entry.text}
+                            </p>
+                          </label>
+                        ) : isEditing ? (
                           <div className="space-y-2">
                             <textarea
                               value={editText}
@@ -353,12 +520,31 @@ export function WorkspaceMemoryList({ apiBase, apiToken }: Props) {
             })}
           </div>
         )}
-      </div>
 
         {path ? (
-          <div className="text-[10px] text-text-faint break-all">文件：{path}</div>
+          <div className="pt-2 text-[10px] text-text-faint break-all">文件：{path}</div>
         ) : null}
       </div>
+
+      <Modal
+        open={pendingBatchDelete}
+        title="批量删除记忆"
+        onClose={() => setPendingBatchDelete(false)}
+        footer={(
+          <div className="flex justify-end gap-2">
+            <Button variant="ghost" disabled={busy} onClick={() => setPendingBatchDelete(false)}>
+              取消
+            </Button>
+            <Button variant="primary" disabled={busy || selectedCount === 0} onClick={() => void onConfirmBatchDelete()}>
+              确认删除 {selectedCount} 条
+            </Button>
+          </div>
+        )}
+      >
+        <p className="text-sm text-text-primary">
+          确定删除已选择的 {selectedCount} 条用户记忆吗？此操作会写回 MEMORY.md，且不可撤销。
+        </p>
+      </Modal>
 
       <Modal
         open={pendingDelete != null}
