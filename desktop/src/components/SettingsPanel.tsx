@@ -8213,7 +8213,7 @@ export function SettingsPanel({
                 sessionId={memoryContextPane?.sessionId ?? ""}
                 layout="dashboard"
                 showConfig
-                initialScope="meta"
+                initialScope="user"
                 providerOptions={providerNames}
               />
             )}

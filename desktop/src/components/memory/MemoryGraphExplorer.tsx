@@ -239,7 +239,6 @@ function MemoryGraphExplorerInner({
       const resolved: MemoryGraphScope =
         sc === "avatar" || sc === "group" ? sc : "meta";
       setDefaultScope(resolved);
-      if (showConfig) setScope(resolved);
       const ingest = cfg.ingest as { auto?: boolean } | undefined;
       setIngestAuto(ingest?.auto !== false);
       const llm = (cfg.llm as { provider?: string; model?: string } | undefined) || {};
@@ -737,7 +736,7 @@ function MemoryGraphExplorerInner({
   );
 
   const configStrip = showConfig ? (
-    <Panel title="记忆图谱设置" collapsible defaultCollapsed={false}>
+    <Panel title="记忆图谱设置" collapsible defaultCollapsed>
       <div className="space-y-0 text-sm text-text-subtle">
         <p className="pb-2 text-[11px] leading-relaxed text-text-faint">
           结构化时态记忆的可视化视图。文本检索仍走 WorkspaceMemoryStore，二者并行不替换。
