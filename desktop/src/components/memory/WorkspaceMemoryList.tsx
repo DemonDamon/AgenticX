@@ -1,4 +1,4 @@
-import { Pencil, Plus, Trash2 } from "lucide-react";
+import { ChevronDown, Pencil, Plus, Trash2 } from "lucide-react";
 import { useCallback, useEffect, useId, useMemo, useState } from "react";
 import { Button } from "../ds/Button";
 import { Modal } from "../ds/Modal";
@@ -35,8 +35,18 @@ export function WorkspaceMemoryList({ apiBase, apiToken }: Props) {
   const [editingKey, setEditingKey] = useState<string | null>(null);
   const [editText, setEditText] = useState("");
   const [pendingDelete, setPendingDelete] = useState<PendingDelete>(null);
+  const [expandedSections, setExpandedSections] = useState<Set<string>>(() => new Set());
 
   const sectionNames = useMemo(() => sections.map((s) => s.section), [sections]);
+
+  const toggleSection = (section: string) => {
+    setExpandedSections((prev) => {
+      const next = new Set(prev);
+      if (next.has(section)) next.delete(section);
+      else next.add(section);
+      return next;
+    });
+  };
 
   useEffect(() => {
     if (isNewGroup) return;
@@ -86,6 +96,7 @@ export function WorkspaceMemoryList({ apiBase, apiToken }: Props) {
       setIsNewGroup(false);
       setNewGroupName("");
       setGroupPick(section);
+      setExpandedSections((prev) => new Set(prev).add(section));
       await reload();
     } catch (e) {
       setError(e instanceof Error ? e.message : "新增失败");
@@ -251,12 +262,26 @@ export function WorkspaceMemoryList({ apiBase, apiToken }: Props) {
           </div>
         ) : (
           <div className="space-y-3">
-            {sections.map((group) => (
+            {sections.map((group) => {
+              const expanded = expandedSections.has(group.section);
+              return (
               <section key={group.section} className="rounded-md border border-border bg-surface-card">
-                <header className="border-b border-[var(--border-muted)] px-3 py-2 text-xs font-semibold text-text-strong">
-                  {group.section}
-                  <span className="ml-2 font-normal text-text-faint">{group.entries.length} 条</span>
+                <header className={expanded ? "border-b border-[var(--border-muted)]" : ""}>
+                  <button
+                    type="button"
+                    className="flex w-full items-center gap-1.5 px-3 py-2 text-left text-xs font-semibold text-text-strong transition hover:text-text-primary"
+                    onClick={() => toggleSection(group.section)}
+                    aria-expanded={expanded}
+                  >
+                    <ChevronDown
+                      className={`h-3.5 w-3.5 shrink-0 text-text-faint transition-transform ${expanded ? "" : "-rotate-90"}`}
+                      aria-hidden
+                    />
+                    <span className="min-w-0 flex-1 truncate">{group.section}</span>
+                    <span className="shrink-0 font-normal text-text-faint">{group.entries.length} 条</span>
+                  </button>
                 </header>
+                {expanded ? (
                 <ul className="divide-y divide-[var(--border-muted)]">
                   {group.entries.map((entry) => {
                     const key = entryKey(group.section, entry.index);
@@ -322,8 +347,10 @@ export function WorkspaceMemoryList({ apiBase, apiToken }: Props) {
                     );
                   })}
                 </ul>
+                ) : null}
               </section>
-            ))}
+            );
+            })}
           </div>
         )}
       </div>
