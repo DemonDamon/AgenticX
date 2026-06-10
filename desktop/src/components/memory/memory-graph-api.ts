@@ -308,3 +308,20 @@ export async function deleteWorkspaceEntry(
   });
   if (!r.ok) throw new Error(`delete entry ${r.status}`);
 }
+
+export type WorkspaceEntryRef = { section: string; index: number };
+
+export async function deleteWorkspaceEntriesBatch(
+  apiBase: string,
+  apiToken: string,
+  entries: WorkspaceEntryRef[],
+): Promise<number> {
+  const r = await fetch(`${apiBase}/api/memory/workspace/entries/batch-delete`, {
+    method: "POST",
+    headers: headers(apiToken),
+    body: JSON.stringify({ entries }),
+  });
+  if (!r.ok) throw new Error(`batch delete entries ${r.status}`);
+  const data = (await r.json()) as { deleted?: number };
+  return typeof data.deleted === "number" ? data.deleted : entries.length;
+}

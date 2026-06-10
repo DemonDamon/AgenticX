@@ -466,3 +466,31 @@ def delete_memory_entry(workspace_dir: Path, section: str, index: int) -> None:
     target = _locate_entry_line(lines, section, index)
     del lines[target]
     memory_file.write_text("\n".join(lines), encoding="utf-8")
+
+
+def delete_memory_entries_batch(workspace_dir: Path, targets: List[tuple[str, int]]) -> int:
+    """Delete multiple MEMORY.md list entries in a single file write.
+
+    Args:
+        workspace_dir: The workspace directory.
+        targets: ``(section, index)`` pairs using pre-delete indices within each section.
+
+    Returns:
+        Number of list lines removed.
+    """
+    if not targets:
+        return 0
+    memory_file = _ensure_memory_file(workspace_dir)
+    lines = memory_file.read_text(encoding="utf-8", errors="replace").split("\n")
+    line_numbers: set[int] = set()
+    for section, index in targets:
+        try:
+            line_numbers.add(_locate_entry_line(lines, section, index))
+        except ValueError:
+            continue
+    if not line_numbers:
+        return 0
+    for line_no in sorted(line_numbers, reverse=True):
+        del lines[line_no]
+    memory_file.write_text("\n".join(lines), encoding="utf-8")
+    return len(line_numbers)

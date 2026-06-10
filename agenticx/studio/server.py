@@ -104,6 +104,7 @@ from agenticx.workspace.loader import (
     append_long_term_memory,
     delete_favorite,
     delete_memory_entry,
+    delete_memory_entries_batch,
     ensure_workspace,
     load_favorites,
     read_memory_entries,
@@ -5077,6 +5078,39 @@ def create_studio_app() -> FastAPI:
         except Exception as exc:
             logger.warning("workspace reindex after memory edit failed: %s", exc)
         return {"ok": True}
+
+    @app.post("/api/memory/workspace/entries/batch-delete")
+    async def batch_delete_memory_workspace_entries(
+        payload: dict,
+        x_agx_desktop_token: str | None = Header(default=None),
+    ) -> dict:
+        _check_token(x_agx_desktop_token)
+        raw_entries = payload.get("entries")
+        if not isinstance(raw_entries, list) or not raw_entries:
+            raise HTTPException(status_code=400, detail="entries is required")
+        targets: list[tuple[str, int]] = []
+        for item in raw_entries:
+            if not isinstance(item, dict):
+                continue
+            section = str(item.get("section") or "").strip()
+            if not section:
+                continue
+            try:
+                index = int(item.get("index"))
+            except (TypeError, ValueError):
+                continue
+            targets.append((section, index))
+        if not targets:
+            raise HTTPException(status_code=400, detail="no valid entries")
+        workspace_dir = resolve_workspace_dir()
+        deleted = delete_memory_entries_batch(workspace_dir, targets)
+        if deleted <= 0:
+            raise HTTPException(status_code=400, detail="no entries deleted")
+        try:
+            WorkspaceMemoryStore().index_workspace_sync(workspace_dir)
+        except Exception as exc:
+            logger.warning("workspace reindex after memory edit failed: %s", exc)
+        return {"ok": True, "deleted": deleted}
 
     @app.post("/api/messages/forward")
     async def forward_messages(
