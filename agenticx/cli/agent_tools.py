@@ -700,6 +700,79 @@ STUDIO_TOOLS: List[Dict[str, Any]] = [
     {
         "type": "function",
         "function": {
+            "name": "hook_manage",
+            "description": (
+                "Create, delete, list, or toggle declarative hooks persisted to "
+                "~/.agenticx/config.yaml (hooks.declarative[]). "
+                "Declarative hooks run shell commands, HTTP webhooks, model prompts, or "
+                "agent reasoning at key lifecycle events (before_tool_call, after_tool_call, "
+                "session_start, session_end). "
+                "IMPORTANT: action and name are always required except for action='list'."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "action": {
+                        "type": "string",
+                        "enum": ["create", "delete", "list", "toggle"],
+                        "description": (
+                            "'create': add a new declarative hook; "
+                            "'delete': remove by name; "
+                            "'list': return all declarative hooks; "
+                            "'toggle': enable or disable a hook by name."
+                        ),
+                    },
+                    "name": {
+                        "type": "string",
+                        "description": "Unique hook name (required for create/delete/toggle).",
+                    },
+                    "event": {
+                        "type": "string",
+                        "enum": ["before_tool_call", "after_tool_call", "session_start", "session_end"],
+                        "description": "Lifecycle event that fires this hook (required for create).",
+                    },
+                    "type": {
+                        "type": "string",
+                        "enum": ["command", "http", "prompt", "agent"],
+                        "description": "Hook execution type (required for create). Default: 'command'.",
+                    },
+                    "command": {
+                        "type": "string",
+                        "description": "Shell command to run (for type='command'). Supports {tool} placeholder.",
+                    },
+                    "url": {
+                        "type": "string",
+                        "description": "HTTP endpoint to POST to (for type='http').",
+                    },
+                    "prompt": {
+                        "type": "string",
+                        "description": "Model prompt text (for type='prompt' or 'agent').",
+                    },
+                    "matcher": {
+                        "type": "string",
+                        "description": "Glob pattern to filter which tool names trigger this hook (optional).",
+                    },
+                    "block_on_failure": {
+                        "type": "boolean",
+                        "description": "If true, abort the tool call when the hook fails. Default: false.",
+                    },
+                    "timeout_seconds": {
+                        "type": "integer",
+                        "description": "Hook execution timeout in seconds (1-600). Default: 30.",
+                    },
+                    "enabled": {
+                        "type": "boolean",
+                        "description": "For 'toggle': set to true to enable or false to disable the hook.",
+                    },
+                },
+                "required": ["action"],
+                "additionalProperties": False,
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "skill_import_repo",
             "description": (
                 "Bulk install skills from a GitHub repository into ~/.agenticx/skills/. "
@@ -4578,6 +4651,101 @@ def _write_skill_md_with_checks(
         return None, f"ERROR: {exc}"
 
 
+def _tool_hook_manage(arguments: Dict[str, Any], session: Optional[StudioSession]) -> str:  # noqa: ARG001
+    """Implement the hook_manage agent tool — create/delete/list/toggle declarative hooks."""
+    action = str(arguments.get("action", "")).strip().lower()
+    if action not in ("create", "delete", "list", "toggle"):
+        return "ERROR: hook_manage requires action='create'|'delete'|'list'|'toggle'."
+
+    try:
+        from agenticx.cli.config_manager import ConfigManager
+        from agenticx.hooks.list_api import invalidate_hooks_list_cache
+    except ImportError as exc:
+        return f"ERROR: config subsystem unavailable: {exc}"
+
+    def _load_declarative() -> List[Dict[str, Any]]:
+        raw = ConfigManager.get_value("hooks.declarative") or []
+        return [d for d in raw if isinstance(d, dict)]
+
+    def _save_declarative(entries: List[Dict[str, Any]]) -> None:
+        ConfigManager.set_value("hooks.declarative", entries)
+        invalidate_hooks_list_cache()
+
+    if action == "list":
+        entries = _load_declarative()
+        if not entries:
+            return json.dumps({"ok": True, "hooks": [], "count": 0}, ensure_ascii=False)
+        return json.dumps({"ok": True, "hooks": entries, "count": len(entries)}, ensure_ascii=False)
+
+    name = str(arguments.get("name", "")).strip()
+    if not name:
+        return "ERROR: 'name' is required for action='create'|'delete'|'toggle'."
+
+    entries = _load_declarative()
+
+    if action == "delete":
+        new_entries = [e for e in entries if e.get("name") != name]
+        if len(new_entries) == len(entries):
+            return json.dumps({"ok": False, "error": f"hook '{name}' not found"}, ensure_ascii=False)
+        _save_declarative(new_entries)
+        return json.dumps({"ok": True, "action": "deleted", "name": name}, ensure_ascii=False)
+
+    if action == "toggle":
+        enabled_val = arguments.get("enabled")
+        if enabled_val is None:
+            return "ERROR: 'enabled' (true/false) is required for action='toggle'."
+        target = next((e for e in entries if e.get("name") == name), None)
+        if target is None:
+            return json.dumps({"ok": False, "error": f"hook '{name}' not found"}, ensure_ascii=False)
+        target["enabled"] = bool(enabled_val)
+        _save_declarative(entries)
+        state = "enabled" if bool(enabled_val) else "disabled"
+        return json.dumps({"ok": True, "action": state, "name": name}, ensure_ascii=False)
+
+    # action == "create"
+    event = str(arguments.get("event", "")).strip()
+    valid_events = {"before_tool_call", "after_tool_call", "session_start", "session_end"}
+    if event not in valid_events:
+        return f"ERROR: 'event' must be one of {sorted(valid_events)}."
+
+    hook_type = str(arguments.get("type", "command")).strip()
+    valid_types = {"command", "http", "prompt", "agent"}
+    if hook_type not in valid_types:
+        return f"ERROR: 'type' must be one of {sorted(valid_types)}."
+
+    if hook_type == "command" and not str(arguments.get("command", "")).strip():
+        return "ERROR: 'command' is required for type='command'."
+    if hook_type == "http" and not str(arguments.get("url", "")).strip():
+        return "ERROR: 'url' is required for type='http'."
+    if hook_type in ("prompt", "agent") and not str(arguments.get("prompt", "")).strip():
+        return "ERROR: 'prompt' is required for type='prompt'/'agent'."
+
+    if any(e.get("name") == name for e in entries):
+        return json.dumps({"ok": False, "error": f"hook '{name}' already exists; use delete first to replace."}, ensure_ascii=False)
+
+    new_hook: Dict[str, Any] = {
+        "name": name,
+        "event": event,
+        "type": hook_type,
+        "enabled": True,
+    }
+    if hook_type == "command":
+        new_hook["command"] = str(arguments.get("command", "")).strip()
+    elif hook_type == "http":
+        new_hook["url"] = str(arguments.get("url", "")).strip()
+    elif hook_type in ("prompt", "agent"):
+        new_hook["prompt"] = str(arguments.get("prompt", "")).strip()
+
+    for opt_field in ("matcher", "block_on_failure", "timeout_seconds"):
+        val = arguments.get(opt_field)
+        if val is not None:
+            new_hook[opt_field] = val
+
+    entries.append(new_hook)
+    _save_declarative(entries)
+    return json.dumps({"ok": True, "action": "created", "hook": new_hook}, ensure_ascii=False)
+
+
 def _tool_skill_manage(arguments: Dict[str, Any], session: Optional[StudioSession]) -> str:
     _ = session
     if not _skill_manage_enabled():
@@ -5191,6 +5359,8 @@ async def dispatch_tool_async(
             return _tool_skill_use(arguments, session)
         if name == "skill_list":
             return _tool_skill_list(session)
+        if name == "hook_manage":
+            return _tool_hook_manage(arguments, session)
         if name == "skill_manage":
             return _tool_skill_manage(arguments, session)
         if name == "skill_import_repo":
