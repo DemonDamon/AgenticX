@@ -1,6 +1,8 @@
 /**
  * Shared helpers for gateway perf k6 scripts.
  */
+import http from "k6/http";
+
 export function gatewayBase() {
   return __ENV.GATEWAY_PERF_BASE || "http://127.0.0.1:18088";
 }
@@ -50,6 +52,71 @@ export function rampScenario(name, targetVUs) {
         { duration, target: targetVUs },
       ],
       gracefulRampDown: "5s",
+    },
+  };
+}
+
+/** App full-chain helpers (web-portal login + chat). */
+export function appBase() {
+  return __ENV.APP_PERF_BASE || "http://127.0.0.1:3000";
+}
+
+export function appCredentials() {
+  return {
+    email: __ENV.APP_PERF_EMAIL || "admin@agenticx.local",
+    password: __ENV.APP_PERF_PASSWORD || "change-me",
+  };
+}
+
+export function appChatModel() {
+  return __ENV.APP_PERF_MODEL || "perf-mock/perf-mock-model";
+}
+
+export function appLogin(jar) {
+  const { email, password } = appCredentials();
+  return http.post(
+    `${appBase()}/api/auth/login`,
+    JSON.stringify({ email, password }),
+    {
+      headers: { "Content-Type": "application/json" },
+      jar,
+      tags: { scenario: "app_login" },
+    },
+  );
+}
+
+export function appCreateSession(jar) {
+  return http.post(
+    `${appBase()}/api/chat/sessions`,
+    JSON.stringify({ title: "perf session", active_model: appChatModel() }),
+    {
+      headers: { "Content-Type": "application/json" },
+      jar,
+      tags: { scenario: "app_create_session" },
+    },
+  );
+}
+
+export function portalChatPayload(content) {
+  return JSON.stringify({
+    model: appChatModel(),
+    messages: [{ role: "user", content }],
+    stream: false,
+    temperature: 0,
+  });
+}
+
+export function appRamp200Scenario(name) {
+  return {
+    [name]: {
+      executor: "ramping-vus",
+      startVUs: 0,
+      stages: [
+        { duration: "30s", target: 50 },
+        { duration: "30s", target: 200 },
+        { duration: "60s", target: 200 },
+      ],
+      gracefulRampDown: "30s",
     },
   };
 }
