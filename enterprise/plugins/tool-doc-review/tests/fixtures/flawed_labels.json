@@ -1,0 +1,8 @@
+{
+  "expected": [
+    {"category": "二类", "locator": "Heading level jump", "kind": "跳级"},
+    {"category": "二类", "locator": "图2", "kind": "缺号"},
+    {"category": "二类", "locator": "font-size-inconsistent", "kind": "字号"},
+    {"category": "二类", "locator": "spacing-before-inconsistent", "kind": "段距"}
+  ]
+}

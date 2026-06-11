@@ -1,5 +1,18 @@
 name: tool-doc-review
-version: 0.1.0
+version: 0.2.0
 type: tool-pack
-description: 文档校对工具通用封装模板
-# TODO: populate concrete rules / tools / theme tokens
+description: Document review tool with keyword/regex rules and format checks for enterprise acceptance
+tools:
+  - id: doc_review_cli
+    entry: doc_review_cli.py
+    description: Review text/docx/pdf with optional --format-check for heading, numbering, font, spacing checks
+    inputs:
+      - name: input
+        required: true
+        formats: [txt, docx, pdf]
+      - name: rules
+        required: false
+        formats: [json]
+    flags:
+      - name: format-check
+        description: Enable deterministic format checks (FR-1 through FR-4)

@@ -62,6 +62,7 @@ def main() -> int:
     parser.add_argument("--mock-addr", required=True)
     parser.add_argument("--vus", type=int, required=True)
     parser.add_argument("--duration", required=True)
+    parser.add_argument("--kind", default="gateway-chat-perf-baseline")
     parser.add_argument("summaries", nargs="+")
     args = parser.parse_args()
 
@@ -71,7 +72,7 @@ def main() -> int:
         cases.append(extract_case(path.stem, load_summary(path)))
 
     payload = {
-        "kind": "gateway-chat-perf-baseline",
+        "kind": args.kind,
         "generated_at": args.timestamp,
         "git_commit": args.commit,
         "environment": {
