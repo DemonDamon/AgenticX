@@ -201,6 +201,16 @@ async def search_memory_for_chat(
     turn_ids = [str(item["id"]) for item in merged if item.get("source") == "turn" and item.get("id")]
     if turn_ids:
         asyncio.create_task(asyncio.to_thread(store.reinforce_turns_sync, turn_ids))
+    from agenticx.memory.workspace_memory import _chunk_rerank_enabled
+
+    if _chunk_rerank_enabled():
+        chunk_ids = [
+            str(item["id"])
+            for item in merged
+            if item.get("source") == "workspace" and item.get("id")
+        ]
+        if chunk_ids:
+            asyncio.create_task(asyncio.to_thread(store.reinforce_chunks_sync, chunk_ids))
     return MemoryRecallResult(matches=merged, graph_skipped_reason=graph_skipped_reason)
 
 

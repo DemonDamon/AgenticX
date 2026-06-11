@@ -20,9 +20,19 @@ from typing import Any, Dict, Iterable, List, Tuple
 DEFAULT_WORKSPACE_MEMORY_DB = Path.home() / ".agenticx" / "memory" / "main.sqlite"
 
 _TURN_RECALL_HALFLIFE_DAYS = 7.0
+_CHUNK_RECALL_HALFLIFE_DAYS = 7.0
 
 _CJK_RE = re.compile(r"[\u4e00-\u9fff\u3400-\u4dbf\uf900-\ufaff]")
 _CJK_SEQ_RE = re.compile(r"[\u4e00-\u9fff\u3400-\u4dbf\uf900-\ufaff]{2,8}")
+
+
+def _chunk_rerank_enabled() -> bool:
+    try:
+        from agenticx.memory.turn_archive_config import load_chunk_rerank_config
+
+        return bool(load_chunk_rerank_config().get("enabled", False))
+    except Exception:
+        return False
 
 
 def extract_search_terms(query: str) -> List[str]:
@@ -169,6 +179,12 @@ class WorkspaceMemoryStore:
                 USING fts5(text, session_id UNINDEXED, content='')
                 """
             )
+            # GAP-B: chunks composite rerank columns (idempotent migration for legacy DBs)
+            cols = {r["name"] for r in conn.execute("PRAGMA table_info(chunks)").fetchall()}
+            if "access_count" not in cols:
+                conn.execute("ALTER TABLE chunks ADD COLUMN access_count INTEGER DEFAULT 0")
+            if "last_accessed" not in cols:
+                conn.execute("ALTER TABLE chunks ADD COLUMN last_accessed TEXT")
             conn.commit()
 
     async def index_workspace(self, workspace_dir: Path) -> Dict[str, Any]:
@@ -216,10 +232,13 @@ class WorkspaceMemoryStore:
         if mode not in {"hybrid", "fts", "semantic"}:
             mode = "hybrid"
         n = max(1, int(limit))
+        rerank = _chunk_rerank_enabled()
         if mode == "fts":
-            return self._search_fts(q, n)
+            res = self._search_fts(q, n)
+            return self._rerank_chunks_composite(res)[:n] if rerank else res
         if mode == "semantic":
-            return self._search_semantic(q, n)
+            res = self._search_semantic(q, n)
+            return self._rerank_chunks_composite(res)[:n] if rerank else res
         fts = self._search_fts(q, n * 2)
         sem = self._search_semantic(q, n * 2)
         terms = extract_search_terms(q)
@@ -227,6 +246,8 @@ class WorkspaceMemoryStore:
         if self._should_use_substring(terms, fts):
             sub = self._search_substring(terms, n * 2)
         merged = self._merge_ranked(fts, sem, sub) if sub else self._merge_ranked(fts, sem)
+        if rerank:
+            merged = self._rerank_chunks_composite(merged)
         return merged[:n]
 
     async def get_recent_memories(self, days: int = 7, limit: int = 10) -> List[Dict[str, Any]]:
@@ -321,6 +342,24 @@ class WorkspaceMemoryStore:
                     WHERE id = ?
                     """,
                     (now, turn_id),
+                )
+            conn.commit()
+
+    def reinforce_chunks_sync(self, chunk_ids: List[str]) -> None:
+        """Bump access_count and last_accessed for recalled chunk rows."""
+        ids = [str(cid).strip() for cid in chunk_ids if str(cid).strip()]
+        if not ids:
+            return
+        now = datetime.now(timezone.utc).isoformat()
+        with self._connect() as conn:
+            for chunk_id in ids:
+                conn.execute(
+                    """
+                    UPDATE chunks
+                    SET access_count = access_count + 1, last_accessed = ?
+                    WHERE id = ?
+                    """,
+                    (now, chunk_id),
                 )
             conn.commit()
 
@@ -486,7 +525,7 @@ class WorkspaceMemoryStore:
         with self._connect() as conn:
             rows = conn.execute(
                 """
-                SELECT c.id, c.path, c.source, c.start_line, c.end_line, c.model, c.text, c.created_at
+                SELECT c.id, c.path, c.source, c.start_line, c.end_line, c.model, c.text, c.created_at, c.access_count
                 FROM chunks_fts f
                 JOIN chunks c ON c.rowid = f.rowid
                 WHERE chunks_fts MATCH ?
@@ -502,7 +541,7 @@ class WorkspaceMemoryStore:
         with self._connect() as conn:
             rows = conn.execute(
                 """
-                SELECT id, path, source, start_line, end_line, model, text, embedding, created_at
+                SELECT id, path, source, start_line, end_line, model, text, embedding, created_at, access_count
                 FROM chunks
                 """
             ).fetchall()
@@ -542,6 +581,7 @@ class WorkspaceMemoryStore:
             "model": str(row["model"] or ""),
             "text": str(row["text"]),
             "created_at": str(row["created_at"]),
+            "access_count": int(row["access_count"] or 0) if "access_count" in row.keys() else 0,
             "score": round(float(score), 4),
         }
 
@@ -698,6 +738,35 @@ class WorkspaceMemoryStore:
             "access_count": int(row["access_count"] or 0),
             "score": round(float(score), 4),
         }
+
+    def _rerank_chunks_composite(
+        self,
+        rows: List[Dict[str, Any]],
+        *,
+        halflife_days: float = _CHUNK_RECALL_HALFLIFE_DAYS,
+    ) -> List[Dict[str, Any]]:
+        """recency*frequency composite rerank for markdown chunks (mirror of turns)."""
+        now = datetime.now(timezone.utc)
+        halflife = max(0.1, float(halflife_days))
+        enriched: List[Dict[str, Any]] = []
+        for row in rows:
+            item = dict(row)
+            base = max(float(item.get("score", 0.0)), 0.01)
+            created_raw = str(item.get("created_at", "") or "")
+            try:
+                created = datetime.fromisoformat(created_raw.replace("Z", "+00:00"))
+                if created.tzinfo is None:
+                    created = created.replace(tzinfo=timezone.utc)
+            except ValueError:
+                created = now
+            age_days = max(0.0, (now - created).total_seconds() / 86400.0)
+            recency = math.exp(-0.693 * age_days / halflife)
+            access_count = int(item.get("access_count", 0) or 0)
+            frequency = math.log2(access_count + 1) + 1
+            item["score"] = round(base * recency * frequency, 4)
+            enriched.append(item)
+        enriched.sort(key=lambda item: float(item.get("score", 0.0)), reverse=True)
+        return enriched
 
     def _rerank_turns_composite(
         self,
