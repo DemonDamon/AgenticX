@@ -707,6 +707,7 @@ STUDIO_TOOLS: List[Dict[str, Any]] = [
                 "Declarative hooks run shell commands, HTTP webhooks, model prompts, or "
                 "agent reasoning at key lifecycle events (before_tool_call, after_tool_call, "
                 "session_start, session_end). "
+                "command-type hooks are scanned for dangerous patterns before being saved. "
                 "IMPORTANT: action and name are always required except for action='list'."
             ),
             "parameters": {
@@ -4651,8 +4652,41 @@ def _write_skill_md_with_checks(
         return None, f"ERROR: {exc}"
 
 
+def _hook_manage_enabled() -> bool:
+    """Whether hook_manage is allowed. Default-on; set AGX_HOOK_MANAGE=0 to disable."""
+    v = os.environ.get("AGX_HOOK_MANAGE", "1").strip().lower()
+    return v in {"1", "true", "yes", "on"}
+
+
+def _scan_hook_command(command: str) -> Optional[str]:
+    """Scan a command-type hook body for dangerous patterns via the skill guard.
+
+    Returns a human-readable reason string when the command must be blocked,
+    or ``None`` when it is allowed. Wraps the command in a fenced shell block so
+    both v1 and v2 guard scanners inspect it.
+    """
+    try:
+        from agenticx.skills.guard import scan_skill_markdown_text, should_allow
+    except ImportError:
+        return None
+    fenced = f"```bash\n{command}\n```\n"
+    try:
+        result = scan_skill_markdown_text(fenced, source="agent-created")
+        allowed, reason = should_allow(result, source="agent-created")
+    except Exception:
+        return None
+    if not allowed:
+        return reason
+    return None
+
+
 def _tool_hook_manage(arguments: Dict[str, Any], session: Optional[StudioSession]) -> str:  # noqa: ARG001
     """Implement the hook_manage agent tool — create/delete/list/toggle declarative hooks."""
+    if not _hook_manage_enabled():
+        return (
+            "ERROR: hook_manage is disabled (AGX_HOOK_MANAGE=0). "
+            "Re-enable it in settings to create/modify hooks."
+        )
     action = str(arguments.get("action", "")).strip().lower()
     if action not in ("create", "delete", "list", "toggle"):
         return "ERROR: hook_manage requires action='create'|'delete'|'list'|'toggle'."
@@ -4713,8 +4747,20 @@ def _tool_hook_manage(arguments: Dict[str, Any], session: Optional[StudioSession
     if hook_type not in valid_types:
         return f"ERROR: 'type' must be one of {sorted(valid_types)}."
 
-    if hook_type == "command" and not str(arguments.get("command", "")).strip():
-        return "ERROR: 'command' is required for type='command'."
+    if hook_type == "command":
+        cmd_body = str(arguments.get("command", "")).strip()
+        if not cmd_body:
+            return "ERROR: 'command' is required for type='command'."
+        block_reason = _scan_hook_command(cmd_body)
+        if block_reason:
+            return json.dumps(
+                {
+                    "ok": False,
+                    "error": f"command hook blocked by safety scan: {block_reason}",
+                    "hint": "Revise the command to avoid dangerous patterns, or use type='http'/'prompt'/'agent'.",
+                },
+                ensure_ascii=False,
+            )
     if hook_type == "http" and not str(arguments.get("url", "")).strip():
         return "ERROR: 'url' is required for type='http'."
     if hook_type in ("prompt", "agent") and not str(arguments.get("prompt", "")).strip():

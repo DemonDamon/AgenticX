@@ -22,7 +22,11 @@ in the Desktop Hooks management UI.
 - FR-2: `create` validates event/type/required body fields and appends to `hooks.declarative[]`
 - FR-3: `delete` removes by name; `toggle` sets `enabled` flag; `list` returns current state
 - FR-4: After write, `invalidate_hooks_list_cache()` is called so `GET /api/hooks` returns fresh data
-- FR-5: Tool is always available (no `AGX_HOOK_MANAGE` env gate required — writes only to config.yaml)
+- FR-5: Tool gated by `AGX_HOOK_MANAGE` (default-on, set `=0` to disable)
+- FR-6 (security): command-type hooks are scanned via `agenticx.skills.guard` before being
+  saved; dangerous patterns (rm -rf, exfiltration, credential access, injection) are blocked.
+  This aligns hook_manage with skill_manage's safety posture, since command-type declarative
+  hooks auto-execute `/bin/bash -lc` on every matching lifecycle event without confirm gate.
 
 ## Implementation
 
