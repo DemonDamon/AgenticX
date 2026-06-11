@@ -229,7 +229,7 @@ export function WorkspaceMemoryList({ apiBase, apiToken }: Props) {
   }
 
   return (
-    <div className="flex h-full min-h-0 min-w-0 flex-col gap-3">
+    <div className="flex flex-col gap-3">
       <div className="flex shrink-0 flex-col gap-3">
       <Panel title="新增记忆" collapsible defaultCollapsed={totalEntries > 0}>
         <div className="flex min-w-0 flex-col gap-2">
@@ -384,7 +384,7 @@ export function WorkspaceMemoryList({ apiBase, apiToken }: Props) {
         </div>
       </div>
 
-      <div className="agx-memory-list-scroll min-h-0 flex-1 overflow-y-auto overscroll-contain">
+      <div>
         {totalEntries === 0 ? (
           <div className="flex flex-col items-center justify-center gap-2 px-4 py-8 text-center">
             <p className="text-sm font-medium text-text-subtle">暂无长期记忆条目</p>
