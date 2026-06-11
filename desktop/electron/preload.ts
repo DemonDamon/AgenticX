@@ -367,6 +367,14 @@ contextBridge.exposeInMainWorld("agenticxDesktop", {
     learning_nudge_interval: number;
     learning_min_tool_calls: number;
   }) => ipcRenderer.invoke("save-trinity-config", payload),
+  loadTurnArchiveConfig: async () => ipcRenderer.invoke("load-turn-archive-config"),
+  saveTurnArchiveConfig: async (payload: {
+    enabled: boolean;
+    min_chunk_chars: number;
+    max_chunks_per_turn: number;
+    recall_turns_limit: number;
+    halflife_days: number;
+  }) => ipcRenderer.invoke("save-turn-archive-config", payload),
   loadAutomationConfig: async () => ipcRenderer.invoke("load-automation-config"),
   saveAutomationConfig: async (payload: { prevent_sleep: boolean }) =>
     ipcRenderer.invoke("save-automation-config", payload),

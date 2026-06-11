@@ -84,10 +84,15 @@ def _merge_recall_results(
     *,
     limit: int,
     graph_limit: int,
+    turns_rows: Optional[List[Dict[str, Any]]] = None,
+    turns_limit: int = 0,
 ) -> List[Dict[str, Any]]:
     n = max(1, int(limit))
-    g_cap = max(0, min(int(graph_limit), n))
-    ws_cap = max(1, n - g_cap) if workspace_rows else 0
+    turns_cap = max(0, min(int(turns_limit), n)) if turns_rows else 0
+    g_cap = max(0, min(int(graph_limit), n - turns_cap))
+    ws_cap = max(0, n - g_cap - turns_cap)
+    if ws_cap == 0 and workspace_rows:
+        ws_cap = 1
 
     scored: Dict[str, Dict[str, Any]] = {}
     for rank, row in enumerate(workspace_rows):
@@ -95,6 +100,15 @@ def _merge_recall_results(
         item["source"] = "workspace"
         item["score"] = _rrf_score(rank)
         scored[item["id"]] = item
+    for rank, row in enumerate(turns_rows or []):
+        item = dict(row)
+        item["source"] = "turn"
+        item["score"] = _rrf_score(rank) + 0.05
+        existing = scored.get(item["id"])
+        if existing is None:
+            scored[item["id"]] = item
+            continue
+        existing["score"] = max(float(existing.get("score", 0.0)), float(item["score"]))
     for rank, row in enumerate(graph_rows):
         item = dict(row)
         item["score"] = _rrf_score(rank)
@@ -105,9 +119,10 @@ def _merge_recall_results(
         existing["score"] = max(float(existing.get("score", 0.0)), float(item["score"]))
 
     ranked = sorted(scored.values(), key=lambda row: float(row.get("score", 0.0)), reverse=True)
+    turns_pick = [row for row in ranked if row.get("source") == "turn"][:turns_cap]
     workspace_pick = [row for row in ranked if row.get("source") == "workspace"][:ws_cap]
     graph_pick = [row for row in ranked if row.get("source") == "graph"][:g_cap]
-    combined = workspace_pick + graph_pick
+    combined = turns_pick + workspace_pick + graph_pick
     combined.sort(key=lambda row: float(row.get("score", 0.0)), reverse=True)
     if not combined:
         return ranked[:n]
@@ -122,6 +137,8 @@ async def search_memory_for_chat(
     avatar_id: Optional[str] = None,
     session_id: Optional[str] = None,
     include_graph: Optional[bool] = None,
+    include_turns: Optional[bool] = None,
+    turns_limit: Optional[int] = None,
 ) -> MemoryRecallResult:
     """Search workspace memory and optionally merge graph facts for the current pane."""
     q = (query or "").strip()
@@ -132,6 +149,20 @@ async def search_memory_for_chat(
     workspace_rows = store.search_sync(query=q, mode=mode, limit=max(1, limit))
     for row in workspace_rows:
         row["source"] = "workspace"
+
+    from agenticx.memory.turn_archive_config import is_turn_archive_enabled, load_turn_archive_config
+
+    turn_cfg = load_turn_archive_config()
+    use_turns = is_turn_archive_enabled() if include_turns is None else bool(include_turns)
+    turns_cap = int(turns_limit if turns_limit is not None else turn_cfg.get("recall_turns_limit", 3))
+    turns_rows: List[Dict[str, Any]] = []
+    if use_turns and turns_cap > 0:
+        turns_rows = store.search_turns_sync(
+            q,
+            turns_cap,
+            session_id=str(session_id or ""),
+            halflife_days=float(turn_cfg.get("halflife_days", 7.0)),
+        )
 
     from agenticx.memory.graph.config import load_memory_graph_config
 
@@ -164,7 +195,12 @@ async def search_memory_for_chat(
         graph_rows,
         limit=max(1, limit),
         graph_limit=cfg.search_in_chat_graph_limit,
+        turns_rows=turns_rows,
+        turns_limit=turns_cap if use_turns else 0,
     )
+    turn_ids = [str(item["id"]) for item in merged if item.get("source") == "turn" and item.get("id")]
+    if turn_ids:
+        asyncio.create_task(asyncio.to_thread(store.reinforce_turns_sync, turn_ids))
     return MemoryRecallResult(matches=merged, graph_skipped_reason=graph_skipped_reason)
 
 
@@ -176,6 +212,8 @@ def search_memory_for_chat_sync(
     avatar_id: Optional[str] = None,
     session_id: Optional[str] = None,
     include_graph: Optional[bool] = None,
+    include_turns: Optional[bool] = None,
+    turns_limit: Optional[int] = None,
 ) -> MemoryRecallResult:
     """Sync wrapper for prompt injection paths."""
     coro = search_memory_for_chat(
@@ -185,6 +223,8 @@ def search_memory_for_chat_sync(
         avatar_id=avatar_id,
         session_id=session_id,
         include_graph=include_graph,
+        include_turns=include_turns,
+        turns_limit=turns_limit,
     )
     try:
         asyncio.get_running_loop()

@@ -1249,6 +1249,15 @@ class AgentRuntime:
             self.hooks.register(SessionReviewHook(), priority=-50)
         except Exception:
             pass
+        try:
+            from agenticx.memory.turn_archive_config import load_turn_archive_config
+            from agenticx.runtime.hooks.turn_archive_hook import TurnArchiveHook
+
+            _ta_cfg = load_turn_archive_config()
+            if _ta_cfg.get("enabled"):
+                self.hooks.register(TurnArchiveHook(enabled=True), priority=-60)
+        except Exception:
+            pass
 
     def _maybe_mid_turn_persist(self) -> None:
         """Fire incremental persist if interval or tool-count thresholds are met."""

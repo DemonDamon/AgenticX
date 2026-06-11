@@ -49,6 +49,14 @@ type TrinityConfig = {
   learning_min_tool_calls: number;
 };
 
+type TurnArchiveConfig = {
+  enabled: boolean;
+  min_chunk_chars: number;
+  max_chunks_per_turn: number;
+  recall_turns_limit: number;
+  halflife_days: number;
+};
+
 type AutomationConfig = {
   prevent_sleep: boolean;
 };
@@ -761,6 +769,8 @@ declare global {
       openCodeIndexModelCache: () => Promise<{ ok: boolean; path?: string; error?: string }>;
       loadTrinityConfig: () => Promise<{ ok: boolean; config?: TrinityConfig; error?: string }>;
       saveTrinityConfig: (payload: TrinityConfig) => Promise<{ ok: boolean; error?: string }>;
+      loadTurnArchiveConfig: () => Promise<{ ok: boolean; config?: TurnArchiveConfig; error?: string }>;
+      saveTurnArchiveConfig: (payload: TurnArchiveConfig) => Promise<{ ok: boolean; error?: string }>;
       loadAutomationConfig: () => Promise<{ ok: boolean; config?: AutomationConfig; error?: string }>;
       saveAutomationConfig: (payload: AutomationConfig) => Promise<{ ok: boolean; error?: string }>;
       confirmDialog: (payload: {

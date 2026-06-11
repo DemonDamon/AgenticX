@@ -71,6 +71,7 @@ import {
 import { AccountTab } from "./AccountTab";
 import { KnowledgeSettings, type KnowledgeSettingsHandle } from "./settings/knowledge/KnowledgeSettings";
 import { MemoryGraphExplorer } from "./memory/MemoryGraphExplorer";
+import { TurnArchiveSettingsPanel } from "./memory/TurnArchiveSettingsPanel";
 import { getProviderDisplayName, makeCustomOpenAIProviderId } from "../utils/provider-display";
 import { normalizeProviderEntry } from "../utils/model-options";
 import { classifyModelKind, isEmbeddingModelKind } from "../utils/model-kind";
@@ -8206,16 +8207,19 @@ export function SettingsPanel({
 
             {/* === MEMORY TAB === Plan-Id: 2026-05-31-near-memory-graph-graphiti */}
             {tab === "memory" && (
-              <MemoryGraphExplorer
-                apiBase={apiBase}
-                apiToken={apiToken}
-                avatarId={memoryContextPane?.avatarId ?? null}
-                sessionId={memoryContextPane?.sessionId ?? ""}
-                layout="dashboard"
-                showConfig
-                initialScope="user"
-                providerOptions={providerNames}
-              />
+              <div className="space-y-4">
+                <TurnArchiveSettingsPanel />
+                <MemoryGraphExplorer
+                  apiBase={apiBase}
+                  apiToken={apiToken}
+                  avatarId={memoryContextPane?.avatarId ?? null}
+                  sessionId={memoryContextPane?.sessionId ?? ""}
+                  layout="dashboard"
+                  showConfig
+                  initialScope="user"
+                  providerOptions={providerNames}
+                />
+              </div>
             )}
 
             {/* === HOOKS TAB === */}
