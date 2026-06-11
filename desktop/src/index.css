@@ -254,6 +254,11 @@ body.agx-settings-panel-resizing {
   user-select: none;
 }
 
+body.agx-settings-nav-resizing {
+  cursor: col-resize !important;
+  user-select: none;
+}
+
 /* Settings modal: Chromium/Electron often ignores padding for the native <select> chevron.
    Strip native chrome and draw our own chevron with a fixed inset from the right edge. */
 .agx-settings-panel select {

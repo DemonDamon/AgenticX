@@ -90,6 +90,11 @@ import {
   saveSettingsPanelSize,
   type SettingsPanelSize,
 } from "../utils/settings-panel-size";
+import {
+  clampSettingsNavWidth,
+  loadSettingsNavWidth,
+  saveSettingsNavWidth,
+} from "../utils/settings-nav-width";
 import { useScrollbarOnScroll } from "../hooks/useScrollbarOnScroll";
 import {
   formatBackendChipLabel,
@@ -5635,6 +5640,9 @@ export function SettingsPanel({
   const permissionsPanelRef = useRef<PermissionsAdvancedPanelHandle>(null);
   const [tab, setTab] = useState<SettingsTab>("general");
   const [panelSize, setPanelSize] = useState<SettingsPanelSize>(() => loadSettingsPanelSize());
+  const [navWidth, setNavWidth] = useState(() =>
+    loadSettingsNavWidth(loadSettingsPanelSize().width),
+  );
   useEffect(() => {
     if (!open || !settingsOpenToTab) return;
     setTab(settingsOpenToTab);
@@ -5642,16 +5650,26 @@ export function SettingsPanel({
   }, [open, settingsOpenToTab, updateSettingsSlice]);
   useEffect(() => {
     if (!open) return;
-    setPanelSize(loadSettingsPanelSize());
+    const size = loadSettingsPanelSize();
+    setPanelSize(size);
+    setNavWidth(loadSettingsNavWidth(size.width));
   }, [open]);
   useEffect(() => {
     if (!open) return;
     const onWindowResize = () => {
-      setPanelSize((prev) => clampSettingsPanelSize(prev));
+      setPanelSize((prev) => {
+        const next = clampSettingsPanelSize(prev);
+        setNavWidth((nav) => clampSettingsNavWidth(nav, next.width));
+        return next;
+      });
     };
     window.addEventListener("resize", onWindowResize);
     return () => window.removeEventListener("resize", onWindowResize);
   }, [open]);
+  useEffect(() => {
+    if (!open) return;
+    setNavWidth((prev) => clampSettingsNavWidth(prev, panelSize.width));
+  }, [open, panelSize.width]);
   const onPanelResizeMouseDown = useCallback((event: React.MouseEvent<HTMLDivElement>) => {
     event.preventDefault();
     event.stopPropagation();
@@ -5680,6 +5698,27 @@ export function SettingsPanel({
     window.addEventListener("mousemove", onMove);
     window.addEventListener("mouseup", onUp);
   }, [panelSize.height, panelSize.width]);
+  const onNavResizeMouseDown = useCallback((event: React.MouseEvent<HTMLDivElement>) => {
+    event.preventDefault();
+    event.stopPropagation();
+    const startX = event.clientX;
+    const startWidth = navWidth;
+    document.body.classList.add("agx-settings-nav-resizing");
+    const onMove = (moveEvent: MouseEvent) => {
+      setNavWidth(clampSettingsNavWidth(startWidth + (moveEvent.clientX - startX), panelSize.width));
+    };
+    const onUp = () => {
+      document.body.classList.remove("agx-settings-nav-resizing");
+      window.removeEventListener("mousemove", onMove);
+      window.removeEventListener("mouseup", onUp);
+      setNavWidth((prev) => {
+        saveSettingsNavWidth(prev, panelSize.width);
+        return prev;
+      });
+    };
+    window.addEventListener("mousemove", onMove);
+    window.addEventListener("mouseup", onUp);
+  }, [navWidth, panelSize.width]);
   const [active, setActive] = useState(defaultProvider || ALL_PROVIDERS[0]);
   const providerListScrollRef = useScrollbarOnScroll<HTMLDivElement>();
   const [draft, setDraft] = useState<Record<string, ProviderEntry>>({});
@@ -6969,32 +7008,46 @@ export function SettingsPanel({
         }}
       >
         {/* Left: tab navigation */}
-        <div className="flex h-full min-h-0 w-[200px] shrink-0 flex-col bg-surface-sidebar p-4">
+        <div
+          className="relative flex h-full min-h-0 shrink-0 flex-col bg-surface-sidebar p-4"
+          style={{ width: navWidth }}
+        >
           <div className="mb-4 text-[15px] font-semibold text-text-strong">设置</div>
-          <nav className="flex flex-1 flex-col gap-1">
+          <nav className="flex flex-1 flex-col gap-1 overflow-y-auto">
             {TABS.map((t) => {
               const Icon = t.icon;
               const isActive = tab === t.id;
               return (
                 <button
                   key={t.id}
-                  className={`flex w-full items-center gap-2.5 rounded-[10px] border px-2.5 py-2 text-left text-[13px] font-semibold transition-all ${
+                  className={`flex w-full min-w-0 items-center gap-2.5 rounded-[10px] border px-2.5 py-2 text-left text-[13px] font-semibold transition-all ${
                     isActive
                       ? "border-transparent bg-btnPrimary text-btnPrimary-text"
                       : "border-transparent text-text-subtle hover:border-border-strong hover:bg-surface-card hover:text-text-strong"
                   }`}
                   onClick={() => setTab(t.id)}
+                  title={t.label}
                 >
                   {Icon ? (
                     <Icon className="h-4 w-4 shrink-0" aria-hidden />
                   ) : (
                     <span className="h-4 w-4 shrink-0 rounded-sm bg-surface-hover" aria-hidden />
                   )}
-                  {t.label}
+                  <span className="min-w-0 truncate">{t.label}</span>
                 </button>
               );
             })}
           </nav>
+          <div
+            className="group absolute -right-[3px] top-0 z-20 h-full w-2 cursor-col-resize"
+            role="separator"
+            aria-orientation="vertical"
+            aria-label="拖拽调整导航栏宽度"
+            title="拖拽调整导航栏宽度"
+            onMouseDown={onNavResizeMouseDown}
+          >
+            <div className="mx-auto h-full w-px bg-[var(--ui-accent-divider)] transition-all duration-200 group-hover:w-[2px] group-hover:bg-[var(--ui-btn-primary-bg)]" />
+          </div>
         </div>
 
         {/* Right: content */}
