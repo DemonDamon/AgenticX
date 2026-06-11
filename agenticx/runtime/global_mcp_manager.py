@@ -24,7 +24,10 @@ from typing import Dict, Optional, Set, TYPE_CHECKING
 
 from agenticx.runtime.global_mcp_state import (
     add_to_last_connected,
+    clear_quarantine,
     read_last_connected,
+    read_quarantined,
+    record_restore_failure,
     remove_from_last_connected,
     write_last_connected,
 )
@@ -51,6 +54,10 @@ logger = logging.getLogger(__name__)
 
 # Maximum parallel reconnections on startup.
 _RESTORE_CONCURRENCY = 4
+# 连续失败达到该阈值的 server 在启动 restore 时被跳过（隔离）。0 表示从不隔离。
+_RESTORE_QUARANTINE_THRESHOLD = int(os.getenv("AGX_MCP_QUARANTINE_THRESHOLD", "2") or "2")
+# 单个 server 启动恢复连接的超时（秒）。
+_RESTORE_CONNECT_TIMEOUT = float(os.getenv("AGX_MCP_RESTORE_TIMEOUT", "90") or "90")
 
 
 class GlobalMcpManager:
@@ -156,26 +163,52 @@ class GlobalMcpManager:
             logger.debug("GlobalMcpManager.schedule_restore: no running event loop, skipping")
 
     async def restore_from_last_session(self) -> None:
-        """Connect servers listed in mcp_state.json, up to _RESTORE_CONCURRENCY at a time."""
+        """Connect servers in mcp_state.json, skipping quarantined ones, with per-server timeout."""
         names = read_last_connected()
         if not names:
             return
         self._reload_configs_if_needed()
+
+        quarantined = read_quarantined()
+        threshold = _RESTORE_QUARANTINE_THRESHOLD
+        if threshold > 0:
+            skip = [n for n in names if quarantined.get(n, 0) >= threshold]
+            names = [n for n in names if quarantined.get(n, 0) < threshold]
+            if skip:
+                logger.warning(
+                    "GlobalMcpManager: skipping quarantined MCP server(s) on restore: %s "
+                    "(connect manually in Settings to retry)",
+                    skip,
+                )
+        if not names:
+            return
         logger.info("GlobalMcpManager: restoring %d MCP server(s): %s", len(names), names)
 
         semaphore = asyncio.Semaphore(_RESTORE_CONCURRENCY)
 
         async def _connect_one_safe(name: str) -> None:
             async with semaphore:
-                ok, err = await self.connect_one(name, _persist=False)
-                if not ok:
+                try:
+                    ok, err = await asyncio.wait_for(
+                        self.connect_one(name, _persist=False),
+                        timeout=_RESTORE_CONNECT_TIMEOUT,
+                    )
+                except asyncio.TimeoutError:
+                    ok, err = False, f"restore connect timeout ({int(_RESTORE_CONNECT_TIMEOUT)}s)"
+                except Exception as exc:  # noqa: BLE001 — restore must never propagate
+                    ok, err = False, repr(exc)
+                if ok:
+                    clear_quarantine(name)
+                else:
+                    count = record_restore_failure(name)
                     logger.warning(
-                        "GlobalMcpManager: restore failed for '%s': %s", name, err
+                        "GlobalMcpManager: restore failed for '%s' (fail#%d): %s",
+                        name,
+                        count,
+                        err,
                     )
 
         await asyncio.gather(*(_connect_one_safe(n) for n in names), return_exceptions=True)
-
-        # Persist the actually-connected set (failures are excluded).
         write_last_connected(sorted(self._connected_servers))
         logger.info(
             "GlobalMcpManager: restore done — connected: %s", sorted(self._connected_servers)
@@ -191,8 +224,10 @@ class GlobalMcpManager:
         ok, err = await mcp_connect_async(
             self._hub, self._mcp_configs, self._connected_servers, name
         )
-        if ok and _persist:
-            add_to_last_connected(name)
+        if ok:
+            clear_quarantine(name)
+            if _persist:
+                add_to_last_connected(name)
         return ok, err
 
     async def disconnect_one(self, name: str) -> tuple[bool, str]:

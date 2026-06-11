@@ -651,6 +651,14 @@ def create_studio_app() -> FastAPI:
 
     @contextlib.asynccontextmanager
     async def _studio_lifespan(app: FastAPI):
+        # FR-1: 先装崩溃隔离，确保后续任何 MCP 子进程坏管道都不致命。
+        try:
+            from agenticx.runtime.mcp_crash_guard import install_mcp_crash_guard
+
+            install_mcp_crash_guard()
+        except Exception as exc:
+            logger.debug("install_mcp_crash_guard failed (non-fatal): %s", exc)
+
         # Initialise process-level MCP hub and kick off background restore.
         from agenticx.runtime.global_mcp_manager import GlobalMcpManager as _GmcpM
 

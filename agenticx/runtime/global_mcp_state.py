@@ -8,6 +8,7 @@ manually every time.
 Schema:
     {
         "last_connected": ["server-a", "server-b"],
+        "quarantined": {"bad-server": 2},
         "updated_at": 1714982400.0
     }
 """
@@ -18,7 +19,7 @@ import json
 import logging
 import time
 from pathlib import Path
-from typing import List
+from typing import Dict, List
 
 logger = logging.getLogger(__name__)
 
@@ -47,13 +48,31 @@ def read_last_connected() -> List[str]:
         return []
 
 
-def write_last_connected(names: List[str]) -> None:
-    """Persist the current set of connected server names."""
+def read_quarantined() -> Dict[str, int]:
+    """Return {server_name: consecutive_failure_count} from mcp_state.json."""
+    path = _state_path()
+    if not path.exists():
+        return {}
+    try:
+        raw = json.loads(path.read_text(encoding="utf-8"))
+        q = raw.get("quarantined", {})
+        if isinstance(q, dict):
+            return {str(k): int(v) for k, v in q.items() if isinstance(k, str)}
+    except Exception as exc:
+        logger.warning("mcp_state.json quarantine read error (ignored): %s", exc)
+    return {}
+
+
+def _write_full_state(last_connected: List[str], quarantined: Dict[str, int]) -> None:
     path = _state_path()
     try:
         path.write_text(
             json.dumps(
-                {"last_connected": sorted(set(names)), "updated_at": time.time()},
+                {
+                    "last_connected": sorted(set(last_connected)),
+                    "quarantined": {k: int(v) for k, v in quarantined.items() if int(v) > 0},
+                    "updated_at": time.time(),
+                },
                 ensure_ascii=False,
                 indent=2,
             )
@@ -62,6 +81,33 @@ def write_last_connected(names: List[str]) -> None:
         )
     except Exception as exc:
         logger.warning("mcp_state.json write error (ignored): %s", exc)
+
+
+def write_last_connected(names: List[str]) -> None:
+    """Persist connected server names, preserving the quarantine map."""
+    _write_full_state(names, read_quarantined())
+
+
+def record_restore_failure(name: str) -> int:
+    """Increment consecutive failure count; return new count."""
+    key = str(name or "").strip()
+    if not key:
+        return 0
+    q = read_quarantined()
+    q[key] = q.get(key, 0) + 1
+    _write_full_state(read_last_connected(), q)
+    return q[key]
+
+
+def clear_quarantine(name: str) -> None:
+    """Reset failure count for a server (call on successful manual/auto connect)."""
+    key = str(name or "").strip()
+    if not key:
+        return
+    q = read_quarantined()
+    if key in q:
+        del q[key]
+        _write_full_state(read_last_connected(), q)
 
 
 def add_to_last_connected(name: str) -> None:
