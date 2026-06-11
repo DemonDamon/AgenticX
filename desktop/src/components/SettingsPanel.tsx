@@ -750,22 +750,22 @@ function ModelCapabilityBadges({
 }
 
 const TABS: { id: SettingsTab; label: string; icon: typeof Settings2 }[] = [
-  { id: "account", label: "账号", icon: User },
-  { id: "general", label: "通用", icon: Settings2 },
+  { id: "account", label: "用户账号", icon: User },
+  { id: "general", label: "通用偏好", icon: Settings2 },
   { id: "provider", label: "模型服务", icon: Cpu },
   { id: "mcp", label: "MCP", icon: Plug },
-  { id: "tools", label: "工具", icon: Wrench },
-  { id: "skills", label: "技能", icon: SkillPuzzleIcon },
+  { id: "tools", label: "内置工具", icon: Wrench },
+  { id: "skills", label: "技能配置", icon: SkillPuzzleIcon },
   // Plan-Id: machi-kb-stage1-local-mvp
   { id: "knowledge", label: "知识库", icon: Library },
   { id: "memory", label: "记忆管理", icon: Network },
-  { id: "hooks", label: "钩子", icon: Anchor },
+  { id: "hooks", label: "钩子管理", icon: Anchor },
   { id: "automation", label: "定时任务", icon: AutomationTaskIcon },
   { id: "voice", label: "语音服务", icon: Mic },
   { id: "email", label: "邮件通知", icon: Mail },
-  { id: "workspace", label: "工作区", icon: FolderOpen },
-  { id: "favorites", label: "收藏", icon: Bookmark },
-  { id: "server", label: "服务器连接", icon: Globe },
+  { id: "workspace", label: "工作目录", icon: FolderOpen },
+  { id: "favorites", label: "内容收藏", icon: Bookmark },
+  { id: "server", label: "远程连接", icon: Globe },
 ];
 
 const EMAIL_PRESETS: Array<{
