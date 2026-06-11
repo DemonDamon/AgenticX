@@ -259,6 +259,90 @@ body.agx-settings-nav-resizing {
   user-select: none;
 }
 
+/* Settings range slider — theme-filled track + thumb (Automation / 运行时参数等) */
+.agx-range-slider {
+  --agx-range-fill: rgb(var(--theme-color-rgb, 16, 185, 129));
+  --agx-range-track: color-mix(in srgb, var(--text-faint) 28%, transparent);
+  --agx-range-percent: 50%;
+  width: 100%;
+  height: 1.25rem;
+  margin: 0;
+  appearance: none;
+  background: transparent;
+  cursor: pointer;
+}
+
+.agx-range-slider:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.agx-range-slider:focus {
+  outline: none;
+}
+
+.agx-range-slider:focus-visible::-webkit-slider-thumb {
+  box-shadow:
+    0 1px 2px rgba(0, 0, 0, 0.18),
+    0 0 0 3px rgba(var(--theme-color-rgb, 16, 185, 129), 0.28);
+}
+
+.agx-range-slider::-webkit-slider-runnable-track {
+  height: 6px;
+  border-radius: 9999px;
+  background: linear-gradient(
+    to right,
+    var(--agx-range-fill) 0%,
+    var(--agx-range-fill) var(--agx-range-percent),
+    var(--agx-range-track) var(--agx-range-percent),
+    var(--agx-range-track) 100%
+  );
+}
+
+.agx-range-slider::-webkit-slider-thumb {
+  appearance: none;
+  width: 16px;
+  height: 16px;
+  margin-top: -5px;
+  border-radius: 9999px;
+  border: 2px solid var(--agx-range-fill);
+  background: #fff;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.16);
+  transition: transform 0.12s ease, box-shadow 0.12s ease;
+}
+
+.agx-range-slider:not(:disabled):hover::-webkit-slider-thumb {
+  transform: scale(1.06);
+}
+
+.agx-range-slider::-moz-range-track {
+  height: 6px;
+  border-radius: 9999px;
+  background: var(--agx-range-track);
+  border: none;
+}
+
+.agx-range-slider::-moz-range-progress {
+  height: 6px;
+  border-radius: 9999px;
+  background: var(--agx-range-fill);
+}
+
+.agx-range-slider::-moz-range-thumb {
+  width: 16px;
+  height: 16px;
+  border-radius: 9999px;
+  border: 2px solid var(--agx-range-fill);
+  background: #fff;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.16);
+}
+
+.agx-range-slider:focus-visible::-moz-range-thumb {
+  box-shadow:
+    0 1px 3px rgba(0, 0, 0, 0.16),
+    0 0 0 3px rgba(var(--theme-color-rgb, 16, 185, 129), 0.28);
+}
+
 /* Settings modal: Chromium/Electron often ignores padding for the native <select> chevron.
    Strip native chrome and draw our own chevron with a fixed inset from the right edge. */
 .agx-settings-panel select {
