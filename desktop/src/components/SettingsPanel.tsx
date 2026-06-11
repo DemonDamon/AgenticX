@@ -7013,7 +7013,7 @@ export function SettingsPanel({
 
           <div
             className={`min-h-0 flex-1 px-4 py-3 ${
-              tab === "knowledge" || tab === "memory" ? "flex flex-col overflow-hidden" : "overflow-y-auto"
+              tab === "knowledge" ? "flex flex-col overflow-hidden" : "overflow-y-auto"
             }`}
           >
             {tab === "account" && <AccountTab />}
