@@ -285,6 +285,14 @@ type AutomationConfig = {
   prevent_sleep: boolean;
 };
 
+type TurnArchiveConfig = {
+  enabled: boolean;
+  min_chunk_chars: number;
+  max_chunks_per_turn: number;
+  recall_turns_limit: number;
+  halflife_days: number;
+};
+
 type SkillInstallPolicyConfig = {
   non_high_risk_auto_install: boolean;
 };
@@ -442,6 +450,22 @@ const DEFAULT_TRINITY_CONFIG: TrinityConfig = {
 
 const DEFAULT_AUTOMATION_CONFIG: AutomationConfig = {
   prevent_sleep: false,
+};
+
+const TURN_ARCHIVE_CONFIG_KEYS = new Set([
+  "enabled",
+  "min_chunk_chars",
+  "max_chunks_per_turn",
+  "recall_turns_limit",
+  "halflife_days",
+]);
+
+const DEFAULT_TURN_ARCHIVE_CONFIG: TurnArchiveConfig = {
+  enabled: false,
+  min_chunk_chars: 40,
+  max_chunks_per_turn: 3,
+  recall_turns_limit: 3,
+  halflife_days: 7,
 };
 
 const DEFAULT_SKILL_INSTALL_POLICY: SkillInstallPolicyConfig = {
@@ -1326,6 +1350,89 @@ function intValue(raw: unknown, field: string): number {
   const parsed = Number(raw);
   if (!Number.isInteger(parsed)) throw new Error(`${field} must be integer`);
   return parsed;
+}
+
+function floatValue(raw: unknown, field: string, min?: number, max?: number): number {
+  const parsed = Number(raw);
+  if (!Number.isFinite(parsed)) throw new Error(`${field} must be number`);
+  if (min !== undefined && parsed < min) throw new Error(`${field} must be >= ${min}`);
+  if (max !== undefined && parsed > max) throw new Error(`${field} must be <= ${max}`);
+  return parsed;
+}
+
+function loadTurnArchiveConfig(cfg: AgxConfig): TurnArchiveConfig {
+  const root = cfg as Record<string, unknown>;
+  const memory = root.memory;
+  if (!memory || typeof memory !== "object" || Array.isArray(memory)) {
+    return { ...DEFAULT_TURN_ARCHIVE_CONFIG };
+  }
+  const section = (memory as Record<string, unknown>).turn_archive;
+  if (!section || typeof section !== "object" || Array.isArray(section)) {
+    return { ...DEFAULT_TURN_ARCHIVE_CONFIG };
+  }
+  const row = section as Record<string, unknown>;
+  const rawMinChunk = Number(row.min_chunk_chars);
+  const rawMaxChunks = Number(row.max_chunks_per_turn);
+  const rawRecallLimit = Number(row.recall_turns_limit);
+  const rawHalflife = Number(row.halflife_days);
+  return {
+    enabled: parseBooleanLoose(row.enabled, DEFAULT_TURN_ARCHIVE_CONFIG.enabled),
+    min_chunk_chars:
+      Number.isInteger(rawMinChunk) && rawMinChunk >= 1
+        ? rawMinChunk
+        : DEFAULT_TURN_ARCHIVE_CONFIG.min_chunk_chars,
+    max_chunks_per_turn:
+      Number.isInteger(rawMaxChunks) && rawMaxChunks >= 1
+        ? rawMaxChunks
+        : DEFAULT_TURN_ARCHIVE_CONFIG.max_chunks_per_turn,
+    recall_turns_limit:
+      Number.isInteger(rawRecallLimit) && rawRecallLimit >= 1
+        ? rawRecallLimit
+        : DEFAULT_TURN_ARCHIVE_CONFIG.recall_turns_limit,
+    halflife_days:
+      Number.isFinite(rawHalflife) && rawHalflife > 0
+        ? rawHalflife
+        : DEFAULT_TURN_ARCHIVE_CONFIG.halflife_days,
+  };
+}
+
+function validateTurnArchiveConfigPayload(
+  input: unknown,
+): { ok: true; config: TurnArchiveConfig } | { ok: false; error: string } {
+  if (!input || typeof input !== "object") return { ok: false, error: "invalid payload: object required" };
+  const payload = input as Record<string, unknown>;
+  for (const key of Object.keys(payload)) {
+    if (!TURN_ARCHIVE_CONFIG_KEYS.has(key)) {
+      return { ok: false, error: `invalid field: ${key}` };
+    }
+  }
+  let enabled: boolean;
+  let minChunkChars: number;
+  let maxChunksPerTurn: number;
+  let recallTurnsLimit: number;
+  let halflifeDays: number;
+  try {
+    enabled = parseBooleanStrict(payload.enabled, "enabled");
+    minChunkChars = intValue(payload.min_chunk_chars, "min_chunk_chars");
+    maxChunksPerTurn = intValue(payload.max_chunks_per_turn, "max_chunks_per_turn");
+    recallTurnsLimit = intValue(payload.recall_turns_limit, "recall_turns_limit");
+    halflifeDays = floatValue(payload.halflife_days, "halflife_days", 0.1, 365);
+  } catch (err) {
+    return { ok: false, error: String(err) };
+  }
+  if (minChunkChars < 1) return { ok: false, error: "min_chunk_chars must be >= 1" };
+  if (maxChunksPerTurn < 1) return { ok: false, error: "max_chunks_per_turn must be >= 1" };
+  if (recallTurnsLimit < 1) return { ok: false, error: "recall_turns_limit must be >= 1" };
+  return {
+    ok: true,
+    config: {
+      enabled,
+      min_chunk_chars: minChunkChars,
+      max_chunks_per_turn: maxChunksPerTurn,
+      recall_turns_limit: recallTurnsLimit,
+      halflife_days: halflifeDays,
+    },
+  };
 }
 
 function validateTrinityConfigPayload(input: unknown): { ok: true; config: TrinityConfig } | { ok: false; error: string } {
@@ -4590,6 +4697,33 @@ function registerIpc(): void {
       return { ok: true };
     } catch (err) {
       return { ok: false, error: String(err) };
+    }
+  });
+
+  ipcMain.handle("load-turn-archive-config", async () => {
+    const cfg = loadAgxConfig();
+    return { ok: true, config: loadTurnArchiveConfig(cfg) };
+  });
+
+  ipcMain.handle("save-turn-archive-config", async (_event, payload: unknown) => {
+    const checked = validateTurnArchiveConfigPayload(payload);
+    if (!checked.ok) return { ok: false, error: checked.error };
+    try {
+      const cfg = loadAgxConfig();
+      const root = cfg as Record<string, unknown>;
+      const prevMemory = root.memory;
+      const mergedMemory =
+        prevMemory && typeof prevMemory === "object" && !Array.isArray(prevMemory)
+          ? { ...(prevMemory as Record<string, unknown>) }
+          : {};
+      mergedMemory.turn_archive = { ...checked.config };
+      root.memory = mergedMemory;
+      saveAgxConfig(cfg);
+      return { ok: true };
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      console.error("[save-turn-archive-config]", err);
+      return { ok: false, error: msg || "config_write_failed" };
     }
   });
 

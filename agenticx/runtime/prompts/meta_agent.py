@@ -295,14 +295,26 @@ def _build_memory_recall_context(session: StudioSession) -> str:
                 if len(lines) > 1:
                     sections.append("\n".join(lines))
 
+        from agenticx.memory.turn_archive_config import is_turn_archive_enabled, load_turn_archive_config
+
         avatar_id = str(getattr(session, "bound_avatar_id", "") or "").strip() or None
         session_id = str(getattr(session, "session_id", "") or "").strip() or None
+        turn_cfg = load_turn_archive_config()
+        turns_limit = int(turn_cfg.get("recall_turns_limit", 3))
+        if getattr(session, "_recall_boost_pending", False):
+            turns_limit = min(turns_limit * 2, 10)
+            try:
+                setattr(session, "_recall_boost_pending", False)
+            except Exception:
+                pass
         recall = search_memory_for_chat_sync(
             query,
             limit=5,
             mode="hybrid",
             avatar_id=avatar_id,
             session_id=session_id,
+            include_turns=is_turn_archive_enabled(),
+            turns_limit=turns_limit,
         )
         lines = ["## 相关历史记忆（自动召回）"]
         total = 0
@@ -311,7 +323,12 @@ def _build_memory_recall_context(session: StudioSession) -> str:
             text = str(item.get("text", "")).strip()
             if not text:
                 continue
-            prefix = "[图谱] " if item.get("source") == "graph" else ""
+            if item.get("source") == "turn":
+                prefix = "[历史对话] "
+            elif item.get("source") == "graph":
+                prefix = "[图谱] "
+            else:
+                prefix = ""
             snippet = f"{prefix}{text[:200]}"
             snippet_key = " ".join(snippet.split())
             if snippet_key in seen_snippets:

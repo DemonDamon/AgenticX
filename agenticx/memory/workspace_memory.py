@@ -19,6 +19,8 @@ from typing import Any, Dict, Iterable, List, Tuple
 
 DEFAULT_WORKSPACE_MEMORY_DB = Path.home() / ".agenticx" / "memory" / "main.sqlite"
 
+_TURN_RECALL_HALFLIFE_DAYS = 7.0
+
 _CJK_RE = re.compile(r"[\u4e00-\u9fff\u3400-\u4dbf\uf900-\ufaff]")
 _CJK_SEQ_RE = re.compile(r"[\u4e00-\u9fff\u3400-\u4dbf\uf900-\ufaff]{2,8}")
 
@@ -138,6 +140,35 @@ class WorkspaceMemoryStore:
                 )
                 """
             )
+            conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS turns (
+                    id TEXT PRIMARY KEY,
+                    session_id TEXT NOT NULL,
+                    avatar_id TEXT,
+                    turn_index INTEGER,
+                    role TEXT,
+                    text TEXT NOT NULL,
+                    embedding BLOB,
+                    content_hash TEXT NOT NULL,
+                    access_count INTEGER DEFAULT 0,
+                    last_accessed TEXT,
+                    created_at TEXT NOT NULL
+                )
+                """
+            )
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_turns_session ON turns(session_id)"
+            )
+            conn.execute(
+                "CREATE UNIQUE INDEX IF NOT EXISTS idx_turns_hash ON turns(content_hash)"
+            )
+            conn.execute(
+                """
+                CREATE VIRTUAL TABLE IF NOT EXISTS turns_fts
+                USING fts5(text, session_id UNINDEXED, content='')
+                """
+            )
             conn.commit()
 
     async def index_workspace(self, workspace_dir: Path) -> Dict[str, Any]:
@@ -200,6 +231,98 @@ class WorkspaceMemoryStore:
 
     async def get_recent_memories(self, days: int = 7, limit: int = 10) -> List[Dict[str, Any]]:
         return await asyncio.to_thread(self.get_recent_memories_sync, days, limit)
+
+    def archive_turn_sync(
+        self,
+        *,
+        session_id: str,
+        text: str,
+        avatar_id: str = "",
+        turn_index: int = 0,
+        role: str = "pair",
+    ) -> bool:
+        """Archive one conversation turn chunk. Returns False if duplicate."""
+        body = (text or "").strip()
+        sid = (session_id or "").strip()
+        if not body or not sid:
+            return False
+        content_hash = hashlib.sha256(f"{sid}:{body}".encode("utf-8")).hexdigest()[:16]
+        turn_id = f"turn-{content_hash}"
+        now = datetime.now(timezone.utc).isoformat()
+        with self._connect() as conn:
+            existing = conn.execute(
+                "SELECT id FROM turns WHERE content_hash = ?",
+                (content_hash,),
+            ).fetchone()
+            if existing is not None:
+                return False
+            embedding = self._get_cached_embedding(conn, content_hash, body)
+            conn.execute(
+                """
+                INSERT INTO turns (
+                    id, session_id, avatar_id, turn_index, role, text,
+                    embedding, content_hash, access_count, last_accessed, created_at
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, NULL, ?)
+                """,
+                (
+                    turn_id,
+                    sid,
+                    avatar_id or "",
+                    int(turn_index),
+                    role,
+                    body,
+                    embedding,
+                    content_hash,
+                    now,
+                ),
+            )
+            conn.execute(
+                """
+                INSERT INTO turns_fts(rowid, text, session_id)
+                VALUES ((SELECT rowid FROM turns WHERE id = ?), ?, ?)
+                """,
+                (turn_id, body, sid),
+            )
+            conn.commit()
+        return True
+
+    def search_turns_sync(
+        self,
+        query: str,
+        limit: int = 5,
+        *,
+        session_id: str = "",
+        halflife_days: float = _TURN_RECALL_HALFLIFE_DAYS,
+    ) -> List[Dict[str, Any]]:
+        """Search archived turns with recency * frequency composite rerank."""
+        q = (query or "").strip()
+        if not q:
+            return []
+        n = max(1, int(limit))
+        fts = self._search_turns_fts(q, n * 2, session_id=session_id)
+        sem = self._search_turns_semantic(q, n * 2, session_id=session_id)
+        merged = self._merge_ranked(fts, sem)
+        reranked = self._rerank_turns_composite(merged, halflife_days=halflife_days)
+        return reranked[:n]
+
+    def reinforce_turns_sync(self, turn_ids: List[str]) -> None:
+        """Bump access_count and last_accessed for recalled turn rows."""
+        ids = [str(tid).strip() for tid in turn_ids if str(tid).strip()]
+        if not ids:
+            return
+        now = datetime.now(timezone.utc).isoformat()
+        with self._connect() as conn:
+            for turn_id in ids:
+                conn.execute(
+                    """
+                    UPDATE turns
+                    SET access_count = access_count + 1, last_accessed = ?
+                    WHERE id = ?
+                    """,
+                    (now, turn_id),
+                )
+            conn.commit()
 
     def get_recent_memories_sync(self, days: int = 7, limit: int = 10) -> List[Dict[str, Any]]:
         n = max(1, int(limit))
@@ -484,3 +607,122 @@ class WorkspaceMemoryStore:
         if left_norm == 0 or right_norm == 0:
             return 0.0
         return dot / (left_norm * right_norm)
+
+    def _search_turns_fts(
+        self,
+        query: str,
+        limit: int,
+        *,
+        session_id: str = "",
+    ) -> List[Dict[str, Any]]:
+        sid = (session_id or "").strip()
+        with self._connect() as conn:
+            if sid:
+                rows = conn.execute(
+                    """
+                    SELECT t.id, t.session_id, t.text, t.created_at, t.access_count
+                    FROM turns_fts f
+                    JOIN turns t ON t.rowid = f.rowid
+                    WHERE turns_fts MATCH ? AND t.session_id = ?
+                    LIMIT ?
+                    """,
+                    (query, sid, max(1, limit)),
+                ).fetchall()
+            else:
+                rows = conn.execute(
+                    """
+                    SELECT t.id, t.session_id, t.text, t.created_at, t.access_count
+                    FROM turns_fts f
+                    JOIN turns t ON t.rowid = f.rowid
+                    WHERE turns_fts MATCH ?
+                    LIMIT ?
+                    """,
+                    (query, max(1, limit)),
+                ).fetchall()
+            return [
+                self._turn_row_to_result(row, score=1.0 - (idx * 0.01))
+                for idx, row in enumerate(rows)
+            ]
+
+    def _search_turns_semantic(
+        self,
+        query: str,
+        limit: int,
+        *,
+        session_id: str = "",
+    ) -> List[Dict[str, Any]]:
+        sid = (session_id or "").strip()
+        query_vec = self._embedding_vector(query)
+        scored: List[Tuple[float, sqlite3.Row]] = []
+        with self._connect() as conn:
+            if sid:
+                rows = conn.execute(
+                    """
+                    SELECT id, session_id, text, embedding, created_at, access_count
+                    FROM turns
+                    WHERE session_id = ?
+                    """,
+                    (sid,),
+                ).fetchall()
+            else:
+                rows = conn.execute(
+                    """
+                    SELECT id, session_id, text, embedding, created_at, access_count
+                    FROM turns
+                    """
+                ).fetchall()
+            for row in rows:
+                embedding_bytes = row["embedding"]
+                if not isinstance(embedding_bytes, (bytes, bytearray)):
+                    continue
+                vec = self._decode_vector(bytes(embedding_bytes))
+                score = self._cosine_similarity(query_vec, vec)
+                scored.append((score, row))
+        scored.sort(key=lambda item: item[0], reverse=True)
+        return [
+            self._turn_row_to_result(row, score=score)
+            for score, row in scored[: max(1, limit)]
+        ]
+
+    def _turn_row_to_result(self, row: sqlite3.Row, *, score: float) -> Dict[str, Any]:
+        return {
+            "id": str(row["id"]),
+            "path": "",
+            "source": "turn",
+            "session_id": str(row["session_id"] or ""),
+            "start_line": 0,
+            "end_line": 0,
+            "model": "",
+            "text": str(row["text"]),
+            "created_at": str(row["created_at"]),
+            "access_count": int(row["access_count"] or 0),
+            "score": round(float(score), 4),
+        }
+
+    def _rerank_turns_composite(
+        self,
+        rows: List[Dict[str, Any]],
+        *,
+        halflife_days: float = _TURN_RECALL_HALFLIFE_DAYS,
+    ) -> List[Dict[str, Any]]:
+        now = datetime.now(timezone.utc)
+        halflife = max(0.1, float(halflife_days))
+        enriched: List[Dict[str, Any]] = []
+        for row in rows:
+            item = dict(row)
+            base = max(float(item.get("score", 0.0)), 0.01)
+            created_raw = str(item.get("created_at", "") or "")
+            try:
+                created = datetime.fromisoformat(created_raw.replace("Z", "+00:00"))
+                if created.tzinfo is None:
+                    created = created.replace(tzinfo=timezone.utc)
+            except ValueError:
+                created = now
+            age_days = max(0.0, (now - created).total_seconds() / 86400.0)
+            recency = math.exp(-0.693 * age_days / halflife)
+            access_count = int(item.get("access_count", 0) or 0)
+            frequency = math.log2(access_count + 1) + 1
+            item["score"] = round(base * recency * frequency, 4)
+            enriched.append(item)
+        enriched.sort(key=lambda item: float(item.get("score", 0.0)), reverse=True)
+        return enriched
