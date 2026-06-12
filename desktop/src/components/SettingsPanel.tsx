@@ -7217,40 +7217,23 @@ export function SettingsPanel({
                   <p className="mb-3 text-[11px] leading-relaxed text-text-subtle">
                     「你」的身份与展示，以及希望各对话如何围绕你展开（称呼、头像、用户偏好）。全局人格（SOUL）仍在下方 Near 区块。
                   </p>
-                  <label className="block text-sm text-text-muted">
-                    我的称呼（用于所有对话）
-                    <input
-                      type="text"
-                      className="mt-1 w-full rounded-md border border-border bg-surface-panel px-2 py-1.5 text-sm text-text-primary placeholder:text-text-faint"
-                      value={userNicknameDraft}
-                      onChange={(e) => {
-                        setUserNicknameDraft(e.target.value);
-                        setUserProfileMessage("");
-                      }}
-                      placeholder="留空则显示「我」"
-                      maxLength={48}
-                    />
-                  </label>
-                  <p className="mt-1 text-[11px] text-text-subtle">
-                    在单聊与群聊中均以此称呼标注你的身份，分身会称呼你此名。
-                  </p>
-                  <div className="mt-4">
-                    <div className="text-sm text-text-muted">我的头像</div>
-                    <div className="mt-2 flex items-center gap-3">
+                  <div className="flex items-start gap-6">
+                    {/* 左侧：头像区 */}
+                    <div className="flex shrink-0 flex-col items-center gap-3 pt-1">
                       {userAvatarUrl ? (
                         <img
                           src={userAvatarUrl}
                           alt="我的头像"
-                          className="h-12 w-12 rounded-full border border-border object-cover"
+                          className="h-16 w-16 rounded-full border border-border object-cover shadow-sm"
                         />
                       ) : (
-                        <div className="flex h-12 w-12 items-center justify-center rounded-full bg-[rgba(var(--theme-color-rgb),0.9)] text-sm font-semibold text-black">
+                        <div className="flex h-16 w-16 items-center justify-center rounded-full bg-[rgba(var(--theme-color-rgb),0.9)] text-lg font-semibold text-black shadow-sm">
                           {(userNicknameDraft.trim().slice(0, 1) || "我").toUpperCase()}
                         </div>
                       )}
-                      <div className="flex flex-wrap items-center gap-2">
-                        <label className="cursor-pointer rounded-md border border-border px-3 py-1.5 text-xs text-text-subtle transition hover:bg-surface-hover hover:text-text-strong">
-                          上传图片
+                      <div className="flex items-center gap-2">
+                        <label className="cursor-pointer text-xs font-medium text-[rgba(var(--theme-color-rgb),0.9)] transition-opacity hover:opacity-80">
+                          更换
                           <input
                             type="file"
                             accept="image/*"
@@ -7262,63 +7245,86 @@ export function SettingsPanel({
                             }}
                           />
                         </label>
-                        <button
-                          type="button"
-                          className="rounded-md border border-border px-3 py-1.5 text-xs text-text-subtle transition hover:bg-surface-hover hover:text-text-strong disabled:opacity-50"
-                          disabled={!userAvatarUrl}
-                          onClick={() => {
-                            setUserAvatarUrl("");
-                            setUserAvatarMessage("已恢复默认用户头像。");
-                          }}
-                        >
-                          恢复默认
-                        </button>
+                        {userAvatarUrl && (
+                          <>
+                            <span className="text-border">|</span>
+                            <button
+                              type="button"
+                              className="text-xs text-text-subtle transition-colors hover:text-text-muted"
+                              onClick={() => {
+                                setUserAvatarUrl("");
+                                setUserAvatarMessage("已恢复默认。");
+                              }}
+                            >
+                              清除
+                            </button>
+                          </>
+                        )}
                       </div>
+                      {userAvatarMessage ? (
+                        <div className="text-[10px] text-text-subtle">{userAvatarMessage}</div>
+                      ) : null}
                     </div>
-                    <p className="mt-1 text-[11px] text-text-subtle">
-                      会用于 IM 风格聊天中的用户消息头像。仅本机生效，保存在本地浏览器存储。
-                    </p>
-                    {userAvatarMessage ? (
-                      <p className="mt-1 text-[11px] text-text-subtle">{userAvatarMessage}</p>
-                    ) : null}
-                  </div>
-                  <div className="mt-4">
-                    <div className="text-sm text-text-muted">用户偏好与风格（注入系统提示）</div>
-                    <textarea
-                      className="mt-1 w-full resize-none rounded-md border border-border bg-surface-panel px-2 py-1.5 text-sm text-text-primary placeholder:text-text-faint"
-                      rows={4}
-                      value={userPreferenceDraft}
-                      onChange={(e) => {
-                        setUserPreferenceDraft(e.target.value);
-                        setUserProfileMessage("");
-                      }}
-                      placeholder={"例：我不喜欢绕弯子，请直接给结论；偏好表格而非长段落；遇到歧义先问我再执行。"}
-                      maxLength={500}
-                    />
-                    <div className="mt-1 flex items-start justify-between gap-3">
-                      <p className="min-w-0 flex-1 text-[11px] leading-relaxed text-text-subtle">
-                        {`${userPreferenceDraft.length}/500 字。会注入每次对话的系统提示，对所有 agent 的回复方式生效。`}
-                      </p>
-                      <div className="flex shrink-0 items-center gap-2">
-                        {userProfileMessage ? (
-                          <span
-                            className={`max-w-[180px] text-right text-[11px] leading-snug ${
-                              userProfileMessage.startsWith("用户档案已保存")
-                                ? "text-text-subtle"
-                                : "text-rose-400"
-                            }`}
-                          >
-                            {userProfileMessage}
-                          </span>
-                        ) : null}
-                        <button
-                          type="button"
-                          className="rounded-md bg-btnPrimary px-3 py-1 text-xs font-medium text-btnPrimary-text transition hover:bg-btnPrimary-hover disabled:opacity-50"
-                          disabled={!userProfileDirty}
-                          onClick={saveUserProfile}
-                        >
-                          保存
-                        </button>
+
+                    {/* 右侧：表单区 */}
+                    <div className="flex-1 min-w-0 space-y-4">
+                      <div>
+                        <div className="mb-1.5 text-sm font-medium text-text-muted">我的称呼（用于所有对话）</div>
+                        <input
+                          type="text"
+                          className="w-full rounded-md border border-border bg-surface-panel px-3 py-2 text-sm text-text-primary placeholder:text-text-faint focus:border-[rgba(var(--theme-color-rgb),0.5)] focus:outline-none focus:ring-1 focus:ring-[rgba(var(--theme-color-rgb),0.5)] transition-shadow"
+                          value={userNicknameDraft}
+                          onChange={(e) => {
+                            setUserNicknameDraft(e.target.value);
+                            setUserProfileMessage("");
+                          }}
+                          placeholder="留空则显示「我」"
+                          maxLength={48}
+                        />
+                        <p className="mt-1.5 text-[11px] text-text-subtle">
+                          在单聊与群聊中均以此称呼标注你的身份，分身会称呼你此名。
+                        </p>
+                      </div>
+
+                      <div>
+                        <div className="mb-1.5 text-sm font-medium text-text-muted">用户偏好与风格（注入系统提示）</div>
+                        <textarea
+                          className="w-full resize-none rounded-md border border-border bg-surface-panel px-3 py-2 text-sm text-text-primary placeholder:text-text-faint focus:border-[rgba(var(--theme-color-rgb),0.5)] focus:outline-none focus:ring-1 focus:ring-[rgba(var(--theme-color-rgb),0.5)] transition-shadow"
+                          rows={3}
+                          value={userPreferenceDraft}
+                          onChange={(e) => {
+                            setUserPreferenceDraft(e.target.value);
+                            setUserProfileMessage("");
+                          }}
+                          placeholder="例：我不喜欢绕弯子，请直接给结论；偏好表格而非长段落；遇到歧义先问我再执行。"
+                          maxLength={500}
+                        />
+                        <div className="mt-1.5 flex items-start justify-between gap-3">
+                          <p className="min-w-0 flex-1 text-[11px] leading-relaxed text-text-subtle">
+                            {`${userPreferenceDraft.length}/500 字。会注入每次对话的系统提示，对所有 agent 的回复方式生效。`}
+                          </p>
+                          <div className="flex shrink-0 items-center gap-2">
+                            {userProfileMessage ? (
+                              <span
+                                className={`max-w-[180px] text-right text-[11px] leading-snug ${
+                                  userProfileMessage.startsWith("用户档案已保存")
+                                    ? "text-text-subtle"
+                                    : "text-rose-400"
+                                }`}
+                              >
+                                {userProfileMessage}
+                              </span>
+                            ) : null}
+                            <button
+                              type="button"
+                              className="rounded-md bg-btnPrimary px-4 py-1.5 text-xs font-medium text-btnPrimary-text transition hover:bg-btnPrimary-hover disabled:opacity-50"
+                              disabled={!userProfileDirty}
+                              onClick={saveUserProfile}
+                            >
+                              保存
+                            </button>
+                          </div>
+                        </div>
                       </div>
                     </div>
                   </div>
