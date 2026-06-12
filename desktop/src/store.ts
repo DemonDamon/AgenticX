@@ -150,6 +150,7 @@ export type ToolCallStatus = "pending" | "running" | "done" | "error" | "cancell
 /** Flat inline notices for context/token budget events (not expandable tool cards). */
 export type ContextNoticeKind =
   | "budget_compress"
+  | "context_compact"
   | "compactor_cb"
   | "compaction_reactive"
   | "compaction_proactive"
@@ -198,6 +199,8 @@ export type Message = {
   budgetSource?: string;
   budgetCurrent?: number;
   budgetMax?: number;
+  /** messages.json metadata (e.g. view_image_inject). */
+  metadata?: Record<string, unknown>;
 };
 
 /** Extras allowed on tool messages from `addPaneMessage` / `addMessage`. */

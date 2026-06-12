@@ -6,7 +6,11 @@ Author: Damon Li
 
 from __future__ import annotations
 
-from agenticx.cli.agent_tools import PENDING_VISUAL_ATTACHMENTS_KEY
+from agenticx.cli.agent_tools import (
+    PENDING_VISUAL_ATTACHMENTS_KEY,
+    VIEW_IMAGE_INJECT_LLM_TEXT,
+    VIEW_IMAGE_INJECT_METADATA_SOURCE,
+)
 from agenticx.cli.studio import StudioSession
 from agenticx.runtime.agent_runtime import _inject_pending_visual_attachments
 
@@ -34,7 +38,11 @@ def test_inject_pending_visual_attachments_appends_multimodal_user_message() -> 
     assert content[1]["type"] == "image_url"
     assert content[1]["image_url"]["url"] == "data:image/png;base64,abc"
     assert session.agent_messages[-1] == messages[-1]
-    assert session.chat_history[-1]["visual_attachments"][0]["name"] == "cover.png"
+    hist = session.chat_history[-1]
+    assert hist["visual_attachments"][0]["name"] == "cover.png"
+    assert hist["visual_attachments"][0]["data_url"] == "data:image/png;base64,abc"
+    assert hist["content"] == ""
+    assert hist["metadata"]["source"] == VIEW_IMAGE_INJECT_METADATA_SOURCE
 
 
 def test_inject_pending_visual_attachments_clears_after_pop() -> None:
@@ -60,7 +68,7 @@ def test_inject_pending_visual_attachments_clears_after_pop() -> None:
             "content": [
                 {
                     "type": "text",
-                    "text": "<system-injected> attached images requested via view_image tool:",
+                    "text": VIEW_IMAGE_INJECT_LLM_TEXT,
                 },
                 {"type": "image_url", "image_url": {"url": "data:image/png;base64,abc"}},
             ],

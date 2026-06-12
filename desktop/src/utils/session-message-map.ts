@@ -2,6 +2,10 @@ import type { Message, MessageAttachment, MsgRole } from "../store";
 import { META_AGENT_DISPLAY_NAME } from "../constants/branding";
 import { isMetaLeaderIdentity } from "./display-name";
 import { parseSearchReferences } from "../types/search-references";
+import {
+  isViewImageInjectMetadata,
+  VIEW_IMAGE_INJECT_LEGACY_PREFIX,
+} from "./view-image-inject";
 
 /** Snapshot row from GET /api/session/messages (snake_case). */
 export function attachmentsFromSessionRow(raw: unknown): MessageAttachment[] | undefined {
@@ -47,6 +51,23 @@ export function attachmentsFromSessionRow(raw: unknown): MessageAttachment[] | u
   return out.length ? out : undefined;
 }
 
+function imageAttachmentsFromVisualRow(raw: unknown): MessageAttachment[] | undefined {
+  if (!Array.isArray(raw) || raw.length === 0) return undefined;
+  const out: MessageAttachment[] = [];
+  for (const a of raw) {
+    if (!a || typeof a !== "object") continue;
+    const o = a as { name?: unknown; mime_type?: unknown; size?: unknown; data_url?: unknown };
+    const dataUrl = String(o.data_url ?? "").trim();
+    if (!dataUrl.startsWith("data:image/")) continue;
+    const name = String(o.name ?? "").trim() || "image";
+    const sizeRaw = o.size;
+    const size = typeof sizeRaw === "number" && Number.isFinite(sizeRaw) ? sizeRaw : Number(sizeRaw) || 0;
+    const mimeType = String(o.mime_type ?? "").trim() || "image/png";
+    out.push({ name, mimeType, size, dataUrl });
+  }
+  return out.length ? out : undefined;
+}
+
 export type LoadedSessionMessage = {
   id?: string;
   role: MsgRole;
@@ -73,6 +94,8 @@ export type LoadedSessionMessage = {
   };
   /** From messages.json / GET /api/session/messages */
   attachments?: unknown;
+  visual_attachments?: unknown;
+  metadata?: Record<string, unknown>;
   tool_call_id?: string;
   tool_name?: string;
   tool_args?: Record<string, unknown>;
@@ -118,10 +141,18 @@ export function mapLoadedSessionMessage(
   const agentId = item.agent_id ?? "meta";
   const rawAvatarName = item.avatar_name != null ? String(item.avatar_name).trim() : "";
   const metaLeaderRow = isMetaLeaderIdentity(agentId, rawAvatarName);
+  const injectRow = isViewImageInjectMetadata(item.metadata)
+    || String(item.content ?? "").trim().startsWith(VIEW_IMAGE_INJECT_LEGACY_PREFIX);
+  const visualAttachments = imageAttachmentsFromVisualRow(item.visual_attachments);
+  const fileAttachments = attachmentsFromSessionRow(item.attachments);
+  const mergedAttachments = injectRow
+    ? visualAttachments ?? fileAttachments
+    : fileAttachments ?? visualAttachments;
+  const rawContent = String(item.content ?? "");
   const mapped: Message = {
     id,
     role: item.role,
-    content: item.content,
+    content: injectRow && !rawContent.trim() ? "" : rawContent,
     ownerSessionId: String(ownerSessionId ?? idPrefix ?? "").trim() || undefined,
     agentId,
     avatarName: metaLeaderRow ? META_AGENT_DISPLAY_NAME : item.avatar_name,
@@ -140,7 +171,11 @@ export function mapLoadedSessionMessage(
             items: forwardedItems,
           }
         : undefined,
-    attachments: attachmentsFromSessionRow(item.attachments),
+    attachments: mergedAttachments,
+    metadata:
+      item.metadata && typeof item.metadata === "object"
+        ? { ...(item.metadata as Record<string, unknown>) }
+        : undefined,
   };
   if (item.role === "assistant") {
     const sq = item.suggested_questions;

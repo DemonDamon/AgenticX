@@ -133,6 +133,7 @@ import {
   mapLoadedSessionMessage,
   type LoadedSessionMessage,
 } from "../utils/session-message-map";
+import { viewImageInjectRowFromSession } from "../utils/view-image-inject";
 import { resolveSessionTailForSwitch, invalidateSessionTail } from "../utils/session-tail-cache";
 import { visibleMessagesForSession } from "../utils/message-ownership";
 import {
@@ -2651,7 +2652,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
             const rowAtts = attachmentsFromSessionRow(
               (item as { attachments?: unknown }).attachments
             );
-            if (!content && !rowAtts?.length) continue;
+            if (!content && !rowAtts?.length && !viewImageInjectRowFromSession(item)) continue;
             const attSig =
               rowAtts?.length && rowAtts[0]?.dataUrl
                 ? rowAtts[0].dataUrl.slice(0, 72)
