@@ -7551,31 +7551,8 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
 
   const createNewTopic = (inherit = true, sessionMode: PaneSessionMode = "daily_office") => {
     const prevSessionId = (pane.sessionId || "").trim();
-    const runningSid = (streamingSessionId || prevSessionId).trim();
-    if (runningSid) {
-      const ctrl = sessionAbortControllersRef.current[runningSid];
-      if (ctrl) {
-        try {
-          ctrl.abort();
-        } catch {
-          // ignore
-        }
-        delete sessionAbortControllersRef.current[runningSid];
-      }
-      const st = sessionStreamStateRef.current[runningSid];
-      if (st) {
-        st.active = false;
-        st.text = "";
-        sessionStreamStateRef.current[runningSid] = st;
-      }
-      // 切到新对话时释放当前 pane 发送锁，避免旧流挂住导致新消息无法发送。
-      if (sendChatInFlightRef.current === pane.id) {
-        sendChatInFlightRef.current = null;
-      }
-      void window.agenticxDesktop.interruptSession?.(runningSid).catch(() => {
-        // best effort
-      });
-    }
+    // 用户主动新建会话时，不应强制中断旧会话流：旧会话允许后台继续执行。
+    // 发送锁在 sendChat 里会基于 isPaneAwaitingFreshSession 进行抢占释放。
     clearPaneMessages(pane.id);
     setPaneContextInherited(pane.id, false);
     setPanePendingSessionMode(pane.id, sessionMode);
