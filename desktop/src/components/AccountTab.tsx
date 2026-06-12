@@ -163,14 +163,14 @@ export function AccountTab() {
       </div>
 
       {acct.loggedIn ? (
-        <div className="rounded-lg border border-border-subtle bg-surface-card px-4 py-3 space-y-2">
+        <div className="rounded-lg border border-border bg-surface-card px-4 py-3 space-y-2">
           <div className="text-xs text-text-subtle">当前已登录</div>
           <div className="font-medium">{acct.displayName || acct.email || "（无显示名）"}</div>
           {acct.email ? <div className="text-xs text-text-subtle font-mono">{acct.email}</div> : null}
           <Button
             type="button"
             variant="ghost"
-            className="mt-2 inline-flex items-center gap-1.5 border border-border-subtle"
+            className="mt-2 inline-flex items-center gap-1.5 border border-border"
             onClick={() => void onLogout()}
           >
             <LogOut className="size-3.5" />
@@ -178,7 +178,7 @@ export function AccountTab() {
           </Button>
         </div>
       ) : (
-        <div className="rounded-lg border border-border-subtle bg-surface-card px-4 py-4 space-y-3">
+        <div className="rounded-lg border border-border bg-surface-card px-4 py-4 space-y-3">
           <p className="text-xs text-text-subtle">
             点击下方按钮将在系统浏览器中打开官网登录页；完成后本窗口会自动更新状态。
           </p>
