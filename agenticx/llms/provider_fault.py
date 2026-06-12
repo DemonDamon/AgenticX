@@ -16,7 +16,15 @@ from typing import TYPE_CHECKING, Literal, Optional, Set
 if TYPE_CHECKING:
     from agenticx.cli.studio import StudioSession
 
-FaultKind = Literal["billing", "auth", "rate_limit", "tool_unavailable", "transient", "unknown"]
+FaultKind = Literal[
+    "billing",
+    "auth",
+    "rate_limit",
+    "tool_unavailable",
+    "context_window",
+    "transient",
+    "unknown",
+]
 
 
 def provider_fault_escalation_enabled() -> bool:
@@ -50,6 +58,13 @@ def classify_provider_fault(exc: BaseException) -> FaultKind:
         return "auth"
     if "429" in text or "rate limit" in text or "too many requests" in text:
         return "rate_limit"
+    if (
+        "contextwindowexceeded" in text
+        or "context window" in text
+        or "maximum context length" in text
+        or "context length exceeded" in text
+    ):
+        return "context_window"
     if "tool" in text and ("not found" in text or "unavailable" in text):
         return "tool_unavailable"
     if "timeout" in text or "timed out" in text or "connection reset" in text:
@@ -95,4 +110,9 @@ def human_hint_for_fault(fault: FaultKind) -> str:
         return "鉴权失败：请检查 API Key / Base URL / 组织权限后更换 Provider 再试。"
     if fault == "rate_limit":
         return "触发限流：请降低并发或等待窗口重置后再试。"
+    if fault == "context_window":
+        return (
+            "精简模式仍超出当前模型上下文。请换更大窗口模型（如 glm-4-9b-chat-1m），"
+            "或新建会话后再试。"
+        )
     return "请检查网络与模型配置后重试。"

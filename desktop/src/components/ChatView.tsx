@@ -1499,11 +1499,17 @@ export function ChatView({ onOpenConfirm, mode = "pro" }: Props) {
               const detector = String(payload.data?.detector ?? "").trim();
               const isWarning = severity === "warning"
                 || detector === "token_budget_compress"
-                || detector === "compactor_circuit_breaker";
+                || detector === "compactor_circuit_breaker"
+                || detector === "context_budget_compact"
+                || detector === "context_window";
               if (eventAgentId === "meta") {
                 if (isWarning) {
                   const noticeKind =
-                    detector === "compactor_circuit_breaker" ? "compactor_cb" : "budget_compress";
+                    detector === "context_budget_compact" || detector === "context_window"
+                      ? "context_compact"
+                      : detector === "compactor_circuit_breaker"
+                        ? "compactor_cb"
+                        : "budget_compress";
                   addMessage("tool", errText, "meta", undefined, undefined, undefined, {
                     noticeKind,
                   });
