@@ -69,6 +69,11 @@ export type MemoryGraphStatus = {
   } | null;
 };
 
-export type WorkspaceMemoryEntry = { index: number; text: string; line: number };
+export type WorkspaceMemoryEntry = {
+  index: number;
+  text: string;
+  line: number;
+  children?: string[];
+};
 export type WorkspaceMemorySection = { section: string; entries: WorkspaceMemoryEntry[] };
 export type WorkspaceMemoryDoc = { sections: WorkspaceMemorySection[]; path: string };

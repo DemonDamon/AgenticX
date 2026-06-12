@@ -286,11 +286,18 @@ export async function updateWorkspaceEntry(
   section: string,
   index: number,
   text: string,
+  children?: string[],
 ): Promise<void> {
+  const body: { section: string; index: number; text: string; children?: string[] } = {
+    section,
+    index,
+    text,
+  };
+  if (children !== undefined) body.children = children;
   const r = await fetch(`${apiBase}/api/memory/workspace/entry`, {
     method: "PATCH",
     headers: headers(apiToken),
-    body: JSON.stringify({ section, index, text }),
+    body: JSON.stringify(body),
   });
   if (!r.ok) throw new Error(`update entry ${r.status}`);
 }

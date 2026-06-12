@@ -5018,13 +5018,15 @@ def create_studio_app() -> FastAPI:
             if sec not in sections_map:
                 sections_map[sec] = []
                 sections_order.append(sec)
-            sections_map[sec].append(
-                {
-                    "index": int(entry.get("index", 0)),
-                    "text": str(entry.get("text") or ""),
-                    "line": int(entry.get("line") or 0),
-                }
-            )
+            item: dict = {
+                "index": int(entry.get("index", 0)),
+                "text": str(entry.get("text") or ""),
+                "line": int(entry.get("line") or 0),
+            }
+            raw_children = entry.get("children")
+            if isinstance(raw_children, list) and raw_children:
+                item["children"] = [str(c) for c in raw_children if str(c).strip()]
+            sections_map[sec].append(item)
         sections = [{"section": sec, "entries": sections_map[sec]} for sec in sections_order]
         return {
             "ok": True,
@@ -5067,8 +5069,17 @@ def create_studio_app() -> FastAPI:
         except (TypeError, ValueError):
             raise HTTPException(status_code=400, detail="index must be an integer")
         workspace_dir = resolve_workspace_dir()
+        children: list[str] | None = None
+        raw_children = payload.get("children")
+        if raw_children is not None:
+            if not isinstance(raw_children, list):
+                raise HTTPException(status_code=400, detail="children must be a list")
+            children = [str(c).strip() for c in raw_children if str(c).strip()]
         try:
-            update_memory_entry(workspace_dir, section, index, text)
+            if children is not None:
+                update_memory_entry(workspace_dir, section, index, text, children=children)
+            else:
+                update_memory_entry(workspace_dir, section, index, text)
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
         try:

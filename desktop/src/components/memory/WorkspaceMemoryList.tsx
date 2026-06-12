@@ -10,7 +10,7 @@ import {
   fetchWorkspaceMemory,
   updateWorkspaceEntry,
 } from "./memory-graph-api";
-import type { WorkspaceMemorySection } from "./memory-graph-types";
+import type { WorkspaceMemoryEntry, WorkspaceMemorySection } from "./memory-graph-types";
 
 /** Fallback when MEMORY.md has no sections yet; matches loader.MEMORY_TEMPLATE. */
 const FALLBACK_SECTION = "User Anchors";
@@ -46,6 +46,8 @@ export function WorkspaceMemoryList({ apiBase, apiToken }: Props) {
   const newGroupInputId = useId();
   const [editingKey, setEditingKey] = useState<string | null>(null);
   const [editText, setEditText] = useState("");
+  const [editChildrenText, setEditChildrenText] = useState("");
+  const [editingHasChildren, setEditingHasChildren] = useState(false);
   const [pendingDelete, setPendingDelete] = useState<PendingDelete>(null);
   const [pendingBatchDelete, setPendingBatchDelete] = useState(false);
   const [selectMode, setSelectMode] = useState(false);
@@ -64,9 +66,46 @@ export function WorkspaceMemoryList({ apiBase, apiToken }: Props) {
 
   const selectedCount = selectedKeys.size;
 
+  const expandSectionsWithEntries = useCallback(() => {
+    setExpandedSections((prev) => {
+      const next = new Set(prev);
+      for (const group of sections) {
+        if (group.entries.length > 0) next.add(group.section);
+      }
+      return next;
+    });
+  }, [sections]);
+
+  const enterSelectMode = () => {
+    expandSectionsWithEntries();
+    setSelectMode(true);
+    setSelectedKeys(new Set());
+  };
+
   const exitSelectMode = () => {
     setSelectMode(false);
     setSelectedKeys(new Set());
+  };
+
+  const beginEdit = (section: string, key: string, entry: WorkspaceMemoryEntry) => {
+    setExpandedSections((prev) => new Set(prev).add(section));
+    if (selectMode) exitSelectMode();
+    setEditingKey(key);
+    setEditText(entry.text);
+    setEditChildrenText((entry.children ?? []).join("\n"));
+    setEditingHasChildren((entry.children?.length ?? 0) > 0);
+  };
+
+  const cancelEdit = () => {
+    setEditingKey(null);
+    setEditText("");
+    setEditChildrenText("");
+    setEditingHasChildren(false);
+  };
+
+  const formatEntryPreview = (entry: WorkspaceMemoryEntry) => {
+    if (!entry.children?.length) return entry.text;
+    return `${entry.text}\n${entry.children.map((child) => `  - ${child}`).join("\n")}`;
   };
 
   const toggleEntrySelect = (key: string) => {
@@ -167,14 +206,33 @@ export function WorkspaceMemoryList({ apiBase, apiToken }: Props) {
   };
 
   const onSaveEdit = async (section: string, index: number) => {
+    if (editingHasChildren) {
+      const parentText = editText.trim();
+      const children = editChildrenText
+        .split("\n")
+        .map((line) => line.replace(/^[-*]\s+/, "").trim())
+        .filter(Boolean);
+      if (!parentText || children.length === 0) return;
+      setBusy(true);
+      setError(null);
+      try {
+        await updateWorkspaceEntry(apiBase, apiToken, section, index, parentText, children);
+        cancelEdit();
+        await reload();
+      } catch (e) {
+        setError(e instanceof Error ? e.message : "保存失败");
+      } finally {
+        setBusy(false);
+      }
+      return;
+    }
     const text = editText.trim();
     if (!text) return;
     setBusy(true);
     setError(null);
     try {
       await updateWorkspaceEntry(apiBase, apiToken, section, index, text);
-      setEditingKey(null);
-      setEditText("");
+      cancelEdit();
       await reload();
     } catch (e) {
       setError(e instanceof Error ? e.message : "保存失败");
@@ -369,8 +427,9 @@ export function WorkspaceMemoryList({ apiBase, apiToken }: Props) {
                 <button
                   type="button"
                   disabled={busy}
-                  onClick={() => setSelectMode(true)}
+                  onClick={enterSelectMode}
                   className="ml-auto text-[10px] text-text-muted transition hover:text-text-strong disabled:opacity-50"
+                  title="勾选多条后批量删除；单条仍可用右侧编辑/删除"
                 >
                   批量管理
                 </button>
@@ -395,8 +454,37 @@ export function WorkspaceMemoryList({ apiBase, apiToken }: Props) {
           </div>
         ) : (
           <div className="space-y-3">
+            {selectMode ? (
+              <div
+                className="sticky top-0 z-10 flex flex-wrap items-center gap-2 rounded-md border border-border bg-surface-panel/95 px-3 py-2 backdrop-blur-sm"
+              >
+                <span className="text-[11px] font-medium text-text-strong">批量选择</span>
+                <span className="text-[10px] text-text-muted">已选 {selectedCount} 条</span>
+                <button
+                  type="button"
+                  disabled={busy || selectedCount === 0}
+                  onClick={() => setPendingBatchDelete(true)}
+                  className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-[10px] font-medium text-status-error transition hover:bg-status-error/10 disabled:opacity-50"
+                >
+                  <Trash2 className="h-3 w-3" />
+                  删除所选
+                </button>
+                <button
+                  type="button"
+                  disabled={busy}
+                  onClick={exitSelectMode}
+                  className="ml-auto text-[10px] text-text-muted transition hover:text-text-strong disabled:opacity-50"
+                >
+                  完成
+                </button>
+              </div>
+            ) : null}
             {sections.map((group) => {
-              const expanded = expandedSections.has(group.section) || selectMode;
+              const expanded =
+                expandedSections.has(group.section) ||
+                selectMode ||
+                (editingKey != null &&
+                  group.entries.some((entry) => entryKey(group.section, entry.index) === editingKey));
               const sectionSelect = sectionSelectionState(group);
               return (
               <section key={group.section} className="rounded-md border border-border bg-surface-card">
@@ -441,35 +529,107 @@ export function WorkspaceMemoryList({ apiBase, apiToken }: Props) {
                   {group.entries.map((entry) => {
                     const key = entryKey(group.section, entry.index);
                     const isEditing = editingKey === key;
+                    const entryContent = (
+                      <div className="min-w-0 flex-1">
+                        <p className="whitespace-pre-wrap break-words text-xs leading-relaxed text-text-primary">
+                          {entry.text}
+                        </p>
+                        {entry.children && entry.children.length > 0 ? (
+                          <ul className="mt-1.5 space-y-0.5 border-l border-border/50 pl-3">
+                            {entry.children.map((child, childIdx) => (
+                              <li
+                                key={`${key}-child-${childIdx}`}
+                                className="text-[11px] leading-relaxed text-text-subtle"
+                              >
+                                {child}
+                              </li>
+                            ))}
+                          </ul>
+                        ) : null}
+                      </div>
+                    );
+                    const entryActions = (
+                      <div className="flex shrink-0 items-center gap-1">
+                        <button
+                          type="button"
+                          className="rounded px-1.5 py-1 text-[10px] text-text-muted hover:bg-surface-hover hover:text-text-strong"
+                          title="编辑"
+                          disabled={busy}
+                          onClick={() => beginEdit(group.section, key, entry)}
+                        >
+                          <Pencil className="h-3.5 w-3.5" />
+                        </button>
+                        <button
+                          type="button"
+                          className="rounded px-1.5 py-1 text-[10px] text-status-error hover:bg-status-error/10"
+                          title="删除"
+                          disabled={busy}
+                          onClick={() =>
+                            setPendingDelete({
+                              section: group.section,
+                              index: entry.index,
+                              text: formatEntryPreview(entry),
+                            })
+                          }
+                        >
+                          <Trash2 className="h-3.5 w-3.5" />
+                        </button>
+                      </div>
+                    );
                     return (
                       <li key={key} className="px-3 py-2">
                         {selectMode ? (
-                          <label className="flex cursor-pointer items-start gap-2">
+                          <div className="flex items-start gap-2">
                             <input
                               type="checkbox"
                               checked={selectedKeys.has(key)}
                               onChange={() => toggleEntrySelect(key)}
                               className="mt-0.5 h-3.5 w-3.5 shrink-0 accent-[var(--ui-btn-primary-bg)]"
+                              aria-label={`选择 ${entry.text.slice(0, 40)}`}
                             />
-                            <p className="min-w-0 flex-1 whitespace-pre-wrap break-words text-xs leading-relaxed text-text-primary">
-                              {entry.text}
-                            </p>
-                          </label>
+                            {entryContent}
+                            {entryActions}
+                          </div>
                         ) : isEditing ? (
                           <div className="space-y-2">
-                            <textarea
-                              value={editText}
-                              onChange={(e) => setEditText(e.target.value)}
-                              rows={3}
-                              className="w-full rounded-md border border-border bg-surface-panel px-2 py-1.5 text-xs text-text-primary"
-                            />
+                            {editingHasChildren ? (
+                              <>
+                                <p className="text-xs font-medium text-text-strong">{editText}</p>
+                                <label className="block text-[10px] text-text-faint">
+                                  子项（每行一条）
+                                  <textarea
+                                    value={editChildrenText}
+                                    onChange={(e) => setEditChildrenText(e.target.value)}
+                                    rows={Math.max(3, editChildrenText.split("\n").length)}
+                                    placeholder="数学/物理理论能力强"
+                                    className="mt-1 w-full rounded-md border border-border bg-surface-panel px-2 py-1.5 text-xs text-text-primary"
+                                  />
+                                </label>
+                              </>
+                            ) : (
+                              <textarea
+                                value={editText}
+                                onChange={(e) => setEditText(e.target.value)}
+                                rows={3}
+                                className="w-full rounded-md border border-border bg-surface-panel px-2 py-1.5 text-xs text-text-primary"
+                              />
+                            )}
                             <div className="flex justify-end gap-2">
-                              <Button variant="ghost" disabled={busy} onClick={() => setEditingKey(null)}>
+                              <Button variant="ghost" disabled={busy} onClick={cancelEdit}>
                                 取消
                               </Button>
                               <Button
                                 variant="primary"
-                                disabled={busy || !editText.trim()}
+                                disabled={
+                                  busy ||
+                                  (editingHasChildren
+                                    ? !editText.trim() ||
+                                      !editChildrenText
+                                        .split("\n")
+                                        .map((line) => line.replace(/^[-*]\s+/, "").trim())
+                                        .some(Boolean)
+                                    : !editText.trim())
+                                }
                                 onClick={() => void onSaveEdit(group.section, entry.index)}
                               >
                                 保存
@@ -478,36 +638,8 @@ export function WorkspaceMemoryList({ apiBase, apiToken }: Props) {
                           </div>
                         ) : (
                           <div className="flex items-start gap-2">
-                            <p className="min-w-0 flex-1 whitespace-pre-wrap break-words text-xs leading-relaxed text-text-primary">
-                              {entry.text}
-                            </p>
-                            <div className="flex shrink-0 items-center gap-1">
-                              <button
-                                type="button"
-                                className="rounded px-1.5 py-1 text-[10px] text-text-muted hover:bg-surface-hover hover:text-text-strong"
-                                title="编辑"
-                                onClick={() => {
-                                  setEditingKey(key);
-                                  setEditText(entry.text);
-                                }}
-                              >
-                                <Pencil className="h-3.5 w-3.5" />
-                              </button>
-                              <button
-                                type="button"
-                                className="rounded px-1.5 py-1 text-[10px] text-status-error hover:bg-status-error/10"
-                                title="删除"
-                                onClick={() =>
-                                  setPendingDelete({
-                                    section: group.section,
-                                    index: entry.index,
-                                    text: entry.text,
-                                  })
-                                }
-                              >
-                                <Trash2 className="h-3.5 w-3.5" />
-                              </button>
-                            </div>
+                            {entryContent}
+                            {entryActions}
                           </div>
                         )}
                       </li>

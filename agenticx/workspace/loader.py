@@ -86,7 +86,8 @@ def append_daily_memory(workspace_dir: Path, note: str) -> None:
         return
 
 
-_MEMORY_LIST_ITEM_RE = re.compile(r"^\s*[-*]\s+(.*)$")
+_MEMORY_LIST_ITEM_RE = re.compile(r"^(\s*)[-*]\s+(.*)$")
+_MEMORY_CHILD_INDENT = "  "
 
 
 _MEMORY_ENTRY_MAX_CHARS = 400
@@ -410,15 +411,32 @@ def load_workspace_context() -> Dict[str, str]:
     }
 
 
+def _memory_list_item_indent(raw: str) -> int | None:
+    match = _MEMORY_LIST_ITEM_RE.match(raw)
+    if not match:
+        return None
+    return len(match.group(1).replace("\t", "    "))
+
+
+def _memory_list_item_text(raw: str) -> str | None:
+    match = _MEMORY_LIST_ITEM_RE.match(raw)
+    if not match:
+        return None
+    return match.group(2).strip()
+
+
 def read_memory_entries(workspace_dir: Path) -> List[dict]:
     """Parse MEMORY.md into structured list entries grouped by section.
+
+    Top-level bullets become indexed entries; indented nested bullets are
+    attached as ``children`` on the preceding top-level entry.
 
     Args:
         workspace_dir: The workspace directory.
 
     Returns:
-        A flat list of entries, each with section, index (0-based within the
-        section), text (marker stripped) and 1-based line number.
+        A flat list of top-level entries, each with section, index (0-based
+        within the section), text, optional children, and 1-based line number.
     """
     memory_file = workspace_dir / "MEMORY.md"
     if not memory_file.exists():
@@ -426,49 +444,96 @@ def read_memory_entries(workspace_dir: Path) -> List[dict]:
     lines = memory_file.read_text(encoding="utf-8", errors="replace").splitlines()
     current_section = ""
     counters: dict[str, int] = {}
+    section_top: dict[str, dict | None] = {}
     entries: List[dict] = []
     for i, raw in enumerate(lines):
         stripped = raw.strip()
         if stripped.startswith("## "):
             current_section = stripped[3:].strip()
             counters.setdefault(current_section, 0)
+            section_top[current_section] = None
             continue
-        match = _MEMORY_LIST_ITEM_RE.match(raw)
-        if match and current_section:
+        indent = _memory_list_item_indent(raw)
+        text = _memory_list_item_text(raw)
+        if indent is None or not current_section or text is None:
+            continue
+        if indent == 0:
             idx = counters[current_section]
-            entries.append(
-                {
-                    "section": current_section,
-                    "index": idx,
-                    "text": match.group(1).strip(),
-                    "line": i + 1,
-                }
-            )
+            entry = {
+                "section": current_section,
+                "index": idx,
+                "text": text,
+                "line": i + 1,
+                "children": [],
+            }
+            entries.append(entry)
             counters[current_section] = idx + 1
+            section_top[current_section] = entry
+        else:
+            parent = section_top.get(current_section)
+            if parent is not None:
+                parent["children"].append(text)
     return entries
 
 
+def _trim_entry_block_end(lines: List[str], start: int, end: int) -> int:
+    """Drop trailing blank or non-list lines from an entry block."""
+    while end > start + 1:
+        stripped = lines[end - 1].strip()
+        if not stripped or _memory_list_item_indent(lines[end - 1]) is None:
+            end -= 1
+        else:
+            break
+    return end
+
+
+def _locate_entry_block(lines: List[str], section: str, index: int) -> tuple[int, int]:
+    """Return ``[start, end)`` line indices for a top-level entry block.
+
+    The block includes nested child bullets under the top-level item.
+
+    Raises:
+        ValueError: When the section or index cannot be found.
+    """
+    current_section = ""
+    top_level_idx = 0
+    block_start: int | None = None
+    for i, raw in enumerate(lines):
+        stripped = raw.strip()
+        if stripped.startswith("## "):
+            if block_start is not None:
+                return block_start, _trim_entry_block_end(lines, block_start, i)
+            current_section = stripped[3:].strip()
+            top_level_idx = 0
+            block_start = None
+            continue
+        if current_section != section:
+            continue
+        indent = _memory_list_item_indent(raw)
+        if indent is None:
+            continue
+        if indent == 0:
+            if block_start is not None:
+                return block_start, _trim_entry_block_end(lines, block_start, i)
+            if top_level_idx == index:
+                block_start = i
+            top_level_idx += 1
+    if block_start is not None:
+        for j in range(block_start + 1, len(lines)):
+            if lines[j].strip().startswith("## "):
+                return block_start, _trim_entry_block_end(lines, block_start, j)
+        return block_start, _trim_entry_block_end(lines, block_start, len(lines))
+    raise ValueError(f"memory entry not found: section={section!r} index={index}")
+
+
 def _locate_entry_line(lines: List[str], section: str, index: int) -> int:
-    """Return the 0-based line number of the index-th list item under section.
+    """Return the 0-based line number of the index-th top-level list item.
 
     Raises:
         ValueError: When the section or the index-th item cannot be found.
     """
-    current_section = ""
-    counter = 0
-    for i, raw in enumerate(lines):
-        stripped = raw.strip()
-        if stripped.startswith("## "):
-            current_section = stripped[3:].strip()
-            counter = 0
-            continue
-        if current_section != section:
-            continue
-        if _MEMORY_LIST_ITEM_RE.match(raw):
-            if counter == index:
-                return i
-            counter += 1
-    raise ValueError(f"memory entry not found: section={section!r} index={index}")
+    start, _ = _locate_entry_block(lines, section, index)
+    return start
 
 
 def _ensure_memory_file(workspace_dir: Path) -> Path:
@@ -479,21 +544,39 @@ def _ensure_memory_file(workspace_dir: Path) -> Path:
     return memory_file
 
 
-def update_memory_entry(workspace_dir: Path, section: str, index: int, new_text: str) -> None:
-    """Replace the text of one MEMORY.md list entry, preserving everything else."""
+def update_memory_entry(
+    workspace_dir: Path,
+    section: str,
+    index: int,
+    new_text: str,
+    children: Optional[List[str]] = None,
+) -> None:
+    """Replace one top-level MEMORY.md entry and optional nested children."""
     memory_file = _ensure_memory_file(workspace_dir)
     lines = memory_file.read_text(encoding="utf-8", errors="replace").split("\n")
-    target = _locate_entry_line(lines, section, index)
-    lines[target] = f"- {new_text.strip()}"
+    start, end = _locate_entry_block(lines, section, index)
+    if children is None:
+        children = []
+        for raw in lines[start + 1:end]:
+            indent = _memory_list_item_indent(raw)
+            child_text = _memory_list_item_text(raw)
+            if indent is not None and indent > 0 and child_text:
+                children.append(child_text)
+    new_block = [f"- {new_text.strip()}"]
+    for child in children:
+        child_text = str(child).strip()
+        if child_text:
+            new_block.append(f"{_MEMORY_CHILD_INDENT}- {child_text}")
+    lines = lines[:start] + new_block + lines[end:]
     memory_file.write_text("\n".join(lines), encoding="utf-8")
 
 
 def delete_memory_entry(workspace_dir: Path, section: str, index: int) -> None:
-    """Delete one MEMORY.md list entry, keeping the section heading intact."""
+    """Delete one top-level MEMORY.md entry block, including nested children."""
     memory_file = _ensure_memory_file(workspace_dir)
     lines = memory_file.read_text(encoding="utf-8", errors="replace").split("\n")
-    target = _locate_entry_line(lines, section, index)
-    del lines[target]
+    start, end = _locate_entry_block(lines, section, index)
+    del lines[start:end]
     memory_file.write_text("\n".join(lines), encoding="utf-8")
 
 
@@ -514,7 +597,9 @@ def delete_memory_entries_batch(workspace_dir: Path, targets: List[tuple[str, in
     line_numbers: set[int] = set()
     for section, index in targets:
         try:
-            line_numbers.add(_locate_entry_line(lines, section, index))
+            start, end = _locate_entry_block(lines, section, index)
+            for line_no in range(start, end):
+                line_numbers.add(line_no)
         except ValueError:
             continue
     if not line_numbers:
