@@ -49,6 +49,22 @@ describe("model-options", () => {
     });
   });
 
+  it("allows baseUrl-only custom gateways in the model picker", () => {
+    const intranet: ProviderEntry = {
+      apiKey: "",
+      baseUrl: "http://192.168.32.151:6821/aibox/v1",
+      model: "some-model",
+      models: ["some-model"],
+      enabled: true,
+      dropParams: false,
+      interface: "openai",
+    };
+    expect(isModelSelectable("custom_openai_intranet", "some-model", { custom_openai_intranet: intranet })).toBe(true);
+    const options = collectSelectableModelOptions({ custom_openai_intranet: intranet });
+    expect(options).toHaveLength(1);
+    expect(options[0]?.model).toBe("some-model");
+  });
+
   it("collects only selectable provider/model pairs", () => {
     const options = collectSelectableModelOptions({
       openai: openaiGateway,

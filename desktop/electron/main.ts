@@ -1137,6 +1137,81 @@ const KNOWN_BASE_URLS: Record<string, string> = {
   kimi: "https://api.moonshot.cn/v1",
 };
 
+/** Treat UI placeholders as empty so we do not send `Bearer sk-...` to intranet gateways. */
+function normalizeProviderApiKey(apiKey: string | undefined): string {
+  const key = (apiKey ?? "").trim();
+  if (!key) return "";
+  if (/^sk-\.{2,}$/i.test(key)) return "";
+  if (key === "sk-" || key.toLowerCase() === "your-api-key") return "";
+  return key;
+}
+
+/** Omit Authorization when key is empty — intranet OpenAI-compatible gateways often need no auth. */
+function openAiCompatAuthHeaders(apiKey: string | undefined): Record<string, string> {
+  const key = normalizeProviderApiKey(apiKey);
+  if (!key) return {};
+  return { Authorization: `Bearer ${key}` };
+}
+
+function isModelsCatalogMissing(status: number, body: string): boolean {
+  if (status === 404 || status === 405) return true;
+  if (status !== 400 && status !== 422) return false;
+  const lower = body.toLowerCase();
+  return (
+    lower.includes("not found")
+    || lower.includes("not_found")
+    || lower.includes("no route")
+    || lower.includes("unknown path")
+    || lower.includes("不存在")
+  );
+}
+
+function usesCustomBaseUrl(provider: string, baseUrl?: string): boolean {
+  const custom = (baseUrl ?? "").trim().replace(/\/+$/, "");
+  if (!custom) return false;
+  const known = (KNOWN_BASE_URLS[provider] ?? "").replace(/\/+$/, "");
+  return custom !== known;
+}
+
+/** Many enterprise gateways only expose /chat/completions (no GET /models). */
+async function probeOpenAiCompatChatReachable(
+  base: string,
+  apiKey: string,
+): Promise<{ ok: boolean; error?: string }> {
+  const url = `${base}/chat/completions`;
+  try {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 10000);
+    const resp = await proxyAwareFetch(url, {
+      method: "POST",
+      headers: {
+        ...openAiCompatAuthHeaders(apiKey),
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        model: "__near_connectivity_probe__",
+        messages: [{ role: "user", content: "ping" }],
+        max_tokens: 1,
+      }),
+      signal: controller.signal,
+    });
+    clearTimeout(timer);
+    if (resp.ok) return { ok: true };
+    const body = await resp.text().catch(() => "");
+    if (resp.status === 401 || resp.status === 403) {
+      return { ok: false, error: `HTTP ${resp.status}: ${body.slice(0, 200)}` };
+    }
+    if (resp.status >= 500) {
+      return { ok: false, error: `HTTP ${resp.status}: ${body.slice(0, 200)}` };
+    }
+    // Model/route validation errors still prove the chat endpoint is reachable.
+    if (resp.status >= 400 && resp.status < 500) return { ok: true };
+    return { ok: false, error: `HTTP ${resp.status}: ${body.slice(0, 200)}` };
+  } catch (err) {
+    return { ok: false, error: String(err) };
+  }
+}
+
 // Bailian/DashScope vector models. The OpenAI-compatible `/models` endpoint
 // does not list embedding SKUs, so we merge this catalog into fetch-models for
 // the bailian provider (and any base URL pointing at dashscope). Keep in sync
@@ -6025,34 +6100,57 @@ function registerIpc(): void {
     apiKey: string;
     baseUrl?: string;
   }) => {
+    const apiKey = normalizeProviderApiKey(payload.apiKey);
     const base = (payload.baseUrl || KNOWN_BASE_URLS[payload.provider] || "").replace(/\/+$/, "");
     if (!base) return { ok: false, error: "未知 provider，请填写 API 地址" };
     const isMinimax = payload.provider === "minimax";
-    const url = isMinimax ? `${base}/chat/completions` : `${base}/models`;
+    const customBase = usesCustomBaseUrl(payload.provider, payload.baseUrl);
+    if (isMinimax) {
+      try {
+        const controller = new AbortController();
+        const timer = setTimeout(() => controller.abort(), 10000);
+        const resp = await proxyAwareFetch(`${base}/chat/completions`, {
+          method: "POST",
+          headers: {
+            ...openAiCompatAuthHeaders(apiKey),
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            model: "MiniMax-M2.5",
+            messages: [{ role: "user", content: "hi" }],
+            max_tokens: 1,
+          }),
+          signal: controller.signal,
+        });
+        clearTimeout(timer);
+        if (resp.ok) return { ok: true, status: resp.status };
+        const body = await resp.text().catch(() => "");
+        return { ok: false, error: `HTTP ${resp.status}: ${body.slice(0, 200)}` };
+      } catch (err) {
+        return { ok: false, error: String(err) };
+      }
+    }
     try {
       const controller = new AbortController();
       const timer = setTimeout(() => controller.abort(), 10000);
-      const resp = isMinimax
-        ? await proxyAwareFetch(url, {
-            method: "POST",
-            headers: {
-              Authorization: `Bearer ${payload.apiKey}`,
-              "Content-Type": "application/json",
-            },
-            body: JSON.stringify({
-              model: "MiniMax-M2.5",
-              messages: [{ role: "user", content: "hi" }],
-              max_tokens: 1,
-            }),
-            signal: controller.signal,
-          })
-        : await proxyAwareFetch(url, {
-            headers: { Authorization: `Bearer ${payload.apiKey}` },
-            signal: controller.signal,
-          });
+      const resp = await proxyAwareFetch(`${base}/models`, {
+        headers: openAiCompatAuthHeaders(apiKey),
+        signal: controller.signal,
+      });
       clearTimeout(timer);
       if (resp.ok) return { ok: true, status: resp.status };
       const body = await resp.text().catch(() => "");
+      if (isModelsCatalogMissing(resp.status, body) || (customBase && !apiKey)) {
+        const probe = await probeOpenAiCompatChatReachable(base, apiKey);
+        if (probe.ok) {
+          return {
+            ok: true,
+            status: resp.status,
+            warning: "网关未提供 /models 列表，连通性正常；请用 + 手动添加模型 ID",
+          };
+        }
+        return { ok: false, error: probe.error ?? `HTTP ${resp.status}: ${body.slice(0, 200)}` };
+      }
       return { ok: false, error: `HTTP ${resp.status}: ${body.slice(0, 200)}` };
     } catch (err) {
       return { ok: false, error: String(err) };
@@ -6064,6 +6162,7 @@ function registerIpc(): void {
     apiKey: string;
     baseUrl?: string;
   }) => {
+    const apiKey = normalizeProviderApiKey(payload.apiKey);
     const base = (payload.baseUrl || KNOWN_BASE_URLS[payload.provider] || "").replace(/\/+$/, "");
     if (!base) return { ok: false, models: [], error: "未知 API 地址" };
     const url = `${base}/models`;
@@ -6078,11 +6177,12 @@ function registerIpc(): void {
       const controller = new AbortController();
       const timer = setTimeout(() => controller.abort(), 15000);
       const resp = await proxyAwareFetch(url, {
-        headers: { Authorization: `Bearer ${payload.apiKey}` },
+        headers: openAiCompatAuthHeaders(apiKey),
         signal: controller.signal,
       });
       clearTimeout(timer);
       if (!resp.ok) {
+        const body = await resp.text().catch(() => "");
         const fallback = PROVIDER_FALLBACK_MODELS[payload.provider];
         if (resp.status === 404 && Array.isArray(fallback) && fallback.length > 0) {
           return { ok: true, models: mergeEmbeddings(fallback) };
@@ -6091,6 +6191,13 @@ function registerIpc(): void {
           // Even if the catalog endpoint fails, expose the known embeddings so
           // users can still configure vectorization.
           return { ok: true, models: mergeEmbeddings([]) };
+        }
+        if (isModelsCatalogMissing(resp.status, body)) {
+          return {
+            ok: true,
+            models: [],
+            warning: "该网关未提供 /models 接口，请使用 + 手动添加模型 ID",
+          };
         }
         return { ok: false, models: [], error: `HTTP ${resp.status}` };
       }
@@ -6108,6 +6215,7 @@ function registerIpc(): void {
     baseUrl?: string;
     model: string;
   }) => {
+    const apiKey = normalizeProviderApiKey(payload.apiKey);
     const base = (payload.baseUrl || KNOWN_BASE_URLS[payload.provider] || "").replace(/\/+$/, "");
     if (!base) return { ok: false, error: "未知 API 地址" };
     // Embedding models reject /chat/completions; probe them via /embeddings so
@@ -6128,7 +6236,7 @@ function registerIpc(): void {
       const resp = await proxyAwareFetch(url, {
         method: "POST",
         headers: {
-          Authorization: `Bearer ${payload.apiKey}`,
+          ...openAiCompatAuthHeaders(apiKey),
           "Content-Type": "application/json",
         },
         body,

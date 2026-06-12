@@ -52,9 +52,7 @@ class ProviderResolver:
         if not provider_key.startswith("custom_openai_"):
             return False
         # Require gateway-like shape to avoid accidentally routing arbitrary custom providers.
-        has_base_url = bool(str(base_url or "").strip())
-        has_auth = bool(str(api_key or "").strip())
-        return has_base_url and has_auth
+        return bool(str(base_url or "").strip())
 
     @classmethod
     def _normalized_model(
@@ -100,8 +98,12 @@ class ProviderResolver:
             "group_id",
             "drop_params",
         ):
-            if provider_cfg.get(key) is not None:
-                kwargs[key] = provider_cfg[key]
+            val = provider_cfg.get(key)
+            if val is None:
+                continue
+            if key == "api_key" and not str(val).strip():
+                continue
+            kwargs[key] = val
         return kwargs
 
     @classmethod

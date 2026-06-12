@@ -134,3 +134,33 @@ def test_resolver_legacy_custom_openai_provider_without_interface_uses_litellm(t
     provider = ProviderResolver.resolve()
     assert isinstance(provider, LiteLLMProvider)
     assert provider.model == "openai/deepseek-r1"
+
+
+def test_resolver_keyless_custom_openai_gateway_with_interface(tmp_path: Path, monkeypatch):
+    """Intranet OpenAI-compatible gateways may omit api_key when base_url is set."""
+    _setup_paths(tmp_path, monkeypatch)
+    ConfigManager.set_value("default_provider", "custom_openai_intranet", scope="global")
+    ConfigManager.set_value("providers.custom_openai_intranet.api_key", "", scope="global")
+    ConfigManager.set_value("providers.custom_openai_intranet.model", "gpt-4o-mini", scope="global")
+    ConfigManager.set_value(
+        "providers.custom_openai_intranet.base_url",
+        "http://192.168.32.151:6821/aibox/v1",
+        scope="global",
+    )
+    ConfigManager.set_value("providers.custom_openai_intranet.interface", "openai", scope="global")
+
+    provider = ProviderResolver.resolve()
+    assert isinstance(provider, LiteLLMProvider)
+    assert provider.model == "openai/gpt-4o-mini"
+    assert provider.base_url == "http://192.168.32.151:6821/aibox/v1"
+    assert provider.api_key == "placeholder"
+
+
+def test_litellm_provider_from_config_uses_placeholder_for_custom_base_without_key():
+    provider = LiteLLMProvider.from_config(
+        {
+            "model": "openai/Qwen3-32B",
+            "base_url": "http://192.168.32.151:6821/aibox/v1",
+        }
+    )
+    assert provider.api_key == "placeholder"
