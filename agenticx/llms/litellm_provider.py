@@ -15,11 +15,25 @@ def _reasoning_detail_text(detail: Any) -> str:
 
 
 def _iter_reasoning_delta_texts(delta: Any) -> List[str]:
-    """MiniMax M2.x may stream thinking via reasoning_details instead of reasoning_content."""
+    """Extract reasoning/thinking delta text from a streaming chunk delta.
+
+    Different providers use different field names for the thinking phase:
+    - reasoning_content  (DeepSeek-R1, many OpenAI-compat gateways)
+    - reasoning          (Qwen3 / some aibox gateways emit this alongside reasoning_content)
+    - reasoning_details  (MiniMax M2.x)
+
+    When a gateway echoes both ``reasoning`` and ``reasoning_content`` with
+    identical content (e.g. aibox + Qwen3-32B), we deduplicate by preferring
+    ``reasoning_content`` and skipping ``reasoning`` when the value is the same.
+    """
     out: List[str] = []
     rc = getattr(delta, "reasoning_content", None)
     if isinstance(rc, str) and rc:
         out.append(rc)
+    # Only include `reasoning` when it carries distinct content.
+    reasoning = getattr(delta, "reasoning", None)
+    if isinstance(reasoning, str) and reasoning and reasoning != rc:
+        out.append(reasoning)
     details = getattr(delta, "reasoning_details", None)
     if details:
         for detail in details:
@@ -27,6 +41,81 @@ def _iter_reasoning_delta_texts(delta: Any) -> List[str]:
             if text:
                 out.append(text)
     return out
+
+
+def _resolve_litellm_api_key(api_key: Optional[str], base_url: Optional[str]) -> Optional[str]:
+    """LiteLLM's OpenAI client rejects empty api_key even when the gateway does not."""
+    cleaned = str(api_key or "").strip()
+    if cleaned:
+        return cleaned
+    if str(base_url or "").strip():
+        return "placeholder"
+    return api_key
+
+
+def _is_private_base_url(base_url: Optional[str]) -> bool:
+    """Return True when *base_url* resolves to a private/loopback/intranet address.
+
+    We bypass the system proxy for these URLs because SOCKS5 proxies in common
+    developer setups (e.g. ALL_PROXY=socks5://127.0.0.1:7897) require the
+    socksio package, which is not always installed.  Private addresses never
+    need a proxy.
+    """
+    import ipaddress
+    import re
+    from urllib.parse import urlparse
+
+    url = str(base_url or "").strip()
+    if not url:
+        return False
+    try:
+        host = urlparse(url).hostname or ""
+        try:
+            addr = ipaddress.ip_address(host)
+            return addr.is_private or addr.is_loopback or addr.is_link_local
+        except ValueError:
+            return host == "localhost" or bool(re.match(r"^(local|intranet|corp)\.", host))
+    except Exception:
+        return False
+
+
+def _build_no_proxy_openai_client(api_key: Optional[str], base_url: Optional[str]) -> Optional[Any]:
+    """Return an openai.OpenAI client with proxy bypassed for private URLs.
+
+    LiteLLM's ``client`` kwarg must be an ``openai.OpenAI`` instance.  We
+    construct one with an httpx transport that has no proxy so SOCKS env vars
+    do not cause ImportError when socksio is absent.
+    """
+    if not _is_private_base_url(base_url):
+        return None
+    try:
+        import httpx  # type: ignore
+        import openai  # type: ignore
+        http_client = httpx.Client(transport=httpx.HTTPTransport())
+        return openai.OpenAI(
+            api_key=api_key or "placeholder",
+            base_url=str(base_url or "").rstrip("/") + "/",
+            http_client=http_client,
+        )
+    except Exception:
+        return None
+
+
+def _build_no_proxy_async_openai_client(api_key: Optional[str], base_url: Optional[str]) -> Optional[Any]:
+    """Async variant of _build_no_proxy_openai_client."""
+    if not _is_private_base_url(base_url):
+        return None
+    try:
+        import httpx  # type: ignore
+        import openai  # type: ignore
+        async_http_client = httpx.AsyncClient(transport=httpx.AsyncHTTPTransport())
+        return openai.AsyncOpenAI(
+            api_key=api_key or "placeholder",
+            base_url=str(base_url or "").rstrip("/") + "/",
+            http_client=async_http_client,
+        )
+    except Exception:
+        return None
 
 class LiteLLMProvider(BaseLLMProvider):
     """
@@ -70,6 +159,9 @@ class LiteLLMProvider(BaseLLMProvider):
         max_retries = kwargs.pop("max_retries", self.max_retries)
         fallbacks = kwargs.pop("fallbacks", self.fallbacks)
         self._apply_drop_params_default(kwargs)
+        _no_proxy_client = _build_no_proxy_openai_client(self.api_key, self.base_url)
+        if _no_proxy_client is not None:
+            kwargs.setdefault("client", _no_proxy_client)
         try:
             response = litellm.completion(
                 model=self.model,
@@ -106,6 +198,9 @@ class LiteLLMProvider(BaseLLMProvider):
         max_retries = kwargs.pop("max_retries", self.max_retries)
         fallbacks = kwargs.pop("fallbacks", self.fallbacks)
         self._apply_drop_params_default(kwargs)
+        _no_proxy_async_client = _build_no_proxy_async_openai_client(self.api_key, self.base_url)
+        if _no_proxy_async_client is not None:
+            kwargs.setdefault("client", _no_proxy_async_client)
         try:
             response = await litellm.acompletion(
                 model=self.model,
@@ -218,6 +313,9 @@ class LiteLLMProvider(BaseLLMProvider):
                 extra = {}
                 kwargs["extra_body"] = extra
             extra.setdefault("reasoning_split", True)
+        _no_proxy_client = _build_no_proxy_openai_client(self.api_key, self.base_url)
+        if _no_proxy_client is not None:
+            kwargs.setdefault("client", _no_proxy_client)
         response_stream = litellm.completion(
             model=self.model,
             messages=messages,
@@ -332,6 +430,9 @@ class LiteLLMProvider(BaseLLMProvider):
         max_retries = kwargs.pop("max_retries", self.max_retries)
         fallbacks = kwargs.pop("fallbacks", self.fallbacks)
         self._apply_drop_params_default(kwargs)
+        _no_proxy_async_client = _build_no_proxy_async_openai_client(self.api_key, self.base_url)
+        if _no_proxy_async_client is not None:
+            kwargs.setdefault("client", _no_proxy_async_client)
         response_stream = await litellm.acompletion(
             model=self.model,
             messages=messages,
@@ -504,10 +605,11 @@ class LiteLLMProvider(BaseLLMProvider):
         model = config.get("model")
         if not model:
             raise ValueError("Model must be specified in config")
+        base_url = config.get("base_url")
         return cls(
             model=model,
-            api_key=config.get("api_key"),
-            base_url=config.get("base_url"),
+            api_key=_resolve_litellm_api_key(config.get("api_key"), base_url),
+            base_url=base_url,
             api_version=config.get("api_version"),
             timeout=config.get("timeout"),
             max_retries=config.get("max_retries"),

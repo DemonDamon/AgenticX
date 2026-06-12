@@ -23,8 +23,8 @@ type LoadConfigResult = {
   };
 };
 
-type ValidateKeyResult = { ok: boolean; error?: string; status?: number };
-type FetchModelsResult = { ok: boolean; models: string[]; error?: string };
+type ValidateKeyResult = { ok: boolean; error?: string; status?: number; warning?: string };
+type FetchModelsResult = { ok: boolean; models: string[]; error?: string; warning?: string };
 type HealthCheckResult = { ok: boolean; error?: string; latencyMs?: number };
 type EmailConfig = {
   enabled: boolean;

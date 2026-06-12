@@ -45,9 +45,17 @@ export function normalizeAllProviders(
   return out;
 }
 
+/** At least apiKey or custom baseUrl — aligns with SettingsPanel providerCredentialed. */
+export function isProviderCredentialed(
+  entry: Pick<ProviderCatalogEntry, "apiKey" | "baseUrl"> | undefined,
+): boolean {
+  if (!entry) return false;
+  return Boolean((entry.apiKey ?? "").trim() || (entry.baseUrl ?? "").trim());
+}
+
 function providerPassesPickerGate(entry: ProviderCatalogEntry): boolean {
   if (entry.enabled === false) return false;
-  return Boolean((entry.apiKey ?? "").trim());
+  return isProviderCredentialed(entry);
 }
 
 export function isModelInProviderCatalog(

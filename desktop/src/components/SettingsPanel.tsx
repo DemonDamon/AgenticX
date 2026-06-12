@@ -5725,12 +5725,14 @@ export function SettingsPanel({
   const [defProv, setDefProv] = useState(defaultProvider);
   const [keyStatus, setKeyStatus] = useState<Record<string, "idle" | "checking" | "ok" | "fail">>({});
   const [keyError, setKeyError] = useState<Record<string, string>>({});
+  const [keyWarning, setKeyWarning] = useState<Record<string, string>>({});
   const [modelHealthMap, setModelHealthMap] = useState<Record<string, ModelHealthEntry>>({});
   const [fetchingModels, setFetchingModels] = useState(false);
   const [fetchModelsModalOpen, setFetchModelsModalOpen] = useState(false);
   const [fetchedModels, setFetchedModels] = useState<string[]>([]);
   const [fetchModelsSearch, setFetchModelsSearch] = useState("");
   const [fetchModelsError, setFetchModelsError] = useState<string | null>(null);
+  const [fetchModelsWarning, setFetchModelsWarning] = useState<string | null>(null);
   const [addModelModalOpen, setAddModelModalOpen] = useState(false);
   const [addModelFormId, setAddModelFormId] = useState("");
   const [addModelFormName, setAddModelFormName] = useState("");
@@ -6166,22 +6168,27 @@ export function SettingsPanel({
   }, [draft]);
 
   const onValidateKey = async () => {
-    if (!current.apiKey) return;
+    if (!providerCredentialed(current)) return;
     setKeyStatus((p) => ({ ...p, [active]: "checking" }));
     setKeyError((p) => ({ ...p, [active]: "" }));
+    setKeyWarning((p) => ({ ...p, [active]: "" }));
     const res = await window.agenticxDesktop.validateKey({ provider: active, apiKey: current.apiKey, baseUrl: current.baseUrl || undefined });
     setKeyStatus((p) => ({ ...p, [active]: res.ok ? "ok" : "fail" }));
+    if (res.ok && res.warning) {
+      setKeyWarning((p) => ({ ...p, [active]: res.warning ?? "" }));
+    }
     if (!res.ok) setKeyError((p) => ({ ...p, [active]: res.error ?? "未知错误" }));
   };
 
   const onFetchModels = async () => {
-    if (!current.apiKey) return;
+    if (!providerCredentialed(current)) return;
     const requestProvider = active;
     const requestId = fetchModelsRequestSeqRef.current + 1;
     fetchModelsRequestSeqRef.current = requestId;
     const requestApiKey = current.apiKey;
     const requestBaseUrl = current.baseUrl || undefined;
     setFetchModelsError(null);
+    setFetchModelsWarning(null);
     setFetchingModels(true);
     try {
       const res = await window.agenticxDesktop.fetchModels({
@@ -6196,6 +6203,10 @@ export function SettingsPanel({
         setFetchModelsError(res.error ?? "拉取模型失败");
         return;
       }
+      if (res.warning) {
+        setFetchModelsWarning(res.warning);
+      }
+      if (res.models.length === 0) return;
       const normalized = Array.from(
         new Set(
           [...current.models, ...res.models].map((m) => String(m).trim()).filter(Boolean),
@@ -6248,7 +6259,7 @@ export function SettingsPanel({
   };
 
   const onBatchHealthCheck = async () => {
-    if (!current.apiKey?.trim() || current.models.length === 0) return;
+    if (!providerCredentialed(current) || current.models.length === 0) return;
     for (const m of current.models) {
       const key = `${active}:${m}`;
       setModelHealthMap((p) => ({ ...p, [key]: { phase: "checking" } }));
@@ -7554,13 +7565,19 @@ export function SettingsPanel({
                                 : ks === "fail" ? "border-rose-500/50 text-rose-400"
                                 : "border-border text-text-subtle hover:text-text-strong"
                             }`}
-                            disabled={ks === "checking" || !current.apiKey}
+                            disabled={ks === "checking" || !providerCredentialed(current)}
                             onClick={onValidateKey}
                           >
                             {ks === "checking" ? "检测中..." : ks === "ok" ? "有效 ✓" : ks === "fail" ? "失败 ✗" : "检 测"}
                           </button>
                         </div>
                         {ks === "fail" && keyError[active] && <div className="mt-1 text-xs text-rose-400">{keyError[active]}</div>}
+                        {ks === "ok" && keyWarning[active] && (
+                          <div className="mt-1 text-xs text-amber-400/90">{keyWarning[active]}</div>
+                        )}
+                        {!current.apiKey.trim() && current.baseUrl.trim() && (
+                          <div className="mt-1 text-xs text-text-faint">内网 OpenAI 兼容网关可不填密钥；若输入框仍是 sk-... 占位符请清空后再检测。</div>
+                        )}
                       </label>
                       <label className="block text-sm text-text-muted">
                         API 地址 <span className="text-xs text-text-faint">(留空使用默认)</span>
@@ -7608,7 +7625,7 @@ export function SettingsPanel({
                               type="button"
                               aria-label="批量健康检查"
                               className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md border border-border text-text-subtle transition hover:bg-surface-hover hover:text-text-strong disabled:pointer-events-none disabled:opacity-40"
-                              disabled={!current.apiKey?.trim() || current.models.length === 0}
+                              disabled={!providerCredentialed(current) || current.models.length === 0}
                               onClick={() => void onBatchHealthCheck()}
                             >
                               <Activity className="h-4 w-4" aria-hidden />
@@ -7619,7 +7636,7 @@ export function SettingsPanel({
                               type="button"
                               aria-label="从 API 获取模型"
                               className="inline-flex h-8 w-8 items-center justify-center rounded-md border border-border text-text-subtle transition hover:bg-surface-hover hover:text-text-strong disabled:pointer-events-none disabled:opacity-40"
-                              disabled={fetchingModels || !current.apiKey?.trim()}
+                              disabled={fetchingModels || !providerCredentialed(current)}
                               onClick={() => void onFetchModels()}
                             >
                               {fetchingModels ? (
@@ -7647,6 +7664,8 @@ export function SettingsPanel({
                       </div>
                       {fetchModelsError ? (
                         <div className="text-xs text-rose-400">{fetchModelsError}</div>
+                      ) : fetchModelsWarning ? (
+                        <div className="text-xs text-amber-400/90">{fetchModelsWarning}</div>
                       ) : null}
                       <div className="space-y-1">
                         {current.models.length === 0 ? (
@@ -7679,7 +7698,7 @@ export function SettingsPanel({
                                   <button
                                     type="button"
                                     className="shrink-0 text-xs text-text-faint transition hover:text-[var(--settings-accent-fg)] disabled:opacity-40"
-                                    disabled={checking || !current.apiKey}
+                                    disabled={checking || !providerCredentialed(current)}
                                     onClick={() => void onHealthCheck(model)}
                                   >
                                     检测
