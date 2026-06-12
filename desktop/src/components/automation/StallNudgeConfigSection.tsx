@@ -24,7 +24,7 @@ export function StallNudgeConfigSection({ value, onChange, disabled }: Props) {
     <div className="rounded-xl border border-border bg-surface-card px-4 py-3.5">
       <div className="text-sm font-semibold text-text-strong">长任务停滞与续跑</div>
       <p className="mt-1 text-xs leading-relaxed text-text-muted">
-        控制任务进度感叹号、顶部「可能已中断」提示，以及可选的自动续跑。修改后请点击窗口底部「保存」。
+        控制任务进度感叹号、顶部「可能已中断」提示，以及可选的自动续跑。修改后请点击窗口底部「退出」。
       </p>
 
       <div className="mt-3 space-y-2">

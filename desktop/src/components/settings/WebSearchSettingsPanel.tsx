@@ -30,6 +30,31 @@ const PROVIDERS: { id: string; label: string; needsKey: boolean }[] = [
   { id: "bing", label: "Bing Web Search API", needsKey: true },
 ];
 
+function normalizeWebSearchConfig(cfg: WebSearchConfig): WebSearchConfig {
+  return {
+    enabled: cfg.enabled !== false,
+    default_provider: cfg.default_provider || "duckduckgo",
+    max_results: typeof cfg.max_results === "number" ? cfg.max_results : 5,
+    fetch_snippet_chars: typeof cfg.fetch_snippet_chars === "number" ? cfg.fetch_snippet_chars : 600,
+    providers:
+      cfg.providers && typeof cfg.providers === "object"
+        ? (cfg.providers as Record<string, Record<string, unknown>>)
+        : {},
+  };
+}
+
+function webSearchConfigsEqual(a: WebSearchConfig, b: WebSearchConfig): boolean {
+  const left = normalizeWebSearchConfig(a);
+  const right = normalizeWebSearchConfig(b);
+  return (
+    left.enabled === right.enabled &&
+    left.default_provider === right.default_provider &&
+    left.max_results === right.max_results &&
+    left.fetch_snippet_chars === right.fetch_snippet_chars &&
+    JSON.stringify(left.providers) === JSON.stringify(right.providers)
+  );
+}
+
 export function WebSearchSettingsPanel() {
   const apiToken = useAppStore((s) => s.apiToken);
   const apiBase = useAppStore((s) => s.apiBase);
@@ -38,6 +63,7 @@ export function WebSearchSettingsPanel() {
   const [testing, setTesting] = useState(false);
   const [message, setMessage] = useState("");
   const [draft, setDraft] = useState<WebSearchConfig>(DEFAULT_CONFIG);
+  const [saved, setSaved] = useState<WebSearchConfig>(DEFAULT_CONFIG);
   const [apiKeyInput, setApiKeyInput] = useState("");
   const [cxInput, setCxInput] = useState("");
 
@@ -63,16 +89,9 @@ export function WebSearchSettingsPanel() {
       const body = (await resp.json()) as { ok?: boolean; config?: WebSearchConfig };
       const cfg = body.config;
       if (cfg) {
-        setDraft({
-          enabled: cfg.enabled !== false,
-          default_provider: cfg.default_provider || "duckduckgo",
-          max_results: typeof cfg.max_results === "number" ? cfg.max_results : 5,
-          fetch_snippet_chars: typeof cfg.fetch_snippet_chars === "number" ? cfg.fetch_snippet_chars : 600,
-          providers: (cfg.providers && typeof cfg.providers === "object" ? cfg.providers : {}) as Record<
-            string,
-            Record<string, unknown>
-          >,
-        });
+        const normalized = normalizeWebSearchConfig(cfg);
+        setDraft(normalized);
+        setSaved(normalized);
       }
       setApiKeyInput("");
       setCxInput("");
@@ -90,6 +109,8 @@ export function WebSearchSettingsPanel() {
   const currentProviderMeta = PROVIDERS.find((p) => p.id === draft.default_provider);
   const needsKey = currentProviderMeta?.needsKey ?? false;
   const needsCx = draft.default_provider === "google";
+  const webSearchDirty =
+    !webSearchConfigsEqual(draft, saved) || apiKeyInput.trim() !== "" || cxInput.trim() !== "";
 
   const persist = async () => {
     setSaving(true);
@@ -175,7 +196,10 @@ export function WebSearchSettingsPanel() {
           type="button"
           role="switch"
           aria-checked={draft.enabled}
-          onClick={() => setDraft((d) => ({ ...d, enabled: !d.enabled }))}
+          onClick={() => {
+            setDraft((d) => ({ ...d, enabled: !d.enabled }));
+            setMessage("");
+          }}
           className={`relative h-5 w-9 shrink-0 rounded-full transition focus:outline-none focus-visible:ring-2 focus-visible:ring-[rgba(var(--theme-color-rgb,16,185,129),0.55)] ${
             draft.enabled ? "bg-[rgb(var(--theme-color-rgb,16,185,129))]" : "bg-surface-hover"
           }`}
@@ -192,7 +216,10 @@ export function WebSearchSettingsPanel() {
         <select
           className="mt-1 w-full rounded-md border border-border bg-surface-panel px-2 py-1.5 text-sm text-text-primary"
           value={draft.default_provider}
-          onChange={(e) => setDraft((d) => ({ ...d, default_provider: e.target.value }))}
+          onChange={(e) => {
+            setDraft((d) => ({ ...d, default_provider: e.target.value }));
+            setMessage("");
+          }}
         >
           {PROVIDERS.map((p) => (
             <option key={p.id} value={p.id}>
@@ -209,15 +236,16 @@ export function WebSearchSettingsPanel() {
           max={WEB_SEARCH_MAX_RESULTS_CAP}
           className="mt-1 w-full rounded-md border border-border bg-surface-panel px-2 py-1.5 text-sm text-text-primary"
           value={draft.max_results}
-          onChange={(e) =>
+          onChange={(e) => {
             setDraft((d) => ({
               ...d,
               max_results: Math.min(
                 WEB_SEARCH_MAX_RESULTS_CAP,
                 Math.max(1, Number(e.target.value) || 5),
               ),
-            }))
-          }
+            }));
+            setMessage("");
+          }}
         />
       </label>
       {needsKey ? (
@@ -228,7 +256,10 @@ export function WebSearchSettingsPanel() {
             autoComplete="off"
             className="mt-1 w-full rounded-md border border-border bg-surface-panel px-2 py-1.5 text-sm text-text-primary"
             value={apiKeyInput}
-            onChange={(e) => setApiKeyInput(e.target.value)}
+            onChange={(e) => {
+              setApiKeyInput(e.target.value);
+              setMessage("");
+            }}
             placeholder="填写新密钥以更新；留空则保留已保存密钥"
           />
         </label>
@@ -240,20 +271,15 @@ export function WebSearchSettingsPanel() {
             type="text"
             className="mt-1 w-full rounded-md border border-border bg-surface-panel px-2 py-1.5 text-sm text-text-primary"
             value={cxInput}
-            onChange={(e) => setCxInput(e.target.value)}
+            onChange={(e) => {
+              setCxInput(e.target.value);
+              setMessage("");
+            }}
             placeholder="填写新 cx 以更新；留空则保留已保存值"
           />
         </label>
       ) : null}
-      <div className="mt-3 flex flex-wrap gap-2">
-        <button
-          type="button"
-          disabled={saving}
-          onClick={() => void persist()}
-          className="rounded-md bg-[rgb(var(--theme-color-rgb,16,185,129))] px-3 py-1.5 text-sm font-medium text-white disabled:opacity-50"
-        >
-          {saving ? "保存中…" : "保存"}
-        </button>
+      <div className="mt-3 flex flex-wrap items-center justify-end gap-2">
         <button
           type="button"
           disabled={testing || !draft.enabled}
@@ -261,6 +287,14 @@ export function WebSearchSettingsPanel() {
           className="rounded-md border border-border bg-surface-panel px-3 py-1.5 text-sm text-text-primary disabled:opacity-50"
         >
           {testing ? "测试中…" : "测试连通"}
+        </button>
+        <button
+          type="button"
+          disabled={saving || !webSearchDirty}
+          onClick={() => void persist()}
+          className="rounded-md bg-btnPrimary px-3 py-1.5 text-sm font-medium text-btnPrimary-text transition hover:bg-btnPrimary-hover disabled:opacity-50"
+        >
+          {saving ? "保存中…" : "保存"}
         </button>
       </div>
       {message ? <div className="mt-2 text-xs text-text-muted">{message}</div> : null}
