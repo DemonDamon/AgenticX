@@ -9,7 +9,14 @@ export function stripLegacyNoticePrefix(content: string): string {
 }
 
 function detectKindFromText(text: string): ContextNoticeKind | null {
-  if (text.includes("但仍超限") || text.includes("上下文接近上限，建议收口")) return "budget_compress";
+  if (
+    text.includes("已自动切换为精简模式")
+    || text.includes("已自动切换精简模式")
+    || text.includes("已自动切换精简 Meta")
+  ) {
+    return "context_compact";
+  }
+  if (text.includes("精简模式仍超出") || text.includes("上下文超限")) return "context_compact";
   if (text.includes("上下文 token 接近上限")) return "budget_compress";
   if (text.includes("自动上下文压缩已暂停")) return "compactor_cb";
   if (text.includes("上下文接近上限，已压缩")) return "compaction_reactive";
