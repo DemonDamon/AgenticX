@@ -4045,7 +4045,7 @@ function EmailSettingsTab() {
         </div>
       </div>
 
-      <div className="flex items-center gap-2">
+      <div className="flex flex-wrap items-center justify-end gap-2">
         <button
           className="rounded-md border border-border px-3 py-1.5 text-xs text-text-muted transition hover:bg-surface-hover disabled:opacity-40"
           onClick={onTestSend}
@@ -4060,8 +4060,8 @@ function EmailSettingsTab() {
         >
           {saving ? "保存中..." : "保存邮件配置"}
         </button>
-        {message && <div className="text-xs text-text-subtle">{message}</div>}
       </div>
+      {message ? <div className="mt-2 text-xs text-text-subtle">{message}</div> : null}
     </div>
   );
 }
