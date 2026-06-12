@@ -2186,6 +2186,20 @@ def create_studio_app() -> FastAPI:
             except Exception as _skill_exc:
                 logger.warning("skill_slugs inject error: %s", _skill_exc)
         image_inputs = _normalize_image_inputs(payload.image_inputs)
+        # Always derive history attachments from the client's original image uploads.
+        # We may strip image_inputs below for a non-vision model on *this* turn,
+        # but the persisted user message (chat_history / agent_messages) must carry
+        # the data:image payloads so that a later switch to a vision model can promote
+        # them into real multimodal content without the user re-uploading.
+        history_image_attachments = _history_attachments_from_image_inputs(image_inputs)
+        try:
+            from agenticx.studio.chat_attachments import materialize_session_image_uploads
+
+            history_image_attachments = materialize_session_image_uploads(
+                payload.session_id, history_image_attachments
+            )
+        except Exception:
+            pass
         pending_subagent_summaries = session.scratchpad.pop("__pending_subagent_summaries__", [])
         if isinstance(pending_subagent_summaries, list):
             for entry in pending_subagent_summaries[:20]:
@@ -2779,7 +2793,15 @@ def create_studio_app() -> FastAPI:
                                     }
                                 )
                             user_message_content = content_blocks
-                            history_user_attachments = _history_attachments_from_image_inputs(image_inputs)
+                        # Persist image attachments for the user turn in history (messages.json)
+                        # using the original client uploads (even if we cleared image_inputs for a
+                        # non-vision model on this specific turn). This enables later promotion
+                        # when the session model is switched to a vision-capable one.
+                        if history_image_attachments:
+                            if history_user_attachments is None:
+                                history_user_attachments = []
+                            # prepend images before any context-file attachments for this turn
+                            history_user_attachments = list(history_image_attachments) + history_user_attachments
                         _turn_cf = (
                             _normalize_context_files(payload.context_files)
                             if getattr(payload, "context_files", None)

@@ -4307,20 +4307,31 @@ async def _tool_view_image(arguments: Dict[str, Any], session: Optional[StudioSe
         source = final_url
         name = _filename_from_url(final_url, mime)
     elif parsed.scheme in {"file", ""} or target.startswith("/") or (len(target) > 2 and target[1] == ":"):
-        try:
-            path = _resolve_workspace_path(target, session, pick_existing=True)
-        except ValueError as exc:
-            return f"ERROR: {exc}"
-        if not path.exists() or not path.is_file():
-            return f"ERROR: file not found: {path}"
-        data = path.read_bytes()
-        if len(data) > _VIEW_IMAGE_MAX_BYTES:
-            return "ERROR: image exceeds 8MB limit"
-        mime = _detect_image_mime(data)
-        if not mime:
-            return "ERROR: unsupported image type"
-        name = path.name
-        source = str(path)
+        session_hit = None
+        if session is not None:
+            try:
+                from agenticx.studio.chat_attachments import resolve_session_chat_image
+
+                session_hit = resolve_session_chat_image(session, target)
+            except Exception:
+                session_hit = None
+        if session_hit is not None:
+            data, mime, name, source = session_hit
+        else:
+            try:
+                path = _resolve_workspace_path(target, session, pick_existing=True)
+            except ValueError as exc:
+                return f"ERROR: {exc}"
+            if not path.exists() or not path.is_file():
+                return f"ERROR: file not found: {path}"
+            data = path.read_bytes()
+            if len(data) > _VIEW_IMAGE_MAX_BYTES:
+                return "ERROR: image exceeds 8MB limit"
+            mime = _detect_image_mime(data)
+            if not mime:
+                return "ERROR: unsupported image type"
+            name = path.name
+            source = str(path)
     else:
         return "ERROR: only http(s) URLs, data:image/* URLs, and local file paths are supported"
     if len(data) > _VIEW_IMAGE_MAX_BYTES:

@@ -137,6 +137,7 @@ import { resolveSessionTailForSwitch, invalidateSessionTail } from "../utils/ses
 import { visibleMessagesForSession } from "../utils/message-ownership";
 import {
   shouldDropDuplicateUserSend,
+  shouldSuppressDuplicatePendingUserEcho,
   type SendDedupeEntry,
 } from "../utils/send-dedupe";
 import { resolveSendSessionId } from "../utils/send-lock";
@@ -167,6 +168,7 @@ import {
   clearPaneAwaitingFreshSession,
   clearPaneLazyInheritParent,
   clearPanePendingSessionMode,
+  isPaneAwaitingFreshSession,
   markPaneAwaitingFreshSession,
   peekPaneLazyInheritParent,
   peekPanePendingSessionMode,
@@ -2285,6 +2287,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
   const loadingOlderMessagesRef = useRef(false);
   const sessionBootstrapRef = useRef("");
   const lastUserSendDedupeRef = useRef<SendDedupeEntry | null>(null);
+  const sendChatInFlightRef = useRef<string | null>(null);
   const [showJumpToBottomFab, setShowJumpToBottomFab] = useState(false);
   const imeComposingRef = useRef(false);
   const [atOpen, setAtOpen] = useState(false);
@@ -5933,6 +5936,28 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
     if (!isContinuation && !text && !hasReadyAttachments) return;
     if (!apiBase) return;
 
+    const sendLockKey = pane.id;
+    let holdSendLock = false;
+    const releaseSendLock = () => {
+      if (holdSendLock && sendChatInFlightRef.current === sendLockKey) {
+        sendChatInFlightRef.current = null;
+      }
+    };
+    if (!options?.forceSend) {
+      if (sendChatInFlightRef.current === sendLockKey) {
+        // "全新对话" 是显式抢占旧会话：旧流若卡住，必须允许首条消息发送，
+        // 否则会表现为输入可见但点击发送无反应。
+        if (isPaneAwaitingFreshSession(pane.id)) {
+          sendChatInFlightRef.current = null;
+        } else {
+          console.warn("[ChatPane] dropped concurrent sendChat on pane", sendLockKey);
+          return;
+        }
+      }
+      sendChatInFlightRef.current = sendLockKey;
+      holdSendLock = true;
+    }
+
     const useLazySession = !isGroupPane && !isAutomationTaskPane;
     let requestSessionId = resolveSendSessionId(options?.lockedSessionId, pane.sessionId);
     // Dev-only invariant: every async/system send (continuation / retry / queued /
@@ -5959,7 +5984,10 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
     };
 
     if (!requestSessionId) {
-      if (!useLazySession) return;
+      if (!useLazySession) {
+        releaseSendLock();
+        return;
+      }
       try {
         const avatarId =
           pane.avatarId && pane.avatarId.startsWith("group:") ? undefined : pane.avatarId ?? undefined;
@@ -5978,6 +6006,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
             `⚠️ 无法创建会话：${created.error || "未知错误"}。请检查后端服务。`,
             "meta"
           );
+          releaseSendLock();
           return;
         }
         requestSessionId = created.session_id;
@@ -6004,6 +6033,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
         window.setTimeout(() => useAppStore.getState().bumpSessionCatalogRevision(), 450);
       } catch (err) {
         addPaneMessage(pane.id, "tool", `⚠️ 创建会话失败：${String(err)}`, "meta");
+        releaseSendLock();
         return;
       }
     }
@@ -6028,6 +6058,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
       setComposerText("");
       setQuoteTarget(null);
       setContextFiles({});
+      releaseSendLock();
       return;
     }
 
@@ -6128,6 +6159,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
       } catch (err) {
         console.error("[ChatPane] failed to create isolated session:", err);
       }
+      releaseSendLock();
       return;
     }
 
@@ -6153,6 +6185,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
           requestSessionId,
           messageText.slice(0, 48),
         );
+        releaseSendLock();
         return;
       }
       lastUserSendDedupeRef.current = {
@@ -6198,6 +6231,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
         );
         if (!ok) {
           await reloadSessionFromDisk(requestSessionId);
+          releaseSendLock();
           return;
         }
         setPaneMessages(pane.id, currentMsgs.slice(0, implicitRetryIdx + 1));
@@ -6221,6 +6255,17 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
         const avatarId = mentionMap.get(matchedName);
         if (avatarId && !mentionedAvatarIds.includes(avatarId)) mentionedAvatarIds.push(avatarId);
       }
+    }
+    if (
+      !isContinuation &&
+      !options?.forceSend &&
+      shouldSuppressDuplicatePendingUserEcho(
+        useAppStore.getState().panes.find((p) => p.id === pane.id)?.messages ?? pane.messages ?? [],
+        messageText,
+      )
+    ) {
+      suppressUserEcho = true;
+      skipUserHistory = true;
     }
     if (targetAgentId === "meta") {
       if (!suppressUserEcho) {
@@ -6389,8 +6434,13 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
             mime_type: file.mimeType,
             size: file.size,
           }));
-        const canSendImageInputs = targetAgentId === "meta" && !isGroupPane;
-        if (canSendImageInputs && imageInputs.length > 0) {
+        // Always forward image data (when present as dataUrl) so the backend can:
+        // - inject as vision content for the current turn (if the session's active model supports it), and
+        // - persist as history_user_attachments (with data_url) for this session's messages.json.
+        // This makes uploaded images durable in the session "section" and reconstructible for
+        // later vision models or after restart/model switch. The server normalizes/strips
+        // current-turn injection for non-vision sessions; the attachment record is still written.
+        if (imageInputs.length > 0) {
           body.image_inputs = imageInputs;
         }
         const contextFilePayload: Record<string, string> = {};
@@ -6399,9 +6449,11 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
           if (!key) continue;
           const ready = resolveReadyAttachment(file, readyEntries);
           const isImage = !!file.dataUrl || file.mimeType.startsWith("image/") || !!ready?.dataUrl || ready?.mimeType.startsWith("image/");
-          if (isImage) {
-            contextFilePayload[key] = "[图片文件]";
-          } else if (ready?.content) {
+          // Chat-uploaded images are carried via image_inputs / persisted attachments only.
+          // Do not mirror them into context_files (bare filenames like image.png confuse
+          // the model into calling view_image on non-existent workspace paths).
+          if (isImage) continue;
+          if (ready?.content) {
             contextFilePayload[key] = ready.content;
           } else {
             contextFilePayload[key] = `[附件] ${file.name}`;
@@ -6478,10 +6530,14 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
 
       const reader = resp.body?.getReader();
       const decoder = new TextDecoder();
-      if (!reader) return;
+      if (!reader) {
+        releaseSendLock();
+        return;
+      }
 
       let full = "";
       let cumulativeFull = "";
+      let receivedFinalEvent = false;
       let pendingSuggestedQuestions: string[] = [];
       let pendingReferences: SearchReference[] = [];
       let pendingSearchedQueries: string[] = [];
@@ -7199,6 +7255,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
               }
             }
             if (payload.type === "final") {
+              receivedFinalEvent = true;
               if (eventAgentId === "meta") {
                 useAppStore.getState().clearSessionHistoryHint(requestSessionId);
                 const finalText = String(payload.data?.text ?? "");
@@ -7279,10 +7336,19 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
                     budgetMax: budgetInfo.maxAllowed,
                   },
                 );
-              } else if (severity === "warning" || detector === "token_budget_compress" || detector === "compactor_circuit_breaker") {
-                // FR-4 / FR-5: non-fatal warnings render as flat context notices, not tool cards.
+              } else if (
+                severity === "warning"
+                || detector === "token_budget_compress"
+                || detector === "compactor_circuit_breaker"
+                || detector === "context_budget_compact"
+                || detector === "context_window"
+              ) {
                 const noticeKind =
-                  detector === "compactor_circuit_breaker" ? "compactor_cb" : "budget_compress";
+                  detector === "context_budget_compact" || detector === "context_window"
+                    ? "context_compact"
+                    : detector === "compactor_circuit_breaker"
+                      ? "compactor_cb"
+                      : "budget_compress";
                 addPaneMessageIfSessionActive(pane.id, "tool", errText, eventAgentId || "meta", undefined, undefined, undefined, {
                   noticeKind,
                 });
@@ -7354,6 +7420,16 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
         } else {
           stampLastAssistantCompletedAt();
         }
+      } else if (!abortController.signal.aborted && !receivedFinalEvent) {
+        // SSE ended without a final payload and without committed assistant text.
+        // Surface an explicit hint so users don't resend blindly and create duplicate
+        // user turns in the same session.
+        addPaneMessageIfSessionActive(
+          pane.id,
+          "tool",
+          "⚠️ 本轮请求已中断（未收到模型最终响应）。可点击“恢复执行”重试，先不要重复发送同一句。",
+          "meta",
+        );
       }
     } catch (error) {
       if (isContinuation) {
@@ -7363,6 +7439,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
         addPaneMessageIfSessionActive(pane.id, "tool", `❌ 请求失败: ${String(error)}`, "meta");
       }
     } finally {
+      releaseSendLock();
       delete sessionAbortControllersRef.current[requestSessionId];
       streamCommitRegistryRef.current.clearSession(requestSessionId);
       const ended = sessionStreamStateRef.current[requestSessionId];
@@ -7470,6 +7547,31 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
 
   const createNewTopic = (inherit = true, sessionMode: PaneSessionMode = "daily_office") => {
     const prevSessionId = (pane.sessionId || "").trim();
+    const runningSid = (streamingSessionId || prevSessionId).trim();
+    if (runningSid) {
+      const ctrl = sessionAbortControllersRef.current[runningSid];
+      if (ctrl) {
+        try {
+          ctrl.abort();
+        } catch {
+          // ignore
+        }
+        delete sessionAbortControllersRef.current[runningSid];
+      }
+      const st = sessionStreamStateRef.current[runningSid];
+      if (st) {
+        st.active = false;
+        st.text = "";
+        sessionStreamStateRef.current[runningSid] = st;
+      }
+      // 切到新对话时释放当前 pane 发送锁，避免旧流挂住导致新消息无法发送。
+      if (sendChatInFlightRef.current === pane.id) {
+        sendChatInFlightRef.current = null;
+      }
+      void window.agenticxDesktop.interruptSession?.(runningSid).catch(() => {
+        // best effort
+      });
+    }
     clearPaneMessages(pane.id);
     setPaneContextInherited(pane.id, false);
     setPanePendingSessionMode(pane.id, sessionMode);

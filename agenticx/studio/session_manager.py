@@ -1220,6 +1220,15 @@ class SessionManager:
                 session.scratchpad = normalize_scratchpad_loaded(dict(scratchpad))
             messages = self._load_messages_snapshot(session_id)
             if messages:
+                from agenticx.studio.chat_attachments import (
+                    materialize_message_lists_image_uploads,
+                )
+
+                if materialize_message_lists_image_uploads(session_id, [messages]):
+                    try:
+                        atomic_write_json(self._messages_path(session_id), messages)
+                    except Exception:
+                        pass
                 session.chat_history = self._normalize_messages(messages)
         except Exception:
             pass
@@ -1228,6 +1237,15 @@ class SessionManager:
             raw = self._load_agent_messages_snapshot(session_id)
             if raw:
                 from agenticx.runtime.agent_runtime import _sanitize_context_messages
+                from agenticx.studio.chat_attachments import (
+                    materialize_message_lists_image_uploads,
+                    sync_agent_messages_attachments_from_chat_history,
+                )
+
+                materialize_message_lists_image_uploads(session_id, [raw])
+                sync_agent_messages_attachments_from_chat_history(
+                    raw, getattr(session, "chat_history", None) or []
+                )
                 session.agent_messages = _sanitize_context_messages(raw)
         except Exception:
             pass
@@ -1329,6 +1347,18 @@ class SessionManager:
                 **_harness_list_fields(session),
             }
             self._session_store._save_session_summary_sync(session_id, summary, metadata)
+            try:
+                from agenticx.studio.chat_attachments import materialize_message_lists_image_uploads
+
+                materialize_message_lists_image_uploads(
+                    session_id,
+                    [
+                        session.chat_history or [],
+                        getattr(session, "agent_messages", None) or [],
+                    ],
+                )
+            except Exception:
+                pass
             self._save_messages_snapshot(session_id, session.chat_history or [])
             self._session_store._index_session_messages_sync(session_id, session.chat_history or [])
             self._save_agent_messages_snapshot(session_id, getattr(session, "agent_messages", None) or [])
@@ -1570,6 +1600,11 @@ class SessionManager:
                                 "mime_type": mime,
                                 "size": sz,
                                 "data_url": du,
+                                **(
+                                    {"storage_path": sp}
+                                    if (sp := str(a.get("storage_path", "") or "").strip())
+                                    else {}
+                                ),
                             }
                         )
                         image_n += 1
