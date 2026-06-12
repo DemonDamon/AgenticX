@@ -1637,6 +1637,31 @@ class SessionManager:
                         file_n += 1
                 if clean_atts:
                     row["attachments"] = clean_atts
+            raw_visual = item.get("visual_attachments")
+            if isinstance(raw_visual, list) and raw_visual:
+                clean_visual: list[dict[str, Any]] = []
+                for a in raw_visual[:4]:
+                    if not isinstance(a, dict):
+                        continue
+                    du = str(a.get("data_url", "")).strip()
+                    if not du.startswith("data:image/") or len(du) > max_data_url:
+                        continue
+                    mime = str(a.get("mime_type", "") or "").strip() or "image/png"
+                    try:
+                        sz = int(a.get("size", 0) or 0)
+                    except (TypeError, ValueError):
+                        sz = 0
+                    clean_visual.append(
+                        {
+                            "name": str(a.get("name", "") or "").strip() or "image",
+                            "mime_type": mime,
+                            "size": sz,
+                            "data_url": du,
+                            "source": str(a.get("source", "") or "").strip(),
+                        }
+                    )
+                if clean_visual:
+                    row["visual_attachments"] = clean_visual
             if role == "assistant":
                 raw_sq = item.get("suggested_questions")
                 if isinstance(raw_sq, list) and raw_sq:

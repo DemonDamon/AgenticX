@@ -4087,6 +4087,10 @@ def _tool_web_search(arguments: Dict[str, Any], session: Optional["StudioSession
 
 
 PENDING_VISUAL_ATTACHMENTS_KEY = "__pending_visual_attachments__"
+VIEW_IMAGE_INJECT_LLM_TEXT = (
+    "<system-injected> attached images requested via view_image tool:"
+)
+VIEW_IMAGE_INJECT_METADATA_SOURCE = "view_image_inject"
 _WEB_FETCH_MAX_BYTES = 2 * 1024 * 1024
 _WEB_FETCH_BODY_CHAR_LIMIT = 12_000
 _VIEW_IMAGE_MAX_BYTES = 8 * 1024 * 1024

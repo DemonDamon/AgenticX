@@ -23,6 +23,8 @@ from typing import TYPE_CHECKING, Any, AsyncGenerator, Awaitable, Callable, Dict
 from agenticx.cli.agent_tools import (
     PENDING_VISUAL_ATTACHMENTS_KEY,
     STUDIO_TOOLS,
+    VIEW_IMAGE_INJECT_LLM_TEXT,
+    VIEW_IMAGE_INJECT_METADATA_SOURCE,
     studio_tools_for_session,
     _TOOL_REQUIRED_PARAMS,
     dispatch_tool_async,
@@ -615,7 +617,7 @@ def _inject_pending_visual_attachments(
     content_blocks: List[Dict[str, Any]] = [
         {
             "type": "text",
-            "text": "<system-injected> attached images requested via view_image tool:",
+            "text": VIEW_IMAGE_INJECT_LLM_TEXT,
         },
     ]
     simplified: List[Dict[str, Any]] = []
@@ -632,6 +634,7 @@ def _inject_pending_visual_attachments(
                 "mime_type": str(item.get("mime_type", "") or "image/png"),
                 "size": int(item.get("size", 0) or 0),
                 "source": str(item.get("source", "") or ""),
+                "data_url": data_url,
             }
         )
     if len(content_blocks) <= 1:
@@ -643,7 +646,8 @@ def _inject_pending_visual_attachments(
         session.chat_history.append(
             {
                 "role": "user",
-                "content": "<system-injected> attached images requested via view_image tool:",
+                "content": "",
+                "metadata": {"source": VIEW_IMAGE_INJECT_METADATA_SOURCE},
                 "visual_attachments": simplified,
             }
         )

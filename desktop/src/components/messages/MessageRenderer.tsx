@@ -8,10 +8,12 @@ import { CleanBlock } from "./CleanBlock";
 import { ToolCallCard } from "./ToolCallCard";
 import { SystemNotice } from "./SystemNotice";
 import { ContextNoticeLine } from "./ContextNoticeLine";
+import { ViewImageInjectCard } from "./ViewImageInjectCard";
 import { BudgetExceededCard } from "./BudgetExceededCard";
 import { parseContextNotice } from "../../utils/context-notice";
 import { parseBudgetExceededFromText } from "../../utils/budget-exceeded";
 import { shouldShowBudgetIncompleteHint } from "../../utils/budget-incomplete-message";
+import { isViewImageInjectMessage } from "../../utils/view-image-inject";
 import { parseTodoMessage, TodoUpdateCard } from "../TodoUpdateCard";
 import { isMetaLeaderIdentity, resolveMetaDisplayName } from "../../utils/display-name";
 import { resolveReferencesForAssistant } from "../../utils/turn-reference-context";
@@ -188,6 +190,9 @@ export function MessageRenderer({
     if (message.role !== "assistant") return undefined;
     return resolveReferencesForAssistant(message, allMessages);
   }, [message, allMessages]);
+  if (isViewImageInjectMessage(message)) {
+    return <ViewImageInjectCard message={message} />;
+  }
   if (message.role === "user" || message.role === "assistant") {
     if (chatStyle === "terminal") {
       return <TerminalLine message={message} badge={assistantBadge} />;
