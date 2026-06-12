@@ -56,7 +56,11 @@ from agenticx.runtime.followup_stream import (
     split_final_answer_and_followups,
     suggested_questions_enabled_from_config,
 )
-from agenticx.llms.provider_fault import classify_provider_fault, record_session_provider_hard_failure
+from agenticx.llms.provider_fault import (
+    classify_provider_fault,
+    human_hint_for_fault,
+    record_session_provider_hard_failure,
+)
 from agenticx.runtime.provider_fallback import (
     maybe_apply_provider_fallback,
     record_provider_timeout,
@@ -259,7 +263,7 @@ def _parallel_tools_enabled() -> bool:
         return False
 MAX_CONTEXT_CHARS = 16_000
 STOP_MESSAGE = "已中断当前生成"
-DEFAULT_LLM_INVOKE_TIMEOUT_SECONDS = 120.0
+DEFAULT_LLM_INVOKE_TIMEOUT_SECONDS = 60.0
 PROVIDER_INVOKE_TIMEOUT_SECONDS: Dict[str, float] = {
     # Some providers/models (especially tool-heavy rounds) often need longer first-token latency.
     "volcengine": 180.0,
@@ -452,6 +456,101 @@ def _resolve_llm_hard_timeout_seconds(session: StudioSession) -> float:
     except Exception:
         pass
     return min(DEFAULT_LLM_HARD_TIMEOUT_SECONDS, round_cap)
+
+
+_STREAM_WAITING_HINT = object()
+
+
+class _StreamWatchdogUserStop(Exception):
+    """Raised when the user interrupts an in-flight sync stream bridge."""
+
+
+async def _iter_sync_stream_with_watchdog(
+    *,
+    loop: asyncio.AbstractEventLoop,
+    run_sync_stream: Callable[[threading.Event, Callable[[Any], None]], None],
+    check_should_stop: Callable[[], Awaitable[bool]],
+    invoke_timeout_seconds: float,
+    heartbeat_timeout_seconds: float,
+    hard_timeout_seconds: float,
+    first_feedback_seconds: float = 0.0,
+    emit_waiting_hint: bool = False,
+    queue_poll_seconds: float = 0.1,
+) -> AsyncGenerator[Any, None]:
+    """Bridge a blocking sync stream iterator with idle and hard watchdogs.
+
+    Runs ``run_sync_stream`` in a worker thread, forwarding chunks through an
+    asyncio queue. Applies the same first-byte / inter-token idle semantics as
+    the primary ``stream_with_tools`` path.
+
+    Author: Damon Li
+    """
+    token_queue: asyncio.Queue[Any | None] = asyncio.Queue()
+    stop_stream = threading.Event()
+
+    def _queue_put(payload: Any | None) -> None:
+        loop.call_soon_threadsafe(token_queue.put_nowait, payload)
+
+    stream_task = loop.run_in_executor(
+        None,
+        lambda: run_sync_stream(stop_stream, _queue_put),
+    )
+    stream_started_at = loop.time()
+    first_chunk_at = 0.0
+    last_chunk_at = 0.0
+    waiting_hint_emitted = False
+    try:
+        while True:
+            if await check_should_stop():
+                stop_stream.set()
+                raise _StreamWatchdogUserStop()
+            now = loop.time()
+            elapsed = now - stream_started_at
+            if (
+                emit_waiting_hint
+                and first_feedback_seconds > 0
+                and (not waiting_hint_emitted)
+                and elapsed >= first_feedback_seconds
+            ):
+                waiting_hint_emitted = True
+                yield _STREAM_WAITING_HINT
+            if elapsed >= hard_timeout_seconds:
+                stop_stream.set()
+                raise asyncio.TimeoutError()
+            idle_limit = (
+                invoke_timeout_seconds
+                if first_chunk_at <= 0
+                else heartbeat_timeout_seconds
+            )
+            idle_anchor = stream_started_at if first_chunk_at <= 0 else last_chunk_at
+            if (now - idle_anchor) >= idle_limit:
+                stop_stream.set()
+                raise asyncio.TimeoutError()
+            try:
+                stream_item = await asyncio.wait_for(
+                    token_queue.get(),
+                    timeout=queue_poll_seconds,
+                )
+            except asyncio.TimeoutError:
+                if stream_task.done():
+                    break
+                continue
+            if stream_item is None:
+                break
+            if isinstance(stream_item, dict) and str(
+                stream_item.get("type", "")
+            ).strip() == "stream_error":
+                raise RuntimeError(str(stream_item.get("error", "stream error")))
+            if first_chunk_at <= 0:
+                first_chunk_at = now
+            last_chunk_at = now
+            yield stream_item
+    finally:
+        stop_stream.set()
+        try:
+            await asyncio.wait_for(asyncio.shield(stream_task), timeout=1.0)
+        except Exception:
+            pass
 
 
 def _llm_timeout_retry_count(session: StudioSession) -> int:
@@ -1798,14 +1897,12 @@ class AgentRuntime:
                 used_stream_path = False
                 if callable(stream_with_tools):
                     try:
-                        token_queue: asyncio.Queue[Dict[str, Any] | None] = asyncio.Queue()
                         loop = asyncio.get_running_loop()
-                        stop_stream = threading.Event()
 
-                        def _queue_put(payload: Dict[str, Any] | None) -> None:
-                            loop.call_soon_threadsafe(token_queue.put_nowait, payload)
-
-                        def _run_sync_stream_with_tools() -> None:
+                        def _run_sync_stream_with_tools(
+                            stop_event: threading.Event,
+                            queue_put: Callable[[Any], None],
+                        ) -> None:
                             try:
                                 _round_tool_choice: Any = "auto"
                                 if (
@@ -1822,8 +1919,6 @@ class AgentRuntime:
                                     "max_tokens": 8192,
                                     "timeout": request_timeout_seconds,
                                 }
-                                # MiniMax occasionally rejects advanced chat settings (error 2013).
-                                # Start streaming with conservative parameters to reduce hard failures.
                                 if provider_name.strip().lower() == "minimax":
                                     stream_kwargs.pop("tool_choice", None)
                                     stream_kwargs.pop("temperature", None)
@@ -1832,27 +1927,20 @@ class AgentRuntime:
                                     messages_for_llm,
                                     **stream_kwargs,
                                 ):
-                                    if stop_stream.is_set():
+                                    if stop_event.is_set():
                                         break
                                     if isinstance(chunk, dict):
-                                        _queue_put(dict(chunk))
+                                        queue_put(dict(chunk))
                             except Exception as exc:
-                                _queue_put(
+                                queue_put(
                                     {"type": "stream_error", "error": str(exc)}
                                 )
                             finally:
-                                _queue_put(None)
+                                queue_put(None)
 
-                        stream_task = loop.run_in_executor(
-                            None, _run_sync_stream_with_tools
-                        )
-                        stream_started_at = loop.time()
-                        first_chunk_at = 0.0
-                        last_chunk_at = 0.0
-                        waiting_hint_emitted = False
-                        last_pulse_at = stream_started_at
                         tool_calls_acc: Dict[int, Dict[str, str]] = {}
                         stream_usage: Dict[str, int] = {}
+
                         def _safe_int(value: Any) -> int:
                             if isinstance(value, bool):
                                 return int(value)
@@ -1870,55 +1958,25 @@ class AgentRuntime:
                                     except ValueError:
                                         return 0
                             return 0
-                        while True:
-                            if await _check_should_stop():
-                                stop_stream.set()
-                                yield RuntimeEvent(
-                                    type=EventType.ERROR.value,
-                                    data={"text": STOP_MESSAGE},
-                                    agent_id=agent_id,
-                                )
-                                return
-                            now = loop.time()
-                            elapsed = now - stream_started_at
-                            if (not waiting_hint_emitted) and elapsed >= first_feedback_seconds:
-                                waiting_hint_emitted = True
-                                last_pulse_at = now
+
+                        async for stream_chunk in _iter_sync_stream_with_watchdog(
+                            loop=loop,
+                            run_sync_stream=_run_sync_stream_with_tools,
+                            check_should_stop=_check_should_stop,
+                            invoke_timeout_seconds=invoke_timeout_seconds,
+                            heartbeat_timeout_seconds=heartbeat_timeout_seconds,
+                            hard_timeout_seconds=hard_timeout_seconds,
+                            first_feedback_seconds=first_feedback_seconds,
+                            emit_waiting_hint=True,
+                        ):
+                            if stream_chunk is _STREAM_WAITING_HINT:
                                 yield RuntimeEvent(
                                     type=EventType.TOKEN.value,
                                     data={"text": "⏳"},
                                     agent_id=agent_id,
                                 )
-                            if elapsed >= hard_timeout_seconds:
-                                stop_stream.set()
-                                raise asyncio.TimeoutError()
-                            idle_limit = (
-                                invoke_timeout_seconds
-                                if first_chunk_at <= 0
-                                else heartbeat_timeout_seconds
-                            )
-                            idle_anchor = stream_started_at if first_chunk_at <= 0 else last_chunk_at
-                            if (now - idle_anchor) >= idle_limit:
-                                stop_stream.set()
-                                raise asyncio.TimeoutError()
-                            try:
-                                stream_chunk = await asyncio.wait_for(
-                                    token_queue.get(), timeout=0.1
-                                )
-                            except asyncio.TimeoutError:
-                                if stream_task.done():
-                                    break
                                 continue
-                            if stream_chunk is None:
-                                break
                             chunk_type = str(stream_chunk.get("type", "")).strip()
-                            if chunk_type == "stream_error":
-                                raise RuntimeError(
-                                    str(stream_chunk.get("error", "stream error"))
-                                )
-                            if first_chunk_at <= 0:
-                                first_chunk_at = now
-                            last_chunk_at = now
                             if chunk_type == "content":
                                 tok = str(stream_chunk.get("text", ""))
                                 if tok:
@@ -1969,7 +2027,6 @@ class AgentRuntime:
                                     acc["name"] = tool_name
                                 if args_delta:
                                     acc["arguments"] += args_delta
-                        await stream_task
                         # FR-C：流式工具调用偶尔因 token 紧张被截断 → arguments 字段为空。
                         # 如果该工具有 required 参数（如 file_write），则不要把空参数派发出去，
                         # 改成丢弃并往本轮 response_text 追加一条 retry hint，让下一轮 LLM
@@ -2034,6 +2091,13 @@ class AgentRuntime:
                             {"content": response_text, "tool_calls": tool_calls, "usage": stream_usage},
                         )()
                         used_stream_path = True
+                    except _StreamWatchdogUserStop:
+                        yield RuntimeEvent(
+                            type=EventType.ERROR.value,
+                            data={"text": STOP_MESSAGE},
+                            agent_id=agent_id,
+                        )
+                        return
                     except Exception as stream_exc:
                         logger.warning(
                             "stream_with_tools failed, fallback to invoke path",
@@ -2045,13 +2109,6 @@ class AgentRuntime:
                             fault=classify_provider_fault(stream_exc),
                         )
                         used_stream_path = False
-                    finally:
-                        stop_stream.set()
-                        if "stream_task" in locals() and stream_task is not None:
-                            try:
-                                await asyncio.wait_for(asyncio.shield(stream_task), timeout=1.0)
-                            except Exception:
-                                pass
                 if not used_stream_path:
                     def _invoke_once_with_fallback() -> Any:
                         _fallback_tool_choice: Any = "auto"
@@ -2347,8 +2404,8 @@ class AgentRuntime:
                     type=EventType.ERROR.value,
                     data={
                         "text": (
-                            f"模型响应超时（>{int(round_timeout)}s，provider={provider_hint}, "
-                            f"model={model_hint}）。已重试仍无响应，任务已中断。"
+                            f"{human_hint_for_fault('transient')} "
+                            f"(>{int(round_timeout)}s, provider={provider_hint}, model={model_hint})"
                         ),
                         "detector": "llm_round_timeout",
                         "severity": "error",
@@ -2417,11 +2474,9 @@ class AgentRuntime:
                         )
                         continue
 
-                from agenticx.llms.provider_fault import human_hint_for_fault
-
                 err_text = (
                     human_hint_for_fault(fault)
-                    if fault == "context_window"
+                    if fault in {"billing", "auth", "rate_limit", "context_window", "transient"}
                     else f"模型调用失败: {exc}"
                 )
                 yield RuntimeEvent(
@@ -2491,10 +2546,12 @@ class AgentRuntime:
                     streamed_text = ""
                     sug_list = []
                     try:
-                        token_queue: asyncio.Queue[str | None] = asyncio.Queue()
                         stream_loop = asyncio.get_running_loop()
 
-                        def _run_sync_stream() -> None:
+                        def _run_sync_stream_fallback(
+                            stop_event: threading.Event,
+                            queue_put: Callable[[Any], None],
+                        ) -> None:
                             try:
                                 for chunk in self.llm.stream(
                                     messages,
@@ -2502,35 +2559,54 @@ class AgentRuntime:
                                     max_tokens=8192,
                                     timeout=request_timeout_seconds,
                                 ):
+                                    if stop_event.is_set():
+                                        break
                                     tok = chunk if isinstance(chunk, str) else str(chunk.get("content", ""))
                                     if tok:
-                                        stream_loop.call_soon_threadsafe(token_queue.put_nowait, tok)
+                                        queue_put(tok)
                             finally:
-                                stream_loop.call_soon_threadsafe(token_queue.put_nowait, None)
+                                queue_put(None)
 
-                        stream_task = asyncio.get_running_loop().run_in_executor(None, _run_sync_stream)
-
-                        while True:
-                            if await _check_should_stop():
-                                stream_task.cancel()
-                                yield RuntimeEvent(type=EventType.ERROR.value, data={"text": STOP_MESSAGE}, agent_id=agent_id)
-                                return
-                            try:
-                                tok = await asyncio.wait_for(token_queue.get(), timeout=0.05)
-                            except asyncio.TimeoutError:
-                                continue
-                            if tok is None:
-                                break
-                            streamed_text += tok
-                            _vis2 = followup_emitter.feed_append(tok)
+                        async for tok in _iter_sync_stream_with_watchdog(
+                            loop=stream_loop,
+                            run_sync_stream=_run_sync_stream_fallback,
+                            check_should_stop=_check_should_stop,
+                            invoke_timeout_seconds=invoke_timeout_seconds,
+                            heartbeat_timeout_seconds=heartbeat_timeout_seconds,
+                            hard_timeout_seconds=hard_timeout_seconds,
+                            queue_poll_seconds=0.05,
+                        ):
+                            streamed_text += str(tok)
+                            _vis2 = followup_emitter.feed_append(str(tok))
                             if _vis2:
                                 yield RuntimeEvent(
                                     type=EventType.TOKEN.value,
                                     data={"text": _vis2},
                                     agent_id=agent_id,
                                 )
-
-                        await stream_task
+                    except _StreamWatchdogUserStop:
+                        yield RuntimeEvent(
+                            type=EventType.ERROR.value,
+                            data={"text": STOP_MESSAGE},
+                            agent_id=agent_id,
+                        )
+                        return
+                    except asyncio.TimeoutError:
+                        timeout_hint = human_hint_for_fault("transient")
+                        yield RuntimeEvent(
+                            type=EventType.ERROR.value,
+                            data={
+                                "text": (
+                                    f"{timeout_hint} "
+                                    f"(provider={provider_name or '(unknown)'}, "
+                                    f"model={model_name or '(unknown)'})"
+                                ),
+                                "detector": "llm_stream_timeout",
+                                "severity": "error",
+                            },
+                            agent_id=agent_id,
+                        )
+                        return
                     except Exception:
                         streamed_text = response_text
                     raw_tail = streamed_text.strip() if streamed_text.strip() else response_text
@@ -3292,10 +3368,12 @@ class AgentRuntime:
 
                     summary_text = ""
                     try:
-                        halt_queue: asyncio.Queue[str | None] = asyncio.Queue()
                         halt_loop = asyncio.get_running_loop()
 
-                        def _run_halt_stream() -> None:
+                        def _run_halt_stream(
+                            stop_event: threading.Event,
+                            queue_put: Callable[[Any], None],
+                        ) -> None:
                             try:
                                 for chunk in self.llm.stream(
                                     messages,
@@ -3303,33 +3381,31 @@ class AgentRuntime:
                                     max_tokens=800,
                                     timeout=request_timeout_seconds,
                                 ):
+                                    if stop_event.is_set():
+                                        break
                                     tok = chunk if isinstance(chunk, str) else str(chunk.get("content", ""))
                                     if tok:
-                                        halt_loop.call_soon_threadsafe(halt_queue.put_nowait, tok)
+                                        queue_put(tok)
                             finally:
-                                halt_loop.call_soon_threadsafe(halt_queue.put_nowait, None)
+                                queue_put(None)
 
-                        halt_task = asyncio.get_running_loop().run_in_executor(None, _run_halt_stream)
-                        while True:
-                            if await _check_should_stop():
-                                halt_task.cancel()
-                                break
-                            try:
-                                tok = await asyncio.wait_for(halt_queue.get(), timeout=0.05)
-                            except asyncio.TimeoutError:
-                                continue
-                            if tok is None:
-                                break
-                            summary_text += tok
+                        async for tok in _iter_sync_stream_with_watchdog(
+                            loop=halt_loop,
+                            run_sync_stream=_run_halt_stream,
+                            check_should_stop=_check_should_stop,
+                            invoke_timeout_seconds=invoke_timeout_seconds,
+                            heartbeat_timeout_seconds=heartbeat_timeout_seconds,
+                            hard_timeout_seconds=hard_timeout_seconds,
+                            queue_poll_seconds=0.05,
+                        ):
+                            summary_text += str(tok)
                             yield RuntimeEvent(
                                 type=EventType.TOKEN.value,
-                                data={"text": tok},
+                                data={"text": str(tok)},
                                 agent_id=agent_id,
                             )
-                        try:
-                            await halt_task
-                        except Exception:
-                            pass
+                    except (_StreamWatchdogUserStop, asyncio.TimeoutError) as exc:
+                        logger.warning("loop-halt summary stream stopped: %s", exc)
                     except Exception as exc:
                         logger.warning("loop-halt summary stream failed: %s", exc)
                     summary_text = summary_text.strip() or (
