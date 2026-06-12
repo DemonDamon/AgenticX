@@ -308,16 +308,56 @@ def test_truncate_after_uses_user_occurrence_not_last_duplicate() -> None:
         },
     )
     assert resp.status_code == 200
-    # Retry the first duplicate user turn: remove only its assistant, keep later user turns.
+    # Retry the first duplicate user turn: drop everything after it, including later rounds.
     assert [x["content"] for x in managed.studio_session.chat_history] == [
         "retry me",
-        "retry me",
-        "second answer",
     ]
     assert [x["content"] for x in managed.studio_session.agent_messages] == [
         "retry me",
-        "retry me",
-        "second answer",
+    ]
+
+
+def test_truncate_after_first_turn_clears_view_image_inject_and_later_rounds() -> None:
+    app = create_studio_app()
+    client, session_id, managed = _seed_truncate_session(app)
+    inject_prefix = "<system-injected> attached images requested via view_image tool:"
+    managed.studio_session.chat_history = [
+        {"role": "user", "content": "first question", "timestamp": 1},
+        {"role": "assistant", "content": "first answer", "timestamp": 2},
+        {"role": "user", "content": "switch model", "timestamp": 3},
+        {"role": "user", "content": inject_prefix, "timestamp": 4},
+        {"role": "assistant", "content": "second answer", "timestamp": 5},
+        {"role": "user", "content": "switch model", "timestamp": 6},
+        {"role": "assistant", "content": "third answer", "timestamp": 7},
+    ]
+    managed.studio_session.agent_messages = [
+        {"role": "user", "content": "first question"},
+        {"role": "assistant", "content": "first answer"},
+        {"role": "user", "content": "switch model"},
+        {"role": "assistant", "content": "second answer"},
+        {"role": "user", "content": "switch model"},
+        {"role": "assistant", "content": "third answer"},
+    ]
+
+    resp = client.post(
+        "/api/session/messages/truncate",
+        json={
+            "session_id": session_id,
+            "user_content": "switch model",
+            "mode": "after",
+            "user_occurrence": 1,
+        },
+    )
+    assert resp.status_code == 200
+    assert [x["content"] for x in managed.studio_session.chat_history] == [
+        "first question",
+        "first answer",
+        "switch model",
+    ]
+    assert [x["content"] for x in managed.studio_session.agent_messages] == [
+        "first question",
+        "first answer",
+        "switch model",
     ]
 
 

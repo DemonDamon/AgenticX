@@ -4154,11 +4154,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
   }, []);
 
   const hasTrailingTurnMessages = useCallback((msgs: Message[], userIdx: number) => {
-    let end = userIdx + 1;
-    while (end < msgs.length && msgs[end].role !== "user") {
-      end += 1;
-    }
-    return end > userIdx + 1;
+    return userIdx < msgs.length - 1;
   }, []);
 
   const editUserMessage = useCallback(

@@ -1962,19 +1962,11 @@ def create_studio_app() -> FastAPI:
             if idx < 0:
                 return 0, False
             if mode == "after":
-                cut_end = len(rows)
-                for j in range(idx + 1, len(rows)):
-                    row = rows[j]
-                    if not isinstance(row, dict):
-                        continue
-                    if str(row.get("role", "") or "").strip() == "user":
-                        cut_end = j
-                        break
                 cut_start = idx + 1
-                removed_local = cut_end - cut_start
+                removed_local = len(rows) - cut_start
                 if removed_local <= 0:
                     return 0, True
-                del rows[cut_start:cut_end]
+                del rows[cut_start:]
                 return removed_local, True
             cut = idx
             removed_local = len(rows) - cut
