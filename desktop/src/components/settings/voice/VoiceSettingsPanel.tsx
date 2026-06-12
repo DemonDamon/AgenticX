@@ -546,13 +546,13 @@ export const VoiceSettingsPanel = forwardRef<VoiceSettingsPanelHandle>(function 
             </label>
             <label className="block">
               API 应用密钥
-              <input
-                className="mt-1 w-full rounded-md border border-border bg-surface-panel px-2 py-1 text-sm text-text-primary"
+              <SecretInput
+                placeholder="仅在覆盖时填写"
                 value={draft.doubao_realtime.api_app_key}
-                onChange={(e) =>
+                onChange={(api_app_key) =>
                   setDraft((d) => ({
                     ...d,
-                    doubao_realtime: { ...d.doubao_realtime, api_app_key: e.target.value },
+                    doubao_realtime: { ...d.doubao_realtime, api_app_key },
                   }))
                 }
               />
