@@ -652,7 +652,7 @@ export const VoiceSettingsPanel = forwardRef<VoiceSettingsPanelHandle>(function 
         )}
 
         <div className="border-t border-border pt-4">
-          <div className="flex flex-wrap gap-2">
+          <div className="flex flex-wrap items-center justify-end gap-2">
             <button
               type="button"
               disabled={testing}
