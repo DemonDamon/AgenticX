@@ -134,11 +134,31 @@ class LiteLLMProvider(BaseLLMProvider):
         default=None,
         description="When True, LiteLLM strips unsupported params (e.g. tool_choice) for strict OpenAI-compatible proxies.",
     )
+    extra_body: Optional[Dict[str, Any]] = Field(
+        default=None,
+        description="Extra request body fields forwarded verbatim to the provider (e.g. chat_template_kwargs for Qwen3).",
+    )
 
     def _apply_drop_params_default(self, kwargs: Dict[str, Any]) -> None:
         if self.drop_params is None:
             return
         kwargs.setdefault("drop_params", self.drop_params)
+
+    def _apply_extra_body(self, kwargs: Dict[str, Any]) -> None:
+        """Merge self.extra_body into the call kwargs under the 'extra_body' key.
+
+        Callers may already pass extra_body themselves; provider-level config is
+        applied with lower priority (setdefault logic for top-level keys inside
+        the dict) so call-site overrides always win.
+        """
+        if not self.extra_body:
+            return
+        existing = kwargs.get("extra_body")
+        if not isinstance(existing, dict):
+            existing = {}
+        for k, v in self.extra_body.items():
+            existing.setdefault(k, v)
+        kwargs["extra_body"] = existing
 
     def invoke(
         self, prompt: Union[str, List[Dict]], tools: Optional[List[Dict]] = None, **kwargs
@@ -159,6 +179,7 @@ class LiteLLMProvider(BaseLLMProvider):
         max_retries = kwargs.pop("max_retries", self.max_retries)
         fallbacks = kwargs.pop("fallbacks", self.fallbacks)
         self._apply_drop_params_default(kwargs)
+        self._apply_extra_body(kwargs)
         _no_proxy_client = _build_no_proxy_openai_client(self.api_key, self.base_url)
         if _no_proxy_client is not None:
             kwargs.setdefault("client", _no_proxy_client)
@@ -198,6 +219,7 @@ class LiteLLMProvider(BaseLLMProvider):
         max_retries = kwargs.pop("max_retries", self.max_retries)
         fallbacks = kwargs.pop("fallbacks", self.fallbacks)
         self._apply_drop_params_default(kwargs)
+        self._apply_extra_body(kwargs)
         _no_proxy_async_client = _build_no_proxy_async_openai_client(self.api_key, self.base_url)
         if _no_proxy_async_client is not None:
             kwargs.setdefault("client", _no_proxy_async_client)
@@ -236,6 +258,7 @@ class LiteLLMProvider(BaseLLMProvider):
         max_retries = kwargs.pop("max_retries", self.max_retries)
         fallbacks = kwargs.pop("fallbacks", self.fallbacks)
         self._apply_drop_params_default(kwargs)
+        self._apply_extra_body(kwargs)
         response_stream = litellm.completion(
             model=self.model,
             messages=messages,
@@ -306,6 +329,7 @@ class LiteLLMProvider(BaseLLMProvider):
         # Ask provider to include usage in streamed chunks when available.
         stream_options["include_usage"] = True
         self._apply_drop_params_default(kwargs)
+        self._apply_extra_body(kwargs)
         model_lower = str(self.model or "").lower()
         if "minimax" in model_lower:
             extra = kwargs.get("extra_body")
@@ -430,6 +454,7 @@ class LiteLLMProvider(BaseLLMProvider):
         max_retries = kwargs.pop("max_retries", self.max_retries)
         fallbacks = kwargs.pop("fallbacks", self.fallbacks)
         self._apply_drop_params_default(kwargs)
+        self._apply_extra_body(kwargs)
         _no_proxy_async_client = _build_no_proxy_async_openai_client(self.api_key, self.base_url)
         if _no_proxy_async_client is not None:
             kwargs.setdefault("client", _no_proxy_async_client)
@@ -606,6 +631,8 @@ class LiteLLMProvider(BaseLLMProvider):
         if not model:
             raise ValueError("Model must be specified in config")
         base_url = config.get("base_url")
+        raw_extra_body = config.get("extra_body")
+        extra_body = raw_extra_body if isinstance(raw_extra_body, dict) else None
         return cls(
             model=model,
             api_key=_resolve_litellm_api_key(config.get("api_key"), base_url),
@@ -615,4 +642,5 @@ class LiteLLMProvider(BaseLLMProvider):
             max_retries=config.get("max_retries"),
             fallbacks=config.get("fallbacks"),
             drop_params=config.get("drop_params"),
+            extra_body=extra_body,
         )
