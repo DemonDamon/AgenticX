@@ -151,6 +151,17 @@ def test_runtime_text_only_emits_tokens_then_final() -> None:
     assert events[-1]["type"] == EventType.FINAL.value
 
 
+def test_runtime_stream_fallback_syncs_agent_messages_with_chat_history() -> None:
+    """Empty invoke + stream fallback must not leave agent_messages assistant blank."""
+    runtime = AgentRuntime(_TextOnlyLLM(), _ApproveGate())
+    session = StudioSession()
+    events = __import__("asyncio").run(_collect(runtime, session, "hello"))
+    assert events[-1]["type"] == EventType.FINAL.value
+    assert events[-1]["data"]["text"] == "tok1tok2"
+    assert session.chat_history[-1] == {"role": "assistant", "content": "tok1tok2"}
+    assert session.agent_messages[-1] == {"role": "assistant", "content": "tok1tok2"}
+
+
 def test_runtime_should_stop_interrupts_generation() -> None:
     runtime = AgentRuntime(_TextOnlyLLM(), _ApproveGate())
     calls = {"n": 0}

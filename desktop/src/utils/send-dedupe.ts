@@ -4,6 +4,21 @@ export type SendDedupeEntry = {
   at: number;
 };
 
+type PendingTurnRow = { role: string; content?: string };
+
+/** Last visible turn is the same user text with no assistant reply yet (retry / barge-in). */
+export function shouldSuppressDuplicatePendingUserEcho(
+  messages: PendingTurnRow[],
+  text: string,
+): boolean {
+  const normalized = String(text ?? "").trim();
+  if (!normalized) return false;
+  const nonTool = messages.filter((m) => m.role !== "tool");
+  const last = nonTool[nonTool.length - 1];
+  if (!last || last.role !== "user") return false;
+  return String(last.content ?? "").trim() === normalized;
+}
+
 /** Drop duplicate user sends within a short window (double-click / chip burst). */
 export function shouldDropDuplicateUserSend(
   entry: SendDedupeEntry | null | undefined,

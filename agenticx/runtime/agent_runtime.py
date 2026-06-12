@@ -30,7 +30,7 @@ from agenticx.cli.agent_tools import (
 )
 from agenticx.cli.studio_mcp import build_mcp_tools_context
 from agenticx.cli.studio_skill import get_all_skill_summaries
-from agenticx.llms.vision import strip_nonvision_multimodal_messages
+from agenticx.llms.vision import is_vision_capable, strip_nonvision_multimodal_messages
 from agenticx.runtime.compactor import ContextCompactor
 from agenticx.runtime.tool_result_budget import (
     apply_tool_result_budget,
@@ -78,6 +78,29 @@ def _session_disk_dir(session: Any) -> Optional[Path]:
         return None
     safe = re.sub(r"[^A-Za-z0-9_.-]+", "_", text).strip("_") or text
     return Path.home() / ".agenticx" / "sessions" / safe
+
+
+def _chat_history_tail_matches(
+    history: Sequence[Dict[str, Any]] | None,
+    role: str,
+    content: Any,
+) -> bool:
+    if not history:
+        return False
+    last = history[-1]
+    if str(last.get("role", "")).lower() != str(role or "").lower():
+        return False
+    return str(last.get("content", "")).strip() == str(content or "").strip()
+
+
+def _chat_history_append_deduped(history: List[Dict[str, Any]], row: Dict[str, Any]) -> bool:
+    """Append when tail role+content differs. Returns True if appended."""
+    role = str(row.get("role", ""))
+    content = row.get("content", "")
+    if _chat_history_tail_matches(history, role, content):
+        return False
+    history.append(row)
+    return True
 
 
 def _env_int_runtime(key: str, default: int) -> int:
@@ -624,6 +647,81 @@ def _inject_pending_visual_attachments(
                 "visual_attachments": simplified,
             }
         )
+
+
+def _enrich_attachments_from_chat_history(
+    history: List[Dict[str, Any]], chat_history: List[Dict[str, Any]]
+) -> None:
+    """Best-effort: copy image attachments from chat_history onto agent_messages rows."""
+    from agenticx.studio.chat_attachments import sync_agent_messages_attachments_from_chat_history
+
+    sync_agent_messages_attachments_from_chat_history(history, chat_history)
+
+
+def _promote_user_image_attachments(
+    messages: List[Dict[str, Any]], provider_name: str, model_name: str
+) -> List[Dict[str, Any]]:
+    """For vision-capable models, turn user history entries that carry attachments
+    with data:image data_url into proper multimodal content lists.
+
+    This ensures images uploaded in previous turns of the *same session* (even if
+    the model at send time was text-only, or after restart/model switch) are visible
+    as native vision parts to the current vision model, without requiring the user
+    to re-attach or the agent to call view_image on transient paths.
+    """
+    if not is_vision_capable(provider_name, model_name):
+        return messages
+    out: List[Dict[str, Any]] = []
+    for m in messages:
+        if not isinstance(m, dict):
+            out.append(m)
+            continue
+        if m.get("role") != "user":
+            out.append(m)
+            continue
+        atts = m.get("attachments")
+        if not isinstance(atts, list) or not atts:
+            out.append(m)
+            continue
+        image_blocks: List[Dict[str, Any]] = []
+        for a in atts:
+            if not isinstance(a, dict):
+                continue
+            from agenticx.studio.chat_attachments import image_data_url_from_attachment
+
+            du = image_data_url_from_attachment(a)
+            if du.startswith("data:image/"):
+                image_blocks.append({"type": "image_url", "image_url": {"url": du}})
+        if not image_blocks:
+            out.append(m)
+            continue
+        content = m.get("content")
+        if isinstance(content, list):
+            # Already multimodal; append any missing image blocks (dedup by url)
+            existing = {
+                str(b.get("image_url", {}).get("url", ""))
+                for b in content
+                if isinstance(b, dict) and str(b.get("type", "")) == "image_url"
+            }
+            new_blocks = list(content)
+            for b in image_blocks:
+                u = str(b.get("image_url", {}).get("url", ""))
+                if u and u not in existing:
+                    new_blocks.append(b)
+                    existing.add(u)
+            new_m = dict(m)
+            new_m["content"] = new_blocks
+            out.append(new_m)
+        else:
+            text = str(content or "").strip()
+            blocks: List[Dict[str, Any]] = []
+            if text:
+                blocks.append({"type": "text", "text": text})
+            blocks.extend(image_blocks)
+            new_m = dict(m)
+            new_m["content"] = blocks
+            out.append(new_m)
+    return out
 
 
 def _build_agent_system_prompt(session: StudioSession) -> str:
@@ -1327,6 +1425,16 @@ class AgentRuntime:
         active_tools: Sequence[Dict[str, Any]] = (
             studio_tools_for_session(session) if tools is None else tools
         )
+        from agenticx.runtime.context_budget import maybe_compact_meta_turn_context
+
+        compact_prompt, compact_tools, compact_notice = maybe_compact_meta_turn_context(
+            session,
+            system_prompt=current_system_prompt,
+            tools=list(active_tools),
+        )
+        if compact_notice:
+            current_system_prompt = compact_prompt
+            active_tools = compact_tools
         allowed_tool_names = {
             str(tool.get("function", {}).get("name", "")).strip()
             for tool in active_tools
@@ -1339,6 +1447,13 @@ class AgentRuntime:
             "knowledge_search" in allowed_tool_names and _kb_retrieval_always_mode(session)
         )
         history = _sanitize_context_messages(session.agent_messages)
+        # Enrich plain user entries in agent_messages history from chat_history attachments
+        # (covers resumes of sessions that had images persisted only to chat_history, and
+        # aligns pre-fix data so promotion below can see data:image attachments).
+        try:
+            _enrich_attachments_from_chat_history(history, getattr(session, "chat_history", None) or [])
+        except Exception:
+            pass
         if getattr(session, "_code_dev_phase_compact_pending", False):
             setattr(session, "_code_dev_phase_compact_pending", False)
             compact_model = str(getattr(session, "model_name", "") or "")
@@ -1356,6 +1471,17 @@ class AgentRuntime:
         )
         messages: List[Dict[str, Any]] = [{"role": "system", "content": current_system_prompt}]
         messages.extend(compacted_history)
+        # Promote any user history attachments (with data:image data_url) into native
+        # multimodal content blocks when the target model supports vision. This is the
+        # key step that makes previously uploaded chat images visible after model switch
+        # or across turns, without the user re-uploading or the agent calling view_image
+        # on transient client paths.
+        try:
+            p = str(getattr(session, "provider_name", "") or "")
+            m = str(getattr(session, "model_name", "") or "")
+            messages = _promote_user_image_attachments(messages, p, m)
+        except Exception:
+            pass
         try:
             from agenticx.runtime.session_mode import (
                 EXPLORE_WHOLE_FILE_READ_WARN_KEY,
@@ -1396,14 +1522,20 @@ class AgentRuntime:
         user_content: Any = user_message_content if user_message_content is not None else user_input
         messages.append({"role": "user", "content": user_content})
         if persist_user_message:
-            session.agent_messages.append({"role": "user", "content": user_input})
+            # Store rich content (list with image_url blocks for vision uploads) + attachments
+            # so that later turns (including after model switch to a vision model) can replay
+            # the images as native multimodal parts instead of relying on ephemeral paths or view_image.
+            am_user: dict[str, Any] = {"role": "user", "content": user_content}
+            if history_user_attachments:
+                am_user["attachments"] = list(history_user_attachments)
+            session.agent_messages.append(am_user)
         await self.hooks.run_on_agent_start(session, agent_id, user_input)
         synced_session_message_count = len(session.agent_messages)
         if persist_user_message and not _is_system_trigger:
             hist_user: dict[str, Any] = {"role": "user", "content": user_input}
             if history_user_attachments:
                 hist_user["attachments"] = list(history_user_attachments)
-            session.chat_history.append(hist_user)
+            _chat_history_append_deduped(session.chat_history, hist_user)
             # Set current user intent for goal anchor injection (FR-1)
             session.current_user_intent = user_input
             # Persist the user turn to disk immediately. Otherwise messages.json
@@ -1433,7 +1565,7 @@ class AgentRuntime:
                     hist_user: dict[str, Any] = {"role": "user", "content": user_input}
                     if history_user_attachments:
                         hist_user["attachments"] = list(history_user_attachments)
-                    session.chat_history.append(hist_user)
+                    _chat_history_append_deduped(session.chat_history, hist_user)
                     session.current_user_intent = user_input
                     if self._mid_turn_persist is not None:
                         try:
@@ -1467,6 +1599,17 @@ class AgentRuntime:
         first_feedback_seconds = _resolve_llm_first_feedback_seconds(session)
         provider_name = str(getattr(session, "provider_name", "") or "").strip()
         model_name = str(getattr(session, "model_name", "") or "").strip()
+
+        if compact_notice:
+            yield RuntimeEvent(
+                type=EventType.ERROR.value,
+                data={
+                    "text": compact_notice,
+                    "severity": "warning",
+                    "detector": "context_budget_compact",
+                },
+                agent_id=agent_id,
+            )
 
         for round_idx in range(1, self.max_tool_rounds + 1):
             if await _check_should_stop():
@@ -1571,6 +1714,13 @@ class AgentRuntime:
                 session._turns_since_skill_manage = getattr(session, "_turns_since_skill_manage", 0) + 1
                 messages = await self.hooks.run_before_model(messages, session)
                 messages = _sanitize_context_messages(messages)
+                # Late promote (idempotent) so that any attachments added to recent user
+                # entries (current turn or injected) are visible as vision parts for
+                # capable models before stripping.
+                try:
+                    messages = _promote_user_image_attachments(messages, provider_name, model_name)
+                except Exception:
+                    pass
                 messages = strip_nonvision_multimodal_messages(
                     messages, provider_name, model_name
                 )
@@ -1626,6 +1776,12 @@ class AgentRuntime:
                     data=context_payload,
                     agent_id=agent_id,
                 )
+                # Ensure any attachments on recent history (including current turn) are
+                # promoted for this round's LLM call when the model is vision capable.
+                try:
+                    messages_for_llm = _promote_user_image_attachments(messages_for_llm, provider_name, model_name)
+                except Exception:
+                    pass
                 messages_for_llm = strip_nonvision_multimodal_messages(
                     messages_for_llm, provider_name, model_name
                 )
@@ -2050,6 +2206,14 @@ class AgentRuntime:
                         if did_react:
                             session.agent_messages = react_hist
                             messages[:] = [{"role": "system", "content": current_system_prompt}, *list(react_hist)]
+                            # Re-promote after forced history replacement so vision images from
+                            # attachments survive this compaction/reset path when applicable.
+                            try:
+                                p = str(getattr(session, "provider_name", "") or "")
+                                m = str(getattr(session, "model_name", "") or "")
+                                messages = _promote_user_image_attachments(messages, p, m)
+                            except Exception:
+                                pass
                             try:
                                 await self.hooks.run_on_compaction(react_count, react_summary, session)
                             except Exception:
@@ -2213,13 +2377,56 @@ class AgentRuntime:
                         agent_id=agent_id,
                     )
                     return
+                if (
+                    fault == "context_window"
+                    and not self._forced_budget_compact_this_turn
+                    and agent_id == "meta"
+                ):
+                    from agenticx.runtime.context_budget import (
+                        force_compact_meta_turn_context,
+                        model_prefers_compact_meta_context,
+                    )
+
+                    if model_prefers_compact_meta_context(model_name, provider_name):
+                        self._forced_budget_compact_this_turn = True
+                        compact_prompt, compact_tools, compact_notice = force_compact_meta_turn_context(
+                            session,
+                            tools=active_tools,
+                        )
+                        current_system_prompt = compact_prompt
+                        active_tools = compact_tools
+                        allowed_tool_names = {
+                            str(tool.get("function", {}).get("name", "")).strip()
+                            for tool in active_tools
+                            if isinstance(tool, dict)
+                        }
+                        if messages and str(messages[0].get("role", "")).lower() == "system":
+                            messages[0] = {"role": "system", "content": current_system_prompt}
+                        yield RuntimeEvent(
+                            type=EventType.ERROR.value,
+                            data={
+                                "text": compact_notice,
+                                "severity": "warning",
+                                "detector": "context_budget_compact",
+                            },
+                            agent_id=agent_id,
+                        )
+                        continue
+
+                from agenticx.llms.provider_fault import human_hint_for_fault
+
+                err_text = (
+                    human_hint_for_fault(fault)
+                    if fault == "context_window"
+                    else f"模型调用失败: {exc}"
+                )
                 yield RuntimeEvent(
                     type=EventType.ERROR.value,
                     data={
-                        "text": f"模型调用失败: {exc}",
+                        "text": err_text,
                         "detector": fault,
                         "retryable": fault in {"rate_limit", "transient"},
-                        "severity": "warning" if fault == "rate_limit" else "error",
+                        "severity": "warning" if fault in {"rate_limit", "context_window"} else "error",
                     },
                     agent_id=agent_id,
                 )
@@ -2336,6 +2543,16 @@ class AgentRuntime:
                         "当前模型未返回进一步正文，请继续给我下一步指令。"
                     )
                     sug_list = []
+                # Invoke/stream may leave response.content empty while the stream-fallback
+                # path fills final_text; chat_history used to update but agent_messages kept "".
+                if session.agent_messages and isinstance(session.agent_messages[-1], dict):
+                    _last_am = session.agent_messages[-1]
+                    if (
+                        str(_last_am.get("role", "")).lower() == "assistant"
+                        and not _last_am.get("tool_calls")
+                        and str(final_text or "").strip()
+                    ):
+                        _last_am["content"] = final_text
                 if not _is_system_trigger:
                     _hist_assistant: Dict[str, Any] = {"role": "assistant", "content": final_text}
                     if sug_list:
@@ -2350,7 +2567,7 @@ class AgentRuntime:
                             _hist_assistant["searched_queries"] = list(_ref_payload["searched_queries"])
                     except Exception:
                         pass
-                    session.chat_history.append(_hist_assistant)
+                    _chat_history_append_deduped(session.chat_history, _hist_assistant)
                 await self.hooks.run_on_agent_end(final_text, session)
                 _um = usage_metadata_from_llm_response(response)
                 _final_data: dict[str, Any] = {"text": final_text}
@@ -2382,7 +2599,7 @@ class AgentRuntime:
             }
             messages.append(assistant_tool_message)
             if not _is_system_trigger and str(ac_clean or "").strip():
-                session.chat_history.append({"role": "assistant", "content": ac_clean})
+                _chat_history_append_deduped(session.chat_history, {"role": "assistant", "content": ac_clean})
 
             _parallel_mode = _parallel_tools_enabled() and len(tool_calls) > 1
             if _parallel_mode:
