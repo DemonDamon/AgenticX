@@ -65,6 +65,7 @@ class ProviderConfig:
     secret_key: Optional[str] = None
     group_id: Optional[str] = None
     drop_params: Optional[bool] = None
+    extra_body: Optional[Dict[str, Any]] = None
     extra: Dict[str, Any] = field(default_factory=dict)
 
 
@@ -187,6 +188,7 @@ class AgxConfig:
             secret_key=raw.pop("secret_key", None),
             group_id=raw.pop("group_id", None),
             drop_params=raw.pop("drop_params", None),
+            extra_body=raw.pop("extra_body", None) or None,
             extra=raw,
         )
 
