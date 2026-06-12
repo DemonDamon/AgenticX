@@ -23,7 +23,7 @@ export function RuntimeConfigSection({ value, onChange, disabled }: RuntimeConfi
         中设置 <code className="rounded bg-surface-panel px-1">group_chat.mention_hops: 2</code>（范围 1-10）。
       </p>
 
-      <div className="mt-4 rounded-lg border border-border/80 bg-surface-panel px-3 py-3">
+      <div className="mt-4 rounded-lg border border-border bg-surface-panel px-3 py-3">
         <div className="mb-2.5 flex items-center justify-between gap-2">
           <span className="text-xs font-medium text-text-primary">最大工具轮数</span>
           <span className="text-[11px] tabular-nums text-text-muted">
