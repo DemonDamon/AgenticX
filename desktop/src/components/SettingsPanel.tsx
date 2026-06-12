@@ -3854,6 +3854,71 @@ function SkillsTab() {
   );
 }
 
+/** 自定义下拉选择器，替代原生 select，支持完整主题样式控制 */
+function SettingsDropdown({
+  label,
+  value,
+  displayLabel,
+  options,
+  onChange,
+  className = "",
+}: {
+  label: string;
+  value: string;
+  displayLabel: string;
+  options: ReadonlyArray<{ value: string; label: string }>;
+  onChange: (v: string) => void;
+  className?: string;
+}) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const handler = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+    };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, [open]);
+
+  return (
+    <div ref={ref} className={`relative ${className}`}>
+      <div className="mb-1.5 text-sm text-text-muted">{label}</div>
+      <button
+        type="button"
+        onClick={() => setOpen((o) => !o)}
+        className="flex w-full items-center justify-between rounded-md border border-border bg-surface-panel px-3 py-1.5 text-sm text-text-primary transition-colors hover:bg-surface-hover"
+      >
+        <span>{displayLabel}</span>
+        <svg
+          className={`ml-2 size-3.5 shrink-0 text-text-subtle transition-transform duration-150 ${open ? "rotate-180" : ""}`}
+          viewBox="0 0 20 20" fill="currentColor"
+        >
+          <path fillRule="evenodd" d="M5.23 7.21a.75.75 0 011.06.02L10 11.168l3.71-3.938a.75.75 0 111.08 1.04l-4.25 4.5a.75.75 0 01-1.08 0l-4.25-4.5a.75.75 0 01.02-1.06z" clipRule="evenodd" />
+        </svg>
+      </button>
+      {open && (
+        <div className="absolute left-0 top-full z-50 mt-1 w-full min-w-max overflow-hidden rounded-lg border border-border bg-surface-panel shadow-lg">
+          {options.map((opt) => (
+            <button
+              key={opt.value}
+              type="button"
+              onClick={() => { onChange(opt.value); setOpen(false); }}
+              className={`flex w-full items-center gap-2 px-3 py-2 text-sm transition-colors hover:bg-surface-hover ${
+                value === opt.value ? "text-text-primary" : "text-text-subtle"
+              }`}
+            >
+              <span className={`size-1.5 shrink-0 rounded-full ${value === opt.value ? "bg-[rgba(var(--theme-color-rgb),0.9)]" : "bg-transparent"}`} />
+              {opt.label}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function EmailSettingsTab() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -7086,29 +7151,45 @@ export function SettingsPanel({
             {/* === GENERAL TAB ===（保持挂载以便底部「保存」能刷入权限 API，避免仅失焦写入） */}
             <div className={tab === "general" ? "space-y-4" : "hidden"}>
                 <Panel title="显示">
-                  <label className="block text-sm text-text-muted">
-                    主题
-                    <select
-                      className="mt-1 w-full rounded-md border border-border bg-surface-panel px-2 py-1.5 text-sm text-text-primary"
-                      value={theme}
-                      onChange={(e) => onThemeChange(e.target.value as "dark" | "light" | "dim")}
-                    >
-                      <option value="dark">深色</option>
-                      <option value="light">浅色</option>
-                    </select>
-                  </label>
-                  <label className="mt-3 block text-sm text-text-muted">
-                    聊天风格
-                    <select
-                      className="mt-1 w-full rounded-md border border-border bg-surface-panel px-2 py-1.5 text-sm text-text-primary"
-                      value={chatStyle}
-                      onChange={(e) => onChatStyleChange(e.target.value as ChatStyle)}
-                    >
-                      <option value="im">IM 风格（头像 + 右侧绿色用户气泡）</option>
-                      <option value="terminal">Terminal 风格（等宽前缀）</option>
-                      <option value="clean">Clean 风格（极简分隔块）</option>
-                    </select>
-                  </label>
+                  <div className="flex gap-4">
+                    {/* 主题 自定义下拉 */}
+                    {(() => {
+                      const themeOptions = [
+                        { value: "dark", label: "深色" },
+                        { value: "light", label: "浅色" },
+                      ] as const;
+                      const currentLabel = themeOptions.find((o) => o.value === theme)?.label ?? theme;
+                      return (
+                        <SettingsDropdown
+                          label="主题"
+                          value={theme}
+                          displayLabel={currentLabel}
+                          options={themeOptions}
+                          onChange={(v) => onThemeChange(v as "dark" | "light" | "dim")}
+                          className="flex-1"
+                        />
+                      );
+                    })()}
+                    {/* 聊天风格 自定义下拉 */}
+                    {(() => {
+                      const styleOptions = [
+                        { value: "im", label: "IM 风格（头像 + 气泡）" },
+                        { value: "terminal", label: "Terminal 风格（等宽前缀）" },
+                        { value: "clean", label: "Clean 风格（极简分隔块）" },
+                      ] as const;
+                      const currentLabel = styleOptions.find((o) => o.value === chatStyle)?.label?.split("（")[0] ?? chatStyle;
+                      return (
+                        <SettingsDropdown
+                          label="聊天风格"
+                          value={chatStyle}
+                          displayLabel={currentLabel}
+                          options={styleOptions}
+                          onChange={(v) => onChatStyleChange(v as ChatStyle)}
+                          className="flex-[2]"
+                        />
+                      );
+                    })()}
+                  </div>
                   <div className="mt-3 block text-sm text-text-muted">
                     主题色系
                     <div className="mt-2 flex items-center gap-3">
