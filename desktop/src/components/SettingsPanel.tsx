@@ -1782,7 +1782,7 @@ const CcBridgeSettingsPanel = forwardRef<CcBridgePanelHandle, Record<string, nev
     () => ({
       async save() {
         if (loading) {
-          return { ok: false, error: "Bridge 配置仍在加载，请稍后再点窗口底部「保存」。" };
+          return { ok: false, error: "Bridge 配置仍在加载，请稍后再点窗口底部「退出」。" };
         }
         setBusy(true);
         setMsg("");
@@ -1973,7 +1973,7 @@ const CcBridgeSettingsPanel = forwardRef<CcBridgePanelHandle, Record<string, nev
           />
         </div>
         <p className="text-[11px] text-text-faint">
-          运行模式、URL、token、空闲时间修改后，请点击窗口底部「保存」与「工具」页其它项一并写入本机配置。
+          运行模式、URL、token、空闲时间修改后，请点击窗口底部「退出」与「工具」页其它项一并写入本机配置。
         </p>
         <div className="flex flex-wrap gap-2">
           <button
@@ -2183,7 +2183,7 @@ const ToolsTab = forwardRef<ToolsTabHandle, Record<string, never>>(function Tool
     () => ({
       async saveAll() {
         if (loading) {
-          return { ok: false, error: "工具列表仍在加载，请稍后再点窗口底部「保存」。" };
+          return { ok: false, error: "工具列表仍在加载，请稍后再点窗口底部「退出」。" };
         }
         await saveBashDefaultTimeout();
         let afterSec = stallNudge.stall_auto_nudge_after_seconds;
@@ -2278,7 +2278,7 @@ const ToolsTab = forwardRef<ToolsTabHandle, Record<string, never>>(function Tool
         管理 Agent 可调用工具的全局启停状态。关闭后 Agent 将无法调用该工具。
       </div>
       <div className="text-xs text-text-faint">
-        仅部分工具提供可折叠的「高级设置」；其余工具仅支持启用/停用。窗口底部「保存」会一并提交本页 bash 默认超时、最大工具轮数与 Claude Code Bridge 配置。
+        仅部分工具提供可折叠的「高级设置」；其余工具仅支持启用/停用。窗口底部「退出」会一并提交本页 bash 默认超时、最大工具轮数与 Claude Code Bridge 配置。
       </div>
       <RuntimeConfigSection
         value={maxToolRounds}
@@ -5807,8 +5807,12 @@ export function SettingsPanel({
   const [serverTestError, setServerTestError] = useState("");
   const [serverShowToken, setServerShowToken] = useState(false);
   const [metaSoul, setMetaSoul] = useState("");
+  const [metaSoulSaved, setMetaSoulSaved] = useState("");
   const [metaSoulSaving, setMetaSoulSaving] = useState(false);
   const [metaSoulMessage, setMetaSoulMessage] = useState("");
+  const [userNicknameDraft, setUserNicknameDraft] = useState("");
+  const [userPreferenceDraft, setUserPreferenceDraft] = useState("");
+  const [userProfileMessage, setUserProfileMessage] = useState("");
   const [userAvatarMessage, setUserAvatarMessage] = useState("");
   const [metaAvatarMessage, setMetaAvatarMessage] = useState("");
 
@@ -5926,6 +5930,9 @@ export function SettingsPanel({
     setModelHealthMap({});
     setMcpMessage("");
     setMetaSoulMessage("");
+    setUserNicknameDraft(userNickname);
+    setUserPreferenceDraft(userPreference);
+    setUserProfileMessage("");
     setServerTestStatus("idle");
     setServerTestError("");
     void window.agenticxDesktop.loadRemoteServer().then((rs) => {
@@ -5962,14 +5969,23 @@ export function SettingsPanel({
       }
     });
     void window.agenticxDesktop.loadMetaSoul().then((res) => {
-      if (res?.ok) {
-        setMetaSoul(res.content || "");
-      } else {
-        setMetaSoul("");
-      }
+      const content = res?.ok ? res.content || "" : "";
+      setMetaSoul(content);
+      setMetaSoulSaved(content);
     });
     if (sessionId) void onRefreshMcp(sessionId);
-  }, [open, providers, defaultProvider, sessionId, onRefreshMcp]);
+  }, [open, providers, defaultProvider, sessionId, onRefreshMcp, userNickname, userPreference]);
+
+  const userProfileDirty =
+    userNicknameDraft !== userNickname || userPreferenceDraft !== userPreference;
+
+  const saveUserProfile = useCallback(() => {
+    setUserNickname(userNicknameDraft);
+    setUserPreference(userPreferenceDraft);
+    setUserProfileMessage("用户档案已保存。下一轮对话生效。");
+  }, [setUserNickname, setUserPreference, userNicknameDraft, userPreferenceDraft]);
+
+  const metaSoulDirty = metaSoul !== metaSoulSaved;
 
   const saveMetaSoul = useCallback(async () => {
     setMetaSoulSaving(true);
@@ -5977,6 +5993,7 @@ export function SettingsPanel({
     try {
       const res = await window.agenticxDesktop.saveMetaSoul({ content: metaSoul });
       if (res?.ok) {
+        setMetaSoulSaved(metaSoul);
         setMetaSoulMessage("Meta-Agent SOUL 已保存。下一轮对话生效。");
       } else {
         setMetaSoulMessage(`保存失败: ${res?.error ?? "未知错误"}`);
@@ -7129,8 +7146,11 @@ export function SettingsPanel({
                     <input
                       type="text"
                       className="mt-1 w-full rounded-md border border-border bg-surface-panel px-2 py-1.5 text-sm text-text-primary placeholder:text-text-faint"
-                      value={userNickname}
-                      onChange={(e) => setUserNickname(e.target.value)}
+                      value={userNicknameDraft}
+                      onChange={(e) => {
+                        setUserNicknameDraft(e.target.value);
+                        setUserProfileMessage("");
+                      }}
                       placeholder="留空则显示「我」"
                       maxLength={48}
                     />
@@ -7149,7 +7169,7 @@ export function SettingsPanel({
                         />
                       ) : (
                         <div className="flex h-12 w-12 items-center justify-center rounded-full bg-[rgba(var(--theme-color-rgb),0.9)] text-sm font-semibold text-black">
-                          {(userNickname.trim().slice(0, 1) || "我").toUpperCase()}
+                          {(userNicknameDraft.trim().slice(0, 1) || "我").toUpperCase()}
                         </div>
                       )}
                       <div className="flex flex-wrap items-center gap-2">
@@ -7186,20 +7206,46 @@ export function SettingsPanel({
                       <p className="mt-1 text-[11px] text-text-subtle">{userAvatarMessage}</p>
                     ) : null}
                   </div>
-                  <label className="mt-4 block text-sm text-text-muted">
-                    用户偏好与风格（注入系统提示）
+                  <div className="mt-4">
+                    <div className="text-sm text-text-muted">用户偏好与风格（注入系统提示）</div>
                     <textarea
                       className="mt-1 w-full resize-none rounded-md border border-border bg-surface-panel px-2 py-1.5 text-sm text-text-primary placeholder:text-text-faint"
                       rows={4}
-                      value={userPreference}
-                      onChange={(e) => setUserPreference(e.target.value)}
+                      value={userPreferenceDraft}
+                      onChange={(e) => {
+                        setUserPreferenceDraft(e.target.value);
+                        setUserProfileMessage("");
+                      }}
                       placeholder={"例：我不喜欢绕弯子，请直接给结论；偏好表格而非长段落；遇到歧义先问我再执行。"}
                       maxLength={500}
                     />
-                  </label>
-                  <p className="mt-1 text-[11px] text-text-subtle">
-                    {`${userPreference.length}/500 字。会注入每次对话的系统提示，对所有 agent 的回复方式生效。`}
-                  </p>
+                    <div className="mt-1 flex items-start justify-between gap-3">
+                      <p className="min-w-0 flex-1 text-[11px] leading-relaxed text-text-subtle">
+                        {`${userPreferenceDraft.length}/500 字。会注入每次对话的系统提示，对所有 agent 的回复方式生效。`}
+                      </p>
+                      <div className="flex shrink-0 items-center gap-2">
+                        {userProfileMessage ? (
+                          <span
+                            className={`max-w-[180px] text-right text-[11px] leading-snug ${
+                              userProfileMessage.startsWith("用户档案已保存")
+                                ? "text-text-subtle"
+                                : "text-rose-400"
+                            }`}
+                          >
+                            {userProfileMessage}
+                          </span>
+                        ) : null}
+                        <button
+                          type="button"
+                          className="rounded-md bg-btnPrimary px-3 py-1 text-xs font-medium text-btnPrimary-text transition hover:bg-btnPrimary-hover disabled:opacity-50"
+                          disabled={!userProfileDirty}
+                          onClick={saveUserProfile}
+                        >
+                          保存
+                        </button>
+                      </div>
+                    </div>
+                  </div>
                 </Panel>
                 <Panel title="元智能体（Near）">
                   <p className="mb-3 text-[11px] leading-relaxed text-text-subtle">
@@ -7253,22 +7299,17 @@ export function SettingsPanel({
                       className="mt-1 w-full resize-none rounded-md border border-border bg-surface-panel px-2 py-1.5 text-sm text-text-primary placeholder:text-text-faint"
                       rows={6}
                       value={metaSoul}
-                      onChange={(e) => setMetaSoul(e.target.value)}
+                      onChange={(e) => {
+                        setMetaSoul(e.target.value);
+                        setMetaSoulMessage("");
+                      }}
                       placeholder={"写入 ~/.agenticx/workspace/SOUL.md。\n例如：\n- 回答先给结论\n- 不做过度客套\n- 任务进度要可见"}
                     />
                   </label>
-                  <div className="mt-2 flex items-center gap-2">
-                    <button
-                      type="button"
-                      className="rounded-md border border-border px-3 py-1.5 text-xs text-text-subtle transition hover:bg-surface-hover hover:text-text-strong disabled:opacity-50"
-                      disabled={metaSoulSaving}
-                      onClick={() => void saveMetaSoul()}
-                    >
-                      {metaSoulSaving ? "保存中..." : "保存 Meta SOUL"}
-                    </button>
+                  <div className="mt-2 flex flex-wrap items-center justify-end gap-2">
                     {metaSoulMessage ? (
                       <span
-                        className={`text-xs ${
+                        className={`mr-auto text-xs ${
                           metaSoulMessage.startsWith("Meta-Agent SOUL 已保存")
                             ? "text-text-subtle"
                             : "text-rose-400"
@@ -7277,6 +7318,14 @@ export function SettingsPanel({
                         {metaSoulMessage}
                       </span>
                     ) : null}
+                    <button
+                      type="button"
+                      className="rounded-md bg-btnPrimary px-3 py-1.5 text-xs font-medium text-btnPrimary-text transition hover:bg-btnPrimary-hover disabled:opacity-50"
+                      disabled={metaSoulSaving || !metaSoulDirty}
+                      onClick={() => void saveMetaSoul()}
+                    >
+                      {metaSoulSaving ? "保存中..." : "保存 Meta SOUL"}
+                    </button>
                   </div>
                 </Panel>
                 <Panel title="权限">
@@ -7298,9 +7347,9 @@ export function SettingsPanel({
                         : "默认全部自动执行，不再询问（高风险）。"}
                   </div>
                   <p className="mt-2 text-[11px] text-text-faint">
-                    下方「路径 / 命令 / 工具拒绝」修改后，请点击窗口底部「保存」写入 Studio（与失焦保存等效）。未配置远程 URL 时使用本机内置 API；若仍出现 HTTP 404，请升级远端 agenticx 版本或核对服务器地址是否指向当前 Near 使用的同一 Studio。
+                    下方「路径 / 命令 / 工具拒绝」修改后，请点击窗口底部「退出」写入 Studio（与失焦保存等效）。未配置远程 URL 时使用本机内置 API；若仍出现 HTTP 404，请升级远端 agenticx 版本或核对服务器地址是否指向当前 Near 使用的同一 Studio。
                   </p>
-                  <div className="mt-3 rounded-md border border-status-warning/35 bg-status-warning/10 px-3 py-2.5 text-xs text-text-subtle">
+                  <div className="mt-3 rounded-md border border-border bg-status-warning/10 px-3 py-2.5 text-xs text-text-subtle">
                     <div className="font-medium text-status-warning">凭据安全</div>
                     <p className="mt-1 leading-relaxed">
                       API Key、Token、密码<strong className="font-medium text-text-primary">请勿在对话中发送</strong>
@@ -8602,7 +8651,7 @@ export function SettingsPanel({
                         />
                       </label>
                       <p className="mt-1 text-xs text-text-faint">
-                        修改后点底部「保存」统一生效；需重启 Near / agx serve。
+                        修改后点底部「退出」统一生效；需重启 Near / agx serve。
                       </p>
                     </div>
                   )}
@@ -8814,19 +8863,22 @@ export function SettingsPanel({
                   <p>1. 在云主机上安装 agenticx: <code className="text-text-muted">pip install agenticx</code></p>
                   <p>2. 启动服务: <code className="text-text-muted">agx serve --host 0.0.0.0 --port 8080 --token YOUR_TOKEN</code></p>
                   <p>3. 确保防火墙放行对应端口，生产环境建议配置 HTTPS (Nginx 反向代理)。</p>
-                  <p className="text-text-faint">修改后点底部「保存」统一生效；切换模式需重启 Near。</p>
+                  <p className="text-text-faint">修改后点底部「退出」统一生效；切换模式需重启 Near。</p>
                 </div>
               </div>
             )}
           </div>
 
           {/* Footer */}
-          <div className="flex shrink-0 items-center justify-end gap-2 border-t border-border px-4 py-2.5">
-            <button className="rounded-md border border-border px-4 py-1.5 text-sm text-text-subtle transition hover:bg-surface-hover" onClick={onClose}>
-              取消
-            </button>
-            <button className="rounded-md bg-btnPrimary px-4 py-1.5 text-sm font-medium text-btnPrimary-text transition hover:bg-btnPrimary-hover" onClick={handleSave}>
-              保存
+          <div className="flex shrink-0 items-center justify-between gap-3 border-t border-border px-4 py-2.5">
+            <span className="min-w-0 truncate text-[11px] text-text-faint">
+              开关类配置改动即时生效；需手动填写的项请用各区块内的「保存」。退出时会一并写入模型服务、连接、语音等设置。
+            </span>
+            <button
+              className="shrink-0 rounded-md bg-btnPrimary px-4 py-1.5 text-sm font-medium text-btnPrimary-text transition hover:bg-btnPrimary-hover"
+              onClick={handleSave}
+            >
+              退出
             </button>
           </div>
         </div>

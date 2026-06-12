@@ -15,7 +15,7 @@ export function RuntimeConfigSection({ value, onChange, disabled }: RuntimeConfi
     <div className="rounded-xl border border-border bg-surface-card px-4 py-3.5">
       <div className="text-sm font-semibold text-text-strong">运行时参数</div>
       <p className="mt-1 text-xs leading-relaxed text-text-muted">
-        Agent 单次对话中可连续调用工具的最大轮数。长任务建议适当提高。修改后请点击窗口底部「保存」写入本机配置。
+        Agent 单次对话中可连续调用工具的最大轮数。长任务建议适当提高。修改后请点击窗口底部「退出」写入本机配置。
       </p>
       <p className="mt-1.5 text-[11px] leading-relaxed text-text-faint">
         群聊 @mention 多跳次数（默认 2）可在{" "}

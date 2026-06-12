@@ -242,7 +242,7 @@ export const VoiceSettingsPanel = forwardRef<VoiceSettingsPanelHandle>(function 
 
   const persistVoice = useCallback(async (): Promise<{ ok: boolean; error?: string }> => {
     if (loadingRef.current) {
-      return { ok: false, error: "语音设置仍在加载，请稍后在窗口底部再点「保存」。" };
+      return { ok: false, error: "语音设置仍在加载，请稍后在窗口底部再点「退出」。" };
     }
     setPanelMsg("");
     setProbeMsg("");
@@ -285,7 +285,7 @@ export const VoiceSettingsPanel = forwardRef<VoiceSettingsPanelHandle>(function 
       });
       if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
       await load();
-      setPanelMsg("已与窗口底部「保存」一并写入本机配置（realtime 计费见云厂商控制台）。");
+      setPanelMsg("已与窗口底部「退出」一并写入本机配置（realtime 计费见云厂商控制台）。");
       return { ok: true };
     } catch (e) {
       const err = e instanceof Error ? e.message : "保存失败";
@@ -340,7 +340,7 @@ export const VoiceSettingsPanel = forwardRef<VoiceSettingsPanelHandle>(function 
       <p className="mb-4 text-[11px] leading-relaxed text-text-faint">
         灵巧模式胶囊走 Meta-Agent（Near）：对话轮次归档到当前元智能体会话，`metadata.source = voice-focus`。
         实时链路按使用量计费——OpenAI Realtime 与豆包/火山均需自备账号与密钥。国内调用 OpenAI 需自行配置可访问代理的{" "}
-        <code className="text-text-subtle">base_url</code>。请使用窗口<strong>底部</strong>的「保存」将本页写入{" "}
+        <code className="text-text-subtle">base_url</code>。请使用窗口<strong>底部</strong>的「退出」将本页写入{" "}
         <code className="text-text-subtle">~/.agenticx/config.yaml</code>（本页不再提供重复保存按钮）。
       </p>
 
