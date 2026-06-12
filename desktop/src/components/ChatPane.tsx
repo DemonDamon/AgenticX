@@ -133,7 +133,7 @@ import {
   mapLoadedSessionMessage,
   type LoadedSessionMessage,
 } from "../utils/session-message-map";
-import { viewImageInjectRowFromSession } from "../utils/view-image-inject";
+import { isViewImageInjectMessage, viewImageInjectRowFromSession } from "../utils/view-image-inject";
 import { resolveSessionTailForSwitch, invalidateSessionTail } from "../utils/session-tail-cache";
 import { visibleMessagesForSession } from "../utils/message-ownership";
 import {
@@ -5420,7 +5420,8 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
             const hasStreamingRow = groupedWork.some(
               (r) => r.kind === "message" && r.message.role === "assistant" && r.message.id === "__stream__"
             );
-            const useUnifiedReActCard = hasTools || hasStreamingRow;
+            const hasViewImageInject = workMessages.some(isViewImageInjectMessage);
+            const useUnifiedReActCard = hasTools || hasStreamingRow || hasViewImageInject;
             const isSelecting = selectedMessageIds.size > 0;
             const blockAnySelected = workMessages.some((m) => selectedMessageIds.has(m.id));
             const lastAssistantInBlock = [...workMessages].reverse().find(
@@ -5479,8 +5480,14 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
                       })}
                     </div>
                   ) : (
-                    <div className="flex min-w-0 flex-1 flex-col gap-2">
-                      {groupedWork.map((r, i) => renderGroupedRow(r, i, { reactWorkColumn: true, reactShowActions: true }))}
+                    <div className="flex min-w-0 flex-1 flex-col gap-0">
+                      {groupedWork.map((r, i) =>
+                        renderGroupedRow(r, i, {
+                          reactWorkColumn: true,
+                          reactFlat: true,
+                          reactShowActions: true,
+                        }),
+                      )}
                     </div>
                   )}
                 </div>
