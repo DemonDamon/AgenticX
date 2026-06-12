@@ -350,7 +350,7 @@ export const VoiceSettingsPanel = forwardRef<VoiceSettingsPanelHandle>(function 
 
       <div className="space-y-3 text-sm text-text-muted">
         <fieldset className="space-y-2">
-          <legend className="text-text-subtle">Provider</legend>
+          <legend className="text-text-subtle">服务供应商</legend>
           <label className="flex cursor-pointer items-center gap-2">
             <input
               type="radio"
@@ -453,7 +453,7 @@ export const VoiceSettingsPanel = forwardRef<VoiceSettingsPanelHandle>(function 
           <div className="space-y-2 border-t border-border pt-3">
             <div className="text-text-subtle text-xs uppercase tracking-wide">OpenAI Realtime</div>
             <label className="block">
-              API Key
+              API 密钥
               <SecretInput
                 placeholder="仅在覆盖时填写；留空保持不变"
                 value={draft.openai_realtime.api_key}
@@ -461,7 +461,7 @@ export const VoiceSettingsPanel = forwardRef<VoiceSettingsPanelHandle>(function 
               />
             </label>
             <label className="block">
-              Base URL
+              API 地址
               <input
                 className="mt-1 w-full rounded-md border border-border bg-surface-panel px-2 py-1 text-sm text-text-primary"
                 value={draft.openai_realtime.base_url}
@@ -469,7 +469,7 @@ export const VoiceSettingsPanel = forwardRef<VoiceSettingsPanelHandle>(function 
               />
             </label>
             <label className="block">
-              Model
+              模型
               <input
                 className="mt-1 w-full rounded-md border border-border bg-surface-panel px-2 py-1 text-sm text-text-primary"
                 value={draft.openai_realtime.model}
@@ -477,7 +477,7 @@ export const VoiceSettingsPanel = forwardRef<VoiceSettingsPanelHandle>(function 
               />
             </label>
             <label className="block">
-              Voice
+              音色
               <input
                 className="mt-1 w-full rounded-md border border-border bg-surface-panel px-2 py-1 text-sm text-text-primary"
                 value={draft.openai_realtime.voice}
@@ -485,7 +485,7 @@ export const VoiceSettingsPanel = forwardRef<VoiceSettingsPanelHandle>(function 
               />
             </label>
             <label className="block">
-              指令 Instructions（可选，注入 realtime session）
+              会话指令（可选）
               <textarea
                 rows={4}
                 className="mt-1 w-full rounded-md border border-border bg-surface-panel px-2 py-1 text-sm text-text-primary"
@@ -506,7 +506,7 @@ export const VoiceSettingsPanel = forwardRef<VoiceSettingsPanelHandle>(function 
               豆包模式下，语音采集走实时链路，工具执行（含 MCP/CLI）由本地 Meta 运行时桥接处理；若系统语音不可用，将仅返回文本结果。
             </p>
             <label className="block">
-              App ID
+              应用 ID
               <input
                 className="mt-1 w-full rounded-md border border-border bg-surface-panel px-2 py-1 text-sm text-text-primary"
                 value={draft.doubao_realtime.app_id}
@@ -519,7 +519,7 @@ export const VoiceSettingsPanel = forwardRef<VoiceSettingsPanelHandle>(function 
               />
             </label>
             <label className="block">
-              Access Key
+              访问密钥
               <SecretInput
                 placeholder="仅在覆盖时填写"
                 value={draft.doubao_realtime.access_key}
@@ -532,7 +532,7 @@ export const VoiceSettingsPanel = forwardRef<VoiceSettingsPanelHandle>(function 
               />
             </label>
             <label className="block">
-              Secret Key（可选）
+              密钥（可选）
               <SecretInput
                 placeholder="部分账号需要填写"
                 value={draft.doubao_realtime.secret_key}
@@ -545,7 +545,7 @@ export const VoiceSettingsPanel = forwardRef<VoiceSettingsPanelHandle>(function 
               />
             </label>
             <label className="block">
-              API App Key
+              API 应用密钥
               <input
                 className="mt-1 w-full rounded-md border border-border bg-surface-panel px-2 py-1 text-sm text-text-primary"
                 value={draft.doubao_realtime.api_app_key}
@@ -558,7 +558,7 @@ export const VoiceSettingsPanel = forwardRef<VoiceSettingsPanelHandle>(function 
               />
             </label>
             <label className="block">
-              Resource Id
+              资源 ID
               <input
                 className="mt-1 w-full rounded-md border border-border bg-surface-panel px-2 py-1 text-sm text-text-primary"
                 value={draft.doubao_realtime.resource_id}
@@ -571,7 +571,7 @@ export const VoiceSettingsPanel = forwardRef<VoiceSettingsPanelHandle>(function 
               />
             </label>
             <label className="block">
-              Model 版本
+              模型版本
               <select
                 className="mt-1 w-full rounded-md border border-border bg-surface-panel px-2 py-1.5 text-sm text-text-primary"
                 value={draft.doubao_realtime.model}
@@ -590,7 +590,7 @@ export const VoiceSettingsPanel = forwardRef<VoiceSettingsPanelHandle>(function 
               </span>
             </label>
             <label className="block">
-              Voice Type（音色）
+              音色
               <input
                 placeholder="如 zh_female_vv_jupiter_bigtts / saturn_xxx / S_xxx"
                 className="mt-1 w-full rounded-md border border-border bg-surface-panel px-2 py-1 text-sm text-text-primary"
@@ -604,7 +604,7 @@ export const VoiceSettingsPanel = forwardRef<VoiceSettingsPanelHandle>(function 
               />
             </label>
             <label className="block">
-              Bot Name（角色称呼，仅 O 版本生效，≤20 字）
+              角色称呼（仅 O 版本生效，≤20 字）
               <input
                 maxLength={20}
                 placeholder="Near"
@@ -619,7 +619,7 @@ export const VoiceSettingsPanel = forwardRef<VoiceSettingsPanelHandle>(function 
               />
             </label>
             <label className="block">
-              System Role（背景人设，仅 O 版本生效）
+              背景人设（仅 O 版本生效）
               <textarea
                 rows={3}
                 placeholder='例如："你是一个理性、克制、技术导向的开发者助手。"'
@@ -634,7 +634,7 @@ export const VoiceSettingsPanel = forwardRef<VoiceSettingsPanelHandle>(function 
               />
             </label>
             <label className="block">
-              Speaking Style（口吻，仅 O 版本生效）
+              口吻（仅 O 版本生效）
               <textarea
                 rows={2}
                 placeholder='例如："你说话简洁、就事论事，不寒暄。"'
