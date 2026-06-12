@@ -43,12 +43,14 @@ def test_read_memory_entries_parses_sections_and_indexes(tmp_path):
         "index": 0,
         "text": "Name: Alice",
         "line": 4,
+        "children": [],
     }
     assert entries[1] == {
         "section": "User Anchors",
         "index": 1,
         "text": "Name: Alice",
         "line": 5,
+        "children": [],
     }
     assert entries[2]["section"] == "Agent Notes"
     assert entries[2]["index"] == 0
@@ -111,5 +113,55 @@ def test_delete_memory_entries_batch_removes_multiple_entries(tmp_path):
             "index": 0,
             "text": "Move transient details into daily memory files.",
             "line": 6,
+            "children": [],
         }
     ]
+
+
+NESTED_MEMORY = """# MEMORY.md
+
+## Agent Identity Anchors
+- Name: Near
+- Capability profile:
+  - math strong
+  - systems strong
+- Position: CEO
+"""
+
+
+def test_read_memory_entries_groups_nested_children(tmp_path):
+    memory_file = tmp_path / "MEMORY.md"
+    memory_file.write_text(NESTED_MEMORY, encoding="utf-8")
+    entries = read_memory_entries(tmp_path)
+    assert len(entries) == 3
+    assert entries[1]["text"] == "Capability profile:"
+    assert entries[1]["children"] == ["math strong", "systems strong"]
+    assert entries[1]["index"] == 1
+
+
+def test_update_memory_entry_rewrites_nested_block(tmp_path):
+    memory_file = tmp_path / "MEMORY.md"
+    memory_file.write_text(NESTED_MEMORY, encoding="utf-8")
+    update_memory_entry(
+        tmp_path,
+        "Agent Identity Anchors",
+        1,
+        "Capability profile:",
+        children=["theory", "engineering"],
+    )
+    raw = memory_file.read_text(encoding="utf-8")
+    assert "- Capability profile:" in raw
+    assert "  - theory" in raw
+    assert "  - engineering" in raw
+    assert "math strong" not in raw
+
+
+def test_delete_memory_entry_removes_nested_children(tmp_path):
+    memory_file = tmp_path / "MEMORY.md"
+    memory_file.write_text(NESTED_MEMORY, encoding="utf-8")
+    delete_memory_entry(tmp_path, "Agent Identity Anchors", 1)
+    raw = memory_file.read_text(encoding="utf-8")
+    assert "Capability profile:" not in raw
+    assert "math strong" not in raw
+    assert "- Name: Near" in raw
+    assert "- Position: CEO" in raw

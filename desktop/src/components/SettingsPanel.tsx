@@ -12,7 +12,6 @@ import {
   Cpu,
   Plug,
   Mail,
-  FolderOpen,
   Bookmark,
   Sparkles,
   Globe,
@@ -768,7 +767,6 @@ const TABS: { id: SettingsTab; label: string; icon: typeof Settings2 }[] = [
   { id: "automation", label: "定时任务", icon: AutomationTaskIcon },
   { id: "voice", label: "语音服务", icon: Mic },
   { id: "email", label: "邮件通知", icon: Mail },
-  { id: "workspace", label: "工作目录", icon: FolderOpen },
   { id: "favorites", label: "内容收藏", icon: Bookmark },
   { id: "server", label: "远程连接", icon: Globe },
 ];
@@ -5581,20 +5579,6 @@ function SettingsToggleCard(props: {
   );
 }
 
-function WorkspaceSettingsTab() {
-  return (
-    <div className="space-y-4">
-      <label className="block text-sm text-text-muted">
-        默认工作区目录
-        <input className="mt-1 w-full rounded-md border border-border bg-surface-panel px-2 py-1.5 text-sm text-text-subtle" value="~/.agenticx/workspace" readOnly />
-        <span className="mt-1 block text-xs text-text-faint">修改工作区目录请编辑 ~/.agenticx/config.yaml 中的 workspace_dir 字段</span>
-      </label>
-      <div className="rounded-md border border-border bg-surface-card px-3 py-2.5 text-xs text-text-subtle">
-        每个分身拥有独立工作区，位于 ~/.agenticx/avatars/&lt;id&gt;/workspace。
-      </div>
-    </div>
-  );
-}
 
 export function SettingsPanel({
   open,
@@ -7374,6 +7358,16 @@ export function SettingsPanel({
                 <SuggestedQuestionsSettingsPanel />
                 <ComputerUseGeneralPanel />
                 <SessionMemoryPanel />
+                <Panel title="工作目录">
+                  <label className="block text-sm text-text-muted">
+                    默认工作区目录
+                    <input className="mt-1 w-full rounded-md border border-border bg-surface-panel px-2 py-1.5 text-sm text-text-subtle" value="~/.agenticx/workspace" readOnly />
+                    <span className="mt-1 block text-xs text-text-faint">修改工作区目录请编辑 ~/.agenticx/config.yaml 中的 workspace_dir 字段</span>
+                  </label>
+                  <div className="mt-3 rounded-md border border-border bg-surface-card px-3 py-2.5 text-xs text-text-subtle">
+                    每个分身拥有独立工作区，位于 ~/.agenticx/avatars/&lt;id&gt;/workspace。
+                  </div>
+                </Panel>
                 <div className="rounded-md border border-border bg-surface-card px-3 py-2.5 text-xs text-text-subtle">
                   当前版本：AgenticX Desktop v0.2.5
                 </div>
@@ -8352,9 +8346,6 @@ export function SettingsPanel({
 
             {/* === EMAIL TAB === */}
             {tab === "email" && <EmailSettingsTab />}
-
-            {/* === WORKSPACE TAB === */}
-            {tab === "workspace" && <WorkspaceSettingsTab />}
 
             {tab === "favorites" && (
               <FavoritesTab
