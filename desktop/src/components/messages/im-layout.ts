@@ -40,7 +40,8 @@ const ASSISTANT_TEXT_PADDING_LEFT_PX = 2.5;
 const ASSISTANT_ACTION_MARGIN_LEFT_PX = 12;
 
 export function getAssistantTextClassName(options: AssistantTextClassOptions = {}): string | undefined {
-  return options.hasReasoning ? "mt-2" : undefined;
+  if (!options.hasReasoning) return undefined;
+  return options.inReActRow ? "mt-1" : "mt-2";
 }
 
 export function getAssistantTextStyle(_options: AssistantTextClassOptions = {}): CSSProperties {

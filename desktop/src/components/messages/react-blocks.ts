@@ -1,4 +1,5 @@
 import type { Message } from "../../store";
+import { isViewImageInjectMessage } from "../../utils/view-image-inject";
 import { parseReasoningContent } from "./reasoning-parser";
 
 export type ReActBlockModel = {
@@ -23,7 +24,7 @@ export function expandMessagesToTopLevelRows(messages: Message[]): TopLevelChatR
     buf = [];
   };
   for (const m of messages) {
-    if (m.role === "user") {
+    if (m.role === "user" && !isViewImageInjectMessage(m)) {
       flush();
       out.push({ kind: "user", message: m });
     } else {

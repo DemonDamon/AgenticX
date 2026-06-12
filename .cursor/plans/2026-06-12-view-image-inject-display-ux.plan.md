@@ -19,6 +19,7 @@
 
 - Backend: `VIEW_IMAGE_INJECT_*` 常量；`_inject_pending_visual_attachments` 双写结构；`session_manager` 持久化 `visual_attachments`。
 - Desktop: `view-image-inject.ts`, `ViewImageInjectCard.tsx`, `MessageRenderer` 路由，`session-message-map` 映射。
+- **Spacing (follow-up)**: inject 行并入 ReAct 块（`react-blocks.ts`）；有 inject 时启用统一 ReAct 卡片；工作列始终 `reactFlat`；`ViewImageInjectCard` 与工具链摘要行同款 `py-1`；ReAct 列 Thought→正文 `mt-1`。
 
 Plan-Id: 2026-06-12-view-image-inject-display-ux  
 Plan-File: .cursor/plans/2026-06-12-view-image-inject-display-ux.plan.md
