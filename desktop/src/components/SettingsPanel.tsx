@@ -6374,93 +6374,61 @@ export function SettingsPanel({
 
   const callAiAssist = useCallback(
     async (kind: "identity" | "soul" | "preference") => {
-      const base = (apiBase || "").replace(/\/+$/, "");
-      if (!base) {
-        setMetaWorkspaceMessage("未连接到 Studio，无法使用 AI 辅助。");
-        return;
-      }
-      const currentContent = kind === "identity" ? metaIdentity : kind === "soul" ? metaSoul : userPreferenceDraft;
+      const setMsg = kind === "preference" ? setUserProfileMessage : setMetaWorkspaceMessage;
+      const currentContent =
+        kind === "identity" ? metaIdentity : kind === "soul" ? metaSoul : userPreferenceDraft;
+
       const prompts: Record<typeof kind, { system: string; user: string }> = {
         identity: {
           system:
-            "你是一个帮助用户配置 AI 助理身份定义的助手。输出纯 Markdown，不要加解释、不要加中文注释，直接输出可填入 IDENTITY.md 的内容。格式参考：\n```\n# IDENTITY.md\n- Name: ...\n- Role: ...\n- Persona: ...\n```",
+            "你是一个帮助用户配置 AI 助理身份定义的助手。直接输出可填入 IDENTITY.md 的 Markdown 内容，不要加任何解释或前缀。",
           user: currentContent.trim()
             ? `请对以下身份定义进行润色，让它更清晰、更有个性，保留 Markdown 格式：\n\n${currentContent}`
             : "请为一个名为 Near 的个人 AI 助理生成一份简洁的身份定义（IDENTITY.md），Markdown 格式，包含 Name、Role、Persona 字段。",
         },
         soul: {
           system:
-            "你是一个帮助用户配置 AI 助理人格原则的助手。输出纯 Markdown，不要加解释，直接输出可填入 SOUL.md 的内容。格式参考：\n```\n# SOUL.md – How You Behave\n## Principles\n- ...\n## Communication Style\n- ...\n```",
+            "你是一个帮助用户配置 AI 助理人格原则的助手。直接输出可填入 SOUL.md 的 Markdown 内容，不要加任何解释或前缀。",
           user: currentContent.trim()
             ? `请对以下全局人格进行润色，让原则更清晰、更有可操作性，保留 Markdown 格式：\n\n${currentContent}`
             : "请为一个个人 AI 助理生成一份全局人格文档（SOUL.md），Markdown 格式，包含行为准则和沟通风格。",
         },
         preference: {
           system:
-            "你是一个帮助用户描述自己使用 AI 时偏好的助手。输出简洁的纯文本偏好描述（非 Markdown），不超过 300 字，直接输出可填入「用户偏好」字段的内容，不要加任何前缀。",
+            "你是一个帮助用户描述自己使用 AI 时偏好的助手。输出简洁的纯文本偏好描述（非 Markdown），不超过 200 字，直接输出内容，不要加任何前缀。",
           user: currentContent.trim()
             ? `请润色以下用户偏好描述，让它更自然、更清晰：\n\n${currentContent}`
             : "请生成一段示例用户偏好描述，内容包含：回复风格、格式偏好、沟通习惯等，字数在 100 字以内。",
         },
       };
       const { system, user } = prompts[kind];
+
+      // 从当前激活的 provider 取 API 配置
+      const store = await import("../store").then((m) => m.useAppStore.getState());
+      const activeProvider = store.activeProvider || defaultProvider || "";
+      const providerEntry = providers[activeProvider];
+      const apiKey = providerEntry?.apiKey ?? "";
+      const baseUrl = providerEntry?.baseUrl ?? "";
+      const model = providerEntry?.model ?? store.activeModel ?? "";
+
       setAiAssistLoading(kind);
+      setMsg("");
       try {
-        const resp = await fetch(`${base}/api/chat`, {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            ...(apiToken ? { "x-agx-desktop-token": apiToken } : {}),
-          },
-          body: JSON.stringify({
-            session_id: `__ai_assist_${kind}_${Date.now()}`,
-            user_input: user,
-            system_override: system,
-            stream: false,
-          }),
+        const res = await window.agenticxDesktop.aiAssistComplete({
+          systemPrompt: system,
+          userPrompt: user,
+          provider: activeProvider,
+          apiKey,
+          baseUrl,
+          model,
         });
-        if (!resp.ok) {
-          const errText = await resp.text().catch(() => "");
-          setMetaWorkspaceMessage(`AI 辅助失败: HTTP ${resp.status}${errText ? " — " + errText.slice(0, 80) : ""}`);
+        if (!res?.ok) {
+          setMsg(`AI 辅助失败: ${res?.error ?? "未知错误"}`);
           return;
         }
-        const isStream = resp.headers.get("content-type")?.includes("text/event-stream");
-        let result = "";
-        if (isStream) {
-          const reader = resp.body?.getReader();
-          const decoder = new TextDecoder();
-          let buf = "";
-          if (reader) {
-            while (true) {
-              const { value, done } = await reader.read();
-              if (done) break;
-              buf += decoder.decode(value, { stream: true });
-              const parts = buf.split("\n\n");
-              buf = parts.pop() ?? "";
-              for (const part of parts) {
-                for (const line of part.split("\n")) {
-                  if (!line.startsWith("data:")) continue;
-                  const raw = line.slice(5).trim();
-                  if (!raw || raw === "[DONE]") continue;
-                  try {
-                    const ev = JSON.parse(raw) as { type?: string; text?: string; content?: string; delta?: { text?: string } };
-                    if (ev.type === "text_delta" || ev.type === "content_block_delta") {
-                      result += ev.delta?.text ?? ev.text ?? "";
-                    } else if (ev.text) {
-                      result += ev.text;
-                    }
-                  } catch { /* skip malformed frames */ }
-                }
-              }
-            }
-          }
-        } else {
-          const data = await resp.json() as { response?: string; content?: string; message?: string; choices?: Array<{ message?: { content?: string } }> };
-          result = data.response ?? data.content ?? data.message ?? data.choices?.[0]?.message?.content ?? "";
-        }
-        result = result.trim();
+        const result = (res.content ?? "").trim();
         if (!result) {
-          setMetaWorkspaceMessage("AI 未返回有效内容，请重试。");
+          setMsg("AI 未返回有效内容，请重试。");
           return;
         }
         if (kind === "identity") {
@@ -6474,12 +6442,12 @@ export function SettingsPanel({
           setUserProfileMessage("AI 已生成偏好描述，请检查后保存。");
         }
       } catch (err) {
-        setMetaWorkspaceMessage(`AI 辅助失败: ${String(err)}`);
+        setMsg(`AI 辅助失败: ${String(err)}`);
       } finally {
         setAiAssistLoading(null);
       }
     },
-    [apiBase, apiToken, metaIdentity, metaSoul, userPreferenceDraft],
+    [metaIdentity, metaSoul, userPreferenceDraft, defaultProvider, providers],
   );
 
   const handleProfileAvatarUpload = useCallback(

@@ -744,6 +744,14 @@ declare global {
       saveMetaSoul: (payload: { content: string }) => Promise<{ ok: boolean; error?: string }>;
       loadMetaIdentity: () => Promise<{ ok: boolean; content: string; error?: string }>;
       saveMetaIdentity: (payload: { content: string }) => Promise<{ ok: boolean; error?: string }>;
+      aiAssistComplete: (payload: {
+        systemPrompt: string;
+        userPrompt: string;
+        provider?: string;
+        apiKey?: string;
+        baseUrl?: string;
+        model?: string;
+      }) => Promise<{ ok: boolean; content?: string; error?: string }>;
       listMetaWorkspaceHistory: (payload: {
         kind: "identity" | "soul";
       }) => Promise<{

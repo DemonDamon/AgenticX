@@ -350,6 +350,14 @@ contextBridge.exposeInMainWorld("agenticxDesktop", {
   saveMetaSoul: async (payload: { content: string }) => ipcRenderer.invoke("save-meta-soul", payload),
   loadMetaIdentity: async () => ipcRenderer.invoke("load-meta-identity"),
   saveMetaIdentity: async (payload: { content: string }) => ipcRenderer.invoke("save-meta-identity", payload),
+  aiAssistComplete: async (payload: {
+    systemPrompt: string;
+    userPrompt: string;
+    provider?: string;
+    apiKey?: string;
+    baseUrl?: string;
+    model?: string;
+  }) => ipcRenderer.invoke("ai-assist-complete", payload),
   listMetaWorkspaceHistory: async (payload: { kind: "identity" | "soul" }) =>
     ipcRenderer.invoke("list-meta-workspace-history", payload),
   restoreMetaWorkspaceHistory: async (payload: { kind: "identity" | "soul"; id: string }) =>
