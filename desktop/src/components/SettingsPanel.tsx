@@ -36,6 +36,7 @@ import {
   CheckCircle2,
   Eye,
   EyeOff,
+  ExternalLink,
   Library,
   Mic,
   Network,
@@ -5637,6 +5638,7 @@ function MetaMarkdownField({
   onChange,
   onAiAssist,
   aiAssistLoading,
+  onOpenInEditor,
 }: {
   label: string;
   value: string;
@@ -5647,8 +5649,16 @@ function MetaMarkdownField({
   onChange: (v: string) => void;
   onAiAssist?: () => void;
   aiAssistLoading?: boolean;
+  onOpenInEditor?: () => void;
 }) {
   const [preview, setPreview] = useState(false);
+  const toolbarBtnClass = (active?: boolean) =>
+    `flex items-center justify-center rounded p-1 transition-colors disabled:opacity-40 ${
+      active
+        ? "bg-surface-card text-text-primary"
+        : "text-text-faint hover:bg-surface-hover hover:text-text-subtle"
+    }`;
+  const iconClass = "h-3.5 w-3.5 shrink-0";
   return (
     <div>
       <div className="mb-1.5 text-sm font-medium text-text-muted">{label}</div>
@@ -5661,7 +5671,7 @@ function MetaMarkdownField({
       <div className="relative">
         {preview ? (
           <div
-            className="agx-settings-md w-full min-h-[4rem] rounded-md border border-border bg-surface-panel px-3 py-2 pr-24 text-sm text-text-primary overflow-auto"
+            className="agx-settings-md w-full min-h-[4rem] rounded-md border border-border bg-surface-panel px-3 py-2 pr-[7.5rem] text-sm text-text-primary overflow-auto"
             style={{ minHeight: `${rows * 1.625}rem` }}
           >
             {value.trim() ? (
@@ -5678,45 +5688,56 @@ function MetaMarkdownField({
           </div>
         ) : (
           <textarea
-            className="w-full resize-none rounded-md border border-border bg-surface-panel px-3 py-2 pr-24 text-sm text-text-primary placeholder:text-text-faint focus:border-[rgba(var(--theme-color-rgb),0.5)] focus:outline-none focus:ring-1 focus:ring-[rgba(var(--theme-color-rgb),0.5)] transition-shadow"
+            className="w-full resize-none rounded-md border border-border bg-surface-panel px-3 py-2 pr-[7.5rem] text-sm text-text-primary placeholder:text-text-faint focus:border-[rgba(var(--theme-color-rgb),0.5)] focus:outline-none focus:ring-1 focus:ring-[rgba(var(--theme-color-rgb),0.5)] transition-shadow"
             rows={rows}
             value={value}
             onChange={(e) => onChange(e.target.value)}
             placeholder={placeholder}
           />
         )}
-        {/* 右上角悬浮：✨ | 编辑 | 预览 */}
         <div className="absolute right-1.5 top-1.5 flex items-center gap-0.5 rounded-md border border-border/70 bg-surface-panel/90 backdrop-blur-sm px-1 py-0.5 shadow-sm">
           {onAiAssist ? (
-            <button
-              type="button"
-              disabled={aiAssistLoading}
-              className="flex items-center justify-center rounded p-0.5 text-[rgba(var(--theme-color-rgb),0.85)] transition-opacity hover:opacity-70 disabled:opacity-40"
-              onClick={onAiAssist}
-              title={value.trim() ? "AI 润色" : "AI 生成"}
-            >
-              {aiAssistLoading ? (
-                <Loader2 className="h-3 w-3 animate-spin" />
-              ) : (
-                <Sparkles className="h-3 w-3" />
-              )}
-            </button>
+            <HoverTip label={value.trim() ? "AI 润色" : "AI 生成"}>
+              <button
+                type="button"
+                disabled={aiAssistLoading}
+                className={toolbarBtnClass()}
+                onClick={onAiAssist}
+              >
+                {aiAssistLoading ? (
+                  <Loader2 className={`${iconClass} animate-spin`} aria-hidden />
+                ) : (
+                  <Sparkles className={iconClass} aria-hidden />
+                )}
+              </button>
+            </HoverTip>
           ) : null}
           {onAiAssist ? <span className="mx-0.5 h-3 w-px bg-border/60" /> : null}
-          <button
-            type="button"
-            className={`rounded px-1.5 py-0.5 text-[10px] transition-colors ${!preview ? "bg-surface-card text-text-primary" : "text-text-faint hover:text-text-subtle"}`}
-            onClick={() => setPreview(false)}
-          >
-            编辑
-          </button>
-          <button
-            type="button"
-            className={`rounded px-1.5 py-0.5 text-[10px] transition-colors ${preview ? "bg-surface-card text-text-primary" : "text-text-faint hover:text-text-subtle"}`}
-            onClick={() => setPreview(true)}
-          >
-            预览
-          </button>
+          <HoverTip label="编辑">
+            <button
+              type="button"
+              className={toolbarBtnClass(!preview)}
+              onClick={() => setPreview(false)}
+            >
+              <SquarePen className={iconClass} aria-hidden />
+            </button>
+          </HoverTip>
+          <HoverTip label="预览">
+            <button
+              type="button"
+              className={toolbarBtnClass(preview)}
+              onClick={() => setPreview(true)}
+            >
+              <Eye className={iconClass} aria-hidden />
+            </button>
+          </HoverTip>
+          {onOpenInEditor ? (
+            <HoverTip label="在编辑器中打开">
+              <button type="button" className={toolbarBtnClass()} onClick={onOpenInEditor}>
+                <ExternalLink className={iconClass} aria-hidden />
+              </button>
+            </HoverTip>
+          ) : null}
         </div>
       </div>
     </div>
@@ -7784,7 +7805,7 @@ export function SettingsPanel({
                     {/* 右侧：表单区 */}
                     <div className="flex-1 min-w-0 space-y-2">
                       <MetaMarkdownField
-                        label="身份定义（IDENTITY.md）"
+                        label="身份定义"
                         value={metaIdentity}
                         rows={3}
                         externalHint={metaExternalHintIdentity}
@@ -7792,6 +7813,7 @@ export function SettingsPanel({
                         placeholder={"例如：\n- Name: Near\n- Role: 你的个人 AI 助理\n- Vibe: 务实、简洁、执行优先"}
                         onAiAssist={() => void callAiAssist("identity")}
                         aiAssistLoading={aiAssistLoading === "identity"}
+                        onOpenInEditor={() => void openMetaWorkspaceInEditor("identity")}
                         onChange={(v) => {
                           setMetaIdentity(v);
                           setMetaWorkspaceMessage("");
@@ -7800,7 +7822,7 @@ export function SettingsPanel({
                       />
 
                       <MetaMarkdownField
-                        label="全局人格（SOUL.md）"
+                        label="全局人格"
                         value={metaSoul}
                         rows={5}
                         externalHint={metaExternalHintSoul}
@@ -7808,6 +7830,7 @@ export function SettingsPanel({
                         placeholder={"例如：\n- 回答先给结论\n- 不做过度客套\n- 任务进度要可见"}
                         onAiAssist={() => void callAiAssist("soul")}
                         aiAssistLoading={aiAssistLoading === "soul"}
+                        onOpenInEditor={() => void openMetaWorkspaceInEditor("soul")}
                         onChange={(v) => {
                           setMetaSoul(v);
                           setMetaWorkspaceMessage("");
