@@ -456,3 +456,61 @@ export const chatMarkdownComponents: Partial<Components> = {
     );
   },
 };
+
+/** Settings-panel markdown preview — explicit block styles (no @tailwindcss/typography). */
+export const settingsRemarkPlugins = [remarkGfm];
+
+export const settingsMarkdownComponents: Partial<Components> = {
+  h1: ({ children }) => (
+    <h1 className="mb-2 mt-0 text-base font-semibold text-text-strong">{children}</h1>
+  ),
+  h2: ({ children }) => (
+    <h2 className="mb-1.5 mt-3 text-sm font-semibold text-text-strong first:mt-0">{children}</h2>
+  ),
+  h3: ({ children }) => (
+    <h3 className="mb-1 mt-2 text-sm font-medium text-text-primary first:mt-0">{children}</h3>
+  ),
+  p: ({ children }) => (
+    <p className="mb-2 text-sm leading-relaxed text-text-primary last:mb-0">{children}</p>
+  ),
+  ul: ({ children }) => (
+    <ul className="mb-2 list-disc space-y-1 pl-5 text-sm leading-relaxed text-text-primary last:mb-0">
+      {children}
+    </ul>
+  ),
+  ol: ({ children }) => (
+    <ol className="mb-2 list-decimal space-y-1 pl-5 text-sm leading-relaxed text-text-primary last:mb-0">
+      {children}
+    </ol>
+  ),
+  li: ({ children }) => <li className="text-text-primary">{children}</li>,
+  strong: ({ children }) => <strong className="font-semibold text-text-strong">{children}</strong>,
+  em: ({ children }) => <em className="italic text-text-subtle">{children}</em>,
+  code: ({ children, className }) => {
+    const isBlock = Boolean(className?.includes("language-"));
+    if (isBlock) {
+      return (
+        <code className={`block font-mono text-xs text-text-muted ${className ?? ""}`}>{children}</code>
+      );
+    }
+    return (
+      <code className="rounded bg-surface-card px-1 py-0.5 font-mono text-xs text-text-muted">
+        {children}
+      </code>
+    );
+  },
+  pre: ({ children }) => (
+    <pre className="mb-2 overflow-x-auto rounded-md bg-surface-card p-2 text-xs last:mb-0">{children}</pre>
+  ),
+  blockquote: ({ children }) => (
+    <blockquote className="mb-2 border-l-2 border-border pl-3 text-sm text-text-subtle last:mb-0">
+      {children}
+    </blockquote>
+  ),
+  hr: () => <hr className="my-3 border-border" />,
+  table: chatMarkdownComponents.table,
+  td: chatMarkdownComponents.td,
+  th: chatMarkdownComponents.th,
+  a: chatMarkdownComponents.a,
+  img: chatMarkdownComponents.img,
+};

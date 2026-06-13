@@ -9,6 +9,12 @@ import {
 } from "react";
 import ReactMarkdown from "react-markdown";
 import {
+  chatUrlTransform,
+  normalizeChatMarkdownContent,
+  settingsMarkdownComponents,
+  settingsRemarkPlugins,
+} from "./messages/markdown-components";
+import {
   Settings2,
   Cpu,
   Plug,
@@ -5655,11 +5661,17 @@ function MetaMarkdownField({
       <div className="relative">
         {preview ? (
           <div
-            className="w-full min-h-[4rem] rounded-md border border-border bg-surface-panel px-3 py-2 pr-24 text-sm text-text-primary overflow-auto prose prose-sm prose-neutral dark:prose-invert max-w-none"
+            className="agx-settings-md w-full min-h-[4rem] rounded-md border border-border bg-surface-panel px-3 py-2 pr-24 text-sm text-text-primary overflow-auto"
             style={{ minHeight: `${rows * 1.625}rem` }}
           >
             {value.trim() ? (
-              <ReactMarkdown>{value}</ReactMarkdown>
+              <ReactMarkdown
+                remarkPlugins={settingsRemarkPlugins}
+                components={settingsMarkdownComponents}
+                urlTransform={chatUrlTransform}
+              >
+                {normalizeChatMarkdownContent(value)}
+              </ReactMarkdown>
             ) : (
               <span className="text-text-faint italic">（空）</span>
             )}
