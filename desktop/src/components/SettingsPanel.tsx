@@ -5630,6 +5630,8 @@ function MetaMarkdownField({
   placeholder,
   onOpenEditor,
   onChange,
+  onAiAssist,
+  aiAssistLoading,
 }: {
   label: string;
   value: string;
@@ -5639,6 +5641,8 @@ function MetaMarkdownField({
   placeholder?: string;
   onOpenEditor: () => void;
   onChange: (v: string) => void;
+  onAiAssist?: () => void;
+  aiAssistLoading?: boolean;
 }) {
   const [preview, setPreview] = useState(false);
   return (
@@ -5663,13 +5667,31 @@ function MetaMarkdownField({
             </button>
           </div>
         </div>
-        <button
-          type="button"
-          className="shrink-0 text-xs text-text-subtle transition-colors hover:text-text-muted"
-          onClick={onOpenEditor}
-        >
-          在编辑器中打开
-        </button>
+        <div className="flex items-center gap-2 shrink-0">
+          {onAiAssist ? (
+            <button
+              type="button"
+              disabled={aiAssistLoading}
+              className="flex items-center gap-1 text-xs text-[rgba(var(--theme-color-rgb),0.85)] transition-opacity hover:opacity-80 disabled:opacity-40"
+              onClick={onAiAssist}
+              title={value.trim() ? "AI 润色当前内容" : "AI 生成建议内容"}
+            >
+              {aiAssistLoading ? (
+                <Loader2 className="h-3 w-3 animate-spin" />
+              ) : (
+                <Sparkles className="h-3 w-3" />
+              )}
+              {aiAssistLoading ? "生成中…" : (value.trim() ? "AI 润色" : "AI 生成")}
+            </button>
+          ) : null}
+          <button
+            type="button"
+            className="text-xs text-text-subtle transition-colors hover:text-text-muted"
+            onClick={onOpenEditor}
+          >
+            在编辑器中打开
+          </button>
+        </div>
       </div>
       {externalHint ? (
         <div className="mb-1 text-[10px] text-amber-600/90 dark:text-amber-400/90">
@@ -5770,6 +5792,7 @@ export function SettingsPanel({
   const updateSettingsSlice = useAppStore((s) => s.updateSettings);
   const initializedForOpenRef = useRef(false);
   const metaWorkspaceHydratedRef = useRef(false);
+  const [aiAssistLoading, setAiAssistLoading] = useState<"identity" | "soul" | "preference" | null>(null);
   const metaIdentityDraftRef = useRef("");
   const metaIdentitySavedRef = useRef("");
   const metaSoulDraftRef = useRef("");
@@ -6348,6 +6371,116 @@ export function SettingsPanel({
     metaHistoryOpen,
     loadMetaWorkspaceHistory,
   ]);
+
+  const callAiAssist = useCallback(
+    async (kind: "identity" | "soul" | "preference") => {
+      const base = (apiBase || "").replace(/\/+$/, "");
+      if (!base) {
+        setMetaWorkspaceMessage("未连接到 Studio，无法使用 AI 辅助。");
+        return;
+      }
+      const currentContent = kind === "identity" ? metaIdentity : kind === "soul" ? metaSoul : userPreferenceDraft;
+      const prompts: Record<typeof kind, { system: string; user: string }> = {
+        identity: {
+          system:
+            "你是一个帮助用户配置 AI 助理身份定义的助手。输出纯 Markdown，不要加解释、不要加中文注释，直接输出可填入 IDENTITY.md 的内容。格式参考：\n```\n# IDENTITY.md\n- Name: ...\n- Role: ...\n- Persona: ...\n```",
+          user: currentContent.trim()
+            ? `请对以下身份定义进行润色，让它更清晰、更有个性，保留 Markdown 格式：\n\n${currentContent}`
+            : "请为一个名为 Near 的个人 AI 助理生成一份简洁的身份定义（IDENTITY.md），Markdown 格式，包含 Name、Role、Persona 字段。",
+        },
+        soul: {
+          system:
+            "你是一个帮助用户配置 AI 助理人格原则的助手。输出纯 Markdown，不要加解释，直接输出可填入 SOUL.md 的内容。格式参考：\n```\n# SOUL.md – How You Behave\n## Principles\n- ...\n## Communication Style\n- ...\n```",
+          user: currentContent.trim()
+            ? `请对以下全局人格进行润色，让原则更清晰、更有可操作性，保留 Markdown 格式：\n\n${currentContent}`
+            : "请为一个个人 AI 助理生成一份全局人格文档（SOUL.md），Markdown 格式，包含行为准则和沟通风格。",
+        },
+        preference: {
+          system:
+            "你是一个帮助用户描述自己使用 AI 时偏好的助手。输出简洁的纯文本偏好描述（非 Markdown），不超过 300 字，直接输出可填入「用户偏好」字段的内容，不要加任何前缀。",
+          user: currentContent.trim()
+            ? `请润色以下用户偏好描述，让它更自然、更清晰：\n\n${currentContent}`
+            : "请生成一段示例用户偏好描述，内容包含：回复风格、格式偏好、沟通习惯等，字数在 100 字以内。",
+        },
+      };
+      const { system, user } = prompts[kind];
+      setAiAssistLoading(kind);
+      try {
+        const resp = await fetch(`${base}/api/chat`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            ...(apiToken ? { "x-agx-desktop-token": apiToken } : {}),
+          },
+          body: JSON.stringify({
+            session_id: `__ai_assist_${kind}_${Date.now()}`,
+            user_input: user,
+            system_override: system,
+            stream: false,
+          }),
+        });
+        if (!resp.ok) {
+          const errText = await resp.text().catch(() => "");
+          setMetaWorkspaceMessage(`AI 辅助失败: HTTP ${resp.status}${errText ? " — " + errText.slice(0, 80) : ""}`);
+          return;
+        }
+        const isStream = resp.headers.get("content-type")?.includes("text/event-stream");
+        let result = "";
+        if (isStream) {
+          const reader = resp.body?.getReader();
+          const decoder = new TextDecoder();
+          let buf = "";
+          if (reader) {
+            while (true) {
+              const { value, done } = await reader.read();
+              if (done) break;
+              buf += decoder.decode(value, { stream: true });
+              const parts = buf.split("\n\n");
+              buf = parts.pop() ?? "";
+              for (const part of parts) {
+                for (const line of part.split("\n")) {
+                  if (!line.startsWith("data:")) continue;
+                  const raw = line.slice(5).trim();
+                  if (!raw || raw === "[DONE]") continue;
+                  try {
+                    const ev = JSON.parse(raw) as { type?: string; text?: string; content?: string; delta?: { text?: string } };
+                    if (ev.type === "text_delta" || ev.type === "content_block_delta") {
+                      result += ev.delta?.text ?? ev.text ?? "";
+                    } else if (ev.text) {
+                      result += ev.text;
+                    }
+                  } catch { /* skip malformed frames */ }
+                }
+              }
+            }
+          }
+        } else {
+          const data = await resp.json() as { response?: string; content?: string; message?: string; choices?: Array<{ message?: { content?: string } }> };
+          result = data.response ?? data.content ?? data.message ?? data.choices?.[0]?.message?.content ?? "";
+        }
+        result = result.trim();
+        if (!result) {
+          setMetaWorkspaceMessage("AI 未返回有效内容，请重试。");
+          return;
+        }
+        if (kind === "identity") {
+          setMetaIdentity(result);
+          setMetaWorkspaceMessage("AI 已生成身份定义，请检查后保存。");
+        } else if (kind === "soul") {
+          setMetaSoul(result);
+          setMetaWorkspaceMessage("AI 已生成全局人格，请检查后保存。");
+        } else {
+          setUserPreferenceDraft(result);
+          setUserProfileMessage("AI 已生成偏好描述，请检查后保存。");
+        }
+      } catch (err) {
+        setMetaWorkspaceMessage(`AI 辅助失败: ${String(err)}`);
+      } finally {
+        setAiAssistLoading(null);
+      }
+    },
+    [apiBase, apiToken, metaIdentity, metaSoul, userPreferenceDraft],
+  );
 
   const handleProfileAvatarUpload = useCallback(
     (file: File, target: "user" | "meta") => {
@@ -7580,7 +7713,23 @@ export function SettingsPanel({
                       </div>
 
                       <div>
-                        <div className="mb-1.5 text-sm font-medium text-text-muted">用户偏好与风格（注入系统提示）</div>
+                        <div className="mb-1.5 flex items-center justify-between gap-2">
+                          <div className="text-sm font-medium text-text-muted">用户偏好与风格（注入系统提示）</div>
+                          <button
+                            type="button"
+                            disabled={aiAssistLoading === "preference"}
+                            className="flex shrink-0 items-center gap-1 text-xs text-[rgba(var(--theme-color-rgb),0.85)] transition-opacity hover:opacity-80 disabled:opacity-40"
+                            onClick={() => void callAiAssist("preference")}
+                            title={userPreferenceDraft.trim() ? "AI 润色偏好描述" : "AI 生成偏好描述"}
+                          >
+                            {aiAssistLoading === "preference" ? (
+                              <Loader2 className="h-3 w-3 animate-spin" />
+                            ) : (
+                              <Sparkles className="h-3 w-3" />
+                            )}
+                            {aiAssistLoading === "preference" ? "生成中…" : (userPreferenceDraft.trim() ? "AI 润色" : "AI 生成")}
+                          </button>
+                        </div>
                         <textarea
                           className="w-full resize-none rounded-md border border-border bg-surface-panel px-3 py-2 text-sm text-text-primary placeholder:text-text-faint focus:border-[rgba(var(--theme-color-rgb),0.5)] focus:outline-none focus:ring-1 focus:ring-[rgba(var(--theme-color-rgb),0.5)] transition-shadow"
                           rows={3}
@@ -7676,6 +7825,8 @@ export function SettingsPanel({
                         externalHintText="磁盘上的身份定义可能已在外部修改。"
                         placeholder={"例如：\n- Name: Near\n- Role: 你的个人 AI 助理\n- Vibe: 务实、简洁、执行优先"}
                         onOpenEditor={() => void openMetaWorkspaceInEditor("identity")}
+                        onAiAssist={() => void callAiAssist("identity")}
+                        aiAssistLoading={aiAssistLoading === "identity"}
                         onChange={(v) => {
                           setMetaIdentity(v);
                           setMetaWorkspaceMessage("");
@@ -7691,6 +7842,8 @@ export function SettingsPanel({
                         externalHintText="磁盘上的全局人格可能已在外部修改。"
                         placeholder={"例如：\n- 回答先给结论\n- 不做过度客套\n- 任务进度要可见"}
                         onOpenEditor={() => void openMetaWorkspaceInEditor("soul")}
+                        onAiAssist={() => void callAiAssist("soul")}
+                        aiAssistLoading={aiAssistLoading === "soul"}
                         onChange={(v) => {
                           setMetaSoul(v);
                           setMetaWorkspaceMessage("");
