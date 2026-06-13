@@ -5628,8 +5628,9 @@ function MetaMarkdownField({
   externalHint,
   externalHintText,
   placeholder,
-  onOpenEditor,
   onChange,
+  onAiAssist,
+  aiAssistLoading,
 }: {
   label: string;
   value: string;
@@ -5637,65 +5638,75 @@ function MetaMarkdownField({
   externalHint?: boolean;
   externalHintText?: string;
   placeholder?: string;
-  onOpenEditor: () => void;
   onChange: (v: string) => void;
+  onAiAssist?: () => void;
+  aiAssistLoading?: boolean;
 }) {
   const [preview, setPreview] = useState(false);
   return (
     <div>
-      <div className="mb-1.5 flex items-center justify-between gap-2">
-        <div className="flex items-center gap-2">
-          <div className="text-sm font-medium text-text-muted">{label}</div>
-          <div className="flex rounded border border-border overflow-hidden text-[11px]">
-            <button
-              type="button"
-              className={`px-2 py-0.5 transition-colors ${!preview ? "bg-surface-card text-text-primary" : "text-text-faint hover:text-text-subtle"}`}
-              onClick={() => setPreview(false)}
-            >
-              编辑
-            </button>
-            <button
-              type="button"
-              className={`px-2 py-0.5 transition-colors ${preview ? "bg-surface-card text-text-primary" : "text-text-faint hover:text-text-subtle"}`}
-              onClick={() => setPreview(true)}
-            >
-              预览
-            </button>
-          </div>
-        </div>
-        <button
-          type="button"
-          className="shrink-0 text-xs text-text-subtle transition-colors hover:text-text-muted"
-          onClick={onOpenEditor}
-        >
-          在编辑器中打开
-        </button>
-      </div>
+      <div className="mb-1.5 text-sm font-medium text-text-muted">{label}</div>
       {externalHint ? (
         <div className="mb-1 text-[10px] text-amber-600/90 dark:text-amber-400/90">
           {externalHintText}
         </div>
       ) : null}
-      {preview ? (
-        <div
-          className="w-full min-h-[4rem] rounded-md border border-border bg-surface-panel px-3 py-2 text-sm text-text-primary overflow-auto prose prose-sm prose-neutral dark:prose-invert max-w-none"
-          style={{ minHeight: `${rows * 1.625}rem` }}
-        >
-          {value.trim() ? (
-            <ReactMarkdown>{value}</ReactMarkdown>
-          ) : (
-            <span className="text-text-faint italic">（空）</span>
-          )}
+      {/* textarea + 右上角悬浮操作组 */}
+      <div className="relative">
+        {preview ? (
+          <div
+            className="w-full min-h-[4rem] rounded-md border border-border bg-surface-panel px-3 py-2 pr-24 text-sm text-text-primary overflow-auto prose prose-sm prose-neutral dark:prose-invert max-w-none"
+            style={{ minHeight: `${rows * 1.625}rem` }}
+          >
+            {value.trim() ? (
+              <ReactMarkdown>{value}</ReactMarkdown>
+            ) : (
+              <span className="text-text-faint italic">（空）</span>
+            )}
+          </div>
+        ) : (
+          <textarea
+            className="w-full resize-none rounded-md border border-border bg-surface-panel px-3 py-2 pr-24 text-sm text-text-primary placeholder:text-text-faint focus:border-[rgba(var(--theme-color-rgb),0.5)] focus:outline-none focus:ring-1 focus:ring-[rgba(var(--theme-color-rgb),0.5)] transition-shadow"
+            rows={rows}
+            value={value}
+            onChange={(e) => onChange(e.target.value)}
+            placeholder={placeholder}
+          />
+        )}
+        {/* 右上角悬浮：✨ | 编辑 | 预览 */}
+        <div className="absolute right-1.5 top-1.5 flex items-center gap-0.5 rounded-md border border-border/70 bg-surface-panel/90 backdrop-blur-sm px-1 py-0.5 shadow-sm">
+          {onAiAssist ? (
+            <button
+              type="button"
+              disabled={aiAssistLoading}
+              className="flex items-center justify-center rounded p-0.5 text-[rgba(var(--theme-color-rgb),0.85)] transition-opacity hover:opacity-70 disabled:opacity-40"
+              onClick={onAiAssist}
+              title={value.trim() ? "AI 润色" : "AI 生成"}
+            >
+              {aiAssistLoading ? (
+                <Loader2 className="h-3 w-3 animate-spin" />
+              ) : (
+                <Sparkles className="h-3 w-3" />
+              )}
+            </button>
+          ) : null}
+          {onAiAssist ? <span className="mx-0.5 h-3 w-px bg-border/60" /> : null}
+          <button
+            type="button"
+            className={`rounded px-1.5 py-0.5 text-[10px] transition-colors ${!preview ? "bg-surface-card text-text-primary" : "text-text-faint hover:text-text-subtle"}`}
+            onClick={() => setPreview(false)}
+          >
+            编辑
+          </button>
+          <button
+            type="button"
+            className={`rounded px-1.5 py-0.5 text-[10px] transition-colors ${preview ? "bg-surface-card text-text-primary" : "text-text-faint hover:text-text-subtle"}`}
+            onClick={() => setPreview(true)}
+          >
+            预览
+          </button>
         </div>
-      ) : (
-        <textarea
-          className="w-full resize-none rounded-md border border-border bg-surface-panel px-3 py-2 text-sm text-text-primary placeholder:text-text-faint focus:border-[rgba(var(--theme-color-rgb),0.5)] focus:outline-none focus:ring-1 focus:ring-[rgba(var(--theme-color-rgb),0.5)] transition-shadow"
-          rows={rows}
-          value={value}
-          onChange={(e) => onChange(e.target.value)}
-          placeholder={placeholder}
-        />
-      )}
+      </div>
     </div>
   );
 }
@@ -7767,7 +7778,8 @@ export function SettingsPanel({
                         externalHint={metaExternalHintIdentity}
                         externalHintText="磁盘上的身份定义可能已在外部修改。"
                         placeholder={"例如：\n- Name: Near\n- Role: 你的个人 AI 助理\n- Vibe: 务实、简洁、执行优先"}
-                        onOpenEditor={() => void openMetaWorkspaceInEditor("identity")}
+                        onAiAssist={() => void callAiAssist("identity")}
+                        aiAssistLoading={aiAssistLoading === "identity"}
                         onChange={(v) => {
                           setMetaIdentity(v);
                           setMetaWorkspaceMessage("");
@@ -7782,7 +7794,8 @@ export function SettingsPanel({
                         externalHint={metaExternalHintSoul}
                         externalHintText="磁盘上的全局人格可能已在外部修改。"
                         placeholder={"例如：\n- 回答先给结论\n- 不做过度客套\n- 任务进度要可见"}
-                        onOpenEditor={() => void openMetaWorkspaceInEditor("soul")}
+                        onAiAssist={() => void callAiAssist("soul")}
+                        aiAssistLoading={aiAssistLoading === "soul"}
                         onChange={(v) => {
                           setMetaSoul(v);
                           setMetaWorkspaceMessage("");
@@ -7874,38 +7887,10 @@ export function SettingsPanel({
                         ) : null}
                       </div>
 
-                      <div className="flex flex-wrap items-center justify-end gap-2">
+                      <div className="flex items-center justify-end gap-3">
                         {metaWorkspaceMessage ? (
                           <span className="mr-auto text-[11px] text-text-subtle">{metaWorkspaceMessage}</span>
                         ) : null}
-                        <button
-                          type="button"
-                          disabled={aiAssistLoading === "identity"}
-                          className="flex items-center gap-1 text-xs text-[rgba(var(--theme-color-rgb),0.85)] transition-opacity hover:opacity-80 disabled:opacity-40"
-                          onClick={() => void callAiAssist("identity")}
-                          title="对身份定义进行 AI 润色/生成"
-                        >
-                          {aiAssistLoading === "identity" ? (
-                            <Loader2 className="h-3 w-3 animate-spin" />
-                          ) : (
-                            <Sparkles className="h-3 w-3" />
-                          )}
-                          {aiAssistLoading === "identity" ? "生成中…" : (metaIdentity.trim() ? "润色身份" : "生成身份")}
-                        </button>
-                        <button
-                          type="button"
-                          disabled={aiAssistLoading === "soul"}
-                          className="flex items-center gap-1 text-xs text-[rgba(var(--theme-color-rgb),0.85)] transition-opacity hover:opacity-80 disabled:opacity-40"
-                          onClick={() => void callAiAssist("soul")}
-                          title="对全局人格进行 AI 润色/生成"
-                        >
-                          {aiAssistLoading === "soul" ? (
-                            <Loader2 className="h-3 w-3 animate-spin" />
-                          ) : (
-                            <Sparkles className="h-3 w-3" />
-                          )}
-                          {aiAssistLoading === "soul" ? "生成中…" : (metaSoul.trim() ? "润色人格" : "生成人格")}
-                        </button>
                         <button
                           type="button"
                           className="rounded-md bg-btnPrimary px-4 py-1.5 text-xs font-medium text-btnPrimary-text transition hover:bg-btnPrimary-hover disabled:opacity-50"
