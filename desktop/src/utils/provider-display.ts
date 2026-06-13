@@ -1,5 +1,17 @@
 /** 内置厂商展示名（配置 key 仍为英文 id）；自定义厂商用 entry.displayName */
 
+const BUILTIN_PROVIDER_IDS = new Set([
+  "openai",
+  "anthropic",
+  "volcengine",
+  "bailian",
+  "zhipu",
+  "qianfan",
+  "minimax",
+  "kimi",
+  "ollama",
+]);
+
 const PROVIDER_DISPLAY_NAME: Record<string, string> = {
   openai: "OpenAI",
   anthropic: "Anthropic",
@@ -27,6 +39,24 @@ export function isOfficialOpenAIBase(baseUrl: string): boolean {
   const base = normalizeBaseUrl(baseUrl);
   if (!base) return true;
   return base === "https://api.openai.com" || base === "https://api.openai.com/v1";
+}
+
+/** 是否允许用户自定义侧栏/标题展示名（写入 display_name，不改配置 id）。 */
+export function isProviderDisplayNameEditable(
+  providerId: string,
+  entry?: ProviderDisplayEntry | null,
+): boolean {
+  if (providerId.startsWith("custom_openai_") || entry?.interface === "openai") {
+    return true;
+  }
+  if (!BUILTIN_PROVIDER_IDS.has(providerId)) {
+    return true;
+  }
+  if (providerId === "openai") {
+    const baseUrl = (entry?.baseUrl ?? "").trim();
+    return Boolean(baseUrl && !isOfficialOpenAIBase(baseUrl));
+  }
+  return false;
 }
 
 export function getProviderDisplayName(
