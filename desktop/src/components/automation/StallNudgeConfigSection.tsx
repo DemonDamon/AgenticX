@@ -1,4 +1,5 @@
 import type { ChangeEvent } from "react";
+import { SettingsRangeField } from "../settings/SettingsRangeField";
 
 export type StallNudgeConfig = {
   /** No SSE/tool progress for this many seconds → show stall warning (default 90). */
@@ -35,16 +36,18 @@ export function StallNudgeConfigSection({ value, onChange, disabled }: Props) {
           </p>
           <div className="mt-3 flex items-center gap-3">
             <span className="w-28 shrink-0 text-xs text-text-muted">判定阈值（秒）</span>
-            <input
-              type="range"
-              min={30}
-              max={300}
-              step={10}
-              value={value.stall_detect_silence_seconds}
-              disabled={disabled}
-              onChange={(e) => set({ stall_detect_silence_seconds: Number(e.target.value) })}
-              className="h-4 flex-1 disabled:opacity-50"
-            />
+            <div className="min-w-0 flex-1">
+              <SettingsRangeField
+                min={30}
+                max={300}
+                step={10}
+                value={value.stall_detect_silence_seconds}
+                onChange={(v) => set({ stall_detect_silence_seconds: v })}
+                disabled={disabled}
+                showNumberInput={false}
+                showMinMaxHints={false}
+              />
+            </div>
             <span className="w-10 text-center text-xs text-text-primary">
               {value.stall_detect_silence_seconds}
             </span>
@@ -95,16 +98,18 @@ export function StallNudgeConfigSection({ value, onChange, disabled }: Props) {
           <div className="mt-3 space-y-2">
             <div className="flex items-center gap-3">
               <span className="w-28 shrink-0 text-xs text-text-muted">触发等待（秒）</span>
-              <input
-                type="range"
-                min={60}
-                max={300}
-                step={10}
-                value={value.stall_auto_nudge_after_seconds}
-                disabled={disabled || !value.stall_auto_nudge_enabled}
-                onChange={(e) => set({ stall_auto_nudge_after_seconds: Number(e.target.value) })}
-                className="h-4 flex-1 disabled:opacity-50"
-              />
+              <div className="min-w-0 flex-1">
+                <SettingsRangeField
+                  min={60}
+                  max={300}
+                  step={10}
+                  value={value.stall_auto_nudge_after_seconds}
+                  onChange={(v) => set({ stall_auto_nudge_after_seconds: v })}
+                  disabled={disabled || !value.stall_auto_nudge_enabled}
+                  showNumberInput={false}
+                  showMinMaxHints={false}
+                />
+              </div>
               <span className="w-10 text-center text-xs text-text-primary">
                 {value.stall_auto_nudge_after_seconds}
               </span>
