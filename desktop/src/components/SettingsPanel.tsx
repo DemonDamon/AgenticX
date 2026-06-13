@@ -7,6 +7,7 @@ import {
   useRef,
   useState,
 } from "react";
+import ReactMarkdown from "react-markdown";
 import {
   Settings2,
   Cpu,
@@ -5620,6 +5621,85 @@ function formatSkillScanSummary(scan: {
   return lines.join("\n");
 }
 
+function MetaMarkdownField({
+  label,
+  value,
+  rows,
+  externalHint,
+  externalHintText,
+  placeholder,
+  onOpenEditor,
+  onChange,
+}: {
+  label: string;
+  value: string;
+  rows: number;
+  externalHint?: boolean;
+  externalHintText?: string;
+  placeholder?: string;
+  onOpenEditor: () => void;
+  onChange: (v: string) => void;
+}) {
+  const [preview, setPreview] = useState(false);
+  return (
+    <div>
+      <div className="mb-1.5 flex items-center justify-between gap-2">
+        <div className="flex items-center gap-2">
+          <div className="text-sm font-medium text-text-muted">{label}</div>
+          <div className="flex rounded border border-border overflow-hidden text-[11px]">
+            <button
+              type="button"
+              className={`px-2 py-0.5 transition-colors ${!preview ? "bg-surface-card text-text-primary" : "text-text-faint hover:text-text-subtle"}`}
+              onClick={() => setPreview(false)}
+            >
+              编辑
+            </button>
+            <button
+              type="button"
+              className={`px-2 py-0.5 transition-colors ${preview ? "bg-surface-card text-text-primary" : "text-text-faint hover:text-text-subtle"}`}
+              onClick={() => setPreview(true)}
+            >
+              预览
+            </button>
+          </div>
+        </div>
+        <button
+          type="button"
+          className="shrink-0 text-xs text-text-subtle transition-colors hover:text-text-muted"
+          onClick={onOpenEditor}
+        >
+          在编辑器中打开
+        </button>
+      </div>
+      {externalHint ? (
+        <div className="mb-1 text-[10px] text-amber-600/90 dark:text-amber-400/90">
+          {externalHintText}
+        </div>
+      ) : null}
+      {preview ? (
+        <div
+          className="w-full min-h-[4rem] rounded-md border border-border bg-surface-panel px-3 py-2 text-sm text-text-primary overflow-auto prose prose-sm prose-neutral dark:prose-invert max-w-none"
+          style={{ minHeight: `${rows * 1.625}rem` }}
+        >
+          {value.trim() ? (
+            <ReactMarkdown>{value}</ReactMarkdown>
+          ) : (
+            <span className="text-text-faint italic">（空）</span>
+          )}
+        </div>
+      ) : (
+        <textarea
+          className="w-full resize-none rounded-md border border-border bg-surface-panel px-3 py-2 text-sm text-text-primary placeholder:text-text-faint focus:border-[rgba(var(--theme-color-rgb),0.5)] focus:outline-none focus:ring-1 focus:ring-[rgba(var(--theme-color-rgb),0.5)] transition-shadow"
+          rows={rows}
+          value={value}
+          onChange={(e) => onChange(e.target.value)}
+          placeholder={placeholder}
+        />
+      )}
+    </div>
+  );
+}
+
 function formatMetaWorkspaceHistoryTime(id: string, savedAt: string): string {
   const m = id.match(/^(\d{4})(\d{2})(\d{2})-(\d{2})(\d{2})(\d{2})$/);
   if (m) return `${m[1]}-${m[2]}-${m[3]} ${m[4]}:${m[5]}:${m[6]}`;
@@ -6006,7 +6086,7 @@ export function SettingsPanel({
     setKeyError({});
     setModelHealthMap({});
     setMcpMessage("");
-    setMetaSoulMessage("");
+    setMetaWorkspaceMessage("");
     setUserNicknameDraft(userNickname);
     setUserPreferenceDraft(userPreference);
     setUserProfileMessage("");
@@ -7588,63 +7668,35 @@ export function SettingsPanel({
 
                     {/* 右侧：表单区 */}
                     <div className="flex-1 min-w-0 space-y-2">
-                      <div>
-                        <div className="mb-1.5 flex items-center justify-between gap-2">
-                          <div className="text-sm font-medium text-text-muted">身份定义（IDENTITY.md）</div>
-                          <button
-                            type="button"
-                            className="shrink-0 text-xs text-text-subtle transition-colors hover:text-text-muted"
-                            onClick={() => void openMetaWorkspaceInEditor("identity")}
-                          >
-                            在编辑器中打开
-                          </button>
-                        </div>
-                        {metaExternalHintIdentity ? (
-                          <div className="mb-1 text-[10px] text-amber-600/90 dark:text-amber-400/90">
-                            磁盘上的身份定义可能已在外部修改。
-                          </div>
-                        ) : null}
-                        <textarea
-                          className="w-full resize-none rounded-md border border-border bg-surface-panel px-3 py-2 text-sm text-text-primary placeholder:text-text-faint focus:border-[rgba(var(--theme-color-rgb),0.5)] focus:outline-none focus:ring-1 focus:ring-[rgba(var(--theme-color-rgb),0.5)] transition-shadow"
-                          rows={3}
-                          value={metaIdentity}
-                          onChange={(e) => {
-                            setMetaIdentity(e.target.value);
-                            setMetaWorkspaceMessage("");
-                            setMetaExternalHintIdentity(false);
-                          }}
-                          placeholder={"例如：\n- Name: Near\n- Role: 你的个人 AI 助理\n- Vibe: 务实、简洁、执行优先"}
-                        />
-                      </div>
+                      <MetaMarkdownField
+                        label="身份定义（IDENTITY.md）"
+                        value={metaIdentity}
+                        rows={3}
+                        externalHint={metaExternalHintIdentity}
+                        externalHintText="磁盘上的身份定义可能已在外部修改。"
+                        placeholder={"例如：\n- Name: Near\n- Role: 你的个人 AI 助理\n- Vibe: 务实、简洁、执行优先"}
+                        onOpenEditor={() => void openMetaWorkspaceInEditor("identity")}
+                        onChange={(v) => {
+                          setMetaIdentity(v);
+                          setMetaWorkspaceMessage("");
+                          setMetaExternalHintIdentity(false);
+                        }}
+                      />
 
-                      <div>
-                        <div className="mb-1.5 flex items-center justify-between gap-2">
-                          <div className="text-sm font-medium text-text-muted">全局人格（SOUL.md）</div>
-                          <button
-                            type="button"
-                            className="shrink-0 text-xs text-text-subtle transition-colors hover:text-text-muted"
-                            onClick={() => void openMetaWorkspaceInEditor("soul")}
-                          >
-                            在编辑器中打开
-                          </button>
-                        </div>
-                        {metaExternalHintSoul ? (
-                          <div className="mb-1 text-[10px] text-amber-600/90 dark:text-amber-400/90">
-                            磁盘上的全局人格可能已在外部修改。
-                          </div>
-                        ) : null}
-                        <textarea
-                          className="w-full resize-none rounded-md border border-border bg-surface-panel px-3 py-2 text-sm text-text-primary placeholder:text-text-faint focus:border-[rgba(var(--theme-color-rgb),0.5)] focus:outline-none focus:ring-1 focus:ring-[rgba(var(--theme-color-rgb),0.5)] transition-shadow"
-                          rows={5}
-                          value={metaSoul}
-                          onChange={(e) => {
-                            setMetaSoul(e.target.value);
-                            setMetaWorkspaceMessage("");
-                            setMetaExternalHintSoul(false);
-                          }}
-                          placeholder={"例如：\n- 回答先给结论\n- 不做过度客套\n- 任务进度要可见"}
-                        />
-                      </div>
+                      <MetaMarkdownField
+                        label="全局人格（SOUL.md）"
+                        value={metaSoul}
+                        rows={5}
+                        externalHint={metaExternalHintSoul}
+                        externalHintText="磁盘上的全局人格可能已在外部修改。"
+                        placeholder={"例如：\n- 回答先给结论\n- 不做过度客套\n- 任务进度要可见"}
+                        onOpenEditor={() => void openMetaWorkspaceInEditor("soul")}
+                        onChange={(v) => {
+                          setMetaSoul(v);
+                          setMetaWorkspaceMessage("");
+                          setMetaExternalHintSoul(false);
+                        }}
+                      />
 
                       <div className="border-t border-border/60 pt-2">
                         <button
