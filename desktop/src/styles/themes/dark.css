@@ -10,6 +10,7 @@
   --surface-base: #1C1C1E;
   --surface-base-fallback: #1C1C1E;
   --surface-panel: rgba(38, 38, 42, 0.78);
+  --surface-popover: #26262a;
   --surface-sidebar: rgba(38, 38, 42, 0.72);
   --surface-topbar: rgba(38, 38, 42, 0.72);
   --surface-messages: transparent;

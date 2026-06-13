@@ -18,6 +18,7 @@ const config: Config = {
         surface: {
           base: "var(--surface-base)",
           panel: "var(--surface-panel)",
+          popover: "var(--surface-popover)",
           sidebar: "var(--surface-sidebar)",
           topbar: "var(--surface-topbar)",
           messages: "var(--surface-messages)",
