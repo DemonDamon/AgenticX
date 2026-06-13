@@ -5712,7 +5712,6 @@ function MetaMarkdownField({
               </button>
             </HoverTip>
           ) : null}
-          {onAiAssist ? <span className="mx-0.5 h-3 w-px bg-border/60" /> : null}
           <HoverTip label="编辑">
             <button
               type="button"
