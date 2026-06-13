@@ -5695,7 +5695,7 @@ function MetaMarkdownField({
             placeholder={placeholder}
           />
         )}
-        <div className="absolute right-1.5 top-1.5 flex items-center gap-0.5 rounded-md border border-border/70 bg-surface-panel/90 backdrop-blur-sm px-1 py-0.5 shadow-sm">
+        <div className="absolute right-1.5 top-1.5 flex items-center gap-0.5 rounded-md bg-surface-panel/90 backdrop-blur-sm px-1 py-0.5">
           {onAiAssist ? (
             <HoverTip label={value.trim() ? "AI 润色" : "AI 生成"}>
               <button
@@ -5705,9 +5705,9 @@ function MetaMarkdownField({
                 onClick={onAiAssist}
               >
                 {aiAssistLoading ? (
-                  <Loader2 className={`${iconClass} animate-spin`} aria-hidden />
+                  <Loader2 className="h-4 w-4 shrink-0 animate-spin" aria-hidden />
                 ) : (
-                  <Sparkles className={iconClass} aria-hidden />
+                  <Sparkles className="h-4 w-4 shrink-0" aria-hidden />
                 )}
               </button>
             </HoverTip>
