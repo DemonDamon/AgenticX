@@ -742,6 +742,10 @@ declare global {
       startupRendererReady: () => Promise<{ ok: boolean; duplicate?: boolean }>;
       loadMetaSoul: () => Promise<{ ok: boolean; content: string; error?: string }>;
       saveMetaSoul: (payload: { content: string }) => Promise<{ ok: boolean; error?: string }>;
+      loadMetaIdentity: () => Promise<{ ok: boolean; content: string; error?: string }>;
+      saveMetaIdentity: (payload: { content: string }) => Promise<{ ok: boolean; error?: string }>;
+      loadUserMd: () => Promise<{ ok: boolean; content: string; error?: string }>;
+      saveUserMd: (payload: { content: string }) => Promise<{ ok: boolean; error?: string }>;
       loadAvatarSoul: (payload: { avatarId: string }) => Promise<{ ok: boolean; content: string; error?: string }>;
       saveAvatarSoul: (payload: {
         avatarId: string;

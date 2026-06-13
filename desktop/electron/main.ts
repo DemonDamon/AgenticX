@@ -330,6 +330,8 @@ function defaultAutomationCrontaskPath(taskId: string): string {
 }
 const WORKSPACE_DIR = path.join(CONFIG_DIR, "workspace");
 const META_SOUL_PATH = path.join(WORKSPACE_DIR, "SOUL.md");
+const META_IDENTITY_PATH = path.join(WORKSPACE_DIR, "IDENTITY.md");
+const META_USER_PATH = path.join(WORKSPACE_DIR, "USER.md");
 const AVATARS_DIR = path.join(CONFIG_DIR, "avatars");
 const FEISHU_BINDING_PATH = path.join(CONFIG_DIR, "feishu_binding.json");
 const LAYOUT_PATH = path.join(CONFIG_DIR, "layout.json");
@@ -6312,6 +6314,40 @@ function registerIpc(): void {
   ipcMain.handle("save-meta-soul", async (_event, payload: { content?: string }) => {
     try {
       saveSoulFile(META_SOUL_PATH, String(payload?.content ?? ""));
+      return { ok: true };
+    } catch (err) {
+      return { ok: false, error: String(err) };
+    }
+  });
+
+  ipcMain.handle("load-meta-identity", async () => {
+    try {
+      return { ok: true, content: loadSoulFile(META_IDENTITY_PATH) };
+    } catch (err) {
+      return { ok: false, content: "", error: String(err) };
+    }
+  });
+
+  ipcMain.handle("save-meta-identity", async (_event, payload: { content?: string }) => {
+    try {
+      saveSoulFile(META_IDENTITY_PATH, String(payload?.content ?? ""));
+      return { ok: true };
+    } catch (err) {
+      return { ok: false, error: String(err) };
+    }
+  });
+
+  ipcMain.handle("load-user-md", async () => {
+    try {
+      return { ok: true, content: loadSoulFile(META_USER_PATH) };
+    } catch (err) {
+      return { ok: false, content: "", error: String(err) };
+    }
+  });
+
+  ipcMain.handle("save-user-md", async (_event, payload: { content?: string }) => {
+    try {
+      saveSoulFile(META_USER_PATH, String(payload?.content ?? ""));
       return { ok: true };
     } catch (err) {
       return { ok: false, error: String(err) };

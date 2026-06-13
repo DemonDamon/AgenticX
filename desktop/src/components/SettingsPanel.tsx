@@ -5861,6 +5861,10 @@ export function SettingsPanel({
   const [metaSoulSaved, setMetaSoulSaved] = useState("");
   const [metaSoulSaving, setMetaSoulSaving] = useState(false);
   const [metaSoulMessage, setMetaSoulMessage] = useState("");
+  const [metaIdentity, setMetaIdentity] = useState("");
+  const [metaIdentitySaved, setMetaIdentitySaved] = useState("");
+  const [metaIdentitySaving, setMetaIdentitySaving] = useState(false);
+  const [metaIdentityMessage, setMetaIdentityMessage] = useState("");
   const [userNicknameDraft, setUserNicknameDraft] = useState("");
   const [userPreferenceDraft, setUserPreferenceDraft] = useState("");
   const [userProfileMessage, setUserProfileMessage] = useState("");
@@ -6024,6 +6028,11 @@ export function SettingsPanel({
       setMetaSoul(content);
       setMetaSoulSaved(content);
     });
+    void window.agenticxDesktop.loadMetaIdentity().then((res) => {
+      const content = res?.ok ? res.content || "" : "";
+      setMetaIdentity(content);
+      setMetaIdentitySaved(content);
+    });
     if (sessionId) void onRefreshMcp(sessionId);
   }, [open, providers, defaultProvider, sessionId, onRefreshMcp, userNickname, userPreference]);
 
@@ -6033,10 +6042,42 @@ export function SettingsPanel({
   const saveUserProfile = useCallback(() => {
     setUserNickname(userNicknameDraft);
     setUserPreference(userPreferenceDraft);
+    // 同步写入 USER.md，供运行时 workspace context 读取
+    const userMdContent = [
+      "# USER.md - About Your User",
+      "",
+      `- Name: ${userNicknameDraft.trim() || "(unknown)"}`,
+      `- Preferred address: ${userNicknameDraft.trim() || "(unknown)"}`,
+      "- Timezone: Asia/Shanghai",
+      "- Preferences:",
+      ...(userPreferenceDraft.trim()
+        ? userPreferenceDraft.trim().split("\n").map((l) => `  ${l}`)
+        : ["  (not set)"]),
+    ].join("\n");
+    void window.agenticxDesktop.saveUserMd({ content: userMdContent });
     setUserProfileMessage("用户档案已保存。下一轮对话生效。");
   }, [setUserNickname, setUserPreference, userNicknameDraft, userPreferenceDraft]);
 
   const metaSoulDirty = metaSoul !== metaSoulSaved;
+  const metaIdentityDirty = metaIdentity !== metaIdentitySaved;
+
+  const saveMetaIdentity = useCallback(async () => {
+    setMetaIdentitySaving(true);
+    setMetaIdentityMessage("");
+    try {
+      const res = await window.agenticxDesktop.saveMetaIdentity({ content: metaIdentity });
+      if (res?.ok) {
+        setMetaIdentitySaved(metaIdentity);
+        setMetaIdentityMessage("身份定义已保存。下一轮对话生效。");
+      } else {
+        setMetaIdentityMessage(`保存失败: ${res?.error ?? "未知错误"}`);
+      }
+    } catch (err) {
+      setMetaIdentityMessage(`保存失败: ${String(err)}`);
+    } finally {
+      setMetaIdentitySaving(false);
+    }
+  }, [metaIdentity]);
 
   const saveMetaSoul = useCallback(async () => {
     setMetaSoulSaving(true);
@@ -6045,7 +6086,7 @@ export function SettingsPanel({
       const res = await window.agenticxDesktop.saveMetaSoul({ content: metaSoul });
       if (res?.ok) {
         setMetaSoulSaved(metaSoul);
-        setMetaSoulMessage("Meta-Agent SOUL 已保存。下一轮对话生效。");
+        setMetaSoulMessage("Near SOUL 已保存。下一轮对话生效。");
       } else {
         setMetaSoulMessage(`保存失败: ${res?.error ?? "未知错误"}`);
       }
@@ -7330,20 +7371,17 @@ export function SettingsPanel({
                   </div>
                 </Panel>
                 <Panel title="元智能体（Near）">
-                  <p className="mb-3 text-[11px] leading-relaxed text-text-subtle">
-                    仅 Near 元智能体：自定义头像与全局人格（SOUL.md）。用户偏好见上方「用户档案」。
-                  </p>
-                  <div>
-                    <div className="text-sm text-text-muted">Near 头像</div>
-                    <div className="mt-2 flex items-center gap-3">
+                  <div className="flex items-start gap-6">
+                    {/* 左侧：头像区 */}
+                    <div className="flex shrink-0 flex-col items-center gap-3 pt-1">
                       <img
                         src={effectiveMetaAvatarUrl}
                         alt="Near 头像"
-                        className="h-12 w-12 rounded-full border border-border object-cover"
+                        className="h-16 w-16 rounded-full border border-border object-cover shadow-sm"
                       />
-                      <div className="flex flex-wrap items-center gap-2">
-                        <label className="cursor-pointer rounded-md border border-border px-3 py-1.5 text-xs text-text-subtle transition hover:bg-surface-hover hover:text-text-strong">
-                          上传图片
+                      <div className="flex items-center gap-2">
+                        <label className="cursor-pointer text-xs font-medium text-[rgba(var(--theme-color-rgb),0.9)] transition-opacity hover:opacity-80">
+                          更换
                           <input
                             type="file"
                             accept="image/*"
@@ -7355,59 +7393,96 @@ export function SettingsPanel({
                             }}
                           />
                         </label>
+                        {metaAvatarUrl && (
+                          <>
+                            <span className="text-border">|</span>
+                            <button
+                              type="button"
+                              className="text-xs text-text-subtle transition-colors hover:text-text-muted"
+                              onClick={() => {
+                                setMetaAvatarUrl("");
+                                setMetaAvatarMessage("已恢复默认。");
+                              }}
+                            >
+                              清除
+                            </button>
+                          </>
+                        )}
+                      </div>
+                      {metaAvatarMessage ? (
+                        <div className="text-[10px] text-text-subtle">{metaAvatarMessage}</div>
+                      ) : null}
+                    </div>
+
+                    {/* 右侧：全局人格编辑区 */}
+                    <div className="flex-1 min-w-0">
+                      <div className="mb-1.5 text-sm font-medium text-text-muted">全局人格</div>
+                      <textarea
+                        className="w-full resize-none rounded-md border border-border bg-surface-panel px-3 py-2 text-sm text-text-primary placeholder:text-text-faint focus:border-[rgba(var(--theme-color-rgb),0.5)] focus:outline-none focus:ring-1 focus:ring-[rgba(var(--theme-color-rgb),0.5)] transition-shadow"
+                        rows={6}
+                        value={metaSoul}
+                        onChange={(e) => {
+                          setMetaSoul(e.target.value);
+                          setMetaSoulMessage("");
+                        }}
+                        placeholder={"写入 ~/.agenticx/workspace/SOUL.md。\n例如：\n- 回答先给结论\n- 不做过度客套\n- 任务进度要可见"}
+                      />
+                      <div className="mt-1.5 flex flex-wrap items-center justify-end gap-2">
+                        {metaSoulMessage ? (
+                          <span
+                            className={`mr-auto text-xs ${
+                              metaSoulMessage.startsWith("Near SOUL 已保存")
+                                ? "text-text-subtle"
+                                : "text-rose-400"
+                            }`}
+                          >
+                            {metaSoulMessage}
+                          </span>
+                        ) : null}
                         <button
                           type="button"
-                          className="rounded-md border border-border px-3 py-1.5 text-xs text-text-subtle transition hover:bg-surface-hover hover:text-text-strong disabled:opacity-50"
-                          disabled={!metaAvatarUrl}
-                          onClick={() => {
-                            setMetaAvatarUrl("");
-                            setMetaAvatarMessage("已恢复默认 Near 头像。");
-                          }}
+                          className="rounded-md bg-btnPrimary px-4 py-1.5 text-xs font-medium text-btnPrimary-text transition hover:bg-btnPrimary-hover disabled:opacity-50"
+                          disabled={metaSoulSaving || !metaSoulDirty}
+                          onClick={() => void saveMetaSoul()}
                         >
-                          恢复默认
+                          {metaSoulSaving ? "保存中…" : "保存"}
                         </button>
                       </div>
+                      <div className="mt-4 border-t border-border pt-4">
+                        <div className="mb-1.5 text-sm font-medium text-text-muted">身份定义</div>
+                        <textarea
+                          className="w-full resize-none rounded-md border border-border bg-surface-panel px-3 py-2 text-sm text-text-primary placeholder:text-text-faint focus:border-[rgba(var(--theme-color-rgb),0.5)] focus:outline-none focus:ring-1 focus:ring-[rgba(var(--theme-color-rgb),0.5)] transition-shadow"
+                          rows={4}
+                          value={metaIdentity}
+                          onChange={(e) => {
+                            setMetaIdentity(e.target.value);
+                            setMetaIdentityMessage("");
+                          }}
+                          placeholder={"写入 ~/.agenticx/workspace/IDENTITY.md。\n例如：\n- Name: Near\n- Role: 你的个人 AI 助理\n- Vibe: 务实、简洁、执行优先"}
+                        />
+                        <div className="mt-1.5 flex flex-wrap items-center justify-end gap-2">
+                          {metaIdentityMessage ? (
+                            <span
+                              className={`mr-auto text-xs ${
+                                metaIdentityMessage.startsWith("身份定义已保存")
+                                  ? "text-text-subtle"
+                                  : "text-rose-400"
+                              }`}
+                            >
+                              {metaIdentityMessage}
+                            </span>
+                          ) : null}
+                          <button
+                            type="button"
+                            className="rounded-md bg-btnPrimary px-4 py-1.5 text-xs font-medium text-btnPrimary-text transition hover:bg-btnPrimary-hover disabled:opacity-50"
+                            disabled={metaIdentitySaving || !metaIdentityDirty}
+                            onClick={() => void saveMetaIdentity()}
+                          >
+                            {metaIdentitySaving ? "保存中…" : "保存"}
+                          </button>
+                        </div>
+                      </div>
                     </div>
-                    <p className="mt-1 text-[11px] text-text-subtle">
-                      仅本机生效，保存在本地浏览器存储。建议使用小于 1.8MB 的方形图片。
-                    </p>
-                    {metaAvatarMessage ? (
-                      <p className="mt-1 text-[11px] text-text-subtle">{metaAvatarMessage}</p>
-                    ) : null}
-                  </div>
-                  <label className="mt-4 block text-sm text-text-muted">
-                    Meta-Agent SOUL（全局人格）
-                    <textarea
-                      className="mt-1 w-full resize-none rounded-md border border-border bg-surface-panel px-2 py-1.5 text-sm text-text-primary placeholder:text-text-faint"
-                      rows={6}
-                      value={metaSoul}
-                      onChange={(e) => {
-                        setMetaSoul(e.target.value);
-                        setMetaSoulMessage("");
-                      }}
-                      placeholder={"写入 ~/.agenticx/workspace/SOUL.md。\n例如：\n- 回答先给结论\n- 不做过度客套\n- 任务进度要可见"}
-                    />
-                  </label>
-                  <div className="mt-2 flex flex-wrap items-center justify-end gap-2">
-                    {metaSoulMessage ? (
-                      <span
-                        className={`mr-auto text-xs ${
-                          metaSoulMessage.startsWith("Meta-Agent SOUL 已保存")
-                            ? "text-text-subtle"
-                            : "text-rose-400"
-                        }`}
-                      >
-                        {metaSoulMessage}
-                      </span>
-                    ) : null}
-                    <button
-                      type="button"
-                      className="rounded-md bg-btnPrimary px-3 py-1.5 text-xs font-medium text-btnPrimary-text transition hover:bg-btnPrimary-hover disabled:opacity-50"
-                      disabled={metaSoulSaving || !metaSoulDirty}
-                      onClick={() => void saveMetaSoul()}
-                    >
-                      {metaSoulSaving ? "保存中..." : "保存 Meta SOUL"}
-                    </button>
                   </div>
                 </Panel>
                 <Panel title="权限">

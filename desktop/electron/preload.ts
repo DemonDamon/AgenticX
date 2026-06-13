@@ -348,6 +348,10 @@ contextBridge.exposeInMainWorld("agenticxDesktop", {
   loadConfig: async () => ipcRenderer.invoke("load-config"),
   loadMetaSoul: async () => ipcRenderer.invoke("load-meta-soul"),
   saveMetaSoul: async (payload: { content: string }) => ipcRenderer.invoke("save-meta-soul", payload),
+  loadMetaIdentity: async () => ipcRenderer.invoke("load-meta-identity"),
+  saveMetaIdentity: async (payload: { content: string }) => ipcRenderer.invoke("save-meta-identity", payload),
+  loadUserMd: async () => ipcRenderer.invoke("load-user-md"),
+  saveUserMd: async (payload: { content: string }) => ipcRenderer.invoke("save-user-md", payload),
   loadAvatarSoul: async (payload: { avatarId: string }) => ipcRenderer.invoke("load-avatar-soul", payload),
   saveAvatarSoul: async (payload: { avatarId: string; content: string }) =>
     ipcRenderer.invoke("save-avatar-soul", payload),
