@@ -52,6 +52,14 @@ import {
   type SystemSearchCategory,
 } from "./system-search";
 import { proxyAwareFetch, logProxyConfig } from "./proxy-fetch";
+import {
+  listMetaWorkspaceHistory,
+  parseMetaWorkspaceHistoryKind,
+  restoreMetaWorkspaceHistory,
+  resolveMetaWorkspaceMainPath,
+  snapshotMetaWorkspaceBeforeSave,
+  type MetaWorkspaceHistoryKind,
+} from "./meta-workspace-history";
 
 /** Node fetch honors HTTP_PROXY; localhost cc-bridge POSTs then fail (e.g. 502) and PTY input never reaches Claude. */
 function ccBridgeUrlIsLoopback(urlStr: string): boolean {
@@ -1296,6 +1304,11 @@ function loadSoulFile(pathName: string): string {
 function saveSoulFile(pathName: string, content: string): void {
   fs.mkdirSync(path.dirname(pathName), { recursive: true });
   fs.writeFileSync(pathName, content, "utf-8");
+}
+
+function saveMetaWorkspaceMarkdown(kind: MetaWorkspaceHistoryKind, content: string): void {
+  snapshotMetaWorkspaceBeforeSave(WORKSPACE_DIR, kind, content);
+  saveSoulFile(resolveMetaWorkspaceMainPath(WORKSPACE_DIR, kind), content);
 }
 
 function resolveAvatarSoulPath(avatarId: string): string {
@@ -6313,7 +6326,7 @@ function registerIpc(): void {
 
   ipcMain.handle("save-meta-soul", async (_event, payload: { content?: string }) => {
     try {
-      saveSoulFile(META_SOUL_PATH, String(payload?.content ?? ""));
+      saveMetaWorkspaceMarkdown("soul", String(payload?.content ?? ""));
       return { ok: true };
     } catch (err) {
       return { ok: false, error: String(err) };
@@ -6330,10 +6343,54 @@ function registerIpc(): void {
 
   ipcMain.handle("save-meta-identity", async (_event, payload: { content?: string }) => {
     try {
-      saveSoulFile(META_IDENTITY_PATH, String(payload?.content ?? ""));
+      saveMetaWorkspaceMarkdown("identity", String(payload?.content ?? ""));
       return { ok: true };
     } catch (err) {
       return { ok: false, error: String(err) };
+    }
+  });
+
+  ipcMain.handle("list-meta-workspace-history", async (_event, payload: { kind?: string }) => {
+    const kind = parseMetaWorkspaceHistoryKind(payload?.kind);
+    if (!kind) return { ok: false, items: [], error: "invalid kind" };
+    try {
+      return { ok: true, items: listMetaWorkspaceHistory(WORKSPACE_DIR, kind) };
+    } catch (err) {
+      return { ok: false, items: [], error: String(err) };
+    }
+  });
+
+  ipcMain.handle(
+    "restore-meta-workspace-history",
+    async (_event, payload: { kind?: string; id?: string }) => {
+      const kind = parseMetaWorkspaceHistoryKind(payload?.kind);
+      const id = String(payload?.id ?? "").trim();
+      if (!kind) return { ok: false, error: "invalid kind" };
+      if (!id) return { ok: false, error: "id is required" };
+      try {
+        const result = restoreMetaWorkspaceHistory(WORKSPACE_DIR, kind, id);
+        if (!result.ok) return { ok: false, error: result.error };
+        return { ok: true, content: result.content };
+      } catch (err) {
+        return { ok: false, error: String(err) };
+      }
+    },
+  );
+
+  ipcMain.handle("open-meta-workspace-file", async (_event, payload: { kind?: string }) => {
+    const kind = parseMetaWorkspaceHistoryKind(payload?.kind);
+    if (!kind) return { ok: false, error: "invalid kind" };
+    const target = resolveMetaWorkspaceMainPath(WORKSPACE_DIR, kind);
+    try {
+      if (!fs.existsSync(target)) {
+        fs.mkdirSync(path.dirname(target), { recursive: true });
+        fs.writeFileSync(target, "", "utf-8");
+      }
+      const err = await shell.openPath(target);
+      if (err) return { ok: false, error: err };
+      return { ok: true };
+    } catch (e) {
+      return { ok: false, error: String(e) };
     }
   });
 
