@@ -7414,73 +7414,55 @@ export function SettingsPanel({
                       ) : null}
                     </div>
 
-                    {/* 右侧：全局人格编辑区 */}
-                    <div className="flex-1 min-w-0">
-                      <div className="mb-1.5 text-sm font-medium text-text-muted">全局人格</div>
-                      <textarea
-                        className="w-full resize-none rounded-md border border-border bg-surface-panel px-3 py-2 text-sm text-text-primary placeholder:text-text-faint focus:border-[rgba(var(--theme-color-rgb),0.5)] focus:outline-none focus:ring-1 focus:ring-[rgba(var(--theme-color-rgb),0.5)] transition-shadow"
-                        rows={6}
-                        value={metaSoul}
-                        onChange={(e) => {
-                          setMetaSoul(e.target.value);
-                          setMetaSoulMessage("");
-                        }}
-                        placeholder={"写入 ~/.agenticx/workspace/SOUL.md。\n例如：\n- 回答先给结论\n- 不做过度客套\n- 任务进度要可见"}
-                      />
-                      <div className="mt-1.5 flex flex-wrap items-center justify-end gap-2">
-                        {metaSoulMessage ? (
-                          <span
-                            className={`mr-auto text-xs ${
-                              metaSoulMessage.startsWith("Near SOUL 已保存")
-                                ? "text-text-subtle"
-                                : "text-rose-400"
-                            }`}
-                          >
-                            {metaSoulMessage}
-                          </span>
-                        ) : null}
-                        <button
-                          type="button"
-                          className="rounded-md bg-btnPrimary px-4 py-1.5 text-xs font-medium text-btnPrimary-text transition hover:bg-btnPrimary-hover disabled:opacity-50"
-                          disabled={metaSoulSaving || !metaSoulDirty}
-                          onClick={() => void saveMetaSoul()}
-                        >
-                          {metaSoulSaving ? "保存中…" : "保存"}
-                        </button>
-                      </div>
-                      <div className="mt-4 border-t border-border pt-4">
-                        <div className="mb-1.5 text-sm font-medium text-text-muted">身份定义</div>
+                    {/* 右侧：表单区 */}
+                    <div className="flex-1 min-w-0 space-y-4">
+                      <div>
+                        <div className="mb-1.5 text-sm font-medium text-text-muted">身份定义（IDENTITY.md）</div>
                         <textarea
                           className="w-full resize-none rounded-md border border-border bg-surface-panel px-3 py-2 text-sm text-text-primary placeholder:text-text-faint focus:border-[rgba(var(--theme-color-rgb),0.5)] focus:outline-none focus:ring-1 focus:ring-[rgba(var(--theme-color-rgb),0.5)] transition-shadow"
-                          rows={4}
+                          rows={3}
                           value={metaIdentity}
                           onChange={(e) => {
                             setMetaIdentity(e.target.value);
                             setMetaIdentityMessage("");
                           }}
-                          placeholder={"写入 ~/.agenticx/workspace/IDENTITY.md。\n例如：\n- Name: Near\n- Role: 你的个人 AI 助理\n- Vibe: 务实、简洁、执行优先"}
+                          placeholder={"例如：\n- Name: Near\n- Role: 你的个人 AI 助理\n- Vibe: 务实、简洁、执行优先"}
                         />
-                        <div className="mt-1.5 flex flex-wrap items-center justify-end gap-2">
-                          {metaIdentityMessage ? (
-                            <span
-                              className={`mr-auto text-xs ${
-                                metaIdentityMessage.startsWith("身份定义已保存")
-                                  ? "text-text-subtle"
-                                  : "text-rose-400"
-                              }`}
-                            >
-                              {metaIdentityMessage}
-                            </span>
-                          ) : null}
-                          <button
-                            type="button"
-                            className="rounded-md bg-btnPrimary px-4 py-1.5 text-xs font-medium text-btnPrimary-text transition hover:bg-btnPrimary-hover disabled:opacity-50"
-                            disabled={metaIdentitySaving || !metaIdentityDirty}
-                            onClick={() => void saveMetaIdentity()}
-                          >
-                            {metaIdentitySaving ? "保存中…" : "保存"}
-                          </button>
-                        </div>
+                      </div>
+                      
+                      <div>
+                        <div className="mb-1.5 text-sm font-medium text-text-muted">全局人格（SOUL.md）</div>
+                        <textarea
+                          className="w-full resize-none rounded-md border border-border bg-surface-panel px-3 py-2 text-sm text-text-primary placeholder:text-text-faint focus:border-[rgba(var(--theme-color-rgb),0.5)] focus:outline-none focus:ring-1 focus:ring-[rgba(var(--theme-color-rgb),0.5)] transition-shadow"
+                          rows={5}
+                          value={metaSoul}
+                          onChange={(e) => {
+                            setMetaSoul(e.target.value);
+                            setMetaSoulMessage("");
+                          }}
+                          placeholder={"例如：\n- 回答先给结论\n- 不做过度客套\n- 任务进度要可见"}
+                        />
+                      </div>
+
+                      <div className="flex flex-wrap items-center justify-end gap-3 pt-2">
+                        {metaIdentityMessage || metaSoulMessage ? (
+                          <span className="mr-auto text-[11px] text-text-subtle">
+                            {metaIdentityMessage && metaSoulMessage 
+                              ? `${metaIdentityMessage} ${metaSoulMessage}`
+                              : (metaIdentityMessage || metaSoulMessage)}
+                          </span>
+                        ) : null}
+                        <button
+                          type="button"
+                          className="rounded-md bg-btnPrimary px-4 py-1.5 text-xs font-medium text-btnPrimary-text transition hover:bg-btnPrimary-hover disabled:opacity-50"
+                          disabled={(metaSoulSaving || metaIdentitySaving) || (!metaSoulDirty && !metaIdentityDirty)}
+                          onClick={async () => {
+                            if (metaIdentityDirty) await saveMetaIdentity();
+                            if (metaSoulDirty) await saveMetaSoul();
+                          }}
+                        >
+                          {(metaSoulSaving || metaIdentitySaving) ? "保存中…" : "保存配置"}
+                        </button>
                       </div>
                     </div>
                   </div>
