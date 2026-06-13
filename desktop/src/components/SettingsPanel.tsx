@@ -3907,7 +3907,7 @@ function SettingsDropdown({
         </svg>
       </button>
       {open && (
-        <div className="absolute left-0 top-full z-50 mt-1 w-full min-w-max overflow-hidden rounded-lg border border-border bg-surface-panel shadow-lg">
+        <div className="absolute left-0 top-full z-50 mt-1 w-full min-w-max overflow-hidden rounded-lg border border-border bg-surface-popover shadow-lg">
           {options.map((opt) => (
             <button
               key={opt.value}
