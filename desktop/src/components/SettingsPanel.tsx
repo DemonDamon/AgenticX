@@ -5620,6 +5620,12 @@ function formatSkillScanSummary(scan: {
   return lines.join("\n");
 }
 
+function formatMetaWorkspaceHistoryTime(id: string, savedAt: string): string {
+  const m = id.match(/^(\d{4})(\d{2})(\d{2})-(\d{2})(\d{2})(\d{2})$/);
+  if (m) return `${m[1]}-${m[2]}-${m[3]} ${m[4]}:${m[5]}:${m[6]}`;
+  return savedAt;
+}
+
 function SettingsToggleCard(props: {
   title: string;
   description: string;
@@ -5683,6 +5689,11 @@ export function SettingsPanel({
   const memoryContextPane = panes.find((p) => p.id === activePaneId) ?? panes[0];
   const updateSettingsSlice = useAppStore((s) => s.updateSettings);
   const initializedForOpenRef = useRef(false);
+  const metaWorkspaceHydratedRef = useRef(false);
+  const metaIdentityDraftRef = useRef("");
+  const metaIdentitySavedRef = useRef("");
+  const metaSoulDraftRef = useRef("");
+  const metaSoulSavedRef = useRef("");
   const toolsTabRef = useRef<ToolsTabHandle>(null);
   const knowledgeRef = useRef<KnowledgeSettingsHandle>(null);
   const voiceSettingsRef = useRef<VoiceSettingsPanelHandle>(null);
@@ -5860,11 +5871,21 @@ export function SettingsPanel({
   const [metaSoul, setMetaSoul] = useState("");
   const [metaSoulSaved, setMetaSoulSaved] = useState("");
   const [metaSoulSaving, setMetaSoulSaving] = useState(false);
-  const [metaSoulMessage, setMetaSoulMessage] = useState("");
   const [metaIdentity, setMetaIdentity] = useState("");
   const [metaIdentitySaved, setMetaIdentitySaved] = useState("");
   const [metaIdentitySaving, setMetaIdentitySaving] = useState(false);
-  const [metaIdentityMessage, setMetaIdentityMessage] = useState("");
+  const [metaWorkspaceMessage, setMetaWorkspaceMessage] = useState("");
+  const [metaExternalHintIdentity, setMetaExternalHintIdentity] = useState(false);
+  const [metaExternalHintSoul, setMetaExternalHintSoul] = useState(false);
+  const [metaHistoryOpen, setMetaHistoryOpen] = useState(false);
+  const [metaHistoryLoading, setMetaHistoryLoading] = useState(false);
+  const [metaHistoryMessage, setMetaHistoryMessage] = useState("");
+  const [metaHistoryIdentityItems, setMetaHistoryIdentityItems] = useState<
+    Array<{ id: string; savedAt: string; preview: string }>
+  >([]);
+  const [metaHistorySoulItems, setMetaHistorySoulItems] = useState<
+    Array<{ id: string; savedAt: string; preview: string }>
+  >([]);
   const [userNicknameDraft, setUserNicknameDraft] = useState("");
   const [userPreferenceDraft, setUserPreferenceDraft] = useState("");
   const [userProfileMessage, setUserProfileMessage] = useState("");
@@ -5946,6 +5967,7 @@ export function SettingsPanel({
     // Reset the guard when dialog is closed.
     if (!open) {
       initializedForOpenRef.current = false;
+      metaWorkspaceHydratedRef.current = false;
       fetchModelsRequestSeqRef.current += 1;
       setFetchingModels(false);
       setFetchModelsModalOpen(false);
@@ -6023,16 +6045,6 @@ export function SettingsPanel({
           .catch(() => {});
       }
     });
-    void window.agenticxDesktop.loadMetaSoul().then((res) => {
-      const content = res?.ok ? res.content || "" : "";
-      setMetaSoul(content);
-      setMetaSoulSaved(content);
-    });
-    void window.agenticxDesktop.loadMetaIdentity().then((res) => {
-      const content = res?.ok ? res.content || "" : "";
-      setMetaIdentity(content);
-      setMetaIdentitySaved(content);
-    });
     if (sessionId) void onRefreshMcp(sessionId);
   }, [open, providers, defaultProvider, sessionId, onRefreshMcp, userNickname, userPreference]);
 
@@ -6061,41 +6073,201 @@ export function SettingsPanel({
   const metaSoulDirty = metaSoul !== metaSoulSaved;
   const metaIdentityDirty = metaIdentity !== metaIdentitySaved;
 
-  const saveMetaIdentity = useCallback(async () => {
-    setMetaIdentitySaving(true);
-    setMetaIdentityMessage("");
+  useEffect(() => {
+    metaIdentityDraftRef.current = metaIdentity;
+    metaIdentitySavedRef.current = metaIdentitySaved;
+    metaSoulDraftRef.current = metaSoul;
+    metaSoulSavedRef.current = metaSoulSaved;
+  }, [metaIdentity, metaIdentitySaved, metaSoul, metaSoulSaved]);
+
+  const loadMetaWorkspaceHistory = useCallback(async () => {
+    setMetaHistoryLoading(true);
+    setMetaHistoryMessage("");
     try {
-      const res = await window.agenticxDesktop.saveMetaIdentity({ content: metaIdentity });
-      if (res?.ok) {
-        setMetaIdentitySaved(metaIdentity);
-        setMetaIdentityMessage("身份定义已保存。下一轮对话生效。");
+      const [identityRes, soulRes] = await Promise.all([
+        window.agenticxDesktop.listMetaWorkspaceHistory({ kind: "identity" }),
+        window.agenticxDesktop.listMetaWorkspaceHistory({ kind: "soul" }),
+      ]);
+      if (identityRes?.ok) {
+        setMetaHistoryIdentityItems(identityRes.items ?? []);
       } else {
-        setMetaIdentityMessage(`保存失败: ${res?.error ?? "未知错误"}`);
+        setMetaHistoryMessage(identityRes?.error ?? "无法加载身份历史");
+      }
+      if (soulRes?.ok) {
+        setMetaHistorySoulItems(soulRes.items ?? []);
+      } else if (!identityRes?.ok) {
+        setMetaHistoryMessage(soulRes?.error ?? "无法加载人格历史");
       }
     } catch (err) {
-      setMetaIdentityMessage(`保存失败: ${String(err)}`);
+      setMetaHistoryMessage(String(err));
+    } finally {
+      setMetaHistoryLoading(false);
+    }
+  }, []);
+
+  const reloadMetaWorkspaceFromDisk = useCallback(async () => {
+    const [identityRes, soulRes] = await Promise.all([
+      window.agenticxDesktop.loadMetaIdentity(),
+      window.agenticxDesktop.loadMetaSoul(),
+    ]);
+    const diskIdentity = identityRes?.ok ? identityRes.content ?? "" : "";
+    const diskSoul = soulRes?.ok ? soulRes.content ?? "" : "";
+
+    const localIdentity = metaIdentityDraftRef.current;
+    const savedIdentity = metaIdentitySavedRef.current;
+    const localSoul = metaSoulDraftRef.current;
+    const savedSoul = metaSoulSavedRef.current;
+
+    const applyIdentity = (content: string) => {
+      setMetaIdentity(content);
+      setMetaIdentitySaved(content);
+      setMetaExternalHintIdentity(false);
+    };
+    const applySoul = (content: string) => {
+      setMetaSoul(content);
+      setMetaSoulSaved(content);
+      setMetaExternalHintSoul(false);
+    };
+
+    if (!metaWorkspaceHydratedRef.current) {
+      applyIdentity(diskIdentity);
+      applySoul(diskSoul);
+      metaWorkspaceHydratedRef.current = true;
+      return;
+    }
+
+    if (localIdentity === savedIdentity && diskIdentity !== savedIdentity) {
+      const dlg = await window.agenticxDesktop.confirmDialog({
+        title: "检测到外部修改",
+        message: "身份定义已在外部编辑器中修改，是否加载最新内容？",
+        confirmText: "加载",
+        cancelText: "保留当前编辑",
+      });
+      if (dlg.confirmed) {
+        applyIdentity(diskIdentity);
+      } else {
+        setMetaExternalHintIdentity(true);
+      }
+    } else if (localIdentity !== savedIdentity && diskIdentity !== savedIdentity) {
+      setMetaExternalHintIdentity(true);
+    } else if (localIdentity === savedIdentity) {
+      applyIdentity(diskIdentity);
+    }
+
+    if (localSoul === savedSoul && diskSoul !== savedSoul) {
+      const dlg = await window.agenticxDesktop.confirmDialog({
+        title: "检测到外部修改",
+        message: "全局人格已在外部编辑器中修改，是否加载最新内容？",
+        confirmText: "加载",
+        cancelText: "保留当前编辑",
+      });
+      if (dlg.confirmed) {
+        applySoul(diskSoul);
+      } else {
+        setMetaExternalHintSoul(true);
+      }
+    } else if (localSoul !== savedSoul && diskSoul !== savedSoul) {
+      setMetaExternalHintSoul(true);
+    } else if (localSoul === savedSoul) {
+      applySoul(diskSoul);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!open || tab !== "general") return;
+    void reloadMetaWorkspaceFromDisk();
+  }, [open, tab, reloadMetaWorkspaceFromDisk]);
+
+  useEffect(() => {
+    if (!open || tab !== "general" || !metaHistoryOpen) return;
+    void loadMetaWorkspaceHistory();
+  }, [open, tab, metaHistoryOpen, loadMetaWorkspaceHistory]);
+
+  const openMetaWorkspaceInEditor = useCallback(async (kind: "identity" | "soul") => {
+    const res = await window.agenticxDesktop.openMetaWorkspaceFile({ kind });
+    if (!res?.ok) {
+      setMetaWorkspaceMessage(`无法打开文件: ${res?.error ?? "未知错误"}`);
+    }
+  }, []);
+
+  const restoreMetaWorkspaceHistoryItem = useCallback(
+    async (kind: "identity" | "soul", id: string) => {
+      const dlg = await window.agenticxDesktop.confirmDialog({
+        title: "恢复历史版本",
+        message: "将用该历史版本覆盖当前文件与编辑区内容，是否继续？",
+        confirmText: "恢复",
+        cancelText: "取消",
+        destructive: true,
+      });
+      if (!dlg.confirmed) return;
+
+      try {
+        const res = await window.agenticxDesktop.restoreMetaWorkspaceHistory({ kind, id });
+        if (!res?.ok) {
+          setMetaWorkspaceMessage(`恢复失败: ${res?.error ?? "未知错误"}`);
+          return;
+        }
+        const content = res.content ?? "";
+        if (kind === "identity") {
+          setMetaIdentity(content);
+          setMetaIdentitySaved(content);
+          setMetaExternalHintIdentity(false);
+        } else {
+          setMetaSoul(content);
+          setMetaSoulSaved(content);
+          setMetaExternalHintSoul(false);
+        }
+        setMetaWorkspaceMessage("已恢复，下一轮对话生效。");
+        if (metaHistoryOpen) void loadMetaWorkspaceHistory();
+      } catch (err) {
+        setMetaWorkspaceMessage(`恢复失败: ${String(err)}`);
+      }
+    },
+    [loadMetaWorkspaceHistory, metaHistoryOpen],
+  );
+
+  const saveMetaWorkspace = useCallback(async () => {
+    setMetaIdentitySaving(true);
+    setMetaSoulSaving(true);
+    setMetaWorkspaceMessage("");
+    const errors: string[] = [];
+    try {
+      if (metaIdentityDirty) {
+        const res = await window.agenticxDesktop.saveMetaIdentity({ content: metaIdentity });
+        if (res?.ok) {
+          setMetaIdentitySaved(metaIdentity);
+        } else {
+          errors.push(`身份定义: ${res?.error ?? "未知错误"}`);
+        }
+      }
+      if (metaSoulDirty) {
+        const res = await window.agenticxDesktop.saveMetaSoul({ content: metaSoul });
+        if (res?.ok) {
+          setMetaSoulSaved(metaSoul);
+        } else {
+          errors.push(`全局人格: ${res?.error ?? "未知错误"}`);
+        }
+      }
+      if (errors.length > 0) {
+        setMetaWorkspaceMessage(`保存失败: ${errors.join("；")}`);
+      } else if (metaIdentityDirty || metaSoulDirty) {
+        setMetaWorkspaceMessage("已保存，下一轮对话生效。");
+        if (metaHistoryOpen) void loadMetaWorkspaceHistory();
+      }
+    } catch (err) {
+      setMetaWorkspaceMessage(`保存失败: ${String(err)}`);
     } finally {
       setMetaIdentitySaving(false);
-    }
-  }, [metaIdentity]);
-
-  const saveMetaSoul = useCallback(async () => {
-    setMetaSoulSaving(true);
-    setMetaSoulMessage("");
-    try {
-      const res = await window.agenticxDesktop.saveMetaSoul({ content: metaSoul });
-      if (res?.ok) {
-        setMetaSoulSaved(metaSoul);
-        setMetaSoulMessage("Near SOUL 已保存。下一轮对话生效。");
-      } else {
-        setMetaSoulMessage(`保存失败: ${res?.error ?? "未知错误"}`);
-      }
-    } catch (err) {
-      setMetaSoulMessage(`保存失败: ${String(err)}`);
-    } finally {
       setMetaSoulSaving(false);
     }
-  }, [metaSoul]);
+  }, [
+    metaIdentity,
+    metaIdentityDirty,
+    metaSoul,
+    metaSoulDirty,
+    metaHistoryOpen,
+    loadMetaWorkspaceHistory,
+  ]);
 
   const handleProfileAvatarUpload = useCallback(
     (file: File, target: "user" | "meta") => {
@@ -7417,49 +7589,159 @@ export function SettingsPanel({
                     {/* 右侧：表单区 */}
                     <div className="flex-1 min-w-0 space-y-2">
                       <div>
-                        <div className="mb-1.5 text-sm font-medium text-text-muted">身份定义（IDENTITY.md）</div>
+                        <div className="mb-1.5 flex items-center justify-between gap-2">
+                          <div className="text-sm font-medium text-text-muted">身份定义（IDENTITY.md）</div>
+                          <button
+                            type="button"
+                            className="shrink-0 text-xs text-text-subtle transition-colors hover:text-text-muted"
+                            onClick={() => void openMetaWorkspaceInEditor("identity")}
+                          >
+                            在编辑器中打开
+                          </button>
+                        </div>
+                        {metaExternalHintIdentity ? (
+                          <div className="mb-1 text-[10px] text-amber-600/90 dark:text-amber-400/90">
+                            磁盘上的身份定义可能已在外部修改。
+                          </div>
+                        ) : null}
                         <textarea
                           className="w-full resize-none rounded-md border border-border bg-surface-panel px-3 py-2 text-sm text-text-primary placeholder:text-text-faint focus:border-[rgba(var(--theme-color-rgb),0.5)] focus:outline-none focus:ring-1 focus:ring-[rgba(var(--theme-color-rgb),0.5)] transition-shadow"
                           rows={3}
                           value={metaIdentity}
                           onChange={(e) => {
                             setMetaIdentity(e.target.value);
-                            setMetaIdentityMessage("");
+                            setMetaWorkspaceMessage("");
+                            setMetaExternalHintIdentity(false);
                           }}
                           placeholder={"例如：\n- Name: Near\n- Role: 你的个人 AI 助理\n- Vibe: 务实、简洁、执行优先"}
                         />
                       </div>
-                      
+
                       <div>
-                        <div className="mb-1.5 text-sm font-medium text-text-muted">全局人格（SOUL.md）</div>
+                        <div className="mb-1.5 flex items-center justify-between gap-2">
+                          <div className="text-sm font-medium text-text-muted">全局人格（SOUL.md）</div>
+                          <button
+                            type="button"
+                            className="shrink-0 text-xs text-text-subtle transition-colors hover:text-text-muted"
+                            onClick={() => void openMetaWorkspaceInEditor("soul")}
+                          >
+                            在编辑器中打开
+                          </button>
+                        </div>
+                        {metaExternalHintSoul ? (
+                          <div className="mb-1 text-[10px] text-amber-600/90 dark:text-amber-400/90">
+                            磁盘上的全局人格可能已在外部修改。
+                          </div>
+                        ) : null}
                         <textarea
                           className="w-full resize-none rounded-md border border-border bg-surface-panel px-3 py-2 text-sm text-text-primary placeholder:text-text-faint focus:border-[rgba(var(--theme-color-rgb),0.5)] focus:outline-none focus:ring-1 focus:ring-[rgba(var(--theme-color-rgb),0.5)] transition-shadow"
                           rows={5}
                           value={metaSoul}
                           onChange={(e) => {
                             setMetaSoul(e.target.value);
-                            setMetaSoulMessage("");
+                            setMetaWorkspaceMessage("");
+                            setMetaExternalHintSoul(false);
                           }}
                           placeholder={"例如：\n- 回答先给结论\n- 不做过度客套\n- 任务进度要可见"}
                         />
                       </div>
 
+                      <div className="border-t border-border/60 pt-2">
+                        <button
+                          type="button"
+                          className="flex items-center gap-1 text-xs text-text-subtle transition-colors hover:text-text-muted"
+                          onClick={() => setMetaHistoryOpen((v) => !v)}
+                        >
+                          <ChevronRight
+                            className={`h-3.5 w-3.5 transition-transform ${metaHistoryOpen ? "rotate-90" : ""}`}
+                            aria-hidden
+                          />
+                          历史记录
+                        </button>
+                        {metaHistoryOpen ? (
+                          <div className="mt-2 space-y-3 rounded-md border border-border/60 bg-surface-panel/50 p-2">
+                            {metaHistoryLoading ? (
+                              <div className="text-[11px] text-text-faint">加载中…</div>
+                            ) : null}
+                            {metaHistoryMessage ? (
+                              <div className="text-[11px] text-red-400">{metaHistoryMessage}</div>
+                            ) : null}
+                            <div>
+                              <div className="mb-1 text-[11px] font-medium text-text-muted">身份定义</div>
+                              {metaHistoryIdentityItems.length === 0 ? (
+                                <div className="text-[10px] text-text-faint">
+                                  暂无历史版本（保存后会自动记录变更前内容）
+                                </div>
+                              ) : (
+                                <ul className="space-y-1">
+                                  {metaHistoryIdentityItems.map((item) => (
+                                    <li key={item.id} className="flex items-start gap-2 text-[11px]">
+                                      <span className="shrink-0 text-text-faint">
+                                        {formatMetaWorkspaceHistoryTime(item.id, item.savedAt)}
+                                      </span>
+                                      <span className="min-w-0 flex-1 truncate text-text-subtle">
+                                        {item.preview || "（空）"}
+                                      </span>
+                                      <button
+                                        type="button"
+                                        className="shrink-0 text-theme hover:underline"
+                                        onClick={() =>
+                                          void restoreMetaWorkspaceHistoryItem("identity", item.id)
+                                        }
+                                      >
+                                        恢复
+                                      </button>
+                                    </li>
+                                  ))}
+                                </ul>
+                              )}
+                            </div>
+                            <div>
+                              <div className="mb-1 text-[11px] font-medium text-text-muted">全局人格</div>
+                              {metaHistorySoulItems.length === 0 ? (
+                                <div className="text-[10px] text-text-faint">
+                                  暂无历史版本（保存后会自动记录变更前内容）
+                                </div>
+                              ) : (
+                                <ul className="space-y-1">
+                                  {metaHistorySoulItems.map((item) => (
+                                    <li key={item.id} className="flex items-start gap-2 text-[11px]">
+                                      <span className="shrink-0 text-text-faint">
+                                        {formatMetaWorkspaceHistoryTime(item.id, item.savedAt)}
+                                      </span>
+                                      <span className="min-w-0 flex-1 truncate text-text-subtle">
+                                        {item.preview || "（空）"}
+                                      </span>
+                                      <button
+                                        type="button"
+                                        className="shrink-0 text-theme hover:underline"
+                                        onClick={() =>
+                                          void restoreMetaWorkspaceHistoryItem("soul", item.id)
+                                        }
+                                      >
+                                        恢复
+                                      </button>
+                                    </li>
+                                  ))}
+                                </ul>
+                              )}
+                            </div>
+                          </div>
+                        ) : null}
+                      </div>
+
                       <div className="flex flex-wrap items-center justify-end gap-3">
-                        {metaIdentityMessage || metaSoulMessage ? (
-                          <span className="mr-auto text-[11px] text-text-subtle">
-                            {metaIdentityMessage && metaSoulMessage 
-                              ? `${metaIdentityMessage} ${metaSoulMessage}`
-                              : (metaIdentityMessage || metaSoulMessage)}
-                          </span>
+                        {metaWorkspaceMessage ? (
+                          <span className="mr-auto text-[11px] text-text-subtle">{metaWorkspaceMessage}</span>
                         ) : null}
                         <button
                           type="button"
                           className="rounded-md bg-btnPrimary px-4 py-1.5 text-xs font-medium text-btnPrimary-text transition hover:bg-btnPrimary-hover disabled:opacity-50"
-                          disabled={(metaSoulSaving || metaIdentitySaving) || (!metaSoulDirty && !metaIdentityDirty)}
-                          onClick={async () => {
-                            if (metaIdentityDirty) await saveMetaIdentity();
-                            if (metaSoulDirty) await saveMetaSoul();
-                          }}
+                          disabled={
+                            (metaSoulSaving || metaIdentitySaving) ||
+                            (!metaSoulDirty && !metaIdentityDirty)
+                          }
+                          onClick={() => void saveMetaWorkspace()}
                         >
                           {(metaSoulSaving || metaIdentitySaving) ? "保存中…" : "保存"}
                         </button>

@@ -744,6 +744,18 @@ declare global {
       saveMetaSoul: (payload: { content: string }) => Promise<{ ok: boolean; error?: string }>;
       loadMetaIdentity: () => Promise<{ ok: boolean; content: string; error?: string }>;
       saveMetaIdentity: (payload: { content: string }) => Promise<{ ok: boolean; error?: string }>;
+      listMetaWorkspaceHistory: (payload: {
+        kind: "identity" | "soul";
+      }) => Promise<{
+        ok: boolean;
+        items?: Array<{ id: string; savedAt: string; preview: string }>;
+        error?: string;
+      }>;
+      restoreMetaWorkspaceHistory: (payload: {
+        kind: "identity" | "soul";
+        id: string;
+      }) => Promise<{ ok: boolean; content?: string; error?: string }>;
+      openMetaWorkspaceFile: (payload: { kind: "identity" | "soul" }) => Promise<{ ok: boolean; error?: string }>;
       loadUserMd: () => Promise<{ ok: boolean; content: string; error?: string }>;
       saveUserMd: (payload: { content: string }) => Promise<{ ok: boolean; error?: string }>;
       loadAvatarSoul: (payload: { avatarId: string }) => Promise<{ ok: boolean; content: string; error?: string }>;
