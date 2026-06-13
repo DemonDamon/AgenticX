@@ -6350,6 +6350,72 @@ function registerIpc(): void {
     }
   });
 
+  ipcMain.handle(
+    "ai-assist-complete",
+    async (
+      _event,
+      payload: {
+        systemPrompt: string;
+        userPrompt: string;
+        provider?: string;
+        apiKey?: string;
+        baseUrl?: string;
+        model?: string;
+      },
+    ) => {
+      const provider = String(payload?.provider ?? "").trim();
+      const apiKey = normalizeProviderApiKey(payload?.apiKey);
+      const baseUrl = (payload?.baseUrl ?? "").trim().replace(/\/+$/, "");
+      const model = String(payload?.model ?? "").trim();
+      const base =
+        baseUrl || (provider ? (KNOWN_BASE_URLS[provider] ?? "") : "") || "";
+      if (!base) return { ok: false, error: "未配置 API 地址，请先在设置中完成模型提供商配置。" };
+      const url = `${base}/chat/completions`;
+      const body = JSON.stringify({
+        model: model || "gpt-4o-mini",
+        messages: [
+          { role: "system", content: String(payload?.systemPrompt ?? "") },
+          { role: "user", content: String(payload?.userPrompt ?? "") },
+        ],
+        max_tokens: 1024,
+        stream: false,
+      });
+      try {
+        const controller = new AbortController();
+        const timer = setTimeout(() => controller.abort(), 60000);
+        const resp = await proxyAwareFetch(url, {
+          method: "POST",
+          headers: {
+            ...openAiCompatAuthHeaders(apiKey),
+            "Content-Type": "application/json",
+          },
+          body,
+          signal: controller.signal,
+        });
+        clearTimeout(timer);
+        const text = await resp.text();
+        if (!resp.ok) {
+          return { ok: false, error: `HTTP ${resp.status}: ${text.slice(0, 200)}` };
+        }
+        let data: { choices?: Array<{ message?: { content?: string } }>; content?: string; response?: string };
+        try {
+          data = JSON.parse(text) as typeof data;
+        } catch {
+          return { ok: false, error: "响应格式错误" };
+        }
+        const content =
+          data.choices?.[0]?.message?.content ??
+          (data as { content?: string }).content ??
+          (data as { response?: string }).response ??
+          "";
+        if (!content.trim()) return { ok: false, error: "模型未返回有效内容" };
+        return { ok: true, content: content.trim() };
+      } catch (err) {
+        return { ok: false, error: String(err) };
+      }
+    },
+  );
+
   ipcMain.handle("list-meta-workspace-history", async (_event, payload: { kind?: string }) => {
     const kind = parseMetaWorkspaceHistoryKind(payload?.kind);
     if (!kind) return { ok: false, items: [], error: "invalid kind" };
