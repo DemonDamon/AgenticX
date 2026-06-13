@@ -2288,7 +2288,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
   const loadingOlderMessagesRef = useRef(false);
   const sessionBootstrapRef = useRef("");
   const lastUserSendDedupeRef = useRef<SendDedupeEntry | null>(null);
-  const sendChatInFlightRef = useRef<string | null>(null);
+  const sendChatInFlightRef = useRef<{ paneId: string; sessionId: string } | null>(null);
   const [showJumpToBottomFab, setShowJumpToBottomFab] = useState(false);
   const imeComposingRef = useRef(false);
   const [atOpen, setAtOpen] = useState(false);
@@ -5941,25 +5941,35 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
     if (!apiBase) return;
 
     const sendLockKey = pane.id;
+    // 计算本次发送的目标 session（用于跨 session 并发判断）
+    const targetSendSid = (options?.lockedSessionId || pane.sessionId || "").trim();
     let holdSendLock = false;
     const releaseSendLock = () => {
-      if (holdSendLock && sendChatInFlightRef.current === sendLockKey) {
+      if (holdSendLock && sendChatInFlightRef.current?.paneId === sendLockKey) {
         sendChatInFlightRef.current = null;
       }
     };
     if (!options?.forceSend) {
-      if (sendChatInFlightRef.current === sendLockKey) {
-        // "全新对话" 是显式抢占旧会话：旧流若卡住，必须允许首条消息发送，
-        // 否则会表现为输入可见但点击发送无反应。
-        if (isPaneAwaitingFreshSession(pane.id)) {
+      if (sendChatInFlightRef.current?.paneId === sendLockKey) {
+        const inFlightSid = sendChatInFlightRef.current.sessionId;
+        if (inFlightSid && targetSendSid && inFlightSid !== targetSendSid) {
+          // 旧流属于不同 session（用户切换了历史会话后点击 chip）：
+          // 不阻断新 session 的发送，也不抢占旧锁（旧流会在 finally 里自行释放）。
+          // holdSendLock 保持 false，此次不持锁。
+        } else if (isPaneAwaitingFreshSession(pane.id)) {
+          // "全新对话" 是显式抢占旧会话：旧流若卡住，必须允许首条消息发送，
+          // 否则会表现为输入可见但点击发送无反应。
           sendChatInFlightRef.current = null;
+          sendChatInFlightRef.current = { paneId: sendLockKey, sessionId: targetSendSid };
+          holdSendLock = true;
         } else {
           console.warn("[ChatPane] dropped concurrent sendChat on pane", sendLockKey);
           return;
         }
+      } else {
+        sendChatInFlightRef.current = { paneId: sendLockKey, sessionId: targetSendSid };
+        holdSendLock = true;
       }
-      sendChatInFlightRef.current = sendLockKey;
-      holdSendLock = true;
     }
 
     const useLazySession = !isGroupPane && !isAutomationTaskPane;
