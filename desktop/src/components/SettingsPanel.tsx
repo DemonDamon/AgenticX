@@ -7415,7 +7415,7 @@ export function SettingsPanel({
                     </div>
 
                     {/* 右侧：表单区 */}
-                    <div className="flex-1 min-w-0 space-y-4">
+                    <div className="flex-1 min-w-0 space-y-2">
                       <div>
                         <div className="mb-1.5 text-sm font-medium text-text-muted">身份定义（IDENTITY.md）</div>
                         <textarea
@@ -7444,7 +7444,7 @@ export function SettingsPanel({
                         />
                       </div>
 
-                      <div className="flex flex-wrap items-center justify-end gap-3 pt-2">
+                      <div className="flex flex-wrap items-center justify-end gap-3">
                         {metaIdentityMessage || metaSoulMessage ? (
                           <span className="mr-auto text-[11px] text-text-subtle">
                             {metaIdentityMessage && metaSoulMessage 
@@ -7461,7 +7461,7 @@ export function SettingsPanel({
                             if (metaSoulDirty) await saveMetaSoul();
                           }}
                         >
-                          {(metaSoulSaving || metaIdentitySaving) ? "保存中…" : "保存配置"}
+                          {(metaSoulSaving || metaIdentitySaving) ? "保存中…" : "保存"}
                         </button>
                       </div>
                     </div>
