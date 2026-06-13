@@ -1,10 +1,21 @@
 import { describe, expect, it } from "vitest";
 import { formatModelOptionLabel, normalizeBareModelId } from "./model-display";
-import { getProviderDisplayName, isOfficialOpenAIBase } from "./provider-display";
+import {
+  getProviderDisplayName,
+  isOfficialOpenAIBase,
+  isProviderDisplayNameEditable,
+} from "./provider-display";
 
 describe("provider-display", () => {
   it("uses custom displayName when configured", () => {
     expect(getProviderDisplayName("custom_openai_caiyun", { displayName: "彩讯" })).toBe("彩讯");
+  });
+
+  it("allows renaming custom vendors and openai-compatible gateways", () => {
+    expect(isProviderDisplayNameEditable("custom_openai_yidong", { displayName: "移动云" })).toBe(true);
+    expect(isProviderDisplayNameEditable("openai", { baseUrl: "http://47.2.1.1/v1" })).toBe(true);
+    expect(isProviderDisplayNameEditable("openai", { baseUrl: "https://api.openai.com/v1" })).toBe(false);
+    expect(isProviderDisplayNameEditable("anthropic", {})).toBe(false);
   });
 
   it("labels built-in openai with custom base as compatible gateway", () => {

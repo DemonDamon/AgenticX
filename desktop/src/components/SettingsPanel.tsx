@@ -79,7 +79,7 @@ import { AccountTab } from "./AccountTab";
 import { KnowledgeSettings, type KnowledgeSettingsHandle } from "./settings/knowledge/KnowledgeSettings";
 import { MemoryGraphExplorer } from "./memory/MemoryGraphExplorer";
 import { TurnArchiveSettingsPanel } from "./memory/TurnArchiveSettingsPanel";
-import { getProviderDisplayName, makeCustomOpenAIProviderId } from "../utils/provider-display";
+import { getProviderDisplayName, isProviderDisplayNameEditable, makeCustomOpenAIProviderId } from "../utils/provider-display";
 import { normalizeProviderEntry } from "../utils/model-options";
 import { classifyModelKind, isEmbeddingModelKind } from "../utils/model-kind";
 import type { SettingsTab } from "../settings-tab";
@@ -5926,6 +5926,15 @@ export function SettingsPanel({
   const [editModelOriginalId, setEditModelOriginalId] = useState("");
   const [editModelFormId, setEditModelFormId] = useState("");
   const [editModelError, setEditModelError] = useState<string | null>(null);
+  const [inlineRenameProviderId, setInlineRenameProviderId] = useState<string | null>(null);
+  const [inlineRenameValue, setInlineRenameValue] = useState("");
+  const [providerContextMenu, setProviderContextMenu] = useState<{
+    x: number;
+    y: number;
+    providerId: string;
+  } | null>(null);
+  const providerContextMenuRef = useRef<HTMLDivElement>(null);
+  const inlineRenameInputRef = useRef<HTMLInputElement>(null);
   const [providerEnableHint, setProviderEnableHint] = useState<string | null>(null);
   const [defaultProvHint, setDefaultProvHint] = useState<string | null>(null);
   /** API 密钥显隐（切换左侧厂商时恢复为隐藏） */
@@ -6588,6 +6597,32 @@ export function SettingsPanel({
   }, [active]);
 
   useEffect(() => {
+    if (!inlineRenameProviderId) return;
+    const t = window.setTimeout(() => {
+      inlineRenameInputRef.current?.focus();
+      inlineRenameInputRef.current?.select();
+    }, 0);
+    return () => window.clearTimeout(t);
+  }, [inlineRenameProviderId]);
+
+  useEffect(() => {
+    if (!providerContextMenu) return;
+    const onPointerDown = (e: MouseEvent) => {
+      if (providerContextMenuRef.current?.contains(e.target as Node)) return;
+      setProviderContextMenu(null);
+    };
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setProviderContextMenu(null);
+    };
+    window.addEventListener("mousedown", onPointerDown);
+    window.addEventListener("keydown", onKeyDown);
+    return () => {
+      window.removeEventListener("mousedown", onPointerDown);
+      window.removeEventListener("keydown", onKeyDown);
+    };
+  }, [providerContextMenu]);
+
+  useEffect(() => {
     setFetchModelsModalOpen(false);
     setFetchedModels([]);
     setFetchModelsSearch("");
@@ -6853,6 +6888,44 @@ export function SettingsPanel({
     });
     closeEditModelModal();
   };
+
+  const beginInlineProviderRename = useCallback(
+    (providerId: string) => {
+      const entry = draft[providerId];
+      if (!isProviderDisplayNameEditable(providerId, entry)) return;
+      setActive(providerId);
+      setInlineRenameProviderId(providerId);
+      setInlineRenameValue(getProviderDisplayName(providerId, entry));
+      setProviderContextMenu(null);
+      setProviderEnableHint(null);
+      setDefaultProvHint(null);
+    },
+    [draft],
+  );
+
+  const cancelInlineProviderRename = useCallback(() => {
+    setInlineRenameProviderId(null);
+    setInlineRenameValue("");
+  }, []);
+
+  const commitInlineProviderRename = useCallback(() => {
+    const providerId = inlineRenameProviderId;
+    if (!providerId) return;
+    const trimmed = inlineRenameValue.trim();
+    if (!trimmed) {
+      cancelInlineProviderRename();
+      return;
+    }
+    setDraft((prev) => {
+      const prevEntry = prev[providerId];
+      if (!prevEntry) return prev;
+      return {
+        ...prev,
+        [providerId]: { ...prevEntry, displayName: trimmed },
+      };
+    });
+    cancelInlineProviderRename();
+  }, [inlineRenameProviderId, inlineRenameValue, cancelInlineProviderRename]);
 
   /** Normalize base_url: strip trailing slash; if no version segment (/v1, /v2…), append /v1. */
   const normalizeBaseUrl = (url: string): string => {
@@ -8011,6 +8084,7 @@ export function SettingsPanel({
                             active === name ? "bg-[var(--settings-accent-row-bg)] text-[var(--settings-accent-fg)]" : "text-text-subtle hover:bg-surface-hover hover:text-text-primary"
                           }`}
                           onClick={() => {
+                            if (name !== active) cancelInlineProviderRename();
                             setActive(name);
                             setProviderEnableHint(null);
                             setDefaultProvHint(null);
@@ -8023,6 +8097,13 @@ export function SettingsPanel({
                             setEditModelOriginalId("");
                             setEditModelFormId("");
                             setEditModelError(null);
+                            setProviderContextMenu(null);
+                          }}
+                          onContextMenu={(e) => {
+                            if (!isProviderDisplayNameEditable(name, entry)) return;
+                            e.preventDefault();
+                            e.stopPropagation();
+                            setProviderContextMenu({ x: e.clientX, y: e.clientY, providerId: name });
                           }}
                         >
                           <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${dotClass}`} />
@@ -8047,9 +8128,47 @@ export function SettingsPanel({
 
                 {/* Provider detail */}
                 <div className="flex-1 space-y-3">
-                      <h2 className="text-sm font-semibold leading-snug text-text-primary">
-                        {getProviderDisplayName(active, current)}
-                      </h2>
+                      {inlineRenameProviderId === active && isProviderDisplayNameEditable(active, current) ? (
+                        <input
+                          ref={inlineRenameInputRef}
+                          className="w-full rounded-md border border-[var(--settings-accent-badge-bg)] bg-surface-panel px-2 py-1 text-sm font-semibold text-text-primary outline-none ring-1 ring-[var(--settings-accent-badge-bg)]"
+                          value={inlineRenameValue}
+                          onChange={(e) => setInlineRenameValue(e.target.value)}
+                          onBlur={commitInlineProviderRename}
+                          onKeyDown={(e) => {
+                            if (e.key === "Enter") {
+                              e.preventDefault();
+                              commitInlineProviderRename();
+                            }
+                            if (e.key === "Escape") {
+                              e.preventDefault();
+                              cancelInlineProviderRename();
+                            }
+                          }}
+                          aria-label="服务厂商显示名"
+                        />
+                      ) : (
+                        <h2
+                          className={`flex items-center gap-1.5 text-sm font-semibold leading-snug text-text-primary ${
+                            isProviderDisplayNameEditable(active, current)
+                              ? "cursor-text rounded-md px-0.5 transition hover:bg-surface-hover"
+                              : ""
+                          }`}
+                          onClick={() => {
+                            if (isProviderDisplayNameEditable(active, current)) {
+                              beginInlineProviderRename(active);
+                            }
+                          }}
+                          title={
+                            isProviderDisplayNameEditable(active, current) ? "点击重命名；侧栏项也可右键重命名" : undefined
+                          }
+                        >
+                          <span>{getProviderDisplayName(active, current)}</span>
+                          {isProviderDisplayNameEditable(active, current) ? (
+                            <SquarePen className="h-3.5 w-3.5 shrink-0 text-text-faint" aria-hidden />
+                          ) : null}
+                        </h2>
+                      )}
                       <div className="space-y-1 rounded-md border border-border bg-surface-panel px-3 py-2">
                         <div className="flex items-center justify-between">
                           <div className="text-xs text-text-subtle">
@@ -8128,21 +8247,6 @@ export function SettingsPanel({
                           <div className="text-[11px] text-rose-400">{defaultProvHint}</div>
                         ) : null}
                       </div>
-                      {!(ALL_PROVIDERS as readonly string[]).includes(active) &&
-                      (current.interface === "openai" || active.startsWith("custom_openai_")) ? (
-                        <label className="mb-3 block text-sm text-text-muted">
-                          服务厂商显示名
-                          <input
-                            className="mt-1 w-full rounded-md border border-border bg-surface-panel px-2 py-1.5 text-sm"
-                            value={current.displayName ?? ""}
-                            onChange={(e) => updateField("displayName", e.target.value)}
-                            placeholder="例如 移动云"
-                          />
-                          <p className="mt-1 text-[11px] leading-relaxed text-text-faint">
-                            仅用于界面与侧栏展示；配置中的厂商 id 仍为左侧英文标识。
-                          </p>
-                        </label>
-                      ) : null}
                       <label className="block text-sm text-text-muted">
                         API 密钥
                         <div className="mt-1 flex gap-2">
@@ -8582,6 +8686,22 @@ export function SettingsPanel({
                       </Modal>
                 </div>
               </div>
+              {providerContextMenu ? (
+                <div
+                  ref={providerContextMenuRef}
+                  className="fixed z-[220] min-w-[120px] overflow-hidden rounded-lg border border-border bg-surface-card py-1 shadow-lg"
+                  style={{ left: providerContextMenu.x, top: providerContextMenu.y }}
+                >
+                  <button
+                    type="button"
+                    className="flex w-full items-center gap-2 px-3 py-2 text-left text-xs text-text-muted transition hover:bg-surface-hover hover:text-text-strong"
+                    onClick={() => beginInlineProviderRename(providerContextMenu.providerId)}
+                  >
+                    <SquarePen className="h-3.5 w-3.5 shrink-0" aria-hidden />
+                    重命名
+                  </button>
+                </div>
+              ) : null}
               </div>
             )}
 
