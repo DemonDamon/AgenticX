@@ -274,13 +274,30 @@ def provider_supports_json_response_format(provider_name: str, base_url: str | N
     return False
 
 
+def _normalize_model_slug(model: str) -> str:
+    return (model or "").strip().lower().split("/")[-1]
+
+
+def model_supports_enable_thinking_param(model: str) -> bool:
+    """DashScope/Bailian hybrid models that accept ``enable_thinking`` in the request body.
+
+    Non-hybrid models such as ``qwen-plus`` / ``qwen-turbo`` reject the parameter and must
+    not receive it (OpenAI SDK also rejects a top-level ``enable_thinking`` kwarg).
+    """
+    model_l = _normalize_model_slug(model)
+    if "qvq" in model_l:
+        return True
+    # qwen3-*, qwen3.5-*, qwen3.* — hybrid thinking families only.
+    return bool(re.match(r"qwen3[\-.]", model_l))
+
+
 def provider_requires_disable_thinking(provider_name: str, base_url: str | None, model: str) -> bool:
     """Thinking/reasoning models may return empty ``content`` and break JSON extraction."""
     provider = (provider_name or "").strip().lower()
     base = (base_url or "").lower()
-    model_l = (model or "").strip().lower()
+    model_l = _normalize_model_slug(model)
     if provider in {"bailian", "dashscope", "aliyun"} or "dashscope.aliyuncs.com" in base:
-        if "qwen" in model_l or "qvq" in model_l:
+        if model_supports_enable_thinking_param(model):
             return True
     if provider == "kimi" or "moonshot" in base:
         return True
@@ -299,8 +316,10 @@ def memory_graph_chat_request_extras(
     base = (base_url or "").lower()
     extras: dict[str, Any] = {}
     body: dict[str, Any] = {}
-    if provider_requires_disable_thinking(provider_name, base_url, model):
-        extras["enable_thinking"] = False
+    if (
+        provider in {"bailian", "dashscope", "aliyun"} or "dashscope.aliyuncs.com" in base
+    ) and model_supports_enable_thinking_param(model):
+        # Must go through extra_body; AsyncOpenAI.create() rejects top-level enable_thinking.
         body["enable_thinking"] = False
     if provider == "kimi" or "moonshot" in base:
         body["thinking"] = {"type": "disabled"}
