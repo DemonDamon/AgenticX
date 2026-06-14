@@ -139,12 +139,16 @@ function resolveMemoryBuildUi(st: MemoryGraphStatus | null): {
 }
 
 import { Panel } from "../ds/Panel";
+import { SettingsDropdown } from "../ds/SettingsDropdown";
 
 /** 与设置页 Panel / 知识库卡片一致的边线语义 */
 const MG_PANEL = "rounded-lg border border-border bg-surface-card";
 const MG_DIVIDER = "h-px shrink-0 bg-[var(--border-muted)]";
 const MG_FIELD =
   "rounded-md border border-border bg-surface-panel px-2 py-1.5 text-xs text-text-primary outline-none focus:border-[var(--settings-accent-focus)]";
+/** 工具栏行内控件统一高度，与 MG_FIELD 视觉对齐 */
+const MG_TOOLBAR_CTRL =
+  "h-8 rounded-md border border-border bg-surface-panel text-xs text-text-primary outline-none focus:border-[var(--settings-accent-focus)]";
 
 function buildProviderModelOptions(
   providers: Record<string, ProviderCatalogEntry>,
@@ -221,15 +225,31 @@ function MemoryGraphExplorerInner({
   const [embedModel, setEmbedModel] = useState("");
   const [defaultProvider, setDefaultProvider] = useState("");
   const providerCatalog = useAppStore((s) => s.settings.providers);
+  const avatarsList = useAppStore((s) => s.avatars);
+  const groupsList = useAppStore((s) => s.groups);
 
   const isDashboard = layout === "dashboard";
+
+  // Dashboard 模式可自由切换具体分身 / 群聊查看其记忆；sidebar 模式锁定当前窗格主体。
+  const [selectedSubjectId, setSelectedSubjectId] = useState("");
+
+  const effectiveAvatarId = useMemo(() => {
+    if (scopeLocked) return avatarId;
+    if (scope === "meta") return null;
+    const sid = selectedSubjectId.trim();
+    if (!sid) return null;
+    return scope === "group" ? `group:${sid}` : sid;
+  }, [scopeLocked, avatarId, scope, selectedSubjectId]);
+
+  const effectiveSessionId = scopeLocked ? sessionId : "";
+
   const groupId = useMemo(
-    () => deriveGroupId(scope, avatarId),
-    [scope, avatarId],
+    () => deriveGroupId(scope, effectiveAvatarId),
+    [scope, effectiveAvatarId],
   );
 
   const subjectAvatarIdForWorkspace = useMemo(() => {
-    const aid = (avatarId || "").trim();
+    const aid = (effectiveAvatarId || "").trim();
     if (scope === "meta") return null;
     if (scope === "group") {
       if (aid.startsWith("group:")) return aid;
@@ -237,7 +257,18 @@ function MemoryGraphExplorerInner({
     }
     if (!aid || aid.startsWith("group:")) return null;
     return aid;
-  }, [scope, avatarId]);
+  }, [scope, effectiveAvatarId]);
+
+  const subjectOptions = useMemo(() => {
+    const list = scope === "group" ? groupsList : avatarsList;
+    return list.map((item) => ({ value: item.id, label: item.name }));
+  }, [scope, groupsList, avatarsList]);
+
+  const subjectDisplayLabel = useMemo(() => {
+    const empty = scope === "group" ? "暂无群聊" : "暂无分身";
+    if (!selectedSubjectId.trim()) return empty;
+    return subjectOptions.find((o) => o.value === selectedSubjectId)?.label ?? selectedSubjectId;
+  }, [scope, selectedSubjectId, subjectOptions]);
 
   const selectedNode: GraphNodeDTO | null = useMemo(
     () => graph.nodes.find((n) => n.id === selectedId) || null,
@@ -325,15 +356,15 @@ function MemoryGraphExplorerInner({
       }
       const overview = await fetchMemoryGraphOverview(apiBase, apiToken, {
         scope,
-        avatarId,
-        sessionId,
+        avatarId: effectiveAvatarId,
+        sessionId: effectiveSessionId,
         groupId,
       });
       setGraph(overview);
       const eps = await fetchMemoryGraphEpisodes(apiBase, apiToken, groupId, 30, {
         scope,
-        avatarId,
-        sessionId,
+        avatarId: effectiveAvatarId,
+        sessionId: effectiveSessionId,
       });
       setEpisodes(eps);
     } catch (e) {
@@ -348,7 +379,7 @@ function MemoryGraphExplorerInner({
     } finally {
       setLoading(false);
     }
-  }, [apiBase, apiToken, groupId, avatarId, sessionId, scope]);
+  }, [apiBase, apiToken, groupId, effectiveAvatarId, effectiveSessionId, scope]);
 
   useEffect(() => {
     void loadConfig();
@@ -357,6 +388,16 @@ function MemoryGraphExplorerInner({
   useEffect(() => {
     setScope(initialScope);
   }, [initialScope]);
+
+  // Dashboard 模式切换主体类型时，自动选中该类型下第一个主体（避免空分区提示）。
+  useEffect(() => {
+    if (scopeLocked || scope === "meta") return;
+    const list = scope === "group" ? groupsList : avatarsList;
+    const ids = list.map((item) => item.id);
+    if (!selectedSubjectId || !ids.includes(selectedSubjectId)) {
+      setSelectedSubjectId(ids[0] ?? "");
+    }
+  }, [scope, scopeLocked, avatarsList, groupsList, selectedSubjectId]);
 
   useEffect(() => {
     void reload();
@@ -406,8 +447,8 @@ function MemoryGraphExplorerInner({
         apiToken,
         groupId,
         query.trim(),
-        sessionId,
-        avatarId,
+        effectiveSessionId,
+        effectiveAvatarId,
       );
       setGraph(result);
     } catch (e) {
@@ -425,8 +466,8 @@ function MemoryGraphExplorerInner({
         apiToken,
         episodeId,
         groupId,
-        sessionId,
-        avatarId,
+        effectiveSessionId,
+        effectiveAvatarId,
       );
       await reload();
       setSelectedId(null);
@@ -554,27 +595,57 @@ function MemoryGraphExplorerInner({
     </>
   ) : (
     <div
-      className={`flex flex-wrap items-center gap-2 ${
-        isDashboard ? "px-0.5" : "border-b border-[var(--border-muted)] px-3 py-2"
-      }`}
+      className={
+        isDashboard
+          ? `${MG_PANEL} flex flex-col gap-2 p-3`
+          : "flex flex-col gap-2 border-b border-[var(--border-muted)] px-3 py-2"
+      }
     >
-      <div className="flex overflow-hidden rounded-md border border-border text-[11px]">
-        {(["meta", "avatar", "group"] as MemoryGraphScope[]).map((s) => (
+      {/* 第一行：主体类型 + 分身 / 群聊（与设置区 select 同字号、同高度） */}
+      <div className="flex items-center gap-2">
+        <div className="flex h-8 shrink-0 overflow-hidden rounded-md border border-border text-xs">
+          {(["meta", "avatar", "group"] as MemoryGraphScope[]).map((s) => (
+            <button
+              key={s}
+              type="button"
+              className={`flex h-full items-center px-3 transition ${
+                scope === s
+                  ? "bg-[var(--ui-btn-primary-bg)] text-[var(--ui-btn-primary-text)]"
+                  : "bg-transparent text-text-muted hover:bg-surface-hover hover:text-text-primary"
+              }`}
+              onClick={() => setScope(s)}
+            >
+              {scopeLabel(s)}
+            </button>
+          ))}
+        </div>
+        {scope !== "meta" ? (
+          <SettingsDropdown
+            size="compact"
+            className="min-w-0 flex-1 max-w-xs"
+            value={selectedSubjectId}
+            displayLabel={subjectDisplayLabel}
+            options={subjectOptions}
+            onChange={setSelectedSubjectId}
+            disabled={subjectOptions.length === 0}
+            title={scope === "group" ? "选择群聊查看其记忆" : "选择分身查看其记忆"}
+          />
+        ) : (
+          <div className="min-w-0 flex-1" />
+        )}
+        {onClose ? (
           <button
-            key={s}
             type="button"
-            className={`px-2.5 py-1 transition ${
-              scope === s
-                ? "bg-[var(--ui-btn-primary-bg)] font-medium text-[var(--ui-btn-primary-text)]"
-                : "bg-transparent text-text-muted hover:bg-surface-hover hover:text-text-primary"
-            }`}
-            onClick={() => setScope(s)}
+            className="agx-topbar-btn !px-[5px] shrink-0"
+            onClick={onClose}
+            title="收起"
           >
-            {scopeLabel(s)}
+            <PanelRightClose className="h-4 w-4" />
           </button>
-        ))}
+        ) : null}
       </div>
-      <div className="flex min-w-[200px] flex-1 items-center gap-1.5">
+      {/* 第二行：搜索 + 刷新 */}
+      <div className="flex items-center gap-2">
         <div className="relative min-w-0 flex-1">
           <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-text-faint" />
           <input
@@ -584,31 +655,26 @@ function MemoryGraphExplorerInner({
               if (e.key === "Enter") void onSearch();
             }}
             placeholder="搜索实体、关系…"
-            className={`w-full pl-8 pr-2 ${MG_FIELD}`}
+            className={`h-8 w-full pl-8 pr-2 ${MG_TOOLBAR_CTRL}`}
           />
         </div>
         <button
           type="button"
-          className="shrink-0 rounded-md px-3 py-1.5 text-xs font-medium transition hover:opacity-90"
+          className="h-8 shrink-0 rounded-md px-3 text-xs font-medium transition hover:opacity-90"
           style={{ background: "var(--ui-btn-primary-bg)", color: "var(--ui-btn-primary-text)" }}
           onClick={() => void onSearch()}
         >
           搜索
         </button>
-      </div>
-      <button
-        type="button"
-        className="agx-topbar-btn !px-[5px]"
-        onClick={() => void reload()}
-        title="刷新图谱"
-      >
-        <RefreshCw className={`h-4 w-4 ${loading ? "animate-spin" : ""}`} />
-      </button>
-      {onClose ? (
-        <button type="button" className="agx-topbar-btn !px-[5px]" onClick={onClose} title="收起">
-          <PanelRightClose className="h-4 w-4" />
+        <button
+          type="button"
+          className="agx-topbar-btn !h-8 !px-[5px]"
+          onClick={() => void reload()}
+          title="刷新图谱"
+        >
+          <RefreshCw className={`h-4 w-4 ${loading ? "animate-spin" : ""}`} />
         </button>
-      ) : null}
+      </div>
     </div>
   );
 

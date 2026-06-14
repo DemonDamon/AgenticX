@@ -42,6 +42,7 @@ import {
   Network,
 } from "lucide-react";
 import { Panel } from "./ds/Panel";
+import { SettingsDropdown } from "./ds/SettingsDropdown";
 import { Modal } from "./ds/Modal";
 import { HoverTip } from "./ds/HoverTip";
 import type { Avatar, ChatPane, ChatStyle, GroupChat, McpServer } from "../store";
@@ -3858,71 +3859,6 @@ function SkillsTab() {
           </div>
         )}
       </div>
-    </div>
-  );
-}
-
-/** 自定义下拉选择器，替代原生 select，支持完整主题样式控制 */
-function SettingsDropdown({
-  label,
-  value,
-  displayLabel,
-  options,
-  onChange,
-  className = "",
-}: {
-  label: string;
-  value: string;
-  displayLabel: string;
-  options: ReadonlyArray<{ value: string; label: string }>;
-  onChange: (v: string) => void;
-  className?: string;
-}) {
-  const [open, setOpen] = useState(false);
-  const ref = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    if (!open) return;
-    const handler = (e: MouseEvent) => {
-      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
-    };
-    document.addEventListener("mousedown", handler);
-    return () => document.removeEventListener("mousedown", handler);
-  }, [open]);
-
-  return (
-    <div ref={ref} className={`relative ${className}`}>
-      <div className="mb-1.5 text-sm text-text-muted">{label}</div>
-      <button
-        type="button"
-        onClick={() => setOpen((o) => !o)}
-        className="flex w-full items-center justify-between rounded-md border border-border bg-surface-panel px-3 py-1.5 text-sm text-text-primary transition-colors hover:bg-surface-hover"
-      >
-        <span>{displayLabel}</span>
-        <svg
-          className={`ml-2 size-3.5 shrink-0 text-text-subtle transition-transform duration-150 ${open ? "rotate-180" : ""}`}
-          viewBox="0 0 20 20" fill="currentColor"
-        >
-          <path fillRule="evenodd" d="M5.23 7.21a.75.75 0 011.06.02L10 11.168l3.71-3.938a.75.75 0 111.08 1.04l-4.25 4.5a.75.75 0 01-1.08 0l-4.25-4.5a.75.75 0 01.02-1.06z" clipRule="evenodd" />
-        </svg>
-      </button>
-      {open && (
-        <div className="absolute left-0 top-full z-50 mt-1 w-full min-w-max overflow-hidden rounded-lg border border-border bg-surface-popover shadow-lg">
-          {options.map((opt) => (
-            <button
-              key={opt.value}
-              type="button"
-              onClick={() => { onChange(opt.value); setOpen(false); }}
-              className={`flex w-full items-center gap-2 px-3 py-2 text-sm transition-colors hover:bg-surface-hover ${
-                value === opt.value ? "text-text-primary" : "text-text-subtle"
-              }`}
-            >
-              <span className={`size-1.5 shrink-0 rounded-full ${value === opt.value ? "bg-[rgba(var(--theme-color-rgb),0.9)]" : "bg-transparent"}`} />
-              {opt.label}
-            </button>
-          ))}
-        </div>
-      )}
     </div>
   );
 }
