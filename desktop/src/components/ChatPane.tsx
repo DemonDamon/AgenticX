@@ -2287,6 +2287,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
   const autoScrollPinnedRef = useRef(true);
   const loadingOlderMessagesRef = useRef(false);
   const sessionBootstrapRef = useRef("");
+  const sessionBootstrapInflightRef = useRef("");
   const lastUserSendDedupeRef = useRef<SendDedupeEntry | null>(null);
   const sendChatInFlightRef = useRef<{ paneId: string; sessionId: string } | null>(null);
   const [showJumpToBottomFab, setShowJumpToBottomFab] = useState(false);
@@ -4003,6 +4004,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
   useEffect(() => {
     loadingOlderMessagesRef.current = false;
     sessionBootstrapRef.current = "";
+    sessionBootstrapInflightRef.current = "";
   }, [pane.sessionId]);
 
   /** App restore / direct bind / switch-back: ensure the pane shows this session's
@@ -4016,7 +4018,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
     const sid = (pane.sessionId || "").trim();
     if (!sid) return;
     const live = useAppStore.getState().panes.find((p) => p.id === pane.id);
-    if (!live || live.loadingMessages) return;
+    if (!live) return;
     // Actively streaming this session: live + reattach rows are authoritative;
     // never overwrite them mid-stream. Mark bootstrapped so the post-stream
     // effect re-run does not trigger a redundant disk reload.
@@ -4027,7 +4029,8 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
     }
     // Already loaded this binding's persisted history from disk.
     if (sessionBootstrapRef.current === sid) return;
-    sessionBootstrapRef.current = sid;
+    if (sessionBootstrapInflightRef.current === sid) return;
+    sessionBootstrapInflightRef.current = sid;
     let cancelled = false;
     const paneStillOnSid = () =>
       String(
@@ -4045,6 +4048,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
             hasOlderMessages: entry.hasOlder,
             loadingOlderMessages: false,
           });
+          sessionBootstrapRef.current = sid;
           return;
         }
         // Tail page empty/unavailable — fall back to a full load so a transient
@@ -4061,19 +4065,23 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
             hasOlderMessages: false,
             loadingOlderMessages: false,
           });
-        } else if (sessionBootstrapRef.current === sid) {
-          // Nothing on disk for this sid — release the bootstrap latch so a later
-          // trigger can retry rather than leaving the pane permanently blank.
-          sessionBootstrapRef.current = "";
+          sessionBootstrapRef.current = sid;
         }
       } catch {
-        if (sessionBootstrapRef.current === sid) sessionBootstrapRef.current = "";
+        /* retry on next effect run */
       } finally {
+        if (sessionBootstrapInflightRef.current === sid) {
+          sessionBootstrapInflightRef.current = "";
+        }
         if (!cancelled) setPaneLoadingMessages(pane.id, false);
       }
     })();
     return () => {
       cancelled = true;
+      if (sessionBootstrapInflightRef.current === sid) {
+        sessionBootstrapInflightRef.current = "";
+        setPaneLoadingMessages(pane.id, false);
+      }
     };
   }, [
     pane.id,
