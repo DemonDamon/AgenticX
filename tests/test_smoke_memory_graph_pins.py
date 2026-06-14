@@ -30,12 +30,13 @@ async def test_bulk_delete_skips_pinned(tmp_path, monkeypatch):
 
     deleted_ids: list[str] = []
 
+    class _FakeGraphiti:
+        async def remove_episode(self, uuid: str) -> None:
+            deleted_ids.append(uuid)
+
     class _Store(store_mod.MemoryGraphStore):
         async def _ensure_ready_impl(self) -> None:
-            return None
-
-        async def _delete_episode_impl(self, episode_uuid: str) -> None:
-            deleted_ids.append(episode_uuid)
+            self._graphiti = _FakeGraphiti()
 
     store = _Store()
     monkeypatch.setattr(

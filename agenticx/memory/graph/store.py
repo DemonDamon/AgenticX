@@ -503,6 +503,9 @@ class MemoryGraphStore:
         group_id: str,
         episode_uuids: List[str],
     ) -> Dict[str, Any]:
+        # Ensure graphiti is ready once up-front; subsequent removes skip re-check
+        # to avoid deadlocking the graphiti loop with nested asyncio.wait_for calls.
+        await self._ensure_ready_impl()
         pinned = load_pins(group_id)
         deleted: List[str] = []
         skipped_pinned: List[str] = []
@@ -513,7 +516,7 @@ class MemoryGraphStore:
             if eid in pinned:
                 skipped_pinned.append(eid)
                 continue
-            await self._delete_episode_impl(eid)
+            await self._graphiti.remove_episode(eid)
             deleted.append(eid)
         return {
             "deleted": deleted,
@@ -559,9 +562,11 @@ class MemoryGraphStore:
         )
         if dry_run:
             return {"would_delete": to_delete, "count": len(to_delete), "kept": kept}
+        # _ensure_ready_impl already called above; use _graphiti.remove_episode directly
+        # to avoid nested asyncio.wait_for deadlocking the graphiti loop.
         deleted: List[str] = []
         for eid in to_delete:
-            await self._delete_episode_impl(eid)
+            await self._graphiti.remove_episode(eid)
             deleted.append(eid)
         return {"deleted": deleted, "count": len(deleted), "kept": kept}
 
