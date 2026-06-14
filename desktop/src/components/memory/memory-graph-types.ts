@@ -37,6 +37,29 @@ export type GraphEpisodeDTO = {
   referenceTime?: string | null;
   sourceDescription?: string;
   preview?: string;
+  pinned?: boolean;
+};
+
+export type MemoryGraphRetentionConfig = {
+  enabled?: boolean;
+  max_episodes?: number;
+  max_age_days?: number;
+  on_ingest?: boolean;
+};
+
+export type EpisodeImpactDTO = {
+  episodeId?: string;
+  groupId?: string;
+  nodeCount?: number;
+  edgeCount?: number;
+  note?: string;
+};
+
+export type RetentionRunResult = {
+  would_delete?: string[];
+  deleted?: string[];
+  count?: number;
+  kept?: number;
 };
 
 export type MemoryGraphScope = "avatar" | "meta" | "group";

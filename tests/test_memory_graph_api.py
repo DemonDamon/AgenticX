@@ -140,7 +140,8 @@ def test_memory_graph_overview_session_group_requires_session_id(monkeypatch):
     assert ok.status_code == 200
 
 
-def test_finalize_chat_runtime_schedules_ingest_without_saw_final(monkeypatch):
+@pytest.mark.asyncio
+async def test_finalize_chat_runtime_schedules_ingest_without_saw_final(monkeypatch):
     scheduled: list[tuple] = []
 
     def _fake_schedule(session_id: str, **kwargs):
@@ -166,6 +167,9 @@ def test_finalize_chat_runtime_schedules_ingest_without_saw_final(monkeypatch):
         def persist(self, _sid: str) -> None:
             pass
 
+        async def persist_async(self, _sid: str) -> None:
+            pass
+
         def get(self, _sid: str, touch: bool = False):
             return type("Managed", (), {"avatar_id": None})()
 
@@ -177,7 +181,7 @@ def test_finalize_chat_runtime_schedules_ingest_without_saw_final(monkeypatch):
 
     from agenticx.studio.server import _finalize_chat_runtime
 
-    _finalize_chat_runtime(
+    await _finalize_chat_runtime(
         _Manager(),
         "session-1",
         _Session(),

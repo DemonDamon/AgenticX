@@ -16,6 +16,7 @@ logger = logging.getLogger(__name__)
 
 from agenticx.memory.graph.config import load_memory_graph_config, memory_graph_config_to_dict
 from agenticx.memory.graph.group_id import derive_group_id, resolve_scope_group_id, validate_group_access
+from agenticx.memory.graph.pins import set_pin
 from agenticx.memory.graph.store import (
     MemoryGraphDisabledError,
     MemoryGraphStore,
@@ -213,6 +214,101 @@ def register_memory_graph_routes(app, *, check_token) -> None:
             return {"ok": True, "deleted": episode_uuid}
         except (MemoryGraphDisabledError, MemoryGraphUnavailableError) as exc:
             raise _map_error(exc) from exc
+
+    @router.post("/episodes/bulk-delete")
+    async def memory_graph_bulk_delete_episodes(
+        payload: dict[str, Any],
+        x_agx_desktop_token: Optional[str] = Header(default=None),
+    ) -> dict[str, Any]:
+        _auth(x_agx_desktop_token)
+        cfg = load_memory_graph_config()
+        if not cfg.enabled:
+            raise HTTPException(status_code=503, detail={"error": "memory_graph_disabled"})
+        group_id = str(payload.get("group_id", "") or "").strip()
+        raw_ids = payload.get("episode_uuids")
+        avatar_id = payload.get("avatar_id")
+        session_id = payload.get("session_id")
+        if not group_id or not isinstance(raw_ids, list) or not raw_ids:
+            raise HTTPException(status_code=400, detail="group_id and episode_uuids are required")
+        if not validate_group_access(group_id, avatar_id=avatar_id, session_id=session_id):
+            raise HTTPException(status_code=403, detail={"error": "group_access_denied"})
+        try:
+            store = MemoryGraphStore.singleton()
+            result = await store.delete_episodes_bulk(group_id, [str(x) for x in raw_ids])
+            return {"ok": True, **result}
+        except (MemoryGraphDisabledError, MemoryGraphUnavailableError) as exc:
+            raise _map_error(exc) from exc
+
+    @router.get("/episode/{episode_uuid}/impact")
+    async def memory_graph_episode_impact(
+        episode_uuid: str,
+        group_id: str = Query(...),
+        avatar_id: Optional[str] = Query(default=None),
+        session_id: Optional[str] = Query(default=None),
+        x_agx_desktop_token: Optional[str] = Header(default=None),
+    ) -> dict[str, Any]:
+        _auth(x_agx_desktop_token)
+        cfg = load_memory_graph_config()
+        if not cfg.enabled:
+            raise HTTPException(status_code=503, detail={"error": "memory_graph_disabled"})
+        if not validate_group_access(group_id, avatar_id=avatar_id, session_id=session_id):
+            raise HTTPException(status_code=403, detail={"error": "group_access_denied"})
+        try:
+            store = MemoryGraphStore.singleton()
+            impact = await store.preview_episode_impact(group_id, episode_uuid)
+            return {"ok": True, **impact}
+        except (MemoryGraphDisabledError, MemoryGraphUnavailableError) as exc:
+            raise _map_error(exc) from exc
+
+    @router.post("/retention/run")
+    async def memory_graph_retention_run(
+        payload: dict[str, Any],
+        x_agx_desktop_token: Optional[str] = Header(default=None),
+    ) -> dict[str, Any]:
+        _auth(x_agx_desktop_token)
+        cfg = load_memory_graph_config()
+        if not cfg.enabled:
+            raise HTTPException(status_code=503, detail={"error": "memory_graph_disabled"})
+        group_id = str(payload.get("group_id", "") or "").strip()
+        avatar_id = payload.get("avatar_id")
+        session_id = payload.get("session_id")
+        dry_run = bool(payload.get("dry_run", False))
+        if not group_id:
+            raise HTTPException(status_code=400, detail="group_id is required")
+        if not validate_group_access(group_id, avatar_id=avatar_id, session_id=session_id):
+            raise HTTPException(status_code=403, detail={"error": "group_access_denied"})
+        try:
+            store = MemoryGraphStore.singleton()
+            result = await store.prune_episodes(
+                group_id,
+                max_episodes=cfg.retention.max_episodes,
+                max_age_days=cfg.retention.max_age_days,
+                dry_run=dry_run,
+            )
+            return {"ok": True, **result}
+        except (MemoryGraphDisabledError, MemoryGraphUnavailableError) as exc:
+            raise _map_error(exc) from exc
+
+    @router.post("/episode/{episode_uuid}/pin")
+    async def memory_graph_episode_pin(
+        episode_uuid: str,
+        payload: dict[str, Any],
+        x_agx_desktop_token: Optional[str] = Header(default=None),
+    ) -> dict[str, Any]:
+        _auth(x_agx_desktop_token)
+        cfg = load_memory_graph_config()
+        if not cfg.enabled:
+            raise HTTPException(status_code=503, detail={"error": "memory_graph_disabled"})
+        group_id = str(payload.get("group_id", "") or "").strip()
+        pinned = bool(payload.get("pinned", True))
+        avatar_id = payload.get("avatar_id")
+        session_id = payload.get("session_id")
+        if not group_id:
+            raise HTTPException(status_code=400, detail="group_id is required")
+        if not validate_group_access(group_id, avatar_id=avatar_id, session_id=session_id):
+            raise HTTPException(status_code=403, detail={"error": "group_access_denied"})
+        set_pin(group_id, episode_uuid, pinned=pinned)
+        return {"ok": True, "episode_id": episode_uuid, "pinned": pinned}
 
     @router.get("/config")
     async def memory_graph_config_get(

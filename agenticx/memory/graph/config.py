@@ -27,6 +27,16 @@ class MemoryGraphIngestConfig:
 
 
 @dataclass
+class MemoryGraphRetentionConfig:
+    """Automatic episode retention for graph partitions."""
+
+    enabled: bool = False
+    max_episodes: int = 0
+    max_age_days: int = 0
+    on_ingest: bool = True
+
+
+@dataclass
 class MemoryGraphProviderConfig:
     """Optional LLM/embedder override."""
 
@@ -43,6 +53,7 @@ class MemoryGraphConfig:
     db_path: Path = field(default_factory=lambda: DEFAULT_GRAPH_DB)
     default_scope: str = "meta"
     ingest: MemoryGraphIngestConfig = field(default_factory=MemoryGraphIngestConfig)
+    retention: MemoryGraphRetentionConfig = field(default_factory=MemoryGraphRetentionConfig)
     llm: MemoryGraphProviderConfig = field(default_factory=MemoryGraphProviderConfig)
     embedder: MemoryGraphProviderConfig = field(default_factory=MemoryGraphProviderConfig)
     telemetry: bool = False
@@ -83,6 +94,13 @@ def load_memory_graph_config() -> MemoryGraphConfig:
         env_enabled = False
     if env_enabled is not None:
         cfg.enabled = env_enabled
+
+    raw_retention = os.environ.get("AGX_MEMORY_GRAPH_RETENTION", "").strip().lower()
+    env_retention: Optional[bool] = None
+    if raw_retention in {"1", "true", "yes", "on"}:
+        env_retention = True
+    elif raw_retention in {"0", "false", "no", "off"}:
+        env_retention = False
 
     raw_search_in_chat = os.environ.get("AGX_MEMORY_GRAPH_SEARCH_IN_CHAT", "").strip().lower()
     env_search_in_chat: Optional[bool] = None
@@ -136,6 +154,24 @@ def load_memory_graph_config() -> MemoryGraphConfig:
             minimum=256,
         )
 
+    retention_raw = section.get("retention")
+    if isinstance(retention_raw, dict):
+        if env_retention is None:
+            cfg.retention.enabled = _coerce_bool(retention_raw.get("enabled"), cfg.retention.enabled)
+        cfg.retention.max_episodes = _coerce_int(
+            retention_raw.get("max_episodes"),
+            cfg.retention.max_episodes,
+            minimum=0,
+        )
+        cfg.retention.max_age_days = _coerce_int(
+            retention_raw.get("max_age_days"),
+            cfg.retention.max_age_days,
+            minimum=0,
+        )
+        cfg.retention.on_ingest = _coerce_bool(retention_raw.get("on_ingest"), cfg.retention.on_ingest)
+    if env_retention is not None:
+        cfg.retention.enabled = env_retention
+
     for key, target in (("llm", cfg.llm), ("embedder", cfg.embedder)):
         block = section.get(key)
         if isinstance(block, dict):
@@ -172,6 +208,12 @@ def memory_graph_config_to_dict(cfg: MemoryGraphConfig) -> Dict[str, Any]:
             "max_queue": cfg.ingest.max_queue,
             "semaphore_limit": cfg.ingest.semaphore_limit,
             "max_chars_per_episode": cfg.ingest.max_chars_per_episode,
+        },
+        "retention": {
+            "enabled": cfg.retention.enabled,
+            "max_episodes": cfg.retention.max_episodes,
+            "max_age_days": cfg.retention.max_age_days,
+            "on_ingest": cfg.retention.on_ingest,
         },
         "llm": {"provider": cfg.llm.provider, "model": cfg.llm.model},
         "embedder": {"provider": cfg.embedder.provider, "model": cfg.embedder.model},

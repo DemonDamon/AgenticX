@@ -1,8 +1,10 @@
 import type {
+  EpisodeImpactDTO,
   GraphEpisodeDTO,
   GraphViewDTO,
   MemoryGraphScope,
   MemoryGraphStatus,
+  RetentionRunResult,
   WorkspaceMemoryDoc,
 } from "./memory-graph-types";
 
@@ -129,10 +131,14 @@ export async function fetchMemoryGraphOverview(
     avatarId: string | null;
     sessionId: string;
     groupId?: string;
+    limitNodes?: number;
+    limitEdges?: number;
   },
 ): Promise<GraphViewDTO> {
   const qs = new URLSearchParams();
   appendGroupContext(qs, params);
+  if (params.limitNodes != null) qs.set("limit_nodes", String(params.limitNodes));
+  if (params.limitEdges != null) qs.set("limit_edges", String(params.limitEdges));
   const r = await fetchWithTimeout(
     `${apiBase}/api/memory/graph/overview?${qs}`,
     { headers: headers(apiToken) },
@@ -222,6 +228,124 @@ export async function deleteMemoryGraphEpisode(
     headers: headers(apiToken),
   });
   if (!r.ok) throw new Error(`delete ${r.status}`);
+}
+
+export async function bulkDeleteMemoryGraphEpisodes(
+  apiBase: string,
+  apiToken: string,
+  groupId: string,
+  episodeIds: string[],
+  sessionId: string,
+  avatarId: string | null,
+): Promise<{ deleted: string[]; skipped_pinned: string[]; count: number }> {
+  const r = await fetchWithTimeout(
+    `${apiBase}/api/memory/graph/episodes/bulk-delete`,
+    {
+      method: "POST",
+      headers: headers(apiToken),
+      body: JSON.stringify({
+        group_id: groupId,
+        episode_uuids: episodeIds,
+        session_id: sessionId,
+        avatar_id: avatarId,
+      }),
+    },
+    30000,
+  );
+  if (!r.ok) {
+    const body = await r.json().catch(() => ({}));
+    throw new Error(formatMemoryGraphApiError(body, `bulk delete ${r.status}`));
+  }
+  const data = (await r.json()) as {
+    deleted?: string[];
+    skipped_pinned?: string[];
+    count?: number;
+  };
+  return {
+    deleted: data.deleted || [],
+    skipped_pinned: data.skipped_pinned || [],
+    count: data.count ?? (data.deleted?.length ?? 0),
+  };
+}
+
+export async function fetchEpisodeImpact(
+  apiBase: string,
+  apiToken: string,
+  episodeId: string,
+  groupId: string,
+  sessionId: string,
+  avatarId: string | null,
+): Promise<EpisodeImpactDTO> {
+  const qs = new URLSearchParams({ group_id: groupId, session_id: sessionId });
+  if (avatarId) qs.set("avatar_id", avatarId);
+  const r = await fetchWithTimeout(
+    `${apiBase}/api/memory/graph/episode/${encodeURIComponent(episodeId)}/impact?${qs}`,
+    { headers: headers(apiToken) },
+    20000,
+  );
+  if (!r.ok) {
+    const body = await r.json().catch(() => ({}));
+    throw new Error(formatMemoryGraphApiError(body, `impact ${r.status}`));
+  }
+  return (await r.json()) as EpisodeImpactDTO;
+}
+
+export async function runMemoryGraphRetention(
+  apiBase: string,
+  apiToken: string,
+  groupId: string,
+  dryRun: boolean,
+  sessionId: string,
+  avatarId: string | null,
+): Promise<RetentionRunResult> {
+  const r = await fetchWithTimeout(
+    `${apiBase}/api/memory/graph/retention/run`,
+    {
+      method: "POST",
+      headers: headers(apiToken),
+      body: JSON.stringify({
+        group_id: groupId,
+        dry_run: dryRun,
+        session_id: sessionId,
+        avatar_id: avatarId,
+      }),
+    },
+    30000,
+  );
+  if (!r.ok) {
+    const body = await r.json().catch(() => ({}));
+    throw new Error(formatMemoryGraphApiError(body, `retention ${r.status}`));
+  }
+  return (await r.json()) as RetentionRunResult;
+}
+
+export async function setEpisodePin(
+  apiBase: string,
+  apiToken: string,
+  episodeId: string,
+  groupId: string,
+  pinned: boolean,
+  sessionId: string,
+  avatarId: string | null,
+): Promise<void> {
+  const r = await fetchWithTimeout(
+    `${apiBase}/api/memory/graph/episode/${encodeURIComponent(episodeId)}/pin`,
+    {
+      method: "POST",
+      headers: headers(apiToken),
+      body: JSON.stringify({
+        group_id: groupId,
+        pinned,
+        session_id: sessionId,
+        avatar_id: avatarId,
+      }),
+    },
+    15000,
+  );
+  if (!r.ok) {
+    const body = await r.json().catch(() => ({}));
+    throw new Error(formatMemoryGraphApiError(body, `pin ${r.status}`));
+  }
 }
 
 export async function fetchMemoryGraphConfig(
