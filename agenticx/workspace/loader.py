@@ -10,9 +10,10 @@ from datetime import date
 import json
 import re
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Optional
 
 from agenticx.cli.config_manager import ConfigManager
+from agenticx.memory.graph.group_id import classify_subject, parse_group_id_from_avatar
 
 
 DEFAULT_WORKSPACE_DIR = Path.home() / ".agenticx" / "workspace"
@@ -71,6 +72,26 @@ DAILY_MEMORY_TEMPLATE = """# Daily Memory
 - Date: {today}
 - Notes:
   - (add important session outcomes here)
+"""
+
+SUBJECT_USER_PREF_SECTION = "用户偏好（本主体理解）"
+GROUP_USER_PREF_SECTION = "用户偏好（本群理解）"
+
+GROUP_IDENTITY_TEMPLATE = """# IDENTITY.md - {name}
+
+- Name: {name}
+- Kind: Group chat (multi-avatar)
+- Managed by: Meta-Agent (Machi)
+"""
+
+GROUP_MEMORY_TEMPLATE = """# MEMORY.md - Group Long-Term Anchors
+
+## {user_pref_section}
+- （本群所理解的用户偏好与协作约定，由 Meta-Agent 维护）
+
+## Agent Notes
+- Group created: {created_at}
+- Keep this file short and curated.
 """
 
 
@@ -301,6 +322,122 @@ def resolve_workspace_dir() -> Path:
     return Path(raw).expanduser().resolve(strict=False)
 
 
+def _bound_avatar_id_from_session(session: Any) -> str:
+    """Read avatar_id from StudioSession or managed session wrapper."""
+    if session is None:
+        return ""
+    for attr in ("bound_avatar_id", "avatar_id"):
+        raw = getattr(session, attr, None)
+        if raw is not None and str(raw).strip():
+            return str(raw).strip()
+    studio = getattr(session, "studio_session", None)
+    if studio is not None:
+        for attr in ("bound_avatar_id", "avatar_id"):
+            raw = getattr(studio, attr, None)
+            if raw is not None and str(raw).strip():
+                return str(raw).strip()
+    return ""
+
+
+def resolve_subject_workspace_dir(
+    avatar_id: Optional[str] = None,
+    *,
+    session: Any = None,
+) -> Path:
+    """Resolve workspace directory for the current memory subject (meta/avatar/group)."""
+    aid = (avatar_id or "").strip() or _bound_avatar_id_from_session(session)
+    subject = classify_subject(aid)
+    if subject == "meta":
+        return resolve_workspace_dir()
+    if subject == "group":
+        gid = parse_group_id_from_avatar(aid)
+        if not gid:
+            return resolve_workspace_dir()
+        return ensure_group_workspace(gid)
+    from agenticx.avatar.registry import AvatarRegistry
+
+    cfg = AvatarRegistry().get_avatar(aid)
+    if cfg is not None and str(cfg.workspace_dir or "").strip():
+        return Path(cfg.workspace_dir).expanduser().resolve(strict=False)
+    return (DEFAULT_AGENTICX_HOME / "avatars" / aid / "workspace").expanduser().resolve(strict=False)
+
+
+def ensure_group_workspace(group_id: str, *, group_name: str = "") -> Path:
+    """Bootstrap group text memory workspace (lazy for existing groups)."""
+    gid = (group_id or "").strip()
+    if not gid:
+        raise ValueError("group_id is required")
+    ws = (DEFAULT_AGENTICX_HOME / "groups" / gid / "workspace").expanduser().resolve(strict=False)
+    ws.mkdir(parents=True, exist_ok=True)
+    memory_dir = ws / MEMORY_DIR_NAME
+    memory_dir.mkdir(parents=True, exist_ok=True)
+
+    display_name = (group_name or "").strip() or gid
+    identity_path = ws / "IDENTITY.md"
+    if not identity_path.exists():
+        identity_path.write_text(
+            GROUP_IDENTITY_TEMPLATE.format(name=display_name),
+            encoding="utf-8",
+        )
+
+    memory_path = ws / "MEMORY.md"
+    if not memory_path.exists():
+        memory_path.write_text(
+            GROUP_MEMORY_TEMPLATE.format(
+                user_pref_section=GROUP_USER_PREF_SECTION,
+                created_at=date.today().isoformat(),
+            ),
+            encoding="utf-8",
+        )
+
+    today_file = memory_dir / f"{date.today().isoformat()}.md"
+    if not today_file.exists():
+        today_file.write_text(
+            DAILY_MEMORY_TEMPLATE.format(today=date.today().isoformat()),
+            encoding="utf-8",
+        )
+    return ws
+
+
+def append_user_global_preference(note: str) -> None:
+    """Append one preference line to global USER.md (user-level baseline for all subjects)."""
+    sanitised = _sanitize_memory_note(note)
+    if sanitised is None:
+        return
+    workspace_dir = resolve_workspace_dir()
+    workspace_dir.mkdir(parents=True, exist_ok=True)
+    user_path = workspace_dir / "USER.md"
+    if not user_path.exists():
+        user_path.write_text(USER_TEMPLATE, encoding="utf-8")
+    try:
+        lines = user_path.read_text(encoding="utf-8", errors="replace").split("\n")
+        insert_at = len(lines)
+        found = False
+        for i, raw in enumerate(lines):
+            if raw.strip() == "- Preferences:":
+                found = True
+                insert_at = i + 1
+                j = i + 1
+                while j < len(lines):
+                    stripped = lines[j].strip()
+                    if stripped.startswith("- ") and not lines[j].startswith("  "):
+                        break
+                    if stripped.startswith("## "):
+                        break
+                    insert_at = j + 1
+                    j += 1
+                break
+        if not found:
+            if lines and lines[-1].strip():
+                lines.append("")
+            lines.extend(["- Preferences:", f"  - {sanitised}"])
+        else:
+            lines.insert(insert_at, f"  - {sanitised}")
+        user_path.write_text("\n".join(lines), encoding="utf-8")
+    except OSError:
+        return
+
+
 def _workspace_files() -> Dict[str, str]:
     return {
         "IDENTITY.md": IDENTITY_TEMPLATE,
@@ -367,25 +504,54 @@ def ensure_workspace(*, index_memory: bool = True) -> Path:
 
 def load_workspace_file(name: str) -> Optional[str]:
     """Load a workspace markdown file and return None when absent."""
+    return load_workspace_file_from_dir(resolve_workspace_dir(), name)
+
+
+def load_workspace_file_from_dir(workspace_dir: Path, name: str) -> Optional[str]:
+    """Load a markdown file from a specific workspace directory."""
     if name not in ALLOWED_WORKSPACE_FILES:
         return None
-    workspace_dir = resolve_workspace_dir()
-    try:
-        workspace_real = workspace_dir.resolve(strict=False)
-        file_path = (workspace_dir / name).resolve(strict=True)
-    except OSError:
-        return None
-    try:
-        file_path.relative_to(workspace_real)
-    except ValueError:
-        return None
+    workspace = Path(workspace_dir).expanduser().resolve(strict=False)
+    file_path = workspace / name
     if not file_path.exists() or not file_path.is_file():
         return None
     try:
-        content = file_path.read_text(encoding="utf-8")
+        return file_path.read_text(encoding="utf-8").strip()
     except OSError:
         return None
-    return content.strip()
+
+
+def load_subject_workspace_context(
+    avatar_id: Optional[str] = None,
+    *,
+    session: Any = None,
+    subject_label: str = "",
+) -> Dict[str, str]:
+    """Load global user baseline plus subject-scoped identity/memory files."""
+    global_ws = resolve_workspace_dir()
+    subject_ws = resolve_subject_workspace_dir(avatar_id, session=session)
+    label = (subject_label or "").strip()
+    if not label:
+        from agenticx.memory.graph.group_id import classify_subject
+
+        kind = classify_subject(avatar_id or _bound_avatar_id_from_session(session))
+        if kind == "group":
+            label = "群聊"
+        elif kind == "avatar":
+            label = "数字分身"
+        else:
+            label = "元智能体"
+    return {
+        "global_user": load_workspace_file_from_dir(global_ws, "USER.md") or "",
+        "identity": load_workspace_file_from_dir(subject_ws, "IDENTITY.md") or "",
+        "soul": load_workspace_file_from_dir(subject_ws, "SOUL.md") or "",
+        "memory": load_workspace_file_from_dir(subject_ws, "MEMORY.md") or "",
+        "daily_memory": _load_today_memory(subject_ws),
+        "workspace_dir": str(subject_ws),
+        "global_workspace_dir": str(global_ws),
+        "subject_label": label,
+        "is_meta_subject": subject_ws.resolve(strict=False) == global_ws.resolve(strict=False),
+    }
 
 
 def _load_today_memory(workspace_dir: Path) -> str:

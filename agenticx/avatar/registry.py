@@ -31,6 +31,9 @@ IDENTITY_TEMPLATE = """# IDENTITY.md - {name}
 
 MEMORY_TEMPLATE = """# MEMORY.md - Long-Term Anchors
 
+## 用户偏好（本主体理解）
+- （本分身所理解的用户偏好，可由 agent 动态更新或用户手动编辑）
+
 ## Agent Notes
 - Avatar created: {created_at}
 - Keep this file short and curated.

@@ -106,6 +106,9 @@ class GroupChatRegistry:
             updated_at=now,
         )
         self._write_config(config)
+        from agenticx.workspace.loader import ensure_group_workspace
+
+        ensure_group_workspace(config.id, group_name=config.name)
         return config
 
     def update_group(self, group_id: str, patch: Dict[str, Any]) -> Optional[GroupChatConfig]:

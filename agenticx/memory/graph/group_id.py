@@ -16,6 +16,31 @@ _SAFE_RE = re.compile(r"[^0-9A-Za-z_-]")
 
 META_GROUP_ID = "meta_default"
 
+SubjectKind = str  # "meta" | "avatar" | "group"
+
+
+def parse_subject(avatar_id: Optional[str]) -> SubjectKind:
+    """Classify session subject from bound avatar_id (shared with workspace routing)."""
+    aid = (avatar_id or "").strip()
+    if aid.startswith("group:"):
+        return "group"
+    if aid:
+        return "avatar"
+    return "meta"
+
+
+def parse_group_id_from_avatar(avatar_id: Optional[str]) -> str:
+    """Extract raw group id from ``group:<gid>`` or plain gid."""
+    aid = (avatar_id or "").strip()
+    if aid.startswith("group:"):
+        return aid[len("group:") :]
+    return aid
+
+
+def classify_subject(avatar_id: Optional[str]) -> SubjectKind:
+    """Alias for ``parse_subject`` (plan FR-1.2 naming)."""
+    return parse_subject(avatar_id)
+
 
 def _safe(part: str) -> str:
     """Sanitize an id fragment to Kuzu-safe chars (alnum / dash / underscore)."""
