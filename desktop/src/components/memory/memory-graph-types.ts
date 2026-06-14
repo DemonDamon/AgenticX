@@ -39,7 +39,7 @@ export type GraphEpisodeDTO = {
   preview?: string;
 };
 
-export type MemoryGraphScope = "avatar" | "meta" | "group" | "user";
+export type MemoryGraphScope = "avatar" | "meta" | "group";
 
 export type MemoryGraphStatus = {
   ok?: boolean;
@@ -54,6 +54,8 @@ export type MemoryGraphStatus = {
   job_stage?: string | null;
   job_active?: boolean;
   last_error?: string | null;
+  last_error_at?: string | null;
+  last_success_at?: string | null;
   node_count?: number;
   edge_count?: number;
   config?: {

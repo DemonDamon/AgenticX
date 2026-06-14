@@ -13,11 +13,16 @@ import {
 import type { WorkspaceMemoryEntry, WorkspaceMemorySection } from "./memory-graph-types";
 
 /** Fallback when MEMORY.md has no sections yet; matches loader.MEMORY_TEMPLATE. */
-const FALLBACK_SECTION = "User Anchors";
+const FALLBACK_SECTION = "用户偏好（本主体理解）";
+const GROUP_FALLBACK_SECTION = "用户偏好（本群理解）";
 
 type Props = {
   apiBase: string;
   apiToken: string;
+  /** 当前窗格主体 avatar_id（空=元智能体，group:<id>=群聊） */
+  avatarId?: string | null;
+  title?: string;
+  description?: string;
 };
 
 type PendingDelete = { section: string; index: number; text: string } | null;
@@ -33,13 +38,21 @@ function parseEntryKey(key: string): { section: string; index: number } | null {
   return { section, index };
 }
 
-export function WorkspaceMemoryList({ apiBase, apiToken }: Props) {
+export function WorkspaceMemoryList({
+  apiBase,
+  apiToken,
+  avatarId = null,
+  title = "主体文本记忆",
+  description = "编辑当前主体 MEMORY.md 中的长期记忆条目（含本主体理解的用户偏好）。",
+}: Props) {
   const [sections, setSections] = useState<WorkspaceMemorySection[]>([]);
   const [path, setPath] = useState("");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
-  const [groupPick, setGroupPick] = useState(FALLBACK_SECTION);
+  const defaultSection =
+    avatarId?.startsWith("group:") ? GROUP_FALLBACK_SECTION : FALLBACK_SECTION;
+  const [groupPick, setGroupPick] = useState(defaultSection);
   const [isNewGroup, setIsNewGroup] = useState(false);
   const [newGroupName, setNewGroupName] = useState("");
   const [newText, setNewText] = useState("");
@@ -170,15 +183,15 @@ export function WorkspaceMemoryList({ apiBase, apiToken }: Props) {
     setLoading(true);
     setError(null);
     try {
-      const doc = await fetchWorkspaceMemory(apiBase, apiToken);
+      const doc = await fetchWorkspaceMemory(apiBase, apiToken, avatarId);
       setSections(doc.sections);
       setPath(doc.path);
     } catch (e) {
-      setError(e instanceof Error ? e.message : "加载用户记忆失败");
+      setError(e instanceof Error ? e.message : "加载主体记忆失败");
     } finally {
       setLoading(false);
     }
-  }, [apiBase, apiToken]);
+  }, [apiBase, apiToken, avatarId]);
 
   useEffect(() => {
     void reload();
@@ -191,7 +204,7 @@ export function WorkspaceMemoryList({ apiBase, apiToken }: Props) {
     setBusy(true);
     setError(null);
     try {
-      await createWorkspaceEntry(apiBase, apiToken, section, text);
+      await createWorkspaceEntry(apiBase, apiToken, section, text, avatarId);
       setNewText("");
       setIsNewGroup(false);
       setNewGroupName("");
@@ -216,7 +229,7 @@ export function WorkspaceMemoryList({ apiBase, apiToken }: Props) {
       setBusy(true);
       setError(null);
       try {
-        await updateWorkspaceEntry(apiBase, apiToken, section, index, parentText, children);
+        await updateWorkspaceEntry(apiBase, apiToken, section, index, parentText, children, avatarId);
         cancelEdit();
         await reload();
       } catch (e) {
@@ -231,7 +244,7 @@ export function WorkspaceMemoryList({ apiBase, apiToken }: Props) {
     setBusy(true);
     setError(null);
     try {
-      await updateWorkspaceEntry(apiBase, apiToken, section, index, text);
+      await updateWorkspaceEntry(apiBase, apiToken, section, index, text, undefined, avatarId);
       cancelEdit();
       await reload();
     } catch (e) {
@@ -246,7 +259,7 @@ export function WorkspaceMemoryList({ apiBase, apiToken }: Props) {
     setBusy(true);
     setError(null);
     try {
-      await deleteWorkspaceEntry(apiBase, apiToken, pendingDelete.section, pendingDelete.index);
+      await deleteWorkspaceEntry(apiBase, apiToken, pendingDelete.section, pendingDelete.index, avatarId);
       setPendingDelete(null);
       await reload();
     } catch (e) {
@@ -265,7 +278,7 @@ export function WorkspaceMemoryList({ apiBase, apiToken }: Props) {
     setBusy(true);
     setError(null);
     try {
-      await deleteWorkspaceEntriesBatch(apiBase, apiToken, entries);
+      await deleteWorkspaceEntriesBatch(apiBase, apiToken, entries, avatarId);
       setPendingBatchDelete(false);
       exitSelectMode();
       await reload();
@@ -281,13 +294,22 @@ export function WorkspaceMemoryList({ apiBase, apiToken }: Props) {
   if (loading) {
     return (
       <div className="flex h-full items-center justify-center px-4 text-sm text-text-subtle">
-        加载用户记忆…
+        加载主体记忆…
       </div>
     );
   }
 
   return (
     <div className="flex flex-col gap-3">
+      <div className="px-1">
+        <div className="text-sm font-medium text-text-primary">{title}</div>
+        <p className="mt-1 text-[11px] leading-relaxed text-text-subtle">{description}</p>
+        {path ? (
+          <p className="mt-1 truncate text-[10px] text-text-faint" title={path}>
+            {path}
+          </p>
+        ) : null}
+      </div>
       <div className="flex shrink-0 flex-col gap-3">
       <Panel title="新增记忆" collapsible defaultCollapsed={totalEntries > 0}>
         <div className="flex min-w-0 flex-col gap-2">
