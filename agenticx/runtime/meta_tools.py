@@ -470,6 +470,34 @@ _META_ONLY_TOOLS: List[Dict[str, Any]] = [
     {
         "type": "function",
         "function": {
+            "name": "memory_forget",
+            "description": (
+                "Forget memories matching a topic in the current subject partition. "
+                "Removes matching graph episodes and MEMORY.md bullets (default scope=both). "
+                "Pinned episodes are protected. Irreversible — summarize what will be removed "
+                "before calling when the user request is ambiguous."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "query": {
+                        "type": "string",
+                        "description": "Topic or keyword to forget (matched in episode preview and text bullets).",
+                    },
+                    "scope": {
+                        "type": "string",
+                        "enum": ["graph", "text", "both"],
+                        "description": "graph = episodes only; text = MEMORY.md only; both (default).",
+                    },
+                },
+                "required": ["query"],
+                "additionalProperties": False,
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "mcp_import",
             "description": "Import MCP config from external mcp.json into AgenticX workspace.",
             "parameters": {
@@ -2627,6 +2655,27 @@ async def dispatch_meta_tool_async(
         if recall.graph_skipped_reason:
             payload["graph_skipped_reason"] = recall.graph_skipped_reason
         return json.dumps(payload, ensure_ascii=False)
+
+    if name == "memory_forget":
+        query = str(arguments.get("query", "")).strip()
+        scope = str(arguments.get("scope", "both") or "both").strip().lower()
+        avatar_id = None
+        session_id = None
+        if session is not None:
+            avatar_id = str(getattr(session, "bound_avatar_id", "") or "").strip() or None
+            session_id = str(getattr(session, "session_id", "") or "").strip() or None
+        try:
+            from agenticx.memory.graph.forget import forget_memory_for_session
+
+            result = await forget_memory_for_session(
+                query,
+                scope=scope,
+                avatar_id=avatar_id,
+                session_id=session_id,
+            )
+        except Exception as exc:
+            return json.dumps({"ok": False, "error": f"memory forget failed: {exc}"}, ensure_ascii=False)
+        return json.dumps(result, ensure_ascii=False)
 
     if name == "delegate_to_avatar":
         avatar_id = str(arguments.get("avatar_id", "")).strip()

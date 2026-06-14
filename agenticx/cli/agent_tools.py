@@ -117,6 +117,7 @@ _CONCURRENCY_SAFE_STUDIO_TOOLS = frozenset(
         "skill_list",
         "scratchpad_read",
         "memory_search",
+        "memory_forget",
         "session_search",
         "list_files",
         "liteparse",
@@ -912,6 +913,26 @@ STUDIO_TOOLS: List[Dict[str, Any]] = [
                     "query": {"type": "string"},
                     "mode": {"type": "string", "enum": ["fts", "semantic", "hybrid"]},
                     "limit": {"type": "integer"},
+                },
+                "required": ["query"],
+                "additionalProperties": False,
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "memory_forget",
+            "description": (
+                "Forget memories matching a topic in the current subject (meta/avatar/group). "
+                "Removes matching graph episodes and MEMORY.md bullets (default scope=both). "
+                "Pinned episodes are protected. Irreversible."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "query": {"type": "string"},
+                    "scope": {"type": "string", "enum": ["graph", "text", "both"]},
                 },
                 "required": ["query"],
                 "additionalProperties": False,
@@ -4444,6 +4465,25 @@ async def _tool_memory_search(arguments: Dict[str, Any], session: StudioSession)
     return "\n".join(lines)
 
 
+async def _tool_memory_forget(arguments: Dict[str, Any], session: StudioSession) -> str:
+    query = str(arguments.get("query", "")).strip()
+    scope = str(arguments.get("scope", "both") or "both").strip().lower()
+    avatar_id = str(getattr(session, "bound_avatar_id", "") or "").strip() or None
+    session_id = str(getattr(session, "session_id", "") or "").strip() or None
+    try:
+        from agenticx.memory.graph.forget import forget_memory_for_session
+
+        result = await forget_memory_for_session(
+            query,
+            scope=scope,
+            avatar_id=avatar_id,
+            session_id=session_id,
+        )
+    except Exception as exc:
+        return f"ERROR: memory forget failed: {exc}"
+    return json.dumps(result, ensure_ascii=False)
+
+
 def _skill_manage_enabled() -> bool:
     v = os.environ.get("AGX_SKILL_MANAGE", "0").strip().lower()
     if v in {"1", "true", "yes", "on"}:
@@ -5500,6 +5540,8 @@ async def dispatch_tool_async(
             )
         if name == "memory_search":
             return await _tool_memory_search(arguments, session)
+        if name == "memory_forget":
+            return await _tool_memory_forget(arguments, session)
         if name == "knowledge_search":
             return await asyncio.to_thread(_tool_knowledge_search, arguments, session)
         if name == "knowledge_synthesize":

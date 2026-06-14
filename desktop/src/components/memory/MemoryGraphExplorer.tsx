@@ -1,14 +1,17 @@
-import { PanelRightClose, RefreshCw, Search, Share2 } from "lucide-react";
+import { PanelRightClose, Pin, PinOff, RefreshCw, Search, Share2, Trash2 } from "lucide-react";
 import { memo, useCallback, useEffect, useMemo, useState } from "react";
 import { useAppStore } from "../../store";
 import {
   listProviderVisibleModelIds,
   type ProviderCatalogEntry,
 } from "../../utils/model-options";
+import { Button } from "../ds/Button";
+import { Modal } from "../ds/Modal";
 import { MemoryGraphCanvas } from "./MemoryGraphCanvas";
 import { MemoryGraphDetail } from "./MemoryGraphDetail";
 import { WorkspaceMemoryList } from "./WorkspaceMemoryList";
 import {
+  bulkDeleteMemoryGraphEpisodes,
   deleteMemoryGraphEpisode,
   deriveGroupId,
   fetchMemoryGraphConfig,
@@ -17,7 +20,9 @@ import {
   fetchMemoryGraphStatus,
   formatMemoryGraphFetchError,
   isMemoryGraphEnabled,
+  runMemoryGraphRetention,
   searchMemoryGraph,
+  setEpisodePin,
   updateMemoryGraphConfig,
 } from "./memory-graph-api";
 import type {
@@ -27,6 +32,8 @@ import type {
   MemoryGraphScope,
   MemoryGraphStatus,
 } from "./memory-graph-types";
+
+type EpisodeTimeFilter = "all" | "7d" | "30d" | "older30d";
 
 function MiniSwitch({
   checked,
@@ -224,6 +231,18 @@ function MemoryGraphExplorerInner({
   const [embedProvider, setEmbedProvider] = useState("");
   const [embedModel, setEmbedModel] = useState("");
   const [defaultProvider, setDefaultProvider] = useState("");
+  const [retentionEnabled, setRetentionEnabled] = useState(false);
+  const [retentionMaxEpisodes, setRetentionMaxEpisodes] = useState(200);
+  const [retentionMaxAgeDays, setRetentionMaxAgeDays] = useState(90);
+  const [retentionOnIngest, setRetentionOnIngest] = useState(true);
+  const [episodeSelectMode, setEpisodeSelectMode] = useState(false);
+  const [selectedEpisodeIds, setSelectedEpisodeIds] = useState<Set<string>>(() => new Set());
+  const [episodeTimeFilter, setEpisodeTimeFilter] = useState<EpisodeTimeFilter>("all");
+  const [pendingBulkDelete, setPendingBulkDelete] = useState<{
+    ids: string[];
+    pinnedSkipped: number;
+  } | null>(null);
+  const [pendingRetentionRun, setPendingRetentionRun] = useState<number | null>(null);
   const providerCatalog = useAppStore((s) => s.settings.providers);
   const avatarsList = useAppStore((s) => s.avatars);
   const groupsList = useAppStore((s) => s.groups);
@@ -292,6 +311,16 @@ function MemoryGraphExplorerInner({
       const emb = (cfg.embedder as { provider?: string; model?: string } | undefined) || {};
       setEmbedProvider(String(emb.provider || ""));
       setEmbedModel(String(emb.model || ""));
+      const retention = (cfg.retention as {
+        enabled?: boolean;
+        max_episodes?: number;
+        max_age_days?: number;
+        on_ingest?: boolean;
+      } | undefined) || {};
+      setRetentionEnabled(Boolean(retention.enabled));
+      setRetentionMaxEpisodes(Number(retention.max_episodes ?? 200) || 0);
+      setRetentionMaxAgeDays(Number(retention.max_age_days ?? 90) || 0);
+      setRetentionOnIngest(retention.on_ingest !== false);
     } catch {
       // ignore
     }
@@ -359,9 +388,11 @@ function MemoryGraphExplorerInner({
         avatarId: effectiveAvatarId,
         sessionId: effectiveSessionId,
         groupId,
+        limitNodes: 40,
+        limitEdges: 60,
       });
       setGraph(overview);
-      const eps = await fetchMemoryGraphEpisodes(apiBase, apiToken, groupId, 30, {
+      const eps = await fetchMemoryGraphEpisodes(apiBase, apiToken, groupId, 100, {
         scope,
         avatarId: effectiveAvatarId,
         sessionId: effectiveSessionId,
@@ -476,30 +507,162 @@ function MemoryGraphExplorerInner({
     }
   };
 
+  const filteredEpisodes = useMemo(() => {
+    const now = Date.now();
+    return episodes.filter((ep) => {
+      if (episodeTimeFilter === "all") return true;
+      const ref = ep.referenceTime ? Date.parse(ep.referenceTime) : Number.NaN;
+      if (!Number.isFinite(ref)) return false;
+      const ageMs = now - ref;
+      const dayMs = 86400000;
+      if (episodeTimeFilter === "7d") return ageMs <= 7 * dayMs;
+      if (episodeTimeFilter === "30d") return ageMs <= 30 * dayMs;
+      if (episodeTimeFilter === "older30d") return ageMs > 30 * dayMs;
+      return true;
+    });
+  }, [episodes, episodeTimeFilter]);
+
+  const toggleEpisodeSelection = (episodeId: string) => {
+    setSelectedEpisodeIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(episodeId)) next.delete(episodeId);
+      else next.add(episodeId);
+      return next;
+    });
+  };
+
+  const requestBulkDelete = (ids: string[]) => {
+    const deletable = ids.filter((id) => {
+      const ep = episodes.find((e) => e.id === id);
+      return ep && !ep.pinned;
+    });
+    const pinnedSkipped = ids.length - deletable.length;
+    if (deletable.length === 0) {
+      setError("所选 episode 均为 pinned，无法删除");
+      return;
+    }
+    setPendingBulkDelete({ ids: deletable, pinnedSkipped });
+  };
+
+  const confirmBulkDelete = async () => {
+    if (!pendingBulkDelete || !apiBase.trim()) return;
+    try {
+      await bulkDeleteMemoryGraphEpisodes(
+        apiBase,
+        apiToken,
+        groupId,
+        pendingBulkDelete.ids,
+        effectiveSessionId,
+        effectiveAvatarId,
+      );
+      setPendingBulkDelete(null);
+      setSelectedEpisodeIds(new Set());
+      setEpisodeSelectMode(false);
+      await reload();
+    } catch (e) {
+      setError(formatMemoryGraphFetchError(e, "批量删除失败"));
+    }
+  };
+
+  const onTogglePin = async (episodeId: string, pinned: boolean) => {
+    if (!apiBase.trim()) return;
+    try {
+      await setEpisodePin(
+        apiBase,
+        apiToken,
+        episodeId,
+        groupId,
+        pinned,
+        effectiveSessionId,
+        effectiveAvatarId,
+      );
+      await reload();
+    } catch (e) {
+      setError(formatMemoryGraphFetchError(e, "更新 pin 失败"));
+    }
+  };
+
+  const previewRetentionCleanup = async () => {
+    if (!apiBase.trim() || !groupId) return;
+    try {
+      const result = await runMemoryGraphRetention(
+        apiBase,
+        apiToken,
+        groupId,
+        true,
+        effectiveSessionId,
+        effectiveAvatarId,
+      );
+      setPendingRetentionRun(result.count ?? result.would_delete?.length ?? 0);
+    } catch (e) {
+      setError(formatMemoryGraphFetchError(e, "预览清理失败"));
+    }
+  };
+
+  const confirmRetentionCleanup = async () => {
+    if (!apiBase.trim() || !groupId) return;
+    try {
+      await runMemoryGraphRetention(
+        apiBase,
+        apiToken,
+        groupId,
+        false,
+        effectiveSessionId,
+        effectiveAvatarId,
+      );
+      setPendingRetentionRun(null);
+      await reload();
+    } catch (e) {
+      setError(formatMemoryGraphFetchError(e, "执行清理失败"));
+    }
+  };
+
   const saveConfig = async (patch: {
     enabled?: boolean;
     default_scope?: MemoryGraphScope;
     ingest_auto?: boolean;
     llm?: { provider: string; model: string };
     embedder?: { provider: string; model: string };
+    retention?: {
+      enabled?: boolean;
+      max_episodes?: number;
+      max_age_days?: number;
+      on_ingest?: boolean;
+    };
   }) => {
     if (!apiBase.trim()) return;
     const nextEnabled = patch.enabled ?? enabled;
     const nextScope = patch.default_scope ?? defaultScope;
     const nextAuto = patch.ingest_auto ?? ingestAuto;
+    const nextRetentionEnabled = patch.retention?.enabled ?? retentionEnabled;
+    const nextRetentionMaxEpisodes = patch.retention?.max_episodes ?? retentionMaxEpisodes;
+    const nextRetentionMaxAgeDays = patch.retention?.max_age_days ?? retentionMaxAgeDays;
+    const nextRetentionOnIngest = patch.retention?.on_ingest ?? retentionOnIngest;
     setEnabled(nextEnabled);
     setDefaultScope(nextScope);
     setIngestAuto(nextAuto);
+    setRetentionEnabled(nextRetentionEnabled);
+    setRetentionMaxEpisodes(nextRetentionMaxEpisodes);
+    setRetentionMaxAgeDays(nextRetentionMaxAgeDays);
+    setRetentionOnIngest(nextRetentionOnIngest);
     setSaving(true);
     setConfigMsg("");
     try {
       const current = await fetchMemoryGraphConfig(apiBase, apiToken);
       const ingest = (current.ingest as Record<string, unknown> | undefined) || {};
+      const retention = (current.retention as Record<string, unknown> | undefined) || {};
       const body: Record<string, unknown> = {
         ...current,
         enabled: nextEnabled,
         default_scope: nextScope,
         ingest: { ...ingest, auto: nextAuto },
+        retention: {
+          ...retention,
+          enabled: nextRetentionEnabled,
+          max_episodes: nextRetentionMaxEpisodes,
+          max_age_days: nextRetentionMaxAgeDays,
+          on_ingest: nextRetentionOnIngest,
+        },
       };
       if (patch.llm) body.llm = patch.llm;
       if (patch.embedder) body.embedder = patch.embedder;
@@ -759,6 +922,11 @@ function MemoryGraphExplorerInner({
           className="absolute inset-0 h-full w-full"
         />
       )}
+      {graph.nodes.length > 0 ? (
+        <div className="pointer-events-none absolute left-2 top-2 rounded-md bg-surface-base/90 px-2 py-0.5 text-[10px] text-text-faint shadow-[inset_0_0_0_1px_var(--border-muted)]">
+          显示近期/高频片段，非完整记忆
+        </div>
+      ) : null}
       {graph.meta.truncated ? (
         <div className="pointer-events-none absolute bottom-2 left-2 rounded-md bg-surface-base/90 px-2 py-0.5 text-[10px] text-text-faint shadow-[inset_0_0_0_1px_var(--border-muted)]">
           已截断展示 · 全量 {nodeCount} 节点
@@ -815,32 +983,131 @@ function MemoryGraphExplorerInner({
     <div className="flex w-[236px] shrink-0 flex-col gap-2 overflow-hidden">
       <MemoryGraphDetail node={selectedNode} edges={graph.edges} onDeleteEpisode={onDeleteEpisode} />
       <section className={`flex min-h-0 flex-1 flex-col overflow-hidden ${MG_PANEL}`}>
-        <header className="border-b border-[var(--border-muted)] px-3 py-2">
-          <h4 className="text-[11px] font-semibold uppercase tracking-[0.06em] text-text-subtle">
-            Episode 时间轴
-          </h4>
+        <header className="space-y-2 border-b border-[var(--border-muted)] px-3 py-2">
+          <div className="flex items-center justify-between gap-2">
+            <h4 className="text-[11px] font-semibold uppercase tracking-[0.06em] text-text-subtle">
+              Episode 时间轴
+            </h4>
+            <button
+              type="button"
+              className={`text-[10px] ${episodeSelectMode ? "text-text-strong" : "text-text-faint hover:text-text-subtle"}`}
+              onClick={() => {
+                setEpisodeSelectMode((v) => !v);
+                if (episodeSelectMode) setSelectedEpisodeIds(new Set());
+              }}
+            >
+              {episodeSelectMode ? "取消多选" : "多选"}
+            </button>
+          </div>
+          <div className="flex flex-wrap gap-1">
+            {(
+              [
+                ["all", "全部"],
+                ["7d", "近7天"],
+                ["30d", "近30天"],
+                ["older30d", "30天前"],
+              ] as const
+            ).map(([key, label]) => (
+              <button
+                key={key}
+                type="button"
+                className={`rounded px-1.5 py-0.5 text-[10px] ${
+                  episodeTimeFilter === key
+                    ? "bg-surface-hover text-text-strong"
+                    : "text-text-faint hover:bg-surface-hover"
+                }`}
+                onClick={() => setEpisodeTimeFilter(key)}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+          {episodeSelectMode ? (
+            <div className="flex flex-wrap items-center gap-1">
+              <button
+                type="button"
+                className="text-[10px] text-text-faint hover:text-text-subtle"
+                onClick={() =>
+                  setSelectedEpisodeIds(new Set(filteredEpisodes.filter((e) => !e.pinned).map((e) => e.id)))
+                }
+              >
+                全选
+              </button>
+              <button
+                type="button"
+                className="text-[10px] text-text-faint hover:text-text-subtle"
+                onClick={() => setSelectedEpisodeIds(new Set())}
+              >
+                取消
+              </button>
+              <button
+                type="button"
+                className="inline-flex items-center gap-1 text-[10px] text-rose-400 hover:text-rose-300"
+                disabled={selectedEpisodeIds.size === 0}
+                onClick={() => requestBulkDelete(Array.from(selectedEpisodeIds))}
+              >
+                <Trash2 className="h-3 w-3" />
+                删除选中
+              </button>
+              {episodeTimeFilter === "older30d" ? (
+                <button
+                  type="button"
+                  className="text-[10px] text-rose-400 hover:text-rose-300"
+                  onClick={() =>
+                    requestBulkDelete(filteredEpisodes.filter((e) => !e.pinned).map((e) => e.id))
+                  }
+                >
+                  删除筛选结果
+                </button>
+              ) : null}
+            </div>
+          ) : null}
         </header>
         <div className="min-h-0 flex-1 overflow-y-auto p-1.5">
-          {episodes.length === 0 ? (
+          {filteredEpisodes.length === 0 ? (
             <div className="px-1.5 py-2 text-[10px] text-text-faint">暂无 episode</div>
           ) : (
-            episodes.map((ep) => (
-              <button
+            filteredEpisodes.map((ep) => (
+              <div
                 key={ep.id}
-                type="button"
-                className={`mb-0.5 block w-full truncate rounded-md px-2 py-1.5 text-left text-[10px] transition ${
-                  selectedId === ep.id
-                    ? "bg-surface-hover text-text-strong"
-                    : "text-text-subtle hover:bg-surface-hover"
+                className={`mb-0.5 flex items-start gap-1 rounded-md px-1 py-0.5 ${
+                  selectedId === ep.id ? "bg-surface-hover" : "hover:bg-surface-hover"
                 }`}
-                onClick={() => setSelectedId(ep.id)}
-                title={ep.preview}
               >
-                {ep.referenceTime ? (
-                  <span className="mr-1 text-text-faint">{ep.referenceTime.slice(5, 16)}</span>
+                {episodeSelectMode ? (
+                  <input
+                    type="checkbox"
+                    className="mt-1.5 shrink-0"
+                    checked={selectedEpisodeIds.has(ep.id)}
+                    disabled={Boolean(ep.pinned)}
+                    onChange={() => toggleEpisodeSelection(ep.id)}
+                  />
                 ) : null}
-                {ep.preview || ep.name}
-              </button>
+                <button
+                  type="button"
+                  className={`min-w-0 flex-1 truncate rounded-md px-1 py-1 text-left text-[10px] ${
+                    selectedId === ep.id ? "text-text-strong" : "text-text-subtle"
+                  }`}
+                  onClick={() => setSelectedId(ep.id)}
+                  title={ep.preview}
+                >
+                  {ep.pinned ? (
+                    <Pin className="mr-0.5 inline h-3 w-3 text-amber-400/90" />
+                  ) : null}
+                  {ep.referenceTime ? (
+                    <span className="mr-1 text-text-faint">{ep.referenceTime.slice(5, 16)}</span>
+                  ) : null}
+                  {ep.preview || ep.name}
+                </button>
+                <button
+                  type="button"
+                  className="shrink-0 rounded p-1 text-text-faint hover:bg-surface-card hover:text-text-subtle"
+                  title={ep.pinned ? "取消 pin" : "pin 保护"}
+                  onClick={() => void onTogglePin(ep.id, !ep.pinned)}
+                >
+                  {ep.pinned ? <PinOff className="h-3 w-3" /> : <Pin className="h-3 w-3" />}
+                </button>
+              </div>
             ))
           )}
         </div>
@@ -890,6 +1157,84 @@ function MemoryGraphExplorerInner({
             onChange={(next) => void saveConfig({ ingest_auto: next })}
             aria-label="自动 ingest"
           />
+        </div>
+        <div className={MG_DIVIDER} />
+        <div className="space-y-2 py-2">
+          <div className="flex items-center justify-between gap-4">
+            <div>
+              <div>保留策略</div>
+              <div className="mt-0.5 text-[11px] text-text-faint">自动清理超出条数/天数的 episode（0=不限）</div>
+            </div>
+            <MiniSwitch
+              checked={retentionEnabled}
+              disabled={saving || !enabled}
+              onChange={(next) =>
+                void saveConfig({ retention: { enabled: next } })
+              }
+              aria-label="启用自动清理"
+            />
+          </div>
+          <div className="grid grid-cols-2 gap-2">
+            <label className="text-[11px] text-text-faint">
+              最多保留
+              <input
+                type="number"
+                min={0}
+                disabled={saving || !enabled}
+                value={retentionMaxEpisodes}
+                onChange={(e) => setRetentionMaxEpisodes(Number(e.target.value) || 0)}
+                onBlur={() =>
+                  void saveConfig({
+                    retention: {
+                      max_episodes: retentionMaxEpisodes,
+                      max_age_days: retentionMaxAgeDays,
+                      on_ingest: retentionOnIngest,
+                    },
+                  })
+                }
+                className={`${MG_FIELD} mt-1 w-full`}
+              />
+            </label>
+            <label className="text-[11px] text-text-faint">
+              保留天数
+              <input
+                type="number"
+                min={0}
+                disabled={saving || !enabled}
+                value={retentionMaxAgeDays}
+                onChange={(e) => setRetentionMaxAgeDays(Number(e.target.value) || 0)}
+                onBlur={() =>
+                  void saveConfig({
+                    retention: {
+                      max_episodes: retentionMaxEpisodes,
+                      max_age_days: retentionMaxAgeDays,
+                      on_ingest: retentionOnIngest,
+                    },
+                  })
+                }
+                className={`${MG_FIELD} mt-1 w-full`}
+              />
+            </label>
+          </div>
+          <div className="flex items-center justify-between gap-4">
+            <div className="text-[11px] text-text-faint">ingest 后自动清理</div>
+            <MiniSwitch
+              checked={retentionOnIngest}
+              disabled={saving || !enabled || !retentionEnabled}
+              onChange={(next) => void saveConfig({ retention: { on_ingest: next } })}
+              aria-label="ingest 后自动清理"
+            />
+          </div>
+          <div className="flex justify-end">
+            <Button
+              type="button"
+              variant="ghost"
+              disabled={!enabled || !groupId}
+              onClick={() => void previewRetentionCleanup()}
+            >
+              立即清理
+            </Button>
+          </div>
         </div>
         <div className={MG_DIVIDER} />
         <div className="space-y-2 py-2">
@@ -1036,9 +1381,57 @@ function MemoryGraphExplorerInner({
     />
   );
 
+  const modals = (
+    <>
+      <Modal
+        open={pendingBulkDelete != null}
+        title="确认删除 Episode"
+        onClose={() => setPendingBulkDelete(null)}
+        footer={
+          <>
+            <Button type="button" variant="ghost" onClick={() => setPendingBulkDelete(null)}>
+              取消
+            </Button>
+            <Button type="button" variant="danger" onClick={() => void confirmBulkDelete()}>
+              删除
+            </Button>
+          </>
+        }
+      >
+        <p className="text-sm text-text-subtle">
+          将删除 {pendingBulkDelete?.ids.length ?? 0} 条 episode
+          {pendingBulkDelete && pendingBulkDelete.pinnedSkipped > 0
+            ? `（${pendingBulkDelete.pinnedSkipped} 条 pinned 将保留）`
+            : ""}
+          。此操作不可撤销。
+        </p>
+      </Modal>
+      <Modal
+        open={pendingRetentionRun != null}
+        title="确认立即清理"
+        onClose={() => setPendingRetentionRun(null)}
+        footer={
+          <>
+            <Button type="button" variant="ghost" onClick={() => setPendingRetentionRun(null)}>
+              取消
+            </Button>
+            <Button type="button" variant="danger" onClick={() => void confirmRetentionCleanup()}>
+              执行清理
+            </Button>
+          </>
+        }
+      >
+        <p className="text-sm text-text-subtle">
+          按当前保留策略，将删除约 {pendingRetentionRun ?? 0} 条 episode（pinned 条目受保护）。
+        </p>
+      </Modal>
+    </>
+  );
+
   if (isDashboard) {
     return (
       <div className="flex flex-col gap-4">
+        {modals}
         <div className="shrink-0 space-y-4">
           {configStrip}
           {toolbar}
@@ -1059,6 +1452,7 @@ function MemoryGraphExplorerInner({
 
   return (
     <div className="flex h-full min-h-0 flex-col bg-surface-base text-text-subtle">
+      {modals}
       {toolbar}
       <div className="min-w-0 space-y-2 px-3 pt-2 empty:hidden">{alerts}</div>
       <div className="min-h-0 flex-1 p-2">{canvasArea}</div>

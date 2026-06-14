@@ -116,6 +116,21 @@ class MemoryGraphWriter:
                     node_count=int(meta.get("nodeCount") or 0),
                     edge_count=int(meta.get("edgeCount") or 0),
                 )
+                cfg = load_memory_graph_config()
+                if cfg.retention.enabled and cfg.retention.on_ingest:
+                    try:
+                        await store.prune_episodes(
+                            job.group_id,
+                            max_episodes=cfg.retention.max_episodes,
+                            max_age_days=cfg.retention.max_age_days,
+                            dry_run=False,
+                        )
+                    except Exception as exc:
+                        logger.warning(
+                            "memory graph retention failed for %s: %s",
+                            job.group_id,
+                            exc,
+                        )
             except Exception as exc:
                 logger.warning("memory graph ingest failed: %s", exc, exc_info=True)
                 self._status.record_failure(str(exc))

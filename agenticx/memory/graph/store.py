@@ -15,12 +15,17 @@ from typing import Any, Dict, List, Optional
 from agenticx.memory.graph.clients import build_graphiti_clients
 from agenticx.memory.graph.config import MemoryGraphConfig, load_memory_graph_config
 from agenticx.memory.graph.dto import build_graph_view, map_episode_timeline_item
+from agenticx.memory.graph.pins import load_pins
+from agenticx.memory.graph.retention import select_episodes_for_prune
 from agenticx.memory.graph.status import MemoryGraphStatusStore
 
 logger = logging.getLogger(__name__)
 
-_INIT_TIMEOUT_SECONDS = 120.0
-_SEARCH_TIMEOUT_SECONDS = 25.0
+_EPISODE_LIST_MAX = 500
+_EPISODE_IMPACT_NOTE = (
+    "Entities may be shared across other episodes; removing this episode does not "
+    "guarantee all related entities or edges are removed from the graph."
+)
 
 
 def _kuzu_lock_help() -> str:
@@ -465,10 +470,16 @@ class MemoryGraphStore:
         await self._ensure_ready_impl()
         episodes = await self._graphiti.retrieve_episodes(
             reference_time=datetime.now(timezone.utc),
-            last_n=max(1, min(last_n, 100)),
+            last_n=max(1, min(last_n, _EPISODE_LIST_MAX)),
             group_ids=[group_id],
         )
-        return [map_episode_timeline_item(ep) for ep in episodes]
+        pinned = load_pins(group_id)
+        items = []
+        for ep in episodes:
+            row = map_episode_timeline_item(ep)
+            row["pinned"] = row.get("id") in pinned
+            items.append(row)
+        return items
 
     async def delete_episode(self, episode_uuid: str) -> None:
         from agenticx.memory.graph.executor import run_on_graphiti_loop
@@ -478,6 +489,103 @@ class MemoryGraphStore:
     async def _delete_episode_impl(self, episode_uuid: str) -> None:
         await self._ensure_ready_impl()
         await self._graphiti.remove_episode(episode_uuid)
+
+    async def delete_episodes_bulk(self, group_id: str, episode_uuids: List[str]) -> Dict[str, Any]:
+        from agenticx.memory.graph.executor import run_on_graphiti_loop
+
+        return await run_on_graphiti_loop(
+            self._delete_episodes_bulk_impl(group_id, episode_uuids)
+        )
+
+    async def _delete_episodes_bulk_impl(
+        self,
+        group_id: str,
+        episode_uuids: List[str],
+    ) -> Dict[str, Any]:
+        pinned = load_pins(group_id)
+        deleted: List[str] = []
+        skipped_pinned: List[str] = []
+        for raw in episode_uuids:
+            eid = str(raw or "").strip()
+            if not eid:
+                continue
+            if eid in pinned:
+                skipped_pinned.append(eid)
+                continue
+            await self._delete_episode_impl(eid)
+            deleted.append(eid)
+        return {
+            "deleted": deleted,
+            "skipped_pinned": skipped_pinned,
+            "count": len(deleted),
+        }
+
+    async def prune_episodes(
+        self,
+        group_id: str,
+        *,
+        max_episodes: int = 0,
+        max_age_days: int = 0,
+        dry_run: bool = False,
+    ) -> Dict[str, Any]:
+        from agenticx.memory.graph.executor import run_on_graphiti_loop
+
+        return await run_on_graphiti_loop(
+            self._prune_episodes_impl(
+                group_id,
+                max_episodes=max_episodes,
+                max_age_days=max_age_days,
+                dry_run=dry_run,
+            )
+        )
+
+    async def _prune_episodes_impl(
+        self,
+        group_id: str,
+        *,
+        max_episodes: int = 0,
+        max_age_days: int = 0,
+        dry_run: bool = False,
+    ) -> Dict[str, Any]:
+        await self._ensure_ready_impl()
+        episodes = await self._list_episodes_impl(group_id, last_n=_EPISODE_LIST_MAX)
+        pinned = load_pins(group_id)
+        to_delete, kept = select_episodes_for_prune(
+            episodes,
+            max_episodes=max_episodes,
+            max_age_days=max_age_days,
+            pinned=pinned,
+        )
+        if dry_run:
+            return {"would_delete": to_delete, "count": len(to_delete), "kept": kept}
+        deleted: List[str] = []
+        for eid in to_delete:
+            await self._delete_episode_impl(eid)
+            deleted.append(eid)
+        return {"deleted": deleted, "count": len(deleted), "kept": kept}
+
+    async def preview_episode_impact(self, group_id: str, episode_uuid: str) -> Dict[str, Any]:
+        from agenticx.memory.graph.executor import run_on_graphiti_loop
+
+        return await run_on_graphiti_loop(
+            self._preview_episode_impact_impl(group_id, episode_uuid)
+        )
+
+    async def _preview_episode_impact_impl(
+        self,
+        group_id: str,
+        episode_uuid: str,
+    ) -> Dict[str, Any]:
+        view = await self._get_episode_subgraph_impl(group_id, episode_uuid)
+        nodes = view.get("nodes") or []
+        edges = view.get("edges") or []
+        return {
+            "episodeId": episode_uuid,
+            "groupId": group_id,
+            "nodeCount": len(nodes),
+            "edgeCount": len(edges),
+            "note": _EPISODE_IMPACT_NOTE,
+        }
 
     def get_status(self) -> Dict[str, Any]:
         self.refresh_config()
