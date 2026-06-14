@@ -47,7 +47,6 @@ export function deriveGroupId(
   scope: MemoryGraphScope,
   avatarId: string | null,
 ): string {
-  if (scope === "user") return "";
   if (scope === "meta") return "meta_default";
   const aid = (avatarId || "").trim();
   if (scope === "group") {
@@ -259,11 +258,21 @@ export async function updateMemoryGraphConfig(
 export async function fetchWorkspaceMemory(
   apiBase: string,
   apiToken: string,
+  avatarId?: string | null,
 ): Promise<WorkspaceMemoryDoc> {
-  const r = await fetch(`${apiBase}/api/memory/workspace`, { headers: headers(apiToken) });
+  const qs = avatarId?.trim() ? `?avatar_id=${encodeURIComponent(avatarId.trim())}` : "";
+  const r = await fetch(`${apiBase}/api/memory/workspace${qs}`, { headers: headers(apiToken) });
   if (!r.ok) throw new Error(`workspace memory ${r.status}`);
   const data = (await r.json()) as Partial<WorkspaceMemoryDoc>;
   return { sections: data.sections || [], path: data.path || "" };
+}
+
+function workspaceEntryBody(
+  body: Record<string, unknown>,
+  avatarId?: string | null,
+): Record<string, unknown> {
+  const aid = avatarId?.trim();
+  return aid ? { ...body, avatar_id: aid } : body;
 }
 
 export async function createWorkspaceEntry(
@@ -271,11 +280,12 @@ export async function createWorkspaceEntry(
   apiToken: string,
   section: string,
   text: string,
+  avatarId?: string | null,
 ): Promise<void> {
   const r = await fetch(`${apiBase}/api/memory/workspace/entry`, {
     method: "POST",
     headers: headers(apiToken),
-    body: JSON.stringify({ section, text }),
+    body: JSON.stringify(workspaceEntryBody({ section, text }, avatarId)),
   });
   if (!r.ok) throw new Error(`create entry ${r.status}`);
 }
@@ -287,6 +297,7 @@ export async function updateWorkspaceEntry(
   index: number,
   text: string,
   children?: string[],
+  avatarId?: string | null,
 ): Promise<void> {
   const body: { section: string; index: number; text: string; children?: string[] } = {
     section,
@@ -297,7 +308,7 @@ export async function updateWorkspaceEntry(
   const r = await fetch(`${apiBase}/api/memory/workspace/entry`, {
     method: "PATCH",
     headers: headers(apiToken),
-    body: JSON.stringify(body),
+    body: JSON.stringify(workspaceEntryBody(body, avatarId)),
   });
   if (!r.ok) throw new Error(`update entry ${r.status}`);
 }
@@ -307,11 +318,12 @@ export async function deleteWorkspaceEntry(
   apiToken: string,
   section: string,
   index: number,
+  avatarId?: string | null,
 ): Promise<void> {
   const r = await fetch(`${apiBase}/api/memory/workspace/entry`, {
     method: "DELETE",
     headers: headers(apiToken),
-    body: JSON.stringify({ section, index }),
+    body: JSON.stringify(workspaceEntryBody({ section, index }, avatarId)),
   });
   if (!r.ok) throw new Error(`delete entry ${r.status}`);
 }
@@ -322,11 +334,12 @@ export async function deleteWorkspaceEntriesBatch(
   apiBase: string,
   apiToken: string,
   entries: WorkspaceEntryRef[],
+  avatarId?: string | null,
 ): Promise<number> {
   const r = await fetch(`${apiBase}/api/memory/workspace/entries/batch-delete`, {
     method: "POST",
     headers: headers(apiToken),
-    body: JSON.stringify({ entries }),
+    body: JSON.stringify(workspaceEntryBody({ entries }, avatarId)),
   });
   if (!r.ok) throw new Error(`batch delete entries ${r.status}`);
   const data = (await r.json()) as { deleted?: number };

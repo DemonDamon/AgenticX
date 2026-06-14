@@ -86,7 +86,6 @@ const EMPTY_GRAPH: GraphViewDTO = {
 function scopeLabel(scope: MemoryGraphScope): string {
   if (scope === "avatar") return "数字分身";
   if (scope === "group") return "群聊";
-  if (scope === "user") return "用户";
   return "元智能体";
 }
 
@@ -229,6 +228,17 @@ function MemoryGraphExplorerInner({
     [scope, avatarId],
   );
 
+  const subjectAvatarIdForWorkspace = useMemo(() => {
+    const aid = (avatarId || "").trim();
+    if (scope === "meta") return null;
+    if (scope === "group") {
+      if (aid.startsWith("group:")) return aid;
+      return aid ? `group:${aid}` : null;
+    }
+    if (!aid || aid.startsWith("group:")) return null;
+    return aid;
+  }, [scope, avatarId]);
+
   const selectedNode: GraphNodeDTO | null = useMemo(
     () => graph.nodes.find((n) => n.id === selectedId) || null,
     [graph.nodes, selectedId],
@@ -263,15 +273,6 @@ function MemoryGraphExplorerInner({
     }
     setLoading(true);
     setError(null);
-    if (scope === "user") {
-      setDisabled(false);
-      setStatusHint(null);
-      setBuildProgress(null);
-      setGraph(EMPTY_GRAPH);
-      setEpisodes([]);
-      setLoading(false);
-      return;
-    }
     try {
       const st = await fetchMemoryGraphStatus(apiBase, apiToken);
       setStatus(st);
@@ -393,10 +394,6 @@ function MemoryGraphExplorerInner({
   }, [apiBase, apiToken, reload, status?.job_progress, status?.pending_jobs]);
 
   const onSearch = async () => {
-    if (scope === "user") {
-      void reload();
-      return;
-    }
     if (!apiBase.trim() || !query.trim()) {
       void reload();
       return;
@@ -562,7 +559,7 @@ function MemoryGraphExplorerInner({
       }`}
     >
       <div className="flex overflow-hidden rounded-md border border-border text-[11px]">
-        {(["user", "meta", "avatar", "group"] as MemoryGraphScope[]).map((s) => (
+        {(["meta", "avatar", "group"] as MemoryGraphScope[]).map((s) => (
           <button
             key={s}
             type="button"
@@ -959,8 +956,19 @@ function MemoryGraphExplorerInner({
     </Panel>
   ) : null;
 
-  const isUserScope = scope === "user";
-  const userListArea = <WorkspaceMemoryList apiBase={apiBase} apiToken={apiToken} />;
+  const subjectMemoryArea = (
+    <WorkspaceMemoryList
+      apiBase={apiBase}
+      apiToken={apiToken}
+      avatarId={subjectAvatarIdForWorkspace}
+      title={`${scopeLabel(scope)}文本记忆`}
+      description={
+        scope === "meta"
+          ? "元智能体长期记忆（MEMORY.md）。全局用户偏好请在「显示 → 用户档案」维护。"
+          : "本主体 MEMORY.md，含本主体理解的用户偏好，可手动增删改。"
+      }
+    />
+  );
 
   if (isDashboard) {
     return (
@@ -970,18 +978,15 @@ function MemoryGraphExplorerInner({
           {toolbar}
           {alerts}
         </div>
-        {isUserScope ? (
-          <div>{userListArea}</div>
-        ) : (
-          <div className="flex min-h-[500px] flex-1 gap-3 overflow-hidden">
-            {leftRail}
-            <div className="flex min-w-0 flex-1 flex-col gap-2 overflow-hidden">
-              <div className="min-h-0 flex-1">{canvasArea}</div>
-              {legend}
-            </div>
-            {rightRail}
+        <div className="flex min-h-[500px] flex-1 gap-3 overflow-hidden">
+          {leftRail}
+          <div className="flex min-w-0 flex-1 flex-col gap-2 overflow-hidden">
+            <div className="min-h-0 flex-1">{canvasArea}</div>
+            {legend}
           </div>
-        )}
+          {rightRail}
+        </div>
+        <div className="min-h-0">{subjectMemoryArea}</div>
       </div>
     );
   }
@@ -990,31 +995,28 @@ function MemoryGraphExplorerInner({
     <div className="flex h-full min-h-0 flex-col bg-surface-base text-text-subtle">
       {toolbar}
       <div className="min-w-0 space-y-2 px-3 pt-2 empty:hidden">{alerts}</div>
-      {isUserScope ? (
-        <div className="min-h-0 min-w-0 flex-1 overflow-y-auto p-2">{userListArea}</div>
-      ) : (
-        <>
-          <div className="min-h-0 flex-1 p-2">{canvasArea}</div>
-          <div className="max-h-[42%] space-y-2 overflow-y-auto border-t border-border px-3 py-2">
-            <MemoryGraphDetail node={selectedNode} edges={graph.edges} onDeleteEpisode={onDeleteEpisode} />
-            {episodes.length > 0 ? (
-              <div className="max-h-24 overflow-y-auto text-[10px]">
-                <div className="mb-1 font-medium text-text-faint">Episode 时间轴</div>
-                {episodes.map((ep) => (
-                  <button
-                    key={ep.id}
-                    type="button"
-                    className="mb-1 block w-full truncate rounded px-1 py-0.5 text-left hover:bg-surface-card"
-                    onClick={() => setSelectedId(ep.id)}
-                  >
+      <div className="min-h-0 flex-1 p-2">{canvasArea}</div>
+      <div className="max-h-[42%] space-y-2 overflow-y-auto border-t border-border px-3 py-2">
+        <MemoryGraphDetail node={selectedNode} edges={graph.edges} onDeleteEpisode={onDeleteEpisode} />
+        {episodes.length > 0 ? (
+          <div className="max-h-24 overflow-y-auto text-[10px]">
+            <div className="mb-1 font-medium text-text-faint">Episode 时间轴</div>
+            {episodes.map((ep) => (
+              <button
+                key={ep.id}
+                type="button"
+                className="mb-1 block w-full truncate rounded px-1 py-0.5 text-left hover:bg-surface-card"
+                onClick={() => setSelectedId(ep.id)}
+              >
                     {ep.preview || ep.name}
                   </button>
                 ))}
               </div>
             ) : null}
-          </div>
-        </>
-      )}
+      </div>
+      <div className="max-h-[38%] min-h-0 overflow-y-auto border-t border-border p-2">
+        {subjectMemoryArea}
+      </div>
     </div>
   );
 }
