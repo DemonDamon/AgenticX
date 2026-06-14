@@ -8,9 +8,53 @@ from __future__ import annotations
 
 import asyncio
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from agenticx.memory.workspace_memory import WorkspaceMemoryStore
+
+
+def _path_under_workspace_roots(path: str, roots: List[Path]) -> bool:
+    if not path:
+        return False
+    try:
+        resolved = Path(path).expanduser().resolve(strict=False)
+    except OSError:
+        return False
+    for root in roots:
+        try:
+            resolved.relative_to(root.expanduser().resolve(strict=False))
+            return True
+        except ValueError:
+            continue
+    return False
+
+
+def _filter_workspace_rows_for_subject(
+    rows: List[Dict[str, Any]],
+    *,
+    global_workspace: Path,
+    subject_workspace: Path,
+) -> List[Dict[str, Any]]:
+    """Keep only global USER baseline paths and current subject workspace chunks."""
+    global_ws = global_workspace.expanduser().resolve(strict=False)
+    subject_ws = subject_workspace.expanduser().resolve(strict=False)
+    allowed_roots: List[Path] = [global_ws]
+    if subject_ws != global_ws:
+        allowed_roots.append(subject_ws)
+    filtered: List[Dict[str, Any]] = []
+    for row in rows:
+        path = str(row.get("path") or "")
+        if not path:
+            continue
+        path_obj = Path(path).expanduser().resolve(strict=False)
+        if path_obj.name == "USER.md":
+            if _path_under_workspace_roots(path, [global_ws]):
+                filtered.append(row)
+            continue
+        if _path_under_workspace_roots(path, allowed_roots):
+            filtered.append(row)
+    return filtered
 
 
 @dataclass
@@ -146,7 +190,23 @@ async def search_memory_for_chat(
         return MemoryRecallResult(matches=[])
 
     store = WorkspaceMemoryStore()
-    workspace_rows = store.search_sync(query=q, mode=mode, limit=max(1, limit))
+    from agenticx.workspace.loader import resolve_subject_workspace_dir, resolve_workspace_dir
+
+    global_ws = resolve_workspace_dir()
+    subject_ws = resolve_subject_workspace_dir(avatar_id)
+    try:
+        store.index_workspace_sync(global_ws)
+        if subject_ws.resolve(strict=False) != global_ws.resolve(strict=False):
+            store.index_workspace_sync(subject_ws)
+    except Exception:
+        pass
+
+    raw_rows = store.search_sync(query=q, mode=mode, limit=max(1, limit) * 6)
+    workspace_rows = _filter_workspace_rows_for_subject(
+        raw_rows,
+        global_workspace=global_ws,
+        subject_workspace=subject_ws,
+    )[: max(1, limit)]
     for row in workspace_rows:
         row["source"] = "workspace"
 

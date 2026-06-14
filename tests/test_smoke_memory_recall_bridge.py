@@ -59,7 +59,8 @@ def test_merge_recall_results_respects_graph_limit() -> None:
 async def test_search_memory_for_chat_workspace_only(tmp_path: Path) -> None:
     workspace = tmp_path / "workspace"
     workspace.mkdir(parents=True, exist_ok=True)
-    (workspace / "MEMORY.md").write_text(
+    memory_path = workspace / "MEMORY.md"
+    memory_path.write_text(
         "# MEMORY.md\n- 用户喜欢《黑夜传说》\n",
         encoding="utf-8",
     )
@@ -73,7 +74,15 @@ async def test_search_memory_for_chat_workspace_only(tmp_path: Path) -> None:
         store_cls.return_value = real_store
 
         with patch("agenticx.memory.graph.config.load_memory_graph_config", return_value=cfg):
-            result = await search_memory_for_chat("黑夜传说", limit=3)
+            with patch(
+                "agenticx.workspace.loader.resolve_workspace_dir",
+                return_value=workspace,
+            ):
+                with patch(
+                    "agenticx.workspace.loader.resolve_subject_workspace_dir",
+                    return_value=workspace,
+                ):
+                    result = await search_memory_for_chat("黑夜传说", limit=3)
 
     assert result.matches
     assert all(row.get("source") == "workspace" for row in result.matches)
@@ -100,9 +109,17 @@ async def test_search_memory_for_chat_merges_graph(tmp_path: Path) -> None:
         store_cls.return_value = real_store
 
         with patch("agenticx.memory.graph.config.load_memory_graph_config", return_value=cfg):
-            with patch("agenticx.memory.graph.store.MemoryGraphStore") as graph_cls:
-                graph_cls.return_value.search_subgraph = AsyncMock(return_value=graph_view)
-                result = await search_memory_for_chat("黑夜传说", limit=5)
+            with patch(
+                "agenticx.workspace.loader.resolve_workspace_dir",
+                return_value=workspace,
+            ):
+                with patch(
+                    "agenticx.workspace.loader.resolve_subject_workspace_dir",
+                    return_value=workspace,
+                ):
+                    with patch("agenticx.memory.graph.store.MemoryGraphStore") as graph_cls:
+                        graph_cls.return_value.search_subgraph = AsyncMock(return_value=graph_view)
+                        result = await search_memory_for_chat("黑夜传说", limit=5)
 
     sources = {row.get("source") for row in result.matches}
     assert "workspace" in sources
@@ -111,37 +128,59 @@ async def test_search_memory_for_chat_merges_graph(tmp_path: Path) -> None:
 
 @pytest.mark.asyncio
 async def test_search_memory_for_chat_graph_disabled_by_config(tmp_path: Path) -> None:
+    workspace = tmp_path / "workspace"
+    workspace.mkdir(parents=True, exist_ok=True)
+    memory_path = str(workspace / "MEMORY.md")
     cfg = MemoryGraphConfig(enabled=True, search_in_chat=False)
 
     with patch("agenticx.memory.recall.WorkspaceMemoryStore") as store_cls:
         store_cls.return_value.search_sync.return_value = [
-            {"id": "w1", "text": "hello", "score": 1.0},
+            {"id": "w1", "text": "hello", "score": 1.0, "path": memory_path},
         ]
         with patch("agenticx.memory.graph.config.load_memory_graph_config", return_value=cfg):
-            with patch("agenticx.memory.graph.store.MemoryGraphStore") as graph_cls:
-                result = await search_memory_for_chat("hello", limit=3)
-                graph_cls.assert_not_called()
+            with patch(
+                "agenticx.workspace.loader.resolve_workspace_dir",
+                return_value=workspace,
+            ):
+                with patch(
+                    "agenticx.workspace.loader.resolve_subject_workspace_dir",
+                    return_value=workspace,
+                ):
+                    with patch("agenticx.memory.graph.store.MemoryGraphStore") as graph_cls:
+                        result = await search_memory_for_chat("hello", limit=3)
+                        graph_cls.assert_not_called()
 
     assert result.matches
     assert all(row.get("source") == "workspace" for row in result.matches)
 
 
 @pytest.mark.asyncio
-async def test_search_memory_for_chat_graph_failure_fallback() -> None:
+async def test_search_memory_for_chat_graph_failure_fallback(tmp_path: Path) -> None:
     from agenticx.memory.graph.store import MemoryGraphUnavailableError
 
+    workspace = tmp_path / "workspace"
+    workspace.mkdir(parents=True, exist_ok=True)
+    memory_path = str(workspace / "MEMORY.md")
     cfg = MemoryGraphConfig(enabled=True, search_in_chat=True)
 
     with patch("agenticx.memory.recall.WorkspaceMemoryStore") as store_cls:
         store_cls.return_value.search_sync.return_value = [
-            {"id": "w1", "text": "workspace hit", "score": 1.0},
+            {"id": "w1", "text": "workspace hit", "score": 1.0, "path": memory_path},
         ]
         with patch("agenticx.memory.graph.config.load_memory_graph_config", return_value=cfg):
-            with patch("agenticx.memory.graph.store.MemoryGraphStore") as graph_cls:
-                graph_cls.return_value.search_subgraph = AsyncMock(
-                    side_effect=MemoryGraphUnavailableError("graph offline")
-                )
-                result = await search_memory_for_chat("test", limit=3)
+            with patch(
+                "agenticx.workspace.loader.resolve_workspace_dir",
+                return_value=workspace,
+            ):
+                with patch(
+                    "agenticx.workspace.loader.resolve_subject_workspace_dir",
+                    return_value=workspace,
+                ):
+                    with patch("agenticx.memory.graph.store.MemoryGraphStore") as graph_cls:
+                        graph_cls.return_value.search_subgraph = AsyncMock(
+                            side_effect=MemoryGraphUnavailableError("graph offline")
+                        )
+                        result = await search_memory_for_chat("test", limit=3)
 
     assert result.matches
     assert result.graph_skipped_reason == "graph offline"
