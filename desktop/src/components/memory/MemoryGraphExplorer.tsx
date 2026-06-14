@@ -70,6 +70,8 @@ type Props = {
   layout?: "dashboard" | "sidebar";
   showConfig?: boolean;
   initialScope?: MemoryGraphScope;
+  /** 侧栏模式展示当前分区名称（如分身名、群聊名） */
+  contextTitle?: string;
   /** 可选 provider 列表，用于「记忆构建模型」选择器（来自 SettingsPanel） */
   providerOptions?: string[];
   onClose?: () => void;
@@ -193,9 +195,11 @@ function MemoryGraphExplorerInner({
   layout = "dashboard",
   showConfig = false,
   initialScope = "meta",
+  contextTitle = "",
   providerOptions = [],
   onClose,
 }: Props) {
+  const scopeLocked = layout === "sidebar";
   const [scope, setScope] = useState<MemoryGraphScope>(initialScope);
   const [graph, setGraph] = useState<GraphViewDTO>(EMPTY_GRAPH);
   const [episodes, setEpisodes] = useState<GraphEpisodeDTO[]>([]);
@@ -506,27 +510,40 @@ function MemoryGraphExplorerInner({
       }`}
     >
       {!isDashboard ? (
-        <div className="mr-auto flex items-center gap-2 text-sm font-medium text-text-strong">
-          <Share2 className="h-4 w-4" strokeWidth={1.8} />
-          记忆图谱
+        <div className="mr-auto flex min-w-0 flex-col gap-0.5">
+          <div className="flex items-center gap-2 text-sm font-medium text-text-strong">
+            <Share2 className="h-4 w-4 shrink-0" strokeWidth={1.8} />
+            <span className="truncate">记忆图谱</span>
+          </div>
+          {scopeLocked ? (
+            <div className="truncate pl-6 text-[10px] text-text-faint">
+              {contextTitle.trim() || scopeLabel(scope)}
+            </div>
+          ) : null}
         </div>
       ) : null}
-      <div className="flex overflow-hidden rounded-md border border-border text-[11px]">
-        {(["user", "meta", "avatar", "group"] as MemoryGraphScope[]).map((s) => (
-          <button
-            key={s}
-            type="button"
-            className={`px-2.5 py-1 transition ${
-              scope === s
-                ? "bg-[var(--ui-btn-primary-bg)] font-medium text-[var(--ui-btn-primary-text)]"
-                : "bg-transparent text-text-muted hover:bg-surface-hover hover:text-text-primary"
-            }`}
-            onClick={() => setScope(s)}
-          >
-            {scopeLabel(s)}
-          </button>
-        ))}
-      </div>
+      {scopeLocked ? (
+        <span className="shrink-0 rounded-md border border-border bg-surface-card px-2 py-1 text-[11px] text-text-muted">
+          {scopeLabel(scope)}
+        </span>
+      ) : (
+        <div className="flex overflow-hidden rounded-md border border-border text-[11px]">
+          {(["user", "meta", "avatar", "group"] as MemoryGraphScope[]).map((s) => (
+            <button
+              key={s}
+              type="button"
+              className={`px-2.5 py-1 transition ${
+                scope === s
+                  ? "bg-[var(--ui-btn-primary-bg)] font-medium text-[var(--ui-btn-primary-text)]"
+                  : "bg-transparent text-text-muted hover:bg-surface-hover hover:text-text-primary"
+              }`}
+              onClick={() => setScope(s)}
+            >
+              {scopeLabel(s)}
+            </button>
+          ))}
+        </div>
+      )}
       <div className="flex min-w-[200px] flex-1 items-center gap-1.5">
         <div className="relative min-w-0 flex-1">
           <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-text-faint" />

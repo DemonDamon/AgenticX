@@ -20,6 +20,7 @@ from agenticx.memory.graph.json_compat import (
     empty_payload_for_response_model,
     extract_chat_message_text,
     memory_graph_chat_request_extras,
+    model_supports_enable_thinking_param,
     parse_llm_json,
     provider_requires_disable_thinking,
     provider_supports_json_response_format,
@@ -50,23 +51,44 @@ def test_provider_supports_json_response_format():
     assert provider_supports_json_response_format("openai", "https://proxy.example/v1") is False
 
 
+def test_model_supports_enable_thinking_param():
+    assert model_supports_enable_thinking_param("qwen3.5-plus") is True
+    assert model_supports_enable_thinking_param("bailian/qwen3-max") is True
+    assert model_supports_enable_thinking_param("qvq-max") is True
+    assert model_supports_enable_thinking_param("qwen-plus") is False
+    assert model_supports_enable_thinking_param("qwen-turbo") is False
+    assert model_supports_enable_thinking_param("qwen-max") is False
+
+
 def test_provider_requires_disable_thinking_for_qwen():
     assert provider_requires_disable_thinking(
         "bailian",
         "https://dashscope.aliyuncs.com/compatible-mode/v1",
         "qwen3.5-plus",
     )
+    assert provider_requires_disable_thinking(
+        "bailian",
+        "https://dashscope.aliyuncs.com/compatible-mode/v1",
+        "qwen-plus",
+    ) is False
     assert provider_requires_disable_thinking("openai", None, "gpt-4o-mini") is False
 
 
 def test_memory_graph_chat_request_extras_disables_thinking():
-    extras = memory_graph_chat_request_extras(
+    hybrid = memory_graph_chat_request_extras(
         "bailian",
         "https://dashscope.aliyuncs.com/compatible-mode/v1",
         "qwen3.5-plus",
     )
-    assert extras.get("enable_thinking") is False
-    assert extras.get("extra_body", {}).get("enable_thinking") is False
+    assert "enable_thinking" not in hybrid
+    assert hybrid.get("extra_body", {}).get("enable_thinking") is False
+
+    non_hybrid = memory_graph_chat_request_extras(
+        "bailian",
+        "https://dashscope.aliyuncs.com/compatible-mode/v1",
+        "qwen-plus",
+    )
+    assert non_hybrid == {}
 
     kimi = memory_graph_chat_request_extras("kimi", "https://api.moonshot.cn/v1", "moonshot-v1-8k")
     assert kimi.get("extra_body", {}).get("thinking") == {"type": "disabled"}
@@ -136,6 +158,46 @@ def test_parse_llm_json_empty_raises():
 
     with pytest.raises(ValueError, match="empty"):
         parse_llm_json("")
+
+
+def test_compat_llm_client_qwen_plus_omits_enable_thinking():
+    from graphiti_core.prompts.models import Message
+
+    from agenticx.memory.graph.llm_client import CompatOpenAIGenericClient
+
+    captured: dict[str, object] = {}
+
+    class _Choice:
+        message = type("M", (), {"content": '{"edges": []}', "reasoning_content": None})()
+
+    class _Response:
+        choices = [_Choice()]
+
+    class _FakeCompletions:
+        async def create(self, **kwargs):
+            captured.update(kwargs)
+            return _Response()
+
+    class _FakeClient:
+        chat = type("Chat", (), {"completions": _FakeCompletions()})()
+
+    client = CompatOpenAIGenericClient(
+        client=_FakeClient(),
+        provider_name="bailian",
+        base_url="https://dashscope.aliyuncs.com/compatible-mode/v1",
+    )
+    client.model = "qwen-plus"
+
+    import asyncio
+
+    asyncio.run(
+        client._generate_response(
+            [Message(role="user", content="extract")],
+            max_tokens=256,
+        )
+    )
+    assert "enable_thinking" not in captured
+    assert "extra_body" not in captured
 
 
 def test_compat_llm_client_empty_content_falls_back_to_empty_edges():

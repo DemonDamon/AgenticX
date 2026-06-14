@@ -16,6 +16,7 @@ function MemoryGraphPanelInner({ pane, onClose }: Props) {
   // 按当前窗格天然归属选择默认分区：群聊→群聊，分身→分身，否则元智能体
   const aid = (pane.avatarId || "").trim();
   const initialScope = aid.startsWith("group:") ? "group" : aid ? "avatar" : "meta";
+  const contextTitle = (pane.avatarName || "").trim();
 
   return (
     <MemoryGraphExplorer
@@ -25,6 +26,7 @@ function MemoryGraphPanelInner({ pane, onClose }: Props) {
       sessionId={pane.sessionId}
       layout="sidebar"
       initialScope={initialScope}
+      contextTitle={contextTitle}
       onClose={onClose}
     />
   );
