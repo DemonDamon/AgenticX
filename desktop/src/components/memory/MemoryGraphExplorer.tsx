@@ -244,6 +244,7 @@ function MemoryGraphExplorerInner({
   } | null>(null);
   const [pendingRetentionRun, setPendingRetentionRun] = useState<number | null>(null);
   const providerCatalog = useAppStore((s) => s.settings.providers);
+  const setApiBase = useAppStore((s) => s.setApiBase);
   const avatarsList = useAppStore((s) => s.avatars);
   const groupsList = useAppStore((s) => s.groups);
 
@@ -400,6 +401,22 @@ function MemoryGraphExplorerInner({
       setEpisodes(eps);
     } catch (e) {
       const msg = formatMemoryGraphFetchError(e, "加载记忆图谱失败");
+      if (
+        /无法连接 agx serve|failed to fetch|networkerror|load failed/i.test(msg) &&
+        typeof window !== "undefined" &&
+        window.agenticxDesktop?.getApiBase
+      ) {
+        try {
+          const freshBase = await window.agenticxDesktop.getApiBase();
+          if (freshBase && freshBase !== apiBase) {
+            setStatusHint("检测到后端地址已更新，正在重连…");
+            setApiBase(freshBase);
+            return;
+          }
+        } catch {
+          // keep original error path
+        }
+      }
       if (msg.includes("memory_graph_disabled")) {
         setDisabled(true);
         setStatusHint("记忆图谱未启用");
@@ -410,7 +427,7 @@ function MemoryGraphExplorerInner({
     } finally {
       setLoading(false);
     }
-  }, [apiBase, apiToken, groupId, effectiveAvatarId, effectiveSessionId, scope]);
+  }, [apiBase, apiToken, groupId, effectiveAvatarId, effectiveSessionId, scope, setApiBase]);
 
   useEffect(() => {
     void loadConfig();

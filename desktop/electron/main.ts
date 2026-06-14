@@ -1706,7 +1706,21 @@ async function pingRemoteServer(config: ResolvedRemoteConfig, timeoutMs = 10000)
 }
 
 function getStudioUrl(): string {
-  return remoteConfig ? remoteConfig.url : `http://127.0.0.1:${apiPort}`;
+  if (remoteConfig) return remoteConfig.url;
+  let port = apiPort;
+  if (!Number.isFinite(port) || port <= 0) {
+    try {
+      const portFile = path.join(CONFIG_DIR, "serve.port");
+      const text = fs.existsSync(portFile) ? fs.readFileSync(portFile, "utf-8").trim() : "";
+      const parsed = Number.parseInt(text, 10);
+      if (Number.isFinite(parsed) && parsed > 0) {
+        port = parsed;
+      }
+    } catch {
+      // best-effort fallback only
+    }
+  }
+  return `http://127.0.0.1:${port}`;
 }
 
 function getStudioToken(): string {
