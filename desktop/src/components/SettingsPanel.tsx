@@ -7703,7 +7703,7 @@ export function SettingsPanel({
                 </Panel>
                 <Panel title="用户档案">
                   <p className="mb-3 text-[11px] leading-relaxed text-text-subtle">
-                    「你」的身份与展示，以及希望各对话如何围绕你展开（称呼、头像、用户偏好）。全局人格（SOUL）仍在下方 Near 区块。
+                    「你」的身份与展示，以及<strong className="font-medium text-text-muted">对所有元智能体 / 分身 / 群聊生效的全局用户偏好基线</strong>（称呼、头像、偏好与风格）。各主体还会在各自的 MEMORY.md 中单独记录对本主体的理解；全局人格（SOUL）仍在下方 Near 区块。
                   </p>
                   <div className="flex items-start gap-6">
                     {/* 左侧：头像区 */}
@@ -7789,7 +7789,7 @@ export function SettingsPanel({
                         />
                         <div className="mt-1.5 flex items-start justify-between gap-3">
                           <p className="min-w-0 flex-1 text-[11px] leading-relaxed text-text-subtle">
-                            {`${userPreferenceDraft.length}/500 字。会注入每次对话的系统提示，对所有 agent 的回复方式生效。`}
+                            {`${userPreferenceDraft.length}/500 字。作为 user 级只读基线注入每次对话的系统提示，对所有元智能体、分身与群聊生效。`}
                           </p>
                           <div className="flex shrink-0 items-center gap-2">
                             {userProfileMessage ? (
@@ -9060,6 +9060,11 @@ export function SettingsPanel({
             {/* === MEMORY TAB === Plan-Id: 2026-05-31-near-memory-graph-graphiti */}
             {tab === "memory" && (
               <div className="space-y-4">
+                <Panel title="记忆说明">
+                  <p className="text-[11px] leading-relaxed text-text-subtle">
+                    记忆按<strong className="font-medium text-text-muted">主体</strong>隔离：元智能体、各分身、群聊各有文本 MEMORY 与图谱分区。全局用户偏好请在「显示 → 用户档案」维护；下方图谱与文本记忆仅覆盖 meta / 分身 / 群聊三类主体。
+                  </p>
+                </Panel>
                 <TurnArchiveSettingsPanel />
                 <MemoryGraphExplorer
                   apiBase={apiBase}
@@ -9068,7 +9073,7 @@ export function SettingsPanel({
                   sessionId={memoryContextPane?.sessionId ?? ""}
                   layout="dashboard"
                   showConfig
-                  initialScope="user"
+                  initialScope="meta"
                   providerOptions={providerNames}
                 />
               </div>
