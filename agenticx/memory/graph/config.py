@@ -117,6 +117,9 @@ def load_memory_graph_config() -> MemoryGraphConfig:
     if scope == "session":
         # 「本会话」已下线，旧配置回落到元智能体分区
         scope = "meta"
+    if scope == "user":
+        # 「用户」图谱 scope 已下线，回落到元智能体
+        scope = "meta"
     if scope in {"avatar", "meta", "group"}:
         cfg.default_scope = scope
 

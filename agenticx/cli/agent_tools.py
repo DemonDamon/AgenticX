@@ -875,15 +875,22 @@ STUDIO_TOOLS: List[Dict[str, Any]] = [
         "function": {
             "name": "memory_append",
             "description": (
-                "Append note to workspace daily memory or long-term MEMORY.md. "
-                "Content must be a concise, self-contained fact (max ~400 chars). "
-                "Never pass raw conversation text, <think> blocks, code blocks, or file lists."
+                "Append note to the current subject's workspace memory (meta/avatar/group) "
+                "or global user baseline. Default scope=subject writes to this pane's MEMORY.md; "
+                "use scope=user_global only when the user wants all subjects to remember "
+                "(e.g. a lesson from avatar A that avatar B should also avoid). "
+                "Content must be a concise, self-contained fact (max ~400 chars)."
             ),
             "parameters": {
                 "type": "object",
                 "properties": {
                     "target": {"type": "string", "enum": ["daily", "long_term"]},
                     "content": {"type": "string"},
+                    "scope": {
+                        "type": "string",
+                        "enum": ["subject", "user_global"],
+                        "description": "subject (default) = current meta/avatar/group; user_global = ~/.agenticx/workspace/USER.md baseline for all subjects.",
+                    },
                 },
                 "required": ["target", "content"],
                 "additionalProperties": False,
@@ -3934,34 +3941,73 @@ async def _tool_memory_append(
     *,
     confirm_gate: ConfirmGate,
     emit_event: Optional[Any] = None,
+    session: Optional["StudioSession"] = None,
 ) -> str:
     target = str(arguments.get("target", "")).strip().lower()
     content = str(arguments.get("content", "")).strip()
+    scope = str(arguments.get("scope", "subject") or "subject").strip().lower()
     if target not in {"daily", "long_term"}:
         return "ERROR: target must be daily or long_term"
+    if scope not in {"subject", "user_global"}:
+        return "ERROR: scope must be subject or user_global"
     if not content:
         return "ERROR: content is required"
 
-    workspace_dir = ensure_workspace(index_memory=False)
-    if target == "long_term":
+    from datetime import date
+
+    from agenticx.workspace.loader import (
+        DAILY_MEMORY_TEMPLATE,
+        append_daily_memory,
+        append_long_term_memory,
+        append_user_global_preference,
+        resolve_subject_workspace_dir,
+        resolve_workspace_dir,
+    )
+
+    if scope == "user_global":
+        if target != "long_term":
+            return "ERROR: user_global scope only supports target=long_term"
         if not await _confirm(
-            "Append note into long-term MEMORY.md?",
+            "Append preference to global USER.md (all subjects)?",
             confirm_gate=confirm_gate,
-            context={"tool": "memory_append", "target": target, "preview": content[:200]},
+            context={"tool": "memory_append", "scope": scope, "preview": content[:200]},
             emit_event=emit_event,
         ):
             return "CANCELLED: user denied memory append"
-        append_long_term_memory(workspace_dir, content)
+        append_user_global_preference(content)
+        workspace_dir = resolve_workspace_dir()
     else:
-        append_daily_memory(workspace_dir, content)
+        workspace_dir = resolve_subject_workspace_dir(session=session)
+        workspace_dir.mkdir(parents=True, exist_ok=True)
+        if target == "long_term":
+            if not await _confirm(
+                "Append note into this subject's long-term MEMORY.md?",
+                confirm_gate=confirm_gate,
+                context={"tool": "memory_append", "target": target, "preview": content[:200]},
+                emit_event=emit_event,
+            ):
+                return "CANCELLED: user denied memory append"
+            append_long_term_memory(workspace_dir, content)
+        else:
+            memory_dir = workspace_dir / "memory"
+            memory_dir.mkdir(parents=True, exist_ok=True)
+            today_file = memory_dir / f"{date.today().isoformat()}.md"
+            if not today_file.exists():
+                today_file.write_text(
+                    DAILY_MEMORY_TEMPLATE.format(today=date.today().isoformat()),
+                    encoding="utf-8",
+                )
+            append_daily_memory(workspace_dir, content)
 
-    # Keep memory index hot for subsequent memory_search calls.
     try:
         store = WorkspaceMemoryStore()
         store.index_workspace_sync(workspace_dir)
+        global_ws = resolve_workspace_dir()
+        if workspace_dir.resolve(strict=False) != global_ws.resolve(strict=False):
+            store.index_workspace_sync(global_ws)
     except Exception:
         pass
-    return f"OK: appended to {target}"
+    return f"OK: appended to {target} (scope={scope})"
 
 
 def _tool_knowledge_search(
@@ -5446,7 +5492,12 @@ async def dispatch_tool_async(
                 dispatch_project_state_tool, name, arguments, session
             )
         if name == "memory_append":
-            return await _tool_memory_append(arguments, confirm_gate=gate, emit_event=event_callback)
+            return await _tool_memory_append(
+                arguments,
+                confirm_gate=gate,
+                emit_event=event_callback,
+                session=session,
+            )
         if name == "memory_search":
             return await _tool_memory_search(arguments, session)
         if name == "knowledge_search":

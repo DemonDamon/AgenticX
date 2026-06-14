@@ -109,6 +109,7 @@ from agenticx.workspace.loader import (
     load_favorites,
     read_memory_entries,
     remove_favorite_memory_note,
+    resolve_subject_workspace_dir,
     resolve_workspace_dir,
     update_favorite_tags,
     update_memory_entry,
@@ -5004,12 +5005,21 @@ def create_studio_app() -> FastAPI:
             "already_saved": already_saved,
         }
 
+    def _memory_workspace_dir_from_payload(payload: dict | None = None, *, avatar_id: str | None = None) -> Path:
+        aid = (avatar_id or "").strip()
+        if not aid and isinstance(payload, dict):
+            aid = str(payload.get("avatar_id") or "").strip()
+        if aid:
+            return resolve_subject_workspace_dir(aid)
+        return resolve_workspace_dir()
+
     @app.get("/api/memory/workspace")
     async def get_memory_workspace(
+        avatar_id: str | None = None,
         x_agx_desktop_token: str | None = Header(default=None),
     ) -> dict:
         _check_token(x_agx_desktop_token)
-        workspace_dir = resolve_workspace_dir()
+        workspace_dir = _memory_workspace_dir_from_payload(avatar_id=avatar_id)
         entries = read_memory_entries(workspace_dir)
         sections_map: dict[str, list[dict]] = {}
         sections_order: list[str] = []
@@ -5044,7 +5054,7 @@ def create_studio_app() -> FastAPI:
         if not text:
             raise HTTPException(status_code=400, detail="empty text")
         section = str(payload.get("section") or "User Anchors").strip() or "User Anchors"
-        workspace_dir = resolve_workspace_dir()
+        workspace_dir = _memory_workspace_dir_from_payload(payload)
         append_long_term_memory(workspace_dir, text, section=section)
         try:
             WorkspaceMemoryStore().index_workspace_sync(workspace_dir)
@@ -5068,7 +5078,7 @@ def create_studio_app() -> FastAPI:
             index = int(payload.get("index"))
         except (TypeError, ValueError):
             raise HTTPException(status_code=400, detail="index must be an integer")
-        workspace_dir = resolve_workspace_dir()
+        workspace_dir = _memory_workspace_dir_from_payload(payload)
         children: list[str] | None = None
         raw_children = payload.get("children")
         if raw_children is not None:
@@ -5101,7 +5111,7 @@ def create_studio_app() -> FastAPI:
             index = int(payload.get("index"))
         except (TypeError, ValueError):
             raise HTTPException(status_code=400, detail="index must be an integer")
-        workspace_dir = resolve_workspace_dir()
+        workspace_dir = _memory_workspace_dir_from_payload(payload)
         try:
             delete_memory_entry(workspace_dir, section, index)
         except ValueError as exc:
@@ -5135,7 +5145,7 @@ def create_studio_app() -> FastAPI:
             targets.append((section, index))
         if not targets:
             raise HTTPException(status_code=400, detail="no valid entries")
-        workspace_dir = resolve_workspace_dir()
+        workspace_dir = _memory_workspace_dir_from_payload(payload)
         deleted = delete_memory_entries_batch(workspace_dir, targets)
         if deleted <= 0:
             raise HTTPException(status_code=400, detail="no entries deleted")

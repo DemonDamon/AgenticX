@@ -30,8 +30,11 @@ from agenticx.llms.provider_resolver import ProviderResolver
 from agenticx.memory.workspace_memory import WorkspaceMemoryStore
 from agenticx.runtime.team_manager import AgentTeamManager
 from agenticx.workspace.loader import (
+    DAILY_MEMORY_TEMPLATE,
     append_daily_memory,
     append_long_term_memory,
+    append_user_global_preference,
+    resolve_subject_workspace_dir,
     resolve_workspace_dir,
 )
 
@@ -176,10 +179,10 @@ _META_ONLY_TOOLS: List[Dict[str, Any]] = [
         "function": {
             "name": "memory_append",
             "description": (
-                "Persist a fact to workspace memory so it survives across sessions. "
-                "Use 'daily' for transient session outcomes; use 'long_term' for user preferences, "
-                "important URLs, recurring instructions, or anything the user explicitly asks to remember. "
-                "Content should be a concise, self-contained note (not raw conversation text)."
+                "Persist a fact to the current subject workspace (meta/avatar/group) or global USER baseline. "
+                "Default scope=subject; use scope=user_global when the user wants all subjects to remember "
+                "(e.g. a lesson from one avatar that others should also follow). "
+                "Use 'daily' for transient outcomes; 'long_term' for preferences and durable facts."
             ),
             "parameters": {
                 "type": "object",
@@ -192,6 +195,11 @@ _META_ONLY_TOOLS: List[Dict[str, Any]] = [
                     "content": {
                         "type": "string",
                         "description": "Concise fact to persist. Include key details (URLs, paths, names).",
+                    },
+                    "scope": {
+                        "type": "string",
+                        "enum": ["subject", "user_global"],
+                        "description": "subject (default) = current pane; user_global = global USER.md for all subjects.",
                     },
                 },
                 "required": ["target", "content"],
@@ -2546,20 +2554,46 @@ async def dispatch_meta_tool_async(
     if name == "memory_append":
         target = str(arguments.get("target", "daily") or "daily").strip().lower()
         content = str(arguments.get("content", "")).strip()
+        scope = str(arguments.get("scope", "subject") or "subject").strip().lower()
         if not content:
             return json.dumps({"ok": False, "error": "missing content"}, ensure_ascii=False)
-        workspace_dir = resolve_workspace_dir()
-        if target == "long_term":
-            append_long_term_memory(workspace_dir, content)
+        if scope not in {"subject", "user_global"}:
+            return json.dumps({"ok": False, "error": "scope must be subject or user_global"}, ensure_ascii=False)
+        if scope == "user_global":
+            if target != "long_term":
+                return json.dumps(
+                    {"ok": False, "error": "user_global scope only supports long_term"},
+                    ensure_ascii=False,
+                )
+            append_user_global_preference(content)
+            workspace_dir = resolve_workspace_dir()
         else:
-            append_daily_memory(workspace_dir, content)
+            workspace_dir = resolve_subject_workspace_dir(session=session)
+            workspace_dir.mkdir(parents=True, exist_ok=True)
+            if target == "long_term":
+                append_long_term_memory(workspace_dir, content)
+            else:
+                from datetime import date
+
+                memory_dir = workspace_dir / "memory"
+                memory_dir.mkdir(parents=True, exist_ok=True)
+                today_file = memory_dir / f"{date.today().isoformat()}.md"
+                if not today_file.exists():
+                    today_file.write_text(
+                        DAILY_MEMORY_TEMPLATE.format(today=date.today().isoformat()),
+                        encoding="utf-8",
+                    )
+                append_daily_memory(workspace_dir, content)
         try:
             store = WorkspaceMemoryStore()
             store.index_workspace_sync(workspace_dir)
+            global_ws = resolve_workspace_dir()
+            if workspace_dir.resolve(strict=False) != global_ws.resolve(strict=False):
+                store.index_workspace_sync(global_ws)
         except Exception:
             pass
         return json.dumps(
-            {"ok": True, "target": target, "content": content[:200]},
+            {"ok": True, "target": target, "scope": scope, "content": content[:200]},
             ensure_ascii=False,
         )
 
