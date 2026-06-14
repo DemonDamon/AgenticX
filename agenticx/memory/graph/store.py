@@ -22,6 +22,7 @@ from agenticx.memory.graph.status import MemoryGraphStatusStore
 logger = logging.getLogger(__name__)
 
 _EPISODE_LIST_MAX = 500
+_INIT_TIMEOUT_SECONDS = 120.0
 _EPISODE_IMPACT_NOTE = (
     "Entities may be shared across other episodes; removing this episode does not "
     "guarantee all related entities or edges are removed from the graph."
