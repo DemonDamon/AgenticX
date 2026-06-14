@@ -9063,6 +9063,13 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
       ) : null}
       {!compactSidePanels && pane.memoryGraphOpen ? (
         <div className="relative h-full shrink-0 overflow-hidden border-l border-border" style={{ width: historyWidth }}>
+          <div
+            className="group absolute -left-[3px] top-0 z-20 h-full w-2 cursor-col-resize"
+            onMouseDown={startResizeHistory}
+            title="拖拽调整记忆图谱面板宽度"
+          >
+            <div className="mx-auto h-full w-px bg-[var(--ui-accent-divider)] transition-all duration-200 group-hover:w-[2px] group-hover:bg-[var(--ui-btn-primary-bg)]" />
+          </div>
           <MemoryGraphPanel pane={pane} onClose={closeMemoryGraphPanelOnly} tintColor={paneTint} />
         </div>
       ) : null}
@@ -9185,6 +9192,13 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
               className="pointer-events-auto absolute bottom-0 right-0 top-10 z-50 shrink-0 overflow-hidden border-l border-border bg-surface-base shadow-[6px_0_24px_rgba(0,0,0,0.28)]"
               style={{ width: overlayHistoryWidth, WebkitAppRegion: "no-drag" } as CSSProperties}
             >
+              <div
+                className="group absolute -left-[3px] top-0 z-20 h-full w-2 cursor-col-resize"
+                onMouseDown={startResizeHistory}
+                title="拖拽调整记忆图谱面板宽度"
+              >
+                <div className="mx-auto h-full w-px bg-[var(--ui-accent-divider)] transition-all duration-200 group-hover:w-[2px] group-hover:bg-[var(--ui-btn-primary-bg)]" />
+              </div>
               <MemoryGraphPanel pane={pane} onClose={closeMemoryGraphPanelOnly} tintColor={paneTint} />
             </div>
           ) : null}
