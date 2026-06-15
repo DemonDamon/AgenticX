@@ -177,23 +177,31 @@ function StatChip({
   sub,
   accent = "rgba(99,102,241,0.9)",
   className = "",
+  mono = false,
 }: {
   label: string;
   value: string | number;
   sub?: string;
   accent?: string;
   className?: string;
+  mono?: boolean;
 }) {
   return (
-    <div className={`relative min-w-0 flex-1 px-3 py-2 ${className}`}>
+    <div className={`relative min-w-0 flex-1 px-3 pb-2 pt-2.5 ${className}`}>
       <span
-        className="absolute inset-y-2 left-0 w-[2px] rounded-full"
+        className="absolute inset-x-3 top-0 h-[2px] rounded-full"
         style={{ background: accent }}
         aria-hidden
       />
-      <div className="pl-2">
-        <div className="text-[10px] uppercase tracking-[0.06em] text-text-faint">{label}</div>
-        <div className="mt-0.5 text-base font-semibold tabular-nums leading-none text-text-strong">{value}</div>
+      <div>
+        <div className="text-[10px] tracking-[0.06em] text-text-faint">{label}</div>
+        <div
+          className={`mt-0.5 tabular-nums leading-none text-text-strong ${
+            mono ? "break-all font-mono text-[11px] font-normal leading-snug" : "text-base font-semibold"
+          }`}
+        >
+          {value}
+        </div>
         {sub ? <div className="mt-0.5 truncate text-[10px] text-text-faint">{sub}</div> : null}
       </div>
     </div>
@@ -1033,7 +1041,7 @@ function MemoryGraphExplorerInner({
       <div className="hidden w-px shrink-0 self-stretch bg-[var(--border-muted)] sm:block" aria-hidden />
       <StatChip label="关系" value={edgeCount} accent="rgba(167,139,250,0.9)" />
       <div className="hidden w-px shrink-0 self-stretch bg-[var(--border-muted)] sm:block" aria-hidden />
-      <StatChip label="Episodes" value={episodes.length} sub="时间轴条目" accent="rgba(148,163,184,0.9)" />
+      <StatChip label="记忆片段" value={episodes.length} sub="时间轴条目" accent="rgba(148,163,184,0.9)" />
       <div className="hidden w-px shrink-0 self-stretch bg-[var(--border-muted)] sm:block" aria-hidden />
       <StatChip
         label="队列"
@@ -1042,17 +1050,13 @@ function MemoryGraphExplorerInner({
         accent="rgba(245,158,11,0.9)"
       />
       <div className="hidden w-px shrink-0 self-stretch bg-[var(--border-muted)] sm:block" aria-hidden />
-      <div className="relative min-w-0 flex-[1.2] px-3 py-2">
-        <span
-          className="absolute inset-y-2 left-0 w-[2px] rounded-full"
-          style={{ background: "rgba(99,102,241,0.55)" }}
-          aria-hidden
-        />
-        <div className="pl-2">
-          <div className="text-[10px] uppercase tracking-[0.06em] text-text-faint">分区</div>
-          <div className="mt-0.5 break-all font-mono text-[11px] leading-snug text-text-subtle">{groupId}</div>
-        </div>
-      </div>
+      <StatChip
+        label="分区"
+        value={groupId}
+        mono
+        className="min-w-0 flex-[1.2]"
+        accent="rgba(99,102,241,0.55)"
+      />
     </div>
   );
 
