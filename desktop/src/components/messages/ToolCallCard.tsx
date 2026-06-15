@@ -13,6 +13,12 @@ import {
 } from "lucide-react";
 import { Shimmer } from "../ds/Shimmer";
 import { ToolOutputStream } from "./ToolOutputStream";
+import { SkillPatchPreviewCard } from "./SkillPatchPreviewCard";
+import {
+  parseSkillManageError,
+  parseSkillPatchPreviewPayload,
+  type SkillPatchPreviewPayload,
+} from "./skill-manage-preview";
 
 type Props = {
   message: Message;
@@ -29,6 +35,7 @@ type Props = {
   selectable?: boolean;
   selected?: boolean;
   onToggleSelectMessage?: (message: Message) => void;
+  onSkillManageApply?: (message: Message, payload: SkillPatchPreviewPayload, targetIndex: number | null) => void;
 };
 
 /** Legacy: extract tool name from old 🔧/✅ prefixed content */
@@ -133,6 +140,7 @@ export function ToolCallCard({
   selectable,
   selected,
   onToggleSelectMessage,
+  onSkillManageApply,
 }: Props) {
   const normalizedTerms = useMemo(() => normalizeHighlightTerms(highlightTerms), [highlightTerms]);
   const matchedByHighlight = useMemo(() => {
@@ -149,6 +157,14 @@ export function ToolCallCard({
   const status = message.toolStatus;
   const hasStream = (message.toolStreamLines?.length ?? 0) > 0;
   const hasDetail = message.content.length > 0 || hasStream;
+  const skillPreviewPayload = useMemo(() => {
+    if ((message.toolName ?? "").trim() !== "skill_manage") return null;
+    return parseSkillPatchPreviewPayload(message.content);
+  }, [message.toolName, message.content]);
+  const skillManageError = useMemo(() => {
+    if ((message.toolName ?? "").trim() !== "skill_manage") return null;
+    return parseSkillManageError(message.content);
+  }, [message.toolName, message.content]);
 
   const titleEl =
     status === "running" || status === "pending" ? (
@@ -183,7 +199,32 @@ export function ToolCallCard({
   const detailBody = (
     <>
       {hasStream ? <ToolOutputStream lines={message.toolStreamLines ?? []} /> : null}
-      {message.content ? (
+      {skillPreviewPayload ? (
+        <SkillPatchPreviewCard
+          message={message}
+          payload={skillPreviewPayload}
+          onApply={onSkillManageApply}
+        />
+      ) : null}
+      {skillManageError ? (
+        <div
+          className={`rounded border px-2 py-1 text-[12px] ${
+            skillManageError.code === "POLICY"
+              ? "border-amber-500/50 bg-amber-500/10 text-amber-300"
+              : "border-rose-500/50 bg-rose-500/10 text-rose-300"
+          }`}
+        >
+          <div className="font-medium">
+            {skillManageError.code === "POLICY" ? "安全策略拦截" : "参数/状态校验失败"}
+          </div>
+          {skillManageError.detail ? (
+            <div className="mt-0.5 whitespace-pre-wrap break-words text-[11px] text-current/90">
+              {skillManageError.detail}
+            </div>
+          ) : null}
+        </div>
+      ) : null}
+      {message.content && !skillPreviewPayload && !skillManageError ? (
         <span className="break-all whitespace-pre-wrap">
           {renderHighlightedText(message.content, normalizedTerms)}
         </span>
