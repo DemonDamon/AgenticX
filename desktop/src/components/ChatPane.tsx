@@ -79,6 +79,7 @@ import { isKnownNonVisionChatModel } from "../utils/model-vision";
 import {
   canStopCurrentRun,
   isDoubleEnterWithinWindow,
+  isStreamRunActiveForQueue,
   shouldEnqueueOnResend,
   shouldInterruptOnResend,
   shouldShowSessionWorkInProgress,
@@ -5951,8 +5952,51 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
     if (!apiBase) return;
 
     const sendLockKey = pane.id;
-    // 计算本次发送的目标 session（用于跨 session 并发判断）
     const targetSendSid = (options?.lockedSessionId || pane.sessionId || "").trim();
+    const inFlightForPane =
+      sendChatInFlightRef.current?.paneId === sendLockKey
+        ? (sendChatInFlightRef.current.sessionId || "").trim()
+        : "";
+    const canQueueFollowUp =
+      !isContinuation && !options?.suppressUserEcho && !options?.skipUserHistory;
+
+    const resolveStreamRunActive = (sessionKey: string) =>
+      isStreamRunActiveForQueue({
+        sessionId: sessionKey,
+        streamStateActive: !!sessionStreamStateRef.current[sessionKey]?.active,
+        sendInFlightForSession:
+          !!inFlightForPane && inFlightForPane === sessionKey.trim(),
+        executionState: sessionExecutionState,
+        currentSessionId: pane.sessionId || "",
+      });
+
+    const tryEnqueueFollowUp = (sessionKey: string): boolean => {
+      const sid = sessionKey.trim();
+      if (!sid || !canQueueFollowUp) return false;
+      if (
+        !shouldEnqueueOnResend({
+          isStreamRunActive: resolveStreamRunActive(sid),
+          forceSend: options?.forceSend,
+        })
+      ) {
+        return false;
+      }
+      enqueuePaneMessage(pane.id, {
+        id: crypto.randomUUID(),
+        text: messageText,
+        attachments: userAttachments,
+        contextFiles: [],
+        timestamp: Date.now(),
+      });
+      setComposerText("");
+      setQuoteTarget(null);
+      setContextFiles({});
+      return true;
+    };
+
+    if (tryEnqueueFollowUp(targetSendSid || inFlightForPane)) return;
+
+    // 计算本次发送的目标 session（用于跨 session 并发判断）
     let holdSendLock = false;
     const releaseSendLock = () => {
       if (holdSendLock && sendChatInFlightRef.current?.paneId === sendLockKey) {
@@ -5972,6 +6016,8 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
           sendChatInFlightRef.current = null;
           sendChatInFlightRef.current = { paneId: sendLockKey, sessionId: targetSendSid };
           holdSendLock = true;
+        } else if (tryEnqueueFollowUp(inFlightSid || targetSendSid)) {
+          return;
         } else {
           console.warn("[ChatPane] dropped concurrent sendChat on pane", sendLockKey);
           return;
@@ -6061,30 +6107,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
         return;
       }
     }
-    const isStreamRunActive = !!sessionStreamStateRef.current[requestSessionId]?.active;
-    const canQueueFollowUp =
-      !isContinuation && !options?.suppressUserEcho && !options?.skipUserHistory;
-
-    if (
-      canQueueFollowUp &&
-      shouldEnqueueOnResend({
-        isStreamRunActive,
-        forceSend: options?.forceSend,
-      })
-    ) {
-      enqueuePaneMessage(pane.id, {
-        id: crypto.randomUUID(),
-        text: messageText,
-        attachments: userAttachments,
-        contextFiles: [],
-        timestamp: Date.now(),
-      });
-      setComposerText("");
-      setQuoteTarget(null);
-      setContextFiles({});
-      releaseSendLock();
-      return;
-    }
+    const isStreamRunActive = resolveStreamRunActive(requestSessionId);
 
     if (
       shouldInterruptOnResend({
@@ -8759,7 +8782,18 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
                   const trimmedComposer = composerText.trim();
                   const hasComposerPayload = !!trimmedComposer || readyAttachments.length > 0;
                   const sid = (pane.sessionId || "").trim();
-                  const streamActive = !!sessionStreamStateRef.current[sid]?.active;
+                  const inFlightSid =
+                    sendChatInFlightRef.current?.paneId === pane.id
+                      ? (sendChatInFlightRef.current.sessionId || "").trim()
+                      : "";
+                  const queueSid = sid || inFlightSid;
+                  const streamActive = isStreamRunActiveForQueue({
+                    sessionId: queueSid,
+                    streamStateActive: !!sessionStreamStateRef.current[queueSid]?.active,
+                    sendInFlightForSession: !!inFlightSid && inFlightSid === queueSid,
+                    executionState: sessionExecutionState,
+                    currentSessionId: sid,
+                  });
                   const queue = useAppStore.getState().pendingMessages[paneId] ?? [];
 
                   if (streamActive) {

@@ -132,6 +132,29 @@ export type StreamingResendInput = {
   forceSend?: boolean;
 };
 
+export type StreamRunActiveInput = {
+  sessionId: string;
+  streamStateActive?: boolean;
+  sendInFlightForSession?: boolean;
+  executionState?: SessionExecutionState | string;
+  currentSessionId?: string;
+};
+
+/** Whether a follow-up should queue instead of starting a concurrent send. */
+export function isStreamRunActiveForQueue(opts: StreamRunActiveInput): boolean {
+  const sid = (opts.sessionId || "").trim();
+  if (!sid) return false;
+  if (opts.streamStateActive) return true;
+  if (opts.sendInFlightForSession) return true;
+  if (
+    sid === (opts.currentSessionId || "").trim() &&
+    shouldShowStopForExecutionState(opts.executionState)
+  ) {
+    return true;
+  }
+  return false;
+}
+
 /** Default: enqueue follow-ups while a stream run is active. */
 export function shouldEnqueueOnResend(opts: StreamingResendInput): boolean {
   if (opts.forceSend) return false;

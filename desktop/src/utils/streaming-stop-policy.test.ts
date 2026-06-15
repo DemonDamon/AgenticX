@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   canStopCurrentRun,
   isDoubleEnterWithinWindow,
+  isStreamRunActiveForQueue,
   shouldEnqueueOnResend,
   shouldInterruptOnResend,
   shouldShowSessionWorkInProgress,
@@ -51,6 +52,32 @@ describe("shouldShowStopButton", () => {
         executionState: "idle",
         hasDelegation: true,
         isGroupPane: false,
+      })
+    ).toBe(true);
+  });
+});
+
+describe("isStreamRunActiveForQueue", () => {
+  it("treats in-flight send lock as active even when stream ref cleared", () => {
+    expect(
+      isStreamRunActiveForQueue({
+        sessionId: "s1",
+        streamStateActive: false,
+        sendInFlightForSession: true,
+        executionState: "idle",
+        currentSessionId: "s1",
+      })
+    ).toBe(true);
+  });
+
+  it("treats backend running state as active for current session", () => {
+    expect(
+      isStreamRunActiveForQueue({
+        sessionId: "s1",
+        streamStateActive: false,
+        sendInFlightForSession: false,
+        executionState: "running",
+        currentSessionId: "s1",
       })
     ).toBe(true);
   });
