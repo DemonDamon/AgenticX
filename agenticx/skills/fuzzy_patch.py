@@ -20,7 +20,7 @@ Author: Damon Li
 from __future__ import annotations
 
 import re
-from typing import Callable
+from typing import Any, Callable
 
 
 def fuzzy_find_and_replace(
@@ -28,6 +28,8 @@ def fuzzy_find_and_replace(
     old_string: str,
     new_string: str,
     replace_all: bool = False,
+    before_context: str = "",
+    after_context: str = "",
 ) -> tuple[str, int, str | None, str | None]:
     """Find and replace using a chain of increasingly fuzzy strategies.
 
@@ -50,10 +52,19 @@ def fuzzy_find_and_replace(
 
     for name, fn in strategies:
         matches = fn(content, old_string)
+        if matches and (before_context or after_context):
+            matches = _filter_matches_by_context(
+                content,
+                matches,
+                before_context=before_context,
+                after_context=after_context,
+            )
         if matches:
             if len(matches) > 1 and not replace_all:
+                ranges = ", ".join(f"{s}:{e}" for s, e in matches[:8])
                 return content, 0, None, (
                     f"Found {len(matches)} matches (strategy: {name}). "
+                    f"Ranges: {ranges}. "
                     "Provide more context to make it unique, or set replace_all=True."
                 )
             new_content = _apply_replacements(content, matches, new_string)
@@ -62,12 +73,82 @@ def fuzzy_find_and_replace(
     return content, 0, None, "Could not find a match for old_string in the file"
 
 
+def fuzzy_find_matches(
+    content: str,
+    old_string: str,
+    *,
+    before_context: str = "",
+    after_context: str = "",
+) -> dict[str, Any]:
+    if not old_string:
+        return {"error": "old_string cannot be empty", "strategy": None, "matches": []}
+    strategies: list[tuple[str, Callable[[str, str], list[tuple[int, int]]]]] = [
+        ("exact", _strategy_exact),
+        ("line_trimmed", _strategy_line_trimmed),
+        ("whitespace_normalized", _strategy_whitespace_normalized),
+        ("indentation_flexible", _strategy_indentation_flexible),
+        ("escape_normalized", _strategy_escape_normalized),
+    ]
+    for name, fn in strategies:
+        matches = fn(content, old_string)
+        if matches and (before_context or after_context):
+            matches = _filter_matches_by_context(
+                content,
+                matches,
+                before_context=before_context,
+                after_context=after_context,
+            )
+        if matches:
+            return {
+                "error": None,
+                "strategy": name,
+                "matches": [match_to_range(content, m) for m in matches],
+            }
+    return {"error": "Could not find a match for old_string in the file", "strategy": None, "matches": []}
+
+
+def match_to_range(content: str, match: tuple[int, int]) -> dict[str, int]:
+    start, end = match
+    return {
+        "start": start,
+        "end": end,
+        "start_line": _line_of_pos(content, start),
+        "end_line": _line_of_pos(content, max(start, end - 1)),
+    }
+
+
 def _apply_replacements(content: str, matches: list[tuple[int, int]], new_string: str) -> str:
     """Apply replacements at given (start, end) positions, back to front."""
     result = content
     for start, end in sorted(matches, key=lambda x: x[0], reverse=True):
         result = result[:start] + new_string + result[end:]
     return result
+
+
+def _line_of_pos(text: str, pos: int) -> int:
+    if pos <= 0:
+        return 1
+    return text.count("\n", 0, min(pos, len(text))) + 1
+
+
+def _filter_matches_by_context(
+    content: str,
+    matches: list[tuple[int, int]],
+    *,
+    before_context: str,
+    after_context: str,
+) -> list[tuple[int, int]]:
+    filtered: list[tuple[int, int]] = []
+    for start, end in matches:
+        before_ok = True
+        after_ok = True
+        if before_context:
+            before_ok = content[max(0, start - len(before_context) - 800) : start].find(before_context) != -1
+        if after_context:
+            after_ok = content[end : min(len(content), end + len(after_context) + 800)].find(after_context) != -1
+        if before_ok and after_ok:
+            filtered.append((start, end))
+    return filtered
 
 
 def _strategy_exact(content: str, pattern: str) -> list[tuple[int, int]]:

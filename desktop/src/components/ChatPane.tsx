@@ -51,6 +51,7 @@ import { StickyTaskBar } from "./StickyTaskBar";
 import { WorkspacePanel } from "./WorkspacePanel";
 import { SpawnsColumn } from "./SpawnsColumn";
 import { MessageRenderer, renderToolMessageExtras } from "./messages/MessageRenderer";
+import type { SkillPatchPreviewPayload } from "./messages/skill-manage-preview";
 import { groupConsecutiveToolMessages, type GroupedChatRow } from "./messages/group-tool-messages";
 import { expandMessagesToTopLevelRows } from "./messages/react-blocks";
 import { shouldHideStreamOverlay, shouldShowMidTurnStreamActivity } from "../utils/stream-overlay-policy";
@@ -5286,6 +5287,49 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
     [paneId, takePendingMessage]
   );
 
+  const applySkillPatchPreview = useCallback(
+    (message: Message, payload: SkillPatchPreviewPayload, targetIndex: number | null) => {
+      const args = (message.toolArgs ?? {}) as Record<string, unknown>;
+      const skillName = String(args.name ?? "").trim();
+      const oldString = String(args.old_string ?? "");
+      const newString = String(args.new_string ?? "");
+      const beforeContext = String(args.before_context ?? "");
+      const afterContext = String(args.after_context ?? "");
+      const replaceAll = Boolean(args.replace_all);
+      const patchToken = String(payload.patch_token ?? "").trim();
+      const sid = String(message.ownerSessionId ?? pane.sessionId ?? "").trim();
+      if (!sid || !skillName || !oldString) return;
+      const applyArgs: Record<string, unknown> = {
+        action: "patch",
+        name: skillName,
+        mode: "apply",
+        old_string: oldString,
+        new_string: newString,
+      };
+      if (patchToken) applyArgs.patch_token = patchToken;
+      if (beforeContext) applyArgs.before_context = beforeContext;
+      if (afterContext) applyArgs.after_context = afterContext;
+      if (replaceAll) applyArgs.replace_all = true;
+      if (targetIndex !== null && Number.isFinite(targetIndex)) {
+        applyArgs.target_index = targetIndex;
+      }
+      const instruction =
+        [
+          "请立即且仅执行一次工具调用，不要输出解释文字。",
+          "tool_name: skill_manage",
+          `arguments: ${JSON.stringify(applyArgs)}`,
+          "执行完成后再返回结果。",
+        ].join("\n");
+      void sendChatRef.current(instruction, {
+        lockedSessionId: sid,
+        suppressUserEcho: true,
+        skipUserHistory: true,
+        forceSend: true,
+      });
+    },
+    [pane.sessionId]
+  );
+
   const renderedMessages = useMemo(() => {
     const reactActionStyle = getAssistantActionStyle({ inReActRow: true });
     const renderGroupedRow = (
@@ -5373,6 +5417,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
               }
               streamStalled={message.id === "__stream__" && stallState === "stall"}
               streamStalledSeconds={message.id === "__stream__" ? silentSeconds : 0}
+              onSkillManageApply={applySkillPatchPreview}
             />
           </div>
         );
@@ -5407,6 +5452,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
             onToggleSelectMessage={toggleSelectMessage}
             omitLeadingSpacer={reactCol}
             flat={reactFlat}
+            onSkillManageApply={applySkillPatchPreview}
           />
         </div>
       );

@@ -17,6 +17,7 @@ import { isViewImageInjectMessage } from "../../utils/view-image-inject";
 import { parseTodoMessage, TodoUpdateCard } from "../TodoUpdateCard";
 import { isMetaLeaderIdentity, resolveMetaDisplayName } from "../../utils/display-name";
 import { resolveReferencesForAssistant } from "../../utils/turn-reference-context";
+import type { SkillPatchPreviewPayload } from "./skill-manage-preview";
 
 type Props = {
   message: Message;
@@ -60,6 +61,7 @@ type Props = {
   isLastAssistantInPane?: boolean;
   streamStalled?: boolean;
   streamStalledSeconds?: number;
+  onSkillManageApply?: (message: Message, payload: SkillPatchPreviewPayload, targetIndex: number | null) => void;
 };
 
 function extractPathFromToolResult(msg: string): string {
@@ -184,6 +186,7 @@ export function MessageRenderer({
   isLastAssistantInPane = false,
   streamStalled = false,
   streamStalledSeconds = 0,
+  onSkillManageApply,
 }: Props) {
   const chatStyle = useAppStore((s) => s.chatStyle);
   const resolvedReferences = useMemo(() => {
@@ -298,6 +301,7 @@ export function MessageRenderer({
         selected={selected}
         onToggleSelectMessage={onToggleSelectMessage}
         action={renderToolMessageExtras(message, { onRevealPath, onResolveInlineConfirm })}
+        onSkillManageApply={onSkillManageApply}
       />
     );
   }

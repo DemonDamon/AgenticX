@@ -5,6 +5,7 @@ import { ToolCallCard } from "./ToolCallCard";
 import type { ReactNode } from "react";
 import { TodoUpdateCard } from "../TodoUpdateCard";
 import { isTodoUpdateToolMessage } from "./MessageRenderer";
+import type { SkillPatchPreviewPayload } from "./skill-manage-preview";
 
 type Props = {
   messages: Message[];
@@ -18,6 +19,7 @@ type Props = {
   omitLeadingSpacer?: boolean;
   /** When true, remove outer border/rounded so parent unified container provides the single border. */
   flat?: boolean;
+  onSkillManageApply?: (message: Message, payload: SkillPatchPreviewPayload, targetIndex: number | null) => void;
 };
 
 function countToolNames(msgs: Message[]): Map<string, number> {
@@ -38,6 +40,7 @@ export function TurnToolGroupCard({
   onToggleSelectMessage,
   omitLeadingSpacer = false,
   flat = false,
+  onSkillManageApply,
 }: Props) {
   const [expanded, setExpanded] = useState(false);
   const summary = useMemo(() => {
@@ -115,6 +118,7 @@ export function TurnToolGroupCard({
                   action={renderExtras?.(m)}
                   variant="nested"
                   omitLeadingSpacer={flat}
+                  onSkillManageApply={onSkillManageApply}
                 />
               )
             )}

@@ -10,6 +10,7 @@ import asyncio
 import base64
 import difflib
 import fnmatch
+import hashlib
 import json
 import logging
 import os
@@ -657,8 +658,8 @@ STUDIO_TOOLS: List[Dict[str, Any]] = [
                 "properties": {
                     "action": {
                         "type": "string",
-                        "enum": ["create", "patch", "delete"],
-                        "description": "Operation: 'create' writes a new SKILL.md; 'patch' edits an existing one; 'delete' removes the skill directory.",
+                        "enum": ["create", "patch", "delete", "history", "rollback"],
+                        "description": "Operation: create/patch/delete/history/rollback.",
                     },
                     "name": {
                         "type": "string",
@@ -692,6 +693,39 @@ STUDIO_TOOLS: List[Dict[str, Any]] = [
                     },
                     "old_string": {"type": "string", "description": "Required for 'patch': exact substring to find and replace in the existing SKILL.md."},
                     "new_string": {"type": "string", "description": "Required for 'patch': replacement text for old_string."},
+                    "mode": {
+                        "type": "string",
+                        "enum": ["preview", "apply"],
+                        "description": "Patch mode. preview only computes diff/token and does not write; apply writes changes.",
+                    },
+                    "patch_token": {
+                        "type": "string",
+                        "description": "Token returned by preview; when provided to apply, must match current content hash and patch payload.",
+                    },
+                    "before_context": {
+                        "type": "string",
+                        "description": "Optional context before old_string for disambiguation.",
+                    },
+                    "after_context": {
+                        "type": "string",
+                        "description": "Optional context after old_string for disambiguation.",
+                    },
+                    "target_index": {
+                        "type": "integer",
+                        "description": "Optional index in multi-match candidates; required when preview returns multiple matches and replace_all is false.",
+                    },
+                    "replace_all": {
+                        "type": "boolean",
+                        "description": "If true, patch all matches. Default false.",
+                    },
+                    "limit": {
+                        "type": "integer",
+                        "description": "For history action: number of versions to return (1-200).",
+                    },
+                    "to_version": {
+                        "type": "string",
+                        "description": "For rollback action: target version id from history.",
+                    },
                 },
                 "required": ["action", "name"],
                 "additionalProperties": False,
@@ -4609,6 +4643,60 @@ def _resolve_skill_create_content(arguments: Dict[str, Any], session: Optional[S
     return content, None
 
 
+def _skill_manage_error(code: str, message: str) -> str:
+    return f"ERROR[{code.upper()}]: {message}"
+
+
+def _skill_patch_token_payload(
+    *,
+    name: str,
+    strategy: str,
+    old_hash: str,
+    old_string: str,
+    new_string: str,
+    before_context: str,
+    after_context: str,
+    ranges: list[dict[str, int]],
+) -> dict[str, Any]:
+    return {
+        "v": 1,
+        "name": name,
+        "strategy": strategy,
+        "old_hash": old_hash,
+        "old_string_sha256": hashlib.sha256(old_string.encode("utf-8")).hexdigest(),
+        "new_string_sha256": hashlib.sha256(new_string.encode("utf-8")).hexdigest(),
+        "before_context_sha256": hashlib.sha256(before_context.encode("utf-8")).hexdigest() if before_context else "",
+        "after_context_sha256": hashlib.sha256(after_context.encode("utf-8")).hexdigest() if after_context else "",
+        "ranges": ranges,
+        "issued_at": int(time.time()),
+    }
+
+
+def _encode_patch_token(payload: dict[str, Any]) -> str:
+    body = json.dumps(payload, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+    checksum = hashlib.sha256(body).hexdigest()
+    envelope = {"p": payload, "c": checksum}
+    raw = json.dumps(envelope, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+    return base64.urlsafe_b64encode(raw).decode("ascii")
+
+
+def _decode_patch_token(token: str) -> Tuple[Optional[dict[str, Any]], Optional[str]]:
+    try:
+        raw = base64.urlsafe_b64decode(token.encode("ascii"))
+        obj = json.loads(raw.decode("utf-8"))
+        payload = obj.get("p")
+        checksum = str(obj.get("c", ""))
+        if not isinstance(payload, dict):
+            return None, "invalid patch token payload"
+        body = json.dumps(payload, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+        expected = hashlib.sha256(body).hexdigest()
+        if checksum != expected:
+            return None, "patch token checksum mismatch"
+        return payload, None
+    except Exception as exc:
+        return None, f"invalid patch token: {exc}"
+
+
 def _tool_session_search(arguments: Dict[str, Any], session: Optional[StudioSession]) -> str:
     _ = session
     from agenticx.memory.session_store import session_fts_enabled
@@ -4708,6 +4796,10 @@ def _write_skill_md_with_checks(
         normalized, frontmatter_fixed = normalize_skill_md(content, canonical_name)
     except SkillFrontmatterError as exc:
         return None, f"ERROR: {exc}"
+    # Defense-in-depth: block classic remote pipe-to-shell patterns even if
+    # guard pattern sets or confidence filters drift over time.
+    if re.search(r"(curl|wget)[^\n]*\|\s*(?:ba)?sh\b", normalized, re.IGNORECASE):
+        return None, _skill_manage_error("policy", "危险命令模式：检测到远程下载并管道执行 shell")
 
     validation_warnings: List[str] = []
     skill_md = skill_dir / "SKILL.md"
@@ -4904,7 +4996,7 @@ def _tool_skill_manage(arguments: Dict[str, Any], session: Optional[StudioSessio
     if not action:
         return (
             "ERROR: 'action' is required. "
-            "Call skill_manage with action='create'|'patch'|'delete', name=<skill-name>, "
+            "Call skill_manage with action='create'|'patch'|'delete'|'history'|'rollback', name=<skill-name>, "
             "and content=<full SKILL.md text> for create."
         )
     raw_name = str(arguments.get("name", "") or "").strip()
@@ -4963,28 +5055,159 @@ def _tool_skill_manage(arguments: Dict[str, Any], session: Optional[StudioSessio
     if action == "patch":
         old_s = str(arguments.get("old_string", ""))
         new_s = str(arguments.get("new_string", ""))
+        mode = str(arguments.get("mode", "apply") or "apply").strip().lower()
+        if mode not in {"preview", "apply"}:
+            return _skill_manage_error("validation", "mode must be 'preview' or 'apply'")
         replace_all = bool(arguments.get("replace_all", False))
+        before_context = str(arguments.get("before_context", "") or "")
+        after_context = str(arguments.get("after_context", "") or "")
+        target_index_raw = arguments.get("target_index")
+        target_index: Optional[int] = None
+        if target_index_raw is not None:
+            try:
+                target_index = int(target_index_raw)
+            except Exception:
+                return _skill_manage_error("validation", "target_index must be an integer")
         skill_md = skill_dir / "SKILL.md"
         if not skill_md.is_file():
-            return "ERROR: SKILL.md not found"
+            return _skill_manage_error("validation", "SKILL.md not found")
         try:
             original = skill_md.read_text(encoding="utf-8")
         except OSError as exc:
-            return f"ERROR: read failed: {exc}"
-        from agenticx.skills.fuzzy_patch import fuzzy_find_and_replace
+            return _skill_manage_error("validation", f"read failed: {exc}")
+        from agenticx.skills.fuzzy_patch import fuzzy_find_and_replace, fuzzy_find_matches
+        from agenticx.skills.guard import scan_skill_markdown_text
 
-        updated, match_count, strategy, match_err = fuzzy_find_and_replace(
+        matches_info = fuzzy_find_matches(
+            original,
+            old_s,
+            before_context=before_context,
+            after_context=after_context,
+        )
+        if matches_info.get("error"):
+            return _skill_manage_error("validation", str(matches_info["error"]))
+        ranges = list(matches_info.get("matches", []))
+        strategy = str(matches_info.get("strategy", "") or "")
+        if not ranges:
+            return _skill_manage_error("validation", "Could not find a match for old_string in the file")
+        if len(ranges) > 1 and not replace_all:
+            if target_index is None:
+                payload = {
+                    "ok": False,
+                    "action": "patch",
+                    "mode": mode,
+                    "requires_target_selection": True,
+                    "strategy": strategy,
+                    "match_count": len(ranges),
+                    "target_ranges": ranges,
+                }
+                return json.dumps(payload, ensure_ascii=False)
+            if target_index < 0 or target_index >= len(ranges):
+                return _skill_manage_error("validation", "target_index out of range")
+            selected = ranges[target_index]
+            ranges = [selected]
+            s = int(selected.get("start", 0))
+            e = int(selected.get("end", s))
+            before_context = original[max(0, s - 80) : s]
+            after_context = original[e : min(len(original), e + 80)]
+            replace_all = False
+
+        updated, match_count, strategy2, match_err = fuzzy_find_and_replace(
             original,
             old_s,
             new_s,
             replace_all=replace_all,
+            before_context=before_context,
+            after_context=after_context,
         )
         if match_err:
-            return f"ERROR: {match_err}"
+            return _skill_manage_error("validation", match_err)
+        strategy = strategy2 or strategy
+
+        old_hash = hashlib.sha256(original.encode("utf-8")).hexdigest()
+        token_payload = _skill_patch_token_payload(
+            name=name,
+            strategy=strategy or "exact",
+            old_hash=old_hash,
+            old_string=old_s,
+            new_string=new_s,
+            before_context=before_context,
+            after_context=after_context,
+            ranges=ranges,
+        )
+        patch_token = _encode_patch_token(token_payload)
+        quick_result = scan_skill_markdown_text(updated, source="agent-created")
+        quick_allowed, quick_reason = should_allow(quick_result, "agent-created")
+        preview_payload = {
+            "ok": True,
+            "action": "patch",
+            "mode": "preview",
+            "strategy": strategy,
+            "match_count": match_count,
+            "target_ranges": ranges,
+            "old_sha256": old_hash,
+            "new_sha256": hashlib.sha256(updated.encode("utf-8")).hexdigest(),
+            "patch_token": patch_token,
+            "risk": {
+                "verdict": quick_result.verdict,
+                "allowed": quick_allowed,
+                "reason": quick_reason,
+                "findings": [f.pattern_name for f in quick_result.findings[:8]],
+            },
+            "diff": "\n".join(
+                difflib.unified_diff(
+                    original.splitlines(),
+                    updated.splitlines(),
+                    fromfile="SKILL.md (old)",
+                    tofile="SKILL.md (new)",
+                    lineterm="",
+                )
+            ),
+        }
+        if mode == "preview":
+            return json.dumps(preview_payload, ensure_ascii=False)
+
+        token_arg = str(arguments.get("patch_token", "") or "").strip()
+        if token_arg:
+            decoded, token_err = _decode_patch_token(token_arg)
+            if token_err:
+                return _skill_manage_error("validation", token_err)
+            assert decoded is not None
+            if str(decoded.get("name", "")) != name:
+                return _skill_manage_error("validation", "patch token skill mismatch")
+            if str(decoded.get("old_hash", "")) != old_hash:
+                return _skill_manage_error("validation", "patch token outdated: file changed since preview")
+            if str(decoded.get("old_string_sha256", "")) != hashlib.sha256(old_s.encode("utf-8")).hexdigest():
+                return _skill_manage_error("validation", "patch token old_string mismatch")
+            if str(decoded.get("new_string_sha256", "")) != hashlib.sha256(new_s.encode("utf-8")).hexdigest():
+                return _skill_manage_error("validation", "patch token new_string mismatch")
+            if str(decoded.get("before_context_sha256", "")) != (
+                hashlib.sha256(before_context.encode("utf-8")).hexdigest() if before_context else ""
+            ):
+                return _skill_manage_error("validation", "patch token before_context mismatch")
+            if str(decoded.get("after_context_sha256", "")) != (
+                hashlib.sha256(after_context.encode("utf-8")).hexdigest() if after_context else ""
+            ):
+                return _skill_manage_error("validation", "patch token after_context mismatch")
+
         backup = original
 
         def _rollback_patch() -> None:
             skill_md.write_text(backup, encoding="utf-8")
+
+        try:
+            from agenticx.skills.skill_versions import save_snapshot
+
+            save_snapshot(
+                skills_root=root,
+                skill_name=name,
+                content=original,
+                actor="agent",
+                session_id=str(getattr(session, "session_id", "") or ""),
+                summary=f"pre-patch fuzzy:{strategy}",
+            )
+        except Exception:
+            pass
 
         success, err = _write_skill_md_with_checks(
             action="patch",
@@ -4992,10 +5215,12 @@ def _tool_skill_manage(arguments: Dict[str, Any], session: Optional[StudioSessio
             content=updated,
             canonical_name=name,
             on_rollback=_rollback_patch,
-            extra={"strategy": strategy, "matches": match_count},
+            extra={"strategy": strategy, "matches": match_count, "mode": "apply"},
         )
         if err:
-            return err
+            if err.startswith("ERROR: 技能内容被安全策略拦截"):
+                return _skill_manage_error("policy", err)
+            return _skill_manage_error("validation", err)
         try:
             from agenticx.skills.versioning import append_changelog
 
@@ -5006,7 +5231,7 @@ def _tool_skill_manage(arguments: Dict[str, Any], session: Optional[StudioSessio
             )
         except Exception:
             pass
-        return success or "ERROR: unknown patch failure"
+        return success or _skill_manage_error("validation", "unknown patch failure")
 
     if action == "delete":
         if not skill_dir.exists():
@@ -5021,6 +5246,87 @@ def _tool_skill_manage(arguments: Dict[str, Any], session: Optional[StudioSessio
         except OSError as exc:
             return f"ERROR: delete failed: {exc}"
         return json.dumps({"ok": True, "action": "delete", "removed": True}, ensure_ascii=False)
+
+    if action == "history":
+        limit = int(arguments.get("limit", 50) or 50)
+        limit = max(1, min(limit, 200))
+        try:
+            from agenticx.skills.skill_versions import list_versions
+
+            versions = list_versions(skills_root=root, skill_name=name, limit=limit)
+        except Exception as exc:
+            return _skill_manage_error("validation", f"history failed: {exc}")
+        payload = {
+            "ok": True,
+            "action": "history",
+            "name": name,
+            "versions": [
+                {
+                    "version": v.version,
+                    "created_at": v.created_at,
+                    "actor": v.actor,
+                    "session_id": v.session_id,
+                    "content_sha256": v.content_sha256,
+                    "summary": v.summary,
+                }
+                for v in versions
+            ],
+        }
+        return json.dumps(payload, ensure_ascii=False)
+
+    if action == "rollback":
+        to_version = str(arguments.get("to_version", "") or "").strip()
+        if not to_version:
+            return _skill_manage_error("validation", "to_version is required for rollback")
+        skill_md = skill_dir / "SKILL.md"
+        if not skill_md.is_file():
+            return _skill_manage_error("validation", "SKILL.md not found")
+        try:
+            from agenticx.skills.skill_versions import get_version_content, save_snapshot
+        except Exception as exc:
+            return _skill_manage_error("validation", f"versioning unavailable: {exc}")
+        try:
+            original = skill_md.read_text(encoding="utf-8")
+            target = get_version_content(skills_root=root, skill_name=name, version=to_version)
+        except FileNotFoundError as exc:
+            return _skill_manage_error("validation", str(exc))
+        except Exception as exc:
+            return _skill_manage_error("validation", f"rollback read failed: {exc}")
+
+        def _rollback_original() -> None:
+            skill_md.write_text(original, encoding="utf-8")
+
+        try:
+            save_snapshot(
+                skills_root=root,
+                skill_name=name,
+                content=original,
+                actor="agent",
+                session_id=str(getattr(session, "session_id", "") or ""),
+                summary=f"pre-rollback -> {to_version}",
+            )
+        except Exception:
+            pass
+
+        success, err = _write_skill_md_with_checks(
+            action="rollback",
+            skill_dir=skill_dir,
+            content=target,
+            canonical_name=name,
+            on_rollback=_rollback_original,
+            extra={"to_version": to_version},
+        )
+        if err:
+            if err.startswith("ERROR: 技能内容被安全策略拦截"):
+                return _skill_manage_error("policy", err)
+            return _skill_manage_error("validation", err)
+        try:
+            from agenticx.skills.versioning import append_changelog
+
+            append_changelog(skill_dir, action="edit", summary=f"rollback to {to_version}")
+        except Exception:
+            pass
+        return success or _skill_manage_error("validation", "unknown rollback failure")
 
     return "ERROR: unknown action"
 
