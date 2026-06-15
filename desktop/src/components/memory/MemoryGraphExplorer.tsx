@@ -1463,14 +1463,17 @@ function MemoryGraphExplorerInner({
       <Modal
         open={pendingBulkDelete != null}
         title="确认删除 Episode"
+        backdropClassName="bg-black/70"
+        panelClassName="w-full max-w-[min(92vw,480px)] bg-[var(--surface-base-fallback)]"
         onClose={() => {
           if (!bulkDeleting) setPendingBulkDelete(null);
         }}
         footer={
-          <>
+          <div className="flex justify-end gap-3">
             <Button
               type="button"
               variant="ghost"
+              className="min-w-[76px] bg-surface-card-strong"
               disabled={bulkDeleting}
               onClick={() => setPendingBulkDelete(null)}
             >
@@ -1479,12 +1482,13 @@ function MemoryGraphExplorerInner({
             <Button
               type="button"
               variant="danger"
+              className="min-w-[76px]"
               disabled={bulkDeleting}
               onClick={() => void confirmBulkDelete()}
             >
               {bulkDeleting ? "删除中…" : "删除"}
             </Button>
-          </>
+          </div>
         }
       >
         <p className="text-sm text-text-subtle">
@@ -1503,16 +1507,28 @@ function MemoryGraphExplorerInner({
       <Modal
         open={pendingRetentionRun != null}
         title="确认立即清理"
+        backdropClassName="bg-black/70"
+        panelClassName="w-full max-w-[min(92vw,480px)] bg-[var(--surface-base-fallback)]"
         onClose={() => setPendingRetentionRun(null)}
         footer={
-          <>
-            <Button type="button" variant="ghost" onClick={() => setPendingRetentionRun(null)}>
+          <div className="flex justify-end gap-3">
+            <Button
+              type="button"
+              variant="ghost"
+              className="min-w-[76px] bg-surface-card-strong"
+              onClick={() => setPendingRetentionRun(null)}
+            >
               取消
             </Button>
-            <Button type="button" variant="danger" onClick={() => void confirmRetentionCleanup()}>
+            <Button
+              type="button"
+              variant="danger"
+              className="min-w-[76px]"
+              onClick={() => void confirmRetentionCleanup()}
+            >
               执行清理
             </Button>
-          </>
+          </div>
         }
       >
         <p className="text-sm text-text-subtle">
