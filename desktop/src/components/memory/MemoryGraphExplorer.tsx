@@ -171,28 +171,30 @@ function buildProviderModelOptions(
   return Array.from(set);
 }
 
-function StatRow({
+function StatChip({
   label,
   value,
   sub,
   accent = "rgba(99,102,241,0.9)",
+  className = "",
 }: {
   label: string;
   value: string | number;
   sub?: string;
   accent?: string;
+  className?: string;
 }) {
   return (
-    <div className="relative px-3 py-2.5">
+    <div className={`relative min-w-0 flex-1 px-3 py-2 ${className}`}>
       <span
-        className="absolute inset-y-2.5 left-0 w-[2px] rounded-full"
+        className="absolute inset-y-2 left-0 w-[2px] rounded-full"
         style={{ background: accent }}
         aria-hidden
       />
       <div className="pl-2">
         <div className="text-[10px] uppercase tracking-[0.06em] text-text-faint">{label}</div>
-        <div className="mt-0.5 text-lg font-semibold tabular-nums leading-none text-text-strong">{value}</div>
-        {sub ? <div className="mt-0.5 text-[10px] text-text-faint">{sub}</div> : null}
+        <div className="mt-0.5 text-base font-semibold tabular-nums leading-none text-text-strong">{value}</div>
+        {sub ? <div className="mt-0.5 truncate text-[10px] text-text-faint">{sub}</div> : null}
       </div>
     </div>
   );
@@ -989,9 +991,28 @@ function MemoryGraphExplorerInner({
         />
       )}
       {graph.nodes.length > 0 ? (
-        <div className="pointer-events-none absolute left-2 top-2 rounded-md bg-surface-base/90 px-2 py-0.5 text-[10px] text-text-faint shadow-[inset_0_0_0_1px_var(--border-muted)]">
-          显示近期/高频片段，非完整记忆
-        </div>
+        <>
+          <div className="pointer-events-none absolute left-2 top-2 max-w-[calc(100%-9rem)] rounded-md bg-surface-base/90 px-2 py-0.5 text-[10px] text-text-faint shadow-[inset_0_0_0_1px_var(--border-muted)]">
+            显示近期/高频片段，非完整记忆
+          </div>
+          <div className="pointer-events-none absolute right-2 top-2 rounded-md bg-surface-base/90 px-2 py-1.5 shadow-[inset_0_0_0_1px_var(--border-muted)]">
+            <div className="flex flex-col gap-1 text-[10px] text-text-faint">
+              <span className="inline-flex items-center gap-1.5">
+                <span className="h-2 w-2 shrink-0 rounded-full bg-[#60a5fa]" /> 实体
+              </span>
+              <span className="inline-flex items-center gap-1.5">
+                <span className="h-2 w-2 shrink-0 rounded-full bg-[#94a3b8]" /> Episode
+              </span>
+              <span className="inline-flex items-center gap-1.5">
+                <span className="h-2 w-2 shrink-0 rounded-full bg-[#a78bfa]" /> 社区
+              </span>
+              <span className="inline-flex items-center gap-1.5">
+                <span className="inline-block h-px w-4 shrink-0 border-t border-dashed border-text-faint/70" />{" "}
+                已失效关系
+              </span>
+            </div>
+          </div>
+        </>
       ) : null}
       {graph.meta.truncated ? (
         <div className="pointer-events-none absolute bottom-2 left-2 rounded-md bg-surface-base/90 px-2 py-0.5 text-[10px] text-text-faint shadow-[inset_0_0_0_1px_var(--border-muted)]">
@@ -1001,46 +1022,36 @@ function MemoryGraphExplorerInner({
     </div>
   );
 
-  const legend = (
-    <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[10px] text-text-faint">
-      <span className="inline-flex items-center gap-1.5">
-        <span className="h-2 w-2 rounded-full bg-[#60a5fa]" /> 实体
-      </span>
-      <span className="inline-flex items-center gap-1.5">
-        <span className="h-2 w-2 rounded-full bg-[#94a3b8]" /> Episode
-      </span>
-      <span className="inline-flex items-center gap-1.5">
-        <span className="h-2 w-2 rounded-full bg-[#a78bfa]" /> 社区
-      </span>
-      <span className="inline-flex items-center gap-1.5">
-        <span className="inline-block h-px w-4 border-t border-dashed border-text-faint/70" /> 已失效关系
-      </span>
-    </div>
-  );
-
-  const leftRail = (
-    <div className={`flex w-[160px] shrink-0 flex-col overflow-hidden ${MG_PANEL}`}>
-      <StatRow
+  const statsBar = (
+    <div className={`flex shrink-0 flex-wrap items-stretch overflow-hidden ${MG_PANEL}`}>
+      <StatChip
         label="节点"
         value={nodeCount}
         sub={`实体 ${entityCount} · 片段 ${episodeCount}`}
         accent="rgba(96,165,250,0.9)"
       />
-      <div className={MG_DIVIDER} />
-      <StatRow label="关系" value={edgeCount} accent="rgba(167,139,250,0.9)" />
-      <div className={MG_DIVIDER} />
-      <StatRow label="Episodes" value={episodes.length} sub="时间轴条目" accent="rgba(148,163,184,0.9)" />
-      <div className={MG_DIVIDER} />
-      <StatRow
+      <div className="hidden w-px shrink-0 self-stretch bg-[var(--border-muted)] sm:block" aria-hidden />
+      <StatChip label="关系" value={edgeCount} accent="rgba(167,139,250,0.9)" />
+      <div className="hidden w-px shrink-0 self-stretch bg-[var(--border-muted)] sm:block" aria-hidden />
+      <StatChip label="Episodes" value={episodes.length} sub="时间轴条目" accent="rgba(148,163,184,0.9)" />
+      <div className="hidden w-px shrink-0 self-stretch bg-[var(--border-muted)] sm:block" aria-hidden />
+      <StatChip
         label="队列"
         value={status?.pending_jobs ?? 0}
         sub={status?.graphiti_installed === false ? "未安装引擎" : "待 ingest"}
         accent="rgba(245,158,11,0.9)"
       />
-      <div className={MG_DIVIDER} />
-      <div className="px-3 py-2.5 text-[10px]">
-        <div className="text-[10px] uppercase tracking-[0.06em] text-text-faint">分区</div>
-        <div className="mt-1 break-all font-mono text-text-subtle">{groupId}</div>
+      <div className="hidden w-px shrink-0 self-stretch bg-[var(--border-muted)] sm:block" aria-hidden />
+      <div className="relative min-w-0 flex-[1.2] px-3 py-2">
+        <span
+          className="absolute inset-y-2 left-0 w-[2px] rounded-full"
+          style={{ background: "rgba(99,102,241,0.55)" }}
+          aria-hidden
+        />
+        <div className="pl-2">
+          <div className="text-[10px] uppercase tracking-[0.06em] text-text-faint">分区</div>
+          <div className="mt-0.5 break-all font-mono text-[11px] leading-snug text-text-subtle">{groupId}</div>
+        </div>
       </div>
     </div>
   );
@@ -1521,10 +1532,9 @@ function MemoryGraphExplorerInner({
           {alerts}
         </div>
         <div className="flex min-h-[500px] flex-1 gap-3 overflow-hidden">
-          {leftRail}
           <div className="flex min-w-0 flex-1 flex-col gap-2 overflow-hidden">
+            {statsBar}
             <div className="min-h-0 flex-1">{canvasArea}</div>
-            {legend}
           </div>
           {rightRail}
         </div>
