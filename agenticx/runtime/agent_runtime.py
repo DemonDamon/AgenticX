@@ -67,6 +67,11 @@ from agenticx.runtime.provider_fallback import (
     reset_provider_timeout_streak,
     resolve_provider_read_timeout,
 )
+from agenticx.runtime.prompt_cache_policy import (
+    apply_prompt_cache_breakpoints,
+    build_context_management_kwargs,
+    load_prompt_cache_config,
+)
 
 if TYPE_CHECKING:
     from agenticx.cli.studio import StudioSession
@@ -1702,6 +1707,27 @@ class AgentRuntime:
         first_feedback_seconds = _resolve_llm_first_feedback_seconds(session)
         provider_name = str(getattr(session, "provider_name", "") or "").strip()
         model_name = str(getattr(session, "model_name", "") or "").strip()
+        prompt_cache_cfg = load_prompt_cache_config()
+        latest_cache_telemetry: Dict[str, Any] = {
+            "cache_mode": "disabled",
+            "cache_breakpoints": 0,
+            "cache_eligible_chars": 0,
+            "cache_hit_chars": 0,
+            "cache_hit_rate": 0.0,
+            "cache_saved_tokens_est": 0,
+        }
+        try:
+            _notice = ""
+            if isinstance(session.scratchpad, dict):
+                _notice = str(session.scratchpad.pop("vision_budget_notice", "") or "").strip()
+            if _notice:
+                yield RuntimeEvent(
+                    type=EventType.ERROR.value,
+                    data={"text": _notice, "severity": "warning", "detector": "vision_history_budget"},
+                    agent_id=agent_id,
+                )
+        except Exception:
+            pass
 
         if compact_notice:
             yield RuntimeEvent(
@@ -1862,6 +1888,29 @@ class AgentRuntime:
                         messages_for_llm = list(messages) + [anchor_message]
                 else:
                     messages_for_llm = messages
+                llm_call_kwargs: Dict[str, Any] = {}
+                try:
+                    messages_for_llm, cache_telemetry = apply_prompt_cache_breakpoints(
+                        messages_for_llm,
+                        provider_name=provider_name,
+                        cfg=prompt_cache_cfg,
+                    )
+                    llm_call_kwargs = build_context_management_kwargs(
+                        provider_name=provider_name,
+                        cfg=prompt_cache_cfg,
+                    )
+                    cache_eligible_chars = int(cache_telemetry.get("cache_eligible_chars", 0) or 0)
+                    cache_saved_tokens_est = int(cache_eligible_chars / 4) if cache_eligible_chars > 0 else 0
+                    latest_cache_telemetry = {
+                        "cache_mode": str(cache_telemetry.get("cache_mode", "disabled")),
+                        "cache_breakpoints": int(cache_telemetry.get("cache_breakpoints", 0) or 0),
+                        "cache_eligible_chars": cache_eligible_chars,
+                        "cache_hit_chars": 0,
+                        "cache_hit_rate": 0.0,
+                        "cache_saved_tokens_est": cache_saved_tokens_est,
+                    }
+                except Exception:
+                    llm_call_kwargs = {}
                 context_payload = {
                     "round": round_idx,
                     "prompt_tokens_approx": approx_tokens(
@@ -1872,6 +1921,10 @@ class AgentRuntime:
                     "archived_tool_calls": budget_stats.archived_replaced,
                     "anchor_mode": getattr(session, "_goal_anchor_mode", None),
                     "anchor_prepend": bool(getattr(session, "_goal_anchor_prepend", False)),
+                    "cache_mode": latest_cache_telemetry.get("cache_mode", "disabled"),
+                    "cache_breakpoints": latest_cache_telemetry.get("cache_breakpoints", 0),
+                    "cache_eligible_chars": latest_cache_telemetry.get("cache_eligible_chars", 0),
+                    "cache_saved_tokens_est": latest_cache_telemetry.get("cache_saved_tokens_est", 0),
                 }
                 persist_context_stats(session, context_payload)
                 yield RuntimeEvent(
@@ -1923,6 +1976,7 @@ class AgentRuntime:
                                     stream_kwargs.pop("tool_choice", None)
                                     stream_kwargs.pop("temperature", None)
                                     stream_kwargs["max_tokens"] = 4096
+                                stream_kwargs.update(llm_call_kwargs)
                                 for chunk in stream_with_tools(
                                     messages_for_llm,
                                     **stream_kwargs,
@@ -2127,6 +2181,7 @@ class AgentRuntime:
                                 temperature=0.2,
                                 max_tokens=8192,
                                 timeout=request_timeout_seconds,
+                                **llm_call_kwargs,
                             )
                         except Exception as invoke_exc:
                             provider_lower = provider_name.strip().lower()
@@ -2141,11 +2196,13 @@ class AgentRuntime:
                                         "tools": active_tools,
                                         "max_tokens": 4096,
                                         "timeout": request_timeout_seconds,
+                                        **llm_call_kwargs,
                                     },
                                     # Some accounts reject max_tokens + tool_choice combos in edge cases.
                                     {
                                         "tools": active_tools,
                                         "timeout": request_timeout_seconds,
+                                        **llm_call_kwargs,
                                     },
                                 ]
                                 last_exc: Exception = invoke_exc
@@ -2558,6 +2615,7 @@ class AgentRuntime:
                                     temperature=0.2,
                                     max_tokens=8192,
                                     timeout=request_timeout_seconds,
+                                    **llm_call_kwargs,
                                 ):
                                     if stop_event.is_set():
                                         break
@@ -2668,6 +2726,12 @@ class AgentRuntime:
                         **_um,
                         "model": model_name,
                         "provider": provider_name,
+                        "cache_mode": latest_cache_telemetry.get("cache_mode", "disabled"),
+                        "cache_breakpoints": int(latest_cache_telemetry.get("cache_breakpoints", 0) or 0),
+                        "cache_eligible_chars": int(latest_cache_telemetry.get("cache_eligible_chars", 0) or 0),
+                        "cache_hit_chars": int(latest_cache_telemetry.get("cache_hit_chars", 0) or 0),
+                        "cache_hit_rate": float(latest_cache_telemetry.get("cache_hit_rate", 0.0) or 0.0),
+                        "cache_saved_tokens_est": int(latest_cache_telemetry.get("cache_saved_tokens_est", 0) or 0),
                     }
                 yield RuntimeEvent(type=EventType.FINAL.value, data=_final_data, agent_id=agent_id)
                 return

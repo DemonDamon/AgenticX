@@ -68,6 +68,16 @@ def _message_text_for_tokens(msg: Dict[str, Any]) -> str:
     return "\n".join(parts)
 
 
+_HARD_CONSTRAINT_PATTERNS = (
+    re.compile(r"(必须[^。；\n]{0,120})"),
+    re.compile(r"(不要[^。；\n]{0,120})"),
+    re.compile(r"(始终[^。；\n]{0,120})"),
+    re.compile(r"(must\s+[^.;\n]{0,120})", re.I),
+    re.compile(r"(never\s+[^.;\n]{0,120})", re.I),
+    re.compile(r"(always\s+[^.;\n]{0,120})", re.I),
+)
+
+
 class ContextCompactor:
     """Compact older conversation history into a short summary block."""
 
@@ -285,8 +295,9 @@ class ContextCompactor:
             "请将以下多条历史对话压缩成一段精炼摘要，用于后续推理。",
             "要求：",
             "1. 仅输出摘要正文，不要复述本指令、不要输出任何形如 `[xxx]` 或 `[/xxx]` 的标签。",
-            "2. 必须覆盖：用户最近一条尚未被完整回答的原始问题（用一句话忠实复述）、关键决策、关键工具结果、关键文件改动、当前待办与风险。",
-            "3. 输出中文，长度控制在 400 字以内，使用条目式，不要写客套话或解释。",
+            "2. 必须逐字保留用户硬约束，尤其含有「必须 / 不要 / 始终 / must / never / always」的原句片段。",
+            "3. 摘要必须覆盖 8 类信息：用户完整指令、任务模板、约束规则、已执行操作、错误与修复记录、进度追踪、当前状态、下一步动作。",
+            "4. 输出中文，长度控制在 400 字以内，使用条目式，不要写客套话或解释。",
             "",
         ]
         if memory_prefix:
@@ -343,7 +354,35 @@ class ContextCompactor:
         current = re.sub(r"\[/[A-Za-z][A-Za-z0-9_\-]*\]", "", current)
         return current.strip()
 
+    @staticmethod
+    def _extract_hard_constraints(messages_to_compact: Sequence[Dict[str, Any]]) -> List[str]:
+        """Extract user hard constraints for summary fidelity checks."""
+        found: List[str] = []
+        for msg in messages_to_compact:
+            if not isinstance(msg, dict):
+                continue
+            if str(msg.get("role", "")).strip().lower() != "user":
+                continue
+            text = str(msg.get("content", "") or "")
+            for pattern in _HARD_CONSTRAINT_PATTERNS:
+                for match in pattern.findall(text):
+                    item = str(match).strip()
+                    if item and item not in found:
+                        found.append(item)
+        return found[:12]
+
+    @staticmethod
+    def _summary_keeps_constraints(summary: str, constraints: Sequence[str]) -> bool:
+        if not constraints:
+            return True
+        summary_text = str(summary or "")
+        for item in constraints:
+            if item not in summary_text:
+                return False
+        return True
+
     async def _summarize(self, messages_to_compact: Sequence[Dict[str, Any]], memory_prefix: str = "") -> str:
+        hard_constraints = self._extract_hard_constraints(messages_to_compact)
         prompt = self._build_compaction_prompt(messages_to_compact, memory_prefix=memory_prefix)
         try:
             response = await asyncio.to_thread(
@@ -354,6 +393,25 @@ class ContextCompactor:
             )
             text = str(getattr(response, "content", "") or "").strip()
             text = self._sanitize_summary_text(text)
+            if text and hard_constraints and (not self._summary_keeps_constraints(text, hard_constraints)):
+                retry_prompt = (
+                    prompt
+                    + "\n\n补充要求：你刚才遗漏了用户硬约束。请重写摘要，并逐字包含以下片段：\n"
+                    + "\n".join(f"- {item}" for item in hard_constraints)
+                )
+                retry_resp = await asyncio.to_thread(
+                    self.llm.invoke,
+                    [{"role": "user", "content": retry_prompt}],
+                    temperature=0.0,
+                    max_tokens=500,
+                )
+                retry_text = str(getattr(retry_resp, "content", "") or "").strip()
+                retry_text = self._sanitize_summary_text(retry_text)
+                if retry_text and self._summary_keeps_constraints(retry_text, hard_constraints):
+                    text = retry_text
+                else:
+                    snippets = [_stringify_message(item)[:160] for item in messages_to_compact[-12:]]
+                    text = "；".join(snippets)[:700]
             if text:
                 self._consecutive_failures = 0
                 return text
