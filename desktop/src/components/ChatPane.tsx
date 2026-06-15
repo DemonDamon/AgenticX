@@ -5274,7 +5274,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
     (msgId: string) => {
       const item = takePendingMessage(paneId, msgId);
       if (!item) return;
-      const lockedSessionId = (
+      const lockedSessionId = String(item.sessionId ?? "").trim() || (
         useAppStore.getState().panes.find((p) => p.id === paneId)?.sessionId || ""
       ).trim();
       void sendChatRef.current(item.text, {
@@ -5984,6 +5984,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
       enqueuePaneMessage(pane.id, {
         id: crypto.randomUUID(),
         text: messageText,
+        sessionId: sid,
         attachments: userAttachments,
         contextFiles: [],
         timestamp: Date.now(),
@@ -7527,7 +7528,10 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
       useAppStore.getState().dropCachedSessionMessages(requestSessionId);
       void mergeTailFromDisk(requestSessionId);
 
-      const nextQueued = useAppStore.getState().dequeuePaneMessage(pane.id);
+      const nextQueued = useAppStore.getState().dequeuePaneMessageForSession(
+        pane.id,
+        requestSessionId,
+      );
       if (nextQueued) {
         requestAnimationFrame(() => {
           void sendChatRef.current(nextQueued.text, {

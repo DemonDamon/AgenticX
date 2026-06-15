@@ -954,6 +954,7 @@ export function ChatView({ onOpenConfirm, mode = "pro" }: Props) {
       enqueuePaneMessage(liteQueueKey, {
         id: crypto.randomUUID(),
         text: userText,
+        sessionId,
         attachments: [],
         contextFiles: [],
         timestamp: Date.now(),
@@ -1581,7 +1582,10 @@ export function ChatView({ onOpenConfirm, mode = "pro" }: Props) {
       scrollToBottom();
       void syncSubAgents();
 
-      const nextQueued = useAppStore.getState().dequeuePaneMessage(liteQueueKey);
+      const nextQueued = useAppStore.getState().dequeuePaneMessageForSession(
+        liteQueueKey,
+        sessionId,
+      );
       if (nextQueued) {
         requestAnimationFrame(() => void sendChat(nextQueued.text));
       }
@@ -1811,7 +1815,12 @@ export function ChatView({ onOpenConfirm, mode = "pro" }: Props) {
             const latestQueued = queue[queue.length - 1];
             if (latestQueued) {
               const item = takePendingMessage(liteQueueKey, latestQueued.id);
-              if (item) void sendChatRef.current(item.text, { forceSend: true });
+              if (item) {
+                const ownerSid = String(item.sessionId ?? "").trim();
+                if (!ownerSid || ownerSid === sessionId) {
+                  void sendChatRef.current(item.text, { forceSend: true });
+                }
+              }
             }
           }
           return;
@@ -2251,6 +2260,7 @@ export function ChatView({ onOpenConfirm, mode = "pro" }: Props) {
                   enqueuePaneMessage(liteQueueKey, {
                     id: crypto.randomUUID(),
                     text,
+                    sessionId,
                     attachments: [],
                     contextFiles: [],
                     timestamp: Date.now(),
