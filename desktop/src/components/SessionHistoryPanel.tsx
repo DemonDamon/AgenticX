@@ -135,8 +135,35 @@ const PLACEHOLDER_SESSION_TITLES = new Set(
   ].map((s) => s.toLowerCase()),
 );
 
+const SKILL_DISPLAY_NAME_MAP: Record<string, string> = {
+  "infra-monitor": "基础设施监控技能",
+};
+
+function resolveSkillDisplayName(skillPath: string): string {
+  const cleaned = String(skillPath || "").replace(/^\/+|\/+$/g, "");
+  if (!cleaned) return "技能调用";
+  const segments = cleaned.split("/").filter(Boolean);
+  const key = segments[segments.length - 1] || cleaned;
+  return SKILL_DISPLAY_NAME_MAP[key] || "技能调用";
+}
+
+function sanitizeSessionDisplayText(input: string): string {
+  const raw = String(input || "");
+  if (!raw) return "";
+  const withReasoningLabel = raw
+    .replace(/<\s*think\s*>/gi, "思考：")
+    .replace(/<\s*\/\s*think\s*>/gi, "");
+  const withSkillName = withReasoningLabel.replace(
+    /@skill:\/\/([a-zA-Z0-9._/-]+)/gi,
+    (_m, skillPath: string) => `[${resolveSkillDisplayName(skillPath)}]`
+  );
+  const compact = withSkillName.replace(/\s+/g, " ").trim();
+  if (compact === "思考：") return "";
+  return compact;
+}
+
 function isPlaceholderSessionTitle(name: string): boolean {
-  const t = name.trim();
+  const t = sanitizeSessionDisplayText(name).trim();
   if (!t) return true;
   const lower = t.toLowerCase();
   if (PLACEHOLDER_SESSION_TITLES.has(lower)) return true;
@@ -147,7 +174,7 @@ function isPlaceholderSessionTitle(name: string): boolean {
 
 /** Title for history rows: real name, or short id — never generic 「新会话」. */
 function sessionHistoryLabel(item: SessionRow): string {
-  const raw = (item.session_name || "").trim();
+  const raw = sanitizeSessionDisplayText(item.session_name || "").trim();
   if (raw && !isPlaceholderSessionTitle(raw)) return raw;
   const compact = item.session_id.replace(/-/g, "");
   const hint = compact.slice(0, 8);
@@ -909,6 +936,7 @@ export const SessionHistoryPanel = memo(function SessionHistoryPanel({ pane, onC
     if (!item || !item.session_id) return null;
     const active = item.session_id === pane.sessionId;
     const label = (labelOverride || sessionHistoryLabel(item)).trim() || sessionHistoryLabel(item);
+    const displaySnippet = contentSnippet ? sanitizeSessionDisplayText(contentSnippet) : "";
     const unread = unreadSessionIds.includes(item.session_id);
     const activityAt = getSessionActivityTimestamp(item) || Date.now() / 1000;
     const isRunning = item.execution_state === "running";
@@ -1032,12 +1060,12 @@ export const SessionHistoryPanel = memo(function SessionHistoryPanel({ pane, onC
                 ) : null}
                 {unread ? <span className="inline-block h-2 w-2 shrink-0 rounded-full bg-text-muted" /> : null}
               </span>
-              {!selectMode && contentSnippet ? (
+              {!selectMode && displaySnippet ? (
                 <span
                   className="mt-1 line-clamp-2 w-full text-[12px] leading-snug text-text-subtle"
-                  title={contentSnippet}
+                  title={displaySnippet}
                 >
-                  {contentSnippet}
+                  {displaySnippet}
                 </span>
               ) : null}
             </span>
