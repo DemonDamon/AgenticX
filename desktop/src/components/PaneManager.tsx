@@ -27,9 +27,65 @@ type Props = {
 
 const COLUMNS = 2;
 const MIN_PCT = 15;
+/** 主区宽度低于此值且 ≥2 窗格时改为 Tab 切换，避免并排挤压变形（680px 最窄窗口场景）。 */
+const PANE_TAB_ONLY_MAX_WIDTH = 920;
+/** 并排双窗格时单窗格最低舒适宽度；低于则走 Tab 模式。 */
+const PANE_COMFORT_MIN_WIDTH = 400;
 
 function clamp(value: number, min: number, max: number) {
   return Math.max(min, Math.min(max, value));
+}
+
+function shouldUsePaneTabs(containerWidth: number, paneCount: number): boolean {
+  if (paneCount < 2) return false;
+  const w =
+    containerWidth > 0
+      ? containerWidth
+      : typeof window !== "undefined"
+        ? window.innerWidth
+        : 0;
+  if (w <= 0) return false;
+  if (w < PANE_TAB_ONLY_MAX_WIDTH) return true;
+  return w / paneCount < PANE_COMFORT_MIN_WIDTH;
+}
+
+function PaneTabStrip({
+  panes,
+  activePaneId,
+  onSelect,
+}: {
+  panes: ChatPaneState[];
+  activePaneId: string;
+  onSelect: (paneId: string) => void;
+}) {
+  return (
+    <div
+      className="flex h-9 shrink-0 items-center gap-1 overflow-x-auto border-b border-border bg-surface-base/80 px-2 backdrop-blur-sm"
+      role="tablist"
+      aria-label="聊天窗格"
+    >
+      {panes.map((pane) => {
+        const active = pane.id === activePaneId;
+        return (
+          <button
+            key={pane.id}
+            type="button"
+            role="tab"
+            aria-selected={active}
+            className={`max-w-[11rem] shrink-0 truncate rounded-md px-2.5 py-1 text-xs transition ${
+              active
+                ? "bg-surface-hover font-medium text-text-strong"
+                : "text-text-muted hover:bg-surface-hover/60 hover:text-text-strong"
+            }`}
+            title={pane.avatarName}
+            onClick={() => onSelect(pane.id)}
+          >
+            {pane.avatarName}
+          </button>
+        );
+      })}
+    </div>
+  );
 }
 
 function PaneDragOverlayPreview({ pane }: { pane: ChatPaneState }) {
@@ -60,7 +116,20 @@ export function PaneManager({ onOpenConfirm }: Props) {
   );
 
   const containerRef = useRef<HTMLDivElement>(null);
+  const [containerWidth, setContainerWidth] = useState(0);
   const [activeDragId, setActiveDragId] = useState<string | null>(null);
+
+  useEffect(() => {
+    const el = containerRef.current;
+    if (!el) return;
+    const ro = new ResizeObserver((entries) => {
+      const w = entries[0]?.contentRect.width ?? 0;
+      setContainerWidth(w);
+    });
+    ro.observe(el);
+    setContainerWidth(el.clientWidth);
+    return () => ro.disconnect();
+  }, []);
 
   const sensors = useSensors(
     useSensor(PointerSensor, {
@@ -136,11 +205,53 @@ export function PaneManager({ onOpenConfirm }: Props) {
   };
 
   const isMulti = paneCount >= 2;
+  const paneTabMode = shouldUsePaneTabs(containerWidth, paneCount);
   const paneIds = panes.map((p) => p.id);
   const activeDragPane = activeDragId ? panes.find((p) => p.id === activeDragId) : undefined;
 
+  const renderChatPane = (pane: ChatPaneState, isFocused: boolean) => (
+    <ChatPane
+      paneId={pane.id}
+      focused={isFocused}
+      onFocus={() => setActivePaneId(pane.id)}
+      onOpenConfirm={onOpenConfirm}
+    />
+  );
+
+  const multiPaneMinWidth = isMulti
+    ? clamp(Math.floor((containerWidth || 680) / paneCount) - 8, 240, 320)
+    : undefined;
+
+  const tabBody = paneTabMode ? (
+    <>
+      <PaneTabStrip
+        panes={panes}
+        activePaneId={activePaneId}
+        onSelect={setActivePaneId}
+      />
+      <div className="relative min-h-0 min-w-0 flex-1 overflow-hidden">
+        {panes.map((pane) => {
+          const isFocused = activePaneId === pane.id;
+          return (
+            <div
+              key={pane.id}
+              className={
+                isFocused
+                  ? "flex h-full min-w-0 overflow-hidden"
+                  : "pointer-events-none absolute inset-0 hidden overflow-hidden"
+              }
+              aria-hidden={!isFocused}
+            >
+              {renderChatPane(pane, isFocused)}
+            </div>
+          );
+        })}
+      </div>
+    </>
+  ) : null;
+
   const layoutTwoOrFewer = (
-    <div ref={containerRef} className="flex h-full min-w-0 flex-1 overflow-hidden">
+    <div className="flex h-full min-w-0 flex-1 overflow-hidden">
       {panes.map((pane, index) => {
         const widthPct =
           paneCount === 1 ? 100 : colSizes[0]?.[index] ?? 100 / paneCount;
@@ -148,7 +259,7 @@ export function PaneManager({ onOpenConfirm }: Props) {
         const isFocused = activePaneId === pane.id;
         const outerStyle = {
           width: `${widthPct}%`,
-          minWidth: isMulti ? 320 : undefined,
+          minWidth: multiPaneMinWidth,
         } as const;
 
         const inner = (
@@ -158,12 +269,7 @@ export function PaneManager({ onOpenConfirm }: Props) {
                 isFocused && isMulti ? "bg-[rgba(255,255,255,0.015)]" : ""
               }`}
             >
-              <ChatPane
-                paneId={pane.id}
-                focused={isFocused}
-                onFocus={() => setActivePaneId(pane.id)}
-                onOpenConfirm={onOpenConfirm}
-              />
+              {renderChatPane(pane, isFocused)}
             </div>
             {!isLast && paneCount === 2 ? (
               <PaneDivider direction="horizontal" onDrag={(delta) => handleColDrag(0, delta)} />
@@ -198,7 +304,7 @@ export function PaneManager({ onOpenConfirm }: Props) {
   );
 
   const layoutMultiRow = (
-    <div ref={containerRef} className="flex h-full min-w-0 flex-1 flex-col overflow-hidden">
+    <div className="flex h-full min-w-0 flex-1 flex-col overflow-hidden">
       {Array.from({ length: rows }, (_, rowIndex) => {
         const rowPanes = panes.slice(rowIndex * COLUMNS, rowIndex * COLUMNS + COLUMNS);
         const rowHeightPct = rowSizes[rowIndex] ?? 100 / rows;
@@ -219,7 +325,7 @@ export function PaneManager({ onOpenConfirm }: Props) {
 
                 const outerStyle = {
                   width: `${widthPct}%`,
-                  minWidth: 240,
+                  minWidth: multiPaneMinWidth ?? 240,
                 } as const;
 
                 return (
@@ -234,12 +340,7 @@ export function PaneManager({ onOpenConfirm }: Props) {
                         isFocused ? "bg-[rgba(255,255,255,0.015)]" : ""
                       }`}
                     >
-                      <ChatPane
-                        paneId={pane.id}
-                        focused={isFocused}
-                        onFocus={() => setActivePaneId(pane.id)}
-                        onOpenConfirm={onOpenConfirm}
-                      />
+                      {renderChatPane(pane, isFocused)}
                     </div>
                     {!isLastCol && rowPanes.length === 2 ? (
                       <PaneDivider
@@ -266,9 +367,49 @@ export function PaneManager({ onOpenConfirm }: Props) {
 
   if (paneCount <= 2) {
     if (paneCount < 2) {
-      return layoutTwoOrFewer;
+      return (
+        <div ref={containerRef} className="flex h-full min-w-0 flex-1 flex-col overflow-hidden">
+          {layoutTwoOrFewer}
+        </div>
+      );
+    }
+    if (paneTabMode) {
+      return (
+        <div ref={containerRef} className="flex h-full min-w-0 flex-1 flex-col overflow-hidden">
+          {tabBody}
+        </div>
+      );
     }
     return (
+      <div ref={containerRef} className="flex h-full min-w-0 flex-1 flex-col overflow-hidden">
+        <DndContext
+          sensors={sensors}
+          collisionDetection={closestCenter}
+          onDragStart={handleDragStart}
+          onDragEnd={handleDragEnd}
+          onDragCancel={clearDrag}
+        >
+          <SortableContext items={paneIds} strategy={rectSortingStrategy}>
+            {layoutTwoOrFewer}
+          </SortableContext>
+          <DragOverlay dropAnimation={{ duration: 200, easing: "cubic-bezier(0.25,1,0.5,1)" }}>
+            {activeDragPane ? <PaneDragOverlayPreview pane={activeDragPane} /> : null}
+          </DragOverlay>
+        </DndContext>
+      </div>
+    );
+  }
+
+  if (paneTabMode) {
+    return (
+      <div ref={containerRef} className="flex h-full min-w-0 flex-1 flex-col overflow-hidden">
+        {tabBody}
+      </div>
+    );
+  }
+
+  return (
+    <div ref={containerRef} className="flex h-full min-w-0 flex-1 flex-col overflow-hidden">
       <DndContext
         sensors={sensors}
         collisionDetection={closestCenter}
@@ -277,29 +418,12 @@ export function PaneManager({ onOpenConfirm }: Props) {
         onDragCancel={clearDrag}
       >
         <SortableContext items={paneIds} strategy={rectSortingStrategy}>
-          {layoutTwoOrFewer}
+          {layoutMultiRow}
         </SortableContext>
         <DragOverlay dropAnimation={{ duration: 200, easing: "cubic-bezier(0.25,1,0.5,1)" }}>
           {activeDragPane ? <PaneDragOverlayPreview pane={activeDragPane} /> : null}
         </DragOverlay>
       </DndContext>
-    );
-  }
-
-  return (
-    <DndContext
-      sensors={sensors}
-      collisionDetection={closestCenter}
-      onDragStart={handleDragStart}
-      onDragEnd={handleDragEnd}
-      onDragCancel={clearDrag}
-    >
-      <SortableContext items={paneIds} strategy={rectSortingStrategy}>
-        {layoutMultiRow}
-      </SortableContext>
-      <DragOverlay dropAnimation={{ duration: 200, easing: "cubic-bezier(0.25,1,0.5,1)" }}>
-        {activeDragPane ? <PaneDragOverlayPreview pane={activeDragPane} /> : null}
-      </DragOverlay>
-    </DndContext>
+    </div>
   );
 }

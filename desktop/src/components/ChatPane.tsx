@@ -696,7 +696,7 @@ class HistoryPanelBoundary extends Component<
 const PANE_MODEL_PICKER_MARGIN = 8;
 const PANE_MODEL_PICKER_GAP = 4;
 const PANE_MODEL_PICKER_MIN_MAX_HEIGHT = 64;
-const PANE_MODEL_PICKER_PANEL_WIDTH = 240;
+const PANE_MODEL_PICKER_PANEL_WIDTH = 280;
 
 function paneModelPickerPanelStyle(anchor: DOMRect): CSSProperties {
   const vw = window.innerWidth;
@@ -795,14 +795,15 @@ function PaneModelPicker({ paneId }: { paneId: string }) {
   }, [open, syncPanelPosition, options.length]);
 
   return (
-    <div className="relative" ref={anchorRef}>
+    <div className="relative min-w-0 max-w-full" ref={anchorRef}>
       <button
-        className="flex h-8 min-h-8 items-center gap-1.5 rounded px-1.5 py-0.5 text-[13px] font-normal leading-relaxed text-[color:var(--chat-im-assistant-text)] transition hover:bg-surface-hover"
+        type="button"
+        className="flex h-8 min-h-8 max-w-full min-w-0 items-center gap-1.5 rounded px-1.5 py-0.5 text-[13px] font-normal leading-relaxed text-[color:var(--chat-im-assistant-text)] transition hover:bg-surface-hover"
         onClick={() => setOpen((v) => !v)}
-        title="切换模型"
+        title={currentLabel}
       >
         <ProviderIcon provider={currentProvider} className="h-[13px] w-[13px] shrink-0" />
-        <span className="max-w-[180px] truncate">{currentLabel}</span>
+        <span className="min-w-0 flex-1 truncate text-left">{currentLabel}</span>
         <ChevronDown className={`h-4 w-4 shrink-0 transition-transform ${open ? "rotate-180" : ""}`} strokeWidth={2} aria-hidden />
       </button>
       {open &&
@@ -824,9 +825,10 @@ function PaneModelPicker({ paneId }: { paneId: string }) {
                     <button
                       key={`${opt.provider}:${opt.model}`}
                       type="button"
-                      className={`group flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-[13px] font-normal leading-relaxed text-[color:var(--chat-im-assistant-text)] transition-colors ${
+                      className={`group flex w-full min-w-0 items-center gap-2 rounded-lg px-2.5 py-2 pr-3 text-left text-[13px] font-normal leading-relaxed text-[color:var(--chat-im-assistant-text)] transition-colors ${
                         isActive ? "bg-surface-hover" : "hover:bg-surface-hover"
                       }`}
+                      title={opt.label}
                       onClick={() => handleSelect(opt.provider, opt.model)}
                     >
                       <span className="flex flex-1 items-center gap-2">
@@ -8798,8 +8800,8 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
               </div>
             ) : null}
             </div>
-            <div className="agx-pane-composer-actions flex min-w-0 items-center justify-between gap-1 px-2.5 pb-2.5 pt-1">
-              <div className="flex shrink-0 items-center gap-0.5">
+            <div className="agx-pane-composer-actions flex min-w-0 items-center justify-between gap-2 px-2.5 pb-2.5 pt-1">
+              <div className="flex min-w-0 shrink items-center gap-0.5 overflow-hidden">
                 <input
                   ref={fileInputRef}
                   type="file"
@@ -8890,7 +8892,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
                 </button>
               </div>
               {/* ── Team mode action bar (routing="team" only) ─────────── */}
-              <div className="flex shrink-0 items-center gap-1.5">
+              <div className="flex min-w-0 shrink-0 items-center gap-1.5">
                 {isGroupPane && activeGroup?.routing === "team" && (
                   <div className="flex items-center gap-1 mr-1">
                     <button
