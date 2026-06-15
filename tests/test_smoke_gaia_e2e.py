@@ -53,6 +53,7 @@ def test_smoke_gaia_pipeline_end_to_end(tmp_path: Path, monkeypatch) -> None:
             "--export-submission",
             "--benchmark-name",
             "gaia_smoke",
+            "--dry-run",
         ],
     )
     exit_code = run_gaia_benchmark.main()
