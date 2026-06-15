@@ -37,19 +37,22 @@ async def test_preview_episode_impact_returns_honest_note(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_delete_episode_calls_graphiti_remove_episode(monkeypatch):
+async def test_delete_episode_uses_isolated_removal(monkeypatch):
     removed: list[str] = []
 
-    class _Graphiti:
-        async def remove_episode(self, episode_uuid: str) -> None:
-            removed.append(episode_uuid)
+    async def _fake_remove_isolated(episode_uuid: str) -> None:
+        removed.append(episode_uuid)
 
     store = MemoryGraphStore()
     store._ready = True
-    store._graphiti = _Graphiti()
+    store._graphiti = object()
     monkeypatch.setattr(
         "agenticx.memory.graph.executor.run_on_graphiti_loop",
         lambda coro: coro,
+    )
+    monkeypatch.setattr(
+        "agenticx.memory.graph.episode_delete.remove_episode_isolated",
+        _fake_remove_isolated,
     )
     await store.delete_episode("uuid-abc")
     assert removed == ["uuid-abc"]

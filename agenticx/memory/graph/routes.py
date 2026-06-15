@@ -238,6 +238,9 @@ def register_memory_graph_routes(app, *, check_token) -> None:
             return {"ok": True, **result}
         except (MemoryGraphDisabledError, MemoryGraphUnavailableError) as exc:
             raise _map_error(exc) from exc
+        except Exception as exc:
+            logger.warning("memory graph bulk delete failed: %s", exc, exc_info=True)
+            raise _map_error(exc) from exc
 
     @router.get("/episode/{episode_uuid}/impact")
     async def memory_graph_episode_impact(

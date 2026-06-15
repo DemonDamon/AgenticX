@@ -142,3 +142,56 @@ def memory_graph_ingest(
 
     _run(_go())
     console.print("[green]Ingest completed (see memory-graph status)[/green]")
+
+
+@memory_graph_app.command("rebuild")
+def memory_graph_rebuild(
+    exclude: list[str] = typer.Option(
+        [], "--exclude", "-e", help="Episode uuid(s) to drop while rebuilding"
+    ),
+    yes: bool = typer.Option(False, "--yes", "-y", help="Skip confirmation"),
+) -> None:
+    """Rebuild the Kuzu graph DB, dropping given episodes (Kuzu DELETE SIGSEGV workaround).
+
+    Must be run while no agx serve / Near holds the DB lock (⌘Q Near first).
+    A timestamped backup is created automatically.
+    """
+    cfg = load_memory_graph_config()
+    if not cfg.enabled:
+        console.print("[yellow]memory_graph.enabled is false[/yellow]")
+        raise typer.Exit(1)
+    if not graphiti_available():
+        console.print("[red]graphiti-core not installed. pip install 'agenticx[graphiti]'[/red]")
+        raise typer.Exit(1)
+    targets = [str(x).strip() for x in exclude if str(x).strip()]
+    if not targets:
+        console.print("[yellow]--exclude <uuid> is required[/yellow]")
+        raise typer.Exit(1)
+    if not yes:
+        console.print(
+            f"[bold]将重建图谱库并删除 {len(targets)} 条 episode[/bold]：{', '.join(t[:8] + '…' for t in targets)}"
+        )
+        console.print("[dim]请确认已完全退出 Near（⌘Q）且无 agx serve 在运行。[/dim]")
+        if not typer.confirm("继续？"):
+            raise typer.Exit(0)
+
+    from agenticx.memory.graph.graph_rebuild import rebuild_graph_excluding_episodes
+
+    async def _go() -> dict:
+        return await rebuild_graph_excluding_episodes(targets, cfg=cfg)
+
+    try:
+        result = _run(_go())
+    except Exception as exc:
+        msg = str(exc)
+        if "lock on file" in msg.lower():
+            console.print(
+                "[red]Kuzu 库被占用：请先完全退出 Near（⌘Q）并 pkill -f 'agx serve' 后重试。[/red]"
+            )
+            raise typer.Exit(1) from exc
+        console.print(f"[red]重建失败：{exc}[/red]")
+        raise typer.Exit(1) from exc
+    console.print(
+        f"[green]重建完成[/green] 删除 {len(result.get('deleted') or [])} 条，"
+        f"剩余 episode {result.get('remaining')}；备份：{result.get('backup')}"
+    )

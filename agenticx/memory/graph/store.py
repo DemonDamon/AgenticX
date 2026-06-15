@@ -489,7 +489,9 @@ class MemoryGraphStore:
 
     async def _delete_episode_impl(self, episode_uuid: str) -> None:
         await self._ensure_ready_impl()
-        await self._graphiti.remove_episode(episode_uuid)
+        from agenticx.memory.graph.episode_delete import remove_episode_isolated
+
+        await remove_episode_isolated(episode_uuid)
 
     async def delete_episodes_bulk(self, group_id: str, episode_uuids: List[str]) -> Dict[str, Any]:
         from agenticx.memory.graph.executor import run_on_graphiti_loop
@@ -509,6 +511,8 @@ class MemoryGraphStore:
         pinned = load_pins(group_id)
         deleted: List[str] = []
         skipped_pinned: List[str] = []
+        failed: List[Dict[str, str]] = []
+        to_delete: List[str] = []
         for raw in episode_uuids:
             eid = str(raw or "").strip()
             if not eid:
@@ -516,11 +520,53 @@ class MemoryGraphStore:
             if eid in pinned:
                 skipped_pinned.append(eid)
                 continue
-            await self._graphiti.remove_episode(eid)
-            deleted.append(eid)
+            to_delete.append(eid)
+        if to_delete:
+            from agenticx.memory.graph.episode_delete import remove_episodes_isolated
+
+            iso = await remove_episodes_isolated(to_delete)
+            deleted = [str(x) for x in iso.get("deleted") or []]
+            sigsegv_uuids: List[str] = []
+            for item in iso.get("failed") or []:
+                if isinstance(item, dict):
+                    eid = str(item.get("episode_uuid") or "")
+                    err = str(item.get("error") or "delete failed")
+                    if "SIGSEGV" in err:
+                        sigsegv_uuids.append(eid)
+                    else:
+                        failed.append({"episode_uuid": eid, "error": err})
+                        logger.warning("bulk delete skipped episode %s: %s", eid[:8], err)
+
+            # Kuzu 0.11.3 segfaults on DELETE for some episodic nodes; fall back to a
+            # full DB rebuild that drops those nodes via COPY export/import.
+            if sigsegv_uuids:
+                logger.warning(
+                    "bulk delete: %d episode(s) hit Kuzu SIGSEGV, rebuilding graph DB",
+                    len(sigsegv_uuids),
+                )
+                from agenticx.memory.graph.graph_rebuild import (
+                    rebuild_graph_excluding_episodes,
+                )
+
+                self.reset_runtime()
+                try:
+                    rb = await rebuild_graph_excluding_episodes(
+                        sigsegv_uuids, cfg=self.cfg
+                    )
+                    deleted.extend(str(x) for x in rb.get("deleted") or [])
+                except Exception as exc:  # pragma: no cover - surfaced to API
+                    logger.exception("memory graph rebuild-delete failed")
+                    for eid in sigsegv_uuids:
+                        failed.append(
+                            {
+                                "episode_uuid": eid,
+                                "error": f"重建式删除失败：{exc}",
+                            }
+                        )
         return {
             "deleted": deleted,
             "skipped_pinned": skipped_pinned,
+            "failed": failed,
             "count": len(deleted),
         }
 
@@ -564,9 +610,11 @@ class MemoryGraphStore:
             return {"would_delete": to_delete, "count": len(to_delete), "kept": kept}
         # _ensure_ready_impl already called above; use _graphiti.remove_episode directly
         # to avoid nested asyncio.wait_for deadlocking the graphiti loop.
+        from agenticx.memory.graph.episode_delete import remove_episode_isolated
+
         deleted: List[str] = []
         for eid in to_delete:
-            await self._graphiti.remove_episode(eid)
+            await remove_episode_isolated(eid)
             deleted.append(eid)
         return {"deleted": deleted, "count": len(deleted), "kept": kept}
 
