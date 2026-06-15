@@ -106,3 +106,4 @@ task_plan.md
 **/out/
 enterprise/apps/gateway/.runtime/
 enterprise/.runtime/
+.dataset/
