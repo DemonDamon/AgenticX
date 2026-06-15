@@ -2179,6 +2179,37 @@ def create_studio_app() -> FastAPI:
             except Exception as _skill_exc:
                 logger.warning("skill_slugs inject error: %s", _skill_exc)
         image_inputs = _normalize_image_inputs(payload.image_inputs)
+        vision_budget_stats: dict[str, Any] = {}
+        try:
+            from agenticx.runtime.vision_history_budget import (
+                apply_turn_image_budget,
+                load_vision_history_config,
+                maybe_batch_compact_session_images,
+                should_emit_budget_notice,
+            )
+
+            _vh_cfg = load_vision_history_config()
+            image_inputs, vision_budget_stats = apply_turn_image_budget(
+                image_inputs,
+                cfg=_vh_cfg,
+                user_input=str(payload.user_input or ""),
+            )
+            _did_batch, _replaced = maybe_batch_compact_session_images(
+                session,
+                cfg=_vh_cfg,
+                new_image_count=len(image_inputs),
+            )
+            if (_did_batch or bool(vision_budget_stats.get("omitted_for_budget"))) and should_emit_budget_notice(session):
+                if isinstance(session.scratchpad, dict):
+                    session.scratchpad["vision_budget_notice"] = (
+                        "已对历史图片进行预算化精简，保留最近高相关内容。"
+                    )
+                    session.scratchpad["vision_budget_replaced"] = int(_replaced)
+                    session.scratchpad["vision_budget_dropped"] = int(
+                        vision_budget_stats.get("dropped_count", 0) or 0
+                    )
+        except Exception:
+            pass
         # Always derive history attachments from the client's original image uploads.
         # We may strip image_inputs below for a non-vision model on *this* turn,
         # but the persisted user message (chat_history / agent_messages) must carry
