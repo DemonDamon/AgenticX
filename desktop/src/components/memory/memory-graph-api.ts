@@ -84,6 +84,14 @@ export function formatMemoryGraphFetchError(error: unknown, fallback: string): s
   return msg || fallback;
 }
 
+export function formatMemoryGraphActionError(error: unknown, fallback: string): string {
+  const msg = error instanceof Error ? error.message : String(error);
+  if (/failed to fetch|networkerror|load failed/i.test(msg)) {
+    return formatMemoryGraphFetchError(error, fallback);
+  }
+  return msg || fallback;
+}
+
 function formatMemoryGraphApiError(
   body: unknown,
   fallback: string,
@@ -237,7 +245,12 @@ export async function bulkDeleteMemoryGraphEpisodes(
   episodeIds: string[],
   sessionId: string,
   avatarId: string | null,
-): Promise<{ deleted: string[]; skipped_pinned: string[]; count: number }> {
+): Promise<{
+  deleted: string[];
+  skipped_pinned: string[];
+  failed: Array<{ episode_uuid: string; error: string }>;
+  count: number;
+}> {
   const r = await fetchWithTimeout(
     `${apiBase}/api/memory/graph/episodes/bulk-delete`,
     {
@@ -250,7 +263,7 @@ export async function bulkDeleteMemoryGraphEpisodes(
         avatar_id: avatarId,
       }),
     },
-    30000,
+    120000,
   );
   if (!r.ok) {
     const body = await r.json().catch(() => ({}));
@@ -259,11 +272,13 @@ export async function bulkDeleteMemoryGraphEpisodes(
   const data = (await r.json()) as {
     deleted?: string[];
     skipped_pinned?: string[];
+    failed?: Array<{ episode_uuid: string; error: string }>;
     count?: number;
   };
   return {
     deleted: data.deleted || [],
     skipped_pinned: data.skipped_pinned || [],
+    failed: data.failed || [],
     count: data.count ?? (data.deleted?.length ?? 0),
   };
 }

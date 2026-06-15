@@ -1,5 +1,5 @@
 import { PanelRightClose, Pin, PinOff, RefreshCw, Search, Share2, Trash2 } from "lucide-react";
-import { memo, useCallback, useEffect, useMemo, useState } from "react";
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useAppStore } from "../../store";
 import {
   listProviderVisibleModelIds,
@@ -19,6 +19,7 @@ import {
   fetchMemoryGraphOverview,
   fetchMemoryGraphStatus,
   formatMemoryGraphFetchError,
+  formatMemoryGraphActionError,
   isMemoryGraphEnabled,
   runMemoryGraphRetention,
   searchMemoryGraph,
@@ -242,6 +243,8 @@ function MemoryGraphExplorerInner({
     ids: string[];
     pinnedSkipped: number;
   } | null>(null);
+  const [bulkDeleting, setBulkDeleting] = useState(false);
+  const bulkDeletingRef = useRef(false);
   const [pendingRetentionRun, setPendingRetentionRun] = useState<number | null>(null);
   const providerCatalog = useAppStore((s) => s.settings.providers);
   const setApiBase = useAppStore((s) => s.setApiBase);
@@ -520,7 +523,7 @@ function MemoryGraphExplorerInner({
       await reload();
       setSelectedId(null);
     } catch (e) {
-      setError(formatMemoryGraphFetchError(e, "删除 episode 失败"));
+      setError(formatMemoryGraphActionError(e, "删除 episode 失败"));
     }
   };
 
@@ -562,22 +565,68 @@ function MemoryGraphExplorerInner({
   };
 
   const confirmBulkDelete = async () => {
-    if (!pendingBulkDelete || !apiBase.trim()) return;
+    if (bulkDeletingRef.current || !pendingBulkDelete || !apiBase.trim()) return;
+    bulkDeletingRef.current = true;
+    setBulkDeleting(true);
+    setError(null);
+    const ids = pendingBulkDelete.ids;
     try {
-      await bulkDeleteMemoryGraphEpisodes(
+      const result = await bulkDeleteMemoryGraphEpisodes(
         apiBase,
         apiToken,
         groupId,
-        pendingBulkDelete.ids,
+        ids,
         effectiveSessionId,
         effectiveAvatarId,
       );
       setPendingBulkDelete(null);
       setSelectedEpisodeIds(new Set());
       setEpisodeSelectMode(false);
+      if (result.failed.length > 0) {
+        const preview = result.failed
+          .slice(0, 2)
+          .map((f) => `${f.episode_uuid.slice(0, 8)}…：${f.error}`)
+          .join("；");
+        const suffix =
+          result.failed.length > 2 ? `（另有 ${result.failed.length - 2} 条失败）` : "";
+        setError(
+          result.deleted.length > 0
+            ? `已删除 ${result.deleted.length} 条，${result.failed.length} 条失败：${preview}${suffix}`
+            : `删除失败：${preview}${suffix}`,
+        );
+      }
+    } catch (e) {
+      const msg = formatMemoryGraphActionError(e, "批量删除失败");
+      if (
+        /无法连接 agx serve|failed to fetch|networkerror|load failed/i.test(msg) &&
+        typeof window !== "undefined" &&
+        window.agenticxDesktop?.getApiBase
+      ) {
+        try {
+          const freshBase = await window.agenticxDesktop.getApiBase();
+          if (freshBase && freshBase !== apiBase) {
+            setApiBase(freshBase);
+            setError("后端地址已变更，请关闭对话框后重试删除");
+            return;
+          }
+        } catch {
+          // fall through
+        }
+      }
+      setError(
+        /无法连接 agx serve|failed to fetch|networkerror|load failed/i.test(msg)
+          ? "后端无响应（可能仍在删除中或已退出）。请等待约 1 分钟后再点「刷新」，勿重复点删除；若仍失败请 ⌘Q 退出 Near 后重开。"
+          : msg,
+      );
+      return;
+    } finally {
+      bulkDeletingRef.current = false;
+      setBulkDeleting(false);
+    }
+    try {
       await reload();
     } catch (e) {
-      setError(formatMemoryGraphFetchError(e, "批量删除失败"));
+      setError(formatMemoryGraphActionError(e, "删除已完成，但刷新列表失败，请点「刷新」"));
     }
   };
 
@@ -595,7 +644,7 @@ function MemoryGraphExplorerInner({
       );
       await reload();
     } catch (e) {
-      setError(formatMemoryGraphFetchError(e, "更新 pin 失败"));
+      setError(formatMemoryGraphActionError(e, "更新 pin 失败"));
     }
   };
 
@@ -612,7 +661,7 @@ function MemoryGraphExplorerInner({
       );
       setPendingRetentionRun(result.count ?? result.would_delete?.length ?? 0);
     } catch (e) {
-      setError(formatMemoryGraphFetchError(e, "预览清理失败"));
+      setError(formatMemoryGraphActionError(e, "预览清理失败"));
     }
   };
 
@@ -630,7 +679,7 @@ function MemoryGraphExplorerInner({
       setPendingRetentionRun(null);
       await reload();
     } catch (e) {
-      setError(formatMemoryGraphFetchError(e, "执行清理失败"));
+      setError(formatMemoryGraphActionError(e, "执行清理失败"));
     }
   };
 
@@ -1403,14 +1452,26 @@ function MemoryGraphExplorerInner({
       <Modal
         open={pendingBulkDelete != null}
         title="确认删除 Episode"
-        onClose={() => setPendingBulkDelete(null)}
+        onClose={() => {
+          if (!bulkDeleting) setPendingBulkDelete(null);
+        }}
         footer={
           <>
-            <Button type="button" variant="ghost" onClick={() => setPendingBulkDelete(null)}>
+            <Button
+              type="button"
+              variant="ghost"
+              disabled={bulkDeleting}
+              onClick={() => setPendingBulkDelete(null)}
+            >
               取消
             </Button>
-            <Button type="button" variant="danger" onClick={() => void confirmBulkDelete()}>
-              删除
+            <Button
+              type="button"
+              variant="danger"
+              disabled={bulkDeleting}
+              onClick={() => void confirmBulkDelete()}
+            >
+              {bulkDeleting ? "删除中…" : "删除"}
             </Button>
           </>
         }
@@ -1422,6 +1483,11 @@ function MemoryGraphExplorerInner({
             : ""}
           。此操作不可撤销。
         </p>
+        {bulkDeleting ? (
+          <p className="mt-2 text-sm text-text-faint">
+            正在删除，请勿重复点击或退出。若条目触发图谱引擎缺陷会自动重建图谱库（已自动备份），最长约 1 分钟。
+          </p>
+        ) : null}
       </Modal>
       <Modal
         open={pendingRetentionRun != null}
