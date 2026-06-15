@@ -250,6 +250,8 @@ export type MessageAttachment = {
 export type QueuedMessage = {
   id: string;
   text: string;
+  /** Owning session id captured when queued; prevents cross-session replay. */
+  sessionId?: string;
   attachments: MessageAttachment[];
   contextFiles: MessageAttachment[];
   timestamp: number;
@@ -425,6 +427,7 @@ type AppState = {
   pendingMessages: Record<string, QueuedMessage[]>;
   enqueuePaneMessage: (paneId: string, msg: QueuedMessage) => void;
   dequeuePaneMessage: (paneId: string) => QueuedMessage | undefined;
+  dequeuePaneMessageForSession: (paneId: string, sessionId: string) => QueuedMessage | undefined;
   takePendingMessage: (paneId: string, msgId: string) => QueuedMessage | undefined;
   removePendingMessage: (paneId: string, msgId: string) => void;
   editPendingMessage: (paneId: string, msgId: string, newText: string) => void;
@@ -1233,6 +1236,21 @@ export const useAppStore = create<AppState>((set, get) => ({
       },
     }));
     return first;
+  },
+  dequeuePaneMessageForSession: (paneId, sessionId) => {
+    const sid = String(sessionId ?? "").trim();
+    if (!sid) return undefined;
+    const queue = get().pendingMessages[paneId] ?? [];
+    const idx = queue.findIndex((m) => String(m.sessionId ?? "").trim() === sid);
+    if (idx < 0) return undefined;
+    const item = queue[idx];
+    set((state) => ({
+      pendingMessages: {
+        ...state.pendingMessages,
+        [paneId]: (state.pendingMessages[paneId] ?? []).filter((_, i) => i !== idx),
+      },
+    }));
+    return item;
   },
   takePendingMessage: (paneId, msgId) => {
     const queue = get().pendingMessages[paneId] ?? [];
