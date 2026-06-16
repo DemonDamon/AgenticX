@@ -1109,6 +1109,50 @@ def _extract_inline_tool_call(
     tag_block = re.search(r"<tool_code>\s*(.*?)\s*</tool_code>", text, re.S)
     if tag_block:
         snippet = tag_block.group(1).strip()
+    snippet = snippet.strip()
+
+    def _parse_tool_call_object(obj: Any) -> Optional[Dict[str, Any]]:
+        if not isinstance(obj, dict):
+            return None
+        fn = obj.get("function")
+        if not isinstance(fn, dict):
+            return None
+        name = str(fn.get("name") or "").strip()
+        if not name or name not in allowed_tool_names:
+            return None
+        raw_args = fn.get("arguments", {})
+        args_obj: Dict[str, Any] = {}
+        if isinstance(raw_args, dict):
+            args_obj = raw_args
+        elif isinstance(raw_args, str):
+            try:
+                parsed_args = json.loads(raw_args)
+                if isinstance(parsed_args, dict):
+                    args_obj = parsed_args
+            except Exception:
+                args_obj = {}
+        return {"name": name, "arguments": args_obj}
+
+    # Some models (notably Ollama variants without strict tool-call support)
+    # may emit OpenAI-style tool_calls JSON as plain text.
+    if snippet.startswith("```") and snippet.endswith("```"):
+        body = re.sub(r"^```(?:json)?\s*", "", snippet).rstrip()
+        snippet = re.sub(r"\s*```$", "", body).strip()
+    if snippet.startswith("{"):
+        try:
+            payload = json.loads(snippet)
+            if isinstance(payload, dict):
+                calls = payload.get("tool_calls")
+                if isinstance(calls, list):
+                    for item in calls:
+                        parsed_call = _parse_tool_call_object(item)
+                        if parsed_call is not None:
+                            return parsed_call
+                parsed_single = _parse_tool_call_object(payload)
+                if parsed_single is not None:
+                    return parsed_single
+        except Exception:
+            pass
 
     # Find the first allowed tool call anywhere in the snippet.
     # This supports wrappers such as print(check_resources()).
@@ -1133,6 +1177,70 @@ def _extract_inline_tool_call(
         except Exception:
             args_obj = {}
     return {"name": tool_name, "arguments": args_obj}
+
+
+def _sanitize_structured_assistant_text(text: str, allowed_tool_names: set[str]) -> str:
+    """Extract user-facing content from model-emitted JSON wrappers.
+
+    Some providers/models may output planner JSON as plain text, e.g.
+    `{"thought":"...","tool_calls":[]}` or OpenAI-like wrappers. This helper
+    keeps visible content only and drops internal scaffolding noise.
+    """
+    if not text:
+        return ""
+    snippet = str(text).strip()
+    if not snippet:
+        return ""
+    if snippet.startswith("```") and snippet.endswith("```"):
+        body = re.sub(r"^```(?:json)?\s*", "", snippet).rstrip()
+        snippet = re.sub(r"\s*```$", "", body).strip()
+    if not snippet.startswith("{"):
+        return str(text).strip()
+    try:
+        payload = json.loads(snippet)
+    except Exception:
+        return str(text).strip()
+    if not isinstance(payload, dict):
+        return str(text).strip()
+
+    for key in ("content", "response", "answer", "reply", "final"):
+        val = payload.get(key)
+        if isinstance(val, str) and val.strip():
+            return val.strip()
+
+    tool_calls = payload.get("tool_calls")
+    if isinstance(tool_calls, list):
+        for item in tool_calls:
+            if not isinstance(item, dict):
+                continue
+            fn = item.get("function")
+            fn_name = ""
+            fn_args: Any = {}
+            if isinstance(fn, dict):
+                fn_name = str(fn.get("name") or "").strip()
+                fn_args = fn.get("arguments", {})
+            elif isinstance(fn, str):
+                fn_name = fn.strip()
+                fn_args = item.get("args", {})
+            if not fn_name:
+                continue
+            if isinstance(fn_args, str):
+                try:
+                    fn_args = json.loads(fn_args)
+                except Exception:
+                    fn_args = {}
+            if not isinstance(fn_args, dict):
+                continue
+            if fn_name in allowed_tool_names or fn_name in {"respond", "final_answer", "reply", "answer"}:
+                for arg_key in ("content", "text", "message", "answer", "reply"):
+                    maybe_text = fn_args.get(arg_key)
+                    if isinstance(maybe_text, str) and maybe_text.strip():
+                        return maybe_text.strip()
+
+    internal_only_keys = {"thought", "reasoning", "plan", "analysis", "tool_calls"}
+    if set(payload.keys()).issubset(internal_only_keys):
+        return ""
+    return str(text).strip()
 
 
 def _build_progress_signature(session: StudioSession) -> str:
@@ -2549,7 +2657,10 @@ class AgentRuntime:
                 return
             _reset_llm_timeout_retry_count(session)
             reset_provider_timeout_streak(session)
-            response_text = (response.content or "").strip()
+            response_text = _sanitize_structured_assistant_text(
+                (response.content or "").strip(),
+                allowed_tool_names,
+            )
             raw_tc = response.tool_calls or []
             tool_calls = [
                 tc for tc in raw_tc
@@ -2668,6 +2779,7 @@ class AgentRuntime:
                     except Exception:
                         streamed_text = response_text
                     raw_tail = streamed_text.strip() if streamed_text.strip() else response_text
+                    raw_tail = _sanitize_structured_assistant_text(str(raw_tail), allowed_tool_names)
                     final_text, sug_list = (
                         split_final_answer_and_followups(raw_tail)
                         if _followups_enabled

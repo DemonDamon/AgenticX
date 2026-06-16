@@ -197,7 +197,7 @@ type ProviderConfig = {
   enabled?: boolean;
   drop_params?: boolean;
   display_name?: string;
-  interface?: "openai";
+  interface?: "openai" | "ollama";
 };
 
 type RemoteServerConfig = {
@@ -1264,6 +1264,40 @@ const BAILIAN_EMBEDDING_MODELS = [
 
 function isBailianLikeRequest(provider: string, base: string): boolean {
   return provider === "bailian" || provider === "dashscope" || /dashscope\.aliyuncs\.com/i.test(base);
+}
+
+function isOllamaLikeProvider(provider: string): boolean {
+  return provider === "ollama" || provider.startsWith("custom_ollama_");
+}
+
+function normalizeOllamaApiBase(baseUrl: string): string {
+  return baseUrl.trim().replace(/\/+$/, "").replace(/\/v\d+$/i, "");
+}
+
+async function fetchOllamaModelNames(baseUrl: string): Promise<{
+  ok: boolean;
+  models?: string[];
+  error?: string;
+}> {
+  const base = normalizeOllamaApiBase(baseUrl);
+  if (!base) return { ok: false, error: "未知 API 地址" };
+  try {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 15000);
+    const resp = await proxyAwareFetch(`${base}/api/tags`, { signal: controller.signal });
+    clearTimeout(timer);
+    if (!resp.ok) {
+      const body = await resp.text().catch(() => "");
+      return { ok: false, error: `HTTP ${resp.status}: ${body.slice(0, 200)}` };
+    }
+    const data = await resp.json() as { models?: Array<{ name?: string }> };
+    const models = (data.models ?? [])
+      .map((m) => String(m.name ?? "").trim())
+      .filter(Boolean);
+    return { ok: true, models };
+  } catch (err) {
+    return { ok: false, error: String(err) };
+  }
 }
 
 /** Heuristic: does a model id look like an embedding SKU (text or multimodal)? */
@@ -6067,7 +6101,7 @@ function registerIpc(): void {
     enabled?: boolean;
     dropParams?: boolean;
     displayName?: string;
-    interface?: "openai";
+    interface?: "openai" | "ollama";
   }) => {
     if (isRemoteMode()) {
       const r = await studioFetchJson(
@@ -6101,8 +6135,11 @@ function registerIpc(): void {
       else delete next.display_name;
     }
     if (payload.interface !== undefined) {
-      if (payload.interface === "openai") next.interface = "openai";
-      else delete next.interface;
+      if (payload.interface === "openai" || payload.interface === "ollama") {
+        next.interface = payload.interface;
+      } else {
+        delete next.interface;
+      }
     }
     cfg.providers[payload.name] = next;
     saveAgxConfig(cfg);
@@ -6143,6 +6180,11 @@ function registerIpc(): void {
     apiKey: string;
     baseUrl?: string;
   }) => {
+    if (isOllamaLikeProvider(payload.provider)) {
+      const rawBase = payload.baseUrl || "http://localhost:11434";
+      const tags = await fetchOllamaModelNames(rawBase);
+      return tags.ok ? { ok: true } : { ok: false, error: tags.error ?? "Ollama 连通性检测失败" };
+    }
     const apiKey = normalizeProviderApiKey(payload.apiKey);
     const base = (payload.baseUrl || KNOWN_BASE_URLS[payload.provider] || "").replace(/\/+$/, "");
     if (!base) return { ok: false, error: "未知 provider，请填写 API 地址" };
@@ -6205,6 +6247,14 @@ function registerIpc(): void {
     apiKey: string;
     baseUrl?: string;
   }) => {
+    if (isOllamaLikeProvider(payload.provider)) {
+      const rawBase = payload.baseUrl || "http://localhost:11434";
+      const tags = await fetchOllamaModelNames(rawBase);
+      if (!tags.ok) {
+        return { ok: false, models: [], error: tags.error ?? "拉取 Ollama 模型失败" };
+      }
+      return { ok: true, models: (tags.models ?? []).sort() };
+    }
     const apiKey = normalizeProviderApiKey(payload.apiKey);
     const base = (payload.baseUrl || KNOWN_BASE_URLS[payload.provider] || "").replace(/\/+$/, "");
     if (!base) return { ok: false, models: [], error: "未知 API 地址" };

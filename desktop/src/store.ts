@@ -311,7 +311,7 @@ export type ProviderEntry = {
   /** 自定义服务厂商展示名 */
   displayName?: string;
   /** OpenAI 范式接口 */
-  interface?: "openai";
+  interface?: "openai" | "ollama";
 };
 
 type SettingsState = {

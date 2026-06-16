@@ -156,6 +156,34 @@ def test_resolver_keyless_custom_openai_gateway_with_interface(tmp_path: Path, m
     assert provider.api_key == "placeholder"
 
 
+def test_resolver_custom_provider_with_interface_ollama_uses_litellm(tmp_path: Path, monkeypatch):
+    _setup_paths(tmp_path, monkeypatch)
+    ConfigManager.set_value("default_provider", "custom_ollama_home", scope="global")
+    ConfigManager.set_value("providers.custom_ollama_home.base_url", "http://192.168.1.10:11434", scope="global")
+    ConfigManager.set_value("providers.custom_ollama_home.model", "llama3", scope="global")
+    ConfigManager.set_value("providers.custom_ollama_home.interface", "ollama", scope="global")
+
+    provider = ProviderResolver.resolve()
+    assert isinstance(provider, LiteLLMProvider)
+    assert provider.model == "ollama/llama3"
+    assert provider.base_url == "http://192.168.1.10:11434"
+
+
+def test_resolver_legacy_custom_ollama_provider_without_interface(tmp_path: Path, monkeypatch):
+    _setup_paths(tmp_path, monkeypatch)
+    ConfigManager.set_value("default_provider", "custom_ollama_legacy", scope="global")
+    ConfigManager.set_value(
+        "providers.custom_ollama_legacy.base_url",
+        "http://192.168.1.10:11434",
+        scope="global",
+    )
+    ConfigManager.set_value("providers.custom_ollama_legacy.model", "gemma4:latest", scope="global")
+
+    provider = ProviderResolver.resolve()
+    assert isinstance(provider, LiteLLMProvider)
+    assert provider.model == "ollama/gemma4:latest"
+
+
 def test_litellm_provider_from_config_uses_placeholder_for_custom_base_without_key():
     provider = LiteLLMProvider.from_config(
         {

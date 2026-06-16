@@ -73,7 +73,7 @@ function toProviderEntries(
       enabled?: boolean;
       drop_params?: boolean;
       display_name?: string;
-      interface?: "openai";
+      interface?: "openai" | "ollama";
     }
   >
 ): Record<string, ProviderEntry> {
@@ -92,7 +92,7 @@ function toProviderEntries(
       dropParams: cfg.drop_params === true,
     };
     if (displayName) row.displayName = displayName;
-    if (cfg.interface === "openai") row.interface = "openai";
+    if (cfg.interface === "openai" || cfg.interface === "ollama") row.interface = cfg.interface;
     result[name] = normalizeProviderEntry(row);
   }
   return result;
@@ -1608,7 +1608,10 @@ export function App() {
     const normalizedProviders = normalizeAllProviders(result.providers);
 
     for (const [name, entry] of Object.entries(normalizedProviders)) {
-      const hasCustomVendorMeta = Boolean(entry.displayName?.trim()) || entry.interface === "openai";
+      const hasCustomVendorMeta =
+        Boolean(entry.displayName?.trim())
+        || entry.interface === "openai"
+        || entry.interface === "ollama";
       if (
         !hasCustomVendorMeta &&
         !entry.apiKey &&
@@ -1629,7 +1632,9 @@ export function App() {
         dropParams: entry.dropParams,
         // displayName 未出现在对象上时不传，避免误删 YAML；显式传空串表示用户清空展示名
         ...(entry.displayName !== undefined ? { displayName: entry.displayName.trim() } : {}),
-        ...(entry.interface === "openai" ? { interface: "openai" as const } : {}),
+        ...(entry.interface === "openai" || entry.interface === "ollama"
+          ? { interface: entry.interface }
+          : {}),
       });
     }
     await window.agenticxDesktop.setDefaultProvider(result.defaultProvider);
