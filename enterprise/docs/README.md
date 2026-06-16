@@ -22,7 +22,7 @@ Enterprise 是企业级大模型应用一体化平台，由 **员工前台（web
 | 配策略 / 插件 | [plugin-protocol/README.md](./plugin-protocol/README.md) · [gateway/policy-engine.md](./gateway/policy-engine.md) |
 | 部署到 Vercel + 外部 Gateway | [deployment/README.md](./deployment/README.md) |
 | 给客户做定制 | [guides/enterprise-customers-collaboration.md](./guides/enterprise-customers-collaboration.md) |
-| 排障 | [development/troubleshooting.md](./development/troubleshooting.md) |
+| 排障 | [development/troubleshooting.md](./development/troubleshooting.md) · [runbooks/postgres-ddl-lock-waiting.md](./runbooks/postgres-ddl-lock-waiting.md) |
 
 ---
 
@@ -78,7 +78,7 @@ Enterprise 是企业级大模型应用一体化平台，由 **员工前台（web
 - [deployment/README.md](./deployment/README.md) — Vercel + 外部 Gateway
 - [deployment/vercel-env-checklist.md](./deployment/vercel-env-checklist.md)
 - [deployment/supabase-migration-guide.md](./deployment/supabase-migration-guide.md)
-- [runbooks/](./runbooks/) — SSO、审计回灌、策略回滚、Channel 中继、隧道 demo
+- [runbooks/](./runbooks/) — SSO、审计回灌、策略回滚、PostgreSQL DDL 锁等待、Channel 中继、隧道 demo
 
 ### 决策记录
 
