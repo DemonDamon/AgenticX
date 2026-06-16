@@ -1176,6 +1176,20 @@ function isModelsCatalogMissing(status: number, body: string): boolean {
   );
 }
 
+function isChatProbeTokenLimitFalseNegative(status: number, body: string): boolean {
+  if (status !== 400) return false;
+  const lower = body.toLowerCase();
+  return (
+    lower.includes("max_tokens")
+    && (
+      lower.includes("model output limit")
+      || lower.includes("was reached")
+      || lower.includes("too small")
+      || lower.includes("must be")
+    )
+  );
+}
+
 function usesCustomBaseUrl(provider: string, baseUrl?: string): boolean {
   const custom = (baseUrl ?? "").trim().replace(/\/+$/, "");
   if (!custom) return false;
@@ -6256,7 +6270,9 @@ function registerIpc(): void {
       : JSON.stringify({
           model: payload.model,
           messages: [{ role: "user", content: "hi" }],
-          max_tokens: 1,
+          // `max_tokens: 1` triggers false negatives on some OpenAI-compatible
+          // GPT-5 gateways; use a small but safe floor for probe requests.
+          max_tokens: 16,
         });
     try {
       const controller = new AbortController();
@@ -6275,6 +6291,9 @@ function registerIpc(): void {
       const latencyMs = Math.round(performance.now() - t0);
       if (resp.ok) return { ok: true, latencyMs };
       const errBody = await resp.text().catch(() => "");
+      if (!isEmbedding && isChatProbeTokenLimitFalseNegative(resp.status, errBody)) {
+        return { ok: true, latencyMs };
+      }
       return { ok: false, error: `HTTP ${resp.status}: ${errBody.slice(0, 200)}` };
     } catch (err) {
       return { ok: false, error: String(err) };
