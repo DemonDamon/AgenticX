@@ -1,6 +1,11 @@
 import asyncio
 from typing import Any, Optional, Dict, List, AsyncGenerator, Generator, Union, cast
 import litellm  # type: ignore
+
+# GAIA / batch runs call LiteLLM many times; default stderr prints red
+# "Provider List" / "Give Feedback" hints even when the call eventually succeeds.
+litellm.suppress_debug_info = True
+
 from pydantic import Field  # type: ignore
 from .base import BaseLLMProvider, StreamChunk
 from .response import LLMResponse, TokenUsage, LLMChoice
