@@ -8,7 +8,7 @@ export type ProviderCatalogEntry = {
   enabled: boolean;
   dropParams: boolean;
   displayName?: string;
-  interface?: "openai";
+  interface?: "openai" | "ollama";
 };
 
 export type SelectableModelOption = {

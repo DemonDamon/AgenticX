@@ -80,7 +80,16 @@ import { AccountTab } from "./AccountTab";
 import { KnowledgeSettings, type KnowledgeSettingsHandle } from "./settings/knowledge/KnowledgeSettings";
 import { MemoryGraphExplorer } from "./memory/MemoryGraphExplorer";
 import { TurnArchiveSettingsPanel } from "./memory/TurnArchiveSettingsPanel";
-import { getProviderDisplayName, isProviderDisplayNameEditable, makeCustomOpenAIProviderId } from "../utils/provider-display";
+import {
+  getProviderDisplayName,
+  isOllamaLikeProvider,
+  isProviderDisplayNameEditable,
+  makeCustomOllamaProviderId,
+  makeCustomOpenAIProviderId,
+  normalizeProviderBaseUrlForSave,
+  previewProviderApiEndpoint,
+  type ProviderInterfaceKind,
+} from "../utils/provider-display";
 import { normalizeProviderEntry } from "../utils/model-options";
 import { classifyModelKind, isEmbeddingModelKind } from "../utils/model-kind";
 import type { SettingsTab } from "../settings-tab";
@@ -169,8 +178,8 @@ type ProviderEntry = {
   dropParams: boolean;
   /** 自定义服务厂商展示名（写入 config display_name） */
   displayName?: string;
-  /** 接口范式：当前仅支持 OpenAI 兼容 */
-  interface?: "openai";
+  /** 自定义厂商接口范式：OpenAI 兼容或 Ollama 原生 */
+  interface?: ProviderInterfaceKind;
 };
 
 /** 至少填写了密钥或自定义 API 地址之一，才视为已配置（与「留空使用默认」的隐式地址区分）。 */
@@ -211,7 +220,10 @@ function providerEntryFromSaved(saved: Partial<ProviderEntry> | undefined): Prov
   const cred = providerCredentialed({ apiKey, baseUrl });
   const models = saved?.models;
   const dn = raw.displayName?.trim() || raw.display_name?.trim();
-  const iface = saved?.interface === "openai" ? "openai" : undefined;
+  const iface =
+    saved?.interface === "openai" || saved?.interface === "ollama"
+      ? saved.interface
+      : undefined;
   return {
     apiKey,
     baseUrl,
@@ -5858,6 +5870,7 @@ export function SettingsPanel({
   const [addModelFormName, setAddModelFormName] = useState("");
   const [addServiceVendorModalOpen, setAddServiceVendorModalOpen] = useState(false);
   const [addVendorFormName, setAddVendorFormName] = useState("");
+  const [addVendorFormType, setAddVendorFormType] = useState<ProviderInterfaceKind>("openai");
   const [editModelModalOpen, setEditModelModalOpen] = useState(false);
   const [editModelOriginalId, setEditModelOriginalId] = useState("");
   const [editModelFormId, setEditModelFormId] = useState("");
@@ -6518,7 +6531,8 @@ export function SettingsPanel({
       enabled: raw.enabled !== false,
       dropParams: raw.dropParams === true,
       displayName: raw.displayName != null && String(raw.displayName).trim() ? String(raw.displayName).trim() : undefined,
-      interface: raw.interface === "openai" ? "openai" : undefined,
+      interface:
+        raw.interface === "openai" || raw.interface === "ollama" ? raw.interface : undefined,
     };
   }, [draft, active]);
 
@@ -6752,12 +6766,16 @@ export function SettingsPanel({
   const closeAddServiceVendorModal = () => {
     setAddServiceVendorModalOpen(false);
     setAddVendorFormName("");
+    setAddVendorFormType("openai");
   };
 
   const submitAddServiceVendorFromModal = () => {
     const name = addVendorFormName.trim();
     if (!name) return;
-    const id = makeCustomOpenAIProviderId(name, Object.keys(draft));
+    const isOllama = addVendorFormType === "ollama";
+    const id = isOllama
+      ? makeCustomOllamaProviderId(name, Object.keys(draft))
+      : makeCustomOpenAIProviderId(name, Object.keys(draft));
     setDraft((prev) => ({
       ...prev,
       [id]: {
@@ -6768,7 +6786,7 @@ export function SettingsPanel({
         enabled: false,
         dropParams: false,
         displayName: name,
-        interface: "openai",
+        interface: addVendorFormType,
       },
     }));
     setActive(id);
@@ -6863,13 +6881,6 @@ export function SettingsPanel({
     cancelInlineProviderRename();
   }, [inlineRenameProviderId, inlineRenameValue, cancelInlineProviderRename]);
 
-  /** Normalize base_url: strip trailing slash; if no version segment (/v1, /v2…), append /v1. */
-  const normalizeBaseUrl = (url: string): string => {
-    const b = url.trim().replace(/\/+$/, "");
-    if (!b) return b;
-    return /\/v\d(\/|$)/.test(b) ? b : `${b}/v1`;
-  };
-
   const handleSave = async () => {
     const permRes = await permissionsPanelRef.current?.flushPermissions?.();
     if (permRes && !permRes.ok) {
@@ -6902,7 +6913,10 @@ export function SettingsPanel({
     }
     const normalized: Record<string, ProviderEntry> = {};
     for (const [name, entry] of Object.entries(draft)) {
-      normalized[name] = normalizeProviderEntry({ ...entry, baseUrl: normalizeBaseUrl(entry.baseUrl) });
+      normalized[name] = normalizeProviderEntry({
+        ...entry,
+        baseUrl: normalizeProviderBaseUrlForSave(name, entry.baseUrl, entry),
+      });
     }
     await onSave({ defaultProvider: defProv, providers: normalized });
     const remoteSave = await window.agenticxDesktop.saveRemoteServer({
@@ -8054,6 +8068,7 @@ export function SettingsPanel({
                     className="mx-1.5 mb-1.5 mt-0.5 flex shrink-0 items-center justify-center gap-1 rounded-lg border border-[var(--settings-accent-badge-bg)] py-1.5 text-xs font-medium text-[var(--settings-accent-fg)] transition hover:bg-[var(--settings-accent-row-bg)]"
                     onClick={() => {
                       setAddVendorFormName("");
+                      setAddVendorFormType("openai");
                       setAddServiceVendorModalOpen(true);
                     }}
                   >
@@ -8232,17 +8247,26 @@ export function SettingsPanel({
                       </label>
                       <label className="block text-sm text-text-muted">
                         API 地址 <span className="text-xs text-text-faint">(留空使用默认)</span>
-                        <input className="mt-1 w-full rounded-md border border-border bg-surface-panel px-2 py-1.5 text-sm" value={current.baseUrl} onChange={(e) => updateField("baseUrl", e.target.value)} placeholder="https://..." />
+                        <input
+                          className="mt-1 w-full rounded-md border border-border bg-surface-panel px-2 py-1.5 text-sm"
+                          value={current.baseUrl}
+                          onChange={(e) => updateField("baseUrl", e.target.value)}
+                          placeholder={
+                            isOllamaLikeProvider(active, current)
+                              ? "http://192.168.x.x:11434"
+                              : "https://..."
+                          }
+                        />
+                        {isOllamaLikeProvider(active, current) && (
+                          <div className="mt-1 text-xs text-text-faint">
+                            Ollama 使用原生 API，<strong className="font-medium text-text-subtle">不要</strong>填写 <code className="text-[10px]">/v1</code>；留空密钥，仅填可访问的地址即可。
+                          </div>
+                        )}
                         {current.baseUrl.trim() && (
                           <div className="mt-1 text-xs text-text-faint">
-                            预览：<span className="text-text-subtle">{
-                              (() => {
-                                const b = current.baseUrl.trim().replace(/\/+$/, "");
-                                // Normalize: ensure /v1 segment is present (Cherry Studio behavior)
-                                const base = /\/v\d(\/|$)/.test(b) ? b : `${b}/v1`;
-                                return `${base}/chat/completions`;
-                              })()
-                            }</span>
+                            预览：<span className="text-text-subtle">
+                              {previewProviderApiEndpoint(active, current.baseUrl, current)}
+                            </span>
                           </div>
                         )}
                       </label>
@@ -8511,14 +8535,17 @@ export function SettingsPanel({
                             服务厂商类型
                             <select
                               className="mt-1 w-full rounded-md border border-border bg-surface-card-strong px-2 py-1.5 text-sm"
-                              value="openai"
-                              disabled
+                              value={addVendorFormType}
                               aria-label="服务厂商类型"
+                              onChange={(e) => setAddVendorFormType(e.target.value as ProviderInterfaceKind)}
                             >
-                              <option value="openai">OpenAI</option>
+                              <option value="openai">OpenAI 兼容</option>
+                              <option value="ollama">Ollama</option>
                             </select>
                             <p className="mt-1 text-[11px] leading-relaxed text-text-faint">
-                              当前仅支持 OpenAI 兼容接口（含多数中转 / 网关）；保存设置后写入配置。
+                              {addVendorFormType === "ollama"
+                                ? "Ollama 直连（如局域网 11434）；API 地址勿带 /v1。侧栏已有内置「Ollama」时可改那边，此处用于第二实例或自定义名称。"
+                                : "OpenAI 兼容接口（含多数中转 / 网关）；保存设置后写入配置。"}
                             </p>
                           </label>
                         </div>

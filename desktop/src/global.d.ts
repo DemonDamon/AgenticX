@@ -929,7 +929,7 @@ declare global {
         enabled?: boolean;
         dropParams?: boolean;
         displayName?: string;
-        interface?: "openai";
+        interface?: "openai" | "ollama";
       }) => Promise<{ ok: boolean }>;
       setDefaultProvider: (name: string) => Promise<{ ok: boolean }>;
       deleteProvider: (name: string) => Promise<{ ok: boolean }>;

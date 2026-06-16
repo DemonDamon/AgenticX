@@ -54,6 +54,16 @@ class ProviderResolver:
         # Require gateway-like shape to avoid accidentally routing arbitrary custom providers.
         return bool(str(base_url or "").strip())
 
+    @staticmethod
+    def _is_legacy_custom_ollama_provider(
+        provider_key: str,
+        *,
+        base_url: Optional[str],
+    ) -> bool:
+        if not provider_key.startswith("custom_ollama_"):
+            return False
+        return bool(str(base_url or "").strip())
+
     @classmethod
     def _normalized_model(
         cls,
@@ -124,6 +134,11 @@ class ProviderResolver:
             ):
                 provider_cls = LiteLLMProvider
                 effective_key = "openai"
+            elif extra.get("interface") == "ollama" or cls._is_legacy_custom_ollama_provider(
+                provider_key, base_url=provider.base_url
+            ):
+                provider_cls = LiteLLMProvider
+                effective_key = "ollama"
             else:
                 raise ValueError(f"Unsupported provider: {provider_key}")
         else:
