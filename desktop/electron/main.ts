@@ -3148,10 +3148,13 @@ function createWindow(): void {
 }
 
 function createTray(): void {
+  const isMac = process.platform === "darwin";
+  const isWin = process.platform === "win32";
+  const iconName = isMac ? "trayTemplate.png" : (isWin ? "icon.ico" : "icon.png");
   const iconPath =
     process.env.NODE_ENV === "development"
-      ? path.resolve(process.cwd(), "assets", "trayTemplate.png")
-      : path.join(process.resourcesPath, "assets", "trayTemplate.png");
+      ? path.resolve(process.cwd(), "assets", iconName)
+      : path.join(process.resourcesPath, "assets", iconName);
   if (!fs.existsSync(iconPath)) {
     return;
   }
