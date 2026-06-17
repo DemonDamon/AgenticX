@@ -100,17 +100,42 @@ curl --noproxy '*' -s -o /dev/null -w '%{http_code}\n' http://127.0.0.1:3000
 
 原因：`drizzle-kit` 个别版本（如 `0.31.10`）在 migrate 失败时会**吞掉底层 Postgres 错误**；并非日志没采集。
 
-**第一步：看脚本落盘日志**（`bootstrap.sh` / `start-dev.sh` 已自动 `tee`）：
+先判断这次失败发生在哪一步：
+
+```text
+postgres is ready
+running db:migrate
+...
+ERR_PNPM_RECURSIVE_RUN_FIRST_FAIL ... drizzle-kit migrate
+```
+
+如果日志停在这里，说明 Docker 和 Postgres 已经起来了，失败点是数据库迁移。不要继续反复执行 `bootstrap.sh`，先拿到底层错误。
+
+**第一步：看脚本落盘日志**（`bootstrap.sh` / `start-dev.sh` 已自动写入 `.runtime/logs/`）：
 
 ```bash
-ls -lt enterprise/.runtime/logs/
-tail -n 80 enterprise/.runtime/logs/db-migrate-*.log
-# bootstrap 全流程：enterprise/.runtime/logs/bootstrap-*.log
+cd enterprise
+ls -lt .runtime/logs/
+tail -n 80 .runtime/logs/db-migrate-*.log
+# bootstrap 全流程：.runtime/logs/bootstrap-*.log
 ```
 
 失败时终端也会打印 `[log] db:migrate failed — full output: ...`，把该文件发给运维即可。
 
-**开发/POC 环境最短修复**（可清库）：
+如果当前目录已经是 `enterprise/`，用：
+
+```bash
+ls -lt .runtime/logs/
+tail -n 120 .runtime/logs/bootstrap-*.log
+tail -n 120 .runtime/logs/db-migrate-*.log 2>/dev/null || true
+docker logs --tail=120 agenticx-postgres-dev
+```
+
+**第二步：确认是不是“只清镜像，没有清数据库”**
+
+Docker 镜像和 Postgres 数据卷是两回事。执行过 `docker rmi` 或“清镜像”后，旧数据库数据通常仍在 Docker volume 里。旧表、半成品迁移或旧迁移记录仍可能导致 `db:migrate` 失败。
+
+开发 / POC 环境如果可以清库，直接走重建路径：
 
 ```bash
 cd enterprise
@@ -118,7 +143,22 @@ bash scripts/bootstrap.sh --reset-db
 bash scripts/start-dev-with-infra.sh --ui=stream
 ```
 
-**不能清库时**：在日志仍不够时，临时降级 `drizzle-kit` 以暴露真实 PG 错误：
+`--reset-db` 会执行 docker compose `down -v`，删除本地 Postgres 数据卷后重新建库。不要在需要保留数据的环境使用。
+
+**第三步：不能清库时，保留现场继续查**
+
+确认容器和连接状态：
+
+```bash
+cd enterprise
+docker ps
+docker exec -it agenticx-postgres-dev psql -U postgres -d agenticx -c '\dt'
+docker exec -it agenticx-postgres-dev psql -U postgres -d agenticx -c 'select * from drizzle.__drizzle_migrations order by created_at desc limit 5;'
+```
+
+如果 `drizzle.__drizzle_migrations` 不存在或表结构与预期不一致，把输出和日志一起回传。
+
+在日志仍不够时，临时降级 `drizzle-kit` 以暴露真实 PG 错误：
 
 ```bash
 cd enterprise
@@ -126,6 +166,10 @@ pnpm --filter @agenticx/db-schema add -D drizzle-kit@0.31.9
 set -a && source .env.local && set +a
 pnpm --filter @agenticx/db-schema db:migrate
 ```
+
+**第四步：排查是否有并发迁移**
+
+如果同时出现大量 `CREATE TABLE waiting` 或 `too many clients already`，参考 [PostgreSQL DDL 锁等待 Runbook](../runbooks/postgres-ddl-lock-waiting.md)。这通常是多个进程 / 多个副本同时执行迁移，不是正常应用访问。
 
 ---
 
