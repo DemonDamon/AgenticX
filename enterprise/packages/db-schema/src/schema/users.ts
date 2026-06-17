@@ -1,3 +1,4 @@
+import { sql } from "drizzle-orm";
 import { index, integer, pgTable, timestamp, uniqueIndex, varchar } from "drizzle-orm/pg-core";
 import { auditColumns, softDeleteColumns, ulid } from "./_shared";
 import { departments } from "./departments";
@@ -24,7 +25,9 @@ export const users = pgTable(
     ...auditColumns,
   },
   (table) => ({
-    tenantEmailUq: uniqueIndex("users_tenant_email_uq").on(table.tenantId, table.email),
+    tenantEmailActiveUq: uniqueIndex("users_tenant_email_active_uq")
+      .on(table.tenantId, table.email)
+      .where(sql`${table.isDeleted} = false AND ${table.deletedAt} IS NULL`),
     idTenantUq: uniqueIndex("users_id_tenant_uq").on(table.id, table.tenantId),
     tenantDeptIdx: index("users_tenant_dept_idx").on(table.tenantId, table.deptId),
     tenantEmployeeNoIdx: index("users_tenant_employee_no_idx").on(table.tenantId, table.employeeNo),

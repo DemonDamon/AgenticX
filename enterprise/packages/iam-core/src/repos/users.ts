@@ -265,6 +265,52 @@ export async function getAdminUser(tenantId: string, id: string): Promise<AdminU
   return toDto(row[0]);
 }
 
+function isActiveUserRow(row: typeof users.$inferSelect): boolean {
+  return !row.isDeleted && row.deletedAt == null;
+}
+
+async function findUserRowByTenantEmail(
+  dbOrTx: IamDb,
+  tenantId: string,
+  email: string
+): Promise<typeof users.$inferSelect | null> {
+  const row = await dbOrTx
+    .select()
+    .from(users)
+    .where(and(eq(users.tenantId, tenantId), eq(users.email, email)))
+    .limit(1);
+  return row[0] ?? null;
+}
+
+function buildNewUserFields(input: {
+  displayName: string;
+  deptId?: string | null;
+  status?: AdminUserStatus;
+  phone?: string | null;
+  employeeNo?: string | null;
+  jobTitle?: string | null;
+  passwordHash: string;
+}): Omit<typeof users.$inferInsert, "id" | "tenantId" | "email" | "createdAt"> & {
+  updatedAt: Date;
+} {
+  const now = new Date();
+  const rowStatus: "active" | "disabled" = input.status === "disabled" ? "disabled" : "active";
+  return {
+    deptId: input.deptId ?? null,
+    displayName: input.displayName.trim(),
+    passwordHash: input.passwordHash,
+    status: rowStatus,
+    phone: input.phone ?? null,
+    employeeNo: input.employeeNo ?? null,
+    jobTitle: input.jobTitle ?? null,
+    failedLoginCount: 0,
+    lockedUntil: null,
+    isDeleted: false,
+    deletedAt: null,
+    updatedAt: now,
+  };
+}
+
 async function replaceUserRoles(
   input: {
     tenantId: string;
@@ -309,44 +355,43 @@ export async function createAdminUser(input: {
   const email = input.email.trim().toLowerCase();
   if (!email) throw new Error("email is required");
 
-  const dup = await db
-    .select({ id: users.id })
-    .from(users)
-    .where(
-      and(
-        eq(users.tenantId, input.tenantId),
-        eq(users.email, email),
-        eq(users.isDeleted, false),
-        isNull(users.deletedAt)
-      )
-    )
-    .limit(1);
-  if (dup[0]) throw new Error("email already exists");
+  const existing = await findUserRowByTenantEmail(db, input.tenantId, email);
+  if (existing && isActiveUserRow(existing)) {
+    throw new Error("email already exists");
+  }
 
   const initialPassword = input.initialPassword?.trim() || generateInitialPassword();
   const passwordHash = await hashPassword(initialPassword);
-  const id = ulid();
   const now = new Date();
-  const rowStatus: "active" | "disabled" = input.status === "disabled" ? "disabled" : "active";
-
-  await db.insert(users).values({
-    id,
-    tenantId: input.tenantId,
-    deptId: input.deptId ?? null,
-    email,
-    displayName: input.displayName.trim(),
+  const userFields = buildNewUserFields({
+    displayName: input.displayName,
+    deptId: input.deptId,
+    status: input.status,
+    phone: input.phone,
+    employeeNo: input.employeeNo,
+    jobTitle: input.jobTitle,
     passwordHash,
-    status: rowStatus,
-    phone: input.phone ?? null,
-    employeeNo: input.employeeNo ?? null,
-    jobTitle: input.jobTitle ?? null,
-    failedLoginCount: 0,
-    lockedUntil: null,
-    isDeleted: false,
-    deletedAt: null,
-    createdAt: now,
-    updatedAt: now,
   });
+
+  let id: string;
+  let restored = false;
+  if (existing) {
+    id = existing.id;
+    restored = true;
+    await db
+      .update(users)
+      .set(userFields)
+      .where(and(eq(users.tenantId, input.tenantId), eq(users.id, id)));
+  } else {
+    id = ulid();
+    await db.insert(users).values({
+      id,
+      tenantId: input.tenantId,
+      email,
+      createdAt: now,
+      ...userFields,
+    });
+  }
 
   const codes = input.roleCodes?.length ? input.roleCodes : ["member"];
   const idMap = await resolveRoleIdsFromCodes(input.tenantId, codes);
@@ -366,10 +411,10 @@ export async function createAdminUser(input: {
   await insertAuditEvent({
     tenantId: input.tenantId,
     actorUserId: input.actorUserId ?? null,
-    eventType: "iam.user.create",
+    eventType: restored ? "iam.user.restore" : "iam.user.create",
     targetKind: "user",
     targetId: id,
-    detail: { email, roleCodes: codes },
+    detail: { email, roleCodes: codes, restored },
   });
 
   const user = await getAdminUser(input.tenantId, id);
@@ -595,24 +640,13 @@ export async function upsertUserByEmailInTx(
   }
 ): Promise<string> {
   const email = input.email.trim().toLowerCase();
-  const existing = await tx
-    .select()
-    .from(users)
-    .where(
-      and(
-        eq(users.tenantId, input.tenantId),
-        eq(users.email, email),
-        eq(users.isDeleted, false),
-        isNull(users.deletedAt)
-      )
-    )
-    .limit(1);
+  const existing = await findUserRowByTenantEmail(tx, input.tenantId, email);
 
   const now = new Date();
   let userId: string;
 
-  if (existing[0]) {
-    userId = existing[0].id;
+  if (existing && isActiveUserRow(existing)) {
+    userId = existing.id;
     await tx
       .update(users)
       .set({
@@ -622,8 +656,24 @@ export async function upsertUserByEmailInTx(
         employeeNo: input.employeeNo ?? null,
         jobTitle: input.jobTitle ?? null,
         passwordHash: input.passwordHash,
-        status: input.status && input.status !== "locked" ? input.status : existing[0].status,
+        status: input.status && input.status !== "locked" ? input.status : existing.status,
         updatedAt: now,
+      })
+      .where(and(eq(users.tenantId, input.tenantId), eq(users.id, userId)));
+  } else if (existing) {
+    userId = existing.id;
+    await tx
+      .update(users)
+      .set({
+        ...buildNewUserFields({
+          displayName: input.displayName,
+          deptId: input.deptId,
+          status: input.status,
+          phone: input.phone,
+          employeeNo: input.employeeNo,
+          jobTitle: input.jobTitle,
+          passwordHash: input.passwordHash,
+        }),
       })
       .where(and(eq(users.tenantId, input.tenantId), eq(users.id, userId)));
   } else {
