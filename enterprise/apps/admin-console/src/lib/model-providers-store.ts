@@ -245,6 +245,14 @@ function normalizeProviderId(id: string): string {
   return id.trim().toLowerCase().replace(/[^a-z0-9_-]/g, "-");
 }
 
+function assertValidProviderId(id: string): void {
+  if (!id || /^-+$/.test(id) || !/^[a-z0-9][a-z0-9_-]*$/.test(id)) {
+    throw new Error(
+      "厂商 ID 须为英文小写字母/数字/连字符（例如 moma、minimax-cloud），勿填中文或符号"
+    );
+  }
+}
+
 export async function listProviders(): Promise<PublicProviderRecord[]> {
   const tenantId = requiredTenantId();
   const rows = await loadAll(tenantId);
@@ -272,6 +280,7 @@ export async function createProvider(input: CreateProviderInput): Promise<Public
   const db = getIamDb();
   const id = normalizeProviderId(input.id);
   if (!id) throw new Error("provider id is required");
+  assertValidProviderId(id);
   const dup = await db
     .select({ id: mpTable.id })
     .from(mpTable)
