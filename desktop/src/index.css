@@ -77,25 +77,33 @@ body {
 /* GFM tables (react-markdown + remark-gfm) — default UA styles are invisible on dark bubbles */
 .msg-content table {
   border-collapse: collapse;
-  margin: 0.75em 0;
+  margin: 0;
   font-size: 0.875rem;
   line-height: 1.5;
 }
 .msg-content th,
 .msg-content td {
   border: 1px solid var(--border-subtle);
-  padding: 0.4em 0.55em;
+  padding: 0.5em 0.75em;
   text-align: left;
   vertical-align: top;
   word-break: break-word;
 }
+.msg-content tr th:first-child,
+.msg-content tr td:first-child {
+  border-left: none;
+}
+.msg-content tr th:last-child,
+.msg-content tr td:last-child {
+  border-right: none;
+}
+.msg-content tbody tr:last-child td {
+  border-bottom: none;
+}
 .msg-content thead th {
-  background: color-mix(in srgb, var(--surface-card) 70%, transparent);
   font-weight: 600;
   color: var(--text-strong);
-}
-.msg-content tbody tr:nth-child(even) td {
-  background: color-mix(in srgb, var(--surface-hover) 25%, transparent);
+  border-top: none;
 }
 
 /* KaTeX long display formulas should scroll instead of clipping in bubbles. */

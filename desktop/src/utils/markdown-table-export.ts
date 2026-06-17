@@ -25,11 +25,27 @@ export function rowsToCsv(rows: string[][]): string {
   return `\uFEFF${body}`;
 }
 
-/** Tab-separated — pastes cleanly into Excel / Numbers / 飞书表格. */
-export function rowsToTsv(rows: string[][]): string {
-  return rows
-    .map((row) => row.map((cell) => cell.replace(/\t/g, " ")).join("\t"))
-    .join("\n");
+function escapeMarkdownCell(value: string): string {
+  // Keep single-line table cells and avoid breaking separators.
+  return value.replace(/\|/g, "\\|").replace(/\r?\n/g, "<br>");
+}
+
+/** Markdown table string, suitable for copy/paste into chat editors. */
+export function rowsToMarkdown(rows: string[][]): string {
+  if (rows.length === 0) return "";
+  const maxCols = rows.reduce((n, row) => Math.max(n, row.length), 0);
+  const normalize = (row: string[]) =>
+    Array.from({ length: maxCols }, (_, i) => escapeMarkdownCell(row[i] ?? ""));
+
+  const header = normalize(rows[0]);
+  const align = Array.from({ length: maxCols }, () => "---");
+  const body = rows.slice(1).map(normalize);
+  const lines = [
+    `| ${header.join(" | ")} |`,
+    `| ${align.join(" | ")} |`,
+    ...body.map((row) => `| ${row.join(" | ")} |`),
+  ];
+  return lines.join("\n");
 }
 
 export function triggerBlobDownload(blob: Blob, filename: string): void {
