@@ -2184,6 +2184,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
     [groupMembers, groupChatUserLabel, metaAvatarUrl, userAvatarUrl]
   );
   const workspacePanelOpen = !!pane?.taskspacePanelOpen;
+  const [pendingWorkspacePreviewPath, setPendingWorkspacePreviewPath] = useState<string | null>(null);
 
   const paneAvatarMeta = useMemo(() => {
     const aid = pane?.avatarId;
@@ -3439,30 +3440,21 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
     }));
   };
 
-  const revealFileInTaskspace = useCallback(async (absPath: string) => {
-    if (!pane.sessionId) return;
-    const cleanPath = String(absPath || "").trim();
-    if (!cleanPath) return;
-    const dirPath = cleanPath.includes("/") ? cleanPath.slice(0, cleanPath.lastIndexOf("/")) : cleanPath;
-    const result = await window.agenticxDesktop.addTaskspace({
-      sessionId: pane.sessionId,
-      path: dirPath,
-      label: dirPath.split("/").pop() || "taskspace",
-    });
-    if (result.ok && result.workspace?.id) {
-      setActiveTaskspace(pane.id, result.workspace.id);
+  const openWorkspaceFilePreview = useCallback(
+    (absPath: string) => {
+      const cleanPath = String(absPath || "").trim();
+      if (!cleanPath) return;
       if (!pane.taskspacePanelOpen) {
         openWorkspaceSidebarForPane(pane.id, paneRef.current?.clientWidth ?? paneWidth, openSidePanel);
       }
-    }
-  }, [
-    pane.id,
-    pane.sessionId,
-    pane.taskspacePanelOpen,
-    setActiveTaskspace,
-    openSidePanel,
-    paneWidth,
-  ]);
+      setPendingWorkspacePreviewPath(cleanPath);
+    },
+    [pane.id, pane.taskspacePanelOpen, paneWidth, openSidePanel],
+  );
+
+  const revealFileInTaskspace = useCallback(async (absPath: string) => {
+    openWorkspaceFilePreview(absPath);
+  }, [openWorkspaceFilePreview]);
 
   const copyMessage = useCallback(async (message: Message) => {
     const textToCopy = messagePlainTextForClipboard(message);
@@ -9128,6 +9120,8 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
               const next = `${base}${sep}${mention} `;
               setComposerText(next, { tokenNames: [fileName] });
             }}
+            previewAbsPath={pendingWorkspacePreviewPath}
+            onPreviewAbsPathHandled={() => setPendingWorkspacePreviewPath(null)}
           />
         </div>
       ) : null}
@@ -9247,6 +9241,8 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
                   const next = `${base}${sep}${mention} `;
                   setComposerText(next, { tokenNames: [fileName] });
                 }}
+                previewAbsPath={pendingWorkspacePreviewPath}
+                onPreviewAbsPathHandled={() => setPendingWorkspacePreviewPath(null)}
               />
             </div>
           ) : null}

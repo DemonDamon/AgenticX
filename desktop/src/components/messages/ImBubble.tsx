@@ -49,6 +49,8 @@ type Props = {
   selected?: boolean;
   /** Clicking a follow-up chip sends this text as the next user message (assistant only). */
   onFollowupClick?: (text: string, ctx?: { ownerSessionId?: string }) => void;
+  /** Open absolute file path in workspace preview (assistant markdown paths). */
+  onRevealPath?: (path: string) => void;
   /** Suppress in-bubble chips; used when parent renders them outside a unified ReAct container. */
   omitSuggestedQuestions?: boolean;
   /** Render-only hint when this assistant reply was cut off by session token budget. */
@@ -182,6 +184,7 @@ export function ImBubble({
   assistantVisual = "default",
   noBubbleBorder = false,
   onFollowupClick,
+  onRevealPath,
   omitSuggestedQuestions = false,
   budgetIncompleteHint = false,
   showSenderIdentity = false,
@@ -617,6 +620,7 @@ export function ImBubble({
                             references={citationReferences}
                             isStreaming={isStreaming}
                             onQuoteText={(text) => onQuoteMessage?.(message, text)}
+                            onRevealPath={onRevealPath}
                           />
                         </div>
                       )

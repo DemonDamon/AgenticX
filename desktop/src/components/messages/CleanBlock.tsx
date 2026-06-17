@@ -9,9 +9,10 @@ import { renderUserMessageInlineBody } from "./user-message-inline";
 type Props = {
   message: Message;
   badge?: ReactNode;
+  onRevealPath?: (path: string) => void;
 };
 
-export function CleanBlock({ message, badge }: Props) {
+export function CleanBlock({ message, badge, onRevealPath }: Props) {
   const isUser = message.role === "user";
   const isStreaming = message.id === "__stream__";
   const parsed = !isUser ? parseReasoningContent(message.content) : null;
@@ -51,7 +52,7 @@ export function CleanBlock({ message, badge }: Props) {
             )
           ) : (
             <div className={!isUser && parsed?.reasoning ? "mt-2" : undefined}>
-              <CitationMarkdownBody content={bodyText} references={message.references} isStreaming={isStreaming} />
+              <CitationMarkdownBody content={bodyText} references={message.references} isStreaming={isStreaming} onRevealPath={onRevealPath} />
             </div>
           )
         ) : null}

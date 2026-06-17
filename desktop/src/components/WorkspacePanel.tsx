@@ -1,5 +1,6 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { PanelRightClose, Folder, RefreshCw, FolderPlus, Terminal } from "lucide-react";
+import { createPortal } from "react-dom";
+import { PanelRightClose, Folder, RefreshCw, FolderPlus, Terminal, FileText, X, Copy, Check } from "lucide-react";
 import type { MouseEvent as ReactMouseEvent } from "react";
 import Prism from "prismjs";
 import "prismjs/components/prism-bash";
@@ -8,6 +9,14 @@ import "prismjs/components/prism-markdown";
 import "prismjs/components/prism-python";
 import "prismjs/components/prism-typescript";
 import "prismjs/themes/prism-tomorrow.css";
+import ReactMarkdown from "react-markdown";
+import {
+  chatMarkdownComponents,
+  chatRehypePlugins,
+  chatRemarkPlugins,
+  chatUrlTransform,
+  normalizeChatMarkdownContent,
+} from "./messages/markdown-components";
 import type { Taskspace } from "../store";
 import { useAppStore } from "../store";
 import { createResizeRafScheduler } from "../utils/resize-raf";
@@ -16,6 +25,11 @@ import { TerminalEmbed } from "./TerminalEmbed";
 import { getRememberedSessionForAvatar } from "../utils/avatar-last-session";
 import { isPaneAwaitingFreshSession } from "../utils/pane-fresh-session";
 import { shouldKeepWorkspaceVisibleWhenSessionMissing } from "../utils/workspace-session-visibility";
+import {
+  findTaskspaceForAbsPath,
+  parentDirectory,
+  relativePathFromRoot,
+} from "../utils/workspace-file-path";
 
 type TaskspaceFile = {
   name: string;
@@ -41,6 +55,9 @@ type Props = {
   autoRefreshKey?: number;
   onClose?: () => void;
   tintColor?: string;
+  /** Absolute path requested from chat (click path in assistant message). */
+  previewAbsPath?: string | null;
+  onPreviewAbsPathHandled?: () => void;
 };
 
 type CtxMenuState =
@@ -95,6 +112,25 @@ function detectLanguage(path: string): string {
   return "clike";
 }
 
+function isMarkdownPath(path: string): boolean {
+  const lower = path.toLowerCase();
+  return lower.endsWith(".md") || lower.endsWith(".markdown") || lower.endsWith(".mdx");
+}
+
+function formatBytes(bytes: number): string {
+  const n = Number(bytes);
+  if (!Number.isFinite(n) || n <= 0) return "0 B";
+  const units = ["B", "KB", "MB", "GB"];
+  const i = Math.min(units.length - 1, Math.floor(Math.log(n) / Math.log(1024)));
+  const value = n / Math.pow(1024, i);
+  return `${i === 0 ? value : value.toFixed(1)} ${units[i]}`;
+}
+
+function baseName(path: string): string {
+  const parts = String(path || "").split(/[\\/]/).filter(Boolean);
+  return parts[parts.length - 1] || path;
+}
+
 function nodeKey(taskspaceId: string, relPath: string): string {
   return `${taskspaceId}:${relPath || "."}`;
 }
@@ -132,6 +168,8 @@ export function WorkspacePanel({
   autoRefreshKey,
   onClose,
   tintColor,
+  previewAbsPath,
+  onPreviewAbsPathHandled,
 }: Props) {
   const addPaneTerminalTab = useAppStore((s) => s.addPaneTerminalTab);
   const removePaneTerminalTab = useAppStore((s) => s.removePaneTerminalTab);
@@ -153,6 +191,8 @@ export function WorkspacePanel({
   const [entriesByDir, setEntriesByDir] = useState<Record<string, TaskspaceFile[]>>({});
   const [selectedFilePath, setSelectedFilePath] = useState("");
   const [filePreview, setFilePreview] = useState<FilePreview | null>(null);
+  const [previewAnchor, setPreviewAnchor] = useState<{ top: number; bottom: number; left: number } | null>(null);
+  const [previewCopied, setPreviewCopied] = useState(false);
   const [showAddForm, setShowAddForm] = useState(false);
   const [newPath, setNewPath] = useState("");
   const [newLabel, setNewLabel] = useState("");
@@ -216,12 +256,53 @@ export function WorkspacePanel({
     }
   }, [panelHeight, maxTerminalHeight]);
 
+  const previewIsMarkdown = useMemo(
+    () => (filePreview ? isMarkdownPath(filePreview.path) : false),
+    [filePreview]
+  );
+
   const highlightedCode = useMemo(() => {
-    if (!filePreview) return "";
+    if (!filePreview || previewIsMarkdown) return "";
     const language = detectLanguage(filePreview.path);
     const grammar = Prism.languages[language] ?? Prism.languages.clike;
     return Prism.highlight(filePreview.content, grammar, language);
+  }, [filePreview, previewIsMarkdown]);
+
+  const previewMarkdownContent = useMemo(
+    () => (filePreview && previewIsMarkdown ? normalizeChatMarkdownContent(filePreview.content) : ""),
+    [filePreview, previewIsMarkdown]
+  );
+
+  // Anchor the floating preview to the left edge of the workspace panel
+  // (Codex-style pop-out) so it isn't clipped by the panel's overflow.
+  useLayoutEffect(() => {
+    if (!filePreview) {
+      setPreviewAnchor(null);
+      return;
+    }
+    const recompute = () => {
+      const el = panelRef.current;
+      if (!el) return;
+      const r = el.getBoundingClientRect();
+      setPreviewAnchor({ top: r.top, bottom: r.bottom, left: r.left });
+    };
+    recompute();
+    window.addEventListener("resize", recompute);
+    return () => window.removeEventListener("resize", recompute);
   }, [filePreview]);
+
+  useEffect(() => {
+    if (!filePreview) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setFilePreview(null);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [filePreview]);
+
+  useEffect(() => {
+    setPreviewCopied(false);
+  }, [filePreview?.path]);
 
   const loadTaskspaces = async (): Promise<Taskspace[] | undefined> => {
     const browseSessionId = getBrowseSessionId();
@@ -585,6 +666,58 @@ export function WorkspacePanel({
       size: Number(result.size ?? 0),
     });
   };
+
+  const openFileByAbsolutePath = async (absPathRaw: string) => {
+    const absPath = String(absPathRaw || "").trim();
+    if (!absPath) return;
+    const browseSessionId = getBrowseSessionId();
+    if (!browseSessionId) {
+      setErrorText("请先发送一条消息创建会话后再预览文件");
+      return;
+    }
+    setErrorText("");
+    let workspaces = taskspaces;
+    if (workspaces.length === 0) {
+      const loaded = await loadTaskspaces();
+      workspaces = loaded ?? [];
+    }
+    let match = findTaskspaceForAbsPath(workspaces, absPath);
+    if (!match) {
+      const parent = parentDirectory(absPath);
+      const addResult = await window.agenticxDesktop.addTaskspace({
+        sessionId: browseSessionId,
+        path: parent,
+        label: parent.split(/[\\/]/).pop() || "workspace",
+      });
+      if (!addResult.ok || !addResult.workspace?.id) {
+        setErrorText(addResult.error ?? "无法添加工作区以预览文件");
+        return;
+      }
+      const reloaded = await loadTaskspaces();
+      workspaces = reloaded ?? workspaces;
+      match = findTaskspaceForAbsPath(workspaces, absPath);
+      if (!match && addResult.workspace) {
+        match = {
+          taskspaceId: addResult.workspace.id,
+          relPath: relativePathFromRoot(addResult.workspace.path, absPath),
+        };
+      }
+    }
+    if (!match) {
+      setErrorText("无法在工作区中定位该文件");
+      return;
+    }
+    await openFile(match.taskspaceId, match.relPath);
+  };
+
+  useEffect(() => {
+    const path = String(previewAbsPath ?? "").trim();
+    if (!path) return;
+    void openFileByAbsolutePath(path).finally(() => {
+      onPreviewAbsPathHandled?.();
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [previewAbsPath]);
 
   const toggleDir = async (taskspaceId: string, relPath: string) => {
     if (activeTaskspaceId !== taskspaceId) {
@@ -1017,30 +1150,104 @@ export function WorkspacePanel({
         }
       />
 
-      {filePreview ? (
-        <div className="absolute inset-2 z-30 flex min-h-0 flex-col rounded-lg border border-border-strong bg-surface-panel shadow-2xl backdrop-blur-xl">
-          <div className="flex items-center justify-between border-b border-border px-3 py-2">
-            <div className="truncate text-[13px] text-text-subtle">{filePreview.path}</div>
-            <button
-              className="rounded border border-border px-2 py-1 text-[13px] text-text-muted hover:bg-surface-hover hover:text-text-strong"
-              onClick={() => setFilePreview(null)}
-            >
-              关闭
-            </button>
-          </div>
-          <pre className="min-h-0 flex-1 overflow-auto px-3 py-2 text-[13px] leading-relaxed">
-            <code
-              className={`language-${detectLanguage(filePreview.path)}`}
-              dangerouslySetInnerHTML={{ __html: highlightedCode }}
-            />
-          </pre>
-          {filePreview.truncated ? (
-            <div className="border-t border-border px-3 py-1.5 text-xs text-amber-300">
-              文件过大，已截断显示（{filePreview.size} bytes）。
-            </div>
-          ) : null}
-        </div>
-      ) : null}
+      {filePreview && previewAnchor
+        ? createPortal(
+            <>
+              <div
+                className="fixed z-[55]"
+                style={{
+                  top: 0,
+                  bottom: 0,
+                  left: 0,
+                  right: Math.max(0, window.innerWidth - previewAnchor.left),
+                }}
+                onMouseDown={() => setFilePreview(null)}
+                aria-hidden
+              />
+              <div
+                role="dialog"
+                aria-label={`预览 ${baseName(filePreview.path)}`}
+                className="animate-preview-pop fixed z-[56] flex min-h-0 flex-col overflow-hidden rounded-2xl border border-[var(--border-subtle)] bg-surface-popover shadow-[0_20px_60px_-15px_rgba(0,0,0,0.5)]"
+                style={{
+                  top: previewAnchor.top + 8,
+                  bottom: Math.max(8, window.innerHeight - previewAnchor.bottom + 8),
+                  right: Math.max(8, window.innerWidth - previewAnchor.left + 8),
+                  width: Math.min(760, Math.max(420, previewAnchor.left - 24)),
+                  transformOrigin: "right center",
+                }}
+                onMouseDown={(e) => e.stopPropagation()}
+              >
+                <div className="flex shrink-0 items-center gap-3 border-b border-border bg-surface-popover px-4 py-3">
+                  <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-[var(--border-subtle)] bg-surface-base shadow-sm">
+                    <FileText className="h-4 w-4 text-text-muted" strokeWidth={1.5} />
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <div className="truncate text-[14px] font-semibold tracking-tight text-text-strong" title={filePreview.path}>
+                      {baseName(filePreview.path)}
+                    </div>
+                    <div className="mt-0.5 flex items-center gap-1.5 truncate text-[11px] font-mono text-text-faint" title={filePreview.path}>
+                      <span className="truncate">{filePreview.path}</span>
+                      <span className="h-0.5 w-0.5 shrink-0 rounded-full bg-text-faint opacity-50" />
+                      <span className="shrink-0">{formatBytes(filePreview.size)}</span>
+                    </div>
+                  </div>
+                  <div className="ml-2 flex shrink-0 items-center gap-1">
+                    <button
+                      className="flex h-7 w-7 items-center justify-center rounded-md text-text-muted transition-colors hover:bg-surface-hover hover:text-text-strong"
+                      onClick={() => {
+                        void navigator.clipboard.writeText(filePreview.content);
+                        setPreviewCopied(true);
+                        window.setTimeout(() => setPreviewCopied(false), 1800);
+                      }}
+                      title="复制文件内容"
+                    >
+                      {previewCopied ? (
+                        <Check className="h-4 w-4 text-emerald-400" strokeWidth={2} />
+                      ) : (
+                        <Copy className="h-4 w-4" strokeWidth={1.5} />
+                      )}
+                    </button>
+                    <div className="h-4 w-px bg-border opacity-50" />
+                    <button
+                      className="flex h-7 w-7 items-center justify-center rounded-md text-text-muted transition-colors hover:bg-surface-hover hover:text-text-strong"
+                      onClick={() => setFilePreview(null)}
+                      title="关闭预览（Esc）"
+                    >
+                      <X className="h-4 w-4" strokeWidth={1.5} />
+                    </button>
+                  </div>
+                </div>
+                <div className="preview-scrollbar min-h-0 flex-1 overflow-auto bg-surface-base">
+                  {previewIsMarkdown ? (
+                    <div className="msg-content px-6 py-5 text-[13px] leading-relaxed text-text-primary">
+                      <ReactMarkdown
+                        remarkPlugins={chatRemarkPlugins}
+                        rehypePlugins={chatRehypePlugins}
+                        components={chatMarkdownComponents}
+                        urlTransform={chatUrlTransform}
+                      >
+                        {previewMarkdownContent}
+                      </ReactMarkdown>
+                    </div>
+                  ) : (
+                    <pre className="m-0 min-h-0 border-none bg-transparent px-6 py-5 text-[13px] leading-[1.65]">
+                      <code
+                        className={`language-${detectLanguage(filePreview.path)}`}
+                        dangerouslySetInnerHTML={{ __html: highlightedCode }}
+                      />
+                    </pre>
+                  )}
+                </div>
+                {filePreview.truncated ? (
+                  <div className="shrink-0 border-t border-border bg-amber-500/10 px-4 py-2 text-xs text-amber-500/90 backdrop-blur-md">
+                    文件过大，已截断显示（{formatBytes(filePreview.size)}）。
+                  </div>
+                ) : null}
+              </div>
+            </>,
+            document.body
+          )
+        : null}
 
       {errorText ? (
         <div className="border-t border-border px-3 py-1.5 text-xs text-rose-300">{errorText}</div>

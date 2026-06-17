@@ -15,10 +15,12 @@ import type { SearchReference } from "../../types/search-references";
 
 export { normalizeChatMarkdownContent, normalizeLenientEmphasisInText } from "./markdown-normalize";
 import { openExternalUrl } from "../../utils/open-external";
+import { isAbsoluteFilePath } from "../../utils/workspace-file-path";
 
 export const MarkdownContext = createContext<{
   isStreaming?: boolean;
   onQuoteText?: (text: string) => void;
+  onRevealPath?: (path: string) => void;
   references?: SearchReference[];
 }>({});
 
@@ -371,12 +373,53 @@ function CodeBlockComponent({
   );
 }
 
+function ChatInlineCode({
+  className,
+  children,
+  ...rest
+}: HTMLAttributes<HTMLElement> & { className?: string; children?: ReactNode }) {
+  const { onRevealPath } = useContext(MarkdownContext);
+  const text = reactNodeToPlainText(children).trim();
+  const isBlock = Boolean(className?.includes("language-"));
+  if (!isBlock && onRevealPath && isAbsoluteFilePath(text)) {
+    return (
+      <button
+        type="button"
+        className="cursor-pointer rounded bg-surface-card px-1.5 py-0.5 font-mono text-[0.85em] text-[var(--ui-btn-primary-bg,#38bdf8)] underline-offset-2 transition hover:underline"
+        title="在工作区中预览此文件"
+        onClick={(event) => {
+          event.preventDefault();
+          event.stopPropagation();
+          onRevealPath(text);
+        }}
+      >
+        {children}
+      </button>
+    );
+  }
+  if (isBlock) {
+    return (
+      <code className={className} {...rest}>
+        {children}
+      </code>
+    );
+  }
+  return (
+    <code className="rounded bg-surface-card px-1.5 py-0.5 font-mono text-[0.85em]" {...rest}>
+      {children}
+    </code>
+  );
+}
+
 /** Shared ReactMarkdown `components` map (GFM + Mermaid fenced blocks). */
 export const chatRemarkPlugins = [remarkGfm, remarkMath];
 export const chatRehypePlugins = [rehypeKatex];
 
 /** Shared ReactMarkdown `components` map (GFM + Mermaid fenced blocks). */
 export const chatMarkdownComponents: Partial<Components> = {
+  code({ className, children, ...rest }) {
+    return <ChatInlineCode className={className} {...rest}>{children}</ChatInlineCode>;
+  },
   pre({ children, node, className, ...rest }) {
     const fromHast = extractMermaidFromHastPre(node as HastElement | undefined);
     const mermaidSrc = fromHast ?? extractMermaidFromPreChildren(children);

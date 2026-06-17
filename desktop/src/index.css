@@ -467,3 +467,32 @@ input[type="radio"] {
   box-shadow: 0 0 0 1px rgba(var(--theme-color-rgb, 59, 130, 246), 0.5) !important;
 }
 
+/* Codex-style file preview popover animation */
+@keyframes agx-preview-pop {
+  0% { opacity: 0; transform: scale(0.98) translateX(8px); }
+  100% { opacity: 1; transform: scale(1) translateX(0); }
+}
+.animate-preview-pop {
+  animation: agx-preview-pop 0.2s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+/* Elegant scrollbar for the preview content */
+.preview-scrollbar::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+.preview-scrollbar::-webkit-scrollbar-track {
+  background: transparent;
+}
+.preview-scrollbar::-webkit-scrollbar-thumb {
+  background: var(--border-subtle);
+  border: 3px solid transparent;
+  background-clip: padding-box;
+  border-radius: 9999px;
+}
+.preview-scrollbar::-webkit-scrollbar-thumb:hover {
+  background: var(--border-strong);
+  border: 3px solid transparent;
+  background-clip: padding-box;
+}
+

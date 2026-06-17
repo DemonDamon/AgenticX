@@ -1,7 +1,13 @@
+import { isAbsoluteFilePath } from "../../utils/workspace-file-path";
+
 /** Inline code spans — leave literal backtick content unchanged. */
 const INLINE_CODE_RE = /(`[^`\n]+`)/g;
 
 const FENCED_BLOCK_RE = /(```[\s\S]*?```|~~~[\s\S]*?~~~)/g;
+
+/** Standalone line that is only an absolute file path (not already in backticks). */
+const STANDALONE_ABS_PATH_LINE_RE =
+  /^(\/(?:Users|home|tmp|var|opt|private|Volumes)[^\s\n`<>[\]()]+)$/gm;
 
 /** Full-width asterisk (U+FF0A) and similar look-alikes → ASCII `*`. */
 function normalizeAsteriskChars(text: string): string {
@@ -68,13 +74,22 @@ function normalizeLatexMathDelimitersInText(text: string): string {
   return next;
 }
 
+function wrapStandaloneAbsoluteFilePaths(text: string): string {
+  return text.replace(STANDALONE_ABS_PATH_LINE_RE, (match) => {
+    const trimmed = match.trim();
+    return isAbsoluteFilePath(trimmed) ? `\`${trimmed}\`` : match;
+  });
+}
+
 function normalizeProseChunk(chunk: string, options?: NormalizeChatMarkdownOptions): string {
   const proseChunks = chunk.split(INLINE_CODE_RE);
   let next = proseChunks
     .map((prose, proseIdx) =>
       proseIdx % 2 === 1
         ? prose
-        : normalizeLenientEmphasisInText(normalizeLatexMathDelimitersInText(prose)),
+        : wrapStandaloneAbsoluteFilePaths(
+            normalizeLenientEmphasisInText(normalizeLatexMathDelimitersInText(prose)),
+          ),
     )
     .join("");
   if (options?.isStreaming) {
