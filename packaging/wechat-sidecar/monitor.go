@@ -38,12 +38,13 @@ type MessageItem struct {
 }
 
 var (
-	monitorMu          sync.Mutex
-	monitorCancel      context.CancelFunc
-	monitorRunning     bool
-	monitorClient      *ilink.Client
-	lastMessageTime    time.Time
-	keepaliveCancel    context.CancelFunc
+	monitorMu              sync.Mutex
+	monitorCancel          context.CancelFunc
+	monitorRunning         bool
+	monitorClient          *ilink.Client
+	lastMessageTime        time.Time
+	keepaliveCancel        context.CancelFunc
+	consecutiveMonitorErrors int
 
 	sseMu      sync.Mutex
 	sseClients []chan SSEEvent
@@ -75,6 +76,7 @@ func startMonitor(creds *Credentials) {
 
 	monitorMu.Lock()
 	lastMessageTime = time.Now()
+	consecutiveMonitorErrors = 0
 	monitorMu.Unlock()
 
 	kaCtx, kaCancel := context.WithCancel(ctx)
@@ -86,6 +88,7 @@ func startMonitor(creds *Credentials) {
 	handler := func(msg ilink.WeixinMessage) {
 		monitorMu.Lock()
 		lastMessageTime = time.Now()
+		consecutiveMonitorErrors = 0
 		monitorMu.Unlock()
 		evt := convertMessage(msg)
 		broadcastSSE(evt)
@@ -95,12 +98,22 @@ func startMonitor(creds *Credentials) {
 		OnError: func(err error) {
 			slog.Error("monitor error", "error", err)
 			broadcastSSE(SSEEvent{Type: "error", Status: err.Error()})
+			monitorMu.Lock()
+			consecutiveMonitorErrors++
+			if consecutiveMonitorErrors >= 3 {
+				monitorRunning = false
+				monitorClient = nil
+				slog.Warn("monitor degraded to stale after consecutive errors", "count", consecutiveMonitorErrors)
+				broadcastSSE(SSEEvent{Type: "status", Status: "stale"})
+			}
+			monitorMu.Unlock()
 		},
 		OnSessionExpired: func() {
 			slog.Warn("iLink session expired")
 			broadcastSSE(SSEEvent{Type: "status", Status: "session_expired"})
 			monitorMu.Lock()
 			monitorRunning = false
+			consecutiveMonitorErrors = 0
 			monitorMu.Unlock()
 		},
 	}
@@ -114,6 +127,7 @@ func startMonitor(creds *Credentials) {
 	monitorMu.Lock()
 	monitorRunning = false
 	monitorClient = nil
+	consecutiveMonitorErrors = 0
 	monitorMu.Unlock()
 
 	slog.Info("monitor stopped")
@@ -132,6 +146,7 @@ func stopMonitor() {
 	}
 	monitorRunning = false
 	monitorClient = nil
+	consecutiveMonitorErrors = 0
 }
 
 func keepaliveLoop(ctx context.Context, creds *Credentials) {
@@ -282,4 +297,21 @@ func handleEvents(w http.ResponseWriter, r *http.Request) {
 			flusher.Flush()
 		}
 	}
+}
+
+// getLastSuccessAt returns the RFC3339 UTC time of last successful message or start.
+func getLastSuccessAt() string {
+	monitorMu.Lock()
+	defer monitorMu.Unlock()
+	if lastMessageTime.IsZero() {
+		return ""
+	}
+	return lastMessageTime.UTC().Format(time.RFC3339)
+}
+
+// getConsecutiveErrors returns current error streak count (for health).
+func getConsecutiveErrors() int {
+	monitorMu.Lock()
+	defer monitorMu.Unlock()
+	return consecutiveMonitorErrors
 }

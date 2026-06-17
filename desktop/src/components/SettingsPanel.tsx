@@ -5983,7 +5983,7 @@ export function SettingsPanel({
   const [gwAdvancedOpen, setGwAdvancedOpen] = useState(false);
   const [gwQrOpen, setGwQrOpen] = useState(false);
   // WeChat iLink sidecar
-  const [wechatStatus, setWechatStatus] = useState<"idle" | "binding" | "connected" | "expired" | "error">("idle");
+  const [wechatStatus, setWechatStatus] = useState<"idle" | "binding" | "connected" | "stale" | "recovering" | "expired" | "error">("idle");
   const [wechatBotId, setWechatBotId] = useState("");
   const [wechatQrUrl, setWechatQrUrl] = useState("");
   const [wechatQrFallbackUrl, setWechatQrFallbackUrl] = useState("");
@@ -6039,6 +6039,47 @@ export function SettingsPanel({
       setGwBindingsLoading(false);
     }
   }, [gwUrl, gwDeviceId, gwToken]);
+
+  // Refresh wechat sidecar status with 3-source reconciliation (sidecar + binding time + reported age)
+  const refreshWechatStatus = useCallback(async () => {
+    try {
+      const portInfo = await window.agenticxDesktop.wechatSidecarPort();
+      if (!portInfo.running || !portInfo.port) return;
+      const resp = await fetch(`http://127.0.0.1:${portInfo.port}/status`);
+      if (!resp.ok) return;
+      const data: { connected?: boolean; bot_id?: string; status?: string; stale?: boolean; credential_age_hours?: number } = await resp.json();
+      let bindingAgeH = 0;
+      try {
+        const b = await window.agenticxDesktop.loadWechatBinding();
+        const d = (b.bindings as any)?.["_desktop"];
+        if (d?.bound_at) {
+          const bt = Date.parse(String(d.bound_at));
+          if (!Number.isNaN(bt)) bindingAgeH = (Date.now() - bt) / 3600000;
+        }
+      } catch {}
+      const age = data.credential_age_hours ?? bindingAgeH ?? 0;
+
+      const sidecarConnected = !!data.connected;
+      const sidecarStale = !!data.stale;
+
+      // Live connection from sidecar takes precedence.
+      // Age-based staleness only applies when we don't have a positive live connection.
+      const isStale = sidecarStale || (!sidecarConnected && age > 20);
+
+      if (sidecarConnected && !sidecarStale) {
+        setWechatStatus("connected");
+        setWechatBotId(data.bot_id || "");
+      } else if (isStale) {
+        setWechatStatus("stale");
+        setWechatBotId(data.bot_id || "");
+      } else if (data.bot_id) {
+        setWechatStatus("idle");
+        setWechatBotId(data.bot_id);
+      }
+    } catch {
+      // silent; do not overwrite user-visible state on transient error
+    }
+  }, []);
 
   useEffect(() => {
     if (!open || tab !== "server") return;
@@ -6111,24 +6152,17 @@ export function SettingsPanel({
       setFeishuAppId(lc.appId || "");
       setFeishuAppSecret(lc.appSecret || "");
     });
-    void window.agenticxDesktop.wechatSidecarPort().then((res) => {
-      if (res.running && res.port > 0) {
-        fetch(`http://127.0.0.1:${res.port}/status`)
-          .then((r) => r.json())
-          .then((data: { connected?: boolean; bot_id?: string; status?: string }) => {
-            if (data.connected) {
-              setWechatStatus("connected");
-              setWechatBotId(data.bot_id || "");
-            } else if (data.bot_id) {
-              setWechatStatus("idle");
-              setWechatBotId(data.bot_id);
-            }
-          })
-          .catch(() => {});
-      }
-    });
+    void refreshWechatStatus();
     if (sessionId) void onRefreshMcp(sessionId);
   }, [open, providers, defaultProvider, sessionId, onRefreshMcp, userNickname, userPreference]);
+
+  // Poll for wechat status while settings panel (server tab) is open
+  useEffect(() => {
+    if (!open || tab !== "server") return;
+    // initial refresh already scheduled in prior effect; add recurring
+    const t = setInterval(() => { void refreshWechatStatus(); }, 45000);
+    return () => clearInterval(t);
+  }, [open, tab, refreshWechatStatus]);
 
   const userProfileDirty =
     userNicknameDraft !== userNickname || userPreferenceDraft !== userPreference;
@@ -9497,39 +9531,117 @@ export function SettingsPanel({
                     </div>
                   )}
 
-                  {(wechatStatus === "connected" || (wechatStatus === "idle" && wechatBotId)) && (
+                  {(wechatStatus === "connected" || (wechatStatus === "idle" && wechatBotId) || wechatStatus === "stale" || wechatStatus === "recovering") && (
                     <div className="space-y-3">
                       <div className="flex items-center gap-2">
-                        <span className={`inline-block h-2 w-2 rounded-full ${wechatStatus === "connected" ? "bg-green-500" : "bg-yellow-500"}`} />
-                        <span className="text-sm text-text-subtle">
-                          {wechatStatus === "connected" ? "已连接" : "已绑定（未连接）"}
+                        <span className={`inline-block h-2 w-2 rounded-full ${wechatStatus === "connected" ? "bg-green-500" : wechatStatus === "recovering" ? "bg-[var(--status-warning)] animate-pulse" : wechatStatus === "stale" ? "bg-[var(--status-warning)]" : "bg-yellow-500"}`} />
+                        <span className={`text-sm ${wechatStatus === "stale" || wechatStatus === "recovering" ? "text-status-warning" : "text-text-subtle"}`}>
+                          {wechatStatus === "connected" ? "已连接" : wechatStatus === "recovering" ? "恢复中..." : wechatStatus === "stale" ? "连接已失效（可恢复）" : "已绑定（未连接）"}
                         </span>
                       </div>
                       {wechatBotId && (
                         <p className="text-xs text-text-faint">Bot ID: <code className="rounded bg-surface-hover px-1">{wechatBotId}</code></p>
                       )}
-                      <button
-                        type="button"
-                        className="rounded-md border border-red-500/30 px-3 py-1.5 text-sm text-red-400 transition hover:bg-red-500/10"
-                        onClick={async () => {
-                          try {
-                            const { port, running } = await window.agenticxDesktop.wechatSidecarPort();
-                            if (running && port) await fetch(`http://127.0.0.1:${port}/unbind`, { method: "POST" });
-                          } catch { /* noop */ }
-                          try {
-                            await window.agenticxDesktop.saveWechatDesktopBinding({ sessionId: null });
-                          } catch { /* noop */ }
-                          setWechatStatus("idle");
-                          setWechatBotId("");
-                          setWechatQrUrl("");
-                          setWechatQrFallbackUrl("");
-                          setWechatBindSessionId("");
-                          setWechatBindSidecarPort(0);
-                          setWechatBindMsg("");
-                        }}
-                      >
-                        解绑微信
-                      </button>
+                      {wechatStatus === "recovering" && (
+                        <p className="text-xs text-status-warning">正在尝试重新连接微信 iLink，请稍候…</p>
+                      )}
+                      {wechatStatus === "stale" && (
+                        <p className="text-xs text-status-warning">通道已降级（凭证可能过期或连接中断），建议尝试恢复或重新绑定。</p>
+                      )}
+                      <div className="flex items-center gap-3 pt-1">
+                        {wechatStatus === "stale" && (
+                          <button
+                            type="button"
+                            className="rounded-md bg-btnPrimary px-3 py-1.5 text-sm font-medium text-btnPrimary-text transition hover:bg-btnPrimary-hover"
+                            onClick={async () => {
+                              setWechatBindMsg("");
+                              setWechatStatus("recovering");
+                              try {
+                                let { port, running } = await window.agenticxDesktop.wechatSidecarPort();
+                                if (!running || !port) {
+                                  const started = await window.agenticxDesktop.wechatSidecarStart();
+                                  port = started.port;
+                                  await new Promise((r) => setTimeout(r, 1200));
+                                }
+                                if (port) {
+                                  const rc = await fetch(`http://127.0.0.1:${port}/reconnect`, { method: "POST" });
+                                  const j = await rc.json().catch(() => ({}));
+                                  if (j && j.ok) {
+                                    // Poll a couple of times with direct status check so we can give clear feedback.
+                                    // The "恢复中..." text is driven by wechatStatus === "recovering".
+                                    const doRefreshAndMaybeClear = async (delay: number, final: boolean) => {
+                                      await new Promise(r => setTimeout(r, delay));
+                                      try {
+                                        const p = await window.agenticxDesktop.wechatSidecarPort();
+                                        if (p.running && p.port) {
+                                          const s = await fetch(`http://127.0.0.1:${p.port}/status`);
+                                          if (s.ok) {
+                                            const d: any = await s.json();
+                                            const conn = !!d.connected;
+                                            const stl = !!d.stale;
+                                            if (conn && !stl) {
+                                              setWechatStatus("connected");
+                                              setWechatBotId(d.bot_id || "");
+                                              setWechatBindMsg("恢复成功，已连接");
+                                              setTimeout(() => setWechatBindMsg(""), 1800);
+                                              return true;
+                                            } else if (stl) {
+                                              setWechatStatus("stale");
+                                              setWechatBotId(d.bot_id || "");
+                                            }
+                                          }
+                                        }
+                                      } catch {}
+                                      if (final) {
+                                        setWechatStatus("stale");
+                                        setWechatBindMsg("恢复未成功，通道仍不可用");
+                                        setTimeout(() => setWechatBindMsg(""), 2200);
+                                      }
+                                      return false;
+                                    };
+                                    void doRefreshAndMaybeClear(1200, false);
+                                    void doRefreshAndMaybeClear(3800, true);
+                                    return;
+                                  }
+                                }
+                                setWechatStatus("stale");
+                                setWechatBindMsg("恢复失败，请尝试重新绑定");
+                              } catch (e) {
+                                setWechatStatus("stale");
+                                setWechatBindMsg("恢复出错：" + String(e));
+                              }
+                            }}
+                          >
+                            尝试恢复连接
+                          </button>
+                        )}
+                        <button
+                          type="button"
+                          className="rounded-md bg-red-600 px-3 py-1.5 text-sm font-medium text-white transition hover:bg-red-700"
+                          onClick={async () => {
+                            try {
+                              const { port, running } = await window.agenticxDesktop.wechatSidecarPort();
+                              if (running && port) await fetch(`http://127.0.0.1:${port}/unbind`, { method: "POST" });
+                            } catch { /* noop */ }
+                            try {
+                              await window.agenticxDesktop.saveWechatDesktopBinding({ sessionId: null });
+                            } catch { /* noop */ }
+                            // Ensure creds file cleared even if sidecar not running
+                            try {
+                              await window.agenticxDesktop.wechatClearCredentials?.();
+                            } catch {}
+                            setWechatStatus("idle");
+                            setWechatBotId("");
+                            setWechatQrUrl("");
+                            setWechatQrFallbackUrl("");
+                            setWechatBindSessionId("");
+                            setWechatBindSidecarPort(0);
+                            setWechatBindMsg("");
+                          }}
+                        >
+                          解绑微信
+                        </button>
+                      </div>
                     </div>
                   )}
 

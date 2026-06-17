@@ -5,15 +5,18 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"time"
 )
 
 const credentialsFile = "wechat_credentials.json"
 
 type Credentials struct {
-	BotID       string `json:"bot_id"`
-	BotToken    string `json:"bot_token"`
-	BaseURL     string `json:"base_url"`
-	ILinkUserID string `json:"ilink_user_id"`
+	BotID         string `json:"bot_id"`
+	BotToken      string `json:"bot_token"`
+	BaseURL       string `json:"base_url"`
+	ILinkUserID   string `json:"ilink_user_id"`
+	SavedAt       string `json:"saved_at"`
+	LastSuccessAt string `json:"last_success_at,omitempty"`
 }
 
 func loadCredentials(dataDir string) (*Credentials, error) {
@@ -29,12 +32,22 @@ func loadCredentials(dataDir string) (*Credentials, error) {
 	if creds.BotToken == "" {
 		return nil, fmt.Errorf("credentials file missing bot_token")
 	}
+	// Backward compat: if no saved_at, fall back to file mtime (or leave empty for caller to treat conservatively).
+	if creds.SavedAt == "" {
+		if fi, statErr := os.Stat(p); statErr == nil {
+			creds.SavedAt = fi.ModTime().UTC().Format(time.RFC3339)
+		}
+	}
 	return &creds, nil
 }
 
 func saveCredentials(dataDir string, creds *Credentials) error {
 	if err := os.MkdirAll(dataDir, 0755); err != nil {
 		return fmt.Errorf("create data dir: %w", err)
+	}
+	// Set saved_at on first save or if missing (ISO8601 UTC); preserve existing for reloads but ensure present on write.
+	if creds.SavedAt == "" {
+		creds.SavedAt = time.Now().UTC().Format(time.RFC3339)
 	}
 	data, err := json.MarshalIndent(creds, "", "  ")
 	if err != nil {

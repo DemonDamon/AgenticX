@@ -137,6 +137,8 @@ contextBridge.exposeInMainWorld("agenticxDesktop", {
     ipcRenderer.invoke("wechat-sidecar-stop") as Promise<{ ok: boolean }>,
   wechatSidecarPort: async () =>
     ipcRenderer.invoke("wechat-sidecar-port") as Promise<{ port: number; running: boolean }>,
+  wechatClearCredentials: async () =>
+    ipcRenderer.invoke("wechat-clear-credentials") as Promise<{ ok: boolean }>,
 
   onOpenSettings: (cb: () => void): void => {
     ipcRenderer.on("open-settings", () => cb());

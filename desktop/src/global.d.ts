@@ -464,6 +464,7 @@ declare global {
       wechatSidecarStart: () => Promise<{ ok: boolean; port: number }>;
       wechatSidecarStop: () => Promise<{ ok: boolean }>;
       wechatSidecarPort: () => Promise<{ port: number; running: boolean }>;
+      wechatClearCredentials: () => Promise<{ ok: boolean }>;
 
       onOpenSettings: (cb: () => void) => void;
       onSkillsChanged: (cb: () => void) => () => void;

@@ -141,6 +141,8 @@ class WeChatILinkAdapter:
         self._running = False
         self._task: Optional[asyncio.Task[None]] = None
         self._reply_name = os.getenv("AGX_WECHAT_REPLY_NAME", DEFAULT_META_PRODUCT_LABEL).strip()
+        self._last_event_at: float = 0.0
+        self._degraded: bool = False
 
     def _resolve_sidecar_url(self) -> str:
         if self._sidecar_url:
@@ -205,7 +207,8 @@ class WeChatILinkAdapter:
             except Exception:
                 logger.exception("SSE consumer error, retrying in 5s")
             if self._running:
-                await asyncio.sleep(5)
+                delay = 15 if self._degraded else 5
+                await asyncio.sleep(delay)
 
     async def _consume_sse(self, sidecar_url: str) -> None:
         transport = httpx.AsyncHTTPTransport()
@@ -233,8 +236,20 @@ class WeChatILinkAdapter:
         self, sidecar_url: str, evt: Dict[str, Any]
     ) -> None:
         evt_type = evt.get("type", "")
-        if evt_type == "status" and evt.get("status") == "session_expired":
-            logger.warning("WeChat iLink session expired")
+        if evt_type == "status":
+            st = evt.get("status")
+            if st in ("session_expired", "stale"):
+                logger.warning("WeChat iLink channel status: %s (degraded)", st)
+                self._degraded = True
+                self._last_event_at = time.time()
+                return
+            if st:
+                self._last_event_at = time.time()
+                return
+        if evt_type == "error":
+            logger.warning("WeChat iLink error event: %s", evt.get("status") or evt)
+            self._degraded = True
+            self._last_event_at = time.time()
             return
         if evt_type != "message":
             return
@@ -258,6 +273,8 @@ class WeChatILinkAdapter:
 
         if not text and not media_paths:
             return
+        self._degraded = False
+        self._last_event_at = time.time()
 
         user_input = text
         if media_paths:
