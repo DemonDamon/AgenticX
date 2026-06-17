@@ -14,7 +14,10 @@ from agenticx.llms.ark_provider import ArkLLMProvider
 from agenticx.llms.bailian_provider import BailianProvider
 from agenticx.llms.base import BaseLLMProvider
 from agenticx.llms.kimi_provider import KimiProvider
-from agenticx.llms.litellm_provider import LiteLLMProvider
+from agenticx.llms.litellm_provider import (
+    LiteLLMProvider,
+    normalize_litellm_model_for_openai_compat_gateway,
+)
 from agenticx.llms.minimax_provider import MiniMaxProvider
 from agenticx.llms.qianfan_provider import QianfanProvider
 from agenticx.llms.zhipu_provider import ZhipuProvider
@@ -80,12 +83,11 @@ class ProviderResolver:
             if model.startswith(prefix):
                 return model
             return f"{prefix}{model}"
-        # Custom OpenAI-compatible gateways (e.g. 移动云): LiteLLM cannot infer the
-        # route from bare IDs like deepseek-r1 and raises BadRequestError unless the
-        # model is prefixed (same idea as MiniMaxProvider).
+        # Custom OpenAI-compatible gateways (e.g. MOMA): always route via openai/ so
+        # LiteLLM uses the configured base_url, including vendor ids with slashes
+        # such as minimax/minimax-m3.
         if provider_name == "openai" and (base_url or "").strip():
-            if "/" not in model:
-                return f"openai/{model}"
+            return normalize_litellm_model_for_openai_compat_gateway(model, base_url)
         return model
 
     @classmethod
