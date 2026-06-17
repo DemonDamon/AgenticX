@@ -191,7 +191,7 @@ _PREVIEW_KIND_OFFICE = "office"
 _PREVIEW_KIND_BINARY = "binary"
 
 _MARKDOWN_EXTS = frozenset({".md", ".markdown", ".mdx"})
-_TEXT_EXTS = frozenset({".txt", ".csv", ".log"})
+_TEXT_EXTS = frozenset({".txt", ".csv", ".log", ".jsonl", ".ndjson"})
 _CODE_EXTS = frozenset(
     {
         ".py",
@@ -208,6 +208,7 @@ _CODE_EXTS = frozenset(
         ".xml",
         ".html",
         ".css",
+        ".rs",
     }
 )
 _IMAGE_EXTS = frozenset({".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp"})
@@ -224,11 +225,15 @@ _MIME_BY_EXT: dict[str, str] = {
     ".js": "text/javascript",
     ".jsx": "text/javascript",
     ".json": "application/json",
+    ".jsonl": "application/jsonl",
+    ".ndjson": "application/x-ndjson",
+    ".log": "text/plain",
     ".yaml": "application/yaml",
     ".yml": "application/yaml",
     ".toml": "application/toml",
     ".sh": "text/x-shellscript",
     ".bash": "text/x-shellscript",
+    ".rs": "text/rust",
     ".png": "image/png",
     ".jpg": "image/jpeg",
     ".jpeg": "image/jpeg",
@@ -267,6 +272,10 @@ def _guess_preview_kind(path: Path, mime_type: str) -> str:
         return _PREVIEW_KIND_PDF
     if ext in _OFFICE_EXTS:
         return _PREVIEW_KIND_OFFICE
+    if mime_type.startswith("text/"):
+        return _PREVIEW_KIND_TEXT
+    if mime_type in ("application/json", "application/xml", "application/javascript"):
+        return _PREVIEW_KIND_CODE
     return _PREVIEW_KIND_BINARY
 
 

@@ -45,8 +45,8 @@ export function PdfPreview({
         return;
       }
       try {
-        const pdfjsLib = await import("pdfjs-dist");
-        const workerMod = await import("pdfjs-dist/build/pdf.worker.mjs?url");
+        const pdfjsLib = await import("pdfjs-dist/legacy/build/pdf.mjs");
+        const workerMod = await import("pdfjs-dist/legacy/build/pdf.worker.mjs?url");
         pdfjsLib.GlobalWorkerOptions.workerSrc = workerMod.default;
         const buffer = await dataUrlToArrayBuffer(loaded.dataUrl);
         const pdf = await pdfjsLib.getDocument({ data: buffer }).promise;

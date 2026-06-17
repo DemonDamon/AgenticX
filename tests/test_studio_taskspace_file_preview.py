@@ -59,6 +59,31 @@ def test_classify_xlsx_as_office(tmp_path: Path) -> None:
     assert info["preview_supported"] is False
 
 
+def test_classify_jsonl_as_textual(tmp_path: Path) -> None:
+    file_path = tmp_path / "submission.jsonl"
+    file_path.write_text('{"id": 1}\n', encoding="utf-8")
+    info = classify_taskspace_file(file_path)
+    assert info["preview_kind"] == "text"
+    assert info["is_binary"] is False
+    assert info["preview_supported"] is True
+
+
+def test_classify_rust_as_code(tmp_path: Path) -> None:
+    file_path = tmp_path / "main.rs"
+    file_path.write_text("fn main() {}\n", encoding="utf-8")
+    info = classify_taskspace_file(file_path)
+    assert info["preview_kind"] == "code"
+    assert info["is_binary"] is False
+
+
+def test_classify_log_as_text(tmp_path: Path) -> None:
+    file_path = tmp_path / "app.log"
+    file_path.write_text("2026-06-17 INFO started\n", encoding="utf-8")
+    info = classify_taskspace_file(file_path)
+    assert info["preview_kind"] == "text"
+    assert info["is_binary"] is False
+
+
 @pytest.fixture()
 def preview_manager(tmp_path: Path) -> tuple[SessionManager, str, str]:
     store = SessionStore(tmp_path / "sessions.sqlite")

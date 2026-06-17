@@ -439,8 +439,8 @@ loadLocalFileDataUrl: (path: string) => Promise<{ ok: boolean; dataUrl?: string;
 - Configure worker correctly for Vite/Electron. Prefer local worker URL import pattern:
 
 ```ts
-import * as pdfjsLib from "pdfjs-dist";
-import pdfWorkerUrl from "pdfjs-dist/build/pdf.worker.mjs?url";
+import * as pdfjsLib from "pdfjs-dist/legacy/build/pdf.mjs";
+import pdfWorkerUrl from "pdfjs-dist/legacy/build/pdf.worker.mjs?url";
 pdfjsLib.GlobalWorkerOptions.workerSrc = pdfWorkerUrl;
 ```
 
@@ -552,6 +552,7 @@ Plan-File: .cursor/plans/2026-06-17-workspace-file-preview-binary-office-support
 
 - **Risk:** PDF.js worker bundling fails in Electron/Vite.
   - Mitigation: isolate PDF preview in `PdfPreview.tsx`; if worker import fails, fall back to placeholder and keep P0 stable.
+  - **Follow-up (2026-06-17):** Electron 34 lacks `Uint8Array.toHex()` required by pdfjs-dist 6.x modern build; use `pdfjs-dist/legacy/build/pdf.mjs` + matching worker instead.
 - **Risk:** Theme token backgrounds are rgba and cause transparency.
   - Mitigation: use only `bg-surface-popover` and `bg-surface-base` for modal/card surfaces; verify dark/dim visually.
 - **Risk:** Very large files freeze renderer.
@@ -560,6 +561,12 @@ Plan-File: .cursor/plans/2026-06-17-workspace-file-preview-binary-office-support
   - Mitigation: dynamic import `mammoth`, `xlsx`, and `pdfjs-dist` only inside their preview components.
 - **Risk:** Existing full `tsc` has unrelated errors.
   - Mitigation: do not fix unrelated files; use `ReadLints` and focused build evidence where possible, report residual risk.
+
+## Post-implementation Fixes (2026-06-17)
+
+- **FR-1 follow-up:** Extend classifier with `.jsonl`, `.ndjson`, `.rs`; add `text/*` MIME fallback so plain-text files are not mislabeled `binary`.
+- **FR-3 follow-up:** Switch `PdfPreview.tsx` to `pdfjs-dist/legacy/build/*` for Electron 34 compatibility (`hashOriginal.toHex is not a function`).
+- **Tests:** Add coverage for `.jsonl`, `.rs`, `.log` classification in `tests/test_studio_taskspace_file_preview.py`.
 
 ## Final Handoff Notes for Composer 2.5
 
