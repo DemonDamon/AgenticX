@@ -8,6 +8,7 @@ import remarkMath from "remark-math";
 import rehypeKatex from "rehype-katex";
 import { Copy, Check, Quote, Maximize2, ChevronDown, ChevronUp } from "lucide-react";
 import { MermaidBlock } from "./MermaidBlock";
+import { TableBlock } from "./TableBlock";
 import { highlightChatCode } from "./highlight-chat-code";
 import { Modal } from "../ds/Modal";
 import { HoverTip } from "../ds/HoverTip";
@@ -460,11 +461,11 @@ export const chatMarkdownComponents: Partial<Components> = {
       />
     );
   },
-  table({ children, ...rest }) {
+  table({ children, className, ...rest }) {
     return (
-      <div className="overflow-x-auto">
-        <table {...rest}>{children}</table>
-      </div>
+      <TableBlock className={className} {...rest}>
+        {children}
+      </TableBlock>
     );
   },
   td({ children, ...rest }) {
