@@ -184,6 +184,57 @@ def test_resolver_legacy_custom_ollama_provider_without_interface(tmp_path: Path
     assert provider.model == "ollama/gemma4:latest"
 
 
+def test_resolver_openai_custom_base_prefixes_vendor_slash_model_ids_for_litellm(
+    tmp_path: Path, monkeypatch
+):
+    """MOMA-style upstream ids (minimax/minimax-m3) must use openai/ for LiteLLM routing."""
+    _setup_paths(tmp_path, monkeypatch)
+    ConfigManager.set_value("default_provider", "custom_openai_moma", scope="global")
+    ConfigManager.set_value("providers.custom_openai_moma.api_key", "k", scope="global")
+    ConfigManager.set_value("providers.custom_openai_moma.model", "minimax/minimax-m3", scope="global")
+    ConfigManager.set_value(
+        "providers.custom_openai_moma.base_url",
+        "https://moma.cmecloud.cn/v1",
+        scope="global",
+    )
+    ConfigManager.set_value("providers.custom_openai_moma.interface", "openai", scope="global")
+
+    provider = ProviderResolver.resolve()
+    assert isinstance(provider, LiteLLMProvider)
+    assert provider.model == "openai/minimax/minimax-m3"
+    assert provider.base_url == "https://moma.cmecloud.cn/v1"
+
+
+def test_minimax_provider_custom_gateway_normalizes_vendor_slash_model():
+    provider = MiniMaxProvider.from_config(
+        {
+            "model": "minimax/minimax-m3",
+            "api_key": "k",
+            "base_url": "https://moma.cmecloud.cn/v1",
+        }
+    )
+    assert provider.model == "openai/minimax/minimax-m3"
+    assert provider.base_url == "https://moma.cmecloud.cn/v1"
+
+
+def test_litellm_normalize_openai_compat_gateway_helper():
+    from agenticx.llms.litellm_provider import normalize_litellm_model_for_openai_compat_gateway
+
+    assert (
+        normalize_litellm_model_for_openai_compat_gateway(
+            "minimax/minimax-m3", "https://moma.cmecloud.cn/v1"
+        )
+        == "openai/minimax/minimax-m3"
+    )
+    assert (
+        normalize_litellm_model_for_openai_compat_gateway(
+            "openai/deepseek-r1", "https://example.com/v1"
+        )
+        == "openai/deepseek-r1"
+    )
+    assert normalize_litellm_model_for_openai_compat_gateway("gpt-4o-mini", "") == "gpt-4o-mini"
+
+
 def test_litellm_provider_from_config_uses_placeholder_for_custom_base_without_key():
     provider = LiteLLMProvider.from_config(
         {

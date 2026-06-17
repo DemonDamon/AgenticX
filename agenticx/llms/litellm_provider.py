@@ -58,6 +58,27 @@ def _resolve_litellm_api_key(api_key: Optional[str], base_url: Optional[str]) ->
     return api_key
 
 
+def normalize_litellm_model_for_openai_compat_gateway(
+    model: str,
+    base_url: Optional[str],
+) -> str:
+    """Map config/UI model ids to LiteLLM routes for custom OpenAI-compatible gateways.
+
+    Proxies such as China Mobile MOMA expose upstream ids like ``minimax/minimax-m3``.
+    LiteLLM treats the ``minimax/`` prefix as native MiniMax routing and ignores the
+    custom ``base_url``, which surfaces as ``NotFoundError``. Prefix with ``openai/`` so
+    LiteLLM uses the OpenAI client against the configured gateway base.
+    """
+    name = str(model or "").strip()
+    if not name:
+        return name
+    if not str(base_url or "").strip():
+        return name
+    if name.lower().startswith("openai/"):
+        return name
+    return f"openai/{name}"
+
+
 def _is_private_base_url(base_url: Optional[str]) -> bool:
     """Return True when *base_url* resolves to a private/loopback/intranet address.
 
