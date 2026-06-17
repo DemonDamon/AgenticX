@@ -6,7 +6,7 @@ import { MarkdownContext } from "./markdown-components";
 import {
   extractTableRows,
   rowsToCsv,
-  rowsToTsv,
+  rowsToMarkdown,
   triggerBlobDownload,
 } from "../../utils/markdown-table-export";
 
@@ -29,7 +29,7 @@ export function TableBlock({ children, className, ...rest }: Props & Record<stri
     const rows = readRows();
     if (rows.length === 0) return;
     try {
-      await navigator.clipboard.writeText(rowsToTsv(rows));
+      await navigator.clipboard.writeText(rowsToMarkdown(rows));
       setCopied(true);
       setTimeout(() => setCopied(false), 2000);
     } catch {
@@ -46,12 +46,12 @@ export function TableBlock({ children, className, ...rest }: Props & Record<stri
   };
 
   return (
-    <div className="group/table my-2 overflow-hidden rounded-xl border border-border bg-surface-panel">
-      <div className="flex h-8 shrink-0 items-center justify-between border-b border-border bg-surface-hover/50 px-3 text-xs text-text-faint">
+    <div className="group/table my-1.5 inline-block max-w-full overflow-hidden rounded-lg border border-border/70 bg-surface-panel align-top">
+      <div className="flex h-7 shrink-0 items-center justify-between border-b border-border/70 bg-surface-hover/40 px-2.5 text-[11px] text-text-faint">
         <span className="text-[11px] font-medium tracking-wide text-text-muted">表格</span>
         {!isStreaming && (
           <div className="flex items-center gap-1 text-text-faint">
-            <HoverTip label="复制">
+            <HoverTip label="复制 Markdown">
               <button
                 type="button"
                 onClick={() => void handleCopy()}
@@ -72,7 +72,7 @@ export function TableBlock({ children, className, ...rest }: Props & Record<stri
           </div>
         )}
       </div>
-      <div className="overflow-x-auto">
+      <div className="max-w-full overflow-x-auto">
         <table ref={tableRef} className={className} {...rest}>
           {children}
         </table>

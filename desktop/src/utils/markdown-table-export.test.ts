@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { extractTableRows, rowsToCsv, rowsToTsv } from "./markdown-table-export";
+import { extractTableRows, rowsToCsv, rowsToMarkdown } from "./markdown-table-export";
 
 test("extractTableRows reads header and body cells", () => {
   const mkCell = (text: string) => ({ textContent: text });
@@ -27,12 +27,12 @@ test("rowsToCsv escapes commas and quotes", () => {
   assert.match(csv, /"say ""hi"", world"/);
 });
 
-test("rowsToTsv joins with tabs", () => {
+test("rowsToMarkdown builds markdown table", () => {
   assert.equal(
-    rowsToTsv([
+    rowsToMarkdown([
       ["差距维度", "优先级"],
       ["信息摄入", "P0"],
     ]),
-    "差距维度\t优先级\n信息摄入\tP0",
+    "| 差距维度 | 优先级 |\n| --- | --- |\n| 信息摄入 | P0 |",
   );
 });
