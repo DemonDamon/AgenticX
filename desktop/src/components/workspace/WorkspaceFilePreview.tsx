@@ -6,6 +6,7 @@ import "prismjs/components/prism-bash";
 import "prismjs/components/prism-json";
 import "prismjs/components/prism-markdown";
 import "prismjs/components/prism-python";
+import "prismjs/components/prism-rust";
 import "prismjs/components/prism-typescript";
 import "prismjs/themes/prism-tomorrow.css";
 import ReactMarkdown from "react-markdown";
@@ -41,9 +42,11 @@ function detectLanguage(path: string): string {
   if (lower.endsWith(".py")) return "python";
   if (lower.endsWith(".ts") || lower.endsWith(".tsx")) return "typescript";
   if (lower.endsWith(".js") || lower.endsWith(".jsx")) return "javascript";
-  if (lower.endsWith(".json")) return "json";
+  if (lower.endsWith(".json") || lower.endsWith(".jsonl") || lower.endsWith(".ndjson")) return "json";
   if (lower.endsWith(".md")) return "markdown";
   if (lower.endsWith(".sh") || lower.endsWith(".bash")) return "bash";
+  if (lower.endsWith(".rs")) return "rust";
+  if (lower.endsWith(".log") || lower.endsWith(".txt")) return "plain";
   return "clike";
 }
 
