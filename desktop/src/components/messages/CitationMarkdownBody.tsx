@@ -33,6 +33,7 @@ type Props = {
   references?: SearchReference[];
   isStreaming?: boolean;
   onQuoteText?: (text: string) => void;
+  onRevealPath?: (path: string) => void;
   className?: string;
   style?: CSSProperties;
 };
@@ -255,6 +256,7 @@ export function CitationMarkdownBody({
   references,
   isStreaming,
   onQuoteText,
+  onRevealPath,
   className,
   style,
 }: Props) {
@@ -280,7 +282,7 @@ export function CitationMarkdownBody({
 
   return (
     <div className={className} style={style}>
-      <MarkdownContext.Provider value={{ isStreaming, onQuoteText, references }}>
+      <MarkdownContext.Provider value={{ isStreaming, onQuoteText, onRevealPath, references }}>
         {blocks.map((block, blockIndex) => (
           <div key={`cite-block-${blockIndex}`} className={blockIndex < blocks.length - 1 ? "mb-2" : undefined}>
             {hasReferences ? (

@@ -198,10 +198,10 @@ export function MessageRenderer({
   }
   if (message.role === "user" || message.role === "assistant") {
     if (chatStyle === "terminal") {
-      return <TerminalLine message={message} badge={assistantBadge} />;
+      return <TerminalLine message={message} badge={assistantBadge} onRevealPath={onRevealPath} />;
     }
     if (chatStyle === "clean") {
-      return <CleanBlock message={message} badge={assistantBadge} />;
+      return <CleanBlock message={message} badge={assistantBadge} onRevealPath={onRevealPath} />;
     }
     const rawAssist = (message.avatarName ?? "").trim();
     const metaLeaderRow = message.role === "assistant" && isMetaLeaderIdentity(message.agentId, rawAssist);
@@ -238,6 +238,7 @@ export function MessageRenderer({
         selectable={selectable}
         selected={selected}
         onFollowupClick={onFollowupClick}
+        onRevealPath={onRevealPath}
         omitSuggestedQuestions={omitSuggestedQuestions}
         budgetIncompleteHint={
           budgetExceededActive && allMessages.length > 0

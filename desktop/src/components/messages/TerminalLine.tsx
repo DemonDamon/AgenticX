@@ -9,9 +9,10 @@ import { renderUserMessageInlineBody } from "./user-message-inline";
 type Props = {
   message: Message;
   badge?: ReactNode;
+  onRevealPath?: (path: string) => void;
 };
 
-export function TerminalLine({ message, badge }: Props) {
+export function TerminalLine({ message, badge, onRevealPath }: Props) {
   const isUser = message.role === "user";
   const isStreaming = message.id === "__stream__";
   const parsed = !isUser ? parseReasoningContent(message.content) : null;
@@ -47,7 +48,7 @@ export function TerminalLine({ message, badge }: Props) {
                 (message.attachments ?? []).filter((a) => !!a.referenceToken)
               )
             ) : (
-              <CitationMarkdownBody content={bodyText} references={message.references} isStreaming={isStreaming} />
+              <CitationMarkdownBody content={bodyText} references={message.references} isStreaming={isStreaming} onRevealPath={onRevealPath} />
             )
           ) : null}
         </div>
