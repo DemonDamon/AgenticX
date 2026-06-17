@@ -6740,6 +6740,46 @@ function registerIpc(): void {
     }
   });
 
+  const PREVIEW_MAX_BYTES = 25 * 1024 * 1024;
+  const PREVIEW_FILE_MIME_BY_EXT: Record<string, string> = {
+    ".pdf": "application/pdf",
+    ".docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    ".xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    ".xls": "application/vnd.ms-excel",
+  };
+
+  ipcMain.handle("load-local-file-data-url", async (_event, inputPath: string) => {
+    try {
+      const raw = String(inputPath || "").trim();
+      if (!raw) return { ok: false, error: "empty path" };
+      const normalized = raw.startsWith("file://") ? decodeURIComponent(raw.replace(/^file:\/\//, "")) : raw;
+      if (!fs.existsSync(normalized)) {
+        return { ok: false, error: "file not found" };
+      }
+      const stat = await fs.promises.stat(normalized);
+      if (stat.isDirectory()) {
+        return { ok: false, error: "path is a directory" };
+      }
+      if (stat.size > PREVIEW_MAX_BYTES) {
+        return { ok: false, error: `file exceeds preview limit (${PREVIEW_MAX_BYTES} bytes)` };
+      }
+      const ext = path.extname(normalized).toLowerCase();
+      const mime = PREVIEW_FILE_MIME_BY_EXT[ext];
+      if (!mime) {
+        return { ok: false, error: `preview not allowed for extension: ${ext || "(none)"}` };
+      }
+      const buf = await fs.promises.readFile(normalized);
+      return {
+        ok: true,
+        dataUrl: `data:${mime};base64,${buf.toString("base64")}`,
+        mime,
+        size: stat.size,
+      };
+    } catch (err) {
+      return { ok: false, error: String(err) };
+    }
+  });
+
   ipcMain.handle(
     "install-from-registry",
     async (

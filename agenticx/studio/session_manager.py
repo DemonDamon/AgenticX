@@ -9,6 +9,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import mimetypes
 import os
 import re
 import shutil
@@ -179,6 +180,117 @@ class ManagedSession:
             self.team_manager.event_emitter = event_emitter
             self.team_manager.summary_sink = summary_sink
         return self.team_manager
+
+
+_PREVIEW_KIND_TEXT = "text"
+_PREVIEW_KIND_MARKDOWN = "markdown"
+_PREVIEW_KIND_CODE = "code"
+_PREVIEW_KIND_IMAGE = "image"
+_PREVIEW_KIND_PDF = "pdf"
+_PREVIEW_KIND_OFFICE = "office"
+_PREVIEW_KIND_BINARY = "binary"
+
+_MARKDOWN_EXTS = frozenset({".md", ".markdown", ".mdx"})
+_TEXT_EXTS = frozenset({".txt", ".csv", ".log"})
+_CODE_EXTS = frozenset(
+    {
+        ".py",
+        ".ts",
+        ".tsx",
+        ".js",
+        ".jsx",
+        ".json",
+        ".yaml",
+        ".yml",
+        ".toml",
+        ".sh",
+        ".bash",
+        ".xml",
+        ".html",
+        ".css",
+    }
+)
+_IMAGE_EXTS = frozenset({".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp"})
+_PDF_EXTS = frozenset({".pdf"})
+_OFFICE_EXTS = frozenset({".doc", ".docx", ".xls", ".xlsx", ".ppt", ".pptx"})
+
+_MIME_BY_EXT: dict[str, str] = {
+    ".md": "text/markdown",
+    ".markdown": "text/markdown",
+    ".mdx": "text/markdown",
+    ".py": "text/x-python",
+    ".ts": "text/typescript",
+    ".tsx": "text/typescript",
+    ".js": "text/javascript",
+    ".jsx": "text/javascript",
+    ".json": "application/json",
+    ".yaml": "application/yaml",
+    ".yml": "application/yaml",
+    ".toml": "application/toml",
+    ".sh": "text/x-shellscript",
+    ".bash": "text/x-shellscript",
+    ".png": "image/png",
+    ".jpg": "image/jpeg",
+    ".jpeg": "image/jpeg",
+    ".gif": "image/gif",
+    ".webp": "image/webp",
+    ".bmp": "image/bmp",
+    ".pdf": "application/pdf",
+    ".doc": "application/msword",
+    ".docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    ".xls": "application/vnd.ms-excel",
+    ".xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    ".ppt": "application/vnd.ms-powerpoint",
+    ".pptx": "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+}
+
+
+def _guess_preview_mime(path: Path) -> str:
+    ext = path.suffix.lower()
+    mime, _encoding = mimetypes.guess_type(str(path))
+    if mime:
+        return mime
+    return _MIME_BY_EXT.get(ext, "application/octet-stream")
+
+
+def _guess_preview_kind(path: Path, mime_type: str) -> str:
+    ext = path.suffix.lower()
+    if ext in _MARKDOWN_EXTS or mime_type == "text/markdown":
+        return _PREVIEW_KIND_MARKDOWN
+    if ext in _TEXT_EXTS:
+        return _PREVIEW_KIND_TEXT
+    if ext in _CODE_EXTS:
+        return _PREVIEW_KIND_CODE
+    if ext in _IMAGE_EXTS or mime_type.startswith("image/"):
+        return _PREVIEW_KIND_IMAGE
+    if ext in _PDF_EXTS or mime_type == "application/pdf":
+        return _PREVIEW_KIND_PDF
+    if ext in _OFFICE_EXTS:
+        return _PREVIEW_KIND_OFFICE
+    return _PREVIEW_KIND_BINARY
+
+
+def _is_textual_preview_kind(kind: str) -> bool:
+    return kind in (_PREVIEW_KIND_TEXT, _PREVIEW_KIND_MARKDOWN, _PREVIEW_KIND_CODE)
+
+
+def classify_taskspace_file(path: Path) -> dict[str, Any]:
+    """Classify a taskspace file for workspace preview (pure helper for tests/runtime)."""
+    mime_type = _guess_preview_mime(path)
+    preview_kind = _guess_preview_kind(path, mime_type)
+    is_binary = not _is_textual_preview_kind(preview_kind)
+    preview_supported = preview_kind in (
+        _PREVIEW_KIND_TEXT,
+        _PREVIEW_KIND_MARKDOWN,
+        _PREVIEW_KIND_CODE,
+        _PREVIEW_KIND_IMAGE,
+    )
+    return {
+        "mime_type": mime_type,
+        "preview_kind": preview_kind,
+        "is_binary": is_binary,
+        "preview_supported": preview_supported,
+    }
 
 
 class SessionManager:
@@ -1166,20 +1278,26 @@ class SessionManager:
         target = self._resolve_inside_root(root, rel_path, expect_dir=False)
         if target.is_dir():
             raise IsADirectoryError(str(target))
-        data = target.read_bytes()
-        truncated = False
-        if len(data) > max_bytes:
-            data = data[:max_bytes]
-            truncated = True
-        content = data.decode("utf-8", errors="replace")
-        return {
+        size = int(target.stat().st_size)
+        classification = classify_taskspace_file(target)
+        result: dict[str, Any] = {
             "name": target.name,
             "path": str(target.relative_to(root)),
             "absolute_path": str(target),
-            "content": content,
-            "truncated": truncated,
-            "size": int(target.stat().st_size),
+            "size": size,
+            **classification,
         }
+        if _is_textual_preview_kind(str(classification["preview_kind"])):
+            data = target.read_bytes()
+            truncated = False
+            if len(data) > max_bytes:
+                data = data[:max_bytes]
+                truncated = True
+            result["content"] = data.decode("utf-8", errors="replace")
+            result["truncated"] = truncated
+        else:
+            result["truncated"] = False
+        return result
 
     def cleanup_expired(self) -> None:
         now = time.time()

@@ -645,6 +645,10 @@ declare global {
         content?: string;
         truncated?: boolean;
         size?: number;
+        mime_type?: string;
+        preview_kind?: "text" | "markdown" | "code" | "image" | "pdf" | "office" | "binary";
+        is_binary?: boolean;
+        preview_supported?: boolean;
         error?: string;
       }>;
       loadSessionMessages: (sessionId: string) => Promise<{
@@ -1008,6 +1012,13 @@ declare global {
       searchRegistry: (args: { q: string }) => Promise<RegistrySearchResult>;
       searchSkillHub: (args: { q: string }) => Promise<SkillHubSearchResult>;
       loadLocalImageDataUrl: (path: string) => Promise<{ ok: boolean; dataUrl?: string; error?: string }>;
+      loadLocalFileDataUrl: (path: string) => Promise<{
+        ok: boolean;
+        dataUrl?: string;
+        mime?: string;
+        size?: number;
+        error?: string;
+      }>;
       installFromRegistry: (args: {
         source: string;
         name: string;
