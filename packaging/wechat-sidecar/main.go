@@ -135,10 +135,25 @@ func handleStatus(w http.ResponseWriter, _ *http.Request) {
 	if creds != nil {
 		botID = creds.BotID
 	}
-	if connected {
-		status = "connected"
+	ageHours := 0.0
+	if creds != nil && creds.SavedAt != "" {
+		if t, err := time.Parse(time.RFC3339, creds.SavedAt); err == nil {
+			ageHours = time.Since(t).Hours()
+		}
+	}
+	lastSuccess := getLastSuccessAt()
+	consecErrs := getConsecutiveErrors()
+	stale := !connected && creds != nil && (ageHours > 20 || consecErrs >= 3)
+
+	statusStr := status
+	if stale {
+		statusStr = "stale"
+	} else if connected {
+		statusStr = "connected"
 	} else if creds != nil {
-		status = "idle"
+		statusStr = "idle"
+	} else {
+		statusStr = "disconnected"
 	}
 
 	profileMu.RLock()
@@ -147,11 +162,15 @@ func handleStatus(w http.ResponseWriter, _ *http.Request) {
 	profileMu.RUnlock()
 
 	writeJSON(w, http.StatusOK, map[string]any{
-		"connected":        connected,
-		"bot_id":           botID,
-		"status":           status,
-		"bot_display_name": displayName,
-		"bot_avatar_url":   avatarURL,
+		"connected":            connected,
+		"bot_id":               botID,
+		"status":               statusStr,
+		"stale":                stale,
+		"credential_age_hours": ageHours,
+		"last_success_at":      lastSuccess,
+		"last_error":           "",
+		"bot_display_name":     displayName,
+		"bot_avatar_url":       avatarURL,
 	})
 }
 
@@ -164,6 +183,11 @@ func handleReconnect(w http.ResponseWriter, _ *http.Request) {
 
 	setCredentials(creds)
 	stopMonitor()
+	// Reset error streak before attempting fresh monitor so a previous failure streak
+	// doesn't immediately re-mark as stale.
+	monitorMu.Lock()
+	consecutiveMonitorErrors = 0
+	monitorMu.Unlock()
 	go startMonitor(creds)
 
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "bot_id": creds.BotID})

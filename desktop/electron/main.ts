@@ -3809,6 +3809,16 @@ function registerIpc(): void {
     return { port: wechatSidecarPort, running: !!wechatSidecarProcess && !wechatSidecarProcess.killed };
   });
 
+  ipcMain.handle("wechat-clear-credentials", async () => {
+    try {
+      const credsPath = path.join(CONFIG_DIR, "wechat_credentials.json");
+      if (fs.existsSync(credsPath)) fs.unlinkSync(credsPath);
+      return { ok: true };
+    } catch {
+      return { ok: false };
+    }
+  });
+
   ipcMain.handle("load-wechat-binding", async () => {
     try {
       const raw = fs.readFileSync(WECHAT_BINDING_PATH, "utf-8");
