@@ -276,10 +276,16 @@ export default function ModelProvidersPage() {
     if (!active) return;
     setTesting(true);
     try {
+      const probeModel =
+        active.models.find((m) => m.enabled)?.name ?? active.models[0]?.name ?? undefined;
+      const payload: { apiKey?: string; baseUrl?: string; probeModel?: string } = {};
+      if (keyDraft.trim()) payload.apiKey = keyDraft.trim();
+      if (baseUrlDraft.trim()) payload.baseUrl = baseUrlDraft.trim();
+      if (probeModel) payload.probeModel = probeModel;
       const res = await fetch(`/api/admin/providers/${active.id}/test`, {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify(keyDraft.trim() ? { apiKey: keyDraft } : {}),
+        body: JSON.stringify(payload),
       });
       const json = (await res.json()) as TestResp;
       if (json.data?.reachable) {
@@ -678,6 +684,7 @@ export default function ModelProvidersPage() {
                 value={newModel.name}
                 onChange={(event) => setNewModel((prev) => ({ ...prev, name: event.target.value }))}
               />
+              <p className="text-xs text-muted-foreground">{t("modelIdHint")}</p>
             </div>
             <div className="space-y-1.5">
               <Label htmlFor="add-model-label">{t("modelLabelLabel")}</Label>
@@ -867,6 +874,7 @@ function AddProviderDialog({
                   value={custom.id}
                   onChange={(event) => setCustom((prev) => ({ ...prev, id: event.target.value }))}
                 />
+                <p className="text-xs text-muted-foreground">{t("providerIdHint")}</p>
               </div>
               <div className="space-y-1.5">
 <Label>{t("displayNameLabel")}</Label>
