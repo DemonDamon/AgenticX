@@ -78,6 +78,7 @@ function mapSessionRow(row: typeof chatSessions.$inferSelect): ChatSession {
 
 function mapMessageRow(row: typeof chatMessages.$inferSelect): ChatMessage {
   const role = row.role as ChatMessageRole;
+  const metadata = row.metadata as { attachments?: ChatMessage["attachments"] } | null;
   return {
     id: row.id,
     session_id: row.sessionId,
@@ -85,6 +86,7 @@ function mapMessageRow(row: typeof chatMessages.$inferSelect): ChatMessage {
     user_id: row.userId,
     role,
     content: row.content,
+    attachments: metadata?.attachments,
     model: row.model ?? undefined,
     created_at: row.createdAt.toISOString(),
   };
@@ -216,7 +218,10 @@ export async function appendChatMessages(
         content: message.content,
         model: message.model?.trim() || null,
         status: "complete" as const,
-        metadata: null as null,
+        metadata:
+          message.attachments && message.attachments.length > 0
+            ? ({ attachments: message.attachments } as Record<string, unknown>)
+            : null,
         createdAt,
         updatedAt: createdAt,
       };
@@ -291,7 +296,10 @@ export async function replaceAllChatSessionMessages(
           content: message.content,
           model: message.model?.trim() || null,
           status: "complete" as const,
-          metadata: null as null,
+          metadata:
+            message.attachments && message.attachments.length > 0
+              ? ({ attachments: message.attachments } as Record<string, unknown>)
+              : null,
           createdAt,
           updatedAt: createdAt,
         };

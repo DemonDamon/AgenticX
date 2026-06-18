@@ -37,6 +37,7 @@ export interface PortalModelOption {
   label: string;
   route: ProviderRoute;
   isDefault: boolean;
+  capabilities?: string[];
 }
 
 function requiredTenant(): string {
@@ -131,6 +132,7 @@ export async function listAvailableModelsForUser(userId: string, email?: string)
         label: m.label,
         route: p.route,
         isDefault: p.isDefault,
+        capabilities: m.capabilities,
       });
     }
   }

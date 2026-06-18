@@ -93,6 +93,7 @@
     "noModelsHint": "No models are available. Ask an admin to enable models under Platform → Model service and assign them to you under Users → Visible models.",
     "newConversation": "New chat",
     "attachment": "Attachment",
+    "uploadImage": "Upload image",
     "uploadComingSoon": "Upload files (coming soon)",
     "gatewayOnline": "Gateway online",
     "gatewayOnlineShort": "on",
