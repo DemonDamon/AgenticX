@@ -77,7 +77,7 @@ func ParseClaudeMessages(body io.Reader) (openai.ChatCompletionRequest, error) {
 			role = "user"
 		}
 		text, cacheCtrl := claudeMessageParts(msg.Content)
-		req.Messages = append(req.Messages, openai.ChatMessage{Role: role, Content: text, CacheControl: cacheCtrl})
+		req.Messages = append(req.Messages, openai.ChatMessage{Role: role, Content: openai.NewStringContent(text), CacheControl: cacheCtrl})
 	}
 	if len(req.Messages) == 0 {
 		return openai.ChatCompletionRequest{}, fmt.Errorf("messages is required")

@@ -35,8 +35,9 @@ func nonEmpty(a, fallback string) string {
 func estimateTokens(messages []openai.ChatMessage) int {
 	total := 0
 	for _, msg := range messages {
-		total += len(msg.Content) / 3
-		if len(msg.Content)%3 != 0 {
+		text := openai.ContentText(msg.Content)
+		total += len(text) / 3
+		if len(text)%3 != 0 {
 			total += 1
 		}
 	}

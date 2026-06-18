@@ -268,7 +268,7 @@ func (s *Server) tryServeProtocolCache(w http.ResponseWriter, ctx cacheServeCont
 	case inbound.ProtocolResponses:
 		text := ""
 		if len(resp.Choices) > 0 {
-			text = resp.Choices[0].Message.Content
+			text = openai.ContentText(resp.Choices[0].Message.Content)
 		}
 		enc := outbound.NewResponsesStreamEncoder(ctx.req.Model)
 		writeJSON(w, http.StatusOK, enc.Completed(text, usage))

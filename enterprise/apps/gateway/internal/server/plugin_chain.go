@@ -130,9 +130,9 @@ func (s *Server) transformChatResponseJSON(hookCtx *wasmhost.HookContext, resp *
 	}
 	var patched openai.ChatCompletionResponse
 	if err := json.Unmarshal(transformed, &patched); err != nil {
-		content := resp.Choices[0].Message.Content
+		content := openai.ContentText(resp.Choices[0].Message.Content)
 		out := s.applyWasmResponseBody(hookCtx, []byte(content))
-		resp.Choices[0].Message.Content = string(out)
+		resp.Choices[0].Message.Content = openai.NewStringContent(string(out))
 		return
 	}
 	*resp = patched

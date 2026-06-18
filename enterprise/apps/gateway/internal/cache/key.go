@@ -44,7 +44,7 @@ func normalizeMessages(messages []openai.ChatMessage) []map[string]string {
 	for _, msg := range messages {
 		out = append(out, map[string]string{
 			"role":    strings.TrimSpace(msg.Role),
-			"content": strings.TrimSpace(openai.ComposeMessageContent(msg.Content, msg.ReasoningContent)),
+			"content": strings.TrimSpace(openai.ComposeMessageContent(openai.ContentText(msg.Content), msg.ReasoningContent)),
 		})
 	}
 	sort.SliceStable(out, func(i, j int) bool {
@@ -84,7 +84,7 @@ func joinMessages(messages []openai.ChatMessage, system string) string {
 		parts = append(parts, system)
 	}
 	for _, msg := range messages {
-		parts = append(parts, openai.ComposeMessageContent(msg.Content, msg.ReasoningContent))
+		parts = append(parts, openai.ComposeMessageContent(openai.ContentText(msg.Content), msg.ReasoningContent))
 	}
 	return strings.Join(parts, "\n")
 }

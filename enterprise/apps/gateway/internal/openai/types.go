@@ -15,7 +15,7 @@ type Tool struct {
 
 type ChatMessage struct {
 	Role             string          `json:"role"`
-	Content          string          `json:"content"`
+	Content          json.RawMessage `json:"content"`
 	ReasoningContent string          `json:"reasoning_content,omitempty"`
 	ToolCallID       string          `json:"tool_call_id,omitempty"`
 	Name             string          `json:"name,omitempty"`

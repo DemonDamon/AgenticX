@@ -161,13 +161,16 @@ func pivotToClaudeRequest(req openai.ChatCompletionRequest, ch channel.Channel, 
 	for _, m := range req.Messages {
 		if strings.EqualFold(m.Role, "system") {
 			if out.System == "" {
-				out.System = m.Content
+				out.System = openai.ContentText(m.Content)
 			}
 			continue
 		}
-		content := any(m.Content)
+		var content any
+		if err := json.Unmarshal(m.Content, &content); err != nil {
+			content = openai.ContentText(m.Content)
+		}
 		if len(m.CacheControl) > 0 {
-			block := map[string]any{"type": "text", "text": m.Content}
+			block := map[string]any{"type": "text", "text": openai.ContentText(m.Content)}
 			var cacheCtrl any
 			if err := json.Unmarshal(m.CacheControl, &cacheCtrl); err == nil {
 				block["cache_control"] = cacheCtrl
@@ -193,7 +196,7 @@ func claudeToPivotResponse(wire claudeMessageResponse, model string) openai.Chat
 		ID:      wire.ID,
 		Object:  "chat.completion",
 		Model:   nonEmpty(wire.Model, model),
-		Choices: []openai.ChatCompletionChoice{{Index: 0, Message: openai.ChatMessage{Role: "assistant", Content: text.String()}, FinishReason: "stop"}},
+		Choices: []openai.ChatCompletionChoice{{Index: 0, Message: openai.ChatMessage{Role: "assistant", Content: openai.NewStringContent(text.String())}, FinishReason: "stop"}},
 		Usage: openai.Usage{
 			PromptTokens:             wire.Usage.InputTokens,
 			CompletionTokens:         wire.Usage.OutputTokens,

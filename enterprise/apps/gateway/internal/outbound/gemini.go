@@ -52,7 +52,7 @@ func (e *GeminiStreamEncoder) CompleteResponse(resp openai.ChatCompletionRespons
 	text := ""
 	if len(resp.Choices) > 0 {
 		msg := resp.Choices[0].Message
-		text = openai.ComposeMessageContent(msg.Content, msg.ReasoningContent)
+		text = openai.ComposeMessageContent(openai.ContentText(msg.Content), msg.ReasoningContent)
 	}
 	return map[string]any{
 		"candidates": []map[string]any{

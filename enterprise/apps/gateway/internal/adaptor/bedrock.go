@@ -207,7 +207,7 @@ func openAIToBedrockConverse(req openai.ChatCompletionRequest) bedrockConverseRe
 		role := strings.ToLower(strings.TrimSpace(msg.Role))
 		switch role {
 		case "system":
-			out.System = append(out.System, bedrockContentBlock{Text: msg.Content})
+			out.System = append(out.System, bedrockContentBlock{Text: openai.ContentText(msg.Content)})
 			continue
 		case "assistant", "user":
 			// ok
@@ -220,7 +220,7 @@ func openAIToBedrockConverse(req openai.ChatCompletionRequest) bedrockConverseRe
 		}
 		out.Messages = append(out.Messages, bedrockMessage{
 			Role:    role,
-			Content: []bedrockContentBlock{{Text: msg.Content}},
+			Content: []bedrockContentBlock{{Text: openai.ContentText(msg.Content)}},
 		})
 	}
 	inf := &bedrockInference{}
@@ -261,7 +261,7 @@ func bedrockConverseToOpenAI(wire bedrockConverseResponse, model string) openai.
 			Index: 0,
 			Message: openai.ChatMessage{
 				Role:    "assistant",
-				Content: text,
+				Content: openai.NewStringContent(text),
 			},
 			FinishReason: finish,
 		}},
