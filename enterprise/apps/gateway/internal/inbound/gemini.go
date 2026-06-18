@@ -90,7 +90,7 @@ func ParseGeminiGenerate(body io.Reader, model string, stream bool) (openai.Chat
 		if text == "" {
 			continue
 		}
-		req.Messages = append(req.Messages, openai.ChatMessage{Role: role, Content: text})
+		req.Messages = append(req.Messages, openai.ChatMessage{Role: role, Content: openai.NewStringContent(text)})
 	}
 	if len(req.Messages) == 0 {
 		return openai.ChatCompletionRequest{}, fmt.Errorf("contents is required")

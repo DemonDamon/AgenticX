@@ -46,7 +46,7 @@ func ParseResponses(body io.Reader) (openai.ChatCompletionRequest, error) {
 	}
 	var asString string
 	if err := json.Unmarshal(raw.Input, &asString); err == nil {
-		req.Messages = []openai.ChatMessage{{Role: "user", Content: asString}}
+		req.Messages = []openai.ChatMessage{{Role: "user", Content: openai.NewStringContent(asString)}}
 		return req, nil
 	}
 	var msgs []responsesInputMessage
@@ -60,10 +60,10 @@ func ParseResponses(body io.Reader) (openai.ChatCompletionRequest, error) {
 				req.System = m.Content
 				continue
 			}
-			req.Messages = append(req.Messages, openai.ChatMessage{Role: role, Content: m.Content})
+			req.Messages = append(req.Messages, openai.ChatMessage{Role: role, Content: openai.NewStringContent(m.Content)})
 		}
 		if len(req.Messages) == 0 && req.System != "" {
-			req.Messages = []openai.ChatMessage{{Role: "user", Content: req.System}}
+			req.Messages = []openai.ChatMessage{{Role: "user", Content: openai.NewStringContent(req.System)}}
 		}
 		if len(req.Messages) == 0 {
 			return openai.ChatCompletionRequest{}, fmt.Errorf("input messages empty")

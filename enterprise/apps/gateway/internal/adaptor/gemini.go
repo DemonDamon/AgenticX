@@ -182,7 +182,7 @@ func pivotToGeminiRequest(req openai.ChatCompletionRequest) geminiGenerateReques
 		}
 		out.Contents = append(out.Contents, geminiContentWire{
 			Role:  role,
-			Parts: []map[string]string{{"text": m.Content}},
+			Parts: []map[string]string{{"text": openai.ContentText(m.Content)}},
 		})
 	}
 	return out
@@ -206,7 +206,7 @@ func geminiToPivotResponse(wire geminiGenerateResponse, model string) openai.Cha
 		Model:  model,
 		Choices: []openai.ChatCompletionChoice{{
 			Index:        0,
-			Message:      openai.ChatMessage{Role: "assistant", Content: text.String()},
+			Message:      openai.ChatMessage{Role: "assistant", Content: openai.NewStringContent(text.String())},
 			FinishReason: "stop",
 		}},
 		Usage: openai.Usage{

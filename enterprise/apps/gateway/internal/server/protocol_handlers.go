@@ -122,7 +122,7 @@ func prependSystemMessage(messages []openai.ChatMessage, system string) []openai
 		return messages
 	}
 	out := make([]openai.ChatMessage, 0, len(messages)+1)
-	out = append(out, openai.ChatMessage{Role: "system", Content: system})
+	out = append(out, openai.ChatMessage{Role: "system", Content: openai.NewStringContent(system)})
 	out = append(out, messages...)
 	return out
 }
@@ -211,10 +211,10 @@ func (s *Server) protocolComplete(
 	if len(resp.Choices) > 0 {
 		msg := &resp.Choices[0].Message
 		if thinkingMode == transform.ThinkingSeparate {
-			responseContent = openai.ComposeMessageContent(msg.Content, msg.ReasoningContent)
+			responseContent = openai.ComposeMessageContent(openai.ContentText(msg.Content), msg.ReasoningContent)
 		} else {
-			responseContent = openai.ComposeMessageContent(msg.Content, msg.ReasoningContent)
-			msg.Content = responseContent
+			responseContent = openai.ComposeMessageContent(openai.ContentText(msg.Content), msg.ReasoningContent)
+			msg.Content = openai.NewStringContent(responseContent)
 			msg.ReasoningContent = ""
 		}
 	}

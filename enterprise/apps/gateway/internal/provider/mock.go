@@ -31,7 +31,7 @@ func (p *MockProvider) Complete(
 				Index: 0,
 				Message: openai.ChatMessage{
 					Role:    "assistant",
-					Content: content,
+					Content: openai.NewStringContent(content),
 				},
 				FinishReason: "stop",
 			},

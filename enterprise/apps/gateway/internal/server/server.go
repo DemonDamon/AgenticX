@@ -759,8 +759,8 @@ func (s *Server) handleChatCompletions(w http.ResponseWriter, r *http.Request) {
 	responseContent := ""
 	if len(resp.Choices) > 0 {
 		msg := &resp.Choices[0].Message
-		responseContent = openai.ComposeMessageContent(msg.Content, msg.ReasoningContent)
-		msg.Content = responseContent
+		responseContent = openai.ComposeMessageContent(openai.ContentText(msg.Content), msg.ReasoningContent)
+		msg.Content = openai.NewStringContent(responseContent)
 		msg.ReasoningContent = ""
 	}
 	providerInputTokens := resp.Usage.PromptTokens
@@ -781,7 +781,7 @@ func (s *Server) handleChatCompletions(w http.ResponseWriter, r *http.Request) {
 	})
 
 	if len(resp.Choices) > 0 {
-		respPolicy := s.evaluatePolicy(resp.Choices[0].Message.Content, makeEvalContext(identity, "response"))
+		respPolicy := s.evaluatePolicy(openai.ContentText(resp.Choices[0].Message.Content), makeEvalContext(identity, "response"))
 		if respPolicy.Blocked {
 			s.logger.Warn("policy blocked response", "model", req.Model, "hits", len(respPolicy.Hits))
 			if err := s.writeAuditEvent(audit.Event{
@@ -800,7 +800,7 @@ func (s *Server) handleChatCompletions(w http.ResponseWriter, r *http.Request) {
 				Route:        decision.Route,
 				Digest: &audit.Digest{
 					PromptHash:   hashText(joinMessages(req.Messages)),
-					ResponseHash: hashText(resp.Choices[0].Message.Content),
+					ResponseHash: hashText(openai.ContentText(resp.Choices[0].Message.Content)),
 				},
 				PoliciesHit: toAuditPolicyHits(respPolicy.Hits),
 				LatencyMS:   time.Since(startedAt).Milliseconds(),
@@ -811,8 +811,8 @@ func (s *Server) handleChatCompletions(w http.ResponseWriter, r *http.Request) {
 			writePolicyError(w, "90002", "响应触发合规拦截", respPolicy.Hits)
 			return
 		}
-		if respPolicy.RedactedText != resp.Choices[0].Message.Content {
-			resp.Choices[0].Message.Content = respPolicy.RedactedText
+		if respPolicy.RedactedText != openai.ContentText(resp.Choices[0].Message.Content) {
+			resp.Choices[0].Message.Content = openai.NewStringContent(respPolicy.RedactedText)
 		}
 	}
 
@@ -828,7 +828,7 @@ func (s *Server) handleChatCompletions(w http.ResponseWriter, r *http.Request) {
 
 	s.transformChatResponseJSON(pluginCtx, &resp)
 	if len(resp.Choices) > 0 {
-		responseContent = openai.ComposeMessageContent(resp.Choices[0].Message.Content, resp.Choices[0].Message.ReasoningContent)
+		responseContent = openai.ComposeMessageContent(openai.ContentText(resp.Choices[0].Message.Content), resp.Choices[0].Message.ReasoningContent)
 	}
 
 	chatAudit := s.auditChatCall(audit.Event{
@@ -1262,10 +1262,11 @@ func writeJSON(w http.ResponseWriter, statusCode int, payload any) {
 func joinMessages(messages []openai.ChatMessage) string {
 	parts := make([]string, 0, len(messages))
 	for _, msg := range messages {
-		if strings.TrimSpace(msg.Content) == "" {
+		text := strings.TrimSpace(openai.ContentText(msg.Content))
+		if text == "" {
 			continue
 		}
-		parts = append(parts, msg.Content)
+		parts = append(parts, text)
 	}
 	return strings.Join(parts, "\n")
 }
@@ -1277,8 +1278,8 @@ func joinMessages(messages []openai.ChatMessage) string {
 func latestUserMessageContent(messages []openai.ChatMessage) string {
 	for i := len(messages) - 1; i >= 0; i-- {
 		msg := messages[i]
-		if strings.EqualFold(msg.Role, "user") && strings.TrimSpace(msg.Content) != "" {
-			return msg.Content
+		if strings.EqualFold(msg.Role, "user") && strings.TrimSpace(openai.ContentText(msg.Content)) != "" {
+			return openai.ContentText(msg.Content)
 		}
 	}
 	return joinMessages(messages)
@@ -1291,7 +1292,7 @@ func replaceLastUserMessageContent(messages []openai.ChatMessage, content string
 		if strings.EqualFold(messages[i].Role, "user") {
 			next := make([]openai.ChatMessage, len(messages))
 			copy(next, messages)
-			next[i].Content = content
+			next[i].Content = openai.NewStringContent(content)
 			return next
 		}
 	}

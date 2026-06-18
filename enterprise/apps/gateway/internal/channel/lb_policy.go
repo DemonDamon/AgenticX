@@ -91,7 +91,7 @@ func extractPrefixContents(messages []openai.ChatMessage, n int) string {
 	}
 	parts := make([]string, 0, n)
 	for i := 0; i < n; i++ {
-		content := strings.TrimSpace(openai.ComposeMessageContent(messages[i].Content, messages[i].ReasoningContent))
+		content := strings.TrimSpace(openai.ComposeMessageContent(openai.ContentText(messages[i].Content), messages[i].ReasoningContent))
 		if content != "" {
 			parts = append(parts, content)
 		}

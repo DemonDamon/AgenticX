@@ -118,7 +118,7 @@ func promptText(req openai.ChatCompletionRequest) string {
 		parts = append(parts, req.System)
 	}
 	for _, msg := range req.Messages {
-		parts = append(parts, openai.ComposeMessageContent(msg.Content, msg.ReasoningContent))
+		parts = append(parts, openai.ComposeMessageContent(openai.ContentText(msg.Content), msg.ReasoningContent))
 	}
 	return strings.Join(parts, "\n")
 }

@@ -40,8 +40,8 @@ func (s *Server) handleChatCompleteRelay(
 	responseContent := ""
 	if len(resp.Choices) > 0 {
 		msg := &resp.Choices[0].Message
-		responseContent = openai.ComposeMessageContent(msg.Content, msg.ReasoningContent)
-		msg.Content = responseContent
+		responseContent = openai.ComposeMessageContent(openai.ContentText(msg.Content), msg.ReasoningContent)
+		msg.Content = openai.NewStringContent(responseContent)
 		msg.ReasoningContent = ""
 	}
 	providerInputTokens := resp.Usage.PromptTokens
@@ -63,7 +63,7 @@ func (s *Server) handleChatCompleteRelay(
 	})
 
 	if len(resp.Choices) > 0 {
-		respPolicy := s.evaluatePolicy(resp.Choices[0].Message.Content, makeEvalContext(identity, "response"))
+		respPolicy := s.evaluatePolicy(openai.ContentText(resp.Choices[0].Message.Content), makeEvalContext(identity, "response"))
 		if respPolicy.Blocked {
 			s.logger.Warn("policy blocked response", "model", req.Model, "hits", len(respPolicy.Hits))
 			ev := audit.Event{
@@ -80,7 +80,7 @@ func (s *Server) handleChatCompleteRelay(
 				Provider:        decision.Provider,
 				Model:           req.Model,
 				Route:           decision.Route,
-				Digest:          &audit.Digest{PromptHash: hashText(joinMessages(req.Messages)), ResponseHash: hashText(resp.Choices[0].Message.Content)},
+				Digest:          &audit.Digest{PromptHash: hashText(joinMessages(req.Messages)), ResponseHash: hashText(openai.ContentText(resp.Choices[0].Message.Content))},
 				PoliciesHit:     toAuditPolicyHits(respPolicy.Hits),
 				LatencyMS:       time.Since(startedAt).Milliseconds(),
 				EstimatedTokens: estimatedInputTokens,
@@ -96,14 +96,14 @@ func (s *Server) handleChatCompleteRelay(
 			writePolicyError(w, "90002", "响应触发合规拦截", respPolicy.Hits)
 			return
 		}
-		if respPolicy.RedactedText != resp.Choices[0].Message.Content {
-			resp.Choices[0].Message.Content = respPolicy.RedactedText
+		if respPolicy.RedactedText != openai.ContentText(resp.Choices[0].Message.Content) {
+			resp.Choices[0].Message.Content = openai.NewStringContent(respPolicy.RedactedText)
 		}
 	}
 
 	s.transformChatResponseJSON(pluginCtx, &resp)
 	if len(resp.Choices) > 0 {
-		responseContent = openai.ComposeMessageContent(resp.Choices[0].Message.Content, resp.Choices[0].Message.ReasoningContent)
+		responseContent = openai.ComposeMessageContent(openai.ContentText(resp.Choices[0].Message.Content), resp.Choices[0].Message.ReasoningContent)
 	}
 
 	ev := audit.Event{
