@@ -2,7 +2,7 @@
 
 import * as React from "react";
 import { useTranslations } from "next-intl";
-import { InputArea, MessageList, useChatStore } from "@agenticx/feature-chat";
+import { InputArea, MessageList, useChatStore, useComposerAttachments, extractClipboardImageFiles, withClipboardImageNames, modelSupportsVision } from "@agenticx/feature-chat";
 import { type ChatClient } from "@agenticx/sdk-ts";
 import {
   Activity,
@@ -43,6 +43,7 @@ type PortalModelOption = {
   label: string;
   route: "local" | "private-cloud" | "third-party";
   isDefault: boolean;
+  capabilities?: string[];
 };
 
 /** 会话 active_model（provider/model）在可见列表为空时的展示兜底。 */
@@ -92,6 +93,16 @@ export function MachiChatView({ client }: MachiChatViewProps) {
   const [draft, setDraft] = React.useState("");
   const [webSearch, setWebSearch] = React.useState(false);
   const [deepResearch, setDeepResearch] = React.useState(false);
+  const [visionWarning, setVisionWarning] = React.useState<string | null>(null);
+  const fileInputRef = React.useRef<HTMLInputElement>(null);
+  const {
+    attachments,
+    attachmentError,
+    addFiles,
+    removeAttachment,
+    clearAttachments,
+    toMessageAttachments,
+  } = useComposerAttachments();
   const [modelMenuOpen, setModelMenuOpen] = React.useState(false);
   const modelMenuRef = React.useRef<HTMLDivElement>(null);
   const modelTriggerRef = React.useRef<HTMLButtonElement>(null);
@@ -281,10 +292,56 @@ export function MachiChatView({ client }: MachiChatViewProps) {
     if (activeSession) setSessionTitle(activeSession.title);
   }, [activeSession?.id, activeSession?.title]);
 
+  const activeModelOption = React.useMemo(
+    () => availableModels.find((item) => item.id === activeModel),
+    [availableModels, activeModel],
+  );
+
+  const visionSupported = React.useMemo(
+    () =>
+      modelSupportsVision(
+        activeModelOption?.provider ?? "",
+        activeModelOption?.model ?? activeModel,
+        activeModelOption?.capabilities,
+      ),
+    [activeModelOption, activeModel],
+  );
+
+  const warnIfNonVision = React.useCallback(() => {
+    if (visionSupported) return false;
+    setVisionWarning("模型不支持该文件类型");
+    window.setTimeout(() => setVisionWarning(null), 3200);
+    return true;
+  }, [visionSupported]);
+
+  const handleAddFiles = React.useCallback(
+    (files: File[]) => {
+      const imageFiles = files.filter((file) => file.type.startsWith("image/"));
+      if (imageFiles.length === 0) return;
+      if (warnIfNonVision()) return;
+      addFiles(imageFiles);
+    },
+    [addFiles, warnIfNonVision],
+  );
+
+  const handlePaste = React.useCallback(
+    (event: React.ClipboardEvent<HTMLTextAreaElement>) => {
+      const raw = extractClipboardImageFiles(event.clipboardData);
+      if (raw.length === 0) return;
+      event.preventDefault();
+      if (warnIfNonVision()) return;
+      handleAddFiles(withClipboardImageNames(raw));
+    },
+    [handleAddFiles, warnIfNonVision],
+  );
+
   const handleSend = (text: string) => {
-    if (!text.trim()) return;
-    void sendMessage(client, { content: text });
+    const trimmed = text.trim();
+    const messageAttachments = toMessageAttachments();
+    if (!trimmed && messageAttachments.length === 0) return;
+    void sendMessage(client, { content: trimmed, attachments: messageAttachments });
     setDraft("");
+    clearAttachments();
   };
 
   const composer = (
@@ -309,6 +366,25 @@ export function MachiChatView({ client }: MachiChatViewProps) {
           </div>
         </Alert>
       )}
+      {(visionWarning || attachmentError) && (
+        <Alert variant="warning" className="border-amber-300/60 bg-amber-50/90 text-amber-950 shadow-sm dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-100">
+          <ShieldAlert className="h-5 w-5" />
+          <AlertDescription>{visionWarning ?? attachmentError}</AlertDescription>
+        </Alert>
+      )}
+
+      <input
+        ref={fileInputRef}
+        type="file"
+        accept="image/*"
+        multiple
+        className="hidden"
+        onChange={(event) => {
+          const files = event.target.files ? Array.from(event.target.files) : [];
+          if (files.length > 0) handleAddFiles(files);
+          event.target.value = "";
+        }}
+      />
 
       <InputArea
         value={draft}
@@ -317,15 +393,28 @@ export function MachiChatView({ client }: MachiChatViewProps) {
         onSend={() => handleSend(draft)}
         onCancel={() => void cancel(client)}
         appearance="portal"
+        attachments={Object.values(attachments)}
+        onAddFiles={handleAddFiles}
+        onRemoveAttachment={removeAttachment}
+        onPaste={handlePaste}
         leftToolbar={
           <>
             <Tooltip>
               <TooltipTrigger asChild>
-                <Button variant="ghost" size="icon" aria-label={t("attachment")} className="h-8 w-8 rounded-full text-muted-foreground hover:text-foreground">
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  aria-label={t("attachment")}
+                  className="h-8 w-8 rounded-full text-muted-foreground hover:text-foreground"
+                  onClick={() => {
+                    if (warnIfNonVision()) return;
+                    fileInputRef.current?.click();
+                  }}
+                >
                   <Paperclip className="h-4 w-4" />
                 </Button>
               </TooltipTrigger>
-              <TooltipContent>{t("uploadComingSoon")}</TooltipContent>
+              <TooltipContent>{t("uploadImage")}</TooltipContent>
             </Tooltip>
             <Button
               variant={webSearch ? "secondary" : "ghost"}
