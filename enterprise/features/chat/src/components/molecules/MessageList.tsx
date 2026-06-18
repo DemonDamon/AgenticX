@@ -404,6 +404,22 @@ export function MessageList({
                           </div>
                         ) : null}
 
+                        {/* 用户图片附件 */}
+                        {isUser && message.attachments && message.attachments.length > 0 ? (
+                          <div className="mb-2 flex flex-wrap gap-2">
+                            {message.attachments.map((attachment) =>
+                              attachment.mime_type.startsWith("image/") && attachment.data_url ? (
+                                <img
+                                  key={`${message.id}-${attachment.name}`}
+                                  src={attachment.data_url}
+                                  alt={attachment.name}
+                                  className="max-h-40 max-w-full rounded-xl object-cover"
+                                />
+                              ) : null,
+                            )}
+                          </div>
+                        ) : null}
+
                         {/* 消息内容 */}
                         {!hideContentParagraph ? (
                           isAssistant ? (
@@ -411,13 +427,13 @@ export function MessageList({
                               text={displayContentForRender || "..."}
                               className={`break-words text-base leading-7 ${!message.content ? "opacity-70" : ""}`}
                             />
-                          ) : (
+                          ) : message.content.trim() ? (
                             <p
                               className={`whitespace-pre-wrap break-words text-base leading-7 ${!message.content ? "opacity-70" : ""}`}
                             >
-                              {displayContentForRender || "..."}
+                              {displayContentForRender}
                             </p>
-                          )
+                          ) : null
                         ) : null}
 
                         {/* 工具调用 */}

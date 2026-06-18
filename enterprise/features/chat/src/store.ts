@@ -14,6 +14,7 @@ export type ChatStatus = "idle" | "sending" | "streaming" | "error";
 
 type SendMessageInput = {
   content: string;
+  attachments?: import("@agenticx/core-api").ChatMessageAttachment[];
   tenantId?: string;
   userId?: string;
 };
@@ -136,6 +137,12 @@ function toSdkRequest(sessionId: string, model: string, messages: ChatMessage[])
       id: message.id,
       role: message.role === "tool" ? "assistant" : message.role,
       content: message.content,
+      attachments: message.attachments?.map((item) => ({
+        name: item.name,
+        mimeType: item.mime_type,
+        size: item.size,
+        dataUrl: item.data_url,
+      })),
       createdAt: message.created_at,
     })),
   };
@@ -586,7 +593,8 @@ export const useChatStore = create<ChatStore>((set, get) => ({
     if (state.status === "sending" || state.status === "streaming") return;
 
     const content = input.content.trim();
-    if (!content) return;
+    const attachments = input.attachments?.filter((item) => item.data_url?.trim()) ?? [];
+    if (!content && attachments.length === 0) return;
 
     if (isDraftSessionId(state, sessionId)) {
       if (state.hydrated) {
@@ -645,6 +653,7 @@ export const useChatStore = create<ChatStore>((set, get) => ({
       user_id: userId,
       role: "user",
       content,
+      attachments: attachments.length > 0 ? attachments : undefined,
       created_at: now(),
     };
     const assistantMessage: ChatMessage = {

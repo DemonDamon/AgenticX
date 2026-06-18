@@ -1,5 +1,6 @@
 import type { ChatClient } from "./client";
-import type { ChatChunk, ChatRequest, SendMessageResult } from "../types";
+import type { ChatChunk, ChatMessage, ChatRequest, SendMessageResult } from "../types";
+import { toGatewayMessage } from "./multimodal";
 
 type PendingRequest = {
   request: ChatRequest;
@@ -85,10 +86,7 @@ export class HttpChatClient implements ChatClient {
         body: JSON.stringify({
           model: pending.request.model,
           stream: true,
-          messages: pending.request.messages.map((message) => ({
-            role: message.role,
-            content: message.content,
-          })),
+          messages: pending.request.messages.map((message) => toGatewayMessage(message)),
         }),
         signal: controller.signal,
       });
