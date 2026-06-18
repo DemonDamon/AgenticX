@@ -1,4 +1,5 @@
 export * from "./types";
+export * from "./types/composer-attachment";
 export * from "./history-client";
 export { sessionTitleNeedsAutoFill, buildAutoTitleFromFirstUserMessage } from "@agenticx/core-api";
 export * from "./store";
@@ -8,3 +9,8 @@ export * from "./components/molecules/InputArea";
 export * from "./components/molecules/ModelSelector";
 export * from "./components/atoms/ReasoningBlock";
 export * from "./components/atoms/ToolCallCard";
+export * from "./components/atoms/AttachmentChip";
+export * from "./hooks/useComposerAttachments";
+export * from "./utils/clipboard-images";
+export * from "./utils/model-vision";
+export * from "./utils/build-multimodal-content";

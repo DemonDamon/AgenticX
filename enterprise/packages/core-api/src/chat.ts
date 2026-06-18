@@ -11,6 +11,14 @@ export type ToolCallSummary = {
   result_preview?: string;
 };
 
+/** Image attachment persisted in chat_messages.metadata and sent as OpenAI image_url. */
+export type ChatMessageAttachment = {
+  name: string;
+  mime_type: string;
+  size?: number;
+  data_url: string;
+};
+
 export type ChatMessage = {
   id: EntityId;
   session_id: EntityId;
@@ -18,6 +26,7 @@ export type ChatMessage = {
   user_id: EntityId;
   role: ChatMessageRole;
   content: string;
+  attachments?: ChatMessageAttachment[];
   model?: string;
   provider?: string;
   reasoning?: string;

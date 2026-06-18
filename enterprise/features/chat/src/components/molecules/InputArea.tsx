@@ -1,5 +1,7 @@
 import * as React from "react";
 import { Button } from "@agenticx/ui";
+import { AttachmentChip } from "../atoms/AttachmentChip";
+import type { ComposerAttachment } from "../../types/composer-attachment";
 
 type InputAreaProps = {
   value: string;
@@ -11,6 +13,10 @@ type InputAreaProps = {
   rightToolbar?: React.ReactNode;
   className?: string;
   appearance?: "default" | "portal";
+  attachments?: ComposerAttachment[];
+  onAddFiles?: (files: File[]) => void;
+  onRemoveAttachment?: (id: string) => void;
+  onPaste?: (event: React.ClipboardEvent<HTMLTextAreaElement>) => void;
 };
 
 function SendIcon({ className }: { className?: string }) {
@@ -40,10 +46,16 @@ export function InputArea({
   rightToolbar,
   className,
   appearance = "default",
+  attachments = [],
+  onAddFiles,
+  onRemoveAttachment,
+  onPaste,
 }: InputAreaProps) {
   const textareaRef = React.useRef<HTMLTextAreaElement>(null);
   const imeComposingRef = React.useRef(false);
-  const canSend = status !== "sending" && status !== "streaming" && value.trim().length > 0;
+  const readyCount = attachments.filter((item) => item.status === "ready").length;
+  const canSend =
+    status !== "sending" && status !== "streaming" && (value.trim().length > 0 || readyCount > 0);
   const canCancel = status === "sending" || status === "streaming";
   const minTextareaHeight = appearance === "portal" ? 48 : 40;
 
@@ -59,6 +71,22 @@ export function InputArea({
       ? "border-zinc-200/90 dark:border-zinc-700/80 focus-within:!border-indigo-600 dark:focus-within:!border-indigo-500 focus-within:shadow-[0_0_0_1px_rgba(79,70,229,0.78),0_18px_38px_-20px_rgba(79,70,229,0.45)] dark:focus-within:shadow-[0_0_0_1px_rgba(99,102,241,0.78),0_18px_38px_-20px_rgba(79,70,229,0.42)]"
       : "border-border/80 focus-within:!border-border/80 focus-within:shadow-[0_16px_40px_-12px_rgba(0,0,0,0.15)]";
 
+  const handleDragOver = (event: React.DragEvent) => {
+    if (!onAddFiles) return;
+    if (event.dataTransfer?.types?.includes("Files")) {
+      event.preventDefault();
+      event.dataTransfer.dropEffect = "copy";
+    }
+  };
+
+  const handleDrop = (event: React.DragEvent) => {
+    if (!onAddFiles) return;
+    const files = event.dataTransfer?.files ? Array.from(event.dataTransfer.files) : [];
+    if (files.length === 0) return;
+    event.preventDefault();
+    onAddFiles(files);
+  };
+
   return (
     <div
       className={[
@@ -66,11 +94,25 @@ export function InputArea({
         appearanceClassName,
         className ?? "",
       ].join(" ")}
+      onDragOver={handleDragOver}
+      onDrop={handleDrop}
     >
+      {attachments.length > 0 ? (
+        <div className="flex flex-wrap gap-2 px-2 pt-1">
+          {attachments.map((file) => (
+            <AttachmentChip
+              key={file.id}
+              file={file}
+              onRemove={() => onRemoveAttachment?.(file.id)}
+            />
+          ))}
+        </div>
+      ) : null}
       <textarea
         ref={textareaRef}
         value={value}
         onChange={(event) => onChange(event.target.value)}
+        onPaste={onPaste}
         rows={1}
         className={`w-full resize-none overflow-y-auto border-0 bg-transparent px-3 pb-2 pt-2.5 text-sm leading-6 text-foreground outline-none ring-0 placeholder:text-muted-foreground/70 focus:outline-none focus:ring-0 focus-visible:outline-none focus-visible:ring-0 ${appearance === "portal" ? "min-h-[48px]" : "min-h-[40px]"}`}
         placeholder="发送消息给 Machi..."
@@ -117,4 +159,3 @@ export function InputArea({
     </div>
   );
 }
-
