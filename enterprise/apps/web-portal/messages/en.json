@@ -71,6 +71,7 @@
     "sessionActions": "Session actions",
     "rename": "Rename",
     "delete": "Delete",
+    "sessionGenerating": "Generating",
     "currentUser": "Signed in as {email}"
   },
   "chat": {

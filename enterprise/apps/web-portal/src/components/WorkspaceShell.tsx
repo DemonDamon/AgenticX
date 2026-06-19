@@ -46,6 +46,7 @@ import { useChatStore } from "@agenticx/feature-chat";
 import { MachiChatView } from "./MachiChatView";
 import { QuotaCard } from "./QuotaCard";
 import { SettingsPanel } from "./settings/SettingsPanel";
+import { SessionGeneratingDots } from "./SessionGeneratingDots";
 
 type WorkspaceShellProps = {
   userEmail: string;
@@ -128,6 +129,7 @@ export function WorkspaceShell({ userEmail, userScopes }: WorkspaceShellProps) {
   const switchSession = useChatStore((s) => s.switchSession);
   const renameSessionInStore = useChatStore((s) => s.renameSession);
   const deleteSessionInStore = useChatStore((s) => s.deleteSession);
+  const streamingSessionId = useChatStore((s) => s.streamingSessionId);
 
   const history = React.useMemo<HistorySession[]>(
     () =>
@@ -314,6 +316,7 @@ export function WorkspaceShell({ userEmail, userScopes }: WorkspaceShellProps) {
                             key={item.id}
                             session={item}
                             active={activeSessionId === item.id}
+                            isGenerating={streamingSessionId === item.id}
                             onSelect={() => onSelectSession(item.id)}
                             onRename={() => onRenameSession(item.id)}
                             onDelete={() => onDeleteSession(item.id)}
@@ -338,11 +341,20 @@ export function WorkspaceShell({ userEmail, userScopes }: WorkspaceShellProps) {
                             ? "bg-sidebar-accent text-sidebar-accent-foreground"
                             : "text-muted-foreground hover:bg-muted hover:text-foreground",
                         ].join(" ")}
+                        aria-label={
+                          streamingSessionId === item.id ? `${item.title} · ${t("sessionGenerating")}` : item.title
+                        }
                       >
-                        <MessageSquare className="h-4 w-4" />
+                        {streamingSessionId === item.id ? (
+                          <SessionGeneratingDots className="text-foreground/75" />
+                        ) : (
+                          <MessageSquare className="h-4 w-4" />
+                        )}
                       </button>
                     </TooltipTrigger>
-                    <TooltipContent side="right">{item.title}</TooltipContent>
+                    <TooltipContent side="right">
+                      {streamingSessionId === item.id ? `${item.title} · ${t("sessionGenerating")}` : item.title}
+                    </TooltipContent>
                   </Tooltip>
                 ))}
               </div>
@@ -475,12 +487,14 @@ export function WorkspaceShell({ userEmail, userScopes }: WorkspaceShellProps) {
 function SessionItem({
   session,
   active,
+  isGenerating,
   onSelect,
   onRename,
   onDelete,
 }: {
   session: HistorySession;
   active: boolean;
+  isGenerating: boolean;
   onSelect: () => void;
   onRename: () => void;
   onDelete: () => void;
@@ -494,8 +508,22 @@ function SessionItem({
         active ? "bg-sidebar-accent text-sidebar-accent-foreground" : "text-foreground/85 hover:bg-muted",
       ].join(" ")}
     >
-      <button type="button" onClick={onSelect} className="min-w-0 flex-1 truncate text-left">
-        {session.title}
+      <button
+        type="button"
+        onClick={onSelect}
+        className="flex min-w-0 flex-1 items-center gap-2 text-left"
+        aria-label={isGenerating ? `${session.title} · ${t("sessionGenerating")}` : session.title}
+      >
+        {isGenerating ? (
+          <span
+            className="flex h-4 w-4 shrink-0 items-center justify-center text-muted-foreground"
+            title={t("sessionGenerating")}
+            aria-label={t("sessionGenerating")}
+          >
+            <SessionGeneratingDots />
+          </span>
+        ) : null}
+        <span className="min-w-0 flex-1 truncate">{session.title}</span>
       </button>
       <DropdownMenu>
         <DropdownMenuTrigger asChild>
