@@ -1,6 +1,6 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { PanelRightClose, Folder, RefreshCw, FolderPlus, Terminal } from "lucide-react";
-import type { MouseEvent as ReactMouseEvent } from "react";
+import type { DragEvent as ReactDragEvent, MouseEvent as ReactMouseEvent } from "react";
 import type { Taskspace } from "../store";
 import { useAppStore } from "../store";
 import { createResizeRafScheduler } from "../utils/resize-raf";
@@ -13,7 +13,13 @@ import {
   findTaskspaceForAbsPath,
   parentDirectory,
   relativePathFromRoot,
+  absoluteTaskspacePath,
 } from "../utils/workspace-file-path";
+import {
+  encodeNearWorkspaceDragEntry,
+  NEAR_WORKSPACE_DRAG_MIME,
+  type NearWorkspaceDragEntry,
+} from "../utils/workspace-drag";
 import { WorkspaceFilePreview } from "./workspace/WorkspaceFilePreview";
 import {
   mapTaskspaceFileToWorkspacePreview,
@@ -34,7 +40,12 @@ type Props = {
   sessionId: string;
   activeTaskspaceId: string | null;
   onActiveTaskspaceChange: (taskspaceId: string | null) => void;
-  onPickFileForReference?: (path: string) => void;
+  onPickFileForReference?: (taskspaceId: string, path: string) => void;
+  onPickDirectoryForReference?: (payload: {
+    taskspaceId: string;
+    relPath: string;
+    label: string;
+  }) => void;
   autoRefreshKey?: number;
   onClose?: () => void;
   tintColor?: string;
@@ -88,16 +99,16 @@ function nodeKey(taskspaceId: string, relPath: string): string {
   return `${taskspaceId}:${relPath || "."}`;
 }
 
-/** Join taskspace root (absolute) with a relative path from the Studio API (POSIX segments). */
-function absoluteTaskspacePath(root: string, relPath: string): string {
-  const r = String(root || "").trim().replace(/[/\\]+$/, "");
-  if (!r) return "";
-  const norm = String(relPath || ".").replace(/\\/g, "/");
-  const parts = norm.split("/").filter((p) => p && p !== ".");
-  if (parts.length === 0) return r;
-  const isWin = /^[a-zA-Z]:/.test(r) || r.startsWith("\\\\");
-  const sep = isWin ? "\\" : "/";
-  return `${r}${sep}${parts.join(sep)}`;
+function taskspaceReferenceLabel(taskspace: Taskspace): string {
+  if (taskspace.id !== "default") {
+    return taskspace.label || taskspace.path.split(/[\\/]/).filter(Boolean).pop() || "工作区";
+  }
+  return taskspace.path.split(/[\\/]/).filter(Boolean).pop() || taskspace.label || "默认工作区";
+}
+
+function startWorkspaceEntryDrag(e: ReactDragEvent, entry: NearWorkspaceDragEntry) {
+  e.dataTransfer.effectAllowed = "copy";
+  e.dataTransfer.setData(NEAR_WORKSPACE_DRAG_MIME, encodeNearWorkspaceDragEntry(entry));
 }
 
 function terminalCwdForEntry(taskspace: Taskspace, entry: TaskspaceFile): string {
@@ -118,6 +129,7 @@ export function WorkspacePanel({
   activeTaskspaceId,
   onActiveTaskspaceChange,
   onPickFileForReference,
+  onPickDirectoryForReference,
   autoRefreshKey,
   onClose,
   tintColor,
@@ -709,21 +721,47 @@ export function WorkspacePanel({
       if (item.type === "dir") {
         return (
           <div key={item.path}>
-            <button
-              className="flex w-full min-w-0 items-center gap-1 rounded px-1 py-1 text-left text-[13px] text-text-muted hover:bg-surface-hover"
-              style={{ paddingLeft }}
-              onClick={() => void toggleDir(taskspaceId, item.path)}
-              title={item.path}
-              onContextMenu={(e) => {
-                e.preventDefault();
-                const ts = taskspaces.find((t) => t.id === taskspaceId);
-                if (!ts) return;
-                setCtxMenu({ kind: "entry", x: e.clientX, y: e.clientY, taskspace: ts, entry: item });
-              }}
+            <div
+              className="flex min-w-0 items-center gap-1"
+              draggable
+              onDragStart={(e) =>
+                startWorkspaceEntryDrag(e, {
+                  type: "dir",
+                  taskspaceId,
+                  relPath: item.path,
+                  label: item.name,
+                })
+              }
             >
-              <span className="inline-block w-3 shrink-0 text-center">{isExpanded ? "▾" : "▸"}</span>
-              <span className="min-w-0 truncate">{item.name}/</span>
-            </button>
+              <button
+                className="flex min-w-0 flex-1 items-center gap-1 rounded px-1 py-1 text-left text-[13px] text-text-muted hover:bg-surface-hover"
+                style={{ paddingLeft }}
+                onClick={() => void toggleDir(taskspaceId, item.path)}
+                title={item.path}
+                onContextMenu={(e) => {
+                  e.preventDefault();
+                  const ts = taskspaces.find((t) => t.id === taskspaceId);
+                  if (!ts) return;
+                  setCtxMenu({ kind: "entry", x: e.clientX, y: e.clientY, taskspace: ts, entry: item });
+                }}
+              >
+                <span className="inline-block w-3 shrink-0 text-center">{isExpanded ? "▾" : "▸"}</span>
+                <span className="min-w-0 truncate">{item.name}/</span>
+              </button>
+              <button
+                className="rounded px-1.5 py-0.5 text-xs text-text-faint transition hover:bg-surface-hover hover:text-text-muted"
+                onClick={() =>
+                  onPickDirectoryForReference?.({
+                    taskspaceId,
+                    relPath: item.path,
+                    label: item.name,
+                  })
+                }
+                title="引用到输入框"
+              >
+                @
+              </button>
+            </div>
             {isExpanded ? renderDir(taskspaceId, item.path, depth + 1) : null}
           </div>
         );
@@ -732,6 +770,15 @@ export function WorkspacePanel({
         <div
           key={item.path}
           className="flex min-w-0 items-center gap-1"
+          draggable
+          onDragStart={(e) =>
+            startWorkspaceEntryDrag(e, {
+              type: "file",
+              taskspaceId,
+              relPath: item.path,
+              label: item.name,
+            })
+          }
           onContextMenu={(e) => {
             e.preventDefault();
             const ts = taskspaces.find((t) => t.id === taskspaceId);
@@ -751,7 +798,7 @@ export function WorkspacePanel({
           </button>
           <button
             className="rounded px-1.5 py-0.5 text-xs text-text-faint transition hover:bg-surface-hover hover:text-text-muted"
-            onClick={() => onPickFileForReference?.(item.path)}
+            onClick={() => onPickFileForReference?.(taskspaceId, item.path)}
             title="引用到输入框"
           >
             @
@@ -908,6 +955,15 @@ export function WorkspacePanel({
                 <div
                   key={`${taskspaceId}:${file.path}`}
                   className="flex min-w-0 items-center gap-1"
+                  draggable
+                  onDragStart={(e) =>
+                    startWorkspaceEntryDrag(e, {
+                      type: "file",
+                      taskspaceId,
+                      relPath: file.path,
+                      label: file.name,
+                    })
+                  }
                   onContextMenu={(e) => {
                     e.preventDefault();
                     if (!ts) return;
@@ -926,7 +982,7 @@ export function WorkspacePanel({
                   </button>
                   <button
                     className="rounded px-1.5 py-0.5 text-xs text-text-faint transition hover:bg-surface-hover hover:text-text-muted"
-                    onClick={() => onPickFileForReference?.(file.path)}
+                    onClick={() => onPickFileForReference?.(taskspaceId, file.path)}
                     title="引用到输入框"
                   >
                     @
@@ -943,31 +999,57 @@ export function WorkspacePanel({
             
             return (
               <div key={ts.id} className="mb-0.5">
-                <button
-                  className={`flex w-full min-w-0 items-center gap-1.5 rounded px-1 py-1.5 text-left text-[13px] font-medium transition ${
-                    isActive ? "bg-surface-hover text-text-strong" : "text-text-subtle hover:bg-surface-hover hover:text-text-primary"
-                  }`}
-                  onClick={() => {
-                    onActiveTaskspaceChange(ts.id);
-                    const next = new Set(expandedDirs);
-                    if (next.has(key)) {
-                      next.delete(key);
-                    } else {
-                      next.add(key);
-                      void loadDir(ts.id, ".");
-                    }
-                    setExpandedDirs(next);
-                  }}
-                  onContextMenu={(e) => {
-                    e.preventDefault();
-                    setCtxMenu({ kind: "taskspace", x: e.clientX, y: e.clientY, taskspace: ts });
-                  }}
-                  title={ts.id === "default" ? (ts.path || ts.label) : ts.path}
+                <div
+                  className="flex min-w-0 items-center gap-1"
+                  draggable
+                  onDragStart={(e) =>
+                    startWorkspaceEntryDrag(e, {
+                      type: "dir",
+                      taskspaceId: ts.id,
+                      relPath: ".",
+                      label: taskspaceReferenceLabel(ts),
+                    })
+                  }
                 >
-                  <span className="inline-block w-3 shrink-0 text-center text-text-faint">{isExpanded ? "▾" : "▸"}</span>
-                  <Folder className="h-3.5 w-3.5 shrink-0 opacity-70" strokeWidth={1.8} />
-                  <span className="min-w-0 flex-1 truncate">{ts.id !== "default" ? ts.label : (ts.path || ts.label || "默认工作区")}</span>
-                </button>
+                  <button
+                    className={`flex min-w-0 flex-1 items-center gap-1.5 rounded px-1 py-1.5 text-left text-[13px] font-medium transition ${
+                      isActive ? "bg-surface-hover text-text-strong" : "text-text-subtle hover:bg-surface-hover hover:text-text-primary"
+                    }`}
+                    onClick={() => {
+                      onActiveTaskspaceChange(ts.id);
+                      const next = new Set(expandedDirs);
+                      if (next.has(key)) {
+                        next.delete(key);
+                      } else {
+                        next.add(key);
+                        void loadDir(ts.id, ".");
+                      }
+                      setExpandedDirs(next);
+                    }}
+                    onContextMenu={(e) => {
+                      e.preventDefault();
+                      setCtxMenu({ kind: "taskspace", x: e.clientX, y: e.clientY, taskspace: ts });
+                    }}
+                    title={ts.id === "default" ? (ts.path || ts.label) : ts.path}
+                  >
+                    <span className="inline-block w-3 shrink-0 text-center text-text-faint">{isExpanded ? "▾" : "▸"}</span>
+                    <Folder className="h-3.5 w-3.5 shrink-0 opacity-70" strokeWidth={1.8} />
+                    <span className="min-w-0 flex-1 truncate">{ts.id !== "default" ? ts.label : (ts.path || ts.label || "默认工作区")}</span>
+                  </button>
+                  <button
+                    className="rounded px-1.5 py-0.5 text-xs text-text-faint transition hover:bg-surface-hover hover:text-text-muted"
+                    onClick={() =>
+                      onPickDirectoryForReference?.({
+                        taskspaceId: ts.id,
+                        relPath: ".",
+                        label: taskspaceReferenceLabel(ts),
+                      })
+                    }
+                    title="引用到输入框"
+                  >
+                    @
+                  </button>
+                </div>
                 {isExpanded ? renderDir(ts.id, ".", 1) : null}
               </div>
             );
@@ -1053,6 +1135,15 @@ export function WorkspacePanel({
             ? ctxMenu.kind === "taskspace"
               ? [
                   {
+                    label: "引用到输入框",
+                    onSelect: () =>
+                      onPickDirectoryForReference?.({
+                        taskspaceId: ctxMenu.taskspace.id,
+                        relPath: ".",
+                        label: taskspaceReferenceLabel(ctxMenu.taskspace),
+                      }),
+                  },
+                  {
                     label: revealInFileManagerLabel,
                     onSelect: () => {
                       const rootPath = (ctxMenu.taskspace.path || "").trim();
@@ -1074,6 +1165,20 @@ export function WorkspacePanel({
                   },
                 ]
               : [
+                  {
+                    label: "引用到输入框",
+                    onSelect: () => {
+                      if (ctxMenu.entry.type === "dir") {
+                        onPickDirectoryForReference?.({
+                          taskspaceId: ctxMenu.taskspace.id,
+                          relPath: ctxMenu.entry.path,
+                          label: ctxMenu.entry.name,
+                        });
+                        return;
+                      }
+                      onPickFileForReference?.(ctxMenu.taskspace.id, ctxMenu.entry.path);
+                    },
+                  },
                   {
                     label: revealInFileManagerLabel,
                     onSelect: () => {

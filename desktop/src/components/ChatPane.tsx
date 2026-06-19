@@ -188,6 +188,13 @@ import {
   type GlobalSearchReferenceFileDetail,
 } from "./global-search/global-search-events";
 import { buildFileMentionAppend, fileNameFromPath } from "../utils/chat-file-mention";
+import { absoluteTaskspacePath } from "../utils/workspace-file-path";
+import {
+  composerAcceptsDragTypes,
+  decodeNearWorkspaceDragEntry,
+  NEAR_WORKSPACE_DRAG_MIME,
+  type NearWorkspaceDragEntry,
+} from "../utils/workspace-drag";
 import {
   accumulateReferenceTurn,
   applyFinalReferencePayload,
@@ -3388,10 +3395,15 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
     return key;
   };
 
-  const addTaskspaceAliasReference = async (taskspaceId: string, alias: string, absolutePath: string) => {
+  const addTaskspaceAliasReference = async (
+    taskspaceId: string,
+    alias: string,
+    absolutePath: string,
+    startRelPath = "."
+  ) => {
     const apiSessionId = resolveTaskspaceApiSessionId();
     if (!apiSessionId) return;
-    const queue: string[] = ["."];
+    const queue: string[] = [startRelPath || "."];
     const visited = new Set<string>();
     const lines: string[] = [];
     let fileCount = 0;
@@ -3441,6 +3453,46 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
       },
     }));
   };
+
+  const insertWorkspaceFileReference = useCallback(
+    async (taskspaceId: string, relPath: string) => {
+      if (!taskspaceId || !relPath) return;
+      await addContextFile(taskspaceId, relPath, { referenceToken: true });
+      const fileName = relPath.split(/[\\/]/).pop() || relPath;
+      const { next, tokenNames } = buildFileMentionAppend(extractComposerText(), fileName);
+      setComposerText(next, { tokenNames });
+      focusComposerEnd();
+    },
+    [addContextFile, extractComposerText, focusComposerEnd, setComposerText]
+  );
+
+  const insertWorkspaceDirectoryReference = useCallback(
+    async (taskspaceId: string, relPath: string, label: string) => {
+      const apiSessionId = resolveTaskspaceApiSessionId();
+      if (!apiSessionId || !taskspaceId) return;
+      const cleanLabel = String(label || relPath.split(/[\\/]/).pop() || "folder").trim();
+      const wsResp = await window.agenticxDesktop.listTaskspaces(apiSessionId);
+      const ts = wsResp.workspaces?.find((item) => item.id === taskspaceId);
+      if (!ts?.path) return;
+      const abs = relPath === "." ? ts.path : absoluteTaskspacePath(ts.path, relPath);
+      await addTaskspaceAliasReference(taskspaceId, cleanLabel, abs, relPath || ".");
+      const { next, tokenNames } = buildFileMentionAppend(extractComposerText(), cleanLabel);
+      setComposerText(next, { tokenNames });
+      focusComposerEnd();
+    },
+    [addTaskspaceAliasReference, extractComposerText, focusComposerEnd, setComposerText]
+  );
+
+  const handleWorkspaceDragEntry = useCallback(
+    async (entry: NearWorkspaceDragEntry) => {
+      if (entry.type === "file") {
+        await insertWorkspaceFileReference(entry.taskspaceId, entry.relPath);
+      } else {
+        await insertWorkspaceDirectoryReference(entry.taskspaceId, entry.relPath, entry.label);
+      }
+    },
+    [insertWorkspaceDirectoryReference, insertWorkspaceFileReference]
+  );
 
   const openWorkspaceFilePreview = useCallback(
     (absPath: string) => {
@@ -8716,7 +8768,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
                 imeComposingRef.current = false;
               }}
               onDragOver={(e) => {
-                if (e.dataTransfer?.types?.includes("Files")) {
+                if (composerAcceptsDragTypes(e.dataTransfer?.types ?? [])) {
                   e.preventDefault();
                   e.stopPropagation();
                   try {
@@ -8725,7 +8777,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
                 }
               }}
               onDragEnter={(e) => {
-                if (e.dataTransfer?.types?.includes("Files")) {
+                if (composerAcceptsDragTypes(e.dataTransfer?.types ?? [])) {
                   e.preventDefault();
                   e.stopPropagation();
                 }
@@ -8733,6 +8785,16 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
               onDrop={(e) => {
                 const dt = e.dataTransfer;
                 if (!dt) return;
+                const workspaceRaw = dt.getData(NEAR_WORKSPACE_DRAG_MIME);
+                if (workspaceRaw) {
+                  const entry = decodeNearWorkspaceDragEntry(workspaceRaw);
+                  if (entry) {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    void handleWorkspaceDragEntry(entry);
+                    return;
+                  }
+                }
                 const files = dt.files ? Array.from(dt.files) : [];
                 if (files.length === 0) return;
                 e.preventDefault();
@@ -9121,16 +9183,11 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
             autoRefreshKey={taskspaceAutoRefreshKey}
             onClose={closeWorkspacePanelOnly}
             tintColor={paneTint}
-            onPickFileForReference={(path) => {
-              if (!pane.activeTaskspaceId) return;
-              void addContextFile(pane.activeTaskspaceId, path, { referenceToken: true });
-              const fileName = path.split(/[\\/]/).pop() || path;
-              const mention = `@${fileName}`;
-              const base = extractComposerText();
-              const trimmed = base.trimEnd();
-              const sep = !trimmed || /\s$/.test(base) ? "" : " ";
-              const next = `${base}${sep}${mention} `;
-              setComposerText(next, { tokenNames: [fileName] });
+            onPickFileForReference={(taskspaceId, path) => {
+              void insertWorkspaceFileReference(taskspaceId, path);
+            }}
+            onPickDirectoryForReference={({ taskspaceId, relPath, label }) => {
+              void insertWorkspaceDirectoryReference(taskspaceId, relPath, label);
             }}
             previewAbsPath={pendingWorkspacePreviewPath}
             onPreviewAbsPathHandled={() => setPendingWorkspacePreviewPath(null)}
@@ -9242,16 +9299,11 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
                 autoRefreshKey={taskspaceAutoRefreshKey}
                 onClose={closeWorkspacePanelOnly}
                 tintColor={paneTint}
-                onPickFileForReference={(path) => {
-                  if (!pane.activeTaskspaceId) return;
-                  void addContextFile(pane.activeTaskspaceId, path, { referenceToken: true });
-                  const fileName = path.split(/[\\/]/).pop() || path;
-                  const mention = `@${fileName}`;
-                  const base = extractComposerText();
-                  const trimmed = base.trimEnd();
-                  const sep = !trimmed || /\s$/.test(base) ? "" : " ";
-                  const next = `${base}${sep}${mention} `;
-                  setComposerText(next, { tokenNames: [fileName] });
+                onPickFileForReference={(taskspaceId, path) => {
+                  void insertWorkspaceFileReference(taskspaceId, path);
+                }}
+                onPickDirectoryForReference={({ taskspaceId, relPath, label }) => {
+                  void insertWorkspaceDirectoryReference(taskspaceId, relPath, label);
                 }}
                 previewAbsPath={pendingWorkspacePreviewPath}
                 onPreviewAbsPathHandled={() => setPendingWorkspacePreviewPath(null)}
