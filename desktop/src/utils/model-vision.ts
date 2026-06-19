@@ -22,7 +22,7 @@ function minimaxM2TextOnlySlug(slug: string): boolean {
 function zhipuGlm5TextOnlySlug(slug: string): boolean {
   const s = slug.toLowerCase();
   if (/vl|vision|4v|5v/.test(s)) return false;
-  return s === "glm-5" || s.startsWith("glm-5-");
+  return s === "glm-5" || /^glm-5([.\-_]|$)/.test(s);
 }
 
 /** Bailian/DashScope text Qwen SKUs reject OpenAI-style image_url blocks (e.g. qwen3.7-max). */

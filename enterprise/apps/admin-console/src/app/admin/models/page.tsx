@@ -31,20 +31,27 @@ import {
   SelectTrigger,
   SelectValue,
   toast,
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
 } from "@agenticx/ui";
 import { useTranslations } from "next-intl";
 import {
   Activity,
   Check,
   CircleDot,
+  CircleMinus,
   Eye,
   EyeOff,
+  Loader2,
   Plus,
   RefreshCcw,
   Trash2,
   Wrench,
   Server,
 } from "lucide-react";
+import { inferModelCapabilities, isEmbeddingModelId } from "../../../lib/infer-model-capabilities";
 
 type ProviderRoute = "local" | "private-cloud" | "third-party";
 
@@ -97,6 +104,12 @@ type TestResp = {
   data?: { reachable?: boolean; via?: string; status?: number; preview?: string; modelCount?: number };
 };
 
+type FetchModelsResp = {
+  code: string;
+  message: string;
+  data?: { models?: string[]; warning?: string };
+};
+
 interface ProviderFormBaseline {
   displayName: string;
   baseUrl: string;
@@ -135,6 +148,12 @@ export default function ModelProvidersPage() {
   const [saving, setSaving] = useState(false);
   const [addingModel, setAddingModel] = useState(false);
   const [newModel, setNewModel] = useState<{ name: string; label: string }>({ name: "", label: "" });
+  const [fetchModelsOpen, setFetchModelsOpen] = useState(false);
+  const [fetchModelsSearch, setFetchModelsSearch] = useState("");
+  const [fetchingModels, setFetchingModels] = useState(false);
+  const [fetchedModels, setFetchedModels] = useState<string[]>([]);
+  const [fetchModelsError, setFetchModelsError] = useState<string | null>(null);
+  const [fetchModelsWarning, setFetchModelsWarning] = useState<string | null>(null);
   const formInitializedForId = useRef<string | null>(null);
 
   const active = useMemo(() => providers.find((p) => p.id === activeId) ?? null, [providers, activeId]);
@@ -395,6 +414,109 @@ export default function ModelProvidersPage() {
     toast.success(t("toast.modelRemoved"));
   };
 
+  const providerCredentialed = useMemo(() => {
+    if (!active) return false;
+    const base = (baseUrlDraft.trim() || active.baseUrl).trim();
+    if (!base) return false;
+    if (active.id === "ollama" || active.id.startsWith("custom_ollama_")) return true;
+    return Boolean(keyDraft.trim() || active.apiKeyConfigured);
+  }, [active, baseUrlDraft, keyDraft]);
+
+  const filteredFetchedModels = useMemo(() => {
+    const keyword = fetchModelsSearch.trim().toLowerCase();
+    if (!keyword) return fetchedModels;
+    return fetchedModels.filter((model) => model.toLowerCase().includes(keyword));
+  }, [fetchedModels, fetchModelsSearch]);
+
+  const getFetchedModelState = useCallback(
+    (modelName: string): "enabled" | "disabled" | "absent" => {
+      if (!active) return "absent";
+      const existing = active.models.find((m) => m.name === modelName);
+      if (!existing) return "absent";
+      return existing.enabled ? "enabled" : "disabled";
+    },
+    [active]
+  );
+
+  const handleFetchModels = async () => {
+    if (!active || !providerCredentialed) return;
+    setFetchingModels(true);
+    setFetchModelsError(null);
+    setFetchModelsWarning(null);
+    try {
+      const payload: { apiKey?: string; baseUrl?: string } = {};
+      if (keyDraft.trim()) payload.apiKey = keyDraft.trim();
+      if (baseUrlDraft.trim()) payload.baseUrl = baseUrlDraft.trim();
+      const res = await fetch(`/api/admin/providers/${active.id}/fetch-models`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+      const json = (await res.json()) as FetchModelsResp;
+      if (!res.ok) {
+        setFetchModelsError(json.message ?? t("toast.fetchModelsFailed"));
+        return;
+      }
+      if (json.data?.warning) {
+        setFetchModelsWarning(json.data.warning);
+      }
+      const apiModels = json.data?.models ?? [];
+      if (apiModels.length === 0) {
+        if (!json.data?.warning) {
+          setFetchModelsError(t("fetchModelsEmpty"));
+        }
+        return;
+      }
+      const merged = Array.from(
+        new Set([...active.models.map((m) => m.name), ...apiModels].map((m) => m.trim()).filter(Boolean))
+      ).sort((a, b) => a.localeCompare(b));
+      setFetchedModels(merged);
+      setFetchModelsSearch("");
+      setFetchModelsOpen(true);
+    } catch (error) {
+      setFetchModelsError(error instanceof Error ? error.message : t("toast.networkError"));
+    } finally {
+      setFetchingModels(false);
+    }
+  };
+
+  const handleEnableFetchedModel = async (modelName: string) => {
+    if (!active || isEmbeddingModelId(modelName)) return;
+    const state = getFetchedModelState(modelName);
+    if (state === "enabled") return;
+
+    if (state === "absent") {
+      const capabilities = inferModelCapabilities(active.id, modelName);
+      const res = await fetch(`/api/admin/providers/${active.id}/models`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          name: modelName,
+          label: modelName,
+          capabilities,
+          enabled: true,
+        }),
+      });
+      const json = (await res.json()) as ProviderResp;
+      if (!res.ok || !json.data) {
+        toast.error(json.message ?? t("toast.addModelFailed"));
+        return;
+      }
+      setProviders((prev) => prev.map((p) => (p.id === active.id ? json.data!.provider : p)));
+      toast.success(t("toast.modelAdded"));
+      return;
+    }
+
+    await handleToggleModel(modelName, true);
+  };
+
+  const handleDisableFetchedModel = async (modelName: string) => {
+    if (!active) return;
+    const state = getFetchedModelState(modelName);
+    if (state !== "enabled") return;
+    await handleToggleModel(modelName, false);
+  };
+
   return (
     <div className="space-y-5">
       <PageHeader
@@ -599,11 +721,35 @@ export default function ModelProvidersPage() {
 <h3 className="text-sm font-semibold">{t("modelListTitle")}（{active.models.length}）</h3>
                       <p className="text-xs text-muted-foreground">{t("modelListHint")}</p>
                     </div>
-                    <Button size="sm" variant="outline" onClick={() => setAddingModel(true)}>
-                      <Plus />
-                      {t("addModel")}
-                    </Button>
+                    <div className="flex items-center gap-1.5">
+                      <TooltipProvider delayDuration={280}>
+                        <Tooltip>
+                          <TooltipTrigger asChild>
+                            <Button
+                              size="icon-sm"
+                              variant="outline"
+                              aria-label={t("fetchModels")}
+                              disabled={fetchingModels || !providerCredentialed}
+                              onClick={() => void handleFetchModels()}
+                            >
+                              {fetchingModels ? <Loader2 className="animate-spin" /> : <RefreshCcw />}
+                            </Button>
+                          </TooltipTrigger>
+                          <TooltipContent>{t("fetchModels")}</TooltipContent>
+                        </Tooltip>
+                      </TooltipProvider>
+                      <Button size="sm" variant="outline" onClick={() => setAddingModel(true)}>
+                        <Plus />
+                        {t("addModel")}
+                      </Button>
+                    </div>
                   </div>
+
+                  {fetchModelsError ? (
+                    <p className="text-xs text-destructive">{fetchModelsError}</p>
+                  ) : fetchModelsWarning ? (
+                    <p className="text-xs text-amber-600 dark:text-amber-400">{fetchModelsWarning}</p>
+                  ) : null}
 
                   {active.models.length === 0 ? (
                     <EmptyState
@@ -668,6 +814,100 @@ export default function ModelProvidersPage() {
         existingIds={providers.map((p) => p.id)}
         onCreated={(id) => void load(id)}
       />
+
+      <Dialog
+        open={fetchModelsOpen}
+        onOpenChange={(open) => {
+          setFetchModelsOpen(open);
+          if (!open) setFetchModelsSearch("");
+        }}
+      >
+        <DialogContent className="max-w-2xl">
+          <DialogHeader>
+            <DialogTitle>{t("fetchModelsDialogTitle")}</DialogTitle>
+            <DialogDescription>{active?.displayName ?? ""}</DialogDescription>
+          </DialogHeader>
+          <div className="space-y-3">
+            <Input
+              value={fetchModelsSearch}
+              onChange={(event) => setFetchModelsSearch(event.target.value)}
+              placeholder={t("fetchModelsSearchPlaceholder")}
+            />
+            <div className="max-h-[min(56vh,460px)] space-y-1 overflow-y-auto pr-1">
+              {filteredFetchedModels.length === 0 ? (
+                <EmptyState
+                  icon={<Server className="h-5 w-5" />}
+                  title={fetchedModels.length === 0 ? t("fetchModelsEmpty") : t("fetchModelsNoMatch")}
+                  size="sm"
+                  className="border border-dashed"
+                />
+              ) : (
+                filteredFetchedModels.map((modelName) => {
+                  const state = getFetchedModelState(modelName);
+                  const isVisible = state === "enabled";
+                  const isEmbedding = isEmbeddingModelId(modelName);
+                  const caps = inferModelCapabilities(active?.id ?? "", modelName);
+                  return (
+                    <div
+                      key={modelName}
+                      className="grid grid-cols-[minmax(0,1fr)_auto_auto] items-center gap-2 rounded-md border border-border bg-muted/30 px-3 py-2"
+                    >
+                      <div className="min-w-0">
+                        <div className="truncate text-sm font-medium">{modelName}</div>
+                        <div className="text-[11px] text-muted-foreground">
+                          {isVisible ? t("fetchModelsStatusVisible") : t("fetchModelsStatusHidden")}
+                        </div>
+                      </div>
+                      <div className="flex flex-wrap justify-end gap-1">
+                        {caps.map((cap) => (
+                          <Badge key={cap} variant="soft" className="text-[10px]">
+                            {cap}
+                          </Badge>
+                        ))}
+                      </div>
+                      <div className="flex items-center gap-1.5">
+                        <Button
+                          type="button"
+                          size="icon-sm"
+                          variant="outline"
+                          aria-label={t("fetchModelsEnable", { name: modelName })}
+                          className={isVisible ? "border-emerald-500/40 text-emerald-600" : undefined}
+                          disabled={isVisible || isEmbedding}
+                          onClick={() => void handleEnableFetchedModel(modelName)}
+                        >
+                          <Plus />
+                        </Button>
+                        <Button
+                          type="button"
+                          size="icon-sm"
+                          variant="outline"
+                          aria-label={t("fetchModelsDisable", { name: modelName })}
+                          className={!isVisible ? "border-destructive/40 text-destructive/70" : undefined}
+                          disabled={!isVisible}
+                          onClick={() => void handleDisableFetchedModel(modelName)}
+                        >
+                          <CircleMinus />
+                        </Button>
+                      </div>
+                    </div>
+                  );
+                })
+              )}
+            </div>
+          </div>
+          <DialogFooter className="sm:justify-between">
+            <span className="text-xs text-muted-foreground">
+              {t("fetchModelsSummary", {
+                total: fetchedModels.length,
+                visible: active?.models.filter((m) => m.enabled).length ?? 0,
+              })}
+            </span>
+            <Button variant="outline" onClick={() => setFetchModelsOpen(false)}>
+              {t("fetchModelsDone")}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       <Dialog open={addingModel} onOpenChange={setAddingModel}>
         <DialogContent>
