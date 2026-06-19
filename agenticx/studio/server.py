@@ -6549,4 +6549,8 @@ def create_studio_app() -> FastAPI:
 
     register_web_search_routes(app)
 
+    from agenticx.studio.delivery_api import register_delivery_routes
+
+    register_delivery_routes(app, _check_token)
+
     return app
