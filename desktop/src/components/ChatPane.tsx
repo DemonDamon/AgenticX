@@ -22,6 +22,7 @@ import {
   FolderOpen,
   PhoneCall,
   Bot,
+  Boxes,
   History,
   X,
   PanelRightClose,
@@ -2045,6 +2046,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
   const cycleSidePanel = useAppStore((s) => s.cycleSidePanel);
   const toggleFocusMode = useAppStore((s) => s.toggleFocusMode);
   const openSidePanel = useAppStore((s) => s.openSidePanel);
+  const openDeliveryPanel = useAppStore((s) => s.openDeliveryPanel);
   const addPaneTerminalTab = useAppStore((s) => s.addPaneTerminalTab);
   const setActiveTaskspace = useAppStore((s) => s.setActiveTaskspace);
   const addPaneMessage = useAppStore((s) => s.addPaneMessage);
@@ -8263,6 +8265,16 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
                 title="切换群成员面板"
               >
                 <Users className="h-[18px] w-[18px]" strokeWidth={1.8} />
+              </button>
+            )}
+            {isMachiMetaPane && (
+              <button
+                type="button"
+                className="agx-topbar-btn !px-[5px]"
+                onClick={() => openDeliveryPanel()}
+                title="交付任务（POC/MVP）"
+              >
+                <Boxes className="h-[18px] w-[18px]" strokeWidth={1.8} />
               </button>
             )}
             {!isGroupPane && (

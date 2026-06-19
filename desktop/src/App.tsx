@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AvatarSidebar } from "./components/AvatarSidebar";
 import { ConfirmDialog } from "./components/ConfirmDialog";
 import { SettingsPanel } from "./components/SettingsPanel";
+import { DeliveryPanel } from "./components/delivery/DeliveryPanel";
 import { TokenDashboardPanel } from "./components/TokenDashboardPanel";
 import { LiteChatView } from "./components/LiteChatView";
 import { PaneManager } from "./components/PaneManager";
@@ -282,6 +283,8 @@ export function App() {
   const closeSettings = useAppStore((s) => s.closeSettings);
   const tokenDashboardOpen = useAppStore((s) => s.tokenDashboard.open);
   const closeTokenDashboard = useAppStore((s) => s.closeTokenDashboard);
+  const deliveryPanelOpen = useAppStore((s) => s.deliveryPanel.open);
+  const closeDeliveryPanel = useAppStore((s) => s.closeDeliveryPanel);
   const updateSettings = useAppStore((s) => s.updateSettings);
   const setActiveModel = useAppStore((s) => s.setActiveModel);
   const setPaneModel = useAppStore((s) => s.setPaneModel);
@@ -2178,6 +2181,12 @@ export function App() {
         onForwardFavorite={handleForwardFavorite}
       />
       <TokenDashboardPanel open={tokenDashboardOpen} onClose={() => closeTokenDashboard()} />
+      <DeliveryPanel
+        open={deliveryPanelOpen}
+        apiBase={apiBase}
+        apiToken={apiToken}
+        onClose={() => closeDeliveryPanel()}
+      />
       <GlobalSearchHost />
       <KbDocumentOpenOverlay />
       <Toast
