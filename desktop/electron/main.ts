@@ -1262,8 +1262,22 @@ const BAILIAN_EMBEDDING_MODELS = [
   ...BAILIAN_MULTIMODAL_EMBEDDING_MODELS,
 ];
 
+// Zhipu OpenAI-compatible GET /models omits VLM chat SKUs (e.g. glm-4.6v).
+const ZHIPU_DOCUMENTED_VLM_MODELS = [
+  "glm-4.6v",
+  "glm-5v-turbo",
+  "glm-4.1v-thinking",
+  "glm-4.6v-flash",
+  "glm-4.1v-thinking-flash",
+  "glm-4v-flash",
+];
+
 function isBailianLikeRequest(provider: string, base: string): boolean {
   return provider === "bailian" || provider === "dashscope" || /dashscope\.aliyuncs\.com/i.test(base);
+}
+
+function isZhipuLikeRequest(provider: string, base: string): boolean {
+  return provider === "zhipu" || /open\.bigmodel\.cn/i.test(base);
 }
 
 function isOllamaLikeProvider(provider: string): boolean {
@@ -6277,8 +6291,10 @@ function registerIpc(): void {
     const embeddingExtras = isBailianLikeRequest(payload.provider, base)
       ? BAILIAN_EMBEDDING_MODELS
       : [];
-    const mergeEmbeddings = (models: string[]): string[] =>
-      Array.from(new Set([...models, ...embeddingExtras]));
+    const vlmExtras = isZhipuLikeRequest(payload.provider, base) ? ZHIPU_DOCUMENTED_VLM_MODELS : [];
+    const catalogExtras = [...embeddingExtras, ...vlmExtras];
+    const mergeCatalogExtras = (models: string[]): string[] =>
+      Array.from(new Set([...models, ...catalogExtras]));
     try {
       const controller = new AbortController();
       const timer = setTimeout(() => controller.abort(), 15000);
@@ -6291,12 +6307,11 @@ function registerIpc(): void {
         const body = await resp.text().catch(() => "");
         const fallback = PROVIDER_FALLBACK_MODELS[payload.provider];
         if (resp.status === 404 && Array.isArray(fallback) && fallback.length > 0) {
-          return { ok: true, models: mergeEmbeddings(fallback) };
+          return { ok: true, models: mergeCatalogExtras(fallback) };
         }
-        if (embeddingExtras.length > 0) {
-          // Even if the catalog endpoint fails, expose the known embeddings so
-          // users can still configure vectorization.
-          return { ok: true, models: mergeEmbeddings([]) };
+        if (catalogExtras.length > 0) {
+          // Even if the catalog endpoint fails, expose known extras so users can configure them.
+          return { ok: true, models: mergeCatalogExtras([]) };
         }
         if (isModelsCatalogMissing(resp.status, body)) {
           return {
@@ -6307,9 +6322,11 @@ function registerIpc(): void {
         }
         return { ok: false, models: [], error: `HTTP ${resp.status}` };
       }
-      const data = await resp.json() as { data?: Array<{ id: string }> };
-      const models = (data.data ?? []).map((m) => m.id);
-      return { ok: true, models: mergeEmbeddings(models).sort() };
+      const data = await resp.json() as { data?: Array<{ id?: string; model?: string; name?: string }>; has_more?: boolean; last_id?: string };
+      const models = (data.data ?? [])
+        .map((m) => String(m.id ?? m.model ?? m.name ?? "").trim())
+        .filter(Boolean);
+      return { ok: true, models: mergeCatalogExtras(models).sort() };
     } catch (err) {
       return { ok: false, models: [], error: String(err) };
     }
