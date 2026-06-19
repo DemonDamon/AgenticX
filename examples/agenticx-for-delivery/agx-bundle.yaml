@@ -1,0 +1,37 @@
+agx_bundle: "1.0"
+name: "agenticx-delivery-kit"
+version: "1.0.0"
+description: "Near Desktop POC/MVP delivery avatars, skills, and MCP presets"
+author: "Damon Li"
+license: "MIT"
+
+components:
+  skills:
+    - path: skills/requirement-decompose/SKILL.md
+      description: "Requirement decomposition for delivery pipeline"
+    - path: skills/b2b-desktop-design-system/SKILL.md
+      description: "B2B desktop design system checklist"
+    - path: skills/scaffold-vite-react/SKILL.md
+      description: "Vite + React POC scaffold guidance"
+    - path: skills/playwright-uitest/SKILL.md
+      description: "Playwright UI test generation and reporting"
+  mcp_servers:
+    - name: "figma-mcp"
+      config_path: mcp/figma-mcp.json
+      description: "Figma read/write via figma-developer-mcp"
+    - name: "playwright-mcp"
+      config_path: mcp/playwright-mcp.json
+      description: "Official Playwright MCP for browser automation"
+  avatars:
+    - name: "delivery-analyst"
+      config_path: avatars/delivery-analyst.yaml
+      description: "Requirement analyst for delivery loop"
+    - name: "delivery-designer"
+      config_path: avatars/delivery-designer.yaml
+      description: "UI/UX designer for delivery loop"
+    - name: "delivery-frontend"
+      config_path: avatars/delivery-frontend.yaml
+      description: "Frontend developer for delivery loop"
+    - name: "delivery-qa"
+      config_path: avatars/delivery-qa.yaml
+      description: "QA and audit for delivery loop"
