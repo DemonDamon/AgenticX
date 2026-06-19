@@ -103,7 +103,8 @@
     "deleteConversation": "Delete conversation",
     "welcomeTitle": "I'm Machi",
     "welcomeSubtitle": "Nice to meet you. What can I help with?",
-    "loadingMessages": "Loading messages…"
+    "loadingMessages": "Loading messages…",
+    "scrollToBottom": "Scroll to bottom"
   },
   "settings": {
     "title": "Settings",

@@ -6,6 +6,7 @@ import { Button, Tooltip, TooltipContent, TooltipTrigger } from "@agenticx/ui";
 import { ReasoningBlock } from "../atoms/ReasoningBlock";
 import { ToolCallCard } from "../atoms/ToolCallCard";
 import { parseAssistantContent } from "../../assistant-content";
+import { isNearBottom, shouldShowScrollToBottomFab } from "../../utils/scroll-near-bottom";
 import { ASSISTANT_MD_COMPONENTS } from "../../markdown/assistant-markdown-components";
 import "../../markdown/chat-prism-themes.css";
 
@@ -90,6 +91,14 @@ function IconChevronRight({ className }: { className?: string }) {
   );
 }
 
+function IconChevronDown({ className }: { className?: string }) {
+  return (
+    <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.25" strokeLinecap="round" strokeLinejoin="round" className={className}>
+      <path d="m6 9 6 6 6-6" />
+    </svg>
+  );
+}
+
 type ResponseVersionMeta = {
   activeIndex: number;
   total: number;
@@ -113,6 +122,9 @@ type MessageListProps = {
   onShare?: (messageId: string) => void;
   onCopy?: (content: string) => void;
   onFeedback?: (messageId: string, type: "like" | "dislike") => void;
+  /** Kimi-style jump-to-bottom control when user scrolls up during streaming. */
+  showScrollToBottomFab?: boolean;
+  scrollToBottomLabel?: string;
 };
 
 function ThinkingDotsPlaceholder() {
@@ -153,27 +165,67 @@ export function MessageList({
   onShare,
   onCopy,
   onFeedback,
+  showScrollToBottomFab = true,
+  scrollToBottomLabel = "回到底部",
 }: MessageListProps) {
   const parentRef = React.useRef<HTMLDivElement>(null);
+  const autoScrollPinnedRef = React.useRef(true);
+  const [showJumpToBottomFab, setShowJumpToBottomFab] = React.useState(false);
   const [selectedMessages, setSelectedMessages] = React.useState<Set<string>>(new Set());
   const [isSelectionMode, setIsSelectionMode] = React.useState(false);
   const [copiedId, setCopiedId] = React.useState<string | null>(null);
   const [editingMessageId, setEditingMessageId] = React.useState<string | null>(null);
   const [editingDraft, setEditingDraft] = React.useState("");
   const longPressTimerRef = React.useRef<Map<string, NodeJS.Timeout>>(new Map());
-  const prevMessageCountRef = React.useRef(messages.length);
 
-  // 只在消息数量增加时滚动到底部（用户发送新消息或收到新回复）
+  const flushJumpToBottomFab = React.useCallback(() => {
+    const container = parentRef.current;
+    if (!container) {
+      setShowJumpToBottomFab(false);
+      return;
+    }
+    autoScrollPinnedRef.current = isNearBottom(container);
+    setShowJumpToBottomFab(showScrollToBottomFab && shouldShowScrollToBottomFab(container));
+  }, [showScrollToBottomFab]);
+
+  const listSessionId = messages[0]?.session_id ?? "";
+  const prevListSessionIdRef = React.useRef(listSessionId);
+  React.useEffect(() => {
+    if (listSessionId !== prevListSessionIdRef.current) {
+      prevListSessionIdRef.current = listSessionId;
+      autoScrollPinnedRef.current = true;
+    }
+  }, [listSessionId]);
+
   React.useEffect(() => {
     const container = parentRef.current;
     if (!container) return;
-    
-    // 只有当消息数量增加时才滚动（避免浏览历史时被打断）
-    if (messages.length > prevMessageCountRef.current) {
+    if (autoScrollPinnedRef.current) {
       container.scrollTop = container.scrollHeight;
     }
-    prevMessageCountRef.current = messages.length;
-  }, [messages]);
+    flushJumpToBottomFab();
+  }, [messages, flushJumpToBottomFab]);
+
+  React.useEffect(() => {
+    const container = parentRef.current;
+    if (!container) return;
+    const onScrollOrResize = () => flushJumpToBottomFab();
+    container.addEventListener("scroll", onScrollOrResize, { passive: true });
+    window.addEventListener("resize", onScrollOrResize);
+    flushJumpToBottomFab();
+    return () => {
+      container.removeEventListener("scroll", onScrollOrResize);
+      window.removeEventListener("resize", onScrollOrResize);
+    };
+  }, [flushJumpToBottomFab, messages.length]);
+
+  const scrollToBottom = React.useCallback((behavior: ScrollBehavior = "smooth") => {
+    const container = parentRef.current;
+    if (!container) return;
+    autoScrollPinnedRef.current = true;
+    container.scrollTo({ top: container.scrollHeight, behavior });
+    requestAnimationFrame(() => flushJumpToBottomFab());
+  }, [flushJumpToBottomFab]);
 
   // 清理所有长按计时器
   React.useEffect(() => {
@@ -702,6 +754,22 @@ export function MessageList({
           })}
         </div>
       </div>
+
+      {showJumpToBottomFab ? (
+        <div className="pointer-events-none absolute inset-x-0 bottom-3 z-30 px-4 sm:px-6">
+          <div className="mx-auto flex w-full max-w-4xl justify-end">
+            <button
+              type="button"
+              className="pointer-events-auto flex h-9 w-9 items-center justify-center rounded-full border border-border/80 bg-background/95 text-foreground shadow-lg backdrop-blur-sm transition hover:bg-muted/80"
+              aria-label={scrollToBottomLabel}
+              title={scrollToBottomLabel}
+              onClick={() => scrollToBottom("smooth")}
+            >
+              <IconChevronDown className="h-5 w-5" />
+            </button>
+          </div>
+        </div>
+      ) : null}
 
       {/* 底部多选操作栏 */}
       {isSelectionMode && selectedMessages.size > 0 && (

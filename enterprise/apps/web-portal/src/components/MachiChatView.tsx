@@ -665,6 +665,7 @@ export function MachiChatView({ client }: MachiChatViewProps) {
                 className="h-full"
                 styleVariant="im"
                 assistantFrameless
+                scrollToBottomLabel={t("scrollToBottom")}
                 responseVersionMetaByUserMessageId={responseVersionMetaByUserMessageId}
                 retryVersionMetaByUserMessageId={retryVersionMetaByUserMessageId}
                 onShowPreviousResponseVersion={showPreviousResponseVersion}
