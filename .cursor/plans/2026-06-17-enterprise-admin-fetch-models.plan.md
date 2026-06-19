@@ -17,3 +17,7 @@
 - AC-1: 配置 Key 后点击刷新可弹出模型列表
 - AC-2: 搜索、`+/-` 可启用/禁用模型并落库
 - AC-3: `infer-model-capabilities` 单测覆盖 GLM-5.1 / GLM-4.5V
+
+## Root cause (2026-06-17 follow-up)
+
+智谱 `GET /models` 实测仅返回文本对话 SKU（约 8 个），**不含** `glm-4.6v` 等 VLM。Near 弹窗「13 个」= API 结果 + `config.yaml` 已配置模型合并，并非 API 多扫。修复：对 zhipu/bigmodel 合并文档 VLM 目录（对齐百炼 embedding 合并策略）。

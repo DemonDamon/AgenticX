@@ -7,7 +7,8 @@ describe("inferModelCapabilities", () => {
     expect(inferModelCapabilities("zhipu", "GLM-5.1")).toEqual(["text"]);
   });
 
-  it("marks GLM-4.5V with vision", () => {
+  it("marks GLM-4.6V with vision", () => {
+    expect(inferModelCapabilities("zhipu", "glm-4.6v")).toContain("vision");
     expect(inferModelCapabilities("zhipu", "glm-4.5v")).toContain("vision");
   });
 
