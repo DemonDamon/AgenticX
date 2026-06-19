@@ -2,12 +2,14 @@ import * as React from "react";
 import { Button } from "@agenticx/ui";
 import { AttachmentChip } from "../atoms/AttachmentChip";
 import type { ComposerAttachment } from "../../types/composer-attachment";
+import { isDoubleEnterWithinWindow } from "../../utils/message-queue";
 
 type InputAreaProps = {
   value: string;
   status: "idle" | "sending" | "streaming" | "error";
   onChange: (value: string) => void;
   onSend: () => void;
+  onForceSend?: () => void;
   onCancel: () => void;
   leftToolbar?: React.ReactNode;
   rightToolbar?: React.ReactNode;
@@ -41,6 +43,7 @@ export function InputArea({
   status,
   onChange,
   onSend,
+  onForceSend,
   onCancel,
   leftToolbar,
   rightToolbar,
@@ -53,9 +56,10 @@ export function InputArea({
 }: InputAreaProps) {
   const textareaRef = React.useRef<HTMLTextAreaElement>(null);
   const imeComposingRef = React.useRef(false);
+  const lastEnterAtRef = React.useRef(0);
   const readyCount = attachments.filter((item) => item.status === "ready").length;
-  const canSend =
-    status !== "sending" && status !== "streaming" && (value.trim().length > 0 || readyCount > 0);
+  const hasContent = value.trim().length > 0 || readyCount > 0;
+  const canSend = hasContent;
   const canCancel = status === "sending" || status === "streaming";
   const minTextareaHeight = appearance === "portal" ? 48 : 40;
 
@@ -134,7 +138,19 @@ export function InputArea({
           if (event.key !== "Enter") return;
           if (event.shiftKey) return;
           event.preventDefault();
-          if (canSend) onSend();
+          if (!canSend) return;
+          if (canCancel) {
+            if (isDoubleEnterWithinWindow(lastEnterAtRef.current)) {
+              lastEnterAtRef.current = 0;
+              (onForceSend ?? onSend)();
+              return;
+            }
+            lastEnterAtRef.current = Date.now();
+            onSend();
+            return;
+          }
+          lastEnterAtRef.current = 0;
+          onSend();
         }}
       />
       {(leftToolbar || rightToolbar || true) && (
@@ -148,11 +164,15 @@ export function InputArea({
               <Button variant="secondary" size="icon" onClick={onCancel} className="h-8 w-8 rounded-full shadow-none">
                 <SquareIcon className="h-3.5 w-3.5 fill-current" />
               </Button>
-            ) : (
-              <Button onClick={onSend} disabled={!canSend} size="icon" className="h-8 w-8 rounded-full shadow-none transition-transform hover:scale-105 active:scale-95">
-                <SendIcon className="h-3.5 w-3.5" />
-              </Button>
-            )}
+            ) : null}
+            <Button
+              onClick={onSend}
+              disabled={!canSend}
+              size="icon"
+              className="h-8 w-8 rounded-full shadow-none transition-transform hover:scale-105 active:scale-95"
+            >
+              <SendIcon className="h-3.5 w-3.5" />
+            </Button>
           </div>
         </div>
       )}

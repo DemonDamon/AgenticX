@@ -2,7 +2,7 @@
 
 import * as React from "react";
 import { useTranslations } from "next-intl";
-import { InputArea, MessageList, useChatStore, useComposerAttachments, extractClipboardImageFiles, withClipboardImageNames, modelSupportsVision } from "@agenticx/feature-chat";
+import { InputArea, MessageList, MessageQueuePanel, useChatStore, useComposerAttachments, extractClipboardImageFiles, withClipboardImageNames, modelSupportsVision } from "@agenticx/feature-chat";
 import { type ChatClient } from "@agenticx/sdk-ts";
 import {
   Activity,
@@ -82,6 +82,10 @@ export function MachiChatView({ client }: MachiChatViewProps) {
     renameSession,
     switchModel,
     sendMessage,
+    sendQueuedMessageNow,
+    removePendingMessage,
+    editPendingMessage,
+    pendingMessages,
     editUserMessageAndResend,
     regenerateAssistantResponse,
     showPreviousResponseVersion,
@@ -335,14 +339,26 @@ export function MachiChatView({ client }: MachiChatViewProps) {
     [handleAddFiles, warnIfNonVision],
   );
 
-  const handleSend = (text: string) => {
-    const trimmed = text.trim();
-    const messageAttachments = toMessageAttachments();
-    if (!trimmed && messageAttachments.length === 0) return;
-    void sendMessage(client, { content: trimmed, attachments: messageAttachments });
-    setDraft("");
-    clearAttachments();
-  };
+  const handleSend = React.useCallback(
+    (opts?: { forceSend?: boolean }) => {
+      const trimmed = draft.trim();
+      const messageAttachments = toMessageAttachments();
+      if (!trimmed && messageAttachments.length === 0) return;
+      void sendMessage(
+        client,
+        { content: trimmed, attachments: messageAttachments },
+        opts?.forceSend ? { forceSend: true } : undefined,
+      );
+      setDraft("");
+      clearAttachments();
+    },
+    [clearAttachments, client, draft, sendMessage, toMessageAttachments],
+  );
+
+  const queuedForSession = React.useMemo(() => {
+    if (!activeSessionId) return [];
+    return pendingMessages.filter((message) => message.sessionId === activeSessionId);
+  }, [activeSessionId, pendingMessages]);
 
   const composer = (
     <div className="mx-auto w-full max-w-4xl space-y-3">
@@ -386,11 +402,19 @@ export function MachiChatView({ client }: MachiChatViewProps) {
         }}
       />
 
+      <MessageQueuePanel
+        messages={queuedForSession}
+        onEdit={editPendingMessage}
+        onRemove={removePendingMessage}
+        onSendNow={(id) => void sendQueuedMessageNow(client, id)}
+      />
+
       <InputArea
         value={draft}
         status={status}
         onChange={setDraft}
-        onSend={() => handleSend(draft)}
+        onSend={() => handleSend()}
+        onForceSend={() => handleSend({ forceSend: true })}
         onCancel={() => void cancel(client)}
         appearance="portal"
         attachments={Object.values(attachments)}
