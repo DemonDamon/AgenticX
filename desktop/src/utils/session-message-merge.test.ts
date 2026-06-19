@@ -70,4 +70,22 @@ describe("mergeSessionMessagesTail", () => {
     expect(out).toHaveLength(2);
     expect(out[1].suggestedQuestions).toEqual(["next?"]);
   });
+
+  it("keeps disk chronological order when memory only holds the latest tail (no append-old-to-end bug)", () => {
+    const existing = [
+      uidMsg("user", "latest q", "uid-u2"),
+      uidMsg("assistant", "latest a", "uid-a2"),
+    ];
+    const out = mergeSessionMessagesTail(
+      existing,
+      [
+        diskRow("user", "old q"),
+        diskRow("assistant", "old a"),
+        diskRow("user", "latest q"),
+        diskRow("assistant", "latest a"),
+      ],
+      sid,
+    );
+    expect(out.map((m) => m.content)).toEqual(["old q", "old a", "latest q", "latest a"]);
+  });
 });

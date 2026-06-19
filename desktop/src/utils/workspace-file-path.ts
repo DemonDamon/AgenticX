@@ -7,6 +7,18 @@ function normalizePath(p: string): string {
     .replace(/\/+$/, "");
 }
 
+/** Join taskspace root (absolute) with a relative path from the Studio API (POSIX segments). */
+export function absoluteTaskspacePath(root: string, relPath: string): string {
+  const r = String(root || "").trim().replace(/[/\\]+$/, "");
+  if (!r) return "";
+  const norm = String(relPath || ".").replace(/\\/g, "/");
+  const parts = norm.split("/").filter((p) => p && p !== ".");
+  if (parts.length === 0) return r;
+  const isWin = /^[a-zA-Z]:/.test(r) || r.startsWith("\\\\");
+  const sep = isWin ? "\\" : "/";
+  return `${r}${sep}${parts.join(sep)}`;
+}
+
 /** Detect absolute local file paths suitable for workspace preview. */
 export function isAbsoluteFilePath(text: string): boolean {
   const t = String(text || "").trim();
