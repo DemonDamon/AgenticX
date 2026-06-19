@@ -1,0 +1,16 @@
+{
+  "curated_mcp_servers": [
+    {
+      "id": "figma-mcp",
+      "name": "Figma MCP",
+      "description": "Read/write Figma files via figma-developer-mcp (bundled with agenticx-delivery-kit)",
+      "bundle": "agenticx-delivery-kit"
+    },
+    {
+      "id": "playwright-mcp",
+      "name": "Playwright MCP",
+      "description": "Official @playwright/mcp browser automation (bundled with agenticx-delivery-kit)",
+      "bundle": "agenticx-delivery-kit"
+    }
+  ]
+}
