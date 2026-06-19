@@ -9,6 +9,8 @@ import {
 } from "@agenticx/core-api";
 import type { ChatClient, ChatRequest as SdkChatRequest } from "@agenticx/sdk-ts";
 import { ChatHistoryHttpError, createPortalChatHistoryClient } from "./history-client";
+import type { QueuedMessage } from "./types/queued-message";
+import { isStreamActive, shouldEnqueueOnResend } from "./utils/message-queue";
 
 export type ChatStatus = "idle" | "sending" | "streaming" | "error";
 
@@ -17,6 +19,11 @@ type SendMessageInput = {
   attachments?: import("@agenticx/core-api").ChatMessageAttachment[];
   tenantId?: string;
   userId?: string;
+};
+
+type SendMessageOptions = {
+  /** Interrupt current stream and send immediately (queue send-now / double Enter). */
+  forceSend?: boolean;
 };
 
 type EditUserMessageInput = {
@@ -70,6 +77,8 @@ export type ChatStoreState = {
   sessionMessagesLoading: boolean;
   /** 本地草稿 session：用户发送首条消息前不落盘（对齐 Machi Desktop lazy create） */
   draftSessionId: string | null;
+  /** 流式生成中排队等待发送的消息（按 session 隔离） */
+  pendingMessages: QueuedMessage[];
 };
 
 const EMPTY_USAGE: SessionTokenUsage = {
@@ -89,7 +98,10 @@ export type ChatStoreActions = {
   renameSession(sessionId: string, title: string): Promise<void>;
   deleteSession(sessionId: string): Promise<void>;
   switchModel(model: string): void;
-  sendMessage(client: ChatClient, input: SendMessageInput): Promise<void>;
+  sendMessage(client: ChatClient, input: SendMessageInput, options?: SendMessageOptions): Promise<void>;
+  sendQueuedMessageNow(client: ChatClient, messageId: string): Promise<void>;
+  removePendingMessage(messageId: string): void;
+  editPendingMessage(messageId: string, content: string): void;
   editUserMessageAndResend(client: ChatClient, input: EditUserMessageInput): Promise<void>;
   regenerateAssistantResponse(client: ChatClient, assistantMessageId: string): Promise<void>;
   showPreviousResponseVersion(userMessageId: string): void;
@@ -353,6 +365,36 @@ export const useChatStore = create<ChatStore>((set, get) => ({
   historyError: null,
   sessionMessagesLoading: false,
   draftSessionId: null,
+  pendingMessages: [],
+
+  removePendingMessage(messageId) {
+    set((state) => ({
+      pendingMessages: state.pendingMessages.filter((message) => message.id !== messageId),
+    }));
+  },
+
+  editPendingMessage(messageId, content) {
+    const trimmed = content.trim();
+    if (!trimmed) return;
+    set((state) => ({
+      pendingMessages: state.pendingMessages.map((message) =>
+        message.id === messageId ? { ...message, content: trimmed } : message
+      ),
+    }));
+  },
+
+  async sendQueuedMessageNow(client, messageId) {
+    const item = get().pendingMessages.find((message) => message.id === messageId);
+    if (!item) return;
+    set((state) => ({
+      pendingMessages: state.pendingMessages.filter((message) => message.id !== messageId),
+    }));
+    await get().sendMessage(
+      client,
+      { content: item.content, attachments: item.attachments },
+      { forceSend: true }
+    );
+  },
 
   async hydrateSessions() {
     if (chatHydrateInFlight) {
@@ -586,62 +628,85 @@ export const useChatStore = create<ChatStore>((set, get) => ({
     }
   },
 
-  async sendMessage(client, input) {
+  async sendMessage(client, input, options) {
     const state = get();
     let sessionId = state.activeSessionId;
     if (!sessionId) return;
-    if (state.status === "sending" || state.status === "streaming") return;
 
     const content = input.content.trim();
     const attachments = input.attachments?.filter((item) => item.data_url?.trim()) ?? [];
     if (!content && attachments.length === 0) return;
 
-    if (isDraftSessionId(state, sessionId)) {
-      if (state.hydrated) {
-        try {
-          const created = await portalHistory.createSession({
-            title: buildAutoTitleFromFirstUserMessage(content) || "New chat",
-            activeModel: state.activeModel,
-          });
-          sessionId = created.id;
-          set((prev) => {
-            const draftId = prev.draftSessionId;
-            const draftTokens = draftId ? (prev.sessionTokensBySessionId[draftId] ?? { ...EMPTY_USAGE }) : { ...EMPTY_USAGE };
-            const nextTokensMap = { ...prev.sessionTokensBySessionId };
-            if (draftId) delete nextTokensMap[draftId];
-            nextTokensMap[created.id] = draftTokens;
-            return {
-              draftSessionId: null,
-              activeSessionId: created.id,
-              sessions: [...prev.sessions, created],
-              sessionTokensBySessionId: nextTokensMap,
-            };
-          });
-        } catch (error) {
-          const message = resolveHistoryErrorMessage(error, "创建会话失败");
-          set({
-            historyError: message,
-            hydrated: message === "登录已过期，请重新登录" ? false : get().hydrated,
-          });
-          return;
-        }
-      } else {
-        const promoted: ChatSession = {
-          id: sessionId,
-          tenant_id: input.tenantId ?? DEFAULT_TENANT,
-          user_id: input.userId ?? DEFAULT_USER,
-          title: buildAutoTitleFromFirstUserMessage(content) || "New chat",
-          active_model: state.activeModel,
-          message_count: 0,
-          created_at: now(),
-          updated_at: now(),
-        };
-        set((prev) => ({
-          draftSessionId: null,
-          sessions: [...prev.sessions, promoted],
-        }));
-      }
+    if (shouldEnqueueOnResend({ isStreamActive: isStreamActive(state.status), forceSend: options?.forceSend })) {
+      const enqueueSessionId = sessionId;
+      set((prev) => ({
+        pendingMessages: [
+          ...prev.pendingMessages,
+          {
+            id: makeId(),
+            sessionId: enqueueSessionId,
+            content: content || "（附件）",
+            attachments: attachments.length > 0 ? attachments : undefined,
+            timestamp: Date.now(),
+          },
+        ],
+      }));
+      return;
     }
+
+    if (options?.forceSend && isStreamActive(get().status)) {
+      await get().cancel(client);
+    }
+
+    let queueSessionId = sessionId;
+    if (isDraftSessionId(get(), sessionId)) {
+        if (state.hydrated) {
+          try {
+            const created = await portalHistory.createSession({
+              title: buildAutoTitleFromFirstUserMessage(content) || "New chat",
+              activeModel: state.activeModel,
+            });
+            sessionId = created.id;
+            set((prev) => {
+              const draftId = prev.draftSessionId;
+              const draftTokens = draftId ? (prev.sessionTokensBySessionId[draftId] ?? { ...EMPTY_USAGE }) : { ...EMPTY_USAGE };
+              const nextTokensMap = { ...prev.sessionTokensBySessionId };
+              if (draftId) delete nextTokensMap[draftId];
+              nextTokensMap[created.id] = draftTokens;
+              return {
+                draftSessionId: null,
+                activeSessionId: created.id,
+                sessions: [...prev.sessions, created],
+                sessionTokensBySessionId: nextTokensMap,
+              };
+            });
+          } catch (error) {
+            const message = resolveHistoryErrorMessage(error, "创建会话失败");
+            set({
+              historyError: message,
+              hydrated: message === "登录已过期，请重新登录" ? false : get().hydrated,
+            });
+            return;
+          }
+        } else {
+          const promoted: ChatSession = {
+            id: sessionId,
+            tenant_id: input.tenantId ?? DEFAULT_TENANT,
+            user_id: input.userId ?? DEFAULT_USER,
+            title: buildAutoTitleFromFirstUserMessage(content) || "New chat",
+            active_model: state.activeModel,
+            message_count: 0,
+            created_at: now(),
+            updated_at: now(),
+          };
+          set((prev) => ({
+            draftSessionId: null,
+            sessions: [...prev.sessions, promoted],
+          }));
+        }
+      }
+
+    queueSessionId = sessionId;
 
     const latest = get();
     const tenantId = input.tenantId ?? latest.sessions.find((session) => session.id === sessionId)?.tenant_id ?? DEFAULT_TENANT;
@@ -786,6 +851,21 @@ export const useChatStore = create<ChatStore>((set, get) => ({
         status: "error",
         errorMessage: error instanceof Error ? error.message : "Unknown send error",
         activeRequestId: null,
+      });
+    } finally {
+      const after = get();
+      if (isStreamActive(after.status)) return;
+      const sid = String(queueSessionId ?? "").trim();
+      if (!sid) return;
+      const idx = after.pendingMessages.findIndex((message) => message.sessionId.trim() === sid);
+      if (idx < 0) return;
+      const next = after.pendingMessages[idx];
+      if (!next) return;
+      set((prev) => ({
+        pendingMessages: prev.pendingMessages.filter((_, index) => index !== idx),
+      }));
+      queueMicrotask(() => {
+        void get().sendMessage(client, { content: next.content, attachments: next.attachments });
       });
     }
   },
