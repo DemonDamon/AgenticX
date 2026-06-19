@@ -103,7 +103,8 @@
     "deleteConversation": "删除对话",
     "welcomeTitle": "我是 Machi",
     "welcomeSubtitle": "很高兴见到你，有什么我可以帮忙的吗？",
-    "loadingMessages": "加载消息…"
+    "loadingMessages": "加载消息…",
+    "scrollToBottom": "回到底部"
   },
   "settings": {
     "title": "设置",
