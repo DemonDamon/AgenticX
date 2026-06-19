@@ -79,6 +79,8 @@ export type ChatStoreState = {
   draftSessionId: string | null;
   /** 流式生成中排队等待发送的消息（按 session 隔离） */
   pendingMessages: QueuedMessage[];
+  /** 当前正在 sending/streaming 的会话，供侧栏状态指示（切换会话后仍指向原 session） */
+  streamingSessionId: string | null;
 };
 
 const EMPTY_USAGE: SessionTokenUsage = {
@@ -366,6 +368,7 @@ export const useChatStore = create<ChatStore>((set, get) => ({
   sessionMessagesLoading: false,
   draftSessionId: null,
   pendingMessages: [],
+  streamingSessionId: null,
 
   removePendingMessage(messageId) {
     set((state) => ({
@@ -740,6 +743,7 @@ export const useChatStore = create<ChatStore>((set, get) => ({
     set((prev) => ({
       messages: mergeSessionMessages(prev.messages, sessionId, nextSessionMessages),
       status: "sending",
+      streamingSessionId: sessionId,
       errorMessage: null,
       responseVersionsByUserMessageId: {
         ...prev.responseVersionsByUserMessageId,
@@ -768,7 +772,7 @@ export const useChatStore = create<ChatStore>((set, get) => ({
     try {
       const request = toSdkRequest(sessionId, get().activeModel, nextSessionMessages);
       const { requestId } = await client.sendMessage(request);
-      set({ status: "streaming", activeRequestId: requestId });
+      set({ status: "streaming", activeRequestId: requestId, streamingSessionId: sessionId });
 
       for await (const chunk of client.stream(requestId)) {
         if (chunk.error) {
@@ -777,6 +781,7 @@ export const useChatStore = create<ChatStore>((set, get) => ({
             status: "idle",
             errorMessage: complianceMessage,
             activeRequestId: null,
+            streamingSessionId: null,
           });
           set((prev) => ({
             messages: prev.messages.map((message) =>
@@ -828,7 +833,7 @@ export const useChatStore = create<ChatStore>((set, get) => ({
         }
 
         if (chunk.done) {
-          set({ status: "idle", activeRequestId: null });
+          set({ status: "idle", activeRequestId: null, streamingSessionId: null });
         }
       }
 
@@ -851,6 +856,7 @@ export const useChatStore = create<ChatStore>((set, get) => ({
         status: "error",
         errorMessage: error instanceof Error ? error.message : "Unknown send error",
         activeRequestId: null,
+        streamingSessionId: null,
       });
     } finally {
       const after = get();
@@ -946,6 +952,7 @@ export const useChatStore = create<ChatStore>((set, get) => ({
     set((prev) => ({
       messages: mergeSessionMessages(prev.messages, sessionId, truncatedSessionMessages),
       status: "sending",
+      streamingSessionId: sessionId,
       errorMessage: null,
       responseVersionsByUserMessageId: {
         ...Object.fromEntries(
@@ -974,7 +981,7 @@ export const useChatStore = create<ChatStore>((set, get) => ({
     try {
       const request = toSdkRequest(sessionId, state.activeModel, truncatedSessionMessages);
       const { requestId } = await client.sendMessage(request);
-      set({ status: "streaming", activeRequestId: requestId });
+      set({ status: "streaming", activeRequestId: requestId, streamingSessionId: sessionId });
 
       for await (const chunk of client.stream(requestId)) {
         if (chunk.error) {
@@ -983,6 +990,7 @@ export const useChatStore = create<ChatStore>((set, get) => ({
             status: "idle",
             errorMessage: complianceMessage,
             activeRequestId: null,
+            streamingSessionId: null,
           });
           set((prev) => ({
             messages: prev.messages.map((message) =>
@@ -1033,7 +1041,7 @@ export const useChatStore = create<ChatStore>((set, get) => ({
         }
 
         if (chunk.done) {
-          set({ status: "idle", activeRequestId: null });
+          set({ status: "idle", activeRequestId: null, streamingSessionId: null });
         }
       }
 
@@ -1053,6 +1061,7 @@ export const useChatStore = create<ChatStore>((set, get) => ({
         status: "error",
         errorMessage: error instanceof Error ? error.message : "Unknown send error",
         activeRequestId: null,
+        streamingSessionId: null,
       });
     }
   },
@@ -1123,6 +1132,7 @@ export const useChatStore = create<ChatStore>((set, get) => ({
     set((prev) => ({
       messages: mergeSessionMessages(prev.messages, sessionId, nextSessionMessages),
       status: "sending",
+      streamingSessionId: sessionId,
       errorMessage: null,
       responseVersionsByUserMessageId: {
         ...prev.responseVersionsByUserMessageId,
@@ -1146,7 +1156,7 @@ export const useChatStore = create<ChatStore>((set, get) => ({
     try {
       const request = toSdkRequest(sessionId, state.activeModel, regenerateRequestMessages);
       const { requestId } = await client.sendMessage(request);
-      set({ status: "streaming", activeRequestId: requestId });
+      set({ status: "streaming", activeRequestId: requestId, streamingSessionId: sessionId });
 
       for await (const chunk of client.stream(requestId)) {
         if (chunk.error) {
@@ -1155,6 +1165,7 @@ export const useChatStore = create<ChatStore>((set, get) => ({
             status: "idle",
             errorMessage: complianceMessage,
             activeRequestId: null,
+            streamingSessionId: null,
           });
           set((prev) => ({
             messages: prev.messages.map((message) =>
@@ -1205,7 +1216,7 @@ export const useChatStore = create<ChatStore>((set, get) => ({
         }
 
         if (chunk.done) {
-          set({ status: "idle", activeRequestId: null });
+          set({ status: "idle", activeRequestId: null, streamingSessionId: null });
         }
       }
 
@@ -1225,6 +1236,7 @@ export const useChatStore = create<ChatStore>((set, get) => ({
         status: "error",
         errorMessage: error instanceof Error ? error.message : "Unknown send error",
         activeRequestId: null,
+        streamingSessionId: null,
       });
     }
   },
@@ -1409,7 +1421,7 @@ export const useChatStore = create<ChatStore>((set, get) => ({
     const requestId = get().activeRequestId;
     if (!requestId) return;
     await client.cancel(requestId);
-    set({ status: "idle", activeRequestId: null });
+    set({ status: "idle", activeRequestId: null, streamingSessionId: null });
   },
 
   deleteMessage(messageId) {

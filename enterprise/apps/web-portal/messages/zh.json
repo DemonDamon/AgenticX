@@ -71,6 +71,7 @@
     "sessionActions": "会话操作",
     "rename": "重命名",
     "delete": "删除",
+    "sessionGenerating": "生成中",
     "currentUser": "当前登录用户：{email}"
   },
   "chat": {
