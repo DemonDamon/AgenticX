@@ -335,6 +335,11 @@ type TokenDashboardState = {
   customTo: string;
 };
 
+type DeliveryPanelState = {
+  open: boolean;
+  selectedTaskId: string | null;
+};
+
 type AppState = {
   apiBase: string;
   apiToken: string;
@@ -347,6 +352,7 @@ type AppState = {
   confirm: ConfirmState;
   settings: SettingsState;
   tokenDashboard: TokenDashboardState;
+  deliveryPanel: DeliveryPanelState;
   activeProvider: string;
   activeModel: string;
   userMode: "pro" | "lite";
@@ -616,6 +622,9 @@ type AppState = {
   closeTokenDashboard: () => void;
   setTokenDashboardRange: (range: TokenDashboardRange) => void;
   setTokenDashboardCustomRange: (from: string, to: string) => void;
+  openDeliveryPanel: (taskId?: string | null) => void;
+  closeDeliveryPanel: () => void;
+  setDeliverySelectedTaskId: (taskId: string | null) => void;
 };
 
 function uid(): string {
@@ -868,6 +877,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   confirm: { open: false, requestId: "", question: "", agentId: "meta" },
   settings: { open: false, provider: "", model: "", apiKey: "", defaultProvider: "", providers: {} },
   tokenDashboard: { open: false, range: "month", customFrom: "", customTo: "" },
+  deliveryPanel: { open: false, selectedTaskId: null },
   setApiBase: (apiBase) => set({ apiBase }),
   setApiToken: (apiToken) => set({ apiToken }),
   setSessionId: (sessionId) => set({ sessionId }),
@@ -2057,5 +2067,20 @@ export const useAppStore = create<AppState>((set, get) => ({
   setTokenDashboardCustomRange: (customFrom, customTo) =>
     set((state) => ({
       tokenDashboard: { ...state.tokenDashboard, customFrom, customTo, range: "custom" },
+    })),
+  openDeliveryPanel: (taskId) =>
+    set((state) => ({
+      deliveryPanel: {
+        open: true,
+        selectedTaskId: taskId !== undefined ? taskId : state.deliveryPanel.selectedTaskId,
+      },
+    })),
+  closeDeliveryPanel: () =>
+    set((state) => ({
+      deliveryPanel: { ...state.deliveryPanel, open: false },
+    })),
+  setDeliverySelectedTaskId: (taskId) =>
+    set((state) => ({
+      deliveryPanel: { ...state.deliveryPanel, selectedTaskId: taskId },
     })),
 }));

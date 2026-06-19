@@ -56,6 +56,7 @@ import { shouldDisableMcpToggle } from "../utils/mcp-toggle-state";
 import { ForwardPicker, type ForwardConfirmPayload } from "./ForwardPicker";
 import { QrConnectModal } from "./QrConnectModal";
 import { AutomationTab } from "./automation/AutomationTab";
+import { DeliveryConfigSection } from "./delivery/DeliveryConfigSection";
 import { AutomationTaskIcon } from "./icons/AutomationTaskIcon";
 import { SkillPuzzleIcon } from "./icons/SkillPuzzleIcon";
 import {
@@ -9079,7 +9080,12 @@ export function SettingsPanel({
             {/* === HOOKS TAB === */}
             {tab === "hooks" && <HooksTab />}
 
-            {tab === "automation" && <AutomationTab />}
+            {tab === "automation" && (
+              <div className="space-y-4">
+                <DeliveryConfigSection apiBase={apiBase} apiToken={apiToken} />
+                <AutomationTab />
+              </div>
+            )}
 
             {tab === "voice" && <VoiceSettingsPanel ref={voiceSettingsRef} />}
 
