@@ -5,5 +5,6 @@ Author: Damon Li
 """
 
 from agenticx.delivery.config import get_delivery_config
+from agenticx.delivery.orchestrator import DeliveryOrchestrator
 
-__all__ = ["get_delivery_config"]
+__all__ = ["DeliveryOrchestrator", "get_delivery_config"]
