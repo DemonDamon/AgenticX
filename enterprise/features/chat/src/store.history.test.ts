@@ -70,6 +70,9 @@ describe("chat store history hydration", () => {
       sessionTokensBySessionId: {},
       draftSessionId: null,
       responseVersionsByUserMessageId: {},
+      pendingMessages: [],
+      streamingSessionId: null,
+      streamStateBySessionId: {},
     });
   });
 

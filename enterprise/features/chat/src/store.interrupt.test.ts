@@ -52,6 +52,7 @@ describe("chat store stream interrupt", () => {
       activeModel: "test-model",
       activeRequestId: null,
       streamingSessionId: null,
+      streamStateBySessionId: {},
       errorMessage: null,
       sessionTokens: {
         inputTokens: 0,

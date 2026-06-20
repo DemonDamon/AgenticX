@@ -10,9 +10,15 @@ import {
 import type { ChatClient, ChatRequest as SdkChatRequest } from "@agenticx/sdk-ts";
 import { ChatHistoryHttpError, createPortalChatHistoryClient } from "./history-client";
 import type { QueuedMessage } from "./types/queued-message";
-import { isStreamActive, shouldEnqueueOnResend } from "./utils/message-queue";
+import { shouldEnqueueOnResend } from "./utils/message-queue";
+import { getSessionRequestId, isSessionStreaming } from "./utils/session-stream-state";
 
 export type ChatStatus = "idle" | "sending" | "streaming" | "error";
+
+export type SessionStreamState = {
+  status: "sending" | "streaming";
+  activeRequestId: string;
+};
 
 type SendMessageInput = {
   content: string;
@@ -81,6 +87,8 @@ export type ChatStoreState = {
   pendingMessages: QueuedMessage[];
   /** 当前正在 sending/streaming 的会话，供侧栏状态指示（切换会话后仍指向原 session） */
   streamingSessionId: string | null;
+  /** 按 session 隔离的流式状态，支持多 session 并发 */
+  streamStateBySessionId: Record<string, SessionStreamState>;
 };
 
 const EMPTY_USAGE: SessionTokenUsage = {
@@ -140,6 +148,42 @@ function addChunkToSessionTokens(
     lastOutputTokens: chunk.outputTokens ?? 0,
     lastUpdatedAt: now(),
   };
+}
+
+type ChatStoreSet = (
+  partial: Partial<ChatStoreState> | ((state: ChatStoreState) => Partial<ChatStoreState>),
+) => void;
+
+function topLevelStreamFieldsForSession(
+  state: Pick<ChatStoreState, "streamStateBySessionId">,
+  sessionId: string | null,
+): Pick<ChatStoreState, "status" | "activeRequestId"> {
+  if (!sessionId) return { status: "idle", activeRequestId: null };
+  const stream = state.streamStateBySessionId[sessionId];
+  if (!stream) return { status: "idle", activeRequestId: null };
+  return { status: stream.status, activeRequestId: stream.activeRequestId };
+}
+
+function setSessionStream(set: ChatStoreSet, sessionId: string, next: SessionStreamState | null): void {
+  set((prev) => {
+    const map = { ...prev.streamStateBySessionId };
+    if (next) {
+      map[sessionId] = next;
+    } else {
+      delete map[sessionId];
+    }
+    const isActive = prev.activeSessionId === sessionId;
+    return {
+      streamStateBySessionId: map,
+      ...(isActive
+        ? {
+            status: next?.status ?? ("idle" as const),
+            activeRequestId: next?.activeRequestId ?? null,
+          }
+        : {}),
+      streamingSessionId: next ? sessionId : prev.streamingSessionId === sessionId ? null : prev.streamingSessionId,
+    };
+  });
 }
 
 function toSdkRequest(sessionId: string, model: string, messages: ChatMessage[]): SdkChatRequest {
@@ -369,6 +413,7 @@ export const useChatStore = create<ChatStore>((set, get) => ({
   draftSessionId: null,
   pendingMessages: [],
   streamingSessionId: null,
+  streamStateBySessionId: {},
 
   removePendingMessage(messageId) {
     set((state) => ({
@@ -489,25 +534,32 @@ export const useChatStore = create<ChatStore>((set, get) => ({
     if (!target) return;
     const tokens = get().sessionTokensBySessionId[sessionId] ?? { ...EMPTY_USAGE };
     if (!get().hydrated) {
-      set({
-        ...discardDraftSessionPatch(get()),
+      set((prev) => ({
+        ...discardDraftSessionPatch(prev),
         activeSessionId: sessionId,
         activeModel: target.active_model ?? DEFAULT_MODEL,
+        ...topLevelStreamFieldsForSession(prev, sessionId),
         errorMessage: null,
         sessionTokens: { ...tokens },
-      });
+      }));
       return;
     }
 
+    const targetIsStreaming = isSessionStreaming(get(), sessionId);
     const loadSeq = ++sessionMessageLoadSeq;
-    set({
-      ...discardDraftSessionPatch(get()),
+    set((prev) => ({
+      ...discardDraftSessionPatch(prev),
       activeSessionId: sessionId,
       activeModel: target.active_model ?? DEFAULT_MODEL,
+      ...topLevelStreamFieldsForSession(prev, sessionId),
       errorMessage: null,
       sessionTokens: { ...tokens },
-      sessionMessagesLoading: true,
-    });
+      sessionMessagesLoading: targetIsStreaming ? false : true,
+    }));
+
+    // 目标 session 正在流式：内存中的 partial 尚未落库，跳过远端 fetch
+    // 否则 portalHistory.getMessages 的旧快照会覆盖正在流的 assistant 消息
+    if (targetIsStreaming) return;
 
     try {
       const remoteMessages = await portalHistory.getMessages(sessionId);
@@ -640,7 +692,7 @@ export const useChatStore = create<ChatStore>((set, get) => ({
     const attachments = input.attachments?.filter((item) => item.data_url?.trim()) ?? [];
     if (!content && attachments.length === 0) return;
 
-    if (shouldEnqueueOnResend({ isStreamActive: isStreamActive(state.status), forceSend: options?.forceSend })) {
+    if (shouldEnqueueOnResend({ isStreamActive: isSessionStreaming(state, sessionId), forceSend: options?.forceSend })) {
       const enqueueSessionId = sessionId;
       set((prev) => ({
         pendingMessages: [
@@ -657,7 +709,7 @@ export const useChatStore = create<ChatStore>((set, get) => ({
       return;
     }
 
-    if (options?.forceSend && isStreamActive(get().status)) {
+    if (options?.forceSend && isSessionStreaming(get(), sessionId)) {
       await get().cancel(client);
     }
 
@@ -742,8 +794,6 @@ export const useChatStore = create<ChatStore>((set, get) => ({
 
     set((prev) => ({
       messages: mergeSessionMessages(prev.messages, sessionId, nextSessionMessages),
-      status: "sending",
-      streamingSessionId: sessionId,
       errorMessage: null,
       responseVersionsByUserMessageId: {
         ...prev.responseVersionsByUserMessageId,
@@ -768,26 +818,24 @@ export const useChatStore = create<ChatStore>((set, get) => ({
         };
       }),
     }));
+    setSessionStream(set, sessionId, { status: "sending", activeRequestId: "" });
 
     try {
       const request = toSdkRequest(sessionId, get().activeModel, nextSessionMessages);
       const { requestId } = await client.sendMessage(request);
-      set({ status: "streaming", activeRequestId: requestId, streamingSessionId: sessionId });
+      setSessionStream(set, sessionId, { status: "streaming", activeRequestId: requestId });
 
       for await (const chunk of client.stream(requestId)) {
         if (chunk.cancelled) {
-          set({ status: "idle", errorMessage: null, activeRequestId: null, streamingSessionId: null });
+          setSessionStream(set, sessionId, null);
+          set({ errorMessage: null });
           break;
         }
 
         if (chunk.error) {
           const complianceMessage = toComplianceMessage(chunk.error.code, chunk.error.message);
-          set({
-            status: "idle",
-            errorMessage: complianceMessage,
-            activeRequestId: null,
-            streamingSessionId: null,
-          });
+          setSessionStream(set, sessionId, null);
+          set({ errorMessage: complianceMessage });
           set((prev) => ({
             messages: prev.messages.map((message) =>
               message.id === assistantMessage.id ? { ...message, content: complianceMessage } : message
@@ -838,7 +886,7 @@ export const useChatStore = create<ChatStore>((set, get) => ({
         }
 
         if (chunk.done) {
-          set({ status: "idle", activeRequestId: null, streamingSessionId: null });
+          setSessionStream(set, sessionId, null);
         }
       }
 
@@ -857,17 +905,20 @@ export const useChatStore = create<ChatStore>((set, get) => ({
         }
       }
     } catch (error) {
-      set({
-        status: "error",
-        errorMessage: error instanceof Error ? error.message : "Unknown send error",
-        activeRequestId: null,
-        streamingSessionId: null,
-      });
+      setSessionStream(set, sessionId, null);
+      set((prev) =>
+        prev.activeSessionId === sessionId
+          ? {
+              status: "error" as const,
+              errorMessage: error instanceof Error ? error.message : "Unknown send error",
+            }
+          : {},
+      );
     } finally {
       const after = get();
-      if (isStreamActive(after.status)) return;
       const sid = String(queueSessionId ?? "").trim();
       if (!sid) return;
+      if (isSessionStreaming(after, sid)) return;
       const idx = after.pendingMessages.findIndex((message) => message.sessionId.trim() === sid);
       if (idx < 0) return;
       const next = after.pendingMessages[idx];
@@ -885,7 +936,7 @@ export const useChatStore = create<ChatStore>((set, get) => ({
     const state = get();
     const sessionId = state.activeSessionId;
     if (!sessionId) return;
-    if (state.status === "sending" || state.status === "streaming") return;
+    if (isSessionStreaming(state, sessionId)) return;
 
     const nextContent = input.content.trim();
     if (!nextContent) return;
@@ -956,8 +1007,6 @@ export const useChatStore = create<ChatStore>((set, get) => ({
 
     set((prev) => ({
       messages: mergeSessionMessages(prev.messages, sessionId, truncatedSessionMessages),
-      status: "sending",
-      streamingSessionId: sessionId,
       errorMessage: null,
       responseVersionsByUserMessageId: {
         ...Object.fromEntries(
@@ -982,26 +1031,24 @@ export const useChatStore = create<ChatStore>((set, get) => ({
           : session
       ),
     }));
+    setSessionStream(set, sessionId, { status: "sending", activeRequestId: "" });
 
     try {
       const request = toSdkRequest(sessionId, state.activeModel, truncatedSessionMessages);
       const { requestId } = await client.sendMessage(request);
-      set({ status: "streaming", activeRequestId: requestId, streamingSessionId: sessionId });
+      setSessionStream(set, sessionId, { status: "streaming", activeRequestId: requestId });
 
       for await (const chunk of client.stream(requestId)) {
         if (chunk.cancelled) {
-          set({ status: "idle", errorMessage: null, activeRequestId: null, streamingSessionId: null });
+          setSessionStream(set, sessionId, null);
+          set({ errorMessage: null });
           break;
         }
 
         if (chunk.error) {
           const complianceMessage = toComplianceMessage(chunk.error.code, chunk.error.message);
-          set({
-            status: "idle",
-            errorMessage: complianceMessage,
-            activeRequestId: null,
-            streamingSessionId: null,
-          });
+          setSessionStream(set, sessionId, null);
+          set({ errorMessage: complianceMessage });
           set((prev) => ({
             messages: prev.messages.map((message) =>
               message.id === replacementAssistant.id ? { ...message, content: complianceMessage } : message
@@ -1051,7 +1098,7 @@ export const useChatStore = create<ChatStore>((set, get) => ({
         }
 
         if (chunk.done) {
-          set({ status: "idle", activeRequestId: null, streamingSessionId: null });
+          setSessionStream(set, sessionId, null);
         }
       }
 
@@ -1067,12 +1114,15 @@ export const useChatStore = create<ChatStore>((set, get) => ({
         }
       }
     } catch (error) {
-      set({
-        status: "error",
-        errorMessage: error instanceof Error ? error.message : "Unknown send error",
-        activeRequestId: null,
-        streamingSessionId: null,
-      });
+      setSessionStream(set, sessionId, null);
+      set((prev) =>
+        prev.activeSessionId === sessionId
+          ? {
+              status: "error" as const,
+              errorMessage: error instanceof Error ? error.message : "Unknown send error",
+            }
+          : {},
+      );
     }
   },
 
@@ -1080,7 +1130,7 @@ export const useChatStore = create<ChatStore>((set, get) => ({
     const state = get();
     const sessionId = state.activeSessionId;
     if (!sessionId) return;
-    if (state.status === "sending" || state.status === "streaming") return;
+    if (isSessionStreaming(state, sessionId)) return;
 
     const sessionMessages = getSessionMessages(state.messages, sessionId);
     const { assistantIndex, userIndex } = findAssistantAndRelatedUserIndex(sessionMessages, assistantMessageId);
@@ -1141,8 +1191,6 @@ export const useChatStore = create<ChatStore>((set, get) => ({
 
     set((prev) => ({
       messages: mergeSessionMessages(prev.messages, sessionId, nextSessionMessages),
-      status: "sending",
-      streamingSessionId: sessionId,
       errorMessage: null,
       responseVersionsByUserMessageId: {
         ...prev.responseVersionsByUserMessageId,
@@ -1162,26 +1210,24 @@ export const useChatStore = create<ChatStore>((set, get) => ({
           : session
       ),
     }));
+    setSessionStream(set, sessionId, { status: "sending", activeRequestId: "" });
 
     try {
       const request = toSdkRequest(sessionId, state.activeModel, regenerateRequestMessages);
       const { requestId } = await client.sendMessage(request);
-      set({ status: "streaming", activeRequestId: requestId, streamingSessionId: sessionId });
+      setSessionStream(set, sessionId, { status: "streaming", activeRequestId: requestId });
 
       for await (const chunk of client.stream(requestId)) {
         if (chunk.cancelled) {
-          set({ status: "idle", errorMessage: null, activeRequestId: null, streamingSessionId: null });
+          setSessionStream(set, sessionId, null);
+          set({ errorMessage: null });
           break;
         }
 
         if (chunk.error) {
           const complianceMessage = toComplianceMessage(chunk.error.code, chunk.error.message);
-          set({
-            status: "idle",
-            errorMessage: complianceMessage,
-            activeRequestId: null,
-            streamingSessionId: null,
-          });
+          setSessionStream(set, sessionId, null);
+          set({ errorMessage: complianceMessage });
           set((prev) => ({
             messages: prev.messages.map((message) =>
               message.id === replacementAssistant.id ? { ...message, content: complianceMessage } : message
@@ -1231,7 +1277,7 @@ export const useChatStore = create<ChatStore>((set, get) => ({
         }
 
         if (chunk.done) {
-          set({ status: "idle", activeRequestId: null, streamingSessionId: null });
+          setSessionStream(set, sessionId, null);
         }
       }
 
@@ -1247,12 +1293,15 @@ export const useChatStore = create<ChatStore>((set, get) => ({
         }
       }
     } catch (error) {
-      set({
-        status: "error",
-        errorMessage: error instanceof Error ? error.message : "Unknown send error",
-        activeRequestId: null,
-        streamingSessionId: null,
-      });
+      setSessionStream(set, sessionId, null);
+      set((prev) =>
+        prev.activeSessionId === sessionId
+          ? {
+              status: "error" as const,
+              errorMessage: error instanceof Error ? error.message : "Unknown send error",
+            }
+          : {},
+      );
     }
   },
 
@@ -1433,7 +1482,10 @@ export const useChatStore = create<ChatStore>((set, get) => ({
   },
 
   async cancel(client) {
-    const requestId = get().activeRequestId;
+    const state = get();
+    const sessionId = state.activeSessionId;
+    if (!sessionId) return;
+    const requestId = getSessionRequestId(state, sessionId);
     if (!requestId) return;
     await client.cancel(requestId);
   },
