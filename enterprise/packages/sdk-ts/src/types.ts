@@ -33,6 +33,8 @@ export type ChatChunk = {
   delta?: string;
   done: boolean;
   usage?: ChatUsage;
+  /** 用户主动中断（非错误）：保留已生成内容，不视为失败。 */
+  cancelled?: boolean;
   error?: {
     code: string;
     message: string;

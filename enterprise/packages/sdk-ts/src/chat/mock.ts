@@ -61,10 +61,7 @@ export class MockChatClient implements ChatClient {
         yield {
           requestId,
           done: true,
-          error: {
-            code: "REQUEST_CANCELLED",
-            message: "Request has been cancelled by client.",
-          },
+          cancelled: true,
         };
         return;
       }

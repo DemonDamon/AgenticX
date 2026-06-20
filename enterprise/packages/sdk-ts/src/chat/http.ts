@@ -211,14 +211,18 @@ export class HttpChatClient implements ChatClient {
       }
       yield { requestId, done: true };
     } catch (error) {
-      yield {
-        requestId,
-        done: true,
-        error: {
-          code: pending.cancelled ? "49900" : "50000",
-          message: pending.cancelled ? "request cancelled" : error instanceof Error ? error.message : "request failed",
-        },
-      };
+      if (pending.cancelled) {
+        yield { requestId, done: true, cancelled: true };
+      } else {
+        yield {
+          requestId,
+          done: true,
+          error: {
+            code: "50000",
+            message: error instanceof Error ? error.message : "request failed",
+          },
+        };
+      }
     } finally {
       this.pending.delete(requestId);
       this.controllers.delete(requestId);
