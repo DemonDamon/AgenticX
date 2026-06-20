@@ -812,7 +812,7 @@ export function MessageList({
 
       {showJumpToBottomFab ? (
         <div className="pointer-events-none absolute inset-x-0 bottom-3 z-30 px-4 sm:px-6">
-          <div className="mx-auto flex w-full max-w-4xl justify-end">
+          <div className="mx-auto flex w-full max-w-4xl justify-center">
             <button
               type="button"
               className="pointer-events-auto flex h-9 w-9 items-center justify-center rounded-full border border-border/80 bg-background/95 text-foreground shadow-lg backdrop-blur-sm transition hover:bg-muted/80"
