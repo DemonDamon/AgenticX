@@ -775,6 +775,11 @@ export const useChatStore = create<ChatStore>((set, get) => ({
       set({ status: "streaming", activeRequestId: requestId, streamingSessionId: sessionId });
 
       for await (const chunk of client.stream(requestId)) {
+        if (chunk.cancelled) {
+          set({ status: "idle", errorMessage: null, activeRequestId: null, streamingSessionId: null });
+          break;
+        }
+
         if (chunk.error) {
           const complianceMessage = toComplianceMessage(chunk.error.code, chunk.error.message);
           set({
@@ -984,6 +989,11 @@ export const useChatStore = create<ChatStore>((set, get) => ({
       set({ status: "streaming", activeRequestId: requestId, streamingSessionId: sessionId });
 
       for await (const chunk of client.stream(requestId)) {
+        if (chunk.cancelled) {
+          set({ status: "idle", errorMessage: null, activeRequestId: null, streamingSessionId: null });
+          break;
+        }
+
         if (chunk.error) {
           const complianceMessage = toComplianceMessage(chunk.error.code, chunk.error.message);
           set({
@@ -1159,6 +1169,11 @@ export const useChatStore = create<ChatStore>((set, get) => ({
       set({ status: "streaming", activeRequestId: requestId, streamingSessionId: sessionId });
 
       for await (const chunk of client.stream(requestId)) {
+        if (chunk.cancelled) {
+          set({ status: "idle", errorMessage: null, activeRequestId: null, streamingSessionId: null });
+          break;
+        }
+
         if (chunk.error) {
           const complianceMessage = toComplianceMessage(chunk.error.code, chunk.error.message);
           set({
@@ -1421,7 +1436,6 @@ export const useChatStore = create<ChatStore>((set, get) => ({
     const requestId = get().activeRequestId;
     if (!requestId) return;
     await client.cancel(requestId);
-    set({ status: "idle", activeRequestId: null, streamingSessionId: null });
   },
 
   deleteMessage(messageId) {
