@@ -129,7 +129,7 @@ export function WorkspaceShell({ userEmail, userScopes }: WorkspaceShellProps) {
   const switchSession = useChatStore((s) => s.switchSession);
   const renameSessionInStore = useChatStore((s) => s.renameSession);
   const deleteSessionInStore = useChatStore((s) => s.deleteSession);
-  const streamingSessionId = useChatStore((s) => s.streamingSessionId);
+  const streamStateBySessionId = useChatStore((s) => s.streamStateBySessionId);
 
   const history = React.useMemo<HistorySession[]>(
     () =>
@@ -316,7 +316,7 @@ export function WorkspaceShell({ userEmail, userScopes }: WorkspaceShellProps) {
                             key={item.id}
                             session={item}
                             active={activeSessionId === item.id}
-                            isGenerating={streamingSessionId === item.id}
+                            isGenerating={Boolean(streamStateBySessionId[item.id])}
                             onSelect={() => onSelectSession(item.id)}
                             onRename={() => onRenameSession(item.id)}
                             onDelete={() => onDeleteSession(item.id)}
@@ -342,10 +342,10 @@ export function WorkspaceShell({ userEmail, userScopes }: WorkspaceShellProps) {
                             : "text-muted-foreground hover:bg-muted hover:text-foreground",
                         ].join(" ")}
                         aria-label={
-                          streamingSessionId === item.id ? `${item.title} · ${t("sessionGenerating")}` : item.title
+                          streamStateBySessionId[item.id] ? `${item.title} · ${t("sessionGenerating")}` : item.title
                         }
                       >
-                        {streamingSessionId === item.id ? (
+                        {streamStateBySessionId[item.id] ? (
                           <SessionGeneratingDots className="text-foreground/75" />
                         ) : (
                           <MessageSquare className="h-4 w-4" />
@@ -353,7 +353,7 @@ export function WorkspaceShell({ userEmail, userScopes }: WorkspaceShellProps) {
                       </button>
                     </TooltipTrigger>
                     <TooltipContent side="right">
-                      {streamingSessionId === item.id ? `${item.title} · ${t("sessionGenerating")}` : item.title}
+                      {streamStateBySessionId[item.id] ? `${item.title} · ${t("sessionGenerating")}` : item.title}
                     </TooltipContent>
                   </Tooltip>
                 ))}
