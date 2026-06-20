@@ -7,6 +7,11 @@ import { ReasoningBlock } from "../atoms/ReasoningBlock";
 import { ToolCallCard } from "../atoms/ToolCallCard";
 import { parseAssistantContent } from "../../assistant-content";
 import { isNearBottom, shouldShowScrollToBottomFab } from "../../utils/scroll-near-bottom";
+import {
+  hasActiveTextSelection,
+  shouldCancelLongPressOnMove,
+  shouldStartLongPress,
+} from "../../utils/message-list-selection-gesture";
 import { ASSISTANT_MD_COMPONENTS } from "../../markdown/assistant-markdown-components";
 import "../../markdown/chat-prism-themes.css";
 
@@ -71,6 +76,14 @@ function IconCheck({ className }: { className?: string }) {
   return (
     <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}>
       <polyline points="20 6 9 17 4 12"/>
+    </svg>
+  );
+}
+
+function IconListChecks({ className }: { className?: string }) {
+  return (
+    <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}>
+      <path d="M3 5h18"/><path d="M3 12h18"/><path d="M3 19h18"/><path d="m9 5 2 2 4-4"/><path d="m9 12 2 2 4-4"/><path d="m9 19 2 2 4-4"/>
     </svg>
   );
 }
@@ -177,6 +190,8 @@ export function MessageList({
   const [editingMessageId, setEditingMessageId] = React.useState<string | null>(null);
   const [editingDraft, setEditingDraft] = React.useState("");
   const longPressTimerRef = React.useRef<Map<string, NodeJS.Timeout>>(new Map());
+  const activeLongPressRef = React.useRef<{ messageId: string; x: number; y: number } | null>(null);
+  const LONG_PRESS_MS = 500;
 
   const flushJumpToBottomFab = React.useCallback(() => {
     const container = parentRef.current;
@@ -281,13 +296,35 @@ export function MessageList({
     setIsSelectionMode(false);
   };
 
-  // 长按触发多选模式
-  const handleLongPress = (messageId: string) => {
-    if (!isSelectionMode) {
-      setIsSelectionMode(true);
-      setSelectedMessages(new Set([messageId]));
+  const cancelLongPress = React.useCallback((messageId: string) => {
+    const timer = longPressTimerRef.current.get(messageId);
+    if (timer) {
+      clearTimeout(timer);
+      longPressTimerRef.current.delete(messageId);
     }
-  };
+    if (activeLongPressRef.current?.messageId === messageId) {
+      activeLongPressRef.current = null;
+    }
+  }, []);
+
+  const enterSelectionMode = React.useCallback((messageId: string) => {
+    if (hasActiveTextSelection(window.getSelection()?.toString())) return;
+    setIsSelectionMode(true);
+    setSelectedMessages(new Set([messageId]));
+  }, []);
+
+  const scheduleLongPress = React.useCallback(
+    (messageId: string, clientX: number, clientY: number) => {
+      activeLongPressRef.current = { messageId, x: clientX, y: clientY };
+      const timer = setTimeout(() => {
+        longPressTimerRef.current.delete(messageId);
+        activeLongPressRef.current = null;
+        enterSelectionMode(messageId);
+      }, LONG_PRESS_MS);
+      longPressTimerRef.current.set(messageId, timer);
+    },
+    [enterSelectionMode],
+  );
 
   if (messages.length === 0) {
     return (
@@ -367,18 +404,18 @@ export function MessageList({
             const canShowPreviousRetryVersion = !!retryVersionMeta && retryVersionMeta.activeIndex > 0;
             const canShowNextRetryVersion = !!retryVersionMeta && retryVersionMeta.activeIndex < retryVersionMeta.total - 1;
 
-            // 使用 ref 存储每个消息的长按计时器
-            const onPointerDown = () => {
-              const timer = setTimeout(() => handleLongPress(message.id), 500);
-              longPressTimerRef.current.set(message.id, timer);
+            const onPointerDown = (e: React.PointerEvent) => {
+              if (!shouldStartLongPress(e.pointerType)) return;
+              scheduleLongPress(message.id, e.clientX, e.clientY);
             };
-            const onPointerUp = () => {
-              const timer = longPressTimerRef.current.get(message.id);
-              if (timer) {
-                clearTimeout(timer);
-                longPressTimerRef.current.delete(message.id);
+            const onPointerMove = (e: React.PointerEvent) => {
+              const active = activeLongPressRef.current;
+              if (!active || active.messageId !== message.id) return;
+              if (shouldCancelLongPressOnMove(active.x, active.y, e.clientX, e.clientY)) {
+                cancelLongPress(message.id);
               }
             };
+            const onPointerUp = () => cancelLongPress(message.id);
 
             return (
               <div
@@ -386,6 +423,7 @@ export function MessageList({
                 className={`group/message flex w-full ${isUser ? "justify-end" : "justify-start"}`}
                 onClick={() => isSelectionMode && toggleSelection(message.id)}
                 onPointerDown={onPointerDown}
+                onPointerMove={onPointerMove}
                 onPointerUp={onPointerUp}
                 onPointerLeave={onPointerUp}
               >
@@ -567,6 +605,23 @@ export function MessageList({
                               </Button>
                             </TooltipTrigger>
                             <TooltipContent>复制</TooltipContent>
+                          </Tooltip>
+
+                          <Tooltip>
+                            <TooltipTrigger asChild>
+                              <Button
+                                variant="ghost"
+                                size="icon"
+                                className="h-7 w-7 rounded-full text-muted-foreground hover:text-foreground"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  enterSelectionMode(message.id);
+                                }}
+                              >
+                                <IconListChecks className="h-3.5 w-3.5" />
+                              </Button>
+                            </TooltipTrigger>
+                            <TooltipContent>多选</TooltipContent>
                           </Tooltip>
 
                           {isUser ? (
