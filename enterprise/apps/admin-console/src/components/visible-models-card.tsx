@@ -204,24 +204,28 @@ export function VisibleModelsCard({ target, title, hint, inheritedFromDept }: Pr
         </Badge>
       </div>
 
-      {inheritedFromDept && inheritedFromDept.modelIds.length > 0 ? (
+      {inheritedFromDept ? (
         <TooltipProvider>
           <Tooltip>
             <TooltipTrigger asChild>
               <div className="flex flex-wrap gap-1 rounded-md border border-dashed border-border bg-muted/30 px-2 py-1.5 text-xs text-muted-foreground">
-                {tUsers("detail.inheritedFromDept", {
-                  dept: inheritedFromDept.deptLabel,
-                  count: inheritedFromDept.modelIds.length,
-                })}
+                {inheritedFromDept.modelIds.length > 0
+                  ? tUsers("detail.inheritedFromDept", {
+                      dept: inheritedFromDept.deptLabel,
+                      count: inheritedFromDept.modelIds.length,
+                    })
+                  : tUsers("detail.inheritedFromDeptEmpty", { dept: inheritedFromDept.deptLabel })}
               </div>
             </TooltipTrigger>
-            <TooltipContent side="top" className="max-w-sm">
-              <div className="space-y-0.5 font-mono text-[10px]">
-                {inheritedFromDept.modelIds.map((id) => (
-                  <div key={id}>{id}</div>
-                ))}
-              </div>
-            </TooltipContent>
+            {inheritedFromDept.modelIds.length > 0 ? (
+              <TooltipContent side="top" className="max-w-sm">
+                <div className="space-y-0.5 font-mono text-[10px]">
+                  {inheritedFromDept.modelIds.map((id) => (
+                    <div key={id}>{id}</div>
+                  ))}
+                </div>
+              </TooltipContent>
+            ) : null}
           </Tooltip>
         </TooltipProvider>
       ) : null}
