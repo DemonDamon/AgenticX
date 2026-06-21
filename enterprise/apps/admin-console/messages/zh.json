@@ -585,6 +585,10 @@
           "updatedAt": "更新时间",
           "visibleModels": "可见模型分配",
           "visibleModelsHint": "勾选后该用户登录前台仅能看到这些模型；未勾选时无可用模型",
+          "visibleModelsExtraHint": "这里勾选的是该用户在部门基线之上额外可见的模型。",
+          "inheritedFromDept": "继承自部门 {dept}：{count} 个",
+          "applyToDept": "应用到本部门全员",
+          "applyToDeptSuccess": "已同步到部门可见模型",
           "selectedCount": "已选 {selected} / 可选 {total}",
           "noModelsHint": "尚无可分配模型，请先到「平台配置 · 模型服务」启用厂商与模型。",
           "edit": "编辑",
@@ -664,6 +668,11 @@
         "moveToRoot": "（移至根级）",
         "confirmMove": "确认移动",
         "confirmDelete": "确定要删除此部门吗？下级部门及成员将被解绑。",
+        "visibleModels": {
+          "title": "可见模型分配",
+          "hint": "勾选后该部门成员默认可见这些模型；用户级配置仍会叠加。",
+          "clear": "清空本部门模型"
+        },
         "toast": {
           "loadFailed": "加载失败",
           "networkError": "网络错误",

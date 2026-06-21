@@ -92,9 +92,10 @@ const LEGACY_ADMIN_EMAIL_TO_USER_ID: Record<string, string> = {
   "audit@agenticx.local": "u_003",
 };
 
-function resolveAssignmentKeys(userId: string, email?: string): string[] {
+function resolveAssignmentKeys(userId: string, email?: string, deptId?: string | null): string[] {
   const keys = new Set<string>();
   if (userId) keys.add(userId);
+  if (deptId) keys.add(`dept:${deptId}`);
   if (!email) return Array.from(keys);
   const normalizedEmail = email.trim().toLowerCase();
   if (!normalizedEmail) return Array.from(keys);
@@ -107,12 +108,16 @@ function resolveAssignmentKeys(userId: string, email?: string): string[] {
   return Array.from(keys);
 }
 
-/** 当前用户最终可见模型 = （启用的 provider × model）∩ 管理员分配集合。 */
-export async function listAvailableModelsForUser(userId: string, email?: string): Promise<PortalModelOption[]> {
+/** 当前用户最终可见模型 = （启用的 provider × model）∩ 管理员分配集合（用户 ∪ email ∪ 部门）。 */
+export async function listAvailableModelsForUser(
+  userId: string,
+  email?: string,
+  deptId?: string | null,
+): Promise<PortalModelOption[]> {
   const providers = await readProviders();
   const userMap = await readUserModels();
   const allowed = new Set<string>();
-  for (const key of resolveAssignmentKeys(userId, email)) {
+  for (const key of resolveAssignmentKeys(userId, email, deptId)) {
     for (const modelId of userMap[key] ?? []) {
       if (modelId) allowed.add(modelId);
     }
