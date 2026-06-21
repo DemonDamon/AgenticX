@@ -46,6 +46,10 @@ import {
 } from "lucide-react";
 import { VisibleModelsEditor } from "../../../components/visible-models-editor";
 
+/** 左右栏 header 统一固定高度，保证 border-b 在同一水平线 */
+const PANEL_HEADER_ROW =
+  "flex h-14 shrink-0 items-center border-b border-border";
+
 type ApiDept = {
   id: string;
   tenantId: string;
@@ -60,6 +64,22 @@ type ApiDept = {
 };
 
 type ApiEnvelope<T> = { code: string; message: string; data?: T };
+
+type DeptMember = {
+  id: string;
+  email: string;
+  displayName: string;
+  status: "active" | "disabled" | "locked";
+  jobTitle: string | null;
+};
+
+type DeptMembersResp = ApiEnvelope<{ items: DeptMember[]; total: number }>;
+
+const MEMBER_STATUS_VARIANT = {
+  active: "success",
+  disabled: "warning",
+  locked: "destructive",
+} as const;
 
 function mapApiToNode(n: ApiDept): DepartmentTreeNode {
   return {
@@ -202,9 +222,13 @@ function collectAllIds(nodes: DepartmentTreeNode[]): string[] {
 
 export default function DepartmentsPage() {
   const t = useTranslations("pages.iam.departments");
+  const tu = useTranslations("pages.iam.users");
   const tc = useTranslations("common");
   const [tree, setTree] = useState<DepartmentTreeNode[]>([]);
   const [loading, setLoading] = useState(true);
+  const [deptMembers, setDeptMembers] = useState<DeptMember[]>([]);
+  const [deptMembersTotal, setDeptMembersTotal] = useState(0);
+  const [membersLoading, setMembersLoading] = useState(false);
 
   // 左侧树：展开 id 集合（默认全展开）
   const [expandedIds, setExpandedIds] = useState<Set<string>>(new Set());
@@ -247,6 +271,36 @@ export default function DepartmentsPage() {
   useEffect(() => {
     void loadTree();
   }, [loadTree]);
+
+  const loadDeptMembers = useCallback(async (deptId: string) => {
+    setMembersLoading(true);
+    try {
+      const params = new URLSearchParams({ deptId, limit: "20", deptScope: "direct" });
+      const res = await adminFetch(`/api/admin/users?${params.toString()}`, { cache: "no-store" });
+      const json = (await res.json()) as DeptMembersResp;
+      if (res.ok && json.data) {
+        setDeptMembers(json.data.items);
+        setDeptMembersTotal(json.data.total);
+      } else {
+        setDeptMembers([]);
+        setDeptMembersTotal(0);
+      }
+    } catch {
+      setDeptMembers([]);
+      setDeptMembersTotal(0);
+    } finally {
+      setMembersLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!currentDeptId) {
+      setDeptMembers([]);
+      setDeptMembersTotal(0);
+      return;
+    }
+    void loadDeptMembers(currentDeptId);
+  }, [currentDeptId, loadDeptMembers]);
 
   const currentNode = currentDeptId ? findNode(tree, currentDeptId) : null;
   const childNodes = currentNode ? currentNode.children : tree;
@@ -412,7 +466,7 @@ export default function DepartmentsPage() {
         {/* ── 左侧部门树 ── */}
         <aside className="flex w-60 shrink-0 flex-col border-r border-border">
           {/* 树头部 */}
-          <div className="border-b border-border px-3 py-3">
+          <div className={`${PANEL_HEADER_ROW} px-3`}>
             <span className="text-sm font-semibold text-foreground">{t("treeTitle")}</span>
           </div>
 
@@ -460,8 +514,8 @@ export default function DepartmentsPage() {
             /* 选中了某个部门 */
             <div className="flex flex-col">
               {/* 部门头部信息区 */}
-              <div className="flex flex-col gap-3 border-b border-border p-3 px-6">
-                <div className="flex flex-wrap items-center justify-between gap-4">
+              <div className={`${PANEL_HEADER_ROW} px-6`}>
+                <div className="flex min-w-0 flex-1 flex-wrap items-center justify-between gap-4">
                   <div className="flex items-center gap-3">
                     <h2 className="flex flex-wrap items-center gap-3 text-xl font-bold text-foreground">
                       {currentNode.name}
@@ -508,18 +562,18 @@ export default function DepartmentsPage() {
 
                   <div className="flex flex-wrap gap-2">
                     <Button
-                      variant="outline"
+                      variant="ghost"
                       size="icon"
-                      className="h-8 w-8"
+                      className="h-8 w-8 text-muted-foreground hover:bg-muted hover:text-foreground"
                       title={t("edit")}
                       onClick={() => { setNameEditMode(false); setDeptSettingsOpen(true); }}
                     >
                       <Pencil className="h-4 w-4" />
                     </Button>
                     <Button
-                      variant="outline"
+                      variant="ghost"
                       size="icon"
-                      className="h-8 w-8"
+                      className="h-8 w-8 text-muted-foreground hover:bg-muted hover:text-foreground"
                       title={t("move")}
                       onClick={() => { setMoveParentId(currentNode.parentId ?? null); setMoveOpen(true); }}
                     >
@@ -538,10 +592,69 @@ export default function DepartmentsPage() {
                 </div>
               </div>
 
-              {/* 子部门卡片网格 */}
-              <div className="p-6 pb-10">
+              {/* 成员 + 子部门 */}
+              <div className="flex flex-col gap-8 p-6 pb-10">
+                <section>
+                  <div className="mb-3 flex items-center justify-between gap-3">
+                    <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+                      {t("membersSectionLabel")}
+                    </p>
+                    <Link
+                      href={`/iam/users?dept=${currentNode.id}`}
+                      className="text-xs text-primary transition-colors hover:underline"
+                    >
+                      {t("membersViewAll")}
+                    </Link>
+                  </div>
+                  {membersLoading ? (
+                    <div className="flex items-center gap-2 py-6 text-sm text-muted-foreground">
+                      <RefreshCw className="h-3.5 w-3.5 animate-spin" />
+                      {t("membersLoading")}
+                    </div>
+                  ) : deptMembers.length === 0 ? (
+                    <p className="rounded-lg border border-dashed border-border px-4 py-6 text-center text-sm text-muted-foreground">
+                      {t("membersEmpty")}
+                    </p>
+                  ) : (
+                    <>
+                      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
+                        {deptMembers.map((member) => (
+                          <div
+                            key={member.id}
+                            className="flex items-center gap-3 rounded-lg border border-border bg-card p-3"
+                          >
+                            <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-primary/10 text-sm font-semibold text-primary">
+                              {member.displayName.slice(0, 1) || "?"}
+                            </span>
+                            <div className="min-w-0 flex-1">
+                              <div className="truncate text-sm font-medium text-foreground">
+                                {member.displayName}
+                              </div>
+                              <div className="truncate text-xs text-muted-foreground">{member.email}</div>
+                              {member.jobTitle ? (
+                                <div className="truncate text-xs text-muted-foreground">{member.jobTitle}</div>
+                              ) : null}
+                            </div>
+                            <Badge variant={MEMBER_STATUS_VARIANT[member.status]}>
+                              {tu(`status.${member.status}`)}
+                            </Badge>
+                          </div>
+                        ))}
+                      </div>
+                      {deptMembersTotal > deptMembers.length && (
+                        <p className="mt-3 text-xs text-muted-foreground">
+                          {t("membersMore", {
+                            shown: deptMembers.length,
+                            total: deptMembersTotal,
+                          })}
+                        </p>
+                      )}
+                    </>
+                  )}
+                </section>
+
                 {(childNodes.length > 0 || true) && (
-                <div>
+                <section>
                   <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
                     {childNodes.map((child) => (
                       <Card
@@ -590,17 +703,17 @@ export default function DepartmentsPage() {
                       <span className="text-sm font-medium">{t("newSubDept")}</span>
                     </button>
                   </div>
-                </div>
+                </section>
               )}
               </div>
             </div>
           ) : (
             /* 根级：显示所有顶级部门卡片 */
             <div className="flex flex-col">
-              <div className="flex items-center justify-between border-b border-border p-3 px-6">
-                <div className="flex items-center gap-3">
+              <div className={`${PANEL_HEADER_ROW} px-6`}>
+                <div className="flex min-w-0 flex-1 items-center gap-3">
                   <h2 className="text-xl font-bold text-foreground">{t("rootLabel")}</h2>
-                  <p className="text-xs text-muted-foreground ml-2">{t("rootHint")}</p>
+                  <p className="text-xs text-muted-foreground">{t("rootHint")}</p>
                 </div>
               </div>
               <div className="p-6 pb-10">
