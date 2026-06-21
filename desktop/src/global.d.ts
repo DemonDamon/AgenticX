@@ -913,6 +913,13 @@ declare global {
         updated?: string[];
         error?: string;
       }>;
+      resolveLocalPath: (path: string) => Promise<{
+        ok: boolean;
+        resolvedPath?: string;
+        isDirectory?: boolean;
+        isFile?: boolean;
+        error?: string;
+      }>;
       shellOpenPath: (path: string) => Promise<{ ok: boolean; error?: string }>;
       shellShowItemInFolder: (path: string) => Promise<{ ok: boolean; error?: string }>;
       connectMcp: (payload: { sessionId: string; name: string }) => Promise<{ ok: boolean; error?: string }>;

@@ -625,20 +625,35 @@ export function WorkspacePanel({
   const openFileByAbsolutePath = async (absPathRaw: string) => {
     const absPath = String(absPathRaw || "").trim();
     if (!absPath) return;
+    setErrorText("");
+
+    const resolved = await window.agenticxDesktop.resolveLocalPath(absPath);
+    if (resolved.ok && resolved.isDirectory && resolved.resolvedPath) {
+      const opened = await window.agenticxDesktop.shellOpenPath(resolved.resolvedPath);
+      if (!opened.ok) {
+        setErrorText(opened.error ?? "无法打开目录");
+      }
+      return;
+    }
+    if (resolved.ok === false && resolved.error === "path not found") {
+      setErrorText("路径不存在");
+      return;
+    }
+
+    const targetPath = resolved.ok && resolved.resolvedPath ? resolved.resolvedPath : absPath;
     const browseSessionId = getBrowseSessionId();
     if (!browseSessionId) {
       setErrorText("请先发送一条消息创建会话后再预览文件");
       return;
     }
-    setErrorText("");
     let workspaces = taskspaces;
     if (workspaces.length === 0) {
       const loaded = await loadTaskspaces();
       workspaces = loaded ?? [];
     }
-    let match = findTaskspaceForAbsPath(workspaces, absPath);
+    let match = findTaskspaceForAbsPath(workspaces, targetPath);
     if (!match) {
-      const parent = parentDirectory(absPath);
+      const parent = parentDirectory(targetPath);
       const addResult = await window.agenticxDesktop.addTaskspace({
         sessionId: browseSessionId,
         path: parent,
@@ -650,11 +665,11 @@ export function WorkspacePanel({
       }
       const reloaded = await loadTaskspaces();
       workspaces = reloaded ?? workspaces;
-      match = findTaskspaceForAbsPath(workspaces, absPath);
+      match = findTaskspaceForAbsPath(workspaces, targetPath);
       if (!match && addResult.workspace) {
         match = {
           taskspaceId: addResult.workspace.id,
-          relPath: relativePathFromRoot(addResult.workspace.path, absPath),
+          relPath: relativePathFromRoot(addResult.workspace.path, targetPath),
         };
       }
     }
