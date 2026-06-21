@@ -5981,6 +5981,7 @@ export function SettingsPanel({
   const [workspaceDirSaving, setWorkspaceDirSaving] = useState(false);
 
   const workspaceDirDirty = workspaceDirDraft.trim() !== workspaceDirSaved.trim();
+  const [gwEnabled, setGwEnabled] = useState(false);
   const [gwUrl, setGwUrl] = useState("");
   const [gwDeviceId, setGwDeviceId] = useState("");
   const [gwToken, setGwToken] = useState("");
@@ -6988,6 +6989,7 @@ export function SettingsPanel({
   }, [inlineRenameProviderId, inlineRenameValue, cancelInlineProviderRename]);
 
   const handleSave = async () => {
+    try {
     const permRes = await permissionsPanelRef.current?.flushPermissions?.();
     if (permRes && !permRes.ok) {
       const msg =
@@ -7060,9 +7062,13 @@ export function SettingsPanel({
         message: "重启后连接模式切换才会生效。",
         confirmText: "知道了",
       });
+      onClose();
       return;
     }
     onClose();
+    } catch (err) {
+      window.alert(`保存设置失败：${err instanceof Error ? err.message : String(err)}`);
+    }
   };
 
   const runMcpToggleRequest = useCallback(async (name: string, next: boolean) => {
