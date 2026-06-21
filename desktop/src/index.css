@@ -106,6 +106,21 @@ body {
   border-top: none;
 }
 
+/* TableBlock outer frame matches CodeBlock; grid lines stay inside the wrapper only. */
+.agx-table-block table th,
+.agx-table-block table td {
+  border: none;
+  border-bottom: 1px solid var(--border-muted);
+}
+.agx-table-block table tr th:not(:last-child),
+.agx-table-block table tr td:not(:last-child) {
+  border-right: 1px solid var(--border-muted);
+}
+.agx-table-block table tbody tr:last-child td,
+.agx-table-block table tbody tr:last-child th {
+  border-bottom: none;
+}
+
 /* KaTeX long display formulas should scroll instead of clipping in bubbles. */
 .msg-content .katex-display {
   overflow-x: auto;
