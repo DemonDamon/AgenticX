@@ -672,7 +672,7 @@
           "title": "可见模型分配",
           "hint": "父部门配置为上限；本部门仅能在父部门允许范围内再筛选；未配置则透传父级。",
           "openEditor": "配置可见模型",
-          "sheetTitle": "配置可见模型",
+          "sheetTitle": "可见模型配置",
           "parentAllowed": "继承上限：{label}（{count} 个）",
           "allEnabledParent": "全部启用模型",
           "noParentAllowed": "父级未允许任何模型",
@@ -684,6 +684,11 @@
           "cancel": "取消",
           "collapse": "收起",
           "clear": "清空本部门模型"
+        },
+        "settings": {
+          "permissionsTitle": "权限配置",
+          "securityTitle": "安全配置",
+          "comingSoon": "即将推出"
         },
         "toast": {
           "loadFailed": "加载失败",

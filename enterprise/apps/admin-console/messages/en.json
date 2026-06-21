@@ -672,7 +672,7 @@
           "title": "Visible model assignment",
           "hint": "Parent dept sets the ceiling; this dept can only narrow within parent allowance; unset passes through.",
           "openEditor": "Configure visible models",
-          "sheetTitle": "Configure visible models",
+          "sheetTitle": "Visible model config",
           "parentAllowed": "Inherited ceiling: {label} ({count})",
           "allEnabledParent": "All enabled models",
           "noParentAllowed": "Parent allows no models",
@@ -684,6 +684,11 @@
           "cancel": "Cancel",
           "collapse": "Collapse",
           "clear": "Clear department models"
+        },
+        "settings": {
+          "permissionsTitle": "Permissions",
+          "securityTitle": "Security",
+          "comingSoon": "Coming soon"
         },
         "toast": {
           "loadFailed": "Failed to load",

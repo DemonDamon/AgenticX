@@ -124,8 +124,8 @@ export function VisibleModelsEditor({ target, variant = "sheet", onClose, onSave
         setPrunedModelIds(modelsJson.data.prunedModelIds ?? []);
       }
 
-      const firstProvider = opts[0]?.provider;
-      if (firstProvider) setExpandedProviders(new Set([firstProvider]));
+      const allProviders = new Set(opts.map((o) => o.provider));
+      setExpandedProviders(allProviders);
     } finally {
       setLoading(false);
     }

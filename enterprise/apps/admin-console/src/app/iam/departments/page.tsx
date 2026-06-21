@@ -26,8 +26,6 @@ import {
   PageHeader,
   Sheet,
   SheetContent,
-  SheetDescription,
-  SheetHeader,
   SheetTitle,
   toast,
 } from "@agenticx/ui";
@@ -107,12 +105,13 @@ export default function DepartmentsPage() {
   const [createOpen, setCreateOpen] = useState(false);
   const [newName, setNewName] = useState("");
 
-  const [editOpen, setEditOpen] = useState(false);
-  const [editName, setEditName] = useState("");
-
   const [moveOpen, setMoveOpen] = useState(false);
   const [moveParentId, setMoveParentId] = useState<string | null>(null);
-  const [modelEditorOpen, setModelEditorOpen] = useState(false);
+
+  // 统一部门设置 Sheet
+  const [deptSettingsOpen, setDeptSettingsOpen] = useState(false);
+  const [nameEditMode, setNameEditMode] = useState(false);
+  const [draftName, setDraftName] = useState("");
 
   const loadTree = useCallback(async () => {
     setLoading(true);
@@ -169,12 +168,12 @@ export default function DepartmentsPage() {
     await loadTree();
   }
 
-  async function handleSaveName() {
-    if (!currentNode || !editName.trim()) return;
+  async function handleSaveNameInline() {
+    if (!currentNode || !draftName.trim()) return;
     const res = await fetch(`/api/admin/departments/${currentNode.id}`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ name: editName.trim() }),
+      body: JSON.stringify({ name: draftName.trim() }),
     });
     const json = (await res.json()) as { message?: string };
     if (!res.ok) {
@@ -182,7 +181,7 @@ export default function DepartmentsPage() {
       return;
     }
     toast.success(t("toast.nameUpdated"));
-    setEditOpen(false);
+    setNameEditMode(false);
     await loadTree();
   }
 
@@ -331,16 +330,9 @@ export default function DepartmentsPage() {
               <Button
                 variant="outline"
                 className="bg-background"
-                onClick={() => setModelEditorOpen(true)}
-              >
-                <Sparkles className="mr-2 h-4 w-4" /> {t("visibleModels.openEditor")}
-              </Button>
-              <Button
-                variant="outline"
-                className="bg-background"
                 onClick={() => {
-                  setEditName(currentNode.name);
-                  setEditOpen(true);
+                  setNameEditMode(false);
+                  setDeptSettingsOpen(true);
                 }}
               >
                 <Pencil className="mr-2 h-4 w-4" /> {t("edit")}
@@ -367,19 +359,84 @@ export default function DepartmentsPage() {
         </Card>
       )}
 
-      <Sheet open={modelEditorOpen} onOpenChange={setModelEditorOpen}>
-        <SheetContent side="right" className="flex w-full flex-col overflow-y-auto sm:max-w-xl">
-          <SheetHeader>
-            <SheetTitle>{t("visibleModels.sheetTitle")}</SheetTitle>
-            <SheetDescription>{currentNode?.name}</SheetDescription>
-          </SheetHeader>
-          {currentNode ? (
-            <VisibleModelsEditor
-              target={{ kind: "dept", id: currentNode.id }}
-              variant="sheet"
-              onClose={() => setModelEditorOpen(false)}
-            />
-          ) : null}
+      <Sheet open={deptSettingsOpen} onOpenChange={(open) => { setDeptSettingsOpen(open); if (!open) setNameEditMode(false); }}>
+        <SheetContent side="right" className="flex w-full flex-col gap-0 overflow-y-auto p-0 sm:max-w-xl">
+          {/* 无障碍隐藏标题，满足 Radix 要求 */}
+          <span className="sr-only">
+            <SheetTitle>{currentNode?.name ?? t("edit")}</SheetTitle>
+          </span>
+          {/* 顶部：部门名称大标题 + 小铅笔改名 */}
+          <div className="flex items-start justify-between gap-4 border-b border-border px-6 py-6">
+            <div className="min-w-0 flex-1">
+              {nameEditMode ? (
+                <div className="flex items-center gap-2">
+                  <input
+                    autoFocus
+                    value={draftName}
+                    onChange={(e) => setDraftName(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") void handleSaveNameInline();
+                      if (e.key === "Escape") setNameEditMode(false);
+                    }}
+                    className="flex-1 rounded-md border border-border bg-background px-3 py-1.5 text-xl font-bold leading-tight text-foreground outline-none focus:border-primary focus:ring-2 focus:ring-primary/20"
+                  />
+                  <Button size="sm" onClick={() => void handleSaveNameInline()}>{t("visibleModels.save")}</Button>
+                  <Button size="sm" variant="ghost" onClick={() => setNameEditMode(false)}>{t("visibleModels.cancel")}</Button>
+                </div>
+              ) : (
+                <div className="flex items-center gap-2">
+                  <h2 className="truncate text-2xl font-bold leading-tight text-foreground">
+                    {currentNode?.name}
+                  </h2>
+                  <button
+                    type="button"
+                    title={t("editDialogTitle")}
+                    onClick={() => { setDraftName(currentNode?.name ?? ""); setNameEditMode(true); }}
+                    className="ml-1 flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+                  >
+                    <Pencil className="h-3.5 w-3.5" />
+                  </button>
+                </div>
+              )}
+              <p className="mt-1 break-all font-mono text-xs text-muted-foreground">
+                {currentNode?.path}
+              </p>
+            </div>
+          </div>
+
+          {/* 配置区：可见模型 */}
+          <div className="flex-1 space-y-0 divide-y divide-border">
+            {/* 模型配置 */}
+            <div className="px-6 py-5">
+              <div className="mb-4 flex items-center gap-2">
+                <Sparkles className="h-4 w-4 text-primary" />
+                <span className="text-sm font-semibold text-foreground">{t("visibleModels.sheetTitle")}</span>
+              </div>
+              {currentNode ? (
+                <VisibleModelsEditor
+                  target={{ kind: "dept", id: currentNode.id }}
+                  variant="sheet"
+                  onClose={() => setDeptSettingsOpen(false)}
+                />
+              ) : null}
+            </div>
+
+            {/* 预留：权限配置 */}
+            <div className="px-6 py-5">
+              <div className="flex items-center gap-2 opacity-40">
+                <span className="text-sm font-semibold text-foreground">{t("settings.permissionsTitle")}</span>
+                <span className="rounded bg-muted px-1.5 py-0.5 text-[10px] text-muted-foreground">{t("settings.comingSoon")}</span>
+              </div>
+            </div>
+
+            {/* 预留：安全配置 */}
+            <div className="px-6 py-5">
+              <div className="flex items-center gap-2 opacity-40">
+                <span className="text-sm font-semibold text-foreground">{t("settings.securityTitle")}</span>
+                <span className="rounded bg-muted px-1.5 py-0.5 text-[10px] text-muted-foreground">{t("settings.comingSoon")}</span>
+              </div>
+            </div>
+          </div>
         </SheetContent>
       </Sheet>
 
@@ -463,34 +520,6 @@ export default function DepartmentsPage() {
               {tc("actions.cancel")}
             </Button>
             <Button onClick={() => void handleCreate()}>{t("confirmCreate")}</Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-
-      {/* 编辑对话框 */}
-      <Dialog open={editOpen} onOpenChange={setEditOpen}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>{t("editDialogTitle")}</DialogTitle>
-          </DialogHeader>
-          <div className="space-y-4 py-4">
-            <div className="space-y-2">
-              <Label>{t("newNameLabel")}</Label>
-              <Input
-                value={editName}
-                onChange={(e) => setEditName(e.target.value)}
-                autoFocus
-                onKeyDown={(e) => {
-                  if (e.key === "Enter") void handleSaveName();
-                }}
-              />
-            </div>
-          </div>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setEditOpen(false)}>
-              {tc("actions.cancel")}
-            </Button>
-<Button onClick={() => void handleSaveName()}>{tc("actions.save")}</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
