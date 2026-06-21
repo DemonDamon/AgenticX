@@ -258,6 +258,8 @@ type AgxConfig = {
   };
   automation?: { prevent_sleep?: boolean };
   skills?: { non_high_risk_auto_install?: boolean };
+  /** Meta-agent default workspace root (supports ~); mirrors config.yaml workspace_dir */
+  workspace_dir?: string;
   /** Near 官网 / Supabase 账号（桌面端轮询写入，勿在日志中打印 token） */
   agx_account?: {
     user_email?: string;
@@ -307,6 +309,33 @@ type SkillInstallPolicyConfig = {
 
 const CONFIG_DIR = path.join(os.homedir(), ".agenticx");
 const CONFIG_PATH = path.join(CONFIG_DIR, "config.yaml");
+const DEFAULT_META_WORKSPACE_DIR = path.join(CONFIG_DIR, "workspace");
+
+function expandDesktopLocalPath(input: string): string {
+  const raw = String(input || "").trim();
+  if (!raw) return "";
+  const decoded = raw.startsWith("file://") ? decodeURIComponent(raw.replace(/^file:\/\//, "")) : raw;
+  if (decoded === "~") return os.homedir();
+  if (decoded.startsWith("~/")) return path.join(os.homedir(), decoded.slice(2));
+  return path.normalize(decoded);
+}
+
+function resolveConfigWorkspaceDirRaw(cfg?: AgxConfig): string {
+  const raw = String(cfg?.workspace_dir ?? "").trim();
+  if (raw && !["none", "null"].includes(raw.toLowerCase())) return raw;
+  return "~/.agenticx/workspace";
+}
+
+function resolveMetaWorkspaceDir(cfg?: AgxConfig): string {
+  const expanded = expandDesktopLocalPath(resolveConfigWorkspaceDirRaw(cfg ?? loadAgxConfig()));
+  if (!expanded) return DEFAULT_META_WORKSPACE_DIR;
+  return path.resolve(expanded);
+}
+
+function metaWorkspaceMarkdownPath(filename: string, cfg?: AgxConfig): string {
+  return path.join(resolveMetaWorkspaceDir(cfg), filename);
+}
+
 const AUTOMATION_TASKS_PATH = path.join(CONFIG_DIR, "automation_tasks.json");
 const AUTOMATION_LOGS_DIR = path.join(CONFIG_DIR, "logs", "automation");
 
@@ -336,10 +365,6 @@ const AUTOMATION_CRONTASK_DIR = path.join(CONFIG_DIR, "crontask");
 function defaultAutomationCrontaskPath(taskId: string): string {
   return path.join(AUTOMATION_CRONTASK_DIR, String(taskId ?? "").trim());
 }
-const WORKSPACE_DIR = path.join(CONFIG_DIR, "workspace");
-const META_SOUL_PATH = path.join(WORKSPACE_DIR, "SOUL.md");
-const META_IDENTITY_PATH = path.join(WORKSPACE_DIR, "IDENTITY.md");
-const META_USER_PATH = path.join(WORKSPACE_DIR, "USER.md");
 const AVATARS_DIR = path.join(CONFIG_DIR, "avatars");
 const FEISHU_BINDING_PATH = path.join(CONFIG_DIR, "feishu_binding.json");
 const LAYOUT_PATH = path.join(CONFIG_DIR, "layout.json");
@@ -1369,8 +1394,9 @@ function saveSoulFile(pathName: string, content: string): void {
 }
 
 function saveMetaWorkspaceMarkdown(kind: MetaWorkspaceHistoryKind, content: string): void {
-  snapshotMetaWorkspaceBeforeSave(WORKSPACE_DIR, kind, content);
-  saveSoulFile(resolveMetaWorkspaceMainPath(WORKSPACE_DIR, kind), content);
+  const workspaceDir = resolveMetaWorkspaceDir();
+  snapshotMetaWorkspaceBeforeSave(workspaceDir, kind, content);
+  saveSoulFile(resolveMetaWorkspaceMainPath(workspaceDir, kind), content);
 }
 
 function resolveAvatarSoulPath(avatarId: string): string {
@@ -5838,15 +5864,6 @@ function registerIpc(): void {
     },
   );
 
-  function expandDesktopLocalPath(input: string): string {
-    const raw = String(input || "").trim();
-    if (!raw) return "";
-    const decoded = raw.startsWith("file://") ? decodeURIComponent(raw.replace(/^file:\/\//, "")) : raw;
-    if (decoded === "~") return os.homedir();
-    if (decoded.startsWith("~/")) return path.join(os.homedir(), decoded.slice(2));
-    return path.normalize(decoded);
-  }
-
   ipcMain.handle("resolve-local-path", async (_event, inputPath: string) => {
     try {
       const resolvedPath = expandDesktopLocalPath(inputPath);
@@ -6457,9 +6474,44 @@ function registerIpc(): void {
     return { ok: true };
   });
 
+  ipcMain.handle("load-workspace-config", async () => {
+    try {
+      const cfg = loadAgxConfig();
+      return {
+        ok: true,
+        workspaceDir: resolveConfigWorkspaceDirRaw(cfg),
+        resolvedPath: resolveMetaWorkspaceDir(cfg),
+      };
+    } catch (err) {
+      return { ok: false, error: String(err) };
+    }
+  });
+
+  ipcMain.handle("save-workspace-config", async (_event, payload: { workspaceDir?: string }) => {
+    try {
+      const trimmed = String(payload?.workspaceDir ?? "").trim();
+      if (!trimmed) return { ok: false, error: "工作区路径不能为空" };
+      const resolved = path.resolve(expandDesktopLocalPath(trimmed));
+      if (!resolved) return { ok: false, error: "无效路径" };
+      await fs.promises.mkdir(resolved, { recursive: true });
+      const cfg = loadAgxConfig();
+      const previous = resolveConfigWorkspaceDirRaw(cfg);
+      cfg.workspace_dir = trimmed;
+      saveAgxConfig(cfg);
+      return {
+        ok: true,
+        workspaceDir: trimmed,
+        resolvedPath: resolved,
+        changed: previous !== trimmed,
+      };
+    } catch (err) {
+      return { ok: false, error: String(err) };
+    }
+  });
+
   ipcMain.handle("load-meta-soul", async () => {
     try {
-      return { ok: true, content: loadSoulFile(META_SOUL_PATH) };
+      return { ok: true, content: loadSoulFile(metaWorkspaceMarkdownPath("SOUL.md")) };
     } catch (err) {
       return { ok: false, content: "", error: String(err) };
     }
@@ -6476,7 +6528,7 @@ function registerIpc(): void {
 
   ipcMain.handle("load-meta-identity", async () => {
     try {
-      return { ok: true, content: loadSoulFile(META_IDENTITY_PATH) };
+      return { ok: true, content: loadSoulFile(metaWorkspaceMarkdownPath("IDENTITY.md")) };
     } catch (err) {
       return { ok: false, content: "", error: String(err) };
     }
@@ -6561,7 +6613,7 @@ function registerIpc(): void {
     const kind = parseMetaWorkspaceHistoryKind(payload?.kind);
     if (!kind) return { ok: false, items: [], error: "invalid kind" };
     try {
-      return { ok: true, items: listMetaWorkspaceHistory(WORKSPACE_DIR, kind) };
+      return { ok: true, items: listMetaWorkspaceHistory(resolveMetaWorkspaceDir(), kind) };
     } catch (err) {
       return { ok: false, items: [], error: String(err) };
     }
@@ -6575,7 +6627,7 @@ function registerIpc(): void {
       if (!kind) return { ok: false, error: "invalid kind" };
       if (!id) return { ok: false, error: "id is required" };
       try {
-        const result = restoreMetaWorkspaceHistory(WORKSPACE_DIR, kind, id);
+        const result = restoreMetaWorkspaceHistory(resolveMetaWorkspaceDir(), kind, id);
         if (!result.ok) return { ok: false, error: result.error };
         return { ok: true, content: result.content };
       } catch (err) {
@@ -6587,7 +6639,7 @@ function registerIpc(): void {
   ipcMain.handle("open-meta-workspace-file", async (_event, payload: { kind?: string }) => {
     const kind = parseMetaWorkspaceHistoryKind(payload?.kind);
     if (!kind) return { ok: false, error: "invalid kind" };
-    const target = resolveMetaWorkspaceMainPath(WORKSPACE_DIR, kind);
+    const target = resolveMetaWorkspaceMainPath(resolveMetaWorkspaceDir(), kind);
     try {
       if (!fs.existsSync(target)) {
         fs.mkdirSync(path.dirname(target), { recursive: true });
@@ -6603,7 +6655,7 @@ function registerIpc(): void {
 
   ipcMain.handle("load-user-md", async () => {
     try {
-      return { ok: true, content: loadSoulFile(META_USER_PATH) };
+      return { ok: true, content: loadSoulFile(metaWorkspaceMarkdownPath("USER.md")) };
     } catch (err) {
       return { ok: false, content: "", error: String(err) };
     }
@@ -6611,7 +6663,7 @@ function registerIpc(): void {
 
   ipcMain.handle("save-user-md", async (_event, payload: { content?: string }) => {
     try {
-      saveSoulFile(META_USER_PATH, String(payload?.content ?? ""));
+      saveSoulFile(metaWorkspaceMarkdownPath("USER.md"), String(payload?.content ?? ""));
       return { ok: true };
     } catch (err) {
       return { ok: false, error: String(err) };

@@ -705,6 +705,21 @@ declare global {
       deleteGroup: (id: string) => Promise<{ ok: boolean; error?: string }>;
 
       loadConfig: () => Promise<LoadConfigResult>;
+      loadWorkspaceConfig: () => Promise<{
+        ok: boolean;
+        workspaceDir?: string;
+        resolvedPath?: string;
+        error?: string;
+      }>;
+      saveWorkspaceConfig: (payload: {
+        workspaceDir: string;
+      }) => Promise<{
+        ok: boolean;
+        workspaceDir?: string;
+        resolvedPath?: string;
+        changed?: boolean;
+        error?: string;
+      }>;
       agxAccountLoginStart: () => Promise<{
         ok: boolean;
         device_id?: string;
