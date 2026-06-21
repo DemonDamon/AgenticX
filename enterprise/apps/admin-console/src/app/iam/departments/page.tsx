@@ -24,12 +24,17 @@ import {
   Input,
   Label,
   PageHeader,
+  Sheet,
+  SheetContent,
+  SheetDescription,
+  SheetHeader,
+  SheetTitle,
   toast,
 } from "@agenticx/ui";
 import { useTranslations } from "next-intl";
 import type { DepartmentTreeNode } from "@agenticx/feature-iam";
-import { Download, Pencil, Plus, RefreshCw, Trash2, FolderTree, Users, ChevronRight, CornerRightUp } from "lucide-react";
-import { VisibleModelsCard } from "../../../components/visible-models-card";
+import { Download, Pencil, Plus, RefreshCw, Trash2, FolderTree, Users, ChevronRight, CornerRightUp, Sparkles } from "lucide-react";
+import { VisibleModelsEditor } from "../../../components/visible-models-editor";
 
 type ApiDept = {
   id: string;
@@ -107,6 +112,7 @@ export default function DepartmentsPage() {
 
   const [moveOpen, setMoveOpen] = useState(false);
   const [moveParentId, setMoveParentId] = useState<string | null>(null);
+  const [modelEditorOpen, setModelEditorOpen] = useState(false);
 
   const loadTree = useCallback(async () => {
     setLoading(true);
@@ -325,6 +331,13 @@ export default function DepartmentsPage() {
               <Button
                 variant="outline"
                 className="bg-background"
+                onClick={() => setModelEditorOpen(true)}
+              >
+                <Sparkles className="mr-2 h-4 w-4" /> {t("visibleModels.openEditor")}
+              </Button>
+              <Button
+                variant="outline"
+                className="bg-background"
                 onClick={() => {
                   setEditName(currentNode.name);
                   setEditOpen(true);
@@ -354,9 +367,21 @@ export default function DepartmentsPage() {
         </Card>
       )}
 
-      {currentNode ? (
-        <VisibleModelsCard target={{ kind: "dept", id: currentNode.id }} />
-      ) : null}
+      <Sheet open={modelEditorOpen} onOpenChange={setModelEditorOpen}>
+        <SheetContent side="right" className="flex w-full flex-col overflow-y-auto sm:max-w-xl">
+          <SheetHeader>
+            <SheetTitle>{t("visibleModels.sheetTitle")}</SheetTitle>
+            <SheetDescription>{currentNode?.name}</SheetDescription>
+          </SheetHeader>
+          {currentNode ? (
+            <VisibleModelsEditor
+              target={{ kind: "dept", id: currentNode.id }}
+              variant="sheet"
+              onClose={() => setModelEditorOpen(false)}
+            />
+          ) : null}
+        </SheetContent>
+      </Sheet>
 
       {/* 当前层级的子部门卡片网格 */}
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">

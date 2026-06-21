@@ -47,7 +47,7 @@ import {
 import { useTranslations } from "next-intl";
 import type { ColumnDef } from "@tanstack/react-table";
 import { MoreHorizontal, Pencil, Plus, RefreshCcw, ShieldCheck, ShieldX, Trash2, UserPlus, Users, Check } from "lucide-react";
-import { VisibleModelsCard } from "../../../components/visible-models-card";
+import { VisibleModelsEditor } from "../../../components/visible-models-editor";
 
 type Status = "active" | "disabled" | "locked";
 
@@ -109,7 +109,6 @@ function UsersPageContent() {
   const [selected, setSelected] = useState<AdminUser | null>(null);
   const [createOpen, setCreateOpen] = useState(false);
   const [editOpen, setEditOpen] = useState(false);
-  const [deptInheritedModelIds, setDeptInheritedModelIds] = useState<string[]>([]);
   const [deptOptions, setDeptOptions] = useState<DeptOption[]>([]);
   const [roleOptions, setRoleOptions] = useState<RoleOption[]>([]);
 
@@ -186,27 +185,6 @@ function UsersPageContent() {
       alive = false;
     };
   }, []);
-
-  useEffect(() => {
-    if (!selected) {
-      setDeptInheritedModelIds([]);
-      return;
-    }
-    let alive = true;
-    void (async () => {
-      try {
-        const res = await adminFetch(`/api/admin/users/${selected.id}/models`, { cache: "no-store" });
-        if (!res.ok) return;
-        const json = (await res.json()) as { data?: { inheritedDeptModelIds?: string[] } };
-        if (alive && json.data) setDeptInheritedModelIds(json.data.inheritedDeptModelIds ?? []);
-      } catch {
-        // 静默
-      }
-    })();
-    return () => {
-      alive = false;
-    };
-  }, [selected?.id, selected?.deptId]);
 
   const handleCreate = async (input: Record<string, unknown>) => {
     const res = await adminFetch("/api/admin/users", {
@@ -645,25 +623,16 @@ function UsersPageContent() {
                   value={<span className="font-mono text-xs">{new Date(selected.updatedAt).toLocaleString("zh-CN")}</span>}
                 />
 
-                <VisibleModelsCard
-                  target={
-                    selected
-                      ? {
-                          kind: "user",
-                          id: selected.id,
-                          applyToDeptId: selected.deptId ?? null,
-                        }
-                      : null
-                  }
-                  inheritedFromDept={
-                    selected?.deptId
-                      ? {
-                          deptLabel: deptLabelMap.get(selected.deptId) ?? selected.deptId,
-                          modelIds: deptInheritedModelIds,
-                        }
-                      : null
-                  }
-                />
+                {selected ? (
+                  <VisibleModelsEditor
+                    target={{
+                      kind: "user",
+                      id: selected.id,
+                      deptId: selected.deptId ?? null,
+                    }}
+                    variant="inline"
+                  />
+                ) : null}
               </div>
 
               <div className="flex flex-wrap gap-2 border-t border-border pt-3">

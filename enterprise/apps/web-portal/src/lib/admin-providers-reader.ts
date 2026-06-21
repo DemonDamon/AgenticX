@@ -7,6 +7,12 @@ import { enterpriseRuntimeUserVisibleModels as uvmTable } from "@agenticx/db-sch
 import { getIamDb, listDepartmentAncestorIds, migrateLegacyUserVisibleModelsIfNeeded } from "@agenticx/iam-core";
 import { eq } from "drizzle-orm";
 
+import {
+  collectUserAssignmentKeys,
+  computeEffectiveDeptAllowed,
+  computeEffectiveUserAllowed,
+  mergeUserStoredSet,
+} from "./effective-models";
 import { decryptProviderApiKey } from "./provider-api-key-crypto";
 
 export type ProviderRoute = "local" | "private-cloud" | "third-party";
@@ -39,6 +45,13 @@ export interface PortalModelOption {
   isDefault: boolean;
   capabilities?: string[];
 }
+
+const LEGACY_ADMIN_EMAIL_TO_USER_ID: Record<string, string> = {
+  "admin@agenticx.local": "u_001",
+  "owner@agenticx.local": "u_001",
+  "ops@agenticx.local": "u_002",
+  "audit@agenticx.local": "u_003",
+};
 
 function requiredTenant(): string {
   const t = process.env.DEFAULT_TENANT_ID?.trim();
@@ -82,41 +95,35 @@ async function readUserModels(): Promise<Record<string, string[]>> {
     if (!map[r.assignmentKey]) map[r.assignmentKey] = [];
     map[r.assignmentKey]!.push(r.modelId);
   }
+  for (const k of Object.keys(map)) {
+    map[k] = [...new Set(map[k]!)];
+  }
   return map;
 }
 
-const LEGACY_ADMIN_EMAIL_TO_USER_ID: Record<string, string> = {
-  "admin@agenticx.local": "u_001",
-  "owner@agenticx.local": "u_001",
-  "ops@agenticx.local": "u_002",
-  "audit@agenticx.local": "u_003",
-};
-
-async function resolveAssignmentKeys(
-  userId: string,
-  email?: string,
-  deptId?: string | null,
-): Promise<string[]> {
-  const keys = new Set<string>();
-  if (userId) keys.add(userId);
-  if (deptId) {
-    const tid = requiredTenant();
-    const chain = await listDepartmentAncestorIds(tid, deptId);
-    for (const id of chain) keys.add(`dept:${id}`);
+function flattenEnabledModelIds(providers: ProviderRecord[]): string[] {
+  const ids: string[] = [];
+  for (const p of providers) {
+    if (!p.enabled) continue;
+    for (const m of p.models) {
+      if (!m.enabled) continue;
+      ids.push(`${p.id}/${m.name}`);
+    }
   }
-  if (!email) return Array.from(keys);
-  const normalizedEmail = email.trim().toLowerCase();
-  if (!normalizedEmail) return Array.from(keys);
-
-  keys.add(`email:${normalizedEmail}`);
-
-  const legacyUserId = LEGACY_ADMIN_EMAIL_TO_USER_ID[normalizedEmail];
-  if (legacyUserId) keys.add(legacyUserId);
-
-  return Array.from(keys);
+  return ids;
 }
 
-/** 当前用户最终可见模型 = （启用的 provider × model）∩ 管理员分配集合（用户 ∪ email ∪ 部门）。 */
+function resolveUserKeys(userId: string, email?: string): string[] {
+  const keys = collectUserAssignmentKeys(userId, email);
+  if (email) {
+    const normalizedEmail = email.trim().toLowerCase();
+    const legacyUserId = LEGACY_ADMIN_EMAIL_TO_USER_ID[normalizedEmail];
+    if (legacyUserId && !keys.includes(legacyUserId)) keys.push(legacyUserId);
+  }
+  return keys;
+}
+
+/** 当前用户最终可见模型 = 启用的 provider × model，经部门/用户级联收窄。 */
 export async function listAvailableModelsForUser(
   userId: string,
   email?: string,
@@ -124,19 +131,30 @@ export async function listAvailableModelsForUser(
 ): Promise<PortalModelOption[]> {
   const providers = await readProviders();
   const userMap = await readUserModels();
-  const allowed = new Set<string>();
-  for (const key of await resolveAssignmentKeys(userId, email, deptId)) {
-    for (const modelId of userMap[key] ?? []) {
-      if (modelId) allowed.add(modelId);
-    }
+  const allEnabled = flattenEnabledModelIds(providers);
+
+  let deptEffective = allEnabled;
+  if (deptId) {
+    const tid = requiredTenant();
+    const chain = await listDepartmentAncestorIds(tid, deptId);
+    deptEffective = computeEffectiveDeptAllowed({
+      allEnabledIds: allEnabled,
+      userVisibleMap: userMap,
+      ancestorChain: chain,
+    });
   }
+
+  const userKeys = resolveUserKeys(userId, email);
+  const userStored = mergeUserStoredSet(userMap, userKeys);
+  const effectiveIds = new Set(computeEffectiveUserAllowed(deptEffective, userStored));
+
   const out: PortalModelOption[] = [];
   for (const p of providers) {
     if (!p.enabled) continue;
     for (const m of p.models) {
       if (!m.enabled) continue;
       const id = `${p.id}/${m.name}`;
-      if (!allowed.has(id)) continue;
+      if (!effectiveIds.has(id)) continue;
       out.push({
         id,
         provider: p.id,
