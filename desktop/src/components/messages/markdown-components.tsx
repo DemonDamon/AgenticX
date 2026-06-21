@@ -387,7 +387,7 @@ function ChatInlineCode({
       <button
         type="button"
         className="cursor-pointer rounded bg-surface-card px-1.5 py-0.5 font-mono text-[0.85em] text-[var(--ui-btn-primary-bg,#38bdf8)] underline-offset-2 transition hover:underline"
-        title="在工作区中预览此文件"
+        title="打开此路径（目录将在文件管理器中打开，文件在工作区预览）"
         onClick={(event) => {
           event.preventDefault();
           event.stopPropagation();

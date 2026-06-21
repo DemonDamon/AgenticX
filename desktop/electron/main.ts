@@ -5838,8 +5838,36 @@ function registerIpc(): void {
     },
   );
 
-  ipcMain.handle("shell-open-path", async (_event, path: string) => {
-    const target = String(path || "").trim();
+  function expandDesktopLocalPath(input: string): string {
+    const raw = String(input || "").trim();
+    if (!raw) return "";
+    const decoded = raw.startsWith("file://") ? decodeURIComponent(raw.replace(/^file:\/\//, "")) : raw;
+    if (decoded === "~") return os.homedir();
+    if (decoded.startsWith("~/")) return path.join(os.homedir(), decoded.slice(2));
+    return path.normalize(decoded);
+  }
+
+  ipcMain.handle("resolve-local-path", async (_event, inputPath: string) => {
+    try {
+      const resolvedPath = expandDesktopLocalPath(inputPath);
+      if (!resolvedPath) return { ok: false, error: "empty path" };
+      if (!fs.existsSync(resolvedPath)) {
+        return { ok: false, error: "path not found", resolvedPath };
+      }
+      const stat = await fs.promises.stat(resolvedPath);
+      return {
+        ok: true,
+        resolvedPath,
+        isDirectory: stat.isDirectory(),
+        isFile: stat.isFile(),
+      };
+    } catch (err) {
+      return { ok: false, error: String(err) };
+    }
+  });
+
+  ipcMain.handle("shell-open-path", async (_event, pathValue: string) => {
+    const target = expandDesktopLocalPath(pathValue);
     if (!target) return { ok: false, error: "path is required" };
     try {
       const err = await shell.openPath(target);
@@ -5851,7 +5879,7 @@ function registerIpc(): void {
   });
 
   ipcMain.handle("shell-show-item-in-folder", async (_event, fullPath: string) => {
-    const fsPath = path.normalize(String(fullPath || "").trim());
+    const fsPath = expandDesktopLocalPath(fullPath);
     if (!fsPath) return { ok: false, error: "path is required" };
     try {
       shell.showItemInFolder(fsPath);
