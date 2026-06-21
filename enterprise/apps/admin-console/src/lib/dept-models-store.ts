@@ -3,6 +3,7 @@
  * assignment_key 使用 `dept:<deptId>` 写入 enterprise_runtime_user_visible_models。
  */
 
+import { listDepartmentAncestorIds } from "@agenticx/iam-core";
 import { enterpriseRuntimeUserVisibleModels as uvmTable } from "@agenticx/db-schema";
 import { getIamDb } from "@agenticx/iam-core";
 import { and, eq } from "drizzle-orm";
@@ -52,6 +53,19 @@ export async function deleteDeptAssignment(deptId: string): Promise<void> {
   const tid = requiredTenant();
   const db = getIamDb();
   await db.delete(uvmTable).where(and(eq(uvmTable.tenantId, tid), eq(uvmTable.assignmentKey, deptKey(deptId))));
+}
+
+/** 合并直属部门及全部上级部门的可见模型（去重）。 */
+export async function getInheritedDeptModels(deptId: string): Promise<string[]> {
+  const tid = requiredTenant();
+  const chain = await listDepartmentAncestorIds(tid, deptId);
+  const merged = new Set<string>();
+  for (const id of chain) {
+    for (const modelId of await getDeptModels(id)) {
+      merged.add(modelId);
+    }
+  }
+  return [...merged];
 }
 
 export { DEPT_PREFIX, deptKey };

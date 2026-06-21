@@ -586,7 +586,8 @@
           "visibleModels": "可见模型分配",
           "visibleModelsHint": "勾选后该用户登录前台仅能看到这些模型；未勾选时无可用模型",
           "visibleModelsExtraHint": "这里勾选的是该用户在部门基线之上额外可见的模型。",
-          "inheritedFromDept": "继承自部门 {dept}：{count} 个",
+          "inheritedFromDept": "继承自部门链（含上级，直属 {dept}）：{count} 个",
+          "inheritedFromDeptEmpty": "部门 {dept} 及上级均未配置可见模型",
           "applyToDept": "应用到本部门全员",
           "applyToDeptSuccess": "已同步到部门可见模型",
           "selectedCount": "已选 {selected} / 可选 {total}",
@@ -670,7 +671,7 @@
         "confirmDelete": "确定要删除此部门吗？下级部门及成员将被解绑。",
         "visibleModels": {
           "title": "可见模型分配",
-          "hint": "勾选后该部门成员默认可见这些模型；用户级配置仍会叠加。",
+          "hint": "勾选后该部门成员默认可见这些模型；下级子部门成员也会继承；用户级配置仍会叠加。",
           "clear": "清空本部门模型"
         },
         "toast": {

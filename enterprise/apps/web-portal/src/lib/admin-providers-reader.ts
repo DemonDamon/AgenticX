@@ -4,7 +4,7 @@
 
 import { enterpriseRuntimeModelProviders as mpTable } from "@agenticx/db-schema";
 import { enterpriseRuntimeUserVisibleModels as uvmTable } from "@agenticx/db-schema";
-import { getIamDb, migrateLegacyUserVisibleModelsIfNeeded } from "@agenticx/iam-core";
+import { getIamDb, listDepartmentAncestorIds, migrateLegacyUserVisibleModelsIfNeeded } from "@agenticx/iam-core";
 import { eq } from "drizzle-orm";
 
 import { decryptProviderApiKey } from "./provider-api-key-crypto";
@@ -92,10 +92,18 @@ const LEGACY_ADMIN_EMAIL_TO_USER_ID: Record<string, string> = {
   "audit@agenticx.local": "u_003",
 };
 
-function resolveAssignmentKeys(userId: string, email?: string, deptId?: string | null): string[] {
+async function resolveAssignmentKeys(
+  userId: string,
+  email?: string,
+  deptId?: string | null,
+): Promise<string[]> {
   const keys = new Set<string>();
   if (userId) keys.add(userId);
-  if (deptId) keys.add(`dept:${deptId}`);
+  if (deptId) {
+    const tid = requiredTenant();
+    const chain = await listDepartmentAncestorIds(tid, deptId);
+    for (const id of chain) keys.add(`dept:${id}`);
+  }
   if (!email) return Array.from(keys);
   const normalizedEmail = email.trim().toLowerCase();
   if (!normalizedEmail) return Array.from(keys);
@@ -117,7 +125,7 @@ export async function listAvailableModelsForUser(
   const providers = await readProviders();
   const userMap = await readUserModels();
   const allowed = new Set<string>();
-  for (const key of resolveAssignmentKeys(userId, email, deptId)) {
+  for (const key of await resolveAssignmentKeys(userId, email, deptId)) {
     for (const modelId of userMap[key] ?? []) {
       if (modelId) allowed.add(modelId);
     }

@@ -416,6 +416,21 @@ export async function findOrCreateDepartmentPath(input: {
   return out;
 }
 
+/** 返回从直属部门沿 parent 链到根的 id 列表（含自身，直属在前） */
+export async function listDepartmentAncestorIds(tenantId: string, deptId: string): Promise<string[]> {
+  const ids: string[] = [];
+  let currentId: string | null = deptId;
+  const seen = new Set<string>();
+  while (currentId && !seen.has(currentId)) {
+    seen.add(currentId);
+    const dept = await getDepartment(tenantId, currentId);
+    if (!dept) break;
+    ids.push(dept.id);
+    currentId = dept.parentId;
+  }
+  return ids;
+}
+
 /** 返回某部门及其子部门 id 列表（含自身） */
 export async function listDepartmentSubtreeIds(tenantId: string, deptId: string): Promise<string[]> {
   const db = getIamDb();

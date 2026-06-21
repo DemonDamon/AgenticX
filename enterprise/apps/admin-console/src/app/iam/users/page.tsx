@@ -188,17 +188,17 @@ function UsersPageContent() {
   }, []);
 
   useEffect(() => {
-    if (!selected?.deptId) {
+    if (!selected) {
       setDeptInheritedModelIds([]);
       return;
     }
     let alive = true;
     void (async () => {
       try {
-        const res = await adminFetch(`/api/admin/departments/${selected.deptId}/models`, { cache: "no-store" });
+        const res = await adminFetch(`/api/admin/users/${selected.id}/models`, { cache: "no-store" });
         if (!res.ok) return;
-        const json = (await res.json()) as { data?: { modelIds: string[] } };
-        if (alive && json.data) setDeptInheritedModelIds(json.data.modelIds);
+        const json = (await res.json()) as { data?: { inheritedDeptModelIds?: string[] } };
+        if (alive && json.data) setDeptInheritedModelIds(json.data.inheritedDeptModelIds ?? []);
       } catch {
         // 静默
       }

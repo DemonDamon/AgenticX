@@ -13,6 +13,7 @@ vi.mock("@agenticx/iam-core", () => ({
     delete: mockDelete,
     insert: mockInsert,
   }),
+  listDepartmentAncestorIds: vi.fn(async (_tenantId: string, deptId: string) => [deptId, "dept-parent"]),
 }));
 
 function selectChain(rows: unknown[]) {
@@ -77,5 +78,15 @@ describe("dept-models-store", () => {
     await deleteDeptAssignment("dept-frontend");
     expect(mockDelete).toHaveBeenCalled();
     expect(mockWhereDelete).toHaveBeenCalled();
+  });
+
+  it("getInheritedDeptModels merges ancestor chain", async () => {
+    mockSelect
+      .mockReturnValueOnce(selectChain([{ modelId: "openai/gpt-3.5" }]))
+      .mockReturnValueOnce(selectChain([{ modelId: "openai/gpt-4" }]));
+
+    const { getInheritedDeptModels } = await import("../dept-models-store");
+    const ids = await getInheritedDeptModels("dept-frontend");
+    expect(ids.sort()).toEqual(["openai/gpt-3.5", "openai/gpt-4"]);
   });
 });

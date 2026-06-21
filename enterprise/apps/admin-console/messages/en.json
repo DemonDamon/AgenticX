@@ -586,7 +586,8 @@
           "visibleModels": "Visible model assignment",
           "visibleModelsHint": "Checked models appear in portal; none checked means no models available",
           "visibleModelsExtraHint": "Selections here are extra models on top of the department baseline.",
-          "inheritedFromDept": "Inherited from {dept}: {count} models",
+          "inheritedFromDept": "Inherited from department chain incl. ancestors ({dept}): {count}",
+          "inheritedFromDeptEmpty": "No visible models on {dept} or its parent departments",
           "applyToDept": "Apply to entire department",
           "applyToDeptSuccess": "Synced to department visible models",
           "selectedCount": "Selected {selected} / {total} available",
@@ -670,7 +671,7 @@
         "confirmDelete": "Delete this department? Sub-departments and members will be unbound.",
         "visibleModels": {
           "title": "Visible model assignment",
-          "hint": "Members of this department see these models by default; user-level assignments are added on top.",
+          "hint": "Members of this department see these models by default; sub-departments inherit them; user-level assignments are added on top.",
           "clear": "Clear department models"
         },
         "toast": {

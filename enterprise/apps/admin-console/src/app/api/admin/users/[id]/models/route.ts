@@ -2,6 +2,7 @@ import { getAdminUser } from "@agenticx/iam-core";
 import { NextResponse } from "next/server";
 import { requireAdminScope } from "../../../../../../lib/admin-auth";
 import { getUserModels, setUserModels } from "../../../../../../lib/user-models-store";
+import { getInheritedDeptModels } from "../../../../../../lib/dept-models-store";
 
 export async function GET(_req: Request, context: { params: Promise<{ id: string }> }) {
   const auth = await requireAdminScope(["user:read"]);
@@ -14,7 +15,11 @@ export async function GET(_req: Request, context: { params: Promise<{ id: string
   return NextResponse.json({
     code: "00000",
     message: "ok",
-    data: { userId: id, modelIds: await getUserModels(id) },
+    data: {
+      userId: id,
+      modelIds: await getUserModels(id),
+      inheritedDeptModelIds: user.deptId ? await getInheritedDeptModels(user.deptId) : [],
+    },
   });
 }
 

@@ -11,6 +11,7 @@ vi.mock("@agenticx/iam-core", () => ({
     insert: mockInsert,
   }),
   migrateLegacyUserVisibleModelsIfNeeded: vi.fn().mockResolvedValue({ action: "skipped", count: 0 }),
+  listDepartmentAncestorIds: vi.fn(async (_tenantId: string, deptId: string) => [deptId]),
 }));
 
 vi.mock("../provider-api-key-crypto", () => ({
@@ -134,5 +135,37 @@ describe("listAvailableModelsForUser", () => {
     const models = await listAvailableModelsForUser("u_001");
 
     expect(models.map((m) => m.id)).toEqual(["openai/gpt-4"]);
+  });
+
+  it("includes parent department models when deptId is a child dept", async () => {
+    const { listDepartmentAncestorIds } = await import("@agenticx/iam-core");
+    vi.mocked(listDepartmentAncestorIds).mockResolvedValueOnce(["dept-frontend", "dept-rd"]);
+
+    const providersRead = chain([], [
+      {
+        providerId: "openai",
+        displayName: "OpenAI",
+        baseUrl: "https://example.com",
+        apiKeyCipher: "",
+        enabled: true,
+        isDefault: false,
+        route: "third-party",
+        models: [
+          { name: "gpt-4", label: "GPT-4", enabled: true },
+          { name: "gpt-3.5", label: "GPT-3.5", enabled: true },
+        ],
+      },
+    ]);
+    const userModelsRead = chain([], [
+      { assignmentKey: "dept:dept-rd", modelId: "openai/gpt-4" },
+      { assignmentKey: "dept:dept-frontend", modelId: "openai/gpt-3.5" },
+    ]);
+
+    mockSelect.mockReturnValueOnce(providersRead).mockReturnValueOnce(userModelsRead);
+
+    const { listAvailableModelsForUser } = await import("../admin-providers-reader");
+    const models = await listAvailableModelsForUser("u_001", undefined, "dept-frontend");
+
+    expect(models.map((m) => m.id).sort()).toEqual(["openai/gpt-3.5", "openai/gpt-4"]);
   });
 });
