@@ -4,9 +4,24 @@
  */
 
 import { enterpriseRuntimeUserVisibleModels as uvmTable } from "@agenticx/db-schema";
-import { getIamDb, migrateLegacyUserVisibleModelsIfNeeded, resolveRuntimeAdminDir } from "@agenticx/iam-core";
+import {
+  getDepartment,
+  getIamDb,
+  listDepartmentAncestorIds,
+  migrateLegacyUserVisibleModelsIfNeeded,
+  resolveRuntimeAdminDir,
+} from "@agenticx/iam-core";
 import * as path from "node:path";
 import { eq, and } from "drizzle-orm";
+
+import {
+  clipToAllowed,
+  computeEffectiveDeptAllowed,
+  computePrunedModelIds,
+  mergeUserStoredSet,
+  collectUserAssignmentKeys,
+} from "./effective-models";
+import { listAllEnabledModelIds } from "./model-providers-store";
 
 const LEGACY_PATH = path.join(resolveRuntimeAdminDir(), "user-models.json");
 
@@ -28,6 +43,60 @@ async function migrateLegacyIfNeeded(tid: string): Promise<void> {
   await migrateLegacyUserVisibleModelsIfNeeded(tid);
 }
 
+export type UserModelsEditPayload = {
+  userId: string;
+  modelIds: string[];
+  parentAllowedIds: string[];
+  parentLabel: string;
+  prunedModelIds: string[];
+  /** @deprecated 兼容旧前端，等同 parentAllowedIds */
+  inheritedDeptModelIds: string[];
+};
+
+export type SetUserModelsResult = {
+  modelIds: string[];
+  prunedModelIds: string[];
+};
+
+async function computeUserParentAllowed(deptId: string | null): Promise<{
+  parentAllowedIds: string[];
+  parentLabel: string;
+}> {
+  const tid = requiredTenant();
+  const allEnabled = await listAllEnabledModelIds();
+  const userVisibleMap = await listAllAssignments();
+  if (!deptId) {
+    return { parentAllowedIds: allEnabled, parentLabel: "__ALL_ENABLED__" };
+  }
+  const chain = await listDepartmentAncestorIds(tid, deptId);
+  const parentAllowedIds = computeEffectiveDeptAllowed({
+    allEnabledIds: allEnabled,
+    userVisibleMap,
+    ancestorChain: chain,
+  });
+  const dept = await getDepartment(tid, deptId);
+  const parentLabel = dept ? `${dept.name}（${dept.path}）` : deptId;
+  return { parentAllowedIds, parentLabel };
+}
+
+export async function readUserEditPayload(
+  userId: string,
+  email: string,
+  deptId: string | null,
+): Promise<UserModelsEditPayload> {
+  const modelIds = await getUserModels(userId);
+  const { parentAllowedIds, parentLabel } = await computeUserParentAllowed(deptId);
+  const prunedModelIds = computePrunedModelIds(modelIds, new Set(parentAllowedIds));
+  return {
+    userId,
+    modelIds,
+    parentAllowedIds,
+    parentLabel,
+    prunedModelIds,
+    inheritedDeptModelIds: parentAllowedIds,
+  };
+}
+
 export async function getUserModels(userId: string): Promise<string[]> {
   const tid = requiredTenant();
   await migrateLegacyIfNeeded(tid);
@@ -39,18 +108,26 @@ export async function getUserModels(userId: string): Promise<string[]> {
   return [...new Set(rows.map((r) => r.modelId))];
 }
 
-export async function setUserModels(userId: string, modelIds: string[]): Promise<string[]> {
+export async function setUserModels(
+  userId: string,
+  modelIds: string[],
+  deptId: string | null = null,
+): Promise<SetUserModelsResult> {
   const tid = requiredTenant();
   await migrateLegacyIfNeeded(tid);
   const db = getIamDb();
-  const unique = Array.from(new Set(modelIds.map((m) => m.trim()).filter(Boolean)));
+  const { parentAllowedIds } = await computeUserParentAllowed(deptId);
+  const parentAllowed = new Set(parentAllowedIds);
+  const { saved, prunedModelIds } = clipToAllowed(modelIds, parentAllowed);
+
   await db.delete(uvmTable).where(and(eq(uvmTable.tenantId, tid), eq(uvmTable.assignmentKey, userId)));
-  if (unique.length === 0) return [];
-  const rows = unique.map((modelId) => ({ tenantId: tid, assignmentKey: userId, modelId }));
-  for (const chunk of chunked(rows, 100)) {
-    await db.insert(uvmTable).values(chunk).onConflictDoNothing();
+  if (saved.length > 0) {
+    const rows = saved.map((modelId) => ({ tenantId: tid, assignmentKey: userId, modelId }));
+    for (const chunk of chunked(rows, 100)) {
+      await db.insert(uvmTable).values(chunk).onConflictDoNothing();
+    }
   }
-  return [...unique];
+  return { modelIds: saved, prunedModelIds };
 }
 
 export async function listAllAssignments(): Promise<Mapping> {
@@ -83,3 +160,5 @@ export function userModelsFilePath(): string {
 export function __resetUserModelsCache(): void {
   /* legacy in-process flag removed; kept for tests that reset module state */
 }
+
+export { collectUserAssignmentKeys, mergeUserStoredSet };

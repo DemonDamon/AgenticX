@@ -259,6 +259,20 @@ export async function listProviders(): Promise<PublicProviderRecord[]> {
   return rows.map(toPublic);
 }
 
+/** 全部已启用 provider × model 的 id 列表（`providerId/modelName`）。 */
+export async function listAllEnabledModelIds(): Promise<string[]> {
+  const providers = await listProviders();
+  const ids: string[] = [];
+  for (const p of providers) {
+    if (!p.enabled) continue;
+    for (const m of p.models) {
+      if (!m.enabled) continue;
+      ids.push(`${p.id}/${m.name}`);
+    }
+  }
+  return ids;
+}
+
 export async function getProvider(id: string): Promise<PublicProviderRecord | null> {
   const found = (await loadAll(requiredTenantId())).find((p) => p.id === id);
   return found ? toPublic(found) : null;

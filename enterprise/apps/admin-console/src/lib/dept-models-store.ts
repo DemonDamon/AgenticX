@@ -3,10 +3,17 @@
  * assignment_key 使用 `dept:<deptId>` 写入 enterprise_runtime_user_visible_models。
  */
 
-import { listDepartmentAncestorIds } from "@agenticx/iam-core";
+import { getDepartment, getIamDb, listDepartmentAncestorIds } from "@agenticx/iam-core";
 import { enterpriseRuntimeUserVisibleModels as uvmTable } from "@agenticx/db-schema";
-import { getIamDb } from "@agenticx/iam-core";
 import { and, eq } from "drizzle-orm";
+
+import {
+  clipToAllowed,
+  computeParentAllowedIds,
+  computePrunedModelIds,
+} from "./effective-models";
+import { listAllEnabledModelIds } from "./model-providers-store";
+import { listAllAssignments } from "./user-models-store";
 
 const DEPT_PREFIX = "dept:";
 
@@ -26,6 +33,41 @@ function chunked<T>(arr: T[], size: number): T[][] {
   return out;
 }
 
+export type DeptModelsEditPayload = {
+  deptId: string;
+  modelIds: string[];
+  parentAllowedIds: string[];
+  parentLabel: string;
+  prunedModelIds: string[];
+};
+
+export type SetDeptModelsResult = {
+  modelIds: string[];
+  prunedModelIds: string[];
+};
+
+async function resolveParentLabel(tenantId: string, ancestorChain: readonly string[]): Promise<string> {
+  if (ancestorChain.length <= 1) return "__ALL_ENABLED__";
+  const parentId = ancestorChain[1];
+  if (!parentId) return "__ALL_ENABLED__";
+  const parent = await getDepartment(tenantId, parentId);
+  return parent ? `${parent.name}（${parent.path}）` : parentId;
+}
+
+export async function readDeptEditPayload(deptId: string): Promise<DeptModelsEditPayload> {
+  const tid = requiredTenant();
+  const [chain, allEnabled, userVisibleMap, modelIds] = await Promise.all([
+    listDepartmentAncestorIds(tid, deptId),
+    listAllEnabledModelIds(),
+    listAllAssignments(),
+    getDeptModels(deptId),
+  ]);
+  const parentAllowedIds = computeParentAllowedIds(allEnabled, userVisibleMap, chain);
+  const parentLabel = await resolveParentLabel(tid, chain);
+  const prunedModelIds = computePrunedModelIds(modelIds, new Set(parentAllowedIds));
+  return { deptId, modelIds, parentAllowedIds, parentLabel, prunedModelIds };
+}
+
 export async function getDeptModels(deptId: string): Promise<string[]> {
   const tid = requiredTenant();
   const db = getIamDb();
@@ -36,36 +78,31 @@ export async function getDeptModels(deptId: string): Promise<string[]> {
   return [...new Set(rows.map((r) => r.modelId))];
 }
 
-export async function setDeptModels(deptId: string, modelIds: string[]): Promise<string[]> {
+export async function setDeptModels(deptId: string, modelIds: string[]): Promise<SetDeptModelsResult> {
   const tid = requiredTenant();
   const db = getIamDb();
-  const unique = Array.from(new Set(modelIds.map((m) => m.trim()).filter(Boolean)));
+  const [chain, allEnabled, userVisibleMap] = await Promise.all([
+    listDepartmentAncestorIds(tid, deptId),
+    listAllEnabledModelIds(),
+    listAllAssignments(),
+  ]);
+  const parentAllowed = new Set(computeParentAllowedIds(allEnabled, userVisibleMap, chain));
+  const { saved, prunedModelIds } = clipToAllowed(modelIds, parentAllowed);
+
   await db.delete(uvmTable).where(and(eq(uvmTable.tenantId, tid), eq(uvmTable.assignmentKey, deptKey(deptId))));
-  if (unique.length === 0) return [];
-  const rows = unique.map((modelId) => ({ tenantId: tid, assignmentKey: deptKey(deptId), modelId }));
-  for (const chunk of chunked(rows, 100)) {
-    await db.insert(uvmTable).values(chunk).onConflictDoNothing();
+  if (saved.length > 0) {
+    const rows = saved.map((modelId) => ({ tenantId: tid, assignmentKey: deptKey(deptId), modelId }));
+    for (const chunk of chunked(rows, 100)) {
+      await db.insert(uvmTable).values(chunk).onConflictDoNothing();
+    }
   }
-  return [...unique];
+  return { modelIds: saved, prunedModelIds };
 }
 
 export async function deleteDeptAssignment(deptId: string): Promise<void> {
   const tid = requiredTenant();
   const db = getIamDb();
   await db.delete(uvmTable).where(and(eq(uvmTable.tenantId, tid), eq(uvmTable.assignmentKey, deptKey(deptId))));
-}
-
-/** 合并直属部门及全部上级部门的可见模型（去重）。 */
-export async function getInheritedDeptModels(deptId: string): Promise<string[]> {
-  const tid = requiredTenant();
-  const chain = await listDepartmentAncestorIds(tid, deptId);
-  const merged = new Set<string>();
-  for (const id of chain) {
-    for (const modelId of await getDeptModels(id)) {
-      merged.add(modelId);
-    }
-  }
-  return [...merged];
 }
 
 export { DEPT_PREFIX, deptKey };
