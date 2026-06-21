@@ -31,6 +31,8 @@ export type ListUsersFilter = {
   q?: string;
   status?: AdminUserStatus;
   deptId?: string;
+  /** direct=仅直属部门；subtree=含子部门（默认，兼容用户管理页筛选） */
+  deptScope?: "direct" | "subtree";
   roleCode?: string;
   limit?: number;
   offset?: number;
@@ -197,11 +199,15 @@ async function applyUserFilters(
   }
 
   if (filter.deptId) {
-    const subtree = await listDepartmentSubtreeIdsLocal(tenantId, filter.deptId);
-    if (subtree.length) {
-      extra.push(inArray(users.deptId, subtree));
+    if (filter.deptScope === "direct") {
+      extra.push(eq(users.deptId, filter.deptId));
     } else {
-      extra.push(sql`false`);
+      const subtree = await listDepartmentSubtreeIdsLocal(tenantId, filter.deptId);
+      if (subtree.length) {
+        extra.push(inArray(users.deptId, subtree));
+      } else {
+        extra.push(sql`false`);
+      }
     }
   }
 

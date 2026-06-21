@@ -24,6 +24,8 @@ export async function GET(request: Request) {
   if (isStatus(status)) filter.status = status;
   const deptId = searchParams.get("deptId");
   if (deptId) filter.deptId = deptId;
+  const deptScope = searchParams.get("deptScope");
+  if (deptScope === "direct" || deptScope === "subtree") filter.deptScope = deptScope;
   const roleCode = searchParams.get("roleCode");
   if (roleCode) filter.roleCode = roleCode;
   const limit = Number(searchParams.get("limit") ?? "");
