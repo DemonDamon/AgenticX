@@ -31,7 +31,19 @@ import {
 } from "@agenticx/ui";
 import { useTranslations } from "next-intl";
 import type { DepartmentTreeNode } from "@agenticx/feature-iam";
-import { Download, Pencil, Plus, RefreshCw, Trash2, FolderTree, Users, ChevronRight, CornerRightUp, Sparkles } from "lucide-react";
+import {
+  ChevronDown,
+  ChevronRight,
+  CornerRightUp,
+  Download,
+  FolderTree,
+  Pencil,
+  Plus,
+  RefreshCw,
+  Sparkles,
+  Trash2,
+  Users,
+} from "lucide-react";
 import { VisibleModelsEditor } from "../../../components/visible-models-editor";
 
 type ApiDept = {
@@ -91,14 +103,113 @@ function getBreadcrumbPath(nodes: DepartmentTreeNode[], targetId: string | null)
   return path;
 }
 
+/* ---------- 左侧树节点组件 ---------- */
+function TreeNode({
+  node,
+  depth,
+  selectedId,
+  expandedIds,
+  onSelect,
+  onToggle,
+}: {
+  node: DepartmentTreeNode;
+  depth: number;
+  selectedId: string | null;
+  expandedIds: Set<string>;
+  onSelect: (id: string) => void;
+  onToggle: (id: string) => void;
+}) {
+  const isExpanded = expandedIds.has(node.id);
+  const isSelected = selectedId === node.id;
+  const hasChildren = node.children.length > 0;
+
+  return (
+    <div>
+      <button
+        type="button"
+        onClick={() => { onSelect(node.id); if (hasChildren) onToggle(node.id); }}
+        style={{ paddingLeft: `${4 + depth * 14}px` }}
+        className={[
+          "group flex w-full items-center gap-1.5 rounded-lg py-1.5 pr-2 text-left text-sm transition-colors",
+          isSelected
+            ? "bg-primary/10 font-semibold text-primary"
+            : "text-foreground/80 hover:bg-muted hover:text-foreground",
+        ].join(" ")}
+      >
+        {/* 展开/折叠箭头 */}
+        <span className="flex h-4 w-4 shrink-0 items-center justify-center">
+          {hasChildren ? (
+            isExpanded ? (
+              <ChevronDown className="h-3.5 w-3.5 text-muted-foreground" />
+            ) : (
+              <ChevronRight className="h-3.5 w-3.5 text-muted-foreground" />
+            )
+          ) : (
+            <span className="h-3.5 w-3.5" />
+          )}
+        </span>
+
+        {/* 部门图标（展开/折叠保持一致） */}
+        <FolderTree
+          className={[
+            "h-3.5 w-3.5 shrink-0",
+            isSelected ? "text-primary" : "text-muted-foreground group-hover:text-foreground",
+          ].join(" ")}
+        />
+
+        {/* 部门名 */}
+        <span className="min-w-0 flex-1 truncate">{node.name}</span>
+
+        {/* 成员数角标 */}
+        {node.memberCount > 0 && (
+          <span className="shrink-0 rounded-full bg-muted px-1.5 py-0.5 text-[10px] text-muted-foreground leading-none">
+            {node.memberCount}
+          </span>
+        )}
+      </button>
+
+      {/* 子节点 */}
+      {isExpanded && hasChildren && (
+        <div>
+          {node.children.map((child) => (
+            <TreeNode
+              key={child.id}
+              node={child}
+              depth={depth + 1}
+              selectedId={selectedId}
+              expandedIds={expandedIds}
+              onSelect={onSelect}
+              onToggle={onToggle}
+            />
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/* ---------- 收集所有 id ---------- */
+function collectAllIds(nodes: DepartmentTreeNode[]): string[] {
+  const ids: string[] = [];
+  for (const n of nodes) {
+    ids.push(n.id);
+    if (n.children.length) ids.push(...collectAllIds(n.children));
+  }
+  return ids;
+}
+
+/* ================================================== */
+
 export default function DepartmentsPage() {
   const t = useTranslations("pages.iam.departments");
   const tc = useTranslations("common");
-  const ts = useTranslations("shell");
   const [tree, setTree] = useState<DepartmentTreeNode[]>([]);
   const [loading, setLoading] = useState(true);
-  
-  // Drill-down state
+
+  // 左侧树：展开 id 集合（默认全展开）
+  const [expandedIds, setExpandedIds] = useState<Set<string>>(new Set());
+
+  // 当前选中的部门（null = 根）
   const [currentDeptId, setCurrentDeptId] = useState<string | null>(null);
 
   // Modals state
@@ -122,13 +233,16 @@ export default function DepartmentsPage() {
         toast.error(json.message ?? t("toast.loadFailed"));
         return;
       }
-      setTree(json.data.items.map(mapApiToNode));
+      const nodes = json.data.items.map(mapApiToNode);
+      setTree(nodes);
+      // 首次加载：展开所有节点
+      setExpandedIds(new Set(collectAllIds(nodes)));
     } catch (e) {
       toast.error(e instanceof Error ? e.message : t("toast.networkError"));
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [t]);
 
   useEffect(() => {
     void loadTree();
@@ -149,6 +263,15 @@ export default function DepartmentsPage() {
     walk(tree, 0);
     return out;
   }, [tree]);
+
+  function toggleExpand(id: string) {
+    setExpandedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }
 
   async function handleCreate() {
     if (!newName.trim()) return;
@@ -245,127 +368,301 @@ export default function DepartmentsPage() {
   }
 
   return (
-    <div className="space-y-6 p-1 pb-10">
-      <PageHeader
-        breadcrumb={
-          <Breadcrumb>
-            <BreadcrumbList>
-              <BreadcrumbItem>
-                <BreadcrumbLink asChild>
-                  <Link href="/dashboard">Admin</Link>
-                </BreadcrumbLink>
-              </BreadcrumbItem>
-              <BreadcrumbSeparator />
-              <BreadcrumbItem>{t("breadcrumbIam")}</BreadcrumbItem>
-              <BreadcrumbSeparator />
-              <BreadcrumbItem>
-                <BreadcrumbPage>{t("breadcrumbDepartments")}</BreadcrumbPage>
-              </BreadcrumbItem>
-            </BreadcrumbList>
-          </Breadcrumb>
-        }
-        title={t("title")}
-        description={t("description")}
-        actions={
-          <div className="flex flex-wrap gap-2">
-            <Button variant="outline" size="sm" onClick={() => void loadTree()} disabled={loading}>
-              <RefreshCw className={`mr-2 h-4 w-4 ${loading ? "animate-spin" : ""}`} />
-              {t("refresh")}
-            </Button>
-            <Button variant="outline" size="sm" onClick={() => void exportStructure()}>
-              <Download className="mr-2 h-4 w-4" />
-              {t("exportStructure")}
-            </Button>
-          </div>
-        }
-      />
-
-      {/* 面包屑导航栏（钻取用） */}
-      <div className="flex flex-wrap items-center gap-1.5 rounded-xl border border-border bg-card p-2 shadow-sm">
-        <Button
-          variant={currentDeptId === null ? "secondary" : "ghost"}
-          size="sm"
-          className="font-medium"
-          onClick={() => setCurrentDeptId(null)}
-        >
-          <FolderTree className="mr-2 h-4 w-4" />
-          {t("rootLabel")}
-        </Button>
-
-        {breadcrumbs.map((b) => (
-          <React.Fragment key={b.id}>
-            <ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground/50" />
-            <Button
-              variant={currentDeptId === b.id ? "secondary" : "ghost"}
-              size="sm"
-              className="font-medium"
-              onClick={() => setCurrentDeptId(b.id)}
-            >
-              {b.name}
-            </Button>
-          </React.Fragment>
-        ))}
+    <div className="flex h-full flex-col">
+      {/* 顶部 PageHeader */}
+      <div className="px-1 pb-1 pt-1">
+        <PageHeader
+          breadcrumb={
+            <Breadcrumb>
+              <BreadcrumbList>
+                <BreadcrumbItem>
+                  <BreadcrumbLink asChild>
+                    <Link href="/dashboard">Admin</Link>
+                  </BreadcrumbLink>
+                </BreadcrumbItem>
+                <BreadcrumbSeparator />
+                <BreadcrumbItem>{t("breadcrumbIam")}</BreadcrumbItem>
+                <BreadcrumbSeparator />
+                <BreadcrumbItem>
+                  <BreadcrumbPage>{t("breadcrumbDepartments")}</BreadcrumbPage>
+                </BreadcrumbItem>
+              </BreadcrumbList>
+            </Breadcrumb>
+          }
+          title={t("title")}
+          description={t("description")}
+          actions={
+            <div className="flex flex-wrap gap-2">
+              <Button variant="outline" size="sm" onClick={() => void loadTree()} disabled={loading}>
+                <RefreshCw className={`mr-2 h-4 w-4 ${loading ? "animate-spin" : ""}`} />
+                {t("refresh")}
+              </Button>
+              <Button variant="outline" size="sm" onClick={() => void exportStructure()}>
+                <Download className="mr-2 h-4 w-4" />
+                {t("exportStructure")}
+              </Button>
+            </div>
+          }
+        />
       </div>
 
-      {/* 当前部门的信息与操作栏 */}
-      {currentNode && (
-        <Card className="overflow-hidden border-primary/20 bg-primary/5 shadow-sm">
-          <CardContent className="flex flex-wrap items-center justify-between gap-4 p-5">
-            <div className="space-y-1.5">
-              <h3 className="flex items-center gap-3 text-lg font-bold text-foreground">
-                {currentNode.name}
-                <Link 
-                  href={`/iam/users?dept=${currentNode.id}`}
-                  className="inline-flex items-center hover:opacity-80 transition-opacity"
-                  title={t("membersLinkTitle")}
-                >
-                  <Badge variant="secondary" className="bg-background shadow-sm hover:bg-muted cursor-pointer">
-                    {t("memberCount", { count: currentNode.memberCount })}
-                  </Badge>
-                </Link>
-              </h3>
-              <p className="break-all font-mono text-xs text-muted-foreground">Path: {currentNode.path}</p>
-            </div>
-            <div className="flex flex-wrap gap-2">
-              <Button
-                variant="outline"
-                className="bg-background"
-                onClick={() => {
-                  setNameEditMode(false);
-                  setDeptSettingsOpen(true);
-                }}
-              >
-                <Pencil className="mr-2 h-4 w-4" /> {t("edit")}
-              </Button>
-              <Button
-                variant="outline"
-                className="bg-background"
-                onClick={() => {
-                  setMoveParentId(currentNode.parentId ?? null);
-                  setMoveOpen(true);
-                }}
-              >
-                <CornerRightUp className="mr-2 h-4 w-4" /> {t("move")}
-              </Button>
-              <Button
-                variant="destructive"
-                className="bg-destructive/10 text-destructive hover:bg-destructive hover:text-destructive-foreground"
-                onClick={() => void handleDelete(currentNode.id)}
-              >
-                <Trash2 className="mr-2 h-4 w-4" /> {t("delete")}
-              </Button>
-            </div>
-          </CardContent>
-        </Card>
-      )}
+      {/* 主体：左树 + 右内容 */}
+      <div className="flex min-h-0 flex-1 gap-0 overflow-hidden rounded-xl border border-border bg-card shadow-sm">
 
+        {/* ── 左侧部门树 ── */}
+        <aside className="flex w-60 shrink-0 flex-col border-r border-border">
+          {/* 树头部 */}
+          <div className="border-b border-border px-3 py-3">
+            <span className="text-sm font-semibold text-foreground">{t("treeTitle")}</span>
+          </div>
+
+          {/* 树内容 */}
+          <nav className="flex-1 overflow-y-auto py-2 pl-1 pr-1">
+            {/* 树节点 */}
+            {loading ? (
+              <div className="mt-4 flex items-center justify-center text-xs text-muted-foreground">
+                <RefreshCw className="mr-1.5 h-3 w-3 animate-spin" />
+                {t("loading")}
+              </div>
+            ) : (
+              tree.map((node) => (
+                <TreeNode
+                  key={node.id}
+                  node={node}
+                  depth={0}
+                  selectedId={currentDeptId}
+                  expandedIds={expandedIds}
+                  onSelect={setCurrentDeptId}
+                  onToggle={toggleExpand}
+                />
+              ))
+            )}
+          </nav>
+
+          {/* 新建顶级部门 */}
+          {currentDeptId === null && (
+            <div className="border-t border-border p-2">
+              <button
+                type="button"
+                onClick={() => { setNewName(""); setCreateOpen(true); }}
+                className="flex w-full items-center gap-2 rounded-lg px-3 py-1.5 text-sm text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+              >
+                <Plus className="h-3.5 w-3.5" />
+                {t("newTopDept")}
+              </button>
+            </div>
+          )}
+        </aside>
+
+        {/* ── 右侧内容区 ── */}
+        <main className="flex min-w-0 flex-1 flex-col overflow-y-auto bg-background">
+          {currentNode ? (
+            /* 选中了某个部门 */
+            <div className="flex flex-col">
+              {/* 部门头部信息区 */}
+              <div className="flex flex-col gap-3 border-b border-border p-3 px-6">
+                <div className="flex flex-wrap items-center justify-between gap-4">
+                  <div className="flex items-center gap-3">
+                    <h2 className="flex flex-wrap items-center gap-3 text-xl font-bold text-foreground">
+                      {currentNode.name}
+                      <Link
+                        href={`/iam/users?dept=${currentNode.id}`}
+                        title={t("membersLinkTitle")}
+                      >
+                        <Badge variant="secondary" className="cursor-pointer bg-muted hover:bg-muted/80 shadow-none">
+                          <Users className="mr-1 h-3 w-3" />
+                          {t("memberCount", { count: currentNode.memberCount })}
+                        </Badge>
+                      </Link>
+                    </h2>
+                    
+                    {/* 路径面包屑（轻量版） */}
+                    {breadcrumbs.length > 0 && (
+                      <div className="flex flex-wrap items-center gap-1 text-xs text-muted-foreground ml-2">
+                        <button
+                          type="button"
+                          onClick={() => setCurrentDeptId(null)}
+                          className="hover:text-primary transition-colors"
+                        >
+                          {t("rootLabel")}
+                        </button>
+                        {breadcrumbs.map((b, i) => (
+                          <React.Fragment key={b.id}>
+                            <ChevronRight className="h-3 w-3" />
+                            {i < breadcrumbs.length - 1 ? (
+                              <button
+                                type="button"
+                                onClick={() => setCurrentDeptId(b.id)}
+                                className="hover:text-primary transition-colors"
+                              >
+                                {b.name}
+                              </button>
+                            ) : (
+                              <span className="font-semibold text-foreground">{b.name}</span>
+                            )}
+                          </React.Fragment>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+
+                  <div className="flex flex-wrap gap-2">
+                    <Button
+                      variant="outline"
+                      size="icon"
+                      className="h-8 w-8"
+                      title={t("edit")}
+                      onClick={() => { setNameEditMode(false); setDeptSettingsOpen(true); }}
+                    >
+                      <Pencil className="h-4 w-4" />
+                    </Button>
+                    <Button
+                      variant="outline"
+                      size="icon"
+                      className="h-8 w-8"
+                      title={t("move")}
+                      onClick={() => { setMoveParentId(currentNode.parentId ?? null); setMoveOpen(true); }}
+                    >
+                      <CornerRightUp className="h-4 w-4" />
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="h-8 w-8 text-destructive hover:bg-destructive/10 hover:text-destructive"
+                      title={t("delete")}
+                      onClick={() => void handleDelete(currentNode.id)}
+                    >
+                      <Trash2 className="h-4 w-4" />
+                    </Button>
+                  </div>
+                </div>
+              </div>
+
+              {/* 子部门卡片网格 */}
+              <div className="p-6 pb-10">
+                {(childNodes.length > 0 || true) && (
+                <div>
+                  <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
+                    {childNodes.map((child) => (
+                      <Card
+                        key={child.id}
+                        className="group cursor-pointer transition-all hover:border-primary/40 hover:shadow-sm"
+                        onClick={() => {
+                          setCurrentDeptId(child.id);
+                          if (!expandedIds.has(child.id)) toggleExpand(child.id);
+                        }}
+                      >
+                        <CardHeader className="pb-2 pt-4">
+                          <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary/10 text-primary transition-colors group-hover:bg-primary group-hover:text-primary-foreground">
+                            <FolderTree className="h-4 w-4" />
+                          </div>
+                          <CardTitle className="mt-2 line-clamp-1 text-sm font-semibold" title={child.name}>
+                            {child.name}
+                          </CardTitle>
+                        </CardHeader>
+                        <CardContent className="pb-3">
+                          <div className="flex items-center gap-3 text-xs text-muted-foreground">
+                            <Link
+                              href={`/iam/users?dept=${child.id}`}
+                              onClick={(e) => e.stopPropagation()}
+                              className="flex items-center gap-1 hover:text-primary transition-colors"
+                            >
+                              <Users className="h-3.5 w-3.5" />
+                              {t("members", { count: child.memberCount })}
+                            </Link>
+                            <span className="flex items-center gap-1">
+                              <FolderTree className="h-3.5 w-3.5" />
+                              {t("subDepartments", { count: child.children.length })}
+                            </span>
+                          </div>
+                        </CardContent>
+                      </Card>
+                    ))}
+
+                    {/* 新建子部门 */}
+                    <button
+                      onClick={() => { setNewName(""); setCreateOpen(true); }}
+                      className="group flex min-h-[108px] flex-col items-center justify-center gap-2 rounded-xl border-2 border-dashed border-border bg-transparent text-muted-foreground transition-all hover:border-primary/40 hover:bg-primary/5 hover:text-primary"
+                    >
+                      <div className="flex h-8 w-8 items-center justify-center rounded-full bg-muted transition-colors group-hover:bg-primary/20">
+                        <Plus className="h-4 w-4" />
+                      </div>
+                      <span className="text-sm font-medium">{t("newSubDept")}</span>
+                    </button>
+                  </div>
+                </div>
+              )}
+              </div>
+            </div>
+          ) : (
+            /* 根级：显示所有顶级部门卡片 */
+            <div className="flex flex-col">
+              <div className="flex items-center justify-between border-b border-border p-3 px-6">
+                <div className="flex items-center gap-3">
+                  <h2 className="text-xl font-bold text-foreground">{t("rootLabel")}</h2>
+                  <p className="text-xs text-muted-foreground ml-2">{t("rootHint")}</p>
+                </div>
+              </div>
+              <div className="p-6 pb-10">
+                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
+                  {tree.map((child) => (
+                  <Card
+                    key={child.id}
+                    className="group cursor-pointer transition-all hover:border-primary/40 hover:shadow-sm"
+                    onClick={() => {
+                      setCurrentDeptId(child.id);
+                      if (!expandedIds.has(child.id)) toggleExpand(child.id);
+                    }}
+                  >
+                    <CardHeader className="pb-2 pt-4">
+                      <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary/10 text-primary transition-colors group-hover:bg-primary group-hover:text-primary-foreground">
+                        <FolderTree className="h-4 w-4" />
+                      </div>
+                      <CardTitle className="mt-2 line-clamp-1 text-sm font-semibold" title={child.name}>
+                        {child.name}
+                      </CardTitle>
+                    </CardHeader>
+                    <CardContent className="pb-3">
+                      <div className="flex items-center gap-3 text-xs text-muted-foreground">
+                        <Link
+                          href={`/iam/users?dept=${child.id}`}
+                          onClick={(e) => e.stopPropagation()}
+                          className="flex items-center gap-1 hover:text-primary transition-colors"
+                        >
+                          <Users className="h-3.5 w-3.5" />
+                          {t("members", { count: child.memberCount })}
+                        </Link>
+                        <span className="flex items-center gap-1">
+                          <FolderTree className="h-3.5 w-3.5" />
+                          {t("subDepartments", { count: child.children.length })}
+                        </span>
+                      </div>
+                    </CardContent>
+                  </Card>
+                ))}
+                <button
+                  onClick={() => { setNewName(""); setCreateOpen(true); }}
+                  className="group flex min-h-[108px] flex-col items-center justify-center gap-2 rounded-xl border-2 border-dashed border-border bg-transparent text-muted-foreground transition-all hover:border-primary/40 hover:bg-primary/5 hover:text-primary"
+                >
+                  <div className="flex h-8 w-8 items-center justify-center rounded-full bg-muted transition-colors group-hover:bg-primary/20">
+                    <Plus className="h-4 w-4" />
+                  </div>
+                  <span className="text-sm font-medium">{t("newTopDept")}</span>
+                </button>
+              </div>
+              </div>
+            </div>
+          )}
+        </main>
+      </div>
+
+      {/* ── 部门设置 Sheet ── */}
       <Sheet open={deptSettingsOpen} onOpenChange={(open) => { setDeptSettingsOpen(open); if (!open) setNameEditMode(false); }}>
         <SheetContent side="right" className="flex w-full flex-col gap-0 overflow-y-auto p-0 sm:max-w-xl">
-          {/* 无障碍隐藏标题，满足 Radix 要求 */}
           <span className="sr-only">
             <SheetTitle>{currentNode?.name ?? t("edit")}</SheetTitle>
           </span>
-          {/* 顶部：部门名称大标题 + 小铅笔改名 */}
+          {/* 顶部：部门名 + 小铅笔 */}
           <div className="flex items-start justify-between gap-4 border-b border-border px-6 py-6">
             <div className="min-w-0 flex-1">
               {nameEditMode ? (
@@ -385,9 +682,7 @@ export default function DepartmentsPage() {
                 </div>
               ) : (
                 <div className="flex items-center gap-2">
-                  <h2 className="truncate text-2xl font-bold leading-tight text-foreground">
-                    {currentNode?.name}
-                  </h2>
+                  <h2 className="truncate text-2xl font-bold leading-tight text-foreground">{currentNode?.name}</h2>
                   <button
                     type="button"
                     title={t("editDialogTitle")}
@@ -398,15 +693,12 @@ export default function DepartmentsPage() {
                   </button>
                 </div>
               )}
-              <p className="mt-1 break-all font-mono text-xs text-muted-foreground">
-                {currentNode?.path}
-              </p>
+              <p className="mt-1 break-all font-mono text-xs text-muted-foreground">{currentNode?.path}</p>
             </div>
           </div>
 
-          {/* 配置区：可见模型 */}
+          {/* 配置区 */}
           <div className="flex-1 space-y-0 divide-y divide-border">
-            {/* 模型配置 */}
             <div className="px-6 py-5">
               <div className="mb-4 flex items-center gap-2">
                 <Sparkles className="h-4 w-4 text-primary" />
@@ -420,16 +712,12 @@ export default function DepartmentsPage() {
                 />
               ) : null}
             </div>
-
-            {/* 预留：权限配置 */}
             <div className="px-6 py-5">
               <div className="flex items-center gap-2 opacity-40">
                 <span className="text-sm font-semibold text-foreground">{t("settings.permissionsTitle")}</span>
                 <span className="rounded bg-muted px-1.5 py-0.5 text-[10px] text-muted-foreground">{t("settings.comingSoon")}</span>
               </div>
             </div>
-
-            {/* 预留：安全配置 */}
             <div className="px-6 py-5">
               <div className="flex items-center gap-2 opacity-40">
                 <span className="text-sm font-semibold text-foreground">{t("settings.securityTitle")}</span>
@@ -440,66 +728,11 @@ export default function DepartmentsPage() {
         </SheetContent>
       </Sheet>
 
-      {/* 当前层级的子部门卡片网格 */}
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
-        {childNodes.map((child) => (
-          <Card
-            key={child.id}
-            className="group relative flex cursor-pointer flex-col overflow-hidden transition-all hover:border-primary/50 hover:shadow-md"
-            onClick={() => setCurrentDeptId(child.id)}
-          >
-            <CardHeader className="pb-3">
-              <div className="flex items-start justify-between">
-                <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-primary/10 text-primary transition-colors group-hover:bg-primary group-hover:text-primary-foreground">
-                  <FolderTree className="h-5 w-5" />
-                </div>
-              </div>
-              <CardTitle className="mt-3 line-clamp-1 text-base leading-relaxed" title={child.name}>
-                {child.name}
-              </CardTitle>
-            </CardHeader>
-            <CardContent className="mt-auto">
-              <div className="flex items-center gap-4 text-sm text-muted-foreground">
-                <Link 
-                  href={`/iam/users?dept=${child.id}`} 
-                  onClick={(e) => e.stopPropagation()}
-                  className="flex items-center gap-1.5 hover:text-primary transition-colors" 
-                  title={t("membersLinkTitle")}
-                >
-                  <Users className="h-4 w-4" />
-                  {t("members", { count: child.memberCount })}
-                </Link>
-                <div className="flex items-center gap-1.5" title={t("drillInTitle")}>
-                  <FolderTree className="h-4 w-4" />
-                  {t("subDepartments", { count: child.children.length })}
-                </div>
-              </div>
-            </CardContent>
-          </Card>
-        ))}
-
-        {/* 新建子部门占位卡片 */}
-        <button
-          onClick={() => {
-            setNewName("");
-            setCreateOpen(true);
-          }}
-          className="group flex min-h-[160px] flex-col items-center justify-center gap-3 rounded-xl border-2 border-dashed border-border bg-transparent px-4 py-6 text-muted-foreground transition-all hover:border-primary/50 hover:bg-primary/5 hover:text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
-        >
-          <div className="flex h-10 w-10 items-center justify-center rounded-full bg-muted transition-colors group-hover:bg-primary/20">
-            <Plus className="h-5 w-5" />
-          </div>
-          <span className="font-medium">{currentNode ? t("newSubDept") : t("newTopDept")}</span>
-        </button>
-      </div>
-
-      {/* --- 对话框区域 --- */}
-
       {/* 新建对话框 */}
       <Dialog open={createOpen} onOpenChange={setCreateOpen}>
         <DialogContent>
           <DialogHeader>
-<DialogTitle>{currentNode ? t("createDialogUnder", { name: currentNode.name }) : t("createDialogRoot")}</DialogTitle>
+            <DialogTitle>{currentNode ? t("createDialogUnder", { name: currentNode.name }) : t("createDialogRoot")}</DialogTitle>
           </DialogHeader>
           <div className="space-y-4 py-4">
             <div className="space-y-2">
@@ -509,16 +742,12 @@ export default function DepartmentsPage() {
                 onChange={(e) => setNewName(e.target.value)}
                 placeholder={t("deptNamePlaceholder")}
                 autoFocus
-                onKeyDown={(e) => {
-                  if (e.key === "Enter") void handleCreate();
-                }}
+                onKeyDown={(e) => { if (e.key === "Enter") void handleCreate(); }}
               />
             </div>
           </div>
           <DialogFooter>
-            <Button variant="outline" onClick={() => setCreateOpen(false)}>
-              {tc("actions.cancel")}
-            </Button>
+            <Button variant="outline" onClick={() => setCreateOpen(false)}>{tc("actions.cancel")}</Button>
             <Button onClick={() => void handleCreate()}>{t("confirmCreate")}</Button>
           </DialogFooter>
         </DialogContent>
@@ -542,17 +771,13 @@ export default function DepartmentsPage() {
                 {flatForParentSelect
                   .filter((o) => o.id !== currentDeptId)
                   .map((o) => (
-                    <option key={o.id} value={o.id}>
-                      {o.label}
-                    </option>
+                    <option key={o.id} value={o.id}>{o.label}</option>
                   ))}
               </select>
             </div>
           </div>
           <DialogFooter>
-            <Button variant="outline" onClick={() => setMoveOpen(false)}>
-              {tc("actions.cancel")}
-            </Button>
+            <Button variant="outline" onClick={() => setMoveOpen(false)}>{tc("actions.cancel")}</Button>
             <Button onClick={() => void handleMove()}>{t("confirmMove")}</Button>
           </DialogFooter>
         </DialogContent>
