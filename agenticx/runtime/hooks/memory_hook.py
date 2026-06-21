@@ -32,7 +32,9 @@ class MemoryHook(AgentHook):
                 return
             workspace_dir = getattr(session, "workspace_dir", None)
             if not workspace_dir:
-                workspace_dir = os.getenv("AGX_WORKSPACE_ROOT", "") or str(Path.home())
+                from agenticx.workspace.loader import resolve_workspace_dir
+
+                workspace_dir = str(resolve_workspace_dir())
             workspace_dir = Path(workspace_dir)
 
             facts = self._extract_facts_heuristic(chat_history)

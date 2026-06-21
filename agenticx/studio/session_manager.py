@@ -351,6 +351,7 @@ class SessionManager:
         self._restore_managed_metadata(sid, managed)
         self._ensure_default_taskspace(managed)
         self._sync_taskspaces_with_global(managed)
+        self.align_meta_session_workspace(managed)
         self._sessions[sid] = managed
         return managed
 
@@ -2369,6 +2370,45 @@ class SessionManager:
                     Path(resolved).mkdir(parents=True, exist_ok=True)
                     ts["path"] = resolved
                 return
+
+    def apply_session_workspace_dir(
+        self,
+        managed: ManagedSession,
+        *,
+        avatar_workspace_dir: str | None = None,
+    ) -> None:
+        """Set session workspace_dir from avatar override or global config default."""
+        from agenticx.workspace.loader import resolve_default_session_workspace_dir
+
+        resolved = resolve_default_session_workspace_dir(
+            avatar_workspace_dir=avatar_workspace_dir,
+        )
+        managed.studio_session.workspace_dir = str(resolved)
+        self.rebind_default_taskspace_to_workspace(managed)
+
+    def align_meta_session_workspace(self, managed: ManagedSession) -> None:
+        """Keep meta-agent sessions on the configured default workspace, not legacy home/cwd."""
+        if str(getattr(managed, "avatar_id", "") or "").strip():
+            return
+        from agenticx.workspace.loader import resolve_default_session_workspace_dir
+
+        canonical = resolve_default_session_workspace_dir()
+        current_raw = str(getattr(managed.studio_session, "workspace_dir", "") or "").strip()
+        if not current_raw:
+            managed.studio_session.workspace_dir = str(canonical)
+            self.rebind_default_taskspace_to_workspace(managed)
+            return
+        try:
+            current = Path(current_raw).expanduser().resolve(strict=False)
+            canonical_res = canonical.resolve(strict=False)
+        except Exception:
+            return
+        if current == canonical_res:
+            return
+        home = Path.home().resolve(strict=False)
+        if current == home:
+            managed.studio_session.workspace_dir = str(canonical_res)
+            self.rebind_default_taskspace_to_workspace(managed)
 
     def apply_avatar_binding(
         self,

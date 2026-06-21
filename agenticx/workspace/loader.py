@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from datetime import date
 import json
+import os
 import re
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -320,6 +321,23 @@ def resolve_workspace_dir() -> Path:
     if not raw:
         return DEFAULT_WORKSPACE_DIR
     return Path(raw).expanduser().resolve(strict=False)
+
+
+def resolve_default_session_workspace_dir(*, avatar_workspace_dir: str | None = None) -> Path:
+    """Resolve filesystem workspace for a Studio session.
+
+    Priority:
+    1. Avatar-specific ``workspace_dir`` when non-empty
+    2. ``AGX_WORKSPACE_ROOT`` env override (dev/tests)
+    3. ``config.yaml`` ``workspace_dir`` via :func:`resolve_workspace_dir`
+    """
+    avatar_raw = (avatar_workspace_dir or "").strip()
+    if avatar_raw:
+        return Path(avatar_raw).expanduser().resolve(strict=False)
+    env_raw = os.getenv("AGX_WORKSPACE_ROOT", "").strip()
+    if env_raw:
+        return Path(env_raw).expanduser().resolve(strict=False)
+    return resolve_workspace_dir()
 
 
 def _bound_avatar_id_from_session(session: Any) -> str:

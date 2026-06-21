@@ -1619,6 +1619,7 @@ def create_studio_app() -> FastAPI:
             requested_sid = None
         if managed is not None:
             logger.info("[session] reused existing sid=%s", managed.session_id)
+            manager.align_meta_session_workspace(managed)
         if managed is None:
             avatar_cfg = avatar_registry.get_avatar(avatar_id) if avatar_id else None
             effective_provider = (avatar_cfg.default_provider if avatar_cfg and avatar_cfg.default_provider else provider)
@@ -1634,10 +1635,12 @@ def create_studio_app() -> FastAPI:
                 requested_sid,
             )
             if avatar_cfg and avatar_cfg.workspace_dir:
-                managed.studio_session.workspace_dir = avatar_cfg.workspace_dir
+                manager.apply_session_workspace_dir(
+                    managed,
+                    avatar_workspace_dir=avatar_cfg.workspace_dir,
+                )
             else:
-                managed.studio_session.workspace_dir = os.getenv("AGX_WORKSPACE_ROOT", "").strip() or os.getcwd()
-            manager.rebind_default_taskspace_to_workspace(managed)
+                manager.apply_session_workspace_dir(managed)
             manager.apply_avatar_binding(
                 managed,
                 avatar_id=avatar_id or None,
@@ -2127,6 +2130,7 @@ def create_studio_app() -> FastAPI:
         managed = manager.get(payload.session_id, touch=False)
         if managed is None:
             raise HTTPException(status_code=404, detail="session not found")
+        manager.align_meta_session_workspace(managed)
         # Idempotency guard: dedupe a duplicate POST (double-click / chip burst /
         # retry race) so the backend never persists a second identical user turn.
         # Keyed by client_turn_id on the managed session (bounded recent set).
@@ -4424,10 +4428,12 @@ def create_studio_app() -> FastAPI:
                 scratch[PHASE_SCRATCH_KEY] = PHASE_EXPLORE
             ensure_code_dev_workflow_skill(managed.studio_session)
         if avatar_cfg and avatar_cfg.workspace_dir:
-            managed.studio_session.workspace_dir = avatar_cfg.workspace_dir
+            manager.apply_session_workspace_dir(
+                managed,
+                avatar_workspace_dir=avatar_cfg.workspace_dir,
+            )
         else:
-            managed.studio_session.workspace_dir = os.getenv("AGX_WORKSPACE_ROOT", "").strip() or os.getcwd()
-        manager.rebind_default_taskspace_to_workspace(managed)
+            manager.apply_session_workspace_dir(managed)
         manager.apply_avatar_binding(
             managed,
             avatar_id=avatar_id,

@@ -176,7 +176,9 @@ def _workspace_root() -> Path:
             return Path(configured).expanduser().resolve(strict=False)
         except Exception:
             pass
-    return Path.cwd().resolve()
+    from agenticx.workspace.loader import resolve_workspace_dir
+
+    return resolve_workspace_dir()
 
 
 def _resolve_mcp_auto_connect_setting() -> Optional[List[str]]:

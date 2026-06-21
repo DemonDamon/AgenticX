@@ -44,9 +44,11 @@ def _workspace_root(session: Any) -> Path | None:
         p = Path(env).expanduser()
         if p.is_dir():
             return p.resolve()
-    cwd = Path.cwd()
-    if cwd.is_dir():
-        return cwd.resolve()
+    from agenticx.workspace.loader import resolve_workspace_dir
+
+    canonical = resolve_workspace_dir()
+    if canonical.is_dir():
+        return canonical.resolve()
     return None
 
 

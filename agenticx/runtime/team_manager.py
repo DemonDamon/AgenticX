@@ -329,10 +329,12 @@ class AgentTeamManager:
         return block
 
     def _build_subagent_system_prompt(self, context: SubAgentContext, session: StudioSession) -> str:
-        workspace_dir = (
-            (session.workspace_dir or "").strip()
-            or os.getenv("AGX_WORKSPACE_ROOT", "").strip()
-            or os.getcwd()
+        from agenticx.workspace.loader import resolve_default_session_workspace_dir
+
+        workspace_dir = str(
+            resolve_default_session_workspace_dir(
+                avatar_workspace_dir=(session.workspace_dir or "").strip() or None,
+            )
         )
         context_file_keys = list(context.context_files.keys())
         context_hint = (
