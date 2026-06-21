@@ -5974,8 +5974,13 @@ export function SettingsPanel({
   const [userProfileMessage, setUserProfileMessage] = useState("");
   const [userAvatarMessage, setUserAvatarMessage] = useState("");
   const [metaAvatarMessage, setMetaAvatarMessage] = useState("");
+  const [workspaceDirDraft, setWorkspaceDirDraft] = useState("~/.agenticx/workspace");
+  const [workspaceDirSaved, setWorkspaceDirSaved] = useState("~/.agenticx/workspace");
+  const [workspaceDirResolved, setWorkspaceDirResolved] = useState("");
+  const [workspaceDirMessage, setWorkspaceDirMessage] = useState("");
+  const [workspaceDirSaving, setWorkspaceDirSaving] = useState(false);
 
-  const [gwEnabled, setGwEnabled] = useState(false);
+  const workspaceDirDirty = workspaceDirDraft.trim() !== workspaceDirSaved.trim();
   const [gwUrl, setGwUrl] = useState("");
   const [gwDeviceId, setGwDeviceId] = useState("");
   const [gwToken, setGwToken] = useState("");
@@ -6131,6 +6136,7 @@ export function SettingsPanel({
     setModelHealthMap({});
     setMcpMessage("");
     setMetaWorkspaceMessage("");
+    setWorkspaceDirMessage("");
     setUserNicknameDraft(userNickname);
     setUserPreferenceDraft(userPreference);
     setUserProfileMessage("");
@@ -6154,6 +6160,13 @@ export function SettingsPanel({
       setFeishuAppSecret(lc.appSecret || "");
     });
     void refreshWechatStatus();
+    void window.agenticxDesktop.loadWorkspaceConfig().then((res) => {
+      if (!res?.ok) return;
+      const dir = String(res.workspaceDir ?? "~/.agenticx/workspace").trim() || "~/.agenticx/workspace";
+      setWorkspaceDirDraft(dir);
+      setWorkspaceDirSaved(dir);
+      setWorkspaceDirResolved(String(res.resolvedPath ?? "").trim());
+    });
     if (sessionId) void onRefreshMcp(sessionId);
   }, [open, providers, defaultProvider, sessionId, onRefreshMcp, userNickname, userPreference]);
 
@@ -6385,6 +6398,64 @@ export function SettingsPanel({
     metaHistoryOpen,
     loadMetaWorkspaceHistory,
   ]);
+
+  const chooseWorkspaceDirectory = useCallback(async () => {
+    setWorkspaceDirMessage("");
+    try {
+      const res = await window.agenticxDesktop.chooseDirectory();
+      if (res?.canceled) return;
+      if (!res?.ok || !res.path) {
+        setWorkspaceDirMessage(res?.error ? `选择失败: ${res.error}` : "未选择目录");
+        return;
+      }
+      setWorkspaceDirDraft(res.path);
+    } catch (err) {
+      setWorkspaceDirMessage(`选择失败: ${String(err)}`);
+    }
+  }, []);
+
+  const saveWorkspaceDirectory = useCallback(async () => {
+    const trimmed = workspaceDirDraft.trim();
+    if (!trimmed) {
+      setWorkspaceDirMessage("工作区路径不能为空");
+      return;
+    }
+    setWorkspaceDirSaving(true);
+    setWorkspaceDirMessage("");
+    try {
+      const res = await window.agenticxDesktop.saveWorkspaceConfig({ workspaceDir: trimmed });
+      if (!res?.ok) {
+        setWorkspaceDirMessage(`保存失败: ${res?.error ?? "未知错误"}`);
+        return;
+      }
+      const saved = String(res.workspaceDir ?? trimmed).trim() || trimmed;
+      setWorkspaceDirDraft(saved);
+      setWorkspaceDirSaved(saved);
+      setWorkspaceDirResolved(String(res.resolvedPath ?? "").trim());
+      if (res.changed) {
+        void reloadMetaWorkspaceFromDisk();
+        const restartDlg = await window.agenticxDesktop.confirmDialog({
+          title: "工作区已更新",
+          message: "新建元智能体对话将使用新目录；已有会话仍保留原工作区。",
+          detail:
+            "建议完全退出 Near（⌘Q）后重新打开，以确保 Machi 人格文件、用户档案与记忆索引路径一致。",
+          confirmText: "立即重启",
+          cancelText: "稍后手动重启",
+        });
+        if (restartDlg.confirmed) {
+          await window.agenticxDesktop.appRelaunch();
+          return;
+        }
+        setWorkspaceDirMessage("已保存。请新建对话使新路径生效；建议稍后重启 Near。");
+      } else {
+        setWorkspaceDirMessage("已保存，路径未变更。");
+      }
+    } catch (err) {
+      setWorkspaceDirMessage(`保存失败: ${String(err)}`);
+    } finally {
+      setWorkspaceDirSaving(false);
+    }
+  }, [reloadMetaWorkspaceFromDisk, workspaceDirDraft]);
 
   const callAiAssist = useCallback(
     async (kind: "identity" | "soul" | "preference") => {
@@ -8035,10 +8106,60 @@ export function SettingsPanel({
                 <SessionMemoryPanel />
                 <Panel title="工作目录">
                   <label className="block text-sm text-text-muted">
-                    默认工作区目录
-                    <input className="mt-1 w-full rounded-md border border-border bg-surface-panel px-2 py-1.5 text-sm text-text-subtle" value="~/.agenticx/workspace" readOnly />
-                    <span className="mt-1 block text-xs text-text-faint">修改工作区目录请编辑 ~/.agenticx/config.yaml 中的 workspace_dir 字段</span>
+                    默认工作区目录（元智能体）
+                    <div className="mt-1 flex gap-2">
+                      <input
+                        className="min-w-0 flex-1 rounded-md border border-border bg-surface-panel px-2 py-1.5 text-sm text-text-subtle"
+                        value={workspaceDirDraft}
+                        onChange={(e) => {
+                          setWorkspaceDirDraft(e.target.value);
+                          setWorkspaceDirMessage("");
+                        }}
+                        placeholder="~/.agenticx/workspace"
+                        spellCheck={false}
+                      />
+                      <button
+                        type="button"
+                        className="shrink-0 rounded-md border border-border bg-surface-card px-2.5 py-1.5 text-xs text-text-subtle transition hover:bg-surface-hover hover:text-text-primary"
+                        onClick={() => void chooseWorkspaceDirectory()}
+                      >
+                        选择…
+                      </button>
+                    </div>
+                    {workspaceDirResolved ? (
+                      <span className="mt-1 block text-[11px] text-text-faint">
+                        解析路径：{workspaceDirResolved}
+                      </span>
+                    ) : null}
+                    <span className="mt-1 block text-xs text-text-faint">
+                      Machi 默认读写根目录（IDENTITY / USER / SOUL / MEMORY 等）。保存后新建对话生效；已有会话仍用原路径。
+                    </span>
                   </label>
+                  <div className="mt-3 flex flex-wrap items-center gap-2">
+                    <button
+                      type="button"
+                      className="rounded-md bg-btnPrimary px-3 py-1.5 text-xs font-medium text-btnPrimary-text transition hover:bg-btnPrimary-hover disabled:cursor-not-allowed disabled:opacity-50"
+                      disabled={!workspaceDirDirty || workspaceDirSaving}
+                      onClick={() => void saveWorkspaceDirectory()}
+                    >
+                      {workspaceDirSaving ? "保存中…" : "保存工作区路径"}
+                    </button>
+                    {workspaceDirDirty ? (
+                      <button
+                        type="button"
+                        className="rounded-md border border-border px-3 py-1.5 text-xs text-text-subtle transition hover:bg-surface-hover"
+                        onClick={() => {
+                          setWorkspaceDirDraft(workspaceDirSaved);
+                          setWorkspaceDirMessage("");
+                        }}
+                      >
+                        撤销
+                      </button>
+                    ) : null}
+                  </div>
+                  {workspaceDirMessage ? (
+                    <p className="mt-2 text-xs text-text-muted">{workspaceDirMessage}</p>
+                  ) : null}
                   <div className="mt-3 rounded-md border border-border bg-surface-card px-3 py-2.5 text-xs text-text-subtle">
                     每个分身拥有独立工作区，位于 ~/.agenticx/avatars/&lt;id&gt;/workspace。
                   </div>

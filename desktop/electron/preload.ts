@@ -348,6 +348,9 @@ contextBridge.exposeInMainWorld("agenticxDesktop", {
   deleteGroup: async (id: string) => ipcRenderer.invoke("delete-group", id),
 
   loadConfig: async () => ipcRenderer.invoke("load-config"),
+  loadWorkspaceConfig: async () => ipcRenderer.invoke("load-workspace-config"),
+  saveWorkspaceConfig: async (payload: { workspaceDir: string }) =>
+    ipcRenderer.invoke("save-workspace-config", payload),
   loadMetaSoul: async () => ipcRenderer.invoke("load-meta-soul"),
   saveMetaSoul: async (payload: { content: string }) => ipcRenderer.invoke("save-meta-soul", payload),
   loadMetaIdentity: async () => ipcRenderer.invoke("load-meta-identity"),
