@@ -46,7 +46,8 @@ import {
 } from "@agenticx/ui";
 import { useTranslations } from "next-intl";
 import type { ColumnDef } from "@tanstack/react-table";
-import { MoreHorizontal, Pencil, Plus, RefreshCcw, ShieldCheck, ShieldX, Trash2, UserPlus, Users, Sparkles, Check } from "lucide-react";
+import { MoreHorizontal, Pencil, Plus, RefreshCcw, ShieldCheck, ShieldX, Trash2, UserPlus, Users, Check } from "lucide-react";
+import { VisibleModelsCard } from "../../../components/visible-models-card";
 
 type Status = "active" | "disabled" | "locked";
 
@@ -86,14 +87,6 @@ function getStatusMeta(t: ReturnType<typeof useTranslations<"pages.iam.users">>)
   } satisfies Record<Status, { label: string; variant: "success" | "warning" | "destructive" }>;
 }
 
-interface ModelOption {
-  id: string;
-  provider: string;
-  providerLabel: string;
-  model: string;
-  label: string;
-}
-
 type DeptOption = { id: string; label: string };
 type RoleOption = { id: string; code: string; name: string };
 
@@ -116,9 +109,7 @@ function UsersPageContent() {
   const [selected, setSelected] = useState<AdminUser | null>(null);
   const [createOpen, setCreateOpen] = useState(false);
   const [editOpen, setEditOpen] = useState(false);
-  const [modelOptions, setModelOptions] = useState<ModelOption[]>([]);
-  const [userModels, setUserModels] = useState<string[]>([]);
-  const [savingModels, setSavingModels] = useState(false);
+  const [deptInheritedModelIds, setDeptInheritedModelIds] = useState<string[]>([]);
   const [deptOptions, setDeptOptions] = useState<DeptOption[]>([]);
   const [roleOptions, setRoleOptions] = useState<RoleOption[]>([]);
 
@@ -196,61 +187,18 @@ function UsersPageContent() {
     };
   }, []);
 
-  // 并行加载所有可分配的模型（来自管理员配置）
   useEffect(() => {
-    let alive = true;
-    void (async () => {
-      try {
-        const res = await adminFetch("/api/admin/providers", { cache: "no-store" });
-        const json = (await res.json()) as {
-          data?: {
-            providers: Array<{
-              id: string;
-              displayName: string;
-              enabled: boolean;
-              apiKeyConfigured: boolean;
-              models: Array<{ name: string; label: string; enabled: boolean }>;
-            }>;
-          };
-        };
-        if (!alive || !json.data) return;
-        const opts: ModelOption[] = [];
-        for (const p of json.data.providers) {
-          if (!p.enabled) continue;
-          for (const m of p.models) {
-            if (!m.enabled) continue;
-            opts.push({
-              id: `${p.id}/${m.name}`,
-              provider: p.id,
-              providerLabel: p.displayName,
-              model: m.name,
-              label: m.label,
-            });
-          }
-        }
-        setModelOptions(opts);
-      } catch {
-        // 静默：模型分配仅是用户详情的子区域，加载失败不影响主页
-      }
-    })();
-    return () => {
-      alive = false;
-    };
-  }, []);
-
-  // 选中某用户时拉取其当前的可见模型
-  useEffect(() => {
-    if (!selected) {
-      setUserModels([]);
+    if (!selected?.deptId) {
+      setDeptInheritedModelIds([]);
       return;
     }
     let alive = true;
     void (async () => {
       try {
-        const res = await fetch(`/api/admin/users/${selected.id}/models`, { cache: "no-store" });
+        const res = await adminFetch(`/api/admin/departments/${selected.deptId}/models`, { cache: "no-store" });
         if (!res.ok) return;
         const json = (await res.json()) as { data?: { modelIds: string[] } };
-        if (alive && json.data) setUserModels(json.data.modelIds);
+        if (alive && json.data) setDeptInheritedModelIds(json.data.modelIds);
       } catch {
         // 静默
       }
@@ -258,31 +206,7 @@ function UsersPageContent() {
     return () => {
       alive = false;
     };
-  }, [selected?.id]);
-
-  const handleToggleUserModel = async (modelId: string) => {
-    if (!selected) return;
-    const next = userModels.includes(modelId)
-      ? userModels.filter((m) => m !== modelId)
-      : [...userModels, modelId];
-    setUserModels(next);
-    setSavingModels(true);
-    try {
-      const res = await fetch(`/api/admin/users/${selected.id}/models`, {
-        method: "PUT",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ modelIds: next }),
-      });
-      const json = (await res.json()) as { data?: { modelIds: string[] }; message?: string };
-      if (!res.ok || !json.data) {
-        toast.error(json.message ?? t("toast.saveFailed"));
-        return;
-      }
-      setUserModels(json.data.modelIds);
-    } finally {
-      setSavingModels(false);
-    }
-  };
+  }, [selected?.id, selected?.deptId]);
 
   const handleCreate = async (input: Record<string, unknown>) => {
     const res = await adminFetch("/api/admin/users", {
@@ -721,60 +645,25 @@ function UsersPageContent() {
                   value={<span className="font-mono text-xs">{new Date(selected.updatedAt).toLocaleString("zh-CN")}</span>}
                 />
 
-                <div className="space-y-2 rounded-lg border border-border p-3">
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <div className="flex items-center gap-1.5 text-sm font-semibold">
-                        <Sparkles className="h-3.5 w-3.5 text-primary" />
-                        {t("detail.visibleModels")}
-                      </div>
-                      <div className="text-xs text-muted-foreground">
-                        {t("detail.visibleModelsHint")}
-                      </div>
-                    </div>
-                    <Badge variant="soft" className="text-[10px]">
-                      {t("detail.selectedCount", { selected: userModels.length, total: modelOptions.length })}
-                    </Badge>
-                  </div>
-                  {modelOptions.length === 0 ? (
-                    <p className="text-xs text-muted-foreground">
-                      {t("detail.noModelsHint")}
-                    </p>
-                  ) : (
-                    <div className="grid gap-1.5 sm:grid-cols-2">
-                      {modelOptions.map((opt) => {
-                        const checked = userModels.includes(opt.id);
-                        return (
-                          <button
-                            key={opt.id}
-                            type="button"
-                            onClick={() => void handleToggleUserModel(opt.id)}
-                            disabled={savingModels}
-                            className={[
-                              "flex items-center gap-2 rounded-md border px-2.5 py-1.5 text-left text-xs transition-colors",
-                              checked
-                                ? "border-primary bg-primary-soft/50 text-foreground"
-                                : "border-border bg-surface-card hover:bg-muted",
-                            ].join(" ")}
-                          >
-                            <Check
-                              className={[
-                                "h-3.5 w-3.5 shrink-0",
-                                checked ? "text-primary" : "opacity-0",
-                              ].join(" ")}
-                            />
-                            <div className="min-w-0 flex-1">
-                              <div className="truncate font-medium">{opt.label}</div>
-                              <div className="truncate text-[10px] text-muted-foreground">
-                                {opt.providerLabel} · <span className="font-mono">{opt.model}</span>
-                              </div>
-                            </div>
-                          </button>
-                        );
-                      })}
-                    </div>
-                  )}
-                </div>
+                <VisibleModelsCard
+                  target={
+                    selected
+                      ? {
+                          kind: "user",
+                          id: selected.id,
+                          applyToDeptId: selected.deptId ?? null,
+                        }
+                      : null
+                  }
+                  inheritedFromDept={
+                    selected?.deptId
+                      ? {
+                          deptLabel: deptLabelMap.get(selected.deptId) ?? selected.deptId,
+                          modelIds: deptInheritedModelIds,
+                        }
+                      : null
+                  }
+                />
               </div>
 
               <div className="flex flex-wrap gap-2 border-t border-border pt-3">

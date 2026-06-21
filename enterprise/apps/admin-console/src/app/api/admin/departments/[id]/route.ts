@@ -1,6 +1,7 @@
 import { deleteDepartment, getDepartment, moveDepartment, updateDepartmentName } from "@agenticx/iam-core";
 import { NextResponse } from "next/server";
 import { requireAdminScope } from "../../../../../lib/admin-auth";
+import { deleteDeptAssignment } from "../../../../../lib/dept-models-store";
 
 export async function GET(_request: Request, context: { params: Promise<{ id: string }> }) {
   const auth = await requireAdminScope(["dept:read"]);
@@ -52,6 +53,7 @@ export async function DELETE(_request: Request, context: { params: Promise<{ id:
   const { id } = await context.params;
   try {
     await deleteDepartment({ tenantId: auth.session.tenantId, id, actorUserId: auth.session.userId });
+    await deleteDeptAssignment(id);
     return NextResponse.json({ code: "00000", message: "ok" });
   } catch (error) {
     const err = error as Error & { code?: string };

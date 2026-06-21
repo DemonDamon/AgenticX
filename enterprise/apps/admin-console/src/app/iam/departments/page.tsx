@@ -29,6 +29,7 @@ import {
 import { useTranslations } from "next-intl";
 import type { DepartmentTreeNode } from "@agenticx/feature-iam";
 import { Download, Pencil, Plus, RefreshCw, Trash2, FolderTree, Users, ChevronRight, CornerRightUp } from "lucide-react";
+import { VisibleModelsCard } from "../../../components/visible-models-card";
 
 type ApiDept = {
   id: string;
@@ -352,6 +353,10 @@ export default function DepartmentsPage() {
           </CardContent>
         </Card>
       )}
+
+      {currentNode ? (
+        <VisibleModelsCard target={{ kind: "dept", id: currentNode.id }} />
+      ) : null}
 
       {/* 当前层级的子部门卡片网格 */}
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">

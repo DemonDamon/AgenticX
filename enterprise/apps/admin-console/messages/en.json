@@ -585,6 +585,10 @@
           "updatedAt": "Updated",
           "visibleModels": "Visible model assignment",
           "visibleModelsHint": "Checked models appear in portal; none checked means no models available",
+          "visibleModelsExtraHint": "Selections here are extra models on top of the department baseline.",
+          "inheritedFromDept": "Inherited from {dept}: {count} models",
+          "applyToDept": "Apply to entire department",
+          "applyToDeptSuccess": "Synced to department visible models",
           "selectedCount": "Selected {selected} / {total} available",
           "noModelsHint": "No assignable models — enable providers/models under Platform · Model Services first.",
           "edit": "Edit",
@@ -664,6 +668,11 @@
         "moveToRoot": "(Move to root)",
         "confirmMove": "Move",
         "confirmDelete": "Delete this department? Sub-departments and members will be unbound.",
+        "visibleModels": {
+          "title": "Visible model assignment",
+          "hint": "Members of this department see these models by default; user-level assignments are added on top.",
+          "clear": "Clear department models"
+        },
         "toast": {
           "loadFailed": "Failed to load",
           "networkError": "Network error",
