@@ -18,10 +18,10 @@ import errno
 import logging
 import os
 from contextlib import AsyncExitStack
-from typing import Any, Dict, List, Optional, Set, Type, Union
+from typing import Any, Dict, List, Literal, Optional, Set, Type, Union
 
 import anyio  # type: ignore
-from pydantic import BaseModel, Field  # type: ignore
+from pydantic import BaseModel, Field, model_validator  # type: ignore
 
 try:
     import mcp.types as mcp_types  # type: ignore
@@ -70,22 +70,76 @@ def _is_recoverable_mcp_transport_error(exc: BaseException) -> bool:
     return False
 
 
+MCPTransport = Literal["stdio", "streamable_http", "sse"]
+
+
 class MCPServerConfig(BaseModel):
-    """MCP 服务器配置（与旧版兼容）"""
+    """MCP server config supporting both stdio and remote (HTTP/SSE) transports.
+
+    Backward compatibility:
+      - Existing stdio entries (``command`` + optional ``args``/``env``/``cwd``)
+        keep working unchanged. ``transport`` is auto-inferred to ``"stdio"``.
+      - New remote entries provide ``url`` (and optional ``headers``).
+        ``transport`` is inferred from the URL suffix: ``/sse`` → ``"sse"``,
+        otherwise ``"streamable_http"``. Callers may also set ``transport``
+        explicitly to override the inference.
+
+    Exactly one of ``command`` or ``url`` MUST be provided.
+    """
+
     name: str
-    command: str
+    # Transport (auto-inferred when omitted).
+    transport: Optional[MCPTransport] = None
+    # stdio fields
+    command: Optional[str] = None
     args: List[str] = Field(default_factory=list)
     env: Dict[str, str] = Field(default_factory=dict)
+    cwd: Optional[str] = Field(default=None, description="Working directory for stdio child process.")
+    # remote fields
+    url: Optional[str] = Field(default=None, description="Remote MCP server URL (streamable-http / sse).")
+    headers: Dict[str, str] = Field(
+        default_factory=dict,
+        description="HTTP headers sent to the remote MCP server (e.g. Authorization).",
+    )
+    # common
     timeout: float = 60.0
-    cwd: Optional[str] = Field(default=None, description="工作目录")
     enabled_tools: List[str] = Field(
         default_factory=list,
-        description="启用的工具名称列表（空列表表示全部启用）"
+        description="Whitelist of tools to expose; empty means all tools.",
     )
     assign_to_agents: List[str] = Field(
         default_factory=list,
-        description="分配给哪些智能体（空列表表示全部智能体可用）"
+        description="Assign this MCP to specific agents; empty means all agents.",
     )
+
+    @model_validator(mode="after")
+    def _validate_transport(self) -> "MCPServerConfig":
+        has_command = bool(self.command and str(self.command).strip())
+        has_url = bool(self.url and str(self.url).strip())
+        if has_url and has_command:
+            raise ValueError(
+                f"MCP server '{self.name}' must specify exactly one of `command` or `url`, not both"
+            )
+        if not has_url and not has_command:
+            raise ValueError(
+                f"MCP server '{self.name}' must specify exactly one of `command` or `url`"
+            )
+        if has_url:
+            if self.transport is None:
+                # /sse suffix → SSE; everything else defaults to streamable-http.
+                # Trim query string before suffix check so URLs like
+                # "https://host/sse?token=x" still resolve correctly.
+                url_path = str(self.url).split("?", 1)[0].rstrip("/")
+                self.transport = "sse" if url_path.endswith("/sse") else "streamable_http"
+        else:
+            if self.transport is None:
+                self.transport = "stdio"
+            elif self.transport != "stdio":
+                raise ValueError(
+                    f"MCP server '{self.name}' has command but transport={self.transport!r}; "
+                    "stdio transport is required when command is set"
+                )
+        return self
 
 
 class MCPToolInfo(BaseModel):

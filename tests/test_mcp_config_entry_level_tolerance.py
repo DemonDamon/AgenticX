@@ -31,8 +31,8 @@ def test_load_mcp_config_skips_bad_entries(tmp_path: Path) -> None:
         {
             "mcpServers": {
                 "good": {"command": "echo", "args": ["hi"]},
-                # url-only entry fails validation before Phase 2; loader must skip it.
-                "bad": {"url": "https://x/mcp"},
+                # Malformed entry: neither `command` nor `url` is provided.
+                "bad": {"args": ["lonely"]},
                 # Mutually exclusive: both transports set is also invalid.
                 "bad_both": {"command": "echo", "url": "https://x/mcp"},
             }
@@ -45,6 +45,28 @@ def test_load_mcp_config_skips_bad_entries(tmp_path: Path) -> None:
     assert "bad" not in servers
     assert "bad_both" not in servers
     assert servers["good"].command == "echo"
+
+
+def test_load_mcp_config_accepts_remote_url_entries(tmp_path: Path) -> None:
+    """Phase 2: `url` entries are now valid (streamable-http / sse)."""
+
+    cfg_path = _write_mcp_json(
+        tmp_path / "mcp.json",
+        {
+            "mcpServers": {
+                "stdio_one": {"command": "echo"},
+                "remote_http": {"url": "https://api.tushare.pro/mcp/?token=x"},
+                "remote_sse": {"url": "https://example.com/sse"},
+            }
+        },
+    )
+
+    servers = load_mcp_config(str(cfg_path))
+
+    assert set(servers.keys()) == {"stdio_one", "remote_http", "remote_sse"}
+    assert servers["stdio_one"].transport == "stdio"
+    assert servers["remote_http"].transport == "streamable_http"
+    assert servers["remote_sse"].transport == "sse"
 
 
 def test_load_mcp_config_all_good_entries(tmp_path: Path) -> None:

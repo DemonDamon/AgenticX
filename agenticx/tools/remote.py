@@ -56,22 +56,25 @@ def make_sync_mcp_wrapper(async_func: Any, tool_name: str) -> Any:
     return sync_wrapper
 
 
-class MCPServerConfig(BaseModel):
-    name: str
-    command: str
-    args: List[str] = Field(default_factory=list)
-    env: Dict[str, str] = Field(default_factory=dict)
-    timeout: float = 60.0
-    cwd: Optional[str] = Field(default=None, description="工作目录")
-    # DeerFlow-inspired enhancements
-    enabled_tools: List[str] = Field(
-        default_factory=list,
-        description="启用的工具名称列表（空列表表示全部启用）"
-    )
-    assign_to_agents: List[str] = Field(
-        default_factory=list,
-        description="分配给哪些智能体（空列表表示全部智能体可用）"
-    )
+# Canonical MCPServerConfig lives in remote_v2 (supports stdio + remote URL
+# transports). We re-export here so existing imports
+# (``from agenticx.tools.remote import MCPServerConfig``) keep working without
+# field drift. See plan 2026-06-22-near-remote-url-mcp-support, Task 2.1.
+try:
+    from .remote_v2 import MCPServerConfig  # type: ignore  # noqa: F401
+except ImportError:  # pragma: no cover - mcp SDK missing; fallback to legacy stdio-only model
+    class MCPServerConfig(BaseModel):  # type: ignore[no-redef]
+        name: str
+        command: Optional[str] = None
+        args: List[str] = Field(default_factory=list)
+        env: Dict[str, str] = Field(default_factory=dict)
+        timeout: float = 60.0
+        cwd: Optional[str] = Field(default=None)
+        url: Optional[str] = None
+        headers: Dict[str, str] = Field(default_factory=dict)
+        transport: Optional[str] = None
+        enabled_tools: List[str] = Field(default_factory=list)
+        assign_to_agents: List[str] = Field(default_factory=list)
 
 class MCPToolCall(BaseModel):
     jsonrpc: str = Field(default="2.0", description="JSON-RPC version")
