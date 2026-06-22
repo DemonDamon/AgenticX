@@ -712,7 +712,7 @@ async def mcp_connect_async(
         console.print(f"[red]连接 {name} 失败:[/red] {cmd_err}")
         return False, cmd_err
 
-    if name == "browser-use" and _is_stock_browser_use_mcp_config(cfg):
+    if name == "browser-use" and str(getattr(cfg, "transport", "stdio") or "stdio") == "stdio" and _is_stock_browser_use_mcp_config(cfg):
         ok_install, err = await preflight_browser_use_install_async(echo=True)
         if not ok_install:
             console.print(
