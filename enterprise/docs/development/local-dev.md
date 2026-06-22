@@ -24,12 +24,44 @@ bash scripts/start-dev-with-infra.sh  # 连同 Docker PG/Redis
 
 ## 默认登录
 
-| 端 | 账号 | 密码 env |
+| 端 | 账号 | 密码 env（bootstrap 时设置，写入 `.env.local`） |
 |---|---|---|
-| 后台 | `owner@agenticx.local` | `ADMIN_CONSOLE_LOGIN_PASSWORD` |
-| 前台 | `owner@agenticx.local` | `AUTH_DEV_OWNER_PASSWORD` |
+| 后台 | `admin@agenticx.local` | 与 `AUTH_DEV_OWNER_PASSWORD` 一致（见下节） |
+| 前台 | `admin@agenticx.local` | `AUTH_DEV_OWNER_PASSWORD` |
 
 `staff@agenticx.local` **不在**默认种子中，需后台创建。
+
+> 历史文档偶见 `owner@agenticx.local`；当前 `db-seed.mjs` 写入的是 **`admin@agenticx.local`**。
+
+---
+
+## 密码与登录（env vs Postgres）
+
+本地 dev 配了 `DATABASE_URL` 后，**前台 / 后台密码登录都验 Postgres `users.password_hash`**，不会每次读 `.env.local`。
+
+| 阶段 | 谁决定密码 |
+|---|---|
+| `bootstrap.sh` → `db:seed` | 用当时环境里的 **`AUTH_DEV_OWNER_PASSWORD`** 做 bcrypt，写入 `users.password_hash` |
+| 日常 `start-dev.sh` 重启 | **不**重跑 seed；PG 里 hash **不变** |
+| 手动改 `.env.local` 后 | env 与 PG **可能不一致**，直到你重跑 seed |
+
+两个 env 变量的分工：
+
+| 变量 | 作用 |
+|---|---|
+| `AUTH_DEV_OWNER_PASSWORD` | **`db:seed` 写库**；web-portal 开发态登录；应与 PG 中种子用户密码一致 |
+| `ADMIN_CONSOLE_LOGIN_PASSWORD` | bootstrap 交互收集、落盘 `.env.local`；**有 PG 时 admin 登录不读它**（仅无库时的 env 兜底） |
+
+改密码后同步进库（任选其一）：
+
+```bash
+cd enterprise
+set -a && source .env.local && set +a
+pnpm --filter @agenticx/db-schema db:seed
+# 或：bash scripts/reset-dev-data.sh --with-seed --yes
+```
+
+连续输错 5 次会锁定账号（`failed_login_count` / `locked_until` / `status=locked`），界面仍显示 `invalid credentials`。处置见 [troubleshooting.md#登录与-iam](./troubleshooting.md#登录与-iam)。
 
 ---
 

@@ -22,6 +22,7 @@ Enterprise 是企业级大模型应用一体化平台，由 **员工前台（web
 | 配策略 / 插件 | [plugin-protocol/README.md](./plugin-protocol/README.md) · [gateway/policy-engine.md](./gateway/policy-engine.md) |
 | 部署到 Vercel + 外部 Gateway | [deployment/README.md](./deployment/README.md) |
 | 给客户做定制 | [guides/enterprise-customers-collaboration.md](./guides/enterprise-customers-collaboration.md) |
+| 登录密码 / 改 env 不生效 | [development/local-dev.md#密码与登录env-vs-postgres](./development/local-dev.md#密码与登录env-vs-postgres) · [troubleshooting#登录与-iam](./development/troubleshooting.md#登录与-iam) |
 | 排障 | [development/troubleshooting.md](./development/troubleshooting.md) · [runbooks/postgres-ddl-lock-waiting.md](./runbooks/postgres-ddl-lock-waiting.md) |
 
 ---
