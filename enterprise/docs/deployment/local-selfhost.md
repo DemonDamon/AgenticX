@@ -70,11 +70,13 @@ bash scripts/start-dev-with-infra.sh --ui=stream
 | 管理后台 | <http://localhost:3001> |
 | 网关健康检查 | <http://localhost:8088/healthz> |
 
-默认登录账号 `admin@agenticx.local`，密码即第 2 步设置的值（落在 `enterprise/.env.local`）：
+默认登录账号 `admin@agenticx.local`，密码以 **Postgres 中 seed 时的 hash** 为准（bootstrap 第 2 步写入 `.env.local` 的 `AUTH_DEV_OWNER_PASSWORD`，`db:seed` 同步进 `users.password_hash`）：
 
 ```bash
-grep -E 'ADMIN_CONSOLE_LOGIN_PASSWORD|AUTH_DEV_OWNER_PASSWORD' .env.local
+grep AUTH_DEV_OWNER_PASSWORD .env.local
 ```
+
+改 env 后登录仍失败 → 重跑 `pnpm --filter @agenticx/db-schema db:seed` 或见 [development/troubleshooting.md#登录与-iam](../development/troubleshooting.md#登录与-iam)。
 
 > `staff@agenticx.local` **不在**默认种子里，需登录后台手动创建。
 

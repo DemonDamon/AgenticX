@@ -175,10 +175,16 @@ pnpm --filter @agenticx/db-schema db:migrate
 
 ## 登录与 IAM
 
+> 机制说明（env 何时生效、seed 写 hash）：[local-dev.md#密码与登录env-vs-postgres](./local-dev.md#密码与登录env-vs-postgres)
+
 | 现象 | 原因 | 处置 |
 |---|---|---|
-| admin 密码错误 | seed 后改了 password env | 重跑 bootstrap 或 `reset-dev-data.sh --with-seed` |
-| `staff@...` Invalid credentials | 无此种子用户 | 用 owner 或后台创建 |
+| admin / 前台「密码错误」但 `.env.local` 密码「明明对」 | 有 `DATABASE_URL` 时验 **PG hash**，不是 env；或改 env 后未重跑 seed | `set -a && source .env.local && set +a` 后 `pnpm --filter @agenticx/db-schema db:seed` |
+| 重启后密码「变了」 | 重启 **不会**改 PG；常见是 env 与库不一致或账号被锁 | 先查库：`docker exec agenticx-postgres-dev psql -U postgres -d agenticx -c "SELECT email, status, failed_login_count, locked_until FROM users WHERE email='admin@agenticx.local';"` |
+| 密码正确仍 `invalid credentials` | 连续 5 次失败锁定（portal / admin 共用 `users` 表）；UI 不区分锁定与密码错 | 解锁：`UPDATE users SET status='active', failed_login_count=0, locked_until=NULL WHERE email='admin@agenticx.local';` 或等锁定窗口过后再试 |
+| admin 密码错误（确认真输错） | seed 后改了 `AUTH_DEV_OWNER_PASSWORD` 未同步 PG | 重跑 `db:seed` 或 `reset-dev-data.sh --with-seed` |
+| 用了 `ADMIN_CONSOLE_LOGIN_PASSWORD` 登不上 | 有 PG 时 admin **不读**该变量验密（仅无库兜底） | 以 `AUTH_DEV_OWNER_PASSWORD` 为准，或重跑 seed 同步 hash |
+| `staff@...` Invalid credentials | 无此种子用户 | 用 `admin@agenticx.local` 或后台创建 |
 | 前台无模型可选 | 未分配可见模型 / PG 空 | admin 模型服务 + 用户可见模型；或 `migrate:legacy-runtime` |
 | IAM 403 | scope 不足 | 查 [rbac/scopes.md](../rbac/scopes.md) |
 

@@ -27,7 +27,7 @@
 
 | 变量 | 必填 | 说明 |
 |---|---|---|
-| `AUTH_DEV_OWNER_PASSWORD` | 🟡 dev | 开发态 owner@agenticx.local 密码 |
+| `AUTH_DEV_OWNER_PASSWORD` | 🟡 dev | **`db:seed` 写入 PG 的 bcrypt 源**；web-portal 开发登录。默认种子用户 `admin@agenticx.local`。改 env 后须重跑 `db:seed` 才同步库 |
 | `ENABLE_DEV_BOOTSTRAP` | ⚪ | 非生产自动引导 seed |
 | `GATEWAY_COMPLETIONS_URL` | 🟡 | 默认 `http://127.0.0.1:8088/v1/chat/completions` |
 | `NEXT_PUBLIC_SSO_PROVIDERS` | ⚪ | `id:显示名` 逗号分隔，控制 SSO 按钮 |
@@ -49,7 +49,7 @@
 | 变量 | 必填 | 说明 |
 |---|---|---|
 | `ADMIN_CONSOLE_LOGIN_EMAIL` | 🟡 | 管理台账号；默认 `admin@agenticx.local` |
-| `ADMIN_CONSOLE_LOGIN_PASSWORD` | ✅ | 管理台密码登录 |
+| `ADMIN_CONSOLE_LOGIN_PASSWORD` | ✅ | bootstrap 落盘、无 PG 时的 env 兜底。**有 `DATABASE_URL` 时 admin 登录验 PG hash**（hash 来自 seed 时的 `AUTH_DEV_OWNER_PASSWORD`），改本变量不会自动改库 |
 | `ADMIN_CONSOLE_SESSION_SECRET` | ✅ | 管理台 session 签名 |
 | `GATEWAY_BASE_URL` | 🟡 | 管理台健康检查目标（默认 `http://127.0.0.1:8088`） |
 | `GATEWAY_INTERNAL_TOKEN` | ✅ Vercel 分体 | Gateway 拉取 internal API 的 Bearer |
