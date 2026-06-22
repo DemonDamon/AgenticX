@@ -18,7 +18,9 @@ import errno
 import logging
 import os
 from contextlib import AsyncExitStack
+from datetime import timedelta
 from typing import Any, Dict, List, Literal, Optional, Set, Type, Union
+from urllib.parse import urlparse
 
 import anyio  # type: ignore
 from pydantic import BaseModel, Field, model_validator  # type: ignore
@@ -32,6 +34,16 @@ except ImportError:
     ClientSession = None  # type: ignore
     StdioServerParameters = None  # type: ignore
     stdio_client = None  # type: ignore
+
+try:  # Streamable HTTP transport (mcp SDK >= 1.0)
+    from mcp.client.streamable_http import streamablehttp_client  # type: ignore
+except ImportError:
+    streamablehttp_client = None  # type: ignore
+
+try:  # SSE transport (legacy MCP wire protocol)
+    from mcp.client.sse import sse_client  # type: ignore
+except ImportError:
+    sse_client = None  # type: ignore
 
 from .base import BaseTool, ToolError
 
@@ -234,38 +246,76 @@ class MCPClientV2:
         if self._closed:
             raise RuntimeError("Client has been closed")
 
-        if stdio_client is None or ClientSession is None or StdioServerParameters is None:
+        if ClientSession is None:
             raise RuntimeError(
-                "MCP SDK 未安装：当前 Python 环境下 `from mcp.client.stdio import stdio_client` 失败，"
-                "因此所有 MCP 子进程都无法启动。请在与 Studio 相同的解释器下执行 "
+                "MCP SDK 未安装：当前 Python 环境下 `from mcp.client.session import ClientSession` 失败。"
+                "请在与 Studio 相同的解释器下执行 "
                 "`pip install 'mcp>=1.0.0,<2'`（或 `pip install -e \".[desktop-runtime]\"`），"
                 "然后重启 Studio。"
             )
-        
-        logger.info(f"Creating persistent MCP session for server: {self.server_config.name}")
-        
-        # 构建环境变量
-        env = dict(os.environ)
-        env.update(self.server_config.env)
-        
-        # 创建 stdio transport 参数
-        server_params = StdioServerParameters(
-            command=self.server_config.command,
-            args=self.server_config.args,
-            env=env,
-            cwd=self.server_config.cwd,
+
+        transport = self.server_config.transport or "stdio"
+        logger.info(
+            "Creating persistent MCP session for server=%s transport=%s",
+            self.server_config.name,
+            transport,
         )
-        
+
         # 创建 exit stack（如果还没有）
         if self._exit_stack is None:
             self._exit_stack = AsyncExitStack()
             await self._exit_stack.__aenter__()
-        
+
         try:
-            # 进入 stdio_client context（保持 transport 打开）
-            stdio_transport = await self._exit_stack.enter_async_context(stdio_client(server_params))
-            read_stream, write_stream = stdio_transport
-            
+            if transport == "stdio":
+                if stdio_client is None or StdioServerParameters is None:
+                    raise RuntimeError(
+                        "stdio transport unavailable: `mcp.client.stdio` import failed."
+                    )
+                # 构建环境变量
+                env = dict(os.environ)
+                env.update(self.server_config.env)
+                server_params = StdioServerParameters(
+                    command=self.server_config.command,
+                    args=self.server_config.args,
+                    env=env,
+                    cwd=self.server_config.cwd,
+                )
+                stdio_transport = await self._exit_stack.enter_async_context(
+                    stdio_client(server_params)
+                )
+                read_stream, write_stream = stdio_transport
+            elif transport == "streamable_http":
+                if streamablehttp_client is None:
+                    raise RuntimeError(
+                        "streamable-http transport unavailable: "
+                        "`mcp.client.streamable_http` import failed. "
+                        "Upgrade `mcp` SDK to >=1.0."
+                    )
+                http_cm = streamablehttp_client(
+                    url=self.server_config.url,
+                    headers=dict(self.server_config.headers) or None,
+                    timeout=timedelta(seconds=float(self.server_config.timeout)),
+                )
+                streams = await self._exit_stack.enter_async_context(http_cm)
+                # streamablehttp_client returns (read, write, get_session_id_callback)
+                read_stream, write_stream = streams[0], streams[1]
+            elif transport == "sse":
+                if sse_client is None:
+                    raise RuntimeError(
+                        "sse transport unavailable: `mcp.client.sse` import failed."
+                    )
+                sse_cm = sse_client(
+                    url=self.server_config.url,
+                    headers=dict(self.server_config.headers) or None,
+                )
+                read_stream, write_stream = await self._exit_stack.enter_async_context(sse_cm)
+            else:
+                raise ToolError(
+                    f"unsupported MCP transport: {transport!r}",
+                    self.server_config.name,
+                )
+
             # 进入 ClientSession context（保持 session 打开）
             session = await self._exit_stack.enter_async_context(
                 ClientSession(
@@ -292,6 +342,21 @@ class MCPClientV2:
             self._initialized = True
             
         except Exception as e:
+            # Log without leaking headers (may contain Bearer token / PAT).
+            host_hint = ""
+            if transport != "stdio" and self.server_config.url:
+                try:
+                    host_hint = f" host={urlparse(self.server_config.url).netloc}"
+                except Exception:
+                    host_hint = ""
+            logger.warning(
+                "MCP session bring-up failed: server=%s transport=%s%s err=%s: %s",
+                self.server_config.name,
+                transport,
+                host_hint,
+                type(e).__name__,
+                e,
+            )
             # 清理资源
             if self._exit_stack is not None:
                 try:
