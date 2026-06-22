@@ -658,6 +658,7 @@
         "membersLinkTitle": "点击跳转至成员管理页面",
         "membersSectionLabel": "成员",
         "membersEmpty": "该部门暂无成员",
+        "emptyDept": "该部门暂无成员与子部门",
         "membersLoading": "加载成员中…",
         "membersViewAll": "成员管理",
         "membersMore": "已展示 {shown} / 共 {total} 人，其余请前往成员管理查看",

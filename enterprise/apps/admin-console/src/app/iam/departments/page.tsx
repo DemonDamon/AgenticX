@@ -565,6 +565,15 @@ export default function DepartmentsPage() {
                       variant="ghost"
                       size="icon"
                       className="h-8 w-8 text-muted-foreground hover:bg-muted hover:text-foreground"
+                      title={t("newSubDept")}
+                      onClick={() => { setNewName(""); setCreateOpen(true); }}
+                    >
+                      <Plus className="h-4 w-4" />
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="h-8 w-8 text-muted-foreground hover:bg-muted hover:text-foreground"
                       title={t("modelConfig")}
                       onClick={() => { setNameEditMode(false); setDeptSettingsOpen(true); }}
                     >
@@ -603,91 +612,105 @@ export default function DepartmentsPage() {
                 </div>
               </div>
 
-              {/* 成员 + 子部门（同一网格，无分区标题） */}
-              <div className="p-6 pb-10">
+              {/* 成员（行列表）+ 子部门（卡片网格）分区展示 */}
+              <div className="flex flex-col gap-0 p-6 pb-10">
+
+                {/* ── 直属成员 ── */}
                 {membersLoading ? (
-                  <div className="mb-3 flex items-center gap-2 text-sm text-muted-foreground">
+                  <div className="flex items-center gap-2 py-4 text-sm text-muted-foreground">
                     <RefreshCw className="h-3.5 w-3.5 animate-spin" />
                     {t("membersLoading")}
                   </div>
-                ) : null}
-                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
-                  {!membersLoading &&
-                    deptMembers.map((member) => (
-                      <div
-                        key={member.id}
-                        className="flex items-center gap-3 rounded-lg border border-border bg-card p-3"
-                      >
-                        <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-primary/10 text-sm font-semibold text-primary">
-                          {member.displayName.slice(0, 1) || "?"}
-                        </span>
-                        <div className="min-w-0 flex-1">
-                          <div className="truncate text-sm font-medium text-foreground">
-                            {member.displayName}
+                ) : deptMembers.length > 0 ? (
+                  <section className={childNodes.length > 0 ? "mb-8" : ""}>
+                    {childNodes.length > 0 && (
+                      <p className="mb-3 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+                        {t("membersSectionLabel")}
+                      </p>
+                    )}
+                    <div className="flex flex-col divide-y divide-border rounded-lg border border-border bg-card overflow-hidden">
+                      {deptMembers.map((member) => (
+                        <div
+                          key={member.id}
+                          className="flex items-center gap-3 px-4 py-3 hover:bg-muted/40 transition-colors"
+                        >
+                          <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-primary/10 text-sm font-semibold text-primary">
+                            {member.displayName.slice(0, 1) || "?"}
+                          </span>
+                          <div className="min-w-0 flex-1">
+                            <div className="truncate text-sm font-medium text-foreground">
+                              {member.displayName}
+                            </div>
+                            <div className="truncate text-xs text-muted-foreground">
+                              {member.jobTitle ? `${member.jobTitle} · ` : ""}{member.email}
+                            </div>
                           </div>
-                          <div className="truncate text-xs text-muted-foreground">{member.email}</div>
-                          {member.jobTitle ? (
-                            <div className="truncate text-xs text-muted-foreground">{member.jobTitle}</div>
-                          ) : null}
+                          <Badge variant={MEMBER_STATUS_VARIANT[member.status]}>
+                            {tu(`status.${member.status}`)}
+                          </Badge>
                         </div>
-                        <Badge variant={MEMBER_STATUS_VARIANT[member.status]}>
-                          {tu(`status.${member.status}`)}
-                        </Badge>
-                      </div>
-                    ))}
-                  {childNodes.map((child) => (
-                      <Card
-                        key={child.id}
-                        className="group cursor-pointer transition-all hover:border-primary/40 hover:shadow-sm"
-                        onClick={() => {
-                          setCurrentDeptId(child.id);
-                          if (!expandedIds.has(child.id)) toggleExpand(child.id);
-                        }}
-                      >
-                        <CardHeader className="pb-2 pt-4">
-                          <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary/10 text-primary transition-colors group-hover:bg-primary group-hover:text-primary-foreground">
-                            <FolderTree className="h-4 w-4" />
-                          </div>
-                          <CardTitle className="mt-2 line-clamp-1 text-sm font-semibold" title={child.name}>
-                            {child.name}
-                          </CardTitle>
-                        </CardHeader>
-                        <CardContent className="pb-3">
-                          <div className="flex items-center gap-3 text-xs text-muted-foreground">
-                            <Link
-                              href={`/iam/users?dept=${child.id}`}
-                              onClick={(e) => e.stopPropagation()}
-                              className="flex items-center gap-1 hover:text-primary transition-colors"
-                            >
-                              <Users className="h-3.5 w-3.5" />
-                              {t("members", { count: child.memberCount })}
-                            </Link>
-                            <span className="flex items-center gap-1">
-                              <FolderTree className="h-3.5 w-3.5" />
-                              {t("subDepartments", { count: child.children.length })}
-                            </span>
-                          </div>
-                        </CardContent>
-                      </Card>
-                    ))}
-
-                  {/* 新建子部门 */}
-                  <button
-                    onClick={() => { setNewName(""); setCreateOpen(true); }}
-                    className="group flex min-h-[108px] flex-col items-center justify-center gap-2 rounded-xl border-2 border-dashed border-border bg-transparent text-muted-foreground transition-all hover:border-primary/40 hover:bg-primary/5 hover:text-primary"
-                  >
-                    <div className="flex h-8 w-8 items-center justify-center rounded-full bg-muted transition-colors group-hover:bg-primary/20">
-                      <Plus className="h-4 w-4" />
+                      ))}
                     </div>
-                    <span className="text-sm font-medium">{t("newSubDept")}</span>
-                  </button>
-                </div>
-                {!membersLoading && deptMembersTotal > deptMembers.length && (
-                  <p className="mt-3 text-xs text-muted-foreground">
-                    {t("membersMore", {
-                      shown: deptMembers.length,
-                      total: deptMembersTotal,
-                    })}
+                    {!membersLoading && deptMembersTotal > deptMembers.length && (
+                      <p className="mt-2 text-xs text-muted-foreground">
+                        {t("membersMore", { shown: deptMembers.length, total: deptMembersTotal })}
+                      </p>
+                    )}
+                  </section>
+                ) : null}
+
+                {/* ── 子部门 ── */}
+                {childNodes.length > 0 && (
+                  <section>
+                    {deptMembers.length > 0 && (
+                      <p className="mb-3 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+                        {t("subDepartmentsLabel")}
+                      </p>
+                    )}
+                    <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
+                      {childNodes.map((child) => (
+                        <Card
+                          key={child.id}
+                          className="group cursor-pointer transition-all hover:border-primary/40 hover:shadow-sm"
+                          onClick={() => {
+                            setCurrentDeptId(child.id);
+                            if (!expandedIds.has(child.id)) toggleExpand(child.id);
+                          }}
+                        >
+                          <CardHeader className="pb-2 pt-4">
+                            <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary/10 text-primary transition-colors group-hover:bg-primary group-hover:text-primary-foreground">
+                              <FolderTree className="h-4 w-4" />
+                            </div>
+                            <CardTitle className="mt-2 line-clamp-1 text-sm font-semibold" title={child.name}>
+                              {child.name}
+                            </CardTitle>
+                          </CardHeader>
+                          <CardContent className="pb-3">
+                            <div className="flex items-center gap-3 text-xs text-muted-foreground">
+                              <Link
+                                href={`/iam/users?dept=${child.id}`}
+                                onClick={(e) => e.stopPropagation()}
+                                className="flex items-center gap-1 hover:text-primary transition-colors"
+                              >
+                                <Users className="h-3.5 w-3.5" />
+                                {t("members", { count: child.memberCount })}
+                              </Link>
+                              <span className="flex items-center gap-1">
+                                <FolderTree className="h-3.5 w-3.5" />
+                                {t("subDepartments", { count: child.children.length })}
+                              </span>
+                            </div>
+                          </CardContent>
+                        </Card>
+                      ))}
+                    </div>
+                  </section>
+                )}
+
+                {/* 无成员且无子部门时的空态 */}
+                {!membersLoading && deptMembers.length === 0 && childNodes.length === 0 && (
+                  <p className="py-12 text-center text-sm text-muted-foreground">
+                    {t("emptyDept")}
                   </p>
                 )}
               </div>

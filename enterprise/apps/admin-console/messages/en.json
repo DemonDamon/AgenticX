@@ -658,6 +658,7 @@
         "membersLinkTitle": "Go to member management",
         "membersSectionLabel": "Members",
         "membersEmpty": "No members in this department",
+        "emptyDept": "No members or sub-departments yet",
         "membersLoading": "Loading members…",
         "membersViewAll": "Manage members",
         "membersMore": "Showing {shown} of {total} — open member management for the rest",
