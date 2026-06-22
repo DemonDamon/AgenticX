@@ -465,6 +465,8 @@ contextBridge.exposeInMainWorld("agenticxDesktop", {
   mcpDiscover: async () => ipcRenderer.invoke("mcp-discover"),
   mcpGetRaw: async (payload?: { path?: string }) => ipcRenderer.invoke("mcp-get-raw", payload),
   mcpPutRaw: async (payload: { path: string; text: string }) => ipcRenderer.invoke("mcp-put-raw", payload),
+  mcpGatewayRegistry: async (payload: { baseUrl: string; token: string }) =>
+    ipcRenderer.invoke("mcp-gateway-registry", payload),
   mcpMarketplaceList: async (payload?: {
     category?: string;
     search?: string;

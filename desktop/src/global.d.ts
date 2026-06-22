@@ -906,6 +906,11 @@ declare global {
         format?: string;
         error?: string;
       }>;
+      mcpGatewayRegistry: (payload: { baseUrl: string; token: string }) => Promise<{
+        ok: boolean;
+        data?: unknown;
+        error?: string;
+      }>;
       mcpMarketplaceList: (payload?: {
         category?: string;
         search?: string;
