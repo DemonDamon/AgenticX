@@ -424,8 +424,9 @@ export default function DepartmentsPage() {
   return (
     <div className="flex h-full flex-col">
       {/* 顶部 PageHeader */}
-      <div className="px-1 pb-1 pt-1">
+      <div className="px-1 pt-1">
         <PageHeader
+          className="mb-1"
           breadcrumb={
             <Breadcrumb>
               <BreadcrumbList>
