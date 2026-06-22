@@ -424,9 +424,9 @@ export default function DepartmentsPage() {
   return (
     <div className="flex h-full flex-col">
       {/* 顶部 PageHeader */}
-      <div className="px-1 pt-1">
+      <div className="mb-3 flex flex-col gap-1 pt-1">
         <PageHeader
-          className="mb-1"
+          className="mb-0 space-y-3"
           breadcrumb={
             <Breadcrumb>
               <BreadcrumbList>
@@ -445,20 +445,20 @@ export default function DepartmentsPage() {
             </Breadcrumb>
           }
           title={t("title")}
-          description={t("description")}
-          actions={
-            <div className="flex flex-wrap gap-2">
-              <Button variant="outline" size="sm" onClick={() => void loadTree()} disabled={loading}>
-                <RefreshCw className={`mr-2 h-4 w-4 ${loading ? "animate-spin" : ""}`} />
-                {t("refresh")}
-              </Button>
-              <Button variant="outline" size="sm" onClick={() => void exportStructure()}>
-                <Download className="mr-2 h-4 w-4" />
-                {t("exportStructure")}
-              </Button>
-            </div>
-          }
         />
+        <div className="flex w-full items-end justify-between gap-4">
+          <p className="min-w-0 text-sm text-muted-foreground">{t("description")}</p>
+          <div className="flex shrink-0 items-center gap-3">
+            <Button variant="outline" size="sm" onClick={() => void loadTree()} disabled={loading}>
+              <RefreshCw className={`mr-2 h-4 w-4 ${loading ? "animate-spin" : ""}`} />
+              {t("refresh")}
+            </Button>
+            <Button variant="outline" size="sm" onClick={() => void exportStructure()}>
+              <Download className="mr-2 h-4 w-4" />
+              {t("exportStructure")}
+            </Button>
+          </div>
+        </div>
       </div>
 
       {/* 主体：左树 + 右内容 */}
