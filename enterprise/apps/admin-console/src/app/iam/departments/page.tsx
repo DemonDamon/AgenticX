@@ -814,11 +814,23 @@ export default function DepartmentsPage() {
       <Dialog open={createOpen} onOpenChange={setCreateOpen}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>{currentNode ? t("createDialogUnder", { name: currentNode.name }) : t("createDialogRoot")}</DialogTitle>
+            <DialogTitle>
+              {currentNode ? (
+                <span className="flex flex-wrap items-center gap-x-1.5 gap-y-1 leading-snug">
+                  <span>{t("createDialogUnderPrefix")}</span>
+                  <span className="inline-flex max-w-full items-center rounded-md bg-primary/10 px-2 py-0.5 text-sm font-semibold text-primary">
+                    {currentNode.name}
+                  </span>
+                  <span>{t("createDialogUnderSuffix")}</span>
+                </span>
+              ) : (
+                t("createDialogRoot")
+              )}
+            </DialogTitle>
           </DialogHeader>
           <div className="space-y-4 py-4">
-            <div className="space-y-2">
-              <Label>{t("deptNameLabel")}</Label>
+            <div className="space-y-3">
+              <Label className="block">{t("deptNameLabel")}</Label>
               <Input
                 value={newName}
                 onChange={(e) => setNewName(e.target.value)}
