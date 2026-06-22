@@ -883,8 +883,16 @@ def load_mcp_config(config_path: str = "~/.cursor/mcp.json") -> Dict[str, MCPSer
     
     servers = {}
     for name, server_data in servers_data.items():
-        servers[name] = MCPServerConfig(name=name, **server_data)
-    
+        try:
+            servers[name] = MCPServerConfig(name=name, **server_data)
+        except Exception as exc:
+            # Per-entry tolerance: a single malformed/unsupported server entry
+            # (e.g. remote `url` only entry before Phase 2 lands) must not block
+            # other valid stdio entries from loading. See plan
+            # 2026-06-22-near-remote-url-mcp-support, Task 1.1.
+            logger.warning("skip MCP entry %s: %s", name, exc)
+            continue
+
     return servers
 
 

@@ -409,6 +409,8 @@ export function App() {
           name: item.name,
           connected: Boolean(item.connected),
           command: item.command,
+          url: typeof item.url === "string" ? item.url : undefined,
+          transport: typeof item.transport === "string" ? item.transport : undefined,
           connection_state: item.connection_state,
           tool_count: typeof item.tool_count === "number" ? item.tool_count : undefined,
           tool_names: Array.isArray(item.tool_names) ? (item.tool_names as string[]) : undefined,

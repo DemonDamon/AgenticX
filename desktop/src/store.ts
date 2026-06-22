@@ -31,6 +31,10 @@ export type McpServer = {
   name: string;
   connected: boolean;
   command?: string;
+  /** Remote URL for streamable-http / sse transports (empty for stdio entries). */
+  url?: string;
+  /** Transport kind: "stdio" | "streamable_http" | "sse". Defaults to "stdio". */
+  transport?: string;
   /** healthy=握手且已注册工具；error=仍标记已连但当前无工具（多为子进程失效）；disconnected=未连 */
   connection_state?: "healthy" | "error" | "disconnected";
   tool_count?: number;
