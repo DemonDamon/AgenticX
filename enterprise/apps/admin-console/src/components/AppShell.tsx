@@ -30,6 +30,7 @@ import {
   useLocale,
   useUiTheme,
 } from "@agenticx/ui";
+import { getEnterpriseVersionLabel } from "@agenticx/branding";
 import { useTranslations } from "next-intl";
 import {
   Activity,
@@ -351,7 +352,9 @@ export function AppShell({ children }: AppShellProps) {
             {!collapsed && (
               <div className="min-w-0 flex-1">
                 <div className="truncate text-sm font-semibold">AgenticX</div>
-                <div className="truncate text-[11px] text-muted-foreground">{t("adminLabel")}</div>
+                <div className="truncate text-[11px] text-muted-foreground">
+                  {t("adminLabel")} · {getEnterpriseVersionLabel()}
+                </div>
               </div>
             )}
           </div>
