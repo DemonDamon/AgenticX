@@ -9042,6 +9042,10 @@ export function SettingsPanel({
                                 </div>
                                 {server.command ? (
                                   <div className="truncate text-[10px] text-text-faint">{server.command}</div>
+                                ) : server.url ? (
+                                  <div className="truncate text-[10px] text-text-faint" title={server.url}>
+                                    remote: {server.url}
+                                  </div>
                                 ) : null}
                                 {latestOpMessage ? (
                                   <div

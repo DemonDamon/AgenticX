@@ -195,6 +195,10 @@ type McpServerItem = {
   name: string;
   connected: boolean;
   command?: string;
+  /** Remote URL for streamable-http / sse transports (empty for stdio entries). */
+  url?: string;
+  /** Transport kind: "stdio" | "streamable_http" | "sse". Defaults to "stdio". */
+  transport?: string;
   connection_state?: "healthy" | "error" | "disconnected";
   tool_count?: number;
   /** Original tool names registered by this server (available when connected & healthy). */
