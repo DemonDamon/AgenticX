@@ -97,6 +97,10 @@ import type { SettingsTab } from "../settings-tab";
 import type { MCPDiscoveryHit } from "./settings/mcp/MCPDiscoveryPanel";
 import { MCPMarketplacePanel } from "./settings/mcp/MCPMarketplacePanel";
 import { MCPJsonEditorModal } from "./settings/mcp/MCPJsonEditorModal";
+import { McpRemoteServerModal } from "./settings/mcp/McpRemoteServerModal";
+import { McpRemoteServerDetail } from "./settings/mcp/McpRemoteServerDetail";
+import { McpGatewayImportPanel } from "./settings/mcp/McpGatewayImportPanel";
+import { mcpRemoteHostLabel, mcpTransportBadgeLabel } from "../utils/mcp-remote-config";
 import { WebSearchSettingsPanel, SuggestedQuestionsSettingsPanel } from "./settings/WebSearchSettingsPanel";
 import {
   VoiceSettingsPanel,
@@ -5942,6 +5946,10 @@ export function SettingsPanel({
   const [mcpEditorPath, setMcpEditorPath] = useState(MCP_PRIMARY_CONFIG_PATH);
   const [mcpEditorFocusServerName, setMcpEditorFocusServerName] = useState<string | undefined>(undefined);
   const [mcpEditorFocusToken, setMcpEditorFocusToken] = useState(0);
+  const [mcpRemoteModalOpen, setMcpRemoteModalOpen] = useState(false);
+  const [mcpRemoteModalMode, setMcpRemoteModalMode] = useState<"add" | "edit">("add");
+  const [mcpRemoteEditName, setMcpRemoteEditName] = useState<string | undefined>(undefined);
+  const [mcpRemoteDetailExpanded, setMcpRemoteDetailExpanded] = useState<Set<string>>(new Set());
   const fetchModelsRequestSeqRef = useRef(0);
   const activeProviderRef = useRef(active);
 
@@ -8966,6 +8974,7 @@ export function SettingsPanel({
                     ) : null}
                     {mcpServers.map((server) => {
                       const pres = resolveMcpRowPresentation(server);
+                      const isRemote = Boolean(server.url?.trim());
                       const optimisticChecked = mcpOptimisticChecked[server.name];
                       const switchChecked = typeof optimisticChecked === "boolean" ? optimisticChecked : server.connected;
                       const forceDisconnectedMessage = Boolean(mcpServerBusy[server.name]) && !switchChecked;
@@ -8974,8 +8983,10 @@ export function SettingsPanel({
                         : server.op_message?.trim() || `状态：${pres.statusLine}`;
                       const toolNames = server.tool_names ?? [];
                       const disabledForServer = mcpDisabledTools[server.name] ?? [];
-                      const isExpanded = mcpExpandedServers.has(server.name);
-                      const canExpand = toolNames.length > 0;
+                      const isToolsExpanded = mcpExpandedServers.has(server.name);
+                      const isRemoteDetailExpanded = mcpRemoteDetailExpanded.has(server.name);
+                      const canExpandTools = toolNames.length > 0;
+                      const canExpandRemoteDetail = isRemote;
                       return (
                         <div
                           key={server.name}
@@ -8991,11 +9002,24 @@ export function SettingsPanel({
                               <div className="min-w-0 flex-1">
                                 <div className="flex items-center gap-1">
                                   <span className="truncate text-sm font-medium text-text-muted">{server.name}</span>
-                                  {canExpand ? (
+                                  {isRemote ? (
+                                    <>
+                                      <span
+                                        className="shrink-0 text-[10px] text-text-faint"
+                                        title={server.url}
+                                      >
+                                        🌐 {mcpRemoteHostLabel(server.url)}
+                                      </span>
+                                      <span className="shrink-0 rounded border border-border bg-surface-panel px-1 py-0 text-[9px] uppercase tracking-wide text-text-muted">
+                                        {mcpTransportBadgeLabel(server.transport)}
+                                      </span>
+                                    </>
+                                  ) : null}
+                                  {canExpandTools ? (
                                     <button
                                       type="button"
                                       className="shrink-0 rounded p-0.5 text-text-faint transition hover:bg-surface-hover hover:text-text-subtle"
-                                      title={isExpanded ? "收起工具列表" : `展开工具列表（${toolNames.length} 个）`}
+                                      title={isToolsExpanded ? "收起工具列表" : `展开工具列表（${toolNames.length} 个）`}
                                       onClick={() =>
                                         setMcpExpandedServers((prev) => {
                                           const next = new Set(prev);
@@ -9006,15 +9030,32 @@ export function SettingsPanel({
                                       }
                                     >
                                       <ChevronRight
-                                        className={`h-3.5 w-3.5 transition-transform ${isExpanded ? "rotate-90" : ""}`}
+                                        className={`h-3.5 w-3.5 transition-transform ${isToolsExpanded ? "rotate-90" : ""}`}
                                         aria-hidden
                                       />
                                     </button>
                                   ) : null}
-                                  {canExpand ? (
+                                  {canExpandTools ? (
                                     <span className="shrink-0 text-[10px] text-text-faint">
                                       {toolNames.length - disabledForServer.length}/{toolNames.length} 启用
                                     </span>
+                                  ) : null}
+                                  {canExpandRemoteDetail ? (
+                                    <button
+                                      type="button"
+                                      className="shrink-0 rounded px-1 py-0.5 text-[10px] text-text-faint transition hover:bg-surface-hover hover:text-text-subtle"
+                                      title={isRemoteDetailExpanded ? "收起远程详情" : "展开 URL / Headers"}
+                                      onClick={() =>
+                                        setMcpRemoteDetailExpanded((prev) => {
+                                          const next = new Set(prev);
+                                          if (next.has(server.name)) next.delete(server.name);
+                                          else next.add(server.name);
+                                          return next;
+                                        })
+                                      }
+                                    >
+                                      {isRemoteDetailExpanded ? "收起" : "详情"}
+                                    </button>
                                   ) : null}
                                 </div>
                                 <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5">
@@ -9040,9 +9081,9 @@ export function SettingsPanel({
                                     </>
                                   ) : null}
                                 </div>
-                                {server.command ? (
+                                {server.command && !isRemote ? (
                                   <div className="truncate text-[10px] text-text-faint">{server.command}</div>
-                                ) : server.url ? (
+                                ) : isRemote && server.url && !isRemoteDetailExpanded ? (
                                   <div className="truncate text-[10px] text-text-faint" title={server.url}>
                                     remote: {server.url}
                                   </div>
@@ -9066,6 +9107,12 @@ export function SettingsPanel({
                                 title={`编辑 ${server.name} 配置`}
                                 disabled={Boolean(mcpServerBusy[server.name])}
                                 onClick={() => {
+                                  if (isRemote) {
+                                    setMcpRemoteModalMode("edit");
+                                    setMcpRemoteEditName(server.name);
+                                    setMcpRemoteModalOpen(true);
+                                    return;
+                                  }
                                   void openMcpEditorForServer(server.name);
                                 }}
                               >
@@ -9098,8 +9145,17 @@ export function SettingsPanel({
                             </div>
                           </div>
 
+                          {isRemoteDetailExpanded && isRemote ? (
+                            <McpRemoteServerDetail
+                              serverName={server.name}
+                              url={server.url}
+                              transport={server.transport}
+                              locateServerPath={locateMcpServerPath}
+                            />
+                          ) : null}
+
                           {/* 展开的工具列表 */}
-                          {isExpanded && canExpand ? (
+                          {isToolsExpanded && canExpandTools ? (
                             <div className="border-t border-border px-3 pb-2.5 pt-2">
                               <div className="flex flex-wrap gap-1.5">
                                 {toolNames.map((tool) => {
@@ -9127,20 +9183,47 @@ export function SettingsPanel({
                       );
                     })}
 
-                    {/* New MCP Server */}
-                    <button
-                      type="button"
-                      className="flex w-full items-center gap-2 rounded-md border border-dashed border-border bg-surface-panel px-3 py-2 text-left text-sm text-text-subtle transition hover:bg-surface-hover hover:text-text-primary"
-                      onClick={() => openMcpEditor(MCP_PRIMARY_CONFIG_PATH)}
-                    >
-                      <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-md border border-border">
-                        <Plus className="h-3.5 w-3.5" aria-hidden />
-                      </span>
-                      <span className="flex flex-col">
-                        <span className="font-medium text-text-muted">New MCP Server</span>
-                        <span className="text-[11px] text-text-faint">在 JSON 编辑器中添加自定义 MCP 服务</span>
-                      </span>
-                    </button>
+                    <div className="grid gap-2 sm:grid-cols-2">
+                      <button
+                        type="button"
+                        className="flex items-center gap-2 rounded-md border border-dashed border-border bg-surface-panel px-3 py-2 text-left text-sm text-text-subtle transition hover:bg-surface-hover hover:text-text-primary"
+                        onClick={() => {
+                          setMcpRemoteModalMode("add");
+                          setMcpRemoteEditName(undefined);
+                          setMcpRemoteModalOpen(true);
+                        }}
+                      >
+                        <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-md border border-border">
+                          <Plus className="h-3.5 w-3.5" aria-hidden />
+                        </span>
+                        <span className="flex flex-col">
+                          <span className="font-medium text-text-muted">添加远程 MCP</span>
+                          <span className="text-[11px] text-text-faint">URL + Headers（Tushare / Gateway）</span>
+                        </span>
+                      </button>
+                      <button
+                        type="button"
+                        className="flex items-center gap-2 rounded-md border border-dashed border-border bg-surface-panel px-3 py-2 text-left text-sm text-text-subtle transition hover:bg-surface-hover hover:text-text-primary"
+                        onClick={() => openMcpEditor(MCP_PRIMARY_CONFIG_PATH)}
+                      >
+                        <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-md border border-border">
+                          <SquarePen className="h-3.5 w-3.5" aria-hidden />
+                        </span>
+                        <span className="flex flex-col">
+                          <span className="font-medium text-text-muted">编辑 JSON</span>
+                          <span className="text-[11px] text-text-faint">stdio 命令或高级字段</span>
+                        </span>
+                      </button>
+                    </div>
+
+                    <McpGatewayImportPanel
+                      configPath={MCP_PRIMARY_CONFIG_PATH}
+                      existingServerNames={new Set(mcpServers.map((s) => s.name))}
+                      onImported={async (msg) => {
+                        setMcpMessage(msg);
+                        if (sessionId) await onRefreshMcp(sessionId);
+                      }}
+                    />
                   </div>
                 </div>
 
@@ -9965,6 +10048,21 @@ export function SettingsPanel({
         if (!result.ok) return { ok: false, error: result.error };
         if (sessionId) await onRefreshMcp(sessionId);
         return { ok: true };
+      }}
+    />
+    <McpRemoteServerModal
+      open={mcpRemoteModalOpen}
+      mode={mcpRemoteModalMode}
+      configPath={MCP_PRIMARY_CONFIG_PATH}
+      serverName={mcpRemoteEditName}
+      locateServerPath={locateMcpServerPath}
+      onClose={() => {
+        setMcpRemoteModalOpen(false);
+        setMcpRemoteEditName(undefined);
+      }}
+      onSaved={async (msg) => {
+        setMcpMessage(msg);
+        if (sessionId) await onRefreshMcp(sessionId);
       }}
     />
     </>

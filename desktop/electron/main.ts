@@ -5784,6 +5784,36 @@ function registerIpc(): void {
   });
 
   ipcMain.handle(
+    "mcp-gateway-registry",
+    async (_event, payload: { baseUrl: string; token: string }) => {
+      const base = String(payload?.baseUrl || "")
+        .trim()
+        .replace(/\/+$/, "");
+      const token = String(payload?.token || "").trim();
+      if (!base) return { ok: false, error: "missing baseUrl" };
+      if (!token) return { ok: false, error: "missing token" };
+      try {
+        const resp = await proxyAwareFetch(`${base}/mcp/registry`, {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        const text = await resp.text();
+        if (!resp.ok) {
+          return { ok: false, error: `HTTP ${resp.status}: ${text.slice(0, 300)}` };
+        }
+        let data: unknown;
+        try {
+          data = JSON.parse(text);
+        } catch {
+          return { ok: false, error: "registry response is not JSON" };
+        }
+        return { ok: true, data };
+      } catch (err) {
+        return { ok: false, error: String(err) };
+      }
+    },
+  );
+
+  ipcMain.handle(
     "mcp-marketplace-list",
     async (
       _event,
