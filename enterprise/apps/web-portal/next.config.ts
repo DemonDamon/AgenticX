@@ -1,9 +1,13 @@
 import type { NextConfig } from "next";
 import createNextIntlPlugin from "next-intl/plugin";
+import enterprisePkg from "../../package.json";
 
 const withNextIntl = createNextIntlPlugin("./src/i18n/request.ts");
 
 const config: NextConfig = {
+  env: {
+    NEXT_PUBLIC_ENTERPRISE_VERSION: enterprisePkg.version,
+  },
   transpilePackages: [
     "@agenticx/ui",
     "@agenticx/branding",
