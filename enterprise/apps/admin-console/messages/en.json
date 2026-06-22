@@ -652,6 +652,7 @@
         "memberCount": "{count} members",
         "pathLabel": "Path:",
         "edit": "Edit",
+        "modelConfig": "Model configuration",
         "move": "Move",
         "delete": "Delete",
         "membersLinkTitle": "Go to member management",

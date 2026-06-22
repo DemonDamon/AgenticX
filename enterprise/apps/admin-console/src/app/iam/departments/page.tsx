@@ -37,10 +37,10 @@ import {
   CornerRightUp,
   Download,
   FolderTree,
+  Package,
   Pencil,
   Plus,
   RefreshCw,
-  Sparkles,
   Trash2,
   Users,
 } from "lucide-react";
@@ -565,10 +565,21 @@ export default function DepartmentsPage() {
                       variant="ghost"
                       size="icon"
                       className="h-8 w-8 text-muted-foreground hover:bg-muted hover:text-foreground"
-                      title={t("edit")}
+                      title={t("modelConfig")}
                       onClick={() => { setNameEditMode(false); setDeptSettingsOpen(true); }}
                     >
-                      <Pencil className="h-4 w-4" />
+                      <Package className="h-4 w-4" />
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="h-8 w-8 text-muted-foreground hover:bg-muted hover:text-foreground"
+                      title={t("membersViewAll")}
+                      asChild
+                    >
+                      <Link href={`/iam/users?dept=${currentNode.id}`}>
+                        <Users className="h-4 w-4" />
+                      </Link>
                     </Button>
                     <Button
                       variant="ghost"
@@ -592,71 +603,39 @@ export default function DepartmentsPage() {
                 </div>
               </div>
 
-              {/* 成员 + 子部门 */}
-              <div className="flex flex-col gap-8 p-6 pb-10">
-                <section>
-                  <div className="mb-3 flex items-center justify-between gap-3">
-                    <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-                      {t("membersSectionLabel")}
-                    </p>
-                    <Link
-                      href={`/iam/users?dept=${currentNode.id}`}
-                      className="text-xs text-primary transition-colors hover:underline"
-                    >
-                      {t("membersViewAll")}
-                    </Link>
+              {/* 成员 + 子部门（同一网格，无分区标题） */}
+              <div className="p-6 pb-10">
+                {membersLoading ? (
+                  <div className="mb-3 flex items-center gap-2 text-sm text-muted-foreground">
+                    <RefreshCw className="h-3.5 w-3.5 animate-spin" />
+                    {t("membersLoading")}
                   </div>
-                  {membersLoading ? (
-                    <div className="flex items-center gap-2 py-6 text-sm text-muted-foreground">
-                      <RefreshCw className="h-3.5 w-3.5 animate-spin" />
-                      {t("membersLoading")}
-                    </div>
-                  ) : deptMembers.length === 0 ? (
-                    <p className="rounded-lg border border-dashed border-border px-4 py-6 text-center text-sm text-muted-foreground">
-                      {t("membersEmpty")}
-                    </p>
-                  ) : (
-                    <>
-                      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
-                        {deptMembers.map((member) => (
-                          <div
-                            key={member.id}
-                            className="flex items-center gap-3 rounded-lg border border-border bg-card p-3"
-                          >
-                            <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-primary/10 text-sm font-semibold text-primary">
-                              {member.displayName.slice(0, 1) || "?"}
-                            </span>
-                            <div className="min-w-0 flex-1">
-                              <div className="truncate text-sm font-medium text-foreground">
-                                {member.displayName}
-                              </div>
-                              <div className="truncate text-xs text-muted-foreground">{member.email}</div>
-                              {member.jobTitle ? (
-                                <div className="truncate text-xs text-muted-foreground">{member.jobTitle}</div>
-                              ) : null}
-                            </div>
-                            <Badge variant={MEMBER_STATUS_VARIANT[member.status]}>
-                              {tu(`status.${member.status}`)}
-                            </Badge>
+                ) : null}
+                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
+                  {!membersLoading &&
+                    deptMembers.map((member) => (
+                      <div
+                        key={member.id}
+                        className="flex items-center gap-3 rounded-lg border border-border bg-card p-3"
+                      >
+                        <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-primary/10 text-sm font-semibold text-primary">
+                          {member.displayName.slice(0, 1) || "?"}
+                        </span>
+                        <div className="min-w-0 flex-1">
+                          <div className="truncate text-sm font-medium text-foreground">
+                            {member.displayName}
                           </div>
-                        ))}
+                          <div className="truncate text-xs text-muted-foreground">{member.email}</div>
+                          {member.jobTitle ? (
+                            <div className="truncate text-xs text-muted-foreground">{member.jobTitle}</div>
+                          ) : null}
+                        </div>
+                        <Badge variant={MEMBER_STATUS_VARIANT[member.status]}>
+                          {tu(`status.${member.status}`)}
+                        </Badge>
                       </div>
-                      {deptMembersTotal > deptMembers.length && (
-                        <p className="mt-3 text-xs text-muted-foreground">
-                          {t("membersMore", {
-                            shown: deptMembers.length,
-                            total: deptMembersTotal,
-                          })}
-                        </p>
-                      )}
-                    </>
-                  )}
-                </section>
-
-                {(childNodes.length > 0 || true) && (
-                <section>
-                  <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
-                    {childNodes.map((child) => (
+                    ))}
+                  {childNodes.map((child) => (
                       <Card
                         key={child.id}
                         className="group cursor-pointer transition-all hover:border-primary/40 hover:shadow-sm"
@@ -692,19 +671,25 @@ export default function DepartmentsPage() {
                       </Card>
                     ))}
 
-                    {/* 新建子部门 */}
-                    <button
-                      onClick={() => { setNewName(""); setCreateOpen(true); }}
-                      className="group flex min-h-[108px] flex-col items-center justify-center gap-2 rounded-xl border-2 border-dashed border-border bg-transparent text-muted-foreground transition-all hover:border-primary/40 hover:bg-primary/5 hover:text-primary"
-                    >
-                      <div className="flex h-8 w-8 items-center justify-center rounded-full bg-muted transition-colors group-hover:bg-primary/20">
-                        <Plus className="h-4 w-4" />
-                      </div>
-                      <span className="text-sm font-medium">{t("newSubDept")}</span>
-                    </button>
-                  </div>
-                </section>
-              )}
+                  {/* 新建子部门 */}
+                  <button
+                    onClick={() => { setNewName(""); setCreateOpen(true); }}
+                    className="group flex min-h-[108px] flex-col items-center justify-center gap-2 rounded-xl border-2 border-dashed border-border bg-transparent text-muted-foreground transition-all hover:border-primary/40 hover:bg-primary/5 hover:text-primary"
+                  >
+                    <div className="flex h-8 w-8 items-center justify-center rounded-full bg-muted transition-colors group-hover:bg-primary/20">
+                      <Plus className="h-4 w-4" />
+                    </div>
+                    <span className="text-sm font-medium">{t("newSubDept")}</span>
+                  </button>
+                </div>
+                {!membersLoading && deptMembersTotal > deptMembers.length && (
+                  <p className="mt-3 text-xs text-muted-foreground">
+                    {t("membersMore", {
+                      shown: deptMembers.length,
+                      total: deptMembersTotal,
+                    })}
+                  </p>
+                )}
               </div>
             </div>
           ) : (
@@ -773,7 +758,7 @@ export default function DepartmentsPage() {
       <Sheet open={deptSettingsOpen} onOpenChange={(open) => { setDeptSettingsOpen(open); if (!open) setNameEditMode(false); }}>
         <SheetContent side="right" className="flex w-full flex-col gap-0 overflow-y-auto p-0 sm:max-w-xl">
           <span className="sr-only">
-            <SheetTitle>{currentNode?.name ?? t("edit")}</SheetTitle>
+            <SheetTitle>{currentNode?.name ?? t("modelConfig")}</SheetTitle>
           </span>
           {/* 顶部：部门名 + 小铅笔 */}
           <div className="flex items-start justify-between gap-4 border-b border-border px-6 py-6">
@@ -813,10 +798,6 @@ export default function DepartmentsPage() {
           {/* 配置区 */}
           <div className="flex-1 space-y-0 divide-y divide-border">
             <div className="px-6 py-5">
-              <div className="mb-4 flex items-center gap-2">
-                <Sparkles className="h-4 w-4 text-primary" />
-                <span className="text-sm font-semibold text-foreground">{t("visibleModels.sheetTitle")}</span>
-              </div>
               {currentNode ? (
                 <VisibleModelsEditor
                   target={{ kind: "dept", id: currentNode.id }}
@@ -824,18 +805,6 @@ export default function DepartmentsPage() {
                   onClose={() => setDeptSettingsOpen(false)}
                 />
               ) : null}
-            </div>
-            <div className="px-6 py-5">
-              <div className="flex items-center gap-2 opacity-40">
-                <span className="text-sm font-semibold text-foreground">{t("settings.permissionsTitle")}</span>
-                <span className="rounded bg-muted px-1.5 py-0.5 text-[10px] text-muted-foreground">{t("settings.comingSoon")}</span>
-              </div>
-            </div>
-            <div className="px-6 py-5">
-              <div className="flex items-center gap-2 opacity-40">
-                <span className="text-sm font-semibold text-foreground">{t("settings.securityTitle")}</span>
-                <span className="rounded bg-muted px-1.5 py-0.5 text-[10px] text-muted-foreground">{t("settings.comingSoon")}</span>
-              </div>
             </div>
           </div>
         </SheetContent>

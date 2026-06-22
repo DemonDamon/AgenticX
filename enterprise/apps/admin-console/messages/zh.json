@@ -652,6 +652,7 @@
         "memberCount": "{count} 名成员",
         "pathLabel": "Path:",
         "edit": "编辑",
+        "modelConfig": "模型配置",
         "move": "移动",
         "delete": "删除",
         "membersLinkTitle": "点击跳转至成员管理页面",
