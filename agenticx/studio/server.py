@@ -3519,6 +3519,8 @@ def create_studio_app() -> FastAPI:
                     "name": name,
                     "connected": in_connected,
                     "command": str(getattr(cfg, "command", "") or ""),
+                    "url": str(getattr(cfg, "url", "") or ""),
+                    "transport": str(getattr(cfg, "transport", "stdio") or "stdio"),
                     "connection_state": conn_state,
                     "tool_count": n_tools,
                     "tool_names": sorted(tool_names_map.get(name, [])),

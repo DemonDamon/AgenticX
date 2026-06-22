@@ -457,18 +457,29 @@ def _hub_connect_lock() -> asyncio.Lock:
 
 
 def _serialize_server_config(cfg: "MCPServerConfig") -> Dict[str, Any]:
-    """Serialize MCPServerConfig to JSON-compatible dict."""
-    data: Dict[str, Any] = {
-        "command": cfg.command,
-    }
-    if getattr(cfg, "args", None):
-        data["args"] = list(cfg.args)
-    if getattr(cfg, "env", None):
-        data["env"] = dict(cfg.env)
+    """Serialize MCPServerConfig to JSON-compatible dict.
+
+    Writes only the fields relevant to the configured transport, keeping
+    ``mcp.json`` minimal and human-readable.
+    """
+    transport = str(getattr(cfg, "transport", "stdio") or "stdio")
+    data: Dict[str, Any] = {}
+    if transport == "stdio":
+        data["command"] = cfg.command
+        if getattr(cfg, "args", None):
+            data["args"] = list(cfg.args)
+        if getattr(cfg, "env", None):
+            data["env"] = dict(cfg.env)
+        if getattr(cfg, "cwd", None):
+            data["cwd"] = cfg.cwd
+    else:
+        # streamable_http / sse
+        if getattr(cfg, "url", None):
+            data["url"] = cfg.url
+        if getattr(cfg, "headers", None):
+            data["headers"] = dict(cfg.headers)
     if getattr(cfg, "timeout", None) is not None:
         data["timeout"] = float(cfg.timeout)
-    if getattr(cfg, "cwd", None):
-        data["cwd"] = cfg.cwd
     if getattr(cfg, "enabled_tools", None):
         data["enabled_tools"] = list(cfg.enabled_tools)
     if getattr(cfg, "assign_to_agents", None):
@@ -510,7 +521,14 @@ def _resolve_command_path(
 
 
 def _precheck_mcp_command(cfg: "MCPServerConfig") -> Tuple[bool, str]:
-    """Validate MCP command exists before attempting stdio handshake."""
+    """Validate MCP command exists before attempting stdio handshake.
+
+    Remote (streamable-http / sse) transports do not run a local child process
+    and so have no command to resolve — skip the check entirely.
+    """
+    transport = str(getattr(cfg, "transport", "stdio") or "stdio")
+    if transport != "stdio":
+        return True, ""
     cmd = str(getattr(cfg, "command", "") or "").strip()
     if not cmd:
         return False, "MCP 配置缺少 command 字段。"
