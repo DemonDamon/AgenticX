@@ -27,6 +27,12 @@ import {
 } from "@agenticx/ui";
 import { KeyRound, Plus, Trash2 } from "lucide-react";
 import { useTranslations } from "next-intl";
+import {
+  getPatPlainFromVault,
+  plainMatchesTokenPrefix,
+  removePatFromVault,
+  upsertPatVault,
+} from "../../../lib/pat-vault";
 
 type PatRow = {
   id: number;
@@ -56,6 +62,12 @@ export default function ApiTokensPage() {
   const [open, setOpen] = useState(false);
   const [plainToken, setPlainToken] = useState<string | null>(null);
   const [form, setForm] = useState({ name: "", userId: "", expireDays: "90" });
+  const [vaultVersion, setVaultVersion] = useState(0);
+  const [pasteOpen, setPasteOpen] = useState(false);
+  const [pasteTarget, setPasteTarget] = useState<PatRow | null>(null);
+  const [pasteValue, setPasteValue] = useState("");
+
+  const bumpVault = () => setVaultVersion((v) => v + 1);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -63,7 +75,12 @@ export default function ApiTokensPage() {
       const res = await adminFetch("/api/admin/api-tokens");
       const json = await readJsonBody(res, { code: "50000", message: "empty response", data: { tokens: [] as PatRow[] } });
       if (!res.ok || json.code !== "00000") throw new Error(json.message || "load failed");
-      setTokens(json.data?.tokens ?? []);
+      const all = json.data?.tokens ?? [];
+      for (const row of all) {
+        if (row.status !== "active") removePatFromVault(row.id);
+      }
+      setTokens(all.filter((row) => row.status === "active"));
+      bumpVault();
     } catch (e) {
       toast.error(e instanceof Error ? e.message : tc("toast.loadFailed"));
     } finally {
@@ -74,6 +91,32 @@ export default function ApiTokensPage() {
   useEffect(() => {
     void load();
   }, [load]);
+
+  const openPasteDialog = (row: PatRow) => {
+    setPasteTarget(row);
+    setPasteValue("");
+    setPasteOpen(true);
+  };
+
+  const savePastedKey = () => {
+    if (!pasteTarget) return;
+    const trimmed = pasteValue.trim();
+    if (!plainMatchesTokenPrefix(trimmed, pasteTarget.tokenPrefix)) {
+      toast.error(t("pasteKeyMismatch"));
+      return;
+    }
+    upsertPatVault({
+      id: pasteTarget.id,
+      name: pasteTarget.name,
+      tokenPrefix: pasteTarget.tokenPrefix,
+      plainToken: trimmed,
+    });
+    bumpVault();
+    setPasteOpen(false);
+    setPasteTarget(null);
+    setPasteValue("");
+    toast.success(tc("actions.save"));
+  };
 
   const onCreate = async () => {
     try {
@@ -86,9 +129,20 @@ export default function ApiTokensPage() {
           expireDays: Number(form.expireDays) || 90,
         }),
       });
-      const json = await readJsonBody(res, { code: "50000", message: "empty response", data: {} as { token?: string } });
+      const json = await readJsonBody(res, { code: "50000", message: "empty response", data: {} as { token?: string; record?: PatRow } });
       if (!res.ok || json.code !== "00000") throw new Error(json.message || "create failed");
-      setPlainToken(json.data?.token ?? null);
+      const plain = json.data?.token?.trim() ?? "";
+      const record = json.data?.record;
+      if (plain && record) {
+        upsertPatVault({
+          id: record.id,
+          name: record.name,
+          tokenPrefix: record.tokenPrefix,
+          plainToken: plain,
+        });
+        bumpVault();
+      }
+      setPlainToken(plain || null);
       setOpen(false);
       setForm({ name: "", userId: "", expireDays: "90" });
       await load();
@@ -100,12 +154,14 @@ export default function ApiTokensPage() {
 
   const onRevoke = async (id: number) => {
     if (!confirm(t("confirmRevoke"))) return;
-    const res = await fetch(`/api/admin/api-tokens/${id}`, { method: "DELETE" });
+    const res = await adminFetch(`/api/admin/api-tokens/${id}`, { method: "DELETE" });
     const json = await readJsonBody(res, { code: "50000", message: "empty response" });
     if (!res.ok || json.code !== "00000") {
       toast.error(json.message || t("toast.revokeFailed"));
       return;
     }
+    removePatFromVault(id);
+    bumpVault();
     toast.success(t("toast.revoked"));
     await load();
   };
@@ -143,10 +199,23 @@ export default function ApiTokensPage() {
           </CardHeader>
           <CardContent className="space-y-2">
             <code className="block break-all rounded bg-muted p-3 text-xs">{plainToken}</code>
-            <Button size="sm" variant="outline" onClick={() => void navigator.clipboard.writeText(plainToken)}>
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => {
+                void navigator.clipboard.writeText(plainToken);
+                toast.success(tc("actions.copy"));
+              }}
+            >
               {tc("actions.copy")}
             </Button>
-            <Button size="sm" variant="ghost" onClick={() => setPlainToken(null)}>
+            <Button
+              size="sm"
+              variant="ghost"
+              onClick={() => {
+                setPlainToken(null);
+              }}
+            >
               {tc("actions.closeSaved")}
             </Button>
           </CardContent>
@@ -155,9 +224,14 @@ export default function ApiTokensPage() {
 
       {loading ? (
         <p className="text-sm text-muted-foreground">{tc("states.loading")}</p>
+      ) : tokens.length === 0 ? (
+        <p className="text-sm text-muted-foreground">{tc("states.empty")}</p>
       ) : (
         <div className="grid gap-3">
-          {tokens.map((row) => (
+          {tokens.map((row) => {
+            const vaultPlain = getPatPlainFromVault(row.id);
+            void vaultVersion;
+            return (
             <Card key={row.id}>
               <CardContent className="flex items-center justify-between gap-4 pt-4">
                 <div>
@@ -168,15 +242,35 @@ export default function ApiTokensPage() {
                     {row.tokenPrefix}… · {t("meta.user", { userId: row.userId })} · {row.status}
                     {row.lastUsedAt ? t("meta.lastUsed", { lastUsed: row.lastUsedAt }) : ""}
                   </p>
+                  {!vaultPlain ? (
+                    <p className="mt-1 text-xs text-muted-foreground/80">{t("vaultMissingHint")}</p>
+                  ) : null}
                 </div>
-                {row.status === "active" ? (
+                <div className="flex shrink-0 items-center gap-1">
+                  {vaultPlain ? (
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={() => {
+                        void navigator.clipboard.writeText(vaultPlain);
+                        toast.success(tc("actions.copy"));
+                      }}
+                    >
+                      {t("copyKey")}
+                    </Button>
+                  ) : (
+                    <Button size="sm" variant="outline" onClick={() => openPasteDialog(row)}>
+                      {t("pasteKey")}
+                    </Button>
+                  )}
                   <Button variant="ghost" size="sm" className="text-destructive" onClick={() => void onRevoke(row.id)}>
                     <Trash2 className="h-4 w-4" />
                   </Button>
-                ) : null}
+                </div>
               </CardContent>
             </Card>
-          ))}
+            );
+          })}
         </div>
       )}
 
@@ -204,6 +298,36 @@ export default function ApiTokensPage() {
               {tc("actions.cancel")}
             </Button>
             <Button onClick={() => void onCreate()}>{tc("actions.create")}</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={pasteOpen} onOpenChange={setPasteOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>{t("pasteKeyTitle")}</DialogTitle>
+          </DialogHeader>
+          {pasteTarget ? (
+            <p className="text-xs text-muted-foreground">
+              {pasteTarget.name} · {pasteTarget.tokenPrefix}…
+            </p>
+          ) : null}
+          <div className="space-y-2">
+            <Label htmlFor="paste-key-input">{t("pasteKey")}</Label>
+            <Input
+              id="paste-key-input"
+              value={pasteValue}
+              onChange={(e) => setPasteValue(e.target.value)}
+              placeholder="agx-pat-..."
+              className="font-mono text-xs"
+            />
+            <p className="text-xs text-muted-foreground">{t("pasteKeyHint")}</p>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setPasteOpen(false)}>
+              {tc("actions.cancel")}
+            </Button>
+            <Button onClick={savePastedKey}>{tc("actions.save")}</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
