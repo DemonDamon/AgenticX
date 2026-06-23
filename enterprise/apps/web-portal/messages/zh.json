@@ -143,7 +143,7 @@
       "export": "导出"
     },
     "apiTokens": {
-      "title": "API Tokens",
+      "title": "API 令牌",
       "description": "创建 agx-pat-* 令牌，供脚本或 IDE 直连 Enterprise Gateway",
       "plainTokenLabel": "明文 Token（仅显示一次）",
       "copy": "复制",
