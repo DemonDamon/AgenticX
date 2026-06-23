@@ -4235,6 +4235,12 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
       if ((live.messages ?? []).length > 0) sessionBootstrapRef.current = sid;
       return;
     }
+    // One-shot guard: once this session has been bootstrapped (either by a
+    // successful disk load here or by splash/restore hydration), never run the
+    // disk load again. This prevents the bootstrap from firing a second disk
+    // read after the user sends their first message (which changes
+    // pane.messages.length) and producing a duplicate optimistic user row.
+    if (sessionBootstrapRef.current === sid) return;
     const ownedCount = visibleMessagesForSession(live.messages ?? [], sid).length;
     // Splash / App restore may hydrate messages before this effect runs — mark
     // bootstrapped without a redundant disk roundtrip.
@@ -4317,7 +4323,6 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
   }, [
     pane.id,
     pane.sessionId,
-    pane.messages?.length,
     streamingSessionId,
     sessionBootstrapRetryNonce,
     setPaneLoadingMessages,
