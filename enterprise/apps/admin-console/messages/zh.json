@@ -50,7 +50,7 @@
         "models": "模型服务",
         "channels": "Channel 管理",
         "cache": "AI 缓存",
-        "apiTokens": "API Tokens",
+        "apiTokens": "API 令牌",
         "mcpServers": "MCP 托管",
         "plugins": "Wasm 插件",
         "errors": "错误聚类",
@@ -175,11 +175,11 @@
         }
       },
       "apiTokens": {
-        "title": "API Tokens",
+        "title": "API 令牌",
         "description": "为企业用户或系统集成签发 agx-pat-* 令牌，供网关 M2M 鉴权。",
         "newToken": "新建 Token",
         "plainTokenTitle": "明文 Token（仅显示一次）",
-        "dialogTitle": "新建 API Token",
+        "dialogTitle": "新建 API 令牌",
         "nameLabel": "名称",
         "userIdLabel": "归属用户 ID",
         "expireDaysLabel": "有效天数",
@@ -198,7 +198,7 @@
         },
         "toast": {
           "loadFailed": "加载失败",
-          "createSuccess": "API Token 已创建，请立即复制明文",
+          "createSuccess": "API 令牌已创建，请立即复制明文",
           "createFailed": "创建失败",
           "revokeFailed": "吊销失败",
           "revoked": "已吊销"
@@ -241,7 +241,7 @@
         "proxyPatUseToken": "使用此 Token",
         "proxyPatCreateSection": "新建 Token",
         "proxyPatReuseSection": "本浏览器已保存的 Token",
-        "proxyPatReuseEmpty": "暂无。在此页或 API Tokens 页新建后会自动保存。",
+        "proxyPatReuseEmpty": "暂无。在此页或 API 令牌页新建后会自动保存。",
         "proxyPatExistingSection": "已有 Token",
         "proxyPatExistingHint": "若本地有创建时保存的明文，可点「引用」；否则请粘贴完整 Token",
         "proxyPatVaultMissing": "无本地明文",
@@ -1018,7 +1018,7 @@
         "filtersDescription": "所有条件改动后自动重新查询",
         "dept": "部门",
         "user": "员工",
-        "apiToken": "API Token",
+        "apiToken": "API 令牌",
         "provider": "厂商",
         "model": "模型",
         "startDate": "开始日期",
@@ -1200,18 +1200,18 @@
       "quota": {
         "breadcrumbQuota": "额度控制",
         "title": "Token 额度控制",
-        "description": "租户 / 部门 / 用户 / API Token 四维度配额：monthly、TPM、RPM、并发。",
+        "description": "租户 / 部门 / 用户 / API 令牌四维度配额：monthly、TPM、RPM、并发。",
         "tabs": {
           "roles": "角色默认",
           "departments": "部门",
           "users": "用户",
-          "pats": "API Token"
+          "pats": "API 令牌"
         },
         "roleDefaultsTitle": "角色默认额度",
         "roleDefaultsDescription": "未命中更细粒度规则时按角色回退。",
         "deptIdPlaceholder": "部门 ID",
         "userIdPlaceholder": "用户 ID",
-        "patIdPlaceholder": "API Token ID（数字）",
+        "patIdPlaceholder": "API 令牌 ID（数字）",
         "patLabel": "PAT #{id}",
         "fields": {
           "monthlyTokens": "月 Token",
