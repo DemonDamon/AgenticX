@@ -4750,6 +4750,60 @@ def _tool_session_search(arguments: Dict[str, Any], session: Optional[StudioSess
     return json.dumps({"mode": "search", "sessions": sessions_out}, ensure_ascii=False)
 
 
+def _should_queue_skill_write() -> bool:
+    from agenticx.learning.config import get_learning_config
+
+    cfg = get_learning_config()
+    if bool(cfg.get("agent_writes_require_approval", True)):
+        return True
+    if bool(cfg.get("freeze_during_session", True)):
+        try:
+            from agenticx.runtime.session_freeze import is_frozen
+
+            return is_frozen()
+        except Exception:
+            return False
+    return False
+
+
+def _queue_skill_proposal(
+    *,
+    action: str,
+    name: str,
+    skill_md_text: str,
+    session: Optional[StudioSession],
+    diff_summary: str = "",
+    candidate_index: int = 1,
+    total_candidates: int = 1,
+    review_model: str = "",
+    scores: Optional[Dict[str, float]] = None,
+) -> str:
+    from agenticx.learning.gepa_proposer import write_proposal
+
+    session_id = str(getattr(session, "session_id", "") or "") if session else ""
+    pdir = write_proposal(
+        base_skill=name,
+        action=action,
+        skill_md_text=skill_md_text,
+        session_id=session_id,
+        review_model=review_model,
+        diff_summary=diff_summary,
+        candidate_index=candidate_index,
+        total_candidates=total_candidates,
+        scores=scores,
+    )
+    pid = pdir.name
+    payload: Dict[str, Any] = {
+        "ok": True,
+        "action": f"{action}_pending",
+        "name": name,
+        "path": str(pdir / "SKILL.md"),
+        "proposal_id": pid,
+        "message": f"Proposal queued for approval: {pid}",
+    }
+    return json.dumps(payload, ensure_ascii=False)
+
+
 def _skill_manage_success_payload(
     *,
     action: str,
@@ -4798,6 +4852,34 @@ def _write_skill_md_with_checks(
         normalized, frontmatter_fixed = normalize_skill_md(content, canonical_name)
     except SkillFrontmatterError as exc:
         return None, f"ERROR: {exc}"
+
+    from agenticx.learning.config import get_learning_config
+    from agenticx.learning.skill_quality_gate import check_size_limits
+    from agenticx.skills.frontmatter import get_description_from_frontmatter
+
+    _cfg = get_learning_config()
+    _desc = get_description_from_frontmatter(normalized) or ""
+    _size = check_size_limits(
+        normalized,
+        _desc,
+        max_bytes=int(_cfg.get("max_skill_bytes", 15360)),
+        max_desc_chars=int(_cfg.get("max_description_chars", 500)),
+    )
+    if not _size["ok"]:
+        return None, _skill_manage_error("size_limit", f"{_size['error']}. {_size['hint']}")
+
+    session_obj = extra.get("_session") if isinstance(extra, dict) else None
+    if _should_queue_skill_write():
+        queued = _queue_skill_proposal(
+            action=action,
+            name=canonical_name,
+            skill_md_text=normalized,
+            session=session_obj,
+        )
+        if on_rollback:
+            on_rollback()
+        return queued, None
+
     # Defense-in-depth: block classic remote pipe-to-shell patterns even if
     # guard pattern sets or confidence filters drift over time.
     if re.search(r"(curl|wget)[^\n]*\|\s*(?:ba)?sh\b", normalized, re.IGNORECASE):
@@ -5041,6 +5123,7 @@ def _tool_skill_manage(arguments: Dict[str, Any], session: Optional[StudioSessio
             content=content,
             canonical_name=name,
             on_rollback=lambda: shutil.rmtree(skill_dir, ignore_errors=True),
+            extra={"_session": session},
         )
         if err:
             if skill_dir.exists() and not (skill_dir / "SKILL.md").is_file():
@@ -5217,7 +5300,7 @@ def _tool_skill_manage(arguments: Dict[str, Any], session: Optional[StudioSessio
             content=updated,
             canonical_name=name,
             on_rollback=_rollback_patch,
-            extra={"strategy": strategy, "matches": match_count, "mode": "apply"},
+            extra={"strategy": strategy, "matches": match_count, "mode": "apply", "_session": session},
         )
         if err:
             if err.startswith("ERROR: 技能内容被安全策略拦截"):
@@ -5316,7 +5399,7 @@ def _tool_skill_manage(arguments: Dict[str, Any], session: Optional[StudioSessio
             content=target,
             canonical_name=name,
             on_rollback=_rollback_original,
-            extra={"to_version": to_version},
+            extra={"to_version": to_version, "_session": session},
         )
         if err:
             if err.startswith("ERROR: 技能内容被安全策略拦截"):

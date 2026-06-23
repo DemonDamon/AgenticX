@@ -5842,6 +5842,35 @@ def create_studio_app() -> FastAPI:
             logger.warning("list_skills error: %s", payload.get("error"))
         return payload
 
+    @app.get("/api/skills/proposals")
+    async def list_skill_proposals(
+        x_agx_desktop_token: str | None = Header(default=None),
+    ) -> dict:
+        _check_token(x_agx_desktop_token)
+        from agenticx.skills.pending_queue import list_pending
+
+        return {"ok": True, "proposals": list_pending()}
+
+    @app.post("/api/skills/proposals/{pid}/approve")
+    async def approve_skill_proposal(
+        pid: str,
+        x_agx_desktop_token: str | None = Header(default=None),
+    ) -> dict:
+        _check_token(x_agx_desktop_token)
+        from agenticx.skills.pending_queue import approve
+
+        return approve(pid, approver="desktop-user")
+
+    @app.post("/api/skills/proposals/{pid}/reject")
+    async def reject_skill_proposal(
+        pid: str,
+        x_agx_desktop_token: str | None = Header(default=None),
+    ) -> dict:
+        _check_token(x_agx_desktop_token)
+        from agenticx.skills.pending_queue import reject
+
+        return reject(pid, reason="rejected from desktop")
+
     @app.get("/api/skills/{name}")
     async def get_skill_detail(
         name: str,

@@ -164,3 +164,30 @@ def evaluate(
         reasons = ", ".join(c.reason for c in failed) if failed else "score below threshold"
         return GateResult(False, reasons, round(avg, 3), checks)
     return GateResult(True, "all checks passed", round(avg, 3), checks)
+
+
+def check_size_limits(
+    skill_md_text: str,
+    description: str,
+    *,
+    max_bytes: int = 15360,
+    max_desc_chars: int = 500,
+) -> dict[str, Any]:
+    """Hermes-style hard size limits. Return {ok, error, hint}."""
+    size = len(skill_md_text.encode("utf-8"))
+    if size > max_bytes:
+        return {
+            "ok": False,
+            "error": f"SKILL.md size {size} bytes exceeds limit {max_bytes}",
+            "hint": (
+                "Split long sections into references/<name>.md "
+                "and reference them by relative path."
+            ),
+        }
+    if len(description) > max_desc_chars:
+        return {
+            "ok": False,
+            "error": f"description length {len(description)} exceeds {max_desc_chars} chars",
+            "hint": "Shorten description; move details into the SKILL.md body.",
+        }
+    return {"ok": True, "error": "", "hint": ""}

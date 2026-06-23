@@ -40,6 +40,12 @@ DEFAULTS: dict[str, Any] = {
     "quality_gate_min_score": 0.6,
     "review_model": "gpt-4o-mini",
     "review_enabled": False,
+    "agent_writes_require_approval": True,
+    "max_skill_bytes": 15360,
+    "max_description_chars": 500,
+    "freeze_during_session": True,
+    "gepa_enabled": False,
+    "gepa_num_candidates": 3,
 }
 
 
@@ -114,6 +120,10 @@ def get_learning_config() -> dict[str, Any]:
             merged["min_tool_calls"] = max(1, int(env_min_calls))
         except (ValueError, TypeError):
             logger.warning("Invalid AGX_LEARNING_MIN_TOOL_CALLS: %r", env_min_calls)
+
+    env_review = os.getenv("AGX_SKILL_REVIEW_ENABLED")
+    if env_review is not None:
+        merged["review_enabled"] = env_review.strip().lower() in {"1", "true", "on", "yes"}
 
     return merged
 

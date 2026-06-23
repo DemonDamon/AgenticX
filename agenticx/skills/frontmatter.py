@@ -93,6 +93,14 @@ def normalize_skill_md(content: str, canonical_name: str) -> Tuple[str, List[str
     return normalized, fixed
 
 
+def get_description_from_frontmatter(content: str) -> Optional[str]:
+    """Return the ``description`` scalar from SKILL.md frontmatter, if present."""
+    fm_block = _extract_frontmatter_block(content)
+    if fm_block is None:
+        return None
+    return _frontmatter_get_scalar(fm_block, "description")
+
+
 def validate_skill_frontmatter(content: str) -> List[str]:
     """Return validation error messages for SKILL.md frontmatter (empty if ok)."""
     errors: List[str] = []

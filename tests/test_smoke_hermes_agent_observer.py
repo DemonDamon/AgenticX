@@ -108,17 +108,16 @@ class TestObservationHookIntegration:
         hook = ObservationHook()
         session = _FakeSession()
 
-        with patch.object(hook, "_project_id", return_value="deadbeef"):
-            with patch("agenticx.learning.observer.Path.home", return_value=tmp_path):
-                asyncio.get_event_loop().run_until_complete(
-                    self._run_hook_cycle(hook, "bash_exec", {"cmd": "ls"}, "file1.txt\nfile2.txt", session)
-                )
+        with patch("agenticx.learning.observer.Path.home", return_value=tmp_path):
+            asyncio.get_event_loop().run_until_complete(
+                self._run_hook_cycle(hook, "bash_exec", {"cmd": "ls"}, "file1.txt\nfile2.txt", session)
+            )
 
-        jsonl_path = tmp_path / ".agenticx" / "instincts" / "projects" / "deadbeef" / "observations.jsonl"
-        assert jsonl_path.exists(), f"JSONL not found at {jsonl_path}"
-        lines = jsonl_path.read_text().strip().splitlines()
-        assert len(lines) == 1
-        obs = json.loads(lines[0])
+        obs_path = tmp_path / ".agenticx" / "sessions" / session.session_id / "tool_call_observations.json"
+        assert obs_path.exists(), f"observations not found at {obs_path}"
+        observations = json.loads(obs_path.read_text())
+        assert len(observations) == 1
+        obs = observations[0]
 
         assert obs["tool_name"] == "bash_exec"
         assert obs["success"] is True
@@ -127,21 +126,19 @@ class TestObservationHookIntegration:
         assert isinstance(obs["elapsed_ms"], int)
         assert obs["elapsed_ms"] >= 0
         assert "timestamp" in obs
-        assert obs["session_id"] == "test-session-123"
 
     def test_failed_tool_call_records_error(self, tmp_path: Path) -> None:
         hook = ObservationHook()
         session = _FakeSession()
 
-        with patch.object(hook, "_project_id", return_value="deadbeef"):
-            with patch("agenticx.learning.observer.Path.home", return_value=tmp_path):
-                asyncio.get_event_loop().run_until_complete(
-                    self._run_hook_cycle(hook, "bash_exec", {"cmd": "bad"}, "Error: command not found", session)
-                )
+        with patch("agenticx.learning.observer.Path.home", return_value=tmp_path):
+            asyncio.get_event_loop().run_until_complete(
+                self._run_hook_cycle(hook, "bash_exec", {"cmd": "bad"}, "Error: command not found", session)
+            )
 
-        jsonl_path = tmp_path / ".agenticx" / "instincts" / "projects" / "deadbeef" / "observations.jsonl"
-        lines = jsonl_path.read_text().strip().splitlines()
-        obs = json.loads(lines[0])
+        obs_path = tmp_path / ".agenticx" / "sessions" / session.session_id / "tool_call_observations.json"
+        observations = json.loads(obs_path.read_text())
+        obs = observations[0]
 
         assert obs["success"] is False
         assert obs["error_signal"] == "error:"
@@ -154,13 +151,12 @@ class TestObservationHookIntegration:
             for _ in range(3):
                 await self._run_hook_cycle(hook, "tool", {}, "ok", session)
 
-        with patch.object(hook, "_project_id", return_value="deadbeef"):
-            with patch("agenticx.learning.observer.Path.home", return_value=tmp_path):
-                asyncio.get_event_loop().run_until_complete(_run_three())
+        with patch("agenticx.learning.observer.Path.home", return_value=tmp_path):
+            asyncio.get_event_loop().run_until_complete(_run_three())
 
-        jsonl_path = tmp_path / ".agenticx" / "instincts" / "projects" / "deadbeef" / "observations.jsonl"
-        lines = jsonl_path.read_text().strip().splitlines()
-        indices = [json.loads(l)["turn_index"] for l in lines]
+        obs_path = tmp_path / ".agenticx" / "sessions" / session.session_id / "tool_call_observations.json"
+        observations = json.loads(obs_path.read_text())
+        indices = [o["turn_index"] for o in observations]
         assert indices == [1, 2, 3]
 
     def test_disabled_does_not_write(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -174,5 +170,5 @@ class TestObservationHookIntegration:
             )
 
         assert result == "data"
-        jsonl_path = tmp_path / ".agenticx" / "instincts" / "projects"
-        assert not jsonl_path.exists() or not list(jsonl_path.rglob("*.jsonl"))
+        obs_path = tmp_path / ".agenticx" / "sessions" / session.session_id / "tool_call_observations.json"
+        assert not obs_path.exists()

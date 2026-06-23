@@ -102,6 +102,15 @@ def _learning_enabled() -> bool:
         return flag in {"1", "true", "on", "yes"}
 
 
+def _review_enabled() -> bool:
+    try:
+        from agenticx.learning.config import get
+        return bool(get("review_enabled", False)) and _learning_enabled()
+    except Exception:
+        flag = os.getenv("AGX_SKILL_REVIEW_ENABLED", "0").strip().lower()
+        return flag in {"1", "true", "on", "yes"} and _learning_enabled()
+
+
 def _load_learning_config() -> dict[str, Any]:
     try:
         from agenticx.learning.config import get_learning_config
@@ -136,8 +145,9 @@ def _list_existing_skills() -> list[str]:
     if not root.is_dir():
         return []
     return sorted(
-        d.name for d in root.iterdir()
-        if d.is_dir() and (d / "SKILL.md").is_file()
+        d.name
+        for d in root.iterdir()
+        if d.is_dir() and not d.name.startswith(".") and (d / "SKILL.md").is_file()
     )
 
 
@@ -149,7 +159,7 @@ class SessionReviewHook(AgentHook):
     """
 
     async def on_agent_end(self, final_text: str, session: Any) -> None:
-        if not _learning_enabled():
+        if not _review_enabled():
             return
         if not self._should_review(session):
             return
@@ -196,10 +206,81 @@ class SessionReviewHook(AgentHook):
                 )
                 return
 
+            config = _load_learning_config()
+            if config.get("gepa_enabled"):
+                await self._run_gepa_review(session, signals, session_id, observations)
+                return
+
             await self._run_skill_review_agent(session, signals)
 
         except Exception:
             logger.warning("Skill review failed", exc_info=True)
+
+    async def _run_gepa_review(
+        self,
+        session: Any,
+        signals: SessionSignals,
+        session_id: str,
+        observations: list[dict[str, Any]],
+    ) -> None:
+        """GEPA N-candidate path — writes proposals only."""
+        from agenticx.learning.gepa_proposer import generate_candidates
+        from agenticx.skills.frontmatter import get_description_from_frontmatter
+
+        provider_name = str(getattr(session, "provider_name", "") or "").strip()
+        model_name = str(getattr(session, "model_name", "") or "").strip()
+        if not model_name:
+            return
+
+        config = _load_learning_config()
+        review_model = str(config.get("review_model", "gpt-4o-mini"))
+        n = int(config.get("gepa_num_candidates", 3))
+
+        history = list(getattr(session, "agent_messages", []) or [])
+        truncated = _truncate_history(history[-_HISTORY_TAIL:])
+        review_context = json.dumps(
+            {
+                "signals": {
+                    "tool_call_count": signals.tool_call_count,
+                    "unique_tools": signals.unique_tools,
+                    "error_count": signals.error_count,
+                    "success_rate": signals.success_rate,
+                },
+                "messages": truncated,
+                "observations": observations[-20:],
+            },
+            ensure_ascii=False,
+        )
+
+        existing = _list_existing_skills()
+        action = "patch" if existing else "create"
+        base_skill = existing[0] if existing else f"session-{session_id[:8]}"
+        base_md: str | None = None
+        if action == "patch":
+            skill_path = Path.home() / ".agenticx" / "skills" / base_skill / "SKILL.md"
+            if skill_path.is_file():
+                base_md = skill_path.read_text(encoding="utf-8")
+
+        paths = await generate_candidates(
+            base_skill_name=base_skill,
+            action=action,
+            session_id=session_id,
+            review_model=review_model,
+            provider_name=provider_name,
+            base_skill_md=base_md,
+            review_context=review_context,
+            n=n,
+        )
+        if paths:
+            first_md = (paths[0] / "SKILL.md").read_text(encoding="utf-8")
+            inferred = get_description_from_frontmatter(first_md)
+            logger.info(
+                "GEPA wrote %d proposal(s) for session %s (skill=%s, desc=%s)",
+                len(paths),
+                session_id,
+                base_skill,
+                (inferred or "")[:80],
+            )
 
     async def _run_skill_review_agent(
         self, session: Any, signals: SessionSignals

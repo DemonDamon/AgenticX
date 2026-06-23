@@ -59,6 +59,7 @@ import { AutomationTab } from "./automation/AutomationTab";
 import { DeliveryConfigSection } from "./delivery/DeliveryConfigSection";
 import { AutomationTaskIcon } from "./icons/AutomationTaskIcon";
 import { SkillPuzzleIcon } from "./icons/SkillPuzzleIcon";
+import { PendingProposalsList } from "./settings/skills/PendingProposalsList";
 import {
   RuntimeConfigSection,
   RUNTIME_MAX_TOOL_ROUNDS,
@@ -2547,6 +2548,7 @@ function SkillsTab() {
   const detailRequestSeqRef = useRef(0);
   const marketInstallQueueRef = useRef<RegistrySearchItem[]>([]);
   const skillsListAnchorRef = useRef<HTMLDivElement | null>(null);
+  const [pendingProposalCount, setPendingProposalCount] = useState(0);
 
   const addPane = useAppStore((s) => s.addPane);
   const setForwardAutoReply = useAppStore((s) => s.setForwardAutoReply);
@@ -3221,6 +3223,14 @@ function SkillsTab() {
       <div ref={skillsListAnchorRef} className="text-sm text-text-subtle">
         技能（Skills）是注入给 Agent 的领域知识指令，告诉 AI 在特定任务中「怎么做」。
       </div>
+
+      {pendingProposalCount > 0 ? (
+        <Panel title={`待审 (${pendingProposalCount})`}>
+          <PendingProposalsList onCountChange={setPendingProposalCount} />
+        </Panel>
+      ) : (
+        <PendingProposalsList onCountChange={setPendingProposalCount} hideWhenEmpty />
+      )}
 
       {/* Skill scan roots (presets + custom paths) */}
       <Panel title="扫描路径">

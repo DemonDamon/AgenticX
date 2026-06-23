@@ -12,7 +12,7 @@ import asyncio
 import json
 from pathlib import Path
 from typing import Any
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
 import pytest
 
@@ -24,26 +24,30 @@ class _FakeSession:
     workspace_dir = "/tmp/review-workspace"
     _turns_since_skill_manage = 15
     _total_tool_calls = 10
+    provider_name = "openai"
+    model_name = "gpt-4o-mini"
+    agent_messages: list[dict[str, Any]] = []
 
 
-def _write_observations(project_dir: Path, session_id: str, count: int = 8, errors: int = 2) -> None:
-    """Write synthetic observations for testing."""
-    project_dir.mkdir(parents=True, exist_ok=True)
-    lines = []
+def _write_session_observations(session_dir: Path, count: int = 8, errors: int = 2) -> None:
+    session_dir.mkdir(parents=True, exist_ok=True)
+    observations = []
     tools = ["bash_exec", "file_read", "file_write", "bash_exec", "web_search"]
     for i in range(count):
-        tool = tools[i % len(tools)]
-        success = i >= errors
-        obs = {
-            "tool_name": tool,
-            "success": success,
-            "session_id": session_id,
-            "elapsed_ms": 100 + i * 50,
-            "turn_index": i + 1,
-            "error_signal": "error:" if not success else None,
-        }
-        lines.append(json.dumps(obs))
-    (project_dir / "observations.jsonl").write_text("\n".join(lines) + "\n")
+        observations.append(
+            {
+                "tool_name": tools[i % len(tools)],
+                "success": i >= errors,
+                "session_id": "review-test-001",
+                "elapsed_ms": 100 + i * 50,
+                "turn_index": i + 1,
+                "error_signal": "error:" if i < errors else None,
+            }
+        )
+    (session_dir / "tool_call_observations.json").write_text(
+        json.dumps(observations),
+        encoding="utf-8",
+    )
 
 
 class TestShouldReview:
@@ -80,49 +84,48 @@ class TestRunReview:
     def _enable(self, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setenv("AGX_SKILL_REVIEW_ENABLED", "1")
 
-    def test_writes_pending_skills(self, tmp_path: Path) -> None:
+    def test_triggers_review_agent_for_complex_session(self, tmp_path: Path) -> None:
         hook = SessionReviewHook()
         session = _FakeSession()
-
-        project_id = hook._resolve_project_id(session)
-        project_dir = tmp_path / ".agenticx" / "instincts" / "projects" / project_id
-        _write_observations(project_dir, session.session_id, count=8, errors=2)
+        session_dir = tmp_path / ".agenticx" / "sessions" / session.session_id
+        _write_session_observations(session_dir, count=8, errors=2)
 
         with patch("agenticx.learning.session_review_hook.Path.home", return_value=tmp_path):
-            asyncio.get_event_loop().run_until_complete(hook._run_review(session))
-
-        pending_path = project_dir / "pending_skills.json"
-        assert pending_path.exists()
-        pending = json.loads(pending_path.read_text())
-        assert isinstance(pending, list)
-        assert len(pending) == 1
-        rec = pending[0]
-        assert rec["session_id"] == "review-test-001"
-        assert rec["recommendation"] == "review_suggested"
-        assert rec["signals"]["tool_call_count"] == 8
-        assert rec["signals"]["error_count"] == 2
-        assert rec["signals"]["error_recovery_count"] >= 0
+            with patch.object(
+                hook,
+                "_run_skill_review_agent",
+                new=AsyncMock(),
+            ) as mock_review:
+                asyncio.get_event_loop().run_until_complete(hook._run_review(session))
+                mock_review.assert_awaited_once()
 
     def test_skips_simple_session(self, tmp_path: Path) -> None:
         hook = SessionReviewHook()
         session = _FakeSession()
-
-        project_id = hook._resolve_project_id(session)
-        project_dir = tmp_path / ".agenticx" / "instincts" / "projects" / project_id
-        _write_observations(project_dir, session.session_id, count=2, errors=0)
+        session_dir = tmp_path / ".agenticx" / "sessions" / session.session_id
+        _write_session_observations(session_dir, count=2, errors=0)
 
         with patch("agenticx.learning.session_review_hook.Path.home", return_value=tmp_path):
-            asyncio.get_event_loop().run_until_complete(hook._run_review(session))
-
-        pending_path = project_dir / "pending_skills.json"
-        assert not pending_path.exists()
+            with patch.object(
+                hook,
+                "_run_skill_review_agent",
+                new=AsyncMock(),
+            ) as mock_review:
+                asyncio.get_event_loop().run_until_complete(hook._run_review(session))
+                mock_review.assert_not_awaited()
 
     def test_skips_no_observations(self, tmp_path: Path) -> None:
         hook = SessionReviewHook()
         session = _FakeSession()
 
         with patch("agenticx.learning.session_review_hook.Path.home", return_value=tmp_path):
-            asyncio.get_event_loop().run_until_complete(hook._run_review(session))
+            with patch.object(
+                hook,
+                "_run_skill_review_agent",
+                new=AsyncMock(),
+            ) as mock_review:
+                asyncio.get_event_loop().run_until_complete(hook._run_review(session))
+                mock_review.assert_not_awaited()
 
 
 class TestOnAgentEnd:
@@ -137,17 +140,18 @@ class TestOnAgentEnd:
         monkeypatch.setenv("AGX_SKILL_REVIEW_ENABLED", "1")
         hook = SessionReviewHook()
         session = _FakeSession()
-
-        project_id = hook._resolve_project_id(session)
-        project_dir = tmp_path / ".agenticx" / "instincts" / "projects" / project_id
-        _write_observations(project_dir, session.session_id, count=10, errors=1)
+        session_dir = tmp_path / ".agenticx" / "sessions" / session.session_id
+        _write_session_observations(session_dir, count=10, errors=1)
 
         async def _run() -> None:
             with patch("agenticx.learning.session_review_hook.Path.home", return_value=tmp_path):
-                await hook.on_agent_end("done", session)
-                await asyncio.sleep(0.3)
+                with patch.object(
+                    hook,
+                    "_run_review",
+                    new=AsyncMock(),
+                ) as mock_run:
+                    await hook.on_agent_end("done", session)
+                    await asyncio.sleep(0.05)
+                    mock_run.assert_awaited_once()
 
         asyncio.get_event_loop().run_until_complete(_run())
-
-        pending_path = project_dir / "pending_skills.json"
-        assert pending_path.exists()

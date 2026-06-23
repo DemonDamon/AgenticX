@@ -60,6 +60,15 @@ class TestSkillManageFuzzyPatch:
     @pytest.fixture()
     def skill_env(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
         monkeypatch.setenv("AGX_SKILL_MANAGE", "1")
+        monkeypatch.setattr(
+            "agenticx.learning.config.get_learning_config",
+            lambda: {
+                "agent_writes_require_approval": False,
+                "freeze_during_session": False,
+                "max_skill_bytes": 15360,
+                "max_description_chars": 500,
+            },
+        )
         skills_root = tmp_path / "skills"
         skills_root.mkdir()
         monkeypatch.setattr(
@@ -121,6 +130,15 @@ class TestSkillManageChangelog:
     @pytest.fixture()
     def skills_root(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
         monkeypatch.setenv("AGX_SKILL_MANAGE", "1")
+        monkeypatch.setattr(
+            "agenticx.learning.config.get_learning_config",
+            lambda: {
+                "agent_writes_require_approval": False,
+                "freeze_during_session": False,
+                "max_skill_bytes": 15360,
+                "max_description_chars": 500,
+            },
+        )
         root = tmp_path / "skills"
         root.mkdir()
         monkeypatch.setattr(
