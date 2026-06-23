@@ -91,6 +91,14 @@ export function isOfficialOpenAIBase(baseUrl: string): boolean {
   return base === "https://api.openai.com" || base === "https://api.openai.com/v1";
 }
 
+/** 用户通过「添加服务厂商」创建的条目，允许从设置中删除。 */
+export function isProviderDeletable(providerId: string): boolean {
+  if (providerId.startsWith("custom_openai_") || providerId.startsWith("custom_ollama_")) {
+    return true;
+  }
+  return !BUILTIN_PROVIDER_IDS.has(providerId);
+}
+
 /** 是否允许用户自定义侧栏/标题展示名（写入 display_name，不改配置 id）。 */
 export function isProviderDisplayNameEditable(
   providerId: string,
