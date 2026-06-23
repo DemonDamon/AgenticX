@@ -1423,33 +1423,47 @@ export const useAppStore = create<AppState>((set, get) => ({
     }),
   addPaneMessage: (paneId, role, content, agentId, provider, model, attachments, extras) =>
     set((state) => ({
-      panes: state.panes.map((pane) =>
-        pane.id === paneId
-          ? {
-              ...pane,
-              messages: [
-                ...pane.messages,
-                {
-                  id: uid(),
-                  role,
-                  content,
-                  timestamp: Date.now(),
-                  // Stamp the owning session so the render layer can never show
-                  // this row under a different conversation. Callers on hot
-                  // streaming paths pass an explicit ownerSessionId (the request
-                  // session) via extras; everyone else defaults to the pane's
-                  // current session, which is correct for all guarded writes.
-                  ownerSessionId: String(pane.sessionId ?? "").trim() || undefined,
-                  agentId,
-                  provider,
-                  model,
-                  attachments,
-                  ...extras,
-                },
-              ],
-            }
-          : pane
-      ),
+      panes: state.panes.map((pane) => {
+        if (pane.id !== paneId) return pane;
+        // Guard against duplicate user messages: if the pane already has a user
+        // message with the same content and ownerSessionId, skip the append.
+        // This prevents a visible duplicate when a bootstrap disk-load races with
+        // the optimistic addPaneMessage called from sendChat.
+        if (role === "user" && String(content ?? "").trim()) {
+          const ownerSid = String(extras?.ownerSessionId ?? pane.sessionId ?? "").trim() || undefined;
+          const norm = (s: unknown) => String(s ?? "").trim();
+          const dup = pane.messages.some(
+            (m) =>
+              m.role === "user" &&
+              norm(m.content) === norm(content) &&
+              (ownerSid ? m.ownerSessionId === ownerSid : !m.ownerSessionId),
+          );
+          if (dup) return pane;
+        }
+        return {
+          ...pane,
+          messages: [
+            ...pane.messages,
+            {
+              id: uid(),
+              role,
+              content,
+              timestamp: Date.now(),
+              // Stamp the owning session so the render layer can never show
+              // this row under a different conversation. Callers on hot
+              // streaming paths pass an explicit ownerSessionId (the request
+              // session) via extras; everyone else defaults to the pane's
+              // current session, which is correct for all guarded writes.
+              ownerSessionId: String(pane.sessionId ?? "").trim() || undefined,
+              agentId,
+              provider,
+              model,
+              attachments,
+              ...extras,
+            },
+          ],
+        };
+      }),
     })),
   updatePaneMessageByToolCallId: (paneId, toolCallId, patch) => {
     let found = false;
