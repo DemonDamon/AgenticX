@@ -4,6 +4,7 @@ import {
   getProviderDisplayName,
   isOfficialOpenAIBase,
   isProviderDisplayNameEditable,
+  isProviderDeletable,
 } from "./provider-display";
 
 describe("provider-display", () => {
@@ -16,6 +17,14 @@ describe("provider-display", () => {
     expect(isProviderDisplayNameEditable("openai", { baseUrl: "http://47.2.1.1/v1" })).toBe(true);
     expect(isProviderDisplayNameEditable("openai", { baseUrl: "https://api.openai.com/v1" })).toBe(false);
     expect(isProviderDisplayNameEditable("anthropic", {})).toBe(false);
+  });
+
+  it("allows deleting user-added vendors but not built-in slots", () => {
+    expect(isProviderDeletable("custom_openai_caixun_b")).toBe(true);
+    expect(isProviderDeletable("custom_ollama_remote")).toBe(true);
+    expect(isProviderDeletable("openai")).toBe(false);
+    expect(isProviderDeletable("anthropic")).toBe(false);
+    expect(isProviderDeletable("ollama")).toBe(false);
   });
 
   it("labels built-in openai with custom base as compatible gateway", () => {

@@ -84,6 +84,7 @@ import { TurnArchiveSettingsPanel } from "./memory/TurnArchiveSettingsPanel";
 import {
   getProviderDisplayName,
   isOllamaLikeProvider,
+  isProviderDeletable,
   isProviderDisplayNameEditable,
   makeCustomOllamaProviderId,
   makeCustomOpenAIProviderId,
@@ -5882,12 +5883,8 @@ export function SettingsPanel({
   const [editModelError, setEditModelError] = useState<string | null>(null);
   const [inlineRenameProviderId, setInlineRenameProviderId] = useState<string | null>(null);
   const [inlineRenameValue, setInlineRenameValue] = useState("");
-  const [providerContextMenu, setProviderContextMenu] = useState<{
-    x: number;
-    y: number;
-    providerId: string;
-  } | null>(null);
-  const providerContextMenuRef = useRef<HTMLDivElement>(null);
+  const [providerDeleteConfirmId, setProviderDeleteConfirmId] = useState<string | null>(null);
+  const [providerDeleteBusy, setProviderDeleteBusy] = useState(false);
   const inlineRenameInputRef = useRef<HTMLInputElement>(null);
   const [providerEnableHint, setProviderEnableHint] = useState<string | null>(null);
   const [defaultProvHint, setDefaultProvHint] = useState<string | null>(null);
@@ -6671,23 +6668,6 @@ export function SettingsPanel({
   }, [inlineRenameProviderId]);
 
   useEffect(() => {
-    if (!providerContextMenu) return;
-    const onPointerDown = (e: MouseEvent) => {
-      if (providerContextMenuRef.current?.contains(e.target as Node)) return;
-      setProviderContextMenu(null);
-    };
-    const onKeyDown = (e: KeyboardEvent) => {
-      if (e.key === "Escape") setProviderContextMenu(null);
-    };
-    window.addEventListener("mousedown", onPointerDown);
-    window.addEventListener("keydown", onKeyDown);
-    return () => {
-      window.removeEventListener("mousedown", onPointerDown);
-      window.removeEventListener("keydown", onKeyDown);
-    };
-  }, [providerContextMenu]);
-
-  useEffect(() => {
     setFetchModelsModalOpen(false);
     setFetchedModels([]);
     setFetchModelsSearch("");
@@ -6965,7 +6945,6 @@ export function SettingsPanel({
       setActive(providerId);
       setInlineRenameProviderId(providerId);
       setInlineRenameValue(getProviderDisplayName(providerId, entry));
-      setProviderContextMenu(null);
       setProviderEnableHint(null);
       setDefaultProvHint(null);
     },
@@ -6995,6 +6974,77 @@ export function SettingsPanel({
     });
     cancelInlineProviderRename();
   }, [inlineRenameProviderId, inlineRenameValue, cancelInlineProviderRename]);
+
+  const confirmDeleteProvider = useCallback(async () => {
+    const providerId = providerDeleteConfirmId?.trim();
+    if (!providerId || providerDeleteBusy) return;
+    setProviderDeleteBusy(true);
+    try {
+      await window.agenticxDesktop.deleteProvider(providerId);
+      const remainingNames = providerNames.filter((n) => n !== providerId);
+      const fallbackActive =
+        remainingNames.find((n) => n !== providerId && providerCredentialed(draft[n])) ??
+        remainingNames.find((n) => n !== providerId) ??
+        ALL_PROVIDERS[0];
+      let nextDefault = defProv;
+      if (defProv === providerId) {
+        nextDefault = fallbackActive;
+        await window.agenticxDesktop.setDefaultProvider(nextDefault);
+        setDefProv(nextDefault);
+      }
+      setDraft((prev) => {
+        const next = { ...prev };
+        delete next[providerId];
+        return next;
+      });
+      setKeyStatus((prev) => {
+        const next = { ...prev };
+        delete next[providerId];
+        return next;
+      });
+      setKeyError((prev) => {
+        const next = { ...prev };
+        delete next[providerId];
+        return next;
+      });
+      setKeyWarning((prev) => {
+        const next = { ...prev };
+        delete next[providerId];
+        return next;
+      });
+      setModelHealthMap((prev) => {
+        const next = { ...prev };
+        for (const key of Object.keys(next)) {
+          if (key.startsWith(`${providerId}:`)) delete next[key];
+        }
+        return next;
+      });
+      cancelInlineProviderRename();
+      setActive(fallbackActive);
+      setProviderEnableHint(null);
+      setDefaultProvHint(null);
+      setProviderDeleteConfirmId(null);
+      const nextProviders = { ...providers, ...draft };
+      delete nextProviders[providerId];
+      updateSettingsSlice({
+        providers: nextProviders,
+        ...(defProv === providerId ? { defaultProvider: nextDefault } : {}),
+      });
+    } catch {
+      window.alert("删除服务厂商失败，请稍后重试。");
+    } finally {
+      setProviderDeleteBusy(false);
+    }
+  }, [
+    cancelInlineProviderRename,
+    defProv,
+    draft,
+    providerDeleteBusy,
+    providerDeleteConfirmId,
+    providerNames,
+    providers,
+    updateSettingsSlice,
+  ]);
 
   const handleSave = async () => {
     try {
@@ -8217,13 +8267,6 @@ export function SettingsPanel({
                             setEditModelOriginalId("");
                             setEditModelFormId("");
                             setEditModelError(null);
-                            setProviderContextMenu(null);
-                          }}
-                          onContextMenu={(e) => {
-                            if (!isProviderDisplayNameEditable(name, entry)) return;
-                            e.preventDefault();
-                            e.stopPropagation();
-                            setProviderContextMenu({ x: e.clientX, y: e.clientY, providerId: name });
                           }}
                         >
                           <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${dotClass}`} />
@@ -8249,6 +8292,8 @@ export function SettingsPanel({
 
                 {/* Provider detail */}
                 <div className="flex-1 space-y-3">
+                      <div className="flex items-start justify-between gap-2">
+                        <div className="min-w-0 flex-1">
                       {inlineRenameProviderId === active && isProviderDisplayNameEditable(active, current) ? (
                         <input
                           ref={inlineRenameInputRef}
@@ -8257,6 +8302,7 @@ export function SettingsPanel({
                           onChange={(e) => setInlineRenameValue(e.target.value)}
                           onBlur={commitInlineProviderRename}
                           onKeyDown={(e) => {
+                            if (e.nativeEvent.isComposing || e.key === "Process" || e.keyCode === 229) return;
                             if (e.key === "Enter") {
                               e.preventDefault();
                               commitInlineProviderRename();
@@ -8281,7 +8327,7 @@ export function SettingsPanel({
                             }
                           }}
                           title={
-                            isProviderDisplayNameEditable(active, current) ? "点击重命名；侧栏项也可右键重命名" : undefined
+                            isProviderDisplayNameEditable(active, current) ? "点击重命名" : undefined
                           }
                         >
                           <span>{getProviderDisplayName(active, current)}</span>
@@ -8290,6 +8336,18 @@ export function SettingsPanel({
                           ) : null}
                         </h2>
                       )}
+                        </div>
+                        {isProviderDeletable(active) ? (
+                          <button
+                            type="button"
+                            className="inline-flex shrink-0 items-center gap-1 rounded-md border border-rose-500/35 px-2 py-1 text-[11px] text-rose-400 transition hover:bg-rose-500/10 hover:text-rose-300"
+                            onClick={() => setProviderDeleteConfirmId(active)}
+                          >
+                            <Trash2 className="h-3.5 w-3.5 shrink-0" aria-hidden />
+                            删除
+                          </button>
+                        ) : null}
+                      </div>
                       <div className="space-y-1 rounded-md border border-border bg-surface-panel px-3 py-2">
                         <div className="flex items-center justify-between">
                           <div className="text-xs text-text-subtle">
@@ -8697,6 +8755,7 @@ export function SettingsPanel({
                               onChange={(e) => setAddVendorFormName(e.target.value)}
                               placeholder="例如 OpenAI"
                               onKeyDown={(e) => {
+                                if (e.nativeEvent.isComposing || e.key === "Process" || e.keyCode === 229) return;
                                 if (e.key === "Enter" && addVendorFormName.trim()) submitAddServiceVendorFromModal();
                               }}
                             />
@@ -8753,6 +8812,7 @@ export function SettingsPanel({
                               onChange={(e) => setAddModelFormId(e.target.value)}
                               placeholder="必填，例如 gpt-4o-mini"
                               onKeyDown={(e) => {
+                                if (e.nativeEvent.isComposing || e.key === "Process" || e.keyCode === 229) return;
                                 if (e.key === "Enter" && addModelFormId.trim()) submitAddModelFromModal();
                               }}
                             />
@@ -8807,6 +8867,7 @@ export function SettingsPanel({
                               }}
                               placeholder="例如 gpt-4o-mini"
                               onKeyDown={(e) => {
+                                if (e.nativeEvent.isComposing || e.key === "Process" || e.keyCode === 229) return;
                                 if (e.key === "Enter" && editModelFormId.trim()) submitEditModelFromModal();
                               }}
                             />
@@ -8817,24 +8878,46 @@ export function SettingsPanel({
                           </p>
                         </div>
                       </Modal>
+                      <Modal
+                        open={Boolean(providerDeleteConfirmId)}
+                        title="删除服务厂商"
+                        onClose={() => {
+                          if (providerDeleteBusy) return;
+                          setProviderDeleteConfirmId(null);
+                        }}
+                        backdropClassName="bg-black/75"
+                        panelClassName="w-full max-w-[min(92vw,400px)] bg-[var(--surface-base-fallback)]"
+                        footer={(
+                          <div className="flex justify-end gap-2">
+                            <button
+                              type="button"
+                              className="rounded-md border border-border px-3 py-1.5 text-xs text-text-subtle transition hover:bg-surface-hover hover:text-text-strong disabled:opacity-40"
+                              disabled={providerDeleteBusy}
+                              onClick={() => setProviderDeleteConfirmId(null)}
+                            >
+                              取消
+                            </button>
+                            <button
+                              type="button"
+                              className="rounded-md bg-rose-600 px-3 py-1.5 text-xs font-medium text-white transition hover:bg-rose-500 disabled:opacity-40"
+                              disabled={providerDeleteBusy}
+                              onClick={() => void confirmDeleteProvider()}
+                            >
+                              {providerDeleteBusy ? "删除中…" : "删除"}
+                            </button>
+                          </div>
+                        )}
+                      >
+                        <p className="text-sm leading-relaxed text-text-muted">
+                          确认删除服务厂商「
+                          {providerDeleteConfirmId
+                            ? getProviderDisplayName(providerDeleteConfirmId, draft[providerDeleteConfirmId])
+                            : ""}
+                          」？删除后立即生效，该厂商下的模型配置也会一并移除。
+                        </p>
+                      </Modal>
                 </div>
               </div>
-              {providerContextMenu ? (
-                <div
-                  ref={providerContextMenuRef}
-                  className="fixed z-[220] min-w-[120px] overflow-hidden rounded-lg border border-border bg-surface-card py-1 shadow-lg"
-                  style={{ left: providerContextMenu.x, top: providerContextMenu.y }}
-                >
-                  <button
-                    type="button"
-                    className="flex w-full items-center gap-2 px-3 py-2 text-left text-xs text-text-muted transition hover:bg-surface-hover hover:text-text-strong"
-                    onClick={() => beginInlineProviderRename(providerContextMenu.providerId)}
-                  >
-                    <SquarePen className="h-3.5 w-3.5 shrink-0" aria-hidden />
-                    重命名
-                  </button>
-                </div>
-              ) : null}
               </div>
             )}
 
