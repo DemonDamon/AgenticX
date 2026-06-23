@@ -5,6 +5,7 @@ import { ReasoningBlock } from "./ReasoningBlock";
 import { parseReasoningContent } from "./reasoning-parser";
 import { CitationMarkdownBody } from "./CitationMarkdownBody";
 import { renderUserMessageInlineBody } from "./user-message-inline";
+import { isWorkspaceReferenceAttachment } from "../../utils/reference-attachment";
 
 type Props = {
   message: Message;
@@ -45,7 +46,7 @@ export function TerminalLine({ message, badge, onRevealPath }: Props) {
             isUser ? (
               renderUserMessageInlineBody(
                 bodyText,
-                (message.attachments ?? []).filter((a) => !!a.referenceToken)
+                (message.attachments ?? []).filter((a) => isWorkspaceReferenceAttachment(a))
               )
             ) : (
               <CitationMarkdownBody content={bodyText} references={message.references} isStreaming={isStreaming} onRevealPath={onRevealPath} />

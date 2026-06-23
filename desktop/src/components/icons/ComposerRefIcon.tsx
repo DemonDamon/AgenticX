@@ -33,7 +33,6 @@ export function resolveComposerRefIconKind(
   if (!trimmed) return "file";
 
   if (trimmed.startsWith("@dir:")) return "folder";
-  if (meta?.composerRefLabel && meta.composerRefLabel === trimmed) return "folder";
   if (meta?.name?.startsWith("@dir:") && meta.composerRefLabel === trimmed) return "folder";
 
   // 有扩展名 → 文件；无扩展名且无路径分隔 → 目录别名（如 AgenticX）

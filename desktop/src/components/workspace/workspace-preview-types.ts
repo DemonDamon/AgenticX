@@ -7,6 +7,28 @@ export type WorkspacePreviewKind =
   | "office"
   | "binary";
 
+export type WorkspaceTextRangeQuote = {
+  kind: "text-range";
+  path: string;
+  absolutePath: string;
+  startLine?: number;
+  endLine?: number;
+  snippet: string;
+  label: string;
+};
+
+export type WorkspaceSpreadsheetQuote = {
+  kind: "spreadsheet-range";
+  path: string;
+  absolutePath: string;
+  sheet: string;
+  a1: string;
+  snippet: string;
+  label: string;
+};
+
+export type WorkspacePreviewQuotePayload = WorkspaceTextRangeQuote | WorkspaceSpreadsheetQuote;
+
 export type WorkspacePreview =
   | {
       kind: "text" | "markdown" | "code";

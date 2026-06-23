@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { Check, Copy, FileText, FolderOpen, ImageIcon, X } from "lucide-react";
 import Prism from "prismjs";
@@ -20,12 +20,39 @@ import {
 import {
   formatPreviewBytes,
   previewBaseName,
+  type WorkspacePreviewQuotePayload,
   type WorkspacePreview,
 } from "./workspace-preview-types";
 import { DocxPreview } from "./DocxPreview";
 import { PdfPreview } from "./PdfPreview";
 import { PreviewFallback } from "./PreviewFallback";
 import { SpreadsheetPreview } from "./SpreadsheetPreview";
+import {
+  computeSelectionPopupAnchor,
+  SelectionQuotePopover,
+  type SelectionPopupAnchor,
+} from "./selection-quote-popover";
+
+type TextualPreview = {
+  kind: "text" | "markdown" | "code";
+  path: string;
+  absolutePath: string;
+  content: string;
+  size: number;
+  truncated: boolean;
+  mimeType: string;
+};
+
+type BinaryLikePreview = {
+  kind: "pdf" | "office" | "binary";
+  path: string;
+  absolutePath: string;
+  size: number;
+  mimeType: string;
+  message: string;
+};
+
+type OfficePreview = BinaryLikePreview & { kind: "office" };
 
 export type WorkspaceFilePreviewProps = {
   preview: WorkspacePreview;
@@ -33,6 +60,7 @@ export type WorkspaceFilePreviewProps = {
   copied: boolean;
   onCopy: () => void;
   onClose: () => void;
+  onQuoteSnippet?: (payload: WorkspacePreviewQuotePayload) => void;
   onRevealInFileManager?: (absolutePath: string) => void;
   revealInFileManagerLabel?: string;
 };
@@ -86,7 +114,7 @@ function BinaryPlaceholderBody({
   onRevealInFileManager,
   revealInFileManagerLabel,
 }: {
-  preview: Extract<WorkspacePreview, { kind: "pdf" | "office" | "binary" }>;
+  preview: BinaryLikePreview;
   onCopy: () => void;
   onRevealInFileManager?: (absolutePath: string) => void;
   revealInFileManagerLabel?: string;
@@ -107,11 +135,13 @@ function BinaryPlaceholderBody({
 function OfficePreviewBody({
   preview,
   onCopy,
+  onQuoteSnippet,
   onRevealInFileManager,
   revealInFileManagerLabel,
 }: {
-  preview: Extract<WorkspacePreview, { kind: "office" }>;
+  preview: OfficePreview;
   onCopy: () => void;
+  onQuoteSnippet?: (payload: WorkspacePreviewQuotePayload) => void;
   onRevealInFileManager?: (absolutePath: string) => void;
   revealInFileManagerLabel?: string;
 }) {
@@ -130,9 +160,11 @@ function OfficePreviewBody({
   if (variant === "xlsx") {
     return (
       <SpreadsheetPreview
+        path={preview.path}
         absolutePath={preview.absolutePath}
         mimeType={preview.mimeType}
         onCopyPath={onCopy}
+        onQuoteSelection={onQuoteSnippet}
         onRevealInFileManager={onRevealInFileManager}
         revealInFileManagerLabel={revealInFileManagerLabel}
       />
@@ -245,7 +277,13 @@ function ImagePreviewBody({
   );
 }
 
-function TextualPreviewBody({ preview }: { preview: Extract<WorkspacePreview, { kind: "text" | "markdown" | "code" }> }) {
+function TextualPreviewBody({
+  preview,
+  onQuoteSnippet,
+}: {
+  preview: TextualPreview;
+  onQuoteSnippet?: (payload: WorkspacePreviewQuotePayload) => void;
+}) {
   const highlightedCode = useMemo(() => {
     if (preview.kind === "markdown") return "";
     const language = detectLanguage(preview.path);
@@ -257,29 +295,166 @@ function TextualPreviewBody({ preview }: { preview: Extract<WorkspacePreview, { 
     () => (preview.kind === "markdown" ? normalizeChatMarkdownContent(preview.content) : ""),
     [preview]
   );
+  const markdownRef = useRef<HTMLDivElement | null>(null);
+  const codeBlockRef = useRef<HTMLPreElement | null>(null);
+  const [selectionRange, setSelectionRange] = useState<{
+    startLine?: number;
+    endLine?: number;
+    snippet: string;
+    anchor: SelectionPopupAnchor;
+  } | null>(null);
+
+  const toLineNumber = useCallback((content: string, charOffset: number): number => {
+    const safeOffset = Math.max(0, Math.min(charOffset, content.length));
+    if (safeOffset <= 0) return 1;
+    let line = 1;
+    for (let i = 0; i < safeOffset; i += 1) {
+      if (content[i] === "\n") line += 1;
+    }
+    return line;
+  }, []);
+
+  useEffect(() => {
+    setSelectionRange(null);
+  }, [preview.path, preview.content, preview.kind]);
+
+  const syncSelectionRange = useCallback(() => {
+    const container = preview.kind === "markdown" ? markdownRef.current : codeBlockRef.current;
+    if (!container) {
+      setSelectionRange(null);
+      return;
+    }
+    const sel = window.getSelection();
+    if (!sel || sel.rangeCount === 0 || sel.isCollapsed) {
+      setSelectionRange(null);
+      return;
+    }
+    const range = sel.getRangeAt(0);
+    const within =
+      container.contains(range.startContainer) && container.contains(range.endContainer);
+    if (!within) {
+      setSelectionRange(null);
+      return;
+    }
+    const selectedText = sel.toString().replace(/\u00a0/g, " ").trim();
+    if (!selectedText) {
+      setSelectionRange(null);
+      return;
+    }
+    const anchor = computeSelectionPopupAnchor(range);
+    if (!anchor) {
+      setSelectionRange(null);
+      return;
+    }
+    const preStart = document.createRange();
+    preStart.selectNodeContents(container);
+    preStart.setEnd(range.startContainer, range.startOffset);
+    const preEnd = document.createRange();
+    preEnd.selectNodeContents(container);
+    preEnd.setEnd(range.endContainer, range.endOffset);
+    const startOffset = preStart.toString().length;
+    const endOffset = preEnd.toString().length;
+    if (preview.kind === "markdown") {
+      const idx = preview.content.indexOf(selectedText);
+      if (idx >= 0) {
+        const startLine = toLineNumber(preview.content, idx);
+        const endLine = Math.max(startLine, toLineNumber(preview.content, idx + selectedText.length));
+        setSelectionRange({ startLine, endLine, snippet: selectedText, anchor });
+        return;
+      }
+      setSelectionRange({ snippet: selectedText, anchor });
+      return;
+    }
+    const startLine = toLineNumber(preview.content, startOffset);
+    const endLine = Math.max(startLine, toLineNumber(preview.content, endOffset));
+    const lines = preview.content.split("\n");
+    const snippet = lines.slice(startLine - 1, endLine).join("\n").trimEnd();
+    if (!snippet.trim()) {
+      setSelectionRange({ snippet: selectedText, anchor });
+      return;
+    }
+    setSelectionRange({ startLine, endLine, snippet, anchor });
+  }, [preview.content, preview.kind, toLineNumber]);
+
+  useEffect(() => {
+    const onSelectionChange = () => syncSelectionRange();
+    document.addEventListener("selectionchange", onSelectionChange);
+    return () => document.removeEventListener("selectionchange", onSelectionChange);
+  }, [syncSelectionRange]);
+
+  useEffect(() => {
+    const container = preview.kind === "markdown" ? markdownRef.current : codeBlockRef.current;
+    const scrollEl = container?.closest(".preview-scrollbar");
+    if (!scrollEl) return;
+    const onScroll = () => syncSelectionRange();
+    scrollEl.addEventListener("scroll", onScroll, { passive: true });
+    return () => scrollEl.removeEventListener("scroll", onScroll);
+  }, [preview.kind, syncSelectionRange]);
 
   if (preview.kind === "markdown") {
     return (
-      <div className="msg-content px-6 py-5 text-[13px] leading-relaxed text-text-primary">
-        <ReactMarkdown
-          remarkPlugins={chatRemarkPlugins}
-          rehypePlugins={chatRehypePlugins}
-          components={chatMarkdownComponents}
-          urlTransform={chatUrlTransform}
-        >
-          {markdownContent}
-        </ReactMarkdown>
+      <div className="relative">
+        {selectionRange && onQuoteSnippet ? (
+          <SelectionQuotePopover
+            anchor={selectionRange.anchor}
+            onQuote={() =>
+              onQuoteSnippet({
+                kind: "text-range",
+                path: preview.path,
+                absolutePath: preview.absolutePath,
+                startLine: selectionRange.startLine,
+                endLine: selectionRange.endLine,
+                snippet: selectionRange.snippet,
+                label:
+                  selectionRange.startLine && selectionRange.endLine
+                    ? `${previewBaseName(preview.path)} (${selectionRange.startLine}-${selectionRange.endLine})`
+                    : `${previewBaseName(preview.path)} (片段)`,
+              })
+            }
+          />
+        ) : null}
+        <div ref={markdownRef} className="msg-content px-6 py-5 text-[13px] leading-relaxed text-text-primary">
+          <ReactMarkdown
+            remarkPlugins={chatRemarkPlugins}
+            rehypePlugins={chatRehypePlugins}
+            components={chatMarkdownComponents}
+            urlTransform={chatUrlTransform}
+          >
+            {markdownContent}
+          </ReactMarkdown>
+        </div>
       </div>
     );
   }
 
   return (
-    <pre className="m-0 min-h-0 border-none bg-transparent px-6 py-5 text-[13px] leading-[1.65]">
-      <code
-        className={`language-${detectLanguage(preview.path)}`}
-        dangerouslySetInnerHTML={{ __html: highlightedCode }}
-      />
-    </pre>
+    <div className="relative">
+      {selectionRange && onQuoteSnippet ? (
+        <SelectionQuotePopover
+          anchor={selectionRange.anchor}
+          onQuote={() =>
+            onQuoteSnippet({
+              kind: "text-range",
+              path: preview.path,
+              absolutePath: preview.absolutePath,
+              startLine: selectionRange.startLine,
+              endLine: selectionRange.endLine,
+              snippet: selectionRange.snippet,
+              label:
+                selectionRange.startLine && selectionRange.endLine
+                  ? `${previewBaseName(preview.path)} (${selectionRange.startLine}-${selectionRange.endLine})`
+                  : `${previewBaseName(preview.path)} (片段)`,
+            })
+          }
+        />
+      ) : null}
+      <pre ref={codeBlockRef} className="m-0 min-h-0 border-none bg-transparent px-6 py-5 text-[13px] leading-[1.65]">
+        <code
+          className={`language-${detectLanguage(preview.path)}`}
+          dangerouslySetInnerHTML={{ __html: highlightedCode }}
+        />
+      </pre>
+    </div>
   );
 }
 
@@ -289,6 +464,7 @@ export function WorkspaceFilePreview({
   copied,
   onCopy,
   onClose,
+  onQuoteSnippet,
   onRevealInFileManager,
   revealInFileManagerLabel,
 }: WorkspaceFilePreviewProps) {
@@ -389,20 +565,21 @@ export function WorkspaceFilePreview({
             />
           ) : preview.kind === "office" ? (
             <OfficePreviewBody
-              preview={preview}
+              preview={preview as OfficePreview}
               onCopy={onCopy}
+              onQuoteSnippet={onQuoteSnippet}
               onRevealInFileManager={onRevealInFileManager}
               revealInFileManagerLabel={revealInFileManagerLabel}
             />
           ) : preview.kind === "binary" ? (
             <BinaryPlaceholderBody
-              preview={preview}
+              preview={preview as BinaryLikePreview}
               onCopy={onCopy}
               onRevealInFileManager={onRevealInFileManager}
               revealInFileManagerLabel={revealInFileManagerLabel}
             />
           ) : (
-            <TextualPreviewBody preview={preview} />
+            <TextualPreviewBody preview={preview as TextualPreview} onQuoteSnippet={onQuoteSnippet} />
           )}
         </div>
         {truncated ? (

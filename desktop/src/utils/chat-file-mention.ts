@@ -1,9 +1,14 @@
 /** Build composer mention text for a file reference (matches WorkspacePanel @ injection). */
-export function buildFileMentionAppend(base: string, fileName: string): { next: string; tokenNames: string[] } {
-  const mention = `@${fileName}`;
+export function buildFileMentionAppend(
+  base: string,
+  fileName: string,
+  options?: { mentionText?: string }
+): { next: string; tokenNames: string[] } {
+  const mentionLabel = String(options?.mentionText || fileName).trim() || fileName;
+  const mention = `@${mentionLabel}`;
   const trimmed = base.trimEnd();
   const sep = !trimmed || /\s$/.test(base) ? "" : " ";
-  return { next: `${base}${sep}${mention} `, tokenNames: [fileName] };
+  return { next: `${base}${sep}${mention} `, tokenNames: [mentionLabel] };
 }
 
 export function fileNameFromPath(filePath: string): string {
