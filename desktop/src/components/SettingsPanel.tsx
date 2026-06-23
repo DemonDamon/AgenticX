@@ -4584,6 +4584,51 @@ const TRINITY_DEFAULTS: TrinityConfigForm = {
   learning_min_tool_calls: 5,
 };
 
+/** Keys mirrored into agx serve env at startup — toggling requires app restart. */
+const TRINITY_RESTART_ENV_KEYS = new Set<keyof TrinityConfigForm>([
+  "skill_protocol",
+  "session_summary",
+  "learning_enabled",
+  "skill_manage_enabled",
+  "learning_nudge_interval",
+  "learning_min_tool_calls",
+]);
+
+async function promptNearRestartAfterTrinitySave(
+  patch: Partial<TrinityConfigForm>,
+): Promise<boolean> {
+  const touched = (Object.keys(patch) as (keyof TrinityConfigForm)[]).some((key) =>
+    TRINITY_RESTART_ENV_KEYS.has(key),
+  );
+  if (!touched || typeof window === "undefined" || !window.agenticxDesktop?.confirmDialog) {
+    return false;
+  }
+
+  let message: string;
+  if ("skill_manage_enabled" in patch) {
+    message = patch.skill_manage_enabled
+      ? "「允许助手改本地技能」已开启。需完全退出 Near（⌘Q）后重新打开，模型才能调用 skill_manage 修改 ~/.agenticx/skills/ 下的技能。"
+      : "「允许助手改本地技能」已关闭。需重启 Near 后，后端才会禁止 skill_manage。";
+  } else {
+    message =
+      "智能体三件套设置已保存。需完全退出 Near（⌘Q）后重新打开，内置助手才会加载新配置。";
+  }
+
+  const restartDlg = await window.agenticxDesktop.confirmDialog({
+    title: "需要重启 Near",
+    message,
+    detail:
+      "内置 agx serve 仅在启动时注入相关环境变量；不重启则当前对话里 skill_manage 等能力仍按旧设置运行。",
+    confirmText: "立即重启",
+    cancelText: "稍后手动重启",
+  });
+  if (restartDlg.confirmed && window.agenticxDesktop.appRelaunch) {
+    await window.agenticxDesktop.appRelaunch();
+    return true;
+  }
+  return false;
+}
+
 function useTrinityConfig() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -4641,7 +4686,10 @@ function useTrinityConfig() {
         return;
       }
       setLastSaved(next);
-      setMessage("已保存。完全退出 Near 后重新打开生效。");
+      const relaunched = await promptNearRestartAfterTrinitySave(patch);
+      if (!relaunched) {
+        setMessage("已保存。完全退出 Near（⌘Q）后重新打开生效。");
+      }
     } catch (e) {
       setForm(lastSaved);
       setMessage(e instanceof Error ? e.message : "保存失败。");
@@ -5085,7 +5133,7 @@ function SkillAdvancedPanel() {
         />
         <SettingsToggleCard
           title="允许助手改本地技能"
-          description="开启后，模型可以在授权范围内新增、改写或删除 ~/.agenticx 下的技能文件（仍受后端 skill_manage 开关约束）。"
+          description="开启后，模型可在授权范围内通过 skill_manage 新增、改写或删除 ~/.agenticx/skills/ 下的技能；保存后需完全退出并重启 Near 才生效。"
           checked={form.skill_manage_enabled}
           disabled={busy}
           onChange={(next) => void update({ skill_manage_enabled: next })}
