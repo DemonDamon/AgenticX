@@ -1564,6 +1564,11 @@ class AgentRuntime:
         except Exception:
             pass
         try:
+            from agenticx.runtime.hooks.session_freeze_hook import SessionFreezeHook
+            self.hooks.register(SessionFreezeHook(), priority=-55)
+        except Exception:
+            pass
+        try:
             from agenticx.memory.turn_archive_config import load_turn_archive_config
             from agenticx.runtime.hooks.turn_archive_hook import TurnArchiveHook
 

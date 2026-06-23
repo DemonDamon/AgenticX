@@ -8,35 +8,40 @@ Author: Damon Li
 
 from __future__ import annotations
 
+import inspect
+
 import pytest
 
 
 class TestSkillsLearningGuidance:
-    """Verify the guidance block is present in the system prompt template."""
+    """Verify the guidance block is present in the shared skill authoring module."""
 
     def test_guidance_text_in_prompt_module(self) -> None:
-        from agenticx.runtime.prompts import meta_agent
-        import inspect
-        source = inspect.getsource(meta_agent)
-        assert "Skill 学习协议" in source, "SKILLS_LEARNING_GUIDANCE block not found in meta_agent.py"
+        from agenticx.runtime.prompts import skill_authoring
+
+        source = inspect.getsource(skill_authoring)
+        assert "Skill 学习协议" in source
 
     def test_guidance_mentions_skill_manage(self) -> None:
-        from agenticx.runtime.prompts import meta_agent
-        import inspect
-        source = inspect.getsource(meta_agent)
-        assert "skill_manage" in source
-        assert "action='create'" in source or "action='patch'" in source
+        block = __import__(
+            "agenticx.runtime.prompts.skill_authoring",
+            fromlist=["build_skill_authoring_prompt_block"],
+        ).build_skill_authoring_prompt_block()
+        assert "skill_manage" in block
+        assert "action='create'" in block or "action='patch'" in block
 
     def test_guidance_requires_user_confirm(self) -> None:
-        from agenticx.runtime.prompts import meta_agent
-        import inspect
-        source = inspect.getsource(meta_agent)
-        assert "用户确认" in source or "confirm" in source.lower()
+        block = __import__(
+            "agenticx.runtime.prompts.skill_authoring",
+            fromlist=["build_skill_authoring_prompt_block"],
+        ).build_skill_authoring_prompt_block()
+        assert "用户确认" in block or "confirm" in block.lower()
 
     def test_guidance_before_skill_manage_spec(self) -> None:
-        from agenticx.runtime.prompts import meta_agent
-        import inspect
-        source = inspect.getsource(meta_agent)
-        guidance_pos = source.find("Skill 学习协议")
-        spec_pos = source.find("skill_manage 使用规范")
-        assert guidance_pos < spec_pos, "Guidance should appear before skill_manage spec"
+        block = __import__(
+            "agenticx.runtime.prompts.skill_authoring",
+            fromlist=["build_skill_authoring_prompt_block"],
+        ).build_skill_authoring_prompt_block()
+        guidance_pos = block.find("Skill 学习协议")
+        spec_pos = block.find("skill_manage / skill_import_repo 使用规范")
+        assert guidance_pos < spec_pos
