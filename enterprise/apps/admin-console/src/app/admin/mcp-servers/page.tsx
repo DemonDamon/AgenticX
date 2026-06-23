@@ -1,6 +1,7 @@
 "use client";
 import { adminFetch } from "../../../lib/admin-client-auth";
 
+import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
 import {
   Badge,
@@ -43,9 +44,36 @@ type Health = {
   p50LatencyMs: number;
 };
 
+function resolveGatewayBase(): string {
+  return (
+    process.env.NEXT_PUBLIC_GATEWAY_PUBLIC_BASE_URL?.trim() || "http://127.0.0.1:8088"
+  ).replace(/\/+$/, "");
+}
+
+function proxyClientUrl(base: string, serverId: string): string {
+  return `${base}/v1/mcp/${serverId}/`;
+}
+
+function proxyMcpJsonSnippet(
+  base: string,
+  server: { id: string; name: string },
+  patPlaceholder: string
+): string {
+  const cfg = {
+    mcpServers: {
+      [server.name || server.id]: {
+        url: `${base}/v1/mcp/${server.id}/`,
+        headers: { Authorization: `Bearer ${patPlaceholder}` },
+      },
+    },
+  };
+  return JSON.stringify(cfg, null, 2);
+}
+
 export default function AdminMcpServersPage() {
   const t = useTranslations("pages.admin.mcpServers");
   const tc = useTranslations("common");
+  const gatewayBase = resolveGatewayBase();
   const [servers, setServers] = useState<McpServer[]>([]);
   const [loading, setLoading] = useState(true);
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -60,6 +88,20 @@ export default function AdminMcpServersPage() {
   const [proxyUpstream, setProxyUpstream] = useState("");
   const [proxyAuth, setProxyAuth] = useState("");
   const [proxyRpm, setProxyRpm] = useState("60");
+  /** Single expanded config panel; opening B collapses A. */
+  const [expandedConfigId, setExpandedConfigId] = useState<string | null>(null);
+
+  const copyText = useCallback(
+    async (text: string) => {
+      try {
+        await navigator.clipboard.writeText(text);
+        toast.success(t("proxyCopied"));
+      } catch {
+        toast.error(tc("states.error"));
+      }
+    },
+    [t, tc]
+  );
 
   const loadProxy = useCallback(async () => {
     try {
@@ -191,6 +233,7 @@ export default function AdminMcpServersPage() {
       const res = await adminFetch(`/api/admin/mcp-proxy-servers/${id}`, { method: "DELETE" });
       if (!res.ok) throw new Error(await res.text());
       toast.success(t("toast.deleteSuccess"));
+      if (expandedConfigId === id) setExpandedConfigId(null);
       await loadProxy();
     } catch (err) {
       toast.error(err instanceof Error ? err.message : t("toast.deleteFailed"));
@@ -211,6 +254,10 @@ export default function AdminMcpServersPage() {
     } catch (err) {
       toast.error(err instanceof Error ? err.message : t("toast.deleteFailed"));
     }
+  }
+
+  function toggleConfigPanel(serverId: string) {
+    setExpandedConfigId((cur) => (cur === serverId ? null : serverId));
   }
 
   return (
@@ -288,6 +335,13 @@ export default function AdminMcpServersPage() {
           <CardDescription>{t("proxyDescription")}</CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
+          <div className="space-y-3 rounded-md border p-3 text-xs text-muted-foreground">
+            <p>{t("proxyAuthNote", { gatewayBase })}</p>
+            <p>{t("proxyPatReusableNote")}</p>
+            <Button variant="outline" size="sm" asChild>
+              <Link href="/admin/api-tokens">{t("proxyManagePat")}</Link>
+            </Button>
+          </div>
           <div className="flex flex-wrap items-end gap-3">
             <div className="space-y-1">
               <Label htmlFor="proxy-name">Name</Label>
@@ -320,27 +374,58 @@ export default function AdminMcpServersPage() {
           {proxyServers.length === 0 && (
             <p className="text-sm text-muted-foreground">{t("proxyEmpty")}</p>
           )}
-          {proxyServers.map((s) => (
-            <div key={s.id} className="flex flex-wrap items-center justify-between gap-2 rounded-lg border p-3">
-              <div>
-                <div className="font-medium">{s.name}</div>
-                <div className="text-xs text-muted-foreground">
-                  {t("proxyGatewayPath")}: /v1/mcp/{s.id}/* · {s.upstreamUrl}
+          {proxyServers.map((s) => {
+            const clientUrl = proxyClientUrl(gatewayBase, s.id);
+            const configSnippet = proxyMcpJsonSnippet(gatewayBase, s, t("proxyPatPlaceholder"));
+            const configExpanded = expandedConfigId === s.id;
+            return (
+              <div key={s.id} className="space-y-2 rounded-lg border p-3">
+                <div className="flex flex-wrap items-start justify-between gap-2">
+                  <div className="min-w-0 flex-1 space-y-1">
+                    <div className="font-medium">{s.name}</div>
+                    <div className="text-xs text-muted-foreground">{t("proxyClientUrlLabel")}</div>
+                    <div className="flex flex-wrap items-center gap-2">
+                      <code className="break-all font-mono text-xs">{clientUrl}</code>
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        onClick={() => void copyText(clientUrl)}
+                      >
+                        {t("proxyCopyUrl")}
+                      </Button>
+                    </div>
+                    <div className="text-xs text-muted-foreground/80">
+                      {t("proxyUpstreamLabel")}: {s.upstreamUrl}
+                    </div>
+                  </div>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <Badge variant={s.enabled ? "default" : "secondary"}>
+                      {s.enabled ? "enabled" : "disabled"}
+                    </Badge>
+                    <Button size="sm" variant="outline" onClick={() => toggleConfigPanel(s.id)}>
+                      {t("proxyViewConfig")}
+                    </Button>
+                    <Button size="sm" variant="outline" onClick={() => void toggleProxyServer(s)}>
+                      {s.enabled ? "Disable" : "Enable"}
+                    </Button>
+                    <Button size="sm" variant="ghost" onClick={() => void removeProxyServer(s.id)}>
+                      <Trash2 className="size-4" />
+                    </Button>
+                  </div>
                 </div>
+                {configExpanded ? (
+                  <div className="space-y-2 border-t pt-3">
+                    <pre className="overflow-x-auto rounded-md bg-muted/50 p-3 font-mono text-xs">
+                      {configSnippet}
+                    </pre>
+                    <Button size="sm" variant="outline" onClick={() => void copyText(configSnippet)}>
+                      {t("proxyCopyConfig")}
+                    </Button>
+                  </div>
+                ) : null}
               </div>
-              <div className="flex items-center gap-2">
-                <Badge variant={s.enabled ? "default" : "secondary"}>
-                  {s.enabled ? "enabled" : "disabled"}
-                </Badge>
-                <Button size="sm" variant="outline" onClick={() => void toggleProxyServer(s)}>
-                  {s.enabled ? "Disable" : "Enable"}
-                </Button>
-                <Button size="sm" variant="ghost" onClick={() => void removeProxyServer(s.id)}>
-                  <Trash2 className="size-4" />
-                </Button>
-              </div>
-            </div>
-          ))}
+            );
+          })}
         </CardContent>
       </Card>
 
