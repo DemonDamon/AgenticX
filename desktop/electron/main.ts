@@ -1313,6 +1313,13 @@ function normalizeOllamaApiBase(baseUrl: string): string {
   return baseUrl.trim().replace(/\/+$/, "").replace(/\/v\d+$/i, "");
 }
 
+/** OpenAI-compatible API root; append /v1 when absent. Keep in sync with provider-display.ts */
+function resolveOpenAiCompatApiBase(provider: string, baseUrl?: string): string {
+  const raw = (baseUrl || KNOWN_BASE_URLS[provider] || "").trim().replace(/\/+$/, "");
+  if (!raw) return raw;
+  return /\/v\d(\/|$)/.test(raw) ? raw : `${raw}/v1`;
+}
+
 async function fetchOllamaModelNames(baseUrl: string): Promise<{
   ok: boolean;
   models?: string[];
@@ -6288,7 +6295,7 @@ function registerIpc(): void {
       return tags.ok ? { ok: true } : { ok: false, error: tags.error ?? "Ollama 连通性检测失败" };
     }
     const apiKey = normalizeProviderApiKey(payload.apiKey);
-    const base = (payload.baseUrl || KNOWN_BASE_URLS[payload.provider] || "").replace(/\/+$/, "");
+    const base = resolveOpenAiCompatApiBase(payload.provider, payload.baseUrl);
     if (!base) return { ok: false, error: "未知 provider，请填写 API 地址" };
     const isMinimax = payload.provider === "minimax";
     const customBase = usesCustomBaseUrl(payload.provider, payload.baseUrl);
@@ -6358,7 +6365,7 @@ function registerIpc(): void {
       return { ok: true, models: (tags.models ?? []).sort() };
     }
     const apiKey = normalizeProviderApiKey(payload.apiKey);
-    const base = (payload.baseUrl || KNOWN_BASE_URLS[payload.provider] || "").replace(/\/+$/, "");
+    const base = resolveOpenAiCompatApiBase(payload.provider, payload.baseUrl);
     if (!base) return { ok: false, models: [], error: "未知 API 地址" };
     const url = `${base}/models`;
     // DashScope/Bailian compatible-mode `/models` omits embedding SKUs; merge
@@ -6397,7 +6404,16 @@ function registerIpc(): void {
         }
         return { ok: false, models: [], error: `HTTP ${resp.status}` };
       }
-      const data = await resp.json() as { data?: Array<{ id?: string; model?: string; name?: string }>; has_more?: boolean; last_id?: string };
+      const bodyText = await resp.text().catch(() => "");
+      let data: { data?: Array<{ id?: string; model?: string; name?: string }>; has_more?: boolean; last_id?: string };
+      try {
+        data = JSON.parse(bodyText) as typeof data;
+      } catch {
+        const hint = bodyText.trimStart().startsWith("<")
+          ? "API 返回了 HTML 而非 JSON，请确认 API 地址（多数 OpenAI 兼容网关需以 /v1 结尾）"
+          : `响应解析失败: ${bodyText.slice(0, 120)}`;
+        return { ok: false, models: [], error: hint };
+      }
       const models = (data.data ?? [])
         .map((m) => String(m.id ?? m.model ?? m.name ?? "").trim())
         .filter(Boolean);
@@ -6414,7 +6430,7 @@ function registerIpc(): void {
     model: string;
   }) => {
     const apiKey = normalizeProviderApiKey(payload.apiKey);
-    const base = (payload.baseUrl || KNOWN_BASE_URLS[payload.provider] || "").replace(/\/+$/, "");
+    const base = resolveOpenAiCompatApiBase(payload.provider, payload.baseUrl);
     if (!base) return { ok: false, error: "未知 API 地址" };
     // Embedding models reject /chat/completions; probe them via /embeddings so
     // health check does not falsely report failure for vector models.
