@@ -5,6 +5,7 @@ import { ReasoningBlock } from "./ReasoningBlock";
 import { parseReasoningContent } from "./reasoning-parser";
 import { CitationMarkdownBody } from "./CitationMarkdownBody";
 import { renderUserMessageInlineBody } from "./user-message-inline";
+import { isWorkspaceReferenceAttachment } from "../../utils/reference-attachment";
 
 type Props = {
   message: Message;
@@ -48,7 +49,7 @@ export function CleanBlock({ message, badge, onRevealPath }: Props) {
           isUser ? (
             renderUserMessageInlineBody(
               bodyText,
-              (message.attachments ?? []).filter((a) => !!a.referenceToken)
+              (message.attachments ?? []).filter((a) => isWorkspaceReferenceAttachment(a))
             )
           ) : (
             <div className={!isUser && parsed?.reasoning ? "mt-2" : undefined}>

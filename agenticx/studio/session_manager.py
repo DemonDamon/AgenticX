@@ -1761,6 +1761,19 @@ class SessionManager:
                         }
                         if crl:
                             att_dict["composer_ref_label"] = crl
+                        line_start = a.get("line_start")
+                        line_end = a.get("line_end")
+                        if isinstance(line_start, int) and isinstance(line_end, int):
+                            att_dict["line_start"] = line_start
+                            att_dict["line_end"] = line_end
+                        snippet_ref = str(a.get("snippet_ref", "") or "").strip()
+                        if snippet_ref:
+                            att_dict["snippet_ref"] = snippet_ref
+                        sheet = str(a.get("sheet", "") or "").strip()
+                        a1 = str(a.get("a1", "") or "").strip()
+                        if sheet and a1:
+                            att_dict["sheet"] = sheet
+                            att_dict["a1"] = a1
                         clean_atts.append(att_dict)
                         file_n += 1
                 if clean_atts:

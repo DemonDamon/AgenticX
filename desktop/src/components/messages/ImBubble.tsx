@@ -4,6 +4,7 @@ import { Bookmark, Copy, Forward, LayoutList, Quote, RotateCcw, Pencil, X, Arrow
 import type { Message, MessageAttachment } from "../../store";
 import type { SearchReference } from "../../types/search-references";
 import { AttachmentCard } from "./AttachmentCard";
+import { isWorkspaceReferenceAttachment } from "../../utils/reference-attachment";
 import { ReasoningBlock } from "./ReasoningBlock";
 import { ReferencesCard } from "./ReferencesCard";
 import { parseReasoningContent } from "./reasoning-parser";
@@ -221,10 +222,10 @@ export function ImBubble({
   const citationReferences =
     (resolvedReferences?.length ?? 0) > 0 ? resolvedReferences : message.references;
   const referenceAttachments = isUser
-    ? (message.attachments ?? []).filter((attachment) => !!attachment.referenceToken)
+    ? (message.attachments ?? []).filter((attachment) => isWorkspaceReferenceAttachment(attachment))
     : [];
   const displayAttachments = isUser
-    ? (message.attachments ?? []).filter((attachment) => !attachment.referenceToken)
+    ? (message.attachments ?? []).filter((attachment) => !isWorkspaceReferenceAttachment(attachment))
     : [];
   const hasBody = !!bodyText?.trim();
   const bubbleStyle: CSSProperties = isUser

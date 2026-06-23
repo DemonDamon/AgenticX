@@ -1,4 +1,5 @@
 import type { Message, MessageAttachment, MsgRole } from "../store";
+import { normalizeReferenceAttachments } from "./reference-attachment";
 import { META_AGENT_DISPLAY_NAME } from "../constants/branding";
 import { isMetaLeaderIdentity } from "./display-name";
 import { parseSearchReferences } from "../types/search-references";
@@ -21,6 +22,12 @@ export function attachmentsFromSessionRow(raw: unknown): MessageAttachment[] | u
       source_path?: unknown;
       reference_token?: unknown;
       composer_ref_label?: unknown;
+      line_start?: unknown;
+      line_end?: unknown;
+      sheet?: unknown;
+      a1?: unknown;
+      snippet_ref?: unknown;
+      snippet_content?: unknown;
       kind?: unknown;
     };
     const dataUrl = String(o.data_url ?? "").trim();
@@ -34,8 +41,19 @@ export function attachmentsFromSessionRow(raw: unknown): MessageAttachment[] | u
     }
     const kind = String(o.kind ?? "").trim();
     const sourcePath = String(o.source_path ?? "").trim();
-    const referenceToken = Boolean(o.reference_token);
     const composerRefLabel = String(o.composer_ref_label ?? "").trim();
+    const lineStart = Number(o.line_start);
+    const lineEnd = Number(o.line_end);
+    const sheet = String(o.sheet ?? "").trim();
+    const a1 = String(o.a1 ?? "").trim();
+    const snippetRef = String(o.snippet_ref ?? "").trim();
+    const snippetContent = String(o.snippet_content ?? "").trim();
+    const referenceToken =
+      Boolean(o.reference_token) ||
+      !!composerRefLabel ||
+      (Number.isFinite(lineStart) && Number.isFinite(lineEnd)) ||
+      !!snippetRef ||
+      (!!sheet && !!a1);
     if (kind === "context_file" || (!dataUrl && name)) {
       const mimeType = String(o.mime_type ?? "").trim() || "application/octet-stream";
       out.push({
@@ -45,6 +63,12 @@ export function attachmentsFromSessionRow(raw: unknown): MessageAttachment[] | u
         ...(sourcePath ? { sourcePath } : {}),
         ...(referenceToken ? { referenceToken: true } : {}),
         ...(composerRefLabel ? { composerRefLabel } : {}),
+        ...(Number.isFinite(lineStart) && Number.isFinite(lineEnd)
+          ? { lineRange: { start: Math.max(1, Math.floor(lineStart)), end: Math.max(1, Math.floor(lineEnd)) } }
+          : {}),
+        ...(sheet && a1 ? { spreadsheetRef: { sheet, a1 } } : {}),
+        ...(snippetRef ? { snippetRef } : {}),
+        ...(snippetContent ? { snippetContent } : {}),
       });
     }
   }
@@ -171,7 +195,7 @@ export function mapLoadedSessionMessage(
             items: forwardedItems,
           }
         : undefined,
-    attachments: mergedAttachments,
+    attachments: normalizeReferenceAttachments(mergedAttachments),
     metadata:
       item.metadata && typeof item.metadata === "object"
         ? { ...(item.metadata as Record<string, unknown>) }

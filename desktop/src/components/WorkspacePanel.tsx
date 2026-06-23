@@ -24,6 +24,7 @@ import { WorkspaceFilePreview } from "./workspace/WorkspaceFilePreview";
 import {
   mapTaskspaceFileToWorkspacePreview,
   previewCopyText,
+  type WorkspacePreviewQuotePayload,
   type WorkspacePreview,
 } from "./workspace/workspace-preview-types";
 
@@ -49,6 +50,7 @@ type Props = {
   autoRefreshKey?: number;
   onClose?: () => void;
   tintColor?: string;
+  onQuotePreviewSnippet?: (payload: WorkspacePreviewQuotePayload) => void;
   /** Absolute path requested from chat (click path in assistant message). */
   previewAbsPath?: string | null;
   onPreviewAbsPathHandled?: () => void;
@@ -133,6 +135,7 @@ export function WorkspacePanel({
   autoRefreshKey,
   onClose,
   tintColor,
+  onQuotePreviewSnippet,
   previewAbsPath,
   onPreviewAbsPathHandled,
 }: Props) {
@@ -1220,6 +1223,7 @@ export function WorkspacePanel({
           copied={previewCopied}
           onCopy={handlePreviewCopy}
           onClose={() => setFilePreview(null)}
+          onQuoteSnippet={onQuotePreviewSnippet}
           onRevealInFileManager={revealInFileManager}
           revealInFileManagerLabel={revealInFileManagerLabel}
         />

@@ -50,6 +50,7 @@ import { SessionHistoryPanel } from "./SessionHistoryPanel";
 import { MemoryGraphPanel } from "./memory/MemoryGraphPanel";
 import { StickyTaskBar } from "./StickyTaskBar";
 import { WorkspacePanel } from "./WorkspacePanel";
+import type { WorkspacePreviewQuotePayload } from "./workspace/workspace-preview-types";
 import { SpawnsColumn } from "./SpawnsColumn";
 import { MessageRenderer, renderToolMessageExtras } from "./messages/MessageRenderer";
 import type { SkillPatchPreviewPayload } from "./messages/skill-manage-preview";
@@ -136,6 +137,7 @@ import {
   mapLoadedSessionMessage,
   type LoadedSessionMessage,
 } from "../utils/session-message-map";
+import { isWorkspaceReferenceAttachment } from "../utils/reference-attachment";
 import { isViewImageInjectMessage, viewImageInjectRowFromSession } from "../utils/view-image-inject";
 import { resolveSessionTailForSwitch, invalidateSessionTail } from "../utils/session-tail-cache";
 import { visibleMessagesForSession } from "../utils/message-ownership";
@@ -1484,6 +1486,10 @@ type AttachedFile = {
   referenceToken?: boolean;
   /** @工作区别名：输入框 @提及文案与 chip 用短名，附件标题仍用 `name`（如 @dir:…） */
   composerRefLabel?: string;
+  lineRange?: { start: number; end: number };
+  spreadsheetRef?: { sheet: string; a1: string };
+  snippetRef?: string;
+  snippetContent?: string;
 };
 
 function isImageFile(file: File): boolean {
@@ -1545,6 +1551,72 @@ function resolveReadyAttachment(
     if (file.name && rec.name === file.name) return rec;
   }
   return undefined;
+}
+
+function buildContextFileKeyFromAttachment(
+  file: Pick<MessageAttachment, "sourcePath" | "name" | "lineRange" | "spreadsheetRef" | "snippetRef">
+): string {
+  const base = String(file.sourcePath || file.name || "").trim();
+  if (!base) return "";
+  const line = file.lineRange;
+  if (line && Number.isFinite(line.start) && Number.isFinite(line.end)) {
+    const start = Math.max(1, Math.floor(line.start));
+    const end = Math.max(start, Math.floor(line.end));
+    return `${base}:${start}-${end}`;
+  }
+  const sheet = file.spreadsheetRef?.sheet?.trim();
+  const a1 = file.spreadsheetRef?.a1?.trim();
+  if (sheet && a1) {
+    return `${base}#${sheet}!${a1}`;
+  }
+  const snippetRef = String(file.snippetRef || "").trim();
+  if (snippetRef) {
+    return `${base}:${snippetRef}`;
+  }
+  return base;
+}
+
+function canonicalMentionFromAttachment(
+  file: Pick<MessageAttachment, "sourcePath" | "name" | "lineRange" | "spreadsheetRef" | "snippetRef">
+): string {
+  const key = buildContextFileKeyFromAttachment(file);
+  return key ? `@${key}` : "";
+}
+
+function rewriteUserReferenceMentions(text: string, attachments: MessageAttachment[]): string {
+  const records = attachments
+    .map((att) => {
+      const label = String(att.composerRefLabel || att.name || "").trim();
+      const canonical = canonicalMentionFromAttachment(att);
+      return { label, canonical };
+    })
+    .filter((row) => row.label.length > 0 && row.canonical.length > 0)
+    .sort((a, b) => b.label.length - a.label.length);
+  if (!records.length) return text;
+  let cursor = 0;
+  let out = "";
+  while (cursor < text.length) {
+    const at = text.indexOf("@", cursor);
+    if (at < 0) {
+      out += text.slice(cursor);
+      break;
+    }
+    out += text.slice(cursor, at);
+    const rest = text.slice(at + 1);
+    const matched = records.find((row) => {
+      if (!rest.startsWith(row.label)) return false;
+      const tail = rest.slice(row.label.length, row.label.length + 1);
+      return tail.length === 0 || /\s/.test(tail);
+    });
+    if (!matched) {
+      out += "@";
+      cursor = at + 1;
+      continue;
+    }
+    out += matched.canonical;
+    cursor = at + 1 + matched.label.length;
+  }
+  return out;
 }
 
 type AtCandidate =
@@ -2302,6 +2374,8 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
   const loadingOlderMessagesRef = useRef(false);
   const sessionBootstrapRef = useRef("");
   const sessionBootstrapInflightRef = useRef("");
+  const sessionBootstrapAttemptRef = useRef(0);
+  const [sessionBootstrapRetryNonce, setSessionBootstrapRetryNonce] = useState(0);
   const lastUserSendDedupeRef = useRef<SendDedupeEntry | null>(null);
   const sendChatInFlightRef = useRef<{ paneId: string; sessionId: string } | null>(null);
   const [showJumpToBottomFab, setShowJumpToBottomFab] = useState(false);
@@ -3483,6 +3557,85 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
     [addTaskspaceAliasReference, extractComposerText, focusComposerEnd, setComposerText]
   );
 
+  const insertWorkspaceSnippetReference = useCallback(
+    (payload: WorkspacePreviewQuotePayload) => {
+      const abs = String(payload.absolutePath || "").trim();
+      if (!abs) return;
+      const makeSnippetRef = (snippet: string) => {
+        let h = 2166136261;
+        for (let i = 0; i < snippet.length; i += 1) {
+          h ^= snippet.charCodeAt(i);
+          h = Math.imul(h, 16777619);
+        }
+        return `snippet-${(h >>> 0).toString(16).padStart(8, "0")}`;
+      };
+      if (payload.kind === "text-range") {
+        const content = String(payload.snippet || "").trimEnd();
+        if (!content.trim()) return;
+        const hasLineRange =
+          Number.isFinite(payload.startLine) && Number.isFinite(payload.endLine);
+        const startLine = hasLineRange ? Math.max(1, Math.floor(payload.startLine!)) : undefined;
+        const endLine =
+          hasLineRange && startLine !== undefined
+            ? Math.max(startLine, Math.floor(payload.endLine!))
+            : undefined;
+        const snippetRef = !hasLineRange ? makeSnippetRef(content) : undefined;
+        const key =
+          hasLineRange && startLine !== undefined && endLine !== undefined
+            ? `${abs}:${startLine}-${endLine}`
+            : `${abs}:${snippetRef}`;
+        setContextFiles((prev) => ({
+          ...prev,
+          [key]: {
+            name: key,
+            size: content.length,
+            mimeType: "text/plain",
+            status: "ready",
+            content,
+            sourcePath: abs,
+            referenceToken: true,
+            composerRefLabel: payload.label,
+            ...(startLine !== undefined && endLine !== undefined
+              ? { lineRange: { start: startLine, end: endLine } }
+              : {}),
+            ...(snippetRef ? { snippetRef } : {}),
+            snippetContent: content,
+          },
+        }));
+        const { next, tokenNames } = buildFileMentionAppend(extractComposerText(), payload.label, {
+          mentionText: payload.label,
+        });
+        setComposerText(next, { tokenNames });
+        focusComposerEnd();
+        return;
+      }
+      const content = String(payload.snippet || "").trimEnd();
+      if (!content.trim()) return;
+      const key = `${abs}#${payload.sheet}!${payload.a1}`;
+      setContextFiles((prev) => ({
+        ...prev,
+        [key]: {
+          name: key,
+          size: content.length,
+          mimeType: "text/plain",
+          status: "ready",
+          content,
+          sourcePath: abs,
+          referenceToken: true,
+          composerRefLabel: payload.label,
+          spreadsheetRef: { sheet: payload.sheet, a1: payload.a1 },
+          snippetContent: content,
+        },
+      }));
+      const { next, tokenNames } = buildFileMentionAppend(extractComposerText(), payload.label, {
+        mentionText: payload.label,
+      });
+      setComposerText(next, { tokenNames });
+      focusComposerEnd();
+    },
+    [extractComposerText, focusComposerEnd, setComposerText]
+  );
+
   const handleWorkspaceDragEntry = useCallback(
     async (entry: NearWorkspaceDragEntry) => {
       if (entry.type === "file") {
@@ -3511,7 +3664,11 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
   }, [openWorkspaceFilePreview]);
 
   const copyMessage = useCallback(async (message: Message) => {
-    const textToCopy = messagePlainTextForClipboard(message);
+    const raw = messagePlainTextForClipboard(message);
+    const textToCopy =
+      message.role === "user"
+        ? rewriteUserReferenceMentions(raw, (message.attachments ?? []).filter((item) => isWorkspaceReferenceAttachment(item)))
+        : raw;
     try {
       const firstImage = (message.attachments ?? []).find(
         (attachment) => !!attachment.dataUrl && attachment.mimeType.startsWith("image/")
@@ -4055,6 +4212,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
     loadingOlderMessagesRef.current = false;
     sessionBootstrapRef.current = "";
     sessionBootstrapInflightRef.current = "";
+    sessionBootstrapAttemptRef.current = 0;
   }, [pane.sessionId]);
 
   /** App restore / direct bind / switch-back: ensure the pane shows this session's
@@ -4077,8 +4235,13 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
       if ((live.messages ?? []).length > 0) sessionBootstrapRef.current = sid;
       return;
     }
-    // Already loaded this binding's persisted history from disk.
-    if (sessionBootstrapRef.current === sid) return;
+    const ownedCount = visibleMessagesForSession(live.messages ?? [], sid).length;
+    // Splash / App restore may hydrate messages before this effect runs — mark
+    // bootstrapped without a redundant disk roundtrip.
+    if (ownedCount > 0) {
+      sessionBootstrapRef.current = sid;
+      return;
+    }
     if (sessionBootstrapInflightRef.current === sid) return;
     sessionBootstrapInflightRef.current = sid;
     let cancelled = false;
@@ -4118,10 +4281,28 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
           sessionBootstrapRef.current = sid;
         }
       } catch {
-        /* retry on next effect run */
+        /* schedule retry below */
       } finally {
         if (sessionBootstrapInflightRef.current === sid) {
           sessionBootstrapInflightRef.current = "";
+        }
+        if (!cancelled && paneStillOnSid()) {
+          const hydrated =
+            visibleMessagesForSession(
+              useAppStore.getState().panes.find((p) => p.id === pane.id)?.messages ?? [],
+              sid
+            ).length > 0;
+          if (!hydrated && sessionBootstrapAttemptRef.current < 4) {
+            sessionBootstrapAttemptRef.current += 1;
+            window.setTimeout(() => {
+              const stillSid =
+                String(
+                  useAppStore.getState().panes.find((p) => p.id === pane.id)?.sessionId ?? ""
+                ).trim() === sid;
+              if (!stillSid) return;
+              setSessionBootstrapRetryNonce((n) => n + 1);
+            }, 800 * sessionBootstrapAttemptRef.current);
+          }
         }
         if (!cancelled) setPaneLoadingMessages(pane.id, false);
       }
@@ -4138,6 +4319,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
     pane.sessionId,
     pane.messages?.length,
     streamingSessionId,
+    sessionBootstrapRetryNonce,
     setPaneLoadingMessages,
     setPaneMessagePaging,
     setPaneMessages,
@@ -6031,6 +6213,10 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
       sourcePath: file.sourcePath,
       referenceToken: file.referenceToken,
       composerRefLabel: file.composerRefLabel,
+      lineRange: file.lineRange,
+      spreadsheetRef: file.spreadsheetRef,
+      snippetRef: file.snippetRef,
+      snippetContent: file.snippetContent,
     }));
     const rawUserAttachments: MessageAttachment[] =
       retryAttachments && retryAttachments.length > 0
@@ -6585,7 +6771,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
         }
         const contextFilePayload: Record<string, string> = {};
         for (const file of userAttachments) {
-          const key = String(file.sourcePath || file.name || "").trim();
+          const key = buildContextFileKeyFromAttachment(file);
           if (!key) continue;
           const ready = resolveReadyAttachment(file, readyEntries);
           const isImage = !!file.dataUrl || file.mimeType.startsWith("image/") || !!ready?.dataUrl || ready?.mimeType.startsWith("image/");
@@ -6593,7 +6779,9 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
           // Do not mirror them into context_files (bare filenames like image.png confuse
           // the model into calling view_image on non-existent workspace paths).
           if (isImage) continue;
-          if (ready?.content) {
+          if (ready?.snippetContent) {
+            contextFilePayload[key] = ready.snippetContent;
+          } else if (ready?.content) {
             contextFilePayload[key] = ready.content;
           } else {
             contextFilePayload[key] = `[附件] ${file.name}`;
@@ -9189,6 +9377,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
             onPickDirectoryForReference={({ taskspaceId, relPath, label }) => {
               void insertWorkspaceDirectoryReference(taskspaceId, relPath, label);
             }}
+            onQuotePreviewSnippet={insertWorkspaceSnippetReference}
             previewAbsPath={pendingWorkspacePreviewPath}
             onPreviewAbsPathHandled={() => setPendingWorkspacePreviewPath(null)}
           />
@@ -9305,6 +9494,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
                 onPickDirectoryForReference={({ taskspaceId, relPath, label }) => {
                   void insertWorkspaceDirectoryReference(taskspaceId, relPath, label);
                 }}
+                onQuotePreviewSnippet={insertWorkspaceSnippetReference}
                 previewAbsPath={pendingWorkspacePreviewPath}
                 onPreviewAbsPathHandled={() => setPendingWorkspacePreviewPath(null)}
               />

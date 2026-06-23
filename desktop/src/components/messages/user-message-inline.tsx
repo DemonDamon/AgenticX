@@ -8,6 +8,7 @@ import {
 } from "../icons/ComposerRefIcon";
 import type { Components } from "react-markdown";
 import type { MessageAttachment } from "../../store";
+import { normalizeReferenceAttachments } from "../../utils/reference-attachment";
 import {
   chatMarkdownComponents,
   chatRehypePlugins,
@@ -67,9 +68,10 @@ export function renderUserMessageInlineBody(
   bodyText: string,
   referenceAttachments: MessageAttachment[]
 ): ReactNode {
+  const refs = normalizeReferenceAttachments(referenceAttachments) ?? [];
   const names = Array.from(
     new Set(
-      referenceAttachments
+      refs
         .flatMap((att) => [String(att.name || "").trim(), String(att.composerRefLabel || "").trim()])
         .filter((name) => name.length > 0)
     )
@@ -124,7 +126,7 @@ export function renderUserMessageInlineBody(
         <UserFileRefChip
           key={`ref-${chipKey++}`}
           name={matched}
-          referenceAttachments={referenceAttachments}
+          referenceAttachments={refs}
         />
       );
       cursor += matched.length + 1;
