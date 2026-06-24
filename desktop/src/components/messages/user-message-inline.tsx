@@ -8,7 +8,12 @@ import {
 } from "../icons/ComposerRefIcon";
 import type { Components } from "react-markdown";
 import type { MessageAttachment } from "../../store";
-import { findReferenceAttachmentMeta, normalizeReferenceAttachments } from "../../utils/reference-attachment";
+import {
+  buildFileReferenceOpenRequest,
+  findReferenceAttachmentMeta,
+  normalizeReferenceAttachments,
+  type FileReferenceOpenRequest,
+} from "../../utils/reference-attachment";
 import { HoverTip } from "../ds/HoverTip";
 import {
   formatReferenceChipLabel,
@@ -53,21 +58,43 @@ export function UserSkillRefChip({ name }: { name: string }) {
 export function UserFileRefChip({
   name,
   referenceAttachments = [],
+  onOpenReference,
 }: {
   name: string;
   referenceAttachments?: MessageAttachment[];
+  onOpenReference?: (request: FileReferenceOpenRequest) => void;
 }) {
   const meta = findReferenceAttachmentMeta(name, referenceAttachments);
   const sourcePath = String(meta?.sourcePath || "").trim();
   const displayLabel = formatReferenceChipLabel(name, sourcePath);
   const resolvedPath = resolveReferenceSourcePath(name, sourcePath);
   const kind = resolveComposerRefIconKindFromAttachments(name, referenceAttachments);
-  const chip = (
-    <span className={COMPOSER_INLINE_CHIP_CLASS}>
+  const openRequest = buildFileReferenceOpenRequest(name, meta);
+  const clickable = !!openRequest && !!onOpenReference;
+
+  const chipInner = (
+    <>
       <ComposerRefIcon kind={kind} />
       <span className="min-w-0 truncate">{displayLabel}</span>
-    </span>
+    </>
   );
+
+  const chip = clickable ? (
+    <button
+      type="button"
+      className={`${COMPOSER_INLINE_CHIP_CLASS} cursor-pointer transition hover:brightness-110 focus:outline-none focus-visible:ring-2 focus-visible:ring-[rgba(var(--theme-color-rgb,16,185,129),0.45)]`}
+      title="点击预览文件"
+      onClick={(event) => {
+        event.stopPropagation();
+        if (openRequest) onOpenReference?.(openRequest);
+      }}
+    >
+      {chipInner}
+    </button>
+  ) : (
+    <span className={COMPOSER_INLINE_CHIP_CLASS}>{chipInner}</span>
+  );
+
   if (!resolvedPath) return chip;
   return (
     <HoverTip label={resolvedPath} inline delayMs={280}>
@@ -81,7 +108,8 @@ export function UserFileRefChip({
  */
 export function renderUserMessageInlineBody(
   bodyText: string,
-  referenceAttachments: MessageAttachment[]
+  referenceAttachments: MessageAttachment[],
+  onOpenFileReference?: (request: FileReferenceOpenRequest) => void
 ): ReactNode {
   const refs = normalizeReferenceAttachments(referenceAttachments) ?? [];
   const names = Array.from(
@@ -146,6 +174,7 @@ export function renderUserMessageInlineBody(
           key={`ref-${chipKey++}`}
           name={matched}
           referenceAttachments={refs}
+          onOpenReference={onOpenFileReference}
         />
       );
       cursor += matched.length + 1;

@@ -4,7 +4,7 @@ import { Bookmark, Copy, Forward, LayoutList, Quote, RotateCcw, Pencil, X, Arrow
 import type { Message, MessageAttachment } from "../../store";
 import type { SearchReference } from "../../types/search-references";
 import { AttachmentCard } from "./AttachmentCard";
-import { isWorkspaceReferenceAttachment } from "../../utils/reference-attachment";
+import { isWorkspaceReferenceAttachment, type FileReferenceOpenRequest } from "../../utils/reference-attachment";
 import { ReasoningBlock } from "./ReasoningBlock";
 import { ReferencesCard } from "./ReferencesCard";
 import { parseReasoningContent } from "./reasoning-parser";
@@ -52,6 +52,8 @@ type Props = {
   onFollowupClick?: (text: string, ctx?: { ownerSessionId?: string }) => void;
   /** Open absolute file path in workspace preview (assistant markdown paths). */
   onRevealPath?: (path: string) => void;
+  /** Open @file reference chip in workspace preview (optionally focused to a line range). */
+  onOpenFileReference?: (request: FileReferenceOpenRequest) => void;
   /** Suppress in-bubble chips; used when parent renders them outside a unified ReAct container. */
   omitSuggestedQuestions?: boolean;
   /** Render-only hint when this assistant reply was cut off by session token budget. */
@@ -186,6 +188,7 @@ export function ImBubble({
   noBubbleBorder = false,
   onFollowupClick,
   onRevealPath,
+  onOpenFileReference,
   omitSuggestedQuestions = false,
   budgetIncompleteHint = false,
   showSenderIdentity = false,
@@ -612,7 +615,7 @@ export function ImBubble({
                     {hasBody ? (
                       isUser ? (
                         <div className="whitespace-pre-wrap break-words">
-                          {renderUserMessageInlineBody(bodyText, referenceAttachments)}
+                          {renderUserMessageInlineBody(bodyText, referenceAttachments, onOpenFileReference)}
                         </div>
                       ) : (
                         <div className={assistantTextClassName} style={assistantTextStyle}>

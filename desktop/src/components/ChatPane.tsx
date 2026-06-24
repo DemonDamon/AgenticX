@@ -50,7 +50,7 @@ import { SessionHistoryPanel } from "./SessionHistoryPanel";
 import { MemoryGraphPanel } from "./memory/MemoryGraphPanel";
 import { StickyTaskBar } from "./StickyTaskBar";
 import { WorkspacePanel } from "./WorkspacePanel";
-import type { WorkspacePreviewQuotePayload } from "./workspace/workspace-preview-types";
+import type { WorkspacePreviewOpenRequest, WorkspacePreviewQuotePayload } from "./workspace/workspace-preview-types";
 import { SpawnsColumn } from "./SpawnsColumn";
 import { MessageRenderer, renderToolMessageExtras } from "./messages/MessageRenderer";
 import type { SkillPatchPreviewPayload } from "./messages/skill-manage-preview";
@@ -2271,7 +2271,8 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
     [groupMembers, groupChatUserLabel, metaAvatarUrl, userAvatarUrl]
   );
   const workspacePanelOpen = !!pane?.taskspacePanelOpen;
-  const [pendingWorkspacePreviewPath, setPendingWorkspacePreviewPath] = useState<string | null>(null);
+  const [pendingWorkspacePreviewRequest, setPendingWorkspacePreviewRequest] =
+    useState<WorkspacePreviewOpenRequest | null>(null);
 
   const paneAvatarMeta = useMemo(() => {
     const aid = pane?.avatarId;
@@ -3817,15 +3818,28 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
   );
 
   const openWorkspaceFilePreview = useCallback(
-    (absPath: string) => {
-      const cleanPath = String(absPath || "").trim();
-      if (!cleanPath) return;
+    (request: WorkspacePreviewOpenRequest | string) => {
+      const normalized: WorkspacePreviewOpenRequest =
+        typeof request === "string"
+          ? { absolutePath: request.trim() }
+          : {
+              absolutePath: String(request.absolutePath || "").trim(),
+              ...(request.lineRange ? { lineRange: request.lineRange } : {}),
+            };
+      if (!normalized.absolutePath) return;
       if (!pane.taskspacePanelOpen) {
         openWorkspaceSidebarForPane(pane.id, paneRef.current?.clientWidth ?? paneWidth, openSidePanel);
       }
-      setPendingWorkspacePreviewPath(cleanPath);
+      setPendingWorkspacePreviewRequest(normalized);
     },
     [pane.id, pane.taskspacePanelOpen, paneWidth, openSidePanel],
+  );
+
+  const openFileReferencePreview = useCallback(
+    (request: WorkspacePreviewOpenRequest) => {
+      openWorkspaceFilePreview(request);
+    },
+    [openWorkspaceFilePreview],
   );
 
   const revealFileInTaskspace = useCallback(async (absPath: string) => {
@@ -5787,6 +5801,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
               noBubbleBorder={reactFlat}
               toolCardOmitLeadingSpacer={message.role === "tool" && reactCol}
               onRevealPath={(path) => void revealFileInTaskspace(path)}
+              onOpenFileReference={(request) => openFileReferencePreview(request)}
               assistantName={imAssistantName}
               assistantAvatarUrl={imAssistantAvatarUrl}
               userName={imUserName}
@@ -9569,8 +9584,8 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
               void insertWorkspaceDirectoryReference(taskspaceId, relPath, label);
             }}
             onQuotePreviewSnippet={insertWorkspaceSnippetReference}
-            previewAbsPath={pendingWorkspacePreviewPath}
-            onPreviewAbsPathHandled={() => setPendingWorkspacePreviewPath(null)}
+            previewOpenRequest={pendingWorkspacePreviewRequest}
+            onPreviewOpenRequestHandled={() => setPendingWorkspacePreviewRequest(null)}
           />
         </div>
       ) : null}
@@ -9686,8 +9701,8 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
                   void insertWorkspaceDirectoryReference(taskspaceId, relPath, label);
                 }}
                 onQuotePreviewSnippet={insertWorkspaceSnippetReference}
-                previewAbsPath={pendingWorkspacePreviewPath}
-                onPreviewAbsPathHandled={() => setPendingWorkspacePreviewPath(null)}
+                previewOpenRequest={pendingWorkspacePreviewRequest}
+                onPreviewOpenRequestHandled={() => setPendingWorkspacePreviewRequest(null)}
               />
             </div>
           ) : null}

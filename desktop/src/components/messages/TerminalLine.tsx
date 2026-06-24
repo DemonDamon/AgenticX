@@ -5,15 +5,16 @@ import { ReasoningBlock } from "./ReasoningBlock";
 import { parseReasoningContent } from "./reasoning-parser";
 import { CitationMarkdownBody } from "./CitationMarkdownBody";
 import { renderUserMessageInlineBody } from "./user-message-inline";
-import { isWorkspaceReferenceAttachment } from "../../utils/reference-attachment";
+import { isWorkspaceReferenceAttachment, type FileReferenceOpenRequest } from "../../utils/reference-attachment";
 
 type Props = {
   message: Message;
   badge?: ReactNode;
   onRevealPath?: (path: string) => void;
+  onOpenFileReference?: (request: FileReferenceOpenRequest) => void;
 };
 
-export function TerminalLine({ message, badge, onRevealPath }: Props) {
+export function TerminalLine({ message, badge, onRevealPath, onOpenFileReference }: Props) {
   const isUser = message.role === "user";
   const isStreaming = message.id === "__stream__";
   const parsed = !isUser ? parseReasoningContent(message.content) : null;
@@ -46,7 +47,8 @@ export function TerminalLine({ message, badge, onRevealPath }: Props) {
             isUser ? (
               renderUserMessageInlineBody(
                 bodyText,
-                (message.attachments ?? []).filter((a) => isWorkspaceReferenceAttachment(a))
+                (message.attachments ?? []).filter((a) => isWorkspaceReferenceAttachment(a)),
+                onOpenFileReference
               )
             ) : (
               <CitationMarkdownBody content={bodyText} references={message.references} isStreaming={isStreaming} onRevealPath={onRevealPath} />
