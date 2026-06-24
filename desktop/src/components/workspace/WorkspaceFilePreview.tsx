@@ -292,13 +292,28 @@ function LineFocusedSourceView({
   const end = Math.max(start, Math.floor(lineRange.end));
 
   useEffect(() => {
-    const scrollEl = containerRef.current?.closest(".preview-scrollbar") as HTMLElement | null;
-    const lineEl = containerRef.current?.querySelector(`[data-preview-line="${start}"]`);
-    if (!scrollEl || !lineEl) return;
-    const scrollRect = scrollEl.getBoundingClientRect();
-    const lineRect = lineEl.getBoundingClientRect();
-    const delta = lineRect.top - scrollRect.top - scrollEl.clientHeight * 0.35;
-    scrollEl.scrollTop = Math.max(0, scrollEl.scrollTop + delta);
+    let cancelled = false;
+    const scrollToLine = (): boolean => {
+      const scrollEl = containerRef.current?.closest(".preview-scrollbar") as HTMLElement | null;
+      const lineEl = containerRef.current?.querySelector(`[data-preview-line="${start}"]`);
+      if (!scrollEl || !lineEl) return false;
+      const scrollRect = scrollEl.getBoundingClientRect();
+      const lineRect = lineEl.getBoundingClientRect();
+      const delta = lineRect.top - scrollRect.top - scrollEl.clientHeight * 0.35;
+      scrollEl.scrollTop = Math.max(0, scrollEl.scrollTop + delta);
+      return true;
+    };
+    let attempts = 0;
+    const tick = () => {
+      if (cancelled) return;
+      if (scrollToLine() || attempts >= 10) return;
+      attempts += 1;
+      requestAnimationFrame(tick);
+    };
+    requestAnimationFrame(tick);
+    return () => {
+      cancelled = true;
+    };
   }, [content, start]);
 
   return (
@@ -310,9 +325,15 @@ function LineFocusedSourceView({
           <div
             key={lineNo}
             data-preview-line={lineNo}
-            className={`flex min-w-0 ${highlighted ? "bg-cyan-400/12 ring-1 ring-inset ring-cyan-400/25" : ""}`}
+            className={`flex min-w-0 rounded-sm ${
+              highlighted ? "bg-yellow-400/30 ring-1 ring-inset ring-yellow-400/50" : ""
+            }`}
           >
-            <span className="w-11 shrink-0 select-none pr-3 text-right tabular-nums text-text-faint">
+            <span
+              className={`w-11 shrink-0 select-none pr-3 text-right tabular-nums ${
+                highlighted ? "font-semibold text-yellow-200" : "text-text-faint"
+              }`}
+            >
               {lineNo}
             </span>
             <span className="min-w-0 flex-1 whitespace-pre-wrap break-words">{line || " "}</span>

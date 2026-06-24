@@ -1,5 +1,9 @@
 import type { MessageAttachment } from "../store";
-import { resolveReferenceSourcePath } from "./chat-file-mention";
+import {
+  fileNameFromPath,
+  resolveReferenceSourcePath,
+  stripLineRangeFromAbsPath,
+} from "./chat-file-mention";
 
 export type FileReferenceOpenRequest = {
   absolutePath: string;
@@ -10,6 +14,110 @@ function basename(path: string): string {
   const norm = path.replace(/\\/g, "/");
   const idx = norm.lastIndexOf("/");
   return idx >= 0 ? norm.slice(idx + 1) : norm;
+}
+
+export function resolveAttachmentLineRange(att: MessageAttachment): { start: number; end: number } | undefined {
+  if (att.lineRange) return att.lineRange;
+  return (
+    parseLineRangeFromReferenceLabel(String(att.name || "")) ??
+    parseLineRangeFromReferenceLabel(String(att.composerRefLabel || ""))
+  );
+}
+
+function resolveAttachmentBasename(att: MessageAttachment): string {
+  const sourcePath = String(att.sourcePath || "")
+    .trim()
+    .replace(/\\/g, "/");
+  if (sourcePath) return fileNameFromPath(sourcePath);
+  const name = String(att.name || "")
+    .trim()
+    .replace(/:\d+-\d+$/, "")
+    .replace(/#\s*.*/, "");
+  return fileNameFromPath(name.replace(/\\/g, "/")) || name;
+}
+
+/** All @-mention spellings we should recognize in user message bodies (longest match wins). */
+export function collectReferenceMatchLabels(att: MessageAttachment): string[] {
+  const out = new Set<string>();
+  const composerRefLabel = String(att.composerRefLabel || "").trim();
+  const name = String(att.name || "").trim();
+  const sourcePath = String(att.sourcePath || "")
+    .trim()
+    .replace(/\\/g, "/");
+  for (const candidate of [composerRefLabel, name, sourcePath]) {
+    if (candidate) out.add(candidate);
+  }
+  const baseName = resolveAttachmentBasename(att);
+  if (baseName) out.add(baseName);
+  const lineRange = resolveAttachmentLineRange(att);
+  if (lineRange && baseName) {
+    out.add(`${baseName} (${lineRange.start}-${lineRange.end})`);
+    out.add(`${baseName}:${lineRange.start}-${lineRange.end}`);
+    out.add(`${baseName} :${lineRange.start}-${lineRange.end}`);
+  }
+  if (lineRange && sourcePath) {
+    out.add(`${sourcePath}:${lineRange.start}-${lineRange.end}`);
+  }
+  return Array.from(out).filter(Boolean);
+}
+
+function mentionBoundaryOk(after: string): boolean {
+  if (after.length === 0) return true;
+  if (/^:\d+-\d+/.test(after) || /^\(\d+-\d+\)/.test(after)) return false;
+  if (/^\s/.test(after)) return true;
+  return false;
+}
+
+/** Match the @file reference label after `@` in user message text. Returns the consumed label. */
+export function matchReferenceMentionLabel(
+  rest: string,
+  attachments: MessageAttachment[]
+): string | null {
+  const refs = attachments.filter(isWorkspaceReferenceAttachment);
+  if (!refs.length) return null;
+
+  const lineSuffix = rest.match(/^([^\s@]+?)\s*:(\d+)-(\d+)/);
+  if (lineSuffix) {
+    const basePart = lineSuffix[1]!.trim();
+    const start = Math.max(1, parseInt(lineSuffix[2]!, 10));
+    const end = Math.max(start, parseInt(lineSuffix[3]!, 10));
+    const canonical = `${basePart}:${start}-${end}`;
+    const after = rest.slice(lineSuffix[0].length);
+    if (!mentionBoundaryOk(after)) {
+      // continue to label loop
+    } else if (
+      findReferenceAttachmentMeta(canonical, refs) ||
+      refs.some((att) => {
+        const range = resolveAttachmentLineRange(att);
+        return (
+          !!range &&
+          range.start === start &&
+          range.end === end &&
+          (resolveAttachmentBasename(att) === basePart ||
+            resolveAttachmentBasename(att) === fileNameFromPath(basePart))
+        );
+      })
+    ) {
+      return lineSuffix[0];
+    }
+  }
+
+  const labels = Array.from(new Set(refs.flatMap(collectReferenceMatchLabels))).sort(
+    (a, b) => b.length - a.length
+  );
+  for (const name of labels) {
+    if (!rest.startsWith(name)) continue;
+    const after = rest.slice(name.length);
+    if (!mentionBoundaryOk(after)) continue;
+    if (!parseLineRangeFromReferenceLabel(name)) {
+      const trimmedAfter = after.trimStart();
+      if (/^:\d+-\d+/.test(trimmedAfter) || /^\(\d+-\d+\)/.test(trimmedAfter)) {
+        continue;
+      }
+    }
+    return name;
+  }
+  return null;
 }
 
 export function parseLineRangeFromReferenceLabel(label: string): { start: number; end: number } | undefined {
@@ -34,9 +142,15 @@ export function buildFileReferenceOpenRequest(
   name: string,
   meta?: MessageAttachment
 ): FileReferenceOpenRequest | null {
-  const absolutePath = resolveReferenceSourcePath(name, meta?.sourcePath);
+  const rawName = String(name || "")
+    .trim()
+    .replace(/\s+:(\d+)-(\d+)$/, ":$1-$2");
+  const lineRange =
+    (meta ? resolveAttachmentLineRange(meta) : undefined) ??
+    parseLineRangeFromReferenceLabel(rawName);
+  const normalizedName = stripLineRangeFromAbsPath(rawName);
+  const absolutePath = resolveReferenceSourcePath(normalizedName, meta?.sourcePath);
   if (!absolutePath) return null;
-  const lineRange = meta?.lineRange ?? parseLineRangeFromReferenceLabel(name);
   return lineRange ? { absolutePath, lineRange } : { absolutePath };
 }
 
@@ -47,10 +161,11 @@ export function findReferenceAttachmentMeta(
 ): MessageAttachment | undefined {
   const needle = String(label || "").trim();
   if (!needle) return undefined;
-  const lineFromNeedle = parseLineRangeFromReferenceLabel(needle);
+  const normalizedNeedle = needle.replace(/\s+:(\d+)-(\d+)$/, ":$1-$2");
+  const lineFromNeedle = parseLineRangeFromReferenceLabel(normalizedNeedle);
   const needleBase = lineFromNeedle
-    ? needle.replace(/:(\d+)-(\d+)$/, "").replace(/\((\d+)-(\d+)\)\s*$/, "").trim()
-    : needle;
+    ? normalizedNeedle.replace(/:(\d+)-(\d+)$/, "").replace(/\((\d+)-(\d+)\)\s*$/, "").trim()
+    : normalizedNeedle;
 
   for (const att of attachments) {
     const composerRefLabel = String(att.composerRefLabel || "").trim();
