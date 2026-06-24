@@ -97,6 +97,13 @@ class ContextCompactor:
         self.token_compact_ratio = min(0.99, max(0.5, token_compact_ratio))
         self._consecutive_failures = 0
         self._tiktoken_encoder: Any = None
+        # Rolling compaction cooldown: after a successful compaction, require a
+        # minimum growth in tail messages before compacting again, unless token
+        # usage is already critically high.
+        self.min_new_messages_after_compact = _env_int(
+            "AGX_COMPACT_MIN_NEW_MESSAGES",
+            6,
+        )
 
     def _get_tiktoken_encoder(self) -> Any:
         if self._tiktoken_encoder is not None:
@@ -184,6 +191,22 @@ class ContextCompactor:
         eval_msgs = tail if _prefix is not None else messages
         if len(eval_msgs) <= self.retain_recent_messages:
             return False
+        if _prefix is not None:
+            min_tail_before_recompact = self.retain_recent_messages + max(
+                1, self.min_new_messages_after_compact
+            )
+            if len(eval_msgs) <= min_tail_before_recompact:
+                if model and self._should_compact_by_tokens(eval_msgs, model):
+                    return True
+                total_chars = sum(
+                    len(_message_text_for_tokens(item))
+                    for item in eval_msgs
+                    if isinstance(item, dict)
+                )
+                # Keep a hard escape hatch for unusually verbose tails.
+                if total_chars > self.threshold_chars * 2:
+                    return True
+                return False
         if model and self._should_compact_by_tokens(eval_msgs, model):
             return True
         if len(eval_msgs) > self.threshold_messages:
