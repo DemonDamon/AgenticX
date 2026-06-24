@@ -29,6 +29,19 @@ export type WorkspaceSpreadsheetQuote = {
 
 export type WorkspacePreviewQuotePayload = WorkspaceTextRangeQuote | WorkspaceSpreadsheetQuote;
 
+export type WorkspacePreviewLineRange = {
+  start: number;
+  end: number;
+};
+
+/** Open workspace preview from chat (@file chip / path click). */
+export type WorkspacePreviewOpenRequest = {
+  absolutePath: string;
+  lineRange?: WorkspacePreviewLineRange;
+};
+
+export type { FileReferenceOpenRequest } from "../../utils/reference-attachment";
+
 export type WorkspacePreview =
   | {
       kind: "text" | "markdown" | "code";

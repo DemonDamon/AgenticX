@@ -18,12 +18,14 @@ import { parseTodoMessage, TodoUpdateCard } from "../TodoUpdateCard";
 import { isMetaLeaderIdentity, resolveMetaDisplayName } from "../../utils/display-name";
 import { resolveReferencesForAssistant } from "../../utils/turn-reference-context";
 import type { SkillPatchPreviewPayload } from "./skill-manage-preview";
+import type { FileReferenceOpenRequest } from "../../utils/reference-attachment";
 
 type Props = {
   message: Message;
   highlightTerms?: string[];
   assistantBadge?: ReactNode;
   onRevealPath?: (path: string) => void;
+  onOpenFileReference?: (request: FileReferenceOpenRequest) => void;
   assistantName?: string;
   assistantAvatarUrl?: string;
   /** IM assistant: align with ReAct block tool column (no duplicate avatar). */
@@ -155,6 +157,7 @@ export function MessageRenderer({
   highlightTerms,
   assistantBadge,
   onRevealPath,
+  onOpenFileReference,
   assistantName,
   assistantAvatarUrl,
   userName,
@@ -198,10 +201,10 @@ export function MessageRenderer({
   }
   if (message.role === "user" || message.role === "assistant") {
     if (chatStyle === "terminal") {
-      return <TerminalLine message={message} badge={assistantBadge} onRevealPath={onRevealPath} />;
+      return <TerminalLine message={message} badge={assistantBadge} onRevealPath={onRevealPath} onOpenFileReference={onOpenFileReference} />;
     }
     if (chatStyle === "clean") {
-      return <CleanBlock message={message} badge={assistantBadge} onRevealPath={onRevealPath} />;
+      return <CleanBlock message={message} badge={assistantBadge} onRevealPath={onRevealPath} onOpenFileReference={onOpenFileReference} />;
     }
     const rawAssist = (message.avatarName ?? "").trim();
     const metaLeaderRow = message.role === "assistant" && isMetaLeaderIdentity(message.agentId, rawAssist);
@@ -239,6 +242,7 @@ export function MessageRenderer({
         selected={selected}
         onFollowupClick={onFollowupClick}
         onRevealPath={onRevealPath}
+        onOpenFileReference={onOpenFileReference}
         omitSuggestedQuestions={omitSuggestedQuestions}
         budgetIncompleteHint={
           budgetExceededActive && allMessages.length > 0

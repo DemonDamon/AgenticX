@@ -5,15 +5,16 @@ import { ReasoningBlock } from "./ReasoningBlock";
 import { parseReasoningContent } from "./reasoning-parser";
 import { CitationMarkdownBody } from "./CitationMarkdownBody";
 import { renderUserMessageInlineBody } from "./user-message-inline";
-import { isWorkspaceReferenceAttachment } from "../../utils/reference-attachment";
+import { isWorkspaceReferenceAttachment, type FileReferenceOpenRequest } from "../../utils/reference-attachment";
 
 type Props = {
   message: Message;
   badge?: ReactNode;
   onRevealPath?: (path: string) => void;
+  onOpenFileReference?: (request: FileReferenceOpenRequest) => void;
 };
 
-export function CleanBlock({ message, badge, onRevealPath }: Props) {
+export function CleanBlock({ message, badge, onRevealPath, onOpenFileReference }: Props) {
   const isUser = message.role === "user";
   const isStreaming = message.id === "__stream__";
   const parsed = !isUser ? parseReasoningContent(message.content) : null;
@@ -49,7 +50,8 @@ export function CleanBlock({ message, badge, onRevealPath }: Props) {
           isUser ? (
             renderUserMessageInlineBody(
               bodyText,
-              (message.attachments ?? []).filter((a) => isWorkspaceReferenceAttachment(a))
+              (message.attachments ?? []).filter((a) => isWorkspaceReferenceAttachment(a)),
+              onOpenFileReference
             )
           ) : (
             <div className={!isUser && parsed?.reasoning ? "mt-2" : undefined}>

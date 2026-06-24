@@ -20,6 +20,7 @@ import {
 import {
   formatPreviewBytes,
   previewBaseName,
+  type WorkspacePreviewLineRange,
   type WorkspacePreviewQuotePayload,
   type WorkspacePreview,
 } from "./workspace-preview-types";
@@ -63,6 +64,7 @@ export type WorkspaceFilePreviewProps = {
   onQuoteSnippet?: (payload: WorkspacePreviewQuotePayload) => void;
   onRevealInFileManager?: (absolutePath: string) => void;
   revealInFileManagerLabel?: string;
+  initialLineRange?: WorkspacePreviewLineRange;
 };
 
 function detectLanguage(path: string): string {
@@ -277,13 +279,63 @@ function ImagePreviewBody({
   );
 }
 
+function LineFocusedSourceView({
+  content,
+  lineRange,
+}: {
+  content: string;
+  lineRange: WorkspacePreviewLineRange;
+}) {
+  const containerRef = useRef<HTMLDivElement | null>(null);
+  const lines = useMemo(() => content.split("\n"), [content]);
+  const start = Math.max(1, Math.floor(lineRange.start));
+  const end = Math.max(start, Math.floor(lineRange.end));
+
+  useEffect(() => {
+    const scrollEl = containerRef.current?.closest(".preview-scrollbar") as HTMLElement | null;
+    const lineEl = containerRef.current?.querySelector(`[data-preview-line="${start}"]`);
+    if (!scrollEl || !lineEl) return;
+    const scrollRect = scrollEl.getBoundingClientRect();
+    const lineRect = lineEl.getBoundingClientRect();
+    const delta = lineRect.top - scrollRect.top - scrollEl.clientHeight * 0.35;
+    scrollEl.scrollTop = Math.max(0, scrollEl.scrollTop + delta);
+  }, [content, start]);
+
+  return (
+    <div ref={containerRef} className="px-6 py-5 font-mono text-[13px] leading-[1.65] text-text-primary">
+      {lines.map((line, index) => {
+        const lineNo = index + 1;
+        const highlighted = lineNo >= start && lineNo <= end;
+        return (
+          <div
+            key={lineNo}
+            data-preview-line={lineNo}
+            className={`flex min-w-0 ${highlighted ? "bg-cyan-400/12 ring-1 ring-inset ring-cyan-400/25" : ""}`}
+          >
+            <span className="w-11 shrink-0 select-none pr-3 text-right tabular-nums text-text-faint">
+              {lineNo}
+            </span>
+            <span className="min-w-0 flex-1 whitespace-pre-wrap break-words">{line || " "}</span>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
 function TextualPreviewBody({
   preview,
   onQuoteSnippet,
+  initialLineRange,
 }: {
   preview: TextualPreview;
   onQuoteSnippet?: (payload: WorkspacePreviewQuotePayload) => void;
+  initialLineRange?: WorkspacePreviewLineRange;
 }) {
+  if (initialLineRange) {
+    return <LineFocusedSourceView content={preview.content} lineRange={initialLineRange} />;
+  }
+
   const highlightedCode = useMemo(() => {
     if (preview.kind === "markdown") return "";
     const language = detectLanguage(preview.path);
@@ -467,11 +519,18 @@ export function WorkspaceFilePreview({
   onQuoteSnippet,
   onRevealInFileManager,
   revealInFileManagerLabel,
+  initialLineRange,
 }: WorkspaceFilePreviewProps) {
   const truncated =
     preview.kind === "text" || preview.kind === "markdown" || preview.kind === "code"
       ? preview.truncated
       : false;
+  const focusLabel =
+    initialLineRange && initialLineRange.start === initialLineRange.end
+      ? `第 ${initialLineRange.start} 行`
+      : initialLineRange
+        ? `第 ${initialLineRange.start}–${initialLineRange.end} 行`
+        : null;
 
   return createPortal(
     <>
@@ -517,6 +576,12 @@ export function WorkspaceFilePreview({
               <span className="truncate">{preview.path}</span>
               <span className="h-0.5 w-0.5 shrink-0 rounded-full bg-text-faint opacity-50" />
               <span className="shrink-0">{formatPreviewBytes(preview.size)}</span>
+              {focusLabel ? (
+                <>
+                  <span className="h-0.5 w-0.5 shrink-0 rounded-full bg-text-faint opacity-50" />
+                  <span className="shrink-0 text-cyan-400/90">{focusLabel}</span>
+                </>
+              ) : null}
             </div>
           </div>
           <div className="ml-2 flex shrink-0 items-center gap-1">
@@ -579,7 +644,11 @@ export function WorkspaceFilePreview({
               revealInFileManagerLabel={revealInFileManagerLabel}
             />
           ) : (
-            <TextualPreviewBody preview={preview as TextualPreview} onQuoteSnippet={onQuoteSnippet} />
+            <TextualPreviewBody
+              preview={preview as TextualPreview}
+              onQuoteSnippet={onQuoteSnippet}
+              initialLineRange={initialLineRange}
+            />
           )}
         </div>
         {truncated ? (

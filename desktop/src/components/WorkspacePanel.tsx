@@ -24,6 +24,7 @@ import { WorkspaceFilePreview } from "./workspace/WorkspaceFilePreview";
 import {
   mapTaskspaceFileToWorkspacePreview,
   previewCopyText,
+  type WorkspacePreviewOpenRequest,
   type WorkspacePreviewQuotePayload,
   type WorkspacePreview,
 } from "./workspace/workspace-preview-types";
@@ -51,9 +52,9 @@ type Props = {
   onClose?: () => void;
   tintColor?: string;
   onQuotePreviewSnippet?: (payload: WorkspacePreviewQuotePayload) => void;
-  /** Absolute path requested from chat (click path in assistant message). */
-  previewAbsPath?: string | null;
-  onPreviewAbsPathHandled?: () => void;
+  /** Absolute path (+ optional line range) requested from chat (@file chip / path click). */
+  previewOpenRequest?: WorkspacePreviewOpenRequest | null;
+  onPreviewOpenRequestHandled?: () => void;
 };
 
 type CtxMenuState =
@@ -136,8 +137,8 @@ export function WorkspacePanel({
   onClose,
   tintColor,
   onQuotePreviewSnippet,
-  previewAbsPath,
-  onPreviewAbsPathHandled,
+  previewOpenRequest,
+  onPreviewOpenRequestHandled,
 }: Props) {
   const addPaneTerminalTab = useAppStore((s) => s.addPaneTerminalTab);
   const removePaneTerminalTab = useAppStore((s) => s.removePaneTerminalTab);
@@ -160,6 +161,7 @@ export function WorkspacePanel({
   const [selectedFilePath, setSelectedFilePath] = useState("");
   const [filePreview, setFilePreview] = useState<WorkspacePreview | null>(null);
   const [previewAnchor, setPreviewAnchor] = useState<{ top: number; bottom: number; left: number } | null>(null);
+  const [previewFocusLineRange, setPreviewFocusLineRange] = useState<{ start: number; end: number } | null>(null);
   const [previewCopied, setPreviewCopied] = useState(false);
   const [showAddForm, setShowAddForm] = useState(false);
   const [newPath, setNewPath] = useState("");
@@ -229,6 +231,7 @@ export function WorkspacePanel({
   useLayoutEffect(() => {
     if (!filePreview) {
       setPreviewAnchor(null);
+      setPreviewFocusLineRange(null);
       return;
     }
     const recompute = () => {
@@ -245,7 +248,10 @@ export function WorkspacePanel({
   useEffect(() => {
     if (!filePreview) return;
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") setFilePreview(null);
+      if (e.key === "Escape") {
+        setFilePreview(null);
+        setPreviewFocusLineRange(null);
+      }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
@@ -684,13 +690,15 @@ export function WorkspacePanel({
   };
 
   useEffect(() => {
-    const path = String(previewAbsPath ?? "").trim();
+    const request = previewOpenRequest;
+    const path = String(request?.absolutePath ?? "").trim();
     if (!path) return;
+    setPreviewFocusLineRange(request?.lineRange ?? null);
     void openFileByAbsolutePath(path).finally(() => {
-      onPreviewAbsPathHandled?.();
+      onPreviewOpenRequestHandled?.();
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [previewAbsPath]);
+  }, [previewOpenRequest]);
 
   const toggleDir = async (taskspaceId: string, relPath: string) => {
     if (activeTaskspaceId !== taskspaceId) {
@@ -1222,7 +1230,11 @@ export function WorkspacePanel({
           anchor={previewAnchor}
           copied={previewCopied}
           onCopy={handlePreviewCopy}
-          onClose={() => setFilePreview(null)}
+          onClose={() => {
+            setFilePreview(null);
+            setPreviewFocusLineRange(null);
+          }}
+          initialLineRange={previewFocusLineRange ?? undefined}
           onQuoteSnippet={onQuotePreviewSnippet}
           onRevealInFileManager={revealInFileManager}
           revealInFileManagerLabel={revealInFileManagerLabel}
