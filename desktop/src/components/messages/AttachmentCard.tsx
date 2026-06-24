@@ -1,7 +1,7 @@
 import { useMemo, useState } from "react";
 import type { MessageAttachment } from "../../store";
 import { Modal } from "../ds/Modal";
-import { formatReferencePathHint, referenceChipTitle } from "../../utils/chat-file-mention";
+import { formatReferencePathHint, resolveReferenceSourcePath } from "../../utils/chat-file-mention";
 import { isWorkspaceReferenceAttachment } from "../../utils/reference-attachment";
 
 function formatFileSize(size: number): string {
@@ -42,7 +42,7 @@ export function AttachmentCard({ attachment }: { attachment: MessageAttachment }
   const pathHint =
     isReference && attachment.sourcePath ? formatReferencePathHint(attachment.sourcePath) : "";
   const cardTitle = attachment.sourcePath
-    ? referenceChipTitle(attachment.name, attachment.sourcePath)
+    ? resolveReferenceSourcePath(attachment.name, attachment.sourcePath)
     : attachment.name;
   const ext = useMemo(() => {
     const idx = attachment.name.lastIndexOf(".");
