@@ -83,3 +83,24 @@ def test_rolling_compact_only_counts_tail_messages() -> None:
     assert count == 13  # 21 tail - 8 retained
     assert len(compacted) == 9
     assert "[compacted]" in compacted[0]["content"]
+
+
+def test_rolling_compact_has_growth_cooldown_by_default() -> None:
+    """After prior compaction, small tail growth should not immediately re-compact."""
+    compactor = ContextCompactor(_LLM(), threshold_messages=12, retain_recent_messages=8)
+    # Tail growth is only +3 over retain window; default cooldown is +6.
+    tail = [{"role": "user", "content": f"msg-{i}"} for i in range(11)]
+    messages: List[Dict[str, Any]] = [
+        {
+            "role": "system",
+            "content": "[compacted] 已压缩 20 条历史消息，以下为摘要：\nold summary",
+        },
+        *tail,
+    ]
+
+    compacted, did_compact, _summary, count, _pending = asyncio.run(
+        compactor.maybe_compact(messages, model="gpt-4o")
+    )
+    assert did_compact is False
+    assert count == 0
+    assert compacted == messages
