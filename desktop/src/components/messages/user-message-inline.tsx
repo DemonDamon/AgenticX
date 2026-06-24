@@ -8,10 +8,11 @@ import {
 } from "../icons/ComposerRefIcon";
 import type { Components } from "react-markdown";
 import type { MessageAttachment } from "../../store";
-import { normalizeReferenceAttachments } from "../../utils/reference-attachment";
+import { findReferenceAttachmentMeta, normalizeReferenceAttachments } from "../../utils/reference-attachment";
+import { HoverTip } from "../ds/HoverTip";
 import {
   formatReferenceChipLabel,
-  referenceChipTitle,
+  resolveReferenceSourcePath,
 } from "../../utils/chat-file-mention";
 import {
   chatMarkdownComponents,
@@ -56,23 +57,22 @@ export function UserFileRefChip({
   name: string;
   referenceAttachments?: MessageAttachment[];
 }) {
-  const meta = referenceAttachments.find(
-    (att) =>
-      att.composerRefLabel === name ||
-      att.name === name ||
-      att.sourcePath === name ||
-      String(att.name || "")
-        .split(/[\\/]/)
-        .pop() === name
-  );
+  const meta = findReferenceAttachmentMeta(name, referenceAttachments);
   const sourcePath = String(meta?.sourcePath || "").trim();
   const displayLabel = formatReferenceChipLabel(name, sourcePath);
+  const resolvedPath = resolveReferenceSourcePath(name, sourcePath);
   const kind = resolveComposerRefIconKindFromAttachments(name, referenceAttachments);
-  return (
-    <span className={COMPOSER_INLINE_CHIP_CLASS} title={referenceChipTitle(name, sourcePath)}>
+  const chip = (
+    <span className={COMPOSER_INLINE_CHIP_CLASS}>
       <ComposerRefIcon kind={kind} />
       <span className="min-w-0 truncate">{displayLabel}</span>
     </span>
+  );
+  if (!resolvedPath) return chip;
+  return (
+    <HoverTip label={resolvedPath} inline delayMs={280}>
+      {chip}
+    </HoverTip>
   );
 }
 

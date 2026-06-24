@@ -4,10 +4,12 @@ type Props = {
   label: string;
   /** Show delay; native `title` is often ~500–1000ms and cannot be tuned. */
   delayMs?: number;
+  /** Keep wrapper inline for @file chips inside message text. */
+  inline?: boolean;
   children: ReactNode;
 };
 
-export function HoverTip({ label, delayMs = 280, children }: Props) {
+export function HoverTip({ label, delayMs = 280, inline = false, children }: Props) {
   const [open, setOpen] = useState(false);
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -22,7 +24,7 @@ export function HoverTip({ label, delayMs = 280, children }: Props) {
 
   return (
     <div
-      className="relative flex shrink-0"
+      className={inline ? "relative inline align-baseline" : "relative flex shrink-0"}
       onPointerEnter={() => {
         clearTimer();
         timerRef.current = setTimeout(() => setOpen(true), delayMs);
@@ -36,7 +38,7 @@ export function HoverTip({ label, delayMs = 280, children }: Props) {
       {open ? (
         <div
           role="tooltip"
-          className="pointer-events-none absolute bottom-full left-1/2 z-[60] mb-1.5 w-max max-w-[min(288px,calc(100vw-24px))] -translate-x-1/2 rounded-md border border-border bg-surface-panel px-2.5 py-1.5 text-left text-[11px] leading-snug text-text-primary shadow-lg backdrop-blur-xl"
+          className="pointer-events-none absolute bottom-full left-1/2 z-[60] mb-1.5 w-max max-w-[min(360px,calc(100vw-24px))] -translate-x-1/2 break-all rounded-md border border-border bg-surface-panel px-2.5 py-1.5 text-left text-[11px] leading-snug text-text-primary shadow-lg backdrop-blur-xl"
         >
           {label}
         </div>

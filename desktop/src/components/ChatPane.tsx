@@ -189,7 +189,8 @@ import {
   GLOBAL_SEARCH_WORKSPACE_ADDED,
   type GlobalSearchReferenceFileDetail,
 } from "./global-search/global-search-events";
-import { buildFileMentionAppend, fileNameFromPath, formatReferenceChipLabel, formatReferencePathHint, referenceChipTitle } from "../utils/chat-file-mention";
+import { buildFileMentionAppend, buildComposerRefPathLookup, fileNameFromPath, formatReferenceChipLabel, formatReferencePathHint, lookupComposerRefPath, resolveReferenceSourcePath } from "../utils/chat-file-mention";
+import { findReferenceAttachmentMeta } from "../utils/reference-attachment";
 import { absoluteTaskspacePath } from "../utils/workspace-file-path";
 import {
   composerAcceptsDragTypes,
@@ -1148,7 +1149,7 @@ function AttachmentChip({ file, onRemove }: { file: AttachedFile; onRemove: () =
           : "border-border bg-surface-card hover:bg-surface-hover"
       }`}
       style={{ maxWidth: "320px" }}
-      title={file.sourcePath ? referenceChipTitle(file.name, file.sourcePath) : undefined}
+      title={file.sourcePath ? resolveReferenceSourcePath(file.name, file.sourcePath) : undefined}
     >
       {isImage && file.dataUrl ? (
         <img src={file.dataUrl} alt={file.name} className="h-10 w-10 shrink-0 rounded-lg object-cover" />
@@ -2409,6 +2410,10 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
   const [wechatDesktopBound, setWechatDesktopBound] = useState(false);
   const [automationTaskErrorHint, setAutomationTaskErrorHint] = useState<string | null>(null);
   const composerRef = useRef<HTMLDivElement | null>(null);
+  const composerRefPathsRef = useRef<Record<string, string>>({});
+  const composerRefTipTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const composerRefTipTargetRef = useRef<HTMLElement | null>(null);
+  const [composerRefTip, setComposerRefTip] = useState<{ path: string; x: number; y: number } | null>(null);
   const [composerExpanded, setComposerExpanded] = useState(false);
   useEffect(() => {
     if (!favoriteToastOpen) return;
@@ -3326,36 +3331,146 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
     selection.addRange(range);
   }, []);
 
+  useEffect(() => {
+    const root = composerRef.current;
+    if (!root) return;
+
+    const clearComposerRefTipTimer = () => {
+      if (composerRefTipTimerRef.current != null) {
+        clearTimeout(composerRefTipTimerRef.current);
+        composerRefTipTimerRef.current = null;
+      }
+    };
+
+    const resolveComposerRefTipPath = (target: HTMLElement): string => {
+      const fromAttr = target.getAttribute("data-source-path")?.trim();
+      if (fromAttr) return fromAttr;
+      const refName = target.getAttribute("data-ref-name")?.trim() || "";
+      if (!refName) return "";
+      const fromLookup = lookupComposerRefPath(composerRefPathsRef.current, refName);
+      if (fromLookup) return fromLookup;
+      const meta = findReferenceAttachmentMeta(
+        refName,
+        Object.entries(contextFiles).map(([key, file]) => ({
+          ...file,
+          sourcePath: file.sourcePath || key,
+        }))
+      );
+      return resolveReferenceSourcePath(refName, meta?.sourcePath);
+    };
+
+    const showComposerRefTip = (target: HTMLElement) => {
+      const path = resolveComposerRefTipPath(target);
+      if (!path) return;
+      target.setAttribute("data-source-path", path);
+      target.title = path;
+      composerRefTipTargetRef.current = target;
+      const rect = target.getBoundingClientRect();
+      setComposerRefTip({ path, x: rect.left + rect.width / 2, y: rect.top });
+    };
+
+    const onMouseOver = (event: MouseEvent) => {
+      const target = (event.target as HTMLElement | null)?.closest?.(
+        '[data-ref-token="1"]'
+      ) as HTMLElement | null;
+      if (!target || !root.contains(target)) return;
+      if (composerRefTipTargetRef.current === target && composerRefTipTimerRef.current != null) {
+        return;
+      }
+      clearComposerRefTipTimer();
+      composerRefTipTargetRef.current = target;
+      composerRefTipTimerRef.current = setTimeout(() => showComposerRefTip(target), 280);
+    };
+
+    const onMouseOut = (event: MouseEvent) => {
+      const from = (event.target as HTMLElement | null)?.closest?.(
+        '[data-ref-token="1"]'
+      ) as HTMLElement | null;
+      if (!from) return;
+      const to = (event.relatedTarget as HTMLElement | null)?.closest?.(
+        '[data-ref-token="1"]'
+      ) as HTMLElement | null;
+      if (to && from === to) return;
+      clearComposerRefTipTimer();
+      composerRefTipTargetRef.current = null;
+      setComposerRefTip(null);
+    };
+
+    root.addEventListener("mouseover", onMouseOver);
+    root.addEventListener("mouseout", onMouseOut);
+    return () => {
+      root.removeEventListener("mouseover", onMouseOver);
+      root.removeEventListener("mouseout", onMouseOut);
+      clearComposerRefTipTimer();
+      composerRefTipTargetRef.current = null;
+      setComposerRefTip(null);
+    };
+  }, [composerExpanded, contextFiles, input, pane.id]);
+
+  const patchComposerRefTokenPaths = useCallback(() => {
+    const root = composerRef.current;
+    if (!root) return;
+    const lookup = buildComposerRefPathLookup(
+      Object.entries(contextFiles).map(([key, file]) => ({
+        key,
+        name: file.name,
+        sourcePath: file.sourcePath,
+        composerRefLabel: file.composerRefLabel,
+      })),
+      composerRefPathsRef.current
+    );
+    composerRefPathsRef.current = lookup;
+    root.querySelectorAll<HTMLElement>('[data-ref-token="1"]').forEach((node) => {
+      const refName = String(node.getAttribute("data-ref-name") || "").trim();
+      if (!refName) return;
+      const sp = lookupComposerRefPath(lookup, refName);
+      if (!sp) return;
+      node.setAttribute("data-source-path", sp);
+      node.title = sp;
+    });
+  }, [contextFiles]);
+
+  useEffect(() => {
+    patchComposerRefTokenPaths();
+  }, [patchComposerRefTokenPaths, input, contextFiles]);
+
   const resolveRefMetaForLabel = useCallback(
     (label: string) => {
-      return Object.values(contextFiles).find((file) => {
-        if (file.composerRefLabel === label) return true;
-        if (file.name === label) return true;
-        if (file.sourcePath === label) return true;
-        const base = String(file.name || "").split(/[\\/]/).pop();
-        return base === label;
-      });
+      const rows = Object.entries(contextFiles).map(([key, file]) => ({
+        ...file,
+        sourcePath: file.sourcePath || key,
+      }));
+      return findReferenceAttachmentMeta(label, rows);
     },
     [contextFiles]
   );
 
   const createFileRefToken = useCallback(
-    (name: string) => {
+    (name: string, explicitSourcePath?: string) => {
       const meta = resolveRefMetaForLabel(name);
-      const sourcePath = String(meta?.sourcePath || "").trim();
+      const resolvedPath = resolveReferenceSourcePath(
+        name,
+        explicitSourcePath ||
+          lookupComposerRefPath(composerRefPathsRef.current, name) ||
+          meta?.sourcePath
+      );
       const kind = resolveComposerRefIconKind(name, meta);
       const token = document.createElement("span");
       token.setAttribute("contenteditable", "false");
       token.setAttribute("data-ref-token", "1");
       token.setAttribute("data-ref-name", name);
       token.className = COMPOSER_INLINE_CHIP_CLASS;
-      if (sourcePath) token.title = referenceChipTitle(name, sourcePath);
+      if (resolvedPath) {
+        token.setAttribute("data-source-path", resolvedPath);
+        token.title = resolvedPath;
+        composerRefPathsRef.current[name] = resolvedPath;
+      }
       const icon = document.createElement("span");
       icon.innerHTML = composerRefIconInnerHtml(kind, 13);
       token.appendChild(icon);
       const label = document.createElement("span");
       label.className = "min-w-0 truncate";
-      label.textContent = formatReferenceChipLabel(name, sourcePath);
+      label.textContent = formatReferenceChipLabel(name, resolvedPath);
       token.appendChild(label);
       return token;
     },
@@ -3379,13 +3494,22 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
   }, []);
 
   const setComposerText = useCallback(
-    (value: string, options?: { tokenNames?: string[] }) => {
+    (value: string, options?: { tokenNames?: string[]; refSourcePaths?: Record<string, string> }) => {
       const el = composerRef.current;
       if (!el) {
         setInput(value);
         updateAtStateFromText(value);
         return;
       }
+      composerRefPathsRef.current = buildComposerRefPathLookup(
+        Object.entries(contextFiles).map(([key, file]) => ({
+          key,
+          name: file.name,
+          sourcePath: file.sourcePath,
+          composerRefLabel: file.composerRefLabel,
+        })),
+        { ...composerRefPathsRef.current, ...(options?.refSourcePaths ?? {}) }
+      );
       const tokenNames = new Set<string>();
       for (const [, file] of Object.entries(contextFiles)) {
         if (file.referenceToken && file.name) tokenNames.add(file.name);
@@ -3435,7 +3559,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
           el.appendChild(document.createTextNode(textBuffer));
           textBuffer = "";
         }
-        el.appendChild(createFileRefToken(matched));
+        el.appendChild(createFileRefToken(matched, lookupComposerRefPath(composerRefPathsRef.current, matched)));
         cursor += matched.length + 1;
       }
       if (textBuffer) {
@@ -3451,7 +3575,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
   const addContextFile = async (
     taskspaceId: string,
     relPath: string,
-    options?: { referenceToken?: boolean }
+    options?: { referenceToken?: boolean; composerRefLabel?: string }
   ): Promise<string | null> => {
     const apiSessionId = resolveTaskspaceApiSessionId();
     if (!apiSessionId || !relPath) return null;
@@ -3463,6 +3587,10 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
     if (!fileResp.ok || typeof fileResp.content !== "string") return null;
     const key = String(fileResp.absolute_path || relPath);
     const content = (fileResp.content ?? "").slice(0, TEXT_ATTACHMENT_LIMIT);
+    const composerRefLabel =
+      String(options?.composerRefLabel || "").trim() ||
+      key.split(/[\\/]/).pop() ||
+      key;
     setContextFiles((prev) => ({
       ...prev,
       [key]: {
@@ -3472,6 +3600,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
         status: "ready",
         content,
         sourcePath: key,
+        composerRefLabel: options?.referenceToken ? composerRefLabel : undefined,
         referenceToken: !!options?.referenceToken,
       },
     }));
@@ -3537,13 +3666,38 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
     }));
   };
 
+  const insertAtAutocompleteFileReference = useCallback(
+    async (taskspaceId: string, relPath: string, label: string) => {
+      const cleanLabel = String(label || relPath.split(/[\\/]/).pop() || "").trim();
+      if (!taskspaceId || !relPath || !cleanLabel) return;
+      const absKey = await addContextFile(taskspaceId, relPath, {
+        referenceToken: true,
+        composerRefLabel: cleanLabel,
+      });
+      const mention = `@${cleanLabel} `;
+      const base = extractComposerText();
+      const next = base.replace(/(?:^|\s)@[^\s@]*$/, (text) =>
+        `${text.startsWith(" ") ? " " : ""}${mention}`
+      );
+      setComposerText(next, {
+        tokenNames: [cleanLabel],
+        ...(absKey ? { refSourcePaths: { [cleanLabel]: absKey } } : {}),
+      });
+      focusComposerEnd();
+    },
+    [addContextFile, extractComposerText, focusComposerEnd, setComposerText]
+  );
+
   const insertWorkspaceFileReference = useCallback(
     async (taskspaceId: string, relPath: string) => {
       if (!taskspaceId || !relPath) return;
-      await addContextFile(taskspaceId, relPath, { referenceToken: true });
+      const absKey = await addContextFile(taskspaceId, relPath, { referenceToken: true });
       const fileName = relPath.split(/[\\/]/).pop() || relPath;
       const { next, tokenNames } = buildFileMentionAppend(extractComposerText(), fileName);
-      setComposerText(next, { tokenNames });
+      setComposerText(next, {
+        tokenNames,
+        ...(absKey ? { refSourcePaths: { [fileName]: absKey } } : {}),
+      });
       focusComposerEnd();
     },
     [addContextFile, extractComposerText, focusComposerEnd, setComposerText]
@@ -3614,7 +3768,10 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
         const { next, tokenNames } = buildFileMentionAppend(extractComposerText(), payload.label, {
           mentionText: payload.label,
         });
-        setComposerText(next, { tokenNames });
+        setComposerText(next, {
+          tokenNames,
+          refSourcePaths: { [payload.label]: abs },
+        });
         focusComposerEnd();
         return;
       }
@@ -3639,7 +3796,10 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
       const { next, tokenNames } = buildFileMentionAppend(extractComposerText(), payload.label, {
         mentionText: payload.label,
       });
-      setComposerText(next, { tokenNames });
+      setComposerText(next, {
+        tokenNames,
+        refSourcePaths: { [payload.label]: abs },
+      });
       focusComposerEnd();
     },
     [extractComposerText, focusComposerEnd, setComposerText]
@@ -7969,7 +8129,10 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
 
       const base = mode === "new" ? "" : extractComposerText();
       const { next, tokenNames } = buildFileMentionAppend(base, fileName);
-      setComposerText(next, { tokenNames });
+      setComposerText(next, {
+        tokenNames,
+        refSourcePaths: { [fileName]: trimmed },
+      });
       focusComposerEnd();
     },
     [
@@ -9085,11 +9248,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
                       setComposerText(next, { tokenNames: [first.alias || first.label] });
                       void addTaskspaceAliasReference(first.taskspaceId, first.alias, first.path);
                     } else {
-                      const mention = `@${first.label} `;
-                      const base = extractComposerText();
-                      const next = base.replace(/(?:^|\s)@[^\s@]*$/, (text) => `${text.startsWith(" ") ? " " : ""}${mention}`);
-                      setComposerText(next, { tokenNames: [first.alias || first.label] });
-                      void addContextFile(first.taskspaceId, first.path, { referenceToken: true });
+                      void insertAtAutocompleteFileReference(first.taskspaceId, first.path, first.label);
                     }
                     return;
                   }
@@ -9303,6 +9462,22 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
               </div>
             </div>
           </div>
+          {composerRefTip
+            ? createPortal(
+                <div
+                  role="tooltip"
+                  className="pointer-events-none fixed z-[100] w-max max-w-[min(360px,calc(100vw-24px))] break-all rounded-md border border-border bg-surface-panel px-2.5 py-1.5 text-left text-[11px] leading-snug text-text-primary shadow-lg backdrop-blur-xl"
+                  style={{
+                    left: composerRefTip.x,
+                    top: composerRefTip.y,
+                    transform: "translate(-50%, calc(-100% - 6px))",
+                  }}
+                >
+                  {composerRefTip.path}
+                </div>,
+                document.body
+              )
+            : null}
           {atOpen ? (
             <div className="mt-1 max-h-28 overflow-y-auto rounded border border-border bg-surface-panel p-1 backdrop-blur-xl">
               {atCandidates.length === 0 ? (
@@ -9335,11 +9510,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
                         setComposerText(next, { tokenNames: [item.alias || item.label] });
                         void addTaskspaceAliasReference(item.taskspaceId, item.alias, item.path);
                       } else {
-                        const mention = `@${item.label} `;
-                        const base = extractComposerText();
-                        const next = base.replace(/(?:^|\s)@[^\s@]*$/, (text) => `${text.startsWith(" ") ? " " : ""}${mention}`);
-                        setComposerText(next, { tokenNames: [item.label] });
-                        void addContextFile(item.taskspaceId, item.path, { referenceToken: true });
+                        void insertAtAutocompleteFileReference(item.taskspaceId, item.path, item.label);
                       }
                     }}
                   >

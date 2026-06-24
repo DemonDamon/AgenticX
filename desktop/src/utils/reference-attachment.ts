@@ -6,6 +6,26 @@ function basename(path: string): string {
   return idx >= 0 ? norm.slice(idx + 1) : norm;
 }
 
+/** Match @ chip label to attachment metadata (filename, alias, or absolute path). */
+export function findReferenceAttachmentMeta(
+  label: string,
+  attachments: MessageAttachment[]
+): MessageAttachment | undefined {
+  const needle = String(label || "").trim();
+  if (!needle) return undefined;
+  for (const att of attachments) {
+    const composerRefLabel = String(att.composerRefLabel || "").trim();
+    const name = String(att.name || "").trim();
+    const sourcePath = String(att.sourcePath || "")
+      .trim()
+      .replace(/\\/g, "/");
+    if (composerRefLabel === needle || name === needle || sourcePath === needle) return att;
+    if (sourcePath && basename(sourcePath) === needle) return att;
+    if (name && basename(name) === needle) return att;
+  }
+  return undefined;
+}
+
 /** Workspace @file / snippet rows — not chat-upload AttachmentCards. */
 export function isWorkspaceReferenceAttachment(att: MessageAttachment): boolean {
   if (att.referenceToken) return true;
