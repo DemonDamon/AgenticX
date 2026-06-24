@@ -6617,7 +6617,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
         addPaneMessage(
           pane.id,
           "user",
-          outboundMessageText,
+          messageText,
           "meta",
           undefined,
           undefined,
@@ -6634,8 +6634,8 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
         );
       }
     } else {
-      addSubAgentEvent(targetAgentId, { type: "user", content: outboundMessageText });
-      addPaneMessage(pane.id, "tool", `🗣 发送给 ${targetAgentId}: ${outboundMessageText}`, "meta");
+      addSubAgentEvent(targetAgentId, { type: "user", content: messageText });
+      addPaneMessage(pane.id, "tool", `🗣 发送给 ${targetAgentId}: ${messageText}`, "meta");
     }
     setComposerText("");
     setQuoteTarget(null);

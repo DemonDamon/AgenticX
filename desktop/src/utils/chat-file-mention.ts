@@ -37,13 +37,16 @@ export function referenceChipTitle(name: string, sourcePath?: string): string {
   return sp || `@${name}`;
 }
 
-/** Chip label: keep short filename, append directory hint when path is outside workspace-relative name. */
+/** Chip label: always show basename; full path stays in sourcePath / API payload only. */
 export function formatReferenceChipLabel(name: string, sourcePath?: string): string {
   const label = String(name || "").trim();
+  if (!label) return label;
+  if (label.includes("/") || label.includes("\\")) {
+    return fileNameFromPath(label);
+  }
   const sp = String(sourcePath || "").trim();
-  if (!label || !sp || label.includes("/") || label.includes("\\")) return label;
-  const hint = formatReferencePathHint(sp);
-  return hint ? `${label} · ${hint}` : label;
+  if (sp) return fileNameFromPath(sp) || label;
+  return label;
 }
 
 export function parentFolderPath(filePath: string): string {
