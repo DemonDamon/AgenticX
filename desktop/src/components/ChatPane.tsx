@@ -189,7 +189,7 @@ import {
   GLOBAL_SEARCH_WORKSPACE_ADDED,
   type GlobalSearchReferenceFileDetail,
 } from "./global-search/global-search-events";
-import { buildFileMentionAppend, fileNameFromPath } from "../utils/chat-file-mention";
+import { buildFileMentionAppend, fileNameFromPath, formatReferenceChipLabel, formatReferencePathHint, referenceChipTitle } from "../utils/chat-file-mention";
 import { absoluteTaskspacePath } from "../utils/workspace-file-path";
 import {
   composerAcceptsDragTypes,
@@ -1138,6 +1138,8 @@ function ActionCircleButton({
 function AttachmentChip({ file, onRemove }: { file: AttachedFile; onRemove: () => void }) {
   const isImage = !!file.dataUrl || file.mimeType.startsWith("image/");
   const isReferenceToken = !!file.referenceToken;
+  const pathHint =
+    isReferenceToken && file.sourcePath ? formatReferencePathHint(file.sourcePath) : "";
   return (
     <div
       className={`group relative inline-flex items-center gap-3 rounded-xl border px-3 py-2 text-sm transition-colors ${
@@ -1145,7 +1147,8 @@ function AttachmentChip({ file, onRemove }: { file: AttachedFile; onRemove: () =
           ? "border-sky-500/40 bg-sky-500/10 text-sky-100"
           : "border-border bg-surface-card hover:bg-surface-hover"
       }`}
-      style={{ maxWidth: "240px" }}
+      style={{ maxWidth: "320px" }}
+      title={file.sourcePath ? referenceChipTitle(file.name, file.sourcePath) : undefined}
     >
       {isImage && file.dataUrl ? (
         <img src={file.dataUrl} alt={file.name} className="h-10 w-10 shrink-0 rounded-lg object-cover" />
@@ -1165,7 +1168,9 @@ function AttachmentChip({ file, onRemove }: { file: AttachedFile; onRemove: () =
           {file.name}
         </div>
         {isReferenceToken ? (
-          <div className="text-xs text-sky-200/80 mt-0.5">@ 文件引用</div>
+          <div className="truncate text-xs text-sky-200/80 mt-0.5">
+            {pathHint ? `@ ${pathHint}` : "@ 文件引用"}
+          </div>
         ) : file.status === "parsing" ? (
           <div className="text-xs text-text-faint animate-pulse mt-0.5">解析中...</div>
         ) : file.status === "error" ? (
@@ -3321,37 +3326,40 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
     selection.addRange(range);
   }, []);
 
-  const resolveRefIconKindForLabel = useCallback(
+  const resolveRefMetaForLabel = useCallback(
     (label: string) => {
-      const meta = Object.values(contextFiles).find((file) => {
+      return Object.values(contextFiles).find((file) => {
         if (file.composerRefLabel === label) return true;
         if (file.name === label) return true;
+        if (file.sourcePath === label) return true;
         const base = String(file.name || "").split(/[\\/]/).pop();
         return base === label;
       });
-      return resolveComposerRefIconKind(label, meta);
     },
     [contextFiles]
   );
 
   const createFileRefToken = useCallback(
     (name: string) => {
-      const kind = resolveRefIconKindForLabel(name);
+      const meta = resolveRefMetaForLabel(name);
+      const sourcePath = String(meta?.sourcePath || "").trim();
+      const kind = resolveComposerRefIconKind(name, meta);
       const token = document.createElement("span");
       token.setAttribute("contenteditable", "false");
       token.setAttribute("data-ref-token", "1");
       token.setAttribute("data-ref-name", name);
       token.className = COMPOSER_INLINE_CHIP_CLASS;
+      if (sourcePath) token.title = referenceChipTitle(name, sourcePath);
       const icon = document.createElement("span");
       icon.innerHTML = composerRefIconInnerHtml(kind, 13);
       token.appendChild(icon);
       const label = document.createElement("span");
       label.className = "min-w-0 truncate";
-      label.textContent = name;
+      label.textContent = formatReferenceChipLabel(name, sourcePath);
       token.appendChild(label);
       return token;
     },
-    [resolveRefIconKindForLabel]
+    [resolveRefMetaForLabel]
   );
 
   const createSkillRefToken = useCallback((name: string) => {
@@ -3382,6 +3390,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
       for (const [, file] of Object.entries(contextFiles)) {
         if (file.referenceToken && file.name) tokenNames.add(file.name);
         if (file.composerRefLabel) tokenNames.add(file.composerRefLabel);
+        if (file.sourcePath) tokenNames.add(file.sourcePath);
       }
       for (const name of options?.tokenNames ?? []) {
         if (name) tokenNames.add(name);
@@ -6230,6 +6239,11 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
     // Do not drop reference/workspace attachments when the user asks a short follow-up without @文件名;
     // otherwise context_files never reaches the model and the file looks "invisible".
     const userAttachments: MessageAttachment[] = rawUserAttachments;
+    const refAttachments = userAttachments.filter((item) => isWorkspaceReferenceAttachment(item));
+    const outboundMessageText =
+      refAttachments.length > 0
+        ? rewriteUserReferenceMentions(messageText, refAttachments)
+        : messageText;
     const hasReadyAttachments = userAttachments.length > 0;
     if (!isContinuation && !text && !hasReadyAttachments) return;
     if (!apiBase) return;
@@ -6603,7 +6617,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
         addPaneMessage(
           pane.id,
           "user",
-          messageText,
+          outboundMessageText,
           "meta",
           undefined,
           undefined,
@@ -6620,8 +6634,8 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
         );
       }
     } else {
-      addSubAgentEvent(targetAgentId, { type: "user", content: messageText });
-      addPaneMessage(pane.id, "tool", `🗣 发送给 ${targetAgentId}: ${messageText}`, "meta");
+      addSubAgentEvent(targetAgentId, { type: "user", content: outboundMessageText });
+      addPaneMessage(pane.id, "tool", `🗣 发送给 ${targetAgentId}: ${outboundMessageText}`, "meta");
     }
     setComposerText("");
     setQuoteTarget(null);
@@ -6715,7 +6729,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
     };
 
     try {
-      const body: Record<string, unknown> = { session_id: requestSessionId, user_input: messageText };
+      const body: Record<string, unknown> = { session_id: requestSessionId, user_input: outboundMessageText };
       // Idempotency key: backend short-circuits a duplicate POST (double-click /
       // chip burst / retry race) so it never appends a second user row.
       body.client_turn_id = crypto.randomUUID();
@@ -6751,7 +6765,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
       }
       if (userPreference.trim()) body.user_preference = userPreference.trim();
       // Extract @skill:// references from message text
-      const skillSlugMatches = messageText.match(/@skill:\/\/([^\s@,，。！？\n]+)/g);
+      const skillSlugMatches = outboundMessageText.match(/@skill:\/\/([^\s@,，。！？\n]+)/g);
       if (skillSlugMatches && skillSlugMatches.length > 0) {
         const skillSlugs = [...new Set(skillSlugMatches.map((m) => m.replace("@skill://", "")))];
         if (skillSlugs.length > 0) body.skill_slugs = skillSlugs;
@@ -7948,6 +7962,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
           status: "ready",
           content,
           sourcePath: trimmed,
+          composerRefLabel: fileName,
           referenceToken: true,
         },
       }));

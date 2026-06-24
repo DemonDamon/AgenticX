@@ -10,6 +10,10 @@ import type { Components } from "react-markdown";
 import type { MessageAttachment } from "../../store";
 import { normalizeReferenceAttachments } from "../../utils/reference-attachment";
 import {
+  formatReferenceChipLabel,
+  referenceChipTitle,
+} from "../../utils/chat-file-mention";
+import {
   chatMarkdownComponents,
   chatRehypePlugins,
   chatRemarkPlugins,
@@ -52,11 +56,22 @@ export function UserFileRefChip({
   name: string;
   referenceAttachments?: MessageAttachment[];
 }) {
+  const meta = referenceAttachments.find(
+    (att) =>
+      att.composerRefLabel === name ||
+      att.name === name ||
+      att.sourcePath === name ||
+      String(att.name || "")
+        .split(/[\\/]/)
+        .pop() === name
+  );
+  const sourcePath = String(meta?.sourcePath || "").trim();
+  const displayLabel = formatReferenceChipLabel(name, sourcePath);
   const kind = resolveComposerRefIconKindFromAttachments(name, referenceAttachments);
   return (
-    <span className={COMPOSER_INLINE_CHIP_CLASS} title={`@${name}`}>
+    <span className={COMPOSER_INLINE_CHIP_CLASS} title={referenceChipTitle(name, sourcePath)}>
       <ComposerRefIcon kind={kind} />
-      <span className="min-w-0 truncate">{name}</span>
+      <span className="min-w-0 truncate">{displayLabel}</span>
     </span>
   );
 }
@@ -72,8 +87,12 @@ export function renderUserMessageInlineBody(
   const names = Array.from(
     new Set(
       refs
-        .flatMap((att) => [String(att.name || "").trim(), String(att.composerRefLabel || "").trim()])
-        .filter((name) => name.length > 0)
+        .flatMap((att) => {
+          const label = String(att.composerRefLabel || att.name || "").trim();
+          const sourcePath = String(att.sourcePath || "").trim();
+          const base = sourcePath ? sourcePath.split(/[\\/]/).pop() || "" : "";
+          return [label, sourcePath, base].filter((item) => item.length > 0);
+        })
     )
   ).sort((a, b) => b.length - a.length);
 

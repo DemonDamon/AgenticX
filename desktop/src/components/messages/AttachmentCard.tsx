@@ -1,6 +1,8 @@
 import { useMemo, useState } from "react";
 import type { MessageAttachment } from "../../store";
 import { Modal } from "../ds/Modal";
+import { formatReferencePathHint, referenceChipTitle } from "../../utils/chat-file-mention";
+import { isWorkspaceReferenceAttachment } from "../../utils/reference-attachment";
 
 function formatFileSize(size: number): string {
   if (size < 1024) return `${size}B`;
@@ -36,6 +38,12 @@ function isImage(att: MessageAttachment): boolean {
 export function AttachmentCard({ attachment }: { attachment: MessageAttachment }) {
   const [open, setOpen] = useState(false);
   const image = isImage(attachment);
+  const isReference = isWorkspaceReferenceAttachment(attachment);
+  const pathHint =
+    isReference && attachment.sourcePath ? formatReferencePathHint(attachment.sourcePath) : "";
+  const cardTitle = attachment.sourcePath
+    ? referenceChipTitle(attachment.name, attachment.sourcePath)
+    : attachment.name;
   const ext = useMemo(() => {
     const idx = attachment.name.lastIndexOf(".");
     if (idx < 0 || idx === attachment.name.length - 1) return "FILE";
@@ -73,7 +81,10 @@ export function AttachmentCard({ attachment }: { attachment: MessageAttachment }
   }
 
   return (
-    <div className="flex min-w-[220px] max-w-[260px] items-center gap-2 rounded-xl border border-border bg-surface-panel px-2.5 py-2">
+    <div
+      className="flex min-w-[220px] max-w-[320px] items-center gap-2 rounded-xl border border-border bg-surface-panel px-2.5 py-2"
+      title={cardTitle}
+    >
       <div
         className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md text-[10px] font-semibold"
         style={{ background: "var(--surface-hover)", color: fileBadgeColor(attachment.name) }}
@@ -83,7 +94,7 @@ export function AttachmentCard({ attachment }: { attachment: MessageAttachment }
       <div className="min-w-0">
         <div className="truncate text-xs text-text-muted">{attachment.name}</div>
         <div className="text-[10px] text-text-faint">
-          {fileKindLabel(attachment)} · {formatFileSize(attachment.size)}
+          {pathHint ? `@ ${pathHint}` : fileKindLabel(attachment)} · {formatFileSize(attachment.size)}
         </div>
       </div>
     </div>

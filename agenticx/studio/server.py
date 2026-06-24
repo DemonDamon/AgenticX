@@ -1565,11 +1565,15 @@ def create_studio_app() -> FastAPI:
             elif _looks_like_filesystem_path(key):
                 display_name = os.path.basename(str(key).replace("\\", "/")) or key
                 source_path = key
-                reference_token = False
+                reference_token = True
+                composer_ref_label = display_name
                 size_val = len(body.encode("utf-8")) if body else 0
             else:
                 display_name = os.path.basename(str(key).replace("\\", "/")) or key
                 source_path = key if _looks_like_filesystem_path(key) else ""
+                if source_path:
+                    reference_token = True
+                    composer_ref_label = display_name
 
             dedupe_key = key.casefold()
             if dedupe_key in seen:
