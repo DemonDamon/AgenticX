@@ -15,6 +15,7 @@ import {
   relativePathFromRoot,
   absoluteTaskspacePath,
 } from "../utils/workspace-file-path";
+import { stripLineRangeFromAbsPath } from "../utils/chat-file-mention";
 import {
   encodeNearWorkspaceDragEntry,
   NEAR_WORKSPACE_DRAG_MIME,
@@ -22,6 +23,7 @@ import {
 } from "../utils/workspace-drag";
 import { WorkspaceFilePreview } from "./workspace/WorkspaceFilePreview";
 import {
+  mapSystemSearchPreviewToWorkspacePreview,
   mapTaskspaceFileToWorkspacePreview,
   previewCopyText,
   type WorkspacePreviewOpenRequest,
@@ -231,7 +233,6 @@ export function WorkspacePanel({
   useLayoutEffect(() => {
     if (!filePreview) {
       setPreviewAnchor(null);
-      setPreviewFocusLineRange(null);
       return;
     }
     const recompute = () => {
@@ -632,16 +633,32 @@ export function WorkspacePanel({
   };
 
   const openFileByAbsolutePath = async (absPathRaw: string) => {
-    const absPath = String(absPathRaw || "").trim();
+    const absPath = stripLineRangeFromAbsPath(String(absPathRaw || "").trim());
     if (!absPath) return;
     setErrorText("");
 
+    const directPreview = await window.agenticxDesktop.systemSearchPreview(absPath);
+    if (directPreview.ok) {
+      const mapped = mapSystemSearchPreviewToWorkspacePreview(absPath, directPreview);
+      if (mapped && (mapped.kind === "text" || mapped.kind === "markdown" || mapped.kind === "code")) {
+        setSelectedFilePath("");
+        setFilePreview(mapped);
+        const match = findTaskspaceForAbsPath(taskspaces, absPath);
+        if (match && activeTaskspaceId !== match.taskspaceId) {
+          onActiveTaskspaceChange(match.taskspaceId);
+        }
+        return;
+      }
+      if (mapped && mapped.kind === "image") {
+        setSelectedFilePath("");
+        setFilePreview(mapped);
+        return;
+      }
+    }
+
     const resolved = await window.agenticxDesktop.resolveLocalPath(absPath);
     if (resolved.ok && resolved.isDirectory && resolved.resolvedPath) {
-      const opened = await window.agenticxDesktop.shellOpenPath(resolved.resolvedPath);
-      if (!opened.ok) {
-        setErrorText(opened.error ?? "无法打开目录");
-      }
+      setErrorText("引用目标应是文件，不是文件夹");
       return;
     }
     if (resolved.ok === false && resolved.error === "path not found") {
@@ -649,7 +666,10 @@ export function WorkspacePanel({
       return;
     }
 
-    const targetPath = resolved.ok && resolved.resolvedPath ? resolved.resolvedPath : absPath;
+    const targetPath =
+      resolved.ok && resolved.resolvedPath
+        ? stripLineRangeFromAbsPath(resolved.resolvedPath)
+        : absPath;
     const browseSessionId = getBrowseSessionId();
     if (!browseSessionId) {
       setErrorText("请先发送一条消息创建会话后再预览文件");
@@ -669,7 +689,7 @@ export function WorkspacePanel({
         label: parent.split(/[\\/]/).pop() || "workspace",
       });
       if (!addResult.ok || !addResult.workspace?.id) {
-        setErrorText(addResult.error ?? "无法添加工作区以预览文件");
+        setErrorText(addResult.error ?? directPreview.error ?? "无法预览该文件");
         return;
       }
       const reloaded = await loadTaskspaces();
@@ -683,7 +703,7 @@ export function WorkspacePanel({
       }
     }
     if (!match) {
-      setErrorText("无法在工作区中定位该文件");
+      setErrorText(directPreview.error ?? "无法在工作区中定位该文件");
       return;
     }
     await openFile(match.taskspaceId, match.relPath);

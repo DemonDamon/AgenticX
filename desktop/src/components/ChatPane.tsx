@@ -137,7 +137,11 @@ import {
   mapLoadedSessionMessage,
   type LoadedSessionMessage,
 } from "../utils/session-message-map";
-import { isWorkspaceReferenceAttachment } from "../utils/reference-attachment";
+import {
+  findReferenceAttachmentMeta,
+  isWorkspaceReferenceAttachment,
+  parseLineRangeFromReferenceLabel,
+} from "../utils/reference-attachment";
 import { isViewImageInjectMessage, viewImageInjectRowFromSession } from "../utils/view-image-inject";
 import { resolveSessionTailForSwitch, invalidateSessionTail } from "../utils/session-tail-cache";
 import { visibleMessagesForSession } from "../utils/message-ownership";
@@ -190,7 +194,6 @@ import {
   type GlobalSearchReferenceFileDetail,
 } from "./global-search/global-search-events";
 import { buildFileMentionAppend, buildComposerRefPathLookup, fileNameFromPath, formatReferenceChipLabel, formatReferencePathHint, lookupComposerRefPath, resolveReferenceSourcePath } from "../utils/chat-file-mention";
-import { findReferenceAttachmentMeta } from "../utils/reference-attachment";
 import { absoluteTaskspacePath } from "../utils/workspace-file-path";
 import {
   composerAcceptsDragTypes,
@@ -3471,7 +3474,8 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
       token.appendChild(icon);
       const label = document.createElement("span");
       label.className = "min-w-0 truncate";
-      label.textContent = formatReferenceChipLabel(name, resolvedPath);
+      const lineRange = meta?.lineRange ?? parseLineRangeFromReferenceLabel(name);
+      label.textContent = formatReferenceChipLabel(name, resolvedPath, lineRange);
       token.appendChild(label);
       return token;
     },

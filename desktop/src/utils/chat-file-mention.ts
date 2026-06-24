@@ -15,6 +15,15 @@ export function fileNameFromPath(filePath: string): string {
   return filePath.split(/[\\/]/).pop() || filePath;
 }
 
+/** Remove `:534-534` / `(534-534)` line-range suffixes from a filesystem path or @ label. */
+export function stripLineRangeFromAbsPath(path: string): string {
+  return String(path || "")
+    .trim()
+    .replace(/\((\d+)-(\d+)\)\s*$/, "")
+    .replace(/\s+:(\d+)-(\d+)$/, "")
+    .replace(/:(\d+)-(\d+)$/, "");
+}
+
 /** Parent directory hint for reference chips (e.g. `~/Downloads`). */
 export function formatReferencePathHint(absPath: string): string {
   const norm = String(absPath || "")
@@ -33,14 +42,18 @@ export function formatReferencePathHint(absPath: string): string {
 }
 
 export function resolveReferenceSourcePath(name: string, sourcePath?: string): string {
-  const sp = String(sourcePath || "")
-    .trim()
-    .replace(/\\/g, "/");
+  const sp = stripLineRangeFromAbsPath(
+    String(sourcePath || "")
+      .trim()
+      .replace(/\\/g, "/")
+  );
   if (sp) return sp;
-  const label = String(name || "")
-    .trim()
-    .replace(/\\/g, "/");
-  if (label.includes("/")) return label;
+  const label = stripLineRangeFromAbsPath(
+    String(name || "")
+      .trim()
+      .replace(/\\/g, "/")
+  );
+  if (label.includes("/") || label.includes("\\")) return label;
   return "";
 }
 
@@ -49,16 +62,41 @@ export function referenceChipTitle(name: string, sourcePath?: string): string {
   return resolved || `@${name}`;
 }
 
-/** Chip label: always show basename; full path stays in sourcePath / API payload only. */
-export function formatReferenceChipLabel(name: string, sourcePath?: string): string {
-  const label = String(name || "").trim();
-  if (!label) return label;
-  if (label.includes("/") || label.includes("\\")) {
-    return fileNameFromPath(label);
+function parseLineRangeFromChipLabel(label: string): { start: number; end: number } | undefined {
+  const text = String(label || "").trim();
+  if (!text) return undefined;
+  const colonMatch = text.match(/:(\d+)-(\d+)$/);
+  if (colonMatch) {
+    const start = Math.max(1, parseInt(colonMatch[1]!, 10));
+    const end = Math.max(start, parseInt(colonMatch[2]!, 10));
+    return { start, end };
   }
-  const sp = String(sourcePath || "").trim();
-  if (sp) return fileNameFromPath(sp) || label;
-  return label;
+  const parenMatch = text.match(/\((\d+)-(\d+)\)$/);
+  if (parenMatch) {
+    const start = Math.max(1, parseInt(parenMatch[1]!, 10));
+    const end = Math.max(start, parseInt(parenMatch[2]!, 10));
+    return { start, end };
+  }
+  return undefined;
+}
+
+/** Chip label: basename + optional line range; full path stays in sourcePath / API payload only. */
+export function formatReferenceChipLabel(
+  name: string,
+  sourcePath?: string,
+  lineRange?: { start: number; end: number }
+): string {
+  const label = String(name || "").trim();
+  const range = lineRange ?? parseLineRangeFromChipLabel(label);
+  const baseSource =
+    label.includes("/") || label.includes("\\")
+      ? label.replace(/:(\d+)-(\d+)$/, "").replace(/\((\d+)-(\d+)\)$/, "").trim()
+      : String(sourcePath || "").trim() || label.replace(/:(\d+)-(\d+)$/, "").replace(/\((\d+)-(\d+)\)$/, "").trim();
+  const baseName = fileNameFromPath(baseSource.replace(/\\/g, "/")) || label;
+  if (range) {
+    return `${baseName} (${range.start}-${range.end})`;
+  }
+  return baseName;
 }
 
 /** Map @ chip label → absolute path for composer tooltips and token metadata. */

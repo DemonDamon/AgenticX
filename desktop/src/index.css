@@ -442,6 +442,13 @@ body.agx-settings-nav-resizing {
 
 /* 在用户气泡内时，利用 text-primary 混合透明度产生色差，并增加微渐变和阴影使其更立体 */
 .agx-im-user-bubble .agx-composer-inline-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.28rem;
+  max-width: min(100%, 340px);
+  vertical-align: middle;
+  padding-inline: 0.35rem;
+  padding-block: 0.1rem;
   background: linear-gradient(
     to bottom,
     color-mix(in srgb, var(--text-primary) 2%, rgba(var(--theme-color-rgb), 0.15)),
@@ -449,9 +456,30 @@ body.agx-settings-nav-resizing {
   );
   border-color: color-mix(in srgb, var(--text-primary) 12%, rgba(var(--theme-color-rgb), 0.3));
   border-bottom-color: color-mix(in srgb, var(--text-primary) 22%, rgba(var(--theme-color-rgb), 0.35));
-  box-shadow: 
+  box-shadow:
     0 1px 2px rgba(0, 0, 0, 0.08),
     inset 0 1px 0 rgba(255, 255, 255, 0.12);
+}
+
+.agx-im-user-bubble .agx-composer-inline-chip .agx-file-ref-chip-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.agx-im-user-bubble .agx-composer-inline-chip .agx-file-ref-chip-lines {
+  flex-shrink: 0;
+  border-radius: 0.2rem;
+  padding-inline: 0.28rem;
+  padding-block: 0.02rem;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 0.82em;
+  font-weight: 500;
+  line-height: 1.35;
+  font-variant-numeric: tabular-nums;
+  color: color-mix(in srgb, var(--chat-composer-chip-fg) 78%, var(--text-faint) 22%);
+  background: color-mix(in srgb, var(--text-primary) 8%, rgba(0, 0, 0, 0.14));
 }
 
 input[type="checkbox"],

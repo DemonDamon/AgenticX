@@ -11,7 +11,10 @@ import type { MessageAttachment } from "../../store";
 import {
   buildFileReferenceOpenRequest,
   findReferenceAttachmentMeta,
+  matchReferenceMentionLabel,
   normalizeReferenceAttachments,
+  parseLineRangeFromReferenceLabel,
+  resolveAttachmentLineRange,
   type FileReferenceOpenRequest,
 } from "../../utils/reference-attachment";
 import { HoverTip } from "../ds/HoverTip";
@@ -66,16 +69,34 @@ export function UserFileRefChip({
 }) {
   const meta = findReferenceAttachmentMeta(name, referenceAttachments);
   const sourcePath = String(meta?.sourcePath || "").trim();
-  const displayLabel = formatReferenceChipLabel(name, sourcePath);
+  const lineRange =
+    (meta ? resolveAttachmentLineRange(meta) : undefined) ??
+    parseLineRangeFromReferenceLabel(name);
+  const baseName = formatReferenceChipLabel(name, sourcePath, lineRange).replace(
+    /\s*\(\d+-\d+\)\s*$/,
+    ""
+  );
+  const lineLabel =
+    lineRange && lineRange.start === lineRange.end
+      ? `:${lineRange.start}`
+      : lineRange
+        ? `:${lineRange.start}-${lineRange.end}`
+        : "";
   const resolvedPath = resolveReferenceSourcePath(name, sourcePath);
   const kind = resolveComposerRefIconKindFromAttachments(name, referenceAttachments);
   const openRequest = buildFileReferenceOpenRequest(name, meta);
   const clickable = !!openRequest && !!onOpenReference;
+  const hoverTitle = resolvedPath
+    ? lineRange
+      ? `${resolvedPath} · 第 ${lineRange.start}${lineRange.end !== lineRange.start ? `–${lineRange.end}` : ""} 行`
+      : resolvedPath
+    : undefined;
 
   const chipInner = (
     <>
       <ComposerRefIcon kind={kind} />
-      <span className="min-w-0 truncate">{displayLabel}</span>
+      <span className="agx-file-ref-chip-name">{baseName}</span>
+      {lineLabel ? <span className="agx-file-ref-chip-lines">{lineLabel}</span> : null}
     </>
   );
 
@@ -83,7 +104,7 @@ export function UserFileRefChip({
     <button
       type="button"
       className={`${COMPOSER_INLINE_CHIP_CLASS} cursor-pointer transition hover:brightness-110 focus:outline-none focus-visible:ring-2 focus-visible:ring-[rgba(var(--theme-color-rgb,16,185,129),0.45)]`}
-      title="点击预览文件"
+      title={hoverTitle ?? "点击预览文件"}
       onClick={(event) => {
         event.stopPropagation();
         if (openRequest) onOpenReference?.(openRequest);
@@ -92,7 +113,9 @@ export function UserFileRefChip({
       {chipInner}
     </button>
   ) : (
-    <span className={COMPOSER_INLINE_CHIP_CLASS}>{chipInner}</span>
+    <span className={COMPOSER_INLINE_CHIP_CLASS} title={hoverTitle}>
+      {chipInner}
+    </span>
   );
 
   if (!resolvedPath) return chip;
@@ -112,17 +135,6 @@ export function renderUserMessageInlineBody(
   onOpenFileReference?: (request: FileReferenceOpenRequest) => void
 ): ReactNode {
   const refs = normalizeReferenceAttachments(referenceAttachments) ?? [];
-  const names = Array.from(
-    new Set(
-      refs
-        .flatMap((att) => {
-          const label = String(att.composerRefLabel || att.name || "").trim();
-          const sourcePath = String(att.sourcePath || "").trim();
-          const base = sourcePath ? sourcePath.split(/[\\/]/).pop() || "" : "";
-          return [label, sourcePath, base].filter((item) => item.length > 0);
-        })
-    )
-  ).sort((a, b) => b.length - a.length);
 
   const chunks: ReactNode[] = [];
   let cursor = 0;
@@ -163,11 +175,7 @@ export function renderUserMessageInlineBody(
     }
 
     const rest = bodyText.slice(cursor + 1);
-    const matched = names.find((name) => {
-      if (!rest.startsWith(name)) return false;
-      const tail = rest.slice(name.length, name.length + 1);
-      return tail.length === 0 || /\s/.test(tail);
-    });
+    const matched = matchReferenceMentionLabel(rest, refs);
     if (matched) {
       chunks.push(
         <UserFileRefChip

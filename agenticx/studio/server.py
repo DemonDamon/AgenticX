@@ -1549,6 +1549,8 @@ def create_studio_app() -> FastAPI:
             reference_token = False
             source_path = ""
             composer_ref_label = ""
+            line_start: int | None = None
+            line_end: int | None = None
             if key.startswith("@dir:"):
                 dir_parts = key.split(":", 2)
                 if len(dir_parts) == 3:
@@ -1557,11 +1559,22 @@ def create_studio_app() -> FastAPI:
                     composer_ref_label = dir_parts[1]
                     reference_token = True
             elif len(parts) >= 3 and parts[-1].isdigit() and parts[-2].isdigit():
-                display_name = str(parts[0] or "").strip() or key
+                source_path = str(parts[0] or "").strip()
+                display_name = os.path.basename(str(source_path).replace("\\", "/")) or source_path
                 try:
-                    size_val = int(parts[-2])
-                except ValueError:
+                    line_start = int(parts[-2])
+                    line_end = int(parts[-1])
                     size_val = len(body.encode("utf-8")) if body else 0
+                    composer_ref_label = f"{display_name} ({line_start}-{line_end})"
+                    reference_token = True
+                except ValueError:
+                    display_name = str(parts[0] or "").strip() or key
+                    try:
+                        size_val = int(parts[-2])
+                    except ValueError:
+                        size_val = len(body.encode("utf-8")) if body else 0
+                    line_start = None
+                    line_end = None
             elif _looks_like_filesystem_path(key):
                 display_name = os.path.basename(str(key).replace("\\", "/")) or key
                 source_path = key
@@ -1580,17 +1593,19 @@ def create_studio_app() -> FastAPI:
                 continue
             seen.add(dedupe_key)
             mime = _guess_mime_from_filename(display_name)
-            out.append(
-                {
-                    "name": display_name,
-                    "mime_type": mime,
-                    "size": int(max(0, size_val)),
-                    "source_path": str(source_path or "").strip(),
-                    "reference_token": bool(reference_token),
-                    "composer_ref_label": composer_ref_label,
-                    "kind": "context_file",
-                }
-            )
+            att_row: dict[str, Any] = {
+                "name": display_name,
+                "mime_type": mime,
+                "size": int(max(0, size_val)),
+                "source_path": str(source_path or "").strip(),
+                "reference_token": bool(reference_token),
+                "composer_ref_label": composer_ref_label,
+                "kind": "context_file",
+            }
+            if isinstance(line_start, int) and isinstance(line_end, int):
+                att_row["line_start"] = line_start
+                att_row["line_end"] = line_end
+            out.append(att_row)
         return out
 
     @app.get("/api/session", response_model=SessionState)

@@ -153,6 +153,59 @@ export function mapTaskspaceFileToWorkspacePreview(
   return { kind: "code", path, absolutePath, content, size, truncated, mimeType };
 }
 
+export function mapSystemSearchPreviewToWorkspacePreview(
+  absolutePath: string,
+  result: {
+    ok: boolean;
+    kind: "text" | "image" | "metadata";
+    content?: string;
+    fileUrl?: string;
+    truncated?: boolean;
+    error?: string;
+  }
+): WorkspacePreview | null {
+  if (!result.ok) return null;
+  const path = previewBaseName(absolutePath);
+  const lower = path.toLowerCase();
+  const mimeType =
+    lower.endsWith(".md") ? "text/markdown"
+    : lower.endsWith(".json") ? "application/json"
+    : lower.endsWith(".yaml") || lower.endsWith(".yml") ? "text/yaml"
+    : "text/plain";
+
+  if (result.kind === "image" && result.fileUrl) {
+    return {
+      kind: "image",
+      path,
+      absolutePath,
+      size: 0,
+      mimeType: "image/png",
+    };
+  }
+
+  if (result.kind === "text" && typeof result.content === "string") {
+    const content = result.content;
+    const size = content.length;
+    const truncated = !!result.truncated;
+    if (lower.endsWith(".md")) {
+      return { kind: "markdown", path, absolutePath, content, size, truncated, mimeType };
+    }
+    if (lower.endsWith(".txt") || lower.endsWith(".log")) {
+      return { kind: "text", path, absolutePath, content, size, truncated, mimeType: "text/plain" };
+    }
+    return { kind: "code", path, absolutePath, content, size, truncated, mimeType };
+  }
+
+  return {
+    kind: "binary",
+    path,
+    absolutePath,
+    size: 0,
+    mimeType: "application/octet-stream",
+    message: result.content || result.error || "该文件类型暂不支持预览",
+  };
+}
+
 export function previewCopyText(preview: WorkspacePreview): string {
   if (preview.kind === "text" || preview.kind === "markdown" || preview.kind === "code") {
     return preview.content;

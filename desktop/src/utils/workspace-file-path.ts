@@ -1,4 +1,5 @@
 import type { Taskspace } from "../store";
+import { stripLineRangeFromAbsPath } from "./chat-file-mention";
 
 function normalizePath(p: string): string {
   return String(p || "")
@@ -44,17 +45,18 @@ export function relativePathFromRoot(root: string, absPath: string): string {
 }
 
 export function parentDirectory(absPath: string): string {
-  const norm = normalizePath(absPath);
+  const norm = stripLineRangeFromAbsPath(normalizePath(absPath));
   const idx = norm.lastIndexOf("/");
   if (idx <= 0) return norm;
   return norm.slice(0, idx);
 }
 
+
 export function findTaskspaceForAbsPath(
   taskspaces: Taskspace[],
   absPath: string
 ): { taskspaceId: string; relPath: string } | null {
-  const norm = normalizePath(absPath);
+  const norm = normalizePath(stripLineRangeFromAbsPath(absPath));
   if (!norm) return null;
   let best: { taskspaceId: string; relPath: string; rootLen: number } | null = null;
   for (const ts of taskspaces) {
