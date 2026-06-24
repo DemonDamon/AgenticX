@@ -16,6 +16,47 @@ $WorkArchDir = Join-Path $PackagingDir 'build\win-amd64'
 $BundledDir = Join-Path $DesktopDir 'bundled-backend\win-amd64'
 $SkipPyInstaller = ($env:SKIP_BACKEND -eq '1')
 
+function Import-CmdEnvDump {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$DumpFile
+    )
+    foreach ($line in Get-Content -Path $DumpFile) {
+        if (-not $line) { continue }
+        $idx = $line.IndexOf('=')
+        if ($idx -le 0) { continue }
+        $name = $line.Substring(0, $idx)
+        $value = $line.Substring($idx + 1)
+        [System.Environment]::SetEnvironmentVariable($name, $value, "Process")
+    }
+}
+
+function Initialize-MsvcToolchain {
+    $vswhere = Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio\Installer\vswhere.exe'
+    if (-not (Test-Path $vswhere)) {
+        throw "vswhere.exe not found at $vswhere"
+    }
+    $installPath = & $vswhere -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath
+    if (-not $installPath) {
+        throw 'No Visual Studio installation with VC tools found. Please ensure VS2022 C++ Build Tools are installed on runner.'
+    }
+    $vsDevCmd = Join-Path $installPath 'Common7\Tools\VsDevCmd.bat'
+    if (-not (Test-Path $vsDevCmd)) {
+        throw "VsDevCmd.bat not found at $vsDevCmd"
+    }
+    Write-Host "--- Loading MSVC env from $vsDevCmd ---"
+    $dumpFile = Join-Path ([System.IO.Path]::GetTempPath()) ("msvc-env-" + [System.Guid]::NewGuid().ToString("N") + ".txt")
+    try {
+        cmd.exe /s /c "`"$vsDevCmd`" -arch=x64 -host_arch=x64 >nul && set > `"$dumpFile`""
+        Import-CmdEnvDump -DumpFile $dumpFile
+    } finally {
+        Remove-Item -Path $dumpFile -ErrorAction SilentlyContinue
+    }
+    # node-gyp / electron-rebuild hints
+    [System.Environment]::SetEnvironmentVariable('GYP_MSVS_VERSION', '2022', 'Process')
+    [System.Environment]::SetEnvironmentVariable('npm_config_msvs_version', '2022', 'Process')
+}
+
 function Find-PythonLauncher {
     $ver = 'import sys; raise SystemExit(0 if sys.version_info>=(3,10) else 1)'
     $py = Get-Command py -ErrorAction SilentlyContinue
@@ -33,6 +74,7 @@ function Find-PythonLauncher {
 }
 
 Write-Host '=== Building Machi (Windows x64, bundled backend) ==='
+Initialize-MsvcToolchain
 
 $PyLaunch = Find-PythonLauncher
 if (-not $PyLaunch) {

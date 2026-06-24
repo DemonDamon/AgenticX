@@ -122,7 +122,8 @@ jobs:
 
   build-tag-windows:
     if: github.event_name == 'push'
-    runs-on: windows-latest
+    # Pin to windows-2022: node-gyp + node-pty needs stable VS2022 C++ workload.
+    runs-on: windows-2022
     steps:
       - uses: actions/checkout@v5
         with:
@@ -268,7 +269,8 @@ jobs:
 
   build-dispatch-windows:
     if: github.event_name == 'workflow_dispatch' && github.event.inputs.arch == 'windows-amd64'
-    runs-on: windows-latest
+    # Pin to windows-2022: avoid toolchain drift on windows-latest images.
+    runs-on: windows-2022
     steps:
       - uses: actions/checkout@v5
         with:
