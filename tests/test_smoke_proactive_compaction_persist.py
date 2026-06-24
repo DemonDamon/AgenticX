@@ -93,6 +93,6 @@ def test_ac2_rolling_compact_after_enough_new_messages() -> None:
 
     did3, count3 = asyncio.run(_simulate_proactive_compact_turn(agent_messages, compactor=compactor))
     assert did3 is True
-    assert count3 == 14  # 22 - 8 retained, not 15/16 linear per-turn bump
+    assert count3 == 13  # rolling: 21 tail messages - 8 retained
     assert len(agent_messages) == 9
     assert "[compacted]" in agent_messages[0]["content"]
