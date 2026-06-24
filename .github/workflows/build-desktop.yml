@@ -145,8 +145,16 @@ jobs:
           go-version: "1.22"
           cache-dependency-path: packaging/wechat-sidecar/go.sum
 
+      # node-pty is a native module; node-gyp needs cl.exe from VS Build Tools.
+      - name: Setup MSVC (node-pty / node-gyp)
+        uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: x64
+
       - name: Build Windows installer (bundled)
         shell: pwsh
+        env:
+          GYP_MSVS_VERSION: "2022"
         run: ./packaging/build_windows_installer.ps1
 
       - name: Verify bundled backend in win-unpacked
@@ -283,8 +291,16 @@ jobs:
           go-version: "1.22"
           cache-dependency-path: packaging/wechat-sidecar/go.sum
 
+      # node-pty is a native module; node-gyp needs cl.exe from VS Build Tools.
+      - name: Setup MSVC (node-pty / node-gyp)
+        uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: x64
+
       - name: Build Windows installer (bundled)
         shell: pwsh
+        env:
+          GYP_MSVS_VERSION: "2022"
         run: ./packaging/build_windows_installer.ps1
 
       - name: Verify bundled backend in win-unpacked
