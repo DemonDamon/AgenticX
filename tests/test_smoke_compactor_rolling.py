@@ -47,6 +47,24 @@ def test_compacted_prefix_does_not_retrigger_on_block_chars() -> None:
     assert compacted == messages
 
 
+def test_split_for_compaction_avoids_orphan_tool_at_boundary() -> None:
+    compactor = ContextCompactor(_LLM(), retain_recent_messages=4)
+    working: List[Dict[str, Any]] = [
+        {"role": "user", "content": "old-1"},
+        {"role": "user", "content": "old-2"},
+        {"role": "assistant", "content": "", "tool_calls": [{"id": "tc1", "type": "function", "function": {"name": "bash_exec", "arguments": "{}"}}]},
+        {"role": "tool", "tool_call_id": "tc1", "name": "bash_exec", "content": "ok"},
+        {"role": "user", "content": "new-1"},
+        {"role": "assistant", "content": "step"},
+        {"role": "user", "content": "new-2"},
+        {"role": "assistant", "content": "tail"},
+    ]
+    to_compact, retained = compactor._split_for_compaction(working)
+    assert retained
+    assert str(retained[0].get("role", "")).lower() != "tool"
+    assert len(to_compact) + len(retained) == len(working)
+
+
 def test_rolling_compact_only_counts_tail_messages() -> None:
     compactor = ContextCompactor(_LLM(), threshold_messages=20, retain_recent_messages=8)
     tail = [{"role": "user", "content": f"msg-{i}"} for i in range(21)]
