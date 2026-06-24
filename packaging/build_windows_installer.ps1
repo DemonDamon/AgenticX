@@ -192,11 +192,12 @@ Copy-Item -Path $SidecarExe -Destination (Join-Path $BundledDir 'agx-wechat-side
 Write-Host '--- Step 4: npm ci + desktop build ---'
 Push-Location $DesktopDir
 try {
+    # Help node-gyp locate VS2022 (required for node-pty native rebuild in electron-builder).
+    npm config set msvs_version 2022
     npm ci
     npm run build
-    Write-Host '--- Step 5: node-pty (native) ---'
-    npx electron-rebuild -f -w node-pty
-    Write-Host '--- Step 6: electron-builder (NSIS x64) ---'
+    Write-Host '--- Step 5: electron-builder (NSIS x64) ---'
+    Write-Host '[build_windows_installer] node-pty rebuild is handled by electron-builder install-app-deps'
     $env:CSC_IDENTITY_AUTO_DISCOVERY = 'false'
     npx electron-builder --win --x64 --publish never
 } finally {
