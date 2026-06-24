@@ -7,6 +7,7 @@ Author: Damon Li
 
 from __future__ import annotations
 
+import asyncio
 import json
 import shutil
 from pathlib import Path
@@ -14,6 +15,10 @@ from typing import Any
 from unittest.mock import patch
 
 import pytest
+
+
+def _run(coro):
+    return asyncio.run(coro)
 
 
 # ---------------------------------------------------------------------------
@@ -86,10 +91,10 @@ class TestSkillManageFuzzyPatch:
     def test_exact_patch_still_works(self, skill_env: Path) -> None:
         from agenticx.cli.agent_tools import _tool_skill_manage
 
-        result = _tool_skill_manage(
+        result = _run(_tool_skill_manage(
             {"action": "patch", "name": "test-skill", "old_string": "Run build", "new_string": "Run make"},
             None,
-        )
+        ))
         parsed = json.loads(result)
         assert parsed["ok"] is True
         assert parsed["strategy"] == "exact"
@@ -102,10 +107,10 @@ class TestSkillManageFuzzyPatch:
             "---\nname: test-skill\ndescription: A test\n---\n\n"
             "    def foo():\n        pass\n"
         )
-        result = _tool_skill_manage(
+        result = _run(_tool_skill_manage(
             {"action": "patch", "name": "test-skill", "old_string": "def foo():\n    pass", "new_string": "def bar():\n    return 42"},
             None,
-        )
+        ))
         parsed = json.loads(result)
         assert parsed["ok"] is True
         assert parsed["strategy"] in ("line_trimmed", "indentation_flexible")
@@ -113,10 +118,10 @@ class TestSkillManageFuzzyPatch:
     def test_patch_writes_changelog(self, skill_env: Path) -> None:
         from agenticx.cli.agent_tools import _tool_skill_manage
 
-        _tool_skill_manage(
+        _run(_tool_skill_manage(
             {"action": "patch", "name": "test-skill", "old_string": "Run build", "new_string": "Run make"},
             None,
-        )
+        ))
         cl = skill_env / ".changelog"
         assert cl.exists()
         assert "patch" in cl.read_text()
@@ -151,7 +156,7 @@ class TestSkillManageChangelog:
         from agenticx.cli.agent_tools import _tool_skill_manage
 
         content = "---\nname: new-skill\ndescription: test\n---\n\n## Steps\n1. Do something\n"
-        result = _tool_skill_manage({"action": "create", "name": "new-skill", "content": content}, None)
+        result = _run(_tool_skill_manage({"action": "create", "name": "new-skill", "content": content}, None))
         parsed = json.loads(result)
         assert parsed["ok"] is True
         cl = skills_root / "new-skill" / ".changelog"
@@ -164,7 +169,7 @@ class TestSkillManageChangelog:
         skill_dir = skills_root / "to-delete"
         skill_dir.mkdir()
         (skill_dir / "SKILL.md").write_text("---\nname: to-delete\ndescription: x\n---\n\nBody.\n")
-        result = _tool_skill_manage({"action": "delete", "name": "to-delete"}, None)
+        result = _run(_tool_skill_manage({"action": "delete", "name": "to-delete"}, None))
         parsed = json.loads(result)
         assert parsed["ok"] is True
         assert not skill_dir.exists()

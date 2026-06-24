@@ -4836,6 +4836,7 @@ def _write_skill_md_with_checks(
     canonical_name: str,
     on_rollback: Optional[Any] = None,
     extra: Optional[Dict[str, Any]] = None,
+    skip_queue: bool = False,
 ) -> Tuple[Optional[str], Optional[str]]:
     """Normalize, write, guard-scan, and verify discoverability.
 
@@ -4869,7 +4870,7 @@ def _write_skill_md_with_checks(
         return None, _skill_manage_error("size_limit", f"{_size['error']}. {_size['hint']}")
 
     session_obj = extra.get("_session") if isinstance(extra, dict) else None
-    if _should_queue_skill_write():
+    if not skip_queue and _should_queue_skill_write():
         queued = _queue_skill_proposal(
             action=action,
             name=canonical_name,
@@ -5069,13 +5070,22 @@ def _tool_hook_manage(arguments: Dict[str, Any], session: Optional[StudioSession
     return json.dumps({"ok": True, "action": "created", "hook": new_hook}, ensure_ascii=False)
 
 
-def _tool_skill_manage(arguments: Dict[str, Any], session: Optional[StudioSession]) -> str:
+async def _tool_skill_manage(
+    arguments: Dict[str, Any],
+    session: Optional[StudioSession],
+    *,
+    confirm_gate: Optional[ConfirmGate] = None,
+    emit_event: Optional[Any] = None,
+) -> str:
     _ = session
     if not _skill_manage_enabled():
         return (
             "ERROR: skill_manage is disabled. Set AGX_SKILL_MANAGE=1 "
             "or AGX_CONFIRM_STRATEGY=auto (Run Everything hook)."
         )
+    # Interactive mode: user approves/rejects inline in the chat.
+    # Non-interactive (e.g. session_review_hook): falls back to pending queue.
+    _interactive = emit_event is not None and isinstance(confirm_gate, AsyncConfirmGate)
     action = str(arguments.get("action", "") or "").strip().lower()
     if not action:
         return (
@@ -5116,6 +5126,16 @@ def _tool_skill_manage(arguments: Dict[str, Any], session: Optional[StudioSessio
             normalize_skill_md(content, name)
         except SkillFrontmatterError as exc:
             return f"ERROR: {exc}"
+        if _interactive:
+            preview = content[:400] + ("\n\n…（已截断）" if len(content) > 400 else "")
+            approved = await _confirm(
+                f"skill_manage 请求**创建**新技能「{name}」\n\n内容预览：\n\n```\n{preview}\n```\n\n确认写入 `~/.agenticx/skills/{name}/SKILL.md`？",
+                confirm_gate=confirm_gate,  # type: ignore[arg-type]
+                context={"tool": "skill_manage", "action": "create", "skill": name},
+                emit_event=emit_event,
+            )
+            if not approved:
+                return "CANCELLED: 用户拒绝了 skill_manage create 操作"
         skill_dir.mkdir(parents=True, exist_ok=True)
         success, err = _write_skill_md_with_checks(
             action="create",
@@ -5124,6 +5144,7 @@ def _tool_skill_manage(arguments: Dict[str, Any], session: Optional[StudioSessio
             canonical_name=name,
             on_rollback=lambda: shutil.rmtree(skill_dir, ignore_errors=True),
             extra={"_session": session},
+            skip_queue=_interactive,
         )
         if err:
             if skill_dir.exists() and not (skill_dir / "SKILL.md").is_file():
@@ -5280,6 +5301,21 @@ def _tool_skill_manage(arguments: Dict[str, Any], session: Optional[StudioSessio
         def _rollback_patch() -> None:
             skill_md.write_text(backup, encoding="utf-8")
 
+        if _interactive:
+            old_preview = old_s[:200] + ("…" if len(old_s) > 200 else "")
+            new_preview = new_s[:200] + ("…" if len(new_s) > 200 else "")
+            approved = await _confirm(
+                f"skill_manage 请求**修改**技能「{name}」（{match_count} 处替换）\n\n"
+                f"**旧内容：**\n```\n{old_preview}\n```\n\n"
+                f"**新内容：**\n```\n{new_preview}\n```\n\n"
+                f"确认应用补丁？",
+                confirm_gate=confirm_gate,  # type: ignore[arg-type]
+                context={"tool": "skill_manage", "action": "patch", "skill": name},
+                emit_event=emit_event,
+            )
+            if not approved:
+                return "CANCELLED: 用户拒绝了 skill_manage patch 操作"
+
         try:
             from agenticx.skills.skill_versions import save_snapshot
 
@@ -5301,6 +5337,7 @@ def _tool_skill_manage(arguments: Dict[str, Any], session: Optional[StudioSessio
             canonical_name=name,
             on_rollback=_rollback_patch,
             extra={"strategy": strategy, "matches": match_count, "mode": "apply", "_session": session},
+            skip_queue=_interactive,
         )
         if err:
             if err.startswith("ERROR: 技能内容被安全策略拦截"):
@@ -5321,6 +5358,15 @@ def _tool_skill_manage(arguments: Dict[str, Any], session: Optional[StudioSessio
     if action == "delete":
         if not skill_dir.exists():
             return json.dumps({"ok": True, "action": "delete", "removed": False}, ensure_ascii=False)
+        if _interactive:
+            approved = await _confirm(
+                f"skill_manage 请求**删除**技能「{name}」\n\n路径：`~/.agenticx/skills/{name}/`\n\n此操作不可撤销（除非系统有版本快照），确认删除？",
+                confirm_gate=confirm_gate,  # type: ignore[arg-type]
+                context={"tool": "skill_manage", "action": "delete", "skill": name, "risk": "destructive"},
+                emit_event=emit_event,
+            )
+            if not approved:
+                return "CANCELLED: 用户拒绝了 skill_manage delete 操作"
         try:
             from agenticx.skills.versioning import append_changelog
             append_changelog(skill_dir, action="delete", summary="skill deleted by agent")
@@ -5900,7 +5946,7 @@ async def dispatch_tool_async(
         if name == "hook_manage":
             return _tool_hook_manage(arguments, session)
         if name == "skill_manage":
-            return _tool_skill_manage(arguments, session)
+            return await _tool_skill_manage(arguments, session, confirm_gate=gate, emit_event=event_callback)
         if name == "skill_import_repo":
             return _tool_skill_import_repo(arguments, session)
         if name == "todo_write":

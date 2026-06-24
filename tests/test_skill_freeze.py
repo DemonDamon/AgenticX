@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 from pathlib import Path
 
@@ -32,7 +33,7 @@ def test_freeze_queues_create_while_active(skill_home: Path) -> None:
     inc_active()
     try:
         body = "---\nname: frozen-skill\ndescription: Frozen\n---\n\nSteps.\n"
-        out = json.loads(_tool_skill_manage({"action": "create", "name": "frozen-skill", "content": body}, None))
+        out = json.loads(asyncio.run(_tool_skill_manage({"action": "create", "name": "frozen-skill", "content": body}, None)))
         assert out.get("action") == "create_pending"
         assert not (skill_home / ".agenticx" / "skills" / "frozen-skill" / "SKILL.md").exists()
         proposal_root = skill_home / ".agenticx" / "skills" / ".proposals"
