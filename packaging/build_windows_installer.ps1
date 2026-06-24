@@ -55,6 +55,19 @@ function Initialize-MsvcToolchain {
     # node-gyp / electron-rebuild hints
     [System.Environment]::SetEnvironmentVariable('GYP_MSVS_VERSION', '2022', 'Process')
     [System.Environment]::SetEnvironmentVariable('npm_config_msvs_version', '2022', 'Process')
+
+    # Fail-fast verification: catch toolchain bootstrap failure before the long
+    # PyInstaller stage so CI logs surface the root cause immediately instead of
+    # degrading back to "Could not find any Visual Studio installation to use"
+    # ~15 minutes later inside electron-builder's node-gyp call.
+    $cl = Get-Command cl.exe -ErrorAction SilentlyContinue
+    if (-not $cl) {
+        throw "cl.exe not on PATH after VsDevCmd injection -- MSVC toolchain bootstrap failed."
+    }
+    Write-Host "--- MSVC toolchain ready ---"
+    Write-Host "    cl.exe         : $($cl.Source)"
+    Write-Host "    VCINSTALLDIR   : $env:VCINSTALLDIR"
+    Write-Host "    VCToolsVersion : $env:VCToolsVersion"
 }
 
 function Find-PythonLauncher {
