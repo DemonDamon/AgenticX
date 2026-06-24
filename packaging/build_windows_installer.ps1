@@ -56,6 +56,14 @@ function Initialize-MsvcToolchain {
     [System.Environment]::SetEnvironmentVariable('GYP_MSVS_VERSION', '2022', 'Process')
     [System.Environment]::SetEnvironmentVariable('npm_config_msvs_version', '2022', 'Process')
 
+    # Tell Python setuptools/distutils to trust the already-loaded MSVC env and
+    # NOT re-invoke vcvarsall.bat (which crashes on chroma-hnswlib because it
+    # spawns "vcvarsall.bat x86_amd64" inside an env that already has the
+    # native x64 toolchain loaded -- the cross-compile flag conflicts and the
+    # nested cmd exits non-zero, breaking the wheel build).
+    [System.Environment]::SetEnvironmentVariable('DISTUTILS_USE_SDK', '1', 'Process')
+    [System.Environment]::SetEnvironmentVariable('MSSdk', '1', 'Process')
+
     # Fail-fast verification: catch toolchain bootstrap failure before the long
     # PyInstaller stage so CI logs surface the root cause immediately instead of
     # degrading back to "Could not find any Visual Studio installation to use"
@@ -159,7 +167,10 @@ if (-not $SkipPyInstaller) {
     # Install with `desktop-runtime` extras so the bundled exe ships with PDF /
     # Office readers and numpy (GitHub issue #10: "Document ingestion fails for
     # PDF files (missing PDF reader libs / missing numpy)" on Windows).
-    & $VenvPip install -q "$ProjectRoot[desktop-runtime]"
+    # --prefer-binary: pull wheels whenever available (chroma-hnswlib ships
+    # cp312 win_amd64 wheels; falling back to source build collides with our
+    # pre-loaded MSVC env). Defensive even though pip already prefers wheels.
+    & $VenvPip install --prefer-binary "$ProjectRoot[desktop-runtime]"
     Test-DesktopRuntimeImports -PythonExe $VenvPython
 
     New-Item -ItemType Directory -Force -Path $DistArchDir | Out-Null
