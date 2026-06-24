@@ -191,6 +191,39 @@ class ContextCompactor:
         total_chars = sum(len(_message_text_for_tokens(item)) for item in eval_msgs if isinstance(item, dict))
         return total_chars > self.threshold_chars
 
+    def _split_for_compaction(
+        self,
+        working: Sequence[Dict[str, Any]],
+    ) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
+        """Split working history without orphan tool rows at the retain boundary."""
+        items = [m for m in working if isinstance(m, dict)]
+        retain_n = self.retain_recent_messages
+        if len(items) <= retain_n:
+            return [], list(items)
+
+        split_at = len(items) - retain_n
+
+        # Never start retained segment with a tool message (assistant owner was compacted away).
+        while split_at > 0 and str(items[split_at].get("role", "")).strip().lower() == "tool":
+            split_at -= 1
+
+        # If split lands on assistant+tool_calls, include contiguous tool responses in retained.
+        if split_at < len(items) and str(items[split_at].get("role", "")).strip().lower() == "assistant":
+            tool_calls = items[split_at].get("tool_calls") or []
+            if tool_calls:
+                j = split_at + 1
+                while j < len(items) and str(items[j].get("role", "")).strip().lower() == "tool":
+                    j += 1
+                group_len = j - split_at
+                if group_len > retain_n:
+                    split_at = max(0, j - retain_n)
+                    while split_at > 0 and str(items[split_at].get("role", "")).strip().lower() == "tool":
+                        split_at -= 1
+
+        to_compact = list(items[:split_at])
+        retained = list(items[split_at:])
+        return to_compact, retained
+
     def micro_compact_tool_result(self, tool_name: str, result: str, budget: Optional[int] = None) -> str:
         """Condense verbose tool results preserving head/tail."""
         if budget is None:
@@ -492,9 +525,10 @@ class ContextCompactor:
             )
             return copied, False, "", 0, ""
 
-        compacted_count = len(working) - self.retain_recent_messages
-        to_compact = working[:compacted_count]
-        retained = working[compacted_count:]
+        to_compact, retained = self._split_for_compaction(working)
+        if not to_compact:
+            return copied, False, "", 0, ""
+        compacted_count = len(to_compact)
         memory = self._extract_session_memory(to_compact)
 
         # FR-6: Extract pending user question (hard-coded at top of content)

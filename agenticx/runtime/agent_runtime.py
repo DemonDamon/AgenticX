@@ -1631,6 +1631,7 @@ class AgentRuntime:
         self._proactive_compact_this_turn = False
         self._budget_compress_notice_sent_this_turn = False
         self._pending_loop_nudge = None
+        setattr(session, "_context_chain_repair_attempted", False)
         self._last_persist_time = time.time()
         self._tools_since_persist = 0
         try:
@@ -1688,10 +1689,33 @@ class AgentRuntime:
             if _phase_did:
                 session.agent_messages = list(history)
         compact_model = str(getattr(session, "model_name", "") or "")
-        compacted_history, did_compact, compact_summary, compacted_count, _pending_q = await self.compactor.maybe_compact(
-            history,
-            model=compact_model,
-        )
+        did_compact = False
+        compact_summary = ""
+        compacted_count = 0
+        compacted_history = history
+        try:
+            compacted_history, did_compact, compact_summary, compacted_count, _pending_q = await self.compactor.maybe_compact(
+                history,
+                model=compact_model,
+            )
+        except Exception as exc:
+            logger.warning(
+                "proactive compaction failed; continuing with unsplit history session=%s: %s",
+                getattr(session, "session_id", ""),
+                exc,
+                exc_info=True,
+            )
+            compacted_history = history
+            did_compact = False
+        if did_compact:
+            compacted_history = _sanitize_context_messages(compacted_history)
+            if len(compacted_history) <= 1:
+                logger.warning(
+                    "proactive compaction collapsed history to <=1 row; skipping persist session=%s",
+                    getattr(session, "session_id", ""),
+                )
+                compacted_history = history
+                did_compact = False
         messages: List[Dict[str, Any]] = [{"role": "system", "content": current_system_prompt}]
         messages.extend(compacted_history)
         # Promote any user history attachments (with data:image data_url) into native
@@ -1728,6 +1752,7 @@ class AgentRuntime:
                         scratch[EXPLORE_WHOLE_FILE_READ_WARN_KEY] = "0"
         except Exception:
             pass
+        _is_system_trigger = user_input.startswith("[系统通知]")
         if did_compact:
             yield RuntimeEvent(
                 type=EventType.COMPACTION.value,
@@ -1737,12 +1762,24 @@ class AgentRuntime:
                 },
                 agent_id=agent_id,
             )
-            await self.hooks.run_on_compaction(compacted_count, compact_summary, session)
+            try:
+                await self.hooks.run_on_compaction(compacted_count, compact_summary, session)
+            except Exception:
+                logger.debug("run_on_compaction hook failed", exc_info=True)
             # FR-1: persist proactive compaction so later turns use compacted history
             # instead of re-summarizing full agent_messages every turn.
             session.agent_messages = list(compacted_history)
             self._proactive_compact_this_turn = True
-        _is_system_trigger = user_input.startswith("[系统通知]")
+            if not _is_system_trigger and str(user_input or "").strip():
+                messages.append(
+                    {
+                        "role": "system",
+                        "content": (
+                            "[compaction-notice] 较早历史已压缩为摘要；请继续完成用户当前请求，"
+                            "勿将 [compacted] 标记误判为任务终止。"
+                        ),
+                    },
+                )
         user_content: Any = user_message_content if user_message_content is not None else user_input
         messages.append({"role": "user", "content": user_content})
         if persist_user_message:
@@ -2447,20 +2484,24 @@ class AgentRuntime:
                             model=model_name,
                         )
                         if did_react:
-                            session.agent_messages = react_hist
-                            messages[:] = [{"role": "system", "content": current_system_prompt}, *list(react_hist)]
-                            # Re-promote after forced history replacement so vision images from
-                            # attachments survive this compaction/reset path when applicable.
-                            try:
-                                p = str(getattr(session, "provider_name", "") or "")
-                                m = str(getattr(session, "model_name", "") or "")
-                                messages = _promote_user_image_attachments(messages, p, m)
-                            except Exception:
-                                pass
-                            try:
-                                await self.hooks.run_on_compaction(react_count, react_summary, session)
-                            except Exception:
-                                pass
+                            react_hist = _sanitize_context_messages(react_hist)
+                            if len(react_hist) <= 1:
+                                did_react = False
+                            else:
+                                session.agent_messages = react_hist
+                                messages[:] = [{"role": "system", "content": current_system_prompt}, *list(react_hist)]
+                                # Re-promote after forced history replacement so vision images from
+                                # attachments survive this compaction/reset path when applicable.
+                                try:
+                                    p = str(getattr(session, "provider_name", "") or "")
+                                    m = str(getattr(session, "model_name", "") or "")
+                                    messages = _promote_user_image_attachments(messages, p, m)
+                                except Exception:
+                                    pass
+                                try:
+                                    await self.hooks.run_on_compaction(react_count, react_summary, session)
+                                except Exception:
+                                    pass
                     budget_level, budget_source, budget_current, budget_max = self.token_budget.check_with_source()
                     if (
                         budget_level == BudgetLevel.COMPRESS
@@ -2667,6 +2708,27 @@ class AgentRuntime:
                     if fault in {"billing", "auth", "rate_limit", "context_window", "transient"}
                     else f"模型调用失败: {exc}"
                 )
+                # Recover once from broken tool-call pairing after compaction/split.
+                if (
+                    fault in {"context_window", "transient"}
+                    and not getattr(session, "_context_chain_repair_attempted", False)
+                ):
+                    repaired_messages = _sanitize_context_messages(messages)
+                    repaired_agent = _sanitize_context_messages(session.agent_messages)
+                    if repaired_messages != messages or repaired_agent != session.agent_messages:
+                        setattr(session, "_context_chain_repair_attempted", True)
+                        messages[:] = repaired_messages
+                        session.agent_messages = repaired_agent
+                        yield RuntimeEvent(
+                            type=EventType.ERROR.value,
+                            data={
+                                "text": "上下文链已修复，正在重试本轮模型调用…",
+                                "severity": "warning",
+                                "detector": "context_chain_repair",
+                            },
+                            agent_id=agent_id,
+                        )
+                        continue
                 yield RuntimeEvent(
                     type=EventType.ERROR.value,
                     data={
