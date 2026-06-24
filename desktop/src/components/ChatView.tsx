@@ -51,6 +51,7 @@ import {
   type ContinueReason,
   type ContinueSource,
 } from "../utils/session-continue";
+import { shouldDropDuplicateUserSend, type SendDedupeEntry } from "../utils/send-dedupe";
 import { ChatImAvatar, ImBubble } from "./messages/ImBubble";
 import { TerminalLine } from "./messages/TerminalLine";
 import { CleanBlock } from "./messages/CleanBlock";
@@ -412,6 +413,7 @@ export function ChatView({ onOpenConfirm, mode = "pro" }: Props) {
   const lastMidStreamAssistantCommitRef = useRef<string | null>(null);
   const abortedByUserRef = useRef(false);
   const activeRequestIdRef = useRef(0);
+  const lastUserSendDedupeRef = useRef<SendDedupeEntry | null>(null);
   const modelBtnRef = useRef<HTMLButtonElement | null>(null);
   const imeComposingRef = useRef(false);
   const lastComposerEnterAtRef = useRef(0);
@@ -946,6 +948,24 @@ export function ChatView({ onOpenConfirm, mode = "pro" }: Props) {
   ) => {
     const isContinuation = !!opts?.continuation;
     if ((!userText && !isContinuation) || !apiBase || !sessionId) return;
+    if (!isContinuation && !opts?.forceSend) {
+      const now = Date.now();
+      if (
+        shouldDropDuplicateUserSend(
+          lastUserSendDedupeRef.current,
+          sessionId,
+          userText,
+          now,
+        )
+      ) {
+        return;
+      }
+      lastUserSendDedupeRef.current = {
+        sessionId,
+        text: String(userText ?? "").trim(),
+        at: now,
+      };
+    }
 
     if (
       !isContinuation &&
@@ -1100,6 +1120,7 @@ export function ChatView({ onOpenConfirm, mode = "pro" }: Props) {
 
     try {
       const body: Record<string, unknown> = { session_id: sessionId, user_input: effectiveUserText };
+      if (!isContinuation) body.client_turn_id = crypto.randomUUID();
       if (reqProvider) body.provider = reqProvider;
       if (reqModel) body.model = reqModel;
       if (targetAgentId !== "meta") body.agent_id = targetAgentId;
