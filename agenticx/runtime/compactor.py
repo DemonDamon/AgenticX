@@ -137,17 +137,58 @@ class ContextCompactor:
         limit_tokens = max(1024, int(limit_chars / 4))
         return est_tokens > limit_tokens * self.token_compact_ratio
 
+    @staticmethod
+    def _has_compacted_prefix(messages: Sequence[Dict[str, Any]]) -> bool:
+        if not messages:
+            return False
+        first = messages[0]
+        if not isinstance(first, dict):
+            return False
+        if str(first.get("role", "")).strip().lower() != "system":
+            return False
+        return "[compacted]" in str(first.get("content", "") or "")
+
+    @classmethod
+    def _split_compacted_messages(
+        cls,
+        messages: Sequence[Dict[str, Any]],
+    ) -> Tuple[Optional[Dict[str, Any]], List[Dict[str, Any]]]:
+        if cls._has_compacted_prefix(messages):
+            prefix = messages[0] if isinstance(messages[0], dict) else None
+            tail = [m for m in messages[1:] if isinstance(m, dict)]
+            return prefix, tail
+        return None, [m for m in messages if isinstance(m, dict)]
+
+    @staticmethod
+    def _extract_compacted_summary_text(compact_block: Dict[str, Any]) -> str:
+        content = str(compact_block.get("content", "") or "")
+        marker = "[compacted]"
+        idx = content.find(marker)
+        if idx < 0:
+            return content.strip()[:1500]
+        after_marker = content[idx:]
+        parts = after_marker.split("\n", 1)
+        if len(parts) < 2:
+            return ""
+        return parts[1].strip()[:1500]
+
     def _should_compact(
         self,
         messages: Sequence[Dict[str, Any]],
         *,
         model: str = "",
     ) -> bool:
-        if model and self._should_compact_by_tokens(messages, model):
+        _prefix, tail = self._split_compacted_messages(messages)
+        # After a prior compaction, only the post-summary tail decides whether to
+        # roll forward — the compact block itself must not re-trigger every turn.
+        eval_msgs = tail if _prefix is not None else messages
+        if len(eval_msgs) <= self.retain_recent_messages:
+            return False
+        if model and self._should_compact_by_tokens(eval_msgs, model):
             return True
-        if len(messages) > self.threshold_messages:
+        if len(eval_msgs) > self.threshold_messages:
             return True
-        total_chars = sum(len(_message_text_for_tokens(item)) for item in messages if isinstance(item, dict))
+        total_chars = sum(len(_message_text_for_tokens(item)) for item in eval_msgs if isinstance(item, dict))
         return total_chars > self.threshold_chars
 
     def micro_compact_tool_result(self, tool_name: str, result: str, budget: Optional[int] = None) -> str:
@@ -435,7 +476,9 @@ class ContextCompactor:
             (new_messages, did_compact, summary, compacted_count, pending_question)
         """
         copied = [m for m in messages if isinstance(m, dict)]
-        if len(copied) <= self.retain_recent_messages:
+        compact_block, tail = self._split_compacted_messages(copied)
+        working = tail if compact_block is not None else copied
+        if len(working) <= self.retain_recent_messages:
             return copied, False, "", 0, ""
 
         should = force or self._should_compact(copied, model=model)
@@ -449,9 +492,9 @@ class ContextCompactor:
             )
             return copied, False, "", 0, ""
 
-        compacted_count = len(copied) - self.retain_recent_messages
-        to_compact = copied[:compacted_count]
-        retained = copied[compacted_count:]
+        compacted_count = len(working) - self.retain_recent_messages
+        to_compact = working[:compacted_count]
+        retained = working[compacted_count:]
         memory = self._extract_session_memory(to_compact)
 
         # FR-6: Extract pending user question (hard-coded at top of content)
@@ -471,7 +514,12 @@ class ContextCompactor:
             memory_json = json.dumps(memory_for_prefix, ensure_ascii=False)
         except Exception:
             memory_json = str(memory_for_prefix)
-        memory_prefix = f"[session_memory]{memory_json[:1800]}"
+        prior_summary_prefix = ""
+        if compact_block is not None:
+            prior_text = self._extract_compacted_summary_text(compact_block)
+            if prior_text:
+                prior_summary_prefix = f"[prior_compacted_summary]\n{prior_text[:1200]}\n\n"
+        memory_prefix = f"{prior_summary_prefix}[session_memory]{memory_json[:1800]}"
         summary = await self._summarize(to_compact, memory_prefix=memory_prefix)
 
         # FR-6: Build compacted message with pending question hard-coded at top

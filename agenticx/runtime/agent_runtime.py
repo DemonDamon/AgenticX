@@ -1530,6 +1530,7 @@ class AgentRuntime:
         # are not reduced), so without these every tool round would re-summarize and
         # re-emit the same UI warning.
         self._forced_budget_compact_this_turn = False
+        self._proactive_compact_this_turn = False
         self._budget_compress_notice_sent_this_turn = False
         self._mid_turn_persist = mid_turn_persist
         self._persist_interval_sec = _resolve_mid_turn_persist_interval()
@@ -1627,6 +1628,7 @@ class AgentRuntime:
 
         self.token_budget.reset_turn()
         self._forced_budget_compact_this_turn = False
+        self._proactive_compact_this_turn = False
         self._budget_compress_notice_sent_this_turn = False
         self._pending_loop_nudge = None
         self._last_persist_time = time.time()
@@ -1739,6 +1741,7 @@ class AgentRuntime:
             # FR-1: persist proactive compaction so later turns use compacted history
             # instead of re-summarizing full agent_messages every turn.
             session.agent_messages = list(compacted_history)
+            self._proactive_compact_this_turn = True
         _is_system_trigger = user_input.startswith("[系统通知]")
         user_content: Any = user_message_content if user_message_content is not None else user_input
         messages.append({"role": "user", "content": user_content})
@@ -2426,7 +2429,16 @@ class AgentRuntime:
                     did_react = False
                     react_summary = ""
                     react_count = 0
-                    if not self._forced_budget_compact_this_turn:
+                    # Session-level token budget counts cumulative LLM usage; compacting
+                    # chat history cannot reduce it. Only attempt forced compaction for
+                    # per-turn budget pressure, and never twice in one turn (proactive
+                    # compaction already ran at turn start).
+                    should_force_reactive_compact = (
+                        not self._forced_budget_compact_this_turn
+                        and not self._proactive_compact_this_turn
+                        and budget_source == "turn"
+                    )
+                    if should_force_reactive_compact:
                         self._forced_budget_compact_this_turn = True
                         hist_compact = _sanitize_context_messages(session.agent_messages)
                         react_hist, did_react, react_summary, react_count, _pending_q_react = await self.compactor.maybe_compact(
@@ -2466,9 +2478,14 @@ class AgentRuntime:
                         )
                         # FR-4: one concise notice — skip separate reactive compaction event when
                         # budget is still over limit (Desktop would otherwise show two long lines).
-                        if did_react:
+                        if budget_source == "session":
                             compress_notice = (
-                                f"上下文接近上限，已压缩 {react_count} 条历史但仍超限，"
+                                f"本会话 Token 预算已接近上限（{budget_current}/{budget_max}），"
+                                "建议收口交付或新建会话续接。"
+                            )
+                        elif did_react:
+                            compress_notice = (
+                                f"本回合上下文接近上限，已压缩 {react_count} 条历史但仍偏紧，"
                                 "建议收口或新建会话。"
                             )
                         else:
@@ -2481,6 +2498,7 @@ class AgentRuntime:
                                 "detector": "token_budget_compress",
                                 "current": budget_current,
                                 "max": budget_max,
+                                "budget_source": budget_source,
                             },
                             agent_id=agent_id,
                         )
