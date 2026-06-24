@@ -15,6 +15,37 @@ export function fileNameFromPath(filePath: string): string {
   return filePath.split(/[\\/]/).pop() || filePath;
 }
 
+/** Parent directory hint for reference chips (e.g. `~/Downloads`). */
+export function formatReferencePathHint(absPath: string): string {
+  const norm = String(absPath || "")
+    .trim()
+    .replace(/\\/g, "/");
+  if (!norm) return "";
+  const idx = norm.lastIndexOf("/");
+  if (idx <= 0) return norm;
+  const parent = norm.slice(0, idx);
+  const parts = parent.split("/").filter(Boolean);
+  if (parts.length >= 3 && parts[0] === "Users") {
+    return `~/${parts.slice(2).join("/")}`;
+  }
+  if (parts.length >= 2) return parts.slice(-2).join("/");
+  return parent;
+}
+
+export function referenceChipTitle(name: string, sourcePath?: string): string {
+  const sp = String(sourcePath || "").trim();
+  return sp || `@${name}`;
+}
+
+/** Chip label: keep short filename, append directory hint when path is outside workspace-relative name. */
+export function formatReferenceChipLabel(name: string, sourcePath?: string): string {
+  const label = String(name || "").trim();
+  const sp = String(sourcePath || "").trim();
+  if (!label || !sp || label.includes("/") || label.includes("\\")) return label;
+  const hint = formatReferencePathHint(sp);
+  return hint ? `${label} · ${hint}` : label;
+}
+
 export function parentFolderPath(filePath: string): string {
   const normalized = filePath.replace(/\\/g, "/");
   const idx = normalized.lastIndexOf("/");
