@@ -1928,6 +1928,18 @@ export const useAppStore = create<AppState>((set, get) => ({
     })),
   addMessage: (role, content, agentId, provider, model, attachments, extras) =>
     set((state) => {
+      const activePane = state.panes.find((pane) => pane.id === state.activePaneId);
+      if (role === "user" && String(content ?? "").trim() && activePane) {
+        const ownerSid = String(activePane.sessionId ?? "").trim() || undefined;
+        const norm = (s: unknown) => String(s ?? "").trim();
+        const dup = (activePane.messages ?? []).some(
+          (m) =>
+            m.role === "user" &&
+            norm(m.content) === norm(content) &&
+            (ownerSid ? m.ownerSessionId === ownerSid : !m.ownerSessionId),
+        );
+        if (dup) return state;
+      }
       const nextMessage: Message = {
         id: uid(),
         role,
