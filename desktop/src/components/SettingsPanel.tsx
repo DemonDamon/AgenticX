@@ -435,7 +435,9 @@ function getSkillCategory(skill: SkillItem): "third-party" | "custom" | "builtin
 }
 
 const SKILLS_SECTION_PANEL_TITLE_CLASS =
-  "text-sm font-semibold normal-case tracking-normal text-text-strong";
+  "text-sm font-bold normal-case tracking-normal text-text-strong";
+
+const SKILLS_GROUP_TITLE_CLASS = "text-sm font-semibold text-text-strong";
 
 function SkillRowButton({
   skill,
@@ -682,7 +684,7 @@ function SkillGroup({
         <ChevronDown
           className={`h-4 w-4 shrink-0 text-text-faint transition-transform ${expanded ? "" : "-rotate-90"}`}
         />
-        <span className="text-xs font-normal text-text-subtle">
+        <span className={SKILLS_GROUP_TITLE_CLASS}>
           {title} ({skills.length})
         </span>
       </button>
@@ -729,7 +731,7 @@ function SkillsLocationSection({
 
   return (
     <Panel
-      title={`${title} (${skills.length})`}
+      title={title}
       collapsible
       defaultCollapsed={false}
       className="mb-4"
@@ -771,16 +773,6 @@ function SkillsLocationSection({
     </Panel>
   );
 }
-
-type BundleItem = {
-  name: string;
-  version: string;
-  description: string;
-  skills: string[];
-  mcp_servers: string[];
-  avatars: string[];
-  memory_templates: string[];
-};
 
 type RegistrySearchItem = {
   name: string;
@@ -2629,18 +2621,11 @@ function SkillsTab() {
   const [activeSkillName, setActiveSkillName] = useState<string | null>(null);
   const [expandedSkillName, setExpandedSkillName] = useState<string | null>(null);
   const [loadingDetail, setLoadingDetail] = useState(false);
-  const [bundles, setBundles] = useState<BundleItem[]>([]);
-  const [bundleInstallPath, setBundleInstallPath] = useState("");
-  const [bundleBusy, setBundleBusy] = useState(false);
-  const [bundleMsg, setBundleMsg] = useState("");
   const [marketQuery, setMarketQuery] = useState("");
   const [marketResults, setMarketResults] = useState<RegistrySearchItem[]>([]);
   const [marketLoading, setMarketLoading] = useState(false);
   const [marketMsg, setMarketMsg] = useState("");
   const [registryInstallBusy, setRegistryInstallBusy] = useState(false);
-  const [bundlePendingPath, setBundlePendingPath] = useState("");
-  const [bundleNeedsConfirmNonHigh, setBundleNeedsConfirmNonHigh] = useState(false);
-  const [bundleNeedsConfirmHigh, setBundleNeedsConfirmHigh] = useState(false);
   const [marketPending, setMarketPending] = useState<RegistrySearchItem | null>(null);
   const [marketNeedsConfirmNonHigh, setMarketNeedsConfirmNonHigh] = useState(false);
   const [marketNeedsConfirmHigh, setMarketNeedsConfirmHigh] = useState(false);
@@ -2668,6 +2653,7 @@ function SkillsTab() {
   const [installPromptBusy, setInstallPromptBusy] = useState(false);
   const [skillhubQuery, setSkillhubQuery] = useState("");
   const [skillhubResults, setSkillhubResults] = useState<SkillHubRow[]>([]);
+  const [skillhubResultsExpanded, setSkillhubResultsExpanded] = useState(true);
   const [skillhubLoading, setSkillhubLoading] = useState(false);
   const [skillhubMsg, setSkillhubMsg] = useState("");
   const [skillhubHint, setSkillhubHint] = useState("");
@@ -2675,12 +2661,6 @@ function SkillsTab() {
     Object.fromEntries(RECOMMENDED_SKILLS.map((skill) => [skill.id, skill.icon_src]))
   );
   const [recommendedIconBroken, setRecommendedIconBroken] = useState<Record<string, boolean>>({});
-
-  useEffect(() => {
-    setBundleNeedsConfirmNonHigh(false);
-    setBundleNeedsConfirmHigh(false);
-    setBundlePendingPath("");
-  }, [bundleInstallPath]);
 
   useEffect(() => {
     let cancelled = false;
@@ -2723,15 +2703,13 @@ function SkillsTab() {
     setErr("");
     void (async () => {
       try {
-        const [skillsRes, bundlesRes, scanRes] = await Promise.all([
+        const [skillsRes, scanRes] = await Promise.all([
           window.agenticxDesktop.loadSkills(),
-          window.agenticxDesktop.loadBundles(),
           window.agenticxDesktop.getSkillSettings(),
         ]);
         if (!cancelled) {
           if (skillsRes.ok) setItems(skillsRes.items ?? []);
           else setErr(skillsRes.error ?? "加载技能失败");
-          if (bundlesRes.ok) setBundles(bundlesRes.items ?? []);
           if (scanRes.ok && Array.isArray(scanRes.preset_paths)) {
             setSkillScanPresets(
               scanRes.preset_paths.map((p) => ({
@@ -2839,18 +2817,15 @@ function SkillsTab() {
     setErr("");
     setDetail(null);
     setExpandedSkillName(null);
-    setBundleMsg("");
     setRecentMarketSkillName(null);
     try {
       await window.agenticxDesktop.refreshSkills();
-      const [skillsRes, bundlesRes, scanRes] = await Promise.all([
+      const [skillsRes, scanRes] = await Promise.all([
         window.agenticxDesktop.loadSkills(),
-        window.agenticxDesktop.loadBundles(),
         window.agenticxDesktop.getSkillSettings(),
       ]);
       if (skillsRes.ok) setItems(skillsRes.items ?? []);
       else setErr(skillsRes.error ?? "刷新失败");
-      if (bundlesRes.ok) setBundles(bundlesRes.items ?? []);
       if (scanRes.ok && Array.isArray(scanRes.preset_paths)) {
         setSkillScanPresets(
           scanRes.preset_paths.map((p) => ({
@@ -2905,14 +2880,40 @@ function SkillsTab() {
     ],
   );
 
-  const reloadSkillsAndBundles = async () => {
-    const [skillsRes, bundlesRes] = await Promise.all([
-      window.agenticxDesktop.loadSkills(),
-      window.agenticxDesktop.loadBundles(),
-    ]);
-    if (skillsRes.ok) setItems(skillsRes.items ?? []);
-    if (bundlesRes.ok) setBundles(bundlesRes.items ?? []);
-  };
+  const onAddCustomSkillPath = useCallback(async () => {
+    if (skillScanBusy) return;
+    try {
+      const picker = window.agenticxDesktop.chooseDirectory;
+      if (typeof picker !== "function") {
+        setSkillScanMsg("当前客户端不支持目录选择，请重启桌面端后重试。");
+        return;
+      }
+      const picked = await picker();
+      if (picked.canceled) return;
+      if (!picked.ok || !picked.path?.trim()) {
+        setSkillScanMsg(picked.error ? `选择目录失败: ${picked.error}` : "未选择目录");
+        return;
+      }
+      const path = picked.path.trim();
+      const existing = skillScanCustomPaths.map((p) => p.trim()).filter(Boolean);
+      if (existing.includes(path)) {
+        setSkillScanMsg("该路径已在自定义列表中");
+        return;
+      }
+      const next = [...existing, path];
+      setSkillScanCustomPaths(next);
+      await persistSkillScanSettings(skillScanPresets, next, preferredSkillSources, disabledSkillNames);
+    } catch (e) {
+      setSkillScanMsg(String(e));
+    }
+  }, [
+    skillScanBusy,
+    skillScanCustomPaths,
+    skillScanPresets,
+    preferredSkillSources,
+    disabledSkillNames,
+    persistSkillScanSettings,
+  ]);
 
   const reloadSkillsAfterMarketInstall = async (installedSlug: string) => {
     try {
@@ -2992,124 +2993,13 @@ function SkillsTab() {
         });
       }
       setSkillhubResults(rows);
+      setSkillhubResultsExpanded(true);
       setSkillhubHint(typeof res.hint === "string" ? res.hint : "");
     } catch (e) {
       setSkillhubResults([]);
       setSkillhubMsg(String(e));
     } finally {
       setSkillhubLoading(false);
-    }
-  };
-
-  const onInstallBundle = async () => {
-    if (!bundleInstallPath.trim()) return;
-    const sourcePath = bundleInstallPath.trim();
-    setBundleBusy(true);
-    setBundleMsg("");
-    setBundleNeedsConfirmNonHigh(false);
-    setBundleNeedsConfirmHigh(false);
-    setBundlePendingPath("");
-    try {
-      setBundleMsg("正在扫描扩展包…");
-      const prev = await window.agenticxDesktop.installBundlePreview({ sourcePath });
-      if (!prev.ok) {
-        setBundleMsg(`扫描未通过: ${prev.error ?? "未知错误"}`);
-        return;
-      }
-      if (prev.scan) {
-        setBundleMsg(formatSkillScanSummary(prev.scan));
-      } else {
-        setBundleMsg("未发现需要展示的扫描条目。");
-      }
-
-      const res = await window.agenticxDesktop.installBundle({ sourcePath });
-      if (res.ok) {
-        setBundleMsg(
-          formatInstallDoneMsg(
-            `已安装扩展包 "${res.name ?? ""}" v${res.version ?? ""}`,
-            res.scan_summary ?? prev.scan,
-          ),
-        );
-        setBundleInstallPath("");
-        await reloadSkillsAndBundles();
-        return;
-      }
-      if (res.error_code === "non_high_risk_confirm_required") {
-        setBundlePendingPath(sourcePath);
-        setBundleNeedsConfirmNonHigh(true);
-        if (res.scan_summary) {
-          setBundleMsg(`${formatSkillScanSummary(res.scan_summary)}\n\n当前策略要求你点「确认安装」后再写入。`);
-        } else {
-          setBundleMsg("当前策略要求你点「确认安装」后再写入。");
-        }
-        return;
-      }
-      if (res.error_code === "high_risk_confirm_required") {
-        setBundlePendingPath(sourcePath);
-        setBundleNeedsConfirmHigh(true);
-        if (res.scan_summary) {
-          setBundleMsg(`${formatSkillScanSummary(res.scan_summary)}\n\n命中高危规则：请阅读摘要后点下方按钮确认。`);
-        } else {
-          setBundleMsg("命中高危规则：请阅读说明后点下方按钮确认。");
-        }
-        return;
-      }
-      setBundleMsg(`安装失败: ${res.error ?? "未知错误"}`);
-    } catch (e) {
-      setBundleMsg(`安装失败: ${String(e)}`);
-    } finally {
-      setBundleBusy(false);
-    }
-  };
-
-  const onConfirmBundleInstall = async (kind: "non_high" | "high") => {
-    if (!bundlePendingPath.trim()) return;
-    setBundleBusy(true);
-    try {
-      const res = await window.agenticxDesktop.installBundle({
-        sourcePath: bundlePendingPath.trim(),
-        confirmNonHighRisk: kind === "non_high",
-        acknowledgeHighRisk: kind === "high",
-      });
-      setBundleNeedsConfirmNonHigh(false);
-      setBundleNeedsConfirmHigh(false);
-      setBundlePendingPath("");
-      if (res.ok) {
-        setBundleMsg(
-          formatInstallDoneMsg(
-            `已安装扩展包 "${res.name ?? ""}" v${res.version ?? ""}`,
-            res.scan_summary,
-          ),
-        );
-        setBundleInstallPath("");
-        await reloadSkillsAndBundles();
-      } else {
-        setBundleMsg(`安装失败: ${res.error ?? "未知错误"}`);
-      }
-    } catch (e) {
-      setBundleMsg(`安装失败: ${String(e)}`);
-    } finally {
-      setBundleBusy(false);
-    }
-  };
-
-  const onUninstallBundle = async (name: string) => {
-    setBundleBusy(true);
-    setBundleMsg("");
-    try {
-      const res = await window.agenticxDesktop.uninstallBundle({ name });
-      if (res.ok) {
-        setBundleMsg(`已卸载扩展包 "${name}"`);
-        setBundles((prev) => prev.filter((b) => b.name !== name));
-        const skillsRes = await window.agenticxDesktop.loadSkills();
-        if (skillsRes.ok) setItems(skillsRes.items ?? []);
-      } else {
-        setBundleMsg(`卸载失败: ${res.error ?? "未知错误"}`);
-      }
-    } catch (e) {
-      setBundleMsg(`卸载失败: ${String(e)}`);
-    } finally {
-      setBundleBusy(false);
     }
   };
 
@@ -3330,12 +3220,7 @@ function SkillsTab() {
   }
 
   return (
-    <div className="space-y-3">
-      <div ref={skillsListAnchorRef} className="text-sm text-text-subtle">
-        <strong className="text-text-strong">技能</strong>
-        是注入给 Agent 的领域知识指令，告诉 AI 在特定任务中
-        <strong className="text-text-strong">怎么做</strong>。
-      </div>
+    <div ref={skillsListAnchorRef} className="space-y-3">
 
       {pendingProposalCount > 0 ? (
         <Panel title={`待审 (${pendingProposalCount})`}>
@@ -3356,7 +3241,7 @@ function SkillsTab() {
             {skillScanPresets.map((p) => (
               <div key={p.id} className="flex items-center justify-between px-3 py-2.5">
                 <div className="min-w-0 flex-1 pr-3">
-                  <div className="text-sm font-medium text-text-strong">{p.label}</div>
+                  <div className="text-sm font-semibold text-text-strong">{p.label}</div>
                   <div className="mt-0.5 truncate font-mono text-[10px] text-text-muted">{p.path}</div>
                 </div>
                 <div className="shrink-0">
@@ -3377,61 +3262,66 @@ function SkillsTab() {
             ))}
           </div>
 
-          {/* Custom paths */}
-          <div className="flex items-center justify-between border-t border-border bg-surface-card px-3 py-2">
-            <div className="text-xs font-semibold text-text-strong">自定义路径</div>
-            <button
-              type="button"
-              className="inline-flex items-center gap-1 rounded bg-surface-panel px-2 py-1 text-[11px] font-medium text-text-subtle shadow-sm ring-1 ring-inset ring-border transition hover:bg-surface-hover hover:text-text-primary disabled:opacity-40"
-              disabled={skillScanBusy}
-              onClick={() => setSkillScanCustomPaths((prev) => [...prev, ""])}
-            >
-              <Plus className="h-3 w-3" />
-              添加路径
-            </button>
-          </div>
-          
           <div className="divide-y divide-border border-t border-border">
             {skillScanCustomPaths.length === 0 ? (
-              <div className="p-3 text-center text-xs text-text-faint bg-surface-base">
-                暂无自定义路径
+              <div className="bg-surface-base p-3">
+                <button
+                  type="button"
+                  className="flex w-full items-center justify-center rounded-md border border-dashed border-border px-3 py-2.5 text-sm text-text-subtle transition hover:border-border-strong hover:bg-surface-hover hover:text-text-primary disabled:opacity-40"
+                  disabled={skillScanBusy}
+                  onClick={() => void onAddCustomSkillPath()}
+                >
+                  添加自定义路径
+                </button>
               </div>
             ) : (
-              skillScanCustomPaths.map((row, i) => (
-                <div key={`skill-custom-${i}`} className="flex items-center gap-2 px-3 py-2 bg-surface-base">
-                  <div className="flex-1">
-                    <input
-                      className="w-full rounded bg-surface-panel px-2 py-1.5 font-mono text-xs text-text-primary outline-none placeholder:text-text-faint focus:ring-1 focus:ring-border"
-                      placeholder="例如 ~/my-skills 或绝对路径"
-                      value={row}
+              <>
+                {skillScanCustomPaths.map((row, i) => (
+                  <div key={`skill-custom-${i}`} className="flex items-center gap-2 px-3 py-2 bg-surface-base">
+                    <div className="flex-1">
+                      <input
+                        className="w-full rounded bg-surface-panel px-2 py-1.5 font-mono text-xs text-text-primary outline-none placeholder:text-text-faint focus:ring-1 focus:ring-border"
+                        placeholder="例如 ~/my-skills 或绝对路径"
+                        value={row}
+                        disabled={skillScanBusy}
+                        onChange={(e) => {
+                          const next = [...skillScanCustomPaths];
+                          next[i] = e.target.value;
+                          setSkillScanCustomPaths(next);
+                        }}
+                        onBlur={(e) => {
+                          const next = [...skillScanCustomPaths];
+                          next[i] = e.target.value;
+                          void persistSkillScanSettings(skillScanPresets, next, preferredSkillSources, disabledSkillNames);
+                        }}
+                      />
+                    </div>
+                    <button
+                      type="button"
+                      className="shrink-0 rounded p-1.5 text-text-faint transition hover:bg-surface-hover hover:text-rose-400 disabled:opacity-40"
                       disabled={skillScanBusy}
-                      onChange={(e) => {
-                        const next = [...skillScanCustomPaths];
-                        next[i] = e.target.value;
+                      title="移除"
+                      onClick={() => {
+                        const next = skillScanCustomPaths.filter((_, j) => j !== i);
                         setSkillScanCustomPaths(next);
-                      }}
-                      onBlur={(e) => {
-                        const next = [...skillScanCustomPaths];
-                        next[i] = e.target.value;
                         void persistSkillScanSettings(skillScanPresets, next, preferredSkillSources, disabledSkillNames);
                       }}
-                    />
+                    >
+                      <Trash2 className="h-3.5 w-3.5" />
+                    </button>
                   </div>
+                ))}
+                <div className="bg-surface-base px-3 py-2">
                   <button
                     type="button"
-                    className="shrink-0 rounded p-1.5 text-text-faint transition hover:bg-surface-hover hover:text-rose-400 disabled:opacity-40"
+                    className="flex w-full items-center justify-center rounded-md border border-dashed border-border px-3 py-2 text-xs text-text-subtle transition hover:border-border-strong hover:bg-surface-hover hover:text-text-primary disabled:opacity-40"
                     disabled={skillScanBusy}
-                    title="移除"
-                    onClick={() => {
-                      const next = skillScanCustomPaths.filter((_, j) => j !== i);
-                      setSkillScanCustomPaths(next);
-                      void persistSkillScanSettings(skillScanPresets, next, preferredSkillSources, disabledSkillNames);
-                    }}
+                    onClick={() => void onAddCustomSkillPath()}
                   >
-                    <Trash2 className="h-3.5 w-3.5" />
+                    添加自定义路径
                   </button>
                 </div>
-              ))
+              </>
             )}
           </div>
         </div>
@@ -3777,7 +3667,36 @@ function SkillsTab() {
                 <div className="mt-1.5 text-xs text-text-faint">{skillhubHint}</div>
               )}
               {skillhubResults.length > 0 && (
-                <div className="mt-2 space-y-1">
+                <div className="mt-2">
+                  <div className="mb-2 flex items-center justify-between gap-2">
+                    <button
+                      type="button"
+                      className="flex min-w-0 flex-1 items-center gap-1.5 text-left transition hover:text-text-primary"
+                      onClick={() => setSkillhubResultsExpanded((v) => !v)}
+                      aria-expanded={skillhubResultsExpanded}
+                    >
+                      <ChevronDown
+                        className={`h-4 w-4 shrink-0 text-text-faint transition-transform ${skillhubResultsExpanded ? "" : "-rotate-90"}`}
+                      />
+                      <span className={SKILLS_GROUP_TITLE_CLASS}>
+                        搜索结果 ({skillhubResults.length})
+                      </span>
+                    </button>
+                    <button
+                      type="button"
+                      className="shrink-0 text-[11px] text-text-faint transition hover:text-text-primary"
+                      onClick={() => {
+                        setSkillhubResults([]);
+                        setSkillhubHint("");
+                        setSkillhubMsg("");
+                        setSkillhubResultsExpanded(true);
+                      }}
+                    >
+                      清空
+                    </button>
+                  </div>
+                  {skillhubResultsExpanded ? (
+                    <div className="space-y-1">
                   {skillhubResults.map((item) => (
                     <div
                       key={item.slug}
@@ -3823,145 +3742,17 @@ function SkillsTab() {
                       </div>
                     </div>
                   ))}
+                    </div>
+                  ) : (
+                    <div className="rounded-md border border-dashed border-border px-3 py-2 text-center text-xs text-text-faint">
+                      已收起 {skillhubResults.length} 条结果，点击上方标题可展开
+                    </div>
+                  )}
                 </div>
               )}
             </section>
         </div>
       </Panel>
-
-      {/* === Installed Bundles section === */}
-      <div className="mt-4 border-t border-border pt-4">
-        <div className="mb-2 flex items-center justify-between">
-          <div className="text-[11px] font-medium uppercase tracking-wide text-text-subtle">
-            已安装扩展包 ({bundles.length})
-          </div>
-        </div>
-
-        {/* Install from local path */}
-        <div className="mb-3 flex gap-2">
-          <input
-            className="flex-1 rounded-md border border-border bg-surface-panel px-2 py-1.5 text-sm text-text-primary placeholder:text-text-faint"
-            placeholder="/path/to/my-bundle (包含 agx-bundle.yaml 的目录)"
-            value={bundleInstallPath}
-            onChange={(e) => setBundleInstallPath(e.target.value)}
-            onKeyDown={(e) => { if (e.key === "Enter") void onInstallBundle(); }}
-          />
-          <button
-            className="shrink-0 rounded-md border border-[var(--settings-accent-border-muted)] px-3 py-1.5 text-xs text-[var(--settings-accent-fg)] transition hover:bg-[var(--settings-accent-subtle-bg)] disabled:opacity-40"
-            onClick={() => void onInstallBundle()}
-            disabled={bundleBusy || !bundleInstallPath.trim()}
-          >
-            {bundleBusy ? "安装中..." : "安装"}
-          </button>
-        </div>
-        {bundleMsg && (
-          <div
-            className={`mb-2 whitespace-pre-wrap text-xs ${
-              bundleMsg.includes("失败") || bundleMsg.includes("扫描未通过")
-                ? "text-rose-400"
-                : bundleNeedsConfirmNonHigh || bundleNeedsConfirmHigh || bundleMsg.includes("高危") || bundleMsg.includes("确认安装")
-                  ? "text-amber-300"
-                  : "text-emerald-400"
-            }`}
-          >
-            {bundleMsg}
-          </div>
-        )}
-        {(bundleNeedsConfirmNonHigh || bundleNeedsConfirmHigh) && (
-          <div className="mb-2 flex flex-wrap gap-2">
-            {bundleNeedsConfirmNonHigh && (
-              <button
-                type="button"
-                className="rounded-md border border-[var(--settings-accent-border-strong)] bg-[var(--settings-accent-subtle-bg)] px-3 py-1.5 text-xs text-[var(--settings-accent-fg-muted)] transition hover:bg-[var(--settings-accent-subtle-bg-hover)] disabled:opacity-40"
-                disabled={bundleBusy}
-                onClick={() => void onConfirmBundleInstall("non_high")}
-              >
-                {bundleBusy ? "安装中…" : "确认安装"}
-              </button>
-            )}
-            {bundleNeedsConfirmHigh && (
-              <button
-                type="button"
-                className="rounded-md border border-rose-500/40 bg-rose-500/10 px-3 py-1.5 text-xs text-rose-300 transition hover:bg-rose-500/20 disabled:opacity-40"
-                disabled={bundleBusy}
-                onClick={() => void onConfirmBundleInstall("high")}
-              >
-                {bundleBusy ? "安装中…" : "我已知晓风险，确认安装"}
-              </button>
-            )}
-            <button
-              type="button"
-              className="rounded-md border border-border px-3 py-1.5 text-xs text-text-subtle transition hover:bg-surface-hover hover:text-text-primary disabled:opacity-40"
-              disabled={bundleBusy}
-              onClick={() => {
-                setBundleNeedsConfirmNonHigh(false);
-                setBundleNeedsConfirmHigh(false);
-                setBundlePendingPath("");
-                setBundleMsg("");
-              }}
-            >
-              取消
-            </button>
-          </div>
-        )}
-
-        {bundles.length === 0 ? (
-          <div className="py-3 text-center text-xs text-text-faint">
-            暂无已安装扩展包。使用上方路径安装 AGX Bundle。
-          </div>
-        ) : (
-          <div className="space-y-1.5">
-            {bundles.map((bundle) => (
-              <div
-                key={bundle.name}
-                className="rounded-md border border-transparent bg-surface-card px-3 py-2"
-              >
-                <div className="flex items-center gap-2">
-                  <span className="flex-1 truncate text-sm font-medium text-text-primary">
-                    {bundle.name}
-                  </span>
-                  <span className="shrink-0 rounded bg-surface-panel px-1.5 text-[10px] text-text-faint">
-                    v{bundle.version}
-                  </span>
-                  <button
-                    type="button"
-                    className="shrink-0 rounded border border-rose-500/30 px-2 py-0.5 text-[10px] text-rose-300 transition hover:bg-rose-500/10 disabled:opacity-40"
-                    disabled={bundleBusy}
-                    onClick={() => void onUninstallBundle(bundle.name)}
-                  >
-                    卸载
-                  </button>
-                </div>
-                {bundle.description && (
-                  <p className="mt-0.5 truncate text-xs text-text-muted">{bundle.description}</p>
-                )}
-                <div className="mt-1 flex flex-wrap gap-1.5">
-                  {bundle.skills.length > 0 && (
-                    <span className="rounded-full border border-border px-1.5 text-[10px] text-text-faint">
-                      {bundle.skills.length} 个技能
-                    </span>
-                  )}
-                  {bundle.mcp_servers.length > 0 && (
-                    <span className="rounded-full border border-border px-1.5 text-[10px] text-text-faint">
-                      {bundle.mcp_servers.length} 个 MCP
-                    </span>
-                  )}
-                  {bundle.avatars.length > 0 && (
-                    <span className="rounded-full border border-border px-1.5 text-[10px] text-text-faint">
-                      {bundle.avatars.length} 个分身预设
-                    </span>
-                  )}
-                  {bundle.memory_templates.length > 0 && (
-                    <span className="rounded-full border border-border px-1.5 text-[10px] text-text-faint">
-                      {bundle.memory_templates.length} 个记忆模板
-                    </span>
-                  )}
-                </div>
-              </div>
-            ))}
-          </div>
-        )}
-      </div>
     </div>
   );
 }
@@ -5187,14 +4978,24 @@ function SkillAdvancedPanel() {
 
   if (loading) {
     return (
-      <Panel title="技能高级设置">
+      <Panel
+        title="技能高级设置"
+        collapsible
+        defaultCollapsed={false}
+        titleClassName={SKILLS_SECTION_PANEL_TITLE_CLASS}
+      >
         <div className="py-2 text-sm text-text-faint">加载中…</div>
       </Panel>
     );
   }
 
   return (
-    <Panel title="技能高级设置">
+    <Panel
+      title="技能高级设置"
+      collapsible
+      defaultCollapsed={false}
+      titleClassName={SKILLS_SECTION_PANEL_TITLE_CLASS}
+    >
       <p className="mb-3 text-xs text-text-faint">
         写入 <code className="text-text-subtle">~/.agenticx/config.yaml</code>，重启后生效。
       </p>
@@ -7827,11 +7628,11 @@ export function SettingsPanel({
       >
         {/* Left: tab navigation */}
         <div
-          className="relative flex h-full min-h-0 shrink-0 flex-col bg-surface-sidebar p-4"
+          className="relative flex h-full min-h-0 shrink-0 flex-col bg-surface-sidebar py-4 pl-4 pr-5"
           style={{ width: navWidth }}
         >
-          <div className="mb-4 text-[15px] font-semibold text-text-strong">设置</div>
-          <nav className="flex flex-1 flex-col gap-1 overflow-y-auto">
+          <div className="mb-4 pr-1 text-[15px] font-semibold text-text-strong">设置</div>
+          <nav className="flex flex-1 flex-col gap-1 overflow-y-auto pr-1">
             {TABS.map((t) => {
               const Icon = t.icon;
               const isActive = tab === t.id;
@@ -7857,7 +7658,7 @@ export function SettingsPanel({
             })}
           </nav>
           <div
-            className="group absolute -right-[3px] top-0 z-20 h-full w-2 cursor-col-resize"
+            className="group absolute right-0 top-0 z-20 h-full w-3 cursor-col-resize"
             role="separator"
             aria-orientation="vertical"
             aria-label="拖拽调整导航栏宽度"
@@ -7869,8 +7670,8 @@ export function SettingsPanel({
         </div>
 
         {/* Right: content */}
-        <div className="flex h-full min-h-0 flex-1 flex-col overflow-hidden">
-          <div className="flex shrink-0 items-center justify-between border-b border-border px-5 py-3">
+        <div className="flex h-full min-h-0 flex-1 flex-col overflow-hidden border-l border-border">
+          <div className="flex shrink-0 items-center justify-between border-b border-border pl-5 pr-5 py-3">
             <h3 className="text-[15px] font-semibold text-text-strong">
               {TABS.find((t) => t.id === tab)?.label ?? "设置"}
             </h3>
@@ -7883,7 +7684,7 @@ export function SettingsPanel({
           </div>
 
           <div
-            className={`min-h-0 flex-1 px-4 py-3 ${
+            className={`min-h-0 flex-1 pl-5 pr-4 py-3 ${
               tab === "knowledge" ? "flex flex-col overflow-hidden" : "overflow-y-auto"
             }`}
           >
