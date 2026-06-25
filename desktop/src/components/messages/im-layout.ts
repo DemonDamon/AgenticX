@@ -39,6 +39,10 @@ const ASSISTANT_TEXT_PADDING_LEFT_PX = 2.5;
  */
 const ASSISTANT_ACTION_MARGIN_LEFT_PX = 12;
 
+/** 20×20 icon column — centers on timeline at bubble px-3 (12px) + 10px = 22px. */
+export const ASSISTANT_ICON_RAIL_CLASS =
+  "flex h-[20px] w-[20px] shrink-0 items-center justify-center";
+
 export function getAssistantTextClassName(options: AssistantTextClassOptions = {}): string | undefined {
   if (!options.hasReasoning) return undefined;
   return options.inReActRow ? "mt-1" : "mt-2";
