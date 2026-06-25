@@ -1434,12 +1434,22 @@ export const useAppStore = create<AppState>((set, get) => ({
         if (role === "user" && String(content ?? "").trim()) {
           const ownerSid = String(extras?.ownerSessionId ?? pane.sessionId ?? "").trim() || undefined;
           const norm = (s: unknown) => String(s ?? "").trim();
-          const dup = pane.messages.some(
-            (m) =>
-              m.role === "user" &&
-              norm(m.content) === norm(content) &&
-              (ownerSid ? m.ownerSessionId === ownerSid : !m.ownerSessionId),
-          );
+          const normalizedContent = norm(content);
+          const dup = pane.messages.some((m) => {
+            if (m.role !== "user") return false;
+            if (norm(m.content) !== normalizedContent) return false;
+            // Primary check: same session ownership.
+            if (ownerSid ? m.ownerSessionId === ownerSid : !m.ownerSessionId) return true;
+            // Fallback: same content regardless of ownerSessionId format — covers
+            // the race where an optimistic write (ownerSid = "sid") and a disk-poll
+            // write (ownerSid from mapLoadedSessionMessage) both land for the same
+            // session but the IDs don't match character-for-character.
+            if (ownerSid && m.ownerSessionId) {
+              const ownerNorm = (s: string) => s.replace(/^dlgpoll-/, "").trim();
+              if (ownerNorm(m.ownerSessionId) === ownerNorm(ownerSid)) return true;
+            }
+            return false;
+          });
           if (dup) return pane;
         }
         return {

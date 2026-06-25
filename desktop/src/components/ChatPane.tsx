@@ -2735,6 +2735,9 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
       if (!active) return;
       const currentSid = pane.sessionId;
       if (!currentSid) return;
+      // Never overwrite in-memory state while a foreground SSE stream is live —
+      // that stream is the single source of truth and disk lags behind.
+      if (sessionStreamStateRef.current[currentSid]?.active) return;
       const otherPaneHasSameSid = panes.some(
         (p) => p.id !== pane.id && p.sessionId === currentSid
       );
@@ -2790,7 +2793,12 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
       const isWechatBound = await isWechatBoundSession(sid);
       if (!active) return;
       const needsExternalPoll = isImSession || isFeishuBound || isWechatBound;
-      if (!hasDelegation && !needsExternalPoll && (pane.messages?.length ?? 0) > 0) return;
+      // Re-read messages length from the store after the async awaits above —
+      // the closure snapshot can be stale if addPaneMessage fired in the interim,
+      // causing a spurious poll() that duplicates the optimistic user row.
+      const freshMsgCount =
+        useAppStore.getState().panes.find((p) => p.id === pane.id)?.messages?.length ?? 0;
+      if (!hasDelegation && !needsExternalPoll && freshMsgCount > 0) return;
       void poll();
       if (!hasDelegation && !needsExternalPoll) return;
       timer = window.setInterval(() => void poll(), 3000);
