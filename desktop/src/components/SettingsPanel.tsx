@@ -2666,6 +2666,7 @@ function SkillsTab() {
     Object.fromEntries(RECOMMENDED_SKILLS.map((skill) => [skill.id, skill.icon_src]))
   );
   const [recommendedIconBroken, setRecommendedIconBroken] = useState<Record<string, boolean>>({});
+  const [marketSectionOpen, setMarketSectionOpen] = useState(false);
 
   useEffect(() => {
     setBundleNeedsConfirmNonHigh(false);
@@ -3542,273 +3543,291 @@ function SkillsTab() {
         )}
       </div>
 
-      {/* === Recommended official shortcuts === */}
-      <div className="mt-4 border-t border-border pt-4">
-        <div className="mb-2 text-[11px] font-medium uppercase tracking-wide text-text-subtle">
-          推荐
-        </div>
-        <p className="mb-2 text-xs text-text-faint">
-          以下为各产品官网入口，技能由对应提供方提供。请点击官网查看最新安装说明与授权要求。
-        </p>
-        <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
-          {RECOMMENDED_SKILLS.map((skill) => (
-            <div
-              key={skill.id}
-              className="flex flex-col rounded-md border border-transparent bg-surface-card px-3 py-2.5 transition hover:bg-surface-hover/40"
-            >
-              <div className="flex items-start gap-2">
-                {recommendedIconBroken[skill.id] || !(recommendedIconData[skill.id] || skill.icon_src) ? (
-                  <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-md border border-border/70 bg-surface-panel text-xs font-semibold text-text-subtle">
-                    {(skill.name || skill.id).slice(0, 1).toUpperCase()}
-                  </div>
-                ) : (
-                  <img
-                    src={recommendedIconData[skill.id] || skill.icon_src}
-                    alt={`${skill.name} 图标`}
-                    className="h-9 w-9 shrink-0 rounded-md border border-border/70 bg-white object-cover"
-                    loading="lazy"
-                    onError={() =>
-                      setRecommendedIconBroken((prev) =>
-                        prev[skill.id] ? prev : { ...prev, [skill.id]: true }
-                      )
-                    }
-                  />
-                )}
-                <div className="min-w-0 flex-1">
-                  <div className="flex flex-wrap items-center gap-1.5">
-                    <span className="text-sm font-medium text-text-primary">{skill.name}</span>
-                    <span className="shrink-0 rounded-full border border-border px-1.5 text-[10px] text-text-faint">
-                      {skill.provider}
-                    </span>
-                    <span className="shrink-0 rounded-full border border-border/80 px-1.5 text-[10px] text-text-muted">
-                      {skill.category}
-                    </span>
-                  </div>
-                  <p className="mt-1 line-clamp-2 text-xs text-text-muted">{skill.description}</p>
-                </div>
+      {/* === Skills Marketplace Section (Collapsible) === */}
+      <div className="mt-8 border-t border-border pt-6">
+        <button
+          type="button"
+          className="flex w-full items-center justify-between group"
+          onClick={() => setMarketSectionOpen(!marketSectionOpen)}
+        >
+          <h3 className="text-lg font-medium flex items-center gap-2 text-text-strong">
+            {marketSectionOpen ? <ChevronDown className="w-5 h-5" /> : <ChevronRight className="w-5 h-5" />}
+            技能市场
+          </h3>
+        </button>
+
+        {marketSectionOpen && (
+          <div className="mt-6 space-y-8 animate-in slide-in-from-top-2">
+            {/* === Recommended official shortcuts === */}
+            <section>
+              <div className="mb-2 text-[11px] font-medium uppercase tracking-wide text-text-subtle">
+                推荐
               </div>
-              <div className="mt-2 flex flex-wrap gap-2">
+              <p className="mb-2 text-xs text-text-faint">
+                以下为各产品官网入口，技能由对应提供方提供。请点击官网查看最新安装说明与授权要求。
+              </p>
+              <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+                {RECOMMENDED_SKILLS.map((skill) => (
+                  <div
+                    key={skill.id}
+                    className="flex flex-col rounded-md border border-transparent bg-surface-card px-3 py-2.5 transition hover:bg-surface-hover/40"
+                  >
+                    <div className="flex items-start gap-2">
+                      {recommendedIconBroken[skill.id] || !(recommendedIconData[skill.id] || skill.icon_src) ? (
+                        <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-md border border-border/70 bg-surface-panel text-xs font-semibold text-text-subtle">
+                          {(skill.name || skill.id).slice(0, 1).toUpperCase()}
+                        </div>
+                      ) : (
+                        <img
+                          src={recommendedIconData[skill.id] || skill.icon_src}
+                          alt={`${skill.name} 图标`}
+                          className="h-9 w-9 shrink-0 rounded-md border border-border/70 bg-white object-cover"
+                          loading="lazy"
+                          onError={() =>
+                            setRecommendedIconBroken((prev) =>
+                              prev[skill.id] ? prev : { ...prev, [skill.id]: true }
+                            )
+                          }
+                        />
+                      )}
+                      <div className="min-w-0 flex-1">
+                        <div className="flex flex-wrap items-center gap-1.5">
+                          <span className="text-sm font-medium text-text-primary">{skill.name}</span>
+                          <span className="shrink-0 rounded-full border border-border px-1.5 text-[10px] text-text-faint">
+                            {skill.provider}
+                          </span>
+                          <span className="shrink-0 rounded-full border border-border/80 px-1.5 text-[10px] text-text-muted">
+                            {skill.category}
+                          </span>
+                        </div>
+                        <p className="mt-1 line-clamp-2 text-xs text-text-muted">{skill.description}</p>
+                      </div>
+                    </div>
+                    <div className="mt-2 flex flex-wrap gap-2">
+                      <button
+                        type="button"
+                        className="rounded-md border border-border px-2.5 py-1 text-[11px] text-text-subtle transition hover:bg-surface-hover hover:text-text-primary"
+                        onClick={() => window.open(skill.official_url, "_blank", "noopener,noreferrer")}
+                      >
+                        官网 ↗
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </section>
+
+            {/* === ClawHub marketplace (registry aggregate) === */}
+            <section className="border-t border-border pt-6">
+              <div className="mb-2 text-[11px] font-medium uppercase tracking-wide text-text-subtle">
+                ClawHub 市场
+              </div>
+              <div className="flex gap-2">
+                <input
+                  className="flex-1 rounded-md border border-border bg-surface-panel px-2 py-1.5 text-sm text-text-primary placeholder:text-text-faint"
+                  placeholder="搜索技能名称..."
+                  value={marketQuery}
+                  onChange={(e) => setMarketQuery(e.target.value)}
+                  onKeyDown={(e) => { if (e.key === "Enter") void onMarketSearch(); }}
+                />
                 <button
-                  type="button"
-                  className="rounded-md border border-border px-2.5 py-1 text-[11px] text-text-subtle transition hover:bg-surface-hover hover:text-text-primary"
-                  onClick={() => window.open(skill.official_url, "_blank", "noopener,noreferrer")}
+                  className="shrink-0 rounded-md border border-border px-3 py-1.5 text-xs text-text-subtle transition hover:bg-surface-hover hover:text-text-primary disabled:opacity-40"
+                  onClick={() => void onMarketSearch()}
+                  disabled={marketLoading}
                 >
-                  官网 ↗
+                  {marketLoading ? "搜索中..." : "搜索"}
                 </button>
               </div>
-            </div>
-          ))}
-        </div>
-      </div>
-
-      {/* === ClawHub marketplace (registry aggregate) === */}
-      <div className="mt-4 border-t border-border pt-4">
-        <div className="mb-2 text-[11px] font-medium uppercase tracking-wide text-text-subtle">
-          ClawHub 市场
-        </div>
-        <div className="flex gap-2">
-          <input
-            className="flex-1 rounded-md border border-border bg-surface-panel px-2 py-1.5 text-sm text-text-primary placeholder:text-text-faint"
-            placeholder="搜索技能名称..."
-            value={marketQuery}
-            onChange={(e) => setMarketQuery(e.target.value)}
-            onKeyDown={(e) => { if (e.key === "Enter") void onMarketSearch(); }}
-          />
-          <button
-            className="shrink-0 rounded-md border border-border px-3 py-1.5 text-xs text-text-subtle transition hover:bg-surface-hover hover:text-text-primary disabled:opacity-40"
-            onClick={() => void onMarketSearch()}
-            disabled={marketLoading}
-          >
-            {marketLoading ? "搜索中..." : "搜索"}
-          </button>
-        </div>
-        {marketMsg && (
-          <div
-            className={`mt-1.5 whitespace-pre-wrap text-xs ${
-              marketMsg.includes("失败") || marketMsg.includes("未找到")
-                ? "text-amber-400"
-                : marketNeedsConfirmNonHigh || marketNeedsConfirmHigh || marketMsg.includes("高危")
-                  ? "text-amber-300"
-                  : "text-emerald-400"
-            }`}
-          >
-            {marketMsg}
-          </div>
-        )}
-        {(marketNeedsConfirmNonHigh || marketNeedsConfirmHigh) && (
-          <div className="mt-2 flex flex-wrap gap-2">
-            {marketNeedsConfirmNonHigh && (
-              <button
-                type="button"
-                className="rounded-md border border-[var(--settings-accent-border-strong)] bg-[var(--settings-accent-subtle-bg)] px-3 py-1.5 text-xs text-[var(--settings-accent-fg-muted)] transition hover:bg-[var(--settings-accent-subtle-bg-hover)] disabled:opacity-40"
-                disabled={registryInstallBusy}
-                onClick={() => void onConfirmMarketInstall("non_high")}
-              >
-                {registryInstallBusy ? "安装中…" : "确认安装"}
-              </button>
-            )}
-            {marketNeedsConfirmHigh && (
-              <button
-                type="button"
-                className="rounded-md border border-rose-500/40 bg-rose-500/10 px-3 py-1.5 text-xs text-rose-300 transition hover:bg-rose-500/20 disabled:opacity-40"
-                disabled={registryInstallBusy}
-                onClick={() => void onConfirmMarketInstall("high")}
-              >
-                {registryInstallBusy ? "安装中…" : "我已知晓风险，确认安装"}
-              </button>
-            )}
-            <button
-              type="button"
-              className="rounded-md border border-border px-3 py-1.5 text-xs text-text-subtle transition hover:bg-surface-hover hover:text-text-primary disabled:opacity-40"
-              disabled={registryInstallBusy}
-              onClick={() => {
-                setMarketNeedsConfirmNonHigh(false);
-                setMarketNeedsConfirmHigh(false);
-                setMarketPending(null);
-                setMarketMsg("");
-              }}
-            >
-              取消
-            </button>
-          </div>
-        )}
-        {marketResults.length > 0 && (
-          <div className="mt-2 space-y-1">
-            {marketResults.map((item) => (
-              <div
-                key={`${item.source}:${item.name}`}
-                className="flex items-start gap-2 rounded-md border border-transparent bg-surface-card px-3 py-2"
-              >
-                <div className="min-w-0 flex-1">
-                  <div className="flex items-center gap-1.5">
-                    <span className="truncate text-sm font-medium text-text-primary">{item.name}</span>
-                    <span className="shrink-0 rounded-full border border-border px-1.5 text-[10px] text-text-faint">
-                      {item.source}
-                    </span>
-                    {item.source_type === "clawhub" && (
-                      <span className="shrink-0 rounded-full border border-violet-500/30 bg-violet-500/10 px-1.5 text-[10px] text-violet-400">
-                        ClawHub
-                      </span>
-                    )}
-                  </div>
-                  {item.description && (
-                    <p className="mt-0.5 line-clamp-2 text-xs text-text-muted">{item.description}</p>
+              {marketMsg && (
+                <div
+                  className={`mt-1.5 whitespace-pre-wrap text-xs ${
+                    marketMsg.includes("失败") || marketMsg.includes("未找到")
+                      ? "text-amber-400"
+                      : marketNeedsConfirmNonHigh || marketNeedsConfirmHigh || marketMsg.includes("高危")
+                        ? "text-amber-300"
+                        : "text-emerald-400"
+                  }`}
+                >
+                  {marketMsg}
+                </div>
+              )}
+              {(marketNeedsConfirmNonHigh || marketNeedsConfirmHigh) && (
+                <div className="mt-2 flex flex-wrap gap-2">
+                  {marketNeedsConfirmNonHigh && (
+                    <button
+                      type="button"
+                      className="rounded-md border border-[var(--settings-accent-border-strong)] bg-[var(--settings-accent-subtle-bg)] px-3 py-1.5 text-xs text-[var(--settings-accent-fg-muted)] transition hover:bg-[var(--settings-accent-subtle-bg-hover)] disabled:opacity-40"
+                      disabled={registryInstallBusy}
+                      onClick={() => void onConfirmMarketInstall("non_high")}
+                    >
+                      {registryInstallBusy ? "安装中…" : "确认安装"}
+                    </button>
                   )}
-                  <p className="mt-0.5 text-[10px] text-text-faint">by {item.author} · v{item.version}</p>
+                  {marketNeedsConfirmHigh && (
+                    <button
+                      type="button"
+                      className="rounded-md border border-rose-500/40 bg-rose-500/10 px-3 py-1.5 text-xs text-rose-300 transition hover:bg-rose-500/20 disabled:opacity-40"
+                      disabled={registryInstallBusy}
+                      onClick={() => void onConfirmMarketInstall("high")}
+                    >
+                      {registryInstallBusy ? "安装中…" : "我已知晓风险，确认安装"}
+                    </button>
+                  )}
+                  <button
+                    type="button"
+                    className="rounded-md border border-border px-3 py-1.5 text-xs text-text-subtle transition hover:bg-surface-hover hover:text-text-primary disabled:opacity-40"
+                    disabled={registryInstallBusy}
+                    onClick={() => {
+                      setMarketNeedsConfirmNonHigh(false);
+                      setMarketNeedsConfirmHigh(false);
+                      setMarketPending(null);
+                      setMarketMsg("");
+                    }}
+                  >
+                    取消
+                  </button>
+                </div>
+              )}
+              {marketResults.length > 0 && (
+                <div className="mt-2 space-y-1">
+                  {marketResults.map((item) => (
+                    <div
+                      key={`${item.source}:${item.name}`}
+                      className="flex items-start gap-2 rounded-md border border-transparent bg-surface-card px-3 py-2"
+                    >
+                      <div className="min-w-0 flex-1">
+                        <div className="flex items-center gap-1.5">
+                          <span className="truncate text-sm font-medium text-text-primary">{item.name}</span>
+                          <span className="shrink-0 rounded-full border border-border px-1.5 text-[10px] text-text-faint">
+                            {item.source}
+                          </span>
+                          {item.source_type === "clawhub" && (
+                            <span className="shrink-0 rounded-full border border-violet-500/30 bg-violet-500/10 px-1.5 text-[10px] text-violet-400">
+                              ClawHub
+                            </span>
+                          )}
+                        </div>
+                        {item.description && (
+                          <p className="mt-0.5 line-clamp-2 text-xs text-text-muted">{item.description}</p>
+                        )}
+                        <p className="mt-0.5 text-[10px] text-text-faint">by {item.author} · v{item.version}</p>
+                      </div>
+                      <button
+                        type="button"
+                        className="shrink-0 rounded border border-[var(--settings-accent-border-muted)] px-2 py-0.5 text-[10px] text-[var(--settings-accent-fg)] transition hover:bg-[var(--settings-accent-subtle-bg)] disabled:opacity-40"
+                        disabled={marketLoading || marketInstallingKey === `${item.source}:${item.name}` || marketQueuedKeys.includes(`${item.source}:${item.name}`)}
+                        onClick={() => void onMarketInstall(item)}
+                      >
+                        {marketInstallingKey === `${item.source}:${item.name}`
+                          ? "安装中…"
+                          : marketQueuedKeys.includes(`${item.source}:${item.name}`)
+                            ? "排队中…"
+                            : "安装"}
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </section>
+
+            {/* === SkillHub (Tencent) marketplace === */}
+            <section className="border-t border-border pt-6">
+              <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+                <div className="text-[11px] font-medium uppercase tracking-wide text-text-subtle">
+                  SkillHub 市场
                 </div>
                 <button
                   type="button"
-                  className="shrink-0 rounded border border-[var(--settings-accent-border-muted)] px-2 py-0.5 text-[10px] text-[var(--settings-accent-fg)] transition hover:bg-[var(--settings-accent-subtle-bg)] disabled:opacity-40"
-                  disabled={marketLoading || marketInstallingKey === `${item.source}:${item.name}` || marketQueuedKeys.includes(`${item.source}:${item.name}`)}
-                  onClick={() => void onMarketInstall(item)}
+                  className="text-[11px] text-text-faint underline decoration-border underline-offset-2 transition hover:text-[var(--settings-accent-fg)]"
+                  onClick={() => window.open("https://skillhub.tencent.com/", "_blank", "noopener,noreferrer")}
                 >
-                  {marketInstallingKey === `${item.source}:${item.name}`
-                    ? "安装中…"
-                    : marketQueuedKeys.includes(`${item.source}:${item.name}`)
-                      ? "排队中…"
-                      : "安装"}
+                  skillhub.tencent.com ↗
                 </button>
               </div>
-            ))}
-          </div>
-        )}
-      </div>
-
-      {/* === SkillHub (Tencent) marketplace === */}
-      <div className="mt-4 border-t border-border pt-4">
-        <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
-          <div className="text-[11px] font-medium uppercase tracking-wide text-text-subtle">
-            SkillHub 市场
-          </div>
-          <button
-            type="button"
-            className="text-[11px] text-text-faint underline decoration-border underline-offset-2 transition hover:text-[var(--settings-accent-fg)]"
-            onClick={() => window.open("https://skillhub.tencent.com/", "_blank", "noopener,noreferrer")}
-          >
-            skillhub.tencent.com ↗
-          </button>
-        </div>
-        <p className="mb-2 text-xs text-text-faint">
-          搜索由本机 SkillHub CLI（若已安装）或已配置的 ClawHub 注册表提供；安装将跳转 Meta-Agent 会话并下发 SkillHub 官方安装指引中的指令。
-        </p>
-        <div className="flex gap-2">
-          <input
-            className="flex-1 rounded-md border border-border bg-surface-panel px-2 py-1.5 text-sm text-text-primary placeholder:text-text-faint"
-            placeholder="搜索 SkillHub 技能名称或关键词..."
-            value={skillhubQuery}
-            onChange={(e) => setSkillhubQuery(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === "Enter") void onSkillHubSearch();
-            }}
-          />
-          <button
-            type="button"
-            className="shrink-0 rounded-md border border-border px-3 py-1.5 text-xs text-text-subtle transition hover:bg-surface-hover hover:text-text-primary disabled:opacity-40"
-            onClick={() => void onSkillHubSearch()}
-            disabled={skillhubLoading}
-          >
-            {skillhubLoading ? "搜索中..." : "搜索"}
-          </button>
-        </div>
-        {skillhubMsg && (
-          <div
-            className={`mt-1.5 whitespace-pre-wrap text-xs ${
-              skillhubMsg.includes("失败") ? "text-amber-400" : "text-rose-400"
-            }`}
-          >
-            {skillhubMsg}
-          </div>
-        )}
-        {skillhubHint && (
-          <div className="mt-1.5 text-xs text-text-faint">{skillhubHint}</div>
-        )}
-        {skillhubResults.length > 0 && (
-          <div className="mt-2 space-y-1">
-            {skillhubResults.map((item) => (
-              <div
-                key={item.slug}
-                className="flex items-start gap-2 rounded-md border border-transparent bg-surface-card px-3 py-2"
-              >
-                <div className="min-w-0 flex-1">
-                  <div className="flex flex-wrap items-center gap-1.5">
-                    <span className="truncate text-sm font-medium text-text-primary">{item.name}</span>
-                    <span className="shrink-0 rounded-full border border-sky-500/30 bg-sky-500/10 px-1.5 text-[10px] text-sky-400">
-                      SkillHub
-                    </span>
-                  </div>
-                  {item.description ? (
-                    <p className="mt-0.5 line-clamp-2 text-xs text-text-muted">{item.description}</p>
-                  ) : null}
-                  <p className="mt-0.5 text-[10px] text-text-faint">
-                    by {item.author} · v{item.version}
-                    {item.downloads != null && item.downloads !== "" ? ` · 下载 ${String(item.downloads)}` : ""}
-                  </p>
-                </div>
-                <div className="flex shrink-0 flex-col gap-1">
-                  <button
-                    type="button"
-                    className="rounded border border-[var(--settings-accent-border-muted)] px-2 py-0.5 text-[10px] text-[var(--settings-accent-fg)] transition hover:bg-[var(--settings-accent-subtle-bg)] disabled:opacity-40"
-                    disabled={installPromptBusy}
-                    onClick={() => onSkillHubMarketInstall(item.slug)}
-                  >
-                    安装
-                  </button>
-                  <button
-                    type="button"
-                    className="rounded border border-border px-2 py-0.5 text-[10px] text-text-subtle transition hover:bg-surface-hover hover:text-text-primary"
-                    onClick={() =>
-                      window.open(
-                        `https://skillhub.tencent.com/skills/${encodeURIComponent(item.slug)}`,
-                        "_blank",
-                        "noopener,noreferrer",
-                      )
-                    }
-                  >
-                    详情 ↗
-                  </button>
-                </div>
+              <p className="mb-2 text-xs text-text-faint">
+                搜索由本机 SkillHub CLI（若已安装）或已配置的 ClawHub 注册表提供；安装将跳转 Meta-Agent 会话并下发 SkillHub 官方安装指引中的指令。
+              </p>
+              <div className="flex gap-2">
+                <input
+                  className="flex-1 rounded-md border border-border bg-surface-panel px-2 py-1.5 text-sm text-text-primary placeholder:text-text-faint"
+                  placeholder="搜索 SkillHub 技能名称或关键词..."
+                  value={skillhubQuery}
+                  onChange={(e) => setSkillhubQuery(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") void onSkillHubSearch();
+                  }}
+                />
+                <button
+                  type="button"
+                  className="shrink-0 rounded-md border border-border px-3 py-1.5 text-xs text-text-subtle transition hover:bg-surface-hover hover:text-text-primary disabled:opacity-40"
+                  onClick={() => void onSkillHubSearch()}
+                  disabled={skillhubLoading}
+                >
+                  {skillhubLoading ? "搜索中..." : "搜索"}
+                </button>
               </div>
-            ))}
+              {skillhubMsg && (
+                <div
+                  className={`mt-1.5 whitespace-pre-wrap text-xs ${
+                    skillhubMsg.includes("失败") ? "text-amber-400" : "text-rose-400"
+                  }`}
+                >
+                  {skillhubMsg}
+                </div>
+              )}
+              {skillhubHint && (
+                <div className="mt-1.5 text-xs text-text-faint">{skillhubHint}</div>
+              )}
+              {skillhubResults.length > 0 && (
+                <div className="mt-2 space-y-1">
+                  {skillhubResults.map((item) => (
+                    <div
+                      key={item.slug}
+                      className="flex items-start gap-2 rounded-md border border-transparent bg-surface-card px-3 py-2"
+                    >
+                      <div className="min-w-0 flex-1">
+                        <div className="flex flex-wrap items-center gap-1.5">
+                          <span className="truncate text-sm font-medium text-text-primary">{item.name}</span>
+                          <span className="shrink-0 rounded-full border border-sky-500/30 bg-sky-500/10 px-1.5 text-[10px] text-sky-400">
+                            SkillHub
+                          </span>
+                        </div>
+                        {item.description ? (
+                          <p className="mt-0.5 line-clamp-2 text-xs text-text-muted">{item.description}</p>
+                        ) : null}
+                        <p className="mt-0.5 text-[10px] text-text-faint">
+                          by {item.author} · v{item.version}
+                          {item.downloads != null && item.downloads !== "" ? ` · 下载 ${String(item.downloads)}` : ""}
+                        </p>
+                      </div>
+                      <div className="flex shrink-0 flex-col gap-1">
+                        <button
+                          type="button"
+                          className="rounded border border-[var(--settings-accent-border-muted)] px-2 py-0.5 text-[10px] text-[var(--settings-accent-fg)] transition hover:bg-[var(--settings-accent-subtle-bg)] disabled:opacity-40"
+                          disabled={installPromptBusy}
+                          onClick={() => onSkillHubMarketInstall(item.slug)}
+                        >
+                          安装
+                        </button>
+                        <button
+                          type="button"
+                          className="rounded border border-border px-2 py-0.5 text-[10px] text-text-subtle transition hover:bg-surface-hover hover:text-text-primary"
+                          onClick={() =>
+                            window.open(
+                              `https://skillhub.tencent.com/skills/${encodeURIComponent(item.slug)}`,
+                              "_blank",
+                              "noopener,noreferrer",
+                            )
+                          }
+                        >
+                          详情 ↗
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </section>
           </div>
         )}
       </div>
