@@ -3550,7 +3550,7 @@ function SkillsTab() {
               <div className="mb-3 text-[12px] font-semibold text-text-strong">
                 官方推荐
               </div>
-              <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+              <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 md:grid-cols-3">
                 {RECOMMENDED_SKILLS.map((skill) => (
                   <div
                     key={skill.id}
@@ -3584,7 +3584,6 @@ function SkillsTab() {
                             {skill.category}
                           </span>
                         </div>
-                        <p className="mt-1 line-clamp-2 text-xs text-text-muted">{skill.description}</p>
                       </div>
                     </div>
                     <div className="mt-2 flex flex-wrap gap-2">
