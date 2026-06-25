@@ -597,13 +597,11 @@ export function ImBubble({
                         searchedQueries={message.searchedQueries}
                       />
                     ) : null}
-                    {!isUser && isStreaming && hasThinkTag ? (
+                    {!isUser && parsed?.reasoning ? (
                       <ReasoningBlock
-                        text={parsed?.reasoning ?? ""}
-                        streaming={!reasoningClosed}
+                        text={parsed.reasoning}
+                        streaming={isStreaming && hasThinkTag && !reasoningClosed}
                       />
-                    ) : !isUser && !isStreaming && parsed?.reasoning ? (
-                      <ReasoningBlock text={parsed.reasoning} />
                     ) : null}
                     {!isUser && isStreaming && !hasBody && (!hasThinkTag || reasoningClosed) ? (
                       streamStalled ? (
