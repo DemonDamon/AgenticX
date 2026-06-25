@@ -1597,16 +1597,22 @@ export function ChatView({ onOpenConfirm, mode = "pro" }: Props) {
       setStreamReferences([]);
       setStreamSearchedQueries([]);
       setStreamingModel(null);
-      setStatus("idle");
+
+      // Dequeue BEFORE setting idle — same fix as ChatPane: if a follow-up
+      // message is already queued, skip the "idle" transition so the task bar
+      // does not flash "已结束" and mislead the user.
+      const nextQueued = useAppStore.getState().dequeuePaneMessageForSession(
+        liteQueueKey,
+        sessionId,
+      );
+      if (!nextQueued) {
+        setStatus("idle");
+      }
       setStreaming(false);
       setSseActive(false);
       scrollToBottom();
       void syncSubAgents();
 
-      const nextQueued = useAppStore.getState().dequeuePaneMessageForSession(
-        liteQueueKey,
-        sessionId,
-      );
       if (nextQueued) {
         requestAnimationFrame(() => void sendChat(nextQueued.text));
       }

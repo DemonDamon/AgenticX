@@ -7974,6 +7974,22 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
         ended.text = "";
         sessionStreamStateRef.current[requestSessionId] = ended;
       }
+
+      // Peek at the queue BEFORE setting idle state: if there is a follow-up
+      // message already queued (e.g. unattended-continuation auto-send), the
+      // session is NOT truly "done" — setting idle here would cause a one-frame
+      // "已结束 关闭" flash that (a) misleads the user into thinking the task
+      // finished and (b) triggers the false-promotion heuristic in StickyTaskBar
+      // that marks in_progress todos as completed. When the user switches sessions
+      // during that flash and returns, they see the continuation run's partial
+      // progress and wonder why the state "regressed" from 5/5 → 4/5.
+      // Fix: dequeue first, and skip the idle transition when a follow-up will
+      // immediately restart the run (within the same requestAnimationFrame).
+      const nextQueued = useAppStore.getState().dequeuePaneMessageForSession(
+        pane.id,
+        requestSessionId,
+      );
+
       if ((pane.sessionId || "").trim() === requestSessionId) {
         const refPatch = referenceExtrasFromTurn(
           turnRefsSnapshot.references,
@@ -7983,7 +7999,11 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
           useAppStore.getState().mergeLastPaneMessageByRole(pane.id, "assistant", refPatch);
         }
         syncStreamingUiForCurrentSession();
-        if (!abortController.signal.aborted) {
+        // Only transition to idle if there is no queued continuation. A queued
+        // follow-up means the run will restart in the next animation frame; the
+        // "running" state must stay set so the StickyTaskBar does not briefly
+        // show "已结束" (and incorrectly promote in_progress todos to completed).
+        if (!abortController.signal.aborted && !nextQueued) {
           setSessionExecutionState("idle");
         }
         setStreamReferences([]);
@@ -8006,10 +8026,6 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
       useAppStore.getState().dropCachedSessionMessages(requestSessionId);
       void mergeTailFromDisk(requestSessionId);
 
-      const nextQueued = useAppStore.getState().dequeuePaneMessageForSession(
-        pane.id,
-        requestSessionId,
-      );
       if (nextQueued) {
         requestAnimationFrame(() => {
           void sendChatRef.current(nextQueued.text, {
