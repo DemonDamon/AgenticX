@@ -541,23 +541,24 @@ function SkillRowButton({
         </div>
       </div>
       {conflictCount > 1 ? (
-        <div className="mt-2.5 flex items-center gap-2 text-[11px] text-text-faint">
-          <span>默认来源</span>
-          <select
-            className="rounded border border-border bg-surface-panel px-1.5 py-0.5 text-[11px] text-text-primary"
+        <div
+          className="mt-2.5 flex items-center gap-2 text-[11px] text-text-faint"
+          onClick={(e) => e.stopPropagation()}
+        >
+          <span className="shrink-0">默认来源</span>
+          <SettingsDropdown
             value={selectedSource}
-            onClick={(e) => e.stopPropagation()}
-            onChange={(e) => {
-              e.stopPropagation();
-              onChoosePreferredSource(skill.name, e.target.value);
-            }}
-          >
-            {uniqueSources.map((source) => (
-              <option key={`${skill.name}:${source}`} value={source}>
-                {skillSourceBadge(source).label}
-              </option>
-            ))}
-          </select>
+            displayLabel={skillSourceBadge(selectedSource).label}
+            options={uniqueSources.map((source) => ({
+              value: source,
+              label: skillSourceBadge(source).label,
+            }))}
+            onChange={(source) => onChoosePreferredSource(skill.name, source)}
+            size="inline"
+            menuPortal
+            className="w-fit shrink-0"
+            title="同名技能冲突时优先使用的来源"
+          />
         </div>
       ) : null}
       {isExpanded ? (
