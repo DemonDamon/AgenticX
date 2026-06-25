@@ -1,6 +1,12 @@
 import * as React from "react";
 import { ChevronDown, ChevronRight } from "lucide-react";
 import { ASSISTANT_ICON_RAIL_CLASS } from "./im-layout";
+import {
+  formatReasoningTitle,
+  getCachedReasoningDuration,
+  measureReasoningSeconds,
+  setCachedReasoningDuration,
+} from "./reasoning-duration-cache";
 
 type Props = {
   text: string;
@@ -12,42 +18,49 @@ function ThinkingGlyph() {
     <svg
       xmlns="http://www.w3.org/2000/svg"
       viewBox="0 0 24 24"
-      className="h-[18px] w-[18px] shrink-0 text-[rgb(var(--theme-color-rgb,59,130,246))]"
+      className="h-[20px] w-[20px] shrink-0 text-[rgb(var(--theme-color-rgb,59,130,246))]"
       fill="none"
       stroke="currentColor"
-      strokeWidth="2.4"
+      strokeWidth="2.5"
       strokeLinecap="round"
       strokeLinejoin="round"
       aria-hidden
     >
-      <ellipse cx="12" cy="12" rx="8.8" ry="4.8" transform="rotate(45 12 12)" />
-      <ellipse cx="12" cy="12" rx="8.8" ry="4.8" transform="rotate(-45 12 12)" />
-      <circle cx="12" cy="12" r="2" fill="currentColor" stroke="none" />
+      <ellipse cx="12" cy="12" rx="9.2" ry="5.1" transform="rotate(45 12 12)" />
+      <ellipse cx="12" cy="12" rx="9.2" ry="5.1" transform="rotate(-45 12 12)" />
+      <circle cx="12" cy="12" r="2.2" fill="currentColor" stroke="none" />
     </svg>
   );
 }
 
+function persistReasoningDuration(content: string, startedAt: number, finishedAt: number): number {
+  const seconds = measureReasoningSeconds(startedAt, finishedAt);
+  setCachedReasoningDuration(content, seconds);
+  return seconds;
+}
+
 export function ReasoningBlock({ text, streaming = false }: Props) {
   const content = text.trim();
-  const [open, setOpen] = React.useState(true);
+  const [open, setOpen] = React.useState(streaming);
   const [tick, setTick] = React.useState(0);
   const startedAtRef = React.useRef<number | null>(null);
   const finishedAtRef = React.useRef<number | null>(null);
 
   React.useEffect(() => {
-    if (startedAtRef.current === null) {
-      startedAtRef.current = Date.now();
-      setOpen(true);
-    }
     if (streaming) {
+      if (startedAtRef.current === null) {
+        startedAtRef.current = Date.now();
+      }
       finishedAtRef.current = null;
+      setOpen(true);
       return;
     }
-    if (finishedAtRef.current === null) {
+    if (startedAtRef.current !== null && finishedAtRef.current === null) {
       finishedAtRef.current = Date.now();
-      setOpen(false); // Auto-collapse when finished
+      persistReasoningDuration(content, startedAtRef.current, finishedAtRef.current);
+      setOpen(false);
     }
-  }, [streaming]);
+  }, [streaming, content]);
 
   React.useEffect(() => {
     if (!streaming) return;
@@ -55,11 +68,36 @@ export function ReasoningBlock({ text, streaming = false }: Props) {
     return () => window.clearInterval(timer);
   }, [streaming]);
 
-  const startedAt = startedAtRef.current ?? Date.now();
+  React.useEffect(() => {
+    return () => {
+      const startedAt = startedAtRef.current;
+      if (startedAt === null || !content) return;
+      const finishedAt = finishedAtRef.current ?? Date.now();
+      persistReasoningDuration(content, startedAt, finishedAt);
+    };
+  }, [content]);
+
+  void tick;
+
+  const cachedSeconds = getCachedReasoningDuration(content);
+  const startedAt = startedAtRef.current;
   const finishedAt = finishedAtRef.current;
-  const elapsedMs = (finishedAt ?? Date.now()) - startedAt;
-  const elapsedSeconds = Math.max(1, Math.round(elapsedMs / 1000));
-  const title = streaming ? "Thinking" : `Thought for ${elapsedSeconds} seconds`;
+
+  let elapsedSeconds = 0;
+  let hasReliableDuration = false;
+
+  if (streaming && startedAt !== null) {
+    elapsedSeconds = measureReasoningSeconds(startedAt, Date.now());
+    hasReliableDuration = true;
+  } else if (cachedSeconds !== undefined) {
+    elapsedSeconds = cachedSeconds;
+    hasReliableDuration = true;
+  } else if (startedAt !== null && finishedAt !== null && finishedAt - startedAt >= 500) {
+    elapsedSeconds = measureReasoningSeconds(startedAt, finishedAt);
+    hasReliableDuration = true;
+  }
+
+  const title = formatReasoningTitle({ streaming, elapsedSeconds, hasReliableDuration });
   const showContent = open && (content.length > 0 || streaming);
 
   return (

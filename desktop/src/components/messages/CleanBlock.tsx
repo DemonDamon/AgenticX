@@ -19,6 +19,8 @@ export function CleanBlock({ message, badge, onRevealPath, onOpenFileReference }
   const isStreaming = message.id === "__stream__";
   const parsed = !isUser ? parseReasoningContent(message.content) : null;
   const hasThinkTag = parsed?.hasReasoningTag ?? false;
+  const reasoningClosed =
+    hasThinkTag && /<\/think>/i.test(String(message.content ?? ""));
   const bodyText = !isUser && hasThinkTag ? (parsed?.response ?? "") : message.content;
   const hasBody = !!bodyText?.trim();
   return (
@@ -41,10 +43,11 @@ export function CleanBlock({ message, badge, onRevealPath, onOpenFileReference }
         {!isUser && (message.references?.length ?? 0) > 0 ? (
           <ReferencesCard references={message.references ?? []} searchedQueries={message.searchedQueries} />
         ) : null}
-        {!isUser && isStreaming && (hasThinkTag || !hasBody) ? (
-          <ReasoningBlock text={parsed?.reasoning ?? ""} streaming />
-        ) : !isUser && !isStreaming && parsed?.reasoning ? (
-          <ReasoningBlock text={parsed.reasoning} />
+        {!isUser && parsed?.reasoning ? (
+          <ReasoningBlock
+            text={parsed.reasoning}
+            streaming={isStreaming && !reasoningClosed && (hasThinkTag || !hasBody)}
+          />
         ) : null}
         {hasBody ? (
           isUser ? (
