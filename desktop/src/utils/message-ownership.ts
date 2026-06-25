@@ -47,6 +47,35 @@ export function messageBelongsToSession(
 }
 
 /**
+ * Collapse back-to-back duplicate user messages that share the same trimmed
+ * content. These can appear transiently when an optimistic write races with a
+ * disk-reload path that both land in pane.messages before reconciliation runs.
+ * Keeping only the last occurrence preserves any richer metadata (attachments,
+ * ownerSessionId) that the disk copy may carry while dropping the bare
+ * optimistic duplicate.
+ */
+function dedupeConsecutiveUserMessages<T extends { role: string; content?: unknown }>(
+  messages: T[],
+): T[] {
+  const out: T[] = [];
+  for (let i = 0; i < messages.length; i++) {
+    const m = messages[i];
+    if (
+      m.role === "user" &&
+      i + 1 < messages.length &&
+      messages[i + 1].role === "user" &&
+      String(m.content ?? "").trim() === String(messages[i + 1].content ?? "").trim() &&
+      String(m.content ?? "").trim().length > 0
+    ) {
+      // Skip this copy; the next one will be included (or itself deduplicated).
+      continue;
+    }
+    out.push(m);
+  }
+  return out;
+}
+
+/**
  * Filter a message list down to those that belong to *sessionId*.
  * Pure; preserves order; never mutates the input.
  */
@@ -55,5 +84,6 @@ export function visibleMessagesForSession<T extends OwnedMessage>(
   sessionId: string | undefined | null,
 ): T[] {
   const filtered = messages.filter((m) => messageBelongsToSession(m, sessionId));
-  return dedupeContinuationNotices(dedupeSupervisorNotices(filtered)) as T[];
+  const deduped = dedupeConsecutiveUserMessages(filtered as (T & { role: string; content?: unknown })[]);
+  return dedupeContinuationNotices(dedupeSupervisorNotices(deduped)) as T[];
 }
