@@ -3544,16 +3544,16 @@ function SkillsTab() {
 
       {/* === Skills Marketplace Section (Collapsible) === */}
       <Panel title="技能市场" collapsible defaultCollapsed={false} className="mt-4">
-        <div className="space-y-6 pt-2 pb-2">
+        <div className="space-y-4 pt-1 pb-1">
           {/* === Recommended official shortcuts === */}
-            <section className="rounded-lg bg-surface-panel p-4 border border-border">
-              <div className="mb-2 text-[13px] font-semibold text-text-strong">
+            <section className="rounded-lg bg-surface-panel p-3 border border-border">
+              <div className="mb-1.5 text-[12px] font-semibold text-text-strong">
                 官方推荐
               </div>
-              <p className="mb-4 text-xs text-text-faint">
+              <p className="mb-3 text-xs text-text-faint">
                 以下为各产品官网入口，技能由对应提供方提供。请点击官网查看最新安装说明与授权要求。
               </p>
-              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+              <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
                 {RECOMMENDED_SKILLS.map((skill) => (
                   <div
                     key={skill.id}
@@ -3605,8 +3605,8 @@ function SkillsTab() {
             </section>
 
             {/* === ClawHub marketplace (registry aggregate) === */}
-            <section className="rounded-lg bg-surface-panel p-4 border border-border">
-              <div className="mb-4 text-[13px] font-semibold text-text-strong">
+            <section className="rounded-lg bg-surface-panel p-3 border border-border">
+              <div className="mb-3 text-[12px] font-semibold text-text-strong">
                 CLAWHUB 市场
               </div>
               <div className="flex gap-2">
@@ -3718,9 +3718,9 @@ function SkillsTab() {
             </section>
 
             {/* === SkillHub (Tencent) marketplace === */}
-            <section className="rounded-lg bg-surface-panel p-4 border border-border">
-              <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
-                <div className="text-[13px] font-semibold text-text-strong">
+            <section className="rounded-lg bg-surface-panel p-3 border border-border">
+              <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+                <div className="text-[12px] font-semibold text-text-strong">
                   SKILLHUB 市场
                 </div>
                 <button
