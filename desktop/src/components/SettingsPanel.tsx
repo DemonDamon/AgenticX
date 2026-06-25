@@ -3544,20 +3544,20 @@ function SkillsTab() {
 
       {/* === Skills Marketplace Section (Collapsible) === */}
       <Panel title="技能市场" collapsible defaultCollapsed={false} className="mt-4">
-        <div className="space-y-8 pt-2">
+        <div className="space-y-6 pt-2 pb-2">
           {/* === Recommended official shortcuts === */}
-            <section>
-              <div className="mb-2 text-[11px] font-medium uppercase tracking-wide text-text-subtle">
-                推荐
+            <section className="rounded-lg bg-surface-panel p-4 border border-border">
+              <div className="mb-2 text-[13px] font-semibold text-text-strong">
+                官方推荐
               </div>
-              <p className="mb-2 text-xs text-text-faint">
+              <p className="mb-4 text-xs text-text-faint">
                 以下为各产品官网入口，技能由对应提供方提供。请点击官网查看最新安装说明与授权要求。
               </p>
-              <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
                 {RECOMMENDED_SKILLS.map((skill) => (
                   <div
                     key={skill.id}
-                    className="flex flex-col rounded-md border border-transparent bg-surface-card px-3 py-2.5 transition hover:bg-surface-hover/40"
+                    className="flex flex-col rounded-md border border-border bg-surface-card px-3 py-2.5 transition hover:bg-surface-hover/40"
                   >
                     <div className="flex items-start gap-2">
                       {recommendedIconBroken[skill.id] || !(recommendedIconData[skill.id] || skill.icon_src) ? (
@@ -3605,9 +3605,9 @@ function SkillsTab() {
             </section>
 
             {/* === ClawHub marketplace (registry aggregate) === */}
-            <section>
-              <div className="mb-2 text-[11px] font-medium uppercase tracking-wide text-text-subtle">
-                ClawHub 市场
+            <section className="rounded-lg bg-surface-panel p-4 border border-border">
+              <div className="mb-4 text-[13px] font-semibold text-text-strong">
+                CLAWHUB 市场
               </div>
               <div className="flex gap-2">
                 <input
@@ -3718,10 +3718,10 @@ function SkillsTab() {
             </section>
 
             {/* === SkillHub (Tencent) marketplace === */}
-            <section>
-              <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
-                <div className="text-[11px] font-medium uppercase tracking-wide text-text-subtle">
-                  SkillHub 市场
+            <section className="rounded-lg bg-surface-panel p-4 border border-border">
+              <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
+                <div className="text-[13px] font-semibold text-text-strong">
+                  SKILLHUB 市场
                 </div>
                 <button
                   type="button"
