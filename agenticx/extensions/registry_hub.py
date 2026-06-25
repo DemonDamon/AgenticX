@@ -43,6 +43,27 @@ logger = logging.getLogger(__name__)
 # from the environment (SOCKS without socksio breaks httpx; proxies often break TLS).
 _REGISTRY_HTTPX = {"trust_env": False}
 
+# Built-in ClawHub source when config has no registries or no clawhub entry.
+DEFAULT_CLAWHUB_REGISTRY: Dict[str, str] = {
+    "name": "clawhub",
+    "url": "https://clawhub.ai/api",
+    "type": "clawhub",
+}
+
+
+def _ensure_clawhub_registry(
+    registries: List[Dict[str, Any]],
+) -> Tuple[List[Dict[str, Any]], bool]:
+    """Return registries with a ClawHub source when none is configured."""
+    items = [r for r in registries if isinstance(r, dict)]
+    has_clawhub = any(
+        str(r.get("type", "")).lower() == "clawhub" and str(r.get("url", "")).strip()
+        for r in items
+    )
+    if has_clawhub:
+        return items, False
+    return items + [dict(DEFAULT_CLAWHUB_REGISTRY)], True
+
 
 @dataclass
 class SearchResult:
@@ -96,8 +117,16 @@ class RegistryHub:
         """Initialise with a list of registry config dicts.
 
         Each dict should have: ``name``, ``url``, ``type`` keys.
+        When no ClawHub registry is present, a built-in ``clawhub.ai`` source is injected.
         """
-        self._registries: List[Dict[str, Any]] = registries or []
+        normalized, using_default = _ensure_clawhub_registry(list(registries or []))
+        self._registries: List[Dict[str, Any]] = normalized
+        self._using_default_clawhub = using_default
+
+    @property
+    def using_default_clawhub(self) -> bool:
+        """True when the built-in ClawHub registry was injected from defaults."""
+        return self._using_default_clawhub
 
     @classmethod
     def from_config(cls) -> "RegistryHub":

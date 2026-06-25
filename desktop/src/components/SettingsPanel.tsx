@@ -3012,8 +3012,11 @@ function SkillsTab() {
       if (seq !== marketSearchSeqRef.current) return;
       if (res.ok) {
         setMarketResults(res.items ?? []);
-        if ((res.items ?? []).length === 0) setMarketMsg("未找到相关技能");
-        else setMarketMsg("");
+        if ((res.items ?? []).length === 0) {
+          setMarketMsg(res.hint?.trim() || "未找到相关技能");
+        } else {
+          setMarketMsg("");
+        }
       } else {
         setMarketMsg(res.error ?? "搜索失败");
         setMarketResults([]);
