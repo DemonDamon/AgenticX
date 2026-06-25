@@ -4854,6 +4854,11 @@ def _write_skill_md_with_checks(
     except SkillFrontmatterError as exc:
         return None, f"ERROR: {exc}"
 
+    if action == "create":
+        from agenticx.skills.frontmatter import ensure_skill_source, write_skill_provenance
+
+        normalized = ensure_skill_source(normalized, "agent_created")
+
     from agenticx.learning.config import get_learning_config
     from agenticx.learning.skill_quality_gate import check_size_limits
     from agenticx.skills.frontmatter import get_description_from_frontmatter
@@ -4890,6 +4895,10 @@ def _write_skill_md_with_checks(
     skill_md = skill_dir / "SKILL.md"
     try:
         skill_md.write_text(normalized, encoding="utf-8")
+        if action == "create":
+            from agenticx.skills.frontmatter import write_skill_provenance
+
+            write_skill_provenance(skill_dir, "agent_created", extra={"name": canonical_name})
         result = scan_skill(skill_dir, source="agent-created")
         ok, reason = should_allow(result, "agent-created")
         if not ok:

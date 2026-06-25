@@ -363,7 +363,9 @@ function inferSourceFromBaseDir(baseDir?: string): string | null {
 function effectiveSkillSource(skill: SkillItem): string {
   const raw = String(skill.source ?? "").trim();
   if (raw && raw !== "unknown" && raw !== "custom") return raw;
-  return inferSourceFromBaseDir(skill.base_dir) ?? (raw || "custom");
+  const inferred = inferSourceFromBaseDir(skill.base_dir);
+  if (inferred) return inferred;
+  return raw || "custom";
 }
 
 function effectiveSkillLocation(skill: SkillItem): "project" | "global" {
@@ -416,7 +418,7 @@ function skillSourceBadge(source: string | undefined): { label: string; classNam
     case "agenticx":
       return { label: "自建", className: `${base} border-purple-500/30 bg-purple-500/10 text-purple-400` };
     case "agent_created":
-      return { label: "智能体创建", className: `${base} border-purple-500/30 bg-purple-500/10 text-purple-300` };
+      return { label: "自建", className: `${base} border-purple-500/30 bg-purple-500/10 text-purple-300` };
     case "custom":
       return { label: "自定义", className: `${base} border-border bg-surface-panel text-text-faint` };
     default:
