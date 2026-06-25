@@ -371,7 +371,14 @@ type RegistrySearchItem = {
   source_type: string;
   install_hint: string;
 };
-type RegistrySearchResult = { ok: boolean; items: RegistrySearchItem[]; count: number; error?: string };
+type RegistrySearchResult = {
+  ok: boolean;
+  items: RegistrySearchItem[];
+  count: number;
+  error?: string;
+  hint?: string;
+  using_default_clawhub?: boolean;
+};
 
 type SkillHubSearchItem = {
   slug: string;

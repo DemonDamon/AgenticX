@@ -6468,7 +6468,20 @@ def create_studio_app() -> FastAPI:
 
             hub = RegistryHub.from_config()
             results = hub.search(q)
-            return {"ok": True, "items": [r.to_dict() for r in results], "count": len(results)}
+            q_trim = (q or "").strip()
+            hint = ""
+            if not results:
+                if q_trim:
+                    hint = f"未找到与「{q_trim}」相关的技能"
+                elif hub.using_default_clawhub:
+                    hint = "未找到技能；可在 ~/.agenticx/config.yaml 的 extensions.registries 中添加更多注册源。"
+            return {
+                "ok": True,
+                "items": [r.to_dict() for r in results],
+                "count": len(results),
+                "using_default_clawhub": hub.using_default_clawhub,
+                "hint": hint,
+            }
         except Exception as exc:
             logger.warning("registry_search error: %s", exc)
             return {"ok": False, "items": [], "count": 0, "error": str(exc)}
