@@ -434,6 +434,9 @@ function getSkillCategory(skill: SkillItem): "third-party" | "custom" | "builtin
   return "custom";
 }
 
+const SKILLS_SECTION_PANEL_TITLE_CLASS =
+  "text-sm font-semibold normal-case tracking-normal text-text-strong";
+
 function SkillRowButton({
   skill,
   isActive,
@@ -679,7 +682,7 @@ function SkillGroup({
         <ChevronDown
           className={`h-4 w-4 shrink-0 text-text-faint transition-transform ${expanded ? "" : "-rotate-90"}`}
         />
-        <span className="text-xs font-semibold text-text-strong">
+        <span className="text-xs font-normal text-text-subtle">
           {title} ({skills.length})
         </span>
       </button>
@@ -725,7 +728,13 @@ function SkillsLocationSection({
   if (skills.length === 0 && !showWhenEmpty) return null;
 
   return (
-    <Panel title={`${title} (${skills.length})`} collapsible defaultCollapsed={false} className="mb-4">
+    <Panel
+      title={`${title} (${skills.length})`}
+      collapsible
+      defaultCollapsed={false}
+      className="mb-4"
+      titleClassName={SKILLS_SECTION_PANEL_TITLE_CLASS}
+    >
       <div className="pt-1">
         {isGlobal && onSearchChange && onRefresh ? (
           <div className="mb-3 flex gap-2">
@@ -3323,7 +3332,9 @@ function SkillsTab() {
   return (
     <div className="space-y-3">
       <div ref={skillsListAnchorRef} className="text-sm text-text-subtle">
-        技能（Skills）是注入给 Agent 的领域知识指令，告诉 AI 在特定任务中「怎么做」。
+        <strong className="text-text-strong">技能</strong>
+        是注入给 Agent 的领域知识指令，告诉 AI 在特定任务中
+        <strong className="text-text-strong">怎么做</strong>。
       </div>
 
       {pendingProposalCount > 0 ? (
@@ -3335,7 +3346,7 @@ function SkillsTab() {
       )}
 
       {/* Skill scan roots (presets + custom paths) */}
-      <Panel title="扫描路径" collapsible defaultCollapsed>
+      <Panel title="扫描路径" collapsible defaultCollapsed titleClassName={SKILLS_SECTION_PANEL_TITLE_CLASS}>
         <p className="mb-3 text-xs leading-relaxed text-text-subtle">
           项目内 <code className="text-text-muted">.agents/skills</code>、<code className="text-text-muted">.claude/skills</code>、<code className="text-text-muted">~/.agenticx/skills</code>（含 ClawHub 安装、智能体创建）以及内置包始终参与扫描。以下第三方根目录可按开关启用；也可添加自定义文件夹。
         </p>
@@ -3543,7 +3554,13 @@ function SkillsTab() {
       </div>
 
       {/* === Skills Marketplace Section (Collapsible) === */}
-      <Panel title="技能市场" collapsible defaultCollapsed={false} className="mt-4">
+      <Panel
+        title="技能市场"
+        collapsible
+        defaultCollapsed={false}
+        className="mt-4"
+        titleClassName={SKILLS_SECTION_PANEL_TITLE_CLASS}
+      >
         <div className="space-y-4 pt-1 pb-1">
           {/* === Recommended official shortcuts === */}
             <section className="rounded-lg bg-surface-panel p-3 border border-border">
