@@ -5114,32 +5114,43 @@ function SkillAdvancedPanel() {
               <span className="text-text-subtle">完整</span>—尽量扫全目录与依赖，更严、更慢。
             </p>
           </div>
-          <div className="mt-3 flex flex-wrap items-center gap-3 text-sm">
-            <label className="flex items-center gap-2">
-              <span className="text-text-muted">引擎版本</span>
-              <select
-                className="rounded-md border border-border bg-surface-card px-2 py-1 text-sm"
-                value={guardVersion}
+          <div className="mt-3 flex flex-wrap items-center gap-x-6 gap-y-2">
+            <div className="flex items-center gap-2">
+              <span className="shrink-0 text-xs text-text-muted">引擎版本</span>
+              <SettingsDropdown
+                value={String(guardVersion)}
+                displayLabel={`v${guardVersion}`}
+                options={[
+                  { value: "1", label: "v1" },
+                  { value: "2", label: "v2" },
+                ]}
+                onChange={(v) => void saveGuard({ version: Number(v) })}
                 disabled={busy}
-                onChange={(e) => void saveGuard({ version: Number(e.target.value) })}
-              >
-                <option value={1}>v1</option>
-                <option value={2}>v2</option>
-              </select>
-            </label>
-            <label className="flex items-center gap-2">
-              <span className="text-text-muted">扫描模式</span>
-              <select
-                className="rounded-md border border-border bg-surface-card px-2 py-1 text-sm"
+                size="compact"
+                menuPortal
+                className="w-[7rem] shrink-0"
+              />
+            </div>
+            <div className="flex items-center gap-2">
+              <span className="shrink-0 text-xs text-text-muted">扫描模式</span>
+              <SettingsDropdown
                 value={scanMode}
+                displayLabel={
+                  scanMode === "quick" ? "快速" : scanMode === "full" ? "完整" : "标准"
+                }
+                options={[
+                  { value: "quick", label: "快速" },
+                  { value: "standard", label: "标准" },
+                  { value: "full", label: "完整" },
+                ]}
+                onChange={(v) => void saveGuard({ scan_mode: v })}
                 disabled={busy || guardVersion < 2}
-                onChange={(e) => void saveGuard({ scan_mode: e.target.value })}
-              >
-                <option value="quick">快速</option>
-                <option value="standard">标准</option>
-                <option value="full">完整</option>
-              </select>
-            </label>
+                size="compact"
+                menuPortal
+                className="w-[7rem] shrink-0"
+                title={guardVersion < 2 ? "仅引擎 v2 支持扫描模式" : undefined}
+              />
+            </div>
           </div>
           <div className="mt-3 flex items-center gap-3 border-t border-border pt-3">
             <button
