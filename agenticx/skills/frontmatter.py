@@ -6,9 +6,12 @@ Author: Damon Li
 
 from __future__ import annotations
 
+import json
 import re
 from pathlib import Path
-from typing import List, Optional, Tuple
+from typing import Any, List, Optional, Tuple
+
+SKILL_PROVENANCE_FILENAME = ".agx-skill-provenance.json"
 
 _FRONTMATTER_RE = re.compile(r"^---\s*\n(.*?)\n---", re.DOTALL)
 
@@ -91,6 +94,56 @@ def normalize_skill_md(content: str, canonical_name: str) -> Tuple[str, List[str
     if not normalized.endswith("\n"):
         normalized += "\n"
     return normalized, fixed
+
+
+def ensure_skill_source(content: str, source: str) -> str:
+    """Ensure SKILL.md frontmatter contains an explicit ``source`` field."""
+    text = content if content.endswith("\n") else content + "\n"
+    fm_block = _extract_frontmatter_block(text)
+    if fm_block is None:
+        raise SkillFrontmatterError("SKILL.md must start with YAML frontmatter (---)")
+
+    fm_text, _ = _set_or_insert_frontmatter_field(fm_block, "source", source.strip())
+    body_match = _FRONTMATTER_RE.match(text.strip())
+    if not body_match:
+        raise SkillFrontmatterError("invalid frontmatter structure")
+    trailing = text.strip()[body_match.end() :]
+    if trailing and not trailing.startswith("\n"):
+        trailing = "\n" + trailing
+    normalized = f"---\n{fm_text.rstrip()}\n---{trailing}"
+    if not normalized.endswith("\n"):
+        normalized += "\n"
+    return normalized
+
+
+def write_skill_provenance(
+    skill_dir: Path,
+    source: str,
+    *,
+    extra: Optional[dict[str, Any]] = None,
+) -> Path:
+    """Persist install provenance beside SKILL.md for stable source labeling."""
+    payload: dict[str, Any] = {"source": source.strip()}
+    if extra:
+        payload.update(extra)
+    path = skill_dir / SKILL_PROVENANCE_FILENAME
+    path.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    return path
+
+
+def read_skill_provenance_source(skill_dir: Path) -> Optional[str]:
+    """Return ``source`` from the provenance sidecar when present and valid."""
+    path = skill_dir / SKILL_PROVENANCE_FILENAME
+    if not path.is_file():
+        return None
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
+    if not isinstance(data, dict):
+        return None
+    raw = str(data.get("source", "")).strip().lower().replace("-", "_")
+    return raw or None
 
 
 def get_description_from_frontmatter(content: str) -> Optional[str]:

@@ -6,7 +6,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from agenticx.tools import skill_bundle as skill_bundle_module
-from agenticx.tools.skill_bundle import SkillBundleLoader, infer_skill_source
+from agenticx.tools.skill_bundle import SkillBundleLoader, infer_skill_source, resolve_skill_source
 
 
 def _write_skill(root: Path, name: str, description: str, body: str) -> None:
@@ -114,3 +114,46 @@ def test_infer_skill_source_keeps_cursor_label_for_symlinked_skillhub_dir(
     source = infer_skill_source(linked_skill_dir)
 
     assert source == "cursor"
+
+
+def test_resolve_skill_source_prefers_frontmatter_over_path(tmp_path: Path) -> None:
+    skill_dir = tmp_path / ".agenticx" / "skills" / "ui-design"
+    skill_dir.mkdir(parents=True)
+    content = (
+        "---\n"
+        "name: ui-design\n"
+        "description: third-party ui skill\n"
+        "source: skillhub\n"
+        "---\n\n"
+        "# UI design\n"
+    )
+    (skill_dir / "SKILL.md").write_text(content, encoding="utf-8")
+
+    loader = SkillBundleLoader(search_paths=[skill_dir.parent])
+    meta = loader._parse_skill_md(skill_dir / "SKILL.md", skill_dir, "global")
+
+    assert meta is not None
+    assert meta.source == "skillhub"
+    assert resolve_skill_source(skill_dir, "---\nname: ui-design\nsource: skillhub\n---") == "skillhub"
+
+
+def test_resolve_skill_source_reads_provenance_sidecar(tmp_path: Path) -> None:
+    from agenticx.skills.frontmatter import write_skill_provenance
+
+    skill_dir = tmp_path / ".agenticx" / "skills" / "tencent-meeting-mcp"
+    skill_dir.mkdir(parents=True)
+    content = (
+        "---\n"
+        "name: tencent-meeting-mcp\n"
+        "description: meeting skill\n"
+        "---\n\n"
+        "# Meeting\n"
+    )
+    (skill_dir / "SKILL.md").write_text(content, encoding="utf-8")
+    write_skill_provenance(skill_dir, "skillhub")
+
+    loader = SkillBundleLoader(search_paths=[skill_dir.parent])
+    meta = loader._parse_skill_md(skill_dir / "SKILL.md", skill_dir, "global")
+
+    assert meta is not None
+    assert meta.source == "skillhub"

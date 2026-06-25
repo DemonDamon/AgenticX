@@ -531,8 +531,15 @@ class RegistryHub:
         except Exception as exc:
             return None, f"Failed to fetch skill from ClawHub: {exc}"
 
-    def write_registry_skill(self, skill_name: str, skill_content: str) -> Path:
+    def write_registry_skill(
+        self,
+        skill_name: str,
+        skill_content: str,
+        *,
+        source: str = "registry",
+    ) -> Path:
         """Write SKILL.md under ~/.agenticx/skills/registry/<name>/."""
+        from agenticx.skills.frontmatter import ensure_skill_source, write_skill_provenance
         from agenticx.skills.registry import _validate_skill_name
 
         validated = _validate_skill_name(skill_name)
@@ -542,7 +549,9 @@ class RegistryHub:
         skill_dir.relative_to(install_root)
         skill_dir.mkdir(parents=True, exist_ok=True)
         md_path = skill_dir / "SKILL.md"
-        md_path.write_text(skill_content, encoding="utf-8")
+        stamped = ensure_skill_source(skill_content, source)
+        md_path.write_text(stamped, encoding="utf-8")
+        write_skill_provenance(skill_dir, source, extra={"name": validated})
         return md_path
 
     def _install_agx(self, url: str, skill_name: str) -> InstallResult:

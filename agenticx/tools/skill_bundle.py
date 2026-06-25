@@ -16,6 +16,7 @@ Skill Bundle Loader (Anthropic SKILL.md 规范兼容)
 
 from __future__ import annotations
 
+import json
 import logging
 import os
 import platform
@@ -291,6 +292,70 @@ def infer_skill_source(base_dir: Path, builtin_root: Optional[Path] = None) -> s
             return "project_agent"
 
     return "custom"
+
+
+_VALID_EXPLICIT_SKILL_SOURCES = frozenset(
+    {
+        "builtin",
+        "registry",
+        "bundle",
+        "cursor",
+        "claude",
+        "agents",
+        "agent_global",
+        "project_agents",
+        "project_agent",
+        "agenticx",
+        "agent_created",
+        "skillhub",
+        "custom",
+    }
+)
+
+
+def _normalize_explicit_source(raw: str) -> Optional[str]:
+    normalized = str(raw or "").strip().lower().replace("-", "_")
+    if normalized in _VALID_EXPLICIT_SKILL_SOURCES:
+        return normalized
+    return None
+
+
+def resolve_skill_source(
+    base_dir: Path,
+    fm_text: Optional[str] = None,
+    *,
+    builtin_root: Optional[Path] = None,
+) -> str:
+    """Resolve skill provenance: frontmatter ``source`` > sidecar > path inference."""
+    if fm_text:
+        from agenticx.skills.frontmatter import _frontmatter_get_scalar
+
+        explicit = _normalize_explicit_source(_frontmatter_get_scalar(fm_text, "source") or "")
+        if explicit:
+            return explicit
+
+    try:
+        from agenticx.skills.frontmatter import read_skill_provenance_source
+
+        sidecar = read_skill_provenance_source(base_dir)
+        explicit = _normalize_explicit_source(sidecar or "")
+        if explicit:
+            return explicit
+    except Exception:
+        pass
+
+    prov_path = base_dir / ".agx-skill-provenance.json"
+    if prov_path.is_file():
+        try:
+            data = json.loads(prov_path.read_text(encoding="utf-8"))
+            if isinstance(data, dict):
+                explicit = _normalize_explicit_source(str(data.get("source", "")))
+                if explicit:
+                    return explicit
+        except Exception:
+            pass
+
+    return infer_skill_source(base_dir, builtin_root)
 
 
 def _expand_skill_path(path_str: str) -> Path:
@@ -859,7 +924,7 @@ class SkillBundleLoader:
             base_dir=base_dir,
             skill_md_path=skill_md,
             location=location,
-            source=infer_skill_source(base_dir),
+            source=resolve_skill_source(base_dir, fm_text),
             gate=gate,
             tag=tag,
             icon=icon,
