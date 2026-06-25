@@ -2,7 +2,7 @@ import { createPortal } from "react-dom";
 
 const POPUP_GAP = 6;
 const POPUP_HEIGHT = 32;
-const POPUP_MIN_WIDTH = 128;
+const POPUP_MIN_WIDTH = 160;
 const VIEWPORT_MARGIN = 8;
 
 export type SelectionPopupAnchor = {
@@ -52,12 +52,12 @@ export function SelectionQuotePopover({ anchor, onQuote }: SelectionQuotePopover
   return createPortal(
     <button
       type="button"
-      className="fixed z-[100] flex h-8 min-w-[128px] -translate-x-1/2 items-center justify-center whitespace-nowrap rounded-full border border-[var(--border-subtle)] bg-surface-popover px-3 text-xs leading-none text-text-primary shadow-lg transition-colors hover:bg-surface-hover"
+      className="agx-selection-quote-btn fixed z-[100] flex h-8 min-w-[160px] -translate-x-1/2 items-center justify-center gap-1.5 whitespace-nowrap rounded-md border border-[var(--border-subtle)] px-3 text-xs leading-none shadow-[0_4px_20px_rgba(0,0,0,0.45)] transition-[background-color,border-color,color,box-shadow]"
       style={{ top: anchor.top, left: anchor.left }}
       onMouseDown={(event) => event.preventDefault()}
       onClick={onQuote}
     >
-      引用至当前对话
+      <span className="text-text-muted">引用至当前对话</span>
     </button>,
     document.body
   );

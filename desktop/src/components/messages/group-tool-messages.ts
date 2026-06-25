@@ -1,4 +1,5 @@
 import type { Message } from "../../store";
+import { isContinuationNoticeMessage } from "../../utils/continuation-notice";
 
 function isNoisyToolStatusMessage(message: Message): boolean {
   if (message.role !== "tool") return false;
@@ -13,6 +14,7 @@ export type GroupedChatRow =
 
 function canGroupToolMessage(message: Message): boolean {
   if (message.role !== "tool") return false;
+  if (isContinuationNoticeMessage(message)) return false;
   if ((message.toolName ?? "").trim() === "group_progress") return false;
   // Only group the structured tool rows produced by the new SSE path.
   // Legacy history rows often persist as plain text like "工具调用:" /

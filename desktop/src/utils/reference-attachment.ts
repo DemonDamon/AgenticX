@@ -61,10 +61,17 @@ export function collectReferenceMatchLabels(att: MessageAttachment): string[] {
   return Array.from(out).filter(Boolean);
 }
 
+/** True when text immediately after an @file label ends the mention token (not mid-word). */
+export function isReferenceMentionBoundary(after: string): boolean {
+  return mentionBoundaryOk(after);
+}
+
 function mentionBoundaryOk(after: string): boolean {
   if (after.length === 0) return true;
   if (/^:\d+-\d+/.test(after) || /^\(\d+-\d+\)/.test(after)) return false;
   if (/^\s/.test(after)) return true;
+  // Sentence punctuation (CN/EN) ends the @mention — e.g. `@README.md (224-224)，你是…`
+  if (/^[,，。！？；：、.!?;:)\]}>」』】]/.test(after)) return true;
   return false;
 }
 
@@ -99,6 +106,31 @@ export function matchReferenceMentionLabel(
       })
     ) {
       return lineSuffix[0];
+    }
+  }
+
+  const parenSuffix = rest.match(/^([^\s@]+?)\s*\((\d+)-(\d+)\)/);
+  if (parenSuffix) {
+    const basePart = parenSuffix[1]!.trim();
+    const start = Math.max(1, parseInt(parenSuffix[2]!, 10));
+    const end = Math.max(start, parseInt(parenSuffix[3]!, 10));
+    const canonical = `${basePart} (${start}-${end})`;
+    const after = rest.slice(parenSuffix[0].length);
+    if (
+      mentionBoundaryOk(after) &&
+      (findReferenceAttachmentMeta(canonical, refs) ||
+        refs.some((att) => {
+          const range = resolveAttachmentLineRange(att);
+          return (
+            !!range &&
+            range.start === start &&
+            range.end === end &&
+            (resolveAttachmentBasename(att) === basePart ||
+              resolveAttachmentBasename(att) === fileNameFromPath(basePart))
+          );
+        }))
+    ) {
+      return parenSuffix[0];
     }
   }
 
