@@ -3739,7 +3739,7 @@ function SkillsTab() {
                     className="rounded border border-border px-2 py-0.5 text-[10px] text-text-subtle transition hover:bg-surface-hover hover:text-text-primary"
                     onClick={() =>
                       window.open(
-                        `https://skillhub.tencent.com/skill/${encodeURIComponent(item.slug)}`,
+                        `https://skillhub.tencent.com/skills/${encodeURIComponent(item.slug)}`,
                         "_blank",
                         "noopener,noreferrer",
                       )
