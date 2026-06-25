@@ -2666,7 +2666,6 @@ function SkillsTab() {
     Object.fromEntries(RECOMMENDED_SKILLS.map((skill) => [skill.id, skill.icon_src]))
   );
   const [recommendedIconBroken, setRecommendedIconBroken] = useState<Record<string, boolean>>({});
-  const [marketSectionOpen, setMarketSectionOpen] = useState(false);
 
   useEffect(() => {
     setBundleNeedsConfirmNonHigh(false);
@@ -3544,21 +3543,9 @@ function SkillsTab() {
       </div>
 
       {/* === Skills Marketplace Section (Collapsible) === */}
-      <div className="mt-8 border-t border-border pt-6">
-        <button
-          type="button"
-          className="flex w-full items-center justify-between group"
-          onClick={() => setMarketSectionOpen(!marketSectionOpen)}
-        >
-          <h3 className="text-lg font-medium flex items-center gap-2 text-text-strong">
-            {marketSectionOpen ? <ChevronDown className="w-5 h-5" /> : <ChevronRight className="w-5 h-5" />}
-            技能市场
-          </h3>
-        </button>
-
-        {marketSectionOpen && (
-          <div className="mt-6 space-y-8 animate-in slide-in-from-top-2">
-            {/* === Recommended official shortcuts === */}
+      <Panel title="技能市场" collapsible defaultCollapsed={false} className="mt-4">
+        <div className="space-y-8 pt-2">
+          {/* === Recommended official shortcuts === */}
             <section>
               <div className="mb-2 text-[11px] font-medium uppercase tracking-wide text-text-subtle">
                 推荐
@@ -3618,7 +3605,7 @@ function SkillsTab() {
             </section>
 
             {/* === ClawHub marketplace (registry aggregate) === */}
-            <section className="border-t border-border pt-6">
+            <section>
               <div className="mb-2 text-[11px] font-medium uppercase tracking-wide text-text-subtle">
                 ClawHub 市场
               </div>
@@ -3731,7 +3718,7 @@ function SkillsTab() {
             </section>
 
             {/* === SkillHub (Tencent) marketplace === */}
-            <section className="border-t border-border pt-6">
+            <section>
               <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
                 <div className="text-[11px] font-medium uppercase tracking-wide text-text-subtle">
                   SkillHub 市场
@@ -3828,9 +3815,8 @@ function SkillsTab() {
                 </div>
               )}
             </section>
-          </div>
-        )}
-      </div>
+        </div>
+      </Panel>
 
       {/* === Installed Bundles section === */}
       <div className="mt-4 border-t border-border pt-4">
