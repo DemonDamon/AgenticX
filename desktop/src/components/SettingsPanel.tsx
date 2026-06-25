@@ -689,11 +689,21 @@ function SkillsLocationSection({
   skills,
   title,
   locationLabel,
+  search,
+  onSearchChange,
+  onRefresh,
+  listLoading,
+  showWhenEmpty,
   ...props
 }: {
   skills: SkillItem[];
   title: string;
   locationLabel: "全局" | "项目";
+  search?: string;
+  onSearchChange?: (value: string) => void;
+  onRefresh?: () => void;
+  listLoading?: boolean;
+  showWhenEmpty?: boolean;
   activeSkillName: string | null;
   expandedSkillName: string | null;
   detail: { name: string; content: string } | null;
@@ -708,14 +718,35 @@ function SkillsLocationSection({
   skillScanBusy: boolean;
   onToggleGlobalSkill: (name: string, enabled: boolean) => void;
 }) {
-  if (skills.length === 0) return null;
-  
   const isGlobal = locationLabel === "全局";
+  if (skills.length === 0 && !showWhenEmpty) return null;
 
   return (
     <Panel title={`${title} (${skills.length})`} collapsible defaultCollapsed={false} className="mb-4">
       <div className="pt-1">
-        {isGlobal ? (
+        {isGlobal && onSearchChange && onRefresh ? (
+          <div className="mb-3 flex gap-2">
+            <input
+              className="flex-1 rounded-md border border-border bg-surface-panel px-2 py-1.5 text-sm text-text-primary placeholder:text-text-faint"
+              placeholder="搜索技能名称或描述..."
+              value={search ?? ""}
+              onChange={(e) => onSearchChange(e.target.value)}
+            />
+            <button
+              type="button"
+              className="shrink-0 rounded-md border border-border px-3 py-1.5 text-xs text-text-subtle transition hover:bg-surface-hover hover:text-text-primary disabled:opacity-40"
+              onClick={() => onRefresh()}
+              disabled={listLoading}
+            >
+              刷新
+            </button>
+          </div>
+        ) : null}
+        {skills.length === 0 ? (
+          <div className="rounded-lg border border-dashed border-border px-3 py-4 text-center text-xs text-text-faint">
+            未找到匹配的全局技能
+          </div>
+        ) : isGlobal ? (
           <>
             <SkillGroup title="第三方技能" skills={skills.filter(s => getSkillCategory(s) === "third-party")} locationLabel={locationLabel} {...props} />
             <SkillGroup title="自建技能" skills={skills.filter(s => getSkillCategory(s) === "custom")} locationLabel={locationLabel} {...props} />
@@ -3262,22 +3293,22 @@ function SkillsTab() {
     }
   };
 
-  const filteredAll = search.trim()
-    ? items.filter(
-        (s) =>
-          s.name.toLowerCase().includes(search.toLowerCase()) ||
-          s.description.toLowerCase().includes(search.toLowerCase())
-      )
-    : items;
-
   const projectSkills = pinSkillFirst(
-    filteredAll.filter((s) => effectiveSkillLocation(s) === "project"),
+    items.filter((s) => effectiveSkillLocation(s) === "project"),
     recentMarketSkillName
   );
+  const globalSkillPool = items.filter((s) => effectiveSkillLocation(s) !== "project");
   const globalSkills = pinSkillFirst(
-    filteredAll.filter((s) => effectiveSkillLocation(s) !== "project"),
-    recentMarketSkillName
+    search.trim()
+      ? globalSkillPool.filter(
+          (s) =>
+            s.name.toLowerCase().includes(search.toLowerCase()) ||
+            s.description.toLowerCase().includes(search.toLowerCase()),
+        )
+      : globalSkillPool,
+    recentMarketSkillName,
   );
+  const hasGlobalSkills = globalSkillPool.length > 0;
   const showGlobalSkillsFirst =
     Boolean(recentMarketSkillName) &&
     globalSkills.some((s) => s.name === recentMarketSkillName);
@@ -3400,23 +3431,6 @@ function SkillsTab() {
         ) : null}
       </Panel>
 
-      {/* Search + Refresh */}
-      <div className="flex gap-2">
-        <input
-          className="flex-1 rounded-md border border-border bg-surface-panel px-2 py-1.5 text-sm text-text-primary placeholder:text-text-faint"
-          placeholder="搜索技能名称或描述..."
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
-        />
-        <button
-          className="shrink-0 rounded-md border border-border px-3 py-1.5 text-xs text-text-subtle transition hover:bg-surface-hover hover:text-text-primary disabled:opacity-40"
-          onClick={() => void onRefresh()}
-          disabled={loading}
-        >
-          刷新
-        </button>
-      </div>
-
       {err && (
         <div className="rounded border border-amber-500/40 bg-amber-500/10 px-2 py-1 text-xs text-amber-200">
           {err}
@@ -3440,6 +3454,11 @@ function SkillsTab() {
               skills={globalSkills}
               title="全局技能"
               locationLabel="全局"
+              search={search}
+              onSearchChange={setSearch}
+              onRefresh={() => void onRefresh()}
+              listLoading={loading}
+              showWhenEmpty={hasGlobalSkills}
               activeSkillName={activeSkillName}
               expandedSkillName={expandedSkillName}
               detail={detail}
@@ -3497,6 +3516,11 @@ function SkillsTab() {
               skills={globalSkills}
               title="全局技能"
               locationLabel="全局"
+              search={search}
+              onSearchChange={setSearch}
+              onRefresh={() => void onRefresh()}
+              listLoading={loading}
+              showWhenEmpty={hasGlobalSkills}
               activeSkillName={activeSkillName}
               expandedSkillName={expandedSkillName}
               detail={detail}
