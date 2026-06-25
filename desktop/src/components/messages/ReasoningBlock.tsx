@@ -1,5 +1,6 @@
 import * as React from "react";
 import { ChevronDown, ChevronRight } from "lucide-react";
+import { ASSISTANT_ICON_RAIL_CLASS } from "./im-layout";
 
 type Props = {
   text: string;
@@ -11,7 +12,7 @@ function ThinkingGlyph() {
     <svg
       xmlns="http://www.w3.org/2000/svg"
       viewBox="0 0 24 24"
-      className="h-[22px] w-[22px] shrink-0 text-[rgb(var(--theme-color-rgb,59,130,246))]"
+      className="h-[18px] w-[18px] shrink-0 text-[rgb(var(--theme-color-rgb,59,130,246))]"
       fill="none"
       stroke="currentColor"
       strokeWidth="2.4"
@@ -68,7 +69,7 @@ export function ReasoningBlock({ text, streaming = false }: Props) {
         onClick={() => setOpen((value) => !value)}
         className="flex w-full max-w-full items-center justify-start gap-2 px-0 py-1 text-left"
       >
-        <span className="flex w-[20px] shrink-0 items-center justify-center">
+        <span className={ASSISTANT_ICON_RAIL_CLASS}>
           <ThinkingGlyph />
         </span>
         <span className="flex min-w-0 flex-1 items-center gap-1">

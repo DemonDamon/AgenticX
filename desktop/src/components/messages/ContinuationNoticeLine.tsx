@@ -18,7 +18,7 @@ function variantTone(variant: ContinuationNoticeVariant) {
 
 function ReasonChip({ label }: { label: string }) {
   return (
-    <span className="inline-flex items-center rounded-full border border-border-muted bg-surface-card px-2 py-0.5 text-[11px] font-medium text-text-subtle">
+    <span className="agx-continuation-reason-chip inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-semibold">
       {label}
     </span>
   );
@@ -32,11 +32,21 @@ function RoundLabel({
   maxRounds?: number;
 }) {
   if (round == null) return null;
-  const text =
-    maxRounds != null && maxRounds > 0
-      ? `第 ${round}/${maxRounds} 次`
-      : `第 ${round} 轮`;
-  return <span className="text-[11px] tabular-nums text-text-faint">{text}</span>;
+  const roundNum = (
+    <span className="font-semibold text-[rgb(var(--theme-color-rgb,59,130,246))]">{round}</span>
+  );
+  if (maxRounds != null && maxRounds > 0) {
+    return (
+      <span className="text-[11px] tabular-nums text-text-faint">
+        第 {roundNum}/{maxRounds} 次
+      </span>
+    );
+  }
+  return (
+    <span className="text-[11px] tabular-nums text-text-faint">
+      第 {roundNum} 轮
+    </span>
+  );
 }
 
 export function ContinuationNoticeLine({ message }: Props) {

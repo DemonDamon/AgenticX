@@ -151,9 +151,18 @@ body {
 
 /* 系统状态行（续跑 / Supervisor 通知）：Claude 式轻量 inline，避免与 ToolCallCard 扳手混排 */
 .agx-system-status-line {
-  border-left: 2px solid rgba(var(--theme-color-rgb, 139, 92, 246), 0.22);
-  margin-left: 0.25rem;
-  padding-left: calc(0.75rem - 2px);
+  margin-left: 0;
+}
+
+/* 续跑原因 pill：醒目红底，无边框 */
+.agx-continuation-reason-chip {
+  border: none;
+  background: rgba(239, 68, 68, 0.32);
+  color: rgba(254, 226, 226, 0.98);
+}
+:root[data-theme="light"] .agx-continuation-reason-chip {
+  background: rgba(239, 68, 68, 0.16);
+  color: rgb(185, 28, 28);
 }
 
 /* 历史会话列表：当前会话「豆包式」圆角胶囊底，浅色下避免与 hover 灰阶黏连 */

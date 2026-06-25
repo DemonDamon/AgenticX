@@ -1,5 +1,6 @@
 import type { LucideIcon } from "lucide-react";
 import type { ReactNode } from "react";
+import { ASSISTANT_ICON_RAIL_CLASS } from "./im-layout";
 
 export type SystemStatusTone = "neutral" | "info" | "success" | "warning";
 
@@ -48,19 +49,20 @@ export function SystemStatusLine({
   const palette = TONE[tone];
   return (
     <div
-      className={`agx-system-status-line flex min-w-0 items-start gap-2.5 px-3 py-2 text-[13px] leading-[1.65] ${className}`}
+      className={`agx-system-status-line flex min-w-0 items-center gap-2 px-3 py-1 text-[13px] leading-[1.65] ${className}`}
       data-status-kind={dataStatusKind}
     >
-      <span
-        className="mt-0.5 flex h-[18px] w-[18px] shrink-0 items-center justify-center rounded-[5px]"
-        style={{
-          backgroundColor: palette.bg,
-          boxShadow: `inset 0 0 0 1px ${palette.ring}`,
-          color: palette.fg,
-        }}
-        aria-hidden
-      >
-        <Icon className="h-3 w-3" strokeWidth={2.25} />
+      <span className={ASSISTANT_ICON_RAIL_CLASS} aria-hidden>
+        <span
+          className="flex h-[18px] w-[18px] items-center justify-center rounded-[5px]"
+          style={{
+            backgroundColor: palette.bg,
+            boxShadow: `inset 0 0 0 1px ${palette.ring}`,
+            color: palette.fg,
+          }}
+        >
+          <Icon className="h-3 w-3" strokeWidth={2.25} />
+        </span>
       </span>
       <div className="min-w-0 flex-1 text-text-muted">{children}</div>
     </div>
