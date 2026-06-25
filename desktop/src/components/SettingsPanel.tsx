@@ -3547,12 +3547,9 @@ function SkillsTab() {
         <div className="space-y-4 pt-1 pb-1">
           {/* === Recommended official shortcuts === */}
             <section className="rounded-lg bg-surface-panel p-3 border border-border">
-              <div className="mb-1.5 text-[12px] font-semibold text-text-strong">
+              <div className="mb-3 text-[12px] font-semibold text-text-strong">
                 官方推荐
               </div>
-              <p className="mb-3 text-xs text-text-faint">
-                以下为各产品官网入口，技能由对应提供方提供。请点击官网查看最新安装说明与授权要求。
-              </p>
               <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
                 {RECOMMENDED_SKILLS.map((skill) => (
                   <div
@@ -3731,9 +3728,6 @@ function SkillsTab() {
                   skillhub.tencent.com ↗
                 </button>
               </div>
-              <p className="mb-2 text-xs text-text-faint">
-                搜索由本机 SkillHub CLI（若已安装）或已配置的 ClawHub 注册表提供；安装将跳转 Meta-Agent 会话并下发 SkillHub 官方安装指引中的指令。
-              </p>
               <div className="flex gap-2">
                 <input
                   className="flex-1 rounded-md border border-border bg-surface-panel px-2 py-1.5 text-sm text-text-primary placeholder:text-text-faint"
