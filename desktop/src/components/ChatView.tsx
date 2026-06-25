@@ -1171,7 +1171,16 @@ export function ChatView({ onOpenConfirm, mode = "pro" }: Props) {
             const eventAgentId = payload.data?.agent_id ?? "meta";
             if (payload.type === "continuation_notice") {
               const noticeText = String(payload.data?.text ?? "").trim();
-              if (noticeText) addMessage("tool", noticeText, "meta");
+              if (noticeText) {
+                addMessage("tool", noticeText, "meta", undefined, undefined, undefined, {
+                  metadata: {
+                    kind: "continuation_notice",
+                    source: payload.data?.source,
+                    reason: payload.data?.reason,
+                    continuation_round: payload.data?.continuation_round,
+                  },
+                });
+              }
               continue;
             }
             if (payload.type === "continuation_rejected") {

@@ -1,3 +1,6 @@
+import { dedupeSupervisorNotices } from "./supervisor-notice";
+import { dedupeContinuationNotices } from "./continuation-notice";
+
 /**
  * Cross-session message ownership invariant.
  *
@@ -51,5 +54,6 @@ export function visibleMessagesForSession<T extends OwnedMessage>(
   messages: readonly T[],
   sessionId: string | undefined | null,
 ): T[] {
-  return messages.filter((m) => messageBelongsToSession(m, sessionId));
+  const filtered = messages.filter((m) => messageBelongsToSession(m, sessionId));
+  return dedupeContinuationNotices(dedupeSupervisorNotices(filtered)) as T[];
 }

@@ -92,6 +92,36 @@ def _messages_from_managed(managed: Any) -> list[dict[str, Any]]:
     return list(hist)
 
 
+def _has_supervisor_notice(
+    messages: list[dict[str, Any]],
+    *,
+    kind: str,
+    limit_code: Optional[str] = None,
+) -> bool:
+    """True if chat history already contains this supervisor notice (dedupe guard)."""
+    for item in reversed(messages or []):
+        meta_raw = item.get("metadata")
+        meta = meta_raw if isinstance(meta_raw, dict) else {}
+        content = str(item.get("content") or "")
+        if kind == "unattended_done":
+            if meta.get("kind") == "unattended_done" or "任务已完成" in content:
+                return True
+            continue
+        if kind == "unattended_failed":
+            is_fail = meta.get("kind") == "unattended_failed" or "无人值守已停止" in content
+            if not is_fail:
+                continue
+            if not limit_code:
+                return True
+            if meta.get("limit_code") == limit_code:
+                return True
+            if limit_code == "wall_clock" and "自动运行时长上限" in content:
+                return True
+            if limit_code == "max_continuations" and "次数上限" in content:
+                return True
+    return False
+
+
 class SessionSupervisor:
     """Poll sessions and trigger internal continuation when unattended mode is on."""
 
@@ -176,7 +206,8 @@ class SessionSupervisor:
 
             messages = _messages_from_managed(managed)
             if todos_completed(messages):
-                self._append_done_notice(managed)
+                if not _has_supervisor_notice(messages, kind="unattended_done"):
+                    self._append_done_notice(managed)
                 set_session_unattended_enabled(managed.studio_session, False)
                 await self._manager.persist_async(sid)
                 continue
@@ -253,6 +284,12 @@ class SessionSupervisor:
         self, managed: Any, reason: str, *, code: Optional[str] = None
     ) -> None:
         sid = managed.session_id
+        messages = _messages_from_managed(managed)
+        if _has_supervisor_notice(messages, kind="unattended_failed", limit_code=code):
+            self._manager.set_execution_state(sid, "failed")
+            set_session_unattended_enabled(managed.studio_session, False)
+            await self._manager.persist_async(sid)
+            return
         row = {
             "id": __import__("uuid").uuid4().hex,
             "role": "tool",

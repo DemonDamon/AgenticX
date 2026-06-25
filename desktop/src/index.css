@@ -134,6 +134,28 @@ body {
   color: inherit;
 }
 
+/* 工作区预览选区「引用至当前对话」：实心浮层，hover 略提亮但不透明（对齐 Cursor Add to Chat） */
+.agx-selection-quote-btn {
+  background-color: var(--surface-popover);
+  color: var(--text-muted);
+}
+.agx-selection-quote-btn:hover {
+  background-color: color-mix(in srgb, var(--surface-popover) 78%, var(--text-strong) 22%);
+  border-color: var(--border-strong);
+  color: var(--text-primary);
+  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.55);
+}
+.agx-selection-quote-btn:active {
+  background-color: color-mix(in srgb, var(--surface-popover) 70%, var(--text-strong) 30%);
+}
+
+/* 系统状态行（续跑 / Supervisor 通知）：Claude 式轻量 inline，避免与 ToolCallCard 扳手混排 */
+.agx-system-status-line {
+  border-left: 2px solid rgba(var(--theme-color-rgb, 139, 92, 246), 0.22);
+  margin-left: 0.25rem;
+  padding-left: calc(0.75rem - 2px);
+}
+
 /* 历史会话列表：当前会话「豆包式」圆角胶囊底，浅色下避免与 hover 灰阶黏连 */
 .agx-session-history-row.agx-session-history-row--active {
   background-color: rgba(0, 0, 0, 0.1);

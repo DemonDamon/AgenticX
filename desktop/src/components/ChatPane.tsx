@@ -139,6 +139,7 @@ import {
 } from "../utils/session-message-map";
 import {
   findReferenceAttachmentMeta,
+  isReferenceMentionBoundary,
   isWorkspaceReferenceAttachment,
   parseLineRangeFromReferenceLabel,
 } from "../utils/reference-attachment";
@@ -193,7 +194,15 @@ import {
   GLOBAL_SEARCH_WORKSPACE_ADDED,
   type GlobalSearchReferenceFileDetail,
 } from "./global-search/global-search-events";
-import { buildFileMentionAppend, buildComposerRefPathLookup, fileNameFromPath, formatReferenceChipLabel, formatReferencePathHint, lookupComposerRefPath, resolveReferenceSourcePath } from "../utils/chat-file-mention";
+import {
+  buildFileMentionAppend,
+  buildComposerRefPathLookup,
+  fileNameFromPath,
+  formatReferenceChipLabel,
+  formatReferencePathHint,
+  lookupComposerRefPath,
+  resolveReferenceSourcePath,
+} from "../utils/chat-file-mention";
 import { absoluteTaskspacePath } from "../utils/workspace-file-path";
 import {
   composerAcceptsDragTypes,
@@ -1614,8 +1623,8 @@ function rewriteUserReferenceMentions(text: string, attachments: MessageAttachme
     const rest = text.slice(at + 1);
     const matched = records.find((row) => {
       if (!rest.startsWith(row.label)) return false;
-      const tail = rest.slice(row.label.length, row.label.length + 1);
-      return tail.length === 0 || /\s/.test(tail);
+      const after = rest.slice(row.label.length);
+      return isReferenceMentionBoundary(after);
     });
     if (!matched) {
       out += "@";
@@ -7089,7 +7098,23 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
             if (payload.type === "continuation_notice") {
               const noticeText = String(payload.data?.text ?? "").trim();
               if (noticeText) {
-                addPaneMessageIfSessionActive(pane.id, "tool", noticeText, "meta");
+                addPaneMessageIfSessionActive(
+                  pane.id,
+                  "tool",
+                  noticeText,
+                  "meta",
+                  undefined,
+                  undefined,
+                  undefined,
+                  {
+                    metadata: {
+                      kind: "continuation_notice",
+                      source: payload.data?.source,
+                      reason: payload.data?.reason,
+                      continuation_round: payload.data?.continuation_round,
+                    },
+                  }
+                );
               }
               clearResumeInFlight(requestSessionId);
               if (sessionStillActive) {

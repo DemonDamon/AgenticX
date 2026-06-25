@@ -508,6 +508,7 @@ type AppState = {
         | "references"
         | "searchedQueries"
         | "ownerSessionId"
+        | "metadata"
       >
     > &
       Partial<MessageToolExtras>
@@ -590,6 +591,7 @@ type AppState = {
         | "inlineConfirm"
         | "references"
         | "searchedQueries"
+        | "metadata"
       >
     > &
       Partial<MessageToolExtras>

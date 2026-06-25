@@ -171,3 +171,31 @@ def test_supervisor_auto_continue_interrupted() -> None:
     )
     assert result.should_auto_continue is True
     assert result.continue_reason == "interrupted"
+
+
+def test_supervisor_notice_dedupe_helpers() -> None:
+    from agenticx.studio.supervisor import _has_supervisor_notice
+
+    done_msgs = [
+        {
+            "role": "tool",
+            "content": "✅ 任务已完成（5/5）",
+            "metadata": {"kind": "unattended_done", "source": "supervisor"},
+        }
+    ]
+    assert _has_supervisor_notice(done_msgs, kind="unattended_done") is True
+
+    fail_msgs = [
+        {
+            "role": "tool",
+            "content": "⛔ 无人值守已停止：已连续运行约 6 小时，达到自动运行时长上限",
+            "metadata": {
+                "kind": "unattended_failed",
+                "source": "supervisor",
+                "limit_code": "wall_clock",
+            },
+        }
+    ]
+    assert _has_supervisor_notice(fail_msgs, kind="unattended_failed", limit_code="wall_clock") is True
+    assert _has_supervisor_notice([], kind="unattended_done") is False
+

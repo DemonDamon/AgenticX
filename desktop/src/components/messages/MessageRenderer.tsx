@@ -8,6 +8,10 @@ import { CleanBlock } from "./CleanBlock";
 import { ToolCallCard } from "./ToolCallCard";
 import { SystemNotice } from "./SystemNotice";
 import { ContextNoticeLine } from "./ContextNoticeLine";
+import { SupervisorNoticeLine } from "./SupervisorNoticeLine";
+import { ContinuationNoticeLine } from "./ContinuationNoticeLine";
+import { isSupervisorNoticeMessage } from "../../utils/supervisor-notice";
+import { isContinuationNoticeMessage } from "../../utils/continuation-notice";
 import { ViewImageInjectCard } from "./ViewImageInjectCard";
 import { BudgetExceededCard } from "./BudgetExceededCard";
 import { parseContextNotice } from "../../utils/context-notice";
@@ -287,6 +291,12 @@ export function MessageRenderer({
     const contextNotice = parseContextNotice(message);
     if (contextNotice) {
       return <ContextNoticeLine text={contextNotice.text} />;
+    }
+    if (isSupervisorNoticeMessage(message)) {
+      return <SupervisorNoticeLine message={message} />;
+    }
+    if (isContinuationNoticeMessage(message)) {
+      return <ContinuationNoticeLine message={message} />;
     }
     if (isTodoUpdateToolMessage(message.content)) {
       return (
