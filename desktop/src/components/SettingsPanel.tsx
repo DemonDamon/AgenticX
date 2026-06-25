@@ -27,6 +27,7 @@ import {
   Wrench,
   Loader2,
   ChevronRight,
+  ChevronDown,
   Anchor,
   User,
   Activity,
@@ -413,7 +414,7 @@ function skillSourceBadge(source: string | undefined): { label: string; classNam
         className: `${base} border-cyan-500/30 bg-cyan-500/5 text-cyan-300`,
       };
     case "agenticx":
-      return { label: "AgenticX", className: `${base} border-purple-500/30 bg-purple-500/10 text-purple-400` };
+      return { label: "自建", className: `${base} border-purple-500/30 bg-purple-500/10 text-purple-400` };
     case "agent_created":
       return { label: "智能体创建", className: `${base} border-purple-500/30 bg-purple-500/10 text-purple-300` };
     case "custom":
@@ -421,6 +422,14 @@ function skillSourceBadge(source: string | undefined): { label: string; classNam
     default:
       return { label: "其他", className: `${base} border-border bg-surface-panel text-text-faint` };
   }
+}
+
+function getSkillCategory(skill: SkillItem): "third-party" | "custom" | "builtin" {
+  const src = effectiveSkillSource(skill);
+  if (["registry", "bundle", "cursor", "claude", "skillhub"].includes(src)) return "third-party";
+  if (["builtin"].includes(src)) return "builtin";
+  // All other sources including 'agenticx', 'agents', 'agent_created', 'custom', 'unknown' are treated as custom/user-created
+  return "custom";
 }
 
 function SkillRowButton({
@@ -475,63 +484,62 @@ function SkillRowButton({
       : "shrink-0 rounded-full border border-border bg-surface-panel px-1.5 text-[10px] text-text-faint";
   return (
     <div
-      className={`w-full rounded-md border px-3 py-2 transition ${
+      className={`w-full px-4 py-3 transition ${
         isExpanded || isActive
-          ? "border-[var(--settings-accent-border-strong)] bg-[var(--settings-accent-subtle-bg)]"
+          ? "bg-[var(--settings-accent-subtle-bg)]"
           : skill.name === recentMarketSkillName
-            ? "border-amber-500/35 bg-amber-500/5"
-            : "border-transparent bg-surface-card hover:bg-surface-hover"
+            ? "bg-amber-500/5"
+            : "bg-surface-base hover:bg-surface-hover"
       } ${!globalSkillEnabled ? "opacity-60" : ""}`}
     >
-      <div className="flex items-start gap-2">
-      <button
-        type="button"
-        className="min-w-0 flex-1 text-left"
-        onClick={() => onActivate(skill.name)}
-        onDoubleClick={() => void onExpandDetail(skill.name)}
-        title="双击展开当前技能"
-      >
-        <div className="flex flex-wrap items-center gap-2">
-          <span className="truncate text-sm font-medium text-text-primary">{skill.name}</span>
-          {skill.name === recentMarketSkillName && (
-            <span className="shrink-0 rounded-full border border-amber-500/40 bg-amber-500/15 px-1.5 text-[10px] text-amber-300">
-              刚安装
-            </span>
-          )}
-          <span className={src.className}>{src.label}</span>
-          <span className={locClass}>{locationLabel}</span>
-          {skill.tag ? (
-            <span className="shrink-0 rounded-full border border-violet-500/30 bg-violet-500/10 px-1.5 text-[10px] text-violet-300">
-              {skill.tag}
-            </span>
+      <div className="flex items-start gap-3">
+        <button
+          type="button"
+          className="min-w-0 flex-1 text-left"
+          onClick={() => onActivate(skill.name)}
+          onDoubleClick={() => void onExpandDetail(skill.name)}
+          title="双击展开当前技能"
+        >
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="truncate text-sm font-medium text-text-primary">{skill.name}</span>
+            {skill.name === recentMarketSkillName && (
+              <span className="shrink-0 rounded-full border border-amber-500/40 bg-amber-500/15 px-1.5 text-[10px] text-amber-300">
+                刚安装
+              </span>
+            )}
+            <span className={src.className}>{src.label}</span>
+            <span className={locClass}>{locationLabel}</span>
+            {skill.tag ? (
+              <span className="shrink-0 rounded-full border border-violet-500/30 bg-violet-500/10 px-1.5 text-[10px] text-violet-300">
+                {skill.tag}
+              </span>
+            ) : null}
+            {skill.icon ? (
+              <span className="shrink-0 rounded-full border border-border bg-surface-panel px-1.5 text-[10px] text-text-faint">
+                icon:{skill.icon}
+              </span>
+            ) : null}
+            {conflictCount > 1 ? (
+              <span className="shrink-0 rounded-full border border-rose-500/30 bg-rose-500/10 px-1.5 text-[10px] text-rose-300">
+                同名冲突({conflictCount})
+              </span>
+            ) : null}
+          </div>
+          {skill.description ? (
+            <p className="mt-1.5 truncate text-xs text-text-muted">{skill.description}</p>
           ) : null}
-          {skill.icon ? (
-            <span className="shrink-0 rounded-full border border-border bg-surface-panel px-1.5 text-[10px] text-text-faint">
-              icon:{skill.icon}
-            </span>
-          ) : null}
-          {conflictCount > 1 ? (
-            <span className="shrink-0 rounded-full border border-rose-500/30 bg-rose-500/10 px-1.5 text-[10px] text-rose-300">
-              同名冲突({conflictCount})
-            </span>
-          ) : null}
+        </button>
+        <div className="flex shrink-0 flex-col items-end gap-1 pt-0.5">
+          <SettingsSwitch
+            checked={globalSkillEnabled}
+            disabled={skillScanBusy}
+            aria-label={`启用技能 ${skill.name}`}
+            onChange={(next) => onToggleGlobalSkill(skill.name, next)}
+          />
         </div>
-        {skill.description ? (
-          <p className="mt-0.5 truncate text-xs text-text-muted">{skill.description}</p>
-        ) : null}
-      </button>
-      <div className="flex shrink-0 flex-col items-end gap-0.5 pt-0.5">
-        <span className="text-[10px] text-text-faint">全局</span>
-        <SettingsSwitch
-          checked={globalSkillEnabled}
-          disabled={skillScanBusy}
-          aria-label={`全局启用技能 ${skill.name}`}
-          onChange={(next) => onToggleGlobalSkill(skill.name, next)}
-        />
-      </div>
       </div>
       {conflictCount > 1 ? (
-        <div className="mt-1.5 flex items-center gap-2 text-[11px] text-text-faint">
+        <div className="mt-2.5 flex items-center gap-2 text-[11px] text-text-faint">
           <span>默认来源</span>
           <select
             className="rounded border border-border bg-surface-panel px-1.5 py-0.5 text-[11px] text-text-primary"
@@ -551,7 +559,7 @@ function SkillRowButton({
         </div>
       ) : null}
       {isExpanded ? (
-        <div className="mt-2 rounded-md border border-[var(--settings-accent-border-muted)] bg-surface-card">
+        <div className="mt-3 rounded-md border border-[var(--settings-accent-border-muted)] bg-surface-card">
           <div className="flex items-center justify-between border-b border-border px-3 py-2">
             <span className="text-xs font-medium text-[var(--settings-accent-fg)]">SKILL.md</span>
             <button
@@ -578,23 +586,110 @@ function SkillRowButton({
   );
 }
 
+function SkillList({
+  skills,
+  ...props
+}: {
+  skills: SkillItem[];
+  locationLabel: "全局" | "项目";
+  activeSkillName: string | null;
+  expandedSkillName: string | null;
+  detail: { name: string; content: string } | null;
+  loadingDetail: boolean;
+  recentMarketSkillName: string | null;
+  preferredSources: Record<string, string>;
+  onChoosePreferredSource: (name: string, source: string) => void;
+  onActivate: (name: string) => void;
+  onExpandDetail: (name: string) => void;
+  onCollapseDetail: () => void;
+  disabledSkillNames: string[];
+  skillScanBusy: boolean;
+  onToggleGlobalSkill: (name: string, enabled: boolean) => void;
+}) {
+  const PREVIEW_COUNT = 15;
+  const [showAll, setShowAll] = useState(false);
+  const shouldCollapse = skills.length > PREVIEW_COUNT;
+  const visibleSkills = showAll || !shouldCollapse ? skills : skills.slice(0, PREVIEW_COUNT);
+  const remaining = Math.max(0, skills.length - visibleSkills.length);
+
+  return (
+    <div className="overflow-hidden rounded-lg border border-border bg-surface-base">
+      <div className="divide-y divide-border">
+        {visibleSkills.map((skill) => (
+          <SkillRowButton
+            key={skill.name}
+            skill={skill}
+            isActive={props.activeSkillName === skill.name}
+            isExpanded={props.expandedSkillName === skill.name}
+            detailLoading={props.expandedSkillName === skill.name && props.loadingDetail && props.detail?.name !== skill.name}
+            detailContent={props.expandedSkillName === skill.name && props.detail?.name === skill.name ? props.detail.content : null}
+            globalSkillEnabled={!props.disabledSkillNames.includes(skill.name)}
+            {...props}
+          />
+        ))}
+      </div>
+      {remaining > 0 && (
+        <button
+          type="button"
+          className="w-full border-t border-border bg-surface-panel py-2.5 text-xs font-medium text-text-subtle transition hover:bg-surface-hover hover:text-text-primary"
+          onClick={() => setShowAll(true)}
+        >
+          显示其余 {remaining} 项...
+        </button>
+      )}
+    </div>
+  );
+}
+
+function SkillGroup({
+  title,
+  skills,
+  ...props
+}: {
+  title: string;
+  skills: SkillItem[];
+  locationLabel: "全局" | "项目";
+  activeSkillName: string | null;
+  expandedSkillName: string | null;
+  detail: { name: string; content: string } | null;
+  loadingDetail: boolean;
+  recentMarketSkillName: string | null;
+  preferredSources: Record<string, string>;
+  onChoosePreferredSource: (name: string, source: string) => void;
+  onActivate: (name: string) => void;
+  onExpandDetail: (name: string) => void;
+  onCollapseDetail: () => void;
+  disabledSkillNames: string[];
+  skillScanBusy: boolean;
+  onToggleGlobalSkill: (name: string, enabled: boolean) => void;
+}) {
+  const [expanded, setExpanded] = useState(true);
+  if (skills.length === 0) return null;
+
+  return (
+    <div className="mb-4 last:mb-0">
+      <button
+        type="button"
+        className="mb-2 flex w-full items-center gap-1.5 text-left transition hover:text-text-primary"
+        onClick={() => setExpanded(!expanded)}
+      >
+        <ChevronDown
+          className={`h-4 w-4 shrink-0 text-text-faint transition-transform ${expanded ? "" : "-rotate-90"}`}
+        />
+        <span className="text-xs font-semibold text-text-strong">
+          {title} ({skills.length})
+        </span>
+      </button>
+      {expanded && <SkillList skills={skills} {...props} />}
+    </div>
+  );
+}
+
 function SkillsLocationSection({
   skills,
   title,
   locationLabel,
-  activeSkillName,
-  expandedSkillName,
-  detail,
-  loadingDetail,
-  recentMarketSkillName,
-  preferredSources,
-  onChoosePreferredSource,
-  onActivate,
-  onExpandDetail,
-  onCollapseDetail,
-  disabledSkillNames,
-  skillScanBusy,
-  onToggleGlobalSkill,
+  ...props
 }: {
   skills: SkillItem[];
   title: string;
@@ -614,49 +709,23 @@ function SkillsLocationSection({
   onToggleGlobalSkill: (name: string, enabled: boolean) => void;
 }) {
   if (skills.length === 0) return null;
-  const PREVIEW_COUNT = 10;
-  const [expanded, setExpanded] = useState(false);
-  const shouldCollapse = skills.length > PREVIEW_COUNT;
-  const visibleSkills = expanded || !shouldCollapse ? skills : skills.slice(0, PREVIEW_COUNT);
-  const remaining = Math.max(0, skills.length - visibleSkills.length);
+  
+  const isGlobal = locationLabel === "全局";
 
   return (
-    <div>
-      <div className="mb-1 text-[11px] font-medium uppercase tracking-wide text-text-subtle">
-        {title} ({skills.length})
+    <Panel title={`${title} (${skills.length})`} collapsible defaultCollapsed={false} className="mb-4">
+      <div className="pt-1">
+        {isGlobal ? (
+          <>
+            <SkillGroup title="第三方技能" skills={skills.filter(s => getSkillCategory(s) === "third-party")} locationLabel={locationLabel} {...props} />
+            <SkillGroup title="自建技能" skills={skills.filter(s => getSkillCategory(s) === "custom")} locationLabel={locationLabel} {...props} />
+            <SkillGroup title="内置技能" skills={skills.filter(s => getSkillCategory(s) === "builtin")} locationLabel={locationLabel} {...props} />
+          </>
+        ) : (
+          <SkillList skills={skills} locationLabel={locationLabel} {...props} />
+        )}
       </div>
-      <div className="space-y-1">
-        {visibleSkills.map((skill) => (
-          <SkillRowButton
-            key={skill.name}
-            skill={skill}
-            isActive={activeSkillName === skill.name}
-            isExpanded={expandedSkillName === skill.name}
-            detailLoading={expandedSkillName === skill.name && loadingDetail && detail?.name !== skill.name}
-            detailContent={expandedSkillName === skill.name && detail?.name === skill.name ? detail.content : null}
-            recentMarketSkillName={recentMarketSkillName}
-            locationLabel={locationLabel}
-            preferredSource={preferredSources[skill.name]}
-            onChoosePreferredSource={onChoosePreferredSource}
-            onActivate={onActivate}
-            onExpandDetail={onExpandDetail}
-            onCollapseDetail={onCollapseDetail}
-            globalSkillEnabled={!disabledSkillNames.includes(skill.name)}
-            skillScanBusy={skillScanBusy}
-            onToggleGlobalSkill={onToggleGlobalSkill}
-          />
-        ))}
-        {shouldCollapse ? (
-          <button
-            type="button"
-            className="w-full rounded-md border border-transparent bg-surface-panel px-2.5 py-2 text-left text-xs text-text-subtle transition hover:bg-surface-hover hover:text-text-primary"
-            onClick={() => setExpanded((v) => !v)}
-          >
-            {expanded ? "Show less" : `Show all (${remaining} more)`}
-          </button>
-        ) : null}
-      </div>
-    </div>
+    </Panel>
   );
 }
 
@@ -2543,7 +2612,6 @@ function SkillsTab() {
   const [disabledSkillNames, setDisabledSkillNames] = useState<string[]>([]);
   const [skillScanBusy, setSkillScanBusy] = useState(false);
   const [skillScanMsg, setSkillScanMsg] = useState("");
-  const [builtinSkillsExpanded, setBuiltinSkillsExpanded] = useState(false);
   const marketSearchSeqRef = useRef(0);
   const detailRequestSeqRef = useRef(0);
   const marketInstallQueueRef = useRef<RegistrySearchItem[]>([]);
@@ -3202,15 +3270,12 @@ function SkillsTab() {
       )
     : items;
 
-  const builtinFiltered = filteredAll.filter((s) => effectiveSkillSource(s) === "builtin");
-  const filtered = filteredAll.filter((s) => effectiveSkillSource(s) !== "builtin");
-
   const projectSkills = pinSkillFirst(
-    filtered.filter((s) => effectiveSkillLocation(s) === "project"),
+    filteredAll.filter((s) => effectiveSkillLocation(s) === "project"),
     recentMarketSkillName
   );
   const globalSkills = pinSkillFirst(
-    filtered.filter((s) => effectiveSkillLocation(s) !== "project"),
+    filteredAll.filter((s) => effectiveSkillLocation(s) !== "project"),
     recentMarketSkillName
   );
   const showGlobalSkillsFirst =
@@ -3236,60 +3301,62 @@ function SkillsTab() {
       )}
 
       {/* Skill scan roots (presets + custom paths) */}
-      <Panel title="扫描路径">
-        <p className="mb-3 text-xs leading-relaxed text-text-faint">
+      <Panel title="扫描路径" collapsible defaultCollapsed>
+        <p className="mb-3 text-xs leading-relaxed text-text-subtle">
           项目内 <code className="text-text-muted">.agents/skills</code>、<code className="text-text-muted">.claude/skills</code>、<code className="text-text-muted">~/.agenticx/skills</code>（含 ClawHub 安装、智能体创建）以及内置包始终参与扫描。以下第三方根目录可按开关启用；也可添加自定义文件夹。
         </p>
-        <div className="space-y-3">
-          {skillScanPresets.map((p) => (
-            <div
-              key={p.id}
-              className="flex items-center gap-3 rounded-xl border border-border bg-surface-card px-4 py-3.5"
-            >
-              <div className="min-w-0 flex-1">
-                <div className="text-sm font-semibold text-text-strong">{p.label}</div>
-                <p className="mt-1 font-mono text-[11px] text-text-muted">{p.path}</p>
+        
+        <div className="overflow-hidden rounded-lg border border-border bg-surface-base">
+          <div className="divide-y divide-border">
+            {skillScanPresets.map((p) => (
+              <div key={p.id} className="flex items-center justify-between px-3 py-2.5">
+                <div className="min-w-0 flex-1 pr-3">
+                  <div className="text-sm font-medium text-text-strong">{p.label}</div>
+                  <div className="mt-0.5 truncate font-mono text-[10px] text-text-muted">{p.path}</div>
+                </div>
+                <div className="shrink-0">
+                  <SettingsSwitch
+                    checked={p.enabled}
+                    disabled={skillScanBusy}
+                    aria-label={`切换 ${p.label}`}
+                    onChange={(next) => {
+                      const updated = skillScanPresets.map((row) =>
+                        row.id === p.id ? { ...row, enabled: next } : row,
+                      );
+                      setSkillScanPresets(updated);
+                      void persistSkillScanSettings(updated, skillScanCustomPaths, preferredSkillSources, disabledSkillNames);
+                    }}
+                  />
+                </div>
               </div>
-              <SettingsSwitch
-                checked={p.enabled}
-                disabled={skillScanBusy}
-                aria-label={`切换 ${p.label}`}
-                onChange={(next) => {
-                  const updated = skillScanPresets.map((row) =>
-                    row.id === p.id ? { ...row, enabled: next } : row,
-                  );
-                  setSkillScanPresets(updated);
-                  void persistSkillScanSettings(updated, skillScanCustomPaths, preferredSkillSources, disabledSkillNames);
-                }}
-              />
-            </div>
-          ))}
+            ))}
+          </div>
 
           {/* Custom paths */}
-          <div className="mt-4 border-t border-border pt-4">
-            <div className="mb-3 flex items-center justify-between">
-              <div className="text-sm font-semibold text-text-strong">自定义路径</div>
-              <button
-                type="button"
-                className="inline-flex items-center gap-1 rounded-md border border-border bg-surface-panel px-2.5 py-1.5 text-xs text-text-subtle transition hover:bg-surface-hover hover:text-text-primary disabled:opacity-40"
-                disabled={skillScanBusy}
-                onClick={() => setSkillScanCustomPaths((prev) => [...prev, ""])}
-              >
-                <Plus className="h-3.5 w-3.5" />
-                添加路径
-              </button>
-            </div>
-            
+          <div className="flex items-center justify-between border-t border-border bg-surface-card px-3 py-2">
+            <div className="text-xs font-semibold text-text-strong">自定义路径</div>
+            <button
+              type="button"
+              className="inline-flex items-center gap-1 rounded bg-surface-panel px-2 py-1 text-[11px] font-medium text-text-subtle shadow-sm ring-1 ring-inset ring-border transition hover:bg-surface-hover hover:text-text-primary disabled:opacity-40"
+              disabled={skillScanBusy}
+              onClick={() => setSkillScanCustomPaths((prev) => [...prev, ""])}
+            >
+              <Plus className="h-3 w-3" />
+              添加路径
+            </button>
+          </div>
+          
+          <div className="divide-y divide-border border-t border-border">
             {skillScanCustomPaths.length === 0 ? (
-              <div className="rounded-xl border border-dashed border-border p-4 text-center text-xs text-text-faint">
+              <div className="p-3 text-center text-xs text-text-faint bg-surface-base">
                 暂无自定义路径
               </div>
             ) : (
-              <div className="space-y-2">
-                {skillScanCustomPaths.map((row, i) => (
-                  <div key={`skill-custom-${i}`} className="flex items-center gap-2">
+              skillScanCustomPaths.map((row, i) => (
+                <div key={`skill-custom-${i}`} className="flex items-center gap-2 px-3 py-2 bg-surface-base">
+                  <div className="flex-1">
                     <input
-                      className="min-w-0 flex-1 rounded-md border border-border bg-surface-panel px-3 py-2 font-mono text-xs text-text-primary placeholder:text-text-faint"
+                      className="w-full rounded bg-surface-panel px-2 py-1.5 font-mono text-xs text-text-primary outline-none placeholder:text-text-faint focus:ring-1 focus:ring-border"
                       placeholder="例如 ~/my-skills 或绝对路径"
                       value={row}
                       disabled={skillScanBusy}
@@ -3304,32 +3371,33 @@ function SkillsTab() {
                         void persistSkillScanSettings(skillScanPresets, next, preferredSkillSources, disabledSkillNames);
                       }}
                     />
-                    <button
-                      type="button"
-                      className="shrink-0 rounded-md border border-border p-2 text-text-faint transition hover:bg-surface-hover hover:text-rose-400 disabled:opacity-40"
-                      disabled={skillScanBusy}
-                      title="移除"
-                      onClick={() => {
-                        const next = skillScanCustomPaths.filter((_, j) => j !== i);
-                        setSkillScanCustomPaths(next);
-                        void persistSkillScanSettings(skillScanPresets, next, preferredSkillSources, disabledSkillNames);
-                      }}
-                    >
-                      <Trash2 className="h-4 w-4" />
-                    </button>
                   </div>
-                ))}
-              </div>
+                  <button
+                    type="button"
+                    className="shrink-0 rounded p-1.5 text-text-faint transition hover:bg-surface-hover hover:text-rose-400 disabled:opacity-40"
+                    disabled={skillScanBusy}
+                    title="移除"
+                    onClick={() => {
+                      const next = skillScanCustomPaths.filter((_, j) => j !== i);
+                      setSkillScanCustomPaths(next);
+                      void persistSkillScanSettings(skillScanPresets, next, preferredSkillSources, disabledSkillNames);
+                    }}
+                  >
+                    <Trash2 className="h-3.5 w-3.5" />
+                  </button>
+                </div>
+              ))
             )}
           </div>
-          {skillScanMsg ? (
-            <div
-              className={`text-xs ${skillScanMsg.includes("失败") ? "text-amber-400" : "text-emerald-400"}`}
-            >
-              {skillScanMsg}
-            </div>
-          ) : null}
         </div>
+        
+        {skillScanMsg ? (
+          <div
+            className={`mt-2 text-xs ${skillScanMsg.includes("失败") ? "text-amber-400" : "text-emerald-400"}`}
+          >
+            {skillScanMsg}
+          </div>
+        ) : null}
       </Panel>
 
       {/* Search + Refresh */}
@@ -3444,45 +3512,6 @@ function SkillsTab() {
               onToggleGlobalSkill={toggleGlobalSkill}
             />
           </>
-        )}
-
-        {builtinFiltered.length > 0 && (
-          <div className="rounded-md border border-transparent bg-surface-card">
-            <button
-              type="button"
-              className="flex w-full items-center gap-2 px-3 py-2.5 text-left text-sm text-text-subtle transition hover:bg-surface-hover"
-              onClick={() => setBuiltinSkillsExpanded((v) => !v)}
-            >
-              <ChevronRight
-                className={`h-4 w-4 shrink-0 text-text-faint transition-transform ${builtinSkillsExpanded ? "rotate-90" : ""}`}
-              />
-              <span>内置技能 ({builtinFiltered.length})</span>
-            </button>
-            {builtinSkillsExpanded && (
-              <div className="space-y-1 border-t border-border px-3 py-2">
-                {builtinFiltered.map((skill) => (
-                  <SkillRowButton
-                    key={skill.name}
-                    skill={skill}
-                    isActive={activeSkillName === skill.name}
-                    isExpanded={expandedSkillName === skill.name}
-                    detailLoading={expandedSkillName === skill.name && loadingDetail && detail?.name !== skill.name}
-                    detailContent={expandedSkillName === skill.name && detail?.name === skill.name ? detail.content : null}
-                    recentMarketSkillName={recentMarketSkillName}
-                    locationLabel={effectiveSkillLocation(skill) === "project" ? "项目" : "全局"}
-                    preferredSource={preferredSkillSources[skill.name]}
-                    onChoosePreferredSource={choosePreferredSource}
-                    onActivate={setActiveSkillName}
-                    onExpandDetail={onExpandDetail}
-                    onCollapseDetail={() => setExpandedSkillName(null)}
-                    globalSkillEnabled={!disabledSkillNames.includes(skill.name)}
-                    skillScanBusy={skillScanBusy}
-                    onToggleGlobalSkill={toggleGlobalSkill}
-                  />
-                ))}
-              </div>
-            )}
-          </div>
         )}
       </div>
 
