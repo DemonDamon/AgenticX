@@ -603,6 +603,23 @@ def _build_url_vision_capability_block() -> str:
     )
 
 
+def _build_widget_capability_block() -> str:
+    """Describe built-in show_widget for inline SVG/HTML visualizations."""
+    return (
+        "## 内联可视化（show_widget）\n"
+        "- 你 **内置** `show_widget` 工具，可在聊天气泡内直接渲染矢量图或交互图表，无需生成位图或截图。\n"
+        "- **何时使用**：用户明确要求「图/示意图/流程图/架构图/图表/可视化」，或解释复杂结构/对比数据时，应主动调用 `show_widget`。\n"
+        "- **SVG vs HTML**：\n"
+        "  - 静态示意、流程图、架构图、对比柱状/条形图 → 手写 **SVG**（`<svg viewBox=\"0 0 680 H\" width=\"100%\">`）。\n"
+        "  - 需要交互或数据驱动（折线/饼图/动态筛选）→ **HTML 片段** + Chart.js/D3，从 CDN 白名单加载脚本。\n"
+        "- **SVG 规范**：文字用 `var(--text-primary)` / `var(--text-muted)`；背景/边框可用 `var(--surface-card)` / `var(--border-subtle)`；"
+        "强调色用 `rgb(var(--theme-color-rgb))`；箭头 marker 用 `stroke=\"context-stroke\"` 跟随连线颜色。\n"
+        "- **CDN 白名单**（HTML 模式仅允许）：`cdnjs.cloudflare.com`、`esm.sh`、`cdn.jsdelivr.net`、`unpkg.com`。\n"
+        "- 每次调用渲染 **一个** widget；`title` 必填且简短（会显示在工具卡标题）。\n"
+        "- **禁止**用 ImageGen/截图/HTML 文件落盘替代；纯矢量 SVG 或 sandbox iframe 内 HTML 即可。\n\n"
+    )
+
+
 def _build_followup_questions_block() -> str:
     """Ask the model for <followups> lines consumed by Desktop chips."""
     try:
@@ -815,6 +832,7 @@ def build_meta_agent_system_prompt(
         f"{kb_retrieval_block}"
         f"{_build_web_search_capability_block()}"
         f"{_build_url_vision_capability_block()}"
+        f"{_build_widget_capability_block()}"
         f"{_build_followup_questions_block()}"
         "## 子智能体完成后的主动汇报（关键）\n"
         "- 当「当前子智能体状态」或「历史子智能体结果」中出现 completed 或 failed 的子智能体，你 **必须在本轮回复中主动汇报**，包括：\n"

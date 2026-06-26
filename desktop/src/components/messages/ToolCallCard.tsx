@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import {
   ChevronDown,
   ChevronRight,
+  BarChart3,
   FileText,
   ListChecks,
   Plug,
@@ -14,11 +15,13 @@ import {
 import { Shimmer } from "../ds/Shimmer";
 import { ToolOutputStream } from "./ToolOutputStream";
 import { SkillPatchPreviewCard } from "./SkillPatchPreviewCard";
+import { WidgetBlock } from "./WidgetBlock";
 import {
   parseSkillManageError,
   parseSkillPatchPreviewPayload,
   type SkillPatchPreviewPayload,
 } from "./skill-manage-preview";
+import { parseWidgetPayload } from "./widget-preview";
 
 type Props = {
   message: Message;
@@ -71,6 +74,13 @@ export function buildToolCardTitle(message: Message): string {
     return tn ? `mcp_call ${tn}` : "mcp_call";
   }
   if (name === "knowledge_search") return "knowledge_search";
+  if (name === "show_widget") {
+    const argTitle = String(args.title ?? "").trim();
+    if (argTitle) return argTitle;
+    const parsed = parseWidgetPayload(message.content);
+    if (parsed?.title) return parsed.title;
+    return "可视化图表";
+  }
   if (name) return name;
   return extractToolSummary(message.content);
 }
@@ -81,6 +91,7 @@ function pickToolIcon(name: string) {
   if (name === "todo_write") return ListChecks;
   if (name === "mcp_call") return Plug;
   if (name === "knowledge_search") return Search;
+  if (name === "show_widget") return BarChart3;
   return Wrench;
 }
 
@@ -143,12 +154,16 @@ export function ToolCallCard({
   onSkillManageApply,
 }: Props) {
   const normalizedTerms = useMemo(() => normalizeHighlightTerms(highlightTerms), [highlightTerms]);
+  const widgetPayload = useMemo(() => {
+    if ((message.toolName ?? "").trim() !== "show_widget") return null;
+    return parseWidgetPayload(message.content);
+  }, [message.toolName, message.content]);
   const matchedByHighlight = useMemo(() => {
     if (!message.content || normalizedTerms.length === 0) return false;
     const hay = message.content.toLocaleLowerCase();
     return normalizedTerms.some((t) => hay.includes(t.toLocaleLowerCase()));
   }, [message.content, normalizedTerms]);
-  const shouldForceExpand = forceExpand || matchedByHighlight;
+  const shouldForceExpand = forceExpand || matchedByHighlight || widgetPayload != null;
   const [expanded, setExpanded] = useState(shouldForceExpand);
 
   const title = useMemo(() => buildToolCardTitle(message), [message]);
@@ -206,6 +221,7 @@ export function ToolCallCard({
           onApply={onSkillManageApply}
         />
       ) : null}
+      {widgetPayload ? <WidgetBlock payload={widgetPayload} /> : null}
       {skillManageError ? (
         <div
           className={`rounded border px-2 py-1 text-[12px] ${
@@ -224,7 +240,7 @@ export function ToolCallCard({
           ) : null}
         </div>
       ) : null}
-      {message.content && !skillPreviewPayload && !skillManageError ? (
+      {message.content && !skillPreviewPayload && !skillManageError && !widgetPayload ? (
         <span className="break-all whitespace-pre-wrap">
           {renderHighlightedText(message.content, normalizedTerms)}
         </span>

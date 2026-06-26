@@ -135,6 +135,7 @@ _CONCURRENCY_SAFE_STUDIO_TOOLS = frozenset(
         "web_search",
         "web_fetch",
         "view_image",
+        "show_widget",
     }
 )
 
@@ -1037,6 +1038,43 @@ STUDIO_TOOLS: List[Dict[str, Any]] = [
                     },
                 },
                 "required": ["path"],
+                "additionalProperties": False,
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "show_widget",
+            "description": (
+                "Render an inline visualization widget in the chat. "
+                "Pass hand-written SVG (vector diagrams, flow charts) or an HTML "
+                "fragment (with <style>/<script>, may load Chart.js/D3 from the CDN "
+                "allowlist). Use SVG for static diagrams; use HTML for interactive "
+                "or data-driven charts. The widget inherits the chat theme CSS vars."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "title": {
+                        "type": "string",
+                        "description": "Widget title shown on the card.",
+                    },
+                    "widget_code": {
+                        "type": "string",
+                        "description": (
+                            "SVG string starting with '<svg' OR an HTML fragment. "
+                            "SVG should use viewBox='0 0 680 H' width='100%' and "
+                            "CSS vars like var(--text-primary), var(--text-muted)."
+                        ),
+                    },
+                    "loading_messages": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "Optional rotating loading messages shown before render.",
+                    },
+                },
+                "required": ["title", "widget_code"],
                 "additionalProperties": False,
             },
         },
@@ -4699,6 +4737,31 @@ def _decode_patch_token(token: str) -> Tuple[Optional[dict[str, Any]], Optional[
         return None, f"invalid patch token: {exc}"
 
 
+def _tool_show_widget(arguments: Dict[str, Any]) -> str:
+    """Return a widget payload JSON consumed by the Desktop ToolCallCard.
+
+    The backend does no rendering; it validates and passes the widget code
+    through to the frontend as a structured JSON string.
+    """
+    title = str(arguments.get("title") or "").strip()
+    widget_code = str(arguments.get("widget_code") or "")
+    raw_msgs = arguments.get("loading_messages")
+    loading_messages = (
+        [str(m).strip() for m in raw_msgs if str(m).strip()]
+        if isinstance(raw_msgs, list)
+        else []
+    )
+    if not widget_code.strip():
+        return "ERROR: show_widget requires non-empty widget_code."
+    payload = {
+        "type": "widget",
+        "title": title,
+        "widget_code": widget_code,
+        "loading_messages": loading_messages,
+    }
+    return json.dumps(payload, ensure_ascii=False)
+
+
 def _tool_session_search(arguments: Dict[str, Any], session: Optional[StudioSession]) -> str:
     _ = session
     from agenticx.memory.session_store import session_fts_enabled
@@ -6016,6 +6079,8 @@ async def dispatch_tool_async(
             return _tool_list_files(arguments, session)
         if name == "liteparse":
             return await _tool_liteparse(arguments, session)
+        if name == "show_widget":
+            return _tool_show_widget(arguments)
         if name == "task_experience_retrieve":
             gid = _resolve_group_id(session, arguments.get("group_id"))
             limit = min(max(int(arguments.get("limit") or 5), 1), 10)
