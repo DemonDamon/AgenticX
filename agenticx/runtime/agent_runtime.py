@@ -2787,6 +2787,26 @@ class AgentRuntime:
                 if _followups_enabled
                 else (response_text, [])
             )
+            # --- Widget flow guard: detect text-based diagrams and force retry ---
+            if not tool_calls and "show_widget" in allowed_tool_names:
+                from agenticx.runtime.widget_flow_guard import (
+                    WIDGET_FLOW_RETRY_HINT,
+                    contains_text_flow_diagram,
+                )
+
+                if contains_text_flow_diagram(response_text) and not getattr(
+                    session, "_widget_flow_retried", False
+                ):
+                    setattr(session, "_widget_flow_retried", True)
+                    logger.info(
+                        "widget_flow_guard: detected text flow diagram, forcing retry"
+                    )
+                    messages.append({"role": "assistant", "content": ac_clean})
+                    messages.append({"role": "system", "content": WIDGET_FLOW_RETRY_HINT})
+                    session.agent_messages.append({"role": "assistant", "content": ac_clean})
+                    session.agent_messages.append({"role": "system", "content": WIDGET_FLOW_RETRY_HINT})
+                    continue
+            # --- End widget flow guard ---
             assistant_message: Dict[str, Any] = {"role": "assistant", "content": ac_clean}
             if tool_calls:
                 assistant_message["tool_calls"] = tool_calls
