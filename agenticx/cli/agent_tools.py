@@ -1047,11 +1047,11 @@ STUDIO_TOOLS: List[Dict[str, Any]] = [
         "function": {
             "name": "show_widget",
             "description": (
-                "Render an inline visualization widget in the chat. "
-                "Pass hand-written SVG (vector diagrams, flow charts) or an HTML "
-                "fragment (with <style>/<script>, may load Chart.js/D3 from the CDN "
-                "allowlist). Use SVG for static diagrams; use HTML for interactive "
-                "or data-driven charts. The widget inherits the chat theme CSS vars."
+                "Render an inline visualization widget in the chat (preferred for architecture, "
+                "flow, sequence, and comparison diagrams). Pass hand-written SVG or an HTML "
+                "fragment (Chart.js/D3 from CDN allowlist). MUST use this instead of ASCII/text "
+                "box diagrams in markdown when explaining how something works or delivering a "
+                "technical solution with multiple components."
             ),
             "parameters": {
                 "type": "object",

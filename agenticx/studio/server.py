@@ -2667,12 +2667,14 @@ def create_studio_app() -> FastAPI:
                 from agenticx.runtime.prompts.meta_agent import (
                     _build_followup_questions_block,
                     _build_web_search_capability_block,
+                    _build_widget_capability_block,
                 )
                 from agenticx.runtime.prompts.skill_authoring import (
                     build_skill_authoring_prompt_block,
                 )
 
                 prompt += "\n" + _build_web_search_capability_block()
+                prompt += _build_widget_capability_block()
                 prompt += _build_followup_questions_block()
                 prompt += build_skill_authoring_prompt_block()
             except Exception:
