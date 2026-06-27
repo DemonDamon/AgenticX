@@ -1,0 +1,37 @@
+<svg viewBox="0 0 680 460" width="100%" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" refX="8" refY="5"
+      markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+      <path d="M2 1L8 5L2 9" fill="none" stroke="context-stroke"
+        stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+    </marker>
+  </defs>
+
+  <rect x="40" y="40" width="600" height="56" rx="8" fill="#E6F1FB" stroke="#378ADD" stroke-width="0.5"/>
+  <text x="340" y="60" text-anchor="middle" dominant-baseline="central" font-family="system-ui" font-size="15" fill="#2C2C2A">(7LbB</text>
+  <text x="340" y="79" text-anchor="middle" dominant-baseline="central" font-family="system-ui" font-size="12" fill="#5F5E5A">Lb”( / }äL agx / Python SDK</text>
+
+  <polyline points="340,98 340,124" fill="none" stroke="#B4B2A9" stroke-width="1.5" marker-end="url(#arrow)"/>
+
+  <rect x="40" y="126" width="600" height="56" rx="8" fill="#EEEDFE" stroke="#534AB7" stroke-width="0.5"/>
+  <text x="340" y="146" text-anchor="middle" dominant-baseline="central" font-family="system-ui" font-size="15" fill="#2C2C2A">Studio ÐLöB</text>
+  <text x="340" y="165" text-anchor="middle" dominant-baseline="central" font-family="system-ui" font-size="12" fill="#5F5E5A">Ý¡ / Meta-Agent ¦ / â¡ / «¤J</text>
+
+  <polyline points="340,184 340,210" fill="none" stroke="#B4B2A9" stroke-width="1.5" marker-end="url(#arrow)"/>
+
+  <rect x="40" y="212" width="600" height="56" rx="8" fill="#EAF3DE" stroke="#3B6D11" stroke-width="0.5"/>
+  <text x="340" y="232" text-anchor="middle" dominant-baseline="central" font-family="system-ui" font-size="15" fill="#2C2C2A">8ÃF¶B</text>
+  <text x="340" y="251" text-anchor="middle" dominant-baseline="central" font-family="system-ui" font-size="12" fill="#5F5E5A">’gL / zýS / °Æ / åw / LLM Ð›¹ / Hooks</text>
+
+  <polyline points="340,270 340,296" fill="none" stroke="#B4B2A9" stroke-width="1.5" marker-end="url(#arrow)"/>
+
+  <rect x="40" y="298" width="600" height="56" rx="8" fill="#F1EFE8" stroke="#B4B2A9" stroke-width="0.5"/>
+  <text x="340" y="318" text-anchor="middle" dominant-baseline="central" font-family="system-ui" font-size="15" fill="#2C2C2A">sð¡B</text>
+  <text x="340" y="337" text-anchor="middle" dominant-baseline="central" font-family="system-ui" font-size="12" fill="#5F5E5A">ïÂK' / áO® / ‰h» / X¨</text>
+
+  <polyline points="340,356 340,382" fill="none" stroke="#B4B2A9" stroke-width="1.5" marker-end="url(#arrow)"/>
+
+  <rect x="40" y="384" width="600" height="56" rx="8" fill="#E6F1FB" stroke="#378ADD" stroke-width="0.5"/>
+  <text x="340" y="404" text-anchor="middle" dominant-baseline="central" font-family="system-ui" font-size="15" fill="#2C2C2A">†ßiUB</text>
+  <text x="340" y="423" text-anchor="middle" dominant-baseline="central" font-family="system-ui" font-size="12" fill="#5F5E5A">GUI Agent / åÆûß GraphRAG / AgentKit Æ</text>
+</svg>
