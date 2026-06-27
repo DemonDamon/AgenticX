@@ -1051,7 +1051,8 @@ STUDIO_TOOLS: List[Dict[str, Any]] = [
                 "would show a flow, pipeline, sequence, architecture, MitM/proxy path, or any "
                 "A->B->C style diagram — including simple 3-node chains. NEVER substitute "
                 "markdown text/code blocks (```text```, arrow chains, ↓ lines, mermaid source). "
-                "Call this first, then explain in prose."
+                "Before calling: output 1-3 sentences of visible intro prose in the same turn "
+                "(not in reasoning/thinking). Then call show_widget, then explain in detail."
             ),
             "parameters": {
                 "type": "object",
