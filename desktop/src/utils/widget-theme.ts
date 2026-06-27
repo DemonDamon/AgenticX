@@ -38,5 +38,16 @@ export function collectThemeCssVars(): string {
   return parts.join("; ");
 }
 
+/** Opaque surface color for PNG export (matches widget card background). */
+export function exportSurfaceColor(): string {
+  if (typeof document === "undefined") return "#ffffff";
+  const root = getComputedStyle(document.documentElement);
+  const popover = root.getPropertyValue("--surface-popover").trim();
+  if (popover && !popover.includes("transparent")) return popover;
+  const base = root.getPropertyValue("--surface-base-fallback").trim();
+  if (base) return base;
+  return "#ffffff";
+}
+
 /** Variable names exposed to the model via system prompt (SVG/HTML authoring). */
 export const WIDGET_THEME_VAR_HINTS = WIDGET_THEME_VAR_NAMES;
