@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import { Code, Copy, Download, Image, MoreHorizontal, X } from "lucide-react";
 import { collectThemeCssVars } from "../../utils/widget-theme";
 import type { WidgetPayload } from "./widget-preview";
 
@@ -98,18 +99,173 @@ function HtmlWidget({ code, loadingMessages }: { code: string; loadingMessages: 
   );
 }
 
+function WidgetMenu({ payload }: { payload: WidgetPayload }) {
+  const [open, setOpen] = useState(false);
+  const [viewCode, setViewCode] = useState(false);
+  const [copied, setCopied] = useState(false);
+  const menuRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    function handler(e: MouseEvent) {
+      if (menuRef.current && !menuRef.current.contains(e.target as Node)) setOpen(false);
+    }
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, [open]);
+
+  function downloadFile() {
+    const ext = payload.kind === "svg" ? "svg" : "html";
+    const mime = payload.kind === "svg" ? "image/svg+xml" : "text/html";
+    const blob = new Blob([payload.widgetCode], { type: mime });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `${payload.title || "widget"}.${ext}`;
+    a.click();
+    URL.revokeObjectURL(url);
+    setOpen(false);
+  }
+
+  function downloadImage() {
+    if (payload.kind !== "svg") return;
+    const blob = new Blob([payload.widgetCode], { type: "image/svg+xml;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const img = new window.Image();
+    img.onload = () => {
+      const w = img.naturalWidth || 800;
+      const h = img.naturalHeight || 600;
+      const canvas = document.createElement("canvas");
+      canvas.width = w * 2;
+      canvas.height = h * 2;
+      const ctx = canvas.getContext("2d");
+      if (ctx) {
+        ctx.scale(2, 2);
+        ctx.drawImage(img, 0, 0, w, h);
+      }
+      const a = document.createElement("a");
+      a.href = canvas.toDataURL("image/png");
+      a.download = `${payload.title || "widget"}.png`;
+      a.click();
+      URL.revokeObjectURL(url);
+    };
+    img.src = url;
+    setOpen(false);
+  }
+
+  async function copyCode() {
+    try {
+      await navigator.clipboard.writeText(payload.widgetCode);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1500);
+    } catch {
+      /* ignore */
+    }
+    setOpen(false);
+  }
+
+  return (
+    <>
+      <div ref={menuRef} className="absolute right-2 top-2 z-10">
+        <button
+          type="button"
+          onClick={() => setOpen((v) => !v)}
+          className="flex h-6 w-6 items-center justify-center rounded bg-surface-card/80 text-text-faint shadow-sm backdrop-blur-sm transition hover:bg-surface-card hover:text-text-subtle"
+          title="更多操作"
+        >
+          {copied ? (
+            <svg viewBox="0 0 16 16" className="h-3.5 w-3.5 text-emerald-400" fill="none" stroke="currentColor" strokeWidth="2">
+              <path d="M3 8.5L6 11.5L13 4.5" />
+            </svg>
+          ) : (
+            <MoreHorizontal size={14} />
+          )}
+        </button>
+        {open && (
+          <div className="absolute right-0 top-7 min-w-[148px] rounded-lg border border-border bg-surface-card py-1 shadow-lg">
+            <button
+              type="button"
+              onClick={downloadFile}
+              className="flex w-full items-center gap-2 px-3 py-1.5 text-[13px] text-text-subtle hover:bg-surface-card-strong"
+            >
+              <Download size={13} className="shrink-0" />
+              下载到本地
+            </button>
+            {payload.kind === "svg" && (
+              <button
+                type="button"
+                onClick={downloadImage}
+                className="flex w-full items-center gap-2 px-3 py-1.5 text-[13px] text-text-subtle hover:bg-surface-card-strong"
+              >
+                <Image size={13} className="shrink-0" />
+                下载为图片
+              </button>
+            )}
+            <button
+              type="button"
+              onClick={copyCode}
+              className="flex w-full items-center gap-2 px-3 py-1.5 text-[13px] text-text-subtle hover:bg-surface-card-strong"
+            >
+              <Copy size={13} className="shrink-0" />
+              复制代码
+            </button>
+            <button
+              type="button"
+              onClick={() => { setViewCode(true); setOpen(false); }}
+              className="flex w-full items-center gap-2 px-3 py-1.5 text-[13px] text-text-subtle hover:bg-surface-card-strong"
+            >
+              <Code size={13} className="shrink-0" />
+              查看代码
+            </button>
+          </div>
+        )}
+      </div>
+
+      {viewCode && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
+          onClick={() => setViewCode(false)}
+        >
+          <div
+            className="flex max-h-[80vh] w-full max-w-3xl flex-col overflow-hidden rounded-xl border border-border bg-surface-card shadow-xl"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between border-b border-border px-4 py-3">
+              <span className="text-[13px] font-medium text-text-primary">
+                {payload.title ? `${payload.title} — 源代码` : "源代码"}
+              </span>
+              <button
+                type="button"
+                onClick={() => setViewCode(false)}
+                className="text-text-faint hover:text-text-subtle"
+              >
+                <X size={15} />
+              </button>
+            </div>
+            <pre className="flex-1 overflow-auto p-4 text-[12px] leading-relaxed text-text-primary">
+              {payload.widgetCode}
+            </pre>
+          </div>
+        </div>
+      )}
+    </>
+  );
+}
+
 export function WidgetBlock({ payload }: Props) {
   if (payload.kind === "svg") {
     return (
-      <div className="w-full overflow-hidden rounded-md border border-border bg-surface-card/40 p-2">
+      <div className="relative w-full overflow-hidden rounded-md border border-border bg-surface-card/40 p-2">
         <SvgWidget code={payload.widgetCode} />
+        <WidgetMenu payload={payload} />
       </div>
     );
   }
 
   return (
-    <div className="w-full overflow-hidden rounded-md border border-border bg-surface-card/40 p-1">
+    <div className="relative w-full overflow-hidden rounded-md border border-border bg-surface-card/40 p-1">
       <HtmlWidget code={payload.widgetCode} loadingMessages={payload.loadingMessages} />
+      <WidgetMenu payload={payload} />
     </div>
   );
 }

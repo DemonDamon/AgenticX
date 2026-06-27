@@ -249,6 +249,10 @@ class ContextCompactor:
 
     def micro_compact_tool_result(self, tool_name: str, result: str, budget: Optional[int] = None) -> str:
         """Condense verbose tool results preserving head/tail."""
+        name = str(tool_name or "").strip().lower()
+        # Widget payloads are structured JSON + SVG/HTML; truncation breaks UI rendering.
+        if name == "show_widget":
+            return str(result or "")
         if budget is None:
             budget = _env_int("AGX_MICRO_COMPACT_BUDGET", 4000)
         text = str(result or "")

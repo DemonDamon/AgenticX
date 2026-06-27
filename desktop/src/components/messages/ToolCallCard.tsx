@@ -163,11 +163,29 @@ export function ToolCallCard({
     const hay = message.content.toLocaleLowerCase();
     return normalizedTerms.some((t) => hay.includes(t.toLocaleLowerCase()));
   }, [message.content, normalizedTerms]);
-  const shouldForceExpand = forceExpand || matchedByHighlight || widgetPayload != null;
+  const shouldForceExpand = forceExpand || matchedByHighlight;
   const [expanded, setExpanded] = useState(shouldForceExpand);
 
   const title = useMemo(() => buildToolCardTitle(message), [message]);
   const toolName = (message.toolName ?? "").trim();
+
+  // show_widget with valid payload → render inline (no collapsible chrome)
+  if (toolName === "show_widget" && widgetPayload) {
+    return (
+      <div className="w-full min-w-0">
+        <WidgetBlock payload={widgetPayload} />
+      </div>
+    );
+  }
+
+  // show_widget with truncated/broken content → amber warning inline
+  if (toolName === "show_widget" && /\[micro-compact tool=show_widget/i.test(message.content)) {
+    return (
+      <div className="w-full min-w-0 rounded border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-[12px] text-amber-200">
+        图表内容被上下文压缩截断，无法渲染。请重新生成或升级 Near 后重试本对话。
+      </div>
+    );
+  }
   const Icon = pickToolIcon(toolName || extractToolSummary(message.content).split(/\s/)[0] || "tool");
   const status = message.toolStatus;
   const hasStream = (message.toolStreamLines?.length ?? 0) > 0;
@@ -221,7 +239,6 @@ export function ToolCallCard({
           onApply={onSkillManageApply}
         />
       ) : null}
-      {widgetPayload ? <WidgetBlock payload={widgetPayload} /> : null}
       {skillManageError ? (
         <div
           className={`rounded border px-2 py-1 text-[12px] ${

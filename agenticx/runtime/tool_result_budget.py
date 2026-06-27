@@ -21,6 +21,7 @@ TOOL_RESULT_CLASS: Dict[str, str] = {
     "todo_write": "small",
     "list_scheduled_tasks": "small",
     "get_automation_task_logs": "small",
+    "show_widget": "small",
     "file_read": "large",
     "bash_exec": "large",
     "liteparse": "large",

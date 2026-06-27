@@ -28,7 +28,15 @@ def test_micro_compact_truncates() -> None:
     long = "x" * 5000
     out = c.micro_compact_tool_result("file_read", long, budget=400)
     assert len(out) < len(long)
-    assert "truncated" in out
+    assert "micro-compact" in out
+
+
+def test_micro_compact_skips_show_widget() -> None:
+    c = ContextCompactor(_LLM())
+    payload = '{"type":"widget","title":"t","widget_code":"' + ("<svg></svg>" + "x" * 9000) + '"}'
+    out = c.micro_compact_tool_result("show_widget", payload, budget=400)
+    assert out == payload
+    assert "micro-compact" not in out
 
 
 @pytest.mark.asyncio

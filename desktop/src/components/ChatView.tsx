@@ -106,6 +106,9 @@ function formatToolResultMessage(toolNameRaw: unknown, resultRaw: unknown): { co
   if (toolName === "check_resources") {
     return { content: "", silent: true };
   }
+  if (toolName === "show_widget") {
+    return { content: resultText, silent: false };
+  }
   if (toolName === "delegate_to_avatar") {
     try {
       const parsed = JSON.parse(resultText) as Record<string, unknown>;
