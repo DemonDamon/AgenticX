@@ -360,7 +360,13 @@ class AgentTeamManager:
             credential_safety = f"{CREDENTIAL_SAFETY_BLOCK}\n\n"
         except Exception:
             pass
-        return (
+        try:
+            from agenticx.runtime.prompts.meta_agent import _build_widget_capability_block
+
+            widget_block = _build_widget_capability_block()
+        except Exception:
+            widget_block = ""
+        base = (
             "你是 AgenticX Studio 的子智能体。\n"
             "你的核心目标：在指定工作目录中完成被委派任务，并持续汇报可验证进展。\n\n"
             f"{credential_safety}"
@@ -399,6 +405,9 @@ class AgentTeamManager:
             "- 若收到 todo_write 提醒，只更新现有待办一次，不要为此再写确认文件。\n"
             "- 每次工具调用必须直接推进 delegated_task；禁止为响应系统提醒而堆叠无意义文件。\n"
         )
+        if widget_block:
+            return base + "\n" + widget_block
+        return base
 
     async def _emit(self, event: RuntimeEvent) -> None:
         if self.event_emitter is not None:

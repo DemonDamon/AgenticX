@@ -851,6 +851,12 @@ def _build_agent_system_prompt(session: StudioSession) -> str:
         project_state_block = build_project_state_blocks(session)
     except Exception:
         project_state_block = ""
+    try:
+        from agenticx.runtime.prompts.meta_agent import _build_widget_capability_block
+
+        widget_block = _build_widget_capability_block()
+    except Exception:
+        widget_block = ""
     return (
         "你是 AgenticX Studio 的执行型 Agent（implement 角色）。\n"
         "核心目标：根据用户请求完成代码/命令操作，并在不确定或高风险动作前主动确认。\n\n"
@@ -887,6 +893,7 @@ def _build_agent_system_prompt(session: StudioSession) -> str:
         "- 多步骤任务优先使用 todo_write 跟踪进度，保持只有一个 in_progress。\n"
         "- 对中间结果优先写入 scratchpad_write，后续步骤先 scratchpad_read 复用。\n"
         "- 优先最小改动，避免无关重构。\n"
+        f"{widget_block}"
     )
 
 
