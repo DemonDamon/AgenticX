@@ -83,7 +83,7 @@ function HtmlWidget({ code, loadingMessages }: { code: string; loadingMessages: 
   return (
     <div className="relative w-full">
       {!loaded ? (
-        <div className="absolute inset-0 z-[1] flex items-center justify-center rounded-md bg-surface-card/80 text-[13px] text-text-muted">
+        <div className="absolute inset-0 z-[1] flex items-center justify-center rounded-md bg-[var(--surface-popover)] text-[13px] text-text-muted">
           {loadingLabel}
         </div>
       ) : null}
@@ -170,7 +170,7 @@ function WidgetMenu({ payload }: { payload: WidgetPayload }) {
         <button
           type="button"
           onClick={() => setOpen((v) => !v)}
-          className="flex h-6 w-6 items-center justify-center rounded bg-surface-card/80 text-text-faint shadow-sm backdrop-blur-sm transition hover:bg-surface-card hover:text-text-subtle"
+          className="flex h-6 w-6 items-center justify-center rounded border border-border bg-[var(--surface-popover)] text-text-faint shadow-sm transition hover:bg-[var(--surface-card-strong)] hover:text-text-subtle"
           title="更多操作"
         >
           {copied ? (
@@ -182,11 +182,11 @@ function WidgetMenu({ payload }: { payload: WidgetPayload }) {
           )}
         </button>
         {open && (
-          <div className="absolute right-0 top-7 min-w-[148px] rounded-lg border border-border bg-surface-card py-1 shadow-lg">
+          <div className="absolute right-0 top-7 min-w-[148px] rounded-lg border border-border bg-[var(--surface-popover)] py-1 shadow-lg">
             <button
               type="button"
               onClick={downloadFile}
-              className="flex w-full items-center gap-2 px-3 py-1.5 text-[13px] text-text-subtle hover:bg-surface-card-strong"
+              className="flex w-full items-center gap-2 px-3 py-1.5 text-[13px] text-text-subtle hover:bg-[var(--surface-hover)]"
             >
               <Download size={13} className="shrink-0" />
               下载到本地
@@ -195,7 +195,7 @@ function WidgetMenu({ payload }: { payload: WidgetPayload }) {
               <button
                 type="button"
                 onClick={downloadImage}
-                className="flex w-full items-center gap-2 px-3 py-1.5 text-[13px] text-text-subtle hover:bg-surface-card-strong"
+                className="flex w-full items-center gap-2 px-3 py-1.5 text-[13px] text-text-subtle hover:bg-[var(--surface-hover)]"
               >
                 <Image size={13} className="shrink-0" />
                 下载为图片
@@ -204,7 +204,7 @@ function WidgetMenu({ payload }: { payload: WidgetPayload }) {
             <button
               type="button"
               onClick={copyCode}
-              className="flex w-full items-center gap-2 px-3 py-1.5 text-[13px] text-text-subtle hover:bg-surface-card-strong"
+              className="flex w-full items-center gap-2 px-3 py-1.5 text-[13px] text-text-subtle hover:bg-[var(--surface-hover)]"
             >
               <Copy size={13} className="shrink-0" />
               复制代码
@@ -212,7 +212,7 @@ function WidgetMenu({ payload }: { payload: WidgetPayload }) {
             <button
               type="button"
               onClick={() => { setViewCode(true); setOpen(false); }}
-              className="flex w-full items-center gap-2 px-3 py-1.5 text-[13px] text-text-subtle hover:bg-surface-card-strong"
+              className="flex w-full items-center gap-2 px-3 py-1.5 text-[13px] text-text-subtle hover:bg-[var(--surface-hover)]"
             >
               <Code size={13} className="shrink-0" />
               查看代码
@@ -223,11 +223,11 @@ function WidgetMenu({ payload }: { payload: WidgetPayload }) {
 
       {viewCode && (
         <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black p-4"
           onClick={() => setViewCode(false)}
         >
           <div
-            className="flex max-h-[80vh] w-full max-w-3xl flex-col overflow-hidden rounded-xl border border-border bg-surface-card shadow-xl"
+            className="flex max-h-[80vh] w-full max-w-3xl flex-col overflow-hidden rounded-xl border border-border bg-[var(--surface-popover)] shadow-xl"
             onClick={(e) => e.stopPropagation()}
           >
             <div className="flex items-center justify-between border-b border-border px-4 py-3">
@@ -255,7 +255,7 @@ function WidgetMenu({ payload }: { payload: WidgetPayload }) {
 export function WidgetBlock({ payload }: Props) {
   if (payload.kind === "svg") {
     return (
-      <div className="relative w-full overflow-hidden rounded-md border border-border bg-surface-card/40 p-2">
+      <div className="relative w-full overflow-hidden rounded-md border border-border bg-[var(--surface-popover)] p-2">
         <SvgWidget code={payload.widgetCode} />
         <WidgetMenu payload={payload} />
       </div>
@@ -263,7 +263,7 @@ export function WidgetBlock({ payload }: Props) {
   }
 
   return (
-    <div className="relative w-full overflow-hidden rounded-md border border-border bg-surface-card/40 p-1">
+    <div className="relative w-full overflow-hidden rounded-md border border-border bg-[var(--surface-popover)] p-1">
       <HtmlWidget code={payload.widgetCode} loadingMessages={payload.loadingMessages} />
       <WidgetMenu payload={payload} />
     </div>

@@ -14,6 +14,8 @@ import { isSupervisorNoticeMessage } from "../../utils/supervisor-notice";
 import { isContinuationNoticeMessage } from "../../utils/continuation-notice";
 import { ViewImageInjectCard } from "./ViewImageInjectCard";
 import { BudgetExceededCard } from "./BudgetExceededCard";
+import { WidgetBlock } from "./WidgetBlock";
+import { parseWidgetPayload } from "./widget-preview";
 import { parseContextNotice } from "../../utils/context-notice";
 import { parseBudgetExceededFromText } from "../../utils/budget-exceeded";
 import { shouldShowBudgetIncompleteHint } from "../../utils/budget-incomplete-message";
@@ -304,6 +306,23 @@ export function MessageRenderer({
           <TodoUpdateCard content={message.content} />
         </div>
       );
+    }
+    if ((message.toolName ?? "").trim() === "show_widget") {
+      const payload = parseWidgetPayload(message.content);
+      if (payload) {
+        return (
+          <div className="my-2 w-full min-w-0">
+            <WidgetBlock payload={payload} />
+          </div>
+        );
+      }
+      if (/\[micro-compact tool=show_widget/i.test(message.content)) {
+        return (
+          <div className="my-2 w-full min-w-0 rounded border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-[12px] text-amber-200">
+            图表内容被上下文压缩截断，无法渲染。请重新生成或升级 Near 后重试本对话。
+          </div>
+        );
+      }
     }
     return (
       <ToolCallCard
