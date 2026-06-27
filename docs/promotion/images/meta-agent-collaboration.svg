@@ -1,0 +1,41 @@
+<svg viewBox="0 0 680 384" width="100%" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" refX="8" refY="5"
+      markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+      <path d="M2 1L8 5L2 9" fill="none" stroke="context-stroke"
+        stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+    </marker>
+  </defs>
+
+  <rect x="280" y="40" width="120" height="44" rx="8" fill="#E6F1FB" stroke="#378ADD" stroke-width="0.5"/>
+  <text x="340" y="62" text-anchor="middle" dominant-baseline="central" font-family="system-ui" font-size="14" fill="#2C2C2A">(7÷B</text>
+
+  <polyline points="340,86 340,122" fill="none" stroke="#B4B2A9" stroke-width="1.5" marker-end="url(#arrow)"/>
+
+  <rect x="240" y="124" width="200" height="44" rx="8" fill="#EEEDFE" stroke="#534AB7" stroke-width="0.5"/>
+  <text x="340" y="146" text-anchor="middle" dominant-baseline="central" font-family="system-ui" font-size="14" fill="#2C2C2A">Meta-Agent ;¦</text>
+
+  <polyline points="320,168 150,214" fill="none" stroke="#B4B2A9" stroke-width="1.5" marker-end="url(#arrow)"/>
+  <polyline points="340,168 340,214" fill="none" stroke="#B4B2A9" stroke-width="1.5" marker-end="url(#arrow)"/>
+  <polyline points="360,168 530,214" fill="none" stroke="#B4B2A9" stroke-width="1.5" marker-end="url(#arrow)"/>
+
+  <rect x="60" y="216" width="160" height="56" rx="8" fill="#EAF3DE" stroke="#3B6D11" stroke-width="0.5"/>
+  <text x="140" y="236" text-anchor="middle" dominant-baseline="central" font-family="system-ui" font-size="14" fill="#2C2C2A">« A</text>
+  <text x="140" y="255" text-anchor="middle" dominant-baseline="central" font-family="system-ui" font-size="12" fill="#5F5E5A">ìËÝgL</text>
+
+  <rect x="260" y="216" width="160" height="56" rx="8" fill="#EAF3DE" stroke="#3B6D11" stroke-width="0.5"/>
+  <text x="340" y="236" text-anchor="middle" dominant-baseline="central" font-family="system-ui" font-size="14" fill="#2C2C2A">« B</text>
+  <text x="340" y="255" text-anchor="middle" dominant-baseline="central" font-family="system-ui" font-size="12" fill="#5F5E5A">†ò§úïý¯</text>
+
+  <rect x="460" y="216" width="160" height="56" rx="8" fill="#EAF3DE" stroke="#3B6D11" stroke-width="0.5"/>
+  <text x="540" y="236" text-anchor="middle" dominant-baseline="central" font-family="system-ui" font-size="14" fill="#2C2C2A">« C</text>
+  <text x="540" y="255" text-anchor="middle" dominant-baseline="central" font-family="system-ui" font-size="12" fill="#5F5E5A">vÑ
+P”»</text>
+
+  <polyline points="140,272 320,318" fill="none" stroke="#B4B2A9" stroke-width="1.5" marker-end="url(#arrow)"/>
+  <polyline points="340,272 340,318" fill="none" stroke="#B4B2A9" stroke-width="1.5" marker-end="url(#arrow)"/>
+  <polyline points="540,272 360,318" fill="none" stroke="#B4B2A9" stroke-width="1.5" marker-end="url(#arrow)"/>
+
+  <rect x="220" y="320" width="240" height="44" rx="8" fill="#E6F1FB" stroke="#378ADD" stroke-width="0.5"/>
+  <text x="340" y="342" text-anchor="middle" dominant-baseline="central" font-family="system-ui" font-size="14" fill="#2C2C2A">G;§úÞ(7</text>
+</svg>
