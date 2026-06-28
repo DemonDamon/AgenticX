@@ -1314,7 +1314,7 @@ function HooksTab() {
       ) : null}
 
       {/* Block A: 预置钩子 */}
-      <Panel title={`预置钩子 (${curatedHooks.length})`}>
+      <Panel title={`预置钩子 (${curatedHooks.length})`} collapsible>
         {curatedHooks.length === 0 ? (
           <div className="py-3 text-center text-xs text-text-faint">暂无预置钩子</div>
         ) : (
@@ -7639,11 +7639,11 @@ export function SettingsPanel({
       >
         {/* Left: tab navigation */}
         <div
-          className="relative flex h-full min-h-0 shrink-0 flex-col bg-surface-sidebar py-4 pl-4 pr-5"
+          className="relative flex h-full min-h-0 shrink-0 flex-col bg-surface-sidebar py-4 pl-4 pr-2"
           style={{ width: navWidth }}
         >
-          <div className="mb-4 pr-1 text-[15px] font-semibold text-text-strong">设置</div>
-          <nav className="flex flex-1 flex-col gap-1 overflow-y-auto pr-1">
+          <div className="mb-4 text-[15px] font-semibold text-text-strong">设置</div>
+          <nav className="flex flex-1 flex-col gap-1 overflow-y-auto">
             {TABS.map((t) => {
               const Icon = t.icon;
               const isActive = tab === t.id;
@@ -7676,12 +7676,12 @@ export function SettingsPanel({
             title="拖拽调整导航栏宽度"
             onMouseDown={onNavResizeMouseDown}
           >
-            <div className="mx-auto h-full w-px bg-[var(--ui-accent-divider)] transition-all duration-200 group-hover:w-[2px] group-hover:bg-[var(--ui-btn-primary-bg)]" />
+            <div className="absolute inset-y-0 right-0 w-px bg-[var(--ui-accent-divider)] transition-all duration-200 group-hover:w-[2px] group-hover:bg-[var(--ui-btn-primary-bg)]" />
           </div>
         </div>
 
         {/* Right: content */}
-        <div className="flex h-full min-h-0 flex-1 flex-col overflow-hidden border-l border-border">
+        <div className="flex h-full min-h-0 flex-1 flex-col overflow-hidden">
           <div className="flex shrink-0 items-center justify-between border-b border-border pl-5 pr-5 py-3">
             <h3 className="text-[15px] font-semibold text-text-strong">
               {TABS.find((t) => t.id === tab)?.label ?? "设置"}
