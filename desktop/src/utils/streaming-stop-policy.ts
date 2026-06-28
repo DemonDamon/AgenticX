@@ -91,7 +91,9 @@ export function shouldShowSessionWorkInProgress(opts: SessionWorkInProgressInput
   if (execState === "failed") return false;
   if (opts.userStopped) return false;
   if (shouldShowStopForExecutionState(execState)) return true;
-  if (opts.stallState === "stall" || opts.stallState === "exhausted") return true;
+  // "stall" = actively hung: keep spinner. "exhausted" = gave up: taskLiveness handles it
+  // via the "stalled" branch so sessionWorkInProgress no longer needs to return true.
+  if (opts.stallState === "stall") return true;
 
   if (!opts.sessionUnattended || !opts.unattendedGlobalEnabled) return false;
 
@@ -101,7 +103,13 @@ export function shouldShowSessionWorkInProgress(opts: SessionWorkInProgressInput
   if (todosAllCompletedFromMessages(messages)) return false;
 
   const lastMsg = messages[messages.length - 1];
-  if (hasOpenTodosFromMessages(messages)) return true;
+  // Bug-fix: Only bridge between turns when the backend confirms the session is
+  // actively running. When execState is "idle", the backend has already finished —
+  // trust it and stop the spinner. Stall detection will handle genuinely incomplete
+  // sessions. Previously, "unattended + open todos + idle backend" caused the main
+  // pane to spin forever while the history panel (which reads execution_state
+  // directly) correctly showed no spinner — a visible state desync.
+  if (hasOpenTodosFromMessages(messages) && execState !== "idle") return true;
   if (execState === "interrupted") return true;
   return !messageLooksLikeAssistantFinal(lastMsg);
 }

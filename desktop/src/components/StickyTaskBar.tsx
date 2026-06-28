@@ -8,6 +8,7 @@ import {
   resolveStickyTodoDisplay,
   detectDiskEvidenceForInProgressTodos,
 } from "../utils/task-stall-policy";
+import { assistantBodyText } from "../utils/budget-incomplete-message";
 import type { SessionExecutionState } from "../utils/streaming-stop-policy";
 
 /**
@@ -73,7 +74,14 @@ function detectModelForgotFinalTodoUpdate(
     }
   }
   if (!sawLaterToolCall) return false;
-  return messageLooksLikeAssistantFinal(lastAssistant);
+  if (!messageLooksLikeAssistantFinal(lastAssistant)) return false;
+  // Bug-fix: short "announcement" messages (e.g. "我即将给出解决方案") must NOT be
+  // treated as a completed delivery. Promotions should only fire when the final
+  // assistant message has substantial content that plausibly represents the actual
+  // work product, not merely a promise of future work.
+  const body = assistantBodyText(lastAssistant!);
+  if (body.length < 150) return false;
+  return true;
 }
 
 type HarnessPhase = "explore" | "read" | "author";

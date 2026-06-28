@@ -4737,7 +4737,9 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
   );
 
   const taskLiveness = useMemo((): "active" | "stalled" | "idle" => {
-    if (stallState === "stall") return "stalled";
+    // "exhausted" = stall auto-nudge used up; show as stalled (not active) so that
+    // StickyTaskBar can render the "stuck" state and promotePending can eventually fire.
+    if (stallState === "stall" || stallState === "exhausted") return "stalled";
     if (sessionWorkInProgress) return "active";
     if (sessionExecutionState === "running") return "active";
     return "idle";
