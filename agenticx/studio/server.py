@@ -364,8 +364,23 @@ async def _finalize_chat_runtime(
     *,
     saw_final: bool,
     had_runtime_failure: bool,
+    interruption_cause: str | None = None,
 ) -> None:
+    from agenticx.studio.turn_interruption import (
+        append_turn_interruption_notice,
+        resolve_turn_interruption_cause,
+    )
+
     _flush_taskspace_hint(manager, session_id, session)
+    cause = interruption_cause
+    if not saw_final and cause is None:
+        cause = resolve_turn_interruption_cause(
+            manager,
+            session_id,
+            saw_final=saw_final,
+            had_runtime_failure=had_runtime_failure,
+        )
+    append_turn_interruption_notice(session, cause=cause, saw_final=saw_final)
     end_state = _resolve_chat_end_execution_state(
         manager,
         session_id,
@@ -2406,6 +2421,9 @@ def create_studio_app() -> FastAPI:
         )
         is_group_session = group_payload is not None
         if is_group_session:
+            from agenticx.studio.turn_interruption import clear_stale_unattended_failure
+
+            clear_stale_unattended_failure(session)
             manager.clear_interrupt(payload.session_id)
             manager.set_execution_state(payload.session_id, "running")
             setattr(session, "_usage_owner_session_id", payload.session_id)
@@ -2584,6 +2602,9 @@ def create_studio_app() -> FastAPI:
         meta_confirm_gate = (
             AutoApproveConfirmGate() if is_automation_session else _resolve_confirm_gate(managed, "meta")
         )
+        from agenticx.studio.turn_interruption import clear_stale_unattended_failure
+
+        clear_stale_unattended_failure(session)
         manager.clear_interrupt(payload.session_id)
         manager.set_execution_state(payload.session_id, "running")
 
@@ -2900,12 +2921,21 @@ def create_studio_app() -> FastAPI:
                                 partial_meta_text,
                                 saw_final=saw_final,
                             )
+                            from agenticx.studio.turn_interruption import resolve_turn_interruption_cause
+
+                            hub_cause = resolve_turn_interruption_cause(
+                                manager,
+                                payload.session_id,
+                                saw_final=saw_final,
+                                had_runtime_failure=had_runtime_failure,
+                            )
                             await _finalize_chat_runtime(
                                 manager,
                                 payload.session_id,
                                 session,
                                 saw_final=saw_final,
                                 had_runtime_failure=had_runtime_failure,
+                                interruption_cause=hub_cause,
                             )
                         else:
                             await event_queue.put(None)
@@ -2976,6 +3006,7 @@ def create_studio_app() -> FastAPI:
                 if not client_disconnected:
                     yield f"data: {json.dumps(err.model_dump(), ensure_ascii=False)}\n\n"
             finally:
+                runtime_was_cancelled = False
                 if hub_sub_id is not None and event_hub is not None:
                     event_hub.unsubscribe(hub_sub_id)
                 if runtime_task is not None and not runtime_task.done():
@@ -2989,6 +3020,7 @@ def create_studio_app() -> FastAPI:
                             await asyncio.wait_for(runtime_task, timeout=1.0)
                     if runtime_task is not None and not runtime_task.done():
                         if event_hub is None or not client_disconnected:
+                            runtime_was_cancelled = True
                             runtime_task.cancel()
                     else:
                         logger.info(
@@ -3000,6 +3032,16 @@ def create_studio_app() -> FastAPI:
                     if task_exc is not None and event_hub is None:
                         had_runtime_failure = True
                 if event_hub is None:
+                    from agenticx.studio.turn_interruption import resolve_turn_interruption_cause
+
+                    legacy_cause = resolve_turn_interruption_cause(
+                        manager,
+                        payload.session_id,
+                        saw_final=saw_final,
+                        had_runtime_failure=had_runtime_failure,
+                        client_disconnected=client_disconnected,
+                        runtime_cancelled=runtime_was_cancelled,
+                    )
                     _finalize_partial_assistant_if_needed(
                         session,
                         partial_meta_text,
@@ -3011,6 +3053,7 @@ def create_studio_app() -> FastAPI:
                         session,
                         saw_final=saw_final,
                         had_runtime_failure=had_runtime_failure,
+                        interruption_cause=legacy_cause,
                     )
             if not client_disconnected and event_hub is None:
                 yield 'data: {"type":"done","data":{}}\n\n'

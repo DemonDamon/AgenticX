@@ -89,6 +89,7 @@ import {
   shouldShowStopButton,
   type SessionExecutionState,
 } from "../utils/streaming-stop-policy";
+import { TURN_INTERRUPTED_TOAST } from "../utils/turn-interruption-notice";
 import {
   CHANNEL_C_GRACE_MS,
   stallDetectSilenceMs,
@@ -5854,6 +5855,8 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
               sessionId={(pane.sessionId || "").trim() || undefined}
               onResumeInNewSession={() => resumeInNewSessionRef.current()}
               onOpenBudgetSettings={() => useAppStore.getState().openSettings("automation")}
+              onResumeTask={() => void resumeCurrentTask()}
+              resumeInFlight={resumeInFlight}
               sessionBusy={sessionBusy}
               isLastAssistantInPane={
                 message.role === "assistant" && message.id === lastAssistantMessageId
@@ -7985,15 +7988,9 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
           stampLastAssistantCompletedAt();
         }
       } else if (!abortController.signal.aborted && !receivedFinalEvent) {
-        // SSE ended without a final payload and without committed assistant text.
-        // Surface an explicit hint so users don't resend blindly and create duplicate
-        // user turns in the same session.
-        addPaneMessageIfSessionActive(
-          pane.id,
-          "tool",
-          "⚠️ 本轮请求已中断（未收到模型最终响应）。可点击“恢复执行”重试，先不要重复发送同一句。",
-          "meta",
-        );
+        // Backend persists turn_interrupted to messages.json; toast is ephemeral.
+        setStallHintToast(TURN_INTERRUPTED_TOAST);
+        await mergeTailFromDisk(requestSessionId);
       }
     } catch (error) {
       if (isContinuation) {
