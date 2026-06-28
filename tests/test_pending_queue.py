@@ -59,3 +59,15 @@ def test_reject_removes_proposal(skills_home: Path) -> None:
     result = reject("abc123", reason="not needed")
     assert result["ok"] is True
     assert list_pending() == []
+
+
+def test_approve_create_when_orphan_dir_without_skill_md(skills_home: Path) -> None:
+    """Orphan skill dirs (e.g. failed guard rollback) must not block create approval."""
+    skill_dir = skills_home / ".agenticx" / "skills" / "queued-skill"
+    skill_dir.mkdir(parents=True, exist_ok=True)
+    (skill_dir / ".changelog").write_text("orphan\n", encoding="utf-8")
+
+    result = approve("abc123", approver="test-user")
+    assert result["ok"] is True
+    assert (skill_dir / "SKILL.md").is_file()
+    assert list_pending() == []

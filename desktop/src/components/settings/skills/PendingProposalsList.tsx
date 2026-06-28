@@ -113,6 +113,7 @@ export function PendingProposalsList({
     const base = apiBase.replace(/\/$/, "");
     if (!base) return;
     setBusyId(id);
+    setErr("");
     try {
       const headers: Record<string, string> = { "Content-Type": "application/json" };
       if (apiToken) headers["X-AGX-Desktop-Token"] = apiToken;
@@ -123,7 +124,12 @@ export function PendingProposalsList({
       });
       const data = await resp.json();
       if (!resp.ok || !data.ok) {
-        setErr(data.error ?? `${kind} 失败`);
+        const raw = String(data.error ?? "");
+        const msg =
+          raw === "skill already exists"
+            ? "该 skill 已存在，无法重复创建"
+            : raw || (kind === "approve" ? "批准失败" : "拒绝失败");
+        setErr(msg);
         return;
       }
       setJustDone((prev) => ({ ...prev, [id]: kind === "approve" ? "approved" : "rejected" }));
@@ -220,7 +226,7 @@ export function PendingProposalsList({
                   <button
                     type="button"
                     disabled={isBusy}
-                    className="flex h-7 items-center rounded-md bg-primary px-3 text-[11px] font-medium text-primary-foreground transition hover:opacity-90 disabled:opacity-40"
+                    className="flex h-7 items-center rounded-md bg-[var(--ui-btn-primary-bg)] px-3 text-[11px] font-medium text-white transition hover:bg-[var(--ui-btn-primary-bg-hover)] disabled:opacity-40"
                     onClick={() => void act(p.proposal_id, "approve")}
                   >
                     {isBusy ? "处理中…" : "批准"}
@@ -228,7 +234,7 @@ export function PendingProposalsList({
                   <button
                     type="button"
                     disabled={isBusy}
-                    className="flex h-7 items-center rounded-md border border-border px-3 text-[11px] text-text-subtle transition hover:border-border-strong hover:text-text-primary disabled:opacity-40"
+                    className="flex h-7 items-center rounded-md bg-red-600 px-3 text-[11px] font-medium text-white transition hover:bg-red-500 disabled:opacity-40"
                     onClick={() => void act(p.proposal_id, "reject")}
                   >
                     拒绝

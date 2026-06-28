@@ -131,11 +131,11 @@ def approve(proposal_id: str, *, approver: str = "user") -> dict[str, Any]:
         return {"ok": False, "error": "skill path outside skills root"}
 
     action = str(meta.get("action", "create") or "create")
-    if action == "create" and skill_dir.exists():
+    target = skill_dir / "SKILL.md"
+    if action == "create" and target.is_file():
         return {"ok": False, "error": "skill already exists"}
 
     skill_dir.mkdir(parents=True, exist_ok=True)
-    target = skill_dir / "SKILL.md"
     try:
         target.write_text(normalized, encoding="utf-8")
         result = scan_skill(skill_dir, source="agent-created")
