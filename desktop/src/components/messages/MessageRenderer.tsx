@@ -10,8 +10,10 @@ import { SystemNotice } from "./SystemNotice";
 import { ContextNoticeLine } from "./ContextNoticeLine";
 import { SupervisorNoticeLine } from "./SupervisorNoticeLine";
 import { ContinuationNoticeLine } from "./ContinuationNoticeLine";
+import { TurnInterruptionNoticeLine } from "./TurnInterruptionNoticeLine";
 import { isSupervisorNoticeMessage } from "../../utils/supervisor-notice";
 import { isContinuationNoticeMessage } from "../../utils/continuation-notice";
+import { isTurnInterruptionNoticeMessage } from "../../utils/turn-interruption-notice";
 import { ViewImageInjectCard } from "./ViewImageInjectCard";
 import { BudgetExceededCard } from "./BudgetExceededCard";
 import { WidgetBlock } from "./WidgetBlock";
@@ -61,6 +63,8 @@ type Props = {
   sessionId?: string;
   onResumeInNewSession?: () => void;
   onOpenBudgetSettings?: () => void;
+  onResumeTask?: () => void;
+  resumeInFlight?: boolean;
   /** Group chat: avatar + name on each user/assistant bubble. */
   showSenderIdentity?: boolean;
   senderAvatarVariant?: "circle" | "rounded-square";
@@ -188,6 +192,8 @@ export function MessageRenderer({
   sessionId,
   onResumeInNewSession,
   onOpenBudgetSettings,
+  onResumeTask,
+  resumeInFlight = false,
   showSenderIdentity = false,
   senderAvatarVariant = "circle",
   senderAvatarId,
@@ -299,6 +305,15 @@ export function MessageRenderer({
     }
     if (isContinuationNoticeMessage(message)) {
       return <ContinuationNoticeLine message={message} />;
+    }
+    if (isTurnInterruptionNoticeMessage(message)) {
+      return (
+        <TurnInterruptionNoticeLine
+          message={message}
+          resumeInFlight={resumeInFlight}
+          onResume={onResumeTask}
+        />
+      );
     }
     if (isTodoUpdateToolMessage(message.content)) {
       return (

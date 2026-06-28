@@ -978,8 +978,12 @@ def _sanitize_context_messages(messages: Sequence[Dict[str, Any]]) -> List[Dict[
         role = str(msg.get("role", ""))
 
         if role != "assistant":
-            # Tool messages are only valid as contiguous responses immediately
-            # following an assistant tool_calls message. Standalone tool rows are dropped.
+            if role == "tool":
+                meta_raw = msg.get("metadata")
+                meta = meta_raw if isinstance(meta_raw, dict) else {}
+                if meta.get("kind") == "turn_interrupted":
+                    idx += 1
+                    continue
             if role != "tool":
                 sanitized.append(msg)
             idx += 1

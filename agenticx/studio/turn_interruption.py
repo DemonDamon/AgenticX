@@ -1,0 +1,130 @@
+"""Persist visible notices when a chat SSE turn ends without FINAL."""
+
+from __future__ import annotations
+
+import uuid
+from typing import Any
+
+TURN_INTERRUPTED_KIND = "turn_interrupted"
+
+_CAUSE_MESSAGES: dict[str, str] = {
+    "user_interrupt": "已按用户请求中断当前生成。可点「恢复执行」继续。",
+    "runtime_failure": "运行出错，本轮未收到模型最终响应。可点「恢复执行」重试。",
+    "client_disconnect": "连接已断开，本轮在工具执行后未收到模型最终响应。可点「恢复执行」继续。",
+    "cancelled": "本轮生成已取消，未收到模型最终响应。可点「恢复执行」继续。",
+    "no_final": "上一步工具执行后未收到模型最终响应。可点「恢复执行」继续。",
+    "unknown": "本轮请求已中断（未收到模型最终响应）。可点「恢复执行」继续。",
+}
+
+
+def _last_history_row(session: Any) -> dict[str, Any] | None:
+    history = getattr(session, "chat_history", None)
+    if not isinstance(history, list) or not history:
+        return None
+    last = history[-1]
+    return last if isinstance(last, dict) else None
+
+
+def _row_meta(row: dict[str, Any]) -> dict[str, Any]:
+    meta_raw = row.get("metadata")
+    return meta_raw if isinstance(meta_raw, dict) else {}
+
+
+def _last_row_is_tool_result(session: Any) -> bool:
+    """True when the turn ended on a real tool execution row (not a status notice)."""
+    last = _last_history_row(session)
+    if last is None or str(last.get("role", "")) != "tool":
+        return False
+    meta = _row_meta(last)
+    notice_kind = str(meta.get("kind") or "").strip()
+    if notice_kind in {
+        TURN_INTERRUPTED_KIND,
+        "continuation_notice",
+        "unattended_done",
+        "unattended_failed",
+        "todo_disk_reconcile",
+    }:
+        return False
+    if str(last.get("tool_call_id", "") or meta.get("tool_call_id", "")).strip():
+        return True
+    tool_name = str(last.get("tool_name", "") or meta.get("tool_name", "")).strip()
+    if tool_name and tool_name not in {"group_progress"}:
+        return True
+    content = str(last.get("content") or "").strip()
+    if content.startswith("exit_code="):
+        return True
+    return False
+
+
+def interruption_notice_content(*, cause: str, session: Any) -> str:
+    key = cause if cause in _CAUSE_MESSAGES else "unknown"
+    if key in {"no_final", "unknown"} and _last_row_is_tool_result(session):
+        return _CAUSE_MESSAGES["no_final"]
+    return _CAUSE_MESSAGES[key]
+
+
+def has_turn_interruption_notice(session: Any) -> bool:
+    last = _last_history_row(session)
+    if last is None:
+        return False
+    return _row_meta(last).get("kind") == TURN_INTERRUPTED_KIND
+
+
+def append_turn_interruption_notice(
+    session: Any,
+    *,
+    cause: str | None,
+    saw_final: bool,
+) -> bool:
+    """Append a turn_interrupted tool row when a turn ends without FINAL (idempotent)."""
+    if saw_final or not cause:
+        return False
+    history = getattr(session, "chat_history", None)
+    if not isinstance(history, list):
+        return False
+    if has_turn_interruption_notice(session):
+        return False
+    content = interruption_notice_content(cause=cause, session=session)
+    history.append(
+        {
+            "id": uuid.uuid4().hex,
+            "role": "tool",
+            "content": content,
+            "agent_id": "meta",
+            "metadata": {
+                "kind": TURN_INTERRUPTED_KIND,
+                "cause": cause,
+                "source": "runtime",
+            },
+        }
+    )
+    return True
+
+
+def resolve_turn_interruption_cause(
+    manager: Any,
+    session_id: str,
+    *,
+    saw_final: bool,
+    had_runtime_failure: bool,
+    client_disconnected: bool = False,
+    runtime_cancelled: bool = False,
+) -> str | None:
+    if saw_final:
+        return None
+    if manager.should_interrupt(session_id):
+        return "user_interrupt"
+    if had_runtime_failure:
+        return "runtime_failure"
+    if client_disconnected and runtime_cancelled:
+        return "client_disconnect"
+    if runtime_cancelled:
+        return "cancelled"
+    return "no_final"
+
+
+def clear_stale_unattended_failure(session: Any) -> None:
+    """Drop supervisor wall-clock failure scratchpad when user starts a new manual turn."""
+    scratchpad = getattr(session, "scratchpad", None)
+    if isinstance(scratchpad, dict):
+        scratchpad.pop("__unattended_failure__", None)
