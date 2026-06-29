@@ -1414,6 +1414,33 @@ function normalizeLocalFsPath(raw: string): string {
   return trimmed;
 }
 
+function decodeLocalTextBuffer(buf: Buffer): { content: string; encodingError?: string } {
+  try {
+    const decoder = new TextDecoder("utf-8", { fatal: true });
+    return { content: decoder.decode(buf) };
+  } catch {
+    return {
+      content: "",
+      encodingError:
+        "文件不是有效的 UTF-8 编码（中文 SVG/文本可能显示乱码），请用 UTF-8 重新保存",
+    };
+  }
+}
+
+function prepareSvgMarkupForEmbed(raw: string): string {
+  let s = String(raw ?? "").replace(/^\uFEFF/, "");
+  s = s.replace(/^\s*<\?xml[^>]*\?>\s*/i, "");
+  s = s.replace(/^\s*<!DOCTYPE[^>]*>\s*/i, "");
+  return s.trim();
+}
+
+function buildSvgCharsetDataUrlFromBuffer(buf: Buffer): string {
+  const decoded = decodeLocalTextBuffer(buf);
+  const content = decoded.encodingError ? buf.toString("utf8") : decoded.content;
+  const markup = prepareSvgMarkupForEmbed(content);
+  return `data:image/svg+xml;charset=utf-8,${encodeURIComponent(markup)}`;
+}
+
 function saveMetaWorkspaceMarkdown(kind: MetaWorkspaceHistoryKind, content: string): void {
   const workspaceDir = resolveMetaWorkspaceDir();
   snapshotMetaWorkspaceBeforeSave(workspaceDir, kind, content);
@@ -6890,6 +6917,9 @@ function registerIpc(): void {
       }
       const buf = await fs.promises.readFile(normalized);
       const ext = path.extname(normalized).toLowerCase();
+      if (ext === ".svg") {
+        return { ok: true, dataUrl: buildSvgCharsetDataUrlFromBuffer(buf) };
+      }
       const mime =
         ext === ".png"
           ? "image/png"
@@ -6899,9 +6929,7 @@ function registerIpc(): void {
               ? "image/gif"
               : ext === ".webp"
                 ? "image/webp"
-                : ext === ".svg"
-                  ? "image/svg+xml"
-                  : "application/octet-stream";
+                : "application/octet-stream";
       return { ok: true, dataUrl: `data:${mime};base64,${buf.toString("base64")}` };
     } catch (err) {
       return { ok: false, error: String(err) };
@@ -6924,8 +6952,12 @@ function registerIpc(): void {
       if (stat.size > READ_LOCAL_TEXT_MAX_BYTES) {
         return { ok: false, error: `file too large to read (${stat.size} bytes)` };
       }
-      const content = await fs.promises.readFile(normalized, "utf8");
-      return { ok: true, content, size: stat.size };
+      const buf = await fs.promises.readFile(normalized);
+      const decoded = decodeLocalTextBuffer(buf);
+      if (decoded.encodingError) {
+        return { ok: false, error: decoded.encodingError };
+      }
+      return { ok: true, content: decoded.content, size: stat.size };
     } catch (err) {
       return { ok: false, error: String(err) };
     }
