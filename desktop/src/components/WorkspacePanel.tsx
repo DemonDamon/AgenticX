@@ -193,6 +193,15 @@ export function WorkspacePanel({
     [taskspaces, activeTaskspaceId]
   );
 
+  const previewTaskspaceRoot = useMemo(() => {
+    if (!filePreview) return undefined;
+    const matched = findTaskspaceForAbsPath(taskspaces, filePreview.absolutePath);
+    if (matched) {
+      return taskspaces.find((t) => t.id === matched.taskspaceId)?.path;
+    }
+    return activeTaskspace?.path;
+  }, [filePreview, taskspaces, activeTaskspace]);
+
   const revealInFileManagerLabel = useMemo(() => {
     if (hostPlatform === "darwin") return "在访达中显示";
     if (hostPlatform === "win32") return "在文件资源管理器中显示";
@@ -617,7 +626,8 @@ export function WorkspacePanel({
       return;
     }
     setSelectedFilePath(relPath);
-    const preview = mapTaskspaceFileToWorkspacePreview(result, relPath);
+    const ts = taskspaces.find((t) => t.id === taskspaceId);
+    const preview = mapTaskspaceFileToWorkspacePreview(result, relPath, ts?.path);
     if (!preview) {
       setErrorText(result.error ?? "读取文件失败");
       return;
@@ -1258,6 +1268,7 @@ export function WorkspacePanel({
           onQuoteSnippet={onQuotePreviewSnippet}
           onRevealInFileManager={revealInFileManager}
           revealInFileManagerLabel={revealInFileManagerLabel}
+          taskspaceRoot={previewTaskspaceRoot}
         />
       ) : null}
 

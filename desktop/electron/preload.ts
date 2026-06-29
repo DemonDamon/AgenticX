@@ -598,6 +598,7 @@ contextBridge.exposeInMainWorld("agenticxDesktop", {
   loadLocalImageDataUrl: async (path: string) => ipcRenderer.invoke("load-local-image-data-url", path),
   writeLocalTextFile: async (payload: { path: string; content: string }) =>
     ipcRenderer.invoke("write-local-text-file", payload),
+  readLocalTextFile: async (path: string) => ipcRenderer.invoke("read-local-text-file", path),
   loadLocalFileDataUrl: async (path: string) => ipcRenderer.invoke("load-local-file-data-url", path),
   installFromRegistry: async (args: {
     source: string;

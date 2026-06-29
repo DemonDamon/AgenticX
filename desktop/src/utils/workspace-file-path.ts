@@ -86,6 +86,33 @@ export function resolveRelativeAssetPath(fileAbsolutePath: string, src: string):
   return `/${baseParts.join("/")}`;
 }
 
+/** Whether a path is an absolute local filesystem path (not a workspace-relative path). */
+export function isAbsoluteLocalPath(pathValue: string): boolean {
+  const value = String(pathValue || "").trim();
+  if (!value) return false;
+  if (value.startsWith("file://")) return true;
+  return isAbsoluteFilePath(value);
+}
+
+/** Resolve markdown host file to an absolute path for relative asset lookup. */
+export function resolveMarkdownHostPath(
+  filePath: string,
+  workspaceRoot?: string,
+  relPathFallback?: string
+): string {
+  const raw = stripLineRangeFromAbsPath(String(filePath || "").trim());
+  const rel = stripLineRangeFromAbsPath(String(relPathFallback || "").trim());
+  if (!raw && !rel) return "";
+  if (raw && isAbsoluteLocalPath(raw)) {
+    return raw.startsWith("file://") ? raw : raw.replace(/\\/g, "/");
+  }
+  if (workspaceRoot) {
+    const relForJoin = rel || raw;
+    if (relForJoin) return absoluteTaskspacePath(workspaceRoot, relForJoin);
+  }
+  return raw;
+}
+
 
 export function findTaskspaceForAbsPath(
   taskspaces: Taskspace[],
