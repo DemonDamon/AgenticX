@@ -99,6 +99,16 @@ const REASONING_ACTION_INTENT_RE =
 /** Visible body that defers work to a follow-up step instead of delivering it. */
 const DEFERRAL_BODY_RE = /我先|让我先|接下来|稍等|正在|马上/;
 
+/**
+ * Explicit handoff / step-entry phrases — strict mirror of backend
+ * `_HANDOFF_BODY_RE` in `agenticx/studio/session_manager.py`.
+ * Keep both sides in sync; any change here MUST be reflected on the backend.
+ */
+const HANDOFF_BODY_RE =
+  /我现在进入第[一二三四五六七八九十0-9]+[项步阶段点]|现在开始(?:进行|优化|处理|执行|动手)|让我开始(?:进行|优化|处理|执行|动手)|我(?:现在)?去(?:读取|加载|执行|处理|优化|改|看)|我来(?:试试|看看|读取|加载|执行|改|优化)|接下来我(?:就|来|去|会)(?:读取|执行|改|优化|开始)/;
+
+const HANDOFF_BODY_MAX_CHARS = 300;
+
 function assistantReasoningText(message: Message): string {
   if (message.role !== "assistant") return "";
   return parseReasoningContent(message.content).reasoning.trim();
@@ -131,9 +141,20 @@ export function lastTurnPromisedActionWithoutFollowThrough(messages: Message[]):
   if (messageHasTerminalMarkers(last)) return false;
   const reasoning = assistantReasoningText(last);
   const body = assistantBodyText(last);
-  if (!reasoning || !REASONING_ACTION_INTENT_RE.test(reasoning)) return false;
-  if (DEFERRAL_BODY_RE.test(body) && body.length < 220) return true;
-  return looksLikeUnfinishedAssistantBody(body);
+
+  // Path A: reasoning promises action + deferring short body.
+  if (reasoning && REASONING_ACTION_INTENT_RE.test(reasoning)) {
+    if (DEFERRAL_BODY_RE.test(body) && body.length < 220) return true;
+    if (looksLikeUnfinishedAssistantBody(body)) return true;
+  }
+
+  // Path B/C: explicit handoff in body, no tool rows in this turn.
+  if (body && HANDOFF_BODY_RE.test(body) && body.length < HANDOFF_BODY_MAX_CHARS) {
+    const hasToolRow = tail.some((m) => m?.role === "tool");
+    if (!hasToolRow) return true;
+  }
+
+  return false;
 }
 
 /** Extract the (done, total) counts from a todo snapshot tool message body. */

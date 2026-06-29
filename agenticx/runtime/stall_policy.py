@@ -18,6 +18,33 @@ ContinuationReason = Literal["stall", "interrupted", "exhausted", "rate_limit", 
 # Trailing punctuation that suggests the model stopped mid-thought (often before a tool call).
 _UNFINISHED_TRAILING_RE = re.compile(r"[:：,，;；、—…]+$", re.UNICODE)
 
+# Mirror of session_manager._HANDOFF_BODY_RE — keep in sync.
+_HANDOFF_BODY_RE_LOCAL = re.compile(
+    r"我现在进入第[一二三四五六七八九十0-9]+[项步阶段点]"
+    r"|现在开始(?:进行|优化|处理|执行|动手)"
+    r"|让我开始(?:进行|优化|处理|执行|动手)"
+    r"|我(?:现在)?去(?:读取|加载|执行|处理|优化|改|看)"
+    r"|我来(?:试试|看看|读取|加载|执行|改|优化)"
+    r"|接下来我(?:就|来|去|会)(?:读取|执行|改|优化|开始)",
+)
+
+_HANDOFF_BODY_MAX_CHARS = 300
+
+
+def _last_message_is_deferred_handoff(message: Optional[dict[str, Any]]) -> bool:
+    """True if the assistant's last message is a verbal handoff w/o tool calls."""
+    if not message or not isinstance(message, dict):
+        return False
+    if str(message.get("role", "")).strip() != "assistant":
+        return False
+    tool_calls = message.get("tool_calls")
+    if isinstance(tool_calls, list) and tool_calls:
+        return False
+    body = str(message.get("content", "") or "").strip()
+    if not body or len(body) >= _HANDOFF_BODY_MAX_CHARS:
+        return False
+    return bool(_HANDOFF_BODY_RE_LOCAL.search(body))
+
 
 def _assistant_body_text(message: dict[str, Any]) -> str:
     return str(message.get("content", "")).strip()
@@ -185,6 +212,10 @@ def evaluate_stall_for_continuation(inp: StallEvaluateInput) -> StallEvaluateRes
     )
 
     should_stall = channel_a or channel_b or channel_c
+    # Promote: a deferred handoff message is itself a stall signal, even when no
+    # other channel fires (idle session + body that looks "final" superficially).
+    if not should_stall and _last_message_is_deferred_handoff(inp.last_message):
+        should_stall = True
     if not should_stall and inp.stall_state_hint != "stall":
         return StallEvaluateResult(False, False, "manual")
 
@@ -200,7 +231,11 @@ def evaluate_stall_for_continuation(inp: StallEvaluateInput) -> StallEvaluateRes
     # Auto-continue when stalled and not purely idle-with-final
     can_continue = exec_state in {"running", "interrupted", "idle"}
     if exec_state == "idle" and message_looks_like_assistant_final(inp.last_message):
-        can_continue = False
+        # Override: deferred handoff (口头交接但未调工具) — supervisor must continue.
+        if _last_message_is_deferred_handoff(inp.last_message):
+            can_continue = True
+        else:
+            can_continue = False
 
     return StallEvaluateResult(
         should_stall=should_stall,

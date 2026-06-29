@@ -74,6 +74,29 @@ _REASONING_ACTION_INTENT_RE = re.compile(
 )
 _DEFERRAL_BODY_RE = re.compile(r"我先|让我先|接下来|稍等|正在|马上")
 
+# Explicit handoff / step-entry phrases that promise next-step work without doing it.
+# Strict: short, declarative "I'm now starting X" patterns only — DO NOT add generic
+# narrative connectors like 「接下来」 or 「下面」 alone, they appear in normal prose.
+_HANDOFF_BODY_RE = re.compile(
+    r"我现在进入第[一二三四五六七八九十0-9]+[项步阶段点]"  # 我现在进入第二项 / 第3步
+    r"|现在开始(?:进行|优化|处理|执行|动手)"               # 现在开始优化
+    r"|让我开始(?:进行|优化|处理|执行|动手)"                # 让我开始处理
+    r"|我(?:现在)?去(?:读取|加载|执行|处理|优化|改|看)"     # 我现在去读取 / 我去看
+    r"|我来(?:试试|看看|读取|加载|执行|改|优化)"            # 我来试试 / 我来优化
+    r"|接下来我(?:就|来|去|会)(?:读取|执行|改|优化|开始)",  # 接下来我去执行
+)
+
+# Body length cap for path C — beyond this, treat the message as a real reply.
+_HANDOFF_BODY_MAX_CHARS = 300
+
+
+def _turn_has_any_tool_row(tail: List[Dict[str, Any]]) -> bool:
+    """True if the messages after the last user include any role=tool row."""
+    for msg in tail:
+        if str(msg.get("role", "")).strip() == "tool":
+            return True
+    return False
+
 
 def _extract_assistant_reasoning(content: str) -> str:
     text = str(content or "")
@@ -116,11 +139,23 @@ def _messages_last_turn_promised_action_without_followthrough(
         return False
     reasoning = _extract_assistant_reasoning(content)
     body = _visible_assistant_body(content)
-    if not reasoning or not _REASONING_ACTION_INTENT_RE.search(reasoning):
-        return False
-    if _DEFERRAL_BODY_RE.search(body) and len(body) < 220:
-        return True
-    return bool(body) and body.rstrip()[-1:] in {":", "：", ",", "，", ";", "；", "、", "—", "…"}
+
+    # Path A (existing): reasoning promises action + short / deferring body.
+    if reasoning and _REASONING_ACTION_INTENT_RE.search(reasoning):
+        if _DEFERRAL_BODY_RE.search(body) and len(body) < 220:
+            return True
+        if body and body.rstrip()[-1:] in {":", "：", ",", "，", ";", "；", "、", "—", "…"}:
+            return True
+
+    # Path B/C (new): explicit handoff in body, regardless of reasoning.
+    # Requires no tool rows after the last user turn — already guarded above by
+    # asserting the *last* message is assistant; but a deferred turn may still
+    # have an earlier tool call in the same turn, so we tighten here.
+    if body and _HANDOFF_BODY_RE.search(body) and len(body) < _HANDOFF_BODY_MAX_CHARS:
+        if not _turn_has_any_tool_row(tail):
+            return True
+
+    return False
 
 
 # Titles that should be replaced by the first real user message (case-insensitive ASCII).

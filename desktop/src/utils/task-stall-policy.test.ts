@@ -466,4 +466,56 @@ describe("lastTurnPromisedActionWithoutFollowThrough", () => {
     ];
     expect(lastTurnPromisedActionWithoutFollowThrough(messages)).toBe(false);
   });
+
+  it("detects handoff body without reasoning block (path B)", () => {
+    const messages: Message[] = [
+      msg({ id: "u1", role: "user", content: "继续优化视频" }),
+      msg({
+        id: "a2",
+        role: "assistant",
+        content:
+          "验收已完成：视频能用，但偏\"模板化介绍页\"。我现在进入第二项：直接优化 composition，做一个更像成片的版本",
+      }),
+    ];
+    expect(lastTurnPromisedActionWithoutFollowThrough(messages)).toBe(true);
+    expect(
+      shouldTriggerIncompleteEndStall("idle", false, messages, CHANNEL_C_GRACE_MS, true),
+    ).toBe(true);
+  });
+
+  it("returns false when handoff body has a tool row in the same turn", () => {
+    const messages: Message[] = [
+      msg({ id: "u1", role: "user", content: "go" }),
+      msg({ id: "t1", role: "tool", toolName: "bash_exec", content: "ok" }),
+      msg({
+        id: "a1",
+        role: "assistant",
+        content: "我现在进入第二项：直接优化 composition",
+      }),
+    ];
+    expect(lastTurnPromisedActionWithoutFollowThrough(messages)).toBe(false);
+  });
+
+  it("returns false when handoff body length >= 300 (normal narrative)", () => {
+    const longBody = "现在开始优化。" + "（具体分析展开内容）".repeat(40); // > 300 chars
+    const messages: Message[] = [
+      msg({ id: "u1", role: "user", content: "解释一下" }),
+      msg({ id: "a1", role: "assistant", content: longBody }),
+    ];
+    expect(longBody.length).toBeGreaterThanOrEqual(300);
+    expect(lastTurnPromisedActionWithoutFollowThrough(messages)).toBe(false);
+  });
+
+  it("returns false when handoff body has assistant.tool_calls populated", () => {
+    const messages: Message[] = [
+      msg({ id: "u1", role: "user", content: "go" }),
+      {
+        ...msg({ id: "a1", role: "assistant", content: "我现在进入第二项" }),
+        tool_calls: [
+          { id: "x", type: "function", function: { name: "bash_exec" } },
+        ],
+      } as unknown as Message,
+    ];
+    expect(lastTurnPromisedActionWithoutFollowThrough(messages)).toBe(false);
+  });
 });
