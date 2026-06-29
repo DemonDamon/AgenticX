@@ -981,7 +981,14 @@ def _sanitize_context_messages(messages: Sequence[Dict[str, Any]]) -> List[Dict[
             if role == "tool":
                 meta_raw = msg.get("metadata")
                 meta = meta_raw if isinstance(meta_raw, dict) else {}
-                if meta.get("kind") == "turn_interrupted":
+                # Filter UI-only notice messages from LLM context so they
+                # don't pollute follow-up turns with stale interruption or
+                # continuation noise.
+                if meta.get("kind") in (
+                    "turn_interrupted",
+                    "continuation_notice",
+                    "futile_resume_guard",
+                ):
                     idx += 1
                     continue
             if role != "tool":

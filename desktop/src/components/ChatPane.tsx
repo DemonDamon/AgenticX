@@ -93,6 +93,7 @@ import { TURN_INTERRUPTED_TOAST } from "../utils/turn-interruption-notice";
 import {
   CHANNEL_C_GRACE_MS,
   stallDetectSilenceMs,
+  isFutileResume,
   lastTurnHasCompletedAssistantReply,
   resolveSessionHealth,
   resolveSilenceTier,
@@ -4759,6 +4760,13 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
     return null;
   }, [visibleMessages]);
 
+  // Whether the latest interrupted turn is already complete — used to hide
+  // the 恢复执行 button on a turn_interrupted row (futile-resume guard).
+  const isFutileResumeFlag = useMemo(
+    () => isFutileResume(pane.messages ?? []),
+    [pane.messages],
+  );
+
   const clearResumeInFlight = useCallback((sid: string) => {
     if (resumeInFlightTimerRef.current != null) {
       window.clearTimeout(resumeInFlightTimerRef.current);
@@ -5650,6 +5658,21 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
   const resumeCurrentTask = useCallback(async () => {
     const sid = (pane.sessionId || "").trim();
     if (!sid || resumeInFlightRef.current[sid]) return;
+
+    // Guard: skip futile resumes. When the last turn_interrupted follows a
+    // complete assistant reply and all todos are done, resuming only makes
+    // the model re-announce "task done" and re-verify outputs — a loop.
+    const guardMsgs =
+      useAppStore.getState().panes.find((p) => p.id === pane.id)?.messages ??
+      pane.messages ??
+      [];
+    if (isFutileResume(guardMsgs)) {
+      addPaneMessage(pane.id, "tool", "✅ 任务已全部完成，无需恢复执行。", "meta", undefined, undefined, undefined, {
+        metadata: { kind: "futile_resume_guard" },
+      });
+      return;
+    }
+
     beginResumeInFlight(sid);
     delete userStoppedSessionRef.current[sid];
     let state: SessionExecutionState = sessionExecutionState;
@@ -5679,7 +5702,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
       lockedSessionId: sid,
       continuation: { reason, source: "desktop_manual" },
     });
-  }, [beginResumeInFlight, interruptForResume, pane.avatarId, pane.sessionId, sessionExecutionState, stallState]);
+  }, [addPaneMessage, beginResumeInFlight, interruptForResume, pane.avatarId, pane.id, pane.messages, pane.sessionId, sessionExecutionState, stallState]);
 
   const resumeWithModel = useCallback(
     async (provider: string, model: string) => {
@@ -5857,6 +5880,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
               onOpenBudgetSettings={() => useAppStore.getState().openSettings("automation")}
               onResumeTask={() => void resumeCurrentTask()}
               resumeInFlight={resumeInFlight}
+              isFutileResume={isFutileResumeFlag}
               sessionBusy={sessionBusy}
               isLastAssistantInPane={
                 message.role === "assistant" && message.id === lastAssistantMessageId

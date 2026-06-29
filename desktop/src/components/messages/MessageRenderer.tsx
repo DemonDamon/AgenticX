@@ -65,6 +65,8 @@ type Props = {
   onOpenBudgetSettings?: () => void;
   onResumeTask?: () => void;
   resumeInFlight?: boolean;
+  /** When true, the turn-interrupted resume button is hidden (task already complete). */
+  isFutileResume?: boolean;
   /** Group chat: avatar + name on each user/assistant bubble. */
   showSenderIdentity?: boolean;
   senderAvatarVariant?: "circle" | "rounded-square";
@@ -194,6 +196,7 @@ export function MessageRenderer({
   onOpenBudgetSettings,
   onResumeTask,
   resumeInFlight = false,
+  isFutileResume = false,
   showSenderIdentity = false,
   senderAvatarVariant = "circle",
   senderAvatarId,
@@ -312,6 +315,7 @@ export function MessageRenderer({
           message={message}
           resumeInFlight={resumeInFlight}
           onResume={onResumeTask}
+          isFutile={isFutileResume}
         />
       );
     }
