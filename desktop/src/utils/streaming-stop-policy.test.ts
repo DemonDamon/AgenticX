@@ -3,6 +3,7 @@ import {
   canStopCurrentRun,
   isDoubleEnterWithinWindow,
   isStreamRunActiveForQueue,
+  resolveQueueSessionKey,
   shouldEnqueueOnResend,
   shouldInterruptOnResend,
   shouldShowSessionWorkInProgress,
@@ -54,6 +55,36 @@ describe("shouldShowStopButton", () => {
         isGroupPane: false,
       })
     ).toBe(true);
+  });
+});
+
+describe("resolveQueueSessionKey", () => {
+  it("falls back to in-flight session when current session is empty", () => {
+    expect(
+      resolveQueueSessionKey({
+        currentSessionId: "",
+        inFlightSessionId: "old-sess",
+      })
+    ).toBe("old-sess");
+  });
+
+  it("does not borrow in-flight session while awaiting fresh lazy session", () => {
+    expect(
+      resolveQueueSessionKey({
+        currentSessionId: "",
+        inFlightSessionId: "old-sess",
+        awaitingFreshSession: true,
+      })
+    ).toBe("");
+  });
+
+  it("prefers current session when both are set", () => {
+    expect(
+      resolveQueueSessionKey({
+        currentSessionId: "new-sess",
+        inFlightSessionId: "old-sess",
+      })
+    ).toBe("new-sess");
   });
 });
 

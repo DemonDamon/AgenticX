@@ -84,6 +84,7 @@ import {
   canStopCurrentRun,
   isDoubleEnterWithinWindow,
   isStreamRunActiveForQueue,
+  resolveQueueSessionKey,
   shouldEnqueueOnResend,
   shouldInterruptOnResend,
   shouldShowSessionWorkInProgress,
@@ -6489,6 +6490,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
         : "";
     const canQueueFollowUp =
       !isContinuation && !options?.suppressUserEcho && !options?.skipUserHistory;
+    const awaitingFreshSession = isPaneAwaitingFreshSession(pane.id);
 
     const resolveStreamRunActive = (sessionKey: string) =>
       isStreamRunActiveForQueue({
@@ -6525,7 +6527,12 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
       return true;
     };
 
-    if (tryEnqueueFollowUp(targetSendSid || inFlightForPane)) return;
+    const queueSessionKey = resolveQueueSessionKey({
+      currentSessionId: targetSendSid,
+      inFlightSessionId: inFlightForPane,
+      awaitingFreshSession,
+    });
+    if (tryEnqueueFollowUp(queueSessionKey)) return;
 
     // 计算本次发送的目标 session（用于跨 session 并发判断）
     let holdSendLock = false;
@@ -9367,7 +9374,12 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
                     sendChatInFlightRef.current?.paneId === pane.id
                       ? (sendChatInFlightRef.current.sessionId || "").trim()
                       : "";
-                  const queueSid = sid || inFlightSid;
+                  const awaitingFreshSession = isPaneAwaitingFreshSession(pane.id);
+                  const queueSid = resolveQueueSessionKey({
+                    currentSessionId: sid,
+                    inFlightSessionId: inFlightSid,
+                    awaitingFreshSession,
+                  });
                   const streamActive = isStreamRunActiveForQueue({
                     sessionId: queueSid,
                     streamStateActive: !!sessionStreamStateRef.current[queueSid]?.active,
