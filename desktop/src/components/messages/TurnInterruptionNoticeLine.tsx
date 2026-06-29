@@ -1,7 +1,7 @@
 import { CirclePause, RotateCcw } from "lucide-react";
 import type { Message } from "../../store";
 import { parseTurnInterruptionNotice } from "../../utils/turn-interruption-notice";
-import { ASSISTANT_ICON_RAIL_CLASS } from "./im-layout";
+import { SystemStatusLine } from "./SystemStatusLine";
 
 type Props = {
   message: Message;
@@ -17,27 +17,9 @@ export function TurnInterruptionNoticeLine({ message, resumeInFlight = false, on
   const text = isUserInterrupt ? "已中断" : "上一步工具执行后未收到模型响应";
 
   return (
-    <div
-      className="agx-system-status-line flex min-w-0 items-center gap-2 px-3 py-1 text-[13px] leading-[1.65]"
-      data-status-kind="turn-interrupted"
-    >
-      {/* icon tile */}
-      <span className={ASSISTANT_ICON_RAIL_CLASS} aria-hidden>
-        <span
-          className="flex h-[18px] w-[18px] items-center justify-center rounded-[5px]"
-          style={{
-            backgroundColor: "rgba(251, 191, 36, 0.10)",
-            boxShadow: "inset 0 0 0 1px rgba(251, 191, 36, 0.28)",
-            color: "rgba(253, 224, 71, 0.82)",
-          }}
-        >
-          <CirclePause className="h-3 w-3" strokeWidth={2.25} />
-        </span>
-      </span>
-
-      {/* body */}
-      <div className="flex min-w-0 flex-1 flex-wrap items-center gap-x-2 gap-y-0.5">
-        <span className="text-text-muted">{text}</span>
+    <SystemStatusLine icon={CirclePause} tone="info" data-status-kind="turn-interrupted">
+      <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-0.5">
+        <span>{text}</span>
         {onResume && !isFutile ? (
           <button
             type="button"
@@ -51,6 +33,6 @@ export function TurnInterruptionNoticeLine({ message, resumeInFlight = false, on
           </button>
         ) : null}
       </div>
-    </div>
+    </SystemStatusLine>
   );
 }

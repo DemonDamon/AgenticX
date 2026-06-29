@@ -26,6 +26,7 @@ import { KeybindingsPanel } from "./KeybindingsPanel";
 import { attachmentsFromSessionRow } from "../utils/session-message-map";
 import { MessageRenderer, renderToolMessageExtras } from "./messages/MessageRenderer";
 import { groupConsecutiveToolMessages, type GroupedChatRow } from "./messages/group-tool-messages";
+import { isInterruptedAssistantPlaceholder } from "../utils/noisy-chat-messages";
 import { expandMessagesToTopLevelRows } from "./messages/react-blocks";
 import { shouldHideStreamOverlay, shouldShowMidTurnStreamActivity } from "../utils/stream-overlay-policy";
 import { TurnToolGroupCard } from "./messages/TurnToolGroupCard";
@@ -611,7 +612,11 @@ export function ChatView({ onOpenConfirm, mode = "pro" }: Props) {
   }, [messages, sessionExecutionState, sessionId, sseActive, stallDetectSeconds, stallState]);
 
   const visibleMessages = useMemo(
-    () => messages.filter((item) => !item.agentId || item.agentId === "meta"),
+    () =>
+      messages.filter(
+        (item) =>
+          (!item.agentId || item.agentId === "meta") && !isInterruptedAssistantPlaceholder(item),
+      ),
     [messages]
   );
   const groupedVisibleMessages = useMemo(
@@ -1588,7 +1593,6 @@ export function ChatView({ onOpenConfirm, mode = "pro" }: Props) {
       if (err instanceof DOMException && err.name === "AbortError") {
         if (!abortedByUserRef.current) {
           commitCurrentStreamIfNeeded();
-          addMessage("tool", "已中断当前生成", "meta");
         }
       } else {
         addMessage("tool", `❌ 请求失败: ${String(err)}`, "meta");

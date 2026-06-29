@@ -43,6 +43,16 @@ const ASSISTANT_ACTION_MARGIN_LEFT_PX = 12;
 export const ASSISTANT_ICON_RAIL_CLASS =
   "flex h-[20px] w-[20px] shrink-0 items-center justify-center";
 
+/** Theme-primary rail color — shared by thought chain, tool rail, and system status rows. */
+export const REACT_RAIL_ICON_CLASS =
+  "text-[rgb(var(--theme-color-rgb,59,130,246))]";
+
+export const REACT_RAIL_ICON_TILE_STYLE: CSSProperties = {
+  backgroundColor: "rgba(var(--theme-color-rgb, 59, 130, 246), 0.12)",
+  boxShadow: "inset 0 0 0 1px rgba(var(--theme-color-rgb, 59, 130, 246), 0.32)",
+  color: "rgb(var(--theme-color-rgb, 59, 130, 246))",
+};
+
 export function getAssistantTextClassName(options: AssistantTextClassOptions = {}): string | undefined {
   if (!options.hasReasoning) return undefined;
   return options.inReActRow ? "mt-1" : "mt-2";
