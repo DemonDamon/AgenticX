@@ -89,6 +89,68 @@ export function isTodoSnapshotSuperseded(messages: Message[], todoIndex: number)
   return false;
 }
 
+const TODO_COMPLETED_RE = /\((\d+)\s*\/\s*(\d+)\s*completed\)/;
+
+/** Extract the (done, total) counts from a todo snapshot tool message body. */
+function parseTodoCompletedCounts(content: string): { done: number; total: number } | null {
+  const match = content.match(TODO_COMPLETED_RE);
+  if (!match) return null;
+  const done = parseInt(match[1] ?? "", 10);
+  const total = parseInt(match[2] ?? "", 10);
+  if (!Number.isFinite(done) || !Number.isFinite(total) || total <= 0) return null;
+  return { done, total };
+}
+
+/**
+ * Returns true when triggering a resume/continuation would be futile:
+ * the last turn_interrupted follows a complete assistant reply, there
+ * are no pending (non-done) tool rows, and the latest todo snapshot
+ * shows all items completed. In that state, resuming only makes the
+ * model re-announce "task done" and re-verify outputs — a known loop.
+ */
+export function isFutileResume(messages: Message[]): boolean {
+  if (!messages.length) return false;
+
+  // Locate the last turn_interrupted tool message.
+  let lastInterruptedIdx = -1;
+  for (let i = messages.length - 1; i >= 0; i -= 1) {
+    const m = messages[i];
+    if (
+      m?.role === "tool" &&
+      (m.metadata as Record<string, unknown> | undefined)?.kind === "turn_interrupted"
+    ) {
+      lastInterruptedIdx = i;
+      break;
+    }
+  }
+  if (lastInterruptedIdx < 0) return false;
+
+  // The turn before the interruption must have produced a complete
+  // assistant reply — otherwise a resume is genuinely needed.
+  const beforeInterrupt = messages.slice(0, lastInterruptedIdx);
+  if (!lastTurnHasCompletedAssistantReply(beforeInterrupt)) return false;
+
+  // Reject if any tool row in the last turn is still pending/running.
+  for (let i = 0; i < beforeInterrupt.length; i += 1) {
+    const m = beforeInterrupt[i];
+    if (m?.role !== "tool") continue;
+    const status = (m.toolStatus ?? "").trim();
+    if (status === "pending" || status === "running") return false;
+  }
+
+  // The most recent todo snapshot before the interruption must show
+  // all items completed. Conservative: if no snapshot found, allow resume.
+  for (let i = lastInterruptedIdx - 1; i >= 0; i -= 1) {
+    const m = messages[i];
+    if (m?.role !== "tool") continue;
+    const counts = parseTodoCompletedCounts(String(m.content ?? ""));
+    if (counts) {
+      return counts.done === counts.total;
+    }
+  }
+  return false;
+}
+
 /** Whether desktop auto-nudge may fire for the current stall + execution state. */
 export function shouldAllowStallAutoNudge(
   stallState: StallPhase,

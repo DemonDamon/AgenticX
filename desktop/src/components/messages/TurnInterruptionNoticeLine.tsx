@@ -6,9 +6,11 @@ type Props = {
   message: Message;
   resumeInFlight?: boolean;
   onResume?: () => void;
+  /** When true, the resume is futile (task already complete) — hide the button. */
+  isFutile?: boolean;
 };
 
-export function TurnInterruptionNoticeLine({ message, resumeInFlight = false, onResume }: Props) {
+export function TurnInterruptionNoticeLine({ message, resumeInFlight = false, onResume, isFutile = false }: Props) {
   const parsed = parseTurnInterruptionNotice(message);
   const text = parsed?.text ?? String(message.content ?? "").trim();
   if (!text) return null;
@@ -23,7 +25,7 @@ export function TurnInterruptionNoticeLine({ message, resumeInFlight = false, on
         data-status-kind="turn-interrupted"
       >
         <p>{text}</p>
-        {onResume ? (
+        {onResume && !isFutile ? (
           <div className="mt-2 flex flex-wrap items-center gap-2">
             <button
               type="button"

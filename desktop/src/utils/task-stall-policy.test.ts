@@ -3,6 +3,7 @@ import type { ParsedTodo } from "../components/TodoUpdateCard";
 import type { Message } from "../store";
 import {
   CHANNEL_C_GRACE_MS,
+  isFutileResume,
   isTodoSnapshotSuperseded,
   lastTurnHasCompletedAssistantReply,
   messageLooksLikeAssistantFinal,
@@ -311,5 +312,75 @@ describe("shouldAllowStallAutoNudge", () => {
 
   it("allows interrupted stall for auto nudge", () => {
     expect(shouldAllowStallAutoNudge("stall", "interrupted", false)).toBe(true);
+  });
+});
+
+describe("isFutileResume", () => {
+  it("returns true when last turn_interrupted follows a complete reply + all todos done", () => {
+    const messages: Message[] = [
+      msg({ id: "u1", role: "user", content: "生成视频" }),
+      msg({ id: "t1", role: "tool", content: "[x] 初始化 [x] 渲染 (2/2 completed)" }),
+      msg({ id: "a1", role: "assistant", content: "视频已生成：/tmp/out.mp4" }),
+      msg({
+        id: "t2",
+        role: "tool",
+        content: "已按用户请求中断当前生成。可点「恢复执行」继续。",
+        metadata: { kind: "turn_interrupted", cause: "user_interrupt" },
+      }),
+    ];
+    expect(isFutileResume(messages)).toBe(true);
+  });
+
+  it("returns false when todos are not all done", () => {
+    const messages: Message[] = [
+      msg({ id: "u1", role: "user", content: "生成视频" }),
+      msg({ id: "t1", role: "tool", content: "[x] 初始化 [>] 渲染 (1/2 completed)" }),
+      msg({ id: "a1", role: "assistant", content: "正在渲染中……" }),
+      msg({
+        id: "t2",
+        role: "tool",
+        content: "中断",
+        metadata: { kind: "turn_interrupted" },
+      }),
+    ];
+    expect(isFutileResume(messages)).toBe(false);
+  });
+
+  it("returns false when no turn_interrupted message exists", () => {
+    const messages: Message[] = [
+      msg({ id: "u1", role: "user", content: "hello" }),
+      msg({ id: "a1", role: "assistant", content: "hi" }),
+    ];
+    expect(isFutileResume(messages)).toBe(false);
+  });
+
+  it("returns false when a tool row in the last turn is still running", () => {
+    const messages: Message[] = [
+      msg({ id: "u1", role: "user", content: "生成视频" }),
+      msg({ id: "t1", role: "tool", content: "[x] 初始化 [x] 渲染 (2/2 completed)", toolStatus: "done" }),
+      msg({ id: "t2", role: "tool", content: "rendering...", toolStatus: "running" }),
+      msg({ id: "a1", role: "assistant", content: "视频已生成：/tmp/out.mp4" }),
+      msg({
+        id: "t3",
+        role: "tool",
+        content: "中断",
+        metadata: { kind: "turn_interrupted" },
+      }),
+    ];
+    expect(isFutileResume(messages)).toBe(false);
+  });
+
+  it("returns false when no todo snapshot is present (conservative allow)", () => {
+    const messages: Message[] = [
+      msg({ id: "u1", role: "user", content: "hello" }),
+      msg({ id: "a1", role: "assistant", content: "hi, done" }),
+      msg({
+        id: "t1",
+        role: "tool",
+        content: "中断",
+        metadata: { kind: "turn_interrupted" },
+      }),
+    ];
+    expect(isFutileResume(messages)).toBe(false);
   });
 });
