@@ -148,6 +148,24 @@ export type StreamRunActiveInput = {
   currentSessionId?: string;
 };
 
+export type ResolveQueueSessionKeyInput = {
+  currentSessionId: string;
+  inFlightSessionId?: string;
+  /** When user explicitly started a fresh lazy session, never borrow in-flight id. */
+  awaitingFreshSession?: boolean;
+};
+
+/**
+ * Session key used for queue / stream-active checks.
+ * Empty current session + background in-flight must NOT merge when awaiting fresh.
+ */
+export function resolveQueueSessionKey(opts: ResolveQueueSessionKeyInput): string {
+  const sid = (opts.currentSessionId || "").trim();
+  if (opts.awaitingFreshSession) return sid;
+  const inFlight = (opts.inFlightSessionId || "").trim();
+  return sid || inFlight;
+}
+
 /** Whether a follow-up should queue instead of starting a concurrent send. */
 export function isStreamRunActiveForQueue(opts: StreamRunActiveInput): boolean {
   const sid = (opts.sessionId || "").trim();
