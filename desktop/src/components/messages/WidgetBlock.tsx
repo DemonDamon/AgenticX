@@ -10,34 +10,57 @@ type Props = {
 const CDN_ALLOW =
   "https://cdnjs.cloudflare.com https://esm.sh https://cdn.jsdelivr.net https://unpkg.com";
 
-function sanitizeSvgCode(code: string): Element | null {
+/**
+ * Sanitize and normalise an SVG string for inline display:
+ *  - strip <script> and on* event attrs (XSS)
+ *  - ensure viewBox exists (so width:100% preserves aspect ratio)
+ *  - remove explicit width/height attrs (CSS controls sizing)
+ * Returns the resulting SVG markup string, or null on parse error.
+ */
+function buildSanitizedSvgHtml(code: string): string | null {
   const doc = new DOMParser().parseFromString(code, "image/svg+xml");
   const root = doc.documentElement;
   if (root.querySelector("parsererror")) return null;
-  doc.querySelectorAll("script").forEach((node) => node.remove());
+
+  doc.querySelectorAll("script").forEach((n) => n.remove());
   doc.querySelectorAll("*").forEach((el) => {
     [...el.attributes].forEach((attr) => {
-      if (attr.name.toLowerCase().startsWith("on")) {
-        el.removeAttribute(attr.name);
-      }
+      if (attr.name.toLowerCase().startsWith("on")) el.removeAttribute(attr.name);
     });
   });
-  return root;
+
+  // Ensure a valid viewBox so `width:100%; height:auto` preserves aspect ratio.
+  if (!root.getAttribute("viewBox")) {
+    const w = parseSvgLength(root.getAttribute("width"), 680);
+    const h = parseSvgLength(root.getAttribute("height"), Math.round(w * 0.65));
+    root.setAttribute("viewBox", `0 0 ${w} ${h}`);
+  }
+
+  // Remove fixed pixel dimensions – CSS will take over.
+  root.removeAttribute("width");
+  root.removeAttribute("height");
+
+  return new XMLSerializer().serializeToString(root);
 }
 
+/**
+ * Renders the SVG via dangerouslySetInnerHTML so the element lives in the
+ * current document from the very first paint – avoids cross-document node
+ * adoption timing issues that caused the "empty white box" artefact.
+ */
 function SvgWidget({ code }: { code: string }) {
-  const ref = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    if (!ref.current) return;
-    const svg = sanitizeSvgCode(code);
-    ref.current.replaceChildren();
-    if (svg) {
-      ref.current.appendChild(svg);
-    }
-  }, [code]);
-
-  return <div ref={ref} className="w-full overflow-x-auto" />;
+  const html = useMemo(() => buildSanitizedSvgHtml(code), [code]);
+  if (!html) return null;
+  return (
+    // [&>svg] selectors style the directly-injected <svg> element.
+    // width:100% + height:auto makes it fill the column and scale by aspect ratio.
+    // max-h-[400px] prevents very tall diagrams from dominating the chat.
+    <div
+      className="w-full [&>svg]:block [&>svg]:w-full [&>svg]:h-auto [&>svg]:max-h-[400px]"
+      // eslint-disable-next-line react/no-danger
+      dangerouslySetInnerHTML={{ __html: html }}
+    />
+  );
 }
 
 function HtmlWidget({ code, loadingMessages }: { code: string; loadingMessages: string[] }) {
@@ -421,7 +444,7 @@ export function WidgetBlock({ payload }: Props) {
     return (
       <div
         ref={hostRef}
-        className="relative w-full overflow-hidden rounded-md border border-border bg-[var(--surface-popover)] p-2"
+        className="relative w-full overflow-hidden rounded-md border border-border"
       >
         <SvgWidget code={payload.widgetCode} />
         <WidgetMenu
