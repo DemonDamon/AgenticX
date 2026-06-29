@@ -16,13 +16,17 @@ import type { SearchReference } from "../../types/search-references";
 
 export { normalizeChatMarkdownContent, normalizeLenientEmphasisInText } from "./markdown-normalize";
 import { openExternalUrl } from "../../utils/open-external";
-import { isAbsoluteFilePath } from "../../utils/workspace-file-path";
+import { isAbsoluteFilePath, resolveRelativeAssetPath } from "../../utils/workspace-file-path";
 
 export const MarkdownContext = createContext<{
   isStreaming?: boolean;
   onQuoteText?: (text: string) => void;
   onRevealPath?: (path: string) => void;
   references?: SearchReference[];
+  /** Absolute path of the markdown file being rendered (workspace preview). */
+  markdownFilePath?: string;
+  /** Wider image layout for document preview (vs chat bubbles). */
+  documentImage?: boolean;
 }>({});
 
 const MERMAID_LANG = new Set(["mermaid", "mmd"]);
@@ -187,11 +191,21 @@ function MarkdownImage({
   alt?: string;
   title?: string;
 }) {
+  const { markdownFilePath, documentImage } = useContext(MarkdownContext);
   const [open, setOpen] = useState(false);
   const [resolvedSrc, setResolvedSrc] = useState("");
   const [loadError, setLoadError] = useState("");
-  const normalizedSrc = useMemo(() => normalizeMarkdownImageSrc(src), [src]);
+  const effectiveSrc = useMemo(() => {
+    const raw = String(src ?? "").trim();
+    if (!raw) return "";
+    if (markdownFilePath) {
+      return resolveRelativeAssetPath(markdownFilePath, raw);
+    }
+    return raw;
+  }, [markdownFilePath, src]);
+  const normalizedSrc = useMemo(() => normalizeMarkdownImageSrc(effectiveSrc), [effectiveSrc]);
   const displaySrc = resolvedSrc || normalizedSrc;
+  const isSvg = normalizedSrc.toLowerCase().includes(".svg") || String(src ?? "").toLowerCase().endsWith(".svg");
 
   useEffect(() => {
     let alive = true;
@@ -204,7 +218,7 @@ function MarkdownImage({
       };
     }
 
-    if (!isLocalMarkdownImageSrc(src)) {
+    if (!isLocalMarkdownImageSrc(effectiveSrc)) {
       setResolvedSrc(normalizedSrc);
       return () => {
         alive = false;
@@ -221,7 +235,7 @@ function MarkdownImage({
     }
 
     setResolvedSrc("");
-    void api(localPathFromMarkdownImageSrc(src)).then((res) => {
+    void api(localPathFromMarkdownImageSrc(effectiveSrc)).then((res) => {
       if (!alive) return;
       if (res?.ok && res.dataUrl) {
         setResolvedSrc(res.dataUrl);
@@ -234,22 +248,29 @@ function MarkdownImage({
     return () => {
       alive = false;
     };
-  }, [normalizedSrc, src]);
+  }, [effectiveSrc, normalizedSrc]);
 
   if (!normalizedSrc) return <span className="text-text-faint">[图片地址为空]</span>;
+
+  const thumbClass =
+    documentImage || isSvg
+      ? "max-h-none w-full max-w-full object-contain"
+      : "max-h-[220px] w-auto max-w-[280px] object-cover";
 
   return (
     <>
       <button
         type="button"
-        className="group my-1 block overflow-hidden rounded-xl border border-border bg-surface-panel text-left"
+        className={`group my-1 block overflow-hidden rounded-xl border border-border bg-surface-panel text-left ${
+          documentImage || isSvg ? "w-full" : ""
+        }`}
         title={title || alt || "点击查看原图"}
         onClick={() => setOpen(true)}
       >
         <img
           src={displaySrc}
           alt={alt || "image"}
-          className="max-h-[220px] w-auto max-w-[280px] object-cover transition group-hover:scale-[1.01]"
+          className={`${thumbClass} transition group-hover:scale-[1.01]`}
           loading="lazy"
         />
         <div className="px-2 py-1 text-[11px] text-text-faint">

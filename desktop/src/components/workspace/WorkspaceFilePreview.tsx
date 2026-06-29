@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { Check, Copy, FileText, FolderOpen, ImageIcon, X } from "lucide-react";
+import { Check, Copy, Eye, FileText, FolderOpen, ImageIcon, Pencil, X } from "lucide-react";
 import Prism from "prismjs";
 import "prismjs/components/prism-bash";
 import "prismjs/components/prism-json";
@@ -15,6 +15,7 @@ import {
   chatRehypePlugins,
   chatRemarkPlugins,
   chatUrlTransform,
+  MarkdownContext,
   normalizeChatMarkdownContent,
 } from "../messages/markdown-components";
 import {
@@ -344,14 +345,22 @@ function LineFocusedSourceView({
   );
 }
 
+type TextualViewMode = "preview" | "edit";
+
 function TextualPreviewBody({
   preview,
   onQuoteSnippet,
   initialLineRange,
+  viewMode,
+  editContent,
+  onEditContentChange,
 }: {
   preview: TextualPreview;
   onQuoteSnippet?: (payload: WorkspacePreviewQuotePayload) => void;
   initialLineRange?: WorkspacePreviewLineRange;
+  viewMode: TextualViewMode;
+  editContent: string;
+  onEditContentChange: (value: string) => void;
 }) {
   if (initialLineRange) {
     return <LineFocusedSourceView content={preview.content} lineRange={initialLineRange} />;
@@ -365,8 +374,8 @@ function TextualPreviewBody({
   }, [preview]);
 
   const markdownContent = useMemo(
-    () => (preview.kind === "markdown" ? normalizeChatMarkdownContent(preview.content) : ""),
-    [preview]
+    () => (preview.kind === "markdown" ? normalizeChatMarkdownContent(editContent) : ""),
+    [preview.kind, editContent]
   );
   const markdownRef = useRef<HTMLDivElement | null>(null);
   const codeBlockRef = useRef<HTMLPreElement | null>(null);
@@ -464,6 +473,24 @@ function TextualPreviewBody({
     return () => scrollEl.removeEventListener("scroll", onScroll);
   }, [preview.kind, syncSelectionRange]);
 
+  const editLineCount = useMemo(
+    () => Math.max(24, editContent.split("\n").length + 2),
+    [editContent]
+  );
+
+  if (preview.kind === "markdown" && viewMode === "edit") {
+    return (
+      <textarea
+        rows={editLineCount}
+        className="m-0 block w-full resize-none border-0 bg-transparent px-6 py-5 font-mono text-[13px] leading-[1.65] text-text-primary outline-none ring-0 focus:outline-none focus:ring-0"
+        value={editContent}
+        onChange={(e) => onEditContentChange(e.target.value)}
+        spellCheck={false}
+        aria-label="编辑 Markdown 源码"
+      />
+    );
+  }
+
   if (preview.kind === "markdown") {
     return (
       <div className="relative">
@@ -486,16 +513,23 @@ function TextualPreviewBody({
             }
           />
         ) : null}
-        <div ref={markdownRef} className="msg-content px-6 py-5 text-[13px] leading-relaxed text-text-primary">
-          <ReactMarkdown
-            remarkPlugins={chatRemarkPlugins}
-            rehypePlugins={chatRehypePlugins}
-            components={chatMarkdownComponents}
-            urlTransform={chatUrlTransform}
-          >
-            {markdownContent}
-          </ReactMarkdown>
-        </div>
+        <MarkdownContext.Provider
+          value={{
+            markdownFilePath: preview.absolutePath,
+            documentImage: true,
+          }}
+        >
+          <div ref={markdownRef} className="msg-content px-6 py-5 text-[13px] leading-relaxed text-text-primary">
+            <ReactMarkdown
+              remarkPlugins={chatRemarkPlugins}
+              rehypePlugins={chatRehypePlugins}
+              components={chatMarkdownComponents}
+              urlTransform={chatUrlTransform}
+            >
+              {markdownContent}
+            </ReactMarkdown>
+          </div>
+        </MarkdownContext.Provider>
       </div>
     );
   }
@@ -546,6 +580,63 @@ export function WorkspaceFilePreview({
     preview.kind === "text" || preview.kind === "markdown" || preview.kind === "code"
       ? preview.truncated
       : false;
+  const isEditableMarkdown =
+    preview.kind === "markdown" && !truncated && !initialLineRange;
+  const textualPreview =
+    preview.kind === "text" || preview.kind === "markdown" || preview.kind === "code"
+      ? (preview as TextualPreview)
+      : null;
+
+  const [viewMode, setViewMode] = useState<TextualViewMode>("preview");
+  const [editContent, setEditContent] = useState(textualPreview?.content ?? "");
+  const [savedBaseline, setSavedBaseline] = useState(textualPreview?.content ?? "");
+  const [saveError, setSaveError] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    if (!textualPreview) return;
+    setViewMode("preview");
+    setEditContent(textualPreview.content);
+    setSavedBaseline(textualPreview.content);
+    setSaveError(null);
+  }, [textualPreview?.path, textualPreview?.absolutePath, textualPreview?.content]);
+
+  const isDirty = textualPreview != null && editContent !== savedBaseline;
+
+  const persistEditContent = useCallback(async (): Promise<boolean> => {
+    if (!textualPreview || !isDirty) return true;
+    const api = window.agenticxDesktop?.writeLocalTextFile;
+    if (!api) {
+      setSaveError("当前客户端不支持保存文件");
+      return false;
+    }
+    setSaving(true);
+    setSaveError(null);
+    try {
+      const res = await api({ path: textualPreview.absolutePath, content: editContent });
+      if (!res.ok) {
+        setSaveError(res.error ?? "保存失败");
+        return false;
+      }
+      setSavedBaseline(editContent);
+      return true;
+    } catch (err) {
+      setSaveError(String(err));
+      return false;
+    } finally {
+      setSaving(false);
+    }
+  }, [editContent, isDirty, textualPreview]);
+
+  const switchToPreview = useCallback(async () => {
+    if (viewMode === "preview") return;
+    if (isDirty) {
+      const ok = await persistEditContent();
+      if (!ok) return;
+    }
+    setViewMode("preview");
+  }, [isDirty, persistEditContent, viewMode]);
+
   const focusLabel =
     initialLineRange && initialLineRange.start === initialLineRange.end
       ? `第 ${initialLineRange.start} 行`
@@ -606,6 +697,37 @@ export function WorkspaceFilePreview({
             </div>
           </div>
           <div className="ml-2 flex shrink-0 items-center gap-1">
+            {isEditableMarkdown ? (
+              <>
+                <button
+                  type="button"
+                  className={`flex h-7 w-7 items-center justify-center rounded-md transition-colors ${
+                    viewMode === "preview"
+                      ? "bg-surface-hover text-text-strong"
+                      : "text-text-muted hover:bg-surface-hover hover:text-text-strong"
+                  }`}
+                  onClick={() => void switchToPreview()}
+                  title="预览"
+                  aria-pressed={viewMode === "preview"}
+                >
+                  <Eye className="h-4 w-4" strokeWidth={1.5} />
+                </button>
+                <button
+                  type="button"
+                  className={`flex h-7 w-7 items-center justify-center rounded-md transition-colors ${
+                    viewMode === "edit"
+                      ? "bg-surface-hover text-text-strong"
+                      : "text-text-muted hover:bg-surface-hover hover:text-text-strong"
+                  }`}
+                  onClick={() => setViewMode("edit")}
+                  title="编辑源码"
+                  aria-pressed={viewMode === "edit"}
+                >
+                  <Pencil className="h-4 w-4" strokeWidth={1.5} />
+                </button>
+                <div className="h-4 w-px bg-border opacity-50" />
+              </>
+            ) : null}
             <button
               type="button"
               className="flex h-7 w-7 items-center justify-center rounded-md text-text-muted transition-colors hover:bg-surface-hover hover:text-text-strong"
@@ -669,9 +791,25 @@ export function WorkspaceFilePreview({
               preview={preview as TextualPreview}
               onQuoteSnippet={onQuoteSnippet}
               initialLineRange={initialLineRange}
+              viewMode={isEditableMarkdown ? viewMode : "preview"}
+              editContent={editContent}
+              onEditContentChange={setEditContent}
             />
           )}
         </div>
+        {saveError ? (
+          <div className="shrink-0 border-t border-border bg-rose-500/10 px-4 py-2 text-xs text-rose-300">
+            保存失败：{saveError}
+          </div>
+        ) : saving ? (
+          <div className="shrink-0 border-t border-border bg-surface-panel px-4 py-2 text-xs text-text-muted">
+            正在保存…
+          </div>
+        ) : isEditableMarkdown && viewMode === "edit" && isDirty ? (
+          <div className="shrink-0 border-t border-border bg-surface-panel px-4 py-2 text-xs text-text-muted">
+            有未保存修改；切回预览将自动保存
+          </div>
+        ) : null}
         {truncated ? (
           <div className="shrink-0 border-t border-border bg-amber-500/10 px-4 py-2 text-xs text-amber-500/90">
             文件过大，已截断显示（{formatPreviewBytes(preview.size)}）。
