@@ -102,10 +102,10 @@ function StalledStreamIndicator({ silentSeconds }: { silentSeconds: number }) {
 }
 
 /** Doubao-style 3-dot bouncing indicator for streaming gaps (reasoning done → tool call → first body token). */
-function StreamingDots() {
+function StreamingDots({ compact = false }: { compact?: boolean }) {
   return (
     <div
-      className="inline-flex items-center gap-1.5 py-1.5"
+      className={`inline-flex items-center gap-1.5 ${compact ? "py-0" : "py-1.5"}`}
       aria-live="polite"
       aria-label="正在处理"
     >
@@ -423,9 +423,13 @@ export function ImBubble({
       </>
     ) : null;
 
+  const pendingWorkCompact = isMetaPendingWork || (compactAssistant && isStreaming && !hasBody);
+
   return (
     <div
-      className={`group relative flex min-w-0 items-start gap-2${isStreaming ? " !mt-1" : ""}${
+      className={`group relative flex min-w-0 items-start gap-2${
+        isStreaming && !pendingWorkCompact ? " !mt-1" : ""
+      }${pendingWorkCompact ? " -mt-1" : ""}${
         groupIdentityLayout && !isUser ? " pl-4" : ""
       }`}
       onContextMenu={openContextMenu}
@@ -532,6 +536,8 @@ export function ImBubble({
                   ? "relative min-w-0 w-full overflow-x-auto overflow-y-visible px-3 py-0 text-[var(--agx-chat-im-body-font-size)] leading-relaxed"
                   : isUser
                     ? "agx-im-user-bubble relative min-w-0 w-fit max-w-full overflow-x-auto overflow-y-visible rounded-xl border px-3 py-3 text-[var(--agx-chat-im-body-font-size)] leading-relaxed rounded-tr-[4px]"
+                    : isMetaPendingWork
+                      ? "relative min-w-0 w-full overflow-x-auto overflow-y-visible px-3 py-0 text-[var(--agx-chat-im-body-font-size)] leading-relaxed"
                     : groupIdentityLayout
                       ? "relative min-w-0 w-full overflow-x-auto overflow-y-visible px-3 pt-1 pb-0 text-[var(--agx-chat-im-body-font-size)] leading-relaxed"
                       : (message.references?.length ?? 0) > 0
@@ -582,7 +588,7 @@ export function ImBubble({
                   streamStalled ? (
                     <StalledStreamIndicator silentSeconds={streamStalledSeconds} />
                   ) : (
-                    <StreamingDots />
+                    <StreamingDots compact />
                   )
                 ) : isGroupTyping ? (
                   <span className="inline-flex items-baseline gap-0.5" aria-live="polite" aria-label="正在输入">
@@ -607,7 +613,7 @@ export function ImBubble({
                       streamStalled ? (
                         <StalledStreamIndicator silentSeconds={streamStalledSeconds} />
                       ) : (
-                        <StreamingDots />
+                        <StreamingDots compact={compactAssistant && noBubbleBorder} />
                       )
                     ) : null}
                     {hasBody ? (
@@ -634,7 +640,7 @@ export function ImBubble({
                       streamStalled ? (
                         <StalledStreamIndicator silentSeconds={streamStalledSeconds} />
                       ) : (
-                        <StreamingDots />
+                        <StreamingDots compact={compactAssistant && noBubbleBorder} />
                       )
                     ) : null}
                   </>

@@ -68,6 +68,7 @@ export function ContinuationNoticeLine({ message }: Props) {
       icon={RefreshCw}
       tone={variantTone(parsed.variant)}
       data-status-kind={`continuation-${parsed.variant}`}
+      className="!py-0.5"
     >
       <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
         <span className="font-medium text-text-subtle">{parsed.title}</span>

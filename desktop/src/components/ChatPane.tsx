@@ -6149,14 +6149,18 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
       })}
       {((sessionWorkInProgress && !isStreamingCurrentSession) || midTurnStreamActivity) &&
       !isGroupPane ? (
-        <ImBubble
-          key="typing-meta"
-          message={{ id: "typing-meta", role: "assistant", content: "" }}
-          assistantName={paneAvatarMeta.name}
-          assistantAvatarUrl={paneAvatarMeta.url}
-          streamStalled={stallState === "stall"}
-          streamStalledSeconds={silentSeconds}
-        />
+        <div className={useReActImLayout ? "-mt-2" : undefined}>
+          <ImBubble
+            key="typing-meta"
+            message={{ id: "typing-meta", role: "assistant", content: "" }}
+            assistantName={paneAvatarMeta.name}
+            assistantAvatarUrl={paneAvatarMeta.url}
+            assistantVisual={useReActImLayout ? "compact-inline" : "default"}
+            noBubbleBorder={useReActImLayout}
+            streamStalled={stallState === "stall"}
+            streamStalledSeconds={silentSeconds}
+          />
+        </div>
       ) : null}
       {isStreamingCurrentSession && !hideStreamOverlayAsDuplicate && !useReActImLayout ? (
         chatStyle === "terminal" ? (
