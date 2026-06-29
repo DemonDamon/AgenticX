@@ -13,6 +13,7 @@ import {
   Tray
 } from "electron";
 import { spawn, ChildProcess, execFile, execFileSync } from "node:child_process";
+import { fileURLToPath } from "node:url";
 
 // Before app.ready: mitigate Chromium paint corruption (smearing/ghosting) on
 // some Windows + NVIDIA (or hybrid GPU) stacks.
@@ -1398,6 +1399,19 @@ function loadSoulFile(pathName: string): string {
 function saveSoulFile(pathName: string, content: string): void {
   fs.mkdirSync(path.dirname(pathName), { recursive: true });
   fs.writeFileSync(pathName, content, "utf-8");
+}
+
+function normalizeLocalFsPath(raw: string): string {
+  const trimmed = String(raw || "").trim();
+  if (!trimmed) return "";
+  if (trimmed.startsWith("file://")) {
+    try {
+      return fileURLToPath(trimmed);
+    } catch {
+      return decodeURIComponent(trimmed.replace(/^file:\/\//, ""));
+    }
+  }
+  return trimmed;
 }
 
 function saveMetaWorkspaceMarkdown(kind: MetaWorkspaceHistoryKind, content: string): void {
@@ -6869,11 +6883,10 @@ function registerIpc(): void {
 
   ipcMain.handle("load-local-image-data-url", async (_event, inputPath: string) => {
     try {
-      const raw = String(inputPath || "").trim();
-      if (!raw) return { ok: false, error: "empty path" };
-      const normalized = raw.startsWith("file://") ? decodeURIComponent(raw.replace(/^file:\/\//, "")) : raw;
+      const normalized = normalizeLocalFsPath(inputPath);
+      if (!normalized) return { ok: false, error: "empty path" };
       if (!fs.existsSync(normalized)) {
-        return { ok: false, error: "file not found" };
+        return { ok: false, error: `file not found: ${normalized}` };
       }
       const buf = await fs.promises.readFile(normalized);
       const ext = path.extname(normalized).toLowerCase();
@@ -6895,13 +6908,36 @@ function registerIpc(): void {
     }
   });
 
+  const READ_LOCAL_TEXT_MAX_BYTES = 512 * 1024;
+
+  ipcMain.handle("read-local-text-file", async (_event, inputPath: string) => {
+    try {
+      const normalized = normalizeLocalFsPath(inputPath);
+      if (!normalized) return { ok: false, error: "empty path" };
+      if (!fs.existsSync(normalized)) {
+        return { ok: false, error: `file not found: ${normalized}` };
+      }
+      const stat = await fs.promises.stat(normalized);
+      if (stat.isDirectory()) {
+        return { ok: false, error: "path is a directory" };
+      }
+      if (stat.size > READ_LOCAL_TEXT_MAX_BYTES) {
+        return { ok: false, error: `file too large to read (${stat.size} bytes)` };
+      }
+      const content = await fs.promises.readFile(normalized, "utf8");
+      return { ok: true, content, size: stat.size };
+    } catch (err) {
+      return { ok: false, error: String(err) };
+    }
+  });
+
   const WRITE_LOCAL_TEXT_MAX_BYTES = 512 * 1024;
 
   ipcMain.handle("write-local-text-file", async (_event, payload: { path?: string; content?: string }) => {
     try {
       const raw = String(payload?.path || "").trim();
       if (!raw) return { ok: false, error: "empty path" };
-      const normalized = raw.startsWith("file://") ? decodeURIComponent(raw.replace(/^file:\/\//, "")) : raw;
+      const normalized = normalizeLocalFsPath(raw);
       if (!fs.existsSync(normalized)) {
         return { ok: false, error: "file not found" };
       }

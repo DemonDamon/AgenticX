@@ -34,6 +34,7 @@ import {
   SelectionQuotePopover,
   type SelectionPopupAnchor,
 } from "./selection-quote-popover";
+import { resolveMarkdownHostPath } from "../../utils/workspace-file-path";
 
 type TextualPreview = {
   kind: "text" | "markdown" | "code";
@@ -66,6 +67,8 @@ export type WorkspaceFilePreviewProps = {
   onRevealInFileManager?: (absolutePath: string) => void;
   revealInFileManagerLabel?: string;
   initialLineRange?: WorkspacePreviewLineRange;
+  /** Taskspace root for resolving relative absolutePath / image assets. */
+  taskspaceRoot?: string;
 };
 
 function detectLanguage(path: string): string {
@@ -354,6 +357,7 @@ function TextualPreviewBody({
   viewMode,
   editContent,
   onEditContentChange,
+  markdownHostPath,
 }: {
   preview: TextualPreview;
   onQuoteSnippet?: (payload: WorkspacePreviewQuotePayload) => void;
@@ -361,6 +365,7 @@ function TextualPreviewBody({
   viewMode: TextualViewMode;
   editContent: string;
   onEditContentChange: (value: string) => void;
+  markdownHostPath: string;
 }) {
   if (initialLineRange) {
     return <LineFocusedSourceView content={preview.content} lineRange={initialLineRange} />;
@@ -515,7 +520,7 @@ function TextualPreviewBody({
         ) : null}
         <MarkdownContext.Provider
           value={{
-            markdownFilePath: preview.absolutePath,
+            markdownFilePath: markdownHostPath,
             documentImage: true,
           }}
         >
@@ -575,6 +580,7 @@ export function WorkspaceFilePreview({
   onRevealInFileManager,
   revealInFileManagerLabel,
   initialLineRange,
+  taskspaceRoot,
 }: WorkspaceFilePreviewProps) {
   const truncated =
     preview.kind === "text" || preview.kind === "markdown" || preview.kind === "code"
@@ -636,6 +642,15 @@ export function WorkspaceFilePreview({
     }
     setViewMode("preview");
   }, [isDirty, persistEditContent, viewMode]);
+
+  const markdownHostPath = useMemo(() => {
+    if (!textualPreview || textualPreview.kind !== "markdown") return "";
+    return resolveMarkdownHostPath(
+      textualPreview.absolutePath,
+      taskspaceRoot,
+      textualPreview.path
+    );
+  }, [textualPreview, taskspaceRoot]);
 
   const focusLabel =
     initialLineRange && initialLineRange.start === initialLineRange.end
@@ -794,6 +809,7 @@ export function WorkspaceFilePreview({
               viewMode={isEditableMarkdown ? viewMode : "preview"}
               editContent={editContent}
               onEditContentChange={setEditContent}
+              markdownHostPath={markdownHostPath}
             />
           )}
         </div>

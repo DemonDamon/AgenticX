@@ -1,3 +1,5 @@
+import { absoluteTaskspacePath } from "../../utils/workspace-file-path";
+
 export type WorkspacePreviewKind =
   | "text"
   | "markdown"
@@ -99,11 +101,15 @@ export function previewBaseName(path: string): string {
 
 export function mapTaskspaceFileToWorkspacePreview(
   result: TaskspaceFilePreviewApi,
-  relPath: string
+  relPath: string,
+  taskspaceRoot?: string
 ): WorkspacePreview | null {
   if (!result.ok) return null;
   const path = String(result.path ?? relPath);
-  const absolutePath = String(result.absolute_path ?? relPath);
+  const absolutePath = String(
+    result.absolute_path ??
+      (taskspaceRoot ? absoluteTaskspacePath(taskspaceRoot, path) : relPath)
+  );
   const size = Number(result.size ?? 0);
   const mimeType = String(result.mime_type ?? "application/octet-stream");
   const previewKind = (result.preview_kind ?? "code") as WorkspacePreviewKind;

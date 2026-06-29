@@ -1052,7 +1052,7 @@ declare global {
       searchSkillHub: (args: { q: string }) => Promise<SkillHubSearchResult>;
       loadLocalImageDataUrl: (path: string) => Promise<{ ok: boolean; dataUrl?: string; error?: string }>;
       writeLocalTextFile: (payload: { path: string; content: string }) => Promise<{ ok: boolean; size?: number; error?: string }>;
-      writeLocalTextFile: (payload: { path: string; content: string }) => Promise<{ ok: boolean; size?: number; error?: string }>;
+      readLocalTextFile: (path: string) => Promise<{ ok: boolean; content?: string; size?: number; error?: string }>;
       loadLocalFileDataUrl: (path: string) => Promise<{
         ok: boolean;
         dataUrl?: string;

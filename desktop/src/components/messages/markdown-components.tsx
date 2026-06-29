@@ -161,7 +161,14 @@ function isLocalMarkdownImageSrc(raw?: string): boolean {
 
 function localPathFromMarkdownImageSrc(raw?: string): string {
   const value = String(raw ?? "").trim();
-  if (value.startsWith("file://")) return value;
+  if (!value) return "";
+  if (value.startsWith("file://")) {
+    try {
+      return decodeURIComponent(value.replace(/^file:\/\//i, ""));
+    } catch {
+      return value.replace(/^file:\/\//i, "");
+    }
+  }
   return value;
 }
 
@@ -194,6 +201,7 @@ function MarkdownImage({
   const { markdownFilePath, documentImage } = useContext(MarkdownContext);
   const [open, setOpen] = useState(false);
   const [resolvedSrc, setResolvedSrc] = useState("");
+  const [inlineSvg, setInlineSvg] = useState("");
   const [loadError, setLoadError] = useState("");
   const effectiveSrc = useMemo(() => {
     const raw = String(src ?? "").trim();
@@ -204,15 +212,19 @@ function MarkdownImage({
     return raw;
   }, [markdownFilePath, src]);
   const normalizedSrc = useMemo(() => normalizeMarkdownImageSrc(effectiveSrc), [effectiveSrc]);
-  const displaySrc = resolvedSrc || normalizedSrc;
-  const isSvg = normalizedSrc.toLowerCase().includes(".svg") || String(src ?? "").toLowerCase().endsWith(".svg");
+  const isLocalAsset = isLocalMarkdownImageSrc(effectiveSrc);
+  const displaySrc = resolvedSrc;
+  const isSvg =
+    effectiveSrc.toLowerCase().endsWith(".svg") || String(src ?? "").toLowerCase().endsWith(".svg");
+  const isLoadingLocal = isLocalAsset && !inlineSvg && !resolvedSrc && !loadError;
 
   useEffect(() => {
     let alive = true;
     setLoadError("");
+    setInlineSvg("");
+    setResolvedSrc("");
 
     if (!normalizedSrc) {
-      setResolvedSrc("");
       return () => {
         alive = false;
       };
@@ -225,30 +237,43 @@ function MarkdownImage({
       };
     }
 
-    const api = window.agenticxDesktop?.loadLocalImageDataUrl;
-    if (!api) {
-      setResolvedSrc(normalizedSrc);
+    const desktop = window.agenticxDesktop;
+    const loadImage = desktop?.loadLocalImageDataUrl;
+    const loadText = desktop?.readLocalTextFile;
+    if (!loadImage) {
       setLoadError("当前运行环境无法读取本地图片");
       return () => {
         alive = false;
       };
     }
 
-    setResolvedSrc("");
-    void api(localPathFromMarkdownImageSrc(effectiveSrc)).then((res) => {
+    const localPath = localPathFromMarkdownImageSrc(effectiveSrc);
+
+    void (async () => {
+      let textError: string | undefined;
+      if (isSvg && loadText) {
+        const textRes = await loadText(localPath);
+        if (!alive) return;
+        if (textRes?.ok && textRes.content) {
+          setInlineSvg(textRes.content);
+          return;
+        }
+        textError = textRes?.error;
+      }
+
+      const res = await loadImage(localPath);
       if (!alive) return;
       if (res?.ok && res.dataUrl) {
         setResolvedSrc(res.dataUrl);
         return;
       }
-      setResolvedSrc(normalizedSrc);
-      setLoadError(res?.error || "本地图片读取失败");
-    });
+      setLoadError(res?.error || textError || "本地图片读取失败");
+    })();
 
     return () => {
       alive = false;
     };
-  }, [effectiveSrc, normalizedSrc]);
+  }, [effectiveSrc, isSvg, normalizedSrc]);
 
   if (!normalizedSrc) return <span className="text-text-faint">[图片地址为空]</span>;
 
@@ -256,6 +281,45 @@ function MarkdownImage({
     documentImage || isSvg
       ? "max-h-none w-full max-w-full object-contain"
       : "max-h-[220px] w-auto max-w-[280px] object-cover";
+
+  const previewBody = isLoadingLocal
+    ? (
+        <div className="flex min-h-[120px] items-center justify-center px-4 py-8 text-sm text-text-muted">
+          正在加载图片…
+        </div>
+      )
+    : inlineSvg
+    ? (
+        <div
+          className={`${thumbClass} [&_svg]:h-auto [&_svg]:w-full`}
+          // SVG assets are user-local markdown embeds in workspace preview.
+          dangerouslySetInnerHTML={{ __html: inlineSvg }}
+        />
+      )
+    : loadError
+      ? (
+          <div className="px-4 py-6 text-center text-sm text-rose-300">
+            图片预览失败：{loadError}
+            {effectiveSrc ? (
+              <div className="mt-1 text-[11px] text-text-faint">{effectiveSrc}</div>
+            ) : null}
+          </div>
+        )
+      : displaySrc
+        ? (
+            <img
+              src={displaySrc}
+              alt={alt || "image"}
+              className={`${thumbClass} transition group-hover:scale-[1.01]`}
+              loading="lazy"
+              onError={() => {
+                if (!inlineSvg) setLoadError("图片渲染失败");
+              }}
+            />
+          )
+        : (
+            <div className="px-4 py-6 text-center text-sm text-text-faint">图片地址无效</div>
+          );
 
   return (
     <>
@@ -267,19 +331,21 @@ function MarkdownImage({
         title={title || alt || "点击查看原图"}
         onClick={() => setOpen(true)}
       >
-        <img
-          src={displaySrc}
-          alt={alt || "image"}
-          className={`${thumbClass} transition group-hover:scale-[1.01]`}
-          loading="lazy"
-        />
+        {previewBody}
         <div className="px-2 py-1 text-[11px] text-text-faint">
-          {loadError ? `图片预览失败：${loadError}` : alt || title || "图片预览"}
+          {loadError && !inlineSvg ? `图片预览失败：${loadError}` : alt || title || "图片预览"}
         </div>
       </button>
       <Modal open={open} title={alt || title || "图片预览"} onClose={() => setOpen(false)}>
         <div className="flex max-h-[72vh] items-center justify-center overflow-auto">
-          <img src={displaySrc} alt={alt || "image"} className="h-auto max-h-[68vh] w-auto max-w-full rounded-lg" />
+          {inlineSvg ? (
+            <div
+              className="max-h-[68vh] w-full [&_svg]:h-auto [&_svg]:max-h-[68vh] [&_svg]:w-full"
+              dangerouslySetInnerHTML={{ __html: inlineSvg }}
+            />
+          ) : (
+            <img src={displaySrc} alt={alt || "image"} className="h-auto max-h-[68vh] w-auto max-w-full rounded-lg" />
+          )}
         </div>
       </Modal>
     </>
