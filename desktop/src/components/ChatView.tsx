@@ -2176,11 +2176,15 @@ export function ChatView({ onOpenConfirm, mode = "pro" }: Props) {
             </div>
           )}
           {midTurnStreamActivity && chatStyle === "im" ? (
-            <ImBubble
-              message={{ id: "typing-meta", role: "assistant", content: "" }}
-              assistantName="Near"
-              streamStalled={stallState === "stall"}
-            />
+            <div className="-mt-2">
+              <ImBubble
+                message={{ id: "typing-meta", role: "assistant", content: "" }}
+                assistantName="Near"
+                assistantVisual="compact-inline"
+                noBubbleBorder
+                streamStalled={stallState === "stall"}
+              />
+            </div>
           ) : null}
           {stallState === "stall" ? (
             <StallRecoveryCard
