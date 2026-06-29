@@ -51,6 +51,41 @@ export function parentDirectory(absPath: string): string {
   return norm.slice(0, idx);
 }
 
+/** Resolve markdown/image relative refs (e.g. `images/foo.svg`) against the hosting file path. */
+export function resolveRelativeAssetPath(fileAbsolutePath: string, src: string): string {
+  const value = String(src ?? "").trim();
+  if (!value) return "";
+  if (/^(https?:|data:|blob:|file:)/i.test(value)) return value;
+  if (value.startsWith("/assets/")) return value;
+  if (value.startsWith("/") || /^[a-zA-Z]:[\\/]/.test(value)) return value.replace(/\\/g, "/");
+
+  const baseDir = parentDirectory(fileAbsolutePath);
+  if (!baseDir) return value;
+
+  const isWin = /^[a-zA-Z]:/.test(baseDir);
+  const sep = isWin ? "\\" : "/";
+  const segments = value.replace(/\\/g, "/").split("/");
+  const baseParts = baseDir.split(/[/\\]/).filter((p) => p.length > 0);
+  for (const segment of segments) {
+    if (!segment || segment === ".") continue;
+    if (segment === "..") {
+      if (baseParts.length > 0) baseParts.pop();
+      continue;
+    }
+    baseParts.push(segment);
+  }
+  if (isWin) {
+    const driveMatch = baseParts[0]?.match(/^([a-zA-Z]:)$/);
+    if (driveMatch) {
+      const drive = driveMatch[1];
+      const rest = baseParts.slice(1).join(sep);
+      return rest ? `${drive}${sep}${rest}` : drive;
+    }
+    return baseParts.join(sep);
+  }
+  return `/${baseParts.join("/")}`;
+}
+
 
 export function findTaskspaceForAbsPath(
   taskspaces: Taskspace[],
