@@ -91,6 +91,7 @@ from agenticx.studio.continuation import (
 from agenticx.studio.session_event_hub import BufferedEvent
 from agenticx.studio.session_manager import (
     SessionManager,
+    _messages_last_turn_promised_action_without_followthrough,
     _visible_assistant_body,
     managed_session_binding_matches_avatar_query,
 )
@@ -372,19 +373,28 @@ async def _finalize_chat_runtime(
     )
 
     _flush_taskspace_hint(manager, session_id, session)
+    history = getattr(session, "chat_history", None) or []
+    deferred_action = saw_final and _messages_last_turn_promised_action_without_followthrough(
+        [m for m in history if isinstance(m, dict)]
+    )
     cause = interruption_cause
-    if not saw_final and cause is None:
+    if deferred_action:
+        append_turn_interruption_notice(session, cause="deferred_action", saw_final=False)
+    elif not saw_final and cause is None:
         cause = resolve_turn_interruption_cause(
             manager,
             session_id,
             saw_final=saw_final,
             had_runtime_failure=had_runtime_failure,
         )
-    append_turn_interruption_notice(session, cause=cause, saw_final=saw_final)
+        append_turn_interruption_notice(session, cause=cause, saw_final=saw_final)
+    else:
+        append_turn_interruption_notice(session, cause=cause, saw_final=saw_final)
+    effective_saw_final = saw_final and not deferred_action
     end_state = _resolve_chat_end_execution_state(
         manager,
         session_id,
-        saw_final=saw_final,
+        saw_final=effective_saw_final,
         had_runtime_failure=had_runtime_failure,
     )
     manager.clear_interrupt(session_id)

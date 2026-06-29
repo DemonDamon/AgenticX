@@ -5493,6 +5493,12 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
         return;
       }
 
+      if (isFutileResume(msgs)) {
+        setStallState("none");
+        setStallRejectReason("");
+        return;
+      }
+
       const stallSilenceMs = stallDetectSilenceMs(stallRuntimeConfig.stall_detect_silence_seconds);
       const channelA = sseActive && lastProgress > 0 && silentMs >= stallSilenceMs;
       const channelB =
@@ -5670,6 +5676,8 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
       addPaneMessage(pane.id, "tool", "✅ 任务已全部完成，无需恢复执行。", "meta", undefined, undefined, undefined, {
         metadata: { kind: "futile_resume_guard" },
       });
+      setStallState("none");
+      setStallRejectReason("");
       return;
     }
 

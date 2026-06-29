@@ -6,6 +6,7 @@ export type TurnInterruptionCause =
   | "client_disconnect"
   | "cancelled"
   | "no_final"
+  | "deferred_action"
   | "unknown";
 
 type NoticePick = Pick<Message, "role" | "content" | "metadata">;
@@ -40,6 +41,7 @@ export function parseTurnInterruptionNotice(message: NoticePick): {
     || causeRaw === "client_disconnect"
     || causeRaw === "cancelled"
     || causeRaw === "no_final"
+    || causeRaw === "deferred_action"
       ? causeRaw
       : "unknown";
   const text = String(message.content ?? "").trim();

@@ -675,8 +675,10 @@ def test_get_messages_page_tail_rounds_and_before_index(tmp_path: Path) -> None:
 
     limited = manager.get_messages_page(sid, tail_rounds=3, tail_limit=2)
     assert limited["total_count"] == 7
-    assert len(limited["messages"]) == 2
-    assert limited["start_index"] == 5
+    # tail_limit alone would keep 2 rows, but the last user anchor must stay addressable.
+    assert limited["start_index"] == 0
+    assert len(limited["messages"]) == 7
+    assert limited["messages"][-2]["content"] == "turn2"
 
     assert manager.persist(sid) is True
     tail_path = tmp_path / "sessions" / sid / "messages_tail.json"
@@ -687,4 +689,40 @@ def test_get_messages_page_tail_rounds_and_before_index(tmp_path: Path) -> None:
     page = fast.get_messages_page(sid, tail_rounds=1, tail_limit=40)
     assert page["total_count"] == 7
     assert len(page["messages"]) >= 1
+
+
+def test_tail_limit_keeps_last_user_turn_for_stall_policy(tmp_path: Path) -> None:
+    """tail_limit must not drop the last user row — otherwise desktop stall policy misfires."""
+    store = SessionStore(tmp_path / "sessions.sqlite")
+    manager = SessionManager()
+    manager._session_store = store
+    manager._sessions_root = str(tmp_path / "sessions")
+
+    sid = "tail-user-anchor"
+    managed = manager.create(session_id=sid)
+    history: list[dict] = [
+        {"id": "u0", "role": "user", "content": "early turn"},
+        {"id": "a0", "role": "assistant", "content": "early reply"},
+    ]
+    for i in range(40):
+        history.append({"id": f"f{i}", "role": "tool", "content": f"filler-{i}"})
+    history.extend(
+        [
+            {"id": "u1", "role": "user", "content": "final turn"},
+            {"id": "a1", "role": "assistant", "content": "final answer body"},
+            {"id": "t1", "role": "tool", "content": "orphan tool tail"},
+        ]
+    )
+    managed.studio_session.chat_history = history
+    assert manager.persist(sid) is True
+
+    page = manager.get_messages_page(sid, tail_rounds=3, tail_limit=40)
+    roles = [str(m.get("role", "")) for m in page["messages"]]
+    assert "user" in roles
+    user_rows = [m for m in page["messages"] if str(m.get("role", "")) == "user"]
+    assert user_rows[-1]["content"] == "final turn"
+    assert any(
+        str(m.get("role", "")) == "assistant" and "final answer" in str(m.get("content", ""))
+        for m in page["messages"]
+    )
 
