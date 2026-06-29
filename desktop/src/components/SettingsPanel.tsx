@@ -97,17 +97,7 @@ import {
   previewProviderApiEndpoint,
   type ProviderInterfaceKind,
 } from "../utils/provider-display";
-import {
-  OpenAI as LobOpenAI,
-  Anthropic as LobAnthropic,
-  Volcengine as LobVolcengine,
-  Bailian as LobBailian,
-  Zhipu as LobZhipu,
-  Baidu as LobBaidu,
-  Minimax as LobMinimax,
-  Kimi as LobKimi,
-  Ollama as LobOllama,
-} from "@lobehub/icons";
+import { PROVIDER_ICON_MAP } from "../utils/provider-icons";
 import { normalizeProviderEntry } from "../utils/model-options";
 import { classifyModelKind, isEmbeddingModelKind } from "../utils/model-kind";
 import type { SettingsTab } from "../settings-tab";
@@ -892,19 +882,7 @@ type ModelHealthEntry =
   | { phase: "ok"; ms: number }
   | { phase: "error" };
 
-/** 品牌 Avatar 映射：provider id → @lobehub/icons Avatar component */
-const PROVIDER_LOB_AVATAR: Record<string, React.ComponentType<{ size?: number }>> = {
-  openai: LobOpenAI.Avatar,
-  anthropic: LobAnthropic.Avatar,
-  volcengine: LobVolcengine.Avatar,
-  bailian: LobBailian.Avatar,
-  zhipu: LobZhipu.Avatar,
-  qianfan: LobBaidu.Avatar,
-  minimax: LobMinimax.Avatar,
-  kimi: LobKimi.Avatar,
-  ollama: LobOllama.Avatar,
-};
-
+/** 品牌 Avatar：优先用内联 SVG 图标，自定义厂商降级为品牌色首字母 */
 function ProviderAvatar({
   providerId,
   size = 28,
@@ -914,26 +892,22 @@ function ProviderAvatar({
   size?: number;
   entry?: { displayName?: string; baseUrl?: string; interface?: string } | null;
 }) {
-  const LobAvatar = PROVIDER_LOB_AVATAR[providerId];
-  if (LobAvatar) {
-    return <LobAvatar size={size} />;
-  }
+  const IconComp = PROVIDER_ICON_MAP[providerId];
   const bg = getProviderBrandColor(providerId);
   const color = getProviderBrandTextColor(providerId);
-  const initials = getProviderInitials(providerId, entry);
   const r = size <= 28 ? "rounded-full" : "rounded-xl";
   return (
     <span
-      className={`inline-flex shrink-0 items-center justify-center font-bold shadow-sm ${r}`}
-      style={{
-        width: size,
-        height: size,
-        backgroundColor: bg,
-        color,
-        fontSize: Math.round(size * 0.4),
-      }}
+      className={`inline-flex shrink-0 items-center justify-center shadow-sm ${r}`}
+      style={{ width: size, height: size, backgroundColor: bg, color }}
     >
-      {initials}
+      {IconComp ? (
+        <IconComp size={Math.round(size * 0.6)} />
+      ) : (
+        <span style={{ fontSize: Math.round(size * 0.4), fontWeight: 700, lineHeight: 1 }}>
+          {getProviderInitials(providerId, entry)}
+        </span>
+      )}
     </span>
   );
 }
