@@ -85,6 +85,9 @@ import { MemoryGraphExplorer } from "./memory/MemoryGraphExplorer";
 import { TurnArchiveSettingsPanel } from "./memory/TurnArchiveSettingsPanel";
 import {
   getProviderDisplayName,
+  getProviderBrandColor,
+  getProviderBrandTextColor,
+  getProviderInitials,
   isOllamaLikeProvider,
   isProviderDeletable,
   isProviderDisplayNameEditable,
@@ -94,6 +97,17 @@ import {
   previewProviderApiEndpoint,
   type ProviderInterfaceKind,
 } from "../utils/provider-display";
+import {
+  OpenAI as LobOpenAI,
+  Anthropic as LobAnthropic,
+  Volcengine as LobVolcengine,
+  Bailian as LobBailian,
+  Zhipu as LobZhipu,
+  Baidu as LobBaidu,
+  Minimax as LobMinimax,
+  Kimi as LobKimi,
+  Ollama as LobOllama,
+} from "@lobehub/icons";
 import { normalizeProviderEntry } from "../utils/model-options";
 import { classifyModelKind, isEmbeddingModelKind } from "../utils/model-kind";
 import type { SettingsTab } from "../settings-tab";
@@ -242,6 +256,54 @@ function providerEntryFromSaved(saved: Partial<ProviderEntry> | undefined): Prov
     displayName: dn || undefined,
     interface: iface,
   };
+}
+
+function cloneProviderDraftMap(draft: Record<string, ProviderEntry>): Record<string, ProviderEntry> {
+  const out: Record<string, ProviderEntry> = {};
+  for (const [name, entry] of Object.entries(draft)) {
+    out[name] = { ...entry, models: [...entry.models] };
+  }
+  return out;
+}
+
+function normalizeProviderDraftForCompare(
+  draft: Record<string, ProviderEntry>,
+): Record<string, ProviderEntry> {
+  const normalized: Record<string, ProviderEntry> = {};
+  for (const [name, entry] of Object.entries(draft)) {
+    normalized[name] = normalizeProviderEntry({
+      ...entry,
+      baseUrl: normalizeProviderBaseUrlForSave(name, entry.baseUrl, entry),
+    });
+  }
+  return normalized;
+}
+
+function providerEntryConfigsEqual(a: ProviderEntry, b: ProviderEntry): boolean {
+  return (
+    a.apiKey === b.apiKey
+    && a.baseUrl === b.baseUrl
+    && a.model === b.model
+    && a.enabled === b.enabled
+    && a.dropParams === b.dropParams
+    && (a.displayName ?? "") === (b.displayName ?? "")
+    && (a.interface ?? "") === (b.interface ?? "")
+    && a.models.length === b.models.length
+    && a.models.every((model, index) => model === b.models[index])
+  );
+}
+
+function providerDraftMapsEqual(
+  a: Record<string, ProviderEntry>,
+  b: Record<string, ProviderEntry>,
+): boolean {
+  const keysA = Object.keys(a).sort();
+  const keysB = Object.keys(b).sort();
+  if (keysA.length !== keysB.length) return false;
+  return keysA.every((key, index) => {
+    if (key !== keysB[index]) return false;
+    return providerEntryConfigsEqual(a[key]!, b[key]!);
+  });
 }
 
 const MCP_PRIMARY_CONFIG_PATH = "~/.agenticx/mcp.json";
@@ -829,6 +891,52 @@ type ModelHealthEntry =
   | { phase: "checking" }
   | { phase: "ok"; ms: number }
   | { phase: "error" };
+
+/** 品牌 Avatar 映射：provider id → @lobehub/icons Avatar component */
+const PROVIDER_LOB_AVATAR: Record<string, React.ComponentType<{ size?: number }>> = {
+  openai: LobOpenAI.Avatar,
+  anthropic: LobAnthropic.Avatar,
+  volcengine: LobVolcengine.Avatar,
+  bailian: LobBailian.Avatar,
+  zhipu: LobZhipu.Avatar,
+  qianfan: LobBaidu.Avatar,
+  minimax: LobMinimax.Avatar,
+  kimi: LobKimi.Avatar,
+  ollama: LobOllama.Avatar,
+};
+
+function ProviderAvatar({
+  providerId,
+  size = 28,
+  entry,
+}: {
+  providerId: string;
+  size?: number;
+  entry?: { displayName?: string; baseUrl?: string; interface?: string } | null;
+}) {
+  const LobAvatar = PROVIDER_LOB_AVATAR[providerId];
+  if (LobAvatar) {
+    return <LobAvatar size={size} />;
+  }
+  const bg = getProviderBrandColor(providerId);
+  const color = getProviderBrandTextColor(providerId);
+  const initials = getProviderInitials(providerId, entry);
+  const r = size <= 28 ? "rounded-full" : "rounded-xl";
+  return (
+    <span
+      className={`inline-flex shrink-0 items-center justify-center font-bold shadow-sm ${r}`}
+      style={{
+        width: size,
+        height: size,
+        backgroundColor: bg,
+        color,
+        fontSize: Math.round(size * 0.4),
+      }}
+    >
+      {initials}
+    </span>
+  );
+}
 
 function formatHealthLatencyMs(ms: number): string {
   if (ms >= 1000) return `${(ms / 1000).toFixed(2)}s`;
@@ -5805,6 +5913,10 @@ export function SettingsPanel({
   const [active, setActive] = useState(defaultProvider || ALL_PROVIDERS[0]);
   const providerListScrollRef = useScrollbarOnScroll<HTMLDivElement>();
   const [draft, setDraft] = useState<Record<string, ProviderEntry>>({});
+  const [providerSavedSnapshot, setProviderSavedSnapshot] = useState<Record<string, ProviderEntry>>({});
+  const [providerSavedDefProv, setProviderSavedDefProv] = useState(defaultProvider);
+  const [providerConfigMessage, setProviderConfigMessage] = useState("");
+  const [providerConfigSaving, setProviderConfigSaving] = useState(false);
   const [defProv, setDefProv] = useState(defaultProvider);
   const [keyStatus, setKeyStatus] = useState<Record<string, "idle" | "checking" | "ok" | "fail">>({});
   const [keyError, setKeyError] = useState<Record<string, string>>({});
@@ -6078,6 +6190,10 @@ export function SettingsPanel({
       }
     }
     setDraft(merged);
+    setProviderSavedSnapshot(cloneProviderDraftMap(merged));
+    setProviderSavedDefProv(defaultProvider || ALL_PROVIDERS[0]);
+    setProviderConfigMessage("");
+    setProviderConfigSaving(false);
     setProviderEnableHint(null);
     setDefaultProvHint(null);
     setDefProv(defaultProvider || ALL_PROVIDERS[0]);
@@ -6655,6 +6771,36 @@ export function SettingsPanel({
     const set = new Set<string>([...ALL_PROVIDERS, ...Object.keys(draft)]);
     return Array.from(set);
   }, [draft]);
+
+  const providerConfigDirty = useMemo(() => {
+    if (defProv !== providerSavedDefProv) return true;
+    const normalizedDraft = normalizeProviderDraftForCompare(draft);
+    const normalizedSaved = normalizeProviderDraftForCompare(providerSavedSnapshot);
+    return !providerDraftMapsEqual(normalizedDraft, normalizedSaved);
+  }, [defProv, draft, providerSavedDefProv, providerSavedSnapshot]);
+
+  const saveProviderConfig = useCallback(async () => {
+    if (!providerConfigDirty || providerConfigSaving) return;
+    setProviderConfigSaving(true);
+    setProviderConfigMessage("");
+    try {
+      const normalized: Record<string, ProviderEntry> = {};
+      for (const [name, entry] of Object.entries(draft)) {
+        normalized[name] = normalizeProviderEntry({
+          ...entry,
+          baseUrl: normalizeProviderBaseUrlForSave(name, entry.baseUrl, entry),
+        });
+      }
+      await onSave({ defaultProvider: defProv, providers: normalized });
+      setProviderSavedSnapshot(cloneProviderDraftMap(normalized));
+      setProviderSavedDefProv(defProv);
+      setProviderConfigMessage("已保存");
+    } catch (err) {
+      setProviderConfigMessage(`保存失败：${err instanceof Error ? err.message : String(err)}`);
+    } finally {
+      setProviderConfigSaving(false);
+    }
+  }, [defProv, draft, onSave, providerConfigDirty, providerConfigSaving]);
 
   const onValidateKey = async () => {
     if (!providerCredentialed(current)) return;
@@ -8182,21 +8328,24 @@ export function SettingsPanel({
             {tab === "provider" && (
               <div className="flex flex-col gap-3">
                 <RemoteBackendHintBanner kind="synced" />
-              <div className="flex gap-3">
+              <div className="flex gap-4">
                 {/* Provider sub-list */}
-                <div className="flex w-[140px] shrink-0 flex-col rounded-md border border-border bg-surface-card">
+                <div className="flex w-[176px] shrink-0 flex-col rounded-xl border border-border bg-surface-card">
                   <div
                     ref={providerListScrollRef}
-                    className="agx-scrollbar-on-scroll max-h-[min(60vh,420px)] space-y-0.5 overflow-y-auto py-1"
+                    className="agx-scrollbar-on-scroll max-h-[min(60vh,480px)] space-y-0.5 overflow-y-auto p-1.5"
                   >
                     {providerNames.map((name) => {
                       const entry = draft[name];
-                      const dotClass = providerEffectiveOn(entry) ? "bg-emerald-400" : "bg-rose-400";
+                      const isOn = providerEffectiveOn(entry);
+                      const isSelected = active === name;
                       return (
                         <button
                           key={name}
-                          className={`flex w-full items-center gap-1.5 px-2 py-1.5 text-left text-xs transition ${
-                            active === name ? "bg-[var(--settings-accent-row-bg)] text-[var(--settings-accent-fg)]" : "text-text-subtle hover:bg-surface-hover hover:text-text-primary"
+                          className={`flex w-full items-center gap-2.5 rounded-lg px-2 py-2 text-left transition ${
+                            isSelected
+                              ? "bg-[var(--settings-accent-row-bg)]"
+                              : "hover:bg-surface-hover"
                           }`}
                           onClick={() => {
                             if (name !== active) cancelInlineProviderRename();
@@ -8214,163 +8363,162 @@ export function SettingsPanel({
                             setEditModelError(null);
                           }}
                         >
-                          <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${dotClass}`} />
-                          <span className="truncate">{getProviderDisplayName(name, entry)}</span>
-                          {name === defProv && <span className="ml-auto shrink-0 rounded bg-[var(--settings-accent-badge-bg)] px-1 text-[9px] text-[var(--settings-accent-fg)]">默认</span>}
+                          <ProviderAvatar providerId={name} size={28} entry={entry} />
+                          <span className="min-w-0 flex-1">
+                            <span className={`block truncate text-xs font-medium ${isSelected ? "text-[var(--settings-accent-fg)]" : "text-text-primary"}`}>
+                              {getProviderDisplayName(name, entry)}
+                            </span>
+                            <span className={`block text-[10px] ${isOn ? "text-emerald-500" : "text-text-faint"}`}>
+                              {isOn ? "已启用" : "未启用"}
+                            </span>
+                          </span>
+                          {name === defProv && (
+                            <span className="shrink-0 rounded bg-[var(--settings-accent-badge-bg)] px-1 py-0.5 text-[9px] font-medium text-[var(--settings-accent-fg)]">
+                              默认
+                            </span>
+                          )}
                         </button>
                       );
                     })}
                   </div>
-                  <button
-                    type="button"
-                    className="mx-1.5 mb-1.5 mt-0.5 flex shrink-0 items-center justify-center gap-1 rounded-lg border border-[var(--settings-accent-badge-bg)] py-1.5 text-xs font-medium text-[var(--settings-accent-fg)] transition hover:bg-[var(--settings-accent-row-bg)]"
-                    onClick={() => {
-                      setAddVendorFormName("");
-                      setAddVendorFormType("openai");
-                      setAddServiceVendorModalOpen(true);
-                    }}
-                  >
-                    <Plus className="h-3.5 w-3.5 shrink-0" aria-hidden />
-                    添加
-                  </button>
+                  <div className="border-t border-border p-1.5">
+                    <button
+                      type="button"
+                      className="flex w-full items-center justify-center gap-1.5 rounded-lg py-2 text-xs font-medium text-text-subtle transition hover:bg-surface-hover hover:text-text-primary"
+                      onClick={() => {
+                        setAddVendorFormName("");
+                        setAddVendorFormType("openai");
+                        setAddServiceVendorModalOpen(true);
+                      }}
+                    >
+                      <Plus className="h-3.5 w-3.5 shrink-0" aria-hidden />
+                      添加
+                    </button>
+                  </div>
                 </div>
 
                 {/* Provider detail */}
-                <div className="flex-1 space-y-3">
-                      <div className="flex items-start justify-between gap-2">
-                        <div className="min-w-0 flex-1">
+                <div className="flex-1 min-w-0 space-y-3">
+                  {/* ── Header: logo + name + toggles ── */}
+                  <div className="flex items-center gap-3">
+                    <ProviderAvatar providerId={active} size={40} entry={current} />
+                    <div className="min-w-0 flex-1">
                       {inlineRenameProviderId === active && isProviderDisplayNameEditable(active, current) ? (
                         <input
                           ref={inlineRenameInputRef}
-                          className="w-full rounded-md border border-[var(--settings-accent-badge-bg)] bg-surface-panel px-2 py-1 text-sm font-semibold text-text-primary outline-none ring-1 ring-[var(--settings-accent-badge-bg)]"
+                          className="w-full rounded-md border border-[var(--settings-accent-badge-bg)] bg-surface-panel px-2 py-1 text-base font-semibold text-text-primary outline-none ring-1 ring-[var(--settings-accent-badge-bg)]"
                           value={inlineRenameValue}
                           onChange={(e) => setInlineRenameValue(e.target.value)}
                           onBlur={commitInlineProviderRename}
                           onKeyDown={(e) => {
                             if (e.nativeEvent.isComposing || e.key === "Process" || e.keyCode === 229) return;
-                            if (e.key === "Enter") {
-                              e.preventDefault();
-                              commitInlineProviderRename();
-                            }
-                            if (e.key === "Escape") {
-                              e.preventDefault();
-                              cancelInlineProviderRename();
-                            }
+                            if (e.key === "Enter") { e.preventDefault(); commitInlineProviderRename(); }
+                            if (e.key === "Escape") { e.preventDefault(); cancelInlineProviderRename(); }
                           }}
                           aria-label="服务厂商显示名"
                         />
                       ) : (
                         <h2
-                          className={`flex items-center gap-1.5 text-sm font-semibold leading-snug text-text-primary ${
+                          className={`flex items-center gap-1.5 text-base font-semibold leading-snug text-text-primary ${
                             isProviderDisplayNameEditable(active, current)
-                              ? "cursor-text rounded-md px-0.5 transition hover:bg-surface-hover"
+                              ? "cursor-text rounded px-0.5 transition hover:bg-surface-hover"
                               : ""
                           }`}
                           onClick={() => {
-                            if (isProviderDisplayNameEditable(active, current)) {
-                              beginInlineProviderRename(active);
-                            }
+                            if (isProviderDisplayNameEditable(active, current)) beginInlineProviderRename(active);
                           }}
-                          title={
-                            isProviderDisplayNameEditable(active, current) ? "点击重命名" : undefined
-                          }
+                          title={isProviderDisplayNameEditable(active, current) ? "点击重命名" : undefined}
                         >
-                          <span>{getProviderDisplayName(active, current)}</span>
-                          {isProviderDisplayNameEditable(active, current) ? (
+                          {getProviderDisplayName(active, current)}
+                          {isProviderDisplayNameEditable(active, current) && (
                             <SquarePen className="h-3.5 w-3.5 shrink-0 text-text-faint" aria-hidden />
-                          ) : null}
+                          )}
                         </h2>
                       )}
-                        </div>
-                        {isProviderDeletable(active) ? (
-                          <button
-                            type="button"
-                            className="inline-flex shrink-0 items-center gap-1 rounded-md border border-rose-500/35 px-2 py-1 text-[11px] text-rose-400 transition hover:bg-rose-500/10 hover:text-rose-300"
-                            onClick={() => setProviderDeleteConfirmId(active)}
-                          >
-                            <Trash2 className="h-3.5 w-3.5 shrink-0" aria-hidden />
-                            删除
-                          </button>
-                        ) : null}
-                      </div>
-                      <div className="space-y-1 rounded-md border border-border bg-surface-panel px-3 py-2">
-                        <div className="flex items-center justify-between">
-                          <div className="text-xs text-text-subtle">
-                            {currentEffectiveOn ? "已启用" : "已禁用"}
-                          </div>
-                          <button
-                            type="button"
-                            aria-label={
-                              currentEffectiveOn
-                                ? `关闭 ${getProviderDisplayName(active, current)}`
-                                : `启用 ${getProviderDisplayName(active, current)}`
+                    </div>
+                    {/* 启用 / 设为默认 toggles */}
+                    <div className="flex shrink-0 items-center gap-4">
+                      <label className="flex cursor-pointer flex-col items-center gap-1">
+                        <span className="text-[10px] text-text-faint">启用</span>
+                        <button
+                          type="button"
+                          role="switch"
+                          aria-checked={currentEffectiveOn}
+                          aria-label={currentEffectiveOn ? `关闭 ${getProviderDisplayName(active, current)}` : `启用 ${getProviderDisplayName(active, current)}`}
+                          className={`relative inline-flex h-[22px] w-[38px] shrink-0 cursor-pointer rounded-full transition-colors duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--settings-accent-badge-bg)] focus-visible:ring-offset-2 ${
+                            currentEffectiveOn ? "bg-btnPrimary" : "bg-surface-card-strong"
+                          }`}
+                          onClick={() => {
+                            if (currentEffectiveOn) {
+                              updateField("enabled", false);
+                              setProviderEnableHint(null);
+                            } else if (!providerCredentialed(current)) {
+                              setProviderEnableHint("请先填写 API 密钥或 API 地址后再启用");
+                            } else {
+                              updateField("enabled", true);
+                              setProviderEnableHint(null);
                             }
-                            className={`inline-flex min-w-[58px] items-center justify-center rounded-full border px-2 py-0.5 text-[11px] font-medium transition ${
-                              currentEffectiveOn
-                                ? "border-emerald-500/50 bg-emerald-500/15 text-emerald-400"
-                                : "border-border bg-surface-card text-text-faint hover:text-text-subtle"
-                            }`}
-                            onClick={() => {
-                              if (currentEffectiveOn) {
-                                updateField("enabled", false);
-                                setProviderEnableHint(null);
-                              } else if (!providerCredentialed(current)) {
-                                setProviderEnableHint("请先填写 API 密钥或 API 地址后再启用");
-                              } else {
-                                updateField("enabled", true);
-                                setProviderEnableHint(null);
-                              }
-                            }}
-                          >
-                            {currentEffectiveOn ? "ON" : "OFF"}
-                          </button>
-                        </div>
-                        <div className="mt-2 flex items-center justify-between border-t border-border pt-2">
-                          <div className="text-xs text-text-subtle">
-                            {defProv === active ? "已设为默认" : "未设为默认"}
-                          </div>
-                          <button
-                            type="button"
-                            aria-label={
-                              defProv === active
-                                ? `取消将 ${getProviderDisplayName(active, current)} 设为默认 Provider`
-                                : `将 ${getProviderDisplayName(active, current)} 设为默认 Provider`
-                            }
-                            className={`inline-flex min-w-[58px] items-center justify-center rounded-full border px-2 py-0.5 text-[11px] font-medium transition ${
-                              defProv === active
-                                ? "border-emerald-500/50 bg-emerald-500/15 text-emerald-400"
-                                : "border-border bg-surface-card text-text-faint hover:text-text-subtle"
-                            }`}
-                            onClick={() => {
-                              if (defProv === active) {
-                                const fallback =
-                                  providerNames.find((n) => n !== active && providerCredentialed(draft[n])) ??
-                                  providerNames.find((n) => n !== active) ??
-                                  ALL_PROVIDERS.find((n) => n !== active);
-                                if (fallback && fallback !== active) {
-                                  setDefaultProvHint(null);
-                                  setDefProv(fallback);
-                                } else {
-                                  setDefaultProvHint("至少要保留一个默认 Provider；请先在左侧选择其它厂商后再取消默认。");
-                                }
-                              } else if (!providerCredentialed(current)) {
-                                setDefaultProvHint("请先填写 API 密钥或 API 地址后再设为默认 Provider");
-                              } else {
+                          }}
+                        >
+                          <span
+                            className={`pointer-events-none inline-block h-[18px] w-[18px] rounded-full bg-white shadow-md ring-0 transition-transform duration-200 ${
+                              currentEffectiveOn ? "translate-x-[18px]" : "translate-x-[2px]"
+                            } mt-[2px]`}
+                          />
+                        </button>
+                      </label>
+                      <label className="flex cursor-pointer flex-col items-center gap-1">
+                        <span className="text-[10px] text-text-faint">设为默认</span>
+                        <button
+                          type="button"
+                          role="switch"
+                          aria-checked={defProv === active}
+                          aria-label={defProv === active ? `取消默认 ${getProviderDisplayName(active, current)}` : `设为默认 ${getProviderDisplayName(active, current)}`}
+                          className={`relative inline-flex h-[22px] w-[38px] shrink-0 cursor-pointer rounded-full transition-colors duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--settings-accent-badge-bg)] focus-visible:ring-offset-2 ${
+                            defProv === active ? "bg-btnPrimary" : "bg-surface-card-strong"
+                          }`}
+                          onClick={() => {
+                            if (defProv === active) {
+                              const fallback =
+                                providerNames.find((n) => n !== active && providerCredentialed(draft[n])) ??
+                                providerNames.find((n) => n !== active) ??
+                                ALL_PROVIDERS.find((n) => n !== active);
+                              if (fallback && fallback !== active) {
                                 setDefaultProvHint(null);
-                                setDefProv(active);
+                                setDefProv(fallback);
+                              } else {
+                                setDefaultProvHint("至少要保留一个默认 Provider；请先在左侧选择其它厂商后再取消默认。");
                               }
-                            }}
-                          >
-                            {defProv === active ? "ON" : "OFF"}
-                          </button>
-                        </div>
-                        {providerEnableHint ? (
-                          <div className="text-[11px] text-rose-400">{providerEnableHint}</div>
-                        ) : null}
-                        {defaultProvHint ? (
-                          <div className="text-[11px] text-rose-400">{defaultProvHint}</div>
-                        ) : null}
-                      </div>
+                            } else if (!providerCredentialed(current)) {
+                              setDefaultProvHint("请先填写 API 密钥或 API 地址后再设为默认 Provider");
+                            } else {
+                              setDefaultProvHint(null);
+                              setDefProv(active);
+                            }
+                          }}
+                        >
+                          <span
+                            className={`pointer-events-none inline-block h-[18px] w-[18px] rounded-full bg-white shadow-md ring-0 transition-transform duration-200 ${
+                              defProv === active ? "translate-x-[18px]" : "translate-x-[2px]"
+                            } mt-[2px]`}
+                          />
+                        </button>
+                      </label>
+                      {isProviderDeletable(active) && (
+                        <button
+                          type="button"
+                          className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-rose-500/30 text-rose-400/70 transition hover:border-rose-500/60 hover:bg-rose-500/10 hover:text-rose-400"
+                          onClick={() => setProviderDeleteConfirmId(active)}
+                          aria-label="删除厂商"
+                        >
+                          <Trash2 className="h-4 w-4" aria-hidden />
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                  {(providerEnableHint || defaultProvHint) && (
+                    <div className="text-xs text-rose-400">{providerEnableHint || defaultProvHint}</div>
+                  )}
                       <label className="block text-sm text-text-muted">
                         API 密钥
                         <div className="mt-1 flex gap-2">
@@ -8443,36 +8591,21 @@ export function SettingsPanel({
                           </div>
                         )}
                       </label>
-                      {(DROP_PARAMS_CAPABLE_PROVIDERS.has(active) || current.interface === "openai") && (
-                        <label className="flex cursor-pointer items-start gap-2 text-sm text-text-muted">
-                          <input
-                            type="checkbox"
-                            className="mt-0.5 h-4 w-4 shrink-0 rounded border-border"
-                            checked={current.dropParams}
-                            onChange={(e) => updateField("dropParams", e.target.checked)}
-                          />
-                          <span>
-                            兼容模式：丢弃上游不支持的参数（<code className="text-xs text-text-faint">drop_params</code>）
-                            <span className="mt-0.5 block text-xs text-text-faint">
-                              自建 LiteLLM / 部分 OpenAI 兼容网关不支持 <code className="text-[10px]">tool_choice</code> 时需开启；保存后重启本机 <code className="text-[10px]">agx serve</code> 或重开 Near 后生效。
-                            </span>
-                          </span>
-                        </label>
-                      )}
-                      <div className="grid grid-cols-[minmax(0,1fr)_minmax(6.5rem,auto)_auto] items-center gap-2">
-                        <div className="flex min-w-0 flex-wrap items-center gap-2">
-                          <span className="text-sm font-medium text-text-muted">模型列表</span>
-                          <span className="rounded-full bg-surface-hover px-1.5 py-px text-[10px] font-medium tabular-nums text-text-subtle">
+                      
+                      <div className="grid grid-cols-[minmax(0,1fr)_auto_auto] items-center gap-2">
+                        <div className="flex min-w-0 items-center gap-2">
+                          <span className="text-sm font-medium text-text-primary">模型列表</span>
+                          <span className="rounded-full bg-surface-hover px-2 py-0.5 text-[10px] font-medium tabular-nums text-text-subtle">
                             {current.models.length}
                           </span>
                         </div>
-                        <div className="min-w-[6.5rem]" aria-hidden />
-                        <div className="flex shrink-0 items-center justify-end gap-1">
+                        <div />
+                        <div className="flex shrink-0 items-center gap-1">
                           <HoverTip label="批量健康检查">
                             <button
                               type="button"
                               aria-label="批量健康检查"
-                              className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md border border-border text-text-subtle transition hover:bg-surface-hover hover:text-text-strong disabled:pointer-events-none disabled:opacity-40"
+                              className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-border text-text-subtle transition hover:bg-surface-hover hover:text-text-strong disabled:pointer-events-none disabled:opacity-40"
                               disabled={!providerCredentialed(current) || current.models.length === 0}
                               onClick={() => void onBatchHealthCheck()}
                             >
@@ -8483,7 +8616,7 @@ export function SettingsPanel({
                             <button
                               type="button"
                               aria-label="从 API 获取模型"
-                              className="inline-flex h-8 w-8 items-center justify-center rounded-md border border-border text-text-subtle transition hover:bg-surface-hover hover:text-text-strong disabled:pointer-events-none disabled:opacity-40"
+                              className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-border text-text-subtle transition hover:bg-surface-hover hover:text-text-strong disabled:pointer-events-none disabled:opacity-40"
                               disabled={fetchingModels || !providerCredentialed(current)}
                               onClick={() => void onFetchModels()}
                             >
@@ -8498,7 +8631,7 @@ export function SettingsPanel({
                             <button
                               type="button"
                               aria-label="添加模型"
-                              className="inline-flex h-8 w-8 items-center justify-center rounded-md border border-border text-text-subtle transition hover:bg-surface-hover hover:text-text-strong"
+                              className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-border text-text-subtle transition hover:bg-surface-hover hover:text-text-strong"
                               onClick={() => {
                                 setAddModelFormId("");
                                 setAddModelFormName("");
@@ -8515,9 +8648,11 @@ export function SettingsPanel({
                       ) : fetchModelsWarning ? (
                         <div className="text-xs text-amber-400/90">{fetchModelsWarning}</div>
                       ) : null}
-                      <div className="space-y-1">
+                      <div className="space-y-1.5">
                         {current.models.length === 0 ? (
-                          <div className="py-4 text-center text-sm text-text-faint">暂无模型，可从 API 拉取或点击 + 手动添加</div>
+                          <div className="rounded-lg border border-dashed border-border px-3 py-8 text-center text-sm text-text-faint">
+                            暂无模型，可从 API 拉取或点击 + 手动添加
+                          </div>
                         ) : null}
                         {current.models.map((model) => {
                           const hk = `${active}:${model}`;
@@ -8526,10 +8661,10 @@ export function SettingsPanel({
                           return (
                             <div
                               key={model}
-                              className="grid grid-cols-[minmax(0,1fr)_minmax(6.5rem,auto)_2rem_2rem] items-center gap-2 rounded-md border border-border bg-surface-panel/50 px-3 py-2"
+                              className="grid grid-cols-[minmax(0,1fr)_minmax(6.5rem,auto)_2rem_2rem] items-center gap-2 rounded-lg border border-border bg-surface-panel px-3 py-2.5 transition hover:border-[var(--settings-accent-border-muted)]"
                             >
                               <div className="min-w-0">
-                                <div className="truncate text-sm text-text-muted">{model}</div>
+                                <div className="truncate text-sm text-text-primary">{model}</div>
                               </div>
                               <div className="flex min-w-0 items-center justify-end gap-2">
                                 <ModelCapabilityBadges provider={active} model={model} />
@@ -8556,7 +8691,7 @@ export function SettingsPanel({
                               <HoverTip label="编辑模型">
                                 <button
                                   type="button"
-                                  className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md border border-border text-text-faint transition hover:bg-surface-hover hover:text-text-primary"
+                                  className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-border text-text-faint transition hover:bg-surface-hover hover:text-text-primary"
                                   aria-label="编辑模型"
                                   onClick={() => openEditModelModal(model)}
                                 >
@@ -8566,7 +8701,7 @@ export function SettingsPanel({
                               <HoverTip label="移除模型">
                                 <button
                                   type="button"
-                                  className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md border border-border text-rose-400/80 transition hover:bg-surface-hover hover:text-rose-400"
+                                  className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-border text-rose-400/70 transition hover:border-rose-400/50 hover:bg-rose-500/5 hover:text-rose-400"
                                   aria-label="移除模型"
                                   onClick={() => onRemoveModel(model)}
                                 >
@@ -8862,6 +8997,27 @@ export function SettingsPanel({
                         </p>
                       </Modal>
                 </div>
+              </div>
+              <div className="flex items-center justify-end gap-2 border-t border-border pt-3">
+                {providerConfigMessage ? (
+                  <span
+                    className={`mr-auto text-xs ${
+                      providerConfigMessage.startsWith("已保存") ? "text-text-muted" : "text-rose-400"
+                    }`}
+                  >
+                    {providerConfigMessage}
+                  </span>
+                ) : providerConfigDirty ? (
+                  <span className="mr-auto text-xs text-text-subtle">有未保存的模型服务改动</span>
+                ) : null}
+                <button
+                  type="button"
+                  className="rounded-md px-4 py-1.5 text-sm font-medium transition disabled:cursor-not-allowed disabled:border disabled:border-border disabled:bg-transparent disabled:text-text-faint bg-btnPrimary text-btnPrimary-text hover:bg-btnPrimary-hover disabled:opacity-100"
+                  disabled={!providerConfigDirty || providerConfigSaving}
+                  onClick={() => void saveProviderConfig()}
+                >
+                  {providerConfigSaving ? "保存中…" : "保存"}
+                </button>
               </div>
               </div>
             )}
