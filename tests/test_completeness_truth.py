@@ -120,6 +120,70 @@ def test_messages_last_turn_promised_action_false_when_tools_follow() -> None:
     assert _messages_last_turn_promised_action_without_followthrough(messages) is False
 
 
+def test_handoff_body_without_reasoning() -> None:
+    """Path B: explicit handoff in body, no reasoning block, no tool_calls."""
+    messages = [
+        {"role": "user", "content": "继续优化视频"},
+        {
+            "role": "assistant",
+            "content": (
+                "验收已完成：视频能用，但偏\"模板化介绍页\"。"
+                "我现在进入第二项：直接优化 composition，做一个更像成片的版本"
+            ),
+        },
+    ]
+    assert _messages_last_turn_promised_action_without_followthrough(messages) is True
+
+
+def test_handoff_short_body_variants() -> None:
+    """Path B variants — different handoff phrases."""
+    samples = [
+        "我现在去读取 composition 文件",
+        "让我开始优化",
+        "接下来我去执行 bash_exec",
+        "我来试试新的方案",
+    ]
+    for body in samples:
+        messages = [
+            {"role": "user", "content": "go"},
+            {"role": "assistant", "content": body},
+        ]
+        assert _messages_last_turn_promised_action_without_followthrough(messages) is True, body
+
+
+def test_handoff_negative_long_narrative() -> None:
+    """Path B negative: long body — normal prose, not a deferred stub."""
+    body = "我们分两点说明。第一点是 …" + "（具体分析展开）" * 30  # > 300 chars
+    messages = [
+        {"role": "user", "content": "解释一下"},
+        {"role": "assistant", "content": body},
+    ]
+    assert _messages_last_turn_promised_action_without_followthrough(messages) is False
+
+
+def test_handoff_negative_with_tool_row_in_turn() -> None:
+    """Path B negative: a tool row already exists in this turn -> not deferred."""
+    messages = [
+        {"role": "user", "content": "go"},
+        {"role": "tool", "content": "OK", "tool_name": "bash_exec"},
+        {"role": "assistant", "content": "我现在进入第二项：直接优化 composition"},
+    ]
+    assert _messages_last_turn_promised_action_without_followthrough(messages) is False
+
+
+def test_handoff_negative_with_tool_calls() -> None:
+    """Path B negative: assistant has tool_calls populated -> not deferred."""
+    messages = [
+        {"role": "user", "content": "go"},
+        {
+            "role": "assistant",
+            "content": "我现在进入第二项",
+            "tool_calls": [{"id": "x", "function": {"name": "bash_exec"}}],
+        },
+    ]
+    assert _messages_last_turn_promised_action_without_followthrough(messages) is False
+
+
 def test_accumulate_meta_partial_text_skips_spinner() -> None:
     evt = RuntimeEvent(type=EventType.TOKEN.value, data={"text": "⏳"}, agent_id="meta")
     assert _accumulate_meta_partial_text("hello", evt) == "hello"
