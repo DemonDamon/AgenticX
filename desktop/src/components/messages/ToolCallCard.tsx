@@ -172,7 +172,7 @@ export function ToolCallCard({
   // show_widget with valid payload → render inline (no collapsible chrome)
   if (toolName === "show_widget" && widgetPayload) {
     return (
-      <div className="w-full min-w-0">
+      <div className="w-full min-w-0 px-4">
         <WidgetBlock payload={widgetPayload} />
       </div>
     );

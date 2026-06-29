@@ -329,7 +329,7 @@ export function MessageRenderer({
       const payload = parseWidgetPayload(message.content);
       if (payload) {
         return (
-          <div className="my-2 w-full min-w-0">
+          <div className="my-2 w-full min-w-0 px-4">
             <WidgetBlock payload={payload} />
           </div>
         );
