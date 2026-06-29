@@ -1,6 +1,7 @@
-import { AlertTriangle, Play } from "lucide-react";
+import { CirclePause, RotateCcw } from "lucide-react";
 import type { Message } from "../../store";
 import { parseTurnInterruptionNotice } from "../../utils/turn-interruption-notice";
+import { ASSISTANT_ICON_RAIL_CLASS } from "./im-layout";
 
 type Props = {
   message: Message;
@@ -12,31 +13,42 @@ type Props = {
 
 export function TurnInterruptionNoticeLine({ message, resumeInFlight = false, onResume, isFutile = false }: Props) {
   const parsed = parseTurnInterruptionNotice(message);
-  const text = parsed?.text ?? String(message.content ?? "").trim();
-  if (!text) return null;
+  const isUserInterrupt = parsed?.cause === "user_interrupt";
+  const text = isUserInterrupt ? "已中断" : "上一步工具执行后未收到模型响应";
 
   return (
-    <div className="flex min-w-0 items-start gap-2">
-      <div className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-amber-500/50 bg-amber-500/10 text-amber-200">
-        <AlertTriangle className="h-4 w-4" aria-hidden />
-      </div>
-      <div
-        className="min-w-0 flex-1 rounded-lg border border-amber-500/45 bg-amber-500/8 px-3 py-2.5 text-[13px] leading-relaxed text-text-subtle"
-        data-status-kind="turn-interrupted"
-      >
-        <p>{text}</p>
+    <div
+      className="agx-system-status-line flex min-w-0 items-center gap-2 px-3 py-1 text-[13px] leading-[1.65]"
+      data-status-kind="turn-interrupted"
+    >
+      {/* icon tile */}
+      <span className={ASSISTANT_ICON_RAIL_CLASS} aria-hidden>
+        <span
+          className="flex h-[18px] w-[18px] items-center justify-center rounded-[5px]"
+          style={{
+            backgroundColor: "rgba(251, 191, 36, 0.10)",
+            boxShadow: "inset 0 0 0 1px rgba(251, 191, 36, 0.28)",
+            color: "rgba(253, 224, 71, 0.82)",
+          }}
+        >
+          <CirclePause className="h-3 w-3" strokeWidth={2.25} />
+        </span>
+      </span>
+
+      {/* body */}
+      <div className="flex min-w-0 flex-1 flex-wrap items-center gap-x-2 gap-y-0.5">
+        <span className="text-text-muted">{text}</span>
         {onResume && !isFutile ? (
-          <div className="mt-2 flex flex-wrap items-center gap-2">
-            <button
-              type="button"
-              className="inline-flex items-center gap-1 rounded-md border border-amber-500/50 bg-surface-card px-2.5 py-1 text-[12px] font-medium text-text-strong hover:bg-surface-hover disabled:opacity-60"
-              disabled={resumeInFlight}
-              onClick={() => onResume()}
-            >
-              <Play className="h-3.5 w-3.5" aria-hidden />
-              {resumeInFlight ? "恢复中…" : "恢复执行"}
-            </button>
-          </div>
+          <button
+            type="button"
+            className="inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-[12px] font-medium text-text-faint transition-colors hover:text-text-subtle disabled:opacity-50"
+            disabled={resumeInFlight}
+            onClick={() => onResume()}
+            aria-label="恢复执行"
+          >
+            <RotateCcw className="h-3 w-3" aria-hidden />
+            {resumeInFlight ? "恢复中…" : "恢复执行"}
+          </button>
         ) : null}
       </div>
     </div>
