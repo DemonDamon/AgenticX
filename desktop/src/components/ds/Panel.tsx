@@ -43,18 +43,18 @@ export function Panel({
 
   return (
     <section className={`rounded-lg border border-border bg-surface-card ${className}`}>
-      <header className="flex items-center justify-between border-b border-border px-3 py-2">
+      <header className="flex items-center gap-2 border-b border-border px-3 py-2">
         <button
           type="button"
-          className="flex min-w-0 flex-1 items-center gap-1.5 text-left transition hover:text-text-primary"
+          className="flex min-w-0 flex-1 items-center justify-between gap-2 text-left transition hover:text-text-primary"
           onClick={() => setOpen((v) => !v)}
           aria-expanded={open}
         >
+          <h4 className={`min-w-0 truncate ${titleClass}`}>{title}</h4>
           <ChevronDown
             className={`h-3.5 w-3.5 shrink-0 text-text-faint transition-transform ${open ? "" : "-rotate-90"}`}
             aria-hidden
           />
-          <h4 className={titleClass}>{title}</h4>
         </button>
         {actions}
       </header>

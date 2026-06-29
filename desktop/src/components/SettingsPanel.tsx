@@ -547,7 +547,7 @@ function SkillRowButton({
       </div>
       {conflictCount > 1 ? (
         <div
-          className="mt-2.5 flex items-center gap-2 text-[11px] text-text-faint"
+          className="mt-2.5 flex items-center justify-between gap-2 text-[11px] text-text-faint"
           onClick={(e) => e.stopPropagation()}
         >
           <span className="shrink-0">默认来源</span>
@@ -678,15 +678,15 @@ function SkillGroup({
     <div className="mb-4 last:mb-0">
       <button
         type="button"
-        className="mb-2 flex w-full items-center gap-1.5 text-left transition hover:text-text-primary"
+        className="mb-2 flex w-full items-center justify-between gap-2 text-left transition hover:text-text-primary"
         onClick={() => setExpanded(!expanded)}
       >
+        <span className={`min-w-0 truncate ${SKILLS_GROUP_TITLE_CLASS}`}>
+          {title} ({skills.length})
+        </span>
         <ChevronDown
           className={`h-4 w-4 shrink-0 text-text-faint transition-transform ${expanded ? "" : "-rotate-90"}`}
         />
-        <span className={SKILLS_GROUP_TITLE_CLASS}>
-          {title} ({skills.length})
-        </span>
       </button>
       {expanded && <SkillList skills={skills} {...props} />}
     </div>
@@ -3671,16 +3671,16 @@ function SkillsTab() {
                   <div className="mb-2 flex items-center justify-between gap-2">
                     <button
                       type="button"
-                      className="flex min-w-0 flex-1 items-center gap-1.5 text-left transition hover:text-text-primary"
+                      className="flex min-w-0 flex-1 items-center justify-between gap-2 text-left transition hover:text-text-primary"
                       onClick={() => setSkillhubResultsExpanded((v) => !v)}
                       aria-expanded={skillhubResultsExpanded}
                     >
+                      <span className={`min-w-0 truncate ${SKILLS_GROUP_TITLE_CLASS}`}>
+                        搜索结果 ({skillhubResults.length})
+                      </span>
                       <ChevronDown
                         className={`h-4 w-4 shrink-0 text-text-faint transition-transform ${skillhubResultsExpanded ? "" : "-rotate-90"}`}
                       />
-                      <span className={SKILLS_GROUP_TITLE_CLASS}>
-                        搜索结果 ({skillhubResults.length})
-                      </span>
                     </button>
                     <button
                       type="button"
@@ -5114,8 +5114,8 @@ function SkillAdvancedPanel() {
               <span className="text-text-subtle">完整</span>—尽量扫全目录与依赖，更严、更慢。
             </p>
           </div>
-          <div className="mt-3 flex flex-wrap items-center gap-x-6 gap-y-2">
-            <div className="flex items-center gap-2">
+          <div className="mt-3 space-y-2">
+            <div className="flex items-center justify-between gap-3">
               <span className="shrink-0 text-xs text-text-muted">引擎版本</span>
               <SettingsDropdown
                 value={String(guardVersion)}
@@ -5131,7 +5131,7 @@ function SkillAdvancedPanel() {
                 className="w-[7rem] shrink-0"
               />
             </div>
-            <div className="flex items-center gap-2">
+            <div className="flex items-center justify-between gap-3">
               <span className="shrink-0 text-xs text-text-muted">扫描模式</span>
               <SettingsDropdown
                 value={scanMode}
@@ -7639,11 +7639,11 @@ export function SettingsPanel({
       >
         {/* Left: tab navigation */}
         <div
-          className="relative flex h-full min-h-0 shrink-0 flex-col bg-surface-sidebar py-4 pl-4 pr-2"
+          className="relative flex h-full min-h-0 shrink-0 flex-col bg-surface-sidebar py-4 pl-4 pr-0"
           style={{ width: navWidth }}
         >
-          <div className="mb-4 text-[15px] font-semibold text-text-strong">设置</div>
-          <nav className="flex flex-1 flex-col gap-1 overflow-y-auto">
+          <div className="mb-4 pr-2 text-[15px] font-semibold text-text-strong">设置</div>
+          <nav className="agx-settings-nav-scroll flex flex-1 flex-col gap-1 overflow-y-auto">
             {TABS.map((t) => {
               const Icon = t.icon;
               const isActive = tab === t.id;
