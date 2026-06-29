@@ -1,5 +1,44 @@
 /** 内置厂商展示名（配置 key 仍为英文 id）；自定义厂商用 entry.displayName */
 
+/** 品牌专属颜色（纯色背景用于 logo 头像）；未匹配的自定义厂商按名称 hash 取色 */
+const PROVIDER_BRAND_COLOR: Record<string, string> = {
+  openai: "#10a37f",
+  anthropic: "#d97757",
+  volcengine: "#1664ff",
+  bailian: "#ff6a00",
+  zhipu: "#6154ec",
+  qianfan: "#3264ff",
+  minimax: "#1a1a1a",
+  kimi: "#1d6af4",
+  ollama: "#ffffff",
+};
+
+const PROVIDER_BRAND_TEXT_COLOR: Record<string, string> = {
+  minimax: "#ffffff",
+  ollama: "#18181b",
+};
+
+const PALETTE = [
+  "#6366f1", "#8b5cf6", "#ec4899", "#14b8a6",
+  "#f59e0b", "#ef4444", "#22c55e", "#3b82f6",
+];
+
+function hashCode(str: string): number {
+  let h = 0;
+  for (let i = 0; i < str.length; i++) {
+    h = Math.imul(31, h) + str.charCodeAt(i) | 0;
+  }
+  return Math.abs(h);
+}
+
+export function getProviderBrandColor(providerId: string): string {
+  return PROVIDER_BRAND_COLOR[providerId] ?? PALETTE[hashCode(providerId) % PALETTE.length] ?? "#6366f1";
+}
+
+export function getProviderBrandTextColor(providerId: string): string {
+  return PROVIDER_BRAND_TEXT_COLOR[providerId] ?? "#ffffff";
+}
+
 const BUILTIN_PROVIDER_IDS = new Set([
   "openai",
   "anthropic",
@@ -135,6 +174,13 @@ export function getProviderDisplayName(
     }
   }
   return PROVIDER_DISPLAY_NAME[providerId] ?? providerId;
+}
+
+/** Provider 名称取首字母（用于头像 fallback） */
+export function getProviderInitials(providerId: string, entry?: ProviderDisplayEntry | null): string {
+  const displayName = getProviderDisplayName(providerId, entry);
+  const first = displayName.trim().charAt(0).toUpperCase();
+  return first || "P";
 }
 
 function makeCustomProviderId(prefix: string, displayName: string, existingKeys: string[]): string {
