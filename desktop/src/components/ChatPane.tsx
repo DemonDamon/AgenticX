@@ -9101,7 +9101,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
                 </span>
               ) : null}
               {sessionUnattended && unattendedGlobalEnabled && !budgetExceededInfo ? (
-                <span className="rounded-full bg-violet-500/10 px-2 py-0.5 text-violet-200">
+                <span className="rounded-full bg-violet-500/10 px-2 py-0.5 text-violet-200 [html[data-theme=light]_&]:bg-violet-500/15 [html[data-theme=light]_&]:text-violet-900">
                   无人值守 · 续跑 {unattendedContinueCount}/{unattendedMaxContinuations}
                 </span>
               ) : null}
@@ -9120,7 +9120,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
                   onClick={() => void toggleSessionUnattended()}
                   className={`rounded-full px-2 py-0.5 transition outline-none focus-visible:outline-none ${
                     sessionUnattended
-                      ? "bg-violet-500/15 text-violet-200"
+                      ? "bg-violet-500/15 text-violet-200 [html[data-theme=light]_&]:bg-violet-500/15 [html[data-theme=light]_&]:text-violet-900"
                       : "bg-surface-panel/75 text-text-muted hover:text-text-strong"
                   }`}
                 >
