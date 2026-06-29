@@ -6,6 +6,7 @@ import {
   isFutileResume,
   isTodoSnapshotSuperseded,
   lastTurnHasCompletedAssistantReply,
+  lastTurnPromisedActionWithoutFollowThrough,
   messageLooksLikeAssistantFinal,
   resolveStickyTodoDisplay,
   sessionMessagesHydrated,
@@ -275,6 +276,34 @@ describe("shouldTriggerIncompleteEndStall", () => {
       shouldTriggerIncompleteEndStall("idle", false, incomplete, CHANNEL_C_GRACE_MS, true),
     ).toBe(true);
   });
+
+  it("does not stall when the loaded window has no user anchor (tail trim artifact)", () => {
+    const toolOnlyTail: Message[] = [
+      msg({ id: "t1", role: "tool", toolName: "bash_exec", content: "exit_code=0" }),
+      msg({ id: "a1", role: "assistant", content: "验证完成。" }),
+    ];
+    expect(
+      shouldTriggerIncompleteEndStall("idle", false, toolOnlyTail, CHANNEL_C_GRACE_MS, true),
+    ).toBe(false);
+  });
+
+  it("does not stall when resume would be futile (completed todos + turn_interrupted)", () => {
+    const messages: Message[] = [
+      msg({ id: "u1", role: "user", content: "生成视频" }),
+      msg({ id: "t1", role: "tool", content: "[x] init [x] render (2/2 completed)" }),
+      msg({ id: "a1", role: "assistant", content: "视频已生成：/tmp/out.mp4" }),
+      msg({
+        id: "t2",
+        role: "tool",
+        content: "已按用户请求中断当前生成。",
+        metadata: { kind: "turn_interrupted" },
+      }),
+      msg({ id: "t3", role: "tool", toolName: "bash_exec", content: "exit_code=0" }),
+    ];
+    expect(
+      shouldTriggerIncompleteEndStall("idle", false, messages, CHANNEL_C_GRACE_MS, true),
+    ).toBe(false);
+  });
 });
 
 describe("sessionMessagesHydrated", () => {
@@ -382,5 +411,59 @@ describe("isFutileResume", () => {
       }),
     ];
     expect(isFutileResume(messages)).toBe(false);
+  });
+
+  it("returns false when turn_interrupted belongs to an earlier user turn", () => {
+    const messages: Message[] = [
+      msg({ id: "u1", role: "user", content: "生成视频" }),
+      msg({ id: "t1", role: "tool", content: "[x] init [x] render (2/2 completed)" }),
+      msg({ id: "a1", role: "assistant", content: "视频已生成：/tmp/out.mp4" }),
+      msg({
+        id: "t2",
+        role: "tool",
+        content: "已按用户请求中断当前生成。",
+        metadata: { kind: "turn_interrupted" },
+      }),
+      msg({ id: "u2", role: "user", content: "分析 mp4 不足" }),
+      msg({
+        id: "a2",
+        role: "assistant",
+        content:
+          "<think>让我先读取 composition 源码，然后加载 skill。</think>\n我先读取源码再给你方案。",
+      }),
+    ];
+    expect(isFutileResume(messages)).toBe(false);
+  });
+});
+
+describe("lastTurnPromisedActionWithoutFollowThrough", () => {
+  it("detects deferred-action stub after model switch", () => {
+    const messages: Message[] = [
+      msg({ id: "u1", role: "user", content: "分析 mp4 不足" }),
+      msg({
+        id: "a1",
+        role: "assistant",
+        content:
+          "<think>让我先读取 composition 源码，然后加载相关 skill。</think>\n团长，我先读取生成的 composition 源码，同时加载 HyperFrames 相关 skill 来给你完整的诊断和优化方案。",
+      }),
+    ];
+    expect(lastTurnPromisedActionWithoutFollowThrough(messages)).toBe(true);
+    expect(
+      shouldTriggerIncompleteEndStall("idle", false, messages, CHANNEL_C_GRACE_MS, true),
+    ).toBe(true);
+  });
+
+  it("returns false when tools actually followed the assistant stub", () => {
+    const messages: Message[] = [
+      msg({ id: "u1", role: "user", content: "分析 mp4" }),
+      msg({
+        id: "a1",
+        role: "assistant",
+        content:
+          "<think>让我先读取文件。</think>\n我先读取源码。",
+      }),
+      msg({ id: "t1", role: "tool", toolName: "file_read", content: "ok" }),
+    ];
+    expect(lastTurnPromisedActionWithoutFollowThrough(messages)).toBe(false);
   });
 });

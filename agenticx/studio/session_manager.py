@@ -67,6 +67,62 @@ def _messages_last_turn_has_completed_reply(messages: List[Dict[str, Any]]) -> b
             return True
     return False
 
+
+_REASONING_ACTION_INTENT_RE = re.compile(
+    r"让我先|我先|接下来要|然后加载|然后调用|去读取|去加载|todo_write",
+    re.IGNORECASE,
+)
+_DEFERRAL_BODY_RE = re.compile(r"我先|让我先|接下来|稍等|正在|马上")
+
+
+def _extract_assistant_reasoning(content: str) -> str:
+    text = str(content or "")
+    match = _THINK_BLOCK_RE.search(text)
+    if match:
+        inner = match.group(0)
+        return inner.replace("<think>", "").replace("</think>", "").strip()
+    open_match = _THINK_OPEN_TAIL_RE.search(text)
+    if open_match:
+        return open_match.group(0).replace("<think>", "", 1).strip()
+    return ""
+
+
+def _messages_last_turn_promised_action_without_followthrough(
+    messages: List[Dict[str, Any]],
+) -> bool:
+    """Assistant promised tool/file work in reasoning but ended without tool_calls."""
+    if not messages:
+        return False
+    last_user_idx = -1
+    for idx, msg in enumerate(messages):
+        if str(msg.get("role", "")).strip() == "user":
+            last_user_idx = idx
+    if last_user_idx < 0:
+        return False
+    tail = messages[last_user_idx + 1 :]
+    if not tail:
+        return False
+    last = tail[-1]
+    if str(last.get("role", "")).strip() != "assistant":
+        return False
+    tool_calls = last.get("tool_calls")
+    if isinstance(tool_calls, list) and tool_calls:
+        return False
+    raw_sq = last.get("suggested_questions")
+    if isinstance(raw_sq, list) and any(str(x).strip() for x in raw_sq):
+        return False
+    content = str(last.get("content", "") or "")
+    if "</followups>" in content.lower():
+        return False
+    reasoning = _extract_assistant_reasoning(content)
+    body = _visible_assistant_body(content)
+    if not reasoning or not _REASONING_ACTION_INTENT_RE.search(reasoning):
+        return False
+    if _DEFERRAL_BODY_RE.search(body) and len(body) < 220:
+        return True
+    return bool(body) and body.rstrip()[-1:] in {":", "：", ",", "，", ";", "；", "、", "—", "…"}
+
+
 # Titles that should be replaced by the first real user message (case-insensitive ASCII).
 _PLACEHOLDER_SESSION_TITLE_CF: frozenset[str] = frozenset(
     x.casefold()
@@ -1015,14 +1071,44 @@ class SessionManager:
         return 0
 
     @staticmethod
+    def _last_user_index(raw: list[dict]) -> int:
+        last = -1
+        for idx, item in enumerate(raw):
+            if str(item.get("role", "")).strip() == "user":
+                last = idx
+        return last
+
+    @staticmethod
     def _apply_tail_message_limit(
-        window: list[dict], abs_start: int, total_count: int, tail_limit: int | None
+        window: list[dict],
+        abs_start: int,
+        total_count: int,
+        tail_limit: int | None,
+        *,
+        full_raw: list[dict] | None = None,
+        round_anchor_abs: int | None = None,
+        last_user_abs_index: int = -1,
     ) -> tuple[list[dict], int]:
         if not tail_limit or len(window) <= tail_limit:
-            return window, abs_start
-        trimmed = window[-max(1, int(tail_limit)) :]
-        new_start = max(0, total_count - len(trimmed))
-        return trimmed, new_start
+            out_start = abs_start
+            out_window = window
+        else:
+            trimmed = window[-max(1, int(tail_limit)) :]
+            out_start = max(0, total_count - len(trimmed))
+            out_window = trimmed
+
+        # tail_limit must not drop the last user turn (or tail_rounds anchor) —
+        # otherwise desktop stall detection reads "no completed reply" on an
+        # idle session and loops futile resume cards after session switch.
+        anchor = out_start
+        if round_anchor_abs is not None:
+            anchor = min(anchor, max(0, int(round_anchor_abs)))
+        if last_user_abs_index >= 0:
+            anchor = min(anchor, last_user_abs_index)
+        if anchor < out_start and full_raw is not None:
+            out_start = anchor
+            out_window = full_raw[out_start:]
+        return out_window, out_start
 
     def get_messages_page(
         self,
@@ -1037,6 +1123,8 @@ class SessionManager:
         if tail_rounds is not None:
             meta = self._load_messages_tail_snapshot(session_id)
             if meta is not None:
+                raw_full = self._get_raw_messages_list(session_id)
+                last_user = self._last_user_index(raw_full)
                 raw_tail = meta["messages"]
                 total_count = int(meta["total_count"])
                 base_index = int(meta["start_index"])
@@ -1044,7 +1132,13 @@ class SessionManager:
                 window = raw_tail[rel_start:]
                 abs_start = base_index + rel_start
                 window, abs_start = self._apply_tail_message_limit(
-                    window, abs_start, total_count, tail_limit
+                    window,
+                    abs_start,
+                    total_count,
+                    tail_limit,
+                    full_raw=raw_full,
+                    round_anchor_abs=abs_start,
+                    last_user_abs_index=last_user,
                 )
                 return {
                     "messages": self._normalize_messages(window),
@@ -1055,12 +1149,19 @@ class SessionManager:
 
         raw = self._get_raw_messages_list(session_id)
         total_count = len(raw)
+        last_user = self._last_user_index(raw)
 
         if tail_rounds is not None:
             start_index = self._tail_start_index_for_rounds(raw, tail_rounds)
             window = raw[start_index:]
             window, start_index = self._apply_tail_message_limit(
-                window, start_index, total_count, tail_limit
+                window,
+                start_index,
+                total_count,
+                tail_limit,
+                full_raw=raw,
+                round_anchor_abs=start_index,
+                last_user_abs_index=last_user,
             )
             self._ensure_messages_tail_snapshot(session_id, raw)
         elif before_index is not None:

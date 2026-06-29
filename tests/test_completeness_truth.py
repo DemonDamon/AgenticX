@@ -17,6 +17,7 @@ from agenticx.studio.server import (
 )
 from agenticx.studio.session_manager import (
     _messages_last_turn_has_completed_reply,
+    _messages_last_turn_promised_action_without_followthrough,
     _visible_assistant_body,
 )
 
@@ -90,6 +91,33 @@ def test_messages_last_turn_completed_false_for_interrupted_placeholder() -> Non
         {"role": "assistant", "content": "（已中断）"},
     ]
     assert _messages_last_turn_has_completed_reply(messages) is False
+
+
+def test_messages_last_turn_promised_action_without_followthrough() -> None:
+    messages = [
+        {"role": "user", "content": "分析 mp4"},
+        {
+            "role": "assistant",
+            "content": (
+                "<think>让我先读取 composition 源码，然后加载相关 skill。"
+                "</think>\n"
+                "我先读取 composition 源码，同时加载 HyperFrames skill 来给你完整方案。"
+            ),
+        },
+    ]
+    assert _messages_last_turn_promised_action_without_followthrough(messages) is True
+
+
+def test_messages_last_turn_promised_action_false_when_tools_follow() -> None:
+    messages = [
+        {"role": "user", "content": "分析 mp4"},
+        {
+            "role": "assistant",
+            "content": "<think>让我先读取文件。</think>\n我先读取源码。",
+        },
+        {"role": "tool", "content": "exit_code=0\nstdout:\nok", "tool_name": "file_read"},
+    ]
+    assert _messages_last_turn_promised_action_without_followthrough(messages) is False
 
 
 def test_accumulate_meta_partial_text_skips_spinner() -> None:

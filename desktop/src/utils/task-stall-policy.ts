@@ -4,6 +4,7 @@
 
 import type { ParsedTodo, TodoItem } from "../components/TodoUpdateCard";
 import type { Message } from "../store";
+import { parseReasoningContent } from "../components/messages/reasoning-parser";
 import { assistantBodyText, looksLikeUnfinishedAssistantBody } from "./budget-incomplete-message";
 
 /** Default stall warning threshold (seconds) — overridable via Settings → 工具 → 长任务停滞与续跑. */
@@ -91,6 +92,50 @@ export function isTodoSnapshotSuperseded(messages: Message[], todoIndex: number)
 
 const TODO_COMPLETED_RE = /\((\d+)\s*\/\s*(\d+)\s*completed\)/;
 
+/** Reasoning that plans tool/file work the model did not start in the same turn. */
+const REASONING_ACTION_INTENT_RE =
+  /让我先|我先|接下来要|然后加载|然后调用|去读取|去加载|todo_write/i;
+
+/** Visible body that defers work to a follow-up step instead of delivering it. */
+const DEFERRAL_BODY_RE = /我先|让我先|接下来|稍等|正在|马上/;
+
+function assistantReasoningText(message: Message): string {
+  if (message.role !== "assistant") return "";
+  return parseReasoningContent(message.content).reasoning.trim();
+}
+
+function messageHasTerminalMarkers(message: Message): boolean {
+  const sq = message.suggestedQuestions;
+  if (Array.isArray(sq) && sq.some((x) => String(x ?? "").trim())) return true;
+  return String(message.content ?? "").toLowerCase().includes("</followups>");
+}
+
+/**
+ * True when the last user turn ended on an assistant stub that promised tool/file
+ * work (in reasoning) but emitted no tool_calls and no follow-up tool rows —
+ * common when switching models or when a provider returns FINAL too early.
+ */
+export function lastTurnPromisedActionWithoutFollowThrough(messages: Message[]): boolean {
+  if (!messages.length) return false;
+  let lastUserIdx = -1;
+  for (let i = 0; i < messages.length; i += 1) {
+    if (messages[i]?.role === "user") lastUserIdx = i;
+  }
+  if (lastUserIdx < 0) return false;
+  const tail = messages.slice(lastUserIdx + 1);
+  if (!tail.length) return false;
+  const last = tail[tail.length - 1];
+  if (last?.role !== "assistant") return false;
+  const toolCalls = (last.tool_calls as unknown[] | undefined) ?? [];
+  if (toolCalls.length > 0) return false;
+  if (messageHasTerminalMarkers(last)) return false;
+  const reasoning = assistantReasoningText(last);
+  const body = assistantBodyText(last);
+  if (!reasoning || !REASONING_ACTION_INTENT_RE.test(reasoning)) return false;
+  if (DEFERRAL_BODY_RE.test(body) && body.length < 220) return true;
+  return looksLikeUnfinishedAssistantBody(body);
+}
+
 /** Extract the (done, total) counts from a todo snapshot tool message body. */
 function parseTodoCompletedCounts(content: string): { done: number; total: number } | null {
   const match = content.match(TODO_COMPLETED_RE);
@@ -124,6 +169,13 @@ export function isFutileResume(messages: Message[]): boolean {
     }
   }
   if (lastInterruptedIdx < 0) return false;
+
+  // Only treat interruptions in the active (last user) turn as futile.
+  let lastUserIdx = -1;
+  for (let i = 0; i < messages.length; i += 1) {
+    if (messages[i]?.role === "user") lastUserIdx = i;
+  }
+  if (lastInterruptedIdx < lastUserIdx) return false;
 
   // The turn before the interruption must have produced a complete
   // assistant reply — otherwise a resume is genuinely needed.
@@ -286,6 +338,11 @@ export function shouldTriggerIncompleteEndStall(
   const state = (executionState || "").trim();
   // Only idle — user-interrupted sessions are handled via userStopped stall suppress.
   if (state !== "idle") return false;
+  // Tail pagination may briefly serve a tool-only slice before re-expand; without
+  // a user anchor we cannot judge turn completeness — never flag stall.
+  if (!messages.some((m) => m?.role === "user")) return false;
+  if (isFutileResume(messages)) return false;
+  if (lastTurnPromisedActionWithoutFollowThrough(messages)) return true;
   return !lastTurnHasCompletedAssistantReply(messages);
 }
 
