@@ -17,6 +17,7 @@ import type { SearchReference } from "../../types/search-references";
 export { normalizeChatMarkdownContent, normalizeLenientEmphasisInText } from "./markdown-normalize";
 import { openExternalUrl } from "../../utils/open-external";
 import { isAbsoluteFilePath, resolveRelativeAssetPath } from "../../utils/workspace-file-path";
+import { buildSvgCharsetDataUrl } from "../../utils/svg-markup";
 
 export const MarkdownContext = createContext<{
   isStreaming?: boolean;
@@ -201,7 +202,6 @@ function MarkdownImage({
   const { markdownFilePath, documentImage } = useContext(MarkdownContext);
   const [open, setOpen] = useState(false);
   const [resolvedSrc, setResolvedSrc] = useState("");
-  const [inlineSvg, setInlineSvg] = useState("");
   const [loadError, setLoadError] = useState("");
   const effectiveSrc = useMemo(() => {
     const raw = String(src ?? "").trim();
@@ -216,12 +216,11 @@ function MarkdownImage({
   const displaySrc = resolvedSrc;
   const isSvg =
     effectiveSrc.toLowerCase().endsWith(".svg") || String(src ?? "").toLowerCase().endsWith(".svg");
-  const isLoadingLocal = isLocalAsset && !inlineSvg && !resolvedSrc && !loadError;
+  const isLoadingLocal = isLocalAsset && !resolvedSrc && !loadError;
 
   useEffect(() => {
     let alive = true;
     setLoadError("");
-    setInlineSvg("");
     setResolvedSrc("");
 
     if (!normalizedSrc) {
@@ -255,7 +254,7 @@ function MarkdownImage({
         const textRes = await loadText(localPath);
         if (!alive) return;
         if (textRes?.ok && textRes.content) {
-          setInlineSvg(textRes.content);
+          setResolvedSrc(buildSvgCharsetDataUrl(textRes.content));
           return;
         }
         textError = textRes?.error;
@@ -288,14 +287,6 @@ function MarkdownImage({
           正在加载图片…
         </div>
       )
-    : inlineSvg
-    ? (
-        <div
-          className={`${thumbClass} [&_svg]:h-auto [&_svg]:w-full`}
-          // SVG assets are user-local markdown embeds in workspace preview.
-          dangerouslySetInnerHTML={{ __html: inlineSvg }}
-        />
-      )
     : loadError
       ? (
           <div className="px-4 py-6 text-center text-sm text-rose-300">
@@ -312,9 +303,7 @@ function MarkdownImage({
               alt={alt || "image"}
               className={`${thumbClass} transition group-hover:scale-[1.01]`}
               loading="lazy"
-              onError={() => {
-                if (!inlineSvg) setLoadError("图片渲染失败");
-              }}
+              onError={() => setLoadError("图片渲染失败")}
             />
           )
         : (
@@ -333,18 +322,15 @@ function MarkdownImage({
       >
         {previewBody}
         <div className="px-2 py-1 text-[11px] text-text-faint">
-          {loadError && !inlineSvg ? `图片预览失败：${loadError}` : alt || title || "图片预览"}
+          {loadError ? `图片预览失败：${loadError}` : alt || title || "图片预览"}
         </div>
       </button>
       <Modal open={open} title={alt || title || "图片预览"} onClose={() => setOpen(false)}>
         <div className="flex max-h-[72vh] items-center justify-center overflow-auto">
-          {inlineSvg ? (
-            <div
-              className="max-h-[68vh] w-full [&_svg]:h-auto [&_svg]:max-h-[68vh] [&_svg]:w-full"
-              dangerouslySetInnerHTML={{ __html: inlineSvg }}
-            />
-          ) : (
+          {displaySrc ? (
             <img src={displaySrc} alt={alt || "image"} className="h-auto max-h-[68vh] w-auto max-w-full rounded-lg" />
+          ) : (
+            <div className="text-sm text-text-muted">图片地址无效</div>
           )}
         </div>
       </Modal>
