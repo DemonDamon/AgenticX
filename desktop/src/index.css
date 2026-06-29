@@ -187,6 +187,12 @@ body {
   padding-right: 10px;
 }
 
+/* 设置侧栏：滚动条稳定贴右缘，蓝色选中态不与滚动条挤在一起 */
+.agx-settings-nav-scroll {
+  scrollbar-gutter: stable;
+  padding-right: 6px;
+}
+
 /* 定时任务闹钟：表盘 currentColor 填充，指针与表盘形成对比 */
 .automation-task-icon__hand {
   stroke: var(--automation-clock-hand, #ffffff);
