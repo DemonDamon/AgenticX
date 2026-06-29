@@ -10,9 +10,7 @@ type Props = {
   message: Message;
 };
 
-function variantTone(variant: ContinuationNoticeVariant) {
-  if (variant === "supervisor") return "neutral" as const;
-  if (variant === "auto_nudge") return "info" as const;
+function variantTone(_variant: ContinuationNoticeVariant) {
   return "info" as const;
 }
 

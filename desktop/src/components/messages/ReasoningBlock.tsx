@@ -1,6 +1,6 @@
 import * as React from "react";
 import { ChevronDown, ChevronRight } from "lucide-react";
-import { ASSISTANT_ICON_RAIL_CLASS } from "./im-layout";
+import { ASSISTANT_ICON_RAIL_CLASS, REACT_RAIL_ICON_CLASS } from "./im-layout";
 import {
   formatReasoningTitle,
   getCachedReasoningDuration,
@@ -18,7 +18,7 @@ function ThinkingGlyph() {
     <svg
       xmlns="http://www.w3.org/2000/svg"
       viewBox="0 0 24 24"
-      className="h-[20px] w-[20px] shrink-0 text-[rgb(var(--theme-color-rgb,59,130,246))]"
+      className={`h-[20px] w-[20px] shrink-0 ${REACT_RAIL_ICON_CLASS}`}
       fill="none"
       stroke="currentColor"
       strokeWidth="2.5"

@@ -55,6 +55,7 @@ import { SpawnsColumn } from "./SpawnsColumn";
 import { MessageRenderer, renderToolMessageExtras } from "./messages/MessageRenderer";
 import type { SkillPatchPreviewPayload } from "./messages/skill-manage-preview";
 import { groupConsecutiveToolMessages, type GroupedChatRow } from "./messages/group-tool-messages";
+import { isInterruptedAssistantPlaceholder } from "../utils/noisy-chat-messages";
 import { expandMessagesToTopLevelRows } from "./messages/react-blocks";
 import { shouldHideStreamOverlay, shouldShowMidTurnStreamActivity } from "../utils/stream-overlay-policy";
 import { TurnToolGroupCard } from "./messages/TurnToolGroupCard";
@@ -2357,7 +2358,6 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
   /** User clicked stop — do not re-show stall card until the next send/continue. */
   const userStoppedSessionRef = useRef<Record<string, boolean>>({});
   const stopInFlightRef = useRef<Record<string, boolean>>({});
-  const interruptNoticeSentRef = useRef<Record<string, boolean>>({});
   const [lastToolProgress, setLastToolProgress] = useState<{ name: string; sec: number } | null>(null);
   const [contextLoopStats, setContextLoopStats] = useState<{
     round: number;
@@ -2484,6 +2484,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
       visibleMessagesForSession(pane?.messages ?? [], pane?.sessionId).filter((item) => {
         if (isGroupPane) return true;
         if (item.role === "assistant" && isThinkingPlaceholderText(item.content || "")) return false;
+        if (isInterruptedAssistantPlaceholder(item)) return false;
         return !item.agentId || item.agentId === "meta";
       }),
     [isGroupPane, pane?.messages, pane?.sessionId]
@@ -5308,10 +5309,6 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
         // history sidebar spinner disappears at once instead of waiting for the
         // 1.5s list poll (which can lag behind a bloated session list query).
         useAppStore.getState().clearSessionHistoryHint(sid);
-        if (!interruptNoticeSentRef.current[sid]) {
-          interruptNoticeSentRef.current[sid] = true;
-          addPaneMessage(pane.id, "tool", "已中断任务", "meta");
-        }
       } else {
         userStoppedSessionRef.current[sid] = false;
         setRunGuardSessionId("");
@@ -6583,7 +6580,6 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
       const key = sessionKey.trim();
       if (!key) return;
       delete userStoppedSessionRef.current[key];
-      delete interruptNoticeSentRef.current[key];
       delete stopInFlightRef.current[key];
     };
 

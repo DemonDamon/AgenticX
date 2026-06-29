@@ -14,6 +14,10 @@ import { TurnInterruptionNoticeLine } from "./TurnInterruptionNoticeLine";
 import { isSupervisorNoticeMessage } from "../../utils/supervisor-notice";
 import { isContinuationNoticeMessage } from "../../utils/continuation-notice";
 import { isTurnInterruptionNoticeMessage } from "../../utils/turn-interruption-notice";
+import {
+  isInterruptedAssistantPlaceholder,
+  isNoisyToolStatusMessage,
+} from "../../utils/noisy-chat-messages";
 import { ViewImageInjectCard } from "./ViewImageInjectCard";
 import { BudgetExceededCard } from "./BudgetExceededCard";
 import { WidgetBlock } from "./WidgetBlock";
@@ -109,15 +113,7 @@ export function isTodoUpdateToolMessage(content: string): boolean {
   return parseTodoMessage(content) !== null;
 }
 
-export function isNoisyToolStatusMessage(message: Pick<Message, "role" | "content" | "toolName">): boolean {
-  if (message.role !== "tool") return false;
-  const toolName = (message.toolName ?? "").trim();
-  if (toolName === "check_resources") return true;
-  const content = String(message.content ?? "").trim();
-  if (!toolName && /^[✅🔧⚠️❌🗣]?\s*check_resources\b/i.test(content)) return true;
-  if (toolName) return false;
-  return content === "后台任务已完成" || content === "已发送中断请求";
-}
+export { isNoisyToolStatusMessage } from "../../utils/noisy-chat-messages";
 
 /** Shared extras row under tool cards (inline confirm + workspace reveal). */
 export function renderToolMessageExtras(
@@ -215,6 +211,9 @@ export function MessageRenderer({
     return <ViewImageInjectCard message={message} />;
   }
   if (message.role === "user" || message.role === "assistant") {
+    if (isInterruptedAssistantPlaceholder(message)) {
+      return null;
+    }
     if (chatStyle === "terminal") {
       return <TerminalLine message={message} badge={assistantBadge} onRevealPath={onRevealPath} onOpenFileReference={onOpenFileReference} />;
     }

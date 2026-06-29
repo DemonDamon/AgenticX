@@ -154,15 +154,15 @@ body {
   margin-left: 0;
 }
 
-/* 续跑原因 pill：醒目红底，无边框 */
+/* 续跑原因 pill：与 ReAct 主题色对齐 */
 .agx-continuation-reason-chip {
   border: none;
-  background: rgba(239, 68, 68, 0.32);
-  color: rgba(254, 226, 226, 0.98);
+  background: rgba(var(--theme-color-rgb, 59, 130, 246), 0.14);
+  color: rgb(var(--theme-color-rgb, 59, 130, 246));
 }
 :root[data-theme="light"] .agx-continuation-reason-chip {
-  background: rgba(239, 68, 68, 0.16);
-  color: rgb(185, 28, 28);
+  background: rgba(var(--theme-color-rgb, 59, 130, 246), 0.12);
+  color: rgb(37, 99, 235);
 }
 
 /* 历史会话列表：当前会话「豆包式」圆角胶囊底，浅色下避免与 hover 灰阶黏连 */

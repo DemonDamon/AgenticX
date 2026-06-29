@@ -1,12 +1,6 @@
 import type { Message } from "../../store";
 import { isContinuationNoticeMessage } from "../../utils/continuation-notice";
-
-function isNoisyToolStatusMessage(message: Message): boolean {
-  if (message.role !== "tool") return false;
-  if ((message.toolName ?? "").trim()) return false;
-  const content = String(message.content ?? "").trim();
-  return content === "后台任务已完成" || content === "已发送中断请求";
-}
+import { isNoisyToolStatusMessage } from "../../utils/noisy-chat-messages";
 
 export type GroupedChatRow =
   | { kind: "message"; message: Message }
