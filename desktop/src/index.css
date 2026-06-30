@@ -165,6 +165,15 @@ body {
   color: rgb(37, 99, 235);
 }
 
+/* 助手推荐问 chip：浅色消息区白底时需独立底色，避免与页面融为一体 */
+.agx-followup-chip {
+  background-color: var(--chat-followup-chip-bg, var(--surface-popover));
+  border-color: var(--chat-followup-chip-border, var(--border-subtle));
+}
+.agx-followup-chip:hover {
+  background-color: var(--chat-followup-chip-bg-hover, var(--surface-hover));
+}
+
 /* 历史会话列表：当前会话「豆包式」圆角胶囊底，浅色下避免与 hover 灰阶黏连 */
 .agx-session-history-row.agx-session-history-row--active {
   background-color: rgba(0, 0, 0, 0.1);

@@ -15,6 +15,9 @@
   --surface-topbar: rgba(38, 38, 42, 0.72);
   --surface-messages: transparent;
   --surface-composer: rgba(45, 45, 48, 0.85);
+  --chat-followup-chip-bg: var(--surface-popover);
+  --chat-followup-chip-bg-hover: var(--surface-hover);
+  --chat-followup-chip-border: var(--border-subtle);
   --surface-card: rgba(255, 255, 255, 0.05);
   --surface-card-strong: rgba(255, 255, 255, 0.11);
   --surface-hover: rgba(255, 255, 255, 0.09);
