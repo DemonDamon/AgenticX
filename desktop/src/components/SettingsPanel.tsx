@@ -898,11 +898,11 @@ function ProviderAvatar({
   const r = size <= 28 ? "rounded-full" : "rounded-xl";
   return (
     <span
-      className={`inline-flex shrink-0 items-center justify-center shadow-sm ${r}`}
+      className={`inline-flex shrink-0 items-center justify-center overflow-hidden shadow-sm ${r}`}
       style={{ width: size, height: size, backgroundColor: bg, color }}
     >
       {IconComp ? (
-        <IconComp size={Math.round(size * 0.6)} />
+        <IconComp size={Math.round(size * 0.55)} className="shrink-0" />
       ) : (
         <span style={{ fontSize: Math.round(size * 0.4), fontWeight: 700, lineHeight: 1 }}>
           {getProviderInitials(providerId, entry)}
@@ -7815,8 +7815,12 @@ export function SettingsPanel({
           </div>
 
           <div
-            className={`min-h-0 flex-1 pl-5 pr-4 py-3 ${
-              tab === "knowledge" ? "flex flex-col overflow-hidden" : "overflow-y-auto"
+            className={`min-h-0 flex-1 pl-5 pr-4 ${
+              tab === "provider"
+                ? "flex flex-col overflow-hidden pt-4 pb-3"
+                : tab === "knowledge"
+                  ? "flex flex-col overflow-hidden py-3"
+                  : "overflow-y-auto py-3"
             }`}
           >
             {tab === "account" && <AccountTab />}
@@ -8300,14 +8304,14 @@ export function SettingsPanel({
 
             {/* === PROVIDER TAB === */}
             {tab === "provider" && (
-              <div className="flex flex-col gap-3">
+              <div className="flex min-h-0 flex-1 flex-col gap-3">
                 <RemoteBackendHintBanner kind="synced" />
-              <div className="flex gap-4">
+              <div className="flex min-h-0 flex-1 gap-4">
                 {/* Provider sub-list */}
-                <div className="flex w-[176px] shrink-0 flex-col rounded-xl border border-border bg-surface-card">
+                <div className="flex w-[176px] shrink-0 flex-col self-stretch rounded-xl border border-border bg-surface-card">
                   <div
                     ref={providerListScrollRef}
-                    className="agx-scrollbar-on-scroll max-h-[min(60vh,480px)] space-y-0.5 overflow-y-auto p-1.5"
+                    className="agx-scrollbar-on-scroll min-h-0 flex-1 space-y-0.5 overflow-y-auto px-1.5 pb-1.5 pt-2.5"
                   >
                     {providerNames.map((name) => {
                       const entry = draft[name];
@@ -8372,9 +8376,9 @@ export function SettingsPanel({
                 </div>
 
                 {/* Provider detail */}
-                <div className="flex-1 min-w-0 space-y-3">
+                <div className="min-h-0 flex-1 min-w-0 space-y-3 overflow-y-auto pr-0.5">
                   {/* ── Header: logo + name + toggles ── */}
-                  <div className="flex items-center gap-3">
+                  <div className="flex items-center gap-3 pt-1">
                     <ProviderAvatar providerId={active} size={40} entry={current} />
                     <div className="min-w-0 flex-1">
                       {inlineRenameProviderId === active && isProviderDisplayNameEditable(active, current) ? (
@@ -8972,7 +8976,7 @@ export function SettingsPanel({
                       </Modal>
                 </div>
               </div>
-              <div className="flex items-center justify-end gap-2 border-t border-border pt-3">
+              <div className="flex shrink-0 items-center justify-end gap-2 pt-2">
                 {providerConfigMessage ? (
                   <span
                     className={`mr-auto text-xs ${
