@@ -3,6 +3,7 @@ import { ChevronDown, ChevronRight, ExternalLink, Search } from "lucide-react";
 import type { SearchReference } from "../../types/search-references";
 import { openSearchReference } from "../../utils/open-kb-reference";
 import { dedupeReferencesByDoc, type DocGroup } from "../../utils/citation-doc-grouping";
+import { REACT_RAIL_TITLE_CLASS } from "./im-layout";
 
 type Props = {
   references: SearchReference[];
@@ -139,14 +140,14 @@ export function ReferencesCard({ references, searchedQueries }: Props) {
         onClick={() => setExpanded((v) => !v)}
         aria-expanded={expanded}
       >
-        <span className="flex w-[20px] shrink-0 items-center justify-center" aria-hidden>
+        <span className="flex h-[20px] w-[20px] shrink-0 items-center justify-center" aria-hidden>
           <Search
             className="h-[18px] w-[18px] text-[rgb(var(--theme-color-rgb,6,182,212))]"
             strokeWidth={2.2}
           />
         </span>
         <span className="flex min-w-0 flex-1 items-center gap-1">
-          <span className="truncate text-[13px] font-medium text-text-subtle">{summary}</span>
+          <span className={`truncate ${REACT_RAIL_TITLE_CLASS}`}>{summary}</span>
           <span className="shrink-0" aria-hidden>
             {expanded ? (
               <ChevronDown className="h-3.5 w-3.5 shrink-0 text-text-muted" strokeWidth={2} />
