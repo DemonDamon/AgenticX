@@ -30,9 +30,7 @@ async function fetchWithTimeout(
     return await fetch(url, { ...init, signal: ctrl.signal });
   } catch (e) {
     if (e instanceof DOMException && e.name === "AbortError") {
-      throw new Error(
-        "后端无响应（超时）：图谱引擎可能正在初始化或被其他 agx serve 占用，请完全退出 Near 后重开",
-      );
+      throw new Error("记忆图谱加载超时，请稍候点「刷新」重试");
     }
     throw e;
   } finally {
@@ -76,12 +74,43 @@ function appendGroupContext(
   if (params.sessionId.trim()) qs.set("session_id", params.sessionId.trim());
 }
 
+export function isLikelyGraphCorruptionError(message: string | null | undefined): boolean {
+  if (!message?.trim()) return false;
+  const msg = message.toLowerCase();
+  if (/lock on file|could not set lock|图谱库被占用/.test(msg)) return false;
+  return /io exception|cannot read from file|corrupt|filedescriptor|numbytesread/.test(msg);
+}
+
+export function humanizeMemoryGraphError(message: string): string {
+  const msg = message.trim();
+  if (!msg) return "记忆图谱暂时不可用，请稍后点「刷新」重试。";
+  if (isLikelyGraphCorruptionError(msg)) {
+    return "记忆图谱本地数据异常，Near 正在尝试自动修复，请稍候…";
+  }
+  if (/lock on file|could not set lock|图谱库被占用|kuzu.*占用/i.test(msg)) {
+    return "记忆图谱引擎正忙，请稍等几秒后点「刷新」；若仍无效，请完全退出并重新打开 Near。";
+  }
+  if (/timed out|超时|无响应/i.test(msg)) {
+    return "记忆图谱加载较慢，请稍候再试。";
+  }
+  if (/graphiti-core is not installed|graphiti.*未安装/i.test(msg)) {
+    return "当前后端未安装记忆图谱组件，请使用完整版 Near。";
+  }
+  if (/failed to fetch|networkerror|load failed|无法连接 agx serve/i.test(msg)) {
+    return "暂时无法连接本地助手后端，请稍候再试；若聊天正常，点「刷新」即可。";
+  }
+  if (msg.length > 120 || /构建异常：/i.test(msg)) {
+    return "记忆图谱暂时不可用，请稍后点「刷新」重试。";
+  }
+  return msg;
+}
+
 export function formatMemoryGraphFetchError(error: unknown, fallback: string): string {
   const msg = error instanceof Error ? error.message : String(error);
   if (/failed to fetch|networkerror|load failed/i.test(msg)) {
-    return "无法连接 agx serve（后端可能无响应或正初始化图谱引擎，请完全退出 Near 后重开）";
+    return humanizeMemoryGraphError(msg);
   }
-  return msg || fallback;
+  return humanizeMemoryGraphError(msg || fallback);
 }
 
 export function formatMemoryGraphActionError(error: unknown, fallback: string): string {
@@ -106,9 +135,9 @@ function formatMemoryGraphApiError(
     }
     const message = err.message || "";
     if (/kuzu|lock on file|图谱库被占用/i.test(message)) {
-      return message;
+      return humanizeMemoryGraphError(message);
     }
-    return err.message || code || fallback;
+    return humanizeMemoryGraphError(err.message || code || fallback);
   }
   return fallback;
 }
@@ -129,6 +158,22 @@ export async function fetchMemoryGraphStatus(
   );
   if (!r.ok) throw new Error(`status ${r.status}`);
   return (await r.json()) as MemoryGraphStatus;
+}
+
+export async function repairMemoryGraph(
+  apiBase: string,
+  apiToken: string,
+): Promise<{ recovered?: boolean; recovery?: Record<string, unknown> | null }> {
+  const r = await fetchWithTimeout(
+    `${apiBase}/api/memory/graph/recover`,
+    { method: "POST", headers: headers(apiToken), body: "{}" },
+    180000,
+  );
+  if (!r.ok) {
+    const body = await r.json().catch(() => ({}));
+    throw new Error(formatMemoryGraphApiError(body, `recover ${r.status}`));
+  }
+  return (await r.json()) as { recovered?: boolean; recovery?: Record<string, unknown> | null };
 }
 
 export async function fetchMemoryGraphOverview(

@@ -29,12 +29,15 @@ _EPISODE_IMPACT_NOTE = (
 )
 
 
-def _kuzu_lock_help() -> str:
+def _kuzu_lock_user_message() -> str:
     return (
-        "Kuzu 图谱库被占用：通常是有多个 agx serve 同时在跑（例如重启 Near 后旧进程未退出）。"
-        "请完全退出 Near（⌘Q），在终端执行 pkill -f 'agx serve' 后再打开；"
-        "勿在 Near 运行时单独执行 agx memory-graph ingest。"
+        "记忆图谱引擎正忙，请稍等几秒后点「刷新」；"
+        "若仍无效，请完全退出并重新打开 Near。"
     )
+
+
+def _kuzu_lock_help() -> str:
+    return _kuzu_lock_user_message()
 
 
 _store_singleton: Optional["MemoryGraphStore"] = None
@@ -153,6 +156,26 @@ class MemoryGraphStore:
         self._driver = None
         self._status.write({"last_error": None, "last_error_at": None})
 
+    async def repair_database(self) -> Dict[str, Any]:
+        """Probe Kuzu health, auto-recover if corrupt, and warm up Graphiti (user-facing repair)."""
+        from agenticx.memory.graph.executor import run_on_graphiti_loop
+
+        return await run_on_graphiti_loop(self._repair_database_impl())
+
+    async def _repair_database_impl(self) -> Dict[str, Any]:
+        self.require_graphiti()
+        self.reset_runtime()
+        loop = asyncio.get_running_loop()
+        from agenticx.memory.graph.graph_recovery import ensure_graph_db_healthy
+
+        recovery = await loop.run_in_executor(None, ensure_graph_db_healthy, self.cfg)
+        await self._ensure_ready_impl()
+        return {
+            "ok": True,
+            "recovered": recovery is not None,
+            "recovery": recovery,
+        }
+
     def require_enabled(self) -> None:
         self.refresh_config()
         if not self.cfg.enabled:
@@ -179,10 +202,16 @@ class MemoryGraphStore:
             str(self.cfg.ingest.semaphore_limit),
         )
 
+        from agenticx.memory.graph.graph_recovery import ensure_graph_db_healthy
+
+        self.cfg.db_path.parent.mkdir(parents=True, exist_ok=True)
+        recovery = ensure_graph_db_healthy(self.cfg)
+        if recovery:
+            logger.warning("memory graph auto-recovery: %s", recovery)
+
         from graphiti_core.driver.kuzu_driver import KuzuDriver
 
         db_path = str(self.cfg.db_path.expanduser())
-        self.cfg.db_path.parent.mkdir(parents=True, exist_ok=True)
         driver = KuzuDriver(db=db_path)
         _prepare_kuzu_driver(driver)
         try:
@@ -192,6 +221,30 @@ class MemoryGraphStore:
             _dispose_kuzu_driver(driver)
             raise
         return driver, llm_client, embedder, cross_encoder
+
+    async def _build_graphiti_with_indices(
+        self,
+        driver: Any,
+        llm_client: Any,
+        embedder: Any,
+        cross_encoder: Any,
+    ) -> Any:
+        from graphiti_core import Graphiti
+
+        self._touch_job_progress(22, "preparing")
+        graphiti = Graphiti(
+            graph_driver=driver,
+            llm_client=llm_client,
+            embedder=embedder,
+            cross_encoder=cross_encoder,
+            max_coroutines=self.cfg.ingest.semaphore_limit,
+        )
+        self._touch_job_progress(32, "preparing")
+        await asyncio.wait_for(
+            graphiti.build_indices_and_constraints(),
+            timeout=_INIT_TIMEOUT_SECONDS,
+        )
+        return graphiti
 
     def _touch_job_progress(self, percent: int, stage: str) -> None:
         state = self._status.read()
@@ -232,7 +285,6 @@ class MemoryGraphStore:
         async with _init_lock:
             if self._ready and self._graphiti is not None:
                 return
-            from graphiti_core import Graphiti
 
             self._touch_job_progress(12, "preparing")
             loop = asyncio.get_running_loop()
@@ -256,18 +308,11 @@ class MemoryGraphStore:
                 raise
             graphiti = None
             try:
-                self._touch_job_progress(22, "preparing")
-                graphiti = Graphiti(
-                    graph_driver=driver,
-                    llm_client=llm_client,
-                    embedder=embedder,
-                    cross_encoder=cross_encoder,
-                    max_coroutines=self.cfg.ingest.semaphore_limit,
-                )
-                self._touch_job_progress(32, "preparing")
-                await asyncio.wait_for(
-                    graphiti.build_indices_and_constraints(),
-                    timeout=_INIT_TIMEOUT_SECONDS,
+                graphiti = await self._build_graphiti_with_indices(
+                    driver,
+                    llm_client,
+                    embedder,
+                    cross_encoder,
                 )
             except BaseException as exc:
                 # 构建 Graphiti 或建索引失败时，driver 仍持有 Kuzu 锁，必须释放
@@ -278,7 +323,39 @@ class MemoryGraphStore:
                     raise MemoryGraphUnavailableError(
                         f"Graphiti index build timed out after {_INIT_TIMEOUT_SECONDS:.0f}s"
                     ) from exc
-                raise
+                from agenticx.memory.graph.graph_recovery import (
+                    ensure_graph_db_healthy,
+                    is_kuzu_corruption_error,
+                )
+
+                if is_kuzu_corruption_error(exc):
+                    logger.warning(
+                        "memory graph init hit corruption during index build: %s",
+                        exc,
+                    )
+                    recovery = ensure_graph_db_healthy(self.cfg)
+                    if recovery:
+                        logger.warning(
+                            "memory graph auto-recovery after index failure: %s",
+                            recovery,
+                        )
+                    (
+                        driver,
+                        llm_client,
+                        embedder,
+                        cross_encoder,
+                    ) = await asyncio.wait_for(
+                        loop.run_in_executor(None, self._bootstrap_graphiti_sync),
+                        timeout=_INIT_TIMEOUT_SECONDS,
+                    )
+                    graphiti = await self._build_graphiti_with_indices(
+                        driver,
+                        llm_client,
+                        embedder,
+                        cross_encoder,
+                    )
+                else:
+                    raise
             self._graphiti = graphiti
             self._driver = driver
             self._ready = True

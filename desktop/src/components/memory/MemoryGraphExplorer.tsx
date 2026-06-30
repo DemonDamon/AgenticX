@@ -20,7 +20,10 @@ import {
   fetchMemoryGraphStatus,
   formatMemoryGraphFetchError,
   formatMemoryGraphActionError,
+  humanizeMemoryGraphError,
+  isLikelyGraphCorruptionError,
   isMemoryGraphEnabled,
+  repairMemoryGraph,
   runMemoryGraphRetention,
   searchMemoryGraph,
   setEpisodePin,
@@ -231,6 +234,8 @@ function MemoryGraphExplorerInner({
   const [error, setError] = useState<string | null>(null);
   const [disabled, setDisabled] = useState(false);
   const [statusHint, setStatusHint] = useState<string | null>(null);
+  const [statusHintIsError, setStatusHintIsError] = useState(false);
+  const autoRecoverAttemptedRef = useRef(false);
   const [buildProgress, setBuildProgress] = useState<number | null>(null);
   const [configMsg, setConfigMsg] = useState("");
   const [saving, setSaving] = useState(false);
@@ -385,15 +390,56 @@ function MemoryGraphExplorerInner({
         setEpisodes([]);
         return;
       } else if (shouldShowBuildError(st)) {
-        setStatusHint(`构建异常：${st.last_error}`);
-        setBuildProgress(null);
+        const corrupt = isLikelyGraphCorruptionError(st.last_error);
+        if (corrupt && !autoRecoverAttemptedRef.current) {
+          autoRecoverAttemptedRef.current = true;
+          setStatusHint("记忆图谱数据异常，正在自动修复…");
+          setStatusHintIsError(false);
+          setBuildProgress(20);
+          try {
+            const repair = await repairMemoryGraph(apiBase, apiToken);
+            const stAfter = await fetchMemoryGraphStatus(apiBase, apiToken);
+            setStatus(stAfter);
+            setBuildProgress(null);
+            if (repair.recovered) {
+              const action = String(repair.recovery?.action || "");
+              setStatusHint(
+                action === "restored_from_backup"
+                  ? "记忆图谱已从备份恢复，请稍候加载…"
+                  : action === "recreated_empty"
+                    ? "记忆图谱已重建为空库，后续对话会继续写入新记忆。"
+                    : "记忆图谱已修复，正在加载…",
+              );
+              setStatusHintIsError(false);
+            } else if (shouldShowBuildError(stAfter)) {
+              setStatusHint(humanizeMemoryGraphError(stAfter.last_error || ""));
+              setStatusHintIsError(true);
+            } else {
+              setStatusHint(null);
+              setStatusHintIsError(false);
+            }
+          } catch (repairErr) {
+            setBuildProgress(null);
+            setStatusHint(formatMemoryGraphFetchError(repairErr, "记忆图谱自动修复失败"));
+            setStatusHintIsError(true);
+            setGraph(EMPTY_GRAPH);
+            setEpisodes([]);
+            return;
+          }
+        } else {
+          setStatusHint(humanizeMemoryGraphError(st.last_error || ""));
+          setStatusHintIsError(true);
+          setBuildProgress(null);
+        }
       } else {
         const buildUi = resolveMemoryBuildUi(st);
         if (buildUi.hint) {
           setStatusHint(buildUi.hint);
+          setStatusHintIsError(false);
           setBuildProgress(buildUi.progress);
         } else {
           setStatusHint(null);
+          setStatusHintIsError(false);
           setBuildProgress(null);
         }
       }
@@ -412,6 +458,9 @@ function MemoryGraphExplorerInner({
         sessionId: effectiveSessionId,
       });
       setEpisodes(eps);
+      setStatusHint(null);
+      setStatusHintIsError(false);
+      setBuildProgress(null);
     } catch (e) {
       const msg = formatMemoryGraphFetchError(e, "加载记忆图谱失败");
       if (
@@ -474,7 +523,8 @@ function MemoryGraphExplorerInner({
           const st = await fetchMemoryGraphStatus(apiBase, apiToken);
           setStatus(st);
           if (shouldShowBuildError(st)) {
-            setStatusHint(`构建异常：${st.last_error}`);
+            setStatusHint(humanizeMemoryGraphError(st.last_error || ""));
+            setStatusHintIsError(true);
             setBuildProgress(null);
             return;
           }
@@ -908,7 +958,10 @@ function MemoryGraphExplorerInner({
         <button
           type="button"
           className="agx-topbar-btn !h-8 !px-[5px]"
-          onClick={() => void reload()}
+          onClick={() => {
+            autoRecoverAttemptedRef.current = false;
+            void reload();
+          }}
           title="刷新图谱"
         >
           <RefreshCw className={`h-4 w-4 ${loading ? "animate-spin" : ""}`} />
@@ -917,7 +970,7 @@ function MemoryGraphExplorerInner({
     </div>
   );
 
-  const isErrorHint = Boolean(statusHint?.startsWith("构建异常"));
+  const isErrorHint = statusHintIsError;
 
   const alerts = (
     <>
