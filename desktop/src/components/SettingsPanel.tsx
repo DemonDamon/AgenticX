@@ -132,6 +132,7 @@ import {
   readScopedLocalStorage,
   writeScopedLocalStorage,
 } from "../utils/backend-scope";
+import { studioFetch } from "../utils/studio-fetch";
 export type { SettingsTab } from "../settings-tab";
 
 const MCP_MARKETPLACE_ID_MAP_KEY = "agenticx:mcp:marketplaceIdToNames";
@@ -1282,13 +1283,12 @@ function HooksTab() {
   const fetchAll = useCallback(async () => {
     try {
       const token = apiToken || (await window.agenticxDesktop.getApiAuthToken()) || "";
-      const effectiveBase = backendUrl || (await window.agenticxDesktop.getApiBase());
       const headers: Record<string, string> = {};
       if (token) headers["x-agx-desktop-token"] = token;
 
       const [hooksRes, settingsRes] = await Promise.all([
-        fetch(`${effectiveBase}/api/hooks`, { headers }),
-        fetch(`${effectiveBase}/api/hooks/settings`, { headers }),
+        studioFetch("/api/hooks", { headers, storeBase: backendUrl }),
+        studioFetch("/api/hooks/settings", { headers, storeBase: backendUrl }),
       ]);
       const hooksData = await hooksRes.json();
       const settingsData = await settingsRes.json();
@@ -1332,13 +1332,13 @@ function HooksTab() {
       setBusy(true);
       try {
         const token = apiToken || (await window.agenticxDesktop.getApiAuthToken()) || "";
-        const effectiveBase = backendUrl || (await window.agenticxDesktop.getApiBase());
         const headers: Record<string, string> = { "Content-Type": "application/json" };
         if (token) headers["x-agx-desktop-token"] = token;
-        const resp = await fetch(`${effectiveBase}/api/hooks/settings`, {
+        const resp = await studioFetch("/api/hooks/settings", {
           method: "PUT",
           headers,
           body: JSON.stringify(patch),
+          storeBase: backendUrl,
         });
         const data = await resp.json().catch(() => null);
         if (!resp.ok || !data?.ok) {

@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { CheckCircle, Clock, XCircle } from "lucide-react";
 import { useAppStore } from "../../../store";
+import { studioFetch } from "../../../utils/studio-fetch";
 
 interface ProposalScore {
   accuracy: number;
@@ -80,14 +81,12 @@ export function PendingProposalsList({
   const [justDone, setJustDone] = useState<Record<string, "approved" | "rejected">>({});
 
   const load = useCallback(async () => {
-    const base = apiBase.replace(/\/$/, "");
-    if (!base) return;
     setLoading(true);
     setErr("");
     try {
       const headers: Record<string, string> = {};
       if (apiToken) headers["X-AGX-Desktop-Token"] = apiToken;
-      const resp = await fetch(`${base}/api/skills/proposals`, { headers });
+      const resp = await studioFetch("/api/skills/proposals", { headers, storeBase: apiBase });
       const data = await resp.json();
       if (!resp.ok || !data.ok) {
         setErr(data.error ?? "加载待审 skill 失败");
@@ -110,17 +109,16 @@ export function PendingProposalsList({
   useEffect(() => { void load(); }, [load]);
 
   const act = async (id: string, kind: "approve" | "reject") => {
-    const base = apiBase.replace(/\/$/, "");
-    if (!base) return;
     setBusyId(id);
     setErr("");
     try {
       const headers: Record<string, string> = { "Content-Type": "application/json" };
       if (apiToken) headers["X-AGX-Desktop-Token"] = apiToken;
-      const resp = await fetch(`${base}/api/skills/proposals/${id}/${kind}`, {
+      const resp = await studioFetch(`/api/skills/proposals/${id}/${kind}`, {
         method: "POST",
         headers,
         body: kind === "reject" ? JSON.stringify({ reason: "用户拒绝" }) : undefined,
+        storeBase: apiBase,
       });
       const data = await resp.json();
       if (!resp.ok || !data.ok) {
@@ -148,7 +146,6 @@ export function PendingProposalsList({
     }
   };
 
-  if (!apiBase.trim()) return null;
   if (!loading && proposals.length === 0 && !err) {
     if (hideWhenEmpty) return null;
     return (

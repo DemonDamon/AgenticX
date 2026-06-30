@@ -10,6 +10,7 @@ import type {
   PreviewChunk,
   RetrievalHit,
 } from "./types";
+import { studioFetch } from "../../../utils/studio-fetch";
 
 export type EmbeddingTestResult = {
   ok: boolean;
@@ -77,7 +78,6 @@ export function createKbApi(
   const p = (suffix: string) => (pathMode === "brain" ? suffix : `/api/kb${suffix}`);
 
   async function doJson<T>(path: string, init: RequestInit = {}): Promise<T> {
-    const base = await resolveApiBase();
     const headers: Record<string, string> = {
       ...(init.headers as Record<string, string> | undefined ?? {}),
     };
@@ -85,7 +85,7 @@ export function createKbApi(
     if (init.body && !(init.body instanceof FormData) && !headers["Content-Type"]) {
       headers["Content-Type"] = "application/json";
     }
-    const res = await fetch(`${base}${path}`, { ...init, headers });
+    const res = await studioFetch(path, { ...init, headers, storeBase: await resolveApiBase() });
     if (!res.ok) {
       let detail: string;
       try {
