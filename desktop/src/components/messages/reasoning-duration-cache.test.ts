@@ -1,9 +1,11 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
+  estimateReasoningSeconds,
   formatReasoningTitle,
   getCachedReasoningDuration,
   measureReasoningSeconds,
+  resolvePersistedReasoningSeconds,
   setCachedReasoningDuration,
 } from "./reasoning-duration-cache";
 
@@ -31,4 +33,12 @@ test("reasoning duration cache survives remount key lookup", () => {
 test("measureReasoningSeconds rounds up to at least one second", () => {
   assert.equal(measureReasoningSeconds(0, 400), 1);
   assert.equal(measureReasoningSeconds(0, 2600), 3);
+});
+
+test("resolvePersistedReasoningSeconds prefers persisted then cache then estimate", () => {
+  assert.equal(resolvePersistedReasoningSeconds("abc", 9), 9);
+  setCachedReasoningDuration("cached-only", 6);
+  assert.equal(resolvePersistedReasoningSeconds("cached-only"), 6);
+  const long = "x".repeat(800);
+  assert.equal(resolvePersistedReasoningSeconds(long), estimateReasoningSeconds(long));
 });

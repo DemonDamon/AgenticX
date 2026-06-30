@@ -45,3 +45,25 @@ export function formatReasoningTitle(options: {
 export function measureReasoningSeconds(startedAt: number, finishedAt: number): number {
   return Math.max(1, Math.round((finishedAt - startedAt) / 1000));
 }
+
+/** Fallback when no stream timer or persisted seconds exist (≈400 chars / sec, min 1). */
+export function estimateReasoningSeconds(text: string): number {
+  const len = String(text ?? "").trim().length;
+  if (len <= 0) return 1;
+  return Math.max(1, Math.min(600, Math.round(len / 400)));
+}
+
+/** Persisted → in-memory cache → length estimate (non-streaming display). */
+export function resolvePersistedReasoningSeconds(
+  reasoningText: string,
+  persistedSeconds?: number,
+): number | undefined {
+  if (typeof persistedSeconds === "number" && persistedSeconds >= 1) {
+    return persistedSeconds;
+  }
+  const trimmed = reasoningText.trim();
+  if (!trimmed) return undefined;
+  const cached = getCachedReasoningDuration(trimmed);
+  if (cached !== undefined) return cached;
+  return estimateReasoningSeconds(trimmed);
+}
