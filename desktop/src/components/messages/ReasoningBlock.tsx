@@ -1,4 +1,5 @@
 import * as React from "react";
+import ReactMarkdown from "react-markdown";
 import { ChevronDown, ChevronRight } from "lucide-react";
 import { ASSISTANT_ICON_RAIL_CLASS, REACT_RAIL_ICON_CLASS, REACT_RAIL_TITLE_CLASS } from "./im-layout";
 import {
@@ -7,6 +8,14 @@ import {
   measureReasoningSeconds,
   setCachedReasoningDuration,
 } from "./reasoning-duration-cache";
+import {
+  chatMarkdownComponents,
+  chatRehypePlugins,
+  chatRemarkPlugins,
+  chatUrlTransform,
+  MarkdownContext,
+  normalizeChatMarkdownContent,
+} from "./markdown-components";
 
 type Props = {
   text: string;
@@ -142,7 +151,18 @@ export function ReasoningBlock({ text, streaming = false, seconds }: Props) {
             />
             <div className="pl-[28px] text-[13px] leading-[1.7] text-text-subtle">
               {content.length > 0 ? (
-                <p className="whitespace-pre-wrap break-words">{content}</p>
+                <div className="msg-content min-w-0 break-words">
+                  <MarkdownContext.Provider value={{ isStreaming: streaming }}>
+                    <ReactMarkdown
+                      remarkPlugins={chatRemarkPlugins}
+                      rehypePlugins={chatRehypePlugins}
+                      components={chatMarkdownComponents}
+                      urlTransform={chatUrlTransform}
+                    >
+                      {normalizeChatMarkdownContent(content, { isStreaming: streaming })}
+                    </ReactMarkdown>
+                  </MarkdownContext.Provider>
+                </div>
               ) : (
                 <div className="flex h-5 items-center">
                   <div className="h-4 w-24 animate-pulse rounded bg-surface-hover" key={tick} />

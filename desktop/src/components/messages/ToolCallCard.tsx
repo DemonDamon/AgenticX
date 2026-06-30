@@ -22,6 +22,7 @@ import {
   type SkillPatchPreviewPayload,
 } from "./skill-manage-preview";
 import { parseWidgetPayload } from "./widget-preview";
+import { openExternalUrl } from "../../utils/open-external";
 
 type Props = {
   message: Message;
@@ -123,11 +124,14 @@ function normalizeHighlightTerms(terms?: string[]): string[] {
   return out;
 }
 
-function renderHighlightedText(content: string, terms: string[]): ReactNode {
-  if (!content) return null;
-  if (terms.length === 0) return content;
+const TOOL_URL_RE = /(https?:\/\/[^\s<>"']+)/giu;
+const TOOL_URL_TRAILING_PUNCT = /[.,;:!?)\]>}"']+$/;
+
+function highlightTextSegment(text: string, terms: string[]): ReactNode {
+  if (!text) return null;
+  if (terms.length === 0) return text;
   const regex = new RegExp(`(${terms.map((t) => escapeRegExp(t)).join("|")})`, "giu");
-  const parts = content.split(regex);
+  const parts = text.split(regex);
   return parts.map((part, idx) => {
     if (!part) return null;
     regex.lastIndex = 0;
@@ -138,6 +142,50 @@ function renderHighlightedText(content: string, terms: string[]): ReactNode {
         {part}
       </mark>
     );
+  });
+}
+
+// URL 整体保持完整可点击，不被关键词高亮拆散；点击走系统默认浏览器。
+function renderHighlightedText(content: string, terms: string[]): ReactNode {
+  if (!content) return null;
+  const segments: Array<{ type: "text" | "url"; value: string }> = [];
+  let last = 0;
+  TOOL_URL_RE.lastIndex = 0;
+  let m: RegExpExecArray | null;
+  while ((m = TOOL_URL_RE.exec(content)) !== null) {
+    const start = m.index;
+    const raw = m[1];
+    if (start > last) segments.push({ type: "text", value: content.slice(last, start) });
+    const url = raw.replace(TOOL_URL_TRAILING_PUNCT, "");
+    if (url) segments.push({ type: "url", value: url });
+    last = start + raw.length;
+    TOOL_URL_RE.lastIndex = last;
+    if (raw.length === 0) break;
+  }
+  if (last < content.length) segments.push({ type: "text", value: content.slice(last) });
+
+  if (segments.length === 0) return content;
+  if (!segments.some((s) => s.type === "url")) return highlightTextSegment(content, terms);
+
+  return segments.map((seg, i) => {
+    if (seg.type === "url") {
+      return (
+        <a
+          key={`tool-link-${i}`}
+          href={seg.value}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="text-cyan-600 underline underline-offset-2 break-all hover:text-cyan-500 dark:text-cyan-400 dark:hover:text-cyan-300"
+          onClick={(e) => {
+            e.preventDefault();
+            openExternalUrl(seg.value);
+          }}
+        >
+          {seg.value}
+        </a>
+      );
+    }
+    return <span key={`tool-text-${i}`}>{highlightTextSegment(seg.value, terms)}</span>;
   });
 }
 
