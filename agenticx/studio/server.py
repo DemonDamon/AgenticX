@@ -718,6 +718,36 @@ def _build_automation_runner_system_prompt(
     return "\n".join(lines)
 
 
+def _studio_cors_origins() -> list[str]:
+    """Allowed browser origins for Desktop dev (Vite) and packaged file loads."""
+    origins: list[str] = [
+        "null",
+        "app://.",
+        "file://",
+    ]
+    dev_ports: set[str] = {"5173", "5713"}
+    env_port = os.getenv("AGX_DEV_PORT", "").strip()
+    if env_port:
+        for part in env_port.split(","):
+            port = part.strip()
+            if port.isdigit():
+                dev_ports.add(port)
+    for port in sorted(dev_ports, key=int):
+        origins.extend(
+            [
+                f"http://localhost:{port}",
+                f"http://127.0.0.1:{port}",
+            ]
+        )
+    extra = os.getenv("AGX_CORS_ORIGINS", "").strip()
+    if extra:
+        for origin in extra.split(","):
+            origin = origin.strip()
+            if origin and origin not in origins:
+                origins.append(origin)
+    return origins
+
+
 def create_studio_app() -> FastAPI:
     _pending_mcp_autoconnect_tasks: set[asyncio.Task[Any]] = set()
 
@@ -917,19 +947,9 @@ def create_studio_app() -> FastAPI:
                 await asyncio.wait_for(task, timeout=1.0)
 
     app = FastAPI(title="AgenticX Studio Service", version="0.1.0", lifespan=_studio_lifespan)
-    default_origins = [
-        "http://localhost:5173",
-        "http://127.0.0.1:5173",
-        "null",
-        "app://.",
-        "file://",
-    ]
-    extra = os.getenv("AGX_CORS_ORIGINS", "").strip()
-    if extra:
-        default_origins.extend([o.strip() for o in extra.split(",") if o.strip()])
     app.add_middleware(
         CORSMiddleware,
-        allow_origins=default_origins,
+        allow_origins=_studio_cors_origins(),
         allow_credentials=False,
         allow_methods=["*"],
         allow_headers=["*"],
