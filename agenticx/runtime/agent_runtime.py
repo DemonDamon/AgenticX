@@ -2158,6 +2158,11 @@ class AgentRuntime:
                 response_text = ""
                 tool_calls: List[Dict[str, Any]] = []
                 response: Any
+                # Reasoning phase timing captured during the streaming path for
+                # reasoning_seconds persistence. Populated only when the model
+                # emits  Mattis... Mattis tags via the streaming path.
+                _stream_reasoning_start_ts: Optional[float] = None
+                _stream_body_start_ts: Optional[float] = None
                 stream_with_tools = getattr(self.llm, "stream_with_tools", None)
                 used_stream_path = False
                 if callable(stream_with_tools):
@@ -2246,6 +2251,21 @@ class AgentRuntime:
                             if chunk_type == "content":
                                 tok = str(stream_chunk.get("text", ""))
                                 if tok:
+                                    # Capture reasoning phase timing for
+                                    # reasoning_seconds persistence. The first
+                                    #  Mattis marks reasoning start; the first
+                                    #  Mattis/ marks body start.
+                                    if (
+                                        _stream_reasoning_start_ts is None
+                                        and _THINK_OPEN_TAG in response_text + tok
+                                    ):
+                                        _stream_reasoning_start_ts = time.monotonic()
+                                    if (
+                                        _stream_reasoning_start_ts is not None
+                                        and _stream_body_start_ts is None
+                                        and _THINK_CLOSE_TAG in response_text + tok
+                                    ):
+                                        _stream_body_start_ts = time.monotonic()
                                     response_text += tok
                                     _vis = followup_emitter.feed_append(tok)
                                     if _vis:
@@ -2801,10 +2821,28 @@ class AgentRuntime:
                 return
             _reset_llm_timeout_retry_count(session)
             reset_provider_timeout_streak(session)
+            # Preserve reasoning from the streamed accumulation before
+            # response.content overwrites it. Non-streaming response.content
+            # carries reasoning in a separate field (reasoning_content), so
+            # _split_reasoning_and_body on the overwritten text yields empty
+            # and the reasoning chain never reaches messages.json / the final
+            # SSE event, causing the "思考过程" block to vanish after the
+            # user switches away from and back into the session.
+            _streamed_reasoning, _ = _split_reasoning_and_body(response_text)
             response_text = _sanitize_structured_assistant_text(
                 (response.content or "").strip(),
                 allowed_tool_names,
             )
+            # Fallback: recover reasoning from the non-streaming response
+            # object when the streaming path did not run (provider without
+            # stream_with_tools, or pure ainvoke).
+            _rc_any = getattr(response, "reasoning_content", None) or getattr(
+                response, "reasoning", None
+            )
+            _nonstream_reasoning = ""
+            if isinstance(_rc_any, str) and _rc_any.strip():
+                _nonstream_reasoning = _rc_any.strip()
+            _turn_reasoning = _streamed_reasoning or _nonstream_reasoning
             raw_tc = response.tool_calls or []
             tool_calls = [
                 tc for tc in raw_tc
@@ -2969,11 +3007,20 @@ class AgentRuntime:
                         _last_am["content"] = final_text
                 if not _is_system_trigger:
                     _reasoning_text, _clean_body = _split_reasoning_and_body(final_text)
+                    if not _reasoning_text and _turn_reasoning:
+                        _reasoning_text = _turn_reasoning
                     _hist_assistant: Dict[str, Any] = {"role": "assistant", "content": _clean_body or final_text}
                     if sug_list:
                         _hist_assistant["suggested_questions"] = list(sug_list)
                     if _reasoning_text:
                         _hist_assistant["reasoning"] = _reasoning_text[:16384]
+                        if (
+                            _stream_reasoning_start_ts is not None
+                            and _stream_body_start_ts is not None
+                        ):
+                            _rs = int(_stream_body_start_ts - _stream_reasoning_start_ts)
+                            if _rs >= 1:
+                                _hist_assistant["reasoning_seconds"] = _rs
                     try:
                         from agenticx.studio.references import turn_reference_payload
 
@@ -2997,6 +3044,13 @@ class AgentRuntime:
                     _final_data["suggested_questions"] = list(sug_list)
                 if _final_reasoning:
                     _final_data["reasoning"] = _final_reasoning[:16384]
+                    if (
+                        _stream_reasoning_start_ts is not None
+                        and _stream_body_start_ts is not None
+                    ):
+                        _rs = int(_stream_body_start_ts - _stream_reasoning_start_ts)
+                        if _rs >= 1:
+                            _final_data["reasoning_seconds"] = _rs
                 try:
                     from agenticx.studio.references import turn_reference_payload
 
