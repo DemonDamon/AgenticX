@@ -67,7 +67,8 @@ import { ChatImAvatar, ImBubble } from "./messages/ImBubble";
 import { MessageTimestamp } from "./messages/MessageTimestamp";
 import {
   ASSISTANT_ACTION_ICON_ROW_CLASS,
-  ASSISTANT_ACTION_TAIL_CLASS,
+  ASSISTANT_ACTION_RHYTHM_END_CLASS,
+  ASSISTANT_BODY_TAIL_CLASS,
   ASSISTANT_FOLLOWUP_CHIP_CLASS,
   ASSISTANT_FOLLOWUP_LIST_CLASS,
   getAssistantActionStyle,
@@ -5835,6 +5836,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
         reactHideBadge?: boolean;
         reactShowActions?: boolean;
         omitSuggestedQuestions?: boolean;
+        actionRhythmBodyTail?: boolean;
         holdToolGroupProgress?: boolean;
       }
     ) => {
@@ -5843,6 +5845,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
       const reactHideBadge = opts.reactHideBadge ?? false;
       const reactShowActions = opts.reactShowActions ?? false;
       const omitSuggestedQuestions = opts.omitSuggestedQuestions ?? false;
+      const actionRhythmBodyTail = opts.actionRhythmBodyTail ?? false;
       const holdToolGroupProgress = opts.holdToolGroupProgress ?? false;
       if (row.kind === "message") {
         const message = row.message;
@@ -5855,7 +5858,10 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
         const imAssistantName = groupSender?.name ?? paneAvatarMeta.name;
         const imAssistantAvatarUrl = groupSender?.url ?? paneAvatarMeta.url;
         return (
-          <div key={message.id} className="group/sel relative">
+          <div
+            key={message.id}
+            className={`group/sel relative${actionRhythmBodyTail ? ` ${ASSISTANT_BODY_TAIL_CLASS}` : ""}`}
+          >
             {rowSelectable && !isSelected && (
               <button
                 type="button"
@@ -5903,6 +5909,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
               selected={rowSelectable && isSelected}
               onFollowupClick={sendFollowupChip}
               omitSuggestedQuestions={omitSuggestedQuestions}
+              actionRhythmBodyTail={actionRhythmBodyTail}
               budgetExceededActive={Boolean(budgetExceededInfo)}
               allMessages={pane.messages ?? []}
               sessionId={(pane.sessionId || "").trim() || undefined}
@@ -6019,116 +6026,155 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
                     </button>
                   ) : null}
                   {useUnifiedReActCard ? (
-                    <div className="min-w-0 flex-1 overflow-hidden">
-                      {groupedWork.map((r, i) => {
-                        const omitSq =
-                          Boolean(
-                            peeledFollowupAssistant &&
-                              r.kind === "message" &&
-                              r.message.role === "assistant" &&
-                              r.message.id === peeledFollowupAssistant.id
-                          );
+                    (() => {
+                      const actionTailReady =
+                        !hasStreamingRow && !sessionWorkInProgress && workMessages.length > 0;
+                      const rhythmEndIdx =
+                        actionTailReady && groupedWork.length > 0
+                          ? groupedWork.length - 1
+                          : groupedWork.length;
+                      const headRows = groupedWork.slice(0, rhythmEndIdx);
+                      const tailRow =
+                        rhythmEndIdx < groupedWork.length ? groupedWork[rhythmEndIdx] : null;
+
+                      const renderReActBlockActionIcons = () => (
+                        <div className={ASSISTANT_ACTION_ICON_ROW_CLASS} style={reactActionStyle}>
+                          <HoverTip label="复制">
+                            <button
+                              type="button"
+                              className="rounded p-1 hover:bg-surface-hover hover:text-text-strong"
+                              onMouseDown={(e) => e.preventDefault()}
+                              onClick={() => void copyReActBlock(workMessages)}
+                            >
+                              <Copy size={13} />
+                            </button>
+                          </HoverTip>
+                          {lastAssistantInBlock ? (
+                            <>
+                              <HoverTip label="引用">
+                                <button
+                                  type="button"
+                                  className="rounded p-1 hover:bg-surface-hover hover:text-text-strong"
+                                  onMouseDown={(e) => e.preventDefault()}
+                                  onClick={() =>
+                                    setQuoteTarget({
+                                      message: lastAssistantInBlock,
+                                      body: resolveQuoteBody(lastAssistantInBlock, undefined),
+                                    })
+                                  }
+                                >
+                                  <Quote size={13} />
+                                </button>
+                              </HoverTip>
+                              <HoverTip label="收藏">
+                                <button
+                                  type="button"
+                                  className="rounded p-1 hover:bg-surface-hover hover:text-text-strong"
+                                  onMouseDown={(e) => e.preventDefault()}
+                                  onClick={() => void favoriteMessage(lastAssistantInBlock, undefined)}
+                                >
+                                  <Bookmark size={13} />
+                                </button>
+                              </HoverTip>
+                              <HoverTip label="转发">
+                                <button
+                                  type="button"
+                                  className="rounded p-1 hover:bg-surface-hover hover:text-text-strong"
+                                  onMouseDown={(e) => e.preventDefault()}
+                                  onClick={() => forwardOneMessage(lastAssistantInBlock, undefined)}
+                                >
+                                  <Forward size={13} />
+                                </button>
+                              </HoverTip>
+                            </>
+                          ) : null}
+                          <HoverTip label="多选">
+                            <button
+                              type="button"
+                              className={`rounded p-1 hover:bg-surface-hover ${
+                                blockAnySelected ? "text-cyan-400 hover:text-cyan-300" : "hover:text-text-strong"
+                              }`}
+                              onMouseDown={(e) => e.preventDefault()}
+                              onClick={() => toggleSelectBlock(workMessages)}
+                            >
+                              <LayoutList size={13} />
+                            </button>
+                          </HoverTip>
+                          <MessageTimestamp ts={lastAssistantInBlock?.timestamp} align="left" />
+                        </div>
+                      );
+
+                      const renderReActBlockFollowups = () =>
+                        peeledFollowupAssistant?.suggestedQuestions &&
+                        peeledFollowupAssistant.suggestedQuestions.length > 0 ? (
+                          <div className={ASSISTANT_FOLLOWUP_LIST_CLASS} style={reactActionStyle}>
+                            {peeledFollowupAssistant.suggestedQuestions.slice(0, 3).map((q, qi) => (
+                              <button
+                                key={`${qi}-${q}`}
+                                type="button"
+                                className={ASSISTANT_FOLLOWUP_CHIP_CLASS}
+                                onMouseDown={(e) => e.preventDefault()}
+                                onClick={() =>
+                                  sendFollowupChip(q, {
+                                    ownerSessionId: peeledFollowupAssistant?.ownerSessionId,
+                                  })
+                                }
+                              >
+                                <span>{q}</span>
+                                <ArrowRight className="h-3 w-3 shrink-0 opacity-50 transition group-hover:opacity-80" />
+                              </button>
+                            ))}
+                          </div>
+                        ) : null;
+
+                      const mapGroupedRow = (r: GroupedChatRow, i: number) => {
+                        const omitSq = Boolean(
+                          peeledFollowupAssistant &&
+                            r.kind === "message" &&
+                            r.message.role === "assistant" &&
+                            r.message.id === peeledFollowupAssistant.id
+                        );
+                        const bodyTail = Boolean(
+                          omitSq &&
+                            actionTailReady &&
+                            tailRow &&
+                            r === tailRow
+                        );
                         return renderGroupedRow(r, i, {
                           reactWorkColumn: true,
                           reactFlat: true,
                           reactHideBadge: i > 0,
                           omitSuggestedQuestions: omitSq,
+                          actionRhythmBodyTail: bodyTail,
                           holdToolGroupProgress:
                             r.kind === "tool_group" &&
                             i === lastToolGroupIdxInWork &&
-                            shouldHoldToolGroupProgress(workMessages, r.messages, isStreamingCurrentSession),
+                            shouldHoldToolGroupProgress(
+                              workMessages,
+                              r.messages,
+                              isStreamingCurrentSession
+                            ),
                         });
-                      })}
-                      {!hasStreamingRow && !sessionWorkInProgress && workMessages.length > 0 ? (
-                        <div className={ASSISTANT_ACTION_TAIL_CLASS}>
-                          <div className={`${ASSISTANT_ACTION_ICON_ROW_CLASS} mt-2.5`} style={reactActionStyle}>
-                            <HoverTip label="复制">
-                              <button
-                                type="button"
-                                className="rounded p-1 hover:bg-surface-hover hover:text-text-strong"
-                                onMouseDown={(e) => e.preventDefault()}
-                                onClick={() => void copyReActBlock(workMessages)}
-                              >
-                                <Copy size={13} />
-                              </button>
-                            </HoverTip>
-                            {lastAssistantInBlock ? (
-                              <>
-                                <HoverTip label="引用">
-                                  <button
-                                    type="button"
-                                    className="rounded p-1 hover:bg-surface-hover hover:text-text-strong"
-                                    onMouseDown={(e) => e.preventDefault()}
-                                    onClick={() =>
-                                      setQuoteTarget({
-                                        message: lastAssistantInBlock,
-                                        body: resolveQuoteBody(lastAssistantInBlock, undefined),
-                                      })
-                                    }
-                                  >
-                                    <Quote size={13} />
-                                  </button>
-                                </HoverTip>
-                                <HoverTip label="收藏">
-                                  <button
-                                    type="button"
-                                    className="rounded p-1 hover:bg-surface-hover hover:text-text-strong"
-                                    onMouseDown={(e) => e.preventDefault()}
-                                    onClick={() => void favoriteMessage(lastAssistantInBlock, undefined)}
-                                  >
-                                    <Bookmark size={13} />
-                                  </button>
-                                </HoverTip>
-                                <HoverTip label="转发">
-                                  <button
-                                    type="button"
-                                    className="rounded p-1 hover:bg-surface-hover hover:text-text-strong"
-                                    onMouseDown={(e) => e.preventDefault()}
-                                    onClick={() => forwardOneMessage(lastAssistantInBlock, undefined)}
-                                  >
-                                    <Forward size={13} />
-                                  </button>
-                                </HoverTip>
-                              </>
-                            ) : null}
-                            <HoverTip label="多选">
-                              <button
-                                type="button"
-                                className={`rounded p-1 hover:bg-surface-hover ${
-                                  blockAnySelected ? "text-cyan-400 hover:text-cyan-300" : "hover:text-text-strong"
-                                }`}
-                                onMouseDown={(e) => e.preventDefault()}
-                                onClick={() => toggleSelectBlock(workMessages)}
-                              >
-                                <LayoutList size={13} />
-                              </button>
-                            </HoverTip>
-                            <MessageTimestamp ts={lastAssistantInBlock?.timestamp} align="left" />
-                          </div>
-                          {peeledFollowupAssistant?.suggestedQuestions &&
-                          peeledFollowupAssistant.suggestedQuestions.length > 0 ? (
-                            <div className={`${ASSISTANT_FOLLOWUP_LIST_CLASS} mt-2.5`} style={reactActionStyle}>
-                              {peeledFollowupAssistant.suggestedQuestions.slice(0, 3).map((q, qi) => (
-                                <button
-                                  key={`${qi}-${q}`}
-                                  type="button"
-                                  className={ASSISTANT_FOLLOWUP_CHIP_CLASS}
-                                  onMouseDown={(e) => e.preventDefault()}
-                                  onClick={() =>
-                                    sendFollowupChip(q, {
-                                      ownerSessionId: peeledFollowupAssistant?.ownerSessionId,
-                                    })
-                                  }
-                                >
-                                  <span>{q}</span>
-                                  <ArrowRight className="h-3 w-3 shrink-0 opacity-50 transition group-hover:opacity-80" />
-                                </button>
-                              ))}
+                      };
+
+                      return (
+                        <div className="min-w-0 flex-1 overflow-hidden">
+                          {headRows.map((r, i) => mapGroupedRow(r, i))}
+                          {actionTailReady && tailRow ? (
+                            <div className={ASSISTANT_ACTION_RHYTHM_END_CLASS}>
+                              {mapGroupedRow(tailRow, rhythmEndIdx)}
+                              {renderReActBlockActionIcons()}
+                              {renderReActBlockFollowups()}
                             </div>
+                          ) : actionTailReady ? (
+                            <>
+                              {renderReActBlockActionIcons()}
+                              {renderReActBlockFollowups()}
+                            </>
                           ) : null}
                         </div>
-                      ) : null}
-                    </div>
+                      );
+                    })()
                   ) : (
                     <div className="flex min-w-0 flex-1 flex-col gap-0">
                       {groupedWork.map((r, i) =>

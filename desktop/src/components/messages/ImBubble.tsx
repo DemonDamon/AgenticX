@@ -62,6 +62,8 @@ type Props = {
   onOpenFileReference?: (request: FileReferenceOpenRequest) => void;
   /** Suppress in-bubble chips; used when parent renders them outside a unified ReAct container. */
   omitSuggestedQuestions?: boolean;
+  /** Tighten trailing line-box before a peeled block-level action row (ReAct card). */
+  actionRhythmBodyTail?: boolean;
   /** Render-only hint when this assistant reply was cut off by session token budget. */
   budgetIncompleteHint?: boolean;
   /** Group chat: show avatar + display name on every bubble (WeChat-style). */
@@ -196,6 +198,7 @@ export function ImBubble({
   onRevealPath,
   onOpenFileReference,
   omitSuggestedQuestions = false,
+  actionRhythmBodyTail = false,
   budgetIncompleteHint = false,
   showSenderIdentity = false,
   senderAvatarVariant = "circle",
@@ -438,6 +441,8 @@ export function ImBubble({
   // line spacing reported in production. Neutralize them for rail rows only.
   const railRow = compactAssistant && noBubbleBorder;
   const assistantActionRhythmStack = !isUser && showAssistantFollowups;
+  const tightenAssistantBodyLeading = assistantActionRhythmStack || actionRhythmBodyTail;
+  const assistantBodyLeadingClass = tightenAssistantBodyLeading ? "leading-snug" : "leading-relaxed";
 
   return (
     <div
@@ -547,16 +552,16 @@ export function ImBubble({
             <div
               className={
                 compactAssistant && noBubbleBorder
-                  ? "relative min-w-0 w-full overflow-x-auto overflow-y-visible px-3 py-0 text-[var(--agx-chat-im-body-font-size)] leading-relaxed"
+                  ? `relative min-w-0 w-full overflow-x-auto overflow-y-visible px-3 py-0 text-[var(--agx-chat-im-body-font-size)] ${assistantBodyLeadingClass}`
                   : isUser
                     ? "agx-im-user-bubble relative min-w-0 w-fit max-w-full overflow-x-auto overflow-y-visible rounded-xl border px-3 py-3 text-[var(--agx-chat-im-body-font-size)] leading-relaxed rounded-tr-[4px]"
                     : isMetaPendingWork
-                      ? "relative min-w-0 w-full overflow-x-auto overflow-y-visible px-3 py-0 text-[var(--agx-chat-im-body-font-size)] leading-relaxed"
+                      ? `relative min-w-0 w-full overflow-x-auto overflow-y-visible px-3 py-0 text-[var(--agx-chat-im-body-font-size)] ${assistantBodyLeadingClass}`
                     : groupIdentityLayout
-                      ? "relative min-w-0 w-full overflow-x-auto overflow-y-visible px-3 pt-1 pb-0 text-[var(--agx-chat-im-body-font-size)] leading-relaxed"
+                      ? `relative min-w-0 w-full overflow-x-auto overflow-y-visible px-3 pt-1 pb-0 text-[var(--agx-chat-im-body-font-size)] ${assistantBodyLeadingClass}`
                       : (message.references?.length ?? 0) > 0
-                        ? "relative min-w-0 w-full overflow-x-auto overflow-y-visible px-3 pt-1 pb-0 text-[var(--agx-chat-im-body-font-size)] leading-relaxed"
-                        : "relative min-w-0 w-full overflow-x-auto overflow-y-visible px-3 pt-3 pb-0 text-[var(--agx-chat-im-body-font-size)] leading-relaxed"
+                        ? `relative min-w-0 w-full overflow-x-auto overflow-y-visible px-3 pt-1 pb-0 text-[var(--agx-chat-im-body-font-size)] ${assistantBodyLeadingClass}`
+                        : `relative min-w-0 w-full overflow-x-auto overflow-y-visible px-3 pt-3 pb-0 text-[var(--agx-chat-im-body-font-size)] ${assistantBodyLeadingClass}`
               }
               style={compactAssistant && noBubbleBorder ? undefined : userBubbleStyle}
             >
