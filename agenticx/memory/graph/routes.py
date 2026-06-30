@@ -36,11 +36,22 @@ def register_memory_graph_routes(app, *, check_token) -> None:
         check_token(token)
 
     def _map_error(exc: Exception) -> HTTPException:
+        from agenticx.memory.graph.graph_recovery import user_facing_graph_error
+
         if isinstance(exc, MemoryGraphDisabledError):
             return HTTPException(status_code=503, detail={"error": "memory_graph_disabled"})
         if isinstance(exc, MemoryGraphUnavailableError):
-            return HTTPException(status_code=503, detail={"error": "memory_graph_unavailable", "message": str(exc)})
-        return HTTPException(status_code=500, detail={"error": "memory_graph_error", "message": str(exc)})
+            return HTTPException(
+                status_code=503,
+                detail={
+                    "error": "memory_graph_unavailable",
+                    "message": user_facing_graph_error(exc),
+                },
+            )
+        return HTTPException(
+            status_code=500,
+            detail={"error": "memory_graph_error", "message": user_facing_graph_error(exc)},
+        )
 
     @router.get("/overview")
     async def memory_graph_overview(
@@ -193,6 +204,26 @@ def register_memory_graph_routes(app, *, check_token) -> None:
 
         status = await run_in_settings_pool(MemoryGraphStore.build_status_payload_sync)
         return {"ok": True, **status}
+
+    @router.post("/recover")
+    async def memory_graph_recover(
+        x_agx_desktop_token: Optional[str] = Header(default=None),
+    ) -> dict[str, Any]:
+        """Auto-repair corrupt Kuzu DB and warm Graphiti (no manual cp / terminal steps)."""
+        _auth(x_agx_desktop_token)
+        cfg = load_memory_graph_config()
+        if not cfg.enabled:
+            raise HTTPException(status_code=503, detail={"error": "memory_graph_disabled"})
+        try:
+            store = MemoryGraphStore.singleton()
+            result = await store.repair_database()
+            status = store.get_status()
+            return {"ok": True, **result, "status": status}
+        except (MemoryGraphDisabledError, MemoryGraphUnavailableError) as exc:
+            raise _map_error(exc) from exc
+        except Exception as exc:
+            logger.warning("memory graph recover failed: %s", exc, exc_info=True)
+            raise _map_error(exc) from exc
 
     @router.delete("/episode/{episode_uuid}")
     async def memory_graph_delete_episode(
