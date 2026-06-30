@@ -23,6 +23,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 from typing import AsyncGenerator
+from typing import Dict
 from email.message import EmailMessage
 
 import httpx
@@ -57,7 +58,7 @@ from agenticx.cli.studio_mcp import (
     set_mcp_skip_default_names_config,
 )
 from agenticx.llms.provider_resolver import ProviderResolver
-from agenticx.runtime import AgentRuntime, AutoApproveConfirmGate
+from agenticx.runtime import AgentRuntime, AutoApproveConfirmGate, AutoSuspendClarifyGate
 from agenticx.runtime.auto_solve import AutoSolveMode
 from agenticx.runtime.events import EventType, RuntimeEvent, normalize_tool_sse_payload
 from agenticx.runtime.loop_controller import LoopController
@@ -77,6 +78,7 @@ from agenticx.runtime.group_router import (
 from agenticx.runtime.team_manager import AgentTeamManager
 from agenticx.studio.protocols import (
     ChatRequest,
+    ClarifyResponse,
     ConfirmResponse,
     ContinueRequest,
     SessionState,
@@ -307,6 +309,50 @@ def _buffered_event_to_sse_lines(buffered: BufferedEvent) -> list[str]:
     lines = [f"id: {buffered.seq}\n"]
     lines.extend(_runtime_event_to_sse_lines(buffered.event))
     return lines
+
+
+def _persist_clarification_prompt(session: Any, data: Dict[str, Any], *, suspended: bool = False) -> None:
+    """Append a UI-visible clarification prompt row to chat_history (NFR-2).
+
+    Idempotent: skip if the last row already records the same request_id.
+    The ``metadata.kind == "clarification"`` marker is filtered out of LLM
+    context by the runtime sanitizer so it does not pollute the next turn;
+    the user's actual answer arrives separately as a real tool result.
+    """
+    try:
+        request_id = str(data.get("id", "") or "")
+        if not request_id:
+            return
+        history = getattr(session, "chat_history", None)
+        if history is None:
+            return
+        if history:
+            tail = history[-1]
+            if (
+                isinstance(tail, dict)
+                and tail.get("role") == "tool"
+                and isinstance(tail.get("metadata"), dict)
+                and tail["metadata"].get("kind") == "clarification"
+                and str(tail["metadata"].get("request_id", "")) == request_id
+            ):
+                return
+        prompt = str(data.get("prompt", "") or "")
+        options = list(data.get("options", []) or [])
+        allow_free_text = bool(data.get("allow_free_text", True))
+        history.append({
+            "role": "tool",
+            "content": prompt,
+            "metadata": {
+                "kind": "clarification",
+                "request_id": request_id,
+                "prompt": prompt,
+                "options": options,
+                "allow_free_text": allow_free_text,
+                "suspended": suspended,
+            },
+        })
+    except Exception:
+        logger.exception("[clarify] failed to persist clarification prompt")
 
 
 def _parse_sse_since_seq(
@@ -984,6 +1030,14 @@ def create_studio_app() -> FastAPI:
         if _global_auto_confirm_enabled():
             return AutoApproveConfirmGate()
         return managed.get_confirm_gate(agent_id)
+
+    def _resolve_clarify_gate(managed: Any, agent_id: str = "meta", *, is_automation: bool = False) -> Any:
+        # Clarification must NEVER be auto-approved (that would drop the user's
+        # actual answer). Automation sessions get AutoSuspendClarifyGate which
+        # returns a suspended sentinel immediately so the agent wraps up.
+        if is_automation:
+            return AutoSuspendClarifyGate()
+        return managed.get_clarify_gate(agent_id)
 
     def _resolve_mcp_auto_connect_setting() -> list[str] | None:
         """Resolve mcp.auto_connect.
@@ -2164,6 +2218,29 @@ def create_studio_app() -> FastAPI:
             raise HTTPException(status_code=404, detail="confirm request not found")
         return {"ok": True}
 
+    @app.post("/api/clarify")
+    async def post_clarify(
+        payload: ClarifyResponse,
+        x_agx_desktop_token: str | None = Header(default=None),
+    ) -> dict:
+        _check_token(x_agx_desktop_token)
+        managed = manager.get(payload.session_id, touch=False)
+        if managed is None:
+            raise HTTPException(status_code=404, detail="session not found")
+        gate = managed.get_clarify_gate(payload.agent_id)
+        if payload.agent_id != "meta" and managed.team_manager is not None:
+            team_gate = managed.team_manager.get_clarify_gate(payload.agent_id)
+            if team_gate is not None:
+                gate = team_gate
+        answer = {
+            "answer_text": payload.answer_text or "",
+            "selected_options": list(payload.selected_options or []),
+        }
+        ok = gate.resolve(payload.request_id, answer)
+        if not ok:
+            raise HTTPException(status_code=404, detail="clarification request not found")
+        return {"ok": True}
+
     @app.post("/api/chat")
     async def chat(
         payload: ChatRequest,
@@ -2452,6 +2529,7 @@ def create_studio_app() -> FastAPI:
                         max_tool_rounds=_resolve_max_tool_rounds(),
                         meta_leader_display_name=meta_leader_label,
                         confirm_gate_factory=lambda agent_id: _resolve_confirm_gate(managed, agent_id),
+                        clarify_gate_factory=lambda agent_id: _resolve_clarify_gate(managed, agent_id),
                     )
                     quoted_content = str(payload.quoted_content or "")
                     quoted_message_id = str(payload.quoted_message_id or "")
@@ -2612,6 +2690,7 @@ def create_studio_app() -> FastAPI:
         meta_confirm_gate = (
             AutoApproveConfirmGate() if is_automation_session else _resolve_confirm_gate(managed, "meta")
         )
+        meta_clarify_gate = _resolve_clarify_gate(managed, "meta", is_automation=is_automation_session)
         from agenticx.studio.turn_interruption import clear_stale_unattended_failure
 
         clear_stale_unattended_failure(session)
@@ -2631,6 +2710,8 @@ def create_studio_app() -> FastAPI:
                 team_manager=team_manager,
                 max_tool_rounds=_resolve_max_tool_rounds(),
                 mid_turn_persist=_mid_turn_persist_cb,
+                clarify_gate=meta_clarify_gate,
+                is_unattended=is_automation_session,
             )
         except TypeError:
             runtime = AgentRuntime(
@@ -2774,6 +2855,21 @@ def create_studio_app() -> FastAPI:
                         )
                 elif _runtime_error_counts_as_failure(event):
                     had_runtime_failure = True
+                # Persist clarification_required as a visible tool message so the
+                # prompt card survives session switch / refresh (NFR-2). The
+                # agent_runtime context sanitizer filters it out of LLM context
+                # to avoid duplicating the user's answer (which arrives as a
+                # real tool result).
+                if (
+                    event.agent_id == "meta"
+                    and event.type == EventType.CLARIFICATION_REQUIRED.value
+                ):
+                    _persist_clarification_prompt(session, event.data)
+                elif (
+                    event.agent_id == "meta"
+                    and event.type == EventType.CLARIFICATION_SUSPENDED.value
+                ):
+                    _persist_clarification_prompt(session, event.data, suspended=True)
 
             try:
                 async def _produce_meta_events() -> None:
@@ -3290,6 +3386,7 @@ def create_studio_app() -> FastAPI:
             except Exception:
                 pass
 
+        loop_is_automation = str(getattr(managed, "avatar_id", "") or "").startswith("automation:")
         try:
             runtime = AgentRuntime(
                 llm,
@@ -3297,6 +3394,8 @@ def create_studio_app() -> FastAPI:
                 team_manager=loop_tm,
                 max_tool_rounds=_resolve_max_tool_rounds(),
                 mid_turn_persist=_loop_persist_cb,
+                clarify_gate=_resolve_clarify_gate(managed, "meta", is_automation=loop_is_automation),
+                is_unattended=loop_is_automation,
             )
         except TypeError:
             runtime = AgentRuntime(
@@ -3351,6 +3450,10 @@ def create_studio_app() -> FastAPI:
                         break
                     if event.agent_id == "meta" and event.type == EventType.TOOL_RESULT.value:
                         _flush_taskspace_hint(manager, session_id, session)
+                    if event.agent_id == "meta" and event.type == EventType.CLARIFICATION_REQUIRED.value:
+                        _persist_clarification_prompt(session, event.data)
+                    elif event.agent_id == "meta" and event.type == EventType.CLARIFICATION_SUSPENDED.value:
+                        _persist_clarification_prompt(session, event.data, suspended=True)
                     for line in _runtime_event_to_sse_lines(event):
                         yield line
             except Exception as exc:

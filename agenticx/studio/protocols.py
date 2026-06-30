@@ -70,6 +70,14 @@ class ConfirmResponse(BaseModel):
     agent_id: str = "meta"
 
 
+class ClarifyResponse(BaseModel):
+    session_id: str
+    request_id: str
+    agent_id: str = "meta"
+    answer_text: str = ""
+    selected_options: List[str] = Field(default_factory=list)
+
+
 class SessionState(BaseModel):
     session_id: str
     provider: Optional[str] = None

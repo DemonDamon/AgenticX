@@ -55,7 +55,10 @@ import { SpawnsColumn } from "./SpawnsColumn";
 import { MessageRenderer, renderToolMessageExtras } from "./messages/MessageRenderer";
 import type { SkillPatchPreviewPayload } from "./messages/skill-manage-preview";
 import { groupConsecutiveToolMessages, type GroupedChatRow } from "./messages/group-tool-messages";
-import { isInterruptedAssistantPlaceholder } from "../utils/noisy-chat-messages";
+import {
+  isEphemeralStopErrorText,
+  isInterruptedAssistantPlaceholder,
+} from "../utils/noisy-chat-messages";
 import { expandMessagesToTopLevelRows } from "./messages/react-blocks";
 import { shouldHideStreamOverlay, shouldShowMidTurnStreamActivity } from "../utils/stream-overlay-policy";
 import { TurnToolGroupCard } from "./messages/TurnToolGroupCard";
@@ -1226,6 +1229,14 @@ type Props = {
     agentId?: string,
     context?: Record<string, unknown>
   ) => Promise<boolean>;
+  onOpenClarification?: (
+    requestId: string,
+    prompt: string,
+    options: string[],
+    allowFreeText: boolean,
+    agentId?: string,
+    context?: Record<string, unknown>
+  ) => Promise<{ answerText: string; selectedOptions: string[] } | null>;
 };
 
 function ModelBadge({ provider, model }: { provider?: string; model?: string }) {
@@ -2118,7 +2129,7 @@ const GroupMembersSidePanel = memo(function GroupMembersSidePanel({
   );
 });
 
-export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
+export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarification }: Props) {
   const pane = useAppStore((s) => s.panes.find((item) => item.id === paneId) ?? FALLBACK_PANE);
   const paneSortableListeners = usePaneSortableHandle();
   const panes = useAppStore((s) => s.panes);
@@ -5894,6 +5905,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
               streamStalled={message.id === "__stream__" && stallState === "stall"}
               streamStalledSeconds={message.id === "__stream__" ? silentSeconds : 0}
               onSkillManageApply={applySkillPatchPreview}
+              onOpenClarification={onOpenClarification}
             />
           </div>
         );
@@ -7729,6 +7741,78 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
                 });
               }
             }
+            if (payload.type === "clarification_required") {
+              const clarifyReqId = String(payload.data?.id ?? "");
+              const clarifyPrompt = String(payload.data?.prompt ?? "");
+              const clarifyOptions = Array.isArray(payload.data?.options)
+                ? (payload.data.options as string[]).map((o) => String(o)).filter(Boolean)
+                : [];
+              const clarifyAllowFreeText = payload.data?.allow_free_text !== false;
+              if (eventAgentId !== "meta") {
+                updateSubAgent(eventAgentId, {
+                  status: "awaiting_input",
+                  currentAction: "等待你的输入",
+                  pendingClarification: clarifyReqId
+                    ? {
+                        requestId: clarifyReqId,
+                        prompt: clarifyPrompt,
+                        options: clarifyOptions,
+                        allowFreeText: clarifyAllowFreeText,
+                        agentId: eventAgentId,
+                        sessionId: requestSessionId,
+                        context: payload.data?.context,
+                      }
+                    : undefined,
+                });
+                addSubAgentEvent(eventAgentId, {
+                  type: "clarification_required",
+                  content: clarifyPrompt || "等待输入",
+                });
+              }
+              if (onOpenClarification && clarifyReqId) {
+                const answer = await onOpenClarification(
+                  clarifyReqId,
+                  clarifyPrompt,
+                  clarifyOptions,
+                  clarifyAllowFreeText,
+                  eventAgentId,
+                  payload.data?.context,
+                );
+                await fetch(`${apiBase}/api/clarify`, {
+                  method: "POST",
+                  headers: { "Content-Type": "application/json", "x-agx-desktop-token": apiToken },
+                  body: JSON.stringify({
+                    session_id: requestSessionId,
+                    request_id: clarifyReqId,
+                    agent_id: eventAgentId,
+                    answer_text: answer?.answerText ?? "",
+                    selected_options: answer?.selectedOptions ?? [],
+                  }),
+                });
+              }
+            }
+            if (payload.type === "clarification_response") {
+              if (eventAgentId !== "meta") {
+                updateSubAgent(eventAgentId, {
+                  status: "running",
+                  currentAction: "已收到回复，继续执行",
+                  pendingClarification: undefined,
+                });
+                addSubAgentEvent(eventAgentId, {
+                  type: "clarification_response",
+                  content: "已收到用户回复",
+                });
+              }
+            }
+            if (payload.type === "clarification_suspended") {
+              if (eventAgentId !== "meta") {
+                updateSubAgent(eventAgentId, {
+                  status: "running",
+                  currentAction: "无人值守，提问已挂起",
+                  pendingClarification: undefined,
+                });
+              }
+            }
             if (payload.type === "subagent_started") {
               const subId = payload.data?.agent_id;
               console.debug("[ChatPane] SSE subagent_started", subId, "sessionId:", requestSessionId);
@@ -7964,7 +8048,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
                 setExhaustedRounds({ rounds, maxRounds });
                 setStallState("exhausted");
                 addPaneMessageIfSessionActive(pane.id, "tool", errText, "meta");
-              } else {
+              } else if (!isEphemeralStopErrorText(errText)) {
                 addPaneMessageIfSessionActive(pane.id, "tool", `❌ ${errText}`, "meta");
               }
             }

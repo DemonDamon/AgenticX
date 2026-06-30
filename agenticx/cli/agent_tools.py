@@ -49,6 +49,11 @@ from agenticx.runtime.confirm import (
     ConfirmGate,
     SyncConfirmGate,
 )
+from agenticx.runtime.clarify import (
+    AsyncClarifyGate,
+    AutoSuspendClarifyGate,
+    ClarifyGate,
+)
 from agenticx.workspace.loader import (
     append_daily_memory,
     append_long_term_memory,
@@ -290,6 +295,48 @@ def _detect_target(text: str) -> str:
 
 
 STUDIO_TOOLS: List[Dict[str, Any]] = [
+    {
+        "type": "function",
+        "function": {
+            "name": "request_clarification",
+            "description": (
+                "Ask the user an open-ended question and BLOCK until they answer. Use this whenever you need a "
+                "human decision before proceeding: plan sign-off, choosing between options, missing parameters, "
+                "color/style/preference, scope confirmation. Do NOT write the question as plain text and end the "
+                "turn -- call this tool instead so the user gets a blocking prompt with option buttons and a free-"
+                "text box, and your turn continues from their answer. The tool result text is the user's answer; "
+                "continue the same turn based on it. In unattended/automation sessions this returns a suspended "
+                "sentinel -- wrap up the turn and persist the pending question as a todo."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "prompt": {
+                        "type": "string",
+                        "description": "The question to ask the user, in natural language. Be specific.",
+                    },
+                    "options": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": (
+                            "Preset options the user can click (0-8). Use these for binary/multiple-choice "
+                            "decisions. The user may also type custom text when allow_free_text is true."
+                        ),
+                    },
+                    "allow_free_text": {
+                        "type": "boolean",
+                        "description": "Whether the user can type a custom answer (default true).",
+                    },
+                    "context": {
+                        "type": "object",
+                        "description": "Optional extra context to show in the prompt card (e.g. plan summary).",
+                    },
+                },
+                "required": ["prompt"],
+                "additionalProperties": False,
+            },
+        },
+    },
     {
         "type": "function",
         "function": {
@@ -2040,6 +2087,117 @@ async def _confirm(
             }
         )
     return approved
+
+
+def build_clarification_tool_result(answer: Dict[str, Any]) -> str:
+    """Render a structured clarification answer as natural-language tool result.
+
+    The agent reads this text as the tool result of ``request_clarification``
+    and continues the same turn. Sentinels ``__timeout__`` / ``__suspended__``
+    are translated into explicit guidance so the model wraps up gracefully
+    instead of asking again.
+    """
+    if isinstance(answer, dict):
+        if answer.get("__timeout__"):
+            return (
+                "[CLARIFICATION_TIMEOUT] 用户未在时限内回复该提问。"
+                "请把待确认项写入待办并优雅结束本轮，不要重复发起同一提问。"
+            )
+        if answer.get("__suspended__"):
+            return (
+                "[CLARIFICATION_PENDING] 当前为无人值守/自动化会话，已向用户发起提问但暂无人回复。"
+                "请把待确认项写入待办并结束本轮，等待用户下次回来时再继续。"
+            )
+    answer_text = str((answer or {}).get("answer_text", "") or "").strip()
+    selected = list((answer or {}).get("selected_options", []) or [])
+    parts: List[str] = []
+    if selected:
+        parts.append("用户选择：" + "；".join(selected))
+    if answer_text:
+        parts.append(f"自定义补充：{answer_text}")
+    if not parts:
+        return "用户未提供具体内容（视为按你的默认方案推进）。"
+    return "；".join(parts) + "。"
+
+
+async def _request_clarification(
+    prompt: str,
+    *,
+    options: Optional[List[str]] = None,
+    allow_free_text: bool = True,
+    context: Optional[Dict[str, Any]] = None,
+    clarify_gate: Optional[ClarifyGate] = None,
+    emit_event: Optional[Any] = None,
+    is_unattended: bool = False,
+) -> str:
+    """Block inside a tool call to ask the user an open-ended question.
+
+    Emits ``clarification_required`` (or ``clarification_suspended`` for
+    unattended sessions), waits on the clarify gate, and returns a tool-result
+    string built by :func:`build_clarification_tool_result`.
+    """
+    options = list(options or [])
+    payload_context = dict(context or {})
+    request_id = str(payload_context.get("request_id") or uuid.uuid4())
+    payload_context["request_id"] = request_id
+
+    # Unattended/automation sessions must never block -- there is no UI to
+    # answer. AutoSuspendClarifyGate also hits this branch via isinstance.
+    if is_unattended or isinstance(clarify_gate, AutoSuspendClarifyGate):
+        _log.info(
+            "[clarify] suspended id=%s prompt=%s (unattended)",
+            request_id,
+            prompt[:80],
+        )
+        if emit_event is not None:
+            await emit_event(
+                {
+                    "type": "clarification_suspended",
+                    "data": {
+                        "id": request_id,
+                        "prompt": prompt,
+                        "options": options,
+                        "allow_free_text": allow_free_text,
+                        "context": payload_context,
+                    },
+                }
+            )
+        return build_clarification_tool_result({"__suspended__": True})
+
+    gate = clarify_gate or AsyncClarifyGate()
+    emit_prompt = emit_event is not None and isinstance(gate, AsyncClarifyGate)
+    if emit_prompt:
+        await emit_event(
+            {
+                "type": "clarification_required",
+                "data": {
+                    "id": request_id,
+                    "prompt": prompt,
+                    "options": options,
+                    "allow_free_text": allow_free_text,
+                    "context": payload_context,
+                },
+            }
+        )
+    _log.info("[clarify] requested id=%s prompt=%s", request_id, prompt[:80])
+    answer = await gate.request_clarification(
+        prompt,
+        options=options,
+        allow_free_text=allow_free_text,
+        context=payload_context,
+    )
+    _log.info("[clarify] resolved id=%s answer=%s", request_id, answer)
+    if emit_prompt:
+        await emit_event(
+            {
+                "type": "clarification_response",
+                "data": {
+                    "id": request_id,
+                    "answer": answer,
+                },
+            }
+        )
+    return build_clarification_tool_result(answer)
 
 
 def _path_from_arg(path_arg: str) -> Path:
@@ -5568,7 +5726,10 @@ def _tool_skill_import_repo(arguments: Dict[str, Any], session: Optional[StudioS
 
 def _tool_ask_user(arguments: Dict[str, Any], *, service_mode: bool = False) -> str:
     if service_mode:
-        return "ERROR: ask_user is not supported in service mode; use confirm_required flow."
+        return (
+            "ERROR: ask_user is not supported in service mode; "
+            "use the request_clarification tool to ask the user an open-ended question."
+        )
     question = str(arguments.get("question", "")).strip()
     if not question:
         return "ERROR: missing question"
@@ -5920,6 +6081,8 @@ async def dispatch_tool_async(
     confirm_gate: Optional[ConfirmGate] = None,
     event_callback: Optional[Any] = None,
     team_manager: Optional[Any] = None,
+    clarify_gate: Optional[ClarifyGate] = None,
+    is_unattended: bool = False,
 ) -> str:
     """Dispatch one tool call asynchronously and return result text."""
     arguments = _repair_malformed_file_tool_arguments(name, arguments)
@@ -6076,6 +6239,31 @@ async def dispatch_tool_async(
             return await asyncio.to_thread(_tool_code_index_cancel, arguments, session)
         if name == "ask_user":
             return _tool_ask_user(arguments, service_mode=isinstance(gate, AsyncConfirmGate))
+        if name == "request_clarification":
+            prompt = str(arguments.get("prompt", "") or "").strip()
+            if not prompt:
+                return (
+                    "ERROR: request_clarification requires a non-empty `prompt`. "
+                    "请立即重新调用 request_clarification 并填写 prompt。"
+                )
+            raw_options = arguments.get("options") or []
+            if not isinstance(raw_options, list):
+                raw_options = []
+            options = [str(opt).strip() for opt in raw_options if str(opt).strip()]
+            options = options[:8]
+            allow_free_text = bool(arguments.get("allow_free_text", True))
+            ctx = arguments.get("context")
+            if not isinstance(ctx, dict):
+                ctx = None
+            return await _request_clarification(
+                prompt,
+                options=options,
+                allow_free_text=allow_free_text,
+                context=ctx,
+                clarify_gate=clarify_gate,
+                emit_event=event_callback,
+                is_unattended=is_unattended,
+            )
         if name == "list_files":
             return _tool_list_files(arguments, session)
         if name == "liteparse":

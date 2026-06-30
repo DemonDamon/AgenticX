@@ -14,6 +14,7 @@ type Props = {
 const statusMap: Record<string, { icon: string; label: string; tone: string }> = {
   pending: { icon: "⏳", label: "等待中", tone: "text-amber-300" },
   awaiting_confirm: { icon: "🛂", label: "待确认", tone: "text-orange-300" },
+  awaiting_input: { icon: "❓", label: "等待输入", tone: "text-cyan-300" },
   running: { icon: "🔄", label: "执行中", tone: "text-cyan-300" },
   // FR-2: distinct visual for "paused" (rounds saturated). Amber, not red,
   // to communicate "halted but recoverable" rather than "failed".
@@ -156,7 +157,7 @@ export function SubAgentCard({
   }, [subAgent, status.label]);
 
   const canCancel =
-    subAgent.status === "running" || subAgent.status === "pending" || subAgent.status === "awaiting_confirm";
+    subAgent.status === "running" || subAgent.status === "pending" || subAgent.status === "awaiting_confirm" || subAgent.status === "awaiting_input";
   const canRetry = subAgent.status === "failed" || subAgent.status === "completed" || subAgent.status === "cancelled" || subAgent.status === "paused";
   const modelLabel =
     subAgent.model
@@ -198,6 +199,13 @@ export function SubAgentCard({
       ) : subAgent.status === "awaiting_confirm" ? (
         <div className="mb-2 rounded-md border border-orange-400/30 bg-orange-500/10 p-2 text-xs text-orange-200">
           等待确认中… 请查看弹窗或稍候
+        </div>
+      ) : null}
+      {subAgent.status === "awaiting_input" ? (
+        <div className="mb-2 rounded-md border border-cyan-400/30 bg-cyan-500/10 p-2 text-xs text-cyan-200">
+          {subAgent.pendingClarification?.prompt
+            ? `等待你的输入：${subAgent.pendingClarification.prompt}`
+            : "等待你的输入… 请查看弹窗"}
         </div>
       ) : null}
       {subAgent.resultSummary ? (

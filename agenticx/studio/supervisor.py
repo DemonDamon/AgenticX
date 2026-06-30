@@ -35,6 +35,40 @@ POLL_INTERVAL_SEC = 30.0
 SESSION_META_UNATTENDED = "unattended_enabled"
 
 
+def _has_pending_clarification(managed: Any) -> bool:
+    """True if the session has an unresolved clarification question.
+
+    Blocks supervisor stall-recovery from auto-continuing a session that is
+    legitimately waiting for human input (the clarify gate future is still
+    pending). Without this, the supervisor would mistake "user hasn't
+    answered yet" for "agent stalled" and reboot the turn repeatedly.
+    """
+    try:
+        clarify_gate = getattr(managed, "clarify_gate", None)
+        if clarify_gate is not None and hasattr(clarify_gate, "has_pending"):
+            if clarify_gate.has_pending():
+                return True
+        sub_gates = getattr(managed, "sub_clarify_gates", None)
+        if isinstance(sub_gates, dict):
+            for gate in sub_gates.values():
+                if gate is not None and hasattr(gate, "has_pending") and gate.has_pending():
+                    return True
+        # Also inspect the persisted chat_history tail: an unresolved
+        # clarification prompt (no following user answer / tool result with
+        # the same request_id) means the turn is parked on human input.
+        session = getattr(managed, "studio_session", None)
+        history = getattr(session, "chat_history", None) if session is not None else None
+        if isinstance(history, list) and history:
+            tail = history[-1]
+            if isinstance(tail, dict):
+                meta = tail.get("metadata")
+                if isinstance(meta, dict) and meta.get("kind") == "clarification":
+                    return True
+    except Exception:
+        pass
+    return False
+
+
 def _supervisor_log_dir() -> Path:
     root = Path(os.path.expanduser("~/.agenticx/logs/supervisor"))
     root.mkdir(parents=True, exist_ok=True)
@@ -183,6 +217,12 @@ class SessionSupervisor:
             if managed is None:
                 continue
             if not _session_unattended_enabled(managed):
+                continue
+
+            # If the session is parked on a clarification question, do NOT
+            # auto-continue or wall-clock-fail it -- it is legitimately
+            # waiting for the user, not stalled.
+            if _has_pending_clarification(managed):
                 continue
 
             sp = getattr(managed.studio_session, "scratchpad", {}) or {}

@@ -21,6 +21,7 @@ import {
 import { ViewImageInjectCard } from "./ViewImageInjectCard";
 import { BudgetExceededCard } from "./BudgetExceededCard";
 import { WidgetBlock } from "./WidgetBlock";
+import { ClarificationCard } from "./ClarificationCard";
 import { parseWidgetPayload } from "./widget-preview";
 import { parseContextNotice } from "../../utils/context-notice";
 import { parseBudgetExceededFromText } from "../../utils/budget-exceeded";
@@ -80,6 +81,14 @@ type Props = {
   streamStalled?: boolean;
   streamStalledSeconds?: number;
   onSkillManageApply?: (message: Message, payload: SkillPatchPreviewPayload, targetIndex: number | null) => void;
+  onOpenClarification?: (
+    requestId: string,
+    prompt: string,
+    options: string[],
+    allowFreeText: boolean,
+    agentId?: string,
+    context?: Record<string, unknown>
+  ) => Promise<{ answerText: string; selectedOptions: string[] } | null>;
 };
 
 function extractPathFromToolResult(msg: string): string {
@@ -201,6 +210,7 @@ export function MessageRenderer({
   streamStalled = false,
   streamStalledSeconds = 0,
   onSkillManageApply,
+  onOpenClarification,
 }: Props) {
   const chatStyle = useAppStore((s) => s.chatStyle);
   const resolvedReferences = useMemo(() => {
@@ -341,6 +351,28 @@ export function MessageRenderer({
           </div>
         );
       }
+    }
+    if (message.clarificationPrompt) {
+      return (
+        <ClarificationCard
+          prompt={message.clarificationPrompt}
+          suspended={message.clarificationSuspended}
+          onReply={
+            onOpenClarification
+              ? (p) => {
+                  void onOpenClarification(
+                    p.requestId,
+                    p.prompt,
+                    p.options,
+                    p.allowFreeText,
+                    p.agentId,
+                    p.context,
+                  );
+                }
+              : undefined
+          }
+        />
+      );
     }
     return (
       <ToolCallCard

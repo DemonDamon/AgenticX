@@ -198,7 +198,7 @@ def _harness_list_fields(session: StudioSession) -> dict[str, Any]:
         "read_files_count": read_count,
     }
 from agenticx.memory.session_store import SessionStore, session_fts_enabled
-from agenticx.runtime import AsyncConfirmGate
+from agenticx.runtime import AsyncClarifyGate, AsyncConfirmGate
 from agenticx.runtime.team_manager import AgentTeamManager, SubAgentContext
 from agenticx.utils.atomic_writer import atomic_write_json
 from agenticx.studio.session_event_hub import SessionEventHub
@@ -232,6 +232,8 @@ class ManagedSession:
     studio_session: StudioSession
     confirm_gate: AsyncConfirmGate = field(default_factory=AsyncConfirmGate)
     sub_confirm_gates: Dict[str, AsyncConfirmGate] = field(default_factory=dict)
+    clarify_gate: AsyncClarifyGate = field(default_factory=AsyncClarifyGate)
+    sub_clarify_gates: Dict[str, AsyncClarifyGate] = field(default_factory=dict)
     team_manager: Optional[AgentTeamManager] = None
     updated_at: float = field(default_factory=time.time)
     created_at: float = field(default_factory=time.time)
@@ -248,6 +250,11 @@ class ManagedSession:
         if not agent_id or agent_id == "meta":
             return self.confirm_gate
         return self.sub_confirm_gates.setdefault(agent_id, AsyncConfirmGate())
+
+    def get_clarify_gate(self, agent_id: str = "meta") -> AsyncClarifyGate:
+        if not agent_id or agent_id == "meta":
+            return self.clarify_gate
+        return self.sub_clarify_gates.setdefault(agent_id, AsyncClarifyGate())
 
     def get_or_create_team(
         self,
