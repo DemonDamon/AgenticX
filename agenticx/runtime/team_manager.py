@@ -21,7 +21,14 @@ from agenticx.cli.agent_tools import STUDIO_TOOLS, merge_computer_use_tools_into
 from agenticx.cli.config_manager import ConfigManager
 from agenticx.cli.studio import StudioSession
 from agenticx.llms.provider_resolver import ProviderResolver
-from agenticx.runtime import AgentRuntime, AutoApproveConfirmGate, AsyncConfirmGate, EventType, RuntimeEvent
+from agenticx.runtime import (
+    AgentRuntime,
+    AutoApproveConfirmGate,
+    AsyncClarifyGate,
+    AsyncConfirmGate,
+    EventType,
+    RuntimeEvent,
+)
 from agenticx.runtime.resource_monitor import ResourceMonitor
 from agenticx.runtime.agent_runtime import STOP_MESSAGE
 
@@ -114,6 +121,7 @@ class SubAgentContext:
     artifacts: Dict[Path, str] = field(default_factory=dict)
     context_files: Dict[str, str] = field(default_factory=dict)
     confirm_gate: AsyncConfirmGate = field(default_factory=AsyncConfirmGate)
+    clarify_gate: AsyncClarifyGate = field(default_factory=AsyncClarifyGate)
     result_summary: str = ""
     created_at: float = field(default_factory=time.time)
     updated_at: float = field(default_factory=time.time)
@@ -396,6 +404,7 @@ class AgentTeamManager:
             "- 优先产出文件，边写边推进，不要等规划完毕才动手。\n"
             "- 在 Desktop 服务模式下，不要要求用户输入 A/B，也不要调用不存在的 `confirm_*` 工具。\n"
             "- 需要确认高风险命令时，直接发起真实工具调用（如 bash_exec）；系统会自动弹出 confirm_required。\n"
+            "- 当你需要用户做开放式决策（方案确认、二选一、偏好、缺失参数）时，调用 `request_clarification` 工具发起阻塞提问；用户答复会作为工具结果返回，你须在同一回合继续执行。禁止把开放式问题写进正文然后结束回合。\n"
             "- 只有在收到工具返回 `OK: wrote ...` / `OK: edited ...` 后，才能宣称已落盘。\n"
             "- 对外汇报文件产出时，引用工具返回的绝对路径。\n"
             "- 不做无关全盘扫描，直接在目标目录下工作。\n\n"
@@ -923,6 +932,12 @@ class AgentTeamManager:
             return None
         return context.confirm_gate
 
+    def get_clarify_gate(self, agent_id: str) -> Optional[AsyncClarifyGate]:
+        context = self._agents.get(agent_id)
+        if context is None:
+            return None
+        return context.clarify_gate
+
     async def shutdown(self) -> None:
         tasks = list(self._tasks.values())
         for task in tasks:
@@ -952,6 +967,17 @@ class AgentTeamManager:
                     "question": req.get("question", ""),
                     "context": req.get("context"),
                 }
+        pending_clarification = None
+        if context.clarify_gate and context.clarify_gate.last_request:
+            req = context.clarify_gate.last_request
+            if context.clarify_gate._pending.get(str(req.get("id", ""))):
+                pending_clarification = {
+                    "request_id": req.get("id", ""),
+                    "prompt": req.get("prompt", ""),
+                    "options": list(req.get("options", []) or []),
+                    "allow_free_text": bool(req.get("allow_free_text", True)),
+                    "context": req.get("context"),
+                }
         return {
             "agent_id": context.agent_id,
             "name": context.name,
@@ -971,6 +997,7 @@ class AgentTeamManager:
             "model": context.model_name or self.base_session.model_name or "",
             "output_files": list(context.output_files[:200]),
             "pending_confirm": pending_confirm,
+            "pending_clarification": pending_clarification,
             "avatar_id": context.avatar_id or None,
         }
 
@@ -1034,6 +1061,7 @@ class AgentTeamManager:
             loop_warning_threshold=8,
             loop_critical_threshold=16,
             team_manager=self,
+            clarify_gate=context.clarify_gate,
         )
         system_prompt = self._build_subagent_system_prompt(context, session)
         started_at = time.time()

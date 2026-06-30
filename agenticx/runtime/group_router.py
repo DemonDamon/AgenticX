@@ -17,7 +17,7 @@ from agenticx.avatar.registry import AvatarRegistry
 from agenticx.cli.agent_tools import STUDIO_TOOLS
 from agenticx.cli.studio import StudioSession
 from agenticx.runtime import AgentRuntime
-from agenticx.runtime import AsyncConfirmGate
+from agenticx.runtime import AsyncClarifyGate, AsyncConfirmGate
 from agenticx.runtime.events import EventType
 from agenticx.runtime.group_context import GroupChatContext
 from agenticx.branding import DEFAULT_META_PRODUCT_LABEL, LEGACY_META_LABELS
@@ -274,6 +274,7 @@ class GroupChatRouter:
         max_tool_rounds: int,
         meta_leader_display_name: str | None = None,
         confirm_gate_factory: Callable[[str], "AsyncConfirmGate"] | None = None,
+        clarify_gate_factory: Callable[[str], "AsyncClarifyGate"] | None = None,
     ) -> None:
         self.avatar_registry = avatar_registry
         self.llm_factory = llm_factory
@@ -281,6 +282,7 @@ class GroupChatRouter:
         label = str(meta_leader_display_name or "").strip()
         self._meta_leader_label = label or DEFAULT_META_PRODUCT_LABEL
         self._confirm_gate_factory = confirm_gate_factory
+        self._clarify_gate_factory = clarify_gate_factory
 
     @staticmethod
     def _typing_event(agent_id: str, avatar_name: str) -> GroupReply:
@@ -484,8 +486,11 @@ class GroupChatRouter:
     @staticmethod
     def _runtime_event_to_group_event_type(event_type: str) -> str:
         """Map runtime event type to group progress event type."""
-        if str(event_type or "") == EventType.CONFIRM_REQUIRED.value:
+        et = str(event_type or "")
+        if et == EventType.CONFIRM_REQUIRED.value:
             return "group_blocked"
+        if et == EventType.CLARIFICATION_REQUIRED.value:
+            return "group_clarification"
         return "group_progress"
 
     async def _emit_mention_follow_ups(
@@ -906,10 +911,16 @@ class GroupChatRouter:
             if self._confirm_gate_factory is not None
             else AsyncConfirmGate()
         )
+        clarify_gate = (
+            self._clarify_gate_factory(avatar_id)
+            if self._clarify_gate_factory is not None
+            else AsyncClarifyGate()
+        )
         runtime = AgentRuntime(
             llm,
             confirm_gate,
             max_tool_rounds=self.max_tool_rounds,
+            clarify_gate=clarify_gate,
         )
         if progress_queue is not None:
             progress_queue.put_nowait(
@@ -938,7 +949,7 @@ class GroupChatRouter:
                     group_evt_type = self._runtime_event_to_group_event_type(event.type)
                     confirm_request_id = (
                         str(event.data.get("id", "") or "")
-                        if group_evt_type == "group_blocked"
+                        if group_evt_type in ("group_blocked", "group_clarification")
                         else ""
                     )
                     progress_queue.put_nowait(

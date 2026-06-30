@@ -23,6 +23,14 @@ type Props = {
     agentId?: string,
     context?: Record<string, unknown>
   ) => Promise<boolean>;
+  onOpenClarification?: (
+    requestId: string,
+    prompt: string,
+    options: string[],
+    allowFreeText: boolean,
+    agentId?: string,
+    context?: Record<string, unknown>
+  ) => Promise<{ answerText: string; selectedOptions: string[] } | null>;
 };
 
 const COLUMNS = 2;
@@ -99,7 +107,7 @@ function PaneDragOverlayPreview({ pane }: { pane: ChatPaneState }) {
   );
 }
 
-export function PaneManager({ onOpenConfirm }: Props) {
+export function PaneManager({ onOpenConfirm, onOpenClarification }: Props) {
   const panes = useAppStore((s) => s.panes);
   const activePaneId = useAppStore((s) => s.activePaneId);
   const setActivePaneId = useAppStore((s) => s.setActivePaneId);
@@ -215,6 +223,7 @@ export function PaneManager({ onOpenConfirm }: Props) {
       focused={isFocused}
       onFocus={() => setActivePaneId(pane.id)}
       onOpenConfirm={onOpenConfirm}
+      onOpenClarification={onOpenClarification}
     />
   );
 

@@ -988,6 +988,7 @@ def _sanitize_context_messages(messages: Sequence[Dict[str, Any]]) -> List[Dict[
                     "turn_interrupted",
                     "continuation_notice",
                     "futile_resume_guard",
+                    "clarification",
                 ):
                     idx += 1
                     continue
@@ -1525,9 +1526,13 @@ class AgentRuntime:
         hooks: Optional[HookRegistry] = None,
         team_manager: Optional[Any] = None,
         mid_turn_persist: Optional[Callable[[], None]] = None,
+        clarify_gate: Optional[Any] = None,
+        is_unattended: bool = False,
     ) -> None:
         self.llm = llm
         self.confirm_gate = confirm_gate
+        self.clarify_gate = clarify_gate
+        self.is_unattended = bool(is_unattended)
         self.max_tool_rounds = max_tool_rounds
         self.hooks = hooks or HookRegistry()
         self.compactor = ContextCompactor(llm)
@@ -3367,6 +3372,8 @@ class AgentRuntime:
                             confirm_gate=self.confirm_gate,
                             event_callback=_on_tool_event,
                             team_manager=effective_tm,
+                            clarify_gate=self.clarify_gate,
+                            is_unattended=self.is_unattended,
                         )
                     )
 

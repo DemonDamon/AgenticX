@@ -28,6 +28,7 @@ export function SubAgentPanel({
   const done = subAgents.filter((item) => item.status === "completed").length;
   const pending = subAgents.filter((item) => item.status === "pending").length;
   const awaitingConfirm = subAgents.filter((item) => item.status === "awaiting_confirm").length;
+  const awaitingInput = subAgents.filter((item) => item.status === "awaiting_input").length;
 
   return (
     <aside
@@ -46,7 +47,8 @@ export function SubAgentPanel({
             <span className="mr-2">运行 {running}</span>
             <span className="mr-2">完成 {done}</span>
             <span className="mr-2">等待 {pending}</span>
-            <span>待确认 {awaitingConfirm}</span>
+            <span className="mr-2">待确认 {awaitingConfirm}</span>
+            <span>待输入 {awaitingInput}</span>
           </div>
           <div className="flex-1 space-y-2 overflow-y-auto p-2">
             {subAgents.length === 0 ? (

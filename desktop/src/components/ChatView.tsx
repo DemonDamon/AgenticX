@@ -26,7 +26,10 @@ import { KeybindingsPanel } from "./KeybindingsPanel";
 import { attachmentsFromSessionRow } from "../utils/session-message-map";
 import { MessageRenderer, renderToolMessageExtras } from "./messages/MessageRenderer";
 import { groupConsecutiveToolMessages, type GroupedChatRow } from "./messages/group-tool-messages";
-import { isInterruptedAssistantPlaceholder } from "../utils/noisy-chat-messages";
+import {
+  isEphemeralStopErrorText,
+  isInterruptedAssistantPlaceholder,
+} from "../utils/noisy-chat-messages";
 import { expandMessagesToTopLevelRows } from "./messages/react-blocks";
 import { shouldHideStreamOverlay, shouldShowMidTurnStreamActivity } from "../utils/stream-overlay-policy";
 import { TurnToolGroupCard } from "./messages/TurnToolGroupCard";
@@ -80,6 +83,14 @@ type Props = {
     agentId?: string,
     context?: Record<string, unknown>
   ) => Promise<boolean>;
+  onOpenClarification?: (
+    requestId: string,
+    prompt: string,
+    options: string[],
+    allowFreeText: boolean,
+    agentId?: string,
+    context?: Record<string, unknown>
+  ) => Promise<{ answerText: string; selectedOptions: string[] } | null>;
   mode?: "pro" | "lite";
 };
 
@@ -335,7 +346,7 @@ function MessageActions({
   );
 }
 
-export function ChatView({ onOpenConfirm, mode = "pro" }: Props) {
+export function ChatView({ onOpenConfirm, onOpenClarification, mode = "pro" }: Props) {
   const apiBase = useAppStore((s) => s.apiBase);
   const sessionId = useAppStore((s) => s.sessionId);
   const apiToken = useAppStore((s) => s.apiToken);
@@ -1401,6 +1412,80 @@ export function ChatView({ onOpenConfirm, mode = "pro" }: Props) {
                 });
               }
             }
+            if (payload.type === "clarification_required") {
+              if (!isCurrentRequest()) continue;
+              const clarifyReqId = String(payload.data?.id ?? "");
+              const clarifyPrompt = String(payload.data?.prompt ?? "");
+              const clarifyOptions = Array.isArray(payload.data?.options)
+                ? (payload.data.options as string[]).map((o) => String(o)).filter(Boolean)
+                : [];
+              const clarifyAllowFreeText = payload.data?.allow_free_text !== false;
+              if (eventAgentId !== "meta") {
+                updateSubAgent(eventAgentId, {
+                  status: "awaiting_input",
+                  currentAction: "等待你的输入",
+                  pendingClarification: clarifyReqId
+                    ? {
+                        requestId: clarifyReqId,
+                        prompt: clarifyPrompt,
+                        options: clarifyOptions,
+                        allowFreeText: clarifyAllowFreeText,
+                        agentId: eventAgentId,
+                        sessionId,
+                        context: payload.data?.context,
+                      }
+                    : undefined,
+                });
+                addSubAgentEvent(eventAgentId, {
+                  type: "clarification_required",
+                  content: clarifyPrompt || "等待输入",
+                });
+              }
+              if (onOpenClarification && clarifyReqId) {
+                const answer = await onOpenClarification(
+                  clarifyReqId,
+                  clarifyPrompt,
+                  clarifyOptions,
+                  clarifyAllowFreeText,
+                  eventAgentId,
+                  payload.data?.context,
+                );
+                if (!isCurrentRequest()) continue;
+                await fetch(`${apiBase}/api/clarify`, {
+                  method: "POST",
+                  headers: { "Content-Type": "application/json", "x-agx-desktop-token": apiToken },
+                  body: JSON.stringify({
+                    session_id: sessionId,
+                    request_id: clarifyReqId,
+                    agent_id: eventAgentId,
+                    answer_text: answer?.answerText ?? "",
+                    selected_options: answer?.selectedOptions ?? [],
+                  }),
+                });
+              }
+            }
+            if (payload.type === "clarification_response") {
+              if (eventAgentId !== "meta") {
+                updateSubAgent(eventAgentId, {
+                  status: "running",
+                  currentAction: "已收到回复，继续执行",
+                  pendingClarification: undefined,
+                });
+                addSubAgentEvent(eventAgentId, {
+                  type: "clarification_response",
+                  content: "已收到用户回复",
+                });
+              }
+            }
+            if (payload.type === "clarification_suspended") {
+              if (eventAgentId !== "meta") {
+                updateSubAgent(eventAgentId, {
+                  status: "running",
+                  currentAction: "无人值守，提问已挂起",
+                  pendingClarification: undefined,
+                });
+              }
+            }
             if (payload.type === "final") {
               if (eventAgentId !== "meta") { updateSubAgent(eventAgentId, { status: "completed", currentAction: "已完成" }); addSubAgentEvent(eventAgentId, { type: "final", content: payload.data?.text ?? "" }); continue; }
               const sqRaw = payload.data?.suggested_questions;
@@ -1552,7 +1637,7 @@ export function ChatView({ onOpenConfirm, mode = "pro" }: Props) {
                   addMessage("tool", errText, "meta", undefined, undefined, undefined, {
                     noticeKind,
                   });
-                } else {
+                } else if (!isEphemeralStopErrorText(errText)) {
                   addMessage("tool", `❌ ${errText}`, "meta");
                 }
               } else if (isWarning) {
@@ -2108,6 +2193,7 @@ export function ChatView({ onOpenConfirm, mode = "pro" }: Props) {
                       noBubbleBorder={reactWorkCol}
                       toolCardOmitLeadingSpacer={m.role === "tool" && reactWorkCol}
                       onFollowupClick={(t) => void send(t)}
+                      onOpenClarification={onOpenClarification}
                     />
                     {!isLite && (
                       <MessageActions

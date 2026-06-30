@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AvatarSidebar } from "./components/AvatarSidebar";
 import { ConfirmDialog } from "./components/ConfirmDialog";
+import { ClarificationDialog, type ClarificationAnswer } from "./components/ClarificationDialog";
 import { SettingsPanel } from "./components/SettingsPanel";
 import { DeliveryPanel } from "./components/delivery/DeliveryPanel";
 import { TokenDashboardPanel } from "./components/TokenDashboardPanel";
@@ -245,6 +246,7 @@ export function App() {
   const panes = useAppStore((s) => s.panes);
   const activePaneId = useAppStore((s) => s.activePaneId);
   const confirm = useAppStore((s) => s.confirm);
+  const clarification = useAppStore((s) => s.clarification);
   const settings = useAppStore((s) => s.settings);
   const userMode = useAppStore((s) => s.userMode);
   const setApiBase = useAppStore((s) => s.setApiBase);
@@ -279,6 +281,8 @@ export function App() {
   const addSubAgentEvent = useAppStore((s) => s.addSubAgentEvent);
   const openConfirm = useAppStore((s) => s.openConfirm);
   const closeConfirm = useAppStore((s) => s.closeConfirm);
+  const openClarification = useAppStore((s) => s.openClarification);
+  const closeClarification = useAppStore((s) => s.closeClarification);
   const openSettings = useAppStore((s) => s.openSettings);
   const closeSettings = useAppStore((s) => s.closeSettings);
   const tokenDashboardOpen = useAppStore((s) => s.tokenDashboard.open);
@@ -292,6 +296,7 @@ export function App() {
   const confirmScopeRef = useRef<string | null>(null);
   const autoApproveScopesRef = useRef<Set<string>>(new Set());
   const denyScopesRef = useRef<Set<string>>(new Set());
+  const clarifyResolverRef = useRef<((value: { answerText: string; selectedOptions: string[] } | null) => void) | null>(null);
   const sessionInitDoneRef = useRef(false);
   const workspaceHydratedRef = useRef(false);
   const startupRendererReadyRef = useRef(false);
@@ -937,6 +942,13 @@ export function App() {
             error_text?: string;
             recent_events?: Array<{ type?: string; data?: Record<string, unknown> }>;
             pending_confirm?: { request_id?: string; question?: string; context?: Record<string, unknown> } | null;
+            pending_clarification?: {
+              request_id?: string;
+              prompt?: string;
+              options?: string[] | null;
+              allow_free_text?: boolean | null;
+              context?: Record<string, unknown> | null;
+            } | null;
           }>;
         };
         if (!Array.isArray(data.subagents)) continue;
@@ -962,17 +974,22 @@ export function App() {
           const status = item.status ?? "running";
           const existing = subAgentsRef.current.find((sub) => sub.id === id);
           const hasPendingConfirm = !!(item.pending_confirm?.request_id);
+          const hasPendingClarification = !!(item.pending_clarification?.request_id);
           const effectiveStatus =
             hasPendingConfirm
               ? "awaiting_confirm" as const
-              : existing?.status === "awaiting_confirm" && status === "running"
-                ? "awaiting_confirm" as const
-                : status;
+              : hasPendingClarification
+                ? "awaiting_input" as const
+                : existing?.status === "awaiting_confirm" && status === "running"
+                  ? "awaiting_confirm" as const
+                  : existing?.status === "awaiting_input" && status === "running"
+                    ? "awaiting_input" as const
+                    : status;
           if (status === "running" || status === "pending") {
             seenRunningOrPending.add(id);
             staleMissCountRef.current[id] = 0;
           }
-          if (hasPendingConfirm) {
+          if (hasPendingConfirm || hasPendingClarification) {
             seenRunningOrPending.add(id);
             staleMissCountRef.current[id] = 0;
           }
@@ -981,6 +998,8 @@ export function App() {
           const currentAction =
             effectiveStatus === "awaiting_confirm"
               ? existing?.currentAction || "等待你的确认"
+              : effectiveStatus === "awaiting_input"
+                ? existing?.currentAction || "等待你的输入"
               : status === "completed"
               ? summaryText
                 ? "已完成（查看摘要）"
@@ -1004,6 +1023,22 @@ export function App() {
               : effectiveStatus !== "awaiting_confirm"
                 ? undefined
                 : existing?.pendingConfirm;
+          const pendingClarification =
+            hasPendingClarification
+              ? {
+                  requestId: String(item.pending_clarification!.request_id ?? ""),
+                  prompt: String(item.pending_clarification!.prompt ?? ""),
+                  options: Array.isArray(item.pending_clarification!.options)
+                    ? item.pending_clarification!.options.map((o: unknown) => String(o)).filter(Boolean)
+                    : [],
+                  allowFreeText: item.pending_clarification!.allow_free_text !== false,
+                  agentId: id,
+                  sessionId: sid,
+                  context: item.pending_clarification!.context ?? undefined,
+                }
+              : effectiveStatus !== "awaiting_input"
+                ? undefined
+                : existing?.pendingClarification;
           updateSubAgent(id, {
             status: effectiveStatus,
             currentAction,
@@ -1012,6 +1047,7 @@ export function App() {
             resultSummary: summaryText || undefined,
             outputFiles,
             pendingConfirm,
+            pendingClarification,
           });
 
           if (
@@ -1606,6 +1642,22 @@ export function App() {
       openConfirm(requestId, question, diff, agentId, context);
     });
 
+  // Open-ended clarification must NEVER be auto-approved (NFR-1 / AC-3):
+  // confirming with "Run-Everything" only bypasses *permission* confirms,
+  // not open-ended questions whose answer would be lost.
+  const onOpenClarification = async (
+    requestId: string,
+    prompt: string,
+    options: string[],
+    allowFreeText: boolean,
+    agentId: string = "meta",
+    context?: Record<string, unknown>
+  ): Promise<{ answerText: string; selectedOptions: string[] } | null> =>
+    await new Promise<{ answerText: string; selectedOptions: string[] } | null>((resolve) => {
+      clarifyResolverRef.current = resolve;
+      openClarification(requestId, prompt, options, allowFreeText, agentId, context);
+    });
+
   const handleSettingsSave = async (result: {
     defaultProvider: string;
     providers: Record<string, ProviderEntry>;
@@ -2118,9 +2170,9 @@ export function App() {
             <div className="agx-content">
               <div className="agx-main-content">
                 {userMode === "lite" ? (
-                  <LiteChatView onOpenConfirm={onOpenConfirm} />
+                  <LiteChatView onOpenConfirm={onOpenConfirm} onOpenClarification={onOpenClarification} />
                 ) : (
-                  <PaneManager onOpenConfirm={onOpenConfirm} />
+                  <PaneManager onOpenConfirm={onOpenConfirm} onOpenClarification={onOpenClarification} />
                 )}
               </div>
             </div>
@@ -2158,6 +2210,24 @@ export function App() {
           closeConfirm();
           confirmResolverRef.current?.(false);
           confirmResolverRef.current = null;
+        }}
+      />
+      <ClarificationDialog
+        open={clarification.open}
+        prompt={clarification.prompt}
+        options={clarification.options}
+        allowFreeText={clarification.allowFreeText}
+        sourceLabel={clarification.agentId === "meta" ? "主智能体" : `子智能体 ${clarification.agentId}`}
+        context={clarification.context}
+        onSubmit={(answer: ClarificationAnswer) => {
+          closeClarification();
+          clarifyResolverRef.current?.(answer);
+          clarifyResolverRef.current = null;
+        }}
+        onSkip={() => {
+          closeClarification();
+          clarifyResolverRef.current?.({ answerText: "", selectedOptions: [] });
+          clarifyResolverRef.current = null;
         }}
       />
       <SettingsPanel

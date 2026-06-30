@@ -226,6 +226,25 @@ export function mapLoadedSessionMessage(
     if (toolResultPreview) mapped.toolResultPreview = toolResultPreview;
     if (toolGroupId) mapped.toolGroupId = toolGroupId;
     if (Array.isArray(item.tool_stream_lines)) mapped.toolStreamLines = item.tool_stream_lines;
+    // Reconstruct the inline clarification card from persisted metadata so the
+    // prompt stays visible after session switch / refresh (NFR-2).
+    const meta = mapped.metadata;
+    if (meta && typeof meta === "object" && (meta as Record<string, unknown>).kind === "clarification") {
+      const m = meta as Record<string, unknown>;
+      const requestId = String(m.request_id ?? m.id ?? "").trim();
+      if (requestId) {
+        const rawOptions = Array.isArray(m.options) ? m.options : [];
+        mapped.clarificationPrompt = {
+          requestId,
+          prompt: String(m.prompt ?? item.content ?? ""),
+          options: rawOptions.map((o) => String(o)).filter(Boolean),
+          allowFreeText: m.allow_free_text !== false,
+          agentId,
+          sessionId: String(ownerSessionId ?? idPrefix ?? "").trim(),
+        };
+        if (m.suspended === true) mapped.clarificationSuspended = true;
+      }
+    }
   }
   return mapped;
 }

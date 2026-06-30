@@ -1,5 +1,6 @@
 """Runtime core exports."""
 
+from agenticx.runtime.clarify import AsyncClarifyGate, AutoSuspendClarifyGate, ClarifyGate
 from agenticx.runtime.confirm import AutoApproveConfirmGate, AsyncConfirmGate, ConfirmGate, SyncConfirmGate
 from agenticx.runtime.events import EventType, RuntimeEvent
 from agenticx.runtime.scratchpad import Scratchpad
@@ -55,6 +56,9 @@ __all__ = [
     "SyncConfirmGate",
     "AsyncConfirmGate",
     "AutoApproveConfirmGate",
+    "ClarifyGate",
+    "AsyncClarifyGate",
+    "AutoSuspendClarifyGate",
     "EventType",
     "RuntimeEvent",
     "TodoManager",

@@ -17,6 +17,7 @@ export type MsgRole = "user" | "assistant" | "tool";
 export type SubAgentStatus =
   | "pending"
   | "awaiting_confirm"
+  | "awaiting_input"
   | "running"
   | "paused"
   | "completed"
@@ -179,6 +180,10 @@ export type Message = {
   forwardedHistory?: ForwardedHistoryCard;
   attachments?: MessageAttachment[];
   inlineConfirm?: PendingConfirm;
+  /** Pending clarification prompt rendered as an inline card (NFR-2 visibility). */
+  clarificationPrompt?: PendingClarification;
+  /** Marks the clarification prompt row as suspended (unattended/automation). */
+  clarificationSuspended?: boolean;
   /** Correlates tool_call / tool_result / tool_progress from runtime SSE (`tool_call_id`). */
   toolCallId?: string;
   toolName?: string;
@@ -219,6 +224,8 @@ export type MessageToolExtras = Pick<
   | "toolGroupId"
   | "toolStreamLines"
   | "inlineConfirm"
+  | "clarificationPrompt"
+  | "clarificationSuspended"
   | "suggestedQuestions"
   | "noticeKind"
   | "budgetSource"
@@ -276,6 +283,16 @@ export type PendingConfirm = {
   context?: Record<string, unknown>;
 };
 
+export type PendingClarification = {
+  requestId: string;
+  prompt: string;
+  options: string[];
+  allowFreeText: boolean;
+  agentId: string;
+  sessionId: string;
+  context?: Record<string, unknown>;
+};
+
 export type SubAgent = {
   id: string;
   name: string;
@@ -291,6 +308,7 @@ export type SubAgent = {
   resultSummary?: string;
   outputFiles?: string[];
   pendingConfirm?: PendingConfirm;
+  pendingClarification?: PendingClarification;
   events: SubAgentEvent[];
 };
 
@@ -300,6 +318,16 @@ type ConfirmState = {
   agentId: string;
   question: string;
   diff?: string;
+  context?: Record<string, unknown>;
+};
+
+type ClarificationState = {
+  open: boolean;
+  requestId: string;
+  agentId: string;
+  prompt: string;
+  options: string[];
+  allowFreeText: boolean;
   context?: Record<string, unknown>;
 };
 
@@ -354,6 +382,7 @@ type AppState = {
   selectedSubAgent: string | null;
   codePreview: string;
   confirm: ConfirmState;
+  clarification: ClarificationState;
   settings: SettingsState;
   tokenDashboard: TokenDashboardState;
   deliveryPanel: DeliveryPanelState;
@@ -504,6 +533,8 @@ type AppState = {
         | "timestamp"
         | "forwardedHistory"
         | "inlineConfirm"
+        | "clarificationPrompt"
+        | "clarificationSuspended"
         | "suggestedQuestions"
         | "references"
         | "searchedQueries"
@@ -589,6 +620,8 @@ type AppState = {
         | "timestamp"
         | "forwardedHistory"
         | "inlineConfirm"
+        | "clarificationPrompt"
+        | "clarificationSuspended"
         | "references"
         | "searchedQueries"
         | "metadata"
@@ -614,6 +647,15 @@ type AppState = {
     context?: Record<string, unknown>
   ) => void;
   closeConfirm: () => void;
+  openClarification: (
+    requestId: string,
+    prompt: string,
+    options: string[],
+    allowFreeText: boolean,
+    agentId?: string,
+    context?: Record<string, unknown>
+  ) => void;
+  closeClarification: () => void;
   openSettings: (tab?: SettingsTab) => void;
   closeSettings: () => void;
   updateSettings: (
@@ -881,6 +923,14 @@ export const useAppStore = create<AppState>((set, get) => ({
   selectedSubAgent: null,
   codePreview: "",
   confirm: { open: false, requestId: "", question: "", agentId: "meta" },
+  clarification: {
+    open: false,
+    requestId: "",
+    agentId: "meta",
+    prompt: "",
+    options: [],
+    allowFreeText: true,
+  },
   settings: { open: false, provider: "", model: "", apiKey: "", defaultProvider: "", providers: {} },
   tokenDashboard: { open: false, range: "month", customFrom: "", customTo: "" },
   deliveryPanel: { open: false, selectedTaskId: null },
@@ -2076,6 +2126,20 @@ export const useAppStore = create<AppState>((set, get) => ({
     set({ confirm: { open: true, requestId, question, diff, agentId: agentId ?? "meta", context } }),
   closeConfirm: () =>
     set((state) => ({ confirm: { ...state.confirm, open: false, requestId: "" } })),
+  openClarification: (requestId, prompt, options, allowFreeText, agentId, context) =>
+    set({
+      clarification: {
+        open: true,
+        requestId,
+        prompt,
+        options,
+        allowFreeText,
+        agentId: agentId ?? "meta",
+        context,
+      },
+    }),
+  closeClarification: () =>
+    set((state) => ({ clarification: { ...state.clarification, open: false, requestId: "" } })),
   openSettings: (tab) =>
     set((state) => {
       const openToTab =
