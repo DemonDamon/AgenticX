@@ -174,6 +174,36 @@ body {
   background-color: var(--chat-followup-chip-bg-hover, var(--surface-hover));
 }
 
+/* 助手操作行节奏：去掉正文末块 margin，使 body→图标 与 图标→推荐问 同为 gap-2.5 */
+.agx-assistant-action-rhythm .msg-content > :last-child {
+  margin-bottom: 0 !important;
+}
+
+/* 确保在 ReAct 块里，正文最后一个容器到底部没有多余 padding/margin，mt 才真正控制间距 */
+.agx-assistant-action-rhythm .overflow-hidden > *:last-child:not(.agx-assistant-action-tail) {
+  margin-bottom: 0 !important;
+  padding-bottom: 0 !important;
+}
+
+/* 额外保障：ReAct 内容区里的最后一个 msg-content 或其直接后代也清底 margin */
+.agx-assistant-action-rhythm .msg-content,
+.agx-assistant-action-rhythm .msg-content > :last-child {
+  margin-bottom: 0 !important;
+}
+
+/* 紧邻 action tail 的内容强制无底部空间 */
+.agx-assistant-action-tail {
+  /* spacing controlled explicitly by mt-2.5 on children */
+}
+* + .agx-assistant-action-tail {
+  /* the previous sibling's bottom is handled by the rules above */
+}
+
+/* 固定操作图标行高，避免 flex gap 落在视觉中心不一致 */
+.agx-assistant-action-icons {
+  min-height: 1.25rem; /* h-5 */
+}
+
 /* 历史会话列表：当前会话「豆包式」圆角胶囊底，浅色下避免与 hover 灰阶黏连 */
 .agx-session-history-row.agx-session-history-row--active {
   background-color: rgba(0, 0, 0, 0.1);
