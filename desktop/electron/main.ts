@@ -1875,7 +1875,6 @@ async function studioFetchJson(
   path: string,
   init?: { method?: string; body?: unknown },
 ): Promise<{ ok: boolean; status: number; data?: any; error?: string }> {
-  const url = `${getStudioUrl()}${path}`;
   const headers: Record<string, string> = {
     "x-agx-desktop-token": getStudioToken(),
   };
@@ -1885,7 +1884,11 @@ async function studioFetchJson(
     body = JSON.stringify(init.body);
   }
   try {
-    const resp = await fetch(url, { method: init?.method ?? "GET", headers, body });
+    const resp = await fetchStudioBackend(path, {
+      method: init?.method ?? "GET",
+      headers,
+      body,
+    });
     let data: any = undefined;
     try {
       data = await resp.json();
@@ -1979,6 +1982,26 @@ function withFetchTimeout<T>(
       setTimeout(() => resolve(fallback), timeoutMs);
     }),
   ]);
+}
+
+const STUDIO_BACKEND_FETCH_TIMEOUT_MS = 20_000;
+
+/** Settings-tab and studio IPC: wait for local serve readiness, then fetch with timeout. */
+async function fetchStudioBackend(path: string, init?: RequestInit): Promise<Response> {
+  if (!isRemoteMode()) {
+    await waitForStudio(60_000);
+  }
+  const normalized = path.startsWith("/") ? path : `/${path}`;
+  const url = `${getStudioUrl()}${normalized}`;
+  const headers = new Headers(init?.headers ?? undefined);
+  if (!headers.has("x-agx-desktop-token")) {
+    headers.set("x-agx-desktop-token", getStudioToken());
+  }
+  return fetch(url, {
+    ...init,
+    headers,
+    signal: init?.signal ?? AbortSignal.timeout(STUDIO_BACKEND_FETCH_TIMEOUT_MS),
+  });
 }
 
 async function fetchListAvatarsOnce(): Promise<{ ok: boolean; avatars: unknown[] }> {
@@ -3300,7 +3323,20 @@ function registerEarlyIpc(): void {
     return { ok: true };
   });
 
-  ipcMain.handle("get-api-base", async () => getStudioUrl());
+  ipcMain.handle("get-api-base", async () => {
+    if (!isRemoteMode()) {
+      await waitForStudio(60_000);
+    }
+    return getStudioUrl();
+  });
+  ipcMain.handle("wait-for-studio", async (_event, timeoutMs?: number) => {
+    const ms =
+      typeof timeoutMs === "number" && Number.isFinite(timeoutMs) && timeoutMs > 0
+        ? timeoutMs
+        : 60_000;
+    const ok = await waitForStudio(ms);
+    return { ok };
+  });
   ipcMain.handle("get-api-auth-token", async () => getStudioToken());
   ipcMain.handle("get-platform", async () => process.platform);
   ipcMain.handle("get-connection-mode", async () => getInjectedConnectionMode());
@@ -4257,9 +4293,7 @@ function registerIpc(): void {
 
   ipcMain.handle("get-tools-status", async () => {
     try {
-      const resp = await fetch(`${getStudioUrl()}/api/tools/status`, {
-        headers: { "x-agx-desktop-token": getStudioToken() },
-      });
+      const resp = await fetchStudioBackend("/api/tools/status");
       if (!resp.ok) {
         const body = await resp.text().catch(() => "");
         return { ok: false, tools: [], error: `HTTP ${resp.status}: ${body.slice(0, 300)}` };
@@ -4272,9 +4306,7 @@ function registerIpc(): void {
 
   ipcMain.handle("get-tools-registry", async () => {
     try {
-      const resp = await fetch(`${getStudioUrl()}/api/tools/registry`, {
-        headers: { "x-agx-desktop-token": getStudioToken() },
-      });
+      const resp = await fetchStudioBackend("/api/tools/registry");
       if (!resp.ok) {
         const body = await resp.text().catch(() => "");
         return { ok: false, tools: [], error: `HTTP ${resp.status}: ${body.slice(0, 300)}` };
@@ -4287,9 +4319,7 @@ function registerIpc(): void {
 
   ipcMain.handle("get-tools-policy", async () => {
     try {
-      const resp = await fetch(`${getStudioUrl()}/api/tools/policy`, {
-        headers: { "x-agx-desktop-token": getStudioToken() },
-      });
+      const resp = await fetchStudioBackend("/api/tools/policy");
       if (!resp.ok) {
         const body = await resp.text().catch(() => "");
         return { ok: false, tools_enabled: {}, tools_options: {}, error: `HTTP ${resp.status}: ${body.slice(0, 300)}` };
@@ -5990,9 +6020,7 @@ function registerIpc(): void {
 
   ipcMain.handle("get-skill-settings", async () => {
     try {
-      const resp = await fetch(`${getStudioUrl()}/api/skills/settings`, {
-        headers: { "x-agx-desktop-token": getStudioToken() },
-      });
+      const resp = await fetchStudioBackend("/api/skills/settings");
       if (!resp.ok) {
         const body = await resp.text().catch(() => "");
         return { ok: false, error: `HTTP ${resp.status}: ${body.slice(0, 300)}` };
@@ -6005,9 +6033,7 @@ function registerIpc(): void {
 
   ipcMain.handle("get-guard-settings", async () => {
     try {
-      const resp = await fetch(`${getStudioUrl()}/api/skills/guard-settings`, {
-        headers: { "x-agx-desktop-token": getStudioToken() },
-      });
+      const resp = await fetchStudioBackend("/api/skills/guard-settings");
       if (!resp.ok) {
         const body = await resp.text().catch(() => "");
         return { ok: false, error: `HTTP ${resp.status}: ${body.slice(0, 300)}` };
@@ -6781,11 +6807,8 @@ function registerIpc(): void {
   });
 
   ipcMain.handle("load-skills", async () => {
-    const studioUrl = getStudioUrl();
     try {
-      const resp = await fetch(`${studioUrl}/api/skills`, {
-        headers: { "x-agx-desktop-token": getStudioToken() },
-      });
+      const resp = await fetchStudioBackend("/api/skills");
       return await resp.json();
     } catch (err) {
       return { ok: false, error: String(err), items: [], count: 0 };
@@ -6793,11 +6816,8 @@ function registerIpc(): void {
   });
 
   ipcMain.handle("load-skill-detail", async (_event, args: { name: string }) => {
-    const studioUrl = getStudioUrl();
     try {
-      const resp = await fetch(`${studioUrl}/api/skills/${encodeURIComponent(args.name)}`, {
-        headers: { "x-agx-desktop-token": getStudioToken() },
-      });
+      const resp = await fetchStudioBackend(`/api/skills/${encodeURIComponent(args.name)}`);
       return await resp.json();
     } catch (err) {
       return { ok: false, error: String(err) };
@@ -6805,12 +6825,8 @@ function registerIpc(): void {
   });
 
   ipcMain.handle("refresh-skills", async () => {
-    const studioUrl = getStudioUrl();
     try {
-      const resp = await fetch(`${studioUrl}/api/skills/refresh`, {
-        method: "POST",
-        headers: { "x-agx-desktop-token": getStudioToken() },
-      });
+      const resp = await fetchStudioBackend("/api/skills/refresh", { method: "POST" });
       const data = await resp.json();
       if (data?.ok) emitSkillsChanged();
       return data;

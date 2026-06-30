@@ -2,7 +2,7 @@ import { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useRe
 import { Eye, EyeOff } from "lucide-react";
 import { Panel } from "../../ds/Panel";
 import { META_AGENT_DISPLAY_NAME } from "../../../constants/branding";
-import { useAppStore } from "../../../store";
+import { studioFetch } from "../../../utils/studio-fetch";
 import {
   formatPttShortcutLabel,
   listPttShortcutPresets,
@@ -10,6 +10,7 @@ import {
   savePttShortcutPreset,
   type PttShortcutPreset,
 } from "../../../voice/ptt-config";
+import { useAppStore } from "../../../store";
 
 type VoiceForm = {
   provider: string;
@@ -184,8 +185,10 @@ export const VoiceSettingsPanel = forwardRef<VoiceSettingsPanelHandle>(function 
     setPanelMsg("");
     setProbeMsg("");
     try {
-      const base = apiBase.replace(/\/+$/, "");
-      const resp = await fetch(`${base}/api/voice/settings`, { headers: heads });
+      const resp = await studioFetch("/api/voice/settings", {
+        headers: heads,
+        storeBase: apiBase,
+      });
       if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
       const body = (await resp.json()) as { voice?: Record<string, unknown> };
       const v = body.voice && typeof body.voice === "object" ? body.voice : {};
@@ -247,7 +250,6 @@ export const VoiceSettingsPanel = forwardRef<VoiceSettingsPanelHandle>(function 
     setPanelMsg("");
     setProbeMsg("");
     try {
-      const base = apiBase.replace(/\/+$/, "");
       const d = draftRef.current;
       const openaiKeyPut = pickSecretForPut(d.openai_realtime.api_key);
       const doubaoAkPut = pickSecretForPut(d.doubao_realtime.access_key);
@@ -278,10 +280,11 @@ export const VoiceSettingsPanel = forwardRef<VoiceSettingsPanelHandle>(function 
           input_device_id: d.input_device_id,
         },
       };
-      const resp = await fetch(`${base}/api/voice/settings`, {
+      const resp = await studioFetch("/api/voice/settings", {
         method: "PUT",
         headers: heads,
         body: JSON.stringify(payload),
+        storeBase: apiBase,
       });
       if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
       await load();
@@ -301,11 +304,11 @@ export const VoiceSettingsPanel = forwardRef<VoiceSettingsPanelHandle>(function 
     const provider = draft.provider.includes("doubao") ? "doubao" : "openai";
     setProbeMsg(provider === "doubao" ? "正在握手 wss://openspeech.bytedance.com …" : "正在测试 OpenAI Realtime 连通性 …");
     try {
-      const base = apiBase.replace(/\/+$/, "");
-      const resp = await fetch(`${base}/api/voice/realtime/probe`, {
+      const resp = await studioFetch("/api/voice/realtime/probe", {
         method: "POST",
         headers: heads,
         body: JSON.stringify({ provider }),
+        storeBase: apiBase,
       });
       let body: { ok?: boolean; detail?: string; error?: string } = {};
       try {

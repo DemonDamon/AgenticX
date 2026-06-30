@@ -1,4 +1,5 @@
 import type { KBConfig, KBStats } from "../knowledge/types";
+import { studioFetch } from "../../../utils/studio-fetch";
 
 export type BrainRecord = {
   id: string;
@@ -24,11 +25,19 @@ export function createBrainsApi(apiToken: string, resolveApiBase: ResolveBase) {
     return h;
   };
 
+  const fetchJson = async <T>(path: string, init: RequestInit = {}): Promise<T> => {
+    const base = await resolveApiBase();
+    const res = await studioFetch(path, {
+      ...init,
+      headers: { ...headers(), ...(init.headers as Record<string, string> | undefined) },
+      storeBase: base,
+    });
+    return (await res.json()) as T;
+  };
+
   return {
     async list(): Promise<BrainRecord[]> {
-      const base = await resolveApiBase();
-      const res = await fetch(`${base}/api/brains`, { headers: headers() });
-      const body = (await res.json()) as { ok?: boolean; brains?: BrainRecord[]; error?: string };
+      const body = await fetchJson<{ ok?: boolean; brains?: BrainRecord[]; error?: string }>("/api/brains");
       if (!body.ok) throw new Error(body.error || "list brains failed");
       return body.brains ?? [];
     },
@@ -40,38 +49,29 @@ export function createBrainsApi(apiToken: string, resolveApiBase: ResolveBase) {
       owner_avatar_id?: string;
       config?: Record<string, unknown>;
     }): Promise<BrainRecord> {
-      const base = await resolveApiBase();
-      const res = await fetch(`${base}/api/brains`, {
+      const body = await fetchJson<{ ok?: boolean; brain?: BrainRecord; detail?: string }>("/api/brains", {
         method: "POST",
-        headers: headers(),
         body: JSON.stringify(payload),
       });
-      const body = (await res.json()) as { ok?: boolean; brain?: BrainRecord; detail?: string };
       if (!body.ok || !body.brain) throw new Error(body.detail || "create brain failed");
       return body.brain;
     },
 
     async remove(brainId: string): Promise<void> {
-      const base = await resolveApiBase();
-      const res = await fetch(`${base}/api/brains/${encodeURIComponent(brainId)}`, {
-        method: "DELETE",
-        headers: headers(),
-      });
-      const body = (await res.json()) as { ok?: boolean; detail?: string };
+      const body = await fetchJson<{ ok?: boolean; detail?: string }>(
+        `/api/brains/${encodeURIComponent(brainId)}`,
+        { method: "DELETE" },
+      );
       if (!body.ok) throw new Error(body.detail || "delete brain failed");
     },
 
     async readKbConfig(brainId: string): Promise<{ config: KBConfig; stats: KBStats }> {
-      const base = await resolveApiBase();
-      const res = await fetch(`${base}/api/brains/${encodeURIComponent(brainId)}/config`, {
-        headers: headers(),
-      });
-      const body = (await res.json()) as {
+      const body = await fetchJson<{
         ok?: boolean;
         config?: KBConfig;
         stats?: KBStats;
         detail?: string;
-      };
+      }>(`/api/brains/${encodeURIComponent(brainId)}/config`);
       if (!body.ok || !body.config) throw new Error(body.detail || "read config failed");
       return { config: body.config, stats: body.stats ?? ({} as KBStats) };
     },
@@ -80,30 +80,27 @@ export function createBrainsApi(apiToken: string, resolveApiBase: ResolveBase) {
       brainId: string,
       config: KBConfig,
     ): Promise<{ config: KBConfig; rebuild_required: boolean }> {
-      const base = await resolveApiBase();
-      const res = await fetch(`${base}/api/brains/${encodeURIComponent(brainId)}/config`, {
-        method: "PUT",
-        headers: headers(),
-        body: JSON.stringify(config),
-      });
-      const body = (await res.json()) as {
+      const body = await fetchJson<{
         ok?: boolean;
         config?: KBConfig;
         rebuild_required?: boolean;
         detail?: string;
-      };
+      }>(`/api/brains/${encodeURIComponent(brainId)}/config`, {
+        method: "PUT",
+        body: JSON.stringify(config),
+      });
       if (!body.ok || !body.config) throw new Error(body.detail || "write config failed");
       return { config: body.config, rebuild_required: Boolean(body.rebuild_required) };
     },
 
     async patchBrain(brainId: string, patch: Record<string, unknown>): Promise<BrainRecord> {
-      const base = await resolveApiBase();
-      const res = await fetch(`${base}/api/brains/${encodeURIComponent(brainId)}`, {
-        method: "PATCH",
-        headers: headers(),
-        body: JSON.stringify(patch),
-      });
-      const body = (await res.json()) as { ok?: boolean; brain?: BrainRecord; detail?: string };
+      const body = await fetchJson<{ ok?: boolean; brain?: BrainRecord; detail?: string }>(
+        `/api/brains/${encodeURIComponent(brainId)}`,
+        {
+          method: "PATCH",
+          body: JSON.stringify(patch),
+        },
+      );
       if (!body.ok || !body.brain) throw new Error(body.detail || "patch brain failed");
       return body.brain;
     },

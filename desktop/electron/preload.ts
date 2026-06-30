@@ -62,6 +62,8 @@ async function desktopApiFetch<T>(path: string, init?: RequestInit): Promise<T> 
 contextBridge.exposeInMainWorld("agenticxDesktop", {
   version: "0.2.5",
   getApiBase: async (): Promise<string> => ipcRenderer.invoke("get-api-base"),
+  waitForStudio: async (timeoutMs?: number): Promise<{ ok: boolean }> =>
+    ipcRenderer.invoke("wait-for-studio", timeoutMs),
   getApiAuthToken: async (): Promise<string> => ipcRenderer.invoke("get-api-auth-token"),
   platform: async (): Promise<string> => ipcRenderer.invoke("get-platform"),
   syncTitleBarOverlay: async (theme: "dark" | "light" | "dim") =>
