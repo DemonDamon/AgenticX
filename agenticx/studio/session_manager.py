@@ -1984,6 +1984,16 @@ class SessionManager:
                     row["searched_queries"] = [
                         str(x).strip() for x in raw_queries[:20] if str(x).strip()
                     ]
+                raw_reasoning = item.get("reasoning")
+                if isinstance(raw_reasoning, str) and raw_reasoning.strip():
+                    row["reasoning"] = raw_reasoning.strip()[:16384]
+                raw_reasoning_seconds = item.get("reasoning_seconds")
+                try:
+                    reasoning_seconds = int(raw_reasoning_seconds) if raw_reasoning_seconds is not None else None
+                except (TypeError, ValueError):
+                    reasoning_seconds = None
+                if reasoning_seconds is not None and reasoning_seconds >= 1:
+                    row["reasoning_seconds"] = reasoning_seconds
             normalized.append(row)
         return self._collapse_repeated_assistant_in_turn(normalized)
 

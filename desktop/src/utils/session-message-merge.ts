@@ -4,6 +4,28 @@ import { mapLoadedSessionMessage, type LoadedSessionMessage } from "./session-me
 const norm = (s: unknown) => String(s ?? "").trim();
 const contentKey = (role: string, content: unknown) => `${role}::${norm(content)}`;
 
+/**
+ * In-memory assistant rows carry the raw streamed text — `<think>…</think>`
+ * reasoning and `<followups>…</followups>` blocks — while the disk copy persists
+ * only the sanitized final body. A raw-content comparison therefore never
+ * matches, so the in-memory row falls through to the unconsumed-tail append and
+ * surfaces as a DUPLICATE assistant row (the "思考了 N 秒" rows piling up after
+ * the answer) whose references also land on the wrong copy. Comparing the
+ * reasoning/followups-stripped body lets the live row reconcile with its disk
+ * counterpart so enrichments (references / searched queries) are preserved and
+ * no duplicate is appended.
+ */
+function strippedAssistantBody(content: unknown): string {
+  return String(content ?? "")
+    .replace(/<think>[\s\S]*?<\/think>/gi, "")
+    .replace(/<think>[\s\S]*$/i, "")
+    .replace(/<followups>[\s\S]*?<\/followups>/gi, "")
+    .replace(/<followups>[\s\S]*$/i, "")
+    .trim();
+}
+
+const assistantBodyKey = (content: unknown) => strippedAssistantBody(content);
+
 function overlayMemoryEnrichment(diskRow: Message, memory: Message): Message {
   return {
     ...diskRow,
@@ -17,6 +39,8 @@ function overlayMemoryEnrichment(diskRow: Message, memory: Message): Message {
     suggestedQuestions: memory.suggestedQuestions ?? diskRow.suggestedQuestions,
     references: memory.references ?? diskRow.references,
     searchedQueries: memory.searchedQueries ?? diskRow.searchedQueries,
+    reasoning: memory.reasoning ?? diskRow.reasoning,
+    reasoningSeconds: memory.reasoningSeconds ?? diskRow.reasoningSeconds,
     toolStatus: memory.toolStatus ?? diskRow.toolStatus,
     toolElapsedSec: memory.toolElapsedSec ?? diskRow.toolElapsedSec,
     metadata: memory.metadata ?? diskRow.metadata,
@@ -45,11 +69,19 @@ export function mergeSessionMessagesTail(
       consumedMemory.add(byId);
       return byId;
     }
+    const diskBody =
+      diskRow.role === "assistant" ? assistantBodyKey(diskRow.content) : "";
     for (const memory of existing) {
       if (consumedMemory.has(memory)) continue;
       if (memory.role !== diskRow.role) continue;
-      if (contentKey(memory.role, memory.content) !== contentKey(diskRow.role, diskRow.content)) continue;
-      if (!norm(diskRow.content)) continue;
+      const exactMatch =
+        norm(diskRow.content).length > 0 &&
+        contentKey(memory.role, memory.content) === contentKey(diskRow.role, diskRow.content);
+      const bodyMatch =
+        diskRow.role === "assistant" &&
+        diskBody.length > 0 &&
+        assistantBodyKey(memory.content) === diskBody;
+      if (!exactMatch && !bodyMatch) continue;
       consumedMemory.add(memory);
       return memory;
     }
@@ -57,15 +89,28 @@ export function mergeSessionMessagesTail(
   };
 
   const out: Message[] = [];
+  const placedAssistantBodies = new Set<string>();
   for (const diskRow of mapped) {
     const memory = findMemoryMatch(diskRow);
-    out.push(memory ? overlayMemoryEnrichment(diskRow, memory) : diskRow);
+    const row = memory ? overlayMemoryEnrichment(diskRow, memory) : diskRow;
+    out.push(row);
+    if (row.role === "assistant") {
+      const body = assistantBodyKey(row.content);
+      if (body) placedAssistantBodies.add(body);
+    }
   }
 
+  // Append in-memory rows that disk hasn't persisted yet (缺失自愈), but never
+  // re-append an assistant row whose body already appears above — those are the
+  // accumulated duplicate "思考了 N 秒" copies left by earlier failed merges.
   for (const memory of existing) {
-    if (!consumedMemory.has(memory)) {
-      out.push(memory);
+    if (consumedMemory.has(memory)) continue;
+    if (memory.role === "assistant") {
+      const body = assistantBodyKey(memory.content);
+      if (body && placedAssistantBodies.has(body)) continue;
+      if (body) placedAssistantBodies.add(body);
     }
+    out.push(memory);
   }
 
   return out;

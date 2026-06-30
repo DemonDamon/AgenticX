@@ -7170,6 +7170,8 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
       let pendingSuggestedQuestions: string[] = [];
       let pendingReferences: SearchReference[] = [];
       let pendingSearchedQueries: string[] = [];
+      let pendingReasoning: string | undefined = undefined;
+      let pendingReasoningSeconds: number | undefined = undefined;
       const syncTurnRefsSnapshot = () => {
         turnRefsSnapshot.references = pendingReferences;
         turnRefsSnapshot.queries = pendingSearchedQueries;
@@ -8006,6 +8008,17 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
                 );
                 pendingReferences = appliedRefs.references;
                 pendingSearchedQueries = appliedRefs.queries;
+                const finalReasoningRaw = payload.data?.reasoning;
+                if (typeof finalReasoningRaw === "string" && finalReasoningRaw.trim()) {
+                  pendingReasoning = finalReasoningRaw.trim().slice(0, 16384);
+                }
+                const finalReasoningSecondsRaw = payload.data?.reasoning_seconds;
+                if (
+                  typeof finalReasoningSecondsRaw === "number" &&
+                  finalReasoningSecondsRaw >= 1
+                ) {
+                  pendingReasoningSeconds = Math.round(finalReasoningSecondsRaw);
+                }
                 syncTurnRefsSnapshot();
                 if (isTargetSessionStillActive()) {
                   setStreamReferences([...pendingReferences]);
@@ -8111,7 +8124,14 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
         pendingSuggestedQuestions.length > 0
           ? { suggestedQuestions: pendingSuggestedQuestions.slice(0, 3) }
           : undefined;
-      const turnExtras = refExtras || sugExtras ? { ...refExtras, ...sugExtras } : undefined;
+      const reasoningExtras: Record<string, unknown> = {};
+      if (pendingReasoning) reasoningExtras.reasoning = pendingReasoning;
+      if (pendingReasoningSeconds !== undefined)
+        reasoningExtras.reasoningSeconds = pendingReasoningSeconds;
+      const turnExtras =
+        refExtras || sugExtras || Object.keys(reasoningExtras).length > 0
+          ? { ...refExtras, ...sugExtras, ...reasoningExtras }
+          : undefined;
       const completedAt = Date.now();
       const stampLastAssistantCompletedAt = () => {
         useAppStore.getState().mergeLastPaneMessageByRole(pane.id, "assistant", {
