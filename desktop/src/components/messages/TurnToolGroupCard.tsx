@@ -6,7 +6,7 @@ import type { ReactNode } from "react";
 import { TodoUpdateCard } from "../TodoUpdateCard";
 import { isTodoUpdateToolMessage } from "./MessageRenderer";
 import type { SkillPatchPreviewPayload } from "./skill-manage-preview";
-import { REACT_RAIL_ICON_TILE_STYLE } from "./im-layout";
+import { REACT_RAIL_ICON_TILE_STYLE, REACT_RAIL_TITLE_CLASS } from "./im-layout";
 import { isToolGroupInProgress } from "./group-tool-messages";
 
 type Props = {
@@ -52,7 +52,7 @@ function ToolNameChip({ name }: { name: string }) {
 function CompletedToolSummary({ messages }: { messages: Message[] }) {
   const parts = sortedToolCounts(messages);
   return (
-    <span className="inline-flex min-w-0 flex-wrap items-center gap-x-1 gap-y-0.5 text-[13px] font-medium text-text-subtle">
+    <span className={`inline-flex min-w-0 flex-wrap items-center gap-x-1 gap-y-0.5 ${REACT_RAIL_TITLE_CLASS}`}>
       <span className="shrink-0">已调用 {messages.length} 次工具</span>
       {parts.length > 0 ? (
         <>
@@ -121,7 +121,7 @@ export function TurnToolGroupCard({
         </span>
         <span className="flex min-w-0 shrink items-center gap-1.5">
           {inProgress ? (
-            <span className="truncate text-[13px] font-medium text-text-subtle">正在调用工具</span>
+            <span className={`truncate ${REACT_RAIL_TITLE_CLASS}`}>正在调用工具</span>
           ) : (
             <CompletedToolSummary messages={messages} />
           )}
