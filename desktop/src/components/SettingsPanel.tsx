@@ -1274,7 +1274,6 @@ function HooksTab() {
     disabled: [],
   });
   const [customPaths, setCustomPaths] = useState<string[]>([]);
-  const [importExpanded, setImportExpanded] = useState(false);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const apiToken = useAppStore((s) => s.apiToken);
@@ -1432,15 +1431,11 @@ function HooksTab() {
 
       {/* Block B: 外部导入（默认折叠） */}
       <Panel
-        title={
-          <button type="button" className="flex w-full items-center gap-2 text-left" onClick={() => setImportExpanded((v) => !v)}>
-            <ChevronRight className={`h-3.5 w-3.5 transition-transform ${importExpanded ? "rotate-90" : ""}`} aria-hidden />
-            <span>外部导入钩子{scanSummary.deduped_total > 0 ? ` (${scanSummary.deduped_total} 条，去重自 ${scanSummary.raw_total} 条)` : ""}</span>
-          </button>
-        }
+        title={`外部导入钩子${scanSummary.deduped_total > 0 ? ` (${scanSummary.deduped_total} 条，去重自 ${scanSummary.raw_total} 条)` : ""}`}
+        collapsible
+        defaultCollapsed
       >
-        {importExpanded ? (
-          <div className="space-y-3">
+        <div className="space-y-3">
             <div className="space-y-2">
               {settingsError ? (
                 <div className="rounded-md border border-amber-500/30 bg-amber-500/10 p-2 text-xs text-amber-200">配置路径读取异常：{settingsError}</div>
@@ -1500,8 +1495,7 @@ function HooksTab() {
                 })}
               </div>
             )}
-          </div>
-        ) : null}
+        </div>
       </Panel>
     </div>
   );
