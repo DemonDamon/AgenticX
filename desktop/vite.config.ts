@@ -7,7 +7,8 @@ export default defineConfig(({ command }) => ({
   base: command === "serve" ? "/" : "./",
   plugins: [react()],
   server: {
-    port: 5173,
+    port: Number(process.env.AGX_DEV_PORT) || 5713,
+    strictPort: true,
     proxy: {
       "/api": {
         target: "http://127.0.0.1:8000",
