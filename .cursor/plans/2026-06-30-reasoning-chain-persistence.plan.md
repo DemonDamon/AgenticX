@@ -1,3 +1,10 @@
+---
+name: ""
+overview: ""
+todos: []
+isProject: false
+---
+
 # Reasoning Chain Persistence（思考链持久化）
 
 Planned-with: GLM 5.2
