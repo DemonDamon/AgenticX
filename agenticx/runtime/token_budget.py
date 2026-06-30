@@ -56,7 +56,7 @@ def resolve_token_budget_limits(
 
     if session_limit is None or turn_limit is None:
         try:
-            from agenticx.config.config_manager import ConfigManager
+            from agenticx.cli.config_manager import ConfigManager
 
             global_data = ConfigManager._load_yaml(ConfigManager.GLOBAL_CONFIG_PATH)
             project_data = ConfigManager._load_yaml(ConfigManager.PROJECT_CONFIG_PATH)
