@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
+  isEphemeralStopErrorText,
   isInterruptedAssistantPlaceholder,
   isNoisyToolStatusMessage,
 } from "./noisy-chat-messages.ts";
@@ -15,9 +16,25 @@ test("isNoisyToolStatusMessage hides ephemeral interruption meta rows", () => {
     true,
   );
   assert.equal(
+    isNoisyToolStatusMessage({ role: "tool", content: "❌ 已中断当前生成", toolName: "" }),
+    true,
+    "SSE error rows with ❌ prefix are hidden",
+  );
+  assert.equal(
+    isNoisyToolStatusMessage({ role: "tool", content: "已中断当前生成", toolName: "meta" }),
+    true,
+    "stop rows hide even when toolName is wrongly set",
+  );
+  assert.equal(
     isNoisyToolStatusMessage({ role: "tool", content: "file_read", toolName: "file_read" }),
     false,
   );
+});
+
+test("isEphemeralStopErrorText matches runtime STOP_MESSAGE variants", () => {
+  assert.equal(isEphemeralStopErrorText("已中断当前生成"), true);
+  assert.equal(isEphemeralStopErrorText("❌ 已中断当前生成"), true);
+  assert.equal(isEphemeralStopErrorText("Runtime error: timeout"), false);
 });
 
 test("isInterruptedAssistantPlaceholder hides barge-in assistant rows", () => {
