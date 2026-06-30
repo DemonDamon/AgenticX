@@ -3024,7 +3024,9 @@ function createWindow(): void {
   mainWindowReadyToShow = false;
   mainWindowRevealPending = false;
   const vibrancyEnabled = process.env.AGX_ENABLE_VIBRANCY === "1";
-  const devUrl = process.env.VITE_DEV_SERVER_URL ?? "http://localhost:5173";
+  const devPort = process.env.AGX_DEV_PORT || "5713";
+  const devUrl =
+    process.env.VITE_DEV_SERVER_URL ?? `http://localhost:${devPort}`;
   const appEntryUrl = app.isPackaged
     ? `file://${path.join(__dirname, "..", "dist", "index.html")}`
     : devUrl;

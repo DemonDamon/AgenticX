@@ -7,7 +7,7 @@
   "productName": "Near",
   "main": "dist-electron/main.js",
   "scripts": {
-    "dev": "cp electron/splash.html dist-electron/splash.html 2>/dev/null || true && concurrently \"vite\" \"tsc -p electron/tsconfig.json --watch\" \"wait-on tcp:5173 dist-electron/main.js && electron .\"",
+    "dev": "cp electron/splash.html dist-electron/splash.html 2>/dev/null || true && concurrently \"vite\" \"tsc -p electron/tsconfig.json --watch\" \"node scripts/wait-and-electron.mjs\"",
     "icons:sync": "bash ./scripts/sync-icons.sh",
     "build": "vite build && tsc -p electron/tsconfig.json && cp electron/splash.html dist-electron/splash.html",
     "start": "electron .",
@@ -59,6 +59,7 @@
     "@vitejs/plugin-react": "^4.3.4",
     "autoprefixer": "^10.4.20",
     "concurrently": "^9.1.2",
+    "cross-env": "^10.1.0",
     "electron": "^34.5.8",
     "electron-builder": "^25.1.8",
     "postcss": "^8.5.3",
