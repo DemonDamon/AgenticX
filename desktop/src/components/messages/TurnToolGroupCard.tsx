@@ -1,11 +1,13 @@
 import { useMemo, useState } from "react";
 import type { Message } from "../../store";
-import { Check, ChevronDown, ChevronRight } from "lucide-react";
+import { Check, ChevronDown, ChevronRight, Wrench } from "lucide-react";
 import { ToolCallCard } from "./ToolCallCard";
 import type { ReactNode } from "react";
 import { TodoUpdateCard } from "../TodoUpdateCard";
 import { isTodoUpdateToolMessage } from "./MessageRenderer";
 import type { SkillPatchPreviewPayload } from "./skill-manage-preview";
+import { REACT_RAIL_ICON_TILE_STYLE } from "./im-layout";
+import { isToolGroupInProgress } from "./group-tool-messages";
 
 type Props = {
   messages: Message[];
@@ -19,6 +21,8 @@ type Props = {
   omitLeadingSpacer?: boolean;
   /** When true, remove outer border/rounded so parent unified container provides the single border. */
   flat?: boolean;
+  /** Keep header in "calling tools" while the turn is still between sequential calls. */
+  holdProgress?: boolean;
   onSkillManageApply?: (message: Message, payload: SkillPatchPreviewPayload, targetIndex: number | null) => void;
 };
 
@@ -31,6 +35,43 @@ function countToolNames(msgs: Message[]): Map<string, number> {
   return m;
 }
 
+function sortedToolCounts(msgs: Message[]): Array<[string, number]> {
+  const counts = countToolNames(msgs);
+  return [...counts.entries()].sort((a, b) => b[1] - a[1]);
+}
+
+function ToolNameChip({ name }: { name: string }) {
+  return (
+    <span className="inline-flex max-w-[min(100%,12rem)] items-center gap-1 rounded bg-surface-hover px-1.5 py-0.5 font-mono text-[11px] leading-none text-text-strong">
+      <Wrench className="h-2.5 w-2.5 shrink-0 text-text-muted" strokeWidth={2.2} aria-hidden />
+      <span className="truncate">{name}</span>
+    </span>
+  );
+}
+
+function CompletedToolSummary({ messages }: { messages: Message[] }) {
+  const parts = sortedToolCounts(messages);
+  return (
+    <span className="inline-flex min-w-0 flex-wrap items-center gap-x-1 gap-y-0.5 text-[13px] font-medium text-text-subtle">
+      <span className="shrink-0">已调用 {messages.length} 次工具</span>
+      {parts.length > 0 ? (
+        <>
+          <span className="shrink-0 text-text-faint" aria-hidden>
+            ·
+          </span>
+          {parts.map(([name, count], index) => (
+            <span key={name} className="inline-flex min-w-0 items-center">
+              {index > 0 ? <span className="shrink-0 text-text-faint mr-1.5">，</span> : null}
+              <span className="shrink-0 tabular-nums mr-1.5">{count} 次</span>
+              <ToolNameChip name={name} />
+            </span>
+          ))}
+        </>
+      ) : null}
+    </span>
+  );
+}
+
 export function TurnToolGroupCard({
   messages,
   highlightTerms,
@@ -40,17 +81,14 @@ export function TurnToolGroupCard({
   onToggleSelectMessage,
   omitLeadingSpacer = false,
   flat = false,
+  holdProgress = false,
   onSkillManageApply,
 }: Props) {
   const [expanded, setExpanded] = useState(false);
-  const summary = useMemo(() => {
-    const counts = countToolNames(messages);
-    const parts = [...counts.entries()]
-      .sort((a, b) => b[1] - a[1])
-      .map(([name, c]) => `${c} ${name}`);
-    const head = `本次调用 ${messages.length} 个工具`;
-    return parts.length ? `${head} · ${parts.join("，")}` : head;
-  }, [messages]);
+  const inProgress = useMemo(
+    () => isToolGroupInProgress(messages) || holdProgress,
+    [holdProgress, messages],
+  );
 
   const cardContent = (
     <div
@@ -68,12 +106,25 @@ export function TurnToolGroupCard({
         onClick={() => setExpanded((v) => !v)}
       >
         <span className="flex h-[20px] w-[20px] shrink-0 items-center justify-center" aria-hidden>
-          <span className="flex h-4 w-4 items-center justify-center rounded-full bg-[rgb(var(--theme-color-rgb,59,130,246))] ring-1 ring-[rgba(var(--theme-color-rgb,59,130,246),0.35)]">
-            <Check className="h-2.5 w-2.5 text-white" strokeWidth={2.45} />
-          </span>
+          {inProgress ? (
+            <span
+              className="flex h-4 w-4 items-center justify-center rounded-full"
+              style={REACT_RAIL_ICON_TILE_STYLE}
+            >
+              <Wrench className="h-2.5 w-2.5" strokeWidth={2.45} />
+            </span>
+          ) : (
+            <span className="flex h-4 w-4 items-center justify-center rounded-full bg-[rgb(var(--theme-color-rgb,59,130,246))] ring-1 ring-[rgba(var(--theme-color-rgb,59,130,246),0.35)]">
+              <Check className="h-2.5 w-2.5 text-white" strokeWidth={2.45} />
+            </span>
+          )}
         </span>
         <span className="flex min-w-0 shrink items-center gap-1.5">
-          <span className="truncate text-[13px] font-medium text-text-subtle">{summary}</span>
+          {inProgress ? (
+            <span className="truncate text-[13px] font-medium text-text-subtle">正在调用工具</span>
+          ) : (
+            <CompletedToolSummary messages={messages} />
+          )}
           {expanded ? (
             <ChevronDown className="h-3.5 w-3.5 shrink-0 text-text-muted" strokeWidth={2} aria-hidden />
           ) : (

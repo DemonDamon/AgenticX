@@ -45,3 +45,53 @@ export function groupConsecutiveToolMessages(messages: Message[]): GroupedChatRo
   }
   return out;
 }
+
+export function isToolGroupInProgress(messages: Message[]): boolean {
+  return messages.some((m) => m.toolStatus === "running" || m.toolStatus === "pending");
+}
+
+function findLastGroupedToolMessageId(messages: Message[]): string | undefined {
+  const visibleMessages = messages.filter((m) => !isNoisyToolStatusMessage(m));
+  for (let i = visibleMessages.length - 1; i >= 0; i -= 1) {
+    const message = visibleMessages[i];
+    if (message.role === "tool" && canGroupToolMessage(message)) {
+      return message.id;
+    }
+  }
+  return undefined;
+}
+
+function hasAssistantTailAfterToolGroup(contextMessages: Message[], groupMessages: Message[]): boolean {
+  const lastGroupMessageId = groupMessages[groupMessages.length - 1]?.id;
+  if (!lastGroupMessageId) return false;
+  const visibleMessages = contextMessages.filter((m) => !isNoisyToolStatusMessage(m));
+  const lastGroupIndex = visibleMessages.findIndex((m) => m.id === lastGroupMessageId);
+  if (lastGroupIndex < 0) return false;
+  for (let i = lastGroupIndex + 1; i < visibleMessages.length; i += 1) {
+    const message = visibleMessages[i];
+    if (message.role !== "assistant") continue;
+    if (message.id === "__stream__") return true;
+    if ((message.content ?? "").trim()) return true;
+  }
+  return false;
+}
+
+/**
+ * Between sequential tool calls in the same turn, every row in the group may
+ * briefly flip to "done" before the next call arrives. Keep the group header
+ * in the in-progress state until the turn moves on to assistant output.
+ */
+export function shouldHoldToolGroupProgress(
+  contextMessages: Message[],
+  groupMessages: Message[],
+  isStreamingCurrentSession: boolean,
+): boolean {
+  if (!isStreamingCurrentSession) return false;
+  if (groupMessages.length === 0) return false;
+  if (isToolGroupInProgress(groupMessages)) return false;
+  const lastGroupMessageId = groupMessages[groupMessages.length - 1]?.id;
+  if (!lastGroupMessageId) return false;
+  if (findLastGroupedToolMessageId(contextMessages) !== lastGroupMessageId) return false;
+  if (hasAssistantTailAfterToolGroup(contextMessages, groupMessages)) return false;
+  return true;
+}

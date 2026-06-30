@@ -25,7 +25,7 @@ import {
 import { KeybindingsPanel } from "./KeybindingsPanel";
 import { attachmentsFromSessionRow } from "../utils/session-message-map";
 import { MessageRenderer, renderToolMessageExtras } from "./messages/MessageRenderer";
-import { groupConsecutiveToolMessages, type GroupedChatRow } from "./messages/group-tool-messages";
+import { groupConsecutiveToolMessages, shouldHoldToolGroupProgress, type GroupedChatRow } from "./messages/group-tool-messages";
 import {
   isEphemeralStopErrorText,
   isInterruptedAssistantPlaceholder,
@@ -332,7 +332,7 @@ function MessageActions({
 }) {
   if (msg.role !== "assistant") return null;
   return (
-    <div className="mt-1.5 flex items-center gap-3 text-[11px] text-text-faint">
+    <div className="mt-3 flex items-center gap-3 text-[11px] text-text-faint pb-3">
       <button className="transition hover:text-text-muted" onClick={onCopy} title="复制">
         复制
       </button>
@@ -1345,18 +1345,35 @@ export function ChatView({ onOpenConfirm, onOpenClarification, mode = "pro" }: P
               const rawContent = serializeToolResultRaw(resultRaw);
               const preview = formatted.content.replace(/\s+/g, " ").trim().slice(0, 160);
               const mergedStatus = deriveToolStatusFromResult(resultRaw);
-              if (eventAgentId === "meta" && resultCallId) {
-                const merged = updateMessageByToolCallId(resultCallId, {
+              if (eventAgentId === "meta") {
+                const resultPatch = {
                   content: rawContent,
                   toolStatus: mergedStatus,
                   toolResultPreview: preview,
                   toolStreamLines: [],
-                });
+                };
+                let merged = resultCallId
+                  ? updateMessageByToolCallId(resultCallId, resultPatch)
+                  : false;
+                if (!merged) {
+                  // tool_result 未携带可匹配 id 时，退化为翻转最后一条 running 的 tool 调用，
+                  // 让分组头在流式期间即时切换为完成态，而非整轮结束才纠正。
+                  const fallbackCallId = [...useAppStore.getState().messages]
+                    .reverse()
+                    .find(
+                      (mm) =>
+                        mm.role === "tool" &&
+                        Boolean(mm.toolCallId) &&
+                        (mm.toolStatus === "running" || mm.toolStatus === "pending") &&
+                        (!toolName || (mm.toolName ?? "") === String(toolName))
+                    )?.toolCallId;
+                  if (fallbackCallId) {
+                    merged = updateMessageByToolCallId(fallbackCallId, resultPatch);
+                  }
+                }
                 if (!merged) {
                   addMessage("tool", formatted.content, "meta");
                 }
-              } else if (eventAgentId === "meta") {
-                addMessage("tool", formatted.content, "meta");
               } else {
                 addSubAgentEvent(eventAgentId, { type: "tool_result", content: formatted.content });
                 if (toolName === "file_write" || toolName === "file_edit") {
@@ -2178,7 +2195,15 @@ export function ChatView({ onOpenConfirm, onOpenClarification, mode = "pro" }: P
         )}
         <div className={`mx-auto max-w-3xl space-y-3 ${isLite ? "text-[15px]" : ""}`}>
           {(() => {
-            const renderGroupedChatRow = (row: GroupedChatRow, reactWorkCol: boolean) => {
+            const lastFlatToolGroupIdx = groupedVisibleMessages.reduce(
+              (acc, groupedRow, index) => (groupedRow.kind === "tool_group" ? index : acc),
+              -1,
+            );
+            const renderGroupedChatRow = (
+              row: GroupedChatRow,
+              reactWorkCol: boolean,
+              toolProgressContext?: Message[],
+            ) => {
               if (row.kind === "message") {
                 const m = row.message;
                 return (
@@ -2210,6 +2235,11 @@ export function ChatView({ onOpenConfirm, onOpenClarification, mode = "pro" }: P
                 <TurnToolGroupCard
                   key={`tg-${row.groupId}`}
                   messages={row.messages}
+                  holdProgress={
+                    toolProgressContext
+                      ? shouldHoldToolGroupProgress(toolProgressContext, row.messages, streaming)
+                      : false
+                  }
                   renderExtras={(msg) => renderToolMessageExtras(msg, {})}
                   omitLeadingSpacer={reactWorkCol}
                   flat={reactWorkCol}
@@ -2225,11 +2255,21 @@ export function ChatView({ onOpenConfirm, onOpenClarification, mode = "pro" }: P
                 const { workMessages, finalAssistant } = seg.block;
                 const groupedWork = groupConsecutiveToolMessages(workMessages);
                 const blockKey = `react-${workMessages[0]?.id ?? segIdx}-${finalAssistant?.id ?? ""}`;
+                const lastToolGroupIdxInWork = groupedWork.reduce(
+                  (acc, groupedRow, index) => (groupedRow.kind === "tool_group" ? index : acc),
+                  -1,
+                );
                 return (
                   <div key={blockKey} className="space-y-3">
                     <div className="flex min-w-0 items-start gap-2">
                       <div className="flex min-w-0 flex-1 flex-col gap-3">
-                        {groupedWork.map((r) => renderGroupedChatRow(r, true))}
+                        {groupedWork.map((r, i) =>
+                          renderGroupedChatRow(
+                            r,
+                            true,
+                            r.kind === "tool_group" && i === lastToolGroupIdxInWork ? workMessages : undefined,
+                          ),
+                        )}
                       </div>
                     </div>
                     {finalAssistant ? renderGroupedChatRow({ kind: "message", message: finalAssistant }, false) : null}
@@ -2237,7 +2277,13 @@ export function ChatView({ onOpenConfirm, onOpenClarification, mode = "pro" }: P
                 );
               });
             }
-            return groupedVisibleMessages.map((row) => renderGroupedChatRow(row, false));
+            return groupedVisibleMessages.map((row, rowIdx) =>
+              renderGroupedChatRow(
+                row,
+                false,
+                row.kind === "tool_group" && rowIdx === lastFlatToolGroupIdx ? visibleMessages : undefined,
+              ),
+            );
           })()}
           {streaming && !hideStreamOverlayAsDuplicate && (
             <div className={["!mt-1.5", isLite ? "text-[15px]" : "text-sm"].join(" ")}>

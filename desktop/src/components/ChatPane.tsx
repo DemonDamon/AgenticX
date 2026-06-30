@@ -54,7 +54,7 @@ import type { WorkspacePreviewOpenRequest, WorkspacePreviewQuotePayload } from "
 import { SpawnsColumn } from "./SpawnsColumn";
 import { MessageRenderer, renderToolMessageExtras } from "./messages/MessageRenderer";
 import type { SkillPatchPreviewPayload } from "./messages/skill-manage-preview";
-import { groupConsecutiveToolMessages, type GroupedChatRow } from "./messages/group-tool-messages";
+import { groupConsecutiveToolMessages, shouldHoldToolGroupProgress, type GroupedChatRow } from "./messages/group-tool-messages";
 import {
   isEphemeralStopErrorText,
   isInterruptedAssistantPlaceholder,
@@ -5824,6 +5824,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
         reactHideBadge?: boolean;
         reactShowActions?: boolean;
         omitSuggestedQuestions?: boolean;
+        holdToolGroupProgress?: boolean;
       }
     ) => {
       const reactCol = opts.reactWorkColumn ?? false;
@@ -5831,6 +5832,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
       const reactHideBadge = opts.reactHideBadge ?? false;
       const reactShowActions = opts.reactShowActions ?? false;
       const omitSuggestedQuestions = opts.omitSuggestedQuestions ?? false;
+      const holdToolGroupProgress = opts.holdToolGroupProgress ?? false;
       if (row.kind === "message") {
         const message = row.message;
         const canRetryThisUserMessage = message.role === "user" && !isStreamingCurrentSession;
@@ -5929,6 +5931,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
           <TurnToolGroupCard
             messages={row.messages}
             highlightTerms={pane.historySearchTerms}
+            holdProgress={holdToolGroupProgress}
             renderExtras={(m) =>
               renderToolMessageExtras(m, {
                 onRevealPath: (p) => void revealFileInTaskspace(p),
@@ -5955,6 +5958,10 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
             const { workMessages, finalAssistant } = seg.block;
             const groupedWork = groupConsecutiveToolMessages(workMessages);
             const blockKey = `react-${workMessages[0]?.id ?? segIdx}-${finalAssistant?.id ?? ""}`;
+            const lastToolGroupIdxInWork = groupedWork.reduce(
+              (acc, row, index) => (row.kind === "tool_group" ? index : acc),
+              -1,
+            );
             const hasTools = groupedWork.some(
               (r) => r.kind === "tool_group" || (r.kind === "message" && r.message.role === "tool")
             );
@@ -6017,6 +6024,10 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
                           reactFlat: true,
                           reactHideBadge: i > 0,
                           omitSuggestedQuestions: omitSq,
+                          holdToolGroupProgress:
+                            r.kind === "tool_group" &&
+                            i === lastToolGroupIdxInWork &&
+                            shouldHoldToolGroupProgress(workMessages, r.messages, isStreamingCurrentSession),
                         });
                       })}
                     </div>
@@ -6038,7 +6049,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
                 {/* Block-level actions; peeled follow-ups on the next line below icons */}
                 {!hasStreamingRow && !sessionWorkInProgress && workMessages.length > 0 && useUnifiedReActCard ? (
                   <div
-                    className={`!-mt-0.5 flex min-w-0 items-start gap-2 mb-6`}
+                    className="mb-6 flex min-w-0 items-start gap-2"
                   >
                     {isSelecting ? <div className="h-5 w-5 shrink-0" aria-hidden /> : null}
                     <div className="min-w-0 flex-1">
@@ -6135,7 +6146,18 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
               </div>
             );
           })
-        : groupedVisibleMessages.map((row, rowIdx) => renderGroupedRow(row, rowIdx, {}));
+        : groupedVisibleMessages.map((row, rowIdx) => {
+            const lastToolGroupIdx = groupedVisibleMessages.reduce(
+              (acc, groupedRow, index) => (groupedRow.kind === "tool_group" ? index : acc),
+              -1,
+            );
+            return renderGroupedRow(row, rowIdx, {
+              holdToolGroupProgress:
+                row.kind === "tool_group" &&
+                rowIdx === lastToolGroupIdx &&
+                shouldHoldToolGroupProgress(pane.messages ?? [], row.messages, isStreamingCurrentSession),
+            });
+          });
 
     return (
     <>
@@ -7603,18 +7625,37 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
               const rawContent = serializeToolResultRaw(payload.data?.result);
               const preview = formatted.content.replace(/\s+/g, " ").trim().slice(0, 160);
               const mergedStatus = deriveToolStatusFromResult(payload.data?.result);
-              if (eventAgentId === "meta" && resultCallId) {
-                const merged = updatePaneMessageByToolCallId(pane.id, resultCallId, {
+              if (eventAgentId === "meta") {
+                const resultPatch = {
                   content: rawContent,
                   toolStatus: mergedStatus,
                   toolResultPreview: preview,
                   toolStreamLines: [],
-                });
+                };
+                let merged = resultCallId
+                  ? updatePaneMessageByToolCallId(pane.id, resultCallId, resultPatch)
+                  : false;
+                if (!merged) {
+                  // 流式期间后端可能未在 tool_result 上回传可匹配的 tool_call_id，
+                  // 退化为把该 pane 内最后一条仍在执行的 tool 调用翻成完成态并写入结果，
+                  // 避免分组头长期停留在「正在调用工具」直到整轮结束才被快照纠正。
+                  const pan = useAppStore.getState().panes.find((p) => p.id === pane.id);
+                  const fallbackCallId = [...(pan?.messages ?? [])]
+                    .reverse()
+                    .find(
+                      (mm) =>
+                        mm.role === "tool" &&
+                        Boolean(mm.toolCallId) &&
+                        (mm.toolStatus === "running" || mm.toolStatus === "pending") &&
+                        (!toolName || (mm.toolName ?? "") === toolName)
+                    )?.toolCallId;
+                  if (fallbackCallId) {
+                    merged = updatePaneMessageByToolCallId(pane.id, fallbackCallId, resultPatch);
+                  }
+                }
                 if (!merged) {
                   addPaneMessageIfSessionActive(pane.id, "tool", formatted.content, "meta");
                 }
-              } else if (eventAgentId === "meta") {
-                addPaneMessageIfSessionActive(pane.id, "tool", formatted.content, "meta");
               } else {
                 addSubAgentEvent(eventAgentId, { type: "tool_result", content: formatted.content });
                 if (toolName === "file_write" || toolName === "file_edit") {
