@@ -174,32 +174,28 @@ body {
   background-color: var(--chat-followup-chip-bg-hover, var(--surface-hover));
 }
 
-/* 助手操作行节奏：去掉正文末块 margin，使 body→图标 与 图标→推荐问 同为 gap-2.5 */
-.agx-assistant-action-rhythm .msg-content > :last-child {
+/* 助手操作行节奏：正文末块清零 margin，避免叠在 flex gap 上 */
+.agx-assistant-action-rhythm .msg-content > :last-child,
+.agx-assistant-action-rhythm-end .msg-content > :last-child {
   margin-bottom: 0 !important;
 }
 
-/* 确保在 ReAct 块里，正文最后一个容器到底部没有多余 padding/margin，mt 才真正控制间距 */
-.agx-assistant-action-rhythm .overflow-hidden > *:last-child:not(.agx-assistant-action-tail) {
+/* ReAct 末段正文：leading-relaxed(1.625) 会在字形下方留半行空白，导致 body→图标 > 图标→chip */
+.agx-assistant-body-tail .leading-relaxed,
+.agx-assistant-body-tail .leading-snug,
+.agx-assistant-body-tail .msg-content,
+.agx-assistant-action-rhythm-end .msg-content,
+.agx-assistant-action-rhythm .leading-snug .msg-content {
+  line-height: 1.375;
+}
+.agx-assistant-body-tail .msg-content p,
+.agx-assistant-action-rhythm-end .msg-content p,
+.agx-assistant-action-rhythm .leading-snug .msg-content p {
   margin-bottom: 0 !important;
-  padding-bottom: 0 !important;
+  line-height: inherit;
 }
 
-/* 额外保障：ReAct 内容区里的最后一个 msg-content 或其直接后代也清底 margin */
-.agx-assistant-action-rhythm .msg-content,
-.agx-assistant-action-rhythm .msg-content > :last-child {
-  margin-bottom: 0 !important;
-}
-
-/* 紧邻 action tail 的内容强制无底部空间 */
-.agx-assistant-action-tail {
-  /* spacing controlled explicitly by mt-2.5 on children */
-}
-* + .agx-assistant-action-tail {
-  /* the previous sibling's bottom is handled by the rules above */
-}
-
-/* 固定操作图标行高，避免 flex gap 落在视觉中心不一致 */
+/* 固定操作图标行高，flex gap 从行盒顶/底计量 */
 .agx-assistant-action-icons {
   min-height: 1.25rem; /* h-5 */
 }

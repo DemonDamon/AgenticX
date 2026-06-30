@@ -105,12 +105,17 @@ export const ASSISTANT_ACTION_ICON_ROW_CLASS =
   "agx-assistant-action-icons group flex h-5 w-fit max-w-full flex-wrap items-center gap-0.5 text-text-faint";
 
 /**
- * ReAct block tail container.
- * We control the "body → icons" and "icons → first chip" distances explicitly with mt-2.5
- * on the rows themselves so both clearances are identical (no reliance on outer flex gap
- * or padding-top which differed between normal bubbles and ReAct blocks).
+ * ReAct block tail: last body row + icon row + follow-up chips share one flex column
+ * with uniform gap-2.5 — never stack separate mt-* on children (line-height slack on the
+ * body row would otherwise make body→icons look larger than icons→chips).
  */
-export const ASSISTANT_ACTION_TAIL_CLASS = `agx-assistant-action-tail flex min-w-0 flex-col self-stretch`;
+export const ASSISTANT_ACTION_RHYTHM_END_CLASS = `agx-assistant-action-rhythm-end flex min-w-0 flex-col ${ASSISTANT_ACTION_RHYTHM_GAP_CLASS} self-stretch`;
+
+/** @deprecated Prefer ASSISTANT_ACTION_RHYTHM_END_CLASS; kept for grep/back-compat. */
+export const ASSISTANT_ACTION_TAIL_CLASS = ASSISTANT_ACTION_RHYTHM_END_CLASS;
+
+/** Last assistant body before peeled action row — tightens trailing line-box slack. */
+export const ASSISTANT_BODY_TAIL_CLASS = "agx-assistant-body-tail";
 
 /** Icon row only (no follow-up chips in the same rhythm stack). */
 export const ASSISTANT_ACTION_ICON_ONLY_CLASS = "mb-6 mt-2.5 min-w-0 self-stretch";

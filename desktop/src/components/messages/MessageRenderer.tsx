@@ -62,6 +62,7 @@ type Props = {
   onResolveInlineConfirm?: (confirm: NonNullable<Message["inlineConfirm"]>, approved: boolean) => void;
   onFollowupClick?: (text: string, ctx?: { ownerSessionId?: string }) => void;
   omitSuggestedQuestions?: boolean;
+  actionRhythmBodyTail?: boolean;
   /** When true, assistant messages cut off before budget_exceeded may show an incomplete hint. */
   budgetExceededActive?: boolean;
   allMessages?: Message[];
@@ -194,6 +195,7 @@ export function MessageRenderer({
   noBubbleBorder = false,
   onFollowupClick,
   omitSuggestedQuestions = false,
+  actionRhythmBodyTail = false,
   budgetExceededActive = false,
   allMessages = [],
   sessionId,
@@ -268,6 +270,7 @@ export function MessageRenderer({
         onRevealPath={onRevealPath}
         onOpenFileReference={onOpenFileReference}
         omitSuggestedQuestions={omitSuggestedQuestions}
+        actionRhythmBodyTail={actionRhythmBodyTail}
         budgetIncompleteHint={
           budgetExceededActive && allMessages.length > 0
             ? shouldShowBudgetIncompleteHint(message, allMessages, budgetExceededActive)
