@@ -65,7 +65,12 @@ import { TurnToolGroupCard } from "./messages/TurnToolGroupCard";
 import { WorkingIndicator } from "./messages/WorkingIndicator";
 import { ChatImAvatar, ImBubble } from "./messages/ImBubble";
 import { MessageTimestamp } from "./messages/MessageTimestamp";
-import { getAssistantActionStyle } from "./messages/im-layout";
+import {
+  ASSISTANT_ACTION_RHYTHM_GAP_CLASS,
+  ASSISTANT_FOLLOWUP_CHIP_CLASS,
+  ASSISTANT_FOLLOWUP_LIST_CLASS,
+  getAssistantActionStyle,
+} from "./messages/im-layout";
 import { TerminalLine } from "./messages/TerminalLine";
 import { ProviderIcon } from "./ProviderIcon";
 import { CleanBlock } from "./messages/CleanBlock";
@@ -6049,11 +6054,11 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
                 {/* Block-level actions; peeled follow-ups on the next line below icons */}
                 {!hasStreamingRow && !sessionWorkInProgress && workMessages.length > 0 && useUnifiedReActCard ? (
                   <div
-                    className="mb-6 flex min-w-0 items-start gap-2"
+                    className="mb-6 mt-2.5 flex min-w-0 items-start gap-2"
                   >
                     {isSelecting ? <div className="h-5 w-5 shrink-0" aria-hidden /> : null}
                     <div className="min-w-0 flex-1">
-                      <div className="flex min-w-0 flex-col gap-2">
+                      <div className={`flex min-w-0 flex-col ${ASSISTANT_ACTION_RHYTHM_GAP_CLASS}`}>
                         <div className="group flex w-fit flex-wrap items-center gap-0.5 text-text-faint" style={reactActionStyle}>
                           <HoverTip label="复制">
                             <button
@@ -6120,12 +6125,12 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
                         </div>
                         {peeledFollowupAssistant?.suggestedQuestions &&
                         peeledFollowupAssistant.suggestedQuestions.length > 0 ? (
-                          <div className="flex min-w-0 flex-col items-start gap-1.5" style={reactActionStyle}>
+                          <div className={ASSISTANT_FOLLOWUP_LIST_CLASS} style={reactActionStyle}>
                             {peeledFollowupAssistant.suggestedQuestions.slice(0, 3).map((q, qi) => (
                               <button
                                 key={`${qi}-${q}`}
                                 type="button"
-                                className="group flex max-w-full w-fit items-center gap-2 rounded-full border border-border bg-surface-hover/80 px-3.5 py-1.5 text-left text-[14px] text-text-subtle transition hover:bg-surface-hover hover:text-text-strong whitespace-normal"
+                                className={ASSISTANT_FOLLOWUP_CHIP_CLASS}
                                 onMouseDown={(e) => e.preventDefault()}
                                 onClick={() =>
                                   sendFollowupChip(q, {
@@ -6134,7 +6139,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
                                 }
                               >
                                 <span>{q}</span>
-                                <ArrowRight className="h-3.5 w-3.5 shrink-0 opacity-60 transition group-hover:opacity-100" />
+                                <ArrowRight className="h-3 w-3 shrink-0 opacity-50 transition group-hover:opacity-80" />
                               </button>
                             ))}
                           </div>

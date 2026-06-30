@@ -43,6 +43,19 @@ const ASSISTANT_ACTION_MARGIN_LEFT_PX = 12;
 export const ASSISTANT_ICON_RAIL_CLASS =
   "flex h-[20px] w-[20px] shrink-0 items-center justify-center";
 
+/**
+ * Single source of truth for the ReAct rail header title (思考了 / 已调用工具 /
+ * 已检索…). These three rows live in different containers — ReasoningBlock and
+ * ReferencesCard render inside an ImBubble (`leading-relaxed`, 1.625) while the
+ * tool-group card renders at the message-group level (`leading-normal`, 1.5).
+ * Without an explicit line-height, the same 13px title computes to a different
+ * line box per row (≈21px vs ≈19.5px), so rows read as different font sizes and
+ * the vertical rhythm looks uneven. Pinning `leading-5` (20px) makes every rail
+ * row exactly one 20px line box, matching the 20px icon column.
+ */
+export const REACT_RAIL_TITLE_CLASS =
+  "text-[13px] font-medium leading-5 text-text-subtle";
+
 /** Theme-primary rail color — shared by thought chain, tool rail, and system status rows. */
 export const REACT_RAIL_ICON_CLASS =
   "text-[rgb(var(--theme-color-rgb,59,130,246))]";
@@ -74,3 +87,19 @@ export const ASSISTANT_TIMELINE_PX = {
   textPaddingLeft: ASSISTANT_TEXT_PADDING_LEFT_PX,
   actionMarginLeft: ASSISTANT_ACTION_MARGIN_LEFT_PX,
 };
+
+/** Uniform vertical gap: body → icon row → follow-up chips (matches composer pt-2.5 rhythm). */
+export const ASSISTANT_ACTION_RHYTHM_GAP_CLASS = "gap-2.5";
+
+/** Icon row + optional follow-up chips below assistant body. */
+export const ASSISTANT_ACTION_BLOCK_CLASS = `mb-6 mt-2.5 flex min-w-0 flex-col ${ASSISTANT_ACTION_RHYTHM_GAP_CLASS} self-stretch`;
+
+/** Icon row only (no follow-up chips). */
+export const ASSISTANT_ACTION_ICON_ONLY_CLASS = "mb-6 mt-2.5 min-w-0 self-stretch";
+
+/** Stack of follow-up chips — spacing comes from parent ASSISTANT_ACTION_BLOCK_CLASS gap. */
+export const ASSISTANT_FOLLOWUP_LIST_CLASS = `flex min-w-0 flex-col items-start ${ASSISTANT_ACTION_RHYTHM_GAP_CLASS} self-stretch`;
+
+/** Elevated pill for suggested follow-up questions — solid fill vs page bg (Doubao-like). */
+export const ASSISTANT_FOLLOWUP_CHIP_CLASS =
+  "group flex max-w-full w-fit items-center gap-1.5 rounded-xl border border-border bg-surface-popover px-4 py-2.5 text-left text-[13px] leading-snug text-text-subtle transition-colors duration-150 hover:bg-surface-hover hover:text-text-primary whitespace-normal";

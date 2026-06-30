@@ -13,6 +13,10 @@ import { HoverTip } from "../ds/HoverTip";
 import { CitationMarkdownBody } from "./CitationMarkdownBody";
 import { renderUserMessageInlineBody } from "./user-message-inline";
 import {
+  ASSISTANT_ACTION_BLOCK_CLASS,
+  ASSISTANT_ACTION_ICON_ONLY_CLASS,
+  ASSISTANT_FOLLOWUP_CHIP_CLASS,
+  ASSISTANT_FOLLOWUP_LIST_CLASS,
   getAssistantActionStyle,
   getAssistantTextClassName,
   getAssistantTextStyle,
@@ -405,31 +409,38 @@ export function ImBubble({
 
   const assistantFollowupChipButtons =
     showAssistantFollowups && message.suggestedQuestions ? (
-      <div className="mt-1">
+      <>
         {message.suggestedQuestions.slice(0, 3).map((q, qi) => (
           <button
             key={`${qi}-${q}`}
             type="button"
-            className="group flex max-w-full w-fit items-center gap-2 rounded-full border border-border bg-surface-hover/80 px-3.5 py-1.5 text-left text-[14px] text-text-subtle transition hover:bg-surface-hover hover:text-text-strong whitespace-normal"
+            className={ASSISTANT_FOLLOWUP_CHIP_CLASS}
             onMouseDown={(e) => e.preventDefault()}
             onClick={() =>
               onFollowupClick?.(q, { ownerSessionId: message.ownerSessionId })
             }
           >
             <span>{q}</span>
-            <ArrowRight className="h-3.5 w-3.5 shrink-0 opacity-60 transition group-hover:opacity-100" />
+            <ArrowRight className="h-3 w-3 shrink-0 opacity-50 transition group-hover:opacity-80" />
           </button>
         ))}
-      </div>
+      </>
     ) : null;
 
   const pendingWorkCompact = isMetaPendingWork || (compactAssistant && isStreaming && !hasBody);
+  // Inside the ReAct rail (compact-inline rows stacked flush with no parent gap),
+  // every row must rely solely on its own `py-1` for a uniform 8px rhythm. The
+  // streaming `!mt-1` / `-mt-1` nudges are meant for the standalone assistant
+  // bubble and, when applied to a streaming reasoning/dots row in the rail, make
+  // that row sit 4px higher/lower than the committed rows above it — the uneven
+  // line spacing reported in production. Neutralize them for rail rows only.
+  const railRow = compactAssistant && noBubbleBorder;
 
   return (
     <div
       className={`group relative flex min-w-0 items-start gap-2${
-        isStreaming && !pendingWorkCompact ? " !mt-1" : ""
-      }${pendingWorkCompact ? " -mt-1" : ""}${
+        !railRow && isStreaming && !pendingWorkCompact ? " !mt-1" : ""
+      }${!railRow && pendingWorkCompact ? " -mt-1" : ""}${
         groupIdentityLayout && !isUser ? " pl-4" : ""
       }`}
       onContextMenu={openContextMenu}
@@ -653,15 +664,17 @@ export function ImBubble({
               </p>
             ) : null}
             {showAssistantFollowups && assistantIconButtons ? (
-              <div className="mb-6 mt-1 flex min-w-0 flex-col gap-2 self-stretch">
+              <div className={ASSISTANT_ACTION_BLOCK_CLASS}>
                 <div className="flex w-fit flex-wrap items-center gap-0.5 text-text-faint" style={assistantActionStyle}>
                   {assistantIconButtons}
                   <MessageTimestamp ts={message.timestamp} align="left" />
                 </div>
-                <div className="flex min-w-0 flex-col items-start gap-1.5 self-stretch" style={assistantActionStyle}>{assistantFollowupChipButtons}</div>
+                <div className={ASSISTANT_FOLLOWUP_LIST_CLASS} style={assistantActionStyle}>{assistantFollowupChipButtons}</div>
               </div>
             ) : showAssistantFollowups ? (
-              <div className="mb-6 mt-1 flex min-w-0 flex-col items-start gap-1.5 self-stretch" style={assistantActionStyle}>{assistantFollowupChipButtons}</div>
+              <div className={ASSISTANT_ACTION_BLOCK_CLASS}>
+                <div className={ASSISTANT_FOLLOWUP_LIST_CLASS} style={assistantActionStyle}>{assistantFollowupChipButtons}</div>
+              </div>
             ) : null}
             {hideActions ? null : isUser ? (
               <div className="mt-0.5 flex w-full flex-wrap items-center justify-end gap-0.5 pb-0 leading-none pr-2 text-text-faint">
@@ -730,7 +743,7 @@ export function ImBubble({
                 </HoverTip>
               </div>
             ) : showAssistantFollowups || !assistantIconButtons ? null : (
-              <div className="mb-6 mt-1 min-w-0 self-stretch">
+              <div className={ASSISTANT_ACTION_ICON_ONLY_CLASS}>
                 <div className="flex w-fit max-w-full flex-wrap items-center gap-0.5 text-text-faint" style={assistantActionStyle}>
                   {assistantIconButtons}
                   <MessageTimestamp ts={message.timestamp} align="left" />
