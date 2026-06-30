@@ -91,14 +91,33 @@ export const ASSISTANT_TIMELINE_PX = {
 /** Uniform vertical gap: body → icon row → follow-up chips (matches composer pt-2.5 rhythm). */
 export const ASSISTANT_ACTION_RHYTHM_GAP_CLASS = "gap-2.5";
 
-/** Icon row + optional follow-up chips below assistant body. */
-export const ASSISTANT_ACTION_BLOCK_CLASS = `mb-6 mt-2.5 flex min-w-0 flex-col ${ASSISTANT_ACTION_RHYTHM_GAP_CLASS} self-stretch`;
+/**
+ * Body + icon row + follow-up chips in one column — every step uses the same gap-2.5
+ * (no separate mt on the action block, which skews body→icon vs icon→chip spacing).
+ */
+export const ASSISTANT_ACTION_RHYTHM_STACK_CLASS = `agx-assistant-action-rhythm flex min-w-0 flex-col ${ASSISTANT_ACTION_RHYTHM_GAP_CLASS} mb-6 self-stretch`;
 
-/** Icon row only (no follow-up chips). */
+/** Icon row + optional follow-up chips below assistant body (inside rhythm stack). */
+export const ASSISTANT_ACTION_BLOCK_CLASS = `flex min-w-0 flex-col ${ASSISTANT_ACTION_RHYTHM_GAP_CLASS} self-stretch`;
+
+/** Block-level copy/quote row (fixed height so gaps measure consistently). */
+export const ASSISTANT_ACTION_ICON_ROW_CLASS =
+  "agx-assistant-action-icons group flex h-5 w-fit max-w-full flex-wrap items-center gap-0.5 text-text-faint";
+
+/**
+ * ReAct block tail container.
+ * We control the "body → icons" and "icons → first chip" distances explicitly with mt-2.5
+ * on the rows themselves so both clearances are identical (no reliance on outer flex gap
+ * or padding-top which differed between normal bubbles and ReAct blocks).
+ */
+export const ASSISTANT_ACTION_TAIL_CLASS = `agx-assistant-action-tail flex min-w-0 flex-col self-stretch`;
+
+/** Icon row only (no follow-up chips in the same rhythm stack). */
 export const ASSISTANT_ACTION_ICON_ONLY_CLASS = "mb-6 mt-2.5 min-w-0 self-stretch";
 
-/** Stack of follow-up chips — spacing comes from parent ASSISTANT_ACTION_BLOCK_CLASS gap. */
-export const ASSISTANT_FOLLOWUP_LIST_CLASS = `flex min-w-0 flex-col items-start ${ASSISTANT_ACTION_RHYTHM_GAP_CLASS} self-stretch`;
+/** Stack of follow-up chips — chip-to-chip spacing only (icon→first chip uses parent gap). */
+export const ASSISTANT_FOLLOWUP_LIST_CLASS =
+  "flex min-w-0 flex-col items-start gap-2.5 self-stretch";
 
 /** Elevated pill for suggested follow-up questions — solid fill vs page bg (Doubao-like). */
 export const ASSISTANT_FOLLOWUP_CHIP_CLASS =

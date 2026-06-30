@@ -14,8 +14,9 @@ import { HoverTip } from "../ds/HoverTip";
 import { CitationMarkdownBody } from "./CitationMarkdownBody";
 import { renderUserMessageInlineBody } from "./user-message-inline";
 import {
-  ASSISTANT_ACTION_BLOCK_CLASS,
   ASSISTANT_ACTION_ICON_ONLY_CLASS,
+  ASSISTANT_ACTION_ICON_ROW_CLASS,
+  ASSISTANT_ACTION_RHYTHM_GAP_CLASS,
   ASSISTANT_FOLLOWUP_CHIP_CLASS,
   ASSISTANT_FOLLOWUP_LIST_CLASS,
   getAssistantActionStyle,
@@ -436,6 +437,7 @@ export function ImBubble({
   // that row sit 4px higher/lower than the committed rows above it — the uneven
   // line spacing reported in production. Neutralize them for rail rows only.
   const railRow = compactAssistant && noBubbleBorder;
+  const assistantActionRhythmStack = !isUser && showAssistantFollowups;
 
   return (
     <div
@@ -474,7 +476,7 @@ export function ImBubble({
         </div>
       ) : null}
       <div
-        className={`flex min-w-0 flex-col ${isUser ? "items-end" : "items-start"}${groupIdentityLayout && isUser ? " w-auto max-w-[calc(100%-2.5rem)] shrink-0" : " min-w-0 flex-1"}`}
+        className={`flex min-w-0 flex-col ${isUser ? "items-end" : "items-start"}${groupIdentityLayout && isUser ? " w-auto max-w-[calc(100%-2.5rem)] shrink-0" : " min-w-0 flex-1"}${assistantActionRhythmStack ? ` agx-assistant-action-rhythm mb-6 ${ASSISTANT_ACTION_RHYTHM_GAP_CLASS}` : ""}`}
       >
         {groupIdentityLayout && isUser ? (
           <div className="mb-1 w-full min-w-0 text-right">
@@ -678,16 +680,18 @@ export function ImBubble({
               </p>
             ) : null}
             {showAssistantFollowups && assistantIconButtons ? (
-              <div className={ASSISTANT_ACTION_BLOCK_CLASS}>
-                <div className="flex w-fit flex-wrap items-center gap-0.5 text-text-faint" style={assistantActionStyle}>
+              <>
+                <div className={ASSISTANT_ACTION_ICON_ROW_CLASS} style={assistantActionStyle}>
                   {assistantIconButtons}
                   <MessageTimestamp ts={message.timestamp} align="left" />
                 </div>
-                <div className={ASSISTANT_FOLLOWUP_LIST_CLASS} style={assistantActionStyle}>{assistantFollowupChipButtons}</div>
-              </div>
+                <div className={ASSISTANT_FOLLOWUP_LIST_CLASS} style={assistantActionStyle}>
+                  {assistantFollowupChipButtons}
+                </div>
+              </>
             ) : showAssistantFollowups ? (
-              <div className={ASSISTANT_ACTION_BLOCK_CLASS}>
-                <div className={ASSISTANT_FOLLOWUP_LIST_CLASS} style={assistantActionStyle}>{assistantFollowupChipButtons}</div>
+              <div className={ASSISTANT_FOLLOWUP_LIST_CLASS} style={assistantActionStyle}>
+                {assistantFollowupChipButtons}
               </div>
             ) : null}
             {hideActions ? null : isUser ? (
@@ -758,7 +762,7 @@ export function ImBubble({
               </div>
             ) : showAssistantFollowups || !assistantIconButtons ? null : (
               <div className={ASSISTANT_ACTION_ICON_ONLY_CLASS}>
-                <div className="flex w-fit max-w-full flex-wrap items-center gap-0.5 text-text-faint" style={assistantActionStyle}>
+                <div className={ASSISTANT_ACTION_ICON_ROW_CLASS} style={assistantActionStyle}>
                   {assistantIconButtons}
                   <MessageTimestamp ts={message.timestamp} align="left" />
                 </div>

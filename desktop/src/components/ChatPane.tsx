@@ -66,7 +66,8 @@ import { WorkingIndicator } from "./messages/WorkingIndicator";
 import { ChatImAvatar, ImBubble } from "./messages/ImBubble";
 import { MessageTimestamp } from "./messages/MessageTimestamp";
 import {
-  ASSISTANT_ACTION_RHYTHM_GAP_CLASS,
+  ASSISTANT_ACTION_ICON_ROW_CLASS,
+  ASSISTANT_ACTION_TAIL_CLASS,
   ASSISTANT_FOLLOWUP_CHIP_CLASS,
   ASSISTANT_FOLLOWUP_LIST_CLASS,
   getAssistantActionStyle,
@@ -5999,7 +6000,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
               }
             }
             return (
-              <div key={blockKey} className="space-y-2">
+              <div key={blockKey} className="agx-assistant-action-rhythm mb-6 flex flex-col gap-2.5">
                 <div className="flex min-w-0 items-start gap-2">
                   {isSelecting ? (
                     <button
@@ -6018,9 +6019,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
                     </button>
                   ) : null}
                   {useUnifiedReActCard ? (
-                    <div
-                      className="min-w-0 flex-1 overflow-hidden"
-                    >
+                    <div className="min-w-0 flex-1 overflow-hidden">
                       {groupedWork.map((r, i) => {
                         const omitSq =
                           Boolean(
@@ -6040,6 +6039,95 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
                             shouldHoldToolGroupProgress(workMessages, r.messages, isStreamingCurrentSession),
                         });
                       })}
+                      {!hasStreamingRow && !sessionWorkInProgress && workMessages.length > 0 ? (
+                        <div className={ASSISTANT_ACTION_TAIL_CLASS}>
+                          <div className={`${ASSISTANT_ACTION_ICON_ROW_CLASS} mt-2.5`} style={reactActionStyle}>
+                            <HoverTip label="复制">
+                              <button
+                                type="button"
+                                className="rounded p-1 hover:bg-surface-hover hover:text-text-strong"
+                                onMouseDown={(e) => e.preventDefault()}
+                                onClick={() => void copyReActBlock(workMessages)}
+                              >
+                                <Copy size={13} />
+                              </button>
+                            </HoverTip>
+                            {lastAssistantInBlock ? (
+                              <>
+                                <HoverTip label="引用">
+                                  <button
+                                    type="button"
+                                    className="rounded p-1 hover:bg-surface-hover hover:text-text-strong"
+                                    onMouseDown={(e) => e.preventDefault()}
+                                    onClick={() =>
+                                      setQuoteTarget({
+                                        message: lastAssistantInBlock,
+                                        body: resolveQuoteBody(lastAssistantInBlock, undefined),
+                                      })
+                                    }
+                                  >
+                                    <Quote size={13} />
+                                  </button>
+                                </HoverTip>
+                                <HoverTip label="收藏">
+                                  <button
+                                    type="button"
+                                    className="rounded p-1 hover:bg-surface-hover hover:text-text-strong"
+                                    onMouseDown={(e) => e.preventDefault()}
+                                    onClick={() => void favoriteMessage(lastAssistantInBlock, undefined)}
+                                  >
+                                    <Bookmark size={13} />
+                                  </button>
+                                </HoverTip>
+                                <HoverTip label="转发">
+                                  <button
+                                    type="button"
+                                    className="rounded p-1 hover:bg-surface-hover hover:text-text-strong"
+                                    onMouseDown={(e) => e.preventDefault()}
+                                    onClick={() => forwardOneMessage(lastAssistantInBlock, undefined)}
+                                  >
+                                    <Forward size={13} />
+                                  </button>
+                                </HoverTip>
+                              </>
+                            ) : null}
+                            <HoverTip label="多选">
+                              <button
+                                type="button"
+                                className={`rounded p-1 hover:bg-surface-hover ${
+                                  blockAnySelected ? "text-cyan-400 hover:text-cyan-300" : "hover:text-text-strong"
+                                }`}
+                                onMouseDown={(e) => e.preventDefault()}
+                                onClick={() => toggleSelectBlock(workMessages)}
+                              >
+                                <LayoutList size={13} />
+                              </button>
+                            </HoverTip>
+                            <MessageTimestamp ts={lastAssistantInBlock?.timestamp} align="left" />
+                          </div>
+                          {peeledFollowupAssistant?.suggestedQuestions &&
+                          peeledFollowupAssistant.suggestedQuestions.length > 0 ? (
+                            <div className={`${ASSISTANT_FOLLOWUP_LIST_CLASS} mt-2.5`} style={reactActionStyle}>
+                              {peeledFollowupAssistant.suggestedQuestions.slice(0, 3).map((q, qi) => (
+                                <button
+                                  key={`${qi}-${q}`}
+                                  type="button"
+                                  className={ASSISTANT_FOLLOWUP_CHIP_CLASS}
+                                  onMouseDown={(e) => e.preventDefault()}
+                                  onClick={() =>
+                                    sendFollowupChip(q, {
+                                      ownerSessionId: peeledFollowupAssistant?.ownerSessionId,
+                                    })
+                                  }
+                                >
+                                  <span>{q}</span>
+                                  <ArrowRight className="h-3 w-3 shrink-0 opacity-50 transition group-hover:opacity-80" />
+                                </button>
+                              ))}
+                            </div>
+                          ) : null}
+                        </div>
+                      ) : null}
                     </div>
                   ) : (
                     <div className="flex min-w-0 flex-1 flex-col gap-0">
@@ -6056,103 +6144,6 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
                 {finalAssistant
                   ? renderGroupedRow({ kind: "message", message: finalAssistant }, segIdx + 1000, {})
                   : null}
-                {/* Block-level actions; peeled follow-ups on the next line below icons */}
-                {!hasStreamingRow && !sessionWorkInProgress && workMessages.length > 0 && useUnifiedReActCard ? (
-                  <div
-                    className="mb-6 mt-2.5 flex min-w-0 items-start gap-2"
-                  >
-                    {isSelecting ? <div className="h-5 w-5 shrink-0" aria-hidden /> : null}
-                    <div className="min-w-0 flex-1">
-                      <div className={`flex min-w-0 flex-col ${ASSISTANT_ACTION_RHYTHM_GAP_CLASS}`}>
-                        <div className="group flex w-fit flex-wrap items-center gap-0.5 text-text-faint" style={reactActionStyle}>
-                          <HoverTip label="复制">
-                            <button
-                              type="button"
-                              className="rounded p-1 hover:bg-surface-hover hover:text-text-strong"
-                              onMouseDown={(e) => e.preventDefault()}
-                              onClick={() => void copyReActBlock(workMessages)}
-                            >
-                              <Copy size={13} />
-                            </button>
-                          </HoverTip>
-                          {lastAssistantInBlock ? (
-                            <>
-                              <HoverTip label="引用">
-                                <button
-                                  type="button"
-                                  className="rounded p-1 hover:bg-surface-hover hover:text-text-strong"
-                                  onMouseDown={(e) => e.preventDefault()}
-                                  onClick={() =>
-                                    setQuoteTarget({
-                                      message: lastAssistantInBlock,
-                                      body: resolveQuoteBody(lastAssistantInBlock, undefined),
-                                    })
-                                  }
-                                >
-                                  <Quote size={13} />
-                                </button>
-                              </HoverTip>
-                              <HoverTip label="收藏">
-                                <button
-                                  type="button"
-                                  className="rounded p-1 hover:bg-surface-hover hover:text-text-strong"
-                                  onMouseDown={(e) => e.preventDefault()}
-                                  onClick={() => void favoriteMessage(lastAssistantInBlock, undefined)}
-                                >
-                                  <Bookmark size={13} />
-                                </button>
-                              </HoverTip>
-                              <HoverTip label="转发">
-                                <button
-                                  type="button"
-                                  className="rounded p-1 hover:bg-surface-hover hover:text-text-strong"
-                                  onMouseDown={(e) => e.preventDefault()}
-                                  onClick={() => forwardOneMessage(lastAssistantInBlock, undefined)}
-                                >
-                                  <Forward size={13} />
-                                </button>
-                              </HoverTip>
-                            </>
-                          ) : null}
-                          <HoverTip label="多选">
-                            <button
-                              type="button"
-                              className={`rounded p-1 hover:bg-surface-hover ${
-                                blockAnySelected ? "text-cyan-400 hover:text-cyan-300" : "hover:text-text-strong"
-                              }`}
-                              onMouseDown={(e) => e.preventDefault()}
-                              onClick={() => toggleSelectBlock(workMessages)}
-                            >
-                              <LayoutList size={13} />
-                            </button>
-                          </HoverTip>
-                          <MessageTimestamp ts={lastAssistantInBlock?.timestamp} align="left" />
-                        </div>
-                        {peeledFollowupAssistant?.suggestedQuestions &&
-                        peeledFollowupAssistant.suggestedQuestions.length > 0 ? (
-                          <div className={ASSISTANT_FOLLOWUP_LIST_CLASS} style={reactActionStyle}>
-                            {peeledFollowupAssistant.suggestedQuestions.slice(0, 3).map((q, qi) => (
-                              <button
-                                key={`${qi}-${q}`}
-                                type="button"
-                                className={ASSISTANT_FOLLOWUP_CHIP_CLASS}
-                                onMouseDown={(e) => e.preventDefault()}
-                                onClick={() =>
-                                  sendFollowupChip(q, {
-                                    ownerSessionId: peeledFollowupAssistant?.ownerSessionId,
-                                  })
-                                }
-                              >
-                                <span>{q}</span>
-                                <ArrowRight className="h-3 w-3 shrink-0 opacity-50 transition group-hover:opacity-80" />
-                              </button>
-                            ))}
-                          </div>
-                        ) : null}
-                      </div>
-                    </div>
-                  </div>
-                ) : null}
               </div>
             );
           })
