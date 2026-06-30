@@ -1,6 +1,6 @@
 # Reasoning Chain Persistence（思考链持久化）
 
-Planned-with: (待用户确认规划模型)
+Planned-with: GLM 5.2
 
 ## 背景与问题
 
