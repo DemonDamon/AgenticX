@@ -102,4 +102,4 @@ export const ASSISTANT_FOLLOWUP_LIST_CLASS = `flex min-w-0 flex-col items-start 
 
 /** Elevated pill for suggested follow-up questions — solid fill vs page bg (Doubao-like). */
 export const ASSISTANT_FOLLOWUP_CHIP_CLASS =
-  "group flex max-w-full w-fit items-center gap-1.5 rounded-xl border border-border bg-surface-popover px-4 py-2.5 text-left text-[13px] leading-snug text-text-subtle transition-colors duration-150 hover:bg-surface-hover hover:text-text-primary whitespace-normal";
+  "agx-followup-chip group flex max-w-full w-fit items-center gap-1.5 rounded-xl border px-4 py-2.5 text-left text-[13px] leading-snug text-text-subtle transition-colors duration-150 hover:text-text-primary whitespace-normal";

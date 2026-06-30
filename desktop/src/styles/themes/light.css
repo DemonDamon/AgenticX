@@ -14,6 +14,10 @@
   --surface-topbar: #ffffff;
   --surface-messages: #ffffff;
   --surface-composer: #ffffff;
+  /* 推荐问 chip：消息区为白底时需略深灰底，避免与页面融为一体 */
+  --chat-followup-chip-bg: #f4f4f5;
+  --chat-followup-chip-bg-hover: #ebebec;
+  --chat-followup-chip-border: rgba(0, 0, 0, 0.1);
   --surface-card: rgba(0, 0, 0, 0.03);
   --surface-card-strong: rgba(0, 0, 0, 0.06);
   --surface-hover: rgba(0, 0, 0, 0.05);
