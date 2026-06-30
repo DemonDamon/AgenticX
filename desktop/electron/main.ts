@@ -2616,9 +2616,11 @@ async function startStudioServe(): Promise<void> {
   const cfg = loadAgxConfig();
   const trinity = loadTrinityConfig(cfg);
 
+  const devPort = process.env.AGX_DEV_PORT || "5713";
   const env: NodeJS.ProcessEnv = {
     ...process.env,
     PATH: augmentedPath,
+    AGX_DEV_PORT: devPort,
     AGX_DESKTOP_TOKEN: apiToken,
     AGX_WORKSPACE_ROOT: desktopHome,
     AGX_DESKTOP_UNRESTRICTED_FS: "1",

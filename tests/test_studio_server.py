@@ -819,3 +819,25 @@ def test_server_subagent_resume_completed_run_mode(monkeypatch) -> None:
     assert not any("未找到" in text for text in texts), f"Got not_found errors: {texts}"
     assert not any("不可用" in text for text in texts), f"Got unavailable errors: {texts}"
     assert any("已将你的补充指令发送给子智能体" in text for text in texts)
+
+
+def test_studio_cors_origins_include_default_and_env_dev_ports(monkeypatch):
+    from agenticx.studio.server import _studio_cors_origins
+
+    monkeypatch.delenv("AGX_CORS_ORIGINS", raising=False)
+    monkeypatch.setenv("AGX_DEV_PORT", "5715")
+    origins = _studio_cors_origins()
+    assert "http://localhost:5173" in origins
+    assert "http://localhost:5713" in origins
+    assert "http://localhost:5715" in origins
+    assert "file://" in origins
+
+
+def test_studio_cors_origins_merge_extra_env(monkeypatch):
+    from agenticx.studio.server import _studio_cors_origins
+
+    monkeypatch.setenv("AGX_CORS_ORIGINS", "https://studio.example.com")
+    monkeypatch.delenv("AGX_DEV_PORT", raising=False)
+    origins = _studio_cors_origins()
+    assert "https://studio.example.com" in origins
+
