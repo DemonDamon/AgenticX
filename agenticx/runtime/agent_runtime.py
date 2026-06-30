@@ -1234,6 +1234,18 @@ def _split_reasoning_and_body(text: str) -> tuple[str, str]:
     return reasoning, body.strip()
 
 
+# Nudge hint injected when a round produces reasoning (< Mattis>...</ Mattis>) but no
+# visible body and no tool_calls — i.e. the model "thought but said/did nothing".
+# Forces one retry so the model emits a real final reply or an explicit tool_call,
+# instead of the runtime misjudging the turn as complete and surfacing a "继续" button.
+_REASONING_ONLY_NUDGE_HINT = (
+    "[runtime-reasoning-only] 上一轮只输出了思考内容（< Mattis>），"
+    "没有给出用户可见的回复，也没有发出 tool_call。"
+    "请基于已有上下文与工具结果，直接给出用户可见的最终回复，"
+    "或发出明确的 tool_call；不要只输出思考。"
+)
+
+
 def _sanitize_structured_assistant_text(text: str, allowed_tool_names: set[str]) -> str:
     """Extract user-facing content from model-emitted JSON wrappers.
 
@@ -1906,6 +1918,9 @@ class AgentRuntime:
         write_path_counts: Dict[str, int] = {}
         confirmation_spam_count = 0
         rounds_without_todo = 0
+        # Turn-level counter for reasoning-only rounds (model emitted < Mattis> but no
+        # visible body and no tool_call). Capped at 1 to avoid infinite nudge loops.
+        reason_only_retry = 0
         invoke_timeout_seconds = _resolve_llm_invoke_timeout_seconds(session)
         heartbeat_timeout_seconds = _resolve_llm_heartbeat_timeout_seconds(session)
         hard_timeout_seconds = _resolve_llm_hard_timeout_seconds(session)
@@ -2904,6 +2919,27 @@ class AgentRuntime:
             synced_session_message_count = len(session.agent_messages)
 
             if not tool_calls:
+                # Reasoning-only empty turn detection: model emitted < Mattis> reasoning
+                # but no visible body and no tool_call. Nudge once to force a real reply
+                # or explicit tool_call, instead of misjudging the turn as complete and
+                # surfacing a "继续" button (cases cc9152ab / e3033b24).
+                _, _visible_text = _split_reasoning_and_body(response_text)
+                if (
+                    not _visible_text.strip()
+                    and not _is_system_trigger
+                    and reason_only_retry < 1
+                ):
+                    reason_only_retry += 1
+                    logger.info(
+                        "reason_only_retry session=%s round=%s reason=reasoning_only_empty_turn",
+                        getattr(session, "session_id", ""),
+                        round_idx,
+                    )
+                    messages.append({"role": "assistant", "content": _visible_text})
+                    messages.append({"role": "system", "content": _REASONING_ONLY_NUDGE_HINT})
+                    session.agent_messages.append({"role": "assistant", "content": _visible_text})
+                    session.agent_messages.append({"role": "system", "content": _REASONING_ONLY_NUDGE_HINT})
+                    continue
                 if response_text.strip():
                     # Tokens were already streamed to the client during the
                     # invoke/stream phase above; do NOT re-send them here.
@@ -2932,7 +2968,15 @@ class AgentRuntime:
                                 ):
                                     if stop_event.is_set():
                                         break
-                                    tok = chunk if isinstance(chunk, str) else str(chunk.get("content", ""))
+                                    # Stream-fallback path: providers (litellm/kimi) yield
+                                    # dict chunks with a "text" key (not "content"), so read
+                                    # "text" first and fall back to "content" for str-only
+                                    # providers. Without this, streamed_text stays empty and
+                                    # the补救 logic fires even when the model did stream tokens.
+                                    if isinstance(chunk, str):
+                                        tok = chunk
+                                    else:
+                                        tok = str(chunk.get("text", "") or chunk.get("content", ""))
                                     if tok:
                                         queue_put(tok)
                             finally:
@@ -2987,7 +3031,7 @@ class AgentRuntime:
                         if _followups_enabled
                         else (str(raw_tail).strip(), [])
                     )
-                if not str(final_text).strip() and executed_tool_names:
+                if not _visible_text.strip() and executed_tool_names:
                     unique_tools = ", ".join(dict.fromkeys(executed_tool_names))
                     final_text = (
                         "已完成工具调用（"
@@ -2997,19 +3041,22 @@ class AgentRuntime:
                     sug_list = []
                 # Invoke/stream may leave response.content empty while the stream-fallback
                 # path fills final_text; chat_history used to update but agent_messages kept "".
+                # Split reasoning out of final_text once, so < Mattis> never leaks into
+                # agent_messages content (would be re-fed to the LLM next round) or
+                # messages.json (FR-4: content stays clean, reasoning lives in its field).
+                _reasoning_text, _clean_body = _split_reasoning_and_body(final_text)
+                if not _reasoning_text and _turn_reasoning:
+                    _reasoning_text = _turn_reasoning
                 if session.agent_messages and isinstance(session.agent_messages[-1], dict):
                     _last_am = session.agent_messages[-1]
                     if (
                         str(_last_am.get("role", "")).lower() == "assistant"
                         and not _last_am.get("tool_calls")
-                        and str(final_text or "").strip()
+                        and str(_clean_body or "").strip()
                     ):
-                        _last_am["content"] = final_text
+                        _last_am["content"] = _clean_body
                 if not _is_system_trigger:
-                    _reasoning_text, _clean_body = _split_reasoning_and_body(final_text)
-                    if not _reasoning_text and _turn_reasoning:
-                        _reasoning_text = _turn_reasoning
-                    _hist_assistant: Dict[str, Any] = {"role": "assistant", "content": _clean_body or final_text}
+                    _hist_assistant: Dict[str, Any] = {"role": "assistant", "content": _clean_body}
                     if sug_list:
                         _hist_assistant["suggested_questions"] = list(sug_list)
                     if _reasoning_text:
@@ -3039,7 +3086,7 @@ class AgentRuntime:
                     if not _is_system_trigger
                     else _split_reasoning_and_body(final_text)
                 )
-                _final_data: dict[str, Any] = {"text": _final_clean_body or final_text}
+                _final_data: dict[str, Any] = {"text": _final_clean_body}
                 if sug_list:
                     _final_data["suggested_questions"] = list(sug_list)
                 if _final_reasoning:
