@@ -202,6 +202,10 @@ export type Message = {
   references?: SearchReference[];
   /** Distinct search queries used in this assistant turn. */
   searchedQueries?: string[];
+  /** Persisted reasoning text ( streamed ``ILD... `` stripped from content ). */
+  reasoning?: string;
+  /** Persisted reasoning duration in seconds, written at finalize. */
+  reasoningSeconds?: number;
   /** Renders as flat ContextNoticeLine instead of ToolCallCard. */
   noticeKind?: ContextNoticeKind;
   /** Token budget exceeded metadata for BudgetExceededCard rendering. */

@@ -1198,6 +1198,42 @@ def _extract_inline_tool_call(
     return {"name": tool_name, "arguments": args_obj}
 
 
+_THINK_OPEN_TAG = chr(60) + "think" + chr(62)
+_THINK_CLOSE_TAG = chr(60) + "/think" + chr(62)
+_THINK_BLOCK_RE = re.compile(
+    re.escape(_THINK_OPEN_TAG) + r"(.*?)" + re.escape(_THINK_CLOSE_TAG),
+    re.IGNORECASE | re.DOTALL,
+)
+_THINK_OPEN_TAIL_RE = re.compile(
+    re.escape(_THINK_OPEN_TAG) + r"(.*)" + r"\Z",
+    re.IGNORECASE | re.DOTALL,
+)
+
+
+def _split_reasoning_and_body(text: str) -> tuple[str, str]:
+    """Split assistant text into (reasoning, body).
+
+    Reasoning models stream ``ILD... `` tokens; the persisted assistant
+    ``content`` should carry only the user-facing body so it is never re-fed
+    to the LLM as context, while the reasoning text lives in a dedicated
+    ``reasoning`` field for the UI to render a stable "思考了 X 秒" block.
+    Closed ``ILD... `` blocks and an unclosed trailing ``ILD...`` are both
+    captured. Mirrors the desktop ``parseReasoningContent`` contract.
+    """
+    raw = str(text or "")
+    reasoning_parts: list[str] = []
+    for m in _THINK_BLOCK_RE.finditer(raw):
+        reasoning_parts.append(m.group(1))
+    if not reasoning_parts:
+        open_match = _THINK_OPEN_TAIL_RE.search(raw)
+        if open_match:
+            reasoning_parts.append(open_match.group(1))
+    body = _THINK_BLOCK_RE.sub("", raw)
+    body = _THINK_OPEN_TAIL_RE.sub("", body)
+    reasoning = "\n".join(part.strip() for part in reasoning_parts if part.strip()).strip()
+    return reasoning, body.strip()
+
+
 def _sanitize_structured_assistant_text(text: str, allowed_tool_names: set[str]) -> str:
     """Extract user-facing content from model-emitted JSON wrappers.
 
@@ -2932,9 +2968,12 @@ class AgentRuntime:
                     ):
                         _last_am["content"] = final_text
                 if not _is_system_trigger:
-                    _hist_assistant: Dict[str, Any] = {"role": "assistant", "content": final_text}
+                    _reasoning_text, _clean_body = _split_reasoning_and_body(final_text)
+                    _hist_assistant: Dict[str, Any] = {"role": "assistant", "content": _clean_body or final_text}
                     if sug_list:
                         _hist_assistant["suggested_questions"] = list(sug_list)
+                    if _reasoning_text:
+                        _hist_assistant["reasoning"] = _reasoning_text[:16384]
                     try:
                         from agenticx.studio.references import turn_reference_payload
 
@@ -2948,9 +2987,16 @@ class AgentRuntime:
                     _chat_history_append_deduped(session.chat_history, _hist_assistant)
                 await self.hooks.run_on_agent_end(final_text, session)
                 _um = usage_metadata_from_llm_response(response)
-                _final_data: dict[str, Any] = {"text": final_text}
+                _final_reasoning, _final_clean_body = (
+                    (_reasoning_text, _clean_body)
+                    if not _is_system_trigger
+                    else _split_reasoning_and_body(final_text)
+                )
+                _final_data: dict[str, Any] = {"text": _final_clean_body or final_text}
                 if sug_list:
                     _final_data["suggested_questions"] = list(sug_list)
+                if _final_reasoning:
+                    _final_data["reasoning"] = _final_reasoning[:16384]
                 try:
                     from agenticx.studio.references import turn_reference_payload
 

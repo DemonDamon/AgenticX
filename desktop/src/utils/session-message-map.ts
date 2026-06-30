@@ -140,6 +140,10 @@ export type LoadedSessionMessage = {
     domain?: string;
   }>;
   searched_queries?: string[];
+  /** Persisted reasoning text ( think stripped from content ). */
+  reasoning?: string;
+  /** Persisted reasoning duration in seconds. */
+  reasoning_seconds?: number;
 };
 
 export function mapLoadedSessionMessage(
@@ -211,6 +215,13 @@ export function mapLoadedSessionMessage(
     const queries = item.searched_queries;
     if (Array.isArray(queries) && queries.length > 0) {
       mapped.searchedQueries = queries.map((x) => String(x).trim()).filter(Boolean);
+    }
+    const reasoning = item.reasoning;
+    if (typeof reasoning === "string" && reasoning.trim()) {
+      mapped.reasoning = reasoning.trim();
+    }
+    if (typeof item.reasoning_seconds === "number" && item.reasoning_seconds >= 1) {
+      mapped.reasoningSeconds = Math.round(item.reasoning_seconds);
     }
   }
   if (item.role === "tool") {

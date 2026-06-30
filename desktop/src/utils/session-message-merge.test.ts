@@ -71,6 +71,68 @@ describe("mergeSessionMessagesTail", () => {
     expect(out[1].suggestedQuestions).toEqual(["next?"]);
   });
 
+  it("reconciles a live reasoning row against its sanitized disk body (no duplicate, refs preserved)", () => {
+    const refs = [
+      { id: 1, title: "Doc", url: "https://x", snippet: "s", source: "web" as const },
+    ];
+    const existing: Message[] = [
+      uidMsg("user", "q", "uid-u"),
+      {
+        id: "uid-a",
+        role: "assistant",
+        content: "<think>盘算 17 秒</think>这是最终答案<followups>追问?</followups>",
+        agentId: "meta",
+        references: refs,
+      } as Message,
+    ];
+    const out = mergeSessionMessagesTail(
+      existing,
+      [diskRow("user", "q"), diskRow("assistant", "这是最终答案")],
+      sid,
+    );
+    expect(out).toHaveLength(2);
+    expect(out[1].role).toBe("assistant");
+    expect(out[1].references?.length).toBe(1);
+  });
+
+  it("preserves persisted reasoning fields when overlaying memory onto disk", () => {
+    const existing: Message[] = [
+      uidMsg("user", "q", "uid-u"),
+      {
+        id: "uid-a",
+        role: "assistant",
+        content: "这是最终答案",
+        agentId: "meta",
+        reasoning: "盘算 17 秒",
+        reasoningSeconds: 17,
+      } as Message,
+    ];
+    const out = mergeSessionMessagesTail(
+      existing,
+      [diskRow("user", "q"), diskRow("assistant", "这是最终答案")],
+      sid,
+    );
+    expect(out).toHaveLength(2);
+    expect(out[1].reasoning).toBe("盘算 17 秒");
+    expect(out[1].reasoningSeconds).toBe(17);
+  });
+
+  it("drops accumulated duplicate reasoning copies left by earlier failed merges", () => {
+    const body = "<think>盘算 17 秒</think>这是最终答案";
+    const existing: Message[] = [
+      uidMsg("user", "q", "uid-u"),
+      { id: "uid-a1", role: "assistant", content: body, agentId: "meta" } as Message,
+      { id: "uid-a2", role: "assistant", content: body, agentId: "meta" } as Message,
+      { id: "uid-a3", role: "assistant", content: body, agentId: "meta" } as Message,
+    ];
+    const out = mergeSessionMessagesTail(
+      existing,
+      [diskRow("user", "q"), diskRow("assistant", "这是最终答案")],
+      sid,
+    );
+    expect(out.filter((m) => m.role === "assistant")).toHaveLength(1);
+  });
+
   it("keeps disk chronological order when memory only holds the latest tail (no append-old-to-end bug)", () => {
     const existing = [
       uidMsg("user", "latest q", "uid-u2"),

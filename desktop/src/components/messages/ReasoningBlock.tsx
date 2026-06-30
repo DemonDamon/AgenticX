@@ -1,6 +1,6 @@
 import * as React from "react";
 import { ChevronDown, ChevronRight } from "lucide-react";
-import { ASSISTANT_ICON_RAIL_CLASS, REACT_RAIL_ICON_CLASS } from "./im-layout";
+import { ASSISTANT_ICON_RAIL_CLASS, REACT_RAIL_ICON_CLASS, REACT_RAIL_TITLE_CLASS } from "./im-layout";
 import {
   formatReasoningTitle,
   getCachedReasoningDuration,
@@ -11,6 +11,8 @@ import {
 type Props = {
   text: string;
   streaming?: boolean;
+  /** Persisted reasoning duration in seconds; takes priority over the streaming timer. */
+  seconds?: number;
 };
 
 function ThinkingGlyph() {
@@ -18,7 +20,7 @@ function ThinkingGlyph() {
     <svg
       xmlns="http://www.w3.org/2000/svg"
       viewBox="0 0 24 24"
-      className={`h-[20px] w-[20px] shrink-0 ${REACT_RAIL_ICON_CLASS}`}
+      className={`h-[18px] w-[18px] shrink-0 ${REACT_RAIL_ICON_CLASS}`}
       fill="none"
       stroke="currentColor"
       strokeWidth="2.5"
@@ -39,7 +41,7 @@ function persistReasoningDuration(content: string, startedAt: number, finishedAt
   return seconds;
 }
 
-export function ReasoningBlock({ text, streaming = false }: Props) {
+export function ReasoningBlock({ text, streaming = false, seconds }: Props) {
   const content = text.trim();
   const [open, setOpen] = React.useState(streaming);
   const [tick, setTick] = React.useState(0);
@@ -86,7 +88,13 @@ export function ReasoningBlock({ text, streaming = false }: Props) {
   let elapsedSeconds = 0;
   let hasReliableDuration = false;
 
-  if (streaming && startedAt !== null) {
+  // Persisted duration (from disk / finalize merge) wins for non-streaming
+  // rows so a reloaded or just-completed turn shows the same seconds as the
+  // original run instead of falling back to the in-memory streaming timer.
+  if (!streaming && typeof seconds === "number" && seconds >= 1) {
+    elapsedSeconds = seconds;
+    hasReliableDuration = true;
+  } else if (streaming && startedAt !== null) {
     elapsedSeconds = measureReasoningSeconds(startedAt, Date.now());
     hasReliableDuration = true;
   } else if (cachedSeconds !== undefined) {
@@ -111,7 +119,7 @@ export function ReasoningBlock({ text, streaming = false }: Props) {
           <ThinkingGlyph />
         </span>
         <span className="flex min-w-0 flex-1 items-center gap-1">
-          <span className="truncate text-[13px] font-medium text-text-subtle">{title}</span>
+          <span className={`truncate ${REACT_RAIL_TITLE_CLASS}`}>{title}</span>
           <span className="shrink-0" aria-hidden>
             {open ? (
               <ChevronDown className="h-3.5 w-3.5 shrink-0 text-text-muted" strokeWidth={2} />
