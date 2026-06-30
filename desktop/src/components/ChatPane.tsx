@@ -178,6 +178,11 @@ import {
 } from "../utils/cc-bridge-ui";
 import type { AutomationTask } from "./automation/types";
 import { parseReasoningContent } from "./messages/reasoning-parser";
+import {
+  getCachedReasoningDuration,
+  measureReasoningSeconds,
+  setCachedReasoningDuration,
+} from "./messages/reasoning-duration-cache";
 import { messagePlainTextForClipboard } from "../utils/markdown-copy-format";
 import { buildCompactionNoticeText } from "../utils/context-notice";
 import { usePaneSortableHandle } from "./pane-sortable-context";
@@ -6970,6 +6975,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
       }
       addPaneMessage(...stamped);
     };
+    let streamReasoningStartedAt: number | null = null;
     const commitCurrentStreamIfNeeded = () => {
       const raw = streamCommitRegistryRef.current.getText(requestSessionId).trim();
       // Trim trailing colon ("：" or ":") that model writes just before calling a tool
@@ -6982,7 +6988,34 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
       ) {
         return false;
       }
-      addPaneMessageIfSessionActive(pane.id, "assistant", partial, "meta", chatProvider, chatModel);
+      const parsed = parseReasoningContent(partial);
+      const reasoningText = parsed.reasoning.trim();
+      const bodyContent = parsed.response.replace(/[：:]\s*$/, "").trimEnd();
+      const commitExtras: Record<string, unknown> = {};
+      let commitContent = partial;
+      if (reasoningText) {
+        commitExtras.reasoning = reasoningText.slice(0, 16384);
+        let seconds = getCachedReasoningDuration(reasoningText);
+        if (seconds === undefined && streamReasoningStartedAt !== null) {
+          seconds = measureReasoningSeconds(streamReasoningStartedAt, Date.now());
+          setCachedReasoningDuration(reasoningText, seconds);
+        }
+        if (seconds !== undefined && seconds >= 1) {
+          commitExtras.reasoningSeconds = seconds;
+        }
+        commitContent = bodyContent;
+      }
+      addPaneMessageIfSessionActive(
+        pane.id,
+        "assistant",
+        commitContent,
+        "meta",
+        chatProvider,
+        chatModel,
+        undefined,
+        Object.keys(commitExtras).length > 0 ? commitExtras : undefined,
+      );
+      streamReasoningStartedAt = null;
       streamCommitRegistryRef.current.markCommitted(requestSessionId);
       streamCommitRegistryRef.current.setMidCommit(requestSessionId, partial);
       return true;
@@ -7536,6 +7569,9 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
                 }
                 full += tokenText;
                 cumulativeFull += tokenText;
+                if (/<think>/i.test(full) && streamReasoningStartedAt === null) {
+                  streamReasoningStartedAt = Date.now();
+                }
                 scheduleStreamTextUpdate(full);
               } else {
                 const tok = String(payload.data?.text ?? "");
@@ -7573,6 +7609,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
                 if (eventAgentId === "meta") {
                   commitCurrentStreamIfNeeded();
                   full = "";
+                  streamReasoningStartedAt = null;
                   streamCommitRegistryRef.current.resetTurnSegment(requestSessionId);
                   cancelStreamRenderFrame();
                   scheduleStreamTextUpdate("");

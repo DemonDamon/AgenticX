@@ -6,6 +6,7 @@ import type { SearchReference } from "../../types/search-references";
 import { AttachmentCard } from "./AttachmentCard";
 import { isWorkspaceReferenceAttachment, type FileReferenceOpenRequest } from "../../utils/reference-attachment";
 import { ReasoningBlock } from "./ReasoningBlock";
+import { resolvePersistedReasoningSeconds } from "./reasoning-duration-cache";
 import { ReferencesCard } from "./ReferencesCard";
 import { parseReasoningContent } from "./reasoning-parser";
 import { getContainedSelectionText } from "../../utils/favorite-selection";
@@ -617,7 +618,7 @@ export function ImBubble({
                     {!isUser && message.reasoning && !isStreaming ? (
                       <ReasoningBlock
                         text={message.reasoning}
-                        seconds={message.reasoningSeconds}
+                        seconds={resolvePersistedReasoningSeconds(message.reasoning, message.reasoningSeconds)}
                       />
                     ) : null}
                     {!isUser &&
@@ -625,6 +626,11 @@ export function ImBubble({
                     parsed?.reasoning ? (
                       <ReasoningBlock
                         text={parsed.reasoning}
+                        seconds={
+                          isStreaming
+                            ? undefined
+                            : resolvePersistedReasoningSeconds(parsed.reasoning, message.reasoningSeconds)
+                        }
                         streaming={isStreaming && hasThinkTag && !reasoningClosed}
                       />
                     ) : null}
