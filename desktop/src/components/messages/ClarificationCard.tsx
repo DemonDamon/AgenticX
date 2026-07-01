@@ -2,6 +2,7 @@ import { useMemo, useState } from "react";
 import { AlertCircle, Check, ChevronUp, Clock, Send } from "lucide-react";
 import type { ClarificationDecision, PendingClarification } from "../../store";
 import { buildClarificationAnswerText, inferClarificationDecisions, type ClarificationAnswer } from "../../utils/clarification-notice";
+import { ASSISTANT_INLINE_CARD_SHELL_CLASS, GROUP_INLINE_CARD_SHELL_CLASS } from "./im-layout";
 
 /** Minimal line-art glyph for clarification prompts (Near-style, stroke-only). */
 function ClarificationGlyph({ className }: { className?: string }) {
@@ -37,6 +38,8 @@ type Props = {
   onSubmitAnswer?: (requestId: string, answer: ClarificationAnswer) => Promise<boolean> | boolean;
   /** Skip = submit an empty answer to the backend (so the gate resolves) */
   onSkip?: (requestId: string) => void;
+  /** Group chat: offset past member avatar so the card aligns with bubble content. */
+  groupChatRail?: boolean;
 };
 
 export function ClarificationCard({
@@ -46,7 +49,9 @@ export function ClarificationCard({
   onReply,
   onSubmitAnswer,
   onSkip,
+  groupChatRail = false,
 }: Props) {
+  const shellClass = groupChatRail ? GROUP_INLINE_CARD_SHELL_CLASS : ASSISTANT_INLINE_CARD_SHELL_CLASS;
   const opts = useMemo(
     () => (prompt.options ?? []).filter((o) => typeof o === "string" && o.trim().length > 0),
     [prompt.options],
@@ -233,7 +238,7 @@ export function ClarificationCard({
   if (minimized && !answered) {
     return (
       <div
-        className="my-2 inline-flex max-w-full cursor-pointer items-center gap-2 rounded-lg border border-border bg-surface-card px-3 py-1.5 text-xs text-text-muted hover:bg-surface-hover hover:text-text-strong"
+        className={`${shellClass} inline-flex w-fit max-w-full cursor-pointer items-center gap-2 rounded-lg border border-border bg-surface-card px-3 py-1.5 text-xs text-text-muted hover:bg-surface-hover hover:text-text-strong`}
         onClick={() => setMinimized(false)}
         role="button"
         tabIndex={0}
@@ -257,7 +262,7 @@ export function ClarificationCard({
   if (answered) {
     const answerText = buildClarificationAnswerText(answered);
     return (
-      <div className="my-2 w-full max-w-[min(100%,520px)] overflow-hidden rounded-xl border border-[var(--border-subtle)] bg-surface-card text-sm">
+      <div className={`${shellClass} overflow-hidden rounded-xl border border-[var(--border-subtle)] bg-surface-card text-sm`}>
         <div className="flex items-center gap-2 px-3 py-2 text-[11px] text-text-muted">
           <Check className="h-3.5 w-3.5 text-[var(--ui-btn-primary-bg)]" />
           <span>已回复</span>
@@ -274,7 +279,7 @@ export function ClarificationCard({
   // ── Suspended (unattended/automation) ──────────────────────────────────────
   if (suspended) {
     return (
-      <div className="my-2 w-full max-w-[min(100%,520px)] rounded-xl border border-amber-500/30 bg-amber-500/5 px-3 py-2 text-xs text-amber-200">
+      <div className={`${shellClass} rounded-xl border border-amber-500/30 bg-amber-500/5 px-3 py-2 text-xs text-amber-200`}>
         无人值守会话已向你发起提问，当前已挂起。回来后可点击「回复」继续。
         {onReply && (
           <button
@@ -292,7 +297,7 @@ export function ClarificationCard({
   // ── Active question ───────────────────────────────────────────────────────
   return (
     <div
-      className="my-2 w-full max-w-[min(100%,520px)] overflow-hidden rounded-xl border border-[var(--border-subtle)] bg-surface-card text-sm"
+      className={`${shellClass} overflow-hidden rounded-xl border border-[var(--border-subtle)] bg-surface-card text-sm`}
       role="dialog"
       aria-label="需要你的输入"
     >
