@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Code, Copy, Download, Image, MoreHorizontal, X } from "lucide-react";
+import { Code, Copy, Download, Image, Maximize2, MoreHorizontal, X } from "lucide-react";
 import { collectThemeCssVars, exportSurfaceColor } from "../../utils/widget-theme";
+import { Modal } from "../ds/Modal";
+import { ZoomableViewport } from "../ds/ZoomableViewport";
 import type { WidgetPayload } from "./widget-preview";
 
 type Props = {
@@ -429,8 +431,22 @@ function WidgetMenu({
   );
 }
 
+function ZoomButton({ onClick }: { onClick: () => void }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className="absolute right-9 top-2 z-10 flex h-6 w-6 items-center justify-center rounded border border-border bg-[var(--surface-popover)] text-text-faint shadow-sm transition hover:bg-[var(--surface-card-strong)] hover:text-text-subtle"
+      title="放大查看"
+    >
+      <Maximize2 size={13} />
+    </button>
+  );
+}
+
 export function WidgetBlock({ payload }: Props) {
   const hostRef = useRef<HTMLDivElement>(null);
+  const [zoomOpen, setZoomOpen] = useState(false);
 
   const getSvgDisplayWidth = () => {
     const svg = hostRef.current?.querySelector("svg");
@@ -442,24 +458,50 @@ export function WidgetBlock({ payload }: Props) {
 
   if (payload.kind === "svg") {
     return (
-      <div
-        ref={hostRef}
-        className="relative w-full overflow-hidden rounded-md border border-border"
-      >
-        <SvgWidget code={payload.widgetCode} />
-        <WidgetMenu
-          payload={payload}
-          getSvgDisplayWidth={getSvgDisplayWidth}
-          getLiveSvg={getLiveSvg}
-        />
-      </div>
+      <>
+        <div
+          ref={hostRef}
+          className="relative w-full overflow-hidden rounded-md border border-border"
+        >
+          <SvgWidget code={payload.widgetCode} />
+          <ZoomButton onClick={() => setZoomOpen(true)} />
+          <WidgetMenu
+            payload={payload}
+            getSvgDisplayWidth={getSvgDisplayWidth}
+            getLiveSvg={getLiveSvg}
+          />
+        </div>
+        <Modal
+          open={zoomOpen}
+          title={payload.title || "查看图表"}
+          onClose={() => setZoomOpen(false)}
+          panelClassName="w-[92vw] max-w-5xl bg-surface-panel"
+        >
+          <ZoomableViewport stageWidth={900} viewportHeight="75vh">
+            <SvgWidget code={payload.widgetCode} />
+          </ZoomableViewport>
+        </Modal>
+      </>
     );
   }
 
   return (
-    <div className="relative w-full overflow-hidden rounded-md border border-border bg-[var(--surface-popover)] p-1">
-      <HtmlWidget code={payload.widgetCode} loadingMessages={payload.loadingMessages} />
-      <WidgetMenu payload={payload} />
-    </div>
+    <>
+      <div className="relative w-full overflow-hidden rounded-md border border-border bg-[var(--surface-popover)] p-1">
+        <HtmlWidget code={payload.widgetCode} loadingMessages={payload.loadingMessages} />
+        <ZoomButton onClick={() => setZoomOpen(true)} />
+        <WidgetMenu payload={payload} />
+      </div>
+      <Modal
+        open={zoomOpen}
+        title={payload.title || "查看图表"}
+        onClose={() => setZoomOpen(false)}
+        panelClassName="w-[92vw] max-w-5xl bg-surface-panel"
+      >
+        <ZoomableViewport stageWidth={900} viewportHeight="75vh">
+          <HtmlWidget code={payload.widgetCode} loadingMessages={payload.loadingMessages} />
+        </ZoomableViewport>
+      </Modal>
+    </>
   );
 }

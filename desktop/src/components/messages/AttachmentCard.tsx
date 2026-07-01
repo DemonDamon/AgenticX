@@ -1,6 +1,7 @@
 import { useMemo, useState } from "react";
 import type { MessageAttachment } from "../../store";
 import { Modal } from "../ds/Modal";
+import { ZoomableImage } from "../ds/ZoomableImage";
 import { formatReferencePathHint, resolveReferenceSourcePath } from "../../utils/chat-file-mention";
 import { isWorkspaceReferenceAttachment } from "../../utils/reference-attachment";
 
@@ -67,14 +68,13 @@ export function AttachmentCard({ attachment }: { attachment: MessageAttachment }
             {attachment.name} · {formatFileSize(attachment.size)}
           </div>
         </button>
-        <Modal open={open} title={attachment.name} onClose={() => setOpen(false)}>
-          <div className="flex max-h-[72vh] items-center justify-center overflow-auto">
-            <img
-              src={attachment.dataUrl}
-              alt={attachment.name}
-              className="h-auto max-h-[68vh] w-auto max-w-full rounded-lg"
-            />
-          </div>
+        <Modal
+          open={open}
+          title={attachment.name}
+          onClose={() => setOpen(false)}
+          panelClassName="w-[90vw] max-w-4xl bg-surface-panel"
+        >
+          <ZoomableImage src={attachment.dataUrl!} alt={attachment.name} maxHeight="70vh" />
         </Modal>
       </>
     );
