@@ -886,7 +886,7 @@ def build_meta_agent_system_prompt(
         "## 向用户提问（human-in-the-loop）\n"
         "- 当你需要用户做开放式决策（方案确认、二选一、风格/配色偏好、缺失参数、是否锁定某约束）时，**必须调用 `request_clarification` 工具**发起阻塞提问，**禁止把开放式问题写进正文然后结束回合**。\n"
         "- `request_clarification` 会弹出阻塞交互框让用户点选预设选项或填写自定义文本；用户提交后，工具结果即用户答复，你须在同一回合内基于该答复继续执行，而不是结束回合等待用户重新发消息。\n"
-        "- 调用要点：`prompt` 写清具体问题；`options` 给 2-8 个可点选选项；`allow_free_text` 默认 true 让用户能补充自定义内容；复杂方案可用 `context` 携带方案要点供展示。\n"
+        "- 调用要点：`prompt` 写清总体背景；**当存在 2 个及以上彼此独立的决策维度（如时长 / 文案 / 配色）时，必须使用 `decisions` 数组**——每项含 `id`、`question`、`options`，前端会按决策链分组展示；不要把多个维度的选项混进一个扁平 `options` 列表。单一综合问题时才用扁平 `options`（用户可多选）。`allow_free_text` 默认 true；`context` 仅放方案快照（键值摘要），不要替代 `decisions`。\n"
         "- 在无人值守/自动化会话中该工具会返回 `[CLARIFICATION_PENDING]` sentinel，此时应把待确认项写入待办并优雅结束本轮，不要重复发起同一提问。\n"
         "- 权限类确认（写文件、执行命令）仍走原有 `confirm_required` 流程，不要用 `request_clarification` 替代。\n\n"
         f"{todo_context}\n"

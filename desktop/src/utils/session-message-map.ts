@@ -7,6 +7,7 @@ import {
   isViewImageInjectMetadata,
   VIEW_IMAGE_INJECT_LEGACY_PREFIX,
 } from "./view-image-inject";
+import { parseClarificationDecisions } from "./clarification-notice";
 
 /** Snapshot row from GET /api/session/messages (snake_case). */
 export function attachmentsFromSessionRow(raw: unknown): MessageAttachment[] | undefined {
@@ -245,13 +246,16 @@ export function mapLoadedSessionMessage(
       const requestId = String(m.request_id ?? m.id ?? "").trim();
       if (requestId) {
         const rawOptions = Array.isArray(m.options) ? m.options : [];
+        const decisions = parseClarificationDecisions(m.decisions);
         mapped.clarificationPrompt = {
           requestId,
           prompt: String(m.prompt ?? item.content ?? ""),
           options: rawOptions.map((o) => String(o)).filter(Boolean),
+          decisions: decisions.length > 0 ? decisions : undefined,
           allowFreeText: m.allow_free_text !== false,
           agentId,
           sessionId: String(ownerSessionId ?? idPrefix ?? "").trim(),
+          context: (m.context as Record<string, unknown> | undefined) ?? undefined,
         };
         if (m.suspended === true) mapped.clarificationSuspended = true;
       }

@@ -338,8 +338,9 @@ def _persist_clarification_prompt(session: Any, data: Dict[str, Any], *, suspend
                 return
         prompt = str(data.get("prompt", "") or "")
         options = list(data.get("options", []) or [])
+        decisions = list(data.get("decisions", []) or [])
         allow_free_text = bool(data.get("allow_free_text", True))
-        history.append({
+        row: Dict[str, Any] = {
             "role": "tool",
             "content": prompt,
             "metadata": {
@@ -350,7 +351,13 @@ def _persist_clarification_prompt(session: Any, data: Dict[str, Any], *, suspend
                 "allow_free_text": allow_free_text,
                 "suspended": suspended,
             },
-        })
+        }
+        if decisions:
+            row["metadata"]["decisions"] = decisions
+        ctx = data.get("context")
+        if isinstance(ctx, dict) and ctx:
+            row["metadata"]["context"] = ctx
+        history.append(row)
     except Exception:
         logger.exception("[clarify] failed to persist clarification prompt")
 
@@ -2259,6 +2266,25 @@ def create_studio_app() -> FastAPI:
         ok = gate.resolve(payload.request_id, answer)
         if not ok:
             raise HTTPException(status_code=404, detail="clarification request not found")
+        # Persist the answer onto the clarification prompt row so the inline card
+        # survives a reload / session switch without resurrecting the question
+        # (NFR-2: the "answered" state must be visible, not just the prompt).
+        try:
+            hist = getattr(managed.session, "chat_history", None)
+            if isinstance(hist, list):
+                for row in reversed(hist):
+                    meta = row.get("metadata") if isinstance(row, dict) else None
+                    if (
+                        isinstance(meta, dict)
+                        and meta.get("kind") == "clarification"
+                        and str(meta.get("request_id") or meta.get("id") or "") == payload.request_id
+                    ):
+                        meta["clarification_answered"] = True
+                        meta["clarification_answer"] = answer
+                        break
+                managed.session.persist_async()
+        except Exception:
+            logger.exception("[clarify] failed to persist clarification answer")
         return {"ok": True}
 
     @app.post("/api/chat")

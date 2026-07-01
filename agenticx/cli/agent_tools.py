@@ -319,9 +319,39 @@ STUDIO_TOOLS: List[Dict[str, Any]] = [
                         "type": "array",
                         "items": {"type": "string"},
                         "description": (
-                            "Preset options the user can click (0-8). Use these for binary/multiple-choice "
-                            "decisions. The user may also type custom text when allow_free_text is true."
+                            "Flat preset options (0-8) when all choices are independent toggles "
+                            "or a single combined question. User may select multiple. Prefer "
+                            "`decisions` instead when you need separate answers per dimension."
                         ),
+                    },
+                    "decisions": {
+                        "type": "array",
+                        "description": (
+                            "Structured multi-part sign-off: one entry per independent decision "
+                            "(e.g. duration / copy / color). Each item has its own question and "
+                            "options; the UI renders a decision chain. Use this when prompt mentions "
+                            "multiple key decisions — do NOT flatten into one options list."
+                        ),
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "id": {
+                                    "type": "string",
+                                    "description": "Stable id, e.g. duration / copy / palette.",
+                                },
+                                "question": {
+                                    "type": "string",
+                                    "description": "The decision question for this dimension.",
+                                },
+                                "options": {
+                                    "type": "array",
+                                    "items": {"type": "string"},
+                                    "description": "2-6 mutually exclusive options for this dimension.",
+                                },
+                            },
+                            "required": ["question", "options"],
+                            "additionalProperties": False,
+                        },
                     },
                     "allow_free_text": {
                         "type": "boolean",
@@ -2120,10 +2150,31 @@ def build_clarification_tool_result(answer: Dict[str, Any]) -> str:
     return "；".join(parts) + "。"
 
 
+def _normalize_clarification_decisions(raw: Any) -> List[Dict[str, Any]]:
+    """Parse structured decision groups for multi-part sign-off cards."""
+    if not isinstance(raw, list):
+        return []
+    out: List[Dict[str, Any]] = []
+    for idx, item in enumerate(raw[:6]):
+        if not isinstance(item, dict):
+            continue
+        question = str(item.get("question", "") or "").strip()
+        raw_opts = item.get("options") or []
+        if not question or not isinstance(raw_opts, list):
+            continue
+        options = [str(opt).strip() for opt in raw_opts if str(opt).strip()][:8]
+        if not options:
+            continue
+        decision_id = str(item.get("id", "") or "").strip() or f"decision-{idx + 1}"
+        out.append({"id": decision_id, "question": question, "options": options})
+    return out
+
+
 async def _request_clarification(
     prompt: str,
     *,
     options: Optional[List[str]] = None,
+    decisions: Optional[List[Dict[str, Any]]] = None,
     allow_free_text: bool = True,
     context: Optional[Dict[str, Any]] = None,
     clarify_gate: Optional[ClarifyGate] = None,
@@ -2137,6 +2188,7 @@ async def _request_clarification(
     string built by :func:`build_clarification_tool_result`.
     """
     options = list(options or [])
+    decisions = list(decisions or [])
     payload_context = dict(context or {})
     request_id = str(payload_context.get("request_id") or uuid.uuid4())
     payload_context["request_id"] = request_id
@@ -2157,6 +2209,7 @@ async def _request_clarification(
                         "id": request_id,
                         "prompt": prompt,
                         "options": options,
+                        "decisions": decisions,
                         "allow_free_text": allow_free_text,
                         "context": payload_context,
                     },
@@ -2174,6 +2227,7 @@ async def _request_clarification(
                     "id": request_id,
                     "prompt": prompt,
                     "options": options,
+                    "decisions": decisions,
                     "allow_free_text": allow_free_text,
                     "context": payload_context,
                 },
@@ -6251,6 +6305,8 @@ async def dispatch_tool_async(
                 raw_options = []
             options = [str(opt).strip() for opt in raw_options if str(opt).strip()]
             options = options[:8]
+            raw_decisions = arguments.get("decisions") or []
+            decisions = _normalize_clarification_decisions(raw_decisions)
             allow_free_text = bool(arguments.get("allow_free_text", True))
             ctx = arguments.get("context")
             if not isinstance(ctx, dict):
@@ -6258,6 +6314,7 @@ async def dispatch_tool_async(
             return await _request_clarification(
                 prompt,
                 options=options,
+                decisions=decisions,
                 allow_free_text=allow_free_text,
                 context=ctx,
                 clarify_gate=clarify_gate,
