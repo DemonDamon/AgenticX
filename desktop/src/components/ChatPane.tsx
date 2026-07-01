@@ -236,6 +236,11 @@ import {
 } from "../utils/search-reference-sse";
 import { mergeSearchedQueries } from "../types/search-references";
 import type { SearchReference } from "../types/search-references";
+import {
+  buildClarificationMessageExtras,
+  findRunningClarificationToolMessage,
+} from "../utils/clarification-inline";
+import { parseClarificationDecisions } from "../utils/clarification-notice";
 
 const SEARCH_REFERENCE_TOOLS = new Set(["web_search", "knowledge_search"]);
 
@@ -1249,6 +1254,13 @@ type Props = {
     agentId?: string,
     context?: Record<string, unknown>
   ) => Promise<{ answerText: string; selectedOptions: string[] } | null>;
+  /** Direct inline submit for the clarification card (non-blocking) */
+  onSubmitClarification?: (
+    requestId: string,
+    answer: { answerText: string; selectedOptions: string[] },
+    sessionId?: string,
+    agentId?: string
+  ) => Promise<boolean> | boolean;
 };
 
 function ModelBadge({ provider, model }: { provider?: string; model?: string }) {
@@ -2141,7 +2153,7 @@ const GroupMembersSidePanel = memo(function GroupMembersSidePanel({
   );
 });
 
-export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarification }: Props) {
+export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarification, onSubmitClarification }: Props) {
   const pane = useAppStore((s) => s.panes.find((item) => item.id === paneId) ?? FALLBACK_PANE);
   const paneSortableListeners = usePaneSortableHandle();
   const panes = useAppStore((s) => s.panes);
@@ -5926,6 +5938,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
               streamStalledSeconds={message.id === "__stream__" ? silentSeconds : 0}
               onSkillManageApply={applySkillPatchPreview}
               onOpenClarification={onOpenClarification}
+              onSubmitClarification={onSubmitClarification}
             />
           </div>
         );
@@ -7644,12 +7657,6 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
               const SILENT_TOOLS = new Set(["check_resources"]);
               if (!SILENT_TOOLS.has(toolNameStr)) {
                 if (eventAgentId === "meta") {
-                  commitCurrentStreamIfNeeded();
-                  full = "";
-                  streamReasoningStartedAt = null;
-                  streamCommitRegistryRef.current.resetTurnSegment(requestSessionId);
-                  cancelStreamRenderFrame();
-                  scheduleStreamTextUpdate("");
                   const pan = useAppStore.getState().panes.find((p) => p.id === pane.id);
                   const lastMsg = pan?.messages.length ? pan.messages[pan.messages.length - 1] : undefined;
                   const toolGroupId =
@@ -7659,6 +7666,43 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
                   const rawArgs = JSON.stringify(toolArgs);
                   const content =
                     rawArgs.length > 80_000 ? `${rawArgs.slice(0, 80_000)}\n… (truncated)` : rawArgs;
+                  // Clarification: paint the inline card before stream commit so the
+                  // card appears on the same SSE frame as tool_call (no extra frame wait).
+                  if (toolNameStr === "request_clarification") {
+                    const clarifyExtras = toolCallId
+                      ? buildClarificationMessageExtras(
+                          toolArgs,
+                          toolCallId,
+                          toolGroupId,
+                          requestSessionId,
+                        )
+                      : null;
+                    if (clarifyExtras) {
+                      addPaneMessageIfSessionActive(
+                        pane.id,
+                        "tool",
+                        clarifyExtras.clarificationPrompt?.prompt ?? content,
+                        "meta",
+                        undefined,
+                        undefined,
+                        undefined,
+                        clarifyExtras,
+                      );
+                      commitCurrentStreamIfNeeded();
+                      full = "";
+                      streamReasoningStartedAt = null;
+                      streamCommitRegistryRef.current.resetTurnSegment(requestSessionId);
+                      cancelStreamRenderFrame();
+                      scheduleStreamTextUpdate("");
+                      continue;
+                    }
+                  }
+                  commitCurrentStreamIfNeeded();
+                  full = "";
+                  streamReasoningStartedAt = null;
+                  streamCommitRegistryRef.current.resetTurnSegment(requestSessionId);
+                  cancelStreamRenderFrame();
+                  scheduleStreamTextUpdate("");
                   if (toolCallId) {
                     addPaneMessageIfSessionActive(pane.id, "tool", content, "meta", undefined, undefined, undefined, {
                       toolCallId,
@@ -7870,6 +7914,8 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
                 ? (payload.data.options as string[]).map((o) => String(o)).filter(Boolean)
                 : [];
               const clarifyAllowFreeText = payload.data?.allow_free_text !== false;
+              const clarifyContext = payload.data?.context;
+              const clarifyDecisions = parseClarificationDecisions(payload.data?.decisions);
               if (eventAgentId !== "meta") {
                 updateSubAgent(eventAgentId, {
                   status: "awaiting_input",
@@ -7879,10 +7925,11 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
                         requestId: clarifyReqId,
                         prompt: clarifyPrompt,
                         options: clarifyOptions,
+                        decisions: clarifyDecisions.length > 0 ? clarifyDecisions : undefined,
                         allowFreeText: clarifyAllowFreeText,
                         agentId: eventAgentId,
                         sessionId: requestSessionId,
-                        context: payload.data?.context,
+                        context: clarifyContext,
                       }
                     : undefined,
                 });
@@ -7891,14 +7938,17 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
                   content: clarifyPrompt || "等待输入",
                 });
               }
-              if (onOpenClarification && clarifyReqId) {
+              // For sub-agents we keep the legacy blocking path (updates pendingClarification on SubAgent).
+              // For the main Meta agent we render a non-blocking inline ClarificationCard by
+              // writing a tool message that carries `clarificationPrompt` (NFR-2 visibility).
+              if (eventAgentId !== "meta" && onOpenClarification && clarifyReqId) {
                 const answer = await onOpenClarification(
                   clarifyReqId,
                   clarifyPrompt,
                   clarifyOptions,
                   clarifyAllowFreeText,
                   eventAgentId,
-                  payload.data?.context,
+                  clarifyContext,
                 );
                 await fetch(`${apiBase}/api/clarify`, {
                   method: "POST",
@@ -7912,8 +7962,70 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
                   }),
                 });
               }
+              // Meta: inline card — patch the running tool row when possible so the
+              // card appears immediately on tool_call and only receives the real
+              // request_id here; never nest inside TurnToolGroupCard as raw JSON.
+              if (eventAgentId === "meta" && clarifyReqId && clarifyPrompt) {
+                const pan = useAppStore.getState().panes.find((p) => p.id === pane.id);
+                const running = findRunningClarificationToolMessage(pan?.messages ?? []);
+                const promptPayload = {
+                  requestId: clarifyReqId,
+                  prompt: clarifyPrompt,
+                  options: clarifyOptions,
+                  decisions: clarifyDecisions.length > 0 ? clarifyDecisions : undefined,
+                  allowFreeText: clarifyAllowFreeText,
+                  agentId: "meta",
+                  sessionId: requestSessionId,
+                  context: clarifyContext,
+                };
+                const metaPatch = {
+                  content: clarifyPrompt,
+                  clarificationPrompt: promptPayload,
+                  metadata: {
+                    kind: "clarification",
+                    request_id: clarifyReqId,
+                    prompt: clarifyPrompt,
+                    options: clarifyOptions,
+                    decisions: clarifyDecisions.length > 0 ? clarifyDecisions : undefined,
+                    allow_free_text: clarifyAllowFreeText,
+                    context: clarifyContext,
+                  },
+                };
+                if (running?.toolCallId) {
+                  updatePaneMessageByToolCallId(pane.id, running.toolCallId, metaPatch);
+                } else {
+                  const dup = (pan?.messages ?? []).some(
+                    (m) => m.clarificationPrompt?.requestId === clarifyReqId,
+                  );
+                  if (!dup) {
+                    addPaneMessageIfSessionActive(
+                      pane.id,
+                      "tool",
+                      clarifyPrompt,
+                      "meta",
+                      undefined,
+                      undefined,
+                      undefined,
+                      {
+                        toolName: "request_clarification",
+                        toolStatus: "running",
+                        toolArgs: {
+                          prompt: clarifyPrompt,
+                          options: clarifyOptions,
+                          allow_free_text: clarifyAllowFreeText,
+                          context: clarifyContext,
+                        },
+                        clarificationPrompt: promptPayload,
+                        metadata: metaPatch.metadata,
+                      },
+                    );
+                  }
+                }
+              }
             }
             if (payload.type === "clarification_response") {
+              const respId = String(payload.data?.id ?? "").trim();
+              const respAnswer = payload.data?.answer;
               if (eventAgentId !== "meta") {
                 updateSubAgent(eventAgentId, {
                   status: "running",
@@ -7924,6 +8036,21 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
                   type: "clarification_response",
                   content: "已收到用户回复",
                 });
+              }
+              // Meta (and sub): mark the inline card as answered in the store so
+              // the card flips to the "已回复" state even if the answer came from
+              // another client / the legacy Dialog path.
+              if (respId) {
+                const ans =
+                  respAnswer && typeof respAnswer === "object"
+                    ? {
+                        answerText: String((respAnswer as Record<string, unknown>).answer_text ?? ""),
+                        selectedOptions: Array.isArray((respAnswer as Record<string, unknown>).selected_options)
+                          ? ((respAnswer as Record<string, unknown>).selected_options as unknown[]).map((o) => String(o)).filter(Boolean)
+                          : [],
+                      }
+                    : { answerText: "", selectedOptions: [] };
+                useAppStore.getState().markClarificationAnswered(respId, ans);
               }
             }
             if (payload.type === "clarification_suspended") {

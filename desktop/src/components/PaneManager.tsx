@@ -31,6 +31,12 @@ type Props = {
     agentId?: string,
     context?: Record<string, unknown>
   ) => Promise<{ answerText: string; selectedOptions: string[] } | null>;
+  onSubmitClarification?: (
+    requestId: string,
+    answer: { answerText: string; selectedOptions: string[] },
+    sessionId?: string,
+    agentId?: string
+  ) => Promise<boolean> | boolean;
 };
 
 const COLUMNS = 2;
@@ -107,7 +113,7 @@ function PaneDragOverlayPreview({ pane }: { pane: ChatPaneState }) {
   );
 }
 
-export function PaneManager({ onOpenConfirm, onOpenClarification }: Props) {
+export function PaneManager({ onOpenConfirm, onOpenClarification, onSubmitClarification }: Props) {
   const panes = useAppStore((s) => s.panes);
   const activePaneId = useAppStore((s) => s.activePaneId);
   const setActivePaneId = useAppStore((s) => s.setActivePaneId);
@@ -224,6 +230,7 @@ export function PaneManager({ onOpenConfirm, onOpenClarification }: Props) {
       onFocus={() => setActivePaneId(pane.id)}
       onOpenConfirm={onOpenConfirm}
       onOpenClarification={onOpenClarification}
+      onSubmitClarification={onSubmitClarification}
     />
   );
 

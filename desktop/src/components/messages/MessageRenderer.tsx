@@ -90,11 +90,39 @@ type Props = {
     agentId?: string,
     context?: Record<string, unknown>
   ) => Promise<{ answerText: string; selectedOptions: string[] } | null>;
+  /**
+   * Preferred for inline card: submit directly without forcing a blocking dialog.
+   * Should perform POST /api/clarify and return true on success.
+   */
+  onSubmitClarification?: (
+    requestId: string,
+    answer: { answerText: string; selectedOptions: string[] },
+    sessionId?: string,
+    agentId?: string
+  ) => Promise<boolean> | boolean;
 };
 
 function extractPathFromToolResult(msg: string): string {
   const match = msg.match(/```(?:[a-zA-Z0-9_-]+)?\n([^`\n]+)\n```/);
   return (match?.[1] ?? "").trim();
+}
+
+/** Reconstruct a ClarificationAnswer from persisted metadata (refresh survival). */
+function extractClarificationAnswerFromMeta(
+  meta: Record<string, unknown>,
+): { answerText: string; selectedOptions: string[] } | null {
+  const rawAnswer = meta.clarification_answer;
+  if (rawAnswer && typeof rawAnswer === "object") {
+    const a = rawAnswer as Record<string, unknown>;
+    const answerText = typeof a.answer_text === "string" ? a.answer_text : "";
+    const selectedOptions = Array.isArray(a.selected_options)
+      ? a.selected_options.map((o) => String(o)).filter(Boolean)
+      : [];
+    return { answerText, selectedOptions };
+  }
+  // No stored answer payload, but the flag says it was answered: treat as empty
+  // (shows the "已回复 / 按默认推进" state instead of re-prompting).
+  return { answerText: "", selectedOptions: [] };
 }
 
 function GroupProgressLine({ message }: { message: Message }) {
@@ -213,6 +241,7 @@ export function MessageRenderer({
   streamStalledSeconds = 0,
   onSkillManageApply,
   onOpenClarification,
+  onSubmitClarification,
 }: Props) {
   const chatStyle = useAppStore((s) => s.chatStyle);
   const resolvedReferences = useMemo(() => {
@@ -356,10 +385,19 @@ export function MessageRenderer({
       }
     }
     if (message.clarificationPrompt) {
+      const clarMeta =
+        message.metadata && typeof message.metadata === "object"
+          ? (message.metadata as Record<string, unknown>)
+          : null;
+      const initialAnswer =
+        clarMeta && clarMeta.clarification_answered === true
+          ? extractClarificationAnswerFromMeta(clarMeta)
+          : null;
       return (
         <ClarificationCard
           prompt={message.clarificationPrompt}
           suspended={message.clarificationSuspended}
+          initialAnswer={initialAnswer}
           onReply={
             onOpenClarification
               ? (p) => {
@@ -370,6 +408,29 @@ export function MessageRenderer({
                     p.allowFreeText,
                     p.agentId,
                     p.context,
+                  );
+                }
+              : undefined
+          }
+          onSubmitAnswer={
+            onSubmitClarification
+              ? (requestId, answer) =>
+                  onSubmitClarification(
+                    requestId,
+                    answer,
+                    message.clarificationPrompt?.sessionId,
+                    message.clarificationPrompt?.agentId,
+                  )
+              : undefined
+          }
+          onSkip={
+            onSubmitClarification
+              ? (requestId) => {
+                  void onSubmitClarification(
+                    requestId,
+                    { answerText: "", selectedOptions: [] },
+                    message.clarificationPrompt?.sessionId,
+                    message.clarificationPrompt?.agentId,
                   );
                 }
               : undefined

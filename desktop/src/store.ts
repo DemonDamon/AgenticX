@@ -287,10 +287,18 @@ export type PendingConfirm = {
   context?: Record<string, unknown>;
 };
 
+export type ClarificationDecision = {
+  id: string;
+  question: string;
+  options: string[];
+};
+
 export type PendingClarification = {
   requestId: string;
   prompt: string;
   options: string[];
+  /** When set, render one option group per independent decision dimension. */
+  decisions?: ClarificationDecision[];
   allowFreeText: boolean;
   agentId: string;
   sessionId: string;
@@ -555,7 +563,17 @@ type AppState = {
     paneId: string,
     toolCallId: string,
     patch: Partial<
-      Pick<Message, "content" | "toolStatus" | "toolElapsedSec" | "toolResultPreview" | "toolStreamLines" | "inlineConfirm">
+      Pick<
+        Message,
+        | "content"
+        | "toolStatus"
+        | "toolElapsedSec"
+        | "toolResultPreview"
+        | "toolStreamLines"
+        | "inlineConfirm"
+        | "clarificationPrompt"
+        | "metadata"
+      >
     > & {
       appendStreamLine?: string;
     }
@@ -564,12 +582,27 @@ type AppState = {
   updateMessageByToolCallId: (
     toolCallId: string,
     patch: Partial<
-      Pick<Message, "content" | "toolStatus" | "toolElapsedSec" | "toolResultPreview" | "toolStreamLines" | "inlineConfirm">
+      Pick<
+        Message,
+        | "content"
+        | "toolStatus"
+        | "toolElapsedSec"
+        | "toolResultPreview"
+        | "toolStreamLines"
+        | "inlineConfirm"
+        | "clarificationPrompt"
+        | "metadata"
+      >
     > & {
       appendStreamLine?: string;
     }
   ) => boolean;
   updateLastPaneMessage: (paneId: string, content: string) => void;
+  /** Mark the pane message carrying `requestId` (clarificationPrompt) as answered. */
+  markClarificationAnswered: (
+    requestId: string,
+    answer: { answerText: string; selectedOptions: string[] },
+  ) => void;
   clearPaneMessages: (paneId: string) => void;
   setPaneSessionId: (paneId: string, sessionId: string, modelHint?: { provider?: string; model?: string }) => void;
   setPaneSessionMode: (paneId: string, mode: "code_dev" | "daily_office") => void;
@@ -1605,6 +1638,35 @@ export const useAppStore = create<AppState>((set, get) => ({
         return { ...pane, messages: msgs };
       }),
     })),
+  markClarificationAnswered: (requestId, answer) => {
+    set((state) => ({
+      panes: state.panes.map((pane) => {
+        const idx = (pane.messages ?? []).findIndex(
+          (m) => m.clarificationPrompt?.requestId === requestId,
+        );
+        if (idx < 0) return pane;
+        const msgs = [...(pane.messages ?? [])];
+        const prev = msgs[idx];
+        const prevMeta =
+          prev.metadata && typeof prev.metadata === "object"
+            ? (prev.metadata as Record<string, unknown>)
+            : {};
+        msgs[idx] = {
+          ...prev,
+          toolStatus: "done",
+          metadata: {
+            ...prevMeta,
+            clarification_answered: true,
+            clarification_answer: {
+              answer_text: answer.answerText ?? "",
+              selected_options: answer.selectedOptions ?? [],
+            },
+          },
+        };
+        return { ...pane, messages: msgs };
+      }),
+    }));
+  },
   mergeLastPaneMessageByRole: (paneId, role, patch) => {
     let found = false;
     set((state) => ({

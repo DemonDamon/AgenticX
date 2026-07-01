@@ -12,6 +12,8 @@ function canGroupToolMessage(message: Message): boolean {
   if ((message.toolName ?? "").trim() === "group_progress") return false;
   // Inline widgets render in the message body, not inside TurnToolGroupCard.
   if ((message.toolName ?? "").trim() === "show_widget") return false;
+  // Clarification cards must render as standalone interactive rows, not nested ToolCallCards.
+  if (message.clarificationPrompt) return false;
   // Only group the structured tool rows produced by the new SSE path.
   // Legacy history rows often persist as plain text like "工具调用:" /
   // "工具结果(...):"; grouping those together loses the original ReAct

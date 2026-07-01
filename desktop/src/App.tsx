@@ -1658,6 +1658,96 @@ export function App() {
       openClarification(requestId, prompt, options, allowFreeText, agentId, context);
     });
 
+  /**
+   * Non-blocking submit used by the inline ClarificationCard.
+   * Performs POST /api/clarify and, on success, marks the corresponding pane
+   * message as answered so a reload/switch doesn't resurrect the question.
+   *
+   * sessionId is REQUIRED for the meta inline path — we never fall back to the
+   * global active sessionId because in multi-pane layouts that may belong to a
+   * different pane and would resolve the wrong gate.
+   */
+  const onSubmitClarification = useCallback(
+    async (
+      requestId: string,
+      answer: { answerText: string; selectedOptions: string[] },
+      sessionId?: string,
+      agentId = "meta",
+    ): Promise<boolean> => {
+      // Resolve sessionId from the pane that owns this clarification, not the
+      // global active session (avoid cross-pane gate resolution).
+      let sid = (sessionId ?? "").trim();
+      if (!sid) {
+        const state = useAppStore.getState();
+        for (const p of state.panes) {
+          const hit = (p.messages ?? []).some(
+            (m) => m.clarificationPrompt?.requestId === requestId,
+          );
+          if (hit) {
+            sid = (p.sessionId ?? "").trim();
+            break;
+          }
+        }
+      }
+      if (!sid) {
+        // Last-resort fallback to active pane session, but surface a console
+        // warning so cross-pane mis-routing is diagnosable.
+        const activeSid = useAppStore.getState().sessionId || "";
+        console.warn(
+          "[clarify] no sessionId resolved for request %s, falling back to active %s",
+          requestId,
+          activeSid,
+        );
+        sid = activeSid;
+      }
+
+      const res = await fetch(`${apiBase}/api/clarify`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "x-agx-desktop-token": apiToken },
+        body: JSON.stringify({
+          session_id: sid,
+          request_id: requestId,
+          agent_id: agentId,
+          answer_text: answer.answerText ?? "",
+          selected_options: answer.selectedOptions ?? [],
+        }),
+      });
+
+      // 404 means the gate is already resolved/missing — treat as "already handled".
+      if (res.status === 404) {
+        markClarificationAnsweredInStore(requestId, answer);
+        // Fulfill a pending Dialog resolver (legacy) so it doesn't hang.
+        if (clarifyResolverRef.current) {
+          clarifyResolverRef.current(answer);
+          clarifyResolverRef.current = null;
+          closeClarification();
+        }
+        return false;
+      }
+      if (!res.ok) {
+        // Non-404 error: surface to caller as a business failure.
+        return false;
+      }
+
+      markClarificationAnsweredInStore(requestId, answer);
+      if (clarifyResolverRef.current) {
+        clarifyResolverRef.current(answer);
+        clarifyResolverRef.current = null;
+        closeClarification();
+      }
+      return true;
+    },
+    [apiBase, apiToken, closeClarification],
+  );
+
+  /** Mark the pane message carrying this clarification as answered (refresh survival). */
+  const markClarificationAnsweredInStore = useCallback(
+    (requestId: string, answer: { answerText: string; selectedOptions: string[] }) => {
+      useAppStore.getState().markClarificationAnswered(requestId, answer);
+    },
+    [],
+  );
+
   const handleSettingsSave = async (result: {
     defaultProvider: string;
     providers: Record<string, ProviderEntry>;
@@ -2170,9 +2260,17 @@ export function App() {
             <div className="agx-content">
               <div className="agx-main-content">
                 {userMode === "lite" ? (
-                  <LiteChatView onOpenConfirm={onOpenConfirm} onOpenClarification={onOpenClarification} />
+                  <LiteChatView
+                    onOpenConfirm={onOpenConfirm}
+                    onOpenClarification={onOpenClarification}
+                    onSubmitClarification={onSubmitClarification}
+                  />
                 ) : (
-                  <PaneManager onOpenConfirm={onOpenConfirm} onOpenClarification={onOpenClarification} />
+                  <PaneManager
+                    onOpenConfirm={onOpenConfirm}
+                    onOpenClarification={onOpenClarification}
+                    onSubmitClarification={onSubmitClarification}
+                  />
                 )}
               </div>
             </div>
@@ -2219,15 +2317,29 @@ export function App() {
         allowFreeText={clarification.allowFreeText}
         sourceLabel={clarification.agentId === "meta" ? "主智能体" : `子智能体 ${clarification.agentId}`}
         context={clarification.context}
-        onSubmit={(answer: ClarificationAnswer) => {
+        onSubmit={async (answer: ClarificationAnswer) => {
           closeClarification();
           clarifyResolverRef.current?.(answer);
           clarifyResolverRef.current = null;
+          // Ensure the backend actually receives it even if opened via dialog
+          try {
+            await onSubmitClarification(
+              clarification.requestId,
+              answer,
+              undefined,
+              clarification.agentId
+            );
+          } catch {
+            // best effort; the resolver already fired
+          }
         }}
         onSkip={() => {
           closeClarification();
-          clarifyResolverRef.current?.({ answerText: "", selectedOptions: [] });
+          const empty = { answerText: "", selectedOptions: [] };
+          clarifyResolverRef.current?.(empty);
           clarifyResolverRef.current = null;
+          // fire-and-forget skip
+          void onSubmitClarification(clarification.requestId, empty, undefined, clarification.agentId).catch(() => {});
         }}
       />
       <SettingsPanel

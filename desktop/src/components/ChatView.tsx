@@ -27,6 +27,10 @@ import { attachmentsFromSessionRow } from "../utils/session-message-map";
 import { MessageRenderer, renderToolMessageExtras } from "./messages/MessageRenderer";
 import { groupConsecutiveToolMessages, shouldHoldToolGroupProgress, type GroupedChatRow } from "./messages/group-tool-messages";
 import {
+  buildClarificationMessageExtras,
+  findRunningClarificationToolMessage,
+} from "../utils/clarification-inline";
+import {
   isEphemeralStopErrorText,
   isInterruptedAssistantPlaceholder,
 } from "../utils/noisy-chat-messages";
@@ -91,6 +95,12 @@ type Props = {
     agentId?: string,
     context?: Record<string, unknown>
   ) => Promise<{ answerText: string; selectedOptions: string[] } | null>;
+  onSubmitClarification?: (
+    requestId: string,
+    answer: { answerText: string; selectedOptions: string[] },
+    sessionId?: string,
+    agentId?: string
+  ) => Promise<boolean> | boolean;
   mode?: "pro" | "lite";
 };
 
@@ -346,7 +356,7 @@ function MessageActions({
   );
 }
 
-export function ChatView({ onOpenConfirm, onOpenClarification, mode = "pro" }: Props) {
+export function ChatView({ onOpenConfirm, onOpenClarification, onSubmitClarification, mode = "pro" }: Props) {
   const apiBase = useAppStore((s) => s.apiBase);
   const sessionId = useAppStore((s) => s.sessionId);
   const apiToken = useAppStore((s) => s.apiToken);
@@ -1268,9 +1278,6 @@ export function ChatView({ onOpenConfirm, onOpenClarification, mode = "pro" }: P
               const SILENT_TOOLS_SSE = new Set(["check_resources"]);
               if (!SILENT_TOOLS_SSE.has(toolNameStr)) {
                 if (eventAgentId === "meta") {
-                  commitCurrentStreamIfNeeded();
-                  full = "";
-                  resetStreamSegment();
                   const globalMsgs = useAppStore.getState().messages;
                   const lastMsg = globalMsgs.length ? globalMsgs[globalMsgs.length - 1] : undefined;
                   const toolGroupId =
@@ -1280,6 +1287,30 @@ export function ChatView({ onOpenConfirm, onOpenClarification, mode = "pro" }: P
                   const rawArgs = JSON.stringify(toolArgs);
                   const content =
                     rawArgs.length > 80_000 ? `${rawArgs.slice(0, 80_000)}\n… (truncated)` : rawArgs;
+                  if (toolNameStr === "request_clarification") {
+                    const clarifyExtras = toolCallId
+                      ? buildClarificationMessageExtras(toolArgs, toolCallId, toolGroupId, sessionId)
+                      : null;
+                    if (clarifyExtras) {
+                      addMessage(
+                        "tool",
+                        clarifyExtras.clarificationPrompt?.prompt ?? content,
+                        "meta",
+                        undefined,
+                        undefined,
+                        undefined,
+                        clarifyExtras,
+                      );
+                      commitCurrentStreamIfNeeded();
+                      full = "";
+                      resetStreamSegment();
+                      scheduleStreamTextUpdate("");
+                      continue;
+                    }
+                  }
+                  commitCurrentStreamIfNeeded();
+                  full = "";
+                  resetStreamSegment();
                   if (toolCallId) {
                     addMessage("tool", content, "meta", undefined, undefined, undefined, {
                       toolCallId,
@@ -1457,28 +1488,73 @@ export function ChatView({ onOpenConfirm, onOpenClarification, mode = "pro" }: P
                   type: "clarification_required",
                   content: clarifyPrompt || "等待输入",
                 });
-              }
-              if (onOpenClarification && clarifyReqId) {
-                const answer = await onOpenClarification(
-                  clarifyReqId,
-                  clarifyPrompt,
-                  clarifyOptions,
-                  clarifyAllowFreeText,
-                  eventAgentId,
-                  payload.data?.context,
-                );
-                if (!isCurrentRequest()) continue;
-                await fetch(`${apiBase}/api/clarify`, {
-                  method: "POST",
-                  headers: { "Content-Type": "application/json", "x-agx-desktop-token": apiToken },
-                  body: JSON.stringify({
-                    session_id: sessionId,
+                if (onOpenClarification && clarifyReqId) {
+                  const answer = await onOpenClarification(
+                    clarifyReqId,
+                    clarifyPrompt,
+                    clarifyOptions,
+                    clarifyAllowFreeText,
+                    eventAgentId,
+                    payload.data?.context,
+                  );
+                  if (!isCurrentRequest()) continue;
+                  await fetch(`${apiBase}/api/clarify`, {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json", "x-agx-desktop-token": apiToken },
+                    body: JSON.stringify({
+                      session_id: sessionId,
+                      request_id: clarifyReqId,
+                      agent_id: eventAgentId,
+                      answer_text: answer?.answerText ?? "",
+                      selected_options: answer?.selectedOptions ?? [],
+                    }),
+                  });
+                }
+              } else if (clarifyReqId && clarifyPrompt) {
+                const clarifyContext = payload.data?.context;
+                const running = findRunningClarificationToolMessage(useAppStore.getState().messages);
+                const promptPayload = {
+                  requestId: clarifyReqId,
+                  prompt: clarifyPrompt,
+                  options: clarifyOptions,
+                  allowFreeText: clarifyAllowFreeText,
+                  agentId: "meta",
+                  sessionId,
+                  context: clarifyContext,
+                };
+                const metaPatch = {
+                  content: clarifyPrompt,
+                  clarificationPrompt: promptPayload,
+                  metadata: {
+                    kind: "clarification",
                     request_id: clarifyReqId,
-                    agent_id: eventAgentId,
-                    answer_text: answer?.answerText ?? "",
-                    selected_options: answer?.selectedOptions ?? [],
-                  }),
-                });
+                    prompt: clarifyPrompt,
+                    options: clarifyOptions,
+                    allow_free_text: clarifyAllowFreeText,
+                    context: clarifyContext,
+                  },
+                };
+                if (running?.toolCallId) {
+                  updateMessageByToolCallId(running.toolCallId, metaPatch);
+                } else {
+                  const dup = useAppStore.getState().messages.some(
+                    (m) => m.clarificationPrompt?.requestId === clarifyReqId,
+                  );
+                  if (!dup) {
+                    addMessage("tool", clarifyPrompt, "meta", undefined, undefined, undefined, {
+                      toolName: "request_clarification",
+                      toolStatus: "running",
+                      toolArgs: {
+                        prompt: clarifyPrompt,
+                        options: clarifyOptions,
+                        allow_free_text: clarifyAllowFreeText,
+                        context: clarifyContext,
+                      },
+                      clarificationPrompt: promptPayload,
+                      metadata: metaPatch.metadata,
+                    });
+                  }
+                }
               }
             }
             if (payload.type === "clarification_response") {
@@ -2219,6 +2295,7 @@ export function ChatView({ onOpenConfirm, onOpenClarification, mode = "pro" }: P
                       toolCardOmitLeadingSpacer={m.role === "tool" && reactWorkCol}
                       onFollowupClick={(t) => void send(t)}
                       onOpenClarification={onOpenClarification}
+                      onSubmitClarification={onSubmitClarification}
                     />
                     {!isLite && (
                       <MessageActions
