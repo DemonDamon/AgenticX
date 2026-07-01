@@ -88,6 +88,17 @@ export const ASSISTANT_TIMELINE_PX = {
   actionMarginLeft: ASSISTANT_ACTION_MARGIN_LEFT_PX,
 };
 
+/**
+ * Bordered inline cards (ClarificationCard) in Meta / ReAct IM column — align the
+ * card's left edge with ImBubble body text (`px-3` inset), not the row's outer edge.
+ */
+export const ASSISTANT_INLINE_CARD_SHELL_CLASS =
+  "my-2 ml-3 min-w-0 w-full max-w-[min(calc(100%-0.75rem),520px)]";
+
+/** Group chat: skip avatar column (w-8 + gap-2) before the same content inset. */
+export const GROUP_INLINE_CARD_SHELL_CLASS =
+  "my-2 ml-10 min-w-0 w-full max-w-[min(calc(100%-2.5rem),520px)]";
+
 /** Uniform vertical gap: body → icon row → follow-up chips (matches composer pt-2.5 rhythm). */
 export const ASSISTANT_ACTION_RHYTHM_GAP_CLASS = "gap-2.5";
 

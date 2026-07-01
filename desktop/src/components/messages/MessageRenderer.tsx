@@ -398,6 +398,7 @@ export function MessageRenderer({
           prompt={message.clarificationPrompt}
           suspended={message.clarificationSuspended}
           initialAnswer={initialAnswer}
+          groupChatRail={showSenderIdentity}
           onReply={
             onOpenClarification
               ? (p) => {
