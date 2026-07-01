@@ -12,6 +12,7 @@ import { TableBlock } from "./TableBlock";
 import { highlightChatCode } from "./highlight-chat-code";
 import { Modal } from "../ds/Modal";
 import { HoverTip } from "../ds/HoverTip";
+import { ZoomableImage } from "../ds/ZoomableImage";
 import type { SearchReference } from "../../types/search-references";
 
 export { normalizeChatMarkdownContent, normalizeLenientEmphasisInText } from "./markdown-normalize";
@@ -325,14 +326,17 @@ function MarkdownImage({
           {loadError ? `图片预览失败：${loadError}` : alt || title || "图片预览"}
         </div>
       </button>
-      <Modal open={open} title={alt || title || "图片预览"} onClose={() => setOpen(false)}>
-        <div className="flex max-h-[72vh] items-center justify-center overflow-auto">
-          {displaySrc ? (
-            <img src={displaySrc} alt={alt || "image"} className="h-auto max-h-[68vh] w-auto max-w-full rounded-lg" />
-          ) : (
-            <div className="text-sm text-text-muted">图片地址无效</div>
-          )}
-        </div>
+      <Modal
+        open={open}
+        title={alt || title || "图片预览"}
+        onClose={() => setOpen(false)}
+        panelClassName="w-[90vw] max-w-4xl bg-surface-panel"
+      >
+        {displaySrc ? (
+          <ZoomableImage src={displaySrc} alt={alt || "image"} maxHeight="70vh" />
+        ) : (
+          <div className="py-8 text-center text-sm text-text-muted">图片地址无效</div>
+        )}
       </Modal>
     </>
   );
