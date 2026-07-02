@@ -330,7 +330,7 @@ function MarkdownImage({
         open={open}
         title={alt || title || "图片预览"}
         onClose={() => setOpen(false)}
-        panelClassName="w-[90vw] max-w-4xl bg-surface-panel"
+        panelClassName="w-[90vw] max-w-4xl bg-surface-popover"
       >
         {displaySrc ? (
           <ZoomableImage src={displaySrc} alt={alt || "image"} maxHeight="70vh" />

@@ -72,7 +72,7 @@ export function AttachmentCard({ attachment }: { attachment: MessageAttachment }
           open={open}
           title={attachment.name}
           onClose={() => setOpen(false)}
-          panelClassName="w-[90vw] max-w-4xl bg-surface-panel"
+          panelClassName="w-[90vw] max-w-4xl bg-surface-popover"
         >
           <ZoomableImage src={attachment.dataUrl!} alt={attachment.name} maxHeight="70vh" />
         </Modal>
