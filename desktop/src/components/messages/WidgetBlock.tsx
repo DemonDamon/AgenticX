@@ -46,19 +46,60 @@ function buildSanitizedSvgHtml(code: string): string | null {
 }
 
 /**
+ * 从 SVG code 解析 viewBox 宽高，返回逻辑尺寸 { w, h }。
+ */
+function parseSvgAspect(code: string): { w: number; h: number } {
+  const vbMatch = code.match(/viewBox=["']\s*([\d.+-]+)[\s,]+([\d.+-]+)[\s,]+([\d.+-]+)[\s,]+([\d.+-]+)\s*["']/i);
+  if (vbMatch) {
+    const w = parseFloat(vbMatch[3]!);
+    const h = parseFloat(vbMatch[4]!);
+    if (w > 0 && h > 0) return { w, h };
+  }
+  const wMatch = code.match(/\bwidth=["']([\d.]+)/i);
+  const hMatch = code.match(/\bheight=["']([\d.]+)/i);
+  const w = wMatch ? parseFloat(wMatch[1]!) : 680;
+  const h = hMatch ? parseFloat(hMatch[1]!) : Math.round(w * 0.65);
+  return { w: w > 0 ? w : 680, h: h > 0 ? h : 442 };
+}
+
+/**
  * Renders the SVG via dangerouslySetInnerHTML so the element lives in the
  * current document from the very first paint – avoids cross-document node
  * adoption timing issues that caused the "empty white box" artefact.
+ *
+ * preview=true（默认）:
+ *   - 按 SVG viewBox 的自然宽度展示，最小 640px、最大 900px
+ *   - 宽高比精确还原，无硬截断、无多余空白
+ *   - 若气泡比 SVG 窄则水平滚动，字迹/细节保持清晰
+ * preview=false: 在放大弹窗的 ZoomableViewport 内使用，撑满舞台宽度。
  */
-function SvgWidget({ code }: { code: string }) {
+function SvgWidget({ code, preview = true }: { code: string; preview?: boolean }) {
   const html = useMemo(() => buildSanitizedSvgHtml(code), [code]);
+  const aspect = useMemo(() => parseSvgAspect(code), [code]);
+
   if (!html) return null;
+
+  if (preview) {
+    // 渲染宽度 = clamp(svgNaturalWidth, 640, 900)
+    // height 用 padding-top trick 精确还原宽高比，不截断也不留白
+    const displayW = Math.min(900, Math.max(640, aspect.w));
+    const displayH = Math.round((displayW * aspect.h) / aspect.w);
+    return (
+      <div style={{ width: displayW, height: displayH }}>
+        <div
+          style={{ width: "100%", height: "100%" }}
+          className="[&>svg]:block [&>svg]:h-full [&>svg]:w-full"
+          // eslint-disable-next-line react/no-danger
+          dangerouslySetInnerHTML={{ __html: html }}
+        />
+      </div>
+    );
+  }
+
+  // 弹窗舞台内：撑满舞台宽度，高度 auto
   return (
-    // [&>svg] selectors style the directly-injected <svg> element.
-    // width:100% + height:auto makes it fill the column and scale by aspect ratio.
-    // max-h-[400px] prevents very tall diagrams from dominating the chat.
     <div
-      className="w-full [&>svg]:block [&>svg]:w-full [&>svg]:h-auto [&>svg]:max-h-[400px]"
+      className="w-full [&>svg]:block [&>svg]:h-auto [&>svg]:w-full"
       // eslint-disable-next-line react/no-danger
       dangerouslySetInnerHTML={{ __html: html }}
     />
@@ -459,11 +500,19 @@ export function WidgetBlock({ payload }: Props) {
   if (payload.kind === "svg") {
     return (
       <>
+        {/*
+          外框不再强制 w-full：用 inline-block + max-w-full 让容器收缩至 SVG 实际宽度，
+          同时 mx-auto 保持居中。这样边框贴合内容，不会在窄 SVG 两侧留大片空白。
+        */}
+        {/*
+          overflow-x-auto: 若气泡列比 SVG 自然宽度窄，水平滚动而非压缩。
+          inline-block + max-w-full: 外框随 SVG 内容宽度收缩，不留多余空白。
+        */}
         <div
           ref={hostRef}
-          className="relative w-full overflow-hidden rounded-md border border-border"
+          className="relative inline-block max-w-full overflow-x-auto rounded-md border border-border"
         >
-          <SvgWidget code={payload.widgetCode} />
+          <SvgWidget code={payload.widgetCode} preview />
           <ZoomButton onClick={() => setZoomOpen(true)} />
           <WidgetMenu
             payload={payload}
@@ -475,10 +524,10 @@ export function WidgetBlock({ payload }: Props) {
           open={zoomOpen}
           title={payload.title || "查看图表"}
           onClose={() => setZoomOpen(false)}
-          panelClassName="w-[92vw] max-w-5xl bg-surface-panel"
+          panelClassName="w-[92vw] max-w-5xl bg-surface-popover"
         >
           <ZoomableViewport stageWidth={900} viewportHeight="75vh">
-            <SvgWidget code={payload.widgetCode} />
+            <SvgWidget code={payload.widgetCode} preview={false} />
           </ZoomableViewport>
         </Modal>
       </>
@@ -496,7 +545,7 @@ export function WidgetBlock({ payload }: Props) {
         open={zoomOpen}
         title={payload.title || "查看图表"}
         onClose={() => setZoomOpen(false)}
-        panelClassName="w-[92vw] max-w-5xl bg-surface-panel"
+        panelClassName="w-[92vw] max-w-5xl bg-surface-popover"
       >
         <ZoomableViewport stageWidth={900} viewportHeight="75vh">
           <HtmlWidget code={payload.widgetCode} loadingMessages={payload.loadingMessages} />
