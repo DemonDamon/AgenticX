@@ -63,3 +63,28 @@ test("normalizeChatMarkdownContent: streaming close ignores ** inside inline cod
     "before **open and `** not counted` tail**",
   );
 });
+
+test("normalizeChatMarkdownContent: unwraps automation HTML comment saved paths", () => {
+  const input =
+    "报告生成时间：2026-07-03 00:17:44\n\n<!-- 报告已保存至: /Users/damon/.agenticx/crontask/atask_19/A股日报_20260703.md -->";
+  assert.equal(
+    normalizeChatMarkdownContent(input),
+    "报告生成时间：2026-07-03 00:17:44\n\n报告已保存至: `/Users/damon/.agenticx/crontask/atask_19/A股日报_20260703.md`",
+  );
+});
+
+test("normalizeChatMarkdownContent: linkifies inline labeled saved paths", () => {
+  assert.equal(
+    normalizeChatMarkdownContent("文件已保存到 /Users/damon/out/report.md"),
+    "文件已保存到 `/Users/damon/out/report.md`",
+  );
+  assert.equal(
+    normalizeChatMarkdownContent("saved to: /Users/damon/out/report.md"),
+    "saved to: `/Users/damon/out/report.md`",
+  );
+});
+
+test("normalizeChatMarkdownContent: does not alter paths already in backticks", () => {
+  const input = "已保存至: `/Users/damon/out/report.md`";
+  assert.equal(normalizeChatMarkdownContent(input), input);
+});

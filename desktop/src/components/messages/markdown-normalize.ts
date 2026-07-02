@@ -9,6 +9,49 @@ const FENCED_BLOCK_RE = /(```[\s\S]*?```|~~~[\s\S]*?~~~)/g;
 const STANDALONE_ABS_PATH_LINE_RE =
   /^(\/(?:Users|home|tmp|var|opt|private|Volumes)[^\s\n`<>[\]()]+)$/gm;
 
+/** Capture group for an absolute local path (Unicode filenames allowed). */
+const INLINE_ABS_PATH_CAPTURE =
+  "(\\/(?:Users|home|tmp|var|opt|private|Volumes)[^\\s\\n`<>\\[\\]()]+|[a-zA-Z]:[\\\\/][^\\s\\n`<>\\[\\]()]+|~/[^\\s\\n`<>\\[\\]()]+)";
+
+/** Labels models use when declaring on-disk artifacts (automation / cron tasks). */
+const SAVED_FILE_LABEL =
+  "(?:报告已保存(?:至|到)|文件已保存(?:至|到)|报告(?:文件)?已落盘(?:至|到)?|已保存(?:至|到)|saved\\s+to|written\\s+to|report\\s+saved\\s+to|file\\s+saved\\s+to)";
+
+const HTML_COMMENT_SAVED_PATH_RE = new RegExp(
+  `<!--\\s*(${SAVED_FILE_LABEL}[：:\\s]*)${INLINE_ABS_PATH_CAPTURE}\\s*-->`,
+  "gi",
+);
+
+const INLINE_LABELED_SAVED_PATH_RE = new RegExp(
+  `(${SAVED_FILE_LABEL}[：:\\s]+)${INLINE_ABS_PATH_CAPTURE}(?=[\\s.,;:!?，。；：！？）\\])\\n]|$)`,
+  "gi",
+);
+
+function wrapPathInBackticks(path: string): string | null {
+  const trimmed = path.trim();
+  return isAbsoluteFilePath(trimmed) ? `\`${trimmed}\`` : null;
+}
+
+/** Turn `<!-- 报告已保存至: /path -->` into visible `报告已保存至: `/path``. */
+function unwrapHtmlCommentSavedPaths(text: string): string {
+  return text.replace(HTML_COMMENT_SAVED_PATH_RE, (whole, label: string, path: string) => {
+    const wrapped = wrapPathInBackticks(path);
+    if (!wrapped) return whole;
+    const prefix = String(label || "").trimEnd();
+    return prefix ? `${prefix} ${wrapped}` : wrapped;
+  });
+}
+
+/** Linkify labeled absolute paths in prose, e.g. `已保存至: /Users/.../report.md`. */
+function wrapInlineLabeledSavedPaths(text: string): string {
+  return text.replace(INLINE_LABELED_SAVED_PATH_RE, (whole, label: string, path: string) => {
+    const wrapped = wrapPathInBackticks(path);
+    if (!wrapped) return whole;
+    if (whole.includes("`")) return whole;
+    return `${label}${wrapped}`;
+  });
+}
+
 /** Full-width asterisk (U+FF0A) and similar look-alikes → ASCII `*`. */
 function normalizeAsteriskChars(text: string): string {
   return text.replace(/\uFF0A/g, "*");
@@ -77,8 +120,15 @@ function normalizeLatexMathDelimitersInText(text: string): string {
 function wrapStandaloneAbsoluteFilePaths(text: string): string {
   return text.replace(STANDALONE_ABS_PATH_LINE_RE, (match) => {
     const trimmed = match.trim();
-    return isAbsoluteFilePath(trimmed) ? `\`${trimmed}\`` : match;
+    return wrapPathInBackticks(trimmed) ?? match;
   });
+}
+
+function wrapAutomationSavedFilePaths(text: string): string {
+  let next = unwrapHtmlCommentSavedPaths(text);
+  next = wrapInlineLabeledSavedPaths(next);
+  next = wrapStandaloneAbsoluteFilePaths(next);
+  return next;
 }
 
 function normalizeProseChunk(chunk: string, options?: NormalizeChatMarkdownOptions): string {
@@ -87,7 +137,7 @@ function normalizeProseChunk(chunk: string, options?: NormalizeChatMarkdownOptio
     .map((prose, proseIdx) =>
       proseIdx % 2 === 1
         ? prose
-        : wrapStandaloneAbsoluteFilePaths(
+        : wrapAutomationSavedFilePaths(
             normalizeLenientEmphasisInText(normalizeLatexMathDelimitersInText(prose)),
           ),
     )
