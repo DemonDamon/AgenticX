@@ -1,6 +1,18 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type RefObject } from "react";
 import { createPortal } from "react-dom";
-import { Check, Copy, Eye, FileText, FolderOpen, ImageIcon, Pencil, X } from "lucide-react";
+import {
+  Check,
+  Copy,
+  Eye,
+  FileText,
+  FolderOpen,
+  ImageIcon,
+  Pencil,
+  Redo2,
+  Search,
+  Undo2,
+  X,
+} from "lucide-react";
 import Prism from "prismjs";
 import "prismjs/components/prism-bash";
 import "prismjs/components/prism-json";
@@ -21,6 +33,7 @@ import {
 import {
   formatPreviewBytes,
   previewBaseName,
+  previewCopyText,
   type WorkspacePreviewLineRange,
   type WorkspacePreviewQuotePayload,
   type WorkspacePreview,
@@ -61,7 +74,7 @@ export type WorkspaceFilePreviewProps = {
   preview: WorkspacePreview;
   anchor: { top: number; bottom: number; left: number };
   copied: boolean;
-  onCopy: () => void;
+  onCopy: (text?: string) => void;
   onClose: () => void;
   onQuoteSnippet?: (payload: WorkspacePreviewQuotePayload) => void;
   onRevealInFileManager?: (absolutePath: string) => void;
@@ -350,6 +363,161 @@ function LineFocusedSourceView({
 
 type TextualViewMode = "preview" | "edit";
 
+const EDIT_HISTORY_LIMIT = 200;
+
+type EditHistoryState = {
+  entries: string[];
+  index: number;
+};
+
+function useTextEditHistory(initialContent: string, resetKey: string) {
+  const [history, setHistory] = useState<EditHistoryState>({
+    entries: [initialContent],
+    index: 0,
+  });
+
+  useEffect(() => {
+    setHistory({ entries: [initialContent], index: 0 });
+  }, [resetKey, initialContent]);
+
+  const value = history.entries[history.index] ?? initialContent;
+
+  const setValue = useCallback((next: string) => {
+    setHistory((prev) => {
+      const base = prev.entries.slice(0, prev.index + 1);
+      if (base[base.length - 1] === next) return prev;
+      const entries = [...base, next];
+      if (entries.length > EDIT_HISTORY_LIMIT) {
+        entries.splice(0, entries.length - EDIT_HISTORY_LIMIT);
+      }
+      return { entries, index: entries.length - 1 };
+    });
+  }, []);
+
+  const undo = useCallback(() => {
+    setHistory((prev) => (prev.index > 0 ? { ...prev, index: prev.index - 1 } : prev));
+  }, []);
+
+  const redo = useCallback(() => {
+    setHistory((prev) =>
+      prev.index < prev.entries.length - 1 ? { ...prev, index: prev.index + 1 } : prev
+    );
+  }, []);
+
+  const canUndo = history.index > 0;
+  const canRedo = history.index < history.entries.length - 1;
+
+  return { value, setValue, undo, redo, canUndo, canRedo };
+}
+
+/**
+ * Map visually-identical / OS-substituted punctuation to a single canonical
+ * character so that macOS "smart" dash/quote substitution (which can happen
+ * either in the file's saved content or transiently while typing into an
+ * Electron/Chromium text field) never causes an otherwise-correct find query
+ * to silently fail to match.
+ *
+ * IMPORTANT: every substitution below is exactly 1 character → 1 character,
+ * so the normalized string has the SAME LENGTH as the input and match
+ * indices found in the normalized string remain valid offsets into the
+ * original (un-normalized) string.
+ */
+function normalizeForSearch(s: string): string {
+  return s
+    .replace(/[\u2010\u2011\u2012\u2013\u2014\u2015\uFF0D\u2212]/g, "-") // hyphen/en/em/figure/fullwidth/minus dashes
+    .replace(/[\u00A0\u2007\u202F]/g, " ") // no-break / figure / narrow-no-break space
+    .replace(/[\u2018\u2019\u201B]/g, "'") // smart single quotes
+    .replace(/[\u201C\u201D\u201F]/g, '"'); // smart double quotes
+}
+
+/** Normalize line endings only; preserve leading/trailing newlines in the query. */
+function sanitizeFindQuery(raw: string): string {
+  return raw.replace(/\r\n/g, "\n");
+}
+
+function isEmptyFindQuery(raw: string): boolean {
+  return sanitizeFindQuery(raw).trim().length === 0;
+}
+
+/** Keep the editor selection verbatim (including blank lines / newlines). */
+function selectionToFindQuery(raw: string): string {
+  return raw.replace(/\r\n/g, "\n");
+}
+
+function formatFindQueryForDisplay(query: string): string {
+  if (!query.includes("\n")) return query;
+  return query.replace(/\n/g, "↵");
+}
+
+/** Normalize line endings in replace text; preserve literal newlines typed in the box. */
+function sanitizeReplaceText(raw: string): string {
+  return raw.replace(/\r\n/g, "\n");
+}
+
+function findTextMatch(
+  content: string,
+  query: string,
+  from: number,
+  forward: boolean
+): { start: number; end: number } | null {
+  if (!query || !content) return null;
+  const normContent = normalizeForSearch(content);
+  const normQuery = normalizeForSearch(query);
+  if (forward) {
+    // Start after current position; wrap around if needed
+    const searchFrom = Math.max(0, from);
+    let idx = normContent.indexOf(normQuery, searchFrom);
+    if (idx < 0) idx = normContent.indexOf(normQuery, 0); // wrap
+    return idx >= 0 ? { start: idx, end: idx + normQuery.length } : null;
+  }
+  // Backward search: start before current position; wrap around if needed
+  const searchFrom = Math.max(0, from - normQuery.length);
+  let idx = normContent.lastIndexOf(normQuery, searchFrom);
+  if (idx < 0) idx = normContent.lastIndexOf(normQuery); // wrap
+  return idx >= 0 ? { start: idx, end: idx + normQuery.length } : null;
+}
+
+function countMatches(content: string, query: string): number {
+  if (!query || !content) return 0;
+  const normContent = normalizeForSearch(content);
+  const normQuery = normalizeForSearch(query);
+  let count = 0;
+  let idx = 0;
+  while ((idx = normContent.indexOf(normQuery, idx)) >= 0) {
+    count += 1;
+    idx += normQuery.length;
+  }
+  return count;
+}
+
+/**
+ * Replace all occurrences of `find` (matched leniently via normalizeForSearch,
+ * so em-dash/en-dash/smart-quote variants in the file are matched too) with
+ * `replace`, preserving every non-matched original character exactly as-is.
+ */
+function replaceAllOccurrences(
+  content: string,
+  find: string,
+  replace: string
+): { result: string; count: number } {
+  if (!find) return { result: content, count: 0 };
+  const normContent = normalizeForSearch(content);
+  const normFind = normalizeForSearch(find);
+  if (!normFind) return { result: content, count: 0 };
+  let count = 0;
+  let cursor = 0;
+  let result = "";
+  let idx = normContent.indexOf(normFind, cursor);
+  while (idx >= 0) {
+    result += content.slice(cursor, idx) + replace;
+    cursor = idx + normFind.length;
+    count += 1;
+    idx = normContent.indexOf(normFind, cursor);
+  }
+  result += content.slice(cursor);
+  return { result, count };
+}
+
 function TextualPreviewBody({
   preview,
   onQuoteSnippet,
@@ -358,6 +526,7 @@ function TextualPreviewBody({
   editContent,
   onEditContentChange,
   markdownHostPath,
+  textareaRef,
 }: {
   preview: TextualPreview;
   onQuoteSnippet?: (payload: WorkspacePreviewQuotePayload) => void;
@@ -366,6 +535,7 @@ function TextualPreviewBody({
   editContent: string;
   onEditContentChange: (value: string) => void;
   markdownHostPath: string;
+  textareaRef?: RefObject<HTMLTextAreaElement | null>;
 }) {
   if (initialLineRange) {
     return <LineFocusedSourceView content={preview.content} lineRange={initialLineRange} />;
@@ -486,6 +656,7 @@ function TextualPreviewBody({
   if (preview.kind === "markdown" && viewMode === "edit") {
     return (
       <textarea
+        ref={textareaRef}
         rows={editLineCount}
         className="m-0 block w-full resize-none border-0 bg-transparent px-6 py-5 font-mono text-[13px] leading-[1.65] text-text-primary outline-none ring-0 focus:outline-none focus:ring-0"
         value={editContent}
@@ -593,18 +764,61 @@ export function WorkspaceFilePreview({
       ? (preview as TextualPreview)
       : null;
 
+  const editResetKey = textualPreview
+    ? `${textualPreview.absolutePath}:${textualPreview.content.length}`
+    : "";
+
+  const {
+    value: editContent,
+    setValue: setEditContent,
+    undo,
+    redo,
+    canUndo,
+    canRedo,
+  } = useTextEditHistory(textualPreview?.content ?? "", editResetKey);
+
   const [viewMode, setViewMode] = useState<TextualViewMode>("preview");
-  const [editContent, setEditContent] = useState(textualPreview?.content ?? "");
   const [savedBaseline, setSavedBaseline] = useState(textualPreview?.content ?? "");
   const [saveError, setSaveError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
+  const [findBarOpen, setFindBarOpen] = useState(false);
+  const [findText, setFindText] = useState("");
+  const [replaceText, setReplaceText] = useState("");
+  const [findStatus, setFindStatus] = useState<string | null>(null);
+  const [saveToast, setSaveToast] = useState("");
+  const saveToastTimerRef = useRef<number | null>(null);
+  const editTextareaRef = useRef<HTMLTextAreaElement | null>(null);
+  const findInputRef = useRef<HTMLTextAreaElement | null>(null);
+
+  const showSaveToast = useCallback((msg: string) => {
+    setSaveToast(msg);
+    if (saveToastTimerRef.current !== null) {
+      window.clearTimeout(saveToastTimerRef.current);
+    }
+    saveToastTimerRef.current = window.setTimeout(() => {
+      setSaveToast("");
+      saveToastTimerRef.current = null;
+    }, 1800);
+  }, []);
+
+  useEffect(
+    () => () => {
+      if (saveToastTimerRef.current !== null) {
+        window.clearTimeout(saveToastTimerRef.current);
+      }
+    },
+    []
+  );
 
   useEffect(() => {
     if (!textualPreview) return;
     setViewMode("preview");
-    setEditContent(textualPreview.content);
     setSavedBaseline(textualPreview.content);
     setSaveError(null);
+    setFindBarOpen(false);
+    setFindText("");
+    setReplaceText("");
+    setFindStatus(null);
   }, [textualPreview?.path, textualPreview?.absolutePath, textualPreview?.content]);
 
   const isDirty = textualPreview != null && editContent !== savedBaseline;
@@ -634,6 +848,20 @@ export function WorkspaceFilePreview({
     }
   }, [editContent, isDirty, textualPreview]);
 
+  const handleSave = useCallback(async () => {
+    if (!isEditableMarkdown || viewMode !== "edit") return;
+    if (!isDirty) {
+      showSaveToast("已是最新");
+      return;
+    }
+    const ok = await persistEditContent();
+    if (ok) {
+      showSaveToast("已保存");
+    } else {
+      showSaveToast("保存失败");
+    }
+  }, [isDirty, isEditableMarkdown, persistEditContent, showSaveToast, viewMode]);
+
   const switchToPreview = useCallback(async () => {
     if (viewMode === "preview") return;
     if (isDirty) {
@@ -642,6 +870,155 @@ export function WorkspaceFilePreview({
     }
     setViewMode("preview");
   }, [isDirty, persistEditContent, viewMode]);
+
+  const selectTextRange = useCallback((start: number, end: number) => {
+    const textarea = editTextareaRef.current;
+    if (!textarea) return;
+    textarea.focus();
+    textarea.setSelectionRange(start, end);
+  }, []);
+
+  const findInputRows = useMemo(
+    () => Math.min(5, Math.max(1, findText.split("\n").length)),
+    [findText]
+  );
+  const replaceInputRows = useMemo(
+    () => Math.min(5, Math.max(1, replaceText.split("\n").length)),
+    [replaceText]
+  );
+
+  const runFind = useCallback(
+    (forward: boolean) => {
+      const query = sanitizeFindQuery(findText);
+      if (isEmptyFindQuery(query)) {
+        setFindStatus("请输入查找内容");
+        return;
+      }
+
+      const textarea = editTextareaRef.current;
+      // For forward: start searching after the end of current selection (skip current match)
+      // For backward: start searching before the start of current selection
+      const from = forward
+        ? (textarea?.selectionEnd ?? 0) + 1
+        : (textarea?.selectionStart ?? editContent.length) - 1;
+
+      const match = findTextMatch(editContent, query, Math.max(0, from), forward);
+      if (!match) {
+        setFindStatus(`未找到「${formatFindQueryForDisplay(query)}」`);
+        return;
+      }
+      selectTextRange(match.start, match.end);
+      const total = countMatches(editContent, query);
+      const actual = editContent.slice(match.start, match.end);
+      setFindStatus(
+        actual !== query
+          ? `（文档中为「${formatFindQueryForDisplay(actual)}」，共 ${total} 处）`
+          : total > 1
+            ? `共 ${total} 处`
+            : null
+      );
+    },
+    [editContent, findText, selectTextRange]
+  );
+
+  const runReplaceOne = useCallback(() => {
+    const query = sanitizeFindQuery(findText);
+    if (isEmptyFindQuery(query)) {
+      setFindStatus("请输入查找内容");
+      return;
+    }
+    const replacement = sanitizeReplaceText(replaceText);
+
+    const textarea = editTextareaRef.current;
+    const selStart = textarea?.selectionStart ?? 0;
+    const selEnd = textarea?.selectionEnd ?? 0;
+    // If there is a non-empty selection, replace it directly regardless of how it was matched
+    if (selStart < selEnd) {
+      const next =
+        editContent.slice(0, selStart) + replacement + editContent.slice(selEnd);
+      setEditContent(next);
+      const cursor = selStart + replacement.length;
+      window.requestAnimationFrame(() => selectTextRange(cursor, cursor));
+      setFindStatus(null);
+      return;
+    }
+    // No selection yet → find first
+    runFind(true);
+  }, [editContent, findText, replaceText, runFind, selectTextRange, setEditContent]);
+
+  const runReplaceAll = useCallback(() => {
+    const query = sanitizeFindQuery(findText);
+    if (isEmptyFindQuery(query)) {
+      setFindStatus("请输入查找内容");
+      return;
+    }
+    const replacement = sanitizeReplaceText(replaceText);
+
+    const { result, count } = replaceAllOccurrences(editContent, query, replacement);
+    if (count <= 0) {
+      setFindStatus(`未找到「${formatFindQueryForDisplay(query)}」`);
+      return;
+    }
+    setEditContent(result);
+    setFindStatus(`已替换 ${count} 处`);
+  }, [editContent, findText, replaceText, setEditContent]);
+
+  const openFindBar = useCallback(
+    (prefillFromSelection = false) => {
+      if (prefillFromSelection) {
+        const textarea = editTextareaRef.current;
+        const selStart = textarea?.selectionStart ?? 0;
+        const selEnd = textarea?.selectionEnd ?? 0;
+        if (textarea && selStart < selEnd) {
+          const selected = editContent.slice(selStart, selEnd);
+          setFindText(selectionToFindQuery(selected));
+          setFindStatus(null);
+        }
+      }
+      setFindBarOpen(true);
+      window.requestAnimationFrame(() => findInputRef.current?.focus());
+    },
+    [editContent]
+  );
+
+  const handleCopyClick = useCallback(() => {
+    const text = textualPreview ? editContent : previewCopyText(preview);
+    onCopy(text);
+  }, [editContent, onCopy, preview, textualPreview]);
+
+  useEffect(() => {
+    if (!isEditableMarkdown || viewMode !== "edit") return;
+    const onKeyDown = (e: KeyboardEvent) => {
+      const mod = e.metaKey || e.ctrlKey;
+      if (mod && e.key.toLowerCase() === "z" && !e.shiftKey) {
+        e.preventDefault();
+        undo();
+        return;
+      }
+      if (mod && (e.key.toLowerCase() === "z" && e.shiftKey || e.key.toLowerCase() === "y")) {
+        e.preventDefault();
+        redo();
+        return;
+      }
+      if (mod && e.key.toLowerCase() === "f") {
+        e.preventDefault();
+        openFindBar(true);
+        return;
+      }
+      if (mod && e.key.toLowerCase() === "s") {
+        e.preventDefault();
+        void handleSave();
+      }
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [handleSave, isEditableMarkdown, openFindBar, redo, undo, viewMode]);
+
+  useEffect(() => {
+    if (findBarOpen) {
+      window.requestAnimationFrame(() => findInputRef.current?.focus());
+    }
+  }, [findBarOpen]);
 
   const markdownHostPath = useMemo(() => {
     if (!textualPreview || textualPreview.kind !== "markdown") return "";
@@ -711,6 +1088,24 @@ export function WorkspaceFilePreview({
               ) : null}
             </div>
           </div>
+          {saveToast ? (
+            <div
+              className={`flex shrink-0 items-center gap-1 rounded-md border px-2 py-1 text-[11px] font-medium ${
+                saveToast === "保存失败"
+                  ? "border-rose-500/30 bg-rose-500/10 text-rose-300"
+                  : "border-emerald-500/30 bg-emerald-500/10 text-emerald-300"
+              }`}
+            >
+              {saveToast === "保存失败" ? (
+                <X className="h-3 w-3 shrink-0" strokeWidth={2.5} />
+              ) : (
+                <Check className="h-3 w-3 shrink-0" strokeWidth={2.5} />
+              )}
+              {saveToast}
+            </div>
+          ) : saving ? (
+            <div className="shrink-0 text-[11px] text-text-muted">保存中…</div>
+          ) : null}
           <div className="ml-2 flex shrink-0 items-center gap-1">
             {isEditableMarkdown ? (
               <>
@@ -740,13 +1135,54 @@ export function WorkspaceFilePreview({
                 >
                   <Pencil className="h-4 w-4" strokeWidth={1.5} />
                 </button>
+                {viewMode === "edit" ? (
+                  <>
+                    <button
+                      type="button"
+                      className="flex h-7 w-7 items-center justify-center rounded-md text-text-muted transition-colors hover:bg-surface-hover hover:text-text-strong disabled:cursor-not-allowed disabled:opacity-40"
+                      onClick={undo}
+                      disabled={!canUndo}
+                      title="撤销 (⌘Z)"
+                    >
+                      <Undo2 className="h-4 w-4" strokeWidth={1.5} />
+                    </button>
+                    <button
+                      type="button"
+                      className="flex h-7 w-7 items-center justify-center rounded-md text-text-muted transition-colors hover:bg-surface-hover hover:text-text-strong disabled:cursor-not-allowed disabled:opacity-40"
+                      onClick={redo}
+                      disabled={!canRedo}
+                      title="重做 (⌘⇧Z)"
+                    >
+                      <Redo2 className="h-4 w-4" strokeWidth={1.5} />
+                    </button>
+                    <button
+                      type="button"
+                      className={`flex h-7 w-7 items-center justify-center rounded-md transition-colors ${
+                        findBarOpen
+                          ? "bg-surface-hover text-text-strong"
+                          : "text-text-muted hover:bg-surface-hover hover:text-text-strong"
+                      }`}
+                      onClick={() => {
+                        if (findBarOpen) {
+                          setFindBarOpen(false);
+                          return;
+                        }
+                        openFindBar(true);
+                      }}
+                      title="查找替换 (⌘F)"
+                      aria-pressed={findBarOpen}
+                    >
+                      <Search className="h-4 w-4" strokeWidth={1.5} />
+                    </button>
+                  </>
+                ) : null}
                 <div className="h-4 w-px bg-border opacity-50" />
               </>
             ) : null}
             <button
               type="button"
               className="flex h-7 w-7 items-center justify-center rounded-md text-text-muted transition-colors hover:bg-surface-hover hover:text-text-strong"
-              onClick={onCopy}
+              onClick={handleCopyClick}
               title={
                 preview.kind === "text" || preview.kind === "markdown" || preview.kind === "code"
                   ? "复制文件内容"
@@ -770,6 +1206,91 @@ export function WorkspaceFilePreview({
             </button>
           </div>
         </div>
+        {isEditableMarkdown && viewMode === "edit" && findBarOpen ? (
+          <div className="flex shrink-0 flex-wrap items-start gap-2 border-b border-border bg-surface-panel px-4 py-2">
+            <textarea
+              ref={findInputRef}
+              rows={findInputRows}
+              value={findText}
+              onChange={(e) => {
+                setFindText(e.target.value);
+                setFindStatus(null);
+              }}
+              onPaste={(e) => {
+                e.preventDefault();
+                const pasted = e.clipboardData.getData("text/plain");
+                setFindText(selectionToFindQuery(pasted));
+                setFindStatus(null);
+              }}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" && !e.shiftKey) {
+                  e.preventDefault();
+                  runFind(!e.shiftKey);
+                }
+                if (e.key === "Escape") {
+                  e.preventDefault();
+                  setFindBarOpen(false);
+                }
+              }}
+              placeholder="查找（支持多行，含前后换行）"
+              autoCorrect="off"
+              autoComplete="off"
+              autoCapitalize="off"
+              spellCheck={false}
+              className="min-w-[120px] flex-1 resize-none rounded-md border border-[var(--border-subtle)] bg-surface-base px-2.5 py-1.5 font-mono text-xs leading-relaxed text-text-primary outline-none focus:border-cyan-500/50"
+              aria-label="查找内容"
+            />
+            <textarea
+              rows={replaceInputRows}
+              value={replaceText}
+              onChange={(e) => setReplaceText(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" && !e.shiftKey) {
+                  e.preventDefault();
+                  runReplaceOne();
+                }
+              }}
+              placeholder="替换为（Shift+Enter 换行）"
+              autoCorrect="off"
+              autoComplete="off"
+              autoCapitalize="off"
+              spellCheck={false}
+              className="min-w-[120px] flex-1 resize-none rounded-md border border-[var(--border-subtle)] bg-surface-base px-2.5 py-1.5 font-mono text-xs leading-relaxed text-text-primary outline-none focus:border-cyan-500/50"
+              aria-label="替换内容"
+            />
+            <button
+              type="button"
+              className="rounded-md border border-[var(--border-subtle)] bg-surface-popover px-2.5 py-1.5 text-xs text-text-primary transition-colors hover:bg-surface-hover"
+              onClick={() => runFind(false)}
+            >
+              上一个
+            </button>
+            <button
+              type="button"
+              className="rounded-md border border-[var(--border-subtle)] bg-surface-popover px-2.5 py-1.5 text-xs text-text-primary transition-colors hover:bg-surface-hover"
+              onClick={() => runFind(true)}
+            >
+              下一个
+            </button>
+            <button
+              type="button"
+              className="rounded-md border border-[var(--border-subtle)] bg-surface-popover px-2.5 py-1.5 text-xs text-text-primary transition-colors hover:bg-surface-hover"
+              onClick={runReplaceOne}
+            >
+              替换
+            </button>
+            <button
+              type="button"
+              className="rounded-md border border-[var(--border-subtle)] bg-surface-popover px-2.5 py-1.5 text-xs text-text-primary transition-colors hover:bg-surface-hover"
+              onClick={runReplaceAll}
+            >
+              全部替换
+            </button>
+            {findStatus ? (
+              <span className="w-full text-[11px] text-text-muted">{findStatus}</span>
+            ) : null}
+          </div>
+        ) : null}
         <div className="preview-scrollbar min-h-0 flex-1 overflow-auto bg-surface-base">
           {preview.kind === "image" ? (
             <ImagePreviewBody
@@ -810,6 +1331,7 @@ export function WorkspaceFilePreview({
               editContent={editContent}
               onEditContentChange={setEditContent}
               markdownHostPath={markdownHostPath}
+              textareaRef={editTextareaRef}
             />
           )}
         </div>
@@ -817,13 +1339,9 @@ export function WorkspaceFilePreview({
           <div className="shrink-0 border-t border-border bg-rose-500/10 px-4 py-2 text-xs text-rose-300">
             保存失败：{saveError}
           </div>
-        ) : saving ? (
+        ) : isEditableMarkdown && viewMode === "edit" && isDirty && !saving ? (
           <div className="shrink-0 border-t border-border bg-surface-panel px-4 py-2 text-xs text-text-muted">
-            正在保存…
-          </div>
-        ) : isEditableMarkdown && viewMode === "edit" && isDirty ? (
-          <div className="shrink-0 border-t border-border bg-surface-panel px-4 py-2 text-xs text-text-muted">
-            有未保存修改；切回预览将自动保存
+            有未保存修改 · ⌘S 保存 · ⌘Z 撤销 · ⌘F 查找替换
           </div>
         ) : null}
         {truncated ? (

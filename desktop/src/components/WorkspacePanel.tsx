@@ -635,9 +635,9 @@ export function WorkspacePanel({
     setFilePreview(preview);
   };
 
-  const handlePreviewCopy = () => {
+  const handlePreviewCopy = (text?: string) => {
     if (!filePreview) return;
-    void navigator.clipboard.writeText(previewCopyText(filePreview));
+    void navigator.clipboard.writeText(text ?? previewCopyText(filePreview));
     setPreviewCopied(true);
     window.setTimeout(() => setPreviewCopied(false), 1800);
   };
