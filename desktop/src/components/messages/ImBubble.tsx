@@ -552,16 +552,16 @@ export function ImBubble({
             <div
               className={
                 compactAssistant && noBubbleBorder
-                  ? `relative min-w-0 w-full overflow-x-auto overflow-y-visible px-3 py-0 text-[var(--agx-chat-im-body-font-size)] ${assistantBodyLeadingClass}`
+                  ? `relative min-w-0 w-full px-3 py-0 text-[var(--agx-chat-im-body-font-size)] ${assistantBodyLeadingClass}`
                   : isUser
-                    ? "agx-im-user-bubble relative min-w-0 w-fit max-w-full overflow-x-auto overflow-y-visible rounded-xl border px-3 py-3 text-[var(--agx-chat-im-body-font-size)] leading-relaxed rounded-tr-[4px]"
+                    ? "agx-im-user-bubble relative min-w-0 w-fit max-w-full rounded-xl border px-3 py-3 text-[var(--agx-chat-im-body-font-size)] leading-relaxed rounded-tr-[4px]"
                     : isMetaPendingWork
-                      ? `relative min-w-0 w-full overflow-x-auto overflow-y-visible px-3 py-0 text-[var(--agx-chat-im-body-font-size)] ${assistantBodyLeadingClass}`
+                      ? `relative min-w-0 w-full px-3 py-0 text-[var(--agx-chat-im-body-font-size)] ${assistantBodyLeadingClass}`
                     : groupIdentityLayout
-                      ? `relative min-w-0 w-full overflow-x-auto overflow-y-visible px-3 pt-1 pb-0 text-[var(--agx-chat-im-body-font-size)] ${assistantBodyLeadingClass}`
+                      ? `relative min-w-0 w-full px-3 pt-1 pb-0 text-[var(--agx-chat-im-body-font-size)] ${assistantBodyLeadingClass}`
                       : (message.references?.length ?? 0) > 0
-                        ? `relative min-w-0 w-full overflow-x-auto overflow-y-visible px-3 pt-1 pb-0 text-[var(--agx-chat-im-body-font-size)] ${assistantBodyLeadingClass}`
-                        : `relative min-w-0 w-full overflow-x-auto overflow-y-visible px-3 pt-3 pb-0 text-[var(--agx-chat-im-body-font-size)] ${assistantBodyLeadingClass}`
+                        ? `relative min-w-0 w-full px-3 pt-1 pb-0 text-[var(--agx-chat-im-body-font-size)] ${assistantBodyLeadingClass}`
+                        : `relative min-w-0 w-full px-3 pt-3 pb-0 text-[var(--agx-chat-im-body-font-size)] ${assistantBodyLeadingClass}`
               }
               style={compactAssistant && noBubbleBorder ? undefined : userBubbleStyle}
             >
