@@ -9021,6 +9021,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
 
   const toggleWorkspaceSidePanel = () => {
     if (!compactSidePanels) {
+      if (!pane.taskspacePanelOpen) closeHistoryPanelOnly();
       cycleSidePanel(pane.id, "workspace");
       return;
     }
@@ -9045,6 +9046,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
 
   const toggleMemoryGraphSidePanel = () => {
     if (!compactSidePanels) {
+      if (!pane.memoryGraphOpen) closeHistoryPanelOnly();
       togglePaneMemoryGraph(pane.id);
       return;
     }
@@ -9076,14 +9078,6 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
     togglePaneHistory(pane.id);
   };
 
-  // 历史浮层不再挤占布局，但打开其它面板时仍顺带收起，保持视觉整洁（AC-6）。
-  useEffect(() => {
-    if (!pane.historyOpen) return;
-    if (pane.taskspacePanelOpen || pane.memoryGraphOpen || pane.membersPanelOpen || pane.spawnsColumnOpen) {
-      closeHistoryPanelOnly();
-    }
-  }, [pane.taskspacePanelOpen, pane.memoryGraphOpen, pane.membersPanelOpen, pane.spawnsColumnOpen, pane.historyOpen]);
-
   // 窗口尺寸变化后锚点坐标会过期，直接收起浮层比重新定位更简单可靠。
   useEffect(() => {
     if (!pane.historyOpen) return;
@@ -9094,6 +9088,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
 
   const toggleMembersSidePanel = () => {
     if (!compactSidePanels) {
+      if (!pane.membersPanelOpen) closeHistoryPanelOnly();
       cycleSidePanel(pane.id, "members");
       return;
     }
@@ -9125,6 +9120,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
       return;
     }
     if (!compactSidePanels) {
+      closeHistoryPanelOnly();
       setSpawnsColumnOpen(pane.id, true);
       return;
     }
