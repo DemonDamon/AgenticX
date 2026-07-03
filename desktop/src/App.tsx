@@ -34,7 +34,7 @@ import {
   normalizeAllProviders,
   normalizeProviderEntry,
 } from "./utils/model-options";
-import { avatarPreloadKey, fetchAvatarsWithStartupRetry, fetchSessionsWithStartupRetry, mapAvatarsFromApi, runSplashCorePreload } from "./utils/splash-preload-core";
+import { avatarPreloadKey, fetchAvatarsWithStartupRetry, fetchGroupsWithStartupRetry, fetchSessionsWithStartupRetry, mapAvatarsFromApi, runSplashCorePreload } from "./utils/splash-preload-core";
 
 const WORKSPACE_STATE_STORAGE_KEY = "agx-workspace-state-v1";
 
@@ -300,6 +300,7 @@ export function App() {
   const sessionInitDoneRef = useRef(false);
   const workspaceHydratedRef = useRef(false);
   const startupRendererReadyRef = useRef(false);
+  const studioReadyRefetchDoneRef = useRef(false);
   const [windowResizing, setWindowResizing] = useState(false);
   const [responsiveStage, setResponsiveStage] = useState<0 | 1 | 2>(0);
   const [startupOptimizing, setStartupOptimizing] = useState(true);
@@ -594,6 +595,22 @@ export function App() {
         }
       }
 
+      // Fallback when splash preload did not populate group chats (timeout / disabled).
+      // Groups previously had no startup fallback at all (unlike avatars/sessions),
+      // so a slow backend cold start left the 群聊 sidebar empty permanently.
+      if (useAppStore.getState().groups.length === 0) {
+        try {
+          const groups = await fetchGroupsWithStartupRetry(() =>
+            window.agenticxDesktop.listGroups()
+          );
+          if (groups.length > 0) {
+            useAppStore.getState().setGroups(groups);
+          }
+        } catch (err) {
+          console.error("[App init] preload groups fallback failed:", err);
+        }
+      }
+
       let recovered = false;
       try {
         const raw = readScopedLocalStorage(WORKSPACE_STATE_STORAGE_KEY);
@@ -856,6 +873,70 @@ export function App() {
     })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [ensureMcpAutoConnectOnStartup, refreshMcpStatus]);
+
+  useEffect(() => {
+    const off = window.agenticxDesktop.onStudioReady(() => {
+      if (studioReadyRefetchDoneRef.current) return;
+      studioReadyRefetchDoneRef.current = true;
+
+      void (async () => {
+        const state = useAppStore.getState();
+
+        if (state.avatars.length === 0) {
+          try {
+            const avatars = await fetchAvatarsWithStartupRetry(() =>
+              window.agenticxDesktop.listAvatars()
+            );
+            if (avatars.length > 0) {
+              useAppStore.getState().setAvatars(avatars);
+            }
+          } catch (err) {
+            console.error("[App] studio-ready avatars refetch failed:", err);
+          }
+        }
+
+        if (useAppStore.getState().groups.length === 0) {
+          try {
+            const groups = await fetchGroupsWithStartupRetry(() =>
+              window.agenticxDesktop.listGroups()
+            );
+            if (groups.length > 0) {
+              useAppStore.getState().setGroups(groups);
+            }
+          } catch (err) {
+            console.error("[App] studio-ready groups refetch failed:", err);
+          }
+        }
+
+        const latest = useAppStore.getState();
+        const activePane = latest.panes.find((pane) => pane.id === latest.activePaneId);
+        const avatarId = activePane?.avatarId ?? null;
+        const sessionsKey = avatarPreloadKey(avatarId);
+        const existingRaw = latest.preloadedSessionsByAvatarKey[sessionsKey];
+        const sessionsEmpty = !Array.isArray(existingRaw) || existingRaw.length === 0;
+        if (sessionsEmpty) {
+          try {
+            const rawSessions = await fetchSessionsWithStartupRetry(
+              (key) => window.agenticxDesktop.listSessions(key),
+              avatarId ?? undefined
+            );
+            const normalized = rawSessions.filter((item) =>
+              isSessionItemMatchingAvatar(item as SessionListItem, avatarId ?? undefined)
+            );
+            if (normalized.length > 0) {
+              useAppStore.getState().applyCorePreloadBundle({
+                sessionsKey,
+                sessions: normalized,
+              });
+            }
+          } catch (err) {
+            console.error("[App] studio-ready sessions refetch failed:", err);
+          }
+        }
+      })();
+    });
+    return off;
+  }, []);
 
   useEffect(() => {
     if (!workspaceHydratedRef.current) return;

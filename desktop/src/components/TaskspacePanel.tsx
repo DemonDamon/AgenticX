@@ -1,6 +1,7 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { MouseEvent as ReactMouseEvent } from "react";
 import type { Taskspace } from "../store";
+import { formatTaskspaceAddError } from "../utils/taskspace-errors";
 import { createResizeRafScheduler } from "../utils/resize-raf";
 import Prism from "prismjs";
 import "prismjs/components/prism-bash";
@@ -187,7 +188,7 @@ export function TaskspacePanel({
     });
     setAdding(false);
     if (!result.ok) {
-      setErrorText(result.error ?? "添加 Taskspace 失败");
+      setErrorText(formatTaskspaceAddError(result.error));
       return;
     }
     setErrorText("");

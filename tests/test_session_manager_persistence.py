@@ -8,7 +8,10 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+
 from agenticx.memory.session_store import SessionStore
+from agenticx.studio import session_manager as session_manager_module
 from agenticx.studio.session_manager import SessionManager
 
 
@@ -725,4 +728,26 @@ def test_tail_limit_keeps_last_user_turn_for_stall_policy(tmp_path: Path) -> Non
         str(m.get("role", "")) == "assistant" and "final answer" in str(m.get("content", ""))
         for m in page["messages"]
     )
+
+
+def test_add_taskspace_respects_configurable_limit(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    store = SessionStore(tmp_path / "sessions.sqlite")
+    sessions_root = tmp_path / "sessions"
+    taskspaces_root = tmp_path / "taskspaces"
+
+    monkeypatch.setattr(session_manager_module, "_resolve_max_taskspaces", lambda: 3)
+
+    manager = SessionManager()
+    manager._session_store = store
+    manager._sessions_root = str(sessions_root)
+    manager._taskspaces_root = str(taskspaces_root)
+
+    sid = "taskspace-limit-session"
+    manager.create(session_id=sid)
+
+    manager.add_taskspace(sid, path=str(tmp_path / "ws-a"), label="a")
+    manager.add_taskspace(sid, path=str(tmp_path / "ws-b"), label="b")
+
+    with pytest.raises(ValueError, match=r"taskspace limit reached \(3\)"):
+        manager.add_taskspace(sid, path=str(tmp_path / "ws-c"), label="c")
 

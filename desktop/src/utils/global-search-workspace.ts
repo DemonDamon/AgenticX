@@ -1,5 +1,6 @@
 import { useAppStore } from "../store";
 import { isPaneAwaitingFreshSession } from "./pane-fresh-session";
+import { formatTaskspaceAddError } from "./taskspace-errors";
 
 export type GlobalSearchWorkspaceResult = { ok: boolean; error?: string };
 
@@ -47,7 +48,7 @@ export async function addFolderToActiveWorkspace(folderPath: string): Promise<Gl
     label,
   });
   if (!result.ok) {
-    return { ok: false, error: result.error ?? "添加工作区失败" };
+    return { ok: false, error: formatTaskspaceAddError(result.error) };
   }
   window.dispatchEvent(new CustomEvent("near:global-search:workspace-added", { detail: { paneId: pane.id } }));
   return { ok: true };

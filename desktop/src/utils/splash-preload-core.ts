@@ -277,6 +277,36 @@ export async function fetchAvatarsWithStartupRetry(
   return [];
 }
 
+/** Bounded backoff retry for startup group-chat fetch when splash preload missed.
+ *
+ * Mirrors ``fetchAvatarsWithStartupRetry``: splash preload's overall race
+ * (``SPLASH_PRELOAD_OVERALL_MS``) can time out before a slow backend cold start
+ * finishes (e.g. very large ``~/.agenticx/sessions`` / ``taskspaces`` trees), in
+ * which case ``applySplashPreloadToStore`` never runs and ``store.groups`` stays
+ * empty. Unlike avatars/sessions, groups previously had no App.tsx fallback at
+ * all, so a slow cold start left the 群聊 sidebar permanently empty even after
+ * the backend became healthy.
+ */
+export async function fetchGroupsWithStartupRetry(
+  listGroups: () => Promise<{ ok?: boolean; groups?: unknown[] } | null | undefined>
+): Promise<GroupChat[]> {
+  const maxAttempts = 5;
+  for (let attempt = 0; attempt < maxAttempts; attempt++) {
+    try {
+      const resp = await listGroups();
+      if (resp?.ok && Array.isArray(resp.groups)) {
+        return mapGroupsFromApi(resp.groups);
+      }
+    } catch (err) {
+      console.warn(`[App init] listGroups attempt ${attempt + 1} failed:`, err);
+    }
+    if (attempt < maxAttempts - 1) {
+      await sleep(400 * (attempt + 1));
+    }
+  }
+  return [];
+}
+
 /** Bounded backoff retry for session list fetch at startup. */
 export async function fetchSessionsWithStartupRetry(
   listSessions: (avatarId?: string) => Promise<{ ok?: boolean; sessions?: unknown[] } | null | undefined>,

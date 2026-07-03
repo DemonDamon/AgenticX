@@ -63,6 +63,7 @@ type AutomationConfig = {
 
 type RuntimeConfig = {
   max_tool_rounds: number;
+  max_taskspaces: number;
 };
 
 type AutomationFrequencyData =
@@ -429,6 +430,7 @@ declare global {
       getBackendScopeSync: () => string;
       getConnectionModeSync: () => "local" | "remote";
       onConnectionModeChanged: (callback: () => void) => () => void;
+      onStudioReady: (callback: () => void) => () => void;
       appRelaunch: () => Promise<{ ok: boolean }>;
       focusModeEnter: () => Promise<{ ok: boolean; alreadyActive?: boolean; error?: string }>;
       focusModeExit: () => Promise<{ ok: boolean; alreadyInactive?: boolean; error?: string }>;
@@ -562,6 +564,7 @@ declare global {
       loadRuntimeConfig: () => Promise<{
         ok: boolean;
         max_tool_rounds: number;
+        max_taskspaces: number;
         auto_resume_on_exhaustion: boolean;
         max_auto_resumes: number;
         stall_detect_silence_seconds?: number;
@@ -581,6 +584,7 @@ declare global {
       }>;
       saveRuntimeConfig: (payload: {
         max_tool_rounds?: number;
+        max_taskspaces?: number;
         auto_resume_on_exhaustion?: boolean;
         max_auto_resumes?: number;
         max_tokens_per_session?: number;

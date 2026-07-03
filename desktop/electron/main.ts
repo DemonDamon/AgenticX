@@ -1825,6 +1825,11 @@ function notifyRendererConnectionModeChanged(): void {
   mainWindow.webContents.send("agx-connection-mode-changed");
 }
 
+function notifyRendererStudioReady(): void {
+  if (!mainWindow || mainWindow.isDestroyed()) return;
+  mainWindow.webContents.send("agx-studio-ready");
+}
+
 async function pingRemoteServer(config: ResolvedRemoteConfig, timeoutMs = 10000): Promise<boolean> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
@@ -1936,6 +1941,7 @@ function markStudioReady(): void {
   for (const cb of queued) {
     try { cb(); } catch { /* noop */ }
   }
+  notifyRendererStudioReady();
   // Only arm splash force-show after backend is ready so the main window
   // does not appear with empty avatars/sessions during cold start.
   scheduleSplashForceShowFallback(showMainWindowSafely);
@@ -5135,9 +5141,13 @@ function registerIpc(): void {
         ? (rt as Record<string, unknown>)
         : {};
       const val = Number(raw.max_tool_rounds ?? 30);
+      const taskspacesVal = Number(raw.max_taskspaces ?? 20);
       return {
         ok: true,
         max_tool_rounds: Number.isFinite(val) ? Math.max(10, Math.min(120, val)) : 30,
+        max_taskspaces: Number.isFinite(taskspacesVal)
+          ? Math.max(5, Math.min(100, Math.round(taskspacesVal)))
+          : 20,
         auto_resume_on_exhaustion: Boolean(raw.auto_resume_on_exhaustion ?? false),
         max_auto_resumes: Math.max(0, Math.min(10, Number(raw.max_auto_resumes ?? 3))),
         ...readStallNudgeRuntime(raw),
@@ -5150,6 +5160,7 @@ function registerIpc(): void {
         ok: false,
         error: String(err),
         max_tool_rounds: 30,
+        max_taskspaces: 20,
         auto_resume_on_exhaustion: false,
         max_auto_resumes: 3,
         stall_detect_silence_seconds: 90,
@@ -5183,6 +5194,11 @@ function registerIpc(): void {
         const v = Number(p.max_tool_rounds);
         if (!Number.isFinite(v)) return { ok: false, error: "max_tool_rounds must be a number" };
         merged.max_tool_rounds = Math.max(10, Math.min(120, Math.round(v)));
+      }
+      if (p.max_taskspaces !== undefined) {
+        const v = Number(p.max_taskspaces);
+        if (!Number.isFinite(v)) return { ok: false, error: "max_taskspaces must be a number" };
+        merged.max_taskspaces = Math.max(5, Math.min(100, Math.round(v)));
       }
       if (p.auto_resume_on_exhaustion !== undefined) {
         merged.auto_resume_on_exhaustion = Boolean(p.auto_resume_on_exhaustion);

@@ -63,7 +63,10 @@ import { SkillPuzzleIcon } from "./icons/SkillPuzzleIcon";
 import { PendingProposalsList } from "./settings/skills/PendingProposalsList";
 import {
   RuntimeConfigSection,
+  RUNTIME_DEFAULT_TASKSPACES,
+  RUNTIME_MAX_TASKSPACES,
   RUNTIME_MAX_TOOL_ROUNDS,
+  RUNTIME_MIN_TASKSPACES,
   RUNTIME_MIN_TOOL_ROUNDS,
 } from "./automation/RuntimeConfigSection";
 import {
@@ -2219,6 +2222,7 @@ const ToolsTab = forwardRef<ToolsTabHandle, Record<string, never>>(function Tool
   const [installing, setInstalling] = useState<Record<string, ToolInstallState>>({});
   const [search, setSearch] = useState("");
   const [maxToolRounds, setMaxToolRounds] = useState(60);
+  const [maxTaskspaces, setMaxTaskspaces] = useState(RUNTIME_DEFAULT_TASKSPACES);
   const [stallNudge, setStallNudge] = useState<StallNudgeConfig>({
     stall_detect_silence_seconds: 90,
     stall_auto_nudge_enabled: false,
@@ -2268,6 +2272,11 @@ const ToolsTab = forwardRef<ToolsTabHandle, Record<string, never>>(function Tool
         const n = Number.isFinite(raw) ? raw : 60;
         setMaxToolRounds(
           Math.max(RUNTIME_MIN_TOOL_ROUNDS, Math.min(RUNTIME_MAX_TOOL_ROUNDS, n)),
+        );
+        const taskspacesRaw = Number(runtimeResult.max_taskspaces);
+        const taskspacesN = Number.isFinite(taskspacesRaw) ? taskspacesRaw : RUNTIME_DEFAULT_TASKSPACES;
+        setMaxTaskspaces(
+          Math.max(RUNTIME_MIN_TASKSPACES, Math.min(RUNTIME_MAX_TASKSPACES, taskspacesN)),
         );
         const detectSec = Math.max(
           30,
@@ -2398,6 +2407,7 @@ const ToolsTab = forwardRef<ToolsTabHandle, Record<string, never>>(function Tool
         }
         const rtRes = await window.agenticxDesktop.saveRuntimeConfig({
           max_tool_rounds: maxToolRounds,
+          max_taskspaces: maxTaskspaces,
           stall_detect_silence_seconds: stallNudge.stall_detect_silence_seconds,
           stall_auto_nudge_enabled: stallNudge.stall_auto_nudge_enabled,
           stall_auto_nudge_after_seconds: afterSec,
@@ -2424,7 +2434,7 @@ const ToolsTab = forwardRef<ToolsTabHandle, Record<string, never>>(function Tool
         return bridge.save();
       },
     }),
-    [loading, maxToolRounds, saveBashDefaultTimeout, stallNudge, tokenBudget, unattended],
+    [loading, maxToolRounds, maxTaskspaces, saveBashDefaultTimeout, stallNudge, tokenBudget, unattended],
   );
 
   const startInstall = async (tool: ToolStatusItem) => {
@@ -2487,8 +2497,10 @@ const ToolsTab = forwardRef<ToolsTabHandle, Record<string, never>>(function Tool
         仅部分工具提供可折叠的「高级设置」；其余工具仅支持启用/停用。窗口底部「退出」会一并提交本页 bash 默认超时、最大工具轮数与 Claude Code Bridge 配置。
       </div>
       <RuntimeConfigSection
-        value={maxToolRounds}
-        onChange={setMaxToolRounds}
+        maxToolRounds={maxToolRounds}
+        onMaxToolRoundsChange={setMaxToolRounds}
+        maxTaskspaces={maxTaskspaces}
+        onMaxTaskspacesChange={setMaxTaskspaces}
         disabled={loading}
       />
       <TokenBudgetConfigSection value={tokenBudget} onChange={setTokenBudget} disabled={loading} />

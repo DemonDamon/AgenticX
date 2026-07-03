@@ -30,6 +30,11 @@ import {
   type WorkspacePreviewQuotePayload,
   type WorkspacePreview,
 } from "./workspace/workspace-preview-types";
+import {
+  formatTaskspaceAddError,
+  isTaskspaceAtLimit,
+} from "../utils/taskspace-errors";
+import { RUNTIME_DEFAULT_TASKSPACES } from "./automation/RuntimeConfigSection";
 
 type TaskspaceFile = {
   name: string;
@@ -156,6 +161,11 @@ export function WorkspacePanel({
 
   const [taskspaces, setTaskspaces] = useState<Taskspace[]>([]);
   const [workspaceLoadedOnce, setWorkspaceLoadedOnce] = useState(false);
+  // Bumped when the backend signals studio-ready so the no-session recovery
+  // effects re-run: on a slow cold start the first listSessions fires before
+  // the backend answers, and without this the workspace would stay in its
+  // empty state until an unrelated re-render.
+  const [recoverTick, setRecoverTick] = useState(0);
   const [loading, setLoading] = useState(false);
   const [errorText, setErrorText] = useState("");
   const [expandedDirs, setExpandedDirs] = useState<Set<string>>(new Set());
@@ -169,6 +179,7 @@ export function WorkspacePanel({
   const [newPath, setNewPath] = useState("");
   const [newLabel, setNewLabel] = useState("");
   const [adding, setAdding] = useState(false);
+  const [maxTaskspaces, setMaxTaskspaces] = useState(RUNTIME_DEFAULT_TASKSPACES);
   const [ctxMenu, setCtxMenu] = useState<CtxMenuState | null>(null);
   const [hostPlatform, setHostPlatform] = useState<string | null>(null);
   const [fileSearchQuery, setFileSearchQuery] = useState("");
@@ -192,6 +203,28 @@ export function WorkspacePanel({
     () => taskspaces.find((item) => item.id === activeTaskspaceId) ?? taskspaces[0] ?? null,
     [taskspaces, activeTaskspaceId]
   );
+  const taskspaceAtLimit = useMemo(
+    () => isTaskspaceAtLimit(taskspaces, maxTaskspaces),
+    [taskspaces, maxTaskspaces],
+  );
+
+  useEffect(() => {
+    let disposed = false;
+    const loadLimit = async () => {
+      try {
+        const result = await window.agenticxDesktop.loadRuntimeConfig();
+        if (!disposed && result?.ok && Number.isFinite(result.max_taskspaces)) {
+          setMaxTaskspaces(result.max_taskspaces);
+        }
+      } catch {
+        // keep default fallback
+      }
+    };
+    void loadLimit();
+    return () => {
+      disposed = true;
+    };
+  }, []);
 
   const previewTaskspaceRoot = useMemo(() => {
     if (!filePreview) return undefined;
@@ -351,6 +384,17 @@ export function WorkspacePanel({
       .catch(() => setHostPlatform(null));
   }, []);
 
+  // Retry no-session recovery once the backend becomes ready. On a large-data
+  // cold start the first recovery attempt can run before agx serve answers;
+  // bumping recoverTick re-runs the recovery effects so the workspace self-heals
+  // without any manual action.
+  useEffect(() => {
+    const off = window.agenticxDesktop.onStudioReady?.(() => {
+      setRecoverTick((tick) => tick + 1);
+    });
+    return off;
+  }, []);
+
   useEffect(() => {
     const sid = String(sessionId ?? "").trim();
     if (sid) {
@@ -370,7 +414,14 @@ export function WorkspacePanel({
       const listed = await window.agenticxDesktop
         .listSessions(paneAvatarId ?? undefined)
         .catch(() => ({ ok: false, sessions: [] as SessionListItem[] }));
-      if (!listed.ok || !Array.isArray(listed.sessions) || cancelled) return;
+      if (cancelled) return;
+      if (!listed.ok || !Array.isArray(listed.sessions)) {
+        // Backend not ready / errored: end the skeleton so the panel shows a
+        // clear empty state instead of spinning forever. onStudioReady bumps
+        // recoverTick to retry once the backend is up.
+        setWorkspaceLoadedOnce(true);
+        return;
+      }
       const rememberedSid = getRememberedSessionForAvatar(paneAvatarId);
       const rememberedValid =
         !!rememberedSid &&
@@ -381,7 +432,11 @@ export function WorkspacePanel({
         );
       const recentSid = pickMostRecentSessionId(listed.sessions, paneAvatarId);
       const preferredSid = rememberedValid ? rememberedSid ?? undefined : recentSid;
-      if (!preferredSid || cancelled) return;
+      if (cancelled) return;
+      if (!preferredSid) {
+        setWorkspaceLoadedOnce(true);
+        return;
+      }
       fallbackBrowseSessionIdRef.current = preferredSid;
       await loadTaskspaces();
     })();
@@ -389,7 +444,7 @@ export function WorkspacePanel({
       cancelled = true;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [sessionId, awaitingFreshSession, paneAvatarId]);
+  }, [sessionId, awaitingFreshSession, paneAvatarId, recoverTick]);
 
   useEffect(() => {
     if (!sessionId) {
@@ -420,7 +475,14 @@ export function WorkspacePanel({
       const listed = await window.agenticxDesktop
         .listSessions(paneAvatarId ?? undefined)
         .catch(() => ({ ok: false, sessions: [] as SessionListItem[] }));
-      if (!listed.ok || !Array.isArray(listed.sessions)) return;
+      if (cancelled) return;
+      if (!listed.ok || !Array.isArray(listed.sessions)) {
+        // Backend not ready / errored: end the skeleton so the panel shows a
+        // clear empty state instead of spinning forever. onStudioReady bumps
+        // recoverTick to retry once the backend is up.
+        setWorkspaceLoadedOnce(true);
+        return;
+      }
       const rememberedSid = getRememberedSessionForAvatar(paneAvatarId);
       const rememberedValid =
         !!rememberedSid &&
@@ -431,7 +493,13 @@ export function WorkspacePanel({
         );
       const recentSid = pickMostRecentSessionId(listed.sessions, paneAvatarId);
       const preferredSid = rememberedValid ? rememberedSid ?? undefined : recentSid;
-      if (!preferredSid || cancelled) return;
+      if (cancelled) return;
+      if (!preferredSid) {
+        // No recoverable session for this pane: end the skeleton and let the
+        // render fall through to the "no session" empty state.
+        setWorkspaceLoadedOnce(true);
+        return;
+      }
       if (isPaneAwaitingFreshSession(paneId)) return;
       const latestPane = useAppStore.getState().panes.find((item) => item.id === paneId);
       const latestSid = String(latestPane?.sessionId ?? "").trim();
@@ -442,7 +510,7 @@ export function WorkspacePanel({
     return () => {
       cancelled = true;
     };
-  }, [sessionId, paneAvatarId, paneId, setPaneSessionId]);
+  }, [sessionId, paneAvatarId, paneId, setPaneSessionId, recoverTick]);
 
 
   useEffect(() => {
@@ -523,7 +591,7 @@ export function WorkspacePanel({
     });
     setAdding(false);
     if (!result.ok) {
-      setErrorText(result.error ?? "添加工作区失败");
+      setErrorText(formatTaskspaceAddError(result.error, maxTaskspaces));
       return;
     }
     setErrorText("");
@@ -897,10 +965,15 @@ export function WorkspacePanel({
               <button
                 className={`agx-topbar-btn !px-[5px] ${showAddForm ? "agx-topbar-btn--active" : ""}`}
                 onClick={() => {
+                  if (taskspaceAtLimit) {
+                    setErrorText(formatTaskspaceAddError(`taskspace limit reached (${maxTaskspaces})`, maxTaskspaces));
+                    return;
+                  }
                   setShowAddForm((prev) => !prev);
                   setErrorText("");
                 }}
-                title="新增工作区"
+                title={taskspaceAtLimit ? `已达工作区上限（${taskspaces.length}/${maxTaskspaces}）` : "新增工作区"}
+                disabled={taskspaceAtLimit}
               >
                 <FolderPlus className="h-4 w-4" strokeWidth={1.8} />
               </button>
@@ -943,7 +1016,12 @@ export function WorkspacePanel({
               className="border-b border-border px-3 py-2"
               style={tintColor ? { backgroundColor: tintColor } : undefined}
             >
-              <div className="mb-2 text-[13px] font-medium text-text-subtle">新增工作区</div>
+              <div className="mb-2 flex items-center justify-between gap-2 text-[13px] font-medium text-text-subtle">
+                <span>新增工作区</span>
+                <span className="text-[11px] font-normal tabular-nums text-text-faint">
+                  已用 {taskspaces.length}/{maxTaskspaces}
+                </span>
+              </div>
               <input
                 value={newPath}
                 onChange={(e) => setNewPath(e.target.value)}
@@ -981,10 +1059,10 @@ export function WorkspacePanel({
                 <button
                   className="rounded px-2 py-1 text-[13px] transition disabled:opacity-50"
                   style={{ background: "var(--ui-btn-primary-bg)", color: "var(--ui-btn-primary-text)" }}
-                  disabled={adding}
+                  disabled={adding || taskspaceAtLimit}
                   onClick={() => void addTaskspace(newPath, newLabel)}
                 >
-                  {adding ? "添加中..." : "确认添加"}
+                  {adding ? "添加中..." : taskspaceAtLimit ? "已达上限" : "确认添加"}
                 </button>
               </div>
             </div>
@@ -999,7 +1077,11 @@ export function WorkspacePanel({
             </div>
           ) : null}
           {workspaceLoadedOnce && !loading && taskspaces.length === 0 ? (
-            <div className="text-[13px] text-text-faint">暂无工作区</div>
+            <div className="text-[13px] text-text-faint">
+              {getBrowseSessionId()
+                ? "暂无工作区"
+                : "选择或新建一个对话后，这里会显示工作区文件"}
+            </div>
           ) : null}
           {!loading && filteredFiles !== null ? (
             filteredFiles.length === 0 ? (

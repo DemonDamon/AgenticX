@@ -21,7 +21,34 @@ from pathlib import Path
 from dataclasses import dataclass, field
 from typing import Any, Awaitable, Callable, Dict, List, Optional
 
+from agenticx.cli.config_manager import ConfigManager
+
 _log = logging.getLogger(__name__)
+
+DEFAULT_MAX_TASKSPACES = 20
+MIN_MAX_TASKSPACES = 5
+MAX_MAX_TASKSPACES = 100
+
+
+def _resolve_max_taskspaces() -> int:
+    raw = str(os.getenv("AGX_MAX_TASKSPACES", "")).strip()
+    if not raw:
+        try:
+            global_data = ConfigManager._load_yaml(ConfigManager.GLOBAL_CONFIG_PATH)
+            project_data = ConfigManager._load_yaml(ConfigManager.PROJECT_CONFIG_PATH)
+            merged = ConfigManager._deep_merge(global_data, project_data)
+            cfg_val: Any = ConfigManager._get_nested(merged, "runtime.max_taskspaces")
+        except Exception:
+            cfg_val = None
+        if cfg_val is not None:
+            raw = str(cfg_val).strip()
+    if not raw:
+        raw = str(DEFAULT_MAX_TASKSPACES)
+    try:
+        value = int(raw)
+    except ValueError:
+        value = DEFAULT_MAX_TASKSPACES
+    return max(MIN_MAX_TASKSPACES, min(MAX_MAX_TASKSPACES, value))
 
 _THINK_BLOCK_RE = re.compile(
     r"<think>.*?</think>", re.IGNORECASE | re.DOTALL
@@ -410,8 +437,10 @@ class SessionManager:
         self._session_store = SessionStore()
         self._sessions_root = os.path.join(os.path.expanduser("~"), ".agenticx", "sessions")
         self._taskspaces_root = os.path.join(os.path.expanduser("~"), ".agenticx", "taskspaces")
-        self.max_taskspaces = 5
         self._schedule_fts_backfill()
+
+    def _taskspace_limit(self) -> int:
+        return _resolve_max_taskspaces()
 
     def _schedule_fts_backfill(self) -> None:
         """Fire-and-forget: index historical messages.json files on first startup."""
@@ -531,6 +560,13 @@ class SessionManager:
             raw = "idle"
         if self.should_interrupt(session_id):
             return "interrupted"
+        # Fast path: a plain ``idle`` session always normalizes back to ``idle``
+        # regardless of the on-disk last-turn check below (both the completed and
+        # non-completed branches return ``idle`` when raw == "idle"). Short-circuit
+        # here so session listing does NOT read the full messages.json for every
+        # idle session — this was the dominant O(n) cold-start disk cost.
+        if raw == "idle":
+            return "idle"
         if raw == "running":
             # Stale ``running`` metadata (finalize persist lag, pane switch, or
             # hub-mode off-loop timing) must not keep the history spinner after the
@@ -783,17 +819,25 @@ class SessionManager:
                 chat_history = (
                     getattr(managed.studio_session, "chat_history", None) if managed else None
                 )
+                row_indexed_ts = float(indexed_message_ts.get(sid, 0) or 0)
+                row_summary_ts = float(summary_activity_ts.get(sid, 0) or 0)
                 disk_message_ts = 0.0
-                if managed is None:
+                # Only fall back to a per-file messages.json read when neither the
+                # batched FTS index nor the summary store supplied an activity
+                # timestamp. When indexed_message_ts is present it equals the same
+                # max message timestamp a disk read would derive, so this preserves
+                # `_resolve_list_activity_at`'s result while removing the dominant
+                # O(n) cold-start disk I/O (see FR-2 profile).
+                if managed is None and row_indexed_ts <= 0 and row_summary_ts <= 0:
                     disk_message_ts = self._last_message_activity_from_disk(sid)
                 row["updated_at"] = self._resolve_list_activity_at(
                     chat_history=chat_history,
                     metadata_updated_at=float(row.get("updated_at") or 0),
                     metadata_created_at=float(row.get("created_at") or 0),
-                    indexed_message_ts=float(indexed_message_ts.get(sid, 0) or 0),
+                    indexed_message_ts=row_indexed_ts,
                     metadata_last_activity_at=float(row.get("last_activity_at") or 0),
                     disk_message_ts=disk_message_ts,
-                    summary_activity_ts=float(summary_activity_ts.get(sid, 0) or 0),
+                    summary_activity_ts=row_summary_ts,
                     live_touch_at=float(managed.updated_at) if managed is not None else 0.0,
                 )
         result.sort(
@@ -1338,8 +1382,9 @@ class SessionManager:
             if item.get("path") == resolved_path:
                 return dict(item)
         globals_rows = self._load_global_taskspaces(scope_key=scope_key)
-        if len(globals_rows) >= max(0, self.max_taskspaces - 1):
-            raise ValueError(f"taskspace limit reached ({self.max_taskspaces})")
+        limit = self._taskspace_limit()
+        if len(globals_rows) >= max(0, limit - 1):
+            raise ValueError(f"taskspace limit reached ({limit})")
         clean_label = (label or "").strip() or Path(resolved_path).name or "taskspace"
         taskspace = {
             "id": f"ts-{uuid.uuid4().hex[:8]}",
@@ -2381,7 +2426,17 @@ class SessionManager:
             "path": str(resolved),
         }] + [item for item in managed.taskspaces if item.get("id") != "default"]
 
-    def _sync_taskspaces_with_global(self, managed: ManagedSession) -> None:
+    def _sync_taskspaces_with_global(
+        self, managed: ManagedSession, *, limit: int | None = None
+    ) -> None:
+        """Re-derive a session's taskspace list from the scope's global config.
+
+        ``limit`` should be precomputed by the caller when syncing multiple sessions
+        in a loop (see ``_sync_all_sessions_from_global``): resolving the limit reads
+        and parses ``config.yaml`` from disk, so recomputing it per-session (or per-row)
+        turns an O(1) lookup into O(sessions x rows) disk I/O.
+        """
+        effective_limit = limit if limit is not None else self._taskspace_limit()
         self._ensure_default_taskspace(managed)
         globals_rows = self._load_global_taskspaces(
             scope_key=self._taskspace_scope_key_for_managed(managed)
@@ -2403,18 +2458,19 @@ class SessionManager:
                 }
             )
             seen_paths.add(path)
-            if len(merged) >= self.max_taskspaces:
+            if len(merged) >= effective_limit:
                 break
         managed.taskspaces = merged
 
     def _sync_all_sessions_from_global(self, scope_key: str | None = None) -> None:
+        limit = self._taskspace_limit()
         for managed in self._sessions.values():
             if (
                 scope_key is not None
                 and self._taskspace_scope_key_for_managed(managed) != scope_key
             ):
                 continue
-            self._sync_taskspaces_with_global(managed)
+            self._sync_taskspaces_with_global(managed, limit=limit)
 
     def _global_taskspaces_path(self) -> str:
         return os.path.join(self._taskspaces_root, "global_workspaces.json")
@@ -2454,7 +2510,7 @@ class SessionManager:
                 }
             )
             seen_paths.add(resolved_path)
-            if len(rows) >= max(0, self.max_taskspaces - 1):
+            if len(rows) >= max(0, self._taskspace_limit() - 1):
                 break
         return rows
 
@@ -2593,6 +2649,7 @@ class SessionManager:
         self._sync_taskspaces_with_global(managed)
 
     def _sanitize_taskspaces(self, session_id: str, payload: Any) -> list[dict[str, str]]:
+        limit = self._taskspace_limit()
         rows: list[dict[str, str]] = []
         if isinstance(payload, list):
             for item in payload:
@@ -2611,7 +2668,7 @@ class SessionManager:
                         "path": resolved_path,
                     }
                 )
-                if len(rows) >= self.max_taskspaces:
+                if len(rows) >= limit:
                     break
         if not rows:
             return []
@@ -2623,7 +2680,7 @@ class SessionManager:
                 continue
             dedup.append(row)
             seen_paths.add(row_path)
-            if len(dedup) >= self.max_taskspaces:
+            if len(dedup) >= limit:
                 break
         return dedup
 

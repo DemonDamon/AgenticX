@@ -76,6 +76,11 @@ contextBridge.exposeInMainWorld("agenticxDesktop", {
     ipcRenderer.on("agx-connection-mode-changed", handler);
     return () => ipcRenderer.removeListener("agx-connection-mode-changed", handler);
   },
+  onStudioReady: (callback: () => void): (() => void) => {
+    const handler = () => callback();
+    ipcRenderer.on("agx-studio-ready", handler);
+    return () => ipcRenderer.removeListener("agx-studio-ready", handler);
+  },
   appRelaunch: async (): Promise<{ ok: boolean }> => ipcRenderer.invoke("app-relaunch"),
   focusModeEnter: async (): Promise<{ ok: boolean; alreadyActive?: boolean; error?: string }> =>
     ipcRenderer.invoke("focus-mode-enter"),
@@ -255,7 +260,12 @@ contextBridge.exposeInMainWorld("agenticxDesktop", {
   listSessions: async (avatarId?: string) => ipcRenderer.invoke("list-sessions", avatarId),
   interruptSession: async (sessionId: string) => ipcRenderer.invoke("interrupt-session", sessionId),
   loadRuntimeConfig: async () => ipcRenderer.invoke("load-runtime-config"),
-  saveRuntimeConfig: async (payload: { max_tool_rounds?: number; auto_resume_on_exhaustion?: boolean; max_auto_resumes?: number }) =>
+  saveRuntimeConfig: async (payload: {
+    max_tool_rounds?: number;
+    max_taskspaces?: number;
+    auto_resume_on_exhaustion?: boolean;
+    max_auto_resumes?: number;
+  }) =>
     ipcRenderer.invoke("save-runtime-config", payload),
   searchSessions: async (payload: { q: string; avatarId?: string }) => {
     const params = new URLSearchParams();
