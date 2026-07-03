@@ -787,6 +787,70 @@ function paneModelPickerPanelStyle(anchor: DOMRect): CSSProperties {
   };
 }
 
+/** Viewport-safe fixed positioning for the 历史对话 anchored popover (workbuddy-style, not a persistent side column). */
+const HISTORY_POPOVER_MARGIN = 8;
+const HISTORY_POPOVER_GAP = 6;
+const HISTORY_POPOVER_WIDTH = 360;
+const HISTORY_POPOVER_MIN_MAX_HEIGHT = 240;
+const HISTORY_POPOVER_MAX_HEIGHT_CAP = 560;
+
+function historyPanelPopoverStyle(anchor: DOMRect): CSSProperties {
+  const vw = window.innerWidth;
+  const vh = window.innerHeight;
+  const panelWidth = Math.min(HISTORY_POPOVER_WIDTH, vw - HISTORY_POPOVER_MARGIN * 2);
+
+  // History button sits at the top-right of the pane toolbar; align the popover's
+  // right edge with the button's right edge so it opens toward the pane, not off-screen.
+  let left = anchor.right - panelWidth;
+  if (left + panelWidth > vw - HISTORY_POPOVER_MARGIN) {
+    left = vw - HISTORY_POPOVER_MARGIN - panelWidth;
+  }
+  if (left < HISTORY_POPOVER_MARGIN) {
+    left = HISTORY_POPOVER_MARGIN;
+  }
+
+  const spaceAbove = anchor.top - HISTORY_POPOVER_MARGIN - HISTORY_POPOVER_GAP;
+  const spaceBelow = vh - anchor.bottom - HISTORY_POPOVER_MARGIN - HISTORY_POPOVER_GAP;
+  const preferAbove = spaceAbove >= HISTORY_POPOVER_MIN_MAX_HEIGHT && spaceAbove > spaceBelow;
+
+  // 用 maxHeight（而非确定 height）让浮层按内容自然撑高、内容较少时不留空白；容器本身是
+  // flex 列（display:flex + flexDirection:column），标题/搜索区 shrink-0 固定不动，
+  // 只有内部会话列表区（flex-1 min-h-0 overflow-y-auto）随内容超限时滚动——flex 的
+  // 弹性分配机制在"容器高度来自 max-height clamp"时依然是确定值，不依赖百分比高度解析，
+  // 因此不会出现"限高但滚动条不出现"的问题。
+  if (preferAbove) {
+    const maxHeight = Math.min(
+      HISTORY_POPOVER_MAX_HEIGHT_CAP,
+      Math.max(HISTORY_POPOVER_MIN_MAX_HEIGHT, Math.floor(spaceAbove))
+    );
+    return {
+      left,
+      width: panelWidth,
+      maxHeight,
+      display: "flex",
+      flexDirection: "column",
+      bottom: vh - anchor.top + HISTORY_POPOVER_GAP,
+      top: "auto",
+      right: "auto",
+    };
+  }
+
+  const maxHeight = Math.min(
+    HISTORY_POPOVER_MAX_HEIGHT_CAP,
+    Math.max(HISTORY_POPOVER_MIN_MAX_HEIGHT, Math.floor(spaceBelow))
+  );
+  return {
+    left,
+    width: panelWidth,
+    maxHeight,
+    display: "flex",
+    flexDirection: "column",
+    top: anchor.bottom + HISTORY_POPOVER_GAP,
+    bottom: "auto",
+    right: "auto",
+  };
+}
+
 function PaneModelPicker({ paneId }: { paneId: string }) {
   const settings = useAppStore((s) => s.settings);
   const setPaneModel = useAppStore((s) => s.setPaneModel);
@@ -2509,6 +2573,9 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
     }
     return 220;
   });
+  /** 历史对话按钮 ref + 打开时的锚点位置，用于渲染 workbuddy 风格的浮层（不复用 historyWidth，浮层宽度固定）。 */
+  const historyButtonRef = useRef<HTMLButtonElement | null>(null);
+  const [historyAnchorRect, setHistoryAnchorRect] = useState<DOMRect | null>(null);
   const paneRef = useRef<HTMLDivElement | null>(null);
   const [paneWidth, setPaneWidth] = useState(0);
 
@@ -8865,24 +8932,23 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
   })();
 
   useEffect(() => {
+    // 历史面板已改为不挤占布局的锚定浮层（不再计入互斥占位），此处仅在工作区/记忆图谱/
+    // 成员列表/Spawns 之间做单选互斥。
     if (!compactSidePanels) return;
     const p = pane;
     const stacked =
       Number(!!p.taskspacePanelOpen) +
-      Number(!!p.historyOpen) +
       Number(!!p.memoryGraphOpen) +
       Number(!!p.membersPanelOpen) +
       Number(!!p.spawnsColumnOpen);
     if (stacked <= 1) return;
-    let keep: "workspace" | "history" | "memory-graph" | "members" | "spawns" = "workspace";
+    let keep: "workspace" | "memory-graph" | "members" | "spawns" = "workspace";
     if (p.taskspacePanelOpen) keep = "workspace";
-    else if (p.historyOpen) keep = "history";
     else if (p.memoryGraphOpen) keep = "memory-graph";
     else if (p.membersPanelOpen) keep = "members";
     else keep = "spawns";
     const desired = {
       taskspacePanelOpen: keep === "workspace",
-      historyOpen: keep === "history",
       memoryGraphOpen: keep === "memory-graph",
       membersPanelOpen: keep === "members",
       spawnsColumnOpen: keep === "spawns",
@@ -8892,7 +8958,6 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
       if (!row) return s;
       if (
         row.taskspacePanelOpen === desired.taskspacePanelOpen &&
-        row.historyOpen === desired.historyOpen &&
         row.memoryGraphOpen === desired.memoryGraphOpen &&
         row.membersPanelOpen === desired.membersPanelOpen &&
         row.spawnsColumnOpen === desired.spawnsColumnOpen
@@ -8907,7 +8972,6 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
     compactSidePanels,
     pane.id,
     pane.taskspacePanelOpen,
-    pane.historyOpen,
     pane.memoryGraphOpen,
     pane.membersPanelOpen,
     pane.spawnsColumnOpen,
@@ -8952,6 +9016,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
     useAppStore.setState((s) => ({
       panes: s.panes.map((row) => (row.id !== pane.id ? row : { ...row, historyOpen: false })),
     }));
+    setHistoryAnchorRect(null);
   };
 
   const toggleWorkspaceSidePanel = () => {
@@ -9002,27 +9067,30 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
   };
 
   const toggleHistorySidePanel = () => {
-    if (!compactSidePanels) {
-      togglePaneHistory(pane.id);
-      return;
+    const opening = !pane.historyOpen;
+    if (opening && historyButtonRef.current) {
+      setHistoryAnchorRect(historyButtonRef.current.getBoundingClientRect());
+    } else if (!opening) {
+      setHistoryAnchorRect(null);
     }
-    useAppStore.setState((s) => ({
-      panes: s.panes.map((p) => {
-        if (p.id !== pane.id) return p;
-        const opening = !p.historyOpen;
-        return opening
-          ? {
-              ...p,
-              historyOpen: true,
-              memoryGraphOpen: false,
-              taskspacePanelOpen: false,
-              membersPanelOpen: false,
-              spawnsColumnOpen: false,
-            }
-          : { ...p, historyOpen: false };
-      }),
-    }));
+    togglePaneHistory(pane.id);
   };
+
+  // 历史浮层不再挤占布局，但打开其它面板时仍顺带收起，保持视觉整洁（AC-6）。
+  useEffect(() => {
+    if (!pane.historyOpen) return;
+    if (pane.taskspacePanelOpen || pane.memoryGraphOpen || pane.membersPanelOpen || pane.spawnsColumnOpen) {
+      closeHistoryPanelOnly();
+    }
+  }, [pane.taskspacePanelOpen, pane.memoryGraphOpen, pane.membersPanelOpen, pane.spawnsColumnOpen, pane.historyOpen]);
+
+  // 窗口尺寸变化后锚点坐标会过期，直接收起浮层比重新定位更简单可靠。
+  useEffect(() => {
+    if (!pane.historyOpen) return;
+    const onResize = () => closeHistoryPanelOnly();
+    window.addEventListener("resize", onResize);
+    return () => window.removeEventListener("resize", onResize);
+  }, [pane.historyOpen]);
 
   const toggleMembersSidePanel = () => {
     if (!compactSidePanels) {
@@ -9195,6 +9263,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
               <Share2 className="h-[18px] w-[18px]" strokeWidth={1.8} />
             </button>
             <button
+              ref={historyButtonRef}
               className={`agx-topbar-btn !px-[5px] ${pane.historyOpen ? "agx-topbar-btn--active" : ""}`}
               onClick={toggleHistorySidePanel}
               title="切换历史面板"
@@ -10075,24 +10144,8 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
           <MemoryGraphPanel pane={pane} onClose={closeMemoryGraphPanelOnly} tintColor={paneTint} />
         </div>
       ) : null}
-      {!compactSidePanels && pane.historyOpen ? (
-        <div className="relative h-full shrink-0 overflow-hidden border-l border-border" style={{ width: historyWidth }}>
-          <div
-            className="group absolute -left-[3px] top-0 z-20 h-full w-2 cursor-col-resize"
-            onMouseDown={startResizeHistory}
-            title="拖拽调整历史面板宽度"
-          >
-            <div className="mx-auto h-full w-px bg-[var(--ui-accent-divider)] transition-all duration-200 group-hover:w-[2px] group-hover:bg-[var(--ui-btn-primary-bg)]" />
-          </div>
-          <HistoryPanelBoundary key={`hpb-${pane.id}-${pane.historyOpen}-inline`}>
-            <SessionHistoryPanel pane={pane} onClose={closeHistoryPanelOnly} tintColor={paneTint} />
-          </HistoryPanelBoundary>
-        </div>
-      ) : null}
-
       {compactSidePanels &&
       (workspacePanelOpen ||
-        pane.historyOpen ||
         pane.memoryGraphOpen ||
         (isGroupPane && pane.membersPanelOpen) ||
         pane.spawnsColumnOpen) ? (
@@ -10202,25 +10255,29 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
               <MemoryGraphPanel pane={pane} onClose={closeMemoryGraphPanelOnly} tintColor={paneTint} />
             </div>
           ) : null}
-          {pane.historyOpen ? (
-            <div
-              className="pointer-events-auto absolute bottom-0 right-0 top-10 z-50 shrink-0 overflow-hidden border-l border-border bg-surface-base shadow-[6px_0_24px_rgba(0,0,0,0.28)]"
-              style={{ width: overlayHistoryWidth, WebkitAppRegion: "no-drag" } as CSSProperties}
-            >
-              <div
-                className="group absolute -left-[3px] top-0 z-20 h-full w-2 cursor-col-resize"
-                onMouseDown={startResizeHistory}
-                title="拖拽调整历史面板宽度"
-              >
-                <div className="mx-auto h-full w-px bg-[var(--ui-accent-divider)] transition-all duration-200 group-hover:w-[2px] group-hover:bg-[var(--ui-btn-primary-bg)]" />
-              </div>
-              <HistoryPanelBoundary key={`hpb-${pane.id}-${pane.historyOpen}-overlay`}>
-                <SessionHistoryPanel pane={pane} onClose={closeHistoryPanelOnly} tintColor={paneTint} />
-              </HistoryPanelBoundary>
-            </div>
-          ) : null}
         </>
       ) : null}
+      {pane.historyOpen && historyAnchorRect
+        ? createPortal(
+            <>
+              <div
+                aria-hidden
+                role="presentation"
+                className="fixed inset-0 z-[9998]"
+                onClick={closeHistoryPanelOnly}
+              />
+              <div
+                className="fixed z-[9999] overflow-hidden rounded-xl border border-border bg-surface-panel shadow-xl backdrop-blur-xl"
+                style={historyPanelPopoverStyle(historyAnchorRect)}
+              >
+                <HistoryPanelBoundary key={`hpb-${pane.id}-${pane.historyOpen}-popover`}>
+                  <SessionHistoryPanel pane={pane} tintColor={paneTint} />
+                </HistoryPanelBoundary>
+              </div>
+            </>,
+            document.body
+          )
+        : null}
       <ForwardPicker
         open={forwardPickerOpen}
         currentSessionId={pane.sessionId}

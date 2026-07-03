@@ -1,4 +1,4 @@
-import { ChevronRight, PanelRightClose, ListChecks, MessageSquareMore, Smartphone } from "lucide-react";
+import { ChevronRight, ListChecks, MessageSquareMore, Smartphone } from "lucide-react";
 import { memo, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { useAppStore, type ChatPane, type Message } from "../store";
@@ -34,7 +34,6 @@ function timeAgo(ts: number): string {
 
 type Props = {
   pane: ChatPane;
-  onClose?: () => void;
   tintColor?: string;
 };
 
@@ -295,7 +294,7 @@ function normalizeSessionRows(input: unknown): SessionRow[] {
   return sortSessionRows(rows);
 }
 
-export const SessionHistoryPanel = memo(function SessionHistoryPanel({ pane, onClose, tintColor }: Props) {
+export const SessionHistoryPanel = memo(function SessionHistoryPanel({ pane, tintColor }: Props) {
   const sessionCatalogRevision = useAppStore((s) => s.sessionCatalogRevision);
   const sessionHistoryHints = useAppStore((s) => s.sessionHistoryHints);
   const clearSessionHistoryHint = useAppStore((s) => s.clearSessionHistoryHint);
@@ -1330,10 +1329,10 @@ export const SessionHistoryPanel = memo(function SessionHistoryPanel({ pane, onC
 
   return (
     <div
-      className="agx-session-history-panel flex h-full w-full shrink-0 flex-col bg-surface-card"
+      className="agx-session-history-panel flex min-h-0 flex-1 w-full flex-col bg-surface-card"
       style={tintColor ? { backgroundColor: tintColor } : undefined}
     >
-      <div className="flex flex-col">
+      <div className="flex shrink-0 flex-col">
         <div className="flex min-w-0 items-center gap-1 px-3 py-2">
           <div className="min-w-0 flex-1 font-medium text-text-strong">
             <FitText maxSize={13} minSize={10} title={title}>
@@ -1391,15 +1390,6 @@ export const SessionHistoryPanel = memo(function SessionHistoryPanel({ pane, onC
                 </button>
               </>
             )}
-            {onClose ? (
-              <button
-                className="agx-topbar-btn !px-[5px]"
-                onClick={onClose}
-                title="关闭历史会话"
-              >
-                <PanelRightClose className="h-4 w-4" strokeWidth={1.8} />
-              </button>
-            ) : null}
           </div>
         </div>
         <div className="px-2 pb-1.5">
