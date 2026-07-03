@@ -1,4 +1,4 @@
-import { contextBridge, ipcRenderer } from "electron";
+import { contextBridge, ipcRenderer, webUtils } from "electron";
 
 function parseArgvFlag(prefix: string, fallback: string): string {
   for (const arg of process.argv) {
@@ -323,6 +323,13 @@ contextBridge.exposeInMainWorld("agenticxDesktop", {
       }),
     }),
   chooseDirectory: async () => ipcRenderer.invoke("choose-directory"),
+  getPathForFile: (file: File): string => {
+    try {
+      return webUtils.getPathForFile(file) || "";
+    } catch {
+      return "";
+    }
+  },
   listTaskspaceFiles: async (payload: { sessionId: string; taskspaceId: string; path?: string }) =>
     desktopApiFetch(
       `/api/taskspace/files?session_id=${encodeURIComponent(payload.sessionId)}&taskspace_id=${encodeURIComponent(payload.taskspaceId)}&path=${encodeURIComponent(payload.path || ".")}`

@@ -1647,6 +1647,12 @@ function isLikelyTextFile(file: File): boolean {
   ].some((ext) => lower.endsWith(ext));
 }
 
+/** Office/PDF documents the frontend cannot parse inline; backend skills (liteparse/docx) handle them via absolute path. */
+function isReferenceableDocumentFile(file: File): boolean {
+  const lower = file.name.toLowerCase();
+  return [".doc", ".docx", ".ppt", ".pptx", ".xls", ".xlsx", ".pdf"].some((ext) => lower.endsWith(ext));
+}
+
 function formatFileSize(size: number): string {
   if (size < 1024) return `${size}B`;
   if (size < 1024 * 1024) return `${(size / 1024).toFixed(1)}KB`;
@@ -6489,6 +6495,24 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
       };
       reader.readAsText(file);
       return;
+    }
+
+    if (isReferenceableDocumentFile(file)) {
+      const absolutePath = window.agenticxDesktop?.getPathForFile?.(file) || "";
+      if (absolutePath) {
+        setContextFiles((prev) => ({
+          ...prev,
+          [key]: {
+            name: file.name,
+            size: file.size,
+            mimeType: file.type || "application/octet-stream",
+            status: "ready",
+            content: `[附件] ${file.name}`,
+            sourcePath: absolutePath,
+          },
+        }));
+        return;
+      }
     }
 
     setContextFiles((prev) => ({
