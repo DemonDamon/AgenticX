@@ -3282,6 +3282,14 @@ class AgentRuntime:
                 hook_outcome = await self.hooks.run_before_tool_call(tool_name, arguments, session)
                 if hook_outcome.blocked:
                     blocked_message = hook_outcome.reason or f"工具 {tool_name} 被策略阻止。"
+                    # Emit TOOL_CALL first so the desktop client has a pending card to merge
+                    # the blocked result into (mirrors the normal dispatch path below), rather
+                    # than falling back to a bare, metadata-less tool bubble.
+                    yield RuntimeEvent(
+                        type=EventType.TOOL_CALL.value,
+                        data={"name": tool_name, "arguments": arguments, "tool_call_id": tool_call_id},
+                        agent_id=agent_id,
+                    )
                     messages.append(
                         {
                             "role": "tool",
@@ -3299,9 +3307,25 @@ class AgentRuntime:
                         }
                     )
                     synced_session_message_count = len(session.agent_messages)
+                    if not _is_system_trigger:
+                        session.chat_history.append(
+                            {
+                                "role": "tool",
+                                "content": blocked_message,
+                                "tool_call_id": tool_call_id,
+                                "tool_name": tool_name,
+                                "tool_args": arguments,
+                                "tool_status": "error",
+                            }
+                        )
                     yield RuntimeEvent(
                         type=EventType.ERROR.value,
                         data={"text": blocked_message, "tool_call_id": tool_call_id},
+                        agent_id=agent_id,
+                    )
+                    yield RuntimeEvent(
+                        type=EventType.TOOL_RESULT.value,
+                        data={"name": tool_name, "result": blocked_message, "tool_call_id": tool_call_id},
                         agent_id=agent_id,
                     )
                     continue

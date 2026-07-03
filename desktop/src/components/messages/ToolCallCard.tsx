@@ -9,9 +9,11 @@ import {
   ListChecks,
   Plug,
   Search,
+  ShieldAlert,
   Terminal,
   Wrench,
 } from "lucide-react";
+
 import { Shimmer } from "../ds/Shimmer";
 import { ToolOutputStream } from "./ToolOutputStream";
 import { SkillPatchPreviewCard } from "./SkillPatchPreviewCard";
@@ -23,6 +25,7 @@ import {
 } from "./skill-manage-preview";
 import { parseWidgetPayload } from "./widget-preview";
 import { openExternalUrl } from "../../utils/open-external";
+import { isHookBlockedToolMessage } from "../../utils/hook-block-message";
 
 type Props = {
   message: Message;
@@ -202,6 +205,7 @@ export function ToolCallCard({
   onSkillManageApply,
 }: Props) {
   const normalizedTerms = useMemo(() => normalizeHighlightTerms(highlightTerms), [highlightTerms]);
+  const isHookBlocked = useMemo(() => isHookBlockedToolMessage(message), [message.content, message.toolStatus]);
   const widgetPayload = useMemo(() => {
     if ((message.toolName ?? "").trim() !== "show_widget") return null;
     return parseWidgetPayload(message.content);
@@ -234,10 +238,12 @@ export function ToolCallCard({
       </div>
     );
   }
-  const Icon = pickToolIcon(toolName || extractToolSummary(message.content).split(/\s/)[0] || "tool");
+  const Icon = isHookBlocked
+    ? ShieldAlert
+    : pickToolIcon(toolName || extractToolSummary(message.content).split(/\s/)[0] || "tool");
   const status = message.toolStatus;
   const hasStream = (message.toolStreamLines?.length ?? 0) > 0;
-  const hasDetail = message.content.length > 0 || hasStream;
+  const hasDetail = !isHookBlocked && (message.content.length > 0 || hasStream);
   const skillPreviewPayload = useMemo(() => {
     if ((message.toolName ?? "").trim() !== "skill_manage") return null;
     return parseSkillPatchPreviewPayload(message.content);
@@ -247,12 +253,20 @@ export function ToolCallCard({
     return parseSkillManageError(message.content);
   }, [message.toolName, message.content]);
 
-  const titleEl =
-    status === "running" || status === "pending" ? (
-      <Shimmer text={title} className="text-[13px] font-medium" />
-    ) : (
-      <span className="text-[13px] font-medium text-text-subtle">{title}</span>
-    );
+  const iconColorClass = isHookBlocked ? "text-amber-400" : iconTone(status);
+
+  const titleEl = isHookBlocked ? (
+    <span className="inline-flex min-w-0 flex-1 items-baseline gap-1.5 truncate">
+      <span className="min-w-0 truncate text-[13px] font-medium text-text-subtle">{title}</span>
+      <span className="shrink-0 rounded-[4px] bg-amber-500/15 px-1.5 py-0.5 text-[10px] font-medium leading-none text-amber-400">
+        Hook 拦截
+      </span>
+    </span>
+  ) : status === "running" || status === "pending" ? (
+    <Shimmer text={title} className="text-[13px] font-medium" />
+  ) : (
+    <span className="text-[13px] font-medium text-text-subtle">{title}</span>
+  );
 
   const sec = message.toolElapsedSec;
   const metaRight =
@@ -305,7 +319,7 @@ export function ToolCallCard({
           ) : null}
         </div>
       ) : null}
-      {message.content && !skillPreviewPayload && !skillManageError && !widgetPayload ? (
+      {message.content && !isHookBlocked && !skillPreviewPayload && !skillManageError && !widgetPayload ? (
         <span className="break-all whitespace-pre-wrap">
           {renderHighlightedText(message.content, normalizedTerms)}
         </span>
@@ -320,7 +334,11 @@ export function ToolCallCard({
       : variant === "flat"
         ? "w-full min-w-0 overflow-hidden text-[13px] text-text-muted"
         : `w-full min-w-0 overflow-hidden rounded-lg border bg-surface-card text-[13px] text-text-muted transition ${
-            selected ? "border-[rgba(var(--theme-color-rgb,6,182,212),0.6)]" : "border-border"
+            selected
+              ? "border-[rgba(var(--theme-color-rgb,6,182,212),0.6)]"
+              : isHookBlocked
+                ? "border-amber-500/30"
+                : "border-border"
           }`;
 
   const shell =
@@ -341,7 +359,7 @@ export function ToolCallCard({
             disabled={!hasDetail}
           >
             <span className="inline-flex h-5 w-5 shrink-0 items-center justify-center rounded bg-transparent">
-              <Icon className={`h-3 w-3 ${iconTone(status)}`} aria-hidden />
+              <Icon className={`h-3 w-3 ${iconColorClass}`} aria-hidden />
             </span>
             <span className="min-w-0 shrink truncate text-left">{titleEl}</span>
             {metaRight}
@@ -367,7 +385,7 @@ export function ToolCallCard({
           disabled={!hasDetail}
         >
           <span className="flex h-[20px] w-[20px] shrink-0 items-center justify-center" aria-hidden>
-            <Icon className={`h-3.5 w-3.5 ${iconTone(status)}`} aria-hidden />
+            <Icon className={`h-3.5 w-3.5 ${iconColorClass}`} aria-hidden />
           </span>
           <span className="flex min-w-0 flex-1 items-center gap-1.5">
             <span className="min-w-0 flex-1 truncate text-left">{titleEl}</span>
@@ -405,7 +423,7 @@ export function ToolCallCard({
               ) : (
                 <ChevronRight className="h-3 w-3 shrink-0 text-text-muted" strokeWidth={2} aria-hidden />
               ))}
-            <Icon className={`h-3.5 w-3.5 shrink-0 ${iconTone(status)}`} />
+            <Icon className={`h-3.5 w-3.5 shrink-0 ${iconColorClass}`} />
             <span className="min-w-0 flex-1 truncate">{titleEl}</span>
             {metaRight}
           </button>

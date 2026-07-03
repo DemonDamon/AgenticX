@@ -18,6 +18,12 @@ import {
   isInterruptedAssistantPlaceholder,
   isNoisyToolStatusMessage,
 } from "../../utils/noisy-chat-messages";
+import {
+  buildHookBlockFriendlyNotice,
+  findNearbyHookBlockedTool,
+  isHookBlockEchoAssistantMessage,
+} from "../../utils/hook-block-message";
+import { HookBlockNoticeLine } from "./HookBlockNoticeLine";
 import { ViewImageInjectCard } from "./ViewImageInjectCard";
 import { BudgetExceededCard } from "./BudgetExceededCard";
 import { WidgetBlock } from "./WidgetBlock";
@@ -254,6 +260,12 @@ export function MessageRenderer({
   if (message.role === "user" || message.role === "assistant") {
     if (isInterruptedAssistantPlaceholder(message)) {
       return null;
+    }
+    if (isHookBlockEchoAssistantMessage(message)) {
+      const messageIndex = allMessages.findIndex((row) => row.id === message.id);
+      const toolCtx =
+        messageIndex >= 0 ? findNearbyHookBlockedTool(allMessages, messageIndex) : null;
+      return <HookBlockNoticeLine text={buildHookBlockFriendlyNotice(toolCtx)} />;
     }
     if (chatStyle === "terminal") {
       return <TerminalLine message={message} badge={assistantBadge} onRevealPath={onRevealPath} onOpenFileReference={onOpenFileReference} />;

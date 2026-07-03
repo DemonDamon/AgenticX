@@ -34,6 +34,7 @@ import {
   isEphemeralStopErrorText,
   isInterruptedAssistantPlaceholder,
 } from "../utils/noisy-chat-messages";
+import { HOOK_BLOCK_RE } from "../utils/hook-block-message";
 import { expandMessagesToTopLevelRows } from "./messages/react-blocks";
 import { shouldHideStreamOverlay, shouldShowMidTurnStreamActivity } from "../utils/stream-overlay-policy";
 import { TurnToolGroupCard } from "./messages/TurnToolGroupCard";
@@ -249,6 +250,7 @@ function formatToolResultMessage(toolNameRaw: unknown, resultRaw: unknown): { co
   return { content: `✅ ${toolName} 结果: ${resultText}`, silent: false };
 }
 
+
 function deriveToolStatusFromResult(resultRaw: unknown): "done" | "error" {
   const t =
     typeof resultRaw === "string"
@@ -263,6 +265,8 @@ function deriveToolStatusFromResult(resultRaw: unknown): "done" | "error" {
   if (/^\s*ERROR:/i.test(t)) return "error";
   const m = t.match(/exit_code=(\d+)/);
   if (m && m[1] !== "0") return "error";
+  // Hook-blocked tool calls should be treated as errors, not done
+  if (HOOK_BLOCK_RE.test(t)) return "error";
   return "done";
 }
 
@@ -636,7 +640,8 @@ export function ChatView({ onOpenConfirm, onOpenClarification, onSubmitClarifica
     () =>
       messages.filter(
         (item) =>
-          (!item.agentId || item.agentId === "meta") && !isInterruptedAssistantPlaceholder(item),
+          (!item.agentId || item.agentId === "meta")
+          && !isInterruptedAssistantPlaceholder(item)
       ),
     [messages]
   );
@@ -1731,7 +1736,21 @@ export function ChatView({ onOpenConfirm, onOpenClarification, onSubmitClarifica
                     noticeKind,
                   });
                 } else if (!isEphemeralStopErrorText(errText)) {
-                  addMessage("tool", `❌ ${errText}`, "meta");
+                  // Hook-blocked: merge into existing ToolCallCard to avoid duplicate bubble.
+                  const errToolCallId = String(payload.data?.tool_call_id ?? "").trim();
+                  if (HOOK_BLOCK_RE.test(errText) && errToolCallId) {
+                    const merged = updateMessageByToolCallId(errToolCallId, {
+                      content: errText,
+                      toolStatus: "error",
+                      toolResultPreview: errText.slice(0, 120),
+                      toolStreamLines: [],
+                    });
+                    if (!merged) {
+                      addMessage("tool", errText, "meta");
+                    }
+                  } else {
+                    addMessage("tool", `❌ ${errText}`, "meta");
+                  }
                 }
               } else if (isWarning) {
                 addSubAgentEvent(eventAgentId, { type: "warning", content: errText });
