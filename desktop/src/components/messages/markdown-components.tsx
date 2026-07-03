@@ -6,6 +6,7 @@ import { useEffect, useMemo, useState, createContext, useContext } from "react";
 import remarkGfm from "remark-gfm";
 import remarkMath from "remark-math";
 import rehypeKatex from "rehype-katex";
+import remarkForceStrongEmphasis from "./remark-force-strong";
 import { Copy, Check, Quote, Maximize2, ChevronDown, ChevronUp } from "lucide-react";
 import { MermaidBlock } from "./MermaidBlock";
 import { TableBlock } from "./TableBlock";
@@ -490,7 +491,7 @@ function ChatInlineCode({
 }
 
 /** Shared ReactMarkdown `components` map (GFM + Mermaid fenced blocks). */
-export const chatRemarkPlugins = [remarkGfm, remarkMath];
+export const chatRemarkPlugins = [remarkGfm, remarkMath, remarkForceStrongEmphasis];
 export const chatRehypePlugins = [rehypeKatex];
 
 /** Shared ReactMarkdown `components` map (GFM + Mermaid fenced blocks). */
