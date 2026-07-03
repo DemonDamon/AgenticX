@@ -577,6 +577,8 @@ export const chatMarkdownComponents: Partial<Components> = {
       </a>
     );
   },
+  /** GFM `---` — spacing only; visible line is styled out in `.msg-content hr`. */
+  hr: () => <hr aria-hidden />,
 };
 
 /** Settings-panel markdown preview — explicit block styles (no @tailwindcss/typography). */
@@ -629,7 +631,7 @@ export const settingsMarkdownComponents: Partial<Components> = {
       {children}
     </blockquote>
   ),
-  hr: () => <hr className="my-3 border-border" />,
+  hr: () => <hr className="my-3 border-0" aria-hidden />,
   table: chatMarkdownComponents.table,
   td: chatMarkdownComponents.td,
   th: chatMarkdownComponents.th,

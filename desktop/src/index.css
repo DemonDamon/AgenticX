@@ -74,6 +74,13 @@ body {
 .msg-content h2 { @apply text-lg; }
 .msg-content h3 { @apply text-[16px] leading-6; }
 
+/* GFM thematic break (---): UA default hr is a bright inset line on dark bubbles — spacing only. */
+.msg-content hr {
+  border: none;
+  margin: 0.625em 0;
+  height: 0;
+}
+
 /* GFM tables (react-markdown + remark-gfm) — default UA styles are invisible on dark bubbles */
 .msg-content table {
   border-collapse: collapse;
