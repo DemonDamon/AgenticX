@@ -17,6 +17,13 @@
   }
 }
 
+/* 通用旋转 keyframe，供内联 animation style 使用 */
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
 @keyframes agx-working-shimmer {
   0% {
     background-position: 200% 0;

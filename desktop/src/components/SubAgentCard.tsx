@@ -11,20 +11,119 @@ type Props = {
   selected?: boolean;
 };
 
-const statusMap: Record<string, { icon: string; label: string; tone: string }> = {
-  pending: { icon: "⏳", label: "等待中", tone: "text-amber-300" },
-  awaiting_confirm: { icon: "🛂", label: "待确认", tone: "text-orange-300" },
-  awaiting_input: { icon: "❓", label: "等待输入", tone: "text-cyan-300" },
-  running: { icon: "🔄", label: "执行中", tone: "text-cyan-300" },
+const statusMap: Record<string, { icon: string; label: string; toneClass: string }> = {
+  pending: { icon: "⏳", label: "等待中", toneClass: "text-[var(--status-warning)]" },
+  awaiting_confirm: { icon: "🛂", label: "待确认", toneClass: "text-[var(--status-warning)]" },
+  awaiting_input: { icon: "❓", label: "等待输入", toneClass: "text-[var(--kb-citation-fg)]" },
+  running: { icon: "🔄", label: "执行中", toneClass: "text-[var(--kb-citation-fg)]" },
   // FR-2: distinct visual for "paused" (rounds saturated). Amber, not red,
   // to communicate "halted but recoverable" rather than "failed".
-  paused: { icon: "⏸", label: "已暂停（触顶）", tone: "text-amber-300" },
-  completed: { icon: "✅", label: "已完成", tone: "text-emerald-300" },
-  failed: { icon: "❌", label: "失败", tone: "text-rose-300" },
-  cancelled: { icon: "⏹", label: "已中断", tone: "text-text-muted" }
+  paused: { icon: "⏸", label: "已暂停（触顶）", toneClass: "text-[var(--status-warning)]" },
+  completed: { icon: "✅", label: "已完成", toneClass: "text-[var(--status-success)]" },
+  failed: { icon: "❌", label: "失败", toneClass: "text-[var(--status-error)]" },
+  cancelled: { icon: "⏹", label: "已中断", toneClass: "text-text-muted" },
 };
 
+const ACTION_BTN_BASE =
+  "rounded-md border px-2 py-1 text-xs font-medium transition disabled:opacity-40";
+const ACTION_BTN_PRIMARY = `${ACTION_BTN_BASE} border-[var(--ui-btn-primary-border)] bg-[rgba(var(--theme-color-rgb),0.08)] text-[var(--kb-citation-fg)] hover:bg-[rgba(var(--theme-color-rgb),0.14)]`;
+const ACTION_BTN_NEUTRAL = `${ACTION_BTN_BASE} border-[var(--border-strong)] text-text-primary hover:bg-surface-hover`;
+const ACTION_BTN_DANGER = `${ACTION_BTN_BASE} border-[color-mix(in_srgb,var(--status-error)_45%,transparent)] text-[var(--status-error)] hover:bg-[color-mix(in_srgb,var(--status-error)_10%,transparent)]`;
+const ACTION_BTN_SUCCESS = `${ACTION_BTN_BASE} border-[color-mix(in_srgb,var(--status-success)_45%,transparent)] text-[var(--status-success)] hover:bg-[color-mix(in_srgb,var(--status-success)_10%,transparent)]`;
+
 const AUTO_CONFIRM_SECONDS = 8;
+
+/** 高品质旋转弧线 —— 主题色渐变弧 + 外层呼吸光晕，纯 SVG 无依赖 */
+function ArcSpinner({ size = 15, dur = "0.85s" }: { size?: number; dur?: string }) {
+  const r = 5.5;
+  const cx = size / 2;
+  const cy = size / 2;
+  return (
+    <span className="relative inline-flex shrink-0" style={{ width: size, height: size }} aria-hidden>
+      {/* 呼吸外晕 */}
+      <span
+        className="absolute inset-[-2px] rounded-full animate-ping"
+        style={{ background: "rgba(var(--theme-color-rgb), 0.22)", animationDuration: "1.6s" }}
+      />
+      {/* 旋转弧线 SVG */}
+      <svg
+        viewBox={`0 0 ${size} ${size}`}
+        fill="none"
+        style={{ animation: `spin ${dur} linear infinite`, width: size, height: size }}
+      >
+        {/* 轨道底色 */}
+        <circle cx={cx} cy={cy} r={r} stroke="rgba(var(--theme-color-rgb), 0.14)" strokeWidth="1.8" />
+        {/* 发光弧线：约 270° */}
+        <path
+          d={`M ${cx} ${cy - r} A ${r} ${r} 0 0 1 ${cx + r} ${cy}`}
+          stroke="rgba(var(--theme-color-rgb), 1)"
+          strokeWidth="1.8"
+          strokeLinecap="round"
+        />
+        {/* 尾端渐隐弧 */}
+        <path
+          d={`M ${cx + r} ${cy} A ${r} ${r} 0 0 1 ${cx} ${cy + r}`}
+          stroke="rgba(var(--theme-color-rgb), 0.5)"
+          strokeWidth="1.8"
+          strokeLinecap="round"
+        />
+        <path
+          d={`M ${cx} ${cy + r} A ${r} ${r} 0 0 1 ${cx - r} ${cy}`}
+          stroke="rgba(var(--theme-color-rgb), 0.18)"
+          strokeWidth="1.8"
+          strokeLinecap="round"
+        />
+      </svg>
+    </span>
+  );
+}
+
+/** 等待中：慢速弧线，透明度更低 */
+function PendingArcSpinner({ size = 15 }: { size?: number }) {
+  return <ArcSpinner size={size} dur="1.5s" />;
+}
+
+function SubAgentStatusBadge({
+  agentStatus,
+  label,
+  toneClass,
+  icon,
+}: {
+  agentStatus: string;
+  label: string;
+  toneClass: string;
+  icon: string;
+}) {
+  if (agentStatus === "running") {
+    return (
+      <span
+        className="inline-flex items-center gap-1.5 text-xs font-medium"
+        style={{ color: "rgb(var(--theme-color-rgb))" }}
+        aria-live="polite"
+      >
+        <ArcSpinner />
+        {label}
+      </span>
+    );
+  }
+
+  if (agentStatus === "pending") {
+    return (
+      <span
+        className={`inline-flex items-center gap-1.5 text-xs font-medium ${toneClass}`}
+      >
+        <PendingArcSpinner />
+        {label}
+      </span>
+    );
+  }
+
+  return (
+    <span className={`text-xs font-medium ${toneClass}`}>
+      {icon} {label}
+    </span>
+  );
+}
 
 function isThinkingPlaceholderText(text: string): boolean {
   const trimmed = text.trim();
@@ -35,9 +134,15 @@ function isThinkingPlaceholderText(text: string): boolean {
 function ThinkingDots() {
   return (
     <div className="inline-flex items-center gap-1.5">
-      <span className="h-2.5 w-2.5 rounded-full bg-cyan-300 agx-dot-pulse" />
-      <span className="h-2.5 w-2.5 rounded-full bg-cyan-300 agx-dot-pulse" style={{ animationDelay: "0.2s" }} />
-      <span className="h-2.5 w-2.5 rounded-full bg-cyan-300 agx-dot-pulse" style={{ animationDelay: "0.4s" }} />
+      <span className="h-2.5 w-2.5 rounded-full bg-[var(--ui-btn-primary-bg)] agx-dot-pulse" />
+      <span
+        className="h-2.5 w-2.5 rounded-full bg-[var(--ui-btn-primary-bg)] agx-dot-pulse"
+        style={{ animationDelay: "0.2s" }}
+      />
+      <span
+        className="h-2.5 w-2.5 rounded-full bg-[var(--ui-btn-primary-bg)] agx-dot-pulse"
+        style={{ animationDelay: "0.4s" }}
+      />
     </div>
   );
 }
@@ -90,10 +195,10 @@ function ConfirmWithCountdown({
   };
 
   return (
-    <div className="mb-2 rounded-md border border-orange-400/30 bg-orange-500/10 p-2">
+    <div className="mb-2 rounded-md border border-[color-mix(in_srgb,var(--status-warning)_35%,transparent)] bg-[color-mix(in_srgb,var(--status-warning)_10%,transparent)] p-2">
       <div className="mb-1.5 flex items-center justify-between">
-        <span className="text-[11px] font-medium text-orange-200">需要你的确认</span>
-        <span className="text-[10px] text-orange-300/70">
+        <span className="text-[11px] font-medium text-[var(--status-warning)]">需要你的确认</span>
+        <span className="text-[10px] text-text-muted">
           {remaining}s 后自动通过
         </span>
       </div>
@@ -103,19 +208,20 @@ function ConfirmWithCountdown({
       {/* countdown progress bar */}
       <div className="mb-2 h-1 overflow-hidden rounded-full bg-surface-card">
         <div
-          className="h-full rounded-full bg-emerald-400 transition-all duration-1000 ease-linear"
+          className="h-full rounded-full bg-[var(--status-success)] transition-all duration-1000 ease-linear"
           style={{ width: `${pct}%` }}
         />
       </div>
       <div className="flex items-center gap-2">
         <button
-          className="rounded-md bg-emerald-500/80 px-3 py-1 text-xs font-medium text-white transition hover:bg-emerald-400"
+          className="rounded-md px-3 py-1 text-xs font-medium transition hover:opacity-90"
+          style={{ background: "var(--ui-btn-primary-bg)", color: "var(--ui-btn-primary-text)" }}
           onClick={handleApprove}
         >
           通过
         </button>
         <button
-          className="rounded-md bg-rose-500/70 px-3 py-1 text-xs font-medium text-white transition hover:bg-rose-400"
+          className={`${ACTION_BTN_DANGER} px-3 py-1`}
           onClick={handleDeny}
         >
           拒绝
@@ -163,11 +269,21 @@ export function SubAgentCard({
     subAgent.model
       ? (subAgent.provider ? `${subAgent.provider}/${subAgent.model}` : subAgent.model)
       : "";
+  const handleOpenOutputFile = useCallback(async (filePath: string) => {
+    const open = window.agenticxDesktop?.shellOpenPath;
+    if (!open) return;
+    const result = await open(filePath);
+    if (!result.ok) {
+      console.warn("[SubAgentCard] open file failed:", result.error);
+    }
+  }, []);
 
   return (
     <div
       className={`rounded-xl border p-3 transition ${
-        selected ? "border-cyan-400/50 bg-cyan-500/10" : "border-border bg-surface-card"
+        selected
+          ? "border-[var(--ui-btn-primary-border)] bg-[rgba(var(--theme-color-rgb),0.08)]"
+          : "border-border bg-surface-card"
       }`}
     >
       <div className="mb-2 flex items-start justify-between gap-2">
@@ -176,14 +292,17 @@ export function SubAgentCard({
           <div className="text-xs text-text-subtle">{subAgent.role}</div>
           <div className="text-[11px] text-text-faint">ID: {subAgent.id}</div>
           {modelLabel ? (
-            <div className="mt-1 inline-flex max-w-[220px] items-center rounded bg-surface-card-strong px-1.5 py-0.5 text-[10px] text-cyan-200">
+            <div className="mt-1 inline-flex max-w-[220px] items-center rounded border border-[var(--ui-btn-primary-border)] bg-[rgba(var(--theme-color-rgb),0.1)] px-1.5 py-0.5 text-[10px] font-medium text-[var(--kb-citation-fg)]">
               {modelLabel}
             </div>
           ) : null}
         </button>
-        <span className={`text-xs ${status.tone}`}>
-          {status.icon} {status.label}
-        </span>
+        <SubAgentStatusBadge
+          agentStatus={subAgent.status}
+          label={status.label}
+          toneClass={status.toneClass}
+          icon={status.icon}
+        />
       </div>
 
       <div className="mb-2 line-clamp-2 text-xs text-text-subtle">{subAgent.task}</div>
@@ -197,31 +316,37 @@ export function SubAgentCard({
           onConfirmResolve={onConfirmResolve}
         />
       ) : subAgent.status === "awaiting_confirm" ? (
-        <div className="mb-2 rounded-md border border-orange-400/30 bg-orange-500/10 p-2 text-xs text-orange-200">
+        <div className="mb-2 rounded-md border border-[color-mix(in_srgb,var(--status-warning)_35%,transparent)] bg-[color-mix(in_srgb,var(--status-warning)_10%,transparent)] p-2 text-xs text-[var(--status-warning)]">
           等待确认中… 请查看弹窗或稍候
         </div>
       ) : null}
       {subAgent.status === "awaiting_input" ? (
-        <div className="mb-2 rounded-md border border-cyan-400/30 bg-cyan-500/10 p-2 text-xs text-cyan-200">
+        <div className="mb-2 rounded-md border border-[var(--ui-btn-primary-border)] bg-[rgba(var(--theme-color-rgb),0.08)] p-2 text-xs text-[var(--kb-citation-fg)]">
           {subAgent.pendingClarification?.prompt
             ? `等待你的输入：${subAgent.pendingClarification.prompt}`
             : "等待你的输入… 请查看弹窗"}
         </div>
       ) : null}
       {subAgent.resultSummary ? (
-        <div className="mb-2 rounded-md border border-emerald-500/20 bg-emerald-500/5 p-2">
-          <div className="mb-1 text-[11px] text-emerald-300">最终摘要</div>
+        <div className="mb-2 rounded-md border border-[color-mix(in_srgb,var(--status-success)_25%,transparent)] bg-[color-mix(in_srgb,var(--status-success)_6%,transparent)] p-2">
+          <div className="mb-1 text-[11px] font-medium text-[var(--status-success)]">最终摘要</div>
           <div className="max-h-24 overflow-y-auto whitespace-pre-wrap text-xs text-text-primary">
             {subAgent.resultSummary}
           </div>
           {subAgent.outputFiles && subAgent.outputFiles.length > 0 ? (
             <div className="mt-2">
-              <div className="text-[11px] text-text-subtle">产出文件</div>
-              <div className="max-h-20 overflow-y-auto text-[11px] text-cyan-200">
+              <div className="text-[11px] font-medium text-text-primary">产出文件</div>
+              <div className="max-h-20 space-y-0.5 overflow-y-auto">
                 {subAgent.outputFiles.map((path) => (
-                  <div key={path} className="truncate">
+                  <button
+                    key={path}
+                    type="button"
+                    className="block w-full truncate text-left text-[11px] font-medium text-[var(--kb-citation-fg)] underline underline-offset-2 hover:opacity-80"
+                    title={`打开：${path}`}
+                    onClick={() => void handleOpenOutputFile(path)}
+                  >
                     {path}
-                  </div>
+                  </button>
                 ))}
               </div>
             </div>
@@ -231,36 +356,22 @@ export function SubAgentCard({
       {typeof subAgent.progress === "number" ? (
         <div className="mb-2">
           <div className="h-1.5 overflow-hidden rounded bg-surface-card">
-            <div className="h-full bg-cyan-400" style={{ width: `${Math.max(0, Math.min(100, subAgent.progress))}%` }} />
+            <div className="h-full bg-[var(--ui-btn-primary-bg)]" style={{ width: `${Math.max(0, Math.min(100, subAgent.progress))}%` }} />
           </div>
         </div>
       ) : null}
 
-      <div className="flex items-center gap-2">
-        <button
-          className="rounded-md border border-cyan-500/50 px-2 py-1 text-xs text-cyan-200 hover:bg-cyan-500/10"
-          onClick={() => onChat(subAgent.id)}
-        >
+      <div className="flex flex-wrap items-center gap-2">
+        <button className={ACTION_BTN_PRIMARY} onClick={() => onChat(subAgent.id)}>
           对话
         </button>
-        <button
-          className="rounded-md border border-border px-2 py-1 text-xs text-text-muted hover:bg-surface-hover"
-          onClick={() => setExpanded((v) => !v)}
-        >
+        <button className={ACTION_BTN_NEUTRAL} onClick={() => setExpanded((v) => !v)}>
           {expanded ? "收起详情" : "展开详情"}
         </button>
-        <button
-          className="rounded-md border border-rose-400/50 px-2 py-1 text-xs text-rose-200 disabled:opacity-40"
-          onClick={() => onCancel(subAgent.id)}
-          disabled={!canCancel}
-        >
+        <button className={ACTION_BTN_DANGER} onClick={() => onCancel(subAgent.id)} disabled={!canCancel}>
           中断
         </button>
-        <button
-          className="rounded-md border border-emerald-400/50 px-2 py-1 text-xs text-emerald-200 disabled:opacity-40"
-          onClick={() => onRetry(subAgent.id)}
-          disabled={!canRetry}
-        >
+        <button className={ACTION_BTN_SUCCESS} onClick={() => onRetry(subAgent.id)} disabled={!canRetry}>
           重试
         </button>
       </div>
@@ -288,8 +399,8 @@ export function SubAgentCard({
               ))
           )}
           {subAgent.liveOutput?.trim() ? (
-            <div className="mt-2 rounded border border-cyan-500/20 bg-cyan-500/5 p-2">
-              <div className="mb-1 text-[11px] text-cyan-300">实时输出（代码流）</div>
+            <div className="mt-2 rounded border border-[var(--ui-btn-primary-border)] bg-[rgba(var(--theme-color-rgb),0.06)] p-2">
+              <div className="mb-1 text-[11px] font-medium text-[var(--kb-citation-fg)]">实时输出（代码流）</div>
               {isThinkingPlaceholderText(subAgent.liveOutput) ? (
                 <ThinkingDots />
               ) : (
