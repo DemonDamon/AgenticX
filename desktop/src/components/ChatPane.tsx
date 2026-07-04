@@ -7726,7 +7726,8 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
                 if (tok) {
                   const sub = useAppStore.getState().subAgents.find((item) => item.id === eventAgentId);
                   const prev = sub?.liveOutput ?? "";
-                  const next = (prev + tok).slice(-4000);
+                  // Append token; cap at 8000 chars to avoid unbounded growth.
+                  const next = (prev + tok).slice(-8000);
                   updateSubAgent(eventAgentId, { liveOutput: next });
                 }
               }
@@ -7814,6 +7815,19 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
                     addPaneMessageIfSessionActive(pane.id, "tool", legacy, "meta");
                   }
                 } else {
+                  // Before recording the tool_call, flush any accumulated LLM reasoning
+                  // text from liveOutput as a persistent "reasoning" event so users can
+                  // see what the subagent was thinking before invoking this tool.
+                  const subBeforeTool = useAppStore.getState().subAgents.find((item) => item.id === eventAgentId);
+                  const pendingReasoning = (subBeforeTool?.liveOutput ?? "").trim();
+                  if (pendingReasoning && !isThinkingPlaceholderText(pendingReasoning)) {
+                    // Strip raw <think>…</think> wrappers that some models emit.
+                    const cleaned = pendingReasoning.replace(/<\/?think>/gi, "").trim();
+                    if (cleaned) {
+                      addSubAgentEvent(eventAgentId, { type: "reasoning", content: cleaned });
+                    }
+                    updateSubAgent(eventAgentId, { liveOutput: "" });
+                  }
                   const legacy = `\u{1F527} ${toolNameStr}: ${JSON.stringify(toolArgs).slice(0, 120)}`;
                   addSubAgentEvent(eventAgentId, { type: "tool_call", content: legacy });
                   const livePreview = buildToolCallLivePreview(toolNameStr, toolArgs);
@@ -8347,6 +8361,17 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
                 }
                 scheduleStreamTextUpdate(full);
               } else {
+                // Flush any remaining liveOutput (final reply text) as a "reply" event
+                // before marking completed, so the reasoning/response is preserved.
+                const subAtFinal = useAppStore.getState().subAgents.find((item) => item.id === eventAgentId);
+                const remainingOutput = (subAtFinal?.liveOutput ?? "").trim();
+                if (remainingOutput && !isThinkingPlaceholderText(remainingOutput)) {
+                  const cleaned = remainingOutput.replace(/<\/?think>/gi, "").trim();
+                  if (cleaned) {
+                    addSubAgentEvent(eventAgentId, { type: "reasoning", content: cleaned });
+                  }
+                  updateSubAgent(eventAgentId, { liveOutput: "" });
+                }
                 updateSubAgent(eventAgentId, { status: "completed", currentAction: "已完成" });
                 addSubAgentEvent(eventAgentId, { type: "final", content: payload.data?.text ?? "" });
               }

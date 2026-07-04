@@ -1381,6 +1381,14 @@ export function ChatView({ onOpenConfirm, onOpenClarification, onSubmitClarifica
                     addMessage("tool", legacy, "meta");
                   }
                 } else {
+                  // Flush accumulated reasoning before recording the tool_call event.
+                  const subBeforeTool = useAppStore.getState().subAgents.find((item) => item.id === eventAgentId);
+                  const pendingReasoning = (subBeforeTool?.liveOutput ?? "").trim();
+                  if (pendingReasoning && !isThinkingPlaceholderText(pendingReasoning)) {
+                    const cleaned = pendingReasoning.replace(/<\/?think>/gi, "").trim();
+                    if (cleaned) addSubAgentEvent(eventAgentId, { type: "reasoning", content: cleaned });
+                    updateSubAgent(eventAgentId, { liveOutput: "" });
+                  }
                   const legacy = `\u{1F527} ${toolNameStr}: ${JSON.stringify(toolArgs).slice(0, 120)}`;
                   updateSubAgent(eventAgentId, { status: "running", currentAction: `调用工具 ${toolNameStr}` });
                   addSubAgentEvent(eventAgentId, { type: "tool_call", content: legacy });
@@ -1637,7 +1645,19 @@ export function ChatView({ onOpenConfirm, onOpenClarification, onSubmitClarifica
               }
             }
             if (payload.type === "final") {
-              if (eventAgentId !== "meta") { updateSubAgent(eventAgentId, { status: "completed", currentAction: "已完成" }); addSubAgentEvent(eventAgentId, { type: "final", content: payload.data?.text ?? "" }); continue; }
+              if (eventAgentId !== "meta") {
+                // Flush remaining liveOutput as reasoning before marking complete.
+                const subAtFinal = useAppStore.getState().subAgents.find((item) => item.id === eventAgentId);
+                const remaining = (subAtFinal?.liveOutput ?? "").trim();
+                if (remaining && !isThinkingPlaceholderText(remaining)) {
+                  const cleaned = remaining.replace(/<\/?think>/gi, "").trim();
+                  if (cleaned) addSubAgentEvent(eventAgentId, { type: "reasoning", content: cleaned });
+                  updateSubAgent(eventAgentId, { liveOutput: "" });
+                }
+                updateSubAgent(eventAgentId, { status: "completed", currentAction: "已完成" });
+                addSubAgentEvent(eventAgentId, { type: "final", content: payload.data?.text ?? "" });
+                continue;
+              }
               const sqRaw = payload.data?.suggested_questions;
               pendingSuggestedQuestions = Array.isArray(sqRaw)
                 ? sqRaw.map((x: unknown) => String(x).trim()).filter(Boolean).slice(0, 3)

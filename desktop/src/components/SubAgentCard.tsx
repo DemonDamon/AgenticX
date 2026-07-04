@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
+import * as React from "react";
 import { createPortal } from "react-dom";
 import { Check, ChevronDown } from "lucide-react";
 import ReactMarkdown from "react-markdown";
@@ -610,6 +611,374 @@ function ResultSummaryBlock({
   );
 }
 
+// ─── Activity Timeline ─────────────────────────────────────────────────────
+
+/** 事件类型 → 图标 + 颜色语义 */
+const EVENT_META: Record<
+  string,
+  { icon: React.ReactNode; dot: string; label: string }
+> = {
+  tool_call: {
+    icon: (
+      <svg viewBox="0 0 12 12" fill="none" className="h-3 w-3" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
+        <path d="M9.5 1.5L8 3 9 4l1.5-1.5A2 2 0 117.5 4.5L3.5 8.5A2 2 0 101 10.5L3 9 2 8 .5 9.5A2 2 0 112.5 7.5L6.5 3.5A2 2 0 019.5 1.5z" />
+      </svg>
+    ),
+    dot: "bg-[var(--kb-citation-fg)]",
+    label: "工具调用",
+  },
+  tool_result: {
+    icon: (
+      <svg viewBox="0 0 12 12" fill="none" className="h-3 w-3" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
+        <path d="M2 6l3 3 5-5" />
+      </svg>
+    ),
+    dot: "bg-[var(--status-success)]",
+    label: "工具结果",
+  },
+  message: {
+    icon: (
+      <svg viewBox="0 0 12 12" fill="none" className="h-3 w-3" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
+        <path d="M1.5 8C1.5 8.83 2.17 9.5 3 9.5H8.5l2 2V3C10.5 2.17 9.83 1.5 9 1.5H3C2.17 1.5 1.5 2.17 1.5 3v5z" />
+      </svg>
+    ),
+    dot: "bg-text-muted",
+    label: "消息",
+  },
+  status: {
+    icon: (
+      <svg viewBox="0 0 12 12" fill="none" className="h-3 w-3" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
+        <circle cx="6" cy="6" r="4" />
+        <path d="M6 4v2.5l1.5 1" />
+      </svg>
+    ),
+    dot: "bg-[var(--status-warning)]",
+    label: "状态",
+  },
+  error: {
+    icon: (
+      <svg viewBox="0 0 12 12" fill="none" className="h-3 w-3 text-[var(--status-error)]" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
+        <circle cx="6" cy="6" r="4.5" />
+        <path d="M6 4v2.5M6 8.2v.3" />
+      </svg>
+    ),
+    dot: "bg-[var(--status-error)]",
+    label: "错误",
+  },
+  output: {
+    icon: (
+      <svg viewBox="0 0 12 12" fill="none" className="h-3 w-3" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
+        <rect x="1.5" y="2" width="9" height="8" rx="1.2" />
+        <path d="M4 5h4M4 7h2.5" />
+      </svg>
+    ),
+    dot: "bg-text-faint",
+    label: "输出",
+  },
+  reasoning: {
+    icon: (
+      <svg viewBox="0 0 12 12" fill="none" className="h-3 w-3" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+        <path d="M6 1.5a4.5 4.5 0 010 9" strokeDasharray="2 1.2" />
+        <path d="M6 1.5a4.5 4.5 0 000 9" />
+        <circle cx="6" cy="6" r="1.2" fill="currentColor" strokeWidth="0" />
+      </svg>
+    ),
+    dot: "bg-violet-400",
+    label: "推理",
+  },
+  final: {
+    icon: (
+      <svg viewBox="0 0 12 12" fill="none" className="h-3 w-3 text-[var(--status-success)]" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
+        <path d="M2 6.5l2.5 2.5 5.5-5.5" />
+      </svg>
+    ),
+    dot: "bg-[var(--status-success)]",
+    label: "完成回复",
+  },
+};
+
+const DEFAULT_EVENT_META = {
+  icon: (
+    <svg viewBox="0 0 12 12" fill="none" className="h-3 w-3" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round">
+      <circle cx="6" cy="6" r="1.5" fill="currentColor" />
+    </svg>
+  ),
+  dot: "bg-border",
+  label: "事件",
+};
+
+function getEventMeta(type: string) {
+  const key = type.toLowerCase().replace(/[^a-z_]/g, "");
+  return EVENT_META[key] ?? DEFAULT_EVENT_META;
+}
+
+/** 把 ms 时间戳格式化为 HH:MM:SS */
+function fmtTs(ts: number) {
+  const d = new Date(ts);
+  const hh = String(d.getHours()).padStart(2, "0");
+  const mm = String(d.getMinutes()).padStart(2, "0");
+  const ss = String(d.getSeconds()).padStart(2, "0");
+  return `${hh}:${mm}:${ss}`;
+}
+
+type ParsedEventContent = {
+  /** 解析出的工具名（若能识别） */
+  toolName?: string;
+  /** 主体文本（人类可读，已剥离 JSON 包裹） */
+  body: string;
+  /** 工具调用参数，按 key/value 展示，避免整段 JSON 堆砌 */
+  argEntries?: [string, string][];
+};
+
+const MAX_ARG_VALUE_LEN = 220;
+
+function stringifyArgValue(v: unknown): string {
+  if (v === null || v === undefined) return "—";
+  if (typeof v === "string") return v.length > MAX_ARG_VALUE_LEN ? `${v.slice(0, MAX_ARG_VALUE_LEN)}…` : v;
+  if (typeof v === "number" || typeof v === "boolean") return String(v);
+  try {
+    const s = JSON.stringify(v);
+    return s.length > MAX_ARG_VALUE_LEN ? `${s.slice(0, MAX_ARG_VALUE_LEN)}…` : s;
+  } catch {
+    return String(v);
+  }
+}
+
+/**
+ * 从 bash_exec / shell 类工具结果里提取可读 stdout 内容，剥除 exit_code / stderr 包裹。
+ * 形如 "exit_code=0\nstdout:\nXXX\nstderr:\n(empty)" → "XXX"
+ */
+function extractShellOutput(raw: string): string {
+  // 先尝试匹配 "stdout:\nXXX" 到 "stderr:" 或字符串结尾
+  const m = raw.match(/stdout:\s*\n([\s\S]*?)(?:\nstderr:|$)/);
+  if (m) {
+    const out = m[1].trim();
+    // 如果 stdout 本身是 (empty) 或空，降级返回原文
+    return out && out !== "(empty)" ? out : raw;
+  }
+  return raw;
+}
+
+/**
+ * 把原始事件文本（可能是未加工的 JSON 包裹、streaming 预格式化输出）
+ * 解析为结构化展示字段，避免在时间线里直接堆原始 JSON。
+ * 解析失败时安全退化为纯文本展示，不影响任何未知事件类型。
+ */
+function parseEventContent(_type: string, rawContent: string): ParsedEventContent {
+  const content = rawContent.trim();
+
+  // 情形一：streaming 预格式化工具结果 —— "✅ toolname 结果: ..." / "⚠️ toolname 提示: ..."
+  // 这是 formatToolResultMessage 生成的格式，提取工具名和实际输出。
+  const preFormattedMatch = content.match(/^[✅⚠️🤝🚀🗂📡]\s*([\w.]+)\s+(?:结果|提示|状态快照):\s*([\s\S]*)$/u);
+  if (preFormattedMatch) {
+    const toolName = preFormattedMatch[1];
+    const body = extractShellOutput(preFormattedMatch[2].trim());
+    // 如果是微缩压缩的 [micro-compact ...] 格式，提取实际输出
+    const compact = body.replace(/^\[micro-compact[^\]]*\]\s*/i, "");
+    return { toolName, body: extractShellOutput(compact) };
+  }
+
+  // 情形二：完整原始包裹 —— "tool_call: {...}" / "tool_result: {...}"（轮询路径）
+  const wrapMatch = content.match(/^[^\w{]*(tool_call|tool_result)\s*:\s*(\{[\s\S]*\})\s*$/);
+  if (wrapMatch) {
+    try {
+      const obj = JSON.parse(wrapMatch[2]) as Record<string, unknown>;
+      if (obj && typeof obj === "object") {
+        const toolName = typeof obj.name === "string" ? obj.name : undefined;
+        if (wrapMatch[1] === "tool_call") {
+          const args = obj.arguments && typeof obj.arguments === "object" ? (obj.arguments as Record<string, unknown>) : {};
+          const argEntries = Object.entries(args).map(([k, v]) => [k, stringifyArgValue(v)] as [string, string]);
+          return { toolName, body: "", argEntries };
+        }
+        // tool_result: 提取 result 字段并清洗 shell 输出
+        const result = obj.result;
+        const raw = typeof result === "string" ? result : stringifyArgValue(result);
+        return { toolName, body: extractShellOutput(raw) };
+      }
+    } catch {
+      // JSON 解析失败，落到下面的通用兜底
+    }
+  }
+
+  // 情形三：简写形式 —— "🔧 name: {...}"（streaming 路径截断 JSON）
+  const shorthandMatch = content.match(/^[^\w]*([\w.]+):\s*(\{[\s\S]*)$/);
+  if (shorthandMatch) {
+    const [, toolName, tail] = shorthandMatch;
+    try {
+      const obj = JSON.parse(tail) as Record<string, unknown>;
+      if (obj && typeof obj === "object") {
+        const argEntries = Object.entries(obj).map(([k, v]) => [k, stringifyArgValue(v)] as [string, string]);
+        return { toolName, body: "", argEntries };
+      }
+    } catch {
+      // 截断 JSON：只展示工具名 + 短文本，不暴露残缺 JSON
+      return { toolName, body: tail.replace(/\{[\s\S]*$/, "").trim() || "…" };
+    }
+  }
+
+  return { body: content };
+}
+
+/** 单条事件行，content 超出 100 字符时折叠 */
+function TimelineEvent({ evt }: { evt: { id: string; type: string; content: string; ts: number } }) {
+  const [expanded, setExpanded] = useState(false);
+  const meta = getEventMeta(evt.type);
+  const parsed = useMemo(() => parseEventContent(evt.type, evt.content), [evt.type, evt.content]);
+  const LIMIT = evt.type === "reasoning" ? 60 : 100;
+  const isLong = parsed.body.length > LIMIT;
+  const displayed = !isLong || expanded ? parsed.body : `${parsed.body.slice(0, LIMIT)}…`;
+
+  return (
+    <div className="group flex min-w-0 gap-2">
+      {/* 左侧竖轨 + 圆点 */}
+      <div className="flex flex-col items-center">
+        <span className={`mt-1 h-2 w-2 shrink-0 rounded-full ${meta.dot} ring-1 ring-[var(--surface-bg,transparent)] opacity-80`} />
+        <span className="mt-0.5 w-px flex-1 bg-border opacity-40" />
+      </div>
+      {/* 内容区 */}
+      <div className="mb-2 min-w-0 flex-1">
+        <div className="flex flex-wrap items-center gap-1.5">
+          <span className="shrink-0 text-text-faint opacity-70">{meta.icon}</span>
+          <span className="text-[10px] font-medium uppercase tracking-wide text-text-muted">{meta.label}</span>
+          {parsed.toolName ? (
+            <span className="rounded bg-surface-card-strong px-1 py-0.5 font-mono text-[10px] text-[var(--kb-citation-fg)] ring-1 ring-border">
+              {parsed.toolName}
+            </span>
+          ) : null}
+          <span className="ml-auto shrink-0 font-mono text-[10px] text-text-faint opacity-60">{fmtTs(evt.ts)}</span>
+        </div>
+
+        {/* 工具调用参数：按 key/value 逐行展示，而非原始 JSON */}
+        {parsed.argEntries && parsed.argEntries.length > 0 ? (
+          <div className="mt-1 space-y-0.5 rounded bg-[color-mix(in_srgb,var(--surface-hover)_60%,transparent)] px-1.5 py-1">
+            {parsed.argEntries.map(([k, v]) => (
+              <div key={k} className="flex min-w-0 gap-1.5 text-[11px] leading-relaxed">
+                <span className="shrink-0 font-mono text-text-faint">{k}</span>
+                <span className="min-w-0 flex-1 break-all text-text-primary">{v}</span>
+              </div>
+            ))}
+          </div>
+        ) : parsed.body ? (
+          <p
+            className="mt-0.5 whitespace-pre-wrap break-words text-[11px] leading-relaxed text-text-primary"
+            style={{ wordBreak: "break-word" }}
+          >
+            {displayed}
+            {isLong ? (
+              <button
+                type="button"
+                className="ml-1 text-[10px] text-[var(--kb-citation-fg)] underline-offset-2 hover:underline"
+                onClick={() => setExpanded((v) => !v)}
+              >
+                {expanded ? "收起" : "展开"}
+              </button>
+            ) : null}
+          </p>
+        ) : null}
+      </div>
+    </div>
+  );
+}
+
+/** 过滤掉冗余的 progress 事件：
+ *  - "调用工具 X" / "完成工具 X" 类（tool_call/tool_result 事件已经表达了这层信息）
+ *  - 心跳类"执行中（Ns）"（status bar 已有，不必再占时间线）
+ *  - 第 1 轮 0s 的轮次播报（等价于"已启动"，毫无新信息量）
+ *  - 相邻的重复 progress（同一文本连续出现只保留一条）
+ */
+const NOISE_PROGRESS_RE = /^(?:调用工具\s|完成工具\s|执行中（\d+s）)/;
+const ROUND1_0S_RE = /^第 1\/\d+ 轮分析中（0s）$/;
+
+function denoiseEvents(events: { id: string; type: string; content: string; ts: number }[]) {
+  let lastProgressText = "";
+  return events.filter((evt) => {
+    if (evt.type === "progress") {
+      if (NOISE_PROGRESS_RE.test(evt.content)) return false;
+      if (ROUND1_0S_RE.test(evt.content.trim())) return false;
+      // 相邻重复 progress 去重
+      if (evt.content === lastProgressText) return false;
+      lastProgressText = evt.content;
+      return true;
+    }
+    if (evt.type === "token") return false;
+    return true;
+  });
+}
+
+function ActivityTimeline({
+  events,
+  liveOutput,
+  onCopyDetails,
+  copyFeedback,
+}: {
+  events: { id: string; type: string; content: string; ts: number }[];
+  liveOutput?: string;
+  onCopyDetails: () => void;
+  copyFeedback: boolean;
+}) {
+  const listRef = useRef<HTMLDivElement>(null);
+  const visible = useMemo(() => denoiseEvents(events), [events]);
+  // 保持滚动到底部（最新事件可见）
+  useEffect(() => {
+    const el = listRef.current;
+    if (el) el.scrollTop = el.scrollHeight;
+  }, [visible.length]);
+
+  return (
+    <div className="mt-2 overflow-hidden rounded-lg border border-border bg-surface-card">
+      {/* header */}
+      <div className="flex items-center justify-between border-b border-border px-3 py-1.5">
+        <span className="text-[11px] font-medium text-text-muted">
+          活动日志
+          {visible.length > 0 ? (
+            <span className="ml-1.5 font-mono text-[10px] text-text-faint opacity-60">{visible.length} 步</span>
+          ) : null}
+        </span>
+        <button
+          type="button"
+          className="rounded px-1.5 py-0.5 text-[10px] text-text-faint transition hover:bg-surface-hover hover:text-text-strong"
+          onClick={onCopyDetails}
+        >
+          {copyFeedback ? "已复制 ✓" : "复制"}
+        </button>
+      </div>
+
+      {/* 实时输出胶囊（在事件流上方，仅运行中有内容时显示）*/}
+      {liveOutput?.trim() ? (
+        <div className="border-b border-border px-3 py-2">
+          <div className="mb-1 flex items-center gap-1.5">
+            <ArcSpinner size={10} />
+            <span className="text-[10px] font-medium text-[var(--kb-citation-fg)]">实时流</span>
+          </div>
+          {isThinkingPlaceholderText(liveOutput) ? (
+            <ThinkingDots />
+          ) : (
+            <div className="max-h-28 overflow-y-auto rounded bg-[rgba(var(--theme-color-rgb),0.05)] px-2 py-1.5 font-mono text-[10.5px] leading-relaxed text-text-primary ring-1 ring-[color-mix(in_srgb,rgb(var(--theme-color-rgb))_14%,transparent)]">
+              <pre className="whitespace-pre-wrap break-all">{liveOutput}</pre>
+            </div>
+          )}
+        </div>
+      ) : null}
+
+      {/* 事件时间线 */}
+      <div
+        ref={listRef}
+        className="max-h-48 overflow-y-auto px-3 pt-2.5 pb-1"
+        style={{
+          maskImage: "linear-gradient(to bottom, transparent 0%, black 6%, black 94%, transparent 100%)",
+          WebkitMaskImage: "linear-gradient(to bottom, transparent 0%, black 6%, black 94%, transparent 100%)",
+        }}
+      >
+        {visible.length === 0 ? (
+          <div className="py-4 text-center text-[11px] text-text-faint">暂无活动记录</div>
+        ) : (
+          visible.map((evt) => <TimelineEvent key={evt.id} evt={evt} />)
+        )}
+      </div>
+    </div>
+  );
+}
+
 export function SubAgentCard({
   subAgent,
   onCancel,
@@ -780,41 +1149,12 @@ export function SubAgentCard({
       </div>
 
       {expanded ? (
-        <div className="relative mt-2 max-h-52 space-y-1 overflow-y-auto rounded-md border border-border bg-surface-card p-2">
-          <button
-            className="sticky right-0 top-0 z-10 float-right rounded border border-border bg-surface-card-strong px-1.5 py-0.5 text-[10px] text-text-muted hover:bg-surface-hover hover:text-text-strong"
-            title="复制全部详情"
-            onClick={handleCopyDetails}
-          >
-            {copyFeedback ? "已复制 ✓" : "复制"}
-          </button>
-          {/* 任务指令完整内容已在卡片顶部常驻展示 */}
-          {subAgent.events.length === 0 ? (
-            <div className="text-xs text-text-faint">暂无事件</div>
-          ) : (
-            subAgent.events
-              .slice()
-              .reverse()
-              .map((evt) => (
-                <div key={evt.id} className="text-xs text-text-muted">
-                  <span className="mr-1 text-text-faint">[{evt.type}]</span>
-                  {evt.content}
-                </div>
-              ))
-          )}
-          {subAgent.liveOutput?.trim() ? (
-            <div className="mt-2 rounded border border-[var(--ui-btn-primary-border)] bg-[rgba(var(--theme-color-rgb),0.06)] p-2">
-              <div className="mb-1 text-[11px] font-medium text-[var(--kb-citation-fg)]">实时输出（代码流）</div>
-              {isThinkingPlaceholderText(subAgent.liveOutput) ? (
-                <ThinkingDots />
-              ) : (
-                <div className="agx-code-stream max-h-44 overflow-y-auto whitespace-pre-wrap break-all font-mono text-[11px] text-text-primary">
-                  {subAgent.liveOutput}
-                </div>
-              )}
-            </div>
-          ) : null}
-        </div>
+        <ActivityTimeline
+          events={subAgent.events}
+          liveOutput={subAgent.liveOutput}
+          onCopyDetails={handleCopyDetails}
+          copyFeedback={copyFeedback}
+        />
       ) : null}
     </div>
   );
