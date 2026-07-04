@@ -520,6 +520,7 @@ function TaskInstructionBlock({ agentId, task }: { agentId: string; task: string
     setEditing(false);
   };
 
+  return (
     <SubAgentMetaBlock
       title="详细指令"
       tone="theme"
