@@ -1523,27 +1523,30 @@ class AgentTeamManager:
 
     def _build_result_summary(self, context: SubAgentContext) -> str:
         file_list = self._merge_output_files(context)
+        name = (context.name or context.agent_id or "子智能体").strip()
         if context.status == SubAgentStatus.COMPLETED:
-            text = context.final_text or "任务执行完成"
-            summary = (
-                f"[{context.name}] 已完成。\n"
-                f"结果摘要: {text}\n"
-                f"产出文件: {', '.join(file_list) if file_list else '(无)'}"
-            )
+            text = (context.final_text or "任务执行完成").strip()
+            parts = [f"**{name}** 已完成。"]
+            if text:
+                parts.extend(["", text])
+            if file_list:
+                parts.extend(["", f"产出文件：{', '.join(file_list)}"])
+            summary = "\n".join(parts)
         elif context.status == SubAgentStatus.PAUSED:
-            text = context.final_text or "任务已暂停，可基于当前进展继续。"
+            text = (context.final_text or "任务已暂停，可基于当前进展继续。").strip()
             reason = f"暂停原因: {context.pause_detector or 'runtime_pause'}"
             retry = "可稍后继续。" if context.pause_retryable else "请根据提示继续指示。"
-            summary = (
-                f"[{context.name}] 已暂停。\n"
-                f"{reason}；{retry}\n"
-                f"阶段性摘要: {text}\n"
-                f"产出文件: {', '.join(file_list) if file_list else '(无)'}"
-            )
+            parts = [f"**{name}** 已暂停。", f"{reason}；{retry}"]
+            if text:
+                parts.extend(["", text])
+            if file_list:
+                parts.extend(["", f"产出文件：{', '.join(file_list)}"])
+            summary = "\n".join(parts)
         elif context.status == SubAgentStatus.CANCELLED:
-            summary = f"[{context.name}] 已取消。"
+            summary = f"**{name}** 已取消。"
         else:
-            summary = f"[{context.name}] 执行失败: {context.error_text or '未知错误'}"
+            err = (context.error_text or "未知错误").strip()
+            summary = f"**{name}** 执行失败：{err}"
         # Approximate <=500 token with conservative 2000 chars.
         if len(summary) > 2000:
             summary = summary[:2000] + "...(truncated)"

@@ -7,6 +7,7 @@ import type { SubAgent } from "../store";
 import { useAppStore } from "../store";
 import { formatModelOptionLabel } from "../utils/model-display";
 import { collectSelectableModelOptions, isModelSelectable } from "../utils/model-options";
+import { normalizeSubAgentSummaryMarkdown } from "../utils/subagent-summary-markdown";
 import { ProviderIcon } from "./ProviderIcon";
 
 type Props = {
@@ -556,9 +557,10 @@ function ResultSummaryBlock({
 }) {
   const [copied, setCopied] = useState(false);
   const [expanded, setExpanded] = useState(false);
+  const markdown = useMemo(() => normalizeSubAgentSummaryMarkdown(summary), [summary]);
 
   const handleCopy = () => {
-    void navigator.clipboard.writeText(summary).then(() => {
+    void navigator.clipboard.writeText(markdown).then(() => {
       setCopied(true);
       setTimeout(() => setCopied(false), 1500);
     });
@@ -579,7 +581,7 @@ function ResultSummaryBlock({
       }
     >
       <div className="agx-subagent-summary">
-        <ReactMarkdown remarkPlugins={[remarkGfm]}>{summary}</ReactMarkdown>
+        <ReactMarkdown remarkPlugins={[remarkGfm]}>{markdown}</ReactMarkdown>
       </div>
       {outputFiles && outputFiles.length > 0 ? (
         <div className="mt-2 border-t border-[color-mix(in_srgb,rgb(var(--theme-color-rgb))_15%,transparent)] pt-2">
