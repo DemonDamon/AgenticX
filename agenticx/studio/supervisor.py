@@ -213,7 +213,24 @@ class SessionSupervisor:
             sid = str(row.get("session_id", "") or "").strip()
             if not sid:
                 continue
-            managed = self._manager.get(sid, touch=False)
+            # Cold-start guard: `list_sessions()` is cheap (metadata only), but
+            # `manager.get()` materializes a session's full messages/todos/
+            # taskspaces from disk the first time it is called. Right after
+            # server startup, `_sessions` is empty, so calling `get()` here
+            # unconditionally for every historical session (hundreds on a
+            # long-lived install) synchronously blocks the event loop for the
+            # duration of the full-disk restore of ALL of them — this was the
+            # dominant cause of the multi-second-to-1-minute cold-start stall.
+            # Unattended mode is opt-in per session and rare, so first check
+            # only the in-memory cache, then fall back to a single cheap
+            # scratchpad-only SQLite read before paying for full restore.
+            managed = self._manager.get_if_loaded(sid)
+            if managed is None:
+                if not self._manager.session_scratchpad_flag(
+                    sid, SESSION_META_UNATTENDED
+                ):
+                    continue
+                managed = self._manager.get(sid, touch=False)
             if managed is None:
                 continue
             if not _session_unattended_enabled(managed):

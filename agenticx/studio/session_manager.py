@@ -492,6 +492,36 @@ class SessionManager:
             managed.updated_at = time.time()
         return managed
 
+    def get_if_loaded(self, session_id: str) -> Optional[ManagedSession]:
+        """Return the in-memory session without materializing it from persistence.
+
+        Unlike ``get()``, never triggers ``create()`` for a session that has not
+        been touched yet this process — used by callers (e.g. the background
+        supervisor) that must scan every historical session but only care about
+        ones already resident in memory, to avoid an O(n) full-disk restore.
+        """
+        return self._sessions.get(session_id)
+
+    def session_scratchpad_flag(self, session_id: str, key: str) -> bool:
+        """Cheap persisted scratchpad boolean lookup, without full session restore.
+
+        A single indexed SQLite read (``scratchpad`` table, PK session_id+key)
+        instead of the multi-file ``create()``/``_restore_persisted_state()``
+        pipeline (messages, todos, agent_messages, context refs, taskspace
+        sync). Used to pre-filter sessions before deciding whether the full
+        materialization is actually needed.
+        """
+        sid = str(session_id or "").strip()
+        if not sid:
+            return False
+        try:
+            data = self._session_store._load_scratchpad_sync(sid)
+        except Exception:
+            return False
+        from agenticx.runtime.scratchpad_utils import scratchpad_truthy
+
+        return scratchpad_truthy(data.get(key))
+
     def touch(self, session_id: str) -> bool:
         managed = self._sessions.get(session_id)
         if managed is None:
