@@ -9,6 +9,7 @@ import { useAppStore } from "../store";
 import { formatModelOptionLabel } from "../utils/model-display";
 import { collectSelectableModelOptions, isModelSelectable } from "../utils/model-options";
 import { normalizeSubAgentSummaryMarkdown } from "../utils/subagent-summary-markdown";
+import { isSubAgentLiveStatus } from "../utils/stream-overlay-policy";
 import { ProviderIcon } from "./ProviderIcon";
 
 type Props = {
@@ -490,23 +491,35 @@ function SubAgentMetaBlock({
 }
 
 /** 任务指令块：与「最终摘要」共用同一套元数据卡片结构 */
-function TaskInstructionBlock({ task }: { task: string }) {
+function TaskInstructionBlock({ agentId, task }: { agentId: string; task: string }) {
+  const updateSubAgent = useAppStore((s) => s.updateSubAgent);
   const [copied, setCopied] = useState(false);
   const [editing, setEditing] = useState(false);
   const [expanded, setExpanded] = useState(false);
+  // Controlled by the committed value from store so it always reflects saved state.
   const [editValue, setEditValue] = useState(task);
   if (!task) return null;
 
-  const displayTask = editing ? editValue : task;
-
   const handleCopy = () => {
-    void navigator.clipboard.writeText(displayTask).then(() => {
+    void navigator.clipboard.writeText(editing ? editValue : task).then(() => {
       setCopied(true);
       setTimeout(() => setCopied(false), 1500);
     });
   };
 
-  return (
+  const handleSave = () => {
+    const trimmed = editValue.trim();
+    if (trimmed && trimmed !== task) {
+      updateSubAgent(agentId, { task: trimmed });
+    }
+    setEditing(false);
+  };
+
+  const handleDiscard = () => {
+    setEditValue(task);
+    setEditing(false);
+  };
+
     <SubAgentMetaBlock
       title="详细指令"
       tone="theme"
@@ -516,23 +529,38 @@ function TaskInstructionBlock({ task }: { task: string }) {
           <MetaBlockIconButton label="复制指令" onClick={handleCopy}>
             <CopyIcon copied={copied} />
           </MetaBlockIconButton>
-          <MetaBlockIconButton
-            label={editing ? "完成编辑" : "编辑指令"}
-            active={editing}
-            onClick={() => setEditing((v) => !v)}
-          >
-            <svg
-              viewBox="0 0 16 16"
-              fill="none"
-              className={`h-3.5 w-3.5 ${editing ? "text-[var(--kb-citation-fg)]" : "text-text-muted"}`}
-              stroke="currentColor"
-              strokeWidth="1.5"
-              strokeLinecap="round"
-              strokeLinejoin="round"
+          {editing ? (
+            <>
+              <MetaBlockIconButton label="保存修改" active onClick={handleSave}>
+                <svg viewBox="0 0 16 16" fill="none" className="h-3.5 w-3.5 text-[var(--status-success)]" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M3 8l3.5 3.5L13 4.5" />
+                </svg>
+              </MetaBlockIconButton>
+              <MetaBlockIconButton label="放弃修改" onClick={handleDiscard}>
+                <svg viewBox="0 0 16 16" fill="none" className="h-3.5 w-3.5 text-text-muted" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M4 4l8 8M12 4l-8 8" />
+                </svg>
+              </MetaBlockIconButton>
+            </>
+          ) : (
+            <MetaBlockIconButton
+              label="编辑指令"
+              active={false}
+              onClick={() => { setEditValue(task); setEditing(true); }}
             >
-              <path d="M11.5 2.5a1.414 1.414 0 012 2L5 13H3v-2L11.5 2.5z" />
-            </svg>
-          </MetaBlockIconButton>
+              <svg
+                viewBox="0 0 16 16"
+                fill="none"
+                className="h-3.5 w-3.5 text-text-muted"
+                stroke="currentColor"
+                strokeWidth="1.5"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              >
+                <path d="M11.5 2.5a1.414 1.414 0 012 2L5 13H3v-2L11.5 2.5z" />
+              </svg>
+            </MetaBlockIconButton>
+          )}
           <MetaBlockCollapseButton expanded={expanded} onToggle={() => setExpanded((v) => !v)} />
         </>
       }
@@ -543,6 +571,10 @@ function TaskInstructionBlock({ task }: { task: string }) {
           rows={4}
           value={editValue}
           onChange={(e) => setEditValue(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) { e.preventDefault(); handleSave(); }
+            if (e.key === "Escape") { e.preventDefault(); handleDiscard(); }
+          }}
           autoFocus
         />
       ) : (
@@ -555,10 +587,12 @@ function TaskInstructionBlock({ task }: { task: string }) {
 function ResultSummaryBlock({
   summary,
   outputFiles,
+  resultFile,
   onOpenFile,
 }: {
   summary: string;
   outputFiles?: string[];
+  resultFile?: string;
   onOpenFile: (path: string) => void;
 }) {
   const [copied, setCopied] = useState(false);
@@ -574,12 +608,12 @@ function ResultSummaryBlock({
 
   return (
     <SubAgentMetaBlock
-      title="最终摘要"
+      title="产出结果"
       tone="theme"
       scrollable={!expanded}
       headerActions={
         <>
-          <MetaBlockIconButton label="复制摘要" onClick={handleCopy}>
+          <MetaBlockIconButton label="复制结果" onClick={handleCopy}>
             <CopyIcon copied={copied} />
           </MetaBlockIconButton>
           <MetaBlockCollapseButton expanded={expanded} onToggle={() => setExpanded((v) => !v)} />
@@ -589,6 +623,26 @@ function ResultSummaryBlock({
       <div className="agx-subagent-summary">
         <ReactMarkdown remarkPlugins={[remarkGfm]}>{markdown}</ReactMarkdown>
       </div>
+      {/* 落盘文件路径 */}
+      {resultFile ? (
+        <div className="mt-2 border-t border-[color-mix(in_srgb,rgb(var(--theme-color-rgb))_15%,transparent)] pt-2">
+          <div className="mb-1 flex items-center gap-1 text-[11px] font-medium text-text-primary">
+            <svg viewBox="0 0 12 12" fill="none" className="h-3 w-3 shrink-0 text-[var(--status-success)]" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M2 9.5V3.5a1 1 0 011-1h4l2 2V9.5a1 1 0 01-1 1H3a1 1 0 01-1-1z" />
+              <path d="M7 2.5V5h2.5" />
+            </svg>
+            已落盘
+          </div>
+          <button
+            type="button"
+            className="block w-full truncate text-left text-[11px] font-mono text-[var(--kb-citation-fg)] opacity-80 hover:opacity-100 hover:underline underline-offset-2"
+            title={`打开文件：${resultFile}`}
+            onClick={() => void onOpenFile(resultFile)}
+          >
+            {resultFile}
+          </button>
+        </div>
+      ) : null}
       {outputFiles && outputFiles.length > 0 ? (
         <div className="mt-2 border-t border-[color-mix(in_srgb,rgb(var(--theme-color-rgb))_15%,transparent)] pt-2">
           <div className="mb-1 text-[11px] font-medium text-text-primary">产出文件</div>
@@ -908,16 +962,19 @@ function denoiseEvents(events: { id: string; type: string; content: string; ts: 
 function ActivityTimeline({
   events,
   liveOutput,
+  agentStatus,
   onCopyDetails,
   copyFeedback,
 }: {
   events: { id: string; type: string; content: string; ts: number }[];
   liveOutput?: string;
+  agentStatus: string;
   onCopyDetails: () => void;
   copyFeedback: boolean;
 }) {
   const listRef = useRef<HTMLDivElement>(null);
   const visible = useMemo(() => denoiseEvents(events), [events]);
+  const isLive = isSubAgentLiveStatus(agentStatus);
   // 保持滚动到底部（最新事件可见）
   useEffect(() => {
     const el = listRef.current;
@@ -943,20 +1000,26 @@ function ActivityTimeline({
         </button>
       </div>
 
-      {/* 实时输出胶囊（在事件流上方，仅运行中有内容时显示）*/}
-      {liveOutput?.trim() ? (
+      {/* 实时输出：仅执行中展示；完成后 liveOutput 应已清空并落入 reasoning 事件 */}
+      {isLive && liveOutput?.trim() ? (
         <div className="border-b border-border px-3 py-2">
           <div className="mb-1 flex items-center gap-1.5">
             <ArcSpinner size={10} />
             <span className="text-[10px] font-medium text-[var(--kb-citation-fg)]">实时流</span>
           </div>
-          {isThinkingPlaceholderText(liveOutput) ? (
-            <ThinkingDots />
-          ) : (
-            <div className="max-h-28 overflow-y-auto rounded bg-[rgba(var(--theme-color-rgb),0.05)] px-2 py-1.5 font-mono text-[10.5px] leading-relaxed text-text-primary ring-1 ring-[color-mix(in_srgb,rgb(var(--theme-color-rgb))_14%,transparent)]">
-              <pre className="whitespace-pre-wrap break-all">{liveOutput}</pre>
-            </div>
-          )}
+          {(() => {
+            // Strip <think>/<redacted_thinking> wrappers before display so raw tags never show.
+            const clean = liveOutput
+              .replace(/<redacted_thinking>[\s\S]*?<\/redacted_thinking>/gi, "")
+              .replace(/<\/?think>/gi, "")
+              .trim();
+            if (!clean || isThinkingPlaceholderText(clean)) return <ThinkingDots />;
+            return (
+              <div className="max-h-28 overflow-y-auto rounded bg-[rgba(var(--theme-color-rgb),0.05)] px-2 py-1.5 font-mono text-[10.5px] leading-relaxed text-text-primary ring-1 ring-[color-mix(in_srgb,rgb(var(--theme-color-rgb))_14%,transparent)]">
+                <pre className="whitespace-pre-wrap break-all">{clean}</pre>
+              </div>
+            );
+          })()}
         </div>
       ) : null}
 
@@ -997,7 +1060,8 @@ export function SubAgentCard({
       `角色: ${subAgent.role}`,
       `任务: ${subAgent.task}`,
       `状态: ${status.label}`,
-      subAgent.resultSummary ? `摘要: ${subAgent.resultSummary}` : "",
+      subAgent.resultSummary ? `产出结果: ${subAgent.resultSummary}` : "",
+      subAgent.resultFile ? `落盘路径: ${subAgent.resultFile}` : "",
     ].filter(Boolean).join("\n");
     const events = subAgent.events
       .slice()
@@ -1057,7 +1121,7 @@ export function SubAgentCard({
         />
       </div>
 
-      <TaskInstructionBlock task={subAgent.task} />
+      <TaskInstructionBlock agentId={subAgent.id} task={subAgent.task} />
       {subAgent.status === "awaiting_confirm" && subAgent.pendingConfirm ? (
         <ConfirmWithCountdown
           question={subAgent.pendingConfirm.question}
@@ -1080,6 +1144,7 @@ export function SubAgentCard({
         <ResultSummaryBlock
           summary={subAgent.resultSummary}
           outputFiles={subAgent.outputFiles}
+          resultFile={subAgent.resultFile}
           onOpenFile={handleOpenOutputFile}
         />
       ) : null}
@@ -1152,6 +1217,7 @@ export function SubAgentCard({
         <ActivityTimeline
           events={subAgent.events}
           liveOutput={subAgent.liveOutput}
+          agentStatus={subAgent.status}
           onCopyDetails={handleCopyDetails}
           copyFeedback={copyFeedback}
         />

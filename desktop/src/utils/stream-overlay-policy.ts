@@ -6,6 +6,25 @@ export function isThinkingPlaceholderText(text: string): boolean {
   return /^[\s⏳….·.]+$/.test(trimmed);
 }
 
+/** Strip model-emitted thinking wrappers before persisting subagent reasoning. */
+export function stripThinkingTags(text: string): string {
+  return text
+    .replace(/<\/?redacted_thinking>/gi, "")
+    .replace(/<\/?think>/gi, "")
+    .trim();
+}
+
+export const SUBAGENT_LIVE_STATUSES = new Set([
+  "running",
+  "pending",
+  "awaiting_confirm",
+  "awaiting_input",
+]);
+
+export function isSubAgentLiveStatus(status: string): boolean {
+  return SUBAGENT_LIVE_STATUSES.has(status);
+}
+
 function lastCommittedAssistantText(messages: Message[]): string {
   for (let i = messages.length - 1; i >= 0; i--) {
     const m = messages[i];

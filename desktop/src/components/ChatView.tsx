@@ -37,6 +37,7 @@ import {
 import { HOOK_BLOCK_RE } from "../utils/hook-block-message";
 import { expandMessagesToTopLevelRows } from "./messages/react-blocks";
 import { shouldHideStreamOverlay, shouldShowMidTurnStreamActivity } from "../utils/stream-overlay-policy";
+import { flushSubAgentLiveOutput } from "../utils/subagent-live-output";
 import { TurnToolGroupCard } from "./messages/TurnToolGroupCard";
 import { messagePlainTextForClipboard } from "../utils/markdown-copy-format";
 import { buildCompactionNoticeText } from "../utils/context-notice";
@@ -1381,14 +1382,7 @@ export function ChatView({ onOpenConfirm, onOpenClarification, onSubmitClarifica
                     addMessage("tool", legacy, "meta");
                   }
                 } else {
-                  // Flush accumulated reasoning before recording the tool_call event.
-                  const subBeforeTool = useAppStore.getState().subAgents.find((item) => item.id === eventAgentId);
-                  const pendingReasoning = (subBeforeTool?.liveOutput ?? "").trim();
-                  if (pendingReasoning && !isThinkingPlaceholderText(pendingReasoning)) {
-                    const cleaned = pendingReasoning.replace(/<\/?think>/gi, "").trim();
-                    if (cleaned) addSubAgentEvent(eventAgentId, { type: "reasoning", content: cleaned });
-                    updateSubAgent(eventAgentId, { liveOutput: "" });
-                  }
+                  flushSubAgentLiveOutput(eventAgentId);
                   const legacy = `\u{1F527} ${toolNameStr}: ${JSON.stringify(toolArgs).slice(0, 120)}`;
                   updateSubAgent(eventAgentId, { status: "running", currentAction: `调用工具 ${toolNameStr}` });
                   addSubAgentEvent(eventAgentId, { type: "tool_call", content: legacy });
@@ -1646,14 +1640,7 @@ export function ChatView({ onOpenConfirm, onOpenClarification, onSubmitClarifica
             }
             if (payload.type === "final") {
               if (eventAgentId !== "meta") {
-                // Flush remaining liveOutput as reasoning before marking complete.
-                const subAtFinal = useAppStore.getState().subAgents.find((item) => item.id === eventAgentId);
-                const remaining = (subAtFinal?.liveOutput ?? "").trim();
-                if (remaining && !isThinkingPlaceholderText(remaining)) {
-                  const cleaned = remaining.replace(/<\/?think>/gi, "").trim();
-                  if (cleaned) addSubAgentEvent(eventAgentId, { type: "reasoning", content: cleaned });
-                  updateSubAgent(eventAgentId, { liveOutput: "" });
-                }
+                flushSubAgentLiveOutput(eventAgentId);
                 updateSubAgent(eventAgentId, { status: "completed", currentAction: "已完成" });
                 addSubAgentEvent(eventAgentId, { type: "final", content: payload.data?.text ?? "" });
                 continue;
@@ -1760,10 +1747,14 @@ export function ChatView({ onOpenConfirm, onOpenClarification, onSubmitClarifica
             if (payload.type === "subagent_completed") {
               const subId = payload.data?.agent_id;
               if (subId) {
+                flushSubAgentLiveOutput(subId);
                 const isDelegation = Boolean(payload.data?.delegation);
                 updateSubAgent(subId, {
                   status: "completed",
                   currentAction: isDelegation ? "委派完成" : "已完成",
+                  resultSummary: typeof payload.data?.summary === "string" ? payload.data.summary : undefined,
+                  resultFile: typeof payload.data?.result_file === "string" && payload.data.result_file
+                    ? payload.data.result_file : undefined,
                   sessionId: typeof payload.data?.avatar_session_id === "string" ? payload.data.avatar_session_id : undefined,
                 });
                 addSubAgentEvent(subId, {
@@ -1775,6 +1766,7 @@ export function ChatView({ onOpenConfirm, onOpenClarification, onSubmitClarifica
             if (payload.type === "subagent_error") {
               const subId = payload.data?.agent_id;
               if (subId) {
+                flushSubAgentLiveOutput(subId);
                 const isDelegation = Boolean(payload.data?.delegation);
                 updateSubAgent(subId, {
                   status: payload.data?.status === "cancelled" ? "cancelled" : "failed",

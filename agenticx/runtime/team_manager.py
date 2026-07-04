@@ -144,6 +144,7 @@ class SubAgentContext:
     avatar_id: str = ""
     failure_count: int = 0
     escalation_level: int = 0
+    result_file: str = ""
     pause_detector: str = ""
     pause_retryable: bool = False
 
@@ -1330,6 +1331,7 @@ class AgentTeamManager:
             context.context_files = dict(session.context_files)
             context.output_files = self._extract_output_files_from_messages(context.agent_messages)
             context.result_summary = self._build_result_summary(context)
+            context.result_file = self._persist_result_file(context)
             produced_files = self._merge_output_files(context)
             missing_files = self._missing_output_files(produced_files)
             if (
@@ -1387,6 +1389,7 @@ class AgentTeamManager:
                         "name": context.name,
                         "status": context.status.value,
                         "summary": context.result_summary,
+                        "result_file": context.result_file,
                         "text": context.final_text or context.error_text or context.result_summary,
                         "detector": context.pause_detector,
                         "retryable": context.pause_retryable,
@@ -1520,6 +1523,33 @@ class AgentTeamManager:
             )
         )
         return True
+
+    def _persist_result_file(self, context: SubAgentContext) -> str:
+        """Write the subagent final output to disk and return the file path.
+
+        Saved under:
+            ~/.agenticx/sessions/<owner_session_id>/subagent_results/<agent_id>.md
+
+        Falls back to ~/.agenticx/subagent_results/ when no owner session is known.
+        Returns the absolute path string, or "" on any write failure.
+        """
+        text = (context.final_text or context.result_summary or "").strip()
+        if not text:
+            return ""
+        sid = (self.owner_session_id or "").strip()
+        if sid:
+            base = Path.home() / ".agenticx" / "sessions" / sid / "subagent_results"
+        else:
+            base = Path.home() / ".agenticx" / "subagent_results"
+        try:
+            base.mkdir(parents=True, exist_ok=True)
+            safe_name = re.sub(r"[^\w\-.]", "_", context.agent_id or "agent")
+            target = base / f"{safe_name}.md"
+            target.write_text(text, encoding="utf-8")
+            return str(target)
+        except Exception as exc:  # noqa: BLE001
+            _log.warning("[team_manager] failed to persist result file for %s: %s", context.agent_id, exc)
+            return ""
 
     def _build_result_summary(self, context: SubAgentContext) -> str:
         file_list = self._merge_output_files(context)

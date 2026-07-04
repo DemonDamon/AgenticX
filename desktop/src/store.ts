@@ -318,6 +318,7 @@ export type SubAgent = {
   currentAction?: string;
   liveOutput?: string;
   resultSummary?: string;
+  resultFile?: string;
   outputFiles?: string[];
   pendingConfirm?: PendingConfirm;
   pendingClarification?: PendingClarification;

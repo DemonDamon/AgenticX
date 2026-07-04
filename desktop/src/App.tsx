@@ -1020,6 +1020,7 @@ export function App() {
             task?: string;
             status?: "pending" | "running" | "paused" | "completed" | "failed" | "cancelled";
             result_summary?: string;
+            result_file?: string;
             error_text?: string;
             recent_events?: Array<{ type?: string; data?: Record<string, unknown> }>;
             pending_confirm?: { request_id?: string; question?: string; context?: Record<string, unknown> } | null;
@@ -1126,6 +1127,7 @@ export function App() {
             provider: item.provider ?? existing?.provider,
             model: item.model ?? existing?.model,
             resultSummary: summaryText || undefined,
+            resultFile: typeof item.result_file === "string" && item.result_file ? item.result_file : undefined,
             outputFiles,
             pendingConfirm,
             pendingClarification,
