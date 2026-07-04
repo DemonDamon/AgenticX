@@ -9,7 +9,6 @@ type Props = {
   onCancel: (agentId: string) => void;
   onRetry: (agentId: string) => void;
   onChat: (agentId: string) => void;
-  onSelect: (agentId: string) => void;
   onConfirmResolve?: (agentId: string, approved: boolean) => void;
 };
 
@@ -21,7 +20,6 @@ export function SubAgentPanel({
   onCancel,
   onRetry,
   onChat,
-  onSelect,
   onConfirmResolve,
 }: Props) {
   const running = subAgents.filter((item) => item.status === "running").length;
@@ -63,7 +61,6 @@ export function SubAgentPanel({
                   onCancel={onCancel}
                   onRetry={onRetry}
                   onChat={onChat}
-                  onSelect={onSelect}
                   onConfirmResolve={onConfirmResolve}
                   selected={selectedSubAgent === subAgent.id}
                 />

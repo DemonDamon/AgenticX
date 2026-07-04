@@ -6,7 +6,6 @@ type Props = {
   onCancel: (agentId: string) => void;
   onRetry: (agentId: string) => void;
   onChat: (agentId: string) => void;
-  onSelect: (agentId: string) => void;
   onConfirmResolve?: (agentId: string, approved: boolean) => void;
   selected?: boolean;
 };
@@ -29,6 +28,7 @@ const ACTION_BTN_BASE =
 const ACTION_BTN_PRIMARY = `${ACTION_BTN_BASE} border-[var(--ui-btn-primary-border)] bg-[rgba(var(--theme-color-rgb),0.08)] text-[var(--kb-citation-fg)] hover:bg-[rgba(var(--theme-color-rgb),0.14)]`;
 const ACTION_BTN_NEUTRAL = `${ACTION_BTN_BASE} border-[var(--border-strong)] text-text-primary hover:bg-surface-hover`;
 const ACTION_BTN_DANGER = `${ACTION_BTN_BASE} border-[color-mix(in_srgb,var(--status-error)_45%,transparent)] text-[var(--status-error)] hover:bg-[color-mix(in_srgb,var(--status-error)_10%,transparent)]`;
+const ACTION_BTN_ACTIVE = `${ACTION_BTN_BASE} border-[var(--ui-btn-primary-border)] bg-[rgba(var(--theme-color-rgb),0.16)] text-[var(--kb-citation-fg)] ring-1 ring-[color-mix(in_srgb,var(--ui-btn-primary-border)_55%,transparent)]`;
 const ACTION_BTN_SUCCESS = `${ACTION_BTN_BASE} border-[color-mix(in_srgb,var(--status-success)_45%,transparent)] text-[var(--status-success)] hover:bg-[color-mix(in_srgb,var(--status-success)_10%,transparent)]`;
 
 const AUTO_CONFIRM_SECONDS = 8;
@@ -236,7 +236,6 @@ export function SubAgentCard({
   onCancel,
   onRetry,
   onChat,
-  onSelect,
   onConfirmResolve,
   selected = false,
 }: Props) {
@@ -287,7 +286,7 @@ export function SubAgentCard({
       }`}
     >
       <div className="mb-2 flex items-start justify-between gap-2">
-        <button className="text-left" onClick={() => onSelect(subAgent.id)}>
+        <div className="min-w-0 text-left">
           <div className="text-sm font-medium text-text-strong">{subAgent.name}</div>
           <div className="text-xs text-text-subtle">{subAgent.role}</div>
           <div className="text-[11px] text-text-faint">ID: {subAgent.id}</div>
@@ -296,7 +295,7 @@ export function SubAgentCard({
               {modelLabel}
             </div>
           ) : null}
-        </button>
+        </div>
         <SubAgentStatusBadge
           agentStatus={subAgent.status}
           label={status.label}
@@ -362,8 +361,14 @@ export function SubAgentCard({
       ) : null}
 
       <div className="flex flex-wrap items-center gap-2">
-        <button className={ACTION_BTN_PRIMARY} onClick={() => onChat(subAgent.id)}>
-          对话
+        <button
+          type="button"
+          className={selected ? ACTION_BTN_ACTIVE : ACTION_BTN_PRIMARY}
+          aria-pressed={selected}
+          title={selected ? "结束与该子智能体的对话，切回 Meta" : "向该子智能体发送消息"}
+          onClick={() => onChat(subAgent.id)}
+        >
+          {selected ? "关闭对话" : "对话"}
         </button>
         <button className={ACTION_BTN_NEUTRAL} onClick={() => setExpanded((v) => !v)}>
           {expanded ? "收起详情" : "展开详情"}

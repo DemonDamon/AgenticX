@@ -8908,6 +8908,22 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
     }
   };
 
+  const togglePaneSubAgentChat = (agentId: string) => {
+    if (selectedSubAgent === agentId) {
+      setSelectedSubAgent(null);
+      return;
+    }
+    const sub = paneSubAgents.find((item) => item.id === agentId);
+    const isDelegation =
+      agentId.startsWith("dlg-") ||
+      !!(sub?.events?.some((evt) => evt.type.startsWith("delegation")));
+    if (isDelegation) {
+      void openDelegatedAvatarSession(agentId);
+      return;
+    }
+    setSelectedSubAgent(agentId);
+  };
+
   const resolvePaneSubAgentConfirm = async (agentId: string, approved: boolean) => {
     if (!apiBase || !apiToken || !pane.sessionId) return;
     const sub = subAgents.find((item) => item.id === agentId);
@@ -10178,16 +10194,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
           onClose={() => dismissSpawnsColumn(pane.id, paneSubAgents.map((s) => s.id))}
           onCancel={(agentId) => void cancelPaneSubAgent(agentId)}
           onRetry={(agentId) => void retryPaneSubAgent(agentId)}
-          onChat={(agentId) => {
-            const sub = paneSubAgents.find((item) => item.id === agentId);
-            const isDelegation = agentId.startsWith("dlg-") || !!(sub?.events?.some((evt) => evt.type.startsWith("delegation")));
-            if (isDelegation) {
-              void openDelegatedAvatarSession(agentId);
-              return;
-            }
-            setSelectedSubAgent(agentId);
-          }}
-          onSelect={(agentId) => setSelectedSubAgent(agentId)}
+          onChat={togglePaneSubAgentChat}
           onConfirmResolve={(agentId, approved) => void resolvePaneSubAgentConfirm(agentId, approved)}
           tintColor={paneTint}
         />
@@ -10283,18 +10290,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
                 onClose={() => dismissSpawnsColumn(pane.id, paneSubAgents.map((s) => s.id))}
                 onCancel={(agentId) => void cancelPaneSubAgent(agentId)}
                 onRetry={(agentId) => void retryPaneSubAgent(agentId)}
-                onChat={(agentId) => {
-                  const sub = paneSubAgents.find((item) => item.id === agentId);
-                  const isDelegation =
-                    agentId.startsWith("dlg-") ||
-                    !!(sub?.events?.some((evt) => evt.type.startsWith("delegation")));
-                  if (isDelegation) {
-                    void openDelegatedAvatarSession(agentId);
-                    return;
-                  }
-                  setSelectedSubAgent(agentId);
-                }}
-                onSelect={(agentId) => setSelectedSubAgent(agentId)}
+                onChat={togglePaneSubAgentChat}
                 onConfirmResolve={(agentId, approved) => void resolvePaneSubAgentConfirm(agentId, approved)}
                 tintColor={paneTint}
               />

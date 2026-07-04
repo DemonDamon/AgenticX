@@ -975,6 +975,22 @@ export function ChatView({ onOpenConfirm, onOpenClarification, onSubmitClarifica
     }
   };
 
+  const toggleSubAgentChat = (agentId: string) => {
+    if (selectedSubAgent === agentId) {
+      setSelectedSubAgent(null);
+      return;
+    }
+    const sub = subAgents.find((item) => item.id === agentId);
+    const isDelegation =
+      agentId.startsWith("dlg-") ||
+      !!(sub?.sessionId && sub?.events?.some((evt) => evt.type.startsWith("delegation")));
+    if (isDelegation) {
+      void openDelegatedAvatarSession(agentId);
+      return;
+    }
+    setSelectedSubAgent(agentId);
+  };
+
   const sendChat = async (
     userText: string,
     opts?: {
@@ -2566,16 +2582,7 @@ export function ChatView({ onOpenConfirm, onOpenClarification, onSubmitClarifica
         onToggle={() => setPanelOpen((v) => !v)}
         onCancel={onCancelSubAgent}
         onRetry={onRetrySubAgent}
-        onChat={(id) => {
-          const sub = subAgents.find((item) => item.id === id);
-          const isDelegation = id.startsWith("dlg-") || !!(sub?.sessionId && sub?.events?.some((evt) => evt.type.startsWith("delegation")));
-          if (isDelegation) {
-            void openDelegatedAvatarSession(id);
-            return;
-          }
-          setSelectedSubAgent(id);
-        }}
-        onSelect={(id) => setSelectedSubAgent(id)}
+        onChat={toggleSubAgentChat}
       />
       {/* Reanswer model picker */}
       {modelPickerOpen && (
