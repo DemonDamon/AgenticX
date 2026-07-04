@@ -328,6 +328,21 @@ body {
   tab-size: 2;
 }
 
+/* SubAgentCard 摘要 Markdown 渲染 */
+.agx-subagent-summary p { margin: 0 0 0.35em; line-height: 1.5; }
+.agx-subagent-summary p:last-child { margin-bottom: 0; }
+.agx-subagent-summary h1, .agx-subagent-summary h2, .agx-subagent-summary h3 {
+  font-size: 0.75rem; font-weight: 600; margin: 0.4em 0 0.2em; color: var(--text-strong);
+}
+.agx-subagent-summary ul, .agx-subagent-summary ol { padding-left: 1.2em; margin: 0.2em 0; }
+.agx-subagent-summary li { margin-bottom: 0.15em; }
+.agx-subagent-summary code {
+  font-size: 0.7rem; background: rgba(var(--theme-color-rgb), 0.1);
+  padding: 0.1em 0.3em; border-radius: 0.25em;
+}
+.agx-subagent-summary strong { color: var(--text-strong); font-weight: 600; }
+
+
 /* xterm default stylesheet forces viewport to #000; let canvas + parent surface show through */
 .xterm .xterm-viewport {
   background-color: transparent !important;

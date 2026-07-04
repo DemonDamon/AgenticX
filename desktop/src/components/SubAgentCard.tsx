@@ -1,13 +1,20 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
+import { createPortal } from "react-dom";
+import { Check, ChevronDown } from "lucide-react";
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
 import type { SubAgent } from "../store";
 import { useAppStore } from "../store";
 import { formatModelOptionLabel } from "../utils/model-display";
+import { collectSelectableModelOptions, isModelSelectable } from "../utils/model-options";
+import { ProviderIcon } from "./ProviderIcon";
 
 type Props = {
   subAgent: SubAgent;
   onCancel: (agentId: string) => void;
   onRetry: (agentId: string) => void;
   onChat: (agentId: string) => void;
+  onModelChange?: (agentId: string, provider: string, model: string) => void;
   onConfirmResolve?: (agentId: string, approved: boolean) => void;
   selected?: boolean;
 };
@@ -233,11 +240,375 @@ function ConfirmWithCountdown({
   );
 }
 
+function subAgentModelPickerPanelStyle(anchor: DOMRect): CSSProperties {
+  const width = Math.min(280, Math.max(220, anchor.width + 40));
+  const left = Math.min(Math.max(8, anchor.left), window.innerWidth - width - 8);
+  const top = anchor.bottom + 6;
+  return { position: "fixed", top, left, width, zIndex: 50 };
+}
+
+function SubAgentModelPicker({
+  provider,
+  model,
+  onChange,
+}: {
+  provider?: string;
+  model?: string;
+  onChange: (provider: string, model: string) => void;
+}) {
+  const settings = useAppStore((s) => s.settings.providers);
+  const [open, setOpen] = useState(false);
+  const anchorRef = useRef<HTMLButtonElement>(null);
+  const [panelStyle, setPanelStyle] = useState<CSSProperties>({});
+
+  const options = useMemo(() => collectSelectableModelOptions(settings), [settings]);
+  const currentProvider = (provider ?? "").trim();
+  const currentModel = (model ?? "").trim();
+  const label = useMemo(() => {
+    if (!currentModel) return "选择模型";
+    if (!currentProvider) return currentModel;
+    if (!isModelSelectable(currentProvider, currentModel, settings)) return "选择模型";
+    return formatModelOptionLabel(currentProvider, currentModel, settings[currentProvider]);
+  }, [currentModel, currentProvider, settings]);
+
+  const syncPanelPosition = useCallback(() => {
+    const el = anchorRef.current;
+    if (!el) return;
+    setPanelStyle(subAgentModelPickerPanelStyle(el.getBoundingClientRect()));
+  }, []);
+
+  useLayoutEffect(() => {
+    if (!open) return;
+    syncPanelPosition();
+    const onReflow = () => syncPanelPosition();
+    window.addEventListener("resize", onReflow);
+    window.addEventListener("scroll", onReflow, true);
+    return () => {
+      window.removeEventListener("resize", onReflow);
+      window.removeEventListener("scroll", onReflow, true);
+    };
+  }, [open, syncPanelPosition, options.length]);
+
+  return (
+    <>
+      <button
+        ref={anchorRef}
+        type="button"
+        className="inline-flex max-w-[160px] min-w-0 items-center gap-0.5 rounded border border-[var(--ui-btn-primary-border)] bg-[rgba(var(--theme-color-rgb),0.1)] px-1.5 py-0.5 text-[10px] font-medium text-[var(--kb-citation-fg)] transition hover:bg-[rgba(var(--theme-color-rgb),0.16)]"
+        title={label}
+        onClick={() => setOpen((v) => !v)}
+      >
+        <ProviderIcon provider={currentProvider} className="h-3 w-3 shrink-0" />
+        <span className="min-w-0 truncate">{label}</span>
+        <ChevronDown className={`h-3 w-3 shrink-0 transition-transform ${open ? "rotate-180" : ""}`} strokeWidth={2} />
+      </button>
+      {open &&
+        createPortal(
+          <>
+            <div className="fixed inset-0 z-40" onClick={() => setOpen(false)} />
+            <div
+              className="fixed z-50 max-h-56 overflow-y-auto rounded-xl border border-border bg-surface-panel p-1.5 shadow-xl backdrop-blur-xl"
+              style={panelStyle}
+            >
+              {options.length === 0 ? (
+                <div className="px-3 py-2 text-center text-[11px] text-text-muted">请先在设置中配置模型</div>
+              ) : (
+                options.map((opt) => {
+                  const isActive = opt.provider === currentProvider && opt.model === currentModel;
+                  return (
+                    <button
+                      key={`${opt.provider}:${opt.model}`}
+                      type="button"
+                      className={`flex w-full min-w-0 items-center gap-2 rounded-lg px-2 py-1.5 text-left text-[11px] text-text-primary transition-colors ${
+                        isActive ? "bg-surface-hover" : "hover:bg-surface-hover"
+                      }`}
+                      title={opt.label}
+                      onClick={() => {
+                        onChange(opt.provider, opt.model);
+                        setOpen(false);
+                      }}
+                    >
+                      <ProviderIcon provider={opt.provider} className="h-3 w-3 shrink-0" />
+                      <span className="min-w-0 flex-1 truncate">{opt.label}</span>
+                      {isActive ? <Check className="h-3 w-3 shrink-0" strokeWidth={2} /> : null}
+                    </button>
+                  );
+                })
+              )}
+            </div>
+          </>,
+          document.body,
+        )}
+    </>
+  );
+}
+
+type MetaBlockTone = "theme";
+
+const metaBlockToneStyles: Record<
+  MetaBlockTone,
+  { shell: string; title: string; headerBorder: string }
+> = {
+  theme: {
+    shell:
+      "border-[color-mix(in_srgb,rgb(var(--theme-color-rgb))_22%,transparent)] bg-[color-mix(in_srgb,rgb(var(--theme-color-rgb))_6%,transparent)]",
+    title: "text-[var(--kb-citation-fg)]",
+    headerBorder: "border-[color-mix(in_srgb,rgb(var(--theme-color-rgb))_18%,transparent)]",
+  },
+};
+
+function MetaBlockIconButton({
+  label,
+  active = false,
+  onClick,
+  children,
+}: {
+  label: string;
+  active?: boolean;
+  onClick: () => void;
+  children: ReactNode;
+}) {
+  return (
+    <div className="group relative">
+      <button
+        type="button"
+        className={`flex h-6 w-6 items-center justify-center rounded transition hover:bg-[color-mix(in_srgb,var(--surface-hover)_80%,transparent)] ${
+          active ? "bg-[rgba(var(--theme-color-rgb),0.12)]" : ""
+        }`}
+        onClick={onClick}
+        aria-label={label}
+      >
+        {children}
+      </button>
+      <span className="pointer-events-none absolute right-0 top-7 z-50 whitespace-nowrap rounded bg-surface-card-strong px-1.5 py-0.5 text-[10px] text-text-muted opacity-0 shadow-sm ring-1 ring-border transition-opacity group-hover:opacity-100">
+        {label}
+      </span>
+    </div>
+  );
+}
+
+function CopyIcon({ copied }: { copied: boolean }) {
+  if (copied) {
+    return (
+      <svg
+        viewBox="0 0 16 16"
+        fill="none"
+        className="h-3.5 w-3.5 text-[var(--status-success)]"
+        stroke="currentColor"
+        strokeWidth="1.8"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      >
+        <path d="M3 8l3.5 3.5L13 4.5" />
+      </svg>
+    );
+  }
+  return (
+    <svg
+      viewBox="0 0 16 16"
+      fill="none"
+      className="h-3.5 w-3.5 text-text-muted"
+      stroke="currentColor"
+      strokeWidth="1.5"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <rect x="5" y="5" width="8" height="9" rx="1.2" />
+      <path d="M11 5V4a1 1 0 00-1-1H4a1 1 0 00-1 1v8a1 1 0 001 1h1" />
+    </svg>
+  );
+}
+
+function CollapseToggleIcon({ expanded }: { expanded: boolean }) {
+  return (
+    <svg
+      viewBox="0 0 16 16"
+      fill="none"
+      className={`h-3.5 w-3.5 transition-transform ${expanded ? "rotate-180 text-[var(--kb-citation-fg)]" : "text-text-muted"}`}
+      stroke="currentColor"
+      strokeWidth="1.5"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <path d="M4 6l4 4 4-4" />
+    </svg>
+  );
+}
+
+function MetaBlockCollapseButton({
+  expanded,
+  onToggle,
+}: {
+  expanded: boolean;
+  onToggle: () => void;
+}) {
+  return (
+    <MetaBlockIconButton label={expanded ? "收起" : "展开"} active={expanded} onClick={onToggle}>
+      <CollapseToggleIcon expanded={expanded} />
+    </MetaBlockIconButton>
+  );
+}
+
+function SubAgentMetaBlock({
+  title,
+  tone,
+  headerActions,
+  scrollable = false,
+  children,
+}: {
+  title: string;
+  tone: MetaBlockTone;
+  headerActions?: ReactNode;
+  scrollable?: boolean;
+  children: ReactNode;
+}) {
+  const styles = metaBlockToneStyles[tone];
+  return (
+    <div className={`mb-2 overflow-hidden rounded-md border ${styles.shell}`}>
+      <div
+        className={`flex items-center justify-between border-b px-2.5 py-1.5 ${styles.headerBorder}`}
+      >
+        <span className={`text-[11px] font-medium ${styles.title}`}>{title}</span>
+        {headerActions ? <div className="flex items-center gap-0.5">{headerActions}</div> : null}
+      </div>
+      <div
+        className={`px-2.5 py-2 text-xs leading-relaxed text-text-primary ${
+          scrollable ? "max-h-40 overflow-y-auto" : ""
+        }`}
+      >
+        {children}
+      </div>
+    </div>
+  );
+}
+
+/** 任务指令块：与「最终摘要」共用同一套元数据卡片结构 */
+function TaskInstructionBlock({ task }: { task: string }) {
+  const [copied, setCopied] = useState(false);
+  const [editing, setEditing] = useState(false);
+  const [expanded, setExpanded] = useState(false);
+  const [editValue, setEditValue] = useState(task);
+  if (!task) return null;
+
+  const displayTask = editing ? editValue : task;
+
+  const handleCopy = () => {
+    void navigator.clipboard.writeText(displayTask).then(() => {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1500);
+    });
+  };
+
+  return (
+    <SubAgentMetaBlock
+      title="详细指令"
+      tone="theme"
+      scrollable={!expanded && !editing}
+      headerActions={
+        <>
+          <MetaBlockIconButton label="复制指令" onClick={handleCopy}>
+            <CopyIcon copied={copied} />
+          </MetaBlockIconButton>
+          <MetaBlockIconButton
+            label={editing ? "完成编辑" : "编辑指令"}
+            active={editing}
+            onClick={() => setEditing((v) => !v)}
+          >
+            <svg
+              viewBox="0 0 16 16"
+              fill="none"
+              className={`h-3.5 w-3.5 ${editing ? "text-[var(--kb-citation-fg)]" : "text-text-muted"}`}
+              stroke="currentColor"
+              strokeWidth="1.5"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            >
+              <path d="M11.5 2.5a1.414 1.414 0 012 2L5 13H3v-2L11.5 2.5z" />
+            </svg>
+          </MetaBlockIconButton>
+          <MetaBlockCollapseButton expanded={expanded} onToggle={() => setExpanded((v) => !v)} />
+        </>
+      }
+    >
+      {editing ? (
+        <textarea
+          className="w-full resize-none rounded border border-[var(--ui-btn-primary-border)] bg-surface-card px-2 py-1.5 text-xs text-text-primary outline-none focus:ring-1 focus:ring-[var(--ui-btn-primary-border)]"
+          rows={4}
+          value={editValue}
+          onChange={(e) => setEditValue(e.target.value)}
+          autoFocus
+        />
+      ) : (
+        <p className="whitespace-pre-wrap">{task}</p>
+      )}
+    </SubAgentMetaBlock>
+  );
+}
+
+function ResultSummaryBlock({
+  summary,
+  outputFiles,
+  onOpenFile,
+}: {
+  summary: string;
+  outputFiles?: string[];
+  onOpenFile: (path: string) => void;
+}) {
+  const [copied, setCopied] = useState(false);
+  const [expanded, setExpanded] = useState(false);
+
+  const handleCopy = () => {
+    void navigator.clipboard.writeText(summary).then(() => {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1500);
+    });
+  };
+
+  return (
+    <SubAgentMetaBlock
+      title="最终摘要"
+      tone="theme"
+      scrollable={!expanded}
+      headerActions={
+        <>
+          <MetaBlockIconButton label="复制摘要" onClick={handleCopy}>
+            <CopyIcon copied={copied} />
+          </MetaBlockIconButton>
+          <MetaBlockCollapseButton expanded={expanded} onToggle={() => setExpanded((v) => !v)} />
+        </>
+      }
+    >
+      <div className="agx-subagent-summary">
+        <ReactMarkdown remarkPlugins={[remarkGfm]}>{summary}</ReactMarkdown>
+      </div>
+      {outputFiles && outputFiles.length > 0 ? (
+        <div className="mt-2 border-t border-[color-mix(in_srgb,rgb(var(--theme-color-rgb))_15%,transparent)] pt-2">
+          <div className="mb-1 text-[11px] font-medium text-text-primary">产出文件</div>
+          <div className="max-h-20 space-y-0.5 overflow-y-auto">
+            {outputFiles.map((path) => (
+              <button
+                key={path}
+                type="button"
+                className="block w-full truncate text-left text-[11px] font-medium text-[var(--kb-citation-fg)] underline underline-offset-2 hover:opacity-80"
+                title={`打开：${path}`}
+                onClick={() => void onOpenFile(path)}
+              >
+                {path}
+              </button>
+            ))}
+          </div>
+        </div>
+      ) : null}
+    </SubAgentMetaBlock>
+  );
+}
+
 export function SubAgentCard({
   subAgent,
   onCancel,
   onRetry,
   onChat,
+  onModelChange,
   onConfirmResolve,
   selected = false,
 }: Props) {
@@ -263,17 +634,9 @@ export function SubAgentCard({
     });
   }, [subAgent, status.label]);
 
-  const providers = useAppStore((s) => s.settings.providers);
   const canCancel =
     subAgent.status === "running" || subAgent.status === "pending" || subAgent.status === "awaiting_confirm" || subAgent.status === "awaiting_input";
   const canRetry = subAgent.status === "failed" || subAgent.status === "completed" || subAgent.status === "cancelled" || subAgent.status === "paused";
-  const modelLabel = subAgent.model
-    ? formatModelOptionLabel(
-        subAgent.provider ?? "",
-        subAgent.model,
-        subAgent.provider ? providers[subAgent.provider] : undefined,
-      )
-    : "";
   const handleOpenOutputFile = useCallback(async (filePath: string) => {
     const open = window.agenticxDesktop?.shellOpenPath;
     if (!open) return;
@@ -292,15 +655,23 @@ export function SubAgentCard({
       }`}
     >
       <div className="mb-2 flex items-start justify-between gap-2">
-        <div className="min-w-0 text-left">
-          <div className="text-sm font-medium text-text-strong">{subAgent.name}</div>
-          <div className="text-xs text-text-subtle">{subAgent.role}</div>
-          <div className="text-[11px] text-text-faint">ID: {subAgent.id}</div>
-          {modelLabel ? (
-            <div className="mt-1 inline-flex max-w-[220px] items-center rounded border border-[var(--ui-btn-primary-border)] bg-[rgba(var(--theme-color-rgb),0.1)] px-1.5 py-0.5 text-[10px] font-medium text-[var(--kb-citation-fg)]">
-              {modelLabel}
-            </div>
-          ) : null}
+        <div className="min-w-0 flex-1 text-left">
+          <div className="flex flex-wrap items-center gap-1.5">
+            <span className="text-sm font-medium text-text-strong">{subAgent.name}</span>
+            {onModelChange ? (
+              <SubAgentModelPicker
+                provider={subAgent.provider}
+                model={subAgent.model}
+                onChange={(provider, model) => onModelChange(subAgent.id, provider, model)}
+              />
+            ) : null}
+            <span
+              className="select-all rounded bg-surface-card-strong px-1 py-0.5 font-mono text-[10px] text-text-muted ring-1 ring-border"
+              title={`ID: ${subAgent.id}`}
+            >
+              {subAgent.id}
+            </span>
+          </div>
         </div>
         <SubAgentStatusBadge
           agentStatus={subAgent.status}
@@ -310,10 +681,7 @@ export function SubAgentCard({
         />
       </div>
 
-      <div className="mb-2 line-clamp-2 text-xs text-text-subtle">{subAgent.task}</div>
-      {subAgent.currentAction ? (
-        <div className="mb-2 text-xs text-text-muted">{subAgent.currentAction}</div>
-      ) : null}
+      <TaskInstructionBlock task={subAgent.task} />
       {subAgent.status === "awaiting_confirm" && subAgent.pendingConfirm ? (
         <ConfirmWithCountdown
           question={subAgent.pendingConfirm.question}
@@ -333,30 +701,11 @@ export function SubAgentCard({
         </div>
       ) : null}
       {subAgent.resultSummary ? (
-        <div className="mb-2 rounded-md border border-[color-mix(in_srgb,var(--status-success)_25%,transparent)] bg-[color-mix(in_srgb,var(--status-success)_6%,transparent)] p-2">
-          <div className="mb-1 text-[11px] font-medium text-[var(--status-success)]">最终摘要</div>
-          <div className="max-h-24 overflow-y-auto whitespace-pre-wrap text-xs text-text-primary">
-            {subAgent.resultSummary}
-          </div>
-          {subAgent.outputFiles && subAgent.outputFiles.length > 0 ? (
-            <div className="mt-2">
-              <div className="text-[11px] font-medium text-text-primary">产出文件</div>
-              <div className="max-h-20 space-y-0.5 overflow-y-auto">
-                {subAgent.outputFiles.map((path) => (
-                  <button
-                    key={path}
-                    type="button"
-                    className="block w-full truncate text-left text-[11px] font-medium text-[var(--kb-citation-fg)] underline underline-offset-2 hover:opacity-80"
-                    title={`打开：${path}`}
-                    onClick={() => void handleOpenOutputFile(path)}
-                  >
-                    {path}
-                  </button>
-                ))}
-              </div>
-            </div>
-          ) : null}
-        </div>
+        <ResultSummaryBlock
+          summary={subAgent.resultSummary}
+          outputFiles={subAgent.outputFiles}
+          onOpenFile={handleOpenOutputFile}
+        />
       ) : null}
       {typeof subAgent.progress === "number" ? (
         <div className="mb-2">
@@ -396,6 +745,7 @@ export function SubAgentCard({
           >
             {copyFeedback ? "已复制 ✓" : "复制"}
           </button>
+          {/* 任务指令完整内容已在卡片顶部常驻展示 */}
           {subAgent.events.length === 0 ? (
             <div className="text-xs text-text-faint">暂无事件</div>
           ) : (

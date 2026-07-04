@@ -8901,13 +8901,44 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
       const resp = await fetch(`${apiBase}/api/subagent/retry`, {
         method: "POST",
         headers: { "Content-Type": "application/json", "x-agx-desktop-token": apiToken },
-        body: JSON.stringify({ session_id: targetSessionId, agent_id: agentId }),
+        body: JSON.stringify({
+          session_id: targetSessionId,
+          agent_id: agentId,
+          ...(sub?.provider ? { provider: sub.provider } : {}),
+          ...(sub?.model ? { model: sub.model } : {}),
+        }),
       });
       if (!resp.ok) throw new Error(await resp.text());
       addSubAgentEvent(agentId, { type: "retry", content: "已发送重试请求" });
     } catch (err) {
       updateSubAgent(agentId, { status: "failed", currentAction: "重试失败" });
       addSubAgentEvent(agentId, { type: "error", content: `重试失败: ${String(err)}` });
+    }
+  };
+
+  const changePaneSubAgentModel = async (agentId: string, provider: string, model: string) => {
+    if (!apiBase || !apiToken || !pane.sessionId) return;
+    const sub = subAgents.find((item) => item.id === agentId);
+    const targetSessionId = (sub?.sessionId ?? pane.sessionId).trim() || pane.sessionId;
+    updateSubAgent(agentId, { provider, model });
+    try {
+      const resp = await fetch(`${apiBase}/api/subagent/model`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "x-agx-desktop-token": apiToken },
+        body: JSON.stringify({
+          session_id: targetSessionId,
+          agent_id: agentId,
+          provider,
+          model,
+        }),
+      });
+      if (!resp.ok) throw new Error(await resp.text());
+      addSubAgentEvent(agentId, {
+        type: "model_changed",
+        content: `已切换模型：${formatModelOptionLabel(provider, model, settings.providers[provider])}`,
+      });
+    } catch (err) {
+      addSubAgentEvent(agentId, { type: "error", content: `切换模型失败: ${String(err)}` });
     }
   };
 
@@ -10197,6 +10228,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
           onClose={() => dismissSpawnsColumn(pane.id, paneSubAgents.map((s) => s.id))}
           onCancel={(agentId) => void cancelPaneSubAgent(agentId)}
           onRetry={(agentId) => void retryPaneSubAgent(agentId)}
+          onModelChange={(agentId, provider, model) => void changePaneSubAgentModel(agentId, provider, model)}
           onChat={togglePaneSubAgentChat}
           onConfirmResolve={(agentId, approved) => void resolvePaneSubAgentConfirm(agentId, approved)}
           tintColor={paneTint}
@@ -10293,6 +10325,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
                 onClose={() => dismissSpawnsColumn(pane.id, paneSubAgents.map((s) => s.id))}
                 onCancel={(agentId) => void cancelPaneSubAgent(agentId)}
                 onRetry={(agentId) => void retryPaneSubAgent(agentId)}
+                onModelChange={(agentId, provider, model) => void changePaneSubAgentModel(agentId, provider, model)}
                 onChat={togglePaneSubAgentChat}
                 onConfirmResolve={(agentId, approved) => void resolvePaneSubAgentConfirm(agentId, approved)}
                 tintColor={paneTint}

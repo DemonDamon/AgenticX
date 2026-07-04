@@ -742,7 +742,13 @@ class AgentTeamManager:
             return context, context.agent_id
         return None, query
 
-    async def retry_subagent(self, agent_id: str, refined_task: Optional[str] = None) -> Dict[str, Any]:
+    async def retry_subagent(
+        self,
+        agent_id: str,
+        refined_task: Optional[str] = None,
+        provider: Optional[str] = None,
+        model: Optional[str] = None,
+    ) -> Dict[str, Any]:
         context, agent_id = self._resolve_subagent_context(agent_id)
         if context is None:
             return {"ok": False, "error": "not_found", "message": f"未找到子智能体: {agent_id}"}
@@ -777,6 +783,10 @@ class AgentTeamManager:
                     }
 
             context.task = new_task
+            if provider is not None:
+                context.provider_name = str(provider).strip()
+            if model is not None:
+                context.model_name = str(model).strip()
             context.status = SubAgentStatus.RUNNING
             context.error_text = ""
             context.final_text = ""
@@ -819,6 +829,33 @@ class AgentTeamManager:
             "model": context.model_name or self.base_session.model_name or "",
             "workspace_dir": context.workspace_dir or self.base_session.workspace_dir or "",
             "retried": True,
+        }
+
+    async def update_subagent_model(
+        self,
+        agent_id: str,
+        *,
+        provider: Optional[str] = None,
+        model: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        context, agent_id = self._resolve_subagent_context(agent_id)
+        if context is None:
+            return {"ok": False, "error": "not_found", "message": f"未找到子智能体: {agent_id}"}
+        prov = str(provider or "").strip()
+        mod = str(model or "").strip()
+        if not prov and not mod:
+            return {"ok": False, "error": "invalid_args", "message": "provider or model is required"}
+        async with self._lock:
+            if prov:
+                context.provider_name = prov
+            if mod:
+                context.model_name = mod
+            context.updated_at = time.time()
+        return {
+            "ok": True,
+            "agent_id": agent_id,
+            "provider": context.provider_name or self.base_session.provider_name or "",
+            "model": context.model_name or self.base_session.model_name or "",
         }
 
     async def submit_for_longrun(self, entry: Any) -> Dict[str, Any]:

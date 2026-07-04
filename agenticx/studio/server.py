@@ -3657,6 +3657,10 @@ def create_studio_app() -> FastAPI:
         session_id = str(payload.get("session_id", ""))
         agent_id = str(payload.get("agent_id", ""))
         refined_task = payload.get("task")
+        provider_raw = payload.get("provider")
+        model_raw = payload.get("model")
+        provider = str(provider_raw).strip() if isinstance(provider_raw, str) and provider_raw.strip() else None
+        model = str(model_raw).strip() if isinstance(model_raw, str) and model_raw.strip() else None
         if not session_id or not agent_id:
             raise HTTPException(status_code=400, detail="session_id and agent_id are required")
         managed = manager.get(session_id, touch=False)
@@ -3674,6 +3678,8 @@ def create_studio_app() -> FastAPI:
         result = await team_manager.retry_subagent(
             agent_id,
             str(refined_task) if isinstance(refined_task, str) and refined_task.strip() else None,
+            provider=provider,
+            model=model,
         )
         if not result.get("ok"):
             fallback_manager = AgentTeamManager.find_manager_for_agent(
@@ -3685,9 +3691,60 @@ def create_studio_app() -> FastAPI:
                 result = await fallback_manager.retry_subagent(
                     agent_id,
                     str(refined_task) if isinstance(refined_task, str) and refined_task.strip() else None,
+                    provider=provider,
+                    model=model,
                 )
             if not result.get("ok"):
                 raise HTTPException(status_code=400, detail=result.get("message", "retry failed"))
+        return result
+
+    @app.post("/api/subagent/model")
+    async def update_subagent_model(
+        payload: dict,
+        x_agx_desktop_token: str | None = Header(default=None),
+    ) -> dict:
+        _check_token(x_agx_desktop_token)
+        session_id = str(payload.get("session_id", ""))
+        agent_id = str(payload.get("agent_id", ""))
+        provider_raw = payload.get("provider")
+        model_raw = payload.get("model")
+        provider = str(provider_raw).strip() if isinstance(provider_raw, str) and provider_raw.strip() else None
+        model = str(model_raw).strip() if isinstance(model_raw, str) and model_raw.strip() else None
+        if not session_id or not agent_id:
+            raise HTTPException(status_code=400, detail="session_id and agent_id are required")
+        if not provider and not model:
+            raise HTTPException(status_code=400, detail="provider or model is required")
+        managed = manager.get(session_id, touch=False)
+        if managed is None:
+            raise HTTPException(status_code=404, detail="session not found")
+        team_manager = managed.team_manager
+        if team_manager is None:
+            team_manager = AgentTeamManager.find_manager_for_agent(
+                agent_id,
+                include_archived=True,
+                session_id=session_id,
+            )
+            if team_manager is None:
+                raise HTTPException(status_code=404, detail="agent team not initialized")
+        result = await team_manager.update_subagent_model(
+            agent_id,
+            provider=provider,
+            model=model,
+        )
+        if not result.get("ok"):
+            fallback_manager = AgentTeamManager.find_manager_for_agent(
+                agent_id,
+                include_archived=True,
+                session_id=session_id,
+            )
+            if fallback_manager is not None and fallback_manager is not team_manager:
+                result = await fallback_manager.update_subagent_model(
+                    agent_id,
+                    provider=provider,
+                    model=model,
+                )
+            if not result.get("ok"):
+                raise HTTPException(status_code=400, detail=result.get("message", "update model failed"))
         return result
 
     @app.get("/api/mcp/servers")

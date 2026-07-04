@@ -14,6 +14,7 @@ type Props = {
   onCancel: (agentId: string) => void;
   onRetry: (agentId: string) => void;
   onChat: (agentId: string) => void;
+  onModelChange?: (agentId: string, provider: string, model: string) => void;
   onConfirmResolve?: (agentId: string, approved: boolean) => void;
   tintColor?: string;
 };
@@ -28,6 +29,7 @@ export function SpawnsColumn({
   onCancel,
   onRetry,
   onChat,
+  onModelChange,
   onConfirmResolve,
   tintColor,
 }: Props) {
@@ -74,6 +76,7 @@ export function SpawnsColumn({
               onCancel={onCancel}
               onRetry={onRetry}
               onChat={onChat}
+              onModelChange={onModelChange}
               onConfirmResolve={onConfirmResolve}
             />
           ))
