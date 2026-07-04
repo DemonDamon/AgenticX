@@ -7,6 +7,7 @@ Author: Damon Li
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import os
 import re
@@ -1330,6 +1331,14 @@ class AgentTeamManager:
             context.artifacts = dict(session.artifacts)
             context.context_files = dict(session.context_files)
             context.output_files = self._extract_output_files_from_messages(context.agent_messages)
+            # Subagents may write files via bash_exec (redirection / tee) rather than
+            # file_write/file_edit; merge those (disk-verified) paths so the artifact
+            # check below does not falsely fail a task that did produce output files.
+            for bash_path in self._extract_bash_output_paths(
+                context.agent_messages, context.workspace_dir
+            ):
+                if bash_path not in context.output_files:
+                    context.output_files.append(bash_path)
             context.result_summary = self._build_result_summary(context)
             context.result_file = self._persist_result_file(context)
             produced_files = self._merge_output_files(context)
@@ -1605,6 +1614,61 @@ class AgentTeamManager:
                 if path and path not in seen:
                     seen.add(path)
                     paths.append(path)
+        return paths
+
+    def _extract_bash_output_paths(
+        self, messages: List[Dict[str, Any]], workspace_dir: str
+    ) -> List[str]:
+        """Extract disk-verified output file paths from bash_exec redirections.
+
+        Scans assistant tool_calls for ``bash_exec`` commands and pulls targets of
+        ``>`` / ``>>`` / ``tee`` redirections. Only paths that actually exist on
+        disk are returned, so a mis-parsed or read-only path can never introduce a
+        false "missing artifact" failure. Relative paths resolve against
+        ``workspace_dir``.
+        """
+        base = Path(workspace_dir).expanduser() if str(workspace_dir or "").strip() else None
+        paths: List[str] = []
+        seen: set[str] = set()
+        redirect_re = re.compile(r"(?:>>?|\btee\b(?:\s+-a)?)\s+(['\"]?)([^\s'\"|;&<>]+)\1")
+        for msg in messages:
+            if str(msg.get("role", "")) != "assistant":
+                continue
+            for call in msg.get("tool_calls") or []:
+                if not isinstance(call, dict):
+                    continue
+                fn = call.get("function") or {}
+                if str(fn.get("name", "") or "").strip() != "bash_exec":
+                    continue
+                raw_args = fn.get("arguments")
+                if isinstance(raw_args, str):
+                    try:
+                        args = json.loads(raw_args)
+                    except Exception:
+                        continue
+                elif isinstance(raw_args, dict):
+                    args = raw_args
+                else:
+                    continue
+                command = str(args.get("command", "") or "")
+                if not command:
+                    continue
+                for match in redirect_re.finditer(command):
+                    raw = match.group(2).strip()
+                    if not raw or raw.startswith("/dev/"):
+                        continue
+                    candidate = Path(raw).expanduser()
+                    if not candidate.is_absolute() and base is not None:
+                        candidate = base / candidate
+                    try:
+                        if not candidate.exists():
+                            continue
+                    except Exception:
+                        continue
+                    resolved = str(candidate)
+                    if resolved not in seen:
+                        seen.add(resolved)
+                        paths.append(resolved)
         return paths
 
     def _merge_output_files(self, context: SubAgentContext) -> List[str]:
