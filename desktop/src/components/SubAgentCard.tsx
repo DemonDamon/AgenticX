@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { SubAgent } from "../store";
+import { useAppStore } from "../store";
+import { formatModelOptionLabel } from "../utils/model-display";
 
 type Props = {
   subAgent: SubAgent;
@@ -261,13 +263,17 @@ export function SubAgentCard({
     });
   }, [subAgent, status.label]);
 
+  const providers = useAppStore((s) => s.settings.providers);
   const canCancel =
     subAgent.status === "running" || subAgent.status === "pending" || subAgent.status === "awaiting_confirm" || subAgent.status === "awaiting_input";
   const canRetry = subAgent.status === "failed" || subAgent.status === "completed" || subAgent.status === "cancelled" || subAgent.status === "paused";
-  const modelLabel =
-    subAgent.model
-      ? (subAgent.provider ? `${subAgent.provider}/${subAgent.model}` : subAgent.model)
-      : "";
+  const modelLabel = subAgent.model
+    ? formatModelOptionLabel(
+        subAgent.provider ?? "",
+        subAgent.model,
+        subAgent.provider ? providers[subAgent.provider] : undefined,
+      )
+    : "";
   const handleOpenOutputFile = useCallback(async (filePath: string) => {
     const open = window.agenticxDesktop?.shellOpenPath;
     if (!open) return;

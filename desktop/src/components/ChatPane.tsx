@@ -1355,7 +1355,7 @@ function isNearBottom(el: HTMLDivElement, thresholdPx = 96): boolean {
   return remain <= thresholdPx;
 }
 
-function formatToolResultMessage(toolNameRaw: unknown, resultRaw: unknown): { content: string; silent: boolean } {
+function formatToolResultMessage(toolNameRaw: unknown, resultRaw: unknown, providers?: Record<string, import("../utils/provider-display").ProviderDisplayEntry>): { content: string; silent: boolean } {
   const toolName = String(toolNameRaw ?? "tool");
   const resultText = String(resultRaw ?? "");
   if (toolName === "check_resources") {
@@ -1389,7 +1389,10 @@ function formatToolResultMessage(toolNameRaw: unknown, resultRaw: unknown): { co
       const provider = String(parsed.provider ?? "").trim();
       const model = String(parsed.model ?? "").trim();
       const task = String(parsed.task ?? "").replace(/\s+/g, " ").trim();
-      const modelLabel = provider && model ? ` · ${provider}/${model}` : "";
+      const providerEntry = provider && providers ? providers[provider] : undefined;
+      const modelLabel = provider && model
+        ? ` · ${formatModelOptionLabel(provider, model, providerEntry)}`
+        : "";
       const taskPreview = task ? `\n任务: ${task.slice(0, 140)}${task.length > 140 ? "…" : ""}` : "";
       return {
         content: `🚀 已启动子智能体: ${name} (${role})${modelLabel}${agentId ? `\nID: ${agentId}` : ""}${taskPreview}`,
@@ -7839,7 +7842,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
                   setStreamSearchedQueries([...pendingSearchedQueries]);
                 }
               }
-              const formatted = formatToolResultMessage(toolName, payload.data?.result);
+              const formatted = formatToolResultMessage(toolName, payload.data?.result, settings.providers);
               if (formatted.silent) continue;
               const resultCallId = String(payload.data?.tool_call_id ?? payload.data?.id ?? "").trim();
               const rawContent = serializeToolResultRaw(payload.data?.result);
