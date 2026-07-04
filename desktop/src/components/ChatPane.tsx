@@ -8918,6 +8918,9 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
         body: JSON.stringify({
           session_id: targetSessionId,
           agent_id: agentId,
+          // Send the (possibly edited) task so backend re-runs with the latest
+          // instruction instead of the original one.
+          ...(sub?.task?.trim() ? { task: sub.task.trim() } : {}),
           ...(sub?.provider ? { provider: sub.provider } : {}),
           ...(sub?.model ? { model: sub.model } : {}),
         }),
