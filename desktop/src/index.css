@@ -141,19 +141,21 @@ body {
   color: inherit;
 }
 
-/* 工作区预览选区「引用至当前对话」：实心浮层，hover 略提亮但不透明（对齐 Cursor Add to Chat） */
+/* 工作区预览选区「引用至当前对话」：紧凑 pill 浮层（对齐 Cursor Add to Chat） */
 .agx-selection-quote-btn {
   background-color: var(--surface-popover);
+  border-color: var(--border-subtle);
   color: var(--text-muted);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.35);
 }
 .agx-selection-quote-btn:hover {
-  background-color: color-mix(in srgb, var(--surface-popover) 78%, var(--text-strong) 22%);
-  border-color: var(--border-strong);
+  background-color: color-mix(in srgb, var(--surface-popover) 82%, var(--text-strong) 18%);
+  border-color: color-mix(in srgb, var(--border-subtle) 60%, var(--border-strong) 40%);
   color: var(--text-primary);
-  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.55);
+  box-shadow: 0 3px 12px rgba(0, 0, 0, 0.42);
 }
 .agx-selection-quote-btn:active {
-  background-color: color-mix(in srgb, var(--surface-popover) 70%, var(--text-strong) 30%);
+  background-color: color-mix(in srgb, var(--surface-popover) 74%, var(--text-strong) 26%);
 }
 
 /* 系统状态行（续跑 / Supervisor 通知）：Claude 式轻量 inline，避免与 ToolCallCard 扳手混排 */
