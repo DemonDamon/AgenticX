@@ -359,6 +359,7 @@ export const SessionHistoryPanel = memo(function SessionHistoryPanel({ pane, tin
     if (top + rect.height > vh - pad) top = Math.max(pad, vh - rect.height - pad);
     el.style.left = `${left}px`;
     el.style.top = `${top}px`;
+    el.style.visibility = "visible";
   }, [contextMenu]);
 
   const title = useMemo(() => resolveMetaDisplayName(pane.avatarName), [pane.avatarName]);
@@ -1489,8 +1490,8 @@ export const SessionHistoryPanel = memo(function SessionHistoryPanel({ pane, tin
       {contextMenu ? createPortal(
         <div
           ref={contextMenuRef}
-          className="fixed z-[200] w-[180px] rounded-md border border-border bg-surface-base p-1 shadow-2xl"
-          style={{ left: contextMenu.x, top: contextMenu.y }}
+          className="fixed z-[10000] w-[180px] rounded-md border border-border bg-surface-base p-1 shadow-2xl"
+          style={{ left: contextMenu.x, top: contextMenu.y, visibility: "hidden" }}
           onClick={(e) => e.stopPropagation()}
         >
           <button
