@@ -8162,6 +8162,8 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
               console.debug("[ChatPane] SSE subagent_started", subId, "sessionId:", requestSessionId);
               if (subId) {
                 const isDelegation = Boolean(payload.data?.delegation);
+                const isRetry = Boolean(payload.data?.retried);
+                const alreadyTracked = subAgents.some((sub) => sub.id === subId);
                 const avatarSessionId =
                   (typeof payload.data?.avatar_session_id === "string" && payload.data.avatar_session_id.trim()) || "";
                 addSubAgent({
@@ -8176,10 +8178,24 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
                 updateSubAgent(subId, {
                   status: "running",
                   currentAction: isDelegation ? "委派执行中" : "执行中",
+                  ...(isRetry || alreadyTracked
+                    ? { resultSummary: "", liveOutput: "", outputFiles: [] as string[] }
+                    : {}),
                 });
                 addSubAgentEvent(
                   subId,
-                  { type: isDelegation ? "delegation_started" : "started", content: isDelegation ? `已委派给 ${payload.data?.name ?? subId}` : "已启动" }
+                  {
+                    type: isRetry || alreadyTracked
+                      ? "retry"
+                      : isDelegation
+                        ? "delegation_started"
+                        : "started",
+                    content: isRetry || alreadyTracked
+                      ? "已重新启动"
+                      : isDelegation
+                        ? `已委派给 ${payload.data?.name ?? subId}`
+                        : "已启动",
+                  }
                 );
                 if (isDelegation && avatarSessionId && !isGroupPane) {
                   const dlgName = String(payload.data?.name ?? "").trim();
@@ -8871,7 +8887,13 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
     if (!apiBase || !apiToken || !pane.sessionId) return;
     const sub = subAgents.find((item) => item.id === agentId);
     const targetSessionId = (sub?.sessionId ?? pane.sessionId).trim() || pane.sessionId;
-    updateSubAgent(agentId, { status: "pending", currentAction: "正在重试..." });
+    updateSubAgent(agentId, {
+      status: "pending",
+      currentAction: "正在重试...",
+      resultSummary: "",
+      liveOutput: "",
+      outputFiles: [],
+    });
     try {
       const resp = await fetch(`${apiBase}/api/subagent/retry`, {
         method: "POST",

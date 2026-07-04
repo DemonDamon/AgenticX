@@ -140,7 +140,8 @@ def test_meta_tools_retry_subagent() -> None:
         )
         retry_data = json.loads(retry_raw)
         assert retry_data["ok"] is True
-        assert retry_data["agent_id"] != original_id
+        assert retry_data["agent_id"] == original_id
+        assert retry_data.get("retried") is True
 
     asyncio.run(_run())
 

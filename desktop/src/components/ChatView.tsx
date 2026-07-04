@@ -953,7 +953,13 @@ export function ChatView({ onOpenConfirm, onOpenClarification, onSubmitClarifica
 
   const onRetrySubAgent = async (agentId: string) => {
     if (!apiBase || !sessionId) return;
-    updateSubAgent(agentId, { status: "pending", currentAction: "正在重试..." });
+    updateSubAgent(agentId, {
+      status: "pending",
+      currentAction: "正在重试...",
+      resultSummary: "",
+      liveOutput: "",
+      outputFiles: [],
+    });
     try {
       const resp = await fetch(`${apiBase}/api/subagent/retry`, {
         method: "POST",

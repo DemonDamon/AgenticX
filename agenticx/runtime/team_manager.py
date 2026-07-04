@@ -720,41 +720,106 @@ class AgentTeamManager:
         self._agent_sessions[context.agent_id] = session
         return session
 
+    def _resolve_subagent_context(self, agent_id: str) -> tuple[Optional[SubAgentContext], str]:
+        """Resolve a sub-agent context from active, archived, or alias lookup."""
+        query = agent_id.strip()
+        context = self._agents.get(query)
+        if context is None:
+            archived = self._archived_agents.pop(query, None)
+            if archived is not None:
+                self._agents[query] = archived
+                context = archived
+        if context is None:
+            context = self._find_by_name_or_avatar(query)
+            if context is not None:
+                resolved_id = context.agent_id
+                if resolved_id in self._archived_agents:
+                    self._archived_agents.pop(resolved_id, None)
+                if resolved_id not in self._agents:
+                    self._agents[resolved_id] = context
+                return context, resolved_id
+        if context is not None:
+            return context, context.agent_id
+        return None, query
+
     async def retry_subagent(self, agent_id: str, refined_task: Optional[str] = None) -> Dict[str, Any]:
-        previous = self._agents.get(agent_id)
-        if previous is None:
-            previous = self._find_by_name_or_avatar(agent_id)
-            if previous is not None:
-                agent_id = previous.agent_id
-        if previous is None:
+        context, agent_id = self._resolve_subagent_context(agent_id)
+        if context is None:
             return {"ok": False, "error": "not_found", "message": f"未找到子智能体: {agent_id}"}
-        if previous.status == SubAgentStatus.RUNNING:
+        if context.status == SubAgentStatus.RUNNING:
             return {"ok": False, "error": "still_running", "message": "子智能体仍在运行，无法重试"}
-        new_task = (refined_task or "").strip() or previous.task
-        if previous.error_text:
+
+        new_task = (refined_task or "").strip() or context.task
+        if context.error_text:
             new_task = (
                 f"{new_task}\n\n"
                 "请参考上次失败信息并避免重复问题：\n"
-                f"{previous.error_text}"
+                f"{context.error_text}"
             )
-        result = await self.spawn_subagent(
-            name=previous.name,
-            role=previous.role,
-            task=new_task,
-            source_tool_call_id=previous.source_tool_call_id,
-            provider=previous.provider_name or None,
-            model=previous.model_name or None,
-            workspace_dir=previous.workspace_dir or None,
-            system_prompt=previous.persona_prompt or None,
+
+        async with self._lock:
+            active = self._active_running_count()
+            max_concurrent = self.spawn_config.max_concurrent
+            if active >= max_concurrent:
+                return {
+                    "ok": False,
+                    "error": "max_concurrency_reached",
+                    "message": f"当前并行子智能体已达上限({max_concurrent})",
+                }
+            if active > 0:
+                spawn_check = self.resource_monitor.can_spawn(active_subagents=active)
+                if not spawn_check["allowed"]:
+                    return {
+                        "ok": False,
+                        "error": "resource_limit",
+                        "message": "当前资源占用较高，暂不建议继续启动子智能体",
+                        "resource": spawn_check,
+                    }
+
+            context.task = new_task
+            context.status = SubAgentStatus.RUNNING
+            context.error_text = ""
+            context.final_text = ""
+            context.result_summary = ""
+            context.updated_at = time.time()
+            self._cancelled.discard(agent_id)
+            self._agent_sessions.pop(agent_id, None)
+
+            allowed_tools = self._build_toolset(context.allowed_tool_names)
+            self._tasks[agent_id] = asyncio.create_task(
+                self._run_subagent(context, allowed_tools=allowed_tools)
+            )
+
+        started_event = RuntimeEvent(
+            type=EventType.SUBAGENT_STARTED.value,
+            data={
+                "agent_id": context.agent_id,
+                "name": context.name,
+                "role": context.role,
+                "task": context.task,
+                "status": context.status.value,
+                "depth": context.depth,
+                "mode": context.mode,
+                "provider": context.provider_name or self.base_session.provider_name or "",
+                "model": context.model_name or self.base_session.model_name or "",
+                "retried": True,
+            },
+            agent_id=context.agent_id,
         )
-        if not result.get("ok"):
-            return result
-        new_agent_id = str(result.get("agent_id", "")).strip()
-        new_context = self._agents.get(new_agent_id)
-        if new_context is not None:
-            new_context.context_files.update(previous.context_files)
-            new_context.artifacts.update(previous.artifacts)
-        return result
+        await self._emit(started_event)
+        return {
+            "ok": True,
+            "agent_id": context.agent_id,
+            "name": context.name,
+            "role": context.role,
+            "task": context.task,
+            "depth": context.depth,
+            "mode": context.mode,
+            "provider": context.provider_name or self.base_session.provider_name or "",
+            "model": context.model_name or self.base_session.model_name or "",
+            "workspace_dir": context.workspace_dir or self.base_session.workspace_dir or "",
+            "retried": True,
+        }
 
     async def submit_for_longrun(self, entry: Any) -> Dict[str, Any]:
         """Run one long-running task entry via :meth:`spawn_subagent` and await completion."""
