@@ -33,13 +33,19 @@ const statusMap: Record<string, { icon: string; label: string; toneClass: string
   cancelled: { icon: "⏹", label: "已中断", toneClass: "text-text-muted" },
 };
 
+// All action buttons share a flat ghost base — no border, consistent height.
 const ACTION_BTN_BASE =
-  "rounded-md border px-2 py-1 text-xs font-medium transition disabled:opacity-40";
-const ACTION_BTN_PRIMARY = `${ACTION_BTN_BASE} border-[var(--ui-btn-primary-border)] bg-[rgba(var(--theme-color-rgb),0.08)] text-[var(--kb-citation-fg)] hover:bg-[rgba(var(--theme-color-rgb),0.14)]`;
-const ACTION_BTN_NEUTRAL = `${ACTION_BTN_BASE} border-[var(--border-strong)] text-text-primary hover:bg-surface-hover`;
-const ACTION_BTN_DANGER = `${ACTION_BTN_BASE} border-[color-mix(in_srgb,var(--status-error)_45%,transparent)] text-[var(--status-error)] hover:bg-[color-mix(in_srgb,var(--status-error)_10%,transparent)]`;
-const ACTION_BTN_ACTIVE = `${ACTION_BTN_BASE} border-[var(--ui-btn-primary-border)] bg-[rgba(var(--theme-color-rgb),0.16)] text-[var(--kb-citation-fg)] ring-1 ring-[color-mix(in_srgb,var(--ui-btn-primary-border)_55%,transparent)]`;
-const ACTION_BTN_SUCCESS = `${ACTION_BTN_BASE} border-[color-mix(in_srgb,var(--status-success)_45%,transparent)] text-[var(--status-success)] hover:bg-[color-mix(in_srgb,var(--status-success)_10%,transparent)]`;
+  "inline-flex items-center gap-1 rounded-md px-2.5 py-1 text-[11px] font-medium transition-colors disabled:pointer-events-none disabled:opacity-35";
+// Primary (对话): filled with a very subtle theme tint
+const ACTION_BTN_PRIMARY = `${ACTION_BTN_BASE} bg-[rgba(var(--theme-color-rgb),0.10)] text-[var(--kb-citation-fg)] hover:bg-[rgba(var(--theme-color-rgb),0.18)]`;
+// Active/selected variant (关闭对话)
+const ACTION_BTN_ACTIVE = `${ACTION_BTN_BASE} bg-[rgba(var(--theme-color-rgb),0.20)] text-[var(--kb-citation-fg)] ring-1 ring-[color-mix(in_srgb,var(--ui-btn-primary-border)_60%,transparent)]`;
+// Neutral (展开/收起详情): ghost on hover only
+const ACTION_BTN_NEUTRAL = `${ACTION_BTN_BASE} text-text-muted hover:bg-surface-hover hover:text-text-primary`;
+// Danger (中断): ghost, red text only — no colored border
+const ACTION_BTN_DANGER = `${ACTION_BTN_BASE} text-[var(--status-error)] opacity-75 hover:bg-[color-mix(in_srgb,var(--status-error)_8%,transparent)] hover:opacity-100`;
+// Success (重试): ghost, green text only
+const ACTION_BTN_SUCCESS = `${ACTION_BTN_BASE} text-[var(--status-success)] opacity-75 hover:bg-[color-mix(in_srgb,var(--status-success)_8%,transparent)] hover:opacity-100`;
 
 const AUTO_CONFIRM_SECONDS = 8;
 
@@ -224,14 +230,13 @@ function ConfirmWithCountdown({
       </div>
       <div className="flex items-center gap-2">
         <button
-          className="rounded-md px-3 py-1 text-xs font-medium transition hover:opacity-90"
-          style={{ background: "var(--ui-btn-primary-bg)", color: "var(--ui-btn-primary-text)" }}
+          className="inline-flex items-center gap-1 rounded-md bg-[var(--ui-btn-primary-bg)] px-3 py-1 text-[11px] font-medium text-[var(--ui-btn-primary-text)] transition hover:opacity-90"
           onClick={handleApprove}
         >
           通过
         </button>
         <button
-          className={`${ACTION_BTN_DANGER} px-3 py-1`}
+          className={`inline-flex items-center gap-1 rounded-md px-3 py-1 text-[11px] font-medium transition text-[var(--status-error)] opacity-75 hover:bg-[color-mix(in_srgb,var(--status-error)_8%,transparent)] hover:opacity-100`}
           onClick={handleDeny}
         >
           拒绝
@@ -717,7 +722,8 @@ export function SubAgentCard({
         </div>
       ) : null}
 
-      <div className="flex flex-wrap items-center gap-2">
+      <div className="mt-1 flex flex-wrap items-center gap-1">
+        {/* 对话 — primary action */}
         <button
           type="button"
           className={selected ? ACTION_BTN_ACTIVE : ACTION_BTN_PRIMARY}
@@ -725,15 +731,50 @@ export function SubAgentCard({
           title={selected ? "结束与该子智能体的对话，切回 Meta" : "向该子智能体发送消息"}
           onClick={() => onChat(subAgent.id)}
         >
+          <svg viewBox="0 0 14 14" fill="none" className="h-3 w-3 shrink-0" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+            {selected
+              ? <path d="M2 2l10 10M12 2L2 12" />
+              : <><path d="M2 9.5C2 10.33 2.67 11 3.5 11H10l2 2V4.5C12 3.67 11.33 3 10.5 3h-7C2.67 3 2 3.67 2 4.5v5z" /></>}
+          </svg>
           {selected ? "关闭对话" : "对话"}
         </button>
-        <button className={ACTION_BTN_NEUTRAL} onClick={() => setExpanded((v) => !v)}>
-          {expanded ? "收起详情" : "展开详情"}
+
+        {/* 展开/收起详情 — neutral */}
+        <button
+          className={ACTION_BTN_NEUTRAL}
+          onClick={() => setExpanded((v) => !v)}
+        >
+          <svg viewBox="0 0 14 14" fill="none" className={`h-3 w-3 shrink-0 transition-transform ${expanded ? "rotate-180" : ""}`} stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M3 5l4 4 4-4" />
+          </svg>
+          {expanded ? "收起" : "详情"}
         </button>
-        <button className={ACTION_BTN_DANGER} onClick={() => onCancel(subAgent.id)} disabled={!canCancel}>
+
+        {/* 分隔线 */}
+        <span className="mx-0.5 h-3.5 w-px bg-border" aria-hidden />
+
+        {/* 中断 — danger ghost */}
+        <button
+          className={ACTION_BTN_DANGER}
+          onClick={() => onCancel(subAgent.id)}
+          disabled={!canCancel}
+        >
+          <svg viewBox="0 0 14 14" fill="none" className="h-3 w-3 shrink-0" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+            <rect x="3" y="3" width="8" height="8" rx="1" />
+          </svg>
           中断
         </button>
-        <button className={ACTION_BTN_SUCCESS} onClick={() => onRetry(subAgent.id)} disabled={!canRetry}>
+
+        {/* 重试 — success ghost */}
+        <button
+          className={ACTION_BTN_SUCCESS}
+          onClick={() => onRetry(subAgent.id)}
+          disabled={!canRetry}
+        >
+          <svg viewBox="0 0 14 14" fill="none" className="h-3 w-3 shrink-0" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M11 7A4 4 0 013.27 4.27" />
+            <path d="M3 2v3h3" />
+          </svg>
           重试
         </button>
       </div>
