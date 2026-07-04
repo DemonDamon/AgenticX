@@ -959,8 +959,11 @@ export function ChatView({ onOpenConfirm, onOpenClarification, onSubmitClarifica
       status: "pending",
       currentAction: "正在重试...",
       resultSummary: "",
+      resultFile: undefined,
       liveOutput: "",
       outputFiles: [],
+      // Reset activity log so the retry starts clean instead of stacking events.
+      events: [],
     });
     try {
       const resp = await fetch(`${apiBase}/api/subagent/retry`, {

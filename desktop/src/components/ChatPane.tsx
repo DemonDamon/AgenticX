@@ -8904,8 +8904,12 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
       status: "pending",
       currentAction: "正在重试...",
       resultSummary: "",
+      resultFile: undefined,
       liveOutput: "",
       outputFiles: [],
+      // Reset the activity timeline so the retry run starts from a clean log
+      // instead of stacking on top of the previous attempt's events.
+      events: [],
     });
     try {
       const resp = await fetch(`${apiBase}/api/subagent/retry`, {
