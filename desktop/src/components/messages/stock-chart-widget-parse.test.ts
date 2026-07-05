@@ -18,7 +18,34 @@ describe("parseWidgetPayload stock_chart branch", () => {
     expect(parsed?.kind).toBe("stock_chart");
     if (parsed?.kind === "stock_chart") {
       expect(parsed.points).toHaveLength(1);
+      expect(parsed.instruments).toHaveLength(1);
       expect(parsed.attribution).toBe("数据来源：AkShare");
+    }
+  });
+
+  it("parses multi-stock watchlist tabs", () => {
+    const raw = JSON.stringify({
+      type: "stock_chart",
+      data_source_label: "获取数据 | AkShare（免费行情）",
+      watchlist: [
+        {
+          symbol: "603678.SH",
+          name: "火炬电子",
+          points: [{ date: "2026-07-03", open: 81.26, high: 89.4, low: 77.93, close: 85.48, volume: 42942215 }],
+        },
+        {
+          symbol: "002965.SZ",
+          name: "祥鑫科技",
+          points: [{ date: "2026-07-03", open: 50, high: 53, low: 49, close: 52.6, volume: 12000000 }],
+        },
+      ],
+    });
+    const parsed = parseWidgetPayload(raw);
+    expect(parsed?.kind).toBe("stock_chart");
+    if (parsed?.kind === "stock_chart") {
+      expect(parsed.instruments).toHaveLength(2);
+      expect(parsed.instruments[0]?.name).toBe("火炬电子");
+      expect(parsed.dataSourceLabel).toContain("AkShare");
     }
   });
 

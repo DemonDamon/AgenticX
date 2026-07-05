@@ -21,17 +21,52 @@ metadata:
 3. For **time-series** results (price history, macro trend), **must** follow with `show_widget`:
    - Prefer structured JSON (Desktop renders via ECharts):
 
+**Single stock:**
+
 ```json
 {
   "type": "stock_chart",
   "title": "火炬电子 603678",
   "chart_type": "candlestick",
+  "data_source_label": "获取数据 | AkShare（免费行情）",
   "points": [
     {"date": "2026-07-01", "open": 80, "high": 90, "low": 78, "close": 85, "volume": 120000}
   ],
   "attribution": "数据来源：AkShare"
 }
 ```
+
+**Multiple focused stocks (Kimi-style tabs — user can switch 火炬电子 / 祥鑫科技 / 天齐锂业):**
+
+```json
+{
+  "type": "stock_chart",
+  "data_source_label": "获取数据 | AkShare（免费行情）",
+  "attribution": "数据来源：AkShare",
+  "watchlist": [
+    {
+      "symbol": "603678.SH",
+      "name": "火炬电子",
+      "chart_type": "candlestick",
+      "points": [{"date": "2026-07-03", "open": 81.26, "high": 89.4, "low": 77.93, "close": 85.48, "volume": 42942215}]
+    },
+    {
+      "symbol": "002965.SZ",
+      "name": "祥鑫科技",
+      "chart_type": "candlestick",
+      "points": [...]
+    },
+    {
+      "symbol": "002466.SZ",
+      "name": "天齐锂业",
+      "chart_type": "candlestick",
+      "points": [...]
+    }
+  ]
+}
+```
+
+When the user mentions several tickers they are tracking, fetch each via `query_data_source` and pass **one** `show_widget` with a `watchlist` array — do not render three separate widgets.
 
    - Macro trends: same shape with `"chart_type": "line"` and points like `{"date": "2021", "value": 8.1}`.
 4. **Workflow** (same as show_widget discipline): 1–3 sentences visible intro → `query_data_source` → `show_widget` → interpret numbers from tool output only.

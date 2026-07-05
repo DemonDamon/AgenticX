@@ -639,8 +639,9 @@ def _build_widget_capability_block() -> str:
         "- 每次调用渲染 **一个** widget；`title` 必填且简短（会显示在工具卡标题）。\n"
         "- **禁止**用 ImageGen/截图/HTML 文件落盘替代；纯矢量 SVG 或 sandbox iframe 内 HTML 即可。\n"
         "- **时间序列行情/宏观走势**：取数后优先 `show_widget(widget_code=<stock_chart JSON>)`；"
-        "K 线用 `chart_type: \"candlestick\"`，宏观趋势用 `chart_type: \"line\"`，"
-        "并保留 `attribution` 来源角标。\n\n"
+        "K 线用 `chart_type: \"candlestick\"`，宏观趋势用 `chart_type: \"line\"`；"
+        "用户同时关注多只股票时，用 `watchlist` 数组一次出图（Desktop 顶部 Tab 可切换），"
+        "不要拆成多个 widget；并保留 `attribution` / `data_source_label` 来源角标。\n\n"
     )
 
 
