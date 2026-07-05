@@ -15,6 +15,12 @@ export function normalizeSubAgentSummaryMarkdown(raw: string): string {
   // ATX headings must start a line — break when embedded after prose on the same line.
   text = text.replace(/([^\n#])\s+(#{1,6}\s+)/g, "$1\n\n$2");
 
+  // Structured footer is rendered in the dedicated「产出文件」block.
+  const footerIdx = text.lastIndexOf("产出文件:");
+  if (footerIdx >= 0) {
+    text = text.slice(0, footerIdx).trimEnd();
+  }
+
   text = text.replace(/\n{3,}/g, "\n\n");
   return text.trim();
 }

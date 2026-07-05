@@ -28,6 +28,7 @@ import {
 } from "./components/global-search/global-search-events";
 import { Toast } from "./components/ds/Toast";
 import { KbDocumentOpenOverlay } from "./components/kb/KbDocumentOpenOverlay";
+import { resolveSubAgentOutputPaths } from "./utils/subagent-output-files";
 import { addFolderToActiveWorkspace } from "./utils/global-search-workspace";
 import {
   coerceSelectableModel,
@@ -112,19 +113,6 @@ function isEditableTarget(target: EventTarget | null): boolean {
 function isInsideXterm(target: EventTarget | null): boolean {
   if (!(target instanceof HTMLElement)) return false;
   return Boolean(target.closest(".xterm"));
-}
-
-function extractOutputFiles(summary?: string): string[] {
-  if (!summary) return [];
-  const marker = "产出文件:";
-  const idx = summary.lastIndexOf(marker);
-  if (idx < 0) return [];
-  const raw = summary.slice(idx + marker.length).trim();
-  if (!raw || raw === "(无)") return [];
-  return raw
-    .split(",")
-    .map((item) => item.trim())
-    .filter((item) => item.length > 0);
 }
 
 function normalizePersistedWorkspaceState(raw: unknown): PersistedWorkspaceState | null {
@@ -1021,6 +1009,7 @@ export function App() {
             status?: "pending" | "running" | "paused" | "completed" | "failed" | "cancelled";
             result_summary?: string;
             result_file?: string;
+            output_files?: string[];
             error_text?: string;
             recent_events?: Array<{ type?: string; data?: Record<string, unknown> }>;
             pending_confirm?: { request_id?: string; question?: string; context?: Record<string, unknown> } | null;
@@ -1076,7 +1065,16 @@ export function App() {
             staleMissCountRef.current[id] = 0;
           }
           const summaryText = (item.result_summary ?? "").trim();
-          const outputFiles = extractOutputFiles(summaryText);
+          const resultFile =
+            typeof item.result_file === "string" && item.result_file.trim()
+              ? item.result_file.trim()
+              : undefined;
+          const outputFiles = resolveSubAgentOutputPaths(summaryText, {
+            resultFile,
+            outputFiles: Array.isArray(item.output_files)
+              ? item.output_files.map((p) => String(p))
+              : undefined,
+          });
           const currentAction =
             effectiveStatus === "awaiting_confirm"
               ? existing?.currentAction || "等待你的确认"
@@ -1127,7 +1125,7 @@ export function App() {
             provider: item.provider ?? existing?.provider,
             model: item.model ?? existing?.model,
             resultSummary: summaryText || undefined,
-            resultFile: typeof item.result_file === "string" && item.result_file ? item.result_file : undefined,
+            resultFile,
             outputFiles,
             pendingConfirm,
             pendingClarification,

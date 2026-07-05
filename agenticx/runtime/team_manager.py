@@ -1100,6 +1100,7 @@ class AgentTeamManager:
             "provider": context.provider_name or self.base_session.provider_name or "",
             "model": context.model_name or self.base_session.model_name or "",
             "output_files": list(context.output_files[:200]),
+            "result_file": context.result_file or "",
             "pending_confirm": pending_confirm,
             "pending_clarification": pending_clarification,
             "avatar_id": context.avatar_id or None,
@@ -1330,15 +1331,7 @@ class AgentTeamManager:
             context.agent_messages = list(session.agent_messages)
             context.artifacts = dict(session.artifacts)
             context.context_files = dict(session.context_files)
-            context.output_files = self._extract_output_files_from_messages(context.agent_messages)
-            # Subagents may write files via bash_exec (redirection / tee) rather than
-            # file_write/file_edit; merge those (disk-verified) paths so the artifact
-            # check below does not falsely fail a task that did produce output files.
-            for bash_path in self._extract_bash_output_paths(
-                context.agent_messages, context.workspace_dir
-            ):
-                if bash_path not in context.output_files:
-                    context.output_files.append(bash_path)
+            context.output_files = self._finalize_output_files(context)
             context.result_summary = self._build_result_summary(context)
             context.result_file = self._persist_result_file(context)
             produced_files = self._merge_output_files(context)
@@ -1569,7 +1562,8 @@ class AgentTeamManager:
             if text:
                 parts.extend(["", text])
             if file_list:
-                parts.extend(["", f"产出文件：{', '.join(file_list)}"])
+                parts.extend(["", "产出文件："])
+                parts.extend(f"{idx}. {path}" for idx, path in enumerate(file_list, start=1))
             summary = "\n".join(parts)
         elif context.status == SubAgentStatus.PAUSED:
             text = (context.final_text or "任务已暂停，可基于当前进展继续。").strip()
@@ -1579,17 +1573,78 @@ class AgentTeamManager:
             if text:
                 parts.extend(["", text])
             if file_list:
-                parts.extend(["", f"产出文件：{', '.join(file_list)}"])
+                parts.extend(["", "产出文件："])
+                parts.extend(f"{idx}. {path}" for idx, path in enumerate(file_list, start=1))
             summary = "\n".join(parts)
         elif context.status == SubAgentStatus.CANCELLED:
             summary = f"**{name}** 已取消。"
         else:
             err = (context.error_text or "未知错误").strip()
             summary = f"**{name}** 执行失败：{err}"
-        # Approximate <=500 token with conservative 2000 chars.
-        if len(summary) > 2000:
-            summary = summary[:2000] + "...(truncated)"
         return summary
+
+    def _finalize_output_files(self, context: SubAgentContext) -> List[str]:
+        """Collect paths created or modified during this sub-agent run."""
+        tool_paths = self._extract_output_files_from_messages(context.agent_messages)
+        bash_paths = self._extract_bash_output_paths(context.agent_messages, context.workspace_dir)
+        mkdir_paths = self._extract_bash_mkdir_paths(context.agent_messages, context.workspace_dir)
+        artifact_paths = [str(path) for path in context.artifacts.keys()]
+        trusted: set[str] = set()
+        for raw in tool_paths:
+            if not raw:
+                continue
+            trusted.add(raw)
+            try:
+                trusted.add(str(Path(raw).expanduser().resolve()))
+            except OSError:
+                pass
+        return self._filter_task_produced_paths(
+            tool_paths + bash_paths + mkdir_paths + artifact_paths,
+            task_started_at=context.created_at,
+            trusted_paths=trusted,
+        )
+
+    @staticmethod
+    def _filter_task_produced_paths(
+        paths: Sequence[str],
+        *,
+        task_started_at: float,
+        trusted_paths: Optional[set[str]] = None,
+    ) -> List[str]:
+        """Keep only files/dirs written during the task; skip pre-existing scan targets."""
+        trusted = trusted_paths or set()
+        slack = 5.0
+        kept: List[str] = []
+        seen: set[str] = set()
+        for raw in paths:
+            if not raw:
+                continue
+            try:
+                candidate = Path(raw).expanduser()
+                if not candidate.exists():
+                    continue
+                resolved = str(candidate.resolve())
+            except OSError:
+                continue
+            if resolved in seen:
+                continue
+            if resolved in trusted or raw in trusted:
+                seen.add(resolved)
+                kept.append(resolved)
+                continue
+            try:
+                stat = candidate.stat()
+            except OSError:
+                continue
+            if candidate.is_file():
+                if stat.st_mtime >= task_started_at - slack:
+                    seen.add(resolved)
+                    kept.append(resolved)
+            elif candidate.is_dir() and stat.st_mtime >= task_started_at - slack:
+                # Directory only if touched during the task (e.g. mkdir -p), not pre-existing roots.
+                seen.add(resolved)
+                kept.append(resolved)
+        return kept
 
     def _extract_output_files_from_messages(self, messages: List[Dict[str, Any]]) -> List[str]:
         paths: List[str] = []
@@ -1661,11 +1716,59 @@ class AgentTeamManager:
                     if not candidate.is_absolute() and base is not None:
                         candidate = base / candidate
                     try:
-                        if not candidate.exists():
+                        if not candidate.exists() or candidate.is_dir():
                             continue
                     except Exception:
                         continue
                     resolved = str(candidate)
+                    if resolved not in seen:
+                        seen.add(resolved)
+                        paths.append(resolved)
+        return paths
+
+    def _extract_bash_mkdir_paths(
+        self, messages: List[Dict[str, Any]], workspace_dir: str
+    ) -> List[str]:
+        """Extract directories explicitly created via mkdir in bash_exec."""
+        base = Path(workspace_dir).expanduser() if str(workspace_dir or "").strip() else None
+        paths: List[str] = []
+        seen: set[str] = set()
+        mkdir_re = re.compile(r"\bmkdir\s+(?:-(?:p|m)\s+)*(['\"]?)([^\s'\"|;&<>]+)\1")
+        for msg in messages:
+            if str(msg.get("role", "")) != "assistant":
+                continue
+            for call in msg.get("tool_calls") or []:
+                if not isinstance(call, dict):
+                    continue
+                fn = call.get("function") or {}
+                if str(fn.get("name", "") or "").strip() != "bash_exec":
+                    continue
+                raw_args = fn.get("arguments")
+                if isinstance(raw_args, str):
+                    try:
+                        args = json.loads(raw_args)
+                    except Exception:
+                        continue
+                elif isinstance(raw_args, dict):
+                    args = raw_args
+                else:
+                    continue
+                command = str(args.get("command", "") or "")
+                if not command:
+                    continue
+                for match in mkdir_re.finditer(command):
+                    raw = match.group(2).strip()
+                    if not raw:
+                        continue
+                    candidate = Path(raw).expanduser()
+                    if not candidate.is_absolute() and base is not None:
+                        candidate = base / candidate
+                    try:
+                        if not candidate.is_dir():
+                            continue
+                    except Exception:
+                        continue
+                    resolved = str(candidate.resolve())
                     if resolved not in seen:
                         seen.add(resolved)
                         paths.append(resolved)

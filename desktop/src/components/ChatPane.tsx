@@ -63,6 +63,7 @@ import { HOOK_BLOCK_RE } from "../utils/hook-block-message";
 import { expandMessagesToTopLevelRows } from "./messages/react-blocks";
 import { shouldHideStreamOverlay, shouldShowMidTurnStreamActivity } from "../utils/stream-overlay-policy";
 import { flushSubAgentLiveOutput } from "../utils/subagent-live-output";
+import { resolveSubAgentOutputPaths } from "../utils/subagent-output-files";
 import { TurnToolGroupCard } from "./messages/TurnToolGroupCard";
 import { WorkingIndicator } from "./messages/WorkingIndicator";
 import { ChatImAvatar, ImBubble } from "./messages/ImBubble";
@@ -8281,15 +8282,18 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
               if (subId) {
                 flushSubAgentLiveOutput(subId);
                 const isDelegation = Boolean(payload.data?.delegation);
+                const summary =
+                  typeof payload.data?.summary === "string" ? payload.data.summary : undefined;
+                const resultFile =
+                  typeof payload.data?.result_file === "string" && payload.data.result_file
+                    ? payload.data.result_file
+                    : undefined;
                 updateSubAgent(subId, {
                   status: "completed",
                   currentAction: isDelegation ? "委派完成（查看摘要）" : "已完成（查看摘要）",
-                  resultSummary:
-                    typeof payload.data?.summary === "string" ? payload.data.summary : undefined,
-                  resultFile:
-                    typeof payload.data?.result_file === "string" && payload.data.result_file
-                      ? payload.data.result_file
-                      : undefined,
+                  resultSummary: summary,
+                  resultFile,
+                  outputFiles: resolveSubAgentOutputPaths(summary, { resultFile }),
                   sessionId:
                     (typeof payload.data?.avatar_session_id === "string" && payload.data.avatar_session_id.trim())
                       || undefined,

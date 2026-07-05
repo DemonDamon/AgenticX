@@ -38,6 +38,7 @@ import { HOOK_BLOCK_RE } from "../utils/hook-block-message";
 import { expandMessagesToTopLevelRows } from "./messages/react-blocks";
 import { shouldHideStreamOverlay, shouldShowMidTurnStreamActivity } from "../utils/stream-overlay-policy";
 import { flushSubAgentLiveOutput } from "../utils/subagent-live-output";
+import { resolveSubAgentOutputPaths } from "../utils/subagent-output-files";
 import { TurnToolGroupCard } from "./messages/TurnToolGroupCard";
 import { messagePlainTextForClipboard } from "../utils/markdown-copy-format";
 import { buildCompactionNoticeText } from "../utils/context-notice";
@@ -1755,12 +1756,18 @@ export function ChatView({ onOpenConfirm, onOpenClarification, onSubmitClarifica
               if (subId) {
                 flushSubAgentLiveOutput(subId);
                 const isDelegation = Boolean(payload.data?.delegation);
+                const summary =
+                  typeof payload.data?.summary === "string" ? payload.data.summary : undefined;
+                const resultFile =
+                  typeof payload.data?.result_file === "string" && payload.data.result_file
+                    ? payload.data.result_file
+                    : undefined;
                 updateSubAgent(subId, {
                   status: "completed",
                   currentAction: isDelegation ? "委派完成" : "已完成",
-                  resultSummary: typeof payload.data?.summary === "string" ? payload.data.summary : undefined,
-                  resultFile: typeof payload.data?.result_file === "string" && payload.data.result_file
-                    ? payload.data.result_file : undefined,
+                  resultSummary: summary,
+                  resultFile,
+                  outputFiles: resolveSubAgentOutputPaths(summary, { resultFile }),
                   sessionId: typeof payload.data?.avatar_session_id === "string" ? payload.data.avatar_session_id : undefined,
                 });
                 addSubAgentEvent(subId, {

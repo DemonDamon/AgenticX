@@ -2,14 +2,14 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, typ
 import * as React from "react";
 import { createPortal } from "react-dom";
 import { Check, ChevronDown } from "lucide-react";
-import ReactMarkdown from "react-markdown";
-import remarkGfm from "remark-gfm";
 import type { SubAgent } from "../store";
 import { useAppStore } from "../store";
 import { formatModelOptionLabel } from "../utils/model-display";
 import { collectSelectableModelOptions, isModelSelectable } from "../utils/model-options";
 import { normalizeSubAgentSummaryMarkdown } from "../utils/subagent-summary-markdown";
+import { mergeSubAgentOutputPaths } from "../utils/subagent-output-files";
 import { isSubAgentLiveStatus } from "../utils/stream-overlay-policy";
+import { CitationMarkdownBody } from "./messages/CitationMarkdownBody";
 import { ProviderIcon } from "./ProviderIcon";
 
 type Props = {
@@ -599,6 +599,10 @@ function ResultSummaryBlock({
   const [copied, setCopied] = useState(false);
   const [expanded, setExpanded] = useState(false);
   const markdown = useMemo(() => normalizeSubAgentSummaryMarkdown(summary), [summary]);
+  const linkedOutputPaths = useMemo(
+    () => mergeSubAgentOutputPaths(outputFiles, resultFile ? [resultFile] : undefined),
+    [outputFiles, resultFile],
+  );
 
   const handleCopy = () => {
     void navigator.clipboard.writeText(markdown).then(() => {
@@ -622,44 +626,31 @@ function ResultSummaryBlock({
       }
     >
       <div className="agx-subagent-summary">
-        <ReactMarkdown remarkPlugins={[remarkGfm]}>{markdown}</ReactMarkdown>
+        <CitationMarkdownBody content={markdown} onRevealPath={onOpenFile} />
       </div>
-      {/* 落盘文件路径 */}
-      {resultFile ? (
+      {linkedOutputPaths.length > 0 ? (
         <div className="mt-2 border-t border-[color-mix(in_srgb,rgb(var(--theme-color-rgb))_15%,transparent)] pt-2">
           <div className="mb-1 flex items-center gap-1 text-[11px] font-medium text-text-primary">
             <svg viewBox="0 0 12 12" fill="none" className="h-3 w-3 shrink-0 text-[var(--status-success)]" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
               <path d="M2 9.5V3.5a1 1 0 011-1h4l2 2V9.5a1 1 0 01-1 1H3a1 1 0 01-1-1z" />
               <path d="M7 2.5V5h2.5" />
             </svg>
-            已落盘
+            产出文件
           </div>
-          <button
-            type="button"
-            className="block w-full truncate text-left text-[11px] font-mono text-[var(--kb-citation-fg)] opacity-80 hover:opacity-100 hover:underline underline-offset-2"
-            title={`打开文件：${resultFile}`}
-            onClick={() => void onOpenFile(resultFile)}
-          >
-            {resultFile}
-          </button>
-        </div>
-      ) : null}
-      {outputFiles && outputFiles.length > 0 ? (
-        <div className="mt-2 border-t border-[color-mix(in_srgb,rgb(var(--theme-color-rgb))_15%,transparent)] pt-2">
-          <div className="mb-1 text-[11px] font-medium text-text-primary">产出文件</div>
-          <div className="max-h-20 space-y-0.5 overflow-y-auto">
-            {outputFiles.map((path) => (
-              <button
-                key={path}
-                type="button"
-                className="block w-full truncate text-left text-[11px] font-medium text-[var(--kb-citation-fg)] underline underline-offset-2 hover:opacity-80"
-                title={`打开：${path}`}
-                onClick={() => void onOpenFile(path)}
-              >
-                {path}
-              </button>
+          <ol className="max-h-28 list-decimal space-y-1 overflow-y-auto pl-4 marker:text-[11px] marker:text-text-muted">
+            {linkedOutputPaths.map((path) => (
+              <li key={path} className="text-[11px] leading-snug text-text-primary">
+                <button
+                  type="button"
+                  className="break-all text-left font-mono text-[var(--kb-citation-fg)] underline underline-offset-2 hover:opacity-80"
+                  title={`打开：${path}`}
+                  onClick={() => void onOpenFile(path)}
+                >
+                  {path}
+                </button>
+              </li>
             ))}
-          </div>
+          </ol>
         </div>
       ) : null}
     </SubAgentMetaBlock>
