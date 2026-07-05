@@ -75,3 +75,16 @@ flowchart TD
 3. `.cursor/plans/2026-07-05-data-source-desktop-integration.plan.md`
 4. `.cursor/plans/2026-07-05-data-source-rich-visualization.plan.md`
 5. `.cursor/plans/2026-07-05-data-source-skill-and-prompt-guidance.plan.md`
+
+## 实施状态（2026-07-05）
+
+| 子规划 | Plan-Id | 状态 | Commit |
+|---|---|---|---|
+| A 核心框架 | `2026-07-05-data-source-gateway-core-framework` | ✅ | `28ec0a89` |
+| B 首批适配器 | `2026-07-05-data-source-adapters-wave1` | ✅ | `d459553f`（与 C 同 commit） |
+| C Desktop 集成 | `2026-07-05-data-source-desktop-integration` | ✅ | `d459553f` |
+| D 富渲染 | `2026-07-05-data-source-rich-visualization` | ✅ | `c85f8182` |
+| E Skill+纪律 | `2026-07-05-data-source-skill-and-prompt-guidance` | ✅ | `2e82625f` |
+| 热修 akshare 新浪源 | — | ✅ | `3846ce51`（Clash fake-ip 下 eastmoney 不可用） |
+
+**里程碑 E2E**：重启 `agx serve`/Desktop 后，问「火炬电子最近一周走势」应走 `query_data_source` → `show_widget(stock_chart)` 全链路。
