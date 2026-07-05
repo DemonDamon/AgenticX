@@ -31,9 +31,16 @@ class _FakePlugin:
         return DataSourceResult(source=self.name, api=api_name, data={"pong": True})
 
 
-def test_build_registry_from_config_empty_when_no_section():
+def test_build_registry_from_config_loads_free_defaults_by_default(monkeypatch, tmp_path):
+    from agenticx.cli import config_manager as cm
+
+    empty_cfg = tmp_path / "config.yaml"
+    empty_cfg.write_text("{}", encoding="utf-8")
+    monkeypatch.setattr(cm.ConfigManager, "GLOBAL_CONFIG_PATH", empty_cfg)
     registry = build_registry_from_config()
-    assert registry.list_plugins() == []
+    names = {plugin.name for plugin in registry.list_plugins()}
+    assert "akshare" in names
+    assert "world_bank" in names
 
 
 def test_unknown_data_source_returns_clear_error():

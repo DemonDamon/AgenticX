@@ -108,6 +108,10 @@ desktop-runtime = [
     # 向量化会走 SOCKS；缺 socksio 则入库阶段才抛 ImportError。
     "socksio>=1.0.0,<2",
 ]
+# ── 统一数据源网关（AkShare 等免费行情插件）──
+data-sources = [
+    "akshare>=1.14",
+]
 # ── 额外 LLM 提供者 ──
 llm = [
     "anthropic>=0.40.0,<1",

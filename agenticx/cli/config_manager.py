@@ -375,6 +375,28 @@ class ConfigManager:
         return path
 
     @classmethod
+    def update_section(
+        cls,
+        section: str,
+        key: str,
+        patch: Dict[str, Any],
+        scope: str = "global",
+    ) -> Path:
+        """Deep-merge ``patch`` into ``section.key`` and persist."""
+        path = cls.GLOBAL_CONFIG_PATH if scope == "global" else cls.PROJECT_CONFIG_PATH
+        data = cls._load_yaml(path)
+        section_data = data.get(section)
+        if not isinstance(section_data, dict):
+            section_data = {}
+        entry = section_data.get(key)
+        if not isinstance(entry, dict):
+            entry = {}
+        section_data[key] = cls._deep_merge(entry, patch if isinstance(patch, dict) else {})
+        data[section] = section_data
+        cls._dump_yaml(path, data)
+        return path
+
+    @classmethod
     def set_cc_bridge_field(cls, field: str, value: Any) -> Path:
         """Write ``cc_bridge.<field>`` to global config.
 

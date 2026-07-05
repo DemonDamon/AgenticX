@@ -1156,6 +1156,10 @@ def create_studio_app() -> FastAPI:
 
     register_memory_graph_routes(app, check_token=_check_token)
 
+    from agenticx.studio.data_sources_routes import register_data_sources_routes
+
+    register_data_sources_routes(app, check_token=_check_token)
+
     def _check_mcp_admin_token(x_agx_desktop_token: str | None) -> None:
         if not desktop_token:
             raise HTTPException(status_code=403, detail="desktop token required for MCP admin APIs")

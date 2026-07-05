@@ -41,6 +41,7 @@ import {
   Library,
   Mic,
   Network,
+  Database,
 } from "lucide-react";
 import { Panel } from "./ds/Panel";
 import { SettingsDropdown } from "./ds/SettingsDropdown";
@@ -84,6 +85,7 @@ import {
 } from "./automation/TokenBudgetConfigSection";
 import { AccountTab } from "./AccountTab";
 import { KnowledgeSettings, type KnowledgeSettingsHandle } from "./settings/knowledge/KnowledgeSettings";
+import { DataSourcesSettings } from "./settings/datasources/DataSourcesSettings";
 import { MemoryGraphExplorer } from "./memory/MemoryGraphExplorer";
 import { TurnArchiveSettingsPanel } from "./memory/TurnArchiveSettingsPanel";
 import {
@@ -980,6 +982,7 @@ const TABS: { id: SettingsTab; label: string; icon: typeof Settings2 }[] = [
   { id: "skills", label: "技能配置", icon: SkillPuzzleIcon },
   // Plan-Id: machi-kb-stage1-local-mvp
   { id: "knowledge", label: "知识库", icon: Library },
+  { id: "data_sources", label: "数据源", icon: Database },
   { id: "memory", label: "记忆管理", icon: Network },
   { id: "hooks", label: "钩子管理", icon: Anchor },
   { id: "automation", label: "定时任务", icon: AutomationTaskIcon },
@@ -1050,11 +1053,12 @@ const CATEGORY_LABELS: Record<string, string> = {
   memory: "记忆与搜索",
   document: "文档解析",
   scheduling: "后台任务",
+  data_source: "数据源",
   meta: "元智能体专用",
   other: "其他",
 };
 
-const CATEGORY_ORDER = ["system", "filesystem", "code", "document", "agent", "memory", "scheduling", "mcp", "skill", "meta", "other"];
+const CATEGORY_ORDER = ["system", "filesystem", "code", "document", "agent", "memory", "data_source", "scheduling", "mcp", "skill", "meta", "other"];
 
 const TOOL_LABELS: Record<string, string> = {
   bash_exec: "Bash",
@@ -9436,6 +9440,8 @@ export function SettingsPanel({
 
             {/* === KNOWLEDGE TAB === Plan-Id: machi-kb-stage1-local-mvp */}
             {tab === "knowledge" && <KnowledgeSettings ref={knowledgeRef} />}
+
+            {tab === "data_sources" && <DataSourcesSettings />}
 
             {/* === MEMORY TAB === Plan-Id: 2026-05-31-near-memory-graph-graphiti */}
             {tab === "memory" && (

@@ -13,6 +13,7 @@ from typing import Any, Callable, Dict, List, Optional
 
 from agenticx.cli.config_manager import ConfigManager
 from agenticx.data_sources.base import DataSourcePlugin, DataSourceResult
+from agenticx.data_sources.catalog import DEFAULT_DATA_SOURCES
 from agenticx.data_sources.errors import (
     DataSourceApiNotFoundError,
     DataSourceNotFoundError,
@@ -87,6 +88,25 @@ def _load_plugin_builder(module_path: str) -> Optional[Callable[[dict], DataSour
     return builder
 
 
+def _effective_data_sources_section(raw: Any) -> Dict[str, Dict[str, Any]]:
+    """Merge user config with catalog defaults (free sources enabled out of the box)."""
+    user_section = raw if isinstance(raw, dict) else {}
+    effective: Dict[str, Dict[str, Any]] = {}
+    for name, default_entry in DEFAULT_DATA_SOURCES.items():
+        user_entry = user_section.get(name)
+        if user_entry is None:
+            effective[name] = dict(default_entry)
+        elif isinstance(user_entry, dict):
+            effective[name] = {**default_entry, **user_entry}
+        else:
+            effective[name] = dict(default_entry)
+    for name, user_entry in user_section.items():
+        if name in effective or not isinstance(user_entry, dict):
+            continue
+        effective[name] = dict(user_entry)
+    return effective
+
+
 def build_registry_from_config(
     *,
     timeout_seconds: float = DEFAULT_CALL_TIMEOUT_SECONDS,
@@ -98,9 +118,7 @@ def build_registry_from_config(
     """
     registry = DataSourceRegistry(timeout_seconds=timeout_seconds)
     global_data = ConfigManager._load_yaml(ConfigManager.GLOBAL_CONFIG_PATH) or {}
-    section = global_data.get("data_sources")
-    if not isinstance(section, dict):
-        return registry
+    section = _effective_data_sources_section(global_data.get("data_sources"))
 
     for name, raw_entry in section.items():
         if not isinstance(raw_entry, dict):
