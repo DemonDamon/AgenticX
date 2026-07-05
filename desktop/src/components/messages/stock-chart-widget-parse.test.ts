@@ -59,6 +59,29 @@ describe("parseWidgetPayload stock_chart branch", () => {
     expect(parsed?.kind).toBe("stock_chart");
   });
 
+  it("parses watchlist JSON even when the top-level type field is missing", () => {
+    const raw = JSON.stringify({
+      chart_type: "candlestick",
+      watchlist: [
+        {
+          symbol: "603678",
+          name: "火炬电子",
+          data: [{ date: "2026-07-03", open: 81.26, high: 89.4, low: 77.93, close: 85.48, volume: 42942215 }],
+        },
+        {
+          symbol: "002965",
+          name: "祥鑫科技",
+          data: [{ date: "2026-07-03", open: 50.77, high: 53.5, low: 49.13, close: 52.6, volume: 22610409 }],
+        },
+      ],
+    });
+    const parsed = parseWidgetPayload(raw);
+    expect(parsed?.kind).toBe("stock_chart");
+    if (parsed?.kind === "stock_chart") {
+      expect(parsed.instruments).toHaveLength(2);
+    }
+  });
+
   it("returns null when points are missing", () => {
     const raw = JSON.stringify({ type: "stock_chart", title: "x", points: [] });
     expect(parseWidgetPayload(raw)).toBeNull();

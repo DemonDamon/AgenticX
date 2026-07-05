@@ -1188,7 +1188,10 @@ STUDIO_TOOLS: List[Dict[str, Any]] = [
                 "A->B->C style diagram — including simple 3-node chains. NEVER substitute "
                 "markdown text/code blocks (```text```, arrow chains, ↓ lines, mermaid source). "
                 "Before calling: output 1-3 sentences of visible intro prose in the same turn "
-                "(not in reasoning/thinking). Then call show_widget, then explain in detail."
+                "(not in reasoning/thinking). Then call show_widget, then explain in detail. "
+                "For structured stock/macro charts, widget_code MUST be JSON starting with "
+                '\'{"type": "stock_chart", ...}\' — the "type" field is REQUIRED, omitting it '
+                "will render as unreadable raw text instead of a chart."
             ),
             "parameters": {
                 "type": "object",
@@ -5009,6 +5012,31 @@ def _decode_patch_token(token: str) -> Tuple[Optional[dict[str, Any]], Optional[
         return None, f"invalid patch token: {exc}"
 
 
+def _looks_like_stock_chart_payload(parsed: Dict[str, Any]) -> bool:
+    """Detect a stock_chart JSON even if the model forgot the `type` field.
+
+    Models sometimes emit `{"chart_type": ..., "watchlist": [...]}` without the
+    literal `"type": "stock_chart"` marker. Recognizing the shape (watchlist /
+    points-with-OHLC-keys) avoids silently degrading to a raw-JSON HTML widget.
+    """
+    if parsed.get("type") == "stock_chart":
+        return True
+    if parsed.get("type") not in (None, "", "stock_chart"):
+        return False
+    watchlist = parsed.get("watchlist") or parsed.get("instruments") or parsed.get("series")
+    if isinstance(watchlist, list) and watchlist:
+        first = watchlist[0]
+        if isinstance(first, dict) and isinstance(first.get("points") or first.get("data"), list):
+            return True
+    rows = parsed.get("points") or parsed.get("data")
+    if isinstance(rows, list) and rows and isinstance(rows[0], dict):
+        keys = {str(k).lower() for k in rows[0].keys()}
+        ohlc_keys = {"open", "high", "low", "close", "开盘", "最高", "最低", "收盘"}
+        if keys & ohlc_keys:
+            return True
+    return False
+
+
 def _tool_show_widget(arguments: Dict[str, Any]) -> str:
     """Return a widget payload JSON consumed by the Desktop ToolCallCard.
 
@@ -5029,7 +5057,8 @@ def _tool_show_widget(arguments: Dict[str, Any]) -> str:
     if stripped.startswith("{") and stripped.endswith("}"):
         try:
             parsed = json.loads(stripped)
-            if isinstance(parsed, dict) and parsed.get("type") == "stock_chart":
+            if isinstance(parsed, dict) and _looks_like_stock_chart_payload(parsed):
+                parsed.setdefault("type", "stock_chart")
                 return json.dumps(parsed, ensure_ascii=False)
         except json.JSONDecodeError:
             pass

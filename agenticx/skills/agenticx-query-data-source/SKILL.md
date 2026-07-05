@@ -20,6 +20,10 @@ metadata:
 2. `query_data_source(data_source_name=..., api_name=..., params={...})` — fetch structured JSON.
 3. For **time-series** results (price history, macro trend), **must** follow with `show_widget`:
    - Prefer structured JSON (Desktop renders via ECharts):
+   - **The top-level `"type": "stock_chart"` field is MANDATORY.** Omitting it makes the
+     Desktop client treat the payload as a generic HTML widget and render the raw JSON
+     text instead of a chart — always double-check this field is present before calling
+     `show_widget`.
 
 **Single stock:**
 

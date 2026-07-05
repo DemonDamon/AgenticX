@@ -90,6 +90,32 @@ function parseInstrument(raw: unknown): StockChartInstrument | null {
   };
 }
 
+/**
+ * Detect a stock_chart-shaped JSON even when the model forgot the literal
+ * `"type": "stock_chart"` marker (e.g. only emitted `chart_type` + `watchlist`).
+ * Mirrors the backend heuristic in `_looks_like_stock_chart_payload` so a
+ * dropped `type` field degrades gracefully instead of rendering raw JSON text.
+ */
+function looksLikeStockChartShape(parsed: Record<string, unknown>): boolean {
+  if (parsed.type === "stock_chart") return true;
+  if (parsed.type !== undefined && parsed.type !== "" && parsed.type !== "stock_chart") return false;
+  const watchlistRaw = parsed.watchlist ?? parsed.instruments ?? parsed.series;
+  if (Array.isArray(watchlistRaw) && watchlistRaw.length > 0) {
+    const first = watchlistRaw[0];
+    if (first && typeof first === "object") {
+      const row = first as Record<string, unknown>;
+      if (Array.isArray(row.points) || Array.isArray(row.data)) return true;
+    }
+  }
+  const rows = Array.isArray(parsed.points) ? parsed.points : parsed.data;
+  if (Array.isArray(rows) && rows.length > 0 && rows[0] && typeof rows[0] === "object") {
+    const keys = Object.keys(rows[0] as Record<string, unknown>).map((k) => k.toLowerCase());
+    const ohlcKeys = ["open", "high", "low", "close", "开盘", "最高", "最低", "收盘"];
+    if (keys.some((k) => ohlcKeys.includes(k))) return true;
+  }
+  return false;
+}
+
 function parseStockChartPayload(parsed: Record<string, unknown>): StockChartPayload | null {
   const watchlistRaw = parsed.watchlist ?? parsed.instruments ?? parsed.series;
   let instruments: StockChartInstrument[] = [];
@@ -146,7 +172,7 @@ export function isBrokenStockChartAttempt(content: string): boolean {
   if (!raw.startsWith("{")) return false;
   try {
     const parsed = JSON.parse(raw) as Record<string, unknown>;
-    return parsed.type === "stock_chart";
+    return parsed.type === "stock_chart" || looksLikeStockChartShape(parsed);
   } catch {
     return /"type"\s*:\s*"stock_chart"/.test(raw);
   }
@@ -161,12 +187,26 @@ export function parseWidgetPayload(content: string): WidgetPayload | null {
   if (!raw.startsWith("{") || !raw.endsWith("}")) return null;
   try {
     const parsed = JSON.parse(raw) as Record<string, unknown>;
-    if (parsed.type === "stock_chart") {
+    if (parsed.type === "stock_chart" || looksLikeStockChartShape(parsed)) {
       return parseStockChartPayload(parsed);
     }
     if (parsed.type !== "widget") return null;
     const widgetCode = typeof parsed.widget_code === "string" ? parsed.widget_code : "";
     if (!widgetCode.trim()) return null;
+    // Backward compat: older/double-wrapped payloads (from before the model
+    // reliably included `type: "stock_chart"`) stash the chart JSON inside
+    // widget_code as a plain HTML widget. Unwrap and retry once.
+    const innerTrimmed = widgetCode.trim();
+    if (innerTrimmed.startsWith("{") && innerTrimmed.endsWith("}")) {
+      try {
+        const inner = JSON.parse(innerTrimmed) as Record<string, unknown>;
+        if (inner.type === "stock_chart" || looksLikeStockChartShape(inner)) {
+          return parseStockChartPayload(inner);
+        }
+      } catch {
+        // not nested JSON — fall through to normal HTML/SVG widget rendering
+      }
+    }
     const title = typeof parsed.title === "string" ? parsed.title.trim() : "";
     const rawMsgs = parsed.loading_messages;
     const loadingMessages = Array.isArray(rawMsgs)

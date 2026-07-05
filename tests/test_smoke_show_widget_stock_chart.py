@@ -26,6 +26,47 @@ def test_show_widget_passes_stock_chart_json_through():
     assert parsed["attribution"] == "数据来源：AkShare"
 
 
+def test_show_widget_infers_stock_chart_type_when_missing_watchlist():
+    """Regression: model emitted watchlist JSON without the literal "type" key.
+
+    Previously this degraded to a raw-JSON HTML widget (unreadable text block).
+    """
+    widget_code = json.dumps(
+        {
+            "chart_type": "candlestick",
+            "watchlist": [
+                {
+                    "symbol": "603678",
+                    "name": "火炬电子",
+                    "data": [
+                        {"date": "2026-07-03", "open": 81.26, "high": 89.4, "low": 77.93, "close": 85.48},
+                    ],
+                },
+            ],
+        },
+        ensure_ascii=False,
+    )
+    result = _tool_show_widget({"title": "ignored", "widget_code": widget_code})
+    parsed = json.loads(result)
+    assert parsed["type"] == "stock_chart"
+    assert parsed["watchlist"][0]["symbol"] == "603678"
+
+
+def test_show_widget_infers_stock_chart_type_when_missing_single_points():
+    widget_code = json.dumps(
+        {
+            "chart_type": "candlestick",
+            "points": [
+                {"date": "2026-07-03", "open": 81.26, "high": 89.4, "low": 77.93, "close": 85.48},
+            ],
+        },
+        ensure_ascii=False,
+    )
+    result = _tool_show_widget({"title": "ignored", "widget_code": widget_code})
+    parsed = json.loads(result)
+    assert parsed["type"] == "stock_chart"
+
+
 def test_show_widget_wraps_regular_html_widget():
     result = _tool_show_widget(
         {
