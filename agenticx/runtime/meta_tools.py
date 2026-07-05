@@ -25,6 +25,7 @@ from agenticx.branding import DEFAULT_META_PRODUCT_LABEL as _DEFAULT_META_PRODUC
 from agenticx.cli.studio_mcp import import_mcp_config, load_available_servers
 from agenticx.cli.studio_skill import get_all_skill_summaries
 from agenticx.cli.config_manager import ConfigManager
+from agenticx.llms.provider_display import format_model_option_label, resolve_provider_config
 from agenticx.llms.provider_fault import is_provider_session_blocked
 from agenticx.llms.provider_resolver import ProviderResolver
 from agenticx.memory.workspace_memory import WorkspaceMemoryStore
@@ -982,6 +983,54 @@ def _augment_automation_instruction_with_contract(
     return f"{contract}\n\n{instruction.strip()}"
 
 
+def _model_choice_with_label(
+    provider: str,
+    model: str,
+    *,
+    providers: dict[str, dict[str, Any]] | None = None,
+) -> Dict[str, Any]:
+    prov = str(provider or "").strip()
+    mdl = str(model or "").strip()
+    cfg = resolve_provider_config(prov, providers)
+    return {
+        "provider": prov,
+        "model": mdl,
+        "label": format_model_option_label(prov, mdl, cfg) if prov and mdl else "",
+    }
+
+
+def _attach_model_labels(
+    payload: Dict[str, Any],
+    *,
+    providers: dict[str, dict[str, Any]] | None = None,
+) -> Dict[str, Any]:
+    for key in ("current", "recommended"):
+        block = payload.get(key)
+        if isinstance(block, dict):
+            labeled = _model_choice_with_label(
+                str(block.get("provider", "")),
+                str(block.get("model", "")),
+                providers=providers,
+            )
+            block.update(labeled)
+    alts = payload.get("alternatives")
+    if isinstance(alts, list):
+        payload["alternatives"] = [
+            {
+                **item,
+                **_model_choice_with_label(
+                    str(item.get("provider", "")),
+                    str(item.get("model", "")),
+                    providers=providers,
+                ),
+            }
+            if isinstance(item, dict)
+            else item
+            for item in alts
+        ]
+    return payload
+
+
 def _model_capability_score(provider: str, model: str) -> int:
     text = f"{provider}/{model}".lower()
     score = 50
@@ -1326,9 +1375,16 @@ def _recommend_subagent_model_payload(
 
     configured_candidates: List[Dict[str, Any]] = []
     enabled_provider_names: set[str] = set()
+    provider_catalog: dict[str, dict[str, Any]] = {}
     try:
         cfg = ConfigManager.load()
-        for provider, provider_cfg in (cfg.providers or {}).items():
+        raw_providers = cfg.providers if isinstance(cfg.providers, dict) else {}
+        provider_catalog = {
+            str(k): dict(v)
+            for k, v in raw_providers.items()
+            if isinstance(v, dict)
+        }
+        for provider, provider_cfg in raw_providers.items():
             if not isinstance(provider_cfg, dict):
                 continue
             if not _provider_enabled(provider_cfg):
@@ -1400,7 +1456,8 @@ def _recommend_subagent_model_payload(
         chosen = all_candidates[0]
 
     if not all_candidates:
-        return {
+        return _attach_model_labels(
+            {
             "ok": True,
             "complexity": {
                 "score": complexity_score,
@@ -1420,7 +1477,9 @@ def _recommend_subagent_model_payload(
             },
             "alternatives": [],
             "note": "无可推荐模型时请勿 spawn_subagent 到已拉黑 provider。",
-        }
+            },
+            providers=provider_catalog if provider_catalog else None,
+        )
 
     recommendation = {
         "provider": current_provider or "",
@@ -1449,7 +1508,8 @@ def _recommend_subagent_model_payload(
             }
         )
 
-    return {
+    return _attach_model_labels(
+        {
         "ok": True,
         "complexity": {
             "score": complexity_score,
@@ -1466,8 +1526,10 @@ def _recommend_subagent_model_payload(
             "reason": rec_reason,
         },
         "alternatives": alternatives,
-        "note": "可在 spawn_subagent 中传 provider/model 来按推荐模型启动该子智能体。",
-    }
+        "note": "spawn_subagent 仍传 provider/model；向用户说明时请只用 label（厂商展示名/模型短名）。",
+        },
+        providers=provider_catalog if isinstance(provider_catalog, dict) else None,
+    )
 
 
 def _find_or_create_avatar_session(

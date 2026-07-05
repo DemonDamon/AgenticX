@@ -161,19 +161,42 @@ export function isProviderDisplayNameEditable(
   return false;
 }
 
+/** Case-insensitive provider entry lookup for usage stats / legacy keys. */
+export function resolveProviderEntry(
+  providers: Record<string, ProviderDisplayEntry> | undefined,
+  providerId: string,
+): ProviderDisplayEntry | undefined {
+  const key = (providerId ?? "").trim();
+  if (!key) return undefined;
+  const direct = providers?.[key];
+  if (direct) return direct;
+  const lower = key.toLowerCase();
+  if (!providers) return undefined;
+  for (const [name, entry] of Object.entries(providers)) {
+    if (name.toLowerCase() === lower) return entry;
+  }
+  return undefined;
+}
+
 export function getProviderDisplayName(
   providerId: string,
   entry?: ProviderDisplayEntry | null,
 ): string {
+  const pid = (providerId ?? "").trim();
+  if (!pid || pid === "(unknown)") return "未知厂商";
   const custom = entry?.displayName?.trim();
   if (custom) return custom;
-  if (providerId === "openai") {
+  if (pid === "openai") {
     const baseUrl = (entry?.baseUrl ?? "").trim();
     if (baseUrl && !isOfficialOpenAIBase(baseUrl)) {
       return "OpenAI 兼容";
     }
   }
-  return PROVIDER_DISPLAY_NAME[providerId] ?? providerId;
+  if (PROVIDER_DISPLAY_NAME[pid]) return PROVIDER_DISPLAY_NAME[pid];
+  if (pid.startsWith("custom_openai_") || pid.startsWith("custom_ollama_")) {
+    return "历史厂商";
+  }
+  return pid;
 }
 
 /** Provider 名称取首字母（用于头像 fallback） */

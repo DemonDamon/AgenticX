@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { X } from "lucide-react";
 import { useAppStore, type ThemeMode, type TokenDashboardRange } from "../store";
-import { getProviderDisplayName } from "../utils/provider-display";
+import { getProviderDisplayName, resolveProviderEntry } from "../utils/provider-display";
 import { fetchUsageDashboard, type UsageBreakdownItem, type UsageDailyRow, type UsageSummary, type UsageTopModel } from "../services/usageApi";
 import {
   readUsageDashboardCache,
@@ -73,6 +73,15 @@ export function TokenDashboardPanel({ open, onClose }: Props) {
   const apiToken = useAppStore((s) => s.apiToken);
   const apiBase = useAppStore((s) => s.apiBase);
   const providers = useAppStore((s) => s.settings.providers);
+
+  const breakdownLabel = useCallback(
+    (item: UsageBreakdownItem) => {
+      if (item.label?.trim()) return item.label.trim();
+      const entry = resolveProviderEntry(providers, item.key);
+      return getProviderDisplayName(item.key, entry);
+    },
+    [providers],
+  );
   const range = useAppStore((s) => s.tokenDashboard.range);
   const customFrom = useAppStore((s) => s.tokenDashboard.customFrom);
   const customTo = useAppStore((s) => s.tokenDashboard.customTo);
@@ -386,7 +395,7 @@ export function TokenDashboardPanel({ open, onClose }: Props) {
                         flexBasis: 0,
                         backgroundColor: PROVIDER_BAR_COLORS[i % PROVIDER_BAR_COLORS.length],
                       }}
-                      title={`${getProviderDisplayName(b.key, providers[b.key]) || b.key}: ${b.percent}%`}
+                      title={`${breakdownLabel(b)}: ${b.percent}%`}
                     />
                   ))}
                 </div>
@@ -398,7 +407,7 @@ export function TokenDashboardPanel({ open, onClose }: Props) {
                     key={b.key}
                     className="rounded-lg border border-border bg-surface-base px-3 py-2.5 text-sm"
                   >
-                    <div className="truncate font-semibold uppercase text-[var(--text-strong)]">{getProviderDisplayName(b.key, providers[b.key]) || b.key || "(unknown)"}</div>
+                    <div className="truncate font-semibold text-[var(--text-strong)]">{breakdownLabel(b)}</div>
                     <div className="tabular-nums text-[var(--text-primary)]">{b.percent.toFixed(1)}%</div>
                     <div className="text-xs text-[var(--text-primary)]">
                       {b.model_count != null ? `${b.model_count} models` : ""}

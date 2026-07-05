@@ -8,7 +8,8 @@ import {
 } from "./provider-display";
 
 describe("provider-display", () => {
-  it("uses custom displayName when configured", () => {
+  it("hides raw custom provider ids when displayName is missing", () => {
+    expect(getProviderDisplayName("custom_openai_1782269503107", undefined)).toBe("历史厂商");
     expect(getProviderDisplayName("custom_openai_caiyun", { displayName: "彩讯" })).toBe("彩讯");
   });
 
@@ -52,8 +53,8 @@ describe("model-display", () => {
     expect(formatModelOptionLabel("custom_openai_yidong", "minimax-m2.5", { displayName: "移动云" })).toBe(
       "移动云/minimax-m2.5",
     );
-    expect(formatModelOptionLabel("openai", "gpt-4.1", { baseUrl: "https://api.openai.com/v1" })).toBe(
-      "OpenAI/gpt-4.1",
+    expect(formatModelOptionLabel("custom_openai_moma", "ZHIPU/GLM-5.2", { displayName: "MOMA" })).toBe(
+      "MOMA/GLM-5.2",
     );
   });
 });

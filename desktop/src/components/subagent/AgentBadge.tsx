@@ -6,6 +6,8 @@
  */
 import { useCallback, useLayoutEffect, useRef, useState, type CSSProperties } from "react";
 import { createPortal } from "react-dom";
+import { useAppStore } from "../../store";
+import { formatModelOptionLabel } from "../../utils/model-display";
 import { avatarTintBg } from "../../utils/avatar-color";
 import { ProviderIcon } from "../ProviderIcon";
 import { PixelProgress } from "./PixelProgress";
@@ -82,11 +84,15 @@ function BadgeAvatar({ vm, size }: { vm: BadgeVM; size: number }) {
 }
 
 function ModelPill({ provider, model }: { provider?: string; model?: string }) {
+  const providers = useAppStore((s) => s.settings.providers);
   if (!model) return null;
+  const label = provider
+    ? formatModelOptionLabel(provider, model, providers[provider])
+    : model;
   return (
     <span className="inline-flex max-w-[150px] items-center gap-1 rounded border border-border bg-surface-card-strong px-1.5 py-0.5 text-[10px] text-text-muted">
       {provider ? <ProviderIcon provider={provider} className="h-3 w-3 shrink-0" /> : null}
-      <span className="min-w-0 truncate">{model}</span>
+      <span className="min-w-0 truncate">{label}</span>
     </span>
   );
 }

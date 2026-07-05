@@ -88,6 +88,7 @@ import { KnowledgeSettings, type KnowledgeSettingsHandle } from "./settings/know
 import { DataSourcesSettings } from "./settings/datasources/DataSourcesSettings";
 import { MemoryGraphExplorer } from "./memory/MemoryGraphExplorer";
 import { TurnArchiveSettingsPanel } from "./memory/TurnArchiveSettingsPanel";
+import { formatModelOptionLabel } from "../utils/model-display";
 import {
   getProviderDisplayName,
   getProviderBrandColor,
@@ -8652,7 +8653,9 @@ export function SettingsPanel({
                               className="grid grid-cols-[minmax(0,1fr)_minmax(6.5rem,auto)_2rem_2rem] items-center gap-2 rounded-lg border border-border bg-surface-panel px-3 py-2.5 transition hover:border-[var(--settings-accent-border-muted)]"
                             >
                               <div className="min-w-0">
-                                <div className="truncate text-sm text-text-primary">{model}</div>
+                                <div className="truncate text-sm text-text-primary">
+                                  {formatModelOptionLabel(active, model, current)}
+                                </div>
                               </div>
                               <div className="flex min-w-0 items-center justify-end gap-2">
                                 <ModelCapabilityBadges provider={active} model={model} />

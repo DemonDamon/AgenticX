@@ -16,6 +16,7 @@ export type UsageSummary = {
 
 export type UsageBreakdownItem = {
   key: string;
+  label?: string;
   tokens: number;
   percent: number;
   cost_usd: number;

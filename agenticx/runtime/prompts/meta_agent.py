@@ -20,7 +20,7 @@ from agenticx.runtime.prompts.credential_safety import (
     CREDENTIAL_SAFETY_BLOCK,
     CREDENTIAL_SAFETY_MCP_HINT,
 )
-from agenticx.workspace.loader import load_subject_workspace_context
+from agenticx.llms.provider_display import build_provider_catalog_block, format_model_option_label, resolve_provider_config
 
 
 MAX_WORKSPACE_BLOCK_CHARS = 1800
@@ -916,7 +916,9 @@ def build_meta_agent_system_prompt(
         "- `request_clarification` 会弹出阻塞交互框让用户点选预设选项或填写自定义文本；用户提交后，工具结果即用户答复，你须在同一回合内基于该答复继续执行，而不是结束回合等待用户重新发消息。\n"
         "- 调用要点：`prompt` 写清总体背景；**当存在 2 个及以上彼此独立的决策维度（如时长 / 文案 / 配色）时，必须使用 `decisions` 数组**——每项含 `id`、`question`、`options`，前端会按决策链分组展示；不要把多个维度的选项混进一个扁平 `options` 列表。单一综合问题时才用扁平 `options`（用户可多选）。`allow_free_text` 默认 true；`context` 仅放方案快照（键值摘要），不要替代 `decisions`。\n"
         "- 在无人值守/自动化会话中该工具会返回 `[CLARIFICATION_PENDING]` sentinel，此时应把待确认项写入待办并优雅结束本轮，不要重复发起同一提问。\n"
-        "- 权限类确认（写文件、执行命令）仍走原有 `confirm_required` 流程，不要用 `request_clarification` 替代。\n\n"
+        "- 权限类确认（写文件、执行命令）仍走原有 `confirm_required` 流程，不要用 `request_clarification` 替代。\n"
+        "- 涉及模型/厂商选择时，`prompt` 与 `options` 只能写用户可见的「厂商展示名/模型短名」（如「彩讯-外网/kimi-k2.6」「MOMA/GLM-5.2」），禁止出现 `custom_openai_*` 等内部配置 id。\n\n"
+        f"{build_provider_catalog_block(current_provider=session.provider_name or '', current_model=session.model_name or '')}"
         f"{todo_context}\n"
         f"{lsp_context}"
         f"{active_subagents}"
@@ -925,6 +927,7 @@ def build_meta_agent_system_prompt(
         f"{taskspaces_context}"
         f"{build_code_dev_prompt_blocks(session)}"
         "## 当前会话上下文\n"
+        f"- model_service: {format_model_option_label(session.provider_name or '', session.model_name or '', resolve_provider_config(session.provider_name or ''))}\n"
         f"- provider: {session.provider_name or 'default'}\n"
         f"- model: {session.model_name or 'default'}\n"
         f"{_build_context_files_block(session)}"

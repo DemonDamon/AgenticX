@@ -217,6 +217,8 @@ class UsageStore:
             finally:
                 conn.close()
         total_tokens = sum(int(r[1] or 0) for r in rows)
+        from agenticx.llms.provider_display import provider_breakdown_label
+
         out: list[dict[str, Any]] = []
         for r in rows:
             key = str(r[0] or "(unknown)")
@@ -225,6 +227,7 @@ class UsageStore:
             pct = (100.0 * tks / total_tokens) if total_tokens > 0 else 0.0
             item: dict[str, Any] = {
                 "key": key,
+                "label": provider_breakdown_label(key) if dim != "model" else key,
                 "tokens": tks,
                 "percent": round(pct, 2),
                 "cost_usd": round(cst, 4),
@@ -419,6 +422,8 @@ class UsageStore:
                 (start_ms, end_ms),
             ).fetchall()
             total_tokens = sum(int(r[1] or 0) for r in rows)
+            from agenticx.llms.provider_display import provider_breakdown_label
+
             out: list[dict[str, Any]] = []
             for r in rows:
                 key = str(r[0] or "(unknown)")
@@ -428,6 +433,7 @@ class UsageStore:
                 out.append(
                     {
                         "key": key,
+                        "label": provider_breakdown_label(key),
                         "tokens": tks,
                         "percent": round(pct, 2),
                         "cost_usd": round(cst, 4),
