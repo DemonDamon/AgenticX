@@ -1,6 +1,7 @@
 export { AgentBadge, AgentBadgeDrawerHeader } from "./AgentBadge";
 export { PixelProgress } from "./PixelProgress";
 export { SubAgentClusterCard } from "./SubAgentClusterCard";
+export { HistoricalSubAgentClusterCard } from "./HistoricalSubAgentClusterCard";
 export { SubAgentRunDrawer } from "./SubAgentRunDrawer";
 export { RunActivityTimeline } from "./RunActivityTimeline";
 export { RunArtifactList } from "./RunArtifactList";

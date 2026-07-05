@@ -9,6 +9,24 @@ import {
 } from "./view-image-inject";
 import { parseClarificationDecisions } from "./clarification-notice";
 
+function parseSubAgentClusterAnchor(meta: Record<string, unknown> | undefined): Message["subAgentCluster"] {
+  const raw = meta?.subagent_cluster;
+  if (!raw || typeof raw !== "object") return undefined;
+  const obj = raw as Record<string, unknown>;
+  const clusterId = String(obj.cluster_id ?? obj.clusterId ?? "").trim();
+  const rawRunIds = Array.isArray(obj.run_ids) ? obj.run_ids : Array.isArray(obj.runIds) ? obj.runIds : [];
+  const runIds = rawRunIds.map((item) => String(item ?? "").trim()).filter(Boolean);
+  if (!clusterId || runIds.length === 0) return undefined;
+  const createdAt = Number(obj.created_at ?? obj.createdAt);
+  const title = String(obj.title ?? "").trim();
+  return {
+    clusterId,
+    runIds,
+    ...(title ? { title } : {}),
+    ...(Number.isFinite(createdAt) && createdAt > 0 ? { createdAt } : {}),
+  };
+}
+
 /** Snapshot row from GET /api/session/messages (snake_case). */
 export function attachmentsFromSessionRow(raw: unknown): MessageAttachment[] | undefined {
   if (!Array.isArray(raw) || raw.length === 0) return undefined;
@@ -178,6 +196,10 @@ export function mapLoadedSessionMessage(
     ? visualAttachments ?? fileAttachments
     : fileAttachments ?? visualAttachments;
   const rawContent = String(item.content ?? "");
+  const metadata =
+    item.metadata && typeof item.metadata === "object"
+      ? { ...(item.metadata as Record<string, unknown>) }
+      : undefined;
   const mapped: Message = {
     id,
     role: item.role,
@@ -201,10 +223,8 @@ export function mapLoadedSessionMessage(
           }
         : undefined,
     attachments: normalizeReferenceAttachments(mergedAttachments),
-    metadata:
-      item.metadata && typeof item.metadata === "object"
-        ? { ...(item.metadata as Record<string, unknown>) }
-        : undefined,
+    metadata,
+    subAgentCluster: parseSubAgentClusterAnchor(metadata),
   };
   if (item.role === "assistant") {
     const sq = item.suggested_questions;

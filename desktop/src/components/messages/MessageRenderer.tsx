@@ -38,6 +38,7 @@ import { isMetaLeaderIdentity, resolveMetaDisplayName } from "../../utils/displa
 import { resolveReferencesForAssistant } from "../../utils/turn-reference-context";
 import type { SkillPatchPreviewPayload } from "./skill-manage-preview";
 import type { FileReferenceOpenRequest } from "../../utils/reference-attachment";
+import { HistoricalSubAgentClusterCard } from "../subagent";
 
 type Props = {
   message: Message;
@@ -45,6 +46,7 @@ type Props = {
   assistantBadge?: ReactNode;
   onRevealPath?: (path: string) => void;
   onOpenFileReference?: (request: FileReferenceOpenRequest) => void;
+  onOpenSubAgentRun?: (runId: string) => void;
   assistantName?: string;
   assistantAvatarUrl?: string;
   /** IM assistant: align with ReAct block tool column (no duplicate avatar). */
@@ -210,6 +212,7 @@ export function MessageRenderer({
   assistantBadge,
   onRevealPath,
   onOpenFileReference,
+  onOpenSubAgentRun,
   assistantName,
   assistantAvatarUrl,
   userName,
@@ -258,6 +261,17 @@ export function MessageRenderer({
     return <ViewImageInjectCard message={message} />;
   }
   if (message.role === "user" || message.role === "assistant") {
+    if (message.role === "assistant" && message.subAgentCluster) {
+      return (
+        <div className="my-2 w-full min-w-0 px-4">
+          <HistoricalSubAgentClusterCard
+            anchor={message.subAgentCluster}
+            sessionId={message.ownerSessionId ?? sessionId}
+            onOpenRun={onOpenSubAgentRun}
+          />
+        </div>
+      );
+    }
     if (isInterruptedAssistantPlaceholder(message)) {
       return null;
     }

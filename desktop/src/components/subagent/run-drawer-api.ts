@@ -2,6 +2,7 @@
  * Sub-Plan D — REST helpers for sub-agent run drawer (run detail, activity, artifacts).
  */
 import type { SubAgentRunRecord } from "./badge-vm";
+import type { SubAgentCluster } from "./badge-vm";
 
 export type ActivityEntry = {
   seq: number;
@@ -36,6 +37,13 @@ export type ArtifactPreviewResponse = {
   truncated?: boolean;
   open_hint?: string | null;
   path?: string;
+  error?: string;
+  detail?: string;
+};
+
+export type ClusterListResponse = {
+  ok: boolean;
+  clusters?: SubAgentCluster[];
   error?: string;
   detail?: string;
 };
@@ -97,6 +105,21 @@ export async function fetchArtifactPreview(
     return { ok: false, error: `HTTP ${resp.status}`, detail: await resp.text().catch(() => "") };
   }
   return (await resp.json()) as ArtifactPreviewResponse;
+}
+
+export async function fetchSubAgentClusters(
+  apiBase: string,
+  apiToken: string,
+  sessionId: string,
+): Promise<ClusterListResponse> {
+  const params = new URLSearchParams({ session_id: sessionId });
+  const resp = await fetch(`${apiBase}/api/session/subagent-clusters?${params}`, {
+    headers: { "x-agx-desktop-token": apiToken },
+  });
+  if (!resp.ok) {
+    return { ok: false, error: `HTTP ${resp.status}`, detail: await resp.text().catch(() => "") };
+  }
+  return (await resp.json()) as ClusterListResponse;
 }
 
 export { ACTIVITY_PAGE_SIZE };

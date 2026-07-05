@@ -2768,6 +2768,18 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
         .join("\0"),
     [paneSubAgents]
   );
+  const anchoredSubAgentRunIds = useMemo(() => {
+    const ids = new Set<string>();
+    for (const msg of pane.messages ?? []) {
+      const anchor = msg.subAgentCluster;
+      if (!anchor) continue;
+      for (const runId of anchor.runIds) {
+        const rid = String(runId ?? "").trim();
+        if (rid) ids.add(rid);
+      }
+    }
+    return Array.from(ids);
+  }, [pane.messages]);
   const drawerLiveSubAgent = useMemo(() => {
     const rid = String(pane.runDrawerRunId ?? "").trim();
     if (!rid) return undefined;
@@ -6003,6 +6015,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
               toolCardOmitLeadingSpacer={message.role === "tool" && reactCol}
               onRevealPath={(path) => void revealFileInTaskspace(path)}
               onOpenFileReference={(request) => openFileReferencePreview(request)}
+              onOpenSubAgentRun={handleOpenRunDrawer}
               assistantName={imAssistantName}
               assistantAvatarUrl={imAssistantAvatarUrl}
               userName={imUserName}
@@ -10325,6 +10338,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
           onModelChange={(agentId, provider, model) => void changePaneSubAgentModel(agentId, provider, model)}
           onChat={togglePaneSubAgentChat}
           onOpenRun={handleOpenRunDrawer}
+          anchoredRunIds={anchoredSubAgentRunIds}
           onConfirmResolve={(agentId, approved) => void resolvePaneSubAgentConfirm(agentId, approved)}
           tintColor={paneTint}
         />
@@ -10437,6 +10451,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
                 onModelChange={(agentId, provider, model) => void changePaneSubAgentModel(agentId, provider, model)}
                 onChat={togglePaneSubAgentChat}
                 onOpenRun={handleOpenRunDrawer}
+                anchoredRunIds={anchoredSubAgentRunIds}
                 onConfirmResolve={(agentId, approved) => void resolvePaneSubAgentConfirm(agentId, approved)}
                 tintColor={paneTint}
               />

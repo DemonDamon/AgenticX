@@ -17,6 +17,7 @@ from typing import Any, Dict, List, Optional
 import pytest
 
 from agenticx.cli.studio import StudioSession
+from agenticx.runtime import agent_runtime
 from agenticx.runtime import meta_tools
 from agenticx.runtime.events import EventType, RuntimeEvent
 from agenticx.runtime.subagent_runs import SubAgentRunStore
@@ -276,3 +277,75 @@ def test_smoke_subagent_run_store_delegate_detail_ref(tmp_path, monkeypatch: pyt
     detail_path = str(record.detail_refs.get("avatar_messages_path", "")).strip()
     assert detail_path
     assert Path(detail_path).exists()
+
+
+def test_smoke_subagent_cluster_anchor_updates_without_duplicate(tmp_path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("HOME", str(tmp_path))
+    session = StudioSession()
+    setattr(session, "_session_id", "sess-anchor")
+
+    store = SubAgentRunStore("sess-anchor")
+    first = store.open_run(
+        run_id="sa-anchor-1",
+        kind="spawn",
+        name="Analyst A",
+        role="researcher",
+        task="task A",
+        status="running",
+        source_tool_call_id="call-anchor-1",
+        started_at=100,
+    )
+    changed = agent_runtime._append_subagent_cluster_anchor_if_needed(
+        session,
+        tool_name="spawn_subagent",
+        tool_call_id="call-anchor-1",
+        raw_result=json.dumps({"ok": True, "agent_id": "sa-anchor-1"}),
+    )
+    assert changed is True
+    anchors = [
+        row
+        for row in session.chat_history
+        if isinstance(row.get("metadata"), dict)
+        and isinstance(row["metadata"].get("subagent_cluster"), dict)
+    ]
+    assert len(anchors) == 1
+    anchor = anchors[0]["metadata"]["subagent_cluster"]
+    assert anchor["cluster_id"] == first.cluster_id
+    assert anchor["run_ids"] == ["sa-anchor-1"]
+    assert session.agent_messages == []
+
+    second = store.open_run(
+        run_id="sa-anchor-2",
+        kind="spawn",
+        name="Analyst B",
+        role="writer",
+        task="task B",
+        status="running",
+        source_tool_call_id="call-anchor-2",
+        started_at=101,
+    )
+    assert second.cluster_id == first.cluster_id
+    changed = agent_runtime._append_subagent_cluster_anchor_if_needed(
+        session,
+        tool_name="spawn_subagent",
+        tool_call_id="call-anchor-2",
+        raw_result=json.dumps({"ok": True, "agent_id": "sa-anchor-2"}),
+    )
+    assert changed is True
+    anchors = [
+        row
+        for row in session.chat_history
+        if isinstance(row.get("metadata"), dict)
+        and isinstance(row["metadata"].get("subagent_cluster"), dict)
+    ]
+    assert len(anchors) == 1
+    anchor = anchors[0]["metadata"]["subagent_cluster"]
+    assert anchor["run_ids"] == ["sa-anchor-1", "sa-anchor-2"]
+
+    unchanged = agent_runtime._append_subagent_cluster_anchor_if_needed(
+        session,
+        tool_name="spawn_subagent",
+        tool_call_id="call-anchor-2",
+        raw_result=json.dumps({"ok": True, "agent_id": "sa-anchor-2"}),
+    )
+    assert unchanged is False

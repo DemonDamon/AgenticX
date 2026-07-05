@@ -218,6 +218,15 @@ export type Message = {
   budgetMax?: number;
   /** messages.json metadata (e.g. view_image_inject). */
   metadata?: Record<string, unknown>;
+  /** Sub-Plan E: persisted anchor for a historical sub-agent cluster card. */
+  subAgentCluster?: SubAgentClusterAnchor;
+};
+
+export type SubAgentClusterAnchor = {
+  clusterId: string;
+  runIds: string[];
+  title?: string;
+  createdAt?: number;
 };
 
 /** Extras allowed on tool messages from `addPaneMessage` / `addMessage`. */

@@ -17,6 +17,8 @@ type Props = {
   onChat: (agentId: string) => void;
   /** Sub-Plan D: open run artifact drawer (cluster card member click). */
   onOpenRun?: (runId: string) => void;
+  /** Sub-Plan E: once a cluster anchor exists in the message stream, hide the duplicate live cluster summary. */
+  anchoredRunIds?: string[];
   onModelChange?: (agentId: string, provider: string, model: string) => void;
   onConfirmResolve?: (agentId: string, approved: boolean) => void;
   tintColor?: string;
@@ -33,6 +35,7 @@ export function SpawnsColumn({
   onRetry,
   onChat,
   onOpenRun,
+  anchoredRunIds,
   onModelChange,
   onConfirmResolve,
   tintColor,
@@ -40,8 +43,13 @@ export function SpawnsColumn({
   // 集群概览：把当前会话的多个子智能体聚合为一张 Near 集群卡片（默认折叠），
   // 作为列表上方的快速总览；点击成员复用既有选中 / 对话交互（onChat）。
   const clusterMembers = useMemo(
-    () => subAgents.map((s, i) => fromLiveSubAgent(s, i)),
-    [subAgents],
+    () => {
+      const anchored = new Set((anchoredRunIds ?? []).map((id) => String(id).trim()).filter(Boolean));
+      return subAgents
+        .filter((s) => !anchored.has(s.id))
+        .map((s, i) => fromLiveSubAgent(s, i));
+    },
+    [anchoredRunIds, subAgents],
   );
   return (
     <div className="relative flex h-full min-h-0 shrink-0 flex-col border-l border-border bg-surface-card" style={{ width, ...(tintColor ? { backgroundColor: tintColor } : {}) }}>
