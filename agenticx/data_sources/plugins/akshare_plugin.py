@@ -15,7 +15,10 @@ from agenticx.data_sources.errors import InvalidParamsError
 
 logger = logging.getLogger("agenticx.data_sources.akshare")
 
-DEFAULT_HISTORY_DAYS = 120
+# Default candlestick window: ~3 months of trading days. Fewer bars (e.g. a
+# literal "最近一周" reading) render as a sparse, hard-to-read chart in the
+# chat widget; see agenticx-query-data-source SKILL.md for the full rationale.
+DEFAULT_HISTORY_DAYS = 60
 MAX_HISTORY_DAYS = 1000
 
 

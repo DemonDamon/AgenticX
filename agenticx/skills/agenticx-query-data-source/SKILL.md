@@ -18,6 +18,13 @@ metadata:
 
 1. `list_data_sources(domain="finance")` — discover enabled plugins and `api_name` values.
 2. `query_data_source(data_source_name=..., api_name=..., params={...})` — fetch structured JSON.
+   - **Default chart window: `days: 60` (≈3 个月交易日).** A candlestick chart with only 5–10 bars
+     looks sparse/empty in the chat widget, so this is the default for any "走势/行情/表现如何"
+     style question — including casual phrasing like "最近一周走势" (interpret as "show me how it's
+     been doing lately", not literally 5 trading days).
+   - Only request a shorter window when the user gives an **unambiguous analytical** ask for an
+     exact short range (e.g. "对比昨天和前天的收盘价" or "最近3个交易日的具体数字"). Map common asks:
+     `1个月→days:20`, `3个月→days:60`（默认）, `6个月→days:120`, `1年→days:250`.
 3. For **time-series** results (price history, macro trend), **must** follow with `show_widget`:
    - Prefer structured JSON (Desktop renders via ECharts):
    - **The top-level `"type": "stock_chart"` field is MANDATORY.** Omitting it makes the
@@ -79,7 +86,7 @@ When the user mentions several tickers they are tracking, fetch each via `query_
 
 | User intent | data_source_name | api_name | params notes |
 |---|---|---|---|
-| A-share K-line / recent trend | `akshare` | `stock_price_history` | `symbol`: **6-digit code without exchange suffix** (e.g. `603678`, not `603678.SH`); `market`: `a`; `days`: 30–120 |
+| A-share K-line / recent trend | `akshare` | `stock_price_history` | `symbol`: **6-digit code without exchange suffix** (e.g. `603678`, not `603678.SH`); `market`: `a`; `days`: **60 default** (3 个月), 20/120/250 for 1mo/6mo/1yr |
 | A-share snapshot | `akshare` | `stock_realtime_quote` | `symbol`: `603678` |
 | China / global macro | `world_bank` | see `list_data_sources` | country/indicator codes from API schema |
 | IMF indicators | `imf` | see `list_data_sources` | per plugin schema |

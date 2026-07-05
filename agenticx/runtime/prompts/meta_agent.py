@@ -654,6 +654,8 @@ def _build_data_source_discipline() -> str:
         "再调用 `query_data_source` 取得真实数据。\n"
         "- 取到的时间序列数据用于可视化时，按 show_widget 纪律渲染图表（`stock_chart` JSON 或 ECharts HTML），"
         "不要退化为纯文字表格罗列。\n"
+        "- 股价 K 线**默认取 `days: 60`（约 3 个月）**：用户说「最近走势/最近一周走势/近期表现」等"
+        "泛化表述时，也按 60 天取数以保证图表不稀疏；仅当用户明确要精确的极短窗口（如「对比昨天和前天」）才用更小 days。\n"
         "- 工作流：**先** 1–3 句可见衔接语 → **`query_data_source` 取数** → **`show_widget` 出图** → **后**分节解读；"
         "解读中的数字必须与工具返回一致。\n"
         "- 若所选数据源返回凭证缺失/连接失败，先尝试免费替代源（如 akshare/world_bank）；"
