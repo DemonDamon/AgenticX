@@ -21,6 +21,7 @@ from agenticx.runtime.prompts.credential_safety import (
     CREDENTIAL_SAFETY_MCP_HINT,
 )
 from agenticx.llms.provider_display import build_provider_catalog_block, format_model_option_label, resolve_provider_config
+from agenticx.workspace.loader import load_subject_workspace_context
 
 
 MAX_WORKSPACE_BLOCK_CHARS = 1800

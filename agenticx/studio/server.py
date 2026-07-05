@@ -3197,6 +3197,14 @@ def create_studio_app() -> FastAPI:
                     task_exc = runtime_task.exception()
                     if task_exc is not None and event_hub is None:
                         had_runtime_failure = True
+                        # Surface the swallowed runtime-task exception to the client
+                        # instead of a silent "done" — otherwise the desktop only
+                        # sees zero tokens + no persisted user turn, which the
+                        # stall-detection UI misreads as "上一轮未产出回答" with no
+                        # indication anything actually crashed.
+                        if not client_disconnected:
+                            err = SseEvent(type="error", data={"text": f"Runtime error: {task_exc}"})
+                            yield f"data: {json.dumps(err.model_dump(), ensure_ascii=False)}\n\n"
                 if event_hub is None:
                     from agenticx.studio.turn_interruption import resolve_turn_interruption_cause
 
