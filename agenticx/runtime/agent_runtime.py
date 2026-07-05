@@ -2912,6 +2912,26 @@ class AgentRuntime:
                     session.agent_messages.append({"role": "system", "content": WIDGET_FLOW_RETRY_HINT})
                     continue
             # --- End widget flow guard ---
+            # --- Data source flow guard: uncited quantitative claims ---
+            if (
+                not tool_calls
+                and "query_data_source" in allowed_tool_names
+                and agent_id == "meta"
+            ):
+                from agenticx.runtime.data_source_flow_guard import detect_uncited_quant_claim
+
+                ds_nudge = detect_uncited_quant_claim(ac_clean, executed_tool_names)
+                if ds_nudge and not getattr(session, "_data_source_flow_retried", False):
+                    setattr(session, "_data_source_flow_retried", True)
+                    logger.info(
+                        "data_source_flow_guard: uncited quant claim, forcing retry"
+                    )
+                    messages.append({"role": "assistant", "content": ac_clean})
+                    messages.append({"role": "system", "content": ds_nudge})
+                    session.agent_messages.append({"role": "assistant", "content": ac_clean})
+                    session.agent_messages.append({"role": "system", "content": ds_nudge})
+                    continue
+            # --- End data source flow guard ---
             assistant_message: Dict[str, Any] = {"role": "assistant", "content": ac_clean}
             if tool_calls:
                 assistant_message["tool_calls"] = tool_calls

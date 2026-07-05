@@ -637,7 +637,26 @@ def _build_widget_capability_block() -> str:
         "模块用圆角矩形，层与层之间用箭头连接，中文标签要完整可读。\n"
         "- **CDN 白名单**（HTML 模式仅允许）：`cdnjs.cloudflare.com`、`esm.sh`、`cdn.jsdelivr.net`、`unpkg.com`。\n"
         "- 每次调用渲染 **一个** widget；`title` 必填且简短（会显示在工具卡标题）。\n"
-        "- **禁止**用 ImageGen/截图/HTML 文件落盘替代；纯矢量 SVG 或 sandbox iframe 内 HTML 即可。\n\n"
+        "- **禁止**用 ImageGen/截图/HTML 文件落盘替代；纯矢量 SVG 或 sandbox iframe 内 HTML 即可。\n"
+        "- **时间序列行情/宏观走势**：取数后优先 `show_widget(widget_code=<stock_chart JSON>)`；"
+        "K 线用 `chart_type: \"candlestick\"`，宏观趋势用 `chart_type: \"line\"`，"
+        "并保留 `attribution` 来源角标。\n\n"
+    )
+
+
+def _build_data_source_discipline() -> str:
+    """Describe when the model must call query_data_source instead of guessing facts."""
+    return (
+        "## 查数纪律（query_data_source）— 硬性纪律\n"
+        "- 涉及股价/财务指标/宏观经济数据/企业工商/学术引用等**可核实的量化事实**时，"
+        "**禁止**凭训练记忆直接给出具体数字，必须先调用 `list_data_sources`（如不确定用哪个源）"
+        "再调用 `query_data_source` 取得真实数据。\n"
+        "- 取到的时间序列数据用于可视化时，按 show_widget 纪律渲染图表（`stock_chart` JSON 或 ECharts HTML），"
+        "不要退化为纯文字表格罗列。\n"
+        "- 工作流：**先** 1–3 句可见衔接语 → **`query_data_source` 取数** → **`show_widget` 出图** → **后**分节解读；"
+        "解读中的数字必须与工具返回一致。\n"
+        "- 若所选数据源返回凭证缺失/连接失败，先尝试免费替代源（如 akshare/world_bank）；"
+        "全部失败时必须明确告知用户「当前数据源暂不可用，无法核实最新数据」，**严禁编造具体数值**。\n\n"
     )
 
 
@@ -858,6 +877,7 @@ def build_meta_agent_system_prompt(
         f"{_build_web_search_capability_block()}"
         f"{_build_url_vision_capability_block()}"
         f"{_build_widget_capability_block()}"
+        f"{_build_data_source_discipline()}"
         f"{_build_followup_questions_block()}"
         "## 子智能体完成后的主动汇报（关键）\n"
         "- 当「当前子智能体状态」或「历史子智能体结果」中出现 completed 或 failed 的子智能体，你 **必须在本轮回复中主动汇报**，包括：\n"
