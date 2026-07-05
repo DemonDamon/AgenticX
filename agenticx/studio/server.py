@@ -76,6 +76,15 @@ from agenticx.runtime.group_router import (
     expand_mentions_with_meta_leader,
 )
 from agenticx.runtime.team_manager import AgentTeamManager
+from agenticx.runtime.subagent_runs import SubAgentRunStore
+from agenticx.studio.subagent_review import (
+    collect_memory_status_map,
+    list_subagent_clusters_payload,
+    merge_run_record_with_memory,
+    paginate_activity_entries,
+    preview_artifact_file,
+    resolve_artifact_path,
+)
 from agenticx.studio.protocols import (
     ChatRequest,
     ClarifyResponse,
@@ -3750,6 +3759,137 @@ def create_studio_app() -> FastAPI:
             if not result.get("ok"):
                 raise HTTPException(status_code=400, detail=result.get("message", "update model failed"))
         return result
+
+    @app.get("/api/session/subagent-clusters")
+    async def session_subagent_clusters(
+        session_id: str = Query(...),
+        x_agx_desktop_token: str | None = Header(default=None),
+    ) -> dict:
+        _check_token(x_agx_desktop_token)
+        sid = str(session_id or "").strip()
+        if not sid:
+            return {"ok": False, "error": "session_id is required", "detail": "missing session_id"}
+        try:
+            memory_map = collect_memory_status_map(sid)
+            store = SubAgentRunStore(sid)
+            clusters = list_subagent_clusters_payload(
+                session_id=sid,
+                store=store,
+                memory_map=memory_map,
+            )
+            return {"ok": True, "clusters": clusters}
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("[subagent-clusters] sid=%s failed: %s", sid, exc)
+            return {"ok": False, "error": "subagent clusters read failed", "detail": str(exc)}
+
+    @app.get("/api/subagent/run")
+    async def subagent_run_detail(
+        session_id: str = Query(...),
+        run_id: str = Query(...),
+        x_agx_desktop_token: str | None = Header(default=None),
+    ) -> dict:
+        _check_token(x_agx_desktop_token)
+        sid = str(session_id or "").strip()
+        rid = str(run_id or "").strip()
+        if not sid or not rid:
+            return {
+                "ok": False,
+                "error": "session_id and run_id are required",
+                "detail": "missing query params",
+            }
+        try:
+            store = SubAgentRunStore(sid)
+            record = store.get_run(rid)
+            if record is None:
+                return {"ok": False, "error": "run not found", "detail": rid}
+            memory = collect_memory_status_map(sid).get(rid)
+            return {"ok": True, "run": merge_run_record_with_memory(record, memory)}
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("[subagent/run] sid=%s run=%s failed: %s", sid, rid, exc)
+            return {"ok": False, "error": "run read failed", "detail": str(exc)}
+
+    @app.get("/api/subagent/run/activity")
+    async def subagent_run_activity(
+        session_id: str = Query(...),
+        run_id: str = Query(...),
+        offset: int = Query(default=0),
+        limit: int = Query(default=100),
+        order: str = Query(default="asc"),
+        x_agx_desktop_token: str | None = Header(default=None),
+    ) -> dict:
+        _check_token(x_agx_desktop_token)
+        sid = str(session_id or "").strip()
+        rid = str(run_id or "").strip()
+        if not sid or not rid:
+            return {
+                "ok": False,
+                "error": "session_id and run_id are required",
+                "detail": "missing query params",
+            }
+        try:
+            store = SubAgentRunStore(sid)
+            record = store.get_run(rid)
+            if record is None:
+                return {"ok": False, "error": "run not found", "detail": rid}
+            entries, total, safe_offset, safe_limit = paginate_activity_entries(
+                store.read_activity(rid),
+                offset=offset,
+                limit=limit,
+                order=order,
+            )
+            return {
+                "ok": True,
+                "entries": entries,
+                "total": total,
+                "offset": safe_offset,
+                "limit": safe_limit,
+            }
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("[subagent/run/activity] sid=%s run=%s failed: %s", sid, rid, exc)
+            return {"ok": False, "error": "activity read failed", "detail": str(exc)}
+
+    @app.get("/api/subagent/run/artifact-preview")
+    async def subagent_run_artifact_preview(
+        session_id: str = Query(...),
+        run_id: str = Query(...),
+        path: str = Query(...),
+        x_agx_desktop_token: str | None = Header(default=None),
+    ) -> dict:
+        _check_token(x_agx_desktop_token)
+        sid = str(session_id or "").strip()
+        rid = str(run_id or "").strip()
+        requested_path = str(path or "").strip()
+        if not sid or not rid or not requested_path:
+            return {
+                "ok": False,
+                "error": "session_id, run_id and path are required",
+                "detail": "missing query params",
+            }
+        try:
+            store = SubAgentRunStore(sid)
+            record = store.get_run(rid)
+            if record is None:
+                return {"ok": False, "error": "run not found", "detail": rid}
+            allowed, resolved, reason = resolve_artifact_path(
+                requested_path=requested_path,
+                record=record,
+                owner_session_id=sid,
+            )
+            if not allowed or resolved is None:
+                return {"ok": False, "error": "path not allowed", "detail": reason or requested_path}
+            preview = preview_artifact_file(resolved)
+            if not preview.get("ok"):
+                return preview
+            return preview
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(
+                "[subagent/run/artifact-preview] sid=%s run=%s path=%s failed: %s",
+                sid,
+                rid,
+                requested_path,
+                exc,
+            )
+            return {"ok": False, "error": "artifact preview failed", "detail": str(exc)}
 
     @app.get("/api/mcp/servers")
     async def list_mcp_servers(
