@@ -1,7 +1,8 @@
-import type { MouseEvent as ReactMouseEvent } from "react";
+import { useMemo, type MouseEvent as ReactMouseEvent } from "react";
 import { PanelRightClose, Bot } from "lucide-react";
 import type { SubAgent } from "../store";
 import { SubAgentCard } from "./SubAgentCard";
+import { SubAgentClusterCard, fromLiveSubAgent } from "./subagent";
 
 type Props = {
   width: number;
@@ -33,6 +34,12 @@ export function SpawnsColumn({
   onConfirmResolve,
   tintColor,
 }: Props) {
+  // 集群概览：把当前会话的多个子智能体聚合为一张 Near 集群卡片（默认折叠），
+  // 作为列表上方的快速总览；点击成员复用既有选中 / 对话交互（onChat）。
+  const clusterMembers = useMemo(
+    () => subAgents.map((s, i) => fromLiveSubAgent(s, i)),
+    [subAgents],
+  );
   return (
     <div className="relative flex h-full min-h-0 shrink-0 flex-col border-l border-border bg-surface-card" style={{ width, ...(tintColor ? { backgroundColor: tintColor } : {}) }}>
       <div
@@ -68,7 +75,15 @@ export function SpawnsColumn({
             当前会话还没有派生子智能体
           </div>
         ) : (
-          subAgents.map((subAgent) => (
+          <>
+          {clusterMembers.length >= 2 ? (
+            <SubAgentClusterCard
+              members={clusterMembers}
+              selectedRunId={selectedSubAgent}
+              onOpenRun={onChat}
+            />
+          ) : null}
+          {subAgents.map((subAgent) => (
             <SubAgentCard
               key={subAgent.id}
               subAgent={subAgent}
@@ -79,7 +94,8 @@ export function SpawnsColumn({
               onModelChange={onModelChange}
               onConfirmResolve={onConfirmResolve}
             />
-          ))
+          ))}
+          </>
         )}
       </div>
     </div>
