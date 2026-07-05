@@ -32,6 +32,7 @@ from agenticx.runtime import (
 )
 from agenticx.runtime.resource_monitor import ResourceMonitor
 from agenticx.runtime.agent_runtime import STOP_MESSAGE
+from agenticx.runtime.subagent_runs import SubAgentRunStore
 
 _log = logging.getLogger(__name__)
 
@@ -148,6 +149,8 @@ class SubAgentContext:
     result_file: str = ""
     pause_detector: str = ""
     pause_retryable: bool = False
+    cluster_id: str = ""
+    badge_seq: str = ""
 
 
 class AgentTeamManager:
@@ -184,6 +187,7 @@ class AgentTeamManager:
         self._agent_sessions: Dict[str, StudioSession] = {}
         self._archived_agents: Dict[str, SubAgentContext] = {}
         self._archive_limit = 200
+        self._run_store = SubAgentRunStore(self.owner_session_id)
 
     @classmethod
     def collect_global_statuses(
@@ -568,6 +572,7 @@ class AgentTeamManager:
             self._agents[agent_id] = context
             context.status = SubAgentStatus.RUNNING
             context.updated_at = time.time()
+            self._run_store_open(context)
             self._tasks[agent_id] = asyncio.create_task(
                 self._run_subagent(context, allowed_tools=allowed_tools)
             )
@@ -582,6 +587,8 @@ class AgentTeamManager:
                 "status": context.status.value,
                 "depth": context.depth,
                 "mode": context.mode,
+                "cluster_id": context.cluster_id,
+                "badge_seq": context.badge_seq,
                 "provider": context.provider_name or self.base_session.provider_name or "",
                 "model": context.model_name or self.base_session.model_name or "",
             },
@@ -612,6 +619,8 @@ class AgentTeamManager:
             "task": context.task,
             "depth": context.depth,
             "mode": context.mode,
+            "cluster_id": context.cluster_id,
+            "badge_seq": context.badge_seq,
             "provider": context.provider_name or self.base_session.provider_name or "",
             "model": context.model_name or self.base_session.model_name or "",
             "workspace_dir": context.workspace_dir or self.base_session.workspace_dir or "",
@@ -628,6 +637,15 @@ class AgentTeamManager:
         self._cancelled.add(agent_id)
         context.status = SubAgentStatus.CANCELLED
         context.updated_at = time.time()
+        try:
+            self._run_store.update_status(
+                agent_id,
+                status=context.status.value,
+                error_text="任务已取消",
+                completed_at=context.updated_at,
+            )
+        except Exception as exc:  # noqa: BLE001
+            _log.warning("[subagent_runs] cancel update failed for %s: %s", agent_id, exc)
         task = self._tasks.get(agent_id)
         if task is not None and not task.done():
             task.cancel()
@@ -691,6 +709,17 @@ class AgentTeamManager:
             self._tasks[agent_id] = task
 
         context.updated_at = time.time()
+        try:
+            self._run_store.update_status(agent_id, status=context.status.value)
+            self._run_store.append_activity(
+                agent_id,
+                event_type="note",
+                title="收到追问",
+                detail=text,
+                ts=context.updated_at,
+            )
+        except Exception as exc:  # noqa: BLE001
+            _log.warning("[subagent_runs] follow-up update failed for %s: %s", agent_id, exc)
         await self._emit(
             RuntimeEvent(
                 type=EventType.SUBAGENT_PROGRESS.value,
@@ -1097,6 +1126,8 @@ class AgentTeamManager:
             "mode": context.mode,
             "cleanup": context.cleanup,
             "spawn_tree_path": context.spawn_tree_path,
+            "cluster_id": context.cluster_id,
+            "badge_seq": context.badge_seq,
             "provider": context.provider_name or self.base_session.provider_name or "",
             "model": context.model_name or self.base_session.model_name or "",
             "output_files": list(context.output_files[:200]),
@@ -1129,6 +1160,70 @@ class AgentTeamManager:
         )[:overflow]
         for agent_id in old_ids:
             self._archived_agents.pop(agent_id, None)
+
+    def _run_store_open(self, context: SubAgentContext) -> None:
+        """Open persisted run record for one spawned sub-agent."""
+        try:
+            record = self._run_store.open_run(
+                run_id=context.agent_id,
+                kind="spawn",
+                name=context.name,
+                role=context.role,
+                task=context.task,
+                status=context.status.value,
+                provider=context.provider_name or self.base_session.provider_name or "",
+                model=context.model_name or self.base_session.model_name or "",
+                persona=context.persona_prompt or "",
+                avatar_id=context.avatar_id or "",
+                source_tool_call_id=context.source_tool_call_id or "",
+                started_at=context.updated_at or time.time(),
+                detail_refs={
+                    "scratchpad_key": f"subagent_result::{context.agent_id}",
+                },
+            )
+            context.cluster_id = record.cluster_id
+            context.badge_seq = record.badge_seq
+        except Exception as exc:  # noqa: BLE001
+            _log.warning("[subagent_runs] open_run failed for %s: %s", context.agent_id, exc)
+
+    def _run_store_append_runtime_event(self, context: SubAgentContext, event: RuntimeEvent) -> None:
+        """Append one runtime event into persisted run activity timeline."""
+        try:
+            self._run_store.append_runtime_event(
+                context.agent_id,
+                event_type=event.type,
+                data=dict(event.data or {}),
+                ts=time.time(),
+            )
+        except Exception as exc:  # noqa: BLE001
+            _log.warning("[subagent_runs] append_runtime_event failed for %s: %s", context.agent_id, exc)
+
+    def _run_store_close(self, context: SubAgentContext, produced_files: List[str]) -> None:
+        """Finalize persisted run record after the sub-agent terminal status is known."""
+        artifacts: List[Dict[str, Any]] = []
+        for path in produced_files:
+            p = str(path or "").strip()
+            if not p:
+                continue
+            artifacts.append({"path": p, "kind": "file"})
+        detail_refs = {
+            "result_md_path": str(context.result_file or "").strip() or None,
+            "scratchpad_key": f"subagent_result::{context.agent_id}",
+        }
+        try:
+            self._run_store.close_run(
+                context.agent_id,
+                status=context.status.value,
+                result_summary=context.result_summary,
+                error_text=context.error_text,
+                result_file=context.result_file,
+                output_files=produced_files,
+                artifacts=artifacts,
+                detail_refs=detail_refs,
+                completed_at=context.updated_at or time.time(),
+            )
+        except Exception as exc:  # noqa: BLE001
+            _log.warning("[subagent_runs] close_run failed for %s: %s", context.agent_id, exc)
 
     async def _run_subagent(
         self,
@@ -1176,6 +1271,8 @@ class AgentTeamManager:
         heartbeat_stop = asyncio.Event()
         token_buffer = ""
         token_last_emit_at = time.time()
+        pending_activity_events: List[RuntimeEvent] = []
+        last_activity_flush_at = time.time()
 
         async def _emit_progress(text: str) -> None:
             await self._emit(
@@ -1210,6 +1307,18 @@ class AgentTeamManager:
             )
             token_buffer = ""
             token_last_emit_at = time.time()
+
+        def _flush_activity_events(force: bool = False) -> None:
+            nonlocal last_activity_flush_at
+            if not pending_activity_events:
+                return
+            now = time.time()
+            if not force and len(pending_activity_events) < 5 and (now - last_activity_flush_at) < 3.0:
+                return
+            for evt in pending_activity_events:
+                self._run_store_append_runtime_event(context, evt)
+            pending_activity_events.clear()
+            last_activity_flush_at = now
 
         try:
             def _should_stop() -> bool:
@@ -1261,11 +1370,16 @@ class AgentTeamManager:
                     EventType.TOOL_RESULT.value,
                     EventType.CONFIRM_REQUIRED.value,
                     EventType.CONFIRM_RESPONSE.value,
+                    EventType.CLARIFICATION_REQUIRED.value,
+                    EventType.CLARIFICATION_RESPONSE.value,
                     EventType.SUBAGENT_CHECKPOINT.value,
                     EventType.SUBAGENT_PAUSED.value,
+                    EventType.SUBAGENT_PROGRESS.value,
                     EventType.ERROR.value,
                 }:
                     context.recent_events.append({"type": event.type, "data": event.data})
+                    pending_activity_events.append(event)
+                    _flush_activity_events()
                 if event.type in {EventType.TOOL_CALL.value, EventType.TOOL_RESULT.value}:
                     tool_name = str(event.data.get("name", "tool"))
                     args = event.data.get("arguments") or event.data.get("args") or {}
@@ -1281,6 +1395,7 @@ class AgentTeamManager:
                     )
                     await _emit_progress(action)
                 await self._emit(event)
+            _flush_activity_events(force=True)
 
             await _flush_token_buffer()
 
@@ -1374,6 +1489,7 @@ class AgentTeamManager:
                 escalated = await self._auto_escalate(context, allowed_tools=allowed_tools)
                 if escalated:
                     return
+            self._run_store_close(context, produced_files)
 
             if self.summary_sink is not None:
                 await self.summary_sink(context.result_summary, context)
@@ -1471,6 +1587,17 @@ class AgentTeamManager:
             context.final_text = ""
             context.recent_events.clear()
             context.updated_at = time.time()
+            try:
+                self._run_store.update_status(context.agent_id, status=context.status.value)
+                self._run_store.append_activity(
+                    context.agent_id,
+                    event_type="note",
+                    title=f"自动重试 {context.failure_count}/{max_escalation}",
+                    detail=error_summary,
+                    ts=context.updated_at,
+                )
+            except Exception as exc:  # noqa: BLE001
+                _log.warning("[subagent_runs] retry update failed for %s: %s", context.agent_id, exc)
             self._tasks[context.agent_id] = asyncio.create_task(
                 self._run_subagent(
                     context,
@@ -1507,6 +1634,17 @@ class AgentTeamManager:
         context.final_text = ""
         context.recent_events.clear()
         context.updated_at = time.time()
+        try:
+            self._run_store.update_status(context.agent_id, status=context.status.value)
+            self._run_store.append_activity(
+                context.agent_id,
+                event_type="note",
+                title=f"自动升级重试 {context.failure_count}/{max_escalation}",
+                detail=error_summary,
+                ts=context.updated_at,
+            )
+        except Exception as exc:  # noqa: BLE001
+            _log.warning("[subagent_runs] escalation update failed for %s: %s", context.agent_id, exc)
         self._tasks[context.agent_id] = asyncio.create_task(
             self._run_subagent(
                 context,

@@ -29,6 +29,8 @@ from agenticx.llms.provider_fault import is_provider_session_blocked
 from agenticx.llms.provider_resolver import ProviderResolver
 from agenticx.memory.workspace_memory import WorkspaceMemoryStore
 from agenticx.runtime.team_manager import AgentTeamManager
+from agenticx.runtime.events import EventType
+from agenticx.runtime.subagent_runs import SubAgentRunStore
 from agenticx.workspace.loader import (
     DAILY_MEMORY_TEMPLATE,
     append_daily_memory,
@@ -1610,6 +1612,46 @@ def _missing_output_files(paths: List[str]) -> List[str]:
     return missing
 
 
+def _delegation_event_to_activity(event_type: str, data: Dict[str, Any]) -> tuple[str, str, str]:
+    """Map runtime delegation events into persisted activity timeline entries."""
+    et = str(event_type or "").strip()
+    if et == EventType.TOOL_CALL.value:
+        tool_name = str(data.get("name", "") or "tool").strip()
+        args = data.get("arguments") or data.get("args") or {}
+        detail = ""
+        if isinstance(args, dict):
+            path_val = str(args.get("path", "")).strip()
+            if path_val:
+                detail = f"path={path_val}"
+        return "tool_call", f"调用工具：{tool_name}", detail
+    if et == EventType.TOOL_RESULT.value:
+        tool_name = str(data.get("name", "") or "tool").strip()
+        preview = str(data.get("content", "") or data.get("text", "") or "").strip()
+        return "tool_result", f"工具完成：{tool_name}", preview[:500]
+    if et == EventType.ROUND_START.value:
+        round_no = int(data.get("round", 0) or 0)
+        max_rounds = int(data.get("max_rounds", 0) or 0)
+        return "checkpoint", f"进入第 {round_no}/{max_rounds} 轮", ""
+    if et == EventType.SUBAGENT_PAUSED.value:
+        return "checkpoint", "执行暂停", str(data.get("text", "") or "").strip()
+    if et in {
+        EventType.CONFIRM_REQUIRED.value,
+        EventType.CONFIRM_RESPONSE.value,
+        EventType.CLARIFICATION_REQUIRED.value,
+        EventType.CLARIFICATION_RESPONSE.value,
+    }:
+        title_map = {
+            EventType.CONFIRM_REQUIRED.value: "等待确认",
+            EventType.CONFIRM_RESPONSE.value: "确认已响应",
+            EventType.CLARIFICATION_REQUIRED.value: "等待澄清",
+            EventType.CLARIFICATION_RESPONSE.value: "澄清已响应",
+        }
+        return "confirm", title_map.get(et, "交互事件"), str(data.get("text", "") or "").strip()
+    if et == EventType.ERROR.value:
+        return "note", "运行错误", str(data.get("text", "") or "").strip()
+    return "", "", ""
+
+
 async def _run_delegation_in_avatar_session(
     *,
     avatar_managed: Any,
@@ -1756,6 +1798,38 @@ async def _run_delegation_in_avatar_session(
     if isinstance(prev_info, dict):
         running_info = {**prev_info, **running_info}
     setattr(avatar_managed, "_delegation_info", running_info)
+    owner_session_id = str(running_info.get("from_session", "") or "").strip()
+    if not owner_session_id:
+        owner_session_id = str(getattr(avatar_managed, "session_id", "") or "").strip()
+    run_store = SubAgentRunStore(owner_session_id)
+    try:
+        run_store.open_run(
+            run_id=delegation_id,
+            kind="delegate",
+            name=avatar_context["name"] or delegation_id,
+            role=avatar_context["role"] or "delegated avatar",
+            task=task,
+            status="running",
+            provider=provider_name,
+            model=model_name,
+            persona=avatar_sys_prompt,
+            avatar_id=str(getattr(avatar_config, "id", "") or ""),
+            avatar_session_id=avatar_managed.session_id,
+            source_tool_call_id=str(running_info.get("source_tool_call_id", "") or "").strip(),
+            started_at=time.time(),
+            detail_refs={
+                "avatar_messages_path": str(
+                    Path.home()
+                    / ".agenticx"
+                    / "sessions"
+                    / str(avatar_managed.session_id)
+                    / "messages.json"
+                ),
+                "scratchpad_key": f"delegation_result::{delegation_id}",
+            },
+        )
+    except Exception as exc:  # noqa: BLE001
+        _meta_log.warning("[subagent_runs] open delegation run failed for %s: %s", delegation_id, exc)
 
     delegated_input = f"[委派任务] 来自「{meta_display_name}」:\n{task}"
     path_hints = _collect_path_hints(source_session)
@@ -1781,6 +1855,32 @@ async def _run_delegation_in_avatar_session(
 
     last_persist_at = time.time()
     persist_interval = 5.0
+    pending_activity: List[tuple[str, Dict[str, Any]]] = []
+    last_activity_flush_at = time.time()
+
+    def _flush_activity(force: bool = False) -> None:
+        nonlocal last_activity_flush_at
+        if not pending_activity:
+            return
+        now = time.time()
+        if not force and len(pending_activity) < 5 and (now - last_activity_flush_at) < 3.0:
+            return
+        for evt_type, evt_data in pending_activity:
+            item_type, title, detail = _delegation_event_to_activity(evt_type, evt_data)
+            if not title:
+                continue
+            try:
+                run_store.append_activity(
+                    delegation_id,
+                    event_type=item_type,
+                    title=title,
+                    detail=detail,
+                    ts=now,
+                )
+            except Exception as exc:  # noqa: BLE001
+                _meta_log.warning("[subagent_runs] append delegation activity failed for %s: %s", delegation_id, exc)
+        pending_activity.clear()
+        last_activity_flush_at = now
 
     try:
         async for event in runtime.run_turn(
@@ -1793,6 +1893,19 @@ async def _run_delegation_in_avatar_session(
             usage_session_id=avatar_managed.session_id,
             usage_avatar_id=str(getattr(avatar_managed, "avatar_id", "") or ""),
         ):
+            if event.type in {
+                EventType.TOOL_CALL.value,
+                EventType.TOOL_RESULT.value,
+                EventType.ROUND_START.value,
+                EventType.CONFIRM_REQUIRED.value,
+                EventType.CONFIRM_RESPONSE.value,
+                EventType.CLARIFICATION_REQUIRED.value,
+                EventType.CLARIFICATION_RESPONSE.value,
+                EventType.SUBAGENT_PAUSED.value,
+                EventType.ERROR.value,
+            }:
+                pending_activity.append((event.type, dict(event.data or {})))
+                _flush_activity()
             if event.type == EventType.FINAL.value:
                 final_text = str(event.data.get("text", "")).strip()
             elif event.type == EventType.ERROR.value:
@@ -1824,6 +1937,7 @@ async def _run_delegation_in_avatar_session(
                 except Exception:
                     pass
                 last_persist_at = now
+        _flush_activity(force=True)
         # FR-1: status precedence is paused > failed > cancelled > completed.
         # Tool-rounds saturation must surface as an explicit "paused" status so
         # Meta does not mistake a halted long task for a successful completion.
@@ -1928,6 +2042,29 @@ async def _run_delegation_in_avatar_session(
         info["missing_output_files"] = missing_output_files
     setattr(avatar_managed, "_delegation_info", info)
     avatar_managed.updated_at = time.time()
+    detail_refs = {
+        "avatar_messages_path": str(
+            Path.home()
+            / ".agenticx"
+            / "sessions"
+            / str(avatar_managed.session_id)
+            / "messages.json"
+        ),
+        "scratchpad_key": f"delegation_result::{delegation_id}",
+    }
+    try:
+        run_store.close_run(
+            delegation_id,
+            status=status,
+            result_summary=summary,
+            error_text=error_text,
+            output_files=output_files,
+            artifacts=[{"path": p, "kind": "file"} for p in output_files],
+            detail_refs=detail_refs,
+            completed_at=float(info.get("completed_at", 0) or time.time()),
+        )
+    except Exception as exc:  # noqa: BLE001
+        _meta_log.warning("[subagent_runs] close delegation run failed for %s: %s", delegation_id, exc)
 
     if meta_team_manager is not None:
         # FR-1: paused must surface as SUBAGENT_PAUSED, not SUBAGENT_COMPLETED.
@@ -2003,6 +2140,20 @@ async def _run_delegation_followup_turn(
     )
     final_text = ""
     error_text = ""
+    owner_sid = str((getattr(avatar_managed, "_delegation_info", {}) or {}).get("from_session", "") or "").strip()
+    if not owner_sid:
+        owner_sid = str(getattr(avatar_managed, "session_id", "") or "").strip()
+    run_store = SubAgentRunStore(owner_sid)
+    try:
+        run_store.append_activity(
+            delegation_id,
+            event_type="note",
+            title="收到跟进追问",
+            detail=user_message,
+            ts=time.time(),
+        )
+    except Exception:
+        pass
     try:
         async for event in runtime.run_turn(
             user_message,
@@ -2040,6 +2191,26 @@ async def _run_delegation_followup_turn(
     meta_scratchpad[f"delegation_result::{delegation_id}"] = (
         f"[follow-up] 状态={status}, 摘要: {summary[:500]}"
     )
+    try:
+        run_store.close_run(
+            delegation_id,
+            status=status,
+            result_summary=summary,
+            error_text=error_text,
+            detail_refs={
+                "avatar_messages_path": str(
+                    Path.home()
+                    / ".agenticx"
+                    / "sessions"
+                    / str(avatar_managed.session_id)
+                    / "messages.json"
+                ),
+                "scratchpad_key": f"delegation_result::{delegation_id}",
+            },
+            completed_at=time.time(),
+        )
+    except Exception:
+        pass
     try:
         session_manager.persist(avatar_managed.session_id)
     except Exception:
@@ -2766,6 +2937,34 @@ async def dispatch_meta_tool_async(
                     info["status"] = "failed"
                     info["error"] = str(exc)
                     info["completed_at"] = time.time()
+                owner_sid = str(
+                    (info or {}).get("from_session", "")
+                    or getattr(session, "_owner_session_id", "")
+                    or getattr(team_manager, "owner_session_id", "")
+                    or ""
+                ).strip()
+                if not owner_sid:
+                    owner_sid = str(getattr(avatar_managed, "session_id", "") or "").strip()
+                try:
+                    SubAgentRunStore(owner_sid).close_run(
+                        delegation_id,
+                        status="failed",
+                        result_summary="",
+                        error_text=str(exc),
+                        detail_refs={
+                            "avatar_messages_path": str(
+                                Path.home()
+                                / ".agenticx"
+                                / "sessions"
+                                / str(avatar_managed.session_id)
+                                / "messages.json"
+                            ),
+                            "scratchpad_key": f"delegation_result::{delegation_id}",
+                        },
+                        completed_at=time.time(),
+                    )
+                except Exception:
+                    pass
                 scratchpad[f"delegation_result::{delegation_id}"] = (
                     f"[{avatar.name}] 状态=failed, 错误: {str(exc)[:500]}"
                 )
