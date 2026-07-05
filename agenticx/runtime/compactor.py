@@ -45,6 +45,36 @@ def _env_int(key: str, default: int) -> int:
     return default
 
 
+def _compact_query_data_source_result(result: str, budget: int) -> str:
+    """Trim time-series ``data`` arrays while preserving attribution and warnings."""
+    text = str(result or "")
+    if len(text) <= budget:
+        return text
+    try:
+        parsed = json.loads(text)
+    except json.JSONDecodeError:
+        return text
+    if not isinstance(parsed, dict):
+        return text
+    data = parsed.get("data")
+    if not isinstance(data, list) or len(data) <= 10:
+        return text
+    original_len = len(data)
+    head = data[:5]
+    tail = data[-5:]
+    parsed["data"] = head + [{"_truncated": f"... {original_len - 10} rows omitted ..."}] + tail
+    warnings = parsed.get("warnings")
+    if not isinstance(warnings, list):
+        warnings = []
+    warnings = list(warnings)
+    warnings.append(f"data array truncated from {original_len} to 10 rows for context budget")
+    parsed["warnings"] = warnings
+    compact = json.dumps(parsed, ensure_ascii=False, default=str)
+    if len(compact) <= budget:
+        return compact
+    return text
+
+
 def _stringify_message(msg: Dict[str, Any]) -> str:
     role = str(msg.get("role", "unknown"))
     content = str(msg.get("content", ""))
@@ -253,6 +283,10 @@ class ContextCompactor:
         # Widget payloads are structured JSON + SVG/HTML; truncation breaks UI rendering.
         if name == "show_widget":
             return str(result or "")
+        if name == "query_data_source":
+            if budget is None:
+                budget = _env_int("AGX_MICRO_COMPACT_BUDGET", 4000)
+            return _compact_query_data_source_result(str(result or ""), budget)
         if budget is None:
             budget = _env_int("AGX_MICRO_COMPACT_BUDGET", 4000)
         text = str(result or "")

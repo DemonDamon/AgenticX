@@ -4337,6 +4337,7 @@ def create_studio_app() -> FastAPI:
             "todo_write": "agent", "scratchpad_write": "agent", "scratchpad_read": "agent",
             "memory_append": "memory", "memory_search": "memory", "session_search": "memory",
             "liteparse": "document",
+            "list_data_sources": "data_source", "query_data_source": "data_source",
             "schedule_task": "scheduling", "list_scheduled_tasks": "scheduling", "cancel_scheduled_task": "scheduling",
             "spawn_subagent": "meta", "cancel_subagent": "meta", "retry_subagent": "meta",
             "query_subagent_status": "meta", "check_resources": "meta", "recommend_subagent_model": "meta",
