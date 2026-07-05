@@ -56,6 +56,8 @@ type PersistedPaneState = {
   spawnsColumnOpen?: boolean;
   spawnsColumnSuppressAuto?: boolean;
   spawnsColumnBaselineIds?: string[];
+  runDrawerOpen?: boolean;
+  runDrawerRunId?: string | null;
   sessionTokens?: { input: number; output: number };
 };
 
@@ -156,6 +158,8 @@ function normalizePersistedWorkspaceState(raw: unknown): PersistedWorkspaceState
         spawnsColumnSuppressAuto:
           typeof row.spawnsColumnSuppressAuto === "boolean" ? row.spawnsColumnSuppressAuto : undefined,
         spawnsColumnBaselineIds: baselineIds.length > 0 ? baselineIds : undefined,
+        runDrawerOpen: typeof row.runDrawerOpen === "boolean" ? row.runDrawerOpen : undefined,
+        runDrawerRunId: row.runDrawerRunId == null ? undefined : String(row.runDrawerRunId).trim() || undefined,
         sessionTokens: {
           input: Number.isFinite(tokInput) && tokInput > 0 ? Math.floor(tokInput) : 0,
           output: Number.isFinite(tokOutput) && tokOutput > 0 ? Math.floor(tokOutput) : 0,
@@ -747,6 +751,8 @@ export function App() {
                 spawnsColumnOpen: pane.spawnsColumnOpen ?? false,
                 spawnsColumnSuppressAuto: pane.spawnsColumnSuppressAuto ?? false,
                 spawnsColumnBaselineIds: pane.spawnsColumnBaselineIds ?? [],
+                runDrawerOpen: pane.runDrawerOpen ?? false,
+                runDrawerRunId: pane.runDrawerRunId ?? null,
                 terminalTabs: [],
                 activeTerminalTabId: null,
               })),
@@ -948,6 +954,8 @@ export function App() {
         spawnsColumnOpen: pane.spawnsColumnOpen,
         spawnsColumnSuppressAuto: pane.spawnsColumnSuppressAuto,
         spawnsColumnBaselineIds: pane.spawnsColumnBaselineIds,
+        runDrawerOpen: pane.runDrawerOpen,
+        runDrawerRunId: pane.runDrawerRunId,
         sessionTokens: pane.sessionTokens,
       })),
     };

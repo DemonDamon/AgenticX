@@ -52,6 +52,7 @@ import { StickyTaskBar } from "./StickyTaskBar";
 import { WorkspacePanel } from "./WorkspacePanel";
 import type { WorkspacePreviewOpenRequest, WorkspacePreviewQuotePayload } from "./workspace/workspace-preview-types";
 import { SpawnsColumn } from "./SpawnsColumn";
+import { SubAgentRunDrawer } from "./subagent";
 import { MessageRenderer, renderToolMessageExtras } from "./messages/MessageRenderer";
 import type { SkillPatchPreviewPayload } from "./messages/skill-manage-preview";
 import { groupConsecutiveToolMessages, shouldHoldToolGroupProgress, type GroupedChatRow } from "./messages/group-tool-messages";
@@ -378,6 +379,8 @@ const FALLBACK_PANE: ChatPaneState = {
   oldestLoadedIndex: 0,
   hasOlderMessages: false,
   loadingOlderMessages: false,
+  runDrawerOpen: false,
+  runDrawerRunId: null,
 };
 
 /** Compose-style primary action (豆包式「撰写」语义) + 下拉切换「全新对话」/「继承上下文」，默认前者。 */
@@ -1603,6 +1606,7 @@ function buildToolCallLivePreview(toolNameRaw: unknown, argsRaw: unknown): strin
 
 const TASKSPACE_WIDTH_STORAGE_KEY = "agenticx:taskspace-panel-width";
 const SPAWNS_WIDTH_STORAGE_KEY = "agenticx:spawns-column-width";
+const RUN_DRAWER_WIDTH_STORAGE_KEY = "agenticx:run-drawer-width";
 const TEXT_ATTACHMENT_LIMIT = 32000;
 
 type AttachedFileStatus = "parsing" | "ready" | "error";
@@ -2291,6 +2295,8 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
   const setSpawnsColumnOpen = useAppStore((s) => s.setSpawnsColumnOpen);
   const dismissSpawnsColumn = useAppStore((s) => s.dismissSpawnsColumn);
   const clearSpawnsColumnSuppress = useAppStore((s) => s.clearSpawnsColumnSuppress);
+  const openRunDrawer = useAppStore((s) => s.openRunDrawer);
+  const closeRunDrawer = useAppStore((s) => s.closeRunDrawer);
   const apiBase = useAppStore((s) => s.apiBase);
   const apiToken = useAppStore((s) => s.apiToken);
   const kbGlobalDefaultInit = getCachedGlobalKbRetrievalMode() ?? "auto";
@@ -2578,6 +2584,16 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
     }
     return 300;
   });
+  const [runDrawerWidth, setRunDrawerWidth] = useState(() => {
+    try {
+      const raw = window.localStorage.getItem(RUN_DRAWER_WIDTH_STORAGE_KEY);
+      const parsed = Number(raw);
+      if (Number.isFinite(parsed) && parsed > 0) return parsed;
+    } catch {
+      // ignore storage access failures
+    }
+    return 360;
+  });
   const [historyWidth, setHistoryWidth] = useState(() => {
     try {
       const raw = window.localStorage.getItem("agx-history-width-v1");
@@ -2752,6 +2768,11 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
         .join("\0"),
     [paneSubAgents]
   );
+  const drawerLiveSubAgent = useMemo(() => {
+    const rid = String(pane.runDrawerRunId ?? "").trim();
+    if (!rid) return undefined;
+    return paneSubAgents.find((s) => s.id === rid);
+  }, [pane.runDrawerRunId, paneSubAgents]);
   const primaryPaneForSessionId = useMemo(() => {
     const sid = (pane?.sessionId ?? "").trim();
     if (!sid) return null;
@@ -8772,6 +8793,8 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
   const minTaskspaceWidth = 220;
   const maxSpawnsWidth = paneWidth > 0 ? Math.max(240, Math.floor(paneWidth * 0.42)) : 420;
   const minSpawnsWidth = 220;
+  const minRunDrawerWidth = 280;
+  const maxRunDrawerWidth = paneWidth > 0 ? Math.max(320, Math.floor(paneWidth * 0.48)) : 480;
   const maxHistoryWidth = paneWidth > 0 ? Math.max(220, Math.floor(paneWidth * 0.35)) : 360;
   const minHistoryWidth = 200;
 
@@ -8783,6 +8806,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
   const overlayTaskspaceWidth = clampOverlayAside(taskspaceWidth, minTaskspaceWidth);
   const overlayHistoryWidth = clampOverlayAside(historyWidth, minHistoryWidth);
   const overlaySpawnsWidth = clampOverlayAside(spawnsWidth, minSpawnsWidth);
+  const overlayRunDrawerWidth = clampOverlayAside(runDrawerWidth, minRunDrawerWidth);
 
   useEffect(() => {
     setTaskspaceWidth((prev) => {
@@ -8797,6 +8821,13 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
       return next === prev ? prev : next;
     });
   }, [maxSpawnsWidth, minSpawnsWidth]);
+
+  useEffect(() => {
+    setRunDrawerWidth((prev) => {
+      const next = Math.min(maxRunDrawerWidth, Math.max(minRunDrawerWidth, prev));
+      return next === prev ? prev : next;
+    });
+  }, [maxRunDrawerWidth, minRunDrawerWidth]);
 
   useEffect(() => {
     setHistoryWidth((prev) => {
@@ -8820,6 +8851,14 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
       // ignore storage access failures
     }
   }, [spawnsWidth]);
+
+  useEffect(() => {
+    try {
+      window.localStorage.setItem(RUN_DRAWER_WIDTH_STORAGE_KEY, String(runDrawerWidth));
+    } catch {
+      // ignore storage access failures
+    }
+  }, [runDrawerWidth]);
 
   useEffect(() => {
     try {
@@ -8872,6 +8911,23 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
       const delta = startX - moveEvent.clientX;
       const next = Math.max(minSpawnsWidth, Math.min(maxSpawnsWidth, startWidth + delta));
       setSpawnsWidth(next);
+    };
+    const onUp = () => {
+      window.removeEventListener("mousemove", onMove);
+      window.removeEventListener("mouseup", onUp);
+    };
+    window.addEventListener("mousemove", onMove);
+    window.addEventListener("mouseup", onUp);
+  };
+
+  const startResizeRunDrawer = (event: ReactMouseEvent<HTMLDivElement>) => {
+    event.preventDefault();
+    const startX = event.clientX;
+    const startWidth = runDrawerWidth;
+    const onMove = (moveEvent: MouseEvent) => {
+      const delta = startX - moveEvent.clientX;
+      const next = Math.max(minRunDrawerWidth, Math.min(maxRunDrawerWidth, startWidth + delta));
+      setRunDrawerWidth(next);
     };
     const onUp = () => {
       window.removeEventListener("mousemove", onMove);
@@ -8979,6 +9035,13 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
     setSelectedSubAgent(agentId);
   };
 
+  const handleOpenRunDrawer = (runId: string) => {
+    openRunDrawer(pane.id, runId);
+    if (!pane.spawnsColumnOpen) {
+      setSpawnsColumnOpen(pane.id, true);
+    }
+  };
+
   const resolvePaneSubAgentConfirm = async (agentId: string, approved: boolean) => {
     if (!apiBase || !apiToken || !pane.sessionId) return;
     const sub = subAgents.find((item) => item.id === agentId);
@@ -9068,17 +9131,19 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
 
   useEffect(() => {
     // 历史面板已改为不挤占布局的锚定浮层（不再计入互斥占位），此处仅在工作区/记忆图谱/
-    // 成员列表/Spawns 之间做单选互斥。
+    // 成员列表/Spawns/落盘 drawer 之间做单选互斥（窄窗格 overlay 模式）。
     if (!compactSidePanels) return;
     const p = pane;
     const stacked =
       Number(!!p.taskspacePanelOpen) +
       Number(!!p.memoryGraphOpen) +
       Number(!!p.membersPanelOpen) +
-      Number(!!p.spawnsColumnOpen);
+      Number(!!p.spawnsColumnOpen) +
+      Number(!!p.runDrawerOpen);
     if (stacked <= 1) return;
-    let keep: "workspace" | "memory-graph" | "members" | "spawns" = "workspace";
-    if (p.taskspacePanelOpen) keep = "workspace";
+    let keep: "workspace" | "memory-graph" | "members" | "spawns" | "run-drawer" = "run-drawer";
+    if (p.runDrawerOpen) keep = "run-drawer";
+    else if (p.taskspacePanelOpen) keep = "workspace";
     else if (p.memoryGraphOpen) keep = "memory-graph";
     else if (p.membersPanelOpen) keep = "members";
     else keep = "spawns";
@@ -9087,6 +9152,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
       memoryGraphOpen: keep === "memory-graph",
       membersPanelOpen: keep === "members",
       spawnsColumnOpen: keep === "spawns",
+      runDrawerOpen: keep === "run-drawer",
     };
     useAppStore.setState((s) => {
       const row = s.panes.find((r) => r.id === p.id);
@@ -9095,7 +9161,8 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
         row.taskspacePanelOpen === desired.taskspacePanelOpen &&
         row.memoryGraphOpen === desired.memoryGraphOpen &&
         row.membersPanelOpen === desired.membersPanelOpen &&
-        row.spawnsColumnOpen === desired.spawnsColumnOpen
+        row.spawnsColumnOpen === desired.spawnsColumnOpen &&
+        row.runDrawerOpen === desired.runDrawerOpen
       ) {
         return s;
       }
@@ -9110,6 +9177,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
     pane.memoryGraphOpen,
     pane.membersPanelOpen,
     pane.spawnsColumnOpen,
+    pane.runDrawerOpen,
   ]);
 
   const dismissAuxiliaryOverlays = () => {
@@ -9124,9 +9192,14 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
               memoryGraphOpen: false,
               membersPanelOpen: false,
               spawnsColumnOpen: false,
+              runDrawerOpen: false,
             }
       ),
     }));
+  };
+
+  const closeRunDrawerPanelOnly = () => {
+    closeRunDrawer(pane.id);
   };
 
   const closeMemoryGraphPanelOnly = () => {
@@ -10251,7 +10324,21 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
           onRetry={(agentId) => void retryPaneSubAgent(agentId)}
           onModelChange={(agentId, provider, model) => void changePaneSubAgentModel(agentId, provider, model)}
           onChat={togglePaneSubAgentChat}
+          onOpenRun={handleOpenRunDrawer}
           onConfirmResolve={(agentId, approved) => void resolvePaneSubAgentConfirm(agentId, approved)}
+          tintColor={paneTint}
+        />
+      ) : null}
+      {!compactSidePanels && pane.runDrawerOpen && pane.runDrawerRunId && pane.sessionId ? (
+        <SubAgentRunDrawer
+          width={runDrawerWidth}
+          sessionId={pane.sessionId}
+          runId={pane.runDrawerRunId}
+          liveSubAgent={drawerLiveSubAgent}
+          apiBase={apiBase}
+          apiToken={apiToken}
+          onResizeStart={startResizeRunDrawer}
+          onClose={closeRunDrawerPanelOnly}
           tintColor={paneTint}
         />
       ) : null}
@@ -10271,7 +10358,8 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
       (workspacePanelOpen ||
         pane.memoryGraphOpen ||
         (isGroupPane && pane.membersPanelOpen) ||
-        pane.spawnsColumnOpen) ? (
+        pane.spawnsColumnOpen ||
+        pane.runDrawerOpen) ? (
         <>
           <div
             aria-hidden
@@ -10348,7 +10436,26 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
                 onRetry={(agentId) => void retryPaneSubAgent(agentId)}
                 onModelChange={(agentId, provider, model) => void changePaneSubAgentModel(agentId, provider, model)}
                 onChat={togglePaneSubAgentChat}
+                onOpenRun={handleOpenRunDrawer}
                 onConfirmResolve={(agentId, approved) => void resolvePaneSubAgentConfirm(agentId, approved)}
+                tintColor={paneTint}
+              />
+            </div>
+          ) : null}
+          {pane.runDrawerOpen && pane.runDrawerRunId && pane.sessionId ? (
+            <div
+              className="pointer-events-auto absolute bottom-0 right-0 top-10 z-50 shrink-0 overflow-hidden shadow-[6px_0_24px_rgba(0,0,0,0.28)]"
+              style={{ width: overlayRunDrawerWidth, WebkitAppRegion: "no-drag" } as CSSProperties}
+            >
+              <SubAgentRunDrawer
+                width={overlayRunDrawerWidth}
+                sessionId={pane.sessionId}
+                runId={pane.runDrawerRunId}
+                liveSubAgent={drawerLiveSubAgent}
+                apiBase={apiBase}
+                apiToken={apiToken}
+                onResizeStart={startResizeRunDrawer}
+                onClose={closeRunDrawerPanelOnly}
                 tintColor={paneTint}
               />
             </div>

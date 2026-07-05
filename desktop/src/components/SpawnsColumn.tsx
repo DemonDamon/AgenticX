@@ -15,6 +15,8 @@ type Props = {
   onCancel: (agentId: string) => void;
   onRetry: (agentId: string) => void;
   onChat: (agentId: string) => void;
+  /** Sub-Plan D: open run artifact drawer (cluster card member click). */
+  onOpenRun?: (runId: string) => void;
   onModelChange?: (agentId: string, provider: string, model: string) => void;
   onConfirmResolve?: (agentId: string, approved: boolean) => void;
   tintColor?: string;
@@ -30,6 +32,7 @@ export function SpawnsColumn({
   onCancel,
   onRetry,
   onChat,
+  onOpenRun,
   onModelChange,
   onConfirmResolve,
   tintColor,
@@ -80,7 +83,7 @@ export function SpawnsColumn({
             <SubAgentClusterCard
               members={clusterMembers}
               selectedRunId={selectedSubAgent}
-              onOpenRun={onChat}
+              onOpenRun={onOpenRun ?? onChat}
             />
           ) : null}
           {subAgents.map((subAgent) => (

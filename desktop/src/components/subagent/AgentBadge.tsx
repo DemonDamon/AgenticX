@@ -141,6 +141,66 @@ function FullBadgeCard({ vm, anchorRect }: { vm: BadgeVM; anchorRect: DOMRect })
   );
 }
 
+// ── Drawer 工牌头（Sub-Plan D FR-2：常驻 full 态，非 hover 浮层）────────────
+
+export function AgentBadgeDrawerHeader({
+  vm,
+  onCopy,
+  copyFeedback,
+}: {
+  vm: BadgeVM;
+  onCopy?: () => void;
+  copyFeedback?: boolean;
+}) {
+  const tint = avatarTintBg(vm.avatarId ?? vm.runId);
+  return (
+    <div
+      className="flex flex-col gap-2.5 border-b border-border px-3 py-3"
+      style={tint ? { backgroundImage: `linear-gradient(${tint}, ${tint})` } : undefined}
+    >
+      <div className="flex items-start gap-3">
+        <div className="relative shrink-0">
+          <span
+            className="absolute -left-1 top-1 h-[calc(100%-8px)] w-[2px] rounded-full"
+            style={{ background: "rgb(var(--theme-color-rgb))" }}
+            aria-hidden
+          />
+          <BadgeAvatar vm={vm} size={BADGE_FULL_AVATAR_PX} />
+        </div>
+        <div className="min-w-0 flex-1">
+          <div className="flex items-center gap-1.5">
+            <span className="truncate text-sm font-semibold text-text-strong">{vm.name}</span>
+            <span className="shrink-0 font-mono text-[10px] text-text-faint">{vm.badgeSeq}</span>
+          </div>
+          <div className="mt-0.5 truncate text-[11px] text-text-muted">{vm.role}</div>
+          {vm.persona ? (
+            <div className="mt-1 truncate text-[11px] italic text-text-faint">「{vm.persona}」</div>
+          ) : null}
+        </div>
+        {onCopy ? (
+          <button
+            type="button"
+            className="agx-topbar-btn shrink-0 !px-2 !py-1 text-[11px]"
+            onClick={onCopy}
+          >
+            {copyFeedback ? "已复制" : "复制"}
+          </button>
+        ) : null}
+      </div>
+      <div className="flex items-center justify-between gap-2">
+        <StatusPill status={vm.status} />
+        <ModelPill provider={vm.provider} model={vm.model} />
+      </div>
+      <PixelProgress progress={vm.progress} status={vm.status} />
+      {vm.resultSummary ? (
+        <div className="max-h-20 overflow-y-auto whitespace-pre-wrap rounded-md border border-border bg-surface-card px-2 py-1.5 text-[11px] leading-relaxed text-text-primary">
+          {vm.resultSummary}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
 // ── Compact 工牌（集群卡片内一行）──────────────────────────────────────────
 
 type Props = {

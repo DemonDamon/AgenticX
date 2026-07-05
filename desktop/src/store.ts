@@ -147,6 +147,10 @@ export type ChatPane = {
   hasOlderMessages?: boolean;
   /** True while fetching an older page on scroll-up. */
   loadingOlderMessages?: boolean;
+  /** Sub-Plan D: right column drawer showing one sub-agent run's activity log + artifacts. */
+  runDrawerOpen?: boolean;
+  /** Run id currently shown in the drawer (persists across restarts so the drawer can restore). */
+  runDrawerRunId?: string | null;
 };
 
 /** Lifecycle for merged tool_call + tool_result rows in chat (desktop Meta pane). */
@@ -632,6 +636,9 @@ type AppState = {
   setSpawnsColumnOpen: (paneId: string, open: boolean) => void;
   dismissSpawnsColumn: (paneId: string, baselineSubAgentIds: string[]) => void;
   clearSpawnsColumnSuppress: (paneId: string) => void;
+  /** Sub-Plan D: open/close the right-column sub-agent run drawer. */
+  openRunDrawer: (paneId: string, runId: string) => void;
+  closeRunDrawer: (paneId: string) => void;
   addPaneTerminalTab: (
     paneId: string,
     cwd: string,
@@ -736,6 +743,8 @@ function makeDefaultPane(): ChatPane {
     spawnsColumnOpen: false,
     spawnsColumnSuppressAuto: false,
     spawnsColumnBaselineIds: [],
+    runDrawerOpen: false,
+    runDrawerRunId: null,
     terminalTabs: [],
     activeTerminalTabId: null,
     sessionTokens: { input: 0, output: 0 },
@@ -1429,10 +1438,14 @@ export const useAppStore = create<AppState>((set, get) => ({
           spawnsColumnOpen: false,
           spawnsColumnSuppressAuto: false,
           spawnsColumnBaselineIds: [],
+          runDrawerOpen: false,
+          runDrawerRunId: null,
           terminalTabs: [],
           activeTerminalTabId: null,
           sessionTokens: { input: 0, output: 0 },
           historySearchTerms: [],
+          runDrawerOpen: false,
+          runDrawerRunId: null,
         },
       ],
       activePaneId: paneId,
@@ -2010,6 +2023,29 @@ export const useAppStore = create<AppState>((set, get) => ({
         pane.id === paneId
           ? { ...pane, spawnsColumnSuppressAuto: false, spawnsColumnBaselineIds: [] }
           : pane
+      ),
+    })),
+  openRunDrawer: (paneId, runId) =>
+    set((state) => ({
+      panes: state.panes.map((pane) =>
+        pane.id === paneId
+          ? {
+              ...pane,
+              runDrawerOpen: true,
+              runDrawerRunId: runId,
+              // FR-6: mutually exclude with the other right-column panels so the
+              // drawer does not stack on top of workspace/members/memory-graph.
+              taskspacePanelOpen: false,
+              membersPanelOpen: false,
+              memoryGraphOpen: false,
+            }
+          : pane
+      ),
+    })),
+  closeRunDrawer: (paneId) =>
+    set((state) => ({
+      panes: state.panes.map((pane) =>
+        pane.id === paneId ? { ...pane, runDrawerOpen: false, runDrawerRunId: null } : pane
       ),
     })),
   addPaneTerminalTab: (paneId, cwd, labelHint, ccBridgePty) =>
