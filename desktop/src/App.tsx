@@ -751,8 +751,11 @@ export function App() {
                 spawnsColumnOpen: pane.spawnsColumnOpen ?? false,
                 spawnsColumnSuppressAuto: pane.spawnsColumnSuppressAuto ?? false,
                 spawnsColumnBaselineIds: pane.spawnsColumnBaselineIds ?? [],
-                runDrawerOpen: pane.runDrawerOpen ?? false,
-                runDrawerRunId: pane.runDrawerRunId ?? null,
+                // 落盘 drawer 是「按 run 查看」的临时检视面板，不跨重启恢复：
+                // 恢复后 runId 可能属于旧/别的会话，自动弹出会显示 "run not found"。
+                // 重启后一律收起，用户点集群卡成员再打开当前会话的 run。
+                runDrawerOpen: false,
+                runDrawerRunId: null,
                 terminalTabs: [],
                 activeTerminalTabId: null,
               })),

@@ -1453,8 +1453,6 @@ export const useAppStore = create<AppState>((set, get) => ({
           activeTerminalTabId: null,
           sessionTokens: { input: 0, output: 0 },
           historySearchTerms: [],
-          runDrawerOpen: false,
-          runDrawerRunId: null,
         },
       ],
       activePaneId: paneId,

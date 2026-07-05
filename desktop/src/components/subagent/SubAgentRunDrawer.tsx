@@ -68,7 +68,14 @@ export function SubAgentRunDrawer({
           setLoadError(null);
           return;
         }
-        setLoadError(resp.error || resp.detail || "无法加载 run 详情");
+        const errText = String(resp.error || resp.detail || "");
+        // 该 run 不属于当前会话（多为重启/切会话后残留的 drawer 状态）——静默关闭，
+        // 不把原始 "run not found" 报错糊在面板上。
+        if (/not found/i.test(errText)) {
+          onClose();
+          return;
+        }
+        setLoadError(errText || "无法加载 run 详情");
         return;
       }
       if (resp.run) {
@@ -79,7 +86,7 @@ export function SubAgentRunDrawer({
     } finally {
       setLoadingRun(false);
     }
-  }, [apiBase, apiToken, sessionId, runId, liveSubAgent]);
+  }, [apiBase, apiToken, sessionId, runId, liveSubAgent, onClose]);
 
   useEffect(() => {
     void refreshRun();

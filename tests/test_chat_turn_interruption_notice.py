@@ -51,10 +51,34 @@ def test_append_no_final_after_tool_result() -> None:
 
 
 def test_append_idempotent() -> None:
-    session = _session_with_history([])
+    session = _session_with_history([{"role": "user", "content": "继续"}])
     assert append_turn_interruption_notice(session, cause="cancelled", saw_final=False) is True
     assert append_turn_interruption_notice(session, cause="cancelled", saw_final=False) is False
-    assert len(session.chat_history) == 1
+    assert len(session.chat_history) == 2
+
+
+def test_append_skips_without_user_message() -> None:
+    """A session with no user turn (e.g. a continuation misfired onto a fresh
+    session) must not get a turn_interrupted placeholder — it stays a neutral
+    new session instead of showing a spurious 「恢复执行」 card."""
+    session = _session_with_history([])
+    assert append_turn_interruption_notice(session, cause="runtime_failure", saw_final=False) is False
+    assert session.chat_history == []
+
+    tool_only = _session_with_history(
+        [{"role": "tool", "content": "exit_code=0", "tool_call_id": "tc1"}]
+    )
+    assert (
+        append_turn_interruption_notice(tool_only, cause="runtime_failure", saw_final=False)
+        is False
+    )
+    assert len(tool_only.chat_history) == 1
+
+
+def test_append_writes_with_user_message() -> None:
+    session = _session_with_history([{"role": "user", "content": "跑一下"}])
+    assert append_turn_interruption_notice(session, cause="runtime_failure", saw_final=False) is True
+    assert session.chat_history[-1]["metadata"]["kind"] == TURN_INTERRUPTED_KIND
 
 
 def test_has_turn_interruption_notice() -> None:

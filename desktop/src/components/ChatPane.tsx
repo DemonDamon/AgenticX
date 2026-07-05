@@ -105,7 +105,7 @@ import {
   shouldShowStopButton,
   type SessionExecutionState,
 } from "../utils/streaming-stop-policy";
-import { TURN_INTERRUPTED_TOAST } from "../utils/turn-interruption-notice";
+import { TURN_INTERRUPTED_TOAST, isTurnInterruptionNoticeMessage } from "../utils/turn-interruption-notice";
 import {
   CHANNEL_C_GRACE_MS,
   stallDetectSilenceMs,
@@ -144,6 +144,7 @@ import {
   type ContinueSource,
 } from "../utils/session-continue";
 import { mergeSessionMessagesTail } from "../utils/session-message-merge";
+import { injectLiveSubAgentClusterAnchors } from "../utils/subagent-cluster-inline";
 import {
   enrichDiskMessagesWithInMemoryReferences,
   referencesDifferBetweenTails,
@@ -2294,7 +2295,6 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
   const editPendingMessage = useAppStore((s) => s.editPendingMessage);
   const setSpawnsColumnOpen = useAppStore((s) => s.setSpawnsColumnOpen);
   const dismissSpawnsColumn = useAppStore((s) => s.dismissSpawnsColumn);
-  const clearSpawnsColumnSuppress = useAppStore((s) => s.clearSpawnsColumnSuppress);
   const openRunDrawer = useAppStore((s) => s.openRunDrawer);
   const closeRunDrawer = useAppStore((s) => s.closeRunDrawer);
   const apiBase = useAppStore((s) => s.apiBase);
@@ -2610,6 +2610,16 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
   const paneRef = useRef<HTMLDivElement | null>(null);
   const [paneWidth, setPaneWidth] = useState(0);
 
+  // 会话是否有过真实的用户轮——用于抑制「空会话孤立中断占位」。旧数据里可能残留
+  // 一条无用户消息的 turn_interrupted（continuation 误触发在新会话上），不应展示为
+  // 「恢复执行」卡，须保持「新会话」中性态（对齐后端 append 守卫）。
+  const paneHasUserMessage = useMemo(
+    () =>
+      (pane?.messages ?? []).some(
+        (m) => m.role === "user" && String(m.content ?? "").trim().length > 0
+      ),
+    [pane?.messages]
+  );
   const visibleMessages = useMemo(
     () =>
       // Cross-session ownership invariant: never render a row that belongs to a
@@ -2619,13 +2629,21 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
         if (isGroupPane) return true;
         if (item.role === "assistant" && isThinkingPlaceholderText(item.content || "")) return false;
         if (isInterruptedAssistantPlaceholder(item)) return false;
+        if (!paneHasUserMessage && isTurnInterruptionNoticeMessage(item)) return false;
         return !item.agentId || item.agentId === "meta";
       }),
-    [isGroupPane, pane?.messages, pane?.sessionId]
+    [isGroupPane, paneHasUserMessage, pane?.messages, pane?.sessionId]
+  );
+  // Render-only list: inline the sub-agent cluster card into the conversation
+  // flow (like the clarification card). Kept separate from `visibleMessages` so
+  // selection/counts/last-assistant logic never sees the synthetic anchor row.
+  const renderMessages = useMemo(
+    () => (isGroupPane ? visibleMessages : injectLiveSubAgentClusterAnchors(visibleMessages)),
+    [isGroupPane, visibleMessages]
   );
   const groupedVisibleMessages = useMemo(
-    () => groupConsecutiveToolMessages(visibleMessages),
-    [visibleMessages]
+    () => groupConsecutiveToolMessages(renderMessages),
+    [renderMessages]
   );
   const isStreamingCurrentSession =
     streaming &&
@@ -2670,12 +2688,12 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
   const useReActImLayout = !isGroupPane && chatStyle === "im";
   const visibleMessagesWithStream = useMemo(() => {
     if (useReActImLayout && isStreamingCurrentSession && !hideStreamOverlayAsDuplicate) {
-      return [...visibleMessages, streamAssistantMessage];
+      return [...renderMessages, streamAssistantMessage];
     }
-    return visibleMessages;
+    return renderMessages;
   }, [
     useReActImLayout,
-    visibleMessages,
+    renderMessages,
     isStreamingCurrentSession,
     hideStreamOverlayAsDuplicate,
     streamAssistantMessage,
@@ -2760,14 +2778,6 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
     if (!sid) return [];
     return subAgents.filter((item) => (item.sessionId ?? "").trim() === sid);
   }, [pane?.sessionId, subAgents]);
-  const paneSubAgentIdsKey = useMemo(
-    () =>
-      paneSubAgents
-        .map((s) => s.id)
-        .sort()
-        .join("\0"),
-    [paneSubAgents]
-  );
   const anchoredSubAgentRunIds = useMemo(() => {
     const ids = new Set<string>();
     for (const msg of pane.messages ?? []) {
@@ -2796,33 +2806,14 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
   const shouldShowWechatBadge =
     wechatDesktopBound && primaryPaneForSessionId === pane.id && !isAutomationTaskPane;
 
+  // 集群卡改为内联在对话流展示（对齐 Kimi Work / 澄清卡片语义），Spawns 列不再
+  // 随派生自动弹出——仅作为可选的成员控制/明细面板，由工具栏按钮手动开启；这里
+  // 只在没有子智能体时收起已开的列，保持整洁。
   useEffect(() => {
-    if (paneSubAgents.length === 0) {
-      if (pane.spawnsColumnOpen) setSpawnsColumnOpen(pane.id, false);
-      return;
+    if (paneSubAgents.length === 0 && pane.spawnsColumnOpen) {
+      setSpawnsColumnOpen(pane.id, false);
     }
-    const baseline = new Set(pane.spawnsColumnBaselineIds ?? []);
-    if (pane.spawnsColumnSuppressAuto) {
-      const hasNew = paneSubAgents.some((s) => !baseline.has(s.id));
-      if (hasNew) {
-        clearSpawnsColumnSuppress(pane.id);
-        setSpawnsColumnOpen(pane.id, true);
-      }
-      return;
-    }
-    if (!pane.spawnsColumnOpen) {
-      setSpawnsColumnOpen(pane.id, true);
-    }
-  }, [
-    pane.id,
-    pane.spawnsColumnOpen,
-    pane.spawnsColumnSuppressAuto,
-    pane.spawnsColumnBaselineIds,
-    paneSubAgentIdsKey,
-    paneSubAgents.length,
-    clearSpawnsColumnSuppress,
-    setSpawnsColumnOpen,
-  ]);
+  }, [pane.id, pane.spawnsColumnOpen, paneSubAgents.length, setSpawnsColumnOpen]);
   const attachmentEntries = useMemo(() => Object.entries(contextFiles), [contextFiles]);
   const visibleAttachmentEntries = useMemo(
     () => attachmentEntries.filter(([, file]) => !file.referenceToken),
@@ -4574,7 +4565,12 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
     sessionBootstrapRef.current = "";
     sessionBootstrapInflightRef.current = "";
     sessionBootstrapAttemptRef.current = 0;
-  }, [pane.sessionId]);
+    // 切换会话时收起落盘 drawer：其 runId 属于上一会话，跨会话残留会导致
+    // "run not found"（用户点当前会话集群卡成员时再按需打开）。
+    if (useAppStore.getState().panes.find((p) => p.id === pane.id)?.runDrawerOpen) {
+      closeRunDrawer(pane.id);
+    }
+  }, [pane.id, pane.sessionId, closeRunDrawer]);
 
   /** App restore / direct bind / switch-back: ensure the pane shows this session's
    *  complete persisted history. We must NOT trust stray rows already sitting in the
@@ -5952,6 +5948,15 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
     [pane.sessionId]
   );
 
+  const handleOpenRunDrawer = useCallback(
+    (runId: string) => {
+      // 内联集群卡点成员：只打开右侧落盘 drawer（openRunDrawer 已与其它右侧面板互斥），
+      // 不再顺带弹出 Spawns 列，避免与内联卡重复展示。
+      openRunDrawer(pane.id, runId);
+    },
+    [openRunDrawer, pane.id],
+  );
+
   const renderedMessages = useMemo(() => {
     const reactActionStyle = getAssistantActionStyle({ inReActRow: true });
     const renderGroupedRow = (
@@ -6445,7 +6450,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
       )}
     </>
     );
-  }, [autoNudgeCount, budgetExceededInfo, chatStyle, copyMessage, copyReActBlock, currentModelLabel, exhaustedRounds, favoriteMessage, forwardOneMessage, groupChatUserLabel, groupTyping, groupedVisibleMessages, hideStreamOverlayAsDuplicate, input, isGroupPane, isRunGuardCurrentSession, isStreamingCurrentSession, lastAssistantMessageId, midTurnStreamActivity, pane.historySearchTerms, pane.messages, pane.sessionId, paneAvatarMeta, paneId, readyAttachments.length, resolveGroupInlineConfirm, resolveGroupSender, resolveQuoteBody, resumeCurrentTask, resumeInFlight, resumeWithModel, revealFileInTaskspace, retryUserMessage, selectUpTo, selectedMessageIds, sendFollowupChip, sessionBusy, sessionWorkInProgress, setQuoteTarget, showInlineAssistantModelBadge, silentSeconds, stallModelOptions, stallRejectReason, stallRuntimeConfig.stall_auto_nudge_max_per_session, stallState, stopCurrentRun, streamTextForCurrentSession, streamingModel, toggleSelectBlock, toggleSelectMessage, topLevelRowsIm, userAvatarUrl, userBubbleLabel]);
+  }, [autoNudgeCount, budgetExceededInfo, chatStyle, copyMessage, copyReActBlock, currentModelLabel, exhaustedRounds, favoriteMessage, forwardOneMessage, groupChatUserLabel, groupTyping, groupedVisibleMessages, handleOpenRunDrawer, hideStreamOverlayAsDuplicate, input, isGroupPane, isRunGuardCurrentSession, isStreamingCurrentSession, lastAssistantMessageId, midTurnStreamActivity, openFileReferencePreview, pane.historySearchTerms, pane.messages, pane.sessionId, paneAvatarMeta, paneId, readyAttachments.length, resolveGroupInlineConfirm, resolveGroupSender, resolveQuoteBody, resumeCurrentTask, resumeInFlight, resumeWithModel, revealFileInTaskspace, retryUserMessage, selectUpTo, selectedMessageIds, sendFollowupChip, sessionBusy, sessionWorkInProgress, setQuoteTarget, showInlineAssistantModelBadge, silentSeconds, stallModelOptions, stallRejectReason, stallRuntimeConfig.stall_auto_nudge_max_per_session, stallState, stopCurrentRun, streamTextForCurrentSession, streamingModel, toggleSelectBlock, toggleSelectMessage, topLevelRowsIm, userAvatarUrl, userBubbleLabel]);
 
   const removeAttachment = useCallback((key: string) => {
     setContextFiles((prev) => {
@@ -9046,13 +9051,6 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
       return;
     }
     setSelectedSubAgent(agentId);
-  };
-
-  const handleOpenRunDrawer = (runId: string) => {
-    openRunDrawer(pane.id, runId);
-    if (!pane.spawnsColumnOpen) {
-      setSpawnsColumnOpen(pane.id, true);
-    }
   };
 
   const resolvePaneSubAgentConfirm = async (agentId: string, approved: boolean) => {

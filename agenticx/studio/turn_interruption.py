@@ -71,6 +71,17 @@ def has_turn_interruption_notice(session: Any) -> bool:
     return _row_meta(last).get("kind") == TURN_INTERRUPTED_KIND
 
 
+def _history_has_user_message(session: Any) -> bool:
+    """True when the session's chat history contains at least one user turn."""
+    history = getattr(session, "chat_history", None)
+    if not isinstance(history, list):
+        return False
+    for row in history:
+        if isinstance(row, dict) and str(row.get("role", "")) == "user":
+            return True
+    return False
+
+
 def append_turn_interruption_notice(
     session: Any,
     *,
@@ -84,6 +95,10 @@ def append_turn_interruption_notice(
     if not isinstance(history, list):
         return False
     if has_turn_interruption_notice(session):
+        return False
+    # 无任何用户轮的会话（例如空会话上被误触发的 continuation/resume 立即失败）不应
+    # 留下「恢复执行」失败占位——保持「新会话」中性态，避免用户一进新对话就看到中断卡。
+    if not _history_has_user_message(session):
         return False
     content = interruption_notice_content(cause=cause, session=session)
     history.append(
