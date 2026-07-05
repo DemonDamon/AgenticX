@@ -1,15 +1,93 @@
 import type { Message } from "../../store";
 
-export type WidgetPayload = {
+export type StockChartSeriesPoint = {
+  date: string;
+  open: number;
+  high: number;
+  low: number;
+  close: number;
+  volume?: number;
+};
+
+export type StockChartPayload = {
+  kind: "stock_chart";
+  title: string;
+  chartType: "candlestick" | "line";
+  points: StockChartSeriesPoint[];
+  attribution?: string;
+};
+
+export type HtmlWidgetPayload = {
   title: string;
   widgetCode: string;
   loadingMessages: string[];
-  /** "svg" when widgetCode starts with <svg, else "html". */
   kind: "svg" | "html";
 };
 
+export type WidgetPayload = HtmlWidgetPayload | StockChartPayload;
+
 function widgetKind(widgetCode: string): "svg" | "html" {
   return widgetCode.trimStart().toLowerCase().startsWith("<svg") ? "svg" : "html";
+}
+
+function readNum(value: unknown): number | null {
+  if (typeof value === "number" && Number.isFinite(value)) return value;
+  const parsed = parseFloat(String(value ?? "").replace(/,/g, ""));
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function normalizeStockPoint(raw: unknown): StockChartSeriesPoint | null {
+  if (!raw || typeof raw !== "object") return null;
+  const row = raw as Record<string, unknown>;
+  const date = String(row.date ?? row.日期 ?? row.year ?? row.Year ?? "").trim();
+  const open = readNum(row.open ?? row.开盘);
+  const high = readNum(row.high ?? row.最高);
+  const low = readNum(row.low ?? row.最低);
+  const close = readNum(row.close ?? row.收盘 ?? row.value ?? row.Value);
+  if (!date || open === null || high === null || low === null || close === null) {
+    return null;
+  }
+  const volumeRaw = readNum(row.volume ?? row.成交量 ?? row.vol);
+  return {
+    date,
+    open,
+    high,
+    low,
+    close,
+    volume: volumeRaw === null ? undefined : volumeRaw,
+  };
+}
+
+function parseStockChartPayload(parsed: Record<string, unknown>): StockChartPayload | null {
+  const rawPoints = Array.isArray(parsed.points) ? parsed.points : parsed.data;
+  if (!Array.isArray(rawPoints)) return null;
+  const points = rawPoints
+    .map((item) => normalizeStockPoint(item))
+    .filter((item): item is StockChartSeriesPoint => item !== null);
+  if (points.length === 0) return null;
+  const chartType = parsed.chart_type === "line" || parsed.chartType === "line" ? "line" : "candlestick";
+  return {
+    kind: "stock_chart",
+    title: typeof parsed.title === "string" ? parsed.title.trim() : "",
+    chartType,
+    points,
+    attribution: typeof parsed.attribution === "string" ? parsed.attribution : undefined,
+  };
+}
+
+export function isBrokenStockChartAttempt(content: string): boolean {
+  const raw = String(content ?? "").trim();
+  if (!raw.startsWith("{")) return false;
+  try {
+    const parsed = JSON.parse(raw) as Record<string, unknown>;
+    return parsed.type === "stock_chart";
+  } catch {
+    return /"type"\s*:\s*"stock_chart"/.test(raw);
+  }
+}
+
+export function stockChartDegradedMessage(): string {
+  return "股票图表数据格式无效或缺少有效点位，无法渲染。请让助手重新调用 query_data_source 并传入完整 stock_chart JSON。";
 }
 
 export function parseWidgetPayload(content: string): WidgetPayload | null {
@@ -17,6 +95,9 @@ export function parseWidgetPayload(content: string): WidgetPayload | null {
   if (!raw.startsWith("{") || !raw.endsWith("}")) return null;
   try {
     const parsed = JSON.parse(raw) as Record<string, unknown>;
+    if (parsed.type === "stock_chart") {
+      return parseStockChartPayload(parsed);
+    }
     if (parsed.type !== "widget") return null;
     const widgetCode = typeof parsed.widget_code === "string" ? parsed.widget_code : "";
     if (!widgetCode.trim()) return null;

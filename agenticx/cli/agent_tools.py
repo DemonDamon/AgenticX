@@ -5025,6 +5025,14 @@ def _tool_show_widget(arguments: Dict[str, Any]) -> str:
     )
     if not widget_code.strip():
         return "ERROR: show_widget requires non-empty widget_code."
+    stripped = widget_code.strip()
+    if stripped.startswith("{") and stripped.endswith("}"):
+        try:
+            parsed = json.loads(stripped)
+            if isinstance(parsed, dict) and parsed.get("type") == "stock_chart":
+                return json.dumps(parsed, ensure_ascii=False)
+        except json.JSONDecodeError:
+            pass
     payload = {
         "type": "widget",
         "title": title,

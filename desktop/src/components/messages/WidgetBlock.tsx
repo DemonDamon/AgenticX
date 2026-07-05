@@ -3,7 +3,8 @@ import { Code, Copy, Download, Image, Maximize2, MoreHorizontal, X } from "lucid
 import { collectThemeCssVars, exportSurfaceColor } from "../../utils/widget-theme";
 import { Modal } from "../ds/Modal";
 import { ZoomableViewport } from "../ds/ZoomableViewport";
-import type { WidgetPayload } from "./widget-preview";
+import { StockChartWidgetBlock } from "./StockChartWidget";
+import type { HtmlWidgetPayload, WidgetPayload } from "./widget-preview";
 
 type Props = {
   payload: WidgetPayload;
@@ -296,7 +297,7 @@ function WidgetMenu({
   getSvgDisplayWidth,
   getLiveSvg,
 }: {
-  payload: WidgetPayload;
+  payload: HtmlWidgetPayload;
   getSvgDisplayWidth?: () => number;
   getLiveSvg?: () => SVGSVGElement | null;
 }) {
@@ -488,6 +489,10 @@ function ZoomButton({ onClick }: { onClick: () => void }) {
 export function WidgetBlock({ payload }: Props) {
   const hostRef = useRef<HTMLDivElement>(null);
   const [zoomOpen, setZoomOpen] = useState(false);
+
+  if (payload.kind === "stock_chart") {
+    return <StockChartWidgetBlock payload={payload} />;
+  }
 
   const getSvgDisplayWidth = () => {
     const svg = hostRef.current?.querySelector("svg");

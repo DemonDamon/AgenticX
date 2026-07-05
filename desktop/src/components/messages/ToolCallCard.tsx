@@ -23,7 +23,7 @@ import {
   parseSkillPatchPreviewPayload,
   type SkillPatchPreviewPayload,
 } from "./skill-manage-preview";
-import { parseWidgetPayload } from "./widget-preview";
+import { parseWidgetPayload, isBrokenStockChartAttempt, stockChartDegradedMessage } from "./widget-preview";
 import { openExternalUrl } from "../../utils/open-external";
 import { isHookBlockedToolMessage } from "../../utils/hook-block-message";
 
@@ -235,6 +235,14 @@ export function ToolCallCard({
     return (
       <div className="w-full min-w-0 rounded border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-[12px] text-amber-200">
         图表内容被上下文压缩截断，无法渲染。请重新生成或升级 Near 后重试本对话。
+      </div>
+    );
+  }
+
+  if (toolName === "show_widget" && isBrokenStockChartAttempt(message.content) && !widgetPayload) {
+    return (
+      <div className="w-full min-w-0 rounded border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-[12px] text-amber-200">
+        {stockChartDegradedMessage()}
       </div>
     );
   }

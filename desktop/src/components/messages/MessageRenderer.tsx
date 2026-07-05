@@ -28,7 +28,7 @@ import { ViewImageInjectCard } from "./ViewImageInjectCard";
 import { BudgetExceededCard } from "./BudgetExceededCard";
 import { WidgetBlock } from "./WidgetBlock";
 import { ClarificationCard } from "./ClarificationCard";
-import { parseWidgetPayload } from "./widget-preview";
+import { parseWidgetPayload, isBrokenStockChartAttempt, stockChartDegradedMessage } from "./widget-preview";
 import { parseContextNotice } from "../../utils/context-notice";
 import { parseBudgetExceededFromText } from "../../utils/budget-exceeded";
 import { shouldShowBudgetIncompleteHint } from "../../utils/budget-incomplete-message";
@@ -392,6 +392,13 @@ export function MessageRenderer({
         return (
           <div className="my-2 w-full min-w-0 rounded border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-[12px] text-amber-200">
             图表内容被上下文压缩截断，无法渲染。请重新生成或升级 Near 后重试本对话。
+          </div>
+        );
+      }
+      if (isBrokenStockChartAttempt(message.content)) {
+        return (
+          <div className="my-2 w-full min-w-0 rounded border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-[12px] text-amber-200">
+            {stockChartDegradedMessage()}
           </div>
         );
       }
