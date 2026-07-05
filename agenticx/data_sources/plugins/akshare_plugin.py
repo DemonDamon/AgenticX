@@ -7,13 +7,35 @@ Author: Damon Li
 from __future__ import annotations
 
 import asyncio
+import logging
 from typing import Any, Dict, List
 
 from agenticx.data_sources.base import ApiSpec, DataSourceResult
 from agenticx.data_sources.errors import InvalidParamsError
 
+logger = logging.getLogger("agenticx.data_sources.akshare")
+
 DEFAULT_HISTORY_DAYS = 120
 MAX_HISTORY_DAYS = 1000
+
+
+def _sina_symbol(symbol: str, market: str) -> str:
+    """Normalize a bare A-share code to the sina `sh/sz/bj`-prefixed form.
+
+    The sina-backed ``stock_zh_a_daily`` API needs an exchange prefix; already
+    prefixed inputs are returned unchanged.
+    """
+    s = symbol.strip().lower()
+    if s.startswith(("sh", "sz", "bj")):
+        return s
+    if market == "a":
+        if s.startswith("6"):
+            return f"sh{s}"
+        if s.startswith(("0", "3")):
+            return f"sz{s}"
+        if s.startswith(("4", "8", "9")):
+            return f"bj{s}"
+    return s
 
 
 class AkSharePlugin:
@@ -71,7 +93,19 @@ class AkSharePlugin:
                 ) from exc
 
             if market == "a":
-                df = ak.stock_zh_a_hist(symbol=symbol, period="daily", adjust="qfq")
+                # sina (`stock_zh_a_daily`) is more reliable behind proxied /
+                # fake-ip networks than eastmoney (`stock_zh_a_hist`), which is
+                # often reset. Prefer sina, fall back to eastmoney.
+                try:
+                    df = ak.stock_zh_a_daily(
+                        symbol=_sina_symbol(symbol, market), adjust="qfq"
+                    )
+                except Exception as exc:  # noqa: BLE001 — try the alternate host
+                    logger.warning(
+                        "akshare sina daily failed (%s); falling back to eastmoney",
+                        exc,
+                    )
+                    df = ak.stock_zh_a_hist(symbol=symbol, period="daily", adjust="qfq")
             elif market == "hk":
                 df = ak.stock_hk_hist(symbol=symbol, period="daily", adjust="qfq")
             else:
