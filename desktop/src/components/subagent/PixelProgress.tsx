@@ -1,15 +1,17 @@
 /**
- * 像素方格进度条（Sub-Plan C FR-3）—— 逐格点亮表达进度，对齐图4 的方格质感，
- * 但用主题色而非硬编码绿色。运行中无精确进度时走「呼吸推进」（当前活跃格闪烁）。
+ * 像素/粒子矩阵进度条（Sub-Plan C FR-3）—— `variant="bar"` 逐格点亮表达精确进度，对齐图4 的方格质感
+ * （工牌详情 / drawer 场景）；`variant="dots"` 走两行圆点粒子矩阵质感（对齐 Kimi Work 风格，蜂群卡片行内
+ * 场景）—— 按状态整体着色 + 运行中呼吸闪烁，而非逐格填充比例（对齐参照图里「整体点亮」的活动指示语义）。
  */
 import { useEffect, useMemo, useRef, useState } from "react";
-import { PIXEL_PROGRESS_CELLS, isTerminalStatus } from "./badge-theme";
+import { PIXEL_PROGRESS_CELLS, TONE_COLOR_VAR, isTerminalStatus, statusMeta } from "./badge-theme";
 
 type Props = {
   /** 0..1；undefined 且运行中 → 呼吸推进。 */
   progress?: number;
   status: string;
   cells?: number;
+  variant?: "bar" | "dots";
   className?: string;
 };
 
@@ -19,7 +21,34 @@ const EMPTY_BG = "color-mix(in srgb, rgb(var(--theme-color-rgb)) 14%, transparen
 const ERROR_BG = "var(--status-error)";
 const PAUSED_BG = "var(--status-warning)";
 
-export function PixelProgress({ progress, status, cells = PIXEL_PROGRESS_CELLS, className }: Props) {
+/** 粒子矩阵：两行 × N 列的方点网格，整体按状态语义色点亮，运行中整体呼吸闪烁。 */
+function DotMatrix({ status, cells, className }: { status: string; cells: number; className?: string }) {
+  const isRunning = status === "running" || status === "pending" || status === "awaiting_confirm" || status === "awaiting_input";
+  const meta = statusMeta(status);
+  const color = TONE_COLOR_VAR[meta.tone];
+  const cols = Math.max(1, Math.ceil(cells / 2));
+  return (
+    <div
+      className={`grid shrink-0 grid-rows-2 gap-[2.5px] ${isRunning ? "animate-pulse" : ""} ${className ?? ""}`}
+      style={{ gridTemplateColumns: `repeat(${cols}, 4px)` }}
+      role="progressbar"
+      aria-valuemin={0}
+      aria-valuemax={100}
+      aria-valuenow={status === "completed" ? 100 : undefined}
+      aria-label={meta.label}
+    >
+      {Array.from({ length: cols * 2 }).map((_, i) => (
+        <span key={i} className="h-[4px] w-[4px] rounded-[1px]" style={{ background: color }} />
+      ))}
+    </div>
+  );
+}
+
+export function PixelProgress({ progress, status, cells = PIXEL_PROGRESS_CELLS, variant = "bar", className }: Props) {
+  if (variant === "dots") {
+    return <DotMatrix status={status} cells={cells} className={className} />;
+  }
+
   const isRunning = status === "running" || status === "pending" || status === "awaiting_confirm" || status === "awaiting_input";
   const isFailed = status === "failed";
   const isPaused = status === "paused";

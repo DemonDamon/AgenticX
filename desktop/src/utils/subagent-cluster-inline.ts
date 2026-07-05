@@ -82,7 +82,7 @@ export function injectLiveSubAgentClusterAnchors(messages: Message[]): Message[]
         subAgentCluster: {
           clusterId: acc.clusterId,
           runIds: acc.runIds,
-          title: `Agent 集群 · ${acc.runIds.length} 个并行任务`,
+          title: `Agent 蜂群 · ${acc.runIds.length} 个并行任务`,
         },
       });
     }

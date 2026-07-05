@@ -41,6 +41,7 @@ export type BadgeVM = {
   runId: string;
   name: string;
   role: string;
+  task?: string;
   persona?: string;
   provider?: string;
   model?: string;
@@ -85,6 +86,7 @@ export function fromLiveSubAgent(s: SubAgent, fallbackIndex?: number): BadgeVM {
     runId: s.id,
     name: s.name,
     role: s.role,
+    task: s.task || undefined,
     provider: s.provider || undefined,
     model: s.model || undefined,
     badgeSeq: normalizeSeq(undefined, fallbackIndex),
@@ -102,6 +104,7 @@ export function fromRunRecord(r: SubAgentRunRecord, fallbackIndex?: number): Bad
     runId: r.run_id,
     name: r.name,
     role: r.role,
+    task: r.task || undefined,
     persona: r.persona || undefined,
     provider: r.provider || undefined,
     model: r.model || undefined,
@@ -131,6 +134,7 @@ export function mergeBadgeVMs(persisted: BadgeVM[], live: BadgeVM[]): BadgeVM[] 
     return {
       ...p,
       status: l.status,
+      task: l.task ?? p.task,
       progress: l.progress ?? p.progress,
       resultSummary: l.resultSummary ?? p.resultSummary,
       resultFile: l.resultFile ?? p.resultFile,

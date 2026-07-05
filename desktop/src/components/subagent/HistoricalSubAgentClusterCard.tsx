@@ -85,7 +85,7 @@ export function HistoricalSubAgentClusterCard({ anchor, sessionId, onOpenRun }: 
     return orderByAnchorRunIds(mergeBadgeVMs(persisted, live), anchor.runIds);
   }, [anchor.runIds, cluster, sessionId, subAgents]);
 
-  const title = anchor.title || cluster?.title || `Agent 集群 · ${anchor.runIds.length} 个并行任务`;
+  const title = anchor.title || cluster?.title || `Agent 蜂群 · ${anchor.runIds.length} 个并行任务`;
   if (members.length === 0) {
     return failed ? (
       <DegradedClusterCard title={title} />

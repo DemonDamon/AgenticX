@@ -5957,6 +5957,25 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
     [openRunDrawer, pane.id],
   );
 
+  const togglePaneSubAgentChat = (agentId: string) => {
+    if (selectedSubAgent === agentId) {
+      setSelectedSubAgent(null);
+      return;
+    }
+    const sub = paneSubAgents.find((item) => item.id === agentId);
+    const isDelegation =
+      agentId.startsWith("dlg-") ||
+      !!(sub?.events?.some((evt) => evt.type.startsWith("delegation")));
+    if (isDelegation) {
+      void openDelegatedAvatarSession(agentId);
+      return;
+    }
+    // 选中一个成员即视为「手动开启」明细面板的动作（无论触发源是内联集群卡还是
+    // Spawns 列自身），确保 Spawns 列可见，否则 selectedSubAgent 的明细卡无处渲染。
+    if (!pane.spawnsColumnOpen) setSpawnsColumnOpen(pane.id, true);
+    setSelectedSubAgent(agentId);
+  };
+
   const renderedMessages = useMemo(() => {
     const reactActionStyle = getAssistantActionStyle({ inReActRow: true });
     const renderGroupedRow = (
@@ -6020,7 +6039,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
               toolCardOmitLeadingSpacer={message.role === "tool" && reactCol}
               onRevealPath={(path) => void revealFileInTaskspace(path)}
               onOpenFileReference={(request) => openFileReferencePreview(request)}
-              onOpenSubAgentRun={handleOpenRunDrawer}
+              onOpenSubAgentRun={togglePaneSubAgentChat}
               assistantName={imAssistantName}
               assistantAvatarUrl={imAssistantAvatarUrl}
               userName={imUserName}
@@ -6450,7 +6469,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
       )}
     </>
     );
-  }, [autoNudgeCount, budgetExceededInfo, chatStyle, copyMessage, copyReActBlock, currentModelLabel, exhaustedRounds, favoriteMessage, forwardOneMessage, groupChatUserLabel, groupTyping, groupedVisibleMessages, handleOpenRunDrawer, hideStreamOverlayAsDuplicate, input, isGroupPane, isRunGuardCurrentSession, isStreamingCurrentSession, lastAssistantMessageId, midTurnStreamActivity, openFileReferencePreview, pane.historySearchTerms, pane.messages, pane.sessionId, paneAvatarMeta, paneId, readyAttachments.length, resolveGroupInlineConfirm, resolveGroupSender, resolveQuoteBody, resumeCurrentTask, resumeInFlight, resumeWithModel, revealFileInTaskspace, retryUserMessage, selectUpTo, selectedMessageIds, sendFollowupChip, sessionBusy, sessionWorkInProgress, setQuoteTarget, showInlineAssistantModelBadge, silentSeconds, stallModelOptions, stallRejectReason, stallRuntimeConfig.stall_auto_nudge_max_per_session, stallState, stopCurrentRun, streamTextForCurrentSession, streamingModel, toggleSelectBlock, toggleSelectMessage, topLevelRowsIm, userAvatarUrl, userBubbleLabel]);
+  }, [autoNudgeCount, budgetExceededInfo, chatStyle, copyMessage, copyReActBlock, currentModelLabel, exhaustedRounds, favoriteMessage, forwardOneMessage, groupChatUserLabel, groupTyping, groupedVisibleMessages, togglePaneSubAgentChat, hideStreamOverlayAsDuplicate, input, isGroupPane, isRunGuardCurrentSession, isStreamingCurrentSession, lastAssistantMessageId, midTurnStreamActivity, openFileReferencePreview, pane.historySearchTerms, pane.messages, pane.sessionId, paneAvatarMeta, paneId, readyAttachments.length, resolveGroupInlineConfirm, resolveGroupSender, resolveQuoteBody, resumeCurrentTask, resumeInFlight, resumeWithModel, revealFileInTaskspace, retryUserMessage, selectUpTo, selectedMessageIds, sendFollowupChip, sessionBusy, sessionWorkInProgress, setQuoteTarget, showInlineAssistantModelBadge, silentSeconds, stallModelOptions, stallRejectReason, stallRuntimeConfig.stall_auto_nudge_max_per_session, stallState, stopCurrentRun, streamTextForCurrentSession, streamingModel, toggleSelectBlock, toggleSelectMessage, topLevelRowsIm, userAvatarUrl, userBubbleLabel]);
 
   const removeAttachment = useCallback((key: string) => {
     setContextFiles((prev) => {
@@ -9035,22 +9054,6 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
     } catch (err) {
       addSubAgentEvent(agentId, { type: "error", content: `切换模型失败: ${String(err)}` });
     }
-  };
-
-  const togglePaneSubAgentChat = (agentId: string) => {
-    if (selectedSubAgent === agentId) {
-      setSelectedSubAgent(null);
-      return;
-    }
-    const sub = paneSubAgents.find((item) => item.id === agentId);
-    const isDelegation =
-      agentId.startsWith("dlg-") ||
-      !!(sub?.events?.some((evt) => evt.type.startsWith("delegation")));
-    if (isDelegation) {
-      void openDelegatedAvatarSession(agentId);
-      return;
-    }
-    setSelectedSubAgent(agentId);
   };
 
   const resolvePaneSubAgentConfirm = async (agentId: string, approved: boolean) => {

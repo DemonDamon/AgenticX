@@ -169,7 +169,7 @@ def _append_subagent_cluster_anchor_if_needed(
         created_at = float(cluster.created_at if cluster is not None else record.created_at)
         title = str(cluster.title if cluster is not None else "").strip()
         if not title:
-            title = f"Agent 集群 · {len(run_ids)} 个并行任务"
+            title = f"Agent 蜂群 · {len(run_ids)} 个并行任务"
         anchor = {
             "cluster_id": cluster_id,
             "run_ids": run_ids,

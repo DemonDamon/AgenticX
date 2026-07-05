@@ -1,14 +1,14 @@
 /**
- * Near 集群卡片（Sub-Plan C FR-1 / FR-6）—— 把一次派生的多个子智能体聚合为一张卡片：
- * 卡片头「Agent 集群 · N 个并行任务」+ 成员工牌列表，默认折叠为概览，可展开看完整工牌。
+ * Near 蜂群卡片（Sub-Plan C FR-1 / FR-6）—— 把一次派生的多个子智能体聚合为一张卡片：
+ * 卡片头「Agent 蜂群 · N 个并行任务」+ 成员行列表，始终完整展示（无折叠/展开切换，
+ * 对齐 Kimi Work 的直出式呈现）。
  *
- * 折叠语义与 `ToolCallCard` 一致（默认折叠、可展开）；成员可点击触发 `onOpenRun`（打开
- * Sub-Plan D 的右侧落盘 drawer）。数据源统一吃 `BadgeVM[]`，对 live / persisted 无感。
+ * 成员行布局对齐 Kimi Work：左侧保留更多面积展示名称 + 任务摘要（截取式），右侧为
+ * 编号 + 粒子矩阵进度条（`PixelProgress` 的 `dots` 态）。数据源统一吃 `BadgeVM[]`，
+ * 对 live / persisted 无感。成员可点击触发 `onOpenRun`（打开 Sub-Plan D 的右侧落盘 drawer）。
  */
-import { useMemo, useState } from "react";
-import { AgentBadge } from "./AgentBadge";
+import { useMemo } from "react";
 import { PixelProgress } from "./PixelProgress";
-import { statusMeta } from "./badge-theme";
 import type { BadgeVM } from "./badge-vm";
 
 type Props = {
@@ -16,8 +16,6 @@ type Props = {
   title?: string;
   selectedRunId?: string | null;
   onOpenRun?: (runId: string) => void;
-  /** 默认折叠；传 true 可初始展开。 */
-  defaultExpanded?: boolean;
   className?: string;
 };
 
@@ -32,22 +30,50 @@ function ClusterHeaderIcon() {
   );
 }
 
-/** 折叠态概览：一行 mini 像素进度点阵，概括所有成员进度。 */
-function ClusterOverviewStrip({ members }: { members: BadgeVM[] }) {
+/** 粒子矩阵固定槽宽（6 列 × 4px + 间距），右侧永远预留，窄屏也不被文字挤没。 */
+const DOT_MATRIX_SLOT_PX = 40;
+
+/** 成员行摘要文案：任务描述优先，回落结果摘要，再回落角色。 */
+function excerptFor(vm: BadgeVM): string {
+  return (vm.task || vm.resultSummary || vm.role || "").trim();
+}
+
+function ClusterMemberRow({
+  vm,
+  selected,
+  onClick,
+}: {
+  vm: BadgeVM;
+  selected?: boolean;
+  onClick?: (runId: string) => void;
+}) {
+  const excerpt = excerptFor(vm);
   return (
-    <div className="flex flex-col gap-1">
-      {members.map((m) => (
-        <div key={m.runId} className="flex items-center gap-2">
-          <span className="w-14 shrink-0 truncate text-[11px] text-text-muted" title={m.name}>
-            {m.name}
-          </span>
-          <span className="shrink-0 font-mono text-[10px] text-text-faint">{m.badgeSeq}</span>
-          <div className="min-w-0 flex-1">
-            <PixelProgress progress={m.progress} status={m.status} cells={14} />
-          </div>
+    <button
+      type="button"
+      className={`flex w-full min-w-0 overflow-hidden rounded-lg px-2 py-1.5 text-left transition ${
+        selected ? "bg-[rgba(var(--theme-color-rgb),0.08)]" : "hover:bg-surface-hover"
+      }`}
+      onClick={() => onClick?.(vm.runId)}
+    >
+      {/* 左侧摘要区：占满剩余宽度，超长单行截断 */}
+      <div className="min-w-0 flex-1 overflow-hidden pr-2">
+        <div className="truncate text-[12.5px] font-medium text-text-strong" title={vm.name}>
+          {vm.name}
         </div>
-      ))}
-    </div>
+        <div className="mt-0.5 truncate text-[11px] text-text-muted" title={excerpt || undefined}>
+          {excerpt || "—"}
+        </div>
+      </div>
+      {/* 右侧固定槽：编号 + 点阵矩阵，不参与 flex 收缩 */}
+      <div
+        className="flex shrink-0 flex-col items-end justify-center gap-1 self-stretch py-0.5"
+        style={{ width: DOT_MATRIX_SLOT_PX, minWidth: DOT_MATRIX_SLOT_PX }}
+      >
+        <span className="font-mono text-[10px] leading-none text-text-faint">{vm.badgeSeq}</span>
+        <PixelProgress progress={vm.progress} status={vm.status} variant="dots" cells={12} />
+      </div>
+    </button>
   );
 }
 
@@ -56,10 +82,8 @@ export function SubAgentClusterCard({
   title,
   selectedRunId,
   onOpenRun,
-  defaultExpanded = false,
   className,
 }: Props) {
-  const [expanded, setExpanded] = useState(defaultExpanded);
   const count = members.length;
   const runningCount = useMemo(
     () => members.filter((m) => m.status === "running" || m.status === "pending").length,
@@ -76,41 +100,28 @@ export function SubAgentClusterCard({
     <div
       className={`overflow-hidden rounded-xl border border-[color-mix(in_srgb,rgb(var(--theme-color-rgb))_22%,transparent)] bg-[color-mix(in_srgb,rgb(var(--theme-color-rgb))_5%,transparent)] ${className ?? ""}`}
     >
-      {/* 卡片头 */}
-      <button
-        type="button"
-        className="flex w-full items-center gap-2 border-b border-[color-mix(in_srgb,rgb(var(--theme-color-rgb))_16%,transparent)] px-3 py-2 text-left transition hover:bg-[rgba(var(--theme-color-rgb),0.06)]"
-        onClick={() => setExpanded((v) => !v)}
-      >
+      {/* 卡片头 —— 纯信息展示，不再可点击折叠。 */}
+      <div className="flex items-center gap-2 border-b border-[color-mix(in_srgb,rgb(var(--theme-color-rgb))_16%,transparent)] px-3 py-2">
         <ClusterHeaderIcon />
         <span className="text-[12.5px] font-medium text-[var(--kb-citation-fg)]">
-          {title?.trim() ? title : `Agent 集群 · ${count} 个并行任务`}
+          {title?.trim() ? title : `Agent 蜂群 · ${count} 个并行任务`}
         </span>
         <span className="ml-auto flex items-center gap-2 text-[10px] text-text-faint">
           {runningCount > 0 ? <span className="text-[var(--kb-citation-fg)]">{runningCount} 执行中</span> : null}
           {doneCount > 0 ? <span className="text-[var(--status-success)]">{doneCount} 完成</span> : null}
-          <svg viewBox="0 0 16 16" fill="none" className={`h-3.5 w-3.5 transition-transform ${expanded ? "rotate-180" : ""}`} stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-            <path d="M4 6l4 4 4-4" />
-          </svg>
         </span>
-      </button>
+      </div>
 
-      {/* 内容区 */}
-      <div className="p-2.5">
-        {expanded ? (
-          <div className="flex flex-col gap-2">
-            {members.map((m) => (
-              <AgentBadge
-                key={m.runId}
-                vm={m}
-                selected={selectedRunId === m.runId}
-                onClick={onOpenRun}
-              />
-            ))}
-          </div>
-        ) : (
-          <ClusterOverviewStrip members={members} />
-        )}
+      {/* 内容区 —— 始终完整展示成员行。 */}
+      <div className="flex min-w-0 flex-col gap-0.5 p-1.5">
+        {members.map((m) => (
+          <ClusterMemberRow
+            key={m.runId}
+            vm={m}
+            selected={selectedRunId === m.runId}
+            onClick={onOpenRun}
+          />
+        ))}
       </div>
     </div>
   );
