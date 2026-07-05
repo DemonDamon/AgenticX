@@ -284,8 +284,13 @@ class ContextCompactor:
         if name == "show_widget":
             return str(result or "")
         if name == "query_data_source":
+            # Time-series data must stay complete for chart rendering: a
+            # truncated OHLCV array both breaks the widget and triggers the
+            # model to re-query in a loop. Give it a much larger dedicated
+            # budget so a full 60–120 day window survives intact; only very
+            # large payloads fall back to head/tail truncation.
             if budget is None:
-                budget = _env_int("AGX_MICRO_COMPACT_BUDGET", 4000)
+                budget = _env_int("AGX_DATA_SOURCE_RESULT_BUDGET", 24000)
             return _compact_query_data_source_result(str(result or ""), budget)
         if budget is None:
             budget = _env_int("AGX_MICRO_COMPACT_BUDGET", 4000)

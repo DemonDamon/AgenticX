@@ -79,6 +79,17 @@ metadata:
 
 When the user mentions several tickers they are tracking, fetch each via `query_data_source` and pass **one** `show_widget` with a `watchlist` array — do not render three separate widgets.
 
+> **CRITICAL — never hand-roll HTML/ECharts for stock charts.** Always pass the structured
+> `stock_chart` JSON (single `points` or `watchlist`). The Desktop client has a dedicated,
+> theme-aware `StockChartWidget` (dark/light adaptive tabs, 红涨绿跌, quote header). Hand-written
+> `<div>`+ECharts `<script>` HTML produces broken results (e.g. white tab text on white background,
+> sparse charts) and must not be used for stock/candlestick data.
+>
+> **Copy the OHLCV rows from the `query_data_source` result verbatim** into `points` — the result is
+> already trimmed to `date/open/high/low/close/volume` and the full window (e.g. 60 rows) fits, so
+> there is no need to re-query with a smaller `days`. If a result ever looks truncated, use whatever
+> rows you have; do NOT loop re-querying the same symbol.
+
    - Macro trends: same shape with `"chart_type": "line"` and points like `{"date": "2021", "value": 8.1}`.
 4. **Workflow** (same as show_widget discipline): 1–3 sentences visible intro → `query_data_source` → `show_widget` → interpret numbers from tool output only.
 

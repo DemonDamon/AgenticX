@@ -41,6 +41,45 @@ def _sina_symbol(symbol: str, market: str) -> str:
     return s
 
 
+def _readnum(value: Any) -> float | None:
+    try:
+        if value is None:
+            return None
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _trim_ohlcv_rows(rows: list[dict]) -> list[dict]:
+    """Keep only chart-essential OHLCV fields, normalized to English keys.
+
+    Dropping amount/outstanding_share/turnover shrinks each row ~2.5x so a full
+    60–120 day window survives the tool-result budget intact (avoiding the
+    truncate → re-query loop) and de-noises the payload the model must reason over.
+    Handles both sina (`stock_zh_a_daily`, English keys) and eastmoney
+    (`stock_zh_a_hist`, Chinese keys) column names.
+    """
+    trimmed: list[dict] = []
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        date = str(row.get("date") or row.get("日期") or "").strip()
+        if not date:
+            continue
+        entry = {
+            "date": date,
+            "open": _readnum(row.get("open", row.get("开盘"))),
+            "high": _readnum(row.get("high", row.get("最高"))),
+            "low": _readnum(row.get("low", row.get("最低"))),
+            "close": _readnum(row.get("close", row.get("收盘"))),
+        }
+        volume = _readnum(row.get("volume", row.get("成交量")))
+        if volume is not None:
+            entry["volume"] = volume
+        trimmed.append(entry)
+    return trimmed
+
+
 class AkSharePlugin:
     name = "akshare"
     display_name = "AkShare（免费行情）"
@@ -114,12 +153,12 @@ class AkSharePlugin:
             else:
                 df = ak.stock_us_hist(symbol=symbol, period="daily", adjust="qfq")
             df = df.tail(days)
-            return df.to_dict(orient="records")
+            return _trim_ohlcv_rows(df.to_dict(orient="records"))
 
         rows = await asyncio.to_thread(_fetch)
         as_of = None
         if rows:
-            as_of = str(rows[-1].get("日期") or rows[-1].get("date") or "")
+            as_of = str(rows[-1].get("date") or "")
         return DataSourceResult(
             source=self.name,
             api="stock_price_history",
