@@ -1,8 +1,7 @@
-import { useMemo, type MouseEvent as ReactMouseEvent } from "react";
+import { type MouseEvent as ReactMouseEvent } from "react";
 import { PanelRightClose, Bot } from "lucide-react";
 import type { SubAgent } from "../store";
 import { SubAgentCard } from "./SubAgentCard";
-import { SubAgentClusterCard, fromLiveSubAgent } from "./subagent";
 
 type Props = {
   width: number;
@@ -34,23 +33,10 @@ export function SpawnsColumn({
   onCancel,
   onRetry,
   onChat,
-  onOpenRun,
-  anchoredRunIds,
   onModelChange,
   onConfirmResolve,
   tintColor,
 }: Props) {
-  // 集群概览：把当前会话的多个子智能体聚合为一张 Near 集群卡片（默认折叠），
-  // 作为列表上方的快速总览；点击成员复用既有选中 / 对话交互（onChat）。
-  const clusterMembers = useMemo(
-    () => {
-      const anchored = new Set((anchoredRunIds ?? []).map((id) => String(id).trim()).filter(Boolean));
-      return subAgents
-        .filter((s) => !anchored.has(s.id))
-        .map((s, i) => fromLiveSubAgent(s, i));
-    },
-    [anchoredRunIds, subAgents],
-  );
   return (
     <div className="relative flex h-full min-h-0 shrink-0 flex-col border-l border-border bg-surface-card" style={{ width, ...(tintColor ? { backgroundColor: tintColor } : {}) }}>
       <div
@@ -86,15 +72,9 @@ export function SpawnsColumn({
             当前会话还没有派生子智能体
           </div>
         ) : (
-          <>
-          {clusterMembers.length >= 2 ? (
-            <SubAgentClusterCard
-              members={clusterMembers}
-              selectedRunId={selectedSubAgent}
-              onOpenRun={onOpenRun ?? onChat}
-            />
-          ) : null}
-          {subAgents.map((subAgent) => (
+          // 不再额外渲染一张「集群概览」压缩卡：下方逐条子智能体明细卡已完整覆盖
+          // 同一批成员信息，叠加展示纯属重复，只留一处即可。
+          subAgents.map((subAgent) => (
             <SubAgentCard
               key={subAgent.id}
               subAgent={subAgent}
@@ -105,8 +85,7 @@ export function SpawnsColumn({
               onModelChange={onModelChange}
               onConfirmResolve={onConfirmResolve}
             />
-          ))}
-          </>
+          ))
         )}
       </div>
     </div>

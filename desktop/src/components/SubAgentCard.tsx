@@ -1049,6 +1049,9 @@ export function SubAgentCard({
 }: Props) {
   const [expanded, setExpanded] = useState(false);
   const [copyFeedback, setCopyFeedback] = useState(false);
+  // 整卡折叠：把指令/结果/进度/操作按钮等正文整体收起，只留标题一行 —— 已完成的
+  // 任务默认收起以减少列表视觉噪音；执行中默认展开，方便随时查看进度与中断。
+  const [collapsed, setCollapsed] = useState(subAgent.status === "completed");
   const status = useMemo(() => statusMap[subAgent.status] ?? statusMap.pending, [subAgent.status]);
   const handleCopyDetails = useCallback(() => {
     const header = [
@@ -1094,25 +1097,43 @@ export function SubAgentCard({
           : "border-border bg-surface-card"
       }`}
     >
-      <div className="mb-2 flex items-start justify-between gap-2">
-        <div className="min-w-0 flex-1 text-left">
-          <div className="flex flex-wrap items-center gap-1.5">
-            <span className="text-sm font-medium text-text-strong">{subAgent.name}</span>
-            {onModelChange ? (
+      <div className={`flex items-start justify-between gap-2 ${collapsed ? "" : "mb-2"}`}>
+        <button
+          type="button"
+          className="flex min-w-0 flex-1 items-center gap-1.5 text-left"
+          onClick={() => setCollapsed((v) => !v)}
+          title={collapsed ? "展开整卡" : "折叠整卡"}
+        >
+          <svg
+            viewBox="0 0 14 14"
+            fill="none"
+            className={`h-3 w-3 shrink-0 text-text-faint transition-transform ${collapsed ? "-rotate-90" : ""}`}
+            stroke="currentColor"
+            strokeWidth="1.5"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          >
+            <path d="M3 5l4 4 4-4" />
+          </svg>
+          <span className="min-w-0 flex-1 flex flex-wrap items-center gap-1.5">
+            <span className="truncate text-sm font-medium text-text-strong">{subAgent.name}</span>
+            {!collapsed && onModelChange ? (
               <SubAgentModelPicker
                 provider={subAgent.provider}
                 model={subAgent.model}
                 onChange={(provider, model) => onModelChange(subAgent.id, provider, model)}
               />
             ) : null}
-            <span
-              className="select-all rounded bg-surface-card-strong px-1 py-0.5 font-mono text-[10px] text-text-muted ring-1 ring-border"
-              title={`ID: ${subAgent.id}`}
-            >
-              {subAgent.id}
-            </span>
-          </div>
-        </div>
+            {!collapsed ? (
+              <span
+                className="select-all rounded bg-surface-card-strong px-1 py-0.5 font-mono text-[10px] text-text-muted ring-1 ring-border"
+                title={`ID: ${subAgent.id}`}
+              >
+                {subAgent.id}
+              </span>
+            ) : null}
+          </span>
+        </button>
         <SubAgentStatusBadge
           agentStatus={subAgent.status}
           label={status.label}
@@ -1121,113 +1142,117 @@ export function SubAgentCard({
         />
       </div>
 
-      <TaskInstructionBlock agentId={subAgent.id} task={subAgent.task} />
-      {subAgent.status === "awaiting_confirm" && subAgent.pendingConfirm ? (
-        <ConfirmWithCountdown
-          question={subAgent.pendingConfirm.question}
-          agentId={subAgent.id}
-          onConfirmResolve={onConfirmResolve}
-        />
-      ) : subAgent.status === "awaiting_confirm" ? (
-        <div className="mb-2 rounded-md border border-[color-mix(in_srgb,var(--status-warning)_35%,transparent)] bg-[color-mix(in_srgb,var(--status-warning)_10%,transparent)] p-2 text-xs text-[var(--status-warning)]">
-          等待确认中… 请查看弹窗或稍候
-        </div>
-      ) : null}
-      {subAgent.status === "awaiting_input" ? (
-        <div className="mb-2 rounded-md border border-[var(--ui-btn-primary-border)] bg-[rgba(var(--theme-color-rgb),0.08)] p-2 text-xs text-[var(--kb-citation-fg)]">
-          {subAgent.pendingClarification?.prompt
-            ? `等待你的输入：${subAgent.pendingClarification.prompt}`
-            : "等待你的输入… 请查看弹窗"}
-        </div>
-      ) : null}
-      {subAgent.resultSummary ? (
-        <ResultSummaryBlock
-          summary={subAgent.resultSummary}
-          outputFiles={subAgent.outputFiles}
-          resultFile={subAgent.resultFile}
-          onOpenFile={handleOpenOutputFile}
-        />
-      ) : null}
-      {typeof subAgent.progress === "number" ? (
-        <div className="mb-2">
-          <div className="h-1.5 overflow-hidden rounded bg-surface-card">
-            <div className="h-full bg-[var(--ui-btn-primary-bg)]" style={{ width: `${Math.max(0, Math.min(100, subAgent.progress))}%` }} />
+      {collapsed ? null : (
+        <>
+          <TaskInstructionBlock agentId={subAgent.id} task={subAgent.task} />
+          {subAgent.status === "awaiting_confirm" && subAgent.pendingConfirm ? (
+            <ConfirmWithCountdown
+              question={subAgent.pendingConfirm.question}
+              agentId={subAgent.id}
+              onConfirmResolve={onConfirmResolve}
+            />
+          ) : subAgent.status === "awaiting_confirm" ? (
+            <div className="mb-2 rounded-md border border-[color-mix(in_srgb,var(--status-warning)_35%,transparent)] bg-[color-mix(in_srgb,var(--status-warning)_10%,transparent)] p-2 text-xs text-[var(--status-warning)]">
+              等待确认中… 请查看弹窗或稍候
+            </div>
+          ) : null}
+          {subAgent.status === "awaiting_input" ? (
+            <div className="mb-2 rounded-md border border-[var(--ui-btn-primary-border)] bg-[rgba(var(--theme-color-rgb),0.08)] p-2 text-xs text-[var(--kb-citation-fg)]">
+              {subAgent.pendingClarification?.prompt
+                ? `等待你的输入：${subAgent.pendingClarification.prompt}`
+                : "等待你的输入… 请查看弹窗"}
+            </div>
+          ) : null}
+          {subAgent.resultSummary ? (
+            <ResultSummaryBlock
+              summary={subAgent.resultSummary}
+              outputFiles={subAgent.outputFiles}
+              resultFile={subAgent.resultFile}
+              onOpenFile={handleOpenOutputFile}
+            />
+          ) : null}
+          {typeof subAgent.progress === "number" ? (
+            <div className="mb-2">
+              <div className="h-1.5 overflow-hidden rounded bg-surface-card">
+                <div className="h-full bg-[var(--ui-btn-primary-bg)]" style={{ width: `${Math.max(0, Math.min(100, subAgent.progress))}%` }} />
+              </div>
+            </div>
+          ) : null}
+
+          <div className="mt-1 flex flex-wrap items-center gap-1">
+            {/* 对话 — primary action */}
+            <button
+              type="button"
+              className={selected ? ACTION_BTN_ACTIVE : chatBlocked ? ACTION_BTN_PRIMARY_BLOCKED : ACTION_BTN_PRIMARY}
+              aria-pressed={selected}
+              title={
+                selected
+                  ? "结束与该子智能体的对话，切回 Meta"
+                  : chatBlocked
+                    ? "任务执行中，完成后才能进入对话"
+                    : "向该子智能体发送消息"
+              }
+              onClick={() => onChat(subAgent.id)}
+            >
+              <svg viewBox="0 0 14 14" fill="none" className="h-3 w-3 shrink-0" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+                {selected
+                  ? <path d="M2 2l10 10M12 2L2 12" />
+                  : <><path d="M2 9.5C2 10.33 2.67 11 3.5 11H10l2 2V4.5C12 3.67 11.33 3 10.5 3h-7C2.67 3 2 3.67 2 4.5v5z" /></>}
+              </svg>
+              {selected ? "关闭对话" : "对话"}
+            </button>
+
+            {/* 展开/收起详情 — neutral */}
+            <button
+              className={ACTION_BTN_NEUTRAL}
+              onClick={() => setExpanded((v) => !v)}
+            >
+              <svg viewBox="0 0 14 14" fill="none" className={`h-3 w-3 shrink-0 transition-transform ${expanded ? "rotate-180" : ""}`} stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M3 5l4 4 4-4" />
+              </svg>
+              {expanded ? "收起" : "详情"}
+            </button>
+
+            {/* 分隔线 */}
+            <span className="mx-0.5 h-3.5 w-px bg-border" aria-hidden />
+
+            {/* 中断 — danger ghost */}
+            <button
+              className={ACTION_BTN_DANGER}
+              onClick={() => onCancel(subAgent.id)}
+              disabled={!canCancel}
+            >
+              <svg viewBox="0 0 14 14" fill="none" className="h-3 w-3 shrink-0" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+                <rect x="3" y="3" width="8" height="8" rx="1" />
+              </svg>
+              中断
+            </button>
+
+            {/* 重试 — success ghost */}
+            <button
+              className={ACTION_BTN_SUCCESS}
+              onClick={() => onRetry(subAgent.id)}
+              disabled={!canRetry}
+            >
+              <svg viewBox="0 0 14 14" fill="none" className="h-3 w-3 shrink-0" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M11 7A4 4 0 013.27 4.27" />
+                <path d="M3 2v3h3" />
+              </svg>
+              重试
+            </button>
           </div>
-        </div>
-      ) : null}
 
-      <div className="mt-1 flex flex-wrap items-center gap-1">
-        {/* 对话 — primary action */}
-        <button
-          type="button"
-          className={selected ? ACTION_BTN_ACTIVE : chatBlocked ? ACTION_BTN_PRIMARY_BLOCKED : ACTION_BTN_PRIMARY}
-          aria-pressed={selected}
-          title={
-            selected
-              ? "结束与该子智能体的对话，切回 Meta"
-              : chatBlocked
-                ? "任务执行中，完成后才能进入对话"
-                : "向该子智能体发送消息"
-          }
-          onClick={() => onChat(subAgent.id)}
-        >
-          <svg viewBox="0 0 14 14" fill="none" className="h-3 w-3 shrink-0" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-            {selected
-              ? <path d="M2 2l10 10M12 2L2 12" />
-              : <><path d="M2 9.5C2 10.33 2.67 11 3.5 11H10l2 2V4.5C12 3.67 11.33 3 10.5 3h-7C2.67 3 2 3.67 2 4.5v5z" /></>}
-          </svg>
-          {selected ? "关闭对话" : "对话"}
-        </button>
-
-        {/* 展开/收起详情 — neutral */}
-        <button
-          className={ACTION_BTN_NEUTRAL}
-          onClick={() => setExpanded((v) => !v)}
-        >
-          <svg viewBox="0 0 14 14" fill="none" className={`h-3 w-3 shrink-0 transition-transform ${expanded ? "rotate-180" : ""}`} stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-            <path d="M3 5l4 4 4-4" />
-          </svg>
-          {expanded ? "收起" : "详情"}
-        </button>
-
-        {/* 分隔线 */}
-        <span className="mx-0.5 h-3.5 w-px bg-border" aria-hidden />
-
-        {/* 中断 — danger ghost */}
-        <button
-          className={ACTION_BTN_DANGER}
-          onClick={() => onCancel(subAgent.id)}
-          disabled={!canCancel}
-        >
-          <svg viewBox="0 0 14 14" fill="none" className="h-3 w-3 shrink-0" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-            <rect x="3" y="3" width="8" height="8" rx="1" />
-          </svg>
-          中断
-        </button>
-
-        {/* 重试 — success ghost */}
-        <button
-          className={ACTION_BTN_SUCCESS}
-          onClick={() => onRetry(subAgent.id)}
-          disabled={!canRetry}
-        >
-          <svg viewBox="0 0 14 14" fill="none" className="h-3 w-3 shrink-0" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-            <path d="M11 7A4 4 0 013.27 4.27" />
-            <path d="M3 2v3h3" />
-          </svg>
-          重试
-        </button>
-      </div>
-
-      {expanded ? (
-        <ActivityTimeline
-          events={subAgent.events}
-          liveOutput={subAgent.liveOutput}
-          agentStatus={subAgent.status}
-          onCopyDetails={handleCopyDetails}
-          copyFeedback={copyFeedback}
-        />
-      ) : null}
+          {expanded ? (
+            <ActivityTimeline
+              events={subAgent.events}
+              liveOutput={subAgent.liveOutput}
+              agentStatus={subAgent.status}
+              onCopyDetails={handleCopyDetails}
+              copyFeedback={copyFeedback}
+            />
+          ) : null}
+        </>
+      )}
     </div>
   );
 }
