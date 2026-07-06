@@ -8529,6 +8529,18 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
               const errText = String(payload.data?.text ?? "未知错误");
               const severity = String(payload.data?.severity ?? "").trim();
               const detector = String(payload.data?.detector ?? "").trim();
+              if (
+                eventAgentId === "meta"
+                && detector === "widget_flow_guard"
+                && payload.data?.action === "discard_stream"
+              ) {
+                full = "";
+                cumulativeFull = "";
+                streamReasoningStartedAt = null;
+                cancelStreamRenderFrame();
+                scheduleStreamTextUpdate("");
+                continue;
+              }
               const budgetInfo = budgetExceededInfoFromPayload(
                 payload.data as Record<string, unknown> | undefined,
               );

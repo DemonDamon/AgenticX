@@ -1796,6 +1796,16 @@ export function ChatView({ onOpenConfirm, onOpenClarification, onSubmitClarifica
               const errText = String(payload.data?.text ?? "未知错误");
               const severity = String(payload.data?.severity ?? "").trim();
               const detector = String(payload.data?.detector ?? "").trim();
+              if (
+                eventAgentId === "meta"
+                && detector === "widget_flow_guard"
+                && payload.data?.action === "discard_stream"
+              ) {
+                full = "";
+                cancelStreamRenderFrame();
+                scheduleStreamTextUpdate("");
+                continue;
+              }
               const isWarning = severity === "warning"
                 || detector === "token_budget_compress"
                 || detector === "compactor_circuit_breaker"

@@ -70,3 +70,23 @@ def process(data):
     return result
 ```"""
     assert not contains_text_flow_diagram(text)
+
+
+def test_detects_leading_arrow_steps_in_fenced_block() -> None:
+    text = """## 实现路径
+
+```
+search_reports(keyword="AI")
+    → get_report_detail(report_id)
+    → AI 提取结构化信息
+```
+"""
+    assert contains_text_flow_diagram(text)
+
+
+def test_mermaid_block_not_flagged() -> None:
+    text = """```mermaid
+flowchart LR
+    A --> B --> C
+```"""
+    assert not contains_text_flow_diagram(text)

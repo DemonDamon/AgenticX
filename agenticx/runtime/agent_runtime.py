@@ -2990,16 +2990,35 @@ class AgentRuntime:
             # --- Widget flow guard: detect text-based diagrams and force retry ---
             if not tool_calls and "show_widget" in allowed_tool_names:
                 from agenticx.runtime.widget_flow_guard import (
+                    WIDGET_FLOW_MAX_RETRIES_PER_SESSION,
                     WIDGET_FLOW_RETRY_HINT,
                     contains_text_flow_diagram,
                 )
 
-                if contains_text_flow_diagram(response_text) and not getattr(
-                    session, "_widget_flow_retried", False
+                _widget_flow_retry_count = getattr(
+                    session, "_widget_flow_retry_count", 0
+                )
+                if (
+                    contains_text_flow_diagram(response_text)
+                    and _widget_flow_retry_count < WIDGET_FLOW_MAX_RETRIES_PER_SESSION
                 ):
-                    setattr(session, "_widget_flow_retried", True)
+                    setattr(
+                        session,
+                        "_widget_flow_retry_count",
+                        _widget_flow_retry_count + 1,
+                    )
                     logger.info(
-                        "widget_flow_guard: detected text flow diagram, forcing retry"
+                        "widget_flow_guard: detected text flow diagram, forcing retry (count=%s)",
+                        _widget_flow_retry_count + 1,
+                    )
+                    yield RuntimeEvent(
+                        type=EventType.ERROR.value,
+                        data={
+                            "detector": "widget_flow_guard",
+                            "action": "discard_stream",
+                            "severity": "internal",
+                        },
+                        agent_id=agent_id,
                     )
                     messages.append({"role": "assistant", "content": ac_clean})
                     messages.append({"role": "system", "content": WIDGET_FLOW_RETRY_HINT})
