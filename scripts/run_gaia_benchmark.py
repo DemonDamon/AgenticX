@@ -77,7 +77,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--output-dir", type=Path, default=Path("artifacts/gaia"))
     parser.add_argument("--limit", type=int, default=None)
     parser.add_argument("--offset", type=int, default=0)
-    parser.add_argument("--timeout", type=float, default=300.0, help="Per-task timeout in seconds (default: 300)")
+    parser.add_argument("--timeout", type=float, default=600.0, help="Per-task timeout in seconds (default: 600)")
     parser.add_argument("--max-workers", type=int, default=4)
     parser.add_argument("--resume", action="store_true", help="Skip task_ids already in results.jsonl")
     parser.add_argument("--force-rerun", action="store_true", help="Ignore previous outputs even if present")
@@ -168,7 +168,7 @@ def main() -> int:
             print(str(exc), file=sys.stderr)
             return 1
 
-    task_timeout = float(args.timeout or 300.0)
+    task_timeout = float(args.timeout or 600.0)
     print_gaia_run_banner(
         model=model_selection.model if model_selection else (args.model or ""),
         provider=model_selection.provider if model_selection else (args.provider or ""),
