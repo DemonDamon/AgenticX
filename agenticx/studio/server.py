@@ -37,6 +37,7 @@ from agenticx.studio.context_file_keys import (
     strip_composer_upload_dedupe_key,
     upload_dedupe_size_from_key,
 )
+from agenticx.avatar.group_chat import GroupChatRegistry
 from agenticx.avatar.registry import AvatarRegistry
 from agenticx.branding import DEFAULT_META_PRODUCT_LABEL
 from agenticx.cli.config_manager import ConfigManager
