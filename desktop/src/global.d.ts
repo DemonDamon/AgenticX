@@ -842,6 +842,10 @@ declare global {
         cancelText?: string;
         destructive?: boolean;
       }) => Promise<{ ok: boolean; confirmed: boolean; error?: string }>;
+      exportMessagesPdf: (payload: {
+        html: string;
+        defaultFileName?: string;
+      }) => Promise<{ ok: boolean; canceled?: boolean; path?: string; error?: string }>;
       loadAutomationTasks: () => Promise<{ ok: boolean; tasks: AutomationTaskData[]; error?: string }>;
       saveAutomationTask: (task: AutomationTaskData) => Promise<{ ok: boolean; error?: string }>;
       deleteAutomationTask: (

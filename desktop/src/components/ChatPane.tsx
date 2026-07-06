@@ -194,6 +194,7 @@ import {
   setCachedReasoningDuration,
 } from "./messages/reasoning-duration-cache";
 import { messagePlainTextForClipboard } from "../utils/markdown-copy-format";
+import { buildMessagesPdfHtml } from "../utils/export-pdf-html";
 import { buildCompactionNoticeText } from "../utils/context-notice";
 import { usePaneSortableHandle } from "./pane-sortable-context";
 import { FeishuBadge } from "./FeishuBadge";
@@ -4359,6 +4360,37 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
     );
     setForwardPickerOpen(true);
   }, [selectedMessages, userBubbleLabel]);
+
+  const exportSelectedMessagesToPdf = useCallback(async () => {
+    if (selectedMessages.length === 0) return;
+    try {
+      const now = Date.now();
+      const html = buildMessagesPdfHtml({
+        messages: selectedMessages,
+        sessionTitle: paneAvatarMeta.name || pane?.avatarName || "对话记录",
+        exportedAt: now,
+        userBubbleLabel,
+      });
+      const stamp = new Date(now)
+        .toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit" })
+        .replace(":", "-");
+      const sessionSlug = (paneAvatarMeta.name || pane?.avatarName || "对话")
+        .replace(/[\\/:*?"<>|]/g, "_")
+        .slice(0, 32);
+      const res = await window.agenticxDesktop.exportMessagesPdf({
+        html,
+        defaultFileName: `Machi对话_${sessionSlug}_${stamp}.pdf`,
+      });
+      if (res.canceled) return;
+      if (res.ok && res.path) {
+        setStallHintToast(`已保存到 ${res.path}`);
+      } else {
+        setStallHintToast(`导出失败：${res.error || "未知错误"}`);
+      }
+    } catch (e) {
+      setStallHintToast(`导出失败：${String(e).slice(0, 120)}`);
+    }
+  }, [pane?.avatarName, paneAvatarMeta.name, selectedMessages, userBubbleLabel]);
 
   const deleteSelectedMessages = useCallback(async () => {
     if (selectedMessages.length === 0 || !apiBase || !pane.sessionId) return;
@@ -9777,6 +9809,9 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
                 }}
               >
                 复制
+              </button>
+              <button className="rounded px-1 hover:bg-surface-hover" onClick={() => void exportSelectedMessagesToPdf()}>
+                保存为 PDF
               </button>
               <button className="rounded px-1 hover:bg-surface-hover text-rose-300" onClick={() => void deleteSelectedMessages()}>
                 删除

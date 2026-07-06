@@ -5421,6 +5421,64 @@ function registerIpc(): void {
     }
   });
 
+  ipcMain.handle("export-messages-pdf", async (_event, payload: unknown) => {
+    const p =
+      payload && typeof payload === "object"
+        ? (payload as { html?: unknown; defaultFileName?: unknown })
+        : {};
+    const html = typeof p.html === "string" ? p.html : "";
+    const defaultFileName = String(p.defaultFileName ?? "Machi对话.pdf").trim() || "Machi对话.pdf";
+    if (!html) return { ok: false, canceled: false, error: "empty html" };
+
+    const focused = BrowserWindow.getFocusedWindow() ?? mainWindow ?? null;
+    const defaultPath = path.join(app.getPath("downloads"), defaultFileName);
+    const saveRes = focused
+      ? await dialog.showSaveDialog(focused, {
+          defaultPath,
+          filters: [{ name: "PDF", extensions: ["pdf"] }],
+        })
+      : await dialog.showSaveDialog({
+          defaultPath,
+          filters: [{ name: "PDF", extensions: ["pdf"] }],
+        });
+    if (saveRes.canceled || !saveRes.filePath) return { ok: true, canceled: true };
+
+    const targetPath = saveRes.filePath;
+    let tmpHtmlPath = "";
+    let offscreen: BrowserWindow | null = null;
+    try {
+      tmpHtmlPath = path.join(
+        os.tmpdir(),
+        `agx-export-${Date.now()}-${crypto.randomBytes(4).toString("hex")}.html`,
+      );
+      fs.writeFileSync(tmpHtmlPath, html, "utf-8");
+      offscreen = new BrowserWindow({
+        show: false,
+        webPreferences: { javascript: false, sandbox: true, contextIsolation: true },
+      });
+      await offscreen.loadFile(tmpHtmlPath);
+      await new Promise((resolve) => setTimeout(resolve, 150));
+      const pdfBuffer = await offscreen.webContents.printToPDF({
+        pageSize: "A4",
+        printBackground: true,
+        margins: { marginType: "default" },
+      });
+      fs.writeFileSync(targetPath, pdfBuffer);
+      return { ok: true, canceled: false, path: targetPath };
+    } catch (err) {
+      return { ok: false, canceled: false, error: String(err).slice(0, 200) };
+    } finally {
+      if (offscreen && !offscreen.isDestroyed()) offscreen.destroy();
+      if (tmpHtmlPath) {
+        try {
+          fs.unlinkSync(tmpHtmlPath);
+        } catch {
+          // ignore cleanup failures
+        }
+      }
+    }
+  });
+
   ipcMain.handle("load-automation-tasks", async () => {
     try {
       return { ok: true, tasks: loadAutomationTasks() };

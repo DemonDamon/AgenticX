@@ -433,6 +433,13 @@ contextBridge.exposeInMainWorld("agenticxDesktop", {
       confirmed: boolean;
       error?: string;
     }>,
+  exportMessagesPdf: async (payload: { html: string; defaultFileName?: string }) =>
+    ipcRenderer.invoke("export-messages-pdf", payload) as Promise<{
+      ok: boolean;
+      canceled?: boolean;
+      path?: string;
+      error?: string;
+    }>,
   loadAutomationTasks: async () =>
     ipcRenderer.invoke("load-automation-tasks") as Promise<{
       ok: boolean;

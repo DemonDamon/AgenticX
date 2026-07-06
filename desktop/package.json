@@ -30,6 +30,7 @@
     "js-yaml": "^4.1.1",
     "lucide-react": "^0.577.0",
     "mammoth": "^1.12.0",
+    "marked": "^18.0.5",
     "mermaid": "^11.13.0",
     "monaco-editor": "^0.52.2",
     "node-pty": "^1.1.0",
