@@ -4384,13 +4384,14 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
       if (res.canceled) return;
       if (res.ok && res.path) {
         setStallHintToast(`已保存到 ${res.path}`);
+        setSelectedMessageIds(new Set());
       } else {
         setStallHintToast(`导出失败：${res.error || "未知错误"}`);
       }
     } catch (e) {
       setStallHintToast(`导出失败：${String(e).slice(0, 120)}`);
     }
-  }, [pane?.avatarName, paneAvatarMeta.name, selectedMessages, userBubbleLabel]);
+  }, [pane?.avatarName, paneAvatarMeta.name, selectedMessages, setSelectedMessageIds, userBubbleLabel]);
 
   const deleteSelectedMessages = useCallback(async () => {
     if (selectedMessages.length === 0 || !apiBase || !pane.sessionId) return;
@@ -9757,7 +9758,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
           ) : null}
           {stallHintToast ? (
             <div className="pointer-events-none mb-1 flex justify-center">
-              <div className="rounded-lg border border-amber-500/40 bg-amber-500/10 px-3 py-1.5 text-xs text-amber-200">
+              <div className="rounded-lg border border-amber-500/40 bg-amber-500/10 px-3 py-1.5 text-xs text-amber-200 [html[data-theme=light]_&]:border-amber-600/50 [html[data-theme=light]_&]:bg-amber-500/15 [html[data-theme=light]_&]:text-amber-900">
                 {stallHintToast}
               </div>
             </div>
