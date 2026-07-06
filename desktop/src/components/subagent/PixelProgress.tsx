@@ -1,10 +1,14 @@
 /**
  * 像素/粒子矩阵进度条（Sub-Plan C FR-3）—— `variant="bar"` 逐格点亮表达精确进度，对齐图4 的方格质感
- * （工牌详情 / drawer 场景）；`variant="dots"` 走两行圆点粒子矩阵质感（对齐 Kimi Work 风格，蜂群卡片行内
- * 场景）—— 按状态整体着色 + 运行中呼吸闪烁，而非逐格填充比例（对齐参照图里「整体点亮」的活动指示语义）。
+ * （工牌详情 / drawer 场景）；`variant="dots"` 走 3行×12列圆点矩阵，逐列从左到右点亮，
+ * 像进度条一样推进（运行中无精确进度时活跃列呼吸闪烁）。
  */
 import { useEffect, useMemo, useRef, useState } from "react";
-import { PIXEL_PROGRESS_CELLS, TONE_COLOR_VAR, isTerminalStatus, statusMeta } from "./badge-theme";
+import { PIXEL_PROGRESS_CELLS, isTerminalStatus, statusMeta } from "./badge-theme";
+
+/** 粒子矩阵固定参数：3 行 × 12 列 */
+const DOT_ROWS = 3;
+const DOT_COLS = 12;
 
 type Props = {
   /** 0..1；undefined 且运行中 → 呼吸推进。 */
@@ -21,32 +25,93 @@ const EMPTY_BG = "color-mix(in srgb, rgb(var(--theme-color-rgb)) 14%, transparen
 const ERROR_BG = "var(--status-error)";
 const PAUSED_BG = "var(--status-warning)";
 
-/** 粒子矩阵：两行 × N 列的方点网格，整体按状态语义色点亮，运行中整体呼吸闪烁。 */
-function DotMatrix({ status, cells, className }: { status: string; cells: number; className?: string }) {
+/**
+ * 粒子矩阵：3行 × 12列，逐列从左向右点亮（进度条语义）。
+ * 运行中无精确进度时，活跃列（下一个待点亮列）缓慢呼吸前进。
+ */
+function DotMatrix({ progress, status, className }: { progress?: number; status: string; className?: string }) {
   const isRunning = status === "running" || status === "pending" || status === "awaiting_confirm" || status === "awaiting_input";
+  const isCompleted = status === "completed";
+  const isFailed = status === "failed";
+  const isPaused = status === "paused";
   const meta = statusMeta(status);
-  const color = TONE_COLOR_VAR[meta.tone];
-  const cols = Math.max(1, Math.ceil(cells / 2));
+
+  // 无精确进度时按列呼吸推进
+  const breathing = isRunning && typeof progress !== "number";
+  const [pulseCol, setPulseCol] = useState(0);
+  const rafRef = useRef<number | null>(null);
+
+  useEffect(() => {
+    if (!breathing) return;
+    let last = 0;
+    const step = (t: number) => {
+      // 约每 400ms 前进一列（12列 × 400ms ≈ 5s 跑一圈，节奏舒缓）
+      if (t - last >= 400) {
+        last = t;
+        setPulseCol((c) => (c + 1) % DOT_COLS);
+      }
+      rafRef.current = requestAnimationFrame(step);
+    };
+    rafRef.current = requestAnimationFrame(step);
+    return () => {
+      if (rafRef.current !== null) cancelAnimationFrame(rafRef.current);
+    };
+  }, [breathing]);
+
+  // 计算已填充列数（0..DOT_COLS）
+  let filledCols: number;
+  if (isCompleted) {
+    filledCols = DOT_COLS;
+  } else if (isFailed) {
+    filledCols = 0;
+  } else if (typeof progress === "number") {
+    filledCols = Math.round(Math.max(0, Math.min(1, progress)) * DOT_COLS);
+  } else {
+    filledCols = 0;
+  }
+
+  // 每列的颜色：已填充列用主题色，活跃列呼吸，其余暗色
+  const colColors: string[] = Array.from({ length: DOT_COLS }, (_, col) => {
+    if (isFailed) return ERROR_BG;
+    if (isPaused) return col < Math.max(filledCols, Math.round(DOT_COLS * 0.6)) ? PAUSED_BG : EMPTY_BG;
+    if (col < filledCols) return FILLED_BG;
+    return EMPTY_BG;
+  });
+
   return (
     <div
-      className={`grid shrink-0 grid-rows-2 gap-[2.5px] ${isRunning ? "animate-pulse" : ""} ${className ?? ""}`}
-      style={{ gridTemplateColumns: `repeat(${cols}, 4px)` }}
+      className={`grid shrink-0 gap-[2.5px] ${className ?? ""}`}
+      style={{
+        gridTemplateColumns: `repeat(${DOT_COLS}, 4px)`,
+        gridTemplateRows: `repeat(${DOT_ROWS}, 4px)`,
+        gridAutoFlow: "column",
+      }}
       role="progressbar"
       aria-valuemin={0}
       aria-valuemax={100}
-      aria-valuenow={status === "completed" ? 100 : undefined}
+      aria-valuenow={isCompleted ? 100 : Math.round((filledCols / DOT_COLS) * 100)}
       aria-label={meta.label}
     >
-      {Array.from({ length: cols * 2 }).map((_, i) => (
-        <span key={i} className="h-[4px] w-[4px] rounded-[1px]" style={{ background: color }} />
-      ))}
+      {Array.from({ length: DOT_ROWS * DOT_COLS }).map((_, i) => {
+        // grid-auto-flow:column 时，i = col * DOT_ROWS + row
+        const col = Math.floor(i / DOT_ROWS);
+        const isActive = breathing && col === pulseCol;
+        const bg = colColors[col];
+        return (
+          <span
+            key={i}
+            className={`h-[4px] w-[4px] rounded-[1px] transition-colors duration-200 ${isActive ? "animate-pulse" : ""}`}
+            style={{ background: bg }}
+          />
+        );
+      })}
     </div>
   );
 }
 
 export function PixelProgress({ progress, status, cells = PIXEL_PROGRESS_CELLS, variant = "bar", className }: Props) {
   if (variant === "dots") {
-    return <DotMatrix status={status} cells={cells} className={className} />;
+    return <DotMatrix progress={progress} status={status} className={className} />;
   }
 
   const isRunning = status === "running" || status === "pending" || status === "awaiting_confirm" || status === "awaiting_input";

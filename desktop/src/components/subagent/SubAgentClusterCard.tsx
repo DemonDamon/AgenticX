@@ -30,8 +30,8 @@ function ClusterHeaderIcon() {
   );
 }
 
-/** 粒子矩阵固定槽宽（6 列 × 4px + 间距），右侧永远预留，窄屏也不被文字挤没。 */
-const DOT_MATRIX_SLOT_PX = 40;
+/** 粒子矩阵固定槽宽（3 行 × 12 列 × 4px + 间距），右侧永远预留，窄屏也不被文字挤没。 */
+const DOT_MATRIX_SLOT_PX = 80;
 
 /** 成员行摘要文案：任务描述优先，回落结果摘要，再回落角色。 */
 function excerptFor(vm: BadgeVM): string {
@@ -71,7 +71,7 @@ function ClusterMemberRow({
         style={{ width: DOT_MATRIX_SLOT_PX, minWidth: DOT_MATRIX_SLOT_PX }}
       >
         <span className="font-mono text-[10px] leading-none text-text-faint">{vm.badgeSeq}</span>
-        <PixelProgress progress={vm.progress} status={vm.status} variant="dots" cells={12} />
+        <PixelProgress progress={vm.progress} status={vm.status} variant="dots" />
       </div>
     </button>
   );

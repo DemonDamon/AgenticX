@@ -5985,7 +5985,8 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
             id: rid,
             name: hydrated.name,
             role: hydrated.role,
-            // 历史运行不传 task：避免 SubAgentCard 在历史态显示「详细指令」块
+            // 历史运行传空 task：避免 SubAgentCard 在历史态回显「详细指令」块
+            task: "",
             provider: hydrated.provider,
             model: hydrated.model,
             sessionId: sid,

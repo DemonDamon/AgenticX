@@ -74,6 +74,16 @@ function persistedProgressFor(status: string): number | undefined {
   return undefined;
 }
 
+/**
+ * 运行中且后端未给出精确 progress 时，用已发生的事件数（工具调用等）推导一个单调递增、
+ * 趋近但不到 1 的活动进度，让像素矩阵能随真实运转「一点点点亮」而非纯装饰性呼吸。
+ * 渐近曲线：事件越多推进越慢，封顶 0.92，留给「真正完成」那一刻满格的仪式感。
+ */
+function activityProgressFor(eventCount: number): number | undefined {
+  if (eventCount <= 0) return undefined;
+  return Math.min(0.92, eventCount / (eventCount + 4));
+}
+
 export function fromLiveSubAgent(s: SubAgent, fallbackIndex?: number): BadgeVM {
   const rawProgress = typeof s.progress === "number" ? s.progress : undefined;
   let progress: number | undefined;
@@ -81,6 +91,8 @@ export function fromLiveSubAgent(s: SubAgent, fallbackIndex?: number): BadgeVM {
     progress = Math.max(0, Math.min(1, rawProgress > 1 ? rawProgress / 100 : rawProgress));
   } else if (isTerminalStatus(s.status)) {
     progress = s.status === "completed" ? 1 : undefined;
+  } else if (s.status === "running" || s.status === "pending") {
+    progress = activityProgressFor(s.events?.length ?? 0);
   }
   return {
     runId: s.id,
