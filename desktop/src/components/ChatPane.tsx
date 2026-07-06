@@ -6785,6 +6785,58 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
   );
   const resumeInNewSessionRef = useRef<() => void>(() => {});
 
+  /** Materialize a lazy session (fresh topic / no sessionId yet) with full create params. */
+  const materializeLazySession = useCallback(async (): Promise<string | null> => {
+    const existing = (pane.sessionId || "").trim();
+    if (existing) return existing;
+
+    try {
+      const avatarId =
+        pane.avatarId && pane.avatarId.startsWith("group:") ? undefined : pane.avatarId ?? undefined;
+      const inheritFrom = peekPaneLazyInheritParent(pane.id);
+      const pendingMode = peekPanePendingSessionMode(pane.id) ?? pane.sessionMode ?? "daily_office";
+      const created = await window.agenticxDesktop.createSession({
+        avatar_id: avatarId,
+        session_mode: pendingMode,
+        ...(inheritFrom ? { inherit_from_session_id: inheritFrom } : {}),
+        ...(chatProvider && chatModel ? { provider: chatProvider, model: chatModel } : {}),
+      });
+      if (!created.ok || !created.session_id) {
+        console.error("[ChatPane] materializeLazySession failed:", created.error);
+        return null;
+      }
+      const newSessionId = created.session_id;
+      migratePaneKbRetrievalModeToSession(pane.id, newSessionId);
+      clearPaneLazyInheritParent(pane.id);
+      clearPanePendingSessionMode(pane.id);
+      setPaneSessionMode(pane.id, created.session_mode ?? pendingMode);
+      if (created.inherited) {
+        setPaneContextInherited(pane.id, true);
+      }
+      setPaneSessionId(pane.id, newSessionId, {
+        provider: chatProvider || undefined,
+        model: chatModel || undefined,
+      });
+      clearPaneAwaitingFreshSession(pane.id);
+      useAppStore.getState().bumpSessionCatalogRevision();
+      window.setTimeout(() => useAppStore.getState().bumpSessionCatalogRevision(), 450);
+      return newSessionId;
+    } catch (err) {
+      console.error("[ChatPane] materializeLazySession threw:", err);
+      return null;
+    }
+  }, [
+    pane.id,
+    pane.avatarId,
+    pane.sessionId,
+    pane.sessionMode,
+    chatProvider,
+    chatModel,
+    setPaneSessionId,
+    setPaneSessionMode,
+    setPaneContextInherited,
+  ]);
+
   /** Send a team-mode action (ADD_TASK / PAUSE / RESUME / STOP) to TaskLock via Studio API. */
   const sendGroupTeamAction = async (action: string, data?: Record<string, unknown>) => {
     if (!isGroupPane || !groupChatId || !pane?.sessionId) return;
@@ -6961,54 +7013,25 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
         releaseSendLock();
         return;
       }
-      try {
-        const avatarId =
-          pane.avatarId && pane.avatarId.startsWith("group:") ? undefined : pane.avatarId ?? undefined;
-        const inheritFrom = peekPaneLazyInheritParent(pane.id);
-        const pendingMode = peekPanePendingSessionMode(pane.id) ?? pane.sessionMode ?? "daily_office";
-        const created = await window.agenticxDesktop.createSession({
-          avatar_id: avatarId,
-          session_mode: pendingMode,
-          ...(inheritFrom ? { inherit_from_session_id: inheritFrom } : {}),
-          ...(chatProvider && chatModel ? { provider: chatProvider, model: chatModel } : {}),
-        });
-        if (!created.ok || !created.session_id) {
-          addPaneMessage(
-            pane.id,
-            "tool",
-            `⚠️ 无法创建会话：${created.error || "未知错误"}。请检查后端服务。`,
-            "meta"
-          );
-          releaseSendLock();
-          return;
-        }
-        requestSessionId = created.session_id;
-        migratePaneKbRetrievalModeToSession(pane.id, requestSessionId);
-        clearPaneLazyInheritParent(pane.id);
-        clearPanePendingSessionMode(pane.id);
-        setPaneSessionMode(pane.id, created.session_mode ?? pendingMode);
-        if (created.inherited) {
-          setPaneContextInherited(pane.id, true);
-        }
-        // Defensive reset: a brand-new lazy session must never display any
-        // residual messages from the previously-running session (which may
-        // have been racily restored by poll/sync effects while sessionId
-        // was transitioning from "" to the new id).
-        useAppStore.getState().setPaneMessages(pane.id, []);
-        lastPollCountRef.current = 0;
-        pollSessionSidRef.current = requestSessionId;
-        setPaneSessionId(pane.id, requestSessionId, {
-          provider: chatProvider || undefined,
-          model: chatModel || undefined,
-        });
-        clearPaneAwaitingFreshSession(pane.id);
-        useAppStore.getState().bumpSessionCatalogRevision();
-        window.setTimeout(() => useAppStore.getState().bumpSessionCatalogRevision(), 450);
-      } catch (err) {
-        addPaneMessage(pane.id, "tool", `⚠️ 创建会话失败：${String(err)}`, "meta");
+      const materializedSessionId = await materializeLazySession();
+      if (!materializedSessionId) {
+        addPaneMessage(
+          pane.id,
+          "tool",
+          "⚠️ 无法创建会话：未知错误。请检查后端服务。",
+          "meta"
+        );
         releaseSendLock();
         return;
       }
+      requestSessionId = materializedSessionId;
+      // Defensive reset: a brand-new lazy session must never display any
+      // residual messages from the previously-running session (which may
+      // have been racily restored by poll/sync effects while sessionId
+      // was transitioning from "" to the new id).
+      useAppStore.getState().setPaneMessages(pane.id, []);
+      lastPollCountRef.current = 0;
+      pollSessionSidRef.current = requestSessionId;
     }
     const isStreamRunActive = resolveStreamRunActive(requestSessionId);
 
@@ -10448,6 +10471,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
             onQuotePreviewSnippet={insertWorkspaceSnippetReference}
             previewOpenRequest={pendingWorkspacePreviewRequest}
             onPreviewOpenRequestHandled={() => setPendingWorkspacePreviewRequest(null)}
+            onEnsureSessionForWorkspace={materializeLazySession}
           />
         </div>
       ) : null}
@@ -10557,6 +10581,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
                 onQuotePreviewSnippet={insertWorkspaceSnippetReference}
                 previewOpenRequest={pendingWorkspacePreviewRequest}
                 onPreviewOpenRequestHandled={() => setPendingWorkspacePreviewRequest(null)}
+                onEnsureSessionForWorkspace={materializeLazySession}
               />
             </div>
           ) : null}

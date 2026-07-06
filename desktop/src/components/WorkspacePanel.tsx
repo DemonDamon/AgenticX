@@ -62,6 +62,8 @@ type Props = {
   /** Absolute path (+ optional line range) requested from chat (@file chip / path click). */
   previewOpenRequest?: WorkspacePreviewOpenRequest | null;
   onPreviewOpenRequestHandled?: () => void;
+  /** Materialize a lazy fresh session before adding workspace dirs (same params as first send). */
+  onEnsureSessionForWorkspace?: () => Promise<string | null>;
 };
 
 type CtxMenuState =
@@ -146,6 +148,7 @@ export function WorkspacePanel({
   onQuotePreviewSnippet,
   previewOpenRequest,
   onPreviewOpenRequestHandled,
+  onEnsureSessionForWorkspace,
 }: Props) {
   const addPaneTerminalTab = useAppStore((s) => s.addPaneTerminalTab);
   const removePaneTerminalTab = useAppStore((s) => s.removePaneTerminalTab);
@@ -562,26 +565,43 @@ export function WorkspacePanel({
         return;
       }
       if (isPaneAwaitingFreshSession(paneId)) {
-        setAdding(false);
-        setErrorText("请先发送一条消息，再添加工作区目录");
-        return;
-      }
-      try {
-        const createPayload: { avatar_id?: string; name?: string } = {};
-        if (paneAvatarId) createPayload.avatar_id = paneAvatarId;
-        if (paneAvatarName) createPayload.name = paneAvatarName;
-        const created = await window.agenticxDesktop.createSession(createPayload);
-        if (!created.ok || !created.session_id) {
+        if (typeof onEnsureSessionForWorkspace === "function") {
+          try {
+            const ensured = await onEnsureSessionForWorkspace();
+            if (!ensured) {
+              setAdding(false);
+              setErrorText("创建会话失败，无法添加工作区");
+              return;
+            }
+            effectiveSessionId = ensured;
+          } catch (err) {
+            setAdding(false);
+            setErrorText(`创建会话失败：${String(err)}`);
+            return;
+          }
+        } else {
           setAdding(false);
-          setErrorText(created.error ?? "创建会话失败，无法添加工作区");
+          setErrorText("请先发送一条消息，再添加工作区目录");
           return;
         }
-        effectiveSessionId = created.session_id;
-        setPaneSessionId(paneId, effectiveSessionId);
-      } catch (err) {
-        setAdding(false);
-        setErrorText(`创建会话失败：${String(err)}`);
-        return;
+      } else {
+        try {
+          const createPayload: { avatar_id?: string; name?: string } = {};
+          if (paneAvatarId) createPayload.avatar_id = paneAvatarId;
+          if (paneAvatarName) createPayload.name = paneAvatarName;
+          const created = await window.agenticxDesktop.createSession(createPayload);
+          if (!created.ok || !created.session_id) {
+            setAdding(false);
+            setErrorText(created.error ?? "创建会话失败，无法添加工作区");
+            return;
+          }
+          effectiveSessionId = created.session_id;
+          setPaneSessionId(paneId, effectiveSessionId);
+        } catch (err) {
+          setAdding(false);
+          setErrorText(`创建会话失败：${String(err)}`);
+          return;
+        }
       }
     }
     const result = await window.agenticxDesktop.addTaskspace({
