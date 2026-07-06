@@ -145,6 +145,9 @@ import {
 } from "../utils/session-continue";
 import { mergeSessionMessagesTail } from "../utils/session-message-merge";
 import { injectLiveSubAgentClusterAnchors } from "../utils/subagent-cluster-inline";
+import { buildSubAgentFromRunRecord } from "../utils/subagent-hydrate";
+import { fetchRunActivityPage, fetchRunDetail } from "./subagent/run-drawer-api";
+import type { SubAgentRunRecord } from "./subagent/badge-vm";
 import {
   enrichDiskMessagesWithInMemoryReferences,
   referencesDifferBetweenTails,
@@ -2295,7 +2298,6 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
   const editPendingMessage = useAppStore((s) => s.editPendingMessage);
   const setSpawnsColumnOpen = useAppStore((s) => s.setSpawnsColumnOpen);
   const dismissSpawnsColumn = useAppStore((s) => s.dismissSpawnsColumn);
-  const openRunDrawer = useAppStore((s) => s.openRunDrawer);
   const closeRunDrawer = useAppStore((s) => s.closeRunDrawer);
   const apiBase = useAppStore((s) => s.apiBase);
   const apiToken = useAppStore((s) => s.apiToken);
@@ -5948,13 +5950,75 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
     [pane.sessionId]
   );
 
-  const handleOpenRunDrawer = useCallback(
-    (runId: string) => {
-      // 内联集群卡点成员：只打开右侧落盘 drawer（openRunDrawer 已与其它右侧面板互斥），
-      // 不再顺带弹出 Spawns 列，避免与内联卡重复展示。
-      openRunDrawer(pane.id, runId);
+  const openSubAgentDetailFromCluster = useCallback(
+    async (runId: string) => {
+      const rid = String(runId ?? "").trim();
+      if (!rid) return;
+
+      const live = paneSubAgents.find((item) => item.id === rid);
+      if (live) {
+        togglePaneSubAgentChat(rid);
+        closeRunDrawer(pane.id);
+        return;
+      }
+
+      const sid = String(pane.sessionId ?? "").trim();
+      if (!sid || !apiBase || !apiToken) return;
+
+      try {
+        const [detailResp, activityResp] = await Promise.all([
+          fetchRunDetail(apiBase, apiToken, sid, rid),
+          fetchRunActivityPage(apiBase, apiToken, sid, rid, 0, 200),
+        ]);
+        if (!detailResp.ok || !detailResp.run) return;
+
+        const hydrated = buildSubAgentFromRunRecord(
+          detailResp.run as SubAgentRunRecord,
+          activityResp.entries ?? [],
+          sid,
+        );
+        const store = useAppStore.getState();
+        if (store.subAgents.some((item) => item.id === rid)) {
+          store.updateSubAgent(rid, hydrated);
+        } else {
+          store.addSubAgent({
+            id: rid,
+            name: hydrated.name,
+            role: hydrated.role,
+            // 历史运行不传 task：避免 SubAgentCard 在历史态显示「详细指令」块
+            provider: hydrated.provider,
+            model: hydrated.model,
+            sessionId: sid,
+          });
+          store.updateSubAgent(rid, {
+            status: hydrated.status,
+            currentAction: hydrated.currentAction,
+            progress: hydrated.progress,
+            resultSummary: hydrated.resultSummary,
+            resultFile: hydrated.resultFile,
+            outputFiles: hydrated.outputFiles,
+            events: hydrated.events,
+          });
+        }
+
+        closeRunDrawer(pane.id);
+        if (!pane.spawnsColumnOpen) setSpawnsColumnOpen(pane.id, true);
+        setSelectedSubAgent(rid);
+      } catch {
+        // Ignore — cluster card stays interactive; user can retry click.
+      }
     },
-    [openRunDrawer, pane.id],
+    [
+      apiBase,
+      apiToken,
+      closeRunDrawer,
+      pane.id,
+      pane.sessionId,
+      pane.spawnsColumnOpen,
+      paneSubAgents,
+      setSelectedSubAgent,
+      setSpawnsColumnOpen,
+    ],
   );
 
   const togglePaneSubAgentChat = (agentId: string) => {
@@ -6039,7 +6103,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
               toolCardOmitLeadingSpacer={message.role === "tool" && reactCol}
               onRevealPath={(path) => void revealFileInTaskspace(path)}
               onOpenFileReference={(request) => openFileReferencePreview(request)}
-              onOpenSubAgentRun={togglePaneSubAgentChat}
+              onOpenSubAgentRun={openSubAgentDetailFromCluster}
               assistantName={imAssistantName}
               assistantAvatarUrl={imAssistantAvatarUrl}
               userName={imUserName}
@@ -6469,7 +6533,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
       )}
     </>
     );
-  }, [autoNudgeCount, budgetExceededInfo, chatStyle, copyMessage, copyReActBlock, currentModelLabel, exhaustedRounds, favoriteMessage, forwardOneMessage, groupChatUserLabel, groupTyping, groupedVisibleMessages, togglePaneSubAgentChat, hideStreamOverlayAsDuplicate, input, isGroupPane, isRunGuardCurrentSession, isStreamingCurrentSession, lastAssistantMessageId, midTurnStreamActivity, openFileReferencePreview, pane.historySearchTerms, pane.messages, pane.sessionId, paneAvatarMeta, paneId, readyAttachments.length, resolveGroupInlineConfirm, resolveGroupSender, resolveQuoteBody, resumeCurrentTask, resumeInFlight, resumeWithModel, revealFileInTaskspace, retryUserMessage, selectUpTo, selectedMessageIds, sendFollowupChip, sessionBusy, sessionWorkInProgress, setQuoteTarget, showInlineAssistantModelBadge, silentSeconds, stallModelOptions, stallRejectReason, stallRuntimeConfig.stall_auto_nudge_max_per_session, stallState, stopCurrentRun, streamTextForCurrentSession, streamingModel, toggleSelectBlock, toggleSelectMessage, topLevelRowsIm, userAvatarUrl, userBubbleLabel]);
+  }, [autoNudgeCount, budgetExceededInfo, chatStyle, copyMessage, copyReActBlock, currentModelLabel, exhaustedRounds, favoriteMessage, forwardOneMessage, groupChatUserLabel, groupTyping, groupedVisibleMessages, openSubAgentDetailFromCluster, hideStreamOverlayAsDuplicate, input, isGroupPane, isRunGuardCurrentSession, isStreamingCurrentSession, lastAssistantMessageId, midTurnStreamActivity, openFileReferencePreview, pane.historySearchTerms, pane.messages, pane.sessionId, paneAvatarMeta, paneId, readyAttachments.length, resolveGroupInlineConfirm, resolveGroupSender, resolveQuoteBody, resumeCurrentTask, resumeInFlight, resumeWithModel, revealFileInTaskspace, retryUserMessage, selectUpTo, selectedMessageIds, sendFollowupChip, sessionBusy, sessionWorkInProgress, setQuoteTarget, showInlineAssistantModelBadge, silentSeconds, stallModelOptions, stallRejectReason, stallRuntimeConfig.stall_auto_nudge_max_per_session, stallState, stopCurrentRun, streamTextForCurrentSession, streamingModel, toggleSelectBlock, toggleSelectMessage, topLevelRowsIm, userAvatarUrl, userBubbleLabel]);
 
   const removeAttachment = useCallback((key: string) => {
     setContextFiles((prev) => {
@@ -10338,7 +10402,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
           onRetry={(agentId) => void retryPaneSubAgent(agentId)}
           onModelChange={(agentId, provider, model) => void changePaneSubAgentModel(agentId, provider, model)}
           onChat={togglePaneSubAgentChat}
-          onOpenRun={handleOpenRunDrawer}
+          onOpenRun={openSubAgentDetailFromCluster}
           anchoredRunIds={anchoredSubAgentRunIds}
           onConfirmResolve={(agentId, approved) => void resolvePaneSubAgentConfirm(agentId, approved)}
           tintColor={paneTint}
@@ -10451,7 +10515,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
                 onRetry={(agentId) => void retryPaneSubAgent(agentId)}
                 onModelChange={(agentId, provider, model) => void changePaneSubAgentModel(agentId, provider, model)}
                 onChat={togglePaneSubAgentChat}
-                onOpenRun={handleOpenRunDrawer}
+                onOpenRun={openSubAgentDetailFromCluster}
                 anchoredRunIds={anchoredSubAgentRunIds}
                 onConfirmResolve={(agentId, approved) => void resolvePaneSubAgentConfirm(agentId, approved)}
                 tintColor={paneTint}
