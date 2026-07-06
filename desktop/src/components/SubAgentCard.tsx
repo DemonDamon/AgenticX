@@ -22,18 +22,93 @@ type Props = {
   selected?: boolean;
 };
 
-const statusMap: Record<string, { icon: string; label: string; toneClass: string }> = {
-  pending: { icon: "⏳", label: "等待中", toneClass: "text-[var(--status-warning)]" },
-  awaiting_confirm: { icon: "🛂", label: "待确认", toneClass: "text-[var(--status-warning)]" },
-  awaiting_input: { icon: "❓", label: "等待输入", toneClass: "text-[var(--kb-citation-fg)]" },
-  running: { icon: "🔄", label: "执行中", toneClass: "text-[var(--kb-citation-fg)]" },
-  // FR-2: distinct visual for "paused" (rounds saturated). Amber, not red,
-  // to communicate "halted but recoverable" rather than "failed".
-  paused: { icon: "⏸", label: "已暂停（触顶）", toneClass: "text-[var(--status-warning)]" },
-  completed: { icon: "✅", label: "已完成", toneClass: "text-[var(--status-success)]" },
-  failed: { icon: "❌", label: "失败", toneClass: "text-[var(--status-error)]" },
-  cancelled: { icon: "⏹", label: "已中断", toneClass: "text-text-muted" },
+type StatusTone = "success" | "error" | "warning" | "theme" | "muted";
+
+const statusMap: Record<string, { label: string; tone: StatusTone }> = {
+  pending: { label: "等待中", tone: "warning" },
+  awaiting_confirm: { label: "待确认", tone: "warning" },
+  awaiting_input: { label: "等待输入", tone: "theme" },
+  running: { label: "执行中", tone: "theme" },
+  paused: { label: "已暂停", tone: "warning" },
+  completed: { label: "已完成", tone: "success" },
+  failed: { label: "失败", tone: "error" },
+  cancelled: { label: "已中断", tone: "muted" },
 };
+
+const STATUS_PILL_CLASS: Record<StatusTone, string> = {
+  success:
+    "border-[color-mix(in_srgb,var(--status-success)_30%,transparent)] bg-[color-mix(in_srgb,var(--status-success)_9%,transparent)] text-[var(--status-success)]",
+  error:
+    "border-[color-mix(in_srgb,var(--status-error)_30%,transparent)] bg-[color-mix(in_srgb,var(--status-error)_9%,transparent)] text-[var(--status-error)]",
+  warning:
+    "border-[color-mix(in_srgb,var(--status-warning)_30%,transparent)] bg-[color-mix(in_srgb,var(--status-warning)_9%,transparent)] text-[var(--status-warning)]",
+  theme:
+    "border-[color-mix(in_srgb,rgb(var(--theme-color-rgb))_28%,transparent)] bg-[color-mix(in_srgb,rgb(var(--theme-color-rgb))_8%,transparent)] text-[var(--kb-citation-fg)]",
+  muted: "border-border bg-surface-card-strong text-text-muted",
+};
+
+function StatusGlyph({ status }: { status: string }) {
+  const cls = "h-3 w-3 shrink-0";
+  switch (status) {
+    case "completed":
+      return (
+        <svg viewBox="0 0 12 12" fill="none" className={cls} aria-hidden>
+          <circle cx="6" cy="6" r="4.75" stroke="currentColor" strokeWidth="1" opacity="0.45" />
+          <path
+            d="M3.75 6.1 5.35 7.7 8.35 4.55"
+            stroke="currentColor"
+            strokeWidth="1.35"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          />
+        </svg>
+      );
+    case "failed":
+      return (
+        <svg viewBox="0 0 12 12" fill="none" className={cls} aria-hidden>
+          <circle cx="6" cy="6" r="4.75" stroke="currentColor" strokeWidth="1" opacity="0.45" />
+          <path d="M4.35 4.35 7.65 7.65M7.65 4.35 4.35 7.65" stroke="currentColor" strokeWidth="1.25" strokeLinecap="round" />
+        </svg>
+      );
+    case "cancelled":
+      return (
+        <svg viewBox="0 0 12 12" fill="none" className={cls} aria-hidden>
+          <rect x="3.5" y="3.5" width="5" height="5" rx="1" stroke="currentColor" strokeWidth="1.25" />
+        </svg>
+      );
+    case "paused":
+      return (
+        <svg viewBox="0 0 12 12" fill="none" className={cls} aria-hidden>
+          <path d="M4.5 3.5v5M7.5 3.5v5" stroke="currentColor" strokeWidth="1.35" strokeLinecap="round" />
+        </svg>
+      );
+    case "awaiting_confirm":
+      return (
+        <svg viewBox="0 0 12 12" fill="none" className={cls} aria-hidden>
+          <path
+            d="M6 2.5v3.25M6 8.1h.01"
+            stroke="currentColor"
+            strokeWidth="1.35"
+            strokeLinecap="round"
+          />
+          <circle cx="6" cy="6" r="4.75" stroke="currentColor" strokeWidth="1" opacity="0.45" />
+        </svg>
+      );
+    case "awaiting_input":
+      return (
+        <svg viewBox="0 0 12 12" fill="none" className={cls} aria-hidden>
+          <path
+            d="M2.75 3.5h6.5a1 1 0 0 1 1 1v2.25a1 1 0 0 1-1 1H5.1L3 8.75V6.5a1 1 0 0 1 1-1V3.5z"
+            stroke="currentColor"
+            strokeWidth="1.1"
+            strokeLinejoin="round"
+          />
+        </svg>
+      );
+    default:
+      return null;
+  }
+}
 
 // All action buttons share a flat ghost base — no border, consistent height.
 const ACTION_BTN_BASE =
@@ -105,25 +180,17 @@ function PendingArcSpinner({ size = 15 }: { size?: number }) {
   return <ArcSpinner size={size} dur="1.5s" />;
 }
 
-function SubAgentStatusBadge({
-  agentStatus,
-  label,
-  toneClass,
-  icon,
-}: {
-  agentStatus: string;
-  label: string;
-  toneClass: string;
-  icon: string;
-}) {
+function SubAgentStatusBadge({ agentStatus, label }: { agentStatus: string; label: string }) {
+  const meta = statusMap[agentStatus] ?? statusMap.pending;
+  const pillClass = STATUS_PILL_CLASS[meta.tone];
+
   if (agentStatus === "running") {
     return (
       <span
-        className="inline-flex items-center gap-1.5 text-xs font-medium"
-        style={{ color: "rgb(var(--theme-color-rgb))" }}
+        className={`inline-flex shrink-0 items-center gap-1.5 rounded-full border px-2 py-0.5 text-[10.5px] font-medium leading-none ${pillClass}`}
         aria-live="polite"
       >
-        <ArcSpinner />
+        <ArcSpinner size={12} />
         {label}
       </span>
     );
@@ -132,17 +199,20 @@ function SubAgentStatusBadge({
   if (agentStatus === "pending") {
     return (
       <span
-        className={`inline-flex items-center gap-1.5 text-xs font-medium ${toneClass}`}
+        className={`inline-flex shrink-0 items-center gap-1.5 rounded-full border px-2 py-0.5 text-[10.5px] font-medium leading-none ${pillClass}`}
       >
-        <PendingArcSpinner />
+        <PendingArcSpinner size={12} />
         {label}
       </span>
     );
   }
 
   return (
-    <span className={`text-xs font-medium ${toneClass}`}>
-      {icon} {label}
+    <span
+      className={`inline-flex shrink-0 items-center gap-1 rounded-full border px-2 py-0.5 text-[10.5px] font-medium leading-none ${pillClass}`}
+    >
+      <StatusGlyph status={agentStatus} />
+      {label}
     </span>
   );
 }
@@ -1137,8 +1207,6 @@ export function SubAgentCard({
         <SubAgentStatusBadge
           agentStatus={subAgent.status}
           label={status.label}
-          toneClass={status.toneClass}
-          icon={status.icon}
         />
       </div>
 
