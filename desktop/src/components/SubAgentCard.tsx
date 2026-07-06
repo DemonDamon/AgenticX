@@ -381,7 +381,10 @@ function SubAgentModelPicker({
         type="button"
         className="inline-flex max-w-[160px] min-w-0 items-center gap-0.5 rounded border border-[var(--ui-btn-primary-border)] bg-[rgba(var(--theme-color-rgb),0.1)] px-1.5 py-0.5 text-[10px] font-medium text-[var(--kb-citation-fg)] transition hover:bg-[rgba(var(--theme-color-rgb),0.16)]"
         title={label}
-        onClick={() => setOpen((v) => !v)}
+        onClick={(e) => {
+          e.stopPropagation();
+          setOpen((v) => !v);
+        }}
       >
         <ProviderIcon provider={currentProvider} className="h-3 w-3 shrink-0" />
         <span className="min-w-0 truncate">{label}</span>
@@ -1235,42 +1238,42 @@ export function SubAgentCard({
       }`}
     >
       <div className={`flex items-start justify-between gap-2 ${collapsed ? "" : "mb-2"}`}>
-        <button
-          type="button"
-          className="flex min-w-0 flex-1 items-center gap-1.5 text-left"
-          onClick={() => setCollapsed((v) => !v)}
-          title={collapsed ? "展开整卡" : "折叠整卡"}
-        >
-          <svg
-            viewBox="0 0 14 14"
-            fill="none"
-            className={`h-3 w-3 shrink-0 text-text-faint transition-transform ${collapsed ? "-rotate-90" : ""}`}
-            stroke="currentColor"
-            strokeWidth="1.5"
-            strokeLinecap="round"
-            strokeLinejoin="round"
+        <div className="flex min-w-0 flex-1 flex-wrap items-center gap-1.5">
+          <button
+            type="button"
+            className="flex min-w-0 items-center gap-1.5 text-left"
+            onClick={() => setCollapsed((v) => !v)}
+            title={collapsed ? "展开整卡" : "折叠整卡"}
           >
-            <path d="M3 5l4 4 4-4" />
-          </svg>
-          <span className="min-w-0 flex-1 flex flex-wrap items-center gap-1.5">
+            <svg
+              viewBox="0 0 14 14"
+              fill="none"
+              className={`h-3 w-3 shrink-0 text-text-faint transition-transform ${collapsed ? "-rotate-90" : ""}`}
+              stroke="currentColor"
+              strokeWidth="1.5"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            >
+              <path d="M3 5l4 4 4-4" />
+            </svg>
             <span className="truncate text-sm font-medium text-text-strong">{subAgent.name}</span>
-            {!collapsed && onModelChange ? (
-              <SubAgentModelPicker
-                provider={subAgent.provider}
-                model={subAgent.model}
-                onChange={(provider, model) => onModelChange(subAgent.id, provider, model)}
-              />
-            ) : null}
-            {!collapsed ? (
-              <span
-                className="select-all rounded bg-surface-card-strong px-1 py-0.5 font-mono text-[10px] text-text-muted ring-1 ring-border"
-                title={`ID: ${subAgent.id}`}
-              >
-                {subAgent.id}
-              </span>
-            ) : null}
-          </span>
-        </button>
+          </button>
+          {!collapsed && onModelChange ? (
+            <SubAgentModelPicker
+              provider={subAgent.provider}
+              model={subAgent.model}
+              onChange={(provider, model) => onModelChange(subAgent.id, provider, model)}
+            />
+          ) : null}
+          {!collapsed ? (
+            <span
+              className="select-all rounded bg-surface-card-strong px-1 py-0.5 font-mono text-[10px] text-text-muted ring-1 ring-border"
+              title={`ID: ${subAgent.id}`}
+            >
+              {subAgent.id}
+            </span>
+          ) : null}
+        </div>
         <SubAgentStatusBadge
           agentStatus={subAgent.status}
           label={status.label}
