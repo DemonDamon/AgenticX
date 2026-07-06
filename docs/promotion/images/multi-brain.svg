@@ -1,3 +1,4 @@
+<?xml version="1.0" encoding="UTF-8"?>
 <svg viewBox="0 0 680 360" width="100%" xmlns="http://www.w3.org/2000/svg">
   <defs>
     <marker id="arrow" viewBox="0 0 10 10" refX="8" refY="5"
@@ -8,27 +9,20 @@
   </defs>
 
   <rect x="260" y="40" width="160" height="44" rx="8" fill="#E6F1FB" stroke="#378ADD" stroke-width="0.5"/>
-  <text x="340" y="62" text-anchor="middle" dominant-baseline="central" font-family="system-ui" font-size="14" fill="#2C2C2A">� / �}</text>
-
+  <text x="340" y="62" text-anchor="middle" dominant-baseline="central" font-family="PingFang SC, Hiragino Sans GB, Microsoft YaHei, system-ui, sans-serif" font-size="14" fill="#2C2C2A">分身 / 会话挂载</text>
   <polyline points="320,84 220,122" fill="none" stroke="#B4B2A9" stroke-width="1.5" marker-end="url(#arrow)"/>
   <polyline points="360,84 460,122" fill="none" stroke="#B4B2A9" stroke-width="1.5" marker-end="url(#arrow)"/>
-
   <rect x="120" y="124" width="180" height="56" rx="8" fill="#EEEDFE" stroke="#534AB7" stroke-width="0.5"/>
-  <text x="210" y="144" text-anchor="middle" dominant-baseline="central" font-family="system-ui" font-size="14" fill="#2C2C2A">�c</text>
-  <text x="210" y="163" text-anchor="middle" dominant-baseline="central" font-family="system-ui" font-size="12" fill="#5F5E5A">GraphRAG / ��"</text>
-
+  <text x="210" y="144" text-anchor="middle" dominant-baseline="central" font-family="PingFang SC, Hiragino Sans GB, Microsoft YaHei, system-ui, sans-serif" font-size="14" fill="#2C2C2A">文档脑</text>
+  <text x="210" y="163" text-anchor="middle" dominant-baseline="central" font-family="PingFang SC, Hiragino Sans GB, Microsoft YaHei, system-ui, sans-serif" font-size="12" fill="#5F5E5A">GraphRAG / 多路检索</text>
   <rect x="380" y="124" width="180" height="56" rx="8" fill="#EEEDFE" stroke="#534AB7" stroke-width="0.5"/>
-  <text x="470" y="144" text-anchor="middle" dominant-baseline="central" font-family="system-ui" font-size="14" fill="#2C2C2A">�</text>
-  <text x="470" y="163" text-anchor="middle" dominant-baseline="central" font-family="system-ui" font-size="12" fill="#5F5E5A">���I"</text>
-
+  <text x="470" y="144" text-anchor="middle" dominant-baseline="central" font-family="PingFang SC, Hiragino Sans GB, Microsoft YaHei, system-ui, sans-serif" font-size="14" fill="#2C2C2A">代码脑</text>
+  <text x="470" y="163" text-anchor="middle" dominant-baseline="central" font-family="PingFang SC, Hiragino Sans GB, Microsoft YaHei, system-ui, sans-serif" font-size="12" fill="#5F5E5A">多库混合语义索引</text>
   <polyline points="210,180 320,214" fill="none" stroke="#B4B2A9" stroke-width="1.5" marker-end="url(#arrow)"/>
   <polyline points="470,180 360,214" fill="none" stroke="#B4B2A9" stroke-width="1.5" marker-end="url(#arrow)"/>
-
   <rect x="240" y="216" width="200" height="44" rx="8" fill="#EAF3DE" stroke="#3B6D11" stroke-width="0.5"/>
-  <text x="340" y="238" text-anchor="middle" dominant-baseline="central" font-family="system-ui" font-size="14" fill="#2C2C2A">�Z�"</text>
-
+  <text x="340" y="238" text-anchor="middle" dominant-baseline="central" font-family="PingFang SC, Hiragino Sans GB, Microsoft YaHei, system-ui, sans-serif" font-size="14" fill="#2C2C2A">跨脑聚合检索</text>
   <polyline points="340,260 340,296" fill="none" stroke="#B4B2A9" stroke-width="1.5" marker-end="url(#arrow)"/>
-
   <rect x="270" y="298" width="140" height="44" rx="8" fill="#F1EFE8" stroke="#B4B2A9" stroke-width="0.5"/>
-  <text x="340" y="320" text-anchor="middle" dominant-baseline="central" font-family="system-ui" font-size="14" fill="#2C2C2A">�"Ӝ</text>
+  <text x="340" y="320" text-anchor="middle" dominant-baseline="central" font-family="PingFang SC, Hiragino Sans GB, Microsoft YaHei, system-ui, sans-serif" font-size="14" fill="#2C2C2A">检索结果</text>
 </svg>
