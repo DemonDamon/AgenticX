@@ -159,6 +159,7 @@ import {
   mapLoadedSessionMessage,
   type LoadedSessionMessage,
 } from "../utils/session-message-map";
+import { stripComposerUploadDedupeKey } from "../utils/composer-upload-key";
 import {
   findReferenceAttachmentMeta,
   isReferenceMentionBoundary,
@@ -1704,7 +1705,8 @@ function resolveReadyAttachment(
 function buildContextFileKeyFromAttachment(
   file: Pick<MessageAttachment, "sourcePath" | "name" | "lineRange" | "spreadsheetRef" | "snippetRef">
 ): string {
-  const base = String(file.sourcePath || file.name || "").trim();
+  const rawBase = String(file.sourcePath || file.name || "").trim();
+  const base = stripComposerUploadDedupeKey(rawBase);
   if (!base) return "";
   const line = file.lineRange;
   if (line && Number.isFinite(line.start) && Number.isFinite(line.end)) {
@@ -2823,10 +2825,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
     [attachmentEntries]
   );
   const readyAttachments = useMemo(
-    () =>
-      attachmentEntries
-        .filter(([, file]) => file.status === "ready")
-        .map(([sourcePath, file]) => ({ ...file, sourcePath: file.sourcePath || sourcePath })),
+    () => attachmentEntries.filter(([, file]) => file.status === "ready").map(([, file]) => ({ ...file })),
     [attachmentEntries]
   );
 

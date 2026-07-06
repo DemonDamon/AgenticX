@@ -4,6 +4,7 @@ import {
   resolveReferenceSourcePath,
   stripLineRangeFromAbsPath,
 } from "./chat-file-mention";
+import { isMisclassifiedUploadReference } from "./composer-upload-key";
 
 export type FileReferenceOpenRequest = {
   absolutePath: string;
@@ -241,6 +242,7 @@ export function findReferenceAttachmentMeta(
 
 /** Workspace @file / snippet rows — not chat-upload AttachmentCards. */
 export function isWorkspaceReferenceAttachment(att: MessageAttachment): boolean {
+  if (isMisclassifiedUploadReference(att)) return false;
   if (att.referenceToken) return true;
   if (String(att.composerRefLabel || "").trim()) return true;
   if (att.lineRange || att.spreadsheetRef || att.snippetRef) return true;

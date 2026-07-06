@@ -32,7 +32,11 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from jsonschema import Draft202012Validator
 
-from agenticx.avatar.group_chat import GroupChatRegistry
+from agenticx.studio.context_file_keys import (
+    is_composer_upload_dedupe_key,
+    strip_composer_upload_dedupe_key,
+    upload_dedupe_size_from_key,
+)
 from agenticx.avatar.registry import AvatarRegistry
 from agenticx.branding import DEFAULT_META_PRODUCT_LABEL
 from agenticx.cli.config_manager import ConfigManager
@@ -1678,6 +1682,16 @@ def create_studio_app() -> FastAPI:
                     source_path = dir_parts[2]
                     composer_ref_label = dir_parts[1]
                     reference_token = True
+            elif is_composer_upload_dedupe_key(key):
+                display_name = os.path.basename(
+                    strip_composer_upload_dedupe_key(key).replace("\\", "/")
+                ) or strip_composer_upload_dedupe_key(key)
+                dedupe_size = upload_dedupe_size_from_key(key)
+                if dedupe_size is not None:
+                    size_val = dedupe_size
+                source_path = ""
+                reference_token = False
+                composer_ref_label = ""
             elif len(parts) >= 3 and parts[-1].isdigit() and parts[-2].isdigit():
                 source_path = str(parts[0] or "").strip()
                 display_name = os.path.basename(str(source_path).replace("\\", "/")) or source_path

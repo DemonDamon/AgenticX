@@ -1,4 +1,5 @@
 import type { Message, MessageAttachment, MsgRole } from "../store";
+import { isMisclassifiedUploadReference } from "./composer-upload-key";
 import { normalizeReferenceAttachments } from "./reference-attachment";
 import { META_AGENT_DISPLAY_NAME } from "../constants/branding";
 import { isMetaLeaderIdentity } from "./display-name";
@@ -67,24 +68,42 @@ export function attachmentsFromSessionRow(raw: unknown): MessageAttachment[] | u
     const a1 = String(o.a1 ?? "").trim();
     const snippetRef = String(o.snippet_ref ?? "").trim();
     const snippetContent = String(o.snippet_content ?? "").trim();
-    const referenceToken =
+    let referenceToken =
       Boolean(o.reference_token) ||
       !!composerRefLabel ||
       (Number.isFinite(lineStart) && Number.isFinite(lineEnd)) ||
       !!snippetRef ||
       (!!sheet && !!a1);
+    let resolvedLineRange =
+      Number.isFinite(lineStart) && Number.isFinite(lineEnd)
+        ? { start: Math.max(1, Math.floor(lineStart)), end: Math.max(1, Math.floor(lineEnd)) }
+        : undefined;
+    const draft: MessageAttachment = {
+      name,
+      mimeType: String(o.mime_type ?? "").trim() || "application/octet-stream",
+      size,
+      ...(sourcePath ? { sourcePath } : {}),
+      ...(referenceToken ? { referenceToken: true } : {}),
+      ...(composerRefLabel ? { composerRefLabel } : {}),
+      ...(resolvedLineRange ? { lineRange: resolvedLineRange } : {}),
+    };
+    if (isMisclassifiedUploadReference(draft)) {
+      referenceToken = false;
+      resolvedLineRange = undefined;
+      delete (draft as { composerRefLabel?: string }).composerRefLabel;
+      draft.referenceToken = undefined;
+      draft.lineRange = undefined;
+    }
     if (kind === "context_file" || (!dataUrl && name)) {
-      const mimeType = String(o.mime_type ?? "").trim() || "application/octet-stream";
+      const mimeType = draft.mimeType;
       out.push({
         name,
         mimeType,
         size,
         ...(sourcePath ? { sourcePath } : {}),
         ...(referenceToken ? { referenceToken: true } : {}),
-        ...(composerRefLabel ? { composerRefLabel } : {}),
-        ...(Number.isFinite(lineStart) && Number.isFinite(lineEnd)
-          ? { lineRange: { start: Math.max(1, Math.floor(lineStart)), end: Math.max(1, Math.floor(lineEnd)) } }
-          : {}),
+        ...(composerRefLabel && referenceToken ? { composerRefLabel } : {}),
+        ...(resolvedLineRange ? { lineRange: resolvedLineRange } : {}),
         ...(sheet && a1 ? { spreadsheetRef: { sheet, a1 } } : {}),
         ...(snippetRef ? { snippetRef } : {}),
         ...(snippetContent ? { snippetContent } : {}),
