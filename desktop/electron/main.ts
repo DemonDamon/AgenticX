@@ -5427,7 +5427,7 @@ function registerIpc(): void {
         ? (payload as { html?: unknown; defaultFileName?: unknown })
         : {};
     const html = typeof p.html === "string" ? p.html : "";
-    const defaultFileName = String(p.defaultFileName ?? "Machi对话.pdf").trim() || "Machi对话.pdf";
+    const defaultFileName = String(p.defaultFileName ?? "Near对话.pdf").trim() || "Near对话.pdf";
     if (!html) return { ok: false, canceled: false, error: "empty html" };
 
     const focused = BrowserWindow.getFocusedWindow() ?? mainWindow ?? null;

@@ -207,12 +207,12 @@ export function buildMessagesPdfHtml(args: {
 <html lang="zh-CN">
 <head>
 <meta charset="utf-8">
-<title>Machi 对话记录</title>
+<title>Near 对话记录</title>
 <style>${WIDGET_THEME_VAR_DEFAULTS}${PDF_STYLES}</style>
 </head>
 <body>
 <header class="doc-header">
-  <h1>Machi 对话记录</h1>
+  <h1>Near 对话记录</h1>
   <p class="subtitle">${title}</p>
   <p class="meta-line">导出时间：${exportDate} · 共 ${count} 条消息</p>
 </header>

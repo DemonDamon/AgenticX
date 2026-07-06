@@ -4379,7 +4379,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
         .slice(0, 32);
       const res = await window.agenticxDesktop.exportMessagesPdf({
         html,
-        defaultFileName: `Machi对话_${sessionSlug}_${stamp}.pdf`,
+        defaultFileName: `Near对话_${sessionSlug}_${stamp}.pdf`,
       });
       if (res.canceled) return;
       if (res.ok && res.path) {
