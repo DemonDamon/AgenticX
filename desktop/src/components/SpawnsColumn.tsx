@@ -78,6 +78,7 @@ export function SpawnsColumn({
             <SubAgentCard
               key={subAgent.id}
               subAgent={subAgent}
+              parentSessionId={sessionId}
               selected={selectedSubAgent === subAgent.id}
               onCancel={onCancel}
               onRetry={onRetry}

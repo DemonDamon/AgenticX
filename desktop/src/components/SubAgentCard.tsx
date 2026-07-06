@@ -6,14 +6,17 @@ import type { SubAgent } from "../store";
 import { useAppStore } from "../store";
 import { formatModelOptionLabel } from "../utils/model-display";
 import { collectSelectableModelOptions, isModelSelectable } from "../utils/model-options";
-import { normalizeSubAgentSummaryMarkdown } from "../utils/subagent-summary-markdown";
-import { mergeSubAgentOutputPaths } from "../utils/subagent-output-files";
+import { resolveSubAgentOutputPaths } from "../utils/subagent-output-files";
+import { fetchArtifactPreview, type ArtifactPreviewResponse } from "./subagent/run-drawer-api";
+import { previewBaseName } from "./workspace/workspace-preview-types";
 import { isSubAgentLiveStatus } from "../utils/stream-overlay-policy";
 import { CitationMarkdownBody } from "./messages/CitationMarkdownBody";
 import { ProviderIcon } from "./ProviderIcon";
 
 type Props = {
   subAgent: SubAgent;
+  /** Pane/session fallback when subAgent.sessionId is unset (e.g. legacy hydration). */
+  parentSessionId?: string;
   onCancel: (agentId: string) => void;
   onRetry: (agentId: string) => void;
   onChat: (agentId: string) => void;
@@ -659,74 +662,136 @@ function TaskInstructionBlock({ agentId, task }: { agentId: string; task: string
   );
 }
 
-function ResultSummaryBlock({
-  summary,
-  outputFiles,
-  resultFile,
-  onOpenFile,
-}: {
-  summary: string;
-  outputFiles?: string[];
-  resultFile?: string;
-  onOpenFile: (path: string) => void;
-}) {
-  const [copied, setCopied] = useState(false);
-  const [expanded, setExpanded] = useState(false);
-  const markdown = useMemo(() => normalizeSubAgentSummaryMarkdown(summary), [summary]);
-  const linkedOutputPaths = useMemo(
-    () => mergeSubAgentOutputPaths(outputFiles, resultFile ? [resultFile] : undefined),
-    [outputFiles, resultFile],
-  );
+type ArtifactPreviewState =
+  | { status: "loading" }
+  | { status: "ok"; data: ArtifactPreviewResponse }
+  | { status: "error"; error: string };
 
-  const handleCopy = () => {
-    void navigator.clipboard.writeText(markdown).then(() => {
-      setCopied(true);
-      setTimeout(() => setCopied(false), 1500);
-    });
-  };
+function splitOutputFilePath(path: string): { dirPath: string; fileName: string } {
+  const normalized = path.replace(/\\/g, "/");
+  const slash = normalized.lastIndexOf("/");
+  if (slash < 0) return { dirPath: "", fileName: normalized };
+  return { dirPath: normalized.slice(0, slash), fileName: normalized.slice(slash + 1) };
+}
+
+function isMarkdownPath(path: string): boolean {
+  return path.toLowerCase().endsWith(".md");
+}
+
+function OutputFilesBlock({
+  paths,
+  sessionId,
+  runId,
+}: {
+  paths: string[];
+  sessionId?: string;
+  runId: string;
+}) {
+  const apiBase = useAppStore((s) => s.apiBase);
+  const apiToken = useAppStore((s) => s.apiToken);
+  const canPreview = Boolean(sessionId && apiBase && apiToken);
+  const [blockExpanded, setBlockExpanded] = useState(true);
+  const [expandedPath, setExpandedPath] = useState<string | null>(null);
+  const [previews, setPreviews] = useState<Record<string, ArtifactPreviewState>>({});
+
+  const openFolder = useCallback(async (dirPath: string) => {
+    const open = window.agenticxDesktop?.shellOpenPath;
+    if (!open || !dirPath) return;
+    const result = await open(dirPath);
+    if (!result.ok) {
+      console.warn("[SubAgentCard] open folder failed:", result.error);
+    }
+  }, []);
+
+  const togglePreview = useCallback(
+    (path: string) => {
+      if (!canPreview || !sessionId) {
+        void window.agenticxDesktop?.shellOpenPath?.(path);
+        return;
+      }
+      setExpandedPath((cur) => (cur === path ? null : path));
+      if (previews[path]) return;
+      setPreviews((prev) => ({ ...prev, [path]: { status: "loading" } }));
+      fetchArtifactPreview(apiBase, apiToken, sessionId, runId, path)
+        .then((data) => {
+          setPreviews((prev) => ({
+            ...prev,
+            [path]: data.ok ? { status: "ok", data } : { status: "error", error: data.error || "预览失败" },
+          }));
+        })
+        .catch((err) => {
+          setPreviews((prev) => ({ ...prev, [path]: { status: "error", error: String(err) } }));
+        });
+    },
+    [apiBase, apiToken, canPreview, sessionId, runId, previews],
+  );
 
   return (
     <SubAgentMetaBlock
-      title="产出结果"
+      title="产出文件"
       tone="theme"
-      scrollable={!expanded}
+      scrollable={!blockExpanded}
       headerActions={
-        <>
-          <MetaBlockIconButton label="复制结果" onClick={handleCopy}>
-            <CopyIcon copied={copied} />
-          </MetaBlockIconButton>
-          <MetaBlockCollapseButton expanded={expanded} onToggle={() => setExpanded((v) => !v)} />
-        </>
+        <MetaBlockCollapseButton expanded={blockExpanded} onToggle={() => setBlockExpanded((v) => !v)} />
       }
     >
-      <div className="agx-subagent-summary">
-        <CitationMarkdownBody content={markdown} onRevealPath={onOpenFile} />
-      </div>
-      {linkedOutputPaths.length > 0 ? (
-        <div className="mt-2 border-t border-[color-mix(in_srgb,rgb(var(--theme-color-rgb))_15%,transparent)] pt-2">
-          <div className="mb-1 flex items-center gap-1 text-[11px] font-medium text-text-primary">
-            <svg viewBox="0 0 12 12" fill="none" className="h-3 w-3 shrink-0 text-[var(--status-success)]" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-              <path d="M2 9.5V3.5a1 1 0 011-1h4l2 2V9.5a1 1 0 01-1 1H3a1 1 0 01-1-1z" />
-              <path d="M7 2.5V5h2.5" />
-            </svg>
-            产出文件
-          </div>
-          <ol className="max-h-28 list-decimal space-y-1 overflow-y-auto pl-4 marker:text-[11px] marker:text-text-muted">
-            {linkedOutputPaths.map((path) => (
-              <li key={path} className="text-[11px] leading-snug text-text-primary">
+      <ol className="max-h-48 list-decimal space-y-2 overflow-y-auto pl-4 marker:text-[11px] marker:text-text-muted">
+        {paths.map((path) => {
+          const { dirPath, fileName } = splitOutputFilePath(path);
+          const expanded = expandedPath === path;
+          const preview = previews[path];
+          return (
+            <li key={path} className="text-[11px] leading-snug text-text-primary">
+              <div className="break-all font-mono">
+                {dirPath ? (
+                  <button
+                    type="button"
+                    className="text-left text-text-muted underline underline-offset-2 hover:text-text-primary"
+                    title={`打开文件夹：${dirPath}`}
+                    onClick={() => void openFolder(dirPath)}
+                  >
+                    {dirPath}/
+                  </button>
+                ) : null}
                 <button
                   type="button"
-                  className="break-all text-left font-mono text-[var(--kb-citation-fg)] underline underline-offset-2 hover:opacity-80"
-                  title={`打开：${path}`}
-                  onClick={() => void onOpenFile(path)}
+                  className="text-left text-[var(--kb-citation-fg)] underline underline-offset-2 hover:opacity-80"
+                  title={`预览：${path}`}
+                  onClick={() => togglePreview(path)}
                 >
-                  {path}
+                  {fileName || previewBaseName(path)}
                 </button>
-              </li>
-            ))}
-          </ol>
-        </div>
-      ) : null}
+              </div>
+              {expanded ? (
+                <div className="mt-1.5 max-h-56 overflow-y-auto rounded-md border border-[color-mix(in_srgb,rgb(var(--theme-color-rgb))_15%,transparent)] bg-surface-card px-2 py-1.5">
+                  {!preview || preview.status === "loading" ? (
+                    <div className="text-[11px] text-text-faint">加载中…</div>
+                  ) : preview.status === "error" ? (
+                    <div className="text-[11px] text-[var(--status-error)]">{preview.error}</div>
+                  ) : preview.data.kind === "binary" ? (
+                    <div className="text-[11px] text-text-muted">
+                      {preview.data.open_hint || "该文件不支持内联预览，请在文件夹中打开"}
+                    </div>
+                  ) : preview.data.text != null ? (
+                    isMarkdownPath(path) ? (
+                      <CitationMarkdownBody content={preview.data.text} />
+                    ) : (
+                      <pre className="m-0 whitespace-pre-wrap break-words font-mono text-[11px] leading-relaxed text-text-primary">
+                        {preview.data.text}
+                      </pre>
+                    )
+                  ) : null}
+                  {preview?.status === "ok" && preview.data.kind === "text" && preview.data.truncated ? (
+                    <div className="mt-1 text-[10.5px] text-[var(--status-warning)]">
+                      {preview.data.open_hint || "文件过大，已截断显示"}
+                    </div>
+                  ) : null}
+                </div>
+              ) : null}
+            </li>
+          );
+        })}
+      </ol>
     </SubAgentMetaBlock>
   );
 }
@@ -1110,6 +1175,7 @@ function ActivityTimeline({
 
 export function SubAgentCard({
   subAgent,
+  parentSessionId,
   onCancel,
   onRetry,
   onChat,
@@ -1123,6 +1189,15 @@ export function SubAgentCard({
   // 任务默认收起以减少列表视觉噪音；执行中默认展开，方便随时查看进度与中断。
   const [collapsed, setCollapsed] = useState(subAgent.status === "completed");
   const status = useMemo(() => statusMap[subAgent.status] ?? statusMap.pending, [subAgent.status]);
+  const outputPaths = useMemo(
+    () =>
+      resolveSubAgentOutputPaths(subAgent.resultSummary, {
+        resultFile: subAgent.resultFile,
+        outputFiles: subAgent.outputFiles,
+      }),
+    [subAgent.resultSummary, subAgent.resultFile, subAgent.outputFiles],
+  );
+  const artifactSessionId = subAgent.sessionId || parentSessionId || "";
   const handleCopyDetails = useCallback(() => {
     const header = [
       `智能体: ${subAgent.name} (${subAgent.id})`,
@@ -1150,14 +1225,6 @@ export function SubAgentCard({
   // 关闭一个已开启的对话始终允许（不受此限）。按钮不设 disabled，保留可点击以便
   // 父层拦截点击并弹出提醒 toast，而非静默无响应。
   const chatBlocked = canCancel;
-  const handleOpenOutputFile = useCallback(async (filePath: string) => {
-    const open = window.agenticxDesktop?.shellOpenPath;
-    if (!open) return;
-    const result = await open(filePath);
-    if (!result.ok) {
-      console.warn("[SubAgentCard] open file failed:", result.error);
-    }
-  }, []);
 
   return (
     <div
@@ -1231,12 +1298,11 @@ export function SubAgentCard({
                 : "等待你的输入… 请查看弹窗"}
             </div>
           ) : null}
-          {subAgent.resultSummary ? (
-            <ResultSummaryBlock
-              summary={subAgent.resultSummary}
-              outputFiles={subAgent.outputFiles}
-              resultFile={subAgent.resultFile}
-              onOpenFile={handleOpenOutputFile}
+          {outputPaths.length > 0 ? (
+            <OutputFilesBlock
+              paths={outputPaths}
+              sessionId={artifactSessionId || undefined}
+              runId={subAgent.id}
             />
           ) : null}
           {typeof subAgent.progress === "number" ? (
