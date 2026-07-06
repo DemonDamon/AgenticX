@@ -46,7 +46,8 @@ export function TableBlock({ children, className, ...rest }: Props & Record<stri
   };
 
   return (
-    <div className="agx-table-block group/table my-2 inline-block max-w-full overflow-hidden rounded-xl border border-border bg-surface-panel align-top">
+    <div className="flex w-full justify-center">
+      <div className="agx-table-block group/table my-2 w-fit max-w-full overflow-hidden rounded-xl border border-border bg-surface-panel">
       <div className="flex h-8 shrink-0 items-center justify-between border-b border-border bg-surface-hover/50 px-3 text-xs text-text-faint">
         <span className="text-[11px] font-medium tracking-wide text-text-muted">表格</span>
         {!isStreaming && (
@@ -76,6 +77,7 @@ export function TableBlock({ children, className, ...rest }: Props & Record<stri
         <table ref={tableRef} className={className} {...rest}>
           {children}
         </table>
+      </div>
       </div>
     </div>
   );

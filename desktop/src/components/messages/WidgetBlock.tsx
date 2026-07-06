@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { Code, Copy, Download, Image, Maximize2, MoreHorizontal, X } from "lucide-react";
 import { collectThemeCssVars, exportSurfaceColor } from "../../utils/widget-theme";
 import { Modal } from "../ds/Modal";
@@ -63,33 +63,76 @@ function parseSvgAspect(code: string): { w: number; h: number } {
   return { w: w > 0 ? w : 680, h: h > 0 ? h : 442 };
 }
 
+function readSvgLogicalSize(svg: SVGSVGElement): { w: number; h: number } {
+  const vb = svg.viewBox?.baseVal;
+  if (vb && vb.width > 0 && vb.height > 0) {
+    return { w: vb.width, h: vb.height };
+  }
+  const w = parseSvgLength(svg.getAttribute("width"), 680);
+  const h = parseSvgLength(svg.getAttribute("height"), Math.round(w * 0.65));
+  return { w, h };
+}
+
+/** Expand viewBox when authored bounds clip content (common with undersized LLM SVG). */
+function fitSvgViewBoxToContent(svg: SVGSVGElement, padding = 16): { w: number; h: number } {
+  const declared = readSvgLogicalSize(svg);
+  try {
+    const bbox = svg.getBBox();
+    if (!Number.isFinite(bbox.width) || !Number.isFinite(bbox.height) || bbox.width <= 0 || bbox.height <= 0) {
+      return declared;
+    }
+    const x = Math.min(0, bbox.x - padding);
+    const y = Math.min(0, bbox.y - padding);
+    const right = Math.max(declared.w, bbox.x + bbox.width + padding);
+    const bottom = Math.max(declared.h, bbox.y + bbox.height + padding);
+    const w = Math.ceil(right - x);
+    const h = Math.ceil(bottom - y);
+    svg.setAttribute("viewBox", `${x} ${y} ${w} ${h}`);
+    return { w, h };
+  } catch {
+    return declared;
+  }
+}
+
 /**
  * Renders the SVG via dangerouslySetInnerHTML so the element lives in the
  * current document from the very first paint – avoids cross-document node
  * adoption timing issues that caused the "empty white box" artefact.
  *
  * preview=true（默认）:
- *   - 按 SVG viewBox 的自然宽度展示，最小 640px、最大 900px
- *   - 宽高比精确还原，无硬截断、无多余空白
- *   - 若气泡比 SVG 窄则水平滚动，字迹/细节保持清晰
+ *   - 按 viewBox / 实际内容 bbox 自适应宽高（1 逻辑单位 ≈ 1 CSS px），不同图尺寸不同
+ *   - 容器 mx-auto + max-w-full：在气泡内居中，过宽时等比缩小而非硬压 viewBox
  * preview=false: 在放大弹窗的 ZoomableViewport 内使用，撑满舞台宽度。
  */
 function SvgWidget({ code, preview = true }: { code: string; preview?: boolean }) {
   const html = useMemo(() => buildSanitizedSvgHtml(code), [code]);
-  const aspect = useMemo(() => parseSvgAspect(code), [code]);
+  const hostRef = useRef<HTMLDivElement>(null);
+  const [size, setSize] = useState(() => parseSvgAspect(code));
+
+  useEffect(() => {
+    setSize(parseSvgAspect(code));
+  }, [code]);
+
+  useLayoutEffect(() => {
+    const svg = hostRef.current?.querySelector("svg");
+    if (!svg) return;
+    setSize(fitSvgViewBoxToContent(svg));
+  }, [html]);
 
   if (!html) return null;
 
   if (preview) {
-    // 渲染宽度 = clamp(svgNaturalWidth, 640, 900)
-    // height 用 padding-top trick 精确还原宽高比，不截断也不留白
-    const displayW = Math.min(900, Math.max(640, aspect.w));
-    const displayH = Math.round((displayW * aspect.h) / aspect.w);
     return (
-      <div style={{ width: displayW, height: displayH }}>
+      <div
+        ref={hostRef}
+        className="mx-auto w-fit max-w-full"
+        style={{
+          width: size.w,
+          aspectRatio: `${size.w} / ${size.h}`,
+        }}
+      >
         <div
-          style={{ width: "100%", height: "100%" }}
-          className="[&>svg]:block [&>svg]:h-full [&>svg]:w-full"
+          className="h-full w-full [&>svg]:block [&>svg]:h-full [&>svg]:w-full"
           // eslint-disable-next-line react/no-danger
           dangerouslySetInnerHTML={{ __html: html }}
         />
@@ -100,6 +143,7 @@ function SvgWidget({ code, preview = true }: { code: string; preview?: boolean }
   // 弹窗舞台内：撑满舞台宽度，高度 auto
   return (
     <div
+      ref={hostRef}
       className="w-full [&>svg]:block [&>svg]:h-auto [&>svg]:w-full"
       // eslint-disable-next-line react/no-danger
       dangerouslySetInnerHTML={{ __html: html }}
@@ -505,17 +549,10 @@ export function WidgetBlock({ payload }: Props) {
   if (payload.kind === "svg") {
     return (
       <>
-        {/*
-          外框不再强制 w-full：用 inline-block + max-w-full 让容器收缩至 SVG 实际宽度，
-          同时 mx-auto 保持居中。这样边框贴合内容，不会在窄 SVG 两侧留大片空白。
-        */}
-        {/*
-          overflow-x-auto: 若气泡列比 SVG 自然宽度窄，水平滚动而非压缩。
-          inline-block + max-w-full: 外框随 SVG 内容宽度收缩，不留多余空白。
-        */}
+        <div className="flex w-full justify-center">
         <div
           ref={hostRef}
-          className="relative inline-block max-w-full overflow-x-auto rounded-md border border-border"
+          className="relative w-fit max-w-full overflow-x-auto rounded-md border border-border"
         >
           <SvgWidget code={payload.widgetCode} preview />
           <ZoomButton onClick={() => setZoomOpen(true)} />
@@ -524,6 +561,7 @@ export function WidgetBlock({ payload }: Props) {
             getSvgDisplayWidth={getSvgDisplayWidth}
             getLiveSvg={getLiveSvg}
           />
+        </div>
         </div>
         <Modal
           open={zoomOpen}
