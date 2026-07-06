@@ -37,27 +37,27 @@ const statusMap: Record<string, { label: string; tone: StatusTone }> = {
 
 const STATUS_PILL_CLASS: Record<StatusTone, string> = {
   success:
-    "border-[color-mix(in_srgb,var(--status-success)_30%,transparent)] bg-[color-mix(in_srgb,var(--status-success)_9%,transparent)] text-[var(--status-success)]",
+    "border-border bg-[color-mix(in_srgb,var(--status-success)_4%,transparent)] text-[color-mix(in_srgb,var(--status-success)_78%,var(--text-primary))]",
   error:
-    "border-[color-mix(in_srgb,var(--status-error)_30%,transparent)] bg-[color-mix(in_srgb,var(--status-error)_9%,transparent)] text-[var(--status-error)]",
+    "border-border bg-[color-mix(in_srgb,var(--status-error)_4%,transparent)] text-[color-mix(in_srgb,var(--status-error)_72%,var(--text-primary))]",
   warning:
-    "border-[color-mix(in_srgb,var(--status-warning)_30%,transparent)] bg-[color-mix(in_srgb,var(--status-warning)_9%,transparent)] text-[var(--status-warning)]",
+    "border-border bg-[color-mix(in_srgb,var(--status-warning)_4%,transparent)] text-[color-mix(in_srgb,var(--status-warning)_75%,var(--text-primary))]",
   theme:
-    "border-[color-mix(in_srgb,rgb(var(--theme-color-rgb))_28%,transparent)] bg-[color-mix(in_srgb,rgb(var(--theme-color-rgb))_8%,transparent)] text-[var(--kb-citation-fg)]",
+    "border-border bg-[color-mix(in_srgb,rgb(var(--theme-color-rgb))_4%,transparent)] text-[var(--kb-citation-fg)]",
   muted: "border-border bg-surface-card-strong text-text-muted",
 };
 
 function StatusGlyph({ status }: { status: string }) {
-  const cls = "h-3 w-3 shrink-0";
+  const cls = "h-[11px] w-[11px] shrink-0";
   switch (status) {
     case "completed":
       return (
         <svg viewBox="0 0 12 12" fill="none" className={cls} aria-hidden>
-          <circle cx="6" cy="6" r="4.75" stroke="currentColor" strokeWidth="1" opacity="0.45" />
+          <circle cx="6" cy="6" r="4.35" stroke="currentColor" strokeWidth="1.15" opacity="0.82" />
           <path
-            d="M3.75 6.1 5.35 7.7 8.35 4.55"
+            d="M4.05 6.1 5.35 7.35 8.05 4.65"
             stroke="currentColor"
-            strokeWidth="1.35"
+            strokeWidth="1.2"
             strokeLinecap="round"
             strokeLinejoin="round"
           />
@@ -209,7 +209,7 @@ function SubAgentStatusBadge({ agentStatus, label }: { agentStatus: string; labe
 
   return (
     <span
-      className={`inline-flex shrink-0 items-center gap-1 rounded-full border px-2 py-0.5 text-[10.5px] font-medium leading-none ${pillClass}`}
+      className={`inline-flex shrink-0 items-center gap-1 rounded-full border px-2 py-[3px] text-[11px] font-medium leading-none tracking-[0.01em] shadow-[inset_0_1px_0_rgba(255,255,255,0.04)] ${pillClass}`}
     >
       <StatusGlyph status={agentStatus} />
       {label}
