@@ -48,11 +48,12 @@
 
 .agx-working-shimmer {
   color: transparent;
+  /* 跟随主题 token；勿用固定白色渐变，浅色背景下会不可读 */
   background: linear-gradient(
     90deg,
-    rgba(255, 255, 255, 0.3),
-    rgba(255, 255, 255, 0.95),
-    rgba(255, 255, 255, 0.3)
+    var(--text-subtle),
+    var(--text-strong),
+    var(--text-subtle)
   );
   background-size: 200% 100%;
   -webkit-background-clip: text;
@@ -73,5 +74,13 @@
   .agx-working-spinner {
     animation-duration: var(--ds-spinner-dur) !important;
     animation-iteration-count: infinite !important;
+  }
+
+  .agx-working-shimmer {
+    color: var(--text-subtle);
+    background: none;
+    -webkit-background-clip: unset;
+    background-clip: unset;
+    animation: none;
   }
 }
