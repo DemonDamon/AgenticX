@@ -40,6 +40,10 @@ const ACTION_BTN_BASE =
   "inline-flex items-center gap-1 rounded-md px-2.5 py-1 text-[11px] font-medium transition-colors disabled:pointer-events-none disabled:opacity-35";
 // Primary (对话): filled with a very subtle theme tint
 const ACTION_BTN_PRIMARY = `${ACTION_BTN_BASE} bg-[rgba(var(--theme-color-rgb),0.10)] text-[var(--kb-citation-fg)] hover:bg-[rgba(var(--theme-color-rgb),0.18)]`;
+// Primary but blocked (执行中，未完成) — visually muted; stays clickable so the
+// click still reaches the parent handler and surfaces a reminder toast instead
+// of a native `disabled` no-op.
+const ACTION_BTN_PRIMARY_BLOCKED = `${ACTION_BTN_BASE} bg-surface-card-strong text-text-faint opacity-60 hover:opacity-80 cursor-not-allowed`;
 // Active/selected variant (关闭对话)
 const ACTION_BTN_ACTIVE = `${ACTION_BTN_BASE} bg-[rgba(var(--theme-color-rgb),0.20)] text-[var(--kb-citation-fg)] ring-1 ring-[color-mix(in_srgb,var(--ui-btn-primary-border)_60%,transparent)]`;
 // Neutral (展开/收起详情): ghost on hover only
@@ -1069,6 +1073,10 @@ export function SubAgentCard({
   const canCancel =
     subAgent.status === "running" || subAgent.status === "pending" || subAgent.status === "awaiting_confirm" || subAgent.status === "awaiting_input";
   const canRetry = subAgent.status === "failed" || subAgent.status === "completed" || subAgent.status === "cancelled" || subAgent.status === "paused";
+  // 执行中态（含等待确认/等待输入）禁止「对话」— 避免任务未完成时上下文被轻易打断；
+  // 关闭一个已开启的对话始终允许（不受此限）。按钮不设 disabled，保留可点击以便
+  // 父层拦截点击并弹出提醒 toast，而非静默无响应。
+  const chatBlocked = canCancel;
   const handleOpenOutputFile = useCallback(async (filePath: string) => {
     const open = window.agenticxDesktop?.shellOpenPath;
     if (!open) return;
@@ -1152,9 +1160,15 @@ export function SubAgentCard({
         {/* 对话 — primary action */}
         <button
           type="button"
-          className={selected ? ACTION_BTN_ACTIVE : ACTION_BTN_PRIMARY}
+          className={selected ? ACTION_BTN_ACTIVE : chatBlocked ? ACTION_BTN_PRIMARY_BLOCKED : ACTION_BTN_PRIMARY}
           aria-pressed={selected}
-          title={selected ? "结束与该子智能体的对话，切回 Meta" : "向该子智能体发送消息"}
+          title={
+            selected
+              ? "结束与该子智能体的对话，切回 Meta"
+              : chatBlocked
+                ? "任务执行中，完成后才能进入对话"
+                : "向该子智能体发送消息"
+          }
           onClick={() => onChat(subAgent.id)}
         >
           <svg viewBox="0 0 14 14" fill="none" className="h-3 w-3 shrink-0" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">

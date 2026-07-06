@@ -62,7 +62,7 @@ import {
 } from "../utils/noisy-chat-messages";
 import { HOOK_BLOCK_RE } from "../utils/hook-block-message";
 import { expandMessagesToTopLevelRows } from "./messages/react-blocks";
-import { shouldHideStreamOverlay, shouldShowMidTurnStreamActivity } from "../utils/stream-overlay-policy";
+import { isSubAgentLiveStatus, shouldHideStreamOverlay, shouldShowMidTurnStreamActivity } from "../utils/stream-overlay-policy";
 import { flushSubAgentLiveOutput } from "../utils/subagent-live-output";
 import { resolveSubAgentOutputPaths } from "../utils/subagent-output-files";
 import { TurnToolGroupCard } from "./messages/TurnToolGroupCard";
@@ -6003,6 +6003,12 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
         }
 
         closeRunDrawer(pane.id);
+        // 任务仍在执行时禁止切入对话（与 togglePaneSubAgentChat 的拦截语义一致）；
+        // 明细已写入 store，用户仍可在 Spawns 列看到实时状态，只是不能切到对话态。
+        if (isSubAgentLiveStatus(hydrated.status)) {
+          setStallHintToast("该智能体任务执行中，完成后才能进入对话");
+          return;
+        }
         if (!pane.spawnsColumnOpen) setSpawnsColumnOpen(pane.id, true);
         setSelectedSubAgent(rid);
       } catch {
@@ -6019,6 +6025,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
       paneSubAgents,
       setSelectedSubAgent,
       setSpawnsColumnOpen,
+      setStallHintToast,
     ],
   );
 
@@ -6033,6 +6040,12 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
       !!(sub?.events?.some((evt) => evt.type.startsWith("delegation")));
     if (isDelegation) {
       void openDelegatedAvatarSession(agentId);
+      return;
+    }
+    // 任务仍在执行（含等待确认/等待输入）时禁止切入对话：避免上下文被轻易打断；
+    // 提醒用户等任务完成后再进入。不影响「关闭对话」（上方已提前 return）。
+    if (sub && isSubAgentLiveStatus(sub.status)) {
+      setStallHintToast("该智能体任务执行中，完成后才能进入对话");
       return;
     }
     // 选中一个成员即视为「手动开启」明细面板的动作（无论触发源是内联集群卡还是
