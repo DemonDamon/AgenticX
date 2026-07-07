@@ -80,19 +80,35 @@ def _messages_last_turn_has_completed_reply(messages: List[Dict[str, Any]]) -> b
             last_user_idx = idx
     if last_user_idx < 0:
         return False
-    for msg in messages[last_user_idx + 1 :]:
+    tail = messages[last_user_idx + 1 :]
+    last_reply_idx = -1
+    for idx, msg in enumerate(tail):
         if str(msg.get("role", "")).strip() != "assistant":
             continue
         content = str(msg.get("content", "") or "")
         visible = _visible_assistant_body(content)
-        if visible and not any(marker in visible for marker in _INTERRUPTED_PLACEHOLDER_MARKERS):
-            return True
+        is_reply = bool(visible) and not any(
+            marker in visible for marker in _INTERRUPTED_PLACEHOLDER_MARKERS
+        )
         raw_sq = msg.get("suggested_questions")
         if isinstance(raw_sq, list) and any(str(x).strip() for x in raw_sq):
-            return True
+            is_reply = True
         if "</followups>" in content.lower():
-            return True
-    return False
+            is_reply = True
+        if is_reply:
+            last_reply_idx = idx
+    if last_reply_idx < 0:
+        return False
+
+    # A visible reply followed by a new assistant tool_calls message is only a
+    # preamble; the turn kept running and has not truly completed yet.
+    for msg in tail[last_reply_idx + 1 :]:
+        if str(msg.get("role", "")).strip() != "assistant":
+            continue
+        tool_calls = msg.get("tool_calls")
+        if isinstance(tool_calls, list) and tool_calls:
+            return False
+    return True
 
 
 _REASONING_ACTION_INTENT_RE = re.compile(

@@ -217,6 +217,29 @@ describe("lastTurnHasCompletedAssistantReply", () => {
     ];
     expect(lastTurnHasCompletedAssistantReply(messages)).toBe(false);
   });
+
+  it("returns false when a reply is followed by a new assistant tool_calls row", () => {
+    const messages: Message[] = [
+      msg({ id: "u1", role: "user", content: "你直接帮我做的了吧" }),
+      msg({ id: "a1", role: "assistant", content: "我建议直接做 B 的增强版" }),
+      {
+        ...msg({ id: "a2", role: "assistant", content: "" }),
+        tool_calls: [{ id: "c1", type: "function", function: { name: "skill_use", arguments: "{}" } }],
+      } as Message,
+      msg({ id: "t1", role: "tool", toolName: "skill_use", content: "OK" }),
+    ];
+    expect(lastTurnHasCompletedAssistantReply(messages)).toBe(false);
+  });
+
+  it("keeps true when wrap-up reply is followed by trailing tool bookkeeping rows", () => {
+    const messages: Message[] = [
+      msg({ id: "u1", role: "user", content: "继续未完成的任务" }),
+      msg({ id: "t1", role: "tool", content: "[x][x][x][x] (4/4 completed)" }),
+      msg({ id: "a1", role: "assistant", content: "任务已恢复并完成。Skill 已落盘并验证通过。" }),
+      msg({ id: "t2", role: "tool", content: "已完成（4/4）" }),
+    ];
+    expect(lastTurnHasCompletedAssistantReply(messages)).toBe(true);
+  });
 });
 
 describe("shouldTriggerIncompleteEndStall", () => {

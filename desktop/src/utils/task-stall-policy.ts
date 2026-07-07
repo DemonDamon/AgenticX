@@ -66,6 +66,7 @@ export function lastTurnHasCompletedAssistantReply(messages: Message[]): boolean
     if (messages[idx]?.role === "user") lastUserIdx = idx;
   }
   if (lastUserIdx < 0) return false;
+  let lastReplyIdx = -1;
   for (let idx = lastUserIdx + 1; idx < messages.length; idx += 1) {
     const msg = messages[idx];
     if (msg?.role !== "assistant") continue;
@@ -73,9 +74,20 @@ export function lastTurnHasCompletedAssistantReply(messages: Message[]): boolean
     const content = assistantBodyText(msg);
     if (!content) continue;
     if (INTERRUPTED_ASSISTANT_PLACEHOLDERS.has(content)) continue;
-    return true;
+    lastReplyIdx = idx;
   }
-  return false;
+  if (lastReplyIdx < 0) return false;
+
+  // Keep front-end semantics in sync with backend session_manager:
+  // if a "reply" is followed by a later assistant row that still carries
+  // tool_calls, the turn has not actually wrapped up yet.
+  for (let idx = lastReplyIdx + 1; idx < messages.length; idx += 1) {
+    const msg = messages[idx];
+    if (msg?.role !== "assistant") continue;
+    const toolCalls = (msg.tool_calls as unknown[] | undefined) ?? [];
+    if (toolCalls.length > 0) return false;
+  }
+  return true;
 }
 
 /**
