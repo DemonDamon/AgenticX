@@ -1851,6 +1851,42 @@ def create_studio_app() -> FastAPI:
         )
         return {"ok": True, **page}
 
+    @app.get("/api/session/context_usage")
+    async def get_session_context_usage(
+        session_id: str = Query(...),
+        x_agx_desktop_token: str | None = Header(default=None),
+    ) -> dict:
+        _check_token(x_agx_desktop_token)
+        if not session_id:
+            raise HTTPException(status_code=400, detail="session_id is required")
+        managed = manager.get(session_id, touch=False)
+        if managed is None:
+            raise HTTPException(status_code=404, detail="session not found")
+        from agenticx.studio.context_usage import estimate_session_context_usage
+
+        active_avatar_id = str(getattr(managed, "avatar_id", "") or "").strip()
+        avatar_context: dict[str, str] | None = None
+        if active_avatar_id and not active_avatar_id.startswith("group:"):
+            avatar_cfg = avatar_registry.get_avatar(active_avatar_id)
+            if avatar_cfg is not None:
+                avatar_context = {
+                    "name": avatar_cfg.name or active_avatar_id,
+                    "role": avatar_cfg.role or "",
+                    "system_prompt": avatar_cfg.system_prompt or "",
+                }
+        group_chat = _meta_group_chat_payload(managed)
+
+        try:
+            usage = estimate_session_context_usage(
+                managed,
+                avatar_context=avatar_context,
+                group_chat=group_chat,
+            )
+        except Exception as exc:
+            logger.warning("context usage estimate failed for %s: %s", session_id, exc)
+            raise HTTPException(status_code=500, detail="failed to estimate context usage")
+        return {"ok": True, "session_id": session_id, **usage}
+
     # -------------------------------------------------------------------
     # Project state harness — read-only views over .agx/project/
     # -------------------------------------------------------------------

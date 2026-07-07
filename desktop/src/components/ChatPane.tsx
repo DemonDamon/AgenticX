@@ -49,6 +49,7 @@ import { VoicePttOverlay } from "./VoicePttOverlay";
 import { SessionHistoryPanel } from "./SessionHistoryPanel";
 import { MemoryGraphPanel } from "./memory/MemoryGraphPanel";
 import { StickyTaskBar } from "./StickyTaskBar";
+import { ContextUsageButton } from "./ContextUsagePopup";
 import { WorkspacePanel } from "./WorkspacePanel";
 import type { WorkspacePreviewOpenRequest, WorkspacePreviewQuotePayload } from "./workspace/workspace-preview-types";
 import { SpawnsColumn } from "./SpawnsColumn";
@@ -10293,6 +10294,14 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
                     paneId={paneId}
                     globalDefaultMode={kbGlobalDefaultMode}
                     onNewSessionDefaultChange={onKbNewSessionDefaultChange}
+                  />
+                </div>
+                <div className="flex items-center">
+                  <ContextUsageButton
+                    paneId={pane.id}
+                    sessionId={pane.sessionId ?? ""}
+                    apiBase={apiBase}
+                    apiToken={apiToken}
                   />
                 </div>
                 <button
