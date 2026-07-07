@@ -93,6 +93,10 @@ export function SubAgentClusterCard({
     () => members.filter((m) => m.status === "completed").length,
     [members],
   );
+  const failedCount = useMemo(
+    () => members.filter((m) => m.status === "failed").length,
+    [members],
+  );
 
   if (count === 0) return null;
 
@@ -109,6 +113,7 @@ export function SubAgentClusterCard({
         <span className="ml-auto flex items-center gap-2 text-[10px] text-text-faint">
           {runningCount > 0 ? <span className="text-[var(--kb-citation-fg)]">{runningCount} 执行中</span> : null}
           {doneCount > 0 ? <span className="text-[var(--status-success)]">{doneCount} 完成</span> : null}
+          {failedCount > 0 ? <span className="text-[var(--status-error)]">{failedCount} 失败</span> : null}
         </span>
       </div>
 

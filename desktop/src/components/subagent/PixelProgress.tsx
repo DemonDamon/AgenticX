@@ -19,8 +19,9 @@ type Props = {
   className?: string;
 };
 
-/** 已完成格用主题色，未完成格用极低透明度的主题色底。 */
-const FILLED_BG = "rgb(var(--theme-color-rgb))";
+/** 运行中格用主题色（蓝），已完成格用 success 绿，失败格用 error 红；未完成格极低透明度主题底。 */
+const RUNNING_BG = "rgb(var(--theme-color-rgb))";
+const COMPLETED_BG = "var(--status-success)";
 const EMPTY_BG = "color-mix(in srgb, rgb(var(--theme-color-rgb)) 14%, transparent)";
 const ERROR_BG = "var(--status-error)";
 const PAUSED_BG = "var(--status-warning)";
@@ -70,11 +71,12 @@ function DotMatrix({ progress, status, className }: { progress?: number; status:
     filledCols = 0;
   }
 
-  // 每列的颜色：已填充列用主题色，活跃列呼吸，其余暗色
+  // 每列颜色：完成=绿、运行=蓝、失败=红；活跃列呼吸时仍走运行色。
   const colColors: string[] = Array.from({ length: DOT_COLS }, (_, col) => {
     if (isFailed) return ERROR_BG;
+    if (isCompleted) return COMPLETED_BG;
     if (isPaused) return col < Math.max(filledCols, Math.round(DOT_COLS * 0.6)) ? PAUSED_BG : EMPTY_BG;
-    if (col < filledCols) return FILLED_BG;
+    if (col < filledCols) return RUNNING_BG;
     return EMPTY_BG;
   });
 
@@ -96,12 +98,12 @@ function DotMatrix({ progress, status, className }: { progress?: number; status:
         // grid-auto-flow:column 时，i = col * DOT_ROWS + row
         const col = Math.floor(i / DOT_ROWS);
         const isActive = breathing && col === pulseCol;
-        const bg = colColors[col];
+        const bg = isActive ? RUNNING_BG : colColors[col];
         return (
           <span
             key={i}
             className={`h-[4px] w-[4px] rounded-[1px] transition-colors duration-200 ${isActive ? "animate-pulse" : ""}`}
-            style={{ background: bg }}
+            style={{ background: bg, opacity: isActive ? 0.55 : 1 }}
           />
         );
       })}
@@ -164,10 +166,12 @@ export function PixelProgress({ progress, status, cells = PIXEL_PROGRESS_CELLS, 
         } else if (isPaused && i < Math.max(filledCount, Math.round(cells * 0.6))) {
           bg = PAUSED_BG;
           opacity = 0.85;
+        } else if (isCompleted && i < filledCount) {
+          bg = COMPLETED_BG;
         } else if (i < filledCount) {
-          bg = FILLED_BG;
+          bg = RUNNING_BG;
         } else if (breathing && i === pulseCell) {
-          bg = FILLED_BG;
+          bg = RUNNING_BG;
           opacity = 0.55;
         }
         return (
