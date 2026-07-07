@@ -129,7 +129,7 @@ def test_subagent_spawn_clamps_low_run_timeout(monkeypatch) -> None:
         )
         assert result["ok"] is True
         ctx = manager._agents[result["agent_id"]]
-        assert ctx.run_timeout_seconds == 600
+        assert ctx.run_timeout_seconds == 1200
         await manager.cancel_subagent(result["agent_id"])
 
     asyncio.run(_run())

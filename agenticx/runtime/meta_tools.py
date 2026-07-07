@@ -214,13 +214,23 @@ _META_ONLY_TOOLS: List[Dict[str, Any]] = [
         "type": "function",
         "function": {
             "name": "spawn_subagent",
-            "description": "Spawn one sub-agent worker for a delegated task.",
+            "description": (
+                "Spawn one sub-agent worker for a delegated task. "
+                "批量条目型任务（如 >6 份文档/简历）应拆成多个子智能体（每个 ≤6 项）"
+                "并显式传 run_timeout_seconds=1200~1800。"
+            ),
             "parameters": {
                 "type": "object",
                 "properties": {
                     "name": {"type": "string", "description": "Sub-agent display name."},
                     "role": {"type": "string", "description": "Sub-agent role, e.g. coder/researcher/tester."},
-                    "task": {"type": "string", "description": "Detailed delegated task for this sub-agent."},
+                    "task": {
+                        "type": "string",
+                        "description": (
+                            "Detailed delegated task for this sub-agent. "
+                            "批量条目型任务（如 >6 份文档/简历）应拆成多个子智能体（每个 ≤6 项）。"
+                        ),
+                    },
                     "category": {
                         "type": "string",
                         "enum": ["visual", "deep", "quick", "architect"],
@@ -232,8 +242,9 @@ _META_ONLY_TOOLS: List[Dict[str, Any]] = [
                         "type": "integer",
                         "description": (
                             "Wall-clock cap for the whole sub-agent run. "
-                            "Use 900–1800 for multi-step coding + bash + file tools; "
-                            "values below the runtime floor are raised automatically (default floor 600s, env AGX_SUBAGENT_MIN_RUN_TIMEOUT_SECONDS)."
+                            "Use 1200–1800 for multi-step coding + bash + file tools; "
+                            "values below the runtime floor are raised automatically "
+                            "(default floor 1200s, env AGX_SUBAGENT_MIN_RUN_TIMEOUT_SECONDS)."
                         ),
                     },
                     "provider": {"type": "string", "description": "Optional provider override for this sub-agent."},

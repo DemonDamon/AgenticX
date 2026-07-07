@@ -78,7 +78,7 @@ def _resolve_subagent_min_run_timeout_seconds() -> int:
                 return min(parsed, 86400)
         except ValueError:
             pass
-    return 600
+    return 1200  # 多步 PDF/文档解析类任务 600s 偏短，抬到 20min（env 可覆盖）
 
 
 class SubAgentStatus(str, Enum):
@@ -393,15 +393,15 @@ class AgentTeamManager:
             "## 模型配置\n"
             f"- provider: {context.provider_name or session.provider_name or '(inherit)'}\n"
             f"- model: {context.model_name or session.model_name or '(inherit)'}\n\n"
-            "## ⚠️ 轮次预算（严格遵守）\n"
-            "你最多只有 30 轮工具调用，必须高效利用每一轮：\n"
-            "- 前 1-2 轮：快速确认目标路径是否存在（最多 1 次 list_files）\n"
-            "- 第 3 轮起必须开始 write_file 产出代码，不要反复 read/list 做调研\n"
-            "- 严禁在探索/分析上消耗超过 3 轮\n"
-            "- 写完一个文件立即写下一个，不要规划完所有文件才开始写\n\n"
+            "## ⚠️ 高效执行（严格遵守）\n"
+            "- 你有有限的工具调用轮次预算，务必高效利用，不做无意义重复调用。\n"
+            "- 按任务性质行事：读多份文档/检索类任务，允许充分读取所需材料后再产出；"
+            "代码类任务则尽早开始写文件、边写边推进。\n"
+            "- 不在探索上无限打转；确认目标路径后即进入实质产出。\n\n"
             "## 工作目录约束\n"
             f"- 工作目录: {workspace_dir}\n"
             "- 所有文件读写必须限定在该目录或其子目录\n"
+            "- 产出文件必须写到任务指定的目标目录（绝对路径），严禁写到 /tmp、/private/tmp 等临时目录。\n"
             "- 禁止扫描 `/Users`、`~`、`/` 等系统路径\n\n"
             "## 已注入上下文文件\n"
             f"{context_hint}\n\n"
@@ -1450,29 +1450,44 @@ class AgentTeamManager:
             context.result_summary = self._build_result_summary(context)
             context.result_file = self._persist_result_file(context)
             produced_files = self._merge_output_files(context)
+            text_paths = self._extract_paths_from_text(context.final_text or "")
+            if text_paths:
+                known = set(produced_files)
+                for p in text_paths:
+                    if p not in known:
+                        known.add(p)
+                        produced_files.append(p)
             missing_files = self._missing_output_files(produced_files)
+            did_write_action = self._had_write_or_copy_action(context.agent_messages)
             if (
                 context.status == SubAgentStatus.COMPLETED
                 and self._task_expects_file_output(context.task)
                 and not produced_files
+                and not did_write_action
             ):
                 context.status = SubAgentStatus.FAILED
                 context.error_text = (
                     "Task completed without file artifact. Expected an output file "
-                    "but none was detected from tool results."
+                    "but none was detected from tool results or final text."
                 )
                 context.result_summary = self._build_result_summary(context)
             elif (
                 context.status == SubAgentStatus.COMPLETED
                 and self._task_expects_file_output(context.task)
-                and missing_files
+                and not produced_files
+                and did_write_action
             ):
-                context.status = SubAgentStatus.FAILED
-                context.error_text = (
-                    "Task completed with missing file artifact(s): "
-                    + ", ".join(missing_files[:10])
+                _log.warning(
+                    "[team_manager] %s completed with write/copy actions but no detected "
+                    "output path; keeping COMPLETED to avoid false failure",
+                    context.agent_id,
                 )
-                context.result_summary = self._build_result_summary(context)
+            elif missing_files:
+                _log.debug(
+                    "[team_manager] %s missing reported artifacts (not downgrading): %s",
+                    context.agent_id,
+                    missing_files[:10],
+                )
             self.base_session.scratchpad[f"subagent_result::{context.agent_id}"] = (
                 f"[{context.name}] 状态={context.status.value}, "
                 f"摘要: {(context.result_summary or '(无)')[:500]}, "
@@ -1553,10 +1568,36 @@ class AgentTeamManager:
         Returns True if an escalation retry was launched (caller should return
         early to avoid emitting a duplicate completion event).
         """
+        existing = self._merge_output_files(context)
+        existing += self._extract_paths_from_text(context.final_text or "")
+        existing = [p for p in existing if p and Path(p).expanduser().exists()]
+        if existing and self._task_expects_file_output(context.task):
+            context.status = SubAgentStatus.COMPLETED
+            context.error_text = ""
+            context.output_files = list(dict.fromkeys(existing))
+            context.result_summary = self._build_result_summary(context)
+            _log.info(
+                "[team_manager] %s: disk artifacts present (%d); marking COMPLETED, skip escalation",
+                context.agent_id,
+                len(existing),
+            )
+            return False
+
         max_escalation = _resolve_max_escalation()
         context.failure_count += 1
 
         if context.failure_count > max_escalation:
+            if existing and self._task_expects_file_output(context.task):
+                context.status = SubAgentStatus.COMPLETED
+                context.error_text = ""
+                context.output_files = list(dict.fromkeys(existing))
+                context.result_summary = self._build_result_summary(context)
+                _log.info(
+                    "[team_manager] %s: circuit-breaker skipped; disk artifacts present (%d)",
+                    context.agent_id,
+                    len(existing),
+                )
+                return False
             _log.warning(
                 "Sub-agent %s circuit-breaker tripped after %d failures",
                 context.agent_id, context.failure_count,
@@ -1725,6 +1766,7 @@ class AgentTeamManager:
         """Collect paths created or modified during this sub-agent run."""
         tool_paths = self._extract_output_files_from_messages(context.agent_messages)
         bash_paths = self._extract_bash_output_paths(context.agent_messages, context.workspace_dir)
+        copy_paths = self._extract_bash_copy_paths(context.agent_messages, context.workspace_dir)
         mkdir_paths = self._extract_bash_mkdir_paths(context.agent_messages, context.workspace_dir)
         artifact_paths = [str(path) for path in context.artifacts.keys()]
         trusted: set[str] = set()
@@ -1736,8 +1778,11 @@ class AgentTeamManager:
                 trusted.add(str(Path(raw).expanduser().resolve()))
             except OSError:
                 pass
+        for raw in copy_paths:
+            if raw:
+                trusted.add(raw)
         return self._filter_task_produced_paths(
-            tool_paths + bash_paths + mkdir_paths + artifact_paths,
+            tool_paths + bash_paths + copy_paths + mkdir_paths + artifact_paths,
             task_started_at=context.created_at,
             trusted_paths=trusted,
         )
@@ -1912,6 +1957,71 @@ class AgentTeamManager:
                         paths.append(resolved)
         return paths
 
+    def _extract_bash_copy_paths(
+        self, messages: List[Dict[str, Any]], workspace_dir: str
+    ) -> List[str]:
+        """Extract destination paths from cp/mv/rsync/install in bash_exec.
+
+        Handles: ``cp a b dest/``、``cp -r src dst``、``mv a b``、
+        ``install -m755 a bin/``、``cp -t <dir> a b``、``rsync src dst/``。
+        仅返回磁盘真实存在的路径；相对路径按 workspace_dir 解析。
+        命令的**最后一个非 flag token** 视为目标（`-t <dir>` 例外，dir 即目标）。
+        """
+        base = Path(workspace_dir).expanduser() if str(workspace_dir or "").strip() else None
+        paths: List[str] = []
+        seen: set[str] = set()
+        cmd_re = re.compile(r"\b(?:cp|mv|rsync|install)\b([^\n;|&]*)")
+        tflag_re = re.compile(r"-t\s+(['\"]?)([^\s'\"]+)\1")
+        for msg in messages:
+            if str(msg.get("role", "")) != "assistant":
+                continue
+            for call in msg.get("tool_calls") or []:
+                if not isinstance(call, dict):
+                    continue
+                fn = call.get("function") or {}
+                if str(fn.get("name", "") or "").strip() != "bash_exec":
+                    continue
+                raw_args = fn.get("arguments")
+                if isinstance(raw_args, str):
+                    try:
+                        args = json.loads(raw_args)
+                    except Exception:
+                        continue
+                elif isinstance(raw_args, dict):
+                    args = raw_args
+                else:
+                    continue
+                command = str(args.get("command", "") or "")
+                if not command:
+                    continue
+                for m in cmd_re.finditer(command):
+                    tail = m.group(1) or ""
+                    targets: List[str] = []
+                    tflag = tflag_re.search(tail)
+                    if tflag:
+                        targets.append(tflag.group(2))
+                    else:
+                        toks = [t.strip("'\"") for t in tail.split() if t and not t.startswith("-")]
+                        if len(toks) >= 2:
+                            targets.append(toks[-1])
+                    for raw in targets:
+                        raw = raw.strip()
+                        if not raw:
+                            continue
+                        candidate = Path(raw).expanduser()
+                        if not candidate.is_absolute() and base is not None:
+                            candidate = base / candidate
+                        try:
+                            if not candidate.exists():
+                                continue
+                        except Exception:
+                            continue
+                        resolved = str(candidate.resolve())
+                        if resolved not in seen:
+                            seen.add(resolved)
+                            paths.append(resolved)
+        return paths
+
     def _merge_output_files(self, context: SubAgentContext) -> List[str]:
         merged: List[str] = []
         seen: set[str] = set()
@@ -1925,6 +2035,57 @@ class AgentTeamManager:
                 seen.add(p)
                 merged.append(p)
         return merged
+
+    @staticmethod
+    def _extract_paths_from_text(text: str) -> List[str]:
+        """Extract existing absolute file/dir paths mentioned in free text."""
+        if not text:
+            return []
+        out: List[str] = []
+        seen: set[str] = set()
+        path_re = re.compile(r"(?<![\w])([~/][^\s`'\"()<>，。；、]+)")
+        for m in path_re.finditer(str(text)):
+            raw = m.group(1).rstrip(".,;:)】」』")
+            try:
+                candidate = Path(raw).expanduser()
+                if not candidate.exists():
+                    continue
+                resolved = str(candidate.resolve())
+            except Exception:
+                continue
+            if resolved not in seen:
+                seen.add(resolved)
+                out.append(resolved)
+        return out
+
+    @staticmethod
+    def _had_write_or_copy_action(messages: List[Dict[str, Any]]) -> bool:
+        """True if the run invoked file_write/file_edit or bash copy/write commands."""
+        write_tools = {"file_write", "file_edit"}
+        bash_write_re = re.compile(r"(?:>>?|\btee\b|\bcp\b|\bmv\b|\brsync\b|\binstall\b)")
+        for msg in messages:
+            role = str(msg.get("role", ""))
+            if role == "tool" and str(msg.get("name", "") or "").strip() in write_tools:
+                return True
+            if role == "assistant":
+                for call in msg.get("tool_calls") or []:
+                    if not isinstance(call, dict):
+                        continue
+                    fn = call.get("function") or {}
+                    if str(fn.get("name", "") or "").strip() != "bash_exec":
+                        continue
+                    raw = fn.get("arguments")
+                    cmd = ""
+                    if isinstance(raw, str):
+                        try:
+                            cmd = str(json.loads(raw).get("command", ""))
+                        except Exception:
+                            cmd = raw
+                    elif isinstance(raw, dict):
+                        cmd = str(raw.get("command", ""))
+                    if cmd and bash_write_re.search(cmd):
+                        return True
+        return False
 
     @staticmethod
     def _missing_output_files(paths: Sequence[str]) -> List[str]:
