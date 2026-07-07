@@ -103,3 +103,28 @@ func TestRemainingForScopePat(t *testing.T) {
 		t.Fatalf("pat scope: %+v", result)
 	}
 }
+
+func TestRemainingForWindowDayAndWeek(t *testing.T) {
+	t.Setenv("GATEWAY_QUOTA_POOL", "on")
+	t.Setenv("GATEWAY_QUOTA_POOL_BACKEND", "local")
+	dir := t.TempDir()
+	cfgPath := filepath.Join(dir, "quotas.json")
+	usagePath := filepath.Join(dir, "usage.json")
+	cfg := `{"defaults":{"role":{"staff":{"monthlyTokens":1000,"dailyTokens":100,"weeklyTokens":300,"action":"block"}},"model":{}},"users":{},"departments":{},"apiTokens":{}}`
+	if err := os.WriteFile(cfgPath, []byte(cfg), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	poolUsagePath := filepath.Join(dir, "pool-usage.json")
+	t.Setenv("GATEWAY_QUOTA_POOL_USAGE_FILE", poolUsagePath)
+	tracker := NewTracker(cfgPath, usagePath, nil)
+	ctx := RequestContext{TenantID: "t1", UserID: "u1", Role: "staff"}
+
+	day := tracker.RemainingForWindow(ctx, QuotaWindowDay)
+	if day.Limit != 100 || day.Used != 0 {
+		t.Fatalf("unexpected day remaining: %+v", day)
+	}
+	week := tracker.RemainingForWindow(ctx, QuotaWindowWeek)
+	if week.Limit != 300 || week.Used != 0 {
+		t.Fatalf("unexpected week remaining: %+v", week)
+	}
+}

@@ -1,8 +1,17 @@
 package quota
 
 import (
+	"fmt"
 	"strings"
 	"time"
+)
+
+type QuotaWindow string
+
+const (
+	QuotaWindowDay   QuotaWindow = "day"
+	QuotaWindowWeek  QuotaWindow = "week"
+	QuotaWindowMonth QuotaWindow = "month"
 )
 
 // RemainingResult is a read-only derived view: limit - used = remaining.
@@ -22,6 +31,13 @@ func (t *Tracker) Remaining(ctx RequestContext) RemainingResult {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	return t.remainingLocked(ctx)
+}
+
+// RemainingForWindow returns remaining usage for day/week/month token windows.
+func (t *Tracker) RemainingForWindow(ctx RequestContext, window QuotaWindow) RemainingResult {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	return t.remainingForWindowLocked(ctx, window)
 }
 
 // RemainingForScope resolves limit/used for an explicit admin scope (tenant|dept|user|pat).
@@ -51,6 +67,34 @@ func (t *Tracker) remainingLocked(ctx RequestContext) RemainingResult {
 	rule := selectRuleExtended(cfg, ctx)
 	scope, scopeID := scopeFromRule(rule, ctx)
 	return t.remainingWithRule(rule, ctx, period, scope, scopeID)
+}
+
+func (t *Tracker) remainingForWindowLocked(ctx RequestContext, window QuotaWindow) RemainingResult {
+	cfg := t.loadConfig()
+	rule := selectRuleExtended(cfg, ctx)
+	period := periodForWindow(window, time.Now().UTC())
+	limit := limitForWindow(rule, window)
+	base := RemainingResult{
+		Scope:   scopeFromWindowCtx(ctx),
+		ScopeID: scopeIDFromWindowCtx(ctx),
+		Period:  period,
+	}
+	if limit <= 0 {
+		base.Unlimited = true
+		base.Limit = 0
+		base.Remaining = nil
+		base.Used = t.readWindowUsed(window, ctx, period, rule)
+		return base
+	}
+	used := t.readWindowUsed(window, ctx, period, rule)
+	base.Used = used
+	base.Limit = limit
+	rem := limit - used
+	if rem < 0 {
+		rem = 0
+	}
+	base.Remaining = &rem
+	return base
 }
 
 func (t *Tracker) remainingWithRule(rule Rule, ctx RequestContext, period, scope, scopeID string) RemainingResult {
@@ -91,6 +135,76 @@ func (t *Tracker) readUsedForRule(rule Rule, ctx RequestContext, period string) 
 		return 0
 	}
 	return t.currentUserUsedLocked(userID, period)
+}
+
+func (t *Tracker) readWindowUsed(window QuotaWindow, ctx RequestContext, period string, rule Rule) int64 {
+	switch window {
+	case QuotaWindowDay, QuotaWindowWeek:
+		if t.poolCounter == nil {
+			return 0
+		}
+		kind := "day"
+		if window == QuotaWindowWeek {
+			kind = "week"
+		}
+		key := tokenWindowPoolKey(kind, ctx, period)
+		used, err := t.poolCounter.Current(key)
+		if err != nil {
+			return 0
+		}
+		return used
+	default:
+		return t.readUsedForRule(rule, ctx, period)
+	}
+}
+
+func limitForWindow(rule Rule, window QuotaWindow) int64 {
+	switch window {
+	case QuotaWindowDay:
+		return rule.DailyTokens
+	case QuotaWindowWeek:
+		return rule.WeeklyTokens
+	default:
+		return rule.MonthlyTokens
+	}
+}
+
+func periodForWindow(window QuotaWindow, now time.Time) string {
+	switch window {
+	case QuotaWindowDay:
+		return now.UTC().Format("2006-01-02")
+	case QuotaWindowWeek:
+		year, week := now.UTC().ISOWeek()
+		return fmt.Sprintf("%d-W%02d", year, week)
+	default:
+		return now.UTC().Format("2006-01")
+	}
+}
+
+func scopeFromWindowCtx(ctx RequestContext) string {
+	if strings.TrimSpace(ctx.APITokenID) != "" {
+		return "pat"
+	}
+	if strings.TrimSpace(ctx.UserID) != "" {
+		return "user"
+	}
+	if strings.TrimSpace(ctx.DeptID) != "" {
+		return "dept"
+	}
+	return "tenant"
+}
+
+func scopeIDFromWindowCtx(ctx RequestContext) string {
+	if strings.TrimSpace(ctx.APITokenID) != "" {
+		return strings.TrimSpace(ctx.APITokenID)
+	}
+	if strings.TrimSpace(ctx.UserID) != "" {
+		return strings.TrimSpace(ctx.UserID)
+	}
+	if strings.TrimSpace(ctx.DeptID) != "" {
+		return strings.TrimSpace(ctx.DeptID)
+	}
+	return strings.TrimSpace(ctx.TenantID)
 }
 
 func (t *Tracker) currentUserUsedLocked(userID, period string) int64 {

@@ -19,13 +19,14 @@ const (
 	BudgetUnitTokens  = "tokens"
 
 	BudgetPeriodDay   = "day"
+	BudgetPeriodWeek  = "week"
 	BudgetPeriodMonth = "month"
 )
 
 // BudgetRule defines spend/token budget limits for a dimension.
 type BudgetRule struct {
 	Unit             string  `json:"unit"` // cost_usd | tokens
-	Period           string  `json:"period"` // day | month
+	Period           string  `json:"period"` // day | week | month
 	Limit            float64 `json:"limit"`
 	WarnThresholdPct float64 `json:"warnThresholdPct"`
 	Action           Action  `json:"action"`
@@ -185,10 +186,13 @@ func sanitizeBudgetRule(in BudgetRule) BudgetRule {
 		r.Unit = BudgetUnitTokens
 	}
 	period := strings.ToLower(strings.TrimSpace(r.Period))
-	if period != BudgetPeriodDay {
-		r.Period = BudgetPeriodMonth
-	} else {
+	switch period {
+	case BudgetPeriodDay:
 		r.Period = BudgetPeriodDay
+	case BudgetPeriodWeek:
+		r.Period = BudgetPeriodWeek
+	default:
+		r.Period = BudgetPeriodMonth
 	}
 	if r.Limit < 0 {
 		r.Limit = 0
@@ -238,10 +242,15 @@ func selectBudgetRule(cfg BudgetConfig, ctx RequestContext) (BudgetRule, string,
 }
 
 func budgetPeriodKey(period string, at time.Time) string {
-	if period == BudgetPeriodDay {
+	switch period {
+	case BudgetPeriodDay:
 		return at.UTC().Format("2006-01-02")
+	case BudgetPeriodWeek:
+		year, week := at.UTC().ISOWeek()
+		return fmt.Sprintf("%d-W%02d", year, week)
+	default:
+		return at.UTC().Format("2006-01")
 	}
-	return at.UTC().Format("2006-01")
 }
 
 func budgetDelta(rule BudgetRule, tokens int64, costUSD float64) float64 {

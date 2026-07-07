@@ -67,3 +67,19 @@ kubectl apply -f ../deployment.yaml -f ../service.yaml -f ../hpa.yaml
 ```
 
 就绪探针 `/readyz` 会在配置了 `DATABASE_URL` / `REDIS_URL` 时检查依赖；Prometheus 抓取 `/metrics` 中的 `agx_gateway_http_requests_total` 与 `agx_gateway_active_streams` 可用于 HPA 自定义指标（需 Prometheus Adapter）。
+
+## 多周期配额生产启用
+
+默认行为保持关闭（升级后零行为变化）；与客户确认限额数值后再开启：
+
+```bash
+export GATEWAY_REQUEST_COUNT_QUOTA=on
+export GATEWAY_TOKEN_WINDOW_QUOTA=on
+export GATEWAY_REQUEST_COUNT_BACKEND=pg
+export DATABASE_URL=postgres://...
+```
+
+- `GATEWAY_REQUEST_COUNT_QUOTA=on`：启用日/周/月请求次数配额。
+- `GATEWAY_TOKEN_WINDOW_QUOTA=on`：启用日/周 Token 窗口硬顶。
+- `GATEWAY_REQUEST_COUNT_BACKEND=pg`：多副本部署建议使用 PG 后端，保证跨实例计数一致。
+- `DATABASE_URL`：PG 计数/池用量所需连接。

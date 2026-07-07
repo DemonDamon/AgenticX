@@ -160,8 +160,14 @@ func TestRequestCountCrossWindowReset(t *testing.T) {
 }
 
 func TestSanitizeRuleRequestCounts(t *testing.T) {
-	r := sanitizeRuleExtended(Rule{RequestsPerDay: -1, RequestsPerWeek: 10, RequestsPerMonth: -5})
-	if r.RequestsPerDay != 0 || r.RequestsPerWeek != 10 || r.RequestsPerMonth != 0 {
+	r := sanitizeRuleExtended(Rule{
+		DailyTokens:      -1,
+		WeeklyTokens:     -2,
+		RequestsPerDay:   -1,
+		RequestsPerWeek:  10,
+		RequestsPerMonth: -5,
+	})
+	if r.DailyTokens != 0 || r.WeeklyTokens != 0 || r.RequestsPerDay != 0 || r.RequestsPerWeek != 10 || r.RequestsPerMonth != 0 {
 		t.Fatalf("sanitize failed: %+v", r)
 	}
 }

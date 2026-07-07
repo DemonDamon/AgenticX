@@ -26,6 +26,8 @@ const (
 
 type Rule struct {
 	MonthlyTokens      int64  `json:"monthlyTokens"`
+	DailyTokens        int64  `json:"dailyTokens,omitempty"`
+	WeeklyTokens       int64  `json:"weeklyTokens,omitempty"`
 	TPM                int    `json:"tpm,omitempty"`
 	RPM                int    `json:"rpm,omitempty"`
 	MaxConcurrency     int    `json:"maxConcurrency,omitempty"`

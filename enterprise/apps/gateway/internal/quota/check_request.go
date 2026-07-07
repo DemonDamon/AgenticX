@@ -61,6 +61,10 @@ func (t *Tracker) CheckRequest(ctx RequestContext, tokens int64, costUSD float64
 		return result
 	}
 
+	if result, ok := t.checkTokenWindowLimits(ctx, rule, tokens); ok {
+		return result
+	}
+
 	if rule.TPM > 0 {
 		key := rateKey("tpm", ctx)
 		add := max64(tokens, 1)
@@ -215,6 +219,12 @@ func selectRuleExtended(cfg Config, ctx RequestContext) Rule {
 
 func sanitizeRuleExtended(in Rule) Rule {
 	r := sanitizeRule(in)
+	if r.DailyTokens < 0 {
+		r.DailyTokens = 0
+	}
+	if r.WeeklyTokens < 0 {
+		r.WeeklyTokens = 0
+	}
 	if r.TPM < 0 {
 		r.TPM = 0
 	}

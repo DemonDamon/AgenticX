@@ -2,6 +2,7 @@ package quota
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
@@ -143,5 +144,56 @@ func TestCheckRequestBudgetIntegration(t *testing.T) {
 	check2 := tracker.CheckRequest(ctx, 100, 0.6)
 	if check2.Allowed {
 		t.Fatalf("expected budget block via CheckRequest: %+v", check2)
+	}
+}
+
+func TestBudgetWeekPeriodReset(t *testing.T) {
+	dir := t.TempDir()
+	usagePath := filepath.Join(dir, "budget-usage.json")
+	cfgPath := writeBudgetConfig(t, dir, BudgetConfig{
+		Users: map[string]BudgetRule{
+			"u1": {
+				Unit:   BudgetUnitTokens,
+				Period: BudgetPeriodWeek,
+				Limit:  100,
+				Action: ActionBlock,
+			},
+		},
+	})
+	tracker := NewTracker(filepath.Join(dir, "quotas.json"), usagePath, nil)
+	tracker.budgetCfgPath = cfgPath
+	tracker.budgetUsagePath = usagePath
+
+	ctx := RequestContext{TenantID: "t1", UserID: "u1"}
+	year, week := time.Now().UTC().ISOWeek()
+	thisWeek := fmt.Sprintf("%d-W%02d", year, week)
+	rows := []budgetUsageRow{{Dimension: "user", Key: "u1", Period: thisWeek, Unit: BudgetUnitTokens, Used: 100}}
+	if !tracker.writeBudgetUsage(rows) {
+		t.Fatalf("seed usage failed")
+	}
+	if d := tracker.CheckBudget(ctx, 10, 0); d.Allowed {
+		t.Fatalf("expected block in same week, got %+v", d)
+	}
+
+	lastWeekTime := time.Now().UTC().AddDate(0, 0, -7)
+	lastYear, lastWeek := lastWeekTime.ISOWeek()
+	rows[0].Period = fmt.Sprintf("%d-W%02d", lastYear, lastWeek)
+	if !tracker.writeBudgetUsage(rows) {
+		t.Fatalf("rewrite usage failed")
+	}
+	if d := tracker.CheckBudget(ctx, 10, 0); !d.Allowed {
+		t.Fatalf("expected pass on new week period key, got %+v", d)
+	}
+}
+
+func TestSanitizeBudgetRuleWeek(t *testing.T) {
+	r := sanitizeBudgetRule(BudgetRule{
+		Unit:   BudgetUnitTokens,
+		Period: BudgetPeriodWeek,
+		Limit:  10,
+		Action: ActionWarn,
+	})
+	if r.Period != BudgetPeriodWeek {
+		t.Fatalf("expected week period, got %+v", r)
 	}
 }
