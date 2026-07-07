@@ -1450,44 +1450,63 @@ class AgentTeamManager:
             context.result_summary = self._build_result_summary(context)
             context.result_file = self._persist_result_file(context)
             produced_files = self._merge_output_files(context)
-            text_paths = self._extract_paths_from_text(context.final_text or "")
-            if text_paths:
-                known = set(produced_files)
-                for p in text_paths:
-                    if p not in known:
-                        known.add(p)
-                        produced_files.append(p)
-            missing_files = self._missing_output_files(produced_files)
-            did_write_action = self._had_write_or_copy_action(context.agent_messages)
-            if (
-                context.status == SubAgentStatus.COMPLETED
-                and self._task_expects_file_output(context.task)
-                and not produced_files
-                and not did_write_action
-            ):
-                context.status = SubAgentStatus.FAILED
-                context.error_text = (
-                    "Task completed without file artifact. Expected an output file "
-                    "but none was detected from tool results or final text."
-                )
-                context.result_summary = self._build_result_summary(context)
-            elif (
-                context.status == SubAgentStatus.COMPLETED
-                and self._task_expects_file_output(context.task)
-                and not produced_files
-                and did_write_action
-            ):
-                _log.warning(
-                    "[team_manager] %s completed with write/copy actions but no detected "
-                    "output path; keeping COMPLETED to avoid false failure",
-                    context.agent_id,
-                )
-            elif missing_files:
-                _log.debug(
-                    "[team_manager] %s missing reported artifacts (not downgrading): %s",
-                    context.agent_id,
-                    missing_files[:10],
-                )
+            declared_paths = self._extract_declared_output_paths(context.task)
+
+            if context.status == SubAgentStatus.COMPLETED and declared_paths:
+                missing_declared = [
+                    p for p in declared_paths if not Path(p).expanduser().exists()
+                ]
+                if missing_declared:
+                    context.status = SubAgentStatus.FAILED
+                    context.error_text = (
+                        "Declared output path(s) not found on disk: "
+                        + ", ".join(missing_declared[:10])
+                    )
+                    context.result_summary = self._build_result_summary(context)
+                merged = list(produced_files)
+                for p in declared_paths:
+                    if p not in merged:
+                        merged.append(p)
+                produced_files = merged
+            else:
+                text_paths = self._extract_paths_from_text(context.final_text or "")
+                if text_paths:
+                    known = set(produced_files)
+                    for p in text_paths:
+                        if p not in known:
+                            known.add(p)
+                            produced_files.append(p)
+                missing_files = self._missing_output_files(produced_files)
+                did_write_action = self._had_write_or_copy_action(context.agent_messages)
+                if (
+                    context.status == SubAgentStatus.COMPLETED
+                    and self._task_expects_file_output(context.task)
+                    and not produced_files
+                    and not did_write_action
+                ):
+                    context.status = SubAgentStatus.FAILED
+                    context.error_text = (
+                        "Task completed without file artifact. Expected an output file "
+                        "but none was detected from tool results or final text."
+                    )
+                    context.result_summary = self._build_result_summary(context)
+                elif (
+                    context.status == SubAgentStatus.COMPLETED
+                    and self._task_expects_file_output(context.task)
+                    and not produced_files
+                    and did_write_action
+                ):
+                    _log.warning(
+                        "[team_manager] %s completed with write/copy actions but no detected "
+                        "output path; keeping COMPLETED to avoid false failure",
+                        context.agent_id,
+                    )
+                elif missing_files:
+                    _log.debug(
+                        "[team_manager] %s missing reported artifacts (not downgrading): %s",
+                        context.agent_id,
+                        missing_files[:10],
+                    )
             self.base_session.scratchpad[f"subagent_result::{context.agent_id}"] = (
                 f"[{context.name}] 状态={context.status.value}, "
                 f"摘要: {(context.result_summary or '(无)')[:500]}, "
@@ -1568,9 +1587,7 @@ class AgentTeamManager:
         Returns True if an escalation retry was launched (caller should return
         early to avoid emitting a duplicate completion event).
         """
-        existing = self._merge_output_files(context)
-        existing += self._extract_paths_from_text(context.final_text or "")
-        existing = [p for p in existing if p and Path(p).expanduser().exists()]
+        existing = self._collect_existing_task_artifacts(context)
         if existing and self._task_expects_file_output(context.task):
             context.status = SubAgentStatus.COMPLETED
             context.error_text = ""
@@ -2056,6 +2073,36 @@ class AgentTeamManager:
             if resolved not in seen:
                 seen.add(resolved)
                 out.append(resolved)
+        return out
+
+    def _collect_existing_task_artifacts(self, context: SubAgentContext) -> List[str]:
+        """Paths that count as on-disk task artifacts for escalation early-exit."""
+        declared_paths = self._extract_declared_output_paths(context.task)
+        if declared_paths:
+            existing = [p for p in declared_paths if Path(p).expanduser().exists()]
+        else:
+            existing = self._merge_output_files(context)
+            existing += self._extract_paths_from_text(context.final_text or "")
+            existing = [p for p in existing if p and Path(p).expanduser().exists()]
+        return list(dict.fromkeys(existing))
+
+    @staticmethod
+    def _extract_declared_output_paths(task: str) -> List[str]:
+        """Extract explicitly declared output paths from task text."""
+        if not task:
+            return []
+        out: List[str] = []
+        seen: set[str] = set()
+        patterns = [
+            r"(?:输出|保存|写入|生成)[^\n。]{0,10}?(?:到|至)\s*([~/][^\s，。；、\n]+)",
+            r"(?:save|write|output)\s+(?:it\s+)?to\s+([~/][^\s,;\n]+)",
+        ]
+        for pat in patterns:
+            for m in re.finditer(pat, str(task), flags=re.IGNORECASE):
+                raw = m.group(1).rstrip(".,;:)】」』")
+                if raw and raw not in seen:
+                    seen.add(raw)
+                    out.append(raw)
         return out
 
     @staticmethod

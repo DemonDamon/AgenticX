@@ -51,3 +51,37 @@ def test_write_action_keeps_completed(tmp_path):
 def test_true_empty_still_fails():
     m = _mgr()
     assert m._had_write_or_copy_action([{"role": "assistant", "content": "done"}]) is False
+
+
+def test_declared_output_path_extracted_zh():
+    m = _mgr()
+    task = (
+        "4. 输出评估报告到 /Users/damon/Desktop/Ai产研管理/招聘/20260706/筛选后/产品经理/评估报告.md"
+    )
+    paths = m._extract_declared_output_paths(task)
+    assert paths == [
+        "/Users/damon/Desktop/Ai产研管理/招聘/20260706/筛选后/产品经理/评估报告.md"
+    ]
+
+
+def test_declared_output_path_extracted_en():
+    m = _mgr()
+    task = "Please save it to /tmp/out/report.md when done."
+    paths = m._extract_declared_output_paths(task)
+    assert paths == ["/tmp/out/report.md"]
+
+
+def test_declared_output_path_missing_forces_failed(tmp_path):
+    m = _mgr()
+    task = f"输出评估报告到 {tmp_path}/missing/评估报告.md"
+    paths = m._extract_declared_output_paths(task)
+    assert paths and not Path(paths[0]).expanduser().exists()
+
+
+def test_declared_output_path_present_when_written(tmp_path):
+    target = tmp_path / "评估报告.md"
+    target.write_text("ok")
+    m = _mgr()
+    task = f"输出评估报告到 {target}"
+    paths = m._extract_declared_output_paths(task)
+    assert paths and Path(paths[0]).expanduser().exists()
