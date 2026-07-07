@@ -1134,6 +1134,11 @@ declare global {
         error?: string;
       }>;
       openExternal: (url: string) => Promise<{ ok: boolean; error?: string }>;
+      copyPngToClipboard: (buffer: ArrayBuffer) => Promise<{ ok: boolean; error?: string }>;
+      downloadPngToDownloads: (payload: {
+        buffer: ArrayBuffer;
+        defaultFileName?: string;
+      }) => Promise<{ ok: boolean; path?: string; error?: string }>;
     };
   }
 }

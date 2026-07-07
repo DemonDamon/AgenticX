@@ -1,6 +1,7 @@
 import {
   app,
   BrowserWindow,
+  clipboard,
   dialog,
   ipcMain,
   Menu,
@@ -3327,6 +3328,68 @@ function registerEarlyIpc(): void {
     }
     await shell.openExternal(href);
     return { ok: true };
+  });
+
+  ipcMain.handle("clipboard-write-png", async (_event, buffer: unknown) => {
+    let nodeBuf: Buffer | null = null;
+    if (Buffer.isBuffer(buffer)) {
+      nodeBuf = buffer;
+    } else if (buffer instanceof ArrayBuffer) {
+      nodeBuf = Buffer.from(buffer);
+    } else if (ArrayBuffer.isView(buffer)) {
+      nodeBuf = Buffer.from(buffer.buffer, buffer.byteOffset, buffer.byteLength);
+    }
+    if (!nodeBuf || nodeBuf.length === 0) {
+      return { ok: false, error: "invalid buffer" };
+    }
+    try {
+      const image = nativeImage.createFromBuffer(nodeBuf);
+      if (image.isEmpty()) {
+        return { ok: false, error: "empty image" };
+      }
+      clipboard.writeImage(image);
+      return { ok: true };
+    } catch (error) {
+      return { ok: false, error: String(error) };
+    }
+  });
+
+  ipcMain.handle("download-png-to-downloads", async (_event, payload: unknown) => {
+    const p =
+      payload && typeof payload === "object"
+        ? (payload as { buffer?: unknown; defaultFileName?: unknown })
+        : {};
+    const defaultFileName = String(p.defaultFileName ?? "widget.png").trim() || "widget.png";
+
+    let nodeBuf: Buffer | null = null;
+    const buffer = p.buffer;
+    if (Buffer.isBuffer(buffer)) {
+      nodeBuf = buffer;
+    } else if (buffer instanceof ArrayBuffer) {
+      nodeBuf = Buffer.from(buffer);
+    } else if (ArrayBuffer.isView(buffer)) {
+      nodeBuf = Buffer.from(buffer.buffer, buffer.byteOffset, buffer.byteLength);
+    }
+    if (!nodeBuf || nodeBuf.length === 0) {
+      return { ok: false, error: "invalid buffer" };
+    }
+
+    try {
+      const downloadsDir = app.getPath("downloads");
+      const parsed = path.parse(defaultFileName);
+      const baseName = parsed.name || "widget";
+      const ext = parsed.ext || ".png";
+      let targetPath = path.join(downloadsDir, `${baseName}${ext}`);
+      let suffix = 1;
+      while (fs.existsSync(targetPath)) {
+        targetPath = path.join(downloadsDir, `${baseName}-${suffix}${ext}`);
+        suffix += 1;
+      }
+      fs.writeFileSync(targetPath, nodeBuf);
+      return { ok: true, path: targetPath };
+    } catch (error) {
+      return { ok: false, error: String(error) };
+    }
   });
 
   ipcMain.handle("get-api-base", async () => {

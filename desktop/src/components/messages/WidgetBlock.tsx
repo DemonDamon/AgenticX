@@ -227,13 +227,14 @@ function parseViewBoxSize(svg: Element): { w: number; h: number } {
 }
 
 function rasterExportScale(): number {
-  return Math.max(4, Math.ceil((window.devicePixelRatio || 1) * 3));
+  return Math.min(4, Math.max(2, Math.ceil((window.devicePixelRatio || 1) * 2)));
 }
 
-/** Normalize SVG with explicit pixel size + theme vars + opaque backdrop for PNG export. */
+const MAX_CANVAS_PX = 8192;
+
+/** Normalize SVG with logical pixel size + theme vars + opaque backdrop for PNG export. */
 function buildRasterizableSvg(
   svgCode: string,
-  cssWidthPx: number,
   liveSvg?: SVGSVGElement | null,
 ): string | null {
   const serializedLive = liveSvg
@@ -257,14 +258,9 @@ function buildRasterizableSvg(
   }
 
   const logical = parseViewBoxSize(svg);
-  const cssW = Math.max(1, Math.round(cssWidthPx));
-  const scale = rasterExportScale();
-  const exportW = Math.round(cssW * scale);
-  const exportH = Math.max(1, Math.round((exportW * logical.h) / logical.w));
-
   svg.setAttribute("viewBox", `0 0 ${logical.w} ${logical.h}`);
-  svg.setAttribute("width", String(exportW));
-  svg.setAttribute("height", String(exportH));
+  svg.setAttribute("width", String(logical.w));
+  svg.setAttribute("height", String(logical.h));
 
   const themeCss = collectThemeCssVars();
   if (themeCss) {
@@ -290,50 +286,79 @@ function buildRasterizableSvg(
   return new XMLSerializer().serializeToString(svg);
 }
 
+function loadSvgMarkupAsImage(svgMarkup: string): Promise<HTMLImageElement> {
+  const trySrc = (src: string) =>
+    new Promise<HTMLImageElement>((resolve, reject) => {
+      const img = new window.Image();
+      img.onload = () => resolve(img);
+      img.onerror = () => reject(new Error("SVG raster load failed"));
+      img.src = src;
+    });
+
+  const dataUrl = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svgMarkup)}`;
+  return trySrc(dataUrl).catch(() => {
+    const blob = new Blob([svgMarkup], { type: "image/svg+xml;charset=utf-8" });
+    const blobUrl = URL.createObjectURL(blob);
+    return trySrc(blobUrl).finally(() => URL.revokeObjectURL(blobUrl));
+  });
+}
+
 function svgToPngBlob(
   svgCode: string,
-  cssWidthPx?: number,
+  _cssWidthPx?: number,
   liveSvg?: SVGSVGElement | null,
 ): Promise<Blob | null> {
-  const widthPx = cssWidthPx && cssWidthPx > 0 ? cssWidthPx : 680;
-  const exportSvg = buildRasterizableSvg(svgCode, widthPx, liveSvg);
+  const exportSvg = buildRasterizableSvg(svgCode, liveSvg);
   if (!exportSvg) return Promise.resolve(null);
-  const bgColor = exportSurfaceColor();
 
-  return new Promise((resolve) => {
-    const blob = new Blob([exportSvg], { type: "image/svg+xml;charset=utf-8" });
-    const url = URL.createObjectURL(blob);
-    const img = new window.Image();
-    img.onload = () => {
-      const w = img.naturalWidth;
-      const h = img.naturalHeight;
-      if (!w || !h) {
-        URL.revokeObjectURL(url);
-        resolve(null);
-        return;
+  const doc = new DOMParser().parseFromString(exportSvg, "image/svg+xml");
+  const logical = parseViewBoxSize(doc.documentElement);
+  const bgColor = exportSurfaceColor();
+  const pixelRatio = rasterExportScale();
+
+  return loadSvgMarkupAsImage(exportSvg)
+    .then((img) => {
+      let cw = Math.max(1, Math.ceil(logical.w * pixelRatio));
+      let ch = Math.max(1, Math.ceil(logical.h * pixelRatio));
+      const longest = Math.max(cw, ch);
+      if (longest > MAX_CANVAS_PX) {
+        const shrink = MAX_CANVAS_PX / longest;
+        cw = Math.max(1, Math.floor(cw * shrink));
+        ch = Math.max(1, Math.floor(ch * shrink));
       }
+
       const canvas = document.createElement("canvas");
-      canvas.width = w;
-      canvas.height = h;
+      canvas.width = cw;
+      canvas.height = ch;
       const ctx = canvas.getContext("2d");
-      if (ctx) {
-        ctx.fillStyle = bgColor;
-        ctx.fillRect(0, 0, w, h);
-        ctx.imageSmoothingEnabled = true;
-        ctx.imageSmoothingQuality = "high";
-        ctx.drawImage(img, 0, 0, w, h);
-      }
-      canvas.toBlob((pngBlob) => {
-        URL.revokeObjectURL(url);
-        resolve(pngBlob);
-      }, "image/png");
-    };
-    img.onerror = () => {
-      URL.revokeObjectURL(url);
-      resolve(null);
-    };
-    img.src = url;
-  });
+      if (!ctx) return null;
+
+      ctx.fillStyle = bgColor;
+      ctx.fillRect(0, 0, cw, ch);
+      ctx.imageSmoothingEnabled = true;
+      ctx.imageSmoothingQuality = "high";
+      const scaleX = cw / logical.w;
+      const scaleY = ch / logical.h;
+      ctx.scale(scaleX, scaleY);
+      ctx.drawImage(img, 0, 0, logical.w, logical.h);
+
+      return new Promise<Blob | null>((resolve) => {
+        canvas.toBlob((pngBlob) => resolve(pngBlob), "image/png", 1);
+      });
+    })
+    .catch(() => null);
+}
+
+function triggerBlobDownload(blob: Blob, filename: string) {
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  a.rel = "noopener";
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  window.setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
 function WidgetMenu({
@@ -364,40 +389,69 @@ function WidgetMenu({
     const ext = payload.kind === "svg" ? "svg" : "html";
     const mime = payload.kind === "svg" ? "image/svg+xml" : "text/html";
     const blob = new Blob([payload.widgetCode], { type: mime });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = `${payload.title || "widget"}.${ext}`;
-    a.click();
-    URL.revokeObjectURL(url);
+    triggerBlobDownload(blob, `${payload.title || "widget"}.${ext}`);
     setOpen(false);
   }
 
   async function downloadImage() {
     if (payload.kind !== "svg") return;
+    setOpen(false);
+
     const pngBlob = await svgToPngBlob(payload.widgetCode, getSvgDisplayWidth?.(), getLiveSvg?.());
     if (!pngBlob) return;
-    const url = URL.createObjectURL(pngBlob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = `${payload.title || "widget"}.png`;
-    a.click();
-    URL.revokeObjectURL(url);
-    setOpen(false);
+
+    const filename = `${payload.title || "widget"}.png`;
+    const desktop = window.agenticxDesktop;
+    if (desktop?.downloadPngToDownloads) {
+      const res = await desktop.downloadPngToDownloads({
+        buffer: await pngBlob.arrayBuffer(),
+        defaultFileName: filename,
+      });
+      if (res.ok) return;
+    }
+
+    triggerBlobDownload(pngBlob, filename);
   }
 
   async function copyImage() {
     if (payload.kind !== "svg") return;
+    setOpen(false);
+
+    const displayWidth = getSvgDisplayWidth?.();
+    const liveSvg = getLiveSvg?.();
+    const pngPromise = svgToPngBlob(payload.widgetCode, displayWidth, liveSvg).then((blob) => {
+      if (!blob) throw new Error("PNG export failed");
+      return blob;
+    });
+
     try {
-      const pngBlob = await svgToPngBlob(payload.widgetCode, getSvgDisplayWidth?.(), getLiveSvg?.());
-      if (!pngBlob) return;
-      await navigator.clipboard.write([new ClipboardItem({ "image/png": pngBlob })]);
-      setCopied(true);
-      setTimeout(() => setCopied(false), 1500);
+      if (
+        typeof window.ClipboardItem !== "undefined" &&
+        typeof navigator.clipboard?.write === "function"
+      ) {
+        // Pass a Promise so rasterization can finish without losing the user-gesture window.
+        await navigator.clipboard.write([new ClipboardItem({ "image/png": pngPromise })]);
+        setCopied(true);
+        setTimeout(() => setCopied(false), 1500);
+        return;
+      }
+    } catch {
+      /* fall through to Electron IPC */
+    }
+
+    try {
+      const blob = await pngPromise;
+      const desktop = window.agenticxDesktop;
+      if (desktop?.copyPngToClipboard) {
+        const res = await desktop.copyPngToClipboard(await blob.arrayBuffer());
+        if (res.ok) {
+          setCopied(true);
+          setTimeout(() => setCopied(false), 1500);
+        }
+      }
     } catch {
       /* ignore */
     }
-    setOpen(false);
   }
 
   async function copyCodeToClipboard() {

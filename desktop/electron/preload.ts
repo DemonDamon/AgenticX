@@ -746,4 +746,12 @@ contextBridge.exposeInMainWorld("agenticxDesktop", {
     }>,
   openExternal: async (url: string) =>
     ipcRenderer.invoke("open-external", url) as Promise<{ ok: boolean; error?: string }>,
+  copyPngToClipboard: async (buffer: ArrayBuffer) =>
+    ipcRenderer.invoke("clipboard-write-png", buffer) as Promise<{ ok: boolean; error?: string }>,
+  downloadPngToDownloads: async (payload: { buffer: ArrayBuffer; defaultFileName?: string }) =>
+    ipcRenderer.invoke("download-png-to-downloads", payload) as Promise<{
+      ok: boolean;
+      path?: string;
+      error?: string;
+    }>,
 });
