@@ -85,3 +85,15 @@ def test_declared_output_path_present_when_written(tmp_path):
     task = f"输出评估报告到 {target}"
     paths = m._extract_declared_output_paths(task)
     assert paths and Path(paths[0]).expanduser().exists()
+
+
+def test_subagent_prompt_incremental_record_guidance():
+    from agenticx.runtime.team_manager import SubAgentContext
+    from agenticx.cli.studio import StudioSession
+
+    m = _mgr()
+    ctx = SubAgentContext(agent_id="sa-test", name="t", role="worker", task="read docs")
+    session = StudioSession()
+    m.base_session = session
+    prompt = m._build_subagent_system_prompt(ctx, session)
+    assert "每处理完一份就立即记录" in prompt

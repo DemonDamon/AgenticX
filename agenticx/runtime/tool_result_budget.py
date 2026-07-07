@@ -56,7 +56,7 @@ class ToolResultBudgetConfig:
     """Runtime knobs for tool-result budget governance."""
 
     enabled: bool = True
-    keep_rounds: int = 2
+    keep_rounds: int = 8  # batch doc read + late summarize; 2 rounds caused re-parse loops
     large_threshold_tokens: int = 4000
     archive_subdir: str = "tool_archives"
 
