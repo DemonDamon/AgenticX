@@ -186,11 +186,11 @@ export function ContextUsageButton({
                     </span>
                   </div>
                   <div className="mb-3 flex h-1.5 w-full overflow-hidden rounded-full bg-surface-hover">
-                    {usedTokens > 0
+                    {usage.max_tokens > 0
                       ? CATEGORY_ORDER.map((key) => {
                           const value = usage.categories[key] ?? 0;
                           if (value <= 0) return null;
-                          const widthPct = (value / usedTokens) * 100;
+                          const widthPct = (value / usage.max_tokens) * 100;
                           return (
                             <div
                               key={key}
