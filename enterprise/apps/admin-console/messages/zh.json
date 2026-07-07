@@ -1215,6 +1215,8 @@
         "patLabel": "PAT #{id}",
         "fields": {
           "monthlyTokens": "月 Token",
+          "dailyTokens": "日 Token 上限",
+          "weeklyTokens": "周 Token 上限",
           "tpm": "TPM",
           "rpm": "RPM",
           "concurrency": "并发",

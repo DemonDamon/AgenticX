@@ -1215,6 +1215,8 @@
         "patLabel": "PAT #{id}",
         "fields": {
           "monthlyTokens": "Monthly tokens",
+          "dailyTokens": "Tokens/day",
+          "weeklyTokens": "Tokens/week",
           "tpm": "TPM",
           "rpm": "RPM",
           "concurrency": "Concurrency",

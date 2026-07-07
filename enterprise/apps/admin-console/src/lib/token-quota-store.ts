@@ -7,6 +7,8 @@ export type QuotaAction = "block" | "warn" | "fallback";
 
 export type QuotaRule = {
   monthlyTokens: number;
+  dailyTokens?: number;
+  weeklyTokens?: number;
   tpm?: number;
   rpm?: number;
   maxConcurrency?: number;
@@ -47,6 +49,8 @@ function tenant(): string {
 
 function normalizeRule(input: Partial<QuotaRule> | undefined): QuotaRule {
   const monthlyTokens = Number(input?.monthlyTokens ?? 0);
+  const dailyTokens = Number(input?.dailyTokens ?? 0);
+  const weeklyTokens = Number(input?.weeklyTokens ?? 0);
   const tpm = Number(input?.tpm ?? 0);
   const rpm = Number(input?.rpm ?? 0);
   const maxConcurrency = Number(input?.maxConcurrency ?? 0);
@@ -59,6 +63,8 @@ function normalizeRule(input: Partial<QuotaRule> | undefined): QuotaRule {
     poolScopeRaw === "dept" || poolScopeRaw === "tenant" ? poolScopeRaw : ("" as const);
   return {
     monthlyTokens: Number.isFinite(monthlyTokens) && monthlyTokens > 0 ? Math.floor(monthlyTokens) : 0,
+    dailyTokens: Number.isFinite(dailyTokens) && dailyTokens > 0 ? Math.floor(dailyTokens) : 0,
+    weeklyTokens: Number.isFinite(weeklyTokens) && weeklyTokens > 0 ? Math.floor(weeklyTokens) : 0,
     tpm: Number.isFinite(tpm) && tpm > 0 ? Math.floor(tpm) : 0,
     rpm: Number.isFinite(rpm) && rpm > 0 ? Math.floor(rpm) : 0,
     maxConcurrency: Number.isFinite(maxConcurrency) && maxConcurrency > 0 ? Math.floor(maxConcurrency) : 0,

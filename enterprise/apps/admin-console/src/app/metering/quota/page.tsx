@@ -37,6 +37,8 @@ import { useTranslations } from "next-intl";
 type QuotaAction = "block" | "warn" | "fallback";
 type QuotaRule = {
   monthlyTokens: number;
+  dailyTokens?: number;
+  weeklyTokens?: number;
   tpm?: number;
   rpm?: number;
   maxConcurrency?: number;
@@ -78,7 +80,7 @@ type PricingConfig = {
 type BudgetAction = "block" | "warn" | "fallback";
 type BudgetRule = {
   unit: "cost_usd" | "tokens";
-  period: "day" | "month";
+  period: "day" | "week" | "month";
   limit: number;
   warnThresholdPct?: number;
   action: BudgetAction;
@@ -138,6 +140,8 @@ const EMPTY: QuotaConfig = {
 
 const EMPTY_RULE: QuotaRule = {
   monthlyTokens: 0,
+  dailyTokens: 0,
+  weeklyTokens: 0,
   tpm: 0,
   rpm: 0,
   maxConcurrency: 0,
@@ -211,11 +215,19 @@ function RuleEditor({
   const tf = useTranslations("pages.ops.quota.fields");
 
   return (
-    <div className="grid grid-cols-[140px_repeat(9,minmax(0,1fr))_auto] items-end gap-2 rounded-md border border-border px-3 py-3">
+    <div className="grid grid-cols-[140px_repeat(11,minmax(0,1fr))_auto] items-end gap-2 rounded-md border border-border px-3 py-3">
       <div className="font-medium text-sm pb-2">{label}</div>
       <div className="space-y-1">
         <Label className="text-xs">{tf("monthlyTokens")}</Label>
         <Input type="number" value={rule.monthlyTokens} onChange={(e) => onChange({ monthlyTokens: Number(e.target.value || 0) })} />
+      </div>
+      <div className="space-y-1">
+        <Label className="text-xs">{tf("dailyTokens")}</Label>
+        <Input type="number" value={rule.dailyTokens ?? 0} onChange={(e) => onChange({ dailyTokens: Number(e.target.value || 0) })} />
+      </div>
+      <div className="space-y-1">
+        <Label className="text-xs">{tf("weeklyTokens")}</Label>
+        <Input type="number" value={rule.weeklyTokens ?? 0} onChange={(e) => onChange({ weeklyTokens: Number(e.target.value || 0) })} />
       </div>
       <div className="space-y-1">
         <Label className="text-xs">{tf("tpm")}</Label>
@@ -319,6 +331,7 @@ function BudgetRuleEditor({
           <SelectTrigger><SelectValue /></SelectTrigger>
           <SelectContent>
             <SelectItem value="day">日</SelectItem>
+            <SelectItem value="week">周</SelectItem>
             <SelectItem value="month">月</SelectItem>
           </SelectContent>
         </Select>
