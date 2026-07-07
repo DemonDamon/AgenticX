@@ -4,6 +4,7 @@ import * as path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
   getQuotaSummaryForSession,
+  getQuotaWindowUsageForScope,
   getQuotaUsageForScope,
   resolveRuntimeGatewayDir,
   type QuotaConfigSnapshot,
@@ -144,5 +145,128 @@ describe("quota-remaining", () => {
   it("resolveRuntimeGatewayDir honors env override", () => {
     process.env.ENTERPRISE_GATEWAY_RUNTIME_DIR = "/tmp/gateway-runtime";
     expect(resolveRuntimeGatewayDir()).toBe("/tmp/gateway-runtime");
+  });
+
+  it("supports day/week/month windows independently", async () => {
+    const day = new Date().toISOString().slice(0, 10);
+    const now = new Date();
+    const month = `${now.getUTCFullYear()}-${String(now.getUTCMonth() + 1).padStart(2, "0")}`;
+    const d = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
+    const dayNum = d.getUTCDay() || 7;
+    d.setUTCDate(d.getUTCDate() + 4 - dayNum);
+    const yearStart = new Date(Date.UTC(d.getUTCFullYear(), 0, 1));
+    const weekNo = Math.ceil((((d.getTime() - yearStart.getTime()) / 86400000) + 1) / 7);
+    const week = `${d.getUTCFullYear()}-W${String(weekNo).padStart(2, "0")}`;
+
+    fs.writeFileSync(
+      path.join(tmpDir, "quota-usage.json"),
+      JSON.stringify([{ user_id: "u1", month, used_total: 700 }]),
+    );
+    fs.writeFileSync(
+      path.join(tmpDir, "quota-pool-usage.json"),
+      JSON.stringify([
+        { tenant_id: "tenant-test", scope_type: "tok_day", scope_id: "user::u1", period: day, used_total: 100 },
+        { tenant_id: "tenant-test", scope_type: "tok_week", scope_id: "user::u1", period: week, used_total: 300 },
+      ]),
+    );
+
+    const cfg: QuotaConfigSnapshot = {
+      defaults: { role: { staff: { dailyTokens: 200, weeklyTokens: 500, monthlyTokens: 1000 } }, model: {} },
+      users: {},
+      departments: {},
+    };
+
+    const daily = await getQuotaWindowUsageForScope({
+      tenantId: "tenant-test",
+      scope: "user",
+      scopeId: "u1",
+      role: "staff",
+      window: "day",
+      configOverride: cfg,
+    });
+    const weekly = await getQuotaWindowUsageForScope({
+      tenantId: "tenant-test",
+      scope: "user",
+      scopeId: "u1",
+      role: "staff",
+      window: "week",
+      configOverride: cfg,
+    });
+    const monthly = await getQuotaWindowUsageForScope({
+      tenantId: "tenant-test",
+      scope: "user",
+      scopeId: "u1",
+      role: "staff",
+      window: "month",
+      configOverride: cfg,
+    });
+
+    expect(daily.used).toBe(100);
+    expect(daily.limit).toBe(200);
+    expect(daily.remaining).toBe(100);
+
+    expect(weekly.used).toBe(300);
+    expect(weekly.limit).toBe(500);
+    expect(weekly.remaining).toBe(200);
+
+    expect(monthly.used).toBe(700);
+    expect(monthly.limit).toBe(1000);
+    expect(monthly.remaining).toBe(300);
+  });
+
+  it("dept scope day window used stays 0 (gateway tracks per identity, not dept pool)", async () => {
+    const day = new Date().toISOString().slice(0, 10);
+    fs.writeFileSync(
+      path.join(tmpDir, "quota-pool-usage.json"),
+      JSON.stringify([
+        {
+          tenant_id: "tenant-test",
+          scope_type: "tok_day",
+          scope_id: "dept::dept-a",
+          period: day,
+          used_total: 999,
+        },
+        {
+          tenant_id: "tenant-test",
+          scope_type: "tok_day",
+          scope_id: "user::u1",
+          period: day,
+          used_total: 50,
+        },
+      ]),
+    );
+    const cfg: QuotaConfigSnapshot = {
+      defaults: { role: {}, model: {} },
+      users: {},
+      departments: {
+        "dept-a": { dailyTokens: 200, monthlyTokens: 1000, poolScope: "dept" },
+      },
+    };
+    const daily = await getQuotaWindowUsageForScope({
+      tenantId: "tenant-test",
+      scope: "dept",
+      scopeId: "dept-a",
+      window: "day",
+      configOverride: cfg,
+    });
+    expect(daily.limit).toBe(200);
+    expect(daily.used).toBe(0);
+  });
+
+  it("returns unlimited for day window when dailyTokens is unset", async () => {
+    const cfg: QuotaConfigSnapshot = {
+      defaults: { role: { staff: { monthlyTokens: 1000 } }, model: {} },
+      users: {},
+      departments: {},
+    };
+    const daily = await getQuotaWindowUsageForScope({
+      tenantId: "tenant-test",
+      scope: "user",
+      scopeId: "u1",
+      role: "staff",
+      window: "day",
+      configOverride: cfg,
+    });
+    expect(daily.unlimited).toBe(true);
   });
 });

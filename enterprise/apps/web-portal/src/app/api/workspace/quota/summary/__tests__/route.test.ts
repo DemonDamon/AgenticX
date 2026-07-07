@@ -33,6 +33,33 @@ describe("GET /api/workspace/quota/summary", () => {
       sessionId: "sess-1",
     });
     vi.mocked(getQuotaSummaryForSession).mockResolvedValueOnce({
+      daily: {
+        scope: "user",
+        scopeId: "u-a",
+        period: "2026-06-07",
+        used: 0,
+        limit: 0,
+        remaining: null,
+        unlimited: true,
+      },
+      weekly: {
+        scope: "user",
+        scopeId: "u-a",
+        period: "2026-W23",
+        used: 0,
+        limit: 0,
+        remaining: null,
+        unlimited: true,
+      },
+      monthly: {
+        scope: "user",
+        scopeId: "u-a",
+        period: "2026-06",
+        used: 1,
+        limit: 100,
+        remaining: 99,
+        unlimited: false,
+      },
       user: {
         scope: "user",
         scopeId: "u-a",
@@ -54,5 +81,10 @@ describe("GET /api/workspace/quota/summary", () => {
       userId: "u-a",
       deptId: "dept-a",
     });
+    const body = await res.json();
+    expect(body?.data?.daily).toBeTruthy();
+    expect(body?.data?.weekly).toBeTruthy();
+    expect(body?.data?.monthly).toBeTruthy();
+    expect(body?.data?.user).toBeTruthy();
   });
 });

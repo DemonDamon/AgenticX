@@ -13,6 +13,9 @@ type RemainingSlice = {
 };
 
 type QuotaSummary = {
+  daily?: RemainingSlice & { scope?: string; scopeId?: string; unlimited: boolean };
+  weekly?: RemainingSlice & { scope?: string; scopeId?: string; unlimited: boolean };
+  monthly?: RemainingSlice & { scope?: string; scopeId?: string; unlimited: boolean };
   user: RemainingSlice & { scope?: string; scopeId?: string; unlimited: boolean };
   dept: (RemainingSlice & { shared?: boolean; unlimited: boolean }) | null;
   unlimited: boolean;
@@ -22,6 +25,17 @@ function formatTokens(value: number): string {
   if (value >= 1_000_000) return `${(value / 1_000_000).toFixed(value % 1_000_000 === 0 ? 0 : 1)}M`;
   if (value >= 1_000) return `${(value / 1_000).toFixed(value % 1_000 === 0 ? 0 : 1)}K`;
   return String(value);
+}
+
+function unlimitedPlaceholder(): RemainingSlice & { unlimited: true } {
+  return { used: 0, limit: 0, remaining: null, period: "", unlimited: true };
+}
+
+function resetHint(period: string): string {
+  if (/^\d{4}-\d{2}-\d{2}$/.test(period)) return "次日重置";
+  if (/^\d{4}-W\d{2}$/.test(period)) return "下周重置";
+  if (/^\d{4}-\d{2}$/.test(period)) return "下月重置";
+  return period;
 }
 
 function UsageRow({
@@ -55,7 +69,7 @@ function UsageRow({
       </div>
       <Progress value={pct} className="h-1.5" />
       <div className="text-[11px] text-muted-foreground tabular-nums">
-        剩余 {formatTokens(slice.remaining ?? 0)} · {slice.period}
+        剩余 {formatTokens(slice.remaining ?? 0)} · {resetHint(slice.period)}
       </div>
     </div>
   );
@@ -106,18 +120,31 @@ export function QuotaCard({ collapsed }: { collapsed?: boolean }) {
     return null;
   }
 
-  if (summary.unlimited && !summary.dept) {
+  const daily = summary.daily ?? summary.user;
+  const weekly = summary.weekly ?? unlimitedPlaceholder();
+  const monthly = summary.monthly ?? summary.user;
+  const allWindowUnlimited = daily.unlimited && weekly.unlimited && monthly.unlimited;
+
+  if (allWindowUnlimited && !summary.dept) {
     return (
       <div className="mx-3 mb-2 rounded-lg border border-border/60 bg-muted/20 px-3 py-2 text-xs text-muted-foreground">
-        本月 Token 不限额
+        Token 不限额
       </div>
     );
   }
 
   return (
     <div className="mx-3 mb-2 space-y-3 rounded-lg border border-border/60 bg-muted/20 px-3 py-3">
-      <div className="text-xs font-medium text-foreground">本月额度</div>
-      <UsageRow label="个人" slice={summary.user} />
+      <div className="text-xs font-medium text-foreground">配额进度</div>
+      {!allWindowUnlimited ? (
+        <>
+          <UsageRow label="今日" slice={daily} />
+          <UsageRow label="本周" slice={weekly} />
+          <UsageRow label="本月" slice={monthly} />
+        </>
+      ) : (
+        <div className="text-xs text-muted-foreground">日/周/月均不限额</div>
+      )}
       {summary.dept ? <UsageRow label="部门" slice={summary.dept} /> : null}
     </div>
   );
