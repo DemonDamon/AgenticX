@@ -87,6 +87,20 @@ def test_declared_output_path_present_when_written(tmp_path):
     assert paths and Path(paths[0]).expanduser().exists()
 
 
+def test_max_escalation_default_is_1(monkeypatch):
+    from agenticx.runtime import team_manager as tm
+
+    monkeypatch.delenv("AGX_SUBAGENT_MAX_ESCALATION", raising=False)
+    assert tm._resolve_max_escalation() == 1
+
+
+def test_max_escalation_env_override(monkeypatch):
+    from agenticx.runtime import team_manager as tm
+
+    monkeypatch.setenv("AGX_SUBAGENT_MAX_ESCALATION", "5")
+    assert tm._resolve_max_escalation() == 5
+
+
 def test_subagent_prompt_incremental_record_guidance():
     from agenticx.runtime.team_manager import SubAgentContext
     from agenticx.cli.studio import StudioSession

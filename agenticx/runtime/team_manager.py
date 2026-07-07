@@ -108,7 +108,7 @@ def _resolve_max_escalation() -> int:
             return max(1, int(raw))
         except ValueError:
             pass
-    return 3
+    return 1
 
 
 @dataclass
@@ -1624,7 +1624,9 @@ class AgentTeamManager:
             )
             context.error_text = (
                 f"Circuit-breaker: {context.failure_count} consecutive failures. "
-                f"Last error: {context.error_text}"
+                f"Last error: {context.error_text} "
+                "建议：缩小单次任务的文档/数据批量后重新触发，"
+                "或直接向用户确认是否需要人工介入完成剩余部分。"
             )
             return False
 
