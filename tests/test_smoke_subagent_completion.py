@@ -87,6 +87,44 @@ def test_declared_output_path_present_when_written(tmp_path):
     assert paths and Path(paths[0]).expanduser().exists()
 
 
+def test_seed_session_history_copies_messages():
+    from agenticx.runtime.team_manager import AgentTeamManager, SubAgentContext
+    from agenticx.cli.studio import StudioSession
+
+    prior_messages = [
+        {"role": "user", "content": "task"},
+        {"role": "assistant", "content": "解析了简历A：评分8分"},
+    ]
+    ctx = SubAgentContext(
+        agent_id="sa-test", name="t", role="worker", task="read docs",
+        agent_messages=prior_messages,
+    )
+    session = StudioSession()
+    AgentTeamManager._seed_session_history(session, ctx)
+    assert session.agent_messages == prior_messages
+    session.agent_messages.append({"role": "user", "content": "extra"})
+    assert len(ctx.agent_messages) == 2
+
+
+def test_seed_session_history_noop_when_empty():
+    from agenticx.runtime.team_manager import AgentTeamManager, SubAgentContext
+    from agenticx.cli.studio import StudioSession
+
+    ctx = SubAgentContext(agent_id="sa-test2", name="t", role="worker", task="read docs")
+    session = StudioSession()
+    original = session.agent_messages
+    AgentTeamManager._seed_session_history(session, ctx)
+    assert session.agent_messages == original
+
+
+def test_retry_and_escalation_task_mention_prior_progress():
+    import inspect
+    from agenticx.runtime.team_manager import AgentTeamManager
+
+    source = inspect.getsource(AgentTeamManager._auto_escalate)
+    assert source.count("已包含此前的工作进度") == 2
+
+
 def test_max_escalation_default_is_1(monkeypatch):
     from agenticx.runtime import team_manager as tm
 

@@ -744,8 +744,7 @@ class AgentTeamManager:
         session = self._build_isolated_session(workspace_dir=context.workspace_dir)
         session.context_files.update(context.context_files)
         session.artifacts.update(context.artifacts)
-        if context.agent_messages:
-            session.agent_messages = list(context.agent_messages)
+        self._seed_session_history(session, context)
         if context.attachments:
             session.scratchpad.update(
                 {f"attachment::{k}": v for k, v in context.attachments.items()}
@@ -753,6 +752,18 @@ class AgentTeamManager:
         setattr(session, "_team_manager", self)
         self._agent_sessions[context.agent_id] = session
         return session
+
+    @staticmethod
+    def _seed_session_history(session: StudioSession, context: "SubAgentContext") -> None:
+        """Carry forward prior agent_messages into a freshly built session.
+
+        Used when retrying/escalating a failed sub-agent so the model retains
+        memory of already-parsed files and already-derived conclusions instead
+        of restarting from a blank context (which forces full re-parsing of
+        every document on each retry).
+        """
+        if context.agent_messages:
+            session.agent_messages = list(context.agent_messages)
 
     def _resolve_subagent_context(self, agent_id: str) -> tuple[Optional[SubAgentContext], str]:
         """Resolve a sub-agent context from active, archived, or alias lookup."""
@@ -1247,6 +1258,7 @@ class AgentTeamManager:
                 session.scratchpad.update(
                     {f"attachment::{k}": v for k, v in context.attachments.items()}
                 )
+            self._seed_session_history(session, context)
             self._agent_sessions[context.agent_id] = session
         setattr(session, "_team_manager", self)
         resolved_provider = context.provider_name or session.provider_name or self.base_session.provider_name
@@ -1642,8 +1654,9 @@ class AgentTeamManager:
                 f"RETRY (attempt {context.failure_count}/{max_escalation}): "
                 f"Previous attempt failed with: {error_summary}\n\n"
                 f"Original task: {context.task}\n\n"
-                "Focus on the core objective. Simplify your approach and avoid "
-                "repeating the actions that caused the failure."
+                "你的历史消息中已包含此前的工作进度（已解析的文件内容、已生成的部分结论）。"
+                "请先检查哪些文件/条目已经处理过、哪些结论已经得出，"
+                "只需完成剩余未处理的部分并产出最终文件，不要重复解析已处理过的文件。"
             )
             context.status = SubAgentStatus.RUNNING
             context.error_text = ""
@@ -1689,8 +1702,9 @@ class AgentTeamManager:
             f"Previous {context.failure_count - 1} attempts all failed.\n"
             f"Last error: {error_summary}\n\n"
             f"Original task: {context.task}\n\n"
-            "This is an escalated retry. Take a completely different approach. "
-            "Analyze why previous attempts failed and devise a new strategy."
+            "你的历史消息中已包含此前的工作进度（已解析的文件内容、已生成的部分结论）。"
+            "这是升级重试：请分析之前失败的原因，但不要重新解析已经处理过的文件，"
+            "直接基于已有结论完成剩余部分。"
         )
         context.status = SubAgentStatus.RUNNING
         context.error_text = ""
