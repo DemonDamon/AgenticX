@@ -6777,6 +6777,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
       suppressUserEcho?: boolean;
       skipUserHistory?: boolean;
       forceSend?: boolean;
+      queueDrain?: boolean;
       lockedSessionId?: string;
       continuation?: { reason: ContinueReason; source: ContinueSource };
     }
@@ -6859,6 +6860,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
       suppressUserEcho?: boolean;
       skipUserHistory?: boolean;
       forceSend?: boolean;
+      queueDrain?: boolean;
       lockedSessionId?: string;
       continuation?: { reason: ContinueReason; source: ContinueSource };
     }
@@ -6927,6 +6929,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
         !shouldEnqueueOnResend({
           isStreamRunActive: resolveStreamRunActive(sid),
           forceSend: options?.forceSend,
+          queueDrain: options?.queueDrain,
         })
       ) {
         return false;
@@ -7039,6 +7042,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
       shouldInterruptOnResend({
         isStreamRunActive,
         forceSend: options?.forceSend,
+        queueDrain: options?.queueDrain,
       })
     ) {
       // Force-send while streaming: abort the current run, then start the new round.
@@ -8801,6 +8805,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
           void sendChatRef.current(nextQueued.text, {
             lockedSessionId: requestSessionId,
             retryAttachments: nextQueued.attachments,
+            queueDrain: true,
           });
         });
       }

@@ -138,6 +138,8 @@ export type StreamingResendInput = {
   isStreamRunActive: boolean;
   /** User explicitly bypasses the queue (double-Enter or send-now). */
   forceSend?: boolean;
+  /** Auto-send dequeued after prior turn finished; must not re-enqueue. */
+  queueDrain?: boolean;
 };
 
 export type StreamRunActiveInput = {
@@ -183,12 +185,12 @@ export function isStreamRunActiveForQueue(opts: StreamRunActiveInput): boolean {
 
 /** Default: enqueue follow-ups while a stream run is active. */
 export function shouldEnqueueOnResend(opts: StreamingResendInput): boolean {
-  if (opts.forceSend) return false;
+  if (opts.forceSend || opts.queueDrain) return false;
   return opts.isStreamRunActive;
 }
 
 export function shouldInterruptOnResend(opts: StreamingResendInput): boolean {
-  if (!opts.isStreamRunActive) return false;
+  if (!opts.isStreamRunActive || opts.queueDrain) return false;
   return !!opts.forceSend;
 }
 

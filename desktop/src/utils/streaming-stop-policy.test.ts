@@ -125,6 +125,11 @@ describe("message queue resend policy", () => {
     expect(shouldInterruptOnResend({ isStreamRunActive: true, forceSend: true })).toBe(true);
   });
 
+  it("queue drain sends without re-enqueueing or barge-in interrupt", () => {
+    expect(shouldEnqueueOnResend({ isStreamRunActive: true, queueDrain: true })).toBe(false);
+    expect(shouldInterruptOnResend({ isStreamRunActive: true, queueDrain: true })).toBe(false);
+  });
+
   it("detects double-enter within window", () => {
     const now = 10_000;
     expect(isDoubleEnterWithinWindow(now - 200, now)).toBe(true);
