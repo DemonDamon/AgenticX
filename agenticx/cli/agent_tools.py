@@ -19,7 +19,9 @@ import shlex
 import shutil
 import subprocess
 import sys
+import tempfile
 import time
+import traceback
 import uuid
 from urllib.parse import urlparse
 from pathlib import Path
@@ -43,6 +45,7 @@ from agenticx.memory.session_store import SessionStore
 from agenticx.memory.workspace_memory import WorkspaceMemoryStore
 from agenticx.skills.guard import scan_skill, should_allow
 from agenticx.tools.skill_bundle import SkillBundleLoader
+from agenticx.tools.adapters.video_frames import VideoFrameExtractor
 from agenticx.runtime.confirm import (
     AsyncConfirmGate,
     AutoApproveConfirmGate,
@@ -127,6 +130,7 @@ _CONCURRENCY_SAFE_STUDIO_TOOLS = frozenset(
         "session_search",
         "list_files",
         "liteparse",
+        "video_understand",
         "lsp_goto_definition",
         "lsp_find_references",
         "lsp_hover",
@@ -1113,6 +1117,39 @@ STUDIO_TOOLS: List[Dict[str, Any]] = [
                     "path": {
                         "type": "string",
                         "description": "Absolute or workspace-relative path to the document.",
+                    },
+                },
+                "required": ["path"],
+                "additionalProperties": False,
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "video_understand",
+            "description": (
+                "Understand a local video file (mp4/mov/mkv/webm/avi). Probes metadata "
+                "(duration, resolution, audio track) and extracts representative frames "
+                "adaptively based on duration, then attaches them for the vision model to "
+                "view in the next turn. Prefer this over calling ffmpeg via bash_exec: it is "
+                "one atomic call with adaptive sampling. Requires a vision-capable model. "
+                "Optionally pass `question` to bias sampling toward what the user asks."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "path": {
+                        "type": "string",
+                        "description": "Absolute or workspace-relative path to the video file.",
+                    },
+                    "question": {
+                        "type": "string",
+                        "description": "Optional: what the user wants to know about the video.",
+                    },
+                    "max_frames": {
+                        "type": "integer",
+                        "description": "Optional cap on extracted frames (clamped to server hard max).",
                     },
                 },
                 "required": ["path"],
@@ -4511,6 +4548,11 @@ _WEB_FETCH_MAX_BYTES = 2 * 1024 * 1024
 _WEB_FETCH_BODY_CHAR_LIMIT = 12_000
 _VIEW_IMAGE_MAX_BYTES = 8 * 1024 * 1024
 _VIEW_IMAGE_MAX_PENDING = 4
+_VIDEO_UNDERSTAND_DEFAULT_MAX_FRAMES = 12
+_VIDEO_UNDERSTAND_HARD_MAX_FRAMES = 24
+_VIDEO_UNDERSTAND_DEFAULT_INTERVAL_SECONDS = 8.0
+_VIDEO_UNDERSTAND_MIN_FRAMES = 4
+_VIDEO_UNDERSTAND_MAX_VIDEO_BYTES = 512 * 1024 * 1024
 _ALLOWED_WEB_FETCH_CONTENT_TYPES = (
     "text/html",
     "application/xhtml",
@@ -6028,6 +6070,175 @@ async def _tool_liteparse(arguments: Dict[str, Any], session: Optional[StudioSes
     return content
 
 
+def _video_understand_settings() -> Dict[str, Any]:
+    """Read video_understanding.* from config with safe fallbacks."""
+
+    def _int(key: str, default: int) -> int:
+        raw = ConfigManager.get_value(f"video_understanding.{key}")
+        try:
+            return int(raw) if raw is not None else default
+        except (TypeError, ValueError):
+            return default
+
+    def _float(key: str, default: float) -> float:
+        raw = ConfigManager.get_value(f"video_understanding.{key}")
+        try:
+            return float(raw) if raw is not None else default
+        except (TypeError, ValueError):
+            return default
+
+    def _bool(key: str, default: bool) -> bool:
+        raw = ConfigManager.get_value(f"video_understanding.{key}")
+        if isinstance(raw, bool):
+            return raw
+        if isinstance(raw, str):
+            return raw.strip().lower() in {"1", "true", "yes", "on"}
+        return default
+
+    max_frames = min(
+        _int("max_frames", _VIDEO_UNDERSTAND_DEFAULT_MAX_FRAMES),
+        _VIDEO_UNDERSTAND_HARD_MAX_FRAMES,
+    )
+    return {
+        "max_frames": max(1, max_frames),
+        "interval_seconds": max(
+            1.0,
+            _float("interval_seconds", _VIDEO_UNDERSTAND_DEFAULT_INTERVAL_SECONDS),
+        ),
+        "min_frames": max(1, _int("min_frames", _VIDEO_UNDERSTAND_MIN_FRAMES)),
+        "use_scene_detection": _bool("use_scene_detection", False),
+    }
+
+
+async def _tool_video_understand(arguments: Dict[str, Any], session: Optional[StudioSession] = None) -> str:
+    """Probe and extract representative video frames, then stage for vision input."""
+    raw_path = str(arguments.get("path", "")).strip()
+    if not raw_path:
+        return "ERROR: missing required parameter 'path'."
+
+    if not _session_vision_capable(session):
+        model = str(getattr(session, "model_name", "") or "unknown")
+        return (
+            f"ERROR: current model '{model}' does not support vision; "
+            "switch to a vision-capable model before understanding a video."
+        )
+
+    try:
+        path = _resolve_workspace_path(raw_path, session, pick_existing=True)
+    except ValueError as exc:
+        return f"ERROR: {exc}"
+    if not path.exists() or not path.is_file():
+        return f"ERROR: video not found: {path}"
+
+    ext = path.suffix.lower()
+    if ext not in VideoFrameExtractor.SUPPORTED_FORMATS:
+        return (
+            f"ERROR: unsupported video format '{ext}'. "
+            f"Supported: {', '.join(VideoFrameExtractor.SUPPORTED_FORMATS)}"
+        )
+
+    try:
+        size = path.stat().st_size
+    except OSError as exc:
+        return f"ERROR: cannot stat video: {exc}"
+    if size > _VIDEO_UNDERSTAND_MAX_VIDEO_BYTES:
+        return f"ERROR: video too large ({size // (1024 * 1024)} MB); limit is 512 MB."
+
+    if not VideoFrameExtractor.is_available():
+        return (
+            "ERROR: ffmpeg/ffprobe not found. Install with: brew install ffmpeg "
+            "(macOS) or your platform package manager."
+        )
+
+    settings = _video_understand_settings()
+    req_max = arguments.get("max_frames")
+    if req_max is not None:
+        try:
+            settings["max_frames"] = max(
+                1,
+                min(int(req_max), _VIDEO_UNDERSTAND_HARD_MAX_FRAMES),
+            )
+        except (TypeError, ValueError):
+            pass
+
+    extractor = VideoFrameExtractor()
+    tmp_dir = Path(tempfile.mkdtemp(prefix="agenticx_video_"))
+    probe = None
+    result = None
+    staged = 0
+    try:
+        probe = await extractor.probe(path)
+        frame_count = extractor.plan_frame_count(
+            probe.duration_seconds,
+            interval=settings["interval_seconds"],
+            min_frames=settings["min_frames"],
+            max_frames=settings["max_frames"],
+        )
+        if settings["use_scene_detection"]:
+            result = await extractor.extract_scene(
+                path,
+                tmp_dir,
+                max_frames=settings["max_frames"],
+                probe=probe,
+            )
+        if result is None or len(result.frames) < 2:
+            result = await extractor.extract_interval(
+                path,
+                tmp_dir,
+                frame_count=frame_count,
+                probe=probe,
+            )
+        if not result.frames:
+            return "ERROR: failed to extract any frame from the video."
+
+        pending = _pending_visual_attachments(session)
+        for idx, frame_path in enumerate(result.frames):
+            try:
+                data = frame_path.read_bytes()
+            except OSError:
+                continue
+            ts = result.timestamps[idx] if idx < len(result.timestamps) else 0.0
+            data_url = _data_url_from_bytes(data, "image/png")
+            pending.append(
+                {
+                    "name": f"{path.stem}_frame_{idx + 1:02d}_t{ts:.1f}s.png",
+                    "data_url": data_url,
+                    "mime_type": "image/png",
+                    "size": len(data),
+                    "source": str(path),
+                    "note": f"video frame @ {ts:.1f}s",
+                }
+            )
+            staged += 1
+        if staged == 0:
+            return "ERROR: extracted frames could not be read for attachment."
+    except Exception as exc:
+        return (
+            f"ERROR: video_understand failed for {path.name}: {exc}\n"
+            f"{traceback.format_exc(limit=3)}"
+        )
+    finally:
+        shutil.rmtree(tmp_dir, ignore_errors=True)
+
+    if probe is None or result is None:
+        return "ERROR: internal video_understand state error."
+    audio_note = "with audio track" if probe.has_audio else "no audio track"
+    lines = [
+        f"[video_understand] {path.name}",
+        (
+            f"duration={probe.duration_seconds:.1f}s resolution={probe.width}x{probe.height} "
+            f"{audio_note} strategy={result.strategy} frames_attached={staged}"
+        ),
+        "Frames are attached as images in the NEXT turn; describe/answer using them.",
+    ]
+    if probe.has_audio:
+        lines.append(
+            "NOTE: this video has an audio track that is NOT transcribed in this build; "
+            "rely on frames, and if speech content is essential tell the user so."
+        )
+    return "\n".join(lines)
+
+
 def _resolve_lsp_settings() -> tuple[bool, float]:
     try:
         global_data = ConfigManager._load_yaml(ConfigManager.GLOBAL_CONFIG_PATH)
@@ -6497,6 +6708,8 @@ async def dispatch_tool_async(
             return _tool_list_files(arguments, session)
         if name == "liteparse":
             return await _tool_liteparse(arguments, session)
+        if name == "video_understand":
+            return await _tool_video_understand(arguments, session)
         if name == "list_data_sources":
             return await _tool_list_data_sources(arguments)
         if name == "query_data_source":
