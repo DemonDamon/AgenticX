@@ -29,6 +29,11 @@ test("isNoisyToolStatusMessage hides ephemeral interruption meta rows", () => {
     isNoisyToolStatusMessage({ role: "tool", content: "file_read", toolName: "file_read" }),
     false,
   );
+  assert.equal(
+    isNoisyToolStatusMessage({ role: "tool", content: "✅ todo_write 结果: ok", toolName: "" }),
+    true,
+    "orphan formatted fallback rows are hidden",
+  );
 });
 
 test("isEphemeralStopErrorText matches runtime STOP_MESSAGE variants", () => {

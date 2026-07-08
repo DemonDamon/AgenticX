@@ -1,4 +1,5 @@
 import type { Message } from "../store";
+import { isOrphanFormattedToolResultMessage } from "./orphan-formatted-tool";
 
 const NOISY_TOOL_STATUS_CONTENT = new Set([
   "后台任务已完成",
@@ -30,9 +31,10 @@ export function isEphemeralStopErrorText(text: string): boolean {
 
 /** Ephemeral meta tool rows that duplicate TurnInterruptionNoticeLine or add wrench noise. */
 export function isNoisyToolStatusMessage(
-  message: Pick<Message, "role" | "content" | "toolName">,
+  message: Pick<Message, "role" | "content" | "toolName" | "toolCallId" | "toolGroupId">,
 ): boolean {
   if (message.role !== "tool") return false;
+  if (isOrphanFormattedToolResultMessage(message)) return true;
   const toolName = (message.toolName ?? "").trim();
   if (toolName === "check_resources") return true;
   const content = String(message.content ?? "").trim();

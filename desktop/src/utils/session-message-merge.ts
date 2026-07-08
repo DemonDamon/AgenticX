@@ -1,4 +1,5 @@
 import type { Message } from "../store";
+import { isOrphanFormattedToolResultMessage } from "./orphan-formatted-tool";
 import { mapLoadedSessionMessage, type LoadedSessionMessage } from "./session-message-map";
 
 const norm = (s: unknown) => String(s ?? "").trim();
@@ -105,6 +106,7 @@ export function mergeSessionMessagesTail(
   // accumulated duplicate "思考了 N 秒" copies left by earlier failed merges.
   for (const memory of existing) {
     if (consumedMemory.has(memory)) continue;
+    if (isOrphanFormattedToolResultMessage(memory)) continue;
     if (memory.role === "assistant") {
       const body = assistantBodyKey(memory.content);
       if (body && placedAssistantBodies.has(body)) continue;

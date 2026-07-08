@@ -34,6 +34,7 @@ import {
   isEphemeralStopErrorText,
   isInterruptedAssistantPlaceholder,
 } from "../utils/noisy-chat-messages";
+import { isStreamToolLabelOnlyText, shouldSkipFormattedToolResultFallback } from "../utils/orphan-formatted-tool";
 import { HOOK_BLOCK_RE } from "../utils/hook-block-message";
 import { expandMessagesToTopLevelRows } from "./messages/react-blocks";
 import { shouldHideStreamOverlay, shouldShowMidTurnStreamActivity } from "../utils/stream-overlay-policy";
@@ -126,7 +127,7 @@ const confirmModeLabel: Record<string, string> = {
 };
 
 function formatToolResultMessage(toolNameRaw: unknown, resultRaw: unknown): { content: string; silent: boolean } {
-  const toolName = String(toolNameRaw ?? "tool");
+  const toolName = String(toolNameRaw ?? "").trim() || "tool";
   const resultText = String(resultRaw ?? "");
   if (toolName === "check_resources") {
     return { content: "", silent: true };
@@ -248,6 +249,9 @@ function formatToolResultMessage(toolNameRaw: unknown, resultRaw: unknown): { co
   }
   if (isError) {
     return { content: `⚠️ ${toolName} 提示: ${resultText}`, silent: false };
+  }
+  if (!resultText.trim()) {
+    return { content: "", silent: true };
   }
   return { content: `✅ ${toolName} 结果: ${resultText}`, silent: false };
 }
@@ -452,6 +456,7 @@ export function ChatView({ onOpenConfirm, onOpenClarification, onSubmitClarifica
   const subAgentsRef = useRef(subAgents);
   const subAgentStatusRef = useRef<Record<string, string>>({});
   const ccBridgeLastSessionModeRef = useRef<CcBridgeSessionModeHint>("");
+  const pendingToolResultPatchesRef = useRef<Record<string, ToolCallStreamPatch>>({});
   const [stallState, setStallState] = useState<"none" | "stall">("none");
   const [sessionExecutionState, setSessionExecutionState] = useState<SessionExecutionState>("idle");
   const [sseActive, setSseActive] = useState(false);
@@ -1158,7 +1163,14 @@ export function ChatView({ onOpenConfirm, onOpenClarification, onSubmitClarifica
       const raw = streamTextRef.current.trim();
       // Trim trailing colon ("：" or ":") that model writes just before calling a tool.
       const partial = raw.replace(/[：:]\s*$/, "").trimEnd();
-      if (!partial || isThinkingPlaceholderText(partial) || streamCommittedRef.current) return false;
+      if (
+        !partial ||
+        isThinkingPlaceholderText(partial) ||
+        isStreamToolLabelOnlyText(partial) ||
+        streamCommittedRef.current
+      ) {
+        return false;
+      }
       appendAssistantMessage(partial);
       streamCommittedRef.current = true;
       lastMidStreamAssistantCommitRef.current = partial;
@@ -1177,6 +1189,7 @@ export function ChatView({ onOpenConfirm, onOpenClarification, onSubmitClarifica
       streamTextRef.current = "";
       cancelStreamRenderFrame();
       if (isCurrentRequest()) setStreamedAssistantText("");
+      pendingToolResultPatchesRef.current = {};
       streamCommittedRef.current = false;
     };
 
@@ -1384,6 +1397,11 @@ export function ChatView({ onOpenConfirm, onOpenClarification, onSubmitClarifica
                       toolStatus: "running",
                       toolGroupId,
                     });
+                    const pendingPatch = pendingToolResultPatchesRef.current[toolCallId];
+                    if (pendingPatch) {
+                      updateMessageByToolCallId(toolCallId, pendingPatch);
+                      delete pendingToolResultPatchesRef.current[toolCallId];
+                    }
                   } else {
                     const legacy = `\u{1F527} ${toolNameStr}: ${JSON.stringify(toolArgs).slice(0, 120)}`;
                     addMessage("tool", legacy, "meta");
@@ -1453,8 +1471,6 @@ export function ChatView({ onOpenConfirm, onOpenClarification, onSubmitClarifica
                   ? updateMessageByToolCallId(resultCallId, resultPatch)
                   : false;
                 if (!merged) {
-                  // tool_result 未携带可匹配 id 时，退化为翻转最后一条 running 的 tool 调用，
-                  // 让分组头在流式期间即时切换为完成态，而非整轮结束才纠正。
                   const fallbackCallId = [...useAppStore.getState().messages]
                     .reverse()
                     .find(
@@ -1468,8 +1484,17 @@ export function ChatView({ onOpenConfirm, onOpenClarification, onSubmitClarifica
                     merged = updateMessageByToolCallId(fallbackCallId, resultPatch);
                   }
                 }
-                if (!merged) {
-                  addMessage("tool", formatted.content, "meta");
+                if (!merged && resultCallId) {
+                  pendingToolResultPatchesRef.current[resultCallId] = resultPatch;
+                  merged = true;
+                }
+                if (!merged && !shouldSkipFormattedToolResultFallback(formatted.content, rawContent)) {
+                  addMessage("tool", rawContent || formatted.content, "meta", undefined, undefined, undefined, {
+                    toolCallId: resultCallId || undefined,
+                    toolName: String(toolName || "").trim() || undefined,
+                    toolStatus: mergedStatus,
+                    toolResultPreview: preview,
+                  });
                 }
               } else {
                 addSubAgentEvent(eventAgentId, { type: "tool_result", content: formatted.content });
@@ -1882,6 +1907,18 @@ export function ChatView({ onOpenConfirm, onOpenClarification, onSubmitClarifica
         addMessage("tool", `❌ 请求失败: ${String(err)}`, "meta");
       }
     } finally {
+      // Flush any tool_result patches that never found a matching tool_call
+      // row (dropped/out-of-order SSE) instead of silently discarding them.
+      const leftoverPatches = pendingToolResultPatchesRef.current;
+      pendingToolResultPatchesRef.current = {};
+      for (const [callId, patch] of Object.entries(leftoverPatches)) {
+        if (!patch.content?.trim()) continue;
+        addMessage("tool", patch.content, "meta", undefined, undefined, undefined, {
+          toolCallId: callId,
+          toolStatus: patch.toolStatus,
+          toolResultPreview: patch.toolResultPreview,
+        });
+      }
       if (!isCurrentRequest()) return;
       const refPatch = referenceExtrasFromTurn(
         turnRefsSnapshot.references,

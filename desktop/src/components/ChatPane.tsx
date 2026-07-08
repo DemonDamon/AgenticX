@@ -61,6 +61,7 @@ import {
   isEphemeralStopErrorText,
   isInterruptedAssistantPlaceholder,
 } from "../utils/noisy-chat-messages";
+import { isStreamToolLabelOnlyText, shouldSkipFormattedToolResultFallback } from "../utils/orphan-formatted-tool";
 import { HOOK_BLOCK_RE } from "../utils/hook-block-message";
 import { expandMessagesToTopLevelRows } from "./messages/react-blocks";
 import { isSubAgentLiveStatus, shouldHideStreamOverlay, shouldShowMidTurnStreamActivity } from "../utils/stream-overlay-policy";
@@ -1368,7 +1369,7 @@ function isNearBottom(el: HTMLDivElement, thresholdPx = 96): boolean {
 }
 
 function formatToolResultMessage(toolNameRaw: unknown, resultRaw: unknown, providers?: Record<string, import("../utils/provider-display").ProviderDisplayEntry>): { content: string; silent: boolean } {
-  const toolName = String(toolNameRaw ?? "tool");
+  const toolName = String(toolNameRaw ?? "").trim() || "tool";
   const resultText = String(resultRaw ?? "");
   if (toolName === "check_resources") {
     return { content: "", silent: true };
@@ -1543,6 +1544,9 @@ function formatToolResultMessage(toolNameRaw: unknown, resultRaw: unknown, provi
   }
   if (isError) {
     return { content: `⚠️ ${toolName} 提示: ${compact}`, silent: false };
+  }
+  if (!compact.trim()) {
+    return { content: "", silent: true };
   }
   return { content: `✅ ${toolName} 结果: ${compact}`, silent: false };
 }
@@ -2518,6 +2522,9 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
    * switch (not on every effect re-run). */
   const lastStallBaselineSessionRef = useRef<string>("");
   const deferredSessionMessagesRef = useRef<Record<string, Array<Parameters<typeof addPaneMessage>>>>({});
+  const pendingToolResultPatchesRef = useRef<
+    Record<string, Parameters<typeof updatePaneMessageByToolCallId>[2]>
+  >({});
   const lastComposerEnterAtRef = useRef(0);
   const streamRafRef = useRef<number | null>(null);
   const listRef = useRef<HTMLDivElement>(null);
@@ -7297,6 +7304,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
     setStreamReferences([]);
     setStreamSearchedQueries([]);
     streamCommitRegistryRef.current.beginSession(requestSessionId);
+    pendingToolResultPatchesRef.current = {};
     streamTextRef.current = "";
     const abortController = new AbortController();
     sessionAbortControllersRef.current[requestSessionId] = abortController;
@@ -7330,6 +7338,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
       if (
         !partial ||
         isThinkingPlaceholderText(partial) ||
+        isStreamToolLabelOnlyText(partial) ||
         streamCommitRegistryRef.current.isCommitted(requestSessionId)
       ) {
         return false;
@@ -7350,6 +7359,9 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
           commitExtras.reasoningSeconds = seconds;
         }
         commitContent = bodyContent;
+      }
+      if (!commitContent.trim() || isStreamToolLabelOnlyText(commitContent)) {
+        return false;
       }
       addPaneMessageIfSessionActive(
         pane.id,
@@ -8008,6 +8020,11 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
                       toolStatus: "running",
                       toolGroupId,
                     });
+                    const pendingPatch = pendingToolResultPatchesRef.current[toolCallId];
+                    if (pendingPatch) {
+                      updatePaneMessageByToolCallId(pane.id, toolCallId, pendingPatch);
+                      delete pendingToolResultPatchesRef.current[toolCallId];
+                    }
                   } else {
                     const legacy = `\u{1F527} ${toolNameStr}: ${JSON.stringify(toolArgs).slice(0, 120)}`;
                     addPaneMessageIfSessionActive(pane.id, "tool", legacy, "meta");
@@ -8059,9 +8076,6 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
                   ? updatePaneMessageByToolCallId(pane.id, resultCallId, resultPatch)
                   : false;
                 if (!merged) {
-                  // 流式期间后端可能未在 tool_result 上回传可匹配的 tool_call_id，
-                  // 退化为把该 pane 内最后一条仍在执行的 tool 调用翻成完成态并写入结果，
-                  // 避免分组头长期停留在「正在调用工具」直到整轮结束才被快照纠正。
                   const pan = useAppStore.getState().panes.find((p) => p.id === pane.id);
                   const fallbackCallId = [...(pan?.messages ?? [])]
                     .reverse()
@@ -8076,8 +8090,26 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
                     merged = updatePaneMessageByToolCallId(pane.id, fallbackCallId, resultPatch);
                   }
                 }
-                if (!merged) {
-                  addPaneMessageIfSessionActive(pane.id, "tool", formatted.content, "meta");
+                if (!merged && resultCallId) {
+                  pendingToolResultPatchesRef.current[resultCallId] = resultPatch;
+                  merged = true;
+                }
+                if (!merged && !shouldSkipFormattedToolResultFallback(formatted.content, rawContent)) {
+                  addPaneMessageIfSessionActive(
+                    pane.id,
+                    "tool",
+                    rawContent || formatted.content,
+                    "meta",
+                    undefined,
+                    undefined,
+                    undefined,
+                    {
+                      toolCallId: resultCallId || undefined,
+                      toolName: toolName || undefined,
+                      toolStatus: mergedStatus,
+                      toolResultPreview: preview,
+                    },
+                  );
                 }
               } else {
                 addSubAgentEvent(eventAgentId, { type: "tool_result", content: formatted.content });
@@ -8740,6 +8772,19 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
         addPaneMessageIfSessionActive(pane.id, "tool", `❌ 请求失败: ${String(error)}`, "meta");
       }
     } finally {
+      // Flush any tool_result patches that never found a matching tool_call
+      // row (dropped/out-of-order SSE) instead of silently discarding them —
+      // losing the result entirely is worse than a plain fallback row.
+      const leftoverPatches = pendingToolResultPatchesRef.current;
+      pendingToolResultPatchesRef.current = {};
+      for (const [callId, patch] of Object.entries(leftoverPatches)) {
+        if (!patch.content?.trim()) continue;
+        addPaneMessageIfSessionActive(pane.id, "tool", patch.content, "meta", undefined, undefined, undefined, {
+          toolCallId: callId,
+          toolStatus: patch.toolStatus,
+          toolResultPreview: patch.toolResultPreview,
+        });
+      }
       releaseSendLock();
       delete sessionAbortControllersRef.current[requestSessionId];
       streamCommitRegistryRef.current.clearSession(requestSessionId);
