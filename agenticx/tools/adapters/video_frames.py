@@ -40,6 +40,7 @@ class VideoFrameExtractor:
     """Extract representative frames from a local video via ffmpeg/ffprobe."""
 
     SUPPORTED_FORMATS = [".mp4", ".mov", ".m4v", ".mkv", ".webm", ".avi"]
+    MAX_AUDIO_BYTES = 24 * 1024 * 1024
 
     def __init__(self, timeout: float = 180.0) -> None:
         self.timeout = timeout
@@ -275,3 +276,45 @@ class VideoFrameExtractor:
             probe=probe,
             strategy="scene",
         )
+
+    async def extract_audio(self, path: Path, out_dir: Path) -> Optional[Path]:
+        """Extract mono 16k mp3 audio track.
+
+        Returns:
+            Output audio path on success, or None when source has no audio / extraction
+            fails / output exceeds size guard.
+        """
+        ffmpeg_bin = self._ffmpeg_bin()
+        if not ffmpeg_bin:
+            return None
+        out_dir.mkdir(parents=True, exist_ok=True)
+        out_path = out_dir / "audio.mp3"
+        cmd = [
+            ffmpeg_bin,
+            "-y",
+            "-i",
+            str(path),
+            "-vn",
+            "-ac",
+            "1",
+            "-ar",
+            "16000",
+            "-b:a",
+            "64k",
+            str(out_path),
+        ]
+        try:
+            code, _stdout, _stderr = await self._run_subprocess(cmd)
+        except Exception:
+            return None
+        if code != 0:
+            return None
+        if not out_path.exists():
+            return None
+        try:
+            size = out_path.stat().st_size
+        except OSError:
+            return None
+        if size <= 0 or size > self.MAX_AUDIO_BYTES:
+            return None
+        return out_path

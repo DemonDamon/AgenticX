@@ -60,3 +60,27 @@ async def test_probe_parses_json(tmp_path: Path) -> None:
     assert probe.duration_seconds > 0
     assert probe.width == 320
     assert probe.height == 240
+
+
+@pytest.mark.asyncio
+@pytest.mark.skipif(not VideoFrameExtractor.is_available(), reason="ffmpeg/ffprobe not available")
+async def test_extract_audio_none_on_silent(tmp_path: Path) -> None:
+    """Silent video should return None instead of raising."""
+    mp4_path = tmp_path / "silent.mp4"
+    subprocess.run(
+        [
+            "ffmpeg",
+            "-f",
+            "lavfi",
+            "-i",
+            "testsrc=duration=1:size=320x240:rate=10",
+            "-y",
+            str(mp4_path),
+        ],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    extractor = VideoFrameExtractor()
+    out = await extractor.extract_audio(mp4_path, tmp_path / "audio")
+    assert out is None

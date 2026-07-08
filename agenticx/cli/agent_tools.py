@@ -6095,6 +6095,12 @@ def _video_understand_settings() -> Dict[str, Any]:
             return raw.strip().lower() in {"1", "true", "yes", "on"}
         return default
 
+    def _str(key: str, default: str) -> str:
+        raw = ConfigManager.get_value(f"video_understanding.{key}")
+        if raw is None:
+            return default
+        return str(raw)
+
     max_frames = min(
         _int("max_frames", _VIDEO_UNDERSTAND_DEFAULT_MAX_FRAMES),
         _VIDEO_UNDERSTAND_HARD_MAX_FRAMES,
@@ -6107,7 +6113,51 @@ def _video_understand_settings() -> Dict[str, Any]:
         ),
         "min_frames": max(1, _int("min_frames", _VIDEO_UNDERSTAND_MIN_FRAMES)),
         "use_scene_detection": _bool("use_scene_detection", False),
+        "enable_audio_transcription": _bool("enable_audio_transcription", True),
+        "transcription_language": _str("transcription_language", "").strip(),
     }
+
+
+async def _transcribe_video_audio(audio_path: Path, language: str) -> tuple[str, str]:
+    """Best-effort audio transcription that never breaks video visual flow."""
+    try:
+        # Inline import avoids circular dependency:
+        # voice_endpoints imports STUDIO_TOOLS/dispatch_tool_async from this module.
+        from agenticx.studio.voice_endpoints import (
+            _resolve_transcribe_provider,
+            _transcribe_doubao_flash,
+            _transcribe_openai_whisper,
+        )
+    except Exception as exc:
+        return "", f"transcription module unavailable: {exc}"
+
+    try:
+        provider = _resolve_transcribe_provider()
+    except Exception as exc:
+        return "", f"transcribe provider resolve failed: {exc}"
+    if not provider:
+        return "", "no transcription backend configured (see 设置 → 语音)"
+
+    try:
+        raw = audio_path.read_bytes()
+    except OSError as exc:
+        return "", f"cannot read extracted audio: {exc}"
+
+    try:
+        if provider == "openai_whisper":
+            text = await _transcribe_openai_whisper(
+                raw,
+                filename=audio_path.name,
+                content_type="audio/mpeg",
+                language=(language or "zh"),
+            )
+        elif provider == "doubao_flash":
+            text = await _transcribe_doubao_flash(raw)
+        else:
+            return "", f"unknown transcription provider: {provider}"
+    except Exception as exc:
+        return "", f"transcription failed ({provider}): {exc}"
+    return (text or "").strip(), ""
 
 
 async def _tool_video_understand(arguments: Dict[str, Any], session: Optional[StudioSession] = None) -> str:
@@ -6166,6 +6216,8 @@ async def _tool_video_understand(arguments: Dict[str, Any], session: Optional[St
     probe = None
     result = None
     staged = 0
+    transcript = ""
+    degrade_reason = ""
     try:
         probe = await extractor.probe(path)
         frame_count = extractor.plan_frame_count(
@@ -6212,6 +6264,16 @@ async def _tool_video_understand(arguments: Dict[str, Any], session: Optional[St
             staged += 1
         if staged == 0:
             return "ERROR: extracted frames could not be read for attachment."
+
+        if probe.has_audio and settings.get("enable_audio_transcription", True):
+            audio_path = await extractor.extract_audio(path, tmp_dir)
+            if audio_path is None:
+                degrade_reason = "audio extraction unavailable"
+            else:
+                transcript, degrade_reason = await _transcribe_video_audio(
+                    audio_path,
+                    str(settings.get("transcription_language", "") or ""),
+                )
     except Exception as exc:
         return (
             f"ERROR: video_understand failed for {path.name}: {exc}\n"
@@ -6222,19 +6284,27 @@ async def _tool_video_understand(arguments: Dict[str, Any], session: Optional[St
 
     if probe is None or result is None:
         return "ERROR: internal video_understand state error."
-    audio_note = "with audio track" if probe.has_audio else "no audio track"
+    audio_note = (
+        "with audio (transcribed)"
+        if transcript
+        else ("with audio (not transcribed)" if probe.has_audio else "no audio track")
+    )
     lines = [
         f"[video_understand] {path.name}",
         (
             f"duration={probe.duration_seconds:.1f}s resolution={probe.width}x{probe.height} "
             f"{audio_note} strategy={result.strategy} frames_attached={staged}"
         ),
-        "Frames are attached as images in the NEXT turn; describe/answer using them.",
+        "Frames are attached as images in the NEXT turn; combine them with the transcript below.",
     ]
-    if probe.has_audio:
+    if transcript:
+        clipped = transcript if len(transcript) <= 6000 else transcript[:6000] + " ...[truncated]"
+        lines.append("")
+        lines.append("[audio_transcript]")
+        lines.append(clipped)
+    elif probe.has_audio:
         lines.append(
-            "NOTE: this video has an audio track that is NOT transcribed in this build; "
-            "rely on frames, and if speech content is essential tell the user so."
+            f"NOTE: audio present but not transcribed ({degrade_reason or 'unknown'})."
         )
     return "\n".join(lines)
 
