@@ -6,6 +6,7 @@ import {
   ChevronRight,
   BarChart3,
   FileText,
+  Film,
   ListChecks,
   Plug,
   Search,
@@ -78,6 +79,11 @@ export function buildToolCardTitle(message: Message): string {
     return tn ? `mcp_call ${tn}` : "mcp_call";
   }
   if (name === "knowledge_search") return "knowledge_search";
+  if (name === "video_understand") {
+    const p = String(args.path ?? "").trim();
+    const base = p ? p.split(/[\\/]/).pop() : "";
+    return base ? `理解视频 ${base}` : "理解视频";
+  }
   if (name === "show_widget") {
     const argTitle = String(args.title ?? "").trim();
     if (argTitle) return argTitle;
@@ -95,6 +101,7 @@ function pickToolIcon(name: string) {
   if (name === "todo_write") return ListChecks;
   if (name === "mcp_call") return Plug;
   if (name === "knowledge_search") return Search;
+  if (name === "video_understand") return Film;
   if (name === "show_widget") return BarChart3;
   return Wrench;
 }

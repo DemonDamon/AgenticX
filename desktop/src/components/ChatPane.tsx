@@ -96,6 +96,7 @@ import { Toast } from "./ds/Toast";
 import { extractClipboardImageFiles, withClipboardImageNames } from "../utils/clipboard-images";
 import { clipboardPlainTextForPaste } from "../utils/clipboard-plain-text";
 import { isKnownNonVisionChatModel } from "../utils/model-vision";
+import { isVideoFile } from "../utils/video-file";
 import {
   canStopCurrentRun,
   isDoubleEnterWithinWindow,
@@ -6602,6 +6603,10 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
       setAttachToastOpen(true);
       return;
     }
+    if (isVideoFile(file) && isKnownNonVisionChatModel(chatProvider, chatModel)) {
+      setAttachToastOpen(true);
+      return;
+    }
     setContextFiles((prev) => ({
       ...prev,
       [key]: {
@@ -6689,6 +6694,24 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
             mimeType: file.type || "application/octet-stream",
             status: "ready",
             content: `[附件] ${file.name}`,
+            sourcePath: absolutePath,
+          },
+        }));
+        return;
+      }
+    }
+
+    if (isVideoFile(file)) {
+      const absolutePath = window.agenticxDesktop?.getPathForFile?.(file) || "";
+      if (absolutePath) {
+        setContextFiles((prev) => ({
+          ...prev,
+          [key]: {
+            name: file.name,
+            size: file.size,
+            mimeType: file.type || "video/mp4",
+            status: "ready",
+            content: `[视频] ${file.name}（可用 video_understand 理解）`,
             sourcePath: absolutePath,
           },
         }));
