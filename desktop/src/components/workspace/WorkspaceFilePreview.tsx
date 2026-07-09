@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type RefObject } fro
 import { createPortal } from "react-dom";
 import {
   Check,
+  Code2,
   Copy,
   Eye,
   FileText,
@@ -17,6 +18,7 @@ import Prism from "prismjs";
 import "prismjs/components/prism-bash";
 import "prismjs/components/prism-json";
 import "prismjs/components/prism-markdown";
+import "prismjs/components/prism-markup";
 import "prismjs/components/prism-python";
 import "prismjs/components/prism-rust";
 import "prismjs/components/prism-typescript";
@@ -39,6 +41,7 @@ import {
   type WorkspacePreview,
 } from "./workspace-preview-types";
 import { DocxPreview } from "./DocxPreview";
+import { HtmlPreviewBody, isHtmlPreviewPath } from "./HtmlPreviewBody";
 import { PdfPreview } from "./PdfPreview";
 import { PreviewFallback } from "./PreviewFallback";
 import { SpreadsheetPreview } from "./SpreadsheetPreview";
@@ -91,6 +94,7 @@ function detectLanguage(path: string): string {
   if (lower.endsWith(".js") || lower.endsWith(".jsx")) return "javascript";
   if (lower.endsWith(".json") || lower.endsWith(".jsonl") || lower.endsWith(".ndjson")) return "json";
   if (lower.endsWith(".md")) return "markdown";
+  if (lower.endsWith(".html") || lower.endsWith(".htm")) return "markup";
   if (lower.endsWith(".sh") || lower.endsWith(".bash")) return "bash";
   if (lower.endsWith(".rs")) return "rust";
   if (lower.endsWith(".log") || lower.endsWith(".txt")) return "plain";
@@ -527,6 +531,7 @@ function TextualPreviewBody({
   onEditContentChange,
   markdownHostPath,
   textareaRef,
+  renderHtml,
 }: {
   preview: TextualPreview;
   onQuoteSnippet?: (payload: WorkspacePreviewQuotePayload) => void;
@@ -536,17 +541,17 @@ function TextualPreviewBody({
   onEditContentChange: (value: string) => void;
   markdownHostPath: string;
   textareaRef?: RefObject<HTMLTextAreaElement | null>;
+  /** When true and viewMode is preview, render HTML via sandboxed iframe. */
+  renderHtml?: boolean;
 }) {
-  if (initialLineRange) {
-    return <LineFocusedSourceView content={preview.content} lineRange={initialLineRange} />;
-  }
+  const showHtmlRender = !!renderHtml && viewMode === "preview" && !initialLineRange;
 
   const highlightedCode = useMemo(() => {
-    if (preview.kind === "markdown") return "";
+    if (preview.kind === "markdown" || showHtmlRender) return "";
     const language = detectLanguage(preview.path);
     const grammar = Prism.languages[language] ?? Prism.languages.clike;
     return Prism.highlight(preview.content, grammar, language);
-  }, [preview]);
+  }, [preview, showHtmlRender]);
 
   const markdownContent = useMemo(
     () => (preview.kind === "markdown" ? normalizeChatMarkdownContent(editContent) : ""),
@@ -652,6 +657,16 @@ function TextualPreviewBody({
     () => Math.max(24, editContent.split("\n").length + 2),
     [editContent]
   );
+
+  if (initialLineRange) {
+    return <LineFocusedSourceView content={preview.content} lineRange={initialLineRange} />;
+  }
+
+  if (showHtmlRender) {
+    return (
+      <HtmlPreviewBody content={preview.content} title={previewBaseName(preview.path)} />
+    );
+  }
 
   if (preview.kind === "markdown" && viewMode === "edit") {
     return (
@@ -763,6 +778,8 @@ export function WorkspaceFilePreview({
     preview.kind === "text" || preview.kind === "markdown" || preview.kind === "code"
       ? (preview as TextualPreview)
       : null;
+  const isHtmlFile =
+    textualPreview != null && isHtmlPreviewPath(textualPreview.path) && !initialLineRange;
 
   const editResetKey = textualPreview
     ? `${textualPreview.absolutePath}:${textualPreview.content.length}`
@@ -1107,6 +1124,37 @@ export function WorkspaceFilePreview({
             <div className="shrink-0 text-[11px] text-text-muted">保存中…</div>
           ) : null}
           <div className="ml-2 flex shrink-0 items-center gap-1">
+            {isHtmlFile ? (
+              <>
+                <button
+                  type="button"
+                  className={`flex h-7 w-7 items-center justify-center rounded-md transition-colors ${
+                    viewMode === "preview"
+                      ? "bg-surface-hover text-text-strong"
+                      : "text-text-muted hover:bg-surface-hover hover:text-text-strong"
+                  }`}
+                  onClick={() => setViewMode("preview")}
+                  title="渲染预览"
+                  aria-pressed={viewMode === "preview"}
+                >
+                  <Eye className="h-4 w-4" strokeWidth={1.5} />
+                </button>
+                <button
+                  type="button"
+                  className={`flex h-7 w-7 items-center justify-center rounded-md transition-colors ${
+                    viewMode === "edit"
+                      ? "bg-surface-hover text-text-strong"
+                      : "text-text-muted hover:bg-surface-hover hover:text-text-strong"
+                  }`}
+                  onClick={() => setViewMode("edit")}
+                  title="查看源码"
+                  aria-pressed={viewMode === "edit"}
+                >
+                  <Code2 className="h-4 w-4" strokeWidth={1.5} />
+                </button>
+                <div className="h-4 w-px bg-border opacity-50" />
+              </>
+            ) : null}
             {isEditableMarkdown ? (
               <>
                 <button
@@ -1291,7 +1339,11 @@ export function WorkspaceFilePreview({
             ) : null}
           </div>
         ) : null}
-        <div className="preview-scrollbar min-h-0 flex-1 overflow-auto bg-surface-base">
+        <div
+          className={`preview-scrollbar min-h-0 flex-1 bg-surface-base ${
+            isHtmlFile && viewMode === "preview" ? "overflow-hidden" : "overflow-auto"
+          }`}
+        >
           {preview.kind === "image" ? (
             <ImagePreviewBody
               absolutePath={preview.absolutePath}
@@ -1327,11 +1379,12 @@ export function WorkspaceFilePreview({
               preview={preview as TextualPreview}
               onQuoteSnippet={onQuoteSnippet}
               initialLineRange={initialLineRange}
-              viewMode={isEditableMarkdown ? viewMode : "preview"}
+              viewMode={isEditableMarkdown || isHtmlFile ? viewMode : "preview"}
               editContent={editContent}
               onEditContentChange={setEditContent}
               markdownHostPath={markdownHostPath}
               textareaRef={editTextareaRef}
+              renderHtml={isHtmlFile}
             />
           )}
         </div>
