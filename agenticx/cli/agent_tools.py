@@ -23,9 +23,10 @@ import tempfile
 import time
 import traceback
 import uuid
+from dataclasses import dataclass
 from urllib.parse import urlparse
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Dict, List, Optional, Tuple
+from typing import TYPE_CHECKING, Any, Dict, List, Optional, Tuple, Union
 
 from agenticx.cli.config_manager import ConfigManager
 from agenticx.cli.codegen_engine import CodeGenEngine, infer_output_path, write_generated_file
@@ -139,6 +140,7 @@ _CONCURRENCY_SAFE_STUDIO_TOOLS = frozenset(
         "list_scheduled_tasks",
         "get_automation_task_logs",
         "cc_bridge_list",
+        "bash_bg_poll",
         "knowledge_search",  # Plan-Id: machi-kb-stage1-local-mvp — read-only vector search.
         "knowledge_synthesize",
         "web_search",
@@ -390,6 +392,79 @@ STUDIO_TOOLS: List[Dict[str, Any]] = [
                     "timeout_sec": {"type": "integer", "description": "Timeout seconds, default 30."},
                 },
                 "required": ["command"],
+                "additionalProperties": False,
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "bash_bg_start",
+            "description": (
+                "Start an interactive or long-running shell command in background without timeout kill. "
+                "Use for QR/auth/login commands that wait for user actions. Returns job_id, first-screen output, "
+                "and extracted auth URLs."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "command": {"type": "string", "description": "Command to run in background."},
+                    "cwd": {"type": "string", "description": "Working directory (preferred over cd in command)."},
+                    "first_wait_sec": {
+                        "type": "integer",
+                        "description": "Collect initial output for this many seconds before returning (default 4, max 15).",
+                    },
+                },
+                "required": ["command"],
+                "additionalProperties": False,
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "bash_bg_poll",
+            "description": (
+                "Poll incremental output and status for a background bash job started by bash_bg_start."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "job_id": {"type": "string", "description": "Background bash job id."},
+                },
+                "required": ["job_id"],
+                "additionalProperties": False,
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "bash_bg_input",
+            "description": "Write one line of text to stdin of a running background bash job.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "job_id": {"type": "string", "description": "Background bash job id."},
+                    "text": {"type": "string", "description": "One line input to send."},
+                },
+                "required": ["job_id", "text"],
+                "additionalProperties": False,
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "bash_bg_stop",
+            "description": "Stop a background bash job by id.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "job_id": {"type": "string", "description": "Background bash job id."},
+                    "force": {"type": "boolean", "description": "If true, kill instead of terminate."},
+                },
+                "required": ["job_id"],
                 "additionalProperties": False,
             },
         },
@@ -2693,34 +2768,167 @@ def _try_peel_cd_prefix_parts(
     return (resolved, rest)
 
 
-async def _tool_bash_exec(
+@dataclass
+class _BashPrepared:
+    """Prepared shell execution payload shared by sync/background bash tools."""
+
+    argv: List[str]
+    cwd: Optional[Path]
+    use_shell: bool
+    command: str
+    command_name: str
+
+
+@dataclass
+class _BashBgJob:
+    """In-memory background bash job state."""
+
+    job_id: str
+    session_id: str
+    command: str
+    cwd: Optional[str]
+    proc: asyncio.subprocess.Process
+    lines: List[str]
+    read_cursor: int
+    started_at: float
+    log_path: Path
+    drain_task: Optional[asyncio.Task[Any]]
+    exit_code: Optional[int]
+
+
+_BASH_BG_LOG_DIR = Path.home() / ".agenticx" / "logs" / "bash_bg"
+_BASH_BG_MAX_JOBS_DEFAULT = 8
+_AUTH_URL_RE = re.compile(r"https?://[^\s'\"<>）)]+")
+_BASH_BG_JOBS: Dict[str, _BashBgJob] = {}
+
+
+def _bash_bg_default_first_wait_sec() -> float:
+    """Default bounded wait to capture first-screen output."""
+    try:
+        raw = ConfigManager.get_value("tools_options.bash_bg.first_wait_sec")
+    except Exception:
+        raw = None
+    if raw is None:
+        return 4.0
+    try:
+        value = float(raw)
+    except (TypeError, ValueError):
+        return 4.0
+    return max(1.0, min(15.0, value))
+
+
+def _bash_bg_first_wait_sec(arguments: Dict[str, Any]) -> float:
+    """Resolve first wait seconds from args or config."""
+    raw = arguments.get("first_wait_sec")
+    if raw is None:
+        return _bash_bg_default_first_wait_sec()
+    if isinstance(raw, str) and not raw.strip():
+        return _bash_bg_default_first_wait_sec()
+    try:
+        value = float(raw)
+    except (TypeError, ValueError):
+        return _bash_bg_default_first_wait_sec()
+    return max(1.0, min(15.0, value))
+
+
+def _bash_bg_max_jobs() -> int:
+    """Maximum concurrent running background jobs per session."""
+    try:
+        raw = ConfigManager.get_value("tools_options.bash_bg.max_jobs")
+    except Exception:
+        raw = None
+    if raw is None:
+        return _BASH_BG_MAX_JOBS_DEFAULT
+    try:
+        value = int(raw)
+    except (TypeError, ValueError):
+        return _BASH_BG_MAX_JOBS_DEFAULT
+    return max(1, min(32, value))
+
+
+def _extract_auth_urls(text: str) -> List[str]:
+    """Extract auth/login URLs from tool output text."""
+    urls: List[str] = []
+    for match in _AUTH_URL_RE.findall(text or ""):
+        if match not in urls:
+            urls.append(match)
+        if len(urls) >= 5:
+            break
+    return urls
+
+
+def _bash_bg_session_id(session: Optional[StudioSession]) -> str:
+    """Stable session id key for ownership checks."""
+    if session is None:
+        return "default"
+    sid = str(getattr(session, "session_id", "") or "").strip()
+    return sid or "default"
+
+
+def _bash_bg_owned_job(job_id: str, session: Optional[StudioSession]) -> Union[_BashBgJob, str]:
+    """Resolve a job id and validate it belongs to the current session."""
+    key = str(job_id or "").strip()
+    if not key:
+        return "ERROR: job_id is required"
+    job = _BASH_BG_JOBS.get(key)
+    if job is None:
+        return f"ERROR: unknown or not-owned job_id: {key}"
+    if job.session_id != _bash_bg_session_id(session):
+        return f"ERROR: unknown or not-owned job_id: {key}"
+    return job
+
+
+def _bash_bg_running_jobs_for_session(session_id: str) -> int:
+    """Count running jobs for a session."""
+    return sum(1 for job in _BASH_BG_JOBS.values() if job.session_id == session_id and job.exit_code is None)
+
+
+async def _bash_bg_drain(job: _BashBgJob) -> None:
+    """Drain stdout/stderr of a background process into memory and log file."""
+
+    async def _pump(stream: Optional[asyncio.StreamReader]) -> None:
+        if stream is None:
+            return
+        async for raw in stream:
+            line = raw.decode("utf-8", errors="replace").rstrip("\n")
+            job.lines.append(line)
+            try:
+                with job.log_path.open("a", encoding="utf-8") as handle:
+                    handle.write(line + "\n")
+            except Exception:
+                pass
+
+    try:
+        await asyncio.gather(_pump(job.proc.stdout), _pump(job.proc.stderr))
+        await job.proc.wait()
+    finally:
+        try:
+            job.exit_code = job.proc.returncode
+        except Exception:
+            if job.exit_code is None:
+                job.exit_code = -1
+
+
+async def _bash_exec_prepare(
+    command: str,
     arguments: Dict[str, Any],
-    session: Optional[StudioSession] = None,
+    session: Optional[StudioSession],
     *,
+    tool_name: str,
     confirm_gate: ConfirmGate,
-    emit_event: Optional[Any] = None,
-) -> str:
-    command = str(arguments.get("command", "")).strip()
+    emit_event: Optional[Any],
+) -> Union[_BashPrepared, str]:
+    """Shared validation and argv construction for sync/background bash tools."""
+    command = str(command or "").strip()
     if not command:
         return "ERROR: missing command"
     if len(command) > MAX_BASH_EXEC_COMMAND_CHARS:
         return f"ERROR: command exceeds maximum length ({MAX_BASH_EXEC_COMMAND_CHARS} characters)"
 
-    perm_deny = tool_denied_by_session_permissions("bash_exec")
+    perm_deny = tool_denied_by_session_permissions(tool_name)
     if perm_deny:
         return f"ERROR: {perm_deny}"
 
-    raw_timeout = arguments.get("timeout_sec")
-    if raw_timeout is None:
-        timeout_sec = _bash_exec_default_timeout_sec()
-    elif isinstance(raw_timeout, str) and not str(raw_timeout).strip():
-        timeout_sec = _bash_exec_default_timeout_sec()
-    else:
-        try:
-            timeout_sec = int(raw_timeout)
-        except (TypeError, ValueError):
-            timeout_sec = _bash_exec_default_timeout_sec()
-    timeout_sec = max(1, min(3600, timeout_sec))
     cwd_arg = arguments.get("cwd")
     if cwd_arg:
         try:
@@ -2766,7 +2974,6 @@ async def _tool_bash_exec(
                 )
         except Exception:
             pass
-    # Standalone ``cd DIR`` helper only — compound commands stay on shell/exec path.
     if command_name == "cd" and len(parts) <= 2:
         target = str(parts[1]) if len(parts) > 1 else "~"
         try:
@@ -2788,7 +2995,7 @@ async def _tool_bash_exec(
         if not await _confirm(
             confirm_question,
             confirm_gate=confirm_gate,
-            context={"tool": "bash_exec", "command": command, "risk": "non_whitelisted"},
+            context={"tool": tool_name, "command": command, "risk": "non_whitelisted"},
             emit_event=emit_event,
         ):
             return "CANCELLED: user denied non-whitelisted command"
@@ -2837,7 +3044,7 @@ async def _tool_bash_exec(
             f"High-risk command detected ({joined_reasons}). Execute anyway?",
             confirm_gate=confirm_gate,
             context={
-                "tool": "bash_exec",
+                "tool": tool_name,
                 "command": command,
                 "risk": "high",
                 "reasons": risk_reasons,
@@ -2848,7 +3055,6 @@ async def _tool_bash_exec(
 
     use_shell = bool(re.search(r"(;|&&|\|\||\||`|\$\(|>|<|\n)", command))
     if not use_shell:
-        # Support common env-prefix command style like: FOO=bar cmd --arg
         use_shell = bool(
             re.match(
                 r"^\s*(?:[A-Za-z_][A-Za-z0-9_]*=[^\s]+\s+)+[^\s].*$",
@@ -2860,12 +3066,234 @@ async def _tool_bash_exec(
         if resolved0:
             parts = [resolved0] + list(parts[1:])
     argv = _bash_exec_shell_argv(command) if use_shell else parts
+    return _BashPrepared(
+        argv=argv,
+        cwd=cwd,
+        use_shell=use_shell,
+        command=command,
+        command_name=command_name,
+    )
+
+
+def _bash_bg_status_line(job: _BashBgJob) -> str:
+    """Return running/exited status text."""
+    return "exited" if job.exit_code is not None else "running"
+
+
+def _bash_bg_render_urls(urls: List[str]) -> str:
+    """Render URL list for tool response text."""
+    if not urls:
+        return "(none)"
+    return "\n".join(f"- {url}" for url in urls)
+
+
+async def _tool_bash_bg_start(
+    arguments: Dict[str, Any],
+    session: Optional[StudioSession] = None,
+    *,
+    confirm_gate: ConfirmGate,
+    emit_event: Optional[Any] = None,
+) -> str:
+    command = str(arguments.get("command", "")).strip()
+    prepared = await _bash_exec_prepare(
+        command,
+        arguments,
+        session,
+        tool_name="bash_bg_start",
+        confirm_gate=confirm_gate,
+        emit_event=emit_event,
+    )
+    if isinstance(prepared, str):
+        return prepared
+
+    session_id = _bash_bg_session_id(session)
+    max_jobs = _bash_bg_max_jobs()
+    if _bash_bg_running_jobs_for_session(session_id) >= max_jobs:
+        return (
+            f"ERROR: too many running background jobs (max {max_jobs}). "
+            "Stop one with bash_bg_stop first."
+        )
+
+    try:
+        _BASH_BG_LOG_DIR.mkdir(parents=True, exist_ok=True)
+    except Exception:
+        pass
+
+    job_id = uuid.uuid4().hex[:12]
+    log_path = _BASH_BG_LOG_DIR / f"{job_id}.log"
     try:
         proc = await asyncio.create_subprocess_exec(
-            *argv,
+            *prepared.argv,
+            stdin=asyncio.subprocess.PIPE,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
-            cwd=str(cwd) if cwd else None,
+            cwd=str(prepared.cwd) if prepared.cwd else None,
+        )
+    except Exception as exc:
+        return f"ERROR: command failed to start: {exc}"
+
+    job = _BashBgJob(
+        job_id=job_id,
+        session_id=session_id,
+        command=prepared.command,
+        cwd=str(prepared.cwd) if prepared.cwd else None,
+        proc=proc,
+        lines=[],
+        read_cursor=0,
+        started_at=time.time(),
+        log_path=log_path,
+        drain_task=None,
+        exit_code=None,
+    )
+    _BASH_BG_JOBS[job_id] = job
+    job.drain_task = asyncio.create_task(_bash_bg_drain(job))
+
+    first_wait_sec = _bash_bg_first_wait_sec(arguments)
+    deadline = asyncio.get_event_loop().time() + first_wait_sec
+    while asyncio.get_event_loop().time() < deadline:
+        if job.exit_code is not None or job.lines:
+            break
+        await asyncio.sleep(0.2)
+
+    captured_output = "\n".join(job.lines).strip()
+    auth_urls = _extract_auth_urls(captured_output)
+    job.read_cursor = len(job.lines)
+    status = _bash_bg_status_line(job)
+    exit_code = str(job.exit_code) if job.exit_code is not None else "null"
+    cwd_text = job.cwd or "(session workspace)"
+    return (
+        f"job_id={job.job_id}\n"
+        f"status={status}\n"
+        f"exit_code={exit_code}\n"
+        f"cwd={cwd_text}\n"
+        f"command={job.command}\n"
+        f"captured_output:\n{captured_output or '(empty)'}\n"
+        f"auth_urls:\n{_bash_bg_render_urls(auth_urls)}\n"
+        "NOTE: Process is running in background and is not timeout-killed.\n"
+        "- If auth_urls is not empty, relay them verbatim to the user and ask for scan/authorize.\n"
+        "- If command requires input, use bash_bg_input(job_id, text).\n"
+        "- After user confirms completion, call bash_bg_poll for final exit_code and output."
+    )
+
+
+async def _tool_bash_bg_poll(
+    arguments: Dict[str, Any],
+    session: Optional[StudioSession] = None,
+) -> str:
+    owned = _bash_bg_owned_job(str(arguments.get("job_id", "") or ""), session)
+    if isinstance(owned, str):
+        return owned
+    job = owned
+    new_lines = job.lines[job.read_cursor:]
+    job.read_cursor = len(job.lines)
+    new_output = "\n".join(new_lines).strip()
+    auth_urls = _extract_auth_urls(new_output)
+    status = _bash_bg_status_line(job)
+    exit_code = str(job.exit_code) if job.exit_code is not None else "null"
+    body = (
+        f"job_id={job.job_id}\n"
+        f"status={status}\n"
+        f"exit_code={exit_code}\n"
+        f"new_output:\n{new_output or '(none)'}\n"
+        f"auth_urls:\n{_bash_bg_render_urls(auth_urls)}"
+    )
+    if status == "running" and not new_output:
+        body += (
+            "\nHINT: job still running with no new output. "
+            "It may be waiting for user scan/authorization or stdin input."
+        )
+    return body
+
+
+async def _tool_bash_bg_input(
+    arguments: Dict[str, Any],
+    session: Optional[StudioSession] = None,
+) -> str:
+    owned = _bash_bg_owned_job(str(arguments.get("job_id", "") or ""), session)
+    if isinstance(owned, str):
+        return owned
+    job = owned
+    if job.exit_code is not None:
+        return "ERROR: job already exited"
+    text = str(arguments.get("text", ""))
+    stream = job.proc.stdin
+    if stream is None:
+        return "ERROR: job stdin is not available"
+    payload = f"{text}\n".encode("utf-8")
+    try:
+        stream.write(payload)
+        await stream.drain()
+    except Exception as exc:
+        return f"ERROR: failed to write stdin: {exc}"
+    return f"OK: wrote {len(payload)} bytes to stdin of {job.job_id}"
+
+
+async def _tool_bash_bg_stop(
+    arguments: Dict[str, Any],
+    session: Optional[StudioSession] = None,
+) -> str:
+    owned = _bash_bg_owned_job(str(arguments.get("job_id", "") or ""), session)
+    if isinstance(owned, str):
+        return owned
+    job = owned
+    if job.exit_code is not None:
+        return f"OK: job already exited (exit_code={job.exit_code})"
+
+    force = bool(arguments.get("force", False))
+    try:
+        if force:
+            job.proc.kill()
+        else:
+            job.proc.terminate()
+        try:
+            await asyncio.wait_for(job.proc.wait(), timeout=5.0)
+        except asyncio.TimeoutError:
+            job.proc.kill()
+            await job.proc.wait()
+    except Exception as exc:
+        return f"ERROR: failed to stop job: {exc}"
+
+    job.exit_code = job.proc.returncode
+    return f"OK: stopped {job.job_id} (exit_code={job.exit_code})"
+
+
+async def _tool_bash_exec(
+    arguments: Dict[str, Any],
+    session: Optional[StudioSession] = None,
+    *,
+    confirm_gate: ConfirmGate,
+    emit_event: Optional[Any] = None,
+) -> str:
+    command = str(arguments.get("command", "")).strip()
+    raw_timeout = arguments.get("timeout_sec")
+    if raw_timeout is None:
+        timeout_sec = _bash_exec_default_timeout_sec()
+    elif isinstance(raw_timeout, str) and not str(raw_timeout).strip():
+        timeout_sec = _bash_exec_default_timeout_sec()
+    else:
+        try:
+            timeout_sec = int(raw_timeout)
+        except (TypeError, ValueError):
+            timeout_sec = _bash_exec_default_timeout_sec()
+    timeout_sec = max(1, min(3600, timeout_sec))
+
+    prepared = await _bash_exec_prepare(
+        command,
+        arguments,
+        session,
+        tool_name="bash_exec",
+        confirm_gate=confirm_gate,
+        emit_event=emit_event,
+    )
+    if isinstance(prepared, str):
+        return prepared
+
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            *prepared.argv,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+            cwd=str(prepared.cwd) if prepared.cwd else None,
         )
     except Exception as exc:
         return f"ERROR: command failed to start: {exc}"
@@ -6650,6 +7078,14 @@ async def dispatch_tool_async(
             )
         if name == "bash_exec":
             return await _tool_bash_exec(arguments, session, confirm_gate=gate, emit_event=event_callback)
+        if name == "bash_bg_start":
+            return await _tool_bash_bg_start(arguments, session, confirm_gate=gate, emit_event=event_callback)
+        if name == "bash_bg_poll":
+            return await _tool_bash_bg_poll(arguments, session)
+        if name == "bash_bg_input":
+            return await _tool_bash_bg_input(arguments, session)
+        if name == "bash_bg_stop":
+            return await _tool_bash_bg_stop(arguments, session)
         if name == "code_outline":
             return _tool_code_outline(arguments, session)
         if name == "file_read":
