@@ -548,6 +548,46 @@ _META_ONLY_TOOLS: List[Dict[str, Any]] = [
     {
         "type": "function",
         "function": {
+            "name": "create_avatar",
+            "description": (
+                "Create a new persistent digital avatar (数字分身) in the desktop "
+                "avatar list. Use this after clarifying the user's needs and "
+                "distilling a name, role, and system_prompt. The avatar is written "
+                "to the registry and immediately appears in the sidebar. "
+                "Do NOT just write a markdown file — this tool actually creates it."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "name": {
+                        "type": "string",
+                        "description": "Avatar display name, e.g. 飞廉.",
+                    },
+                    "role": {
+                        "type": "string",
+                        "description": "Short role, e.g. 进取型全市场交易分析师.",
+                    },
+                    "system_prompt": {
+                        "type": "string",
+                        "description": "Full system prompt distilled from the conversation.",
+                    },
+                    "default_provider": {
+                        "type": "string",
+                        "description": "Optional default provider id.",
+                    },
+                    "default_model": {
+                        "type": "string",
+                        "description": "Optional default model id.",
+                    },
+                },
+                "required": ["name", "role", "system_prompt"],
+                "additionalProperties": False,
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "read_avatar_workspace",
             "description": "Read files from avatar workspace without spawning sub-agent.",
             "parameters": {
@@ -2920,6 +2960,55 @@ async def dispatch_meta_tool_async(
         except Exception as exc:
             return json.dumps({"ok": False, "error": f"memory forget failed: {exc}"}, ensure_ascii=False)
         return json.dumps(result, ensure_ascii=False)
+
+    if name == "create_avatar":
+        from agenticx.avatar.registry import AvatarRegistry
+
+        av_name = str(arguments.get("name", "")).strip()
+        av_role = str(arguments.get("role", "")).strip()
+        av_prompt = str(arguments.get("system_prompt", "")).strip()
+        if not av_name:
+            return json.dumps(
+                {
+                    "ok": False,
+                    "error": "missing_name",
+                    "message": "name is required to create an avatar.",
+                },
+                ensure_ascii=False,
+            )
+        registry = AvatarRegistry()
+        for _av in registry.list_avatars():
+            if av_name.lower() == (_av.name or "").lower():
+                return json.dumps(
+                    {
+                        "ok": False,
+                        "error": "avatar_exists",
+                        "avatar_id": _av.id,
+                        "message": (
+                            f"分身「{av_name}」已存在（id={_av.id}），"
+                            f"如需交给它做事请用 delegate_to_avatar。"
+                        ),
+                    },
+                    ensure_ascii=False,
+                )
+        cfg = registry.create_avatar(
+            name=av_name,
+            role=av_role,
+            system_prompt=av_prompt,
+            created_by="meta",
+            default_provider=str(arguments.get("default_provider", "")).strip(),
+            default_model=str(arguments.get("default_model", "")).strip(),
+        )
+        return json.dumps(
+            {
+                "ok": True,
+                "avatar_id": cfg.id,
+                "name": cfg.name,
+                "role": cfg.role,
+                "message": f"数字分身「{cfg.name}」已创建并加入分身列表（id={cfg.id}）。",
+            },
+            ensure_ascii=False,
+        )
 
     if name == "delegate_to_avatar":
         avatar_id = str(arguments.get("avatar_id", "")).strip()

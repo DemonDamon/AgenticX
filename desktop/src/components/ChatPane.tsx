@@ -1397,6 +1397,31 @@ function formatToolResultMessage(toolNameRaw: unknown, resultRaw: unknown, provi
       // Fall through to generic formatter.
     }
   }
+  if (toolName === "create_avatar") {
+    try {
+      const parsed = JSON.parse(resultText) as Record<string, unknown>;
+      const avatarName = String(parsed.name ?? "").trim();
+      const avatarId = String(parsed.avatar_id ?? "").trim();
+      if (parsed.ok) {
+        return {
+          content: `✅ 数字分身「${avatarName || "未命名"}」已创建并加入分身列表${avatarId ? `\nID: ${avatarId}` : ""}`,
+          silent: false,
+        };
+      }
+      if (String(parsed.error ?? "") === "avatar_exists") {
+        return {
+          content: `⚠️ 分身「${avatarName || "同名"}」已存在${avatarId ? `（id=${avatarId}）` : ""}，可直接委派或打开`,
+          silent: false,
+        };
+      }
+      const message = String(parsed.message ?? parsed.error ?? "").trim();
+      if (message) {
+        return { content: `⚠️ 创建分身失败：${message}`, silent: false };
+      }
+    } catch {
+      // Fall through to generic formatter.
+    }
+  }
   if (toolName === "spawn_subagent") {
     try {
       const parsed = JSON.parse(resultText) as Record<string, unknown>;
@@ -8202,6 +8227,29 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
                 if (isTargetSessionStillActive()) {
                   setStreamReferences([...pendingReferences]);
                   setStreamSearchedQueries([...pendingSearchedQueries]);
+                }
+              }
+              if (toolName === "create_avatar") {
+                try {
+                  const rawResult = payload.data?.result;
+                  const parsed =
+                    typeof rawResult === "string"
+                      ? (JSON.parse(rawResult) as Record<string, unknown>)
+                      : (rawResult as Record<string, unknown> | null | undefined);
+                  const avatarId = String(parsed?.avatar_id ?? "").trim();
+                  if (parsed && parsed.ok && avatarId) {
+                    window.dispatchEvent(
+                      new CustomEvent("agenticx:avatars:changed", {
+                        detail: {
+                          avatarId,
+                          name: String(parsed.name ?? "").trim(),
+                          openPane: true,
+                        },
+                      })
+                    );
+                  }
+                } catch {
+                  // Ignore parse errors; tool card still renders via formatter.
                 }
               }
               const formatted = formatToolResultMessage(toolName, payload.data?.result, settings.providers);

@@ -1,199 +1,103 @@
 ---
 name: agenticx-agent-builder
-description: Guide for creating and configuring AgenticX agents with roles, goals, tools, LLM providers, and execution strategies. Use when the user wants to create agents, assign tools to agents, configure LLM backends, set up agent execution, or build multi-agent systems.
+description: Guide for creating persistent Near desktop digital avatars (数字分身) via natural-language interview and the create_avatar tool. Use when the user wants to create an avatar, digital twin, specialist agent persona, or add someone to the avatar sidebar.
 metadata:
   author: AgenticX
-  version: "0.4.2"
+  version: "0.5.0"
 ---
 
-# AgenticX Agent Builder
+# Near Digital Avatar Builder
 
-Guide for creating production-grade agents in AgenticX.
+Help the user create a **persistent desktop digital avatar (数字分身)** that appears in the Near sidebar avatar list.
 
-## Core Concepts
+## Hard rules
 
-An Agent in AgenticX consists of:
-- **Identity**: id, name, role, goal
-- **LLM Provider**: the language model backend
-- **Tools**: functions the agent can invoke
-- **Executor**: the runtime that orchestrates agent reasoning
+1. **Must call `create_avatar`** after clarifying and distilling the config. That tool writes the avatar into the registry and makes it appear in the sidebar.
+2. **Do NOT** only write a Markdown file to Desktop / workspace and claim the avatar is created.
+3. **Do NOT** tell the user there is "no create-avatar API" — `create_avatar` is the API.
+4. **Do NOT** ask the user to open「+ 新建」and fill the manual form unless they explicitly want the GUI.
+5. **Do NOT** invent Python SDK / `AgentExecutor` / `agx agent create` workflows for this task — those are code-layer agents, not Near desktop avatars.
 
-## Creating an Agent
+## Interview flow (2–3 rounds, not a long questionnaire)
 
-### Minimal Agent
+Ask only what is still missing. Prefer short choices (clarification / `show_widget`) over open essays.
 
-```python
-from agenticx import Agent, Task, AgentExecutor
-from agenticx.llms import OpenAIProvider
+### Round 1 — Positioning
 
-agent = Agent(
-    id="assistant",
-    name="Assistant",
-    role="General Purpose Assistant",
-    goal="Help users with tasks",
-    organization_id="default"
+- What should this avatar own? (domain / job)
+- Who is it for? (usually the current user)
+
+### Round 2 — Scope & style
+
+- Coverage (markets, stacks, products, languages…)
+- Analysis / work style (trading vs research, concise vs thorough, etc.)
+
+### Round 3 — Boundaries (only if needed)
+
+- Risk preference / what it must never do
+- Preferred output structure
+- Optional default model
+
+Stop early when you already have enough to write a solid `name` / `role` / `system_prompt`.
+
+## Distill into these fields
+
+| Field | Meaning | Example |
+|---|---|---|
+| `name` | Short character-like display name | 飞廉 |
+| `role` | One-line positioning | 进取型全市场交易分析师 |
+| `system_prompt` | Full behavior contract | See template below |
+| `default_provider` / `default_model` | Optional; omit to inherit global default | |
+
+### `system_prompt` should include
+
+- Identity & coverage
+- Analysis / work priorities
+- Risk preference & hard boundaries
+- Data discipline (no fabricated numbers / facts)
+- Output style & fixed structure when useful
+- Disclaimer when the domain needs one (finance, medical, legal, etc.)
+
+## Landing step (required)
+
+Call:
+
+```text
+create_avatar(
+  name=...,
+  role=...,
+  system_prompt=...,
+  default_provider=optional,
+  default_model=optional
 )
 ```
 
-### Agent with Rich Configuration
+Then confirm to the user:
 
-```python
-agent = Agent(
-    id="research-analyst",
-    name="Research Analyst",
-    role="Senior Research Analyst",
-    goal="Produce thorough, well-cited research reports",
-    backstory="10 years experience in data-driven research",
-    organization_id="research-team",
-    verbose=True
-)
-```
+- The avatar is in the sidebar list
+- They can open it or `@` it in group chat
+- Optionally offer follow-ups: schedule automation, tweak prompt, set default model
 
-### CLI Creation
+### If `create_avatar` returns `avatar_exists`
 
-```bash
-agx agent create research-analyst --role "Senior Research Analyst"
-agx agent list
-```
+Do **not** create a duplicate. Tell the user it already exists and offer:
 
-## LLM Providers
+- `delegate_to_avatar(avatar_id=..., task=...)` for work
+- Or update via settings / a later update tool if they want changes
 
-AgenticX supports multiple LLM backends through a unified interface:
+## Anti-patterns
 
-```python
-from agenticx.llms import OpenAIProvider, LiteLLMProvider
+- Saying "半搞定" after only drafting a prompt file
+- Dumping a long YAML/Markdown archive without calling `create_avatar`
+- Asking the user to copy-paste into the create-avatar form
+- Confusing temporary `spawn_subagent` workers with persistent avatars
+- Using `spawn_subagent` with the same name as a registered avatar
 
-# OpenAI
-llm = OpenAIProvider(model="gpt-4")
+## Example success path
 
-# Any model via LiteLLM (Claude, Gemini, local models, etc.)
-llm = LiteLLMProvider(model="anthropic/claude-sonnet-4-20250514")
-llm = LiteLLMProvider(model="ollama/llama3")
-```
+User: "帮我创建一个数字分身专门帮我分析金融市场"
 
-## Adding Tools
-
-### Function Decorator Tools
-
-```python
-from agenticx.tools import tool
-
-@tool
-def search_web(query: str) -> str:
-    """Search the web for information."""
-    return f"Results for: {query}"
-
-@tool
-def calculate(expression: str) -> float:
-    """Evaluate a math expression safely."""
-    return eval(expression)  # use ast.literal_eval in production
-```
-
-### Attaching Tools to Execution
-
-```python
-executor = AgentExecutor(
-    agent=agent,
-    llm=llm,
-    tools=[search_web, calculate]
-)
-result = executor.run(task)
-```
-
-## Task Definition
-
-```python
-task = Task(
-    id="research-task",
-    description="Research the latest trends in AI agents",
-    expected_output="A structured report with sections and citations",
-    context={"domain": "artificial-intelligence"}
-)
-```
-
-### Output Validation
-
-AgenticX validates task outputs using Pydantic:
-
-```python
-from pydantic import BaseModel
-
-class ResearchReport(BaseModel):
-    title: str
-    summary: str
-    findings: list[str]
-
-task = Task(
-    id="validated-task",
-    description="Research AI trends",
-    expected_output="Structured research report",
-    output_model=ResearchReport
-)
-```
-
-## Execution Strategies
-
-### Basic Execution
-
-```python
-executor = AgentExecutor(agent=agent, llm=llm)
-result = executor.run(task)
-```
-
-### With Events & Callbacks
-
-AgenticX emits events during execution (TaskStart, ToolCall, LLMCall, etc.):
-
-```python
-from agenticx.core import EventLog
-
-event_log = EventLog()
-executor = AgentExecutor(agent=agent, llm=llm, event_log=event_log)
-result = executor.run(task)
-
-for event in event_log.events:
-    print(f"{event.type}: {event.data}")
-```
-
-## Multi-Agent Patterns
-
-### Agent Handoff
-
-```python
-from agenticx.core import HandoffOutput
-
-# Agent A can hand off to Agent B
-handoff = HandoffOutput(target_agent="agent-b", context={"data": result})
-```
-
-### Communication Interface
-
-```python
-from agenticx.core import BroadcastCommunication
-
-comm = BroadcastCommunication()
-comm.send(sender="agent-a", message="Task complete", data=result)
-```
-
-## GuideRails
-
-Constrain agent behavior with guardrails:
-
-```python
-from agenticx.core import GuideRails, GuideRailsConfig
-
-config = GuideRailsConfig(
-    max_iterations=10,
-    timeout_seconds=60,
-    abort_on_failure=True
-)
-guardrails = GuideRails(config=config)
-```
-
-## Best Practices
-
-1. **Specific roles** — narrow roles produce better results than generic ones
-2. **Clear goals** — state what success looks like
-3. **Minimal tools** — only attach tools the agent actually needs
-4. **Output validation** — use Pydantic models for structured outputs
-5. **Event logging** — always enable for debugging and monitoring
+1. Clarify markets / style / risk preference (2–3 choices)
+2. Distill `name=飞廉`, `role=进取型全市场交易分析师`, full `system_prompt`
+3. Call `create_avatar(...)`
+4. Reply: 飞廉已加入分身列表，可直接点开或 @ 它

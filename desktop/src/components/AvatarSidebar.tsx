@@ -513,6 +513,26 @@ export function AvatarSidebar() {
     })();
   };
 
+  const openOrFocusPaneRef = useRef(openOrFocusPane);
+  openOrFocusPaneRef.current = openOrFocusPane;
+
+  useEffect(() => {
+    const onAvatarsChanged = (event: Event) => {
+      const detail = (event as CustomEvent<{ avatarId?: string; name?: string; openPane?: boolean }>).detail;
+      const avatarId = String(detail?.avatarId ?? "").trim();
+      const avatarName = String(detail?.name ?? "").trim();
+      const shouldOpen = detail?.openPane !== false;
+      void (async () => {
+        await refreshAvatars();
+        if (shouldOpen && avatarId) {
+          openOrFocusPaneRef.current(avatarId, avatarName || avatarId);
+        }
+      })();
+    };
+    window.addEventListener("agenticx:avatars:changed", onAvatarsChanged);
+    return () => window.removeEventListener("agenticx:avatars:changed", onAvatarsChanged);
+  }, [refreshAvatars]);
+
   const openOrFocusGroupPane = (group: { id: string; name: string }) => {
     const groupAvatarId = `group:${group.id}`;
     const existing = panes.find((item) => item.avatarId === groupAvatarId);
