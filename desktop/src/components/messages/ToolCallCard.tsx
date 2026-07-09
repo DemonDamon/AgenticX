@@ -250,6 +250,23 @@ export function ToolCallCard({
       readyForPreview: /<svg\b/i.test(widgetCode),
     };
   }, [message.toolArgsPartial, message.toolStatus, toolName]);
+  const hasStream = (message.toolStreamLines?.length ?? 0) > 0;
+  const skillPreviewPayload = useMemo(() => {
+    if ((message.toolName ?? "").trim() !== "skill_manage") return null;
+    return parseSkillPatchPreviewPayload(message.content);
+  }, [message.toolName, message.content]);
+  const skillManageError = useMemo(() => {
+    if ((message.toolName ?? "").trim() !== "skill_manage") return null;
+    return parseSkillManageError(message.content);
+  }, [message.toolName, message.content]);
+
+  // Keep this effect above any early return so the hook count/order stays
+  // stable across renders (show_widget streaming paths return before the
+  // component's later JSX, which previously left this effect unreachable
+  // on some renders → "Rendered more hooks than during the previous render").
+  useEffect(() => {
+    if (shouldForceExpand) setExpanded(true);
+  }, [shouldForceExpand]);
 
   // show_widget with valid payload → render inline (no collapsible chrome)
   if (toolName === "show_widget" && widgetPayload) {
@@ -303,16 +320,7 @@ export function ToolCallCard({
     ? ShieldAlert
     : pickToolIcon(toolName || extractToolSummary(message.content).split(/\s/)[0] || "tool");
   const status = message.toolStatus;
-  const hasStream = (message.toolStreamLines?.length ?? 0) > 0;
   const hasDetail = !isHookBlocked && (message.content.length > 0 || hasStream);
-  const skillPreviewPayload = useMemo(() => {
-    if ((message.toolName ?? "").trim() !== "skill_manage") return null;
-    return parseSkillPatchPreviewPayload(message.content);
-  }, [message.toolName, message.content]);
-  const skillManageError = useMemo(() => {
-    if ((message.toolName ?? "").trim() !== "skill_manage") return null;
-    return parseSkillManageError(message.content);
-  }, [message.toolName, message.content]);
 
   const iconColorClass = isHookBlocked ? "text-amber-400" : iconTone(status);
 
@@ -334,10 +342,6 @@ export function ToolCallCard({
     sec != null && Number.isFinite(sec) && (status === "running" || status === "pending") ? (
       <span className="shrink-0 text-[12px] text-text-faint tabular-nums">{sec}s</span>
     ) : null;
-
-  useEffect(() => {
-    if (shouldForceExpand) setExpanded(true);
-  }, [shouldForceExpand]);
 
   const expandedDetailClass =
     variant === "flat"
