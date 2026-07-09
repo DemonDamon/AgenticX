@@ -164,8 +164,12 @@ async def test_bg_stop() -> None:
 async def test_bg_ownership() -> None:
     session_a = StudioSession()
     session_b = StudioSession()
-    session_a.session_id = "session-a"
-    session_b.session_id = "session-b"
+    # Real production sessions carry the id as `_session_id` (see
+    # studio/server.py `setattr(session, "_session_id", ...)`), not
+    # `session_id` — assert against the real attribute to catch ownership
+    # isolation regressions.
+    setattr(session_a, "_session_id", "session-a")
+    setattr(session_b, "_session_id", "session-b")
     cmd = _python_cmd("import time; print('owned', flush=True); time.sleep(2)")
     started = await agent_tools._tool_bash_bg_start(
         {"command": cmd, "first_wait_sec": 1},
@@ -192,6 +196,23 @@ async def test_bg_reuses_safety_gate(monkeypatch: pytest.MonkeyPatch) -> None:
         emit_event=None,
     )
     assert "CANCELLED: user denied non-whitelisted command" in out
+
+
+def test_bg_session_id_reads_underscore_prefixed_attribute() -> None:
+    """Guards against regressing to the wrong `session_id` attribute name.
+
+    Real StudioSession instances only ever get `_session_id` set (see
+    studio/server.py); if this helper reads `session_id` instead, every real
+    session collapses into the same "default" bucket and job ownership
+    isolation silently breaks in production while unit tests (which may set
+    either attribute) keep passing.
+    """
+    session = StudioSession()
+    setattr(session, "_session_id", "real-session-123")
+    assert agent_tools._bash_bg_session_id(session) == "real-session-123"
+
+    bare_session = StudioSession()
+    assert agent_tools._bash_bg_session_id(bare_session) == "default"
 
 
 def test_prompt_contains_interactive_rule() -> None:

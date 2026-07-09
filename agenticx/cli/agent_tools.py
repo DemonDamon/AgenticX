@@ -2858,10 +2858,17 @@ def _extract_auth_urls(text: str) -> List[str]:
 
 
 def _bash_bg_session_id(session: Optional[StudioSession]) -> str:
-    """Stable session id key for ownership checks."""
+    """Stable session id key for ownership checks.
+
+    Real ``StudioSession`` instances carry the session id as ``_session_id``
+    (set via ``setattr(session, "_session_id", ...)`` in ``studio/server.py``);
+    the class has no ``session_id`` field. Reading the wrong attribute would
+    make every session collapse into the same "default" bucket and defeat
+    background-job ownership isolation across sessions.
+    """
     if session is None:
         return "default"
-    sid = str(getattr(session, "session_id", "") or "").strip()
+    sid = str(getattr(session, "_session_id", "") or getattr(session, "session_id", "") or "").strip()
     return sid or "default"
 
 
