@@ -7,7 +7,7 @@ type Props = {
   toolCount: number;
   /** 该 block 是否正处于流式执行中（true 时强制展开、不折叠） */
   active: boolean;
-  /** 折叠阈值，默认 3 */
+  /** 折叠阈值，默认 5（≥5 次工具调用才套折叠外壳） */
   threshold?: number;
   children: React.ReactNode;
 };
@@ -17,7 +17,7 @@ type Props = {
  * 仅当工具调用轮数达到阈值时才套折叠外壳；未达阈值时原样透传，保持现状。
  * 流式执行中保持展开让用户看到进度，回合结束后自动折叠。
  */
-export function ReactWorkCollapse({ toolCount, active, threshold = 3, children }: Props) {
+export function ReactWorkCollapse({ toolCount, active, threshold = 5, children }: Props) {
   const [collapsed, setCollapsed] = React.useState(false);
 
   React.useEffect(() => {
