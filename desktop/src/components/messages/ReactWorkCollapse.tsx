@@ -1,5 +1,5 @@
 import * as React from "react";
-import { ChevronDown, ChevronRight, Sparkles } from "lucide-react";
+import { ChevronDown, ChevronRight, ListTree } from "lucide-react";
 import { ASSISTANT_ICON_RAIL_CLASS, REACT_RAIL_ICON_CLASS, REACT_RAIL_TITLE_CLASS } from "./im-layout";
 
 type Props = {
@@ -40,7 +40,7 @@ export function ReactWorkCollapse({ toolCount, active, threshold = 5, children }
         className="flex w-full max-w-full items-center justify-start gap-2 px-3 py-1 text-left"
       >
         <span className={ASSISTANT_ICON_RAIL_CLASS}>
-          <Sparkles className={`h-[18px] w-[18px] shrink-0 ${REACT_RAIL_ICON_CLASS}`} strokeWidth={2.2} aria-hidden />
+          <ListTree className={`h-[18px] w-[18px] shrink-0 ${REACT_RAIL_ICON_CLASS}`} strokeWidth={2.2} aria-hidden />
         </span>
         <span className="flex min-w-0 flex-1 items-center gap-1">
           <span className={`truncate ${REACT_RAIL_TITLE_CLASS}`}>已思考并调用 {toolCount} 次工具</span>
@@ -55,7 +55,7 @@ export function ReactWorkCollapse({ toolCount, active, threshold = 5, children }
       </button>
       {!collapsed && (
         <div className="relative ml-4 mt-1 min-w-0 pb-1">
-          {/* 竖向虚线：对齐到顶部 Sparkles 图标正下方（header 图标中心 22px − ml-4 的 16px = 6px）。
+          {/* 竖向虚线：对齐到顶部 ListTree 图标正下方（header 图标中心 22px − ml-4 的 16px = 6px）。
               每行 pl-3 让子行图标左缘落到标题「已」字处；圆点用 top-1 + h-[20px] 居中，
               精确对齐子行「py-1 + 20px 图标」的图标中心（4 + 10 = 14px）。 */}
           <div
