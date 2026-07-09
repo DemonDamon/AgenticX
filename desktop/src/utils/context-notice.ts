@@ -26,6 +26,7 @@ function detectKindFromText(text: string): ContextNoticeKind | null {
   return null;
 }
 
+/** keep in sync with agenticx/studio/compaction_notice.py build_compaction_notice_content */
 export function buildCompactionNoticeText(count: number, reactive: boolean): string {
   if (reactive) {
     return `上下文接近上限，已压缩 ${count} 条历史，任务继续。`;

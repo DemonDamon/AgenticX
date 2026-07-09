@@ -299,6 +299,14 @@ export function mapLoadedSessionMessage(
         if (m.suspended === true) mapped.clarificationSuspended = true;
       }
     }
+    // Restore compaction noticeKind from persisted metadata so ContextNoticeLine
+    // survives session switch / reload without relying on Chinese text matching.
+    if (meta && typeof meta === "object") {
+      const kind = String((meta as Record<string, unknown>).kind ?? "").trim();
+      if (kind === "compaction_proactive" || kind === "compaction_reactive") {
+        mapped.noticeKind = kind;
+      }
+    }
   }
   return mapped;
 }

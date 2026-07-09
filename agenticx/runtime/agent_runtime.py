@@ -1958,6 +1958,9 @@ class AgentRuntime:
         except Exception:
             pass
         _is_system_trigger = user_input.startswith("[系统通知]")
+        # Defer chat_history compaction notice until after the user row is appended
+        # so transcript order stays [user] → [compaction notice] → [assistant].
+        pending_compaction_notice_count: Optional[int] = None
         if did_compact:
             yield RuntimeEvent(
                 type=EventType.COMPACTION.value,
@@ -1985,6 +1988,9 @@ class AgentRuntime:
                         ),
                     },
                 )
+            # Visible notice is deferred (system triggers stay silent for users).
+            if not _is_system_trigger:
+                pending_compaction_notice_count = int(compacted_count)
         user_content: Any = user_message_content if user_message_content is not None else user_input
         messages.append({"role": "user", "content": user_content})
         if persist_user_message:
@@ -1997,6 +2003,7 @@ class AgentRuntime:
             session.agent_messages.append(am_user)
         await self.hooks.run_on_agent_start(session, agent_id, user_input)
         synced_session_message_count = len(session.agent_messages)
+        _should_mid_turn_persist = False
         if persist_user_message and not _is_system_trigger:
             hist_user: dict[str, Any] = {"role": "user", "content": user_input}
             if history_user_attachments:
@@ -2004,16 +2011,11 @@ class AgentRuntime:
             _chat_history_append_deduped(session.chat_history, hist_user)
             # Set current user intent for goal anchor injection (FR-1)
             session.current_user_intent = user_input
+            _should_mid_turn_persist = True
             # Persist the user turn to disk immediately. Otherwise messages.json
             # lags until the first mid-turn checkpoint, and a client that reloads
             # this session (e.g. switching away and back) reads a stale snapshot
             # missing the just-sent user turn -- the message appears to vanish.
-            if self._mid_turn_persist is not None:
-                try:
-                    self._mid_turn_persist()
-                    self._last_persist_time = time.time()
-                except Exception:
-                    pass
         elif not _is_system_trigger:
             # skip_user_history still feeds the model, but Desktop must show the
             # user bubble after reload. Append a display row when the tail does
@@ -2033,12 +2035,26 @@ class AgentRuntime:
                         hist_user["attachments"] = list(history_user_attachments)
                     _chat_history_append_deduped(session.chat_history, hist_user)
                     session.current_user_intent = user_input
-                    if self._mid_turn_persist is not None:
-                        try:
-                            self._mid_turn_persist()
-                            self._last_persist_time = time.time()
-                        except Exception:
-                            pass
+                    _should_mid_turn_persist = True
+        # FR-1: append visible compaction notice after the user chat_history row
+        # so reload order is [user] → [compaction notice] → [assistant].
+        if pending_compaction_notice_count is not None:
+            from agenticx.studio.compaction_notice import append_or_update_compaction_notice
+
+            append_or_update_compaction_notice(
+                session,
+                count=pending_compaction_notice_count,
+                reactive=False,
+                agent_id=agent_id,
+            )
+            pending_compaction_notice_count = None
+            _should_mid_turn_persist = True
+        if _should_mid_turn_persist and self._mid_turn_persist is not None:
+            try:
+                self._mid_turn_persist()
+                self._last_persist_time = time.time()
+            except Exception:
+                pass
         status_query_total = 0
         status_query_attempts_total = 0
         max_status_queries_per_turn = _resolve_status_query_budget_per_turn()
@@ -2820,6 +2836,16 @@ class AgentRuntime:
                                 "summary": react_summary,
                                 "reactive": True,
                             },
+                            agent_id=agent_id,
+                        )
+                        # FR-2: persist reactive compaction notice into chat_history
+                        # so reload / session switch still shows the ContextNoticeLine.
+                        from agenticx.studio.compaction_notice import append_or_update_compaction_notice
+
+                        append_or_update_compaction_notice(
+                            session,
+                            count=react_count,
+                            reactive=True,
                             agent_id=agent_id,
                         )
                     # FR-5: surface compactor circuit-breaker tripping so the user
