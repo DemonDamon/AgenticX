@@ -25,6 +25,7 @@ import {
   type SkillPatchPreviewPayload,
 } from "./skill-manage-preview";
 import { parseWidgetPayload, isBrokenStockChartAttempt, stockChartDegradedMessage } from "./widget-preview";
+import { parseBashBgStart } from "./bash-bg-preview";
 import { openExternalUrl } from "../../utils/open-external";
 import { isHookBlockedToolMessage } from "../../utils/hook-block-message";
 
@@ -222,11 +223,16 @@ export function ToolCallCard({
     const hay = message.content.toLocaleLowerCase();
     return normalizedTerms.some((t) => hay.includes(t.toLocaleLowerCase()));
   }, [message.content, normalizedTerms]);
-  const shouldForceExpand = forceExpand || matchedByHighlight;
+  const toolName = (message.toolName ?? "").trim();
+  const bashBgAuth = useMemo(() => {
+    if (toolName !== "bash_bg_start") return null;
+    return parseBashBgStart(message.content);
+  }, [toolName, message.content]);
+  const hasBashBgAuthUrls = (bashBgAuth?.authUrls?.length ?? 0) > 0;
+  const shouldForceExpand = forceExpand || matchedByHighlight || hasBashBgAuthUrls;
   const [expanded, setExpanded] = useState(shouldForceExpand);
 
   const title = useMemo(() => buildToolCardTitle(message), [message]);
-  const toolName = (message.toolName ?? "").trim();
 
   // show_widget with valid payload → render inline (no collapsible chrome)
   if (toolName === "show_widget" && widgetPayload) {
@@ -332,6 +338,64 @@ export function ToolCallCard({
               {skillManageError.detail}
             </div>
           ) : null}
+        </div>
+      ) : null}
+      {toolName === "bash_bg_start" && hasBashBgAuthUrls ? (
+        <div className="rounded border border-border bg-surface-card px-2 py-2 text-[12px]">
+          <div className="mb-1 flex items-center justify-between gap-2">
+            <span className="font-medium text-text-strong">需要授权/扫码</span>
+            <span
+              className={`rounded px-1.5 py-0.5 text-[10px] ${
+                bashBgAuth?.status === "running"
+                  ? "bg-amber-500/15 text-amber-300"
+                  : bashBgAuth?.status === "exited"
+                    ? "bg-emerald-500/15 text-emerald-300"
+                    : "bg-surface-card-strong text-text-faint"
+              }`}
+            >
+              {bashBgAuth?.status === "running" ? "运行中" : bashBgAuth?.status === "exited" ? "已结束" : "未知"}
+            </span>
+          </div>
+          <div className="space-y-1.5">
+            {bashBgAuth?.authUrls.map((url) => (
+              <div key={url} className="flex flex-wrap items-center gap-2">
+                <button
+                  type="button"
+                  className="break-all text-left text-cyan-500 underline underline-offset-2 hover:text-cyan-400"
+                  onClick={() => openExternalUrl(url)}
+                >
+                  {url}
+                </button>
+                <button
+                  type="button"
+                  className="rounded border border-border px-1.5 py-0.5 text-[11px] text-text-subtle hover:bg-surface-card-strong"
+                  onClick={() => void navigator.clipboard.writeText(url)}
+                >
+                  复制链接
+                </button>
+              </div>
+            ))}
+          </div>
+          <p className="mt-2 text-[11px] text-text-subtle">
+            请用飞书/对应 App 扫码或点击链接完成授权，完成后回到对话告诉我。
+          </p>
+          <button
+            type="button"
+            className="mt-2 inline-flex items-center gap-1 rounded border border-border px-2 py-1 text-[11px] text-text-subtle hover:bg-surface-card-strong"
+            onClick={() => {
+              window.dispatchEvent(
+                new CustomEvent("agx:open-terminal", {
+                  detail: {
+                    cwd: bashBgAuth?.cwd ?? "",
+                    command: bashBgAuth?.command ?? "",
+                  },
+                })
+              );
+            }}
+          >
+            <Terminal className="h-3 w-3" />
+            在工作区终端打开
+          </button>
         </div>
       ) : null}
       {message.content && !isHookBlocked && !skillPreviewPayload && !skillManageError && !widgetPayload ? (

@@ -77,6 +77,11 @@ type SessionListItem = {
   archived?: boolean;
 };
 
+type OpenTerminalEventDetail = {
+  cwd?: string;
+  command?: string;
+};
+
 function isSessionAvatarMatch(item: SessionListItem, avatarId?: string | null): boolean {
   const targetAvatarId = (avatarId ?? "").trim();
   const itemAvatarId = String(item.avatar_id ?? "").trim();
@@ -653,6 +658,25 @@ export function WorkspacePanel({
     setErrorText("");
     addPaneTerminalTab(paneId, p, labelHint);
   };
+
+  useEffect(() => {
+    const onOpenTerminalEvent = (event: Event) => {
+      const custom = event as CustomEvent<OpenTerminalEventDetail>;
+      const detail = custom.detail ?? {};
+      const candidate = String(detail.cwd ?? "").trim();
+      const fallback = String(activeTaskspace?.path ?? taskspaces[0]?.path ?? "").trim();
+      const cwd = candidate || fallback;
+      if (!cwd) {
+        setErrorText("无法打开终端：未提供可用目录");
+        return;
+      }
+      openTerminalForPath(cwd, "授权");
+    };
+    window.addEventListener("agx:open-terminal", onOpenTerminalEvent as EventListener);
+    return () => {
+      window.removeEventListener("agx:open-terminal", onOpenTerminalEvent as EventListener);
+    };
+  }, [activeTaskspace?.path, paneId, taskspaces]);
 
   const revealInFileManager = async (absPath: string) => {
     const p = (absPath || "").trim();
