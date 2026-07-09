@@ -8,6 +8,7 @@ import type { HtmlWidgetPayload, WidgetPayload } from "./widget-preview";
 
 type Props = {
   payload: WidgetPayload;
+  streaming?: boolean;
 };
 
 const CDN_ALLOW =
@@ -584,7 +585,7 @@ function ZoomButton({ onClick }: { onClick: () => void }) {
   );
 }
 
-export function WidgetBlock({ payload }: Props) {
+export function WidgetBlock({ payload, streaming = false }: Props) {
   const hostRef = useRef<HTMLDivElement>(null);
   const [zoomOpen, setZoomOpen] = useState(false);
 
@@ -604,29 +605,39 @@ export function WidgetBlock({ payload }: Props) {
     return (
       <>
         <div className="flex w-full justify-center">
-        <div
-          ref={hostRef}
-          className="relative w-fit max-w-full overflow-x-auto rounded-md border border-border"
-        >
-          <SvgWidget code={payload.widgetCode} preview />
-          <ZoomButton onClick={() => setZoomOpen(true)} />
-          <WidgetMenu
-            payload={payload}
-            getSvgDisplayWidth={getSvgDisplayWidth}
-            getLiveSvg={getLiveSvg}
-          />
+          <div
+            ref={hostRef}
+            className="relative w-fit max-w-full overflow-x-auto rounded-md border border-border"
+          >
+            <SvgWidget code={payload.widgetCode} preview />
+            {streaming ? (
+              <div className="absolute right-2 top-2 rounded bg-[var(--surface-popover)]/85 px-1.5 py-0.5 text-[11px] text-text-muted">
+                绘制中…
+              </div>
+            ) : (
+              <>
+                <ZoomButton onClick={() => setZoomOpen(true)} />
+                <WidgetMenu
+                  payload={payload}
+                  getSvgDisplayWidth={getSvgDisplayWidth}
+                  getLiveSvg={getLiveSvg}
+                />
+              </>
+            )}
+          </div>
         </div>
-        </div>
-        <Modal
-          open={zoomOpen}
-          title={payload.title || "查看图表"}
-          onClose={() => setZoomOpen(false)}
-          panelClassName="w-[92vw] max-w-5xl bg-surface-popover"
-        >
-          <ZoomableViewport stageWidth={900} viewportHeight="75vh">
-            <SvgWidget code={payload.widgetCode} preview={false} />
-          </ZoomableViewport>
-        </Modal>
+        {!streaming ? (
+          <Modal
+            open={zoomOpen}
+            title={payload.title || "查看图表"}
+            onClose={() => setZoomOpen(false)}
+            panelClassName="w-[92vw] max-w-5xl bg-surface-popover"
+          >
+            <ZoomableViewport stageWidth={900} viewportHeight="75vh">
+              <SvgWidget code={payload.widgetCode} preview={false} />
+            </ZoomableViewport>
+          </Modal>
+        ) : null}
       </>
     );
   }

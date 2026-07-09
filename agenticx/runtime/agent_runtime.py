@@ -81,6 +81,8 @@ else:
 
 
 MAX_TOOL_ROUNDS = 10
+SHOW_WIDGET_DELTA_MIN_INTERVAL_MS = 120
+SHOW_WIDGET_DELTA_MIN_CHARS = 800
 
 
 def _session_disk_dir(session: Any) -> Optional[Path]:
@@ -677,6 +679,43 @@ def _reset_llm_timeout_retry_count(session: StudioSession) -> None:
     sp = getattr(session, "scratchpad", None)
     if isinstance(sp, dict):
         sp.pop("_llm_round_timeout_count", None)
+
+
+def _should_emit_show_widget_delta(
+    emit_state: Dict[int, Dict[str, float]],
+    idx: int,
+    arguments_raw: str,
+    *,
+    force: bool = False,
+    now_mono: Optional[float] = None,
+) -> bool:
+    """Decide whether a progressive ``show_widget`` delta should be emitted.
+
+    Emits the very first frame immediately (even empty args) so UI can paint a
+    loading scaffold, then throttles by argument growth / elapsed time.
+    """
+    state = emit_state.setdefault(idx, {"last_emit_mono": 0.0, "last_len": -1.0})
+    last_len = int(state.get("last_len", -1.0))
+    current_len = len(arguments_raw or "")
+    if last_len < 0:
+        state["last_emit_mono"] = float(now_mono if now_mono is not None else time.monotonic())
+        state["last_len"] = float(current_len)
+        return True
+    if current_len <= last_len:
+        return False
+    if force:
+        state["last_emit_mono"] = float(now_mono if now_mono is not None else time.monotonic())
+        state["last_len"] = float(current_len)
+        return True
+    last_emit_mono = float(state.get("last_emit_mono", 0.0))
+    now = float(now_mono if now_mono is not None else time.monotonic())
+    growth = current_len - last_len
+    elapsed_ms = (now - last_emit_mono) * 1000.0
+    if growth < SHOW_WIDGET_DELTA_MIN_CHARS and elapsed_ms < SHOW_WIDGET_DELTA_MIN_INTERVAL_MS:
+        return False
+    state["last_emit_mono"] = now
+    state["last_len"] = float(current_len)
+    return True
 
 
 def _streamed_tool_call_truncated(name: str, args_obj: Dict[str, Any]) -> bool:
@@ -2320,6 +2359,7 @@ class AgentRuntime:
                                 queue_put(None)
 
                         tool_calls_acc: Dict[int, Dict[str, str]] = {}
+                        show_widget_delta_state: Dict[int, Dict[str, float]] = {}
                         stream_usage: Dict[str, int] = {}
 
                         def _safe_int(value: Any) -> int:
@@ -2423,6 +2463,46 @@ class AgentRuntime:
                                     acc["name"] = tool_name
                                 if args_delta:
                                     acc["arguments"] += args_delta
+                                accumulated_name = str(acc.get("name") or "").strip()
+                                if accumulated_name == "show_widget":
+                                    current_args = str(acc.get("arguments") or "")
+                                    if _should_emit_show_widget_delta(
+                                        show_widget_delta_state,
+                                        idx,
+                                        current_args,
+                                    ):
+                                        yield RuntimeEvent(
+                                            type=EventType.TOOL_CALL_DELTA.value,
+                                            data={
+                                                "name": "show_widget",
+                                                "tool_call_id": str(acc.get("id") or f"stream-pending-{idx}"),
+                                                "arguments_raw": current_args,
+                                                "partial": True,
+                                            },
+                                            agent_id=agent_id,
+                                        )
+                        for idx in sorted(tool_calls_acc.keys()):
+                            item = tool_calls_acc[idx]
+                            accumulated_name = str(item.get("name") or "").strip()
+                            if accumulated_name != "show_widget":
+                                continue
+                            current_args = str(item.get("arguments") or "")
+                            if _should_emit_show_widget_delta(
+                                show_widget_delta_state,
+                                idx,
+                                current_args,
+                                force=True,
+                            ):
+                                yield RuntimeEvent(
+                                    type=EventType.TOOL_CALL_DELTA.value,
+                                    data={
+                                        "name": "show_widget",
+                                        "tool_call_id": str(item.get("id") or f"stream-pending-{idx}"),
+                                        "arguments_raw": current_args,
+                                        "partial": True,
+                                    },
+                                    agent_id=agent_id,
+                                )
                         # FR-C：流式工具调用偶尔因 token 紧张被截断 → arguments 字段为空。
                         # 如果该工具有 required 参数（如 file_write），则不要把空参数派发出去，
                         # 改成丢弃并往本轮 response_text 追加一条 retry hint，让下一轮 LLM

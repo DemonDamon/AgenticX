@@ -381,3 +381,28 @@ def test_sanitize_context_messages_placeholders_empty_assistant_with_tools() -> 
     assert sanitized[0]["role"] == "assistant"
     assert sanitized[0]["content"] == " "
     assert sanitized[0]["tool_calls"]
+
+
+def test_should_emit_show_widget_delta_first_frame_and_throttle() -> None:
+    from agenticx.runtime.agent_runtime import _should_emit_show_widget_delta
+
+    state: Dict[int, Dict[str, float]] = {}
+    assert _should_emit_show_widget_delta(state, 0, "", now_mono=1.0) is True
+    # No growth: do not emit repeatedly.
+    assert _should_emit_show_widget_delta(state, 0, "", now_mono=1.2) is False
+    # Small growth + short interval: still throttled.
+    assert _should_emit_show_widget_delta(state, 0, "x" * 100, now_mono=1.06) is False
+    # Enough interval: emit.
+    assert _should_emit_show_widget_delta(state, 0, "x" * 100, now_mono=1.2) is True
+    # Large growth: emit even before interval threshold.
+    huge = "x" * 1200
+    assert _should_emit_show_widget_delta(state, 0, huge, now_mono=1.25) is True
+
+
+def test_should_emit_show_widget_delta_force_flush_only_when_new_data() -> None:
+    from agenticx.runtime.agent_runtime import _should_emit_show_widget_delta
+
+    state: Dict[int, Dict[str, float]] = {}
+    assert _should_emit_show_widget_delta(state, 1, "", now_mono=2.0) is True
+    assert _should_emit_show_widget_delta(state, 1, "", force=True, now_mono=2.1) is False
+    assert _should_emit_show_widget_delta(state, 1, "<svg", force=True, now_mono=2.2) is True

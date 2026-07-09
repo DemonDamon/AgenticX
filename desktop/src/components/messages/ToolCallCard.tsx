@@ -25,6 +25,7 @@ import {
   type SkillPatchPreviewPayload,
 } from "./skill-manage-preview";
 import { parseWidgetPayload, isBrokenStockChartAttempt, stockChartDegradedMessage } from "./widget-preview";
+import { extractPartialShowWidgetArgs, finalizePartialSvg } from "./show-widget-partial";
 import { parseBashBgStart } from "./bash-bg-preview";
 import { openExternalUrl } from "../../utils/open-external";
 import { isHookBlockedToolMessage } from "../../utils/hook-block-message";
@@ -233,12 +234,51 @@ export function ToolCallCard({
   const [expanded, setExpanded] = useState(shouldForceExpand);
 
   const title = useMemo(() => buildToolCardTitle(message), [message]);
+  const showWidgetPartial = useMemo(() => {
+    if (toolName !== "show_widget") return null;
+    if (message.toolStatus !== "running" && message.toolStatus !== "pending") return null;
+    const partial = message.toolArgsPartial;
+    if (!partial) return null;
+    if (partial.argumentsRaw && typeof partial.argumentsRaw === "string") {
+      return extractPartialShowWidgetArgs(partial.argumentsRaw);
+    }
+    const widgetCode = String(partial.widgetCode ?? "");
+    const titleText = String(partial.title ?? "");
+    return {
+      title: titleText,
+      widgetCode,
+      readyForPreview: /<svg\b/i.test(widgetCode),
+    };
+  }, [message.toolArgsPartial, message.toolStatus, toolName]);
 
   // show_widget with valid payload → render inline (no collapsible chrome)
   if (toolName === "show_widget" && widgetPayload) {
     return (
       <div className="w-full min-w-0 px-4">
         <WidgetBlock payload={widgetPayload} />
+      </div>
+    );
+  }
+  if (toolName === "show_widget" && showWidgetPartial?.readyForPreview) {
+    const widgetCode = finalizePartialSvg(showWidgetPartial.widgetCode) ?? showWidgetPartial.widgetCode;
+    return (
+      <div className="w-full min-w-0 px-4">
+        <WidgetBlock
+          payload={{
+            title: showWidgetPartial.title || "可视化图表",
+            widgetCode,
+            loadingMessages: [],
+            kind: "svg",
+          }}
+          streaming
+        />
+      </div>
+    );
+  }
+  if (toolName === "show_widget" && message.toolStatus === "running" && showWidgetPartial && !showWidgetPartial.readyForPreview) {
+    return (
+      <div className="w-full min-w-0 rounded border border-border bg-surface-card px-3 py-2 text-[12px] text-text-muted">
+        {showWidgetPartial.title ? `${showWidgetPartial.title} · ` : ""}正在绘制…
       </div>
     );
   }

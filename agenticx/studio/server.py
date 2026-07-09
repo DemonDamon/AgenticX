@@ -329,6 +329,7 @@ def _runtime_event_to_sse_lines(event: RuntimeEvent) -> list[str]:
     event_data.setdefault("agent_id", event.agent_id)
     if event.type in (
         EventType.TOOL_CALL.value,
+        EventType.TOOL_CALL_DELTA.value,
         EventType.TOOL_RESULT.value,
         EventType.TOOL_PROGRESS.value,
     ):

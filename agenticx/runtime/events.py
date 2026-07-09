@@ -29,6 +29,7 @@ class EventType(str, Enum):
 
     ROUND_START = "round_start"
     TOOL_CALL = "tool_call"
+    TOOL_CALL_DELTA = "tool_call_delta"
     TOOL_PROGRESS = "tool_progress"
     TOOL_RESULT = "tool_result"
     CONFIRM_REQUIRED = "confirm_required"

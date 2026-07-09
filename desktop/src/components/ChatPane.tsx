@@ -56,6 +56,7 @@ import { SpawnsColumn } from "./SpawnsColumn";
 import { SubAgentRunDrawer } from "./subagent";
 import { MessageRenderer, renderToolMessageExtras } from "./messages/MessageRenderer";
 import type { SkillPatchPreviewPayload } from "./messages/skill-manage-preview";
+import { extractPartialShowWidgetArgs } from "./messages/show-widget-partial";
 import { groupConsecutiveToolMessages, shouldHoldToolGroupProgress, type GroupedChatRow } from "./messages/group-tool-messages";
 import {
   isEphemeralStopErrorText,
@@ -7350,6 +7351,11 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
     setStreamSearchedQueries([]);
     streamCommitRegistryRef.current.beginSession(requestSessionId);
     pendingToolResultPatchesRef.current = {};
+    const showWidgetDeltaTimers = new Map<string, number>();
+    const showWidgetDeltaPending = new Map<
+      string,
+      { argumentsRaw: string; title?: string; widgetCode?: string }
+    >();
     streamTextRef.current = "";
     const abortController = new AbortController();
     sessionAbortControllersRef.current[requestSessionId] = abortController;
@@ -7373,6 +7379,52 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
         return;
       }
       addPaneMessage(...stamped);
+    };
+    const flushShowWidgetDelta = (toolCallId: string) => {
+      const pending = showWidgetDeltaPending.get(toolCallId);
+      showWidgetDeltaPending.delete(toolCallId);
+      const timer = showWidgetDeltaTimers.get(toolCallId);
+      if (timer !== undefined) {
+        window.clearTimeout(timer);
+        showWidgetDeltaTimers.delete(toolCallId);
+      }
+      if (!pending) return;
+      const partialPayload = {
+        argumentsRaw: pending.argumentsRaw,
+        title: pending.title,
+        widgetCode: pending.widgetCode,
+      };
+      const partialToolArgs = pending.title ? { title: pending.title } : undefined;
+      const merged = updatePaneMessageByToolCallId(pane.id, toolCallId, {
+        toolName: "show_widget",
+        toolStatus: "running",
+        ...(partialToolArgs ? { toolArgs: partialToolArgs } : {}),
+        toolArgsPartial: partialPayload,
+      });
+      if (merged) return;
+      const pan = useAppStore.getState().panes.find((p) => p.id === pane.id);
+      const lastMsg = pan?.messages.length ? pan.messages[pan.messages.length - 1] : undefined;
+      const toolGroupId =
+        lastMsg?.role === "tool" && lastMsg.toolGroupId
+          ? lastMsg.toolGroupId
+          : crypto.randomUUID();
+      addPaneMessageIfSessionActive(pane.id, "tool", "", "meta", undefined, undefined, undefined, {
+        toolCallId,
+        toolName: "show_widget",
+        toolStatus: "running",
+        toolGroupId,
+        ...(partialToolArgs ? { toolArgs: partialToolArgs } : {}),
+        toolArgsPartial: partialPayload,
+      });
+    };
+    const scheduleShowWidgetDelta = (
+      toolCallId: string,
+      nextPartial: { argumentsRaw: string; title?: string; widgetCode?: string }
+    ) => {
+      showWidgetDeltaPending.set(toolCallId, nextPartial);
+      if (showWidgetDeltaTimers.has(toolCallId)) return;
+      const timer = window.setTimeout(() => flushShowWidgetDelta(toolCallId), 100);
+      showWidgetDeltaTimers.set(toolCallId, timer);
     };
     let streamReasoningStartedAt: number | null = null;
     const commitCurrentStreamIfNeeded = () => {
@@ -8069,13 +8121,31 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
                   cancelStreamRenderFrame();
                   scheduleStreamTextUpdate("");
                   if (toolCallId) {
-                    addPaneMessageIfSessionActive(pane.id, "tool", content, "meta", undefined, undefined, undefined, {
-                      toolCallId,
+                    const merged = updatePaneMessageByToolCallId(pane.id, toolCallId, {
+                      content,
                       toolName: toolNameStr,
                       toolArgs,
                       toolStatus: "running",
-                      toolGroupId,
+                      ...(toolNameStr === "show_widget" ? { toolArgsPartial: undefined } : {}),
                     });
+                    if (!merged) {
+                      addPaneMessageIfSessionActive(
+                        pane.id,
+                        "tool",
+                        content,
+                        "meta",
+                        undefined,
+                        undefined,
+                        undefined,
+                        {
+                          toolCallId,
+                          toolName: toolNameStr,
+                          toolArgs,
+                          toolStatus: "running",
+                          toolGroupId,
+                        }
+                      );
+                    }
                     const pendingPatch = pendingToolResultPatchesRef.current[toolCallId];
                     if (pendingPatch) {
                       updatePaneMessageByToolCallId(pane.id, toolCallId, pendingPatch);
@@ -8098,6 +8168,22 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
                   }
                 }
               }
+            }
+            if (payload.type === "tool_call_delta") {
+              if (eventAgentId !== "meta") continue;
+              const toolNameStr = String(payload.data?.name ?? "").trim();
+              if (toolNameStr !== "show_widget") continue;
+              const toolCallId = String(payload.data?.tool_call_id ?? payload.data?.id ?? "").trim();
+              if (!toolCallId) continue;
+              const argumentsRaw = String(payload.data?.arguments_raw ?? "");
+              const partial = extractPartialShowWidgetArgs(argumentsRaw);
+              if (!partial) continue;
+              scheduleShowWidgetDelta(toolCallId, {
+                argumentsRaw,
+                title: partial.title || undefined,
+                widgetCode: partial.widgetCode || undefined,
+              });
+              continue;
             }
             if (payload.type === "tool_result") {
               const toolName = String(payload.data?.name ?? "");
@@ -8841,6 +8927,11 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
           toolResultPreview: patch.toolResultPreview,
         });
       }
+      for (const timer of showWidgetDeltaTimers.values()) {
+        window.clearTimeout(timer);
+      }
+      showWidgetDeltaTimers.clear();
+      showWidgetDeltaPending.clear();
       releaseSendLock();
       delete sessionAbortControllersRef.current[requestSessionId];
       streamCommitRegistryRef.current.clearSession(requestSessionId);

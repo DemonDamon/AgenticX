@@ -192,6 +192,12 @@ export type Message = {
   toolCallId?: string;
   toolName?: string;
   toolArgs?: Record<string, unknown>;
+  /** In-memory progressive show_widget arguments preview (not persisted). */
+  toolArgsPartial?: {
+    title?: string;
+    widgetCode?: string;
+    argumentsRaw?: string;
+  };
   toolStatus?: ToolCallStatus;
   toolElapsedSec?: number;
   /** One-line preview for collapsed header while running or after done. */
@@ -235,6 +241,7 @@ export type MessageToolExtras = Pick<
   | "toolCallId"
   | "toolName"
   | "toolArgs"
+  | "toolArgsPartial"
   | "toolStatus"
   | "toolElapsedSec"
   | "toolResultPreview"
@@ -584,6 +591,9 @@ type AppState = {
         | "toolElapsedSec"
         | "toolResultPreview"
         | "toolStreamLines"
+        | "toolName"
+        | "toolArgs"
+        | "toolArgsPartial"
         | "inlineConfirm"
         | "clarificationPrompt"
         | "metadata"
@@ -603,6 +613,9 @@ type AppState = {
         | "toolElapsedSec"
         | "toolResultPreview"
         | "toolStreamLines"
+        | "toolName"
+        | "toolArgs"
+        | "toolArgsPartial"
         | "inlineConfirm"
         | "clarificationPrompt"
         | "metadata"
