@@ -68,6 +68,7 @@ import { isSubAgentLiveStatus, shouldHideStreamOverlay, shouldShowMidTurnStreamA
 import { flushSubAgentLiveOutput } from "../utils/subagent-live-output";
 import { resolveSubAgentOutputPaths } from "../utils/subagent-output-files";
 import { TurnToolGroupCard } from "./messages/TurnToolGroupCard";
+import { ReactWorkCollapse } from "./messages/ReactWorkCollapse";
 import { WorkingIndicator } from "./messages/WorkingIndicator";
 import { ChatImAvatar, ImBubble } from "./messages/ImBubble";
 import { MessageTimestamp } from "./messages/MessageTimestamp";
@@ -6309,6 +6310,19 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
                       const tailRow =
                         rhythmEndIdx < groupedWork.length ? groupedWork[rhythmEndIdx] : null;
 
+                      // 过程折叠：到「最后一个 tool_group」为止的思考行 + 工具组折成一张过程卡；
+                      // 其后的行（含最终回答 / 流式行）不进折叠。轮数 ≥3 且非执行中时默认折叠。
+                      const processEnd = lastToolGroupIdxInWork >= 0 ? lastToolGroupIdxInWork + 1 : 0;
+                      const processHeadRows = headRows.slice(0, processEnd);
+                      const afterProcessHeadRows = headRows.slice(processEnd);
+                      const processToolCount = processHeadRows.reduce(
+                        (n, r) => n + (r.kind === "tool_group" ? r.messages.length : 0),
+                        0,
+                      );
+                      const isLastBlock =
+                        topLevelRowsIm !== null && segIdx === topLevelRowsIm.length - 1;
+                      const collapseActive = hasStreamingRow || (isLastBlock && sessionWorkInProgress);
+
                       const renderReActBlockActionIcons = () => (
                         <div className={ASSISTANT_ACTION_ICON_ROW_CLASS} style={reactActionStyle}>
                           <HoverTip label="复制">
@@ -6431,7 +6445,10 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
 
                       return (
                         <div className="min-w-0 flex-1 overflow-hidden">
-                          {headRows.map((r, i) => mapGroupedRow(r, i))}
+                          <ReactWorkCollapse toolCount={processToolCount} active={collapseActive}>
+                            {processHeadRows.map((r, i) => mapGroupedRow(r, i))}
+                          </ReactWorkCollapse>
+                          {afterProcessHeadRows.map((r, i) => mapGroupedRow(r, processEnd + i))}
                           {actionTailReady && tailRow ? (
                             <div className={ASSISTANT_ACTION_RHYTHM_END_CLASS}>
                               {mapGroupedRow(tailRow, rhythmEndIdx)}

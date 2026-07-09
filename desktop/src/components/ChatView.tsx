@@ -41,6 +41,7 @@ import { shouldHideStreamOverlay, shouldShowMidTurnStreamActivity } from "../uti
 import { flushSubAgentLiveOutput } from "../utils/subagent-live-output";
 import { resolveSubAgentOutputPaths } from "../utils/subagent-output-files";
 import { TurnToolGroupCard } from "./messages/TurnToolGroupCard";
+import { ReactWorkCollapse } from "./messages/ReactWorkCollapse";
 import { messagePlainTextForClipboard } from "../utils/markdown-copy-format";
 import { buildCompactionNoticeText } from "../utils/context-notice";
 import { StallRecoveryCard } from "./messages/StallRecoveryCard";
@@ -2479,17 +2480,30 @@ export function ChatView({ onOpenConfirm, onOpenClarification, onSubmitClarifica
                   (acc, groupedRow, index) => (groupedRow.kind === "tool_group" ? index : acc),
                   -1,
                 );
+                // 过程段 = 到「最后一个 tool_group」为止的所有行（思考行 + 工具组）；
+                // tail = 其后的行（最终回答等），永不折叠。
+                const processRows =
+                  lastToolGroupIdxInWork >= 0 ? groupedWork.slice(0, lastToolGroupIdxInWork + 1) : [];
+                const tailRows = groupedWork.slice(lastToolGroupIdxInWork + 1);
+                const processToolCount = processRows.reduce(
+                  (n, r) => n + (r.kind === "tool_group" ? r.messages.length : 0),
+                  0,
+                );
+                const isLastBlock = segIdx === topLevelRowsIm.length - 1;
                 return (
                   <div key={blockKey} className="space-y-3">
                     <div className="flex min-w-0 items-start gap-2">
                       <div className="flex min-w-0 flex-1 flex-col gap-3">
-                        {groupedWork.map((r, i) =>
-                          renderGroupedChatRow(
-                            r,
-                            true,
-                            r.kind === "tool_group" && i === lastToolGroupIdxInWork ? workMessages : undefined,
-                          ),
-                        )}
+                        <ReactWorkCollapse toolCount={processToolCount} active={streaming && isLastBlock}>
+                          {processRows.map((r, i) =>
+                            renderGroupedChatRow(
+                              r,
+                              true,
+                              r.kind === "tool_group" && i === lastToolGroupIdxInWork ? workMessages : undefined,
+                            ),
+                          )}
+                        </ReactWorkCollapse>
+                        {tailRows.map((r) => renderGroupedChatRow(r, true, undefined))}
                       </div>
                     </div>
                     {finalAssistant ? renderGroupedChatRow({ kind: "message", message: finalAssistant }, false) : null}
