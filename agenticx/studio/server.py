@@ -247,6 +247,41 @@ def _runtime_error_counts_as_failure(event: RuntimeEvent) -> bool:
     return True
 
 
+def _record_last_turn_failure(session: Any, event: RuntimeEvent) -> None:
+    """Persist compact diagnostic context for continuation prompts and notices."""
+    if event.type not in {EventType.ERROR.value, EventType.ROUND_END.value}:
+        return
+    data = event.data if isinstance(event.data, dict) else {}
+    detector = str(data.get("detector", "") or "").strip().lower()
+    if not detector and event.type == EventType.ROUND_END.value:
+        reason = str(data.get("reason", "") or "").strip().lower()
+        if reason == "streamed_tool_call_truncated":
+            detector = reason
+    text = str(data.get("text", "") or "").strip()
+    if not detector and not text:
+        return
+    scratchpad = getattr(session, "scratchpad", None)
+    if not isinstance(scratchpad, dict):
+        scratchpad = {}
+        setattr(session, "scratchpad", scratchpad)
+    scratchpad["__last_turn_failure__"] = {
+        "detector": detector,
+        "text": text[:200],
+        "ts": time.time(),
+    }
+
+
+def _last_turn_failure_detector(session: Any) -> str | None:
+    scratchpad = getattr(session, "scratchpad", None)
+    if not isinstance(scratchpad, dict):
+        return None
+    raw = scratchpad.get("__last_turn_failure__")
+    if not isinstance(raw, dict):
+        return None
+    detector = str(raw.get("detector", "") or "").strip().lower()
+    return detector or None
+
+
 def _resolve_chat_end_execution_state(
     manager: SessionManager,
     session_id: str,
@@ -433,6 +468,7 @@ async def _finalize_chat_runtime(
     saw_final: bool,
     had_runtime_failure: bool,
     interruption_cause: str | None = None,
+    interruption_detector: str | None = None,
 ) -> None:
     from agenticx.studio.turn_interruption import (
         append_turn_interruption_notice,
@@ -445,6 +481,7 @@ async def _finalize_chat_runtime(
         [m for m in history if isinstance(m, dict)]
     )
     cause = interruption_cause
+    detector = interruption_detector or _last_turn_failure_detector(session)
     if deferred_action:
         append_turn_interruption_notice(session, cause="deferred_action", saw_final=False)
     elif not saw_final and cause is None:
@@ -454,9 +491,19 @@ async def _finalize_chat_runtime(
             saw_final=saw_final,
             had_runtime_failure=had_runtime_failure,
         )
-        append_turn_interruption_notice(session, cause=cause, saw_final=saw_final)
+        append_turn_interruption_notice(
+            session,
+            cause=cause,
+            saw_final=saw_final,
+            detector=detector,
+        )
     else:
-        append_turn_interruption_notice(session, cause=cause, saw_final=saw_final)
+        append_turn_interruption_notice(
+            session,
+            cause=cause,
+            saw_final=saw_final,
+            detector=detector,
+        )
     effective_saw_final = saw_final and not deferred_action
     end_state = _resolve_chat_end_execution_state(
         manager,
@@ -464,6 +511,12 @@ async def _finalize_chat_runtime(
         saw_final=effective_saw_final,
         had_runtime_failure=had_runtime_failure,
     )
+    try:
+        from agenticx.studio.continuation import finalize_continuation_progress
+
+        finalize_continuation_progress(session, interrupted=end_state == "interrupted")
+    except Exception as exc:
+        logger.debug("continuation progress guard skipped session=%s: %s", session_id, exc)
     manager.clear_interrupt(session_id)
     manager.set_execution_state(session_id, end_state)
     if not had_runtime_failure and end_state != "interrupted":
@@ -2957,6 +3010,8 @@ def create_studio_app() -> FastAPI:
                     _flush_taskspace_hint(manager, payload.session_id, session)
                 if event.type in ("subagent_started", "subagent_completed", "subagent_error"):
                     logger.info("[sse] yielding %s agent=%s", event.type, event.agent_id)
+                if event.agent_id == "meta" and event.type == EventType.ROUND_END.value:
+                    _record_last_turn_failure(session, event)
                 if event.type == EventType.FINAL.value and event.agent_id == "meta":
                     saw_final = True
                     snap = str(getattr(managed, "session_name", None) or "").strip()
@@ -2966,6 +3021,7 @@ def create_studio_app() -> FastAPI:
                         )
                 elif _runtime_error_counts_as_failure(event):
                     had_runtime_failure = True
+                    _record_last_turn_failure(session, event)
                 # Persist clarification_required as a visible tool message so the
                 # prompt card survives session switch / refresh (NFR-2). The
                 # agent_runtime context sanitizer filters it out of LLM context
@@ -3153,6 +3209,7 @@ def create_studio_app() -> FastAPI:
                                 saw_final=saw_final,
                                 had_runtime_failure=had_runtime_failure,
                                 interruption_cause=hub_cause,
+                                interruption_detector=_last_turn_failure_detector(session),
                             )
                         else:
                             await event_queue.put(None)
@@ -3201,6 +3258,8 @@ def create_studio_app() -> FastAPI:
                                 _flush_taskspace_hint(manager, payload.session_id, session)
                             if event.type in ("subagent_started", "subagent_completed", "subagent_error"):
                                 logger.info("[sse] yielding %s agent=%s", event.type, event.agent_id)
+                            if event.agent_id == "meta" and event.type == EventType.ROUND_END.value:
+                                _record_last_turn_failure(session, event)
                             if not client_disconnected:
                                 for line in _runtime_event_to_sse_lines(event):
                                     yield line
@@ -3213,6 +3272,7 @@ def create_studio_app() -> FastAPI:
                                     )
                             elif _runtime_error_counts_as_failure(event):
                                 had_runtime_failure = True
+                                _record_last_turn_failure(session, event)
                         if not meta_done:
                             continue
                         if event_queue.empty():
@@ -3279,6 +3339,7 @@ def create_studio_app() -> FastAPI:
                         saw_final=saw_final,
                         had_runtime_failure=had_runtime_failure,
                         interruption_cause=legacy_cause,
+                        interruption_detector=_last_turn_failure_detector(session),
                     )
             if not client_disconnected and event_hub is None:
                 yield 'data: {"type":"done","data":{}}\n\n'
@@ -3329,7 +3390,10 @@ def create_studio_app() -> FastAPI:
         )
         if not ok:
             async def _deduped() -> AsyncGenerator[str, None]:
-                evt = SseEvent(type="continuation_rejected", data={"text": "续跑请求已去重，请稍后再试"})
+                reject_text = str(notice.get("reject_text", "") or "").strip()
+                if not reject_text:
+                    reject_text = "续跑请求已去重，请稍后再试"
+                evt = SseEvent(type="continuation_rejected", data={"text": reject_text})
                 yield f"data: {json.dumps(evt.model_dump(), ensure_ascii=False)}\n\n"
                 yield 'data: {"type":"done","data":{}}\n\n'
 

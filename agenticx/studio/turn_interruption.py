@@ -17,6 +17,12 @@ _CAUSE_MESSAGES: dict[str, str] = {
     "unknown": "本轮请求已中断（未收到模型最终响应）。可点「恢复执行」继续。",
 }
 
+_DETECTOR_MESSAGES: dict[str, str] = {
+    "llm_round_timeout": "模型响应超时",
+    "llm_stream_timeout": "模型流式响应超时",
+    "streamed_tool_call_truncated": "工具参数流式截断",
+}
+
 
 def _last_history_row(session: Any) -> dict[str, Any] | None:
     history = getattr(session, "chat_history", None)
@@ -57,11 +63,27 @@ def _last_row_is_tool_result(session: Any) -> bool:
     return False
 
 
-def interruption_notice_content(*, cause: str, session: Any) -> str:
+def _normalize_detector(detector: str | None) -> str:
+    return str(detector or "").strip().lower()
+
+
+def _detector_suffix(detector: str | None) -> str:
+    label = _DETECTOR_MESSAGES.get(_normalize_detector(detector), "")
+    if not label:
+        return ""
+    return f"（原因：{label}）"
+
+
+def interruption_notice_content(
+    *,
+    cause: str,
+    session: Any,
+    detector: str | None = None,
+) -> str:
     key = cause if cause in _CAUSE_MESSAGES else "unknown"
     if key in {"no_final", "unknown"} and _last_row_is_tool_result(session):
-        return _CAUSE_MESSAGES["no_final"]
-    return _CAUSE_MESSAGES[key]
+        return _CAUSE_MESSAGES["no_final"] + _detector_suffix(detector)
+    return _CAUSE_MESSAGES[key] + _detector_suffix(detector)
 
 
 def has_turn_interruption_notice(session: Any) -> bool:
@@ -87,6 +109,7 @@ def append_turn_interruption_notice(
     *,
     cause: str | None,
     saw_final: bool,
+    detector: str | None = None,
 ) -> bool:
     """Append a turn_interrupted tool row when a turn ends without FINAL (idempotent)."""
     if saw_final or not cause:
@@ -100,18 +123,22 @@ def append_turn_interruption_notice(
     # 留下「恢复执行」失败占位——保持「新会话」中性态，避免用户一进新对话就看到中断卡。
     if not _history_has_user_message(session):
         return False
-    content = interruption_notice_content(cause=cause, session=session)
+    content = interruption_notice_content(cause=cause, session=session, detector=detector)
+    metadata = {
+        "kind": TURN_INTERRUPTED_KIND,
+        "cause": cause,
+        "source": "runtime",
+    }
+    normalized_detector = _normalize_detector(detector)
+    if normalized_detector:
+        metadata["detector"] = normalized_detector
     history.append(
         {
             "id": uuid.uuid4().hex,
             "role": "tool",
             "content": content,
             "agent_id": "meta",
-            "metadata": {
-                "kind": TURN_INTERRUPTED_KIND,
-                "cause": cause,
-                "source": "runtime",
-            },
+            "metadata": metadata,
         }
     )
     return True

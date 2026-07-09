@@ -50,3 +50,11 @@ def test_maybe_compact_meta_turn_context_shrinks_full_meta_prompt() -> None:
     assert len(compact_prompt) < len(full_prompt)
     assert len(compact_tools) <= len(META_AGENT_TOOLS)
     assert compact_prompt == build_compact_meta_system_prompt(session)
+
+
+def test_meta_prompt_includes_large_artifact_file_write_discipline() -> None:
+    session = StudioSession()
+    prompt = build_meta_agent_system_prompt(session, mode="interactive", taskspaces=[])
+    assert "大文件落盘" in prompt
+    assert "骨架" in prompt
+    assert "再分章追加" in prompt

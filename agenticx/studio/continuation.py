@@ -7,12 +7,14 @@ Author: Damon Li
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import logging
 import time
 import uuid
 from typing import Any, Literal, Optional, Tuple
 
 from agenticx.cli.config_manager import ConfigManager
+from agenticx.runtime.stall_policy import latest_todo_from_messages
 
 _log = logging.getLogger(__name__)
 
@@ -23,6 +25,9 @@ DEDUP_WINDOW_SEC = 60.0
 SCRATCH_LAST_KEY = "__continuation_last__"
 SCRATCH_ROUND_KEY = "__continuation_round__"
 SCRATCH_SUPERVISOR_STARTED_KEY = "__supervisor_started_at__"
+SCRATCH_LAST_TURN_FAILURE_KEY = "__last_turn_failure__"
+SCRATCH_NO_PROGRESS_KEY = "__continuation_no_progress__"
+SCRATCH_PENDING_FINGERPRINT_KEY = "__continuation_pending_fingerprint__"
 
 REASON_LABELS: dict[str, str] = {
     "stall": "停滞",
@@ -88,6 +93,8 @@ def is_continuation_user_prompt(text: str) -> bool:
         return True
     if t.startswith("[系统通知]") or t.startswith("[auto-nudge]"):
         return True
+    if "【续跑约束】" in t:
+        return True
     known = (
         resolve_continuation_prompt("exhausted"),
         resolve_continuation_prompt("interrupted"),
@@ -125,6 +132,57 @@ def resolve_continuation_prompt(
         "请汇报之前任务的执行结果；若文档或文件已生成请给出路径摘要；"
         "若仍有未完成项请继续。"
     )
+
+
+def _last_failure_label(session: Any) -> str:
+    sp = _scratchpad(session)
+    raw = sp.get(SCRATCH_LAST_TURN_FAILURE_KEY)
+    if isinstance(raw, dict):
+        detector = str(raw.get("detector", "") or "").strip()
+        text = str(raw.get("text", "") or "").strip()
+        if detector:
+            return detector
+        if text:
+            return text[:80]
+    history = getattr(session, "chat_history", None)
+    if isinstance(history, list):
+        for item in reversed(history):
+            if not isinstance(item, dict):
+                continue
+            meta_raw = item.get("metadata")
+            meta = meta_raw if isinstance(meta_raw, dict) else {}
+            if str(meta.get("kind", "") or "") != "turn_interrupted":
+                continue
+            cause = str(meta.get("cause", "") or "").strip()
+            if cause in {"runtime_failure", "no_final"}:
+                return str(meta.get("detector", "") or "").strip() or cause
+            break
+    return ""
+
+
+def _large_artifact_retry_constraints(failure_label: str) -> str:
+    return (
+        f"【续跑约束】上次中断原因：{failure_label}。\n"
+        "若当前 todo 是生成 HTML/长文档/完整报告：\n"
+        "1) 禁止一次性 file_write 整页超长内容；\n"
+        "2) 先 file_write 骨架（标题+目录+占位，≤100 行）；\n"
+        "3) 再按章节多次 file_write/file_edit 追加；\n"
+        "4) 每完成一章立即 todo_write 更新进度。"
+    )
+
+
+def resolve_continuation_prompt_for_session(
+    session: Any,
+    reason: ContinuationReason,
+    *,
+    execution_state: str = "idle",
+) -> str:
+    """Build a continuation prompt with session-specific recovery constraints."""
+    base = resolve_continuation_prompt(reason, execution_state=execution_state)
+    failure_label = _last_failure_label(session)
+    if not failure_label:
+        return base
+    return f"{base}\n\n{_large_artifact_retry_constraints(failure_label)}"
 
 
 def format_continuation_notice(
@@ -200,6 +258,129 @@ def mark_continue_attempt(session: Any, reason: str, source: str) -> None:
     sp[SCRATCH_LAST_KEY] = {"reason": reason, "source": source, "ts": time.time()}
 
 
+def _is_notice_tool_row(item: dict[str, Any]) -> bool:
+    meta_raw = item.get("metadata")
+    meta = meta_raw if isinstance(meta_raw, dict) else {}
+    kind = str(meta.get("kind", "") or "").strip()
+    return kind in {
+        "turn_interrupted",
+        "continuation_notice",
+        "unattended_done",
+        "unattended_failed",
+        "todo_disk_reconcile",
+        "clarification",
+    }
+
+
+def _tool_row_identity(item: dict[str, Any]) -> str:
+    tool_name = str(
+        item.get("tool_name", item.get("toolName", item.get("name", ""))) or ""
+    ).strip()
+    content = str(item.get("content", "") or "")
+    digest = hashlib.sha1(content.encode("utf-8", errors="ignore")).hexdigest()[:12]
+    return f"{tool_name}:{len(content)}:{digest}"
+
+
+def continuation_progress_fingerprint(session: Any) -> dict[str, Any]:
+    """Return a compact progress fingerprint for no-progress continuation guards."""
+    history = getattr(session, "chat_history", None)
+    rows = [row for row in history if isinstance(row, dict)] if isinstance(history, list) else []
+    parsed = latest_todo_from_messages(rows)
+    in_progress = ""
+    completed = 0
+    total = 0
+    if parsed is not None:
+        completed = parsed.completed
+        total = parsed.total
+        for item in parsed.items:
+            if item.get("status") == "in_progress":
+                in_progress = str(item.get("content", "") or "")
+                break
+    real_tool_rows = [
+        row
+        for row in rows
+        if str(row.get("role", "") or "") == "tool" and not _is_notice_tool_row(row)
+    ]
+    artifact_count = 0
+    for row in real_tool_rows:
+        tool_name = str(
+            row.get("tool_name", row.get("toolName", row.get("name", ""))) or ""
+        ).strip()
+        if tool_name in {"file_write", "file_edit"}:
+            artifact_count += 1
+    last_tool = _tool_row_identity(real_tool_rows[-1]) if real_tool_rows else ""
+    return {
+        "completed": completed,
+        "total": total,
+        "in_progress": in_progress,
+        "real_tool_count": len(real_tool_rows),
+        "artifact_count": artifact_count,
+        "last_tool": last_tool,
+    }
+
+
+def _no_progress_limit() -> int:
+    raw = get_runtime_value("runtime.unattended.max_no_progress_continues", 3)
+    try:
+        value = int(raw)
+    except (TypeError, ValueError):
+        value = 3
+    return max(1, min(20, value))
+
+
+def _no_progress_state(session: Any) -> dict[str, Any]:
+    sp = _scratchpad(session)
+    raw = sp.get(SCRATCH_NO_PROGRESS_KEY)
+    if isinstance(raw, dict):
+        return raw
+    state: dict[str, Any] = {"count": 0}
+    sp[SCRATCH_NO_PROGRESS_KEY] = state
+    return state
+
+
+def no_progress_reject_reason(session: Any) -> str:
+    state = _no_progress_state(session)
+    limit = _no_progress_limit()
+    try:
+        count = int(state.get("count", 0) or 0)
+    except (TypeError, ValueError):
+        count = 0
+    if count < limit:
+        return ""
+    return (
+        f"连续 {count} 次续跑无新进展，已停止自动恢复。"
+        "请换模型，或改为先写骨架、再分章写文件后手动恢复。"
+    )
+
+
+def mark_continuation_progress_start(session: Any) -> None:
+    sp = _scratchpad(session)
+    sp[SCRATCH_PENDING_FINGERPRINT_KEY] = continuation_progress_fingerprint(session)
+
+
+def finalize_continuation_progress(session: Any, *, interrupted: bool) -> None:
+    sp = _scratchpad(session)
+    before = sp.pop(SCRATCH_PENDING_FINGERPRINT_KEY, None)
+    if not isinstance(before, dict):
+        return
+    after = continuation_progress_fingerprint(session)
+    state = _no_progress_state(session)
+    if after != before:
+        state["count"] = 0
+        state["last_fingerprint"] = after
+        return
+    if interrupted:
+        try:
+            count = int(state.get("count", 0) or 0)
+        except (TypeError, ValueError):
+            count = 0
+        state["count"] = count + 1
+        state["last_fingerprint"] = after
+    else:
+        state["count"] = 0
+        state["last_fingerprint"] = after
+
+
 def append_continuation_notice(
     chat_history: list,
     *,
@@ -270,11 +451,21 @@ def prepare_continue(
 
     if not skip_dedupe and should_dedupe_continue(session, reason):
         _log.info("continuation deduped session=%s reason=%s", managed.session_id, reason)
-        return False, "", get_continuation_round(session), {}
+        return False, "", get_continuation_round(session), {"reject_text": "续跑请求已去重，请稍后再试"}
+
+    reject_text = no_progress_reject_reason(session)
+    if reject_text:
+        _log.info("continuation rejected session=%s reason=no_progress", managed.session_id)
+        return False, "", get_continuation_round(session), {"reject_text": reject_text}
 
     round_n = bump_continuation_round(session)
     mark_continue_attempt(session, reason, source)
-    prompt = resolve_continuation_prompt(reason, execution_state=state)
+    mark_continuation_progress_start(session)
+    prompt = resolve_continuation_prompt_for_session(
+        session,
+        reason,
+        execution_state=state,
+    )
     notice = append_continuation_notice(
         session.chat_history,
         source=source,

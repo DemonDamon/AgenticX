@@ -173,6 +173,7 @@ import {
 import { isViewImageInjectMessage, viewImageInjectRowFromSession } from "../utils/view-image-inject";
 import { resolveSessionTailForSwitch, invalidateSessionTail } from "../utils/session-tail-cache";
 import { visibleMessagesForSession } from "../utils/message-ownership";
+import { maxContinuationRound } from "../utils/continuation-notice";
 import {
   shouldDropDuplicateUserSend,
   shouldSuppressDuplicatePendingUserEcho,
@@ -5365,12 +5366,16 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
 
     sessionEnteredAtRef.current[sid] = enteredAt;
     setAutoNudgeCount(autoNudgeTriggeredRef.current[sid] ?? 0);
-    const priorUnattended = (pane.messages ?? []).filter(
+    const legacyUnattended = (pane.messages ?? []).filter(
       (m) =>
         m.role === "tool" &&
         typeof m.content === "string" &&
         (m.content.includes("无人值守续跑") || m.content.includes("自动续跑提醒")),
     ).length;
+    const priorUnattended = Math.max(
+      legacyUnattended,
+      maxContinuationRound(pane.messages ?? []),
+    );
     unattendedContinueTriggeredRef.current[sid] = priorUnattended;
     setUnattendedContinueCount(priorUnattended);
     void window.agenticxDesktop.listSessions(pane.avatarId ?? undefined).then((r) => {
@@ -7624,6 +7629,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
             const eventAgentId = payload.data?.agent_id ?? "meta";
             if (payload.type === "continuation_notice") {
               const noticeText = String(payload.data?.text ?? "").trim();
+              const continuationRound = Number(payload.data?.continuation_round ?? 0);
               if (noticeText) {
                 addPaneMessageIfSessionActive(
                   pane.id,
@@ -7642,6 +7648,16 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
                     },
                   }
                 );
+              }
+              if (Number.isFinite(continuationRound) && continuationRound > 0) {
+                const nextRound = Math.max(
+                  unattendedContinueTriggeredRef.current[requestSessionId] ?? 0,
+                  Math.floor(continuationRound),
+                );
+                unattendedContinueTriggeredRef.current[requestSessionId] = nextRound;
+                if (sessionStillActive) {
+                  setUnattendedContinueCount(nextRound);
+                }
               }
               clearResumeInFlight(requestSessionId);
               if (sessionStillActive) {

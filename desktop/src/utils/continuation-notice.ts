@@ -114,3 +114,15 @@ export function dedupeContinuationNotices<T extends NoticePick>(messages: readon
     return lastByKey.get(continuationNoticeKey(m)) === i;
   });
 }
+
+export function maxContinuationRound(messages: readonly NoticePick[]): number {
+  let maxRound = 0;
+  for (const message of messages) {
+    if (!message || !isContinuationNoticeMessage(message)) continue;
+    const parsed = parseContinuationNotice(message);
+    if (parsed?.round && Number.isFinite(parsed.round)) {
+      maxRound = Math.max(maxRound, Math.floor(parsed.round));
+    }
+  }
+  return maxRound;
+}

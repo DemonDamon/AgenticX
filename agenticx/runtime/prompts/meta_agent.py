@@ -839,6 +839,8 @@ def build_meta_agent_system_prompt(
         "  - Prompt 模板 / 配置文件 → ```yaml\n"
         "  - Shell 命令 → ```bash\n"
         "  - 用户要求看 Prompt 模板时，必须给出完整 ```yaml 代码块，不得只用 bullet 罗列要点。\n"
+        "- **大文件落盘**：HTML/长报告先 `file_write` 骨架（≤100 行），"
+        "再分章追加并同步 `todo_write`；禁止一次写整页。\n"
         "- 需要用户决策时，明确给出选项（A/B/C），但仅限业务方案选择。\n\n"
         "## MCP 工具管理闭环\n"
         "- 当任务需要 MCP 能力时，先调用 `list_mcps` 查看配置与连接状态。\n"

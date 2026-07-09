@@ -15,9 +15,12 @@ from agenticx.runtime.stall_policy import (
     todos_completed,
 )
 from agenticx.studio.continuation import (
+    finalize_continuation_progress,
     format_continuation_notice,
     is_continuation_user_prompt,
+    mark_continuation_progress_start,
     mark_continue_attempt,
+    no_progress_reject_reason,
     prepare_continue,
     resolve_continuation_prompt,
     should_dedupe_continue,
@@ -42,6 +45,29 @@ def test_resolve_continuation_prompt_interrupted() -> None:
     assert "todo" in text.lower()
 
 
+def test_prepare_continue_adds_large_artifact_retry_constraints() -> None:
+    managed = _FakeManaged()
+    managed.studio_session.scratchpad["__last_turn_failure__"] = {
+        "detector": "llm_round_timeout",
+        "text": "模型响应超时",
+        "ts": 123.0,
+    }
+    ok, prompt, round_n, notice = prepare_continue(
+        managed,
+        reason="interrupted",
+        source="desktop_manual",
+        execution_state="interrupted",
+        skip_dedupe=True,
+    )
+    assert ok is True
+    assert round_n == 1
+    assert notice.get("role") == "tool"
+    assert "【续跑约束】" in prompt
+    assert "llm_round_timeout" in prompt
+    assert "先 file_write 骨架" in prompt
+    assert "禁止一次性 file_write 整页超长内容" in prompt
+
+
 def test_is_continuation_user_prompt_real_user() -> None:
     assert is_continuation_user_prompt("能不能听到？") is False
     assert is_continuation_user_prompt("  hello  ") is False
@@ -52,6 +78,24 @@ def test_is_continuation_user_prompt_internal() -> None:
     assert is_continuation_user_prompt("[auto-nudge] 停滞") is True
     assert is_continuation_user_prompt(resolve_continuation_prompt("stall")) is True
     assert is_continuation_user_prompt(resolve_continuation_prompt("exhausted")) is True
+
+
+def test_is_continuation_user_prompt_with_retry_constraints() -> None:
+    managed = _FakeManaged()
+    managed.studio_session.scratchpad["__last_turn_failure__"] = {
+        "detector": "streamed_tool_call_truncated",
+        "text": "工具参数流式截断",
+        "ts": 123.0,
+    }
+    ok, prompt, _round_n, _notice = prepare_continue(
+        managed,
+        reason="interrupted",
+        source="desktop_manual",
+        execution_state="interrupted",
+        skip_dedupe=True,
+    )
+    assert ok is True
+    assert is_continuation_user_prompt(prompt) is True
 
 
 def test_format_continuation_notice_auto() -> None:
@@ -103,6 +147,59 @@ def test_prepare_continue_manual_dedupe_bypass() -> None:
         skip_dedupe=True,
     )
     assert ok is True
+
+
+def test_no_progress_continuation_rejects_after_limit() -> None:
+    managed = _FakeManaged()
+    managed.studio_session.chat_history = [
+        {"role": "user", "content": "生成 HTML"},
+        {
+            "role": "tool",
+            "tool_name": "todo_write",
+            "content": "[>] 设计并生成 HTML <- 设计并生成 HTML\n[ ] 保存\n(0/2 completed)",
+        },
+    ]
+    for _ in range(3):
+        mark_continuation_progress_start(managed.studio_session)
+        finalize_continuation_progress(managed.studio_session, interrupted=True)
+
+    ok, _prompt, _round_n, notice = prepare_continue(
+        managed,
+        reason="interrupted",
+        source="desktop_manual",
+        execution_state="interrupted",
+        skip_dedupe=True,
+    )
+    assert ok is False
+    assert "无新进展" in notice["reject_text"]
+    assert "换模型" in notice["reject_text"]
+
+
+def test_no_progress_count_resets_after_file_write_progress() -> None:
+    session = _FakeSession()
+    session.chat_history = [
+        {"role": "user", "content": "生成 HTML"},
+        {
+            "role": "tool",
+            "tool_name": "todo_write",
+            "content": "[>] 设计并生成 HTML <- 设计并生成 HTML\n[ ] 保存\n(0/2 completed)",
+        },
+    ]
+    mark_continuation_progress_start(session)
+    finalize_continuation_progress(session, interrupted=True)
+    assert no_progress_reject_reason(session) == ""
+    assert session.scratchpad["__continuation_no_progress__"]["count"] == 1
+
+    mark_continuation_progress_start(session)
+    session.chat_history.append(
+        {
+            "role": "tool",
+            "tool_name": "file_write",
+            "content": "OK: wrote /Users/damon/Desktop/report.html",
+        }
+    )
+    finalize_continuation_progress(session, interrupted=True)
+    assert session.scratchpad["__continuation_no_progress__"]["count"] == 0
 
 
 def test_dedupe_continue_within_window() -> None:
@@ -198,4 +295,35 @@ def test_supervisor_notice_dedupe_helpers() -> None:
     ]
     assert _has_supervisor_notice(fail_msgs, kind="unattended_failed", limit_code="wall_clock") is True
     assert _has_supervisor_notice([], kind="unattended_done") is False
+
+
+def test_supervisor_uses_recent_continue_as_interrupted_silence_anchor() -> None:
+    import time
+
+    from agenticx.studio.supervisor import (
+        _last_continue_attempt_ts,
+        _supervisor_silence_anchor,
+    )
+
+    managed = _FakeManaged()
+    old_ts_ms = (time.time() - 29 * 3600) * 1000
+    recent_continue = time.time()
+    managed.updated_at = time.time() - 5
+    managed.studio_session.scratchpad["__continuation_last__"] = {
+        "reason": "stall",
+        "source": "supervisor",
+        "ts": recent_continue,
+    }
+    messages = [
+        {"role": "user", "content": "生成 HTML", "timestamp": old_ts_ms},
+        {
+            "role": "tool",
+            "content": "运行出错，本轮未收到模型最终响应。",
+            "timestamp": old_ts_ms,
+            "metadata": {"kind": "turn_interrupted", "cause": "runtime_failure"},
+        },
+    ]
+
+    assert _last_continue_attempt_ts(managed.studio_session) == recent_continue
+    assert _supervisor_silence_anchor(managed, messages) == recent_continue
 

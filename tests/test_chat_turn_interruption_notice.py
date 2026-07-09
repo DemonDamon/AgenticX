@@ -81,6 +81,33 @@ def test_append_writes_with_user_message() -> None:
     assert session.chat_history[-1]["metadata"]["kind"] == TURN_INTERRUPTED_KIND
 
 
+def test_append_runtime_failure_includes_detector_hint() -> None:
+    session = _session_with_history([{"role": "user", "content": "跑一下"}])
+    assert (
+        append_turn_interruption_notice(
+            session,
+            cause="runtime_failure",
+            saw_final=False,
+            detector="llm_round_timeout",
+        )
+        is True
+    )
+    row = session.chat_history[-1]
+    assert row["metadata"]["kind"] == TURN_INTERRUPTED_KIND
+    assert row["metadata"]["cause"] == "runtime_failure"
+    assert row["metadata"]["detector"] == "llm_round_timeout"
+    assert "模型响应超时" in row["content"]
+
+
+def test_append_without_detector_keeps_runtime_failure_text_unchanged() -> None:
+    session = _session_with_history([{"role": "user", "content": "跑一下"}])
+    assert append_turn_interruption_notice(session, cause="runtime_failure", saw_final=False) is True
+    assert session.chat_history[-1]["content"] == interruption_notice_content(
+        cause="runtime_failure",
+        session=_session_with_history([]),
+    )
+
+
 def test_has_turn_interruption_notice() -> None:
     session = _session_with_history(
         [{"role": "tool", "content": "x", "metadata": {"kind": TURN_INTERRUPTED_KIND}}]

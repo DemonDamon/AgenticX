@@ -26,6 +26,7 @@ from agenticx.studio.continuation import (
     format_continuation_notice,
     get_continuation_round,
     load_unattended_config,
+    no_progress_reject_reason,
     prepare_continue,
 )
 
@@ -119,6 +120,42 @@ def _last_progress_ts(messages: list[dict[str, Any]]) -> float:
         if t > best:
             best = t
     return best
+
+
+def _last_continue_attempt_ts(session: Any) -> float:
+    sp = getattr(session, "scratchpad", None)
+    if not isinstance(sp, dict):
+        return 0.0
+    raw = sp.get("__continuation_last__")
+    if not isinstance(raw, dict):
+        return 0.0
+    try:
+        return max(0.0, float(raw.get("ts", 0) or 0))
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def _row_kind(row: Any) -> str:
+    if not isinstance(row, dict):
+        return ""
+    meta_raw = row.get("metadata")
+    meta = meta_raw if isinstance(meta_raw, dict) else {}
+    return str(meta.get("kind", "") or "").strip()
+
+
+def _supervisor_silence_anchor(managed: Any, messages: list[dict[str, Any]]) -> float:
+    session = managed.studio_session
+    base = _last_progress_ts(messages) or float(getattr(managed, "updated_at", 0) or 0)
+    if not messages:
+        return base
+    tail_kind = _row_kind(messages[-1])
+    if tail_kind not in {"turn_interrupted", "continuation_notice"}:
+        return base
+    return max(
+        base,
+        float(getattr(managed, "updated_at", 0) or 0),
+        _last_continue_attempt_ts(session),
+    )
 
 
 def _messages_from_managed(managed: Any) -> list[dict[str, Any]]:
@@ -279,7 +316,7 @@ class SessionSupervisor:
                 pass
 
             last_msg = messages[-1] if messages else None
-            last_ts = _last_progress_ts(messages) or managed.updated_at
+            last_ts = _supervisor_silence_anchor(managed, messages) or managed.updated_at
             silent = max(0.0, now - last_ts) if last_ts else 0.0
             session_age = max(0.0, now - float(managed.created_at or now))
 
@@ -297,11 +334,22 @@ class SessionSupervisor:
                 continue
             if silent < stall_after and exec_state != "interrupted":
                 continue
+            last_continue_ts = _last_continue_attempt_ts(managed.studio_session)
+            if (
+                exec_state == "interrupted"
+                and last_continue_ts > 0
+                and (now - last_continue_ts) < stall_after
+            ):
+                continue
 
             reason = eval_result.continue_reason
             if reason == "exhausted" and not cfg.get("auto_resume_exhausted"):
                 continue
             if reason == "interrupted" and not cfg.get("auto_resume_interrupted"):
+                continue
+            no_progress_reason = no_progress_reject_reason(managed.studio_session)
+            if no_progress_reason:
+                await self._fail_session(managed, no_progress_reason, code="no_progress")
                 continue
 
             _log_supervisor_event(
