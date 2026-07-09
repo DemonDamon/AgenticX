@@ -1,6 +1,6 @@
 import type { Message } from "../../store";
 import type { ReactNode } from "react";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   ChevronDown,
   ChevronRight,
@@ -25,7 +25,7 @@ import {
   type SkillPatchPreviewPayload,
 } from "./skill-manage-preview";
 import { parseWidgetPayload, isBrokenStockChartAttempt, stockChartDegradedMessage } from "./widget-preview";
-import { extractPartialShowWidgetArgs, finalizePartialSvg } from "./show-widget-partial";
+import { extractPartialShowWidgetArgs, finalizePartialSvg, type PartialShowWidget } from "./show-widget-partial";
 import { parseBashBgStart } from "./bash-bg-preview";
 import { openExternalUrl } from "../../utils/open-external";
 import { isHookBlockedToolMessage } from "../../utils/hook-block-message";
@@ -234,22 +234,60 @@ export function ToolCallCard({
   const [expanded, setExpanded] = useState(shouldForceExpand);
 
   const title = useMemo(() => buildToolCardTitle(message), [message]);
+  const longestShowWidgetPartialRef = useRef<PartialShowWidget | null>(null);
   const showWidgetPartial = useMemo(() => {
     if (toolName !== "show_widget") return null;
-    if (message.toolStatus !== "running" && message.toolStatus !== "pending") return null;
-    const partial = message.toolArgsPartial;
-    if (!partial) return null;
-    if (partial.argumentsRaw && typeof partial.argumentsRaw === "string") {
-      return extractPartialShowWidgetArgs(partial.argumentsRaw);
+    if (message.toolStatus !== "running" && message.toolStatus !== "pending") {
+      longestShowWidgetPartialRef.current = null;
     }
-    const widgetCode = String(partial.widgetCode ?? "");
-    const titleText = String(partial.title ?? "");
-    return {
-      title: titleText,
-      widgetCode,
-      readyForPreview: /<svg\b/i.test(widgetCode),
-    };
-  }, [message.toolArgsPartial, message.toolStatus, toolName]);
+
+    let extracted: PartialShowWidget | null = null;
+    const partial = message.toolArgsPartial;
+    if (partial) {
+      if (partial.argumentsRaw && typeof partial.argumentsRaw === "string") {
+        extracted = extractPartialShowWidgetArgs(partial.argumentsRaw);
+      } else {
+        const widgetCode = String(partial.widgetCode ?? "");
+        const titleText = String(partial.title ?? "");
+        extracted = {
+          title: titleText,
+          widgetCode,
+          readyForPreview: /<svg\b/i.test(widgetCode),
+        };
+      }
+    }
+
+    const argsCode = String(message.toolArgs?.widget_code ?? "");
+    if (argsCode && (!extracted || argsCode.length > extracted.widgetCode.length)) {
+      extracted = {
+        title: String(message.toolArgs?.title ?? extracted?.title ?? "").trim(),
+        widgetCode: argsCode,
+        readyForPreview: /<svg\b/i.test(argsCode),
+      };
+    }
+
+    const sticky = longestShowWidgetPartialRef.current;
+    if (
+      extracted?.widgetCode
+      && extracted.widgetCode.length >= (sticky?.widgetCode.length ?? 0)
+    ) {
+      longestShowWidgetPartialRef.current = extracted;
+    } else if (sticky && extracted) {
+      const mergedCode =
+        sticky.widgetCode.length >= extracted.widgetCode.length
+          ? sticky.widgetCode
+          : extracted.widgetCode;
+      longestShowWidgetPartialRef.current = {
+        title: extracted.title || sticky.title,
+        widgetCode: mergedCode,
+        readyForPreview: /<svg\b/i.test(mergedCode),
+      };
+    }
+
+    const best = longestShowWidgetPartialRef.current ?? extracted;
+    if (!best) return null;
+    return best;
+  }, [message.toolArgs, message.toolArgsPartial, message.toolStatus, toolName]);
   const hasStream = (message.toolStreamLines?.length ?? 0) > 0;
   const skillPreviewPayload = useMemo(() => {
     if ((message.toolName ?? "").trim() !== "skill_manage") return null;
@@ -292,10 +330,22 @@ export function ToolCallCard({
       </div>
     );
   }
-  if (toolName === "show_widget" && message.toolStatus === "running" && showWidgetPartial && !showWidgetPartial.readyForPreview) {
+  if (toolName === "show_widget" && showWidgetPartial && !showWidgetPartial.readyForPreview
+    && (message.toolStatus === "running" || message.toolStatus === "pending")) {
     return (
       <div className="w-full min-w-0 rounded border border-border bg-surface-card px-3 py-2 text-[12px] text-text-muted">
         {showWidgetPartial.title ? `${showWidgetPartial.title} · ` : ""}正在绘制…
+      </div>
+    );
+  }
+  if (
+    toolName === "show_widget"
+    && (message.toolStatus === "running" || message.toolStatus === "pending")
+    && !showWidgetPartial
+  ) {
+    return (
+      <div className="w-full min-w-0 rounded border border-border bg-surface-card px-3 py-2 text-[12px] text-text-muted">
+        正在绘制…
       </div>
     );
   }

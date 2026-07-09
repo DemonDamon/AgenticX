@@ -105,8 +105,21 @@ function fitSvgViewBoxToContent(svg: SVGSVGElement, padding = 16): { w: number; 
  *   - 容器 mx-auto + max-w-full：在气泡内居中，过宽时等比缩小而非硬压 viewBox
  * preview=false: 在放大弹窗的 ZoomableViewport 内使用，撑满舞台宽度。
  */
-function SvgWidget({ code, preview = true }: { code: string; preview?: boolean }) {
+function SvgWidget({
+  code,
+  preview = true,
+  streaming = false,
+}: {
+  code: string;
+  preview?: boolean;
+  streaming?: boolean;
+}) {
   const html = useMemo(() => buildSanitizedSvgHtml(code), [code]);
+  const lastGoodHtmlRef = useRef<string | null>(null);
+  if (html) {
+    lastGoodHtmlRef.current = html;
+  }
+  const displayHtml = html ?? (streaming ? lastGoodHtmlRef.current : null);
   const hostRef = useRef<HTMLDivElement>(null);
   const [size, setSize] = useState(() => parseSvgAspect(code));
 
@@ -115,12 +128,13 @@ function SvgWidget({ code, preview = true }: { code: string; preview?: boolean }
   }, [code]);
 
   useLayoutEffect(() => {
+    if (streaming) return;
     const svg = hostRef.current?.querySelector("svg");
     if (!svg) return;
     setSize(fitSvgViewBoxToContent(svg));
-  }, [html]);
+  }, [displayHtml, streaming]);
 
-  if (!html) return null;
+  if (!displayHtml) return null;
 
   if (preview) {
     return (
@@ -135,7 +149,7 @@ function SvgWidget({ code, preview = true }: { code: string; preview?: boolean }
         <div
           className="h-full w-full [&>svg]:block [&>svg]:h-full [&>svg]:w-full"
           // eslint-disable-next-line react/no-danger
-          dangerouslySetInnerHTML={{ __html: html }}
+          dangerouslySetInnerHTML={{ __html: displayHtml }}
         />
       </div>
     );
@@ -147,7 +161,7 @@ function SvgWidget({ code, preview = true }: { code: string; preview?: boolean }
       ref={hostRef}
       className="w-full [&>svg]:block [&>svg]:h-auto [&>svg]:w-full"
       // eslint-disable-next-line react/no-danger
-      dangerouslySetInnerHTML={{ __html: html }}
+      dangerouslySetInnerHTML={{ __html: displayHtml }}
     />
   );
 }
@@ -609,7 +623,7 @@ export function WidgetBlock({ payload, streaming = false }: Props) {
             ref={hostRef}
             className="relative w-fit max-w-full overflow-x-auto rounded-md border border-border"
           >
-            <SvgWidget code={payload.widgetCode} preview />
+            <SvgWidget code={payload.widgetCode} preview streaming={streaming} />
             {streaming ? (
               <div className="absolute right-2 top-2 rounded bg-[var(--surface-popover)]/85 px-1.5 py-0.5 text-[11px] text-text-muted">
                 绘制中…

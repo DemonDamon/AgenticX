@@ -7421,6 +7421,10 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
       toolCallId: string,
       nextPartial: { argumentsRaw: string; title?: string; widgetCode?: string }
     ) => {
+      const prev = showWidgetDeltaPending.get(toolCallId);
+      if (prev && nextPartial.argumentsRaw.length < prev.argumentsRaw.length) {
+        return;
+      }
       showWidgetDeltaPending.set(toolCallId, nextPartial);
       if (showWidgetDeltaTimers.has(toolCallId)) return;
       const timer = window.setTimeout(() => flushShowWidgetDelta(toolCallId), 100);
@@ -8126,7 +8130,6 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
                       toolName: toolNameStr,
                       toolArgs,
                       toolStatus: "running",
-                      ...(toolNameStr === "show_widget" ? { toolArgsPartial: undefined } : {}),
                     });
                     if (!merged) {
                       addPaneMessageIfSessionActive(
