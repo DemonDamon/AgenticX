@@ -9,6 +9,23 @@ extraResources:
   - assets/**/*
 afterPack: scripts/verify-bundled-backend.js  # 漏打内嵌后端时直接 fail（含本地手工出包）
 # 签名/公证见 electron-builder.signing.yml（CI 注入 CSC_LINK 时自动切换）
+dmg:
+  title: "${productName}"
+  background: assets/dmg-background.png
+  window:
+    size:
+      width: 768
+      height: 512
+  iconSize: 96
+  iconTextSize: 14
+  contents:
+    - x: 188
+      y: 402
+      type: file
+    - x: 580
+      y: 402
+      type: link
+      path: /Applications
 mac:
   artifactName: "${productName}-${version}-${arch}.${ext}"
   target:
