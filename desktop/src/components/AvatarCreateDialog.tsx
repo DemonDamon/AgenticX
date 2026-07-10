@@ -134,18 +134,21 @@ export function AvatarCreateDialog({ open, onClose, onCreate }: Props) {
 
   return (
     <>
-      <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
-        <div className="agx-avatar-create-dialog w-[440px] max-w-[95vw] rounded-xl border border-border bg-surface-panel p-5">
+      <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4 backdrop-blur-none">
+        <div
+          className="agx-avatar-create-dialog w-[440px] max-w-[95vw] rounded-xl border border-border p-5 shadow-2xl"
+          style={{ backgroundColor: "var(--surface-base-fallback, var(--surface-panel))" }}
+        >
         <h3 className="mb-4 text-[16px] font-semibold text-text-primary">创建数字分身</h3>
 
         <div className="mb-4 flex gap-1 rounded-lg bg-surface-card p-0.5">
           {([["manual", "手动创建"], ["ai", "AI 生成"]] as const).map(([key, label]) => (
             <button
               key={key}
-              className={`flex-1 rounded-md px-3 py-1.5 text-xs font-medium transition ${
+              className={`flex-1 rounded-md border px-3 py-1.5 text-xs font-medium transition ${
                 mode === key
-                  ? "bg-cyan-500/20 text-cyan-400"
-                  : "text-text-subtle hover:text-text-primary"
+                  ? "border-transparent bg-btnPrimary text-btnPrimary-text"
+                  : "border-transparent text-text-subtle hover:border-border-strong hover:bg-surface-card hover:text-text-strong"
               }`}
               onClick={() => setMode(key)}
             >
@@ -221,7 +224,7 @@ export function AvatarCreateDialog({ open, onClose, onCreate }: Props) {
               <div className="rounded-md border border-border bg-surface-card">
                 <button
                   type="button"
-                  className="flex w-full items-center gap-2 px-3 py-2.5 text-left text-sm text-text-muted transition hover:bg-surface-hover"
+                  className="flex w-full items-center gap-2 rounded-md px-3 py-2.5 text-left text-sm text-text-muted transition hover:bg-surface-hover focus:outline-none focus-visible:ring-1 focus-visible:ring-[rgba(var(--theme-color-rgb),0.35)]"
                   onClick={() => setSkillsSectionOpen((v) => !v)}
                 >
                   <ChevronRight
@@ -232,7 +235,7 @@ export function AvatarCreateDialog({ open, onClose, onCreate }: Props) {
                   </span>
                 </button>
                 {skillsSectionOpen && (
-                  <div className="space-y-2 border-t border-border px-3 py-2">
+                  <div className="space-y-2 border-t border-[var(--border-muted)] px-3 py-2">
                     <p className="text-[11px] text-text-faint">
                       全局已在设置中禁用的技能不会列出。关闭表示该分身不使用对应技能。
                     </p>
@@ -241,21 +244,21 @@ export function AvatarCreateDialog({ open, onClose, onCreate }: Props) {
                     ) : skillsItems.length === 0 ? (
                       <div className="py-2 text-xs text-text-faint">暂无可配置技能。</div>
                     ) : (
-                      <div className="max-h-[200px] space-y-1.5 overflow-y-auto">
+                      <div className="max-h-[200px] divide-y divide-[var(--border-muted)] overflow-y-auto rounded-md border border-border bg-surface-card">
                         {skillsItems.map((skill) => {
                           const disabled = skillsEnabledDraft[skill.name] === false;
                           return (
                             <div
                               key={skill.name}
-                              className="flex items-center justify-between gap-2 rounded border border-border/60 bg-surface-panel/50 px-2 py-1.5"
+                              className="flex items-center justify-between gap-2 px-2.5 py-2"
                             >
                               <span className="min-w-0 truncate text-xs text-text-primary">{skill.name}</span>
                               <button
                                 type="button"
-                                className={`shrink-0 rounded border px-2 py-0.5 text-[11px] transition ${
+                                className={`shrink-0 rounded border px-2 py-0.5 text-[11px] transition focus:outline-none focus-visible:ring-1 focus-visible:ring-[rgba(var(--theme-color-rgb),0.35)] ${
                                   disabled
-                                    ? "border-border-strong text-text-muted"
-                                    : "border-cyan-500/40 bg-cyan-500/10 text-cyan-400"
+                                    ? "border-[var(--border-muted)] text-text-muted hover:bg-surface-hover"
+                                    : "border-[var(--ui-btn-primary-border)] bg-[rgba(var(--theme-color-rgb),0.1)] text-[var(--kb-citation-fg)] hover:bg-[rgba(var(--theme-color-rgb),0.16)]"
                                 }`}
                                 onClick={() => {
                                   setSkillsEnabledDraft((prev) => {
