@@ -10,6 +10,22 @@ extraResources:
   - assets/**/*
 afterPack: scripts/verify-bundled-backend.js
 afterSign: scripts/mac/notarize.js
+dmg:
+  title: "${productName}"
+  background: assets/dmg-background.png
+  window:
+    width: 800
+    height: 480
+  iconSize: 104
+  iconTextSize: 14
+  contents:
+    - x: 190
+      y: 365
+      type: file
+    - x: 610
+      y: 365
+      type: link
+      path: /Applications
 mac:
   artifactName: "${productName}-${version}-${arch}.${ext}"
   target:
