@@ -13,16 +13,16 @@ dmg:
   title: "${productName}"
   background: assets/dmg-background.png
   window:
-    width: 800
-    height: 480
-  iconSize: 104
-  iconTextSize: 14
+    width: 640
+    height: 380
+  iconSize: 86
+  iconTextSize: 12
   contents:
-    - x: 190
-      y: 365
+    - x: 160
+      y: 258
       type: file
-    - x: 610
-      y: 365
+    - x: 480
+      y: 258
       type: link
       path: /Applications
 mac:
