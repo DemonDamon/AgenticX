@@ -6,6 +6,7 @@ Author: Damon Li
 
 from __future__ import annotations
 
+import json
 import os
 import time
 from pathlib import Path
@@ -63,6 +64,41 @@ def _build_mcps_context(session: StudioSession) -> str:
     for name in sorted(configs.keys()):
         status = "已连接" if name in connected else "未连接"
         lines.append(f"- {name} [{status}]")
+    return "\n".join(lines) + "\n"
+
+
+def _build_native_connectors_context(status_path: Path | None = None) -> str:
+    """Build a trusted capability block for locally managed native connectors."""
+    path = status_path or Path.home() / ".agenticx" / "connectors" / "native-status.json"
+    try:
+        if not path.is_file() or path.is_symlink() or path.stat().st_size > 64 * 1024:
+            return ""
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError, TypeError):
+        return ""
+    if not isinstance(payload, dict):
+        return ""
+    connectors = payload.get("connectors")
+    if not isinstance(connectors, dict):
+        return ""
+    tmeet = connectors.get("tencent-meeting")
+    if not isinstance(tmeet, dict):
+        return ""
+    connected = tmeet.get("connected") is True
+    status = "已连接" if connected else "未连接"
+    lines = [
+        "### 原生连接器（独立于 MCP）",
+        f"- 腾讯会议 [{status}]；执行入口：Skill `tencent-meeting`（不是 MCP）。",
+        "- 判断腾讯会议连接状态必须以本区块为准；"
+        "`tencent-meeting-mcp` 是另一条 MCP 配置，其未连接状态不能用于否定原生连接器。",
+    ]
+    if connected:
+        lines.append(
+            "- 用户要求使用腾讯会议时，直接激活 `tencent-meeting` Skill 并按其说明执行；"
+            "不要先调用 `list_mcps` 判断该原生连接器。"
+        )
+    else:
+        lines.append("- 当前未授权；引导用户前往「设置 → 连接器 → 腾讯会议」扫码连接。")
     return "\n".join(lines) + "\n"
 
 
@@ -714,6 +750,7 @@ def build_meta_agent_system_prompt(
     session_summary = _build_session_summary_context(session)
     skills_context = _build_skills_context(skill_summaries)
     mcp_context = _build_mcps_context(session)
+    native_connectors_context = _build_native_connectors_context()
     group_allowed: set[str] | None = None
     group_name = ""
     if group_chat and isinstance(group_chat, dict):
@@ -915,6 +952,7 @@ def build_meta_agent_system_prompt(
         "- 严禁编造进度百分比（如 75%）。只有工具返回明确数值时才可引用，否则用“进行中/已完成/失败”描述。\n\n"
         "## 已注册能力\n"
         f"{skills_context}"
+        f"{native_connectors_context}"
         f"{mcp_context}\n"
         f"{avatars_context}\n"
         "## 分身协作\n"
