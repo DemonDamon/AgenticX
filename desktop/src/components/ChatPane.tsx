@@ -88,6 +88,7 @@ import { MessageQueuePanel } from "./messages/MessageQueuePanel";
 import { StallRecoveryCard } from "./messages/StallRecoveryCard";
 import { ForwardPicker, type ForwardConfirmPayload } from "./ForwardPicker";
 import { HoverTip } from "./ds/HoverTip";
+import { ConnectorsMenuButton } from "./connectors/ConnectorsMenuButton";
 import { SkillPuzzleIcon, skillPuzzleIconInnerHtml } from "./icons/SkillPuzzleIcon";
 import {
   COMPOSER_INLINE_CHIP_CLASS,
@@ -10547,23 +10548,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
                     apiToken={apiToken}
                   />
                 </div>
-                <button
-                  type="button"
-                  className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg text-text-muted transition hover:bg-surface-hover hover:text-text-strong"
-                  title="更多"
-                >
-                  <svg
-                    viewBox="0 0 24 24"
-                    fill="currentColor"
-                    className="h-3.5 w-3.5 shrink-0"
-                    aria-hidden
-                  >
-                    <rect x="3" y="3" width="8" height="8" rx="1.5" />
-                    <rect x="13" y="3" width="8" height="8" rx="1.5" />
-                    <rect x="3" y="13" width="8" height="8" rx="1.5" />
-                    <rect x="13" y="13" width="8" height="8" rx="1.5" />
-                  </svg>
-                </button>
+                <ConnectorsMenuButton sessionId={pane.sessionId} />
               </div>
               {/* ── Team mode action bar (routing="team" only) ─────────── */}
               <div className="flex min-w-0 shrink-0 items-center gap-1.5">

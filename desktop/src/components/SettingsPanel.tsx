@@ -9432,7 +9432,15 @@ export function SettingsPanel({
               );
             })()}
 
-            {tab === "connectors" && <ConnectorsTab />}
+            {tab === "connectors" && (
+              <ConnectorsTab
+                sessionId={sessionId}
+                tapdConnected={mcpServers.some(
+                  (server) => server.name === "tapd" && server.connected,
+                )}
+                onRefreshMcp={onRefreshMcp}
+              />
+            )}
             {tab === "tools" && <ToolsTab ref={toolsTabRef} />}
 
             {/* === SKILLS TAB === */}
