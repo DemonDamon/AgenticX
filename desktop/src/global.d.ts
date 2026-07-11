@@ -954,6 +954,36 @@ declare global {
         updated?: string[];
         error?: string;
       }>;
+      nativeConnectorStatus: (id: string) => Promise<{
+        ok: boolean;
+        available: boolean;
+        connected: boolean;
+        label: string;
+        error?: string;
+      }>;
+      nativeConnectorTmeetLogin: () => Promise<{
+        ok: boolean;
+        available: boolean;
+        connected: boolean;
+        label: string;
+        error?: string;
+      }>;
+      nativeConnectorTmeetLogout: () => Promise<{
+        ok: boolean;
+        available: boolean;
+        connected: boolean;
+        label: string;
+        error?: string;
+      }>;
+      nativeConnectorTapdConfigure: (payload: {
+        sessionId: string;
+        accessToken: string;
+      }) => Promise<{ ok: boolean; error?: string }>;
+      onNativeConnectorTmeetProgress: (
+        callback: (payload: {
+          phase: "installing" | "opening_browser" | "waiting" | "success" | "disconnected" | "error";
+        }) => void,
+      ) => () => void;
       resolveLocalPath: (path: string) => Promise<{
         ok: boolean;
         resolvedPath?: string;

@@ -35,6 +35,7 @@ import crypto from "node:crypto";
 import http from "node:http";
 import https from "node:https";
 import yaml from "js-yaml";
+import { extract as extractTar } from "tar";
 import {
   closeSplash,
   configureSplashLayoutThemeReader,
@@ -62,6 +63,15 @@ import {
   snapshotMetaWorkspaceBeforeSave,
   type MetaWorkspaceHistoryKind,
 } from "./meta-workspace-history";
+import {
+  assertManagedSkillDirectory,
+  buildTapdMcpEntry,
+  extractAuthorizationUrl,
+  isTapdValidationSuccess,
+  mergeTapdMcpDocument,
+  parseTmeetAuthStatus,
+  readBodyWithLimit,
+} from "./native-connectors-core";
 
 /** Node fetch honors HTTP_PROXY; localhost cc-bridge POSTs then fail (e.g. 502) and PTY input never reaches Claude. */
 function ccBridgeUrlIsLoopback(urlStr: string): boolean {
@@ -1761,6 +1771,15 @@ let serveProcess: ChildProcess | null = null;
 let feishuProcess: ChildProcess | null = null;
 let wechatSidecarProcess: ChildProcess | null = null;
 let wechatSidecarPort = 0;
+let tmeetAuthProcess: ChildProcess | null = null;
+let tmeetAuthBusy = false;
+let tmeetInstallPromise: Promise<string> | null = null;
+let tmeetBinaryValidationCache: {
+  path: string;
+  size: number;
+  mtimeMs: number;
+  valid: boolean;
+} | null = null;
 let isQuitting = false;
 let serveStdoutBuffer = "";
 let serveStderrBuffer = "";
@@ -2828,6 +2847,556 @@ function stopFeishuProcess(): void {
   if (!feishuProcess) return;
   try { feishuProcess.kill("SIGTERM"); } catch { /* noop */ }
   feishuProcess = null;
+}
+
+type NativeConnectorStatusResult = {
+  ok: boolean;
+  available: boolean;
+  connected: boolean;
+  label: string;
+  error?: string;
+};
+
+const TMEET_PACKAGE_VERSION = "1.0.11";
+const TMEET_PACKAGE_URL =
+  "https://registry.npmjs.org/@tencentcloud/tmeet/-/tmeet-1.0.11.tgz";
+const TMEET_PACKAGE_SHA512 =
+  "N/TdgdxP+D09y9SschrrdCfMe+sGncIZlHUH9czTjAunC/b/Ck3CFO2BplYcm+lnlPPvguOjD0s8qp3GmJO41Q==";
+const TMEET_PACKAGE_MAX_BYTES = 20 * 1024 * 1024;
+const NATIVE_CONNECTOR_STATUS_PATH = path.join(
+  os.homedir(),
+  ".agenticx",
+  "connectors",
+  "native-status.json",
+);
+
+function persistTmeetConnectorStatus(connected: boolean): void {
+  const parentDir = path.dirname(NATIVE_CONNECTOR_STATUS_PATH);
+  fs.mkdirSync(parentDir, { recursive: true, mode: 0o700 });
+  if (
+    fs.existsSync(NATIVE_CONNECTOR_STATUS_PATH) &&
+    fs.lstatSync(NATIVE_CONNECTOR_STATUS_PATH).isSymbolicLink()
+  ) {
+    throw new Error("原生连接器状态文件不能是符号链接");
+  }
+  let current: Record<string, unknown> = {};
+  try {
+    const parsed = JSON.parse(fs.readFileSync(NATIVE_CONNECTOR_STATUS_PATH, "utf8"));
+    if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+      current = parsed as Record<string, unknown>;
+    }
+  } catch {
+    current = {};
+  }
+  const connectors =
+    current.connectors &&
+    typeof current.connectors === "object" &&
+    !Array.isArray(current.connectors)
+      ? current.connectors as Record<string, unknown>
+      : {};
+  const next = {
+    ...current,
+    version: 1,
+    connectors: {
+      ...connectors,
+      "tencent-meeting": {
+        connected,
+        capability: "skill",
+        skill_name: "tencent-meeting",
+        updated_at: new Date().toISOString(),
+      },
+    },
+  };
+  const tempPath = `${NATIVE_CONNECTOR_STATUS_PATH}.${process.pid}.tmp`;
+  fs.writeFileSync(tempPath, `${JSON.stringify(next, null, 2)}\n`, {
+    encoding: "utf8",
+    mode: 0o600,
+  });
+  fs.renameSync(tempPath, NATIVE_CONNECTOR_STATUS_PATH);
+}
+
+function tryPersistTmeetConnectorStatus(connected: boolean): void {
+  try {
+    persistTmeetConnectorStatus(connected);
+  } catch (error) {
+    console.warn("[native-connectors] failed to persist Tencent Meeting status:", String(error));
+  }
+}
+
+function tmeetBinaryFileName(): string {
+  const key = `${process.platform}-${process.arch}`;
+  const fileNames: Record<string, string> = {
+    "darwin-arm64": "tmeet-macOS-AppleSilicon",
+    "darwin-x64": "tmeet-macOS-Intel",
+    "linux-arm64": "tmeet-Linux-ARM64",
+    "linux-x64": "tmeet-Linux-x86_64",
+    "win32-x64": "tmeet-Windows-x86_64.exe",
+  };
+  const fileName = fileNames[key];
+  if (!fileName) throw new Error(`当前平台暂不支持腾讯会议连接器：${key}`);
+  return fileName;
+}
+
+function tmeetBinarySha256(): string {
+  const hashes: Record<string, string> = {
+    "tmeet-Linux-ARM64": "f3e60afe19e348b8d8009340254de308cc1a2623f9ee521496507e535fe66572",
+    "tmeet-Linux-x86_64": "b052d1501ca911fe4f3a2afefa8ed0be7d21f8d3715b664dd11a11e95834c378",
+    "tmeet-Windows-x86_64.exe": "83e9442e568a8c3b014c4fa4e79c4a9e15903a9054f6872941b48404153ba729",
+    "tmeet-macOS-AppleSilicon": "e59c83f46d2652a3680a7dce305f8fac0b3b372ed61dd7527389638aa3501c9c",
+    "tmeet-macOS-Intel": "1686086ef84fbc585251a32b5f19b631ff3a38773e88f4b57a0edf294eea1367",
+  };
+  return hashes[tmeetBinaryFileName()];
+}
+
+function tmeetInstallDir(): string {
+  return path.join(
+    os.homedir(),
+    ".agenticx",
+    "connectors",
+    "tencent-meeting",
+    TMEET_PACKAGE_VERSION,
+  );
+}
+
+async function resolveTmeetBinaryPath(): Promise<string | null> {
+  const binaryPath = path.join(tmeetInstallDir(), "dist", tmeetBinaryFileName());
+  let stat: fs.Stats;
+  try {
+    stat = await fs.promises.stat(binaryPath);
+  } catch {
+    return null;
+  }
+  if (!stat.isFile()) return null;
+  if (
+    tmeetBinaryValidationCache?.path === binaryPath &&
+    tmeetBinaryValidationCache.size === stat.size &&
+    tmeetBinaryValidationCache.mtimeMs === stat.mtimeMs
+  ) {
+    return tmeetBinaryValidationCache.valid ? binaryPath : null;
+  }
+  const digest = crypto
+    .createHash("sha256")
+    .update(await fs.promises.readFile(binaryPath))
+    .digest("hex");
+  const valid = digest === tmeetBinarySha256();
+  tmeetBinaryValidationCache = {
+    path: binaryPath,
+    size: stat.size,
+    mtimeMs: stat.mtimeMs,
+    valid,
+  };
+  if (!valid) return null;
+  if (process.platform !== "win32") fs.chmodSync(binaryPath, 0o755);
+  return binaryPath;
+}
+
+async function installTmeetBinary(): Promise<string> {
+  const installed = await resolveTmeetBinaryPath();
+  if (installed) return installed;
+  sendTmeetProgress("installing");
+  const parentDir = path.dirname(tmeetInstallDir());
+  fs.mkdirSync(parentDir, { recursive: true, mode: 0o700 });
+  const partialDir = path.join(parentDir, `.partial-${crypto.randomUUID()}`);
+  const archivePath = path.join(parentDir, `.download-${crypto.randomUUID()}.tgz`);
+  try {
+    const response = await proxyAwareFetch(TMEET_PACKAGE_URL, {
+      signal: AbortSignal.timeout(30000),
+    });
+    if (!response.ok) throw new Error(`下载腾讯会议 CLI 失败：HTTP ${response.status}`);
+    const declaredSize = Number(response.headers.get("content-length") || "0");
+    if (declaredSize > TMEET_PACKAGE_MAX_BYTES) throw new Error("腾讯会议 CLI 下载包超过安全限制");
+    const archive = Buffer.from(
+      await readBodyWithLimit(response.body, TMEET_PACKAGE_MAX_BYTES),
+    );
+    if (archive.length === 0 || archive.length > TMEET_PACKAGE_MAX_BYTES) {
+      throw new Error("腾讯会议 CLI 下载包大小异常");
+    }
+    const digest = crypto.createHash("sha512").update(archive).digest("base64");
+    if (digest !== TMEET_PACKAGE_SHA512) throw new Error("腾讯会议 CLI 完整性校验失败");
+    fs.mkdirSync(partialDir, { recursive: true, mode: 0o700 });
+    fs.writeFileSync(archivePath, archive, { mode: 0o600 });
+    const binaryMember = `package/dist/${tmeetBinaryFileName()}`;
+    await extractTar({
+      file: archivePath,
+      cwd: partialDir,
+      strip: 1,
+      filter: (memberPath) => memberPath === binaryMember || memberPath === "package/LICENSE",
+    });
+    const extractedBinary = path.join(partialDir, "dist", tmeetBinaryFileName());
+    const stat = fs.lstatSync(extractedBinary);
+    if (!stat.isFile() || stat.isSymbolicLink()) throw new Error("腾讯会议 CLI 运行文件无效");
+    if (process.platform !== "win32") fs.chmodSync(extractedBinary, 0o755);
+    if (fs.existsSync(tmeetInstallDir())) fs.rmSync(tmeetInstallDir(), { recursive: true, force: true });
+    fs.renameSync(partialDir, tmeetInstallDir());
+    const result = await resolveTmeetBinaryPath();
+    if (!result) throw new Error("腾讯会议 CLI 安装未完成");
+    return result;
+  } finally {
+    fs.rmSync(archivePath, { force: true });
+    fs.rmSync(partialDir, { recursive: true, force: true });
+  }
+}
+
+async function ensureTmeetBinaryInstalled(): Promise<string> {
+  const installed = await resolveTmeetBinaryPath();
+  if (installed) return installed;
+  if (tmeetInstallPromise) return await tmeetInstallPromise;
+  tmeetInstallPromise = installTmeetBinary().finally(() => {
+    tmeetInstallPromise = null;
+  });
+  return await tmeetInstallPromise;
+}
+
+async function runTmeetCommand(args: string[], timeoutMs = 15000): Promise<string> {
+  const binaryPath = await resolveTmeetBinaryPath();
+  if (!binaryPath) throw new Error("腾讯会议 CLI 尚未安装");
+  return await new Promise((resolve, reject) => {
+    execFile(
+      binaryPath,
+      args,
+      {
+        timeout: timeoutMs,
+        maxBuffer: 1024 * 1024,
+        env: {
+          ...process.env,
+          TMEET_AGENT: "Near",
+          TMEET_MODEL: "user-selected",
+        },
+      },
+      (error, stdout, stderr) => {
+        const output = `${stdout ?? ""}\n${stderr ?? ""}`.trim();
+        if (error) {
+          reject(new Error("腾讯会议 CLI 命令执行失败"));
+          return;
+        }
+        resolve(output);
+      },
+    );
+  });
+}
+
+function tmeetSkillDir(): string {
+  return path.join(
+    os.homedir(),
+    ".agenticx",
+    "skills",
+    "near-connectors",
+    "tencent-meeting",
+  );
+}
+
+function ensureTmeetSkill(binaryPath: string): void {
+  const skillDir = tmeetSkillDir();
+  const skillPath = path.join(skillDir, "SKILL.md");
+  const markerPath = path.join(skillDir, ".near-managed");
+  const directoryExists = fs.existsSync(skillDir);
+  const markerExists = fs.existsSync(markerPath);
+  assertManagedSkillDirectory(directoryExists, markerExists);
+  const quotedBinary = binaryPath.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
+  const content = `---
+name: tencent-meeting
+description: 使用腾讯会议官方 CLI 查询和管理会议、录制、纪要与参会报告。
+---
+
+# 腾讯会议
+
+仅在用户要求操作腾讯会议时使用。通过 bash_exec 调用以下官方 CLI：
+
+\`\`\`bash
+"${quotedBinary}" --format json <command> [arguments]
+\`\`\`
+
+常用命令可先执行 \`"${quotedBinary}" --help\` 查看。读取操作可以直接执行；创建、更新、取消会议以及导出录制等写入或敏感操作，必须先向用户展示参数并确认。不得输出或读取腾讯会议本地凭证文件。若命令提示未登录，引导用户前往「设置 → 连接器 → 腾讯会议」扫码连接。
+`;
+  if (!directoryExists) {
+    const parentDir = path.dirname(skillDir);
+    const partialDir = path.join(parentDir, `.tencent-meeting.partial-${crypto.randomUUID()}`);
+    fs.mkdirSync(parentDir, { recursive: true, mode: 0o700 });
+    try {
+      fs.mkdirSync(partialDir, { mode: 0o700 });
+      fs.writeFileSync(path.join(partialDir, "SKILL.md"), content, {
+        encoding: "utf8",
+        mode: 0o600,
+      });
+      fs.writeFileSync(path.join(partialDir, ".near-managed"), "managed by Near\n", {
+        encoding: "utf8",
+        mode: 0o600,
+      });
+      fs.renameSync(partialDir, skillDir);
+    } catch (error) {
+      fs.rmSync(partialDir, { recursive: true, force: true });
+      throw error;
+    }
+    return;
+  }
+  const tempPath = `${skillPath}.tmp`;
+  fs.writeFileSync(tempPath, content, { encoding: "utf8", mode: 0o600 });
+  fs.renameSync(tempPath, skillPath);
+}
+
+function removeTmeetSkill(): void {
+  const skillDir = tmeetSkillDir();
+  const markerPath = path.join(skillDir, ".near-managed");
+  if (!fs.existsSync(markerPath)) return;
+  fs.rmSync(skillDir, { recursive: true, force: true });
+}
+
+async function getTmeetStatus(): Promise<NativeConnectorStatusResult> {
+  try {
+    let binaryPath = await resolveTmeetBinaryPath();
+    const managedSkillMarker = path.join(tmeetSkillDir(), ".near-managed");
+    if (!binaryPath && fs.existsSync(managedSkillMarker)) {
+      binaryPath = await ensureTmeetBinaryInstalled();
+    }
+    if (!binaryPath) {
+      tryPersistTmeetConnectorStatus(false);
+      return {
+        ok: true,
+        available: true,
+        connected: false,
+        label: "可用",
+      };
+    }
+    const status = parseTmeetAuthStatus(await runTmeetCommand(["auth", "status"]));
+    if (status.connected && binaryPath) {
+      try {
+        ensureTmeetSkill(binaryPath);
+      } catch (error) {
+        tryPersistTmeetConnectorStatus(false);
+        return {
+          ok: false,
+          available: true,
+          connected: false,
+          label: "连接异常",
+          error: error instanceof Error ? error.message : String(error),
+        };
+      }
+    } else if (!status.connected) {
+      removeTmeetSkill();
+    }
+    tryPersistTmeetConnectorStatus(status.connected && !status.error);
+    return {
+      ok: !status.error,
+      available: !status.error,
+      connected: status.connected,
+      label: status.label,
+      error: status.error,
+    };
+  } catch (error) {
+    tryPersistTmeetConnectorStatus(false);
+    return {
+      ok: false,
+      available: false,
+      connected: false,
+      label: "暂不可用",
+      error: error instanceof Error ? error.message : String(error),
+    };
+  }
+}
+
+function sendTmeetProgress(
+  phase: "installing" | "opening_browser" | "waiting" | "success" | "disconnected" | "error",
+): void {
+  if (!mainWindow || mainWindow.isDestroyed()) return;
+  mainWindow.webContents.send("native-connector-tmeet-progress", { phase });
+}
+
+function startTmeetLogin(): Promise<NativeConnectorStatusResult> {
+  if (tmeetAuthBusy) {
+    return Promise.resolve({
+      ok: false,
+      available: true,
+      connected: false,
+      label: "连接中",
+      error: "腾讯会议正在等待扫码授权",
+    });
+  }
+  tmeetAuthBusy = true;
+  return new Promise((resolve) => {
+    let opened = false;
+    let output = "";
+    let settled = false;
+    let proc: ChildProcess | null = null;
+    let timeout: ReturnType<typeof setTimeout> | null = null;
+    const finish = async (result?: NativeConnectorStatusResult, terminate = false) => {
+      if (settled) return;
+      settled = true;
+      if (timeout) clearTimeout(timeout);
+      const currentProc = proc;
+      if (terminate && currentProc && currentProc.exitCode === null) {
+        await new Promise<void>((done) => {
+          const fallback = setTimeout(done, 2000);
+          currentProc.once("close", () => {
+            clearTimeout(fallback);
+            done();
+          });
+          try { currentProc.kill("SIGTERM"); } catch { done(); }
+        });
+      }
+      if (proc && tmeetAuthProcess === proc) tmeetAuthProcess = null;
+      tmeetAuthBusy = false;
+      const status = result ?? (await getTmeetStatus());
+      sendTmeetProgress(status.connected ? "success" : "error");
+      resolve(status);
+    };
+    const consume = (chunk: Buffer) => {
+      output = `${output}${chunk.toString("utf8")}`.slice(-32768);
+      const authorizationUrl = extractAuthorizationUrl(output);
+      if (!opened && authorizationUrl) {
+        opened = true;
+        sendTmeetProgress("opening_browser");
+        void shell
+          .openExternal(authorizationUrl)
+          .then(() => sendTmeetProgress("waiting"))
+          .catch(() =>
+            finish({
+              ok: false,
+              available: true,
+              connected: false,
+              label: "连接失败",
+              error: "无法打开腾讯会议授权页面",
+            }, true),
+          );
+      }
+    };
+    void ensureTmeetBinaryInstalled().then((binaryPath) => {
+      proc = spawn(binaryPath, ["auth", "login", "--no-browser"], {
+        stdio: ["ignore", "pipe", "pipe"],
+        env: {
+          ...process.env,
+          TMEET_AGENT: "Near",
+          TMEET_MODEL: "user-selected",
+        },
+      });
+      tmeetAuthProcess = proc;
+      timeout = setTimeout(() => {
+        void finish({
+          ok: false,
+          available: true,
+          connected: false,
+          label: "连接超时",
+          error: "扫码授权已超时，请重试",
+        }, true);
+      }, 5 * 60 * 1000);
+      proc.stdout?.on("data", consume);
+      proc.stderr?.on("data", consume);
+      proc.on("error", () => {
+        void finish({
+          ok: false,
+          available: true,
+          connected: false,
+          label: "连接失败",
+          error: "无法启动腾讯会议授权",
+        }, true);
+      });
+      proc.on("exit", (code) => {
+        if (code === 0) {
+          void finish();
+          return;
+        }
+        void finish({
+          ok: false,
+          available: true,
+          connected: false,
+          label: "连接失败",
+          error: opened ? "腾讯会议授权未完成或已取消" : "未能获取腾讯会议授权地址",
+        });
+      });
+    }).catch((error) => {
+      void finish({
+        ok: false,
+        available: true,
+        connected: false,
+        label: "安装失败",
+        error: error instanceof Error ? error.message : String(error),
+      });
+    });
+  });
+}
+
+async function configureTapdConnector(
+  sessionId: string,
+  accessToken: string,
+): Promise<{ ok: boolean; error?: string }> {
+  const token = accessToken.trim();
+  if (!sessionId.trim()) return { ok: false, error: "请先打开一个会话" };
+  if (!token || token.length > 4096) return { ok: false, error: "请填写有效的 TAPD Access Token" };
+  try {
+    const validationController = new AbortController();
+    const validationTimeout = setTimeout(() => validationController.abort(), 15000);
+    let validationResponse: Response;
+    try {
+      validationResponse = await proxyAwareFetch("https://api.tapd.cn/workspaces/projects", {
+        headers: { Authorization: `Bearer ${token}` },
+        signal: validationController.signal,
+      });
+    } catch (error) {
+      if (error instanceof Error && error.name === "AbortError") {
+        return { ok: false, error: "TAPD Token 校验超时，请检查网络后重试" };
+      }
+      throw error;
+    } finally {
+      clearTimeout(validationTimeout);
+    }
+    const validationPayload = await validationResponse.json().catch(() => null);
+    if (!validationResponse.ok || !isTapdValidationSuccess(validationPayload)) {
+      return { ok: false, error: "TAPD Token 校验失败，请确认令牌有效且具备项目访问权限" };
+    }
+    const rawResponse = await fetch(`${getStudioUrl()}/api/mcp/raw`, {
+      headers: { "x-agx-desktop-token": getStudioToken() },
+    });
+    if (!rawResponse.ok && rawResponse.status !== 404) {
+      return { ok: false, error: `读取 MCP 配置失败：HTTP ${rawResponse.status}` };
+    }
+    const rawResult = rawResponse.ok
+      ? await rawResponse.json() as { text?: string }
+      : { text: "{}" };
+    const document = JSON.parse(rawResult.text || "{}") as Record<string, unknown>;
+    const disconnectResponse = await fetch(`${getStudioUrl()}/api/mcp/disconnect`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "x-agx-desktop-token": getStudioToken(),
+      },
+      body: JSON.stringify({ session_id: sessionId.trim(), name: "tapd" }),
+    });
+    if (!disconnectResponse.ok) {
+      return { ok: false, error: `更新 TAPD 前断开旧连接失败：HTTP ${disconnectResponse.status}` };
+    }
+    const entrypoint = require.resolve("@xihe-lab/tapd-mcp-server");
+    const nextDocument = mergeTapdMcpDocument(
+      document,
+      buildTapdMcpEntry(process.execPath, entrypoint, token),
+    );
+    const saveResponse = await fetch(`${getStudioUrl()}/api/mcp/raw`, {
+      method: "PUT",
+      headers: {
+        "Content-Type": "application/json",
+        "x-agx-desktop-token": getStudioToken(),
+      },
+      body: JSON.stringify({
+        path: "~/.agenticx/mcp.json",
+        text: `${JSON.stringify(nextDocument, null, 2)}\n`,
+      }),
+    });
+    if (!saveResponse.ok) return { ok: false, error: `保存 MCP 配置失败：HTTP ${saveResponse.status}` };
+    const connectResponse = await fetch(`${getStudioUrl()}/api/mcp/connect`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "x-agx-desktop-token": getStudioToken(),
+      },
+      body: JSON.stringify({ session_id: sessionId.trim(), name: "tapd" }),
+    });
+    if (!connectResponse.ok) {
+      const body = await connectResponse.text().catch(() => "");
+      return { ok: false, error: `TAPD MCP 连接失败：HTTP ${connectResponse.status} ${body.slice(0, 160)}` };
+    }
+    const result = await connectResponse.json() as { ok?: boolean; error?: string };
+    return result.ok ? { ok: true } : { ok: false, error: result.error || "TAPD MCP 连接失败" };
+  } catch (error) {
+    return { ok: false, error: error instanceof Error ? error.message : String(error) };
+  }
 }
 
 // ── WeChat iLink Sidecar ──────────────────────────────────────────
@@ -3989,6 +4558,62 @@ function registerIpc(): void {
     fs.writeFileSync(FEISHU_BINDING_PATH, JSON.stringify(data, null, 2), "utf-8");
     return { ok: true };
   });
+
+  ipcMain.handle("native-connector-status", async (_event, payload: { id?: string }) => {
+    const id = String(payload?.id || "").trim();
+    if (id === "tencent-meeting") return await getTmeetStatus();
+    if (id === "tapd") {
+      return { ok: true, available: true, connected: false, label: "可用" };
+    }
+    return { ok: true, available: false, connected: false, label: "暂不可用" };
+  });
+
+  ipcMain.handle("native-connector-tmeet-login", async () => {
+    try {
+      return await startTmeetLogin();
+    } catch (error) {
+      return {
+        ok: false,
+        available: false,
+        connected: false,
+        label: "连接失败",
+        error: error instanceof Error ? error.message : String(error),
+      };
+    }
+  });
+
+  ipcMain.handle("native-connector-tmeet-logout", async () => {
+    try {
+      await runTmeetCommand(["auth", "logout"]);
+      const status = await getTmeetStatus();
+      if (!status.ok || status.connected) {
+        return {
+          ...status,
+          ok: false,
+          error: status.error || "腾讯会议仍处于登录状态，断开未生效",
+        };
+      }
+      removeTmeetSkill();
+      sendTmeetProgress("disconnected");
+      return status;
+    } catch (error) {
+      const status = await getTmeetStatus();
+      return {
+        ...status,
+        ok: false,
+        error: error instanceof Error ? error.message : String(error),
+      };
+    }
+  });
+
+  ipcMain.handle(
+    "native-connector-tapd-configure",
+    async (_event, payload: { sessionId?: string; accessToken?: string }) =>
+      await configureTapdConnector(
+        String(payload?.sessionId || ""),
+        String(payload?.accessToken || ""),
+      ),
+  );
 
   // ── WeChat iLink Sidecar IPC ──────────────────────────────────
 
@@ -7674,6 +8299,10 @@ if (!gotTheLock) {
     stopSkillsDirWatcher();
     killAllTerminalSessions();
     stopFeishuProcess();
+    if (tmeetAuthProcess) {
+      try { tmeetAuthProcess.kill("SIGTERM"); } catch { /* noop */ }
+      tmeetAuthProcess = null;
+    }
     stopWechatSidecar();
     stopStudioServe();
   });

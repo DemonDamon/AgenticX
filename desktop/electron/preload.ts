@@ -505,6 +505,28 @@ contextBridge.exposeInMainWorld("agenticxDesktop", {
     ipcRenderer.invoke("mcp-marketplace-detail", payload),
   mcpMarketplaceInstall: async (payload: { serverId: string; env?: Record<string, string> }) =>
     ipcRenderer.invoke("mcp-marketplace-install", payload),
+  nativeConnectorStatus: async (id: string) =>
+    ipcRenderer.invoke("native-connector-status", { id }),
+  nativeConnectorTmeetLogin: async () =>
+    ipcRenderer.invoke("native-connector-tmeet-login"),
+  nativeConnectorTmeetLogout: async () =>
+    ipcRenderer.invoke("native-connector-tmeet-logout"),
+  nativeConnectorTapdConfigure: async (payload: { sessionId: string; accessToken: string }) =>
+    ipcRenderer.invoke("native-connector-tapd-configure", payload),
+  onNativeConnectorTmeetProgress: (
+    callback: (payload: {
+      phase: "installing" | "opening_browser" | "waiting" | "success" | "disconnected" | "error";
+    }) => void,
+  ): (() => void) => {
+    const handler = (
+      _event: Electron.IpcRendererEvent,
+      payload: {
+        phase: "installing" | "opening_browser" | "waiting" | "success" | "disconnected" | "error";
+      },
+    ) => callback(payload);
+    ipcRenderer.on("native-connector-tmeet-progress", handler);
+    return () => ipcRenderer.removeListener("native-connector-tmeet-progress", handler);
+  },
   resolveLocalPath: async (path: string) => ipcRenderer.invoke("resolve-local-path", path),
   shellOpenPath: async (path: string) => ipcRenderer.invoke("shell-open-path", path),
   shellShowItemInFolder: async (path: string) => ipcRenderer.invoke("shell-show-item-in-folder", path),

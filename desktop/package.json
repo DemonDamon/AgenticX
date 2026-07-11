@@ -9,6 +9,7 @@
   "scripts": {
     "dev": "cp electron/splash.html dist-electron/splash.html 2>/dev/null || true && concurrently \"vite\" \"tsc -p electron/tsconfig.json --watch\" \"node scripts/wait-and-electron.mjs\"",
     "icons:sync": "bash ./scripts/sync-icons.sh",
+    "test:native-connectors": "vitest run tests/native-connectors-core.test.ts",
     "build": "vite build && tsc -p electron/tsconfig.json && cp electron/splash.html dist-electron/splash.html",
     "start": "electron .",
     "build:mac": "npm run build && electron-builder --mac",
@@ -24,6 +25,7 @@
     "@dnd-kit/sortable": "^10.0.0",
     "@dnd-kit/utilities": "^3.2.2",
     "@monaco-editor/react": "^4.7.0",
+    "@xihe-lab/tapd-mcp-server": "^1.4.1",
     "@xterm/addon-fit": "^0.11.0",
     "@xterm/xterm": "^6.0.0",
     "echarts": "^5.6.0",
@@ -43,6 +45,7 @@
     "rehype-katex": "^7.0.1",
     "remark-gfm": "^4.0.1",
     "remark-math": "^6.0.0",
+    "tar": "^7.5.19",
     "undici": "^6.26.0",
     "unist-util-visit": "^5.0.0",
     "whisper-wasm": "^0.0.1",
@@ -70,6 +73,7 @@
     "tailwindcss": "^3.4.17",
     "typescript": "^5.8.2",
     "vite": "^6.2.1",
+    "vitest": "^4.1.10",
     "wait-on": "^8.0.3"
   }
 }
