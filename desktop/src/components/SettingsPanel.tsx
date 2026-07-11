@@ -18,6 +18,7 @@ import {
   Settings2,
   Cpu,
   Plug,
+  Link2,
   Mail,
   Bookmark,
   Sparkles,
@@ -113,6 +114,7 @@ import { MCPJsonEditorModal } from "./settings/mcp/MCPJsonEditorModal";
 import { McpRemoteServerModal } from "./settings/mcp/McpRemoteServerModal";
 import { McpRemoteServerDetail } from "./settings/mcp/McpRemoteServerDetail";
 import { McpGatewayImportPanel } from "./settings/mcp/McpGatewayImportPanel";
+import { ConnectorsTab } from "./settings/connectors/ConnectorsTab";
 import { mcpRemoteHostLabel, mcpTransportBadgeLabel } from "../utils/mcp-remote-config";
 import { WebSearchSettingsPanel, SuggestedQuestionsSettingsPanel } from "./settings/WebSearchSettingsPanel";
 import {
@@ -979,6 +981,7 @@ const TABS: { id: SettingsTab; label: string; icon: typeof Settings2 }[] = [
   { id: "general", label: "通用偏好", icon: Settings2 },
   { id: "provider", label: "模型服务", icon: Cpu },
   { id: "mcp", label: "MCP", icon: Plug },
+  { id: "connectors", label: "连接器", icon: Link2 },
   { id: "tools", label: "内置工具", icon: Wrench },
   { id: "skills", label: "技能配置", icon: SkillPuzzleIcon },
   // Plan-Id: machi-kb-stage1-local-mvp
@@ -9429,7 +9432,7 @@ export function SettingsPanel({
               );
             })()}
 
-            {/* === SKILLS TAB === */}
+            {tab === "connectors" && <ConnectorsTab />}
             {tab === "tools" && <ToolsTab ref={toolsTabRef} />}
 
             {/* === SKILLS TAB === */}
