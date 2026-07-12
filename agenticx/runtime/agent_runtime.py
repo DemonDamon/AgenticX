@@ -1805,6 +1805,38 @@ class AgentRuntime:
             self._last_persist_time = now
             self._tools_since_persist = 0
 
+    def _persist_final_checkpoint(self) -> None:
+        """Persist the completed turn before exposing its FINAL event."""
+        if self._mid_turn_persist is None:
+            return
+        try:
+            self._mid_turn_persist()
+        except Exception:
+            logger.exception("final session checkpoint failed")
+        self._last_persist_time = time.time()
+        self._tools_since_persist = 0
+
+    def _append_terminal_assistant(
+        self,
+        session: StudioSession,
+        text: str,
+        *,
+        is_system_trigger: bool,
+    ) -> None:
+        """Append a synthetic terminal reply to both persisted message views."""
+        content = str(text or "").strip()
+        if not content:
+            return
+        message = {"role": "assistant", "content": content}
+        if not (
+            session.agent_messages
+            and session.agent_messages[-1].get("role") == "assistant"
+            and str(session.agent_messages[-1].get("content") or "").strip() == content
+        ):
+            session.agent_messages.append(dict(message))
+        if not is_system_trigger:
+            _chat_history_append_deduped(session.chat_history, dict(message))
+
     async def run_turn(
         self,
         user_input: str,
@@ -3360,6 +3392,7 @@ class AgentRuntime:
                         "cache_hit_rate": float(latest_cache_telemetry.get("cache_hit_rate", 0.0) or 0.0),
                         "cache_saved_tokens_est": int(latest_cache_telemetry.get("cache_saved_tokens_est", 0) or 0),
                     }
+                self._persist_final_checkpoint()
                 yield RuntimeEvent(type=EventType.FINAL.value, data=_final_data, agent_id=agent_id)
                 return
 
@@ -3603,7 +3636,13 @@ class AgentRuntime:
                                 "本轮状态查询达到预算上限（2 次），已停止轮询。"
                                 "我会在子智能体完成/失败后主动汇报。"
                             )
+                            self._append_terminal_assistant(
+                                session,
+                                final_text,
+                                is_system_trigger=_is_system_trigger,
+                            )
                             await self.hooks.run_on_agent_end(final_text, session)
+                            self._persist_final_checkpoint()
                             yield RuntimeEvent(type=EventType.FINAL.value, data={"text": final_text}, agent_id=agent_id)
                             return
                         continue
@@ -3645,7 +3684,13 @@ class AgentRuntime:
                                 "状态查询处于冷却窗口，我先停止本轮轮询。"
                                 "若子智能体仍在运行，我会在完成事件到达后主动汇报。"
                             )
+                            self._append_terminal_assistant(
+                                session,
+                                final_text,
+                                is_system_trigger=_is_system_trigger,
+                            )
                             await self.hooks.run_on_agent_end(final_text, session)
+                            self._persist_final_checkpoint()
                             yield RuntimeEvent(type=EventType.FINAL.value, data={"text": final_text}, agent_id=agent_id)
                             return
                         continue
@@ -3683,7 +3728,13 @@ class AgentRuntime:
                                 "本轮状态已查询过一次，已停止重复轮询。"
                                 "若子智能体仍运行，我会在完成事件到达后主动汇报。"
                             )
+                            self._append_terminal_assistant(
+                                session,
+                                final_text,
+                                is_system_trigger=_is_system_trigger,
+                            )
                             await self.hooks.run_on_agent_end(final_text, session)
+                            self._persist_final_checkpoint()
                             yield RuntimeEvent(type=EventType.FINAL.value, data={"text": final_text}, agent_id=agent_id)
                             return
                         continue
@@ -3741,7 +3792,13 @@ class AgentRuntime:
                                 "检测到状态轮询过于频繁，已停止本轮自动执行。"
                                 "我会等待后台完成事件并主动给你汇报结果。"
                             )
+                            self._append_terminal_assistant(
+                                session,
+                                final_text,
+                                is_system_trigger=_is_system_trigger,
+                            )
                             await self.hooks.run_on_agent_end(final_text, session)
+                            self._persist_final_checkpoint()
                             yield RuntimeEvent(type=EventType.FINAL.value, data={"text": final_text}, agent_id=agent_id)
                             return
                         continue
@@ -4142,6 +4199,7 @@ class AgentRuntime:
                     if not _is_system_trigger:
                         session.chat_history.append(assistant_summary)
                     await self.hooks.run_on_agent_end(summary_text, session)
+                    self._persist_final_checkpoint()
                     yield RuntimeEvent(
                         type=EventType.FINAL.value,
                         data={

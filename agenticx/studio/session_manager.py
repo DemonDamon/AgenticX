@@ -22,6 +22,7 @@ from dataclasses import dataclass, field
 from typing import Any, Awaitable, Callable, Dict, List, Optional
 
 from agenticx.cli.config_manager import ConfigManager
+from agenticx.studio.chat_attachments import materialize_message_lists_image_uploads
 
 _log = logging.getLogger(__name__)
 
@@ -549,8 +550,7 @@ class SessionManager:
         managed = self._sessions.get(session_id)
         if managed is None:
             return False
-        self._persist_session_state(session_id, managed.studio_session)
-        return True
+        return self._persist_session_state(session_id, managed.studio_session)
 
     async def persist_async(self, session_id: str) -> bool:
         """Persist session state off the asyncio event loop (SQLite + FTS + snapshots)."""
@@ -771,15 +771,7 @@ class SessionManager:
         if managed is None:
             return False
         session = managed.studio_session
-        try:
-            self._save_messages_snapshot(session_id, session.chat_history or [])
-            self._save_agent_messages_snapshot(
-                session_id, getattr(session, "agent_messages", None) or [],
-            )
-        except Exception:
-            _log.debug("incremental_persist failed for %s (non-fatal)", session_id)
-            return False
-        return True
+        return self._persist_core_snapshots(session_id, session)
 
     @staticmethod
     def _close_mcp_hub_sync(managed: ManagedSession) -> None:
@@ -1672,69 +1664,167 @@ class SessionManager:
                 str(metadata.get("session_mode"))
             )
 
-    def _persist_session_state(self, session_id: str, session: StudioSession) -> None:
-        self._ensure_session_title_from_chat_history(session_id, session)
+    def _persist_core_snapshots(
+        self,
+        session_id: str,
+        session: StudioSession,
+        *,
+        default_timestamp_ms: int | None = None,
+    ) -> bool:
+        """Persist user-visible and model-context messages as the critical state."""
+        critical_ok = True
         try:
-            todos = session.todo_manager.to_payload()
-            scratchpad = dict(getattr(session, "scratchpad", {}) or {})
-            self._session_store._save_todos_sync(session_id, todos)
-            self._session_store._save_scratchpad_sync(session_id, scratchpad)
-            summary = self._build_session_summary(session)
-            managed_ref = self._sessions.get(session_id)
-            metadata_updated_at = float(getattr(managed_ref, "updated_at", time.time()) or time.time())
-            metadata_created_at = float(getattr(managed_ref, "created_at", time.time()) or time.time())
-            last_activity_at = self._resolve_list_activity_at(
-                chat_history=getattr(session, "chat_history", None),
-                metadata_updated_at=metadata_updated_at,
-                metadata_created_at=metadata_created_at,
+            self._save_messages_snapshot(
+                session_id,
+                session.chat_history or [],
+                default_timestamp_ms=default_timestamp_ms,
             )
-            metadata = {
-                "provider": session.provider_name or "",
-                "model": session.model_name or "",
-                "chat_messages": len(session.chat_history),
-                "artifacts": len(session.artifacts),
-                "session_name": getattr(managed_ref, "session_name", None),
-                "avatar_id": getattr(managed_ref, "avatar_id", None),
-                "avatar_name": getattr(managed_ref, "avatar_name", None),
-                "created_at": metadata_created_at,
-                "updated_at": metadata_updated_at,
-                "last_activity_at": last_activity_at,
-                "pinned": bool(getattr(managed_ref, "pinned", False)),
-                "archived": bool(getattr(managed_ref, "archived", False)),
-                "taskspaces": list(getattr(managed_ref, "taskspaces", []) or []),
-                "execution_state": getattr(managed_ref, "execution_state", "idle"),
-                "session_mode": normalize_session_mode(
-                    getattr(session, "session_mode", None)
-                ),
-                **_harness_list_fields(session),
-            }
-            self._session_store._save_session_summary_sync(session_id, summary, metadata)
-            try:
-                from agenticx.studio.chat_attachments import materialize_message_lists_image_uploads
+        except Exception:
+            critical_ok = False
+            _log.exception(
+                "session persist failed session=%s stage=messages",
+                session_id,
+            )
+        try:
+            self._save_agent_messages_snapshot(
+                session_id,
+                getattr(session, "agent_messages", None) or [],
+            )
+        except Exception:
+            critical_ok = False
+            _log.exception(
+                "session persist failed session=%s stage=agent_messages",
+                session_id,
+            )
+        return critical_ok
 
-                materialize_message_lists_image_uploads(
+    def _persist_session_state(self, session_id: str, session: StudioSession) -> bool:
+        self._ensure_session_title_from_chat_history(session_id, session)
+        managed_ref = self._sessions.get(session_id)
+        metadata_updated_at = float(
+            getattr(managed_ref, "updated_at", time.time()) or time.time()
+        )
+        metadata_created_at = float(
+            getattr(managed_ref, "created_at", time.time()) or time.time()
+        )
+        try:
+            materialize_message_lists_image_uploads(
+                session_id,
+                [
+                    session.chat_history or [],
+                    getattr(session, "agent_messages", None) or [],
+                ],
+            )
+        except Exception:
+            _log.exception(
+                "session persist auxiliary failure session=%s stage=attachments",
+                session_id,
+            )
+
+        critical_ok = self._persist_core_snapshots(
+            session_id,
+            session,
+            default_timestamp_ms=int(metadata_updated_at * 1000),
+        )
+
+        try:
+            self._session_store._save_todos_sync(
+                session_id,
+                session.todo_manager.to_payload(),
+            )
+        except Exception:
+            _log.exception(
+                "session persist auxiliary failure session=%s stage=todos",
+                session_id,
+            )
+
+        try:
+            scratchpad = dict(getattr(session, "scratchpad", {}) or {})
+            self._session_store._save_scratchpad_sync(session_id, scratchpad)
+        except Exception:
+            _log.exception(
+                "session persist auxiliary failure session=%s stage=scratchpad",
+                session_id,
+            )
+
+        if critical_ok:
+            try:
+                summary = self._build_session_summary(session)
+                last_activity_at = self._resolve_list_activity_at(
+                    chat_history=getattr(session, "chat_history", None),
+                    metadata_updated_at=metadata_updated_at,
+                    metadata_created_at=metadata_created_at,
+                )
+                metadata = {
+                    "provider": session.provider_name or "",
+                    "model": session.model_name or "",
+                    "chat_messages": len(session.chat_history),
+                    "artifacts": len(session.artifacts),
+                    "session_name": getattr(managed_ref, "session_name", None),
+                    "avatar_id": getattr(managed_ref, "avatar_id", None),
+                    "avatar_name": getattr(managed_ref, "avatar_name", None),
+                    "created_at": metadata_created_at,
+                    "updated_at": metadata_updated_at,
+                    "last_activity_at": last_activity_at,
+                    "pinned": bool(getattr(managed_ref, "pinned", False)),
+                    "archived": bool(getattr(managed_ref, "archived", False)),
+                    "taskspaces": list(getattr(managed_ref, "taskspaces", []) or []),
+                    "execution_state": getattr(managed_ref, "execution_state", "idle"),
+                    "session_mode": normalize_session_mode(
+                        getattr(session, "session_mode", None)
+                    ),
+                    **_harness_list_fields(session),
+                }
+                self._session_store._save_session_summary_sync(
                     session_id,
-                    [
-                        session.chat_history or [],
-                        getattr(session, "agent_messages", None) or [],
-                    ],
+                    summary,
+                    metadata,
                 )
             except Exception:
-                pass
-            self._save_messages_snapshot(session_id, session.chat_history or [])
-            self._session_store._index_session_messages_sync(session_id, session.chat_history or [])
-            self._save_agent_messages_snapshot(session_id, getattr(session, "agent_messages", None) or [])
+                _log.exception(
+                    "session persist auxiliary failure session=%s stage=summary",
+                    session_id,
+                )
+
+            try:
+                self._session_store._index_session_messages_sync(
+                    session_id,
+                    session.chat_history or [],
+                )
+            except Exception:
+                _log.exception(
+                    "session persist auxiliary failure session=%s stage=fts",
+                    session_id,
+                )
+        else:
+            _log.error(
+                "session persist skipped metadata session=%s because critical snapshots failed",
+                session_id,
+            )
+
+        try:
             self._save_context_refs(session_id, session)
         except Exception:
-            return
+            _log.exception(
+                "session persist auxiliary failure session=%s stage=context_refs",
+                session_id,
+            )
+
+        return critical_ok
 
     def _messages_path(self, session_id: str) -> str:
         return os.path.join(self._sessions_root, session_id, "messages.json")
 
-    def _save_messages_snapshot(self, session_id: str, messages: list[dict]) -> None:
+    def _save_messages_snapshot(
+        self,
+        session_id: str,
+        messages: list[dict],
+        *,
+        default_timestamp_ms: int | None = None,
+    ) -> None:
         path = self._messages_path(session_id)
         # Stamp ms-epoch timestamp on messages missing one (in-memory + disk).
-        now_ms = int(time.time() * 1000)
+        now_ms = default_timestamp_ms or int(time.time() * 1000)
         for item in messages:
             if not isinstance(item, dict):
                 continue
@@ -1824,8 +1914,6 @@ class SessionManager:
         return os.path.join(self._sessions_root, session_id, "agent_messages.json")
 
     def _save_agent_messages_snapshot(self, session_id: str, messages: list[dict]) -> None:
-        if not messages:
-            return
         tail = messages[-40:]
         path = self._agent_messages_path(session_id)
         atomic_write_json(path, tail)

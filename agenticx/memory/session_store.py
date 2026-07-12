@@ -17,6 +17,24 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 DEFAULT_SESSION_DB_PATH = Path.home() / ".agenticx" / "memory" / "sessions.sqlite"
+_SCRATCHPAD_JSON_PREFIX = "\x1eagx-json-v1:"
+
+
+def _encode_scratchpad_value(value: Any) -> str:
+    """Encode one scratchpad value without losing JSON-compatible types."""
+    payload = json.dumps(value, ensure_ascii=False, separators=(",", ":"))
+    return f"{_SCRATCHPAD_JSON_PREFIX}{payload}"
+
+
+def _decode_scratchpad_value(raw: str) -> Any:
+    """Decode typed values while preserving legacy unprefixed strings."""
+    if not raw.startswith(_SCRATCHPAD_JSON_PREFIX):
+        return raw
+    payload = raw[len(_SCRATCHPAD_JSON_PREFIX) :]
+    try:
+        return json.loads(payload)
+    except json.JSONDecodeError:
+        return raw
 
 
 def session_fts_enabled() -> bool:
@@ -253,14 +271,23 @@ class SessionStore:
             except Exception:
                 return []
 
-    async def save_scratchpad(self, session_id: str, data: Dict[str, str]) -> None:
+    async def save_scratchpad(self, session_id: str, data: Dict[str, Any]) -> None:
         await asyncio.to_thread(self._save_scratchpad_sync, session_id, data)
 
-    def _save_scratchpad_sync(self, session_id: str, data: Dict[str, str]) -> None:
+    def _save_scratchpad_sync(self, session_id: str, data: Dict[str, Any]) -> None:
         now = datetime.now(timezone.utc).isoformat()
+        rows: list[tuple[str, str, str, str]] = []
+        for key, value in data.items():
+            normalized_key = str(key)
+            try:
+                encoded = _encode_scratchpad_value(value)
+            except (TypeError, ValueError) as exc:
+                raise TypeError(
+                    f"Scratchpad value is not JSON serializable: key={normalized_key!r}"
+                ) from exc
+            rows.append((session_id, normalized_key, encoded, now))
         with self._connect() as conn:
             conn.execute("DELETE FROM scratchpad WHERE session_id = ?", (session_id,))
-            rows = [(session_id, key, value, now) for key, value in data.items()]
             conn.executemany(
                 """
                 INSERT INTO scratchpad (session_id, key, value, updated_at)
@@ -270,16 +297,19 @@ class SessionStore:
             )
             conn.commit()
 
-    async def load_scratchpad(self, session_id: str) -> Dict[str, str]:
+    async def load_scratchpad(self, session_id: str) -> Dict[str, Any]:
         return await asyncio.to_thread(self._load_scratchpad_sync, session_id)
 
-    def _load_scratchpad_sync(self, session_id: str) -> Dict[str, str]:
+    def _load_scratchpad_sync(self, session_id: str) -> Dict[str, Any]:
         with self._connect() as conn:
             rows = conn.execute(
                 "SELECT key, value FROM scratchpad WHERE session_id = ? ORDER BY key",
                 (session_id,),
             ).fetchall()
-            return {str(row["key"]): str(row["value"]) for row in rows}
+            return {
+                str(row["key"]): _decode_scratchpad_value(str(row["value"]))
+                for row in rows
+            }
 
     async def save_session_summary(
         self,

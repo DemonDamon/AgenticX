@@ -6,6 +6,7 @@ Author: Damon Li
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import pytest
@@ -37,6 +38,115 @@ def test_session_manager_restores_and_persists(tmp_path: Path) -> None:
     assert restored.get("k2") == "v2"
     assert manager.delete(sid) is True
     assert store._load_scratchpad_sync(sid) == {}
+
+
+def test_persist_keeps_final_reply_with_nested_scratchpad(tmp_path: Path) -> None:
+    store = SessionStore(tmp_path / "sessions.sqlite")
+    sessions_root = tmp_path / "sessions"
+    manager = SessionManager()
+    manager._session_store = store
+    manager._sessions_root = str(sessions_root)
+
+    sid = "nested-scratchpad-final"
+    managed = manager.create(session_id=sid)
+    managed.studio_session.chat_history = [
+        {"role": "user", "content": "run tool"},
+        {"role": "tool", "content": "tool succeeded", "tool_name": "bash_exec"},
+        {"role": "assistant", "content": "final answer"},
+    ]
+    managed.studio_session.agent_messages = [
+        {"role": "user", "content": "run tool"},
+        {"role": "assistant", "content": "final answer"},
+    ]
+    managed.studio_session.scratchpad["__last_turn_failure__"] = {
+        "detector": "streamed_tool_call_truncated",
+        "text": "",
+        "ts": 1.0,
+    }
+
+    assert manager.persist(sid) is True
+    messages = json.loads((sessions_root / sid / "messages.json").read_text(encoding="utf-8"))
+    assert messages[-1]["content"] == "final answer"
+
+    fresh = SessionManager()
+    fresh._session_store = store
+    fresh._sessions_root = str(sessions_root)
+    restored = fresh.get(sid, touch=False)
+    assert restored is not None
+    assert restored.studio_session.scratchpad["__last_turn_failure__"]["detector"] == (
+        "streamed_tool_call_truncated"
+    )
+
+
+def test_auxiliary_persist_failure_does_not_block_core_messages(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    store = SessionStore(tmp_path / "sessions.sqlite")
+    sessions_root = tmp_path / "sessions"
+    manager = SessionManager()
+    manager._session_store = store
+    manager._sessions_root = str(sessions_root)
+
+    sid = "scratchpad-failure-core-safe"
+    managed = manager.create(session_id=sid)
+    managed.studio_session.chat_history = [
+        {"role": "user", "content": "question"},
+        {"role": "assistant", "content": "durable final"},
+    ]
+
+    def _fail_scratchpad(*_args: object, **_kwargs: object) -> None:
+        raise RuntimeError("injected scratchpad failure")
+
+    monkeypatch.setattr(store, "_save_scratchpad_sync", _fail_scratchpad)
+
+    assert manager.persist(sid) is True
+    messages = json.loads((sessions_root / sid / "messages.json").read_text(encoding="utf-8"))
+    assert messages[-1]["content"] == "durable final"
+    assert "stage=scratchpad" in caplog.text
+
+
+def test_core_message_persist_failure_returns_false(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    manager = SessionManager()
+    manager._session_store = SessionStore(tmp_path / "sessions.sqlite")
+    manager._sessions_root = str(tmp_path / "sessions")
+    managed = manager.create(session_id="core-persist-failure")
+    managed.studio_session.chat_history = [{"role": "user", "content": "question"}]
+
+    def _fail_messages(*_args: object, **_kwargs: object) -> None:
+        raise RuntimeError("injected messages failure")
+
+    monkeypatch.setattr(manager, "_save_messages_snapshot", _fail_messages)
+
+    assert manager.persist("core-persist-failure") is False
+
+
+def test_persist_clears_stale_agent_messages_snapshot(tmp_path: Path) -> None:
+    store = SessionStore(tmp_path / "sessions.sqlite")
+    sessions_root = tmp_path / "sessions"
+    manager = SessionManager()
+    manager._session_store = store
+    manager._sessions_root = str(sessions_root)
+
+    sid = "clear-agent-messages"
+    managed = manager.create(session_id=sid)
+    managed.studio_session.chat_history = [{"role": "user", "content": "question"}]
+    managed.studio_session.agent_messages = [
+        {"role": "user", "content": "stale model context"}
+    ]
+    assert manager.persist(sid) is True
+
+    managed.studio_session.agent_messages = []
+    assert manager.persist(sid) is True
+
+    payload = json.loads(
+        (sessions_root / sid / "agent_messages.json").read_text(encoding="utf-8")
+    )
+    assert payload == []
 
 
 def test_list_sessions_restores_from_persisted_state_after_restart(tmp_path: Path) -> None:

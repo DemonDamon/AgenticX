@@ -7,7 +7,10 @@ Author: Damon Li
 from __future__ import annotations
 
 import asyncio
+import sqlite3
 from pathlib import Path
+
+import pytest
 
 from agenticx.memory.session_store import SessionStore
 
@@ -29,6 +32,51 @@ def test_session_store_persists_todos_and_scratchpad(tmp_path: Path) -> None:
     assert loaded_scratch == scratchpad
 
 
+def test_session_store_round_trips_typed_scratchpad_values(tmp_path: Path) -> None:
+    store = SessionStore(tmp_path / "sessions.sqlite")
+    session_id = "typed-scratchpad"
+    scratchpad = {
+        "text": "plain",
+        "mapping": {"detector": "streamed_tool_call_truncated", "ts": 1.5},
+        "items": ["one", 2, False],
+        "integer": 3,
+        "float": 4.5,
+        "enabled": True,
+        "empty": None,
+    }
+
+    store._save_scratchpad_sync(session_id, scratchpad)
+
+    assert store._load_scratchpad_sync(session_id) == scratchpad
+
+
+def test_session_store_loads_legacy_plain_scratchpad_as_string(tmp_path: Path) -> None:
+    store = SessionStore(tmp_path / "sessions.sqlite")
+    with store._connect() as conn:
+        conn.execute(
+            """
+            INSERT INTO scratchpad (session_id, key, value, updated_at)
+            VALUES (?, ?, ?, ?)
+            """,
+            ("legacy-session", "legacy-key", "1", "2026-07-12T00:00:00+00:00"),
+        )
+        conn.commit()
+
+    assert store._load_scratchpad_sync("legacy-session") == {"legacy-key": "1"}
+
+
+def test_session_store_reports_invalid_scratchpad_key_without_data_loss(
+    tmp_path: Path,
+) -> None:
+    store = SessionStore(tmp_path / "sessions.sqlite")
+    store._save_scratchpad_sync("invalid-session", {"stable": "value"})
+
+    with pytest.raises(TypeError, match="bad-value"):
+        store._save_scratchpad_sync("invalid-session", {"bad-value": {1, 2}})
+
+    assert store._load_scratchpad_sync("invalid-session") == {"stable": "value"}
+
+
 def test_session_store_summary_search(tmp_path: Path) -> None:
     store = SessionStore(tmp_path / "sessions.sqlite")
     asyncio.run(
@@ -47,8 +95,6 @@ def test_session_summary_history_is_bounded(tmp_path: Path) -> None:
     """Repeated persists for one session must not grow unbounded; only the most
     recent _SUMMARY_HISTORY_KEEP rows are retained (prevents the bloat that
     degraded the session list query)."""
-    import sqlite3
-
     store = SessionStore(tmp_path / "sessions.sqlite")
     keep = SessionStore._SUMMARY_HISTORY_KEEP
     writes = keep + 20

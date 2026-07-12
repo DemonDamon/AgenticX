@@ -55,6 +55,26 @@ class _AlwaysToolLLM:
         yield ""
 
 
+class _AlwaysStatusQueryLLM:
+    def invoke(self, *_args, **_kwargs):
+        return _FakeResponse(
+            "checking",
+            [
+                {
+                    "id": "call-status",
+                    "type": "function",
+                    "function": {
+                        "name": "query_subagent_status",
+                        "arguments": {},
+                    },
+                }
+            ],
+        )
+
+    def stream(self, *_args, **_kwargs):
+        yield ""
+
+
 class _TextOnlyLLM:
     def invoke(self, *_args, **_kwargs):
         # Empty invoke text forces the stream fallback path (TOKEN chunks then FINAL).
@@ -119,7 +139,14 @@ def test_runtime_event_flow_tool_confirm_result_final(monkeypatch) -> None:
 
     monkeypatch.setattr(runtime_module, "dispatch_tool_async", _fake_dispatch)
     runtime = AgentRuntime(_ToolThenFinalLLM(), _ApproveGate())
-    events = __import__("asyncio").run(_collect(runtime, StudioSession(), "do it"))
+    session = StudioSession()
+    checkpoints: list[list[Dict[str, Any]]] = []
+
+    def _persist() -> None:
+        checkpoints.append([dict(row) for row in session.chat_history])
+
+    runtime._mid_turn_persist = _persist  # type: ignore[attr-defined]
+    events = __import__("asyncio").run(_collect(runtime, session, "do it"))
 
     types = [e["type"] for e in events]
     assert all(e["agent_id"] == "meta" for e in events)
@@ -127,6 +154,9 @@ def test_runtime_event_flow_tool_confirm_result_final(monkeypatch) -> None:
     assert EventType.TOOL_CALL.value in types
     assert EventType.TOOL_RESULT.value in types
     assert EventType.FINAL.value in types
+    assert checkpoints
+    assert any(row.get("role") == "tool" for row in checkpoints[-1])
+    assert checkpoints[-1][-1] == {"role": "assistant", "content": "done"}
 
 
 def test_runtime_max_rounds_emits_error(monkeypatch) -> None:
@@ -149,6 +179,61 @@ def test_runtime_text_only_emits_tokens_then_final() -> None:
     assert all(e["agent_id"] == "meta" for e in events)
     assert EventType.TOKEN.value in types
     assert events[-1]["type"] == EventType.FINAL.value
+
+
+def test_runtime_synthetic_final_is_added_before_checkpoint() -> None:
+    runtime = AgentRuntime(_TextOnlyLLM(), _ApproveGate())
+    session = StudioSession()
+    persisted: list[list[Dict[str, Any]]] = []
+
+    def _persist() -> None:
+        persisted.append([dict(row) for row in session.chat_history])
+
+    runtime._mid_turn_persist = _persist  # type: ignore[attr-defined]
+    runtime._append_terminal_assistant(
+        session,
+        "状态查询达到预算上限，已停止轮询。",
+        is_system_trigger=False,
+    )
+    runtime._persist_final_checkpoint()
+
+    assert session.agent_messages[-1]["content"] == "状态查询达到预算上限，已停止轮询。"
+    assert session.chat_history[-1]["content"] == "状态查询达到预算上限，已停止轮询。"
+    assert persisted[-1][-1]["content"] == "状态查询达到预算上限，已停止轮询。"
+
+
+def test_runtime_status_query_synthetic_final_is_checkpointed() -> None:
+    runtime = AgentRuntime(_AlwaysStatusQueryLLM(), _ApproveGate())
+    session = StudioSession()
+    checkpoints: list[list[Dict[str, Any]]] = []
+    tools = [
+        {
+            "type": "function",
+            "function": {
+                "name": "query_subagent_status",
+                "description": "Query status",
+                "parameters": {"type": "object", "properties": {}},
+            },
+        }
+    ]
+
+    def _persist() -> None:
+        checkpoints.append([dict(row) for row in session.chat_history])
+
+    runtime._mid_turn_persist = _persist  # type: ignore[attr-defined]
+
+    async def _run() -> List[Dict[str, Any]]:
+        events: List[Dict[str, Any]] = []
+        async for event in runtime.run_turn("check status", session, tools=tools):
+            events.append({"type": event.type, "data": event.data})
+        return events
+
+    events = __import__("asyncio").run(_run())
+
+    assert events[-1]["type"] == EventType.FINAL.value
+    assert checkpoints
+    assert checkpoints[-1][-1]["role"] == "assistant"
+    assert checkpoints[-1][-1]["content"] == events[-1]["data"]["text"]
 
 
 def test_runtime_stream_fallback_syncs_agent_messages_with_chat_history() -> None:
@@ -339,7 +424,8 @@ async def test_skip_user_history_still_persists_display_user() -> None:
     user_rows = [m for m in session.agent_messages if m.get("role") == "user"]
     assert user_rows == []
     assert session.chat_history[0] == {"role": "user", "content": "能不能听到？"}
-    assert persisted == [1]
+    assert persisted == [1, 2]
+    assert session.chat_history[-1] == {"role": "assistant", "content": "tok1tok2"}
 
 
 async def test_skip_user_history_dedupes_existing_tail_user() -> None:
