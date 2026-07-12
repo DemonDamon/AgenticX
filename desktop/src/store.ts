@@ -11,6 +11,7 @@ import {
 } from "./utils/model-options";
 import type { SearchReference } from "./types/search-references";
 import { shouldClearMessagesOnSessionSwitch } from "./utils/pane-session-switch";
+import { matchesToolCallForSession } from "./utils/pending-tool-result";
 
 export type UiStatus = "idle" | "listening" | "processing";
 export type MsgRole = "user" | "assistant" | "tool";
@@ -600,7 +601,8 @@ type AppState = {
       >
     > & {
       appendStreamLine?: string;
-    }
+    },
+    ownerSessionId?: string,
   ) => boolean;
   /** Lite / global `messages` list: merge tool rows by `toolCallId` (mirrors pane path). */
   updateMessageByToolCallId: (
@@ -1598,13 +1600,15 @@ export const useAppStore = create<AppState>((set, get) => ({
         };
       }),
     })),
-  updatePaneMessageByToolCallId: (paneId, toolCallId, patch) => {
+  updatePaneMessageByToolCallId: (paneId, toolCallId, patch, ownerSessionId) => {
     let found = false;
     set((state) => ({
       panes: state.panes.map((pane) => {
         if (pane.id !== paneId) return pane;
-        const idx = pane.messages.findIndex(
-          (m) => m.role === "tool" && m.toolCallId === toolCallId
+        const idx = pane.messages.findIndex((message) =>
+          ownerSessionId
+            ? matchesToolCallForSession(message, toolCallId, ownerSessionId)
+            : message.role === "tool" && message.toolCallId === toolCallId
         );
         if (idx < 0) return pane;
         found = true;

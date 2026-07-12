@@ -150,6 +150,14 @@ import {
   type ContinueSource,
 } from "../utils/session-continue";
 import { mergeSessionMessagesTail } from "../utils/session-message-merge";
+import {
+  buildPendingToolFallback,
+  buildDeferredToolResultResolution,
+  drainPendingToolResults,
+  hasMatchingToolCall,
+  resolvePendingToolName,
+  type PendingToolResult,
+} from "../utils/pending-tool-result";
 import { injectLiveSubAgentClusterAnchors } from "../utils/subagent-cluster-inline";
 import { buildSubAgentFromRunRecord } from "../utils/subagent-hydrate";
 import { fetchRunActivityPage, fetchRunDetail } from "./subagent/run-drawer-api";
@@ -2552,9 +2560,6 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
    * switch (not on every effect re-run). */
   const lastStallBaselineSessionRef = useRef<string>("");
   const deferredSessionMessagesRef = useRef<Record<string, Array<Parameters<typeof addPaneMessage>>>>({});
-  const pendingToolResultPatchesRef = useRef<
-    Record<string, Parameters<typeof updatePaneMessageByToolCallId>[2]>
-  >({});
   const lastComposerEnterAtRef = useRef(0);
   const streamRafRef = useRef<number | null>(null);
   const listRef = useRef<HTMLDivElement>(null);
@@ -7376,11 +7381,15 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
     setStreamReferences([]);
     setStreamSearchedQueries([]);
     streamCommitRegistryRef.current.beginSession(requestSessionId);
-    pendingToolResultPatchesRef.current = {};
+    const pendingToolResults: Record<string, PendingToolResult> = {};
     const showWidgetDeltaTimers = new Map<string, number>();
     const showWidgetDeltaPending = new Map<
       string,
       { argumentsRaw: string; title?: string; widgetCode?: string }
+    >();
+    const toolCallMetadata = new Map<
+      string,
+      Pick<PendingToolResult, "toolName" | "toolArgs" | "toolGroupId">
     >();
     streamTextRef.current = "";
     const abortController = new AbortController();
@@ -7406,6 +7415,52 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
       }
       addPaneMessage(...stamped);
     };
+    const updatePaneToolMessageForSession = (
+      toolCallId: string,
+      patch: Parameters<typeof updatePaneMessageByToolCallId>[2],
+    ) => updatePaneMessageByToolCallId(pane.id, toolCallId, patch, requestSessionId);
+    const mergePendingToolResultIntoDeferred = (pending: PendingToolResult): boolean => {
+      const deferred = deferredSessionMessagesRef.current[requestSessionId] ?? [];
+      const resolution = buildDeferredToolResultResolution(
+        deferred.map((args) => ({ role: args[1], extras: args[7] })),
+        pending,
+      );
+      if (!resolution) return false;
+      const next = [...deferred];
+      const merged = [...next[resolution.index]] as Parameters<typeof addPaneMessage>;
+      merged[2] = resolution.content;
+      merged[7] = {
+        ...resolution.extras,
+        ownerSessionId: requestSessionId,
+      };
+      next[resolution.index] = merged;
+      deferredSessionMessagesRef.current[requestSessionId] = next;
+      return true;
+    };
+    const flushPendingToolResults = () => {
+      const pendingEntries = drainPendingToolResults(pendingToolResults);
+      const sessionActive = isTargetSessionStillActive();
+      for (const pending of pendingEntries) {
+        if (!pending.patch.content.trim()) continue;
+        if (sessionActive) {
+          if (updatePaneToolMessageForSession(pending.callId, pending.patch)) continue;
+          const currentPane = useAppStore.getState().panes.find((item) => item.id === pane.id);
+          if (hasMatchingToolCall(currentPane?.messages ?? [], pending.callId, requestSessionId)) continue;
+        } else if (mergePendingToolResultIntoDeferred(pending)) {
+          continue;
+        }
+        addPaneMessageIfSessionActive(
+          pane.id,
+          "tool",
+          pending.patch.content,
+          "meta",
+          undefined,
+          undefined,
+          undefined,
+          buildPendingToolFallback(pending),
+        );
+      }
+    };
     const flushShowWidgetDelta = (toolCallId: string) => {
       const pending = showWidgetDeltaPending.get(toolCallId);
       showWidgetDeltaPending.delete(toolCallId);
@@ -7421,7 +7476,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
         widgetCode: pending.widgetCode,
       };
       const partialToolArgs = pending.title ? { title: pending.title } : undefined;
-      const merged = updatePaneMessageByToolCallId(pane.id, toolCallId, {
+      const merged = updatePaneToolMessageForSession(toolCallId, {
         toolName: "show_widget",
         toolStatus: "running",
         ...(partialToolArgs ? { toolArgs: partialToolArgs } : {}),
@@ -7779,7 +7834,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
               const prevText = lastGroupProgressRef.current[eventAgentId] ?? "";
               if (prevText === progressText) continue;
               lastGroupProgressRef.current[eventAgentId] = progressText;
-              const merged = updatePaneMessageByToolCallId(pane.id, progressCallId, {
+              const merged = updatePaneToolMessageForSession(progressCallId, {
                 content: "",
                 toolStatus: "running",
                 toolResultPreview: progressTitle,
@@ -7871,7 +7926,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
               const avatarUrl = String(payload.data?.avatar_url ?? "");
               const content = String(payload.data?.content ?? "");
               const errorText = String(payload.data?.error ?? "");
-              updatePaneMessageByToolCallId(pane.id, `${groupProgressRunId}:group-progress:${eventAgentId}`, {
+              updatePaneToolMessageForSession(`${groupProgressRunId}:group-progress:${eventAgentId}`, {
                 toolStatus: errorText.trim() ? "error" : "done",
               });
               setGroupTyping((prev) => {
@@ -7923,7 +7978,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
               continue;
             }
             if (payload.type === "group_skipped") {
-              updatePaneMessageByToolCallId(pane.id, `${groupProgressRunId}:group-progress:${eventAgentId}`, {
+              updatePaneToolMessageForSession(`${groupProgressRunId}:group-progress:${eventAgentId}`, {
                 toolStatus: "cancelled",
               });
               setGroupTyping((prev) => {
@@ -8031,7 +8086,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
                 };
                 if (Number.isFinite(sec)) patch.toolElapsedSec = sec;
                 if (outputLine !== undefined) patch.appendStreamLine = String(outputLine);
-                updatePaneMessageByToolCallId(pane.id, progressCallId, patch);
+                updatePaneToolMessageForSession(progressCallId, patch);
                 continue;
               }
               if (outputLine !== undefined && eventAgentId === "meta" && !progressCallId) {
@@ -8110,6 +8165,13 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
                     lastMsg?.role === "tool" && lastMsg.toolGroupId
                       ? lastMsg.toolGroupId
                       : crypto.randomUUID();
+                  if (toolCallId) {
+                    toolCallMetadata.set(toolCallId, {
+                      toolName: toolNameStr,
+                      toolArgs,
+                      toolGroupId,
+                    });
+                  }
                   const rawArgs = JSON.stringify(toolArgs);
                   const content =
                     rawArgs.length > 80_000 ? `${rawArgs.slice(0, 80_000)}\n… (truncated)` : rawArgs;
@@ -8151,7 +8213,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
                   cancelStreamRenderFrame();
                   scheduleStreamTextUpdate("");
                   if (toolCallId) {
-                    const merged = updatePaneMessageByToolCallId(pane.id, toolCallId, {
+                    const merged = updatePaneToolMessageForSession(toolCallId, {
                       content,
                       toolName: toolNameStr,
                       toolArgs,
@@ -8175,10 +8237,12 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
                         }
                       );
                     }
-                    const pendingPatch = pendingToolResultPatchesRef.current[toolCallId];
+                    const pendingPatch = pendingToolResults[toolCallId];
                     if (pendingPatch) {
-                      updatePaneMessageByToolCallId(pane.id, toolCallId, pendingPatch);
-                      delete pendingToolResultPatchesRef.current[toolCallId];
+                      const reconciled = isTargetSessionStillActive()
+                        ? updatePaneToolMessageForSession(toolCallId, pendingPatch.patch)
+                        : mergePendingToolResultIntoDeferred(pendingPatch);
+                      if (reconciled) delete pendingToolResults[toolCallId];
                     }
                   } else {
                     const legacy = `\u{1F527} ${toolNameStr}: ${JSON.stringify(toolArgs).slice(0, 120)}`;
@@ -8215,7 +8279,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
               continue;
             }
             if (payload.type === "tool_result") {
-              const toolName = String(payload.data?.name ?? "");
+              const toolName = String(payload.data?.name ?? payload.data?.tool_name ?? "");
               if (SEARCH_REFERENCE_TOOLS.has(toolName)) {
                 const accumulated = accumulateReferenceTurn(
                   pendingReferences,
@@ -8267,7 +8331,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
                   toolStreamLines: [],
                 };
                 let merged = resultCallId
-                  ? updatePaneMessageByToolCallId(pane.id, resultCallId, resultPatch)
+                  ? updatePaneToolMessageForSession(resultCallId, resultPatch)
                   : false;
                 if (!merged) {
                   const pan = useAppStore.getState().panes.find((p) => p.id === pane.id);
@@ -8281,11 +8345,22 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
                         (!toolName || (mm.toolName ?? "") === toolName)
                     )?.toolCallId;
                   if (fallbackCallId) {
-                    merged = updatePaneMessageByToolCallId(pane.id, fallbackCallId, resultPatch);
+                    merged = updatePaneToolMessageForSession(fallbackCallId, resultPatch);
                   }
                 }
                 if (!merged && resultCallId) {
-                  pendingToolResultPatchesRef.current[resultCallId] = resultPatch;
+                  const callMetadata = toolCallMetadata.get(resultCallId);
+                  pendingToolResults[resultCallId] = {
+                    callId: resultCallId,
+                    toolName: resolvePendingToolName(
+                      callMetadata?.toolName,
+                      toolName,
+                      resultCallId,
+                    ),
+                    toolArgs: callMetadata?.toolArgs,
+                    toolGroupId: callMetadata?.toolGroupId,
+                    patch: resultPatch,
+                  };
                   merged = true;
                 }
                 if (!merged && !shouldSkipFormattedToolResultFallback(formatted.content, rawContent)) {
@@ -8516,7 +8591,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
                   },
                 };
                 if (running?.toolCallId) {
-                  updatePaneMessageByToolCallId(pane.id, running.toolCallId, metaPatch);
+                  updatePaneToolMessageForSession(running.toolCallId, metaPatch);
                 } else {
                   const dup = (pan?.messages ?? []).some(
                     (m) => m.clarificationPrompt?.requestId === clarifyReqId,
@@ -8874,7 +8949,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
                 // Hook-blocked: merge into existing ToolCallCard to avoid duplicate bubble.
                 const errToolCallId = String(payload.data?.tool_call_id ?? "").trim();
                 if (HOOK_BLOCK_RE.test(errText) && errToolCallId) {
-                  const merged = updatePaneMessageByToolCallId(pane.id, errToolCallId, {
+                  const merged = updatePaneToolMessageForSession(errToolCallId, {
                     content: errText,
                     toolStatus: "error",
                     toolResultPreview: errText.slice(0, 120),
@@ -8894,6 +8969,9 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
         }
       }
 
+      // Reconcile every tool result before committing the terminal assistant row.
+      // This keeps the live message order identical to messages.json after reload.
+      flushPendingToolResults();
       const trimmedFull = full.trim();
       syncTurnRefsSnapshot();
       const refExtras = referenceExtrasFromTurn(pendingReferences, pendingSearchedQueries);
@@ -8962,23 +9040,16 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
       if (isContinuation) {
         clearResumeInFlight(requestSessionId);
       }
+      // Keep terminal ordering stable on exceptional exits as well: any real
+      // tool result belongs before the request-level failure notice.
+      flushPendingToolResults();
       if (!(error instanceof DOMException && error.name === "AbortError")) {
         addPaneMessageIfSessionActive(pane.id, "tool", `❌ 请求失败: ${String(error)}`, "meta");
       }
     } finally {
-      // Flush any tool_result patches that never found a matching tool_call
-      // row (dropped/out-of-order SSE) instead of silently discarding them —
-      // losing the result entirely is worse than a plain fallback row.
-      const leftoverPatches = pendingToolResultPatchesRef.current;
-      pendingToolResultPatchesRef.current = {};
-      for (const [callId, patch] of Object.entries(leftoverPatches)) {
-        if (!patch.content?.trim()) continue;
-        addPaneMessageIfSessionActive(pane.id, "tool", patch.content, "meta", undefined, undefined, undefined, {
-          toolCallId: callId,
-          toolStatus: patch.toolStatus,
-          toolResultPreview: patch.toolResultPreview,
-        });
-      }
+      // Safety net for malformed/aborted streams. The normal completion path
+      // already drains this before FINAL, so this is an idempotent no-op there.
+      flushPendingToolResults();
       for (const timer of showWidgetDeltaTimers.values()) {
         window.clearTimeout(timer);
       }
