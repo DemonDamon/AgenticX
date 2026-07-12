@@ -386,18 +386,32 @@ def _normalize_preset_paths_from_config(raw: Any) -> Optional[List[Dict[str, Any
     ]
 
 
-def _normalize_custom_paths_from_config(raw: Any) -> List[str]:
+def _normalize_custom_paths_from_config(raw: Any) -> List[Dict[str, Any]]:
+    """Normalize ``skills.custom_paths`` to ``[{path, enabled}, ...]``.
+
+    Accepts legacy string entries (treated as enabled) and dict entries.
+    """
     if raw is None:
         return []
     if isinstance(raw, str) and raw.strip():
-        return [raw.strip()]
-    if not isinstance(raw, list):
+        items: List[Any] = [raw.strip()]
+    elif isinstance(raw, list):
+        items = list(raw)
+    else:
         return []
-    out: List[str] = []
-    for x in raw:
-        s = str(x).strip()
-        if s:
-            out.append(s)
+    out: List[Dict[str, Any]] = []
+    seen: set[str] = set()
+    for x in items:
+        if isinstance(x, dict):
+            path = str(x.get("path", "")).strip()
+            enabled = bool(x.get("enabled", True))
+        else:
+            path = str(x).strip()
+            enabled = True
+        if not path or path in seen:
+            continue
+        seen.add(path)
+        out.append({"path": path, "enabled": enabled})
     return out
 
 
@@ -434,7 +448,7 @@ def _normalize_disabled_skills_from_config(raw: Any) -> List[str]:
 
 
 def get_skill_scan_settings_from_config() -> tuple[
-    List[Dict[str, Any]], List[str], Dict[str, str], List[str]
+    List[Dict[str, Any]], List[Dict[str, Any]], Dict[str, str], List[str]
 ]:
     """Read skill scan settings and ``skills.disabled`` from merged YAML."""
     try:
@@ -497,7 +511,7 @@ def build_skill_search_paths() -> List[Path]:
         Path.home() / ".agent" / "skills",
         _SKILL_PACKAGE_SKILLS_DIR,
     ]
-    presets, custom_strs, _preferred, _ = get_skill_scan_settings_from_config()
+    presets, custom_rows, _preferred, _ = get_skill_scan_settings_from_config()
     extra: List[Path] = []
     agents_home_enabled = True
     for p in presets:
@@ -509,8 +523,13 @@ def build_skill_search_paths() -> List[Path]:
         if not path_str:
             continue
         extra.append(_expand_skill_path(path_str))
-    for s in custom_strs:
-        extra.append(_expand_skill_path(s))
+    for item in custom_rows:
+        if not item.get("enabled", True):
+            continue
+        path_str = str(item.get("path", "")).strip()
+        if not path_str:
+            continue
+        extra.append(_expand_skill_path(path_str))
 
     # If "~/.agent/skills" resolves to "~/.agents/skills", and the user disabled
     # "Agents Global", avoid accidentally re-introducing the same directory via core.
@@ -546,12 +565,13 @@ def build_skill_search_paths() -> List[Path]:
 
 def persist_skill_scan_settings(
     preset_paths: List[Dict[str, Any]],
-    custom_paths: List[str],
+    custom_paths: List[Any],
     preferred_sources: Optional[Dict[str, str]] = None,
     disabled_skills: Optional[List[str]] = None,
 ) -> None:
     """Write skill scan settings to global config.
 
+    ``custom_paths`` may be legacy strings or ``{path, enabled}`` dicts.
     When ``disabled_skills`` is None, the existing ``skills.disabled`` value is kept.
     """
     from agenticx.cli.config_manager import ConfigManager
@@ -569,14 +589,7 @@ def persist_skill_scan_settings(
         }
         for d in SKILL_SCAN_PRESET_DEFAULTS
     ]
-    custom_clean: List[str] = []
-    seen: set[str] = set()
-    for s in custom_paths:
-        t = str(s).strip()
-        if not t or t in seen:
-            continue
-        seen.add(t)
-        custom_clean.append(t)
+    custom_clean = _normalize_custom_paths_from_config(custom_paths)
     preferred_clean = _normalize_preferred_sources_from_config(preferred_sources or {})
     ConfigManager.set_value("skills.preset_paths", cleaned_presets)
     ConfigManager.set_value("skills.custom_paths", custom_clean)
@@ -614,7 +627,8 @@ class SkillBundleLoader:
     默认扫描路径由 :func:`build_skill_search_paths` 生成：核心路径（项目 .agents/.agent/.claude、
     ``~/.agent/skills``、AgenticX bundles/registry、内置包内 skills）始终启用；第三方根目录
     （Cursor / Claude / ``~/.agents/skills`` 等）由 ``~/.agenticx/config.yaml`` 中
-    ``skills.preset_paths`` 逐条开关；另支持 ``skills.custom_paths``。
+    ``skills.preset_paths`` 逐条开关；另支持 ``skills.custom_paths``（``{path, enabled}``，
+    兼容旧版纯字符串列表，默认 enabled）。
 
     Example:
         >>> loader = SkillBundleLoader()

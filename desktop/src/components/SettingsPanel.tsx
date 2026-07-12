@@ -39,6 +39,7 @@ import {
   Eye,
   EyeOff,
   ExternalLink,
+  FolderOpen,
   Library,
   Mic,
   Network,
@@ -2708,6 +2709,30 @@ function pinSkillFirst(skills: SkillItem[], pin: string | null): SkillItem[] {
   return [one, ...next];
 }
 
+function normalizeSkillScanCustomPaths(
+  raw: Array<string | SkillScanCustomRow> | undefined | null,
+): SkillScanCustomRow[] {
+  if (!Array.isArray(raw)) return [];
+  const out: SkillScanCustomRow[] = [];
+  const seen = new Set<string>();
+  for (const item of raw) {
+    if (typeof item === "string") {
+      const path = item.trim();
+      if (!path || seen.has(path)) continue;
+      seen.add(path);
+      out.push({ path, enabled: true });
+      continue;
+    }
+    if (item && typeof item === "object") {
+      const path = String(item.path ?? "").trim();
+      if (!path || seen.has(path)) continue;
+      seen.add(path);
+      out.push({ path, enabled: item.enabled !== false });
+    }
+  }
+  return out;
+}
+
 function SkillsTab() {
   const [items, setItems] = useState<SkillItem[]>([]);
   const [loading, setLoading] = useState(true);
@@ -2730,7 +2755,9 @@ function SkillsTab() {
   /** After marketplace install: pin this skill at top of its group and surface global section first. */
   const [recentMarketSkillName, setRecentMarketSkillName] = useState<string | null>(null);
   const [skillScanPresets, setSkillScanPresets] = useState<SkillScanPresetRow[]>([]);
-  const [skillScanCustomPaths, setSkillScanCustomPaths] = useState<string[]>([]);
+  const [skillScanCustomPaths, setSkillScanCustomPaths] = useState<SkillScanCustomRow[]>([]);
+  /** Local draft custom path: null = no draft; string (incl. "") = unconfirmed row, never persisted until 确认. */
+  const [skillScanDraftPath, setSkillScanDraftPath] = useState<string | null>(null);
   const [preferredSkillSources, setPreferredSkillSources] = useState<Record<string, string>>({});
   /** Skill names globally disabled in ~/.agenticx/config.yaml (skills.disabled). */
   const [disabledSkillNames, setDisabledSkillNames] = useState<string[]>([]);
@@ -2817,7 +2844,7 @@ function SkillsTab() {
             );
           }
           if (scanRes.ok && Array.isArray(scanRes.custom_paths)) {
-            setSkillScanCustomPaths([...scanRes.custom_paths]);
+            setSkillScanCustomPaths(normalizeSkillScanCustomPaths(scanRes.custom_paths));
           }
           if (scanRes.ok && scanRes.preferred_sources && typeof scanRes.preferred_sources === "object") {
             setPreferredSkillSources({ ...scanRes.preferred_sources });
@@ -2858,14 +2885,14 @@ function SkillsTab() {
   const persistSkillScanSettings = useCallback(
     async (
       presetRows: SkillScanPresetRow[],
-      customs: string[],
+      customs: SkillScanCustomRow[],
       preferredSources: Record<string, string>,
       disabledSkills: string[],
     ) => {
       setSkillScanBusy(true);
       setSkillScanMsg("");
       try {
-        const cleanedCustom = customs.map((x) => x.trim()).filter(Boolean);
+        const cleanedCustom = normalizeSkillScanCustomPaths(customs);
         const r = await window.agenticxDesktop.putSkillSettings({
           presetPaths: presetRows.map((p) => ({ id: p.id, enabled: p.enabled })),
           customPaths: cleanedCustom,
@@ -2884,7 +2911,7 @@ function SkillsTab() {
             );
           }
           if (Array.isArray(r.custom_paths)) {
-            setSkillScanCustomPaths([...r.custom_paths]);
+            setSkillScanCustomPaths(normalizeSkillScanCustomPaths(r.custom_paths));
           }
           if (r.preferred_sources && typeof r.preferred_sources === "object") {
             setPreferredSkillSources({ ...r.preferred_sources });
@@ -2933,7 +2960,8 @@ function SkillsTab() {
         );
       }
       if (scanRes.ok && Array.isArray(scanRes.custom_paths)) {
-        setSkillScanCustomPaths([...scanRes.custom_paths]);
+        setSkillScanCustomPaths(normalizeSkillScanCustomPaths(scanRes.custom_paths));
+        setSkillScanDraftPath(null);
       }
       if (scanRes.ok && scanRes.preferred_sources && typeof scanRes.preferred_sources === "object") {
         setPreferredSkillSources({ ...scanRes.preferred_sources });
@@ -2976,40 +3004,99 @@ function SkillsTab() {
     ],
   );
 
-  const onAddCustomSkillPath = useCallback(async () => {
+  const onAddCustomSkillPath = useCallback(() => {
     if (skillScanBusy) return;
+    if (skillScanDraftPath !== null) {
+      setSkillScanMsg("请先确认或取消当前草稿路径");
+      return;
+    }
+    setSkillScanDraftPath("");
+    setSkillScanMsg("");
+  }, [skillScanBusy, skillScanDraftPath]);
+
+  const pickSkillDirectory = useCallback(async (): Promise<string | null> => {
+    const picker = window.agenticxDesktop.chooseDirectory;
+    if (typeof picker !== "function") {
+      setSkillScanMsg("当前客户端不支持目录选择，请重启桌面端后重试。");
+      return null;
+    }
     try {
-      const picker = window.agenticxDesktop.chooseDirectory;
-      if (typeof picker !== "function") {
-        setSkillScanMsg("当前客户端不支持目录选择，请重启桌面端后重试。");
-        return;
-      }
       const picked = await picker();
-      if (picked.canceled) return;
+      if (picked.canceled) return null;
       if (!picked.ok || !picked.path?.trim()) {
         setSkillScanMsg(picked.error ? `选择目录失败: ${picked.error}` : "未选择目录");
-        return;
+        return null;
       }
-      const path = picked.path.trim();
-      const existing = skillScanCustomPaths.map((p) => p.trim()).filter(Boolean);
-      if (existing.includes(path)) {
+      return picked.path.trim();
+    } catch (e) {
+      setSkillScanMsg(String(e));
+      return null;
+    }
+  }, []);
+
+  const onBrowseSkillDraftPath = useCallback(async () => {
+    if (skillScanBusy || skillScanDraftPath === null) return;
+    const path = await pickSkillDirectory();
+    if (path == null) return;
+    setSkillScanDraftPath(path);
+    setSkillScanMsg("");
+  }, [skillScanBusy, skillScanDraftPath, pickSkillDirectory]);
+
+  const onBrowseCommittedSkillPath = useCallback(
+    async (index: number) => {
+      if (skillScanBusy) return;
+      const path = await pickSkillDirectory();
+      if (path == null) return;
+      if (skillScanCustomPaths.some((p, i) => i !== index && p.path.trim() === path)) {
         setSkillScanMsg("该路径已在自定义列表中");
         return;
       }
-      const next = [...existing, path];
+      const next = skillScanCustomPaths.map((row, i) =>
+        i === index ? { ...row, path } : row,
+      );
       setSkillScanCustomPaths(next);
       await persistSkillScanSettings(skillScanPresets, next, preferredSkillSources, disabledSkillNames);
-    } catch (e) {
-      setSkillScanMsg(String(e));
+    },
+    [
+      skillScanBusy,
+      skillScanCustomPaths,
+      skillScanPresets,
+      preferredSkillSources,
+      disabledSkillNames,
+      persistSkillScanSettings,
+      pickSkillDirectory,
+    ],
+  );
+
+  const onConfirmSkillDraftPath = useCallback(async () => {
+    if (skillScanBusy || skillScanDraftPath === null) return;
+    const path = skillScanDraftPath.trim();
+    if (!path) {
+      setSkillScanMsg("请先填写路径");
+      return;
     }
+    if (skillScanCustomPaths.some((p) => p.path.trim() === path)) {
+      setSkillScanMsg("该路径已在自定义列表中");
+      return;
+    }
+    const next = [...skillScanCustomPaths, { path, enabled: true }];
+    setSkillScanDraftPath(null);
+    setSkillScanCustomPaths(next);
+    await persistSkillScanSettings(skillScanPresets, next, preferredSkillSources, disabledSkillNames);
   }, [
     skillScanBusy,
+    skillScanDraftPath,
     skillScanCustomPaths,
     skillScanPresets,
     preferredSkillSources,
     disabledSkillNames,
     persistSkillScanSettings,
   ]);
+
+  const onCancelSkillDraftPath = useCallback(() => {
+    setSkillScanDraftPath(null);
+    setSkillScanMsg("");
+  }, []);
 
   const reloadSkillsAfterMarketInstall = async (installedSlug: string) => {
     try {
@@ -3359,66 +3446,144 @@ function SkillsTab() {
           </div>
 
           <div className="divide-y divide-border border-t border-border">
-            {skillScanCustomPaths.length === 0 ? (
-              <div className="bg-surface-base p-3">
+            {skillScanCustomPaths.map((row, i) => (
+              <div key={`skill-custom-${i}`} className="flex items-center gap-2 px-3 py-2 bg-surface-base">
+                <div className="flex-1 min-w-0">
+                  <input
+                    className="w-full rounded bg-surface-panel px-2 py-1.5 font-mono text-xs text-text-primary outline-none placeholder:text-text-faint focus:ring-1 focus:ring-border"
+                    placeholder="例如 ~/my-skills 或绝对路径"
+                    value={row.path}
+                    disabled={skillScanBusy}
+                    onChange={(e) => {
+                      const next = skillScanCustomPaths.map((r, j) =>
+                        j === i ? { ...r, path: e.target.value } : r,
+                      );
+                      setSkillScanCustomPaths(next);
+                    }}
+                    onBlur={(e) => {
+                      const next = skillScanCustomPaths.map((r, j) =>
+                        j === i ? { ...r, path: e.target.value } : r,
+                      );
+                      void persistSkillScanSettings(
+                        skillScanPresets,
+                        next,
+                        preferredSkillSources,
+                        disabledSkillNames,
+                      );
+                    }}
+                  />
+                </div>
                 <button
                   type="button"
-                  className="flex w-full items-center justify-center rounded-md border border-dashed border-border px-3 py-2.5 text-sm text-text-subtle transition hover:border-border-strong hover:bg-surface-hover hover:text-text-primary disabled:opacity-40"
+                  className="shrink-0 rounded p-1.5 text-text-faint transition hover:bg-surface-hover hover:text-text-primary disabled:opacity-40"
                   disabled={skillScanBusy}
-                  onClick={() => void onAddCustomSkillPath()}
+                  title="浏览选目录"
+                  onClick={() => void onBrowseCommittedSkillPath(i)}
                 >
-                  添加自定义路径
+                  <FolderOpen className="h-3.5 w-3.5" aria-hidden />
                 </button>
+                <button
+                  type="button"
+                  className="shrink-0 rounded p-1.5 text-text-faint transition hover:bg-surface-hover hover:text-rose-400 disabled:opacity-40"
+                  disabled={skillScanBusy}
+                  title="移除"
+                  onClick={() => {
+                    const next = skillScanCustomPaths.filter((_, j) => j !== i);
+                    setSkillScanCustomPaths(next);
+                    void persistSkillScanSettings(
+                      skillScanPresets,
+                      next,
+                      preferredSkillSources,
+                      disabledSkillNames,
+                    );
+                  }}
+                >
+                  <Trash2 className="h-3.5 w-3.5" />
+                </button>
+                <div className="shrink-0 pl-1">
+                  <SettingsSwitch
+                    checked={row.enabled}
+                    disabled={skillScanBusy}
+                    aria-label={`切换自定义路径 ${row.path || i + 1}`}
+                    onChange={(nextEnabled) => {
+                      const next = skillScanCustomPaths.map((r, j) =>
+                        j === i ? { ...r, enabled: nextEnabled } : r,
+                      );
+                      setSkillScanCustomPaths(next);
+                      void persistSkillScanSettings(
+                        skillScanPresets,
+                        next,
+                        preferredSkillSources,
+                        disabledSkillNames,
+                      );
+                    }}
+                  />
+                </div>
               </div>
-            ) : (
-              <>
-                {skillScanCustomPaths.map((row, i) => (
-                  <div key={`skill-custom-${i}`} className="flex items-center gap-2 px-3 py-2 bg-surface-base">
-                    <div className="flex-1">
-                      <input
-                        className="w-full rounded bg-surface-panel px-2 py-1.5 font-mono text-xs text-text-primary outline-none placeholder:text-text-faint focus:ring-1 focus:ring-border"
-                        placeholder="例如 ~/my-skills 或绝对路径"
-                        value={row}
-                        disabled={skillScanBusy}
-                        onChange={(e) => {
-                          const next = [...skillScanCustomPaths];
-                          next[i] = e.target.value;
-                          setSkillScanCustomPaths(next);
-                        }}
-                        onBlur={(e) => {
-                          const next = [...skillScanCustomPaths];
-                          next[i] = e.target.value;
-                          void persistSkillScanSettings(skillScanPresets, next, preferredSkillSources, disabledSkillNames);
-                        }}
-                      />
-                    </div>
-                    <button
-                      type="button"
-                      className="shrink-0 rounded p-1.5 text-text-faint transition hover:bg-surface-hover hover:text-rose-400 disabled:opacity-40"
+            ))}
+
+            {skillScanDraftPath !== null ? (
+              <div className="bg-surface-base px-3 py-2">
+                <div className="flex items-center gap-2">
+                  <div className="flex-1 min-w-0">
+                    <input
+                      className="w-full rounded bg-surface-panel px-2 py-1.5 font-mono text-xs text-text-primary outline-none placeholder:text-text-faint focus:ring-1 focus:ring-border"
+                      placeholder="例如 ~/.agents/skills 或绝对路径"
+                      value={skillScanDraftPath}
                       disabled={skillScanBusy}
-                      title="移除"
-                      onClick={() => {
-                        const next = skillScanCustomPaths.filter((_, j) => j !== i);
-                        setSkillScanCustomPaths(next);
-                        void persistSkillScanSettings(skillScanPresets, next, preferredSkillSources, disabledSkillNames);
+                      autoFocus
+                      onChange={(e) => setSkillScanDraftPath(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter") {
+                          e.preventDefault();
+                          void onConfirmSkillDraftPath();
+                        } else if (e.key === "Escape") {
+                          e.preventDefault();
+                          onCancelSkillDraftPath();
+                        }
                       }}
-                    >
-                      <Trash2 className="h-3.5 w-3.5" />
-                    </button>
+                    />
                   </div>
-                ))}
-                <div className="bg-surface-base px-3 py-2">
                   <button
                     type="button"
-                    className="flex w-full items-center justify-center rounded-md border border-dashed border-border px-3 py-2 text-xs text-text-subtle transition hover:border-border-strong hover:bg-surface-hover hover:text-text-primary disabled:opacity-40"
+                    className="shrink-0 rounded p-1.5 text-text-faint transition hover:bg-surface-hover hover:text-text-primary disabled:opacity-40"
                     disabled={skillScanBusy}
-                    onClick={() => void onAddCustomSkillPath()}
+                    title="浏览选目录"
+                    onClick={() => void onBrowseSkillDraftPath()}
                   >
-                    添加自定义路径
+                    <FolderOpen className="h-3.5 w-3.5" aria-hidden />
+                  </button>
+                  <button
+                    type="button"
+                    className="shrink-0 rounded-md border border-border bg-[var(--ui-btn-primary-bg)] px-2 py-1 text-xs font-medium text-[var(--ui-btn-primary-fg)] transition hover:opacity-90 disabled:opacity-40"
+                    disabled={skillScanBusy}
+                    onClick={() => void onConfirmSkillDraftPath()}
+                  >
+                    确认
+                  </button>
+                  <button
+                    type="button"
+                    className="shrink-0 rounded-md border border-border px-2 py-1 text-xs text-text-subtle transition hover:bg-surface-hover hover:text-text-primary disabled:opacity-40"
+                    disabled={skillScanBusy}
+                    onClick={onCancelSkillDraftPath}
+                  >
+                    取消
                   </button>
                 </div>
-              </>
-            )}
+                <p className="mt-1.5 text-[10px] text-text-faint">仅本地草稿，尚未写入配置</p>
+              </div>
+            ) : null}
+
+            <div className="bg-surface-base px-3 py-2">
+              <button
+                type="button"
+                className="flex w-full items-center justify-center rounded-md border border-dashed border-border px-3 py-2.5 text-sm text-text-subtle transition hover:border-border-strong hover:bg-surface-hover hover:text-text-primary disabled:opacity-40"
+                disabled={skillScanBusy}
+                onClick={onAddCustomSkillPath}
+              >
+                添加自定义路径
+              </button>
+            </div>
           </div>
         </div>
         
@@ -4912,7 +5077,9 @@ function useGuardSettings() {
       const presetPaths = Array.isArray(settings?.preset_paths)
         ? settings.preset_paths.map((p) => ({ id: p.id, enabled: p.enabled }))
         : [];
-      const customPaths = Array.isArray(settings?.custom_paths) ? settings.custom_paths : [];
+      const customPaths = normalizeSkillScanCustomPaths(
+        Array.isArray(settings?.custom_paths) ? settings.custom_paths : [],
+      );
       const preferredSources =
         settings?.preferred_sources && typeof settings.preferred_sources === "object"
           ? settings.preferred_sources

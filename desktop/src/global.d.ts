@@ -239,10 +239,11 @@ type SkillItem = {
 };
 type SkillListResult = { ok: boolean; items: SkillItem[]; count: number; error?: string };
 type SkillScanPresetRow = { id: string; label: string; path: string; enabled: boolean };
+type SkillScanCustomRow = { path: string; enabled: boolean };
 type SkillSettingsResult = {
   ok: boolean;
   preset_paths?: SkillScanPresetRow[];
-  custom_paths?: string[];
+  custom_paths?: Array<string | SkillScanCustomRow>;
   preferred_sources?: Record<string, string>;
   disabled_skills?: string[];
   error?: string;
@@ -1074,7 +1075,7 @@ declare global {
       }) => Promise<SkillSnapshotRestoreResult>;
       putSkillSettings: (payload: {
         presetPaths: Array<{ id: string; enabled: boolean }>;
-        customPaths: string[];
+        customPaths: Array<{ path: string; enabled: boolean } | string>;
         preferredSources?: Record<string, string>;
         disabledSkills?: string[];
       }) => Promise<SkillSettingsResult>;

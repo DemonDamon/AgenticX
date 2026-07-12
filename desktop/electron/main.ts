@@ -6955,7 +6955,7 @@ function registerIpc(): void {
       _event,
       payload: {
         presetPaths: Array<{ id: string; enabled: boolean }>;
-        customPaths: string[];
+        customPaths: Array<{ path: string; enabled: boolean } | string>;
         preferredSources?: Record<string, string>;
         disabledSkills?: string[];
       },
