@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { ExternalLink, Link2, Loader2 } from "lucide-react";
+import { ExternalLink, Link2, Loader2, SquareArrowOutUpRight } from "lucide-react";
 
 import { nativeConnectorAvailability, resolveConnectedConnectorIds } from "../../../electron/native-connectors-core";
 import { CONNECTORS, type ConnectorId } from "../settings/connectors/connector-catalog";
@@ -21,10 +21,9 @@ type NativeId = "tencent-meeting" | "tapd";
 
 /**
  * Persistent「连接器」entry in the composer toolbar (replaces the previous
- * decorative「更多」button). Matches WorkBuddy: already-connected items show a
- * toggle; unconnected items show「连接」which starts that connector's auth
- * flow inline (QR / token form) — never jumps to Settings. Only the header
- * 「管理」link opens the full Connectors settings page.
+ * decorative「更多」button). Matches WorkBuddy:
+ * - Popup list only shows truly connected connectors (with disconnect toggle).
+ * - 「选择更多连接器」jumps to Settings → 连接器 marketplace (same as「管理」).
  */
 export function ConnectorsMenuButton({ sessionId }: Props) {
   const mcpServers = useAppStore((state) => state.mcpServers);
@@ -118,6 +117,21 @@ export function ConnectorsMenuButton({ sessionId }: Props) {
         .map((id) => CONNECTORS.find((item) => item.id === id)?.name ?? id)
         .join("、"),
     [connectedIds],
+  );
+
+  const isConnectorConnected = useCallback(
+    (id: ConnectorId) => {
+      if (id === "tencent-meeting") return tmeetConnected;
+      if (id === "tapd") return tapdConnected;
+      return false;
+    },
+    [tapdConnected, tmeetConnected],
+  );
+
+  /** WorkBuddy popup: only truly connected connectors. */
+  const visibleConnectors = useMemo(
+    () => CONNECTORS.filter((item) => isConnectorConnected(item.id)),
+    [isConnectorConnected],
   );
 
   useEffect(() => {
@@ -270,50 +284,61 @@ export function ConnectorsMenuButton({ sessionId }: Props) {
               </button>
             </div>
             <div className="max-h-80 overflow-y-auto p-1.5">
-              {CONNECTORS.map((item) => {
-                const isImplemented = nativeConnectorAvailability(item.id) === "available";
-                const connected =
-                  item.id === "tencent-meeting"
-                    ? tmeetConnected
-                    : item.id === "tapd"
-                      ? tapdConnected
-                      : false;
-                const busy = pendingId === item.id;
-                // WorkBuddy: connected → toggle; not connected →「连接」inline action.
-                const showToggle = isImplemented && connected;
-                return (
-                  <div
-                    key={item.id}
-                    className="flex items-center gap-2 rounded-lg px-2 py-1.5 text-left transition hover:bg-surface-hover"
-                  >
-                    <span className="flex h-6 w-6 shrink-0 items-center justify-center overflow-hidden rounded-md border border-border bg-white">
-                      <img src={item.iconSrc} alt="" className="h-4 w-4 object-contain" draggable={false} />
-                    </span>
-                    <span className="min-w-0 flex-1 truncate text-[13px] font-medium text-text-strong">
-                      {item.name}
-                    </span>
-                    {busy ? (
-                      <Loader2 className="h-4 w-4 shrink-0 animate-spin text-text-faint" aria-hidden />
-                    ) : showToggle ? (
-                      <SettingsSwitch
-                        checked
-                        size="sm"
-                        aria-label={`断开 ${item.name}`}
-                        onChange={(next) => handleToggle(item.id as NativeId, next)}
-                      />
-                    ) : (
-                      <button
-                        type="button"
-                        className="flex shrink-0 items-center gap-1 text-[12px] font-medium text-emerald-400 transition hover:text-emerald-300"
-                        onClick={() => handleConnectClick(item.id)}
-                      >
-                        <Link2 className="h-3.5 w-3.5" aria-hidden />
-                        连接
-                      </button>
-                    )}
-                  </div>
-                );
-              })}
+              {visibleConnectors.length === 0 ? (
+                <div className="px-2 py-4 text-center text-[12px] text-text-faint">
+                  暂无已连接的连接器
+                </div>
+              ) : (
+                visibleConnectors.map((item) => {
+                  const isImplemented = nativeConnectorAvailability(item.id) === "available";
+                  const connected = isConnectorConnected(item.id);
+                  const busy = pendingId === item.id;
+                  // WorkBuddy: connected → toggle; not connected →「连接」inline action.
+                  const showToggle = isImplemented && connected;
+                  return (
+                    <div
+                      key={item.id}
+                      className="flex items-center gap-2 rounded-lg px-2 py-1.5 text-left transition hover:bg-surface-hover"
+                    >
+                      <span className="flex h-6 w-6 shrink-0 items-center justify-center overflow-hidden rounded-md border border-border bg-white">
+                        <img src={item.iconSrc} alt="" className="h-4 w-4 object-contain" draggable={false} />
+                      </span>
+                      <span className="min-w-0 flex-1 truncate text-[13px] font-medium text-text-strong">
+                        {item.name}
+                      </span>
+                      {busy ? (
+                        <Loader2 className="h-4 w-4 shrink-0 animate-spin text-text-faint" aria-hidden />
+                      ) : showToggle ? (
+                        <SettingsSwitch
+                          checked
+                          size="sm"
+                          aria-label={`断开 ${item.name}`}
+                          onChange={(next) => handleToggle(item.id as NativeId, next)}
+                        />
+                      ) : (
+                        <button
+                          type="button"
+                          className="flex shrink-0 items-center gap-1 text-[12px] font-medium text-emerald-400 transition hover:text-emerald-300"
+                          onClick={() => handleConnectClick(item.id)}
+                        >
+                          <Link2 className="h-3.5 w-3.5" aria-hidden />
+                          连接
+                        </button>
+                      )}
+                    </div>
+                  );
+                })
+              )}
+            </div>
+            <div className="border-t border-border p-1.5">
+              <button
+                type="button"
+                className="flex w-full items-center justify-center gap-1.5 rounded-lg bg-surface-card px-2 py-2 text-[12px] font-medium text-text-muted transition hover:bg-surface-hover hover:text-text-strong"
+                onClick={goToSettings}
+              >
+                <SquareArrowOutUpRight className="h-3.5 w-3.5 shrink-0" aria-hidden />
+                选择更多连接器
+              </button>
             </div>
             {pendingId === "tencent-meeting" && tmeetPhase ? (
               <div className="border-t border-border px-3 py-2 text-[11px] text-text-muted" role="status">

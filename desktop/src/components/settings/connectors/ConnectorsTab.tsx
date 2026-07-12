@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { ExternalLink, Loader2, Plus } from "lucide-react";
+import { ChevronRight, ExternalLink, Loader2, Plus } from "lucide-react";
 import { Modal } from "../../ds/Modal";
 import { Toast } from "../../ds/Toast";
+import { SettingsSwitch } from "../SettingsSwitch";
 import { nativeConnectorAvailability } from "../../../../electron/native-connectors-core";
 import { CONNECTORS, type ConnectorDefinition, type ConnectorId } from "./connector-catalog";
 
@@ -18,6 +19,7 @@ type TmeetStatus = {
   error?: string;
 };
 
+/** Compact status used inside connect/manage dialogs (not the marketplace card). */
 function StatusLabel({
   available,
   connected,
@@ -64,6 +66,8 @@ export function ConnectorsTab({ sessionId, tapdConnected, onRefreshMcp }: Props)
   const [selectedId, setSelectedId] = useState<ConnectorId | null>(null);
   const [toastOpen, setToastOpen] = useState(false);
   const [toastMessage, setToastMessage] = useState("");
+  /** WorkBuddy marketplace: hide not-yet-integrated connectors unless toggled on. */
+  const [showUnavailable, setShowUnavailable] = useState(false);
   const [tmeetStatus, setTmeetStatus] = useState<TmeetStatus>({
     available: true,
     connected: false,
@@ -78,6 +82,40 @@ export function ConnectorsTab({ sessionId, tapdConnected, onRefreshMcp }: Props)
   const selected = useMemo(
     () => CONNECTORS.find((item) => item.id === selectedId) ?? null,
     [selectedId],
+  );
+
+  const connectorState = useCallback(
+    (item: ConnectorDefinition) => {
+      const connected =
+        item.id === "tencent-meeting"
+          ? tmeetStatus.connected
+          : item.id === "tapd"
+            ? tapdConnected
+            : false;
+      const available =
+        item.id === "tencent-meeting"
+          ? tmeetStatus.available
+          : nativeConnectorAvailability(item.id) === "available";
+      const busy =
+        item.id === "tencent-meeting" ? tmeetBusy : item.id === "tapd" ? tapdBusy : false;
+      return { available, connected, busy };
+    },
+    [tapdBusy, tapdConnected, tmeetBusy, tmeetStatus.available, tmeetStatus.connected],
+  );
+
+  const visibleConnectors = useMemo(
+    () =>
+      CONNECTORS.filter((item) => {
+        if (showUnavailable) return true;
+        const { available, connected } = connectorState(item);
+        return available || connected;
+      }),
+    [connectorState, showUnavailable],
+  );
+
+  const unavailableCount = useMemo(
+    () => CONNECTORS.filter((item) => !connectorState(item).available && !connectorState(item).connected).length,
+    [connectorState],
   );
 
   const showToast = useCallback((message: string) => {
@@ -221,44 +259,48 @@ export function ConnectorsTab({ sessionId, tapdConnected, onRefreshMcp }: Props)
   return (
     <>
       <div className="space-y-4 p-4">
-        <p className="text-xs text-text-muted">
-          连接常用账号与服务，让 Near 在获得授权后调用对应能力。
-        </p>
-        <div className="flex items-center gap-2 rounded-lg border border-emerald-500/25 bg-emerald-500/10 px-3 py-2 text-xs text-text-muted">
-          <span className="h-2 w-2 shrink-0 rounded-full bg-emerald-400" aria-hidden />
-          <span>首批已开放腾讯会议和 TAPD；红色标记的连接器尚未接入。</span>
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <p className="max-w-xl text-xs text-text-muted">
+            连接常用账号与服务，让 Near 在获得授权后调用对应能力。
+          </p>
+          {unavailableCount > 0 ? (
+            <label className="flex shrink-0 items-center gap-2 text-[12px] text-text-muted">
+              <span>显示尚未接入</span>
+              <SettingsSwitch
+                checked={showUnavailable}
+                size="sm"
+                aria-label="显示尚未接入的连接器"
+                onChange={setShowUnavailable}
+              />
+            </label>
+          ) : null}
         </div>
 
-        <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 md:grid-cols-3">
-          {CONNECTORS.map((item) => {
-            const connected =
-              item.id === "tencent-meeting"
-                ? tmeetStatus.connected
-                : item.id === "tapd"
-                  ? tapdConnected
-                  : false;
-            const available =
-              item.id === "tencent-meeting"
-                ? tmeetStatus.available
-                : nativeConnectorAvailability(item.id) === "available";
-            const busy =
-              item.id === "tencent-meeting"
-                ? tmeetBusy
-                : item.id === "tapd"
-                  ? tapdBusy
-                  : false;
+        <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+          {visibleConnectors.map((item) => {
+            const { available, connected, busy } = connectorState(item);
             return (
               <div
                 key={item.id}
-                className={`flex min-h-[92px] items-center gap-3 rounded-xl border border-border bg-surface-card px-3 py-3 transition ${available ? "hover:bg-surface-hover" : "opacity-80"}`}
+                className={`flex min-h-[88px] items-start gap-3 rounded-xl border border-border bg-surface-card px-3 py-3 transition ${
+                  available ? "hover:bg-surface-hover" : "opacity-70"
+                }`}
               >
                 <ConnectorIcon item={item} />
                 <div className="min-w-0 flex-1">
-                  <div className="truncate text-sm font-medium text-text-strong">{item.name}</div>
-                  <div className="truncate text-xs text-text-muted">{item.description}</div>
-                  <div className="mt-1.5">
-                    <StatusLabel available={available} connected={connected} busy={busy} />
+                  <div className="flex items-center gap-1.5">
+                    <span className="truncate text-sm font-medium text-text-strong">{item.name}</span>
+                    {/* WorkBuddy: green = connected; grey = available but not connected */}
+                    {connected ? (
+                      <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-emerald-400" aria-label="已连接" />
+                    ) : available ? (
+                      <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-text-faint/50" aria-label="未连接" />
+                    ) : null}
                   </div>
+                  <p className="mt-1 line-clamp-2 text-xs leading-relaxed text-text-muted">{item.description}</p>
+                  {!available && !connected ? (
+                    <p className="mt-1 text-[11px] text-text-faint">尚未接入</p>
+                  ) : null}
                 </div>
                 {available ? (
                   <button
@@ -270,6 +312,8 @@ export function ConnectorsTab({ sessionId, tapdConnected, onRefreshMcp }: Props)
                   >
                     {busy ? (
                       <Loader2 className="h-4 w-4 animate-spin" aria-hidden />
+                    ) : connected ? (
+                      <ChevronRight className="h-4 w-4" aria-hidden />
                     ) : (
                       <Plus className="h-4 w-4" aria-hidden />
                     )}
