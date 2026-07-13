@@ -136,6 +136,14 @@ function now(): string {
   return new Date().toISOString();
 }
 
+/** Stamp a user/assistant pair so PG ORDER BY created_at keeps user first. */
+function pairedCreatedAt(baseMs: number = Date.now()): { user: string; assistant: string } {
+  return {
+    user: new Date(baseMs).toISOString(),
+    assistant: new Date(baseMs + 1).toISOString(),
+  };
+}
+
 function addChunkToSessionTokens(
   prev: SessionTokenUsage,
   chunk: { inputTokens?: number; outputTokens?: number; totalTokens?: number },
@@ -766,6 +774,7 @@ export const useChatStore = create<ChatStore>((set, get) => ({
     const latest = get();
     const tenantId = input.tenantId ?? latest.sessions.find((session) => session.id === sessionId)?.tenant_id ?? DEFAULT_TENANT;
     const userId = input.userId ?? latest.sessions.find((session) => session.id === sessionId)?.user_id ?? DEFAULT_USER;
+    const createdAtPair = pairedCreatedAt();
     const userMessage: ChatMessage = {
       id: makeId(),
       session_id: sessionId,
@@ -774,7 +783,7 @@ export const useChatStore = create<ChatStore>((set, get) => ({
       role: "user",
       content,
       attachments: attachments.length > 0 ? attachments : undefined,
-      created_at: now(),
+      created_at: createdAtPair.user,
     };
     const assistantMessage: ChatMessage = {
       id: makeId(),
@@ -784,7 +793,7 @@ export const useChatStore = create<ChatStore>((set, get) => ({
       role: "assistant",
       content: "",
       model: latest.activeModel,
-      created_at: now(),
+      created_at: createdAtPair.assistant,
     };
 
     const sessionMessages = getSessionMessages(latest.messages, sessionId);
@@ -952,6 +961,7 @@ export const useChatStore = create<ChatStore>((set, get) => ({
     const sourceAssistantMessage = assistantIndex >= 0 ? sessionMessages[assistantIndex] : undefined;
     if (!sourceUserMessage || sourceUserMessage.role !== "user") return;
 
+    const createdAtPair = pairedCreatedAt();
     const replacementAssistant: ChatMessage = {
       id: makeId(),
       session_id: sessionId,
@@ -960,14 +970,14 @@ export const useChatStore = create<ChatStore>((set, get) => ({
       role: "assistant",
       content: "",
       model: state.activeModel,
-      created_at: now(),
+      created_at: createdAtPair.assistant,
     };
 
     const editedMessages = [...sessionMessages];
     editedMessages[userIndex] = {
       ...sourceUserMessage,
       content: nextContent,
-      created_at: now(),
+      created_at: createdAtPair.user,
     };
 
     let targetAssistantIndex = assistantIndex;
@@ -1153,7 +1163,8 @@ export const useChatStore = create<ChatStore>((set, get) => ({
       role: "assistant",
       content: "",
       model: state.activeModel,
-      created_at: now(),
+      // Keep assistant after the related user even if both were previously same-ms stamped.
+      created_at: pairedCreatedAt(Math.max(Date.parse(sourceUserMessage.created_at) || Date.now(), Date.now())).assistant,
     };
 
     const nextSessionMessages = [...sessionMessages];

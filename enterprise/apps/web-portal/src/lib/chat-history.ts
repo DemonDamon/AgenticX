@@ -11,6 +11,7 @@ import { and, asc, desc, eq, gt, isNull } from "drizzle-orm";
 import { drizzle, type NodePgDatabase } from "drizzle-orm/node-postgres";
 import { Pool } from "pg";
 import { ulid as newUlid } from "ulid";
+import { normalizeChatMessageOrder } from "./chat-message-order";
 
 export type ChatHistoryContext = {
   tenantId: string;
@@ -177,8 +178,10 @@ export async function getChatSessionMessages(ctx: ChatHistoryContext, sessionId:
         eq(chatMessages.userId, ctx.userId)
       )
     )
-    .orderBy(asc(chatMessages.createdAt));
-  return rows.map(mapMessageRow);
+    .orderBy(asc(chatMessages.createdAt), asc(chatMessages.id));
+  // Repair same-turn inversions where assistant.created_at <= user.created_at
+  // (historical bug: both stamped with now() in one send, PG order unstable).
+  return normalizeChatMessageOrder(rows.map(mapMessageRow));
 }
 
 export async function appendChatMessages(
