@@ -42,11 +42,8 @@ export type ConnectorDefinition = {
  * - 腾讯会议: official favicon from meeting.tencent.com (via Google s2 favicons).
  * - TAPD: official wordmark SVG from static-open.tapd.cn.
  * - 飞书: official bird mark (teal/blue), same brand asset used by connector catalogs.
- * - 企业微信: official app-icon mark (white squircle + dual green bubbles + dots,
- *   brand green #2BA245). OpenConnector `wecom_bot` ships no local brand SVG — it
- *   falls back to Google favicon for work.weixin.qq.com (currently wrong/WeLink);
- *   TDesign `logo-wecom` is a different single-bubble+nodes glyph. We use the
- *   public WeCom app-icon style shown in connector catalogs.
+ * - 企业微信: iconfont.cn「企业微信」/ WeCom 多色标（蓝描边气泡 + 四色花瓣），
+ *   与官网锁头图一致；非个人微信双绿气泡 App 图标。
  */
 export const CONNECTORS: ConnectorDefinition[] = [
   {
