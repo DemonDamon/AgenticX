@@ -13,13 +13,28 @@ export type GithubAuthStatus = {
   error?: string;
 };
 
+export type FeishuAuthStatus = {
+  configured: boolean;
+  connected: boolean;
+  account?: string;
+  label: string;
+  error?: string;
+};
+
 export type StdioMcpEntry = {
   command: string;
   args: string[];
   env: Record<string, string>;
 };
 
-const AVAILABLE_CONNECTOR_IDS = new Set(["tencent-meeting", "tapd", "github"]);
+const AVAILABLE_CONNECTOR_IDS = new Set(["tencent-meeting", "tapd", "github", "feishu"]);
+
+const FEISHU_VERIFY_HOST_SUFFIXES = [
+  ".feishu.cn",
+  ".feishu.com",
+  ".larksuite.com",
+  ".larkoffice.com",
+];
 
 export function nativeConnectorAvailability(connectorId: string): NativeConnectorAvailability {
   return AVAILABLE_CONNECTOR_IDS.has(connectorId) ? "available" : "unavailable";
@@ -82,6 +97,101 @@ export function extractGithubDeviceUrl(output: string): string | null {
   } catch {
     return null;
   }
+}
+
+/** Extract the last balanced JSON object from mixed stdout/stderr logs. */
+export function extractLastJsonObject(output: string): Record<string, unknown> | null {
+  for (let end = output.length - 1; end >= 0; end -= 1) {
+    if (output[end] !== "}") continue;
+    let depth = 0;
+    let inString = false;
+    let escape = false;
+    for (let i = end; i >= 0; i -= 1) {
+      const ch = output[i];
+      if (inString) {
+        if (escape) {
+          escape = false;
+          continue;
+        }
+        if (ch === "\\") {
+          escape = true;
+          continue;
+        }
+        if (ch === '"') inString = false;
+        continue;
+      }
+      if (ch === '"') {
+        inString = true;
+        continue;
+      }
+      if (ch === "}") {
+        depth += 1;
+        continue;
+      }
+      if (ch === "{") {
+        depth -= 1;
+        if (depth === 0) {
+          const candidate = output.slice(i, end + 1);
+          try {
+            const parsed: unknown = JSON.parse(candidate);
+            if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+              return parsed as Record<string, unknown>;
+            }
+          } catch {
+            // keep scanning for an earlier balanced object
+          }
+          break;
+        }
+      }
+    }
+  }
+  return null;
+}
+
+function isFeishuVerifyUrl(raw: string): boolean {
+  try {
+    const url = new URL(raw);
+    if (url.protocol !== "https:") return false;
+    const host = url.hostname.toLowerCase();
+    return FEISHU_VERIFY_HOST_SUFFIXES.some(
+      (suffix) => host === suffix.slice(1) || host.endsWith(suffix),
+    );
+  } catch {
+    return false;
+  }
+}
+
+export function parseFeishuAuthStatus(output: string): FeishuAuthStatus {
+  const json = extractLastJsonObject(output);
+  if (!json) {
+    return { configured: false, connected: false, label: "可用" };
+  }
+  const appId = typeof json.appId === "string" ? json.appId : undefined;
+  const configured = Boolean(appId);
+  if (json.identity === "user" && typeof json.userName === "string") {
+    return {
+      configured,
+      connected: true,
+      account: json.userName,
+      label: "已连接",
+    };
+  }
+  return {
+    configured,
+    connected: false,
+    label: configured ? "待登录" : "可用",
+  };
+}
+
+export function extractFeishuDeviceFlow(
+  output: string,
+): { verificationUrl: string; deviceCode?: string } | null {
+  const json = extractLastJsonObject(output);
+  if (!json) return null;
+  const url = typeof json.verification_url === "string" ? json.verification_url : undefined;
+  if (!url || !isFeishuVerifyUrl(url)) return null;
+  const deviceCode = typeof json.device_code === "string" ? json.device_code : undefined;
+  return { verificationUrl: url, deviceCode };
 }
 
 export function buildTapdMcpEntry(
@@ -165,12 +275,14 @@ export function resolveConnectedConnectorIds(
   tmeetConnected: boolean,
   mcpServers: Array<{ name: string; connected: boolean }>,
   githubConnected = false,
-): Array<"tencent-meeting" | "tapd" | "github"> {
-  const ids: Array<"tencent-meeting" | "tapd" | "github"> = [];
+  feishuConnected = false,
+): Array<"tencent-meeting" | "tapd" | "github" | "feishu"> {
+  const ids: Array<"tencent-meeting" | "tapd" | "github" | "feishu"> = [];
   if (tmeetConnected) ids.push("tencent-meeting");
   if (mcpServers.some((server) => server.name === "tapd" && server.connected)) {
     ids.push("tapd");
   }
   if (githubConnected) ids.push("github");
+  if (feishuConnected) ids.push("feishu");
   return ids;
 }

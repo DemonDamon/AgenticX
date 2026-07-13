@@ -4,11 +4,14 @@ import {
   buildTapdMcpEntry,
   assertManagedSkillDirectory,
   extractAuthorizationUrl,
+  extractFeishuDeviceFlow,
   extractGithubDeviceCode,
   extractGithubDeviceUrl,
+  extractLastJsonObject,
   isTapdValidationSuccess,
   mergeTapdMcpDocument,
   nativeConnectorAvailability,
+  parseFeishuAuthStatus,
   parseGithubAuthStatus,
   parseTmeetAuthStatus,
   readBodyWithLimit,
@@ -159,6 +162,14 @@ describe("resolveConnectedConnectorIds", () => {
   it("includes github when the native github connector is connected", () => {
     expect(resolveConnectedConnectorIds(false, [], true)).toEqual(["github"]);
   });
+
+  it("includes feishu when the native feishu connector is connected", () => {
+    expect(resolveConnectedConnectorIds(false, [], false, true)).toEqual(["feishu"]);
+  });
+
+  it("includes github and feishu together when both are connected", () => {
+    expect(resolveConnectedConnectorIds(false, [], true, true)).toEqual(["github", "feishu"]);
+  });
 });
 
 describe("nativeConnectorAvailability", () => {
@@ -166,6 +177,7 @@ describe("nativeConnectorAvailability", () => {
     expect(nativeConnectorAvailability("tencent-meeting")).toBe("available");
     expect(nativeConnectorAvailability("tapd")).toBe("available");
     expect(nativeConnectorAvailability("github")).toBe("available");
+    expect(nativeConnectorAvailability("feishu")).toBe("available");
     expect(nativeConnectorAvailability("notion")).toBe("unavailable");
   });
 });
@@ -212,5 +224,84 @@ describe("extractGithubDeviceUrl", () => {
 
   it("rejects non-GitHub device URLs", () => {
     expect(extractGithubDeviceUrl("https://evil.com/login/device")).toBeNull();
+  });
+});
+
+describe("extractLastJsonObject", () => {
+  it("extracts the last JSON object after log prefixes", () => {
+    expect(
+      extractLastJsonObject('INFO booting\n{"identity":"user","userName":"李四","appId":"cli_y"}'),
+    ).toEqual({ identity: "user", userName: "李四", appId: "cli_y" });
+  });
+});
+
+describe("parseFeishuAuthStatus", () => {
+  it("recognizes an authenticated user identity", () => {
+    expect(
+      parseFeishuAuthStatus(
+        '{"identity":"user","userName":"张三","appId":"cli_x","tokenStatus":"valid"}',
+      ),
+    ).toEqual({
+      configured: true,
+      connected: true,
+      account: "张三",
+      label: "已连接",
+    });
+  });
+
+  it("recognizes configured but not logged-in bot identity", () => {
+    expect(
+      parseFeishuAuthStatus(
+        '{"identity":"bot","appId":"cli_x","note":"No user logged in..."}',
+      ),
+    ).toEqual({
+      configured: true,
+      connected: false,
+      label: "待登录",
+    });
+  });
+
+  it("treats garbage output as unconfigured", () => {
+    expect(parseFeishuAuthStatus("garbage no json")).toEqual({
+      configured: false,
+      connected: false,
+      label: "可用",
+    });
+  });
+
+  it("skips log prefixes before the JSON status", () => {
+    expect(
+      parseFeishuAuthStatus(
+        'INFO booting\n{"identity":"user","userName":"李四","appId":"cli_y"}',
+      ),
+    ).toEqual({
+      configured: true,
+      connected: true,
+      account: "李四",
+      label: "已连接",
+    });
+  });
+});
+
+describe("extractFeishuDeviceFlow", () => {
+  it("extracts verification URL and device code from auth login --no-wait JSON", () => {
+    expect(
+      extractFeishuDeviceFlow(
+        '{"verification_url":"https://accounts.feishu.cn/verify?user_code=ABCD-1234","device_code":"dc_1","expires_in":1800}',
+      ),
+    ).toEqual({
+      verificationUrl: "https://accounts.feishu.cn/verify?user_code=ABCD-1234",
+      deviceCode: "dc_1",
+    });
+  });
+
+  it("rejects non-Feishu verification hosts", () => {
+    expect(
+      extractFeishuDeviceFlow('{"verification_url":"https://evil.com/verify?user_code=x"}'),
+    ).toBeNull();
+  });
+
+  it("returns null when config init success has no verification_url", () => {
+    expect(extractFeishuDeviceFlow('{"appId":"cli_x","brand":"feishu"}')).toBeNull();
   });
 });

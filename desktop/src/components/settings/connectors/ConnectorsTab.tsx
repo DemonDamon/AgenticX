@@ -27,6 +27,14 @@ type GithubStatus = {
   account?: string;
 };
 
+type FeishuStatus = {
+  available: boolean;
+  connected: boolean;
+  label: string;
+  error?: string;
+  account?: string;
+};
+
 /** Compact status used inside connect/manage dialogs (not the marketplace card). */
 function StatusLabel({
   available,
@@ -91,6 +99,14 @@ export function ConnectorsTab({ sessionId, tapdConnected, onRefreshMcp }: Props)
   const [githubBusy, setGithubBusy] = useState(false);
   const [githubPhase, setGithubPhase] = useState("");
   const [githubDeviceCode, setGithubDeviceCode] = useState("");
+  const [feishuStatus, setFeishuStatus] = useState<FeishuStatus>({
+    available: true,
+    connected: false,
+    label: "可用",
+  });
+  const [feishuBusy, setFeishuBusy] = useState(false);
+  const [feishuPhase, setFeishuPhase] = useState("");
+  const [feishuVerifyUrl, setFeishuVerifyUrl] = useState("");
   const [tapdToken, setTapdToken] = useState("");
   const [tapdBusy, setTapdBusy] = useState(false);
   const [dialogError, setDialogError] = useState("");
@@ -109,7 +125,9 @@ export function ConnectorsTab({ sessionId, tapdConnected, onRefreshMcp }: Props)
             ? tapdConnected
             : item.id === "github"
               ? githubStatus.connected
-              : false;
+              : item.id === "feishu"
+                ? feishuStatus.connected
+                : false;
       const available =
         item.id === "tencent-meeting"
           ? tmeetStatus.available
@@ -121,10 +139,14 @@ export function ConnectorsTab({ sessionId, tapdConnected, onRefreshMcp }: Props)
             ? tapdBusy
             : item.id === "github"
               ? githubBusy
-              : false;
+              : item.id === "feishu"
+                ? feishuBusy
+                : false;
       return { available, connected, busy };
     },
     [
+      feishuBusy,
+      feishuStatus.connected,
       githubBusy,
       githubStatus.connected,
       tapdBusy,
@@ -176,6 +198,17 @@ export function ConnectorsTab({ sessionId, tapdConnected, onRefreshMcp }: Props)
     });
   }, []);
 
+  const refreshFeishuStatus = useCallback(async () => {
+    const result = await window.agenticxDesktop.nativeConnectorStatus("feishu");
+    setFeishuStatus({
+      available: result.available,
+      connected: result.connected,
+      label: result.label,
+      error: result.error,
+      account: result.account,
+    });
+  }, []);
+
   useEffect(() => {
     void refreshTmeetStatus();
     return window.agenticxDesktop.onNativeConnectorTmeetProgress(({ phase }) => {
@@ -211,12 +244,35 @@ export function ConnectorsTab({ sessionId, tapdConnected, onRefreshMcp }: Props)
     });
   }, [refreshGithubStatus]);
 
+  useEffect(() => {
+    void refreshFeishuStatus();
+    return window.agenticxDesktop.onNativeConnectorFeishuProgress(({ phase, verificationUrl }) => {
+      const labels: Record<string, string> = {
+        installing: "首次使用，正在下载飞书 CLI…",
+        config_setup: "正在浏览器创建飞书应用，请在打开的页面完成…",
+        config_done: "应用已就绪，正在发起用户授权…",
+        auth_setup: "已打开授权页面，请在浏览器中确认授权…",
+        waiting: "等待你在浏览器中完成授权…",
+        success: "授权成功",
+        disconnected: "已断开连接",
+        error: "连接未完成",
+      };
+      if (verificationUrl) setFeishuVerifyUrl(verificationUrl);
+      if (labels[phase]) setFeishuPhase(labels[phase]);
+      if (phase === "success" || phase === "disconnected" || phase === "error") {
+        void refreshFeishuStatus();
+      }
+    });
+  }, [refreshFeishuStatus]);
+
   const openConnector = (item: ConnectorDefinition) => {
     if (nativeConnectorAvailability(item.id) !== "available") return;
     setDialogError("");
     setTmeetPhase("");
     setGithubPhase("");
     setGithubDeviceCode("");
+    setFeishuPhase("");
+    setFeishuVerifyUrl("");
     setSelectedId(item.id);
   };
 
@@ -330,6 +386,74 @@ export function ConnectorsTab({ sessionId, tapdConnected, onRefreshMcp }: Props)
       setSelectedId(null);
     } finally {
       setGithubBusy(false);
+    }
+  };
+
+  const handleFeishuConnect = async () => {
+    setFeishuBusy(true);
+    setDialogError("");
+    setFeishuVerifyUrl("");
+    setFeishuPhase("准备飞书浏览器授权…");
+    try {
+      const result = await window.agenticxDesktop.nativeConnectorFeishuLogin();
+      setFeishuStatus({
+        available: result.available,
+        connected: result.connected,
+        label: result.label,
+        error: result.error,
+        account: result.account,
+      });
+      if (result.error === "已取消") {
+        setFeishuPhase("");
+        setFeishuVerifyUrl("");
+        return;
+      }
+      if (!result.ok || !result.connected) {
+        setDialogError(result.error || "飞书授权未完成");
+        return;
+      }
+      showToast("飞书已连接");
+      setSelectedId(null);
+    } finally {
+      setFeishuBusy(false);
+    }
+  };
+
+  const handleFeishuCancel = async () => {
+    if (feishuBusy) {
+      try {
+        await window.agenticxDesktop.nativeConnectorFeishuCancel();
+      } catch {
+        // best-effort cancel
+      }
+    }
+    setFeishuBusy(false);
+    setFeishuPhase("");
+    setFeishuVerifyUrl("");
+    setDialogError("");
+    setSelectedId(null);
+  };
+
+  const handleFeishuLogout = async () => {
+    setFeishuBusy(true);
+    setDialogError("");
+    try {
+      const result = await window.agenticxDesktop.nativeConnectorFeishuLogout();
+      setFeishuStatus({
+        available: result.available,
+        connected: result.connected,
+        label: result.label,
+        error: result.error,
+        account: result.account,
+      });
+      if (!result.ok) {
+        setDialogError(result.error || "飞书断开失败");
+        return;
+      }
+      showToast("已断开飞书");
+      setSelectedId(null);
+    } finally {
+      setFeishuBusy(false);
     }
   };
 
@@ -595,6 +719,96 @@ export function ConnectorsTab({ sessionId, tapdConnected, onRefreshMcp }: Props)
             {dialogError || githubStatus.error ? (
               <div className="rounded-lg border border-rose-500/35 bg-rose-500/10 px-3 py-2 text-xs text-rose-300">
                 {dialogError || githubStatus.error}
+              </div>
+            ) : null}
+          </div>
+        ) : null}
+      </Modal>
+
+      <Modal
+        open={selected?.id === "feishu"}
+        title="飞书连接器"
+        onClose={() => void handleFeishuCancel()}
+        panelClassName="w-[min(560px,94vw)] bg-surface-panel"
+        footer={
+          <div className="flex justify-end gap-2">
+            <button
+              type="button"
+              className="rounded-md border border-border px-3 py-2 text-xs text-text-muted hover:bg-surface-hover"
+              onClick={() => void handleFeishuCancel()}
+            >
+              取消
+            </button>
+            <button
+              type="button"
+              className="rounded-md bg-btnPrimary px-4 py-2 text-xs font-medium text-btnPrimary-text hover:bg-btnPrimary-hover disabled:opacity-50"
+              disabled={feishuBusy}
+              onClick={() => void (feishuStatus.connected ? handleFeishuLogout() : handleFeishuConnect())}
+            >
+              {feishuBusy ? "处理中…" : feishuStatus.connected ? "断开连接" : "连接飞书"}
+            </button>
+          </div>
+        }
+      >
+        {selected ? (
+          <div className="space-y-4">
+            <div className="flex items-center gap-3">
+              <ConnectorIcon item={selected} large />
+              <div>
+                <div className="text-base font-semibold text-text-strong">飞书</div>
+                <StatusLabel
+                  available={feishuStatus.available}
+                  connected={feishuStatus.connected}
+                  busy={feishuBusy}
+                />
+                {feishuStatus.connected && feishuStatus.account ? (
+                  <div className="mt-1 text-xs text-text-muted">账号：{feishuStatus.account}</div>
+                ) : null}
+              </div>
+            </div>
+            <p className="text-sm leading-relaxed text-text-muted">
+              使用飞书官方 CLI（lark-cli）完成两段式授权：首次需在浏览器创建飞书应用（一次性），随后完成用户授权。连接后
+              Near 会写入托管技能，Agent 可通过 lark-cli
+              操作消息、文档、多维表格、日历与任务。凭证由 CLI 在本机保存。
+            </p>
+            {feishuVerifyUrl ? (
+              <div className="rounded-lg border border-border bg-surface-card px-4 py-3 space-y-2">
+                <div className="text-[11px] text-text-muted">授权页面</div>
+                <div className="flex flex-wrap items-center gap-2">
+                  <button
+                    type="button"
+                    className="inline-flex items-center gap-1 rounded-md border border-border px-2 py-1 text-[11px] text-text-muted hover:bg-surface-hover hover:text-text-strong"
+                    onClick={() => void window.agenticxDesktop.openExternal(feishuVerifyUrl)}
+                  >
+                    <ExternalLink className="h-3.5 w-3.5" aria-hidden />
+                    打开授权页
+                  </button>
+                  <button
+                    type="button"
+                    className="inline-flex items-center gap-1 rounded-md border border-border px-2 py-1 text-[11px] text-text-muted hover:bg-surface-hover hover:text-text-strong"
+                    onClick={() => void navigator.clipboard.writeText(feishuVerifyUrl)}
+                  >
+                    <Copy className="h-3.5 w-3.5" aria-hidden />
+                    复制链接
+                  </button>
+                </div>
+                <p className="text-xs text-text-muted">
+                  若浏览器未自动打开，请点击上方按钮继续完成授权。
+                </p>
+              </div>
+            ) : null}
+            {feishuPhase ? (
+              <div
+                className="flex items-center gap-2 rounded-lg border border-border bg-surface-card px-3 py-2 text-xs text-text-muted"
+                role="status"
+              >
+                {feishuBusy ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
+                {feishuPhase}
+              </div>
+            ) : null}
+            {dialogError || feishuStatus.error ? (
+              <div className="rounded-lg border border-rose-500/35 bg-rose-500/10 px-3 py-2 text-xs text-rose-300">
+                {dialogError || feishuStatus.error}
               </div>
             ) : null}
           </div>

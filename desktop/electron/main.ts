@@ -67,10 +67,12 @@ import {
   assertManagedSkillDirectory,
   buildTapdMcpEntry,
   extractAuthorizationUrl,
+  extractFeishuDeviceFlow,
   extractGithubDeviceCode,
   extractGithubDeviceUrl,
   isTapdValidationSuccess,
   mergeTapdMcpDocument,
+  parseFeishuAuthStatus,
   parseGithubAuthStatus,
   parseTmeetAuthStatus,
   readBodyWithLimit,
@@ -1789,6 +1791,17 @@ let githubInstallPromise: Promise<string> | null = null;
 /** Active Device Flow canceller — closes login promise and kills gh process. */
 let cancelActiveGithubLogin: ((reason?: string) => void) | null = null;
 let githubBinaryValidationCache: {
+  path: string;
+  size: number;
+  mtimeMs: number;
+  valid: boolean;
+} | null = null;
+let feishuAuthProcess: ChildProcess | null = null;
+let feishuAuthBusy = false;
+let feishuInstallPromise: Promise<string> | null = null;
+/** Active Feishu Device Flow canceller — closes login promise and kills lark-cli process. */
+let cancelActiveFeishuLogin: ((reason?: string) => void) | null = null;
+let feishuBinaryValidationCache: {
   path: string;
   size: number;
   mtimeMs: number;
@@ -3950,6 +3963,709 @@ function startGithubLogin(): Promise<NativeConnectorStatusResult> {
   });
 }
 
+const LARK_CLI_VERSION = "1.0.68";
+const LARK_CLI_RELEASE_BASE = `https://github.com/larksuite/cli/releases/download/v${LARK_CLI_VERSION}`;
+const LARK_CLI_ARCHIVE_MAX_BYTES = 60 * 1024 * 1024;
+
+function persistFeishuConnectorStatus(connected: boolean): void {
+  const parentDir = path.dirname(NATIVE_CONNECTOR_STATUS_PATH);
+  fs.mkdirSync(parentDir, { recursive: true, mode: 0o700 });
+  if (
+    fs.existsSync(NATIVE_CONNECTOR_STATUS_PATH) &&
+    fs.lstatSync(NATIVE_CONNECTOR_STATUS_PATH).isSymbolicLink()
+  ) {
+    throw new Error("原生连接器状态文件不能是符号链接");
+  }
+  let current: Record<string, unknown> = {};
+  try {
+    const parsed = JSON.parse(fs.readFileSync(NATIVE_CONNECTOR_STATUS_PATH, "utf8"));
+    if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+      current = parsed as Record<string, unknown>;
+    }
+  } catch {
+    current = {};
+  }
+  const connectors =
+    current.connectors &&
+    typeof current.connectors === "object" &&
+    !Array.isArray(current.connectors)
+      ? (current.connectors as Record<string, unknown>)
+      : {};
+  const next = {
+    ...current,
+    version: 1,
+    connectors: {
+      ...connectors,
+      feishu: {
+        connected,
+        capability: "skill",
+        skill_name: "feishu",
+        updated_at: new Date().toISOString(),
+      },
+    },
+  };
+  const tempPath = `${NATIVE_CONNECTOR_STATUS_PATH}.${process.pid}.tmp`;
+  fs.writeFileSync(tempPath, `${JSON.stringify(next, null, 2)}\n`, {
+    encoding: "utf8",
+    mode: 0o600,
+  });
+  fs.renameSync(tempPath, NATIVE_CONNECTOR_STATUS_PATH);
+}
+
+function tryPersistFeishuConnectorStatus(connected: boolean): void {
+  try {
+    persistFeishuConnectorStatus(connected);
+  } catch (error) {
+    console.warn("[native-connectors] failed to persist Feishu status:", String(error));
+  }
+}
+
+function resolveSystemLarkCliPath(): string | null {
+  const candidates: string[] = [];
+  if (process.platform === "win32") {
+    const appData = process.env.APPDATA || "";
+    if (appData) {
+      candidates.push(path.join(appData, "npm", "lark-cli.cmd"));
+      candidates.push(path.join(appData, "npm", "lark-cli.exe"));
+    }
+  } else {
+    candidates.push(
+      "/opt/homebrew/bin/lark-cli",
+      "/usr/local/bin/lark-cli",
+      "/usr/bin/lark-cli",
+      path.join(os.homedir(), ".npm-global", "bin", "lark-cli"),
+    );
+  }
+  try {
+    const whichCmd = process.platform === "win32" ? "where" : "which";
+    const found = execFileSync(whichCmd, ["lark-cli"], {
+      encoding: "utf8",
+      timeout: 3000,
+      stdio: ["ignore", "pipe", "ignore"],
+      env: process.env,
+    })
+      .split(/\r?\n/)
+      .map((line) => line.trim())
+      .find(Boolean);
+    if (found) candidates.unshift(found);
+  } catch {
+    // PATH lookup is best-effort
+  }
+  for (const candidate of candidates) {
+    try {
+      if (fs.existsSync(candidate) && fs.statSync(candidate).isFile()) return candidate;
+    } catch {
+      // continue
+    }
+  }
+  return null;
+}
+
+function larkCliArchiveInfo(): { archiveName: string; binaryMember: string; binaryName: string } {
+  const key = `${process.platform}-${process.arch}`;
+  const ver = LARK_CLI_VERSION;
+  const table: Record<string, { archiveName: string; binaryMember: string; binaryName: string }> = {
+    "darwin-arm64": {
+      archiveName: `lark-cli-${ver}-darwin-arm64.tar.gz`,
+      binaryMember: "lark-cli",
+      binaryName: "lark-cli",
+    },
+    "darwin-x64": {
+      archiveName: `lark-cli-${ver}-darwin-amd64.tar.gz`,
+      binaryMember: "lark-cli",
+      binaryName: "lark-cli",
+    },
+    "linux-x64": {
+      archiveName: `lark-cli-${ver}-linux-amd64.tar.gz`,
+      binaryMember: "lark-cli",
+      binaryName: "lark-cli",
+    },
+    "linux-arm64": {
+      archiveName: `lark-cli-${ver}-linux-arm64.tar.gz`,
+      binaryMember: "lark-cli",
+      binaryName: "lark-cli",
+    },
+    "win32-x64": {
+      archiveName: `lark-cli-${ver}-windows-amd64.zip`,
+      binaryMember: "lark-cli.exe",
+      binaryName: "lark-cli.exe",
+    },
+    "win32-arm64": {
+      archiveName: `lark-cli-${ver}-windows-arm64.zip`,
+      binaryMember: "lark-cli.exe",
+      binaryName: "lark-cli.exe",
+    },
+  };
+  const info = table[key];
+  if (!info) throw new Error(`当前平台暂不支持飞书连接器：${key}`);
+  return info;
+}
+
+function larkCliArchiveSha256(): string {
+  const hashes: Record<string, string> = {
+    [`lark-cli-${LARK_CLI_VERSION}-darwin-amd64.tar.gz`]:
+      "c6406dcd19cf4398138f8143e1097926d13d0fe22d1fa79b27ffb48a137d0be8",
+    [`lark-cli-${LARK_CLI_VERSION}-darwin-arm64.tar.gz`]:
+      "5a8bab26cd6ad135c39960c8ed30cf0a91f202853bb74e2bfb80f0f9bcdea3d5",
+    [`lark-cli-${LARK_CLI_VERSION}-linux-amd64.tar.gz`]:
+      "8daaeb11b7cadcc77f07fd9ae7948f6c370e8305337888cb930ac7362a05cad8",
+    [`lark-cli-${LARK_CLI_VERSION}-linux-arm64.tar.gz`]:
+      "86d7d94dead5be7a9d16ec28f363792b0abf0e5e4e1475148e8585c1802a6165",
+    [`lark-cli-${LARK_CLI_VERSION}-windows-amd64.zip`]:
+      "d593f658151a0de1ab26b89ee8ff1d93a216777b8120db0b048013468ff63a1d",
+    [`lark-cli-${LARK_CLI_VERSION}-windows-arm64.zip`]:
+      "c86eccf8b2f94652c3fd35c49dac9644ea152edd3248cb986b7efdd995d236e7",
+  };
+  const { archiveName } = larkCliArchiveInfo();
+  const digest = hashes[archiveName];
+  if (!digest) throw new Error(`缺少飞书 CLI 校验值：${archiveName}`);
+  return digest;
+}
+
+function larkCliInstallDir(): string {
+  return path.join(os.homedir(), ".agenticx", "connectors", "feishu", LARK_CLI_VERSION);
+}
+
+async function resolveInstalledLarkCliBinaryPath(): Promise<string | null> {
+  const { binaryName } = larkCliArchiveInfo();
+  const binaryPath = path.join(larkCliInstallDir(), "bin", binaryName);
+  let stat: fs.Stats;
+  try {
+    stat = await fs.promises.stat(binaryPath);
+  } catch {
+    return null;
+  }
+  if (!stat.isFile()) return null;
+  if (
+    feishuBinaryValidationCache?.path === binaryPath &&
+    feishuBinaryValidationCache.size === stat.size &&
+    feishuBinaryValidationCache.mtimeMs === stat.mtimeMs
+  ) {
+    return feishuBinaryValidationCache.valid ? binaryPath : null;
+  }
+  const valid = stat.size > 1024 * 100;
+  feishuBinaryValidationCache = {
+    path: binaryPath,
+    size: stat.size,
+    mtimeMs: stat.mtimeMs,
+    valid,
+  };
+  if (!valid) return null;
+  if (process.platform !== "win32") fs.chmodSync(binaryPath, 0o755);
+  return binaryPath;
+}
+
+async function resolveLarkCliBinaryPath(): Promise<string | null> {
+  const systemPath = resolveSystemLarkCliPath();
+  if (systemPath) return systemPath;
+  return await resolveInstalledLarkCliBinaryPath();
+}
+
+async function extractLarkCliArchive(
+  archivePath: string,
+  partialDir: string,
+  archiveName: string,
+  binaryMember: string,
+): Promise<string> {
+  if (archiveName.endsWith(".tar.gz")) {
+    await extractTar({
+      file: archivePath,
+      cwd: partialDir,
+      filter: (memberPath) =>
+        memberPath === binaryMember ||
+        memberPath.endsWith(`/${binaryMember}`) ||
+        memberPath.endsWith("/LICENSE") ||
+        memberPath === "LICENSE",
+    });
+  } else if (archiveName.endsWith(".zip")) {
+    if (process.platform === "win32") {
+      await new Promise<void>((resolve, reject) => {
+        execFile(
+          "powershell.exe",
+          [
+            "-NoProfile",
+            "-Command",
+            `Expand-Archive -LiteralPath '${archivePath.replace(/'/g, "''")}' -DestinationPath '${partialDir.replace(/'/g, "''")}' -Force`,
+          ],
+          { timeout: 120000, maxBuffer: 4 * 1024 * 1024 },
+          (error) => {
+            if (error) reject(new Error("解压飞书 CLI 失败"));
+            else resolve();
+          },
+        );
+      });
+    } else {
+      await new Promise<void>((resolve, reject) => {
+        execFile(
+          "unzip",
+          ["-o", archivePath, "-d", partialDir],
+          { timeout: 120000, maxBuffer: 4 * 1024 * 1024 },
+          (error) => {
+            if (error) reject(new Error("解压飞书 CLI 失败"));
+            else resolve();
+          },
+        );
+      });
+    }
+  } else {
+    throw new Error(`不支持的飞书 CLI 归档格式：${archiveName}`);
+  }
+  const direct = path.join(partialDir, binaryMember);
+  if (fs.existsSync(direct)) return direct;
+  // Windows zip may nest under a top-level folder; search one level.
+  try {
+    for (const entry of fs.readdirSync(partialDir)) {
+      const nested = path.join(partialDir, entry, binaryMember);
+      if (fs.existsSync(nested)) return nested;
+    }
+  } catch {
+    // fall through
+  }
+  throw new Error("飞书 CLI 运行文件提取失败");
+}
+
+async function installLarkCliBinary(): Promise<string> {
+  const installed = await resolveInstalledLarkCliBinaryPath();
+  if (installed) return installed;
+  sendFeishuProgress("installing");
+  const { archiveName, binaryMember, binaryName } = larkCliArchiveInfo();
+  const parentDir = path.dirname(larkCliInstallDir());
+  fs.mkdirSync(parentDir, { recursive: true, mode: 0o700 });
+  const partialDir = path.join(parentDir, `.partial-${crypto.randomUUID()}`);
+  const archivePath = path.join(parentDir, `.download-${crypto.randomUUID()}-${archiveName}`);
+  try {
+    const response = await proxyAwareFetch(`${LARK_CLI_RELEASE_BASE}/${archiveName}`, {
+      signal: AbortSignal.timeout(90000),
+    });
+    if (!response.ok) throw new Error(`下载飞书 CLI 失败：HTTP ${response.status}`);
+    const declaredSize = Number(response.headers.get("content-length") || "0");
+    if (declaredSize > LARK_CLI_ARCHIVE_MAX_BYTES) throw new Error("飞书 CLI 下载包超过安全限制");
+    const archive = Buffer.from(await readBodyWithLimit(response.body, LARK_CLI_ARCHIVE_MAX_BYTES));
+    if (archive.length === 0 || archive.length > LARK_CLI_ARCHIVE_MAX_BYTES) {
+      throw new Error("飞书 CLI 下载包大小异常");
+    }
+    const digest = crypto.createHash("sha256").update(archive).digest("hex");
+    if (digest !== larkCliArchiveSha256()) throw new Error("飞书 CLI 完整性校验失败");
+    fs.mkdirSync(partialDir, { recursive: true, mode: 0o700 });
+    fs.writeFileSync(archivePath, archive, { mode: 0o600 });
+    const extractedBinary = await extractLarkCliArchive(
+      archivePath,
+      partialDir,
+      archiveName,
+      binaryMember,
+    );
+    const stat = fs.lstatSync(extractedBinary);
+    if (!stat.isFile() || stat.isSymbolicLink()) throw new Error("飞书 CLI 运行文件无效");
+    if (process.platform !== "win32") fs.chmodSync(extractedBinary, 0o755);
+    const stagedBinDir = path.join(partialDir, "bin");
+    fs.mkdirSync(stagedBinDir, { recursive: true, mode: 0o700 });
+    const stagedBinary = path.join(stagedBinDir, binaryName);
+    if (path.resolve(extractedBinary) !== path.resolve(stagedBinary)) {
+      fs.renameSync(extractedBinary, stagedBinary);
+    }
+    if (fs.existsSync(larkCliInstallDir())) {
+      fs.rmSync(larkCliInstallDir(), { recursive: true, force: true });
+    }
+    fs.renameSync(partialDir, larkCliInstallDir());
+    const result = await resolveInstalledLarkCliBinaryPath();
+    if (!result) throw new Error("飞书 CLI 安装未完成");
+    return result;
+  } finally {
+    fs.rmSync(archivePath, { force: true });
+    fs.rmSync(partialDir, { recursive: true, force: true });
+  }
+}
+
+async function ensureLarkCliBinaryInstalled(): Promise<string> {
+  const existing = await resolveLarkCliBinaryPath();
+  if (existing) return existing;
+  if (feishuInstallPromise) return await feishuInstallPromise;
+  feishuInstallPromise = installLarkCliBinary().finally(() => {
+    feishuInstallPromise = null;
+  });
+  return await feishuInstallPromise;
+}
+
+async function runLarkCliCommand(
+  args: string[],
+  timeoutMs = 15000,
+  binaryPathOverride?: string,
+): Promise<string> {
+  const binaryPath = binaryPathOverride || (await resolveLarkCliBinaryPath());
+  if (!binaryPath) throw new Error("飞书 CLI 尚未安装");
+  return await new Promise((resolve, reject) => {
+    execFile(
+      binaryPath,
+      args,
+      {
+        timeout: timeoutMs,
+        maxBuffer: 2 * 1024 * 1024,
+        env: {
+          ...process.env,
+          NO_COLOR: "1",
+        },
+      },
+      (error, stdout, stderr) => {
+        const output = `${stdout ?? ""}\n${stderr ?? ""}`.trim();
+        // auth status may exit non-zero when not logged in / not configured.
+        if (error && !output) {
+          reject(new Error("飞书 CLI 命令执行失败"));
+          return;
+        }
+        resolve(output);
+      },
+    );
+  });
+}
+
+function feishuSkillDir(): string {
+  return path.join(os.homedir(), ".agenticx", "skills", "near-connectors", "feishu");
+}
+
+function ensureFeishuSkill(binaryPath: string): void {
+  const skillDir = feishuSkillDir();
+  const skillPath = path.join(skillDir, "SKILL.md");
+  const markerPath = path.join(skillDir, ".near-managed");
+  const directoryExists = fs.existsSync(skillDir);
+  const markerExists = fs.existsSync(markerPath);
+  assertManagedSkillDirectory(directoryExists, markerExists);
+  const quotedBinary = binaryPath.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
+  const content = `---
+name: feishu
+description: 使用飞书官方 CLI (lark-cli) 操作消息、文档、多维表格、日历、任务、邮件等飞书能力。
+---
+
+# 飞书 (Lark)
+
+仅在用户要求操作飞书/Lark 时使用。通过 bash_exec 调用官方 CLI（本机已登录）：
+
+\`\`\`bash
+"${quotedBinary}" <service> --help          # 发现某业务域的快捷命令，如 im/docs/base/calendar/task/mail
+"${quotedBinary}" <service> +<shortcut> ...  # 人/AI 友好的快捷命令（带智能默认与表格输出）
+"${quotedBinary}" schema <method>            # 自省某 API 的参数/请求体/返回结构/所需 scope
+"${quotedBinary}" api GET|POST <endpoint>    # 需要原始 OpenAPI 时
+\`\`\`
+
+读取类命令（+agenda、+messages 查询、list/view/status/search、auth status）可直接执行；
+写操作（发消息、建/改文档、建/删记录、发邮件、任务创建/完成、审批处理等）必须先向用户展示参数、
+优先用 \`--dry-run\` 预览并确认后再执行。默认输出 \`--format json\`，判断成功以返回体 \`ok === true\`（或退出码）为准。
+不得输出或读取 lark-cli 本地凭证。若提示未登录/未配置，引导用户前往「设置 → 连接器 → 飞书」重新连接。
+`;
+  if (!directoryExists) {
+    const parentDir = path.dirname(skillDir);
+    const partialDir = path.join(parentDir, `.feishu.partial-${crypto.randomUUID()}`);
+    fs.mkdirSync(parentDir, { recursive: true, mode: 0o700 });
+    try {
+      fs.mkdirSync(partialDir, { mode: 0o700 });
+      fs.writeFileSync(path.join(partialDir, "SKILL.md"), content, {
+        encoding: "utf8",
+        mode: 0o600,
+      });
+      fs.writeFileSync(path.join(partialDir, ".near-managed"), "managed by Near\n", {
+        encoding: "utf8",
+        mode: 0o600,
+      });
+      fs.renameSync(partialDir, skillDir);
+    } catch (error) {
+      fs.rmSync(partialDir, { recursive: true, force: true });
+      throw error;
+    }
+    return;
+  }
+  const tempPath = `${skillPath}.tmp`;
+  fs.writeFileSync(tempPath, content, { encoding: "utf8", mode: 0o600 });
+  fs.renameSync(tempPath, skillPath);
+}
+
+function removeFeishuSkill(): void {
+  const skillDir = feishuSkillDir();
+  const markerPath = path.join(skillDir, ".near-managed");
+  if (!fs.existsSync(markerPath)) return;
+  fs.rmSync(skillDir, { recursive: true, force: true });
+}
+
+async function getFeishuStatus(): Promise<NativeConnectorStatusResult> {
+  try {
+    let binaryPath = await resolveLarkCliBinaryPath();
+    const managedSkillMarker = path.join(feishuSkillDir(), ".near-managed");
+    if (!binaryPath && fs.existsSync(managedSkillMarker)) {
+      binaryPath = await ensureLarkCliBinaryInstalled();
+    }
+    if (!binaryPath) {
+      tryPersistFeishuConnectorStatus(false);
+      return {
+        ok: true,
+        available: true,
+        connected: false,
+        label: "可用",
+      };
+    }
+    const status = parseFeishuAuthStatus(await runLarkCliCommand(["auth", "status"], 15000, binaryPath));
+    if (status.connected && binaryPath) {
+      try {
+        ensureFeishuSkill(binaryPath);
+      } catch (error) {
+        tryPersistFeishuConnectorStatus(false);
+        return {
+          ok: false,
+          available: true,
+          connected: false,
+          label: "连接异常",
+          error: error instanceof Error ? error.message : String(error),
+        };
+      }
+    } else if (!status.connected) {
+      removeFeishuSkill();
+    }
+    tryPersistFeishuConnectorStatus(status.connected && !status.error);
+    return {
+      ok: !status.error,
+      available: !status.error,
+      connected: status.connected,
+      label: status.label,
+      error: status.error,
+      account: status.account,
+    };
+  } catch (error) {
+    tryPersistFeishuConnectorStatus(false);
+    return {
+      ok: false,
+      available: false,
+      connected: false,
+      label: "暂不可用",
+      error: error instanceof Error ? error.message : String(error),
+    };
+  }
+}
+
+type FeishuProgressPhase =
+  | "installing"
+  | "config_setup"
+  | "config_done"
+  | "auth_setup"
+  | "waiting"
+  | "success"
+  | "disconnected"
+  | "error";
+
+function sendFeishuProgress(
+  phase: FeishuProgressPhase,
+  extra?: { verificationUrl?: string },
+): void {
+  if (!mainWindow || mainWindow.isDestroyed()) return;
+  mainWindow.webContents.send("native-connector-feishu-progress", {
+    phase,
+    ...(extra?.verificationUrl ? { verificationUrl: extra.verificationUrl } : {}),
+  });
+}
+
+function spawnFeishuPhase(
+  binaryPath: string,
+  args: string[],
+  progressPhase: "config_setup" | "waiting",
+): Promise<{ code: number | null; output: string }> {
+  return new Promise((resolve, reject) => {
+    let output = "";
+    let opened = false;
+    const proc = spawn(binaryPath, args, {
+      stdio: ["pipe", "pipe", "pipe"],
+      env: {
+        ...process.env,
+        NO_COLOR: "1",
+        BROWSER: process.platform === "win32" ? "echo" : "/bin/true",
+      },
+    });
+    feishuAuthProcess = proc;
+    const timeout = setTimeout(() => {
+      try {
+        proc.kill("SIGTERM");
+      } catch {
+        // ignore
+      }
+      reject(new Error("浏览器授权已超时，请重试"));
+    }, 5 * 60 * 1000);
+
+    const consume = (chunk: Buffer) => {
+      output = `${output}${chunk.toString("utf8")}`.slice(-65536);
+      if (/Press Enter to open/i.test(output) && proc.stdin && !proc.stdin.destroyed) {
+        try {
+          proc.stdin.write("\n");
+        } catch {
+          // ignore
+        }
+      }
+      const flow = extractFeishuDeviceFlow(output);
+      if (!opened && flow?.verificationUrl) {
+        opened = true;
+        sendFeishuProgress(progressPhase, { verificationUrl: flow.verificationUrl });
+        void shell.openExternal(flow.verificationUrl).catch(() => {
+          // Modal still shows the URL as fallback
+        });
+      }
+    };
+
+    proc.stdout?.on("data", consume);
+    proc.stderr?.on("data", consume);
+    proc.on("error", (error) => {
+      clearTimeout(timeout);
+      if (feishuAuthProcess === proc) feishuAuthProcess = null;
+      reject(error);
+    });
+    proc.on("exit", (code) => {
+      clearTimeout(timeout);
+      if (feishuAuthProcess === proc) feishuAuthProcess = null;
+      resolve({ code, output });
+    });
+  });
+}
+
+function startFeishuLogin(): Promise<NativeConnectorStatusResult> {
+  if (feishuAuthBusy) {
+    return Promise.resolve({
+      ok: false,
+      available: true,
+      connected: false,
+      label: "连接中",
+      error: "飞书正在等待浏览器授权",
+    });
+  }
+  feishuAuthBusy = true;
+  return new Promise((resolve) => {
+    let settled = false;
+    const finish = async (result?: NativeConnectorStatusResult, terminate = false) => {
+      if (settled) return;
+      settled = true;
+      cancelActiveFeishuLogin = null;
+      const currentProc = feishuAuthProcess;
+      if (terminate && currentProc && currentProc.exitCode === null) {
+        await new Promise<void>((done) => {
+          const fallback = setTimeout(done, 2000);
+          currentProc.once("close", () => {
+            clearTimeout(fallback);
+            done();
+          });
+          try {
+            currentProc.kill("SIGTERM");
+          } catch {
+            done();
+          }
+        });
+      }
+      feishuAuthProcess = null;
+      feishuAuthBusy = false;
+      const status = result ?? (await getFeishuStatus());
+      if (status.error === "已取消") {
+        sendFeishuProgress("disconnected");
+      } else {
+        sendFeishuProgress(status.connected ? "success" : "error");
+      }
+      resolve(status);
+    };
+
+    cancelActiveFeishuLogin = (reason) => {
+      void finish(
+        {
+          ok: false,
+          available: true,
+          connected: false,
+          label: "可用",
+          error: reason || "已取消",
+        },
+        true,
+      );
+    };
+
+    void (async () => {
+      try {
+        sendFeishuProgress("installing");
+        const binaryPath = await ensureLarkCliBinaryInstalled();
+        if (settled) return;
+
+        // Probe whether app credentials already exist.
+        let configured = false;
+        try {
+          const probe = parseFeishuAuthStatus(
+            await runLarkCliCommand(["auth", "status"], 15000, binaryPath),
+          );
+          configured = probe.configured;
+        } catch {
+          configured = false;
+        }
+        if (settled) return;
+
+        if (!configured) {
+          const configResult = await spawnFeishuPhase(
+            binaryPath,
+            ["config", "init", "--new"],
+            "config_setup",
+          );
+          if (settled) return;
+          if (configResult.code !== 0) {
+            await finish({
+              ok: false,
+              available: true,
+              connected: false,
+              label: "连接失败",
+              error: "飞书应用创建未完成或已取消",
+            });
+            return;
+          }
+          sendFeishuProgress("config_done");
+        }
+
+        const noWaitOutput = await runLarkCliCommand(
+          ["auth", "login", "--recommend", "--no-wait"],
+          30000,
+          binaryPath,
+        );
+        if (settled) return;
+        const flow = extractFeishuDeviceFlow(noWaitOutput);
+        if (!flow?.verificationUrl || !flow.deviceCode) {
+          await finish({
+            ok: false,
+            available: true,
+            connected: false,
+            label: "连接失败",
+            error: "未能获取飞书授权链接",
+          });
+          return;
+        }
+        sendFeishuProgress("auth_setup", { verificationUrl: flow.verificationUrl });
+        void shell.openExternal(flow.verificationUrl).catch(() => {
+          // Modal fallback button still available
+        });
+
+        const authResult = await spawnFeishuPhase(
+          binaryPath,
+          ["auth", "login", "--device-code", flow.deviceCode],
+          "waiting",
+        );
+        if (settled) return;
+        if (authResult.code !== 0) {
+          await finish({
+            ok: false,
+            available: true,
+            connected: false,
+            label: "连接失败",
+            error: "飞书授权未完成或已取消",
+          });
+          return;
+        }
+        await finish();
+      } catch (error) {
+        if (settled) return;
+        await finish({
+          ok: false,
+          available: true,
+          connected: false,
+          label: "连接失败",
+          error: error instanceof Error ? error.message : String(error),
+        });
+      }
+    })();
+  });
+}
+
 async function configureTapdConnector(
   sessionId: string,
   accessToken: string,
@@ -5199,6 +5915,7 @@ function registerIpc(): void {
     const id = String(payload?.id || "").trim();
     if (id === "tencent-meeting") return await getTmeetStatus();
     if (id === "github") return await getGithubStatus();
+    if (id === "feishu") return await getFeishuStatus();
     if (id === "tapd") {
       return { ok: true, available: true, connected: false, label: "可用" };
     }
@@ -5316,6 +6033,83 @@ function registerIpc(): void {
       return status;
     } catch (error) {
       const status = await getGithubStatus();
+      return {
+        ...status,
+        ok: false,
+        error: error instanceof Error ? error.message : String(error),
+      };
+    }
+  });
+
+  ipcMain.handle("native-connector-feishu-login", async () => {
+    try {
+      return await startFeishuLogin();
+    } catch (error) {
+      return {
+        ok: false,
+        available: false,
+        connected: false,
+        label: "连接失败",
+        error: error instanceof Error ? error.message : String(error),
+      };
+    }
+  });
+
+  ipcMain.handle("native-connector-feishu-cancel", async () => {
+    if (cancelActiveFeishuLogin) {
+      cancelActiveFeishuLogin("已取消");
+      return { ok: true, available: true, connected: false, label: "可用" };
+    }
+    if (feishuAuthProcess && feishuAuthProcess.exitCode === null) {
+      try {
+        feishuAuthProcess.kill("SIGTERM");
+      } catch {
+        // ignore
+      }
+      feishuAuthProcess = null;
+      feishuAuthBusy = false;
+    }
+    sendFeishuProgress("disconnected");
+    return { ok: true, available: true, connected: false, label: "可用" };
+  });
+
+  ipcMain.handle("native-connector-feishu-logout", async () => {
+    try {
+      const binaryPath = await resolveLarkCliBinaryPath();
+      if (!binaryPath) throw new Error("飞书 CLI 尚未安装");
+      await new Promise<void>((resolve, reject) => {
+        const proc = spawn(binaryPath, ["auth", "logout"], {
+          stdio: ["pipe", "pipe", "pipe"],
+          env: { ...process.env, NO_COLOR: "1" },
+        });
+        let settled = false;
+        const done = (error?: Error) => {
+          if (settled) return;
+          settled = true;
+          if (error) reject(error);
+          else resolve();
+        };
+        proc.stdin?.write("y\n");
+        proc.stdin?.end();
+        proc.on("error", (error) => done(error));
+        proc.on("exit", (code) => {
+          if (code === 0) done();
+          else done(new Error("飞书 CLI 登出失败"));
+        });
+      });
+      const status = await getFeishuStatus();
+      if (!status.ok || status.connected) {
+        return {
+          ...status,
+          ok: false,
+          error: status.error || "飞书仍处于登录状态，断开未生效",
+        };
+      }
+      removeFeishuSkill();
+      sendFeishuProgress("disconnected");
+      return status;
+    } catch (error) {
+      const status = await getFeishuStatus();
       return {
         ...status,
         ok: false,

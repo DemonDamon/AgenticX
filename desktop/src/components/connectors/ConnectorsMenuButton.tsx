@@ -17,7 +17,7 @@ type Props = {
   sessionId?: string;
 };
 
-type NativeId = "tencent-meeting" | "tapd" | "github";
+type NativeId = "tencent-meeting" | "tapd" | "github" | "feishu";
 
 /**
  * Persistent「连接器」entry in the composer toolbar (replaces the previous
@@ -33,6 +33,7 @@ export function ConnectorsMenuButton({ sessionId }: Props) {
   const effectiveSessionId = (sessionId || globalSessionId || "").trim();
   const [tmeetConnected, setTmeetConnected] = useState(false);
   const [githubConnected, setGithubConnected] = useState(false);
+  const [feishuConnected, setFeishuConnected] = useState(false);
   const [open, setOpen] = useState(false);
   const [dropdownPos, setDropdownPos] = useState<{ bottom: number; left: number } | null>(null);
   const [pendingId, setPendingId] = useState<NativeId | null>(null);
@@ -64,6 +65,15 @@ export function ConnectorsMenuButton({ sessionId }: Props) {
       setGithubConnected(result.connected);
     } catch {
       setGithubConnected(false);
+    }
+  }, []);
+
+  const refreshFeishu = useCallback(async () => {
+    try {
+      const result = await window.agenticxDesktop.nativeConnectorStatus("feishu");
+      setFeishuConnected(result.connected);
+    } catch {
+      setFeishuConnected(false);
     }
   }, []);
 
@@ -120,14 +130,23 @@ export function ConnectorsMenuButton({ sessionId }: Props) {
     });
   }, [refreshGithub]);
 
+  useEffect(() => {
+    void refreshFeishu();
+    return window.agenticxDesktop.onNativeConnectorFeishuProgress(({ phase }) => {
+      if (phase === "success" || phase === "disconnected" || phase === "error") {
+        void refreshFeishu();
+      }
+    });
+  }, [refreshFeishu]);
+
   const tapdConnected = useMemo(
     () => mcpServers.some((server) => server.name === "tapd" && server.connected),
     [mcpServers],
   );
 
   const connectedIds = useMemo(
-    () => resolveConnectedConnectorIds(tmeetConnected, mcpServers, githubConnected),
-    [githubConnected, mcpServers, tmeetConnected],
+    () => resolveConnectedConnectorIds(tmeetConnected, mcpServers, githubConnected, feishuConnected),
+    [feishuConnected, githubConnected, mcpServers, tmeetConnected],
   );
 
   const connectedLabel = useMemo(
@@ -143,9 +162,10 @@ export function ConnectorsMenuButton({ sessionId }: Props) {
       if (id === "tencent-meeting") return tmeetConnected;
       if (id === "tapd") return tapdConnected;
       if (id === "github") return githubConnected;
+      if (id === "feishu") return feishuConnected;
       return false;
     },
-    [githubConnected, tapdConnected, tmeetConnected],
+    [feishuConnected, githubConnected, tapdConnected, tmeetConnected],
   );
 
   /** WorkBuddy popup: only truly connected connectors. */
@@ -235,6 +255,16 @@ export function ConnectorsMenuButton({ sessionId }: Props) {
     }
   };
 
+  const disconnectFeishu = async () => {
+    setPendingId("feishu");
+    try {
+      await window.agenticxDesktop.nativeConnectorFeishuLogout();
+      await refreshFeishu();
+    } finally {
+      setPendingId(null);
+    }
+  };
+
   const handleTapdConnect = async () => {
     if (!tapdToken.trim()) {
       setTapdError("请填写 TAPD Personal Access Token");
@@ -287,6 +317,11 @@ export function ConnectorsMenuButton({ sessionId }: Props) {
       goToSettings();
       return;
     }
+    if (id === "feishu") {
+      // Two-phase Device Flow needs Settings Modal.
+      goToSettings();
+      return;
+    }
     showToast("该连接器暂未开放");
   };
 
@@ -303,6 +338,10 @@ export function ConnectorsMenuButton({ sessionId }: Props) {
       }
       if (id === "github") {
         void disconnectGithub();
+        return;
+      }
+      if (id === "feishu") {
+        void disconnectFeishu();
         return;
       }
       return;

@@ -517,6 +517,12 @@ contextBridge.exposeInMainWorld("agenticxDesktop", {
     ipcRenderer.invoke("native-connector-github-logout"),
   nativeConnectorGithubCancel: async () =>
     ipcRenderer.invoke("native-connector-github-cancel"),
+  nativeConnectorFeishuLogin: async () =>
+    ipcRenderer.invoke("native-connector-feishu-login"),
+  nativeConnectorFeishuLogout: async () =>
+    ipcRenderer.invoke("native-connector-feishu-logout"),
+  nativeConnectorFeishuCancel: async () =>
+    ipcRenderer.invoke("native-connector-feishu-cancel"),
   nativeConnectorTapdConfigure: async (payload: { sessionId: string; accessToken: string }) =>
     ipcRenderer.invoke("native-connector-tapd-configure", payload),
   onNativeConnectorTmeetProgress: (
@@ -562,6 +568,38 @@ contextBridge.exposeInMainWorld("agenticxDesktop", {
     ) => callback(payload);
     ipcRenderer.on("native-connector-github-progress", handler);
     return () => ipcRenderer.removeListener("native-connector-github-progress", handler);
+  },
+  onNativeConnectorFeishuProgress: (
+    callback: (payload: {
+      phase:
+        | "installing"
+        | "config_setup"
+        | "config_done"
+        | "auth_setup"
+        | "waiting"
+        | "success"
+        | "disconnected"
+        | "error";
+      verificationUrl?: string;
+    }) => void,
+  ): (() => void) => {
+    const handler = (
+      _event: Electron.IpcRendererEvent,
+      payload: {
+        phase:
+          | "installing"
+          | "config_setup"
+          | "config_done"
+          | "auth_setup"
+          | "waiting"
+          | "success"
+          | "disconnected"
+          | "error";
+        verificationUrl?: string;
+      },
+    ) => callback(payload);
+    ipcRenderer.on("native-connector-feishu-progress", handler);
+    return () => ipcRenderer.removeListener("native-connector-feishu-progress", handler);
   },
   resolveLocalPath: async (path: string) => ipcRenderer.invoke("resolve-local-path", path),
   shellOpenPath: async (path: string) => ipcRenderer.invoke("shell-open-path", path),

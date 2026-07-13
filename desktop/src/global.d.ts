@@ -1000,6 +1000,29 @@ declare global {
         label: string;
         error?: string;
       }>;
+      nativeConnectorFeishuLogin: () => Promise<{
+        ok: boolean;
+        available: boolean;
+        connected: boolean;
+        label: string;
+        error?: string;
+        account?: string;
+      }>;
+      nativeConnectorFeishuLogout: () => Promise<{
+        ok: boolean;
+        available: boolean;
+        connected: boolean;
+        label: string;
+        error?: string;
+        account?: string;
+      }>;
+      nativeConnectorFeishuCancel: () => Promise<{
+        ok: boolean;
+        available: boolean;
+        connected: boolean;
+        label: string;
+        error?: string;
+      }>;
       nativeConnectorTapdConfigure: (payload: {
         sessionId: string;
         accessToken: string;
@@ -1020,6 +1043,20 @@ declare global {
             | "disconnected"
             | "error";
           oneTimeCode?: string;
+        }) => void,
+      ) => () => void;
+      onNativeConnectorFeishuProgress: (
+        callback: (payload: {
+          phase:
+            | "installing"
+            | "config_setup"
+            | "config_done"
+            | "auth_setup"
+            | "waiting"
+            | "success"
+            | "disconnected"
+            | "error";
+          verificationUrl?: string;
         }) => void,
       ) => () => void;
       resolveLocalPath: (path: string) => Promise<{

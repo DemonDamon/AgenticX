@@ -1,6 +1,7 @@
 import tencentMeetingIcon from "../../../assets/connectors/tencent-meeting.svg";
 import tapdIcon from "../../../assets/connectors/tapd.svg";
 import githubIcon from "../../../assets/connectors/github.svg";
+import feishuIcon from "../../../assets/connectors/feishu.svg";
 import gmailIcon from "../../../assets/connectors/gmail.svg";
 import notionIcon from "../../../assets/connectors/notion.svg";
 import slackIcon from "../../../assets/connectors/slack.svg";
@@ -13,6 +14,7 @@ export type ConnectorId =
   | "tencent-meeting"
   | "tapd"
   | "github"
+  | "feishu"
   | "gmail"
   | "notion"
   | "slack"
@@ -37,6 +39,7 @@ export type ConnectorDefinition = {
  *   extracted from `@iconify-json/logos` (same package OpenConnector web console uses).
  * - 腾讯会议: official favicon from meeting.tencent.com (via Google s2 favicons).
  * - TAPD: official wordmark SVG from static-open.tapd.cn.
+ * - 飞书: brand-style mark for the native lark-cli connector.
  */
 export const CONNECTORS: ConnectorDefinition[] = [
   {
@@ -52,6 +55,12 @@ export const CONNECTORS: ConnectorDefinition[] = [
     iconSrc: tapdIcon,
   },
   { id: "github", name: "GitHub", description: "查看仓库、Issue 与 Pull Request", iconSrc: githubIcon },
+  {
+    id: "feishu",
+    name: "飞书",
+    description: "消息、文档、多维表格、日历与任务",
+    iconSrc: feishuIcon,
+  },
   { id: "gmail", name: "Gmail", description: "收发、搜索和整理邮件", iconSrc: gmailIcon },
   { id: "notion", name: "Notion", description: "浏览页面与数据库内容", iconSrc: notionIcon },
   { id: "slack", name: "Slack", description: "读取频道并发送消息", iconSrc: slackIcon },
