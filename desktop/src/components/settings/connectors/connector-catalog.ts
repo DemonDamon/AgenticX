@@ -2,6 +2,7 @@ import tencentMeetingIcon from "../../../assets/connectors/tencent-meeting.svg";
 import tapdIcon from "../../../assets/connectors/tapd.svg";
 import githubIcon from "../../../assets/connectors/github.svg";
 import feishuIcon from "../../../assets/connectors/feishu.svg";
+import wecomIcon from "../../../assets/connectors/wecom.svg";
 import gmailIcon from "../../../assets/connectors/gmail.svg";
 import notionIcon from "../../../assets/connectors/notion.svg";
 import slackIcon from "../../../assets/connectors/slack.svg";
@@ -15,6 +16,7 @@ export type ConnectorId =
   | "tapd"
   | "github"
   | "feishu"
+  | "wecom"
   | "gmail"
   | "notion"
   | "slack"
@@ -40,6 +42,11 @@ export type ConnectorDefinition = {
  * - 腾讯会议: official favicon from meeting.tencent.com (via Google s2 favicons).
  * - TAPD: official wordmark SVG from static-open.tapd.cn.
  * - 飞书: official bird mark (teal/blue), same brand asset used by connector catalogs.
+ * - 企业微信: official app-icon mark (white squircle + dual green bubbles + dots,
+ *   brand green #2BA245). OpenConnector `wecom_bot` ships no local brand SVG — it
+ *   falls back to Google favicon for work.weixin.qq.com (currently wrong/WeLink);
+ *   TDesign `logo-wecom` is a different single-bubble+nodes glyph. We use the
+ *   public WeCom app-icon style shown in connector catalogs.
  */
 export const CONNECTORS: ConnectorDefinition[] = [
   {
@@ -60,6 +67,12 @@ export const CONNECTORS: ConnectorDefinition[] = [
     name: "飞书",
     description: "消息、文档、多维表格、日历与任务",
     iconSrc: feishuIcon,
+  },
+  {
+    id: "wecom",
+    name: "企业微信",
+    description: "消息、文档、智能表格、通讯录、待办与会议",
+    iconSrc: wecomIcon,
   },
   { id: "gmail", name: "Gmail", description: "收发、搜索和整理邮件", iconSrc: gmailIcon },
   { id: "notion", name: "Notion", description: "浏览页面与数据库内容", iconSrc: notionIcon },

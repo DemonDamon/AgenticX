@@ -35,6 +35,13 @@ type FeishuStatus = {
   account?: string;
 };
 
+type WecomStatus = {
+  available: boolean;
+  connected: boolean;
+  label: string;
+  error?: string;
+};
+
 /** Compact status used inside connect/manage dialogs (not the marketplace card). */
 function StatusLabel({
   available,
@@ -107,6 +114,16 @@ export function ConnectorsTab({ sessionId, tapdConnected, onRefreshMcp }: Props)
   const [feishuBusy, setFeishuBusy] = useState(false);
   const [feishuPhase, setFeishuPhase] = useState("");
   const [feishuVerifyUrl, setFeishuVerifyUrl] = useState("");
+  const [wecomStatus, setWecomStatus] = useState<WecomStatus>({
+    available: true,
+    connected: false,
+    label: "可用",
+  });
+  const [wecomBusy, setWecomBusy] = useState(false);
+  const [wecomPhase, setWecomPhase] = useState("");
+  const [botIdInput, setBotIdInput] = useState("");
+  const [botSecretInput, setBotSecretInput] = useState("");
+  const [showBotSecret, setShowBotSecret] = useState(false);
   const [tapdToken, setTapdToken] = useState("");
   const [tapdBusy, setTapdBusy] = useState(false);
   const [dialogError, setDialogError] = useState("");
@@ -127,7 +144,9 @@ export function ConnectorsTab({ sessionId, tapdConnected, onRefreshMcp }: Props)
               ? githubStatus.connected
               : item.id === "feishu"
                 ? feishuStatus.connected
-                : false;
+                : item.id === "wecom"
+                  ? wecomStatus.connected
+                  : false;
       const available =
         item.id === "tencent-meeting"
           ? tmeetStatus.available
@@ -141,7 +160,9 @@ export function ConnectorsTab({ sessionId, tapdConnected, onRefreshMcp }: Props)
               ? githubBusy
               : item.id === "feishu"
                 ? feishuBusy
-                : false;
+                : item.id === "wecom"
+                  ? wecomBusy
+                  : false;
       return { available, connected, busy };
     },
     [
@@ -154,6 +175,8 @@ export function ConnectorsTab({ sessionId, tapdConnected, onRefreshMcp }: Props)
       tmeetBusy,
       tmeetStatus.available,
       tmeetStatus.connected,
+      wecomBusy,
+      wecomStatus.connected,
     ],
   );
 
@@ -206,6 +229,16 @@ export function ConnectorsTab({ sessionId, tapdConnected, onRefreshMcp }: Props)
       label: result.label,
       error: result.error,
       account: result.account,
+    });
+  }, []);
+
+  const refreshWecomStatus = useCallback(async () => {
+    const result = await window.agenticxDesktop.nativeConnectorStatus("wecom");
+    setWecomStatus({
+      available: result.available,
+      connected: result.connected,
+      label: result.label,
+      error: result.error,
     });
   }, []);
 
@@ -265,6 +298,24 @@ export function ConnectorsTab({ sessionId, tapdConnected, onRefreshMcp }: Props)
     });
   }, [refreshFeishuStatus]);
 
+  useEffect(() => {
+    void refreshWecomStatus();
+    return window.agenticxDesktop.onNativeConnectorWecomProgress(({ phase }) => {
+      const labels: Record<string, string> = {
+        installing: "首次使用，正在下载企业微信 CLI…",
+        initializing: "正在配置机器人凭据…",
+        probing: "正在校验凭据…",
+        success: "连接成功",
+        disconnected: "已断开连接",
+        error: "连接未完成",
+      };
+      if (labels[phase]) setWecomPhase(labels[phase]);
+      if (phase === "success" || phase === "disconnected" || phase === "error") {
+        void refreshWecomStatus();
+      }
+    });
+  }, [refreshWecomStatus]);
+
   const openConnector = (item: ConnectorDefinition) => {
     if (nativeConnectorAvailability(item.id) !== "available") return;
     setDialogError("");
@@ -273,6 +324,10 @@ export function ConnectorsTab({ sessionId, tapdConnected, onRefreshMcp }: Props)
     setGithubDeviceCode("");
     setFeishuPhase("");
     setFeishuVerifyUrl("");
+    setWecomPhase("");
+    setBotIdInput("");
+    setBotSecretInput("");
+    setShowBotSecret(false);
     setSelectedId(item.id);
   };
 
@@ -454,6 +509,78 @@ export function ConnectorsTab({ sessionId, tapdConnected, onRefreshMcp }: Props)
       setSelectedId(null);
     } finally {
       setFeishuBusy(false);
+    }
+  };
+
+  const handleWecomConnect = async () => {
+    if (!botIdInput.trim() || !botSecretInput.trim()) {
+      setDialogError("请填写 Bot ID 与 Secret");
+      return;
+    }
+    setWecomBusy(true);
+    setDialogError("");
+    setWecomPhase("准备配置企业微信凭据…");
+    try {
+      const result = await window.agenticxDesktop.nativeConnectorWecomLogin({
+        botId: botIdInput.trim(),
+        botSecret: botSecretInput.trim(),
+      });
+      setWecomStatus({
+        available: result.available,
+        connected: result.connected,
+        label: result.label,
+        error: result.error,
+      });
+      if (result.error === "已取消") {
+        setWecomPhase("");
+        return;
+      }
+      if (!result.ok || !result.connected) {
+        setDialogError(result.error || "企业微信连接未完成");
+        return;
+      }
+      setBotIdInput("");
+      setBotSecretInput("");
+      showToast("企业微信已连接");
+      setSelectedId(null);
+    } finally {
+      setWecomBusy(false);
+    }
+  };
+
+  const handleWecomCancel = async () => {
+    if (wecomBusy) {
+      try {
+        await window.agenticxDesktop.nativeConnectorWecomCancel();
+      } catch {
+        // best-effort cancel
+      }
+    }
+    setWecomBusy(false);
+    setWecomPhase("");
+    setDialogError("");
+    setSelectedId(null);
+  };
+
+  const handleWecomLogout = async () => {
+    setWecomBusy(true);
+    setDialogError("");
+    try {
+      const result = await window.agenticxDesktop.nativeConnectorWecomLogout();
+      setWecomStatus({
+        available: result.available,
+        connected: result.connected,
+        label: result.label,
+        error: result.error,
+      });
+      if (!result.ok) {
+        setDialogError(result.error || "企业微信断开失败");
+        return;
+      }
+      showToast("已断开企业微信");
+      setSelectedId(null);
+    } finally {
+      setWecomBusy(false);
     }
   };
 
@@ -809,6 +936,122 @@ export function ConnectorsTab({ sessionId, tapdConnected, onRefreshMcp }: Props)
             {dialogError || feishuStatus.error ? (
               <div className="rounded-lg border border-rose-500/35 bg-rose-500/10 px-3 py-2 text-xs text-rose-300">
                 {dialogError || feishuStatus.error}
+              </div>
+            ) : null}
+          </div>
+        ) : null}
+      </Modal>
+
+      <Modal
+        open={selected?.id === "wecom"}
+        title="企业微信连接器"
+        onClose={() => void handleWecomCancel()}
+        panelClassName="w-[min(560px,94vw)] bg-surface-panel"
+        footer={
+          <div className="flex justify-end gap-2">
+            <button
+              type="button"
+              className="rounded-md border border-border px-3 py-2 text-xs text-text-muted hover:bg-surface-hover"
+              onClick={() => void handleWecomCancel()}
+            >
+              取消
+            </button>
+            <button
+              type="button"
+              className="rounded-md bg-btnPrimary px-4 py-2 text-xs font-medium text-btnPrimary-text hover:bg-btnPrimary-hover disabled:opacity-50"
+              disabled={wecomBusy}
+              onClick={() => void (wecomStatus.connected ? handleWecomLogout() : handleWecomConnect())}
+            >
+              {wecomBusy ? "处理中…" : wecomStatus.connected ? "断开连接" : "连接"}
+            </button>
+          </div>
+        }
+      >
+        {selected ? (
+          <div className="space-y-4">
+            <div className="flex items-center gap-3">
+              <ConnectorIcon item={selected} large />
+              <div>
+                <div className="text-base font-semibold text-text-strong">企业微信</div>
+                <StatusLabel
+                  available={wecomStatus.available}
+                  connected={wecomStatus.connected}
+                  busy={wecomBusy}
+                />
+              </div>
+            </div>
+            <p className="text-sm leading-relaxed text-text-muted">
+              使用企业微信官方 CLI（wecom-cli）。请先在企业微信管理后台创建 API
+              模式智能机器人，复制 Bot ID 与 Secret 填入下方。连接后 Near 会写入托管技能，Agent
+              可通过 wecom-cli 操作消息、文档、智能表格、通讯录、待办与会议。凭证由 CLI
+              加密保存在本机。
+            </p>
+            {!wecomStatus.connected ? (
+              <div className="space-y-3">
+                <div>
+                  <label className="mb-1 block text-[11px] text-text-muted">Bot ID</label>
+                  <input
+                    type="text"
+                    value={botIdInput}
+                    onChange={(event) => setBotIdInput(event.target.value)}
+                    disabled={wecomBusy}
+                    autoComplete="off"
+                    spellCheck={false}
+                    placeholder="请输入企业微信机器人 Bot ID"
+                    className="w-full rounded-md border border-border bg-surface-card px-3 py-2 text-sm text-text-strong outline-none focus:border-border-strong"
+                  />
+                </div>
+                <div>
+                  <label className="mb-1 block text-[11px] text-text-muted">Bot Secret</label>
+                  <div className="flex gap-2">
+                    <input
+                      type={showBotSecret ? "text" : "password"}
+                      value={botSecretInput}
+                      onChange={(event) => setBotSecretInput(event.target.value)}
+                      disabled={wecomBusy}
+                      autoComplete="off"
+                      spellCheck={false}
+                      placeholder="请输入企业微信机器人 Secret"
+                      className="w-full rounded-md border border-border bg-surface-card px-3 py-2 text-sm text-text-strong outline-none focus:border-border-strong"
+                    />
+                    <button
+                      type="button"
+                      className="shrink-0 rounded-md border border-border px-2 py-1 text-[11px] text-text-muted hover:bg-surface-hover"
+                      onClick={() => setShowBotSecret((prev) => !prev)}
+                    >
+                      {showBotSecret ? "隐藏" : "显示"}
+                    </button>
+                  </div>
+                </div>
+                <a
+                  href="https://open.work.weixin.qq.com/help2/pc/cat?doc_id=21677"
+                  target="_blank"
+                  rel="noreferrer"
+                  className="inline-flex items-center gap-1 text-[11px] text-text-muted hover:text-text-strong"
+                  onClick={(event) => {
+                    event.preventDefault();
+                    void window.agenticxDesktop.openExternal(
+                      "https://open.work.weixin.qq.com/help2/pc/cat?doc_id=21677",
+                    );
+                  }}
+                >
+                  <ExternalLink className="h-3.5 w-3.5" aria-hidden />
+                  如何获取 Bot ID / Secret
+                </a>
+              </div>
+            ) : null}
+            {wecomPhase ? (
+              <div
+                className="flex items-center gap-2 rounded-lg border border-border bg-surface-card px-3 py-2 text-xs text-text-muted"
+                role="status"
+              >
+                {wecomBusy ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
+                {wecomPhase}
+              </div>
+            ) : null}
+            {dialogError || wecomStatus.error ? (
+              <div className="rounded-lg border border-rose-500/35 bg-rose-500/10 px-3 py-2 text-xs text-rose-300">
+                {dialogError || wecomStatus.error}
               </div>
             ) : null}
           </div>

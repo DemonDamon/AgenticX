@@ -523,6 +523,12 @@ contextBridge.exposeInMainWorld("agenticxDesktop", {
     ipcRenderer.invoke("native-connector-feishu-logout"),
   nativeConnectorFeishuCancel: async () =>
     ipcRenderer.invoke("native-connector-feishu-cancel"),
+  nativeConnectorWecomLogin: async (payload: { botId: string; botSecret: string }) =>
+    ipcRenderer.invoke("native-connector-wecom-login", payload),
+  nativeConnectorWecomLogout: async () =>
+    ipcRenderer.invoke("native-connector-wecom-logout"),
+  nativeConnectorWecomCancel: async () =>
+    ipcRenderer.invoke("native-connector-wecom-cancel"),
   nativeConnectorTapdConfigure: async (payload: { sessionId: string; accessToken: string }) =>
     ipcRenderer.invoke("native-connector-tapd-configure", payload),
   onNativeConnectorTmeetProgress: (
@@ -600,6 +606,20 @@ contextBridge.exposeInMainWorld("agenticxDesktop", {
     ) => callback(payload);
     ipcRenderer.on("native-connector-feishu-progress", handler);
     return () => ipcRenderer.removeListener("native-connector-feishu-progress", handler);
+  },
+  onNativeConnectorWecomProgress: (
+    callback: (payload: {
+      phase: "installing" | "initializing" | "probing" | "success" | "disconnected" | "error";
+    }) => void,
+  ): (() => void) => {
+    const handler = (
+      _event: Electron.IpcRendererEvent,
+      payload: {
+        phase: "installing" | "initializing" | "probing" | "success" | "disconnected" | "error";
+      },
+    ) => callback(payload);
+    ipcRenderer.on("native-connector-wecom-progress", handler);
+    return () => ipcRenderer.removeListener("native-connector-wecom-progress", handler);
   },
   resolveLocalPath: async (path: string) => ipcRenderer.invoke("resolve-local-path", path),
   shellOpenPath: async (path: string) => ipcRenderer.invoke("shell-open-path", path),

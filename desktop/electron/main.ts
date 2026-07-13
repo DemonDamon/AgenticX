@@ -71,11 +71,13 @@ import {
   extractGithubDeviceCode,
   extractGithubDeviceUrl,
   isTapdValidationSuccess,
+  isWecomProbeSuccessful,
   mergeTapdMcpDocument,
   parseFeishuAuthStatus,
   parseGithubAuthStatus,
   parseTmeetAuthStatus,
   readBodyWithLimit,
+  wecomNpmPlatformPackage,
 } from "./native-connectors-core";
 
 /** Node fetch honors HTTP_PROXY; localhost cc-bridge POSTs then fail (e.g. 502) and PTY input never reaches Claude. */
@@ -1802,6 +1804,17 @@ let feishuInstallPromise: Promise<string> | null = null;
 /** Active Feishu Device Flow canceller — closes login promise and kills lark-cli process. */
 let cancelActiveFeishuLogin: ((reason?: string) => void) | null = null;
 let feishuBinaryValidationCache: {
+  path: string;
+  size: number;
+  mtimeMs: number;
+  valid: boolean;
+} | null = null;
+let wecomAuthPty: import("node-pty").IPty | null = null;
+let wecomAuthBusy = false;
+let wecomInstallPromise: Promise<string> | null = null;
+/** Active WeCom init canceller — closes login promise and kills wecom-cli PTY. */
+let cancelActiveWecomLogin: ((reason?: string) => void) | null = null;
+let wecomBinaryValidationCache: {
   path: string;
   size: number;
   mtimeMs: number;
@@ -4666,6 +4679,707 @@ function startFeishuLogin(): Promise<NativeConnectorStatusResult> {
   });
 }
 
+/*
+ * FR-0 wecom-cli init interaction record (wecom-cli 0.1.9, PTY probe 2026-07-14):
+ *
+ * Source: https://github.com/WecomTeam/wecom-cli/blob/main/src/cmd/init.rs
+ *
+ * Non-TTY stderr rejects interactive init ("请使用 --noninteractive") — --noninteractive
+ * is the QR-code path, NOT credential stdin. Manual Bot ID/Secret requires a real PTY.
+ *
+ * Interactive sequence (cliclack):
+ *   1) intro "企业微信机器人初始化"
+ *   2) select "请选择企微机器人接入方式："
+ *        - qrcode: 扫码接入（推荐）
+ *        - manual: 手动输入 Bot ID 和 Secret   ← Near sends Down+Enter
+ *   3) input  "企业微信机器人 Bot ID"  → write botId + CR
+ *   4) password "企业微信机器人 Secret" → write botSecret + CR
+ *   5) spinner verify → "企业微信机器人凭证验证成功" / "初始化完成 ✅"
+ *      or fail → "初始化失败 ❌" + rollback bot.enc
+ *
+ * Credentials: ~/.config/wecom/bot.enc (no logout subcommand; delete config dir).
+ * npm binary member: package/bin/wecom-cli(.exe)
+ */
+const WECOM_CLI_VERSION = "0.1.9";
+const WECOM_CLI_ARCHIVE_MAX_BYTES = 30 * 1024 * 1024;
+const WECOM_NPM_REGISTRY = "https://registry.npmjs.org";
+
+function wecomConfigDir(): string {
+  return path.join(os.homedir(), ".config", "wecom");
+}
+
+function wecomBotEncPath(): string {
+  return path.join(wecomConfigDir(), "bot.enc");
+}
+
+function wecomInstallDir(version = WECOM_CLI_VERSION): string {
+  return path.join(os.homedir(), ".agenticx", "connectors", "wecom", version);
+}
+
+function wecomBinaryName(): string {
+  return process.platform === "win32" ? "wecom-cli.exe" : "wecom-cli";
+}
+
+function wecomSkillDir(): string {
+  return path.join(os.homedir(), ".agenticx", "skills", "near-connectors", "wecom");
+}
+
+function persistWecomConnectorStatus(connected: boolean): void {
+  const parentDir = path.dirname(NATIVE_CONNECTOR_STATUS_PATH);
+  fs.mkdirSync(parentDir, { recursive: true, mode: 0o700 });
+  if (
+    fs.existsSync(NATIVE_CONNECTOR_STATUS_PATH) &&
+    fs.lstatSync(NATIVE_CONNECTOR_STATUS_PATH).isSymbolicLink()
+  ) {
+    throw new Error("原生连接器状态文件不能是符号链接");
+  }
+  let current: Record<string, unknown> = {};
+  try {
+    const parsed = JSON.parse(fs.readFileSync(NATIVE_CONNECTOR_STATUS_PATH, "utf8"));
+    if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+      current = parsed as Record<string, unknown>;
+    }
+  } catch {
+    current = {};
+  }
+  const connectors =
+    current.connectors &&
+    typeof current.connectors === "object" &&
+    !Array.isArray(current.connectors)
+      ? (current.connectors as Record<string, unknown>)
+      : {};
+  const next = {
+    ...current,
+    version: 1,
+    connectors: {
+      ...connectors,
+      wecom: {
+        connected,
+        capability: "skill",
+        skill_name: "wecom",
+        updated_at: new Date().toISOString(),
+      },
+    },
+  };
+  const tempPath = `${NATIVE_CONNECTOR_STATUS_PATH}.${process.pid}.tmp`;
+  fs.writeFileSync(tempPath, `${JSON.stringify(next, null, 2)}\n`, {
+    encoding: "utf8",
+    mode: 0o600,
+  });
+  fs.renameSync(tempPath, NATIVE_CONNECTOR_STATUS_PATH);
+}
+
+function tryPersistWecomConnectorStatus(connected: boolean): void {
+  try {
+    persistWecomConnectorStatus(connected);
+  } catch (error) {
+    console.warn("[native-connectors] failed to persist WeCom status:", String(error));
+  }
+}
+
+function clearWecomLocalCredentials(): void {
+  const dir = wecomConfigDir();
+  if (!fs.existsSync(dir)) return;
+  fs.rmSync(dir, { recursive: true, force: true });
+}
+
+function resolveSystemWecomCliPath(): string | null {
+  const candidates: string[] = [];
+  if (process.platform === "win32") {
+    const appData = process.env.APPDATA || "";
+    if (appData) {
+      candidates.push(path.join(appData, "npm", "wecom-cli.cmd"));
+      candidates.push(path.join(appData, "npm", "wecom-cli.exe"));
+    }
+  } else {
+    candidates.push(
+      "/opt/homebrew/bin/wecom-cli",
+      "/usr/local/bin/wecom-cli",
+      "/usr/bin/wecom-cli",
+      path.join(os.homedir(), ".npm-global", "bin", "wecom-cli"),
+    );
+  }
+  try {
+    const whichCmd = process.platform === "win32" ? "where" : "which";
+    const found = execFileSync(whichCmd, ["wecom-cli"], {
+      encoding: "utf8",
+      timeout: 3000,
+      stdio: ["ignore", "pipe", "ignore"],
+      env: process.env,
+    })
+      .split(/\r?\n/)
+      .map((line) => line.trim())
+      .find(Boolean);
+    if (found) candidates.unshift(found);
+  } catch {
+    // PATH lookup is best-effort
+  }
+  for (const candidate of candidates) {
+    try {
+      if (fs.existsSync(candidate) && fs.statSync(candidate).isFile()) return candidate;
+    } catch {
+      // continue
+    }
+  }
+  return null;
+}
+
+async function resolveInstalledWecomCliBinaryPath(): Promise<string | null> {
+  const binaryPath = path.join(wecomInstallDir(), "bin", wecomBinaryName());
+  try {
+    if (!fs.existsSync(binaryPath)) return null;
+    const stat = fs.lstatSync(binaryPath);
+    if (!stat.isFile() || stat.isSymbolicLink()) return null;
+    if (
+      wecomBinaryValidationCache &&
+      wecomBinaryValidationCache.path === binaryPath &&
+      wecomBinaryValidationCache.size === stat.size &&
+      wecomBinaryValidationCache.mtimeMs === stat.mtimeMs
+    ) {
+      return wecomBinaryValidationCache.valid ? binaryPath : null;
+    }
+    await new Promise<void>((resolve, reject) => {
+      execFile(
+        binaryPath,
+        ["--help"],
+        { timeout: 8000, maxBuffer: 1024 * 1024, env: { ...process.env, NO_COLOR: "1" } },
+        (error) => {
+          if (error) reject(error);
+          else resolve();
+        },
+      );
+    });
+    wecomBinaryValidationCache = {
+      path: binaryPath,
+      size: stat.size,
+      mtimeMs: stat.mtimeMs,
+      valid: true,
+    };
+    return binaryPath;
+  } catch {
+    wecomBinaryValidationCache = {
+      path: binaryPath,
+      size: 0,
+      mtimeMs: 0,
+      valid: false,
+    };
+    return null;
+  }
+}
+
+async function resolveWecomCliBinaryPath(): Promise<string | null> {
+  return resolveSystemWecomCliPath() || (await resolveInstalledWecomCliBinaryPath());
+}
+
+function verifyNpmSriIntegrity(archive: Buffer, integrity: string): boolean {
+  const match = integrity.match(/^sha512-([A-Za-z0-9+/=]+)$/);
+  if (!match) return false;
+  const digest = crypto.createHash("sha512").update(archive).digest("base64");
+  return digest === match[1];
+}
+
+async function installWecomCliBinary(): Promise<string> {
+  const installed = await resolveInstalledWecomCliBinaryPath();
+  if (installed) return installed;
+  sendWecomProgress("installing");
+  const pkgName = wecomNpmPlatformPackage(process.platform, process.arch);
+  if (!pkgName) throw new Error("当前平台暂不支持企业微信连接器");
+  const parentDir = path.dirname(wecomInstallDir());
+  fs.mkdirSync(parentDir, { recursive: true, mode: 0o700 });
+  const partialDir = path.join(parentDir, `.partial-${crypto.randomUUID()}`);
+  const archivePath = path.join(parentDir, `.download-${crypto.randomUUID()}.tgz`);
+  try {
+    const metaResponse = await proxyAwareFetch(
+      `${WECOM_NPM_REGISTRY}/${pkgName.replace("/", "%2F")}`,
+      { signal: AbortSignal.timeout(30000) },
+    );
+    if (!metaResponse.ok) {
+      throw new Error(`读取企业微信 CLI 包元数据失败：HTTP ${metaResponse.status}`);
+    }
+    const meta = (await metaResponse.json()) as {
+      "dist-tags"?: { latest?: string };
+      versions?: Record<string, { dist?: { tarball?: string; integrity?: string } }>;
+    };
+    let version = WECOM_CLI_VERSION;
+    let dist = meta.versions?.[version]?.dist;
+    if (!dist?.tarball || !dist.integrity) {
+      const latest = meta.versions?.[meta["dist-tags"]?.latest || ""]?.dist;
+      const latestTag = meta["dist-tags"]?.latest;
+      if (!latestTag || !latest?.tarball || !latest.integrity) {
+        throw new Error("企业微信 CLI 包元数据缺少 tarball/integrity");
+      }
+      version = latestTag;
+      dist = latest;
+      console.warn(`[native-connectors] wecom-cli pinned ${WECOM_CLI_VERSION} missing; using ${version}`);
+    }
+    const response = await proxyAwareFetch(dist.tarball!, {
+      signal: AbortSignal.timeout(90000),
+    });
+    if (!response.ok) throw new Error(`下载企业微信 CLI 失败：HTTP ${response.status}`);
+    const declaredSize = Number(response.headers.get("content-length") || "0");
+    if (declaredSize > WECOM_CLI_ARCHIVE_MAX_BYTES) {
+      throw new Error("企业微信 CLI 下载包超过安全限制");
+    }
+    const archive = Buffer.from(await readBodyWithLimit(response.body, WECOM_CLI_ARCHIVE_MAX_BYTES));
+    if (archive.length === 0 || archive.length > WECOM_CLI_ARCHIVE_MAX_BYTES) {
+      throw new Error("企业微信 CLI 下载包大小异常");
+    }
+    if (!verifyNpmSriIntegrity(archive, dist.integrity!)) {
+      throw new Error("企业微信 CLI 完整性校验失败");
+    }
+    fs.mkdirSync(partialDir, { recursive: true, mode: 0o700 });
+    fs.writeFileSync(archivePath, archive, { mode: 0o600 });
+    const binaryMember = `package/bin/${wecomBinaryName()}`;
+    await extractTar({
+      file: archivePath,
+      cwd: partialDir,
+      filter: (memberPath) =>
+        memberPath === binaryMember ||
+        memberPath === "package/bin/wecom-cli" ||
+        memberPath === "package/bin/wecom-cli.exe" ||
+        memberPath.endsWith("/LICENSE"),
+    });
+    const extractedBinary = path.join(partialDir, binaryMember);
+    if (!fs.existsSync(extractedBinary)) {
+      throw new Error("企业微信 CLI 运行文件提取失败");
+    }
+    const stat = fs.lstatSync(extractedBinary);
+    if (!stat.isFile() || stat.isSymbolicLink()) throw new Error("企业微信 CLI 运行文件无效");
+    if (process.platform !== "win32") fs.chmodSync(extractedBinary, 0o755);
+    const stagedBinDir = path.join(partialDir, "bin");
+    fs.mkdirSync(stagedBinDir, { recursive: true, mode: 0o700 });
+    const stagedBinary = path.join(stagedBinDir, wecomBinaryName());
+    if (path.resolve(extractedBinary) !== path.resolve(stagedBinary)) {
+      fs.renameSync(extractedBinary, stagedBinary);
+    }
+    const finalDir = wecomInstallDir();
+    if (fs.existsSync(finalDir)) fs.rmSync(finalDir, { recursive: true, force: true });
+    fs.renameSync(partialDir, finalDir);
+    const result = await resolveInstalledWecomCliBinaryPath();
+    if (!result) throw new Error("企业微信 CLI 安装未完成");
+    return result;
+  } finally {
+    fs.rmSync(archivePath, { force: true });
+    fs.rmSync(partialDir, { recursive: true, force: true });
+  }
+}
+
+async function ensureWecomCliBinaryInstalled(): Promise<string> {
+  const existing = await resolveWecomCliBinaryPath();
+  if (existing) return existing;
+  if (wecomInstallPromise) return await wecomInstallPromise;
+  wecomInstallPromise = installWecomCliBinary().finally(() => {
+    wecomInstallPromise = null;
+  });
+  return await wecomInstallPromise;
+}
+
+async function runWecomCliCommand(
+  args: string[],
+  timeoutMs = 15000,
+  binaryPathOverride?: string,
+): Promise<{ stdout: string; stderr: string; code: number | null }> {
+  const binaryPath = binaryPathOverride || (await resolveWecomCliBinaryPath());
+  if (!binaryPath) throw new Error("企业微信 CLI 尚未安装");
+  return await new Promise((resolve) => {
+    execFile(
+      binaryPath,
+      args,
+      {
+        timeout: timeoutMs,
+        maxBuffer: 2 * 1024 * 1024,
+        env: {
+          ...process.env,
+          NO_COLOR: "1",
+        },
+      },
+      (error, stdout, stderr) => {
+        const execErr = error as (NodeJS.ErrnoException & { status?: number | null }) | null;
+        const status =
+          typeof execErr?.status === "number"
+            ? execErr.status
+            : typeof execErr?.code === "number"
+              ? execErr.code
+              : error
+                ? 1
+                : 0;
+        resolve({
+          stdout: String(stdout ?? ""),
+          stderr: String(stderr ?? ""),
+          code: status,
+        });
+      },
+    );
+  });
+}
+
+function ensureWecomSkill(binaryPath: string): void {
+  const skillDir = wecomSkillDir();
+  const skillPath = path.join(skillDir, "SKILL.md");
+  const markerPath = path.join(skillDir, ".near-managed");
+  const directoryExists = fs.existsSync(skillDir);
+  const markerExists = fs.existsSync(markerPath);
+  assertManagedSkillDirectory(directoryExists, markerExists);
+  const quotedBinary = binaryPath.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
+  const content = `---
+name: wecom
+description: 使用企业微信官方 CLI (wecom-cli) 操作消息、文档、智能表格、通讯录、待办、会议、日程。
+---
+
+# 企业微信
+
+仅在用户要求操作企业微信时使用。通过 bash_exec 调用官方 CLI（本机已配置机器人凭据）：
+
+\`\`\`bash
+"${quotedBinary}" <category> --help              # 列出该品类下支持的工具
+"${quotedBinary}" <category> <method> --help     # 查看某工具所需参数
+"${quotedBinary}" <category> <method> '<json_args>'  # 执行调用
+\`\`\`
+
+category 取值：contact（通讯录）/ doc（文档、智能表格）/ meeting（会议）/ msg（消息）/ schedule（日程）/ todo（待办）。
+
+读取类调用（get_*、list、query）可直接执行；写操作（发消息、创建/删除文档或记录、创建/取消会议或日程、创建/更新/删除待办）必须先向用户展示参数并确认后再执行。不得输出或读取本机凭据文件。若调用返回 error 字段，引导用户前往「设置 → 连接器 → 企业微信」重新连接。
+`;
+  if (!directoryExists) {
+    const parentDir = path.dirname(skillDir);
+    const partialDir = path.join(parentDir, `.wecom.partial-${crypto.randomUUID()}`);
+    fs.mkdirSync(parentDir, { recursive: true, mode: 0o700 });
+    try {
+      fs.mkdirSync(partialDir, { mode: 0o700 });
+      fs.writeFileSync(path.join(partialDir, "SKILL.md"), content, {
+        encoding: "utf8",
+        mode: 0o600,
+      });
+      fs.writeFileSync(path.join(partialDir, ".near-managed"), "managed by Near\n", {
+        encoding: "utf8",
+        mode: 0o600,
+      });
+      fs.renameSync(partialDir, skillDir);
+    } catch (error) {
+      fs.rmSync(partialDir, { recursive: true, force: true });
+      throw error;
+    }
+    return;
+  }
+  const tempPath = `${skillPath}.tmp`;
+  fs.writeFileSync(tempPath, content, { encoding: "utf8", mode: 0o600 });
+  fs.renameSync(tempPath, skillPath);
+}
+
+function removeWecomSkill(): void {
+  const skillDir = wecomSkillDir();
+  const markerPath = path.join(skillDir, ".near-managed");
+  if (!fs.existsSync(markerPath)) return;
+  fs.rmSync(skillDir, { recursive: true, force: true });
+}
+
+async function getWecomStatus(): Promise<NativeConnectorStatusResult> {
+  try {
+    let binaryPath = await resolveWecomCliBinaryPath();
+    const managedSkillMarker = path.join(wecomSkillDir(), ".near-managed");
+    if (!binaryPath && fs.existsSync(managedSkillMarker)) {
+      binaryPath = await ensureWecomCliBinaryInstalled();
+    }
+    if (!binaryPath) {
+      tryPersistWecomConnectorStatus(false);
+      return { ok: true, available: true, connected: false, label: "可用" };
+    }
+    const configured = fs.existsSync(wecomBotEncPath());
+    if (!configured) {
+      removeWecomSkill();
+      tryPersistWecomConnectorStatus(false);
+      return { ok: true, available: true, connected: false, label: "可用" };
+    }
+    const probe = await runWecomCliCommand(
+      ["contact", "get_userlist", "{}"],
+      10000,
+      binaryPath,
+    );
+    const connected = isWecomProbeSuccessful(probe.stdout.trim() || probe.stderr.trim());
+    if (connected) {
+      try {
+        ensureWecomSkill(binaryPath);
+      } catch (error) {
+        tryPersistWecomConnectorStatus(false);
+        return {
+          ok: false,
+          available: true,
+          connected: false,
+          label: "连接异常",
+          error: error instanceof Error ? error.message : String(error),
+        };
+      }
+      tryPersistWecomConnectorStatus(true);
+      return { ok: true, available: true, connected: true, label: "已连接" };
+    }
+    removeWecomSkill();
+    tryPersistWecomConnectorStatus(false);
+    return {
+      ok: true,
+      available: true,
+      connected: false,
+      label: "待登录",
+      error: "企业微信凭据已存在但校验未通过，请重新连接",
+    };
+  } catch (error) {
+    tryPersistWecomConnectorStatus(false);
+    return {
+      ok: false,
+      available: false,
+      connected: false,
+      label: "暂不可用",
+      error: error instanceof Error ? error.message : String(error),
+    };
+  }
+}
+
+type WecomProgressPhase =
+  | "installing"
+  | "initializing"
+  | "probing"
+  | "success"
+  | "disconnected"
+  | "error";
+
+function sendWecomProgress(phase: WecomProgressPhase): void {
+  if (!mainWindow || mainWindow.isDestroyed()) return;
+  mainWindow.webContents.send("native-connector-wecom-progress", { phase });
+}
+
+function stripAnsiForWecom(text: string): string {
+  return text.replace(/\x1b\[[0-9;?]*[A-Za-z]/g, "").replace(/\r/g, "");
+}
+
+/**
+ * Drive wecom-cli init over a PTY (required — cliclack needs a TTY).
+ * See FR-0 comment block above for the exact prompt sequence.
+ */
+function runWecomInitViaPty(
+  binaryPath: string,
+  botId: string,
+  botSecret: string,
+): Promise<{ code: number; output: string }> {
+  return new Promise((resolve, reject) => {
+    const ptyMod = requireNodePty();
+    if (!ptyMod) {
+      reject(new Error("本机无法启动伪终端（node-pty），无法完成企业微信交互式初始化"));
+      return;
+    }
+    let output = "";
+    let selectedManual = false;
+    let sentBotId = false;
+    let sentSecret = false;
+    let settled = false;
+    const finish = (code: number) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timeout);
+      if (wecomAuthPty === pty) wecomAuthPty = null;
+      resolve({ code, output });
+    };
+    const pty = ptyMod.spawn(binaryPath, ["init"], {
+      name: "xterm-256color",
+      cols: 100,
+      rows: 30,
+      cwd: os.homedir(),
+      env: {
+        ...process.env,
+        NO_COLOR: "1",
+        TERM: "xterm-256color",
+      } as Record<string, string>,
+    });
+    wecomAuthPty = pty;
+    const timeout = setTimeout(() => {
+      try {
+        pty.kill();
+      } catch {
+        // ignore
+      }
+      if (!settled) {
+        settled = true;
+        wecomAuthPty = null;
+        reject(new Error("企业微信初始化已超时，请重试"));
+      }
+    }, 5 * 60 * 1000);
+
+    pty.onData((chunk: string) => {
+      output = `${output}${chunk}`.slice(-65536);
+      const plain = stripAnsiForWecom(output);
+      if (!selectedManual && /请选择企微机器人接入方式/.test(plain)) {
+        selectedManual = true;
+        // Select second item: 手动输入 Bot ID 和 Secret
+        pty.write("\x1b[B");
+        setTimeout(() => {
+          try {
+            pty.write("\r");
+          } catch {
+            // ignore
+          }
+        }, 120);
+        return;
+      }
+      if (
+        selectedManual &&
+        !sentBotId &&
+        /◆\s*企业微信机器人 Bot ID/.test(plain)
+      ) {
+        sentBotId = true;
+        setTimeout(() => {
+          try {
+            pty.write(`${botId}\r`);
+          } catch {
+            // ignore
+          }
+        }, 150);
+        return;
+      }
+      if (
+        sentBotId &&
+        !sentSecret &&
+        /◆\s*企业微信机器人 Secret/.test(plain)
+      ) {
+        sentSecret = true;
+        setTimeout(() => {
+          try {
+            pty.write(`${botSecret}\r`);
+          } catch {
+            // ignore
+          }
+        }, 150);
+      }
+    });
+
+    pty.onExit(({ exitCode }) => {
+      finish(typeof exitCode === "number" ? exitCode : 1);
+    });
+  });
+}
+
+function startWecomLogin(botId: string, botSecret: string): Promise<NativeConnectorStatusResult> {
+  const id = botId.trim();
+  const secret = botSecret.trim();
+  if (!id || !secret) {
+    return Promise.resolve({
+      ok: false,
+      available: true,
+      connected: false,
+      label: "连接失败",
+      error: "请填写 Bot ID 与 Secret",
+    });
+  }
+  if (wecomAuthBusy) {
+    return Promise.resolve({
+      ok: false,
+      available: true,
+      connected: false,
+      label: "连接中",
+      error: "企业微信正在连接中",
+    });
+  }
+  wecomAuthBusy = true;
+  return new Promise((resolve) => {
+    let settled = false;
+    const finish = async (result?: NativeConnectorStatusResult, terminate = false) => {
+      if (settled) return;
+      settled = true;
+      cancelActiveWecomLogin = null;
+      const currentPty = wecomAuthPty;
+      if (terminate && currentPty) {
+        try {
+          currentPty.kill();
+        } catch {
+          // ignore
+        }
+      }
+      wecomAuthPty = null;
+      wecomAuthBusy = false;
+      const status = result ?? (await getWecomStatus());
+      if (status.error === "已取消") {
+        sendWecomProgress("disconnected");
+      } else {
+        sendWecomProgress(status.connected ? "success" : "error");
+      }
+      resolve(status);
+    };
+
+    cancelActiveWecomLogin = (reason) => {
+      void finish(
+        {
+          ok: false,
+          available: true,
+          connected: false,
+          label: "可用",
+          error: reason || "已取消",
+        },
+        true,
+      );
+    };
+
+    void (async () => {
+      try {
+        sendWecomProgress("installing");
+        const binaryPath = await ensureWecomCliBinaryInstalled();
+        if (settled) return;
+        sendWecomProgress("initializing");
+        const initResult = await runWecomInitViaPty(binaryPath, id, secret);
+        if (settled) return;
+        const plain = stripAnsiForWecom(initResult.output);
+        if (initResult.code !== 0 || /初始化失败/.test(plain)) {
+          clearWecomLocalCredentials();
+          await finish({
+            ok: false,
+            available: true,
+            connected: false,
+            label: "连接失败",
+            error: /初始化失败/.test(plain)
+              ? "企业微信机器人凭证验证失败，请检查 Bot ID / Secret"
+              : `企业微信初始化失败（退出码 ${initResult.code}）`,
+          });
+          return;
+        }
+        sendWecomProgress("probing");
+        const probe = await runWecomCliCommand(
+          ["contact", "get_userlist", "{}"],
+          10000,
+          binaryPath,
+        );
+        if (settled) return;
+        const probeText = probe.stdout.trim() || probe.stderr.trim();
+        if (!isWecomProbeSuccessful(probeText)) {
+          clearWecomLocalCredentials();
+          removeWecomSkill();
+          tryPersistWecomConnectorStatus(false);
+          await finish({
+            ok: false,
+            available: true,
+            connected: false,
+            label: "连接失败",
+            error: "企业微信凭据校验未通过，请确认 Bot ID / Secret 正确",
+          });
+          return;
+        }
+        ensureWecomSkill(binaryPath);
+        tryPersistWecomConnectorStatus(true);
+        await finish({
+          ok: true,
+          available: true,
+          connected: true,
+          label: "已连接",
+        });
+      } catch (error) {
+        if (settled) return;
+        await finish({
+          ok: false,
+          available: true,
+          connected: false,
+          label: "连接失败",
+          error: error instanceof Error ? error.message : String(error),
+        });
+      }
+    })();
+  });
+}
+
 async function configureTapdConnector(
   sessionId: string,
   accessToken: string,
@@ -5916,6 +6630,7 @@ function registerIpc(): void {
     if (id === "tencent-meeting") return await getTmeetStatus();
     if (id === "github") return await getGithubStatus();
     if (id === "feishu") return await getFeishuStatus();
+    if (id === "wecom") return await getWecomStatus();
     if (id === "tapd") {
       return { ok: true, available: true, connected: false, label: "可用" };
     }
@@ -6110,6 +6825,66 @@ function registerIpc(): void {
       return status;
     } catch (error) {
       const status = await getFeishuStatus();
+      return {
+        ...status,
+        ok: false,
+        error: error instanceof Error ? error.message : String(error),
+      };
+    }
+  });
+
+  ipcMain.handle(
+    "native-connector-wecom-login",
+    async (_event, payload: { botId?: string; botSecret?: string }) => {
+      try {
+        return await startWecomLogin(String(payload?.botId || ""), String(payload?.botSecret || ""));
+      } catch (error) {
+        return {
+          ok: false,
+          available: false,
+          connected: false,
+          label: "连接失败",
+          error: error instanceof Error ? error.message : String(error),
+        };
+      }
+    },
+  );
+
+  ipcMain.handle("native-connector-wecom-cancel", async () => {
+    if (cancelActiveWecomLogin) {
+      cancelActiveWecomLogin("已取消");
+      return { ok: true, available: true, connected: false, label: "可用" };
+    }
+    if (wecomAuthPty) {
+      try {
+        wecomAuthPty.kill();
+      } catch {
+        // ignore
+      }
+      wecomAuthPty = null;
+      wecomAuthBusy = false;
+    }
+    sendWecomProgress("disconnected");
+    return { ok: true, available: true, connected: false, label: "可用" };
+  });
+
+  ipcMain.handle("native-connector-wecom-logout", async () => {
+    try {
+      clearWecomLocalCredentials();
+      removeWecomSkill();
+      tryPersistWecomConnectorStatus(false);
+      sendWecomProgress("disconnected");
+      const status = await getWecomStatus();
+      if (status.connected) {
+        return {
+          ...status,
+          ok: false,
+          error: status.error || "企业微信仍处于连接状态，断开未生效",
+        };
+      }
+      return status;
+    } catch (error) {
+      const status = await getWecomStatus();
       return {
         ...status,
         ok: false,

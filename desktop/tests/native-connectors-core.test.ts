@@ -9,6 +9,7 @@ import {
   extractGithubDeviceUrl,
   extractLastJsonObject,
   isTapdValidationSuccess,
+  isWecomProbeSuccessful,
   mergeTapdMcpDocument,
   nativeConnectorAvailability,
   parseFeishuAuthStatus,
@@ -16,6 +17,7 @@ import {
   parseTmeetAuthStatus,
   readBodyWithLimit,
   resolveConnectedConnectorIds,
+  wecomNpmPlatformPackage,
 } from "../electron/native-connectors-core";
 
 describe("parseTmeetAuthStatus", () => {
@@ -170,6 +172,10 @@ describe("resolveConnectedConnectorIds", () => {
   it("includes github and feishu together when both are connected", () => {
     expect(resolveConnectedConnectorIds(false, [], true, true)).toEqual(["github", "feishu"]);
   });
+
+  it("includes wecom when the native wecom connector is connected", () => {
+    expect(resolveConnectedConnectorIds(false, [], false, false, true)).toEqual(["wecom"]);
+  });
 });
 
 describe("nativeConnectorAvailability", () => {
@@ -178,7 +184,30 @@ describe("nativeConnectorAvailability", () => {
     expect(nativeConnectorAvailability("tapd")).toBe("available");
     expect(nativeConnectorAvailability("github")).toBe("available");
     expect(nativeConnectorAvailability("feishu")).toBe("available");
+    expect(nativeConnectorAvailability("wecom")).toBe("available");
     expect(nativeConnectorAvailability("notion")).toBe("unavailable");
+  });
+});
+
+describe("wecomNpmPlatformPackage", () => {
+  it("maps supported platforms to npm binary packages", () => {
+    expect(wecomNpmPlatformPackage("darwin", "arm64")).toBe("@wecom/cli-darwin-arm64");
+    expect(wecomNpmPlatformPackage("win32", "x64")).toBe("@wecom/cli-win32-x64");
+  });
+
+  it("returns null for unsupported platforms like win32-arm64", () => {
+    expect(wecomNpmPlatformPackage("win32", "arm64")).toBeNull();
+  });
+});
+
+describe("isWecomProbeSuccessful", () => {
+  it("accepts non-empty JSON without an error field", () => {
+    expect(isWecomProbeSuccessful('{"userlist":[]}')).toBe(true);
+  });
+
+  it("rejects JSON with an error field or empty output", () => {
+    expect(isWecomProbeSuccessful('{"error":"invalid credential"}')).toBe(false);
+    expect(isWecomProbeSuccessful("")).toBe(false);
   });
 });
 

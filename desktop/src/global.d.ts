@@ -1023,6 +1023,30 @@ declare global {
         label: string;
         error?: string;
       }>;
+      nativeConnectorWecomLogin: (payload: {
+        botId: string;
+        botSecret: string;
+      }) => Promise<{
+        ok: boolean;
+        available: boolean;
+        connected: boolean;
+        label: string;
+        error?: string;
+      }>;
+      nativeConnectorWecomLogout: () => Promise<{
+        ok: boolean;
+        available: boolean;
+        connected: boolean;
+        label: string;
+        error?: string;
+      }>;
+      nativeConnectorWecomCancel: () => Promise<{
+        ok: boolean;
+        available: boolean;
+        connected: boolean;
+        label: string;
+        error?: string;
+      }>;
       nativeConnectorTapdConfigure: (payload: {
         sessionId: string;
         accessToken: string;
@@ -1057,6 +1081,11 @@ declare global {
             | "disconnected"
             | "error";
           verificationUrl?: string;
+        }) => void,
+      ) => () => void;
+      onNativeConnectorWecomProgress: (
+        callback: (payload: {
+          phase: "installing" | "initializing" | "probing" | "success" | "disconnected" | "error";
         }) => void,
       ) => () => void;
       resolveLocalPath: (path: string) => Promise<{

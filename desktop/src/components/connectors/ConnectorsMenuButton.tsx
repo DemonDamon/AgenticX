@@ -17,7 +17,7 @@ type Props = {
   sessionId?: string;
 };
 
-type NativeId = "tencent-meeting" | "tapd" | "github" | "feishu";
+type NativeId = "tencent-meeting" | "tapd" | "github" | "feishu" | "wecom";
 
 /**
  * Persistent「连接器」entry in the composer toolbar (replaces the previous
@@ -34,6 +34,7 @@ export function ConnectorsMenuButton({ sessionId }: Props) {
   const [tmeetConnected, setTmeetConnected] = useState(false);
   const [githubConnected, setGithubConnected] = useState(false);
   const [feishuConnected, setFeishuConnected] = useState(false);
+  const [wecomConnected, setWecomConnected] = useState(false);
   const [open, setOpen] = useState(false);
   const [dropdownPos, setDropdownPos] = useState<{ bottom: number; left: number } | null>(null);
   const [pendingId, setPendingId] = useState<NativeId | null>(null);
@@ -74,6 +75,15 @@ export function ConnectorsMenuButton({ sessionId }: Props) {
       setFeishuConnected(result.connected);
     } catch {
       setFeishuConnected(false);
+    }
+  }, []);
+
+  const refreshWecom = useCallback(async () => {
+    try {
+      const result = await window.agenticxDesktop.nativeConnectorStatus("wecom");
+      setWecomConnected(result.connected);
+    } catch {
+      setWecomConnected(false);
     }
   }, []);
 
@@ -139,14 +149,30 @@ export function ConnectorsMenuButton({ sessionId }: Props) {
     });
   }, [refreshFeishu]);
 
+  useEffect(() => {
+    void refreshWecom();
+    return window.agenticxDesktop.onNativeConnectorWecomProgress(({ phase }) => {
+      if (phase === "success" || phase === "disconnected" || phase === "error") {
+        void refreshWecom();
+      }
+    });
+  }, [refreshWecom]);
+
   const tapdConnected = useMemo(
     () => mcpServers.some((server) => server.name === "tapd" && server.connected),
     [mcpServers],
   );
 
   const connectedIds = useMemo(
-    () => resolveConnectedConnectorIds(tmeetConnected, mcpServers, githubConnected, feishuConnected),
-    [feishuConnected, githubConnected, mcpServers, tmeetConnected],
+    () =>
+      resolveConnectedConnectorIds(
+        tmeetConnected,
+        mcpServers,
+        githubConnected,
+        feishuConnected,
+        wecomConnected,
+      ),
+    [feishuConnected, githubConnected, mcpServers, tmeetConnected, wecomConnected],
   );
 
   const connectedLabel = useMemo(
@@ -163,9 +189,10 @@ export function ConnectorsMenuButton({ sessionId }: Props) {
       if (id === "tapd") return tapdConnected;
       if (id === "github") return githubConnected;
       if (id === "feishu") return feishuConnected;
+      if (id === "wecom") return wecomConnected;
       return false;
     },
-    [feishuConnected, githubConnected, tapdConnected, tmeetConnected],
+    [feishuConnected, githubConnected, tapdConnected, tmeetConnected, wecomConnected],
   );
 
   /** WorkBuddy popup: only truly connected connectors. */
@@ -265,6 +292,16 @@ export function ConnectorsMenuButton({ sessionId }: Props) {
     }
   };
 
+  const disconnectWecom = async () => {
+    setPendingId("wecom");
+    try {
+      await window.agenticxDesktop.nativeConnectorWecomLogout();
+      await refreshWecom();
+    } finally {
+      setPendingId(null);
+    }
+  };
+
   const handleTapdConnect = async () => {
     if (!tapdToken.trim()) {
       setTapdError("请填写 TAPD Personal Access Token");
@@ -322,6 +359,11 @@ export function ConnectorsMenuButton({ sessionId }: Props) {
       goToSettings();
       return;
     }
+    if (id === "wecom") {
+      // Bot ID/Secret form lives in Settings Modal.
+      goToSettings();
+      return;
+    }
     showToast("该连接器暂未开放");
   };
 
@@ -342,6 +384,10 @@ export function ConnectorsMenuButton({ sessionId }: Props) {
       }
       if (id === "feishu") {
         void disconnectFeishu();
+        return;
+      }
+      if (id === "wecom") {
+        void disconnectWecom();
         return;
       }
       return;

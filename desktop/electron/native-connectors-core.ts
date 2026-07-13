@@ -21,13 +21,26 @@ export type FeishuAuthStatus = {
   error?: string;
 };
 
+export type WecomAuthStatus = {
+  configured: boolean;
+  connected: boolean;
+  label: string;
+  error?: string;
+};
+
 export type StdioMcpEntry = {
   command: string;
   args: string[];
   env: Record<string, string>;
 };
 
-const AVAILABLE_CONNECTOR_IDS = new Set(["tencent-meeting", "tapd", "github", "feishu"]);
+const AVAILABLE_CONNECTOR_IDS = new Set([
+  "tencent-meeting",
+  "tapd",
+  "github",
+  "feishu",
+  "wecom",
+]);
 
 const FEISHU_VERIFY_HOST_SUFFIXES = [
   ".feishu.cn",
@@ -299,18 +312,47 @@ export async function readBodyWithLimit(
   return result;
 }
 
+/** npm platform package for @wecom/cli native binary; null = unsupported. */
+export function wecomNpmPlatformPackage(platform: string, arch: string): string | null {
+  const map: Record<string, string> = {
+    "darwin-arm64": "@wecom/cli-darwin-arm64",
+    "darwin-x64": "@wecom/cli-darwin-x64",
+    "linux-arm64": "@wecom/cli-linux-arm64",
+    "linux-x64": "@wecom/cli-linux-x64",
+    "win32-x64": "@wecom/cli-win32-x64",
+  };
+  return map[`${platform}-${arch}`] ?? null;
+}
+
+/** Probe stdout is usable when it is non-empty JSON without an `error` field. */
+export function isWecomProbeSuccessful(stdout: string): boolean {
+  const trimmed = stdout.trim();
+  if (!trimmed) return false;
+  try {
+    const parsed: unknown = JSON.parse(trimmed);
+    if (parsed && typeof parsed === "object" && !Array.isArray(parsed) && "error" in parsed) {
+      return false;
+    }
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 export function resolveConnectedConnectorIds(
   tmeetConnected: boolean,
   mcpServers: Array<{ name: string; connected: boolean }>,
   githubConnected = false,
   feishuConnected = false,
-): Array<"tencent-meeting" | "tapd" | "github" | "feishu"> {
-  const ids: Array<"tencent-meeting" | "tapd" | "github" | "feishu"> = [];
+  wecomConnected = false,
+): Array<"tencent-meeting" | "tapd" | "github" | "feishu" | "wecom"> {
+  const ids: Array<"tencent-meeting" | "tapd" | "github" | "feishu" | "wecom"> = [];
   if (tmeetConnected) ids.push("tencent-meeting");
   if (mcpServers.some((server) => server.name === "tapd" && server.connected)) {
     ids.push("tapd");
   }
   if (githubConnected) ids.push("github");
   if (feishuConnected) ids.push("feishu");
+  if (wecomConnected) ids.push("wecom");
   return ids;
 }

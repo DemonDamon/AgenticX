@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 48" width="48" height="48" role="img" aria-label="企业微信">
+  <!-- WeCom app-icon tile: white squircle + dual green bubbles (official brand mark).
+       OpenConnector wecom_bot has no local SVG (homepage favicon fallback only);
+       this matches the public WeCom catalog / app icon used in connector UIs. -->
+  <rect width="48" height="48" rx="10.5" fill="#FFFFFF"/>
+  <path fill="#2BA245" d="M24.2 11.2c-6.55 0-11.85 4.45-11.85 9.95 0 3.35 1.85 6.3 4.7 8.15l-1.15 3.65c-.14.44.34.82.72.58l3.95-2.35c1.15.28 2.38.42 3.63.42 6.55 0 11.85-4.45 11.85-9.95S30.75 11.2 24.2 11.2z"/>
+  <path fill="#2BA245" d="M33.85 24.85c-.55 0-1.08.05-1.6.13-.55 2.95-2.95 5.4-6.15 6.55-.2.95-.32 1.95-.32 2.97 0 4.35 4.15 7.88 9.28 7.88 1 0 1.95-.12 2.85-.35l2.85 1.7c.3.18.68-.12.57-.46l-.82-2.7c2.15-1.45 3.55-3.7 3.55-6.22 0-4.35-4.15-7.5-10.21-7.5z"/>
+  <circle fill="#FFFFFF" cx="19.35" cy="21.15" r="1.55"/>
+  <circle fill="#FFFFFF" cx="24.2" cy="21.15" r="1.55"/>
+  <circle fill="#FFFFFF" cx="29.05" cy="21.15" r="1.55"/>
+  <circle fill="#FFFFFF" cx="31.85" cy="32.35" r="1.15"/>
+  <circle fill="#FFFFFF" cx="35.25" cy="32.35" r="1.15"/>
+  <circle fill="#FFFFFF" cx="38.65" cy="32.35" r="1.15"/>
+</svg>
