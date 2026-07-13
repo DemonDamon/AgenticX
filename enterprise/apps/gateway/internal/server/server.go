@@ -66,8 +66,9 @@ type Server struct {
 	traceReporter      *metering.TraceReporter
 	adminLoader        *runtimeconfig.Loader
 	quotaTracker       *quota.Tracker
-	policySnapBodyHash string
-	channelRegistry    *channel.Registry
+	policySnapBodyHash     string
+	policyRemoteCheckedAt  time.Time
+	channelRegistry        *channel.Registry
 	channelPicker      *channel.Picker
 	channelStats       *channel.StatsStore
 	channelAffinity    *channel.AffinityStore
@@ -479,6 +480,45 @@ func (s *Server) evaluatePolicy(text string, ctx policyengine.EvalContext) polic
 	return engine.EvaluateWithContext(text, ctx)
 }
 
+// policyRemoteReloadInterval controls how often GATEWAY_REMOTE_POLICY_SNAPSHOT_URL is
+// re-fetched. Stream chunks call evaluatePolicy per token; without throttling, each
+// chunk pays a full HTTP round-trip to admin-console (~100–300ms locally) and the UI
+// appears stuck on "Thinking" / dribbles tokens. Channel registry already polls at 5s.
+func policyRemoteReloadInterval() time.Duration {
+	raw := strings.TrimSpace(os.Getenv("GATEWAY_POLICY_REMOTE_RELOAD_INTERVAL"))
+	if raw == "" {
+		return 5 * time.Second
+	}
+	if raw == "0" {
+		return 0
+	}
+	d, err := time.ParseDuration(raw)
+	if err != nil || d < 0 {
+		return 5 * time.Second
+	}
+	return d
+}
+
+func (s *Server) shouldFetchRemotePolicy(now time.Time) bool {
+	interval := policyRemoteReloadInterval()
+	if interval <= 0 {
+		return true
+	}
+	s.policyMu.RLock()
+	checkedAt := s.policyRemoteCheckedAt
+	s.policyMu.RUnlock()
+	if checkedAt.IsZero() {
+		return true
+	}
+	return now.Sub(checkedAt) >= interval
+}
+
+func (s *Server) markRemotePolicyChecked(now time.Time) {
+	s.policyMu.Lock()
+	s.policyRemoteCheckedAt = now
+	s.policyMu.Unlock()
+}
+
 func (s *Server) reloadPolicyIfNeeded() {
 	if strings.TrimSpace(s.policyOverride) == "" && strings.TrimSpace(s.policySnapshot) == "" {
 		return
@@ -501,24 +541,30 @@ func (s *Server) reloadPolicyIfNeeded() {
 	snapChanged := false
 	if snap != "" {
 		if gatewayinternal.IsHTTPURL(snap) {
-			raw, code, err := gatewayinternal.HTTPGet(snap)
-			if err != nil {
-				s.logger.Warn("policy snapshot fetch failed", "url", snap, "error", err)
-				return
+			now := time.Now()
+			if !s.shouldFetchRemotePolicy(now) {
+				// Keep serving the in-memory engine; still allow override-file mtime below.
+			} else {
+				raw, code, err := gatewayinternal.HTTPGet(snap)
+				s.markRemotePolicyChecked(now)
+				if err != nil {
+					s.logger.Warn("policy snapshot fetch failed", "url", snap, "error", err)
+					return
+				}
+				var sum string
+				switch {
+				case code == http.StatusNotFound:
+					sum = ""
+				case code >= 200 && code < 300:
+					sum = sha256Hex(raw)
+				default:
+					s.logger.Warn("policy snapshot bad status", "url", snap, "code", code)
+					return
+				}
+				s.policyMu.RLock()
+				snapChanged = sum != s.policySnapBodyHash
+				s.policyMu.RUnlock()
 			}
-			var sum string
-			switch {
-			case code == http.StatusNotFound:
-				sum = ""
-			case code >= 200 && code < 300:
-				sum = sha256Hex(raw)
-			default:
-				s.logger.Warn("policy snapshot bad status", "url", snap, "code", code)
-				return
-			}
-			s.policyMu.RLock()
-			snapChanged = sum != s.policySnapBodyHash
-			s.policyMu.RUnlock()
 		} else {
 			info, err := os.Stat(snap)
 			if err != nil {

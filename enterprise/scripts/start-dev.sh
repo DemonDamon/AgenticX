@@ -67,6 +67,16 @@ set -a
 source "$ENV_FILE"
 set +a
 
+# curl 会把 127.0.0.1 送进 http_proxy/all_proxy（Clash）；Go 默认豁免 loopback，但
+# 脚本内所有本机探活/子进程 curl 仍依赖 NO_PROXY，否则 wait_for_http 会永久挂起。
+_no_proxy_local="127.0.0.1,localhost,::1"
+if [ -n "${NO_PROXY:-}${no_proxy:-}" ]; then
+  export NO_PROXY="${NO_PROXY:-${no_proxy}},${_no_proxy_local}"
+else
+  export NO_PROXY="${_no_proxy_local}"
+fi
+export no_proxy="$NO_PROXY"
+
 if [ -z "${DATABASE_URL:-}" ]; then
   export DATABASE_URL='postgresql://postgres:postgres@127.0.0.1:5432/agenticx'
   echo "[start-dev] DATABASE_URL 未设置，回退到默认本地地址: $DATABASE_URL"
@@ -169,8 +179,11 @@ wait_for_http() {
   local label="$1"
   local url="$2"
   local max_attempts="${3:-60}"
+  # 本机探活必须绕过代理：shell 常设 http_proxy/all_proxy=Clash(:7897)，
+  # 且 NO_PROXY 为空时 curl 会把 127.0.0.1 也送进代理，无 -m 时会永久挂起，
+  # 导致永远走不到后面的 gateway boot（admin 已就绪却仍 502）。
   for i in $(seq 1 "$max_attempts"); do
-    if curl -fsS "$url" >/dev/null 2>&1; then
+    if curl -fsS --noproxy '*' -m 2 "$url" >/dev/null 2>&1; then
       echo "[start-dev] $label ready"
       return 0
     fi
@@ -215,16 +228,26 @@ wait_for_http "web-portal" "http://127.0.0.1:3000/auth" 90 || true
 # Go 访问 https 上游时优先读 HTTP_PROXY/HTTPS_PROXY（大写）。macOS/Clash 常把大写指到
 # 7890、shell 小写指到 7897，导致 proxyconnect 127.0.0.1:7890 connection refused。
 # 仅对 gateway 子进程去掉失效的大写代理，保留小写 http_proxy/https_proxy（7897）。
-echo "[start-dev] booting gateway (:8088) ..."
-(
-  cd "$ENTERPRISE_DIR/apps/gateway"
-  exec env -u HTTP_PROXY -u HTTPS_PROXY -u ALL_PROXY go run ./cmd/gateway
-) &
-PIDS+=("$!")
+if ! command -v go >/dev/null 2>&1; then
+  echo "[start-dev] 错误：未找到 go（PATH=$PATH）。gateway 无法启动，请安装 Go 或把 go 加入 PATH。" >&2
+else
+  if lsof -nP -iTCP:8088 -sTCP:LISTEN >/dev/null 2>&1; then
+    echo "[start-dev] 警告：:8088 已被占用，跳过启动新 gateway；若这不是本脚本拉起的进程，请先释放端口。" >&2
+    lsof -nP -iTCP:8088 -sTCP:LISTEN >&2 || true
+  else
+    echo "[start-dev] booting gateway (:8088) ..."
+    (
+      cd "$ENTERPRISE_DIR/apps/gateway"
+      exec env -u HTTP_PROXY -u HTTPS_PROXY -u ALL_PROXY go run ./cmd/gateway
+    ) &
+    PIDS+=("$!")
+  fi
+fi
 
 if ! wait_for_http "gateway" "${GATEWAY_BASE_URL:-http://127.0.0.1:8088}/healthz" 45; then
   echo "[start-dev] 警告：gateway 未在 45s 内就绪，前台聊天会报 Gateway request failed。" >&2
-  echo "[start-dev] 请检查上方 gateway 日志（常见：admin internal 401 / 上游模型配置）。" >&2
+  echo "[start-dev] 请检查上方 gateway 日志（常见：admin internal 401 / 端口占用 / go 不在 PATH）。" >&2
+  echo "[start-dev] 手动探活：curl --noproxy '*' http://127.0.0.1:8088/healthz" >&2
 fi
 
 echo
