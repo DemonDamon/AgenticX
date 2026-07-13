@@ -29,6 +29,7 @@ import {
   chatUrlTransform,
   normalizeChatMarkdownContent,
 } from "./markdown-components";
+import { maskSecretsForDisplay } from "../../utils/secret-mask";
 
 const SKILL_PREFIX = "@skill://";
 
@@ -150,7 +151,7 @@ export function renderUserMessageInlineBody(
         components={userInlineMarkdownComponents}
         urlTransform={chatUrlTransform}
       >
-        {normalizeChatMarkdownContent(raw)}
+        {normalizeChatMarkdownContent(maskSecretsForDisplay(raw))}
       </ReactMarkdown>
     );
   };
