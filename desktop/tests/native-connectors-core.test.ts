@@ -249,6 +249,32 @@ describe("parseFeishuAuthStatus", () => {
     });
   });
 
+  it("recognizes nested identities.user from current lark-cli auth status", () => {
+    expect(
+      parseFeishuAuthStatus(
+        JSON.stringify({
+          appId: "cli_aac4d20e6e78dcb1",
+          brand: "feishu",
+          identity: "user",
+          identities: {
+            bot: { status: "ready", available: true },
+            user: {
+              status: "ready",
+              available: true,
+              userName: "库洛洛",
+              tokenStatus: "valid",
+            },
+          },
+        }),
+      ),
+    ).toEqual({
+      configured: true,
+      connected: true,
+      account: "库洛洛",
+      label: "已连接",
+    });
+  });
+
   it("recognizes configured but not logged-in bot identity", () => {
     expect(
       parseFeishuAuthStatus(

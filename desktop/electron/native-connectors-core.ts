@@ -168,11 +168,39 @@ export function parseFeishuAuthStatus(output: string): FeishuAuthStatus {
   }
   const appId = typeof json.appId === "string" ? json.appId : undefined;
   const configured = Boolean(appId);
-  if (json.identity === "user" && typeof json.userName === "string") {
+
+  // lark-cli ≥1.0.x puts userName under identities.user; older samples may put it top-level.
+  const identities =
+    json.identities && typeof json.identities === "object" && !Array.isArray(json.identities)
+      ? (json.identities as Record<string, unknown>)
+      : null;
+  const userIdentity =
+    identities?.user && typeof identities.user === "object" && !Array.isArray(identities.user)
+      ? (identities.user as Record<string, unknown>)
+      : null;
+  const nestedName = typeof userIdentity?.userName === "string" ? userIdentity.userName : undefined;
+  const topLevelName = typeof json.userName === "string" ? json.userName : undefined;
+  const account = nestedName || topLevelName;
+  const userReady =
+    json.identity === "user" ||
+    userIdentity?.status === "ready" ||
+    userIdentity?.tokenStatus === "valid" ||
+    userIdentity?.available === true;
+
+  if (userReady && account) {
     return {
       configured,
       connected: true,
-      account: json.userName,
+      account,
+      label: "已连接",
+    };
+  }
+  // identity=user but name missing still counts as connected (status probe after login).
+  if (json.identity === "user" && configured) {
+    return {
+      configured,
+      connected: true,
+      account,
       label: "已连接",
     };
   }
