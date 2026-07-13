@@ -39,7 +39,7 @@ export type ConnectorDefinition = {
  *   extracted from `@iconify-json/logos` (same package OpenConnector web console uses).
  * - 腾讯会议: official favicon from meeting.tencent.com (via Google s2 favicons).
  * - TAPD: official wordmark SVG from static-open.tapd.cn.
- * - 飞书: brand-style mark for the native lark-cli connector.
+ * - 飞书: official bird mark (teal/blue), same brand asset used by connector catalogs.
  */
 export const CONNECTORS: ConnectorDefinition[] = [
   {
