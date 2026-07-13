@@ -4,9 +4,12 @@ import {
   buildTapdMcpEntry,
   assertManagedSkillDirectory,
   extractAuthorizationUrl,
+  extractGithubDeviceCode,
+  extractGithubDeviceUrl,
   isTapdValidationSuccess,
   mergeTapdMcpDocument,
   nativeConnectorAvailability,
+  parseGithubAuthStatus,
   parseTmeetAuthStatus,
   readBodyWithLimit,
   resolveConnectedConnectorIds,
@@ -152,13 +155,62 @@ describe("resolveConnectedConnectorIds", () => {
   it("returns no connector for unrelated MCP services", () => {
     expect(resolveConnectedConnectorIds(false, [{ name: "github", connected: true }])).toEqual([]);
   });
+
+  it("includes github when the native github connector is connected", () => {
+    expect(resolveConnectedConnectorIds(false, [], true)).toEqual(["github"]);
+  });
 });
 
 describe("nativeConnectorAvailability", () => {
   it("marks only implemented MVP connectors as available", () => {
     expect(nativeConnectorAvailability("tencent-meeting")).toBe("available");
     expect(nativeConnectorAvailability("tapd")).toBe("available");
-    expect(nativeConnectorAvailability("github")).toBe("unavailable");
+    expect(nativeConnectorAvailability("github")).toBe("available");
     expect(nativeConnectorAvailability("notion")).toBe("unavailable");
+  });
+});
+
+describe("parseGithubAuthStatus", () => {
+  it("recognizes an authenticated CLI status", () => {
+    expect(
+      parseGithubAuthStatus("✓ Logged in to github.com account DemonDamon (keyring)"),
+    ).toEqual({
+      connected: true,
+      account: "DemonDamon",
+      label: "已连接",
+    });
+  });
+
+  it("recognizes an unauthenticated CLI status", () => {
+    expect(parseGithubAuthStatus("You are not logged into any GitHub hosts.")).toEqual({
+      connected: false,
+      label: "可用",
+    });
+  });
+
+  it("treats unknown output as an error", () => {
+    expect(parseGithubAuthStatus("garbage")).toEqual({
+      connected: false,
+      label: "状态异常",
+      error: "无法识别 GitHub 登录状态",
+    });
+  });
+});
+
+describe("extractGithubDeviceCode", () => {
+  it("extracts a one-time device code", () => {
+    expect(extractGithubDeviceCode("! First copy your one-time code: 6C41-A1BC")).toBe("6C41-A1BC");
+  });
+});
+
+describe("extractGithubDeviceUrl", () => {
+  it("extracts the official GitHub device verification URL", () => {
+    expect(extractGithubDeviceUrl("Open https://github.com/login/device in your browser")).toBe(
+      "https://github.com/login/device",
+    );
+  });
+
+  it("rejects non-GitHub device URLs", () => {
+    expect(extractGithubDeviceUrl("https://evil.com/login/device")).toBeNull();
   });
 });

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { ChevronRight, ExternalLink, Loader2, Plus } from "lucide-react";
+import { ChevronRight, Copy, ExternalLink, Loader2, Plus } from "lucide-react";
 import { Modal } from "../../ds/Modal";
 import { Toast } from "../../ds/Toast";
 import { SettingsSwitch } from "../SettingsSwitch";
@@ -17,6 +17,14 @@ type TmeetStatus = {
   connected: boolean;
   label: string;
   error?: string;
+};
+
+type GithubStatus = {
+  available: boolean;
+  connected: boolean;
+  label: string;
+  error?: string;
+  account?: string;
 };
 
 /** Compact status used inside connect/manage dialogs (not the marketplace card). */
@@ -75,6 +83,14 @@ export function ConnectorsTab({ sessionId, tapdConnected, onRefreshMcp }: Props)
   });
   const [tmeetBusy, setTmeetBusy] = useState(false);
   const [tmeetPhase, setTmeetPhase] = useState("");
+  const [githubStatus, setGithubStatus] = useState<GithubStatus>({
+    available: true,
+    connected: false,
+    label: "可用",
+  });
+  const [githubBusy, setGithubBusy] = useState(false);
+  const [githubPhase, setGithubPhase] = useState("");
+  const [githubDeviceCode, setGithubDeviceCode] = useState("");
   const [tapdToken, setTapdToken] = useState("");
   const [tapdBusy, setTapdBusy] = useState(false);
   const [dialogError, setDialogError] = useState("");
@@ -91,16 +107,32 @@ export function ConnectorsTab({ sessionId, tapdConnected, onRefreshMcp }: Props)
           ? tmeetStatus.connected
           : item.id === "tapd"
             ? tapdConnected
-            : false;
+            : item.id === "github"
+              ? githubStatus.connected
+              : false;
       const available =
         item.id === "tencent-meeting"
           ? tmeetStatus.available
           : nativeConnectorAvailability(item.id) === "available";
       const busy =
-        item.id === "tencent-meeting" ? tmeetBusy : item.id === "tapd" ? tapdBusy : false;
+        item.id === "tencent-meeting"
+          ? tmeetBusy
+          : item.id === "tapd"
+            ? tapdBusy
+            : item.id === "github"
+              ? githubBusy
+              : false;
       return { available, connected, busy };
     },
-    [tapdBusy, tapdConnected, tmeetBusy, tmeetStatus.available, tmeetStatus.connected],
+    [
+      githubBusy,
+      githubStatus.connected,
+      tapdBusy,
+      tapdConnected,
+      tmeetBusy,
+      tmeetStatus.available,
+      tmeetStatus.connected,
+    ],
   );
 
   const visibleConnectors = useMemo(
@@ -133,6 +165,17 @@ export function ConnectorsTab({ sessionId, tapdConnected, onRefreshMcp }: Props)
     });
   }, []);
 
+  const refreshGithubStatus = useCallback(async () => {
+    const result = await window.agenticxDesktop.nativeConnectorStatus("github");
+    setGithubStatus({
+      available: result.available,
+      connected: result.connected,
+      label: result.label,
+      error: result.error,
+      account: result.account,
+    });
+  }, []);
+
   useEffect(() => {
     void refreshTmeetStatus();
     return window.agenticxDesktop.onNativeConnectorTmeetProgress(({ phase }) => {
@@ -148,10 +191,32 @@ export function ConnectorsTab({ sessionId, tapdConnected, onRefreshMcp }: Props)
     });
   }, [refreshTmeetStatus]);
 
+  useEffect(() => {
+    void refreshGithubStatus();
+    return window.agenticxDesktop.onNativeConnectorGithubProgress(({ phase, oneTimeCode }) => {
+      const labels: Record<string, string> = {
+        installing: "首次使用，正在下载 GitHub CLI…",
+        code_ready: "已生成一次性授权码，请在浏览器中粘贴",
+        opening_browser: "正在打开 GitHub 授权页面…",
+        waiting: "等待你在浏览器中完成授权…",
+        success: "授权成功",
+        disconnected: "已断开连接",
+        error: "授权未完成",
+      };
+      if (oneTimeCode) setGithubDeviceCode(oneTimeCode);
+      if (labels[phase]) setGithubPhase(labels[phase]);
+      if (phase === "success" || phase === "disconnected" || phase === "error") {
+        void refreshGithubStatus();
+      }
+    });
+  }, [refreshGithubStatus]);
+
   const openConnector = (item: ConnectorDefinition) => {
     if (nativeConnectorAvailability(item.id) !== "available") return;
     setDialogError("");
     setTmeetPhase("");
+    setGithubPhase("");
+    setGithubDeviceCode("");
     setSelectedId(item.id);
   };
 
@@ -197,6 +262,74 @@ export function ConnectorsTab({ sessionId, tapdConnected, onRefreshMcp }: Props)
       setSelectedId(null);
     } finally {
       setTmeetBusy(false);
+    }
+  };
+
+  const handleGithubConnect = async () => {
+    setGithubBusy(true);
+    setDialogError("");
+    setGithubDeviceCode("");
+    setGithubPhase("准备 GitHub 浏览器授权…");
+    try {
+      const result = await window.agenticxDesktop.nativeConnectorGithubLogin();
+      setGithubStatus({
+        available: result.available,
+        connected: result.connected,
+        label: result.label,
+        error: result.error,
+        account: result.account,
+      });
+      if (result.error === "已取消") {
+        setGithubPhase("");
+        setGithubDeviceCode("");
+        return;
+      }
+      if (!result.ok || !result.connected) {
+        setDialogError(result.error || "GitHub 授权未完成");
+        return;
+      }
+      showToast("GitHub 已连接");
+      setSelectedId(null);
+    } finally {
+      setGithubBusy(false);
+    }
+  };
+
+  const handleGithubCancel = async () => {
+    if (githubBusy) {
+      try {
+        await window.agenticxDesktop.nativeConnectorGithubCancel();
+      } catch {
+        // best-effort cancel
+      }
+    }
+    setGithubBusy(false);
+    setGithubPhase("");
+    setGithubDeviceCode("");
+    setDialogError("");
+    setSelectedId(null);
+  };
+
+  const handleGithubLogout = async () => {
+    setGithubBusy(true);
+    setDialogError("");
+    try {
+      const result = await window.agenticxDesktop.nativeConnectorGithubLogout();
+      setGithubStatus({
+        available: result.available,
+        connected: result.connected,
+        label: result.label,
+        error: result.error,
+        account: result.account,
+      });
+      if (!result.ok) {
+        setDialogError(result.error || "GitHub 断开失败");
+        return;
+      }
+      showToast("已断开 GitHub");
+      setSelectedId(null);
+    } finally {
+      setGithubBusy(false);
     }
   };
 
@@ -377,6 +510,91 @@ export function ConnectorsTab({ sessionId, tapdConnected, onRefreshMcp }: Props)
             {dialogError || tmeetStatus.error ? (
               <div className="rounded-lg border border-rose-500/35 bg-rose-500/10 px-3 py-2 text-xs text-rose-300">
                 {dialogError || tmeetStatus.error}
+              </div>
+            ) : null}
+          </div>
+        ) : null}
+      </Modal>
+
+      <Modal
+        open={selected?.id === "github"}
+        title="GitHub 连接器"
+        onClose={() => void handleGithubCancel()}
+        panelClassName="w-[min(560px,94vw)] bg-surface-panel"
+        footer={
+          <div className="flex justify-end gap-2">
+            <button
+              type="button"
+              className="rounded-md border border-border px-3 py-2 text-xs text-text-muted hover:bg-surface-hover"
+              onClick={() => void handleGithubCancel()}
+            >
+              取消
+            </button>
+            <button
+              type="button"
+              className="rounded-md bg-btnPrimary px-4 py-2 text-xs font-medium text-btnPrimary-text hover:bg-btnPrimary-hover disabled:opacity-50"
+              disabled={githubBusy}
+              onClick={() => void (githubStatus.connected ? handleGithubLogout() : handleGithubConnect())}
+            >
+              {githubBusy ? "处理中…" : githubStatus.connected ? "断开连接" : "连接 GitHub"}
+            </button>
+          </div>
+        }
+      >
+        {selected ? (
+          <div className="space-y-4">
+            <div className="flex items-center gap-3">
+              <ConnectorIcon item={selected} large />
+              <div>
+                <div className="text-base font-semibold text-text-strong">GitHub</div>
+                <StatusLabel
+                  available={githubStatus.available}
+                  connected={githubStatus.connected}
+                  busy={githubBusy}
+                />
+                {githubStatus.connected && githubStatus.account ? (
+                  <div className="mt-1 text-xs text-text-muted">账号：{githubStatus.account}</div>
+                ) : null}
+              </div>
+            </div>
+            <p className="text-sm leading-relaxed text-text-muted">
+              使用 GitHub 官方 CLI（gh）完成浏览器 Device Flow 授权。连接后 Near
+              会写入托管技能，Agent 可通过 gh 查询与管理仓库、Issue 与 Pull Request。凭证由 gh
+              在本机保存，Near 不会读取你的 GitHub 密码。
+            </p>
+            {githubDeviceCode ? (
+              <div className="rounded-lg border border-border bg-surface-card px-4 py-3">
+                <div className="text-[11px] text-text-muted">一次性授权码</div>
+                <div className="mt-1 flex items-center gap-2">
+                  <code className="text-2xl font-semibold tracking-widest text-text-strong">
+                    {githubDeviceCode}
+                  </code>
+                  <button
+                    type="button"
+                    className="inline-flex items-center gap-1 rounded-md border border-border px-2 py-1 text-[11px] text-text-muted hover:bg-surface-hover hover:text-text-strong"
+                    onClick={() => void navigator.clipboard.writeText(githubDeviceCode)}
+                  >
+                    <Copy className="h-3.5 w-3.5" aria-hidden />
+                    复制
+                  </button>
+                </div>
+                <p className="mt-2 text-xs text-text-muted">
+                  浏览器已打开 github.com/login/device，请粘贴此码并授权。
+                </p>
+              </div>
+            ) : null}
+            {githubPhase ? (
+              <div
+                className="flex items-center gap-2 rounded-lg border border-border bg-surface-card px-3 py-2 text-xs text-text-muted"
+                role="status"
+              >
+                {githubBusy ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
+                {githubPhase}
+              </div>
+            ) : null}
+            {dialogError || githubStatus.error ? (
+              <div className="rounded-lg border border-rose-500/35 bg-rose-500/10 px-3 py-2 text-xs text-rose-300">
+                {dialogError || githubStatus.error}
               </div>
             ) : null}
           </div>

@@ -511,6 +511,12 @@ contextBridge.exposeInMainWorld("agenticxDesktop", {
     ipcRenderer.invoke("native-connector-tmeet-login"),
   nativeConnectorTmeetLogout: async () =>
     ipcRenderer.invoke("native-connector-tmeet-logout"),
+  nativeConnectorGithubLogin: async () =>
+    ipcRenderer.invoke("native-connector-github-login"),
+  nativeConnectorGithubLogout: async () =>
+    ipcRenderer.invoke("native-connector-github-logout"),
+  nativeConnectorGithubCancel: async () =>
+    ipcRenderer.invoke("native-connector-github-cancel"),
   nativeConnectorTapdConfigure: async (payload: { sessionId: string; accessToken: string }) =>
     ipcRenderer.invoke("native-connector-tapd-configure", payload),
   onNativeConnectorTmeetProgress: (
@@ -526,6 +532,36 @@ contextBridge.exposeInMainWorld("agenticxDesktop", {
     ) => callback(payload);
     ipcRenderer.on("native-connector-tmeet-progress", handler);
     return () => ipcRenderer.removeListener("native-connector-tmeet-progress", handler);
+  },
+  onNativeConnectorGithubProgress: (
+    callback: (payload: {
+      phase:
+        | "installing"
+        | "code_ready"
+        | "opening_browser"
+        | "waiting"
+        | "success"
+        | "disconnected"
+        | "error";
+      oneTimeCode?: string;
+    }) => void,
+  ): (() => void) => {
+    const handler = (
+      _event: Electron.IpcRendererEvent,
+      payload: {
+        phase:
+          | "installing"
+          | "code_ready"
+          | "opening_browser"
+          | "waiting"
+          | "success"
+          | "disconnected"
+          | "error";
+        oneTimeCode?: string;
+      },
+    ) => callback(payload);
+    ipcRenderer.on("native-connector-github-progress", handler);
+    return () => ipcRenderer.removeListener("native-connector-github-progress", handler);
   },
   resolveLocalPath: async (path: string) => ipcRenderer.invoke("resolve-local-path", path),
   shellOpenPath: async (path: string) => ipcRenderer.invoke("shell-open-path", path),

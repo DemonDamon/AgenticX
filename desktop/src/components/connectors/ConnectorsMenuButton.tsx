@@ -17,7 +17,7 @@ type Props = {
   sessionId?: string;
 };
 
-type NativeId = "tencent-meeting" | "tapd";
+type NativeId = "tencent-meeting" | "tapd" | "github";
 
 /**
  * Persistent「连接器」entry in the composer toolbar (replaces the previous
@@ -32,6 +32,7 @@ export function ConnectorsMenuButton({ sessionId }: Props) {
   const openSettings = useAppStore((state) => state.openSettings);
   const effectiveSessionId = (sessionId || globalSessionId || "").trim();
   const [tmeetConnected, setTmeetConnected] = useState(false);
+  const [githubConnected, setGithubConnected] = useState(false);
   const [open, setOpen] = useState(false);
   const [dropdownPos, setDropdownPos] = useState<{ bottom: number; left: number } | null>(null);
   const [pendingId, setPendingId] = useState<NativeId | null>(null);
@@ -54,6 +55,15 @@ export function ConnectorsMenuButton({ sessionId }: Props) {
       setTmeetConnected(result.connected);
     } catch {
       setTmeetConnected(false);
+    }
+  }, []);
+
+  const refreshGithub = useCallback(async () => {
+    try {
+      const result = await window.agenticxDesktop.nativeConnectorStatus("github");
+      setGithubConnected(result.connected);
+    } catch {
+      setGithubConnected(false);
     }
   }, []);
 
@@ -101,14 +111,23 @@ export function ConnectorsMenuButton({ sessionId }: Props) {
     });
   }, [refreshTmeet]);
 
+  useEffect(() => {
+    void refreshGithub();
+    return window.agenticxDesktop.onNativeConnectorGithubProgress(({ phase }) => {
+      if (phase === "success" || phase === "disconnected" || phase === "error") {
+        void refreshGithub();
+      }
+    });
+  }, [refreshGithub]);
+
   const tapdConnected = useMemo(
     () => mcpServers.some((server) => server.name === "tapd" && server.connected),
     [mcpServers],
   );
 
   const connectedIds = useMemo(
-    () => resolveConnectedConnectorIds(tmeetConnected, mcpServers),
-    [mcpServers, tmeetConnected],
+    () => resolveConnectedConnectorIds(tmeetConnected, mcpServers, githubConnected),
+    [githubConnected, mcpServers, tmeetConnected],
   );
 
   const connectedLabel = useMemo(
@@ -123,9 +142,10 @@ export function ConnectorsMenuButton({ sessionId }: Props) {
     (id: ConnectorId) => {
       if (id === "tencent-meeting") return tmeetConnected;
       if (id === "tapd") return tapdConnected;
+      if (id === "github") return githubConnected;
       return false;
     },
-    [tapdConnected, tmeetConnected],
+    [githubConnected, tapdConnected, tmeetConnected],
   );
 
   /** WorkBuddy popup: only truly connected connectors. */
@@ -205,6 +225,16 @@ export function ConnectorsMenuButton({ sessionId }: Props) {
     }
   };
 
+  const disconnectGithub = async () => {
+    setPendingId("github");
+    try {
+      await window.agenticxDesktop.nativeConnectorGithubLogout();
+      await refreshGithub();
+    } finally {
+      setPendingId(null);
+    }
+  };
+
   const handleTapdConnect = async () => {
     if (!tapdToken.trim()) {
       setTapdError("请填写 TAPD Personal Access Token");
@@ -252,13 +282,29 @@ export function ConnectorsMenuButton({ sessionId }: Props) {
       setTapdModalOpen(true);
       return;
     }
+    if (id === "github") {
+      // Device Flow needs a one-time code UI — open Settings connectors page.
+      goToSettings();
+      return;
+    }
     showToast("该连接器暂未开放");
   };
 
   const handleToggle = (id: NativeId, next: boolean) => {
     if (pendingId) return;
     if (!next) {
-      void (id === "tencent-meeting" ? disconnectTencentMeeting() : disconnectTapd());
+      if (id === "tencent-meeting") {
+        void disconnectTencentMeeting();
+        return;
+      }
+      if (id === "tapd") {
+        void disconnectTapd();
+        return;
+      }
+      if (id === "github") {
+        void disconnectGithub();
+        return;
+      }
       return;
     }
     // Toggle ON while disconnected — start connect flow (WorkBuddy-style).

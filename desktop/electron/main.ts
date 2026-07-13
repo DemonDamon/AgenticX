@@ -67,8 +67,11 @@ import {
   assertManagedSkillDirectory,
   buildTapdMcpEntry,
   extractAuthorizationUrl,
+  extractGithubDeviceCode,
+  extractGithubDeviceUrl,
   isTapdValidationSuccess,
   mergeTapdMcpDocument,
+  parseGithubAuthStatus,
   parseTmeetAuthStatus,
   readBodyWithLimit,
 } from "./native-connectors-core";
@@ -1780,6 +1783,17 @@ let tmeetBinaryValidationCache: {
   mtimeMs: number;
   valid: boolean;
 } | null = null;
+let githubAuthProcess: ChildProcess | null = null;
+let githubAuthBusy = false;
+let githubInstallPromise: Promise<string> | null = null;
+/** Active Device Flow canceller — closes login promise and kills gh process. */
+let cancelActiveGithubLogin: ((reason?: string) => void) | null = null;
+let githubBinaryValidationCache: {
+  path: string;
+  size: number;
+  mtimeMs: number;
+  valid: boolean;
+} | null = null;
 let isQuitting = false;
 let serveStdoutBuffer = "";
 let serveStderrBuffer = "";
@@ -2855,6 +2869,7 @@ type NativeConnectorStatusResult = {
   connected: boolean;
   label: string;
   error?: string;
+  account?: string;
 };
 
 const TMEET_PACKAGE_VERSION = "1.0.11";
@@ -3311,6 +3326,627 @@ function startTmeetLogin(): Promise<NativeConnectorStatusResult> {
         error: error instanceof Error ? error.message : String(error),
       });
     });
+  });
+}
+
+const GH_CLI_VERSION = "2.63.2";
+const GH_RELEASE_BASE = `https://github.com/cli/cli/releases/download/v${GH_CLI_VERSION}`;
+const GH_ARCHIVE_MAX_BYTES = 40 * 1024 * 1024;
+
+function persistGithubConnectorStatus(connected: boolean): void {
+  const parentDir = path.dirname(NATIVE_CONNECTOR_STATUS_PATH);
+  fs.mkdirSync(parentDir, { recursive: true, mode: 0o700 });
+  if (
+    fs.existsSync(NATIVE_CONNECTOR_STATUS_PATH) &&
+    fs.lstatSync(NATIVE_CONNECTOR_STATUS_PATH).isSymbolicLink()
+  ) {
+    throw new Error("原生连接器状态文件不能是符号链接");
+  }
+  let current: Record<string, unknown> = {};
+  try {
+    const parsed = JSON.parse(fs.readFileSync(NATIVE_CONNECTOR_STATUS_PATH, "utf8"));
+    if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+      current = parsed as Record<string, unknown>;
+    }
+  } catch {
+    current = {};
+  }
+  const connectors =
+    current.connectors &&
+    typeof current.connectors === "object" &&
+    !Array.isArray(current.connectors)
+      ? (current.connectors as Record<string, unknown>)
+      : {};
+  const next = {
+    ...current,
+    version: 1,
+    connectors: {
+      ...connectors,
+      github: {
+        connected,
+        capability: "skill",
+        skill_name: "github",
+        updated_at: new Date().toISOString(),
+      },
+    },
+  };
+  const tempPath = `${NATIVE_CONNECTOR_STATUS_PATH}.${process.pid}.tmp`;
+  fs.writeFileSync(tempPath, `${JSON.stringify(next, null, 2)}\n`, {
+    encoding: "utf8",
+    mode: 0o600,
+  });
+  fs.renameSync(tempPath, NATIVE_CONNECTOR_STATUS_PATH);
+}
+
+function tryPersistGithubConnectorStatus(connected: boolean): void {
+  try {
+    persistGithubConnectorStatus(connected);
+  } catch (error) {
+    console.warn("[native-connectors] failed to persist GitHub status:", String(error));
+  }
+}
+
+function resolveSystemGhPath(): string | null {
+  const candidates: string[] = [];
+  if (process.platform === "win32") {
+    candidates.push(path.join("C:\\Program Files\\GitHub CLI", "gh.exe"));
+  } else {
+    candidates.push("/opt/homebrew/bin/gh", "/usr/local/bin/gh", "/usr/bin/gh");
+  }
+  try {
+    const whichCmd = process.platform === "win32" ? "where" : "which";
+    const found = execFileSync(whichCmd, ["gh"], {
+      encoding: "utf8",
+      timeout: 3000,
+      stdio: ["ignore", "pipe", "ignore"],
+      env: process.env,
+    })
+      .split(/\r?\n/)
+      .map((line) => line.trim())
+      .find(Boolean);
+    if (found) candidates.unshift(found);
+  } catch {
+    // PATH lookup is best-effort
+  }
+  for (const candidate of candidates) {
+    try {
+      if (fs.existsSync(candidate) && fs.statSync(candidate).isFile()) return candidate;
+    } catch {
+      // continue
+    }
+  }
+  return null;
+}
+
+function ghArchiveInfo(): { archiveName: string; binaryMember: string; binaryName: string } {
+  const key = `${process.platform}-${process.arch}`;
+  const ver = GH_CLI_VERSION;
+  const table: Record<string, { archiveName: string; binaryMember: string; binaryName: string }> = {
+    "darwin-arm64": {
+      archiveName: `gh_${ver}_macOS_arm64.zip`,
+      binaryMember: `gh_${ver}_macOS_arm64/bin/gh`,
+      binaryName: "gh",
+    },
+    "darwin-x64": {
+      archiveName: `gh_${ver}_macOS_amd64.zip`,
+      binaryMember: `gh_${ver}_macOS_amd64/bin/gh`,
+      binaryName: "gh",
+    },
+    "linux-x64": {
+      archiveName: `gh_${ver}_linux_amd64.tar.gz`,
+      binaryMember: `gh_${ver}_linux_amd64/bin/gh`,
+      binaryName: "gh",
+    },
+    "linux-arm64": {
+      archiveName: `gh_${ver}_linux_arm64.tar.gz`,
+      binaryMember: `gh_${ver}_linux_arm64/bin/gh`,
+      binaryName: "gh",
+    },
+    "win32-x64": {
+      archiveName: `gh_${ver}_windows_amd64.zip`,
+      binaryMember: "bin/gh.exe",
+      binaryName: "gh.exe",
+    },
+  };
+  const info = table[key];
+  if (!info) throw new Error(`当前平台暂不支持 GitHub 连接器：${key}`);
+  return info;
+}
+
+function ghArchiveSha256(): string {
+  const hashes: Record<string, string> = {
+    [`gh_${GH_CLI_VERSION}_macOS_arm64.zip`]:
+      "0a53c536c8cc7d1c72c75ff836b018bb7f4351dd1c1c87711da4adf6b36824ee",
+    [`gh_${GH_CLI_VERSION}_macOS_amd64.zip`]:
+      "a5f80b98819d753449224288fd089405b19cabd128c1cbc92922fd6b44e5ee5b",
+    [`gh_${GH_CLI_VERSION}_linux_amd64.tar.gz`]:
+      "912fdb1ca29cb005fb746fc5d2b787a289078923a29d0f9ec19a0b00272ded00",
+    [`gh_${GH_CLI_VERSION}_linux_arm64.tar.gz`]:
+      "0f31e2a8549c64b5c1679f0b99ce5e0dac7c91da9e86f6246adb8805b0f0b4bb",
+    [`gh_${GH_CLI_VERSION}_windows_amd64.zip`]:
+      "da7eaeb29cd9251cc477402681efc72ac2283ced94e63a69c1e3bc9aca99eb9b",
+  };
+  const { archiveName } = ghArchiveInfo();
+  const digest = hashes[archiveName];
+  if (!digest) throw new Error(`缺少 GitHub CLI 校验值：${archiveName}`);
+  return digest;
+}
+
+function ghInstallDir(): string {
+  return path.join(os.homedir(), ".agenticx", "connectors", "github", GH_CLI_VERSION);
+}
+
+async function resolveInstalledGhBinaryPath(): Promise<string | null> {
+  const { binaryName } = ghArchiveInfo();
+  const binaryPath = path.join(ghInstallDir(), "bin", binaryName);
+  let stat: fs.Stats;
+  try {
+    stat = await fs.promises.stat(binaryPath);
+  } catch {
+    return null;
+  }
+  if (!stat.isFile()) return null;
+  if (
+    githubBinaryValidationCache?.path === binaryPath &&
+    githubBinaryValidationCache.size === stat.size &&
+    githubBinaryValidationCache.mtimeMs === stat.mtimeMs
+  ) {
+    return githubBinaryValidationCache.valid ? binaryPath : null;
+  }
+  const digest = crypto
+    .createHash("sha256")
+    .update(await fs.promises.readFile(binaryPath))
+    .digest("hex");
+  // Installed binary itself is not in checksums.txt (archive hashes are).
+  // Trust presence after archive-level verification at install time; mark valid if file exists and is executable-sized.
+  const valid = stat.size > 1024 * 100;
+  githubBinaryValidationCache = {
+    path: binaryPath,
+    size: stat.size,
+    mtimeMs: stat.mtimeMs,
+    valid,
+  };
+  void digest;
+  if (!valid) return null;
+  if (process.platform !== "win32") fs.chmodSync(binaryPath, 0o755);
+  return binaryPath;
+}
+
+async function resolveGhBinaryPath(): Promise<string | null> {
+  const systemPath = resolveSystemGhPath();
+  if (systemPath) return systemPath;
+  return await resolveInstalledGhBinaryPath();
+}
+
+async function extractGithubArchive(
+  archivePath: string,
+  partialDir: string,
+  archiveName: string,
+  binaryMember: string,
+): Promise<string> {
+  if (archiveName.endsWith(".tar.gz")) {
+    await extractTar({
+      file: archivePath,
+      cwd: partialDir,
+      filter: (memberPath) => memberPath === binaryMember || memberPath.endsWith("/LICENSE"),
+    });
+  } else if (archiveName.endsWith(".zip")) {
+    if (process.platform === "win32") {
+      await new Promise<void>((resolve, reject) => {
+        execFile(
+          "powershell.exe",
+          [
+            "-NoProfile",
+            "-Command",
+            `Expand-Archive -LiteralPath '${archivePath.replace(/'/g, "''")}' -DestinationPath '${partialDir.replace(/'/g, "''")}' -Force`,
+          ],
+          { timeout: 120000, maxBuffer: 4 * 1024 * 1024 },
+          (error) => {
+            if (error) reject(new Error("解压 GitHub CLI 失败"));
+            else resolve();
+          },
+        );
+      });
+    } else {
+      await new Promise<void>((resolve, reject) => {
+        execFile(
+          "unzip",
+          ["-o", archivePath, "-d", partialDir],
+          { timeout: 120000, maxBuffer: 4 * 1024 * 1024 },
+          (error) => {
+            if (error) reject(new Error("解压 GitHub CLI 失败"));
+            else resolve();
+          },
+        );
+      });
+    }
+  } else {
+    throw new Error(`不支持的 GitHub CLI 归档格式：${archiveName}`);
+  }
+  const extractedBinary = path.join(partialDir, binaryMember);
+  if (!fs.existsSync(extractedBinary)) {
+    throw new Error("GitHub CLI 运行文件提取失败");
+  }
+  return extractedBinary;
+}
+
+async function installGhBinary(): Promise<string> {
+  const installed = await resolveInstalledGhBinaryPath();
+  if (installed) return installed;
+  sendGithubProgress("installing");
+  const { archiveName, binaryMember, binaryName } = ghArchiveInfo();
+  const parentDir = path.dirname(ghInstallDir());
+  fs.mkdirSync(parentDir, { recursive: true, mode: 0o700 });
+  const partialDir = path.join(parentDir, `.partial-${crypto.randomUUID()}`);
+  const archivePath = path.join(parentDir, `.download-${crypto.randomUUID()}-${archiveName}`);
+  try {
+    const response = await proxyAwareFetch(`${GH_RELEASE_BASE}/${archiveName}`, {
+      signal: AbortSignal.timeout(60000),
+    });
+    if (!response.ok) throw new Error(`下载 GitHub CLI 失败：HTTP ${response.status}`);
+    const declaredSize = Number(response.headers.get("content-length") || "0");
+    if (declaredSize > GH_ARCHIVE_MAX_BYTES) throw new Error("GitHub CLI 下载包超过安全限制");
+    const archive = Buffer.from(await readBodyWithLimit(response.body, GH_ARCHIVE_MAX_BYTES));
+    if (archive.length === 0 || archive.length > GH_ARCHIVE_MAX_BYTES) {
+      throw new Error("GitHub CLI 下载包大小异常");
+    }
+    const digest = crypto.createHash("sha256").update(archive).digest("hex");
+    if (digest !== ghArchiveSha256()) throw new Error("GitHub CLI 完整性校验失败");
+    fs.mkdirSync(partialDir, { recursive: true, mode: 0o700 });
+    fs.writeFileSync(archivePath, archive, { mode: 0o600 });
+    const extractedBinary = await extractGithubArchive(
+      archivePath,
+      partialDir,
+      archiveName,
+      binaryMember,
+    );
+    const stat = fs.lstatSync(extractedBinary);
+    if (!stat.isFile() || stat.isSymbolicLink()) throw new Error("GitHub CLI 运行文件无效");
+    if (process.platform !== "win32") fs.chmodSync(extractedBinary, 0o755);
+    const stagedBinDir = path.join(partialDir, "bin");
+    fs.mkdirSync(stagedBinDir, { recursive: true, mode: 0o700 });
+    const stagedBinary = path.join(stagedBinDir, binaryName);
+    if (path.resolve(extractedBinary) !== path.resolve(stagedBinary)) {
+      fs.renameSync(extractedBinary, stagedBinary);
+    }
+    if (fs.existsSync(ghInstallDir())) fs.rmSync(ghInstallDir(), { recursive: true, force: true });
+    fs.renameSync(partialDir, ghInstallDir());
+    const result = await resolveInstalledGhBinaryPath();
+    if (!result) throw new Error("GitHub CLI 安装未完成");
+    return result;
+  } finally {
+    fs.rmSync(archivePath, { force: true });
+    fs.rmSync(partialDir, { recursive: true, force: true });
+  }
+}
+
+async function ensureGhBinaryInstalled(): Promise<string> {
+  const existing = await resolveGhBinaryPath();
+  if (existing) return existing;
+  if (githubInstallPromise) return await githubInstallPromise;
+  githubInstallPromise = installGhBinary().finally(() => {
+    githubInstallPromise = null;
+  });
+  return await githubInstallPromise;
+}
+
+async function runGhCommand(args: string[], timeoutMs = 15000): Promise<string> {
+  const binaryPath = await resolveGhBinaryPath();
+  if (!binaryPath) throw new Error("GitHub CLI 尚未安装");
+  return await new Promise((resolve, reject) => {
+    execFile(
+      binaryPath,
+      args,
+      {
+        timeout: timeoutMs,
+        maxBuffer: 1024 * 1024,
+        env: {
+          ...process.env,
+          NO_COLOR: "1",
+        },
+      },
+      (error, stdout, stderr) => {
+        const output = `${stdout ?? ""}\n${stderr ?? ""}`.trim();
+        // gh auth status returns non-zero when not logged in; still return output for parsing.
+        if (error && !output) {
+          reject(new Error("GitHub CLI 命令执行失败"));
+          return;
+        }
+        resolve(output);
+      },
+    );
+  });
+}
+
+function githubSkillDir(): string {
+  return path.join(os.homedir(), ".agenticx", "skills", "near-connectors", "github");
+}
+
+function ensureGithubSkill(binaryPath: string): void {
+  const skillDir = githubSkillDir();
+  const skillPath = path.join(skillDir, "SKILL.md");
+  const markerPath = path.join(skillDir, ".near-managed");
+  const directoryExists = fs.existsSync(skillDir);
+  const markerExists = fs.existsSync(markerPath);
+  assertManagedSkillDirectory(directoryExists, markerExists);
+  const quotedBinary = binaryPath.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
+  const content = `---
+name: github
+description: 使用 GitHub 官方 CLI (gh) 查询与管理仓库、Issue、Pull Request 与 Actions。
+---
+
+# GitHub
+
+仅在用户要求操作 GitHub 时使用。通过 bash_exec 调用官方 CLI（已在本机登录）：
+
+\`\`\`bash
+"${quotedBinary}" <command> [flags]        # 例：gh issue list、gh pr view、gh repo view
+"${quotedBinary}" api <endpoint>           # 需要原始 API 时
+\`\`\`
+
+读取类命令（list/view/status/search）可直接执行；创建/编辑/合并/删除等写操作（pr create/merge、issue close、release create、repo delete 等）必须先向用户展示参数并确认。不得输出或读取 gh 本地凭证。若提示未登录，引导用户前往「设置 → 连接器 → GitHub」重新连接。
+`;
+  if (!directoryExists) {
+    const parentDir = path.dirname(skillDir);
+    const partialDir = path.join(parentDir, `.github.partial-${crypto.randomUUID()}`);
+    fs.mkdirSync(parentDir, { recursive: true, mode: 0o700 });
+    try {
+      fs.mkdirSync(partialDir, { mode: 0o700 });
+      fs.writeFileSync(path.join(partialDir, "SKILL.md"), content, {
+        encoding: "utf8",
+        mode: 0o600,
+      });
+      fs.writeFileSync(path.join(partialDir, ".near-managed"), "managed by Near\n", {
+        encoding: "utf8",
+        mode: 0o600,
+      });
+      fs.renameSync(partialDir, skillDir);
+    } catch (error) {
+      fs.rmSync(partialDir, { recursive: true, force: true });
+      throw error;
+    }
+    return;
+  }
+  const tempPath = `${skillPath}.tmp`;
+  fs.writeFileSync(tempPath, content, { encoding: "utf8", mode: 0o600 });
+  fs.renameSync(tempPath, skillPath);
+}
+
+function removeGithubSkill(): void {
+  const skillDir = githubSkillDir();
+  const markerPath = path.join(skillDir, ".near-managed");
+  if (!fs.existsSync(markerPath)) return;
+  fs.rmSync(skillDir, { recursive: true, force: true });
+}
+
+async function getGithubStatus(): Promise<NativeConnectorStatusResult> {
+  try {
+    let binaryPath = await resolveGhBinaryPath();
+    const managedSkillMarker = path.join(githubSkillDir(), ".near-managed");
+    if (!binaryPath && fs.existsSync(managedSkillMarker)) {
+      binaryPath = await ensureGhBinaryInstalled();
+    }
+    if (!binaryPath) {
+      tryPersistGithubConnectorStatus(false);
+      return {
+        ok: true,
+        available: true,
+        connected: false,
+        label: "可用",
+      };
+    }
+    const status = parseGithubAuthStatus(
+      await runGhCommand(["auth", "status", "--hostname", "github.com"]),
+    );
+    if (status.connected && binaryPath) {
+      try {
+        ensureGithubSkill(binaryPath);
+      } catch (error) {
+        tryPersistGithubConnectorStatus(false);
+        return {
+          ok: false,
+          available: true,
+          connected: false,
+          label: "连接异常",
+          error: error instanceof Error ? error.message : String(error),
+        };
+      }
+    } else if (!status.connected) {
+      removeGithubSkill();
+    }
+    tryPersistGithubConnectorStatus(status.connected && !status.error);
+    return {
+      ok: !status.error,
+      available: !status.error,
+      connected: status.connected,
+      label: status.label,
+      error: status.error,
+      account: status.account,
+    };
+  } catch (error) {
+    tryPersistGithubConnectorStatus(false);
+    return {
+      ok: false,
+      available: false,
+      connected: false,
+      label: "暂不可用",
+      error: error instanceof Error ? error.message : String(error),
+    };
+  }
+}
+
+function sendGithubProgress(
+  phase: "installing" | "code_ready" | "opening_browser" | "waiting" | "success" | "disconnected" | "error",
+  extra?: { oneTimeCode?: string },
+): void {
+  if (!mainWindow || mainWindow.isDestroyed()) return;
+  mainWindow.webContents.send("native-connector-github-progress", {
+    phase,
+    ...(extra?.oneTimeCode ? { oneTimeCode: extra.oneTimeCode } : {}),
+  });
+}
+
+function startGithubLogin(): Promise<NativeConnectorStatusResult> {
+  if (githubAuthBusy) {
+    return Promise.resolve({
+      ok: false,
+      available: true,
+      connected: false,
+      label: "连接中",
+      error: "GitHub 正在等待浏览器授权",
+    });
+  }
+  githubAuthBusy = true;
+  return new Promise((resolve) => {
+    let opened = false;
+    let codeSent = false;
+    let output = "";
+    let settled = false;
+    let proc: ChildProcess | null = null;
+    let timeout: ReturnType<typeof setTimeout> | null = null;
+    const finish = async (result?: NativeConnectorStatusResult, terminate = false) => {
+      if (settled) return;
+      settled = true;
+      cancelActiveGithubLogin = null;
+      if (timeout) clearTimeout(timeout);
+      const currentProc = proc;
+      if (terminate && currentProc && currentProc.exitCode === null) {
+        await new Promise<void>((done) => {
+          const fallback = setTimeout(done, 2000);
+          currentProc.once("close", () => {
+            clearTimeout(fallback);
+            done();
+          });
+          try {
+            currentProc.kill("SIGTERM");
+          } catch {
+            done();
+          }
+        });
+      }
+      if (proc && githubAuthProcess === proc) githubAuthProcess = null;
+      githubAuthBusy = false;
+      const status = result ?? (await getGithubStatus());
+      if (status.error === "已取消") {
+        sendGithubProgress("disconnected");
+      } else {
+        sendGithubProgress(status.connected ? "success" : "error");
+      }
+      resolve(status);
+    };
+    cancelActiveGithubLogin = (reason) => {
+      void finish(
+        {
+          ok: false,
+          available: true,
+          connected: false,
+          label: "可用",
+          error: reason || "已取消",
+        },
+        true,
+      );
+    };
+    const consume = (chunk: Buffer) => {
+      output = `${output}${chunk.toString("utf8")}`.slice(-32768);
+      if (/Press Enter to open/i.test(output) && proc?.stdin && !proc.stdin.destroyed) {
+        try {
+          proc.stdin.write("\n");
+        } catch {
+          // ignore
+        }
+      }
+      const oneTimeCode = extractGithubDeviceCode(output);
+      if (!codeSent && oneTimeCode) {
+        codeSent = true;
+        sendGithubProgress("code_ready", { oneTimeCode });
+      }
+      const deviceUrl = extractGithubDeviceUrl(output);
+      if (!opened && deviceUrl) {
+        opened = true;
+        sendGithubProgress("opening_browser");
+        void shell
+          .openExternal(deviceUrl)
+          .then(() => sendGithubProgress("waiting"))
+          .catch(() =>
+            finish(
+              {
+                ok: false,
+                available: true,
+                connected: false,
+                label: "连接失败",
+                error: "无法打开 GitHub 授权页面",
+              },
+              true,
+            ),
+          );
+      }
+    };
+    void ensureGhBinaryInstalled()
+      .then((binaryPath) => {
+        proc = spawn(
+          binaryPath,
+          ["auth", "login", "--hostname", "github.com", "--git-protocol", "https", "--web"],
+          {
+            stdio: ["pipe", "pipe", "pipe"],
+            env: {
+              ...process.env,
+              NO_COLOR: "1",
+              // Prefer Near-controlled browser open when gh respects BROWSER.
+              BROWSER: process.platform === "win32" ? "echo" : "/bin/true",
+              GH_PROMPT: "disabled",
+            },
+          },
+        );
+        githubAuthProcess = proc;
+        timeout = setTimeout(() => {
+          void finish(
+            {
+              ok: false,
+              available: true,
+              connected: false,
+              label: "连接超时",
+              error: "浏览器授权已超时，请重试",
+            },
+            true,
+          );
+        }, 5 * 60 * 1000);
+        proc.stdout?.on("data", consume);
+        proc.stderr?.on("data", consume);
+        proc.on("error", () => {
+          void finish(
+            {
+              ok: false,
+              available: true,
+              connected: false,
+              label: "连接失败",
+              error: "无法启动 GitHub 授权",
+            },
+            true,
+          );
+        });
+        proc.on("exit", (code) => {
+          if (code === 0) {
+            void finish();
+            return;
+          }
+          void finish({
+            ok: false,
+            available: true,
+            connected: false,
+            label: "连接失败",
+            error: opened || codeSent ? "GitHub 授权未完成或已取消" : "未能获取 GitHub 授权码",
+          });
+        });
+      })
+      .catch((error) => {
+        void finish({
+          ok: false,
+          available: true,
+          connected: false,
+          label: "安装失败",
+          error: error instanceof Error ? error.message : String(error),
+        });
+      });
   });
 }
 
@@ -4562,6 +5198,7 @@ function registerIpc(): void {
   ipcMain.handle("native-connector-status", async (_event, payload: { id?: string }) => {
     const id = String(payload?.id || "").trim();
     if (id === "tencent-meeting") return await getTmeetStatus();
+    if (id === "github") return await getGithubStatus();
     if (id === "tapd") {
       return { ok: true, available: true, connected: false, label: "可用" };
     }
@@ -4598,6 +5235,87 @@ function registerIpc(): void {
       return status;
     } catch (error) {
       const status = await getTmeetStatus();
+      return {
+        ...status,
+        ok: false,
+        error: error instanceof Error ? error.message : String(error),
+      };
+    }
+  });
+
+  ipcMain.handle("native-connector-github-login", async () => {
+    try {
+      return await startGithubLogin();
+    } catch (error) {
+      return {
+        ok: false,
+        available: false,
+        connected: false,
+        label: "连接失败",
+        error: error instanceof Error ? error.message : String(error),
+      };
+    }
+  });
+
+  ipcMain.handle("native-connector-github-cancel", async () => {
+    if (cancelActiveGithubLogin) {
+      cancelActiveGithubLogin("已取消");
+      return { ok: true, available: true, connected: false, label: "可用" };
+    }
+    if (githubAuthProcess && githubAuthProcess.exitCode === null) {
+      try {
+        githubAuthProcess.kill("SIGTERM");
+      } catch {
+        // ignore
+      }
+      githubAuthProcess = null;
+      githubAuthBusy = false;
+    }
+    sendGithubProgress("disconnected");
+    return { ok: true, available: true, connected: false, label: "可用" };
+  });
+
+  ipcMain.handle("native-connector-github-logout", async () => {
+    try {
+      const before = await getGithubStatus();
+      const logoutArgs = ["auth", "logout", "--hostname", "github.com"];
+      if (before.account) logoutArgs.push("--user", before.account);
+      const binaryPath = await resolveGhBinaryPath();
+      if (!binaryPath) throw new Error("GitHub CLI 尚未安装");
+      await new Promise<void>((resolve, reject) => {
+        const proc = spawn(binaryPath, logoutArgs, {
+          stdio: ["pipe", "pipe", "pipe"],
+          env: { ...process.env, NO_COLOR: "1" },
+        });
+        let settled = false;
+        const done = (error?: Error) => {
+          if (settled) return;
+          settled = true;
+          if (error) reject(error);
+          else resolve();
+        };
+        // Some gh versions confirm logout interactively; send newline to accept default.
+        proc.stdin?.write("y\n");
+        proc.stdin?.end();
+        proc.on("error", (error) => done(error));
+        proc.on("exit", (code) => {
+          if (code === 0) done();
+          else done(new Error("GitHub CLI 登出失败"));
+        });
+      });
+      const status = await getGithubStatus();
+      if (!status.ok || status.connected) {
+        return {
+          ...status,
+          ok: false,
+          error: status.error || "GitHub 仍处于登录状态，断开未生效",
+        };
+      }
+      removeGithubSkill();
+      sendGithubProgress("disconnected");
+      return status;
+    } catch (error) {
+      const status = await getGithubStatus();
       return {
         ...status,
         ok: false,

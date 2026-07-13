@@ -6,13 +6,20 @@ export type TmeetAuthStatus = {
   error?: string;
 };
 
+export type GithubAuthStatus = {
+  connected: boolean;
+  account?: string;
+  label: string;
+  error?: string;
+};
+
 export type StdioMcpEntry = {
   command: string;
   args: string[];
   env: Record<string, string>;
 };
 
-const AVAILABLE_CONNECTOR_IDS = new Set(["tencent-meeting", "tapd"]);
+const AVAILABLE_CONNECTOR_IDS = new Set(["tencent-meeting", "tapd", "github"]);
 
 export function nativeConnectorAvailability(connectorId: string): NativeConnectorAvailability {
   return AVAILABLE_CONNECTOR_IDS.has(connectorId) ? "available" : "unavailable";
@@ -38,6 +45,39 @@ export function extractAuthorizationUrl(output: string): string | null {
   try {
     const url = new URL(matches[0]);
     if (url.protocol !== "https:" || url.hostname !== "meeting.tencent.com") return null;
+    return url.toString();
+  } catch {
+    return null;
+  }
+}
+
+export function parseGithubAuthStatus(output: string): GithubAuthStatus {
+  const loggedIn = output.match(/Logged in to [\w.-]+ account\s+([\w-]+)/i);
+  if (loggedIn) {
+    return { connected: true, account: loggedIn[1], label: "已连接" };
+  }
+  if (/not logged in(to| into)? any GitHub|not logged into/i.test(output)) {
+    return { connected: false, label: "可用" };
+  }
+  return {
+    connected: false,
+    label: "状态异常",
+    error: "无法识别 GitHub 登录状态",
+  };
+}
+
+export function extractGithubDeviceCode(output: string): string | null {
+  const match = output.match(/one-time code:\s*([A-Z0-9]{4}-[A-Z0-9]{4})/i);
+  return match ? match[1].toUpperCase() : null;
+}
+
+export function extractGithubDeviceUrl(output: string): string | null {
+  const match = output.match(/https:\/\/github\.com\/login\/device[^\s"'<>]*/i);
+  if (!match) return null;
+  try {
+    const url = new URL(match[0]);
+    if (url.protocol !== "https:" || url.hostname !== "github.com") return null;
+    if (!url.pathname.startsWith("/login/device")) return null;
     return url.toString();
   } catch {
     return null;
@@ -124,11 +164,13 @@ export async function readBodyWithLimit(
 export function resolveConnectedConnectorIds(
   tmeetConnected: boolean,
   mcpServers: Array<{ name: string; connected: boolean }>,
-): Array<"tencent-meeting" | "tapd"> {
-  const ids: Array<"tencent-meeting" | "tapd"> = [];
+  githubConnected = false,
+): Array<"tencent-meeting" | "tapd" | "github"> {
+  const ids: Array<"tencent-meeting" | "tapd" | "github"> = [];
   if (tmeetConnected) ids.push("tencent-meeting");
   if (mcpServers.some((server) => server.name === "tapd" && server.connected)) {
     ids.push("tapd");
   }
+  if (githubConnected) ids.push("github");
   return ids;
 }

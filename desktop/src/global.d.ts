@@ -961,6 +961,7 @@ declare global {
         connected: boolean;
         label: string;
         error?: string;
+        account?: string;
       }>;
       nativeConnectorTmeetLogin: () => Promise<{
         ok: boolean;
@@ -976,6 +977,29 @@ declare global {
         label: string;
         error?: string;
       }>;
+      nativeConnectorGithubLogin: () => Promise<{
+        ok: boolean;
+        available: boolean;
+        connected: boolean;
+        label: string;
+        error?: string;
+        account?: string;
+      }>;
+      nativeConnectorGithubLogout: () => Promise<{
+        ok: boolean;
+        available: boolean;
+        connected: boolean;
+        label: string;
+        error?: string;
+        account?: string;
+      }>;
+      nativeConnectorGithubCancel: () => Promise<{
+        ok: boolean;
+        available: boolean;
+        connected: boolean;
+        label: string;
+        error?: string;
+      }>;
       nativeConnectorTapdConfigure: (payload: {
         sessionId: string;
         accessToken: string;
@@ -983,6 +1007,19 @@ declare global {
       onNativeConnectorTmeetProgress: (
         callback: (payload: {
           phase: "installing" | "opening_browser" | "waiting" | "success" | "disconnected" | "error";
+        }) => void,
+      ) => () => void;
+      onNativeConnectorGithubProgress: (
+        callback: (payload: {
+          phase:
+            | "installing"
+            | "code_ready"
+            | "opening_browser"
+            | "waiting"
+            | "success"
+            | "disconnected"
+            | "error";
+          oneTimeCode?: string;
         }) => void,
       ) => () => void;
       resolveLocalPath: (path: string) => Promise<{
