@@ -377,6 +377,60 @@ STUDIO_TOOLS: List[Dict[str, Any]] = [
     {
         "type": "function",
         "function": {
+            "name": "request_action_confirmation",
+            "description": (
+                "Ask the user to confirm or cancel an irreversible / external write action and BLOCK until they "
+                "decide. Use for sending email, submitting approvals, publishing content, deleting remote "
+                "resources, etc. Do NOT end the turn with plain-text 'please confirm' — call this tool so the UI "
+                "shows equal-width Confirm/Cancel buttons (and typed 确认/取消 still works). The tool result tells "
+                "you whether to proceed in the SAME turn. Do NOT put secrets, OAuth tokens, or confirmation "
+                "tokens in arguments. Permission confirms for shell/file tools still use confirm_required."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "title": {
+                        "type": "string",
+                        "description": "Short confirmation title shown on the card (1-200 chars).",
+                    },
+                    "summary": {
+                        "type": "array",
+                        "description": "0-12 summary rows shown to the user before they confirm.",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "label": {"type": "string"},
+                                "value": {"type": "string"},
+                            },
+                            "required": ["label", "value"],
+                            "additionalProperties": False,
+                        },
+                    },
+                    "approve_label": {
+                        "type": "string",
+                        "description": "Primary button label (default 确认执行, max 20 chars).",
+                    },
+                    "reject_label": {
+                        "type": "string",
+                        "description": "Secondary button label (default 取消, max 20 chars).",
+                    },
+                    "expires_in_seconds": {
+                        "type": "integer",
+                        "description": "TTL for this confirmation (clamped 30-1800). Default 300.",
+                    },
+                    "source": {
+                        "type": "string",
+                        "description": "Optional human-readable source label (e.g. Agent Mail).",
+                    },
+                },
+                "required": ["title"],
+                "additionalProperties": False,
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "bash_exec",
             "description": (
                 "Execute a shell command in the session workspace. Prefer the cwd parameter for the working "
@@ -2342,6 +2396,202 @@ def _normalize_clarification_decisions(raw: Any) -> List[Dict[str, Any]]:
         decision_id = str(item.get("id", "") or "").strip() or f"decision-{idx + 1}"
         out.append({"id": decision_id, "question": question, "options": options})
     return out
+
+
+_ACTION_CONFIRM_MIN_TTL = 30
+_ACTION_CONFIRM_MAX_TTL = 1800
+_ACTION_CONFIRM_DEFAULT_TTL = 300
+
+
+def _clamp_action_confirmation_ttl(raw: Any) -> float:
+    """Clamp expires_in_seconds into the supported action-confirmation window."""
+    try:
+        val = float(raw)
+    except (TypeError, ValueError):
+        val = float(_ACTION_CONFIRM_DEFAULT_TTL)
+    if val <= 0:
+        val = float(_ACTION_CONFIRM_DEFAULT_TTL)
+    return max(float(_ACTION_CONFIRM_MIN_TTL), min(float(_ACTION_CONFIRM_MAX_TTL), val))
+
+
+def _normalize_action_confirmation_summary(raw: Any) -> List[Dict[str, str]]:
+    """Normalize summary rows for the action-confirmation card."""
+    if not isinstance(raw, list):
+        return []
+    out: List[Dict[str, str]] = []
+    for item in raw:
+        if len(out) >= 12:
+            break
+        if not isinstance(item, dict):
+            continue
+        label = str(item.get("label", "") or "").strip()[:40]
+        value = str(item.get("value", "") or "").strip()[:1000]
+        if not label or not value:
+            continue
+        out.append({"label": label, "value": value})
+    return out
+
+
+def build_action_confirmation_tool_result(
+    answer: Dict[str, Any],
+    *,
+    approve_label: str = "确认执行",
+    reject_label: str = "取消",
+) -> str:
+    """Render action-confirmation answers as explicit tool-result guidance."""
+    if isinstance(answer, dict):
+        if answer.get("__timeout__"):
+            return (
+                "[ACTION_CONFIRMATION_EXPIRED] 确认已失效。不得继续该动作，"
+                "若仍需执行必须重新生成预览。"
+            )
+        if answer.get("__suspended__"):
+            return "[ACTION_CONFIRMATION_SUSPENDED] 无人值守会话不能确认外部写操作。"
+
+    answer_text = str((answer or {}).get("answer_text", "") or "").strip()
+    selected = [str(x).strip() for x in list((answer or {}).get("selected_options", []) or []) if str(x).strip()]
+    approve = str(approve_label or "确认执行").strip() or "确认执行"
+    reject = str(reject_label or "取消").strip() or "取消"
+
+    lowered = answer_text.lower()
+    approve_hits = {approve, "确认", "确认发送", "同意", "继续", "yes", "y", "ok"}
+    reject_hits = {reject, "取消", "拒绝", "不用了", "no", "n"}
+
+    if any(opt in approve_hits or opt.lower() in approve_hits for opt in selected):
+        return "[ACTION_CONFIRMED] 用户已确认执行。"
+    if any(opt in reject_hits or opt.lower() in reject_hits for opt in selected):
+        return "[ACTION_REJECTED] 用户已取消执行。不得继续该动作。"
+    if answer_text in approve_hits or lowered in {x.lower() for x in approve_hits if x.isascii()}:
+        return "[ACTION_CONFIRMED] 用户已确认执行。"
+    if answer_text in reject_hits or lowered in {x.lower() for x in reject_hits if x.isascii()}:
+        return "[ACTION_REJECTED] 用户已取消执行。不得继续该动作。"
+
+    # Ambiguous / empty answers must never silently approve an external write.
+    return "[ACTION_REJECTED] 用户未明确确认。不得继续该动作。"
+
+
+async def _request_action_confirmation(
+    title: str,
+    *,
+    summary: Optional[List[Dict[str, Any]]] = None,
+    approve_label: str = "确认执行",
+    reject_label: str = "取消",
+    expires_in_seconds: Any = None,
+    source: str = "",
+    clarify_gate: Optional[ClarifyGate] = None,
+    emit_event: Optional[Any] = None,
+    is_unattended: bool = False,
+    caller_context: Optional[Dict[str, Any]] = None,
+) -> str:
+    """Block for a binary action confirmation via the clarification transport.
+
+    Emits ``clarification_required`` with ``context.kind = action_confirmation``
+    so Desktop can render the dedicated confirm card while still resolving
+    through ``POST /api/clarify``.
+    """
+    title_text = str(title or "").strip()[:200]
+    if not title_text:
+        return (
+            "ERROR: request_action_confirmation requires a non-empty `title`. "
+            "请立即重新调用并填写 title。"
+        )
+
+    approve = str(approve_label or "确认执行").strip()[:20] or "确认执行"
+    reject = str(reject_label or "取消").strip()[:20] or "取消"
+    summary_rows = _normalize_action_confirmation_summary(summary)
+    ttl = _clamp_action_confirmation_ttl(expires_in_seconds)
+    source_text = str(source or "").strip()[:80]
+    request_id = str(uuid.uuid4())
+    expires_at_ms = int((time.time() + ttl) * 1000)
+
+    # Controlled context only — never trust caller-provided kind/secrets.
+    payload_context: Dict[str, Any] = {
+        "kind": "action_confirmation",
+        "request_id": request_id,
+        "title": title_text,
+        "summary": summary_rows,
+        "approve_label": approve,
+        "reject_label": reject,
+        "expires_at_ms": expires_at_ms,
+    }
+    if source_text:
+        payload_context["source"] = source_text
+    # caller_context is intentionally ignored for security (kind/token scrubbing).
+    _ = caller_context
+
+    if is_unattended or isinstance(clarify_gate, AutoSuspendClarifyGate):
+        _log.info(
+            "[action_confirm] suspended id=%s title=%s (unattended)",
+            request_id,
+            title_text[:80],
+        )
+        if emit_event is not None:
+            await emit_event(
+                {
+                    "type": "clarification_suspended",
+                    "data": {
+                        "id": request_id,
+                        "prompt": title_text,
+                        "options": [approve, reject],
+                        "decisions": [],
+                        "allow_free_text": True,
+                        "context": payload_context,
+                    },
+                }
+            )
+        return build_action_confirmation_tool_result({"__suspended__": True})
+
+    gate = clarify_gate or AsyncClarifyGate()
+    emit_prompt = emit_event is not None and isinstance(gate, AsyncClarifyGate)
+    if emit_prompt:
+        await emit_event(
+            {
+                "type": "clarification_required",
+                "data": {
+                    "id": request_id,
+                    "prompt": title_text,
+                    "options": [approve, reject],
+                    "decisions": [],
+                    "allow_free_text": True,
+                    "context": payload_context,
+                },
+            }
+        )
+
+    _log.info("[action_confirm] requested id=%s title=%s ttl=%.1fs", request_id, title_text[:80], ttl)
+    try:
+        answer = await asyncio.wait_for(
+            gate.request_clarification(
+                title_text,
+                options=[approve, reject],
+                allow_free_text=True,
+                context=payload_context,
+            ),
+            timeout=ttl,
+        )
+    except asyncio.TimeoutError:
+        _log.warning("[action_confirm] timed out id=%s after %.1fs", request_id, ttl)
+        # Best-effort: resolve pending future so the gate does not linger.
+        if isinstance(gate, AsyncClarifyGate):
+            gate.resolve(request_id, {"__timeout__": True})
+        answer = {"__timeout__": True}
+
+    _log.info("[action_confirm] resolved id=%s answer=%s", request_id, answer)
+    if emit_prompt:
+        await emit_event(
+            {
+                "type": "clarification_response",
+                "data": {
+                    "id": request_id,
+                    "answer": answer,
+                },
+            }
+        )
+    return build_action_confirmation_tool_result(
+        answer if isinstance(answer, dict) else {},
+        approve_label=approve,
+        reject_label=reject,
+    )
 
 
 async def _request_clarification(
@@ -7213,6 +7463,27 @@ async def dispatch_tool_async(
                 decisions=decisions,
                 allow_free_text=allow_free_text,
                 context=ctx,
+                clarify_gate=clarify_gate,
+                emit_event=event_callback,
+                is_unattended=is_unattended,
+            )
+        if name == "request_action_confirmation":
+            title = str(arguments.get("title", "") or "").strip()
+            if not title:
+                return (
+                    "ERROR: request_action_confirmation requires a non-empty `title`. "
+                    "请立即重新调用并填写 title。"
+                )
+            raw_summary = arguments.get("summary") or []
+            if not isinstance(raw_summary, list):
+                raw_summary = []
+            return await _request_action_confirmation(
+                title,
+                summary=raw_summary,
+                approve_label=str(arguments.get("approve_label", "") or "确认执行"),
+                reject_label=str(arguments.get("reject_label", "") or "取消"),
+                expires_in_seconds=arguments.get("expires_in_seconds"),
+                source=str(arguments.get("source", "") or ""),
                 clarify_gate=clarify_gate,
                 emit_event=event_callback,
                 is_unattended=is_unattended,
