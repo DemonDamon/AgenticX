@@ -7,8 +7,8 @@ import {
   useState,
   type ReactNode,
 } from "react";
-import mermaid from "mermaid";
 import { Copy, Download, Minimize2, Move, ZoomIn, ZoomOut } from "lucide-react";
+import { mermaidThemeFromApp, renderMermaidSvg } from "../../utils/mermaid-render";
 
 const MIN_SCALE = 0.25;
 const MAX_SCALE = 4;
@@ -29,10 +29,6 @@ function useDocumentDataTheme(): string {
     return () => obs.disconnect();
   }, []);
   return theme;
-}
-
-function mermaidThemeFromApp(appTheme: string): "dark" | "default" {
-  return appTheme === "light" ? "default" : "dark";
 }
 
 /**
@@ -232,12 +228,11 @@ export function MermaidBlock({ code }: Props) {
     setSvg(null);
     (async () => {
       try {
-        mermaid.initialize({
-          startOnLoad: false,
-          securityLevel: "strict",
+        const out = await renderMermaidSvg({
+          code: trimmed,
+          id: renderId,
           theme: mermaidThemeFromApp(appTheme),
         });
-        const { svg: out } = await mermaid.render(renderId, trimmed);
         if (!cancelled) setSvg(out);
       } catch {
         if (!cancelled) {

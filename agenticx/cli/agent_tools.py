@@ -1349,10 +1349,12 @@ STUDIO_TOOLS: List[Dict[str, Any]] = [
         "function": {
             "name": "show_widget",
             "description": (
-                "Render an inline SVG/HTML visualization in the chat. REQUIRED whenever you "
+                "Render an inline visualization in the chat. REQUIRED whenever you "
                 "would show a flow, pipeline, sequence, architecture, MitM/proxy path, or any "
                 "A->B->C style diagram — including simple 3-node chains. NEVER substitute "
-                "markdown text/code blocks (```text```, arrow chains, ↓ lines, mermaid source). "
+                "markdown text/code blocks (```text```, arrow chains, ↓ lines). "
+                "For flowcharts, architecture, pipelines, and sequence diagrams: set "
+                "widget_format='mermaid' and pass Mermaid source (no Markdown fence). "
                 "Before calling: output 1-3 sentences of visible intro prose in the same turn "
                 "(not in reasoning/thinking). Then call show_widget, then explain in detail. "
                 "For structured stock/macro charts, widget_code MUST be JSON starting with "
@@ -1369,9 +1371,19 @@ STUDIO_TOOLS: List[Dict[str, Any]] = [
                     "widget_code": {
                         "type": "string",
                         "description": (
-                            "SVG string starting with '<svg' OR an HTML fragment. "
-                            "SVG should use viewBox='0 0 680 H' width='100%' and "
-                            "CSS vars like var(--text-primary), var(--text-muted)."
+                            "Mermaid source (flowchart/sequenceDiagram/...), "
+                            "SVG string starting with '<svg', OR an HTML fragment. "
+                            "Mermaid: no Markdown fence. SVG: viewBox='0 0 680 H' width='100%' "
+                            "and CSS vars like var(--text-primary), var(--text-muted)."
+                        ),
+                    },
+                    "widget_format": {
+                        "type": "string",
+                        "enum": ["svg", "html", "mermaid"],
+                        "description": (
+                            "Explicit widget source format. Use mermaid for flowcharts, "
+                            "architecture, pipelines, and sequence diagrams; svg for custom "
+                            "free-form vector graphics; html for interactive widgets."
                         ),
                     },
                     "loading_messages": {
@@ -5780,6 +5792,16 @@ def _tool_show_widget(arguments: Dict[str, Any]) -> str:
     )
     if not widget_code.strip():
         return "ERROR: show_widget requires non-empty widget_code."
+    widget_format_raw = arguments.get("widget_format")
+    widget_format = (
+        str(widget_format_raw).strip().lower()
+        if widget_format_raw is not None
+        else ""
+    )
+    if widget_format and widget_format not in {"svg", "html", "mermaid"}:
+        return (
+            "ERROR: show_widget widget_format must be one of: svg, html, mermaid."
+        )
     stripped = widget_code.strip()
     if stripped.startswith("{") and stripped.endswith("}"):
         try:
@@ -5795,6 +5817,8 @@ def _tool_show_widget(arguments: Dict[str, Any]) -> str:
         "widget_code": widget_code,
         "loading_messages": loading_messages,
     }
+    if widget_format:
+        payload["widget_format"] = widget_format
     return json.dumps(payload, ensure_ascii=False)
 
 

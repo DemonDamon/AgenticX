@@ -1,6 +1,9 @@
+export type WidgetFormatHint = "svg" | "html" | "mermaid" | "";
+
 export type PartialShowWidget = {
   title: string;
   widgetCode: string;
+  widgetFormat: WidgetFormatHint;
   readyForPreview: boolean;
 };
 
@@ -58,6 +61,19 @@ function extractJsonStringPrefix(raw: string, from: number): string {
   return decodeSimpleJsonEscapes(out);
 }
 
+function parseWidgetFormatHint(raw: string): WidgetFormatHint {
+  const formatMatch = raw.match(/"widget_format"\s*:\s*"((?:\\.|[^"\\])*)"/i);
+  if (formatMatch?.[1] == null) return "";
+  const value = decodeSimpleJsonEscapes(formatMatch[1]).trim().toLowerCase();
+  if (value === "svg" || value === "html" || value === "mermaid") return value;
+  return "";
+}
+
+function isReadyForPreview(widgetFormat: WidgetFormatHint, widgetCode: string): boolean {
+  if (widgetFormat === "mermaid") return false;
+  return /<svg\b/i.test(widgetCode);
+}
+
 /** Extract title + widget_code prefix from possibly truncated tool args JSON. */
 export function extractPartialShowWidgetArgs(argumentsRaw: string): PartialShowWidget | null {
   const raw = String(argumentsRaw ?? "");
@@ -69,10 +85,12 @@ export function extractPartialShowWidgetArgs(argumentsRaw: string): PartialShowW
     title = decodeSimpleJsonEscapes(titleMatch[1]).trim();
   }
 
+  const widgetFormat = parseWidgetFormatHint(raw);
+
   const widgetKey = /"widget_code"\s*:\s*"/i.exec(raw);
   if (!widgetKey) {
-    if (!title) return null;
-    return { title, widgetCode: "", readyForPreview: false };
+    if (!title && !widgetFormat) return null;
+    return { title, widgetCode: "", widgetFormat, readyForPreview: false };
   }
 
   const keyEnd = widgetKey.index + widgetKey[0].length;
@@ -80,7 +98,8 @@ export function extractPartialShowWidgetArgs(argumentsRaw: string): PartialShowW
   return {
     title,
     widgetCode,
-    readyForPreview: /<svg\b/i.test(widgetCode),
+    widgetFormat,
+    readyForPreview: isReadyForPreview(widgetFormat, widgetCode),
   };
 }
 

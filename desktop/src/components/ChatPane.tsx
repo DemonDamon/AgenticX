@@ -4422,11 +4422,12 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
         selectedMessages,
         visibleMessages,
       );
-      const html = buildMessagesPdfHtml({
+      const html = await buildMessagesPdfHtml({
         messages: messagesForExport,
         sessionTitle: paneAvatarMeta.name || pane?.avatarName || "对话记录",
         exportedAt: now,
         userBubbleLabel,
+        appTheme: document.documentElement.getAttribute("data-theme") || "dark",
       });
       const stamp = new Date(now)
         .toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit" })

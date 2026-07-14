@@ -12,6 +12,7 @@ describe("extractPartialShowWidgetArgs", () => {
     expect(parsed).not.toBeNull();
     expect(parsed?.title).toBe("故障时间线");
     expect(parsed?.widgetCode).toContain("<svg");
+    expect(parsed?.widgetFormat).toBe("");
     expect(parsed?.readyForPreview).toBe(true);
   });
 
@@ -29,6 +30,7 @@ describe("extractPartialShowWidgetArgs", () => {
     expect(parsed).toEqual({
       title: "x",
       widgetCode: "",
+      widgetFormat: "",
       readyForPreview: false,
     });
   });
@@ -36,6 +38,36 @@ describe("extractPartialShowWidgetArgs", () => {
   it("handles escaped quotes in title", () => {
     const parsed = extractPartialShowWidgetArgs('{"title":"say \\"hello\\"","widget_code":"<svg"}');
     expect(parsed?.title).toBe('say "hello"');
+  });
+
+  it("parses complete mermaid widget_format", () => {
+    const raw = JSON.stringify({
+      title: "流程",
+      widget_format: "mermaid",
+      widget_code: "flowchart LR\n  A --> B",
+    });
+    const parsed = extractPartialShowWidgetArgs(raw);
+    expect(parsed).toEqual({
+      title: "流程",
+      widgetCode: "flowchart LR\n  A --> B",
+      widgetFormat: "mermaid",
+      readyForPreview: false,
+    });
+  });
+
+  it("keeps mermaid readyForPreview false even when source starts with flowchart", () => {
+    const parsed = extractPartialShowWidgetArgs(
+      '{"title":"流程","widget_format":"mermaid","widget_code":"flowchart LR\\n  A --> B',
+    );
+    expect(parsed?.widgetFormat).toBe("mermaid");
+    expect(parsed?.widgetCode.startsWith("flowchart")).toBe(true);
+    expect(parsed?.readyForPreview).toBe(false);
+  });
+
+  it("keeps empty widgetFormat when format field is not yet present", () => {
+    const parsed = extractPartialShowWidgetArgs('{"title":"流程","widget_code":"<svg');
+    expect(parsed?.widgetFormat).toBe("");
+    expect(parsed?.readyForPreview).toBe(true);
   });
 });
 

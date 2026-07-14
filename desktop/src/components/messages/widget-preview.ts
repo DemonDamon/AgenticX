@@ -32,12 +32,22 @@ export type HtmlWidgetPayload = {
   title: string;
   widgetCode: string;
   loadingMessages: string[];
-  kind: "svg" | "html";
+  kind: "svg" | "html" | "mermaid";
 };
 
 export type WidgetPayload = HtmlWidgetPayload | StockChartPayload;
 
-function widgetKind(widgetCode: string): "svg" | "html" {
+function widgetKind(
+  widgetCode: string,
+  declaredFormat: unknown,
+): "svg" | "html" | "mermaid" {
+  if (
+    declaredFormat === "svg" ||
+    declaredFormat === "html" ||
+    declaredFormat === "mermaid"
+  ) {
+    return declaredFormat;
+  }
   return widgetCode.trimStart().toLowerCase().startsWith("<svg") ? "svg" : "html";
 }
 
@@ -216,7 +226,7 @@ export function parseWidgetPayload(content: string): WidgetPayload | null {
       title,
       widgetCode,
       loadingMessages,
-      kind: widgetKind(widgetCode),
+      kind: widgetKind(widgetCode, parsed.widget_format),
     };
   } catch {
     return null;

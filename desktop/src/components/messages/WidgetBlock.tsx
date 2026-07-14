@@ -3,6 +3,7 @@ import { Code, Copy, Download, Image, Maximize2, MoreHorizontal, X } from "lucid
 import { collectThemeCssVars, exportSurfaceColor } from "../../utils/widget-theme";
 import { Modal } from "../ds/Modal";
 import { ZoomableViewport } from "../ds/ZoomableViewport";
+import { MermaidBlock } from "./MermaidBlock";
 import { StockChartWidgetBlock } from "./StockChartWidget";
 import type { HtmlWidgetPayload, WidgetPayload } from "./widget-preview";
 
@@ -605,6 +606,10 @@ export function WidgetBlock({ payload, streaming = false }: Props) {
 
   if (payload.kind === "stock_chart") {
     return <StockChartWidgetBlock payload={payload} />;
+  }
+
+  if (payload.kind === "mermaid") {
+    return <MermaidBlock code={payload.widgetCode} />;
   }
 
   const getSvgDisplayWidth = () => {

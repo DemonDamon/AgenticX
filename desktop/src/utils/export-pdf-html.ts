@@ -4,6 +4,7 @@ import { parseReasoningContent } from "../components/messages/reasoning-parser";
 import { expandMessagesToTopLevelRows } from "../components/messages/react-blocks";
 import { resolveMetaDisplayName } from "./display-name";
 import { isShowWidgetToolMessage, parseWidgetPayload } from "../components/messages/widget-preview";
+import { mermaidThemeFromApp, renderMermaidSvg } from "./mermaid-render";
 
 const PDF_STYLES = `
   @page { margin: 16mm; }
@@ -154,9 +155,12 @@ function resolveSender(message: Message, userBubbleLabel: string): string {
 
 /** Renders a `show_widget` tool message as its actual graphic (SVG inlined verbatim — safe
  * because the offscreen export window has `javascript: false`, so embedded scripts cannot
- * execute even if present). Non-SVG widgets (interactive HTML / stock_chart) cannot be
- * faithfully rendered without a script runtime, so they fall back to a labeled placeholder. */
-function widgetBlockHtml(message: Message): string {
+ * execute even if present). Mermaid payloads are rendered to static SVG first. Non-SVG
+ * interactive HTML / stock_chart fall back to a labeled placeholder. */
+async function widgetBlockHtml(
+  message: Message,
+  opts: { appTheme: string; renderIndex: number },
+): Promise<string> {
   const payload = parseWidgetPayload(message.content || "");
   if (!payload) {
     return `<div class="widget-fallback">[图表内容解析失败，无法导出]</div>`;
@@ -168,6 +172,22 @@ function widgetBlockHtml(message: Message): string {
   const title = payload.title ? `<p class="widget-title">${escapeHtml(payload.title)}</p>` : "";
   if (payload.kind === "svg") {
     return `${title}<div class="widget-graphic">${payload.widgetCode}</div>`;
+  }
+  if (payload.kind === "mermaid") {
+    const chartTitle = escapeHtml(payload.title || "图表");
+    try {
+      const safeId = String(message.id || `idx${opts.renderIndex}`)
+        .replace(/[^a-zA-Z0-9_-]/g, "_")
+        .slice(0, 48);
+      const svg = await renderMermaidSvg({
+        code: payload.widgetCode,
+        id: `pdf-mermaid-${safeId}-${opts.renderIndex}`,
+        theme: mermaidThemeFromApp(opts.appTheme),
+      });
+      return `${title}<div class="widget-graphic">${svg}</div>`;
+    } catch {
+      return `${title}<div class="widget-fallback">[图表：${chartTitle}]（Mermaid 静态渲染失败，请在应用内查看）</div>`;
+    }
   }
   return `${title}<div class="widget-fallback">[图表基于交互脚本渲染，暂不支持导出为静态图片，请在应用内查看]</div>`;
 }
@@ -226,34 +246,44 @@ function hasAttachmentImages(attachments?: MessageAttachment[]): boolean {
   return Boolean(attachments?.some((att) => att.mimeType.startsWith("image/")));
 }
 
-export function buildMessagesPdfHtml(args: {
+export async function buildMessagesPdfHtml(args: {
   messages: Message[];
   sessionTitle?: string;
   exportedAt: number;
   userBubbleLabel?: string;
-}): string {
-  const { messages, sessionTitle, exportedAt, userBubbleLabel = "我" } = args;
+  appTheme?: string;
+}): Promise<string> {
+  const {
+    messages,
+    sessionTitle,
+    exportedAt,
+    userBubbleLabel = "我",
+    appTheme = "dark",
+  } = args;
   const exportable = messages.filter(isExportableMessage);
   const title = escapeHtml(sessionTitle?.trim() || "对话记录");
   const exportDate = escapeHtml(formatExportDate(exportedAt));
 
-  const rendered = exportable
-    .map((message) => {
-      const isWidget = message.role === "tool";
-      const who = escapeHtml(resolveSender(message, userBubbleLabel));
-      const time = escapeHtml(formatTime(message.timestamp));
-      const roleClass = isWidget ? "msg widget" : message.role === "user" ? "msg user" : "msg assistant";
-      const body = isWidget ? widgetBlockHtml(message) : messageBodyHtml(message);
-      const images = isWidget ? "" : attachmentImagesHtml(message.attachments);
-      if (!body && !images) return null;
-      return `
+  // Sequential await avoids Mermaid's global initialize() theme races across parallel renders.
+  const rendered: string[] = [];
+  for (let index = 0; index < exportable.length; index += 1) {
+    const message = exportable[index]!;
+    const isWidget = message.role === "tool";
+    const who = escapeHtml(resolveSender(message, userBubbleLabel));
+    const time = escapeHtml(formatTime(message.timestamp));
+    const roleClass = isWidget ? "msg widget" : message.role === "user" ? "msg user" : "msg assistant";
+    const body = isWidget
+      ? await widgetBlockHtml(message, { appTheme, renderIndex: index })
+      : messageBodyHtml(message);
+    const images = isWidget ? "" : attachmentImagesHtml(message.attachments);
+    if (!body && !images) continue;
+    rendered.push(`
       <section class="${roleClass}">
         ${isWidget ? "" : `<div class="meta"><span class="who">${who}</span>${time ? `<span class="time">${time}</span>` : ""}</div>`}
         ${body ? `<div class="body">${body}</div>` : ""}
         ${images}
-      </section>`;
-    })
-    .filter((block): block is string => Boolean(block));
+      </section>`);
+  }
 
   const count = rendered.length;
 

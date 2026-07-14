@@ -252,6 +252,7 @@ export function ToolCallCard({
         extracted = {
           title: titleText,
           widgetCode,
+          widgetFormat: "",
           readyForPreview: /<svg\b/i.test(widgetCode),
         };
       }
@@ -259,10 +260,16 @@ export function ToolCallCard({
 
     const argsCode = String(message.toolArgs?.widget_code ?? "");
     if (argsCode && (!extracted || argsCode.length > extracted.widgetCode.length)) {
+      const formatRaw = String(message.toolArgs?.widget_format ?? "").trim().toLowerCase();
+      const widgetFormat =
+        formatRaw === "svg" || formatRaw === "html" || formatRaw === "mermaid"
+          ? formatRaw
+          : extracted?.widgetFormat || "";
       extracted = {
         title: String(message.toolArgs?.title ?? extracted?.title ?? "").trim(),
         widgetCode: argsCode,
-        readyForPreview: /<svg\b/i.test(argsCode),
+        widgetFormat,
+        readyForPreview: widgetFormat !== "mermaid" && /<svg\b/i.test(argsCode),
       };
     }
 
@@ -277,10 +284,12 @@ export function ToolCallCard({
         sticky.widgetCode.length >= extracted.widgetCode.length
           ? sticky.widgetCode
           : extracted.widgetCode;
+      const widgetFormat = extracted.widgetFormat || sticky.widgetFormat;
       longestShowWidgetPartialRef.current = {
         title: extracted.title || sticky.title,
         widgetCode: mergedCode,
-        readyForPreview: /<svg\b/i.test(mergedCode),
+        widgetFormat,
+        readyForPreview: widgetFormat !== "mermaid" && /<svg\b/i.test(mergedCode),
       };
     }
 
@@ -332,9 +341,11 @@ export function ToolCallCard({
   }
   if (toolName === "show_widget" && showWidgetPartial && !showWidgetPartial.readyForPreview
     && (message.toolStatus === "running" || message.toolStatus === "pending")) {
+    const statusLabel =
+      showWidgetPartial.widgetFormat === "mermaid" ? "正在编排图表…" : "正在绘制…";
     return (
       <div className="w-full min-w-0 rounded border border-border bg-surface-card px-3 py-2 text-[12px] text-text-muted">
-        {showWidgetPartial.title ? `${showWidgetPartial.title} · ` : ""}正在绘制…
+        {showWidgetPartial.title ? `${showWidgetPartial.title} · ` : ""}{statusLabel}
       </div>
     );
   }

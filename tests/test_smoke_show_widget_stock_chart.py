@@ -77,3 +77,38 @@ def test_show_widget_wraps_regular_html_widget():
     parsed = json.loads(result)
     assert parsed["type"] == "widget"
     assert parsed["widget_code"] == "<div>hello</div>"
+
+
+def test_show_widget_preserves_declared_mermaid_format():
+    result = _tool_show_widget(
+        {
+            "title": "流程",
+            "widget_format": "mermaid",
+            "widget_code": "flowchart LR\n  A --> B",
+        }
+    )
+    parsed = json.loads(result)
+    assert parsed["type"] == "widget"
+    assert parsed["widget_format"] == "mermaid"
+    assert parsed["widget_code"].startswith("flowchart")
+
+
+def test_show_widget_rejects_unknown_widget_format():
+    result = _tool_show_widget(
+        {
+            "title": "流程",
+            "widget_format": "canvas",
+            "widget_code": "anything",
+        }
+    )
+    assert result == (
+        "ERROR: show_widget widget_format must be one of: svg, html, mermaid."
+    )
+
+
+def test_show_widget_keeps_legacy_payload_without_format():
+    result = _tool_show_widget(
+        {"title": "legacy", "widget_code": "<svg viewBox='0 0 10 10'></svg>"}
+    )
+    parsed = json.loads(result)
+    assert "widget_format" not in parsed
