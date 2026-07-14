@@ -1,6 +1,7 @@
 import { marked } from "marked";
 import type { Message, MessageAttachment } from "../store";
 import { parseReasoningContent } from "../components/messages/reasoning-parser";
+import { expandMessagesToTopLevelRows } from "../components/messages/react-blocks";
 import { resolveMetaDisplayName } from "./display-name";
 import { isShowWidgetToolMessage, parseWidgetPayload } from "../components/messages/widget-preview";
 
@@ -20,11 +21,15 @@ const PDF_STYLES = `
   .doc-header h1 { margin: 0 0 8px; font-size: 20px; font-weight: 600; }
   .doc-header .subtitle { margin: 0 0 4px; color: #374151; font-size: 15px; }
   .doc-header .meta-line { margin: 0; color: #6b7280; font-size: 12px; }
+  /* Allow tall messages (tables / long markdown / SVG) to paginate across pages.
+   * page-break-inside:avoid on oversized blocks caused blank trailing pages and
+   * dropped the real final answer in Chromium printToPDF. */
   .msg {
     margin-bottom: 16px;
     padding: 12px 12px 12px 14px;
     border-left: 3px solid #d1d5db;
-    page-break-inside: avoid;
+    page-break-inside: auto;
+    break-inside: auto;
   }
   .msg.user { border-left-color: #2563eb; background: #f8fafc; }
   .msg.assistant { border-left-color: #9ca3af; background: #fafafa; }
@@ -90,12 +95,54 @@ function escapeHtml(text: string): string {
     .replace(/'/g, "&#39;");
 }
 
-/** Export intentionally hides the tool-call process (per user preference): only the
- * `show_widget` tool is special-cased below to surface its rendered graphic. All other
- * tool-role messages (web_search, knowledge_search, bash_exec, ...) are dropped entirely. */
+/** Pure `<think>…</think>` process scraps — UI collapses these; do not dump as fake replies. */
+export function isThinkOnlyAssistantMessage(message: Message): boolean {
+  if (message.role !== "assistant") return false;
+  const parsed = parseReasoningContent(message.content || "");
+  if (!parsed.hasReasoningTag) return false;
+  return parsed.response.trim().length === 0;
+}
+
+/** Export keeps user/assistant answers + `show_widget` graphics. Other tools and
+ * think-only assistant scraps are dropped so the PDF matches the visible conversation. */
 function isExportableMessage(message: Message): boolean {
-  if (message.role !== "tool") return true;
-  return isShowWidgetToolMessage(message);
+  if (message.role === "tool") return isShowWidgetToolMessage(message);
+  if (isThinkOnlyAssistantMessage(message)) return false;
+  return true;
+}
+
+/**
+ * If any message inside a ReAct turn is selected, include the whole turn
+ * (preceding user row + all work messages) so the final answer / widget cannot
+ * be left out of a partial multi-select.
+ */
+export function expandSelectionForCompletePdfExport(
+  selected: Message[],
+  allVisible: Message[],
+): Message[] {
+  if (selected.length === 0) return [];
+  if (allVisible.length === 0) return selected;
+
+  const selectedIds = new Set(selected.map((m) => m.id));
+  const includeIds = new Set<string>(selectedIds);
+  const rows = expandMessagesToTopLevelRows(allVisible);
+
+  for (let i = 0; i < rows.length; i++) {
+    const row = rows[i];
+    if (row.kind !== "react") continue;
+    const blockMsgs = [
+      ...row.block.workMessages,
+      ...(row.block.finalAssistant ? [row.block.finalAssistant] : []),
+    ];
+    const blockHit = blockMsgs.some((m) => selectedIds.has(m.id));
+    const prev = i > 0 ? rows[i - 1] : null;
+    const userHit = prev?.kind === "user" && selectedIds.has(prev.message.id);
+    if (!blockHit && !userHit) continue;
+    for (const m of blockMsgs) includeIds.add(m.id);
+    if (prev?.kind === "user") includeIds.add(prev.message.id);
+  }
+
+  return allVisible.filter((m) => includeIds.has(m.id));
 }
 
 function resolveSender(message: Message, userBubbleLabel: string): string {
@@ -147,7 +194,8 @@ function messageBodyHtml(message: Message): string {
   let content = message.content || "";
   if (message.role === "assistant") {
     const parsed = parseReasoningContent(content);
-    if (parsed.hasReasoningTag) content = parsed.response || content;
+    // Never fall back to raw `<think>` text — that leaked process scraps into the PDF.
+    if (parsed.hasReasoningTag) content = parsed.response;
   }
   content = content.trim();
   if (!content) return "";
@@ -174,6 +222,10 @@ function attachmentImagesHtml(attachments?: MessageAttachment[]): string {
   return `<div class="attachments">${parts.join("")}</div>`;
 }
 
+function hasAttachmentImages(attachments?: MessageAttachment[]): boolean {
+  return Boolean(attachments?.some((att) => att.mimeType.startsWith("image/")));
+}
+
 export function buildMessagesPdfHtml(args: {
   messages: Message[];
   sessionTitle?: string;
@@ -184,9 +236,8 @@ export function buildMessagesPdfHtml(args: {
   const exportable = messages.filter(isExportableMessage);
   const title = escapeHtml(sessionTitle?.trim() || "对话记录");
   const exportDate = escapeHtml(formatExportDate(exportedAt));
-  const count = exportable.length;
 
-  const messageBlocks = exportable
+  const rendered = exportable
     .map((message) => {
       const isWidget = message.role === "tool";
       const who = escapeHtml(resolveSender(message, userBubbleLabel));
@@ -194,6 +245,7 @@ export function buildMessagesPdfHtml(args: {
       const roleClass = isWidget ? "msg widget" : message.role === "user" ? "msg user" : "msg assistant";
       const body = isWidget ? widgetBlockHtml(message) : messageBodyHtml(message);
       const images = isWidget ? "" : attachmentImagesHtml(message.attachments);
+      if (!body && !images) return null;
       return `
       <section class="${roleClass}">
         ${isWidget ? "" : `<div class="meta"><span class="who">${who}</span>${time ? `<span class="time">${time}</span>` : ""}</div>`}
@@ -201,7 +253,9 @@ export function buildMessagesPdfHtml(args: {
         ${images}
       </section>`;
     })
-    .join("\n");
+    .filter((block): block is string => Boolean(block));
+
+  const count = rendered.length;
 
   return `<!doctype html>
 <html lang="zh-CN">
@@ -216,7 +270,15 @@ export function buildMessagesPdfHtml(args: {
   <p class="subtitle">${title}</p>
   <p class="meta-line">导出时间：${exportDate} · 共 ${count} 条消息</p>
 </header>
-<main>${messageBlocks}</main>
+<main>${rendered.join("\n")}</main>
 </body>
 </html>`;
+}
+
+/** Test helper: whether a message would contribute a body/images section. */
+export function messageContributesToPdfExport(message: Message): boolean {
+  if (!isExportableMessage(message)) return false;
+  if (message.role === "tool") return true;
+  if (messageBodyHtml(message)) return true;
+  return hasAttachmentImages(message.attachments);
 }

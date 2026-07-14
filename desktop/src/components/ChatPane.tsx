@@ -210,7 +210,7 @@ import {
   setCachedReasoningDuration,
 } from "./messages/reasoning-duration-cache";
 import { messagePlainTextForClipboard } from "../utils/markdown-copy-format";
-import { buildMessagesPdfHtml } from "../utils/export-pdf-html";
+import { buildMessagesPdfHtml, expandSelectionForCompletePdfExport } from "../utils/export-pdf-html";
 import { buildCompactionNoticeText } from "../utils/context-notice";
 import { usePaneSortableHandle } from "./pane-sortable-context";
 import { FeishuBadge } from "./FeishuBadge";
@@ -4416,8 +4416,14 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
     if (selectedMessages.length === 0) return;
     try {
       const now = Date.now();
+      // Expand partial ReAct multi-select to the full turn so the final answer /
+      // show_widget graphic cannot be omitted from the PDF.
+      const messagesForExport = expandSelectionForCompletePdfExport(
+        selectedMessages,
+        visibleMessages,
+      );
       const html = buildMessagesPdfHtml({
-        messages: selectedMessages,
+        messages: messagesForExport,
         sessionTitle: paneAvatarMeta.name || pane?.avatarName || "对话记录",
         exportedAt: now,
         userBubbleLabel,
@@ -4442,7 +4448,14 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
     } catch (e) {
       setStallHintToast(`导出失败：${String(e).slice(0, 120)}`);
     }
-  }, [pane?.avatarName, paneAvatarMeta.name, selectedMessages, setSelectedMessageIds, userBubbleLabel]);
+  }, [
+    pane?.avatarName,
+    paneAvatarMeta.name,
+    selectedMessages,
+    setSelectedMessageIds,
+    userBubbleLabel,
+    visibleMessages,
+  ]);
 
   const deleteSelectedMessages = useCallback(async () => {
     if (selectedMessages.length === 0 || !apiBase || !pane.sessionId) return;

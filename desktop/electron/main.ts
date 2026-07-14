@@ -9094,7 +9094,9 @@ function registerIpc(): void {
         webPreferences: { javascript: false, sandbox: true, contextIsolation: true },
       });
       await offscreen.loadFile(tmpHtmlPath);
-      await new Promise((resolve) => setTimeout(resolve, 150));
+      // Give Chromium time to lay out tall markdown / inlined SVG before print.
+      // 150ms was too short for large show_widget graphics and could drop trailing pages.
+      await new Promise((resolve) => setTimeout(resolve, 400));
       const pdfBuffer = await offscreen.webContents.printToPDF({
         pageSize: "A4",
         printBackground: true,

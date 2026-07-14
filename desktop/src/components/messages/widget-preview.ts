@@ -224,5 +224,19 @@ export function parseWidgetPayload(content: string): WidgetPayload | null {
 }
 
 export function isShowWidgetToolMessage(message: Message): boolean {
-  return String(message.toolName ?? "").trim() === "show_widget";
+  if (String(message.toolName ?? "").trim() === "show_widget") return true;
+  // Live / partially hydrated rows may omit toolName; recover from call id or payload.
+  const callId = String(message.toolCallId ?? "").trim();
+  if (callId.includes("show_widget")) return true;
+  if (message.role !== "tool") return false;
+  const content = String(message.content ?? "").trim();
+  if (!content.startsWith("{")) return false;
+  try {
+    const parsed = JSON.parse(content) as Record<string, unknown>;
+    if (!parsed || typeof parsed !== "object") return false;
+    if (parsed.type === "widget" || parsed.type === "stock_chart") return true;
+    return typeof parsed.widget_code === "string" || typeof parsed.widgetCode === "string";
+  } catch {
+    return false;
+  }
 }
