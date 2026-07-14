@@ -12,6 +12,14 @@ import {
 import type { SearchReference } from "./types/search-references";
 import { shouldClearMessagesOnSessionSwitch } from "./utils/pane-session-switch";
 import { matchesToolCallForSession } from "./utils/pending-tool-result";
+import type { PendingActionConfirmation } from "./utils/action-confirmation";
+
+export type {
+  ActionConfirmationDecision,
+  ActionConfirmationStatus,
+  ActionConfirmationSummaryRow,
+  PendingActionConfirmation,
+} from "./utils/action-confirmation";
 
 export type UiStatus = "idle" | "listening" | "processing";
 export type MsgRole = "user" | "assistant" | "tool";
@@ -189,6 +197,8 @@ export type Message = {
   clarificationPrompt?: PendingClarification;
   /** Marks the clarification prompt row as suspended (unattended/automation). */
   clarificationSuspended?: boolean;
+  /** Generic irreversible/external-write action confirmation card. */
+  actionConfirmation?: PendingActionConfirmation;
   /** Correlates tool_call / tool_result / tool_progress from runtime SSE (`tool_call_id`). */
   toolCallId?: string;
   toolName?: string;
@@ -251,6 +261,7 @@ export type MessageToolExtras = Pick<
   | "inlineConfirm"
   | "clarificationPrompt"
   | "clarificationSuspended"
+  | "actionConfirmation"
   | "suggestedQuestions"
   | "noticeKind"
   | "budgetSource"
@@ -569,6 +580,7 @@ type AppState = {
         | "inlineConfirm"
         | "clarificationPrompt"
         | "clarificationSuspended"
+        | "actionConfirmation"
         | "suggestedQuestions"
         | "references"
         | "searchedQueries"
@@ -597,6 +609,7 @@ type AppState = {
         | "toolArgsPartial"
         | "inlineConfirm"
         | "clarificationPrompt"
+        | "actionConfirmation"
         | "metadata"
       >
     > & {
@@ -620,6 +633,7 @@ type AppState = {
         | "toolArgsPartial"
         | "inlineConfirm"
         | "clarificationPrompt"
+        | "actionConfirmation"
         | "metadata"
       >
     > & {
@@ -691,6 +705,7 @@ type AppState = {
         | "inlineConfirm"
         | "clarificationPrompt"
         | "clarificationSuspended"
+        | "actionConfirmation"
         | "references"
         | "searchedQueries"
         | "metadata"
@@ -1680,7 +1695,9 @@ export const useAppStore = create<AppState>((set, get) => ({
     set((state) => ({
       panes: state.panes.map((pane) => {
         const idx = (pane.messages ?? []).findIndex(
-          (m) => m.clarificationPrompt?.requestId === requestId,
+          (m) =>
+            m.clarificationPrompt?.requestId === requestId ||
+            m.actionConfirmation?.requestId === requestId,
         );
         if (idx < 0) return pane;
         const msgs = [...(pane.messages ?? [])];
@@ -1689,9 +1706,26 @@ export const useAppStore = create<AppState>((set, get) => ({
           prev.metadata && typeof prev.metadata === "object"
             ? (prev.metadata as Record<string, unknown>)
             : {};
+        let nextAction = prev.actionConfirmation;
+        if (nextAction) {
+          const selected = (answer.selectedOptions ?? []).map((o) => String(o).trim()).filter(Boolean);
+          const approve = nextAction.approveLabel;
+          const reject = nextAction.rejectLabel;
+          const approved =
+            selected.some((o) => o === approve || ["确认", "确认发送", "同意", "继续", "yes", "y", "ok"].includes(o.toLowerCase())) ||
+            ["确认", "确认发送", "同意", "继续", "yes", "y", "ok"].includes((answer.answerText ?? "").trim().toLowerCase());
+          const rejected =
+            selected.some((o) => o === reject || ["取消", "拒绝", "不用了", "no", "n"].includes(o.toLowerCase())) ||
+            ["取消", "拒绝", "不用了", "no", "n"].includes((answer.answerText ?? "").trim().toLowerCase());
+          nextAction = {
+            ...nextAction,
+            status: approved ? "approved" : rejected ? "rejected" : "rejected",
+          };
+        }
         msgs[idx] = {
           ...prev,
           toolStatus: "done",
+          ...(nextAction ? { actionConfirmation: nextAction } : {}),
           metadata: {
             ...prevMeta,
             clarification_answered: true,

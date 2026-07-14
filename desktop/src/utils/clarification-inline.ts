@@ -82,3 +82,16 @@ export function findRunningClarificationToolMessage(messages: Message[]) {
         (m.toolStatus === "running" || m.toolStatus === "pending"),
     );
 }
+
+/** Locate the in-flight request_action_confirmation tool row for SSE patching. */
+export function findRunningActionConfirmationToolMessage(messages: Message[]) {
+  return [...messages]
+    .reverse()
+    .find(
+      (m) =>
+        m.role === "tool" &&
+        m.toolName === "request_action_confirmation" &&
+        Boolean(m.toolCallId) &&
+        (m.toolStatus === "running" || m.toolStatus === "pending"),
+    );
+}

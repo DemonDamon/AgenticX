@@ -10,6 +10,7 @@
     "dev": "cp electron/splash.html dist-electron/splash.html 2>/dev/null || true && concurrently \"vite\" \"tsc -p electron/tsconfig.json --watch\" \"node scripts/wait-and-electron.mjs\"",
     "icons:sync": "bash ./scripts/sync-icons.sh",
     "test:native-connectors": "vitest run tests/native-connectors-core.test.ts",
+    "test:action-confirmation": "vitest run tests/action-confirmation.test.ts tests/session-message-action-confirmation.test.ts",
     "build": "vite build && tsc -p electron/tsconfig.json && cp electron/splash.html dist-electron/splash.html",
     "start": "electron .",
     "build:mac": "npm run build && electron-builder --mac",

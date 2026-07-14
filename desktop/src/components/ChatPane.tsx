@@ -263,9 +263,18 @@ import { mergeSearchedQueries } from "../types/search-references";
 import type { SearchReference } from "../types/search-references";
 import {
   buildClarificationMessageExtras,
+  findRunningActionConfirmationToolMessage,
   findRunningClarificationToolMessage,
 } from "../utils/clarification-inline";
 import { parseClarificationDecisions } from "../utils/clarification-notice";
+import {
+  buildActionConfirmationAnswer,
+  findResolvableActionConfirmation,
+  matchActionConfirmationReply,
+  parseActionConfirmationContext,
+  type ActionConfirmationDecision,
+  type PendingActionConfirmation,
+} from "../utils/action-confirmation";
 
 const SEARCH_REFERENCE_TOOLS = new Set(["web_search", "knowledge_search"]);
 
@@ -6236,6 +6245,9 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
               onSkillManageApply={applySkillPatchPreview}
               onOpenClarification={onOpenClarification}
               onSubmitClarification={onSubmitClarification}
+              onResolveActionConfirmation={(confirmation, decision) =>
+                void resolveActionConfirmation(confirmation, decision, "button")
+              }
             />
           </div>
         );
@@ -6986,6 +6998,23 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
     const hasReadyAttachments = userAttachments.length > 0;
     if (!isContinuation && !text && !hasReadyAttachments) return;
     if (!apiBase) return;
+
+    // Exact 「确认/取消」 phrases resolve a unique pending action card without a new LLM turn.
+    if (!isContinuation && text && !hasReadyAttachments) {
+      const decision = matchActionConfirmationReply(text);
+      if (decision) {
+        const found = findResolvableActionConfirmation({
+          messages: pane.messages ?? [],
+          paneSessionId: (pane.sessionId || "").trim(),
+        });
+        if (found.kind === "hit") {
+          setComposerText("");
+          setQuoteTarget(null);
+          await resolveActionConfirmation(found.confirmation, decision, "manual");
+          return;
+        }
+      }
+    }
 
     const sendLockKey = pane.id;
     const targetSendSid = (options?.lockedSessionId || pane.sessionId || "").trim();
@@ -8515,6 +8544,76 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
               const clarifyAllowFreeText = payload.data?.allow_free_text !== false;
               const clarifyContext = payload.data?.context;
               const clarifyDecisions = parseClarificationDecisions(payload.data?.decisions);
+              const actionConfirm =
+                clarifyContext && typeof clarifyContext === "object"
+                  ? parseActionConfirmationContext({
+                      requestId: clarifyReqId,
+                      sessionId: requestSessionId,
+                      agentId: eventAgentId === "meta" ? "meta" : eventAgentId,
+                      context: clarifyContext,
+                      status: "pending",
+                    })
+                  : null;
+
+              // Generic action confirmation: dedicated card, do not open ClarificationDialog.
+              if (actionConfirm && eventAgentId === "meta" && clarifyReqId) {
+                const pan = useAppStore.getState().panes.find((p) => p.id === pane.id);
+                const running = findRunningActionConfirmationToolMessage(pan?.messages ?? []);
+                const metaPatch = {
+                  content: actionConfirm.title,
+                  actionConfirmation: actionConfirm,
+                  clarificationPrompt: undefined,
+                  metadata: {
+                    kind: "clarification",
+                    request_id: clarifyReqId,
+                    prompt: actionConfirm.title,
+                    options: [actionConfirm.approveLabel, actionConfirm.rejectLabel],
+                    allow_free_text: true,
+                    context: {
+                      kind: "action_confirmation",
+                      title: actionConfirm.title,
+                      summary: actionConfirm.summary,
+                      approve_label: actionConfirm.approveLabel,
+                      reject_label: actionConfirm.rejectLabel,
+                      expires_at_ms: actionConfirm.expiresAtMs,
+                      ...(actionConfirm.source ? { source: actionConfirm.source } : {}),
+                    },
+                  },
+                };
+                if (running?.toolCallId) {
+                  updatePaneToolMessageForSession(running.toolCallId, metaPatch);
+                } else {
+                  const dup = (pan?.messages ?? []).some(
+                    (m) => m.actionConfirmation?.requestId === clarifyReqId,
+                  );
+                  if (!dup) {
+                    addPaneMessageIfSessionActive(
+                      pane.id,
+                      "tool",
+                      actionConfirm.title,
+                      "meta",
+                      undefined,
+                      undefined,
+                      undefined,
+                      {
+                        toolName: "request_action_confirmation",
+                        toolStatus: "running",
+                        toolArgs: {
+                          title: actionConfirm.title,
+                          summary: actionConfirm.summary,
+                          approve_label: actionConfirm.approveLabel,
+                          reject_label: actionConfirm.rejectLabel,
+                          source: actionConfirm.source,
+                        },
+                        actionConfirmation: actionConfirm,
+                        metadata: metaPatch.metadata,
+                      },
+                    );
+                  }
+                }
+                continue;
+              }
+
               if (eventAgentId !== "meta") {
                 updateSubAgent(eventAgentId, {
                   status: "awaiting_input",
@@ -9583,6 +9682,74 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
       });
     } catch {
       // confirm POST failure is non-fatal for UI
+    }
+  }
+
+  async function resolveActionConfirmation(
+    confirmation: PendingActionConfirmation,
+    decision: ActionConfirmationDecision,
+    _source: "button" | "manual" = "button",
+  ): Promise<void> {
+    if (!apiBase || !apiToken) return;
+    const paneSessionId = (pane.sessionId || "").trim();
+    if (!paneSessionId || paneSessionId !== String(confirmation.sessionId || "").trim()) return;
+
+    const patchAction = (status: PendingActionConfirmation["status"], error?: string) => {
+      const pan = useAppStore.getState().panes.find((p) => p.id === pane.id);
+      if (!pan) return;
+      setPaneMessages(
+        pane.id,
+        (pan.messages ?? []).map((msg) => {
+          if (msg.actionConfirmation?.requestId !== confirmation.requestId) return msg;
+          return {
+            ...msg,
+            actionConfirmation: {
+              ...msg.actionConfirmation!,
+              status,
+              ...(error !== undefined ? { error } : { error: undefined }),
+            },
+            ...(status === "approved" || status === "rejected" || status === "expired"
+              ? { toolStatus: "done" as const }
+              : {}),
+          };
+        }),
+      );
+    };
+
+    const current = (useAppStore.getState().panes.find((p) => p.id === pane.id)?.messages ?? []).find(
+      (m) => m.actionConfirmation?.requestId === confirmation.requestId,
+    )?.actionConfirmation;
+    if (!current || current.status === "resolving" || current.status === "approved" || current.status === "rejected") {
+      return;
+    }
+    if (current.status === "uncertain" || current.status === "expired") return;
+
+    patchAction("resolving");
+    const answer = buildActionConfirmationAnswer(confirmation, decision);
+    try {
+      const res = await fetch(`${apiBase}/api/clarify`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "x-agx-desktop-token": apiToken },
+        body: JSON.stringify({
+          session_id: confirmation.sessionId,
+          request_id: confirmation.requestId,
+          agent_id: confirmation.agentId || "meta",
+          answer_text: answer.answerText,
+          selected_options: answer.selectedOptions,
+        }),
+      });
+      if (res.status === 404) {
+        patchAction("expired", "确认请求已失效或不存在");
+        return;
+      }
+      if (!res.ok) {
+        patchAction("uncertain", `确认提交失败（HTTP ${res.status}）`);
+        return;
+      }
+      patchAction(decision === "approved" ? "approved" : "rejected");
+      useAppStore.getState().markClarificationAnswered(confirmation.requestId, answer);
+    } catch {
+      patchAction("uncertain", "网络异常，请求可能已送达");
     }
   }
 

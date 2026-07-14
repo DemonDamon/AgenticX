@@ -9,6 +9,7 @@ import {
   VIEW_IMAGE_INJECT_LEGACY_PREFIX,
 } from "./view-image-inject";
 import { parseClarificationDecisions } from "./clarification-notice";
+import { parseActionConfirmationContext } from "./action-confirmation";
 
 function parseSubAgentClusterAnchor(meta: Record<string, unknown> | undefined): Message["subAgentCluster"] {
   const raw = meta?.subagent_cluster;
@@ -284,19 +285,63 @@ export function mapLoadedSessionMessage(
       const m = meta as Record<string, unknown>;
       const requestId = String(m.request_id ?? m.id ?? "").trim();
       if (requestId) {
-        const rawOptions = Array.isArray(m.options) ? m.options : [];
-        const decisions = parseClarificationDecisions(m.decisions);
-        mapped.clarificationPrompt = {
-          requestId,
-          prompt: String(m.prompt ?? item.content ?? ""),
-          options: rawOptions.map((o) => String(o)).filter(Boolean),
-          decisions: decisions.length > 0 ? decisions : undefined,
-          allowFreeText: m.allow_free_text !== false,
-          agentId,
-          sessionId: String(ownerSessionId ?? idPrefix ?? "").trim(),
-          context: (m.context as Record<string, unknown> | undefined) ?? undefined,
-        };
-        if (m.suspended === true) mapped.clarificationSuspended = true;
+        const rawContext =
+          m.context && typeof m.context === "object"
+            ? (m.context as Record<string, unknown>)
+            : undefined;
+        const sessionId = String(ownerSessionId ?? idPrefix ?? "").trim();
+        // Action confirmation reuses clarification persistence with context.kind.
+        if (rawContext && String(rawContext.kind ?? "").trim() === "action_confirmation") {
+          const answered = m.clarification_answered === true;
+          const answerPayload =
+            m.clarification_answer && typeof m.clarification_answer === "object"
+              ? (m.clarification_answer as Record<string, unknown>)
+              : null;
+          const selected = Array.isArray(answerPayload?.selected_options)
+            ? (answerPayload!.selected_options as unknown[]).map((o) => String(o)).filter(Boolean)
+            : [];
+          const approveLabel = String(rawContext.approve_label ?? rawContext.approveLabel ?? "确认执行").trim() || "确认执行";
+          const rejectLabel = String(rawContext.reject_label ?? rawContext.rejectLabel ?? "取消").trim() || "取消";
+          let status: NonNullable<Message["actionConfirmation"]>["status"] = "pending";
+          if (answered) {
+            if (selected.includes(approveLabel) || selected.some((s) => ["确认", "确认发送", "同意", "继续", "yes", "y", "ok"].includes(s.toLowerCase()))) {
+              status = "approved";
+            } else {
+              status = "rejected";
+            }
+          }
+          const parsed = parseActionConfirmationContext({
+            requestId,
+            sessionId,
+            agentId,
+            context: rawContext,
+            status,
+          });
+          if (parsed) {
+            const expired =
+              parsed.status === "pending" &&
+              typeof parsed.expiresAtMs === "number" &&
+              parsed.expiresAtMs > 0 &&
+              parsed.expiresAtMs <= Date.now();
+            mapped.actionConfirmation = expired ? { ...parsed, status: "expired" } : parsed;
+            mapped.toolName = mapped.toolName || "request_action_confirmation";
+            // Do not also attach ClarificationCard for the same row.
+          }
+        } else {
+          const rawOptions = Array.isArray(m.options) ? m.options : [];
+          const decisions = parseClarificationDecisions(m.decisions);
+          mapped.clarificationPrompt = {
+            requestId,
+            prompt: String(m.prompt ?? item.content ?? ""),
+            options: rawOptions.map((o) => String(o)).filter(Boolean),
+            decisions: decisions.length > 0 ? decisions : undefined,
+            allowFreeText: m.allow_free_text !== false,
+            agentId,
+            sessionId,
+            context: rawContext,
+          };
+          if (m.suspended === true) mapped.clarificationSuspended = true;
+        }
       }
     }
     // Restore compaction noticeKind from persisted metadata so ContextNoticeLine

@@ -28,6 +28,7 @@ import { ViewImageInjectCard } from "./ViewImageInjectCard";
 import { BudgetExceededCard } from "./BudgetExceededCard";
 import { WidgetBlock } from "./WidgetBlock";
 import { ClarificationCard } from "./ClarificationCard";
+import { InlineConfirmCard } from "./InlineConfirmCard";
 import { parseWidgetPayload, isBrokenStockChartAttempt, stockChartDegradedMessage } from "./widget-preview";
 import { parseContextNotice } from "../../utils/context-notice";
 import { parseBudgetExceededFromText } from "../../utils/budget-exceeded";
@@ -39,6 +40,10 @@ import { resolveReferencesForAssistant } from "../../utils/turn-reference-contex
 import type { SkillPatchPreviewPayload } from "./skill-manage-preview";
 import type { FileReferenceOpenRequest } from "../../utils/reference-attachment";
 import { HistoricalSubAgentClusterCard } from "../subagent";
+import type {
+  ActionConfirmationDecision,
+  PendingActionConfirmation,
+} from "../../utils/action-confirmation";
 
 type Props = {
   message: Message;
@@ -108,6 +113,10 @@ type Props = {
     sessionId?: string,
     agentId?: string
   ) => Promise<boolean> | boolean;
+  onResolveActionConfirmation?: (
+    confirmation: PendingActionConfirmation,
+    decision: ActionConfirmationDecision,
+  ) => Promise<void> | void;
 };
 
 function extractPathFromToolResult(msg: string): string {
@@ -251,6 +260,7 @@ export function MessageRenderer({
   onSkillManageApply,
   onOpenClarification,
   onSubmitClarification,
+  onResolveActionConfirmation,
 }: Props) {
   const chatStyle = useAppStore((s) => s.chatStyle);
   const resolvedReferences = useMemo(() => {
@@ -417,6 +427,19 @@ export function MessageRenderer({
         );
       }
     }
+    if (message.actionConfirmation) {
+      return (
+        <InlineConfirmCard
+          confirmation={message.actionConfirmation}
+          groupChatRail={showSenderIdentity}
+          onResolve={
+            onResolveActionConfirmation
+              ? (confirmation, decision) => onResolveActionConfirmation(confirmation, decision)
+              : async () => undefined
+          }
+        />
+      );
+    }
     if (message.clarificationPrompt) {
       const clarMeta =
         message.metadata && typeof message.metadata === "object"
@@ -476,7 +499,7 @@ export function MessageRenderer({
       <ToolCallCard
         message={message}
         highlightTerms={highlightTerms}
-        forceExpand={!!message.inlineConfirm}
+        forceExpand={!!message.inlineConfirm || !!message.actionConfirmation}
         omitLeadingSpacer={toolCardOmitLeadingSpacer}
         variant={noBubbleBorder ? "flat" : "default"}
         selectable={selectable}

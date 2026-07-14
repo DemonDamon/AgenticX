@@ -5,6 +5,7 @@ import type { Message } from "../../store";
 import {
   isToolGroupInProgress,
   shouldHoldToolGroupProgress,
+  groupConsecutiveToolMessages,
 } from "./group-tool-messages";
 
 function toolMessage(
@@ -57,4 +58,30 @@ test("shouldHoldToolGroupProgress ignores historical tool groups", () => {
 
   assert.equal(shouldHoldToolGroupProgress(context, oldGroup, true), false);
   assert.equal(shouldHoldToolGroupProgress(context, currentGroup, true), true);
+});
+
+test("actionConfirmation tool rows stay ungrouped", () => {
+  const actionRow: Message = {
+    ...toolMessage("confirm-1", "running", "request_action_confirmation"),
+    actionConfirmation: {
+      requestId: "req-1",
+      sessionId: "sess-1",
+      agentId: "meta",
+      title: "确认发送？",
+      summary: [],
+      approveLabel: "确认执行",
+      rejectLabel: "取消",
+      status: "pending",
+    },
+  };
+  const rows = groupConsecutiveToolMessages([
+    toolMessage("t1", "done"),
+    actionRow,
+    toolMessage("t2", "done"),
+  ]);
+  assert.equal(rows.length, 3);
+  assert.equal(rows[1]?.kind, "message");
+  if (rows[1]?.kind === "message") {
+    assert.equal(rows[1].message.id, "confirm-1");
+  }
 });
