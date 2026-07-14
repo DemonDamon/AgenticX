@@ -17,7 +17,7 @@ type Props = {
   sessionId?: string;
 };
 
-type NativeId = "tencent-meeting" | "tapd" | "github" | "feishu" | "wecom";
+type NativeId = "tencent-meeting" | "tapd" | "github" | "feishu" | "wecom" | "qqmail";
 
 /**
  * Persistent「连接器」entry in the composer toolbar (replaces the previous
@@ -35,6 +35,7 @@ export function ConnectorsMenuButton({ sessionId }: Props) {
   const [githubConnected, setGithubConnected] = useState(false);
   const [feishuConnected, setFeishuConnected] = useState(false);
   const [wecomConnected, setWecomConnected] = useState(false);
+  const [qqmailConnected, setQqmailConnected] = useState(false);
   const [open, setOpen] = useState(false);
   const [dropdownPos, setDropdownPos] = useState<{ bottom: number; left: number } | null>(null);
   const [pendingId, setPendingId] = useState<NativeId | null>(null);
@@ -84,6 +85,15 @@ export function ConnectorsMenuButton({ sessionId }: Props) {
       setWecomConnected(result.connected);
     } catch {
       setWecomConnected(false);
+    }
+  }, []);
+
+  const refreshQqmail = useCallback(async () => {
+    try {
+      const result = await window.agenticxDesktop.nativeConnectorStatus("qqmail");
+      setQqmailConnected(result.connected);
+    } catch {
+      setQqmailConnected(false);
     }
   }, []);
 
@@ -158,6 +168,15 @@ export function ConnectorsMenuButton({ sessionId }: Props) {
     });
   }, [refreshWecom]);
 
+  useEffect(() => {
+    void refreshQqmail();
+    return window.agenticxDesktop.onNativeConnectorQqmailProgress(({ phase }) => {
+      if (phase === "success" || phase === "disconnected" || phase === "error") {
+        void refreshQqmail();
+      }
+    });
+  }, [refreshQqmail]);
+
   const tapdConnected = useMemo(
     () => mcpServers.some((server) => server.name === "tapd" && server.connected),
     [mcpServers],
@@ -171,8 +190,9 @@ export function ConnectorsMenuButton({ sessionId }: Props) {
         githubConnected,
         feishuConnected,
         wecomConnected,
+        qqmailConnected,
       ),
-    [feishuConnected, githubConnected, mcpServers, tmeetConnected, wecomConnected],
+    [feishuConnected, githubConnected, mcpServers, qqmailConnected, tmeetConnected, wecomConnected],
   );
 
   const connectedLabel = useMemo(
@@ -190,9 +210,10 @@ export function ConnectorsMenuButton({ sessionId }: Props) {
       if (id === "github") return githubConnected;
       if (id === "feishu") return feishuConnected;
       if (id === "wecom") return wecomConnected;
+      if (id === "qqmail") return qqmailConnected;
       return false;
     },
-    [feishuConnected, githubConnected, tapdConnected, tmeetConnected, wecomConnected],
+    [feishuConnected, githubConnected, qqmailConnected, tapdConnected, tmeetConnected, wecomConnected],
   );
 
   /** WorkBuddy popup: only truly connected connectors. */
@@ -302,6 +323,16 @@ export function ConnectorsMenuButton({ sessionId }: Props) {
     }
   };
 
+  const disconnectQqmail = async () => {
+    setPendingId("qqmail");
+    try {
+      await window.agenticxDesktop.nativeConnectorQqmailLogout();
+      await refreshQqmail();
+    } finally {
+      setPendingId(null);
+    }
+  };
+
   const handleTapdConnect = async () => {
     if (!tapdToken.trim()) {
       setTapdError("请填写 TAPD Personal Access Token");
@@ -364,6 +395,11 @@ export function ConnectorsMenuButton({ sessionId }: Props) {
       goToSettings();
       return;
     }
+    if (id === "qqmail") {
+      // OAuth URL UI lives in Settings Modal (same as feishu).
+      goToSettings();
+      return;
+    }
     showToast("该连接器暂未开放");
   };
 
@@ -388,6 +424,10 @@ export function ConnectorsMenuButton({ sessionId }: Props) {
       }
       if (id === "wecom") {
         void disconnectWecom();
+        return;
+      }
+      if (id === "qqmail") {
+        void disconnectQqmail();
         return;
       }
       return;

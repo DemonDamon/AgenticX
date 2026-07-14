@@ -3,18 +3,23 @@ import { describe, expect, it } from "vitest";
 import {
   buildTapdMcpEntry,
   assertManagedSkillDirectory,
+  buildQqmailManagedSkill,
   extractAuthorizationUrl,
   extractFeishuDeviceFlow,
   extractGithubDeviceCode,
   extractGithubDeviceUrl,
   extractLastJsonObject,
+  extractQqmailAuthUrl,
   isTapdValidationSuccess,
   isWecomProbeSuccessful,
   mergeTapdMcpDocument,
   nativeConnectorAvailability,
   parseFeishuAuthStatus,
   parseGithubAuthStatus,
+  parseQqmailAuthStatus,
+  parseQqmailMeAccount,
   parseTmeetAuthStatus,
+  qqmailNpmPlatformPackage,
   readBodyWithLimit,
   resolveConnectedConnectorIds,
   wecomNpmPlatformPackage,
@@ -176,6 +181,10 @@ describe("resolveConnectedConnectorIds", () => {
   it("includes wecom when the native wecom connector is connected", () => {
     expect(resolveConnectedConnectorIds(false, [], false, false, true)).toEqual(["wecom"]);
   });
+
+  it("includes qqmail when the native qqmail connector is connected", () => {
+    expect(resolveConnectedConnectorIds(false, [], false, false, false, true)).toEqual(["qqmail"]);
+  });
 });
 
 describe("nativeConnectorAvailability", () => {
@@ -185,6 +194,7 @@ describe("nativeConnectorAvailability", () => {
     expect(nativeConnectorAvailability("github")).toBe("available");
     expect(nativeConnectorAvailability("feishu")).toBe("available");
     expect(nativeConnectorAvailability("wecom")).toBe("available");
+    expect(nativeConnectorAvailability("qqmail")).toBe("available");
     expect(nativeConnectorAvailability("notion")).toBe("unavailable");
   });
 });
@@ -208,6 +218,104 @@ describe("isWecomProbeSuccessful", () => {
   it("rejects JSON with an error field or empty output", () => {
     expect(isWecomProbeSuccessful('{"error":"invalid credential"}')).toBe(false);
     expect(isWecomProbeSuccessful("")).toBe(false);
+  });
+});
+
+describe("qqmailNpmPlatformPackage", () => {
+  it("maps supported platforms including win32-arm64", () => {
+    expect(qqmailNpmPlatformPackage("darwin", "arm64")).toBe(
+      "@tencent-qqmail/agently-cli-darwin-arm64",
+    );
+    expect(qqmailNpmPlatformPackage("win32", "arm64")).toBe(
+      "@tencent-qqmail/agently-cli-win32-arm64",
+    );
+    expect(qqmailNpmPlatformPackage("win32", "x64")).toBe(
+      "@tencent-qqmail/agently-cli-win32-x64",
+    );
+  });
+
+  it("returns null for unknown platforms", () => {
+    expect(qqmailNpmPlatformPackage("freebsd", "x64")).toBeNull();
+  });
+});
+
+describe("extractQqmailAuthUrl", () => {
+  it("extracts the opaque agent.qq.com OAuth URL from stderr-style output", () => {
+    const raw =
+      "https://agent.qq.com/page/oauth?oauth_type=device&user_code=uc_iN5i0YmVR16HNuXmLc0VcwAA";
+    expect(
+      extractQqmailAuthUrl(`请点击以下链接登录并授权邮箱：\n\n${raw}\n`),
+    ).toBe(raw);
+  });
+
+  it("rejects non-allowlisted hosts", () => {
+    expect(extractQqmailAuthUrl("https://evil.example/page/oauth?x=1")).toBeNull();
+  });
+
+  it("accepts auth.agent.qq.com hosts", () => {
+    const raw = "https://auth.agent.qq.com/oauth/device?func=1&code=abc";
+    expect(extractQqmailAuthUrl(raw)).toBe(raw);
+  });
+});
+
+describe("parseQqmailAuthStatus", () => {
+  it("recognizes logged-out status from S0 sample", () => {
+    expect(
+      parseQqmailAuthStatus(`{
+  "ok": true,
+  "data": {
+    "logged_in": false,
+    "status": "not_logged_in",
+    "message": "Not logged in.",
+    "workspace": "default"
+  }
+}
+tip: Authorization required; follow the agently mail skill OAuth login flow.`),
+    ).toEqual({ connected: false, label: "可用" });
+  });
+
+  it("recognizes logged-in status", () => {
+    expect(
+      parseQqmailAuthStatus(
+        JSON.stringify({
+          ok: true,
+          data: { logged_in: true, status: "logged_in", workspace: "default" },
+        }),
+      ),
+    ).toEqual({ connected: true, label: "已连接" });
+  });
+});
+
+describe("parseQqmailMeAccount", () => {
+  it("returns null when authorization is required", () => {
+    expect(
+      parseQqmailMeAccount(`{
+  "ok": false,
+  "error": { "type": "auth", "message": "authorization required" }
+}`),
+    ).toBeNull();
+  });
+
+  it("extracts email from data.email", () => {
+    expect(
+      parseQqmailMeAccount(
+        JSON.stringify({
+          ok: true,
+          data: { email: "agent@mail.qq.com" },
+        }),
+      ),
+    ).toBe("agent@mail.qq.com");
+  });
+
+  it("extracts alias_id from aliases array", () => {
+    expect(
+      parseQqmailMeAccount(
+        JSON.stringify({
+          ok: true,
+          data: { aliases: [{ alias_id: "bot@agently.qq.com" }] },
+        }),
+      ),
+    ).toBe("bot@agently.qq.com");
   });
 });
 
@@ -358,5 +466,21 @@ describe("extractFeishuDeviceFlow", () => {
 
   it("returns null when config init success has no verification_url", () => {
     expect(extractFeishuDeviceFlow('{"appId":"cli_x","brand":"feishu"}')).toBeNull();
+  });
+});
+
+describe("buildQqmailManagedSkill", () => {
+  it("requires request_action_confirmation with 240s TTL and same-token reuse", () => {
+    const skill = buildQqmailManagedSkill("/opt/agently-cli");
+    expect(skill).toContain("request_action_confirmation");
+    expect(skill).toContain("expires_in_seconds");
+    expect(skill).toContain("240");
+    expect(skill).toContain("--confirmation-token");
+    expect(skill).toContain("完全相同");
+    expect(skill).toContain("[ACTION_CONFIRMED]");
+    expect(skill).toContain("[ACTION_REJECTED]");
+    expect(skill).toContain("[ACTION_CONFIRMATION_EXPIRED]");
+    expect(skill).toContain("/opt/agently-cli");
+    expect(skill).not.toContain("等用户明确许可后");
   });
 });

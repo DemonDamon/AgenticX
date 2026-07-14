@@ -42,6 +42,14 @@ type WecomStatus = {
   error?: string;
 };
 
+type QqmailStatus = {
+  available: boolean;
+  connected: boolean;
+  label: string;
+  error?: string;
+  account?: string;
+};
+
 /** Compact status used inside connect/manage dialogs (not the marketplace card). */
 function StatusLabel({
   available,
@@ -124,6 +132,14 @@ export function ConnectorsTab({ sessionId, tapdConnected, onRefreshMcp }: Props)
   const [botIdInput, setBotIdInput] = useState("");
   const [botSecretInput, setBotSecretInput] = useState("");
   const [showBotSecret, setShowBotSecret] = useState(false);
+  const [qqmailStatus, setQqmailStatus] = useState<QqmailStatus>({
+    available: true,
+    connected: false,
+    label: "可用",
+  });
+  const [qqmailBusy, setQqmailBusy] = useState(false);
+  const [qqmailPhase, setQqmailPhase] = useState("");
+  const [qqmailAuthUrl, setQqmailAuthUrl] = useState("");
   const [tapdToken, setTapdToken] = useState("");
   const [tapdBusy, setTapdBusy] = useState(false);
   const [dialogError, setDialogError] = useState("");
@@ -146,7 +162,9 @@ export function ConnectorsTab({ sessionId, tapdConnected, onRefreshMcp }: Props)
                 ? feishuStatus.connected
                 : item.id === "wecom"
                   ? wecomStatus.connected
-                  : false;
+                  : item.id === "qqmail"
+                    ? qqmailStatus.connected
+                    : false;
       const available =
         item.id === "tencent-meeting"
           ? tmeetStatus.available
@@ -162,7 +180,9 @@ export function ConnectorsTab({ sessionId, tapdConnected, onRefreshMcp }: Props)
                 ? feishuBusy
                 : item.id === "wecom"
                   ? wecomBusy
-                  : false;
+                  : item.id === "qqmail"
+                    ? qqmailBusy
+                    : false;
       return { available, connected, busy };
     },
     [
@@ -170,6 +190,8 @@ export function ConnectorsTab({ sessionId, tapdConnected, onRefreshMcp }: Props)
       feishuStatus.connected,
       githubBusy,
       githubStatus.connected,
+      qqmailBusy,
+      qqmailStatus.connected,
       tapdBusy,
       tapdConnected,
       tmeetBusy,
@@ -239,6 +261,17 @@ export function ConnectorsTab({ sessionId, tapdConnected, onRefreshMcp }: Props)
       connected: result.connected,
       label: result.label,
       error: result.error,
+    });
+  }, []);
+
+  const refreshQqmailStatus = useCallback(async () => {
+    const result = await window.agenticxDesktop.nativeConnectorStatus("qqmail");
+    setQqmailStatus({
+      available: result.available,
+      connected: result.connected,
+      label: result.label,
+      error: result.error,
+      account: result.account,
     });
   }, []);
 
@@ -316,6 +349,25 @@ export function ConnectorsTab({ sessionId, tapdConnected, onRefreshMcp }: Props)
     });
   }, [refreshWecomStatus]);
 
+  useEffect(() => {
+    void refreshQqmailStatus();
+    return window.agenticxDesktop.onNativeConnectorQqmailProgress(({ phase, authUrl }) => {
+      const labels: Record<string, string> = {
+        installing: "首次使用，正在下载 Agent Mail CLI…",
+        opening_browser: "请在浏览器中完成微信授权…",
+        waiting: "等待授权完成…",
+        success: "授权成功",
+        disconnected: "已断开连接",
+        error: "授权未完成",
+      };
+      if (authUrl) setQqmailAuthUrl(authUrl);
+      if (labels[phase]) setQqmailPhase(labels[phase]);
+      if (phase === "success" || phase === "disconnected" || phase === "error") {
+        void refreshQqmailStatus();
+      }
+    });
+  }, [refreshQqmailStatus]);
+
   const openConnector = (item: ConnectorDefinition) => {
     if (nativeConnectorAvailability(item.id) !== "available") return;
     setDialogError("");
@@ -328,6 +380,8 @@ export function ConnectorsTab({ sessionId, tapdConnected, onRefreshMcp }: Props)
     setBotIdInput("");
     setBotSecretInput("");
     setShowBotSecret(false);
+    setQqmailPhase("");
+    setQqmailAuthUrl("");
     setSelectedId(item.id);
   };
 
@@ -581,6 +635,74 @@ export function ConnectorsTab({ sessionId, tapdConnected, onRefreshMcp }: Props)
       setSelectedId(null);
     } finally {
       setWecomBusy(false);
+    }
+  };
+
+  const handleQqmailConnect = async () => {
+    setQqmailBusy(true);
+    setDialogError("");
+    setQqmailAuthUrl("");
+    setQqmailPhase("准备 Agent Mail 浏览器授权…");
+    try {
+      const result = await window.agenticxDesktop.nativeConnectorQqmailLogin();
+      setQqmailStatus({
+        available: result.available,
+        connected: result.connected,
+        label: result.label,
+        error: result.error,
+        account: result.account,
+      });
+      if (result.error === "已取消") {
+        setQqmailPhase("");
+        setQqmailAuthUrl("");
+        return;
+      }
+      if (!result.ok || !result.connected) {
+        setDialogError(result.error || "Agent Mail 授权未完成");
+        return;
+      }
+      showToast("Agent Mail 已连接");
+      setSelectedId(null);
+    } finally {
+      setQqmailBusy(false);
+    }
+  };
+
+  const handleQqmailCancel = async () => {
+    if (qqmailBusy) {
+      try {
+        await window.agenticxDesktop.nativeConnectorQqmailCancel();
+      } catch {
+        // best-effort cancel
+      }
+    }
+    setQqmailBusy(false);
+    setQqmailPhase("");
+    setQqmailAuthUrl("");
+    setDialogError("");
+    setSelectedId(null);
+  };
+
+  const handleQqmailLogout = async () => {
+    setQqmailBusy(true);
+    setDialogError("");
+    try {
+      const result = await window.agenticxDesktop.nativeConnectorQqmailLogout();
+      setQqmailStatus({
+        available: result.available,
+        connected: result.connected,
+        label: result.label,
+        error: result.error,
+        account: result.account,
+      });
+      if (!result.ok) {
+        setDialogError(result.error || "Agent Mail 断开失败");
+        return;
+      }
+      showToast("已断开 Agent Mail");
+      setSelectedId(null);
+    } finally {
+      setQqmailBusy(false);
     }
   };
 
@@ -1052,6 +1174,99 @@ export function ConnectorsTab({ sessionId, tapdConnected, onRefreshMcp }: Props)
             {dialogError || wecomStatus.error ? (
               <div className="rounded-lg border border-rose-500/35 bg-rose-500/10 px-3 py-2 text-xs text-rose-300">
                 {dialogError || wecomStatus.error}
+              </div>
+            ) : null}
+          </div>
+        ) : null}
+      </Modal>
+
+      <Modal
+        open={selected?.id === "qqmail"}
+        title="Agent Mail 连接器"
+        onClose={() => void handleQqmailCancel()}
+        panelClassName="w-[min(560px,94vw)] bg-surface-panel"
+        footer={
+          <div className="flex justify-end gap-2">
+            <button
+              type="button"
+              className="rounded-md border border-border px-3 py-2 text-xs text-text-muted hover:bg-surface-hover"
+              onClick={() => void handleQqmailCancel()}
+            >
+              取消
+            </button>
+            <button
+              type="button"
+              className="rounded-md bg-btnPrimary px-4 py-2 text-xs font-medium text-btnPrimary-text hover:bg-btnPrimary-hover disabled:opacity-50"
+              disabled={qqmailBusy}
+              onClick={() => void (qqmailStatus.connected ? handleQqmailLogout() : handleQqmailConnect())}
+            >
+              {qqmailBusy ? "处理中…" : qqmailStatus.connected ? "断开连接" : "连接 Agent Mail"}
+            </button>
+          </div>
+        }
+      >
+        {selected ? (
+          <div className="space-y-4">
+            <div className="flex items-center gap-3">
+              <ConnectorIcon item={selected} large />
+              <div>
+                <div className="text-base font-semibold text-text-strong">Agent Mail</div>
+                <StatusLabel
+                  available={qqmailStatus.available}
+                  connected={qqmailStatus.connected}
+                  busy={qqmailBusy}
+                />
+                {qqmailStatus.connected && qqmailStatus.account ? (
+                  <div className="mt-1 text-xs text-text-muted">邮箱：{qqmailStatus.account}</div>
+                ) : null}
+              </div>
+            </div>
+            <p className="text-sm leading-relaxed text-text-muted">
+              Agently Mail 是 QQ 邮箱团队为 Agent 打造的专属邮箱（与个人 QQ
+              邮箱隔离）。通过官方 CLI（agently-cli）微信扫码授权后，Near
+              会写入托管技能，Agent 可收发、搜索、回复与转发邮件。管理端：
+              agent.qq.com。
+            </p>
+            {qqmailAuthUrl ? (
+              <div className="rounded-lg border border-border bg-surface-card px-4 py-3 space-y-2">
+                <div className="text-[11px] text-text-muted">
+                  请点击或复制以下链接在浏览器中完成授权：
+                </div>
+                <pre className="overflow-x-auto whitespace-pre-wrap break-all rounded-md bg-surface-panel px-2 py-1.5 text-[11px] text-text-strong">
+                  {qqmailAuthUrl}
+                </pre>
+                <div className="flex flex-wrap items-center gap-2">
+                  <button
+                    type="button"
+                    className="inline-flex items-center gap-1 rounded-md border border-border px-2 py-1 text-[11px] text-text-muted hover:bg-surface-hover hover:text-text-strong"
+                    onClick={() => void window.agenticxDesktop.openExternal(qqmailAuthUrl)}
+                  >
+                    <ExternalLink className="h-3.5 w-3.5" aria-hidden />
+                    打开授权页
+                  </button>
+                  <button
+                    type="button"
+                    className="inline-flex items-center gap-1 rounded-md border border-border px-2 py-1 text-[11px] text-text-muted hover:bg-surface-hover hover:text-text-strong"
+                    onClick={() => void navigator.clipboard.writeText(qqmailAuthUrl)}
+                  >
+                    <Copy className="h-3.5 w-3.5" aria-hidden />
+                    复制链接
+                  </button>
+                </div>
+              </div>
+            ) : null}
+            {qqmailPhase ? (
+              <div
+                className="flex items-center gap-2 rounded-lg border border-border bg-surface-card px-3 py-2 text-xs text-text-muted"
+                role="status"
+              >
+                {qqmailBusy ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
+                {qqmailPhase}
+              </div>
+            ) : null}
+            {dialogError || qqmailStatus.error ? (
+              <div className="rounded-lg border border-rose-500/35 bg-rose-500/10 px-3 py-2 text-xs text-rose-300">
+                {dialogError || qqmailStatus.error}
               </div>
             ) : null}
           </div>

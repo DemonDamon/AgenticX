@@ -65,17 +65,22 @@ import {
 } from "./meta-workspace-history";
 import {
   assertManagedSkillDirectory,
+  buildQqmailManagedSkill,
   buildTapdMcpEntry,
   extractAuthorizationUrl,
   extractFeishuDeviceFlow,
   extractGithubDeviceCode,
   extractGithubDeviceUrl,
+  extractQqmailAuthUrl,
   isTapdValidationSuccess,
   isWecomProbeSuccessful,
   mergeTapdMcpDocument,
   parseFeishuAuthStatus,
   parseGithubAuthStatus,
+  parseQqmailAuthStatus,
+  parseQqmailMeAccount,
   parseTmeetAuthStatus,
+  qqmailNpmPlatformPackage,
   readBodyWithLimit,
   wecomNpmPlatformPackage,
 } from "./native-connectors-core";
@@ -1815,6 +1820,16 @@ let wecomInstallPromise: Promise<string> | null = null;
 /** Active WeCom init canceller — closes login promise and kills wecom-cli PTY. */
 let cancelActiveWecomLogin: ((reason?: string) => void) | null = null;
 let wecomBinaryValidationCache: {
+  path: string;
+  size: number;
+  mtimeMs: number;
+  valid: boolean;
+} | null = null;
+let qqmailAuthProcess: ChildProcess | null = null;
+let qqmailAuthBusy = false;
+let qqmailInstallPromise: Promise<string> | null = null;
+let cancelActiveQqmailLogin: ((reason?: string) => void) | null = null;
+let qqmailBinaryValidationCache: {
   path: string;
   size: number;
   mtimeMs: number;
@@ -5380,6 +5395,592 @@ function startWecomLogin(botId: string, botSecret: string): Promise<NativeConnec
   });
 }
 
+/**
+ * Agent Mail connector (agently-cli / Agently Mail)
+ * Product: QQ 邮箱团队为 Agent 打造的专属邮箱（与个人邮箱隔离），官网 agent.qq.com
+ * S0 (2026-07-14): auth login stderr prints
+ *   https://agent.qq.com/page/oauth?oauth_type=device&user_code=uc_...
+ * auth status JSON: { ok, data:{ logged_in, status, ... } }; +me exit 3 when unauthorized.
+ * npm binary member: package/bin/agently-cli(.exe)
+ */
+const AGENTLY_CLI_VERSION = "1.0.9";
+const AGENTLY_CLI_ARCHIVE_MAX_BYTES = 40 * 1024 * 1024;
+const AGENTLY_NPM_REGISTRY = "https://registry.npmjs.org";
+
+function qqmailInstallDir(version = AGENTLY_CLI_VERSION): string {
+  return path.join(os.homedir(), ".agenticx", "connectors", "qqmail", version);
+}
+
+function qqmailBinaryName(): string {
+  return process.platform === "win32" ? "agently-cli.exe" : "agently-cli";
+}
+
+function qqmailSkillDir(): string {
+  return path.join(os.homedir(), ".agenticx", "skills", "near-connectors", "qqmail");
+}
+
+function persistQqmailConnectorStatus(connected: boolean, account?: string): void {
+  const parentDir = path.dirname(NATIVE_CONNECTOR_STATUS_PATH);
+  fs.mkdirSync(parentDir, { recursive: true, mode: 0o700 });
+  if (
+    fs.existsSync(NATIVE_CONNECTOR_STATUS_PATH) &&
+    fs.lstatSync(NATIVE_CONNECTOR_STATUS_PATH).isSymbolicLink()
+  ) {
+    throw new Error("原生连接器状态文件不能是符号链接");
+  }
+  let current: Record<string, unknown> = {};
+  try {
+    const parsed = JSON.parse(fs.readFileSync(NATIVE_CONNECTOR_STATUS_PATH, "utf8"));
+    if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+      current = parsed as Record<string, unknown>;
+    }
+  } catch {
+    current = {};
+  }
+  const connectors =
+    current.connectors &&
+    typeof current.connectors === "object" &&
+    !Array.isArray(current.connectors)
+      ? (current.connectors as Record<string, unknown>)
+      : {};
+  const next = {
+    ...current,
+    version: 1,
+    connectors: {
+      ...connectors,
+      qqmail: {
+        connected,
+        ...(account ? { account } : {}),
+        capability: "skill",
+        skill_name: "qqmail",
+        updated_at: new Date().toISOString(),
+      },
+    },
+  };
+  const tempPath = `${NATIVE_CONNECTOR_STATUS_PATH}.${process.pid}.tmp`;
+  fs.writeFileSync(tempPath, `${JSON.stringify(next, null, 2)}\n`, {
+    encoding: "utf8",
+    mode: 0o600,
+  });
+  fs.renameSync(tempPath, NATIVE_CONNECTOR_STATUS_PATH);
+}
+
+function tryPersistQqmailConnectorStatus(connected: boolean, account?: string): void {
+  try {
+    persistQqmailConnectorStatus(connected, account);
+  } catch (error) {
+    console.warn("[native-connectors] failed to persist QQ Mail status:", String(error));
+  }
+}
+
+function resolveSystemAgentlyCliPath(): string | null {
+  const candidates: string[] = [];
+  if (process.platform === "win32") {
+    const appData = process.env.APPDATA || "";
+    if (appData) {
+      candidates.push(path.join(appData, "npm", "agently-cli.cmd"));
+      candidates.push(path.join(appData, "npm", "agently-cli.exe"));
+    }
+  } else {
+    candidates.push(
+      "/opt/homebrew/bin/agently-cli",
+      "/usr/local/bin/agently-cli",
+      "/usr/bin/agently-cli",
+      path.join(os.homedir(), ".npm-global", "bin", "agently-cli"),
+    );
+  }
+  try {
+    const whichCmd = process.platform === "win32" ? "where" : "which";
+    const found = execFileSync(whichCmd, ["agently-cli"], {
+      encoding: "utf8",
+      timeout: 3000,
+      stdio: ["ignore", "pipe", "ignore"],
+      env: process.env,
+    })
+      .split(/\r?\n/)
+      .map((line) => line.trim())
+      .find(Boolean);
+    if (found) candidates.unshift(found);
+  } catch {
+    // PATH lookup is best-effort
+  }
+  for (const candidate of candidates) {
+    try {
+      if (fs.existsSync(candidate) && fs.statSync(candidate).isFile()) return candidate;
+    } catch {
+      // continue
+    }
+  }
+  return null;
+}
+
+async function resolveInstalledAgentlyCliBinaryPath(): Promise<string | null> {
+  const binaryPath = path.join(qqmailInstallDir(), "bin", qqmailBinaryName());
+  try {
+    if (!fs.existsSync(binaryPath)) return null;
+    const stat = fs.lstatSync(binaryPath);
+    if (!stat.isFile() || stat.isSymbolicLink()) return null;
+    if (
+      qqmailBinaryValidationCache &&
+      qqmailBinaryValidationCache.path === binaryPath &&
+      qqmailBinaryValidationCache.size === stat.size &&
+      qqmailBinaryValidationCache.mtimeMs === stat.mtimeMs
+    ) {
+      return qqmailBinaryValidationCache.valid ? binaryPath : null;
+    }
+    await new Promise<void>((resolve, reject) => {
+      execFile(
+        binaryPath,
+        ["--help"],
+        { timeout: 8000, maxBuffer: 1024 * 1024, env: { ...process.env, NO_COLOR: "1" } },
+        (error) => {
+          if (error) reject(error);
+          else resolve();
+        },
+      );
+    });
+    qqmailBinaryValidationCache = {
+      path: binaryPath,
+      size: stat.size,
+      mtimeMs: stat.mtimeMs,
+      valid: true,
+    };
+    return binaryPath;
+  } catch {
+    qqmailBinaryValidationCache = {
+      path: binaryPath,
+      size: 0,
+      mtimeMs: 0,
+      valid: false,
+    };
+    return null;
+  }
+}
+
+async function resolveAgentlyCliBinaryPath(): Promise<string | null> {
+  return resolveSystemAgentlyCliPath() || (await resolveInstalledAgentlyCliBinaryPath());
+}
+
+async function installAgentlyCliBinary(): Promise<string> {
+  const installed = await resolveInstalledAgentlyCliBinaryPath();
+  if (installed) return installed;
+  sendQqmailProgress("installing");
+  const pkgName = qqmailNpmPlatformPackage(process.platform, process.arch);
+  if (!pkgName) throw new Error("当前平台暂不支持 Agent Mail 连接器");
+  const parentDir = path.dirname(qqmailInstallDir());
+  fs.mkdirSync(parentDir, { recursive: true, mode: 0o700 });
+  const partialDir = path.join(parentDir, `.partial-${crypto.randomUUID()}`);
+  const archivePath = path.join(parentDir, `.download-${crypto.randomUUID()}.tgz`);
+  try {
+    const metaResponse = await proxyAwareFetch(
+      `${AGENTLY_NPM_REGISTRY}/${pkgName.replace("/", "%2F")}`,
+      { signal: AbortSignal.timeout(30000) },
+    );
+    if (!metaResponse.ok) {
+      throw new Error(`读取 Agent Mail CLI 包元数据失败：HTTP ${metaResponse.status}`);
+    }
+    const meta = (await metaResponse.json()) as {
+      "dist-tags"?: { latest?: string };
+      versions?: Record<string, { dist?: { tarball?: string; integrity?: string } }>;
+    };
+    let version = AGENTLY_CLI_VERSION;
+    let dist = meta.versions?.[version]?.dist;
+    if (!dist?.tarball || !dist.integrity) {
+      const latest = meta.versions?.[meta["dist-tags"]?.latest || ""]?.dist;
+      const latestTag = meta["dist-tags"]?.latest;
+      if (!latestTag || !latest?.tarball || !latest.integrity) {
+        throw new Error("Agent Mail CLI 包元数据缺少 tarball/integrity");
+      }
+      version = latestTag;
+      dist = latest;
+      console.warn(
+        `[native-connectors] agently-cli pinned ${AGENTLY_CLI_VERSION} missing; using ${version}`,
+      );
+    }
+    const response = await proxyAwareFetch(dist.tarball!, {
+      signal: AbortSignal.timeout(90000),
+    });
+    if (!response.ok) throw new Error(`下载 Agent Mail CLI 失败：HTTP ${response.status}`);
+    const declaredSize = Number(response.headers.get("content-length") || "0");
+    if (declaredSize > AGENTLY_CLI_ARCHIVE_MAX_BYTES) {
+      throw new Error("Agent Mail CLI 下载包超过安全限制");
+    }
+    const archive = Buffer.from(
+      await readBodyWithLimit(response.body, AGENTLY_CLI_ARCHIVE_MAX_BYTES),
+    );
+    if (archive.length === 0 || archive.length > AGENTLY_CLI_ARCHIVE_MAX_BYTES) {
+      throw new Error("Agent Mail CLI 下载包大小异常");
+    }
+    if (!verifyNpmSriIntegrity(archive, dist.integrity!)) {
+      throw new Error("Agent Mail CLI 完整性校验失败");
+    }
+    fs.mkdirSync(partialDir, { recursive: true, mode: 0o700 });
+    fs.writeFileSync(archivePath, archive, { mode: 0o600 });
+    const binaryMember = `package/bin/${qqmailBinaryName()}`;
+    await extractTar({
+      file: archivePath,
+      cwd: partialDir,
+      filter: (memberPath) =>
+        memberPath === binaryMember ||
+        memberPath === "package/bin/agently-cli" ||
+        memberPath === "package/bin/agently-cli.exe" ||
+        memberPath.endsWith("/LICENSE"),
+    });
+    const extractedBinary = path.join(partialDir, binaryMember);
+    if (!fs.existsSync(extractedBinary)) {
+      throw new Error("Agent Mail CLI 运行文件提取失败");
+    }
+    const stat = fs.lstatSync(extractedBinary);
+    if (!stat.isFile() || stat.isSymbolicLink()) throw new Error("Agent Mail CLI 运行文件无效");
+    if (process.platform !== "win32") fs.chmodSync(extractedBinary, 0o755);
+    const stagedBinDir = path.join(partialDir, "bin");
+    fs.mkdirSync(stagedBinDir, { recursive: true, mode: 0o700 });
+    const stagedBinary = path.join(stagedBinDir, qqmailBinaryName());
+    if (path.resolve(extractedBinary) !== path.resolve(stagedBinary)) {
+      fs.renameSync(extractedBinary, stagedBinary);
+    }
+    const finalDir = qqmailInstallDir();
+    if (fs.existsSync(finalDir)) fs.rmSync(finalDir, { recursive: true, force: true });
+    fs.renameSync(partialDir, finalDir);
+    const result = await resolveInstalledAgentlyCliBinaryPath();
+    if (!result) throw new Error("Agent Mail CLI 安装未完成");
+    return result;
+  } finally {
+    fs.rmSync(archivePath, { force: true });
+    fs.rmSync(partialDir, { recursive: true, force: true });
+  }
+}
+
+async function ensureAgentlyCliBinaryInstalled(): Promise<string> {
+  const existing = await resolveAgentlyCliBinaryPath();
+  if (existing) return existing;
+  if (qqmailInstallPromise) return await qqmailInstallPromise;
+  qqmailInstallPromise = installAgentlyCliBinary().finally(() => {
+    qqmailInstallPromise = null;
+  });
+  return await qqmailInstallPromise;
+}
+
+async function runAgentlyCliCommand(
+  args: string[],
+  timeoutMs = 15000,
+  binaryPathOverride?: string,
+): Promise<{ stdout: string; stderr: string; code: number | null }> {
+  const binaryPath = binaryPathOverride || (await resolveAgentlyCliBinaryPath());
+  if (!binaryPath) throw new Error("Agent Mail CLI 尚未安装");
+  return await new Promise((resolve) => {
+    execFile(
+      binaryPath,
+      args,
+      {
+        timeout: timeoutMs,
+        maxBuffer: 2 * 1024 * 1024,
+        env: {
+          ...process.env,
+          NO_COLOR: "1",
+        },
+      },
+      (error, stdout, stderr) => {
+        const execErr = error as (NodeJS.ErrnoException & { status?: number | null }) | null;
+        const status =
+          typeof execErr?.status === "number"
+            ? execErr.status
+            : typeof execErr?.code === "number"
+              ? execErr.code
+              : error
+                ? 1
+                : 0;
+        resolve({
+          stdout: String(stdout ?? ""),
+          stderr: String(stderr ?? ""),
+          code: status,
+        });
+      },
+    );
+  });
+}
+
+function ensureQqmailSkill(binaryPath: string): void {
+  const skillDir = qqmailSkillDir();
+  const skillPath = path.join(skillDir, "SKILL.md");
+  const markerPath = path.join(skillDir, ".near-managed");
+  const directoryExists = fs.existsSync(skillDir);
+  const markerExists = fs.existsSync(markerPath);
+  assertManagedSkillDirectory(directoryExists, markerExists);
+  const content = buildQqmailManagedSkill(binaryPath);
+  if (!directoryExists) {
+    const parentDir = path.dirname(skillDir);
+    const partialDir = path.join(parentDir, `.qqmail.partial-${crypto.randomUUID()}`);
+    fs.mkdirSync(parentDir, { recursive: true, mode: 0o700 });
+    try {
+      fs.mkdirSync(partialDir, { mode: 0o700 });
+      fs.writeFileSync(path.join(partialDir, "SKILL.md"), content, {
+        encoding: "utf8",
+        mode: 0o600,
+      });
+      fs.writeFileSync(path.join(partialDir, ".near-managed"), "managed by Near\n", {
+        encoding: "utf8",
+        mode: 0o600,
+      });
+      fs.renameSync(partialDir, skillDir);
+    } catch (error) {
+      fs.rmSync(partialDir, { recursive: true, force: true });
+      throw error;
+    }
+    return;
+  }
+  const tempPath = `${skillPath}.tmp`;
+  fs.writeFileSync(tempPath, content, { encoding: "utf8", mode: 0o600 });
+  fs.renameSync(tempPath, skillPath);
+}
+
+function removeQqmailSkill(): void {
+  const skillDir = qqmailSkillDir();
+  const markerPath = path.join(skillDir, ".near-managed");
+  if (!fs.existsSync(markerPath)) return;
+  fs.rmSync(skillDir, { recursive: true, force: true });
+}
+
+async function getQqmailStatus(): Promise<NativeConnectorStatusResult> {
+  try {
+    let binaryPath = await resolveAgentlyCliBinaryPath();
+    const managedSkillMarker = path.join(qqmailSkillDir(), ".near-managed");
+    if (!binaryPath && fs.existsSync(managedSkillMarker)) {
+      binaryPath = await ensureAgentlyCliBinaryInstalled();
+    }
+    if (!binaryPath) {
+      tryPersistQqmailConnectorStatus(false);
+      return { ok: true, available: true, connected: false, label: "可用" };
+    }
+    const statusResult = await runAgentlyCliCommand(["auth", "status"], 10000, binaryPath);
+    const combined = `${statusResult.stdout}\n${statusResult.stderr}`;
+    const parsed = parseQqmailAuthStatus(combined);
+    if (!parsed.connected) {
+      removeQqmailSkill();
+      tryPersistQqmailConnectorStatus(false);
+      return {
+        ok: true,
+        available: true,
+        connected: false,
+        label: parsed.label || "可用",
+        error: parsed.error,
+      };
+    }
+    const meResult = await runAgentlyCliCommand(["+me"], 10000, binaryPath);
+    const account =
+      parseQqmailMeAccount(`${meResult.stdout}\n${meResult.stderr}`) || undefined;
+    try {
+      ensureQqmailSkill(binaryPath);
+    } catch (error) {
+      tryPersistQqmailConnectorStatus(false);
+      return {
+        ok: false,
+        available: true,
+        connected: false,
+        label: "连接异常",
+        error: error instanceof Error ? error.message : String(error),
+      };
+    }
+    tryPersistQqmailConnectorStatus(true, account);
+    return {
+      ok: true,
+      available: true,
+      connected: true,
+      label: "已连接",
+      account,
+    };
+  } catch (error) {
+    tryPersistQqmailConnectorStatus(false);
+    return {
+      ok: false,
+      available: false,
+      connected: false,
+      label: "暂不可用",
+      error: error instanceof Error ? error.message : String(error),
+    };
+  }
+}
+
+type QqmailProgressPhase =
+  | "installing"
+  | "opening_browser"
+  | "waiting"
+  | "success"
+  | "disconnected"
+  | "error";
+
+function sendQqmailProgress(
+  phase: QqmailProgressPhase,
+  extra?: { authUrl?: string },
+): void {
+  if (!mainWindow || mainWindow.isDestroyed()) return;
+  mainWindow.webContents.send("native-connector-qqmail-progress", {
+    phase,
+    ...(extra?.authUrl ? { authUrl: extra.authUrl } : {}),
+  });
+}
+
+function startQqmailLogin(): Promise<NativeConnectorStatusResult> {
+  if (qqmailAuthBusy) {
+    return Promise.resolve({
+      ok: false,
+      available: true,
+      connected: false,
+      label: "连接中",
+      error: "Agent Mail 正在等待浏览器授权",
+    });
+  }
+  qqmailAuthBusy = true;
+  return new Promise((resolve) => {
+    let opened = false;
+    let output = "";
+    let settled = false;
+    let proc: ChildProcess | null = null;
+    let timeout: ReturnType<typeof setTimeout> | null = null;
+    const finish = async (result?: NativeConnectorStatusResult, terminate = false) => {
+      if (settled) return;
+      settled = true;
+      cancelActiveQqmailLogin = null;
+      if (timeout) clearTimeout(timeout);
+      const currentProc = proc;
+      if (terminate && currentProc && currentProc.exitCode === null) {
+        await new Promise<void>((done) => {
+          const fallback = setTimeout(done, 2000);
+          currentProc.once("close", () => {
+            clearTimeout(fallback);
+            done();
+          });
+          try {
+            currentProc.kill("SIGTERM");
+          } catch {
+            done();
+          }
+        });
+      }
+      if (proc && qqmailAuthProcess === proc) qqmailAuthProcess = null;
+      qqmailAuthBusy = false;
+      const status = result ?? (await getQqmailStatus());
+      if (status.error === "已取消") {
+        sendQqmailProgress("disconnected");
+      } else {
+        sendQqmailProgress(status.connected ? "success" : "error");
+      }
+      resolve(status);
+    };
+    cancelActiveQqmailLogin = (reason) => {
+      void finish(
+        {
+          ok: false,
+          available: true,
+          connected: false,
+          label: "可用",
+          error: reason || "已取消",
+        },
+        true,
+      );
+    };
+    const consume = (chunk: Buffer) => {
+      output = `${output}${chunk.toString("utf8")}`.slice(-32768);
+      const authUrl = extractQqmailAuthUrl(output);
+      if (!opened && authUrl) {
+        opened = true;
+        sendQqmailProgress("opening_browser", { authUrl });
+        void shell
+          .openExternal(authUrl)
+          .then(() => sendQqmailProgress("waiting", { authUrl }))
+          .catch(() =>
+            finish(
+              {
+                ok: false,
+                available: true,
+                connected: false,
+                label: "连接失败",
+                error: "无法打开 Agent Mail 授权页面",
+              },
+              true,
+            ),
+          );
+      }
+    };
+    void ensureAgentlyCliBinaryInstalled()
+      .then((binaryPath) => {
+        if (settled) return;
+        proc = spawn(binaryPath, ["auth", "login"], {
+          stdio: ["ignore", "pipe", "pipe"],
+          env: {
+            ...process.env,
+            NO_COLOR: "1",
+            // Prefer Near-controlled browser open.
+            BROWSER: process.platform === "win32" ? "echo" : "/bin/true",
+          },
+        });
+        qqmailAuthProcess = proc;
+        timeout = setTimeout(() => {
+          void finish(
+            {
+              ok: false,
+              available: true,
+              connected: false,
+              label: "连接失败",
+              error: "Agent Mail 授权已超时，请重试",
+            },
+            true,
+          );
+        }, 10 * 60 * 1000);
+        proc.stdout?.on("data", consume);
+        proc.stderr?.on("data", consume);
+        proc.on("error", (error) => {
+          void finish({
+            ok: false,
+            available: true,
+            connected: false,
+            label: "连接失败",
+            error: error.message || String(error),
+          });
+        });
+        proc.on("close", (code) => {
+          if (settled) return;
+          if (code === 0) {
+            void getQqmailStatus().then((status) => {
+              if (status.connected) {
+                void finish(status);
+              } else {
+                void finish({
+                  ok: false,
+                  available: true,
+                  connected: false,
+                  label: "连接失败",
+                  error: status.error || "授权完成但未检测到登录状态",
+                });
+              }
+            });
+            return;
+          }
+          // Official docs: do not retry on failure.
+          void finish({
+            ok: false,
+            available: true,
+            connected: false,
+            label: "连接失败",
+            error:
+              code == null
+                ? "Agent Mail 授权未完成"
+                : `Agent Mail 授权失败（退出码 ${code}）`,
+          });
+        });
+      })
+      .catch((error) => {
+        void finish({
+          ok: false,
+          available: true,
+          connected: false,
+          label: "连接失败",
+          error: error instanceof Error ? error.message : String(error),
+        });
+      });
+  });
+}
+
 async function configureTapdConnector(
   sessionId: string,
   accessToken: string,
@@ -6631,6 +7232,7 @@ function registerIpc(): void {
     if (id === "github") return await getGithubStatus();
     if (id === "feishu") return await getFeishuStatus();
     if (id === "wecom") return await getWecomStatus();
+    if (id === "qqmail") return await getQqmailStatus();
     if (id === "tapd") {
       return { ok: true, available: true, connected: false, label: "可用" };
     }
@@ -6885,6 +7487,66 @@ function registerIpc(): void {
       return status;
     } catch (error) {
       const status = await getWecomStatus();
+      return {
+        ...status,
+        ok: false,
+        error: error instanceof Error ? error.message : String(error),
+      };
+    }
+  });
+
+  ipcMain.handle("native-connector-qqmail-login", async () => {
+    try {
+      return await startQqmailLogin();
+    } catch (error) {
+      return {
+        ok: false,
+        available: false,
+        connected: false,
+        label: "连接失败",
+        error: error instanceof Error ? error.message : String(error),
+      };
+    }
+  });
+
+  ipcMain.handle("native-connector-qqmail-cancel", async () => {
+    if (cancelActiveQqmailLogin) {
+      cancelActiveQqmailLogin("已取消");
+      return { ok: true, available: true, connected: false, label: "可用" };
+    }
+    if (qqmailAuthProcess) {
+      try {
+        qqmailAuthProcess.kill("SIGTERM");
+      } catch {
+        // ignore
+      }
+      qqmailAuthProcess = null;
+      qqmailAuthBusy = false;
+    }
+    sendQqmailProgress("disconnected");
+    return { ok: true, available: true, connected: false, label: "可用" };
+  });
+
+  ipcMain.handle("native-connector-qqmail-logout", async () => {
+    try {
+      const binaryPath = await resolveAgentlyCliBinaryPath();
+      if (binaryPath) {
+        await runAgentlyCliCommand(["auth", "logout"], 15000, binaryPath);
+      }
+      removeQqmailSkill();
+      tryPersistQqmailConnectorStatus(false);
+      sendQqmailProgress("disconnected");
+      const status = await getQqmailStatus();
+      if (status.connected) {
+        return {
+          ...status,
+          ok: false,
+          error: status.error || "Agent Mail 仍处于连接状态，断开未生效",
+        };
+      }
+      return status;
+    } catch (error) {
+      const status = await getQqmailStatus();
       return {
         ...status,
         ok: false,

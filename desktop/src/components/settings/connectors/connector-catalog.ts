@@ -3,6 +3,7 @@ import tapdIcon from "../../../assets/connectors/tapd.svg";
 import githubIcon from "../../../assets/connectors/github.svg";
 import feishuIcon from "../../../assets/connectors/feishu.svg";
 import wecomIcon from "../../../assets/connectors/wecom.svg";
+import qqmailIcon from "../../../assets/connectors/qqmail.svg";
 import gmailIcon from "../../../assets/connectors/gmail.svg";
 import notionIcon from "../../../assets/connectors/notion.svg";
 import slackIcon from "../../../assets/connectors/slack.svg";
@@ -17,6 +18,7 @@ export type ConnectorId =
   | "github"
   | "feishu"
   | "wecom"
+  | "qqmail"
   | "gmail"
   | "notion"
   | "slack"
@@ -70,6 +72,12 @@ export const CONNECTORS: ConnectorDefinition[] = [
     name: "企业微信",
     description: "消息、文档、智能表格、通讯录、待办与会议",
     iconSrc: wecomIcon,
+  },
+  {
+    id: "qqmail",
+    name: "Agent Mail",
+    description: "Agent 专属邮箱：收发、搜索、回复与转发",
+    iconSrc: qqmailIcon,
   },
   { id: "gmail", name: "Gmail", description: "收发、搜索和整理邮件", iconSrc: gmailIcon },
   { id: "notion", name: "Notion", description: "浏览页面与数据库内容", iconSrc: notionIcon },

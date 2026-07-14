@@ -1047,6 +1047,29 @@ declare global {
         label: string;
         error?: string;
       }>;
+      nativeConnectorQqmailLogin: () => Promise<{
+        ok: boolean;
+        available: boolean;
+        connected: boolean;
+        label: string;
+        error?: string;
+        account?: string;
+      }>;
+      nativeConnectorQqmailLogout: () => Promise<{
+        ok: boolean;
+        available: boolean;
+        connected: boolean;
+        label: string;
+        error?: string;
+        account?: string;
+      }>;
+      nativeConnectorQqmailCancel: () => Promise<{
+        ok: boolean;
+        available: boolean;
+        connected: boolean;
+        label: string;
+        error?: string;
+      }>;
       nativeConnectorTapdConfigure: (payload: {
         sessionId: string;
         accessToken: string;
@@ -1086,6 +1109,12 @@ declare global {
       onNativeConnectorWecomProgress: (
         callback: (payload: {
           phase: "installing" | "initializing" | "probing" | "success" | "disconnected" | "error";
+        }) => void,
+      ) => () => void;
+      onNativeConnectorQqmailProgress: (
+        callback: (payload: {
+          phase: "installing" | "opening_browser" | "waiting" | "success" | "disconnected" | "error";
+          authUrl?: string;
         }) => void,
       ) => () => void;
       resolveLocalPath: (path: string) => Promise<{
