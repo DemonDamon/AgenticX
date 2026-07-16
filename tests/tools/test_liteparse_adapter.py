@@ -20,7 +20,7 @@ def test_liteparse_is_available_with_liteparse_binary(monkeypatch: pytest.Monkey
 
 
 def test_liteparse_is_available_with_npx(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Adapter should be available when npx exists."""
+    """Bare npx alone must not count as LiteParse installed."""
     def fake_which(name: str):
         if name == "liteparse":
             return None
@@ -29,7 +29,11 @@ def test_liteparse_is_available_with_npx(monkeypatch: pytest.MonkeyPatch) -> Non
         return None
 
     monkeypatch.setattr("agenticx.tools.adapters.liteparse.shutil.which", fake_which)
-    assert LiteParseAdapter.is_available() is True
+    monkeypatch.setattr(
+        "agenticx.tools.adapters.liteparse.Path.exists",
+        lambda self: False,
+    )
+    assert LiteParseAdapter.is_available() is False
 
 
 @pytest.mark.asyncio

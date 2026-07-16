@@ -1189,9 +1189,8 @@ class KBRuntime:
 
 
 # Formats that agenticx's native readers can't handle (old-format Office,
-# Excel, images) but LiteParse can. When the user registers one of these, we
-# route directly to LiteParse; if it's not installed we raise a clear KBError
-# with the install hint so the UI can surface a copy-pastable command.
+# Excel, images) but LiteParse can. Kept for callers/tests that still inspect
+# the historical KB routing constants.
 _LITEPARSE_ONLY_EXTS: set[str] = {
     ".doc",
     ".ppt",
@@ -1209,121 +1208,65 @@ _LIBREOFFICE_REQUIRED_EXTS: set[str] = {".doc", ".ppt", ".xls", ".xlsx"}
 
 
 def _libreoffice_install_hint() -> str:
-    """Return platform-specific LibreOffice install command."""
+    """Compatibility wrapper around shared LibreOffice install hint."""
+    from agenticx.tools.document_text import libreoffice_install_hint
 
-    system = platform.system().strip().lower()
-    if system == "darwin":
-        return "brew install --cask libreoffice"
-    if system == "windows":
-        return "choco install libreoffice-fresh"
-    # Linux and unknown fall back to apt-style guidance.
-    return "apt-get install libreoffice"
+    return libreoffice_install_hint()
 
 
 def _libreoffice_available() -> bool:
-    """LibreOffice (``soffice``) is what LiteParse shells out to for legacy
-    Office and Excel formats. We probe before invoking so the error is
-    immediate and actionable, not a 100-line JS stack trace from the CLI."""
+    """Compatibility wrapper around shared LibreOffice probe."""
+    from agenticx.tools.document_text import libreoffice_available
 
-    import shutil
-
-    return bool(shutil.which("soffice") or shutil.which("libreoffice"))
+    return libreoffice_available()
 
 
 def _read_with_liteparse(path: Path) -> str:
-    """Run LiteParse CLI adapter synchronously and return merged text."""
+    """Run LiteParse via the shared extractor and translate errors to KBError."""
+    from agenticx.tools.document_text import (
+        DocumentTextError,
+        LIBREOFFICE_REQUIRED_EXTS,
+        _read_with_liteparse as shared_read_with_liteparse,
+    )
+
+    async def _run() -> str:
+        return await shared_read_with_liteparse(
+            path,
+            require_libreoffice=path.suffix.lower() in LIBREOFFICE_REQUIRED_EXTS,
+        )
 
     try:
-        from agenticx.tools.adapters.liteparse import LiteParseAdapter
+        text = asyncio.run(_run())
+    except DocumentTextError as exc:
+        message = exc.user_message
+        if exc.code == "libreoffice_missing" and "重建该条索引" not in message:
+            message = (
+                f"{message}\n"
+                "安装完成后在资料列表重建该条索引即可，无需重启 Near。"
+            )
+        raise KBError(message) from exc
     except Exception as exc:  # pragma: no cover - packaging issue
         raise KBError(
             f"LiteParse adapter unavailable: {exc}. "
             "Install with `npm i -g @llamaindex/liteparse`."
         ) from exc
-
-    if not LiteParseAdapter.is_available():
-        raise KBError(
-            f"LiteParse CLI not found; required to ingest {path.suffix!r}. "
-            "Install with `npm i -g @llamaindex/liteparse` (or `npx liteparse`)."
-        )
-
-    ext = path.suffix.lower()
-    if ext in _LIBREOFFICE_REQUIRED_EXTS and not _libreoffice_available():
-        install_cmd = _libreoffice_install_hint()
-        raise KBError(
-            f"解析 {ext} 需要 LibreOffice（LiteParse 内部用 soffice 做格式转换）。"
-            f" 未检测到本机已安装。\n"
-            f"建议安装命令：{install_cmd}\n"
-            f"安装完成后在资料列表重建该条索引即可，无需重启 Near。"
-        )
-
-    adapter = LiteParseAdapter(config={"debug": False})
-    try:
-        text = asyncio.run(adapter.parse_to_text(path))
-    except Exception as exc:
-        msg = str(exc)
-        # LiteParse bubbles up underlying tool errors verbatim; detect the
-        # two most common ones and surface a clean, copy-pastable remedy.
-        if "LibreOffice is not installed" in msg or "soffice" in msg.lower():
-            install_cmd = _libreoffice_install_hint()
-            raise KBError(
-                f"解析 {ext} 需要 LibreOffice 做格式转换。\n"
-                f"建议安装命令：{install_cmd}\n"
-                f"安装完成后在资料列表重建该条索引即可。"
-            ) from exc
-        raise KBError(f"LiteParse failed for {path}: {exc}") from exc
-    if not isinstance(text, str) or not text.strip():
-        raise KBError(f"LiteParse returned empty text for {path}")
     return text
 
 
 def _read_document_text(source_path: str) -> str:
-    """Read a file into plain text.
-
-    Routing order:
-      1. Plain text / markdown → ``Path.read_text`` (no parser overhead).
-      2. Legacy Office / Excel / images → LiteParse CLI (covers OCR & old
-         binary formats; needs ``@llamaindex/liteparse`` installed).
-      3. Everything else → ``agenticx/knowledge/readers`` (PDF, DOCX, PPTX,
-         HTML, CSV, JSON, YAML, …).
-    """
-
-    path = Path(source_path).expanduser()
-    ext = path.suffix.lower()
-
-    if ext in {".md", ".txt", ".markdown", ".rst", ".log"}:
-        return path.read_text(encoding="utf-8", errors="replace")
-
-    if ext in _LITEPARSE_ONLY_EXTS:
-        return _read_with_liteparse(path)
+    """Read a file into plain text via the shared document extractor."""
+    from agenticx.tools.document_text import DocumentTextError, read_document_text_sync
 
     try:
-        from agenticx.knowledge.readers import get_reader
-    except Exception as exc:  # pragma: no cover
-        raise KBError(f"agenticx.knowledge.readers unavailable: {exc}") from exc
-
-    try:
-        reader = get_reader(path)
-        raw = reader.read(path)
-        # agenticx readers for PDF / Word / PPT expose async `read()`; ingest
-        # runs in a sync worker thread, so resolve the coroutine here instead
-        # of iterating over it (prior behavior raised "'coroutine' object is
-        # not iterable" for every PDF upload).
-        if asyncio.iscoroutine(raw):
-            docs = asyncio.run(raw)
-        else:
-            docs = raw
-    except Exception as exc:
-        raise KBError(f"Reader failed for {path}: {exc}") from exc
-
-    texts: List[str] = []
-    for d in docs:
-        content = getattr(d, "content", None) or (d.get("content") if isinstance(d, dict) else None)
-        if isinstance(content, str) and content.strip():
-            texts.append(content)
-    if not texts:
-        raise KBError(f"No textual content extracted from {path}")
-    return "\n\n".join(texts)
+        return read_document_text_sync(Path(source_path).expanduser())
+    except DocumentTextError as exc:
+        message = exc.user_message
+        if exc.code == "libreoffice_missing" and "重建该条索引" not in message:
+            message = (
+                f"{message}\n"
+                "安装完成后在资料列表重建该条索引即可，无需重启 Near。"
+            )
+        raise KBError(message) from exc
 
 
 def _document_context_prefix(source_path: str, text: str) -> str:

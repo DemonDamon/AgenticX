@@ -50,23 +50,30 @@ class LiteParseAdapter(DocumentAdapter):
 
     @staticmethod
     def is_available() -> bool:
-        """Return True if LiteParse CLI (or npx) is available."""
+        """Return True if an installed LiteParse CLI binary is available.
+
+        Presence of bare ``npx`` alone is not enough: using ``npx liteparse``
+        can trigger an implicit network install during chat turns.
+        """
         if shutil.which("liteparse"):
             return True
-        return shutil.which("npx") is not None
+        if shutil.which("liteparse.cmd"):
+            return True
+        local_paths = [
+            Path.cwd() / "node_modules/.bin/liteparse",
+            Path(__file__).resolve().parents[4] / "node_modules/.bin/liteparse",
+        ]
+        return any(path.exists() for path in local_paths)
 
     def _find_cli(self) -> Optional[List[str]]:
         """Resolve CLI executable command parts."""
         if self.cli_path:
             return [self.cli_path]
 
-        liteparse_path = shutil.which("liteparse")
-        if liteparse_path:
-            return [liteparse_path]
-
-        npx_path = shutil.which("npx")
-        if npx_path:
-            return [npx_path, "liteparse"]
+        for name in ("liteparse", "liteparse.cmd"):
+            liteparse_path = shutil.which(name)
+            if liteparse_path:
+                return [liteparse_path]
 
         local_paths = [
             Path.cwd() / "node_modules/.bin/liteparse",
@@ -76,7 +83,6 @@ class LiteParseAdapter(DocumentAdapter):
             if path.exists():
                 return [str(path)]
         return None
-
     async def _run_liteparse_parse(self, file_path: Path) -> Dict[str, Any]:
         """Execute LiteParse parse command and decode JSON output."""
         cmd_prefix = self._find_cli()

@@ -713,16 +713,17 @@ def test_read_document_text_routes_liteparse_only_exts(tmp_path: Path, monkeypat
     """Images and legacy Office formats must be handed to LiteParse."""
 
     from agenticx.studio.kb import runtime as kb_runtime
+    from agenticx.tools import document_text as doc_text
 
     img_path = tmp_path / "scan.png"
     img_path.write_bytes(b"\x89PNG\r\n\x1a\n")  # not a real PNG, but that's fine — we stub
     called: list[Path] = []
 
-    def _fake_liteparse(path):
+    async def _fake_liteparse(path, *, require_libreoffice: bool = False):
         called.append(path)
         return "hello from liteparse"
 
-    monkeypatch.setattr(kb_runtime, "_read_with_liteparse", _fake_liteparse)
+    monkeypatch.setattr(doc_text, "_read_with_liteparse", _fake_liteparse)
     text = kb_runtime._read_document_text(str(img_path))
     assert text == "hello from liteparse"
     assert called == [Path(str(img_path)).expanduser()]
@@ -734,12 +735,16 @@ def test_read_with_liteparse_raises_when_libreoffice_missing(tmp_path: Path, mon
     stack trace to the UI."""
 
     from agenticx.studio.kb import runtime as kb_runtime
+    from agenticx.tools import document_text as doc_text
     from agenticx.tools.adapters import liteparse as liteparse_mod
 
     monkeypatch.setattr(
         liteparse_mod.LiteParseAdapter, "is_available", staticmethod(lambda: True)
     )
-    monkeypatch.setattr(kb_runtime, "_libreoffice_available", lambda: False)
+    monkeypatch.setattr(doc_text, "libreoffice_available", lambda: False)
+    monkeypatch.setattr(
+        doc_text, "libreoffice_install_hint", lambda: "brew install --cask libreoffice"
+    )
 
     xlsx_path = tmp_path / "sheet.xlsx"
     xlsx_path.write_bytes(b"PK\x03\x04")
@@ -758,12 +763,16 @@ def test_read_with_liteparse_translates_libreoffice_runtime_error(
     friendly KBError must replace the raw CLI stack trace."""
 
     from agenticx.studio.kb import runtime as kb_runtime
+    from agenticx.tools import document_text as doc_text
     from agenticx.tools.adapters import liteparse as liteparse_mod
 
     monkeypatch.setattr(
         liteparse_mod.LiteParseAdapter, "is_available", staticmethod(lambda: True)
     )
-    monkeypatch.setattr(kb_runtime, "_libreoffice_available", lambda: True)
+    monkeypatch.setattr(doc_text, "libreoffice_available", lambda: True)
+    monkeypatch.setattr(
+        doc_text, "libreoffice_install_hint", lambda: "brew install --cask libreoffice"
+    )
 
     async def _fake_parse_to_text(self, path):
         raise RuntimeError(
@@ -794,8 +803,9 @@ def test_read_with_liteparse_translates_libreoffice_runtime_error(
 )
 def test_libreoffice_install_hint_by_platform(monkeypatch, system_name: str, expected: str):
     from agenticx.studio.kb import runtime as kb_runtime
+    from agenticx.tools import document_text as doc_text
 
-    monkeypatch.setattr(kb_runtime.platform, "system", lambda: system_name)
+    monkeypatch.setattr(doc_text.platform, "system", lambda: system_name)
     assert kb_runtime._libreoffice_install_hint() == expected
 
 
