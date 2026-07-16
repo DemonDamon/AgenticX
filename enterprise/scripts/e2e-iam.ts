@@ -20,9 +20,17 @@ const ADMIN_PASSWORD =
 
 async function adminLogin(page: import("playwright").Page): Promise<void> {
   await page.goto(`${ADMIN_BASE}/login`, { waitUntil: "domcontentloaded", timeout: 30_000 });
-  const input = page.locator('input[type="password"]').first();
-  await input.fill(ADMIN_PASSWORD);
-  await page.getByRole("button", { name: /登录并进入控制台/i }).click();
+  
+  // Explicitly fill email in case it is not autofilled
+  const emailInput = page.locator('input[type="email"]').first();
+  await emailInput.fill("admin@agenticx.local");
+  
+  // Fill password
+  const passwordInput = page.locator('input[type="password"]').first();
+  await passwordInput.fill(ADMIN_PASSWORD);
+  
+  // Robustly click login button (matches either Chinese or English locale text)
+  await page.getByRole("button", { name: /登录并进入控制台|Sign in to console/i }).click();
   await page.waitForURL(/\/dashboard/, { timeout: 20_000 });
 }
 
