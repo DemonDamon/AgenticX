@@ -1,19 +1,12 @@
-import { createHash } from "node:crypto";
 import type { AuditDigest, AuditPolicyHit } from "@agenticx/core-api";
 import { gatewayAuditEvents } from "@agenticx/db-schema";
 import { getAuditRetentionCutoff, getIamDb } from "@agenticx/iam-core";
 import { and, asc, count, desc, eq, gte, lte, sql, type SQL } from "drizzle-orm";
 import { ulid } from "ulid";
 import type { AuditActor, AuditEvent, AuditQueryInput, AuditQueryResult, AuditStore } from "../types";
+import { verifyPersistedChecksum } from "./checksum";
 
 const EXPORT_ROW_HARD_CAP = 100_000;
-
-function computeChecksum(event: AuditEvent): string {
-  const clone = { ...event, checksum: "" };
-  const hash = createHash("blake2b512");
-  hash.update(`${event.prev_checksum}|${JSON.stringify(clone)}`);
-  return hash.digest("hex").slice(0, 64);
-}
 
 function visibilityPredicates(actor: AuditActor) {
   const scopes = new Set(actor.scopes);
@@ -36,6 +29,10 @@ function safePolicyId(raw: string): string | null {
 function rowToAuditEvent(row: typeof gatewayAuditEvents.$inferSelect): AuditEvent {
   const policiesRaw = row.policiesHit as AuditPolicyHit[] | null | undefined;
   const digestRaw = row.digest as AuditDigest | null | undefined;
+  const toolsRaw = row.toolsCalled;
+  const toolsCalled = Array.isArray(toolsRaw)
+    ? toolsRaw.filter((value): value is string => typeof value === "string")
+    : undefined;
   return {
     id: row.id,
     tenant_id: row.tenantId,
@@ -50,15 +47,25 @@ function rowToAuditEvent(row: typeof gatewayAuditEvents.$inferSelect): AuditEven
     provider: row.provider ?? undefined,
     model: row.model ?? undefined,
     route: row.route as AuditEvent["route"],
+    channel_id: row.channelId ?? undefined,
+    channel_key_ref: row.channelKeyRef ?? undefined,
+    api_token_id: row.apiTokenId ?? undefined,
     input_tokens: row.inputTokens ?? undefined,
     output_tokens: row.outputTokens ?? undefined,
     total_tokens: row.totalTokens ?? undefined,
     cost_usd: undefined,
     latency_ms: row.latencyMs ?? undefined,
     digest: digestRaw ?? undefined,
+    tools_called: toolsCalled,
     policies_hit: Array.isArray(policiesRaw) ? policiesRaw : undefined,
+    mcp_server: row.mcpServer ?? undefined,
+    mcp_tool_name: row.mcpToolName ?? undefined,
+    mcp_input_hash: row.mcpInputHash ?? undefined,
+    mcp_output_hash: row.mcpOutputHash ?? undefined,
+    mcp_status: row.mcpStatus ?? undefined,
     prev_checksum: row.prevChecksum,
     checksum: row.checksum,
+    checksum_version: row.checksumVersion,
     signature: row.signature ?? undefined,
     src_region: row.srcRegion ?? undefined,
     dst_region: row.dstRegion ?? undefined,
@@ -67,26 +74,32 @@ function rowToAuditEvent(row: typeof gatewayAuditEvents.$inferSelect): AuditEven
   };
 }
 
-function checkChainSlice(items: AuditEvent[]): { valid: boolean; at?: string; reason?: string } {
-  let prev = "GENESIS";
-  let index = 0;
-  for (const current of items) {
-    if (current.client_type === "admin-console") {
+function checkChainSlice(rows: Array<typeof gatewayAuditEvents.$inferSelect>): {
+  valid: boolean;
+  at?: string;
+  reason?: string;
+  verified: number;
+  legacyUnverified: number;
+} {
+  let prev: string | undefined;
+  let verified = 0;
+  let legacyUnverified = 0;
+  for (const current of rows) {
+    if (current.clientType === "admin-console") {
       continue;
     }
-    if (index > 0 && current.prev_checksum === "GENESIS") {
-      return { valid: false, at: current.id, reason: "unexpected_genesis_pointer" };
+    if (prev !== undefined && current.prevChecksum !== prev) {
+      return { valid: false, at: current.id, reason: "prev_checksum_mismatch", verified, legacyUnverified };
     }
-    if (current.prev_checksum !== prev) {
-      return { valid: false, at: current.id, reason: "prev_checksum_mismatch" };
+    const checksum = verifyPersistedChecksum(current);
+    if (checksum.status === "invalid") {
+      return { valid: false, at: current.id, reason: checksum.reason, verified, legacyUnverified };
     }
-    if (computeChecksum(current) !== current.checksum) {
-      return { valid: false, at: current.id, reason: "checksum_mismatch" };
-    }
+    if (checksum.status === "legacy") legacyUnverified += 1;
+    else verified += 1;
     prev = current.checksum;
-    index += 1;
   }
-  return { valid: true };
+  return { valid: true, verified, legacyUnverified };
 }
 
 async function applyRetentionWindow(tenantId: string, conditions: SQL[]): Promise<void> {
@@ -160,13 +173,13 @@ export class PgAuditStore implements AuditStore {
       .limit(limit)
       .offset(offset);
 
-    const items = rows.map(rowToAuditEvent);
-    const ascItems = [...items].sort((a, b) => {
-      const ta = Date.parse(a.event_time) - Date.parse(b.event_time);
+    const ascRows = [...rows].sort((a, b) => {
+      const ta = a.eventTime.getTime() - b.eventTime.getTime();
       if (ta !== 0) return ta;
       return a.id.localeCompare(b.id);
     });
-    const chain = checkChainSlice(ascItems);
+    const items = rows.map(rowToAuditEvent);
+    const chain = checkChainSlice(ascRows);
 
     return {
       total: Number(countRow?.n ?? 0),
@@ -174,6 +187,9 @@ export class PgAuditStore implements AuditStore {
       chain_valid: chain.valid,
       chain_error_at: chain.at,
       chain_error_reason: chain.reason,
+      chain_verification: chain.legacyUnverified > 0 ? "partial" : "full",
+      chain_verified_count: chain.verified,
+      chain_legacy_unverified: chain.legacyUnverified,
     };
   }
 
@@ -289,6 +305,9 @@ export type ChainVerifyResult = {
   at?: string;
   reason?: string;
   scanned: number;
+  verification: "full" | "partial";
+  verified: number;
+  legacy_unverified: number;
 };
 
 /** Full-table scan (batched) for one tenant; skips admin-console injected rows in chain math. */
@@ -300,10 +319,10 @@ export async function verifyGatewayAuditChain(
   const canVerify =
     scopes.has("*") || scopes.has("audit:manage") || scopes.has("audit:read:all");
   if (!canVerify) {
-    return { valid: false, reason: "forbidden", scanned: 0 };
+    return { valid: false, reason: "forbidden", scanned: 0, verification: "full", verified: 0, legacy_unverified: 0 };
   }
   if (actor.tenantId !== tenantId) {
-    return { valid: false, reason: "tenant_mismatch", scanned: 0 };
+    return { valid: false, reason: "tenant_mismatch", scanned: 0, verification: "full", verified: 0, legacy_unverified: 0 };
   }
 
   const db = getIamDb();
@@ -312,6 +331,8 @@ export async function verifyGatewayAuditChain(
   let prev = "GENESIS";
   let index = 0;
   let scanned = 0;
+  let verified = 0;
+  let legacyUnverified = 0;
 
   while (true) {
     const rows = await db
@@ -326,27 +347,59 @@ export async function verifyGatewayAuditChain(
 
     for (const row of rows) {
       scanned += 1;
-      const current = rowToAuditEvent(row);
-      if (current.client_type === "admin-console") {
+      if (row.clientType === "admin-console") {
         continue;
       }
-      if (index > 0 && current.prev_checksum === "GENESIS") {
-        return { valid: false, at: current.id, reason: "unexpected_genesis_pointer", scanned };
+      if (index === 0 && row.prevChecksum !== "GENESIS") {
+        return {
+          valid: false,
+          at: row.id,
+          reason: "unexpected_first_pointer",
+          scanned,
+          verification: legacyUnverified > 0 ? "partial" : "full",
+          verified,
+          legacy_unverified: legacyUnverified,
+        };
       }
-      if (current.prev_checksum !== prev) {
-        return { valid: false, at: current.id, reason: "prev_checksum_mismatch", scanned };
+      if (index > 0 && row.prevChecksum !== prev) {
+        return {
+          valid: false,
+          at: row.id,
+          reason: "prev_checksum_mismatch",
+          scanned,
+          verification: legacyUnverified > 0 ? "partial" : "full",
+          verified,
+          legacy_unverified: legacyUnverified,
+        };
       }
-      if (computeChecksum(current) !== current.checksum) {
-        return { valid: false, at: current.id, reason: "checksum_mismatch", scanned };
+      const checksum = verifyPersistedChecksum(row);
+      if (checksum.status === "invalid") {
+        return {
+          valid: false,
+          at: row.id,
+          reason: checksum.reason,
+          scanned,
+          verification: legacyUnverified > 0 ? "partial" : "full",
+          verified,
+          legacy_unverified: legacyUnverified,
+        };
       }
-      prev = current.checksum;
+      if (checksum.status === "legacy") legacyUnverified += 1;
+      else verified += 1;
+      prev = row.checksum;
       index += 1;
     }
 
     offset += batchSize;
   }
 
-  return { valid: true, scanned };
+  return {
+    valid: true,
+    scanned,
+    verification: legacyUnverified > 0 ? "partial" : "full",
+    verified,
+    legacy_unverified: legacyUnverified,
+  };
 }
 
 export async function insertGatewayAuditExportEvent(

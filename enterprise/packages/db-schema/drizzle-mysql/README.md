@@ -4,7 +4,7 @@ This folder is the **MySQL 8.0** migration chain for Enterprise dual-dialect sup
 
 ## Rules
 
-- Baseline `0000_mysql_baseline.sql` reflects the final 42-table schema + ordinary VIEW `usage_records_daily_mv`.
+- Baseline `0000_mysql_baseline.sql` reflects the initial 42-table schema + ordinary VIEW `usage_records_daily_mv`; subsequent changes use numbered incremental migrations.
 - Do **not** port PostgreSQL orphan files `0016_mcp_hosting.sql` / `0025_enterprise_runtime_mcp_servers.sql`.
 - Future schema changes must add a new MySQL migration **and** a matching PostgreSQL migration (parity gate).
 

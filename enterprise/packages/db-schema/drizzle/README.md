@@ -6,8 +6,8 @@ This folder is the **PostgreSQL-only** migration chain for Enterprise.
 
 | Item | Count / rule |
 |---|---|
-| Journal entries (`meta/_journal.json`) | **28** — published; never renumber or delete |
-| SQL files on disk | **30** |
+| Journal entries (`meta/_journal.json`) | **29** — published; never renumber or delete |
+| SQL files on disk | **31** |
 | Orphan / duplicate (do **not** port to MySQL) | `0016_mcp_hosting.sql`, `0025_enterprise_runtime_mcp_servers.sql` |
 
 ## MySQL counterpart

@@ -222,6 +222,7 @@ func (h *Handler) writeAudit(id CallerIdentity, rec MCPServer, toolName, status 
 		LatencyMS:    time.Since(started).Milliseconds(),
 		MCPServer:    rec.ID,
 		MCPToolName:  toolName,
+		ToolsCalled:  []string{toolName},
 		MCPInputHash: inputHash,
 		MCPStatus:    status,
 		Digest: &audit.Digest{
