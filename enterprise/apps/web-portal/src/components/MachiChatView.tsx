@@ -140,28 +140,36 @@ export function MachiChatView({ client }: MachiChatViewProps) {
     [t],
   );
 
-  // 动态拉取当前用户可见的模型清单
+  // 动态拉取当前用户可见的模型清单。
+  // 管理员随时可能改变部门/用户的可见模型分配，因此这里不能只在挂载时拉一次：
+  // 定期轮询 + 页面重新可见/聚焦时立即刷新，让列表与实际权限自动保持同步，无需用户手动刷新整页。
   const [availableModels, setAvailableModels] = React.useState<PortalModelOption[]>([]);
   const [modelsLoaded, setModelsLoaded] = React.useState(false);
 
-  React.useEffect(() => {
-    let alive = true;
-    void (async () => {
-      try {
-        const res = await fetch("/api/me/models", { cache: "no-store" });
-        const json = (await res.json()) as { data?: { models: PortalModelOption[] } };
-        if (alive) {
-          setAvailableModels(json.data?.models ?? []);
-          setModelsLoaded(true);
-        }
-      } catch {
-        if (alive) setModelsLoaded(true);
-      }
-    })();
-    return () => {
-      alive = false;
-    };
+  const refreshAvailableModels = React.useCallback(async () => {
+    try {
+      const res = await fetch("/api/me/models", { cache: "no-store" });
+      const json = (await res.json()) as { data?: { models: PortalModelOption[] } };
+      setAvailableModels(json.data?.models ?? []);
+    } finally {
+      setModelsLoaded(true);
+    }
   }, []);
+
+  React.useEffect(() => {
+    void refreshAvailableModels();
+    const intervalId = window.setInterval(() => void refreshAvailableModels(), 20_000);
+    const onVisible = () => {
+      if (document.visibilityState === "visible") void refreshAvailableModels();
+    };
+    document.addEventListener("visibilitychange", onVisible);
+    window.addEventListener("focus", onVisible);
+    return () => {
+      window.clearInterval(intervalId);
+      document.removeEventListener("visibilitychange", onVisible);
+      window.removeEventListener("focus", onVisible);
+    };
+  }, [refreshAvailableModels]);
 
   // 收到模型列表后兜底选默认：优先 isDefault，否则首项
   React.useEffect(() => {
@@ -172,6 +180,14 @@ export function MachiChatView({ client }: MachiChatViewProps) {
     const next = availableModels.find((m) => m.isDefault) ?? availableModels[0];
     if (next) switchModel(next.id);
   }, [modelsLoaded, availableModels, activeModel, switchModel]);
+
+  // 若发送因「模型已不在可见范围内」被服务端拒绝（管理员刚收窄了权限，轮询尚未来得及刷新），
+  // 立即补拉一次最新列表，让下拉框与兜底选择马上纠正，不必等下一个轮询周期或用户手动刷新整页。
+  React.useEffect(() => {
+    if (errorMessage && errorMessage.includes("不在您的可见范围内")) {
+      void refreshAvailableModels();
+    }
+  }, [errorMessage, refreshAvailableModels]);
 
   React.useEffect(() => {
     void hydrateSessions();
