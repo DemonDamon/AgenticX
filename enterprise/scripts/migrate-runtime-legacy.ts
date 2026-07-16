@@ -9,6 +9,7 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { fileURLToPath } from "node:url";
+import { __resetDatabaseForTests } from "@agenticx/iam-core";
 import { migrateRuntimeLegacyFromDisk, type MigrateSliceResult } from "@agenticx/iam-core/runtime-legacy-migrate";
 
 const ENTERPRISE_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -60,7 +61,16 @@ async function main(): Promise<void> {
   console.log("[migrate-runtime-legacy] done");
 }
 
-main().catch((error) => {
-  console.error("[migrate-runtime-legacy] failed:", error instanceof Error ? error.message : error);
-  process.exitCode = 1;
-});
+main()
+  .catch((error) => {
+    console.error("[migrate-runtime-legacy] failed:", error instanceof Error ? error.message : error);
+    process.exitCode = 1;
+  })
+  .finally(async () => {
+    // MySQL/pg pools keep the Node event loop alive; close so start-dev can proceed past migrate.
+    try {
+      await __resetDatabaseForTests();
+    } catch {
+      // ignore close errors
+    }
+  });
