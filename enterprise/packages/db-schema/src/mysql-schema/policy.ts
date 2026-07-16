@@ -100,7 +100,7 @@ export const policyPublishEvents = mysqlTable(
     snapshot: json("snapshot").$type<Record<string, unknown>>().notNull(),
     summary: json("summary").$type<Record<string, unknown>>(),
     publisher: ulid("publisher"),
-    publishedAt: datetime("published_at", { fsp: 6 }).notNull().default(sql`UTC_TIMESTAMP(6)`),
+    publishedAt: datetime("published_at", { fsp: 6 }).notNull().default(sql`(UTC_TIMESTAMP(6))`),
     status: varchar("status", { length: 16 }).notNull().default("published"),
     ...auditColumns,
   },

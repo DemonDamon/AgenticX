@@ -62,10 +62,20 @@ if [ ! -f "$ENV_FILE" ]; then
 fi
 
 # 1) 载入 .env.local
+# Parent (start-dev-with-infra --db=...) may pin dialect/URL via AGX_INFRA_*;
+# re-apply after source so stale .env.local postgres URL cannot win.
+_INFRA_DIALECT="${AGX_INFRA_DATABASE_DIALECT:-}"
+_INFRA_URL="${AGX_INFRA_DATABASE_URL:-}"
 set -a
 # shellcheck disable=SC1090
 source "$ENV_FILE"
 set +a
+if [ -n "$_INFRA_DIALECT" ] && [ -n "$_INFRA_URL" ]; then
+  export DATABASE_DIALECT="$_INFRA_DIALECT"
+  export DATABASE_URL="$_INFRA_URL"
+  echo "[start-dev] honor infra pin: DATABASE_DIALECT=$DATABASE_DIALECT"
+fi
+unset _INFRA_DIALECT _INFRA_URL
 
 # curl 会把 127.0.0.1 送进 http_proxy/all_proxy（Clash）；Go 默认豁免 loopback，但
 # 脚本内所有本机探活/子进程 curl 仍依赖 NO_PROXY，否则 wait_for_http 会永久挂起。
@@ -77,10 +87,40 @@ else
 fi
 export no_proxy="$NO_PROXY"
 
+# Infer / default DATABASE_DIALECT from URL when unset.
+if [ -z "${DATABASE_DIALECT:-}" ]; then
+  case "${DATABASE_URL:-}" in
+    mysql://*) export DATABASE_DIALECT=mysql ;;
+    postgres://*|postgresql://*) export DATABASE_DIALECT=postgresql ;;
+    *) export DATABASE_DIALECT=postgresql ;;
+  esac
+fi
+
 if [ -z "${DATABASE_URL:-}" ]; then
-  export DATABASE_URL='postgresql://postgres:postgres@127.0.0.1:5432/agenticx'
+  if [ "$DATABASE_DIALECT" = "mysql" ]; then
+    export DATABASE_URL='mysql://agenticx:agenticx@127.0.0.1:3306/agenticx'
+  else
+    export DATABASE_URL='postgresql://postgres:postgres@127.0.0.1:5432/agenticx'
+  fi
   echo "[start-dev] DATABASE_URL 未设置，回退到默认本地地址: $DATABASE_URL"
 fi
+
+# Fail-fast on dialect/URL scheme mismatch (same contract as iam-core / gateway).
+case "$DATABASE_URL" in
+  mysql://*)
+    if [ "$DATABASE_DIALECT" != "mysql" ]; then
+      echo "[start-dev] DATABASE_DIALECT=$DATABASE_DIALECT 与 DATABASE_URL=mysql:// 冲突" >&2
+      exit 1
+    fi
+    ;;
+  postgres://*|postgresql://*)
+    if [ "$DATABASE_DIALECT" != "postgresql" ]; then
+      echo "[start-dev] DATABASE_DIALECT=$DATABASE_DIALECT 与 DATABASE_URL=postgres(ql):// 冲突" >&2
+      echo "          若要用 MySQL：bash scripts/bootstrap.sh --db=mysql 或改 .env.local" >&2
+      exit 1
+    fi
+    ;;
+esac
 
 # 2) PEM -> 环境变量（PEM 多行不能直接写进 .env.local）
 if [ -n "${AUTH_JWT_PRIVATE_KEY_FILE:-}" ] && [ -f "$AUTH_JWT_PRIVATE_KEY_FILE" ]; then

@@ -37,11 +37,13 @@ export const enterpriseRuntimeUserVisibleModels = mysqlTable(
     tenantId: varchar("tenant_id", { length: 26 }).notNull(),
     assignmentKey: varchar("assignment_key", { length: 320 }).notNull(),
     modelId: varchar("model_id", { length: 256 }).notNull(),
-    createdAt: datetime("created_at", { fsp: 6 }).default(sql`UTC_TIMESTAMP(6)`).notNull(),
+    createdAt: datetime("created_at", { fsp: 6 }).default(sql`(UTC_TIMESTAMP(6))`).notNull(),
   },
   (table) => ({
     pk: primaryKey({
       columns: [table.tenantId, table.assignmentKey, table.modelId],
+      // MySQL identifier limit is 64 chars; drizzle auto name exceeds it.
+      name: "enterprise_runtime_uvm_pk",
     }),
   })
 );
@@ -50,28 +52,28 @@ export const enterpriseRuntimeUserVisibleModels = mysqlTable(
 export const enterpriseRuntimeTokenQuotas = mysqlTable("enterprise_runtime_token_quotas", {
   tenantId: varchar("tenant_id", { length: 26 }).primaryKey(),
   config: json("config").notNull().$type<Record<string, unknown>>(),
-  updatedAt: datetime("updated_at", { fsp: 6 }).default(sql`UTC_TIMESTAMP(6)`).notNull(),
+  updatedAt: datetime("updated_at", { fsp: 6 }).default(sql`(UTC_TIMESTAMP(6))`).notNull(),
 });
 
 /** 已发布策略快照（单租户一行，JSON 等价 PolicySnapshot）。 */
 export const enterpriseRuntimePolicySnapshots = mysqlTable("enterprise_runtime_policy_snapshots", {
   tenantId: varchar("tenant_id", { length: 26 }).primaryKey(),
   snapshot: json("snapshot").notNull().$type<Record<string, unknown>>(),
-  updatedAt: datetime("updated_at", { fsp: 6 }).default(sql`UTC_TIMESTAMP(6)`).notNull(),
+  updatedAt: datetime("updated_at", { fsp: 6 }).default(sql`(UTC_TIMESTAMP(6))`).notNull(),
 });
 
 /** 租户动态计价配置（等价 pricing.yaml + surcharges，供网关快照拉取）。 */
 export const enterpriseRuntimePricing = mysqlTable("enterprise_runtime_pricing", {
   tenantId: varchar("tenant_id", { length: 26 }).primaryKey(),
   config: json("config").notNull().$type<Record<string, unknown>>(),
-  updatedAt: datetime("updated_at", { fsp: 6 }).default(sql`UTC_TIMESTAMP(6)`).notNull(),
+  updatedAt: datetime("updated_at", { fsp: 6 }).default(sql`(UTC_TIMESTAMP(6))`).notNull(),
 });
 
 /** 租户成本/词元预算整包 JSON。 */
 export const enterpriseRuntimeBudgets = mysqlTable("enterprise_runtime_budgets", {
   tenantId: varchar("tenant_id", { length: 26 }).primaryKey(),
   config: json("config").notNull().$type<Record<string, unknown>>(),
-  updatedAt: datetime("updated_at", { fsp: 6 }).default(sql`UTC_TIMESTAMP(6)`).notNull(),
+  updatedAt: datetime("updated_at", { fsp: 6 }).default(sql`(UTC_TIMESTAMP(6))`).notNull(),
 });
 
 /** 网关预算预警/熔断事件（admin 只读查询）。 */
@@ -91,7 +93,7 @@ export const gatewayBudgetAlerts = mysqlTable(
     limitValue: decimal("limit_value", { precision: 18, scale: 8 }).default("0").notNull(),
     warnThresholdPct: decimal("warn_threshold_pct", { precision: 5, scale: 2 }).default("0").notNull(),
     description: text("description"),
-    createdAt: datetime("created_at", { fsp: 6 }).default(sql`UTC_TIMESTAMP(6)`).notNull(),
+    createdAt: datetime("created_at", { fsp: 6 }).default(sql`(UTC_TIMESTAMP(6))`).notNull(),
   },
   (table) => ({
     tenantTimeIdx: index("gateway_budget_alerts_tenant_time_idx").on(table.tenantId, table.createdAt),
@@ -110,7 +112,7 @@ export const sessionGrants = mysqlTable(
     revokedAt: datetime("revoked_at", { fsp: 6 }),
     createdBy: varchar("created_by", { length: 64 }),
     description: text("description"),
-    createdAt: datetime("created_at", { fsp: 6 }).default(sql`UTC_TIMESTAMP(6)`).notNull(),
+    createdAt: datetime("created_at", { fsp: 6 }).default(sql`(UTC_TIMESTAMP(6))`).notNull(),
   },
   (table) => ({
     tenantSessionIdx: index("session_grants_tenant_session_idx").on(table.tenantId, table.sessionId, table.expiresAt),
@@ -122,7 +124,7 @@ export const enterpriseRuntimePatRevocation = mysqlTable("enterprise_runtime_pat
   tenantId: varchar("tenant_id", { length: 26 }).primaryKey(),
   version: decimal("version", { precision: 20, scale: 0 }).default("0").notNull(),
   revokedHashes: json("revoked_hashes").default([]).notNull().$type<string[]>(),
-  updatedAt: datetime("updated_at", { fsp: 6 }).default(sql`UTC_TIMESTAMP(6)`).notNull(),
+  updatedAt: datetime("updated_at", { fsp: 6 }).default(sql`(UTC_TIMESTAMP(6))`).notNull(),
 });
 
 /** 租户合规：数据驻留、跨境策略、审计留存（HIPAA 式可配）。 */
@@ -132,14 +134,14 @@ export const enterpriseRuntimeCompliance = mysqlTable("enterprise_runtime_compli
   crossBorderAction: varchar("cross_border_action", { length: 32 }).default("allow").notNull(),
   auditRetentionYears: int("audit_retention_years").default(6).notNull(),
   appendOnly: boolean("append_only").default(true).notNull(),
-  updatedAt: datetime("updated_at", { fsp: 6 }).default(sql`UTC_TIMESTAMP(6)`).notNull(),
+  updatedAt: datetime("updated_at", { fsp: 6 }).default(sql`(UTC_TIMESTAMP(6))`).notNull(),
 });
 
 /** 租户 MCP 反代 Server 整包 JSON（gateway /v1/mcp/{server_id}/* 拉取）。 */
 export const enterpriseRuntimeMcpServers = mysqlTable("enterprise_runtime_mcp_servers", {
   tenantId: varchar("tenant_id", { length: 26 }).primaryKey(),
   config: json("config").notNull().$type<{ servers: unknown[] }>(),
-  updatedAt: datetime("updated_at", { fsp: 6 }).default(sql`UTC_TIMESTAMP(6)`).notNull(),
+  updatedAt: datetime("updated_at", { fsp: 6 }).default(sql`(UTC_TIMESTAMP(6))`).notNull(),
 });
 
 /** web-portal refresh token 会话（多副本 serverless）。 */
@@ -151,5 +153,5 @@ export const authRefreshSessions = mysqlTable("auth_refresh_sessions", {
   email: text("email").notNull(),
   scopesJson: json("scopes_json").notNull().$type<string[]>(),
   expiresAt: datetime("expires_at", { fsp: 6 }).notNull(),
-  createdAt: datetime("created_at", { fsp: 6 }).default(sql`UTC_TIMESTAMP(6)`).notNull(),
+  createdAt: datetime("created_at", { fsp: 6 }).default(sql`(UTC_TIMESTAMP(6))`).notNull(),
 });

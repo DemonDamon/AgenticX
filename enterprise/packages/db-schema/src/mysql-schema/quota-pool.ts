@@ -10,11 +10,12 @@ export const gatewayQuotaPoolUsage = mysqlTable(
     scopeId: varchar("scope_id", { length: 128 }).notNull(),
     period: varchar("period", { length: 16 }).notNull(),
     usedTotal: bigint("used_total", { mode: "number" }).default(0).notNull(),
-    updatedAt: datetime("updated_at", { fsp: 6 }).default(sql`UTC_TIMESTAMP(6)`).notNull(),
+    updatedAt: datetime("updated_at", { fsp: 6 }).default(sql`(UTC_TIMESTAMP(6))`).notNull(),
   },
   (table) => ({
     pk: primaryKey({
       columns: [table.tenantId, table.scopeType, table.scopeId, table.period],
+      name: "gateway_quota_pool_usage_pk",
     }),
   })
 );
@@ -31,7 +32,7 @@ export const gatewayQuotaLedger = mysqlTable(
     event: varchar("event", { length: 16 }).notNull(),
     deltaTokens: bigint("delta_tokens", { mode: "number" }).notNull(),
     requestId: varchar("request_id", { length: 128 }),
-    createdAt: datetime("created_at", { fsp: 6 }).default(sql`UTC_TIMESTAMP(6)`).notNull(),
+    createdAt: datetime("created_at", { fsp: 6 }).default(sql`(UTC_TIMESTAMP(6))`).notNull(),
   },
   (table) => ({
     scopeIdx: index("gateway_quota_ledger_scope_idx").on(

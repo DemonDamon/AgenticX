@@ -13,8 +13,8 @@ export const billingSplitRules = mysqlTable(
     participants: json("participants").notNull(),
     billingItems: json("billing_items"),
     enabled: boolean("enabled").default(true).notNull(),
-    createdAt: datetime("created_at", { fsp: 6 }).default(sql`UTC_TIMESTAMP(6)`).notNull(),
-    updatedAt: datetime("updated_at", { fsp: 6 }).default(sql`UTC_TIMESTAMP(6)`).notNull(),
+    createdAt: datetime("created_at", { fsp: 6 }).default(sql`(UTC_TIMESTAMP(6))`).notNull(),
+    updatedAt: datetime("updated_at", { fsp: 6 }).default(sql`(UTC_TIMESTAMP(6))`).notNull(),
   },
   (table) => ({
     tenantEffectiveIdx: index("billing_split_rules_tenant_effective_idx").on(
@@ -38,7 +38,7 @@ export const billingSplitLedger = mysqlTable(
     amountMicroUsd: bigint("amount_micro_usd", { mode: "bigint" }).notNull(),
     originalCostMicroUsd: bigint("original_cost_micro_usd", { mode: "bigint" }).notNull(),
     timeBucket: datetime("time_bucket", { fsp: 6 }).notNull(),
-    createdAt: datetime("created_at", { fsp: 6 }).default(sql`UTC_TIMESTAMP(6)`).notNull(),
+    createdAt: datetime("created_at", { fsp: 6 }).default(sql`(UTC_TIMESTAMP(6))`).notNull(),
   },
   (table) => ({
     usageParticipantUnique: uniqueIndex("billing_split_ledger_usage_participant_rule_idx").on(
@@ -55,7 +55,7 @@ export const billingSettlementWebhookConfig = mysqlTable("billing_settlement_web
   tenantId: varchar("tenant_id", { length: 26 }).primaryKey(),
   webhookUrl: text("webhook_url"),
   enabled: boolean("enabled").default(false).notNull(),
-  updatedAt: datetime("updated_at", { fsp: 6 }).default(sql`UTC_TIMESTAMP(6)`).notNull(),
+  updatedAt: datetime("updated_at", { fsp: 6 }).default(sql`(UTC_TIMESTAMP(6))`).notNull(),
 });
 
 export const billingSettlementWebhookEvents = mysqlTable(
@@ -66,7 +66,7 @@ export const billingSettlementWebhookEvents = mysqlTable(
     payload: json("payload").notNull(),
     status: varchar("status", { length: 32 }).notNull(),
     responseStatus: bigint("response_status", { mode: "number" }),
-    createdAt: datetime("created_at", { fsp: 6 }).default(sql`UTC_TIMESTAMP(6)`).notNull(),
+    createdAt: datetime("created_at", { fsp: 6 }).default(sql`(UTC_TIMESTAMP(6))`).notNull(),
   },
   (table) => ({
     tenantCreatedIdx: index("billing_settlement_webhook_events_tenant_idx").on(table.tenantId, table.createdAt),

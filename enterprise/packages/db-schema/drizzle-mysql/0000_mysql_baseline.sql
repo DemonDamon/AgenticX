@@ -3,8 +3,8 @@ CREATE TABLE `tenants` (
 	`code` varchar(64) NOT NULL,
 	`name` varchar(128) NOT NULL,
 	`plan` varchar(32) NOT NULL DEFAULT 'enterprise',
-	`created_at` datetime(6) NOT NULL DEFAULT UTC_TIMESTAMP(6),
-	`updated_at` datetime(6) NOT NULL DEFAULT UTC_TIMESTAMP(6),
+	`created_at` datetime(6) NOT NULL DEFAULT (UTC_TIMESTAMP(6)),
+	`updated_at` datetime(6) NOT NULL DEFAULT (UTC_TIMESTAMP(6)),
 	CONSTRAINT `tenants_id` PRIMARY KEY(`id`),
 	CONSTRAINT `tenants_code_uq` UNIQUE(`code`)
 );
@@ -13,8 +13,8 @@ CREATE TABLE `organizations` (
 	`id` varchar(26) NOT NULL,
 	`tenant_id` varchar(26) NOT NULL,
 	`name` varchar(128) NOT NULL,
-	`created_at` datetime(6) NOT NULL DEFAULT UTC_TIMESTAMP(6),
-	`updated_at` datetime(6) NOT NULL DEFAULT UTC_TIMESTAMP(6),
+	`created_at` datetime(6) NOT NULL DEFAULT (UTC_TIMESTAMP(6)),
+	`updated_at` datetime(6) NOT NULL DEFAULT (UTC_TIMESTAMP(6)),
 	CONSTRAINT `organizations_id` PRIMARY KEY(`id`),
 	CONSTRAINT `org_tenant_name_uq` UNIQUE(`tenant_id`,`name`)
 );
@@ -25,9 +25,9 @@ CREATE TABLE `departments` (
 	`org_id` varchar(26) NOT NULL,
 	`parent_id` varchar(26),
 	`name` varchar(128) NOT NULL,
-	`path` varchar(1024) NOT NULL,
-	`created_at` datetime(6) NOT NULL DEFAULT UTC_TIMESTAMP(6),
-	`updated_at` datetime(6) NOT NULL DEFAULT UTC_TIMESTAMP(6),
+	`path` varchar(700) NOT NULL,
+	`created_at` datetime(6) NOT NULL DEFAULT (UTC_TIMESTAMP(6)),
+	`updated_at` datetime(6) NOT NULL DEFAULT (UTC_TIMESTAMP(6)),
 	CONSTRAINT `departments_id` PRIMARY KEY(`id`),
 	CONSTRAINT `dept_tenant_org_name_uq` UNIQUE(`tenant_id`,`org_id`,`name`),
 	CONSTRAINT `dept_tenant_path_uq` UNIQUE(`tenant_id`,`path`)
@@ -48,8 +48,8 @@ CREATE TABLE `users` (
 	`locked_until` datetime(6),
 	`is_deleted` boolean NOT NULL DEFAULT false,
 	`deleted_at` datetime(6),
-	`created_at` datetime(6) NOT NULL DEFAULT UTC_TIMESTAMP(6),
-	`updated_at` datetime(6) NOT NULL DEFAULT UTC_TIMESTAMP(6),
+	`created_at` datetime(6) NOT NULL DEFAULT (UTC_TIMESTAMP(6)),
+	`updated_at` datetime(6) NOT NULL DEFAULT (UTC_TIMESTAMP(6)),
 	`active_email_key` varchar(320) GENERATED ALWAYS AS ((CASE WHEN `is_deleted` = 0 AND `deleted_at` IS NULL THEN lower(`email`) ELSE NULL END)) STORED,
 	CONSTRAINT `users_id` PRIMARY KEY(`id`),
 	CONSTRAINT `users_tenant_email_active_uq` UNIQUE(`tenant_id`,`active_email_key`),
@@ -63,8 +63,8 @@ CREATE TABLE `roles` (
 	`name` varchar(128) NOT NULL,
 	`scopes` json NOT NULL DEFAULT ('[]'),
 	`immutable` boolean NOT NULL DEFAULT false,
-	`created_at` datetime(6) NOT NULL DEFAULT UTC_TIMESTAMP(6),
-	`updated_at` datetime(6) NOT NULL DEFAULT UTC_TIMESTAMP(6),
+	`created_at` datetime(6) NOT NULL DEFAULT (UTC_TIMESTAMP(6)),
+	`updated_at` datetime(6) NOT NULL DEFAULT (UTC_TIMESTAMP(6)),
 	CONSTRAINT `roles_id` PRIMARY KEY(`id`),
 	CONSTRAINT `roles_tenant_code_uq` UNIQUE(`tenant_id`,`code`)
 );
@@ -75,8 +75,8 @@ CREATE TABLE `user_roles` (
 	`role_id` varchar(26) NOT NULL,
 	`scope_org_id` varchar(26),
 	`scope_dept_id` varchar(26),
-	`created_at` datetime(6) NOT NULL DEFAULT UTC_TIMESTAMP(6),
-	`updated_at` datetime(6) NOT NULL DEFAULT UTC_TIMESTAMP(6),
+	`created_at` datetime(6) NOT NULL DEFAULT (UTC_TIMESTAMP(6)),
+	`updated_at` datetime(6) NOT NULL DEFAULT (UTC_TIMESTAMP(6)),
 	CONSTRAINT `user_roles_pk` PRIMARY KEY(`tenant_id`,`user_id`,`role_id`)
 );
 --> statement-breakpoint
@@ -102,8 +102,8 @@ CREATE TABLE `usage_records` (
 	`pricing_version` varchar(128),
 	`trace_id` varchar(128),
 	`trace_step` int,
-	`created_at` datetime(6) NOT NULL DEFAULT UTC_TIMESTAMP(6),
-	`updated_at` datetime(6) NOT NULL DEFAULT UTC_TIMESTAMP(6),
+	`created_at` datetime(6) NOT NULL DEFAULT (UTC_TIMESTAMP(6)),
+	`updated_at` datetime(6) NOT NULL DEFAULT (UTC_TIMESTAMP(6)),
 	CONSTRAINT `usage_records_id` PRIMARY KEY(`id`)
 );
 --> statement-breakpoint
@@ -115,8 +115,8 @@ CREATE TABLE `audit_events` (
 	`target_kind` varchar(32) NOT NULL,
 	`target_id` varchar(64),
 	`detail` json,
-	`created_at` datetime(6) NOT NULL DEFAULT UTC_TIMESTAMP(6),
-	`updated_at` datetime(6) NOT NULL DEFAULT UTC_TIMESTAMP(6),
+	`created_at` datetime(6) NOT NULL DEFAULT (UTC_TIMESTAMP(6)),
+	`updated_at` datetime(6) NOT NULL DEFAULT (UTC_TIMESTAMP(6)),
 	CONSTRAINT `audit_events_id` PRIMARY KEY(`id`)
 );
 --> statement-breakpoint
@@ -156,8 +156,8 @@ CREATE TABLE `gateway_audit_events` (
 	`prev_checksum` varchar(128) NOT NULL,
 	`checksum` varchar(128) NOT NULL,
 	`signature` varchar(256),
-	`created_at` datetime(6) NOT NULL DEFAULT UTC_TIMESTAMP(6),
-	`updated_at` datetime(6) NOT NULL DEFAULT UTC_TIMESTAMP(6),
+	`created_at` datetime(6) NOT NULL DEFAULT (UTC_TIMESTAMP(6)),
+	`updated_at` datetime(6) NOT NULL DEFAULT (UTC_TIMESTAMP(6)),
 	CONSTRAINT `gateway_audit_events_id` PRIMARY KEY(`id`),
 	CONSTRAINT `gateway_audit_events_tenant_id_id_uq` UNIQUE(`tenant_id`,`id`)
 );
@@ -169,10 +169,10 @@ CREATE TABLE `policy_publish_events` (
 	`snapshot` json NOT NULL,
 	`summary` json,
 	`publisher` varchar(26),
-	`published_at` datetime(6) NOT NULL DEFAULT UTC_TIMESTAMP(6),
+	`published_at` datetime(6) NOT NULL DEFAULT (UTC_TIMESTAMP(6)),
 	`status` varchar(16) NOT NULL DEFAULT 'published',
-	`created_at` datetime(6) NOT NULL DEFAULT UTC_TIMESTAMP(6),
-	`updated_at` datetime(6) NOT NULL DEFAULT UTC_TIMESTAMP(6),
+	`created_at` datetime(6) NOT NULL DEFAULT (UTC_TIMESTAMP(6)),
+	`updated_at` datetime(6) NOT NULL DEFAULT (UTC_TIMESTAMP(6)),
 	CONSTRAINT `policy_publish_events_id` PRIMARY KEY(`id`),
 	CONSTRAINT `policy_publish_events_tenant_version_uq` UNIQUE(`tenant_id`,`version`)
 );
@@ -186,8 +186,8 @@ CREATE TABLE `policy_rule_packs` (
 	`source` varchar(16) NOT NULL DEFAULT 'custom',
 	`enabled` boolean NOT NULL DEFAULT true,
 	`applies_to` json NOT NULL DEFAULT ('{}'),
-	`created_at` datetime(6) NOT NULL DEFAULT UTC_TIMESTAMP(6),
-	`updated_at` datetime(6) NOT NULL DEFAULT UTC_TIMESTAMP(6),
+	`created_at` datetime(6) NOT NULL DEFAULT (UTC_TIMESTAMP(6)),
+	`updated_at` datetime(6) NOT NULL DEFAULT (UTC_TIMESTAMP(6)),
 	CONSTRAINT `policy_rule_packs_id` PRIMARY KEY(`id`),
 	CONSTRAINT `policy_rule_packs_tenant_code_uq` UNIQUE(`tenant_id`,`code`)
 );
@@ -199,8 +199,8 @@ CREATE TABLE `policy_rule_versions` (
 	`version` int NOT NULL,
 	`snapshot` json NOT NULL,
 	`author` varchar(26),
-	`created_at` datetime(6) NOT NULL DEFAULT UTC_TIMESTAMP(6),
-	`updated_at` datetime(6) NOT NULL DEFAULT UTC_TIMESTAMP(6),
+	`created_at` datetime(6) NOT NULL DEFAULT (UTC_TIMESTAMP(6)),
+	`updated_at` datetime(6) NOT NULL DEFAULT (UTC_TIMESTAMP(6)),
 	CONSTRAINT `policy_rule_versions_id` PRIMARY KEY(`id`),
 	CONSTRAINT `policy_rule_versions_tenant_rule_version_uq` UNIQUE(`tenant_id`,`rule_id`,`version`)
 );
@@ -218,8 +218,8 @@ CREATE TABLE `policy_rules` (
 	`applies_to` json,
 	`status` varchar(16) NOT NULL DEFAULT 'draft',
 	`updated_by` varchar(26),
-	`created_at` datetime(6) NOT NULL DEFAULT UTC_TIMESTAMP(6),
-	`updated_at` datetime(6) NOT NULL DEFAULT UTC_TIMESTAMP(6),
+	`created_at` datetime(6) NOT NULL DEFAULT (UTC_TIMESTAMP(6)),
+	`updated_at` datetime(6) NOT NULL DEFAULT (UTC_TIMESTAMP(6)),
 	CONSTRAINT `policy_rules_id` PRIMARY KEY(`id`),
 	CONSTRAINT `policy_rules_tenant_pack_code_uq` UNIQUE(`tenant_id`,`pack_id`,`code`)
 );
@@ -241,8 +241,8 @@ CREATE TABLE `sso_providers` (
 	`enabled` boolean NOT NULL DEFAULT false,
 	`created_by` varchar(26),
 	`updated_by` varchar(26),
-	`created_at` datetime(6) NOT NULL DEFAULT UTC_TIMESTAMP(6),
-	`updated_at` datetime(6) NOT NULL DEFAULT UTC_TIMESTAMP(6),
+	`created_at` datetime(6) NOT NULL DEFAULT (UTC_TIMESTAMP(6)),
+	`updated_at` datetime(6) NOT NULL DEFAULT (UTC_TIMESTAMP(6)),
 	CONSTRAINT `sso_providers_id` PRIMARY KEY(`id`),
 	CONSTRAINT `sso_providers_tenant_provider_uq` UNIQUE(`tenant_id`,`provider_id`)
 );
@@ -256,8 +256,8 @@ CREATE TABLE `chat_sessions` (
 	`message_count` int NOT NULL DEFAULT 0,
 	`last_message_at` datetime(6),
 	`deleted_at` datetime(6),
-	`created_at` datetime(6) NOT NULL DEFAULT UTC_TIMESTAMP(6),
-	`updated_at` datetime(6) NOT NULL DEFAULT UTC_TIMESTAMP(6),
+	`created_at` datetime(6) NOT NULL DEFAULT (UTC_TIMESTAMP(6)),
+	`updated_at` datetime(6) NOT NULL DEFAULT (UTC_TIMESTAMP(6)),
 	CONSTRAINT `chat_sessions_id` PRIMARY KEY(`id`),
 	CONSTRAINT `chat_sessions_id_tenant_user_uq` UNIQUE(`id`,`tenant_id`,`user_id`)
 );
@@ -272,8 +272,8 @@ CREATE TABLE `chat_messages` (
 	`model` varchar(160),
 	`status` varchar(32) NOT NULL DEFAULT 'complete',
 	`metadata` json,
-	`created_at` datetime(6) NOT NULL DEFAULT UTC_TIMESTAMP(6),
-	`updated_at` datetime(6) NOT NULL DEFAULT UTC_TIMESTAMP(6),
+	`created_at` datetime(6) NOT NULL DEFAULT (UTC_TIMESTAMP(6)),
+	`updated_at` datetime(6) NOT NULL DEFAULT (UTC_TIMESTAMP(6)),
 	CONSTRAINT `chat_messages_id` PRIMARY KEY(`id`),
 	CONSTRAINT `chat_messages_role_check` CHECK(`chat_messages`.`role` in ('system', 'user', 'assistant', 'tool')),
 	CONSTRAINT `chat_messages_status_check` CHECK(`chat_messages`.`status` in ('complete', 'streaming', 'failed'))
@@ -287,14 +287,14 @@ CREATE TABLE `auth_refresh_sessions` (
 	`email` text NOT NULL,
 	`scopes_json` json NOT NULL,
 	`expires_at` datetime(6) NOT NULL,
-	`created_at` datetime(6) NOT NULL DEFAULT UTC_TIMESTAMP(6),
+	`created_at` datetime(6) NOT NULL DEFAULT (UTC_TIMESTAMP(6)),
 	CONSTRAINT `auth_refresh_sessions_session_id` PRIMARY KEY(`session_id`)
 );
 --> statement-breakpoint
 CREATE TABLE `enterprise_runtime_budgets` (
 	`tenant_id` varchar(26) NOT NULL,
 	`config` json NOT NULL,
-	`updated_at` datetime(6) NOT NULL DEFAULT UTC_TIMESTAMP(6),
+	`updated_at` datetime(6) NOT NULL DEFAULT (UTC_TIMESTAMP(6)),
 	CONSTRAINT `enterprise_runtime_budgets_tenant_id` PRIMARY KEY(`tenant_id`)
 );
 --> statement-breakpoint
@@ -304,14 +304,14 @@ CREATE TABLE `enterprise_runtime_compliance` (
 	`cross_border_action` varchar(32) NOT NULL DEFAULT 'allow',
 	`audit_retention_years` int NOT NULL DEFAULT 6,
 	`append_only` boolean NOT NULL DEFAULT true,
-	`updated_at` datetime(6) NOT NULL DEFAULT UTC_TIMESTAMP(6),
+	`updated_at` datetime(6) NOT NULL DEFAULT (UTC_TIMESTAMP(6)),
 	CONSTRAINT `enterprise_runtime_compliance_tenant_id` PRIMARY KEY(`tenant_id`)
 );
 --> statement-breakpoint
 CREATE TABLE `enterprise_runtime_mcp_servers` (
 	`tenant_id` varchar(26) NOT NULL,
 	`config` json NOT NULL,
-	`updated_at` datetime(6) NOT NULL DEFAULT UTC_TIMESTAMP(6),
+	`updated_at` datetime(6) NOT NULL DEFAULT (UTC_TIMESTAMP(6)),
 	CONSTRAINT `enterprise_runtime_mcp_servers_tenant_id` PRIMARY KEY(`tenant_id`)
 );
 --> statement-breakpoint
@@ -327,8 +327,8 @@ CREATE TABLE `enterprise_runtime_model_providers` (
 	`route` varchar(64) NOT NULL DEFAULT 'third-party',
 	`env_key` text,
 	`models` json NOT NULL DEFAULT ('[]'),
-	`created_at` datetime(6) NOT NULL DEFAULT UTC_TIMESTAMP(6),
-	`updated_at` datetime(6) NOT NULL DEFAULT UTC_TIMESTAMP(6),
+	`created_at` datetime(6) NOT NULL DEFAULT (UTC_TIMESTAMP(6)),
+	`updated_at` datetime(6) NOT NULL DEFAULT (UTC_TIMESTAMP(6)),
 	CONSTRAINT `enterprise_runtime_model_providers_id` PRIMARY KEY(`id`),
 	CONSTRAINT `enterprise_runtime_mp_tenant_prov_uk` UNIQUE(`tenant_id`,`provider_id`)
 );
@@ -337,28 +337,28 @@ CREATE TABLE `enterprise_runtime_pat_revocation` (
 	`tenant_id` varchar(26) NOT NULL,
 	`version` decimal(20,0) NOT NULL DEFAULT '0',
 	`revoked_hashes` json NOT NULL DEFAULT ('[]'),
-	`updated_at` datetime(6) NOT NULL DEFAULT UTC_TIMESTAMP(6),
+	`updated_at` datetime(6) NOT NULL DEFAULT (UTC_TIMESTAMP(6)),
 	CONSTRAINT `enterprise_runtime_pat_revocation_tenant_id` PRIMARY KEY(`tenant_id`)
 );
 --> statement-breakpoint
 CREATE TABLE `enterprise_runtime_policy_snapshots` (
 	`tenant_id` varchar(26) NOT NULL,
 	`snapshot` json NOT NULL,
-	`updated_at` datetime(6) NOT NULL DEFAULT UTC_TIMESTAMP(6),
+	`updated_at` datetime(6) NOT NULL DEFAULT (UTC_TIMESTAMP(6)),
 	CONSTRAINT `enterprise_runtime_policy_snapshots_tenant_id` PRIMARY KEY(`tenant_id`)
 );
 --> statement-breakpoint
 CREATE TABLE `enterprise_runtime_pricing` (
 	`tenant_id` varchar(26) NOT NULL,
 	`config` json NOT NULL,
-	`updated_at` datetime(6) NOT NULL DEFAULT UTC_TIMESTAMP(6),
+	`updated_at` datetime(6) NOT NULL DEFAULT (UTC_TIMESTAMP(6)),
 	CONSTRAINT `enterprise_runtime_pricing_tenant_id` PRIMARY KEY(`tenant_id`)
 );
 --> statement-breakpoint
 CREATE TABLE `enterprise_runtime_token_quotas` (
 	`tenant_id` varchar(26) NOT NULL,
 	`config` json NOT NULL,
-	`updated_at` datetime(6) NOT NULL DEFAULT UTC_TIMESTAMP(6),
+	`updated_at` datetime(6) NOT NULL DEFAULT (UTC_TIMESTAMP(6)),
 	CONSTRAINT `enterprise_runtime_token_quotas_tenant_id` PRIMARY KEY(`tenant_id`)
 );
 --> statement-breakpoint
@@ -366,8 +366,8 @@ CREATE TABLE `enterprise_runtime_user_visible_models` (
 	`tenant_id` varchar(26) NOT NULL,
 	`assignment_key` varchar(320) NOT NULL,
 	`model_id` varchar(256) NOT NULL,
-	`created_at` datetime(6) NOT NULL DEFAULT UTC_TIMESTAMP(6),
-	CONSTRAINT `enterprise_runtime_user_visible_models_tenant_id_assignment_key_model_id_pk` PRIMARY KEY(`tenant_id`,`assignment_key`,`model_id`)
+	`created_at` datetime(6) NOT NULL DEFAULT (UTC_TIMESTAMP(6)),
+	CONSTRAINT `enterprise_runtime_uvm_pk` PRIMARY KEY(`tenant_id`,`assignment_key`,`model_id`)
 );
 --> statement-breakpoint
 CREATE TABLE `gateway_budget_alerts` (
@@ -384,7 +384,7 @@ CREATE TABLE `gateway_budget_alerts` (
 	`limit_value` decimal(18,8) NOT NULL DEFAULT '0',
 	`warn_threshold_pct` decimal(5,2) NOT NULL DEFAULT '0',
 	`description` text,
-	`created_at` datetime(6) NOT NULL DEFAULT UTC_TIMESTAMP(6),
+	`created_at` datetime(6) NOT NULL DEFAULT (UTC_TIMESTAMP(6)),
 	CONSTRAINT `gateway_budget_alerts_id` PRIMARY KEY(`id`)
 );
 --> statement-breakpoint
@@ -397,7 +397,7 @@ CREATE TABLE `session_grants` (
 	`revoked_at` datetime(6),
 	`created_by` varchar(64),
 	`description` text,
-	`created_at` datetime(6) NOT NULL DEFAULT UTC_TIMESTAMP(6),
+	`created_at` datetime(6) NOT NULL DEFAULT (UTC_TIMESTAMP(6)),
 	CONSTRAINT `session_grants_id` PRIMARY KEY(`id`)
 );
 --> statement-breakpoint
@@ -414,8 +414,8 @@ CREATE TABLE `gateway_channels` (
 	`supported_models` json NOT NULL DEFAULT ('[]'),
 	`region` varchar(16),
 	`metadata` json NOT NULL DEFAULT ('{}'),
-	`created_at` datetime(6) NOT NULL DEFAULT UTC_TIMESTAMP(6),
-	`updated_at` datetime(6) NOT NULL DEFAULT UTC_TIMESTAMP(6),
+	`created_at` datetime(6) NOT NULL DEFAULT (UTC_TIMESTAMP(6)),
+	`updated_at` datetime(6) NOT NULL DEFAULT (UTC_TIMESTAMP(6)),
 	CONSTRAINT `gateway_channels_id` PRIMARY KEY(`id`),
 	CONSTRAINT `gateway_channels_tenant_name_uk` UNIQUE(`tenant_id`,`name`)
 );
@@ -433,8 +433,8 @@ CREATE TABLE `api_tokens` (
 	`expire_at` datetime(6),
 	`last_used_at` datetime(6),
 	`created_by` varchar(26) NOT NULL,
-	`created_at` datetime(6) NOT NULL DEFAULT UTC_TIMESTAMP(6),
-	`updated_at` datetime(6) NOT NULL DEFAULT UTC_TIMESTAMP(6),
+	`created_at` datetime(6) NOT NULL DEFAULT (UTC_TIMESTAMP(6)),
+	`updated_at` datetime(6) NOT NULL DEFAULT (UTC_TIMESTAMP(6)),
 	CONSTRAINT `api_tokens_id` PRIMARY KEY(`id`),
 	CONSTRAINT `api_tokens_token_hash_uq` UNIQUE(`token_hash`)
 );
@@ -450,8 +450,8 @@ CREATE TABLE `mcp_servers` (
 	`required_scopes` json NOT NULL DEFAULT ('[]'),
 	`status` varchar(16) NOT NULL DEFAULT 'active',
 	`rate_limit` json NOT NULL DEFAULT ('{}'),
-	`created_at` datetime(6) NOT NULL DEFAULT UTC_TIMESTAMP(6),
-	`updated_at` datetime(6) NOT NULL DEFAULT UTC_TIMESTAMP(6),
+	`created_at` datetime(6) NOT NULL DEFAULT (UTC_TIMESTAMP(6)),
+	`updated_at` datetime(6) NOT NULL DEFAULT (UTC_TIMESTAMP(6)),
 	CONSTRAINT `mcp_servers_id` PRIMARY KEY(`id`),
 	CONSTRAINT `mcp_servers_tenant_name_uq` UNIQUE(`tenant_id`,`name`)
 );
@@ -466,8 +466,8 @@ CREATE TABLE `mcp_tools` (
 	`enabled` boolean NOT NULL DEFAULT true,
 	`source_operation_id` varchar(128),
 	`metadata` json NOT NULL DEFAULT ('{}'),
-	`created_at` datetime(6) NOT NULL DEFAULT UTC_TIMESTAMP(6),
-	`updated_at` datetime(6) NOT NULL DEFAULT UTC_TIMESTAMP(6),
+	`created_at` datetime(6) NOT NULL DEFAULT (UTC_TIMESTAMP(6)),
+	`updated_at` datetime(6) NOT NULL DEFAULT (UTC_TIMESTAMP(6)),
 	CONSTRAINT `mcp_tools_id` PRIMARY KEY(`id`),
 	CONSTRAINT `mcp_tools_server_tool_uq` UNIQUE(`server_id`,`tool_name`)
 );
@@ -480,8 +480,8 @@ CREATE TABLE `enterprise_business_revenue` (
 	`period_end` datetime(6) NOT NULL,
 	`revenue_usd` decimal(18,8) NOT NULL,
 	`notes` text,
-	`created_at` datetime(6) NOT NULL DEFAULT UTC_TIMESTAMP(6),
-	`updated_at` datetime(6) NOT NULL DEFAULT UTC_TIMESTAMP(6),
+	`created_at` datetime(6) NOT NULL DEFAULT (UTC_TIMESTAMP(6)),
+	`updated_at` datetime(6) NOT NULL DEFAULT (UTC_TIMESTAMP(6)),
 	CONSTRAINT `enterprise_business_revenue_id` PRIMARY KEY(`id`)
 );
 --> statement-breakpoint
@@ -489,7 +489,7 @@ CREATE TABLE `billing_settlement_webhook_config` (
 	`tenant_id` varchar(26) NOT NULL,
 	`webhook_url` text,
 	`enabled` boolean NOT NULL DEFAULT false,
-	`updated_at` datetime(6) NOT NULL DEFAULT UTC_TIMESTAMP(6),
+	`updated_at` datetime(6) NOT NULL DEFAULT (UTC_TIMESTAMP(6)),
 	CONSTRAINT `billing_settlement_webhook_config_tenant_id` PRIMARY KEY(`tenant_id`)
 );
 --> statement-breakpoint
@@ -499,7 +499,7 @@ CREATE TABLE `billing_settlement_webhook_events` (
 	`payload` json NOT NULL,
 	`status` varchar(32) NOT NULL,
 	`response_status` bigint,
-	`created_at` datetime(6) NOT NULL DEFAULT UTC_TIMESTAMP(6),
+	`created_at` datetime(6) NOT NULL DEFAULT (UTC_TIMESTAMP(6)),
 	CONSTRAINT `billing_settlement_webhook_events_id` PRIMARY KEY(`id`)
 );
 --> statement-breakpoint
@@ -514,7 +514,7 @@ CREATE TABLE `billing_split_ledger` (
 	`amount_micro_usd` bigint NOT NULL,
 	`original_cost_micro_usd` bigint NOT NULL,
 	`time_bucket` datetime(6) NOT NULL,
-	`created_at` datetime(6) NOT NULL DEFAULT UTC_TIMESTAMP(6),
+	`created_at` datetime(6) NOT NULL DEFAULT (UTC_TIMESTAMP(6)),
 	CONSTRAINT `billing_split_ledger_id` PRIMARY KEY(`id`),
 	CONSTRAINT `billing_split_ledger_usage_participant_rule_idx` UNIQUE(`usage_record_id`,`participant_id`,`rule_id`)
 );
@@ -529,8 +529,8 @@ CREATE TABLE `billing_split_rules` (
 	`participants` json NOT NULL,
 	`billing_items` json,
 	`enabled` boolean NOT NULL DEFAULT true,
-	`created_at` datetime(6) NOT NULL DEFAULT UTC_TIMESTAMP(6),
-	`updated_at` datetime(6) NOT NULL DEFAULT UTC_TIMESTAMP(6),
+	`created_at` datetime(6) NOT NULL DEFAULT (UTC_TIMESTAMP(6)),
+	`updated_at` datetime(6) NOT NULL DEFAULT (UTC_TIMESTAMP(6)),
 	CONSTRAINT `billing_split_rules_id` PRIMARY KEY(`id`)
 );
 --> statement-breakpoint
@@ -551,8 +551,8 @@ CREATE TABLE `agent_token_traces` (
 	`duration_ms` int NOT NULL DEFAULT 0,
 	`error_message` text,
 	`metadata` json,
-	`created_at` datetime(6) NOT NULL DEFAULT UTC_TIMESTAMP(6),
-	`updated_at` datetime(6) NOT NULL DEFAULT UTC_TIMESTAMP(6),
+	`created_at` datetime(6) NOT NULL DEFAULT (UTC_TIMESTAMP(6)),
+	`updated_at` datetime(6) NOT NULL DEFAULT (UTC_TIMESTAMP(6)),
 	CONSTRAINT `agent_token_traces_id` PRIMARY KEY(`id`),
 	CONSTRAINT `agent_token_traces_trace_step_uq` UNIQUE(`tenant_id`,`trace_id`,`step_no`)
 );
@@ -566,7 +566,7 @@ CREATE TABLE `gateway_quota_ledger` (
 	`event` varchar(16) NOT NULL,
 	`delta_tokens` bigint NOT NULL,
 	`request_id` varchar(128),
-	`created_at` datetime(6) NOT NULL DEFAULT UTC_TIMESTAMP(6),
+	`created_at` datetime(6) NOT NULL DEFAULT (UTC_TIMESTAMP(6)),
 	CONSTRAINT `gateway_quota_ledger_id` PRIMARY KEY(`id`)
 );
 --> statement-breakpoint
@@ -576,8 +576,8 @@ CREATE TABLE `gateway_quota_pool_usage` (
 	`scope_id` varchar(128) NOT NULL,
 	`period` varchar(16) NOT NULL,
 	`used_total` bigint NOT NULL DEFAULT 0,
-	`updated_at` datetime(6) NOT NULL DEFAULT UTC_TIMESTAMP(6),
-	CONSTRAINT `gateway_quota_pool_usage_tenant_id_scope_type_scope_id_period_pk` PRIMARY KEY(`tenant_id`,`scope_type`,`scope_id`,`period`)
+	`updated_at` datetime(6) NOT NULL DEFAULT (UTC_TIMESTAMP(6)),
+	CONSTRAINT `gateway_quota_pool_usage_pk` PRIMARY KEY(`tenant_id`,`scope_type`,`scope_id`,`period`)
 );
 --> statement-breakpoint
 CREATE TABLE `enterprise_quota_plan_assignments` (
@@ -591,8 +591,8 @@ CREATE TABLE `enterprise_quota_plan_assignments` (
 	`status` varchar(16) NOT NULL DEFAULT 'active',
 	`pending_plan_id` varchar(26),
 	`last_rollover_key` varchar(128),
-	`created_at` datetime(6) NOT NULL DEFAULT UTC_TIMESTAMP(6),
-	`updated_at` datetime(6) NOT NULL DEFAULT UTC_TIMESTAMP(6),
+	`created_at` datetime(6) NOT NULL DEFAULT (UTC_TIMESTAMP(6)),
+	`updated_at` datetime(6) NOT NULL DEFAULT (UTC_TIMESTAMP(6)),
 	`active_scope_key` varchar(200) GENERATED ALWAYS AS ((CASE WHEN `status` = 'active' THEN concat(`scope_type`, ':', `scope_id`) ELSE NULL END)) STORED,
 	CONSTRAINT `enterprise_quota_plan_assignments_id` PRIMARY KEY(`id`),
 	CONSTRAINT `enterprise_quota_plan_assign_scope_active_uk` UNIQUE(`tenant_id`,`active_scope_key`)
@@ -609,8 +609,8 @@ CREATE TABLE `enterprise_quota_plans` (
 	`models` json NOT NULL DEFAULT ('[]'),
 	`period` varchar(8) NOT NULL DEFAULT 'month',
 	`status` varchar(16) NOT NULL DEFAULT 'draft',
-	`created_at` datetime(6) NOT NULL DEFAULT UTC_TIMESTAMP(6),
-	`updated_at` datetime(6) NOT NULL DEFAULT UTC_TIMESTAMP(6),
+	`created_at` datetime(6) NOT NULL DEFAULT (UTC_TIMESTAMP(6)),
+	`updated_at` datetime(6) NOT NULL DEFAULT (UTC_TIMESTAMP(6)),
 	CONSTRAINT `enterprise_quota_plans_id` PRIMARY KEY(`id`)
 );
 --> statement-breakpoint

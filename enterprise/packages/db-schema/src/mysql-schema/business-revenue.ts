@@ -9,6 +9,6 @@ export const enterpriseBusinessRevenue = mysqlTable("enterprise_business_revenue
   periodEnd: datetime("period_end", { fsp: 6 }).notNull(),
   revenueUsd: decimal("revenue_usd", { precision: 18, scale: 8 }).notNull(),
   notes: text("notes"),
-  createdAt: datetime("created_at", { fsp: 6 }).default(sql`UTC_TIMESTAMP(6)`).notNull(),
-  updatedAt: datetime("updated_at", { fsp: 6 }).default(sql`UTC_TIMESTAMP(6)`).notNull(),
+  createdAt: datetime("created_at", { fsp: 6 }).default(sql`(UTC_TIMESTAMP(6))`).notNull(),
+  updatedAt: datetime("updated_at", { fsp: 6 }).default(sql`(UTC_TIMESTAMP(6))`).notNull(),
 });

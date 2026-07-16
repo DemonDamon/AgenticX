@@ -134,8 +134,13 @@ if [ "$SKIP_INFRA" -eq 0 ]; then
       fi
       sleep 1
     done
+    # Force dialect+URL for this --db selection. start-dev.sh sources .env.local
+    # afterwards and would otherwise overwrite with a stale postgresql:// URL.
     export DATABASE_DIALECT=mysql
-    export DATABASE_URL="${DATABASE_URL:-mysql://agenticx:agenticx@127.0.0.1:3306/agenticx}"
+    export DATABASE_URL='mysql://agenticx:agenticx@127.0.0.1:3306/agenticx'
+    export AGX_INFRA_DATABASE_DIALECT="$DATABASE_DIALECT"
+    export AGX_INFRA_DATABASE_URL="$DATABASE_URL"
+    echo "[start-dev-with-infra] DATABASE_DIALECT=$DATABASE_DIALECT DATABASE_URL=$DATABASE_URL"
   else
     echo "[start-dev-with-infra] waiting postgres health..."
     for i in $(seq 1 60); do
@@ -151,7 +156,10 @@ if [ "$SKIP_INFRA" -eq 0 ]; then
       sleep 1
     done
     export DATABASE_DIALECT=postgresql
-    export DATABASE_URL="${DATABASE_URL:-postgresql://postgres:postgres@127.0.0.1:5432/agenticx}"
+    export DATABASE_URL='postgresql://postgres:postgres@127.0.0.1:5432/agenticx'
+    export AGX_INFRA_DATABASE_DIALECT="$DATABASE_DIALECT"
+    export AGX_INFRA_DATABASE_URL="$DATABASE_URL"
+    echo "[start-dev-with-infra] DATABASE_DIALECT=$DATABASE_DIALECT DATABASE_URL=$DATABASE_URL"
   fi
 
   echo "[start-dev-with-infra] waiting redis health..."

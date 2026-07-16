@@ -15,7 +15,8 @@ export const departments = mysqlTable(
       .references(() => organizations.id, { onDelete: "restrict" }),
     parentId: ulid("parent_id"),
     name: varchar("name", { length: 128 }).notNull(),
-    path: varchar("path", { length: 1024 }).notNull(),
+    // utf8mb4 unique(tenant_id, path) must stay ≤ 3072 bytes → path ≤ 700
+    path: varchar("path", { length: 700 }).notNull(),
     ...auditColumns,
   },
   (table) => ({

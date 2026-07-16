@@ -17,4 +17,10 @@ pnpm --filter @agenticx/db-schema db:migrate
 pnpm --filter @agenticx/db-schema db:seed
 ```
 
+## MySQL baseline gotchas (8.0)
+
+- Column defaults must be `DEFAULT (UTC_TIMESTAMP(6))` — bare `DEFAULT UTC_TIMESTAMP(6)` is a syntax error.
+- `departments.path` is `varchar(700)` on MySQL (PG keeps 1024) so `UNIQUE(tenant_id, path)` fits the 3072-byte utf8mb4 index limit.
+- Composite PK names must be ≤ 64 chars (e.g. `enterprise_runtime_uvm_pk`).
+
 See `enterprise/docs/database/dialect-compatibility-matrix.md` and `cutover-runbook.md`.
