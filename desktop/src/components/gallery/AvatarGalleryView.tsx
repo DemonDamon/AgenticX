@@ -138,7 +138,7 @@ export function AvatarGalleryView() {
         <div className="min-w-0">
           <h2 className="text-lg font-semibold text-text-strong">数字分身</h2>
           <p className="mt-1 text-sm text-text-muted">
-            为你的团队召集专精分身，点击卡片即可唤起对话。
+            为你的团队召集专精分身；点击卡片可编辑设置，点「唤起」开始对话。
           </p>
         </div>
         <button
@@ -178,11 +178,11 @@ export function AvatarGalleryView() {
                 role="button"
                 tabIndex={0}
                 className="group relative flex cursor-pointer flex-col rounded-xl border border-border bg-surface-card p-4 transition-all hover:border-text-faint hover:bg-surface-card-strong"
-                onClick={() => openMetaOrAvatarPane(avatar.id, avatar.name)}
+                onClick={() => setSettingsAvatarId(avatar.id)}
                 onKeyDown={(e) => {
                   if (e.key === "Enter" || e.key === " ") {
                     e.preventDefault();
-                    openMetaOrAvatarPane(avatar.id, avatar.name);
+                    setSettingsAvatarId(avatar.id);
                   }
                 }}
               >
@@ -271,7 +271,7 @@ export function AvatarGalleryView() {
             className="w-full px-3 py-1.5 text-left text-[13px] text-text-muted transition hover:bg-surface-hover"
             onClick={() => void handlePinToggle(cardMenu.avatarId)}
           >
-            {avatars.find((a) => a.id === cardMenu.avatarId)?.pinned ? "取消置顶" : "置顶"}
+            {avatars.find((a) => a.id === cardMenu.avatarId)?.pinned ? "取消特别关注" : "特别关注"}
           </button>
           <button
             type="button"
