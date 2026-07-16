@@ -9802,7 +9802,8 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
         return GROUP_TINT_LIST[idx % GROUP_TINT_LIST.length];
       }
     }
-    return avatarTintBg(pane.avatarId);
+    const avatarColor = avatars.find((a) => a.id === pane.avatarId)?.color;
+    return avatarTintBg(pane.avatarId, avatarColor);
   })();
 
   useEffect(() => {

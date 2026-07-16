@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import type { CSSProperties, ReactNode, MouseEvent as ReactMouseEvent } from "react";
 import { Bookmark, Copy, Forward, LayoutList, Quote, RotateCcw, Pencil, X, ArrowUp, ArrowRight, AlertTriangle } from "lucide-react";
 import type { Message, MessageAttachment } from "../../store";
+import { useAppStore } from "../../store";
 import type { SearchReference } from "../../types/search-references";
 import { AttachmentCard } from "./AttachmentCard";
 import { isWorkspaceReferenceAttachment, type FileReferenceOpenRequest } from "../../utils/reference-attachment";
@@ -139,12 +140,19 @@ export function ChatImAvatar({
   imageUrl,
   variant = "circle",
   avatarId,
+  color,
 }: {
   label: string;
   imageUrl?: string;
   variant?: "circle" | "rounded-square";
   avatarId?: string;
+  /** Palette key or empty (= Meta / theme). When omitted and avatarId set, looked up from store. */
+  color?: string;
 }) {
+  const storeColor = useAppStore((s) =>
+    avatarId ? s.avatars.find((a) => a.id === avatarId)?.color : undefined,
+  );
+  const resolvedColor = color ?? storeColor ?? "";
   const char = label.slice(0, 1) || "?";
   const rounded = variant === "rounded-square" ? "rounded-[6px]" : "rounded-full";
   if (imageUrl) {
@@ -156,7 +164,7 @@ export function ChatImAvatar({
       />
     );
   }
-  const tintClass = avatarId ? `${avatarBgClass(avatarId)} text-white` : "";
+  const tintClass = avatarId ? `${avatarBgClass(resolvedColor)} text-white` : "";
   return (
     <div
       className={`flex h-8 w-8 shrink-0 items-center justify-center text-xs font-bold ${rounded} ${tintClass}`}

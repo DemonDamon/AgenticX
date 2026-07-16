@@ -20,6 +20,14 @@ import {
 } from "./badge-theme";
 import type { BadgeVM } from "./badge-vm";
 
+function badgeTint(vm: BadgeVM): string | undefined {
+  const avatars = useAppStore.getState().avatars;
+  const color = vm.avatarId
+    ? avatars.find((a) => a.id === vm.avatarId)?.color
+    : undefined;
+  return avatarTintBg(vm.avatarId ?? vm.runId, color);
+}
+
 /** 主题色旋转弧（running / pending 用），纯 SVG 无依赖。 */
 function BadgeSpinner({ size = 12, dur = "0.85s" }: { size?: number; dur?: string }) {
   const r = size / 2 - 1.4;
@@ -100,7 +108,7 @@ function ModelPill({ provider, model }: { provider?: string; model?: string }) {
 // ── Full 工牌浮层 ──────────────────────────────────────────────────────────
 
 function FullBadgeCard({ vm, anchorRect }: { vm: BadgeVM; anchorRect: DOMRect }) {
-  const tint = avatarTintBg(vm.avatarId ?? vm.runId);
+  const tint = badgeTint(vm);
   const width = 300;
   const left = Math.min(Math.max(8, anchorRect.left), window.innerWidth - width - 8);
   const top = Math.min(anchorRect.bottom + 8, window.innerHeight - 220);
@@ -158,7 +166,7 @@ export function AgentBadgeDrawerHeader({
   onCopy?: () => void;
   copyFeedback?: boolean;
 }) {
-  const tint = avatarTintBg(vm.avatarId ?? vm.runId);
+  const tint = badgeTint(vm);
   return (
     <div
       className="flex flex-col gap-2.5 border-b border-border px-3 py-3"
@@ -220,7 +228,7 @@ export function AgentBadge({ vm, selected = false, onClick }: Props) {
   const hoverTimer = useRef<number | null>(null);
   const [showFull, setShowFull] = useState(false);
   const [anchorRect, setAnchorRect] = useState<DOMRect | null>(null);
-  const tint = avatarTintBg(vm.avatarId ?? vm.runId);
+  const tint = badgeTint(vm);
 
   const openFull = useCallback(() => {
     const el = rowRef.current;

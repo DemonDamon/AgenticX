@@ -97,6 +97,7 @@ type AvatarApiRow = {
   brains_enabled?: "*" | string[] | null;
   default_provider?: string;
   default_model?: string;
+  color?: string;
 };
 
 /** Map `/api/avatars` rows into store `Avatar` shape. */
@@ -125,6 +126,7 @@ export function mapAvatarsFromApi(rows: unknown[]): Avatar[] {
             : undefined,
       defaultProvider: a.default_provider ?? "",
       defaultModel: a.default_model ?? "",
+      color: typeof a.color === "string" ? a.color : "",
     }));
 }
 

@@ -1,9 +1,9 @@
 // ── Avatar (individual) palette ──────────────────────────────────────────────
-const AVATAR_PALETTE = [
+export const AVATAR_PALETTE = [
   "cyan", "violet", "rose", "amber",
   "emerald", "fuchsia", "sky", "orange",
 ] as const;
-type AvatarPaletteKey = (typeof AVATAR_PALETTE)[number];
+export type AvatarPaletteKey = (typeof AVATAR_PALETTE)[number];
 
 // ── Group palette (distinct from avatar palette) ──────────────────────────────
 const GROUP_PALETTE = [
@@ -11,8 +11,6 @@ const GROUP_PALETTE = [
   "red", "blue", "yellow", "purple",
 ] as const;
 type GroupPaletteKey = (typeof GROUP_PALETTE)[number];
-
-type PaletteKey = AvatarPaletteKey | GroupPaletteKey;
 
 function hashToIndex(id: string, mod: number): number {
   let hash = 0;
@@ -28,14 +26,32 @@ function rawGroupId(id: string): string {
   return id.startsWith("group:") ? id.slice(6) : id;
 }
 
-// ── Public: bg Tailwind class ─────────────────────────────────────────────────
-
-export function avatarColorKey(id: string): AvatarPaletteKey {
-  return AVATAR_PALETTE[hashToIndex(id, AVATAR_PALETTE.length)];
+export function isAvatarPaletteKey(value: string): value is AvatarPaletteKey {
+  return (AVATAR_PALETTE as readonly string[]).includes(value);
 }
 
-export function avatarBgClass(id: string): string {
-  return `bg-${avatarColorKey(id)}-600`;
+/**
+ * Empty / invalid → Meta default (theme accent, no pane tint).
+ * Valid palette key → that accent.
+ */
+export function normalizeAvatarColor(color?: string | null): AvatarPaletteKey | "" {
+  const key = String(color ?? "").trim().toLowerCase();
+  return isAvatarPaletteKey(key) ? key : "";
+}
+
+/** @deprecated Prefer normalizeAvatarColor — hash default removed (Meta-aligned). */
+export function avatarColorKey(id: string, color?: string | null): AvatarPaletteKey | "" {
+  void id;
+  return normalizeAvatarColor(color);
+}
+
+// ── Public: bg Tailwind class ─────────────────────────────────────────────────
+
+/** Solid circle / initials background. Empty color → theme (Meta). */
+export function avatarBgClass(color?: string | null): string {
+  const key = normalizeAvatarColor(color);
+  if (!key) return "bg-[rgb(var(--theme-color-rgb,59,130,246))]";
+  return `bg-${key}-600`;
 }
 
 export function groupColorKey(id: string): GroupPaletteKey {
@@ -112,13 +128,35 @@ const AVATAR_DOT: Record<AvatarPaletteKey, string> = {
   orange:  "rgb(251, 146, 60)",
 };
 
+/** Preview swatches for the settings color picker (solid 600-ish). */
+export const AVATAR_COLOR_SWATCH: Record<AvatarPaletteKey, string> = {
+  cyan:    "rgb(8, 145, 178)",
+  violet:  "rgb(124, 58, 237)",
+  rose:    "rgb(225, 29, 72)",
+  amber:   "rgb(217, 119, 6)",
+  emerald: "rgb(5, 150, 105)",
+  fuchsia: "rgb(192, 38, 211)",
+  sky:     "rgb(2, 132, 199)",
+  orange:  "rgb(234, 88, 12)",
+};
+
 // ── Public helpers ────────────────────────────────────────────────────────────
 
-/** Transparent background tint for pane — works for both avatar and group ids */
-export function avatarTintBg(id: string | null | undefined): string | undefined {
+/**
+ * Transparent background tint for pane.
+ * - group ids → group palette
+ * - avatar with empty color → undefined (Meta / default surface)
+ * - avatar with palette color → that tint
+ */
+export function avatarTintBg(
+  id: string | null | undefined,
+  color?: string | null,
+): string | undefined {
   if (!id) return undefined;
   if (isGroupId(id)) return GROUP_TINT[groupColorKey(id)];
-  return AVATAR_TINT[avatarColorKey(id)];
+  const key = normalizeAvatarColor(color);
+  if (!key) return undefined;
+  return AVATAR_TINT[key];
 }
 
 /** Solid background color for group avatar icon */
@@ -131,13 +169,21 @@ export function groupDotColor(id: string): string {
   return GROUP_DOT[groupColorKey(id)];
 }
 
-/** Dot color for avatar hasPane indicator — matches `avatarColorKey(id)` */
-export function avatarDotColor(id: string): string {
-  return AVATAR_DOT[avatarColorKey(id)];
+/** Dot color for avatar hasPane indicator */
+export function avatarDotColor(color?: string | null): string {
+  const key = normalizeAvatarColor(color);
+  if (!key) return "rgb(var(--theme-color-rgb, 59, 130, 246))";
+  return AVATAR_DOT[key];
 }
 
-export function avatarTintBorder(id: string | null | undefined): string | undefined {
+export function avatarTintBorder(
+  id: string | null | undefined,
+  color?: string | null,
+): string | undefined {
   if (!id) return undefined;
+  if (isGroupId(id)) return undefined;
+  const key = normalizeAvatarColor(color);
+  if (!key) return undefined;
   const AVATAR_BORDER: Record<AvatarPaletteKey, string> = {
     cyan:    "rgba(8,145,178,0.15)",
     violet:  "rgba(124,58,237,0.15)",
@@ -148,6 +194,5 @@ export function avatarTintBorder(id: string | null | undefined): string | undefi
     sky:     "rgba(2,132,199,0.15)",
     orange:  "rgba(234,88,12,0.15)",
   };
-  if (isGroupId(id)) return undefined;
-  return AVATAR_BORDER[avatarColorKey(id)];
+  return AVATAR_BORDER[key];
 }

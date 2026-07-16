@@ -221,6 +221,7 @@ contextBridge.exposeInMainWorld("agenticxDesktop", {
     brains_enabled?: "*" | string[] | null;
     default_provider?: string;
     default_model?: string;
+    color?: string;
   }) =>
     ipcRenderer.invoke("update-avatar", payload),
   deleteAvatar: async (id: string) => ipcRenderer.invoke("delete-avatar", id),

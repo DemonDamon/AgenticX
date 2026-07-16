@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Save, RotateCcw, X } from "lucide-react";
 import type { Avatar } from "../store";
-import { avatarBgClass } from "../utils/avatar-color";
+import { avatarBgClass, AVATAR_PALETTE, AVATAR_COLOR_SWATCH, normalizeAvatarColor } from "../utils/avatar-color";
+import type { AvatarPaletteKey } from "../utils/avatar-color";
 import { DefaultModelSelect } from "./DefaultModelSelect";
 
 function avatarInitials(name: string): string {
@@ -86,6 +87,7 @@ export function AvatarSettingsPanel(props: Props) {
   const [avatarImageHint, setAvatarImageHint] = useState("");
   const [defaultProvider, setDefaultProvider] = useState(avatar?.defaultProvider ?? "");
   const [defaultModel, setDefaultModel] = useState(avatar?.defaultModel ?? "");
+  const [colorDraft, setColorDraft] = useState(() => normalizeAvatarColor(avatar?.color));
 
   // Tools
   const [tools, setTools] = useState<ToolItem[]>(DEFAULT_TOOLS);
@@ -147,6 +149,7 @@ export function AvatarSettingsPanel(props: Props) {
       setToolsEnabled({ ...(avatar.toolsEnabled ?? {}) });
       setDefaultProvider(avatar.defaultProvider ?? "");
       setDefaultModel(avatar.defaultModel ?? "");
+      setColorDraft(normalizeAvatarColor(avatar.color));
       const raw = avatar.skillsEnabled;
       setSkillsEnabledDraft(
         raw && typeof raw === "object"
@@ -265,6 +268,7 @@ export function AvatarSettingsPanel(props: Props) {
         avatar_url: avatarUrlDraft.trim(),
         default_provider: defaultProvider.trim(),
         default_model: defaultModel.trim(),
+        color: colorDraft,
         brains_enabled: brainsPayload,
       });
       if (!res?.ok) {
@@ -429,7 +433,7 @@ export function AvatarSettingsPanel(props: Props) {
                     />
                   ) : (
                     <div
-                      className={`flex h-12 w-12 shrink-0 items-center justify-center rounded-full text-xs font-bold text-white ${avatar ? avatarBgClass(avatar.id) : "bg-surface-hover text-text-primary"}`}
+                      className={`flex h-12 w-12 shrink-0 items-center justify-center rounded-full text-xs font-bold text-white ${avatar ? avatarBgClass(colorDraft) : "bg-surface-hover text-text-primary"}`}
                     >
                       {avatarInitials(name || avatar?.name || "")}
                     </div>
@@ -465,6 +469,43 @@ export function AvatarSettingsPanel(props: Props) {
                   与侧栏、会话列表一致展示；建议小于 1.8MB 的方形图片。保存后写入该分身目录下的 avatar.yaml。
                 </p>
                 {avatarImageHint ? <p className="mt-1 text-[11px] text-text-subtle">{avatarImageHint}</p> : null}
+              </div>
+              <div>
+                <div className="text-sm text-text-muted">背景色</div>
+                <p className="mt-1 text-[11px] text-text-subtle">
+                  用于对话窗格轻底色与无头像时的占位色。默认与元智能体一致（主题色、无窗格 tint）。
+                </p>
+                <div className="mt-2 flex flex-wrap items-center gap-2">
+                  <button
+                    type="button"
+                    aria-label="默认（与元智能体一致）"
+                    aria-pressed={colorDraft === ""}
+                    title="默认"
+                    className={`h-7 w-7 rounded-full border-2 transition ${
+                      colorDraft === ""
+                        ? "border-text-strong ring-2 ring-[rgba(var(--theme-color-rgb,59,130,246),0.35)]"
+                        : "border-border hover:border-text-faint"
+                    }`}
+                    style={{ background: "rgb(var(--theme-color-rgb, 59, 130, 246))" }}
+                    onClick={() => setColorDraft("")}
+                  />
+                  {AVATAR_PALETTE.map((key: AvatarPaletteKey) => (
+                    <button
+                      key={key}
+                      type="button"
+                      aria-label={key}
+                      aria-pressed={colorDraft === key}
+                      title={key}
+                      className={`h-7 w-7 rounded-full border-2 transition ${
+                        colorDraft === key
+                          ? "border-text-strong ring-2 ring-white/20"
+                          : "border-transparent hover:scale-105"
+                      }`}
+                      style={{ background: AVATAR_COLOR_SWATCH[key] }}
+                      onClick={() => setColorDraft(key)}
+                    />
+                  ))}
+                </div>
               </div>
               <label className="block text-sm text-text-muted">
                 名称

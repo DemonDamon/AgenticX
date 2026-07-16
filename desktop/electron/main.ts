@@ -7903,6 +7903,7 @@ function registerIpc(): void {
     skills_enabled?: Record<string, boolean> | null;
     default_provider?: string;
     default_model?: string;
+    color?: string;
   }) => {
     const { id, ...body } = payload;
     try {

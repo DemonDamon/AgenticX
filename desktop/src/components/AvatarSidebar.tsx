@@ -78,6 +78,7 @@ export function AvatarSidebar() {
                   : undefined,
             defaultProvider: a.default_provider ?? "",
             defaultModel: a.default_model ?? "",
+            color: typeof a.color === "string" ? a.color : "",
           }))
         );
         return true;

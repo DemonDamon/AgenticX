@@ -129,6 +129,8 @@ type AvatarItem = {
   /** Default provider/model the avatar falls back to when a session has none. */
   default_provider?: string;
   default_model?: string;
+  /** Empty = Meta default; else palette key (cyan/violet/…). */
+  color?: string;
 };
 
 type ToolStatusItem = {
@@ -523,6 +525,7 @@ declare global {
         brains_enabled?: "*" | string[] | null;
         default_provider?: string;
         default_model?: string;
+        color?: string;
       }) => Promise<{ ok: boolean; avatar?: AvatarItem; error?: string }>;
       deleteAvatar: (id: string) => Promise<{ ok: boolean; error?: string }>;
       getToolsStatus: () => Promise<{ ok: boolean; tools: ToolStatusItem[]; error?: string }>;

@@ -21,6 +21,17 @@ import yaml
 AVATARS_ROOT = Path.home() / ".agenticx" / "avatars"
 AVATAR_CONFIG_FILE = "avatar.yaml"
 
+# Must stay aligned with desktop/src/utils/avatar-color.ts AVATAR_PALETTE.
+AVATAR_COLOR_KEYS = frozenset(
+    {"cyan", "violet", "rose", "amber", "emerald", "fuchsia", "sky", "orange"}
+)
+
+
+def normalize_avatar_color(value: Any) -> str:
+    """Return a valid palette key or empty string (Meta / theme default)."""
+    key = str(value or "").strip().lower()
+    return key if key in AVATAR_COLOR_KEYS else ""
+
 IDENTITY_TEMPLATE = """# IDENTITY.md - {name}
 
 - Name: {name}
@@ -54,6 +65,8 @@ class AvatarConfig:
     default_provider: str = ""
     default_model: str = ""
     pinned: bool = False
+    # Empty = same as Meta (no pane tint / theme accent). Else an AVATAR_PALETTE key.
+    color: str = ""
     tools_enabled: Dict[str, bool] = field(default_factory=dict)
     skills_enabled: Optional[Dict[str, bool]] = None
     # None = mount global brains only; "*" = all visible brains; list = explicit ids
@@ -67,12 +80,16 @@ class AvatarConfig:
             d["brains_enabled"] = self.brains_enabled
         if self.skills_enabled is not None:
             d["skills_enabled"] = self.skills_enabled
+        # Always persist color so clearing back to Meta ("") removes a prior key.
+        d["color"] = normalize_avatar_color(self.color)
         return d
 
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> AvatarConfig:
         known = set(cls.__dataclass_fields__.keys())
         filtered = {k: v for k, v in data.items() if k in known}
+        if "color" in filtered:
+            filtered["color"] = normalize_avatar_color(filtered.get("color"))
         return cls(**filtered)
 
 
@@ -142,6 +159,7 @@ class AvatarRegistry:
         skills_enabled: Optional[Dict[str, bool]] = None,
         brains_enabled: Optional[Any] = None,
         workspace_dir: str = "",
+        color: str = "",
     ) -> AvatarConfig:
         """Create a new avatar with isolated workspace.
 
@@ -172,6 +190,7 @@ class AvatarRegistry:
             tools_enabled=dict(tools_enabled or {}),
             skills_enabled=se,
             brains_enabled=brains_enabled,
+            color=normalize_avatar_color(color),
             created_at=now,
             updated_at=now,
         )
@@ -205,6 +224,9 @@ class AvatarRegistry:
                     config.brains_enabled = [str(x).strip() for x in value if str(x).strip()]
                 else:
                     config.brains_enabled = value
+                continue
+            if key == "color":
+                config.color = normalize_avatar_color(value)
                 continue
             if hasattr(config, key):
                 setattr(config, key, value)

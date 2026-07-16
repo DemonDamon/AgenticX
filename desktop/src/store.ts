@@ -75,6 +75,11 @@ export type Avatar = {
   defaultProvider?: string;
   /** Default LLM model the avatar uses when a session has no explicit model yet. */
   defaultModel?: string;
+  /**
+   * Pane / initials accent. Empty = same as Meta (theme, no tint).
+   * One of: cyan | violet | rose | amber | emerald | fuchsia | sky | orange.
+   */
+  color?: string;
 };
 
 export type SessionItem = {

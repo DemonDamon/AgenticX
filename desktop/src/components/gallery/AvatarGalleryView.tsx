@@ -196,7 +196,7 @@ export function AvatarGalleryView() {
                       />
                     ) : (
                       <div
-                        className={`flex h-11 w-11 items-center justify-center rounded-[10px] text-sm font-bold text-white ${avatarBgClass(avatar.id)}`}
+                        className={`flex h-11 w-11 items-center justify-center rounded-[10px] text-sm font-bold text-white ${avatarBgClass(avatar.color)}`}
                       >
                         {avatarInitials(avatar.name)}
                       </div>
@@ -271,7 +271,7 @@ export function AvatarGalleryView() {
             className="w-full px-3 py-1.5 text-left text-[13px] text-text-muted transition hover:bg-surface-hover"
             onClick={() => void handlePinToggle(cardMenu.avatarId)}
           >
-            {avatars.find((a) => a.id === cardMenu.avatarId)?.pinned ? "取消特别关注" : "特别关注"}
+            {avatars.find((a) => a.id === cardMenu.avatarId)?.pinned ? "取消关注" : "关注"}
           </button>
           <button
             type="button"
