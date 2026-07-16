@@ -24,6 +24,7 @@ import {
   Bot,
   Boxes,
   History,
+  Settings,
   X,
   PanelRightClose,
   ArrowRight,
@@ -47,6 +48,7 @@ import {
 import { useVoicePushToTalk } from "../hooks/useVoicePushToTalk";
 import { VoicePttOverlay } from "./VoicePttOverlay";
 import { SessionHistoryPanel } from "./SessionHistoryPanel";
+import { AvatarSettingsPanel } from "./AvatarSettingsPanel";
 import { MemoryGraphPanel } from "./memory/MemoryGraphPanel";
 import { StickyTaskBar } from "./StickyTaskBar";
 import { ContextUsageButton } from "./ContextUsagePopup";
@@ -2664,6 +2666,12 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
   /** 历史对话按钮 ref + 打开时的锚点位置，用于渲染 workbuddy 风格的浮层（不复用 historyWidth，浮层宽度固定）。 */
   const historyButtonRef = useRef<HTMLButtonElement | null>(null);
   const [historyAnchorRect, setHistoryAnchorRect] = useState<DOMRect | null>(null);
+  /** 数字分身窗格顶栏：直接打开分身设置，无需再切到左侧「数字分身」画廊。 */
+  const [avatarSettingsOpen, setAvatarSettingsOpen] = useState(false);
+  const paneSettingsAvatar = useMemo(() => {
+    if (!isDedicatedAvatarPane || !pane?.avatarId) return undefined;
+    return avatars.find((a) => a.id === pane.avatarId);
+  }, [isDedicatedAvatarPane, pane?.avatarId, avatars]);
   const paneRef = useRef<HTMLDivElement | null>(null);
   const [paneWidth, setPaneWidth] = useState(0);
 
@@ -10116,6 +10124,17 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
                 <Boxes className="h-[18px] w-[18px]" strokeWidth={1.8} />
               </button>
             )}
+            {paneSettingsAvatar ? (
+              <button
+                type="button"
+                className="agx-topbar-btn !px-[5px]"
+                onClick={() => setAvatarSettingsOpen(true)}
+                title="分身设置"
+                aria-label="打开分身设置"
+              >
+                <Settings className="h-[18px] w-[18px]" strokeWidth={1.8} />
+              </button>
+            ) : null}
             {!isGroupPane && (
               <button
                 type="button"
@@ -11196,6 +11215,18 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
           setSelectedMessageIds(new Set());
         }}
       />
+      {avatarSettingsOpen && paneSettingsAvatar ? (
+        <AvatarSettingsPanel
+          mode="avatar"
+          avatar={paneSettingsAvatar}
+          onClose={() => setAvatarSettingsOpen(false)}
+          onSaved={() => {
+            window.dispatchEvent(
+              new CustomEvent("agenticx:avatars:changed", { detail: { openPane: false } })
+            );
+          }}
+        />
+      ) : null}
     </div>
   );
 }
