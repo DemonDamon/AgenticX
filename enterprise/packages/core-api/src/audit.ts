@@ -1,6 +1,7 @@
 export type AuditEventType =
   | "chat_call"
   | "tool_call"
+  | "mcp_tool_call"
   | "policy_hit"
   | "auth_login"
   | "auth_logout"
@@ -41,6 +42,9 @@ export interface AuditEvent {
   provider?: string;
   model?: string;
   route: AuditRoute;
+  channel_id?: string;
+  channel_key_ref?: string;
+  api_token_id?: number;
 
   input_tokens?: number;
   output_tokens?: number;
@@ -52,8 +56,15 @@ export interface AuditEvent {
   tools_called?: string[];
   policies_hit?: AuditPolicyHit[];
 
+  mcp_server?: string;
+  mcp_tool_name?: string;
+  mcp_input_hash?: string;
+  mcp_output_hash?: string;
+  mcp_status?: string;
+
   prev_checksum: string;
   checksum: string;
+  checksum_version?: string;
   signature?: string;
 
   src_region?: string;
@@ -82,5 +93,7 @@ export type AuditQueryResult = {
   chain_valid: boolean;
   chain_error_at?: string;
   chain_error_reason?: string;
+  chain_verification?: "full" | "partial";
+  chain_verified_count?: number;
+  chain_legacy_unverified?: number;
 };
-

@@ -1,4 +1,4 @@
-import { bigint, boolean, index, int, json, mysqlTable, datetime, uniqueIndex, varchar } from "drizzle-orm/mysql-core";
+import { bigint, boolean, index, int, json, mysqlTable, datetime, text, uniqueIndex, varchar } from "drizzle-orm/mysql-core";
 import { auditColumns, ulid } from "./_shared";
 import { tenants } from "./tenants";
 
@@ -42,6 +42,8 @@ export const gatewayAuditEvents = mysqlTable(
     residencyRule: varchar("residency_rule", { length: 64 }),
     prevChecksum: varchar("prev_checksum", { length: 128 }).notNull(),
     checksum: varchar("checksum", { length: 128 }).notNull(),
+    checksumVersion: varchar("checksum_version", { length: 16 }).notNull().default("v1"),
+    checksumPayload: text("checksum_payload"),
     signature: varchar("signature", { length: 256 }),
     ...auditColumns,
   },

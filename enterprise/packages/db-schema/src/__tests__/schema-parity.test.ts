@@ -97,9 +97,12 @@ describe("mysql baseline migration inventory", () => {
   const migrationDir = join(packageRoot, "drizzle-mysql");
   const baselinePath = join(migrationDir, "0000_mysql_baseline.sql");
 
-  it("contains one baseline migration for all tables and the daily usage view", () => {
+  it("contains the baseline plus incremental migrations", () => {
     const sqlFiles = readdirSync(migrationDir).filter((name) => name.endsWith(".sql"));
-    expect(sqlFiles).toEqual(["0000_mysql_baseline.sql"]);
+    expect(sqlFiles.sort()).toEqual([
+      "0000_mysql_baseline.sql",
+      "0001_audit_checksum_payload.sql",
+    ]);
 
     const sql = readFileSync(baselinePath, "utf8");
     expect(sql.match(/CREATE TABLE `/g)).toHaveLength(42);
@@ -107,7 +110,7 @@ describe("mysql baseline migration inventory", () => {
     expect(sql).not.toMatch(/MATERIALIZED\s+VIEW/i);
   });
 
-  it("has one MySQL journal entry and excludes PostgreSQL orphan migrations", () => {
+  it("tracks MySQL migrations and excludes PostgreSQL orphan migrations", () => {
     const journal = JSON.parse(
       readFileSync(join(migrationDir, "meta/_journal.json"), "utf8"),
     ) as {
@@ -117,6 +120,7 @@ describe("mysql baseline migration inventory", () => {
     expect(journal.dialect).toBe("mysql");
     expect(journal.entries).toEqual([
       expect.objectContaining({ idx: 0, tag: "0000_mysql_baseline" }),
+      expect.objectContaining({ idx: 1, tag: "0001_audit_checksum_payload" }),
     ]);
     expect(readdirSync(migrationDir)).not.toContain("0016_mcp_hosting.sql");
     expect(readdirSync(migrationDir)).not.toContain(

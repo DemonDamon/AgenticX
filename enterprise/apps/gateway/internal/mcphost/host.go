@@ -207,6 +207,7 @@ func (h *Host) writeToolAudit(identity Identity, rec *ServerRecord, toolName str
 		LatencyMS:     time.Since(started).Milliseconds(),
 		MCPServer:     rec.Name,
 		MCPToolName:   toolName,
+		ToolsCalled:   []string{toolName},
 		MCPInputHash:  hashText(string(inRaw)),
 		MCPOutputHash: hashText(outText),
 		MCPStatus:     status,

@@ -8,6 +8,13 @@
       "when": 1784158783965,
       "tag": "0000_mysql_baseline",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "5",
+      "when": 1780000000000,
+      "tag": "0001_audit_checksum_payload",
+      "breakpoints": true
     }
   ]
 }

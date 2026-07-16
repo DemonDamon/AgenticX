@@ -951,12 +951,14 @@
         "description": {
           "count": "{count} records ·",
           "chainOk": "Full chain verification passed",
+          "chainPartial": "Compatibility verification passed ({count} legacy rows not recomputable)",
           "chainFail": "Full chain verification failed",
           "chainLoading": "Full chain verification loading…",
           "pageChainFail": "Page chain verification failed",
           "scanned": "Scanned {count} rows"
         },
         "chainOk": "Chain intact",
+        "chainPartial": "Compatibility verified",
         "chainBad": "Chain broken",
         "refresh": "Refresh",
         "searchPlaceholder": "Search event type / user / model...",
@@ -994,7 +996,13 @@
           "session": "Session",
           "inputTokens": "Input tokens",
           "outputTokens": "Output tokens",
+          "totalTokens": "Total tokens",
           "latency": "Latency",
+          "apiToken": "API Token / PAT",
+          "promptSummary": "Prompt summary",
+          "responseSummary": "Response summary",
+          "toolsCalled": "Tools called",
+          "toolStatus": "Tool status",
           "noPolicyTitle": "No policy hits",
           "noPolicyDescription": "This event is compliant"
         },

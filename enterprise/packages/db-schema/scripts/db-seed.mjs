@@ -58,7 +58,7 @@ async function main() {
       `
       INSERT INTO users (id, tenant_id, dept_id, email, display_name, password_hash, status)
       VALUES ($1, $2, $3, $4, $5, $6, $7)
-      ON CONFLICT (tenant_id, email) DO UPDATE SET
+      ON CONFLICT (tenant_id, email) WHERE is_deleted = false AND deleted_at IS NULL DO UPDATE SET
         display_name = EXCLUDED.display_name,
         password_hash = EXCLUDED.password_hash,
         status = EXCLUDED.status,

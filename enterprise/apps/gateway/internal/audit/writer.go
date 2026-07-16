@@ -56,6 +56,7 @@ type Event struct {
 	TotalTokens        int             `json:"total_tokens,omitempty"`
 	LatencyMS          int64           `json:"latency_ms,omitempty"`
 	Digest             *Digest         `json:"digest,omitempty"`
+	ToolsCalled        []string        `json:"tools_called,omitempty"`
 	PoliciesHit        []PolicyHit     `json:"policies_hit,omitempty"`
 	MCPStatus          string          `json:"mcp_status,omitempty"`
 	MCPServer          string          `json:"mcp_server,omitempty"`
@@ -68,8 +69,10 @@ type Event struct {
 	DstRegion          string          `json:"dst_region,omitempty"`
 	CrossBorder        bool            `json:"cross_border,omitempty"`
 	ResidencyRule      string          `json:"residency_rule,omitempty"`
+	ChecksumVersion    string          `json:"checksum_version,omitempty"`
 	PrevChecksum       string          `json:"prev_checksum"`
 	Checksum           string          `json:"checksum"`
+	ChecksumPayload    string          `json:"-"`
 }
 
 type Digest struct {
@@ -85,6 +88,8 @@ type FileWriter struct {
 	lastChecksum string
 	mu           sync.Mutex
 }
+
+const checksumVersionV2 = "v2"
 
 func NewFileWriter(dir string) *FileWriter {
 	return &FileWriter{dir: dir}
@@ -110,6 +115,7 @@ func (w *FileWriter) Write(event *Event) error {
 	}
 
 	event.PrevChecksum = nonEmpty(w.lastChecksum, "GENESIS")
+	event.ChecksumVersion = checksumVersionV2
 	event.Checksum = ""
 	rawForChecksum, err := json.Marshal(event)
 	if err != nil {
@@ -117,6 +123,7 @@ func (w *FileWriter) Write(event *Event) error {
 	}
 	sum := blake2b.Sum512([]byte(event.PrevChecksum + "|" + string(rawForChecksum)))
 	event.Checksum = hex.EncodeToString(sum[:])[:64]
+	event.ChecksumPayload = string(rawForChecksum)
 	finalRaw, err := json.Marshal(event)
 	if err != nil {
 		return err

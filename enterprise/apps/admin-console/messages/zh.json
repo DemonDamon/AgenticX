@@ -951,12 +951,14 @@
         "description": {
           "count": "共 {count} 条记录 ·",
           "chainOk": "全表链校验通过",
+          "chainPartial": "全表链兼容校验通过（{count} 条历史记录未重算）",
           "chainFail": "全表链校验失败",
           "chainLoading": "全表链校验加载中…",
           "pageChainFail": "当前页链校验失败",
           "scanned": "已扫 {count} 行"
         },
         "chainOk": "链完整",
+        "chainPartial": "兼容校验",
         "chainBad": "链异常",
         "refresh": "刷新",
         "searchPlaceholder": "按事件类型 / 用户 / 模型搜索...",
@@ -994,7 +996,13 @@
           "session": "Session",
           "inputTokens": "Input tokens",
           "outputTokens": "Output tokens",
+          "totalTokens": "Total tokens",
           "latency": "耗时",
+          "apiToken": "API Token / PAT",
+          "promptSummary": "输入摘要",
+          "responseSummary": "输出摘要",
+          "toolsCalled": "工具调用",
+          "toolStatus": "工具状态",
           "noPolicyTitle": "未命中任何策略",
           "noPolicyDescription": "本次事件合规"
         },

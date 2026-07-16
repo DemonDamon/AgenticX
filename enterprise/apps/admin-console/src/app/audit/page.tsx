@@ -66,13 +66,24 @@ export default function AuditPage() {
     at?: string;
     reason?: string;
     scanned?: number;
+    verification?: "full" | "partial";
+    verified?: number;
+    legacy_unverified?: number;
   } | null>(null);
 
   const loadChainVerify = useCallback(async () => {
     try {
       const response = await adminFetch("/api/audit/chain-verify");
       const payload = (await response.json()) as {
-        data?: { valid: boolean; at?: string; reason?: string; scanned: number };
+        data?: {
+          valid: boolean;
+          at?: string;
+          reason?: string;
+          scanned: number;
+          verification?: "full" | "partial";
+          verified?: number;
+          legacy_unverified?: number;
+        };
       };
       setChainFull(payload.data ?? null);
     } catch {
@@ -224,6 +235,7 @@ export default function AuditPage() {
   }, [userId, model, policyHit, crossBorderOnly, t]);
 
   const headerChainOk = chainFull != null ? chainFull.valid : chainValid;
+  const headerChainPartial = chainFull?.valid === true && chainFull.verification === "partial";
   const headerChainAt =
     chainFull != null && !chainFull.valid ? chainFull.at : chainFull == null && !chainValid ? chainError?.at : undefined;
 
@@ -231,7 +243,9 @@ export default function AuditPage() {
     const prefix = t("description.count", { count: items.length });
     if (chainFull != null) {
       const chainPart = chainFull.valid
-        ? t("description.chainOk")
+        ? headerChainPartial
+          ? t("description.chainPartial", { count: chainFull.legacy_unverified ?? 0 })
+          : t("description.chainOk")
         : `${t("description.chainFail")}${chainFull.reason ? `（${chainFull.reason}）` : ""}`;
       return `${prefix} ${chainPart} · ${t("description.scanned", { count: chainFull.scanned ?? 0 })}`;
     }
@@ -263,9 +277,9 @@ export default function AuditPage() {
         description={headerDescription}
         actions={
           <>
-            <Badge variant={headerChainOk ? "success" : "destructive"} className="gap-1">
+            <Badge variant={headerChainOk ? (headerChainPartial ? "warning" : "success") : "destructive"} className="gap-1">
               <ShieldCheck className="h-3 w-3" />
-              {headerChainOk ? t("chainOk") : t("chainBad")}
+              {headerChainOk ? (headerChainPartial ? t("chainPartial") : t("chainOk")) : t("chainBad")}
             </Badge>
             {!headerChainOk && headerChainAt ? (
               <Badge variant="warning" className="font-mono text-[10px]">
@@ -431,7 +445,13 @@ export default function AuditPage() {
                     <DetailField label={t("detail.session")} value={<span className="font-mono text-xs">{selected.session_id ?? "—"}</span>} />
                     <DetailField label={t("detail.inputTokens")} value={<span className="font-mono">{selected.input_tokens ?? "—"}</span>} />
                     <DetailField label={t("detail.outputTokens")} value={<span className="font-mono">{selected.output_tokens ?? "—"}</span>} />
+                    <DetailField label={t("detail.totalTokens")} value={<span className="font-mono">{selected.total_tokens ?? "—"}</span>} />
                     <DetailField label={t("detail.latency")} value={selected.latency_ms ? `${selected.latency_ms} ms` : "—"} />
+                    <DetailField label={t("detail.apiToken")} value={<span className="font-mono">{selected.api_token_id ?? "—"}</span>} />
+                    <DetailField label={t("detail.promptSummary")} value={selected.digest?.prompt_summary ?? "—"} />
+                    <DetailField label={t("detail.responseSummary")} value={selected.digest?.response_summary ?? "—"} />
+                    <DetailField label={t("detail.toolsCalled")} value={selected.tools_called?.join(", ") || selected.mcp_tool_name || "—"} />
+                    <DetailField label={t("detail.toolStatus")} value={selected.mcp_status ?? "—"} />
                     <DetailField
                       label="数据域 → 上游"
                       value={

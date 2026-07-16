@@ -2,15 +2,17 @@ package audit
 
 import (
 	"context"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"strings"
 	"time"
 
 	"github.com/agenticx/enterprise/gateway/internal/database"
+	"golang.org/x/crypto/blake2b"
 )
 
-// PgWriter inserts events into gateway_audit_events without recomputing checksums.
+// PgWriter inserts events into gateway_audit_events and persists the exact v2 checksum payload.
 type PgWriter struct {
 	database *database.Handle
 }
@@ -45,6 +47,50 @@ func (p *PgWriter) Insert(ctx context.Context, e Event) error {
 		}
 	}
 
+	var tools []byte
+	toolsCalled := append([]string(nil), e.ToolsCalled...)
+	if strings.TrimSpace(e.MCPToolName) != "" {
+		seen := false
+		for _, name := range toolsCalled {
+			if name == e.MCPToolName {
+				seen = true
+				break
+			}
+		}
+		if !seen {
+			toolsCalled = append(toolsCalled, e.MCPToolName)
+		}
+	}
+	if len(toolsCalled) > 0 {
+		tools, err = json.Marshal(toolsCalled)
+		if err != nil {
+			return fmt.Errorf("marshal tools_called: %w", err)
+		}
+	}
+
+	checksumVersion := strings.TrimSpace(e.ChecksumVersion)
+	if checksumVersion == "" {
+		checksumVersion = "v1"
+	}
+	var checksumPayload string
+	if checksumVersion == checksumVersionV2 {
+		checksumPayload = strings.TrimSpace(e.ChecksumPayload)
+		if checksumPayload == "" {
+			clone := e
+			clone.Checksum = ""
+			clone.ChecksumPayload = ""
+			raw, marshalErr := json.Marshal(clone)
+			if marshalErr != nil {
+				return fmt.Errorf("marshal checksum payload: %w", marshalErr)
+			}
+			checksumPayload = string(raw)
+		}
+		sum := blake2b.Sum512([]byte(strings.TrimSpace(e.PrevChecksum) + "|" + checksumPayload))
+		if expected := hex.EncodeToString(sum[:])[:64]; expected != strings.TrimSpace(e.Checksum) {
+			return fmt.Errorf("checksum payload does not match checksum for event %s", e.ID)
+		}
+	}
+
 	nullStr := func(s string) any {
 		s = strings.TrimSpace(s)
 		if s == "" {
@@ -69,10 +115,10 @@ INSERT INTO gateway_audit_events (
   client_type, client_ip, provider, model, route,
   channel_id, channel_key_ref, api_token_id,
   input_tokens, output_tokens, total_tokens, latency_ms,
-  digest, policies_hit, tools_called,
+	  digest, policies_hit, tools_called,
   mcp_server, mcp_tool_name, mcp_input_hash, mcp_output_hash, mcp_status,
   src_region, dst_region, cross_border, residency_rule,
-  prev_checksum, checksum, signature,
+	  checksum_version, checksum_payload, prev_checksum, checksum, signature,
   created_at, updated_at
 ) VALUES (
   ?,?,?,?,
@@ -83,7 +129,7 @@ INSERT INTO gateway_audit_events (
   ?,?,?,
   ?,?,?,?,?,
   ?,?,?,?,
-  ?,?,?,
+  ?,?,?,?,?,
   CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
 )
 ` + conflictClause
@@ -110,7 +156,7 @@ INSERT INTO gateway_audit_events (
 		e.LatencyMS,
 		nullJSON(digest),
 		nullJSON(policies),
-		nil, // tools_called
+		nullJSON(tools),
 		nullStr(e.MCPServer),
 		nullStr(e.MCPToolName),
 		nullStr(e.MCPInputHash),
@@ -120,6 +166,8 @@ INSERT INTO gateway_audit_events (
 		nullStr(e.DstRegion),
 		nullBool(e.CrossBorder),
 		nullStr(e.ResidencyRule),
+		checksumVersion,
+		nullStr(checksumPayload),
 		strings.TrimSpace(e.PrevChecksum),
 		strings.TrimSpace(e.Checksum),
 		nil, // signature
