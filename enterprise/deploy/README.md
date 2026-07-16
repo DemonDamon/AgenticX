@@ -16,6 +16,7 @@
 ```bash
 cd enterprise/deploy/docker-compose
 POSTGRES_PASSWORD=replace-me \
+ADMIN_CONSOLE_LOGIN_PASSWORD=replace-me \
 JWT_PUBLIC_KEY="$(cat /path/to/jwt.pub)" \
 JWT_PRIVATE_KEY="$(cat /path/to/jwt.key)" \
 DATABASE_URL="postgresql://agenticx:replace-me@postgres-primary:5432/agenticx?sslmode=disable" \
@@ -24,78 +25,126 @@ docker compose -f prod.yml --profile postgresql up -d
 
 （`prod.yml` 会通过 `${ADMIN_CONSOLE_LOGIN_PASSWORD?...}` / `${DATABASE_URL?...}` 强制要求相关变量已导出；内置 Postgres 需加 `--profile postgresql`。）
 
-## 国内 / 阿里云部署（镜像加速）
+## 阿里云 ACR 生产部署
 
-直连 Docker Hub（`docker.io`）在国内机房常出现 `i/o timeout`。**不要改 `prod.yml`**，叠加 `prod.aliyun.yml` 覆盖镜像源：
+直连 Docker Hub 或 GHCR 在国内机房可能超时。生产环境不依赖公共代理：先把全部基础镜像和业务镜像同步到私有 ACR，再将 `prod.aliyun.yml` 与 `prod.yml` 叠加使用。
+
+### 1. 准备 ACR
+
+1. 从 ACR 控制台复制部署网络对应的实际访问域名。企业版公网域名通常形如 `<instance>-registry.cn-hangzhou.cr.aliyuncs.com`；VPC 部署必须使用控制台提供的专有网络域名，不要根据示例猜测。
+2. 创建 namespace，以及 `nginx`、`redis`、`postgres`、`enterprise-gateway`、`enterprise-web-portal`、`enterprise-admin-console` 六个仓库。
+3. 对仓库开启镜像版本不可变，并为部署账号配置最小只读权限和网络白名单。
+4. 在部署主机登录 ACR。登录域名必须和后续拉取使用的域名一致：
+
+```bash
+export ALIYUN_ACR_HOST="your-instance-registry.cn-hangzhou.cr.aliyuncs.com"
+export ALIYUN_ACR_NAMESPACE=agenticx
+export ALIYUN_ACR_PREFIX="$ALIYUN_ACR_HOST/$ALIYUN_ACR_NAMESPACE"
+export ALIYUN_ACR_USERNAME="your-ram-user@your-account-alias"
+
+read -rsp "ACR password: " ALIYUN_ACR_PASSWORD
+echo
+printf '%s' "$ALIYUN_ACR_PASSWORD" \
+  | docker login --username "$ALIYUN_ACR_USERNAME" --password-stdin "$ALIYUN_ACR_HOST"
+unset ALIYUN_ACR_PASSWORD
+```
+
+### 2. 同步并固化镜像
+
+在能够访问 Docker Hub、GHCR 和 ACR 的受控机器执行。目标 tag 必须是唯一发布版本，禁止使用 `latest`；同步完成后记录 ACR 返回的 digest。
+
+```bash
+export NGINX_IMAGE_TAG=1.27-alpine-20260716
+export REDIS_IMAGE_TAG=7-alpine-20260716
+export POSTGRES_IMAGE_TAG=16-alpine-20260716
+export SOURCE_ENTERPRISE_IMAGE_TAG="published-source-tag"
+export ENTERPRISE_IMAGE_TAG="2026.07.16-gitsha"
+
+mirror_image() {
+  source_image="$1"
+  target_repo="$2"
+  target_tag="$3"
+  target_image="$ALIYUN_ACR_PREFIX/$target_repo:$target_tag"
+
+  docker pull "$source_image"
+  docker tag "$source_image" "$target_image"
+  docker push "$target_image"
+}
+
+mirror_image nginx:1.27-alpine nginx "$NGINX_IMAGE_TAG"
+mirror_image redis:7-alpine redis "$REDIS_IMAGE_TAG"
+mirror_image postgres:16-alpine postgres "$POSTGRES_IMAGE_TAG"
+mirror_image "ghcr.io/agenticx/enterprise-gateway:$SOURCE_ENTERPRISE_IMAGE_TAG" \
+  enterprise-gateway "$ENTERPRISE_IMAGE_TAG"
+mirror_image "ghcr.io/agenticx/enterprise-web-portal:$SOURCE_ENTERPRISE_IMAGE_TAG" \
+  enterprise-web-portal "$ENTERPRISE_IMAGE_TAG"
+mirror_image "ghcr.io/agenticx/enterprise-admin-console:$SOURCE_ENTERPRISE_IMAGE_TAG" \
+  enterprise-admin-console "$ENTERPRISE_IMAGE_TAG"
+```
+
+如果 GHCR 仓库不是公开仓库，同步前还需用具备 `read:packages` 权限的凭证执行 `docker login ghcr.io`。
+
+### 3. 准备生产环境变量
+
+在仓库外创建 `/etc/agenticx/prod.env`，权限设为 `600`。以下变量均为必填；数据库密码中的 URL 特殊字符必须进行百分号编码：
+
+```dotenv
+ALIYUN_ACR_PREFIX=your-instance-registry.cn-hangzhou.cr.aliyuncs.com/agenticx
+NGINX_IMAGE_TAG=1.27-alpine-20260716
+REDIS_IMAGE_TAG=7-alpine-20260716
+POSTGRES_IMAGE_TAG=16-alpine-20260716
+ENTERPRISE_IMAGE_TAG=2026.07.16-gitsha
+
+POSTGRES_PASSWORD=REPLACE_WITH_STRONG_PASSWORD
+ADMIN_CONSOLE_LOGIN_PASSWORD=REPLACE_WITH_STRONG_PASSWORD
+DATABASE_URL=postgresql://agenticx:REPLACE_WITH_URL_ENCODED_PASSWORD@postgres-primary:5432/agenticx?sslmode=disable
+```
+
+```bash
+sudo chown root:root /etc/agenticx/prod.env
+sudo chmod 600 /etc/agenticx/prod.env
+```
+
+JWT PEM 保持从受控文件读取，避免写入仓库：
+
+```bash
+export JWT_PUBLIC_KEY="$(cat /secure/path/jwt.pub)"
+export JWT_PRIVATE_KEY="$(cat /secure/path/jwt.key)"
+```
+
+### 4. 校验、拉取并启动
+
+每条 Compose 命令都显式传同一个 `--env-file`，避免 `pull` 与 `up` 使用不同环境变量：
 
 ```bash
 cd enterprise/deploy/docker-compose
 
-# 1) 拉镜像（基础库走 DaoCloud；业务镜像默认仍 ghcr.io）
-POSTGRES_PASSWORD=replace-me \
-ADMIN_CONSOLE_LOGIN_PASSWORD=replace-me \
-DATABASE_URL="postgresql://agenticx:replace-me@postgres-primary:5432/agenticx?sslmode=disable" \
-JWT_PUBLIC_KEY="$(cat /path/to/jwt.pub)" \
-JWT_PRIVATE_KEY="$(cat /path/to/jwt.key)" \
-docker compose -f prod.yml -f prod.aliyun.yml --profile postgresql pull
+# 输出必须全部以实际 ALIYUN_ACR_PREFIX 开头，且不能出现 latest。
+docker compose --env-file /etc/agenticx/prod.env \
+  -f prod.yml -f prod.aliyun.yml --profile postgresql config --images
 
-# 2) 启动
-docker compose -f prod.yml -f prod.aliyun.yml --profile postgresql up -d
+docker compose --env-file /etc/agenticx/prod.env \
+  -f prod.yml -f prod.aliyun.yml --profile postgresql pull
+
+docker compose --env-file /etc/agenticx/prod.env \
+  -f prod.yml -f prod.aliyun.yml --profile postgresql up -d
 ```
 
-### 覆盖了哪些镜像
-
-| 服务 | `prod.yml` 原地址 | `prod.aliyun.yml` 默认 |
-|---|---|---|
-| nginx / redis / postgres-* | `docker.io/library/...` | `docker.m.daocloud.io/library/...` |
-| gateway / web-portal / admin-console | `ghcr.io/agenticx/...` | 仍为 `ghcr.io/agenticx/...`（可用环境变量改到 ACR） |
-
-### 业务镜像同步到阿里云 ACR（可选）
-
-若 `ghcr.io` 同样拉不动，先把四个业务镜像推到你们 ACR，再设前缀：
+启动后至少检查：
 
 ```bash
-export ENTERPRISE_IMAGE_REGISTRY=registry.cn-hangzhou.aliyuncs.com/<your-namespace>
-export ENTERPRISE_IMAGE_TAG=latest   # 可选
-
-docker compose -f prod.yml -f prod.aliyun.yml --profile postgresql pull
-docker compose -f prod.yml -f prod.aliyun.yml --profile postgresql up -d
-```
-
-同步示例（在能访问 ghcr 的机器上执行）：
-
-```bash
-SRC=ghcr.io/agenticx
-DST=registry.cn-hangzhou.aliyuncs.com/<your-namespace>
-TAG=latest
-
-for name in enterprise-gateway enterprise-web-portal enterprise-admin-console; do
-  docker pull "$SRC/$name:$TAG"
-  docker tag "$SRC/$name:$TAG" "$DST/$name:$TAG"
-  docker push "$DST/$name:$TAG"
-done
-```
-
-### 可调环境变量
-
-| 变量 | 默认 | 含义 |
-|---|---|---|
-| `DOCKER_HUB_MIRROR` | `docker.m.daocloud.io/library` | 官方 library 镜像前缀 |
-| `ENTERPRISE_IMAGE_REGISTRY` | `ghcr.io/agenticx` | 业务镜像仓库前缀 |
-| `ENTERPRISE_IMAGE_TAG` | `latest` | 业务镜像 tag |
-
-也可改用其它加速前缀，例如：
-
-```bash
-export DOCKER_HUB_MIRROR=dockerproxy.net/library
+docker compose --env-file /etc/agenticx/prod.env \
+  -f prod.yml -f prod.aliyun.yml --profile postgresql ps
+curl --fail http://127.0.0.1/healthz
 ```
 
 ### 排障
 
-- `dial tcp ... registry-1.docker.io:443: i/o timeout`：确认已加 `-f prod.aliyun.yml`，且 `docker compose ... config` 里 nginx/redis 的 `image` 已不是 `docker.io`。
-- `POSTGRES_PASSWORD variable is not set`：启动前必须 export，或放同目录 `.env`（勿提交仓库）。
+- `ALIYUN_ACR_PREFIX is required` 或 tag 变量缺失：确认每条命令都带 `--env-file /etc/agenticx/prod.env`。
+- `unauthorized`：确认已 `docker login`，登录域名与 `ALIYUN_ACR_PREFIX` 的域名完全一致，并检查 RAM 权限。
+- `i/o timeout`：检查部署主机到 ACR 域名的网络、VPC 访问控制和公网/VPC 白名单；该覆盖文件不会回退到 Docker Hub、GHCR 或公共代理。
+- `manifest unknown`：目标仓库或目标 tag 尚未同步，或同步到了另一个地域/namespace。
 - `--profile mysql`：当前 `prod.yml` 只有 `postgresql` profile；MySQL 生产 profile 尚未并入该模板。
-- 仅加速 Docker Hub 不够时：配置宿主机 `/etc/docker/daemon.json` 的 `registry-mirrors` 是补充手段，**不能**替代 `ghcr.io` → ACR 同步。
 
 ## Local Development Startup Order
 
@@ -152,7 +201,7 @@ bash scripts/reset-dev-data.sh --with-seed --yes
 ## Important
 
 - `prod.yml` 为模板，不直接承诺客户侧最终网络拓扑；上云前按客户 VPC、WAF、证书体系做二次适配。
-- 国内机房拉 Docker Hub 超时：叠加 `prod.aliyun.yml`，不要改 `prod.yml` 本体（见上文「国内 / 阿里云部署」）。
+- 阿里云部署须先将全部镜像同步到私有 ACR，再叠加 `prod.aliyun.yml`；不要改 `prod.yml` 本体（见上文「阿里云 ACR 生产部署」）。
 - `config/policies.yaml` 是 Gateway 配置片段，默认挂载 `/app/plugins/moderation-*/manifest.yaml`；Admin 策略启停与额度配置写入共享 `/runtime/admin`。
 - Gateway 新增 `GATEWAY_POLICY_SNAPSHOT_FILE=/runtime/admin/policy-snapshot.json`：
   - 优先加载 PG 发布生成的快照文件；
