@@ -37,6 +37,7 @@ from agenticx.studio.context_file_keys import (
     strip_composer_upload_dedupe_key,
     upload_dedupe_size_from_key,
 )
+from agenticx.studio.context_file_hydration import hydrate_turn_context_files
 from agenticx.avatar.group_chat import GroupChatRegistry
 from agenticx.avatar.registry import AvatarRegistry
 from agenticx.branding import DEFAULT_META_PRODUCT_LABEL
@@ -1777,6 +1778,16 @@ def create_studio_app() -> FastAPI:
                     reference_token = True
                     composer_ref_label = display_name
 
+            # Prefer real on-disk size when source_path is a readable regular file.
+            _sp = str(source_path or "").strip()
+            if _sp and _looks_like_filesystem_path(_sp):
+                try:
+                    _p = Path(_sp).expanduser()
+                    if _p.is_file():
+                        size_val = _p.stat().st_size
+                except (OSError, ValueError):
+                    pass
+
             dedupe_key = key.casefold()
             if dedupe_key in seen:
                 continue
@@ -2448,8 +2459,22 @@ def create_studio_app() -> FastAPI:
             ensure_code_dev_workflow_skill(session)
         except Exception:
             pass
-        if payload.context_files:
-            session.context_files.update(_normalize_context_files(payload.context_files))
+        turn_context_files: dict[str, str] = (
+            _normalize_context_files(payload.context_files) if payload.context_files else {}
+        )
+        if turn_context_files:
+            # Keep already-hydrated bodies; placeholders are filled inside the SSE stream.
+            for _cf_key, _cf_val in turn_context_files.items():
+                _existing = str(session.context_files.get(_cf_key) or "")
+                _is_placeholder = _cf_val.startswith("[附件] ") or _cf_val.startswith("[文件引用] ")
+                if _is_placeholder and _existing and not (
+                    _existing.startswith("[附件] ")
+                    or _existing.startswith("[文件引用] ")
+                    or _existing.startswith("[附件解析失败]")
+                ):
+                    continue
+                if not _is_placeholder:
+                    session.context_files[_cf_key] = _cf_val
         if payload.skill_slugs:
             try:
                 from agenticx.tools.skill_bundle import SkillBundleLoader
@@ -2681,6 +2706,19 @@ def create_studio_app() -> FastAPI:
             setattr(session, "_usage_owner_session_id", payload.session_id)
             async def _group_chat_stream() -> AsyncGenerator[str, None]:
                 try:
+                    if turn_context_files:
+                        progress_evt = SseEvent(
+                            type=EventType.TOOL_PROGRESS.value,
+                            data={"name": "document_parse", "elapsed_seconds": 0},
+                        )
+                        yield f"data: {json.dumps(progress_evt.model_dump(), ensure_ascii=False)}\n\n"
+                        try:
+                            await hydrate_turn_context_files(turn_context_files, session.context_files)
+                        except Exception:
+                            logger.exception("document context hydration failed (group)")
+                            for _k, _v in turn_context_files.items():
+                                if _k not in session.context_files:
+                                    session.context_files[_k] = _v
                     llm_factory = lambda provider, model: ProviderResolver.resolve(
                         provider_name=provider or session.provider_name,
                         model=model or session.model_name,
@@ -3048,6 +3086,26 @@ def create_studio_app() -> FastAPI:
                             "bound_avatar_id",
                             active_avatar_id if is_avatar_session else None,
                         )
+                        if turn_context_files:
+                            progress_evt = RuntimeEvent(
+                                type=EventType.TOOL_PROGRESS.value,
+                                data={"name": "document_parse", "elapsed_seconds": 0},
+                                agent_id="meta",
+                            )
+                            if event_hub is not None:
+                                await event_hub.publish(progress_evt)
+                            else:
+                                await event_queue.put(progress_evt)
+                            try:
+                                await hydrate_turn_context_files(
+                                    turn_context_files,
+                                    session.context_files,
+                                )
+                            except Exception:
+                                logger.exception("document context hydration failed")
+                                for _k, _v in turn_context_files.items():
+                                    if _k not in session.context_files:
+                                        session.context_files[_k] = _v
                         _meta_label = str(getattr(payload, "meta_leader_display_name", None) or "").strip() or DEFAULT_META_PRODUCT_LABEL
                         if isinstance(session.scratchpad, dict):
                             session.scratchpad[META_LEADER_LABEL_SCRATCH_KEY] = _meta_label
@@ -3148,11 +3206,7 @@ def create_studio_app() -> FastAPI:
                                 history_user_attachments = []
                             # prepend images before any context-file attachments for this turn
                             history_user_attachments = list(history_image_attachments) + history_user_attachments
-                        _turn_cf = (
-                            _normalize_context_files(payload.context_files)
-                            if getattr(payload, "context_files", None)
-                            else {}
-                        )
+                        _turn_cf = turn_context_files
                         _cf_hist = _history_attachments_from_context_files(_turn_cf)
                         if _cf_hist:
                             if history_user_attachments is None:

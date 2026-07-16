@@ -841,3 +841,299 @@ def test_studio_cors_origins_merge_extra_env(monkeypatch):
     origins = _studio_cors_origins()
     assert "https://studio.example.com" in origins
 
+
+def test_chat_hydrates_document_before_building_meta_prompt(monkeypatch, tmp_path) -> None:
+    from agenticx.studio import server as server_module
+
+    monkeypatch.setattr(server_module.ProviderResolver, "resolve", lambda **_kwargs: _TextLLM())
+
+    order: List[str] = []
+    captured: Dict[str, str] = {}
+
+    async def _fake_hydrate(turn_cf, session_cf):
+        order.append("hydrate")
+        for key, value in turn_cf.items():
+            if str(value).startswith("[附件] "):
+                session_cf[key] = "HYDRATED_BODY"
+        return type("R", (), {"attempted": 1, "succeeded": 1, "failed": 0, "skipped": 0})()
+
+    real_build = server_module.build_meta_agent_system_prompt
+
+    def _spy_build(session, *args, **kwargs):
+        order.append("prompt")
+        captured.update(dict(session.context_files or {}))
+        return real_build(session, *args, **kwargs)
+
+    monkeypatch.setattr(server_module, "hydrate_turn_context_files", _fake_hydrate)
+    monkeypatch.setattr(server_module, "build_meta_agent_system_prompt", _spy_build)
+
+    pdf = tmp_path / "resume.pdf"
+    pdf.write_bytes(b"%PDF-1.4\n")
+    app = create_studio_app()
+    client = TestClient(app)
+    session_id = client.get("/api/session").json()["session_id"]
+
+    with client.stream(
+        "POST",
+        "/api/chat",
+        json={
+            "session_id": session_id,
+            "user_input": "总结简历",
+            "context_files": {str(pdf): "[附件] resume.pdf"},
+        },
+    ) as resp:
+        assert resp.status_code == 200
+        events = _extract_events(list(resp.iter_lines()))
+
+    assert "hydrate" in order
+    assert "prompt" in order
+    assert order.index("hydrate") < order.index("prompt")
+    assert captured.get(str(pdf)) == "HYDRATED_BODY"
+    assert any(e.get("type") == "tool_progress" for e in events)
+    assert any(
+        (e.get("data") or {}).get("name") == "document_parse"
+        for e in events
+        if e.get("type") == "tool_progress"
+    )
+
+
+def test_chat_keeps_running_when_document_hydration_fails(monkeypatch, tmp_path) -> None:
+    from agenticx.studio import server as server_module
+
+    monkeypatch.setattr(server_module.ProviderResolver, "resolve", lambda **_kwargs: _TextLLM())
+
+    async def _boom(_turn_cf, _session_cf):
+        raise RuntimeError("hydrate boom")
+
+    monkeypatch.setattr(server_module, "hydrate_turn_context_files", _boom)
+
+    pdf = tmp_path / "resume.pdf"
+    pdf.write_bytes(b"%PDF-1.4\n")
+    app = create_studio_app()
+    client = TestClient(app)
+    session_id = client.get("/api/session").json()["session_id"]
+
+    with client.stream(
+        "POST",
+        "/api/chat",
+        json={
+            "session_id": session_id,
+            "user_input": "总结简历",
+            "context_files": {str(pdf): "[附件] resume.pdf"},
+        },
+    ) as resp:
+        assert resp.status_code == 200
+        events = _extract_events(list(resp.iter_lines()))
+
+    assert any(e.get("type") == "final" for e in events)
+    assert not any(e.get("type") == "error" for e in events)
+
+
+def test_group_chat_hydrates_document_before_router_turn(monkeypatch, tmp_path) -> None:
+    from agenticx.runtime.group_router import GroupReply
+    from agenticx.studio import server as server_module
+
+    monkeypatch.setattr(server_module.ProviderResolver, "resolve", lambda **_kwargs: _TextLLM())
+    order: List[str] = []
+    seen_context: Dict[str, str] = {}
+
+    async def _fake_hydrate(turn_cf, session_cf):
+        order.append("hydrate")
+        for key, value in turn_cf.items():
+            if str(value).startswith("[附件] "):
+                session_cf[key] = "GROUP_HYDRATED"
+        return type("R", (), {"attempted": 1, "succeeded": 1, "failed": 0, "skipped": 0})()
+
+    class _FakeGroupRouter:
+        def __init__(self, **_kwargs) -> None:
+            pass
+
+        def pick_targets(self, **_kwargs):
+            return ["meta"]
+
+        def _plain_targets_in_text(self, *_args, **_kwargs):
+            return []
+
+        async def run_group_turn(self, **kwargs):
+            order.append("router")
+            base_session = kwargs.get("base_session")
+            seen_context.update(dict(getattr(base_session, "context_files", {}) or {}))
+            yield GroupReply(
+                agent_id="meta",
+                avatar_name="Machi",
+                avatar_url="",
+                content="group done",
+                skipped=False,
+                event_type="group_reply",
+            )
+
+    monkeypatch.setattr(server_module, "hydrate_turn_context_files", _fake_hydrate)
+    monkeypatch.setattr(server_module, "GroupChatRouter", _FakeGroupRouter)
+
+    pdf = tmp_path / "resume.pdf"
+    pdf.write_bytes(b"%PDF-1.4\n")
+    app = create_studio_app()
+    client = TestClient(app)
+    avatar_registry = app.state.avatar_registry
+    group_registry = app.state.group_registry
+    session_id = client.get("/api/session").json()["session_id"]
+    avatar = avatar_registry.create_avatar(name="测试成员", role="Engineer")
+    group = group_registry.create_group(name="测试群", avatar_ids=[avatar.id], routing="intelligent")
+
+    resp = client.post(
+        "/api/chat",
+        json={
+            "session_id": session_id,
+            "group_id": group.id,
+            "user_input": "总结这份简历",
+            "context_files": {str(pdf): "[附件] resume.pdf"},
+        },
+    )
+    assert resp.status_code == 200
+    _ = _extract_events(resp.text.splitlines())
+    assert order == ["hydrate", "router"]
+    assert seen_context.get(str(pdf)) == "GROUP_HYDRATED"
+
+
+def test_chat_does_not_hydrate_plain_context_twice(monkeypatch, tmp_path) -> None:
+    from agenticx.studio import server as server_module
+
+    monkeypatch.setattr(server_module.ProviderResolver, "resolve", lambda **_kwargs: _TextLLM())
+    hydrate_calls = {"n": 0}
+
+    async def _fake_hydrate(turn_cf, session_cf):
+        hydrate_calls["n"] += 1
+        # Plain text should already be present; placeholder path should hydrate.
+        for key, value in turn_cf.items():
+            if str(value).startswith("[附件] "):
+                session_cf[key] = "PDF_BODY"
+        return type("R", (), {"attempted": 1, "succeeded": 1, "failed": 0, "skipped": 0})()
+
+    monkeypatch.setattr(server_module, "hydrate_turn_context_files", _fake_hydrate)
+
+    pdf = tmp_path / "resume.pdf"
+    notes = tmp_path / "notes.md"
+    pdf.write_bytes(b"%PDF-1.4\n")
+    notes.write_text("plain notes", encoding="utf-8")
+    app = create_studio_app()
+    client = TestClient(app)
+    session_id = client.get("/api/session").json()["session_id"]
+    manager = app.state.session_manager
+    managed = manager.get(session_id)
+    assert managed is not None
+
+    with client.stream(
+        "POST",
+        "/api/chat",
+        json={
+            "session_id": session_id,
+            "user_input": "看看这些文件",
+            "context_files": {
+                str(notes): "plain notes",
+                str(pdf): "[附件] resume.pdf",
+            },
+        },
+    ) as resp:
+        assert resp.status_code == 200
+        _ = _extract_events(list(resp.iter_lines()))
+
+    assert hydrate_calls["n"] == 1
+    assert managed.studio_session.context_files.get(str(notes)) == "plain notes"
+    assert managed.studio_session.context_files.get(str(pdf)) == "PDF_BODY"
+
+
+def test_context_file_attachment_uses_source_file_size(monkeypatch, tmp_path) -> None:
+    from agenticx.studio import server as server_module
+
+    monkeypatch.setattr(server_module.ProviderResolver, "resolve", lambda **_kwargs: _TextLLM())
+
+    async def _fake_hydrate(turn_cf, session_cf):
+        for key, value in turn_cf.items():
+            if str(value).startswith("[附件] "):
+                session_cf[key] = "HYDRATED"
+        return type("R", (), {"attempted": 1, "succeeded": 1, "failed": 0, "skipped": 0})()
+
+    monkeypatch.setattr(server_module, "hydrate_turn_context_files", _fake_hydrate)
+
+    pdf = tmp_path / "resume.pdf"
+    payload_bytes = b"%PDF-1.4\n" + (b"x" * 728_000)
+    pdf.write_bytes(payload_bytes)
+    expected_size = pdf.stat().st_size
+    placeholder = "[附件] resume.pdf"
+    assert expected_size != len(placeholder.encode("utf-8"))
+
+    app = create_studio_app()
+    client = TestClient(app)
+    session_id = client.get("/api/session").json()["session_id"]
+    managed = app.state.session_manager.get(session_id)
+    assert managed is not None
+
+    with client.stream(
+        "POST",
+        "/api/chat",
+        json={
+            "session_id": session_id,
+            "user_input": "总结简历",
+            "context_files": {str(pdf): placeholder},
+        },
+    ) as resp:
+        assert resp.status_code == 200
+        _ = _extract_events(list(resp.iter_lines()))
+
+    user_msgs = [
+        m for m in managed.studio_session.chat_history if m.get("role") == "user"
+    ]
+    assert user_msgs
+    atts = user_msgs[-1].get("attachments") or []
+    assert atts
+    doc = next((a for a in atts if a.get("kind") == "context_file"), None)
+    assert doc is not None
+    assert doc.get("source_path") == str(pdf)
+    assert int(doc.get("size") or 0) == expected_size
+
+
+def test_context_file_attachment_size_falls_back_when_path_missing(monkeypatch, tmp_path) -> None:
+    from agenticx.studio import server as server_module
+
+    monkeypatch.setattr(server_module.ProviderResolver, "resolve", lambda **_kwargs: _TextLLM())
+
+    async def _fake_hydrate(turn_cf, session_cf):
+        for key, value in turn_cf.items():
+            session_cf.setdefault(key, value)
+        return type("R", (), {"attempted": 0, "succeeded": 0, "failed": 0, "skipped": 1})()
+
+    monkeypatch.setattr(server_module, "hydrate_turn_context_files", _fake_hydrate)
+
+    missing = tmp_path / "gone.pdf"
+    # Do not create the file — path is absolute but unreadable.
+    placeholder = "[附件] gone.pdf"
+    expected_fallback = len(placeholder.encode("utf-8"))
+
+    app = create_studio_app()
+    client = TestClient(app)
+    session_id = client.get("/api/session").json()["session_id"]
+    managed = app.state.session_manager.get(session_id)
+    assert managed is not None
+
+    with client.stream(
+        "POST",
+        "/api/chat",
+        json={
+            "session_id": session_id,
+            "user_input": "看看附件",
+            "context_files": {str(missing): placeholder},
+        },
+    ) as resp:
+        assert resp.status_code == 200
+        _ = _extract_events(list(resp.iter_lines()))
+
+    user_msgs = [
+        m for m in managed.studio_session.chat_history if m.get("role") == "user"
+    ]
+    assert user_msgs
+    atts = user_msgs[-1].get("attachments") or []
+    assert atts
+    doc = next((a for a in atts if a.get("kind") == "context_file"), None)
+    assert doc is not None
+    assert int(doc.get("size") or 0) == expected_fallback
+
