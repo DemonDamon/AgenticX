@@ -6,6 +6,13 @@ const mockValues = vi.fn();
 const mockOnConflictDoNothing = vi.fn();
 
 vi.mock("@agenticx/iam-core", () => ({
+  resolveDatabaseConfig: () => ({
+    dialect: "postgresql",
+    url: "postgresql://postgres:postgres@127.0.0.1:5432/agenticx",
+  }),
+  createMysqlDb: vi.fn(async () => {
+    throw new Error("createMysqlDb should not be called in PG unit tests");
+  }),
   getIamDb: () => ({
     select: mockSelect,
     insert: mockInsert,

@@ -1,10 +1,21 @@
 /**
- * web-portal · 只读：从 Postgres 读取 admin 配置的 provider 与用户可见模型。
+ * web-portal · 只读：从运行时配置表读取 admin 配置的 provider 与用户可见模型。
+ * 支持 PostgreSQL / MySQL（DATABASE_DIALECT）。
  */
 
-import { enterpriseRuntimeModelProviders as mpTable } from "@agenticx/db-schema";
-import { enterpriseRuntimeUserVisibleModels as uvmTable } from "@agenticx/db-schema";
-import { getIamDb, listDepartmentAncestorIds, migrateLegacyUserVisibleModelsIfNeeded } from "@agenticx/iam-core";
+import { enterpriseRuntimeModelProviders as pgMpTable } from "@agenticx/db-schema";
+import { enterpriseRuntimeUserVisibleModels as pgUvmTable } from "@agenticx/db-schema";
+import {
+  enterpriseRuntimeModelProviders as mysqlMpTable,
+  enterpriseRuntimeUserVisibleModels as mysqlUvmTable,
+} from "@agenticx/db-schema/mysql";
+import {
+  createMysqlDb,
+  getIamDb,
+  listDepartmentAncestorIds,
+  migrateLegacyUserVisibleModelsIfNeeded,
+  resolveDatabaseConfig,
+} from "@agenticx/iam-core";
 import { eq } from "drizzle-orm";
 
 import {
@@ -53,13 +64,24 @@ const LEGACY_ADMIN_EMAIL_TO_USER_ID: Record<string, string> = {
   "audit@agenticx.local": "u_003",
 };
 
+type ProviderRow = {
+  providerId: string;
+  displayName: string;
+  baseUrl: string;
+  apiKeyCipher: string;
+  enabled: boolean;
+  isDefault: boolean;
+  route: string;
+  models: unknown;
+};
+
 function requiredTenant(): string {
   const t = process.env.DEFAULT_TENANT_ID?.trim();
   if (!t) throw new Error("DEFAULT_TENANT_ID is required.");
   return t;
 }
 
-function rowToProvider(row: typeof mpTable.$inferSelect): ProviderRecord {
+function rowToProvider(row: ProviderRow): ProviderRecord {
   const modelsRaw = Array.isArray(row.models) ? (row.models as unknown as ProviderModelRecord[]) : [];
   return {
     id: row.providerId,
@@ -80,16 +102,29 @@ function rowToProvider(row: typeof mpTable.$inferSelect): ProviderRecord {
 
 async function readProviders(): Promise<ProviderRecord[]> {
   const tid = requiredTenant();
+  const config = resolveDatabaseConfig();
+  if (config.dialect === "mysql") {
+    const { raw: db } = await createMysqlDb(config);
+    const rows = await db.select().from(mysqlMpTable).where(eq(mysqlMpTable.tenantId, tid));
+    return rows.map(rowToProvider);
+  }
   const db = getIamDb();
-  const rows = await db.select().from(mpTable).where(eq(mpTable.tenantId, tid));
+  const rows = await db.select().from(pgMpTable).where(eq(pgMpTable.tenantId, tid));
   return rows.map(rowToProvider);
 }
 
 async function readUserModels(): Promise<Record<string, string[]>> {
   const tid = requiredTenant();
   await migrateLegacyUserVisibleModelsIfNeeded(tid);
-  const db = getIamDb();
-  const rows = await db.select().from(uvmTable).where(eq(uvmTable.tenantId, tid));
+  const config = resolveDatabaseConfig();
+  let rows: Array<{ assignmentKey: string; modelId: string }>;
+  if (config.dialect === "mysql") {
+    const { raw: db } = await createMysqlDb(config);
+    rows = await db.select().from(mysqlUvmTable).where(eq(mysqlUvmTable.tenantId, tid));
+  } else {
+    const db = getIamDb();
+    rows = await db.select().from(pgUvmTable).where(eq(pgUvmTable.tenantId, tid));
+  }
   const map: Record<string, string[]> = {};
   for (const r of rows) {
     if (!map[r.assignmentKey]) map[r.assignmentKey] = [];

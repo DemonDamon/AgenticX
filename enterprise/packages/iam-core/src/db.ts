@@ -28,6 +28,7 @@ export {
   getQueryExecutorSync,
   __resetDatabaseForTests,
 } from "./database/factory";
+export { createMysqlDb, type MySqlIamDb } from "./database/mysql";
 
 /** @deprecated Use createPgPool via database/postgres internally. */
 export function getIamPool() {
