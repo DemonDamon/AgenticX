@@ -1,0 +1,38 @@
+# 国内 / 阿里云环境镜像覆盖层（不改 prod.yml）
+#
+# 用法（与 prod.yml 叠加）：
+#   docker compose -f prod.yml -f prod.aliyun.yml --profile postgresql pull
+#   docker compose -f prod.yml -f prod.aliyun.yml --profile postgresql up -d
+#
+# 环境变量（可选）：
+#   DOCKER_HUB_MIRROR          官方 library 镜像前缀，默认 docker.m.daocloud.io/library
+#   ENTERPRISE_IMAGE_REGISTRY  业务镜像仓库前缀，默认仍为 ghcr.io/agenticx
+#                              同步到 ACR 后改为 registry.cn-<region>.aliyuncs.com/<namespace>
+#   ENTERPRISE_IMAGE_TAG       业务镜像 tag，默认 latest
+#
+# 说明：本文件只覆盖 image，编排/网络/卷以 prod.yml 为准。
+
+services:
+  nginx:
+    image: ${DOCKER_HUB_MIRROR:-docker.m.daocloud.io/library}/nginx:1.27-alpine
+
+  redis:
+    image: ${DOCKER_HUB_MIRROR:-docker.m.daocloud.io/library}/redis:7-alpine
+
+  postgres-primary:
+    image: ${DOCKER_HUB_MIRROR:-docker.m.daocloud.io/library}/postgres:16-alpine
+
+  postgres-replica:
+    image: ${DOCKER_HUB_MIRROR:-docker.m.daocloud.io/library}/postgres:16-alpine
+
+  gateway-a:
+    image: ${ENTERPRISE_IMAGE_REGISTRY:-ghcr.io/agenticx}/enterprise-gateway:${ENTERPRISE_IMAGE_TAG:-latest}
+
+  gateway-b:
+    image: ${ENTERPRISE_IMAGE_REGISTRY:-ghcr.io/agenticx}/enterprise-gateway:${ENTERPRISE_IMAGE_TAG:-latest}
+
+  web-portal:
+    image: ${ENTERPRISE_IMAGE_REGISTRY:-ghcr.io/agenticx}/enterprise-web-portal:${ENTERPRISE_IMAGE_TAG:-latest}
+
+  admin-console:
+    image: ${ENTERPRISE_IMAGE_REGISTRY:-ghcr.io/agenticx}/enterprise-admin-console:${ENTERPRISE_IMAGE_TAG:-latest}
