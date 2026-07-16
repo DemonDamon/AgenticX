@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import type { ReactNode } from "react";
-import { FolderKanban, SquarePen, UsersRound } from "lucide-react";
-import { AutomationTaskIcon } from "./icons/AutomationTaskIcon";
+import type { LucideIcon } from "lucide-react";
+import { AlarmClock, MessageSquarePlus, UserRound, Waypoints } from "lucide-react";
 import { useAppStore, type MainView } from "../store";
 import { APP_DISPLAY_NAME, APP_VERSION, META_AGENT_DISPLAY_NAME } from "../constants/branding";
 import { DEFAULT_META_AVATAR_URL } from "../constants/meta-avatar";
@@ -15,6 +14,24 @@ const SIDEBAR_CONTEXT_MENU_CLASS =
   "fixed z-[200] w-[120px] rounded-md border border-border bg-surface-base py-1 shadow-2xl";
 const SIDEBAR_CONTEXT_MENU_ITEM_CLASS =
   "w-full whitespace-nowrap px-3 py-1.5 text-left text-[13px] transition";
+
+/** Compact nav row: theme-tint selected bg, no border. */
+const NAV_ITEM_BASE =
+  "flex w-full items-center gap-2 rounded-lg px-2.5 py-[7px] text-left text-[13px] leading-none transition-colors";
+const NAV_ITEM_IDLE = "text-text-muted hover:bg-surface-hover hover:text-text-strong";
+const NAV_ITEM_ACTIVE =
+  "bg-[rgba(var(--theme-color-rgb,59,130,246),0.14)] font-medium text-[rgb(var(--theme-color-rgb,59,130,246))]";
+
+type NavEntry =
+  | { kind: "action"; id: "new-task"; label: string; icon: LucideIcon }
+  | { kind: "view"; id: MainView; label: string; icon: LucideIcon };
+
+const NAV_ENTRIES: NavEntry[] = [
+  { kind: "action", id: "new-task", label: "新建任务", icon: MessageSquarePlus },
+  { kind: "view", id: "avatars", label: "数字分身", icon: UserRound },
+  { kind: "view", id: "groups", label: "项目群聊", icon: Waypoints },
+  { kind: "view", id: "automation", label: "定时任务", icon: AlarmClock },
+];
 
 export function AvatarSidebar() {
   const setAvatars = useAppStore((s) => s.setAvatars);
@@ -175,16 +192,6 @@ export function AvatarSidebar() {
     };
   }, [machiContextMenu]);
 
-  const navItems: Array<{ view: MainView; label: string; icon: ReactNode }> = [
-    { view: "avatars", label: "数字分身", icon: <UsersRound className="h-[18px] w-[18px]" /> },
-    { view: "groups", label: "项目群聊", icon: <FolderKanban className="h-[18px] w-[18px]" /> },
-    {
-      view: "automation",
-      label: "定时任务",
-      icon: <AutomationTaskIcon className="h-[18px] w-[18px]" />,
-    },
-  ];
-
   return (
     <>
       <aside className="flex h-full w-full flex-col bg-surface-sidebar">
@@ -220,38 +227,29 @@ export function AvatarSidebar() {
 
         <GlobalSearchTrigger />
 
-        {/* Button navigation: new task / avatars / groups / automation */}
-        <div className="flex flex-col gap-0.5 px-2 py-2">
-          {/* Primary action: new task (fresh meta-agent conversation) */}
-          <button
-            type="button"
-            className="mb-1 flex w-full items-center gap-2.5 rounded-[10px] border border-border-strong bg-surface-card px-3 py-2.5 text-left text-[15px] font-medium text-text-strong transition-all hover:border-[var(--ui-btn-primary-bg)] hover:bg-surface-card-strong"
-            onClick={() => newMetaTask()}
-          >
-            <SquarePen className="h-[18px] w-[18px] shrink-0" />
-            <span>新建任务</span>
-          </button>
-
-          {navItems.map((item) => {
-            const active = mainView === item.view;
+        {/* Compact button navigation */}
+        <nav className="flex flex-col gap-px px-2 py-1.5" aria-label="主导航">
+          {NAV_ENTRIES.map((entry) => {
+            const Icon = entry.icon;
+            const active =
+              entry.kind === "action" ? mainView === "chat" : mainView === entry.id;
             return (
               <button
-                key={item.view}
+                key={entry.id}
                 type="button"
-                className={`flex w-full items-center gap-2.5 rounded-[10px] px-3 py-2.5 text-left text-[15px] transition-all ${
-                  active
-                    ? "bg-surface-card-strong text-text-strong"
-                    : "text-text-muted hover:bg-surface-card hover:text-text-strong"
-                }`}
+                className={`${NAV_ITEM_BASE} ${active ? NAV_ITEM_ACTIVE : NAV_ITEM_IDLE}`}
                 aria-current={active ? "page" : undefined}
-                onClick={() => setMainView(item.view)}
+                onClick={() => {
+                  if (entry.kind === "action") newMetaTask();
+                  else setMainView(entry.id);
+                }}
               >
-                <span className="shrink-0">{item.icon}</span>
-                <span>{item.label}</span>
+                <Icon className="h-4 w-4 shrink-0" strokeWidth={1.75} aria-hidden />
+                <span>{entry.label}</span>
               </button>
             );
           })}
-        </div>
+        </nav>
 
         <div className="flex-1" />
       </aside>
