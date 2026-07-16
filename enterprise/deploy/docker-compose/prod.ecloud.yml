@@ -1,0 +1,47 @@
+# 移动云私有镜像仓库生产覆盖层（不改 prod.yml）
+#
+# 使用前：
+#   1. 在移动云控制台创建 namespace 和对应镜像仓库。
+#   2. 将 nginx、redis、postgres 与三个 Enterprise 镜像同步到移动云仓库。
+#   3. 在部署主机登录控制台提供的实际 Registry 域名。
+#   4. 通过 --env-file 提供以下全部必填变量。
+#
+# 用法：
+#   docker compose --env-file /etc/agenticx/prod.ecloud.env \
+#     -f prod.yml -f prod.ecloud.yml --profile postgresql pull
+#   docker compose --env-file /etc/agenticx/prod.ecloud.env \
+#     -f prod.yml -f prod.ecloud.yml --profile postgresql up -d
+#
+# 必填环境变量：
+#   ECLOUD_IMAGE_PREFIX   移动云仓库完整前缀（实际 Registry 域名 + namespace）
+#   NGINX_IMAGE_TAG       已同步的不可变 nginx tag
+#   REDIS_IMAGE_TAG       已同步的不可变 redis tag
+#   POSTGRES_IMAGE_TAG    已同步的不可变 postgres tag
+#   ENTERPRISE_IMAGE_TAG  已同步的不可变业务镜像 tag；禁止 latest
+#
+# 本文件只覆盖 image，编排、网络和数据卷以 prod.yml 为准。
+
+services:
+  nginx:
+    image: ${ECLOUD_IMAGE_PREFIX:?ECLOUD_IMAGE_PREFIX is required}/nginx:${NGINX_IMAGE_TAG:?NGINX_IMAGE_TAG is required}
+
+  redis:
+    image: ${ECLOUD_IMAGE_PREFIX:?ECLOUD_IMAGE_PREFIX is required}/redis:${REDIS_IMAGE_TAG:?REDIS_IMAGE_TAG is required}
+
+  postgres-primary:
+    image: ${ECLOUD_IMAGE_PREFIX:?ECLOUD_IMAGE_PREFIX is required}/postgres:${POSTGRES_IMAGE_TAG:?POSTGRES_IMAGE_TAG is required}
+
+  postgres-replica:
+    image: ${ECLOUD_IMAGE_PREFIX:?ECLOUD_IMAGE_PREFIX is required}/postgres:${POSTGRES_IMAGE_TAG:?POSTGRES_IMAGE_TAG is required}
+
+  gateway-a:
+    image: ${ECLOUD_IMAGE_PREFIX:?ECLOUD_IMAGE_PREFIX is required}/enterprise-gateway:${ENTERPRISE_IMAGE_TAG:?ENTERPRISE_IMAGE_TAG is required}
+
+  gateway-b:
+    image: ${ECLOUD_IMAGE_PREFIX:?ECLOUD_IMAGE_PREFIX is required}/enterprise-gateway:${ENTERPRISE_IMAGE_TAG:?ENTERPRISE_IMAGE_TAG is required}
+
+  web-portal:
+    image: ${ECLOUD_IMAGE_PREFIX:?ECLOUD_IMAGE_PREFIX is required}/enterprise-web-portal:${ENTERPRISE_IMAGE_TAG:?ENTERPRISE_IMAGE_TAG is required}
+
+  admin-console:
+    image: ${ECLOUD_IMAGE_PREFIX:?ECLOUD_IMAGE_PREFIX is required}/enterprise-admin-console:${ENTERPRISE_IMAGE_TAG:?ENTERPRISE_IMAGE_TAG is required}

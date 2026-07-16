@@ -4,6 +4,7 @@
 
 - `docker-compose/dev.yml`：开发期基础依赖（Postgres + Redis）。
 - `docker-compose/prod.yml`：生产模板（Nginx 入口 + 双网关 + 前后台 + PostgreSQL 主从 + Redis）。
+- `docker-compose/prod.ecloud.yml`：移动云私有镜像仓库覆盖层（只改 `image`，与 `prod.yml` 叠加使用）。
 - `docker-compose/prod.aliyun.yml`：国内/阿里云镜像覆盖层（只改 `image`，与 `prod.yml` 叠加使用）。
 - `nginx/gateway.conf`：公网入口反向代理与基础限流模板。
 - `config/policies.yaml`：网关策略包装载清单（生产可按客户策略扩展）。
@@ -24,6 +25,118 @@ docker compose -f prod.yml --profile postgresql up -d
 ```
 
 （`prod.yml` 会通过 `${ADMIN_CONSOLE_LOGIN_PASSWORD?...}` / `${DATABASE_URL?...}` 强制要求相关变量已导出；内置 Postgres 需加 `--profile postgresql`。）
+
+## 移动云私有镜像仓库生产部署
+
+移动云部署优先使用移动云控制台提供的私有镜像仓库访问地址，避免运行时依赖 Docker Hub、GHCR、公共代理或跨云 ACR。`prod.ecloud.yml` 不内置任何猜测的域名：不同地域、网络类型或交付环境的地址可能不同，必须从当前移动云项目的控制台复制实际 Registry 域名。
+
+### 1. 准备仓库并登录
+
+在移动云控制台创建 namespace，以及 `nginx`、`redis`、`postgres`、`enterprise-gateway`、`enterprise-web-portal`、`enterprise-admin-console` 六个仓库。部署主机与镜像仓库网络可达时，优先选择控制台提供的内网/专网访问地址。
+
+```bash
+# 以下值必须从移动云控制台复制，不要照抄示例域名。
+export ECLOUD_REGISTRY_HOST="COPY_ACTUAL_REGISTRY_HOST_FROM_CONSOLE"
+export ECLOUD_NAMESPACE=agenticx
+export ECLOUD_IMAGE_PREFIX="$ECLOUD_REGISTRY_HOST/$ECLOUD_NAMESPACE"
+export ECLOUD_REGISTRY_USERNAME="COPY_ACTUAL_USERNAME_FROM_CONSOLE"
+
+read -rsp "Registry password: " ECLOUD_REGISTRY_PASSWORD
+echo
+printf '%s' "$ECLOUD_REGISTRY_PASSWORD" \
+  | docker login --username "$ECLOUD_REGISTRY_USERNAME" \
+      --password-stdin "$ECLOUD_REGISTRY_HOST"
+unset ECLOUD_REGISTRY_PASSWORD
+```
+
+登录域名必须与后续镜像地址中的域名完全一致。生产部署账号只授予镜像拉取权限；同步镜像使用独立的推送账号。
+
+### 2. 将全部镜像同步到移动云
+
+在能同时访问 Docker Hub、GHCR 和移动云镜像仓库的受控机器执行。目标 tag 使用唯一发布版本，禁止 `latest`：
+
+```bash
+export NGINX_IMAGE_TAG=1.27-alpine-20260716
+export REDIS_IMAGE_TAG=7-alpine-20260716
+export POSTGRES_IMAGE_TAG=16-alpine-20260716
+export SOURCE_ENTERPRISE_IMAGE_TAG="published-source-tag"
+export ENTERPRISE_IMAGE_TAG="2026.07.16-gitsha"
+
+mirror_to_ecloud() {
+  source_image="$1"
+  target_repo="$2"
+  target_tag="$3"
+  target_image="$ECLOUD_IMAGE_PREFIX/$target_repo:$target_tag"
+
+  docker pull "$source_image"
+  docker tag "$source_image" "$target_image"
+  docker push "$target_image"
+}
+
+mirror_to_ecloud nginx:1.27-alpine nginx "$NGINX_IMAGE_TAG"
+mirror_to_ecloud redis:7-alpine redis "$REDIS_IMAGE_TAG"
+mirror_to_ecloud postgres:16-alpine postgres "$POSTGRES_IMAGE_TAG"
+mirror_to_ecloud "ghcr.io/agenticx/enterprise-gateway:$SOURCE_ENTERPRISE_IMAGE_TAG" \
+  enterprise-gateway "$ENTERPRISE_IMAGE_TAG"
+mirror_to_ecloud "ghcr.io/agenticx/enterprise-web-portal:$SOURCE_ENTERPRISE_IMAGE_TAG" \
+  enterprise-web-portal "$ENTERPRISE_IMAGE_TAG"
+mirror_to_ecloud "ghcr.io/agenticx/enterprise-admin-console:$SOURCE_ENTERPRISE_IMAGE_TAG" \
+  enterprise-admin-console "$ENTERPRISE_IMAGE_TAG"
+```
+
+若 GHCR 仓库不是公开仓库，同步前需用具备 `read:packages` 权限的凭证执行 `docker login ghcr.io`。同步后应记录目标镜像 digest，供发布审计和回滚核对。
+
+### 3. 准备部署环境变量
+
+在仓库外创建 `/etc/agenticx/prod.ecloud.env` 并设置 `600` 权限：
+
+```dotenv
+ECLOUD_IMAGE_PREFIX=COPY_ACTUAL_REGISTRY_HOST_FROM_CONSOLE/agenticx
+NGINX_IMAGE_TAG=1.27-alpine-20260716
+REDIS_IMAGE_TAG=7-alpine-20260716
+POSTGRES_IMAGE_TAG=16-alpine-20260716
+ENTERPRISE_IMAGE_TAG=2026.07.16-gitsha
+
+POSTGRES_PASSWORD=REPLACE_WITH_STRONG_PASSWORD
+ADMIN_CONSOLE_LOGIN_PASSWORD=REPLACE_WITH_STRONG_PASSWORD
+DATABASE_URL=postgresql://agenticx:REPLACE_WITH_URL_ENCODED_PASSWORD@postgres-primary:5432/agenticx?sslmode=disable
+```
+
+```bash
+sudo chown root:root /etc/agenticx/prod.ecloud.env
+sudo chmod 600 /etc/agenticx/prod.ecloud.env
+
+export JWT_PUBLIC_KEY="$(cat /secure/path/jwt.pub)"
+export JWT_PRIVATE_KEY="$(cat /secure/path/jwt.key)"
+```
+
+### 4. 校验、拉取并启动
+
+```bash
+cd enterprise/deploy/docker-compose
+
+# 输出的 8 行镜像必须全部以实际 ECLOUD_IMAGE_PREFIX 开头，且不能出现 latest。
+docker compose --env-file /etc/agenticx/prod.ecloud.env \
+  -f prod.yml -f prod.ecloud.yml --profile postgresql config --images
+
+docker compose --env-file /etc/agenticx/prod.ecloud.env \
+  -f prod.yml -f prod.ecloud.yml --profile postgresql pull
+
+docker compose --env-file /etc/agenticx/prod.ecloud.env \
+  -f prod.yml -f prod.ecloud.yml --profile postgresql up -d
+
+docker compose --env-file /etc/agenticx/prod.ecloud.env \
+  -f prod.yml -f prod.ecloud.yml --profile postgresql ps
+curl --fail http://127.0.0.1/healthz
+```
+
+排障要点：
+
+- `ECLOUD_IMAGE_PREFIX is required`：确认每条命令都带同一个 `--env-file`。
+- `unauthorized`：确认登录域名与镜像域名一致，并检查部署账号的拉取权限。
+- `i/o timeout`：核对移动云仓库访问地址、部署主机网络和访问控制，不要静默回退公共代理。
+- `manifest unknown`：目标仓库或 tag 尚未同步，或者同步到了其他地域/namespace。
+- 当前 `prod.yml` 仅定义 PostgreSQL profile；以后生产模板加入 MySQL 服务时，`prod.ecloud.yml` 还需同步增加 MySQL 镜像覆盖，现阶段不能只靠 override 凭空启用 MySQL。
 
 ## 阿里云 ACR 生产部署
 
