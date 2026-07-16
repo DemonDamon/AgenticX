@@ -44,6 +44,9 @@ func TestRunReadinessChecksSkipsUnsetDeps(t *testing.T) {
 	if checks["postgres"].Status != "skipped" {
 		t.Fatalf("postgres check = %+v", checks["postgres"])
 	}
+	if checks["database"].Status != "skipped" {
+		t.Fatalf("database check = %+v", checks["database"])
+	}
 	if checks["redis"].Status != "skipped" {
 		t.Fatalf("redis check = %+v", checks["redis"])
 	}

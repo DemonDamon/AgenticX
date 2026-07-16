@@ -18,8 +18,8 @@ func TestNormalizeOpenAICachedTokens(t *testing.T) {
 
 func TestNormalizeAnthropicCacheFields(t *testing.T) {
 	usage := NormalizeAnthropic(map[string]any{
-		"input_tokens":               100,
-		"output_tokens":              20,
+		"input_tokens":                100,
+		"output_tokens":               20,
 		"cache_creation_input_tokens": 50,
 		"cache_read_input_tokens":     30,
 	})

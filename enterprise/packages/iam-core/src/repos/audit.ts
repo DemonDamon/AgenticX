@@ -1,7 +1,8 @@
-import { auditEvents } from "@agenticx/db-schema";
-import { ulid } from "ulid";
 import type { IamDb } from "../db";
-import { getIamDb } from "../db";
+import { resolveDatabaseConfig } from "../database/config";
+import type { AuditRepository } from "./contracts";
+import { mysqlAuditRepository } from "./mysql/audit";
+import { postgresqlAuditRepository } from "./postgresql/audit";
 
 export type AuditInsert = {
   tenantId: string;
@@ -31,17 +32,11 @@ export function sanitizeSsoAuditDetail(detail: Record<string, unknown>): Record<
 }
 
 export async function insertAuditEvent(input: AuditInsert, dbOrTx?: IamDb): Promise<void> {
-  const db = dbOrTx ?? getIamDb();
-  const now = new Date();
-  await db.insert(auditEvents).values({
-    id: ulid(),
-    tenantId: input.tenantId,
-    actorUserId: input.actorUserId,
-    eventType: input.eventType,
-    targetKind: input.targetKind,
-    targetId: input.targetId ?? null,
-    detail: input.detail ?? null,
-    createdAt: now,
-    updatedAt: now,
-  });
+  await getAuditRepository().insertAuditEvent(input, dbOrTx);
+}
+
+export function getAuditRepository(): AuditRepository {
+  return resolveDatabaseConfig().dialect === "mysql"
+    ? mysqlAuditRepository
+    : postgresqlAuditRepository;
 }

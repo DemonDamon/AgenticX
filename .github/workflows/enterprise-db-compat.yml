@@ -1,0 +1,82 @@
+name: Enterprise DB Dialect Compat
+
+on:
+  push:
+    paths:
+      - "enterprise/**"
+      - ".github/workflows/enterprise-db-compat.yml"
+  pull_request:
+    paths:
+      - "enterprise/**"
+      - ".github/workflows/enterprise-db-compat.yml"
+
+jobs:
+  db-compat:
+    name: DB contract (${{ matrix.dialect }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - dialect: postgresql
+            image: postgres:16
+          - dialect: mysql
+            # Pin minor version — do not use floating mysql:8 alone for release gates.
+            image: mysql:8.0.36
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_USER: postgres
+          POSTGRES_DB: agenticx
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d agenticx"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+      mysql:
+        image: mysql:8.0.36
+        env:
+          MYSQL_ROOT_PASSWORD: root
+          MYSQL_DATABASE: agenticx
+          MYSQL_USER: agenticx
+          MYSQL_PASSWORD: agenticx
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd "mysqladmin ping -h 127.0.0.1 -uroot -proot"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 30
+    defaults:
+      run:
+        working-directory: enterprise
+    env:
+      DATABASE_DIALECT: ${{ matrix.dialect }}
+      DATABASE_URL: ${{ matrix.dialect == 'postgresql' && 'postgresql://postgres:postgres@127.0.0.1:5432/agenticx' || 'mysql://agenticx:agenticx@127.0.0.1:3306/agenticx' }}
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: "20"
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9.12.0
+      - name: Install
+        run: pnpm install --frozen-lockfile
+      - name: Dialect contract + schema parity
+        run: |
+          pnpm db:compat:test
+          pnpm --filter @agenticx/db-schema test
+          pnpm db:portability:test
+      - name: Migrate + seed
+        run: |
+          pnpm --filter @agenticx/db-schema db:migrate
+          pnpm --filter @agenticx/db-schema db:seed
+      - name: Contract suite
+        run: bash scripts/ci/run-db-contract-suite.sh
+      - name: IAM unit tests
+        run: pnpm --filter @agenticx/iam-core test

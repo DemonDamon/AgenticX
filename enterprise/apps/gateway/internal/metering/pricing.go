@@ -46,8 +46,8 @@ type ModelPricing struct {
 }
 
 type pricingFile struct {
-	Version string                    `yaml:"version,omitempty" json:"version,omitempty"`
-	UpdatedAt string                  `yaml:"updated_at,omitempty" json:"updatedAt,omitempty"`
+	Version   string                    `yaml:"version,omitempty" json:"version,omitempty"`
+	UpdatedAt string                    `yaml:"updated_at,omitempty" json:"updatedAt,omitempty"`
 	Models    map[string][]ModelPricing `yaml:"models" json:"models"`
 	Default   ModelPricing              `yaml:"default" json:"default"`
 }
@@ -126,10 +126,10 @@ func parsePricingTableBytes(raw []byte, versionHint string) (*PricingTable, erro
 
 func unmarshalPricingYAML(raw []byte, parsed *pricingFile) error {
 	type yamlRoot struct {
-		Version   string                 `yaml:"version"`
-		UpdatedAt string                 `yaml:"updated_at"`
-		Default   ModelPricing           `yaml:"default"`
-		Models    map[string]yaml.Node   `yaml:"models"`
+		Version   string               `yaml:"version"`
+		UpdatedAt string               `yaml:"updated_at"`
+		Default   ModelPricing         `yaml:"default"`
+		Models    map[string]yaml.Node `yaml:"models"`
 	}
 	var root yamlRoot
 	if err := yaml.Unmarshal(raw, &root); err != nil {
@@ -333,8 +333,8 @@ func (t *PricingTable) ComputeCost(model string, usage openai.Usage, ctx CostCon
 		float64(n.CachedTokens)*p.CachedInput +
 		float64(n.CacheCreationInputTokens)*p.CacheCreation +
 		float64(n.CacheReadInputTokens)*p.CacheRead
-	outputCost := float64(n.CompletionTokens)*outRate
-	reasoningCost := float64(n.ReasoningTokens)*reasonRate
+	outputCost := float64(n.CompletionTokens) * outRate
+	reasoningCost := float64(n.ReasoningTokens) * reasonRate
 	base := inputCost + outputCost + reasoningCost
 
 	surcharge := applySurcharges(p.Surcharges, n, ctx, inputCost, outputCost, reasoningCost, base)

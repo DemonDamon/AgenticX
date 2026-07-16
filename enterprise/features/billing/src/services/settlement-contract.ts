@@ -1,26 +1,24 @@
-import { Pool } from "pg";
 import { ulid } from "ulid";
 import type { SettlementContractNotifyInput, SettlementWebhookConfig, SettlementWebhookEvent } from "../types";
+import { createBillingSqlExecutor, jsonParam, nowExpr, type BillingSqlExecutor } from "./sql";
 
 export class SettlementContractService {
-  private readonly pool: Pool;
+  private readonly db: BillingSqlExecutor;
 
   public constructor(connectionString?: string) {
-    this.pool = new Pool({
-      connectionString: connectionString ?? process.env.DATABASE_URL ?? "postgresql://postgres:postgres@127.0.0.1:5432/agenticx",
-    });
+    this.db = createBillingSqlExecutor(connectionString);
   }
 
   public async getConfig(tenantId: string): Promise<SettlementWebhookConfig> {
     try {
-      const result = await this.pool.query(
+      const result = await this.db.query(
         `select tenant_id, webhook_url, enabled, updated_at from billing_settlement_webhook_config where tenant_id = $1`,
         [tenantId]
       );
-      if (result.rowCount === 0) {
+      const row = result.rows[0];
+      if (!row) {
         return { tenant_id: tenantId, webhook_url: null, enabled: false, updated_at: new Date(0).toISOString() };
       }
-      const row = result.rows[0];
       return {
         tenant_id: String(row.tenant_id),
         webhook_url: row.webhook_url == null ? null : String(row.webhook_url),
@@ -36,14 +34,21 @@ export class SettlementContractService {
     const current = await this.getConfig(tenantId);
     const webhookUrl = input.webhook_url !== undefined ? input.webhook_url : current.webhook_url;
     const enabled = input.enabled !== undefined ? input.enabled : current.enabled;
-    await this.pool.query(
+    const upsert =
+      this.db.dialect === "postgresql"
+        ? `on conflict (tenant_id) do update
+           set webhook_url = excluded.webhook_url,
+               enabled = excluded.enabled,
+               updated_at = ${nowExpr(this.db.dialect)}`
+        : `on duplicate key update
+           webhook_url = values(webhook_url),
+           enabled = values(enabled),
+           updated_at = ${nowExpr(this.db.dialect)}`;
+    await this.db.query(
       `
         insert into billing_settlement_webhook_config (tenant_id, webhook_url, enabled, updated_at)
-        values ($1, $2, $3, now())
-        on conflict (tenant_id) do update
-        set webhook_url = excluded.webhook_url,
-            enabled = excluded.enabled,
-            updated_at = now()
+        values ($1, $2, $3, ${nowExpr(this.db.dialect)})
+        ${upsert}
       `,
       [tenantId, webhookUrl, enabled]
     );
@@ -52,7 +57,7 @@ export class SettlementContractService {
 
   public async listEvents(tenantId: string, limit = 50): Promise<SettlementWebhookEvent[]> {
     try {
-      const result = await this.pool.query(
+      const result = await this.db.query(
         `
           select id, tenant_id, payload, status, response_status, created_at
           from billing_settlement_webhook_events
@@ -118,11 +123,11 @@ export class SettlementContractService {
   ): Promise<string> {
     const id = ulid();
     try {
-      await this.pool.query(
+      await this.db.query(
         `
           insert into billing_settlement_webhook_events
             (id, tenant_id, payload, status, response_status, created_at)
-          values ($1, $2, $3::jsonb, $4, $5, now())
+          values ($1, $2, ${jsonParam(this.db.dialect, "$3")}, $4, $5, ${nowExpr(this.db.dialect)})
         `,
         [id, tenantId, JSON.stringify(payload), status, responseStatus]
       );

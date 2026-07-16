@@ -9,17 +9,17 @@ import (
 	"sync"
 	"time"
 
-	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/agenticx/enterprise/gateway/internal/database"
 )
 
 // PATIdentity is the resolved identity from a personal access token.
 type PATIdentity struct {
-	APITokenID   int64
-	TenantID     string
-	UserID       string
-	DeptID       string
-	Scopes       []string
-	UserEmail    string
+	APITokenID int64
+	TenantID   string
+	UserID     string
+	DeptID     string
+	Scopes     []string
+	UserEmail  string
 }
 
 type patCacheEntry struct {
@@ -30,7 +30,7 @@ type patCacheEntry struct {
 
 // PATVerifier validates agx-pat-* tokens against api_tokens table.
 type PATVerifier struct {
-	pool            *pgxpool.Pool
+	database        *database.Handle
 	mu              sync.RWMutex
 	cache           map[string]patCacheEntry
 	ttl             time.Duration
@@ -40,15 +40,15 @@ type PATVerifier struct {
 	revocationStore *PATRevocationStore
 }
 
-func NewPATVerifier(pool *pgxpool.Pool) *PATVerifier {
+func NewPATVerifier(handle *database.Handle) *PATVerifier {
 	v := &PATVerifier{
-		pool:            pool,
+		database:        handle,
 		cache:           map[string]patCacheEntry{},
 		ttl:             patCacheTTLFromEnv(),
 		touchPending:    map[int64]struct{}{},
 		revocationStore: NewPATRevocationStore(),
 	}
-	if pool != nil {
+	if handle != nil {
 		v.startTouchFlusher()
 	}
 	return v
@@ -56,7 +56,7 @@ func NewPATVerifier(pool *pgxpool.Pool) *PATVerifier {
 
 // NoteUsed queues api_token last_used_at updates (flushed every 60s).
 func (v *PATVerifier) NoteUsed(id int64) {
-	if v == nil || id <= 0 || v.pool == nil {
+	if v == nil || id <= 0 || v.database == nil {
 		return
 	}
 	v.touchMu.Lock()
@@ -82,7 +82,7 @@ func (v *PATVerifier) startTouchFlusher() {
 }
 
 func (v *PATVerifier) flushTouchPending() {
-	if v == nil || v.pool == nil {
+	if v == nil || v.database == nil {
 		return
 	}
 	v.touchMu.Lock()
@@ -98,7 +98,7 @@ func (v *PATVerifier) flushTouchPending() {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	for _, id := range pending {
-		_, _ = v.pool.Exec(ctx, `UPDATE api_tokens SET last_used_at = NOW(), updated_at = NOW() WHERE id = $1`, id)
+		_, _ = v.database.ExecContext(ctx, `UPDATE api_tokens SET last_used_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP WHERE id = ?`, id)
 	}
 }
 
@@ -117,16 +117,20 @@ func (v *PATVerifier) Verify(ctx context.Context, token string) (PATIdentity, er
 		}
 		return cached.identity, nil
 	}
-	if v.pool == nil {
+	if v.database == nil {
 		return PATIdentity{}, errors.New("auth:pat:database_unavailable")
 	}
 	var id int64
 	var tenantID, userID, deptID, status string
 	var scopes []byte
 	var expireAt *time.Time
-	err := v.pool.QueryRow(ctx, `
+	row, err := v.database.QueryRowContext(ctx, `
 SELECT id, tenant_id, user_id, COALESCE(dept_id, ''), status, scopes, expire_at
-FROM api_tokens WHERE token_hash = $1 LIMIT 1`, hash).Scan(&id, &tenantID, &userID, &deptID, &status, &scopes, &expireAt)
+FROM api_tokens WHERE token_hash = ? LIMIT 1`, hash)
+	if err != nil {
+		return PATIdentity{}, errors.New("auth:pat:invalid")
+	}
+	err = row.Scan(&id, &tenantID, &userID, &deptID, &status, &scopes, &expireAt)
 	if err != nil {
 		return PATIdentity{}, errors.New("auth:pat:invalid")
 	}

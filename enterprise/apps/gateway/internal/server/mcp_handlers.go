@@ -15,7 +15,7 @@ func (s *Server) initMCPHost() {
 	if !mcphost.HostingEnabled() {
 		return
 	}
-	s.mcpHost = mcphost.NewHost(s.pgPool, s.logger, s.quotaTracker, s.audit, s.evaluatePolicy)
+	s.mcpHost = mcphost.NewHost(s.database, s.logger, s.quotaTracker, s.audit, s.evaluatePolicy)
 	s.mcpStreamable = mcphost.StreamableHTTPTransport{}
 	s.mcpSSE = mcphost.NewSSETransport()
 	s.logger.Info("MCP hosting enabled")

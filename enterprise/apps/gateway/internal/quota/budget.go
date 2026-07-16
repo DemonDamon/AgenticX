@@ -25,7 +25,7 @@ const (
 
 // BudgetRule defines spend/token budget limits for a dimension.
 type BudgetRule struct {
-	Unit             string  `json:"unit"` // cost_usd | tokens
+	Unit             string  `json:"unit"`   // cost_usd | tokens
 	Period           string  `json:"period"` // day | week | month
 	Limit            float64 `json:"limit"`
 	WarnThresholdPct float64 `json:"warnThresholdPct"`
@@ -44,19 +44,19 @@ type BudgetConfig struct {
 
 // BudgetDecision is the outcome of a budget check.
 type BudgetDecision struct {
-	Allowed     bool
-	Warn        bool
-	Blocked     bool
-	Action      Action
-	Unit        string
-	Period      string
-	Dimension   string
-	DimensionKey string
-	Used        float64
-	Limit       float64
-	WarnPct     float64
-	Description string
-	FallbackModel string
+	Allowed        bool
+	Warn           bool
+	Blocked        bool
+	Action         Action
+	Unit           string
+	Period         string
+	Dimension      string
+	DimensionKey   string
+	Used           float64
+	Limit          float64
+	WarnPct        float64
+	Description    string
+	FallbackModel  string
 	ReservedTokens int64
 	ReservedCost   float64
 }
@@ -521,14 +521,14 @@ func budgetDecisionToCheckResult(b BudgetDecision) CheckResult {
 		headers["X-AgenticX-Budget-Limit"] = fmt.Sprintf("%.6f", b.Limit)
 	}
 	return CheckResult{
-		Allowed:           b.Allowed,
-		Warn:              b.Warn,
-		Kind:              "budget",
-		Description:       b.Description,
-		Used:              int64(b.Used),
-		Limit:             int64(b.Limit),
-		Headers:           headers,
-		FallbackModel:     b.FallbackModel,
+		Allowed:              b.Allowed,
+		Warn:                 b.Warn,
+		Kind:                 "budget",
+		Description:          b.Description,
+		Used:                 int64(b.Used),
+		Limit:                int64(b.Limit),
+		Headers:              headers,
+		FallbackModel:        b.FallbackModel,
 		BudgetReservedTokens: b.ReservedTokens,
 		BudgetReservedCost:   b.ReservedCost,
 	}

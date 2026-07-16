@@ -7,7 +7,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/agenticx/enterprise/gateway/internal/database"
 )
 
 const (
@@ -35,20 +35,20 @@ func requestCountBackend() string {
 
 // RequestCountCounter tracks calendar day/week/month request counts per rateKey identity.
 type RequestCountCounter struct {
-	mu         sync.Mutex
-	local      map[string]int64
-	usagePath  string
-	pgCounter  PoolCounter
-	usePG      bool
+	mu        sync.Mutex
+	local     map[string]int64
+	usagePath string
+	pgCounter PoolCounter
+	usePG     bool
 }
 
-func newRequestCountCounter(pgPool *pgxpool.Pool, poolUsagePath string) *RequestCountCounter {
+func newRequestCountCounter(handle *database.Handle, poolUsagePath string) *RequestCountCounter {
 	c := &RequestCountCounter{
 		local:     map[string]int64{},
 		usagePath: poolUsagePath,
 	}
-	if requestCountBackend() == "pg" && pgPool != nil {
-		c.pgCounter = &PGPoolCounter{pool: pgPool}
+	if requestCountBackend() == "pg" && handle != nil && handle.DB != nil {
+		c.pgCounter = &PGPoolCounter{database: handle}
 		c.usePG = true
 	}
 	return c

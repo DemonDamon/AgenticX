@@ -15,8 +15,9 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgxpool"
+	"database/sql"
+
+	"github.com/agenticx/enterprise/gateway/internal/database"
 )
 
 const (
@@ -101,15 +102,15 @@ func poolKeyFor(rule Rule, ctx RequestContext, period string) (PoolKey, bool) {
 	}
 }
 
-func newPoolCounter(pgPool *pgxpool.Pool, usagePath string) PoolCounter {
+func newPoolCounter(handle *database.Handle, usagePath string) PoolCounter {
 	if !poolFeatureEnabled() {
 		return nil
 	}
 	if poolBackend() == "pg" {
-		if pgPool != nil {
-			return &PGPoolCounter{pool: pgPool}
+		if handle != nil && handle.DB != nil {
+			return &PGPoolCounter{database: handle}
 		}
-		log.Printf("[quota] pool backend=pg but DATABASE_URL pool unavailable, falling back to local pool counter")
+		log.Printf("[quota] pool backend=pg but DATABASE_URL unavailable, falling back to local pool counter")
 	}
 	return &LocalPoolCounter{
 		usagePath:  usagePath,
@@ -258,14 +259,14 @@ func (c *LocalPoolCounter) lockUsageFile() (func(), bool) {
 	}, true
 }
 
-// PGPoolCounter atomically updates shared pool usage in Postgres.
+// PGPoolCounter atomically updates shared pool usage in the configured database.
 type PGPoolCounter struct {
-	pool *pgxpool.Pool
+	database *database.Handle
 }
 
 func (c *PGPoolCounter) Add(key PoolKey, delta int64, event string, requestID string) (int64, error) {
-	if c == nil || c.pool == nil {
-		return 0, fmt.Errorf("pg pool counter unavailable")
+	if c == nil || c.database == nil || c.database.DB == nil {
+		return 0, fmt.Errorf("pool counter unavailable")
 	}
 	if !key.valid() {
 		return 0, fmt.Errorf("invalid pool key")
@@ -274,29 +275,35 @@ func (c *PGPoolCounter) Add(key PoolKey, delta int64, event string, requestID st
 	defer cancel()
 
 	var usedAfter int64
-	err := c.pool.QueryRow(ctx, `
-INSERT INTO gateway_quota_pool_usage (tenant_id, scope_type, scope_id, period, used_total, updated_at)
-VALUES ($1, $2, $3, $4, $5, now())
-ON CONFLICT (tenant_id, scope_type, scope_id, period)
-DO UPDATE SET used_total = gateway_quota_pool_usage.used_total + EXCLUDED.used_total, updated_at = now()
-RETURNING used_total
-`, key.TenantID, key.ScopeType, key.ScopeID, key.Period, delta).Scan(&usedAfter)
+	var err error
+	if c.database.Dialect == database.MySQL {
+		usedAfter, err = c.addMySQL(ctx, key, delta)
+	} else {
+		usedAfter, err = c.addPostgreSQL(ctx, key, delta)
+	}
 	if err != nil {
 		return 0, err
 	}
 	if usedAfter < 0 {
-		_, _ = c.pool.Exec(ctx, `
-UPDATE gateway_quota_pool_usage SET used_total = 0, updated_at = now()
-WHERE tenant_id = $1 AND scope_type = $2 AND scope_id = $3 AND period = $4
+		_, _ = c.database.ExecContext(ctx, `
+UPDATE gateway_quota_pool_usage SET used_total = 0, updated_at = CURRENT_TIMESTAMP
+WHERE tenant_id = ? AND scope_type = ? AND scope_id = ? AND period = ?
 `, key.TenantID, key.ScopeType, key.ScopeID, key.Period)
 		usedAfter = 0
 	}
 	if delta != 0 && strings.TrimSpace(event) != "" {
 		ledgerID := newLedgerID()
-		_, err = c.pool.Exec(ctx, `
+		reqID := strings.TrimSpace(requestID)
+		var reqArg any
+		if reqID == "" {
+			reqArg = nil
+		} else {
+			reqArg = reqID
+		}
+		_, err = c.database.ExecContext(ctx, `
 INSERT INTO gateway_quota_ledger (id, tenant_id, scope_type, scope_id, period, event, delta_tokens, request_id, created_at)
-VALUES ($1, $2, $3, $4, $5, $6, $7, NULLIF($8, ''), now())
-`, ledgerID, key.TenantID, key.ScopeType, key.ScopeID, key.Period, event, delta, requestID)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+`, ledgerID, key.TenantID, key.ScopeType, key.ScopeID, key.Period, event, delta, reqArg)
 		if err != nil {
 			log.Printf("[quota] pool ledger insert failed key=%s event=%s err=%v", key.cacheKey(), event, err)
 		}
@@ -304,9 +311,57 @@ VALUES ($1, $2, $3, $4, $5, $6, $7, NULLIF($8, ''), now())
 	return usedAfter, nil
 }
 
+func (c *PGPoolCounter) addPostgreSQL(ctx context.Context, key PoolKey, delta int64) (int64, error) {
+	var usedAfter int64
+	row, err := c.database.QueryRowContext(ctx, `
+INSERT INTO gateway_quota_pool_usage (tenant_id, scope_type, scope_id, period, used_total, updated_at)
+VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+ON CONFLICT (tenant_id, scope_type, scope_id, period)
+DO UPDATE SET used_total = gateway_quota_pool_usage.used_total + EXCLUDED.used_total, updated_at = CURRENT_TIMESTAMP
+RETURNING used_total
+`, key.TenantID, key.ScopeType, key.ScopeID, key.Period, delta)
+	if err != nil {
+		return 0, err
+	}
+	if err := row.Scan(&usedAfter); err != nil {
+		return 0, err
+	}
+	return usedAfter, nil
+}
+
+func (c *PGPoolCounter) addMySQL(ctx context.Context, key PoolKey, delta int64) (int64, error) {
+	tx, err := c.database.DB.BeginTx(ctx, nil)
+	if err != nil {
+		return 0, err
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	_, err = tx.ExecContext(ctx, `
+INSERT INTO gateway_quota_pool_usage (tenant_id, scope_type, scope_id, period, used_total, updated_at)
+VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+ON DUPLICATE KEY UPDATE used_total = gateway_quota_pool_usage.used_total + ?, updated_at = CURRENT_TIMESTAMP
+`, key.TenantID, key.ScopeType, key.ScopeID, key.Period, delta, delta)
+	if err != nil {
+		return 0, err
+	}
+	var usedAfter int64
+	err = tx.QueryRowContext(ctx, `
+SELECT used_total FROM gateway_quota_pool_usage
+WHERE tenant_id = ? AND scope_type = ? AND scope_id = ? AND period = ?
+FOR UPDATE
+`, key.TenantID, key.ScopeType, key.ScopeID, key.Period).Scan(&usedAfter)
+	if err != nil {
+		return 0, err
+	}
+	if err := tx.Commit(); err != nil {
+		return 0, err
+	}
+	return usedAfter, nil
+}
+
 func (c *PGPoolCounter) Current(key PoolKey) (int64, error) {
-	if c == nil || c.pool == nil {
-		return 0, fmt.Errorf("pg pool counter unavailable")
+	if c == nil || c.database == nil || c.database.DB == nil {
+		return 0, fmt.Errorf("pool counter unavailable")
 	}
 	if !key.valid() {
 		return 0, fmt.Errorf("invalid pool key")
@@ -314,12 +369,16 @@ func (c *PGPoolCounter) Current(key PoolKey) (int64, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	var used int64
-	err := c.pool.QueryRow(ctx, `
+	row, err := c.database.QueryRowContext(ctx, `
 SELECT used_total FROM gateway_quota_pool_usage
-WHERE tenant_id = $1 AND scope_type = $2 AND scope_id = $3 AND period = $4
-`, key.TenantID, key.ScopeType, key.ScopeID, key.Period).Scan(&used)
+WHERE tenant_id = ? AND scope_type = ? AND scope_id = ? AND period = ?
+`, key.TenantID, key.ScopeType, key.ScopeID, key.Period)
 	if err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
+		return 0, err
+	}
+	err = row.Scan(&used)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
 			return 0, nil
 		}
 		return 0, err

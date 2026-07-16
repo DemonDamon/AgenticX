@@ -1,4 +1,3 @@
-import { Pool } from "pg";
 import { ulid } from "ulid";
 import type {
   BillingSplitLedgerEntry,
@@ -10,16 +9,15 @@ import type {
 import { costUsdToMicro, microToUsdString, splitAmountMicro } from "./split-utils";
 import { SplitRulesService } from "./split-rules";
 import type { SettlementContractService } from "./settlement-contract";
+import { createBillingSqlExecutor, type BillingSqlExecutor } from "./sql";
 
 export class SplitLedgerService {
-  private readonly pool: Pool;
+  private readonly db: BillingSqlExecutor;
   private readonly rules: SplitRulesService;
   private settlement?: SettlementContractService;
 
   public constructor(connectionString?: string, rules?: SplitRulesService, settlement?: SettlementContractService) {
-    this.pool = new Pool({
-      connectionString: connectionString ?? process.env.DATABASE_URL ?? "postgresql://postgres:postgres@127.0.0.1:5432/agenticx",
-    });
+    this.db = createBillingSqlExecutor(connectionString);
     this.rules = rules ?? new SplitRulesService(connectionString);
     this.settlement = settlement;
   }
@@ -40,7 +38,7 @@ export class SplitLedgerService {
     }
     const limit = input.limit ?? 500;
     try {
-      const result = await this.pool.query(
+      const result = await this.db.query(
         `
           select *
           from billing_split_ledger
@@ -59,7 +57,7 @@ export class SplitLedgerService {
   public async syncPendingUsage(tenantId: string, limit = 100): Promise<number> {
     let rows: UsageRecordForSplit[] = [];
     try {
-      const result = await this.pool.query(
+      const result = await this.db.query(
         `
           select ur.id, ur.tenant_id, ur.cost_usd, ur.time_bucket, ur.provider, ur.model
           from usage_records ur
@@ -91,7 +89,7 @@ export class SplitLedgerService {
   }
 
   public async applySplitForUsage(usage: UsageRecordForSplit): Promise<boolean> {
-    const existing = await this.pool.query(`select id from billing_split_ledger where usage_record_id = $1 limit 1`, [
+    const existing = await this.db.query(`select id from billing_split_ledger where usage_record_id = $1 limit 1`, [
       usage.id,
     ]);
     if ((existing.rowCount ?? 0) > 0) {
@@ -118,7 +116,7 @@ export class SplitLedgerService {
     const entries: BillingSplitLedgerEntry[] = [];
     for (const share of shares) {
       const id = ulid();
-      await this.pool.query(
+      await this.db.query(
         `
           insert into billing_split_ledger
             (id, tenant_id, usage_record_id, rule_id, rule_version, participant_id, participant_label,
@@ -183,12 +181,18 @@ export class SplitLedgerService {
 
     let rows: ReconcileResult["rows"] = [];
     try {
-      const summary = await this.pool.query(
+      const amountExpr =
+        this.db.dialect === "postgresql"
+          ? "coalesce(sum(amount_micro_usd), 0)::bigint"
+          : "CAST(coalesce(sum(amount_micro_usd), 0) AS SIGNED)";
+      const countExpr =
+        this.db.dialect === "postgresql" ? "count(*)::int" : "CAST(count(*) AS SIGNED)";
+      const summary = await this.db.query(
         `
           select participant_id,
                  max(participant_label) as participant_label,
-                 coalesce(sum(amount_micro_usd), 0)::bigint as amount_micro_usd,
-                 count(*)::int as entry_count
+                 ${amountExpr} as amount_micro_usd,
+                 ${countExpr} as entry_count
           from billing_split_ledger
           where ${where.join(" and ")}
           group by participant_id

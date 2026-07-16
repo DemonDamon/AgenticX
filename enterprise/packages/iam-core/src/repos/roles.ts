@@ -3,7 +3,10 @@ import { and, eq, inArray, isNull, sql } from "drizzle-orm";
 import { ulid } from "ulid";
 import { ALL_REGISTERED_SCOPES, mergeUserScopes } from "../scope-registry";
 import { getIamDb, type IamDb } from "../db";
+import { resolveDatabaseConfig } from "../database/config";
 import { insertAuditEvent } from "./audit";
+import type { RolesRepository } from "./contracts";
+import { getMysqlUserRolesDetail, mysqlRolesRepository as mysqlRolesRepo } from "./mysql/roles";
 
 export type RoleRow = {
   id: string;
@@ -141,6 +144,9 @@ async function memberCounts(tenantId: string): Promise<Map<string, number>> {
 }
 
 export async function ensureSystemRoles(tenantId: string): Promise<void> {
+  if (resolveDatabaseConfig().dialect === "mysql") {
+    return mysqlRolesRepo.ensureSystemRoles(tenantId);
+  }
   const db = getIamDb();
   const now = new Date();
   for (const seed of SYSTEM_ROLE_SEED) {
@@ -161,6 +167,9 @@ export async function ensureSystemRoles(tenantId: string): Promise<void> {
 }
 
 export async function listRoles(tenantId: string): Promise<RoleRow[]> {
+  if (resolveDatabaseConfig().dialect === "mysql") {
+    return mysqlRolesRepo.listRoles(tenantId);
+  }
   const db = getIamDb();
   const rows = await db.select().from(roles).where(eq(roles.tenantId, tenantId)).orderBy(roles.code);
   const mc = await memberCounts(tenantId);
@@ -168,6 +177,9 @@ export async function listRoles(tenantId: string): Promise<RoleRow[]> {
 }
 
 export async function getRoleById(tenantId: string, id: string): Promise<RoleRow | null> {
+  if (resolveDatabaseConfig().dialect === "mysql") {
+    return mysqlRolesRepo.getRoleById(tenantId, id);
+  }
   const db = getIamDb();
   const row = await db
     .select()
@@ -180,6 +192,9 @@ export async function getRoleById(tenantId: string, id: string): Promise<RoleRow
 }
 
 export async function getRoleByCode(tenantId: string, code: string): Promise<RoleRow | null> {
+  if (resolveDatabaseConfig().dialect === "mysql") {
+    return mysqlRolesRepo.getRoleByCode(tenantId, code);
+  }
   const db = getIamDb();
   const row = await db
     .select()
@@ -197,6 +212,9 @@ export async function createCustomRole(input: {
   scopes: string[];
   actorUserId?: string | null;
 }): Promise<RoleRow> {
+  if (resolveDatabaseConfig().dialect === "mysql") {
+    return mysqlRolesRepo.createCustomRole(input);
+  }
   const db = getIamDb();
   const code = input.code.trim().toLowerCase().replace(/\s+/g, "_");
   if (!code) throw new Error("角色代码不能为空");
@@ -235,6 +253,9 @@ export async function updateRole(input: {
   name?: string;
   scopes?: string[];
 }): Promise<RoleRow> {
+  if (resolveDatabaseConfig().dialect === "mysql") {
+    return mysqlRolesRepo.updateRole(input);
+  }
   const db = getIamDb();
   const row = await db
     .select()
@@ -271,6 +292,9 @@ export async function deleteRole(input: {
   id: string;
   actorUserId?: string | null;
 }): Promise<void> {
+  if (resolveDatabaseConfig().dialect === "mysql") {
+    return mysqlRolesRepo.deleteRole(input);
+  }
   const db = getIamDb();
   const row = await db
     .select()
@@ -306,6 +330,9 @@ export async function duplicateRole(input: {
   newName: string;
   actorUserId?: string | null;
 }): Promise<RoleRow> {
+  if (resolveDatabaseConfig().dialect === "mysql") {
+    return mysqlRolesRepo.duplicateRole(input);
+  }
   const source = await getRoleById(input.tenantId, input.sourceId);
   if (!source) throw new Error("源角色不存在");
   return createCustomRole({
@@ -322,6 +349,9 @@ export async function resolveRoleIdsFromCodes(
   codes: string[],
   dbOrTx?: IamDb
 ): Promise<Map<string, string>> {
+  if (resolveDatabaseConfig().dialect === "mysql") {
+    return mysqlRolesRepo.resolveRoleIdsFromCodes(tenantId, codes);
+  }
   const db = dbOrTx ?? getIamDb();
   const clean = [...new Set(codes.map((c) => c.trim()).filter(Boolean))];
   if (!clean.length) return new Map();
@@ -337,6 +367,9 @@ export async function resolveRoleIdsFromCodes(
 export async function listUsersForRole(tenantId: string, roleId: string): Promise<
   Array<{ userId: string; email: string; displayName: string }>
 > {
+  if (resolveDatabaseConfig().dialect === "mysql") {
+    return mysqlRolesRepo.listUsersForRole(tenantId, roleId);
+  }
   const db = getIamDb();
   const rows = await db
     .select({
@@ -368,6 +401,9 @@ export async function getUserRolesDetail(
   tenantId: string,
   userId: string
 ): Promise<{ scopes: string[]; roleCodes: string[] }> {
+  if (resolveDatabaseConfig().dialect === "mysql") {
+    return getMysqlUserRolesDetail(tenantId, userId);
+  }
   const db = getIamDb();
   const roleRows = await db
     .select({ scopes: roles.scopes, code: roles.code })
@@ -381,4 +417,29 @@ export async function getUserRolesDetail(
 
 export function superAdminScopesFallback(): string[] {
   return [...ALL_REGISTERED_SCOPES];
+}
+
+const roleRepositoryMethods = {
+  ensureSystemRoles,
+  listRoles,
+  getRoleById,
+  getRoleByCode,
+  createCustomRole,
+  updateRole,
+  deleteRole,
+  duplicateRole,
+  resolveRoleIdsFromCodes,
+  listUsersForRole,
+  getUserRolesDetail,
+};
+
+const postgresqlRolesRepository: RolesRepository = {
+  dialect: "postgresql",
+  ...roleRepositoryMethods,
+};
+
+export function getRolesRepository(): RolesRepository {
+  return resolveDatabaseConfig().dialect === "mysql"
+    ? mysqlRolesRepo
+    : postgresqlRolesRepository;
 }

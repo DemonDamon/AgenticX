@@ -1,6 +1,9 @@
-import { enterpriseRuntimeCompliance } from "@agenticx/db-schema";
-import { eq } from "drizzle-orm";
-import { getIamDb } from "./db";
+import { resolveDatabaseConfig } from "./database/config";
+import { mysqlComplianceStore } from "./repos/mysql/compliance";
+import {
+  postgresqlComplianceStore,
+  type ComplianceStore,
+} from "./repos/postgresql/compliance";
 
 export type CrossBorderAction = "allow" | "block" | "require_approval";
 
@@ -27,27 +30,16 @@ function normalizeAction(raw: string | null | undefined): CrossBorderAction {
   return "allow";
 }
 
-function rowToConfig(row: typeof enterpriseRuntimeCompliance.$inferSelect): ComplianceConfig {
-  return {
-    tenantId: row.tenantId,
-    dataResidency: row.dataResidency ?? null,
-    crossBorderAction: normalizeAction(row.crossBorderAction),
-    auditRetentionYears: row.auditRetentionYears ?? DEFAULT_RETENTION_YEARS,
-    appendOnly: row.appendOnly ?? true,
-    updatedAt:
-      row.updatedAt instanceof Date ? row.updatedAt.toISOString() : String(row.updatedAt ?? new Date().toISOString()),
-  };
+function getComplianceStore(): ComplianceStore {
+  return resolveDatabaseConfig().dialect === "mysql"
+    ? mysqlComplianceStore
+    : postgresqlComplianceStore;
 }
 
 export async function getComplianceConfig(tenantId?: string): Promise<ComplianceConfig> {
   const tid = tenantId?.trim() || requiredTenantId();
-  const db = getIamDb();
-  const rows = await db
-    .select()
-    .from(enterpriseRuntimeCompliance)
-    .where(eq(enterpriseRuntimeCompliance.tenantId, tid))
-    .limit(1);
-  if (!rows.length) {
+  const config = await getComplianceStore().get(tid);
+  if (!config) {
     return {
       tenantId: tid,
       dataResidency: null,
@@ -57,7 +49,11 @@ export async function getComplianceConfig(tenantId?: string): Promise<Compliance
       updatedAt: new Date().toISOString(),
     };
   }
-  return rowToConfig(rows[0]!);
+  return {
+    ...config,
+    crossBorderAction: normalizeAction(config.crossBorderAction),
+    auditRetentionYears: config.auditRetentionYears ?? DEFAULT_RETENTION_YEARS,
+  };
 }
 
 export async function upsertComplianceConfig(input: {
@@ -68,29 +64,14 @@ export async function upsertComplianceConfig(input: {
   appendOnly?: boolean;
 }): Promise<ComplianceConfig> {
   const tid = input.tenantId?.trim() || requiredTenantId();
-  const db = getIamDb();
   const years = Math.max(1, Math.min(99, input.auditRetentionYears ?? DEFAULT_RETENTION_YEARS));
-  const now = new Date();
-  await db
-    .insert(enterpriseRuntimeCompliance)
-    .values({
-      tenantId: tid,
-      dataResidency: input.dataResidency?.trim() || null,
-      crossBorderAction: normalizeAction(input.crossBorderAction),
-      auditRetentionYears: years,
-      appendOnly: input.appendOnly ?? true,
-      updatedAt: now,
-    })
-    .onConflictDoUpdate({
-      target: enterpriseRuntimeCompliance.tenantId,
-      set: {
-        dataResidency: input.dataResidency?.trim() || null,
-        crossBorderAction: normalizeAction(input.crossBorderAction),
-        auditRetentionYears: years,
-        appendOnly: input.appendOnly ?? true,
-        updatedAt: now,
-      },
-    });
+  await getComplianceStore().upsert({
+    tenantId: tid,
+    dataResidency: input.dataResidency?.trim() || null,
+    crossBorderAction: normalizeAction(input.crossBorderAction),
+    auditRetentionYears: years,
+    appendOnly: input.appendOnly ?? true,
+  });
   return getComplianceConfig(tid);
 }
 

@@ -6,7 +6,15 @@ import { apiTokens as patTable } from "@agenticx/db-schema";
 import { createHash, randomBytes } from "node:crypto";
 import { and, desc, eq } from "drizzle-orm";
 import { getIamDb } from "./db";
+import { resolveDatabaseConfig } from "./database/config";
 import { recordPatRevocation } from "./pat-revocation-store";
+import {
+  createMysqlPatRow,
+  listMysqlPats,
+  revokeMysqlPat,
+  touchMysqlPatLastUsed,
+  verifyMysqlPat,
+} from "./repos/mysql/pat";
 
 export type PatStatus = "active" | "revoked" | "expired";
 
@@ -84,14 +92,28 @@ export function generatePatPlaintext(): string {
 }
 
 export async function createPat(input: CreatePatInput): Promise<CreatePatResult> {
-  const db = getIamDb();
   const plain = generatePatPlaintext();
   const tokenHash = hashToken(plain);
   const tokenPrefix = plain.slice(0, 12);
   const days = input.expireDays ?? defaultExpireDays();
   const expireAt = new Date(Date.now() + days * 24 * 60 * 60 * 1000);
   const scopes = input.scopes?.length ? input.scopes : ["workspace:chat"];
+  if (resolveDatabaseConfig().dialect === "mysql") {
+    const record = await createMysqlPatRow({
+      tenantId: input.tenantId,
+      userId: input.userId,
+      deptId: input.deptId ?? null,
+      name: input.name.trim(),
+      tokenHash,
+      tokenPrefix,
+      scopes,
+      expireAt,
+      createdBy: input.createdBy,
+    });
+    return { record, token: plain };
+  }
 
+  const db = getIamDb();
   const inserted = await db
     .insert(patTable)
     .values({
@@ -117,6 +139,9 @@ export async function listPats(filter: {
   tenantId: string;
   userId?: string;
 }): Promise<PatRecord[]> {
+  if (resolveDatabaseConfig().dialect === "mysql") {
+    return listMysqlPats(filter.tenantId, filter.userId);
+  }
   const db = getIamDb();
   const cond = filter.userId
     ? and(eq(patTable.tenantId, filter.tenantId), eq(patTable.userId, filter.userId))
@@ -126,6 +151,11 @@ export async function listPats(filter: {
 }
 
 export async function revokePat(id: number, tenantId: string): Promise<PatRecord | null> {
+  if (resolveDatabaseConfig().dialect === "mysql") {
+    const result = await revokeMysqlPat(id, tenantId);
+    if (result) await recordPatRevocation(result.tokenHash);
+    return result?.record ?? null;
+  }
   const db = getIamDb();
   const [existing] = await db
     .select({ tokenHash: patTable.tokenHash })
@@ -154,8 +184,11 @@ export type VerifyPatResult = {
 
 export async function verifyPat(plain: string): Promise<VerifyPatResult | null> {
   if (!plain.startsWith("agx-pat-")) return null;
-  const db = getIamDb();
   const tokenHash = hashToken(plain);
+  if (resolveDatabaseConfig().dialect === "mysql") {
+    return verifyMysqlPat(tokenHash);
+  }
+  const db = getIamDb();
   const rows = await db.select().from(patTable).where(eq(patTable.tokenHash, tokenHash)).limit(1);
   const row = rows[0];
   if (!row) return null;
@@ -172,6 +205,10 @@ export async function verifyPat(plain: string): Promise<VerifyPatResult | null> 
 }
 
 export async function touchPatLastUsed(id: number): Promise<void> {
+  if (resolveDatabaseConfig().dialect === "mysql") {
+    await touchMysqlPatLastUsed(id);
+    return;
+  }
   const db = getIamDb();
   await db.update(patTable).set({ lastUsedAt: new Date(), updatedAt: new Date() }).where(eq(patTable.id, id));
 }

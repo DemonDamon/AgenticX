@@ -16,8 +16,8 @@ func TestPricingCacheCost(t *testing.T) {
 		defaultP: ModelPricing{Input: 1, Output: 2, CachedInput: 0.1},
 	}
 	usage := NormalizeOpenAI(map[string]any{
-		"prompt_tokens":     100,
-		"completion_tokens": 10,
+		"prompt_tokens":         100,
+		"completion_tokens":     10,
 		"prompt_tokens_details": map[string]any{"cached_tokens": 60},
 	})
 	cost := table.ComputeCostUSD("gpt-4o", usage)
@@ -37,16 +37,16 @@ func TestDynamicPricingReasoningAndLongContextSurcharge(t *testing.T) {
 				Output: 2,
 				Surcharges: []SurchargeRule{
 					{
-						Name: "long-context",
-						When: SurchargeWhen{ContextTokensGte: 1000},
+						Name:    "long-context",
+						When:    SurchargeWhen{ContextTokensGte: 1000},
 						AddPerM: 10,
 						ApplyTo: "input",
 					},
 					{
-						Name: "reasoning-premium",
-						When: SurchargeWhen{HasReasoning: &hasReasoning},
+						Name:          "reasoning-premium",
+						When:          SurchargeWhen{HasReasoning: &hasReasoning},
 						MultiplierPct: 20,
-						ApplyTo: "reasoning",
+						ApplyTo:       "reasoning",
 					},
 				},
 			}},

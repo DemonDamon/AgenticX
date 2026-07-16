@@ -14,9 +14,9 @@ import (
 	"time"
 
 	"github.com/agenticx/enterprise/gateway/internal/audit"
+	"github.com/agenticx/enterprise/gateway/internal/database"
 	"github.com/agenticx/enterprise/gateway/internal/quota"
 	policyengine "github.com/agenticx/enterprise/policy-engine"
-	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 // PolicyEvaluator evaluates content policy for MCP tool inputs.
@@ -33,12 +33,12 @@ type Host struct {
 	mu       sync.RWMutex
 }
 
-func NewHost(pool *pgxpool.Pool, logger *slog.Logger, quotaTracker *quota.Tracker, auditWriter audit.EventWriter, policy PolicyEvaluator) *Host {
+func NewHost(handle *database.Handle, logger *slog.Logger, quotaTracker *quota.Tracker, auditWriter audit.EventWriter, policy PolicyEvaluator) *Host {
 	if logger == nil {
 		logger = slog.Default()
 	}
 	h := &Host{
-		registry: NewRegistry(pool, logger),
+		registry: NewRegistry(handle, logger),
 		logger:   logger,
 		quota:    quotaTracker,
 		audit:    auditWriter,
@@ -193,23 +193,23 @@ func (h *Host) writeToolAudit(identity Identity, rec *ServerRecord, toolName str
 		outText = result.Content[0].Text
 	}
 	ev := audit.Event{
-		ID:           fmt.Sprintf("audit_%d", time.Now().UnixNano()),
-		TenantID:     identity.TenantID,
-		EventTime:    time.Now().UTC().Format(time.RFC3339),
-		EventType:    "mcp_tool_call",
-		UserID:       identity.UserID,
-		UserEmail:    identity.UserEmail,
-		DepartmentID: identity.DepartmentID,
-		ClientType:   clientTypeLabel(identity),
-		ClientIP:     identity.ClientIP,
-		Route:        "mcp",
-		APITokenID:   identity.APITokenID,
-		LatencyMS:    time.Since(started).Milliseconds(),
-		MCPServer:    rec.Name,
-		MCPToolName:  toolName,
-		MCPInputHash: hashText(string(inRaw)),
+		ID:            fmt.Sprintf("audit_%d", time.Now().UnixNano()),
+		TenantID:      identity.TenantID,
+		EventTime:     time.Now().UTC().Format(time.RFC3339),
+		EventType:     "mcp_tool_call",
+		UserID:        identity.UserID,
+		UserEmail:     identity.UserEmail,
+		DepartmentID:  identity.DepartmentID,
+		ClientType:    clientTypeLabel(identity),
+		ClientIP:      identity.ClientIP,
+		Route:         "mcp",
+		APITokenID:    identity.APITokenID,
+		LatencyMS:     time.Since(started).Milliseconds(),
+		MCPServer:     rec.Name,
+		MCPToolName:   toolName,
+		MCPInputHash:  hashText(string(inRaw)),
 		MCPOutputHash: hashText(outText),
-		MCPStatus:    status,
+		MCPStatus:     status,
 		Digest: &audit.Digest{
 			PromptHash:      hashText(string(inRaw)),
 			ResponseHash:    hashText(outText),

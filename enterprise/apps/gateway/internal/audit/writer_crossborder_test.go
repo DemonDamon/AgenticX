@@ -10,15 +10,15 @@ func TestFileWriter_ChecksumIncludesCrossBorderFields(t *testing.T) {
 	dir := t.TempDir()
 	w := NewFileWriter(dir)
 	ev1 := &Event{
-		ID:         "audit-1",
-		TenantID:   "tenant-1",
-		EventTime:  time.Now().UTC().Format(time.RFC3339),
-		EventType:  "chat_call",
-		ClientType: "web-portal",
-		Route:      "third-party",
-		SrcRegion:  "cn",
-		DstRegion:  "us",
-		CrossBorder: true,
+		ID:            "audit-1",
+		TenantID:      "tenant-1",
+		EventTime:     time.Now().UTC().Format(time.RFC3339),
+		EventType:     "chat_call",
+		ClientType:    "web-portal",
+		Route:         "third-party",
+		SrcRegion:     "cn",
+		DstRegion:     "us",
+		CrossBorder:   true,
 		ResidencyRule: "cross_border:allow",
 	}
 	if err := w.Write(ev1); err != nil {

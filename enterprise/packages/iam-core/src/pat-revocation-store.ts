@@ -2,6 +2,11 @@ import { enterpriseRuntimePatRevocation } from "@agenticx/db-schema";
 import { createHash } from "node:crypto";
 import { getIamDb } from "./db";
 import { eq } from "drizzle-orm";
+import { resolveDatabaseConfig } from "./database/config";
+import {
+  readMysqlPatRevocation,
+  writeMysqlPatRevocation,
+} from "./repos/mysql/pat-revocation";
 
 export type PatRevocationSnapshot = {
   version: number;
@@ -16,6 +21,11 @@ function tenant(): string {
 }
 
 async function ensureRevocationRow(tid: string) {
+  if (resolveDatabaseConfig().dialect === "mysql") {
+    const existing = await readMysqlPatRevocation(tid);
+    if (!existing) await writeMysqlPatRevocation(tid, 0, [], new Date());
+    return;
+  }
   const db = getIamDb();
   const existing = await db
     .select()
@@ -35,6 +45,15 @@ export async function recordPatRevocation(tokenHash: string): Promise<PatRevocat
   const hash = tokenHash.trim();
   if (!hash) throw new Error("token hash required");
   await ensureRevocationRow(tid);
+  if (resolveDatabaseConfig().dialect === "mysql") {
+    const current = await readMysqlPatRevocation(tid);
+    const prevHashes = current?.revokedHashes ?? [];
+    const nextHashes = prevHashes.includes(hash) ? prevHashes : [...prevHashes, hash].slice(-5000);
+    const nextVersion = (current?.version ?? 0) + 1;
+    const now = new Date();
+    await writeMysqlPatRevocation(tid, nextVersion, nextHashes, now);
+    return { version: nextVersion, revokedHashes: nextHashes, updatedAt: now.toISOString() };
+  }
   const db = getIamDb();
   const [row] = await db
     .select()
@@ -71,6 +90,13 @@ export async function recordPatRevocation(tokenHash: string): Promise<PatRevocat
 export async function buildPatRevocationSnapshotForGateway(): Promise<PatRevocationSnapshot> {
   const tid = tenant();
   await ensureRevocationRow(tid);
+  if (resolveDatabaseConfig().dialect === "mysql") {
+    return (await readMysqlPatRevocation(tid)) ?? {
+      version: 0,
+      revokedHashes: [],
+      updatedAt: new Date().toISOString(),
+    };
+  }
   const db = getIamDb();
   const [row] = await db
     .select()

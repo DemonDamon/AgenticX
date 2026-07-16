@@ -9,23 +9,23 @@ import (
 	"sync"
 	"time"
 
+	"github.com/agenticx/enterprise/gateway/internal/database"
 	"github.com/agenticx/enterprise/gateway/internal/gatewayinternal"
-	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 // SessionGrantStore resolves temporary session scopes (TTL-bound).
 type SessionGrantStore struct {
-	pool       *pgxpool.Pool
-	remoteURL  string
-	mu         sync.RWMutex
-	snapshot   map[string][]string // sessionId -> scopes
-	fetchedAt  time.Time
-	cacheTTL   time.Duration
+	database  *database.Handle
+	remoteURL string
+	mu        sync.RWMutex
+	snapshot  map[string][]string // sessionId -> scopes
+	fetchedAt time.Time
+	cacheTTL  time.Duration
 }
 
-func NewSessionGrantStore(pool *pgxpool.Pool) *SessionGrantStore {
+func NewSessionGrantStore(handle *database.Handle) *SessionGrantStore {
 	return &SessionGrantStore{
-		pool:      pool,
+		database:  handle,
 		remoteURL: strings.TrimSpace(os.Getenv("GATEWAY_REMOTE_SESSION_GRANTS_URL")),
 		snapshot:  map[string][]string{},
 		cacheTTL:  10 * time.Second,
@@ -37,7 +37,7 @@ func (s *SessionGrantStore) ScopesFor(ctx context.Context, tenantID, sessionID s
 	if sessionID == "" {
 		return nil
 	}
-	if s.pool != nil {
+	if s.database != nil {
 		scopes, err := s.queryPG(ctx, tenantID, sessionID)
 		if err == nil {
 			return scopes
@@ -53,15 +53,19 @@ func (s *SessionGrantStore) ScopesFor(ctx context.Context, tenantID, sessionID s
 }
 
 func (s *SessionGrantStore) queryPG(ctx context.Context, tenantID, sessionID string) ([]string, error) {
-	if s.pool == nil {
+	if s.database == nil {
 		return nil, context.Canceled
 	}
 	var raw []byte
-	err := s.pool.QueryRow(ctx, `
+	row, err := s.database.QueryRowContext(ctx, `
 SELECT scopes FROM session_grants
-WHERE tenant_id = $1 AND session_id = $2
-  AND revoked_at IS NULL AND expires_at > NOW()
-ORDER BY expires_at DESC LIMIT 1`, tenantID, sessionID).Scan(&raw)
+WHERE tenant_id = ? AND session_id = ?
+  AND revoked_at IS NULL AND expires_at > CURRENT_TIMESTAMP
+ORDER BY expires_at DESC LIMIT 1`, tenantID, sessionID)
+	if err != nil {
+		return nil, err
+	}
+	err = row.Scan(&raw)
 	if err != nil {
 		return nil, err
 	}

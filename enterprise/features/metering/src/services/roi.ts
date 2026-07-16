@@ -1,4 +1,3 @@
-import { Pool } from "pg";
 import { ulid } from "ulid";
 import type {
   BusinessRevenueInput,
@@ -8,6 +7,15 @@ import type {
   RoiReportResult,
 } from "../types";
 import { computeRoiRows } from "./roi-utils";
+import { resolveDatabaseConfig } from "@agenticx/iam-core";
+import {
+  createMysqlExecutor,
+  createPostgresqlExecutor,
+  mysqlMeteringSql,
+  postgresqlMeteringSql,
+  type MeteringSqlBuilder,
+  type SqlExecutor,
+} from "./sql";
 
 const ROI_DIM_COLUMN: Record<HeatmapDimension, string> = {
   dept: "dept_id",
@@ -18,12 +26,20 @@ const ROI_DIM_COLUMN: Record<HeatmapDimension, string> = {
 };
 
 export class RoiService {
-  private readonly pool: Pool;
+  private readonly database: SqlExecutor;
+  private readonly sql: MeteringSqlBuilder;
 
   public constructor(connectionString?: string) {
-    this.pool = new Pool({
-      connectionString: connectionString ?? process.env.DATABASE_URL ?? "postgresql://postgres:postgres@127.0.0.1:5432/agenticx",
+    const config = resolveDatabaseConfig({
+      DATABASE_URL: connectionString ?? process.env.DATABASE_URL,
+      DATABASE_DIALECT: process.env.DATABASE_DIALECT,
+      NODE_ENV: process.env.NODE_ENV,
     });
+    this.database =
+      config.dialect === "mysql"
+        ? createMysqlExecutor(config.url)
+        : createPostgresqlExecutor(config.url);
+    this.sql = config.dialect === "mysql" ? mysqlMeteringSql : postgresqlMeteringSql;
   }
 
   private pushInClause(
@@ -33,14 +49,16 @@ export class RoiService {
     params: Array<string | number | Date>
   ): void {
     if (!values || values.length === 0) return;
-    const placeholders = values.map((_, idx) => `$${params.length + idx + 1}`).join(",");
+    const placeholders = values
+      .map((_, idx) => this.sql.placeholder(params.length + idx + 1))
+      .join(",");
     where.push(`${field} in (${placeholders})`);
     params.push(...values);
   }
 
   public async listRevenues(tenantId: string): Promise<BusinessRevenueRecord[]> {
     try {
-      const result = await this.pool.query(
+      const result = await this.database.query(
         `
           select id, tenant_id, scenario_label, period_start, period_end, revenue_usd, notes, created_at, updated_at
           from enterprise_business_revenue
@@ -57,16 +75,17 @@ export class RoiService {
 
   public async createRevenue(input: BusinessRevenueInput): Promise<BusinessRevenueRecord> {
     const id = ulid();
-    const result = await this.pool.query(
+    await this.database.query(
       `
         insert into enterprise_business_revenue
           (id, tenant_id, scenario_label, period_start, period_end, revenue_usd, notes, created_at, updated_at)
-        values ($1, $2, $3, $4, $5, $6, $7, now(), now())
-        returning id, tenant_id, scenario_label, period_start, period_end, revenue_usd, notes, created_at, updated_at
+        values ($1, $2, $3, $4, $5, $6, $7, ${this.sql.now()}, ${this.sql.now()})
       `,
       [id, input.tenant_id, input.scenario_label, input.period_start, input.period_end, input.revenue_usd, input.notes ?? null]
     );
-    return this.mapRevenueRow(result.rows[0]);
+    const created = await this.getRevenue(input.tenant_id, id);
+    if (!created) throw new Error("failed to create revenue record");
+    return created;
   }
 
   public async updateRevenue(
@@ -100,22 +119,20 @@ export class RoiService {
       const existing = await this.getRevenue(tenantId, id);
       return existing;
     }
-    fields.push("updated_at = now()");
-    const result = await this.pool.query(
+    fields.push(`updated_at = ${this.sql.now()}`);
+    const result = await this.database.query(
       `
         update enterprise_business_revenue
         set ${fields.join(", ")}
         where tenant_id = $1 and id = $2
-        returning id, tenant_id, scenario_label, period_start, period_end, revenue_usd, notes, created_at, updated_at
       `,
       params
     );
-    if (result.rowCount === 0) return null;
-    return this.mapRevenueRow(result.rows[0]);
+    return this.getRevenue(tenantId, id);
   }
 
   public async deleteRevenue(tenantId: string, id: string): Promise<boolean> {
-    const result = await this.pool.query(`delete from enterprise_business_revenue where tenant_id = $1 and id = $2`, [
+    const result = await this.database.query(`delete from enterprise_business_revenue where tenant_id = $1 and id = $2`, [
       tenantId,
       id,
     ]);
@@ -124,7 +141,7 @@ export class RoiService {
 
   public async getRevenue(tenantId: string, id: string): Promise<BusinessRevenueRecord | null> {
     try {
-      const result = await this.pool.query(
+      const result = await this.database.query(
         `
           select id, tenant_id, scenario_label, period_start, period_end, revenue_usd, notes, created_at, updated_at
           from enterprise_business_revenue
@@ -133,22 +150,23 @@ export class RoiService {
         `,
         [tenantId, id]
       );
-      if (result.rowCount === 0) return null;
-      return this.mapRevenueRow(result.rows[0]);
+      const row = result.rows[0];
+      if (!row) return null;
+      return this.mapRevenueRow(row);
     } catch {
       return null;
     }
   }
 
   public async computeReport(input: RoiReportInput): Promise<RoiReportResult> {
-    const dimExpr = `coalesce(${ROI_DIM_COLUMN[input.dimension]}::text, '(none)')`;
+    const dimExpr = `coalesce(${this.sql.text(ROI_DIM_COLUMN[input.dimension])}, '(none)')`;
     const where: string[] = [];
     const params: Array<string | number | Date> = [];
-    where.push(`tenant_id = $${params.length + 1}`);
+    where.push(`tenant_id = ${this.sql.placeholder(params.length + 1)}`);
     params.push(input.tenant_id);
-    where.push(`time_bucket >= $${params.length + 1}`);
+    where.push(`time_bucket >= ${this.sql.placeholder(params.length + 1)}`);
     params.push(input.start);
-    where.push(`time_bucket <= $${params.length + 1}`);
+    where.push(`time_bucket <= ${this.sql.placeholder(params.length + 1)}`);
     params.push(input.end);
     this.pushInClause("dept_id", input.dept_id, where, params);
     this.pushInClause("user_id", input.user_id, where, params);
@@ -158,9 +176,9 @@ export class RoiService {
 
     let costs: Array<{ label: string; cost_usd: number }> = [];
     try {
-      const costResult = await this.pool.query(
+      const costResult = await this.database.query(
         `
-          select ${dimExpr} as label, coalesce(sum(cost_usd), 0)::numeric(18,8) as cost_usd
+          select ${dimExpr} as label, ${this.sql.decimal("coalesce(sum(cost_usd), 0)")} as cost_usd
           from usage_records
           where ${where.join(" and ")}
           group by 1
@@ -179,9 +197,9 @@ export class RoiService {
 
     let revenues: Array<{ scenario_label: string; revenue_usd: number }> = [];
     try {
-      const revenueResult = await this.pool.query(
+      const revenueResult = await this.database.query(
         `
-          select scenario_label, coalesce(sum(revenue_usd), 0)::numeric(18,8) as revenue_usd
+          select scenario_label, ${this.sql.decimal("coalesce(sum(revenue_usd), 0)")} as revenue_usd
           from enterprise_business_revenue
           where tenant_id = $1
             and period_start <= $3

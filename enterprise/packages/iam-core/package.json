@@ -2,7 +2,7 @@
   "name": "@agenticx/iam-core",
   "version": "0.1.0",
   "private": true,
-  "description": "Enterprise IAM PostgreSQL repositories (Drizzle)",
+  "description": "Enterprise IAM repositories (Drizzle, PostgreSQL / MySQL)",
   "main": "./src/index.ts",
   "types": "./src/index.ts",
   "exports": {
@@ -21,7 +21,8 @@
     "@agenticx/db-schema": "workspace:*",
     "drizzle-orm": "^0.45.2",
     "pg": "^8.20.0",
-    "ulid": "^2.3.0"
+    "ulid": "^2.3.0",
+    "mysql2": "^3.14.1"
   },
   "devDependencies": {
     "@types/node": "^20.11.0",

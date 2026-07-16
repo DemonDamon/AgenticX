@@ -2,7 +2,7 @@
   "name": "@agenticx/enterprise",
   "version": "0.2.2",
   "private": true,
-  "description": "AgenticX Enterprise — 企业级大模型应用一体化平台（前台 + 后台 + AI 网关）",
+  "description": "AgenticX Enterprise \u2014 \u4f01\u4e1a\u7ea7\u5927\u6a21\u578b\u5e94\u7528\u4e00\u4f53\u5316\u5e73\u53f0\uff08\u524d\u53f0 + \u540e\u53f0 + AI \u7f51\u5173\uff09",
   "scripts": {
     "build": "turbo run build",
     "dev": "turbo run dev",
@@ -17,10 +17,15 @@
     "e2e:iam": "tsx scripts/e2e-iam.ts",
     "e2e:sso": "tsx scripts/e2e-sso.ts",
     "migrate:legacy-runtime": "tsx scripts/migrate-runtime-legacy.ts",
+    "db:compat:list": "tsx scripts/db-compat/list-schema-capabilities.ts",
+    "db:compat:test": "vitest run scripts/db-compat/__tests__/dialect-contract.test.ts packages/db-schema/src/__tests__/migration-inventory.test.ts",
     "sso:oidc-smoke": "tsx scripts/sso/oidc-smoke.ts",
     "sso:saml-mock": "node scripts/sso/mock-saml-idp/index.mjs",
     "sso:saml-mock-setup": "bash scripts/sso/mock-saml-idp/setup-keypair.sh",
-    "saml:mock": "pnpm sso:saml-mock"
+    "saml:mock": "pnpm sso:saml-mock",
+    "db:migrate:pg-to-mysql": "tsx scripts/db-portability/migrate-pg-to-mysql.ts",
+    "db:verify:pg-to-mysql": "tsx scripts/db-portability/migrate-pg-to-mysql.ts --dry-run",
+    "db:portability:test": "vitest run scripts/db-portability/__tests__/portability.test.ts"
   },
   "devDependencies": {
     "@agenticx/iam-core": "workspace:*",
@@ -29,7 +34,10 @@
     "tsx": "^4.21.0",
     "turbo": "^2.9.6",
     "typescript": "^5.6.0",
-    "xml-crypto": "^6.0.0"
+    "vitest": "^4.1.5",
+    "xml-crypto": "^6.0.0",
+    "mysql2": "^3.14.1",
+    "pg": "^8.20.0"
   },
   "packageManager": "pnpm@9.12.0",
   "engines": {

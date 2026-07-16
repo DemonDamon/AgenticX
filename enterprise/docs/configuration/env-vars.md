@@ -11,8 +11,9 @@
 
 | 变量 | 必填 | 说明 |
 |---|---|---|
-| `DATABASE_URL` | ✅ | Postgres 连接串；portal / admin / gateway 共用 |
-| `REDIS_URL` | ⚪ | 当前 portal/admin 主要落 PG，Redis 仅本地 compose 起 |
+| `DATABASE_DIALECT` | 🟡 | `postgresql` \| `mysql`；与 `DATABASE_URL` scheme 必须匹配，冲突时启动 fail-fast。缺省时可从 `postgres(ql)://` / `mysql://` 推断 |
+| `DATABASE_URL` | ✅ | 业务库连接串；portal / admin / gateway 共用。PostgreSQL 示例 `postgresql://...`；MySQL 示例 `mysql://...` |
+| `REDIS_URL` | ⚪ | 当前 portal/admin 主要落 DB，Redis 用于 gateway 限流/缓存 |
 | `AUTH_JWT_PRIVATE_KEY` | ✅ | RS256 私钥 PEM（portal/admin 签发） |
 | `AUTH_JWT_PUBLIC_KEY` | ✅ | RS256 公钥（gateway 校验） |
 | `AUTH_JWT_PRIVATE_KEY_FILE` | ⚪ | `.env.local` 习惯写 `*_FILE`，`start-dev.sh` 展开为内容 |
@@ -20,6 +21,8 @@
 | `DEFAULT_TENANT_ID` | 🟡 | 默认租户 ULID（seed 之后） |
 | `DEFAULT_DEPT_ID` | ⚪ | 默认部门 ULID |
 | `AGX_AUTO_DB_MIGRATE` | ⚪ | `start-dev.sh` 仅在 localhost DB 下自动 migrate；`=0` 关闭 |
+
+双方言说明见 `docs/database/dialect-compatibility-matrix.md` 与 `docs/database/cutover-runbook.md`。
 
 ---
 
@@ -49,7 +52,7 @@
 | 变量 | 必填 | 说明 |
 |---|---|---|
 | `ADMIN_CONSOLE_LOGIN_EMAIL` | 🟡 | 管理台账号；默认 `admin@agenticx.local` |
-| `ADMIN_CONSOLE_LOGIN_PASSWORD` | ✅ | bootstrap 落盘、无 PG 时的 env 兜底。**有 `DATABASE_URL` 时 admin 登录验 PG hash**（hash 来自 seed 时的 `AUTH_DEV_OWNER_PASSWORD`），改本变量不会自动改库 |
+| `ADMIN_CONSOLE_LOGIN_PASSWORD` | ✅ | bootstrap 落盘、无库时的 env 兜底。**有 `DATABASE_URL` 时 admin 登录验库内 hash**（hash 来自 seed 时的 `AUTH_DEV_OWNER_PASSWORD`），改本变量不会自动改库 |
 | `ADMIN_CONSOLE_SESSION_SECRET` | ✅ | 管理台 session 签名 |
 | `GATEWAY_BASE_URL` | 🟡 | 管理台健康检查目标（默认 `http://127.0.0.1:8088`） |
 | `GATEWAY_INTERNAL_TOKEN` | ✅ Vercel 分体 | Gateway 拉取 internal API 的 Bearer |
@@ -69,7 +72,7 @@
 | `GATEWAY_HTTP_ADDR` | `:8088` | 监听地址 |
 | `GATEWAY_CONFIG_PATH` | — | YAML 配置路径（模型路由） |
 | `AUTH_JWT_PUBLIC_KEY` | — | JWT 校验（必填） |
-| `DATABASE_URL` | — | 审计 / 计量 PG 双写 |
+| `DATABASE_URL` | — | 审计 / 计量双方言双写（由 `DATABASE_DIALECT` 选驱动） |
 
 ### 4.2 上游 Key 解析（按顺序）
 
@@ -152,8 +155,9 @@ openssl rand -base64 32
 |---|---|
 | 改了 SSO env 无效 | Next.js 不热加载 SSO env，需**完整重启** portal / admin |
 | Gateway 看不到 admin Provider | `GATEWAY_INTERNAL_TOKEN` 两端不一致 |
-| Token chip 永远 0 | gateway 与 portal `DATABASE_URL` 不同库 |
+| Token chip 永远 0 | gateway 与 portal `DATABASE_URL` / `DATABASE_DIALECT` 不同库 |
 | 策略已发布不拦截 | `GATEWAY_POLICY_SNAPSHOT_FILE` 路径错（指错 `.runtime` 根） |
-| `chat history operation failed` | PG 未起或 `DATABASE_URL` 错 |
+| `chat history operation failed` | 业务库未起或 `DATABASE_URL` / 方言错 |
+| 启动报 dialect/URL mismatch | `DATABASE_DIALECT` 与 URL scheme 不一致 |
 
 详见 [development/troubleshooting.md](../development/troubleshooting.md)。

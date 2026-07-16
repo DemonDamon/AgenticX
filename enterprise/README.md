@@ -65,9 +65,20 @@ pnpm -C enterprise visual-tour:i18n
 
 ```bash
 cd enterprise
-bash scripts/bootstrap.sh     # 只需首次 / 环境/密钥变更时跑
+bash scripts/bootstrap.sh     # 只需首次 / 环境/密钥变更时跑（默认 PostgreSQL）
 bash scripts/start-dev.sh     # 每天开工跑这一条
 ```
+
+MySQL 8.0 开发栈：
+
+```bash
+bash scripts/bootstrap.sh --db=mysql
+# 或
+bash scripts/start-dev-with-infra.sh --db=mysql
+bash scripts/start-dev.sh
+```
+
+双方言说明与割接：[docs/runbooks/mysql-deployment.md](./docs/runbooks/mysql-deployment.md)、[docs/database/cutover-runbook.md](./docs/database/cutover-runbook.md)。
 
 起来后：
 
@@ -101,8 +112,8 @@ bash scripts/start-dev.sh     # 每天开工跑这一条
 5. 用该用户的账号登录前台 portal：模型下拉只会出现刚才分配的模型，发送消息走真调
 6. 顶部 token chip 实时显示「↑输入 ↓输出 Σ合计」累计
 
-> **运行时配置（模型服务 / 用户可见模型 / Token 配额）以 Postgres 为单一数据源**（表 `enterprise_runtime_*`）。
-> 本地开发若仍保留 `enterprise/.runtime/admin/{providers,user-models,quotas}.json`，会在 `bootstrap.sh` / `start-dev.sh` 与 `pnpm migrate:legacy-runtime` 时**幂等导入** PG；导入后 admin / portal 均只读 PG。
+> **运行时配置（模型服务 / 用户可见模型 / Token 配额）以业务库为单一数据源**（表 `enterprise_runtime_*`，PostgreSQL 或 MySQL 由 `DATABASE_DIALECT` 决定）。
+> 本地开发若仍保留 `enterprise/.runtime/admin/{providers,user-models,quotas}.json`，会在 `bootstrap.sh` / `start-dev.sh` 与 `pnpm migrate:legacy-runtime` 时**幂等导入**；导入后 admin / portal 均只读业务库。
 > Gateway 后台每 5 秒重读一次 provider 配置，admin 改完几秒内生效，无需重启。
 
 ### 让聊天回真实模型（备选 ② · 环境变量）

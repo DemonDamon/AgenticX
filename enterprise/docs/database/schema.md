@@ -1,27 +1,38 @@
 # 数据库 Schema
 
-> 最后更新：2026-05-21 · 对应代码：`packages/db-schema/src/schema/*`
+> 最后更新：2026-07-16 · 对应代码：`packages/db-schema/src/schema/*`（PostgreSQL）与 `packages/db-schema/src/mysql-schema/*`（MySQL）
 
-ORM：**Drizzle ORM** + PostgreSQL  
+ORM：**Drizzle ORM** · 双方言：PostgreSQL 16（默认）+ MySQL 8.0  
 包：`@agenticx/db-schema`（`packages/db-schema/`）  
-迁移：`packages/db-schema/drizzle/`（`0000` → `0011_gateway_channels.sql`）
+迁移：
+
+| 方言 | 目录 | 配置 |
+|---|---|---|
+| PostgreSQL | `drizzle/` | `drizzle.pg.config.ts`（`drizzle.config.ts` re-export） |
+| MySQL | `drizzle-mysql/` | `drizzle.mysql.config.ts` |
+
+运行时通过 `DATABASE_DIALECT` + `DATABASE_URL` 选择；`pnpm --filter @agenticx/db-schema db:migrate` / `db:seed` 会按方言分派。兼容矩阵见 [dialect-compatibility-matrix.md](./dialect-compatibility-matrix.md)，割接见 [cutover-runbook.md](./cutover-runbook.md)。
 
 ---
 
 ## 1. 迁移与 Seed
 
 ```bash
-# bootstrap.sh 自动执行
+# bootstrap.sh / start-dev-with-infra.sh 自动执行
+export DATABASE_DIALECT=postgresql   # 或 mysql
 pnpm --filter @agenticx/db-schema db:migrate
 pnpm --filter @agenticx/db-schema db:seed
+pnpm --filter @agenticx/db-schema db:check:parity   # 双 schema 契约
 ```
 
 | Seed 脚本 | 写入内容 |
 |---|---|
-| `scripts/db-seed.mjs` | 默认租户、`admin@agenticx.local` 用户、`super_admin` 角色（含 `*` scope） |
+| `scripts/db-seed-dispatch.mjs` | 按方言调用下方脚本 |
+| `scripts/db-seed.mjs` | PostgreSQL：默认租户、`admin@agenticx.local`、`super_admin` |
+| `scripts/db-seed-mysql.mjs` | MySQL：同等种子内容 |
 | `scripts/iam-demo-seed.mjs`（可选） | 多级部门、4 个角色、10 个演示用户；通过 `reset-dev-data.sh --with-iam-seed` 触发 |
 
-**密码边界**：`db-seed.mjs` 仅读取 **`AUTH_DEV_OWNER_PASSWORD`**（缺省则 `ChangeMe_Dev14!Aa`），bcrypt 后写入 `users.password_hash`。`start-dev.sh` 日常启动**不**重跑 seed；改 `.env.local` 密码不会自动更新 PG。登录验 hash 的行为与账号锁定排障见 [development/local-dev.md#密码与登录env-vs-postgres](../development/local-dev.md#密码与登录env-vs-postgres)、[development/troubleshooting.md#登录与-iam](../development/troubleshooting.md#登录与-iam)。
+**密码边界**：seed 仅读取 **`AUTH_DEV_OWNER_PASSWORD`**（缺省则 `ChangeMe_Dev14!Aa`），bcrypt 后写入 `users.password_hash`。`start-dev.sh` 日常启动**不**重跑 seed；改 `.env.local` 密码不会自动更新数据库。登录验 hash 的行为与账号锁定排障见 [development/local-dev.md#密码与登录env-vs-postgres](../development/local-dev.md#密码与登录env-vs-postgres)、[development/troubleshooting.md#登录与-iam](../development/troubleshooting.md#登录与-iam)。
 
 ---
 

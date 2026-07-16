@@ -8,7 +8,10 @@ export type { SsoProviderProtocol, SsoProviderSamlConfig };
 import { and, desc, eq } from "drizzle-orm";
 import { ulid } from "ulid";
 import { getIamDb } from "../db";
+import { resolveDatabaseConfig } from "../database/config";
 import { insertAuditEvent } from "./audit";
+import type { SsoProvidersRepository } from "./contracts";
+import { mysqlSsoProvidersRepository as mysqlSsoRepository } from "./mysql/sso-providers";
 
 export type SsoProviderDto = {
   id: string;
@@ -30,6 +33,20 @@ export type SsoProviderDto = {
   createdAt: string;
   updatedAt: string;
 };
+
+export type SsoProviderPatch = Partial<{
+  displayName: string;
+  protocol: SsoProviderProtocol;
+  issuer: string | null;
+  clientId: string | null;
+  clientSecretEncrypted: string | null;
+  redirectUri: string | null;
+  scopes: string[];
+  claimMapping: Record<string, unknown>;
+  samlConfig: SsoProviderSamlConfig | null;
+  defaultRoleCodes: string[];
+  enabled: boolean;
+}>;
 
 function normalizeProtocol(value: unknown): SsoProviderProtocol {
   return value === "saml" ? "saml" : "oidc";
@@ -59,6 +76,9 @@ function toDto(row: typeof ssoProviders.$inferSelect): SsoProviderDto {
 }
 
 export async function listSsoProviders(tenantId: string): Promise<SsoProviderDto[]> {
+  if (resolveDatabaseConfig().dialect === "mysql") {
+    return mysqlSsoRepository.listSsoProviders(tenantId);
+  }
   const db = getIamDb();
   const rows = await db
     .select()
@@ -72,6 +92,9 @@ export async function getSsoProviderByProviderId(
   tenantId: string,
   providerId: string
 ): Promise<SsoProviderDto | null> {
+  if (resolveDatabaseConfig().dialect === "mysql") {
+    return mysqlSsoRepository.getSsoProviderByProviderId(tenantId, providerId);
+  }
   const db = getIamDb();
   const rows = await db
     .select()
@@ -82,6 +105,9 @@ export async function getSsoProviderByProviderId(
 }
 
 export async function getSsoProviderById(tenantId: string, id: string): Promise<SsoProviderDto | null> {
+  if (resolveDatabaseConfig().dialect === "mysql") {
+    return mysqlSsoRepository.getSsoProviderById(tenantId, id);
+  }
   const db = getIamDb();
   const rows = await db
     .select()
@@ -123,6 +149,9 @@ export async function createSsoProvider(input: {
   defaultRoleCodes?: string[];
   enabled?: boolean;
 }): Promise<SsoProviderDto> {
+  if (resolveDatabaseConfig().dialect === "mysql") {
+    return mysqlSsoRepository.createSsoProvider(input);
+  }
   const db = getIamDb();
   const now = new Date();
   const id = ulid();
@@ -200,21 +229,12 @@ export async function createSamlProvider(input: {
 export async function updateSsoProvider(
   tenantId: string,
   id: string,
-  patch: Partial<{
-    displayName: string;
-    protocol: SsoProviderProtocol;
-    issuer: string | null;
-    clientId: string | null;
-    clientSecretEncrypted: string | null;
-    redirectUri: string | null;
-    scopes: string[];
-    claimMapping: Record<string, unknown>;
-    samlConfig: SsoProviderSamlConfig | null;
-    defaultRoleCodes: string[];
-    enabled: boolean;
-  }>,
+  patch: SsoProviderPatch,
   actorUserId?: string | null
 ): Promise<SsoProviderDto | null> {
+  if (resolveDatabaseConfig().dialect === "mysql") {
+    return mysqlSsoRepository.updateSsoProvider(tenantId, id, patch, actorUserId);
+  }
   const db = getIamDb();
   await db
     .update(ssoProviders)
@@ -257,6 +277,9 @@ export async function deleteSsoProvider(
   id: string,
   actorUserId?: string | null
 ): Promise<SsoProviderDto | null> {
+  if (resolveDatabaseConfig().dialect === "mysql") {
+    return mysqlSsoRepository.deleteSsoProvider(tenantId, id, actorUserId);
+  }
   const db = getIamDb();
   const existing = await getSsoProviderById(tenantId, id);
   await db.delete(ssoProviders).where(and(eq(ssoProviders.tenantId, tenantId), eq(ssoProviders.id, id)));
@@ -278,4 +301,24 @@ export async function deleteSsoProvider(
       : { providerId: null, missing: true },
   });
   return existing;
+}
+
+const ssoProvidersRepositoryMethods = {
+  listSsoProviders,
+  getSsoProviderByProviderId,
+  getSsoProviderById,
+  createSsoProvider,
+  updateSsoProvider,
+  deleteSsoProvider,
+};
+
+const postgresqlSsoProvidersRepository: SsoProvidersRepository = {
+  dialect: "postgresql",
+  ...ssoProvidersRepositoryMethods,
+};
+
+export function getSsoProvidersRepository(): SsoProvidersRepository {
+  return resolveDatabaseConfig().dialect === "mysql"
+    ? mysqlSsoRepository
+    : postgresqlSsoProvidersRepository;
 }

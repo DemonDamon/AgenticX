@@ -36,7 +36,7 @@ func (s *sseSessionStore) Create(serverName string, identity Identity) string {
 
 func (s *sseSessionStore) Valid(id, serverName string, identity Identity) bool {
 	s.mu.RLock()
- sess, ok := s.sessions[id]
+	sess, ok := s.sessions[id]
 	s.mu.RUnlock()
 	if !ok {
 		return false

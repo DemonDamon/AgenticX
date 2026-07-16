@@ -7,22 +7,22 @@ import (
 	"strings"
 	"time"
 
-	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/agenticx/enterprise/gateway/internal/database"
 )
 
 // PgWriter inserts events into gateway_audit_events without recomputing checksums.
 type PgWriter struct {
-	pool *pgxpool.Pool
+	database *database.Handle
 }
 
-func NewPgWriter(pool *pgxpool.Pool) *PgWriter {
-	return &PgWriter{pool: pool}
+func NewPgWriter(handle *database.Handle) *PgWriter {
+	return &PgWriter{database: handle}
 }
 
 // Insert copies the event as stored in JSONL (checksum chain already set by FileWriter).
 func (p *PgWriter) Insert(ctx context.Context, e Event) error {
-	if p == nil || p.pool == nil {
-		return fmt.Errorf("pg writer: nil pool")
+	if p == nil || p.database == nil {
+		return fmt.Errorf("audit database writer: nil handle")
 	}
 	t, err := time.Parse(time.RFC3339, strings.TrimSpace(e.EventTime))
 	if err != nil {
@@ -58,7 +58,11 @@ func (p *PgWriter) Insert(ctx context.Context, e Event) error {
 		ct = "web-portal"
 	}
 
-	_, err = p.pool.Exec(ctx, `
+	conflictClause := "ON CONFLICT (id) DO NOTHING"
+	if p.database.Dialect == database.MySQL {
+		conflictClause = "ON DUPLICATE KEY UPDATE id = id"
+	}
+	query := `
 INSERT INTO gateway_audit_events (
   id, tenant_id, event_time, event_type,
   user_id, user_email, department_id, session_id,
@@ -71,18 +75,19 @@ INSERT INTO gateway_audit_events (
   prev_checksum, checksum, signature,
   created_at, updated_at
 ) VALUES (
-  $1,$2,$3,$4,
-  $5,$6,$7,$8,
-  $9,$10,$11,$12,$13,
-  $14,$15,$16,
-  $17,$18,$19,$20,
-  $21,$22,$23,
-  $24,$25,$26,$27,$28,
-  $29,$30,$31,$32,
-  $33,$34,$35,
-  timezone('utc', now()), timezone('utc', now())
+  ?,?,?,?,
+  ?,?,?,?,
+  ?,?,?,?,?,
+  ?,?,?,
+  ?,?,?,?,
+  ?,?,?,
+  ?,?,?,?,?,
+  ?,?,?,?,
+  ?,?,?,
+  CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
 )
-ON CONFLICT (id) DO NOTHING`,
+` + conflictClause
+	_, err = p.database.ExecContext(ctx, query,
 		strings.TrimSpace(e.ID),
 		strings.TrimSpace(e.TenantID),
 		t,

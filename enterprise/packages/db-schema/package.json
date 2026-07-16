@@ -2,24 +2,42 @@
   "name": "@agenticx/db-schema",
   "version": "0.1.0",
   "private": true,
-  "description": "Drizzle schema（多租户字段预留）",
+  "description": "Drizzle schema\uff08\u591a\u79df\u6237\u5b57\u6bb5\u9884\u7559\uff09",
   "main": "./src/index.ts",
   "types": "./src/index.ts",
   "scripts": {
     "lint": "echo 'lint placeholder'",
     "typecheck": "tsc --noEmit -p tsconfig.json",
-    "db:generate": "drizzle-kit generate",
-    "db:migrate": "drizzle-kit migrate",
-    "db:seed": "node ./scripts/db-seed.mjs",
-    "db:seed:iam": "node ./scripts/iam-demo-seed.mjs"
+    "test": "vitest run",
+    "db:generate": "drizzle-kit generate --config drizzle.config.ts",
+    "db:migrate": "node ./scripts/db-migrate.mjs",
+    "db:generate:pg": "drizzle-kit generate --config drizzle.pg.config.ts",
+    "db:generate:mysql": "drizzle-kit generate --config drizzle.mysql.config.ts",
+    "db:migrate:pg": "drizzle-kit migrate --config drizzle.pg.config.ts",
+    "db:migrate:mysql": "drizzle-kit migrate --config drizzle.mysql.config.ts",
+    "db:check:parity": "vitest run src/__tests__/schema-parity.test.ts",
+    "db:seed": "node ./scripts/db-seed-dispatch.mjs",
+    "db:seed:iam": "node ./scripts/iam-demo-seed.mjs",
+    "db:seed:pg": "node ./scripts/db-seed.mjs",
+    "db:seed:mysql": "node ./scripts/db-seed-mysql.mjs"
   },
   "dependencies": {
     "bcryptjs": "^2.4.3",
     "drizzle-orm": "^0.45.2",
+    "mysql2": "^3.14.1",
     "pg": "^8.20.0"
   },
   "devDependencies": {
     "@types/node": "^20.11.0",
-    "drizzle-kit": "^0.31.10"
+    "drizzle-kit": "^0.31.10",
+    "vitest": "^4.1.5",
+    "typescript": "^5.9.2"
+  },
+  "exports": {
+    ".": "./src/index.ts",
+    "./postgres": "./src/postgres.ts",
+    "./mysql": "./src/mysql.ts",
+    "./dialect": "./src/dialect.ts",
+    "./contracts": "./src/contracts/index.ts"
   }
 }

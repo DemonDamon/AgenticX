@@ -5,7 +5,10 @@ import { and, desc, eq, exists, inArray, ilike, isNull, like, or, sql } from "dr
 import { randomBytes } from "node:crypto";
 import { ulid } from "ulid";
 import { getIamDb, type IamDb } from "../db";
+import { resolveDatabaseConfig } from "../database/config";
 import { insertAuditEvent } from "./audit";
+import type { UsersRepository } from "./contracts";
+import { mysqlUsersRepository as mysqlUsersRepo } from "./mysql/users";
 import { getRoleByCode, getUserRolesDetail, resolveRoleIdsFromCodes } from "./roles";
 
 export type AdminUserStatus = "active" | "disabled" | "locked";
@@ -91,6 +94,9 @@ async function listDepartmentSubtreeIdsLocal(tenantId: string, deptId: string): 
 }
 
 export async function loadAuthUserByEmail(tenantId: string, email: string): Promise<AuthUser | null> {
+  if (resolveDatabaseConfig().dialect === "mysql") {
+    return mysqlUsersRepo.loadAuthUserByEmail(tenantId, email);
+  }
   const db = getIamDb();
   const row = await db
     .select()
@@ -233,6 +239,9 @@ async function applyUserFilters(
 }
 
 export async function listAdminUsers(tenantId: string, filter: ListUsersFilter = {}): Promise<ListUsersResult> {
+  if (resolveDatabaseConfig().dialect === "mysql") {
+    return mysqlUsersRepo.listAdminUsers(tenantId, filter);
+  }
   const db = getIamDb();
   const where = await applyUserFilters(tenantId, filter);
   const limit = Math.max(1, Math.min(200, filter.limit ?? 50));
@@ -254,6 +263,9 @@ export async function listAdminUsers(tenantId: string, filter: ListUsersFilter =
 }
 
 export async function getAdminUser(tenantId: string, id: string): Promise<AdminUserDto | null> {
+  if (resolveDatabaseConfig().dialect === "mysql") {
+    return mysqlUsersRepo.getAdminUser(tenantId, id);
+  }
   const db = getIamDb();
   const row = await db
     .select()
@@ -357,6 +369,9 @@ export async function createAdminUser(input: {
   defaultOrgId: string | null;
   actorUserId?: string | null;
 }): Promise<{ user: AdminUserDto; initialPassword: string }> {
+  if (resolveDatabaseConfig().dialect === "mysql") {
+    return mysqlUsersRepo.createAdminUser(input);
+  }
   const db = getIamDb();
   const email = input.email.trim().toLowerCase();
   if (!email) throw new Error("email is required");
@@ -443,6 +458,9 @@ export async function updateAdminUser(
   patch: UpdateAdminUserInput,
   ctx: { actorUserId?: string | null; defaultOrgId: string | null }
 ): Promise<AdminUserDto> {
+  if (resolveDatabaseConfig().dialect === "mysql") {
+    return mysqlUsersRepo.updateAdminUser(tenantId, id, patch, ctx);
+  }
   const db = getIamDb();
   const row = await db
     .select()
@@ -501,6 +519,9 @@ export async function softDeleteUser(
   id: string,
   actorUserId?: string | null
 ): Promise<void> {
+  if (resolveDatabaseConfig().dialect === "mysql") {
+    return mysqlUsersRepo.softDeleteUser(tenantId, id, actorUserId);
+  }
   const db = getIamDb();
   const row = await db
     .select({ email: users.email, displayName: users.displayName })
@@ -536,6 +557,9 @@ export async function resetUserPassword(input: {
   userId: string;
   actorUserId?: string | null;
 }): Promise<{ initialPassword: string }> {
+  if (resolveDatabaseConfig().dialect === "mysql") {
+    return mysqlUsersRepo.resetUserPassword(input);
+  }
   const initialPassword = generateInitialPassword();
   const passwordHash = await hashPassword(initialPassword);
   const db = getIamDb();
@@ -565,6 +589,9 @@ export async function resetUserPassword(input: {
  * Upsert 用户行（portal 同步 / dev bootstrap）；不自动分配角色（由调用方处理）。
  */
 export async function upsertUserRowFromAuthUser(user: AuthUser): Promise<void> {
+  if (resolveDatabaseConfig().dialect === "mysql") {
+    return mysqlUsersRepo.upsertUserRowFromAuthUser(user);
+  }
   const db = getIamDb();
   const now = new Date();
   await db
@@ -608,6 +635,9 @@ export async function assignRolesIfNone(input: {
   defaultOrgId: string | null;
   defaultDeptId: string | null;
 }): Promise<void> {
+  if (resolveDatabaseConfig().dialect === "mysql") {
+    return mysqlUsersRepo.assignRolesIfNone(input);
+  }
   const db = getIamDb();
   const existing = await db
     .select({ r: userRoles.roleId })
@@ -747,6 +777,9 @@ export async function upsertUserByEmail(input: {
   defaultOrgId: string | null;
   actorUserId?: string | null;
 }): Promise<AdminUserDto> {
+  if (resolveDatabaseConfig().dialect === "mysql") {
+    return mysqlUsersRepo.upsertUserByEmail(input);
+  }
   const db = getIamDb();
   let userId = "";
   await db.transaction(async (tx) => {
@@ -762,6 +795,9 @@ export async function replaceUserRoleAssignments(input: {
   defaultOrgId: string | null;
   defaultDeptId: string | null;
 }): Promise<void> {
+  if (resolveDatabaseConfig().dialect === "mysql") {
+    return mysqlUsersRepo.replaceUserRoleAssignments(input);
+  }
   const idMap = await resolveRoleIdsFromCodes(input.tenantId, input.roleCodes);
   const roleIds = input.roleCodes.map((c) => idMap.get(c)).filter((x): x is string => Boolean(x));
   await replaceUserRoles({
@@ -771,4 +807,31 @@ export async function replaceUserRoleAssignments(input: {
     defaultOrgId: input.defaultOrgId,
     defaultDeptId: input.defaultDeptId,
   });
+}
+
+const usersRepositoryMethods = {
+  loadAuthUserByEmail,
+  updateFailedLogin: updateFailedLoginPg,
+  resetFailedLogin: resetFailedLoginPg,
+  listAdminUsers,
+  getAdminUser,
+  createAdminUser,
+  updateAdminUser,
+  softDeleteUser,
+  resetUserPassword,
+  upsertUserRowFromAuthUser,
+  assignRolesIfNone,
+  upsertUserByEmail,
+  replaceUserRoleAssignments,
+};
+
+const postgresqlUsersRepository: UsersRepository = {
+  dialect: "postgresql",
+  ...usersRepositoryMethods,
+};
+
+export function getUsersRepository(): UsersRepository {
+  return resolveDatabaseConfig().dialect === "mysql"
+    ? mysqlUsersRepo
+    : postgresqlUsersRepository;
 }

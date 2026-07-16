@@ -2,50 +2,47 @@ package quota
 
 import (
 	"context"
-	"database/sql"
+	"fmt"
 	"log/slog"
 	"strings"
 	"time"
 
-	_ "github.com/lib/pq"
+	"github.com/agenticx/enterprise/gateway/internal/database"
 )
 
-// BudgetAlertReporter persists budget alerts to Postgres (best-effort).
+// BudgetAlertReporter persists budget alerts to the configured database (best-effort).
 type BudgetAlertReporter struct {
-	db     *sql.DB
-	logger *slog.Logger
+	database *database.Handle
+	logger   *slog.Logger
 }
 
-func NewBudgetAlertReporter(connectionString string, logger *slog.Logger) (*BudgetAlertReporter, error) {
-	connectionString = ensureBudgetReporterSSLMode(connectionString)
-	db, err := sql.Open("postgres", connectionString)
-	if err != nil {
-		return nil, err
+func NewBudgetAlertReporter(handle *database.Handle, logger *slog.Logger) (*BudgetAlertReporter, error) {
+	if handle == nil || handle.DB == nil {
+		return nil, fmt.Errorf("budget alert database unavailable")
 	}
-	db.SetConnMaxLifetime(10 * time.Minute)
-	db.SetMaxOpenConns(3)
+	handle.DB.SetConnMaxLifetime(10 * time.Minute)
+	handle.DB.SetMaxOpenConns(3)
 	pingCtx, cancel := context.WithTimeout(context.Background(), 1500*time.Millisecond)
 	defer cancel()
-	if err := db.PingContext(pingCtx); err != nil {
-		_ = db.Close()
+	if err := handle.Ping(pingCtx); err != nil {
 		return nil, err
 	}
-	return &BudgetAlertReporter{db: db, logger: logger}, nil
+	return &BudgetAlertReporter{database: handle, logger: logger}, nil
 }
 
 func (r *BudgetAlertReporter) Emit(record BudgetAlertRecord) {
-	if r == nil || r.db == nil {
+	if r == nil || r.database == nil {
 		return
 	}
 	go func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 		defer cancel()
-		_, err := r.db.ExecContext(ctx, `
+		_, err := r.database.ExecContext(ctx, `
       insert into gateway_budget_alerts (
         id, tenant_id, dept_id, user_id, dimension, dimension_key, period, unit,
         alert_type, used_value, limit_value, warn_threshold_pct, description, created_at
       ) values (
-        $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14
+        ?,?,?,?,?,?,?,?,?,?,?,?,?,?
       )
     `,
 			record.ID,
@@ -74,26 +71,4 @@ func nullBudgetString(value string) any {
 		return nil
 	}
 	return value
-}
-
-func ensureBudgetReporterSSLMode(connectionString string) string {
-	trimmed := strings.TrimSpace(connectionString)
-	if trimmed == "" {
-		return trimmed
-	}
-	lower := strings.ToLower(trimmed)
-	if strings.Contains(lower, "sslmode=") {
-		return trimmed
-	}
-	if strings.HasPrefix(lower, "postgres://") || strings.HasPrefix(lower, "postgresql://") {
-		sep := "?"
-		if strings.Contains(trimmed, "?") {
-			sep = "&"
-		}
-		return trimmed + sep + "sslmode=disable"
-	}
-	if strings.HasSuffix(trimmed, " ") {
-		return trimmed + "sslmode=disable"
-	}
-	return trimmed + " sslmode=disable"
 }

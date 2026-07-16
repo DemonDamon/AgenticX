@@ -1,6 +1,5 @@
 import { readFile } from "node:fs/promises";
 import path from "node:path";
-import { Pool } from "pg";
 import type {
   HeatmapDimension,
   HeatmapMetric,
@@ -15,16 +14,16 @@ import type {
   UsageRecordWriteResult,
 } from "../types";
 import { buildHeatmapMatrix, emptyHeatmapResult, formatTimeSlot, type RawHeatmapRow } from "./heatmap-utils";
+import {
+  createMysqlExecutor,
+  createPostgresqlExecutor,
+  mysqlMeteringSql,
+  postgresqlMeteringSql,
+  type MeteringSqlBuilder,
+  type SqlExecutor,
+} from "./sql";
+import { resolveDatabaseConfig } from "@agenticx/iam-core";
 import { ulid } from "ulid";
-
-const GROUP_COLUMN: Record<MeteringGroupKey, string> = {
-  dept: "dept_id",
-  user: "user_id",
-  provider: "provider",
-  model: "model",
-  day: "date_trunc('day', time_bucket)",
-  pat: "api_token_id",
-};
 
 const ALIAS: Record<MeteringGroupKey, string> = {
   dept: "dept",
@@ -48,14 +47,34 @@ const MAX_HEATMAP_TIME_SLOTS: Record<HeatmapTimeGranularity, number> = {
   day: 90,
 };
 
+function groupColumn(sql: MeteringSqlBuilder, group: MeteringGroupKey): string {
+  if (group === "day") return sql.dateBucket("day", "time_bucket");
+  const columns: Record<MeteringGroupKey, string> = {
+    dept: "dept_id",
+    user: "user_id",
+    provider: "provider",
+    model: "model",
+    day: "time_bucket",
+    pat: "api_token_id",
+  };
+  return columns[group];
+}
+
 export class MeteringService {
-  private readonly pool: Pool;
+  private readonly database: SqlExecutor;
+  private readonly sql: MeteringSqlBuilder;
   private readonly usageLogPath: string;
 
   public constructor(connectionString?: string) {
-    this.pool = new Pool({
-      connectionString: connectionString ?? process.env.DATABASE_URL ?? "postgresql://postgres:postgres@127.0.0.1:5432/agenticx",
+    const config = resolveDatabaseConfig({
+      ...process.env,
+      ...(connectionString ? { DATABASE_URL: connectionString } : {}),
     });
+    this.database =
+      config.dialect === "mysql"
+        ? createMysqlExecutor(config.url)
+        : createPostgresqlExecutor(config.url);
+    this.sql = config.dialect === "mysql" ? mysqlMeteringSql : postgresqlMeteringSql;
     this.usageLogPath =
       process.env.GATEWAY_USAGE_LOG ??
       path.resolve(process.cwd(), "../../apps/gateway/.runtime/usage.jsonl");
@@ -68,7 +87,9 @@ export class MeteringService {
     params: Array<string | number | Date>
   ): void {
     if (!values || values.length === 0) return;
-    const placeholders = values.map((_, idx) => `$${params.length + idx + 1}`).join(",");
+    const placeholders = values
+      .map((_, idx) => this.sql.placeholder(params.length + idx + 1))
+      .join(",");
     where.push(`${field} in (${placeholders})`);
     params.push(...values);
   }
@@ -81,11 +102,11 @@ export class MeteringService {
     where: string[],
     params: Array<string | number | Date>
   ): void {
-    where.push(`tenant_id = $${params.length + 1}`);
+    where.push(`tenant_id = ${this.sql.placeholder(params.length + 1)}`);
     params.push(input.tenant_id);
-    where.push(`time_bucket >= $${params.length + 1}`);
+    where.push(`time_bucket >= ${this.sql.placeholder(params.length + 1)}`);
     params.push(input.start);
-    where.push(`time_bucket <= $${params.length + 1}`);
+    where.push(`time_bucket <= ${this.sql.placeholder(params.length + 1)}`);
     params.push(input.end);
     this.pushInClause("dept_id", input.dept_id, where, params);
     this.pushInClause("user_id", input.user_id, where, params);
@@ -96,9 +117,8 @@ export class MeteringService {
 
   public async queryHeatmap(input: HeatmapQueryInput): Promise<HeatmapQueryResult> {
     const metric: HeatmapMetric = input.metric ?? "total_tokens";
-    const timeExpr =
-      input.time_granularity === "hour" ? "date_trunc('hour', time_bucket)" : "date_trunc('day', time_bucket)";
-    const dimExpr = `coalesce(${HEATMAP_DIM_COLUMN[input.dimension]}::text, '(none)')`;
+    const timeExpr = this.sql.dateBucket(input.time_granularity, "time_bucket");
+    const dimExpr = `coalesce(${this.sql.text(HEATMAP_DIM_COLUMN[input.dimension])}, '(none)')`;
     const where: string[] = [];
     const params: Array<string | number | Date> = [];
     this.buildUsageFilters(input, where, params);
@@ -111,8 +131,8 @@ export class MeteringService {
       select
         ${dimExpr} as dim,
         ${timeExpr} as time_slot,
-        coalesce(sum(total_tokens), 0)::bigint as total_tokens,
-        coalesce(sum(cost_usd), 0)::numeric(18,8) as cost_usd
+        ${this.sql.bigint("coalesce(sum(total_tokens), 0)")} as total_tokens,
+        ${this.sql.decimal("coalesce(sum(cost_usd), 0)")} as cost_usd
       from usage_records
       where ${where.join(" and ")}
       group by 1, 2
@@ -121,7 +141,7 @@ export class MeteringService {
     `;
 
     try {
-      const result = await this.pool.query(sql, params);
+      const result = await this.database.query(sql, params);
       const rawRows: RawHeatmapRow[] = result.rows.map((row: Record<string, unknown>) => ({
         dim: String(row.dim ?? "(none)"),
         time: formatTimeSlot(row.time_slot, input.time_granularity),
@@ -179,8 +199,8 @@ export class MeteringService {
 
   public async query(input: MeteringQueryInput): Promise<MeteringQueryResult> {
     const groups: MeteringGroupKey[] = input.group_by.length > 0 ? input.group_by : ["day"];
-    const selectGroup = groups.map((group) => `${GROUP_COLUMN[group]} as ${ALIAS[group]}`);
-    const groupBy = groups.map((group) => GROUP_COLUMN[group]);
+    const selectGroup = groups.map((group) => `${groupColumn(this.sql, group)} as ${ALIAS[group]}`);
+    const groupBy = groups.map((group) => groupColumn(this.sql, group));
 
     const where: string[] = [];
     const params: Array<string | number | Date> = [];
@@ -189,13 +209,13 @@ export class MeteringService {
     const sql = `
       select
         ${selectGroup.join(",\n        ")},
-        coalesce(sum(input_tokens), 0)::bigint as input_tokens,
-        coalesce(sum(output_tokens), 0)::bigint as output_tokens,
-        coalesce(sum(total_tokens), 0)::bigint as total_tokens,
-        coalesce(sum(cached_tokens), 0)::bigint as cached_tokens,
-        coalesce(sum(cache_read_input_tokens), 0)::bigint as cache_read_input_tokens,
-        coalesce(sum(cache_creation_input_tokens), 0)::bigint as cache_creation_input_tokens,
-        coalesce(sum(cost_usd), 0)::numeric(18,8) as cost_usd
+        coalesce(sum(input_tokens), 0) as input_tokens,
+        coalesce(sum(output_tokens), 0) as output_tokens,
+        coalesce(sum(total_tokens), 0) as total_tokens,
+        coalesce(sum(cached_tokens), 0) as cached_tokens,
+        coalesce(sum(cache_read_input_tokens), 0) as cache_read_input_tokens,
+        coalesce(sum(cache_creation_input_tokens), 0) as cache_creation_input_tokens,
+        coalesce(sum(cost_usd), 0) as cost_usd
       from usage_records
       where ${where.join(" and ")}
       group by ${groupBy.join(", ")}
@@ -203,7 +223,7 @@ export class MeteringService {
     `;
 
     try {
-      const result = await this.pool.query(sql, params);
+      const result = await this.database.query(sql, params);
       const rows: MeteringPivotRow[] = result.rows.map((row: Record<string, unknown>) => {
         const dims: Record<string, string | null> = {};
         for (const group of groups) {
@@ -348,15 +368,18 @@ export class MeteringService {
     const outputTokens = input.output_tokens ?? 0;
     const totalTokens = input.total_tokens ?? inputTokens + outputTokens;
     try {
-      await this.pool.query(
+      const placeholders = Array.from({ length: 14 }, (_, index) =>
+        this.sql.placeholder(index + 1),
+      ).join(",");
+      await this.database.query(
         `
           insert into usage_records (
             id, tenant_id, dept_id, user_id, api_token_id, provider, model, route, time_bucket,
             input_tokens, output_tokens, total_tokens, cost_usd, pricing_version, created_at, updated_at
           ) values (
-            $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14, now(), now()
+            ${placeholders}, ${this.sql.now()}, ${this.sql.now()}
           )
-          on conflict (id) do nothing
+          ${this.sql.insertIgnore("id")}
         `,
         [
           id,

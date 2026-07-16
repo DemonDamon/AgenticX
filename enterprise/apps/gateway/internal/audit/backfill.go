@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
-	"net/url"
 	"os"
 	"path/filepath"
 	"sort"
@@ -14,7 +13,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/agenticx/enterprise/gateway/internal/database"
 )
 
 // BackfillDaysFromEnv returns GATEWAY_AUDIT_BACKFILL_DAYS or 7.
@@ -33,69 +32,19 @@ func BackfillDaysFromEnv() int {
 	return n
 }
 
-// PrepareDatabaseURL mirrors metering local-dev sslmode handling for pgx.
-func PrepareDatabaseURL(connectionString string) string {
-	trimmed := strings.TrimSpace(connectionString)
-	if trimmed == "" {
-		return trimmed
-	}
-	lower := strings.ToLower(trimmed)
-	if strings.HasPrefix(lower, "postgres://") || strings.HasPrefix(lower, "postgresql://") {
-		parsed, err := url.Parse(trimmed)
-		if err != nil {
-			return trimmed
-		}
-		query := parsed.Query()
-		if query.Get("sslmode") != "" {
-			return trimmed
-		}
-		query.Set("sslmode", "disable")
-		parsed.RawQuery = query.Encode()
-		return parsed.String()
-	}
-	if strings.Contains(lower, "sslmode=") {
-		return trimmed
-	}
-	if strings.HasSuffix(trimmed, " ") {
-		return trimmed + "sslmode=disable"
-	}
-	return trimmed + " sslmode=disable"
-}
-
-// NewPgxPool opens a small pool for audit inserts / backfill.
-func NewPgxPool(connString string) (*pgxpool.Pool, error) {
-	cfg, err := pgxpool.ParseConfig(PrepareDatabaseURL(connString))
-	if err != nil {
-		return nil, err
-	}
-	cfg.MaxConns = 4
-	cfg.MinConns = 0
-	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
-	defer cancel()
-	pool, err := pgxpool.NewWithConfig(ctx, cfg)
-	if err != nil {
-		return nil, err
-	}
-	if err := pool.Ping(ctx); err != nil {
-		pool.Close()
-		return nil, err
-	}
-	return pool, nil
-}
-
-// RunBackfill scans recent audit JSONL files and inserts missing rows into PG.
-func RunBackfill(ctx context.Context, pool *pgxpool.Pool, dir string, days int, logger *slog.Logger) error {
+// RunBackfill scans recent audit JSONL files and inserts missing rows.
+func RunBackfill(ctx context.Context, handle *database.Handle, dir string, days int, logger *slog.Logger) error {
 	if logger == nil {
 		logger = slog.Default()
 	}
-	if pool == nil {
-		return fmt.Errorf("backfill: nil pool")
+	if handle == nil {
+		return fmt.Errorf("backfill: nil database handle")
 	}
 	files, err := listAuditJSONLInWindow(dir, days)
 	if err != nil {
 		return err
 	}
-	pg := NewPgWriter(pool)
+	pg := NewPgWriter(handle)
 	var inserted int
 	for _, path := range files {
 		nIns, rerr := backfillFile(ctx, pg, path, logger)

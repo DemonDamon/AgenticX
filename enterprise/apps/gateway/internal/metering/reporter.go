@@ -2,13 +2,13 @@ package metering
 
 import (
 	"context"
-	"database/sql"
+	"fmt"
 	"log/slog"
 	"net/url"
 	"strings"
 	"time"
 
-	_ "github.com/lib/pq"
+	"github.com/agenticx/enterprise/gateway/internal/database"
 )
 
 type UsageRecord struct {
@@ -36,29 +36,23 @@ type UsageRecord struct {
 }
 
 type Reporter struct {
-	db     *sql.DB
-	logger *slog.Logger
+	database *database.Handle
+	logger   *slog.Logger
 }
 
-func NewReporter(connectionString string, logger *slog.Logger) (*Reporter, error) {
-	// 本地 docker postgres 默认未启用 SSL，但 lib/pq 默认会要求 SSL，
-	// 导致 ping 失败 → 回落 file sink → admin 计量长期查到空集。
-	// 这里在用户未显式指定 sslmode 时补 disable，保留显式配置的优先级。
-	connectionString = ensureSSLMode(connectionString)
-	db, err := sql.Open("postgres", connectionString)
-	if err != nil {
-		return nil, err
+func NewReporter(handle *database.Handle, logger *slog.Logger) (*Reporter, error) {
+	if handle == nil || handle.DB == nil {
+		return nil, fmt.Errorf("metering database unavailable")
 	}
-	db.SetConnMaxLifetime(10 * time.Minute)
-	db.SetMaxOpenConns(5)
-	db.SetMaxIdleConns(2)
+	handle.DB.SetConnMaxLifetime(10 * time.Minute)
+	handle.DB.SetMaxOpenConns(5)
+	handle.DB.SetMaxIdleConns(2)
 	pingCtx, cancel := context.WithTimeout(context.Background(), 1500*time.Millisecond)
 	defer cancel()
-	if err := db.PingContext(pingCtx); err != nil {
-		_ = db.Close()
+	if err := handle.Ping(pingCtx); err != nil {
 		return nil, err
 	}
-	return &Reporter{db: db, logger: logger}, nil
+	return &Reporter{database: handle, logger: logger}, nil
 }
 
 func (r *Reporter) ReportAsync(record UsageRecord) {
@@ -70,14 +64,14 @@ func (r *Reporter) ReportAsync(record UsageRecord) {
 		}
 		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 		defer cancel()
-		if _, err := r.db.ExecContext(ctx, `
+		if _, err := r.database.ExecContext(ctx, `
       insert into usage_records (
         id, tenant_id, dept_id, user_id, api_token_id, provider, model, route, time_bucket,
         input_tokens, output_tokens, total_tokens,
         cached_tokens, cache_read_input_tokens, cache_creation_input_tokens, reasoning_tokens, usage_source,
         cost_usd, pricing_version, trace_id, trace_step, created_at, updated_at
       ) values (
-        $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21, now(), now()
+        ?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
       )
     `,
 			record.ID,

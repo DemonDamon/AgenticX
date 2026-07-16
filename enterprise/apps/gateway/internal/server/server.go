@@ -20,17 +20,18 @@ import (
 	"time"
 
 	"github.com/agenticx/enterprise/gateway/internal/adaptor"
-	gatewayauth "github.com/agenticx/enterprise/gateway/internal/auth"
 	"github.com/agenticx/enterprise/gateway/internal/audit"
+	gatewayauth "github.com/agenticx/enterprise/gateway/internal/auth"
 	"github.com/agenticx/enterprise/gateway/internal/billing"
 	"github.com/agenticx/enterprise/gateway/internal/cache"
 	"github.com/agenticx/enterprise/gateway/internal/channel"
 	"github.com/agenticx/enterprise/gateway/internal/config"
+	"github.com/agenticx/enterprise/gateway/internal/database"
 	"github.com/agenticx/enterprise/gateway/internal/gatewayinternal"
 	"github.com/agenticx/enterprise/gateway/internal/gwerrors"
 	"github.com/agenticx/enterprise/gateway/internal/keypool"
-	"github.com/agenticx/enterprise/gateway/internal/mcphost"
 	"github.com/agenticx/enterprise/gateway/internal/mcp"
+	"github.com/agenticx/enterprise/gateway/internal/mcphost"
 	"github.com/agenticx/enterprise/gateway/internal/metering"
 	"github.com/agenticx/enterprise/gateway/internal/observability"
 	"github.com/agenticx/enterprise/gateway/internal/openai"
@@ -45,55 +46,54 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
 	"github.com/golang-jwt/jwt/v5"
-	"github.com/jackc/pgx/v5/pgxpool"
 	"golang.org/x/crypto/blake2b"
 )
 
 type Server struct {
-	cfg                config.Config
-	logger             *slog.Logger
-	provider           provider.ChatProvider
-	decider            *routing.Decider
-	policy             *policyengine.Engine
-	policyMu           sync.RWMutex
-	policyManifest     string
-	policySnapshot     string
-	policySnapshotMod  time.Time
-	policyOverride     string
-	policyOverrideMod  time.Time
-	audit              audit.EventWriter
-	metering           metering.Sink
-	traceReporter      *metering.TraceReporter
-	adminLoader        *runtimeconfig.Loader
-	quotaTracker       *quota.Tracker
-	policySnapBodyHash     string
-	policyRemoteCheckedAt  time.Time
-	channelRegistry        *channel.Registry
-	channelPicker      *channel.Picker
-	channelStats       *channel.StatsStore
-	channelAffinity    *channel.AffinityStore
-	adaptorFactory     *adaptor.Factory
-	keyPool            *keypool.Pool
-	relayExecutor      *relay.Executor
-	billingService     *billing.Service
-	patVerifier        *gatewayauth.PATVerifier
-	sessionGrants      *gatewayauth.SessionGrantStore
-	compliance         *residency.ComplianceStore
-	cacheService       *cache.Service
-	pricing            *metering.PricingTable
-	pricingLoader      *metering.PricingLoader
-	metrics            *observability.Registry
-	pgPool             *pgxpool.Pool
-	redisStore         *cache.RedisStore
-	mcpHost            *mcphost.Host
-	mcpStreamable      mcphost.StreamableHTTPTransport
-	mcpSSE             *mcphost.SSETransport
-	mcpRegistry        *mcp.Registry
-	mcpLoader          *mcp.Loader
-	mcpProxy           *mcp.Handler
-	wasmManager        *wasmhost.Manager
-	errorStore         *gwerrors.Store
-	channelProber      *channel.Prober
+	cfg                   config.Config
+	logger                *slog.Logger
+	provider              provider.ChatProvider
+	decider               *routing.Decider
+	policy                *policyengine.Engine
+	policyMu              sync.RWMutex
+	policyManifest        string
+	policySnapshot        string
+	policySnapshotMod     time.Time
+	policyOverride        string
+	policyOverrideMod     time.Time
+	audit                 audit.EventWriter
+	metering              metering.Sink
+	traceReporter         *metering.TraceReporter
+	adminLoader           *runtimeconfig.Loader
+	quotaTracker          *quota.Tracker
+	policySnapBodyHash    string
+	policyRemoteCheckedAt time.Time
+	channelRegistry       *channel.Registry
+	channelPicker         *channel.Picker
+	channelStats          *channel.StatsStore
+	channelAffinity       *channel.AffinityStore
+	adaptorFactory        *adaptor.Factory
+	keyPool               *keypool.Pool
+	relayExecutor         *relay.Executor
+	billingService        *billing.Service
+	patVerifier           *gatewayauth.PATVerifier
+	sessionGrants         *gatewayauth.SessionGrantStore
+	compliance            *residency.ComplianceStore
+	cacheService          *cache.Service
+	pricing               *metering.PricingTable
+	pricingLoader         *metering.PricingLoader
+	metrics               *observability.Registry
+	database              *database.Handle
+	redisStore            *cache.RedisStore
+	mcpHost               *mcphost.Host
+	mcpStreamable         mcphost.StreamableHTTPTransport
+	mcpSSE                *mcphost.SSETransport
+	mcpRegistry           *mcp.Registry
+	mcpLoader             *mcp.Loader
+	mcpProxy              *mcp.Handler
+	wasmManager           *wasmhost.Manager
+	errorStore            *gwerrors.Store
+	channelProber         *channel.Prober
 }
 
 var (
@@ -103,16 +103,26 @@ var (
 )
 
 func New(cfg config.Config, logger *slog.Logger) (*Server, error) {
-	// metering：开发态可选 PG，未配 DATABASE_URL 时降级到本地 jsonl，
-	// 让前台 token chip 与 admin 看用量都能继续工作而不必启 PG。
+	// metering：开发态可选数据库，未配 DATABASE_URL 时降级到本地 jsonl，
+	// 让前台 token chip 与 admin 看用量都能继续工作而不必启数据库。
 	dbURL := strings.TrimSpace(os.Getenv("DATABASE_URL"))
+	var dbHandle *database.Handle
+	if dbURL != "" {
+		handle, err := database.OpenFromEnv()
+		if err != nil {
+			logger.Warn("database unavailable", "error", err)
+		} else {
+			dbHandle = handle
+		}
+	}
+
 	var sink metering.Sink
 	usageLogPath := strings.TrimSpace(os.Getenv("GATEWAY_USAGE_LOG"))
 	if usageLogPath == "" {
 		usageLogPath = "./.runtime/usage.jsonl"
 	}
-	if dbURL != "" {
-		reporter, err := metering.NewReporter(dbURL, logger)
+	if dbHandle != nil {
+		reporter, err := metering.NewReporter(dbHandle, logger)
 		if err != nil {
 			logger.Warn("metering reporter unavailable, fallback to file sink", "error", err, "path", usageLogPath)
 			fileSink, fileErr := metering.NewFileSink(usageLogPath, logger)
@@ -133,8 +143,8 @@ func New(cfg config.Config, logger *slog.Logger) (*Server, error) {
 	}
 
 	var traceReporter *metering.TraceReporter
-	if dbURL != "" {
-		if reporter, err := metering.NewTraceReporter(dbURL, logger); err != nil {
+	if dbHandle != nil {
+		if reporter, err := metering.NewTraceReporter(dbHandle, logger); err != nil {
 			logger.Warn("trace reporter unavailable", "error", err)
 		} else {
 			traceReporter = reporter
@@ -172,25 +182,20 @@ func New(cfg config.Config, logger *slog.Logger) (*Server, error) {
 	fileWriter := audit.NewFileWriter(cfg.AuditDir)
 	var auditWriter audit.EventWriter = fileWriter
 	var patVerifier *gatewayauth.PATVerifier
-	var pgPool *pgxpool.Pool
-	if dbURL != "" {
-		pool, aerr := audit.NewPgxPool(dbURL)
-		if aerr != nil {
-			logger.Warn("audit pg unavailable, using file-only audit", "error", aerr)
-		} else {
-			pgPool = pool
-			patVerifier = gatewayauth.NewPATVerifier(pool)
-			auditWriter = audit.NewDualWriter(fileWriter, audit.NewPgWriter(pool), cfg.AuditDir, logger)
-			days := audit.BackfillDaysFromEnv()
-			realPool := pool
-			realDays := days
-			realDir := cfg.AuditDir
-			go func() {
-				if err := audit.RunBackfill(context.Background(), realPool, realDir, realDays, logger); err != nil {
-					logger.Warn("audit backfill failed", "error", err)
-				}
-			}()
-		}
+	if dbHandle != nil {
+		patVerifier = gatewayauth.NewPATVerifier(dbHandle)
+		auditWriter = audit.NewDualWriter(fileWriter, audit.NewPgWriter(dbHandle), cfg.AuditDir, logger)
+		days := audit.BackfillDaysFromEnv()
+		realHandle := dbHandle
+		realDays := days
+		realDir := cfg.AuditDir
+		go func() {
+			if err := audit.RunBackfill(context.Background(), realHandle, realDir, realDays, logger); err != nil {
+				logger.Warn("audit backfill failed", "error", err)
+			}
+		}()
+	} else if dbURL != "" {
+		logger.Warn("audit database unavailable, using file-only audit")
 	}
 
 	srv := &Server{
@@ -210,14 +215,14 @@ func New(cfg config.Config, logger *slog.Logger) (*Server, error) {
 		metering:           sink,
 		traceReporter:      traceReporter,
 		adminLoader:        adminLoader,
-		quotaTracker:       quota.NewTracker(quotaCfgPath, quotaUsagePath, pgPool),
+		quotaTracker:       quota.NewTracker(quotaCfgPath, quotaUsagePath, dbHandle),
 		patVerifier:        patVerifier,
-		sessionGrants:      gatewayauth.NewSessionGrantStore(pgPool),
-		compliance:         residency.NewComplianceStore(pgPool),
+		sessionGrants:      gatewayauth.NewSessionGrantStore(dbHandle),
+		compliance:         residency.NewComplianceStore(dbHandle),
 		cacheService:       nil,
 		pricingLoader:      initPricingLoader(logger),
 		metrics:            observability.NewRegistryFromEnv(),
-		pgPool:             pgPool,
+		database:           dbHandle,
 	}
 	cacheSvc, redisStore := initCacheService(logger)
 	srv.cacheService = cacheSvc
@@ -225,8 +230,8 @@ func New(cfg config.Config, logger *slog.Logger) (*Server, error) {
 	srv.initMCPHost()
 	srv.initMCPProxy()
 	srv.initChannelRelay()
-	if dbURL != "" {
-		if budgetReporter, err := quota.NewBudgetAlertReporter(dbURL, logger); err != nil {
+	if dbHandle != nil {
+		if budgetReporter, err := quota.NewBudgetAlertReporter(dbHandle, logger); err != nil {
 			logger.Warn("budget alert reporter unavailable", "error", err)
 		} else {
 			srv.quotaTracker.SetBudgetAlertSink(budgetReporter.Emit)
@@ -780,7 +785,7 @@ func (s *Server) handleChatCompletions(w http.ResponseWriter, r *http.Request) {
 		w: w, r: r, req: req, identity: identity, decision: decision, startedAt: startedAt,
 		estimatedInputTokens: estimatedInputTokens, reservedTokens: reserveTokens,
 		inboundProtocol: inboundProtocolLabel("openai-chat"),
-		budgetCheck: &budgetCheck,
+		budgetCheck:     &budgetCheck,
 	}
 	if s.tryServeFromCache(cacheCtx) {
 		return
@@ -878,24 +883,24 @@ func (s *Server) handleChatCompletions(w http.ResponseWriter, r *http.Request) {
 	}
 
 	chatAudit := s.auditChatCall(audit.Event{
-		ID:           makeID("audit"),
-		TenantID:     identity.TenantID,
-		EventTime:    time.Now().UTC().Format(time.RFC3339),
-		EventType:    "chat_call",
-		UserID:       identity.UserID,
-		UserEmail:    identity.UserEmail,
-		DepartmentID: identity.DepartmentID,
-		SessionID:    identity.SessionID,
-		ClientType:   "web-portal",
-		ClientIP:     r.RemoteAddr,
-		Provider:     decision.Provider,
-		Model:        req.Model,
-		Route:        decision.Route,
-		InboundProtocol: inboundProtocolLabel("openai-chat"),
-		InputTokens:  estimateTextTokens(joinMessages(req.Messages)),
-		OutputTokens: estimateTextTokens(responseContent),
-		TotalTokens:  estimateTextTokens(joinMessages(req.Messages)) + estimateTextTokens(responseContent),
-		LatencyMS:    time.Since(startedAt).Milliseconds(),
+		ID:                makeID("audit"),
+		TenantID:          identity.TenantID,
+		EventTime:         time.Now().UTC().Format(time.RFC3339),
+		EventType:         "chat_call",
+		UserID:            identity.UserID,
+		UserEmail:         identity.UserEmail,
+		DepartmentID:      identity.DepartmentID,
+		SessionID:         identity.SessionID,
+		ClientType:        "web-portal",
+		ClientIP:          r.RemoteAddr,
+		Provider:          decision.Provider,
+		Model:             req.Model,
+		Route:             decision.Route,
+		InboundProtocol:   inboundProtocolLabel("openai-chat"),
+		InputTokens:       estimateTextTokens(joinMessages(req.Messages)),
+		OutputTokens:      estimateTextTokens(responseContent),
+		TotalTokens:       estimateTextTokens(joinMessages(req.Messages)) + estimateTextTokens(responseContent),
+		LatencyMS:         time.Since(startedAt).Milliseconds(),
 		LatencyMSUpstream: time.Since(startedAt).Milliseconds(),
 		Digest: &audit.Digest{
 			PromptHash:      hashText(joinMessages(req.Messages)),
@@ -1137,21 +1142,21 @@ func (s *Server) handleStream(
 		}
 		if len(blockedHits) > 0 {
 			ev := audit.Event{
-				ID:           makeID("audit"),
-				TenantID:     identity.TenantID,
-				EventTime:    time.Now().UTC().Format(time.RFC3339),
-				EventType:    "policy_hit",
-				UserID:       identity.UserID,
-				UserEmail:    identity.UserEmail,
-				DepartmentID: identity.DepartmentID,
-				SessionID:    identity.SessionID,
-				ClientType:   "web-portal",
-				ClientIP:     r.RemoteAddr,
-				Provider:     decision.Provider,
-				Model:        req.Model,
-				Route:        decision.Route,
-				ChannelID:       decision.ChannelID,
-		ChannelKeyRef:   streamResult.KeyRef,
+				ID:            makeID("audit"),
+				TenantID:      identity.TenantID,
+				EventTime:     time.Now().UTC().Format(time.RFC3339),
+				EventType:     "policy_hit",
+				UserID:        identity.UserID,
+				UserEmail:     identity.UserEmail,
+				DepartmentID:  identity.DepartmentID,
+				SessionID:     identity.SessionID,
+				ClientType:    "web-portal",
+				ClientIP:      r.RemoteAddr,
+				Provider:      decision.Provider,
+				Model:         req.Model,
+				Route:         decision.Route,
+				ChannelID:     decision.ChannelID,
+				ChannelKeyRef: streamResult.KeyRef,
 				Digest: &audit.Digest{
 					PromptHash:   hashText(inputText),
 					ResponseHash: hashText(responseBuilder.String()),
@@ -1226,25 +1231,25 @@ func (s *Server) handleStream(
 	}
 
 	ev := audit.Event{
-		ID:           makeID("audit"),
-		TenantID:     identity.TenantID,
-		EventTime:    time.Now().UTC().Format(time.RFC3339),
-		EventType:    "chat_call",
-		UserID:       identity.UserID,
-		UserEmail:    identity.UserEmail,
-		DepartmentID: identity.DepartmentID,
-		SessionID:    identity.SessionID,
-		ClientType:   "web-portal",
-		ClientIP:     r.RemoteAddr,
-		Provider:     decision.Provider,
-		Model:        req.Model,
-		Route:        decision.Route,
+		ID:              makeID("audit"),
+		TenantID:        identity.TenantID,
+		EventTime:       time.Now().UTC().Format(time.RFC3339),
+		EventType:       "chat_call",
+		UserID:          identity.UserID,
+		UserEmail:       identity.UserEmail,
+		DepartmentID:    identity.DepartmentID,
+		SessionID:       identity.SessionID,
+		ClientType:      "web-portal",
+		ClientIP:        r.RemoteAddr,
+		Provider:        decision.Provider,
+		Model:           req.Model,
+		Route:           decision.Route,
 		ChannelID:       decision.ChannelID,
 		ChannelKeyRef:   streamResult.KeyRef,
-		InputTokens:  inputTokens,
-		OutputTokens: outputTokens,
-		TotalTokens:  inputTokens + outputTokens,
-		LatencyMS:    time.Since(startedAt).Milliseconds(),
+		InputTokens:     inputTokens,
+		OutputTokens:    outputTokens,
+		TotalTokens:     inputTokens + outputTokens,
+		LatencyMS:       time.Since(startedAt).Milliseconds(),
 		EstimatedTokens: estimatedInputTokens,
 		ActualTokens:    inputTokens + outputTokens,
 		SettleDelta:     settleDelta,

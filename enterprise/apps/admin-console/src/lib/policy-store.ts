@@ -1,6 +1,6 @@
 import { users } from "@agenticx/db-schema";
 import {
-  PgPolicyStore,
+  createPolicyStore,
   type PolicyPack,
   type PolicyPublishEvent,
   type PolicyRule,
@@ -13,7 +13,7 @@ import { getIamDb } from "@agenticx/iam-core";
 import { and, eq } from "drizzle-orm";
 import type { AdminSession } from "./admin-auth";
 
-const store = new PgPolicyStore();
+const store = createPolicyStore();
 
 export type PolicyActor = {
   tenantId: string;

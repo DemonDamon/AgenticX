@@ -14,7 +14,14 @@ import { eq } from "drizzle-orm";
 import { ulid } from "ulid";
 
 import { getIamDb } from "./db";
+import { resolveDatabaseConfig } from "./database/config";
 import { encryptProviderApiKey } from "./provider-api-key-crypto";
+import {
+  insertMysqlRuntimeProviders,
+  insertMysqlRuntimeQuota,
+  insertMysqlUserVisibleModels,
+  mysqlHasRuntimeRows,
+} from "./repos/mysql/runtime-legacy";
 
 export type MigrateSliceResult = {
   action: "imported" | "skipped";
@@ -139,14 +146,20 @@ export async function migrateLegacyProvidersIfNeeded(
   tenantId: string,
   runtimeDir = resolveRuntimeAdminDir()
 ): Promise<MigrateSliceResult> {
-  const db = getIamDb();
-  const existing = await db
-    .select({ id: mpTable.id })
-    .from(mpTable)
-    .where(eq(mpTable.tenantId, tenantId))
-    .limit(1);
-  if (existing.length > 0) {
-    return { action: "skipped", count: 0, reason: "postgres already has providers" };
+  const dialect = resolveDatabaseConfig().dialect;
+  if (dialect === "mysql" ? await mysqlHasRuntimeRows("providers", tenantId) : false) {
+    return { action: "skipped", count: 0, reason: "database already has providers" };
+  }
+  const db = dialect === "postgresql" ? getIamDb() : null;
+  if (db) {
+    const existing = await db
+      .select({ id: mpTable.id })
+      .from(mpTable)
+      .where(eq(mpTable.tenantId, tenantId))
+      .limit(1);
+    if (existing.length > 0) {
+      return { action: "skipped", count: 0, reason: "database already has providers" };
+    }
   }
 
   const legacyFile = path.join(runtimeDir, "providers.json");
@@ -161,8 +174,7 @@ export async function migrateLegacyProvidersIfNeeded(
   }
 
   const now = new Date().toISOString();
-  for (const p of providers) {
-    await db.insert(mpTable).values({
+  const rows = providers.map((p) => ({
       id: ulid(),
       tenantId,
       providerId: p.id,
@@ -176,7 +188,13 @@ export async function migrateLegacyProvidersIfNeeded(
       models: (p.models ?? []) as Record<string, unknown>[],
       createdAt: new Date(p.createdAt || now),
       updatedAt: new Date(p.updatedAt || now),
-    });
+  }));
+  if (dialect === "mysql") {
+    await insertMysqlRuntimeProviders(rows);
+  } else {
+    for (const row of rows) {
+      await db!.insert(mpTable).values(row);
+    }
   }
 
   return { action: "imported", count: providers.length };
@@ -187,14 +205,20 @@ export async function migrateLegacyUserVisibleModelsIfNeeded(
   tenantId: string,
   runtimeDir = resolveRuntimeAdminDir()
 ): Promise<MigrateSliceResult> {
-  const db = getIamDb();
-  const existing = await db
-    .select({ modelId: uvmTable.modelId })
-    .from(uvmTable)
-    .where(eq(uvmTable.tenantId, tenantId))
-    .limit(1);
-  if (existing.length > 0) {
-    return { action: "skipped", count: 0, reason: "postgres already has user visible models" };
+  const dialect = resolveDatabaseConfig().dialect;
+  if (dialect === "mysql" ? await mysqlHasRuntimeRows("user-models", tenantId) : false) {
+    return { action: "skipped", count: 0, reason: "database already has user visible models" };
+  }
+  const db = dialect === "postgresql" ? getIamDb() : null;
+  if (db) {
+    const existing = await db
+      .select({ modelId: uvmTable.modelId })
+      .from(uvmTable)
+      .where(eq(uvmTable.tenantId, tenantId))
+      .limit(1);
+    if (existing.length > 0) {
+      return { action: "skipped", count: 0, reason: "database already has user visible models" };
+    }
   }
 
   const legacyFile = path.join(runtimeDir, "user-models.json");
@@ -217,8 +241,12 @@ export async function migrateLegacyUserVisibleModelsIfNeeded(
     return { action: "skipped", count: 0, reason: "user-models.json empty" };
   }
 
-  for (const chunk of chunked(rows, 200)) {
-    await db.insert(uvmTable).values(chunk).onConflictDoNothing();
+  if (dialect === "mysql") {
+    await insertMysqlUserVisibleModels(rows);
+  } else {
+    for (const chunk of chunked(rows, 200)) {
+      await db!.insert(uvmTable).values(chunk).onConflictDoNothing();
+    }
   }
 
   return { action: "imported", count: rows.length };
@@ -229,10 +257,16 @@ export async function migrateLegacyQuotasIfNeeded(
   tenantId: string,
   runtimeDir = resolveRuntimeAdminDir()
 ): Promise<MigrateSliceResult> {
-  const db = getIamDb();
-  const existing = await db.select().from(qTable).where(eq(qTable.tenantId, tenantId)).limit(1);
-  if (existing.length > 0) {
-    return { action: "skipped", count: 0, reason: "postgres already has quota config" };
+  const dialect = resolveDatabaseConfig().dialect;
+  if (dialect === "mysql" ? await mysqlHasRuntimeRows("quotas", tenantId) : false) {
+    return { action: "skipped", count: 0, reason: "database already has quota config" };
+  }
+  const db = dialect === "postgresql" ? getIamDb() : null;
+  if (db) {
+    const existing = await db.select().from(qTable).where(eq(qTable.tenantId, tenantId)).limit(1);
+    if (existing.length > 0) {
+      return { action: "skipped", count: 0, reason: "database already has quota config" };
+    }
   }
 
   const legacyFile =
@@ -243,11 +277,16 @@ export async function migrateLegacyQuotasIfNeeded(
 
   const parsed = readJsonFile<Partial<QuotaConfig>>(legacyFile, {});
   const cfg = normalizeQuota(parsed);
-  await db.insert(qTable).values({
+  const row = {
     tenantId,
     config: cfg as unknown as Record<string, unknown>,
     updatedAt: new Date(cfg.updatedAt),
-  });
+  };
+  if (dialect === "mysql") {
+    await insertMysqlRuntimeQuota(row);
+  } else {
+    await db!.insert(qTable).values(row);
+  }
 
   return { action: "imported", count: 1 };
 }

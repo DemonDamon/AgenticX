@@ -1,6 +1,13 @@
 import { enterpriseRuntimePatRevocation, sessionGrants as grantTable } from "@agenticx/db-schema";
 import { getIamDb } from "./db";
+import { resolveDatabaseConfig } from "./database/config";
 import { and, desc, eq, gt, isNull } from "drizzle-orm";
+import {
+  activeMysqlSessionGrants,
+  insertMysqlSessionGrant,
+  listMysqlSessionGrants,
+  revokeMysqlSessionGrant,
+} from "./repos/mysql/session-grants";
 
 export type SessionGrantRecord = {
   id: string;
@@ -48,6 +55,17 @@ export async function createSessionGrant(input: CreateSessionGrantInput): Promis
   const id = `sg-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
   const expiresAt = new Date(Date.now() + ttl * 1000);
   const scopes = input.scopes?.length ? input.scopes : ["workspace:chat"];
+  if (resolveDatabaseConfig().dialect === "mysql") {
+    return insertMysqlSessionGrant({
+      id,
+      tenantId: input.tenantId,
+      sessionId: input.sessionId.trim(),
+      scopes,
+      expiresAt,
+      createdBy: input.createdBy ?? null,
+      description: input.description?.trim() || null,
+    });
+  }
   const db = getIamDb();
   const inserted = await db
     .insert(grantTable)
@@ -68,18 +86,25 @@ export async function createSessionGrant(input: CreateSessionGrantInput): Promis
 
 export async function listSessionGrants(limit = 50): Promise<SessionGrantRecord[]> {
   const tid = tenant();
+  const safeLimit = Math.min(Math.max(limit, 1), 200);
+  if (resolveDatabaseConfig().dialect === "mysql") {
+    return listMysqlSessionGrants(tid, safeLimit);
+  }
   const db = getIamDb();
   const rows = await db
     .select()
     .from(grantTable)
     .where(eq(grantTable.tenantId, tid))
     .orderBy(desc(grantTable.createdAt))
-    .limit(Math.min(Math.max(limit, 1), 200));
+    .limit(safeLimit);
   return rows.map(rowToRecord);
 }
 
 export async function revokeSessionGrant(id: string): Promise<SessionGrantRecord | null> {
   const tid = tenant();
+  if (resolveDatabaseConfig().dialect === "mysql") {
+    return revokeMysqlSessionGrant(id, tid);
+  }
   const db = getIamDb();
   const updated = await db
     .update(grantTable)
@@ -94,8 +119,16 @@ export async function buildSessionGrantsSnapshotForGateway(): Promise<{
   grants: Record<string, string[]>;
 }> {
   const tid = tenant();
-  const db = getIamDb();
   const now = new Date();
+  if (resolveDatabaseConfig().dialect === "mysql") {
+    const rows = await activeMysqlSessionGrants(tid, now);
+    const grants: Record<string, string[]> = {};
+    for (const row of rows) {
+      if (row.scopes.length) grants[row.sessionId] = row.scopes;
+    }
+    return { updatedAt: now.toISOString(), grants };
+  }
+  const db = getIamDb();
   const rows = await db
     .select()
     .from(grantTable)

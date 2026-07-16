@@ -2,13 +2,13 @@ package metering
 
 import (
 	"context"
-	"database/sql"
 	"encoding/json"
+	"fmt"
 	"log/slog"
 	"strings"
 	"time"
 
-	_ "github.com/lib/pq"
+	"github.com/agenticx/enterprise/gateway/internal/database"
 )
 
 type TraceSpanRecord struct {
@@ -31,26 +31,23 @@ type TraceSpanRecord struct {
 }
 
 type TraceReporter struct {
-	db     *sql.DB
-	logger *slog.Logger
+	database *database.Handle
+	logger   *slog.Logger
 }
 
-func NewTraceReporter(connectionString string, logger *slog.Logger) (*TraceReporter, error) {
-	connectionString = ensureSSLMode(connectionString)
-	db, err := sql.Open("postgres", connectionString)
-	if err != nil {
-		return nil, err
+func NewTraceReporter(handle *database.Handle, logger *slog.Logger) (*TraceReporter, error) {
+	if handle == nil || handle.DB == nil {
+		return nil, fmt.Errorf("trace database unavailable")
 	}
-	db.SetConnMaxLifetime(10 * time.Minute)
-	db.SetMaxOpenConns(5)
-	db.SetMaxIdleConns(2)
+	handle.DB.SetConnMaxLifetime(10 * time.Minute)
+	handle.DB.SetMaxOpenConns(5)
+	handle.DB.SetMaxIdleConns(2)
 	pingCtx, cancel := context.WithTimeout(context.Background(), 1500*time.Millisecond)
 	defer cancel()
-	if err := db.PingContext(pingCtx); err != nil {
-		_ = db.Close()
+	if err := handle.Ping(pingCtx); err != nil {
 		return nil, err
 	}
-	return &TraceReporter{db: db, logger: logger}, nil
+	return &TraceReporter{database: handle, logger: logger}, nil
 }
 
 func (r *TraceReporter) ReportAsync(record TraceSpanRecord) {
@@ -69,29 +66,35 @@ func (r *TraceReporter) ReportAsync(record TraceSpanRecord) {
 		}
 		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 		defer cancel()
-		if _, err := r.db.ExecContext(ctx, `
+		upsert := `
+      on conflict (tenant_id, trace_id, step_no) do update set
+        step_kind = excluded.step_kind, status = excluded.status, model = excluded.model,
+        provider = excluded.provider, input_tokens = excluded.input_tokens,
+        output_tokens = excluded.output_tokens, reasoning_tokens = excluded.reasoning_tokens,
+        total_tokens = excluded.total_tokens, cost_usd = excluded.cost_usd,
+        duration_ms = excluded.duration_ms, error_message = excluded.error_message,
+        metadata = excluded.metadata, updated_at = CURRENT_TIMESTAMP`
+		valuesAlias := ""
+		if r.database.Dialect == database.MySQL {
+			valuesAlias = " AS new"
+			upsert = `
+      on duplicate key update
+        step_kind = new.step_kind, status = new.status, model = new.model,
+        provider = new.provider, input_tokens = new.input_tokens,
+        output_tokens = new.output_tokens, reasoning_tokens = new.reasoning_tokens,
+        total_tokens = new.total_tokens, cost_usd = new.cost_usd,
+        duration_ms = new.duration_ms, error_message = new.error_message,
+        metadata = new.metadata, updated_at = CURRENT_TIMESTAMP`
+		}
+		query := `
       insert into agent_token_traces (
         id, tenant_id, trace_id, step_no, step_kind, status,
         model, provider, input_tokens, output_tokens, reasoning_tokens, total_tokens,
         cost_usd, duration_ms, error_message, metadata, created_at, updated_at
       ) values (
-        $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16, now(), now()
-      )
-      on conflict (tenant_id, trace_id, step_no) do update set
-        step_kind = excluded.step_kind,
-        status = excluded.status,
-        model = excluded.model,
-        provider = excluded.provider,
-        input_tokens = excluded.input_tokens,
-        output_tokens = excluded.output_tokens,
-        reasoning_tokens = excluded.reasoning_tokens,
-        total_tokens = excluded.total_tokens,
-        cost_usd = excluded.cost_usd,
-        duration_ms = excluded.duration_ms,
-        error_message = excluded.error_message,
-        metadata = excluded.metadata,
-        updated_at = now()
-    `,
+        ?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
+      )` + valuesAlias + upsert
+		if _, err := r.database.ExecContext(ctx, query,
 			record.ID,
 			tenantID,
 			record.TraceID,

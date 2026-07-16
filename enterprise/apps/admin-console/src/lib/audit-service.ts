@@ -2,8 +2,8 @@ import {
   AuditApi,
   type AuditActor,
   type AuditQueryInput,
+  createAuditStore,
   insertGatewayAuditExportEvent,
-  PgAuditStore,
   verifyGatewayAuditChain,
 } from "@agenticx/feature-audit";
 import { getIamDb } from "@agenticx/iam-core";
@@ -11,7 +11,7 @@ import { users } from "@agenticx/db-schema";
 import { and, eq } from "drizzle-orm";
 import type { AdminSession } from "./admin-auth";
 
-const store = new PgAuditStore();
+const store = createAuditStore();
 const api = new AuditApi(store);
 
 export async function buildAuditActor(session: AdminSession, scopes: string[]): Promise<AuditActor> {

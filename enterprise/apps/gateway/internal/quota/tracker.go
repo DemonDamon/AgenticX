@@ -12,8 +12,8 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/agenticx/enterprise/gateway/internal/database"
 	"github.com/agenticx/enterprise/gateway/internal/gatewayinternal"
-	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 type Action string
@@ -85,7 +85,7 @@ type Tracker struct {
 	requestCounter       *RequestCountCounter
 }
 
-func NewTracker(cfgPath, usagePath string, pgPool *pgxpool.Pool) *Tracker {
+func NewTracker(cfgPath, usagePath string, handle *database.Handle) *Tracker {
 	budgetCfgPath := strings.TrimSpace(os.Getenv("GATEWAY_BUDGET_CONFIG_FILE"))
 	if budgetCfgPath == "" {
 		budgetCfgPath = DefaultBudgetConfigPath()
@@ -107,8 +107,8 @@ func NewTracker(cfgPath, usagePath string, pgPool *pgxpool.Pool) *Tracker {
 		budgetUsagePath: budgetUsagePath,
 		budgetRemoteURL: strings.TrimSpace(os.Getenv("GATEWAY_REMOTE_BUDGET_CONFIG_URL")),
 		usageCache:      map[string]int64{},
-		poolCounter:     newPoolCounter(pgPool, poolUsagePath),
-		requestCounter:  newRequestCountCounter(pgPool, poolUsagePath),
+		poolCounter:     newPoolCounter(handle, poolUsagePath),
+		requestCounter:  newRequestCountCounter(handle, poolUsagePath),
 	}
 }
 

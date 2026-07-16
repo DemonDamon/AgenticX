@@ -3,6 +3,8 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import { and, eq } from "drizzle-orm";
 import { getIamDb } from "./db";
+import { resolveDatabaseConfig } from "./database/config";
+import { loadMysqlQuotaConfig, readMysqlQuotaUsage } from "./repos/mysql/quota";
 
 export type QuotaUsageScope = "tenant" | "dept" | "user" | "pat";
 
@@ -119,6 +121,9 @@ async function readPoolUsed(
     return readLocalPoolUsed(tenantId, scopeType, scopeId, period);
   }
   try {
+    if (resolveDatabaseConfig().dialect === "mysql") {
+      return await readMysqlQuotaUsage(tenantId, scopeType, scopeId, period);
+    }
     const db = getIamDb();
     const row = await db
       .select({ usedTotal: gatewayQuotaPoolUsage.usedTotal })
@@ -148,6 +153,9 @@ async function readTokenWindowUsed(
     return readLocalPoolUsed(tenantId, scopeType, scopeId, period);
   }
   try {
+    if (resolveDatabaseConfig().dialect === "mysql") {
+      return await readMysqlQuotaUsage(tenantId, scopeType, scopeId, period);
+    }
     const db = getIamDb();
     const row = await db
       .select({ usedTotal: gatewayQuotaPoolUsage.usedTotal })
@@ -247,6 +255,10 @@ function normalizeConfig(input: Partial<QuotaConfigSnapshot> | undefined): Quota
 
 export async function loadQuotaConfigSnapshot(tenantId?: string): Promise<QuotaConfigSnapshot> {
   const tid = requiredTenant(tenantId);
+  if (resolveDatabaseConfig().dialect === "mysql") {
+    const config = await loadMysqlQuotaConfig(tid);
+    return normalizeConfig(config as Partial<QuotaConfigSnapshot> | undefined);
+  }
   const db = getIamDb();
   const row = await db.select().from(qTable).where(eq(qTable.tenantId, tid)).limit(1);
   if (!row.length) {

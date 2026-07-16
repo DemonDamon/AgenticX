@@ -56,16 +56,28 @@ func (s *Server) runReadinessChecks(ctx context.Context) (map[string]readinessCh
 	ready := true
 
 	dbURL := strings.TrimSpace(os.Getenv("DATABASE_URL"))
+	dialect := strings.TrimSpace(os.Getenv("DATABASE_DIALECT"))
+	if dialect == "" {
+		dialect = "postgresql"
+	}
 	if dbURL == "" {
+		checks["database"] = readinessCheck{Status: "skipped", Skipped: true, Detail: "DATABASE_URL unset"}
 		checks["postgres"] = readinessCheck{Status: "skipped", Skipped: true, Detail: "DATABASE_URL unset"}
-	} else if s.pgPool == nil {
-		checks["postgres"] = readinessCheck{Status: "fail", Detail: "pool unavailable"}
+	} else if s.database == nil {
+		checks["database"] = readinessCheck{Status: "fail", Detail: "handle unavailable"}
+		checks["postgres"] = readinessCheck{Status: "fail", Detail: "handle unavailable"}
 		ready = false
-	} else if err := s.pgPool.Ping(ctx); err != nil {
+	} else if err := s.database.Ping(ctx); err != nil {
+		checks["database"] = readinessCheck{Status: "fail", Detail: err.Error()}
 		checks["postgres"] = readinessCheck{Status: "fail", Detail: err.Error()}
 		ready = false
 	} else {
-		checks["postgres"] = readinessCheck{Status: "ok"}
+		detail := "dialect=" + string(s.database.Dialect)
+		if detail == "dialect=" {
+			detail = "dialect=" + dialect
+		}
+		checks["database"] = readinessCheck{Status: "ok", Detail: detail}
+		checks["postgres"] = readinessCheck{Status: "ok", Detail: "deprecated; use database"}
 	}
 
 	redisURL := strings.TrimSpace(os.Getenv("REDIS_URL"))

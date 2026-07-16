@@ -2,7 +2,10 @@ import { departments, organizations, users } from "@agenticx/db-schema";
 import { and, asc, desc, eq, inArray, isNull, like, ne, sql } from "drizzle-orm";
 import { ulid } from "ulid";
 import { getIamDb, type IamDb } from "../db";
+import { resolveDatabaseConfig } from "../database/config";
 import { insertAuditEvent } from "./audit";
+import type { DepartmentsRepository } from "./contracts";
+import { mysqlDepartmentsRepository as mysqlDeptsRepo } from "./mysql/departments";
 
 export type DepartmentRow = {
   id: string;
@@ -31,6 +34,9 @@ function mapRow(r: typeof departments.$inferSelect): DepartmentRow {
 }
 
 export async function getDefaultOrgId(tenantId: string): Promise<string | null> {
+  if (resolveDatabaseConfig().dialect === "mysql") {
+    return mysqlDeptsRepo.getDefaultOrgId(tenantId);
+  }
   const db = getIamDb();
   const row = await db
     .select({ id: organizations.id })
@@ -66,6 +72,9 @@ async function memberCountsByDept(tenantId: string): Promise<Map<string, number>
 }
 
 export async function listDepartmentsFlat(tenantId: string): Promise<DepartmentRow[]> {
+  if (resolveDatabaseConfig().dialect === "mysql") {
+    return mysqlDeptsRepo.listDepartmentsFlat(tenantId);
+  }
   const db = getIamDb();
   const rows = await db
     .select()
@@ -77,6 +86,9 @@ export async function listDepartmentsFlat(tenantId: string): Promise<DepartmentR
 }
 
 export async function listDepartmentsTree(tenantId: string): Promise<DepartmentRow[]> {
+  if (resolveDatabaseConfig().dialect === "mysql") {
+    return mysqlDeptsRepo.listDepartmentsTree(tenantId);
+  }
   const flat = await listDepartmentsFlat(tenantId);
   const byParent = new Map<string | null, DepartmentRow[]>();
   for (const d of flat) {
@@ -97,6 +109,9 @@ export async function listDepartmentsTree(tenantId: string): Promise<DepartmentR
 }
 
 export async function getDepartment(tenantId: string, id: string): Promise<DepartmentRow | null> {
+  if (resolveDatabaseConfig().dialect === "mysql") {
+    return mysqlDeptsRepo.getDepartment(tenantId, id);
+  }
   const db = getIamDb();
   const row = await db
     .select()
@@ -115,6 +130,9 @@ export async function createDepartment(input: {
   parentId?: string | null;
   actorUserId?: string | null;
 }): Promise<DepartmentRow> {
+  if (resolveDatabaseConfig().dialect === "mysql") {
+    return mysqlDeptsRepo.createDepartment(input);
+  }
   const db = getIamDb();
   const name = input.name.trim();
   if (!name) throw new Error("部门名称不能为空");
@@ -167,6 +185,9 @@ export async function updateDepartmentName(input: {
   name: string;
   actorUserId?: string | null;
 }): Promise<DepartmentRow> {
+  if (resolveDatabaseConfig().dialect === "mysql") {
+    return mysqlDeptsRepo.updateDepartmentName(input);
+  }
   const db = getIamDb();
   const name = input.name.trim();
   if (!name) throw new Error("部门名称不能为空");
@@ -219,6 +240,9 @@ export async function moveDepartment(input: {
   newParentId: string | null;
   actorUserId?: string | null;
 }): Promise<DepartmentRow> {
+  if (resolveDatabaseConfig().dialect === "mysql") {
+    return mysqlDeptsRepo.moveDepartment(input);
+  }
   const db = getIamDb();
   const current = await getDepartment(input.tenantId, input.id);
   if (!current) throw new Error("部门不存在");
@@ -285,6 +309,9 @@ export async function deleteDepartment(input: {
   id: string;
   actorUserId?: string | null;
 }): Promise<void> {
+  if (resolveDatabaseConfig().dialect === "mysql") {
+    return mysqlDeptsRepo.deleteDepartment(input);
+  }
   const db = getIamDb();
   const current = await getDepartment(input.tenantId, input.id);
   if (!current) throw new Error("部门不存在");
@@ -418,6 +445,9 @@ export async function findOrCreateDepartmentPath(input: {
 
 /** 返回从直属部门沿 parent 链到根的 id 列表（含自身，直属在前） */
 export async function listDepartmentAncestorIds(tenantId: string, deptId: string): Promise<string[]> {
+  if (resolveDatabaseConfig().dialect === "mysql") {
+    return mysqlDeptsRepo.listDepartmentAncestorIds(tenantId, deptId);
+  }
   const ids: string[] = [];
   let currentId: string | null = deptId;
   const seen = new Set<string>();
@@ -433,6 +463,9 @@ export async function listDepartmentAncestorIds(tenantId: string, deptId: string
 
 /** 返回某部门及其子部门 id 列表（含自身） */
 export async function listDepartmentSubtreeIds(tenantId: string, deptId: string): Promise<string[]> {
+  if (resolveDatabaseConfig().dialect === "mysql") {
+    return mysqlDeptsRepo.listDepartmentSubtreeIds(tenantId, deptId);
+  }
   const db = getIamDb();
   const self = await getDepartment(tenantId, deptId);
   if (!self) return [];
@@ -442,4 +475,28 @@ export async function listDepartmentSubtreeIds(tenantId: string, deptId: string)
     .from(departments)
     .where(and(eq(departments.tenantId, tenantId), like(departments.path, `${base}%`)));
   return rows.map((r) => r.id);
+}
+
+const departmentRepositoryMethods = {
+  getDefaultOrgId,
+  listDepartmentsFlat,
+  listDepartmentsTree,
+  getDepartment,
+  createDepartment,
+  updateDepartmentName,
+  moveDepartment,
+  deleteDepartment,
+  listDepartmentAncestorIds,
+  listDepartmentSubtreeIds,
+};
+
+const postgresqlDepartmentsRepository: DepartmentsRepository = {
+  dialect: "postgresql",
+  ...departmentRepositoryMethods,
+};
+
+export function getDepartmentsRepository(): DepartmentsRepository {
+  return resolveDatabaseConfig().dialect === "mysql"
+    ? mysqlDeptsRepo
+    : postgresqlDepartmentsRepository;
 }

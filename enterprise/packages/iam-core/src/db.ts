@@ -1,96 +1,59 @@
+/**
+ * IAM database entrypoint.
+ *
+ * Prefer `resolveDatabaseConfig` / `getRepositoryRegistry` for new code.
+ * `getIamDb()` remains for PostgreSQL adapters during dual-dialect migration
+ * and is deprecated for business/API layers after Phase 4.
+ */
+import { resolveDatabaseConfig } from "./database/config";
 import {
-  agentTokenTraces,
-  auditEvents,
-  authRefreshSessions,
-  departments,
-  enterpriseRuntimeModelProviders,
-  enterpriseRuntimePolicySnapshots,
-  enterpriseRuntimePricing,
-  enterpriseRuntimeBudgets,
-  enterpriseRuntimeCompliance,
-  enterpriseRuntimePatRevocation,
-  enterpriseRuntimeTokenQuotas,
-  enterpriseQuotaPlans,
-  enterpriseQuotaPlanAssignments,
-  enterpriseRuntimeUserVisibleModels,
-  gatewayAuditEvents,
-  gatewayBudgetAlerts,
-  gatewayQuotaPoolUsage,
-  sessionGrants,
-  organizations,
-  roles,
-  ssoProviders,
-  userRoles,
-  users,
-} from "@agenticx/db-schema";
-import { drizzle, type NodePgDatabase } from "drizzle-orm/node-postgres";
-import { Pool } from "pg";
+  createPgDb,
+  createPgPool,
+  pgSchema,
+  resetPgDatabaseForTests,
+  type PgIamDb,
+  type PgIamDbSchema,
+} from "./database/postgres";
 
-const schema = {
-  users,
-  departments,
-  organizations,
-  roles,
-  userRoles,
-  ssoProviders,
-  auditEvents,
-  gatewayAuditEvents,
-  enterpriseRuntimeModelProviders,
-  enterpriseRuntimeUserVisibleModels,
-  enterpriseRuntimeTokenQuotas,
-  enterpriseQuotaPlans,
-  enterpriseQuotaPlanAssignments,
-  enterpriseRuntimePolicySnapshots,
-  enterpriseRuntimePricing,
-  enterpriseRuntimeBudgets,
-  gatewayBudgetAlerts,
-  gatewayQuotaPoolUsage,
-  sessionGrants,
-  enterpriseRuntimeCompliance,
-  enterpriseRuntimePatRevocation,
-  authRefreshSessions,
-  agentTokenTraces,
-};
+export type IamDbSchema = PgIamDbSchema;
+/** @deprecated Prefer dialect-neutral RepositoryRegistry / QueryExecutor. */
+export type IamDb = PgIamDb;
 
-export type IamDbSchema = typeof schema;
+export { resolveDatabaseConfig } from "./database/config";
+export type { DatabaseConfig, DatabaseDialect } from "./database/config";
+export type { QueryExecutor, RepositoryRegistry } from "./database/types";
+export {
+  createRepositoryRegistry,
+  getRepositoryRegistry,
+  getQueryExecutorSync,
+  __resetDatabaseForTests,
+} from "./database/factory";
 
-/** Root DB 与 `transaction` 回调内的 client 同一类型，便于跨事务复用 repo 逻辑 */
-export type IamDb = NodePgDatabase<IamDbSchema>;
-
-declare global {
-  var __agenticxIamPgPool: Pool | undefined;
-}
-
-function getDatabaseUrl(): string {
-  const configured = process.env.DATABASE_URL?.trim();
-  const raw =
-    configured ||
-    (process.env.NODE_ENV !== "production" ? "postgresql://postgres:postgres@127.0.0.1:5432/agenticx" : "");
-  if (!raw) throw new Error("DATABASE_URL is not configured");
-  if (/sslmode=/i.test(raw)) return raw;
-  const joiner = raw.includes("?") ? "&" : "?";
-  return `${raw}${joiner}sslmode=disable`;
-}
-
-export function getIamPool(): Pool {
-  if (!globalThis.__agenticxIamPgPool) {
-    globalThis.__agenticxIamPgPool = new Pool({ connectionString: getDatabaseUrl(), max: 10 });
+/** @deprecated Use createPgPool via database/postgres internally. */
+export function getIamPool() {
+  const config = resolveDatabaseConfig();
+  if (config.dialect !== "postgresql") {
+    throw new Error(
+      `getIamPool() is PostgreSQL-only; current dialect=${config.dialect}. Use getRepositoryRegistry().`,
+    );
   }
-  return globalThis.__agenticxIamPgPool;
+  return createPgPool(config.url);
 }
 
-let dbSingleton: IamDb | null = null;
-
+/** @deprecated Prefer getRepositoryRegistry(); PostgreSQL adapter internal use only. */
 export function getIamDb(): IamDb {
-  if (!dbSingleton) {
-    dbSingleton = drizzle(getIamPool(), { schema });
+  const config = resolveDatabaseConfig();
+  if (config.dialect !== "postgresql") {
+    throw new Error(
+      `getIamDb() is PostgreSQL-only; current dialect=${config.dialect}. Use getRepositoryRegistry().`,
+    );
   }
-  return dbSingleton;
+  return createPgDb(config);
 }
 
-/** Test-only: release pool */
+/** Test-only: release pools */
 export function __resetIamDbForTests(): void {
-  dbSingleton = null;
-  void globalThis.__agenticxIamPgPool?.end().catch(() => undefined);
-  globalThis.__agenticxIamPgPool = undefined;
+  resetPgDatabaseForTests();
 }
+
+export { pgSchema as schema };

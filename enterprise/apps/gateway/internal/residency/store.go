@@ -9,13 +9,13 @@ import (
 	"sync"
 	"time"
 
+	"github.com/agenticx/enterprise/gateway/internal/database"
 	"github.com/agenticx/enterprise/gateway/internal/gatewayinternal"
-	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 // ComplianceStore loads tenant data residency and cross-border policy.
 type ComplianceStore struct {
-	pool      *pgxpool.Pool
+	database  *database.Handle
 	remoteURL string
 	mu        sync.RWMutex
 	byTenant  map[string]TenantPolicy
@@ -23,9 +23,9 @@ type ComplianceStore struct {
 	cacheTTL  time.Duration
 }
 
-func NewComplianceStore(pool *pgxpool.Pool) *ComplianceStore {
+func NewComplianceStore(handle *database.Handle) *ComplianceStore {
 	return &ComplianceStore{
-		pool:      pool,
+		database:  handle,
 		remoteURL: strings.TrimSpace(os.Getenv("GATEWAY_REMOTE_COMPLIANCE_URL")),
 		byTenant:  map[string]TenantPolicy{},
 		cacheTTL:  15 * time.Second,
@@ -37,7 +37,7 @@ func (s *ComplianceStore) PolicyFor(ctx context.Context, tenantID string) Tenant
 	if tenantID == "" {
 		return TenantPolicy{CrossBorderAction: ActionAllow}
 	}
-	if s.pool != nil {
+	if s.database != nil {
 		if p, err := s.queryPG(ctx, tenantID); err == nil {
 			return p
 		}
@@ -54,14 +54,18 @@ func (s *ComplianceStore) PolicyFor(ctx context.Context, tenantID string) Tenant
 }
 
 func (s *ComplianceStore) queryPG(ctx context.Context, tenantID string) (TenantPolicy, error) {
-	if s.pool == nil {
+	if s.database == nil {
 		return TenantPolicy{}, context.Canceled
 	}
 	var residency, action *string
-	err := s.pool.QueryRow(ctx, `
+	row, err := s.database.QueryRowContext(ctx, `
 SELECT data_residency, cross_border_action
 FROM enterprise_runtime_compliance
-WHERE tenant_id = $1`, tenantID).Scan(&residency, &action)
+WHERE tenant_id = ?`, tenantID)
+	if err != nil {
+		return TenantPolicy{}, err
+	}
+	err = row.Scan(&residency, &action)
 	if err != nil {
 		return TenantPolicy{}, err
 	}
