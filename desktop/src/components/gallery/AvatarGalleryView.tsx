@@ -134,21 +134,24 @@ export function AvatarGalleryView() {
 
   return (
     <MainViewShell>
-      <div className="mb-5 flex items-start justify-between gap-4">
-        <div className="min-w-0">
-          <h2 className="text-lg font-semibold text-text-strong">数字分身</h2>
-          <p className="mt-1 text-sm text-text-muted">
-            为你的团队召集专精分身；点击卡片可编辑设置，点「唤起」开始对话。
-          </p>
+      {/* Sticky title row only; 关注分身仍靠排序置顶，不钉死 */}
+      <div className="sticky top-0 z-10 -mx-6 -mt-6 mb-5 border-b border-border bg-surface-base px-6 pb-4 pt-6">
+        <div className="flex items-start justify-between gap-4">
+          <div className="min-w-0">
+            <h2 className="text-lg font-semibold text-text-strong">数字分身</h2>
+            <p className="mt-1 text-sm text-text-muted">
+              为你的团队召集专精分身；点击卡片可编辑设置，点「唤起」开始对话。
+            </p>
+          </div>
+          <button
+            type="button"
+            className="flex shrink-0 items-center gap-1.5 rounded-lg bg-btnPrimary px-3 py-2 text-[13px] font-medium text-btnPrimary-text transition hover:bg-btnPrimary-hover"
+            onClick={() => setCreateOpen(true)}
+          >
+            <Plus className="h-4 w-4" />
+            新建分身
+          </button>
         </div>
-        <button
-          type="button"
-          className="flex shrink-0 items-center gap-1.5 rounded-lg bg-btnPrimary px-3 py-2 text-[13px] font-medium text-btnPrimary-text transition hover:bg-btnPrimary-hover"
-          onClick={() => setCreateOpen(true)}
-        >
-          <Plus className="h-4 w-4" />
-          新建分身
-        </button>
       </div>
 
       {!avatarsLoaded ? (
