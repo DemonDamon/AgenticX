@@ -1,6 +1,9 @@
-import { gatewayAuditEvents } from "@agenticx/db-schema";
-import { getIamDb } from "@agenticx/iam-core";
+import { gatewayAuditEvents as pgGatewayAuditEvents } from "@agenticx/db-schema";
+import { gatewayAuditEvents as mysqlGatewayAuditEvents } from "@agenticx/db-schema/mysql";
+import { getIamDb, resolveDatabaseConfig } from "@agenticx/iam-core";
 import { ulid } from "ulid";
+
+import { getPolicyMysqlDb } from "./services/mysql-database";
 
 export type PolicyAuditActor = {
   tenantId: string;
@@ -11,11 +14,10 @@ export type PolicyAuditActor = {
 export async function insertPolicyAuditEvent(
   actor: PolicyAuditActor,
   eventType: "policy_publish" | "policy_rule_change",
-  detail: Record<string, unknown>
+  detail: Record<string, unknown>,
 ): Promise<void> {
-  const db = getIamDb();
   const now = new Date();
-  await db.insert(gatewayAuditEvents).values({
+  const values = {
     id: ulid(),
     tenantId: actor.tenantId,
     eventTime: now,
@@ -40,5 +42,10 @@ export async function insertPolicyAuditEvent(
     signature: null,
     createdAt: now,
     updatedAt: now,
-  });
+  };
+  if (resolveDatabaseConfig().dialect === "mysql") {
+    await getPolicyMysqlDb().insert(mysqlGatewayAuditEvents).values(values);
+    return;
+  }
+  await getIamDb().insert(pgGatewayAuditEvents).values(values);
 }

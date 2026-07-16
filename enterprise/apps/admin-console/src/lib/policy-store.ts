@@ -1,4 +1,5 @@
-import { users } from "@agenticx/db-schema";
+import { users as pgUsers } from "@agenticx/db-schema";
+import { users as mysqlUsers } from "@agenticx/db-schema/mysql";
 import {
   createPolicyStore,
   type PolicyPack,
@@ -9,9 +10,10 @@ import {
   type PolicyStage,
   type PolicyTestResult,
 } from "@agenticx/feature-policy";
-import { getIamDb } from "@agenticx/iam-core";
+import { getIamDb, resolveDatabaseConfig } from "@agenticx/iam-core";
 import { and, eq } from "drizzle-orm";
 import type { AdminSession } from "./admin-auth";
+import { getAdminMysqlDb } from "./db-stores/mysql/database";
 
 const store = createPolicyStore();
 
@@ -22,11 +24,25 @@ export type PolicyActor = {
 };
 
 export async function buildPolicyActor(session: AdminSession): Promise<PolicyActor> {
+  const dialect = resolveDatabaseConfig().dialect;
+  if (dialect === "mysql") {
+    const db = getAdminMysqlDb();
+    const [row] = await db
+      .select({ deptId: mysqlUsers.deptId })
+      .from(mysqlUsers)
+      .where(and(eq(mysqlUsers.tenantId, session.tenantId), eq(mysqlUsers.id, session.userId)))
+      .limit(1);
+    return {
+      tenantId: session.tenantId,
+      userId: session.userId,
+      deptId: row?.deptId ?? null,
+    };
+  }
   const db = getIamDb();
   const [row] = await db
-    .select({ deptId: users.deptId })
-    .from(users)
-    .where(and(eq(users.tenantId, session.tenantId), eq(users.id, session.userId)))
+    .select({ deptId: pgUsers.deptId })
+    .from(pgUsers)
+    .where(and(eq(pgUsers.tenantId, session.tenantId), eq(pgUsers.id, session.userId)))
     .limit(1);
   return {
     tenantId: session.tenantId,
