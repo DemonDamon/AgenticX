@@ -9328,9 +9328,16 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
   createNewTopicRef.current = createNewTopic;
   useEffect(() => {
     const onNewTopic = (e: Event) => {
-      const detail = (e as CustomEvent).detail as { paneId?: string } | undefined;
+      const detail = (e as CustomEvent).detail as { paneId?: string; draftText?: string } | undefined;
       if (detail?.paneId && detail.paneId !== pane.id) return;
       createNewTopicRef.current(false, pane.sessionMode ?? "daily_office");
+      const draftText = detail?.draftText;
+      if (draftText) {
+        // setInput alone only flips React state; the contenteditable composer
+        // renders from direct DOM writes, so we must go through
+        // setComposerText to actually show the draft text in the box.
+        window.setTimeout(() => setComposerText(draftText), 0);
+      }
     };
     window.addEventListener("agenticx:pane:new-topic", onNewTopic);
     return () => window.removeEventListener("agenticx:pane:new-topic", onNewTopic);

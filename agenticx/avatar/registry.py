@@ -32,6 +32,27 @@ def normalize_avatar_color(value: Any) -> str:
     key = str(value or "").strip().lower()
     return key if key in AVATAR_COLOR_KEYS else ""
 
+
+AVATAR_TAGS_MAX_COUNT = 8
+AVATAR_TAG_MAX_LEN = 24
+
+
+def normalize_avatar_tags(value: Any) -> List[str]:
+    """Sanitize gallery-card skill tags: trim, dedupe, cap count/length."""
+    if not isinstance(value, list):
+        return []
+    out: List[str] = []
+    seen = set()
+    for item in value:
+        tag = str(item or "").strip()[:AVATAR_TAG_MAX_LEN]
+        if not tag or tag in seen:
+            continue
+        seen.add(tag)
+        out.append(tag)
+        if len(out) >= AVATAR_TAGS_MAX_COUNT:
+            break
+    return out
+
 IDENTITY_TEMPLATE = """# IDENTITY.md - {name}
 
 - Name: {name}
@@ -60,6 +81,10 @@ class AvatarConfig:
     role: str = ""
     avatar_url: str = ""
     system_prompt: str = ""
+    # Short blurb shown on the gallery card, distinct from system_prompt (behavior rules).
+    description: str = ""
+    # Skill tags shown as chips on the gallery card, e.g. ["PyTorch优化", "GPU性能调优"].
+    tags: List[str] = field(default_factory=list)
     workspace_dir: str = ""
     created_by: str = "manual"
     default_provider: str = ""
@@ -82,6 +107,8 @@ class AvatarConfig:
             d["skills_enabled"] = self.skills_enabled
         # Always persist color so clearing back to Meta ("") removes a prior key.
         d["color"] = normalize_avatar_color(self.color)
+        if self.tags:
+            d["tags"] = normalize_avatar_tags(self.tags)
         return d
 
     @classmethod
@@ -90,6 +117,8 @@ class AvatarConfig:
         filtered = {k: v for k, v in data.items() if k in known}
         if "color" in filtered:
             filtered["color"] = normalize_avatar_color(filtered.get("color"))
+        if "tags" in filtered:
+            filtered["tags"] = normalize_avatar_tags(filtered.get("tags"))
         return cls(**filtered)
 
 
@@ -152,6 +181,8 @@ class AvatarRegistry:
         *,
         avatar_url: str = "",
         system_prompt: str = "",
+        description: str = "",
+        tags: Optional[List[str]] = None,
         created_by: str = "manual",
         default_provider: str = "",
         default_model: str = "",
@@ -183,6 +214,8 @@ class AvatarRegistry:
             role=role,
             avatar_url=avatar_url,
             system_prompt=system_prompt,
+            description=str(description or "").strip(),
+            tags=normalize_avatar_tags(tags),
             workspace_dir=workspace_dir,
             created_by=created_by,
             default_provider=default_provider,
@@ -227,6 +260,9 @@ class AvatarRegistry:
                 continue
             if key == "color":
                 config.color = normalize_avatar_color(value)
+                continue
+            if key == "tags":
+                config.tags = normalize_avatar_tags(value)
                 continue
             if hasattr(config, key):
                 setattr(config, key, value)

@@ -131,6 +131,9 @@ type AvatarItem = {
   default_model?: string;
   /** Empty = Meta default; else palette key (cyan/violet/…). */
   color?: string;
+  workspace_dir?: string;
+  description?: string;
+  tags?: string[];
 };
 
 type ToolStatusItem = {
@@ -506,6 +509,8 @@ declare global {
         role?: string;
         avatar_url?: string;
         system_prompt?: string;
+        description?: string;
+        tags?: string[];
         created_by?: string;
         tools_enabled?: Record<string, boolean>;
         skills_enabled?: Record<string, boolean> | null;
@@ -520,6 +525,8 @@ declare global {
         avatar_url?: string;
         pinned?: boolean;
         system_prompt?: string;
+        description?: string;
+        tags?: string[];
         tools_enabled?: Record<string, boolean>;
         skills_enabled?: Record<string, boolean> | null;
         brains_enabled?: "*" | string[] | null;

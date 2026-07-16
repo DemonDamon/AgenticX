@@ -79,6 +79,9 @@ export function AvatarSidebar() {
             defaultProvider: a.default_provider ?? "",
             defaultModel: a.default_model ?? "",
             color: typeof a.color === "string" ? a.color : "",
+            workspaceDir: a.workspace_dir ?? "",
+            description: a.description ?? "",
+            tags: Array.isArray(a.tags) ? a.tags.map(String) : [],
           }))
         );
         return true;

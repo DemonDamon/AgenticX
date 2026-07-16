@@ -83,6 +83,8 @@ export function AvatarSettingsPanel(props: Props) {
   const [name, setName] = useState(avatar?.name ?? "");
   const [role, setRole] = useState(avatar?.role ?? "");
   const [systemPrompt, setSystemPrompt] = useState(avatar?.systemPrompt ?? "");
+  const [blurb, setBlurb] = useState(avatar?.description ?? "");
+  const [tagsInput, setTagsInput] = useState((avatar?.tags ?? []).join(", "));
   const [avatarUrlDraft, setAvatarUrlDraft] = useState(avatar?.avatarUrl ?? "");
   const [avatarImageHint, setAvatarImageHint] = useState("");
   const [defaultProvider, setDefaultProvider] = useState(avatar?.defaultProvider ?? "");
@@ -260,11 +262,17 @@ export function AvatarSettingsPanel(props: Props) {
           : brainsMountMode === "custom"
             ? brainsCustomIds
             : null;
+      const tags = tagsInput
+        .split(/[,，]/)
+        .map((t) => t.trim())
+        .filter(Boolean);
       const res = await window.agenticxDesktop.updateAvatar({
         id: avatar.id,
         name: name.trim() || avatar.name,
         role: role.trim(),
         system_prompt: systemPrompt.trim(),
+        description: blurb.trim(),
+        tags,
         avatar_url: avatarUrlDraft.trim(),
         default_provider: defaultProvider.trim(),
         default_model: defaultModel.trim(),
@@ -532,6 +540,26 @@ export function AvatarSettingsPanel(props: Props) {
                   value={systemPrompt}
                   onChange={(e) => setSystemPrompt(e.target.value)}
                   placeholder="例如：你是资深前端工程师，先给结论，再给步骤；代码优先给可直接运行版本。"
+                />
+              </label>
+              <label className="block text-sm text-text-muted">
+                简介
+                <span className="ml-1 text-xs font-normal text-text-faint">（可选，展示在分身卡片上）</span>
+                <textarea
+                  className="mt-1 min-h-[64px] w-full resize-y rounded-md border border-border bg-surface-panel px-3 py-2 text-sm text-text-primary"
+                  value={blurb}
+                  onChange={(e) => setBlurb(e.target.value)}
+                  placeholder="一两句话说明该分身能做什么，会展示在分身卡片上..."
+                />
+              </label>
+              <label className="block text-sm text-text-muted">
+                标签
+                <span className="ml-1 text-xs font-normal text-text-faint">（可选，逗号分隔，最多 8 个）</span>
+                <input
+                  className="mt-1 w-full rounded-md border border-border bg-surface-panel px-3 py-2 text-sm text-text-primary"
+                  value={tagsInput}
+                  onChange={(e) => setTagsInput(e.target.value)}
+                  placeholder="例：PyTorch优化, 大模型运行框架, GPU性能调优"
                 />
               </label>
               <label className="block text-sm text-text-muted">

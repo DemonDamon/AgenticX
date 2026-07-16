@@ -201,6 +201,8 @@ contextBridge.exposeInMainWorld("agenticxDesktop", {
     role?: string;
     avatar_url?: string;
     system_prompt?: string;
+    description?: string;
+    tags?: string[];
     created_by?: string;
     tools_enabled?: Record<string, boolean>;
     skills_enabled?: Record<string, boolean> | null;
@@ -216,6 +218,8 @@ contextBridge.exposeInMainWorld("agenticxDesktop", {
     avatar_url?: string;
     pinned?: boolean;
     system_prompt?: string;
+    description?: string;
+    tags?: string[];
     tools_enabled?: Record<string, boolean>;
     skills_enabled?: Record<string, boolean> | null;
     brains_enabled?: "*" | string[] | null;

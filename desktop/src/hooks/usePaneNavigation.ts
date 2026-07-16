@@ -218,8 +218,12 @@ export function usePaneNavigation() {
     [panes, addPane, setActivePaneId, setActiveAvatarId, setPaneSessionId, setMainView]
   );
 
-  /** "新建任务": focus the meta pane and start a brand-new conversation. */
-  const newMetaTask = useCallback(() => {
+  /**
+   * "新建任务": focus the meta pane and start a brand-new conversation.
+   * Optional `draftText` pre-fills the composer (editable, not auto-sent) —
+   * used by the avatar gallery's "AI 创建" flow to hand off a template prompt.
+   */
+  const newMetaTask = useCallback((draftText?: string) => {
     setMainView("chat");
     const metaPane = panes.find((item) => item.avatarId === null);
     let paneId = metaPane?.id;
@@ -234,7 +238,7 @@ export function usePaneNavigation() {
     // Defer so the pane is mounted/focused before it handles the new-topic event.
     window.setTimeout(() => {
       window.dispatchEvent(
-        new CustomEvent("agenticx:pane:new-topic", { detail: { paneId: targetPaneId } })
+        new CustomEvent("agenticx:pane:new-topic", { detail: { paneId: targetPaneId, draftText } })
       );
     }, 0);
   }, [panes, addPane, setActivePaneId, setActiveAvatarId, setMainView]);

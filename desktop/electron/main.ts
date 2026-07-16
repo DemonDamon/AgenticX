@@ -7697,6 +7697,8 @@ function registerIpc(): void {
     role?: string;
     avatar_url?: string;
     system_prompt?: string;
+    description?: string;
+    tags?: string[];
     created_by?: string;
     tools_enabled?: Record<string, boolean>;
     skills_enabled?: Record<string, boolean> | null;
@@ -7899,6 +7901,8 @@ function registerIpc(): void {
     avatar_url?: string;
     pinned?: boolean;
     system_prompt?: string;
+    description?: string;
+    tags?: string[];
     tools_enabled?: Record<string, boolean>;
     skills_enabled?: Record<string, boolean> | null;
     default_provider?: string;

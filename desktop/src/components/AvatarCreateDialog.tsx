@@ -12,20 +12,26 @@ type Props = {
     name: string;
     role: string;
     systemPrompt: string;
+    blurb?: string;
+    tags?: string[];
     toolsEnabled: Record<string, boolean>;
     skillsEnabled?: Record<string, boolean>;
     defaultProvider?: string;
     defaultModel?: string;
     workspaceDir?: string;
   }) => Promise<void>;
+  /** "AI 创建" tab: hand the description off to a new Meta chat draft instead of a one-shot API call. */
+  onCreateViaChat: (description: string) => void;
 };
 
 type Mode = "manual" | "ai";
-export function AvatarCreateDialog({ open, onClose, onCreate }: Props) {
+export function AvatarCreateDialog({ open, onClose, onCreate, onCreateViaChat }: Props) {
   const [mode, setMode] = useState<Mode>("manual");
   const [name, setName] = useState("");
   const [role, setRole] = useState("");
   const [systemPrompt, setSystemPrompt] = useState("");
+  const [blurb, setBlurb] = useState("");
+  const [tagsInput, setTagsInput] = useState("");
   const [description, setDescription] = useState("");
   const [busy, setBusy] = useState(false);
   const [aiError, setAiError] = useState("");
@@ -71,10 +77,16 @@ export function AvatarCreateDialog({ open, onClose, onCreate }: Props) {
       const skillsOnlyFalse = Object.fromEntries(
         Object.entries(skillsEnabledDraft).filter(([, v]) => v === false),
       );
+      const tags = tagsInput
+        .split(/[,，]/)
+        .map((t) => t.trim())
+        .filter(Boolean);
       await onCreate({
         name: name.trim(),
         role: role.trim(),
         systemPrompt: systemPrompt.trim(),
+        blurb: blurb.trim(),
+        tags,
         toolsEnabled: { ...toolsEnabled },
         ...(Object.keys(skillsOnlyFalse).length > 0 ? { skillsEnabled: skillsOnlyFalse } : {}),
         defaultProvider: defaultProvider.trim(),
@@ -84,6 +96,8 @@ export function AvatarCreateDialog({ open, onClose, onCreate }: Props) {
       setName("");
       setRole("");
       setSystemPrompt("");
+      setBlurb("");
+      setTagsInput("");
       setToolsEnabled({});
       setSkillsEnabledDraft({});
       setDefaultProvider("");
@@ -97,29 +111,21 @@ export function AvatarCreateDialog({ open, onClose, onCreate }: Props) {
     }
   };
 
-  const handleAiGenerate = async () => {
-    if (!description.trim()) return;
-    setBusy(true);
+  const handleCreateViaChat = () => {
+    const desc = description.trim();
+    if (!desc) return;
+    onCreateViaChat(desc);
+    setDescription("");
     setAiError("");
-    try {
-      const result = await window.agenticxDesktop.generateAvatar({ description: description.trim() });
-      if (result.ok) {
-        setDescription("");
-        onClose();
-      } else {
-        setAiError(result.error || "AI 生成失败");
-      }
-    } catch (err) {
-      setAiError(String(err));
-    } finally {
-      setBusy(false);
-    }
+    resetAndClose();
   };
 
   const resetAndClose = () => {
     setName("");
     setRole("");
     setSystemPrompt("");
+    setBlurb("");
+    setTagsInput("");
     setDescription("");
     setAiError("");
     setToolsEnabled({});
@@ -142,7 +148,7 @@ export function AvatarCreateDialog({ open, onClose, onCreate }: Props) {
         <h3 className="mb-4 text-[16px] font-semibold text-text-primary">创建数字分身</h3>
 
         <div className="mb-4 flex gap-1 rounded-lg bg-surface-card p-0.5">
-          {([["manual", "手动创建"], ["ai", "AI 生成"]] as const).map(([key, label]) => (
+          {([["manual", "手动创建"], ["ai", "AI 创建"]] as const).map(([key, label]) => (
             <button
               key={key}
               className={`flex-1 rounded-md border px-3 py-1.5 text-xs font-medium transition ${
@@ -188,6 +194,27 @@ export function AvatarCreateDialog({ open, onClose, onCreate }: Props) {
                   value={systemPrompt}
                   onChange={(e) => setSystemPrompt(e.target.value)}
                   placeholder="自定义角色行为指令..."
+                />
+              </label>
+              <label className="block text-sm text-text-muted">
+                简介
+                <span className="ml-1 text-xs text-text-faint">(可选，展示在分身卡片上)</span>
+                <textarea
+                  className="mt-1 w-full resize-none rounded-md border border-border bg-surface-panel px-3 py-2 text-sm"
+                  rows={2}
+                  value={blurb}
+                  onChange={(e) => setBlurb(e.target.value)}
+                  placeholder="一两句话说明该分身能做什么，会展示在分身卡片上..."
+                />
+              </label>
+              <label className="block text-sm text-text-muted">
+                标签
+                <span className="ml-1 text-xs text-text-faint">(可选，逗号分隔，最多 8 个)</span>
+                <input
+                  className="mt-1 w-full rounded-md border border-border bg-surface-panel px-3 py-2 text-sm"
+                  value={tagsInput}
+                  onChange={(e) => setTagsInput(e.target.value)}
+                  placeholder="例：PyTorch优化, 大模型运行框架, GPU性能调优"
                 />
               </label>
               <label className="block text-sm text-text-muted">
@@ -306,7 +333,7 @@ export function AvatarCreateDialog({ open, onClose, onCreate }: Props) {
                   rows={4}
                   value={description}
                   onChange={(e) => setDescription(e.target.value)}
-                  placeholder="描述分身的能力、性格和专长，AI 将自动生成名称、角色和系统提示..."
+                  placeholder="描述分身的能力、性格和专长..."
                   autoFocus
                 />
               </label>
@@ -325,10 +352,10 @@ export function AvatarCreateDialog({ open, onClose, onCreate }: Props) {
               </button>
               <button
                 className="rounded-md bg-btnPrimary px-4 py-1.5 text-sm font-medium text-btnPrimary-text transition hover:bg-btnPrimary-hover disabled:opacity-40"
-                disabled={busy || !description.trim()}
-                onClick={handleAiGenerate}
+                disabled={!description.trim()}
+                onClick={handleCreateViaChat}
               >
-                {busy ? "生成中..." : "AI 生成"}
+                开始创建
               </button>
             </div>
           </>

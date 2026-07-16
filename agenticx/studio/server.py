@@ -4850,11 +4850,14 @@ def create_studio_app() -> FastAPI:
             }
         skills_enabled = _sanitize_avatar_skills_enabled(payload.get("skills_enabled"))
         brains_enabled = _sanitize_avatar_brains_enabled(payload.get("brains_enabled"))
+        raw_tags = payload.get("tags")
         config = avatar_registry.create_avatar(
             name=name,
             role=str(payload.get("role", "")).strip(),
             avatar_url=str(payload.get("avatar_url", "")).strip(),
             system_prompt=str(payload.get("system_prompt", "")).strip(),
+            description=str(payload.get("description", "")).strip(),
+            tags=raw_tags if isinstance(raw_tags, list) else None,
             created_by=str(payload.get("created_by", "")).strip(),
             default_provider=str(payload.get("default_provider", "")).strip(),
             default_model=str(payload.get("default_model", "")).strip(),

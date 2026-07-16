@@ -554,7 +554,13 @@ _META_ONLY_TOOLS: List[Dict[str, Any]] = [
                 "avatar list. Use this after clarifying the user's needs and "
                 "distilling a name, role, and system_prompt. The avatar is written "
                 "to the registry and immediately appears in the sidebar. "
-                "Do NOT just write a markdown file — this tool actually creates it."
+                "Do NOT just write a markdown file — this tool actually creates it. "
+                "IMPORTANT: before calling this tool, you MUST first call "
+                "request_action_confirmation with a summary showing the proposed "
+                "name/role/system_prompt, and only proceed after receiving "
+                "[ACTION_CONFIRMED] in the tool result. If the user rejects or the "
+                "confirmation expires, do not call create_avatar; ask what to adjust "
+                "instead."
             ),
             "parameters": {
                 "type": "object",

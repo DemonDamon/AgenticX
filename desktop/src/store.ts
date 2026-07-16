@@ -80,6 +80,12 @@ export type Avatar = {
    * One of: cyan | violet | rose | amber | emerald | fuchsia | sky | orange.
    */
   color?: string;
+  /** Filesystem path to this avatar's isolated workspace directory. */
+  workspaceDir?: string;
+  /** Short blurb shown on the gallery card, distinct from systemPrompt (behavior rules). */
+  description?: string;
+  /** Skill tags shown as chips on the gallery card. */
+  tags?: string[];
 };
 
 export type SessionItem = {
