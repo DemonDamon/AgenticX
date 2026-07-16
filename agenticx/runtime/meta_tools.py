@@ -552,15 +552,16 @@ _META_ONLY_TOOLS: List[Dict[str, Any]] = [
             "description": (
                 "Create a new persistent digital avatar (数字分身) in the desktop "
                 "avatar list. Use this after clarifying the user's needs and "
-                "distilling a name, role, and system_prompt. The avatar is written "
-                "to the registry and immediately appears in the sidebar. "
-                "Do NOT just write a markdown file — this tool actually creates it. "
+                "distilling a name, role, description, tags, and system_prompt. "
+                "The avatar is written to the registry and immediately appears in "
+                "the sidebar/gallery. Do NOT just write a markdown file — this tool "
+                "actually creates it. "
                 "IMPORTANT: before calling this tool, you MUST first call "
                 "request_action_confirmation with a summary showing the proposed "
-                "name/role/system_prompt, and only proceed after receiving "
-                "[ACTION_CONFIRMED] in the tool result. If the user rejects or the "
-                "confirmation expires, do not call create_avatar; ask what to adjust "
-                "instead."
+                "name/role/description/tags/working style, and only proceed after "
+                "receiving [ACTION_CONFIRMED] in the tool result. If the user rejects "
+                "or the confirmation expires, do not call create_avatar; revise the "
+                "proposal and ask for confirmation again."
             ),
             "parameters": {
                 "type": "object",
@@ -572,6 +573,21 @@ _META_ONLY_TOOLS: List[Dict[str, Any]] = [
                     "role": {
                         "type": "string",
                         "description": "Short role, e.g. 进取型全市场交易分析师.",
+                    },
+                    "description": {
+                        "type": "string",
+                        "description": (
+                            "Short gallery-card blurb (1-2 sentences) describing what "
+                            "this avatar does. Distinct from system_prompt."
+                        ),
+                    },
+                    "tags": {
+                        "type": "array",
+                        "description": (
+                            "Skill tags shown as chips on the gallery card "
+                            "(max 8, each <= 24 chars), e.g. [\"PyTorch优化\", \"GPU性能调优\"]."
+                        ),
+                        "items": {"type": "string"},
                     },
                     "system_prompt": {
                         "type": "string",
@@ -2973,6 +2989,9 @@ async def dispatch_meta_tool_async(
         av_name = str(arguments.get("name", "")).strip()
         av_role = str(arguments.get("role", "")).strip()
         av_prompt = str(arguments.get("system_prompt", "")).strip()
+        av_description = str(arguments.get("description", "")).strip()
+        raw_tags = arguments.get("tags")
+        av_tags = raw_tags if isinstance(raw_tags, list) else None
         if not av_name:
             return json.dumps(
                 {
@@ -3001,6 +3020,8 @@ async def dispatch_meta_tool_async(
             name=av_name,
             role=av_role,
             system_prompt=av_prompt,
+            description=av_description,
+            tags=av_tags,
             created_by="meta",
             default_provider=str(arguments.get("default_provider", "")).strip(),
             default_model=str(arguments.get("default_model", "")).strip(),
@@ -3011,6 +3032,8 @@ async def dispatch_meta_tool_async(
                 "avatar_id": cfg.id,
                 "name": cfg.name,
                 "role": cfg.role,
+                "description": cfg.description,
+                "tags": list(cfg.tags or []),
                 "message": f"数字分身「{cfg.name}」已创建并加入分身列表（id={cfg.id}）。",
             },
             ensure_ascii=False,

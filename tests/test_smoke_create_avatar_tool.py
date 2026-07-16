@@ -41,6 +41,23 @@ def test_create_avatar_registered_in_meta_tools() -> None:
     assert "chat_with_avatar" in names
 
 
+def test_create_avatar_schema_includes_description_and_tags() -> None:
+    create_fn: dict[str, Any] | None = None
+    for item in META_AGENT_TOOLS:
+        if not isinstance(item, dict):
+            continue
+        fn = item.get("function")
+        if isinstance(fn, dict) and fn.get("name") == "create_avatar":
+            create_fn = fn
+            break
+    assert create_fn is not None
+    props = create_fn["parameters"]["properties"]
+    assert "description" in props
+    assert "tags" in props
+    assert props["tags"]["type"] == "array"
+    assert props["tags"]["items"]["type"] == "string"
+
+
 @pytest.mark.asyncio
 async def test_create_avatar_dispatch_persists(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     root = tmp_path / "avatars"
@@ -57,6 +74,8 @@ async def test_create_avatar_dispatch_persists(tmp_path: Path, monkeypatch: pyte
         {
             "name": "飞廉",
             "role": "进取型全市场交易分析师",
+            "description": "专注全市场机会扫描与风险提示的交易分析分身。",
+            "tags": ["交易分析", "风险管理", "市场扫描"],
             "system_prompt": "你是飞廉，专注全市场交易分析。",
         },
         team_manager=team,
@@ -66,6 +85,8 @@ async def test_create_avatar_dispatch_persists(tmp_path: Path, monkeypatch: pyte
     assert result["ok"] is True
     assert result["name"] == "飞廉"
     assert result["role"] == "进取型全市场交易分析师"
+    assert result["description"] == "专注全市场机会扫描与风险提示的交易分析分身。"
+    assert result["tags"] == ["交易分析", "风险管理", "市场扫描"]
     avatar_id = str(result["avatar_id"]).strip()
     assert avatar_id
 
@@ -73,6 +94,8 @@ async def test_create_avatar_dispatch_persists(tmp_path: Path, monkeypatch: pyte
     loaded = registry.get_avatar(avatar_id)
     assert loaded is not None
     assert loaded.name == "飞廉"
+    assert loaded.description == "专注全市场机会扫描与风险提示的交易分析分身。"
+    assert list(loaded.tags or []) == ["交易分析", "风险管理", "市场扫描"]
     assert loaded.created_by == "meta"
     assert (root / avatar_id / "avatar.yaml").is_file()
 
