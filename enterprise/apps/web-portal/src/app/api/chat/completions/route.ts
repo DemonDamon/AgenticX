@@ -4,6 +4,7 @@ import { getSessionFromCookies } from "../../../../lib/session";
 import { ACCESS_COOKIE } from "../../../../lib/session";
 import { isChatSessionOwned } from "../../../../lib/chat-history";
 import { toChatHistoryContext } from "../../../../lib/chat-history-http";
+import { listAvailableModelsForUser } from "../../../../lib/admin-providers-reader";
 
 const GATEWAY_COMPLETIONS_URL =
   process.env.GATEWAY_COMPLETIONS_URL ?? "http://127.0.0.1:8088/v1/chat/completions";
@@ -70,6 +71,21 @@ export async function POST(request: Request) {
   try {
     const parsed = JSON.parse(rawBody) as { model?: string };
     if (typeof parsed.model === "string" && parsed.model.includes("/")) {
+      // 服务端实时校验：用户/部门可见模型收窄后，禁止转发到已失效的模型（客户端未刷新前也不得放行）。
+      const effectiveModels = await listAvailableModelsForUser(session.userId, session.email, session.deptId ?? undefined);
+      const isVisible = effectiveModels.some((m) => m.id === parsed.model);
+      if (!isVisible) {
+        return NextResponse.json(
+          {
+            error: {
+              code: "40301",
+              message: "该模型已不在您的可见范围内，请刷新页面重新选择模型",
+            },
+          },
+          { status: 403 },
+        );
+      }
+
       const [providerId, ...rest] = parsed.model.split("/");
       const modelName = rest.join("/");
       if (providerId && modelName) {
