@@ -180,7 +180,7 @@ export function AvatarCreateDialog({ open, onClose, onCreate }: Props) {
                 />
               </label>
               <label className="block text-sm text-text-muted">
-                System Prompt
+                系统提示
                 <span className="ml-1 text-xs text-text-faint">(可选)</span>
                 <textarea
                   className="mt-1 w-full resize-none rounded-md border border-border bg-surface-panel px-3 py-2 text-sm"
@@ -306,7 +306,7 @@ export function AvatarCreateDialog({ open, onClose, onCreate }: Props) {
                   rows={4}
                   value={description}
                   onChange={(e) => setDescription(e.target.value)}
-                  placeholder="描述分身的能力、性格和专长，AI 将自动生成名称、角色和 System Prompt..."
+                  placeholder="描述分身的能力、性格和专长，AI 将自动生成名称、角色和系统提示..."
                   autoFocus
                 />
               </label>
@@ -324,7 +324,7 @@ export function AvatarCreateDialog({ open, onClose, onCreate }: Props) {
                 取消
               </button>
               <button
-                className="rounded-md bg-violet-500 px-4 py-1.5 text-sm font-medium text-white transition hover:bg-violet-400 disabled:opacity-40"
+                className="rounded-md bg-btnPrimary px-4 py-1.5 text-sm font-medium text-btnPrimary-text transition hover:bg-btnPrimary-hover disabled:opacity-40"
                 disabled={busy || !description.trim()}
                 onClick={handleAiGenerate}
               >

@@ -276,7 +276,7 @@ export function AvatarSettingsPanel(props: Props) {
         content: soulValue,
       });
       if (!soulRes?.ok) {
-        setMessage(`基本信息已保存；SOUL 保存失败: ${soulRes?.error ?? "未知错误"}`);
+        setMessage(`基本信息已保存；灵魂保存失败: ${soulRes?.error ?? "未知错误"}`);
         return;
       }
       setMessage("已保存，下一轮对话生效。");
@@ -366,7 +366,7 @@ export function AvatarSettingsPanel(props: Props) {
         ]
       : [
           { id: "tools", label: "工具权限（全局）" },
-          { id: "soul", label: "Meta SOUL" },
+          { id: "soul", label: "灵魂" },
         ];
 
   const activeTab = tabs.find((t) => t.id === tab) ? tab : tabs[0].id;
@@ -415,7 +415,7 @@ export function AvatarSettingsPanel(props: Props) {
           {activeTab === "general" && mode === "avatar" && (
             <div className="space-y-4">
               <p className="rounded-md border border-border bg-surface-card px-3 py-2 text-xs text-text-subtle">
-                `System Prompt` 用于定义该分身的即时行为规则；`SOUL` 用于长期风格偏好与策略。两者会一起生效，
+                「系统提示」用于定义该分身的即时行为规则；「灵魂」用于长期风格偏好与策略。两者会一起生效，
                 互不替代。
               </p>
               <div>
@@ -485,7 +485,7 @@ export function AvatarSettingsPanel(props: Props) {
                 />
               </label>
               <label className="block text-sm text-text-muted">
-                System Prompt
+                系统提示
                 <textarea
                   className="mt-1 min-h-[120px] w-full resize-y rounded-md border border-border bg-surface-panel px-3 py-2 text-sm text-text-primary"
                   value={systemPrompt}
@@ -559,7 +559,7 @@ export function AvatarSettingsPanel(props: Props) {
               </div>
               <div className="border-t border-border pt-4">
                 <label className="block text-sm text-text-muted">
-                  SOUL
+                  灵魂
                   <span className="ml-1 text-xs font-normal text-text-faint">（长期风格与策略，支持 Markdown）</span>
                 </label>
                 {loadingSoul ? (
