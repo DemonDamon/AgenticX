@@ -21,6 +21,11 @@ from agenticx.runtime.prompts.credential_safety import (
     CREDENTIAL_SAFETY_BLOCK,
     CREDENTIAL_SAFETY_MCP_HINT,
 )
+from agenticx.runtime.context_file_budget import (
+    CONTEXT_FILES_USAGE_HINT,
+    MAX_CONTEXT_FILE_CHARS,
+    serialize_context_files,
+)
 from agenticx.llms.provider_display import build_provider_catalog_block, format_model_option_label, resolve_provider_config
 from agenticx.workspace.loader import load_subject_workspace_context
 
@@ -451,26 +456,17 @@ def _build_taskspaces_context(taskspaces: list[dict[str, str]] | None) -> str:
     return "\n".join(lines) + "\n"
 
 
-MAX_CONTEXT_FILE_CHARS = 4000
-
-
 def _build_context_files_block(session: StudioSession) -> str:
     """Serialize context_files into the system prompt so the model sees file paths and contents."""
     cf = session.context_files
     if not cf:
         return "- context_files: (none)\n"
-    parts = [f"- context_files 数量: {len(cf)}\n\n### 用户引用的文件（context_files）\n"]
-    for fpath, content in cf.items():
-        preview = str(content or "")
-        if len(preview) > MAX_CONTEXT_FILE_CHARS:
-            preview = preview[:MAX_CONTEXT_FILE_CHARS] + "\n...(truncated)"
-        parts.append(f"--- {fpath} ---\n{preview}")
-    parts.append(
-        "\n提示：上述条目中，普通文件路径通常为绝对路径，可直接用于 file_read 等工具调用。"
-        "若条目以 `skill:` 开头（如 `skill:tech-daily-news`），它是技能内容的虚拟键，不是磁盘路径；"
-        "请直接使用其内容，不要用 bash/file_read 去猜测或拼接 SKILL.md 文件路径。"
-        "若用户在消息中 @某文件名，请优先使用此处列出的完整路径。\n"
-    )
+    body = serialize_context_files(cf)
+    parts = [
+        f"- context_files 数量: {len(cf)}\n\n### 用户引用的文件（context_files）\n",
+        body,
+        f"\n{CONTEXT_FILES_USAGE_HINT}\n",
+    ]
     return "\n\n".join(parts)
 
 

@@ -34,6 +34,7 @@ from agenticx.cli.studio_mcp import build_mcp_tools_context
 from agenticx.cli.studio_skill import get_all_skill_summaries
 from agenticx.llms.vision import is_vision_capable, strip_nonvision_multimodal_messages
 from agenticx.runtime.compactor import ContextCompactor
+from agenticx.runtime.context_file_budget import serialize_context_files
 from agenticx.runtime.tool_result_budget import (
     apply_tool_result_budget,
     approx_tokens,
@@ -801,10 +802,7 @@ def _serialize_artifacts(session: StudioSession) -> str:
 def _serialize_context_files(session: StudioSession) -> str:
     if not session.context_files:
         return "(empty)"
-    parts: List[str] = []
-    for fpath, content in session.context_files.items():
-        parts.append(f"--- {fpath} ---\n{_truncate(content, 4000)}")
-    return "\n\n".join(parts)
+    return serialize_context_files(session.context_files)
 
 
 def _serialize_skill_summaries(session: StudioSession) -> str:
