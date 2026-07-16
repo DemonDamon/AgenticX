@@ -9321,6 +9321,21 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
     setInput(draft);
   };
 
+  // "新建任务" nav button dispatches this event to start a fresh conversation
+  // in the targeted (meta) pane. Use a ref so the listener always calls the
+  // latest createNewTopic closure without re-subscribing each render.
+  const createNewTopicRef = useRef(createNewTopic);
+  createNewTopicRef.current = createNewTopic;
+  useEffect(() => {
+    const onNewTopic = (e: Event) => {
+      const detail = (e as CustomEvent).detail as { paneId?: string } | undefined;
+      if (detail?.paneId && detail.paneId !== pane.id) return;
+      createNewTopicRef.current(false, pane.sessionMode ?? "daily_office");
+    };
+    window.addEventListener("agenticx:pane:new-topic", onNewTopic);
+    return () => window.removeEventListener("agenticx:pane:new-topic", onNewTopic);
+  }, [pane.id, pane.sessionMode]);
+
   const insertGlobalSearchFileReference = useCallback(
     async (filePath: string, mode: "current" | "new") => {
       const trimmed = filePath.trim();

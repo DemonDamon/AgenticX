@@ -103,6 +103,9 @@ export type GroupChat = {
   routing: string;
 };
 
+/** Main-area view router state for button-style sidebar navigation. */
+export type MainView = "chat" | "avatars" | "groups" | "automation";
+
 export type SidePanelTab = "workspace" | "members";
 
 export type PaneTerminalTab = {
@@ -483,6 +486,9 @@ type AppState = {
   groups: GroupChat[];
   panes: ChatPane[];
   activePaneId: string;
+  /** Which content the right main area shows (chat / gallery / projects / automation). */
+  mainView: MainView;
+  setMainView: (view: MainView) => void;
   /** Incremented when local session list should refresh (e.g. new session created). SessionHistoryPanel subscribes. */
   sessionCatalogRevision: number;
   bumpSessionCatalogRevision: () => void;
@@ -979,6 +985,8 @@ export const useAppStore = create<AppState>((set, get) => ({
   groups: [],
   panes: [makeDefaultPane()],
   activePaneId: "pane-meta",
+  mainView: "chat",
+  setMainView: (view) => set({ mainView: view }),
   sessionCatalogRevision: 0,
   bumpSessionCatalogRevision: () =>
     set((state) => ({ sessionCatalogRevision: state.sessionCatalogRevision + 1 })),

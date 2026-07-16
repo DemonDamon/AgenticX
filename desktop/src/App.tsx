@@ -7,6 +7,9 @@ import { DeliveryPanel } from "./components/delivery/DeliveryPanel";
 import { TokenDashboardPanel } from "./components/TokenDashboardPanel";
 import { LiteChatView } from "./components/LiteChatView";
 import { PaneManager } from "./components/PaneManager";
+import { AvatarGalleryView } from "./components/gallery/AvatarGalleryView";
+import { ProjectsView } from "./components/groups/ProjectsView";
+import { AutomationView } from "./components/automation/AutomationView";
 import { SidebarResizer } from "./components/SidebarResizer";
 import { Topbar } from "./components/Topbar";
 import { VoiceFocusMode } from "./components/VoiceFocusMode";
@@ -241,6 +244,7 @@ export function App() {
   const clarification = useAppStore((s) => s.clarification);
   const settings = useAppStore((s) => s.settings);
   const userMode = useAppStore((s) => s.userMode);
+  const mainView = useAppStore((s) => s.mainView);
   const setApiBase = useAppStore((s) => s.setApiBase);
   const setApiToken = useAppStore((s) => s.setApiToken);
   const setSessionId = useAppStore((s) => s.setSessionId);
@@ -2357,6 +2361,12 @@ export function App() {
                     onOpenClarification={onOpenClarification}
                     onSubmitClarification={onSubmitClarification}
                   />
+                ) : mainView === "avatars" ? (
+                  <AvatarGalleryView />
+                ) : mainView === "groups" ? (
+                  <ProjectsView />
+                ) : mainView === "automation" ? (
+                  <AutomationView />
                 ) : (
                   <PaneManager
                     onOpenConfirm={onOpenConfirm}
