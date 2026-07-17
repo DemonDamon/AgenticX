@@ -165,16 +165,19 @@ def test_reasoning_in_separate_field_triggers_nudge_then_real_reply() -> None:
     assert _THINK_OPEN not in last["content"]
 
 
-def test_reasoning_only_exhausts_nudge_ends_with_empty_content() -> None:
-    """AC-6: nudge上限 1 命中后, turn ends with empty content (no Mattis, no loop)."""
+def test_reasoning_only_exhausts_nudge_emits_visible_retry_fallback() -> None:
+    """After one nudge, reasoning-only turns emit a non-empty neutral fallback."""
     llm = _AlwaysReasoningOnly()
     runtime = AgentRuntime(llm, _ApproveGate())
     session = StudioSession()
     events = asyncio.run(_collect(runtime, session, "继续"))
-    assert _final_text(events) == "", "FINAL text must be empty after nudge exhausts"
+    final = _final_text(events)
+    assert final.strip(), "FINAL text must be non-empty after nudge exhausts"
+    assert "未能生成完整的可见回复" in final
     last = session.chat_history[-1]
     assert last["role"] == "assistant"
-    assert last["content"] == "", "content must be empty (not Mattis, not placeholder)"
+    assert last["content"] == final
+    assert last.get("metadata", {}).get("turn_terminal") is True
     assert _THINK_OPEN not in last["content"]
 
 
@@ -211,11 +214,13 @@ def test_reasoning_only_after_tool_triggers_fallback_placeholder(monkeypatch) ->
     # nudge fired on round 2 (reasoning-only after tool), exhausted on round 3.
     assert llm.calls == 3
     final = _final_text(events)
-    # 补救 logic should fire (executed_tool_names non-empty + visible_text empty).
-    assert "已完成工具调用" in final, f"补救 placeholder expected, got {final!r}"
+    # Neutral tool-turn fallback (no "已完成工具调用", no replay hint).
+    assert "工具执行已经结束" in final, f"tool-turn fallback expected, got {final!r}"
+    assert "已完成工具调用" not in final
     assert _THINK_OPEN not in final, "FINAL text must not leak Mattis"
     last = session.chat_history[-1]
     assert _THINK_OPEN not in last["content"], "chat_history content must not leak Mattis"
+    assert last.get("metadata", {}).get("terminal_reason") == "tool_turn_empty_fallback"
 
 
 def test_stream_fallback_dict_chunk_text_key_parsed() -> None:

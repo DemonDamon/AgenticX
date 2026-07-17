@@ -156,7 +156,9 @@ def test_runtime_event_flow_tool_confirm_result_final(monkeypatch) -> None:
     assert EventType.FINAL.value in types
     assert checkpoints
     assert any(row.get("role") == "tool" for row in checkpoints[-1])
-    assert checkpoints[-1][-1] == {"role": "assistant", "content": "done"}
+    assert checkpoints[-1][-1]["role"] == "assistant"
+    assert checkpoints[-1][-1]["content"] == "done"
+    assert checkpoints[-1][-1]["metadata"]["turn_terminal"] is True
 
 
 def test_runtime_max_rounds_emits_error(monkeypatch) -> None:
@@ -243,8 +245,11 @@ def test_runtime_stream_fallback_syncs_agent_messages_with_chat_history() -> Non
     events = __import__("asyncio").run(_collect(runtime, session, "hello"))
     assert events[-1]["type"] == EventType.FINAL.value
     assert events[-1]["data"]["text"] == "tok1tok2"
-    assert session.chat_history[-1] == {"role": "assistant", "content": "tok1tok2"}
+    assert session.chat_history[-1]["role"] == "assistant"
+    assert session.chat_history[-1]["content"] == "tok1tok2"
+    assert session.chat_history[-1]["metadata"]["turn_terminal"] is True
     assert session.agent_messages[-1] == {"role": "assistant", "content": "tok1tok2"}
+    assert "metadata" not in session.agent_messages[-1]
 
 
 def test_runtime_should_stop_interrupts_generation() -> None:
@@ -425,7 +430,9 @@ async def test_skip_user_history_still_persists_display_user() -> None:
     assert user_rows == []
     assert session.chat_history[0] == {"role": "user", "content": "能不能听到？"}
     assert persisted == [1, 2]
-    assert session.chat_history[-1] == {"role": "assistant", "content": "tok1tok2"}
+    assert session.chat_history[-1]["role"] == "assistant"
+    assert session.chat_history[-1]["content"] == "tok1tok2"
+    assert session.chat_history[-1]["metadata"]["turn_terminal"] is True
 
 
 async def test_skip_user_history_dedupes_existing_tail_user() -> None:
@@ -492,3 +499,157 @@ def test_should_emit_show_widget_delta_force_flush_only_when_new_data() -> None:
     assert _should_emit_show_widget_delta(state, 1, "", now_mono=2.0) is True
     assert _should_emit_show_widget_delta(state, 1, "", force=True, now_mono=2.1) is False
     assert _should_emit_show_widget_delta(state, 1, "<svg", force=True, now_mono=2.2) is True
+
+
+class _CreateAvatarThenMalformedLLM:
+    """Tool call → malformed cross-nested → still malformed after nudge."""
+
+    def __init__(self) -> None:
+        self.calls = 0
+        self._malformed = (
+            "<think>r block with exactly three followups"
+            "<followups>prompt</think>\n"
+            "**分身「侠客」已创建完成。**\n"
+            "| 项目 | 内容 |\n"
+            "</followups>"
+        )
+
+    def invoke(self, *_args, **_kwargs):
+        self.calls += 1
+        if self.calls == 1:
+            return _FakeResponse(
+                "creating",
+                [
+                    {
+                        "id": "call-av",
+                        "type": "function",
+                        "function": {
+                            "name": "create_avatar",
+                            "arguments": {"name": "侠客"},
+                        },
+                    }
+                ],
+            )
+        return _FakeResponse(self._malformed, [])
+
+    def stream(self, *_args, **_kwargs):
+        yield self._malformed
+
+
+def test_create_avatar_malformed_final_uses_public_message(monkeypatch) -> None:
+    from agenticx.runtime import agent_runtime as runtime_module
+
+    public_msg = "数字分身「侠客」已创建并加入分身列表（id=avatar-1）。"
+
+    async def _fake_meta_dispatch(name, *_args, **_kwargs):
+        assert name == "create_avatar"
+        return (
+            '{"ok": true, "avatar_id": "avatar-1", "name": "侠客", '
+            f'"message": "{public_msg}"}}'
+        )
+
+    monkeypatch.setattr(
+        runtime_module,
+        "_resolve_meta_tool_dispatchers",
+        lambda: ({"create_avatar"}, _fake_meta_dispatch),
+    )
+    llm = _CreateAvatarThenMalformedLLM()
+    runtime = AgentRuntime(llm, _ApproveGate(), team_manager=object())
+    session = StudioSession()
+    hooked: list[str] = []
+
+    async def _spy_end(text, _session):
+        hooked.append(str(text))
+
+    runtime.hooks.run_on_agent_end = _spy_end  # type: ignore[method-assign]
+    tools = [
+        {
+            "type": "function",
+            "function": {
+                "name": "create_avatar",
+                "description": "Create avatar",
+                "parameters": {"type": "object", "properties": {}},
+            },
+        }
+    ]
+
+    async def _run():
+        events = []
+        async for event in runtime.run_turn("建分身", session, tools=tools):
+            events.append({"type": event.type, "data": event.data})
+        return events
+
+    events = __import__("asyncio").run(_run())
+    assert llm.calls == 3
+    final = events[-1]
+    assert final["type"] == EventType.FINAL.value
+    assert final["data"]["text"] == public_msg
+    assert "suggested_questions" not in final["data"]
+    assert final["data"]["turn_terminal"] is True
+    assert final["data"]["terminal_reason"] == "tool_result_fallback"
+    assert session.chat_history[-1]["content"] == public_msg
+    assert session.chat_history[-1]["metadata"]["turn_terminal"] is True
+    assert session.agent_messages[-1]["content"] == public_msg
+    assert "metadata" not in session.agent_messages[-1]
+    assert "block with exactly" not in str(session.chat_history[-1].get("reasoning", ""))
+    assert hooked == [public_msg]
+
+
+def test_public_summary_rejected_for_non_whitelist_and_unsafe_message(monkeypatch) -> None:
+    from agenticx.runtime.agent_runtime import (
+        _classify_tool_turn_outcome,
+        _extract_public_tool_result_summary,
+    )
+
+    assert (
+        _extract_public_tool_result_summary(
+            "memory_append",
+            '{"ok": true, "message": "should not surface"}',
+        )
+        is None
+    )
+    assert (
+        _extract_public_tool_result_summary(
+            "create_avatar",
+            '{"ok": false, "message": "nope"}',
+        )
+        is None
+    )
+    assert (
+        _extract_public_tool_result_summary(
+            "create_avatar",
+            '{"ok": true, "message": "<think>x</think>bad"}',
+        )
+        is None
+    )
+    assert _classify_tool_turn_outcome("x", "[ACTION_CONFIRMATION_EXPIRED]") == "failed"
+    assert _classify_tool_turn_outcome("x", "OK: appended") == "success"
+    assert _classify_tool_turn_outcome(
+        "x", '{"ok": true, "queued": true, "message": "later"}'
+    ) == "pending"
+
+
+def test_status_query_final_has_turn_terminal_marker() -> None:
+    runtime = AgentRuntime(_AlwaysStatusQueryLLM(), _ApproveGate())
+    session = StudioSession()
+    tools = [
+        {
+            "type": "function",
+            "function": {
+                "name": "query_subagent_status",
+                "description": "Query status",
+                "parameters": {"type": "object", "properties": {}},
+            },
+        }
+    ]
+
+    async def _run():
+        events = []
+        async for event in runtime.run_turn("check status", session, tools=tools):
+            events.append({"type": event.type, "data": event.data})
+        return events
+
+    events = __import__("asyncio").run(_run())
+    assert events[-1]["type"] == EventType.FINAL.value
+    assert events[-1]["data"]["turn_terminal"] is True
+    assert session.chat_history[-1]["metadata"]["turn_terminal"] is True

@@ -18,7 +18,19 @@ from pathlib import Path
 import threading
 import time
 import uuid
-from typing import TYPE_CHECKING, Any, AsyncGenerator, Awaitable, Callable, Dict, List, Optional, Sequence
+from typing import (
+    TYPE_CHECKING,
+    Any,
+    AsyncGenerator,
+    Awaitable,
+    Callable,
+    Dict,
+    List,
+    Literal,
+    Mapping,
+    Optional,
+    Sequence,
+)
 
 from agenticx.cli.agent_tools import (
     PENDING_VISUAL_ATTACHMENTS_KEY,
@@ -53,9 +65,13 @@ from agenticx.runtime.llm_retry import LLMRetryPolicy, _classify_error
 from agenticx.runtime.subagent_runs import SubAgentRunStore
 from agenticx.runtime.token_budget import BudgetLevel, TokenBudgetGuard
 from agenticx.runtime.usage_metadata import usage_metadata_from_llm_response
+from agenticx.runtime.assistant_output import (
+    ParsedAssistantOutput,
+    parse_assistant_output,
+    sanitize_public_tool_summary,
+)
 from agenticx.runtime.followup_stream import (
     FollowupStreamEmitter,
-    split_final_answer_and_followups,
     suggested_questions_enabled_from_config,
 )
 from agenticx.llms.provider_fault import (
@@ -1345,25 +1361,81 @@ _THINK_OPEN_TAIL_RE = re.compile(
 def _split_reasoning_and_body(text: str) -> tuple[str, str]:
     """Split assistant text into (reasoning, body).
 
-    Reasoning models stream ``ILD... `` tokens; the persisted assistant
-    ``content`` should carry only the user-facing body so it is never re-fed
-    to the LLM as context, while the reasoning text lives in a dedicated
-    ``reasoning`` field for the UI to render a stable "思考了 X 秒" block.
-    Closed ``ILD... `` blocks and an unclosed trailing ``ILD...`` are both
-    captured. Mirrors the desktop ``parseReasoningContent`` contract.
+    Compatibility wrapper over :func:`parse_assistant_output`. Terminal
+    paths should parse once and reuse ``ParsedAssistantOutput`` instead of
+    calling this helper repeatedly with different follow-up splitters.
     """
-    raw = str(text or "")
-    reasoning_parts: list[str] = []
-    for m in _THINK_BLOCK_RE.finditer(raw):
-        reasoning_parts.append(m.group(1))
-    if not reasoning_parts:
-        open_match = _THINK_OPEN_TAIL_RE.search(raw)
-        if open_match:
-            reasoning_parts.append(open_match.group(1))
-    body = _THINK_BLOCK_RE.sub("", raw)
-    body = _THINK_OPEN_TAIL_RE.sub("", body)
-    reasoning = "\n".join(part.strip() for part in reasoning_parts if part.strip()).strip()
-    return reasoning, body.strip()
+    parsed = parse_assistant_output(str(text or ""))
+    return parsed.reasoning, parsed.visible_body.strip()
+
+
+_PUBLIC_TERMINAL_MESSAGE_TOOLS = frozenset({"create_avatar"})
+
+ToolTurnOutcome = Literal["success", "failed", "pending", "unknown"]
+
+_EMPTY_RESPONSE_FALLBACK = "本轮模型未能生成完整的可见回复，请重新提问。"
+_TOOL_TURN_EMPTY_FALLBACK = (
+    "工具执行已经结束，但模型未能生成完整的最终说明。"
+    "上方工具结果已保留，请查看结果后明确下一步。"
+)
+
+
+def _extract_public_tool_result_summary(
+    tool_name: str,
+    raw_result: str,
+) -> str | None:
+    """Extract a whitelist public message from a successful built-in tool result."""
+    if tool_name not in _PUBLIC_TERMINAL_MESSAGE_TOOLS:
+        return None
+    try:
+        payload = json.loads(str(raw_result or ""))
+    except Exception:
+        return None
+    if not isinstance(payload, dict) or payload.get("ok") is not True:
+        return None
+    if any(payload.get(key) for key in ("queued", "pending", "skipped", "already_running")):
+        return None
+    message = payload.get("message")
+    if not isinstance(message, str):
+        return None
+    return sanitize_public_tool_summary(message)
+
+
+def _classify_tool_turn_outcome(
+    tool_name: str,
+    raw_result: str,
+) -> ToolTurnOutcome:
+    """Classify a tool result for public-summary invalidation rules."""
+    del tool_name  # reserved for future per-tool rules
+    text = str(raw_result or "")
+    head = text.lstrip()
+    if (
+        head.startswith("[ACTION_CONFIRMED]")
+        or head.startswith("OK:")
+    ):
+        return "success"
+    if (
+        head.startswith("ERROR:")
+        or head.startswith("❌")
+        or head.startswith("CANCELLED:")
+        or head.startswith("[ACTION_REJECTED]")
+        or head.startswith("[ACTION_CONFIRMATION_EXPIRED]")
+        or head.startswith("[ACTION_CONFIRMATION_SUSPENDED]")
+    ):
+        return "failed"
+    try:
+        payload = json.loads(text)
+    except Exception:
+        return "unknown"
+    if not isinstance(payload, dict):
+        return "unknown"
+    if any(payload.get(key) for key in ("queued", "pending", "skipped", "already_running")):
+        return "pending"
+    if payload.get("ok") is True:
+        return "success"
+    if payload.get("ok") is False:
+        return "failed"
+    return "unknown"
 
 
 # Nudge hint injected when a round produces reasoning (< Mattis>...</ Mattis>) but no
@@ -1825,15 +1897,106 @@ class AgentRuntime:
         content = str(text or "").strip()
         if not content:
             return
-        message = {"role": "assistant", "content": content}
+        message = {
+            "role": "assistant",
+            "content": content,
+            "metadata": {
+                "turn_terminal": True,
+                "terminal_reason": "synthetic_terminal",
+            },
+        }
         if not (
             session.agent_messages
             and session.agent_messages[-1].get("role") == "assistant"
             and str(session.agent_messages[-1].get("content") or "").strip() == content
         ):
-            session.agent_messages.append(dict(message))
+            # agent_messages must stay provider-safe: no runtime-only metadata.
+            session.agent_messages.append({"role": "assistant", "content": content})
         if not is_system_trigger:
             _chat_history_append_deduped(session.chat_history, dict(message))
+
+    async def _finish_terminal_reply(
+        self,
+        session: StudioSession,
+        *,
+        clean_body: str,
+        reasoning_text: str = "",
+        suggestions: Sequence[str] = (),
+        reasoning_seconds: int | None = None,
+        references: Sequence[dict[str, Any]] = (),
+        searched_queries: Sequence[str] = (),
+        usage_metadata: Mapping[str, Any] | None = None,
+        terminal_reason: str,
+        agent_id: str,
+        is_system_trigger: bool,
+        extra_final: Mapping[str, Any] | None = None,
+    ) -> RuntimeEvent:
+        """Persist one terminal assistant reply and build the FINAL event."""
+        body = str(clean_body or "")
+        if not is_system_trigger and not body.strip():
+            raise RuntimeError("interactive FINAL must have visible body")
+
+        safe_reasoning = str(reasoning_text or "")
+        sug_list = [str(s) for s in suggestions if str(s).strip()]
+
+        if session.agent_messages and isinstance(session.agent_messages[-1], dict):
+            last_am = session.agent_messages[-1]
+            if (
+                str(last_am.get("role", "")).lower() == "assistant"
+                and not last_am.get("tool_calls")
+            ):
+                last_am["content"] = body
+            elif body.strip():
+                session.agent_messages.append({"role": "assistant", "content": body})
+        elif body.strip():
+            session.agent_messages.append({"role": "assistant", "content": body})
+
+        if not is_system_trigger:
+            hist: Dict[str, Any] = {
+                "role": "assistant",
+                "content": body,
+                "metadata": {
+                    "turn_terminal": True,
+                    "terminal_reason": terminal_reason,
+                },
+            }
+            if sug_list:
+                hist["suggested_questions"] = list(sug_list)
+            if safe_reasoning.strip():
+                hist["reasoning"] = safe_reasoning[:16384]
+                if reasoning_seconds is not None and int(reasoning_seconds) >= 1:
+                    hist["reasoning_seconds"] = int(reasoning_seconds)
+            if references:
+                hist["references"] = list(references)
+            if searched_queries:
+                hist["searched_queries"] = list(searched_queries)
+            _chat_history_append_deduped(session.chat_history, hist)
+
+        await self.hooks.run_on_agent_end(body, session)
+
+        final_data: dict[str, Any] = {
+            "text": body,
+            "turn_terminal": True,
+            "terminal_reason": terminal_reason,
+        }
+        if sug_list:
+            final_data["suggested_questions"] = list(sug_list)
+        if safe_reasoning.strip():
+            final_data["reasoning"] = safe_reasoning[:16384]
+            if reasoning_seconds is not None and int(reasoning_seconds) >= 1:
+                final_data["reasoning_seconds"] = int(reasoning_seconds)
+        if references:
+            final_data["references"] = list(references)
+        if searched_queries:
+            final_data["searched_queries"] = list(searched_queries)
+        if usage_metadata:
+            final_data["usage_metadata"] = dict(usage_metadata)
+        if extra_final:
+            for key, value in extra_final.items():
+                final_data[key] = value
+
+        self._persist_final_checkpoint()
+        return RuntimeEvent(type=EventType.FINAL.value, data=final_data, agent_id=agent_id)
 
     async def run_turn(
         self,
@@ -2094,6 +2257,8 @@ class AgentRuntime:
         repeated_status_query_count = 0
         last_status_query_had_rows = False
         executed_tool_names: List[str] = []
+        public_tool_summaries: List[str] = []
+        unresolved_after_public_summary = False
         disk_write_paths: set[str] = set()
         write_path_counts: Dict[str, int] = {}
         confirmation_spam_count = 0
@@ -2101,6 +2266,26 @@ class AgentRuntime:
         # Turn-level counter for reasoning-only rounds (model emitted < Mattis> but no
         # visible body and no tool_call). Capped at 1 to avoid infinite nudge loops.
         reason_only_retry = 0
+
+        def _record_tool_turn_outcome(outcome: ToolTurnOutcome) -> None:
+            nonlocal unresolved_after_public_summary
+            if not public_tool_summaries:
+                return
+            if outcome in ("failed", "pending", "unknown"):
+                unresolved_after_public_summary = True
+            elif outcome == "success":
+                unresolved_after_public_summary = False
+
+        def _note_public_tool_summary(tool_name: str, raw_result: str) -> None:
+            nonlocal unresolved_after_public_summary
+            summary = _extract_public_tool_result_summary(tool_name, raw_result)
+            if not summary:
+                return
+            if summary not in public_tool_summaries:
+                public_tool_summaries.append(summary)
+                if len(public_tool_summaries) > 3:
+                    del public_tool_summaries[:-3]
+            unresolved_after_public_summary = False
         invoke_timeout_seconds = _resolve_llm_invoke_timeout_seconds(session)
         heartbeat_timeout_seconds = _resolve_llm_heartbeat_timeout_seconds(session)
         hard_timeout_seconds = _resolve_llm_hard_timeout_seconds(session)
@@ -3067,28 +3252,44 @@ class AgentRuntime:
                 return
             _reset_llm_timeout_retry_count(session)
             reset_provider_timeout_streak(session)
-            # Preserve reasoning from the streamed accumulation before
-            # response.content overwrites it. Non-streaming response.content
-            # carries reasoning in a separate field (reasoning_content), so
-            # _split_reasoning_and_body on the overwritten text yields empty
-            # and the reasoning chain never reaches messages.json / the final
-            # SSE event, causing the "思考过程" block to vanish after the
-            # user switches away from and back into the session.
-            _streamed_reasoning, _ = _split_reasoning_and_body(response_text)
-            response_text = _sanitize_structured_assistant_text(
+            # Preserve streamed raw before response.content overwrites the
+            # accumulate buffer. Authoritative body/followups source is chosen
+            # below; stream reasoning is only a bound fallback for streamed_raw.
+            streamed_raw = str(followup_emitter.raw or response_text or "")
+            _streamed_reasoning, _ = _split_reasoning_and_body(streamed_raw)
+            final_content = _sanitize_structured_assistant_text(
                 (response.content or "").strip(),
                 allowed_tool_names,
             )
-            # Fallback: recover reasoning from the non-streaming response
-            # object when the streaming path did not run (provider without
-            # stream_with_tools, or pure ainvoke).
+            response_text = final_content
             _rc_any = getattr(response, "reasoning_content", None) or getattr(
                 response, "reasoning", None
             )
             _nonstream_reasoning = ""
             if isinstance(_rc_any, str) and _rc_any.strip():
                 _nonstream_reasoning = _rc_any.strip()
-            _turn_reasoning = _streamed_reasoning or _nonstream_reasoning
+
+            authoritative_source_kind = "final_content"
+            authoritative_raw = final_content
+            if final_content.strip():
+                authoritative_source_kind = "final_content"
+                authoritative_raw = final_content
+                if streamed_raw.strip() and streamed_raw.strip() != final_content.strip():
+                    logger.info(
+                        "terminal_source_mismatch session=%s round=%s kind=final_over_stream",
+                        getattr(session, "session_id", ""),
+                        round_idx,
+                    )
+            elif streamed_raw.strip():
+                authoritative_source_kind = "streamed_raw"
+                authoritative_raw = streamed_raw
+                response_text = streamed_raw
+            else:
+                authoritative_source_kind = "sync_fallback"
+                authoritative_raw = ""
+
+            parsed: ParsedAssistantOutput = parse_assistant_output(authoritative_raw)
+            ac_clean = parsed.visible_body
             raw_tc = response.tool_calls or []
             tool_calls = [
                 tc for tc in raw_tc
@@ -3118,11 +3319,6 @@ class AgentRuntime:
                             },
                         }
                     ]
-            ac_clean, _ac_suggestions = (
-                split_final_answer_and_followups(response_text)
-                if _followups_enabled
-                else (response_text, [])
-            )
             # --- Widget flow guard: detect text-based diagrams and force retry ---
             if not tool_calls and "show_widget" in allowed_tool_names:
                 from agenticx.runtime.widget_flow_guard import (
@@ -3189,13 +3385,9 @@ class AgentRuntime:
             synced_session_message_count = len(session.agent_messages)
 
             if not tool_calls:
-                # Reasoning-only empty turn detection: model emitted < Mattis> reasoning
-                # but no visible body and no tool_call. Nudge once to force a real reply
-                # or explicit tool_call, instead of misjudging the turn as complete and
-                # surfacing a "继续" button (cases cc9152ab / e3033b24).
-                _, _visible_text = _split_reasoning_and_body(response_text)
+                # Reasoning-only / bodyless turn: nudge once, then deterministic fallback.
                 if (
-                    not _visible_text.strip()
+                    not parsed.visible_body.strip()
                     and not _is_system_trigger
                     and reason_only_retry < 1
                 ):
@@ -3205,22 +3397,17 @@ class AgentRuntime:
                         getattr(session, "session_id", ""),
                         round_idx,
                     )
-                    messages.append({"role": "assistant", "content": _visible_text})
+                    messages.append({"role": "assistant", "content": parsed.visible_body})
                     messages.append({"role": "system", "content": _REASONING_ONLY_NUDGE_HINT})
-                    session.agent_messages.append({"role": "assistant", "content": _visible_text})
+                    session.agent_messages.append({"role": "assistant", "content": parsed.visible_body})
                     session.agent_messages.append({"role": "system", "content": _REASONING_ONLY_NUDGE_HINT})
                     continue
-                if response_text.strip():
-                    # Tokens were already streamed to the client during the
-                    # invoke/stream phase above; do NOT re-send them here.
-                    final_text, sug_list = (
-                        split_final_answer_and_followups(response_text)
-                        if _followups_enabled
-                        else (response_text.strip(), [])
-                    )
-                else:
+
+                if (
+                    authoritative_source_kind == "sync_fallback"
+                    and not authoritative_raw.strip()
+                ):
                     streamed_text = ""
-                    sug_list = []
                     try:
                         stream_loop = asyncio.get_running_loop()
 
@@ -3238,11 +3425,6 @@ class AgentRuntime:
                                 ):
                                     if stop_event.is_set():
                                         break
-                                    # Stream-fallback path: providers (litellm/kimi) yield
-                                    # dict chunks with a "text" key (not "content"), so read
-                                    # "text" first and fall back to "content" for str-only
-                                    # providers. Without this, streamed_text stays empty and
-                                    # the补救 logic fires even when the model did stream tokens.
                                     if isinstance(chunk, str):
                                         tok = chunk
                                     else:
@@ -3293,93 +3475,93 @@ class AgentRuntime:
                         )
                         return
                     except Exception:
-                        streamed_text = response_text
-                    raw_tail = streamed_text.strip() if streamed_text.strip() else response_text
-                    raw_tail = _sanitize_structured_assistant_text(str(raw_tail), allowed_tool_names)
-                    final_text, sug_list = (
-                        split_final_answer_and_followups(raw_tail)
-                        if _followups_enabled
-                        else (str(raw_tail).strip(), [])
+                        streamed_text = ""
+                    raw_tail = _sanitize_structured_assistant_text(
+                        str(streamed_text or "").strip(),
+                        allowed_tool_names,
                     )
-                if not _visible_text.strip() and executed_tool_names:
-                    unique_tools = ", ".join(dict.fromkeys(executed_tool_names))
-                    final_text = (
-                        "已完成工具调用（"
-                        f"{unique_tools}）。\n"
-                        "当前模型未返回进一步正文，请继续给我下一步指令。"
-                    )
-                    sug_list = []
-                # Invoke/stream may leave response.content empty while the stream-fallback
-                # path fills final_text; chat_history used to update but agent_messages kept "".
-                # Split reasoning out of final_text once, so < Mattis> never leaks into
-                # agent_messages content (would be re-fed to the LLM next round) or
-                # messages.json (FR-4: content stays clean, reasoning lives in its field).
-                _reasoning_text, _clean_body = _split_reasoning_and_body(final_text)
-                if not _reasoning_text and _turn_reasoning:
-                    _reasoning_text = _turn_reasoning
-                if session.agent_messages and isinstance(session.agent_messages[-1], dict):
-                    _last_am = session.agent_messages[-1]
-                    if (
-                        str(_last_am.get("role", "")).lower() == "assistant"
-                        and not _last_am.get("tool_calls")
-                        and str(_clean_body or "").strip()
-                    ):
-                        _last_am["content"] = _clean_body
-                if not _is_system_trigger:
-                    _hist_assistant: Dict[str, Any] = {"role": "assistant", "content": _clean_body}
-                    if sug_list:
-                        _hist_assistant["suggested_questions"] = list(sug_list)
-                    if _reasoning_text:
-                        _hist_assistant["reasoning"] = _reasoning_text[:16384]
-                        if (
-                            _stream_reasoning_start_ts is not None
-                            and _stream_body_start_ts is not None
-                        ):
-                            _rs = int(_stream_body_start_ts - _stream_reasoning_start_ts)
-                            if _rs >= 1:
-                                _hist_assistant["reasoning_seconds"] = _rs
-                    try:
-                        from agenticx.studio.references import turn_reference_payload
+                    if raw_tail:
+                        authoritative_source_kind = "sync_fallback"
+                        authoritative_raw = raw_tail
+                        parsed = parse_assistant_output(raw_tail)
+                        ac_clean = parsed.visible_body
+                        if session.agent_messages and isinstance(session.agent_messages[-1], dict):
+                            _last_am = session.agent_messages[-1]
+                            if (
+                                str(_last_am.get("role", "")).lower() == "assistant"
+                                and not _last_am.get("tool_calls")
+                            ):
+                                _last_am["content"] = ac_clean
 
-                        _ref_payload = turn_reference_payload(session)
-                        if _ref_payload.get("references"):
-                            _hist_assistant["references"] = list(_ref_payload["references"])
-                        if _ref_payload.get("searched_queries"):
-                            _hist_assistant["searched_queries"] = list(_ref_payload["searched_queries"])
-                    except Exception:
-                        pass
-                    _chat_history_append_deduped(session.chat_history, _hist_assistant)
-                await self.hooks.run_on_agent_end(final_text, session)
-                _um = usage_metadata_from_llm_response(response)
-                _final_reasoning, _final_clean_body = (
-                    (_reasoning_text, _clean_body)
-                    if not _is_system_trigger
-                    else _split_reasoning_and_body(final_text)
+                if parsed.malformed:
+                    reasoning_text = ""
+                elif authoritative_source_kind == "final_content":
+                    reasoning_text = parsed.reasoning or _nonstream_reasoning
+                elif authoritative_source_kind == "streamed_raw":
+                    reasoning_text = parsed.reasoning or _streamed_reasoning
+                else:
+                    reasoning_text = parsed.reasoning
+
+                clean_body = parsed.visible_body
+                sug_list = (
+                    list(parsed.suggested_questions) if _followups_enabled else []
                 )
-                _final_data: dict[str, Any] = {"text": _final_clean_body}
-                if sug_list:
-                    _final_data["suggested_questions"] = list(sug_list)
-                if _final_reasoning:
-                    _final_data["reasoning"] = _final_reasoning[:16384]
-                    if (
-                        _stream_reasoning_start_ts is not None
-                        and _stream_body_start_ts is not None
-                    ):
-                        _rs = int(_stream_body_start_ts - _stream_reasoning_start_ts)
-                        if _rs >= 1:
-                            _final_data["reasoning_seconds"] = _rs
+                if not clean_body.strip() and not _is_system_trigger:
+                    sug_list = []
+                    if public_tool_summaries and not unresolved_after_public_summary:
+                        clean_body = "\n".join(public_tool_summaries[-3:])
+                        terminal_reason = "tool_result_fallback"
+                    elif executed_tool_names:
+                        clean_body = _TOOL_TURN_EMPTY_FALLBACK
+                        terminal_reason = "tool_turn_empty_fallback"
+                    else:
+                        clean_body = _EMPTY_RESPONSE_FALLBACK
+                        terminal_reason = "empty_response_fallback"
+                else:
+                    terminal_reason = (
+                        "malformed_model_final_recovered"
+                        if parsed.malformed
+                        else "model_final"
+                    )
+
+                if parsed.malformed or terminal_reason != "model_final":
+                    logger.warning(
+                        "terminal_output_recovered session=%s round=%s reason=%s "
+                        "protocol_errors=%s tools=%s",
+                        getattr(session, "session_id", ""),
+                        round_idx,
+                        terminal_reason,
+                        list(parsed.protocol_errors),
+                        list(dict.fromkeys(executed_tool_names))[-10:],
+                    )
+
+                _rs: int | None = None
+                if (
+                    reasoning_text
+                    and _stream_reasoning_start_ts is not None
+                    and _stream_body_start_ts is not None
+                ):
+                    _candidate_rs = int(_stream_body_start_ts - _stream_reasoning_start_ts)
+                    if _candidate_rs >= 1:
+                        _rs = _candidate_rs
+
+                _ref_list: list[dict[str, Any]] = []
+                _query_list: list[str] = []
                 try:
                     from agenticx.studio.references import turn_reference_payload
 
                     _ref_payload = turn_reference_payload(session)
                     if _ref_payload.get("references"):
-                        _final_data["references"] = list(_ref_payload["references"])
+                        _ref_list = list(_ref_payload["references"])
                     if _ref_payload.get("searched_queries"):
-                        _final_data["searched_queries"] = list(_ref_payload["searched_queries"])
+                        _query_list = list(_ref_payload["searched_queries"])
                 except Exception:
                     pass
+
+                _um = usage_metadata_from_llm_response(response)
+                _usage_payload: dict[str, Any] | None = None
                 if _um:
-                    _final_data["usage_metadata"] = {
+                    _usage_payload = {
                         **_um,
                         "model": model_name,
                         "provider": provider_name,
@@ -3390,8 +3572,20 @@ class AgentRuntime:
                         "cache_hit_rate": float(latest_cache_telemetry.get("cache_hit_rate", 0.0) or 0.0),
                         "cache_saved_tokens_est": int(latest_cache_telemetry.get("cache_saved_tokens_est", 0) or 0),
                     }
-                self._persist_final_checkpoint()
-                yield RuntimeEvent(type=EventType.FINAL.value, data=_final_data, agent_id=agent_id)
+
+                yield await self._finish_terminal_reply(
+                    session,
+                    clean_body=clean_body,
+                    reasoning_text=reasoning_text if not parsed.malformed else "",
+                    suggestions=sug_list,
+                    reasoning_seconds=_rs,
+                    references=_ref_list,
+                    searched_queries=_query_list,
+                    usage_metadata=_usage_payload,
+                    terminal_reason=terminal_reason,
+                    agent_id=agent_id,
+                    is_system_trigger=_is_system_trigger,
+                )
                 return
 
             assistant_tool_message = {
@@ -3401,7 +3595,14 @@ class AgentRuntime:
             }
             messages.append(assistant_tool_message)
             if not _is_system_trigger and str(ac_clean or "").strip():
-                _chat_history_append_deduped(session.chat_history, {"role": "assistant", "content": ac_clean})
+                _chat_history_append_deduped(
+                    session.chat_history,
+                    {
+                        "role": "assistant",
+                        "content": ac_clean,
+                        "metadata": {"turn_terminal": False},
+                    },
+                )
 
             _parallel_mode = _parallel_tools_enabled() and len(tool_calls) > 1
             if _parallel_mode:
@@ -3465,6 +3666,7 @@ class AgentRuntime:
                         data={"name": tool_name, "result": invalid_message, "tool_call_id": tool_call_id},
                         agent_id=agent_id,
                     )
+                    _record_tool_turn_outcome("failed")
                     continue
                 # Policy deny + allowlist before hooks / confirm (align CC deny > hook ask).
                 perm_deny = tool_denied_by_session_permissions(tool_name)
@@ -3508,6 +3710,7 @@ class AgentRuntime:
                         data={"name": tool_name, "result": denied_message, "tool_call_id": tool_call_id},
                         agent_id=agent_id,
                     )
+                    _record_tool_turn_outcome("failed")
                     continue
                 if tool_name not in allowed_tool_names:
                     denied_message = f"工具 '{tool_name}' 不在当前允许列表中，已拒绝执行。"
@@ -3549,6 +3752,7 @@ class AgentRuntime:
                         data={"name": tool_name, "result": denied_message, "tool_call_id": tool_call_id},
                         agent_id=agent_id,
                     )
+                    _record_tool_turn_outcome("failed")
                     continue
                 hook_outcome = await self.hooks.run_before_tool_call(tool_name, arguments, session)
                 if hook_outcome.blocked:
@@ -3599,6 +3803,7 @@ class AgentRuntime:
                         data={"name": tool_name, "result": blocked_message, "tool_call_id": tool_call_id},
                         agent_id=agent_id,
                     )
+                    _record_tool_turn_outcome("failed")
                     continue
                 if tool_name == "query_subagent_status":
                     status_query_attempts_total += 1
@@ -3634,14 +3839,13 @@ class AgentRuntime:
                                 "本轮状态查询达到预算上限（2 次），已停止轮询。"
                                 "我会在子智能体完成/失败后主动汇报。"
                             )
-                            self._append_terminal_assistant(
+                            yield await self._finish_terminal_reply(
                                 session,
-                                final_text,
+                                clean_body=final_text,
+                                terminal_reason="status_query_budget",
+                                agent_id=agent_id,
                                 is_system_trigger=_is_system_trigger,
                             )
-                            await self.hooks.run_on_agent_end(final_text, session)
-                            self._persist_final_checkpoint()
-                            yield RuntimeEvent(type=EventType.FINAL.value, data={"text": final_text}, agent_id=agent_id)
                             return
                         continue
                     now_ts = time.time()
@@ -3682,14 +3886,13 @@ class AgentRuntime:
                                 "状态查询处于冷却窗口，我先停止本轮轮询。"
                                 "若子智能体仍在运行，我会在完成事件到达后主动汇报。"
                             )
-                            self._append_terminal_assistant(
+                            yield await self._finish_terminal_reply(
                                 session,
-                                final_text,
+                                clean_body=final_text,
+                                terminal_reason="status_query_cooldown",
+                                agent_id=agent_id,
                                 is_system_trigger=_is_system_trigger,
                             )
-                            await self.hooks.run_on_agent_end(final_text, session)
-                            self._persist_final_checkpoint()
-                            yield RuntimeEvent(type=EventType.FINAL.value, data={"text": final_text}, agent_id=agent_id)
                             return
                         continue
                     # Allow exactly one status query per turn for meta agent;
@@ -3726,14 +3929,13 @@ class AgentRuntime:
                                 "本轮状态已查询过一次，已停止重复轮询。"
                                 "若子智能体仍运行，我会在完成事件到达后主动汇报。"
                             )
-                            self._append_terminal_assistant(
+                            yield await self._finish_terminal_reply(
                                 session,
-                                final_text,
+                                clean_body=final_text,
+                                terminal_reason="status_query_repeat",
+                                agent_id=agent_id,
                                 is_system_trigger=_is_system_trigger,
                             )
-                            await self.hooks.run_on_agent_end(final_text, session)
-                            self._persist_final_checkpoint()
-                            yield RuntimeEvent(type=EventType.FINAL.value, data={"text": final_text}, agent_id=agent_id)
                             return
                         continue
                     status_query_total += 1
@@ -3790,14 +3992,13 @@ class AgentRuntime:
                                 "检测到状态轮询过于频繁，已停止本轮自动执行。"
                                 "我会等待后台完成事件并主动给你汇报结果。"
                             )
-                            self._append_terminal_assistant(
+                            yield await self._finish_terminal_reply(
                                 session,
-                                final_text,
+                                clean_body=final_text,
+                                terminal_reason="status_query_throttled",
+                                agent_id=agent_id,
                                 is_system_trigger=_is_system_trigger,
                             )
-                            await self.hooks.run_on_agent_end(final_text, session)
-                            self._persist_final_checkpoint()
-                            yield RuntimeEvent(type=EventType.FINAL.value, data={"text": final_text}, agent_id=agent_id)
                             return
                         continue
 
@@ -3911,6 +4112,8 @@ class AgentRuntime:
                 result = await self.hooks.run_after_tool_call(tool_name, result, session)
                 budget_cfg = load_tool_result_budget_config()
                 raw_result = str(result)
+                _note_public_tool_summary(tool_name, raw_result)
+                _record_tool_turn_outcome(_classify_tool_turn_outcome(tool_name, raw_result))
                 rclass = get_result_class(tool_name, raw_result)
                 archive_path = None
                 if rclass in {"large", "blob"} or approx_tokens(raw_result) >= budget_cfg.large_threshold_tokens:
@@ -4191,21 +4394,17 @@ class AgentRuntime:
                         f"我多次尝试后仍未取得进展（{loop_issue.message}）。"
                         "建议你换用其它工具，或先手动确认目标可行性后再继续。"
                     )
-                    assistant_summary = {"role": "assistant", "content": summary_text}
-                    session.agent_messages.append(assistant_summary)
                     synced_session_message_count = len(session.agent_messages)
-                    if not _is_system_trigger:
-                        session.chat_history.append(assistant_summary)
-                    await self.hooks.run_on_agent_end(summary_text, session)
-                    self._persist_final_checkpoint()
-                    yield RuntimeEvent(
-                        type=EventType.FINAL.value,
-                        data={
-                            "text": summary_text,
+                    yield await self._finish_terminal_reply(
+                        session,
+                        clean_body=summary_text,
+                        terminal_reason="loop_halt",
+                        agent_id=agent_id,
+                        is_system_trigger=_is_system_trigger,
+                        extra_final={
                             "loop_halt": True,
                             "detector": loop_issue.detector,
                         },
-                        agent_id=agent_id,
                     )
                     return
 
