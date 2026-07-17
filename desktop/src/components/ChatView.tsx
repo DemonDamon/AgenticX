@@ -1193,6 +1193,7 @@ export function ChatView({ onOpenConfirm, onOpenClarification, onSubmitClarifica
       userMode === "pro" && planMode && targetAgentId === "meta"
         ? `你现在处于计划模式。请只输出可执行计划与风险，不要调用工具，不要执行操作。\n\n用户需求：${userText}`
         : userText;
+    const clientTurnId = isContinuation ? "" : crypto.randomUUID();
     const requestId = activeRequestIdRef.current + 1;
     activeRequestIdRef.current = requestId;
     const isCurrentRequest = () => activeRequestIdRef.current === requestId;
@@ -1251,7 +1252,15 @@ export function ChatView({ onOpenConfirm, onOpenClarification, onSubmitClarifica
     if (!opts?.insertAfterId && !isContinuation) {
       setInput("");
       if (targetAgentId === "meta") {
-        addMessage("user", userText, "meta");
+        addMessage(
+          "user",
+          userText,
+          "meta",
+          undefined,
+          undefined,
+          undefined,
+          { metadata: { client_turn_id: clientTurnId } },
+        );
       } else {
         addSubAgentEvent(targetAgentId, { type: "user", content: userText });
         addMessage("tool", `🗣 发送给 ${selectedSubAgentName || targetAgentId}: ${userText}`, "meta");
@@ -1337,7 +1346,7 @@ export function ChatView({ onOpenConfirm, onOpenClarification, onSubmitClarifica
 
     try {
       const body: Record<string, unknown> = { session_id: sessionId, user_input: effectiveUserText };
-      if (!isContinuation) body.client_turn_id = crypto.randomUUID();
+      if (!isContinuation) body.client_turn_id = clientTurnId;
       if (reqProvider) body.provider = reqProvider;
       if (reqModel) body.model = reqModel;
       if (targetAgentId !== "meta") body.agent_id = targetAgentId;

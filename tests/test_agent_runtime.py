@@ -7,6 +7,7 @@ from typing import Any, Dict, List
 
 from agenticx.cli.studio import StudioSession
 from agenticx.runtime import AgentRuntime, ConfirmGate, EventType
+from agenticx.runtime.agent_runtime import _chat_history_append_deduped
 
 
 class _FakeResponse:
@@ -450,6 +451,53 @@ async def test_skip_user_history_dedupes_existing_tail_user() -> None:
     user_rows = [m for m in session.chat_history if m.get("role") == "user"]
     assert len(user_rows) == 1
     assert user_rows[0]["content"] == "能不能听到？"
+
+
+async def test_user_history_persists_client_turn_metadata() -> None:
+    runtime = AgentRuntime(_TextOnlyLLM(), _ApproveGate())
+    session = StudioSession()
+    metadata = {"client_turn_id": "turn-123"}
+
+    async for _ in runtime.run_turn(
+        "检查附件",
+        session,
+        history_user_metadata=metadata,
+    ):
+        pass
+
+    agent_user = next(
+        row for row in session.agent_messages if row.get("role") == "user"
+    )
+    history_user = next(
+        row for row in session.chat_history if row.get("role") == "user"
+    )
+    assert agent_user["metadata"] == metadata
+    assert history_user["metadata"] == metadata
+
+
+def test_chat_history_dedupe_keeps_distinct_client_turn_ids() -> None:
+    history = [
+        {
+            "role": "user",
+            "content": "继续",
+            "metadata": {"client_turn_id": "turn-old"},
+        }
+    ]
+
+    appended = _chat_history_append_deduped(
+        history,
+        {
+            "role": "user",
+            "content": "继续",
+            "metadata": {"client_turn_id": "turn-new"},
+        },
+    )
+
+    assert appended is True
+    assert [row["metadata"]["client_turn_id"] for row in history] == [
+        "turn-old",
+        "turn-new",
+    ]
 
 
 def test_sanitize_context_messages_placeholders_empty_assistant_with_tools() -> None:

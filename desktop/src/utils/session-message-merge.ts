@@ -2,9 +2,32 @@ import type { Message } from "../store";
 import { isOrphanFormattedToolResultMessage } from "./orphan-formatted-tool";
 import { mapLoadedSessionMessage, type LoadedSessionMessage } from "./session-message-map";
 import { assistantVisibleBodyForUi } from "./assistant-output";
+import {
+  canonicalizeUserReferenceMentions,
+  stableAttachmentSetIdentity,
+} from "./reference-attachment";
 
 const norm = (s: unknown) => String(s ?? "").trim();
 const contentKey = (role: string, content: unknown) => `${role}::${norm(content)}`;
+const reconciliationContentKey = (message: Message) =>
+  message.role === "user"
+    ? `user::${canonicalizeUserReferenceMentions(
+        String(message.content ?? ""),
+        message.attachments,
+      ).trim()}`
+    : contentKey(message.role, message.content);
+const userRowsMatch = (memory: Message, disk: Message) => {
+  if (reconciliationContentKey(memory) !== reconciliationContentKey(disk)) {
+    return false;
+  }
+  const memoryAttachments = stableAttachmentSetIdentity(memory.attachments);
+  const diskAttachments = stableAttachmentSetIdentity(disk.attachments);
+  if (!memoryAttachments.key || !diskAttachments.key) return true;
+  if (!memoryAttachments.strong || !diskAttachments.strong) return false;
+  return memoryAttachments.key === diskAttachments.key;
+};
+const clientTurnId = (message: Message) =>
+  String(message.metadata?.client_turn_id ?? "").trim();
 
 /**
  * Compare canonical visible bodies so live streamed rows (with think/followups
@@ -51,19 +74,46 @@ export function mergeSessionMessagesTail(
   const consumedMemory = new Set<Message>();
 
   const findMemoryMatch = (diskRow: Message): Message | null => {
-    const byId = memoryById.get(diskRow.id);
-    if (byId && !consumedMemory.has(byId)) {
-      consumedMemory.add(byId);
-      return byId;
+    const diskClientTurnId =
+      diskRow.role === "user" ? clientTurnId(diskRow) : "";
+    if (diskClientTurnId) {
+      const byClientTurn = existing.find(
+        (memory) =>
+          !consumedMemory.has(memory) &&
+          memory.role === "user" &&
+          clientTurnId(memory) === diskClientTurnId,
+      );
+      if (byClientTurn) {
+        consumedMemory.add(byClientTurn);
+        return byClientTurn;
+      }
+    }
+    if (!diskClientTurnId) {
+      const byId = memoryById.get(diskRow.id);
+      if (byId && !consumedMemory.has(byId)) {
+        consumedMemory.add(byId);
+        return byId;
+      }
     }
     const diskBody =
       diskRow.role === "assistant" ? assistantBodyKey(diskRow.content) : "";
     for (const memory of existing) {
       if (consumedMemory.has(memory)) continue;
       if (memory.role !== diskRow.role) continue;
+      const memoryClientTurnId =
+        memory.role === "user" ? clientTurnId(memory) : "";
+      if (
+        diskClientTurnId &&
+        memoryClientTurnId &&
+        memoryClientTurnId !== diskClientTurnId
+      ) {
+        continue;
+      }
       const exactMatch =
         norm(diskRow.content).length > 0 &&
-        contentKey(memory.role, memory.content) === contentKey(diskRow.role, diskRow.content);
+        (diskRow.role === "user"
+          ? userRowsMatch(memory, diskRow)
+          : reconciliationContentKey(memory) === reconciliationContentKey(diskRow));
       const bodyMatch =
         diskRow.role === "assistant" &&
         diskBody.length > 0 &&

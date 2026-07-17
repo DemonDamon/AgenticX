@@ -4,7 +4,10 @@ import {
   resolveReferenceSourcePath,
   stripLineRangeFromAbsPath,
 } from "./chat-file-mention";
-import { isMisclassifiedUploadReference } from "./composer-upload-key";
+import {
+  isMisclassifiedUploadReference,
+  stripComposerUploadDedupeKey,
+} from "./composer-upload-key";
 
 export type FileReferenceOpenRequest = {
   absolutePath: string;
@@ -15,6 +18,144 @@ function basename(path: string): string {
   const norm = path.replace(/\\/g, "/");
   const idx = norm.lastIndexOf("/");
   return idx >= 0 ? norm.slice(idx + 1) : norm;
+}
+
+export function buildContextFileKeyFromAttachment(
+  file: Pick<
+    MessageAttachment,
+    "sourcePath" | "name" | "lineRange" | "spreadsheetRef" | "snippetRef"
+  >
+): string {
+  const rawBase = String(file.sourcePath || file.name || "").trim();
+  const base = stripComposerUploadDedupeKey(rawBase);
+  if (!base) return "";
+  const line = file.lineRange;
+  if (line && Number.isFinite(line.start) && Number.isFinite(line.end)) {
+    const start = Math.max(1, Math.floor(line.start));
+    const end = Math.max(start, Math.floor(line.end));
+    return `${base}:${start}-${end}`;
+  }
+  const sheet = file.spreadsheetRef?.sheet?.trim();
+  const a1 = file.spreadsheetRef?.a1?.trim();
+  if (sheet && a1) {
+    return `${base}#${sheet}!${a1}`;
+  }
+  const snippetRef = String(file.snippetRef || "").trim();
+  if (snippetRef) {
+    return `${base}:${snippetRef}`;
+  }
+  return base;
+}
+
+/**
+ * Stable attachment identity shared by optimistic and persisted rows. MIME and
+ * size are deliberately excluded because the renderer and backend derive them
+ * differently (characters vs bytes, browser MIME vs server inference).
+ */
+export function stableAttachmentSetIdentity(
+  attachments: readonly MessageAttachment[] | undefined
+): { key: string; strong: boolean } {
+  const identities = (attachments ?? [])
+    .map((attachment): { key: string; strong: boolean } => {
+      const dataUrl = String(attachment.dataUrl ?? "");
+      const dataSignature = dataUrl
+        ? `${dataUrl.length}:${dataUrl.slice(0, 96)}`
+        : "";
+      const name = String(attachment.name ?? "").trim();
+      let directorySource = "";
+      if (name.startsWith("@dir:")) {
+        const rest = name.slice("@dir:".length);
+        const separator = rest.indexOf(":");
+        if (separator >= 0) {
+          directorySource = rest.slice(separator + 1).trim();
+        }
+      }
+      const resolvedSource =
+        directorySource ||
+        resolveReferenceSourcePath(name, attachment.sourcePath);
+      const resourceKey = buildContextFileKeyFromAttachment({
+        ...attachment,
+        ...(resolvedSource ? { sourcePath: resolvedSource } : {}),
+      });
+      return {
+        key: [resourceKey, dataSignature].join("\u0000"),
+        strong: Boolean(resolvedSource || dataSignature),
+      };
+    })
+    .sort((a, b) => a.key.localeCompare(b.key));
+  return {
+    key: identities.map((identity) => identity.key).join("\u0001"),
+    strong: identities.every((identity) => identity.strong),
+  };
+}
+
+export function stableAttachmentSetKey(
+  attachments: readonly MessageAttachment[] | undefined
+): string {
+  return stableAttachmentSetIdentity(attachments).key;
+}
+
+/**
+ * Normalize composer short-label mentions to the canonical paths persisted by
+ * the backend. This makes optimistic and disk user rows comparable without
+ * changing how either representation is rendered.
+ */
+export function canonicalizeUserReferenceMentions(
+  text: string,
+  attachments: readonly MessageAttachment[] | undefined
+): string {
+  const records = (attachments ?? [])
+    .filter(isWorkspaceReferenceAttachment)
+    .map((attachment) => {
+      const label = String(
+        attachment.composerRefLabel || attachment.name || ""
+      ).trim();
+      const key = buildContextFileKeyFromAttachment(attachment);
+      return { label, canonical: key ? `@${key}` : "" };
+    })
+    .filter((row) => row.label.length > 0 && row.canonical.length > 0)
+    .sort((a, b) => b.label.length - a.label.length);
+  if (!records.length) return text;
+
+  let cursor = 0;
+  let out = "";
+  const consumedByLabel = new Map<string, number>();
+  while (cursor < text.length) {
+    const at = text.indexOf("@", cursor);
+    if (at < 0) {
+      out += text.slice(cursor);
+      break;
+    }
+    out += text.slice(cursor, at);
+    const rest = text.slice(at + 1);
+    if (rest.startsWith("skill://")) {
+      out += "@";
+      cursor = at + 1;
+      continue;
+    }
+    const firstMatch = records.find((row) => {
+      if (!rest.startsWith(row.label)) return false;
+      return mentionBoundaryOk(rest.slice(row.label.length));
+    });
+    const matchingLabel = firstMatch?.label ?? "";
+    const candidates = matchingLabel
+      ? records.filter((row) => row.label === matchingLabel)
+      : [];
+    const consumed = consumedByLabel.get(matchingLabel) ?? 0;
+    const matched =
+      candidates.length > 0
+        ? candidates[Math.min(consumed, candidates.length - 1)]
+        : undefined;
+    if (!matched) {
+      out += "@";
+      cursor = at + 1;
+      continue;
+    }
+    consumedByLabel.set(matchingLabel, consumed + 1);
+    out += matched.canonical;
+    cursor = at + 1 + matched.label.length;
+  }
+  return out;
 }
 
 export function resolveAttachmentLineRange(att: MessageAttachment): { start: number; end: number } | undefined {

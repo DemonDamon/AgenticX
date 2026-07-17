@@ -3221,6 +3221,9 @@ def create_studio_app() -> FastAPI:
                             system_prompt=sys_prompt,
                             user_message_content=user_message_content,
                             history_user_attachments=history_user_attachments,
+                            history_user_metadata=(
+                                {"client_turn_id": _ctid} if _ctid else None
+                            ),
                             persist_user_message=not bool(getattr(payload, "skip_user_history", False)),
                             usage_session_id=payload.session_id,
                             usage_avatar_id=str(getattr(managed, "avatar_id", "") or ""),

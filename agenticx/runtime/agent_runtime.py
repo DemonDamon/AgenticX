@@ -125,11 +125,30 @@ def _chat_history_tail_matches(
 
 
 def _chat_history_append_deduped(history: List[Dict[str, Any]], row: Dict[str, Any]) -> bool:
-    """Append when tail role+content differs. Returns True if appended."""
+    """Append when tail role, content, or stable user-turn identity differs."""
     role = str(row.get("role", ""))
     content = row.get("content", "")
     if _chat_history_tail_matches(history, role, content):
-        return False
+        last = history[-1] if history else {}
+        row_metadata = row.get("metadata")
+        last_metadata = last.get("metadata")
+        row_client_turn_id = (
+            str(row_metadata.get("client_turn_id") or "").strip()
+            if isinstance(row_metadata, dict)
+            else ""
+        )
+        last_client_turn_id = (
+            str(last_metadata.get("client_turn_id") or "").strip()
+            if isinstance(last_metadata, dict)
+            else ""
+        )
+        if not (
+            role.lower() == "user"
+            and row_client_turn_id
+            and last_client_turn_id
+            and row_client_turn_id != last_client_turn_id
+        ):
+            return False
     history.append(row)
     return True
 
@@ -2009,6 +2028,7 @@ class AgentRuntime:
         system_prompt: Optional[str] = None,
         user_message_content: Optional[Any] = None,
         history_user_attachments: Optional[list[dict[str, Any]]] = None,
+        history_user_metadata: Optional[dict[str, Any]] = None,
         persist_user_message: bool = True,
         usage_session_id: Optional[str] = None,
         usage_avatar_id: Optional[str] = None,
@@ -2193,6 +2213,8 @@ class AgentRuntime:
             am_user: dict[str, Any] = {"role": "user", "content": user_content}
             if history_user_attachments:
                 am_user["attachments"] = list(history_user_attachments)
+            if history_user_metadata:
+                am_user["metadata"] = dict(history_user_metadata)
             session.agent_messages.append(am_user)
         await self.hooks.run_on_agent_start(session, agent_id, user_input)
         synced_session_message_count = len(session.agent_messages)
@@ -2201,6 +2223,8 @@ class AgentRuntime:
             hist_user: dict[str, Any] = {"role": "user", "content": user_input}
             if history_user_attachments:
                 hist_user["attachments"] = list(history_user_attachments)
+            if history_user_metadata:
+                hist_user["metadata"] = dict(history_user_metadata)
             _chat_history_append_deduped(session.chat_history, hist_user)
             # Set current user intent for goal anchor injection (FR-1)
             session.current_user_intent = user_input
@@ -2226,6 +2250,8 @@ class AgentRuntime:
                     hist_user: dict[str, Any] = {"role": "user", "content": user_input}
                     if history_user_attachments:
                         hist_user["attachments"] = list(history_user_attachments)
+                    if history_user_metadata:
+                        hist_user["metadata"] = dict(history_user_metadata)
                     _chat_history_append_deduped(session.chat_history, hist_user)
                     session.current_user_intent = user_input
                     _should_mid_turn_persist = True

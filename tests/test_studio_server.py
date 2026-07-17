@@ -600,10 +600,14 @@ def test_server_confirm_route_supports_agent_id() -> None:
     assert approved is True
 
 
-def test_server_chat_passes_should_stop_callable(monkeypatch) -> None:
+def test_server_chat_passes_should_stop_and_client_turn_metadata(monkeypatch) -> None:
     from agenticx.studio import server as server_module
 
-    called: Dict[str, Any] = {"value": False, "invoked": False}
+    called: Dict[str, Any] = {
+        "value": False,
+        "invoked": False,
+        "history_user_metadata": None,
+    }
 
     class _FakeRuntime:
         def __init__(self, _llm, _confirm_gate):
@@ -613,6 +617,7 @@ def test_server_chat_passes_should_stop_callable(monkeypatch) -> None:
             assert callable(should_stop)
             called["invoked"] = True
             called["value"] = await should_stop()
+            called["history_user_metadata"] = _kwargs.get("history_user_metadata")
             yield RuntimeEvent(type="final", data={"text": "ok"})
 
     monkeypatch.setattr(server_module.ProviderResolver, "resolve", lambda **_kwargs: _TextLLM())
@@ -624,13 +629,18 @@ def test_server_chat_passes_should_stop_callable(monkeypatch) -> None:
     with client.stream(
         "POST",
         "/api/chat",
-        json={"session_id": session_id, "user_input": "hello"},
+        json={
+            "session_id": session_id,
+            "user_input": "hello",
+            "client_turn_id": "turn-123",
+        },
     ) as resp:
         assert resp.status_code == 200
         events = _extract_events(list(resp.iter_lines()))
 
     assert called["invoked"] is True
     assert called["value"] is False
+    assert called["history_user_metadata"] == {"client_turn_id": "turn-123"}
     assert any(e.get("type") == "final" for e in events)
     assert not any(e.get("type") == "error" for e in events)
 

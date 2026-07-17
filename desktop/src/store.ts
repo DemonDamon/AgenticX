@@ -13,6 +13,7 @@ import type { SearchReference } from "./types/search-references";
 import { shouldClearMessagesOnSessionSwitch } from "./utils/pane-session-switch";
 import { matchesToolCallForSession } from "./utils/pending-tool-result";
 import type { PendingActionConfirmation } from "./utils/action-confirmation";
+import { shouldSuppressDuplicatePendingUserEcho } from "./utils/send-dedupe";
 
 export type {
   ActionConfirmationDecision,
@@ -306,6 +307,10 @@ export type MessageAttachment = {
   sourcePath?: string;
   referenceToken?: boolean;
   composerRefLabel?: string;
+  lineRange?: { start: number; end: number };
+  spreadsheetRef?: { sheet: string; a1: string };
+  snippetRef?: string;
+  snippetContent?: string;
 };
 
 export type QueuedMessage = {
@@ -1587,29 +1592,30 @@ export const useAppStore = create<AppState>((set, get) => ({
       panes: state.panes.map((pane) => {
         if (pane.id !== paneId) return pane;
         // Guard against duplicate user messages: if the pane already has a user
-        // message with the same content and ownerSessionId, skip the append.
+        // message with the same canonical content and ownerSessionId, skip the append.
         // This prevents a visible duplicate when a bootstrap disk-load races with
         // the optimistic addPaneMessage called from sendChat.
         if (role === "user" && String(content ?? "").trim()) {
           const ownerSid = String(extras?.ownerSessionId ?? pane.sessionId ?? "").trim() || undefined;
-          const norm = (s: unknown) => String(s ?? "").trim();
-          const normalizedContent = norm(content);
-          const dup = pane.messages.some((m) => {
-            if (m.role !== "user") return false;
-            if (norm(m.content) !== normalizedContent) return false;
-            // Primary check: same session ownership.
-            if (ownerSid ? m.ownerSessionId === ownerSid : !m.ownerSessionId) return true;
-            // Fallback: same content regardless of ownerSessionId format — covers
-            // the race where an optimistic write (ownerSid = "sid") and a disk-poll
-            // write (ownerSid from mapLoadedSessionMessage) both land for the same
-            // session but the IDs don't match character-for-character.
-            if (ownerSid && m.ownerSessionId) {
-              const ownerNorm = (s: string) => s.replace(/^dlgpoll-/, "").trim();
-              if (ownerNorm(m.ownerSessionId) === ownerNorm(ownerSid)) return true;
+          const lastNonTool = [...pane.messages].reverse().find((message) => message.role !== "tool");
+          if (lastNonTool?.role === "user") {
+            const ownerNorm = (value: string) => value.replace(/^dlgpoll-/, "").trim();
+            const existingOwner = String(lastNonTool.ownerSessionId ?? "").trim();
+            const sameOwner = ownerSid
+              ? Boolean(existingOwner) && ownerNorm(existingOwner) === ownerNorm(ownerSid)
+              : !existingOwner;
+            if (
+              sameOwner &&
+              shouldSuppressDuplicatePendingUserEcho(
+                pane.messages,
+                String(content ?? ""),
+                attachments,
+                String(extras?.metadata?.client_turn_id ?? ""),
+              )
+            ) {
+              return pane;
             }
-            return false;
-          });
-          if (dup) return pane;
+          }
         }
         return {
           ...pane,
@@ -2174,15 +2180,16 @@ export const useAppStore = create<AppState>((set, get) => ({
     set((state) => {
       const activePane = state.panes.find((pane) => pane.id === state.activePaneId);
       if (role === "user" && String(content ?? "").trim() && activePane) {
-        const ownerSid = String(activePane.sessionId ?? "").trim() || undefined;
-        const norm = (s: unknown) => String(s ?? "").trim();
-        const dup = (activePane.messages ?? []).some(
-          (m) =>
-            m.role === "user" &&
-            norm(m.content) === norm(content) &&
-            (ownerSid ? m.ownerSessionId === ownerSid : !m.ownerSessionId),
-        );
-        if (dup) return state;
+        if (
+          shouldSuppressDuplicatePendingUserEcho(
+            activePane.messages ?? [],
+            String(content ?? ""),
+            attachments,
+            String(extras?.metadata?.client_turn_id ?? ""),
+          )
+        ) {
+          return state;
+        }
       }
       const nextMessage: Message = {
         id: uid(),

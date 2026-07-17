@@ -180,10 +180,10 @@ import {
   assistantVisibleBodyForUi,
   normalizeFinalAssistantPayload,
 } from "../utils/assistant-output";
-import { stripComposerUploadDedupeKey } from "../utils/composer-upload-key";
 import {
+  buildContextFileKeyFromAttachment,
+  canonicalizeUserReferenceMentions,
   findReferenceAttachmentMeta,
-  isReferenceMentionBoundary,
   isWorkspaceReferenceAttachment,
   parseLineRangeFromReferenceLabel,
 } from "../utils/reference-attachment";
@@ -1759,73 +1759,6 @@ function resolveReadyAttachment(
     if (file.name && rec.name === file.name) return rec;
   }
   return undefined;
-}
-
-function buildContextFileKeyFromAttachment(
-  file: Pick<MessageAttachment, "sourcePath" | "name" | "lineRange" | "spreadsheetRef" | "snippetRef">
-): string {
-  const rawBase = String(file.sourcePath || file.name || "").trim();
-  const base = stripComposerUploadDedupeKey(rawBase);
-  if (!base) return "";
-  const line = file.lineRange;
-  if (line && Number.isFinite(line.start) && Number.isFinite(line.end)) {
-    const start = Math.max(1, Math.floor(line.start));
-    const end = Math.max(start, Math.floor(line.end));
-    return `${base}:${start}-${end}`;
-  }
-  const sheet = file.spreadsheetRef?.sheet?.trim();
-  const a1 = file.spreadsheetRef?.a1?.trim();
-  if (sheet && a1) {
-    return `${base}#${sheet}!${a1}`;
-  }
-  const snippetRef = String(file.snippetRef || "").trim();
-  if (snippetRef) {
-    return `${base}:${snippetRef}`;
-  }
-  return base;
-}
-
-function canonicalMentionFromAttachment(
-  file: Pick<MessageAttachment, "sourcePath" | "name" | "lineRange" | "spreadsheetRef" | "snippetRef">
-): string {
-  const key = buildContextFileKeyFromAttachment(file);
-  return key ? `@${key}` : "";
-}
-
-function rewriteUserReferenceMentions(text: string, attachments: MessageAttachment[]): string {
-  const records = attachments
-    .map((att) => {
-      const label = String(att.composerRefLabel || att.name || "").trim();
-      const canonical = canonicalMentionFromAttachment(att);
-      return { label, canonical };
-    })
-    .filter((row) => row.label.length > 0 && row.canonical.length > 0)
-    .sort((a, b) => b.label.length - a.label.length);
-  if (!records.length) return text;
-  let cursor = 0;
-  let out = "";
-  while (cursor < text.length) {
-    const at = text.indexOf("@", cursor);
-    if (at < 0) {
-      out += text.slice(cursor);
-      break;
-    }
-    out += text.slice(cursor, at);
-    const rest = text.slice(at + 1);
-    const matched = records.find((row) => {
-      if (!rest.startsWith(row.label)) return false;
-      const after = rest.slice(row.label.length);
-      return isReferenceMentionBoundary(after);
-    });
-    if (!matched) {
-      out += "@";
-      cursor = at + 1;
-      continue;
-    }
-    out += matched.canonical;
-    cursor = at + 1 + matched.label.length;
-  }
-  return out;
 }
 
 type AtCandidate =
@@ -4086,7 +4019,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
     const raw = messagePlainTextForClipboard(message);
     const textToCopy =
       message.role === "user"
-        ? rewriteUserReferenceMentions(raw, (message.attachments ?? []).filter((item) => isWorkspaceReferenceAttachment(item)))
+        ? canonicalizeUserReferenceMentions(raw, message.attachments)
         : raw;
     try {
       const firstImage = (message.attachments ?? []).find(
@@ -7002,6 +6935,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
     const isContinuation = !!continuation;
     const text = userText.trim();
     const messageText = isContinuation ? " " : text || ATTACHMENT_ONLY_USER_PROMPT;
+    const clientTurnId = isContinuation ? "" : crypto.randomUUID();
     const retryAttachments = options?.retryAttachments;
     let suppressUserEcho = isContinuation || !!options?.suppressUserEcho;
     let skipUserHistory = isContinuation || !!options?.skipUserHistory;
@@ -7029,7 +6963,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
     const refAttachments = userAttachments.filter((item) => isWorkspaceReferenceAttachment(item));
     const outboundMessageText =
       refAttachments.length > 0
-        ? rewriteUserReferenceMentions(messageText, refAttachments)
+        ? canonicalizeUserReferenceMentions(messageText, refAttachments)
         : messageText;
     const hasReadyAttachments = userAttachments.length > 0;
     if (!isContinuation && !text && !hasReadyAttachments) return;
@@ -7389,6 +7323,8 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
       shouldSuppressDuplicatePendingUserEcho(
         useAppStore.getState().panes.find((p) => p.id === pane.id)?.messages ?? pane.messages ?? [],
         messageText,
+        userAttachments,
+        clientTurnId,
       )
     ) {
       suppressUserEcho = true;
@@ -7406,6 +7342,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
           userAttachments,
           {
             ownerSessionId: requestSessionId,
+            metadata: { client_turn_id: clientTurnId },
             ...(quoteTarget
               ? {
                   quotedMessageId: quoteTarget.message.id,
@@ -7652,7 +7589,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
       const body: Record<string, unknown> = { session_id: requestSessionId, user_input: outboundMessageText };
       // Idempotency key: backend short-circuits a duplicate POST (double-click /
       // chip burst / retry race) so it never appends a second user row.
-      body.client_turn_id = crypto.randomUUID();
+      body.client_turn_id = clientTurnId;
       if (skipUserHistory) body.skip_user_history = true;
       const ats = (pane.activeTaskspaceId || "").trim();
       if (ats) body.active_taskspace_id = ats;
