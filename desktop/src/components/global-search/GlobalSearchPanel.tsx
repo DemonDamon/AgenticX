@@ -185,8 +185,12 @@ export function GlobalSearchPanel({ open, onClose }: Props) {
 
   const isIdle = !search.query.trim();
   const isConversations = search.category === "conversations";
+  const isAll = search.category === "all";
   const filteredGroups = search.groupedResults;
   const conversationHits = search.conversationResults;
+  const showConversationsInAll = isAll && conversationHits.length > 0;
+  const hasFileHits = filteredGroups.length > 0;
+  const hasAnyHits = hasFileHits || (isAll && conversationHits.length > 0);
 
   return createPortal(
     <div
@@ -248,10 +252,7 @@ export function GlobalSearchPanel({ open, onClose }: Props) {
           <div className="flex items-center gap-3 overflow-x-auto py-2.5">
             {CATEGORY_TABS.map((tab, idx) => {
               const active = search.category === tab.id;
-              const count =
-                tab.id === "all"
-                  ? search.results.length
-                  : search.categoryCounts[tab.id];
+              const count = search.categoryCounts[tab.id];
               return (
                 <div key={tab.id} className="flex shrink-0 items-center">
                   {idx > 0 ? (
@@ -331,51 +332,70 @@ export function GlobalSearchPanel({ open, onClose }: Props) {
                 ))}
               </div>
             )
-          ) : search.loading && search.results.length === 0 ? (
+          ) : search.loading && !hasAnyHits ? (
             <div className="flex items-center justify-center gap-2 py-16 text-sm text-text-subtle">
               <Loader2 className="h-4 w-4 animate-spin" />
               正在搜索…
             </div>
-          ) : search.query.trim() && filteredGroups.length === 0 ? (
+          ) : search.query.trim() && !hasAnyHits ? (
             <div className="py-16 text-center text-sm text-text-faint">
-              无匹配文件
+              {isAll ? "无匹配结果" : "无匹配文件"}
             </div>
           ) : (
-            filteredGroups.map(([label, items]) => (
-              <div key={label} className="mb-5 last:mb-0">
-                <div className="mb-1.5 flex items-baseline gap-1 text-[13px] font-semibold text-text-strong">
-                  {label}
-                  <span className="text-text-faint">({items.length})</span>
+            <>
+              {filteredGroups.map(([label, items]) => (
+                <div key={label} className="mb-5 last:mb-0">
+                  <div className="mb-1.5 flex items-baseline gap-1 text-[13px] font-semibold text-text-strong">
+                    {label}
+                    <span className="text-text-faint">({items.length})</span>
+                  </div>
+                  <div>
+                    {items.map((item) => {
+                      const active = search.selectedPath === item.path;
+                      return (
+                        <ResultRow
+                          key={item.path}
+                          item={item}
+                          active={active}
+                          onSelect={() =>
+                            search.setSelectedPath(active ? null : item.path)
+                          }
+                          onOpen={() => {
+                            search.setSelectedPath(item.path);
+                            void search.openSelected();
+                          }}
+                          onReveal={() => {
+                            search.setSelectedPath(item.path);
+                            void search.revealSelected();
+                          }}
+                          onContextMenu={(event) => {
+                            event.preventDefault();
+                            setCtxMenu({ x: event.clientX, y: event.clientY, item });
+                          }}
+                        />
+                      );
+                    })}
+                  </div>
                 </div>
-                <div>
-                  {items.map((item) => {
-                    const active = search.selectedPath === item.path;
-                    return (
-                      <ResultRow
-                        key={item.path}
-                        item={item}
-                        active={active}
-                        onSelect={() =>
-                          search.setSelectedPath(active ? null : item.path)
-                        }
-                        onOpen={() => {
-                          search.setSelectedPath(item.path);
-                          void search.openSelected();
-                        }}
-                        onReveal={() => {
-                          search.setSelectedPath(item.path);
-                          void search.revealSelected();
-                        }}
-                        onContextMenu={(event) => {
-                          event.preventDefault();
-                          setCtxMenu({ x: event.clientX, y: event.clientY, item });
-                        }}
+              ))}
+              {showConversationsInAll ? (
+                <div className="mb-5 last:mb-0">
+                  <div className="mb-1.5 flex items-baseline gap-1 text-[13px] font-semibold text-text-strong">
+                    对话
+                    <span className="text-text-faint">({conversationHits.length})</span>
+                  </div>
+                  <div>
+                    {conversationHits.map((hit) => (
+                      <ConversationRow
+                        key={hit.sessionId}
+                        hit={hit}
+                        onOpen={() => jumpToConversation(hit)}
                       />
-                    );
-                  })}
+                    ))}
+                  </div>
                 </div>
-              </div>
-            ))
+              ) : null}
+            </>
           )}
           </div>
 

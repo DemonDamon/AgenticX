@@ -108,6 +108,57 @@ export function formatMtime(ms: number): string {
   return `${y}/${m}/${day} ${hh}:${mm}`;
 }
 
+type SessionListRow = {
+  session_id: string;
+  avatar_id: string | null;
+  avatar_name?: string | null;
+  session_name: string | null;
+  updated_at: number;
+  provider?: string;
+  model?: string;
+};
+
+/** Search chat history via FTS and resolve titles/avatars from the session list. */
+async function fetchConversationHits(trimmed: string): Promise<{
+  hits: ConversationHit[];
+  error?: string;
+}> {
+  const [sres, lres] = await Promise.all([
+    window.agenticxDesktop.searchSessions({ q: trimmed }),
+    window.agenticxDesktop.listSessions(),
+  ]);
+  if (!sres.ok) {
+    return { hits: [], error: sres.error ?? "对话搜索失败，请稍后重试" };
+  }
+  const rowsById = new Map<string, SessionListRow>();
+  if (lres.ok && Array.isArray(lres.sessions)) {
+    for (const r of lres.sessions) rowsById.set(r.session_id, r);
+  }
+  const rawHits = Array.isArray(sres.hits) ? sres.hits : [];
+  const mapped: ConversationHit[] = [];
+  for (const h of rawHits) {
+    const sid = String(h.session_id || "").trim();
+    if (!sid) continue;
+    const row = rowsById.get(sid);
+    const avatarId = row?.avatar_id ?? null;
+    if (typeof avatarId === "string" && avatarId.startsWith("automation:")) continue;
+    const rawName = String(row?.session_name || "").trim();
+    const title = rawName || `·${sid.replace(/-/g, "").slice(0, 8)}`;
+    mapped.push({
+      sessionId: sid,
+      avatarId,
+      avatarName: String(row?.avatar_name || "").trim(),
+      title,
+      snippet: String(h.snippet || "").trim(),
+      updatedAt: Number(row?.updated_at || 0),
+      provider: row?.provider,
+      model: row?.model,
+    });
+  }
+  mapped.sort((a, b) => b.updatedAt - a.updatedAt);
+  return { hits: mapped };
+}
+
 export function useGlobalSearch(open: boolean) {
   const [query, setQuery] = useState("");
   const [category, setCategory] = useState<GlobalSearchCategory>("all");
@@ -130,7 +181,7 @@ export function useGlobalSearch(open: boolean) {
 
   const categoryCounts = useMemo(() => {
     const counts: Record<GlobalSearchCategory, number> = {
-      all: results.length,
+      all: results.length + conversationResults.length,
       documents: 0,
       applications: 0,
       images: 0,
@@ -245,53 +296,20 @@ export function useGlobalSearch(open: boolean) {
         return;
       }
 
-      // "对话" tab → search chat history via backend FTS, resolve titles/avatars
-      // from the session list so results can jump straight to the conversation.
+      const reqId = ++reqIdRef.current;
+      setLoading(true);
+      setError(null);
+      setWarning(null);
+      setTimedOut(false);
+      startElapsedTimer();
+
+      // "对话" tab → only FTS chat history (no filesystem scan).
       if (nextCategory === "conversations") {
-        const reqId = ++reqIdRef.current;
-        setLoading(true);
-        setError(null);
-        setWarning(null);
-        setTimedOut(false);
-        startElapsedTimer();
         try {
-          const [sres, lres] = await Promise.all([
-            window.agenticxDesktop.searchSessions({ q: trimmed }),
-            window.agenticxDesktop.listSessions(),
-          ]);
+          const conv = await fetchConversationHits(trimmed);
           if (reqId !== reqIdRef.current) return;
-          if (!sres.ok) {
-            setConversationResults([]);
-            setError(sres.error ?? "对话搜索失败，请稍后重试");
-            return;
-          }
-          const rowsById = new Map<string, (typeof lres.sessions)[number]>();
-          if (lres.ok && Array.isArray(lres.sessions)) {
-            for (const r of lres.sessions) rowsById.set(r.session_id, r);
-          }
-          const hits = Array.isArray(sres.hits) ? sres.hits : [];
-          const mapped: ConversationHit[] = [];
-          for (const h of hits) {
-            const sid = String(h.session_id || "").trim();
-            if (!sid) continue;
-            const row = rowsById.get(sid);
-            const avatarId = row?.avatar_id ?? null;
-            if (typeof avatarId === "string" && avatarId.startsWith("automation:")) continue;
-            const rawName = String(row?.session_name || "").trim();
-            const title = rawName || `·${sid.replace(/-/g, "").slice(0, 8)}`;
-            mapped.push({
-              sessionId: sid,
-              avatarId,
-              avatarName: String(row?.avatar_name || "").trim(),
-              title,
-              snippet: String(h.snippet || "").trim(),
-              updatedAt: Number(row?.updated_at || 0),
-              provider: row?.provider,
-              model: row?.model,
-            });
-          }
-          mapped.sort((a, b) => b.updatedAt - a.updatedAt);
-          setConversationResults(mapped);
+          setConversationResults(conv.hits);
+          if (conv.error) setError(conv.error);
         } catch (err) {
           if (reqId !== reqIdRef.current) return;
           setConversationResults([]);
@@ -305,19 +323,22 @@ export function useGlobalSearch(open: boolean) {
         return;
       }
 
-      const reqId = ++reqIdRef.current;
-      setLoading(true);
-      setError(null);
-      setWarning(null);
-      setTimedOut(false);
-      startElapsedTimer();
-
+      // File categories (+ 综合): always fetch conversation hits in parallel so
+      // the 「对话」tab count is accurate without waiting for a tab click.
       try {
-        const resp = await window.agenticxDesktop.systemSearch({
-          query: trimmed,
-          category: nextCategory as Exclude<GlobalSearchCategory, "conversations">,
-        });
+        const [resp, conv] = await Promise.all([
+          window.agenticxDesktop.systemSearch({
+            query: trimmed,
+            category: nextCategory as Exclude<GlobalSearchCategory, "conversations">,
+          }),
+          fetchConversationHits(trimmed).catch((err: unknown) => ({
+            hits: [] as ConversationHit[],
+            error: String(err),
+          })),
+        ]);
         if (reqId !== reqIdRef.current) return;
+
+        setConversationResults(conv.hits);
 
         if (!resp.ok) {
           setResults([]);
