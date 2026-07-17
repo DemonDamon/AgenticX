@@ -57,6 +57,7 @@ const baseFollowups = {
   isStreaming: false,
   isGroupTyping: false,
   omitSuggestedQuestions: false,
+  hasBody: true,
   hasSuggestedQuestions: true,
   hasFollowupHandler: true,
   sessionBusy: false,
@@ -90,5 +91,9 @@ describe("shouldShowAssistantFollowups", () => {
         isLastAssistantInPane: false,
       })
     ).toBe(true);
+  });
+
+  it("hides followups when assistant body is empty", () => {
+    expect(shouldShowAssistantFollowups({ ...baseFollowups, hasBody: false })).toBe(false);
   });
 });

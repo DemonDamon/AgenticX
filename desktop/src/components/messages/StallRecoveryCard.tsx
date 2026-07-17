@@ -27,6 +27,8 @@ type Props = {
   resumeInFlight?: boolean;
   rejectReason?: string;
   onOpenSettings?: () => void;
+  /** When false, hide resume / model-switch / stop actions (bodyless tool turns). */
+  allowResume?: boolean;
 };
 
 const borderAccent: Record<Props["kind"], string> = {
@@ -50,6 +52,7 @@ export function StallRecoveryCard({
   resumeInFlight = false,
   rejectReason = "",
   onOpenSettings,
+  allowResume = true,
 }: Props) {
   const isStall = kind === "stall";
   const isIncomplete = isStall && reason === "incomplete";
@@ -95,25 +98,32 @@ export function StallRecoveryCard({
 
                   <div className="min-w-0 flex-1">
                     <p className="text-[15px] font-medium text-text-strong">
-                      {isStall
-                        ? isIncomplete
-                          ? "上一轮未产出回答"
-                          : "该任务可能已中断（长时间无响应）"
-                        : `已达到最大工具调用轮数（${rounds ?? "?"}/${maxRounds ?? "?"}）`}
+                      {!allowResume && isIncomplete
+                        ? "本轮回复生成不完整"
+                        : isStall
+                          ? isIncomplete
+                            ? "上一轮未产出回答"
+                            : "该任务可能已中断（长时间无响应）"
+                          : `已达到最大工具调用轮数（${rounds ?? "?"}/${maxRounds ?? "?"}）`}
                     </p>
-                    {isStall && currentModelLabel ? (
+                    {!allowResume && isIncomplete ? (
+                      <p className="mt-1 text-xs text-text-muted">
+                        工具结果已保留，请查看后明确下一步。
+                      </p>
+                    ) : isStall && currentModelLabel ? (
                       <p className="mt-1 text-xs text-text-muted">
                         {isIncomplete
                           ? `当前模型：${currentModelLabel}。可重试或换模型继续。`
                           : `当前模型：${currentModelLabel}。若长时间无响应，可尝试切换模型后继续。`}
                       </p>
                     ) : null}
-                    {isStall && autoNudgeMax > 0 && autoNudgeCount >= autoNudgeMax ? (
+                    {allowResume && isStall && autoNudgeMax > 0 && autoNudgeCount >= autoNudgeMax ? (
                       <p className="mt-1 text-xs text-amber-300/90">
                         已自动续跑 {autoNudgeCount} 次，请改为手动操作。
                       </p>
                     ) : null}
 
+                    {allowResume ? (
                     <div className="mt-2.5 flex flex-wrap items-center gap-2">
                       <button
                         type="button"
@@ -157,6 +167,7 @@ export function StallRecoveryCard({
                         </button>
                       )}
                     </div>
+                    ) : null}
 
                     {rejectReason ? (
                       <p className="mt-2 text-xs text-rose-400">续跑被拒：{rejectReason}</p>

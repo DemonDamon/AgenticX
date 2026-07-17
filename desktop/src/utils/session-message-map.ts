@@ -10,6 +10,10 @@ import {
 } from "./view-image-inject";
 import { parseClarificationDecisions } from "./clarification-notice";
 import { parseActionConfirmationContext } from "./action-confirmation";
+import {
+  parseAssistantOutputForUi,
+  sanitizeSuggestedQuestions,
+} from "./assistant-output";
 
 function parseSubAgentClusterAnchor(meta: Record<string, unknown> | undefined): Message["subAgentCluster"] {
   const raw = meta?.subagent_cluster;
@@ -247,9 +251,15 @@ export function mapLoadedSessionMessage(
     subAgentCluster: parseSubAgentClusterAnchor(metadata),
   };
   if (item.role === "assistant") {
+    const parsed = parseAssistantOutputForUi(String(mapped.content ?? ""));
+    mapped.content = parsed.visibleBody;
     const sq = item.suggested_questions;
-    if (Array.isArray(sq) && sq.length > 0) {
-      mapped.suggestedQuestions = sq.map((x) => String(x).trim()).filter(Boolean).slice(0, 3);
+    if (parsed.malformed) {
+      // Detached SQ from broken protocol must not render as chips.
+      delete mapped.suggestedQuestions;
+    } else if (Array.isArray(sq) && sq.length > 0) {
+      const cleaned = sanitizeSuggestedQuestions(sq, parsed.visibleBody);
+      if (cleaned.length > 0) mapped.suggestedQuestions = cleaned;
     }
     const refs = parseSearchReferences(item.references);
     if (refs.length > 0) mapped.references = refs;
@@ -260,6 +270,11 @@ export function mapLoadedSessionMessage(
     const reasoning = item.reasoning;
     if (typeof reasoning === "string" && reasoning.trim()) {
       mapped.reasoning = reasoning.trim();
+    } else if (!parsed.malformed && parsed.reasoning.trim()) {
+      mapped.reasoning = parsed.reasoning.trim();
+    }
+    if (parsed.malformed) {
+      delete mapped.reasoning;
     }
     if (typeof item.reasoning_seconds === "number" && item.reasoning_seconds >= 1) {
       mapped.reasoningSeconds = Math.round(item.reasoning_seconds);

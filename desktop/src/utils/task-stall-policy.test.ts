@@ -6,6 +6,7 @@ import {
   isFutileResume,
   isTodoSnapshotSuperseded,
   lastTurnHasCompletedAssistantReply,
+  lastTurnHasToolActivity,
   lastTurnPromisedActionWithoutFollowThrough,
   messageLooksLikeAssistantFinal,
   resolveStickyTodoDisplay,
@@ -239,6 +240,25 @@ describe("lastTurnHasCompletedAssistantReply", () => {
       msg({ id: "t2", role: "tool", content: "已完成（4/4）" }),
     ];
     expect(lastTurnHasCompletedAssistantReply(messages)).toBe(true);
+  });
+});
+
+describe("lastTurnHasToolActivity", () => {
+  it("returns true for bodyless tool turn", () => {
+    const messages: Message[] = [
+      msg({ id: "u1", role: "user", content: "创建分身" }),
+      msg({ id: "a1", role: "assistant", content: "" }),
+      msg({ id: "t1", role: "tool", toolName: "create_avatar", content: "ok" }),
+    ];
+    expect(lastTurnHasToolActivity(messages)).toBe(true);
+  });
+
+  it("returns false for bodyless no-tool turn", () => {
+    const messages: Message[] = [
+      msg({ id: "u1", role: "user", content: "你好" }),
+      msg({ id: "a1", role: "assistant", content: "" }),
+    ];
+    expect(lastTurnHasToolActivity(messages)).toBe(false);
   });
 });
 

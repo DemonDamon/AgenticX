@@ -329,6 +329,7 @@ export function ImBubble({
     isStreaming,
     isGroupTyping,
     omitSuggestedQuestions,
+    hasBody,
     hasSuggestedQuestions: Boolean(message.suggestedQuestions?.length),
     hasFollowupHandler: Boolean(onFollowupClick),
     sessionBusy,

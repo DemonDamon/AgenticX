@@ -6,6 +6,7 @@ import type { ParsedTodo, TodoItem } from "../components/TodoUpdateCard";
 import type { Message } from "../store";
 import { parseReasoningContent } from "../components/messages/reasoning-parser";
 import { assistantBodyText, looksLikeUnfinishedAssistantBody } from "./budget-incomplete-message";
+import { assistantVisibleBodyForUi } from "./assistant-output";
 
 /** Default stall warning threshold (seconds) — overridable via Settings → 工具 → 长任务停滞与续跑. */
 export const DEFAULT_STALL_DETECT_SILENCE_SECONDS = 90;
@@ -55,9 +56,7 @@ export function messageLooksLikeAssistantFinal(message: Message | undefined): bo
 
 /**
  * True when the last user turn already has a non-empty assistant reply.
- * Aligns with backend ``SessionManager._last_turn_has_completed_reply``:
- * scan all assistant messages after the last user message, not only the
- * array tail (tool rows / reasoning-only rows may follow the answer).
+ * Aligns with backend ``SessionManager._messages_last_turn_has_completed_reply``.
  */
 export function lastTurnHasCompletedAssistantReply(messages: Message[]): boolean {
   if (!messages.length) return false;
@@ -66,21 +65,46 @@ export function lastTurnHasCompletedAssistantReply(messages: Message[]): boolean
     if (messages[idx]?.role === "user") lastUserIdx = idx;
   }
   if (lastUserIdx < 0) return false;
+
+  let sawMarker = false;
   let lastReplyIdx = -1;
   for (let idx = lastUserIdx + 1; idx < messages.length; idx += 1) {
     const msg = messages[idx];
     if (msg?.role !== "assistant") continue;
     if (msg.id === "__stream__" || msg.id === "typing-meta") continue;
-    const content = assistantBodyText(msg);
-    if (!content) continue;
-    if (INTERRUPTED_ASSISTANT_PLACEHOLDERS.has(content)) continue;
-    lastReplyIdx = idx;
+    const meta = msg.metadata;
+    if (meta && String(meta.source ?? "").trim() === "interrupted-partial") continue;
+    const visible = assistantVisibleBodyForUi(String(msg.content ?? "")).trim();
+    const turnTerminal = meta?.turn_terminal;
+    if (turnTerminal === true || turnTerminal === false) {
+      sawMarker = true;
+      if (
+        turnTerminal === true &&
+        visible &&
+        !INTERRUPTED_ASSISTANT_PLACEHOLDERS.has(visible)
+      ) {
+        lastReplyIdx = idx;
+      }
+      continue;
+    }
   }
-  if (lastReplyIdx < 0) return false;
+  if (sawMarker) {
+    if (lastReplyIdx < 0) return false;
+  } else {
+    for (let idx = lastUserIdx + 1; idx < messages.length; idx += 1) {
+      const msg = messages[idx];
+      if (msg?.role !== "assistant") continue;
+      if (msg.id === "__stream__" || msg.id === "typing-meta") continue;
+      const meta = msg.metadata;
+      if (meta && String(meta.source ?? "").trim() === "interrupted-partial") continue;
+      const content = assistantVisibleBodyForUi(String(msg.content ?? "")).trim();
+      if (!content) continue;
+      if (INTERRUPTED_ASSISTANT_PLACEHOLDERS.has(content)) continue;
+      lastReplyIdx = idx;
+    }
+    if (lastReplyIdx < 0) return false;
+  }
 
-  // Keep front-end semantics in sync with backend session_manager:
-  // if a "reply" is followed by a later assistant row that still carries
-  // tool_calls, the turn has not actually wrapped up yet.
   for (let idx = lastReplyIdx + 1; idx < messages.length; idx += 1) {
     const msg = messages[idx];
     if (msg?.role !== "assistant") continue;
@@ -88,6 +112,26 @@ export function lastTurnHasCompletedAssistantReply(messages: Message[]): boolean
     if (toolCalls.length > 0) return false;
   }
   return true;
+}
+
+/** True when the last user turn has tool activity (tool row or tool_calls). */
+export function lastTurnHasToolActivity(messages: Message[]): boolean {
+  if (!messages.length) return false;
+  let lastUserIdx = -1;
+  for (let idx = 0; idx < messages.length; idx += 1) {
+    if (messages[idx]?.role === "user") lastUserIdx = idx;
+  }
+  if (lastUserIdx < 0) return false;
+  for (let idx = lastUserIdx + 1; idx < messages.length; idx += 1) {
+    const msg = messages[idx];
+    if (!msg) continue;
+    if (msg.role === "tool") return true;
+    if (msg.role === "assistant") {
+      const toolCalls = (msg.tool_calls as unknown[] | undefined) ?? [];
+      if (toolCalls.length > 0) return true;
+    }
+  }
+  return false;
 }
 
 /**

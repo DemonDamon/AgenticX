@@ -119,6 +119,7 @@ import {
   stallDetectSilenceMs,
   isFutileResume,
   lastTurnHasCompletedAssistantReply,
+  lastTurnHasToolActivity,
   resolveSessionHealth,
   resolveSilenceTier,
   resolveSilenceTierLabel,
@@ -175,6 +176,10 @@ import {
   mapLoadedSessionMessage,
   type LoadedSessionMessage,
 } from "../utils/session-message-map";
+import {
+  assistantVisibleBodyForUi,
+  normalizeFinalAssistantPayload,
+} from "../utils/assistant-output";
 import { stripComposerUploadDedupeKey } from "../utils/composer-upload-key";
 import {
   findReferenceAttachmentMeta,
@@ -6463,7 +6468,10 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
 
                       const renderReActBlockFollowups = () =>
                         peeledFollowupAssistant?.suggestedQuestions &&
-                        peeledFollowupAssistant.suggestedQuestions.length > 0 ? (
+                        peeledFollowupAssistant.suggestedQuestions.length > 0 &&
+                        assistantVisibleBodyForUi(
+                          String(peeledFollowupAssistant.content ?? ""),
+                        ).trim() ? (
                           <div className={ASSISTANT_FOLLOWUP_LIST_CLASS} style={reactActionStyle}>
                             {peeledFollowupAssistant.suggestedQuestions.slice(0, 3).map((q, qi) => (
                               <button
@@ -6652,6 +6660,12 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
           autoNudgeMax={stallRuntimeConfig.stall_auto_nudge_max_per_session}
           resumeInFlight={resumeInFlight}
           rejectReason={stallRejectReason}
+          allowResume={
+            !(
+              stallReason === "incomplete" &&
+              lastTurnHasToolActivity(pane.messages)
+            )
+          }
           onResume={() => void resumeCurrentTask()}
           onResumeWithModel={(provider, model) => void resumeWithModel(provider, model)}
           onStop={() => void stopCurrentRun()}
@@ -7792,6 +7806,8 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
       let cumulativeFull = "";
       let receivedFinalEvent = false;
       let pendingSuggestedQuestions: string[] = [];
+      let pendingFinalTurnTerminal = false;
+      let pendingFinalTerminalReason: string | undefined;
       let pendingReferences: SearchReference[] = [];
       let pendingSearchedQueries: string[] = [];
       let pendingReasoning: string | undefined = undefined;
@@ -8942,11 +8958,16 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
               receivedFinalEvent = true;
               if (eventAgentId === "meta") {
                 useAppStore.getState().clearSessionHistoryHint(requestSessionId);
-                const finalText = String(payload.data?.text ?? "");
-                const sqRaw = payload.data?.suggested_questions;
-                pendingSuggestedQuestions = Array.isArray(sqRaw)
-                  ? sqRaw.map((x: unknown) => String(x).trim()).filter(Boolean).slice(0, 3)
-                  : [];
+                const normalizedFinal = normalizeFinalAssistantPayload(
+                  payload.data?.text,
+                  payload.data?.suggested_questions,
+                  payload.data?.turn_terminal,
+                  payload.data?.terminal_reason,
+                );
+                const finalText = normalizedFinal.text;
+                pendingSuggestedQuestions = normalizedFinal.suggestedQuestions;
+                pendingFinalTurnTerminal = normalizedFinal.turnTerminal;
+                pendingFinalTerminalReason = normalizedFinal.terminalReason;
                 const appliedRefs = applyFinalReferencePayload(
                   pendingReferences,
                   pendingSearchedQueries,
@@ -8975,6 +8996,11 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
                 if (finalText.trim() && !isThinkingPlaceholderText(finalText)) {
                   full = finalText;
                   cumulativeFull = finalText;
+                } else if (!assistantVisibleBodyForUi(full).trim()) {
+                  full = "";
+                  cumulativeFull = "";
+                  pendingSuggestedQuestions = [];
+                  void mergeTailFromDisk(requestSessionId);
                 }
                 scheduleStreamTextUpdate(full);
               } else {
@@ -9104,9 +9130,19 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
       if (pendingReasoning) reasoningExtras.reasoning = pendingReasoning;
       if (pendingReasoningSeconds !== undefined)
         reasoningExtras.reasoningSeconds = pendingReasoningSeconds;
+      const terminalMetaExtras: Record<string, unknown> = receivedFinalEvent
+        ? {
+            metadata: {
+              turn_terminal: pendingFinalTurnTerminal,
+              ...(pendingFinalTerminalReason
+                ? { terminal_reason: pendingFinalTerminalReason }
+                : {}),
+            },
+          }
+        : { metadata: { turn_terminal: false } };
       const turnExtras =
-        refExtras || sugExtras || Object.keys(reasoningExtras).length > 0
-          ? { ...refExtras, ...sugExtras, ...reasoningExtras }
+        refExtras || sugExtras || Object.keys(reasoningExtras).length > 0 || receivedFinalEvent
+          ? { ...refExtras, ...sugExtras, ...reasoningExtras, ...terminalMetaExtras }
           : undefined;
       const completedAt = Date.now();
       const stampLastAssistantCompletedAt = () => {

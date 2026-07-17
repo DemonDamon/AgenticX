@@ -1,31 +1,17 @@
 import type { Message } from "../store";
 import { isOrphanFormattedToolResultMessage } from "./orphan-formatted-tool";
 import { mapLoadedSessionMessage, type LoadedSessionMessage } from "./session-message-map";
+import { assistantVisibleBodyForUi } from "./assistant-output";
 
 const norm = (s: unknown) => String(s ?? "").trim();
 const contentKey = (role: string, content: unknown) => `${role}::${norm(content)}`;
 
 /**
- * In-memory assistant rows carry the raw streamed text — `<think>…</think>`
- * reasoning and `<followups>…</followups>` blocks — while the disk copy persists
- * only the sanitized final body. A raw-content comparison therefore never
- * matches, so the in-memory row falls through to the unconsumed-tail append and
- * surfaces as a DUPLICATE assistant row (the "思考了 N 秒" rows piling up after
- * the answer) whose references also land on the wrong copy. Comparing the
- * reasoning/followups-stripped body lets the live row reconcile with its disk
- * counterpart so enrichments (references / searched queries) are preserved and
- * no duplicate is appended.
+ * Compare canonical visible bodies so live streamed rows (with think/followups
+ * tags) reconcile with disk rows that already store the sanitized final body.
  */
-function strippedAssistantBody(content: unknown): string {
-  return String(content ?? "")
-    .replace(/<think>[\s\S]*?<\/think>/gi, "")
-    .replace(/<think>[\s\S]*$/i, "")
-    .replace(/<followups>[\s\S]*?<\/followups>/gi, "")
-    .replace(/<followups>[\s\S]*$/i, "")
-    .trim();
-}
-
-const assistantBodyKey = (content: unknown) => strippedAssistantBody(content);
+const assistantBodyKey = (content: unknown) =>
+  assistantVisibleBodyForUi(String(content ?? "")).trim();
 
 function overlayMemoryEnrichment(diskRow: Message, memory: Message): Message {
   return {

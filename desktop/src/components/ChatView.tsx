@@ -23,7 +23,14 @@ import {
   type CcBridgeSessionModeHint,
 } from "../utils/cc-bridge-ui";
 import { KeybindingsPanel } from "./KeybindingsPanel";
-import { attachmentsFromSessionRow } from "../utils/session-message-map";
+import {
+  mapLoadedSessionMessage,
+  type LoadedSessionMessage,
+} from "../utils/session-message-map";
+import {
+  assistantVisibleBodyForUi,
+  normalizeFinalAssistantPayload,
+} from "../utils/assistant-output";
 import { MessageRenderer, renderToolMessageExtras } from "./messages/MessageRenderer";
 import { extractPartialShowWidgetArgs } from "./messages/show-widget-partial";
 import { groupConsecutiveToolMessages, shouldHoldToolGroupProgress, type GroupedChatRow } from "./messages/group-tool-messages";
@@ -56,6 +63,7 @@ import {
   CHANNEL_C_GRACE_MS,
   stallDetectSilenceMs,
   lastTurnHasCompletedAssistantReply,
+  lastTurnHasToolActivity,
   shouldAllowStallAutoNudge,
   shouldTriggerIncompleteEndStall,
 } from "../utils/task-stall-policy";
@@ -790,16 +798,53 @@ export function ChatView({ onOpenConfirm, onOpenClarification, onSubmitClarifica
         const result = await window.agenticxDesktop.loadSessionMessages(targetSessionId);
         clearMessages();
         if (result.ok && Array.isArray(result.messages)) {
-          for (const item of result.messages) {
-            const role = item.role === "user" || item.role === "assistant" || item.role === "tool" ? item.role : "assistant";
-            addMessage(
-              role,
-              item.content,
-              item.agent_id ?? "meta",
-              item.provider,
-              item.model,
-              attachmentsFromSessionRow(item.attachments)
+          for (const [index, item] of result.messages.entries()) {
+            const mapped = mapLoadedSessionMessage(
+              item as LoadedSessionMessage,
+              targetSessionId,
+              index,
+              targetSessionId,
             );
+            addMessage(
+              mapped.role,
+              mapped.content,
+              mapped.agentId,
+              mapped.provider,
+              mapped.model,
+              mapped.attachments,
+              {
+                avatarName: mapped.avatarName,
+                avatarUrl: mapped.avatarUrl,
+                quotedMessageId: mapped.quotedMessageId,
+                quotedContent: mapped.quotedContent,
+                timestamp: mapped.timestamp,
+                forwardedHistory: mapped.forwardedHistory,
+                references: mapped.references,
+                searchedQueries: mapped.searchedQueries,
+                metadata: mapped.metadata,
+                suggestedQuestions: mapped.suggestedQuestions,
+                toolCallId: mapped.toolCallId,
+                toolName: mapped.toolName,
+                toolArgs: mapped.toolArgs,
+                toolStatus: mapped.toolStatus,
+                toolElapsedSec: mapped.toolElapsedSec,
+                toolResultPreview: mapped.toolResultPreview,
+                toolGroupId: mapped.toolGroupId,
+                toolStreamLines: mapped.toolStreamLines,
+                clarificationPrompt: mapped.clarificationPrompt,
+                clarificationSuspended: mapped.clarificationSuspended,
+                actionConfirmation: mapped.actionConfirmation,
+                inlineConfirm: mapped.inlineConfirm,
+              },
+            );
+            if (mapped.reasoning || mapped.reasoningSeconds != null) {
+              mergeLastMessageByRole(mapped.role, {
+                ...(mapped.reasoning ? { reasoning: mapped.reasoning } : {}),
+                ...(mapped.reasoningSeconds != null
+                  ? { reasoningSeconds: mapped.reasoningSeconds }
+                  : {}),
+              });
+            }
           }
         }
       } catch {
@@ -807,7 +852,15 @@ export function ChatView({ onOpenConfirm, onOpenClarification, onSubmitClarifica
       }
       return true;
     },
-    [avatars, setActiveAvatarId, setSessionId, setSelectedSubAgent, clearMessages, addMessage]
+    [
+      avatars,
+      setActiveAvatarId,
+      setSessionId,
+      setSelectedSubAgent,
+      clearMessages,
+      addMessage,
+      mergeLastMessageByRole,
+    ]
   );
 
   const syncSubAgents = useCallback(async () => {
@@ -1313,6 +1366,9 @@ export function ChatView({ onOpenConfirm, onOpenClarification, onSubmitClarifica
       let full = "";
       let cumulativeFull = "";
       let pendingSuggestedQuestions: string[] = [];
+      let pendingFinalTurnTerminal = false;
+      let pendingFinalTerminalReason: string | undefined;
+      let receivedFinalEvent = false;
       let pendingReferences: SearchReference[] = [];
       let pendingSearchedQueries: string[] = [];
       const syncTurnRefsSnapshot = () => {
@@ -1758,10 +1814,16 @@ export function ChatView({ onOpenConfirm, onOpenClarification, onSubmitClarifica
                 addSubAgentEvent(eventAgentId, { type: "final", content: payload.data?.text ?? "" });
                 continue;
               }
-              const sqRaw = payload.data?.suggested_questions;
-              pendingSuggestedQuestions = Array.isArray(sqRaw)
-                ? sqRaw.map((x: unknown) => String(x).trim()).filter(Boolean).slice(0, 3)
-                : [];
+              receivedFinalEvent = true;
+              const normalizedFinal = normalizeFinalAssistantPayload(
+                payload.data?.text,
+                payload.data?.suggested_questions,
+                payload.data?.turn_terminal,
+                payload.data?.terminal_reason,
+              );
+              pendingSuggestedQuestions = normalizedFinal.suggestedQuestions;
+              pendingFinalTurnTerminal = normalizedFinal.turnTerminal;
+              pendingFinalTerminalReason = normalizedFinal.terminalReason;
               const appliedRefs = applyFinalReferencePayload(
                 pendingReferences,
                 pendingSearchedQueries,
@@ -1774,30 +1836,15 @@ export function ChatView({ onOpenConfirm, onOpenClarification, onSubmitClarifica
                 setStreamReferences([...pendingReferences]);
                 setStreamSearchedQueries([...pendingSearchedQueries]);
               }
-              const finalText = String(payload.data?.text ?? "");
-              if (finalText) {
-                if (finalText.startsWith(cumulativeFull)) {
-                  const delta = finalText.slice(cumulativeFull.length);
-                  if (delta) {
-                    full += delta;
-                    cumulativeFull += delta;
-                  }
-                } else if (finalText.startsWith(full)) {
-                  const delta = finalText.slice(full.length);
-                  if (delta) {
-                    full += delta;
-                    cumulativeFull += delta;
-                  }
-                } else if (
-                  normalizeStreamText(finalText) !== normalizeStreamText(full) &&
-                  normalizeStreamText(finalText) !== normalizeStreamText(cumulativeFull) &&
-                  !normalizeStreamText(full).includes(normalizeStreamText(finalText)) &&
-                  !normalizeStreamText(cumulativeFull).includes(normalizeStreamText(finalText))
-                ) {
-                  const merged = full.trim() ? `\n\n${finalText}` : finalText;
-                  full += merged;
-                  cumulativeFull += merged;
-                }
+              const finalText = normalizedFinal.text;
+              if (finalText.trim()) {
+                // Authoritative replacement — never concatenate malformed stream residue.
+                full = finalText;
+                cumulativeFull = finalText;
+              } else if (!assistantVisibleBodyForUi(full).trim()) {
+                full = "";
+                cumulativeFull = "";
+                pendingSuggestedQuestions = [];
               }
               scheduleStreamTextUpdate(full);
             }
@@ -1964,7 +2011,20 @@ export function ChatView({ onOpenConfirm, onOpenClarification, onSubmitClarifica
         pendingSuggestedQuestions.length > 0
           ? { suggestedQuestions: pendingSuggestedQuestions.slice(0, 3) }
           : undefined;
-      const turnExtras = refExtras || sugExtras ? { ...refExtras, ...sugExtras } : undefined;
+      const terminalMetaExtras = receivedFinalEvent
+        ? {
+            metadata: {
+              turn_terminal: pendingFinalTurnTerminal,
+              ...(pendingFinalTerminalReason
+                ? { terminal_reason: pendingFinalTerminalReason }
+                : {}),
+            },
+          }
+        : { metadata: { turn_terminal: false } };
+      const turnExtras =
+        refExtras || sugExtras || receivedFinalEvent
+          ? { ...refExtras, ...sugExtras, ...terminalMetaExtras }
+          : undefined;
       if (isCurrentRequest() && trimmedFull && !isThinkingPlaceholderText(full) && !streamCommittedRef.current) {
         const mid = lastMidStreamAssistantCommitRef.current;
         if (mid !== null && trimmedFull === mid) {
@@ -2644,6 +2704,12 @@ export function ChatView({ onOpenConfirm, onOpenClarification, onSubmitClarifica
               modelOptions={stallModelOptions}
               autoNudgeCount={autoNudgeCount}
               autoNudgeMax={stallNudgeConfig.stall_auto_nudge_max_per_session}
+              allowResume={
+                !(
+                  !lastTurnHasCompletedAssistantReply(messages) &&
+                  lastTurnHasToolActivity(messages)
+                )
+              }
               onResume={() => void resumeCurrentTask()}
               onResumeWithModel={(provider, model) => void resumeWithModel(provider, model)}
               onStop={stopStreaming}

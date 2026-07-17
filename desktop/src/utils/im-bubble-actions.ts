@@ -27,6 +27,7 @@ export function shouldShowAssistantFollowups(args: {
   isStreaming: boolean;
   isGroupTyping: boolean;
   omitSuggestedQuestions?: boolean;
+  hasBody: boolean;
   hasSuggestedQuestions: boolean;
   hasFollowupHandler: boolean;
   sessionBusy?: boolean;
@@ -36,6 +37,7 @@ export function shouldShowAssistantFollowups(args: {
   if (args.isStreaming) return false;
   if (args.isGroupTyping) return false;
   if (args.omitSuggestedQuestions) return false;
+  if (!args.hasBody) return false;
   if (!args.hasSuggestedQuestions) return false;
   if (!args.hasFollowupHandler) return false;
   if (args.sessionBusy && args.isLastAssistantInPane) return false;
