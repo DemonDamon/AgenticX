@@ -1,0 +1,101 @@
+[
+  {
+    "name": "well_formed",
+    "raw": "<think>r</think>正文<followups>问题1\n问题2\n问题3</followups>",
+    "reasoning": "r",
+    "visible_body": "正文",
+    "suggested_questions": ["问题1", "问题2", "问题3"],
+    "protocol_errors": [],
+    "malformed": false
+  },
+  {
+    "name": "uppercase_well_formed",
+    "raw": "<THINK>r</THINK>正文<FOLLOWUPS>问题1\n问题2\n问题3</FOLLOWUPS>",
+    "reasoning": "r",
+    "visible_body": "正文",
+    "suggested_questions": ["问题1", "问题2", "问题3"],
+    "protocol_errors": [],
+    "malformed": false
+  },
+  {
+    "name": "cross_nested_incident",
+    "raw": "<think>r<followups>prompt</think>\n**标题**\n|a|b|\n</followups>",
+    "reasoning": "r",
+    "visible_body": "",
+    "suggested_questions": [],
+    "protocol_errors": ["nested_reserved_tag", "mismatched_close"],
+    "malformed": true
+  },
+  {
+    "name": "reverse_nested",
+    "raw": "<followups>问题1<think>r</think>\n问题2\n问题3</followups>正文",
+    "reasoning": "",
+    "visible_body": "正文",
+    "suggested_questions": [],
+    "protocol_errors": ["nested_reserved_tag"],
+    "malformed": true
+  },
+  {
+    "name": "stray_close",
+    "raw": "正文</think>尾部",
+    "reasoning": "",
+    "visible_body": "正文尾部",
+    "suggested_questions": [],
+    "protocol_errors": ["stray_close"],
+    "malformed": true
+  },
+  {
+    "name": "continuous_mismatch_then_recover",
+    "raw": "<think>r<followups>x</think>y</followups>正文",
+    "reasoning": "r",
+    "visible_body": "正文",
+    "suggested_questions": [],
+    "protocol_errors": ["nested_reserved_tag", "mismatched_close"],
+    "malformed": true
+  },
+  {
+    "name": "unclosed_think",
+    "raw": "正文<think>r",
+    "reasoning": "r",
+    "visible_body": "正文",
+    "suggested_questions": [],
+    "protocol_errors": ["unclosed_think"],
+    "malformed": true
+  },
+  {
+    "name": "unclosed_followups",
+    "raw": "正文<followups>问题1\n问题2\n问题3",
+    "reasoning": "",
+    "visible_body": "正文",
+    "suggested_questions": [],
+    "protocol_errors": ["unclosed_followups"],
+    "malformed": true
+  },
+  {
+    "name": "multiple_followups",
+    "raw": "正文<followups>甲\n乙\n丙</followups><followups>丁\n戊\n己</followups>",
+    "reasoning": "",
+    "visible_body": "正文",
+    "suggested_questions": [],
+    "protocol_errors": ["multiple_followups"],
+    "malformed": true
+  },
+  {
+    "name": "noncanonical_reserved_tag",
+    "raw": "< Think >secret</ Think >正文",
+    "reasoning": "secret",
+    "visible_body": "正文",
+    "suggested_questions": [],
+    "protocol_errors": ["noncanonical_reserved_tag"],
+    "malformed": true
+  },
+  {
+    "name": "followups_without_body",
+    "raw": "<followups>问题1\n问题2\n问题3</followups>",
+    "reasoning": "",
+    "visible_body": "",
+    "suggested_questions": [],
+    "protocol_errors": ["missing_visible_body"],
+    "malformed": true
+  }
+]
