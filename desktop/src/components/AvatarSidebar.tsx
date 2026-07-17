@@ -6,7 +6,6 @@ import { APP_DISPLAY_NAME, APP_VERSION, META_AGENT_DISPLAY_NAME } from "../const
 import { DEFAULT_META_AVATAR_URL } from "../constants/meta-avatar";
 import { usePaneNavigation } from "../hooks/usePaneNavigation";
 import { AvatarSettingsPanel } from "./AvatarSettingsPanel";
-import { GlobalSearchTrigger } from "./global-search/GlobalSearchTrigger";
 
 type MachiContextMenuState = { x: number; y: number } | null;
 
@@ -228,8 +227,6 @@ export function AvatarSidebar() {
             </span>
           </div>
         </button>
-
-        <GlobalSearchTrigger />
 
         {/* Compact button navigation */}
         <nav className="flex flex-col gap-px px-2 py-1.5" aria-label="主导航">

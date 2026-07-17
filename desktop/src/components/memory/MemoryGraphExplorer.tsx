@@ -1,4 +1,4 @@
-import { PanelRightClose, Pin, PinOff, RefreshCw, Search, Share2, Trash2 } from "lucide-react";
+import { PanelRight, Pin, PinOff, RefreshCw, Search, Share2, Trash2 } from "lucide-react";
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useAppStore } from "../../store";
 import {
@@ -845,7 +845,7 @@ function MemoryGraphExplorerInner({
         </span>
         {onClose ? (
           <button type="button" className="agx-topbar-btn !px-[5px]" onClick={onClose} title="收起">
-            <PanelRightClose className="h-4 w-4" />
+            <PanelRight className="h-4 w-4" />
           </button>
         ) : null}
       </div>
@@ -929,7 +929,7 @@ function MemoryGraphExplorerInner({
             onClick={onClose}
             title="收起"
           >
-            <PanelRightClose className="h-4 w-4" />
+            <PanelRight className="h-4 w-4" />
           </button>
         ) : null}
       </div>

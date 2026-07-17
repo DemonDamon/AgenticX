@@ -1,5 +1,5 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { PanelRightClose, Folder, RefreshCw, FolderPlus, Terminal } from "lucide-react";
+import { PanelRight, Folder, RefreshCw, FolderPlus, Terminal } from "lucide-react";
 import type { DragEvent as ReactDragEvent, MouseEvent as ReactMouseEvent } from "react";
 import type { Taskspace } from "../store";
 import { useAppStore } from "../store";
@@ -1038,7 +1038,7 @@ export function WorkspacePanel({
                   onClick={onClose}
                   title="关闭工作区面板"
                 >
-                  <PanelRightClose className="h-4 w-4" strokeWidth={1.8} />
+                  <PanelRight className="h-4 w-4" strokeWidth={1.8} />
                 </button>
               ) : null}
             </div>

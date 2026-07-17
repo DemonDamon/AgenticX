@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState } from "react";
-import { Gauge, LogIn, LogOut, Moon, PanelLeftOpen, Settings, Sun, User } from "lucide-react";
+import { Gauge, LogIn, LogOut, Moon, PanelLeft, Settings, Sun, User } from "lucide-react";
 import { useAppStore } from "../store";
 import { formatBackendChipLabel, getBackendScope, getConnectionModeSync } from "../utils/backend-scope";
+import { GlobalSearchTrigger } from "./global-search/GlobalSearchTrigger";
 
 type Props = {
   sidebarCollapsed: boolean;
@@ -112,8 +113,9 @@ export function Topbar({ sidebarCollapsed, onToggleSidebar }: Props) {
           onClick={onToggleSidebar}
           title={sidebarCollapsed ? "展开侧栏" : "收起侧栏"}
         >
-          <PanelLeftOpen className="h-[18px] w-[18px]" strokeWidth={1.8} />
+          <PanelLeft className="h-[18px] w-[18px]" strokeWidth={1.8} />
         </button>
+        <GlobalSearchTrigger />
         <span
           className="inline-flex max-w-[140px] items-center gap-1.5 rounded-full border border-border bg-surface-card px-2 py-0.5 text-[11px] text-text-subtle"
           title={backendChipTooltip}
