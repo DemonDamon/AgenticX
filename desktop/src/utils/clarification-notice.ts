@@ -15,6 +15,8 @@ export type ClarificationDecisionPayload = {
   id: string;
   question: string;
   options: string[];
+  selectionMode: "single" | "multiple";
+  exclusiveOptions: string[];
 };
 
 export type PendingClarificationPayload = {
@@ -28,6 +30,24 @@ export type PendingClarificationPayload = {
   context?: Record<string, unknown> | undefined;
 };
 
+function normalizeExclusiveOptions(
+  raw: unknown,
+  options: string[],
+  selectionMode: "single" | "multiple",
+): string[] {
+  if (selectionMode !== "multiple" || !Array.isArray(raw)) return [];
+  const optionSet = new Set(options);
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const label of raw) {
+    const text = String(label ?? "").trim();
+    if (!text || !optionSet.has(text) || seen.has(text)) continue;
+    seen.add(text);
+    out.push(text);
+  }
+  return out;
+}
+
 export function parseClarificationDecisions(raw: unknown): ClarificationDecisionPayload[] {
   if (!Array.isArray(raw)) return [];
   const out: ClarificationDecisionPayload[] = [];
@@ -39,7 +59,13 @@ export function parseClarificationDecisions(raw: unknown): ClarificationDecision
     const options = rawOpts.map((o) => String(o).trim()).filter(Boolean).slice(0, 8);
     if (!question || options.length === 0) continue;
     const id = String(rec.id ?? "").trim() || `decision-${out.length + 1}`;
-    out.push({ id, question, options });
+    const selectionMode = rec.selection_mode === "multiple" ? "multiple" : "single";
+    const exclusiveOptions = normalizeExclusiveOptions(
+      rec.exclusive_options,
+      options,
+      selectionMode,
+    );
+    out.push({ id, question, options, selectionMode, exclusiveOptions });
   }
   return out;
 }
@@ -57,12 +83,20 @@ export function inferClarificationDecisions(
 
   const buckets = new Map<string, ClarificationDecisionPayload>();
   for (const [key] of dimensions) {
-    buckets.set(key, { id: key, question: `关于「${key}」的决策`, options: [] });
+    buckets.set(key, {
+      id: key,
+      question: `关于「${key}」的决策`,
+      options: [],
+      selectionMode: "single",
+      exclusiveOptions: [],
+    });
   }
   const other: ClarificationDecisionPayload = {
     id: "__overall__",
     question: "整体确认",
     options: [],
+    selectionMode: "single",
+    exclusiveOptions: [],
   };
 
   for (const opt of options) {
@@ -93,6 +127,43 @@ export function inferClarificationDecisions(
   const out = [...buckets.values()].filter((b) => b.options.length > 0);
   if (other.options.length > 0) out.push(other);
   return out.length >= 2 ? out : [];
+}
+
+/**
+ * Toggle a decision option. Output order always follows ``decision.options``.
+ *
+ * - single: exclusive select / click again to clear
+ * - multiple exclusive: selecting clears others; click again clears
+ * - multiple normal: toggle while clearing any currently selected exclusive
+ */
+export function toggleDecisionSelection(
+  decision: ClarificationDecisionPayload,
+  current: string[],
+  option: string,
+): string[] {
+  const allowed = new Set(decision.options);
+  if (!allowed.has(option)) {
+    return decision.options.filter((o) => current.includes(o));
+  }
+
+  if (decision.selectionMode === "single") {
+    if (current.includes(option) && current.length === 1) return [];
+    return [option];
+  }
+
+  const exclusiveSet = new Set(decision.exclusiveOptions);
+  const isExclusive = exclusiveSet.has(option);
+  const selected = new Set(current.filter((o) => allowed.has(o)));
+
+  if (isExclusive) {
+    if (selected.has(option) && selected.size === 1) return [];
+    return [option];
+  }
+
+  for (const ex of exclusiveSet) selected.delete(ex);
+  if (selected.has(option)) selected.delete(option);
+  else selected.add(option);
+  return decision.options.filter((o) => selected.has(o));
 }
 
 /**

@@ -1,7 +1,7 @@
 import { useMemo, useState } from "react";
 import { AlertCircle, Check, ChevronUp, Clock, Send } from "lucide-react";
 import type { ClarificationDecision, PendingClarification } from "../../store";
-import { buildClarificationAnswerText, inferClarificationDecisions, type ClarificationAnswer } from "../../utils/clarification-notice";
+import { buildClarificationAnswerText, inferClarificationDecisions, toggleDecisionSelection, type ClarificationAnswer } from "../../utils/clarification-notice";
 import { ASSISTANT_INLINE_CARD_SHELL_CLASS, GROUP_INLINE_CARD_SHELL_CLASS } from "./im-layout";
 
 /** Minimal line-art glyph for clarification prompts (Near-style, stroke-only). */
@@ -58,14 +58,19 @@ export function ClarificationCard({
   );
   const decisions = useMemo(() => {
     const explicit = (prompt.decisions ?? []).filter((d) => d.question.trim() && (d.options?.length ?? 0) > 0);
-    if (explicit.length > 0) return explicit;
-    return inferClarificationDecisions(prompt.context, opts);
+    const source = explicit.length > 0 ? explicit : inferClarificationDecisions(prompt.context, opts);
+    return source.map((d) => ({
+      ...d,
+      selectionMode: d.selectionMode === "multiple" ? ("multiple" as const) : ("single" as const),
+      exclusiveOptions: Array.isArray(d.exclusiveOptions) ? d.exclusiveOptions : [],
+    }));
   }, [prompt.decisions, prompt.context, opts]);
   const groupedMode = decisions.length > 0;
+  const hasMultipleDecision = decisions.some((d) => d.selectionMode === "multiple");
   const canFree = prompt.allowFreeText !== false;
 
   const [selectedFlat, setSelectedFlat] = useState<Set<string>>(() => new Set());
-  const [selectedByDecision, setSelectedByDecision] = useState<Record<string, string>>({});
+  const [selectedByDecision, setSelectedByDecision] = useState<Record<string, string[]>>({});
   const [customByDecision, setCustomByDecision] = useState<Record<string, string>>({});
   const [customOpen, setCustomOpen] = useState(false);
   const [customText, setCustomText] = useState("");
@@ -84,9 +89,9 @@ export function ClarificationCard({
   }, [prompt.context]);
 
   const decisionAnswered = (decision: ClarificationDecision) => {
-    const choice = selectedByDecision[decision.id]?.trim();
+    const choices = selectedByDecision[decision.id] ?? [];
     const custom = customByDecision[decision.id]?.trim();
-    return Boolean(choice || (canFree && custom));
+    return Boolean(choices.length > 0 || (canFree && custom));
   };
 
   const canSubmit = useMemo(() => {
@@ -124,12 +129,12 @@ export function ClarificationCard({
     if (answered || submitting) return;
     setError(null);
     setSelectedByDecision((prev) => {
-      const current = prev[decision.id];
-      if (current === opt) {
+      const next = toggleDecisionSelection(decision, prev[decision.id] ?? [], opt);
+      if (next.length === 0) {
         const { [decision.id]: _removed, ...rest } = prev;
         return rest;
       }
-      return { ...prev, [decision.id]: opt };
+      return { ...prev, [decision.id]: next };
     });
   };
 
@@ -143,10 +148,11 @@ export function ClarificationCard({
     if (groupedMode) {
       const selectedOptions = decisions
         .map((d) => {
-          const choice = selectedByDecision[d.id]?.trim();
+          const choices = (selectedByDecision[d.id] ?? []).map((c) => c.trim()).filter(Boolean);
+          const choiceText = choices.join("、");
           const custom = canFree ? customByDecision[d.id]?.trim() : "";
-          if (choice && custom) return `${d.question}：${choice}（补充：${custom}）`;
-          if (choice) return `${d.question}：${choice}`;
+          if (choiceText && custom) return `${d.question}：${choiceText}（补充：${custom}）`;
+          if (choiceText) return `${d.question}：${choiceText}`;
           if (custom) return `${d.question}：${custom}`;
           return null;
         })
@@ -353,22 +359,32 @@ export function ClarificationCard({
 
         {groupedMode ? (
           <div className="mt-3 space-y-3">
-            {decisions.map((decision, idx) => (
+            {decisions.map((decision, idx) => {
+              const isMultiple = decision.selectionMode === "multiple";
+              const selected = selectedByDecision[decision.id] ?? [];
+              return (
               <div key={decision.id}>
                 <div className="flex items-baseline gap-1.5 text-[11px] font-medium text-text-muted">
                   <span className="shrink-0 rounded bg-surface-panel px-1.5 py-0.5 text-[10px] text-text-faint">
                     决策 {idx + 1}
                   </span>
                   <span className="text-text-strong/90">{decision.question}</span>
+                  {isMultiple && (
+                    <span className="shrink-0 text-[10px] font-normal text-text-faint">可多选</span>
+                  )}
                 </div>
-                <div className="mt-1.5 flex flex-wrap gap-1.5" role="radiogroup" aria-label={decision.question}>
+                <div
+                  className="mt-1.5 flex flex-wrap gap-1.5"
+                  role={isMultiple ? "group" : "radiogroup"}
+                  aria-label={decision.question}
+                >
                   {decision.options.map((opt) => {
-                    const isOn = selectedByDecision[decision.id] === opt;
+                    const isOn = selected.includes(opt);
                     return (
                       <button
                         key={`${decision.id}:${opt}`}
                         type="button"
-                        role="radio"
+                        role={isMultiple ? "checkbox" : "radio"}
                         aria-checked={isOn}
                         onClick={() => selectDecisionOption(decision, opt)}
                         disabled={submitting}
@@ -406,7 +422,8 @@ export function ClarificationCard({
                   </div>
                 )}
               </div>
-            ))}
+              );
+            })}
           </div>
         ) : (
           opts.length > 0 && (
@@ -501,7 +518,9 @@ export function ClarificationCard({
       <div className="flex items-center justify-between px-3 pb-2.5 pt-1 text-xs">
         <div className="text-[11px] text-text-faint">
           {groupedMode
-            ? "每项决策选一项或填写自定义回复 · 全部完成后提交"
+            ? hasMultipleDecision
+              ? "完成每项决策后提交 · 标记为可多选的决策可组合选择"
+              : "完成每项决策后提交"
             : "可多选 · 提交后同一回合继续 · 不会打断其他窗格"}
         </div>
         <div className="flex items-center gap-2">

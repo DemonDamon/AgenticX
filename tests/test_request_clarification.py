@@ -12,6 +12,7 @@ from typing import Any, Dict, List
 import pytest
 
 from agenticx.cli.agent_tools import (
+    _normalize_clarification_decisions,
     _request_clarification,
     build_clarification_tool_result,
 )
@@ -19,6 +20,73 @@ from agenticx.runtime.clarify import (
     AsyncClarifyGate,
     AutoSuspendClarifyGate,
 )
+
+
+def test_normalize_clarification_decisions_defaults_to_single() -> None:
+    out = _normalize_clarification_decisions(
+        [
+            {
+                "id": "tone",
+                "question": "整体语气选择？",
+                "options": ["专业克制", "轻松活泼"],
+            }
+        ]
+    )
+    assert out == [
+        {
+            "id": "tone",
+            "question": "整体语气选择？",
+            "options": ["专业克制", "轻松活泼"],
+            "selection_mode": "single",
+            "exclusive_options": [],
+        }
+    ]
+
+
+def test_normalize_clarification_decisions_multiple_with_exclusive() -> None:
+    out = _normalize_clarification_decisions(
+        [
+            {
+                "id": "scope",
+                "question": "系统提示是否需要调整？",
+                "options": ["直接采用上面草案", "补充硬件监控", "补充模型架构设计"],
+                "selection_mode": "multiple",
+                "exclusive_options": ["直接采用上面草案"],
+            }
+        ]
+    )
+    assert out[0]["selection_mode"] == "multiple"
+    assert out[0]["exclusive_options"] == ["直接采用上面草案"]
+
+
+def test_normalize_clarification_decisions_unknown_mode_falls_back_to_single() -> None:
+    out = _normalize_clarification_decisions(
+        [
+            {
+                "question": "选一个",
+                "options": ["A", "B"],
+                "selection_mode": "multi",
+                "exclusive_options": ["A"],
+            }
+        ]
+    )
+    assert out[0]["selection_mode"] == "single"
+    assert out[0]["exclusive_options"] == []
+
+
+def test_normalize_clarification_decisions_filters_invalid_exclusive_options() -> None:
+    out = _normalize_clarification_decisions(
+        [
+            {
+                "question": "选多个",
+                "options": ["A", "B", "C"],
+                "selection_mode": "multiple",
+                "exclusive_options": ["A", "A", "  ", "Z", "B"],
+            }
+        ]
+    )
+    assert out[0]["selection_mode"] == "multiple"
+    assert out[0]["exclusive_options"] == ["A", "B"]
 
 
 def test_build_clarification_tool_result_with_options_and_text() -> None:

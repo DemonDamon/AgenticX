@@ -337,6 +337,8 @@ export type ClarificationDecision = {
   id: string;
   question: string;
   options: string[];
+  selectionMode: "single" | "multiple";
+  exclusiveOptions: string[];
 };
 
 export type PendingClarification = {

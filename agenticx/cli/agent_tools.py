@@ -353,7 +353,23 @@ STUDIO_TOOLS: List[Dict[str, Any]] = [
                                 "options": {
                                     "type": "array",
                                     "items": {"type": "string"},
-                                    "description": "2-6 mutually exclusive options for this dimension.",
+                                    "description": (
+                                        "2-6 options for this dimension. Mutually exclusive when "
+                                        "selection_mode is single (default); combinable when multiple."
+                                    ),
+                                },
+                                "selection_mode": {
+                                    "type": "string",
+                                    "enum": ["single", "multiple"],
+                                    "description": "Selection behavior for this decision. Defaults to single.",
+                                },
+                                "exclusive_options": {
+                                    "type": "array",
+                                    "items": {"type": "string"},
+                                    "description": (
+                                        "Exact option labels that cannot be combined with other selections. "
+                                        "Only used when selection_mode is multiple."
+                                    ),
                                 },
                             },
                             "required": ["question", "options"],
@@ -2391,7 +2407,12 @@ def build_clarification_tool_result(answer: Dict[str, Any]) -> str:
 
 
 def _normalize_clarification_decisions(raw: Any) -> List[Dict[str, Any]]:
-    """Parse structured decision groups for multi-part sign-off cards."""
+    """Parse structured decision groups for multi-part sign-off cards.
+
+    Each decision gets ``selection_mode`` (``single`` | ``multiple``, default
+    ``single``) and ``exclusive_options`` (only meaningful for ``multiple``;
+    filtered to labels that exist in ``options``).
+    """
     if not isinstance(raw, list):
         return []
     out: List[Dict[str, Any]] = []
@@ -2406,7 +2427,30 @@ def _normalize_clarification_decisions(raw: Any) -> List[Dict[str, Any]]:
         if not options:
             continue
         decision_id = str(item.get("id", "") or "").strip() or f"decision-{idx + 1}"
-        out.append({"id": decision_id, "question": question, "options": options})
+        selection_mode = (
+            "multiple" if str(item.get("selection_mode", "") or "").strip() == "multiple" else "single"
+        )
+        exclusive_options: List[str] = []
+        if selection_mode == "multiple":
+            raw_exclusive = item.get("exclusive_options") or []
+            if isinstance(raw_exclusive, list):
+                seen: set[str] = set()
+                option_set = set(options)
+                for label in raw_exclusive:
+                    text = str(label).strip()
+                    if not text or text not in option_set or text in seen:
+                        continue
+                    seen.add(text)
+                    exclusive_options.append(text)
+        out.append(
+            {
+                "id": decision_id,
+                "question": question,
+                "options": options,
+                "selection_mode": selection_mode,
+                "exclusive_options": exclusive_options,
+            }
+        )
     return out
 
 
