@@ -65,24 +65,99 @@ def test_messages_last_turn_completed_true_for_visible_body() -> None:
     assert _messages_last_turn_has_completed_reply(messages) is True
 
 
-def test_messages_last_turn_completed_true_for_suggested_questions_only() -> None:
+def test_messages_last_turn_completed_false_for_suggested_questions_only() -> None:
     messages = [
         {"role": "user", "content": "问题"},
         {
             "role": "assistant",
             "content": "",
-            "suggested_questions": ["继续说明？"],
+            "suggested_questions": ["继续说明？", "再问一次？", "补充细节？"],
+        },
+    ]
+    assert _messages_last_turn_has_completed_reply(messages) is False
+
+
+def test_messages_last_turn_completed_false_for_followups_marker_only() -> None:
+    messages = [
+        {"role": "user", "content": "问题"},
+        {"role": "assistant", "content": "<followups></followups>"},
+    ]
+    assert _messages_last_turn_has_completed_reply(messages) is False
+
+
+def test_messages_last_turn_completed_true_for_body_and_valid_sq() -> None:
+    messages = [
+        {"role": "user", "content": "问题"},
+        {
+            "role": "assistant",
+            "content": "这是回答",
+            "suggested_questions": ["问题1", "问题2", "问题3"],
+            "metadata": {"turn_terminal": True, "terminal_reason": "model_final"},
         },
     ]
     assert _messages_last_turn_has_completed_reply(messages) is True
 
 
-def test_messages_last_turn_completed_true_for_followups_marker() -> None:
+def test_messages_last_turn_completed_false_for_malformed_polluted_sq() -> None:
     messages = [
         {"role": "user", "content": "问题"},
-        {"role": "assistant", "content": "<followups></followups>"},
+        {
+            "role": "assistant",
+            "content": (
+                "<think>r<followups>prompt</think>\n"
+                "**标题**\n|a|b|\n</followups>"
+            ),
+            "suggested_questions": [
+                "Plus the mandatory",
+                "**分身「侠客」已创建完成。**",
+                "| 项目 | 内容 |",
+            ],
+        },
+    ]
+    assert _messages_last_turn_has_completed_reply(messages) is False
+
+
+def test_messages_last_turn_completed_false_for_tool_preface_marker() -> None:
+    messages = [
+        {"role": "user", "content": "建分身"},
+        {
+            "role": "assistant",
+            "content": "开始创建",
+            "metadata": {"turn_terminal": False},
+        },
+        {"role": "tool", "content": "ok", "tool_name": "create_avatar"},
+    ]
+    assert _messages_last_turn_has_completed_reply(messages) is False
+
+
+def test_messages_last_turn_completed_true_after_tool_preface_then_final() -> None:
+    messages = [
+        {"role": "user", "content": "建分身"},
+        {
+            "role": "assistant",
+            "content": "开始创建",
+            "metadata": {"turn_terminal": False},
+        },
+        {"role": "tool", "content": "ok", "tool_name": "create_avatar"},
+        {
+            "role": "assistant",
+            "content": "数字分身已创建",
+            "metadata": {"turn_terminal": True, "terminal_reason": "tool_result_fallback"},
+        },
     ]
     assert _messages_last_turn_has_completed_reply(messages) is True
+
+
+def test_messages_last_turn_completed_false_for_interrupted_partial_source() -> None:
+    messages = [
+        {"role": "user", "content": "问题"},
+        {
+            "role": "assistant",
+            "content": "半截正文",
+            "metadata": {"source": "interrupted-partial"},
+        },
+    ]
+    assert _messages_last_turn_has_completed_reply(messages) is False
 
 
 def test_messages_last_turn_completed_false_for_interrupted_placeholder() -> None:

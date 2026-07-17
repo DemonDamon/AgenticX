@@ -22,6 +22,10 @@ from dataclasses import dataclass, field
 from typing import Any, Awaitable, Callable, Dict, List, Optional
 
 from agenticx.cli.config_manager import ConfigManager
+from agenticx.runtime.assistant_output import (
+    parse_assistant_output,
+    sanitize_suggested_questions,
+)
 from agenticx.studio.chat_attachments import materialize_message_lists_image_uploads
 
 _log = logging.getLogger(__name__)
@@ -51,24 +55,17 @@ def _resolve_max_taskspaces() -> int:
         value = DEFAULT_MAX_TASKSPACES
     return max(MIN_MAX_TASKSPACES, min(MAX_MAX_TASKSPACES, value))
 
-_THINK_BLOCK_RE = re.compile(
-    r"<think>.*?</think>", re.IGNORECASE | re.DOTALL
-)
-_THINK_OPEN_TAIL_RE = re.compile(
-    r"<think>.*\Z", re.IGNORECASE | re.DOTALL
-)
 _INTERRUPTED_PLACEHOLDER_MARKERS = ("（已中断）", "(已中断)")
 
 
+def _assistant_metadata(msg: Dict[str, Any]) -> Dict[str, Any]:
+    raw = msg.get("metadata")
+    return raw if isinstance(raw, dict) else {}
+
+
 def _visible_assistant_body(content: str) -> str:
-    """Assistant text with <think> reasoning stripped (closed blocks AND an
-    unclosed trailing <think>...). Mirrors desktop assistantBodyText so backend
-    and frontend agree on whether a turn produced a real reply.
-    """
-    text = str(content or "")
-    text = _THINK_BLOCK_RE.sub("", text)
-    text = _THINK_OPEN_TAIL_RE.sub("", text)
-    return text.strip()
+    """Return canonical visible body for completion / stall checks."""
+    return parse_assistant_output(str(content or "")).visible_body.strip()
 
 
 def _messages_last_turn_has_completed_reply(messages: List[Dict[str, Any]]) -> bool:
@@ -82,20 +79,50 @@ def _messages_last_turn_has_completed_reply(messages: List[Dict[str, Any]]) -> b
     if last_user_idx < 0:
         return False
     tail = messages[last_user_idx + 1 :]
+
+    saw_turn_terminal_marker = False
     last_reply_idx = -1
     for idx, msg in enumerate(tail):
         if str(msg.get("role", "")).strip() != "assistant":
+            continue
+        meta = _assistant_metadata(msg)
+        if str(meta.get("source", "") or "").strip() == "interrupted-partial":
+            continue
+        content = str(msg.get("content", "") or "")
+        parsed = parse_assistant_output(content)
+        visible = parsed.visible_body.strip()
+        turn_terminal = meta.get("turn_terminal")
+        if turn_terminal is True or turn_terminal is False:
+            saw_turn_terminal_marker = True
+            if turn_terminal is True and visible and not any(
+                marker in visible for marker in _INTERRUPTED_PLACEHOLDER_MARKERS
+            ):
+                last_reply_idx = idx
+            continue
+
+    if saw_turn_terminal_marker:
+        if last_reply_idx < 0:
+            return False
+        for msg in tail[last_reply_idx + 1 :]:
+            if str(msg.get("role", "")).strip() != "assistant":
+                continue
+            tool_calls = msg.get("tool_calls")
+            if isinstance(tool_calls, list) and tool_calls:
+                return False
+        return True
+
+    # Legacy rows (no turn_terminal markers in this user turn).
+    for idx, msg in enumerate(tail):
+        if str(msg.get("role", "")).strip() != "assistant":
+            continue
+        meta = _assistant_metadata(msg)
+        if str(meta.get("source", "") or "").strip() == "interrupted-partial":
             continue
         content = str(msg.get("content", "") or "")
         visible = _visible_assistant_body(content)
         is_reply = bool(visible) and not any(
             marker in visible for marker in _INTERRUPTED_PLACEHOLDER_MARKERS
         )
-        raw_sq = msg.get("suggested_questions")
-        if isinstance(raw_sq, list) and any(str(x).strip() for x in raw_sq):
-            is_reply = True
-        if "</followups>" in content.lower():
-            is_reply = True
         if is_reply:
             last_reply_idx = idx
     if last_reply_idx < 0:
@@ -143,15 +170,7 @@ def _turn_has_any_tool_row(tail: List[Dict[str, Any]]) -> bool:
 
 
 def _extract_assistant_reasoning(content: str) -> str:
-    text = str(content or "")
-    match = _THINK_BLOCK_RE.search(text)
-    if match:
-        inner = match.group(0)
-        return inner.replace("<think>", "").replace("</think>", "").strip()
-    open_match = _THINK_OPEN_TAIL_RE.search(text)
-    if open_match:
-        return open_match.group(0).replace("<think>", "", 1).strip()
-    return ""
+    return parse_assistant_output(str(content or "")).reasoning.strip()
 
 
 def _messages_last_turn_promised_action_without_followthrough(
@@ -668,11 +687,12 @@ class SessionManager:
             return []
 
     def _last_turn_has_terminal_assistant_reply(self, session_id: str) -> bool:
-        """True when the last user turn already has a terminal assistant message.
+        """True when the last user turn already has a strong terminal assistant.
 
-        Uses suggested_questions or a closed ``<followups>`` block so mid-turn
-        incremental persists (thinking-only partial assistant) do not clear the
-        running badge while tools are still executing.
+        New-format rows require ``metadata.turn_terminal is True`` plus a
+        non-empty canonical visible body. Legacy rows (no marker) may use
+        visible body plus sanitized suggested_questions as a compatibility
+        signal. SQ-only / followups-only / tool prefaces never clear running.
         """
         try:
             messages = self._messages_for_execution_state_check(session_id)
@@ -686,14 +706,42 @@ class SessionManager:
                 last_user_idx = idx
         if last_user_idx < 0:
             return False
-        for msg in messages[last_user_idx + 1:]:
+        saw_marker = False
+        for msg in messages[last_user_idx + 1 :]:
             if str(msg.get("role", "")).strip() != "assistant":
                 continue
-            raw_sq = msg.get("suggested_questions")
-            if isinstance(raw_sq, list) and any(str(x).strip() for x in raw_sq):
-                return True
+            meta = _assistant_metadata(msg)
+            if str(meta.get("source", "") or "").strip() == "interrupted-partial":
+                continue
             content = str(msg.get("content", "") or "")
-            if "</followups>" in content.lower():
+            parsed = parse_assistant_output(content)
+            visible = parsed.visible_body.strip()
+            turn_terminal = meta.get("turn_terminal")
+            if turn_terminal is True or turn_terminal is False:
+                saw_marker = True
+                if turn_terminal is True and visible:
+                    return True
+                continue
+        if saw_marker:
+            return False
+        for msg in messages[last_user_idx + 1 :]:
+            if str(msg.get("role", "")).strip() != "assistant":
+                continue
+            meta = _assistant_metadata(msg)
+            if str(meta.get("source", "") or "").strip() == "interrupted-partial":
+                continue
+            content = str(msg.get("content", "") or "")
+            parsed = parse_assistant_output(content)
+            if parsed.malformed:
+                continue
+            visible = parsed.visible_body.strip()
+            if not visible:
+                continue
+            sq = sanitize_suggested_questions(
+                msg.get("suggested_questions"),
+                visible,
+            )
+            if sq:
                 return True
         return False
 
@@ -2126,11 +2174,19 @@ class SessionManager:
                 if clean_visual:
                     row["visual_attachments"] = clean_visual
             if role == "assistant":
+                content_for_parse = str(item.get("content", "") or "")
+                parsed_out = parse_assistant_output(content_for_parse)
                 raw_sq = item.get("suggested_questions")
-                if isinstance(raw_sq, list) and raw_sq:
-                    row["suggested_questions"] = [
-                        str(x).strip() for x in raw_sq[:5] if str(x).strip()
-                    ]
+                if parsed_out.malformed:
+                    # Detached SQ from malformed protocol must not ship to clients.
+                    pass
+                elif isinstance(raw_sq, list) and raw_sq:
+                    cleaned_sq = sanitize_suggested_questions(
+                        raw_sq,
+                        parsed_out.visible_body,
+                    )
+                    if cleaned_sq:
+                        row["suggested_questions"] = list(cleaned_sq)
                 raw_refs = item.get("references")
                 if isinstance(raw_refs, list) and raw_refs:
                     clean_refs: list[dict[str, Any]] = []

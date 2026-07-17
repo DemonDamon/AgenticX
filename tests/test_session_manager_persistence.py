@@ -703,6 +703,83 @@ def test_list_sessions_idle_when_running_metadata_but_terminal_reply(tmp_path: P
     assert row["execution_state"] == "idle"
 
 
+def test_list_sessions_keeps_running_for_sq_only_stale_metadata(tmp_path: Path) -> None:
+    store = SessionStore(tmp_path / "sessions.sqlite")
+    sessions_root = tmp_path / "sessions"
+    manager = SessionManager()
+    manager._session_store = store
+    manager._sessions_root = str(sessions_root)
+    sid = "running-sq-only"
+    managed = manager.create(session_id=sid)
+    managed.studio_session.chat_history = [
+        {"id": "u1", "role": "user", "content": "建分身"},
+        {
+            "id": "a1",
+            "role": "assistant",
+            "content": "",
+            "suggested_questions": ["问题1", "问题2", "问题3"],
+        },
+    ]
+    manager.set_execution_state(sid, "running")
+    rows = manager.list_sessions()
+    row = next(r for r in rows if r["session_id"] == sid)
+    assert row["execution_state"] == "running"
+
+
+def test_list_sessions_idle_for_new_format_turn_terminal_true(tmp_path: Path) -> None:
+    store = SessionStore(tmp_path / "sessions.sqlite")
+    sessions_root = tmp_path / "sessions"
+    manager = SessionManager()
+    manager._session_store = store
+    manager._sessions_root = str(sessions_root)
+    sid = "running-turn-terminal-true"
+    managed = manager.create(session_id=sid)
+    managed.studio_session.chat_history = [
+        {"id": "u1", "role": "user", "content": "建分身"},
+        {
+            "id": "a0",
+            "role": "assistant",
+            "content": "开始",
+            "metadata": {"turn_terminal": False},
+        },
+        {"id": "t1", "role": "tool", "content": "ok", "tool_name": "create_avatar"},
+        {
+            "id": "a1",
+            "role": "assistant",
+            "content": "数字分身已创建",
+            "metadata": {"turn_terminal": True, "terminal_reason": "tool_result_fallback"},
+        },
+    ]
+    manager.set_execution_state(sid, "running")
+    rows = manager.list_sessions()
+    row = next(r for r in rows if r["session_id"] == sid)
+    assert row["execution_state"] == "idle"
+
+
+def test_list_sessions_keeps_running_for_tool_preface_only(tmp_path: Path) -> None:
+    store = SessionStore(tmp_path / "sessions.sqlite")
+    sessions_root = tmp_path / "sessions"
+    manager = SessionManager()
+    manager._session_store = store
+    manager._sessions_root = str(sessions_root)
+    sid = "running-tool-preface-only"
+    managed = manager.create(session_id=sid)
+    managed.studio_session.chat_history = [
+        {"id": "u1", "role": "user", "content": "建分身"},
+        {
+            "id": "a0",
+            "role": "assistant",
+            "content": "开始",
+            "metadata": {"turn_terminal": False},
+        },
+        {"id": "t1", "role": "tool", "content": "ok", "tool_name": "create_avatar"},
+    ]
+    manager.set_execution_state(sid, "running")
+    rows = manager.list_sessions()
+    row = next(r for r in rows if r["session_id"] == sid)
+    assert row["execution_state"] == "running"
+
+
 def test_list_sessions_keeps_running_during_mid_turn_thinking_only(tmp_path: Path) -> None:
     """Incremental thinking persist must not hide the running badge mid tool-loop."""
     store = SessionStore(tmp_path / "sessions.sqlite")
