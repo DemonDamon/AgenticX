@@ -6,7 +6,8 @@ export type GlobalSearchCategory =
   | "applications"
   | "images"
   | "folders"
-  | "videos";
+  | "videos"
+  | "conversations";
 
 export type GlobalSearchItem = {
   path: string;
@@ -15,6 +16,18 @@ export type GlobalSearchItem = {
   kind: "folder" | "document" | "application" | "image" | "video" | "other";
   size: number;
   mtime: number;
+};
+
+/** A chat-history hit surfaced under the "对话" category tab. */
+export type ConversationHit = {
+  sessionId: string;
+  avatarId: string | null;
+  avatarName: string;
+  title: string;
+  snippet: string;
+  updatedAt: number;
+  provider?: string;
+  model?: string;
 };
 
 export type GlobalSearchPreview = {
@@ -36,6 +49,7 @@ export const CATEGORY_TABS: Array<{ id: GlobalSearchCategory; label: string }> =
   { id: "images", label: "图片" },
   { id: "folders", label: "文件夹" },
   { id: "videos", label: "视频" },
+  { id: "conversations", label: "对话" },
 ];
 
 function readHistory(): string[] {
@@ -98,6 +112,7 @@ export function useGlobalSearch(open: boolean) {
   const [query, setQuery] = useState("");
   const [category, setCategory] = useState<GlobalSearchCategory>("all");
   const [results, setResults] = useState<GlobalSearchItem[]>([]);
+  const [conversationResults, setConversationResults] = useState<ConversationHit[]>([]);
   const [selectedPath, setSelectedPath] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -121,6 +136,7 @@ export function useGlobalSearch(open: boolean) {
       images: 0,
       folders: 0,
       videos: 0,
+      conversations: conversationResults.length,
     };
     for (const item of results) {
       if (item.kind === "folder") counts.folders += 1;
@@ -130,7 +146,7 @@ export function useGlobalSearch(open: boolean) {
       if (item.kind === "video") counts.videos += 1;
     }
     return counts;
-  }, [results]);
+  }, [results, conversationResults]);
 
   const visibleResults = useMemo(() => {
     if (category === "all") return results;
@@ -187,6 +203,7 @@ export function useGlobalSearch(open: boolean) {
     setQuery("");
     setCategory("all");
     setResults([]);
+    setConversationResults([]);
     setSelectedPath(null);
     setLoading(false);
     setError(null);
@@ -217,6 +234,7 @@ export function useGlobalSearch(open: boolean) {
       const trimmed = nextQuery.trim();
       if (!trimmed) {
         setResults([]);
+        setConversationResults([]);
         setSelectedPath(null);
         setError(null);
         setWarning(null);
@@ -224,6 +242,66 @@ export function useGlobalSearch(open: boolean) {
         setLoading(false);
         stopElapsedTimer();
         setElapsedMs(0);
+        return;
+      }
+
+      // "对话" tab → search chat history via backend FTS, resolve titles/avatars
+      // from the session list so results can jump straight to the conversation.
+      if (nextCategory === "conversations") {
+        const reqId = ++reqIdRef.current;
+        setLoading(true);
+        setError(null);
+        setWarning(null);
+        setTimedOut(false);
+        startElapsedTimer();
+        try {
+          const [sres, lres] = await Promise.all([
+            window.agenticxDesktop.searchSessions({ q: trimmed }),
+            window.agenticxDesktop.listSessions(),
+          ]);
+          if (reqId !== reqIdRef.current) return;
+          if (!sres.ok) {
+            setConversationResults([]);
+            setError(sres.error ?? "对话搜索失败，请稍后重试");
+            return;
+          }
+          const rowsById = new Map<string, (typeof lres.sessions)[number]>();
+          if (lres.ok && Array.isArray(lres.sessions)) {
+            for (const r of lres.sessions) rowsById.set(r.session_id, r);
+          }
+          const hits = Array.isArray(sres.hits) ? sres.hits : [];
+          const mapped: ConversationHit[] = [];
+          for (const h of hits) {
+            const sid = String(h.session_id || "").trim();
+            if (!sid) continue;
+            const row = rowsById.get(sid);
+            const avatarId = row?.avatar_id ?? null;
+            if (typeof avatarId === "string" && avatarId.startsWith("automation:")) continue;
+            const rawName = String(row?.session_name || "").trim();
+            const title = rawName || `·${sid.replace(/-/g, "").slice(0, 8)}`;
+            mapped.push({
+              sessionId: sid,
+              avatarId,
+              avatarName: String(row?.avatar_name || "").trim(),
+              title,
+              snippet: String(h.snippet || "").trim(),
+              updatedAt: Number(row?.updated_at || 0),
+              provider: row?.provider,
+              model: row?.model,
+            });
+          }
+          mapped.sort((a, b) => b.updatedAt - a.updatedAt);
+          setConversationResults(mapped);
+        } catch (err) {
+          if (reqId !== reqIdRef.current) return;
+          setConversationResults([]);
+          setError(String(err));
+        } finally {
+          if (reqId === reqIdRef.current) {
+            setLoading(false);
+            stopElapsedTimer();
+          }
+        }
         return;
       }
 
@@ -237,7 +315,7 @@ export function useGlobalSearch(open: boolean) {
       try {
         const resp = await window.agenticxDesktop.systemSearch({
           query: trimmed,
-          category: nextCategory,
+          category: nextCategory as Exclude<GlobalSearchCategory, "conversations">,
         });
         if (reqId !== reqIdRef.current) return;
 
@@ -288,6 +366,7 @@ export function useGlobalSearch(open: boolean) {
       debounceRef.current = null;
       reqIdRef.current += 1;
       setResults([]);
+      setConversationResults([]);
       setSelectedPath(null);
       setLoading(false);
       setError(null);
@@ -383,6 +462,7 @@ export function useGlobalSearch(open: boolean) {
     previewLoading,
     categoryCounts,
     groupedResults,
+    conversationResults,
     openSelected,
     revealSelected,
   };

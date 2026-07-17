@@ -8,6 +8,7 @@ import {
   Film,
   Folder,
   Loader2,
+  MessagesSquare,
   Search,
   X,
 } from "lucide-react";
@@ -16,8 +17,10 @@ import {
   formatFileSize,
   formatMtime,
   useGlobalSearch,
+  type ConversationHit,
   type GlobalSearchItem,
 } from "../../hooks/useGlobalSearch";
+import { useAppStore } from "../../store";
 import { ContextMenu } from "../ContextMenu";
 import { Toast } from "../ds/Toast";
 import { buildGlobalSearchContextMenuItems } from "./global-search-context-menu";
@@ -53,6 +56,25 @@ function truncatePathMiddle(filePath: string, max = 64): string {
   return `${filePath.slice(0, head)}…${filePath.slice(-tail)}`;
 }
 
+/** Same highlight-term derivation used by the session history panel. */
+function buildHighlightTermsFromQuery(query: string): string[] {
+  const raw = String(query || "").trim();
+  if (!raw) return [];
+  const terms = new Set<string>([raw]);
+  for (const token of raw.split(/\s+/)) {
+    const t = token.trim();
+    if (t.length >= 2) terms.add(t);
+  }
+  return Array.from(terms);
+}
+
+function formatConversationTime(ms: number): string {
+  const secs = Number(ms);
+  if (!Number.isFinite(secs) || secs <= 0) return "";
+  // backend session updated_at is unix seconds
+  return formatMtime(secs * 1000).slice(0, 10);
+}
+
 type CtxMenuState = {
   x: number;
   y: number;
@@ -70,6 +92,39 @@ export function GlobalSearchPanel({ open, onClose }: Props) {
   const [toastMessage, setToastMessage] = useState("");
   const [toastVariant, setToastVariant] = useState<"default" | "warning">("default");
   const search = useGlobalSearch(open);
+
+  const panes = useAppStore((s) => s.panes);
+  const addPane = useAppStore((s) => s.addPane);
+  const setMainView = useAppStore((s) => s.setMainView);
+  const setActivePaneId = useAppStore((s) => s.setActivePaneId);
+  const setActiveAvatarId = useAppStore((s) => s.setActiveAvatarId);
+  const setPaneSessionId = useAppStore((s) => s.setPaneSessionId);
+  const setPaneHistorySearchTerms = useAppStore((s) => s.setPaneHistorySearchTerms);
+
+  const jumpToConversation = useCallback(
+    (hit: ConversationHit) => {
+      setMainView("chat");
+      const existing = panes.find((p) => p.avatarId === hit.avatarId);
+      const paneId =
+        existing?.id ?? addPane(hit.avatarId, hit.avatarName || hit.title || "会话", "");
+      setActivePaneId(paneId);
+      setActiveAvatarId(hit.avatarId);
+      setPaneSessionId(paneId, hit.sessionId, { provider: hit.provider, model: hit.model });
+      setPaneHistorySearchTerms(paneId, buildHighlightTermsFromQuery(search.query));
+      onClose();
+    },
+    [
+      panes,
+      addPane,
+      setMainView,
+      setActivePaneId,
+      setActiveAvatarId,
+      setPaneSessionId,
+      setPaneHistorySearchTerms,
+      search.query,
+      onClose,
+    ]
+  );
 
   const showToast = useCallback((message: string, variant: "default" | "warning" = "default") => {
     setToastMessage(message);
@@ -129,7 +184,9 @@ export function GlobalSearchPanel({ open, onClose }: Props) {
   if (!open) return null;
 
   const isIdle = !search.query.trim();
+  const isConversations = search.category === "conversations";
   const filteredGroups = search.groupedResults;
+  const conversationHits = search.conversationResults;
 
   return createPortal(
     <div
@@ -165,7 +222,7 @@ export function GlobalSearchPanel({ open, onClose }: Props) {
                   search.submitQuery(search.query);
                 }
               }}
-              placeholder="搜索电脑中的文件、文件夹与应用"
+              placeholder="搜索文件、应用与历史对话"
               className="min-w-0 flex-1 bg-transparent text-[15px] text-text-strong outline-none placeholder:text-text-faint"
             />
             {search.loading ? (
@@ -253,6 +310,27 @@ export function GlobalSearchPanel({ open, onClose }: Props) {
               onClearHistory={search.clearHistory}
               onPickSuggestion={handlePickSuggestion}
             />
+          ) : isConversations ? (
+            search.loading && conversationHits.length === 0 ? (
+              <div className="flex items-center justify-center gap-2 py-16 text-sm text-text-subtle">
+                <Loader2 className="h-4 w-4 animate-spin" />
+                正在搜索…
+              </div>
+            ) : conversationHits.length === 0 ? (
+              <div className="py-16 text-center text-sm text-text-faint">
+                无匹配对话
+              </div>
+            ) : (
+              <div>
+                {conversationHits.map((hit) => (
+                  <ConversationRow
+                    key={hit.sessionId}
+                    hit={hit}
+                    onOpen={() => jumpToConversation(hit)}
+                  />
+                ))}
+              </div>
+            )
           ) : search.loading && search.results.length === 0 ? (
             <div className="flex items-center justify-center gap-2 py-16 text-sm text-text-subtle">
               <Loader2 className="h-4 w-4 animate-spin" />
@@ -421,6 +499,37 @@ function ResultRow({
         </div>
       ) : null}
     </div>
+  );
+}
+
+function ConversationRow({
+  hit,
+  onOpen,
+}: {
+  hit: ConversationHit;
+  onOpen: () => void;
+}) {
+  const time = formatConversationTime(hit.updatedAt);
+  return (
+    <button
+      type="button"
+      className="mb-1 grid w-full grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-3 rounded-lg px-2.5 py-2 text-left transition last:mb-0 hover:bg-surface-hover"
+      onClick={onOpen}
+    >
+      <MessagesSquare className="h-4 w-4 shrink-0 text-sky-400" />
+      <span className="min-w-0">
+        <span className="flex items-baseline gap-2">
+          <span className="truncate text-[13px] font-medium text-text-strong">{hit.title}</span>
+          {hit.avatarName ? (
+            <span className="shrink-0 text-[11px] text-text-faint">{hit.avatarName}</span>
+          ) : null}
+        </span>
+        {hit.snippet ? (
+          <span className="mt-0.5 block truncate text-[12px] text-text-faint">{hit.snippet}</span>
+        ) : null}
+      </span>
+      {time ? <span className="shrink-0 text-[12px] text-text-faint">{time}</span> : null}
+    </button>
   );
 }
 
