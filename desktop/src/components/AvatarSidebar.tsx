@@ -6,6 +6,7 @@ import { APP_DISPLAY_NAME, APP_VERSION, META_AGENT_DISPLAY_NAME } from "../const
 import { DEFAULT_META_AVATAR_URL } from "../constants/meta-avatar";
 import { usePaneNavigation } from "../hooks/usePaneNavigation";
 import { AvatarSettingsPanel } from "./AvatarSettingsPanel";
+import { SidebarSessionHistory } from "./sidebar/SidebarSessionHistory";
 import { TopbarLeftControls } from "./TopbarLeftControls";
 
 type Props = {
@@ -264,7 +265,7 @@ export function AvatarSidebar({ onToggleSidebar }: Props) {
           })}
         </nav>
 
-        <div className="flex-1" />
+        <SidebarSessionHistory />
       </aside>
 
       {machiContextMenu && (
