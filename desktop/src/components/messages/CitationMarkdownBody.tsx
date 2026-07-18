@@ -27,6 +27,7 @@ import {
   type CitationSegment,
 } from "./citation-normalize";
 import { buildDocNumberMap } from "../../utils/citation-doc-grouping";
+import { extractSourceAttribution } from "./source-attribution-parse";
 
 type Props = {
   content: string;
@@ -267,8 +268,15 @@ export function CitationMarkdownBody({
   }, [references]);
   const docNumberById = useMemo(() => buildDocNumberMap(references ?? []), [references]);
 
+  // Strip model-authored「数据来源标注」legends (epistemic theater, not real
+  // provenance). Leaving them in-body makes `[N]` collide with citation pills.
+  const { body: contentWithoutAttribution } = useMemo(
+    () => extractSourceAttribution(content),
+    [content],
+  );
+
   const hasReferences = (references?.length ?? 0) > 0;
-  const normalized = normalizeCitationMarkers(content, hasReferences);
+  const normalized = normalizeCitationMarkers(contentWithoutAttribution, hasReferences);
   const withCitationLayout = hasReferences
     ? relocateCitationMarkersForDisplay(normalized)
     : normalized;
