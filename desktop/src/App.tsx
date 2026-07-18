@@ -2334,7 +2334,7 @@ export function App() {
         <>
           {userMode === "pro" && !sidebarCollapsed ? (
             <div className="agx-sidebar-shell">
-              <AvatarSidebar />
+              <AvatarSidebar onToggleSidebar={() => setSidebarCollapsed((v) => !v)} />
               <SidebarResizer />
             </div>
           ) : null}

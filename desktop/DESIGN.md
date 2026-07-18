@@ -193,7 +193,10 @@ on narrow widths with a scrim — chat width is never permanently sacrificed.
   model selection — layout must not imply shared state.
 
 Spacing rhythm: **{spacing.sm}** inside chips and icon rows; **{spacing.lg}** between
-sections in settings cards.
+sections in settings cards. Icon-only Topbar clusters (sidebar toggle, search, gauge,
+theme, settings, pane-toolbar icons) all read the single `--agx-topbar-icon-gap` custom
+property (set once on `.agx-app`, default `6px`) — never hardcode a `gap` value on a new
+icon row; consume the shared token so every cluster stays visually identical.
 
 ## Elevation & Depth
 
@@ -251,6 +254,25 @@ the bubble — no separate white card chrome.
 Chinese-first copy; bottom-only save; single API key field per provider. Focus states
 use accent ring at 50% alpha. Range sliders fill track with `--theme-color-rgb`.
 
+### Icon-only Topbar / toolbar buttons (`.agx-topbar-btn`)
+
+Ghost by default, Cursor-style: **transparent background at rest**, `--surface-hover`
+reveal only on `:hover`. This applies to every icon-only control sharing the class —
+sidebar toggle, global search, Token gauge, theme toggle, settings, and every pane
+toolbar icon (workspace/history/spawns/memory-graph/close). `--active` is the one
+persistent exception: a toggled-open panel (workspace, history, memory-graph, spawns)
+keeps `--surface-card-strong` so the user can tell it's open even when the pointer moves
+away. Icon-only variant (`--icon-only`) is a fixed 30×30 hit target, icon centered.
+
+This is a **background-reveal** pattern, not a **visibility** pattern — the icon itself
+is always rendered; only its container box appears on hover. It does not contradict the
+"don't hide message action buttons" rule below, which is about hiding controls entirely
+until hover inside chat bubbles.
+
+New icons added to any Topbar/toolbar cluster should reuse `agx-topbar-btn` (+
+`agx-topbar-btn--icon-only` for icon-only) rather than inventing a bespoke button style,
+so the ghost-hover behavior and spacing stay consistent automatically.
+
 ### Status text (`status-text-success`, `status-text-warning`, `status-text-error`)
 
 Semantic only — sync indicators, MCP health, toast outcomes, credential warnings. Each
@@ -273,6 +295,9 @@ vs disabled — not decorative.
   `data-theme-color`.
 - **Don't** use heavy box shadows, gradients, or glass blur on settings forms and modals.
 - **Don't** show message action buttons only on hover — copy/retry/quote stay visible.
+  (This is distinct from Topbar/toolbar icon buttons, where the icon is always visible
+  and only its background box reveals on hover — see "Icon-only Topbar / toolbar
+  buttons" above.)
 - **Don't** lock scroll-to-bottom during streaming; users must scroll up freely.
 - **Don't** use `window.confirm` — use themed in-app dialogs with app icon.
 - **Don't** treat avatar/group hash colors as the global primary — they identify entities,

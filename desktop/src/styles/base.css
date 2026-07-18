@@ -18,6 +18,10 @@ body,
 }
 
 .agx-app {
+  /* Single source of truth for icon-button spacing so every Topbar cluster
+     (left toggle/search, right gauge/theme/settings, sidebar's own traffic-light
+     row) reads with identical rhythm — both containers consume this one value. */
+  --agx-topbar-icon-gap: 6px;
   display: grid;
   grid-template-columns: var(--sidebar-width, 260px) 1fr;
   height: 100vh;
@@ -152,17 +156,39 @@ html[data-platform="win32"] .agx-topbar {
   align-items: center;
   gap: 8px;
   min-width: 0;
+}
+
+.agx-topbar-left-controls {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--agx-topbar-icon-gap, 8px);
+  min-width: 0;
   transition: padding-left var(--ds-dur-slow) var(--ds-ease-out);
 }
 
-.agx-topbar-left--collapsed {
+.agx-topbar-left-controls--collapsed {
   padding-left: 68px;
+}
+
+/* Expanded sidebar: toggle + search sit in the traffic-light row, right-aligned
+   against the divider so they visually meet 本地 on the main Topbar. */
+.agx-sidebar-topbar {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  height: 38px;
+  flex-shrink: 0;
+  min-width: 0;
+  overflow: hidden;
+  /* 左侧留出 macOS 红绿灯安全区，右侧对齐主区边缘 */
+  padding-left: 68px;
+  padding-right: 8px;
 }
 
 .agx-topbar-right {
   display: inline-flex;
   align-items: center;
-  gap: 8px;
+  gap: var(--agx-topbar-icon-gap, 8px);
   min-width: 0;
 }
 
@@ -176,9 +202,12 @@ html[data-platform="win32"] .agx-topbar {
   color: var(--text-strong);
 }
 
+/* Ghost by default — no visible box at rest, background only reveals on hover
+   (Cursor-style icon chrome). Applies to every Topbar / pane-toolbar icon button
+   sharing this class; --active keeps a persistent highlight for toggled panels. */
 .agx-topbar-btn {
   border: none;
-  background: var(--surface-card);
+  background: transparent;
   color: var(--text-muted);
   border-radius: 8px;
   height: 30px;

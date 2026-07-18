@@ -6,6 +6,11 @@ import { APP_DISPLAY_NAME, APP_VERSION, META_AGENT_DISPLAY_NAME } from "../const
 import { DEFAULT_META_AVATAR_URL } from "../constants/meta-avatar";
 import { usePaneNavigation } from "../hooks/usePaneNavigation";
 import { AvatarSettingsPanel } from "./AvatarSettingsPanel";
+import { TopbarLeftControls } from "./TopbarLeftControls";
+
+type Props = {
+  onToggleSidebar: () => void;
+};
 
 type MachiContextMenuState = { x: number; y: number } | null;
 
@@ -32,7 +37,7 @@ const NAV_ENTRIES: NavEntry[] = [
   { kind: "view", id: "automation", label: "定时任务", icon: AlarmClock },
 ];
 
-export function AvatarSidebar() {
+export function AvatarSidebar({ onToggleSidebar }: Props) {
   const setAvatars = useAppStore((s) => s.setAvatars);
   const setGroups = useAppStore((s) => s.setGroups);
   const metaAvatarUrl = useAppStore((s) => s.metaAvatarUrl);
@@ -198,8 +203,15 @@ export function AvatarSidebar() {
   return (
     <>
       <aside className="flex h-full w-full flex-col bg-surface-sidebar">
-        {/* macOS traffic-light safe zone */}
-        <div className="drag-region h-[38px] shrink-0" />
+        {/* macOS traffic-light row: toggle + search aligned to the right edge,
+            adjacent to the main-area divider (where 本地 sits on the Topbar). */}
+        <div className="drag-region agx-sidebar-topbar">
+          <TopbarLeftControls
+            onToggleSidebar={onToggleSidebar}
+            toggleTitle="收起侧栏"
+            className="agx-topbar-left-controls no-drag"
+          />
+        </div>
 
         {/* Meta-Agent brand row */}
         <button

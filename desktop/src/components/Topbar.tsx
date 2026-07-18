@@ -1,8 +1,8 @@
 import { useEffect, useRef, useState } from "react";
-import { Gauge, LogIn, LogOut, Moon, PanelLeft, Settings, Sun, User } from "lucide-react";
+import { Gauge, LogIn, LogOut, Moon, Settings, Sun, User } from "lucide-react";
 import { useAppStore } from "../store";
-import { formatBackendChipLabel, getBackendScope, getConnectionModeSync } from "../utils/backend-scope";
-import { GlobalSearchTrigger } from "./global-search/GlobalSearchTrigger";
+import { TopbarLeftControls } from "./TopbarLeftControls";
+import { BackendModeChip } from "./BackendModeChip";
 
 type Props = {
   sidebarCollapsed: boolean;
@@ -19,26 +19,9 @@ export function Topbar({ sidebarCollapsed, onToggleSidebar }: Props) {
 
   const [loginBusy, setLoginBusy] = useState(false);
   const [userMenuOpen, setUserMenuOpen] = useState(false);
-  const [backendChipTick, setBackendChipTick] = useState(0);
   const userMenuRef = useRef<HTMLDivElement>(null);
 
   const isDarkLike = theme === "dark" || theme === "dim";
-
-  useEffect(() => {
-    return window.agenticxDesktop?.onConnectionModeChanged?.(() => {
-      setBackendChipTick((n) => n + 1);
-    });
-  }, []);
-
-  // Re-read on each render and when main notifies mode changes.
-  void backendChipTick;
-  const connectionMode = getConnectionModeSync();
-  const backendScope = getBackendScope();
-  const backendChipLabel = formatBackendChipLabel(backendScope, connectionMode);
-  const backendChipTooltip =
-    connectionMode === "remote"
-      ? `当前连接到远程后端 ${backendScope}。到「设置 → 服务器」可切换。`
-      : "当前使用本机 agx serve。到「设置 → 服务器」可切换远程模式。";
 
   const onThemeToggle = () => {
     // Topbar 快速切换仅在 dark/light 之间切换，dim 仍保留在「设置」里可选
@@ -107,27 +90,15 @@ export function Topbar({ sidebarCollapsed, onToggleSidebar }: Props) {
 
   return (
     <div className="agx-topbar">
-      <div className={`agx-topbar-left ${sidebarCollapsed ? "agx-topbar-left--collapsed" : ""}`}>
-        <button
-          className="agx-topbar-btn agx-topbar-btn--icon-only"
-          onClick={onToggleSidebar}
-          title={sidebarCollapsed ? "展开侧栏" : "收起侧栏"}
-        >
-          <PanelLeft className="h-[18px] w-[18px]" strokeWidth={1.8} />
-        </button>
-        <GlobalSearchTrigger />
-        <span
-          className="inline-flex max-w-[140px] items-center gap-1.5 rounded-full border border-border bg-surface-card px-2 py-0.5 text-[11px] text-text-subtle"
-          title={backendChipTooltip}
-        >
-          <span
-            className={`h-1.5 w-1.5 shrink-0 rounded-full ${
-              connectionMode === "remote" ? "bg-sky-400" : "bg-emerald-400"
-            }`}
-            aria-hidden
+      <div className="agx-topbar-left">
+        {sidebarCollapsed ? (
+          <TopbarLeftControls
+            onToggleSidebar={onToggleSidebar}
+            toggleTitle="展开侧栏"
+            className="agx-topbar-left-controls agx-topbar-left-controls--collapsed"
           />
-          <span className="truncate">{backendChipLabel}</span>
-        </span>
+        ) : null}
+        <BackendModeChip />
       </div>
       <div className="agx-topbar-right">
         <button
