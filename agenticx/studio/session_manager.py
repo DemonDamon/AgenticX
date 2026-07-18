@@ -583,7 +583,9 @@ class SessionManager:
         if managed is not None:
             managed.execution_state = state
             managed.updated_at = time.time()
-            if state in {"idle", "interrupted", "failed"}:
+            hub = managed.event_hub
+            preserve_interrupted_hub = state == "interrupted" and hub is not None
+            if state in {"idle", "interrupted", "failed"} and not preserve_interrupted_hub:
                 self.clear_event_hub(session_id)
 
     def ensure_event_hub(self, session_id: str) -> SessionEventHub:
@@ -673,6 +675,31 @@ class SessionManager:
     def should_interrupt(self, session_id: str) -> bool:
         sid = str(session_id or "").strip()
         return bool(sid and sid in self._interrupt_requests)
+
+    async def wait_for_interrupted_runtime(
+        self,
+        session_id: str,
+        *,
+        timeout_seconds: float = 2.0,
+        poll_interval_seconds: float = 0.02,
+    ) -> bool:
+        """Wait until a session's previous event hub completes finalization."""
+        sid = str(session_id or "").strip()
+        if not sid:
+            return True
+        hub = self.get_event_hub(sid)
+        if hub is None:
+            return True
+
+        loop = asyncio.get_running_loop()
+        deadline = loop.time() + max(0.0, float(timeout_seconds))
+        interval = max(0.001, float(poll_interval_seconds))
+        while loop.time() < deadline:
+            current_hub = self.get_event_hub(sid)
+            if current_hub is None or current_hub is not hub:
+                return True
+            await asyncio.sleep(interval)
+        return False
 
     def _messages_for_execution_state_check(self, session_id: str) -> list[dict]:
         """Prefer in-memory chat_history so listing reflects a just-finished turn."""

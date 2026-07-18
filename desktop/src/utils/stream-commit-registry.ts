@@ -28,6 +28,14 @@ export class StreamCommitRegistry {
     if (sid) this.committed.set(sid, value);
   }
 
+  claimUncommittedText(sid: string): string | null {
+    if (!sid || this.isCommitted(sid)) return null;
+    const current = this.getText(sid);
+    if (!current.trim()) return null;
+    this.markCommitted(sid);
+    return current;
+  }
+
   setMidCommit(sid: string, text: string | null): void {
     if (sid) this.midCommit.set(sid, text);
   }

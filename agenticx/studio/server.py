@@ -545,6 +545,8 @@ async def _finalize_chat_runtime(
     # turn-end persist cannot stall concurrent /api/chat, /api/usage/* and
     # /api/memory/graph/* requests.
     await manager.persist_async(session_id)
+    if end_state == "interrupted":
+        manager.clear_event_hub(session_id)
     if not had_runtime_failure:
         try:
             from agenticx.memory.graph.writer import schedule_turn_ingest_from_session
@@ -2701,6 +2703,14 @@ def create_studio_app() -> FastAPI:
             from agenticx.studio.turn_interruption import clear_stale_unattended_failure
 
             clear_stale_unattended_failure(session)
+            previous_runtime_settled = await manager.wait_for_interrupted_runtime(
+                payload.session_id
+            )
+            if not previous_runtime_settled:
+                raise HTTPException(
+                    status_code=409,
+                    detail="Previous interrupted run is still stopping; retry shortly.",
+                )
             manager.clear_interrupt(payload.session_id)
             manager.set_execution_state(payload.session_id, "running")
             setattr(session, "_usage_owner_session_id", payload.session_id)
@@ -2838,6 +2848,20 @@ def create_studio_app() -> FastAPI:
         event_queue: "asyncio.Queue[RuntimeEvent | None]"
         import asyncio
 
+        # Wait for any previous run's hub finalization before creating a new
+        # hub. Otherwise this request would hold a closed hub after the old
+        # runtime persists and clears its event hub.
+        previous_runtime_settled = await manager.wait_for_interrupted_runtime(
+            payload.session_id
+        )
+        if not previous_runtime_settled:
+            raise HTTPException(
+                status_code=409,
+                detail="Previous interrupted run is still stopping; retry shortly.",
+            )
+        manager.clear_interrupt(payload.session_id)
+        manager.set_execution_state(payload.session_id, "running")
+
         use_event_hub = live_reattach_enabled()
         event_hub = manager.ensure_event_hub(payload.session_id) if use_event_hub else None
         event_queue = asyncio.Queue()
@@ -2897,8 +2921,6 @@ def create_studio_app() -> FastAPI:
         from agenticx.studio.turn_interruption import clear_stale_unattended_failure
 
         clear_stale_unattended_failure(session)
-        manager.clear_interrupt(payload.session_id)
-        manager.set_execution_state(payload.session_id, "running")
 
         def _mid_turn_persist_cb() -> None:
             try:

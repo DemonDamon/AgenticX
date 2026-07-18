@@ -1139,7 +1139,6 @@ export function ChatView({ onOpenConfirm, onOpenClarification, onSubmitClarifica
 
     if (streaming && opts?.forceSend) {
       abortedByUserRef.current = true;
-      abortRef.current?.abort();
       const partial = streamTextRef.current.trim();
       const partialCommitted =
         !!partial && !isThinkingPlaceholderText(partial) && !streamCommittedRef.current;
@@ -1147,6 +1146,12 @@ export function ChatView({ onOpenConfirm, onOpenClarification, onSubmitClarifica
         addMessage("assistant", streamTextRef.current, "meta", activeProvider, activeModel);
         streamCommittedRef.current = true;
       }
+      try {
+        await window.agenticxDesktop.interruptSession?.(sessionId);
+      } catch (err) {
+        console.warn("[ChatView] barge-in interrupt failed:", err);
+      }
+      abortRef.current?.abort();
       addMessage("tool", "已中断上一轮生成，开始处理新消息", "meta");
       streamTextRef.current = "";
       cancelStreamRenderFrame();

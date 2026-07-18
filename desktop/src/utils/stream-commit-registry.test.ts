@@ -30,6 +30,37 @@ describe("StreamCommitRegistry", () => {
     expect(reg.isCommitted("A")).toBe(false);
   });
 
+  it("atomically claims uncommitted text once", () => {
+    const reg = new StreamCommitRegistry();
+    reg.beginSession("A");
+    reg.setText("A", "partial answer");
+
+    expect(reg.claimUncommittedText("A")).toBe("partial answer");
+    expect(reg.isCommitted("A")).toBe(true);
+    expect(reg.claimUncommittedText("A")).toBeNull();
+  });
+
+  it("does not claim missing or empty session text", () => {
+    const reg = new StreamCommitRegistry();
+    reg.beginSession("A");
+
+    expect(reg.claimUncommittedText("missing")).toBeNull();
+    expect(reg.claimUncommittedText("A")).toBeNull();
+    expect(reg.isCommitted("A")).toBe(false);
+  });
+
+  it("claims text independently across sessions", () => {
+    const reg = new StreamCommitRegistry();
+    reg.beginSession("A");
+    reg.beginSession("B");
+    reg.setText("A", "answer A");
+    reg.setText("B", "answer B");
+
+    expect(reg.claimUncommittedText("A")).toBe("answer A");
+    expect(reg.isCommitted("B")).toBe(false);
+    expect(reg.claimUncommittedText("B")).toBe("answer B");
+  });
+
   it("midCommit is isolated per session", () => {
     const reg = new StreamCommitRegistry();
     reg.beginSession("A");

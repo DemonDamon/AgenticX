@@ -5473,6 +5473,67 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
     }
   }, [pane.messages?.length, recordProgressActivity]);
 
+  /**
+   * Atomically claim the live stream buffer into pane.messages before any
+   * interrupt/abort clears the overlay. Without this, Stop leaves a blank
+   * transcript until the user switches sessions and reloads from disk.
+   */
+  const preserveUncommittedStreamPartial = useCallback(
+    (sid: string, provider?: string, model?: string): boolean => {
+      if (!sid) return false;
+      const claimedRaw = streamCommitRegistryRef.current.claimUncommittedText(sid);
+      let partial = (claimedRaw ?? "").trim().replace(/[：:]\s*$/, "").trimEnd();
+      if (!partial && !streamCommitRegistryRef.current.isCommitted(sid)) {
+        const fromRef = streamTextRef.current.trim();
+        const fromState = String(sessionStreamStateRef.current[sid]?.text ?? "").trim();
+        const fallback = (fromRef || fromState)
+          .replace(/[：:]\s*$/, "")
+          .trimEnd();
+        if (
+          fallback &&
+          fallback !== "⏹ 正在中断..." &&
+          !isThinkingPlaceholderText(fallback) &&
+          !isStreamToolLabelOnlyText(fallback)
+        ) {
+          streamCommitRegistryRef.current.markCommitted(sid);
+          partial = fallback;
+        }
+      }
+      if (
+        !partial ||
+        isThinkingPlaceholderText(partial) ||
+        isStreamToolLabelOnlyText(partial)
+      ) {
+        return false;
+      }
+      const parsed = parseReasoningContent(partial);
+      const reasoningText = parsed.reasoning.trim();
+      const bodyContent = parsed.response.replace(/[：:]\s*$/, "").trimEnd();
+      const commitExtras: Record<string, unknown> = { ownerSessionId: sid };
+      let commitContent = partial;
+      if (reasoningText) {
+        commitExtras.reasoning = reasoningText.slice(0, 16384);
+        commitContent = bodyContent;
+      }
+      if (!commitContent.trim() || isStreamToolLabelOnlyText(commitContent)) {
+        return false;
+      }
+      addPaneMessage(
+        pane.id,
+        "assistant",
+        commitContent,
+        "meta",
+        provider,
+        model,
+        undefined,
+        commitExtras,
+      );
+      streamCommitRegistryRef.current.setMidCommit(sid, partial);
+      return true;
+    },
+    [addPaneMessage, pane.id],
+  );
+
   const stopCurrentRun = useCallback(async () => {
     const sid = (streamingSessionId || pane.sessionId || "").trim();
     if (!sid) return;
@@ -5483,6 +5544,14 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
     userStoppedSessionRef.current[sid] = true;
     setRunGuardSessionId(sid);
     setStallState("none");
+
+    // Commit visible partial BEFORE wiping overlay / aborting SSE. Lite ChatView
+    // already does this; Pro previously only reloaded partial after session switch.
+    preserveUncommittedStreamPartial(
+      sid,
+      streamingModel?.provider || chatProvider || undefined,
+      streamingModel?.model || chatModel || undefined,
+    );
 
     const st = sessionStreamStateRef.current[sid];
     if (st) {
@@ -5506,6 +5575,19 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
         // history sidebar spinner disappears at once instead of waiting for the
         // 1.5s list poll (which can lag behind a bloated session list query).
         useAppStore.getState().clearSessionHistoryHint(sid);
+        // Backend persists turn_interrupted asynchronously; retry disk merge so
+        // the「已中断 / 恢复执行」card appears without requiring a session switch.
+        invalidateSessionTail(sid);
+        void (async () => {
+          for (const delayMs of [150, 450, 1000]) {
+            await new Promise((resolve) => window.setTimeout(resolve, delayMs));
+            const latestSid = String(
+              useAppStore.getState().panes.find((p) => p.id === pane.id)?.sessionId ?? "",
+            ).trim();
+            if (latestSid !== sid) return;
+            await mergeTailFromDisk(sid);
+          }
+        })();
       } else {
         userStoppedSessionRef.current[sid] = false;
         setRunGuardSessionId("");
@@ -5524,7 +5606,18 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
       stopInFlightRef.current[sid] = false;
       setStoppingSessionId((current) => (current === sid ? "" : current));
     }
-  }, [addPaneMessage, pane.id, pane.sessionId, streamingSessionId]);
+  }, [
+    addPaneMessage,
+    chatModel,
+    chatProvider,
+    mergeTailFromDisk,
+    pane.id,
+    pane.sessionId,
+    preserveUncommittedStreamPartial,
+    streamingModel?.model,
+    streamingModel?.provider,
+    streamingSessionId,
+  ]);
 
   const interruptForResume = useCallback(
     async (sid: string) => {
@@ -7130,7 +7223,12 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
       })
     ) {
       // Force-send while streaming: abort the current run, then start the new round.
-      // Partial assistant text is preserved by commitCurrentStreamIfNeeded in finally.
+      // Claim the visible partial before abort/overlay cleanup (same helper as Stop).
+      const preservedVisiblePartial = preserveUncommittedStreamPartial(
+        requestSessionId,
+        chatProvider || undefined,
+        chatModel || undefined,
+      );
       try {
         await window.agenticxDesktop.interruptSession?.(requestSessionId);
       } catch (err) {
@@ -7156,16 +7254,13 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
       }
       setStallState("none");
 
-      // Brief wait for the aborted SSE finally block to commit any partial
-      // assistant text via commitCurrentStreamIfNeeded. Then close the prior
-      // turn with an "(已中断)" placeholder if no assistant turn was written —
-      // otherwise the next request would feed the model two unanswered user
-      // questions and it would answer both.
-      await new Promise((r) => setTimeout(r, 60));
+      // Close a turn that produced no visible assistant output. A claimed partial
+      // is already in the pane and Studio persists the same interrupted partial
+      // while completing the old runtime.
       const tailMsgs = (useAppStore.getState().panes.find((p) => p.id === pane.id)?.messages ?? [])
         .filter((m) => m.role !== "tool");
       const lastNonTool = tailMsgs[tailMsgs.length - 1];
-      if (!lastNonTool || lastNonTool.role === "user") {
+      if (!preservedVisiblePartial && (!lastNonTool || lastNonTool.role === "user")) {
         const interruptedNote = "（已中断）";
         addPaneMessage(pane.id, "assistant", interruptedNote, "meta", chatProvider, chatModel);
         try {
@@ -9150,65 +9245,76 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
       showWidgetDeltaTimers.clear();
       showWidgetDeltaPending.clear();
       releaseSendLock();
-      delete sessionAbortControllersRef.current[requestSessionId];
-      streamCommitRegistryRef.current.clearSession(requestSessionId);
-      const ended = sessionStreamStateRef.current[requestSessionId];
-      if (ended) {
-        ended.active = false;
-        ended.text = "";
-        sessionStreamStateRef.current[requestSessionId] = ended;
-      }
 
-      // Peek at the queue BEFORE setting idle state: if there is a follow-up
-      // message already queued (e.g. unattended-continuation auto-send), the
-      // session is NOT truly "done" — setting idle here would cause a one-frame
-      // "已结束 关闭" flash that (a) misleads the user into thinking the task
-      // finished and (b) triggers the false-promotion heuristic in StickyTaskBar
-      // that marks in_progress todos as completed. When the user switches sessions
-      // during that flash and returns, they see the continuation run's partial
-      // progress and wonder why the state "regressed" from 5/5 → 4/5.
-      // Fix: dequeue first, and skip the idle transition when a follow-up will
-      // immediately restart the run (within the same requestAnimationFrame).
-      const nextQueued = useAppStore.getState().dequeuePaneMessageForSession(
-        pane.id,
-        requestSessionId,
-      );
+      // Barge-in replaces this run's AbortController with a newer one for the
+      // same session_id. Only the owner of the current controller may clear
+      // stream state / registry / queue — otherwise the old finally clobbers
+      // the new force-send turn.
+      const stillOwnsStream =
+        sessionAbortControllersRef.current[requestSessionId] === abortController;
 
-      if ((pane.sessionId || "").trim() === requestSessionId) {
-        const refPatch = referenceExtrasFromTurn(
-          turnRefsSnapshot.references,
-          turnRefsSnapshot.queries,
+      let nextQueued: QueuedMessage | null = null;
+      if (stillOwnsStream) {
+        delete sessionAbortControllersRef.current[requestSessionId];
+        streamCommitRegistryRef.current.clearSession(requestSessionId);
+        const ended = sessionStreamStateRef.current[requestSessionId];
+        if (ended) {
+          ended.active = false;
+          ended.text = "";
+          sessionStreamStateRef.current[requestSessionId] = ended;
+        }
+
+        // Peek at the queue BEFORE setting idle state: if there is a follow-up
+        // message already queued (e.g. unattended-continuation auto-send), the
+        // session is NOT truly "done" — setting idle here would cause a one-frame
+        // "已结束 关闭" flash that (a) misleads the user into thinking the task
+        // finished and (b) triggers the false-promotion heuristic in StickyTaskBar
+        // that marks in_progress todos as completed. When the user switches sessions
+        // during that flash and returns, they see the continuation run's partial
+        // progress and wonder why the state "regressed" from 5/5 → 4/5.
+        // Fix: dequeue first, and skip the idle transition when a follow-up will
+        // immediately restart the run (within the same requestAnimationFrame).
+        nextQueued = useAppStore.getState().dequeuePaneMessageForSession(
+          pane.id,
+          requestSessionId,
         );
-        if (refPatch && !abortController.signal.aborted) {
-          useAppStore.getState().mergeLastPaneMessageByRole(pane.id, "assistant", refPatch);
+
+        if ((pane.sessionId || "").trim() === requestSessionId) {
+          const refPatch = referenceExtrasFromTurn(
+            turnRefsSnapshot.references,
+            turnRefsSnapshot.queries,
+          );
+          if (refPatch && !abortController.signal.aborted) {
+            useAppStore.getState().mergeLastPaneMessageByRole(pane.id, "assistant", refPatch);
+          }
+          syncStreamingUiForCurrentSession();
+          // Only transition to idle if there is no queued continuation. A queued
+          // follow-up means the run will restart in the next animation frame; the
+          // "running" state must stay set so the StickyTaskBar does not briefly
+          // show "已结束" (and incorrectly promote in_progress todos to completed).
+          if (!abortController.signal.aborted && !nextQueued) {
+            setSessionExecutionState("idle");
+          }
+          setStreamReferences([]);
+          setStreamSearchedQueries([]);
+          streamTextRef.current = "";
         }
-        syncStreamingUiForCurrentSession();
-        // Only transition to idle if there is no queued continuation. A queued
-        // follow-up means the run will restart in the next animation frame; the
-        // "running" state must stay set so the StickyTaskBar does not briefly
-        // show "已结束" (and incorrectly promote in_progress todos to completed).
-        if (!abortController.signal.aborted && !nextQueued) {
-          setSessionExecutionState("idle");
+        setGroupTyping({});
+        setContextFiles({});
+        if (!abortController.signal.aborted) {
+          useAppStore.getState().clearSessionHistoryHint(requestSessionId);
         }
-        setStreamReferences([]);
-        setStreamSearchedQueries([]);
+        invalidateSessionTail(requestSessionId);
+        useAppStore.getState().dropCachedSessionMessages(requestSessionId);
+        void mergeTailFromDisk(requestSessionId);
       }
-      abortRef.current = null;
+
+      if (abortRef.current === abortController) {
+        abortRef.current = null;
+      }
       cancelStreamRenderFrame();
-      if ((pane.sessionId || "").trim() === requestSessionId) {
-        streamTextRef.current = "";
-      }
-      setGroupTyping({});
-      setContextFiles({});
-      if (!abortController.signal.aborted) {
-        useAppStore.getState().clearSessionHistoryHint(requestSessionId);
-      }
       useAppStore.getState().bumpSessionCatalogRevision();
       window.setTimeout(() => useAppStore.getState().bumpSessionCatalogRevision(), 500);
-
-      invalidateSessionTail(requestSessionId);
-      useAppStore.getState().dropCachedSessionMessages(requestSessionId);
-      void mergeTailFromDisk(requestSessionId);
 
       if (nextQueued) {
         requestAnimationFrame(() => {
