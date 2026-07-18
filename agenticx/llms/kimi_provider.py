@@ -46,10 +46,22 @@ class KimiProvider(BaseLLMProvider):
         else:
             raise ValueError("Prompt must be either a string or a list of messages")
 
+    def _normalized_model_name(self) -> str:
+        """Return bare model id without provider prefix."""
+        return (self.model or "").lower().split("/")[-1]
+
     def _is_k2_series_model(self) -> bool:
         """Return True if current model is Kimi K2.5/K2.6 series."""
-        model_name = (self.model or "").lower().split("/")[-1]
+        model_name = self._normalized_model_name()
         return model_name.startswith("kimi-k2.6") or model_name.startswith("kimi-k2.5")
+
+    def _is_k3_series_model(self) -> bool:
+        """Return True if current model is Kimi K3 series.
+
+        Moonshot rejects any temperature other than 1.0 for these models
+        (``invalid temperature: only 1 is allowed for this model``).
+        """
+        return self._normalized_model_name().startswith("kimi-k3")
 
     @staticmethod
     def _extract_thinking_type(kwargs: Dict[str, Any]) -> Optional[str]:
@@ -70,8 +82,11 @@ class KimiProvider(BaseLLMProvider):
         return None
 
     def _resolve_temperature(self, kwargs: Dict[str, Any]) -> Optional[float]:
-        """Resolve temperature with K2.x model constraints."""
+        """Resolve temperature with K2.x / K3 model constraints."""
         user_temperature = kwargs.get("temperature", self.temperature)
+        # K3 API hard-requires temperature=1 regardless of thinking mode.
+        if self._is_k3_series_model():
+            return 1.0
         if not self._is_k2_series_model():
             return user_temperature
 
