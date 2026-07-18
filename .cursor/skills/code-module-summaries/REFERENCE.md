@@ -1,0 +1,523 @@
+# Code Module Summaries Reference
+
+## 1. State model
+
+The control directory is tracked in Git. Its location is user-configurable and
+is independent from the summary layout.
+
+### Centralized layout
+
+```text
+<control-dir>/
+  registry.json
+  INDEX.md
+  modules/
+    <module-id>.md
+  state/
+    <module-id>.json
+```
+
+### Colocated layout
+
+```text
+<control-dir>/
+  registry.json
+  INDEX.md
+  state/
+    <module-id>.json
+
+<module-root>/MODULE_SUMMARY.md
+```
+
+The control directory remains centralized in both modes. Only Markdown module
+summaries move in colocated mode.
+
+`registry.json` is the stable ownership map. Per-module files under `state/`
+are the incremental authority. `INDEX.md` is human-facing and must not be used
+to infer a checkpoint.
+
+## 2. Registry schema
+
+Use repository-relative POSIX paths. Keep IDs stable across renames. Increment
+`mapping_revision` whenever a module's roots, shared paths, or summary path
+changes.
+
+```json
+{
+  "schema_version": 1,
+  "layout": "centralized",
+  "tracked_ref": "HEAD",
+  "summary_name": "MODULE_SUMMARY.md",
+  "exclude_paths": [
+    "docs/generated",
+    "vendor"
+  ],
+  "modules": [
+    {
+      "id": "payments",
+      "name": "Payments",
+      "roots": [
+        "services/payments"
+      ],
+      "shared_paths": [
+        "pyproject.toml",
+        "proto/payments"
+      ],
+      "primary_root": "services/payments",
+      "summary_path": "code-summaries/modules/payments.md",
+      "mapping_revision": 1
+    }
+  ]
+}
+```
+
+Required fields:
+
+- `schema_version`: currently `1`.
+- `tracked_ref`: ref frozen by `plan` and rechecked by `checkpoint`.
+- `exclude_paths`: generated/vendor/non-source prefixes intentionally outside
+  module ownership.
+- `modules[].id`: unique, durable, lowercase slug.
+- `modules[].name`: display name; selectors may use it only when unique.
+- `modules[].roots`: one or more owned source path prefixes.
+- `modules[].shared_paths`: optional shared inputs whose changes affect the
+  module.
+- `modules[].primary_root`: required for a colocated module with multiple
+  roots; optional otherwise.
+- `modules[].summary_path`: exact Markdown output path.
+- `modules[].mapping_revision`: positive integer.
+
+Ownership rules:
+
+1. Exact module roots must be unique.
+2. Nested roots are allowed; the deepest matching root owns the path.
+3. A shared path may intentionally affect multiple modules.
+4. The control directory and every registered summary path are excluded from
+   source changes and fingerprints.
+5. Paths must remain inside the repository; `..` and absolute paths are
+   invalid.
+6. Centralized summary paths are exactly
+   `<control-dir>/modules/<module-id>.md`. Colocated summary paths are exactly
+   `<primary-root>/<summary_name>`.
+7. IDs use lowercase letters/numbers with `.`, `_`, or `-`; names and selectors
+   are case-sensitive.
+8. `exclude_paths` are removed from ownership checks, diffs, dirty-worktree
+   checks, source fingerprints, and summaries.
+9. The control directory may sit inside a broad module root, but it must not be
+   the repository root or an ancestor of a module root.
+
+## 3. Per-module checkpoint
+
+The helper writes `state/<module-id>.json` atomically:
+
+```json
+{
+  "schema_version": 1,
+  "module_id": "payments",
+  "generation": "single-use-state-generation",
+  "mapping_revision": 1,
+  "baseline_commit": "full-object-id",
+  "baseline_tree": "full-tree-object-id",
+  "source_fingerprint": "sha256:...",
+  "summary_path": "code-summaries/modules/payments.md",
+  "summary_sha256": "sha256:...",
+  "updated_at": "2026-07-19T00:00:00+00:00"
+}
+```
+
+`updated_at` is informational. `baseline_commit` is the only normal incremental
+boundary. The summary hash detects manual edits or an interrupted
+summary/state write pair. `generation` rotates after every checkpoint so an old
+plan token cannot be replayed.
+
+## 4. Module discovery
+
+### Evidence priority
+
+1. Explicit workspace membership and package/service manifests.
+2. Independently deployable or executable units.
+3. Stable public API and runtime entry points.
+4. Test, configuration, ownership, and release boundaries.
+5. Import/dependency cohesion inside a directory.
+6. Existing architecture documentation, verified against code.
+
+Common markers include:
+
+- JavaScript/TypeScript: workspace declarations and `package.json`.
+- Python: `pyproject.toml`, packages, CLI/server entry points.
+- Go: `go.work`, `go.mod`, `cmd/`, internal package boundaries.
+- Rust: Cargo workspace members and `Cargo.toml`.
+- JVM: Gradle settings/subprojects and Maven modules.
+- .NET: solution and project files.
+- Monorepos: `apps/`, `services/`, `packages/`, `libs/`, deploy manifests,
+  CODEOWNERS, and test roots.
+
+Do not count generated code, vendor directories, dependency caches, build
+output, coverage, snapshots, or virtual environments as modules.
+
+After choosing strong module roots, verify every remaining tracked source path
+has an owner. If needed, add one repository-level module with root `.`.
+Deepest-root ownership keeps nested modules independent while the root module
+captures repository glue and newly introduced top-level packages. A new package
+manifest reported there is a signal to run `--refresh-modules`, not a reason to
+silently absorb the new package forever.
+
+### Target count
+
+Treat a requested count such as ten as an orientation, not a correctness
+requirement:
+
+- Keep high-confidence package or deploy boundaries even if the count differs.
+- Merge only low-confidence siblings with the same runtime responsibility.
+- Split a large module only when a child has an independent entry point, API,
+  ownership boundary, or tests.
+- Put ambiguous repository-wide files into `shared_paths` or ask the user;
+  never assign them by filename coincidence alone.
+
+### Stable IDs
+
+Use a semantic slug such as `payments`, `desktop-renderer`, or `gateway-audit`.
+If names collide, include a stable parent qualifier. On a rename, retain the ID
+and update `name`/`roots`. On a split or merge, create new IDs and explicitly
+retire the old mapping; do not reuse it.
+
+For an approved split/merge, remove the old entry from active `modules`, archive
+its summary and state under `<control-dir>/archive/<old-id>/`, and add a
+top-level informational tombstone:
+
+```json
+{
+  "id": "payments",
+  "retired_at_commit": "full-target-oid",
+  "replaced_by": ["payments-api", "payments-worker"],
+  "archived_summary_path": "code-summaries/archive/payments/summary.md",
+  "archived_state_path": "code-summaries/archive/payments/state.json"
+}
+```
+
+Store these objects in `retired_modules`. New split/merged modules start with no
+state and receive full summaries at the target; never inherit the old module's
+baseline. Show retired mappings in a separate INDEX section. The helper rejects
+an active module whose ID is present in `retired_modules`.
+
+Command flow for split/merge:
+
+- existing active IDs whose effective ownership changed: increment revision and
+  use `plan/checkpoint --mapping-refresh`;
+- brand-new IDs: use the normal first-scan `plan/checkpoint` path;
+- retired old IDs: archive and tombstone them; do not invoke helper checkpoint.
+
+## 5. Initial scan
+
+1. Resolve and freeze the target:
+
+   ```bash
+   git -C <repo> rev-parse --show-toplevel
+   git -C <repo> rev-parse --verify 'HEAD^{commit}'
+   ```
+
+2. Verify selected source paths are clean. Do not infer committed source from a
+   dirty worktree.
+3. Discover modules and present: ID, name, roots, shared paths, summary path,
+   and confidence/evidence.
+4. Create `registry.json` and `INDEX.md`.
+5. Run `plan`; all modules should be `new`, and each blocker-free module
+   includes a `checkpoint_token`:
+
+   ```bash
+   python <skill-dir>/scripts/scan_changes.py plan \
+     --repo <repo> \
+     --control-dir <control-dir>
+   ```
+
+6. If a summary already exists without state, stop by default. Read and
+   preserve it, then rerun both plan and checkpoint with
+   `--adopt-existing-summary`.
+7. Generate each summary using the template below.
+8. Self-check every cited path and symbol against the frozen target.
+9. Checkpoint each successful module with the full `target_commit`,
+   `target_ref`, `checkpoint_token`, and `summary_sha256_at_plan` returned by
+   `plan`.
+10. Leave failed modules without a state file so the next run reports `new`.
+
+An empty or misspelled root returns `MODULE_EMPTY` during plan. Fix the mapping
+before generating a summary.
+
+## 6. Incremental scan
+
+### Plan phase
+
+`plan` is read-only:
+
+```bash
+python <skill-dir>/scripts/scan_changes.py plan \
+  --repo <repo> \
+  --control-dir <control-dir> \
+  --module payments \
+  --target HEAD
+```
+
+It:
+
+- resolves a full target commit;
+- reads each selected module's own baseline;
+- checks object existence and ancestry;
+- compares `BASE` to `TARGET` with NUL-delimited Git output and rename
+  detection;
+- maps both old and new paths through the registry;
+- checks selected source paths for staged, unstaged, and untracked changes;
+- checks summary drift and mapping revisions;
+- returns a module-specific `checkpoint_token` only when that module has no
+  blocker;
+- returns the exact plan-time summary hash used to verify the subsequent edit;
+- emits JSON and exits `2` when any blocker exists.
+
+For all modules, omit `--module`. A module that has no relevant path changes is
+`unchanged`; do not read or rewrite its source summary. A full plan also blocks
+on `UNASSIGNED_TRACKED_PATHS`; map or explicitly exclude those paths before
+continuing.
+
+Do not partially execute a multi-module plan that contains any blocker. Resolve
+the blockers and rerun, or create a new plan selecting only an unblocked module.
+
+When `SUMMARY_DRIFT` is reported, first read and preserve the existing edit,
+then rerun plan with `--accept-summary-drift`. Passing that flag before drift is
+present is rejected.
+
+### Reading exact code
+
+The plan's target may not equal the checked-out worktree. Prefer Git objects:
+
+```bash
+# Existing or modified file at TARGET
+git -C <repo> show '<TARGET>:path/to/file'
+
+# Deleted file at BASE
+git -C <repo> show '<BASE>:path/to/deleted-file'
+
+# Behavioral diff with context
+git -C <repo> diff --no-ext-diff --unified=80 \
+  <BASE> <TARGET> -- path/to/file
+```
+
+For `Rnnn`, inspect both `old_path` at `BASE` and `new_path` at `TARGET`.
+For cross-module moves, both owning modules are affected when both are
+selected. Read adjacent tests/configuration and directly referenced symbols
+only as needed to explain the change.
+
+### Update phase
+
+For each `changed` module:
+
+1. Read its current summary.
+2. Group changes by capability, not merely by file extension.
+3. Update existing sections minimally.
+4. Add only implemented public behavior, architecture, contracts, defaults,
+   error semantics, or dependencies useful to maintainers.
+5. Remove stale descriptions for deleted/renamed code.
+6. Verify every cited path/symbol at `TARGET`.
+
+For `unchanged`, skip source and Markdown reads after the plan. Advance only
+that module's checkpoint:
+
+```bash
+python <skill-dir>/scripts/scan_changes.py checkpoint \
+  --repo <repo> \
+  --control-dir <control-dir> \
+  --module payments \
+  --target <full-target-oid> \
+  --target-ref <target_ref-returned-by-plan> \
+  --plan-token <payments.checkpoint_token> \
+  --summary-sha256-at-plan <payments.summary_sha256_at_plan>
+```
+
+Use the same `--head-only`, `--accept-summary-drift`, or
+`--adopt-existing-summary` options on plan and checkpoint. The helper accepts
+only a full target OID and rechecks the exact target ref; if it moved, rerun
+`plan`.
+
+For a `changed` module whose maintainer-facing summary legitimately needs no
+text change, pass `--summary-unchanged` only after reading every reported
+change. Without that explicit review marker, checkpoint refuses to advance an
+unchanged summary over changed source.
+
+## 7. Summary template
+
+Adapt to the repository's existing documentation style. On first generation:
+
+```markdown
+---
+module_id: payments
+module_name: Payments
+roots:
+  - services/payments
+summary_schema: code-module-summaries/v1
+---
+
+# Payments
+
+## Responsibility
+- What the module owns.
+- What it explicitly does not own.
+
+## Entry points and public interfaces
+- `path/to/file.py` — `PublicClass.method(...)`: verified role.
+
+## Core execution path
+1. Trigger or caller.
+2. Main orchestration.
+3. Persistence/external boundary.
+4. Returned result or emitted event.
+
+## Data and configuration
+- Models, schemas, protocols, environment/config keys, and defaults.
+
+## Dependencies
+- Upstream callers.
+- Downstream modules/services and why they are called.
+
+## Tests and operations
+- Test locations, runtime entry points, and important failure behavior.
+
+## Unverified or ambiguous
+- Only unresolved facts; omit the section when empty.
+```
+
+Do not include a chronological changelog unless explicitly requested.
+
+## 8. Index format
+
+`INDEX.md` is regenerated only during initialization or an approved mapping
+refresh. Keep one row per active module with:
+
+- stable module ID and display name;
+- owned roots and shared inputs;
+- link to the exact summary path;
+- responsibility in one sentence.
+
+Use Markdown hrefs relative to the directory containing `INDEX.md`, sorted by
+stable module ID. Do not put checkpoint SHAs or generated timestamps in the
+index; those belong to `state/`. A selective update must leave the index
+byte-for-byte unchanged.
+
+## 9. Layout rules
+
+### Centralized
+
+Set each summary path to `<control-dir>/modules/<module-id>.md`. This is the
+default and best for cross-module browsing and repositories where module
+directories should contain only runtime code.
+
+### Colocated
+
+Set each summary path to `<primary-root>/<summary-name>`. Use one persisted
+`primary_root` when a module has multiple roots. A normal update never moves
+the file. A root move requires `--refresh-modules`.
+
+Changing layout is a mapping migration:
+
+1. Produce old/new paths.
+2. Confirm collisions and unmanaged existing files.
+3. Move summaries.
+4. Update registry paths and mapping revisions.
+5. Run `plan --mapping-refresh` for each affected active module.
+6. Rebuild/review the summary and checkpoint with `--mapping-refresh`,
+   `--reason`, the returned token, and the returned plan-time summary hash.
+
+Each selected mapping-refresh plan performs whole-repository ownership
+validation, so newly unassigned paths block the migration before checkpoint.
+
+When adding a nested child module, also increment and refresh the former parent
+module because deepest-root ownership changes its effective source set.
+
+Never switch layouts merely because a later invocation supplied a different
+flag.
+
+## 10. Blockers and recovery
+
+| Blocker | Meaning | Safe response |
+|---|---|---|
+| `DIRTY_WORKTREE` | Selected module has local source changes | Commit/stash manually, or explicitly use `--head-only` |
+| `SUMMARY_DRIFT` | Markdown differs from its recorded hash | Read and preserve manual edits, then rerun with `--accept-summary-drift` |
+| `SUMMARY_WITHOUT_STATE` | Existing Markdown has no trusted baseline | Read it, preserve it, then explicitly use `--adopt-existing-summary` |
+| `SUMMARY_MISSING` | A managed summary disappeared | Restore it or fully regenerate that module |
+| `INVALID_BASELINE_OID` | State contains an abbreviated/ref-like baseline | Recover the full original OID or fully rebaseline |
+| `BASELINE_MISSING` | Commit object was pruned or absent in a shallow clone | Ask before fetching history; otherwise fully rebaseline |
+| `HISTORY_DIVERGED` | Rebase/force-push/branch mismatch | Verify the target; fully rebuild and explicitly rebaseline |
+| `MAPPING_REVISION_CHANGED` | Registry boundary changed since checkpoint | Run the mapping-refresh workflow |
+| `UNASSIGNED_TRACKED_PATHS` | Full scan found tracked files outside all roots/shared/excludes | Map or explicitly exclude them before any write |
+| `MODULE_DELETED` | No tracked source remains under module roots | Confirm retire/remap/replacement; never delete automatically |
+| `TARGET_MOVED` | Tracked ref changed after planning | Discard the stale plan and rerun it |
+| `PLAN_TOKEN_REQUIRED` / `PLAN_TOKEN_MISMATCH` | Checkpoint lacks the exact current plan authority | Rerun plan; never invent or reuse a token |
+| `SUMMARY_NOT_UPDATED` | Source changed but summary hash did not | Update it, or explicitly pass `--summary-unchanged` after review |
+| `SUMMARY_DRIFT_NOT_PRESENT` | Drift acceptance was requested before any drift existed | Rerun without `--accept-summary-drift` |
+| `MODULE_EMPTY` | A new module root contains no tracked source at target | Correct the root before generating a summary |
+
+History recovery starts with an explicit recovery plan:
+
+```bash
+python <skill-dir>/scripts/scan_changes.py plan \
+  --repo <repo> \
+  --control-dir <control-dir> \
+  --module <id> \
+  --target <verified-current-ref> \
+  --rebaseline
+```
+
+After a full rebuild or a complete byte-identical review:
+
+```bash
+python <skill-dir>/scripts/scan_changes.py checkpoint \
+  --repo <repo> \
+  --control-dir <control-dir> \
+  --module <id> \
+  --target <full-target-oid> \
+  --target-ref <verified-current-ref> \
+  --rebaseline \
+  --reason "history rewritten; full module summary rebuilt" \
+  --plan-token <checkpoint_token> \
+  --summary-sha256-at-plan <summary_sha256_at_plan>
+```
+
+Do not silently substitute reflog entries, merge bases, dates, or “similar”
+commits for the old baseline.
+
+The recovery token binds the divergent old state and the new frozen target.
+If the rebuilt text is byte-identical, also pass `--summary-unchanged` to
+record the explicit review.
+
+If history and mapping changed together, use both `--rebaseline` and
+`--mapping-refresh` on plan/checkpoint and provide one reason covering both.
+Do not delete the old state to force either transition.
+
+## 11. Selective update guarantees
+
+For `--module payments`, the allowed write set is:
+
+```text
+<payments summary_path>
+<control-dir>/state/payments.json
+```
+
+No registry, index, or other module output may change. A split, merge, root
+move, or deleted selected module is not a normal selective update and must
+switch to an explicitly confirmed mapping refresh.
+
+## 12. Verification
+
+Run the helper tests after modifying the script or state contract:
+
+```bash
+python -m pytest \
+  .cursor/skills/code-module-summaries/tests/test_scan_changes.py \
+  -q --no-cov
+```
+
+Before reporting completion:
+
+- `plan` has no blockers for every checkpointed module.
+- All summary claims resolve at the frozen target.
+- Deleted and renamed symbols no longer remain as current behavior.
+- Unchanged summaries were not rewritten.
+- The write set matches the selected module scope.
+- State files contain the exact target OID returned by the plan.
