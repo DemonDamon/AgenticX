@@ -70,6 +70,8 @@ type Props = {
   }) => void;
   autoRefreshKey?: number;
   onClose?: () => void;
+  /** When embedded in WorkPanel: hide the panel-level close control (parent owns it). */
+  hidePanelClose?: boolean;
   /** Sidebar file-manage mode: replace title with back control (Trae-style). */
   backAction?: { label: string; onClick: () => void };
   tintColor?: string;
@@ -164,6 +166,7 @@ export function WorkspacePanel({
   onPickDirectoryForReference,
   autoRefreshKey,
   onClose,
+  hidePanelClose = false,
   backAction,
   tintColor,
   onQuotePreviewSnippet,
@@ -1244,7 +1247,7 @@ export function WorkspacePanel({
                 >
                   <Terminal className="h-4 w-4" strokeWidth={1.8} />
                 </button>
-                {onClose ? (
+                {onClose && !hidePanelClose ? (
                   <button
                     className="agx-topbar-btn !px-[5px]"
                     onClick={onClose}

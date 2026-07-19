@@ -13,20 +13,17 @@ import {
   LayoutList,
   Quote,
   Search,
-  Share2,
   Forward,
   Sparkles,
   Radar,
   SquarePen,
   Wrench,
   Users,
-  FolderOpen,
   PhoneCall,
-  Bot,
-  Boxes,
   History,
   Settings,
   X,
+  PanelRight,
   PanelRightClose,
   ArrowRight,
   Loader2,
@@ -53,7 +50,6 @@ import { AvatarSettingsPanel } from "./AvatarSettingsPanel";
 import { MemoryGraphPanel } from "./memory/MemoryGraphPanel";
 import { StickyTaskBar } from "./StickyTaskBar";
 import { ContextUsageButton } from "./ContextUsagePopup";
-import { WorkspacePanel } from "./WorkspacePanel";
 import type { WorkspacePreviewOpenRequest, WorkspacePreviewQuotePayload } from "./workspace/workspace-preview-types";
 import {
   NEAR_WORKSPACE_PICK_DIR,
@@ -61,7 +57,7 @@ import {
   type NearWorkspacePickDirDetail,
   type NearWorkspacePickFileDetail,
 } from "../utils/workspace-sidebar-events";
-import { SpawnsColumn } from "./SpawnsColumn";
+import { WorkPanel, type WorkPanelFocus } from "./work-panel/WorkPanel";
 import { SubAgentRunDrawer } from "./subagent";
 import { MessageRenderer, renderToolMessageExtras } from "./messages/MessageRenderer";
 import type { SkillPatchPreviewPayload } from "./messages/skill-manage-preview";
@@ -2275,7 +2271,6 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
   const addPane = useAppStore((s) => s.addPane);
   const setActivePaneId = useAppStore((s) => s.setActivePaneId);
   const togglePaneHistory = useAppStore((s) => s.togglePaneHistory);
-  const togglePaneMemoryGraph = useAppStore((s) => s.togglePaneMemoryGraph);
   const cycleSidePanel = useAppStore((s) => s.cycleSidePanel);
   const toggleFocusMode = useAppStore((s) => s.toggleFocusMode);
   const openSidePanel = useAppStore((s) => s.openSidePanel);
@@ -2306,7 +2301,6 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
   const removePendingMessage = useAppStore((s) => s.removePendingMessage);
   const editPendingMessage = useAppStore((s) => s.editPendingMessage);
   const setSpawnsColumnOpen = useAppStore((s) => s.setSpawnsColumnOpen);
-  const dismissSpawnsColumn = useAppStore((s) => s.dismissSpawnsColumn);
   const closeRunDrawer = useAppStore((s) => s.closeRunDrawer);
   const apiBase = useAppStore((s) => s.apiBase);
   const apiToken = useAppStore((s) => s.apiToken);
@@ -2620,6 +2614,8 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
   const [historyAnchorRect, setHistoryAnchorRect] = useState<DOMRect | null>(null);
   /** WorkBuddy-style in-session find bar (toolbar magnifier → highlight + N/M nav). */
   const [sessionFindOpen, setSessionFindOpen] = useState(false);
+  /** One-shot focus for WorkPanel tabs (summary / workspace / terminal / browser). */
+  const [workPanelFocus, setWorkPanelFocus] = useState<WorkPanelFocus>(null);
   const [sessionFindQuery, setSessionFindQuery] = useState("");
   const [sessionFindMatchIndex, setSessionFindMatchIndex] = useState(0);
   const [sessionFindMatchCount, setSessionFindMatchCount] = useState(0);
@@ -4262,6 +4258,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
               ...(request.lineRange ? { lineRange: request.lineRange } : {}),
             };
       if (!normalized.absolutePath) return;
+      setWorkPanelFocus({ kind: "workspace" });
       if (!pane.taskspacePanelOpen) {
         openWorkspaceSidebarForPane(pane.id, paneRef.current?.clientWidth ?? paneWidth, openSidePanel);
       }
@@ -6416,7 +6413,10 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
           setStallHintToast("该智能体任务执行中，完成后才能进入对话");
           return;
         }
-        if (!pane.spawnsColumnOpen) setSpawnsColumnOpen(pane.id, true);
+        setWorkPanelFocus({ kind: "summary" });
+        if (!pane.taskspacePanelOpen) {
+          openWorkspaceSidebarForPane(pane.id, paneRef.current?.clientWidth ?? paneWidth, openSidePanel);
+        }
         setSelectedSubAgent(rid);
       } catch {
         // Ignore — cluster card stays interactive; user can retry click.
@@ -6426,12 +6426,13 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
       apiBase,
       apiToken,
       closeRunDrawer,
+      openSidePanel,
       pane.id,
       pane.sessionId,
-      pane.spawnsColumnOpen,
+      pane.taskspacePanelOpen,
       paneSubAgents,
+      paneWidth,
       setSelectedSubAgent,
-      setSpawnsColumnOpen,
       setStallHintToast,
     ],
   );
@@ -6455,9 +6456,11 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
       setStallHintToast("该智能体任务执行中，完成后才能进入对话");
       return;
     }
-    // 选中一个成员即视为「手动开启」明细面板的动作（无论触发源是内联集群卡还是
-    // Spawns 列自身），确保 Spawns 列可见，否则 selectedSubAgent 的明细卡无处渲染。
-    if (!pane.spawnsColumnOpen) setSpawnsColumnOpen(pane.id, true);
+    // 选中成员时打开工作台「任务摘要」，子智能体卡片在展开面板内展示。
+    setWorkPanelFocus({ kind: "summary" });
+    if (!pane.taskspacePanelOpen) {
+      openWorkspaceSidebarForPane(pane.id, paneRef.current?.clientWidth ?? paneWidth, openSidePanel);
+    }
     setSelectedSubAgent(agentId);
   };
 
@@ -10290,29 +10293,57 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
     }));
   };
 
-  const toggleMemoryGraphSidePanel = () => {
-    if (!compactSidePanels) {
-      if (!pane.memoryGraphOpen) closeHistoryPanelOnly();
-      togglePaneMemoryGraph(pane.id);
-      return;
-    }
-    useAppStore.setState((s) => ({
-      panes: s.panes.map((p) => {
-        if (p.id !== pane.id) return p;
-        const opening = !p.memoryGraphOpen;
-        return opening
-          ? {
-              ...p,
-              memoryGraphOpen: true,
-              taskspacePanelOpen: false,
-              historyOpen: false,
-              membersPanelOpen: false,
-              spawnsColumnOpen: false,
-            }
-          : { ...p, memoryGraphOpen: false };
-      }),
-    }));
-  };
+  /** Trae-aligned: ⌘⌃B toggles the work expansion panel for the active pane. */
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (
+        !(event.key === "b" || event.key === "B") ||
+        !event.metaKey ||
+        !event.ctrlKey ||
+        event.altKey ||
+        event.shiftKey
+      ) {
+        return;
+      }
+      const activePaneId = useAppStore.getState().activePaneId;
+      if (activePaneId !== pane.id) return;
+      event.preventDefault();
+      const current = useAppStore.getState().panes.find((p) => p.id === pane.id);
+      if (!current) return;
+      const paneOuter = paneRef.current?.clientWidth ?? 0;
+      const compact = paneOuter > 0 && paneOuter < CHATPANE_SIDE_OVERLAY_BREAK;
+      if (!compact) {
+        if (!current.taskspacePanelOpen) {
+          useAppStore.setState((s) => ({
+            panes: s.panes.map((row) =>
+              row.id !== pane.id ? row : { ...row, historyOpen: false }
+            ),
+          }));
+        }
+        useAppStore.getState().cycleSidePanel(pane.id, "workspace");
+        return;
+      }
+      useAppStore.setState((s) => ({
+        panes: s.panes.map((p) => {
+          if (p.id !== pane.id) return p;
+          const opening = !p.taskspacePanelOpen;
+          return opening
+            ? {
+                ...p,
+                taskspacePanelOpen: true,
+                sidePanelTab: "workspace" as const,
+                historyOpen: false,
+                memoryGraphOpen: false,
+                membersPanelOpen: false,
+                spawnsColumnOpen: false,
+              }
+            : { ...p, taskspacePanelOpen: false };
+        }),
+      }));
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [pane.id]);
 
   const toggleHistorySidePanel = () => {
     const opening = !pane.historyOpen;
@@ -10353,36 +10384,6 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
               spawnsColumnOpen: false,
             }
           : { ...p, membersPanelOpen: false };
-      }),
-    }));
-  };
-
-  const toggleSpawnsSideColumn = () => {
-    if (pane.spawnsColumnOpen) {
-      dismissSpawnsColumn(
-        pane.id,
-        paneSubAgents.map((s) => s.id)
-      );
-      return;
-    }
-    if (!compactSidePanels) {
-      closeHistoryPanelOnly();
-      setSpawnsColumnOpen(pane.id, true);
-      return;
-    }
-    useAppStore.setState((s) => ({
-      panes: s.panes.map((p) => {
-        if (p.id !== pane.id) return p;
-        return {
-          ...p,
-          spawnsColumnOpen: true,
-          spawnsColumnSuppressAuto: false,
-          spawnsColumnBaselineIds: [],
-          taskspacePanelOpen: false,
-          historyOpen: false,
-          memoryGraphOpen: false,
-          membersPanelOpen: false,
-        };
       }),
     }));
   };
@@ -10451,70 +10452,6 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
             </div>
           </div>
           <div className="no-drag flex shrink-0 items-center gap-1">
-            {isGroupPane && (
-              <button
-                className={`agx-topbar-btn !px-[5px] ${pane.membersPanelOpen ? "agx-topbar-btn--active" : ""}`}
-                onClick={toggleMembersSidePanel}
-                title="切换群成员面板"
-              >
-                <Users className="h-[18px] w-[18px]" strokeWidth={1.8} />
-              </button>
-            )}
-            {isMachiMetaPane && (
-              <button
-                type="button"
-                className="agx-topbar-btn !px-[5px]"
-                onClick={() => openDeliveryPanel()}
-                title="交付任务（POC/MVP）"
-              >
-                <Boxes className="h-[18px] w-[18px]" strokeWidth={1.8} />
-              </button>
-            )}
-            {paneSettingsAvatar ? (
-              <button
-                type="button"
-                className="agx-topbar-btn !px-[5px]"
-                onClick={() => setAvatarSettingsOpen(true)}
-                title="分身设置"
-                aria-label="打开分身设置"
-              >
-                <Settings className="h-[18px] w-[18px]" strokeWidth={1.8} />
-              </button>
-            ) : null}
-            {!isGroupPane && (
-              <button
-                type="button"
-                className="agx-topbar-btn !px-[5px]"
-                onClick={() => toggleFocusMode(pane.id)}
-                title="灵巧模式 · 实时语音 (⇧⌘F)"
-                aria-label="进入灵巧模式"
-              >
-                <PhoneCall className="h-[18px] w-[18px]" strokeWidth={1.8} />
-              </button>
-            )}
-            <button
-              className={`agx-topbar-btn !px-[5px] ${workspacePanelOpen ? "agx-topbar-btn--active" : ""}`}
-              onClick={toggleWorkspaceSidePanel}
-              title="切换工作区面板"
-            >
-              <FolderOpen className="h-[18px] w-[18px]" strokeWidth={1.8} />
-            </button>
-            {paneSubAgents.length > 0 ? (
-              <button
-                className={`agx-topbar-btn !px-[5px] ${pane.spawnsColumnOpen ? "agx-topbar-btn--active" : ""}`}
-                onClick={toggleSpawnsSideColumn}
-                title={pane.spawnsColumnOpen ? "收起 Spawns 列" : "打开 Spawns 列"}
-              >
-                <Bot className="h-[18px] w-[18px]" strokeWidth={1.8} />
-              </button>
-            ) : null}
-            <button
-              className={`agx-topbar-btn !px-[5px] ${pane.memoryGraphOpen ? "agx-topbar-btn--active" : ""}`}
-              onClick={toggleMemoryGraphSidePanel}
-              title="切换记忆图谱面板"
-            >
-              <Share2 className="h-[18px] w-[18px]" strokeWidth={1.8} />
-            </button>
             {sessionFindOpen ? (
               <div
                 className="flex h-8 items-center gap-1 rounded-lg border border-border bg-surface-card px-1.5 shadow-sm"
@@ -10596,6 +10533,37 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
                 <Search className="h-[18px] w-[18px]" strokeWidth={1.8} />
               </button>
             )}
+            {isGroupPane && (
+              <button
+                className={`agx-topbar-btn !px-[5px] ${pane.membersPanelOpen ? "agx-topbar-btn--active" : ""}`}
+                onClick={toggleMembersSidePanel}
+                title="切换群成员面板"
+              >
+                <Users className="h-[18px] w-[18px]" strokeWidth={1.8} />
+              </button>
+            )}
+            {paneSettingsAvatar ? (
+              <button
+                type="button"
+                className="agx-topbar-btn !px-[5px]"
+                onClick={() => setAvatarSettingsOpen(true)}
+                title="分身设置"
+                aria-label="打开分身设置"
+              >
+                <Settings className="h-[18px] w-[18px]" strokeWidth={1.8} />
+              </button>
+            ) : null}
+            {!isGroupPane && (
+              <button
+                type="button"
+                className="agx-topbar-btn !px-[5px]"
+                onClick={() => toggleFocusMode(pane.id)}
+                title="灵巧模式 · 实时语音 (⇧⌘F)"
+                aria-label="进入灵巧模式"
+              >
+                <PhoneCall className="h-[18px] w-[18px]" strokeWidth={1.8} />
+              </button>
+            )}
             <button
               ref={historyButtonRef}
               className={`agx-topbar-btn !px-[5px] ${pane.historyOpen ? "agx-topbar-btn--active" : ""}`}
@@ -10604,6 +10572,18 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
             >
               <History className="h-[18px] w-[18px]" strokeWidth={1.8} />
             </button>
+            <HoverTip label="展开面板 · ⌘⌃B">
+              <button
+                type="button"
+                className={`agx-topbar-btn !px-[5px] ${workspacePanelOpen ? "agx-topbar-btn--active" : ""}`}
+                onClick={toggleWorkspaceSidePanel}
+                title="展开面板"
+                aria-label="展开面板"
+                aria-pressed={workspacePanelOpen}
+              >
+                <PanelRight className="h-[18px] w-[18px]" strokeWidth={1.8} />
+              </button>
+            </HoverTip>
             <button
               className="agx-topbar-btn !px-[5px] hover:text-status-error"
               onClick={closePaneAndCleanupEmptySession}
@@ -11413,11 +11393,11 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
           <div
             className="group absolute -left-[3px] top-0 z-20 h-full w-2 cursor-col-resize"
             onMouseDown={startResizeTaskspace}
-            title="拖拽调整工作区面板宽度"
+            title="拖拽调整工作台面板宽度"
           >
             <div className="mx-auto h-full w-px bg-[var(--ui-accent-divider)] transition-all duration-200 group-hover:w-[2px] group-hover:bg-[var(--ui-btn-primary-bg)]" />
           </div>
-          <WorkspacePanel
+          <WorkPanel
             paneId={pane.id}
             sessionId={pane.sessionId}
             activeTaskspaceId={pane.activeTaskspaceId}
@@ -11425,6 +11405,8 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
             autoRefreshKey={taskspaceAutoRefreshKey}
             onClose={closeWorkspacePanelOnly}
             tintColor={paneTint}
+            focusRequest={workPanelFocus}
+            onFocusRequestHandled={() => setWorkPanelFocus(null)}
             onPickFileForReference={(taskspaceId, path) => {
               void insertWorkspaceFileReference(taskspaceId, path);
             }}
@@ -11435,26 +11417,20 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
             previewOpenRequest={pendingWorkspacePreviewRequest}
             onPreviewOpenRequestHandled={() => setPendingWorkspacePreviewRequest(null)}
             onEnsureSessionForWorkspace={materializeLazySession}
+            subAgents={paneSubAgents}
+            selectedSubAgent={selectedSubAgent}
+            onCancelSubAgent={(agentId) => void cancelPaneSubAgent(agentId)}
+            onRetrySubAgent={(agentId) => void retryPaneSubAgent(agentId)}
+            onChatSubAgent={togglePaneSubAgentChat}
+            onModelChangeSubAgent={(agentId, provider, model) =>
+              void changePaneSubAgentModel(agentId, provider, model)
+            }
+            onConfirmResolveSubAgent={(agentId, approved) =>
+              void resolvePaneSubAgentConfirm(agentId, approved)
+            }
+            onOpenDelivery={() => openDeliveryPanel()}
           />
         </div>
-      ) : null}
-      {!compactSidePanels && pane.spawnsColumnOpen ? (
-        <SpawnsColumn
-          width={spawnsWidth}
-          sessionId={pane.sessionId || undefined}
-          subAgents={paneSubAgents}
-          selectedSubAgent={selectedSubAgent}
-          onResizeStart={startResizeSpawns}
-          onClose={() => dismissSpawnsColumn(pane.id, paneSubAgents.map((s) => s.id))}
-          onCancel={(agentId) => void cancelPaneSubAgent(agentId)}
-          onRetry={(agentId) => void retryPaneSubAgent(agentId)}
-          onModelChange={(agentId, provider, model) => void changePaneSubAgentModel(agentId, provider, model)}
-          onChat={togglePaneSubAgentChat}
-          onOpenRun={openSubAgentDetailFromCluster}
-          anchoredRunIds={anchoredSubAgentRunIds}
-          onConfirmResolve={(agentId, approved) => void resolvePaneSubAgentConfirm(agentId, approved)}
-          tintColor={paneTint}
-        />
       ) : null}
       {!compactSidePanels && pane.runDrawerOpen && pane.runDrawerRunId && pane.sessionId ? (
         <SubAgentRunDrawer
@@ -11523,11 +11499,11 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
               <div
                 className="group absolute -left-[3px] top-0 z-20 h-full w-2 cursor-col-resize"
                 onMouseDown={startResizeTaskspace}
-                title="拖拽调整工作区面板宽度"
+                title="拖拽调整工作台面板宽度"
               >
                 <div className="mx-auto h-full w-px bg-[var(--ui-accent-divider)] transition-all duration-200 group-hover:w-[2px] group-hover:bg-[var(--ui-btn-primary-bg)]" />
               </div>
-              <WorkspacePanel
+              <WorkPanel
                 paneId={pane.id}
                 sessionId={pane.sessionId}
                 activeTaskspaceId={pane.activeTaskspaceId}
@@ -11535,6 +11511,8 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
                 autoRefreshKey={taskspaceAutoRefreshKey}
                 onClose={closeWorkspacePanelOnly}
                 tintColor={paneTint}
+                focusRequest={workPanelFocus}
+                onFocusRequestHandled={() => setWorkPanelFocus(null)}
                 onPickFileForReference={(taskspaceId, path) => {
                   void insertWorkspaceFileReference(taskspaceId, path);
                 }}
@@ -11545,29 +11523,18 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
                 previewOpenRequest={pendingWorkspacePreviewRequest}
                 onPreviewOpenRequestHandled={() => setPendingWorkspacePreviewRequest(null)}
                 onEnsureSessionForWorkspace={materializeLazySession}
-              />
-            </div>
-          ) : null}
-          {pane.spawnsColumnOpen ? (
-            <div
-              className="pointer-events-auto absolute bottom-0 right-0 top-10 z-50 shrink-0 overflow-hidden shadow-[6px_0_24px_rgba(0,0,0,0.28)]"
-              style={{ width: overlaySpawnsWidth, WebkitAppRegion: "no-drag" } as CSSProperties}
-            >
-              <SpawnsColumn
-                width={overlaySpawnsWidth}
-                sessionId={pane.sessionId || undefined}
                 subAgents={paneSubAgents}
                 selectedSubAgent={selectedSubAgent}
-                onResizeStart={startResizeSpawns}
-                onClose={() => dismissSpawnsColumn(pane.id, paneSubAgents.map((s) => s.id))}
-                onCancel={(agentId) => void cancelPaneSubAgent(agentId)}
-                onRetry={(agentId) => void retryPaneSubAgent(agentId)}
-                onModelChange={(agentId, provider, model) => void changePaneSubAgentModel(agentId, provider, model)}
-                onChat={togglePaneSubAgentChat}
-                onOpenRun={openSubAgentDetailFromCluster}
-                anchoredRunIds={anchoredSubAgentRunIds}
-                onConfirmResolve={(agentId, approved) => void resolvePaneSubAgentConfirm(agentId, approved)}
-                tintColor={paneTint}
+                onCancelSubAgent={(agentId) => void cancelPaneSubAgent(agentId)}
+                onRetrySubAgent={(agentId) => void retryPaneSubAgent(agentId)}
+                onChatSubAgent={togglePaneSubAgentChat}
+                onModelChangeSubAgent={(agentId, provider, model) =>
+                  void changePaneSubAgentModel(agentId, provider, model)
+                }
+                onConfirmResolveSubAgent={(agentId, approved) =>
+                  void resolvePaneSubAgentConfirm(agentId, approved)
+                }
+                onOpenDelivery={() => openDeliveryPanel()}
               />
             </div>
           ) : null}
