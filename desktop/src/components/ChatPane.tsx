@@ -2616,6 +2616,8 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
   const [sessionFindOpen, setSessionFindOpen] = useState(false);
   /** One-shot focus for WorkPanel tabs (summary / workspace / terminal / browser). */
   const [workPanelFocus, setWorkPanelFocus] = useState<WorkPanelFocus>(null);
+  /** Trae-style: enlarge work panel to dominate the chat pane (main content). */
+  const [workPanelExpanded, setWorkPanelExpanded] = useState(false);
   const [sessionFindQuery, setSessionFindQuery] = useState("");
   const [sessionFindMatchIndex, setSessionFindMatchIndex] = useState(0);
   const [sessionFindMatchCount, setSessionFindMatchCount] = useState(0);
@@ -9786,6 +9788,11 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
 
   const maxTaskspaceWidth = paneWidth > 0 ? Math.max(240, Math.floor(paneWidth * 0.4)) : 480;
   const minTaskspaceWidth = 220;
+  /**
+   * Trae Work expand: work panel becomes the main canvas (flex-1);
+   * chat collapses to a floating bottom composer — not a squeezed left column.
+   */
+  const workExpandedLayout = workPanelExpanded && workspacePanelOpen;
   const maxSpawnsWidth = paneWidth > 0 ? Math.max(240, Math.floor(paneWidth * 0.42)) : 420;
   const minSpawnsWidth = 220;
   const minRunDrawerWidth = 280;
@@ -10250,9 +10257,14 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
   };
 
   const closeWorkspacePanelOnly = () => {
+    setWorkPanelExpanded(false);
     useAppStore.setState((s) => ({
       panes: s.panes.map((row) => (row.id !== pane.id ? row : { ...row, taskspacePanelOpen: false })),
     }));
+  };
+
+  const toggleWorkPanelExpand = () => {
+    setWorkPanelExpanded((prev) => !prev);
   };
 
   const closeMembersPanelOnly = () => {
@@ -10271,13 +10283,15 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
   const toggleWorkspaceSidePanel = () => {
     if (!compactSidePanels) {
       if (!pane.taskspacePanelOpen) closeHistoryPanelOnly();
+      else setWorkPanelExpanded(false);
       cycleSidePanel(pane.id, "workspace");
       return;
     }
+    const opening = !pane.taskspacePanelOpen;
+    if (!opening) setWorkPanelExpanded(false);
     useAppStore.setState((s) => ({
       panes: s.panes.map((p) => {
         if (p.id !== pane.id) return p;
-        const opening = !p.taskspacePanelOpen;
         return opening
           ? {
               ...p,
@@ -10319,14 +10333,17 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
               row.id !== pane.id ? row : { ...row, historyOpen: false }
             ),
           }));
+        } else {
+          setWorkPanelExpanded(false);
         }
         useAppStore.getState().cycleSidePanel(pane.id, "workspace");
         return;
       }
+      const opening = !current.taskspacePanelOpen;
+      if (!opening) setWorkPanelExpanded(false);
       useAppStore.setState((s) => ({
         panes: s.panes.map((p) => {
           if (p.id !== pane.id) return p;
-          const opening = !p.taskspacePanelOpen;
           return opening
             ? {
                 ...p,
@@ -10391,14 +10408,28 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
   return (
     <div
       ref={paneRef}
-      className="relative agx-chatpane flex h-full min-w-0 flex-1"
+      className={`relative agx-chatpane flex h-full min-w-0 flex-1 ${
+        workExpandedLayout ? "agx-chatpane--work-expanded" : ""
+      }`}
       style={paneTint ? { backgroundColor: paneTint } : undefined}
       onMouseDown={onFocus}
     >
       <div
-        className="agx-chatpane-main-column flex h-full min-w-0 flex-1 flex-col"
-        style={{ minWidth: 280 }}
+        className={
+          workExpandedLayout
+            ? "pointer-events-none absolute inset-x-0 bottom-0 z-[60] flex justify-center px-3 pb-3 sm:px-6"
+            : "agx-chatpane-main-column flex h-full min-w-0 flex-1 flex-col"
+        }
+        style={workExpandedLayout ? undefined : { minWidth: 280 }}
       >
+        <div
+          className={
+            workExpandedLayout
+              ? "pointer-events-auto flex w-full max-w-3xl flex-col overflow-hidden rounded-2xl border border-border bg-surface-card/95 shadow-[0_16px_48px_rgba(0,0,0,0.38)] backdrop-blur-xl"
+              : "contents"
+          }
+        >
+        {!workExpandedLayout ? (
         <div className="agx-pane-toolbar flex h-10 shrink-0 items-center justify-between px-4">
           <div
             className={`flex min-w-0 flex-1 items-center gap-1.5 overflow-hidden ${
@@ -10572,13 +10603,13 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
             >
               <History className="h-[18px] w-[18px]" strokeWidth={1.8} />
             </button>
-            <HoverTip label="展开面板 · ⌘⌃B">
+            <HoverTip label="工作台 · ⌘⌃B">
               <button
                 type="button"
                 className={`agx-topbar-btn !px-[5px] ${workspacePanelOpen ? "agx-topbar-btn--active" : ""}`}
                 onClick={toggleWorkspaceSidePanel}
-                title="展开面板"
-                aria-label="展开面板"
+                title="工作台"
+                aria-label="工作台"
                 aria-pressed={workspacePanelOpen}
               >
                 <PanelRight className="h-[18px] w-[18px]" strokeWidth={1.8} />
@@ -10593,7 +10624,10 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
             </button>
           </div>
         </div>
+        ) : null}
 
+        {!workExpandedLayout ? (
+        <>
         <div className="relative min-h-0 min-w-0 flex-1">
           <div
             ref={listRef}
@@ -10707,10 +10741,16 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
             </div>
           </div>
         )}
+        </>
+        ) : null}
 
         {/* 外层 px 与列表 agx-pane-message-list 一致，内层 max-w-4xl 单独一层，避免「padding 吃进 max-width」导致输入框比气泡窄一截 */}
-        <div className="shrink-0 px-4 pt-2.5 pb-4">
-          <div className="agx-pane-composer-shell mx-auto min-w-0 w-full max-w-4xl">
+        <div className={`shrink-0 ${workExpandedLayout ? "px-3 pt-2.5 pb-3" : "px-4 pt-2.5 pb-4"}`}>
+          <div
+            className={`agx-pane-composer-shell mx-auto min-w-0 w-full ${
+              workExpandedLayout ? "max-w-none" : "max-w-4xl"
+            }`}
+          >
           <StickyTaskBar
             messages={pane.messages ?? []}
             liveness={taskLiveness}
@@ -11369,6 +11409,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
           ) : null}
           </div>
         </div>
+        </div>
       </div>
 
       {!compactSidePanels && isGroupPane && pane.membersPanelOpen ? (
@@ -11389,14 +11430,23 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
         </div>
       ) : null}
       {!compactSidePanels && workspacePanelOpen ? (
-        <div className="relative h-full shrink-0 overflow-hidden border-l border-border" style={{ width: taskspaceWidth }}>
-          <div
-            className="group absolute -left-[3px] top-0 z-20 h-full w-2 cursor-col-resize"
-            onMouseDown={startResizeTaskspace}
-            title="拖拽调整工作台面板宽度"
-          >
-            <div className="mx-auto h-full w-px bg-[var(--ui-accent-divider)] transition-all duration-200 group-hover:w-[2px] group-hover:bg-[var(--ui-btn-primary-bg)]" />
-          </div>
+        <div
+          className={
+            workExpandedLayout
+              ? "relative h-full min-w-0 flex-1 overflow-hidden"
+              : "relative h-full shrink-0 overflow-hidden border-l border-border"
+          }
+          style={workExpandedLayout ? undefined : { width: taskspaceWidth }}
+        >
+          {!workExpandedLayout ? (
+            <div
+              className="group absolute -left-[3px] top-0 z-20 h-full w-2 cursor-col-resize"
+              onMouseDown={startResizeTaskspace}
+              title="拖拽调整工作台面板宽度"
+            >
+              <div className="mx-auto h-full w-px bg-[var(--ui-accent-divider)] transition-all duration-200 group-hover:w-[2px] group-hover:bg-[var(--ui-btn-primary-bg)]" />
+            </div>
+          ) : null}
           <WorkPanel
             paneId={pane.id}
             sessionId={pane.sessionId}
@@ -11404,6 +11454,8 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
             onActiveTaskspaceChange={(taskspaceId) => setActiveTaskspace(pane.id, taskspaceId)}
             autoRefreshKey={taskspaceAutoRefreshKey}
             onClose={closeWorkspacePanelOnly}
+            expanded={workPanelExpanded}
+            onToggleExpand={toggleWorkPanelExpand}
             tintColor={paneTint}
             focusRequest={workPanelFocus}
             onFocusRequestHandled={() => setWorkPanelFocus(null)}
@@ -11493,16 +11545,26 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
           ) : null}
           {workspacePanelOpen ? (
             <div
-              className="pointer-events-auto absolute bottom-0 right-0 top-10 z-50 shrink-0 overflow-hidden border-l border-border bg-surface-base shadow-[6px_0_24px_rgba(0,0,0,0.28)]"
-              style={{ width: overlayTaskspaceWidth, WebkitAppRegion: "no-drag" } as CSSProperties}
+              className={
+                workExpandedLayout
+                  ? "pointer-events-auto absolute inset-0 z-50 overflow-hidden bg-surface-base"
+                  : "pointer-events-auto absolute bottom-0 right-0 top-10 z-50 shrink-0 overflow-hidden border-l border-border bg-surface-base shadow-[6px_0_24px_rgba(0,0,0,0.28)]"
+              }
+              style={
+                workExpandedLayout
+                  ? ({ WebkitAppRegion: "no-drag" } as CSSProperties)
+                  : ({ width: overlayTaskspaceWidth, WebkitAppRegion: "no-drag" } as CSSProperties)
+              }
             >
-              <div
-                className="group absolute -left-[3px] top-0 z-20 h-full w-2 cursor-col-resize"
-                onMouseDown={startResizeTaskspace}
-                title="拖拽调整工作台面板宽度"
-              >
-                <div className="mx-auto h-full w-px bg-[var(--ui-accent-divider)] transition-all duration-200 group-hover:w-[2px] group-hover:bg-[var(--ui-btn-primary-bg)]" />
-              </div>
+              {!workExpandedLayout ? (
+                <div
+                  className="group absolute -left-[3px] top-0 z-20 h-full w-2 cursor-col-resize"
+                  onMouseDown={startResizeTaskspace}
+                  title="拖拽调整工作台面板宽度"
+                >
+                  <div className="mx-auto h-full w-px bg-[var(--ui-accent-divider)] transition-all duration-200 group-hover:w-[2px] group-hover:bg-[var(--ui-btn-primary-bg)]" />
+                </div>
+              ) : null}
               <WorkPanel
                 paneId={pane.id}
                 sessionId={pane.sessionId}
@@ -11510,6 +11572,8 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
                 onActiveTaskspaceChange={(taskspaceId) => setActiveTaskspace(pane.id, taskspaceId)}
                 autoRefreshKey={taskspaceAutoRefreshKey}
                 onClose={closeWorkspacePanelOnly}
+                expanded={workPanelExpanded}
+                onToggleExpand={toggleWorkPanelExpand}
                 tintColor={paneTint}
                 focusRequest={workPanelFocus}
                 onFocusRequestHandled={() => setWorkPanelFocus(null)}

@@ -16,6 +16,8 @@ import {
   FolderOpen,
   Globe,
   ListTodo,
+  Maximize2,
+  Minimize2,
   PanelRight,
   Plus,
   Terminal as TerminalIcon,
@@ -26,6 +28,7 @@ import { WorkspacePanel } from "../WorkspacePanel";
 import type { WorkspacePreviewOpenRequest, WorkspacePreviewQuotePayload } from "../workspace/workspace-preview-types";
 import { TerminalEmbed } from "../TerminalEmbed";
 import { SubAgentCard } from "../SubAgentCard";
+import { HoverTip } from "../ds/HoverTip";
 
 export type WorkPanelTabKind = "summary" | "workspace" | "terminal" | "browser";
 
@@ -51,6 +54,9 @@ type Props = {
   autoRefreshKey?: number;
   tintColor?: string;
   onClose: () => void;
+  /** Trae-style: enlarge work panel to dominate the pane (main content). */
+  expanded?: boolean;
+  onToggleExpand?: () => void;
   focusRequest?: WorkPanelFocus;
   onFocusRequestHandled?: () => void;
   onPickFileForReference?: (taskspaceId: string, path: string) => void;
@@ -149,6 +155,8 @@ export function WorkPanel({
   autoRefreshKey,
   tintColor,
   onClose,
+  expanded = false,
+  onToggleExpand,
   focusRequest,
   onFocusRequestHandled,
   onPickFileForReference,
@@ -174,7 +182,8 @@ export function WorkPanel({
     (s) => s.panes.find((p) => p.id === paneId)?.activeTerminalTabId ?? null
   );
 
-  const [activeKind, setActiveKind] = useState<WorkPanelTabKind>("summary");
+  const [summaryTabOpen, setSummaryTabOpen] = useState(true);
+  const [activeKind, setActiveKind] = useState<WorkPanelTabKind | null>("summary");
   const [activeBrowserId, setActiveBrowserId] = useState<string | null>(null);
   const [browserTabs, setBrowserTabs] = useState<BrowserTab[]>([]);
   const [workspaceTabOpen, setWorkspaceTabOpen] = useState(false);
@@ -193,9 +202,31 @@ export function WorkPanel({
     [browserTabs, activeBrowserId]
   );
 
+  const hasAnyTab =
+    summaryTabOpen || workspaceTabOpen || terminalTabs.length > 0 || browserTabs.length > 0;
+
+  const resolveFallbackKind = (opts?: {
+    excludeSummary?: boolean;
+    excludeWorkspace?: boolean;
+    excludeTerminalId?: string;
+    excludeBrowserId?: string;
+  }): WorkPanelTabKind | null => {
+    if (!opts?.excludeSummary && summaryTabOpen) return "summary";
+    if (!opts?.excludeWorkspace && workspaceTabOpen) return "workspace";
+    const nextTerminal = terminalTabs.find((t) => t.id !== opts?.excludeTerminalId);
+    if (nextTerminal) return "terminal";
+    const nextBrowser = browserTabs.find((t) => t.id !== opts?.excludeBrowserId);
+    if (nextBrowser) {
+      setActiveBrowserId(nextBrowser.id);
+      return "browser";
+    }
+    return null;
+  };
+
   useEffect(() => {
     if (!focusRequest) return;
     if (focusRequest.kind === "summary") {
+      setSummaryTabOpen(true);
       setActiveKind("summary");
     } else if (focusRequest.kind === "workspace") {
       setWorkspaceTabOpen(true);
@@ -232,6 +263,19 @@ export function WorkPanel({
       setPlusPos({ left: Math.max(8, rect.left), top: rect.bottom + 4 });
     }
     setPlusOpen((v) => !v);
+  };
+
+  const openSummaryTab = () => {
+    setSummaryTabOpen(true);
+    setActiveKind("summary");
+    closePlus();
+  };
+
+  const closeSummaryTab = () => {
+    setSummaryTabOpen(false);
+    if (activeKind === "summary") {
+      setActiveKind(resolveFallbackKind({ excludeSummary: true }));
+    }
   };
 
   const openWorkspaceTab = () => {
@@ -280,15 +324,14 @@ export function WorkPanel({
   };
 
   const closeBrowserTab = (tabId: string) => {
-    setBrowserTabs((prev) => {
-      const next = prev.filter((t) => t.id !== tabId);
-      if (activeBrowserId === tabId) {
-        const last = next[next.length - 1];
-        setActiveBrowserId(last?.id ?? null);
-        if (!last) setActiveKind("summary");
+    const next = browserTabs.filter((t) => t.id !== tabId);
+    setBrowserTabs(next);
+    if (activeBrowserId === tabId) {
+      setActiveBrowserId(next[next.length - 1]?.id ?? null);
+      if (activeKind === "browser") {
+        setActiveKind(resolveFallbackKind({ excludeBrowserId: tabId }));
       }
-      return next;
-    });
+    }
   };
 
   const navigateBrowser = (tabId: string) => {
@@ -318,10 +361,18 @@ export function WorkPanel({
     plusOpen && plusPos
       ? createPortal(
           <div
-            className="fixed z-[120] min-w-[160px] overflow-hidden rounded-xl border border-border bg-surface-card py-1 shadow-lg"
+            className="fixed z-[120] min-w-[148px] overflow-hidden rounded-xl border border-border bg-surface-card py-1.5 shadow-lg"
             style={{ left: plusPos.left, top: plusPos.top }}
             onMouseDown={(e) => e.stopPropagation()}
           >
+            <button
+              type="button"
+              className="flex w-full items-center gap-2.5 px-3 py-2 text-left text-[13px] text-text-strong hover:bg-surface-hover"
+              onClick={openSummaryTab}
+            >
+              <ListTodo className="h-4 w-4 text-text-subtle" strokeWidth={1.7} />
+              任务摘要
+            </button>
             <button
               type="button"
               className="flex w-full items-center gap-2.5 px-3 py-2 text-left text-[13px] text-text-strong hover:bg-surface-hover"
@@ -351,26 +402,71 @@ export function WorkPanel({
         )
       : null;
 
+  const startEntries = [
+    {
+      key: "summary",
+      icon: <ListTodo className="h-5 w-5 shrink-0 text-text-subtle" strokeWidth={1.6} />,
+      title: "任务摘要",
+      subtitle: "查看任务执行进展、产物汇总及关联信息",
+      onClick: openSummaryTab,
+    },
+    {
+      key: "browser",
+      icon: <Globe className="h-5 w-5 shrink-0 text-text-subtle" strokeWidth={1.6} />,
+      title: "浏览器",
+      subtitle: "浏览及调试网页",
+      onClick: openBrowserTab,
+    },
+    {
+      key: "terminal",
+      icon: <TerminalIcon className="h-5 w-5 shrink-0 text-text-subtle" strokeWidth={1.6} />,
+      title: "终端",
+      subtitle: "运行命令及脚本",
+      onClick: openTerminalTab,
+    },
+  ] as const;
+
   return (
     <div className="flex h-full min-h-0 flex-col bg-surface-sidebar">
       <div className="flex h-10 shrink-0 items-center gap-1 border-b border-border px-1.5">
-        <button
-          type="button"
-          className={`flex h-7 max-w-[120px] items-center gap-1.5 rounded-md px-2 text-[12px] ${
-            activeKind === "summary"
-              ? "bg-surface-card-strong text-text-strong"
-              : "text-text-subtle hover:bg-surface-hover hover:text-text-strong"
-          }`}
-          onClick={() => setActiveKind("summary")}
-        >
-          <ListTodo className="h-3.5 w-3.5 shrink-0" strokeWidth={1.8} />
-          <span className="truncate">任务摘要</span>
-        </button>
+        {summaryTabOpen ? (
+          <button
+            type="button"
+            className={`flex h-7 max-w-[132px] items-center gap-1.5 rounded-full px-1.5 pr-2.5 text-[12px] ${
+              activeKind === "summary"
+                ? "bg-surface-card-strong text-text-strong"
+                : "bg-surface-hover/70 text-text-subtle hover:bg-surface-hover hover:text-text-strong"
+            }`}
+            onClick={() => setActiveKind("summary")}
+          >
+            <span
+              role="button"
+              tabIndex={0}
+              className="inline-flex h-[18px] w-[18px] shrink-0 items-center justify-center rounded-full bg-text-faint/40 text-white transition hover:bg-text-faint/60"
+              onClick={(e) => {
+                e.stopPropagation();
+                closeSummaryTab();
+              }}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" || e.key === " ") {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  closeSummaryTab();
+                }
+              }}
+              aria-label="关闭任务摘要"
+              title="关闭任务摘要"
+            >
+              <X className="h-2.5 w-2.5" strokeWidth={2.4} />
+            </span>
+            <span className="truncate">任务摘要</span>
+          </button>
+        ) : null}
 
         {workspaceTabOpen ? (
           <button
             type="button"
-            className={`flex h-7 max-w-[110px] items-center gap-1.5 rounded-md px-2 text-[12px] ${
+            className={`flex h-7 max-w-[110px] items-center gap-1.5 rounded-full px-2 text-[12px] ${
               activeKind === "workspace"
                 ? "bg-surface-card-strong text-text-strong"
                 : "text-text-subtle hover:bg-surface-hover hover:text-text-strong"
@@ -386,14 +482,18 @@ export function WorkPanel({
               onClick={(e) => {
                 e.stopPropagation();
                 setWorkspaceTabOpen(false);
-                if (activeKind === "workspace") setActiveKind("summary");
+                if (activeKind === "workspace") {
+                  setActiveKind(resolveFallbackKind({ excludeWorkspace: true }));
+                }
               }}
               onKeyDown={(e) => {
                 if (e.key === "Enter" || e.key === " ") {
                   e.preventDefault();
                   e.stopPropagation();
                   setWorkspaceTabOpen(false);
-                  if (activeKind === "workspace") setActiveKind("summary");
+                  if (activeKind === "workspace") {
+                    setActiveKind(resolveFallbackKind({ excludeWorkspace: true }));
+                  }
                 }
               }}
               aria-label="关闭工作区标签"
@@ -407,7 +507,7 @@ export function WorkPanel({
           <button
             key={tab.id}
             type="button"
-            className={`flex h-7 max-w-[110px] items-center gap-1.5 rounded-md px-2 text-[12px] ${
+            className={`flex h-7 max-w-[110px] items-center gap-1.5 rounded-full px-2 text-[12px] ${
               activeKind === "terminal" && activeTerminalTabId === tab.id
                 ? "bg-surface-card-strong text-text-strong"
                 : "text-text-subtle hover:bg-surface-hover hover:text-text-strong"
@@ -427,7 +527,7 @@ export function WorkPanel({
                 e.stopPropagation();
                 removePaneTerminalTab(paneId, tab.id);
                 if (activeKind === "terminal" && activeTerminalTabId === tab.id) {
-                  setActiveKind("summary");
+                  setActiveKind(resolveFallbackKind({ excludeTerminalId: tab.id }));
                 }
               }}
               onKeyDown={(e) => {
@@ -436,7 +536,7 @@ export function WorkPanel({
                   e.stopPropagation();
                   removePaneTerminalTab(paneId, tab.id);
                   if (activeKind === "terminal" && activeTerminalTabId === tab.id) {
-                    setActiveKind("summary");
+                    setActiveKind(resolveFallbackKind({ excludeTerminalId: tab.id }));
                   }
                 }
               }}
@@ -451,7 +551,7 @@ export function WorkPanel({
           <button
             key={tab.id}
             type="button"
-            className={`flex h-7 max-w-[120px] items-center gap-1.5 rounded-md px-2 text-[12px] ${
+            className={`flex h-7 max-w-[120px] items-center gap-1.5 rounded-full px-2 text-[12px] ${
               activeKind === "browser" && activeBrowserId === tab.id
                 ? "bg-surface-card-strong text-text-strong"
                 : "text-text-subtle hover:bg-surface-hover hover:text-text-strong"
@@ -489,7 +589,7 @@ export function WorkPanel({
           ref={plusBtnRef}
           type="button"
           className="agx-topbar-btn !px-[5px]"
-          title="打开终端 / 浏览器 / 工作区"
+          title="打开任务摘要 / 浏览器 / 终端 / 工作区"
           aria-label="新建工作台标签"
           onClick={openPlusMenu}
         >
@@ -498,21 +598,66 @@ export function WorkPanel({
 
         <div className="flex-1" />
 
-        <button
-          type="button"
-          className="agx-topbar-btn !px-[5px]"
-          onClick={onClose}
-          title="收起面板"
-          aria-label="收起面板"
-        >
-          <PanelRight className="h-[18px] w-[18px]" strokeWidth={1.8} />
-        </button>
+        {onToggleExpand ? (
+          <HoverTip label={expanded ? "恢复面板宽度" : "展开面板"}>
+            <button
+              type="button"
+              className={`agx-topbar-btn !px-[5px] ${expanded ? "agx-topbar-btn--active" : ""}`}
+              onClick={onToggleExpand}
+              title={expanded ? "恢复面板宽度" : "展开面板"}
+              aria-label={expanded ? "恢复面板宽度" : "展开面板"}
+              aria-pressed={expanded}
+            >
+              {expanded ? (
+                <Minimize2 className="h-[16px] w-[16px]" strokeWidth={1.8} />
+              ) : (
+                <Maximize2 className="h-[16px] w-[16px]" strokeWidth={1.8} />
+              )}
+            </button>
+          </HoverTip>
+        ) : null}
+
+        <HoverTip label="隐藏工具面板">
+          <button
+            type="button"
+            className="agx-topbar-btn !px-[5px]"
+            onClick={onClose}
+            title="隐藏工具面板"
+            aria-label="隐藏工具面板"
+          >
+            <PanelRight className="h-[18px] w-[18px]" strokeWidth={1.8} />
+          </button>
+        </HoverTip>
       </div>
 
       {plusMenu}
 
       <div className="min-h-0 flex-1 overflow-hidden">
-        {activeKind === "summary" ? (
+        {!hasAnyTab ? (
+          <div className="flex h-full flex-col px-8 pt-16">
+            <div className="text-[15px] text-text-faint">从这里开始</div>
+            <div className="mt-6 flex max-w-[360px] flex-col gap-5">
+              {startEntries.map((entry) => (
+                <button
+                  key={entry.key}
+                  type="button"
+                  className="flex items-start gap-3 rounded-lg px-1 py-1 text-left transition hover:bg-surface-hover/50"
+                  onClick={entry.onClick}
+                >
+                  <div className="mt-0.5">{entry.icon}</div>
+                  <div className="min-w-0">
+                    <div className="text-[14px] font-medium text-text-strong">{entry.title}</div>
+                    <div className="mt-0.5 text-[12px] leading-relaxed text-text-faint">
+                      {entry.subtitle}
+                    </div>
+                  </div>
+                </button>
+              ))}
+            </div>
+          </div>
+        ) : null}
+
+        {hasAnyTab && activeKind === "summary" && summaryTabOpen ? (
           <div className="h-full overflow-y-auto">
             <Section
               id="todo"
@@ -595,7 +740,7 @@ export function WorkPanel({
           </div>
         ) : null}
 
-        {activeKind === "workspace" && workspaceTabOpen ? (
+        {hasAnyTab && activeKind === "workspace" && workspaceTabOpen ? (
           <WorkspacePanel
             paneId={paneId}
             sessionId={sessionId}
@@ -613,7 +758,7 @@ export function WorkPanel({
           />
         ) : null}
 
-        {activeKind === "terminal" ? (
+        {hasAnyTab && activeKind === "terminal" ? (
           <div className="flex h-full min-h-0 flex-col">
             {terminalTabs.length === 0 ? (
               <EmptyBlock
@@ -633,7 +778,7 @@ export function WorkPanel({
           </div>
         ) : null}
 
-        {activeKind === "browser" && activeBrowser ? (
+        {hasAnyTab && activeKind === "browser" && activeBrowser ? (
           <div className="flex h-full min-h-0 flex-col">
             <form
               className="flex shrink-0 items-center gap-1.5 border-b border-border px-2 py-1.5"
