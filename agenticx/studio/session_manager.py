@@ -513,7 +513,7 @@ class SessionManager:
         )
         self._restore_managed_metadata(sid, managed)
         self._ensure_default_taskspace(managed)
-        self._sync_taskspaces_with_global(managed)
+        # Per-session workspaces: do not pull avatar/meta global_workspaces into new sessions.
         self.align_meta_session_workspace(managed)
         self._sessions[sid] = managed
         return managed
@@ -1469,7 +1469,6 @@ class SessionManager:
         if managed is None:
             return []
         self._ensure_default_taskspace(managed)
-        self._sync_taskspaces_with_global(managed)
         return [dict(item) for item in managed.taskspaces]
 
     def add_taskspace(
@@ -1479,13 +1478,18 @@ class SessionManager:
         path: str | None = None,
         label: str | None = None,
     ) -> dict[str, str]:
+        """Attach a folder path to this session's visible workspace only.
+
+        Paths are references (not copies). Visibility is per-session: adding or
+        removing here must not mutate sibling conversations for the same avatar.
+        """
         managed = self.get(session_id, touch=False)
         if managed is None:
             raise KeyError("session not found")
         self._ensure_default_taskspace(managed)
-        self._sync_taskspaces_with_global(managed)
-        scope_key = self._taskspace_scope_key_for_managed(managed)
         default_taskspace = self._get_taskspace(managed, "default")
+        if default_taskspace is None:
+            raise RuntimeError("default taskspace missing")
         resolved_path = (
             self._resolve_taskspace_path(path)
             if path and str(path).strip()
@@ -1494,9 +1498,9 @@ class SessionManager:
         for item in managed.taskspaces:
             if item.get("path") == resolved_path:
                 return dict(item)
-        globals_rows = self._load_global_taskspaces(scope_key=scope_key)
         limit = self._taskspace_limit()
-        if len(globals_rows) >= max(0, limit - 1):
+        non_default_count = sum(1 for item in managed.taskspaces if item.get("id") != "default")
+        if non_default_count >= max(0, limit - 1):
             raise ValueError(f"taskspace limit reached ({limit})")
         clean_label = (label or "").strip() or Path(resolved_path).name or "taskspace"
         taskspace = {
@@ -1504,39 +1508,24 @@ class SessionManager:
             "label": clean_label,
             "path": resolved_path,
         }
-        globals_rows.append(taskspace)
-        self._save_global_taskspaces(globals_rows, scope_key=scope_key)
-        self._sync_all_sessions_from_global(scope_key=scope_key)
-        for sid, each in self._sessions.items():
-            if self._taskspace_scope_key_for_managed(each) != scope_key:
-                continue
-            # Persist the new taskspace list but do NOT bump updated_at: workspace
-            # mutations are scope-level config changes, not session activity. Touching
-            # updated_at here would bulk-pollute Today bucketing for all sibling
-            # sessions (see plan 2026-05-28-near-history-bucket-taskspace-pollution).
-            self._persist_session_state(sid, each.studio_session)
+        managed.taskspaces = list(managed.taskspaces) + [taskspace]
+        # Do not bump updated_at: workspace mutations are not chat activity.
+        self._persist_session_state(session_id, managed.studio_session)
         return dict(taskspace)
 
     def remove_taskspace(self, session_id: str, taskspace_id: str) -> bool:
+        """Detach a folder from this session's visible workspace only."""
         managed = self.get(session_id, touch=False)
         if managed is None:
             return False
-        if str(taskspace_id).strip() == "default":
+        tid = str(taskspace_id).strip()
+        if tid == "default":
             return False
-        scope_key = self._taskspace_scope_key_for_managed(managed)
-        globals_rows = self._load_global_taskspaces(scope_key=scope_key)
-        before = len(globals_rows)
-        globals_rows = [item for item in globals_rows if item.get("id") != taskspace_id]
-        if len(globals_rows) == before:
+        before = len(managed.taskspaces)
+        managed.taskspaces = [item for item in managed.taskspaces if item.get("id") != tid]
+        if len(managed.taskspaces) == before:
             return False
-        self._save_global_taskspaces(globals_rows, scope_key=scope_key)
-        self._sync_all_sessions_from_global(scope_key=scope_key)
-        for sid, each in self._sessions.items():
-            if self._taskspace_scope_key_for_managed(each) != scope_key:
-                continue
-            # See add_taskspace: workspace mutation must not bump updated_at,
-            # otherwise every sibling session would be shoved into Today.
-            self._persist_session_state(sid, each.studio_session)
+        self._persist_session_state(session_id, managed.studio_session)
         return True
 
     def list_taskspace_files(
@@ -1549,7 +1538,6 @@ class SessionManager:
         if managed is None:
             raise KeyError("session not found")
         self._ensure_default_taskspace(managed)
-        self._sync_taskspaces_with_global(managed)
         taskspace = self._get_taskspace(managed, taskspace_id)
         if taskspace is None:
             raise KeyError("taskspace not found")
@@ -1581,7 +1569,6 @@ class SessionManager:
         if managed is None:
             raise KeyError("session not found")
         self._ensure_default_taskspace(managed)
-        self._sync_taskspaces_with_global(managed)
         taskspace = self._get_taskspace(managed, taskspace_id)
         if taskspace is None:
             raise KeyError("taskspace not found")
@@ -2856,14 +2843,14 @@ class SessionManager:
         avatar_id: Optional[str],
         avatar_name: Optional[str] = None,
     ) -> None:
-        """Bind session avatar identity and immediately rescope taskspaces.
+        """Bind session avatar identity without mutating per-session workspaces.
 
-        New sessions are created before avatar_id is known in some API flows. If we only
-        set avatar_id later without re-sync, taskspaces can stay in the wrong scope.
+        Attached folders are owned by the session metadata. Binding an avatar must
+        not pull or replace that list from legacy global_workspaces.json scopes.
         """
         managed.avatar_id = normalize_session_avatar_binding(avatar_id)
         managed.avatar_name = (str(avatar_name).strip() or None) if avatar_name is not None else None
-        self._sync_taskspaces_with_global(managed)
+        self._ensure_default_taskspace(managed)
 
     def _sanitize_taskspaces(self, session_id: str, payload: Any) -> list[dict[str, str]]:
         limit = self._taskspace_limit()

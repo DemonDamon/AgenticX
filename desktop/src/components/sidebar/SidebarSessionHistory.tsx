@@ -5,6 +5,7 @@ import {
   GitBranch,
   ListChecks,
   ListFilter,
+  ListTree,
   MessageSquare,
   MoreHorizontal,
   Pencil,
@@ -45,6 +46,7 @@ import {
   type SidebarSessionRow,
 } from "../../utils/sidebar-session-history";
 import { HoverTip } from "../ds/HoverTip";
+import { SidebarSessionFileManage } from "./SidebarSessionFileManage";
 
 type MoreMenuState = {
   sessionId: string;
@@ -145,6 +147,11 @@ export function SidebarSessionHistory() {
   const [moreMenu, setMoreMenu] = useState<MoreMenuState | null>(null);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editingName, setEditingName] = useState("");
+  /** Trae-style: history list → per-session file manage view. */
+  const [fileManageTarget, setFileManageTarget] = useState<{
+    sessionId: string;
+    paneId: string;
+  } | null>(null);
   const filterBtnRef = useRef<HTMLButtonElement>(null);
   const filterMenuRef = useRef<HTMLDivElement>(null);
   const moreMenuRef = useRef<HTMLDivElement>(null);
@@ -213,6 +220,22 @@ export function SidebarSessionHistory() {
       window.clearInterval(bindTimer);
     };
   }, [loadSessions, loadBindings]);
+
+  useEffect(() => {
+    if (!fileManageTarget) return;
+    if (sessions.length === 0) return;
+    const stillExists = sessions.some((s) => s.session_id === fileManageTarget.sessionId);
+    if (!stillExists) setFileManageTarget(null);
+  }, [fileManageTarget, sessions]);
+
+  useEffect(() => {
+    if (!fileManageTarget) return;
+    const onEsc = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setFileManageTarget(null);
+    };
+    window.addEventListener("keydown", onEsc);
+    return () => window.removeEventListener("keydown", onEsc);
+  }, [fileManageTarget]);
 
   useEffect(() => {
     try {
@@ -518,7 +541,7 @@ export function SidebarSessionHistory() {
   };
 
   const openSession = useCallback(
-    async (row: SidebarSessionRow, forcePaneId?: string) => {
+    async (row: SidebarSessionRow, forcePaneId?: string): Promise<string | null> => {
       setMainView("chat");
       const avatarId = String(row.avatar_id ?? "").trim() || null;
       const avatarName = resolveSidebarAvatarChipName(row, avatarNameById);
@@ -535,7 +558,7 @@ export function SidebarSessionHistory() {
         paneId = addPane(avatarId, avatarName, "");
         pane = useAppStore.getState().panes.find((p) => p.id === paneId);
       }
-      if (!paneId || !pane) return;
+      if (!paneId || !pane) return null;
 
       setActivePaneId(paneId);
       setActiveAvatarId(avatarId);
@@ -553,7 +576,7 @@ export function SidebarSessionHistory() {
         setPaneSessionMode(paneId, row.session_mode);
       }
 
-      if (isSameSession && existingMessages.length > 0) return;
+      if (isSameSession && existingMessages.length > 0) return paneId;
 
       const paneStillOn = (sid: string) =>
         isPaneStillOnSession(useAppStore.getState().panes, paneId, sid);
@@ -576,13 +599,13 @@ export function SidebarSessionHistory() {
         setPaneMessages(paneId, cached);
         setPaneLoadingMessages(paneId, false);
         resetPaneMessagePaging(paneId);
-        return;
+        return paneId;
       }
 
       const tailCached = getCachedSessionTail(row.session_id);
       if (tailCached && tailCached.messages.length > 0) {
         applyTailEntry(paneId, tailCached);
-        return;
+        return paneId;
       }
 
       setPaneLoadingMessages(paneId, true);
@@ -596,7 +619,7 @@ export function SidebarSessionHistory() {
             cacheSessionMessages(row.session_id, entry.messages);
           }
           if (paneStillOn(row.session_id)) applyTailEntry(paneId, entry);
-          return;
+          return paneId;
         }
       } catch {
         /* fallback below */
@@ -604,7 +627,7 @@ export function SidebarSessionHistory() {
 
       try {
         const result = await window.agenticxDesktop.loadSessionMessages(row.session_id);
-        if (!paneStillOn(row.session_id)) return;
+        if (!paneStillOn(row.session_id)) return paneId;
         if (result.ok && Array.isArray(result.messages)) {
           const mapped: Message[] = result.messages.map((item, index) =>
             mapLoadedSessionMessage(item as LoadedSessionMessage, row.session_id, index)
@@ -612,7 +635,7 @@ export function SidebarSessionHistory() {
           cacheSessionMessages(row.session_id, mapped);
           setPaneMessages(paneId, mapped);
           resetPaneMessagePaging(paneId);
-          return;
+          return paneId;
         }
       } catch (err) {
         console.warn("[SidebarSessionHistory] openSession load failed", err);
@@ -620,6 +643,7 @@ export function SidebarSessionHistory() {
         if (paneStillOn(row.session_id)) setPaneLoadingMessages(paneId, false);
       }
       if (paneStillOn(row.session_id)) setPaneMessages(paneId, []);
+      return paneId;
     },
     [
       addPane,
@@ -637,6 +661,44 @@ export function SidebarSessionHistory() {
       setPaneSessionMode,
     ]
   );
+
+  /** Fast path: bind pane/session without waiting for message load (card can slide immediately). */
+  const ensurePaneForRow = (row: SidebarSessionRow): string | null => {
+    setMainView("chat");
+    const avatarId = String(row.avatar_id ?? "").trim() || null;
+    const avatarName = resolveSidebarAvatarChipName(row, avatarNameById);
+    const state = useAppStore.getState();
+    let pane = state.panes.find((p) => {
+      const pa = String(p.avatarId ?? "").trim();
+      return pa === (avatarId ?? "");
+    });
+    let paneId = pane?.id ?? "";
+    if (!pane) {
+      paneId = addPane(avatarId, avatarName, "");
+      pane = useAppStore.getState().panes.find((p) => p.id === paneId);
+    }
+    if (!paneId || !pane) return null;
+    setActivePaneId(paneId);
+    setActiveAvatarId(avatarId);
+    rememberSessionForAvatar(avatarId, row.session_id);
+    setPaneSessionId(paneId, row.session_id, {
+      provider: row.provider,
+      model: row.model,
+    });
+    if (row.session_mode === "code_dev" || row.session_mode === "daily_office") {
+      setPaneSessionMode(paneId, row.session_mode);
+    }
+    return paneId;
+  };
+
+  const openFileManage = (row: SidebarSessionRow) => {
+    setMoreMenu(null);
+    const paneId = ensurePaneForRow(row);
+    if (!paneId) return;
+    // Slide card first; hydrate chat history in the background.
+    setFileManageTarget({ sessionId: row.session_id, paneId });
+    void openSession(row, paneId);
+  };
 
   const commitRename = async (row: SidebarSessionRow) => {
     const next = editingName.trim();
@@ -684,6 +746,9 @@ export function SidebarSessionHistory() {
     if (!confirmResult.confirmed) return;
     const result = await api.deleteSession(row.session_id);
     if (!result.ok) return;
+    if (fileManageTarget?.sessionId === row.session_id) {
+      setFileManageTarget(null);
+    }
     clearDeletedSessionRefsInPanes([row.session_id]);
     dropCachedSessionMessages(row.session_id);
     bumpSessionCatalogRevision();
@@ -771,6 +836,14 @@ export function SidebarSessionHistory() {
         setWechatBoundId(target);
       }
       await loadBindings();
+      return;
+    }
+    if (action === "file_manage") {
+      void openFileManage(row);
+      return;
+    }
+    if (action === "delete") {
+      void deleteOneSession(row);
       return;
     }
     if (action === "archive_prior") {
@@ -912,17 +985,17 @@ export function SidebarSessionHistory() {
                   <Pin className="h-3.5 w-3.5" strokeWidth={1.8} />
                 </button>
               </HoverTip>
-              <HoverTip label="删除">
+              <HoverTip label="文件管理">
                 <button
                   type="button"
-                  className="inline-flex h-6 w-6 items-center justify-center rounded-md text-text-muted hover:bg-surface-card hover:text-rose-400"
+                  className="inline-flex h-6 w-6 items-center justify-center rounded-md text-text-muted hover:bg-surface-card hover:text-text-strong"
                   onClick={(e) => {
                     e.stopPropagation();
-                    void deleteOneSession(row);
+                    void openFileManage(row);
                   }}
-                  aria-label="删除"
+                  aria-label="文件管理"
                 >
-                  <Trash2 className="h-3.5 w-3.5" strokeWidth={1.8} />
+                  <ListTree className="h-3.5 w-3.5" strokeWidth={1.8} />
                 </button>
               </HoverTip>
             </div>
@@ -968,11 +1041,19 @@ export function SidebarSessionHistory() {
     </div>
   );
 
+  const showFileManage = !!fileManageTarget;
+
   return (
     <div
-      className="flex min-h-0 flex-1 flex-col"
+      className="relative flex min-h-0 flex-1 flex-col overflow-hidden"
       style={{ borderTop: "1px solid var(--border-muted)" }}
     >
+      <div
+        className={`absolute inset-0 flex min-h-0 flex-col transition-transform duration-300 ease-[cubic-bezier(0.22,1,0.36,1)] will-change-transform ${
+          showFileManage ? "-translate-x-full pointer-events-none" : "translate-x-0"
+        }`}
+        aria-hidden={showFileManage}
+      >
       <div className="flex items-center gap-1 px-2 pb-1 pt-2">
         <div className="min-w-0 flex-1 truncate px-1 text-[11px] font-medium text-text-faint">
           历史对话
@@ -1181,6 +1262,22 @@ export function SidebarSessionHistory() {
           </button>
         ) : null}
       </div>
+      </div>
+
+      <div
+        className={`absolute inset-0 flex min-h-0 flex-col transition-transform duration-300 ease-[cubic-bezier(0.22,1,0.36,1)] will-change-transform ${
+          showFileManage ? "translate-x-0" : "translate-x-full pointer-events-none"
+        }`}
+        aria-hidden={!showFileManage}
+      >
+        {fileManageTarget ? (
+          <SidebarSessionFileManage
+            paneId={fileManageTarget.paneId}
+            sessionId={fileManageTarget.sessionId}
+            onBack={() => setFileManageTarget(null)}
+          />
+        ) : null}
+      </div>
 
       {filterOpen && filterMenuPos
         ? createPortal(
@@ -1222,9 +1319,10 @@ export function SidebarSessionHistory() {
             >
               {(
                 [
-                  { id: "rename" as const, label: "重命名", icon: Pencil },
-                  { id: "open_new_tab" as const, label: "在新标签打开", icon: SquareArrowOutUpRight },
-                  { id: "fork" as const, label: "分叉会话", icon: GitBranch },
+                  { id: "rename" as const, label: "重命名", icon: Pencil, danger: false },
+                  { id: "file_manage" as const, label: "文件管理", icon: ListTree, danger: false },
+                  { id: "open_new_tab" as const, label: "在新标签打开", icon: SquareArrowOutUpRight, danger: false },
+                  { id: "fork" as const, label: "分叉会话", icon: GitBranch, danger: false },
                   ...(!isAutomationPaneAvatarId(moreMenuRow.avatar_id)
                     ? [
                         {
@@ -1234,6 +1332,7 @@ export function SidebarSessionHistory() {
                               ? "取消绑定飞书"
                               : "绑定为飞书会话",
                           icon: MessageSquare,
+                          danger: false,
                         },
                         {
                           id: "toggle_wechat_binding" as const,
@@ -1242,10 +1341,12 @@ export function SidebarSessionHistory() {
                               ? "取消绑定微信"
                               : "绑定为微信会话",
                           icon: Smartphone,
+                          danger: false,
                         },
                       ]
                     : []),
-                  { id: "archive_prior" as const, label: "归档此前会话", icon: Archive },
+                  { id: "archive_prior" as const, label: "归档此前会话", icon: Archive, danger: false },
+                  { id: "delete" as const, label: "删除会话", icon: Trash2, danger: true },
                 ]
               ).map((item) => {
                 const Icon = item.icon;
@@ -1253,10 +1354,15 @@ export function SidebarSessionHistory() {
                   <button
                     key={item.id}
                     type="button"
-                    className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-[13px] text-text-primary hover:bg-surface-hover"
+                    className={`flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-[13px] hover:bg-surface-hover ${
+                      item.danger ? "text-rose-400 hover:text-rose-500" : "text-text-primary"
+                    }`}
                     onClick={() => void runMoreAction(item.id, moreMenuRow)}
                   >
-                    <Icon className="h-3.5 w-3.5 shrink-0 text-text-faint" strokeWidth={1.75} />
+                    <Icon
+                      className={`h-3.5 w-3.5 shrink-0 ${item.danger ? "text-rose-400" : "text-text-faint"}`}
+                      strokeWidth={1.75}
+                    />
                     <span className="truncate">{item.label}</span>
                   </button>
                 );

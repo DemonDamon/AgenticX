@@ -251,7 +251,8 @@ def test_taskspace_apis_can_lazy_restore_session(tmp_path: Path) -> None:
     assert rows[0]["id"] == "default"
 
 
-def test_taskspaces_are_shared_across_sessions_until_removed(tmp_path: Path) -> None:
+def test_taskspaces_are_isolated_per_session(tmp_path: Path) -> None:
+    """Attached folders belong to one session; siblings must not see or lose them."""
     store = SessionStore(tmp_path / "sessions.sqlite")
     sessions_root = tmp_path / "sessions"
     taskspaces_root = tmp_path / "taskspaces"
@@ -261,8 +262,8 @@ def test_taskspaces_are_shared_across_sessions_until_removed(tmp_path: Path) -> 
     manager._sessions_root = str(sessions_root)
     manager._taskspaces_root = str(taskspaces_root)
 
-    sid_a = "shared-taskspace-session-a"
-    sid_b = "shared-taskspace-session-b"
+    sid_a = "isolated-taskspace-session-a"
+    sid_b = "isolated-taskspace-session-b"
     managed_a = manager.create(session_id=sid_a)
     managed_b = manager.create(session_id=sid_b)
     managed_a.studio_session.chat_history = [{"id": "u1", "role": "user", "content": "a"}]
@@ -270,21 +271,21 @@ def test_taskspaces_are_shared_across_sessions_until_removed(tmp_path: Path) -> 
     assert manager.persist(sid_a) is True
     assert manager.persist(sid_b) is True
 
-    shared_dir = tmp_path / "shared-workspace"
-    created = manager.add_taskspace(sid_b, path=str(shared_dir), label="shared")
+    attached_dir = tmp_path / "session-b-workspace"
+    created = manager.add_taskspace(sid_b, path=str(attached_dir), label="only-b")
     assert created["id"].startswith("ts-")
 
     rows_a = manager.list_taskspaces(sid_a)
     rows_b = manager.list_taskspaces(sid_b)
-    assert any(row["path"] == str(shared_dir.resolve()) for row in rows_a)
-    assert any(row["path"] == str(shared_dir.resolve()) for row in rows_b)
+    assert all(row["path"] != str(attached_dir.resolve()) for row in rows_a)
+    assert any(row["path"] == str(attached_dir.resolve()) for row in rows_b)
 
-    assert manager.remove_taskspace(sid_a, created["id"]) is True
-    rows_a_after = manager.list_taskspaces(sid_a)
+    assert manager.remove_taskspace(sid_b, created["id"]) is True
     rows_b_after = manager.list_taskspaces(sid_b)
-    assert all(row["id"] != created["id"] for row in rows_a_after)
     assert all(row["id"] != created["id"] for row in rows_b_after)
 
+    # Re-attach on B and ensure A still clean after reload.
+    created2 = manager.add_taskspace(sid_b, path=str(attached_dir), label="only-b")
     fresh = SessionManager()
     fresh._session_store = store
     fresh._sessions_root = str(sessions_root)
@@ -293,10 +294,10 @@ def test_taskspaces_are_shared_across_sessions_until_removed(tmp_path: Path) -> 
     rows_a_fresh = fresh.list_taskspaces(sid_a)
     rows_b_fresh = fresh.list_taskspaces(sid_b)
     assert len(rows_a_fresh) == 1 and rows_a_fresh[0]["id"] == "default"
-    assert len(rows_b_fresh) == 1 and rows_b_fresh[0]["id"] == "default"
+    assert any(row["id"] == created2["id"] for row in rows_b_fresh)
 
 
-def test_taskspaces_are_isolated_between_different_avatars(tmp_path: Path) -> None:
+def test_taskspaces_are_isolated_even_for_same_avatar(tmp_path: Path) -> None:
     store = SessionStore(tmp_path / "sessions.sqlite")
     sessions_root = tmp_path / "sessions"
     taskspaces_root = tmp_path / "taskspaces"
@@ -316,19 +317,19 @@ def test_taskspaces_are_isolated_between_different_avatars(tmp_path: Path) -> No
     managed_a2.avatar_id = "avatar-a"
     managed_b1.avatar_id = "avatar-b"
 
-    avatar_a_shared_dir = tmp_path / "avatar-a-shared"
-    created = manager.add_taskspace(sid_a1, path=str(avatar_a_shared_dir), label="avatar-a-shared")
+    avatar_a_dir = tmp_path / "avatar-a-only"
+    created = manager.add_taskspace(sid_a1, path=str(avatar_a_dir), label="avatar-a-only")
     assert created["id"].startswith("ts-")
 
     rows_a1 = manager.list_taskspaces(sid_a1)
     rows_a2 = manager.list_taskspaces(sid_a2)
     rows_b1 = manager.list_taskspaces(sid_b1)
-    assert any(row["path"] == str(avatar_a_shared_dir.resolve()) for row in rows_a1)
-    assert any(row["path"] == str(avatar_a_shared_dir.resolve()) for row in rows_a2)
-    assert all(row["path"] != str(avatar_a_shared_dir.resolve()) for row in rows_b1)
+    assert any(row["path"] == str(avatar_a_dir.resolve()) for row in rows_a1)
+    assert all(row["path"] != str(avatar_a_dir.resolve()) for row in rows_a2)
+    assert all(row["path"] != str(avatar_a_dir.resolve()) for row in rows_b1)
 
 
-def test_apply_avatar_binding_rescopes_taskspaces_from_meta_to_avatar(tmp_path: Path) -> None:
+def test_apply_avatar_binding_does_not_pull_global_taskspaces(tmp_path: Path) -> None:
     store = SessionStore(tmp_path / "sessions.sqlite")
     sessions_root = tmp_path / "sessions"
     taskspaces_root = tmp_path / "taskspaces"
@@ -351,13 +352,14 @@ def test_apply_avatar_binding_rescopes_taskspaces_from_meta_to_avatar(tmp_path: 
 
     managed = manager.create(session_id="late-bind-avatar-session")
     rows_before = manager.list_taskspaces(managed.session_id)
-    assert any(row["path"] == str(meta_dir.resolve()) for row in rows_before)
+    assert all(row["path"] != str(meta_dir.resolve()) for row in rows_before)
     assert all(row["path"] != str(avatar_dir.resolve()) for row in rows_before)
 
     manager.apply_avatar_binding(managed, avatar_id="avatar-a", avatar_name="A")
     rows_after = manager.list_taskspaces(managed.session_id)
-    assert any(row["path"] == str(avatar_dir.resolve()) for row in rows_after)
+    assert all(row["path"] != str(avatar_dir.resolve()) for row in rows_after)
     assert all(row["path"] != str(meta_dir.resolve()) for row in rows_after)
+    assert rows_after and rows_after[0]["id"] == "default"
 
 
 def test_delete_purges_persistence_and_removes_from_listing(tmp_path: Path) -> None:

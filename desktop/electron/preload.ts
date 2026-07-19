@@ -338,6 +338,7 @@ contextBridge.exposeInMainWorld("agenticxDesktop", {
       }),
     }),
   chooseDirectory: async () => ipcRenderer.invoke("choose-directory"),
+  chooseFiles: async () => ipcRenderer.invoke("choose-files"),
   getPathForFile: (file: File): string => {
     try {
       return webUtils.getPathForFile(file) || "";

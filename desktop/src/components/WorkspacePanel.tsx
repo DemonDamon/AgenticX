@@ -1,5 +1,18 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { PanelRight, Folder, RefreshCw, FolderPlus, Terminal } from "lucide-react";
+import {
+  ArrowLeft,
+  Check,
+  FilePlus,
+  Folder,
+  FolderPlus,
+  List,
+  ListTree,
+  MoreHorizontal,
+  PanelRight,
+  RefreshCw,
+  Terminal,
+} from "lucide-react";
+import { createPortal } from "react-dom";
 import type { DragEvent as ReactDragEvent, MouseEvent as ReactMouseEvent } from "react";
 import type { Taskspace } from "../store";
 import { useAppStore } from "../store";
@@ -57,6 +70,8 @@ type Props = {
   }) => void;
   autoRefreshKey?: number;
   onClose?: () => void;
+  /** Sidebar file-manage mode: replace title with back control (Trae-style). */
+  backAction?: { label: string; onClick: () => void };
   tintColor?: string;
   onQuotePreviewSnippet?: (payload: WorkspacePreviewQuotePayload) => void;
   /** Absolute path (+ optional line range) requested from chat (@file chip / path click). */
@@ -149,6 +164,7 @@ export function WorkspacePanel({
   onPickDirectoryForReference,
   autoRefreshKey,
   onClose,
+  backAction,
   tintColor,
   onQuotePreviewSnippet,
   previewOpenRequest,
@@ -191,9 +207,17 @@ export function WorkspacePanel({
   const [ctxMenu, setCtxMenu] = useState<CtxMenuState | null>(null);
   const [hostPlatform, setHostPlatform] = useState<string | null>(null);
   const [fileSearchQuery, setFileSearchQuery] = useState("");
+  const [viewMode, setViewMode] = useState<"tree" | "list">("tree");
+  const [viewMenuOpen, setViewMenuOpen] = useState(false);
+  const [moreMenuOpen, setMoreMenuOpen] = useState(false);
+  const [viewMenuPos, setViewMenuPos] = useState<{ left: number; top: number } | null>(null);
+  const [moreMenuPos, setMoreMenuPos] = useState<{ left: number; top: number } | null>(null);
+  const viewBtnRef = useRef<HTMLButtonElement | null>(null);
+  const moreBtnRef = useRef<HTMLButtonElement | null>(null);
   const fallbackBrowseSessionIdRef = useRef<string>("");
   const panelRef = useRef<HTMLDivElement | null>(null);
   const awaitingFreshSession = isPaneAwaitingFreshSession(paneId);
+  const isSidebarEmbed = !!backAction;
   const getBrowseSessionId = () => {
     const direct = String(sessionId ?? "").trim();
     if (direct) return direct;
@@ -215,6 +239,27 @@ export function WorkspacePanel({
     () => isTaskspaceAtLimit(taskspaces, maxTaskspaces),
     [taskspaces, maxTaskspaces],
   );
+  /** Conversation-attached folders (sidebar file-manage hides shared default root). */
+  const visibleTaskspaces = useMemo(() => {
+    if (!isSidebarEmbed) return taskspaces;
+    return taskspaces.filter((t) => t.id !== "default");
+  }, [isSidebarEmbed, taskspaces]);
+  const showConversationEmpty =
+    isSidebarEmbed && workspaceLoadedOnce && !loading && visibleTaskspaces.length === 0;
+
+  const listViewFiles = useMemo(() => {
+    if (viewMode !== "list" || !isSidebarEmbed) return null;
+    const results: { taskspaceId: string; file: TaskspaceFile }[] = [];
+    for (const ts of visibleTaskspaces) {
+      const entries = entriesByDir[nodeKey(ts.id, ".")] ?? [];
+      for (const entry of entries) {
+        if (entry.type === "file") {
+          results.push({ taskspaceId: ts.id, file: entry });
+        }
+      }
+    }
+    return results;
+  }, [viewMode, isSidebarEmbed, visibleTaskspaces, entriesByDir]);
 
   useEffect(() => {
     let disposed = false;
@@ -467,9 +512,47 @@ export function WorkspacePanel({
       setErrorText("");
       return;
     }
+    // Per-session workspace: clear tree cache when switching conversations.
+    setEntriesByDir({});
+    setExpandedDirs(new Set());
+    setSelectedFilePath("");
+    setFileSearchQuery("");
     void loadTaskspaces();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sessionId]);
+
+  useEffect(() => {
+    if (!viewMenuOpen && !moreMenuOpen) return;
+    const onDown = (e: MouseEvent) => {
+      const t = e.target as Node;
+      if (viewBtnRef.current?.contains(t)) return;
+      if (moreBtnRef.current?.contains(t)) return;
+      const el = t instanceof Element ? t : null;
+      if (el?.closest?.("[data-workspace-view-menu],[data-workspace-more-menu]")) return;
+      setViewMenuOpen(false);
+      setMoreMenuOpen(false);
+    };
+    const onEsc = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        setViewMenuOpen(false);
+        setMoreMenuOpen(false);
+      }
+    };
+    window.addEventListener("mousedown", onDown);
+    window.addEventListener("keydown", onEsc);
+    return () => {
+      window.removeEventListener("mousedown", onDown);
+      window.removeEventListener("keydown", onEsc);
+    };
+  }, [viewMenuOpen, moreMenuOpen]);
+
+  useEffect(() => {
+    if (!isSidebarEmbed || viewMode !== "list") return;
+    for (const ts of visibleTaskspaces) {
+      void loadDir(ts.id, ".");
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isSidebarEmbed, viewMode, visibleTaskspaces.map((t) => t.id).join("|")]);
 
   useEffect(() => {
     if (sessionId) return;
@@ -722,6 +805,64 @@ export function WorkspacePanel({
       }
     } catch (err) {
       setErrorText(`目录选择失败：${String(err)}`);
+    }
+  };
+
+  const pickAndAttachDirectory = async () => {
+    setMoreMenuOpen(false);
+    if (taskspaceAtLimit) {
+      setErrorText(formatTaskspaceAddError(`taskspace limit reached (${maxTaskspaces})`, maxTaskspaces));
+      return;
+    }
+    try {
+      const picker = window.agenticxDesktop.chooseDirectory;
+      if (typeof picker !== "function") {
+        setErrorText("当前客户端不支持目录选择，请重启桌面端后重试。");
+        return;
+      }
+      const picked = await picker();
+      if (!picked.ok || !picked.path) {
+        if (!picked.canceled) setErrorText(picked.error ?? "目录选择失败");
+        return;
+      }
+      const label = picked.path.split(/[\\/]/).filter(Boolean).pop() || "folder";
+      await addTaskspace(picked.path, label);
+    } catch (err) {
+      setErrorText(`目录选择失败：${String(err)}`);
+    }
+  };
+
+  const pickAndAttachFiles = async () => {
+    setMoreMenuOpen(false);
+    if (taskspaceAtLimit) {
+      setErrorText(formatTaskspaceAddError(`taskspace limit reached (${maxTaskspaces})`, maxTaskspaces));
+      return;
+    }
+    try {
+      const picker = window.agenticxDesktop.chooseFiles;
+      if (typeof picker !== "function") {
+        setErrorText("当前客户端不支持文件选择，请完全重启桌面端后重试。");
+        return;
+      }
+      const picked = await picker();
+      if (!picked.ok || !picked.paths?.length) {
+        if (!picked.canceled) setErrorText(picked.error ?? "文件选择失败");
+        return;
+      }
+      const parents = new Map<string, string>();
+      for (const filePath of picked.paths) {
+        const normalized = filePath.replace(/\\/g, "/");
+        const idx = normalized.lastIndexOf("/");
+        const parent = idx > 0 ? normalized.slice(0, idx) : normalized;
+        if (!parent || parents.has(parent)) continue;
+        const label = parent.split("/").filter(Boolean).pop() || "folder";
+        parents.set(parent, label);
+      }
+      for (const [dir, label] of parents) {
+        await addTaskspace(dir, label);
+      }
+    } catch (err) {
+      setErrorText(`文件选择失败：${String(err)}`);
     }
   };
 
@@ -988,73 +1129,143 @@ export function WorkspacePanel({
   };
 
   return (
-    <div ref={panelRef} className="relative flex h-full min-h-0 w-full flex-col bg-surface-card" style={tintColor ? { backgroundColor: tintColor } : undefined}>
+    <div
+      ref={panelRef}
+      className={`relative flex h-full min-h-0 w-full flex-col ${
+        isSidebarEmbed ? "bg-surface-sidebar" : "bg-surface-card"
+      }`}
+      style={!isSidebarEmbed && tintColor ? { backgroundColor: tintColor } : undefined}
+    >
       <div className="flex min-h-0 flex-1 flex-col">
         <div className="flex flex-col">
-          <div className="flex items-center justify-between px-3 py-2">
-            <div className="flex items-center gap-1.5 text-[13px] font-medium text-text-strong">
-              工作区
-            </div>
-            <div className="flex items-center gap-0.5">
-              <button
-                className="agx-topbar-btn !px-[5px]"
-                onClick={() => {
-                  setErrorText("");
-                  void refreshListAndActiveTaskspace();
-                }}
-                title="刷新工作区列表与目录"
-              >
-                <RefreshCw className="h-4 w-4" strokeWidth={1.8} />
-              </button>
-              <button
-                className={`agx-topbar-btn !px-[5px] ${showAddForm ? "agx-topbar-btn--active" : ""}`}
-                onClick={() => {
-                  if (taskspaceAtLimit) {
-                    setErrorText(formatTaskspaceAddError(`taskspace limit reached (${maxTaskspaces})`, maxTaskspaces));
-                    return;
-                  }
-                  setShowAddForm((prev) => !prev);
-                  setErrorText("");
-                }}
-                title={taskspaceAtLimit ? `已达工作区上限（${taskspaces.length}/${maxTaskspaces}）` : "新增工作区"}
-                disabled={taskspaceAtLimit}
-              >
-                <FolderPlus className="h-4 w-4" strokeWidth={1.8} />
-              </button>
+          <div className="flex items-center justify-between gap-1 px-2 py-2">
+            {backAction ? (
               <button
                 type="button"
-                className="agx-topbar-btn !px-[5px]"
-                onClick={() => {
-                  setErrorText("");
-                  addSameCwdTerminal();
-                }}
-                title="打开内嵌终端（当前选中的工作区目录）；也可右键工作区节点选「在此目录下打开终端」"
+                className="flex min-w-0 items-center gap-1 rounded-md px-1.5 py-1 text-[11px] font-medium text-text-faint transition-colors hover:bg-surface-hover hover:text-text-strong"
+                onClick={backAction.onClick}
+                aria-label={backAction.label}
               >
-                <Terminal className="h-4 w-4" strokeWidth={1.8} />
+                <ArrowLeft className="h-3.5 w-3.5 shrink-0" strokeWidth={1.8} />
+                <span className="truncate">{backAction.label}</span>
               </button>
-              {onClose ? (
+            ) : (
+              <div className="flex items-center gap-1.5 px-1 text-[13px] font-medium text-text-strong">
+                工作区
+              </div>
+            )}
+            {isSidebarEmbed ? (
+              <div className="flex shrink-0 items-center gap-0.5">
+                <button
+                  ref={viewBtnRef}
+                  type="button"
+                  className="agx-topbar-btn !px-[5px]"
+                  title={viewMode === "list" ? "列表视图" : "树形视图"}
+                  aria-label="切换视图"
+                  onClick={() => {
+                    const rect = viewBtnRef.current?.getBoundingClientRect();
+                    if (rect) {
+                      setViewMenuPos({ left: Math.max(8, rect.right - 160), top: rect.bottom + 4 });
+                    }
+                    setMoreMenuOpen(false);
+                    setViewMenuOpen((v) => !v);
+                  }}
+                >
+                  {viewMode === "list" ? (
+                    <List className="h-4 w-4" strokeWidth={1.8} />
+                  ) : (
+                    <ListTree className="h-4 w-4" strokeWidth={1.8} />
+                  )}
+                </button>
+                <div className="mx-0.5 h-3.5 w-px bg-border" />
+                <button
+                  ref={moreBtnRef}
+                  type="button"
+                  className="agx-topbar-btn !px-[5px]"
+                  title="更多"
+                  aria-label="更多"
+                  onClick={() => {
+                    const rect = moreBtnRef.current?.getBoundingClientRect();
+                    if (rect) {
+                      setMoreMenuPos({ left: Math.max(8, rect.right - 180), top: rect.bottom + 4 });
+                    }
+                    setViewMenuOpen(false);
+                    setMoreMenuOpen((v) => !v);
+                  }}
+                >
+                  <MoreHorizontal className="h-4 w-4" strokeWidth={1.8} />
+                </button>
+              </div>
+            ) : (
+              <div className="flex shrink-0 items-center gap-0.5">
                 <button
                   className="agx-topbar-btn !px-[5px]"
-                  onClick={onClose}
-                  title="关闭工作区面板"
+                  onClick={() => {
+                    setErrorText("");
+                    void refreshListAndActiveTaskspace();
+                  }}
+                  title="刷新工作区列表与目录"
                 >
-                  <PanelRight className="h-4 w-4" strokeWidth={1.8} />
+                  <RefreshCw className="h-4 w-4" strokeWidth={1.8} />
                 </button>
-              ) : null}
+                <button
+                  className={`agx-topbar-btn !px-[5px] ${showAddForm ? "agx-topbar-btn--active" : ""}`}
+                  onClick={() => {
+                    if (taskspaceAtLimit) {
+                      setErrorText(
+                        formatTaskspaceAddError(`taskspace limit reached (${maxTaskspaces})`, maxTaskspaces)
+                      );
+                      return;
+                    }
+                    setShowAddForm((prev) => !prev);
+                    setErrorText("");
+                  }}
+                  title={
+                    taskspaceAtLimit
+                      ? `已达工作区上限（${taskspaces.length}/${maxTaskspaces}）`
+                      : "新增工作区"
+                  }
+                  disabled={taskspaceAtLimit}
+                >
+                  <FolderPlus className="h-4 w-4" strokeWidth={1.8} />
+                </button>
+                <button
+                  type="button"
+                  className="agx-topbar-btn !px-[5px]"
+                  onClick={() => {
+                    setErrorText("");
+                    addSameCwdTerminal();
+                  }}
+                  title="打开内嵌终端（当前选中的工作区目录）；也可右键工作区节点选「在此目录下打开终端」"
+                >
+                  <Terminal className="h-4 w-4" strokeWidth={1.8} />
+                </button>
+                {onClose ? (
+                  <button
+                    className="agx-topbar-btn !px-[5px]"
+                    onClick={onClose}
+                    title="关闭工作区面板"
+                  >
+                    <PanelRight className="h-4 w-4" strokeWidth={1.8} />
+                  </button>
+                ) : null}
+              </div>
+            )}
+          </div>
+          {!showConversationEmpty ? (
+            <div className="px-2 pb-1.5">
+              <input
+                type="search"
+                value={fileSearchQuery}
+                onChange={(e) => setFileSearchQuery(e.target.value)}
+                placeholder="搜索文件…"
+                autoComplete="off"
+                spellCheck={false}
+                aria-label="搜索工作区文件"
+                className="w-full rounded-md border border-border bg-surface-hover px-2 py-2 text-[13px] text-text-primary placeholder:text-text-faint focus:border-[var(--ui-btn-primary-border,#3b82f6)] focus:outline-none focus:ring-1 focus:ring-[var(--ui-btn-primary-border,#3b82f6)]"
+              />
             </div>
-          </div>
-          <div className="px-2 pb-1.5">
-            <input
-              type="search"
-              value={fileSearchQuery}
-              onChange={(e) => setFileSearchQuery(e.target.value)}
-              placeholder="搜索文件…"
-              autoComplete="off"
-              spellCheck={false}
-              aria-label="搜索工作区文件"
-              className="w-full rounded-md border border-border bg-surface-hover px-2 py-2 text-[13px] text-text-primary placeholder:text-text-faint focus:border-[var(--ui-btn-primary-border,#3b82f6)] focus:outline-none focus:ring-1 focus:ring-[var(--ui-btn-primary-border,#3b82f6)]"
-            />
-          </div>
+          ) : null}
           {showAddForm ? (
             <div
               className="border-b border-border px-3 py-2"
@@ -1120,14 +1331,47 @@ export function WorkspacePanel({
               ))}
             </div>
           ) : null}
-          {workspaceLoadedOnce && !loading && taskspaces.length === 0 ? (
-            <div className="text-[13px] text-text-faint">
-              {getBrowseSessionId()
-                ? "暂无工作区"
-                : "选择或新建一个对话后，这里会显示工作区文件"}
+          {showConversationEmpty ? (
+            <div className="flex flex-col items-center justify-center gap-3 px-4 py-12 text-center">
+              <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-surface-hover text-text-faint">
+                <FilePlus className="h-7 w-7" strokeWidth={1.5} />
+              </div>
+              <div className="space-y-1">
+                <div className="text-[14px] font-medium text-text-primary">工作区为空</div>
+                <div className="text-[12px] leading-relaxed text-text-faint">
+                  添加文件或文件夹到当前对话的可见工作区
+                </div>
+              </div>
+              <div className="flex flex-wrap items-center justify-center gap-2">
+                <button
+                  type="button"
+                  className="rounded-lg border border-border bg-surface-hover px-3.5 py-1.5 text-[13px] text-text-primary transition-colors hover:bg-surface-card-strong disabled:opacity-50"
+                  disabled={taskspaceAtLimit}
+                  onClick={() => void pickAndAttachFiles()}
+                >
+                  添加文件
+                </button>
+                <button
+                  type="button"
+                  className="rounded-lg border border-border bg-surface-hover px-3.5 py-1.5 text-[13px] text-text-primary transition-colors hover:bg-surface-card-strong disabled:opacity-50"
+                  disabled={taskspaceAtLimit}
+                  onClick={() => void pickAndAttachDirectory()}
+                >
+                  添加文件夹
+                </button>
+              </div>
             </div>
           ) : null}
-          {!loading && filteredFiles !== null ? (
+          {!isSidebarEmbed && workspaceLoadedOnce && !loading && taskspaces.length === 0 ? (
+            getBrowseSessionId() ? (
+              <div className="px-2 py-4 text-[13px] text-text-faint">暂无工作区</div>
+            ) : (
+              <div className="px-2 py-4 text-[13px] text-text-faint">
+                选择或新建一个对话后，这里会显示工作区文件
+              </div>
+            )
+          ) : null}
+          {!showConversationEmpty && !loading && filteredFiles !== null ? (
             filteredFiles.length === 0 ? (
               <div className="text-[13px] text-text-faint">无匹配文件</div>
             ) : (
@@ -1174,7 +1418,33 @@ export function WorkspacePanel({
               })
             )
           ) : null}
-          {!loading && filteredFiles === null && taskspaces.map((ts) => {
+          {!showConversationEmpty && !loading && filteredFiles === null && listViewFiles ? (
+            listViewFiles.length === 0 ? (
+              <div className="px-1 py-2 text-[13px] text-text-faint">当前目录暂无文件</div>
+            ) : (
+              listViewFiles.map(({ taskspaceId, file }) => (
+                <div key={`${taskspaceId}:${file.path}`} className="flex min-w-0 items-center gap-1">
+                  <button
+                    className={`min-w-0 flex-1 truncate rounded px-1 py-1 text-left text-[13px] transition hover:bg-surface-hover ${
+                      selectedFilePath === file.path ? "text-text-strong" : "text-text-subtle"
+                    }`}
+                    title={file.path}
+                    onClick={() => void openFile(taskspaceId, file.path)}
+                  >
+                    {file.name}
+                  </button>
+                  <button
+                    className="rounded px-1.5 py-0.5 text-xs text-text-faint transition hover:bg-surface-hover hover:text-text-muted"
+                    onClick={() => onPickFileForReference?.(taskspaceId, file.path)}
+                    title="引用到输入框"
+                  >
+                    @
+                  </button>
+                </div>
+              ))
+            )
+          ) : null}
+          {!showConversationEmpty && !loading && filteredFiles === null && !listViewFiles && visibleTaskspaces.map((ts) => {
             const key = nodeKey(ts.id, ".");
             const isExpanded = expandedDirs.has(key);
             const isActive = activeTaskspaceId === ts.id;
@@ -1239,7 +1509,7 @@ export function WorkspacePanel({
         </div>
       </div>
 
-      {terminalTabs.length > 0 ? (
+      {!isSidebarEmbed && terminalTabs.length > 0 ? (
         <>
           <div
             className="group relative min-h-[14px] shrink-0 cursor-row-resize px-2 py-2 touch-none"
@@ -1401,6 +1671,84 @@ export function WorkspacePanel({
       {errorText ? (
         <div className="border-t border-border px-3 py-1.5 text-xs text-rose-300">{errorText}</div>
       ) : null}
+
+      {viewMenuOpen && viewMenuPos
+        ? createPortal(
+            <div
+              data-workspace-view-menu
+              className="fixed z-[240] w-[160px] rounded-xl border border-border bg-surface-base p-1 shadow-2xl"
+              style={{ left: viewMenuPos.left, top: viewMenuPos.top }}
+              onClick={(e) => e.stopPropagation()}
+            >
+              {(
+                [
+                  { id: "list" as const, label: "列表视图", icon: List },
+                  { id: "tree" as const, label: "树形视图", icon: ListTree },
+                ] as const
+              ).map((item) => {
+                const Icon = item.icon;
+                const active = viewMode === item.id;
+                return (
+                  <button
+                    key={item.id}
+                    type="button"
+                    className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-[13px] text-text-primary hover:bg-surface-hover"
+                    onClick={() => {
+                      setViewMode(item.id);
+                      setViewMenuOpen(false);
+                    }}
+                  >
+                    <Icon className="h-3.5 w-3.5 shrink-0 text-text-faint" strokeWidth={1.75} />
+                    <span className="min-w-0 flex-1 truncate">{item.label}</span>
+                    {active ? <Check className="h-3.5 w-3.5 shrink-0 text-text-strong" strokeWidth={2} /> : null}
+                  </button>
+                );
+              })}
+            </div>,
+            document.body
+          )
+        : null}
+
+      {moreMenuOpen && moreMenuPos
+        ? createPortal(
+            <div
+              data-workspace-more-menu
+              className="fixed z-[240] w-[180px] rounded-xl border border-border bg-surface-base p-1 shadow-2xl"
+              style={{ left: moreMenuPos.left, top: moreMenuPos.top }}
+              onClick={(e) => e.stopPropagation()}
+            >
+              <button
+                type="button"
+                className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-[13px] text-text-primary hover:bg-surface-hover"
+                onClick={() => void pickAndAttachFiles()}
+              >
+                <FilePlus className="h-3.5 w-3.5 shrink-0 text-text-faint" strokeWidth={1.75} />
+                <span>添加文件</span>
+              </button>
+              <button
+                type="button"
+                className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-[13px] text-text-primary hover:bg-surface-hover"
+                onClick={() => void pickAndAttachDirectory()}
+              >
+                <FolderPlus className="h-3.5 w-3.5 shrink-0 text-text-faint" strokeWidth={1.75} />
+                <span>添加文件夹</span>
+              </button>
+              <button
+                type="button"
+                className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-[13px] text-text-primary hover:bg-surface-hover"
+                onClick={() => {
+                  setMoreMenuOpen(false);
+                  setErrorText("");
+                  void refreshListAndActiveTaskspace();
+                }}
+              >
+                <RefreshCw className="h-3.5 w-3.5 shrink-0 text-text-faint" strokeWidth={1.75} />
+                <span>刷新</span>
+              </button>
+            </div>,
+            document.body
+          )
+        : null}
     </div>
   );
 }

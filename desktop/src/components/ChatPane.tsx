@@ -55,6 +55,12 @@ import { StickyTaskBar } from "./StickyTaskBar";
 import { ContextUsageButton } from "./ContextUsagePopup";
 import { WorkspacePanel } from "./WorkspacePanel";
 import type { WorkspacePreviewOpenRequest, WorkspacePreviewQuotePayload } from "./workspace/workspace-preview-types";
+import {
+  NEAR_WORKSPACE_PICK_DIR,
+  NEAR_WORKSPACE_PICK_FILE,
+  type NearWorkspacePickDirDetail,
+  type NearWorkspacePickFileDetail,
+} from "../utils/workspace-sidebar-events";
 import { SpawnsColumn } from "./SpawnsColumn";
 import { SubAgentRunDrawer } from "./subagent";
 import { MessageRenderer, renderToolMessageExtras } from "./messages/MessageRenderer";
@@ -4225,6 +4231,26 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
     },
     [insertWorkspaceDirectoryReference, insertWorkspaceFileReference]
   );
+
+  /** Left-sidebar file-manage view dispatches picks; only the owning pane applies them. */
+  useEffect(() => {
+    const onPickFile = (ev: Event) => {
+      const detail = (ev as CustomEvent<NearWorkspacePickFileDetail>).detail;
+      if (!detail || detail.paneId !== pane.id) return;
+      void insertWorkspaceFileReference(detail.taskspaceId, detail.path);
+    };
+    const onPickDir = (ev: Event) => {
+      const detail = (ev as CustomEvent<NearWorkspacePickDirDetail>).detail;
+      if (!detail || detail.paneId !== pane.id) return;
+      void insertWorkspaceDirectoryReference(detail.taskspaceId, detail.relPath, detail.label);
+    };
+    window.addEventListener(NEAR_WORKSPACE_PICK_FILE, onPickFile);
+    window.addEventListener(NEAR_WORKSPACE_PICK_DIR, onPickDir);
+    return () => {
+      window.removeEventListener(NEAR_WORKSPACE_PICK_FILE, onPickFile);
+      window.removeEventListener(NEAR_WORKSPACE_PICK_DIR, onPickDir);
+    };
+  }, [pane.id, insertWorkspaceFileReference, insertWorkspaceDirectoryReference]);
 
   const openWorkspaceFilePreview = useCallback(
     (request: WorkspacePreviewOpenRequest | string) => {

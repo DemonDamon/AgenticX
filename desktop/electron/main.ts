@@ -8405,6 +8405,24 @@ function registerIpc(): void {
     }
   });
 
+  ipcMain.handle("choose-files", async () => {
+    if (remoteConfig) {
+      return { ok: false, error: "远程模式不支持本地文件选择" };
+    }
+    const focused = BrowserWindow.getFocusedWindow() ?? mainWindow ?? null;
+    try {
+      const result = focused
+        ? await dialog.showOpenDialog(focused, { properties: ["openFile", "multiSelections"] })
+        : await dialog.showOpenDialog({ properties: ["openFile", "multiSelections"] });
+      if (result.canceled || result.filePaths.length === 0) {
+        return { ok: false, canceled: true, paths: [] as string[] };
+      }
+      return { ok: true, paths: result.filePaths };
+    } catch (err) {
+      return { ok: false, paths: [] as string[], error: String(err) };
+    }
+  });
+
   ipcMain.handle("list-taskspace-files", async (_event, payload: { sessionId: string; taskspaceId: string; path?: string }) => {
     const sid = String(payload?.sessionId || "").trim();
     const taskspaceId = String(payload?.taskspaceId || "").trim();
