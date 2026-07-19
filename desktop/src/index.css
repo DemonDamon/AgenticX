@@ -167,6 +167,19 @@ body {
   }
 }
 
+/* 侧栏会话「生成中」3×3 粒子矩阵（对齐 Enterprise SessionGeneratingDots） */
+@keyframes agx-session-grid-pulse {
+  0%,
+  100% {
+    opacity: 0.2;
+    transform: scale(0.7);
+  }
+  50% {
+    opacity: 1;
+    transform: scale(1.2);
+  }
+}
+
 /* 工作区预览选区「引用至当前对话」：紧凑 pill 浮层（对齐 Cursor Add to Chat） */
 .agx-selection-quote-btn {
   background-color: var(--surface-popover);

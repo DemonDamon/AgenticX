@@ -35,6 +35,7 @@ import {
   SIDEBAR_HISTORY_COLLAPSE_KEY,
   SIDEBAR_HISTORY_FILTER_KEY,
   SIDEBAR_HISTORY_PAGE_SIZE,
+  applySidebarSessionHistoryHints,
   bucketSidebarHistoryRows,
   formatSidebarRelativeTime,
   getSidebarSessionActivityTs,
@@ -46,6 +47,7 @@ import {
   type SidebarSessionRow,
 } from "../../utils/sidebar-session-history";
 import { HoverTip } from "../ds/HoverTip";
+import { SessionGeneratingDots } from "./SessionGeneratingDots";
 import { SidebarSessionFileManage } from "./SidebarSessionFileManage";
 
 type MoreMenuState = {
@@ -117,6 +119,8 @@ export function SidebarSessionHistory() {
   const panes = useAppStore((s) => s.panes);
   const activePaneId = useAppStore((s) => s.activePaneId);
   const sessionCatalogRevision = useAppStore((s) => s.sessionCatalogRevision);
+  const sessionHistoryHints = useAppStore((s) => s.sessionHistoryHints);
+  const clearSessionHistoryHint = useAppStore((s) => s.clearSessionHistoryHint);
   const addPane = useAppStore((s) => s.addPane);
   const setActivePaneId = useAppStore((s) => s.setActivePaneId);
   const setActiveAvatarId = useAppStore((s) => s.setActiveAvatarId);
@@ -187,12 +191,22 @@ export function SidebarSessionHistory() {
     try {
       const listed = await window.agenticxDesktop.listSessions();
       if (listed.ok && Array.isArray(listed.sessions)) {
-        setSessions(normalizeSidebarSessionRows(listed.sessions));
+        const rows = normalizeSidebarSessionRows(listed.sessions);
+        setSessions(rows);
+        for (const row of rows) {
+          const hint = useAppStore.getState().sessionHistoryHints[row.session_id];
+          if (!hint) continue;
+          const apiActivity = Number(row.updated_at ?? 0);
+          // Backend caught up → drop optimistic hint; UI then trusts API execution_state.
+          if (apiActivity >= hint.activityAt - 2) {
+            clearSessionHistoryHint(row.session_id);
+          }
+        }
       }
     } catch (err) {
       console.warn("[SidebarSessionHistory] listSessions failed", err);
     }
-  }, []);
+  }, [clearSessionHistoryHint]);
 
   const loadBindings = useCallback(async () => {
     try {
@@ -340,16 +354,21 @@ export function SidebarSessionHistory() {
     [avatarNameById, searchQuery]
   );
 
+  const sessionsWithHints = useMemo(
+    () => applySidebarSessionHistoryHints(sessions, sessionHistoryHints),
+    [sessions, sessionHistoryHints]
+  );
+
   const wechatRow = useMemo(() => {
-    const row = sessions.find((s) => s.session_id === wechatBoundId) ?? null;
+    const row = sessionsWithHints.find((s) => s.session_id === wechatBoundId) ?? null;
     if (!row) return null;
     return rowMatchesSearch(row) ? row : null;
-  }, [sessions, wechatBoundId, rowMatchesSearch]);
+  }, [sessionsWithHints, wechatBoundId, rowMatchesSearch]);
   const feishuRow = useMemo(() => {
-    const row = sessions.find((s) => s.session_id === feishuBoundId) ?? null;
+    const row = sessionsWithHints.find((s) => s.session_id === feishuBoundId) ?? null;
     if (!row) return null;
     return rowMatchesSearch(row) ? row : null;
-  }, [sessions, feishuBoundId, rowMatchesSearch]);
+  }, [sessionsWithHints, feishuBoundId, rowMatchesSearch]);
 
   const specialIds = useMemo(() => {
     const ids = new Set<string>();
@@ -360,10 +379,10 @@ export function SidebarSessionHistory() {
 
   const filteredForBuckets = useMemo(
     () =>
-      sessions.filter(
+      sessionsWithHints.filter(
         (row) => matchesSidebarAvatarFilter(row, avatarFilter) && rowMatchesSearch(row)
       ),
-    [sessions, avatarFilter, rowMatchesSearch]
+    [sessionsWithHints, avatarFilter, rowMatchesSearch]
   );
 
   const buckets = useMemo(
@@ -880,6 +899,8 @@ export function SidebarSessionHistory() {
     const menuOpen = moreMenu?.sessionId === row.session_id;
     const isEditing = editingId === row.session_id;
     const showHoverActions = !selectMode && !isEditing;
+    const isRunning = row.execution_state === "running";
+    const isInterrupted = row.execution_state === "interrupted";
 
     return (
       <div
@@ -930,7 +951,7 @@ export function SidebarSessionHistory() {
         ) : (
           <button
             type="button"
-            className="min-w-0 flex-1 truncate text-left text-[12px] text-text-primary"
+            className="flex min-w-0 flex-1 items-center gap-1.5 truncate text-left text-[12px] text-text-primary"
             onClick={() => {
               if (selectMode) {
                 toggleSelectSession(row.session_id);
@@ -938,9 +959,37 @@ export function SidebarSessionHistory() {
               }
               void openSession(row);
             }}
-            title={selectMode ? "点击勾选" : title}
+            title={
+              selectMode
+                ? "点击勾选"
+                : isRunning
+                  ? `${title} · 正在生成`
+                  : isInterrupted
+                    ? `${title} · 已中断`
+                    : title
+            }
+            aria-label={
+              isRunning ? `${title} · 正在生成` : isInterrupted ? `${title} · 已中断` : title
+            }
           >
-            {title}
+            {isRunning ? (
+              <span
+                className="flex h-4 w-4 shrink-0 items-center justify-center text-text-muted"
+                title="正在生成"
+                aria-label="正在生成"
+              >
+                <SessionGeneratingDots />
+              </span>
+            ) : null}
+            {isInterrupted && !isRunning ? (
+              <span
+                className="inline-flex shrink-0 rounded-sm px-1 py-px text-[10px] font-medium leading-tight text-amber-300"
+                title="该会话已收到中断请求"
+              >
+                已中断
+              </span>
+            ) : null}
+            <span className="min-w-0 flex-1 truncate">{title}</span>
           </button>
         )}
         {showHoverActions ? (
@@ -950,7 +999,7 @@ export function SidebarSessionHistory() {
                 menuOpen ? "hidden" : "inline group-hover/row:hidden"
               }`}
             >
-              {relative}
+              {isRunning ? "" : relative}
             </span>
             <div
               className={`shrink-0 items-center gap-0.5 ${

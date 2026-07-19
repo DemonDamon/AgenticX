@@ -3,6 +3,8 @@
 import { META_AGENT_DISPLAY_NAME } from "../constants/branding";
 import { isAutomationPaneAvatarId } from "./automation-pane";
 
+export type SidebarSessionExecutionState = "idle" | "running" | "interrupted" | "failed";
+
 export type SidebarSessionRow = {
   session_id: string;
   avatar_id: string | null;
@@ -12,9 +14,15 @@ export type SidebarSessionRow = {
   created_at?: number;
   pinned?: boolean;
   archived?: boolean;
+  execution_state?: SidebarSessionExecutionState;
   provider?: string;
   model?: string;
   session_mode?: "code_dev" | "daily_office";
+};
+
+export type SidebarSessionHistoryHint = {
+  activityAt: number;
+  running: boolean;
 };
 
 const PLACEHOLDER_SESSION_TITLES = new Set(
@@ -93,6 +101,11 @@ export function normalizeSidebarSessionRows(input: unknown): SidebarSessionRow[]
     if (Boolean(row.archived)) continue;
     const updatedAtRaw = Number(row.updated_at ?? 0);
     const createdAtRaw = Number(row.created_at ?? updatedAtRaw);
+    const execRaw = String(row.execution_state ?? "idle").trim();
+    const execution_state: SidebarSessionExecutionState =
+      execRaw === "running" || execRaw === "interrupted" || execRaw === "failed"
+        ? execRaw
+        : "idle";
     rows.push({
       session_id: sessionId,
       avatar_id: avatarId,
@@ -102,6 +115,7 @@ export function normalizeSidebarSessionRows(input: unknown): SidebarSessionRow[]
       created_at: Number.isFinite(createdAtRaw) && createdAtRaw > 0 ? createdAtRaw : undefined,
       pinned: Boolean(row.pinned),
       archived: Boolean(row.archived),
+      execution_state,
       provider: typeof row.provider === "string" ? row.provider : "",
       model: typeof row.model === "string" ? row.model : "",
       session_mode:
@@ -110,12 +124,43 @@ export function normalizeSidebarSessionRows(input: unknown): SidebarSessionRow[]
           : undefined,
     });
   }
-  return rows.sort((a, b) => {
+  return sortSidebarSessionRows(rows);
+}
+
+/** Keep pin-first / activity-desc order after hint merge. */
+export function sortSidebarSessionRows(rows: SidebarSessionRow[]): SidebarSessionRow[] {
+  return [...rows].sort((a, b) => {
     if (a.pinned !== b.pinned) return a.pinned ? -1 : 1;
     const tsDiff = getSidebarSessionActivityTs(b) - getSidebarSessionActivityTs(a);
     if (tsDiff !== 0) return tsDiff;
     return b.session_id.localeCompare(a.session_id);
   });
+}
+
+/**
+ * Merge optimistic send hints into listed rows.
+ * Once backend `updated_at` catches up, trust API `execution_state` (avoids stranded running).
+ */
+export function applySidebarSessionHistoryHints(
+  rows: readonly SidebarSessionRow[],
+  hints: Record<string, SidebarSessionHistoryHint>
+): SidebarSessionRow[] {
+  if (Object.keys(hints).length === 0) return [...rows];
+  const mapped = rows.map((item) => {
+    const hint = hints[item.session_id];
+    if (!hint) return item;
+    const apiActivity = Number(item.updated_at ?? 0);
+    const backendCaughtUp = apiActivity >= hint.activityAt - 2;
+    return {
+      ...item,
+      updated_at: Math.max(apiActivity, hint.activityAt),
+      execution_state:
+        !backendCaughtUp && hint.running
+          ? ("running" as const)
+          : item.execution_state ?? "idle",
+    };
+  });
+  return sortSidebarSessionRows(mapped);
 }
 
 export function resolveSidebarAvatarChipName(

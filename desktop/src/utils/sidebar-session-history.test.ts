@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  applySidebarSessionHistoryHints,
   bucketSidebarHistoryRows,
   formatSidebarRelativeTime,
   matchesSidebarAvatarFilter,
@@ -96,5 +97,57 @@ describe("sidebar-session-history utils", () => {
     expect(formatSidebarRelativeTime(now / 1000 - 30, now)).toBe("刚刚");
     expect(formatSidebarRelativeTime(now / 1000 - 3600 * 5, now)).toBe("5 小时前");
     expect(formatSidebarRelativeTime(now / 1000 - 86400 * 3, now)).toBe("3 天前");
+  });
+
+  it("preserves execution_state from list API", () => {
+    const rows = normalizeSidebarSessionRows([
+      {
+        session_id: "r1",
+        avatar_id: null,
+        session_name: "跑着",
+        updated_at: 100,
+        execution_state: "running",
+      },
+      {
+        session_id: "i1",
+        avatar_id: null,
+        session_name: "中断",
+        updated_at: 90,
+        execution_state: "interrupted",
+      },
+    ]);
+    expect(rows.find((r) => r.session_id === "r1")?.execution_state).toBe("running");
+    expect(rows.find((r) => r.session_id === "i1")?.execution_state).toBe("interrupted");
+  });
+
+  it("applies optimistic running hint until backend catches up", () => {
+    const rows = normalizeSidebarSessionRows([
+      {
+        session_id: "s1",
+        avatar_id: null,
+        session_name: "会话",
+        updated_at: 100,
+        execution_state: "idle",
+      },
+    ]);
+    const hinted = applySidebarSessionHistoryHints(rows, {
+      s1: { activityAt: 200, running: true },
+    });
+    expect(hinted[0]?.execution_state).toBe("running");
+    expect(hinted[0]?.updated_at).toBe(200);
+
+    const caughtUp = applySidebarSessionHistoryHints(
+      normalizeSidebarSessionRows([
+        {
+          session_id: "s1",
+          avatar_id: null,
+          session_name: "会话",
+          updated_at: 200,
+          execution_state: "idle",
+        },
+      ]),
+      { s1: { activityAt: 200, running: true } }
+    );
+    expect(caughtUp[0]?.execution_state).toBe("idle");
   });
 });
