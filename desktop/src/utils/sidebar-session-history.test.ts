@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   bucketSidebarHistoryRows,
+  formatSidebarRelativeTime,
   matchesSidebarAvatarFilter,
   normalizeSidebarSessionRows,
   resolveSidebarAvatarChipName,
@@ -88,5 +89,12 @@ describe("sidebar-session-history utils", () => {
     expect(
       resolveSidebarAvatarChipName({ avatar_id: "group:g1", avatar_name: "项目组" }, map)
     ).toBe("项目组");
+  });
+
+  it("formats relative activity time", () => {
+    const now = Date.parse("2026-07-19T12:00:00.000Z");
+    expect(formatSidebarRelativeTime(now / 1000 - 30, now)).toBe("刚刚");
+    expect(formatSidebarRelativeTime(now / 1000 - 3600 * 5, now)).toBe("5 小时前");
+    expect(formatSidebarRelativeTime(now / 1000 - 86400 * 3, now)).toBe("3 天前");
   });
 });

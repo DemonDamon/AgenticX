@@ -1,9 +1,24 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { ChevronDown, ListChecks, ListFilter, MessageSquare, Search, Smartphone } from "lucide-react";
+import {
+  Archive,
+  ChevronDown,
+  GitBranch,
+  ListChecks,
+  ListFilter,
+  MessageSquare,
+  MoreHorizontal,
+  Pencil,
+  Pin,
+  Search,
+  Smartphone,
+  SquareArrowOutUpRight,
+  Trash2,
+} from "lucide-react";
 import { createPortal } from "react-dom";
 import { META_AGENT_DISPLAY_NAME } from "../../constants/branding";
 import { useAppStore, type Message } from "../../store";
 import { rememberSessionForAvatar } from "../../utils/avatar-last-session";
+import { isAutomationPaneAvatarId } from "../../utils/automation-pane";
 import {
   clearPaneLazyInheritParent,
   markPaneAwaitingFreshSession,
@@ -19,6 +34,8 @@ import {
   SIDEBAR_HISTORY_FILTER_KEY,
   SIDEBAR_HISTORY_PAGE_SIZE,
   bucketSidebarHistoryRows,
+  formatSidebarRelativeTime,
+  getSidebarSessionActivityTs,
   matchesSidebarAvatarFilter,
   normalizeSidebarSessionRows,
   parseDesktopBoundSessionId,
@@ -26,6 +43,13 @@ import {
   sidebarSessionLabel,
   type SidebarSessionRow,
 } from "../../utils/sidebar-session-history";
+import { HoverTip } from "../ds/HoverTip";
+
+type MoreMenuState = {
+  sessionId: string;
+  x: number;
+  y: number;
+};
 
 type CollapseState = {
   wechat: boolean;
@@ -104,9 +128,14 @@ export function SidebarSessionHistory() {
   const [selectMode, setSelectMode] = useState(false);
   const [selectedSessionIds, setSelectedSessionIds] = useState<string[]>([]);
   const [batchDeleting, setBatchDeleting] = useState(false);
+  const [moreMenu, setMoreMenu] = useState<MoreMenuState | null>(null);
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [editingName, setEditingName] = useState("");
   const filterBtnRef = useRef<HTMLButtonElement>(null);
   const filterMenuRef = useRef<HTMLDivElement>(null);
+  const moreMenuRef = useRef<HTMLDivElement>(null);
   const searchInputRef = useRef<HTMLInputElement>(null);
+  const renameInputRef = useRef<HTMLInputElement>(null);
   const [filterMenuPos, setFilterMenuPos] = useState<{ left: number; top: number } | null>(null);
 
   const avatarNameById = useMemo(() => {
@@ -205,6 +234,49 @@ export function SidebarSessionHistory() {
       window.removeEventListener("keydown", onEsc);
     };
   }, [filterOpen]);
+
+  useEffect(() => {
+    if (!moreMenu) return;
+    const onDown = (e: MouseEvent) => {
+      const t = e.target as Node;
+      if (moreMenuRef.current?.contains(t)) return;
+      setMoreMenu(null);
+    };
+    const onEsc = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setMoreMenu(null);
+    };
+    window.addEventListener("mousedown", onDown);
+    window.addEventListener("keydown", onEsc);
+    return () => {
+      window.removeEventListener("mousedown", onDown);
+      window.removeEventListener("keydown", onEsc);
+    };
+  }, [moreMenu]);
+
+  useEffect(() => {
+    if (!moreMenu || !moreMenuRef.current) return;
+    const el = moreMenuRef.current;
+    const pad = 8;
+    const rect = el.getBoundingClientRect();
+    const vw = window.innerWidth;
+    const vh = window.innerHeight;
+    let left = moreMenu.x;
+    let top = moreMenu.y;
+    if (left + rect.width > vw - pad) left = Math.max(pad, vw - rect.width - pad);
+    if (top + rect.height > vh - pad) top = Math.max(pad, vh - rect.height - pad);
+    el.style.left = `${left}px`;
+    el.style.top = `${top}px`;
+    el.style.visibility = "visible";
+  }, [moreMenu]);
+
+  useEffect(() => {
+    if (!editingId) return;
+    const t = window.setTimeout(() => {
+      renameInputRef.current?.focus();
+      renameInputRef.current?.select();
+    }, 0);
+    return () => window.clearTimeout(t);
+  }, [editingId]);
 
   useEffect(() => {
     if (!searchOpen) return;
@@ -432,16 +504,18 @@ export function SidebarSessionHistory() {
   };
 
   const openSession = useCallback(
-    async (row: SidebarSessionRow) => {
+    async (row: SidebarSessionRow, forcePaneId?: string) => {
       setMainView("chat");
       const avatarId = String(row.avatar_id ?? "").trim() || null;
       const avatarName = resolveSidebarAvatarChipName(row, avatarNameById);
       const state = useAppStore.getState();
-      let pane = state.panes.find((p) => {
-        const pa = String(p.avatarId ?? "").trim();
-        const target = avatarId ?? "";
-        return pa === target;
-      });
+      let pane = forcePaneId
+        ? state.panes.find((p) => p.id === forcePaneId)
+        : state.panes.find((p) => {
+            const pa = String(p.avatarId ?? "").trim();
+            const target = avatarId ?? "";
+            return pa === target;
+          });
       let paneId = pane?.id ?? "";
       if (!pane) {
         paneId = addPane(avatarId, avatarName, "");
@@ -550,26 +624,181 @@ export function SidebarSessionHistory() {
     ]
   );
 
+  const commitRename = async (row: SidebarSessionRow) => {
+    const next = editingName.trim();
+    const prev = sidebarSessionLabel(row);
+    setEditingId(null);
+    if (!next || next === prev) return;
+    const api = window.agenticxDesktop;
+    if (typeof api.renameSession !== "function") return;
+    const result = await api.renameSession({ sessionId: row.session_id, name: next });
+    if (result.ok) {
+      setSessions((curr) =>
+        curr.map((item) =>
+          item.session_id === row.session_id ? { ...item, session_name: next } : item
+        )
+      );
+      bumpSessionCatalogRevision();
+      await loadSessions();
+    }
+  };
+
+  const togglePinSession = async (row: SidebarSessionRow) => {
+    const api = window.agenticxDesktop;
+    if (typeof api.pinSession !== "function") return;
+    const result = await api.pinSession({ sessionId: row.session_id, pinned: !row.pinned });
+    if (result.ok) {
+      bumpSessionCatalogRevision();
+      await loadSessions();
+    }
+  };
+
+  const deleteOneSession = async (row: SidebarSessionRow) => {
+    const api = window.agenticxDesktop;
+    if (typeof api.deleteSession !== "function") return;
+    const confirmResult =
+      typeof api.confirmDialog === "function"
+        ? await api.confirmDialog({
+            title: "确认删除会话",
+            message: "确认删除该会话？",
+            detail: "删除后不可恢复。",
+            confirmText: "删除",
+            cancelText: "取消",
+            destructive: true,
+          })
+        : { ok: true, confirmed: window.confirm("确认删除该会话？删除后不可恢复。") };
+    if (!confirmResult.confirmed) return;
+    const result = await api.deleteSession(row.session_id);
+    if (!result.ok) return;
+    clearDeletedSessionRefsInPanes([row.session_id]);
+    dropCachedSessionMessages(row.session_id);
+    bumpSessionCatalogRevision();
+    window.setTimeout(() => bumpSessionCatalogRevision(), 450);
+    await loadSessions();
+    await loadBindings();
+  };
+
+  const openMoreMenu = (row: SidebarSessionRow, anchor: HTMLElement) => {
+    const rect = anchor.getBoundingClientRect();
+    setMoreMenu({
+      sessionId: row.session_id,
+      x: Math.max(8, rect.right - 180),
+      y: rect.bottom + 4,
+    });
+  };
+
+  const runMoreAction = async (action: string, row: SidebarSessionRow) => {
+    setMoreMenu(null);
+    if (action === "rename") {
+      setEditingId(row.session_id);
+      setEditingName(sidebarSessionLabel(row));
+      return;
+    }
+    if (action === "open_new_tab") {
+      const avatarId = String(row.avatar_id ?? "").trim() || null;
+      const avatarName = resolveSidebarAvatarChipName(row, avatarNameById);
+      const paneId = addPane(avatarId, avatarName, "");
+      void openSession(row, paneId);
+      return;
+    }
+    if (action === "fork") {
+      const api = window.agenticxDesktop;
+      if (typeof api.forkSession !== "function") return;
+      const result = await api.forkSession({ sessionId: row.session_id });
+      if (result.ok) {
+        bumpSessionCatalogRevision();
+        await loadSessions();
+      }
+      return;
+    }
+    if (action === "toggle_feishu_binding") {
+      if (isAutomationPaneAvatarId(row.avatar_id)) return;
+      const target = row.session_id;
+      if (feishuBoundId === target) {
+        await window.agenticxDesktop.saveFeishuDesktopBinding({ sessionId: null });
+        setFeishuBoundId("");
+      } else {
+        const aid = String(row.avatar_id ?? "").trim();
+        await window.agenticxDesktop.saveFeishuDesktopBinding({
+          sessionId: target,
+          avatarId: aid.startsWith("group:") ? null : aid || null,
+          avatarName: row.avatar_name || null,
+          provider: row.provider || null,
+          model: row.model || null,
+        });
+        if (wechatBoundId === target) {
+          await window.agenticxDesktop.saveWechatDesktopBinding({ sessionId: null });
+          setWechatBoundId("");
+        }
+        setFeishuBoundId(target);
+      }
+      await loadBindings();
+      return;
+    }
+    if (action === "toggle_wechat_binding") {
+      if (isAutomationPaneAvatarId(row.avatar_id)) return;
+      const target = row.session_id;
+      if (wechatBoundId === target) {
+        await window.agenticxDesktop.saveWechatDesktopBinding({ sessionId: null });
+        setWechatBoundId("");
+      } else {
+        const aid = String(row.avatar_id ?? "").trim();
+        await window.agenticxDesktop.saveWechatDesktopBinding({
+          sessionId: target,
+          avatarId: aid.startsWith("group:") ? null : aid || null,
+          avatarName: row.avatar_name || null,
+          provider: row.provider || null,
+          model: row.model || null,
+        });
+        if (feishuBoundId === target) {
+          await window.agenticxDesktop.saveFeishuDesktopBinding({ sessionId: null });
+          setFeishuBoundId("");
+        }
+        setWechatBoundId(target);
+      }
+      await loadBindings();
+      return;
+    }
+    if (action === "archive_prior") {
+      const api = window.agenticxDesktop;
+      if (typeof api.archiveSessions !== "function") return;
+      const confirmResult =
+        typeof api.confirmDialog === "function"
+          ? await api.confirmDialog({
+              title: "归档此前会话",
+              message: "确认归档当前会话之前的历史会话吗？",
+              confirmText: "归档",
+              cancelText: "取消",
+            })
+          : { ok: true, confirmed: window.confirm("确认归档当前会话之前的历史会话吗？") };
+      if (!confirmResult.confirmed) return;
+      const result = await api.archiveSessions({
+        sessionId: row.session_id,
+        avatarId: row.avatar_id ?? null,
+      });
+      if (result.ok) {
+        bumpSessionCatalogRevision();
+        await loadSessions();
+      }
+    }
+  };
+
   const renderRow = (row: SidebarSessionRow, icon: "phone" | "chat" | "bubble") => {
     const active = row.session_id === activeSessionId;
     const chip = resolveSidebarAvatarChipName(row, avatarNameById);
     const title = sidebarSessionLabel(row);
     const checked = selectedSessionIds.includes(row.session_id);
+    const relative = formatSidebarRelativeTime(getSidebarSessionActivityTs(row));
+    const menuOpen = moreMenu?.sessionId === row.session_id;
+    const isEditing = editingId === row.session_id;
+    const showHoverActions = !selectMode && !isEditing;
+
     return (
-      <button
+      <div
         key={row.session_id}
-        type="button"
-        className={`flex w-full items-center gap-1.5 rounded-md px-2 py-1.5 text-left transition-colors ${
-          active || checked ? "bg-surface-hover" : "hover:bg-surface-hover/70"
+        className={`group/row flex w-full items-center gap-1 rounded-md px-2 py-1.5 transition-colors ${
+          active || checked || menuOpen ? "bg-surface-hover" : "hover:bg-surface-hover"
         }`}
-        onClick={() => {
-          if (selectMode) {
-            toggleSelectSession(row.session_id);
-            return;
-          }
-          void openSession(row);
-        }}
-        title={selectMode ? "点击勾选" : title}
       >
         {selectMode ? (
           <input
@@ -577,7 +806,6 @@ export function SidebarSessionHistory() {
             className="h-3.5 w-3.5 shrink-0 accent-[rgb(var(--theme-color-rgb,59,130,246))]"
             checked={checked}
             onChange={() => toggleSelectSession(row.session_id)}
-            onClick={(e) => e.stopPropagation()}
             title="点击勾选"
             aria-label={`选择 ${title}`}
           />
@@ -589,10 +817,105 @@ export function SidebarSessionHistory() {
         <span className="shrink-0 rounded px-1 py-px text-[10px] font-medium leading-tight text-text-muted bg-surface-card">
           {chip}
         </span>
-        <span className="min-w-0 flex-1 truncate text-[12px] text-text-primary">{title}</span>
-      </button>
+        {isEditing ? (
+          <input
+            ref={renameInputRef}
+            value={editingName}
+            onChange={(e) => setEditingName(e.target.value)}
+            onBlur={() => void commitRename(row)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") {
+                e.preventDefault();
+                void commitRename(row);
+              } else if (e.key === "Escape") {
+                e.preventDefault();
+                setEditingId(null);
+              }
+            }}
+            className="min-w-0 flex-1 rounded border border-border bg-surface-card px-1.5 py-0.5 text-[12px] text-text-primary outline-none focus:border-[rgba(var(--theme-color-rgb,59,130,246),0.55)]"
+            aria-label="重命名会话"
+          />
+        ) : (
+          <button
+            type="button"
+            className="min-w-0 flex-1 truncate text-left text-[12px] text-text-primary"
+            onClick={() => {
+              if (selectMode) {
+                toggleSelectSession(row.session_id);
+                return;
+              }
+              void openSession(row);
+            }}
+            title={selectMode ? "点击勾选" : title}
+          >
+            {title}
+          </button>
+        )}
+        {showHoverActions ? (
+          <>
+            <span
+              className={`shrink-0 text-[11px] text-text-faint tabular-nums ${
+                menuOpen ? "hidden" : "inline group-hover/row:hidden"
+              }`}
+            >
+              {relative}
+            </span>
+            <div
+              className={`shrink-0 items-center gap-0.5 ${
+                menuOpen ? "flex" : "hidden group-hover/row:flex"
+              }`}
+            >
+              <HoverTip label="更多">
+                <button
+                  type="button"
+                  className="inline-flex h-6 w-6 items-center justify-center rounded-md text-text-muted hover:bg-surface-card hover:text-text-strong"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    openMoreMenu(row, e.currentTarget);
+                  }}
+                  aria-label="更多"
+                >
+                  <MoreHorizontal className="h-3.5 w-3.5" strokeWidth={1.8} />
+                </button>
+              </HoverTip>
+              <HoverTip label={row.pinned ? "取消置顶" : "置顶"}>
+                <button
+                  type="button"
+                  className={`inline-flex h-6 w-6 items-center justify-center rounded-md hover:bg-surface-card ${
+                    row.pinned ? "text-amber-400" : "text-text-muted hover:text-text-strong"
+                  }`}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    void togglePinSession(row);
+                  }}
+                  aria-label={row.pinned ? "取消置顶" : "置顶"}
+                >
+                  <Pin className="h-3.5 w-3.5" strokeWidth={1.8} />
+                </button>
+              </HoverTip>
+              <HoverTip label="删除">
+                <button
+                  type="button"
+                  className="inline-flex h-6 w-6 items-center justify-center rounded-md text-text-muted hover:bg-surface-card hover:text-rose-400"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    void deleteOneSession(row);
+                  }}
+                  aria-label="删除"
+                >
+                  <Trash2 className="h-3.5 w-3.5" strokeWidth={1.8} />
+                </button>
+              </HoverTip>
+            </div>
+          </>
+        ) : null}
+      </div>
     );
   };
+
+  const moreMenuRow = moreMenu
+    ? sessions.find((s) => s.session_id === moreMenu.sessionId) ?? null
+    : null;
 
   const sectionHeader = (
     key: keyof CollapseState,
@@ -865,6 +1188,60 @@ export function SidebarSessionHistory() {
                   {opt.label}
                 </button>
               ))}
+            </div>,
+            document.body
+          )
+        : null}
+
+      {moreMenu && moreMenuRow
+        ? createPortal(
+            <div
+              ref={moreMenuRef}
+              className="fixed z-[230] w-[200px] rounded-xl border border-border bg-surface-base p-1 shadow-2xl"
+              style={{ left: moreMenu.x, top: moreMenu.y, visibility: "hidden" }}
+              onClick={(e) => e.stopPropagation()}
+            >
+              {(
+                [
+                  { id: "rename" as const, label: "重命名", icon: Pencil },
+                  { id: "open_new_tab" as const, label: "在新标签打开", icon: SquareArrowOutUpRight },
+                  { id: "fork" as const, label: "分叉会话", icon: GitBranch },
+                  ...(!isAutomationPaneAvatarId(moreMenuRow.avatar_id)
+                    ? [
+                        {
+                          id: "toggle_feishu_binding" as const,
+                          label:
+                            feishuBoundId === moreMenuRow.session_id
+                              ? "取消绑定飞书"
+                              : "绑定为飞书会话",
+                          icon: MessageSquare,
+                        },
+                        {
+                          id: "toggle_wechat_binding" as const,
+                          label:
+                            wechatBoundId === moreMenuRow.session_id
+                              ? "取消绑定微信"
+                              : "绑定为微信会话",
+                          icon: Smartphone,
+                        },
+                      ]
+                    : []),
+                  { id: "archive_prior" as const, label: "归档此前会话", icon: Archive },
+                ]
+              ).map((item) => {
+                const Icon = item.icon;
+                return (
+                  <button
+                    key={item.id}
+                    type="button"
+                    className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-[13px] text-text-primary hover:bg-surface-hover"
+                    onClick={() => void runMoreAction(item.id, moreMenuRow)}
+                  >
+                    <Icon className="h-3.5 w-3.5 shrink-0 text-text-faint" strokeWidth={1.75} />
+                    <span className="truncate">{item.label}</span>
+                  </button>
+                );
+              })}
             </div>,
             document.body
           )

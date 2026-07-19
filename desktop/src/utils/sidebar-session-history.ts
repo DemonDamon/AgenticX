@@ -67,6 +67,19 @@ export function getSidebarSessionActivityTs(row: Pick<SidebarSessionRow, "update
   return Number.isFinite(created) && created > 0 ? created : 0;
 }
 
+/** Relative activity label for sidebar history rows (unix seconds). */
+export function formatSidebarRelativeTime(tsSeconds: number, nowMs = Date.now()): string {
+  const ts = Number(tsSeconds);
+  if (!Number.isFinite(ts) || ts <= 0) return "";
+  const diff = Math.max(0, nowMs / 1000 - ts);
+  if (diff < 60) return "刚刚";
+  if (diff < 3600) return `${Math.floor(diff / 60)} 分钟前`;
+  if (diff < 86400) return `${Math.floor(diff / 3600)} 小时前`;
+  if (diff < 86400 * 30) return `${Math.floor(diff / 86400)} 天前`;
+  if (diff < 86400 * 365) return `${Math.floor(diff / (86400 * 30))} 个月前`;
+  return `${Math.floor(diff / (86400 * 365))} 年前`;
+}
+
 export function normalizeSidebarSessionRows(input: unknown): SidebarSessionRow[] {
   if (!Array.isArray(input)) return [];
   const rows: SidebarSessionRow[] = [];
