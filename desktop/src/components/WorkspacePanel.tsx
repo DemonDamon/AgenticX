@@ -244,8 +244,12 @@ export function WorkspacePanel({
     if (!isSidebarEmbed) return taskspaces;
     return taskspaces.filter((t) => t.id !== "default");
   }, [isSidebarEmbed, taskspaces]);
-  const showConversationEmpty =
-    isSidebarEmbed && workspaceLoadedOnce && !loading && visibleTaskspaces.length === 0;
+  /**
+   * Sidebar file-manage: show Trae empty UI as soon as there are no attached
+   * folders (including the initial listTaskspaces round-trip) so we never flash
+   * skeleton → empty. After load, attached folders replace this with the tree.
+   */
+  const showConversationEmpty = isSidebarEmbed && visibleTaskspaces.length === 0;
 
   const listViewFiles = useMemo(() => {
     if (viewMode !== "list" || !isSidebarEmbed) return null;
@@ -1324,7 +1328,7 @@ export function WorkspacePanel({
           ) : null}
         </div>
         <div className="min-h-0 flex-1 overflow-y-auto px-2 py-2">
-          {loading || !workspaceLoadedOnce ? (
+          {!isSidebarEmbed && (loading || !workspaceLoadedOnce) ? (
             <div className="space-y-2 py-1">
               {[0, 1, 2].map((i) => (
                 <div key={i} className="h-7 animate-pulse rounded-md bg-surface-hover" />
