@@ -5,6 +5,7 @@ import {
   Bookmark,
   Check,
   ChevronDown,
+  ChevronUp,
   Copy,
   Database,
   GitBranch,
@@ -101,6 +102,10 @@ import { Toast } from "./ds/Toast";
 import { extractClipboardImageFiles, withClipboardImageNames } from "../utils/clipboard-images";
 import { clipboardPlainTextForPaste } from "../utils/clipboard-plain-text";
 import { isKnownNonVisionChatModel } from "../utils/model-vision";
+import {
+  applySessionFindHighlights,
+  clearSessionFindHighlights,
+} from "../utils/session-find-highlight";
 import { isVideoFile } from "../utils/video-file";
 import {
   canStopCurrentRun,
@@ -2281,6 +2286,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
   const setPaneMessagePaging = useAppStore((s) => s.setPaneMessagePaging);
   const setPaneLoadingMessages = useAppStore((s) => s.setPaneLoadingMessages);
   const setPaneHistoryJumpMessageId = useAppStore((s) => s.setPaneHistoryJumpMessageId);
+  const setPaneHistorySearchTerms = useAppStore((s) => s.setPaneHistorySearchTerms);
   const setActiveAvatarId = useAppStore((s) => s.setActiveAvatarId);
   const setPaneContextInherited = useAppStore((s) => s.setPaneContextInherited);
   const toolRoundCount = useMemo(
@@ -2606,6 +2612,13 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
   /** 历史对话按钮 ref + 打开时的锚点位置，用于渲染 workbuddy 风格的浮层（不复用 historyWidth，浮层宽度固定）。 */
   const historyButtonRef = useRef<HTMLButtonElement | null>(null);
   const [historyAnchorRect, setHistoryAnchorRect] = useState<DOMRect | null>(null);
+  /** WorkBuddy-style in-session find bar (toolbar magnifier → highlight + N/M nav). */
+  const [sessionFindOpen, setSessionFindOpen] = useState(false);
+  const [sessionFindQuery, setSessionFindQuery] = useState("");
+  const [sessionFindMatchIndex, setSessionFindMatchIndex] = useState(0);
+  const [sessionFindMatchCount, setSessionFindMatchCount] = useState(0);
+  const sessionFindInputRef = useRef<HTMLInputElement | null>(null);
+  const sessionFindActiveIndexRef = useRef(0);
   /** 数字分身窗格顶栏：直接打开分身设置，无需再切到左侧「数字分身」画廊。 */
   const [avatarSettingsOpen, setAvatarSettingsOpen] = useState(false);
   const paneSettingsAvatar = useMemo(() => {
@@ -3102,6 +3115,8 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
 
   const highlightJumpKeyRef = useRef<string>("");
   useEffect(() => {
+    // In-session find bar owns scroll/highlight navigation while open.
+    if (sessionFindOpen) return;
     const terms = (pane.historySearchTerms ?? []).filter((t) => String(t || "").trim().length > 0);
     if (!pane.sessionId || terms.length === 0) {
       highlightJumpKeyRef.current = "";
@@ -3130,7 +3145,135 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
     return () => {
       cancelled = true;
     };
-  }, [pane.sessionId, pane.historySearchTerms, visibleMessages.length]);
+  }, [pane.sessionId, pane.historySearchTerms, visibleMessages.length, sessionFindOpen]);
+
+  const closeSessionFind = useCallback(() => {
+    const hadQuery = sessionFindQuery.trim().length > 0;
+    setSessionFindOpen(false);
+    setSessionFindQuery("");
+    setSessionFindMatchIndex(0);
+    setSessionFindMatchCount(0);
+    sessionFindActiveIndexRef.current = 0;
+    clearSessionFindHighlights();
+    // Only clear highlight terms if this find bar had driven them (preserve global-search jump).
+    if (hadQuery) setPaneHistorySearchTerms(paneId, []);
+  }, [paneId, sessionFindQuery, setPaneHistorySearchTerms]);
+
+  const openSessionFind = useCallback(() => {
+    setSessionFindOpen(true);
+    window.setTimeout(() => sessionFindInputRef.current?.focus(), 40);
+  }, []);
+
+  const stepSessionFindMatch = useCallback(
+    (delta: number) => {
+      if (sessionFindMatchCount <= 0) return;
+      const next =
+        (sessionFindMatchIndex + delta + sessionFindMatchCount) % sessionFindMatchCount;
+      sessionFindActiveIndexRef.current = next;
+      setSessionFindMatchIndex(next);
+      const applied = applySessionFindHighlights(
+        listRef.current,
+        sessionFindQuery,
+        next
+      );
+      if (applied.count !== sessionFindMatchCount) {
+        setSessionFindMatchCount(applied.count);
+        setSessionFindMatchIndex(applied.activeIndex);
+        sessionFindActiveIndexRef.current = applied.activeIndex;
+      }
+    },
+    [sessionFindMatchCount, sessionFindMatchIndex, sessionFindQuery]
+  );
+
+  // Apply mint highlights + expand matching tool cards when the find query changes.
+  useEffect(() => {
+    if (!sessionFindOpen) {
+      clearSessionFindHighlights();
+      return;
+    }
+    const q = sessionFindQuery.trim();
+    if (!q) {
+      clearSessionFindHighlights();
+      setSessionFindMatchCount(0);
+      setSessionFindMatchIndex(0);
+      sessionFindActiveIndexRef.current = 0;
+      return;
+    }
+    setPaneHistorySearchTerms(paneId, [q]);
+    let cancelled = false;
+    const run = () => {
+      if (cancelled) return;
+      const applied = applySessionFindHighlights(
+        listRef.current,
+        q,
+        sessionFindActiveIndexRef.current
+      );
+      setSessionFindMatchCount(applied.count);
+      setSessionFindMatchIndex(applied.activeIndex);
+      sessionFindActiveIndexRef.current = applied.activeIndex;
+    };
+    // Wait a frame so tool cards can expand (historySearchTerms) before ranging text.
+    const t = window.setTimeout(() => requestAnimationFrame(run), 40);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(t);
+    };
+  }, [
+    sessionFindOpen,
+    sessionFindQuery,
+    visibleMessages.length,
+    streamedAssistantText,
+    paneId,
+    setPaneHistorySearchTerms,
+  ]);
+
+  // ⌘F / Ctrl+F opens in-session find when this pane is active; Esc closes the bar.
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      const isFindChord =
+        (event.metaKey || event.ctrlKey) &&
+        !event.altKey &&
+        !event.shiftKey &&
+        event.key.toLowerCase() === "f";
+      if (isFindChord) {
+        const activePaneId = useAppStore.getState().activePaneId;
+        if (activePaneId !== paneId) return;
+        const target = event.target as HTMLElement | null;
+        // Allow native find inside true text fields outside the chat pane.
+        if (
+          target &&
+          !paneRef.current?.contains(target) &&
+          (target.tagName === "INPUT" ||
+            target.tagName === "TEXTAREA" ||
+            target.isContentEditable)
+        ) {
+          return;
+        }
+        event.preventDefault();
+        if (sessionFindOpen) {
+          sessionFindInputRef.current?.focus();
+          sessionFindInputRef.current?.select();
+        } else {
+          openSessionFind();
+        }
+        return;
+      }
+      if (event.key === "Escape" && sessionFindOpen) {
+        const activePaneId = useAppStore.getState().activePaneId;
+        if (activePaneId !== paneId) return;
+        event.preventDefault();
+        closeSessionFind();
+      }
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [paneId, sessionFindOpen, openSessionFind, closeSessionFind]);
+
+  useEffect(() => {
+    return () => {
+      clearSessionFindHighlights();
+    };
+  }, []);
 
   /** Scroll + flash when history panel jumps to a user query in this session. */
   const historyJumpInFlightRef = useRef<string>("");
@@ -10346,6 +10489,87 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
             >
               <Share2 className="h-[18px] w-[18px]" strokeWidth={1.8} />
             </button>
+            {sessionFindOpen ? (
+              <div
+                className="flex h-8 items-center gap-1 rounded-lg border border-border bg-surface-card px-1.5 shadow-sm"
+                role="search"
+                aria-label="会话内搜索"
+              >
+                <Search className="ml-0.5 h-3.5 w-3.5 shrink-0 text-text-faint" strokeWidth={1.8} />
+                <input
+                  ref={sessionFindInputRef}
+                  type="search"
+                  value={sessionFindQuery}
+                  onChange={(e) => {
+                    sessionFindActiveIndexRef.current = 0;
+                    setSessionFindMatchIndex(0);
+                    setSessionFindQuery(e.target.value);
+                  }}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") {
+                      e.preventDefault();
+                      stepSessionFindMatch(e.shiftKey ? -1 : 1);
+                    } else if (e.key === "Escape") {
+                      e.preventDefault();
+                      closeSessionFind();
+                    }
+                  }}
+                  placeholder="搜索…"
+                  className="w-[112px] bg-transparent text-[12px] text-text-strong outline-none placeholder:text-text-faint"
+                  aria-label="在当前会话中搜索"
+                />
+                <span className="min-w-[2.25rem] shrink-0 text-center text-[11px] tabular-nums text-text-faint">
+                  {sessionFindQuery.trim()
+                    ? sessionFindMatchCount > 0
+                      ? `${sessionFindMatchIndex + 1}/${sessionFindMatchCount}`
+                      : "0/0"
+                    : ""}
+                </span>
+                <button
+                  type="button"
+                  className="rounded p-0.5 text-text-faint transition hover:bg-surface-hover hover:text-text-strong disabled:opacity-30"
+                  disabled={sessionFindMatchCount <= 0}
+                  onClick={() => stepSessionFindMatch(-1)}
+                  title="上一个匹配"
+                  aria-label="上一个匹配"
+                >
+                  <ChevronUp className="h-3.5 w-3.5" strokeWidth={2} />
+                </button>
+                <button
+                  type="button"
+                  className="rounded p-0.5 text-text-faint transition hover:bg-surface-hover hover:text-text-strong disabled:opacity-30"
+                  disabled={sessionFindMatchCount <= 0}
+                  onClick={() => stepSessionFindMatch(1)}
+                  title="下一个匹配"
+                  aria-label="下一个匹配"
+                >
+                  <ChevronDown className="h-3.5 w-3.5" strokeWidth={2} />
+                </button>
+                <button
+                  type="button"
+                  className="rounded p-0.5 text-text-faint transition hover:bg-surface-hover hover:text-text-strong"
+                  onClick={closeSessionFind}
+                  title="关闭搜索"
+                  aria-label="关闭搜索"
+                >
+                  <X className="h-3.5 w-3.5" strokeWidth={2} />
+                </button>
+              </div>
+            ) : (
+              <button
+                type="button"
+                className="agx-topbar-btn !px-[5px]"
+                onClick={openSessionFind}
+                title={
+                  typeof navigator !== "undefined" && /Mac|iPhone|iPad/.test(navigator.platform)
+                    ? "会话内搜索 (⌘F)"
+                    : "会话内搜索 (Ctrl+F)"
+                }
+                aria-label="会话内搜索"
+              >
+                <Search className="h-[18px] w-[18px]" strokeWidth={1.8} />
+              </button>
+            )}
             <button
               ref={historyButtonRef}
               className={`agx-topbar-btn !px-[5px] ${pane.historyOpen ? "agx-topbar-btn--active" : ""}`}

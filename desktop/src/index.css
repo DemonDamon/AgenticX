@@ -141,6 +141,16 @@ body {
   color: inherit;
 }
 
+/* In-pane find (CSS Custom Highlight API) — WorkBuddy-style mint active match. */
+::highlight(agx-session-find) {
+  background-color: color-mix(in srgb, #6ee7b7 42%, transparent);
+  color: inherit;
+}
+::highlight(agx-session-find-active) {
+  background-color: color-mix(in srgb, #34d399 72%, transparent);
+  color: inherit;
+}
+
 /* One-shot flash when jumping to a user query from the history navigator. */
 .agx-message-jump-flash {
   animation: agx-message-jump-flash 1.2s ease-out;
