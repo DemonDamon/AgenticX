@@ -352,10 +352,7 @@ export function WorkPanel({
       : null;
 
   return (
-    <div
-      className="flex h-full min-h-0 flex-col bg-surface-card"
-      style={tintColor ? { backgroundColor: tintColor } : undefined}
-    >
+    <div className="flex h-full min-h-0 flex-col bg-surface-sidebar">
       <div className="flex h-10 shrink-0 items-center gap-1 border-b border-border px-1.5">
         <button
           type="button"
