@@ -412,6 +412,7 @@ const FALLBACK_PANE: ChatPaneState = {
   activeTerminalTabId: null,
   sessionTokens: { input: 0, output: 0 },
   historySearchTerms: [],
+  historyJumpMessageId: null,
   loadingMessages: false,
   oldestLoadedIndex: 0,
   hasOlderMessages: false,
@@ -2279,6 +2280,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
   const prependPaneMessages = useAppStore((s) => s.prependPaneMessages);
   const setPaneMessagePaging = useAppStore((s) => s.setPaneMessagePaging);
   const setPaneLoadingMessages = useAppStore((s) => s.setPaneLoadingMessages);
+  const setPaneHistoryJumpMessageId = useAppStore((s) => s.setPaneHistoryJumpMessageId);
   const setActiveAvatarId = useAppStore((s) => s.setActiveAvatarId);
   const setPaneContextInherited = useAppStore((s) => s.setPaneContextInherited);
   const toolRoundCount = useMemo(
@@ -3129,6 +3131,101 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
       cancelled = true;
     };
   }, [pane.sessionId, pane.historySearchTerms, visibleMessages.length]);
+
+  /** Scroll + flash when history panel jumps to a user query in this session. */
+  const historyJumpInFlightRef = useRef<string>("");
+  useEffect(() => {
+    const targetId = String(pane.historyJumpMessageId ?? "").trim();
+    if (!targetId || !pane.sessionId) {
+      historyJumpInFlightRef.current = "";
+      return;
+    }
+    const jumpKey = `${pane.sessionId}::${targetId}`;
+    if (historyJumpInFlightRef.current === jumpKey) return;
+    historyJumpInFlightRef.current = jumpKey;
+    let cancelled = false;
+
+    const flashAndClear = (el: HTMLElement) => {
+      el.scrollIntoView({ behavior: "smooth", block: "center", inline: "nearest" });
+      // Keep unpinned so the follow-up stream/auto-scroll effect does not yank us back.
+      autoScrollPinnedRef.current = false;
+      el.classList.remove("agx-message-jump-flash");
+      // Force reflow so re-triggering the same class still animates.
+      void el.offsetWidth;
+      el.classList.add("agx-message-jump-flash");
+      window.setTimeout(() => {
+        el.classList.remove("agx-message-jump-flash");
+      }, 1300);
+      setPaneHistoryJumpMessageId(paneId, null);
+      // Allow jumping to the same message id again later.
+      historyJumpInFlightRef.current = "";
+      window.setTimeout(() => {
+        autoScrollPinnedRef.current = false;
+        flushJumpToBottomFab();
+        autoScrollPinnedRef.current = false;
+      }, 350);
+    };
+
+    const ensureLoadedThenScroll = async () => {
+      const findEl = () =>
+        listRef.current?.querySelector(
+          `[data-message-id="${CSS.escape(targetId)}"]`
+        ) as HTMLElement | null;
+
+      let el = findEl();
+      if (!el && pane.hasOlderMessages) {
+        try {
+          const full = await window.agenticxDesktop.loadSessionMessages(pane.sessionId);
+          if (cancelled) return;
+          if (full.ok && Array.isArray(full.messages)) {
+            const sid = pane.sessionId;
+            const mapped = full.messages.map((item, index) =>
+              mapLoadedSessionMessage(item as LoadedSessionMessage, sid, index, sid)
+            );
+            setPaneMessages(paneId, mapped);
+            setPaneMessagePaging(paneId, {
+              oldestLoadedIndex: 0,
+              hasOlderMessages: false,
+              loadingOlderMessages: false,
+            });
+          }
+        } catch {
+          /* fall through to retry DOM query */
+        }
+      }
+
+      const run = (attempt = 0) => {
+        if (cancelled) return;
+        el = findEl();
+        if (el) {
+          flashAndClear(el);
+          return;
+        }
+        if (attempt < 8) {
+          window.setTimeout(() => run(attempt + 1), 60);
+          return;
+        }
+        setPaneHistoryJumpMessageId(paneId, null);
+      };
+      requestAnimationFrame(() => {
+        window.setTimeout(() => run(0), 20);
+      });
+    };
+
+    void ensureLoadedThenScroll();
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    pane.historyJumpMessageId,
+    pane.sessionId,
+    pane.hasOlderMessages,
+    paneId,
+    setPaneHistoryJumpMessageId,
+    setPaneMessages,
+    setPaneMessagePaging,
+    flushJumpToBottomFab,
+  ]);
 
   useEffect(() => {
     return () => {
@@ -6230,6 +6327,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
         return (
           <div
             key={message.id}
+            data-message-id={message.id}
             className={`group/sel relative${actionRhythmBodyTail ? ` ${ASSISTANT_BODY_TAIL_CLASS}` : ""}`}
           >
             {rowSelectable && !isSelected && (
@@ -10252,7 +10350,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
               ref={historyButtonRef}
               className={`agx-topbar-btn !px-[5px] ${pane.historyOpen ? "agx-topbar-btn--active" : ""}`}
               onClick={toggleHistorySidePanel}
-              title="切换历史面板"
+              title="本会话提问导航"
             >
               <History className="h-[18px] w-[18px]" strokeWidth={1.8} />
             </button>

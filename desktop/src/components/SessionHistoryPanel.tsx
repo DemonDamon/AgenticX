@@ -1,1332 +1,148 @@
-import { ChevronRight, ListChecks, MessageSquareMore, Smartphone } from "lucide-react";
-import { memo, useEffect, useMemo, useRef, useState } from "react";
-import { createPortal } from "react-dom";
+import { MessageSquareMore } from "lucide-react";
+import { memo, useEffect, useMemo, useState } from "react";
 import { useAppStore, type ChatPane, type Message } from "../store";
-import { isAutomationPaneAvatarId } from "../utils/automation-pane";
 import { mapLoadedSessionMessage, type LoadedSessionMessage } from "../utils/session-message-map";
-import { getVisibleBoundSession, isSessionVisibleInPane } from "../utils/session-history-logic";
-import { clearPaneLazyInheritParent, markPaneAwaitingFreshSession } from "../utils/pane-fresh-session";
-import { FeishuBadge } from "./FeishuBadge";
-import { META_AGENT_DISPLAY_NAME } from "../constants/branding";
-import { resolveMetaDisplayName } from "../utils/display-name";
-import { avatarPreloadKey } from "../utils/splash-preload-core";
-import { isPaneStillOnSession } from "../utils/session-pane-guard";
-import {
-  cacheSessionTail,
-  cancelPrefetchSessionTail,
-  prefetchSessionTailsBatch,
-  resolveSessionTailForSwitch,
-  getCachedSessionTail,
-  schedulePrefetchSessionTail,
-} from "../utils/session-tail-cache";
 import { FitText } from "./ui/FitText";
-
-/** Cursor-style per-group pagination: show this many rows per group, "... More" reveals another page. */
-const HISTORY_GROUP_PAGE_SIZE = 6;
-
-function timeAgo(ts: number): string {
-  const diff = Date.now() / 1000 - ts;
-  if (diff < 60) return "刚刚";
-  if (diff < 3600) return `${Math.floor(diff / 60)} 分钟前`;
-  if (diff < 86400) return `${Math.floor(diff / 3600)} 小时前`;
-  return `${Math.floor(diff / 86400)} 天前`;
-}
 
 type Props = {
   pane: ChatPane;
   tintColor?: string;
 };
 
-type SessionRow = {
-  session_id: string;
-  avatar_id: string | null;
-  avatar_name?: string | null;
-  session_name: string | null;
-  updated_at: number;
-  created_at?: number;
-  pinned?: boolean;
-  archived?: boolean;
-  execution_state?: "idle" | "running" | "interrupted";
-  provider?: string;
-  model?: string;
-  session_mode?: "code_dev" | "daily_office";
+type QueryNavItem = {
+  id: string;
+  index: number;
+  text: string;
+  preview: string;
+  timestamp?: number;
 };
 
-type SessionContextMenu = {
-  x: number;
-  y: number;
-  item: SessionRow;
-};
-
-type HistoryGroupKey =
-  | "pinned"
-  | "today"
-  | "yesterday"
-  | "previous7Days"
-  | "previous30Days"
-  | "older"
-  | "archived";
-
-type GroupedSessions = {
-  pinned: SessionRow[];
-  today: SessionRow[];
-  yesterday: SessionRow[];
-  previous7Days: SessionRow[];
-  previous30Days: SessionRow[];
-  older: SessionRow[];
-  archived: SessionRow[];
-};
-
-function sortRowsByActivityDesc(rows: SessionRow[]): SessionRow[] {
-  return [...rows].sort(
-    (a, b) => getSessionActivityTimestamp(b) - getSessionActivityTimestamp(a)
-  );
-}
-
-function resolveGroupVisibleCount(
-  groupKey: string,
-  itemCount: number,
-  searchActive: boolean,
-  visibleCounts: Record<string, number>
-): number {
-  if (searchActive || itemCount <= 0) return itemCount;
-  const expanded = visibleCounts[groupKey];
-  const page =
-    typeof expanded === "number" && expanded > 0 ? expanded : HISTORY_GROUP_PAGE_SIZE;
-  return Math.min(itemCount, page);
-}
-
-function getSessionCreatedTimestamp(row: SessionRow): number {
-  const created = Number(row.created_at ?? 0);
-  if (Number.isFinite(created) && created > 0) return created;
-  const updated = Number(row.updated_at ?? 0);
-  if (Number.isFinite(updated) && updated > 0) return updated;
-  return 0;
-}
-
-/** Last activity time — used for Today / Previous 7 days grouping and list ordering. */
-function getSessionActivityTimestamp(row: SessionRow): number {
-  const updated = Number(row.updated_at ?? 0);
-  if (Number.isFinite(updated) && updated > 0) return updated;
-  return getSessionCreatedTimestamp(row);
-}
-
-function sortSessionRows(rows: SessionRow[]): SessionRow[] {
-  return [...rows].sort((a, b) => {
-    if (a.pinned !== b.pinned) return a.pinned ? -1 : 1;
-    const tsDiff = getSessionActivityTimestamp(b) - getSessionActivityTimestamp(a);
-    if (tsDiff !== 0) return tsDiff;
-    return b.session_id.localeCompare(a.session_id);
-  });
-}
-
-const PLACEHOLDER_SESSION_TITLES = new Set(
-  [
-    "微信会话",
-    "微信对话",
-    "微信聊天",
-    "飞书会话",
-    "飞书对话",
-    "新对话",
-    "新会话",
-    "new chat",
-    "new conversation",
-  ].map((s) => s.toLowerCase()),
-);
-
-const SKILL_DISPLAY_NAME_MAP: Record<string, string> = {
-  "infra-monitor": "基础设施监控技能",
-};
-
-function resolveSkillDisplayName(skillPath: string): string {
-  const cleaned = String(skillPath || "").replace(/^\/+|\/+$/g, "");
-  if (!cleaned) return "技能调用";
-  const segments = cleaned.split("/").filter(Boolean);
-  const key = segments[segments.length - 1] || cleaned;
-  return SKILL_DISPLAY_NAME_MAP[key] || "技能调用";
-}
-
-function sanitizeSessionDisplayText(input: string): string {
+function sanitizeQueryText(input: string): string {
   const raw = String(input || "");
   if (!raw) return "";
-  const withReasoningLabel = raw
-    .replace(/<\s*think\s*>/gi, "思考：")
-    .replace(/<\s*\/\s*think\s*>/gi, "");
-  const withSkillName = withReasoningLabel.replace(
-    /@skill:\/\/([a-zA-Z0-9._/-]+)/gi,
-    (_m, skillPath: string) => `[${resolveSkillDisplayName(skillPath)}]`
-  );
-  const compact = withSkillName.replace(/\s+/g, " ").trim();
-  if (compact === "思考：") return "";
-  return compact;
+  return raw
+    .replace(/<\s*think\s*>[\s\S]*?<\s*\/\s*think\s*>/gi, "")
+    .replace(/<\s*think\s*>/gi, "")
+    .replace(/<\s*\/\s*think\s*>/gi, "")
+    .replace(/\s+/g, " ")
+    .trim();
 }
 
-function isPlaceholderSessionTitle(name: string): boolean {
-  const t = sanitizeSessionDisplayText(name).trim();
-  if (!t) return true;
-  const lower = t.toLowerCase();
-  if (PLACEHOLDER_SESSION_TITLES.has(lower)) return true;
-  if (t.startsWith("新会话") || t.startsWith("新对话")) return true;
-  if (lower.startsWith("new session") || lower.startsWith("new chat")) return true;
-  return false;
+function toQueryPreview(text: string, maxLen = 72): string {
+  if (text.length <= maxLen) return text;
+  return `${text.slice(0, Math.max(1, maxLen - 1))}…`;
 }
 
-/** Title for history rows: real name, or short id — never generic 「新会话」. */
-function sessionHistoryLabel(item: SessionRow): string {
-  const raw = sanitizeSessionDisplayText(item.session_name || "").trim();
-  if (raw && !isPlaceholderSessionTitle(raw)) return raw;
-  const compact = item.session_id.replace(/-/g, "");
-  const hint = compact.slice(0, 8);
-  return hint ? `·${hint}` : item.session_id.slice(0, 6);
-}
-
-/** English / 中文 aliases so e.g. "Feishu" matches 飞书 binding rows. */
-function expandedSearchNeedles(query: string): string[] {
-  const q = query.trim();
-  if (!q) return [];
-  const lower = q.toLowerCase();
-  const needles = new Set<string>([q, lower]);
-  const hasFeishu =
-    /\bfeishu\b/i.test(q) || /\blark\b/i.test(q) || q.includes("飞书");
-  const hasWechat =
-    /\bwechat\b/i.test(q) || /\bweixin\b/i.test(q) || q.includes("微信");
-  if (hasFeishu) {
-    ["feishu", "lark", "飞书", "飞书绑定"].forEach((x) => needles.add(x.toLowerCase()));
-  }
-  if (hasWechat) {
-    ["wechat", "weixin", "微信", "微信绑定"].forEach((x) => needles.add(x.toLowerCase()));
-  }
-  return Array.from(needles);
-}
-
-function sessionSearchHaystack(
-  item: SessionRow,
-  feishuSessionId: string | null,
-  wechatSessionId: string | null
-): string {
-  const parts = [
-    item.session_name,
-    sessionHistoryLabel(item),
-    item.avatar_name,
-    item.session_id,
-    item.session_id.replace(/-/g, ""),
-    item.avatar_id,
-  ]
-    .filter((x): x is string => typeof x === "string" && x.length > 0)
-    .join(" ");
-  let extra = "";
-  if (feishuSessionId && item.session_id === feishuSessionId) {
-    extra += " 飞书 feishu lark 飞书绑定 绑定";
-  }
-  if (wechatSessionId && item.session_id === wechatSessionId) {
-    extra += " 微信 wechat weixin 微信绑定 绑定";
-  }
-  return `${parts}${extra}`.toLowerCase();
-}
-
-function sessionMatchesQuery(
-  item: SessionRow,
-  needles: string[],
-  feishuSessionId: string | null,
-  wechatSessionId: string | null
-): boolean {
-  if (needles.length === 0) return true;
-  const hay = sessionSearchHaystack(item, feishuSessionId, wechatSessionId);
-  return needles.some((n) => {
-    const t = n.trim();
-    if (!t) return false;
-    return hay.includes(t.toLowerCase());
-  });
-}
-
-function buildHighlightTermsFromQuery(query: string): string[] {
-  const raw = String(query || "").trim();
-  if (!raw) return [];
-  const terms = new Set<string>([raw]);
-  for (const token of raw.split(/\s+/)) {
-    const t = token.trim();
-    if (t.length >= 2) terms.add(t);
-  }
-  return Array.from(terms);
-}
-
-function isSessionIdOnlyHistoryLabel(item: SessionRow): boolean {
-  const raw = (item.session_name || "").trim();
-  if (raw && !isPlaceholderSessionTitle(raw)) return false;
-  const label = sessionHistoryLabel(item);
-  return /^·[0-9a-f]{6,8}$/i.test(label.trim());
-}
-
-function normalizeSessionRows(input: unknown): SessionRow[] {
-  if (!Array.isArray(input)) return [];
-  const rows: SessionRow[] = [];
-  for (const raw of input) {
-    if (!raw || typeof raw !== "object") continue;
-    const row = raw as Record<string, unknown>;
-    const sessionId = String(row.session_id ?? "").trim();
-    if (!sessionId) continue;
-    const avatarId = row.avatar_id == null ? null : String(row.avatar_id);
-    const avatarName = row.avatar_name == null ? null : String(row.avatar_name);
-    const sessionName = row.session_name == null ? null : String(row.session_name);
-    const updatedAtRaw = Number(row.updated_at ?? 0);
-    const createdAtRaw = Number(row.created_at ?? updatedAtRaw);
-    rows.push({
-      session_id: sessionId,
-      avatar_id: avatarId,
-      avatar_name: avatarName,
-      session_name: sessionName,
-      updated_at: Number.isFinite(updatedAtRaw) && updatedAtRaw > 0 ? updatedAtRaw : 0,
-      created_at: Number.isFinite(createdAtRaw) && createdAtRaw > 0 ? createdAtRaw : undefined,
-      pinned: Boolean(row.pinned),
-      archived: Boolean(row.archived),
-      execution_state:
-        row.execution_state === "running" || row.execution_state === "interrupted"
-          ? row.execution_state
-          : "idle",
-      provider: typeof row.provider === "string" ? row.provider : "",
-      model: typeof row.model === "string" ? row.model : "",
-      session_mode:
-        row.session_mode === "code_dev" || row.session_mode === "daily_office"
-          ? row.session_mode
-          : undefined,
+function extractUserQueries(messages: Message[]): QueryNavItem[] {
+  const items: QueryNavItem[] = [];
+  for (const msg of messages) {
+    if (msg.role !== "user") continue;
+    const text = sanitizeQueryText(msg.content || "");
+    if (!text) continue;
+    const id = String(msg.id || "").trim();
+    if (!id || id.startsWith("__")) continue;
+    items.push({
+      id,
+      index: items.length + 1,
+      text,
+      preview: toQueryPreview(text),
+      timestamp: msg.timestamp,
     });
   }
-  return sortSessionRows(rows);
+  return items;
+}
+
+function queryMatchesSearch(item: QueryNavItem, query: string): boolean {
+  const q = query.trim().toLowerCase();
+  if (!q) return true;
+  return item.text.toLowerCase().includes(q) || String(item.index).includes(q);
 }
 
 export const SessionHistoryPanel = memo(function SessionHistoryPanel({ pane, tintColor }: Props) {
-  const sessionCatalogRevision = useAppStore((s) => s.sessionCatalogRevision);
-  const sessionHistoryHints = useAppStore((s) => s.sessionHistoryHints);
-  const clearSessionHistoryHint = useAppStore((s) => s.clearSessionHistoryHint);
-  const setPaneSessionId = useAppStore((s) => s.setPaneSessionId);
-  const setPaneSessionMode = useAppStore((s) => s.setPaneSessionMode);
-  const setPaneMessages = useAppStore((s) => s.setPaneMessages);
-  const setPaneLoadingMessages = useAppStore((s) => s.setPaneLoadingMessages);
-  const setPaneMessagePaging = useAppStore((s) => s.setPaneMessagePaging);
-  const resetPaneMessagePaging = useAppStore((s) => s.resetPaneMessagePaging);
-  const getCachedSessionMessages = useAppStore((s) => s.getCachedSessionMessages);
-  const cacheSessionMessages = useAppStore((s) => s.cacheSessionMessages);
-  const dropCachedSessionMessages = useAppStore((s) => s.dropCachedSessionMessages);
-  const setPaneHistorySearchTerms = useAppStore((s) => s.setPaneHistorySearchTerms);
-  const addPane = useAppStore((s) => s.addPane);
-  const corePreloadAttempted = useAppStore((s) => s.corePreloadAttempted);
-  const preloadedSessionsKey = avatarPreloadKey(pane.avatarId ?? null);
-  const preloadedSessionsRaw = useAppStore(
-    (s) => s.preloadedSessionsByAvatarKey[preloadedSessionsKey]
+  const setPaneHistoryJumpMessageId = useAppStore((s) => s.setPaneHistoryJumpMessageId);
+  const togglePaneHistory = useAppStore((s) => s.togglePaneHistory);
+
+  const [searchQuery, setSearchQuery] = useState("");
+  const [fetchedQueries, setFetchedQueries] = useState<QueryNavItem[] | null>(null);
+  const [fetchAttempted, setFetchAttempted] = useState(false);
+
+  const liveQueries = useMemo(
+    () => extractUserQueries(pane.messages ?? []),
+    [pane.messages]
   );
 
-  const initialSessionsFromPreload = (): SessionRow[] => {
-    if (!corePreloadAttempted || preloadedSessionsRaw === undefined) return [];
-    return normalizeSessionRows(preloadedSessionsRaw).filter((row) =>
-      isSessionVisibleInPane(row, pane.avatarId ?? null)
-    );
-  };
+  // Prefer a full-session snapshot when available (covers paged-out older turns),
+  // but fall back to live pane messages so newly sent queries appear instantly.
+  const queries = useMemo(() => {
+    if (!fetchedQueries || fetchedQueries.length === 0) return liveQueries;
+    if (liveQueries.length === 0) return fetchedQueries;
+    const byId = new Map<string, QueryNavItem>();
+    for (const item of fetchedQueries) byId.set(item.id, item);
+    for (const item of liveQueries) byId.set(item.id, item);
+    // Keep chronological order: prefer live order when it is a superset/extension,
+    // otherwise rebuild from merged map using live-first then fetched-only.
+    const liveIds = new Set(liveQueries.map((q) => q.id));
+    const onlyFetched = fetchedQueries.filter((q) => !liveIds.has(q.id));
+    const merged = [...onlyFetched, ...liveQueries];
+    return merged.map((item, idx) => ({ ...item, index: idx + 1 }));
+  }, [fetchedQueries, liveQueries]);
 
-  const [sessionsLoadAttempted, setSessionsLoadAttempted] = useState(
-    () => corePreloadAttempted && preloadedSessionsRaw !== undefined
+  const filteredQueries = useMemo(
+    () => queries.filter((item) => queryMatchesSearch(item, searchQuery)),
+    [queries, searchQuery]
   );
-  const [sessions, setSessions] = useState<SessionRow[]>(initialSessionsFromPreload);
-  const [feishuBoundSessionId, setFeishuBoundSessionId] = useState<string | null>(null);
-  const [wechatBoundSessionId, setWechatBoundSessionId] = useState<string | null>(null);
-  const [editingId, setEditingId] = useState<string | null>(null);
-  const [editingName, setEditingName] = useState("");
-  const [contextMenu, setContextMenu] = useState<SessionContextMenu | null>(null);
-  const [unreadSessionIds, setUnreadSessionIds] = useState<string[]>([]);
-  const [selectMode, setSelectMode] = useState(false);
-  const [selectedSessionIds, setSelectedSessionIds] = useState<string[]>([]);
-  const [batchDeleting, setBatchDeleting] = useState(false);
-  const [sessionSearchQuery, setSessionSearchQuery] = useState("");
-  const [groupVisibleCounts, setGroupVisibleCounts] = useState<Partial<Record<HistoryGroupKey, number>>>(
-    {}
-  );
-  const [collapsedGroups, setCollapsedGroups] = useState<Partial<Record<HistoryGroupKey, boolean>>>(
-    {}
-  );
-  const [messageSearchSnippets, setMessageSearchSnippets] = useState<Record<string, string>>({});
-  const messageSearchReq = useRef(0);
-  const contextMenuRef = useRef<HTMLDivElement | null>(null);
-
-  useEffect(() => {
-    if (!contextMenu || !contextMenuRef.current) return;
-    const el = contextMenuRef.current;
-    const pad = 8;
-    const rect = el.getBoundingClientRect();
-    const vw = window.innerWidth;
-    const vh = window.innerHeight;
-    let left = contextMenu.x;
-    let top = contextMenu.y;
-    if (left + rect.width > vw - pad) left = Math.max(pad, vw - rect.width - pad);
-    if (top + rect.height > vh - pad) top = Math.max(pad, vh - rect.height - pad);
-    el.style.left = `${left}px`;
-    el.style.top = `${top}px`;
-    el.style.visibility = "visible";
-  }, [contextMenu]);
-
-  const title = useMemo(() => resolveMetaDisplayName(pane.avatarName), [pane.avatarName]);
-
-  const feishuMarkedSessionId = useMemo(() => {
-    if (isAutomationPaneAvatarId(pane.avatarId)) return null;
-    const sid = feishuBoundSessionId;
-    if (!sid) return null;
-    const row = sessions.find((s) => s.session_id === sid);
-    if (row && isAutomationPaneAvatarId(row.avatar_id)) return null;
-    return sid;
-  }, [pane.avatarId, feishuBoundSessionId, sessions]);
-
-  const wechatMarkedSessionId = useMemo(() => {
-    if (isAutomationPaneAvatarId(pane.avatarId)) return null;
-    const sid = wechatBoundSessionId;
-    if (!sid) return null;
-    const row = sessions.find((s) => s.session_id === sid);
-    if (row && isAutomationPaneAvatarId(row.avatar_id)) return null;
-    return sid;
-  }, [pane.avatarId, wechatBoundSessionId, sessions]);
-
-  const sessionSearchTrim = sessionSearchQuery.trim();
-  const sessionSearchNeedles = useMemo(
-    () => expandedSearchNeedles(sessionSearchTrim),
-    [sessionSearchTrim]
-  );
-
-  const sessionsMatchingSearch = useMemo(() => {
-    if (!sessionSearchTrim) return sessions;
-    const contentHitIds = new Set(Object.keys(messageSearchSnippets));
-    return sessions.filter(
-      (item) =>
-        sessionMatchesQuery(item, sessionSearchNeedles, feishuMarkedSessionId, wechatMarkedSessionId) ||
-        contentHitIds.has(item.session_id)
-    );
-  }, [
-    sessions,
-    sessionSearchTrim,
-    sessionSearchNeedles,
-    feishuMarkedSessionId,
-    wechatMarkedSessionId,
-    messageSearchSnippets,
-  ]);
-
-  const sessionsWithHints = useMemo(() => {
-    if (Object.keys(sessionHistoryHints).length === 0) return sessionsMatchingSearch;
-    const mapped = sessionsMatchingSearch.map((item) => {
-      const hint = sessionHistoryHints[item.session_id];
-      if (!hint) return item;
-      // Once the backend's updated_at has caught up to this optimistic turn, trust
-      // the real backend execution_state (idle / interrupted / failed). Forcing
-      // "running" purely on hint existence leaves a stranded spinner whenever the
-      // separate clearing pass in loadSessions misses (panel closed, interrupted
-      // turn, pane switch, etc.) — the exact "answered but still spinning" bug.
-      const apiActivity = Number(item.updated_at ?? 0);
-      const backendCaughtUp = apiActivity >= hint.activityAt - 2;
-      return {
-        ...item,
-        updated_at: Math.max(apiActivity, hint.activityAt),
-        execution_state:
-          !backendCaughtUp && hint.running ? "running" : item.execution_state,
-      };
-    });
-    return sortSessionRows(mapped);
-  }, [sessionsMatchingSearch, sessionHistoryHints]);
-
-  const groupedSessions = useMemo<GroupedSessions>(() => {
-    const pool = sessionsWithHints;
-    const specialIds = new Set<string>();
-    if (feishuMarkedSessionId) specialIds.add(feishuMarkedSessionId);
-    if (wechatMarkedSessionId) specialIds.add(wechatMarkedSessionId);
-    const visibleSessions = specialIds.size > 0
-      ? pool.filter((item) => !specialIds.has(item.session_id))
-      : pool;
-    const now = new Date();
-    const startToday = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime() / 1000;
-    const startYesterday = startToday - 24 * 3600;
-    const startPrevious7Days = startToday - 7 * 24 * 3600;
-    const startPrevious30Days = startToday - 30 * 24 * 3600;
-    const grouped: GroupedSessions = {
-      pinned: [],
-      today: [],
-      yesterday: [],
-      previous7Days: [],
-      previous30Days: [],
-      older: [],
-      archived: [],
-    };
-    for (const item of visibleSessions) {
-      if (item.archived) {
-        grouped.archived.push(item);
-        continue;
-      }
-      if (item.pinned) {
-        grouped.pinned.push(item);
-        continue;
-      }
-      const activityAt = getSessionActivityTimestamp(item);
-      if (activityAt >= startToday) {
-        grouped.today.push(item);
-      } else if (activityAt >= startYesterday) {
-        grouped.yesterday.push(item);
-      } else if (activityAt >= startPrevious7Days) {
-        grouped.previous7Days.push(item);
-      } else if (activityAt >= startPrevious30Days) {
-        grouped.previous30Days.push(item);
-      } else {
-        grouped.older.push(item);
-      }
-    }
-    grouped.pinned = sortRowsByActivityDesc(grouped.pinned);
-    grouped.today = sortRowsByActivityDesc(grouped.today);
-    grouped.yesterday = sortRowsByActivityDesc(grouped.yesterday);
-    grouped.previous7Days = sortRowsByActivityDesc(grouped.previous7Days);
-    grouped.previous30Days = sortRowsByActivityDesc(grouped.previous30Days);
-    grouped.older = sortRowsByActivityDesc(grouped.older);
-    grouped.archived = sortRowsByActivityDesc(grouped.archived);
-    return grouped;
-  }, [sessionsWithHints, feishuMarkedSessionId, wechatMarkedSessionId]);
-
-  const loadSessions = async () => {
-    try {
-      const avatarId = pane.avatarId ?? undefined;
-      const result = await window.agenticxDesktop.listSessions(avatarId);
-      if (!result.ok) return;
-      const rows = normalizeSessionRows(result.sessions).filter((row) =>
-        isSessionVisibleInPane(row, pane.avatarId ?? null)
-      );
-      setSessions(rows);
-      setSessionsLoadAttempted(true);
-      prefetchSessionTailsBatch(
-        rows.slice(0, 12).map((row) => row.session_id),
-        12
-      );
-      for (const row of rows) {
-        const hint = useAppStore.getState().sessionHistoryHints[row.session_id];
-        if (!hint) continue;
-        const apiActivity = Number(row.updated_at ?? 0);
-        const apiRunning = row.execution_state === "running";
-        if (
-          (apiRunning && apiActivity >= hint.activityAt - 2) ||
-          (!apiRunning && apiActivity >= hint.activityAt - 2)
-        ) {
-          clearSessionHistoryHint(row.session_id);
-        }
-      }
-      setUnreadSessionIds((prev) => prev.filter((id) => rows.some((r) => r.session_id === id)));
-      setSelectedSessionIds((prev) => prev.filter((id) => rows.some((r) => r.session_id === id)));
-    } catch (err) {
-      console.error("[SessionHistoryPanel] loadSessions error:", err);
-    } finally {
-      setSessionsLoadAttempted(true);
-    }
-  };
-
-  useEffect(() => {
-    if (!pane.historyOpen) return;
-    void loadSessions();
-  }, [pane.historyOpen, pane.avatarId, pane.sessionId, sessionCatalogRevision]);
-
-  useEffect(() => {
-    if (!pane.historyOpen) return;
-    const timer = window.setInterval(() => {
-      void loadSessions();
-    }, 1500);
-    return () => window.clearInterval(timer);
-  }, [pane.historyOpen, pane.avatarId, pane.sessionId, sessionCatalogRevision]);
 
   useEffect(() => {
     if (!pane.historyOpen) {
-      setSessionSearchQuery("");
-      setGroupVisibleCounts({});
-      setCollapsedGroups({});
-    }
-  }, [pane.historyOpen]);
-
-  useEffect(() => {
-    if (!pane.historyOpen) return;
-    if (!sessionSearchTrim) {
-      setMessageSearchSnippets({});
+      setSearchQuery("");
+      setFetchedQueries(null);
+      setFetchAttempted(false);
       return;
     }
-    setMessageSearchSnippets({});
-    const myId = ++messageSearchReq.current;
-    const handle = window.setTimeout(() => {
-      void (async () => {
-        try {
-          const avatarRaw = pane.avatarId;
-          const avatarId =
-            typeof avatarRaw === "string" && avatarRaw.length > 0 ? avatarRaw : undefined;
-          const res = await window.agenticxDesktop.searchSessions({
-            q: sessionSearchTrim,
-            avatarId,
-          });
-          if (myId !== messageSearchReq.current) return;
-          const next: Record<string, string> = {};
-          const hits = Array.isArray(res.hits) ? res.hits : [];
-          for (const h of hits) {
-            const sid = String(h.session_id || "").trim();
-            if (!sid) continue;
-            const snip = String(h.snippet || "").trim();
-            next[sid] = snip || "（消息命中）";
-          }
-          setMessageSearchSnippets(next);
-        } catch {
-          if (myId !== messageSearchReq.current) return;
-          setMessageSearchSnippets({});
-        }
-      })();
-    }, 320);
-    return () => window.clearTimeout(handle);
-  }, [pane.historyOpen, sessionSearchTrim, pane.avatarId]);
-
-  useEffect(() => {
-    if (!pane.historyOpen) return;
+    const sid = String(pane.sessionId || "").trim();
+    if (!sid) {
+      setFetchedQueries([]);
+      setFetchAttempted(true);
+      return;
+    }
     let cancelled = false;
-
-    const syncFeishuBinding = async () => {
-      if (cancelled) return;
+    setFetchAttempted(false);
+    void (async () => {
       try {
-        const r = await window.agenticxDesktop.loadFeishuBinding();
-        if (!r.ok || cancelled) {
-          if (!cancelled) setFeishuBoundSessionId(null);
-          return;
+        const result = await window.agenticxDesktop.loadSessionMessages(sid);
+        if (cancelled) return;
+        if (result.ok && Array.isArray(result.messages)) {
+          const mapped = result.messages.map((item, index) =>
+            mapLoadedSessionMessage(item as LoadedSessionMessage, sid, index, sid)
+          );
+          setFetchedQueries(extractUserQueries(mapped));
+        } else {
+          setFetchedQueries(null);
         }
-        const desk = r.bindings["_desktop"] as { session_id?: string; avatar_id?: string | null } | undefined;
-        if (isAutomationPaneAvatarId(desk?.avatar_id)) {
-          await window.agenticxDesktop.saveFeishuDesktopBinding({ sessionId: null });
-          if (!cancelled) setFeishuBoundSessionId(null);
-          return;
-        }
-        const sid = typeof desk?.session_id === "string" ? desk.session_id.trim() : "";
-        setFeishuBoundSessionId(sid || null);
       } catch {
-        if (!cancelled) {
-          setFeishuBoundSessionId(null);
-        }
+        if (!cancelled) setFetchedQueries(null);
+      } finally {
+        if (!cancelled) setFetchAttempted(true);
       }
-    };
-
-    const syncWechatBinding = async () => {
-      if (cancelled) return;
-      try {
-        const r = await window.agenticxDesktop.loadWechatBinding();
-        if (!r.ok || cancelled) {
-          if (!cancelled) setWechatBoundSessionId(null);
-          return;
-        }
-        const desk = r.bindings["_desktop"] as { session_id?: string; avatar_id?: string | null } | undefined;
-        if (isAutomationPaneAvatarId(desk?.avatar_id)) {
-          await window.agenticxDesktop.saveWechatDesktopBinding({ sessionId: null });
-          if (!cancelled) setWechatBoundSessionId(null);
-          return;
-        }
-        const sid = typeof desk?.session_id === "string" ? desk.session_id.trim() : "";
-        setWechatBoundSessionId(sid || null);
-      } catch {
-        if (!cancelled) {
-          setWechatBoundSessionId(null);
-        }
-      }
-    };
-
-    void syncFeishuBinding();
-    void syncWechatBinding();
-    const timer = window.setInterval(() => {
-      void syncFeishuBinding();
-      void syncWechatBinding();
-    }, 3000);
+    })();
     return () => {
       cancelled = true;
-      window.clearInterval(timer);
     };
-  }, [pane.historyOpen]);
+  }, [pane.historyOpen, pane.sessionId]);
 
-  useEffect(() => {
-    if (!contextMenu) return;
-    if (selectMode) {
-      setContextMenu(null);
-      return;
-    }
-    const closeMenu = () => setContextMenu(null);
-    window.addEventListener("click", closeMenu);
-    window.addEventListener("blur", closeMenu);
-    return () => {
-      window.removeEventListener("click", closeMenu);
-      window.removeEventListener("blur", closeMenu);
-    };
-  }, [contextMenu, selectMode]);
-
-  // --- All hooks above, conditional render below ---
-
-  if (!pane.historyOpen) return null;
-
-  const feishuSession = getVisibleBoundSession(
-    feishuMarkedSessionId,
-    sessions,
-    pane.avatarId ?? null
-  );
-
-  const wechatSession = getVisibleBoundSession(
-    wechatMarkedSessionId,
-    sessions,
-    pane.avatarId ?? null
-  );
-
-  const switchSession = async (sessionId: string, targetPaneId = pane.id, highlightTerms: string[] = []) => {
-    const targetRow = sessions.find((item) => item.session_id === sessionId) ?? null;
-    if (!targetRow || !isSessionVisibleInPane(targetRow, pane.avatarId ?? null)) {
-      console.warn("[SessionHistoryPanel] blocked cross-pane session switch", {
-        paneId: targetPaneId,
-        paneAvatarId: pane.avatarId ?? null,
-        sessionId,
-      });
-      return;
-    }
-
-    const targetPane = useAppStore.getState().panes.find((p) => p.id === targetPaneId);
-    const previousSessionId = (targetPane?.sessionId ?? "").trim();
-    const isSameSession = previousSessionId === sessionId.trim();
-    const existingMessages = targetPane?.messages ?? [];
-
-    setPaneSessionId(targetPaneId, sessionId, {
-      provider: targetRow.provider,
-      model: targetRow.model,
-    });
-    if (targetRow.session_mode === "code_dev" || targetRow.session_mode === "daily_office") {
-      setPaneSessionMode(targetPaneId, targetRow.session_mode);
-    }
-    setPaneHistorySearchTerms(targetPaneId, highlightTerms);
-    setUnreadSessionIds((prev) => prev.filter((id) => id !== sessionId));
-
-    if (isSameSession && existingMessages.length > 0) {
-      return;
-    }
-
-    // Guard against stale async results when the pane has switched away
-    // (e.g. fast A→B clicks on the same pane) before our await resolves.
-    const paneStillOn = (sid: string) =>
-      isPaneStillOnSession(useAppStore.getState().panes, targetPaneId, sid);
-
-    const applyTailEntry = (
-      targetId: string,
-      entry: { messages: Message[]; startIndex: number; hasOlder: boolean }
-    ) => {
-      setPaneMessages(targetId, entry.messages);
-      setPaneLoadingMessages(targetId, false);
-      setPaneMessagePaging(targetId, {
-        oldestLoadedIndex: entry.startIndex,
-        hasOlderMessages: entry.hasOlder,
-        loadingOlderMessages: false,
-      });
-    };
-
-    // Fast path: LRU full cache hit — instant, no IPC.
-    const cached = getCachedSessionMessages(sessionId);
-    if (cached && cached.length > 0) {
-      setPaneMessages(targetPaneId, cached);
-      setPaneLoadingMessages(targetPaneId, false);
-      resetPaneMessagePaging(targetPaneId);
-      return;
-    }
-
-    // Fast path: tail cache (prefetch or prior tail load).
-    const tailCached = getCachedSessionTail(sessionId);
-    if (tailCached && tailCached.messages.length > 0) {
-      applyTailEntry(targetPaneId, tailCached);
-      return;
-    }
-
-    // Slow path: skeleton while tail resolves (prefetch / in-flight / fetch).
-    setPaneLoadingMessages(targetPaneId, true);
-    setPaneMessages(targetPaneId, []);
-    resetPaneMessagePaging(targetPaneId);
-    try {
-      const entry = await resolveSessionTailForSwitch(sessionId);
-      if (entry && entry.messages.length > 0) {
-        cacheSessionTail(sessionId, entry);
-        if (!entry.hasOlder) {
-          cacheSessionMessages(sessionId, entry.messages);
-        }
-        if (paneStillOn(sessionId)) applyTailEntry(targetPaneId, entry);
-        return;
-      }
-    } catch {
-      /* fallback below */
-    }
-
-    // Fallback: legacy full load when tail page fails.
-    try {
-      const result = await window.agenticxDesktop.loadSessionMessages(sessionId);
-      if (result.ok && Array.isArray(result.messages)) {
-        const mapped: Message[] = result.messages.map((item, index) =>
-          mapLoadedSessionMessage(item as LoadedSessionMessage, sessionId, index)
-        );
-        cacheSessionMessages(sessionId, mapped);
-        if (paneStillOn(sessionId)) {
-          setPaneMessages(targetPaneId, mapped);
-          resetPaneMessagePaging(targetPaneId);
-        }
-        return;
-      }
-    } catch {
-      /* fallback below */
-    } finally {
-      if (paneStillOn(sessionId)) setPaneLoadingMessages(targetPaneId, false);
-    }
-    if (paneStillOn(sessionId)) setPaneMessages(targetPaneId, []);
+  const jumpToQuery = (messageId: string) => {
+    const id = String(messageId || "").trim();
+    if (!id) return;
+    setPaneHistoryJumpMessageId(pane.id, id);
+    if (pane.historyOpen) togglePaneHistory(pane.id);
   };
 
-  const saveRename = async (sessionId: string) => {
-    const name = editingName.trim();
-    if (!name) {
-      setEditingId(null);
-      return;
-    }
-    await window.agenticxDesktop.renameSession({ sessionId, name });
-    setSessions((prev) =>
-      prev.map((item) => (item.session_id === sessionId ? { ...item, session_name: name } : item))
-    );
-    setEditingId(null);
-  };
-
-  const toggleSelectSession = (sessionId: string) => {
-    setSelectedSessionIds((prev) =>
-      prev.includes(sessionId) ? prev.filter((id) => id !== sessionId) : [...prev, sessionId]
-    );
-  };
-
-  const toggleSelectAll = () => {
-    const pool = sessionsMatchingSearch;
-    setSelectedSessionIds((prev) => {
-      if (prev.length >= pool.length && pool.length > 0) return [];
-      return pool.map((s) => s.session_id);
-    });
-  };
-
-  /**
-   * Clear `pane.sessionId` on any *non-current* pane that still references a deleted session.
-   * Without this, the global subagent-status poll in App.tsx keeps hitting `/api/subagents/status?session_id=<deleted>` → 404 forever.
-   * The current pane is handled separately by the calling delete branch (which may switch to a sibling session).
-   */
-  const clearDeletedSessionRefsInOtherPanes = (deletedIds: Iterable<string>) => {
-    const idSet = new Set<string>();
-    for (const sid of deletedIds) {
-      const trimmed = String(sid || "").trim();
-      if (trimmed) idSet.add(trimmed);
-    }
-    if (idSet.size === 0) return;
-    const allPanes = useAppStore.getState().panes;
-    for (const p of allPanes) {
-      if (p.id === pane.id) continue;
-      const psid = String(p.sessionId || "").trim();
-      if (psid && idSet.has(psid)) {
-        markPaneAwaitingFreshSession(p.id);
-        clearPaneLazyInheritParent(p.id);
-        setPaneSessionId(p.id, "");
-        setPaneMessages(p.id, []);
-      }
-    }
-  };
-
-  const deleteSelectedSessions = async () => {
-    const api = window.agenticxDesktop;
-    if (typeof api.deleteSession !== "function") return;
-    const targets = selectedSessionIds.filter(Boolean);
-    if (targets.length === 0) return;
-    const confirmResult =
-      typeof api.confirmDialog === "function"
-        ? await api.confirmDialog({
-            title: "确认删除会话",
-            message: `确认删除已选择的 ${targets.length} 个会话？`,
-            detail: "删除后不可恢复。",
-            confirmText: "删除",
-            cancelText: "取消",
-            destructive: true,
-          })
-        : { ok: true, confirmed: window.confirm(`确认删除已选择的 ${targets.length} 个会话？删除后不可恢复。`) };
-    const confirmed = !!confirmResult.confirmed;
-    if (!confirmed) return;
-    const prevSessions = sessions;
-    const remainingSessions = sessions.filter((row) => !targets.includes(row.session_id));
-    // Optimistic UI: remove selected rows immediately so interaction feels instant.
-    setSessions(remainingSessions);
-    setSelectedSessionIds([]);
-    setBatchDeleting(true);
-    try {
-      let pending = [...targets];
-      for (let round = 0; round < 3 && pending.length > 0; round += 1) {
-        let failedRound: string[] = [];
-        const canBatch = typeof api.deleteSessionsBatch === "function";
-        if (canBatch) {
-          const result = await api.deleteSessionsBatch(pending);
-          const batchFailed = Array.isArray(result.failed) ? result.failed : [];
-          if (!result?.ok) {
-            // Fallback to single-delete when batch endpoint is unavailable or errored.
-            for (const sessionId of pending) {
-              try {
-                const single = await api.deleteSession(sessionId);
-                if (!single?.ok) failedRound.push(sessionId);
-              } catch {
-                failedRound.push(sessionId);
-              }
-            }
-          } else {
-            failedRound = batchFailed;
-          }
-        } else {
-          for (const sessionId of pending) {
-            try {
-              const result = await api.deleteSession(sessionId);
-              if (!result?.ok) failedRound.push(sessionId);
-            } catch {
-              failedRound.push(sessionId);
-            }
-          }
-        }
-
-        // Verify against latest server list: anything still present must be retried.
-        const refresh = await api.listSessions(pane.avatarId ?? undefined);
-        const rows = refresh.ok ? normalizeSessionRows(refresh.sessions) : [];
-        const remainSet = new Set(rows.map((row) => row.session_id));
-        const stillThere = pending.filter((sid) => remainSet.has(sid));
-        const retrySet = new Set([...failedRound, ...stillThere]);
-        pending = Array.from(retrySet);
-      }
-
-      const failed = pending;
-      if (failed.length > 0) {
-        // Restore failed rows; keep successful deletes hidden.
-        const failedSet = new Set(failed);
-        setSessions((curr) => {
-          const existing = new Set(curr.map((row) => row.session_id));
-          const toRestore = prevSessions.filter((row) => failedSet.has(row.session_id) && !existing.has(row.session_id));
-          return sortSessionRows([...curr, ...toRestore]);
-        });
-        window.alert(`有 ${failed.length} 个会话删除失败，已自动保留。你可以再次尝试删除。`);
-      }
-      const failedSetForRefs = new Set(failed);
-      const successfullyDeleted = targets.filter((sid) => !failedSetForRefs.has(sid));
-      // Clear stale references in other panes so their syncSubAgents poll stops 404'ing.
-      clearDeletedSessionRefsInOtherPanes(successfullyDeleted);
-      dropCachedSessionMessages(successfullyDeleted);
-      const activeDeleted = targets.includes(pane.sessionId);
-      await loadSessions();
-      if (activeDeleted) {
-        const refresh = await window.agenticxDesktop.listSessions(pane.avatarId ?? undefined);
-        const rows = refresh.ok ? normalizeSessionRows(refresh.sessions) : [];
-        const next = rows.find((row) => !targets.includes(row.session_id));
-        if (next) {
-          await switchSession(next.session_id);
-        } else {
-          markPaneAwaitingFreshSession(pane.id);
-          clearPaneLazyInheritParent(pane.id);
-          setPaneSessionId(pane.id, "");
-          setPaneMessages(pane.id, []);
-          await loadSessions();
-        }
-      }
-      setSelectMode(false);
-    } finally {
-      setBatchDeleting(false);
-    }
-  };
-
-  /** 置顶「飞书绑定 / 微信绑定」区块内同一 session 可能双渠道绑定，按区块只显示对应渠道徽标，避免两行都出现双标。 */
-  const renderSessionItem = (
-    item: SessionRow,
-    contentSnippet?: string,
-    imBadgeScope: "all" | "feishu-only" | "wechat-only" = "all",
-    labelOverride?: string
-  ) => {
-    if (!item || !item.session_id) return null;
-    const active = item.session_id === pane.sessionId;
-    const label = (labelOverride || sessionHistoryLabel(item)).trim() || sessionHistoryLabel(item);
-    const displaySnippet = contentSnippet ? sanitizeSessionDisplayText(contentSnippet) : "";
-    const unread = unreadSessionIds.includes(item.session_id);
-    const activityAt = getSessionActivityTimestamp(item) || Date.now() / 1000;
-    const isRunning = item.execution_state === "running";
-    const isInterrupted = item.execution_state === "interrupted";
-    const feishuMarked = feishuMarkedSessionId === item.session_id;
-    const wechatMarked = wechatMarkedSessionId === item.session_id;
-    const showFeishuChip =
-      imBadgeScope === "wechat-only" ? false : feishuMarked;
-    const showWechatChip =
-      imBadgeScope === "feishu-only" ? false : wechatMarked;
-    const rowTitle = selectMode
-      ? "点击勾选会话"
-      : `${label}\n${timeAgo(activityAt)} · 双击重命名 / 右键菜单`;
-    return (
-      <div key={item.session_id} className="mb-1 px-2">
-        {editingId === item.session_id ? (
-          <input
-            autoFocus
-            value={editingName}
-            onChange={(e) => setEditingName(e.target.value)}
-            onBlur={() => void saveRename(item.session_id)}
-            onKeyDown={(e) => {
-              if (e.key === "Enter") void saveRename(item.session_id);
-              if (e.key === "Escape") setEditingId(null);
-            }}
-            className="agx-session-history-row-input w-full rounded border border-border-strong bg-surface-hover px-2 py-2 text-[13px] font-normal text-text-primary outline-none"
-          />
-        ) : (
-          <button
-            type="button"
-            className={`agx-session-history-row flex w-full items-start gap-2 rounded-xl px-2.5 py-2 text-left text-[13px] font-normal leading-snug transition ${
-              active
-                ? "agx-session-history-row--active text-text-strong"
-                : "text-text-primary hover:bg-surface-hover"
-            }`}
-            onClick={() => {
-              if (selectMode) {
-                toggleSelectSession(item.session_id);
-                return;
-              }
-              const terms = buildHighlightTermsFromQuery(sessionSearchTrim);
-              void switchSession(item.session_id, pane.id, terms);
-            }}
-            onMouseEnter={() => {
-              if (selectMode || item.session_id === pane.sessionId) return;
-              schedulePrefetchSessionTail(item.session_id);
-            }}
-            onMouseLeave={() => {
-              cancelPrefetchSessionTail(item.session_id);
-            }}
-            onDoubleClick={() => {
-              if (selectMode) return;
-              setEditingId(item.session_id);
-              setEditingName(label);
-            }}
-            onContextMenu={(e) => {
-              if (selectMode) return;
-              e.preventDefault();
-              setContextMenu({ x: e.clientX, y: e.clientY, item });
-            }}
-            title={rowTitle}
-          >
-            {selectMode ? (
-              <input
-                type="checkbox"
-                checked={selectedSessionIds.includes(item.session_id)}
-                onChange={() => toggleSelectSession(item.session_id)}
-                className="mt-1.5 h-4 w-4 shrink-0 self-center accent-neutral-400"
-                onClick={(e) => e.stopPropagation()}
-              />
-            ) : (
-              <span
-                className={`mt-[1px] flex shrink-0 items-center justify-center ${active ? "text-text-strong" : "text-text-muted"}`}
-                aria-hidden
-              >
-                {showFeishuChip || showWechatChip ? (
-                  <Smartphone className="h-[18px] w-[18px]" strokeWidth={1.8} />
-                ) : (
-                  <MessageSquareMore className="h-[18px] w-[18px]" strokeWidth={1.8} />
-                )}
-              </span>
-            )}
-            <span className="min-w-0 flex-1">
-              <span className="flex w-full min-w-0 items-center gap-1.5">
-                {item.pinned ? <span className="shrink-0 text-[11px] font-medium text-amber-300">pin</span> : null}
-                {isRunning ? (
-                  <span
-                    className="inline-flex shrink-0 items-center justify-center rounded-sm px-0.5 py-px text-text-strong"
-                    title="该会话正在运行"
-                    aria-label="运行中"
-                  >
-                    <span
-                      className="inline-block h-2.5 w-2.5 animate-spin rounded-full border border-current border-t-transparent"
-                      aria-hidden
-                    />
-                  </span>
-                ) : null}
-                {isInterrupted ? (
-                  <span
-                    className="inline-flex shrink-0 rounded-sm px-1 py-px text-[11px] font-medium leading-tight text-amber-300"
-                    title="该会话已收到中断请求"
-                  >
-                    已中断
-                  </span>
-                ) : null}
-                <span className="min-w-0 flex-1 truncate font-normal">
-                  {label}
-                </span>
-                {showFeishuChip ? (
-                  <span className="shrink-0">
-                    <FeishuBadge />
-                  </span>
-                ) : null}
-                {showWechatChip ? (
-                  <span
-                    className="inline-flex shrink-0 items-center rounded-sm px-1 py-px text-[11px] font-medium leading-tight"
-                    style={{ backgroundColor: "rgba(37,211,102,0.15)", color: "#25D366" }}
-                  >
-                    微信
-                  </span>
-                ) : null}
-                {unread ? <span className="inline-block h-2 w-2 shrink-0 rounded-full bg-text-muted" /> : null}
-              </span>
-              {!selectMode && displaySnippet ? (
-                <span
-                  className="mt-1 line-clamp-2 w-full text-[12px] leading-snug text-text-subtle"
-                  title={displaySnippet}
-                >
-                  {displaySnippet}
-                </span>
-              ) : null}
-            </span>
-          </button>
-        )}
-      </div>
-    );
-  };
-
-  const toggleHistoryGroupCollapsed = (groupKey: HistoryGroupKey) => {
-    setCollapsedGroups((prev) => {
-      const willCollapse = !prev[groupKey];
-      if (willCollapse) {
-        setGroupVisibleCounts((counts) => {
-          const { [groupKey]: _removed, ...rest } = counts;
-          return rest;
-        });
-      }
-      return { ...prev, [groupKey]: willCollapse };
-    });
-  };
-
-  const renderGroup = (groupTitle: string, groupKey: HistoryGroupKey, items: SessionRow[]) => {
-    if (items.length === 0) return null;
-    const searchActive = Boolean(sessionSearchTrim);
-    const collapsed = !searchActive && collapsedGroups[groupKey] === true;
-    const visibleCount = resolveGroupVisibleCount(
-      groupKey,
-      items.length,
-      searchActive,
-      groupVisibleCounts
-    );
-    const visibleItems = items.slice(0, visibleCount);
-    const hiddenCount = items.length - visibleCount;
-    const showMore = !searchActive && !collapsed && hiddenCount > 0;
-    return (
-      <div className="mb-1" data-history-group={groupKey}>
-        <button
-          type="button"
-          className="agx-session-history-group-title flex w-full items-center gap-1 rounded-lg px-2 py-1.5 text-left text-[11px] font-semibold uppercase tracking-[0.08em] text-text-faint transition hover:bg-surface-hover hover:text-text-muted"
-          onClick={() => toggleHistoryGroupCollapsed(groupKey)}
-          aria-expanded={!collapsed}
-          title={collapsed ? `展开 ${groupTitle}` : `折叠 ${groupTitle}`}
-        >
-          <ChevronRight
-            className={`h-3.5 w-3.5 shrink-0 transition-transform duration-150 ${collapsed ? "" : "rotate-90"}`}
-            strokeWidth={2}
-            aria-hidden
-          />
-          <span className="min-w-0 flex-1 truncate">{groupTitle}</span>
-          {collapsed ? (
-            <span className="shrink-0 text-[10px] font-normal normal-case tracking-normal text-text-faint">
-              {items.length}
-            </span>
-          ) : null}
-        </button>
-        {!collapsed ? (
-          <>
-            {visibleItems.map((item) =>
-              renderSessionItem(
-                item,
-                sessionSearchTrim ? messageSearchSnippets[item.session_id] : undefined
-              )
-            )}
-            {showMore ? (
-              <div className="px-2 pb-0.5">
-                <button
-                  type="button"
-                  className="agx-session-history-more flex w-full items-center gap-1.5 rounded-xl px-2.5 py-1.5 text-left text-[12px] font-normal text-text-faint transition hover:bg-surface-hover hover:text-text-muted"
-                  onClick={() =>
-                    setGroupVisibleCounts((prev) => ({
-                      ...prev,
-                      [groupKey]: visibleCount + HISTORY_GROUP_PAGE_SIZE,
-                    }))
-                  }
-                  title={`再展开 ${Math.min(hiddenCount, HISTORY_GROUP_PAGE_SIZE)} 个会话`}
-                >
-                  <span className="leading-none tracking-[0.12em]">…</span>
-                  <span>More</span>
-                </button>
-              </div>
-            ) : null}
-          </>
-        ) : null}
-      </div>
-    );
-  };
-
-  const runContextAction = async (action: string) => {
-    if (!contextMenu) return;
-    const item = contextMenu.item;
-    setContextMenu(null);
-    if (action === "toggle_feishu_binding") {
-      if (isAutomationPaneAvatarId(pane.avatarId) || isAutomationPaneAvatarId(item.avatar_id)) return;
-      const currentBound = (feishuBoundSessionId || "").trim();
-      const target = (item.session_id || "").trim();
-      if (!target) return;
-      if (currentBound === target) {
-        await window.agenticxDesktop.saveFeishuDesktopBinding({ sessionId: null });
-        setFeishuBoundSessionId(null);
-      } else {
-        const aid = (item.avatar_id || "").trim();
-        await window.agenticxDesktop.saveFeishuDesktopBinding({
-          sessionId: target,
-          avatarId: aid.startsWith("group:") ? null : (aid || null),
-          avatarName: item.avatar_name || null,
-          provider: pane.modelProvider || null,
-          model: pane.modelName || null,
-        });
-        if ((wechatBoundSessionId || "").trim() === target) {
-          await window.agenticxDesktop.saveWechatDesktopBinding({ sessionId: null });
-          setWechatBoundSessionId(null);
-        }
-        setFeishuBoundSessionId(target);
-      }
-      return;
-    }
-    if (action === "toggle_wechat_binding") {
-      if (isAutomationPaneAvatarId(pane.avatarId) || isAutomationPaneAvatarId(item.avatar_id)) return;
-      const currentBound = (wechatBoundSessionId || "").trim();
-      const target = (item.session_id || "").trim();
-      if (!target) return;
-      if (currentBound === target) {
-        await window.agenticxDesktop.saveWechatDesktopBinding({ sessionId: null });
-        setWechatBoundSessionId(null);
-      } else {
-        const aid = (item.avatar_id || "").trim();
-        await window.agenticxDesktop.saveWechatDesktopBinding({
-          sessionId: target,
-          avatarId: aid.startsWith("group:") ? null : (aid || null),
-          avatarName: item.avatar_name || null,
-          provider: pane.modelProvider || null,
-          model: pane.modelName || null,
-        });
-        if ((feishuBoundSessionId || "").trim() === target) {
-          await window.agenticxDesktop.saveFeishuDesktopBinding({ sessionId: null });
-          setFeishuBoundSessionId(null);
-        }
-        setWechatBoundSessionId(target);
-      }
-      return;
-    }
-    if (action === "rename") {
-      const label = sessionHistoryLabel(item);
-      setEditingId(item.session_id);
-      setEditingName(label);
-      return;
-    }
-    if (action === "pin") {
-      const api = window.agenticxDesktop;
-      if (typeof api.pinSession === "function") {
-        await api.pinSession({ sessionId: item.session_id, pinned: !item.pinned });
-        await loadSessions();
-      }
-      return;
-    }
-    if (action === "open_new_tab") {
-      const paneId = addPane(item.avatar_id ?? null, item.avatar_name || META_AGENT_DISPLAY_NAME, item.session_id);
-      const terms = buildHighlightTermsFromQuery(sessionSearchTrim);
-      await switchSession(item.session_id, paneId, terms);
-      return;
-    }
-    if (action === "mark_unread") {
-      setUnreadSessionIds((prev) =>
-        prev.includes(item.session_id) ? prev.filter((id) => id !== item.session_id) : [...prev, item.session_id]
-      );
-      return;
-    }
-    if (action === "fork") {
-      const api = window.agenticxDesktop;
-      if (typeof api.forkSession === "function") {
-        const result = await api.forkSession({ sessionId: item.session_id });
-        if (result.ok) await loadSessions();
-      }
-      return;
-    }
-    if (action === "delete") {
-      const api = window.agenticxDesktop;
-      if (typeof api.deleteSession !== "function") return;
-      const confirmResult =
-        typeof api.confirmDialog === "function"
-          ? await api.confirmDialog({
-              title: "确认删除会话",
-              message: "确认删除该会话？",
-              detail: "删除后不可恢复。",
-              confirmText: "删除",
-              cancelText: "取消",
-              destructive: true,
-            })
-          : { ok: true, confirmed: window.confirm("确认删除该会话？删除后不可恢复。") };
-      const confirmed = !!confirmResult.confirmed;
-      if (!confirmed) return;
-      const result = await api.deleteSession(item.session_id);
-      if (result.ok) {
-        // Clear stale references in other panes so their syncSubAgents poll stops 404'ing.
-        clearDeletedSessionRefsInOtherPanes([item.session_id]);
-        dropCachedSessionMessages(item.session_id);
-        await loadSessions();
-        if (pane.sessionId === item.session_id) {
-          const next = sessions.find((row) => row.session_id !== item.session_id);
-          if (next) {
-            await switchSession(next.session_id);
-          } else {
-            markPaneAwaitingFreshSession(pane.id);
-            clearPaneLazyInheritParent(pane.id);
-            setPaneSessionId(pane.id, "");
-            setPaneMessages(pane.id, []);
-            await loadSessions();
-          }
-        }
-      }
-      return;
-    }
-    if (action === "archive_prior") {
-      const api = window.agenticxDesktop;
-      if (typeof api.archiveSessions !== "function") return;
-      const confirmed = window.confirm("确认归档当前会话之前的历史会话吗？");
-      if (!confirmed) return;
-      const result = await api.archiveSessions({
-        sessionId: item.session_id,
-        avatarId: pane.avatarId ?? item.avatar_id ?? null,
-      });
-      if (result.ok) {
-        await loadSessions();
-      }
-    }
-  };
-
-  const showFeishuBindSection =
-    !!feishuSession &&
-    (!sessionSearchTrim ||
-      sessionMatchesQuery(
-        feishuSession,
-        sessionSearchNeedles,
-        feishuMarkedSessionId,
-        wechatMarkedSessionId
-      ) ||
-      Boolean(sessionSearchTrim && messageSearchSnippets[feishuSession.session_id]));
-  const showWechatBindSection =
-    !!wechatSession &&
-    (!sessionSearchTrim ||
-      sessionMatchesQuery(
-        wechatSession,
-        sessionSearchNeedles,
-        feishuMarkedSessionId,
-        wechatMarkedSessionId
-      ) ||
-      Boolean(sessionSearchTrim && messageSearchSnippets[wechatSession.session_id]));
-
-  const searchHasAnyMatch =
-    !sessionSearchTrim ||
-    showFeishuBindSection ||
-    showWechatBindSection ||
-    groupedSessions.pinned.length +
-      groupedSessions.today.length +
-      groupedSessions.yesterday.length +
-      groupedSessions.previous7Days.length +
-      groupedSessions.previous30Days.length +
-      groupedSessions.older.length +
-      groupedSessions.archived.length >
-      0;
+  const showLoading = !fetchAttempted && queries.length === 0;
+  const emptyLabel = !pane.sessionId
+    ? "当前无会话"
+    : searchQuery.trim()
+      ? "未找到匹配提问"
+      : "本会话还没有提问";
 
   return (
     <div
@@ -1336,226 +152,68 @@ export const SessionHistoryPanel = memo(function SessionHistoryPanel({ pane, tin
       <div className="flex shrink-0 flex-col">
         <div className="flex min-w-0 items-center gap-1 px-3 py-2">
           <div className="min-w-0 flex-1 font-medium text-text-strong">
-            <FitText maxSize={13} minSize={10} title={title}>
-              历史对话
+            <FitText maxSize={13} minSize={10} title="本会话提问">
+              本会话提问
             </FitText>
           </div>
-          <div className="flex shrink-0 items-center gap-0.5">
-            {!selectMode ? (
-              <button
-                className="agx-topbar-btn !px-[5px]"
-                onClick={() => {
-                  setSelectMode(true);
-                  setContextMenu(null);
-                }}
-                title="多选会话"
-              >
-                <ListChecks className="h-4 w-4" strokeWidth={1.8} />
-              </button>
-            ) : (
-              <>
-                <button
-                  className="agx-topbar-btn min-w-0 max-w-[4.5rem] shrink px-1.5"
-                  onClick={toggleSelectAll}
-                  disabled={batchDeleting}
-                  title="全选或取消全选"
-                >
-                  <FitText maxSize={12} minSize={9}>
-                    {selectedSessionIds.length >= sessionsMatchingSearch.length && sessionsMatchingSearch.length > 0
-                      ? "取消全选"
-                      : "全选"}
-                  </FitText>
-                </button>
-                <button
-                  className="agx-topbar-btn min-w-0 max-w-[4.75rem] shrink px-1.5 text-rose-400 hover:text-rose-500"
-                  onClick={() => void deleteSelectedSessions()}
-                  disabled={batchDeleting || selectedSessionIds.length === 0}
-                  title={selectedSessionIds.length > 0 ? `删除 ${selectedSessionIds.length} 个会话` : "先勾选会话"}
-                >
-                  <FitText maxSize={12} minSize={9}>
-                    {batchDeleting ? "删除中..." : `删除${selectedSessionIds.length > 0 ? ` (${selectedSessionIds.length})` : ""}`}
-                  </FitText>
-                </button>
-                <button
-                  className="agx-topbar-btn min-w-0 max-w-[3rem] shrink px-1.5"
-                  onClick={() => {
-                    setSelectMode(false);
-                    setSelectedSessionIds([]);
-                  }}
-                  disabled={batchDeleting}
-                  title="取消多选"
-                >
-                  <FitText maxSize={12} minSize={9}>
-                    取消
-                  </FitText>
-                </button>
-              </>
-            )}
-          </div>
+          {queries.length > 0 ? (
+            <span className="shrink-0 text-[11px] text-text-faint">{queries.length} 轮</span>
+          ) : null}
         </div>
         <div className="px-2 pb-1.5">
           <input
             type="search"
-            value={sessionSearchQuery}
-            onChange={(e) => setSessionSearchQuery(e.target.value)}
-            placeholder="搜索会话…"
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            placeholder="搜索提问…"
             autoComplete="off"
             spellCheck={false}
-            aria-label="搜索历史会话"
+            aria-label="搜索本会话提问"
             className="w-full rounded-md border border-border bg-surface-hover px-2 py-2 text-[13px] text-text-primary placeholder:text-text-faint focus:border-[var(--ui-btn-primary-border,#3b82f6)] focus:outline-none focus:ring-1 focus:ring-[var(--ui-btn-primary-border,#3b82f6)]"
           />
         </div>
       </div>
       <div className="agx-session-history-scroll min-h-0 flex-1 overflow-y-auto pl-2 pr-[2px] pb-6 pt-0.5">
-        {sessions.length === 0 ? (
-          !sessionsLoadAttempted ? (
-            <div className="space-y-2 px-2 py-1">
-              {[0, 1, 2, 3].map((i) => (
-                <div key={i} className="h-9 animate-pulse rounded-md bg-surface-hover" />
-              ))}
-            </div>
-          ) : (
-            <div className="rounded border border-dashed border-border p-3 text-center text-[13px] text-text-faint">
-              暂无会话
-            </div>
-          )
-        ) : !searchHasAnyMatch ? (
+        {showLoading ? (
+          <div className="space-y-2 px-2 py-1">
+            {[0, 1, 2, 3].map((i) => (
+              <div key={i} className="h-9 animate-pulse rounded-md bg-surface-hover" />
+            ))}
+          </div>
+        ) : filteredQueries.length === 0 ? (
           <div className="rounded border border-dashed border-border p-3 text-center text-[13px] text-text-faint">
-            未找到匹配会话
+            {emptyLabel}
           </div>
         ) : (
-          <>
-            {showFeishuBindSection && feishuSession ? (
-              <div className="mb-2">
-                <div className="agx-session-history-group-title flex items-center gap-1 px-2 py-1.5 text-[11px] font-semibold uppercase tracking-[0.08em] text-[#3370FF]">
-                  <span>飞书绑定</span>
-                  <span
-                    className="inline-flex shrink-0 items-center gap-0.5 rounded-sm px-1 py-px text-[11px] font-medium leading-tight"
-                    style={{ backgroundColor: "rgba(51,112,255,0.15)", color: "#3370FF" }}
-                  >
-                    唯一
+          <div className="flex flex-col gap-0.5">
+            {filteredQueries.map((item) => {
+              const active = pane.historyJumpMessageId === item.id;
+              return (
+                <button
+                  key={item.id}
+                  type="button"
+                  onClick={() => jumpToQuery(item.id)}
+                  title={item.text}
+                  className={`flex w-full min-w-0 items-center gap-2 rounded-md px-2 py-2 text-left transition-colors hover:bg-surface-hover ${
+                    active ? "bg-surface-card-strong text-text-strong" : "text-text-primary"
+                  }`}
+                >
+                  <MessageSquareMore
+                    className="h-3.5 w-3.5 shrink-0 text-text-faint"
+                    strokeWidth={1.8}
+                  />
+                  <span className="shrink-0 tabular-nums text-[11px] text-text-faint">
+                    {item.index}.
                   </span>
-                </div>
-                {renderSessionItem(
-                  feishuSession,
-                  sessionSearchTrim ? messageSearchSnippets[feishuSession.session_id] : undefined,
-                  "feishu-only",
-                  (() => {
-                    const base = sessionHistoryLabel(feishuSession);
-                    const sameLabelConflict =
-                      !!wechatSession &&
-                      wechatSession.session_id !== feishuSession.session_id &&
-                      sessionHistoryLabel(wechatSession) === base;
-                    return sameLabelConflict ? `${base} · 飞书` : base;
-                  })()
-                )}
-              </div>
-            ) : null}
-            {showWechatBindSection && wechatSession ? (
-              <div className="mb-2">
-                <div className="agx-session-history-group-title flex items-center gap-1 px-2 py-1.5 text-[11px] font-semibold uppercase tracking-[0.08em] text-[#25D366]">
-                  <span>微信绑定</span>
-                  <span
-                    className="inline-flex shrink-0 items-center gap-0.5 rounded-sm px-1 py-px text-[11px] font-medium leading-tight"
-                    style={{ backgroundColor: "rgba(37,211,102,0.15)", color: "#25D366" }}
-                  >
-                    唯一
+                  <span className="min-w-0 flex-1 truncate text-[13px] leading-snug">
+                    {item.preview}
                   </span>
-                </div>
-                {renderSessionItem(
-                  wechatSession,
-                  sessionSearchTrim ? messageSearchSnippets[wechatSession.session_id] : undefined,
-                  "wechat-only",
-                  (() => {
-                    const base = sessionHistoryLabel(wechatSession);
-                    const sameLabelConflict =
-                      !!feishuSession &&
-                      feishuSession.session_id !== wechatSession.session_id &&
-                      sessionHistoryLabel(feishuSession) === base;
-                    return sameLabelConflict ? `${base} · 微信` : base;
-                  })()
-                )}
-              </div>
-            ) : null}
-            {renderGroup("Pinned", "pinned", groupedSessions.pinned)}
-            {renderGroup("Today", "today", groupedSessions.today)}
-            {renderGroup("Yesterday", "yesterday", groupedSessions.yesterday)}
-            {renderGroup("Last 7 days", "previous7Days", groupedSessions.previous7Days)}
-            {renderGroup("Last 30 days", "previous30Days", groupedSessions.previous30Days)}
-            {renderGroup("Older", "older", groupedSessions.older)}
-            {renderGroup("Archived", "archived", groupedSessions.archived)}
-          </>
+                </button>
+              );
+            })}
+          </div>
         )}
       </div>
-      {contextMenu ? createPortal(
-        <div
-          ref={contextMenuRef}
-          className="fixed z-[10000] w-[180px] rounded-md border border-border bg-surface-base p-1 shadow-2xl"
-          style={{ left: contextMenu.x, top: contextMenu.y, visibility: "hidden" }}
-          onClick={(e) => e.stopPropagation()}
-        >
-          <button
-            className="w-full rounded px-2 py-2 text-left text-[13px] text-text-primary hover:bg-surface-hover"
-            onClick={() => void runContextAction("pin")}
-          >
-            {contextMenu.item.pinned ? "取消置顶" : "置顶"}
-          </button>
-          {!isAutomationPaneAvatarId(pane.avatarId) && !isAutomationPaneAvatarId(contextMenu.item.avatar_id) ? (
-            <>
-              <button
-                className="w-full rounded px-2 py-2 text-left text-[13px] text-text-primary hover:bg-surface-hover"
-                onClick={() => void runContextAction("toggle_feishu_binding")}
-              >
-                {feishuBoundSessionId === contextMenu.item.session_id ? "取消绑定飞书会话" : "绑定为飞书会话"}
-              </button>
-              <button
-                className="w-full rounded px-2 py-2 text-left text-[13px] text-text-primary hover:bg-surface-hover"
-                onClick={() => void runContextAction("toggle_wechat_binding")}
-              >
-                {wechatBoundSessionId === contextMenu.item.session_id ? "取消绑定微信会话" : "绑定为微信会话"}
-              </button>
-            </>
-          ) : null}
-          <button
-            className="w-full rounded px-2 py-2 text-left text-[13px] text-text-primary hover:bg-surface-hover"
-            onClick={() => void runContextAction("fork")}
-          >
-            分叉会话
-          </button>
-          <button
-            className="w-full rounded px-2 py-2 text-left text-[13px] text-text-primary hover:bg-surface-hover"
-            onClick={() => void runContextAction("open_new_tab")}
-          >
-            在新标签打开
-          </button>
-          <button
-            className="w-full rounded px-2 py-2 text-left text-[13px] text-text-primary hover:bg-surface-hover"
-            onClick={() => void runContextAction("mark_unread")}
-          >
-            标记未读
-          </button>
-          <div className="my-1 border-t border-border" />
-          <button
-            className="w-full rounded px-2 py-2 text-left text-[13px] text-text-primary hover:bg-surface-hover"
-            onClick={() => void runContextAction("delete")}
-          >
-            删除
-          </button>
-          <button
-            className="w-full rounded px-2 py-2 text-left text-[13px] text-text-primary hover:bg-surface-hover"
-            onClick={() => void runContextAction("rename")}
-          >
-            重命名
-          </button>
-          <button
-            className="w-full rounded px-2 py-2 text-left text-[13px] text-text-primary hover:bg-surface-hover"
-            onClick={() => void runContextAction("archive_prior")}
-          >
-            归档此前会话
-          </button>
-        </div>,
-        document.body
-      ) : null}
     </div>
   );
 });

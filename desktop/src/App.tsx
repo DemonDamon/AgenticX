@@ -741,6 +741,7 @@ export function App() {
                 messages: [],
                 sessionTokens: pane.sessionTokens ?? { input: 0, output: 0 },
                 historySearchTerms: [],
+                historyJumpMessageId: null,
                 loadingMessages: false,
                 // Paging state is runtime-only: restored panes start empty and
                 // re-run tail-first loading, so always reset to defaults here.

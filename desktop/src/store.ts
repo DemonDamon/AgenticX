@@ -161,6 +161,8 @@ export type ChatPane = {
   sessionTokens: { input: number; output: number };
   /** Temporary highlight terms from session-history search navigation. */
   historySearchTerms: string[];
+  /** One-shot scroll target: user query message id inside the current session. */
+  historyJumpMessageId?: string | null;
   /** Harness mode for this pane's session (code_dev vs daily_office). */
   sessionMode?: "code_dev" | "daily_office";
   /** True while messages are being fetched after a session switch (shows skeleton). */
@@ -507,7 +509,7 @@ type AppState = {
   /** Which content the right main area shows (chat / gallery / projects / automation). */
   mainView: MainView;
   setMainView: (view: MainView) => void;
-  /** Incremented when local session list should refresh (e.g. new session created). SessionHistoryPanel subscribes. */
+  /** Incremented when local session list should refresh (e.g. new session created). SidebarSessionHistory subscribes. */
   sessionCatalogRevision: number;
   bumpSessionCatalogRevision: () => void;
   /** Optimistic last-activity hints so history sidebar moves to Today on send. */
@@ -686,6 +688,7 @@ type AppState = {
   cacheSessionMessages: (sessionId: string, messages: Message[]) => void;
   dropCachedSessionMessages: (sessionId: string | Iterable<string>) => void;
   setPaneHistorySearchTerms: (paneId: string, terms: string[]) => void;
+  setPaneHistoryJumpMessageId: (paneId: string, messageId: string | null) => void;
   togglePaneHistory: (paneId: string) => void;
   togglePaneMemoryGraph: (paneId: string) => void;
   /** @deprecated Prefer cycleSidePanel / openSidePanel */
@@ -812,6 +815,7 @@ function makeDefaultPane(): ChatPane {
     activeTerminalTabId: null,
     sessionTokens: { input: 0, output: 0 },
     historySearchTerms: [],
+    historyJumpMessageId: null,
     loadingMessages: false,
     oldestLoadedIndex: 0,
     hasOlderMessages: false,
@@ -1509,6 +1513,7 @@ export const useAppStore = create<AppState>((set, get) => ({
           activeTerminalTabId: null,
           sessionTokens: { input: 0, output: 0 },
           historySearchTerms: [],
+          historyJumpMessageId: null,
         },
       ],
       activePaneId: paneId,
@@ -2025,6 +2030,17 @@ export const useAppStore = create<AppState>((set, get) => ({
                     .filter((t) => t.length > 0)
                 )
               ),
+            }
+          : pane
+      ),
+    })),
+  setPaneHistoryJumpMessageId: (paneId, messageId) =>
+    set((state) => ({
+      panes: state.panes.map((pane) =>
+        pane.id === paneId
+          ? {
+              ...pane,
+              historyJumpMessageId: messageId ? String(messageId).trim() || null : null,
             }
           : pane
       ),

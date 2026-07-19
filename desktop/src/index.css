@@ -141,6 +141,22 @@ body {
   color: inherit;
 }
 
+/* One-shot flash when jumping to a user query from the history navigator. */
+.agx-message-jump-flash {
+  animation: agx-message-jump-flash 1.2s ease-out;
+  border-radius: 0.5rem;
+}
+@keyframes agx-message-jump-flash {
+  0% {
+    background: color-mix(in srgb, #facc15 28%, transparent);
+    box-shadow: 0 0 0 1px color-mix(in srgb, #facc15 55%, transparent);
+  }
+  100% {
+    background: transparent;
+    box-shadow: 0 0 0 0 transparent;
+  }
+}
+
 /* 工作区预览选区「引用至当前对话」：紧凑 pill 浮层（对齐 Cursor Add to Chat） */
 .agx-selection-quote-btn {
   background-color: var(--surface-popover);
