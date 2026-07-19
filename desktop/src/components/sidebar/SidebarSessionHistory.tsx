@@ -18,6 +18,7 @@ import { createPortal } from "react-dom";
 import { META_AGENT_DISPLAY_NAME } from "../../constants/branding";
 import { useAppStore, type Message } from "../../store";
 import { rememberSessionForAvatar } from "../../utils/avatar-last-session";
+import { avatarDotColorForIdentity, groupDotColor } from "../../utils/avatar-color";
 import { isAutomationPaneAvatarId } from "../../utils/automation-pane";
 import {
   clearPaneLazyInheritParent,
@@ -93,6 +94,19 @@ function isPaneStillOnSession(
 ): boolean {
   const pane = panes.find((p) => p.id === paneId);
   return String(pane?.sessionId ?? "").trim() === sessionId.trim();
+}
+
+/** C1 左边条：Meta 用中性灰，分身/群聊按身份取色（已配置色优先，否则按 id 哈希）。 */
+function resolveSidebarChipStripeColor(
+  avatarId: string | null | undefined,
+  avatars: Array<{ id: string; color?: string | null }>
+): string {
+  const aid = String(avatarId ?? "").trim();
+  if (!aid) return "rgb(156, 163, 175)";
+  if (aid.startsWith("group:")) return groupDotColor(aid);
+  if (aid.startsWith("automation:")) return "rgb(251, 191, 36)";
+  const avatar = avatars.find((a) => a.id === aid);
+  return avatarDotColorForIdentity(aid, avatar?.color);
 }
 
 export function SidebarSessionHistory() {
@@ -783,9 +797,10 @@ export function SidebarSessionHistory() {
     }
   };
 
-  const renderRow = (row: SidebarSessionRow, icon: "phone" | "chat" | "bubble") => {
+  const renderRow = (row: SidebarSessionRow) => {
     const active = row.session_id === activeSessionId;
     const chip = resolveSidebarAvatarChipName(row, avatarNameById);
+    const stripeColor = resolveSidebarChipStripeColor(row.avatar_id, avatars);
     const title = sidebarSessionLabel(row);
     const checked = selectedSessionIds.includes(row.session_id);
     const relative = formatSidebarRelativeTime(getSidebarSessionActivityTs(row));
@@ -809,12 +824,16 @@ export function SidebarSessionHistory() {
             title="点击勾选"
             aria-label={`选择 ${title}`}
           />
-        ) : icon === "phone" ? (
-          <Smartphone className="h-3.5 w-3.5 shrink-0 text-text-faint" strokeWidth={1.75} />
-        ) : (
-          <MessageSquare className="h-3.5 w-3.5 shrink-0 text-text-faint" strokeWidth={1.75} />
-        )}
-        <span className="shrink-0 rounded px-1 py-px text-[10px] font-medium leading-tight text-text-muted bg-surface-card">
+        ) : null}
+        <span
+          className="relative shrink-0 overflow-hidden rounded px-1.5 py-px pl-2 text-[10px] font-medium leading-tight text-text-primary bg-surface-card"
+          title={chip}
+        >
+          <span
+            aria-hidden
+            className="absolute inset-y-0 left-0 w-[2px]"
+            style={{ backgroundColor: stripeColor }}
+          />
           {chip}
         </span>
         {isEditing ? (
@@ -1085,7 +1104,7 @@ export function SidebarSessionHistory() {
         {!collapse.wechat && (
           <div className="mb-1">
             {wechatRow ? (
-              renderRow(wechatRow, "phone")
+              renderRow(wechatRow)
             ) : (
               <div className="px-2 py-1 text-[11px] text-text-faint">
                 {wechatBoundId && searchQuery.trim() ? "无匹配" : "未绑定会话"}
@@ -1107,7 +1126,7 @@ export function SidebarSessionHistory() {
         {!collapse.feishu && (
           <div className="mb-1">
             {feishuRow ? (
-              renderRow(feishuRow, "chat")
+              renderRow(feishuRow)
             ) : (
               <div className="px-2 py-1 text-[11px] text-text-faint">
                 {feishuBoundId && searchQuery.trim() ? "无匹配" : "未绑定会话"}
@@ -1123,7 +1142,7 @@ export function SidebarSessionHistory() {
             {buckets.pinned.length === 0 ? (
               <div className="px-2 py-1 text-[11px] text-text-faint">暂无置顶</div>
             ) : (
-              buckets.pinned.map((row) => renderRow(row, "bubble"))
+              buckets.pinned.map((row) => renderRow(row))
             )}
           </div>
         )}
@@ -1135,7 +1154,7 @@ export function SidebarSessionHistory() {
             {todayVisible.length === 0 ? (
               <div className="px-2 py-1 text-[11px] text-text-faint">暂无</div>
             ) : (
-              todayVisible.map((row) => renderRow(row, "bubble"))
+              todayVisible.map((row) => renderRow(row))
             )}
           </div>
         )}
@@ -1147,7 +1166,7 @@ export function SidebarSessionHistory() {
             {earlierVisible.length === 0 ? (
               <div className="px-2 py-1 text-[11px] text-text-faint">暂无</div>
             ) : (
-              earlierVisible.map((row) => renderRow(row, "bubble"))
+              earlierVisible.map((row) => renderRow(row))
             )}
           </div>
         )}

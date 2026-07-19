@@ -176,6 +176,20 @@ export function avatarDotColor(color?: string | null): string {
   return AVATAR_DOT[key];
 }
 
+/**
+ * Prefer explicit palette color; if unset, hash avatar id into AVATAR_PALETTE
+ * so different agents stay visually distinct (e.g. history chip stripes).
+ */
+export function avatarDotColorForIdentity(
+  id: string,
+  color?: string | null,
+): string {
+  const key = normalizeAvatarColor(color);
+  if (key) return AVATAR_DOT[key];
+  const hashed = AVATAR_PALETTE[hashToIndex(id, AVATAR_PALETTE.length)];
+  return AVATAR_DOT[hashed];
+}
+
 export function avatarTintBorder(
   id: string | null | undefined,
   color?: string | null,
