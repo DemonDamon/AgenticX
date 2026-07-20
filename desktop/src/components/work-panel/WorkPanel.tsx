@@ -892,7 +892,7 @@ export function WorkPanel({
     plusOpen && plusPos
       ? createPortal(
           <div
-            className="fixed z-[120] min-w-[148px] overflow-hidden rounded-xl border border-border bg-surface-card py-1.5 shadow-lg"
+            className="fixed z-[120] min-w-[148px] overflow-hidden rounded-xl border border-border bg-surface-popover py-1.5 shadow-lg"
             style={{ left: plusPos.left, top: plusPos.top }}
             onMouseDown={(e) => e.stopPropagation()}
           >
