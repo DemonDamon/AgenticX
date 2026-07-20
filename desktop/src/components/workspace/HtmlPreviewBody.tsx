@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { prepareLocalHtmlSrcDoc } from "../../utils/html-preview-assets";
+import { injectHtmlPreviewStorageBridge } from "../../utils/html-preview-storage";
 import {
   HTML_INSPECT_BRIDGE_VERSION,
   HTML_INSPECT_MSG,
@@ -75,7 +76,7 @@ export function HtmlPreviewBody({
   }, [content, documentPath]);
 
   const srcDoc = useMemo(
-    () => injectHtmlInspectBridge(baseSrcDoc),
+    () => injectHtmlInspectBridge(injectHtmlPreviewStorageBridge(baseSrcDoc)),
     [baseSrcDoc, HTML_INSPECT_BRIDGE_VERSION]
   );
 
