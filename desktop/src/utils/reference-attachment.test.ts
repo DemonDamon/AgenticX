@@ -72,6 +72,30 @@ test("canonicalizeUserReferenceMentions never treats a skill token as a file lab
   assert.equal(canonicalizeUserReferenceMentions(text, refs), text);
 });
 
+test("matchReferenceMentionLabel matches HTML element tag with Trae comment meta", () => {
+  const refs: MessageAttachment[] = [
+    {
+      name: "/tmp/report/index.html:el-snippet-fe67ada8",
+      mimeType: "text/plain",
+      size: 100,
+      referenceToken: true,
+      composerRefLabel: "span",
+      sourcePath: "/tmp/report/index.html",
+      snippetRef: "el-snippet-fe67ada8",
+      htmlElementRef: {
+        tagName: "span",
+        selectorHint: "span.risk",
+        comment: "这个对吗",
+      },
+    },
+  ];
+  assert.equal(matchReferenceMentionLabel("span", refs), "span");
+  assert.equal(
+    canonicalizeUserReferenceMentions("@span", refs),
+    "@/tmp/report/index.html:el-snippet-fe67ada8",
+  );
+});
+
 test("canonicalizeUserReferenceMentions resolves repeated same-name labels by attachment order", () => {
   const refs = [
     snippetRef({

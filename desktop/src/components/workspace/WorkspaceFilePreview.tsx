@@ -52,7 +52,8 @@ import {
   type WorkspacePreview,
 } from "./workspace-preview-types";
 import { DocxPreview } from "./DocxPreview";
-import { HtmlPreviewBody, isHtmlPreviewPath } from "./HtmlPreviewBody";
+import { isHtmlPreviewPath } from "./HtmlPreviewBody";
+import { HtmlPreviewShell } from "./HtmlPreviewShell";
 import { PdfPreview } from "./PdfPreview";
 import { PreviewFallback } from "./PreviewFallback";
 import { SpreadsheetPreview } from "./SpreadsheetPreview";
@@ -696,6 +697,7 @@ function TextualPreviewBody({
   markdownHostPath,
   textareaRef,
   renderHtml,
+  onViewHtmlSource,
 }: {
   preview: TextualPreview;
   onQuoteSnippet?: (payload: WorkspacePreviewQuotePayload) => void;
@@ -707,6 +709,7 @@ function TextualPreviewBody({
   textareaRef?: RefObject<HTMLTextAreaElement | null>;
   /** When true and viewMode is preview, render HTML via sandboxed iframe. */
   renderHtml?: boolean;
+  onViewHtmlSource?: () => void;
 }) {
   const showHtmlRender = !!renderHtml && viewMode === "preview" && !initialLineRange;
 
@@ -838,10 +841,12 @@ function TextualPreviewBody({
 
   if (showHtmlRender) {
     return (
-      <HtmlPreviewBody
+      <HtmlPreviewShell
         content={preview.content}
         title={previewBaseName(preview.path)}
         documentPath={preview.absolutePath}
+        onViewSource={onViewHtmlSource}
+        onQuoteHtmlElement={onQuoteSnippet}
       />
     );
   }
@@ -1570,6 +1575,7 @@ export function WorkspaceFilePreview({
               markdownHostPath={markdownHostPath}
               textareaRef={editTextareaRef}
               renderHtml={isHtmlFile}
+              onViewHtmlSource={isHtmlFile ? () => setViewMode("edit") : undefined}
             />
           )}
         </div>

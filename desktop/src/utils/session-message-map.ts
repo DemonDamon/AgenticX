@@ -54,6 +54,8 @@ export function attachmentsFromSessionRow(raw: unknown): MessageAttachment[] | u
       snippet_ref?: unknown;
       snippet_content?: unknown;
       kind?: unknown;
+      html_element_ref?: unknown;
+      htmlElementRef?: unknown;
     };
     const dataUrl = String(o.data_url ?? "").trim();
     const name = String(o.name ?? "").trim() || "file";
@@ -73,9 +75,25 @@ export function attachmentsFromSessionRow(raw: unknown): MessageAttachment[] | u
     const a1 = String(o.a1 ?? "").trim();
     const snippetRef = String(o.snippet_ref ?? "").trim();
     const snippetContent = String(o.snippet_content ?? "").trim();
+    const rawHtmlEl = o.html_element_ref ?? o.htmlElementRef;
+    let htmlElementRef: MessageAttachment["htmlElementRef"] | undefined;
+    if (rawHtmlEl && typeof rawHtmlEl === "object") {
+      const el = rawHtmlEl as Record<string, unknown>;
+      const tagName = String(el.tag_name ?? el.tagName ?? "").trim();
+      const selectorHint = String(el.selector_hint ?? el.selectorHint ?? tagName).trim();
+      const comment = String(el.comment ?? "").trim();
+      if (tagName) {
+        htmlElementRef = {
+          tagName,
+          selectorHint: selectorHint || tagName,
+          ...(comment ? { comment } : {}),
+        };
+      }
+    }
     let referenceToken =
       Boolean(o.reference_token) ||
       !!composerRefLabel ||
+      !!htmlElementRef ||
       (Number.isFinite(lineStart) && Number.isFinite(lineEnd)) ||
       !!snippetRef ||
       (!!sheet && !!a1);
@@ -101,17 +119,23 @@ export function attachmentsFromSessionRow(raw: unknown): MessageAttachment[] | u
     }
     if (kind === "context_file" || (!dataUrl && name)) {
       const mimeType = draft.mimeType;
+      const resolvedComposerLabel =
+        (htmlElementRef?.tagName || composerRefLabel || "").trim() ||
+        (referenceToken ? composerRefLabel : "");
       out.push({
-        name,
+        name: htmlElementRef?.tagName || name,
         mimeType,
         size,
         ...(sourcePath ? { sourcePath } : {}),
         ...(referenceToken ? { referenceToken: true } : {}),
-        ...(composerRefLabel && referenceToken ? { composerRefLabel } : {}),
+        ...(resolvedComposerLabel && referenceToken
+          ? { composerRefLabel: resolvedComposerLabel }
+          : {}),
         ...(resolvedLineRange ? { lineRange: resolvedLineRange } : {}),
         ...(sheet && a1 ? { spreadsheetRef: { sheet, a1 } } : {}),
         ...(snippetRef ? { snippetRef } : {}),
         ...(snippetContent ? { snippetContent } : {}),
+        ...(htmlElementRef ? { htmlElementRef } : {}),
       });
     }
   }

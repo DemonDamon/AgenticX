@@ -46,10 +46,77 @@ import {
   looksLikeDirectoryPath,
   pathToFileUrl,
 } from "../../utils/session-artifacts";
-import { HtmlPreviewBody } from "../workspace/HtmlPreviewBody";
+import { HtmlPreviewChrome } from "../workspace/HtmlPreviewChrome";
+import { HtmlPreviewShell } from "../workspace/HtmlPreviewShell";
+import {
+  DEFAULT_HTML_PREVIEW_VIEWPORT,
+  type HtmlPreviewViewport,
+} from "../workspace/html-preview-device";
 import { SessionArtifactList } from "./SessionArtifactList";
 import { SessionReferenceList } from "./SessionReferenceList";
 import { collectSessionReferences } from "../../utils/session-references";
+
+/** Remote https tab: open-in-browser + device toolbar; inspect unavailable (cross-origin). */
+function RemoteBrowserPane({ title, url }: { title: string; url: string }) {
+  const [deviceToolbarVisible, setDeviceToolbarVisible] = useState(false);
+  const [viewport, setViewport] = useState<HtmlPreviewViewport>(DEFAULT_HTML_PREVIEW_VIEWPORT);
+  const [inspectEnabled, setInspectEnabled] = useState(false);
+  const fixed =
+    viewport.width != null && viewport.height != null && viewport.width > 0 && viewport.height > 0;
+  const zoom = Math.max(25, Math.min(300, viewport.zoomPercent || 100)) / 100;
+
+  return (
+    <div className="flex min-h-0 flex-1 flex-col">
+      <HtmlPreviewChrome
+        documentUrl={url}
+        inspectEnabled={inspectEnabled}
+        onInspectEnabledChange={setInspectEnabled}
+        inspectAvailable={false}
+        deviceToolbarVisible={deviceToolbarVisible}
+        onDeviceToolbarVisibleChange={setDeviceToolbarVisible}
+        viewport={viewport}
+        onViewportChange={setViewport}
+        onOpenInBrowser={() => {
+          void window.agenticxDesktop?.openExternal?.(url);
+        }}
+      />
+      <div className="flex min-h-0 flex-1 justify-center overflow-auto bg-[color-mix(in_oklab,var(--surface-hover)_80%,transparent)] p-3">
+        <div
+          className={
+            fixed
+              ? "relative shrink-0 overflow-hidden rounded-md border border-border bg-white shadow-sm"
+              : "min-h-0 w-full flex-1 overflow-hidden rounded-md border border-border bg-white"
+          }
+          style={
+            fixed
+              ? {
+                  width: Math.ceil((viewport.width ?? 0) * zoom),
+                  height: Math.ceil((viewport.height ?? 0) * zoom),
+                }
+              : undefined
+          }
+        >
+          <iframe
+            title={title}
+            src={url}
+            className="border-0 bg-white"
+            style={
+              fixed
+                ? {
+                    width: viewport.width!,
+                    height: viewport.height!,
+                    transform: zoom !== 1 ? `scale(${zoom})` : undefined,
+                    transformOrigin: "top left",
+                  }
+                : { width: "100%", height: "100%", minHeight: 220 }
+            }
+            sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-popups-to-escape-sandbox"
+          />
+        </div>
+      </div>
+    </div>
+  );
+}
 
 export type WorkPanelTabKind = "summary" | "workspace" | "terminal" | "browser" | "preview";
 
@@ -1268,20 +1335,17 @@ export function WorkPanel({
               />
             </form>
             {activeBrowser.srcDoc != null ? (
-              <div className="flex min-h-0 flex-1 flex-col [&_iframe]:min-h-0 [&_iframe]:flex-1 [&_iframe]:h-full">
-                <HtmlPreviewBody
+              <div className="min-h-0 flex-1">
+                <HtmlPreviewShell
                   content={activeBrowser.srcDoc}
                   title={activeBrowser.title}
-                  documentPath={fileUrlToLocalPath(activeBrowser.url) ?? undefined}
+                  documentPath={fileUrlToLocalPath(activeBrowser.url)}
+                  documentUrl={activeBrowser.url}
+                  onQuoteHtmlElement={onQuotePreviewSnippet}
                 />
               </div>
             ) : activeBrowser.url && activeBrowser.url !== "about:blank" ? (
-              <iframe
-                title={activeBrowser.title}
-                src={activeBrowser.url}
-                className="min-h-0 w-full flex-1 border-0 bg-white"
-                sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-popups-to-escape-sandbox"
-              />
+              <RemoteBrowserPane title={activeBrowser.title} url={activeBrowser.url} />
             ) : (
               <EmptyBlock
                 icon={<Globe className="h-9 w-9" strokeWidth={1.3} />}

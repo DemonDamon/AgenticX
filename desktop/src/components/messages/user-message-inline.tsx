@@ -73,10 +73,15 @@ export function UserFileRefChip({
   const lineRange =
     (meta ? resolveAttachmentLineRange(meta) : undefined) ??
     parseLineRangeFromReferenceLabel(name);
-  const baseName = formatReferenceChipLabel(name, sourcePath, lineRange).replace(
-    /\s*\(\d+-\d+\)\s*$/,
-    ""
-  );
+  const htmlEl = meta?.htmlElementRef;
+  const htmlComment = String(htmlEl?.comment || "").trim();
+  const htmlTag = String(htmlEl?.tagName || "").trim();
+  const baseName = htmlEl
+    ? htmlTag || String(meta?.composerRefLabel || name).trim()
+    : formatReferenceChipLabel(name, sourcePath, lineRange).replace(
+        /\s*\(\d+-\d+\)\s*$/,
+        ""
+      );
   const lineLabel =
     lineRange && lineRange.start === lineRange.end
       ? `:${lineRange.start}`
@@ -93,7 +98,33 @@ export function UserFileRefChip({
       : resolvedPath
     : undefined;
 
-  const chipInner = (
+  // Trae Work sent chip: [cursor] tag · [bubble] comment
+  const chipInner = htmlEl ? (
+    <>
+      <ComposerRefIcon kind="element" />
+      <span className="agx-file-ref-chip-name">{baseName}</span>
+      {htmlComment ? (
+        <>
+          <span className="mx-0.5 opacity-50">·</span>
+          <span
+            className="inline-flex shrink-0 text-emerald-600 dark:text-emerald-400"
+            aria-hidden
+          >
+            <svg viewBox="0 0 16 16" fill="none" className="h-3 w-3">
+              <path
+                d="M3 3.5h10a1.5 1.5 0 011.5 1.5v5A1.5 1.5 0 0113 11.5H8l-2.5 2v-2H3A1.5 1.5 0 011.5 10V5A1.5 1.5 0 013 3.5z"
+                stroke="currentColor"
+                strokeWidth="1.2"
+                strokeLinejoin="round"
+              />
+              <circle cx="11.5" cy="4" r="1" fill="currentColor" />
+            </svg>
+          </span>
+          <span className="agx-file-ref-chip-name">{htmlComment}</span>
+        </>
+      ) : null}
+    </>
+  ) : (
     <>
       <ComposerRefIcon kind={kind} />
       <span className="agx-file-ref-chip-name">{baseName}</span>

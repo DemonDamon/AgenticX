@@ -29,7 +29,26 @@ export type WorkspaceSpreadsheetQuote = {
   label: string;
 };
 
-export type WorkspacePreviewQuotePayload = WorkspaceTextRangeQuote | WorkspaceSpreadsheetQuote;
+/** HTML preview select-element → composer chip + context_files (Trae Work). */
+export type WorkspaceHtmlElementQuote = {
+  kind: "html-element";
+  path: string;
+  absolutePath: string;
+  tagName: string;
+  selectorHint: string;
+  outerHTML: string;
+  innerText?: string;
+  label: string;
+  /** add = chip only; comment = chip includes user comment (就地评论框提交). */
+  intent?: "add" | "comment";
+  /** From Trae「评论到对话」inline composer. */
+  comment?: string;
+};
+
+export type WorkspacePreviewQuotePayload =
+  | WorkspaceTextRangeQuote
+  | WorkspaceSpreadsheetQuote
+  | WorkspaceHtmlElementQuote;
 
 export type WorkspacePreviewLineRange = {
   start: number;

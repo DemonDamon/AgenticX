@@ -106,12 +106,18 @@ export function canonicalizeUserReferenceMentions(
 ): string {
   const records = (attachments ?? [])
     .filter(isWorkspaceReferenceAttachment)
-    .map((attachment) => {
-      const label = String(
-        attachment.composerRefLabel || attachment.name || ""
-      ).trim();
+    .flatMap((attachment) => {
       const key = buildContextFileKeyFromAttachment(attachment);
-      return { label, canonical: key ? `@${key}` : "" };
+      const canonical = key ? `@${key}` : "";
+      if (!canonical) return [];
+      const labels = new Set<string>();
+      const composerRefLabel = String(attachment.composerRefLabel || "").trim();
+      const name = String(attachment.name || "").trim();
+      const tag = String(attachment.htmlElementRef?.tagName || "").trim();
+      for (const candidate of [composerRefLabel, name, tag]) {
+        if (candidate) labels.add(candidate);
+      }
+      return Array.from(labels).map((label) => ({ label, canonical }));
     })
     .filter((row) => row.label.length > 0 && row.canonical.length > 0)
     .sort((a, b) => b.label.length - a.label.length);
@@ -186,9 +192,12 @@ export function collectReferenceMatchLabels(att: MessageAttachment): string[] {
   const sourcePath = String(att.sourcePath || "")
     .trim()
     .replace(/\\/g, "/");
-  for (const candidate of [composerRefLabel, name, sourcePath]) {
+  const htmlTag = String(att.htmlElementRef?.tagName || "").trim();
+  for (const candidate of [composerRefLabel, name, sourcePath, htmlTag]) {
     if (candidate) out.add(candidate);
   }
+  const resourceKey = buildContextFileKeyFromAttachment(att);
+  if (resourceKey) out.add(resourceKey);
   const baseName = resolveAttachmentBasename(att);
   if (baseName) out.add(baseName);
   const lineRange = resolveAttachmentLineRange(att);
@@ -347,7 +356,17 @@ export function findReferenceAttachmentMeta(
     const sourcePath = String(att.sourcePath || "")
       .trim()
       .replace(/\\/g, "/");
-    if (composerRefLabel === needle || name === needle || sourcePath === needle) return att;
+    const htmlTag = String(att.htmlElementRef?.tagName || "").trim();
+    const resourceKey = buildContextFileKeyFromAttachment(att);
+    if (
+      composerRefLabel === needle ||
+      name === needle ||
+      sourcePath === needle ||
+      htmlTag === needle ||
+      resourceKey === needle
+    ) {
+      return att;
+    }
     if (sourcePath && basename(sourcePath) === needle) return att;
     if (name && basename(name) === needle) return att;
     if (lineFromNeedle && att.lineRange) {
@@ -385,6 +404,7 @@ export function findReferenceAttachmentMeta(
 export function isWorkspaceReferenceAttachment(att: MessageAttachment): boolean {
   if (isMisclassifiedUploadReference(att)) return false;
   if (att.referenceToken) return true;
+  if (att.htmlElementRef?.tagName) return true;
   if (String(att.composerRefLabel || "").trim()) return true;
   if (att.lineRange || att.spreadsheetRef || att.snippetRef) return true;
   const name = String(att.name || "").trim();
@@ -395,6 +415,8 @@ export function isWorkspaceReferenceAttachment(att: MessageAttachment): boolean 
 }
 
 export function inferComposerRefLabel(att: MessageAttachment): string | undefined {
+  const htmlTag = String(att.htmlElementRef?.tagName || "").trim();
+  if (htmlTag) return htmlTag;
   const existing = String(att.composerRefLabel || "").trim();
   if (existing) return existing;
   if (att.lineRange) {

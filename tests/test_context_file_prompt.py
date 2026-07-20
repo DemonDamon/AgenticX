@@ -81,3 +81,23 @@ def test_runtime_context_serialization_uses_same_budget() -> None:
     assert "y" * 100 in runtime
     assert TRUNCATION_MARKER.strip() in meta or "...(document context truncated)" in meta
     assert TRUNCATION_MARKER.strip() in runtime or "...(document context truncated)" in runtime
+
+
+def test_html_element_snippet_visible_in_context_files_block() -> None:
+    """Avatar/Meta prompts must surface select-element snippet bodies (not just el-snippet ids)."""
+    key = "/tmp/charts/index.html:el-snippet-204e5c8a"
+    body = (
+        "# Selected HTML element\n"
+        "- path: /tmp/charts/index.html\n"
+        "- tag: span\n"
+        "- visible_text: AI算力需求持续扩张\n"
+        "- user_comment: 重述这句话\n\n"
+        "```html\n"
+        "<span>AI算力需求持续扩张</span>\n"
+        "```\n"
+    )
+    session = SimpleNamespace(context_files={key: body})
+    block = _build_context_files_block(session)
+    assert "AI算力需求持续扩张" in block
+    assert "user_comment: 重述这句话" in block
+    assert key in block

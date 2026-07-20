@@ -313,6 +313,8 @@ export type MessageAttachment = {
   spreadsheetRef?: { sheet: string; a1: string };
   snippetRef?: string;
   snippetContent?: string;
+  /** HTML preview select-element chip (Trae-style). */
+  htmlElementRef?: { tagName: string; selectorHint: string; comment?: string };
 };
 
 export type QueuedMessage = {

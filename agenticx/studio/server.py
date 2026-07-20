@@ -38,6 +38,7 @@ from agenticx.studio.context_file_keys import (
     upload_dedupe_size_from_key,
 )
 from agenticx.studio.context_file_hydration import hydrate_turn_context_files
+from agenticx.studio.html_element_context import html_element_history_fields
 from agenticx.avatar.group_chat import GroupChatRegistry
 from agenticx.avatar.registry import AvatarRegistry
 from agenticx.branding import DEFAULT_META_PRODUCT_LABEL
@@ -1807,6 +1808,16 @@ def create_studio_app() -> FastAPI:
             if isinstance(line_start, int) and isinstance(line_end, int):
                 att_row["line_start"] = line_start
                 att_row["line_end"] = line_end
+            # HTML preview select-element: persist Trae chip meta (tag · comment).
+            _html_el = html_element_history_fields(key, body)
+            if _html_el:
+                for _hk, _hv in _html_el.items():
+                    if _hv is not None and _hv != "":
+                        att_row[_hk] = _hv
+                _sp_el = str(att_row.get("source_path") or "").strip()
+                if _sp_el:
+                    mime = _guess_mime_from_filename(_sp_el)
+                    att_row["mime_type"] = mime
             out.append(att_row)
         return out
 
@@ -3184,6 +3195,19 @@ def create_studio_app() -> FastAPI:
                                         bound_avatar_id=active_avatar_id,
                                     )
                                     sys_prompt += "\n\n" + _build_skills_context(_av_skill_summaries)
+                                except Exception:
+                                    pass
+                                # Parity with Meta: avatar turns must see @file / HTML element snippets.
+                                # Without this, user_input only has `@…:el-snippet-…` and the model
+                                # cannot read visible_text/outerHTML from context_files.
+                                try:
+                                    from agenticx.runtime.prompts.meta_agent import (
+                                        _build_context_files_block,
+                                    )
+
+                                    _cf_block = _build_context_files_block(session)
+                                    if _cf_block and "context_files: (none)" not in _cf_block:
+                                        sys_prompt += "\n\n" + _cf_block
                                 except Exception:
                                     pass
                         else:

@@ -59,6 +59,7 @@ import {
 } from "../utils/workspace-sidebar-events";
 import { WorkPanel, type WorkPanelFocus } from "./work-panel/WorkPanel";
 import { loadPreparedHtmlSrcDoc } from "../utils/html-preview-assets";
+import { buildHtmlElementContextSnippet } from "../utils/html-preview-inspect";
 import {
   artifactBaseName,
   isInAppArtifactPreviewPath,
@@ -1712,6 +1713,7 @@ type AttachedFile = {
   spreadsheetRef?: { sheet: string; a1: string };
   snippetRef?: string;
   snippetContent?: string;
+  htmlElementRef?: { tagName: string; selectorHint: string; comment?: string };
 };
 
 function isImageFile(file: File): boolean {
@@ -1758,21 +1760,35 @@ function resolveReadyAttachment(
   file: MessageAttachment,
   readyTuples: [string, AttachedFile][]
 ): AttachedFile | undefined {
+  // Prefer exact resource key (`abs:el-snippet-…`) — multiple HTML element chips share one sourcePath.
+  const wantKey = buildContextFileKeyFromAttachment(file);
+  if (wantKey) {
+    for (const [stateKey, rec] of readyTuples) {
+      if (stateKey === wantKey) return rec;
+      if (buildContextFileKeyFromAttachment(rec) === wantKey) return rec;
+    }
+  }
+  const wantSnippet = String(file.snippetRef || "").trim();
+  if (wantSnippet) {
+    for (const [, rec] of readyTuples) {
+      if (String(rec.snippetRef || "").trim() === wantSnippet) return rec;
+    }
+  }
   const byAlias = new Map<string, AttachedFile>();
   for (const [stateKey, rec] of readyTuples) {
     byAlias.set(stateKey, rec);
-    const sp = String(rec.sourcePath || "").trim();
-    if (sp) byAlias.set(sp, rec);
     const nm = String(rec.name || "").trim();
     if (nm) byAlias.set(nm, rec);
+    // Only index bare sourcePath when the row is NOT a snippet/line-range slice.
+    const sp = String(rec.sourcePath || "").trim();
+    if (sp && !rec.snippetRef && !rec.lineRange) byAlias.set(sp, rec);
   }
-  const keys = [file.sourcePath, file.name].map((k) => String(k || "").trim()).filter(Boolean);
+  const keys = [file.name, file.sourcePath].map((k) => String(k || "").trim()).filter(Boolean);
   for (const k of keys) {
     const hit = byAlias.get(k);
     if (hit) return hit;
   }
   for (const [, rec] of readyTuples) {
-    if (file.sourcePath && rec.sourcePath === file.sourcePath) return rec;
     if (file.name && rec.name === file.name && file.size === rec.size) return rec;
   }
   for (const [, rec] of readyTuples) {
@@ -2567,6 +2583,17 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
   const [automationTaskErrorHint, setAutomationTaskErrorHint] = useState<string | null>(null);
   const composerRef = useRef<HTMLDivElement | null>(null);
   const composerRefPathsRef = useRef<Record<string, string>>({});
+  /** Chip meta available before setContextFiles re-renders (fixes html-element → index.html flash). */
+  const composerRefMetaOverrideRef = useRef<
+    Record<
+      string,
+      {
+        sourcePath?: string;
+        composerRefLabel?: string;
+        htmlElementRef?: { tagName: string; selectorHint: string; comment?: string };
+      }
+    >
+  >({});
   const composerRefTipTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const composerRefTipTargetRef = useRef<HTMLElement | null>(null);
   const [composerRefTip, setComposerRefTip] = useState<{ path: string; x: number; y: number } | null>(null);
@@ -3872,7 +3899,15 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
 
   const createFileRefToken = useCallback(
     (name: string, explicitSourcePath?: string) => {
-      const meta = resolveRefMetaForLabel(name);
+      const override = composerRefMetaOverrideRef.current[name];
+      const baseMeta = resolveRefMetaForLabel(name);
+      const meta = {
+        ...baseMeta,
+        ...override,
+        htmlElementRef: override?.htmlElementRef ?? baseMeta?.htmlElementRef,
+        composerRefLabel: override?.composerRefLabel ?? baseMeta?.composerRefLabel,
+        sourcePath: override?.sourcePath ?? baseMeta?.sourcePath,
+      };
       const resolvedPath = resolveReferenceSourcePath(
         name,
         explicitSourcePath ||
@@ -3896,8 +3931,31 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
       const label = document.createElement("span");
       label.className = "min-w-0 truncate";
       const lineRange = meta?.lineRange ?? parseLineRangeFromReferenceLabel(name);
-      label.textContent = formatReferenceChipLabel(name, resolvedPath, lineRange);
-      token.appendChild(label);
+      // HTML select-element: [cursor] tag · [bubble] comment — never host HTML filename.
+      if (meta?.htmlElementRef) {
+        const tag = meta.htmlElementRef.tagName || name;
+        const comment = String(meta.htmlElementRef.comment || "").trim();
+        label.textContent = tag;
+        token.appendChild(label);
+        if (comment) {
+          token.setAttribute("data-html-element-comment", comment);
+          const sep = document.createElement("span");
+          sep.className = "mx-0.5 opacity-50";
+          sep.textContent = "·";
+          token.appendChild(sep);
+          const bubble = document.createElement("span");
+          bubble.innerHTML =
+            '<svg viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg" style="width:12px;height:12px;display:inline;vertical-align:-0.1em;margin-right:0.18em;opacity:0.9;color:#059669"><path d="M3 3.5h10a1.5 1.5 0 011.5 1.5v5A1.5 1.5 0 0113 11.5H8l-2.5 2v-2H3A1.5 1.5 0 011.5 10V5A1.5 1.5 0 013 3.5z" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round"/><circle cx="11.5" cy="4" r="1" fill="currentColor"/></svg>';
+          token.appendChild(bubble);
+          const commentEl = document.createElement("span");
+          commentEl.className = "min-w-0 truncate";
+          commentEl.textContent = comment;
+          token.appendChild(commentEl);
+        }
+      } else {
+        label.textContent = formatReferenceChipLabel(name, resolvedPath, lineRange);
+        token.appendChild(label);
+      }
       return token;
     },
     [resolveRefMetaForLabel]
@@ -4158,6 +4216,64 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
         }
         return `snippet-${(h >>> 0).toString(16).padStart(8, "0")}`;
       };
+      if (payload.kind === "html-element") {
+        const comment = String(payload.comment || "").trim();
+        const content = buildHtmlElementContextSnippet({
+          absolutePath: abs,
+          tagName: payload.tagName,
+          selectorHint: payload.selectorHint,
+          outerHTML: payload.outerHTML,
+          innerText: payload.innerText,
+          comment,
+        });
+        if (!content.trim()) return;
+        const tag = String(payload.tagName || "element").trim() || "element";
+        // Stable @token must equal composerRefLabel (tag only). Trae `tag · comment` is
+        // rendered from htmlElementRef — never bake comment into the mention label.
+        const tokenLabel = tag;
+        // Key must match buildContextFileKeyFromAttachment → `${abs}:${snippetRef}`.
+        const snippetRef = `el-${makeSnippetRef(
+          `${payload.selectorHint}\n${payload.outerHTML}\n${comment}`
+        )}`;
+        const key = `${abs}:${snippetRef}`;
+        const htmlElementRef = {
+          tagName: tag,
+          selectorHint: payload.selectorHint,
+          ...(comment ? { comment } : {}),
+        };
+        // Must set before setComposerText — otherwise chip falls back to folder + index.html.
+        composerRefMetaOverrideRef.current[tokenLabel] = {
+          sourcePath: abs,
+          composerRefLabel: tag,
+          htmlElementRef,
+        };
+        setContextFiles((prev) => ({
+          ...prev,
+          [key]: {
+            name: key,
+            size: content.length,
+            mimeType: "text/plain",
+            status: "ready",
+            content,
+            sourcePath: abs,
+            referenceToken: true,
+            composerRefLabel: tag,
+            snippetRef,
+            snippetContent: content,
+            htmlElementRef,
+          },
+        }));
+        // Trae: comment lives inside the chip visually; model also gets user_comment in context_files.
+        const { next, tokenNames } = buildFileMentionAppend(extractComposerText(), tokenLabel, {
+          mentionText: tokenLabel,
+        });
+        setComposerText(next, {
+          tokenNames,
+          refSourcePaths: { [tokenLabel]: abs },
+        });
+        focusComposerEnd();
+        return;
+      }
       if (payload.kind === "text-range") {
         const content = String(payload.snippet || "").trimEnd();
         if (!content.trim()) return;
@@ -7432,6 +7548,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
       spreadsheetRef: file.spreadsheetRef,
       snippetRef: file.snippetRef,
       snippetContent: file.snippetContent,
+      htmlElementRef: file.htmlElementRef,
     }));
     const rawUserAttachments: MessageAttachment[] =
       retryAttachments && retryAttachments.length > 0
@@ -7441,10 +7558,17 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
     // otherwise context_files never reaches the model and the file looks "invisible".
     const userAttachments: MessageAttachment[] = rawUserAttachments;
     const refAttachments = userAttachments.filter((item) => isWorkspaceReferenceAttachment(item));
-    const outboundMessageText =
+    let outboundMessageText =
       refAttachments.length > 0
         ? canonicalizeUserReferenceMentions(messageText, refAttachments)
         : messageText;
+    // Trae「评论到对话」: chip shows tag · comment; model must see the comment in user_input too.
+    for (const att of refAttachments) {
+      const comment = String(att.htmlElementRef?.comment || "").trim();
+      if (comment && !outboundMessageText.includes(comment)) {
+        outboundMessageText = `${outboundMessageText}\n${comment}`;
+      }
+    }
     const hasReadyAttachments = userAttachments.length > 0;
     if (!isContinuation && !text && !hasReadyAttachments) return;
     if (!apiBase) return;
@@ -8137,10 +8261,13 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
           // Do not mirror them into context_files (bare filenames like image.png confuse
           // the model into calling view_image on non-existent workspace paths).
           if (isImage) continue;
-          if (ready?.snippetContent) {
-            contextFilePayload[key] = ready.snippetContent;
-          } else if (ready?.content) {
-            contextFilePayload[key] = ready.content;
+          // Prefer body already on the MessageAttachment (HTML element chips copy snippetContent).
+          const fromFile =
+            String(file.snippetContent || "").trim() ||
+            String(ready?.snippetContent || "").trim() ||
+            String(ready?.content || "").trim();
+          if (fromFile) {
+            contextFilePayload[key] = fromFile;
           } else {
             contextFilePayload[key] = `[附件] ${file.name}`;
           }
