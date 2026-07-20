@@ -3,6 +3,9 @@ import type { ParsedTodo } from "../components/TodoUpdateCard";
 import type { Message } from "../store";
 import {
   CHANNEL_C_GRACE_MS,
+  detectDiskEvidenceForInProgressTodos,
+  detectModelForgotFinalTodoUpdate,
+  extractDiskWritePathsFromMessages,
   isFutileResume,
   isTodoSnapshotSuperseded,
   lastTurnHasCompletedAssistantReply,
@@ -560,5 +563,105 @@ describe("lastTurnPromisedActionWithoutFollowThrough", () => {
       } as unknown as Message,
     ];
     expect(lastTurnPromisedActionWithoutFollowThrough(messages)).toBe(false);
+  });
+});
+
+describe("extractDiskWritePathsFromMessages / detectDiskEvidenceForInProgressTodos", () => {
+  const xlsxPath =
+    "/Users/damon/Desktop/Ai产研管理/售前/广汽/广汽超级程序员一体化平台_成本重新评估_20260720_1648.xlsx";
+
+  it("extracts absolute path from bash_exec JSON stdout output", () => {
+    const messages: Message[] = [
+      msg({
+        id: "t1",
+        role: "tool",
+        toolName: "bash_exec",
+        content: `exit_code=0\nstdout:\n{\n  "ok": true,\n  "output": "${xlsxPath}",\n  "repo_facts": [{"path": "/Users/damon/Desktop/Ai产研管理/项目/aibox"}]\n}`,
+      }),
+    ];
+    expect(extractDiskWritePathsFromMessages(messages)).toEqual([xlsxPath]);
+  });
+
+  it("matches Excel/报价表 todo prose to written xlsx path", () => {
+    const parsed: ParsedTodo = {
+      items: [
+        { status: "completed", content: "重算人天" },
+        { status: "in_progress", content: "生成并保存新版Excel报价表" },
+      ],
+      completed: 1,
+      total: 2,
+    };
+    const messages: Message[] = [
+      msg({
+        id: "t1",
+        role: "tool",
+        toolName: "bash_exec",
+        content: `{"ok": true, "output": "${xlsxPath}"}`,
+      }),
+    ];
+    expect(detectDiskEvidenceForInProgressTodos(messages, parsed)).toBe(true);
+  });
+
+  it("does not match unrelated in_progress todo to xlsx evidence", () => {
+    const parsed: ParsedTodo = {
+      items: [{ status: "in_progress", content: "梳理会议记录与技术规格书" }],
+      completed: 0,
+      total: 1,
+    };
+    const messages: Message[] = [
+      msg({
+        id: "t1",
+        role: "tool",
+        toolName: "bash_exec",
+        content: `{"ok": true, "output": "${xlsxPath}"}`,
+      }),
+    ];
+    expect(detectDiskEvidenceForInProgressTodos(messages, parsed)).toBe(false);
+  });
+});
+
+describe("detectModelForgotFinalTodoUpdate", () => {
+  it("promotes when final assistant follows last todo without a later tool call", () => {
+    const finalBody = [
+      "团长，已完成。我已经基于会议记录与技术规格书重新做了成本测算，并生成了新版 Excel。",
+      "",
+      "## 1. 新 Excel 已保存",
+      "",
+      "路径：",
+      "",
+      "`/Users/damon/Desktop/out/quote.xlsx`",
+      "",
+      "本次重新评估修正了规格书里的几个关键点，并把知识中台等已有能力改为接入与运营管理口径，同时给出了新的报价结构与风险缓冲。",
+    ].join("\n");
+    expect(finalBody.length).toBeGreaterThanOrEqual(150);
+    const messages: Message[] = [
+      msg({
+        id: "t0",
+        role: "tool",
+        toolName: "bash_exec",
+        content: '{"ok": true, "output": "/Users/damon/Desktop/out/quote.xlsx"}',
+      }),
+      msg({
+        id: "t1",
+        role: "tool",
+        toolName: "todo_write",
+        content: "[x] a\n[x] b\n[x] c\n[>] 生成并保存新版Excel报价表\n\n(3/4 completed)",
+      }),
+      msg({ id: "a1", role: "assistant", content: finalBody }),
+    ];
+    expect(detectModelForgotFinalTodoUpdate(messages, 1)).toBe(true);
+  });
+
+  it("rejects short announcement after last todo", () => {
+    const messages: Message[] = [
+      msg({
+        id: "t1",
+        role: "tool",
+        toolName: "todo_write",
+        content: "[>] 生成Excel\n\n(0/1 completed)",
+      }),
+      msg({ id: "a1", role: "assistant", content: "我即将给出解决方案，请稍等。" }),
+    ];
+    expect(detectModelForgotFinalTodoUpdate(messages, 0)).toBe(false);
   });
 });

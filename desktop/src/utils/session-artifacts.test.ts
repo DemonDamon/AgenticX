@@ -93,6 +93,67 @@ describe("collectSessionArtifactPaths", () => {
     ]);
   });
 
+  it("collects bash_exec JSON stdout output file path (openpyxl-style save)", () => {
+    const path =
+      "/Users/damon/Desktop/Ai产研管理/售前/广汽/广汽超级程序员一体化平台_成本重新评估_20260720_1648.xlsx";
+    const messages: Message[] = [
+      toolMsg({
+        id: "t1",
+        toolName: "bash_exec",
+        toolArgs: {
+          command: "python3 - <<'PY'\nwb.save(out)\nprint(json.dumps({'output': str(out)}))\nPY",
+        },
+        content: [
+          "exit_code=0",
+          "stdout:",
+          "{",
+          '  "ok": true,',
+          `  "output": "${path}",`,
+          '  "repo_facts": [',
+          '    { "path": "/Users/damon/Desktop/Ai产研管理/项目/aibox/richinfo-code" }',
+          "  ]",
+          "}",
+        ].join("\n"),
+      }),
+    ];
+    expect(collectSessionArtifactPaths(messages)).toEqual([path]);
+  });
+
+  it("collects path after 新 Excel 已保存 / 路径： multiline prose", () => {
+    const path =
+      "/Users/damon/Desktop/Ai产研管理/售前/广汽/广汽超级程序员一体化平台_成本重新评估_20260720_1648.xlsx";
+    const messages: Message[] = [
+      assistantMsg({
+        id: "a1",
+        content: [
+          "团长，已完成。",
+          "",
+          "## 1. 新 Excel 已保存",
+          "",
+          "路径：",
+          "",
+          `\`${path}\``,
+          "",
+          "---",
+          "",
+          "## 2. 口径",
+        ].join("\n"),
+      }),
+    ];
+    expect(collectSessionArtifactPaths(messages)).toEqual([path]);
+  });
+
+  it("collects same-line 路径： absolute file", () => {
+    const path = "/Users/damon/out/quote.xlsx";
+    const messages: Message[] = [
+      assistantMsg({
+        id: "a1",
+        content: `路径：\`${path}\``,
+      }),
+    ];
+    expect(collectSessionArtifactPaths(messages)).toEqual([path]);
+  });
+
   it("merges sub-agent outputs and extra paths with dedupe", () => {
     const path = "/Users/damon/out/report.md";
     const messages: Message[] = [

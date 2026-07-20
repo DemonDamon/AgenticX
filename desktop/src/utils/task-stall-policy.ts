@@ -473,7 +473,18 @@ export function resolveSessionHealth(
 const DISK_WRITE_PATH_RE =
   /(?:OK:\s*(?:wrote|saved|updated)|file_write|wrote\s+(?:to\s+)?)[`'"]?\s*([^\s`"'\n]+)/gi;
 const FILENAME_HINT_RE =
-  /([A-Za-z0-9_./-]+\.(?:md|txt|py|json|yaml|yml|sh|ts|tsx|js|jsx))/gi;
+  /([A-Za-z0-9_./-]+\.(?:md|txt|py|json|yaml|yml|sh|ts|tsx|js|jsx|xlsx|xls|csv|docx|pptx|pdf|html|htm|svg|mmd))/gi;
+
+/** bash/skill JSON stdout: "output": "/abs/file.ext" */
+const JSON_OUTPUT_PATH_RE =
+  /"output"\s*:\s*"(\/(?:Users|home|tmp|var|opt|private|Volumes)[^"\s]+|[a-zA-Z]:[\\/][^"\s]+|~\/[^"\s]+)"/gi;
+
+/** Todo prose keywords → expected artifact extensions (no filename in the todo text). */
+const TODO_ARTIFACT_SEMANTICS: Array<{ cue: RegExp; exts: RegExp }> = [
+  { cue: /excel|xlsx|报价表|电子表格/i, exts: /\.xlsx?$/i },
+  { cue: /csv|表格导出/i, exts: /\.csv$/i },
+  { cue: /pptx|幻灯片|演示文稿/i, exts: /\.pptx?$/i },
+];
 
 /** Collect filesystem paths mentioned in successful tool writes. */
 export function extractDiskWritePathsFromMessages(messages: Message[]): string[] {
@@ -487,6 +498,13 @@ export function extractDiskWritePathsFromMessages(messages: Message[]): string[]
     while ((match = DISK_WRITE_PATH_RE.exec(content)) !== null) {
       const raw = match[1]?.trim().replace(/[.,;)]+$/, "");
       if (raw) paths.add(raw);
+    }
+    JSON_OUTPUT_PATH_RE.lastIndex = 0;
+    while ((match = JSON_OUTPUT_PATH_RE.exec(content)) !== null) {
+      const raw = match[1]?.trim().replace(/[.,;)]+$/, "");
+      if (raw && /\.[a-zA-Z0-9]{1,12}$/.test(raw.split(/[/\\]/).pop() || "")) {
+        paths.add(raw);
+      }
     }
     if ((msg.toolName || "").trim() === "file_write" && !content.startsWith("ERROR")) {
       const abs = content.match(/\/[\w./+-]+\.[A-Za-z0-9]+/g);
@@ -509,6 +527,27 @@ function filenameHints(text: string): string[] {
   return hints;
 }
 
+function todoMatchesWrittenPath(todoContent: string, path: string): boolean {
+  const pathNorm = path.replace(/\\/g, "/");
+  const base = pathNorm.split("/").pop() || "";
+  const hints = filenameHints(todoContent);
+  if (
+    hints.some((hint) => {
+      const hintNorm = hint.replace(/\\/g, "/");
+      return (
+        pathNorm.includes(hintNorm) ||
+        pathNorm.endsWith(hintNorm) ||
+        base === hintNorm.split("/").pop()
+      );
+    })
+  ) {
+    return true;
+  }
+  return TODO_ARTIFACT_SEMANTICS.some(
+    ({ cue, exts }) => cue.test(todoContent) && exts.test(base),
+  );
+}
+
 /** Promote sticky todos when in_progress items match on-disk write evidence. */
 export function detectDiskEvidenceForInProgressTodos(
   messages: Message[],
@@ -519,13 +558,38 @@ export function detectDiskEvidenceForInProgressTodos(
   const paths = extractDiskWritePathsFromMessages(messages);
   if (paths.length === 0) return false;
   const normalized = paths.map((p) => p.replace(/\\/g, "/"));
-  return inProgress.every((item) => {
-    const hints = filenameHints(item.content);
-    return hints.some((hint) => {
-      const hintNorm = hint.replace(/\\/g, "/");
-      return normalized.some(
-        (path) => path.includes(hintNorm) || path.endsWith(hintNorm) || path.split("/").pop() === hintNorm.split("/").pop(),
-      );
-    });
-  });
+  return inProgress.every((item) =>
+    normalized.some((path) => todoMatchesWrittenPath(item.content, path)),
+  );
+}
+
+/**
+ * Detect "agent forgot to mark todos completed at the end".
+ *
+ * Conditions (run must already be idle — caller gates on liveness):
+ * - There is a substantial final assistant reply after the last todo_write
+ *   (not a short "我即将…" announcement).
+ *
+ * Covers the common anti-pattern:
+ *   bash_exec (produce file) → todo_write(last=in_progress) → final assistant
+ * where no tool follows the last todo snapshot (legacy code required a later
+ * tool call and therefore missed this case).
+ */
+export function detectModelForgotFinalTodoUpdate(
+  messages: Message[],
+  lastTodoIndex: number,
+): boolean {
+  if (lastTodoIndex < 0 || lastTodoIndex >= messages.length - 1) return false;
+  let lastAssistant: Message | undefined;
+  for (let i = lastTodoIndex + 1; i < messages.length; i += 1) {
+    const m = messages[i];
+    if (!m) continue;
+    if (m.role === "assistant" && m.id !== "__stream__") {
+      lastAssistant = m;
+    }
+  }
+  if (!messageLooksLikeAssistantFinal(lastAssistant)) return false;
+  const body = assistantBodyText(lastAssistant!);
+  if (body.length < 150) return false;
+  return true;
 }

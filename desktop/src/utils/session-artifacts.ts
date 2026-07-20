@@ -4,7 +4,9 @@
  * Sources (aligned with team_manager output-file extraction):
  * - file_write / file_edit tool rows (toolArgs.path + OK: wrote|edited)
  * - bash_exec redirect / tee targets in toolArgs.command
- * - labeled save paths in assistant prose (保存路径 / 已保存至 …)
+ * - bash_exec stdout JSON `"output": "/abs/file.ext"` (e.g. openpyxl wb.save)
+ * - labeled save paths in assistant prose (保存路径 / 路径 / 已保存至 …)
+ * - save labels with the absolute file path on a following line
  * - sub-agent outputFiles / resultFile
  *
  * Author: Damon Li
@@ -15,18 +17,36 @@ import { isAbsoluteFilePath } from "./workspace-file-path";
 
 const OK_WRITE_RE = /OK:\s*(?:wrote|edited)\s+(.+?)(?:\s+\(\d+\s+chars\))?/gi;
 
+const ABS_PATH_BODY =
+  "(\\/(?:Users|home|tmp|var|opt|private|Volumes)[^\\s`<>\\[\\]()]+|[a-zA-Z]:[\\\\/][^\\s`<>\\[\\]()]+|~\\/[^\\s`<>\\[\\]()]+)";
+
 const SAVED_FILE_LABEL =
-  "(?:报告已保存(?:至|到)|文件已保存(?:至|到)|报告(?:文件)?已落盘(?:至|到)?|已保存(?:至|到)|保存路径|saved\\s+to|written\\s+to|report\\s+saved\\s+to|file\\s+saved\\s+to)";
+  "(?:报告已保存(?:至|到)|文件已保存(?:至|到)|报告(?:文件)?已落盘(?:至|到)?|已保存(?:至|到)|保存路径|路径|saved\\s+to|written\\s+to|report\\s+saved\\s+to|file\\s+saved\\s+to)";
 
 const LABELED_SAVE_PATH_RE = new RegExp(
-  `${SAVED_FILE_LABEL}[：:\\s]*(\`?)(\\/(?:Users|home|tmp|var|opt|private|Volumes)[^\\s\`<>\\[\\]()]+|[a-zA-Z]:[\\\\/][^\\s\`<>\\[\\]()]+|~\\/[^\\s\`<>\\[\\]()]+)(\\1)`,
+  `${SAVED_FILE_LABEL}[：:\\s]*(\`?)${ABS_PATH_BODY}(\\1)`,
   "gi",
 );
+
+/** Line that introduces a saved artifact; path may follow on later lines. */
+const SAVE_CUE_LINE_RE =
+  /(?:保存路径|路径|已保存(?:至|到)?|saved\s+to|written\s+to|report\s+saved\s+to|file\s+saved\s+to)/i;
+
+const INLINE_ABS_PATH_RE = new RegExp(`\`?${ABS_PATH_BODY}\`?`, "g");
+
+/** bash / skill JSON result: "output": "/abs/file.ext" */
+const JSON_OUTPUT_PATH_RE =
+  /"output"\s*:\s*"(\/(?:Users|home|tmp|var|opt|private|Volumes)[^"\s]+|[a-zA-Z]:[\\/][^"\s]+|~\/[^"\s]+)"/gi;
 
 const BASH_REDIRECT_RE = /(?:>>?|\btee\b(?:\s+-a)?)\s+(['"]?)([^\s'"|;&<>]+)\1/g;
 
 /** Markdown table cell that looks like a bare filename with extension. */
 const TABLE_FILENAME_RE = /^\|\s*`?([^`|/\\]+\.[a-zA-Z0-9]{1,12})`?\s*\|/gm;
+
+function looksLikeArtifactFile(path: string): boolean {
+  const base = path.split("/").pop() || "";
+  return Boolean(base && /\.[a-zA-Z0-9]{1,12}$/.test(base));
+}
 
 function normalizeArtifactPath(raw: string): string | null {
   let value = String(raw || "").trim();
@@ -69,9 +89,37 @@ function extractLabeledSavePaths(content: string, paths: string[], seen: Set<str
     const candidate = normalizeArtifactPath(match[2] ?? "");
     if (!candidate) continue;
     // Directory-only labels are join bases for table filenames, not standalone artifacts.
-    const base = candidate.split("/").pop() || "";
-    if (!base || !/\.[a-zA-Z0-9]{1,12}$/.test(base)) continue;
+    if (!looksLikeArtifactFile(candidate)) continue;
     addPath(paths, seen, candidate);
+  }
+}
+
+/**
+ * Common agent report shape:
+ *   ## 1. 新 Excel 已保存
+ *   路径：
+ *   `/Users/.../file.xlsx`
+ */
+function extractNearbyLabeledSavePaths(content: string, paths: string[], seen: Set<string>): void {
+  const lines = String(content || "").split(/\r?\n/);
+  for (let i = 0; i < lines.length; i++) {
+    const cueLine = lines[i] ?? "";
+    if (!SAVE_CUE_LINE_RE.test(cueLine)) continue;
+
+    let nonEmptySeen = 0;
+    for (let j = i; j < lines.length && nonEmptySeen < 6; j++) {
+      const line = (lines[j] ?? "").trim();
+      if (!line) continue;
+      if (j > i) nonEmptySeen += 1;
+
+      INLINE_ABS_PATH_RE.lastIndex = 0;
+      let match: RegExpExecArray | null;
+      while ((match = INLINE_ABS_PATH_RE.exec(line)) !== null) {
+        const candidate = normalizeArtifactPath(match[1] ?? "");
+        if (!candidate || !looksLikeArtifactFile(candidate)) continue;
+        addPath(paths, seen, candidate);
+      }
+    }
   }
 }
 
@@ -85,6 +133,17 @@ function extractBashRedirectPaths(command: string, paths: string[], seen: Set<st
     if (raw.startsWith("/") || raw.startsWith("~/") || /^[a-zA-Z]:[\\/]/.test(raw)) {
       addPath(paths, seen, raw);
     }
+  }
+}
+
+/** Pull artifact file paths from bash/skill JSON stdout (`"output": "/abs/file.ext"`). */
+function extractJsonOutputArtifactPaths(content: string, paths: string[], seen: Set<string>): void {
+  JSON_OUTPUT_PATH_RE.lastIndex = 0;
+  let match: RegExpExecArray | null;
+  while ((match = JSON_OUTPUT_PATH_RE.exec(content)) !== null) {
+    const candidate = normalizeArtifactPath(match[1] ?? "");
+    if (!candidate || !looksLikeArtifactFile(candidate)) continue;
+    addPath(paths, seen, candidate);
   }
 }
 
@@ -140,9 +199,13 @@ export function collectSessionArtifactPaths(
       } else if (toolName === "bash_exec") {
         const command = String(message.toolArgs?.command ?? "").trim();
         if (command) extractBashRedirectPaths(command, paths, seen);
+        extractJsonOutputArtifactPaths(String(message.content || ""), paths, seen);
+        extractJsonOutputArtifactPaths(String(message.toolResultPreview || ""), paths, seen);
       } else {
         // Formatted tool rows may still embed OK: wrote even if toolName was lost.
         extractOkWritePaths(String(message.content || ""), paths, seen);
+        extractJsonOutputArtifactPaths(String(message.content || ""), paths, seen);
+        extractJsonOutputArtifactPaths(String(message.toolResultPreview || ""), paths, seen);
       }
       continue;
     }
@@ -150,6 +213,7 @@ export function collectSessionArtifactPaths(
     if (role === "assistant") {
       const body = String(message.content || "");
       extractLabeledSavePaths(body, paths, seen);
+      extractNearbyLabeledSavePaths(body, paths, seen);
       extractOkWritePaths(body, paths, seen);
       extractTableFilesUnderSaveDirs(body, paths, seen);
     }

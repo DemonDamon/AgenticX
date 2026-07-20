@@ -4,11 +4,10 @@ import { parseTodoMessage, type ParsedTodo } from "./TodoUpdateCard";
 import type { Message } from "../store";
 import {
   isTodoSnapshotSuperseded,
-  messageLooksLikeAssistantFinal,
   resolveStickyTodoDisplay,
   detectDiskEvidenceForInProgressTodos,
+  detectModelForgotFinalTodoUpdate,
 } from "../utils/task-stall-policy";
-import { assistantBodyText } from "../utils/budget-incomplete-message";
 import type { SessionExecutionState } from "../utils/streaming-stop-policy";
 
 /**
@@ -41,47 +40,6 @@ function pickLatestTodoFromMessages(
     if (parsed) return { parsed, index: i };
   }
   return null;
-}
-
-/**
- * Detect "agent kept working but forgot to update todo_write at the end".
- *
- * Conditions:
- *   - There is at least one further tool call after the last todo_write
- *     snapshot (proves work continued beyond the snapshot).
- *   - The final assistant message looks like a complete reply (not a
- *     half-sentence / `:` ending).
- *
- * When both hold, callers may safely promote residual `pending` todos to
- * `completed` to avoid a stale "1/2" sticky bar after the agent already
- * delivered.
- */
-function detectModelForgotFinalTodoUpdate(
-  messages: Message[],
-  lastTodoIndex: number,
-): boolean {
-  if (lastTodoIndex < 0 || lastTodoIndex >= messages.length - 1) return false;
-  let sawLaterToolCall = false;
-  let lastAssistant: Message | undefined;
-  for (let i = lastTodoIndex + 1; i < messages.length; i += 1) {
-    const m = messages[i];
-    if (!m) continue;
-    if (m.role === "tool") {
-      const name = (m.toolName ?? "").trim();
-      if (name && name !== "todo_write") sawLaterToolCall = true;
-    } else if (m.role === "assistant" && m.id !== "__stream__") {
-      lastAssistant = m;
-    }
-  }
-  if (!sawLaterToolCall) return false;
-  if (!messageLooksLikeAssistantFinal(lastAssistant)) return false;
-  // Bug-fix: short "announcement" messages (e.g. "我即将给出解决方案") must NOT be
-  // treated as a completed delivery. Promotions should only fire when the final
-  // assistant message has substantial content that plausibly represents the actual
-  // work product, not merely a promise of future work.
-  const body = assistantBodyText(lastAssistant!);
-  if (body.length < 150) return false;
-  return true;
 }
 
 type HarnessPhase = "explore" | "read" | "author";
