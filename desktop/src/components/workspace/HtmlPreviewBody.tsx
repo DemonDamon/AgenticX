@@ -14,7 +14,7 @@ import {
   type HtmlPreviewViewport,
 } from "./html-preview-device";
 import {
-  computePopupAnchorFromRect,
+  computeHtmlElementToolbarAnchor,
   type SelectionPopupAnchor,
 } from "./selection-quote-popover";
 
@@ -120,7 +120,7 @@ export function HtmlPreviewBody({
         Math.max(1, rect.width * scaleX),
         Math.max(1, rect.height * scaleY)
       );
-      return computePopupAnchorFromRect(mapped);
+      return computeHtmlElementToolbarAnchor(mapped);
     };
 
     const onMessage = (ev: MessageEvent) => {
@@ -188,7 +188,7 @@ export function HtmlPreviewBody({
         Math.max(1, rect.width * scaleX),
         Math.max(1, rect.height * scaleY)
       );
-      const anchor = computePopupAnchorFromRect(mapped);
+      const anchor = computeHtmlElementToolbarAnchor(mapped);
       if (!anchor) return;
       const next: HtmlPreviewElementHit = { ...prev, anchor };
       lastHitRef.current = next;

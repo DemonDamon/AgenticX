@@ -119,7 +119,8 @@ export function HtmlElementSelectPopover({
     <div
       role="toolbar"
       aria-label={`已选中 ${tagName}`}
-      className="fixed z-[100] flex h-8 -translate-x-1/2 items-center gap-0 overflow-hidden rounded-full border border-border shadow-lg"
+      // Trae capsule: no fixed h-8 + overflow-hidden (clips CJK + icons mid-glyph).
+      className="fixed z-[100] flex -translate-x-1/2 items-center gap-0 rounded-full border border-border shadow-lg"
       style={{
         top: anchor.top,
         left: anchor.left,
@@ -131,20 +132,20 @@ export function HtmlElementSelectPopover({
     >
       <button
         type="button"
-        className="inline-flex h-full items-center gap-1.5 px-3 text-[11px] font-medium text-text-strong transition-colors hover:bg-black/5 dark:hover:bg-white/10"
+        className="inline-flex items-center gap-1.5 whitespace-nowrap px-3 py-2 text-[11px] font-medium leading-none text-text-strong transition-colors hover:bg-black/5 dark:hover:bg-white/10"
         onClick={() => setMode("comment")}
       >
-        <Sparkles className="h-3.5 w-3.5 text-emerald-500" strokeWidth={1.8} />
+        <Sparkles className="h-3.5 w-3.5 shrink-0 text-emerald-500" strokeWidth={1.8} />
         评论到对话
         <span className="text-text-faint">⌘J</span>
       </button>
-      <div className="h-4 w-px shrink-0 bg-border" />
+      <div className="h-3.5 w-px shrink-0 self-center bg-border" />
       <button
         type="button"
-        className="inline-flex h-full items-center gap-1.5 px-3 text-[11px] font-medium text-text-strong transition-colors hover:bg-black/5 dark:hover:bg-white/10"
+        className="inline-flex items-center gap-1.5 whitespace-nowrap px-3 py-2 text-[11px] font-medium leading-none text-text-strong transition-colors hover:bg-black/5 dark:hover:bg-white/10"
         onClick={onAddToChat}
       >
-        <MessageSquarePlus className="h-3.5 w-3.5 text-text-muted" strokeWidth={1.8} />
+        <MessageSquarePlus className="h-3.5 w-3.5 shrink-0 text-text-muted" strokeWidth={1.8} />
         添加到对话
         <span className="text-text-faint">↵</span>
       </button>

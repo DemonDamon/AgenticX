@@ -14,6 +14,8 @@ describe("injectHtmlInspectBridge", () => {
     expect(out).toContain("__agxHtmlInspectInstalled");
     expect(out).toContain(HTML_INSPECT_MSG);
     expect(out).toContain('addEventListener("scroll"');
+    expect(out).toContain('addEventListener("wheel"');
+    expect(out).toContain("syncOverlayToScroll");
     expect(out).toContain("rect-update");
     expect(out.indexOf("__agxHtmlInspectInstalled")).toBeLessThan(out.indexOf("</body>"));
   });

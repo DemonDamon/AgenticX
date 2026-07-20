@@ -6,7 +6,7 @@
 export const HTML_INSPECT_MSG = "agx-html-inspect" as const;
 export const HTML_ELEMENT_OUTER_HTML_MAX = 8000;
 /** Bump when the injected bridge behavior changes so srcDoc re-injects. */
-export const HTML_INSPECT_BRIDGE_VERSION = 2;
+export const HTML_INSPECT_BRIDGE_VERSION = 3;
 
 export type HtmlInspectRect = { top: number; left: number; width: number; height: number };
 
@@ -55,6 +55,10 @@ const INSPECT_SCRIPT = `
   var MAX_HTML = ${HTML_ELEMENT_OUTER_HTML_MAX};
   var enabled = false;
   var selected = null;
+  var hovered = null;
+  var lastPtrX = 0;
+  var lastPtrY = 0;
+  var hasPtr = false;
   var overlay = null;
   var label = null;
 
@@ -72,6 +76,7 @@ const INSPECT_SCRIPT = `
 
   function hideHover() {
     if (!overlay || selected) return;
+    hovered = null;
     overlay.style.display = "none";
     if (label) label.style.display = "none";
   }
@@ -100,24 +105,58 @@ const INSPECT_SCRIPT = `
     return r;
   }
 
+  function pickHoverTarget(clientX, clientY) {
+    var el = document.elementFromPoint(clientX, clientY);
+    if (!el || isInspectChrome(el) || el === document.documentElement || el === document.body) {
+      return null;
+    }
+    return el;
+  }
+
   var syncRaf = 0;
-  function syncSelectedOverlay() {
-    if (!selected || !enabled) return;
-    var tag = tagOf(selected);
-    var r = paint(selected, tag);
+  /** Re-pin overlay after scroll/wheel — covers both selection and hover (mousemove does not fire on scroll). */
+  function syncOverlayToScroll() {
+    if (!enabled) return;
+    if (selected) {
+      if (selected.isConnected === false) {
+        selected = null;
+        hideHover();
+        return;
+      }
+      var stag = tagOf(selected);
+      var sr = paint(selected, stag);
+      if (!sr) return;
+      post({
+        action: "rect-update",
+        rect: { top: sr.top, left: sr.left, width: sr.width, height: sr.height }
+      });
+      return;
+    }
+    var el = null;
+    if (hasPtr) el = pickHoverTarget(lastPtrX, lastPtrY);
+    if (!el && hovered && hovered.isConnected !== false) el = hovered;
+    if (!el) {
+      hideHover();
+      post({ action: "leave" });
+      return;
+    }
+    hovered = el;
+    var tag = tagOf(el);
+    var r = paint(el, tag);
     if (!r) return;
     post({
-      action: "rect-update",
+      action: "hover",
+      tagName: tag,
       rect: { top: r.top, left: r.left, width: r.width, height: r.height }
     });
   }
 
-  function scheduleSyncSelected() {
-    if (!selected || !enabled) return;
+  function scheduleSyncOverlay() {
+    if (!enabled) return;
     if (syncRaf) return;
     syncRaf = requestAnimationFrame(function() {
       syncRaf = 0;
-      syncSelectedOverlay();
+      syncOverlayToScroll();
     });
   }
 
@@ -198,6 +237,7 @@ const INSPECT_SCRIPT = `
       enabled = !!d.enabled;
       if (!enabled) {
         selected = null;
+        hovered = null;
         if (overlay) overlay.style.display = "none";
         if (label) label.style.display = "none";
         document.documentElement.style.cursor = "";
@@ -211,19 +251,24 @@ const INSPECT_SCRIPT = `
       selected = null;
       if (overlay) overlay.style.display = "none";
       if (label) label.style.display = "none";
+      hovered = null;
     }
   });
 
   document.addEventListener("mousemove", function(e) {
     if (!enabled) return;
-    var el = document.elementFromPoint(e.clientX, e.clientY);
-    if (!el || isInspectChrome(el) || el === document.documentElement || el === document.body) {
+    lastPtrX = e.clientX;
+    lastPtrY = e.clientY;
+    hasPtr = true;
+    var el = pickHoverTarget(e.clientX, e.clientY);
+    if (!el) {
       if (!selected) hideHover();
       post({ action: "leave" });
       return;
     }
     if (selected && el === selected) return;
     if (selected) return;
+    hovered = el;
     var tag = tagOf(el);
     paint(el, tag);
     var r = el.getBoundingClientRect();
@@ -234,9 +279,13 @@ const INSPECT_SCRIPT = `
     if (!enabled) return;
     e.preventDefault();
     e.stopPropagation();
-    var el = document.elementFromPoint(e.clientX, e.clientY);
-    if (!el || isInspectChrome(el)) return;
+    lastPtrX = e.clientX;
+    lastPtrY = e.clientY;
+    hasPtr = true;
+    var el = pickHoverTarget(e.clientX, e.clientY);
+    if (!el) return;
     selected = el;
+    hovered = null;
     var paintTag = tagOf(el);
     paint(el, paintTag);
     var r = el.getBoundingClientRect();
@@ -259,6 +308,7 @@ const INSPECT_SCRIPT = `
     if (e.key === "Escape") {
       enabled = false;
       selected = null;
+      hovered = null;
       if (overlay) overlay.style.display = "none";
       if (label) label.style.display = "none";
       document.documentElement.style.cursor = "";
@@ -266,12 +316,14 @@ const INSPECT_SCRIPT = `
     }
   }, true);
 
-  // position:fixed overlay is viewport-relative — re-pin on any scroll/resize.
-  window.addEventListener("scroll", scheduleSyncSelected, true);
-  window.addEventListener("resize", scheduleSyncSelected);
+  // position:fixed overlay is viewport-relative — re-pin on scroll/wheel/resize
+  // (hover path too: wheel scroll does not fire mousemove).
+  window.addEventListener("scroll", scheduleSyncOverlay, true);
+  window.addEventListener("wheel", scheduleSyncOverlay, { capture: true, passive: true });
+  window.addEventListener("resize", scheduleSyncOverlay);
   if (window.visualViewport) {
-    window.visualViewport.addEventListener("resize", scheduleSyncSelected);
-    window.visualViewport.addEventListener("scroll", scheduleSyncSelected);
+    window.visualViewport.addEventListener("resize", scheduleSyncOverlay);
+    window.visualViewport.addEventListener("scroll", scheduleSyncOverlay);
   }
 })();
 `.trim();

@@ -1,9 +1,14 @@
 import { createPortal } from "react-dom";
 
 const POPUP_GAP = 6;
+/** Single-line「引用」pill — keep in sync with SelectionQuotePopover h-7. */
 const POPUP_HEIGHT = 28;
+/** HTML select-element Trae capsule (评论到对话 | 添加到对话) — py-2 + 11px leading-none. */
+export const HTML_ELEMENT_TOOLBAR_HEIGHT = 36;
 /** Approximate pill width for viewport clamping (content-sized button, no min-width). */
 const POPUP_MIN_WIDTH = 118;
+/** Wider clamp for dual-action HTML element toolbar. */
+const HTML_ELEMENT_TOOLBAR_MIN_WIDTH = 260;
 const VIEWPORT_MARGIN = 8;
 
 export type SelectionPopupAnchor = {
@@ -26,17 +31,43 @@ export function computeSelectionPopupAnchor(range: Range): SelectionPopupAnchor 
   return clampPopupAnchor(rect.left + rect.width / 2, rect.bottom + POPUP_GAP, rect.top);
 }
 
-export function computePopupAnchorFromRect(rect: DOMRect): SelectionPopupAnchor {
-  return clampPopupAnchor(rect.left + rect.width / 2, rect.bottom + POPUP_GAP, rect.top);
+export function computePopupAnchorFromRect(
+  rect: DOMRect,
+  opts?: { height?: number; minWidth?: number }
+): SelectionPopupAnchor {
+  return clampPopupAnchor(
+    rect.left + rect.width / 2,
+    rect.bottom + POPUP_GAP,
+    rect.top,
+    opts?.height ?? POPUP_HEIGHT,
+    opts?.minWidth ?? POPUP_MIN_WIDTH
+  );
 }
 
-function clampPopupAnchor(centerX: number, belowY: number, selectionTop: number): SelectionPopupAnchor {
-  const halfW = POPUP_MIN_WIDTH / 2;
+/** Anchor for HtmlElementSelectPopover (taller/wider than the quote pill). */
+export function computeHtmlElementToolbarAnchor(rect: DOMRect): SelectionPopupAnchor {
+  return computePopupAnchorFromRect(rect, {
+    height: HTML_ELEMENT_TOOLBAR_HEIGHT,
+    minWidth: HTML_ELEMENT_TOOLBAR_MIN_WIDTH,
+  });
+}
+
+function clampPopupAnchor(
+  centerX: number,
+  belowY: number,
+  selectionTop: number,
+  popupHeight: number = POPUP_HEIGHT,
+  minWidth: number = POPUP_MIN_WIDTH
+): SelectionPopupAnchor {
+  const halfW = minWidth / 2;
   let top = belowY;
-  if (top + POPUP_HEIGHT > window.innerHeight - VIEWPORT_MARGIN) {
-    top = selectionTop - POPUP_GAP - POPUP_HEIGHT;
+  if (top + popupHeight > window.innerHeight - VIEWPORT_MARGIN) {
+    top = selectionTop - POPUP_GAP - popupHeight;
   }
-  top = Math.max(VIEWPORT_MARGIN, Math.min(window.innerHeight - POPUP_HEIGHT - VIEWPORT_MARGIN, top));
+  top = Math.max(
+    VIEWPORT_MARGIN,
+    Math.min(window.innerHeight - popupHeight - VIEWPORT_MARGIN, top)
+  );
   const left = Math.max(
     halfW + VIEWPORT_MARGIN,
     Math.min(window.innerWidth - halfW - VIEWPORT_MARGIN, centerX)
