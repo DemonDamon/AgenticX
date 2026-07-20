@@ -5,6 +5,8 @@
 
 export const HTML_INSPECT_MSG = "agx-html-inspect" as const;
 export const HTML_ELEMENT_OUTER_HTML_MAX = 8000;
+/** Bump when the injected bridge behavior changes so srcDoc re-injects. */
+export const HTML_INSPECT_BRIDGE_VERSION = 2;
 
 export type HtmlInspectRect = { top: number; left: number; width: number; height: number };
 
@@ -28,6 +30,12 @@ export type HtmlInspectChildMessage =
       innerText: string;
       rect: HtmlInspectRect;
     }
+  /** Selection still active; element moved (scroll/resize) — update overlay + parent popover. */
+  | {
+      type: typeof HTML_INSPECT_MSG;
+      action: "rect-update";
+      rect: HtmlInspectRect;
+    }
   | { type: typeof HTML_INSPECT_MSG; action: "leave" }
   | { type: typeof HTML_INSPECT_MSG; action: "escape" };
 
@@ -41,8 +49,8 @@ export type HtmlElementSelection = {
 
 const INSPECT_SCRIPT = `
 (function(){
-  if (window.__agxHtmlInspectInstalled) return;
-  window.__agxHtmlInspectInstalled = true;
+  if (window.__agxHtmlInspectInstalled === ${HTML_INSPECT_BRIDGE_VERSION}) return;
+  window.__agxHtmlInspectInstalled = ${HTML_INSPECT_BRIDGE_VERSION};
   var MSG = "${HTML_INSPECT_MSG}";
   var MAX_HTML = ${HTML_ELEMENT_OUTER_HTML_MAX};
   var enabled = false;
@@ -72,6 +80,12 @@ const INSPECT_SCRIPT = `
     ensureUi();
     if (!el || !overlay || !label) return;
     var r = el.getBoundingClientRect();
+    // Element scrolled out of view — hide chrome until it returns.
+    if (r.width <= 0 && r.height <= 0) {
+      overlay.style.display = "none";
+      label.style.display = "none";
+      return r;
+    }
     overlay.style.display = "block";
     overlay.style.top = r.top + "px";
     overlay.style.left = r.left + "px";
@@ -83,6 +97,28 @@ const INSPECT_SCRIPT = `
     var lx = Math.max(4, r.left);
     label.style.top = ly + "px";
     label.style.left = lx + "px";
+    return r;
+  }
+
+  var syncRaf = 0;
+  function syncSelectedOverlay() {
+    if (!selected || !enabled) return;
+    var tag = tagOf(selected);
+    var r = paint(selected, tag);
+    if (!r) return;
+    post({
+      action: "rect-update",
+      rect: { top: r.top, left: r.left, width: r.width, height: r.height }
+    });
+  }
+
+  function scheduleSyncSelected() {
+    if (!selected || !enabled) return;
+    if (syncRaf) return;
+    syncRaf = requestAnimationFrame(function() {
+      syncRaf = 0;
+      syncSelectedOverlay();
+    });
   }
 
   function isInspectChrome(el) {
@@ -229,17 +265,37 @@ const INSPECT_SCRIPT = `
       post({ action: "escape" });
     }
   }, true);
+
+  // position:fixed overlay is viewport-relative — re-pin on any scroll/resize.
+  window.addEventListener("scroll", scheduleSyncSelected, true);
+  window.addEventListener("resize", scheduleSyncSelected);
+  if (window.visualViewport) {
+    window.visualViewport.addEventListener("resize", scheduleSyncSelected);
+    window.visualViewport.addEventListener("scroll", scheduleSyncSelected);
+  }
 })();
 `.trim();
 
+const INSPECT_SCRIPT_TAG_RE =
+  /<script\b[^>]*>[\s\S]*?__agxHtmlInspectInstalled[\s\S]*?<\/script>/gi;
+
 /** Append inspect bridge as a trailing script so it runs after document parse. */
 export function injectHtmlInspectBridge(html: string): string {
-  const src = String(html ?? "");
+  let src = String(html ?? "");
   if (!src) {
     return `<!DOCTYPE html><html><head></head><body><script>${INSPECT_SCRIPT}</script></body></html>`;
   }
-  if (src.includes("__agxHtmlInspectInstalled") || src.includes(HTML_INSPECT_MSG)) {
+  // Drop stale bridge so scroll-pin / rect-update upgrades take effect.
+  const versionMark = `__agxHtmlInspectInstalled = ${HTML_INSPECT_BRIDGE_VERSION}`;
+  if (src.includes("__agxHtmlInspectInstalled") && !src.includes(versionMark)) {
+    src = src.replace(INSPECT_SCRIPT_TAG_RE, "");
+  }
+  if (src.includes(versionMark) || src.includes(`__agxHtmlInspectInstalled === ${HTML_INSPECT_BRIDGE_VERSION}`)) {
     return src;
+  }
+  // Legacy inject without version equality — strip before re-adding.
+  if (src.includes("__agxHtmlInspectInstalled") || src.includes(HTML_INSPECT_MSG)) {
+    src = src.replace(INSPECT_SCRIPT_TAG_RE, "");
   }
   const snippet = `<script>${INSPECT_SCRIPT}</script>`;
   const bodyClose = /<\/body\s*>/i;
@@ -258,7 +314,11 @@ export function isHtmlInspectChildMessage(data: unknown): data is HtmlInspectChi
   const d = data as { type?: unknown; action?: unknown };
   if (d.type !== HTML_INSPECT_MSG) return false;
   return (
-    d.action === "hover" || d.action === "select" || d.action === "leave" || d.action === "escape"
+    d.action === "hover" ||
+    d.action === "select" ||
+    d.action === "rect-update" ||
+    d.action === "leave" ||
+    d.action === "escape"
   );
 }
 

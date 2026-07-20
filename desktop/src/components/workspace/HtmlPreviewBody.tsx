@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { prepareLocalHtmlSrcDoc } from "../../utils/html-preview-assets";
 import {
+  HTML_INSPECT_BRIDGE_VERSION,
   HTML_INSPECT_MSG,
   injectHtmlInspectBridge,
   isHtmlInspectChildMessage,
@@ -56,6 +57,7 @@ export function HtmlPreviewBody({
   const iframeRef = useRef<HTMLIFrameElement>(null);
   const onHitRef = useRef(onElementHitChange);
   onHitRef.current = onElementHitChange;
+  const lastHitRef = useRef<HtmlPreviewElementHit | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -72,7 +74,10 @@ export function HtmlPreviewBody({
     };
   }, [content, documentPath]);
 
-  const srcDoc = useMemo(() => injectHtmlInspectBridge(baseSrcDoc), [baseSrcDoc]);
+  const srcDoc = useMemo(
+    () => injectHtmlInspectBridge(baseSrcDoc),
+    [baseSrcDoc, HTML_INSPECT_BRIDGE_VERSION]
+  );
 
   const postToFrame = (msg: HtmlInspectParentMessage) => {
     iframeRef.current?.contentWindow?.postMessage(msg, "*");
@@ -85,6 +90,7 @@ export function HtmlPreviewBody({
       enabled: inspectEnabled,
     });
     if (!inspectEnabled) {
+      lastHitRef.current = null;
       onHitRef.current?.(null);
     }
   }, [inspectEnabled, srcDoc]);
@@ -92,6 +98,7 @@ export function HtmlPreviewBody({
   useEffect(() => {
     if (!clearSelectionKey) return;
     postToFrame({ type: HTML_INSPECT_MSG, action: "clear-selection" });
+    lastHitRef.current = null;
     onHitRef.current?.(null);
   }, [clearSelectionKey]);
 
@@ -122,6 +129,7 @@ export function HtmlPreviewBody({
       if (!iframe?.contentWindow || ev.source !== iframe.contentWindow) return;
       const data = ev.data;
       if (data.action === "escape") {
+        lastHitRef.current = null;
         onHitRef.current?.(null);
         onInspectEnabledChange?.(false);
         return;
@@ -132,22 +140,67 @@ export function HtmlPreviewBody({
       if (data.action === "hover") {
         return;
       }
+      if (data.action === "rect-update") {
+        const prev = lastHitRef.current;
+        if (!prev) return;
+        const anchor = mapRectToAnchor(data.rect);
+        if (!anchor) return;
+        const next: HtmlPreviewElementHit = { ...prev, rect: data.rect, anchor };
+        lastHitRef.current = next;
+        onHitRef.current?.(next);
+        return;
+      }
       if (data.action === "select") {
         const anchor = mapRectToAnchor(data.rect);
         if (!anchor) return;
-        onHitRef.current?.({
+        const hit: HtmlPreviewElementHit = {
           tagName: data.tagName,
           selectorHint: data.selectorHint,
           outerHTML: data.outerHTML,
           innerText: data.innerText,
           rect: data.rect,
           anchor,
-        });
+        };
+        lastHitRef.current = hit;
+        onHitRef.current?.(hit);
       }
     };
     window.addEventListener("message", onMessage);
     return () => window.removeEventListener("message", onMessage);
   }, [onInspectEnabledChange]);
+
+  // When the preview chrome scrolls (iframe moves on screen), rematerialize the
+  // parent popover from the last iframe-local rect — green overlay lives inside
+  // the iframe and moves with it; the Trae toolbar is position:fixed on the host.
+  useEffect(() => {
+    const remapHostAnchor = () => {
+      const prev = lastHitRef.current;
+      if (!prev) return;
+      const iframe = iframeRef.current;
+      if (!iframe) return;
+      const frameBox = iframe.getBoundingClientRect();
+      const scaleX = frameBox.width / Math.max(1, iframe.clientWidth || frameBox.width);
+      const scaleY = frameBox.height / Math.max(1, iframe.clientHeight || frameBox.height);
+      const rect = prev.rect;
+      const mapped = new DOMRect(
+        frameBox.left + rect.left * scaleX,
+        frameBox.top + rect.top * scaleY,
+        Math.max(1, rect.width * scaleX),
+        Math.max(1, rect.height * scaleY)
+      );
+      const anchor = computePopupAnchorFromRect(mapped);
+      if (!anchor) return;
+      const next: HtmlPreviewElementHit = { ...prev, anchor };
+      lastHitRef.current = next;
+      onHitRef.current?.(next);
+    };
+    window.addEventListener("scroll", remapHostAnchor, true);
+    window.addEventListener("resize", remapHostAnchor);
+    return () => {
+      window.removeEventListener("scroll", remapHostAnchor, true);
+      window.removeEventListener("resize", remapHostAnchor);
+    };
+  }, []);
 
   const fixed = isFixedViewport(viewport);
   const zoom = Math.max(25, Math.min(300, viewport.zoomPercent || 100)) / 100;

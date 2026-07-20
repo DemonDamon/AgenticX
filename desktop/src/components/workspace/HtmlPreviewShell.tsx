@@ -110,7 +110,8 @@ export function HtmlPreviewShell({
       </div>
       {elementHit && onQuoteHtmlElement && absPath ? (
         <HtmlElementSelectPopover
-          key={`${elementHit.tagName}-${elementHit.rect.top}-${elementHit.rect.left}`}
+          // Stable across scroll rect-updates so comment draft is not remounted.
+          key={`${elementHit.tagName}:${elementHit.selectorHint}:${elementHit.outerHTML.length}`}
           anchor={elementHit.anchor}
           tagName={elementHit.tagName}
           onAddToChat={() => quoteElement("add")}

@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  HTML_INSPECT_BRIDGE_VERSION,
   HTML_INSPECT_MSG,
   buildHtmlElementContextSnippet,
   injectHtmlInspectBridge,
@@ -12,14 +13,25 @@ describe("injectHtmlInspectBridge", () => {
     const out = injectHtmlInspectBridge(html);
     expect(out).toContain("__agxHtmlInspectInstalled");
     expect(out).toContain(HTML_INSPECT_MSG);
+    expect(out).toContain('addEventListener("scroll"');
+    expect(out).toContain("rect-update");
     expect(out.indexOf("__agxHtmlInspectInstalled")).toBeLessThan(out.indexOf("</body>"));
   });
 
-  it("is idempotent", () => {
+  it("is idempotent for the current bridge version", () => {
     const html = "<html><body>x</body></html>";
     const once = injectHtmlInspectBridge(html);
     const twice = injectHtmlInspectBridge(once);
     expect(twice).toBe(once);
+    expect(once).toContain(`__agxHtmlInspectInstalled = ${HTML_INSPECT_BRIDGE_VERSION}`);
+  });
+
+  it("upgrades a stale bridge missing scroll pin", () => {
+    const stale = `<html><body>x<script>(function(){ if (window.__agxHtmlInspectInstalled) return; window.__agxHtmlInspectInstalled = true; })();</script></body></html>`;
+    const out = injectHtmlInspectBridge(stale);
+    expect(out).toContain("rect-update");
+    expect(out).toContain(`__agxHtmlInspectInstalled = ${HTML_INSPECT_BRIDGE_VERSION}`);
+    expect((out.match(/__agxHtmlInspectInstalled/g) || []).length).toBeGreaterThanOrEqual(2);
   });
 
   it("appends when no body/html close tags", () => {
@@ -29,9 +41,10 @@ describe("injectHtmlInspectBridge", () => {
 });
 
 describe("isHtmlInspectChildMessage", () => {
-  it("accepts hover/select/leave/escape", () => {
+  it("accepts hover/select/rect-update/leave/escape", () => {
     expect(isHtmlInspectChildMessage({ type: HTML_INSPECT_MSG, action: "leave" })).toBe(true);
     expect(isHtmlInspectChildMessage({ type: HTML_INSPECT_MSG, action: "escape" })).toBe(true);
+    expect(isHtmlInspectChildMessage({ type: HTML_INSPECT_MSG, action: "rect-update" })).toBe(true);
     expect(isHtmlInspectChildMessage({ type: "other", action: "leave" })).toBe(false);
   });
 });
