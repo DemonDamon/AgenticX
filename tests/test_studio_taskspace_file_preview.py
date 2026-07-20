@@ -47,7 +47,7 @@ def test_classify_pdf(tmp_path: Path) -> None:
     info = classify_taskspace_file(file_path)
     assert info["preview_kind"] == "pdf"
     assert info["is_binary"] is True
-    assert info["preview_supported"] is False
+    assert info["preview_supported"] is True
 
 
 def test_classify_xlsx_as_office(tmp_path: Path) -> None:
@@ -56,7 +56,25 @@ def test_classify_xlsx_as_office(tmp_path: Path) -> None:
     info = classify_taskspace_file(file_path)
     assert info["preview_kind"] == "office"
     assert info["is_binary"] is True
-    assert info["preview_supported"] is False
+    assert info["preview_supported"] is True
+
+
+def test_classify_svg_as_image(tmp_path: Path) -> None:
+    file_path = tmp_path / "chart.svg"
+    file_path.write_text('<svg xmlns="http://www.w3.org/2000/svg"/>\n', encoding="utf-8")
+    info = classify_taskspace_file(file_path)
+    assert info["preview_kind"] == "image"
+    assert info["mime_type"] == "image/svg+xml"
+    assert info["preview_supported"] is True
+
+
+def test_classify_mmd_as_markdown(tmp_path: Path) -> None:
+    file_path = tmp_path / "flow.mmd"
+    file_path.write_text("flowchart LR\n  A --> B\n", encoding="utf-8")
+    info = classify_taskspace_file(file_path)
+    assert info["preview_kind"] == "markdown"
+    assert info["is_binary"] is False
+    assert info["preview_supported"] is True
 
 
 def test_classify_jsonl_as_textual(tmp_path: Path) -> None:

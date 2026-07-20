@@ -8,7 +8,9 @@ import {
   FileText,
   FolderOpen,
   ImageIcon,
+  Minus,
   Pencil,
+  Plus,
   Redo2,
   Search,
   Undo2,
@@ -75,7 +77,13 @@ type OfficePreview = BinaryLikePreview & { kind: "office" };
 
 export type WorkspaceFilePreviewProps = {
   preview: WorkspacePreview;
-  anchor: { top: number; bottom: number; left: number };
+  /**
+   * popover = Codex-style floating panel anchored left of workspace (legacy).
+   * panel = Trae-style fill the WorkPanel preview tab (no left popup).
+   */
+  layout?: "popover" | "panel";
+  /** Required when layout is popover. */
+  anchor?: { top: number; bottom: number; left: number };
   copied: boolean;
   onCopy: (text?: string) => void;
   onClose: () => void;
@@ -208,21 +216,26 @@ function ImagePreviewBody({
   onCopy,
   onRevealInFileManager,
   revealInFileManagerLabel,
+  enableZoom = false,
 }: {
   absolutePath: string;
   onCopy: () => void;
   onRevealInFileManager?: (absolutePath: string) => void;
   revealInFileManagerLabel?: string;
+  /** Trae-style floating zoom control for panel layout. */
+  enableZoom?: boolean;
 }) {
   const [dataUrl, setDataUrl] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [zoom, setZoom] = useState(100);
 
   useEffect(() => {
     let cancelled = false;
     setLoading(true);
     setError(null);
     setDataUrl(null);
+    setZoom(100);
     const api = window.agenticxDesktop?.loadLocalImageDataUrl;
     if (typeof api !== "function") {
       setLoading(false);
@@ -293,9 +306,51 @@ function ImagePreviewBody({
     );
   }
 
+  const scale = enableZoom ? zoom / 100 : 1;
+
   return (
-    <div className="flex h-full min-h-0 items-center justify-center overflow-auto bg-surface-base p-6">
-      <img src={dataUrl} alt="" className="max-h-full max-w-full rounded-lg object-contain" />
+    <div className="relative flex h-full min-h-0 flex-col bg-surface-base">
+      <div className="min-h-0 flex-1 overflow-auto p-6">
+        <div className="flex min-h-full items-center justify-center">
+          <img
+            src={dataUrl}
+            alt=""
+            className="rounded-lg object-contain"
+            style={
+              enableZoom
+                ? { width: `${Math.round(scale * 100)}%`, maxWidth: "none", height: "auto" }
+                : { maxHeight: "100%", maxWidth: "100%" }
+            }
+          />
+        </div>
+      </div>
+      {enableZoom ? (
+        <div className="pointer-events-none absolute inset-x-0 bottom-4 flex justify-center">
+          <div className="pointer-events-auto flex items-center gap-1 rounded-full border border-border bg-surface-card/95 px-2 py-1 shadow-lg backdrop-blur">
+            <button
+              type="button"
+              className="flex h-7 w-7 items-center justify-center rounded-full text-text-muted hover:bg-surface-hover hover:text-text-strong"
+              onClick={() => setZoom((z) => Math.max(50, z - 25))}
+              title="缩小"
+              aria-label="缩小"
+            >
+              <Minus className="h-3.5 w-3.5" strokeWidth={2} />
+            </button>
+            <span className="min-w-[3.2rem] text-center text-[12px] tabular-nums text-text-strong">
+              {zoom}%
+            </span>
+            <button
+              type="button"
+              className="flex h-7 w-7 items-center justify-center rounded-full text-text-muted hover:bg-surface-hover hover:text-text-strong"
+              onClick={() => setZoom((z) => Math.min(300, z + 25))}
+              title="放大"
+              aria-label="放大"
+            >
+              <Plus className="h-3.5 w-3.5" strokeWidth={2} />
+            </button>
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 }
@@ -553,10 +608,20 @@ function TextualPreviewBody({
     return Prism.highlight(preview.content, grammar, language);
   }, [preview, showHtmlRender]);
 
-  const markdownContent = useMemo(
-    () => (preview.kind === "markdown" ? normalizeChatMarkdownContent(editContent) : ""),
-    [preview.kind, editContent]
-  );
+  const markdownContent = useMemo(() => {
+    if (preview.kind !== "markdown") return "";
+    const lower = preview.path.toLowerCase();
+    // Raw Mermaid sources (.mmd) render as a diagram, not a plain code dump.
+    if (lower.endsWith(".mmd")) {
+      const trimmed = editContent.trim();
+      if (/^```(?:mermaid|mmd)\b/i.test(trimmed)) {
+        return normalizeChatMarkdownContent(editContent);
+      }
+      const body = editContent.replace(/\s+$/, "");
+      return normalizeChatMarkdownContent(`\`\`\`mermaid\n${body}\n\`\`\``);
+    }
+    return normalizeChatMarkdownContent(editContent);
+  }, [preview.kind, preview.path, editContent]);
   const markdownRef = useRef<HTMLDivElement | null>(null);
   const codeBlockRef = useRef<HTMLPreElement | null>(null);
   const [selectionRange, setSelectionRange] = useState<{
@@ -762,6 +827,7 @@ function TextualPreviewBody({
 
 export function WorkspaceFilePreview({
   preview,
+  layout = "popover",
   anchor,
   copied,
   onCopy,
@@ -772,6 +838,7 @@ export function WorkspaceFilePreview({
   initialLineRange,
   taskspaceRoot,
 }: WorkspaceFilePreviewProps) {
+  const isPanel = layout === "panel";
   const truncated =
     preview.kind === "text" || preview.kind === "markdown" || preview.kind === "code"
       ? preview.truncated
@@ -1057,33 +1124,37 @@ export function WorkspaceFilePreview({
         ? `第 ${initialLineRange.start}–${initialLineRange.end} 行`
         : null;
 
-  return createPortal(
-    <>
-      <div
-        className="fixed z-[55]"
-        style={{
-          top: 0,
-          bottom: 0,
-          left: 0,
-          right: Math.max(0, window.innerWidth - anchor.left),
-        }}
-        onMouseDown={onClose}
-        aria-hidden
-      />
+  if (!isPanel && !anchor) {
+    return null;
+  }
+
+  const shell = (
       <div
         role="dialog"
         aria-label={`预览 ${previewBaseName(preview.path)}`}
-        className="animate-preview-pop fixed z-[56] flex min-h-0 flex-col overflow-hidden rounded-2xl border border-[var(--border-subtle)] bg-surface-popover shadow-[0_20px_60px_-15px_rgba(0,0,0,0.5)]"
-        style={{
-          top: anchor.top + 8,
-          bottom: Math.max(8, window.innerHeight - anchor.bottom + 8),
-          right: Math.max(8, window.innerWidth - anchor.left + 8),
-          width: Math.min(760, Math.max(420, anchor.left - 24)),
-          transformOrigin: "right center",
-        }}
+        className={
+          isPanel
+            ? "flex h-full min-h-0 flex-col overflow-hidden bg-surface-sidebar"
+            : "animate-preview-pop fixed z-[56] flex min-h-0 flex-col overflow-hidden rounded-2xl border border-[var(--border-subtle)] bg-surface-popover shadow-[0_20px_60px_-15px_rgba(0,0,0,0.5)]"
+        }
+        style={
+          isPanel || !anchor
+            ? undefined
+            : {
+                top: anchor.top + 8,
+                bottom: Math.max(8, window.innerHeight - anchor.bottom + 8),
+                right: Math.max(8, window.innerWidth - anchor.left + 8),
+                width: Math.min(760, Math.max(420, anchor.left - 24)),
+                transformOrigin: "right center",
+              }
+        }
         onMouseDown={(e) => e.stopPropagation()}
       >
-        <div className="flex shrink-0 items-center gap-3 border-b border-border bg-surface-popover px-4 py-3">
+        <div
+          className={`flex shrink-0 items-center gap-3 border-b border-border px-4 py-3 ${
+            isPanel ? "bg-surface-sidebar" : "bg-surface-popover"
+          }`}
+        >
           <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-[var(--border-subtle)] bg-surface-base shadow-sm">
             <FileText className="h-4 w-4 text-text-muted" strokeWidth={1.5} />
           </div>
@@ -1354,6 +1425,7 @@ export function WorkspaceFilePreview({
               onCopy={onCopy}
               onRevealInFileManager={onRevealInFileManager}
               revealInFileManagerLabel={revealInFileManagerLabel}
+              enableZoom={isPanel}
             />
           ) : preview.kind === "pdf" ? (
             <PdfPreview
@@ -1407,7 +1479,27 @@ export function WorkspaceFilePreview({
           </div>
         ) : null}
       </div>
+  );
+
+  if (isPanel) {
+    return shell;
+  }
+
+  return createPortal(
+    <>
+      <div
+        className="fixed z-[55]"
+        style={{
+          top: 0,
+          bottom: 0,
+          left: 0,
+          right: Math.max(0, window.innerWidth - (anchor?.left ?? 0)),
+        }}
+        onMouseDown={onClose}
+        aria-hidden
+      />
+      {shell}
     </>,
-    document.body
+    document.body,
   );
 }

@@ -61,6 +61,7 @@ import { WorkPanel, type WorkPanelFocus } from "./work-panel/WorkPanel";
 import { loadPreparedHtmlSrcDoc } from "../utils/html-preview-assets";
 import {
   artifactBaseName,
+  isInAppArtifactPreviewPath,
   isInAppHtmlPreviewPath,
   looksLikeDirectoryPath,
   pathToFileUrl,
@@ -4267,11 +4268,40 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
               ...(request.lineRange ? { lineRange: request.lineRange } : {}),
             };
       if (!normalized.absolutePath) return;
-      setWorkPanelFocus({ kind: "workspace" });
+
+      // Open the WorkPanel shell only — never switch to「工作区」file-tree tab.
+      // File browsing lives in left-nav「文件管理」; previews are Trae-style tabs.
       if (!pane.taskspacePanelOpen) {
         openWorkspaceSidebarForPane(pane.id, paneRef.current?.clientWidth ?? paneWidth, openSidePanel);
       }
-      setPendingWorkspacePreviewRequest(normalized);
+
+      if (isInAppHtmlPreviewPath(normalized.absolutePath)) {
+        void (async () => {
+          const prepared = await loadPreparedHtmlSrcDoc(normalized.absolutePath);
+          if (prepared.ok) {
+            setWorkPanelFocus({
+              kind: "browser",
+              url: pathToFileUrl(normalized.absolutePath),
+              title: artifactBaseName(normalized.absolutePath) || "HTML",
+              srcDoc: prepared.srcDoc,
+            });
+            return;
+          }
+          setWorkPanelFocus({
+            kind: "preview",
+            absolutePath: normalized.absolutePath,
+            title: artifactBaseName(normalized.absolutePath),
+          });
+        })();
+        return;
+      }
+
+      setWorkPanelFocus({
+        kind: "preview",
+        absolutePath: normalized.absolutePath,
+        title: artifactBaseName(normalized.absolutePath),
+        ...(normalized.lineRange ? { lineRange: normalized.lineRange } : {}),
+      });
     },
     [pane.id, pane.taskspacePanelOpen, paneWidth, openSidePanel],
   );
@@ -4307,14 +4337,6 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
       console.warn("[ChatPane] read HTML failed:", prepared.error);
     }
 
-    // Prefer task artifacts over the redundant Workspace tab (file browsing lives in
-    // left-nav「文件管理」). Still open the work panel on the summary → artifacts section.
-    setWorkPanelFocus({
-      kind: "summary",
-      section: "artifacts",
-      highlightPath: path,
-    });
-
     let isDirectory = looksLikeDirectoryPath(path);
     const resolve = window.agenticxDesktop?.resolveLocalPath;
     if (resolve) {
@@ -4330,6 +4352,11 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
     }
 
     if (isDirectory) {
+      setWorkPanelFocus({
+        kind: "summary",
+        section: "artifacts",
+        highlightPath: path,
+      });
       const open = window.agenticxDesktop?.shellOpenPath;
       if (open) {
         const result = await open(path);
@@ -4338,13 +4365,31 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
       return;
     }
 
-    // Non-HTML files: locate in Finder only (do not shell-open into Chrome/Preview).
+    // PDF / Office / image / markdown / mermaid / code → Trae-style preview tab (not 工作区).
+    if (isInAppArtifactPreviewPath(path)) {
+      if (!pane.taskspacePanelOpen) {
+        openWorkspaceSidebarForPane(pane.id, paneRef.current?.clientWidth ?? paneWidth, openSidePanel);
+      }
+      setWorkPanelFocus({
+        kind: "preview",
+        absolutePath: path,
+        title: artifactBaseName(path),
+      });
+      return;
+    }
+
+    // Unknown types: highlight in artifacts + locate in Finder (do not shell-open).
+    setWorkPanelFocus({
+      kind: "summary",
+      section: "artifacts",
+      highlightPath: path,
+    });
     const reveal = window.agenticxDesktop?.shellShowItemInFolder;
     if (reveal) {
       const result = await reveal(path);
       if (!result.ok) console.warn("[ChatPane] reveal file failed:", result.error);
     }
-  }, [pane.id, pane.taskspacePanelOpen, paneWidth, openSidePanel]);
+  }, [pane.id, pane.taskspacePanelOpen, paneWidth, openSidePanel, openWorkspaceFilePreview]);
 
   const copyMessage = useCallback(async (message: Message) => {
     const raw = messagePlainTextForClipboard(message);

@@ -3,6 +3,7 @@ import type { Message, SubAgent } from "../store";
 import {
   artifactBaseName,
   collectSessionArtifactPaths,
+  isInAppArtifactPreviewPath,
   isInAppHtmlPreviewPath,
   looksLikeDirectoryPath,
   pathToFileUrl,
@@ -158,6 +159,15 @@ describe("artifact helpers", () => {
     expect(isInAppHtmlPreviewPath("/tmp/report.html")).toBe(true);
     expect(isInAppHtmlPreviewPath("/tmp/Report.HTM")).toBe(true);
     expect(isInAppHtmlPreviewPath("/tmp/a.svg")).toBe(false);
+  });
+
+  it("isInAppArtifactPreviewPath", () => {
+    expect(isInAppArtifactPreviewPath("/tmp/a.svg")).toBe(true);
+    expect(isInAppArtifactPreviewPath("/tmp/a.mmd")).toBe(true);
+    expect(isInAppArtifactPreviewPath("/tmp/a.pdf")).toBe(true);
+    expect(isInAppArtifactPreviewPath("/tmp/a.docx")).toBe(true);
+    expect(isInAppArtifactPreviewPath("/tmp/report.html")).toBe(false);
+    expect(isInAppArtifactPreviewPath("/tmp/charts/")).toBe(false);
   });
 
   it("pathToFileUrl", () => {

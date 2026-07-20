@@ -124,7 +124,7 @@ export function mapTaskspaceFileToWorkspacePreview(
       absolutePath,
       size,
       mimeType,
-      message: "PDF 预览将在下一阶段支持；当前可在系统应用中打开。",
+      message: "PDF 预览加载失败时，可在文件管理器中打开。",
     };
   }
   if (previewKind === "office") {
@@ -134,7 +134,7 @@ export function mapTaskspaceFileToWorkspacePreview(
       absolutePath,
       size,
       mimeType,
-      message: "Office 文档预览将在下一阶段支持；当前可在系统应用中打开。",
+      message: "Office 预览加载失败时，可在文件管理器中打开。",
     };
   }
   if (previewKind === "binary") {
@@ -174,9 +174,11 @@ export function mapSystemSearchPreviewToWorkspacePreview(
   const path = previewBaseName(absolutePath);
   const lower = path.toLowerCase();
   const mimeType =
-    lower.endsWith(".md") ? "text/markdown"
+    lower.endsWith(".md") || lower.endsWith(".mmd") || lower.endsWith(".markdown") || lower.endsWith(".mdx")
+      ? "text/markdown"
     : lower.endsWith(".json") ? "application/json"
     : lower.endsWith(".yaml") || lower.endsWith(".yml") ? "text/yaml"
+    : lower.endsWith(".svg") ? "image/svg+xml"
     : "text/plain";
 
   if (result.kind === "image" && result.fileUrl) {
@@ -185,7 +187,7 @@ export function mapSystemSearchPreviewToWorkspacePreview(
       path,
       absolutePath,
       size: 0,
-      mimeType: "image/png",
+      mimeType: lower.endsWith(".svg") ? "image/svg+xml" : "image/png",
     };
   }
 
@@ -193,7 +195,12 @@ export function mapSystemSearchPreviewToWorkspacePreview(
     const content = result.content;
     const size = content.length;
     const truncated = !!result.truncated;
-    if (lower.endsWith(".md")) {
+    if (
+      lower.endsWith(".md") ||
+      lower.endsWith(".mmd") ||
+      lower.endsWith(".markdown") ||
+      lower.endsWith(".mdx")
+    ) {
       return { kind: "markdown", path, absolutePath, content, size, truncated, mimeType };
     }
     if (lower.endsWith(".txt") || lower.endsWith(".log")) {
@@ -217,4 +224,78 @@ export function previewCopyText(preview: WorkspacePreview): string {
     return preview.content;
   }
   return preview.absolutePath;
+}
+
+/** Classify a local absolute path for Trae-style in-panel preview (no Workspace tab). */
+export async function loadAbsoluteFilePreview(
+  absolutePathRaw: string,
+): Promise<{ ok: true; preview: WorkspacePreview } | { ok: false; error: string }> {
+  const absolutePath = String(absolutePathRaw || "").trim();
+  if (!absolutePath) return { ok: false, error: "empty path" };
+
+  const desktop = window.agenticxDesktop;
+  if (!desktop?.systemSearchPreview) {
+    return { ok: false, error: "当前客户端不支持文件预览" };
+  }
+
+  const base = previewBaseName(absolutePath);
+  const lower = base.toLowerCase();
+
+  try {
+    const direct = await desktop.systemSearchPreview(absolutePath);
+    if (direct.ok) {
+      const mapped = mapSystemSearchPreviewToWorkspacePreview(absolutePath, direct);
+      if (
+        mapped &&
+        (mapped.kind === "text" ||
+          mapped.kind === "markdown" ||
+          mapped.kind === "code" ||
+          mapped.kind === "image")
+      ) {
+        return { ok: true, preview: mapped };
+      }
+    }
+
+    if (lower.endsWith(".pdf")) {
+      return {
+        ok: true,
+        preview: {
+          kind: "pdf",
+          path: base,
+          absolutePath,
+          size: 0,
+          mimeType: "application/pdf",
+          message: "PDF 预览加载失败时，可在文件管理器中打开。",
+        },
+      };
+    }
+    if (
+      lower.endsWith(".doc") ||
+      lower.endsWith(".docx") ||
+      lower.endsWith(".xls") ||
+      lower.endsWith(".xlsx") ||
+      lower.endsWith(".ppt") ||
+      lower.endsWith(".pptx")
+    ) {
+      return {
+        ok: true,
+        preview: {
+          kind: "office",
+          path: base,
+          absolutePath,
+          size: 0,
+          mimeType: "application/octet-stream",
+          message: "Office 预览加载失败时，可在文件管理器中打开。",
+        },
+      };
+    }
+
+    if (direct.ok) {
+      const mapped = mapSystemSearchPreviewToWorkspacePreview(absolutePath, direct);
+      if (mapped) return { ok: true, preview: mapped };
+    }
+    return { ok: false, error: direct.error || "无法预览该文件" };
+  } catch (err) {
+    return { ok: false, error: String(err) };
+  }
 }

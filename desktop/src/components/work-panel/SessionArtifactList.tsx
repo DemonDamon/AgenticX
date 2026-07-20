@@ -6,13 +6,17 @@
 
 import { useEffect, useRef } from "react";
 import { Eye, FileText, FolderOpen, ExternalLink } from "lucide-react";
-import { artifactBaseName, isInAppHtmlPreviewPath } from "../../utils/session-artifacts";
+import {
+  artifactBaseName,
+  isInAppArtifactPreviewPath,
+  isInAppHtmlPreviewPath,
+} from "../../utils/session-artifacts";
 
 type Props = {
   paths: string[];
   highlightPath?: string | null;
   onHighlightHandled?: () => void;
-  /** Open / preview a path (HTML should open in WorkPanel browser; others may use system app). */
+  /** Open / preview a path (HTML → WorkPanel browser; other previewable → WorkspaceFilePreview). */
   onOpenPath?: (path: string) => void;
 };
 
@@ -68,7 +72,8 @@ export function SessionArtifactList({
   return (
     <div className="space-y-1.5">
       {paths.map((path) => {
-        const htmlPreview = isInAppHtmlPreviewPath(path);
+        const inAppPreview =
+          isInAppHtmlPreviewPath(path) || isInAppArtifactPreviewPath(path);
         return (
           <div
             key={path}
@@ -91,14 +96,14 @@ export function SessionArtifactList({
                 type="button"
                 className="flex shrink-0 items-center gap-1 rounded px-1.5 py-0.5 text-[10.5px] text-text-muted hover:bg-surface-hover hover:text-text-primary"
                 onClick={() => openPath(path)}
-                title={htmlPreview ? "在工作台内预览" : "用系统应用打开"}
+                title={inAppPreview ? "在 Near 内预览" : "用系统应用打开"}
               >
-                {htmlPreview ? (
+                {inAppPreview ? (
                   <Eye className="h-3 w-3" strokeWidth={1.5} />
                 ) : (
                   <ExternalLink className="h-3 w-3" strokeWidth={1.5} />
                 )}
-                {htmlPreview ? "预览" : "打开"}
+                {inAppPreview ? "预览" : "打开"}
               </button>
               <button
                 type="button"

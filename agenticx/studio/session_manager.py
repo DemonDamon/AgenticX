@@ -351,7 +351,7 @@ _PREVIEW_KIND_PDF = "pdf"
 _PREVIEW_KIND_OFFICE = "office"
 _PREVIEW_KIND_BINARY = "binary"
 
-_MARKDOWN_EXTS = frozenset({".md", ".markdown", ".mdx"})
+_MARKDOWN_EXTS = frozenset({".md", ".markdown", ".mdx", ".mmd"})
 _TEXT_EXTS = frozenset({".txt", ".csv", ".log", ".jsonl", ".ndjson"})
 _CODE_EXTS = frozenset(
     {
@@ -372,7 +372,7 @@ _CODE_EXTS = frozenset(
         ".rs",
     }
 )
-_IMAGE_EXTS = frozenset({".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp"})
+_IMAGE_EXTS = frozenset({".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp", ".svg", ".ico"})
 _PDF_EXTS = frozenset({".pdf"})
 _OFFICE_EXTS = frozenset({".doc", ".docx", ".xls", ".xlsx", ".ppt", ".pptx"})
 
@@ -380,6 +380,7 @@ _MIME_BY_EXT: dict[str, str] = {
     ".md": "text/markdown",
     ".markdown": "text/markdown",
     ".mdx": "text/markdown",
+    ".mmd": "text/markdown",
     ".py": "text/x-python",
     ".ts": "text/typescript",
     ".tsx": "text/typescript",
@@ -401,6 +402,8 @@ _MIME_BY_EXT: dict[str, str] = {
     ".gif": "image/gif",
     ".webp": "image/webp",
     ".bmp": "image/bmp",
+    ".svg": "image/svg+xml",
+    ".ico": "image/x-icon",
     ".pdf": "application/pdf",
     ".doc": "application/msword",
     ".docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
@@ -449,11 +452,14 @@ def classify_taskspace_file(path: Path) -> dict[str, Any]:
     mime_type = _guess_preview_mime(path)
     preview_kind = _guess_preview_kind(path, mime_type)
     is_binary = not _is_textual_preview_kind(preview_kind)
+    # Desktop WorkspaceFilePreview renders text/image plus PDF/Office (pdf.js / docx).
     preview_supported = preview_kind in (
         _PREVIEW_KIND_TEXT,
         _PREVIEW_KIND_MARKDOWN,
         _PREVIEW_KIND_CODE,
         _PREVIEW_KIND_IMAGE,
+        _PREVIEW_KIND_PDF,
+        _PREVIEW_KIND_OFFICE,
     )
     return {
         "mime_type": mime_type,

@@ -190,6 +190,18 @@ export function isInAppHtmlPreviewPath(path: string): boolean {
   return base.endsWith(".html") || base.endsWith(".htm");
 }
 
+/**
+ * Files that should open with Near in-app preview (WorkspaceFilePreview), not the OS
+ * default app. HTML is handled separately via the WorkPanel browser tab.
+ */
+export function isInAppArtifactPreviewPath(path: string): boolean {
+  if (!path || looksLikeDirectoryPath(path)) return false;
+  if (isInAppHtmlPreviewPath(path)) return false;
+  const base = artifactBaseName(path).toLowerCase();
+  // Concrete file with a short extension → attempt WorkspaceFilePreview (PDF/Office/image/text…).
+  return /\.[a-z0-9]{1,12}$/.test(base);
+}
+
 /** Convert an absolute filesystem path to a file:// URL for the browser address bar. */
 export function pathToFileUrl(absPath: string): string {
   const normalized = String(absPath || "").trim().replace(/\\/g, "/");

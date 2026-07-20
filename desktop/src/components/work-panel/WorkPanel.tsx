@@ -13,6 +13,7 @@ import {
   CheckSquare,
   ChevronDown,
   FileCode2,
+  FileText,
   FolderOpen,
   Globe,
   ListTodo,
@@ -25,7 +26,14 @@ import {
 } from "lucide-react";
 import { useAppStore, type SubAgent } from "../../store";
 import { WorkspacePanel } from "../WorkspacePanel";
-import type { WorkspacePreviewOpenRequest, WorkspacePreviewQuotePayload } from "../workspace/workspace-preview-types";
+import {
+  loadAbsoluteFilePreview,
+  type WorkspacePreview,
+  type WorkspacePreviewLineRange,
+  type WorkspacePreviewOpenRequest,
+  type WorkspacePreviewQuotePayload,
+} from "../workspace/workspace-preview-types";
+import { WorkspaceFilePreview } from "../workspace/WorkspaceFilePreview";
 import { TerminalEmbed } from "../TerminalEmbed";
 import { SubAgentCard } from "../SubAgentCard";
 import { HoverTip } from "../ds/HoverTip";
@@ -43,7 +51,7 @@ import { SessionArtifactList } from "./SessionArtifactList";
 import { SessionReferenceList } from "./SessionReferenceList";
 import { collectSessionReferences } from "../../utils/session-references";
 
-export type WorkPanelTabKind = "summary" | "workspace" | "terminal" | "browser";
+export type WorkPanelTabKind = "summary" | "workspace" | "terminal" | "browser" | "preview";
 
 export type SummarySectionId = "todo" | "artifacts" | "spawns" | "refs";
 
@@ -60,6 +68,13 @@ export type WorkPanelFocus =
       /** Local HTML body rendered via srcDoc (Trae-style in-app preview). */
       srcDoc?: string;
     }
+  /** Trae-style file preview tab (fills WorkPanel; never opens 工作区 file tree). */
+  | {
+      kind: "preview";
+      absolutePath: string;
+      title?: string;
+      lineRange?: WorkspacePreviewLineRange;
+    }
   | null;
 
 type BrowserTab = {
@@ -69,6 +84,17 @@ type BrowserTab = {
   draftUrl: string;
   /** When set, iframe uses srcDoc instead of remote src (local HTML reports). */
   srcDoc?: string | null;
+};
+
+type PreviewTab = {
+  id: string;
+  title: string;
+  absolutePath: string;
+  preview: WorkspacePreview | null;
+  loading: boolean;
+  error: string | null;
+  copied: boolean;
+  lineRange?: WorkspacePreviewLineRange;
 };
 
 type Props = {
@@ -93,8 +119,6 @@ type Props = {
   onQuotePreviewSnippet?: (payload: WorkspacePreviewQuotePayload) => void;
   previewOpenRequest?: WorkspacePreviewOpenRequest | null;
   onPreviewOpenRequestHandled?: () => void;
-  /** Open a non-HTML artifact in WorkspaceFilePreview (PDF / Office / image / text…). */
-  onOpenFilePreview?: (absolutePath: string) => void;
   onEnsureSessionForWorkspace?: () => Promise<string | null>;
   subAgents: SubAgent[];
   selectedSubAgent: string | null;
@@ -144,6 +168,10 @@ function Section({
   open,
   onToggle,
   children,
+  footer,
+  /** When open + has content, body fills remaining height and scrolls inside (Trae fixed zones). */
+  scrollBody = false,
+  hasContent = false,
 }: {
   id: SummarySectionId;
   title: string;
@@ -151,12 +179,18 @@ function Section({
   open: boolean;
   onToggle: (id: SummarySectionId) => void;
   children: ReactNode;
+  footer?: ReactNode;
+  scrollBody?: boolean;
+  hasContent?: boolean;
 }) {
+  const grow = Boolean(open && scrollBody && hasContent);
   return (
-    <section className="border-b border-border">
+    <section
+      className={`flex min-h-0 flex-col border-b border-border ${grow ? "flex-1" : "shrink-0"}`}
+    >
       <button
         type="button"
-        className="flex w-full items-center gap-2 px-3 py-2.5 text-left text-[13px] font-medium text-text-strong hover:bg-surface-hover/60"
+        className="flex w-full shrink-0 items-center gap-2 px-3 py-2.5 text-left text-[13px] font-medium text-text-strong hover:bg-surface-hover/60"
         onClick={() => onToggle(id)}
         aria-expanded={open}
       >
@@ -169,7 +203,14 @@ function Section({
           <span className="text-[11px] font-normal text-text-faint">{count}</span>
         ) : null}
       </button>
-      {open ? <div className="px-3 pb-3">{children}</div> : null}
+      {open ? (
+        <div
+          className={`min-h-0 px-3 pb-3 ${grow ? "flex-1 overflow-y-auto overscroll-contain" : ""}`}
+        >
+          {children}
+        </div>
+      ) : null}
+      {open && footer ? <div className="shrink-0 px-3 pb-3">{footer}</div> : null}
     </section>
   );
 }
@@ -209,7 +250,6 @@ export function WorkPanel({
   onQuotePreviewSnippet,
   previewOpenRequest,
   onPreviewOpenRequestHandled,
-  onOpenFilePreview,
   onEnsureSessionForWorkspace,
   subAgents,
   selectedSubAgent,
@@ -233,14 +273,17 @@ export function WorkPanel({
   const [activeKind, setActiveKind] = useState<WorkPanelTabKind | null>("summary");
   const [activeBrowserId, setActiveBrowserId] = useState<string | null>(null);
   const [browserTabs, setBrowserTabs] = useState<BrowserTab[]>([]);
+  const [activePreviewId, setActivePreviewId] = useState<string | null>(null);
+  const [previewTabs, setPreviewTabs] = useState<PreviewTab[]>([]);
   const [workspaceTabOpen, setWorkspaceTabOpen] = useState(false);
   const [plusOpen, setPlusOpen] = useState(false);
   const [plusPos, setPlusPos] = useState<{ left: number; top: number } | null>(null);
   const plusBtnRef = useRef<HTMLButtonElement | null>(null);
+  // Empty zones stay collapsed by default; content arrival auto-expands (Trae-style).
   const [openSections, setOpenSections] = useState<Record<SummarySectionId, boolean>>({
-    todo: true,
-    artifacts: true,
-    spawns: true,
+    todo: false,
+    artifacts: false,
+    spawns: false,
     refs: false,
   });
   const [extraArtifactPaths, setExtraArtifactPaths] = useState<string[]>([]);
@@ -261,16 +304,31 @@ export function WorkPanel({
     [browserTabs, activeBrowserId]
   );
 
+  const activePreview = useMemo(
+    () => previewTabs.find((t) => t.id === activePreviewId) ?? null,
+    [previewTabs, activePreviewId],
+  );
+
   const hasAnyTab =
-    summaryTabOpen || workspaceTabOpen || terminalTabs.length > 0 || browserTabs.length > 0;
+    summaryTabOpen ||
+    workspaceTabOpen ||
+    terminalTabs.length > 0 ||
+    browserTabs.length > 0 ||
+    previewTabs.length > 0;
 
   const resolveFallbackKind = (opts?: {
     excludeSummary?: boolean;
     excludeWorkspace?: boolean;
     excludeTerminalId?: string;
     excludeBrowserId?: string;
+    excludePreviewId?: string;
   }): WorkPanelTabKind | null => {
     if (!opts?.excludeSummary && summaryTabOpen) return "summary";
+    const nextPreview = previewTabs.find((t) => t.id !== opts?.excludePreviewId);
+    if (nextPreview) {
+      setActivePreviewId(nextPreview.id);
+      return "preview";
+    }
     if (!opts?.excludeWorkspace && workspaceTabOpen) return "workspace";
     const nextTerminal = terminalTabs.find((t) => t.id !== opts?.excludeTerminalId);
     if (nextTerminal) return "terminal";
@@ -280,6 +338,72 @@ export function WorkPanel({
       return "browser";
     }
     return null;
+  };
+
+  const openLocalFilePreview = (
+    absPathRaw: string,
+    titleHint?: string,
+    lineRange?: WorkspacePreviewLineRange,
+  ) => {
+    const path = String(absPathRaw || "").trim();
+    if (!path) return;
+    const title = String(titleHint || "").trim() || artifactBaseName(path) || "预览";
+    const existing = previewTabs.find((t) => t.absolutePath === path);
+    if (existing) {
+      if (lineRange) {
+        setPreviewTabs((prev) =>
+          prev.map((t) => (t.id === existing.id ? { ...t, lineRange } : t)),
+        );
+      }
+      setActivePreviewId(existing.id);
+      setActiveKind("preview");
+      return;
+    }
+    const nextId = uid();
+    setPreviewTabs((prev) => [
+      ...prev,
+      {
+        id: nextId,
+        title,
+        absolutePath: path,
+        preview: null,
+        loading: true,
+        error: null,
+        copied: false,
+        ...(lineRange ? { lineRange } : {}),
+      },
+    ]);
+    setActivePreviewId(nextId);
+    setActiveKind("preview");
+    void (async () => {
+      const loaded = await loadAbsoluteFilePreview(path);
+      setPreviewTabs((prev) =>
+        prev.map((t) =>
+          t.id !== nextId
+            ? t
+            : loaded.ok
+              ? {
+                  ...t,
+                  loading: false,
+                  preview: loaded.preview,
+                  error: null,
+                  title: artifactBaseName(path) || t.title,
+                }
+              : { ...t, loading: false, preview: null, error: loaded.error },
+        ),
+      );
+    })();
+  };
+
+  const closePreviewTab = (tabId: string) => {
+    const next = previewTabs.filter((t) => t.id !== tabId);
+    setPreviewTabs(next);
+    if (activePreviewId === tabId) {
+      setActivePreviewId(next[next.length - 1]?.id ?? null);
+      if (activeKind === "preview") {
+        setActiveKind(resolveFallbackKind({ excludePreviewId: tabId }));
+      }
+    }
   };
 
   useEffect(() => {
@@ -332,6 +456,8 @@ export function WorkPanel({
         setActiveBrowserId(focusRequest.tabId);
       }
       setActiveKind("browser");
+    } else if (focusRequest.kind === "preview") {
+      openLocalFilePreview(focusRequest.absolutePath, focusRequest.title, focusRequest.lineRange);
     }
     onFocusRequestHandled?.();
   }, [focusRequest, onFocusRequestHandled, paneId, setActivePaneTerminalTab]);
@@ -339,18 +465,24 @@ export function WorkPanel({
   useEffect(() => {
     if (subAgents.length > 0) {
       setOpenSections((prev) => (prev.spawns ? prev : { ...prev, spawns: true }));
+    } else {
+      setOpenSections((prev) => (!prev.spawns ? prev : { ...prev, spawns: false }));
     }
   }, [subAgents.length]);
 
   useEffect(() => {
     if (artifactPaths.length > 0) {
       setOpenSections((prev) => (prev.artifacts ? prev : { ...prev, artifacts: true }));
+    } else {
+      setOpenSections((prev) => (!prev.artifacts ? prev : { ...prev, artifacts: false }));
     }
   }, [artifactPaths.length]);
 
   useEffect(() => {
     if (!referenceBundle.isEmpty) {
       setOpenSections((prev) => (prev.refs ? prev : { ...prev, refs: true }));
+    } else {
+      setOpenSections((prev) => (!prev.refs ? prev : { ...prev, refs: false }));
     }
   }, [referenceBundle.isEmpty]);
 
@@ -776,6 +908,45 @@ export function WorkPanel({
           </button>
         ))}
 
+        {previewTabs.map((tab) => (
+          <button
+            key={tab.id}
+            type="button"
+            className={`flex h-7 max-w-[140px] items-center gap-1.5 rounded-full px-2 text-[12px] ${
+              activeKind === "preview" && activePreviewId === tab.id
+                ? "bg-surface-card-strong text-text-strong"
+                : "text-text-subtle hover:bg-surface-hover hover:text-text-strong"
+            }`}
+            onClick={() => {
+              setActivePreviewId(tab.id);
+              setActiveKind("preview");
+            }}
+            title={tab.absolutePath}
+          >
+            <FileText className="h-3.5 w-3.5 shrink-0" strokeWidth={1.8} />
+            <span className="truncate">{tab.title}</span>
+            <span
+              role="button"
+              tabIndex={0}
+              className="rounded p-0.5 text-text-faint hover:bg-surface-hover hover:text-text-strong"
+              onClick={(e) => {
+                e.stopPropagation();
+                closePreviewTab(tab.id);
+              }}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" || e.key === " ") {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  closePreviewTab(tab.id);
+                }
+              }}
+              aria-label="关闭预览标签"
+            >
+              <X className="h-3 w-3" strokeWidth={2} />
+            </span>
+          </button>
+        ))}
+
         <button
           ref={plusBtnRef}
           type="button"
@@ -849,12 +1020,14 @@ export function WorkPanel({
         ) : null}
 
         {hasAnyTab && activeKind === "summary" && summaryTabOpen ? (
-          <div className="h-full overflow-y-auto">
+          <div className="flex h-full min-h-0 flex-col overflow-hidden">
             <Section
               id="todo"
               title="待办"
               open={openSections.todo}
               onToggle={toggleSection}
+              scrollBody
+              hasContent={false}
             >
               <EmptyBlock
                 icon={<CheckSquare className="h-9 w-9" strokeWidth={1.3} />}
@@ -869,6 +1042,18 @@ export function WorkPanel({
               count={artifactPaths.length}
               open={openSections.artifacts}
               onToggle={toggleSection}
+              scrollBody
+              hasContent={artifactPaths.length > 0}
+              footer={
+                <button
+                  type="button"
+                  className="flex w-full items-center justify-center gap-1.5 rounded-lg border border-dashed border-border px-2 py-2 text-[12px] text-text-subtle transition hover:border-[var(--ui-btn-primary-border,#3b82f6)] hover:bg-[color-mix(in_srgb,var(--ui-btn-primary-bg,#3b82f6)_12%,transparent)] hover:text-[var(--ui-btn-primary-bg,#3b82f6)]"
+                  onClick={onOpenDelivery}
+                >
+                  <Boxes className="h-3.5 w-3.5" strokeWidth={1.7} />
+                  新建交付任务（POC / MVP）
+                </button>
+              }
             >
               {artifactPaths.length === 0 ? (
                 <EmptyBlock
@@ -890,22 +1075,42 @@ export function WorkPanel({
                       void window.agenticxDesktop?.shellOpenPath?.(path);
                       return;
                     }
-                    if (isInAppArtifactPreviewPath(path) && onOpenFilePreview) {
-                      onOpenFilePreview(path);
+                    if (isInAppArtifactPreviewPath(path)) {
+                      // Trae-style: open preview tab in this WorkPanel — never 工作区 / left popup.
+                      openLocalFilePreview(path);
                       return;
                     }
                     void window.agenticxDesktop?.shellOpenPath?.(path);
                   }}
                 />
               )}
-              <button
-                type="button"
-                className="mt-1 flex w-full items-center justify-center gap-1.5 rounded-lg border border-dashed border-border px-2 py-2 text-[12px] text-text-subtle transition hover:border-[var(--ui-btn-primary-border,#3b82f6)] hover:bg-[color-mix(in_srgb,var(--ui-btn-primary-bg,#3b82f6)_12%,transparent)] hover:text-[var(--ui-btn-primary-bg,#3b82f6)]"
-                onClick={onOpenDelivery}
-              >
-                <Boxes className="h-3.5 w-3.5" strokeWidth={1.7} />
-                新建交付任务（POC / MVP）
-              </button>
+            </Section>
+
+            <Section
+              id="refs"
+              title="参考信息"
+              count={
+                referenceBundle.isEmpty
+                  ? undefined
+                  : referenceBundle.skillCount + referenceBundle.docCount
+              }
+              open={openSections.refs}
+              onToggle={toggleSection}
+              scrollBody
+              hasContent={!referenceBundle.isEmpty}
+            >
+              {referenceBundle.isEmpty ? (
+                <EmptyBlock
+                  icon={<FileCode2 className="h-9 w-9" strokeWidth={1.3} />}
+                  title="暂无参考"
+                  subtitle="任务执行中调用的技能与参考网页会显示在这里"
+                />
+              ) : (
+                <SessionReferenceList
+                  bundle={referenceBundle}
+                  onOpenWebUrl={openWebReferenceInBrowser}
+                />
+              )}
             </Section>
 
             <Section
@@ -914,6 +1119,8 @@ export function WorkPanel({
               count={subAgents.length}
               open={openSections.spawns}
               onToggle={toggleSection}
+              scrollBody
+              hasContent={subAgents.length > 0}
             >
               {subAgents.length === 0 ? (
                 <EmptyBlock
@@ -939,31 +1146,62 @@ export function WorkPanel({
                 </div>
               )}
             </Section>
+          </div>
+        ) : null}
 
-            <Section
-              id="refs"
-              title="参考信息"
-              count={
-                referenceBundle.isEmpty
-                  ? undefined
-                  : referenceBundle.skillCount + referenceBundle.docCount
-              }
-              open={openSections.refs}
-              onToggle={toggleSection}
-            >
-              {referenceBundle.isEmpty ? (
-                <EmptyBlock
-                  icon={<FileCode2 className="h-9 w-9" strokeWidth={1.3} />}
-                  title="暂无参考"
-                  subtitle="任务执行中调用的技能与参考网页会显示在这里"
-                />
-              ) : (
-                <SessionReferenceList
-                  bundle={referenceBundle}
-                  onOpenWebUrl={openWebReferenceInBrowser}
-                />
-              )}
-            </Section>
+        {hasAnyTab && activeKind === "preview" ? (
+          <div className="flex h-full min-h-0 flex-col">
+            {!activePreview ? (
+              <EmptyBlock
+                icon={<FileText className="h-9 w-9" strokeWidth={1.3} />}
+                title="暂无预览"
+                subtitle="从任务产物打开文件以预览"
+              />
+            ) : activePreview.loading ? (
+              <div className="flex h-full items-center justify-center text-[13px] text-text-muted">
+                正在加载预览…
+              </div>
+            ) : activePreview.error || !activePreview.preview ? (
+              <div className="flex h-full flex-col items-center justify-center gap-3 px-6 text-center">
+                <p className="text-[13px] text-rose-300">{activePreview.error || "预览失败"}</p>
+                <p className="max-w-sm truncate font-mono text-[11px] text-text-faint" title={activePreview.absolutePath}>
+                  {activePreview.absolutePath}
+                </p>
+              </div>
+            ) : (
+              <WorkspaceFilePreview
+                layout="panel"
+                preview={activePreview.preview}
+                copied={activePreview.copied}
+                initialLineRange={activePreview.lineRange}
+                onCopy={(text) => {
+                  const value =
+                    text ??
+                    (activePreview.preview
+                      ? activePreview.preview.kind === "text" ||
+                        activePreview.preview.kind === "markdown" ||
+                        activePreview.preview.kind === "code"
+                        ? activePreview.preview.content
+                        : activePreview.absolutePath
+                      : activePreview.absolutePath);
+                  void navigator.clipboard.writeText(value);
+                  setPreviewTabs((prev) =>
+                    prev.map((t) => (t.id === activePreview.id ? { ...t, copied: true } : t)),
+                  );
+                  window.setTimeout(() => {
+                    setPreviewTabs((prev) =>
+                      prev.map((t) => (t.id === activePreview.id ? { ...t, copied: false } : t)),
+                    );
+                  }, 1600);
+                }}
+                onClose={() => closePreviewTab(activePreview.id)}
+                onQuoteSnippet={onQuotePreviewSnippet}
+                onRevealInFileManager={(abs) => {
+                  void window.agenticxDesktop?.shellShowItemInFolder?.(abs);
+                }}
+                revealInFileManagerLabel="在文件管理器中显示"
+              />
+            )}
           </div>
         ) : null}
 

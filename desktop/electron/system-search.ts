@@ -107,6 +107,7 @@ const TEXT_PREVIEW_EXTENSIONS = new Set([
   ".ini",
   ".env",
   ".log",
+  ".mmd",
 ]);
 
 const IMAGE_EXTENSIONS = new Set([".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp", ".svg", ".heic", ".ico"]);
