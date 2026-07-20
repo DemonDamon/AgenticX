@@ -1688,6 +1688,10 @@ function buildToolCallLivePreview(toolNameRaw: unknown, argsRaw: unknown): strin
 const TASKSPACE_WIDTH_STORAGE_KEY = "agenticx:taskspace-panel-width";
 const SPAWNS_WIDTH_STORAGE_KEY = "agenticx:spawns-column-width";
 const RUN_DRAWER_WIDTH_STORAGE_KEY = "agenticx:run-drawer-width";
+/** Chat column floor while dragging the workbench wider (Trae-like: prefer a large canvas). */
+const CHAT_COLUMN_MIN_WIDTH = 240;
+/** Workbench may grow up to this share of the pane; chat keeps CHAT_COLUMN_MIN_WIDTH. */
+const TASKSPACE_MAX_WIDTH_RATIO = 0.62;
 const TEXT_ATTACHMENT_LIMIT = 32000;
 
 type AttachedFileStatus = "parsing" | "ready" | "error";
@@ -9897,7 +9901,16 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
     };
   }, [insertGlobalSearchFileReference, pane.id]);
 
-  const maxTaskspaceWidth = paneWidth > 0 ? Math.max(240, Math.floor(paneWidth * 0.4)) : 480;
+  const maxTaskspaceWidth =
+    paneWidth > 0
+      ? Math.max(
+          240,
+          Math.min(
+            Math.floor(paneWidth * TASKSPACE_MAX_WIDTH_RATIO),
+            paneWidth - CHAT_COLUMN_MIN_WIDTH,
+          ),
+        )
+      : 720;
   const minTaskspaceWidth = 220;
   /**
    * Trae Work expand: work panel becomes the main canvas (flex-1);
@@ -10531,7 +10544,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
             ? "pointer-events-none absolute inset-x-0 bottom-0 z-[60] flex justify-center px-3 pb-3 sm:px-6"
             : "agx-chatpane-main-column flex h-full min-w-0 flex-1 flex-col"
         }
-        style={workExpandedLayout ? undefined : { minWidth: 280 }}
+        style={workExpandedLayout ? undefined : { minWidth: CHAT_COLUMN_MIN_WIDTH }}
       >
         <div
           className={
