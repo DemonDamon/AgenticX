@@ -55,6 +55,7 @@ import {
   type SystemSearchCategory,
 } from "./system-search";
 import { proxyAwareFetch, logProxyConfig } from "./proxy-fetch";
+import { fetchFaviconDataUrl } from "./fetch-favicon";
 import {
   listMetaWorkspaceHistory,
   parseMetaWorkspaceHistoryKind,
@@ -10157,6 +10158,14 @@ function registerIpc(): void {
       return { ok: false, error: String(err) };
     }
   });
+
+  ipcMain.handle(
+    "fetch-favicon",
+    async (
+      _event,
+      payload: { url?: string; domain?: string; size?: number },
+    ) => fetchFaviconDataUrl(payload ?? {}),
+  );
 
   ipcMain.handle("fetch-models", async (_event, payload: {
     provider: string;

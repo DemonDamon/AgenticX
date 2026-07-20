@@ -1170,6 +1170,15 @@ declare global {
         apiKey: string;
         baseUrl?: string;
       }) => Promise<FetchModelsResult>;
+      /** Main-process favicon fetch (honors HTTPS_PROXY; renderer <img> does not). */
+      fetchFavicon: (payload: {
+        url?: string;
+        domain?: string;
+        size?: number;
+      }) => Promise<
+        | { ok: true; dataUrl: string; host: string }
+        | { ok: false; error: string }
+      >;
       healthCheckModel: (payload: {
         provider: string;
         apiKey: string;

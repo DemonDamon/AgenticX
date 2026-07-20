@@ -2,8 +2,10 @@ import { describe, expect, it } from "vitest";
 import {
   duckDuckGoFaviconUrl,
   googleFaviconUrl,
+  hostVariants,
   hostnameFromUrlOrDomain,
   resolveFaviconCandidates,
+  yandexFaviconUrl,
 } from "./favicon-url";
 
 describe("favicon-url", () => {
@@ -17,15 +19,26 @@ describe("favicon-url", () => {
     expect(hostnameFromUrlOrDomain("www.reddit.com")).toBe("reddit.com");
   });
 
-  it("builds google + duckduckgo candidates", () => {
+  it("builds parent host variants for subdomains", () => {
+    expect(hostVariants("data.eastmoney.com")).toEqual([
+      "data.eastmoney.com",
+      "eastmoney.com",
+    ]);
+    expect(hostVariants("money.finance.sina.com.cn")).toEqual([
+      "money.finance.sina.com.cn",
+      "sina.com.cn",
+    ]);
+  });
+
+  it("builds ddg + yandex + google candidates (parent variants included)", () => {
     const list = resolveFaviconCandidates(
-      "https://vercel.com/docs",
-      "vercel.com",
+      "https://data.eastmoney.com/notices/x",
+      "data.eastmoney.com",
       32,
     );
-    expect(list).toHaveLength(2);
-    expect(list[0]).toBe(googleFaviconUrl("vercel.com", 32));
-    expect(list[1]).toBe(duckDuckGoFaviconUrl("vercel.com"));
+    expect(list[0]).toBe(duckDuckGoFaviconUrl("data.eastmoney.com"));
+    expect(list).toContain(yandexFaviconUrl("eastmoney.com"));
+    expect(list).toContain(googleFaviconUrl("eastmoney.com", 32));
   });
 
   it("returns empty when url/domain missing", () => {

@@ -701,6 +701,8 @@ contextBridge.exposeInMainWorld("agenticxDesktop", {
     ipcRenderer.invoke("validate-key", payload),
   fetchModels: async (payload: { provider: string; apiKey: string; baseUrl?: string }) =>
     ipcRenderer.invoke("fetch-models", payload),
+  fetchFavicon: async (payload: { url?: string; domain?: string; size?: number }) =>
+    ipcRenderer.invoke("fetch-favicon", payload),
   healthCheckModel: async (payload: {
     provider: string;
     apiKey: string;
