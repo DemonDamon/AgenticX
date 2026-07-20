@@ -33,11 +33,15 @@ import { loadPreparedHtmlSrcDoc } from "../../utils/html-preview-assets";
 import {
   artifactBaseName,
   collectSessionArtifactPaths,
+  isInAppArtifactPreviewPath,
   isInAppHtmlPreviewPath,
+  looksLikeDirectoryPath,
   pathToFileUrl,
 } from "../../utils/session-artifacts";
 import { HtmlPreviewBody } from "../workspace/HtmlPreviewBody";
 import { SessionArtifactList } from "./SessionArtifactList";
+import { SessionReferenceList } from "./SessionReferenceList";
+import { collectSessionReferences } from "../../utils/session-references";
 
 export type WorkPanelTabKind = "summary" | "workspace" | "terminal" | "browser";
 
@@ -89,6 +93,8 @@ type Props = {
   onQuotePreviewSnippet?: (payload: WorkspacePreviewQuotePayload) => void;
   previewOpenRequest?: WorkspacePreviewOpenRequest | null;
   onPreviewOpenRequestHandled?: () => void;
+  /** Open a non-HTML artifact in WorkspaceFilePreview (PDF / Office / image / text…). */
+  onOpenFilePreview?: (absolutePath: string) => void;
   onEnsureSessionForWorkspace?: () => Promise<string | null>;
   subAgents: SubAgent[];
   selectedSubAgent: string | null;
@@ -203,6 +209,7 @@ export function WorkPanel({
   onQuotePreviewSnippet,
   previewOpenRequest,
   onPreviewOpenRequestHandled,
+  onOpenFilePreview,
   onEnsureSessionForWorkspace,
   subAgents,
   selectedSubAgent,
@@ -242,6 +249,11 @@ export function WorkPanel({
   const artifactPaths = useMemo(
     () => collectSessionArtifactPaths(paneMessages, subAgents, extraArtifactPaths, sessionId),
     [paneMessages, subAgents, extraArtifactPaths, sessionId],
+  );
+
+  const referenceBundle = useMemo(
+    () => collectSessionReferences(paneMessages),
+    [paneMessages],
   );
 
   const activeBrowser = useMemo(
@@ -337,6 +349,12 @@ export function WorkPanel({
   }, [artifactPaths.length]);
 
   useEffect(() => {
+    if (!referenceBundle.isEmpty) {
+      setOpenSections((prev) => (prev.refs ? prev : { ...prev, refs: true }));
+    }
+  }, [referenceBundle.isEmpty]);
+
+  useEffect(() => {
     setExtraArtifactPaths([]);
     setArtifactHighlightPath(null);
   }, [sessionId]);
@@ -415,6 +433,31 @@ export function WorkPanel({
     setActiveBrowserId(id);
     setActiveKind("browser");
     closePlus();
+  };
+
+  /** Open a remote http(s) reference inside the WorkPanel browser tab (Trae-style). */
+  const openWebReferenceInBrowser = (url: string, title: string) => {
+    const nextUrl = normalizeBrowseUrl(url);
+    if (!/^https?:\/\//i.test(nextUrl)) return;
+    const nextTitle = String(title || "").trim() || nextUrl;
+    const nextId = uid();
+    setBrowserTabs((prev) => {
+      const existing = prev.find((t) => t.url === nextUrl && t.srcDoc == null);
+      if (existing) {
+        queueMicrotask(() => setActiveBrowserId(existing.id));
+        return prev.map((t) =>
+          t.id === existing.id
+            ? { ...t, title: nextTitle, url: nextUrl, draftUrl: nextUrl, srcDoc: null }
+            : t,
+        );
+      }
+      queueMicrotask(() => setActiveBrowserId(nextId));
+      return [
+        ...prev,
+        { id: nextId, title: nextTitle, url: nextUrl, draftUrl: nextUrl, srcDoc: null },
+      ];
+    });
+    setActiveKind("browser");
   };
 
   const closeBrowserTab = (tabId: string) => {
@@ -843,6 +886,14 @@ export function WorkPanel({
                       openLocalHtmlPreview(path);
                       return;
                     }
+                    if (looksLikeDirectoryPath(path)) {
+                      void window.agenticxDesktop?.shellOpenPath?.(path);
+                      return;
+                    }
+                    if (isInAppArtifactPreviewPath(path) && onOpenFilePreview) {
+                      onOpenFilePreview(path);
+                      return;
+                    }
                     void window.agenticxDesktop?.shellOpenPath?.(path);
                   }}
                 />
@@ -892,14 +943,26 @@ export function WorkPanel({
             <Section
               id="refs"
               title="参考信息"
+              count={
+                referenceBundle.isEmpty
+                  ? undefined
+                  : referenceBundle.skillCount + referenceBundle.docCount
+              }
               open={openSections.refs}
               onToggle={toggleSection}
             >
-              <EmptyBlock
-                icon={<FileCode2 className="h-9 w-9" strokeWidth={1.3} />}
-                title="暂无参考"
-                subtitle="任务执行中调用的技能与参考网页会显示在这里"
-              />
+              {referenceBundle.isEmpty ? (
+                <EmptyBlock
+                  icon={<FileCode2 className="h-9 w-9" strokeWidth={1.3} />}
+                  title="暂无参考"
+                  subtitle="任务执行中调用的技能与参考网页会显示在这里"
+                />
+              ) : (
+                <SessionReferenceList
+                  bundle={referenceBundle}
+                  onOpenWebUrl={openWebReferenceInBrowser}
+                />
+              )}
             </Section>
           </div>
         ) : null}

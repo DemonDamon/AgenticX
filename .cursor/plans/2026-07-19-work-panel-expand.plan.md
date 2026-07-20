@@ -20,7 +20,8 @@ Suggested-Impl-Model: cursor-grok-4.5-high-fast
 ## Out of scope
 
 - 记忆图谱能力删除（仅去掉顶栏入口）
-- 待办 / 参考信息真实数据源（v1 空态占位）
+- 待办真实数据源（v1 空态占位）
+- ~~参考信息真实数据源~~ → 已由 follow-up 接线：会话内 `references` / `skill_use` / `@skill://` 聚合进「参考信息」（技能 / 联网搜索 / 知识库）
 - 浏览器完整浏览器 chrome（仅地址栏 + iframe）
 
 ## Key files
