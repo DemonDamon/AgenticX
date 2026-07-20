@@ -8,6 +8,7 @@ import {
   FolderOpen,
   Link2,
   MousePointer2,
+  RefreshCw,
   RotateCw,
   Share2,
   Smartphone,
@@ -38,6 +39,11 @@ type HtmlPreviewChromeProps = {
   viewport: HtmlPreviewViewport;
   onViewportChange: (next: HtmlPreviewViewport) => void;
   onOpenInBrowser: () => void;
+  /**
+   * Optional refresh on this tools row (WorkspaceFilePreview only).
+   * WorkPanel browser keeps refresh in the address bar instead.
+   */
+  onRefresh?: () => void;
   /** Optional: jump to source view (WorkspaceFilePreview). */
   onViewSource?: () => void;
   className?: string;
@@ -90,6 +96,7 @@ export function HtmlPreviewChrome({
   viewport,
   onViewportChange,
   onOpenInBrowser,
+  onRefresh,
   onViewSource,
   className,
 }: HtmlPreviewChromeProps) {
@@ -128,6 +135,11 @@ export function HtmlPreviewChrome({
   return (
     <div className={["flex shrink-0 flex-col border-b border-border", className ?? ""].join(" ")}>
       <div className="flex items-center justify-end gap-0.5 px-2 py-1">
+        {onRefresh ? (
+          <IconBtn label="刷新" onClick={onRefresh}>
+            <RefreshCw className="h-3.5 w-3.5" strokeWidth={1.8} />
+          </IconBtn>
+        ) : null}
         <IconBtn
           label={inspectEnabled ? "退出选择元素" : "选择元素"}
           active={inspectEnabled}

@@ -8,6 +8,8 @@ import {
 } from "react";
 import { createPortal } from "react-dom";
 import {
+  ArrowLeft,
+  ArrowRight,
   Boxes,
   Bot,
   CheckSquare,
@@ -21,6 +23,7 @@ import {
   Minimize2,
   PanelRight,
   Plus,
+  RefreshCw,
   Terminal as TerminalIcon,
   X,
 } from "lucide-react";
@@ -57,13 +60,22 @@ import { SessionReferenceList } from "./SessionReferenceList";
 import { collectSessionReferences } from "../../utils/session-references";
 
 /** Remote https tab: open-in-browser + device toolbar; inspect unavailable (cross-origin). */
-function RemoteBrowserPane({ title, url }: { title: string; url: string }) {
+function RemoteBrowserPane({
+  title,
+  url,
+  reloadKey = 0,
+}: {
+  title: string;
+  url: string;
+  reloadKey?: number;
+}) {
   const [deviceToolbarVisible, setDeviceToolbarVisible] = useState(false);
   const [viewport, setViewport] = useState<HtmlPreviewViewport>(DEFAULT_HTML_PREVIEW_VIEWPORT);
   const [inspectEnabled, setInspectEnabled] = useState(false);
   const fixed =
     viewport.width != null && viewport.height != null && viewport.width > 0 && viewport.height > 0;
   const zoom = Math.max(25, Math.min(300, viewport.zoomPercent || 100)) / 100;
+  const frameKey = reloadKey;
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
@@ -97,6 +109,7 @@ function RemoteBrowserPane({ title, url }: { title: string; url: string }) {
           }
         >
           <iframe
+            key={`remote-browser-${frameKey}`}
             title={title}
             src={url}
             className="border-0 bg-white"
@@ -144,6 +157,12 @@ export type WorkPanelFocus =
     }
   | null;
 
+type BrowserHistoryEntry = {
+  url: string;
+  title: string;
+  srcDoc?: string | null;
+};
+
 type BrowserTab = {
   id: string;
   title: string;
@@ -151,7 +170,83 @@ type BrowserTab = {
   draftUrl: string;
   /** When set, iframe uses srcDoc instead of remote src (local HTML reports). */
   srcDoc?: string | null;
+  /** Bump to force iframe remount after refresh. */
+  reloadNonce?: number;
+  /** Trae-style back/forward stack for this tab. */
+  history: BrowserHistoryEntry[];
+  historyIndex: number;
 };
+
+function browserEntry(
+  url: string,
+  title: string,
+  srcDoc?: string | null,
+): BrowserHistoryEntry {
+  return { url, title, srcDoc: srcDoc ?? null };
+}
+
+function createBrowserTab(init: {
+  id: string;
+  title: string;
+  url: string;
+  draftUrl?: string;
+  srcDoc?: string | null;
+}): BrowserTab {
+  const entry = browserEntry(init.url, init.title, init.srcDoc);
+  return {
+    id: init.id,
+    title: init.title,
+    url: init.url,
+    draftUrl: init.draftUrl ?? (init.url === "about:blank" ? "" : init.url),
+    srcDoc: init.srcDoc ?? null,
+    history: [entry],
+    historyIndex: 0,
+  };
+}
+
+/** Push a navigation entry (truncates forward stack). Same URL updates in place. */
+function pushBrowserHistory(tab: BrowserTab, entry: BrowserHistoryEntry): BrowserTab {
+  const idx = Math.max(0, Math.min(tab.historyIndex, tab.history.length - 1));
+  const cur = tab.history[idx];
+  if (cur && cur.url === entry.url) {
+    const history = tab.history.map((e, i) => (i === idx ? entry : e));
+    return {
+      ...tab,
+      url: entry.url,
+      draftUrl: entry.url === "about:blank" ? tab.draftUrl : entry.url,
+      title: entry.title,
+      srcDoc: entry.srcDoc,
+      history,
+      historyIndex: idx,
+    };
+  }
+  const history = [...tab.history.slice(0, idx + 1), entry];
+  return {
+    ...tab,
+    url: entry.url,
+    draftUrl: entry.url === "about:blank" ? "" : entry.url,
+    title: entry.title,
+    srcDoc: entry.srcDoc,
+    history,
+    historyIndex: history.length - 1,
+  };
+}
+
+function goBrowserHistory(tab: BrowserTab, delta: -1 | 1): BrowserTab | null {
+  const next = tab.historyIndex + delta;
+  if (next < 0 || next >= tab.history.length) return null;
+  const entry = tab.history[next];
+  if (!entry) return null;
+  return {
+    ...tab,
+    historyIndex: next,
+    url: entry.url,
+    draftUrl: entry.url === "about:blank" ? "" : entry.url,
+    title: entry.title,
+    srcDoc: entry.srcDoc,
+    reloadNonce: (tab.reloadNonce ?? 0) + 1,
+  };
+}
 
 type PreviewTab = {
   id: string;
@@ -505,19 +600,21 @@ export function WorkPanel({
           artifactBaseName(fileUrlToLocalPath(focusUrl) || focusUrl) ||
           "浏览器";
         const nextId = uid();
+        const entry = browserEntry(focusUrl, title, focusSrcDoc);
         setBrowserTabs((prev) => {
           const existing = prev.find((t) => t.url === focusUrl);
           if (existing) {
             // Activate existing tab after commit.
             queueMicrotask(() => setActiveBrowserId(existing.id));
             return prev.map((t) =>
-              t.id === existing.id
-                ? { ...t, title, url: focusUrl, draftUrl: focusUrl, srcDoc: focusSrcDoc }
-                : t,
+              t.id === existing.id ? pushBrowserHistory(t, entry) : t,
             );
           }
           queueMicrotask(() => setActiveBrowserId(nextId));
-          return [...prev, { id: nextId, title, url: focusUrl, draftUrl: focusUrl, srcDoc: focusSrcDoc }];
+          return [
+            ...prev,
+            createBrowserTab({ id: nextId, title, url: focusUrl, srcDoc: focusSrcDoc }),
+          ];
         });
       } else if (focusRequest.tabId) {
         setActiveBrowserId(focusRequest.tabId);
@@ -622,12 +719,12 @@ export function WorkPanel({
 
   const openBrowserTab = () => {
     const id = uid();
-    const tab: BrowserTab = {
+    const tab = createBrowserTab({
       id,
       title: "新标签页",
       url: "about:blank",
       draftUrl: "",
-    };
+    });
     setBrowserTabs((prev) => [...prev, tab]);
     setActiveBrowserId(id);
     setActiveKind("browser");
@@ -640,20 +737,19 @@ export function WorkPanel({
     if (!/^https?:\/\//i.test(nextUrl)) return;
     const nextTitle = String(title || "").trim() || nextUrl;
     const nextId = uid();
+    const entry = browserEntry(nextUrl, nextTitle, null);
     setBrowserTabs((prev) => {
       const existing = prev.find((t) => t.url === nextUrl && t.srcDoc == null);
       if (existing) {
         queueMicrotask(() => setActiveBrowserId(existing.id));
         return prev.map((t) =>
-          t.id === existing.id
-            ? { ...t, title: nextTitle, url: nextUrl, draftUrl: nextUrl, srcDoc: null }
-            : t,
+          t.id === existing.id ? pushBrowserHistory(t, entry) : t,
         );
       }
       queueMicrotask(() => setActiveBrowserId(nextId));
       return [
         ...prev,
-        { id: nextId, title: nextTitle, url: nextUrl, draftUrl: nextUrl, srcDoc: null },
+        createBrowserTab({ id: nextId, title: nextTitle, url: nextUrl, srcDoc: null }),
       ];
     });
     setActiveKind("browser");
@@ -682,18 +778,20 @@ export function WorkPanel({
       const fileUrl = pathToFileUrl(path);
       const title = artifactBaseName(path) || "HTML";
       const nextId = uid();
+      const entry = browserEntry(fileUrl, title, prepared.srcDoc);
       setBrowserTabs((prev) => {
         const existing = prev.find((t) => t.url === fileUrl);
         if (existing) {
           queueMicrotask(() => setActiveBrowserId(existing.id));
           return prev.map((t) =>
-            t.id === existing.id
-              ? { ...t, title, url: fileUrl, draftUrl: fileUrl, srcDoc: prepared.srcDoc }
-              : t,
+            t.id === existing.id ? pushBrowserHistory(t, entry) : t,
           );
         }
         queueMicrotask(() => setActiveBrowserId(nextId));
-        return [...prev, { id: nextId, title, url: fileUrl, draftUrl: fileUrl, srcDoc: prepared.srcDoc }];
+        return [
+          ...prev,
+          createBrowserTab({ id: nextId, title, url: fileUrl, srcDoc: prepared.srcDoc }),
+        ];
       });
       setActiveKind("browser");
     })();
@@ -712,12 +810,9 @@ export function WorkPanel({
           return;
         }
         const title = artifactBaseName(localPath) || "HTML";
+        const entry = browserEntry(nextUrl, title, prepared.srcDoc);
         setBrowserTabs((prev) =>
-          prev.map((t) =>
-            t.id === tabId
-              ? { ...t, url: nextUrl, draftUrl: nextUrl, title, srcDoc: prepared.srcDoc }
-              : t,
-          ),
+          prev.map((t) => (t.id === tabId ? pushBrowserHistory(t, entry) : t)),
         );
       })();
       return;
@@ -735,9 +830,55 @@ export function WorkPanel({
         } catch {
           title = "浏览器";
         }
-        return { ...t, url: nextUrl, draftUrl: nextUrl, title, srcDoc: null };
+        return pushBrowserHistory(t, browserEntry(nextUrl, title, null));
       }),
     );
+  };
+
+  const goBrowserBack = (tabId: string) => {
+    setBrowserTabs((prev) =>
+      prev.map((t) => {
+        if (t.id !== tabId) return t;
+        return goBrowserHistory(t, -1) ?? t;
+      }),
+    );
+  };
+
+  const goBrowserForward = (tabId: string) => {
+    setBrowserTabs((prev) =>
+      prev.map((t) => {
+        if (t.id !== tabId) return t;
+        return goBrowserHistory(t, 1) ?? t;
+      }),
+    );
+  };
+
+  /** Trae-style refresh: re-read local HTML / remount remote iframe. */
+  const refreshBrowser = (tabId: string) => {
+    const tab = browserTabs.find((t) => t.id === tabId);
+    if (!tab) return;
+    const bump = (t: BrowserTab): BrowserTab => ({
+      ...t,
+      reloadNonce: (t.reloadNonce ?? 0) + 1,
+    });
+    const localPath = fileUrlToLocalPath(tab.url);
+    if (localPath && isInAppHtmlPreviewPath(localPath)) {
+      void (async () => {
+        const prepared = await loadPreparedHtmlSrcDoc(localPath);
+        if (!prepared.ok) {
+          console.warn("[WorkPanel] refresh HTML failed:", prepared.error);
+          setBrowserTabs((prev) => prev.map((t) => (t.id === tabId ? bump(t) : t)));
+          return;
+        }
+        const title = artifactBaseName(localPath) || "HTML";
+        const entry = browserEntry(tab.url, title, prepared.srcDoc);
+        setBrowserTabs((prev) =>
+          prev.map((t) => (t.id === tabId ? bump(pushBrowserHistory(t, entry)) : t)),
+        );
+      })();
+      return;
+    }
+    setBrowserTabs((prev) => prev.map((t) => (t.id === tabId ? bump(t) : t)));
   };
 
   useEffect(() => {
@@ -1313,13 +1454,62 @@ export function WorkPanel({
         {hasAnyTab && activeKind === "browser" && activeBrowser ? (
           <div className="flex h-full min-h-0 flex-col">
             <form
-              className="flex shrink-0 items-center gap-1.5 border-b border-border px-2 py-1.5"
+              className="flex shrink-0 items-center gap-1 border-b border-border px-2 py-1.5"
               onSubmit={(e) => {
                 e.preventDefault();
                 navigateBrowser(activeBrowser.id);
               }}
             >
-              <Globe className="h-3.5 w-3.5 shrink-0 text-text-faint" strokeWidth={1.7} />
+              {(() => {
+                const canBack = activeBrowser.historyIndex > 0;
+                const canForward =
+                  activeBrowser.historyIndex < activeBrowser.history.length - 1;
+                const navBtn = (opts: {
+                  label: string;
+                  disabled: boolean;
+                  onClick: () => void;
+                  children: ReactNode;
+                }) => (
+                  <HoverTip label={opts.label}>
+                    <button
+                      type="button"
+                      aria-label={opts.label}
+                      disabled={opts.disabled}
+                      className={[
+                        "inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md transition-colors",
+                        opts.disabled
+                          ? "cursor-not-allowed text-text-faint opacity-40"
+                          : "text-text-muted hover:bg-surface-hover hover:text-text-strong",
+                      ].join(" ")}
+                      onClick={opts.onClick}
+                    >
+                      {opts.children}
+                    </button>
+                  </HoverTip>
+                );
+                return (
+                  <>
+                    {navBtn({
+                      label: "后退",
+                      disabled: !canBack,
+                      onClick: () => goBrowserBack(activeBrowser.id),
+                      children: <ArrowLeft className="h-3.5 w-3.5" strokeWidth={1.8} />,
+                    })}
+                    {navBtn({
+                      label: "前进",
+                      disabled: !canForward,
+                      onClick: () => goBrowserForward(activeBrowser.id),
+                      children: <ArrowRight className="h-3.5 w-3.5" strokeWidth={1.8} />,
+                    })}
+                    {navBtn({
+                      label: "刷新",
+                      disabled: false,
+                      onClick: () => refreshBrowser(activeBrowser.id),
+                      children: <RefreshCw className="h-3.5 w-3.5" strokeWidth={1.8} />,
+                    })}
+                  </>
+                );
+              })()}
               <input
                 value={activeBrowser.draftUrl}
                 onChange={(e) => {
@@ -1342,10 +1532,16 @@ export function WorkPanel({
                   documentPath={fileUrlToLocalPath(activeBrowser.url)}
                   documentUrl={activeBrowser.url}
                   onQuoteHtmlElement={onQuotePreviewSnippet}
+                  showChromeRefresh={false}
+                  reloadKey={activeBrowser.reloadNonce ?? 0}
                 />
               </div>
             ) : activeBrowser.url && activeBrowser.url !== "about:blank" ? (
-              <RemoteBrowserPane title={activeBrowser.title} url={activeBrowser.url} />
+              <RemoteBrowserPane
+                title={activeBrowser.title}
+                url={activeBrowser.url}
+                reloadKey={activeBrowser.reloadNonce ?? 0}
+              />
             ) : (
               <EmptyBlock
                 icon={<Globe className="h-9 w-9" strokeWidth={1.3} />}

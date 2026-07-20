@@ -1,4 +1,5 @@
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
+import { loadPreparedHtmlSrcDoc } from "../../utils/html-preview-assets";
 import { pathToFileUrl } from "../../utils/session-artifacts";
 import { previewBaseName, type WorkspaceHtmlElementQuote } from "./workspace-preview-types";
 import { HtmlElementSelectPopover } from "./HtmlElementSelectPopover";
@@ -18,6 +19,13 @@ type HtmlPreviewShellProps = {
   onViewSource?: () => void;
   /** Trae-style：添加到对话 / 评论到对话. */
   onQuoteHtmlElement?: (payload: WorkspaceHtmlElementQuote) => void;
+  /** External reload nonce; merges with internal refresh remounts. */
+  reloadKey?: number;
+  /**
+   * Show refresh on the tools chrome (WorkspaceFilePreview).
+   * WorkPanel browser keeps refresh only in the address bar — set false.
+   */
+  showChromeRefresh?: boolean;
   className?: string;
 };
 
@@ -28,6 +36,8 @@ export function HtmlPreviewShell({
   documentUrl,
   onViewSource,
   onQuoteHtmlElement,
+  reloadKey = 0,
+  showChromeRefresh = true,
   className,
 }: HtmlPreviewShellProps) {
   const [inspectEnabled, setInspectEnabled] = useState(false);
@@ -35,10 +45,18 @@ export function HtmlPreviewShell({
   const [viewport, setViewport] = useState<HtmlPreviewViewport>(DEFAULT_HTML_PREVIEW_VIEWPORT);
   const [elementHit, setElementHit] = useState<HtmlPreviewElementHit | null>(null);
   const [clearSelectionKey, setClearSelectionKey] = useState(0);
+  const [localContent, setLocalContent] = useState<string | null>(null);
+  const [internalReloadKey, setInternalReloadKey] = useState(0);
 
   const absPath = String(documentPath || "").trim();
   const url =
     String(documentUrl || "").trim() || (absPath ? pathToFileUrl(absPath) : "");
+  const effectiveContent = localContent ?? content;
+  const effectiveReloadKey = reloadKey + internalReloadKey;
+
+  useEffect(() => {
+    setLocalContent(null);
+  }, [content, absPath]);
 
   const openInBrowser = useCallback(() => {
     if (absPath) {
@@ -49,6 +67,18 @@ export function HtmlPreviewShell({
       void window.agenticxDesktop?.openExternal?.(url);
     }
   }, [absPath, url]);
+
+  const refresh = useCallback(() => {
+    void (async () => {
+      if (absPath) {
+        const prepared = await loadPreparedHtmlSrcDoc(absPath);
+        if (prepared.ok) setLocalContent(prepared.srcDoc);
+      }
+      setInternalReloadKey((k) => k + 1);
+      setElementHit(null);
+      setClearSelectionKey((k) => k + 1);
+    })();
+  }, [absPath]);
 
   const quoteElement = useCallback(
     (intent: "add" | "comment", comment?: string) => {
@@ -88,17 +118,18 @@ export function HtmlPreviewShell({
             setClearSelectionKey((k) => k + 1);
           }
         }}
-        inspectAvailable={Boolean(content)}
+        inspectAvailable={Boolean(effectiveContent)}
         deviceToolbarVisible={deviceToolbarVisible}
         onDeviceToolbarVisibleChange={setDeviceToolbarVisible}
         viewport={viewport}
         onViewportChange={setViewport}
         onOpenInBrowser={openInBrowser}
+        onRefresh={showChromeRefresh ? refresh : undefined}
         onViewSource={onViewSource}
       />
       <div className="min-h-0 flex-1">
         <HtmlPreviewBody
-          content={content}
+          content={effectiveContent}
           title={title}
           documentPath={absPath || undefined}
           inspectEnabled={inspectEnabled}
@@ -106,6 +137,7 @@ export function HtmlPreviewShell({
           viewport={viewport}
           onElementHitChange={setElementHit}
           clearSelectionKey={clearSelectionKey}
+          reloadKey={effectiveReloadKey}
         />
       </div>
       {elementHit && onQuoteHtmlElement && absPath ? (

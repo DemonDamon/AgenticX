@@ -35,6 +35,8 @@ type HtmlPreviewBodyProps = {
   onElementHitChange?: (hit: HtmlPreviewElementHit | null) => void;
   /** Bump to clear iframe selection overlay after add-to-chat. */
   clearSelectionKey?: number;
+  /** Bump to force iframe remount (refresh). */
+  reloadKey?: number;
 };
 
 /**
@@ -53,6 +55,7 @@ export function HtmlPreviewBody({
   viewport = DEFAULT_HTML_PREVIEW_VIEWPORT,
   onElementHitChange,
   clearSelectionKey = 0,
+  reloadKey = 0,
 }: HtmlPreviewBodyProps) {
   const [baseSrcDoc, setBaseSrcDoc] = useState(content);
   const iframeRef = useRef<HTMLIFrameElement>(null);
@@ -208,6 +211,7 @@ export function HtmlPreviewBody({
 
   const frame = (
     <iframe
+      key={`html-preview-${reloadKey}`}
       ref={iframeRef}
       title={title ?? "HTML 预览"}
       className="block border-0 bg-white"
