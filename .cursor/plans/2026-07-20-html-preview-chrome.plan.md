@@ -100,7 +100,7 @@ flowchart TB
 
 | 落点 | 改动 |
 |------|------|
-| `ChatPane.insertWorkspaceSnippetReference` | `composerRefLabel` = tag only；显示仍走 `htmlElementRef` |
+| `ChatPane.insertWorkspaceSnippetReference` | `composerRefLabel` / `@token` = 唯一 `snippetRef`（勿用裸 tag，否则多芯片共享 override 导致评论串台）；显示仍走 `htmlElementRef.tagName` + comment |
 | `ChatPane.sendChat` | outbound `user_input` 追加 `htmlElementRef.comment` |
 | `reference-attachment.ts` | match/canonicalize 认 `tagName` + resource key |
 | `agenticx/studio/html_element_context.py` | 解析 snippet → `html_element_ref` |

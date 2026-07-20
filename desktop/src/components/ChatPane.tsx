@@ -4228,13 +4228,14 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
         });
         if (!content.trim()) return;
         const tag = String(payload.tagName || "element").trim() || "element";
-        // Stable @token must equal composerRefLabel (tag only). Trae `tag · comment` is
-        // rendered from htmlElementRef — never bake comment into the mention label.
-        const tokenLabel = tag;
         // Key must match buildContextFileKeyFromAttachment → `${abs}:${snippetRef}`.
         const snippetRef = `el-${makeSnippetRef(
           `${payload.selectorHint}\n${payload.outerHTML}\n${comment}`
         )}`;
+        // Unique @token per element — bare tag (e.g. "span") is shared across chips and
+        // would overwrite composerRefMetaOverrideRef / collapse Trae comment onto every chip.
+        // Chip display still uses htmlElementRef.tagName (+ comment), never the token id.
+        const tokenLabel = snippetRef;
         const key = `${abs}:${snippetRef}`;
         const htmlElementRef = {
           tagName: tag,
@@ -4244,7 +4245,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
         // Must set before setComposerText — otherwise chip falls back to folder + index.html.
         composerRefMetaOverrideRef.current[tokenLabel] = {
           sourcePath: abs,
-          composerRefLabel: tag,
+          composerRefLabel: tokenLabel,
           htmlElementRef,
         };
         setContextFiles((prev) => ({
@@ -4257,7 +4258,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
             content,
             sourcePath: abs,
             referenceToken: true,
-            composerRefLabel: tag,
+            composerRefLabel: tokenLabel,
             snippetRef,
             snippetContent: content,
             htmlElementRef,

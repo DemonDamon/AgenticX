@@ -48,8 +48,8 @@ def test_html_element_history_fields_for_trae_chip() -> None:
         SAMPLE_BODY,
     )
     assert fields is not None
-    assert fields["composer_ref_label"] == "span"
-    assert fields["name"] == "span"
+    assert fields["composer_ref_label"] == "el-snippet-fe67ada8"
+    assert fields["name"] == "/tmp/report/index.html:el-snippet-fe67ada8"
     assert fields["source_path"] == "/tmp/report/index.html"
     assert fields["snippet_ref"] == "el-snippet-fe67ada8"
     assert fields["html_element_ref"]["tag_name"] == "span"

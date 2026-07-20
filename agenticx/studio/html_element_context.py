@@ -77,11 +77,16 @@ def html_element_history_fields(
         return None
     if not tag:
         tag = "element"
+    # Unique mention label per element — bare tag collapses multiple same-tag chips.
+    mention_label = snippet_ref or tag
+    display_name = (
+        f"{source_path}:{snippet_ref}" if source_path and snippet_ref else tag
+    )
     fields: dict[str, Any] = {
-        "name": tag,
+        "name": display_name,
         "source_path": source_path,
         "reference_token": True,
-        "composer_ref_label": tag,
+        "composer_ref_label": mention_label,
         "html_element_ref": {
             "tag_name": tag,
             "selector_hint": selector or tag,

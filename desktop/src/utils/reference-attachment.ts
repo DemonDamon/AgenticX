@@ -114,8 +114,13 @@ export function canonicalizeUserReferenceMentions(
       const composerRefLabel = String(attachment.composerRefLabel || "").trim();
       const name = String(attachment.name || "").trim();
       const tag = String(attachment.htmlElementRef?.tagName || "").trim();
-      for (const candidate of [composerRefLabel, name, tag]) {
+      for (const candidate of [composerRefLabel, name]) {
         if (candidate) labels.add(candidate);
+      }
+      // Bare tag only when it is the stable mention label — never when token is unique snippetRef
+      // (multiple select-element chips share tagName like "span").
+      if (tag && (!composerRefLabel || composerRefLabel === tag)) {
+        labels.add(tag);
       }
       return Array.from(labels).map((label) => ({ label, canonical }));
     })
@@ -193,8 +198,11 @@ export function collectReferenceMatchLabels(att: MessageAttachment): string[] {
     .trim()
     .replace(/\\/g, "/");
   const htmlTag = String(att.htmlElementRef?.tagName || "").trim();
-  for (const candidate of [composerRefLabel, name, sourcePath, htmlTag]) {
+  for (const candidate of [composerRefLabel, name, sourcePath]) {
     if (candidate) out.add(candidate);
+  }
+  if (htmlTag && (!composerRefLabel || composerRefLabel === htmlTag)) {
+    out.add(htmlTag);
   }
   const resourceKey = buildContextFileKeyFromAttachment(att);
   if (resourceKey) out.add(resourceKey);
@@ -350,21 +358,28 @@ export function findReferenceAttachmentMeta(
     ? normalizedNeedle.replace(/:(\d+)-(\d+)$/, "").replace(/\((\d+)-(\d+)\)\s*$/, "").trim()
     : normalizedNeedle;
 
+  const tagMatches = attachments.filter((att) => {
+    const htmlTag = String(att.htmlElementRef?.tagName || "").trim();
+    return htmlTag.length > 0 && htmlTag === needle;
+  });
+  const uniqueTagMatch = tagMatches.length === 1 ? tagMatches[0] : undefined;
+
   for (const att of attachments) {
     const composerRefLabel = String(att.composerRefLabel || "").trim();
     const name = String(att.name || "").trim();
     const sourcePath = String(att.sourcePath || "")
       .trim()
       .replace(/\\/g, "/");
-    const htmlTag = String(att.htmlElementRef?.tagName || "").trim();
     const resourceKey = buildContextFileKeyFromAttachment(att);
     if (
       composerRefLabel === needle ||
       name === needle ||
       sourcePath === needle ||
-      htmlTag === needle ||
       resourceKey === needle
     ) {
+      return att;
+    }
+    if (uniqueTagMatch && att === uniqueTagMatch) {
       return att;
     }
     if (sourcePath && basename(sourcePath) === needle) return att;
@@ -415,9 +430,15 @@ export function isWorkspaceReferenceAttachment(att: MessageAttachment): boolean 
 }
 
 export function inferComposerRefLabel(att: MessageAttachment): string | undefined {
-  const htmlTag = String(att.htmlElementRef?.tagName || "").trim();
-  if (htmlTag) return htmlTag;
   const existing = String(att.composerRefLabel || "").trim();
+  const htmlTag = String(att.htmlElementRef?.tagName || "").trim();
+  const snippetRef = String(att.snippetRef || "").trim();
+  if (htmlTag) {
+    // Prefer unique select-element token — bare tag collapses multiple chips to one meta.
+    if (existing && existing !== htmlTag) return existing;
+    if (snippetRef) return snippetRef;
+    return existing || htmlTag;
+  }
   if (existing) return existing;
   if (att.lineRange) {
     const base = basename(String(att.sourcePath || att.name).replace(/:\d+-\d+$/, ""));

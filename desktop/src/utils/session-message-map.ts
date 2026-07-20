@@ -119,11 +119,21 @@ export function attachmentsFromSessionRow(raw: unknown): MessageAttachment[] | u
     }
     if (kind === "context_file" || (!dataUrl && name)) {
       const mimeType = draft.mimeType;
+      // Prefer snippetRef over bare tag so multiple same-tag HTML chips stay distinct on reload.
       const resolvedComposerLabel =
-        (htmlElementRef?.tagName || composerRefLabel || "").trim() ||
-        (referenceToken ? composerRefLabel : "");
+        (
+          (htmlElementRef && snippetRef ? snippetRef : "") ||
+          (htmlElementRef && composerRefLabel && composerRefLabel !== htmlElementRef.tagName
+            ? composerRefLabel
+            : "") ||
+          htmlElementRef?.tagName ||
+          composerRefLabel ||
+          ""
+        ).trim() || (referenceToken ? composerRefLabel : "");
       out.push({
-        name: htmlElementRef?.tagName || name,
+        name: (htmlElementRef && snippetRef ? `${sourcePath || name}:${snippetRef}` : "") ||
+          htmlElementRef?.tagName ||
+          name,
         mimeType,
         size,
         ...(sourcePath ? { sourcePath } : {}),

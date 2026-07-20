@@ -3,6 +3,8 @@ import assert from "node:assert/strict";
 import type { MessageAttachment } from "../store";
 import {
   canonicalizeUserReferenceMentions,
+  findReferenceAttachmentMeta,
+  inferComposerRefLabel,
   isReferenceMentionBoundary,
   matchReferenceMentionLabel,
   stableAttachmentSetKey,
@@ -94,6 +96,54 @@ test("matchReferenceMentionLabel matches HTML element tag with Trae comment meta
     canonicalizeUserReferenceMentions("@span", refs),
     "@/tmp/report/index.html:el-snippet-fe67ada8",
   );
+});
+
+test("findReferenceAttachmentMeta keeps distinct meta for same-tag HTML elements", () => {
+  const refs: MessageAttachment[] = [
+    {
+      name: "/tmp/report/index.html:el-snippet-aaaaaaa1",
+      mimeType: "text/plain",
+      size: 10,
+      referenceToken: true,
+      composerRefLabel: "el-snippet-aaaaaaa1",
+      sourcePath: "/tmp/report/index.html",
+      snippetRef: "el-snippet-aaaaaaa1",
+      htmlElementRef: { tagName: "span", selectorHint: "span.opt" },
+    },
+    {
+      name: "/tmp/report/index.html:el-snippet-bbbbbbb2",
+      mimeType: "text/plain",
+      size: 10,
+      referenceToken: true,
+      composerRefLabel: "el-snippet-bbbbbbb2",
+      sourcePath: "/tmp/report/index.html",
+      snippetRef: "el-snippet-bbbbbbb2",
+      htmlElementRef: {
+        tagName: "span",
+        selectorHint: "span.pessimistic",
+        comment: "20%准确吗",
+      },
+    },
+  ];
+  assert.equal(
+    findReferenceAttachmentMeta("el-snippet-aaaaaaa1", refs)?.htmlElementRef?.comment,
+    undefined,
+  );
+  assert.equal(
+    findReferenceAttachmentMeta("el-snippet-bbbbbbb2", refs)?.htmlElementRef?.comment,
+    "20%准确吗",
+  );
+  // Bare tag is ambiguous across multiple chips — must not return a random span.
+  assert.equal(findReferenceAttachmentMeta("span", refs), undefined);
+  assert.equal(
+    canonicalizeUserReferenceMentions(
+      "@el-snippet-aaaaaaa1 @el-snippet-bbbbbbb2",
+      refs,
+    ),
+    "@/tmp/report/index.html:el-snippet-aaaaaaa1 @/tmp/report/index.html:el-snippet-bbbbbbb2",
+  );
+  assert.equal(inferComposerRefLabel(refs[0]!), "el-snippet-aaaaaaa1");
+  assert.equal(inferComposerRefLabel(refs[1]!), "el-snippet-bbbbbbb2");
 });
 
 test("canonicalizeUserReferenceMentions resolves repeated same-name labels by attachment order", () => {
