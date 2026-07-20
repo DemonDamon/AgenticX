@@ -90,10 +90,33 @@ function browserTitleFromUrl(nextUrl: string, fallback = "浏览器"): string {
   }
 }
 
+/** webview.loadURL / attribute src races reject with ERR_ABORTED — ignore those. */
+function ignoreWebviewNavAbort(err: unknown): void {
+  const e = err as { code?: string; errno?: number; message?: string } | null;
+  if (e?.code === "ERR_ABORTED" || e?.errno === -3) return;
+  if (typeof e?.message === "string" && e.message.includes("ERR_ABORTED")) return;
+  console.warn("[RemoteBrowserPane] webview navigation failed:", err);
+}
+
+function loadWebviewUrl(wv: NearElectronWebview, nextUrl: string): void {
+  try {
+    const result = wv.loadURL(nextUrl);
+    if (result != null && typeof (result as Promise<void>).then === "function") {
+      void (result as Promise<void>).catch(ignoreWebviewNavAbort);
+    }
+  } catch (err) {
+    ignoreWebviewNavAbort(err);
+  }
+}
+
 /**
  * Remote https tab via Electron <webview> (not iframe).
  * Baidu/Google etc. send X-Frame-Options → iframe gets ERR_BLOCKED_BY_RESPONSE;
  * webview is a top-level guest and loads normally.
+ *
+ * Important: keep `src` frozen after mount. Updating `src` on every address-bar
+ * sync races with loadURL / in-page redirects and floods
+ * `GUEST_VIEW_MANAGER_CALL` + ERR_ABORTED in the main process log.
  */
 function RemoteBrowserPane({
   title,
@@ -111,6 +134,8 @@ function RemoteBrowserPane({
   const [viewport, setViewport] = useState<HtmlPreviewViewport>(DEFAULT_HTML_PREVIEW_VIEWPORT);
   const [inspectEnabled, setInspectEnabled] = useState(false);
   const webviewRef = useRef<NearElectronWebview | null>(null);
+  /** Initial src only — subsequent navigations use loadURL. */
+  const initialSrcRef = useRef(url);
   const committedUrlRef = useRef(url);
   const onNavigateRef = useRef(onNavigate);
   onNavigateRef.current = onNavigate;
@@ -118,17 +143,13 @@ function RemoteBrowserPane({
     viewport.width != null && viewport.height != null && viewport.width > 0 && viewport.height > 0;
   const zoom = Math.max(25, Math.min(300, viewport.zoomPercent || 100)) / 100;
 
-  // Parent-driven navigation (address bar / back / forward).
+  // Parent-driven navigation (address bar / back / forward) — never mutate src attr.
   useEffect(() => {
     const wv = webviewRef.current;
     if (!wv) return;
     if (url === committedUrlRef.current) return;
     committedUrlRef.current = url;
-    try {
-      wv.loadURL(url);
-    } catch {
-      wv.src = url;
-    }
+    loadWebviewUrl(wv, url);
   }, [url]);
 
   // Trae-style refresh.
@@ -137,9 +158,12 @@ function RemoteBrowserPane({
     const wv = webviewRef.current;
     if (!wv) return;
     try {
-      wv.reload();
-    } catch {
-      /* ignore */
+      const result = wv.reload();
+      if (result != null && typeof (result as Promise<void>).then === "function") {
+        void (result as Promise<void>).catch(ignoreWebviewNavAbort);
+      }
+    } catch (err) {
+      ignoreWebviewNavAbort(err);
     }
   }, [reloadKey]);
 
@@ -214,7 +238,7 @@ function RemoteBrowserPane({
               webviewRef.current = el as NearElectronWebview | null;
             }}
             title={title}
-            src={url}
+            src={initialSrcRef.current}
             partition="persist:near-workpanel-browser"
             allowpopups="true"
             className="border-0 bg-white"
@@ -1652,6 +1676,7 @@ export function WorkPanel({
               </div>
             ) : activeBrowser.url && activeBrowser.url !== "about:blank" ? (
               <RemoteBrowserPane
+                key={activeBrowser.id}
                 title={activeBrowser.title}
                 url={activeBrowser.url}
                 reloadKey={activeBrowser.reloadNonce ?? 0}

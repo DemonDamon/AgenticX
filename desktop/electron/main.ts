@@ -6287,7 +6287,15 @@ app.on("web-contents-created", (_event, contents) => {
   if (contents.getType() !== "webview") return;
   contents.setWindowOpenHandler(({ url }) => {
     if (!parseHttpUrl(url)) return { action: "deny" };
-    void contents.loadURL(url);
+    // Single navigation path: tell renderer to update the WorkPanel tab + loadURL
+    // once. Calling contents.loadURL here races redirects and floods
+    // GUEST_VIEW_MANAGER_CALL / ERR_ABORTED in the console.
+    const host = contents.hostWebContents;
+    if (host && !host.isDestroyed()) {
+      host.send("in-app-browser-open", url);
+    } else if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.webContents.send("in-app-browser-open", url);
+    }
     return { action: "deny" };
   });
 });

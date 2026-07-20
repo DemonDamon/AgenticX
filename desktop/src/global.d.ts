@@ -4,8 +4,9 @@ export {};
 type NearElectronWebview = HTMLElement & {
   src: string;
   partition?: string;
-  loadURL: (url: string) => void;
-  reload: () => void;
+  /** Rejects with ERR_ABORTED when a newer navigation supersedes this one. */
+  loadURL: (url: string) => Promise<void> | void;
+  reload: () => Promise<void> | void;
   getURL: () => string;
 };
 
