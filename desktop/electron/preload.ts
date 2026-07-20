@@ -892,6 +892,14 @@ contextBridge.exposeInMainWorld("agenticxDesktop", {
     }>,
   openExternal: async (url: string) =>
     ipcRenderer.invoke("open-external", url) as Promise<{ ok: boolean; error?: string }>,
+  /** WorkPanel in-app browser: main denied window.open / will-navigate → navigate here. */
+  onInAppBrowserOpen: (cb: (url: string) => void): (() => void) => {
+    const handler = (_event: unknown, url: string) => {
+      if (typeof url === "string" && url.trim()) cb(url);
+    };
+    ipcRenderer.on("in-app-browser-open", handler);
+    return () => ipcRenderer.removeListener("in-app-browser-open", handler);
+  },
   copyPngToClipboard: async (buffer: ArrayBuffer) =>
     ipcRenderer.invoke("clipboard-write-png", buffer) as Promise<{ ok: boolean; error?: string }>,
   downloadPngToDownloads: async (payload: { buffer: ArrayBuffer; defaultFileName?: string }) =>

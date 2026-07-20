@@ -6273,6 +6273,25 @@ function shouldOpenInExternalBrowser(targetUrl: string, appUrl: string): boolean
   return target.origin !== appParsed.origin;
 }
 
+/** Prefer WorkPanel in-app browser over system Chrome for http(s) navigations. */
+function shouldRouteToInAppBrowser(targetUrl: string, appUrl: string): boolean {
+  return shouldOpenInExternalBrowser(targetUrl, appUrl);
+}
+
+/**
+ * WorkPanel remote browser uses <webview> (not iframe) so sites with
+ * X-Frame-Options / CSP frame-ancestors still load. Guest window.open /
+ * target=_blank stays inside the same webview instead of system Chrome.
+ */
+app.on("web-contents-created", (_event, contents) => {
+  if (contents.getType() !== "webview") return;
+  contents.setWindowOpenHandler(({ url }) => {
+    if (!parseHttpUrl(url)) return { action: "deny" };
+    void contents.loadURL(url);
+    return { action: "deny" };
+  });
+});
+
 function createWindow(): void {
   // Idempotent guard: `whenReady.then` awaits `startStudioServe()` /
   // `waitServeReady()` for ~5s on cold start. During that await the macOS
@@ -6387,6 +6406,8 @@ function createWindow(): void {
     roundedCorners: true,
     webPreferences: {
       preload: path.join(__dirname, "preload.js"),
+      // WorkPanel in-app browser (baidu etc. block iframes via X-Frame-Options).
+      webviewTag: true,
       additionalArguments: [
         `--agx-backend-scope=${encodeURIComponent(getInjectedBackendScope())}`,
         `--agx-connection-mode=${getInjectedConnectionMode()}`,
@@ -6430,17 +6451,21 @@ function createWindow(): void {
   mainWindow.on("unmaximize", scheduleBoundsSave);
   updateSplashStage("loading-ui");
 
-  const tryOpenExternalBrowser = (targetUrl: string): boolean => {
-    if (!shouldOpenInExternalBrowser(targetUrl, appEntryUrl)) return false;
-    void shell.openExternal(targetUrl);
+  const tryRouteToInAppBrowser = (targetUrl: string): boolean => {
+    if (!shouldRouteToInAppBrowser(targetUrl, appEntryUrl)) return false;
+    // Deny popup / top-level nav and let WorkPanel navigate the current browser tab.
+    // Chat/settings still open system browser via explicit `open-external` IPC.
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.webContents.send("in-app-browser-open", targetUrl);
+    }
     return true;
   };
   mainWindow.webContents.setWindowOpenHandler(({ url }) => {
-    if (tryOpenExternalBrowser(url)) return { action: "deny" };
+    if (tryRouteToInAppBrowser(url)) return { action: "deny" };
     return { action: "allow" };
   });
   mainWindow.webContents.on("will-navigate", (event, url) => {
-    if (!tryOpenExternalBrowser(url)) return;
+    if (!tryRouteToInAppBrowser(url)) return;
     event.preventDefault();
   });
   mainWindow.once("ready-to-show", () => {

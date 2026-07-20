@@ -3,6 +3,7 @@ import {
   useMemo,
   useRef,
   useState,
+  type CSSProperties,
   type MouseEvent as ReactMouseEvent,
   type ReactNode,
 } from "react";
@@ -59,23 +60,123 @@ import { SessionArtifactList } from "./SessionArtifactList";
 import { SessionReferenceList } from "./SessionReferenceList";
 import { collectSessionReferences } from "../../utils/session-references";
 
-/** Remote https tab: open-in-browser + device toolbar; inspect unavailable (cross-origin). */
+/**
+ * Multipane: each WorkPanel may register a handler. First one that claims the URL
+ * (active browser tab) wins; else fall back to system browser.
+ */
+type InAppBrowserOpenHandler = (url: string) => boolean;
+const inAppBrowserOpenHandlers = new Set<InAppBrowserOpenHandler>();
+let inAppBrowserOpenIpcWired = false;
+
+function ensureInAppBrowserOpenIpc(): void {
+  if (inAppBrowserOpenIpcWired) return;
+  const api = window.agenticxDesktop;
+  if (!api?.onInAppBrowserOpen) return;
+  inAppBrowserOpenIpcWired = true;
+  api.onInAppBrowserOpen((url) => {
+    for (const handler of inAppBrowserOpenHandlers) {
+      if (handler(url)) return;
+    }
+    void api.openExternal?.(url);
+  });
+}
+
+function browserTitleFromUrl(nextUrl: string, fallback = "浏览器"): string {
+  try {
+    if (nextUrl === "about:blank") return "新标签页";
+    return new URL(nextUrl).hostname || new URL(nextUrl).pathname.split("/").pop() || fallback;
+  } catch {
+    return fallback;
+  }
+}
+
+/**
+ * Remote https tab via Electron <webview> (not iframe).
+ * Baidu/Google etc. send X-Frame-Options → iframe gets ERR_BLOCKED_BY_RESPONSE;
+ * webview is a top-level guest and loads normally.
+ */
 function RemoteBrowserPane({
   title,
   url,
   reloadKey = 0,
+  onNavigate,
 }: {
   title: string;
   url: string;
   reloadKey?: number;
+  /** Guest navigated (link / redirect / intercepted window.open) → sync address bar. */
+  onNavigate?: (nextUrl: string) => void;
 }) {
   const [deviceToolbarVisible, setDeviceToolbarVisible] = useState(false);
   const [viewport, setViewport] = useState<HtmlPreviewViewport>(DEFAULT_HTML_PREVIEW_VIEWPORT);
   const [inspectEnabled, setInspectEnabled] = useState(false);
+  const webviewRef = useRef<NearElectronWebview | null>(null);
+  const committedUrlRef = useRef(url);
+  const onNavigateRef = useRef(onNavigate);
+  onNavigateRef.current = onNavigate;
   const fixed =
     viewport.width != null && viewport.height != null && viewport.width > 0 && viewport.height > 0;
   const zoom = Math.max(25, Math.min(300, viewport.zoomPercent || 100)) / 100;
-  const frameKey = reloadKey;
+
+  // Parent-driven navigation (address bar / back / forward).
+  useEffect(() => {
+    const wv = webviewRef.current;
+    if (!wv) return;
+    if (url === committedUrlRef.current) return;
+    committedUrlRef.current = url;
+    try {
+      wv.loadURL(url);
+    } catch {
+      wv.src = url;
+    }
+  }, [url]);
+
+  // Trae-style refresh.
+  useEffect(() => {
+    if (reloadKey === 0) return;
+    const wv = webviewRef.current;
+    if (!wv) return;
+    try {
+      wv.reload();
+    } catch {
+      /* ignore */
+    }
+  }, [reloadKey]);
+
+  useEffect(() => {
+    const wv = webviewRef.current;
+    if (!wv) return;
+    const syncFromGuest = (nextUrl: string) => {
+      const href = String(nextUrl || "").trim();
+      if (!href || !/^https?:\/\//i.test(href)) return;
+      if (href === committedUrlRef.current) return;
+      committedUrlRef.current = href;
+      onNavigateRef.current?.(href);
+    };
+    const onDidNavigate = (event: Event) => {
+      const e = event as Event & { url?: string };
+      syncFromGuest(e.url || wv.getURL?.() || "");
+    };
+    wv.addEventListener("did-navigate", onDidNavigate);
+    wv.addEventListener("did-navigate-in-page", onDidNavigate);
+    wv.addEventListener("did-redirect-navigation", onDidNavigate);
+    return () => {
+      wv.removeEventListener("did-navigate", onDidNavigate);
+      wv.removeEventListener("did-navigate-in-page", onDidNavigate);
+      wv.removeEventListener("did-redirect-navigation", onDidNavigate);
+    };
+  }, []);
+
+  const frameStyle: CSSProperties = fixed
+    ? {
+        width: viewport.width!,
+        height: viewport.height!,
+        transform: zoom !== 1 ? `scale(${zoom})` : undefined,
+        transformOrigin: "top left",
+        border: 0,
+        display: "flex",
+      }
+    : { width: "100%", height: "100%", minHeight: 220, border: 0, display: "flex" };
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
@@ -108,22 +209,16 @@ function RemoteBrowserPane({
               : undefined
           }
         >
-          <iframe
-            key={`remote-browser-${frameKey}`}
+          <webview
+            ref={(el) => {
+              webviewRef.current = el as NearElectronWebview | null;
+            }}
             title={title}
             src={url}
+            partition="persist:near-workpanel-browser"
+            allowpopups="true"
             className="border-0 bg-white"
-            style={
-              fixed
-                ? {
-                    width: viewport.width!,
-                    height: viewport.height!,
-                    transform: zoom !== 1 ? `scale(${zoom})` : undefined,
-                    transformOrigin: "top left",
-                  }
-                : { width: "100%", height: "100%", minHeight: 220 }
-            }
-            sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-popups-to-escape-sandbox"
+            style={frameStyle}
           />
         </div>
       </div>
@@ -441,6 +536,10 @@ export function WorkPanel({
   const [plusOpen, setPlusOpen] = useState(false);
   const [plusPos, setPlusPos] = useState<{ left: number; top: number } | null>(null);
   const plusBtnRef = useRef<HTMLButtonElement | null>(null);
+  const activeKindRef = useRef(activeKind);
+  const activeBrowserIdRef = useRef(activeBrowserId);
+  activeKindRef.current = activeKind;
+  activeBrowserIdRef.current = activeBrowserId;
   // Empty zones stay collapsed by default; content arrival auto-expands (Trae-style).
   const [openSections, setOpenSections] = useState<Record<SummarySectionId, boolean>>({
     todo: false,
@@ -567,6 +666,29 @@ export function WorkPanel({
       }
     }
   };
+
+  // iframe target=_blank / window.open → main denies + IPC; stay in Near browser tab.
+  useEffect(() => {
+    ensureInAppBrowserOpenIpc();
+    const handler: InAppBrowserOpenHandler = (rawUrl) => {
+      if (activeKindRef.current !== "browser") return false;
+      const tabId = activeBrowserIdRef.current;
+      if (!tabId) return false;
+      const nextUrl = normalizeBrowseUrl(rawUrl);
+      if (!/^https?:\/\//i.test(nextUrl)) return false;
+      const title = browserTitleFromUrl(nextUrl);
+      setBrowserTabs((prev) =>
+        prev.map((t) =>
+          t.id === tabId ? pushBrowserHistory(t, browserEntry(nextUrl, title, null)) : t,
+        ),
+      );
+      return true;
+    };
+    inAppBrowserOpenHandlers.add(handler);
+    return () => {
+      inAppBrowserOpenHandlers.delete(handler);
+    };
+  }, []);
 
   useEffect(() => {
     if (!focusRequest) return;
@@ -821,15 +943,7 @@ export function WorkPanel({
     setBrowserTabs((prev) =>
       prev.map((t) => {
         if (t.id !== tabId) return t;
-        let title = t.title;
-        try {
-          title =
-            nextUrl === "about:blank"
-              ? "新标签页"
-              : new URL(nextUrl).hostname || new URL(nextUrl).pathname.split("/").pop() || "浏览器";
-        } catch {
-          title = "浏览器";
-        }
+        const title = browserTitleFromUrl(nextUrl, t.title || "浏览器");
         return pushBrowserHistory(t, browserEntry(nextUrl, title, null));
       }),
     );
@@ -1541,6 +1655,17 @@ export function WorkPanel({
                 title={activeBrowser.title}
                 url={activeBrowser.url}
                 reloadKey={activeBrowser.reloadNonce ?? 0}
+                onNavigate={(nextUrl) => {
+                  const tabId = activeBrowser.id;
+                  const title = browserTitleFromUrl(nextUrl);
+                  setBrowserTabs((prev) =>
+                    prev.map((t) =>
+                      t.id === tabId
+                        ? pushBrowserHistory(t, browserEntry(nextUrl, title, null))
+                        : t,
+                    ),
+                  );
+                }}
               />
             ) : (
               <EmptyBlock

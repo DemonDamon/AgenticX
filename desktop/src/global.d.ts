@@ -1,5 +1,31 @@
 export {};
 
+/** Electron <webview> in renderer (requires webPreferences.webviewTag). */
+type NearElectronWebview = HTMLElement & {
+  src: string;
+  partition?: string;
+  loadURL: (url: string) => void;
+  reload: () => void;
+  getURL: () => string;
+};
+
+declare namespace React {
+  namespace JSX {
+    interface IntrinsicElements {
+      webview: React.DetailedHTMLProps<
+        React.HTMLAttributes<HTMLElement> & {
+          src?: string;
+          partition?: string;
+          allowpopups?: string | boolean;
+          webpreferences?: string;
+          useragent?: string;
+        },
+        HTMLElement
+      >;
+    }
+  }
+}
+
 type ProviderConfig = {
   api_key?: string;
   base_url?: string;
@@ -1317,6 +1343,8 @@ declare global {
         error?: string;
       }>;
       openExternal: (url: string) => Promise<{ ok: boolean; error?: string }>;
+      /** Popup / top-level http(s) from iframe → navigate WorkPanel browser in-app. */
+      onInAppBrowserOpen: (cb: (url: string) => void) => () => void;
       copyPngToClipboard: (buffer: ArrayBuffer) => Promise<{ ok: boolean; error?: string }>;
       downloadPngToDownloads: (payload: {
         buffer: ArrayBuffer;
