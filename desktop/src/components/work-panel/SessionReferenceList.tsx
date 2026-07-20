@@ -6,10 +6,11 @@
  */
 
 import type { ReactNode } from "react";
-import { BookOpen, Globe, Library } from "lucide-react";
+import { BookOpen, Library } from "lucide-react";
 import type { SessionReferenceBundle } from "../../utils/session-references";
 import { openSearchReference } from "../../utils/open-kb-reference";
 import type { SearchReference } from "../../types/search-references";
+import { SiteFavicon } from "./SiteFavicon";
 
 type Props = {
   bundle: SessionReferenceBundle;
@@ -102,7 +103,13 @@ export function SessionReferenceList({ bundle, onOpenWebUrl }: Props) {
               return (
                 <RefRow
                   key={`web-${group.docKey}`}
-                  icon={<Globe className="h-3.5 w-3.5" strokeWidth={1.7} />}
+                  icon={
+                    <SiteFavicon
+                      key={`favicon-${group.docKey}`}
+                      url={ref.url}
+                      domain={ref.domain}
+                    />
+                  }
                   label={label}
                   title={ref.url || label}
                   onClick={() => openWeb(ref, onOpenWebUrl)}
