@@ -664,7 +664,11 @@ function TextualPreviewBody({
 
   if (showHtmlRender) {
     return (
-      <HtmlPreviewBody content={preview.content} title={previewBaseName(preview.path)} />
+      <HtmlPreviewBody
+        content={preview.content}
+        title={previewBaseName(preview.path)}
+        documentPath={preview.absolutePath}
+      />
     );
   }
 

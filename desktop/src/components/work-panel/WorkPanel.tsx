@@ -29,14 +29,33 @@ import type { WorkspacePreviewOpenRequest, WorkspacePreviewQuotePayload } from "
 import { TerminalEmbed } from "../TerminalEmbed";
 import { SubAgentCard } from "../SubAgentCard";
 import { HoverTip } from "../ds/HoverTip";
+import { loadPreparedHtmlSrcDoc } from "../../utils/html-preview-assets";
+import {
+  artifactBaseName,
+  collectSessionArtifactPaths,
+  isInAppHtmlPreviewPath,
+  pathToFileUrl,
+} from "../../utils/session-artifacts";
+import { HtmlPreviewBody } from "../workspace/HtmlPreviewBody";
+import { SessionArtifactList } from "./SessionArtifactList";
 
 export type WorkPanelTabKind = "summary" | "workspace" | "terminal" | "browser";
 
+export type SummarySectionId = "todo" | "artifacts" | "spawns" | "refs";
+
 export type WorkPanelFocus =
-  | { kind: "summary" }
+  | { kind: "summary"; section?: SummarySectionId; highlightPath?: string }
   | { kind: "workspace" }
   | { kind: "terminal"; tabId?: string }
-  | { kind: "browser"; tabId?: string }
+  | {
+      kind: "browser";
+      tabId?: string;
+      /** Display URL in the address bar (https://… or file:///…). */
+      url?: string;
+      title?: string;
+      /** Local HTML body rendered via srcDoc (Trae-style in-app preview). */
+      srcDoc?: string;
+    }
   | null;
 
 type BrowserTab = {
@@ -44,6 +63,8 @@ type BrowserTab = {
   title: string;
   url: string;
   draftUrl: string;
+  /** When set, iframe uses srcDoc instead of remote src (local HTML reports). */
+  srcDoc?: string | null;
 };
 
 type Props = {
@@ -79,8 +100,6 @@ type Props = {
   onOpenDelivery: () => void;
 };
 
-type SummarySectionId = "todo" | "artifacts" | "spawns" | "refs";
-
 function uid(): string {
   return `${Date.now().toString(36)}-${Math.random().toString(16).slice(2, 8)}`;
 }
@@ -88,8 +107,28 @@ function uid(): string {
 function normalizeBrowseUrl(raw: string): string {
   const trimmed = raw.trim();
   if (!trimmed) return "about:blank";
-  if (/^https?:\/\//i.test(trimmed) || /^about:/i.test(trimmed)) return trimmed;
+  if (/^https?:\/\//i.test(trimmed) || /^about:/i.test(trimmed) || /^file:\/\//i.test(trimmed)) {
+    return trimmed;
+  }
+  // Absolute local path typed into the address bar → file:// URL.
+  if (trimmed.startsWith("/") || /^[a-zA-Z]:[\\/]/.test(trimmed) || trimmed.startsWith("~/")) {
+    return pathToFileUrl(trimmed);
+  }
   return `https://${trimmed}`;
+}
+
+function fileUrlToLocalPath(fileUrl: string): string | null {
+  const raw = String(fileUrl || "").trim();
+  if (!/^file:\/\//i.test(raw)) return null;
+  try {
+    const parsed = new URL(raw);
+    let pathname = decodeURIComponent(parsed.pathname || "");
+    // Windows file:///C:/… → pathname "/C:/…" — drop the leading slash before drive.
+    if (/^\/[a-zA-Z]:\//.test(pathname)) pathname = pathname.slice(1);
+    return pathname || null;
+  } catch {
+    return null;
+  }
 }
 
 function Section({
@@ -181,6 +220,7 @@ export function WorkPanel({
   const activeTerminalTabId = useAppStore(
     (s) => s.panes.find((p) => p.id === paneId)?.activeTerminalTabId ?? null
   );
+  const paneMessages = useAppStore((s) => s.panes.find((p) => p.id === paneId)?.messages ?? []);
 
   const [summaryTabOpen, setSummaryTabOpen] = useState(true);
   const [activeKind, setActiveKind] = useState<WorkPanelTabKind | null>("summary");
@@ -196,6 +236,13 @@ export function WorkPanel({
     spawns: true,
     refs: false,
   });
+  const [extraArtifactPaths, setExtraArtifactPaths] = useState<string[]>([]);
+  const [artifactHighlightPath, setArtifactHighlightPath] = useState<string | null>(null);
+
+  const artifactPaths = useMemo(
+    () => collectSessionArtifactPaths(paneMessages, subAgents, extraArtifactPaths, sessionId),
+    [paneMessages, subAgents, extraArtifactPaths, sessionId],
+  );
 
   const activeBrowser = useMemo(
     () => browserTabs.find((t) => t.id === activeBrowserId) ?? null,
@@ -228,6 +275,18 @@ export function WorkPanel({
     if (focusRequest.kind === "summary") {
       setSummaryTabOpen(true);
       setActiveKind("summary");
+      if (focusRequest.section) {
+        setOpenSections((prev) => ({ ...prev, [focusRequest.section!]: true }));
+      }
+      const highlight = String(focusRequest.highlightPath || "").trim();
+      if (highlight) {
+        const base = highlight.replace(/\\/g, "/").replace(/\/+$/, "").split("/").pop() || "";
+        const looksFile = /\.[a-zA-Z0-9]{1,12}$/.test(base);
+        if (looksFile) {
+          setExtraArtifactPaths((prev) => (prev.includes(highlight) ? prev : [...prev, highlight]));
+        }
+        setArtifactHighlightPath(highlight);
+      }
     } else if (focusRequest.kind === "workspace") {
       setWorkspaceTabOpen(true);
       setActiveKind("workspace");
@@ -235,8 +294,32 @@ export function WorkPanel({
       setActiveKind("terminal");
       if (focusRequest.tabId) setActivePaneTerminalTab(paneId, focusRequest.tabId);
     } else if (focusRequest.kind === "browser") {
+      const focusUrl = String(focusRequest.url || "").trim();
+      const focusSrcDoc = focusRequest.srcDoc;
+      if (focusUrl && focusSrcDoc != null) {
+        const title =
+          String(focusRequest.title || "").trim() ||
+          artifactBaseName(fileUrlToLocalPath(focusUrl) || focusUrl) ||
+          "浏览器";
+        const nextId = uid();
+        setBrowserTabs((prev) => {
+          const existing = prev.find((t) => t.url === focusUrl);
+          if (existing) {
+            // Activate existing tab after commit.
+            queueMicrotask(() => setActiveBrowserId(existing.id));
+            return prev.map((t) =>
+              t.id === existing.id
+                ? { ...t, title, url: focusUrl, draftUrl: focusUrl, srcDoc: focusSrcDoc }
+                : t,
+            );
+          }
+          queueMicrotask(() => setActiveBrowserId(nextId));
+          return [...prev, { id: nextId, title, url: focusUrl, draftUrl: focusUrl, srcDoc: focusSrcDoc }];
+        });
+      } else if (focusRequest.tabId) {
+        setActiveBrowserId(focusRequest.tabId);
+      }
       setActiveKind("browser");
-      if (focusRequest.tabId) setActiveBrowserId(focusRequest.tabId);
     }
     onFocusRequestHandled?.();
   }, [focusRequest, onFocusRequestHandled, paneId, setActivePaneTerminalTab]);
@@ -246,6 +329,17 @@ export function WorkPanel({
       setOpenSections((prev) => (prev.spawns ? prev : { ...prev, spawns: true }));
     }
   }, [subAgents.length]);
+
+  useEffect(() => {
+    if (artifactPaths.length > 0) {
+      setOpenSections((prev) => (prev.artifacts ? prev : { ...prev, artifacts: true }));
+    }
+  }, [artifactPaths.length]);
+
+  useEffect(() => {
+    setExtraArtifactPaths([]);
+    setArtifactHighlightPath(null);
+  }, [sessionId]);
 
   const toggleSection = (id: SummarySectionId) => {
     setOpenSections((prev) => ({ ...prev, [id]: !prev[id] }));
@@ -334,19 +428,73 @@ export function WorkPanel({
     }
   };
 
+  const openLocalHtmlPreview = (absPath: string) => {
+    const path = String(absPath || "").trim();
+    if (!path || !isInAppHtmlPreviewPath(path)) return;
+    void (async () => {
+      const prepared = await loadPreparedHtmlSrcDoc(path);
+      if (!prepared.ok) {
+        console.warn("[WorkPanel] read HTML failed:", prepared.error);
+        return;
+      }
+      const fileUrl = pathToFileUrl(path);
+      const title = artifactBaseName(path) || "HTML";
+      const nextId = uid();
+      setBrowserTabs((prev) => {
+        const existing = prev.find((t) => t.url === fileUrl);
+        if (existing) {
+          queueMicrotask(() => setActiveBrowserId(existing.id));
+          return prev.map((t) =>
+            t.id === existing.id
+              ? { ...t, title, url: fileUrl, draftUrl: fileUrl, srcDoc: prepared.srcDoc }
+              : t,
+          );
+        }
+        queueMicrotask(() => setActiveBrowserId(nextId));
+        return [...prev, { id: nextId, title, url: fileUrl, draftUrl: fileUrl, srcDoc: prepared.srcDoc }];
+      });
+      setActiveKind("browser");
+    })();
+  };
+
   const navigateBrowser = (tabId: string) => {
+    const tab = browserTabs.find((t) => t.id === tabId);
+    if (!tab) return;
+    const nextUrl = normalizeBrowseUrl(tab.draftUrl || tab.url);
+    const localPath = fileUrlToLocalPath(nextUrl);
+    if (localPath && isInAppHtmlPreviewPath(localPath)) {
+      void (async () => {
+        const prepared = await loadPreparedHtmlSrcDoc(localPath);
+        if (!prepared.ok) {
+          console.warn("[WorkPanel] read HTML failed:", prepared.error);
+          return;
+        }
+        const title = artifactBaseName(localPath) || "HTML";
+        setBrowserTabs((prev) =>
+          prev.map((t) =>
+            t.id === tabId
+              ? { ...t, url: nextUrl, draftUrl: nextUrl, title, srcDoc: prepared.srcDoc }
+              : t,
+          ),
+        );
+      })();
+      return;
+    }
+
     setBrowserTabs((prev) =>
       prev.map((t) => {
         if (t.id !== tabId) return t;
-        const nextUrl = normalizeBrowseUrl(t.draftUrl || t.url);
         let title = t.title;
         try {
-          title = nextUrl === "about:blank" ? "新标签页" : new URL(nextUrl).hostname || "浏览器";
+          title =
+            nextUrl === "about:blank"
+              ? "新标签页"
+              : new URL(nextUrl).hostname || new URL(nextUrl).pathname.split("/").pop() || "浏览器";
         } catch {
           title = "浏览器";
         }
-        return { ...t, url: nextUrl, draftUrl: nextUrl, title };
-      })
+        return { ...t, url: nextUrl, draftUrl: nextUrl, title, srcDoc: null };
+      }),
     );
   };
 
@@ -675,14 +823,30 @@ export function WorkPanel({
             <Section
               id="artifacts"
               title="任务产物"
+              count={artifactPaths.length}
               open={openSections.artifacts}
               onToggle={toggleSection}
             >
-              <EmptyBlock
-                icon={<Boxes className="h-9 w-9" strokeWidth={1.3} />}
-                title="暂无产物"
-                subtitle="任务完成后，生成的文件将展示在这里"
-              />
+              {artifactPaths.length === 0 ? (
+                <EmptyBlock
+                  icon={<Boxes className="h-9 w-9" strokeWidth={1.3} />}
+                  title="暂无产物"
+                  subtitle="任务完成后，生成的文件将展示在这里"
+                />
+              ) : (
+                <SessionArtifactList
+                  paths={artifactPaths}
+                  highlightPath={artifactHighlightPath}
+                  onHighlightHandled={() => setArtifactHighlightPath(null)}
+                  onOpenPath={(path) => {
+                    if (isInAppHtmlPreviewPath(path)) {
+                      openLocalHtmlPreview(path);
+                      return;
+                    }
+                    void window.agenticxDesktop?.shellOpenPath?.(path);
+                  }}
+                />
+              )}
               <button
                 type="button"
                 className="mt-1 flex w-full items-center justify-center gap-1.5 rounded-lg border border-dashed border-border px-2 py-2 text-[12px] text-text-subtle transition hover:border-[var(--ui-btn-primary-border,#3b82f6)] hover:bg-[color-mix(in_srgb,var(--ui-btn-primary-bg,#3b82f6)_12%,transparent)] hover:text-[var(--ui-btn-primary-bg,#3b82f6)]"
@@ -802,7 +966,15 @@ export function WorkPanel({
                 autoComplete="off"
               />
             </form>
-            {activeBrowser.url && activeBrowser.url !== "about:blank" ? (
+            {activeBrowser.srcDoc != null ? (
+              <div className="flex min-h-0 flex-1 flex-col [&_iframe]:min-h-0 [&_iframe]:flex-1 [&_iframe]:h-full">
+                <HtmlPreviewBody
+                  content={activeBrowser.srcDoc}
+                  title={activeBrowser.title}
+                  documentPath={fileUrlToLocalPath(activeBrowser.url) ?? undefined}
+                />
+              </div>
+            ) : activeBrowser.url && activeBrowser.url !== "about:blank" ? (
               <iframe
                 title={activeBrowser.title}
                 src={activeBrowser.url}

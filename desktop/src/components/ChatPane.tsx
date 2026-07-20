@@ -58,6 +58,13 @@ import {
   type NearWorkspacePickFileDetail,
 } from "../utils/workspace-sidebar-events";
 import { WorkPanel, type WorkPanelFocus } from "./work-panel/WorkPanel";
+import { loadPreparedHtmlSrcDoc } from "../utils/html-preview-assets";
+import {
+  artifactBaseName,
+  isInAppHtmlPreviewPath,
+  looksLikeDirectoryPath,
+  pathToFileUrl,
+} from "../utils/session-artifacts";
 import { SubAgentRunDrawer } from "./subagent";
 import { MessageRenderer, renderToolMessageExtras } from "./messages/MessageRenderer";
 import type { SkillPatchPreviewPayload } from "./messages/skill-manage-preview";
@@ -4277,8 +4284,67 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
   );
 
   const revealFileInTaskspace = useCallback(async (absPath: string) => {
-    openWorkspaceFilePreview(absPath);
-  }, [openWorkspaceFilePreview]);
+    const path = String(absPath || "").trim();
+    if (!path) return;
+
+    if (!pane.taskspacePanelOpen) {
+      openWorkspaceSidebarForPane(pane.id, paneRef.current?.clientWidth ?? paneWidth, openSidePanel);
+    }
+
+    // HTML reports: Trae-style in-app browser tab (srcDoc), never shell-open Chrome.
+    // Relative <img src="*.svg"> assets are inlined as data URLs for srcDoc.
+    if (isInAppHtmlPreviewPath(path)) {
+      const prepared = await loadPreparedHtmlSrcDoc(path);
+      if (prepared.ok) {
+        setWorkPanelFocus({
+          kind: "browser",
+          url: pathToFileUrl(path),
+          title: artifactBaseName(path) || "HTML",
+          srcDoc: prepared.srcDoc,
+        });
+        return;
+      }
+      console.warn("[ChatPane] read HTML failed:", prepared.error);
+    }
+
+    // Prefer task artifacts over the redundant Workspace tab (file browsing lives in
+    // left-nav「文件管理」). Still open the work panel on the summary → artifacts section.
+    setWorkPanelFocus({
+      kind: "summary",
+      section: "artifacts",
+      highlightPath: path,
+    });
+
+    let isDirectory = looksLikeDirectoryPath(path);
+    const resolve = window.agenticxDesktop?.resolveLocalPath;
+    if (resolve) {
+      try {
+        const info = await resolve(path);
+        if (info.ok) {
+          if (info.isDirectory) isDirectory = true;
+          else if (info.isFile) isDirectory = false;
+        }
+      } catch {
+        // Keep heuristic fallback.
+      }
+    }
+
+    if (isDirectory) {
+      const open = window.agenticxDesktop?.shellOpenPath;
+      if (open) {
+        const result = await open(path);
+        if (!result.ok) console.warn("[ChatPane] open directory failed:", result.error);
+      }
+      return;
+    }
+
+    // Non-HTML files: locate in Finder only (do not shell-open into Chrome/Preview).
+    const reveal = window.agenticxDesktop?.shellShowItemInFolder;
+    if (reveal) {
+      const result = await reveal(path);
+      if (!result.ok) console.warn("[ChatPane] reveal file failed:", result.error);
+    }
+  }, [pane.id, pane.taskspacePanelOpen, paneWidth, openSidePanel]);
 
   const copyMessage = useCallback(async (message: Message) => {
     const raw = messagePlainTextForClipboard(message);
