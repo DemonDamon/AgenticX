@@ -1,4 +1,13 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type RefObject } from "react";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type MouseEvent as ReactMouseEvent,
+  type RefObject,
+  type WheelEvent as ReactWheelEvent,
+} from "react";
 import { createPortal } from "react-dom";
 import {
   Check,
@@ -211,6 +220,13 @@ function OfficePreviewBody({
   );
 }
 
+const IMAGE_PREVIEW_MIN_ZOOM = 50;
+const IMAGE_PREVIEW_MAX_ZOOM = 300;
+
+function clampImagePreviewZoom(zoom: number): number {
+  return Math.min(IMAGE_PREVIEW_MAX_ZOOM, Math.max(IMAGE_PREVIEW_MIN_ZOOM, zoom));
+}
+
 function ImagePreviewBody({
   absolutePath,
   onCopy,
@@ -222,13 +238,17 @@ function ImagePreviewBody({
   onCopy: () => void;
   onRevealInFileManager?: (absolutePath: string) => void;
   revealInFileManagerLabel?: string;
-  /** Trae-style floating zoom control for panel layout. */
+  /** Trae-style floating zoom + grab-to-pan for panel layout. */
   enableZoom?: boolean;
 }) {
   const [dataUrl, setDataUrl] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [zoom, setZoom] = useState(100);
+  const [offset, setOffset] = useState({ x: 0, y: 0 });
+  const [isDragging, setIsDragging] = useState(false);
+  const dragOrigin = useRef<{ mx: number; my: number; ox: number; oy: number } | null>(null);
+  const containerRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -236,6 +256,9 @@ function ImagePreviewBody({
     setError(null);
     setDataUrl(null);
     setZoom(100);
+    setOffset({ x: 0, y: 0 });
+    setIsDragging(false);
+    dragOrigin.current = null;
     const api = window.agenticxDesktop?.loadLocalImageDataUrl;
     if (typeof api !== "function") {
       setLoading(false);
@@ -267,6 +290,58 @@ function ImagePreviewBody({
       cancelled = true;
     };
   }, [absolutePath]);
+
+  const resetView = useCallback(() => {
+    setZoom(100);
+    setOffset({ x: 0, y: 0 });
+  }, []);
+
+  const handleWheel = useCallback(
+    (e: ReactWheelEvent<HTMLDivElement>) => {
+      if (!enableZoom) return;
+      e.preventDefault();
+      e.stopPropagation();
+      const container = containerRef.current;
+      if (!container) return;
+      const rect = container.getBoundingClientRect();
+      const mx = e.clientX - rect.left - rect.width / 2;
+      const my = e.clientY - rect.top - rect.height / 2;
+      setZoom((prev) => {
+        const next = clampImagePreviewZoom(Math.round(prev * (e.deltaY < 0 ? 1.12 : 1 / 1.12)));
+        if (next === prev) return prev;
+        const ratio = next / prev;
+        setOffset((o) => ({ x: mx - (mx - o.x) * ratio, y: my - (my - o.y) * ratio }));
+        return next;
+      });
+    },
+    [enableZoom],
+  );
+
+  const handleMouseDown = useCallback(
+    (e: ReactMouseEvent<HTMLDivElement>) => {
+      if (!enableZoom || e.button !== 0) return;
+      e.preventDefault();
+      setIsDragging(true);
+      dragOrigin.current = { mx: e.clientX, my: e.clientY, ox: offset.x, oy: offset.y };
+    },
+    [enableZoom, offset],
+  );
+
+  const handleMouseMove = useCallback(
+    (e: ReactMouseEvent<HTMLDivElement>) => {
+      if (!isDragging || !dragOrigin.current) return;
+      setOffset({
+        x: dragOrigin.current.ox + e.clientX - dragOrigin.current.mx,
+        y: dragOrigin.current.oy + e.clientY - dragOrigin.current.my,
+      });
+    },
+    [isDragging],
+  );
+
+  const handleMouseUp = useCallback(() => {
+    setIsDragging(false);
+    dragOrigin.current = null;
+  }, []);
 
   if (loading) {
     return (
@@ -306,51 +381,85 @@ function ImagePreviewBody({
     );
   }
 
-  const scale = enableZoom ? zoom / 100 : 1;
+  if (!enableZoom) {
+    return (
+      <div className="relative flex h-full min-h-0 flex-col bg-surface-base">
+        <div className="min-h-0 flex-1 overflow-auto p-6">
+          <div className="flex min-h-full items-center justify-center">
+            <img
+              src={dataUrl}
+              alt=""
+              className="rounded-lg object-contain"
+              style={{ maxHeight: "100%", maxWidth: "100%" }}
+            />
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  const scale = zoom / 100;
 
   return (
     <div className="relative flex h-full min-h-0 flex-col bg-surface-base">
-      <div className="min-h-0 flex-1 overflow-auto p-6">
-        <div className="flex min-h-full items-center justify-center">
-          <img
-            src={dataUrl}
-            alt=""
-            className="rounded-lg object-contain"
-            style={
-              enableZoom
-                ? { width: `${Math.round(scale * 100)}%`, maxWidth: "none", height: "auto" }
-                : { maxHeight: "100%", maxWidth: "100%" }
-            }
-          />
+      <div
+        ref={containerRef}
+        className="relative min-h-0 flex-1 overflow-hidden"
+        style={{ cursor: isDragging ? "grabbing" : "grab" }}
+        onWheel={handleWheel}
+        onMouseDown={handleMouseDown}
+        onMouseMove={handleMouseMove}
+        onMouseUp={handleMouseUp}
+        onMouseLeave={handleMouseUp}
+        onDoubleClick={resetView}
+        title="拖拽平移 · 滚轮缩放 · 双击还原"
+      >
+        <img
+          src={dataUrl}
+          alt=""
+          draggable={false}
+          className="rounded-lg object-contain"
+          style={{
+            position: "absolute",
+            top: "50%",
+            left: "50%",
+            maxWidth: "92%",
+            maxHeight: "92%",
+            width: "auto",
+            height: "auto",
+            transform: `translate(calc(-50% + ${offset.x}px), calc(-50% + ${offset.y}px)) scale(${scale})`,
+            transformOrigin: "center center",
+            userSelect: "none",
+            pointerEvents: "none",
+            transition: isDragging ? "none" : "transform 0.05s ease-out",
+          }}
+        />
+      </div>
+      <div className="pointer-events-none absolute inset-x-0 bottom-4 flex justify-center">
+        <div className="pointer-events-auto flex items-center gap-1 rounded-full border border-border bg-surface-card/95 px-2 py-1 shadow-lg backdrop-blur">
+          <button
+            type="button"
+            className="flex h-7 w-7 items-center justify-center rounded-full text-text-muted hover:bg-surface-hover hover:text-text-strong"
+            onClick={() => setZoom((z) => clampImagePreviewZoom(z - 25))}
+            title="缩小"
+            aria-label="缩小"
+          >
+            <Minus className="h-3.5 w-3.5" strokeWidth={2} />
+          </button>
+          <span className="min-w-[3.2rem] text-center text-[12px] tabular-nums text-text-strong">
+            {zoom}%
+          </span>
+          <button
+            type="button"
+            className="flex h-7 w-7 items-center justify-center rounded-full text-text-muted hover:bg-surface-hover hover:text-text-strong"
+            onClick={() => setZoom((z) => clampImagePreviewZoom(z + 25))}
+            title="放大"
+            aria-label="放大"
+          >
+            <Plus className="h-3.5 w-3.5" strokeWidth={2} />
+          </button>
         </div>
       </div>
-      {enableZoom ? (
-        <div className="pointer-events-none absolute inset-x-0 bottom-4 flex justify-center">
-          <div className="pointer-events-auto flex items-center gap-1 rounded-full border border-border bg-surface-card/95 px-2 py-1 shadow-lg backdrop-blur">
-            <button
-              type="button"
-              className="flex h-7 w-7 items-center justify-center rounded-full text-text-muted hover:bg-surface-hover hover:text-text-strong"
-              onClick={() => setZoom((z) => Math.max(50, z - 25))}
-              title="缩小"
-              aria-label="缩小"
-            >
-              <Minus className="h-3.5 w-3.5" strokeWidth={2} />
-            </button>
-            <span className="min-w-[3.2rem] text-center text-[12px] tabular-nums text-text-strong">
-              {zoom}%
-            </span>
-            <button
-              type="button"
-              className="flex h-7 w-7 items-center justify-center rounded-full text-text-muted hover:bg-surface-hover hover:text-text-strong"
-              onClick={() => setZoom((z) => Math.min(300, z + 25))}
-              title="放大"
-              aria-label="放大"
-            >
-              <Plus className="h-3.5 w-3.5" strokeWidth={2} />
-            </button>
-          </div>
-        </div>
-      ) : null}
     </div>
   );
 }
