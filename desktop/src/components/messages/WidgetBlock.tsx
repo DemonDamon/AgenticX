@@ -1,5 +1,6 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { Code, Copy, Download, Image, Maximize2, MoreHorizontal, X } from "lucide-react";
+import { adaptSvgDocumentColors } from "../../utils/adapt-svg-theme";
 import { collectThemeCssVars, exportSurfaceColor } from "../../utils/widget-theme";
 import { Modal } from "../ds/Modal";
 import { ZoomableViewport } from "../ds/ZoomableViewport";
@@ -44,6 +45,10 @@ function buildSanitizedSvgHtml(code: string): string | null {
   // Remove fixed pixel dimensions – CSS will take over.
   root.removeAttribute("width");
   root.removeAttribute("height");
+
+  // LLM SVGs often hardcode GitHub-dark fills; map them to Near theme vars so
+  // light mode no longer shows a black slab inside a white chat bubble.
+  adaptSvgDocumentColors(doc);
 
   return new XMLSerializer().serializeToString(root);
 }
@@ -277,6 +282,11 @@ function buildRasterizableSvg(
   svg.setAttribute("viewBox", `0 0 ${logical.w} ${logical.h}`);
   svg.setAttribute("width", String(logical.w));
   svg.setAttribute("height", String(logical.h));
+
+  // Prefer live DOM (already theme-adapted in chat); otherwise adapt raw markup.
+  if (!serializedLive) {
+    adaptSvgDocumentColors(doc);
+  }
 
   const themeCss = collectThemeCssVars();
   if (themeCss) {

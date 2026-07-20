@@ -4,6 +4,7 @@ import { parseReasoningContent } from "../components/messages/reasoning-parser";
 import { expandMessagesToTopLevelRows } from "../components/messages/react-blocks";
 import { resolveMetaDisplayName } from "./display-name";
 import { isShowWidgetToolMessage, parseWidgetPayload } from "../components/messages/widget-preview";
+import { adaptSvgMarkupColors } from "./adapt-svg-theme";
 import { mermaidThemeFromApp, renderMermaidSvg } from "./mermaid-render";
 
 const PDF_STYLES = `
@@ -75,6 +76,8 @@ const WIDGET_THEME_VAR_DEFAULTS = `
     --text-subtle: #6b7280;
     --text-faint: #9ca3af;
     --surface-base: #ffffff;
+    --surface-base-fallback: #ffffff;
+    --surface-popover: #ffffff;
     --surface-card: #f9fafb;
     --surface-card-strong: #f3f4f6;
     --border-subtle: #e5e7eb;
@@ -84,6 +87,10 @@ const WIDGET_THEME_VAR_DEFAULTS = `
     --status-success: #22c55e;
     --status-warning: #f59e0b;
     --status-error: #ef4444;
+    --svg-card-green: #dafbe1;
+    --svg-card-yellow: #fff8c5;
+    --svg-card-red: #ffebe9;
+    --svg-track: #eaeef2;
   }
 `;
 
@@ -171,7 +178,7 @@ async function widgetBlockHtml(
   }
   const title = payload.title ? `<p class="widget-title">${escapeHtml(payload.title)}</p>` : "";
   if (payload.kind === "svg") {
-    return `${title}<div class="widget-graphic">${payload.widgetCode}</div>`;
+    return `${title}<div class="widget-graphic">${adaptSvgMarkupColors(payload.widgetCode)}</div>`;
   }
   if (payload.kind === "mermaid") {
     const chartTitle = escapeHtml(payload.title || "图表");

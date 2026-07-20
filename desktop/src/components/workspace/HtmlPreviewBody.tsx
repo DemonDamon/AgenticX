@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import { useAppStore } from "../../store";
 import { prepareLocalHtmlSrcDoc } from "../../utils/html-preview-assets";
 import { injectHtmlPreviewStorageBridge } from "../../utils/html-preview-storage";
+import { injectHtmlPreviewTheme } from "../../utils/html-preview-theme";
 import {
   HTML_INSPECT_BRIDGE_VERSION,
   HTML_INSPECT_MSG,
@@ -57,6 +59,7 @@ export function HtmlPreviewBody({
   clearSelectionKey = 0,
   reloadKey = 0,
 }: HtmlPreviewBodyProps) {
+  const appTheme = useAppStore((s) => s.theme);
   const [baseSrcDoc, setBaseSrcDoc] = useState(content);
   const iframeRef = useRef<HTMLIFrameElement>(null);
   const onHitRef = useRef(onElementHitChange);
@@ -79,8 +82,11 @@ export function HtmlPreviewBody({
   }, [content, documentPath]);
 
   const srcDoc = useMemo(
-    () => injectHtmlInspectBridge(injectHtmlPreviewStorageBridge(baseSrcDoc)),
-    [baseSrcDoc, HTML_INSPECT_BRIDGE_VERSION]
+    () =>
+      injectHtmlInspectBridge(
+        injectHtmlPreviewStorageBridge(injectHtmlPreviewTheme(baseSrcDoc, appTheme)),
+      ),
+    [baseSrcDoc, appTheme, HTML_INSPECT_BRIDGE_VERSION],
   );
 
   const postToFrame = (msg: HtmlInspectParentMessage) => {
