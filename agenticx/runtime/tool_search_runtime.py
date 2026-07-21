@@ -125,3 +125,23 @@ def build_runtime_context(
 
 def empty_state() -> ToolSearchStateV1:
     return ToolSearchStateV1()
+
+
+def collect_mcp_descriptors(
+    session: Any,
+    full_openai_tools: list[dict],
+) -> list[ToolDescriptor]:
+    """Build MCP ToolDescriptors from the session hub (parent-gated on mcp_call)."""
+    pool_names = {_openai_tool_name(t) for t in full_openai_tools}
+    if "mcp_call" not in pool_names:
+        return []
+    hub = getattr(session, "mcp_hub", None)
+    if hub is None:
+        return []
+    try:
+        from agenticx.runtime.mcp_tool_catalog import snapshots_to_descriptors
+
+        snapshots = hub.list_tool_snapshots()
+    except Exception:
+        return []
+    return snapshots_to_descriptors(snapshots, mcp_call_allowed=True)

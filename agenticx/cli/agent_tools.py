@@ -7672,6 +7672,36 @@ async def dispatch_tool_async(
             "To request approval, directly call the real tool (e.g. bash_exec); "
             "runtime will emit confirm_required and wait for UI confirmation."
         )
+    # --- Dynamic MCP function tools loaded via tool_search (public names) ---
+    if runtime_tool_context is not None:
+        try:
+            from agenticx.runtime.mcp_tool_catalog import resolve_mcp_execution_name
+            from agenticx.cli.studio_mcp import mcp_call_tool_async
+
+            routed = resolve_mcp_execution_name(
+                name,
+                getattr(runtime_tool_context, "catalog", None).descriptors
+                if getattr(runtime_tool_context, "catalog", None) is not None
+                else (),
+            )
+            if routed:
+                hub = getattr(session, "mcp_hub", None)
+                if hub is None:
+                    return "ERROR: no MCP hub connected"
+                # Parent gate: catalog only contains MCP tools when mcp_call was allowed.
+                args_obj = arguments if isinstance(arguments, dict) else {}
+                repeat_guard_error = _check_mcp_repeat_guard(session, routed, args_obj)
+                if repeat_guard_error:
+                    return repeat_guard_error
+                return await mcp_call_tool_async(
+                    hub,
+                    routed,
+                    json.dumps(args_obj, ensure_ascii=False),
+                    echo=False,
+                )
+        except Exception as mcp_dyn_exc:
+            return f"ERROR: dynamic MCP tool '{name}' failed: {mcp_dyn_exc}"
+
     # --- Fallback chain: try resolving via registered ToolFallbackChain ---
     _fallback_chain = getattr(session, "_fallback_chain", None)
     if _fallback_chain is not None:

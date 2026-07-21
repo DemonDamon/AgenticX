@@ -2087,7 +2087,10 @@ class AgentRuntime:
             is_tool_pending_next_round,
             project_tools_for_round,
         )
-        from agenticx.runtime.tool_search_runtime import build_runtime_context
+        from agenticx.runtime.tool_search_runtime import (
+            build_runtime_context,
+            collect_mcp_descriptors,
+        )
 
         compact_prompt, compact_tools, compact_notice = maybe_compact_meta_turn_context(
             session,
@@ -2098,13 +2101,32 @@ class AgentRuntime:
             current_system_prompt = compact_prompt
             full_tool_pool = list(compact_tools)
 
-        ts_ctx = build_runtime_context(
-            session=session,
-            full_openai_tools=full_tool_pool,
-            mcp_descriptors=(),
-        )
+        def _rebuild_ts_ctx():
+            return build_runtime_context(
+                session=session,
+                full_openai_tools=full_tool_pool,
+                mcp_descriptors=collect_mcp_descriptors(session, full_tool_pool),
+            )
+
+        ts_ctx = _rebuild_ts_ctx()
 
         def _project_active_tools() -> tuple[list[Dict[str, Any]], set[str]]:
+            nonlocal ts_ctx
+            # Refresh MCP snapshots each round (connect/disconnect) while keeping scratchpad state.
+            prev_loaded = list(ts_ctx.state.loaded_ids)
+            ts_ctx = _rebuild_ts_ctx()
+            # Prefer in-memory loaded ids from this turn (tool_search), then scratchpad.
+            if prev_loaded:
+                from agenticx.runtime.tool_search import ToolSearchStateV1, prune_state_to_catalog
+
+                ts_ctx.state = prune_state_to_catalog(
+                    ToolSearchStateV1(
+                        loaded_ids=prev_loaded,
+                        catalog_fingerprint=ts_ctx.catalog.fingerprint,
+                        version=ts_ctx.state.version,
+                    ),
+                    ts_ctx.catalog,
+                )
             projected = project_tools_for_round(
                 ts_ctx,
                 full_openai_tools=full_tool_pool,
@@ -3289,11 +3311,7 @@ class AgentRuntime:
                         )
                         current_system_prompt = compact_prompt
                         full_tool_pool = list(compact_tools)
-                        ts_ctx = build_runtime_context(
-                            session=session,
-                            full_openai_tools=full_tool_pool,
-                            mcp_descriptors=(),
-                        )
+                        ts_ctx = _rebuild_ts_ctx()
                         active_tools, allowed_tool_names = _project_active_tools()
                         if messages and str(messages[0].get("role", "")).lower() == "system":
                             messages[0] = {"role": "system", "content": current_system_prompt}
