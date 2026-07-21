@@ -5,14 +5,23 @@ export const RUNTIME_MAX_TOOL_ROUNDS = 120;
 export const RUNTIME_MIN_TASKSPACES = 5;
 export const RUNTIME_MAX_TASKSPACES = 100;
 export const RUNTIME_DEFAULT_TASKSPACES = 20;
+export const TOOL_SEARCH_THRESHOLD_MIN = 1000;
+export const TOOL_SEARCH_THRESHOLD_MAX = 50000;
+export const TOOL_SEARCH_THRESHOLD_DEFAULT = 6000;
 const TOOL_ROUNDS_STEP = 10;
 const TASKSPACES_STEP = 1;
+
+export type ToolSearchMode = "off" | "auto" | "always";
 
 type RuntimeConfigSectionProps = {
   maxToolRounds: number;
   onMaxToolRoundsChange: (value: number) => void;
   maxTaskspaces: number;
   onMaxTaskspacesChange: (value: number) => void;
+  toolSearchMode: ToolSearchMode;
+  onToolSearchModeChange: (value: ToolSearchMode) => void;
+  toolSearchThreshold: number;
+  onToolSearchThresholdChange: (value: number) => void;
   disabled?: boolean;
 };
 
@@ -21,6 +30,10 @@ export function RuntimeConfigSection({
   onMaxToolRoundsChange,
   maxTaskspaces,
   onMaxTaskspacesChange,
+  toolSearchMode,
+  onToolSearchModeChange,
+  toolSearchThreshold,
+  onToolSearchThresholdChange,
   disabled,
 }: RuntimeConfigSectionProps) {
   return (
@@ -72,6 +85,41 @@ export function RuntimeConfigSection({
           <p className="mt-2 text-[11px] leading-relaxed text-text-faint">
             含 1 个默认工作区；同一分身或 Meta 下手动添加的目录共享此上限。
           </p>
+        </div>
+
+        <div className="rounded-lg border border-border bg-surface-panel px-3 py-3">
+          <div className="mb-1.5 text-xs font-medium text-text-primary">工具按需加载</div>
+          <p className="mb-2.5 text-[11px] leading-relaxed text-text-faint">
+            首轮只提供核心工具，需要时通过检索加载更多工具定义，可减少上下文占用。关闭时与旧版行为一致。
+          </p>
+          <select
+            className="w-full rounded-md border border-border bg-surface-card px-2.5 py-1.5 pr-8 text-xs text-text-primary"
+            value={toolSearchMode}
+            disabled={disabled}
+            onChange={(e) => onToolSearchModeChange(e.target.value as ToolSearchMode)}
+          >
+            <option value="off">关闭</option>
+            <option value="auto">自动（超过阈值启用）</option>
+            <option value="always">始终</option>
+          </select>
+          {toolSearchMode === "auto" ? (
+            <div className="mt-3">
+              <div className="mb-2 flex items-center justify-between gap-2">
+                <span className="text-[11px] text-text-muted">自动启用阈值（约 token）</span>
+                <span className="text-[11px] tabular-nums text-text-muted">
+                  {toolSearchThreshold}
+                </span>
+              </div>
+              <SettingsRangeField
+                min={TOOL_SEARCH_THRESHOLD_MIN}
+                max={TOOL_SEARCH_THRESHOLD_MAX}
+                step={500}
+                value={toolSearchThreshold}
+                onChange={onToolSearchThresholdChange}
+                disabled={disabled}
+              />
+            </div>
+          ) : null}
         </div>
       </div>
     </div>

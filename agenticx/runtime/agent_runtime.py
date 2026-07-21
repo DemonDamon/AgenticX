@@ -2567,6 +2567,29 @@ class AgentRuntime:
                     }
                 except Exception:
                     llm_call_kwargs = {}
+                try:
+                    from agenticx.runtime.tool_search import (
+                        estimate_schema_tokens,
+                        should_apply_tool_search,
+                    )
+
+                    _ts_before = estimate_schema_tokens(list(full_tool_pool))
+                    _ts_sent = estimate_schema_tokens(list(active_tools))
+                    _ts_applied = should_apply_tool_search(
+                        ts_ctx.config,
+                        full_pool_schema_tokens=_ts_before,
+                        tool_search_allowed=ts_ctx.tool_search_allowed,
+                    )
+                    _ts_mode = str(ts_ctx.config.normalized().mode)
+                    _ts_loaded = len(ts_ctx.state.loaded_ids)
+                    _ts_candidates = len(ts_ctx.catalog.descriptors)
+                except Exception:
+                    _ts_before = 0
+                    _ts_sent = 0
+                    _ts_applied = False
+                    _ts_mode = "off"
+                    _ts_loaded = 0
+                    _ts_candidates = 0
                 context_payload = {
                     "round": round_idx,
                     "prompt_tokens_approx": approx_tokens(
@@ -2581,6 +2604,13 @@ class AgentRuntime:
                     "cache_breakpoints": latest_cache_telemetry.get("cache_breakpoints", 0),
                     "cache_eligible_chars": latest_cache_telemetry.get("cache_eligible_chars", 0),
                     "cache_saved_tokens_est": latest_cache_telemetry.get("cache_saved_tokens_est", 0),
+                    "tool_search_mode": _ts_mode,
+                    "tool_search_applied": bool(_ts_applied),
+                    "tool_search_candidate_count": int(_ts_candidates),
+                    "tool_search_loaded_count": int(_ts_loaded),
+                    "tool_search_schema_tokens_before": int(_ts_before),
+                    "tool_search_schema_tokens_sent": int(_ts_sent),
+                    "tool_search_schema_tokens_saved": max(0, int(_ts_before) - int(_ts_sent)),
                 }
                 persist_context_stats(session, context_payload)
                 yield RuntimeEvent(

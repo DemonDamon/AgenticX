@@ -8836,6 +8836,18 @@ function registerIpc(): void {
         : {};
       const val = Number(raw.max_tool_rounds ?? 30);
       const taskspacesVal = Number(raw.max_taskspaces ?? 20);
+      const toolSearchRaw =
+        raw.tool_search && typeof raw.tool_search === "object" && !Array.isArray(raw.tool_search)
+          ? (raw.tool_search as Record<string, unknown>)
+          : {};
+      let toolSearchMode = String(toolSearchRaw.mode ?? "off").trim().toLowerCase();
+      if (toolSearchMode !== "off" && toolSearchMode !== "auto" && toolSearchMode !== "always") {
+        toolSearchMode = "off";
+      }
+      const thresholdRaw = Number(toolSearchRaw.auto_schema_token_threshold ?? 6000);
+      const toolSearchThreshold = Number.isFinite(thresholdRaw)
+        ? Math.max(1000, Math.min(50000, Math.round(thresholdRaw)))
+        : 6000;
       return {
         ok: true,
         max_tool_rounds: Number.isFinite(val) ? Math.max(10, Math.min(120, val)) : 30,
@@ -8844,6 +8856,8 @@ function registerIpc(): void {
           : 20,
         auto_resume_on_exhaustion: Boolean(raw.auto_resume_on_exhaustion ?? false),
         max_auto_resumes: Math.max(0, Math.min(10, Number(raw.max_auto_resumes ?? 3))),
+        tool_search_mode: toolSearchMode,
+        tool_search_auto_schema_token_threshold: toolSearchThreshold,
         ...readStallNudgeRuntime(raw),
         ...readUnattendedRuntime(raw),
         ...readTokenBudgetRuntime(raw),
@@ -8855,6 +8869,8 @@ function registerIpc(): void {
         error: String(err),
         max_tool_rounds: 30,
         max_taskspaces: 20,
+        tool_search_mode: "off",
+        tool_search_auto_schema_token_threshold: 6000,
         auto_resume_on_exhaustion: false,
         max_auto_resumes: 3,
         stall_detect_silence_seconds: 90,
@@ -8982,6 +8998,34 @@ function registerIpc(): void {
       }
       if (Object.keys(tokenBudgetMerged).length > 0) {
         merged.token_budget = tokenBudgetMerged;
+      }
+      if (
+        p.tool_search_mode !== undefined ||
+        p.tool_search_auto_schema_token_threshold !== undefined
+      ) {
+        const prevTs =
+          merged.tool_search && typeof merged.tool_search === "object" && !Array.isArray(merged.tool_search)
+            ? { ...(merged.tool_search as Record<string, unknown>) }
+            : {};
+        if (p.tool_search_mode !== undefined) {
+          const mode = String(p.tool_search_mode).trim().toLowerCase();
+          if (mode !== "off" && mode !== "auto" && mode !== "always") {
+            return { ok: false, error: "tool_search_mode must be off|auto|always" };
+          }
+          prevTs.mode = mode;
+        }
+        if (p.tool_search_auto_schema_token_threshold !== undefined) {
+          const v = Number(p.tool_search_auto_schema_token_threshold);
+          if (!Number.isFinite(v)) {
+            return { ok: false, error: "tool_search_auto_schema_token_threshold must be a number" };
+          }
+          prevTs.auto_schema_token_threshold = Math.max(1000, Math.min(50000, Math.round(v)));
+        }
+        if (prevTs.mode === undefined) prevTs.mode = "off";
+        if (prevTs.auto_schema_token_threshold === undefined) {
+          prevTs.auto_schema_token_threshold = 6000;
+        }
+        merged.tool_search = prevTs;
       }
       root.runtime = merged;
       saveAgxConfig(cfg);

@@ -2232,6 +2232,8 @@ const ToolsTab = forwardRef<ToolsTabHandle, Record<string, never>>(function Tool
   const [search, setSearch] = useState("");
   const [maxToolRounds, setMaxToolRounds] = useState(60);
   const [maxTaskspaces, setMaxTaskspaces] = useState(RUNTIME_DEFAULT_TASKSPACES);
+  const [toolSearchMode, setToolSearchMode] = useState<"off" | "auto" | "always">("off");
+  const [toolSearchThreshold, setToolSearchThreshold] = useState(6000);
   const [stallNudge, setStallNudge] = useState<StallNudgeConfig>({
     stall_detect_silence_seconds: 90,
     stall_auto_nudge_enabled: false,
@@ -2286,6 +2288,16 @@ const ToolsTab = forwardRef<ToolsTabHandle, Record<string, never>>(function Tool
         const taskspacesN = Number.isFinite(taskspacesRaw) ? taskspacesRaw : RUNTIME_DEFAULT_TASKSPACES;
         setMaxTaskspaces(
           Math.max(RUNTIME_MIN_TASKSPACES, Math.min(RUNTIME_MAX_TASKSPACES, taskspacesN)),
+        );
+        const tsMode = String(runtimeResult.tool_search_mode ?? "off").trim().toLowerCase();
+        setToolSearchMode(
+          tsMode === "auto" || tsMode === "always" || tsMode === "off" ? tsMode : "off",
+        );
+        const tsThreshold = Number(runtimeResult.tool_search_auto_schema_token_threshold ?? 6000);
+        setToolSearchThreshold(
+          Number.isFinite(tsThreshold)
+            ? Math.max(1000, Math.min(50000, Math.round(tsThreshold)))
+            : 6000,
         );
         const detectSec = Math.max(
           30,
@@ -2417,6 +2429,8 @@ const ToolsTab = forwardRef<ToolsTabHandle, Record<string, never>>(function Tool
         const rtRes = await window.agenticxDesktop.saveRuntimeConfig({
           max_tool_rounds: maxToolRounds,
           max_taskspaces: maxTaskspaces,
+          tool_search_mode: toolSearchMode,
+          tool_search_auto_schema_token_threshold: toolSearchThreshold,
           stall_detect_silence_seconds: stallNudge.stall_detect_silence_seconds,
           stall_auto_nudge_enabled: stallNudge.stall_auto_nudge_enabled,
           stall_auto_nudge_after_seconds: afterSec,
@@ -2443,7 +2457,17 @@ const ToolsTab = forwardRef<ToolsTabHandle, Record<string, never>>(function Tool
         return bridge.save();
       },
     }),
-    [loading, maxToolRounds, maxTaskspaces, saveBashDefaultTimeout, stallNudge, tokenBudget, unattended],
+    [
+      loading,
+      maxToolRounds,
+      maxTaskspaces,
+      toolSearchMode,
+      toolSearchThreshold,
+      saveBashDefaultTimeout,
+      stallNudge,
+      tokenBudget,
+      unattended,
+    ],
   );
 
   const startInstall = async (tool: ToolStatusItem) => {
@@ -2510,6 +2534,10 @@ const ToolsTab = forwardRef<ToolsTabHandle, Record<string, never>>(function Tool
         onMaxToolRoundsChange={setMaxToolRounds}
         maxTaskspaces={maxTaskspaces}
         onMaxTaskspacesChange={setMaxTaskspaces}
+        toolSearchMode={toolSearchMode}
+        onToolSearchModeChange={setToolSearchMode}
+        toolSearchThreshold={toolSearchThreshold}
+        onToolSearchThresholdChange={setToolSearchThreshold}
         disabled={loading}
       />
       <TokenBudgetConfigSection value={tokenBudget} onChange={setTokenBudget} disabled={loading} />

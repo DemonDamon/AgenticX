@@ -91,6 +91,8 @@ type AutomationConfig = {
 type RuntimeConfig = {
   max_tool_rounds: number;
   max_taskspaces: number;
+  tool_search_mode?: "off" | "auto" | "always";
+  tool_search_auto_schema_token_threshold?: number;
 };
 
 type AutomationFrequencyData =
@@ -605,6 +607,8 @@ declare global {
         max_taskspaces: number;
         auto_resume_on_exhaustion: boolean;
         max_auto_resumes: number;
+        tool_search_mode?: "off" | "auto" | "always";
+        tool_search_auto_schema_token_threshold?: number;
         stall_detect_silence_seconds?: number;
         stall_auto_nudge_enabled?: boolean;
         stall_auto_nudge_after_seconds?: number;
@@ -625,6 +629,8 @@ declare global {
         max_taskspaces?: number;
         auto_resume_on_exhaustion?: boolean;
         max_auto_resumes?: number;
+        tool_search_mode?: "off" | "auto" | "always";
+        tool_search_auto_schema_token_threshold?: number;
         max_tokens_per_session?: number;
         max_tokens_per_turn?: number;
         stall_detect_silence_seconds?: number;
