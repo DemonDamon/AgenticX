@@ -15,6 +15,21 @@ function avatarInitials(name: string): string {
 
 type CardMenuState = { avatarId: string; x: number; y: number } | null;
 
+/** Gallery cards: idle / focus / selected borders follow --theme-color-rgb. */
+const GALLERY_CARD_BASE =
+  "group relative flex cursor-pointer flex-col rounded-xl border bg-surface-card p-4 transition-all outline-none hover:bg-surface-card-strong";
+const GALLERY_CARD_IDLE =
+  "border-border hover:border-[rgba(var(--theme-color-rgb,59,130,246),0.35)] focus-visible:border-[rgba(var(--theme-color-rgb,59,130,246),0.5)] focus-visible:ring-1 focus-visible:ring-[rgba(var(--theme-color-rgb,59,130,246),0.22)]";
+const GALLERY_CARD_SELECTED =
+  "border-[rgba(var(--theme-color-rgb,59,130,246),0.5)] bg-surface-card-strong ring-1 ring-[rgba(var(--theme-color-rgb,59,130,246),0.22)]";
+
+const GALLERY_CREATE_BASE =
+  "flex min-h-[168px] flex-col items-center justify-center gap-1.5 rounded-xl border border-dashed text-text-faint outline-none transition";
+const GALLERY_CREATE_IDLE =
+  "border-border hover:border-[rgba(var(--theme-color-rgb,59,130,246),0.35)] hover:text-[rgb(var(--theme-color-rgb,59,130,246))] focus-visible:border-[rgba(var(--theme-color-rgb,59,130,246),0.5)] focus-visible:text-[rgb(var(--theme-color-rgb,59,130,246))] focus-visible:ring-1 focus-visible:ring-[rgba(var(--theme-color-rgb,59,130,246),0.22)]";
+const GALLERY_CREATE_ACTIVE =
+  "border-[rgba(var(--theme-color-rgb,59,130,246),0.5)] text-[rgb(var(--theme-color-rgb,59,130,246))] ring-1 ring-[rgba(var(--theme-color-rgb,59,130,246),0.22)]";
+
 export function AvatarGalleryView() {
   const avatars = useAppStore((s) => s.avatars);
   const setAvatars = useAppStore((s) => s.setAvatars);
@@ -207,12 +222,13 @@ export function AvatarGalleryView() {
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3">
           {sortedAvatars.map((avatar) => {
             const hasPane = panes.some((p) => p.avatarId === avatar.id);
+            const isCardSelected = settingsAvatarId === avatar.id;
             return (
               <div
                 key={avatar.id}
                 role="button"
                 tabIndex={0}
-                className="group relative flex cursor-pointer flex-col rounded-xl border border-border bg-surface-card p-4 transition-all hover:border-text-faint hover:bg-surface-card-strong"
+                className={`${GALLERY_CARD_BASE} ${isCardSelected ? GALLERY_CARD_SELECTED : GALLERY_CARD_IDLE}`}
                 onClick={() => setSettingsAvatarId(avatar.id)}
                 onKeyDown={(e) => {
                   if (e.key === "Enter" || e.key === " ") {
@@ -298,7 +314,7 @@ export function AvatarGalleryView() {
           })}
           <button
             type="button"
-            className="flex min-h-[168px] flex-col items-center justify-center gap-1.5 rounded-xl border border-dashed border-border text-text-faint transition hover:border-text-faint hover:text-text-muted"
+            className={`${GALLERY_CREATE_BASE} ${createOpen ? GALLERY_CREATE_ACTIVE : GALLERY_CREATE_IDLE}`}
             onClick={() => setCreateOpen(true)}
           >
             <Plus className="h-5 w-5" />

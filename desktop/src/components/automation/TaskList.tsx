@@ -65,6 +65,13 @@ function relativeTime(iso: string): string {
   return `${Math.floor(diff / 86400_000)} 天前`;
 }
 
+/** Task rows: hover / expanded borders follow --theme-color-rgb. */
+const TASK_ROW_BASE = "rounded-lg border bg-surface-card transition-all";
+const TASK_ROW_IDLE =
+  "border-border hover:border-[rgba(var(--theme-color-rgb,59,130,246),0.35)]";
+const TASK_ROW_EXPANDED =
+  "border-[rgba(var(--theme-color-rgb,59,130,246),0.5)] ring-1 ring-[rgba(var(--theme-color-rgb,59,130,246),0.22)]";
+
 export function TaskList({ tasks, onToggle, onEdit, onDelete, onRunNow }: Props) {
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [runningId, setRunningId] = useState<string | null>(null);
@@ -119,7 +126,7 @@ export function TaskList({ tasks, onToggle, onEdit, onDelete, onRunNow }: Props)
         return (
           <div
             key={task.id}
-            className="rounded-lg border border-border bg-surface-card transition hover:border-text-faint"
+            className={`${TASK_ROW_BASE} ${expanded ? TASK_ROW_EXPANDED : TASK_ROW_IDLE}`}
           >
             <div className="flex items-center gap-3 px-3 py-2.5">
               <button

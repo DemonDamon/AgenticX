@@ -29,6 +29,12 @@ interface Props {
   onSelect: (template: AutomationTemplate) => void;
 }
 
+/** Template cards: hover / focus borders follow --theme-color-rgb. */
+const TEMPLATE_CARD_BASE =
+  "flex items-start gap-3 rounded-lg border bg-surface-card px-3 py-2.5 text-left transition-all outline-none hover:bg-surface-card-strong";
+const TEMPLATE_CARD_IDLE =
+  "border-border hover:border-[rgba(var(--theme-color-rgb,59,130,246),0.35)] focus-visible:border-[rgba(var(--theme-color-rgb,59,130,246),0.5)] focus-visible:ring-1 focus-visible:ring-[rgba(var(--theme-color-rgb,59,130,246),0.22)]";
+
 export function TemplateGrid({ onSelect }: Props) {
   return (
     <div className="space-y-2">
@@ -42,7 +48,7 @@ export function TemplateGrid({ onSelect }: Props) {
             <button
               key={tpl.id}
               type="button"
-              className="flex items-start gap-3 rounded-lg border border-border bg-surface-card px-3 py-2.5 text-left transition hover:border-text-faint hover:bg-surface-card-strong"
+              className={`${TEMPLATE_CARD_BASE} ${TEMPLATE_CARD_IDLE}`}
               onClick={() => onSelect(tpl)}
             >
               <div className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-md bg-surface-panel">

@@ -33,6 +33,14 @@ type EditorState =
   | { mode: "edit"; group: GroupChat }
   | null;
 
+/** Project cards: hover / focus borders follow --theme-color-rgb. */
+const PROJECT_CARD_BASE =
+  "rounded-xl border bg-surface-card transition-all outline-none hover:bg-surface-card-strong";
+const PROJECT_CARD_IDLE =
+  "border-border hover:border-[rgba(var(--theme-color-rgb,59,130,246),0.35)] focus-visible:border-[rgba(var(--theme-color-rgb,59,130,246),0.5)] focus-visible:ring-1 focus-visible:ring-[rgba(var(--theme-color-rgb,59,130,246),0.22)]";
+const PROJECT_CARD_SELECTED =
+  "border-[rgba(var(--theme-color-rgb,59,130,246),0.5)] bg-surface-card-strong ring-1 ring-[rgba(var(--theme-color-rgb,59,130,246),0.22)]";
+
 export function ProjectsView() {
   const groups = useAppStore((s) => s.groups);
   const avatars = useAppStore((s) => s.avatars);
@@ -129,6 +137,8 @@ export function ProjectsView() {
             {groups.map((group, groupIndex) => {
               const hasPane = panes.some((p) => p.avatarId === `group:${group.id}`);
               const { iconBg } = groupColorByIndex(groupIndex);
+              const isGroupSelected =
+                editorState?.mode === "edit" && editorState.group.id === group.id;
               const memberNames = group.avatarIds
                 .map((id) => avatars.find((a) => a.id === id)?.name || id.slice(0, 4))
                 .join("、");
@@ -137,7 +147,7 @@ export function ProjectsView() {
                   key={group.id}
                   role="button"
                   tabIndex={0}
-                  className="group relative flex cursor-pointer flex-col rounded-xl border border-border bg-surface-card p-4 transition-all hover:border-text-faint hover:bg-surface-card-strong"
+                  className={`group relative flex cursor-pointer flex-col p-4 ${PROJECT_CARD_BASE} ${isGroupSelected ? PROJECT_CARD_SELECTED : PROJECT_CARD_IDLE}`}
                   onClick={() => openGroupPane(group)}
                   onKeyDown={(e) => {
                     if (e.key === "Enter" || e.key === " ") {
@@ -198,7 +208,7 @@ export function ProjectsView() {
               <button
                 key={tpl.id}
                 type="button"
-                className="flex items-start gap-3 rounded-xl border border-border bg-surface-card px-4 py-3.5 text-left transition hover:border-text-faint hover:bg-surface-card-strong"
+                className={`flex items-start gap-3 px-4 py-3.5 text-left ${PROJECT_CARD_BASE} ${PROJECT_CARD_IDLE}`}
                 onClick={() => handleTemplateSelect(tpl.id)}
               >
                 <div className="mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-surface-panel">
