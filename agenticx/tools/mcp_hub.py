@@ -7,6 +7,7 @@ Author: Damon Li
 from __future__ import annotations
 
 import asyncio
+import copy
 import logging
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Tuple
@@ -24,6 +25,18 @@ class MCPHubConfig(BaseModel):
 
     servers: List[MCPServerConfig] = Field(default_factory=list)
     auto_mode: bool = False
+
+
+@dataclass(frozen=True)
+class MCPToolSnapshot:
+    """Read-only view of one routed MCP tool (no hub internals exposed)."""
+
+    server_name: str
+    original_name: str
+    routed_name: str
+    description: str
+    input_schema: dict
+    enabled: bool
 
 
 @dataclass
@@ -173,6 +186,55 @@ class MCPHub:
             )
 
         return await route.client.call_tool(route.original_name, arguments or {})
+
+    def list_tool_snapshots(self) -> List[MCPToolSnapshot]:
+        """Return a read-only snapshot of currently discovered/routed tools.
+
+        Does not trigger discovery (empty routing → empty list).
+        """
+        if not self._tool_routing:
+            return []
+        try:
+            from agenticx.cli.studio_mcp import get_mcp_disabled_tools_config
+
+            disabled_cfg = get_mcp_disabled_tools_config()
+        except Exception:
+            disabled_cfg = {}
+        if not isinstance(disabled_cfg, dict):
+            disabled_cfg = {}
+
+        out: List[MCPToolSnapshot] = []
+        for routed_name, route in self._tool_routing.items():
+            server_name = str(route.client.server_config.name or "unknown")
+            original = str(route.original_name or "")
+            disabled_for_server = disabled_cfg.get(server_name, [])
+            if not isinstance(disabled_for_server, list):
+                disabled_for_server = []
+            enabled = original not in disabled_for_server
+            schema = copy.deepcopy(route.tool_info.inputSchema or {})
+            if not isinstance(schema, dict):
+                schema = {}
+            out.append(
+                MCPToolSnapshot(
+                    server_name=server_name,
+                    original_name=original,
+                    routed_name=str(routed_name),
+                    description=str(route.tool_info.description or ""),
+                    input_schema=schema,
+                    enabled=enabled,
+                )
+            )
+        return out
+
+    def get_tool_snapshot(self, routed_name: str) -> Optional[MCPToolSnapshot]:
+        """Lookup one snapshot by hub routed name."""
+        key = str(routed_name or "").strip()
+        if not key:
+            return None
+        for snap in self.list_tool_snapshots():
+            if snap.routed_name == key:
+                return snap
+        return None
 
     async def get_tools_for_agent(self) -> List[BaseTool]:
         """Return auto-injected tools for Agent usage."""

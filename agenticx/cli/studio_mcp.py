@@ -1117,30 +1117,55 @@ def set_mcp_disabled_tools_config(data: Dict[str, List[str]]) -> None:
     ConfigManager.set_value("mcp.disabled_tools", cleaned)
 
 
-def build_mcp_tools_context(hub: "MCPHub") -> str:
+def build_mcp_tools_context(
+    hub: "MCPHub",
+    *,
+    defer_schemas: bool = False,
+    loaded_public_or_routed_names: set[str] | None = None,
+) -> str:
     """Serialize connected MCP tools as text context for code generation.
 
     Tools that the user has individually disabled via the UI are excluded so
     the agent is not aware of them and cannot attempt to call them.
+
+    When ``defer_schemas`` is True (ToolSearch applied), do **not** dump
+    inputSchema — only names / short guidance, optionally highlighting loaded tools.
     """
     if not hub._merged_tools:
         return ""
 
     disabled_cfg = get_mcp_disabled_tools_config()
+    loaded = {str(x).strip() for x in (loaded_public_or_routed_names or set()) if str(x).strip()}
 
     parts = ["=== 可用的 MCP 工具 ===\n"]
-    parts.append(
-        "以下是用户已连接的 MCP 工具；`mcp_call` 的 `tool_name` 必须与下列名称**完全一致**。"
-        "勿编造 `list_tools`、`list_pages`、`browse_to` 等；查看名称请用 `list_mcps` 返回的 `mcp_tool_names`。\n"
-    )
+    if defer_schemas:
+        parts.append(
+            "ToolSearch 已启用：下方仅列出已连接 MCP 工具名称，**不含**完整 inputSchema。"
+            "请先调用 `tool_search` 加载所需工具，完整 schema 在下一轮可用；"
+            "兼容路径仍可使用 `list_mcps` → `mcp_call`。\n"
+            "勿编造 `list_tools`、`list_pages`、`browse_to` 等名称。\n"
+        )
+    else:
+        parts.append(
+            "以下是用户已连接的 MCP 工具；`mcp_call` 的 `tool_name` 必须与下列名称**完全一致**。"
+            "勿编造 `list_tools`、`list_pages`、`browse_to` 等；查看名称请用 `list_mcps` 返回的 `mcp_tool_names`。\n"
+        )
     for tool_info in hub._merged_tools:
         route = hub._tool_routing.get(tool_info.name)
         source = route.client.server_config.name if route else "unknown"
         original = route.original_name if route else tool_info.name
         if original in disabled_cfg.get(source, []):
             continue
-        parts.append(f"工具: {tool_info.name} (来源: {source})")
+        marker = ""
+        if defer_schemas and loaded and (
+            tool_info.name in loaded or original in loaded
+        ):
+            marker = " [已加载]"
+        parts.append(f"工具: {tool_info.name} (来源: {source}){marker}")
         parts.append(f"  描述: {tool_info.description}")
+        if defer_schemas:
+            parts.append("")
+            continue
         schema_str = json.dumps(tool_info.inputSchema, ensure_ascii=False, indent=2)
         if len(schema_str) > 500:
             schema_str = schema_str[:500] + "\n  ..."

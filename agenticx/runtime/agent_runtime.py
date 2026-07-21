@@ -1002,7 +1002,21 @@ def _promote_user_image_attachments(
 def _build_agent_system_prompt(session: StudioSession) -> str:
     mcp_context = ""
     if session.mcp_hub is not None:
-        mcp_context = build_mcp_tools_context(session.mcp_hub)
+        # When ToolSearch mode != off, defer MCP schema dumping into the system
+        # prompt (names/catalog only). Exact auto-threshold application may still
+        # fail-open in projection; avoiding full schema dump is the token win.
+        defer_schemas = False
+        try:
+            from agenticx.runtime.tool_search_runtime import read_tool_search_config
+
+            _ts_cfg = read_tool_search_config()
+            defer_schemas = _ts_cfg.mode in {"auto", "always"}
+        except Exception:
+            defer_schemas = False
+        mcp_context = build_mcp_tools_context(
+            session.mcp_hub,
+            defer_schemas=defer_schemas,
+        )
     if not mcp_context:
         mcp_context = "(no MCP tools connected)"
 
