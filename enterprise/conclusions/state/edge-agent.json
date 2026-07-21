@@ -1,0 +1,12 @@
+{
+  "schema_version": 1,
+  "module_id": "edge-agent",
+  "generation": "f9634c5411834012b60d6e7fc88ebbf8",
+  "mapping_revision": 1,
+  "baseline_commit": "8ebec3b5b2baaf7f0f76e2e8c2a2dcd5e811d3da",
+  "baseline_tree": "9937fea679618cc28fa8e4897053b5ef2b43d280",
+  "source_fingerprint": "sha256:b825174dd799d1b2a0db8985d7937a6c7d2275f33f3f9f6b3a77cedd4ff7a97c",
+  "summary_path": "enterprise/conclusions/apps/edge-agent_conclusion.md",
+  "summary_sha256": "sha256:d1b7433d11afe319a00bd4b089483ab01647ab5d2cb6669614eec1ad50269744",
+  "updated_at": "2026-07-21T07:36:29.531561+00:00"
+}

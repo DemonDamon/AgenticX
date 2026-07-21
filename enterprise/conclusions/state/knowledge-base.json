@@ -1,0 +1,12 @@
+{
+  "schema_version": 1,
+  "module_id": "knowledge-base",
+  "generation": "2b7e9f763afb43c98ec9d8a8259f6578",
+  "mapping_revision": 1,
+  "baseline_commit": "8ebec3b5b2baaf7f0f76e2e8c2a2dcd5e811d3da",
+  "baseline_tree": "9937fea679618cc28fa8e4897053b5ef2b43d280",
+  "source_fingerprint": "sha256:f4fe6695039f5f6e92d3656f188fec2214409a22dd52e039bddf2008af4a41ac",
+  "summary_path": "enterprise/conclusions/features/knowledge-base_conclusion.md",
+  "summary_sha256": "sha256:e057e1878fb1aac763cfc57be7cdf18d46f7c8244bec4f9cfc3e33f79ee44a60",
+  "updated_at": "2026-07-21T07:46:52.553190+00:00"
+}

@@ -1,0 +1,12 @@
+{
+  "schema_version": 1,
+  "module_id": "admin-console",
+  "generation": "1b85f1b43e6c4a3b8bd1d1a3707a3eb6",
+  "mapping_revision": 1,
+  "baseline_commit": "8ebec3b5b2baaf7f0f76e2e8c2a2dcd5e811d3da",
+  "baseline_tree": "9937fea679618cc28fa8e4897053b5ef2b43d280",
+  "source_fingerprint": "sha256:8d4a4bb7d6a6bd897a6ee79f74391b04d6523c9a09fdcd2a73477774b5a2de4f",
+  "summary_path": "enterprise/conclusions/apps/admin-console_conclusion.md",
+  "summary_sha256": "sha256:932919c3c28340ee944e2f29311c4c9175bb909cdb1cbbaf7a30c70ae2dbe9e5",
+  "updated_at": "2026-07-21T07:36:27.663854+00:00"
+}

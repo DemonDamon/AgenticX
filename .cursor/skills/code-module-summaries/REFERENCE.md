@@ -447,6 +447,12 @@ never trips `UNASSIGNED_TRACKED_PATHS`. The overview itself is authored by the
 agent (regenerated on init or an approved mapping refresh, like `INDEX.md`),
 not produced by the helper.
 
+Batch parallel summary writers are a Skill-level concern (see SKILL.md §6).
+The helper never chooses or launches subagent models. Before any parallel
+`Task` dispatch, the parent must ask the user for a `Task` model slug and
+prefer a cheap writer (default recommendation: `composer-2.5-fast`) unless the
+user explicitly picks another tier.
+
 Changing layout is a mapping migration:
 
 1. Produce old/new paths.

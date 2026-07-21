@@ -1,0 +1,12 @@
+{
+  "schema_version": 1,
+  "module_id": "tools-mcp",
+  "generation": "3782fe01bc814b399bc99c042722d57a",
+  "mapping_revision": 1,
+  "baseline_commit": "8ebec3b5b2baaf7f0f76e2e8c2a2dcd5e811d3da",
+  "baseline_tree": "9937fea679618cc28fa8e4897053b5ef2b43d280",
+  "source_fingerprint": "sha256:5fb25b8b54fd2818ab9036a75dcaf64f8a32408b3faf71ab81f174fd91d2550e",
+  "summary_path": "enterprise/conclusions/features/tools-mcp_conclusion.md",
+  "summary_sha256": "sha256:d2f9e1f0e2258cb9bfb4fc42cdc91d63253463b4915be75f552cb123c9f853ae",
+  "updated_at": "2026-07-21T07:46:54.845029+00:00"
+}

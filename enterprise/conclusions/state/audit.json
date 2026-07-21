@@ -1,0 +1,12 @@
+{
+  "schema_version": 1,
+  "module_id": "audit",
+  "generation": "efcc9feab4f745dcb867053ca443cdcd",
+  "mapping_revision": 1,
+  "baseline_commit": "8ebec3b5b2baaf7f0f76e2e8c2a2dcd5e811d3da",
+  "baseline_tree": "9937fea679618cc28fa8e4897053b5ef2b43d280",
+  "source_fingerprint": "sha256:cd61a85837b757806566a0b6545c6c8aec0a3deebf52457587e9315cac78cba4",
+  "summary_path": "enterprise/conclusions/features/audit_conclusion.md",
+  "summary_sha256": "sha256:d463b7af9f6cf5751eb23ef632ec62586345b196ec8e8602f1ad558eaf9ecff5",
+  "updated_at": "2026-07-21T07:39:24.063807+00:00"
+}

@@ -1,0 +1,12 @@
+{
+  "schema_version": 1,
+  "module_id": "metering",
+  "generation": "93025198c29b45f4881ca5b7cbb75de9",
+  "mapping_revision": 1,
+  "baseline_commit": "8ebec3b5b2baaf7f0f76e2e8c2a2dcd5e811d3da",
+  "baseline_tree": "9937fea679618cc28fa8e4897053b5ef2b43d280",
+  "source_fingerprint": "sha256:d27b6eac5655980a460b6f63a5a18c3572a3b18735fefc5d9cb2c83f0b5dbb52",
+  "summary_path": "enterprise/conclusions/features/metering_conclusion.md",
+  "summary_sha256": "sha256:f596c935281946e54556f5eba0ec94521aaae304108845559e4fedd2df9e08bc",
+  "updated_at": "2026-07-21T07:39:21.162219+00:00"
+}

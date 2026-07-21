@@ -1,0 +1,12 @@
+{
+  "schema_version": 1,
+  "module_id": "sdk-ts",
+  "generation": "c7482489a08842e69f085d5ff8d9cfb6",
+  "mapping_revision": 1,
+  "baseline_commit": "8ebec3b5b2baaf7f0f76e2e8c2a2dcd5e811d3da",
+  "baseline_tree": "9937fea679618cc28fa8e4897053b5ef2b43d280",
+  "source_fingerprint": "sha256:1f3739ff98a99469b0307bf0f17eba3277cfcd526a9fae27af0e4cc8009f6a38",
+  "summary_path": "enterprise/conclusions/packages/sdk-ts_conclusion.md",
+  "summary_sha256": "sha256:fff8b48883b5e6f05aba980029185eb061bd6cd5db8a5d32db2374539e1c000b",
+  "updated_at": "2026-07-21T07:50:31.491519+00:00"
+}

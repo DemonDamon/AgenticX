@@ -1,0 +1,12 @@
+{
+  "schema_version": 1,
+  "module_id": "db-schema",
+  "generation": "e1fb63aa2c13403480352898afa002fa",
+  "mapping_revision": 1,
+  "baseline_commit": "8ebec3b5b2baaf7f0f76e2e8c2a2dcd5e811d3da",
+  "baseline_tree": "9937fea679618cc28fa8e4897053b5ef2b43d280",
+  "source_fingerprint": "sha256:fd5090fe57124bf44cc674ed44238035622cd707845cb5ee57185fbc4a8318fe",
+  "summary_path": "enterprise/conclusions/packages/db-schema_conclusion.md",
+  "summary_sha256": "sha256:605073d75c4af1d44e2b2a942d166dd43860893dc59a07aea694035638be762c",
+  "updated_at": "2026-07-21T07:46:56.861299+00:00"
+}

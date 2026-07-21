@@ -1,0 +1,28 @@
+{
+  "schema_version": 1,
+  "layout": "custom",
+  "tracked_ref": "HEAD",
+  "index_path": "desktop/conclusions/README.md",
+  "exclude_paths": [
+    "desktop/node_modules",
+    "desktop/dist",
+    "desktop/dist-electron",
+    "desktop/release",
+    "desktop/out",
+    "desktop/test-results",
+    "desktop/bundled-backend",
+    "desktop/.uploads"
+  ],
+  "modules": [
+    {
+      "id": "desktop",
+      "name": "Desktop",
+      "roots": ["desktop"],
+      "shared_paths": [],
+      "primary_root": "desktop",
+      "summary_path": "desktop/conclusions/desktop_conclusion.md",
+      "mapping_revision": 2
+    }
+  ],
+  "retired_modules": []
+}

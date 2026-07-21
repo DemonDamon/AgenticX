@@ -1,0 +1,12 @@
+{
+  "schema_version": 1,
+  "module_id": "web-portal",
+  "generation": "655eece169f143a2870f68976a33dd31",
+  "mapping_revision": 1,
+  "baseline_commit": "8ebec3b5b2baaf7f0f76e2e8c2a2dcd5e811d3da",
+  "baseline_tree": "9937fea679618cc28fa8e4897053b5ef2b43d280",
+  "source_fingerprint": "sha256:6c9ebf7892df84aeb37421e64d4a68ad519d93649dc932ed261782cab8b236a5",
+  "summary_path": "enterprise/conclusions/apps/web-portal_conclusion.md",
+  "summary_sha256": "sha256:e08431c40751665eefed7f57a2cf1a00819e80a7dd1a7e04fc21810b7143dc8f",
+  "updated_at": "2026-07-21T07:36:26.633629+00:00"
+}

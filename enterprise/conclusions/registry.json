@@ -1,0 +1,238 @@
+{
+  "schema_version": 1,
+  "layout": "custom",
+  "tracked_ref": "HEAD",
+  "index_path": "enterprise/conclusions/README.md",
+  "exclude_paths": [
+    "enterprise/node_modules",
+    "enterprise/.turbo",
+    "enterprise/.next"
+  ],
+  "modules": [
+    {
+      "id": "web-portal",
+      "name": "web-portal",
+      "roots": ["enterprise/apps/web-portal"],
+      "shared_paths": [],
+      "summary_path": "enterprise/conclusions/apps/web-portal_conclusion.md",
+      "mapping_revision": 1
+    },
+    {
+      "id": "admin-console",
+      "name": "admin-console",
+      "roots": ["enterprise/apps/admin-console"],
+      "shared_paths": [],
+      "summary_path": "enterprise/conclusions/apps/admin-console_conclusion.md",
+      "mapping_revision": 1
+    },
+    {
+      "id": "gateway",
+      "name": "gateway",
+      "roots": ["enterprise/apps/gateway"],
+      "shared_paths": [],
+      "summary_path": "enterprise/conclusions/apps/gateway_conclusion.md",
+      "mapping_revision": 1
+    },
+    {
+      "id": "edge-agent",
+      "name": "edge-agent",
+      "roots": ["enterprise/apps/edge-agent"],
+      "shared_paths": [],
+      "summary_path": "enterprise/conclusions/apps/edge-agent_conclusion.md",
+      "mapping_revision": 1
+    },
+    {
+      "id": "agents",
+      "name": "agents",
+      "roots": ["enterprise/features/agents"],
+      "shared_paths": [],
+      "summary_path": "enterprise/conclusions/features/agents_conclusion.md",
+      "mapping_revision": 1
+    },
+    {
+      "id": "audit",
+      "name": "audit",
+      "roots": ["enterprise/features/audit"],
+      "shared_paths": [],
+      "summary_path": "enterprise/conclusions/features/audit_conclusion.md",
+      "mapping_revision": 1
+    },
+    {
+      "id": "billing",
+      "name": "billing",
+      "roots": ["enterprise/features/billing"],
+      "shared_paths": [],
+      "summary_path": "enterprise/conclusions/features/billing_conclusion.md",
+      "mapping_revision": 1
+    },
+    {
+      "id": "chat",
+      "name": "chat",
+      "roots": ["enterprise/features/chat"],
+      "shared_paths": [],
+      "summary_path": "enterprise/conclusions/features/chat_conclusion.md",
+      "mapping_revision": 1
+    },
+    {
+      "id": "iam",
+      "name": "iam",
+      "roots": ["enterprise/features/iam"],
+      "shared_paths": [],
+      "summary_path": "enterprise/conclusions/features/iam_conclusion.md",
+      "mapping_revision": 1
+    },
+    {
+      "id": "knowledge-base",
+      "name": "knowledge-base",
+      "roots": ["enterprise/features/knowledge-base"],
+      "shared_paths": [],
+      "summary_path": "enterprise/conclusions/features/knowledge-base_conclusion.md",
+      "mapping_revision": 1
+    },
+    {
+      "id": "metering",
+      "name": "metering",
+      "roots": ["enterprise/features/metering"],
+      "shared_paths": [],
+      "summary_path": "enterprise/conclusions/features/metering_conclusion.md",
+      "mapping_revision": 1
+    },
+    {
+      "id": "model-service",
+      "name": "model-service",
+      "roots": ["enterprise/features/model-service"],
+      "shared_paths": [],
+      "summary_path": "enterprise/conclusions/features/model-service_conclusion.md",
+      "mapping_revision": 1
+    },
+    {
+      "id": "policy",
+      "name": "policy",
+      "roots": ["enterprise/features/policy"],
+      "shared_paths": [],
+      "summary_path": "enterprise/conclusions/features/policy_conclusion.md",
+      "mapping_revision": 1
+    },
+    {
+      "id": "settings",
+      "name": "settings",
+      "roots": ["enterprise/features/settings"],
+      "shared_paths": [],
+      "summary_path": "enterprise/conclusions/features/settings_conclusion.md",
+      "mapping_revision": 1
+    },
+    {
+      "id": "tools-mcp",
+      "name": "tools-mcp",
+      "roots": ["enterprise/features/tools-mcp"],
+      "shared_paths": [],
+      "summary_path": "enterprise/conclusions/features/tools-mcp_conclusion.md",
+      "mapping_revision": 1
+    },
+    {
+      "id": "auth",
+      "name": "auth",
+      "roots": ["enterprise/packages/auth"],
+      "shared_paths": [],
+      "summary_path": "enterprise/conclusions/packages/auth_conclusion.md",
+      "mapping_revision": 1
+    },
+    {
+      "id": "branding",
+      "name": "branding",
+      "roots": ["enterprise/packages/branding"],
+      "shared_paths": [],
+      "summary_path": "enterprise/conclusions/packages/branding_conclusion.md",
+      "mapping_revision": 1
+    },
+    {
+      "id": "config",
+      "name": "config",
+      "roots": ["enterprise/packages/config"],
+      "shared_paths": [],
+      "summary_path": "enterprise/conclusions/packages/config_conclusion.md",
+      "mapping_revision": 1
+    },
+    {
+      "id": "core-api",
+      "name": "core-api",
+      "roots": ["enterprise/packages/core-api"],
+      "shared_paths": [],
+      "summary_path": "enterprise/conclusions/packages/core-api_conclusion.md",
+      "mapping_revision": 1
+    },
+    {
+      "id": "db-schema",
+      "name": "db-schema",
+      "roots": ["enterprise/packages/db-schema"],
+      "shared_paths": [],
+      "summary_path": "enterprise/conclusions/packages/db-schema_conclusion.md",
+      "mapping_revision": 1
+    },
+    {
+      "id": "iam-core",
+      "name": "iam-core",
+      "roots": ["enterprise/packages/iam-core"],
+      "shared_paths": [],
+      "summary_path": "enterprise/conclusions/packages/iam-core_conclusion.md",
+      "mapping_revision": 1
+    },
+    {
+      "id": "policy-engine",
+      "name": "policy-engine",
+      "roots": ["enterprise/packages/policy-engine"],
+      "shared_paths": [],
+      "summary_path": "enterprise/conclusions/packages/policy-engine_conclusion.md",
+      "mapping_revision": 1
+    },
+    {
+      "id": "sdk-py",
+      "name": "sdk-py",
+      "roots": ["enterprise/packages/sdk-py"],
+      "shared_paths": [],
+      "summary_path": "enterprise/conclusions/packages/sdk-py_conclusion.md",
+      "mapping_revision": 1
+    },
+    {
+      "id": "sdk-ts",
+      "name": "sdk-ts",
+      "roots": ["enterprise/packages/sdk-ts"],
+      "shared_paths": [],
+      "summary_path": "enterprise/conclusions/packages/sdk-ts_conclusion.md",
+      "mapping_revision": 1
+    },
+    {
+      "id": "telemetry",
+      "name": "telemetry",
+      "roots": ["enterprise/packages/telemetry"],
+      "shared_paths": [],
+      "summary_path": "enterprise/conclusions/packages/telemetry_conclusion.md",
+      "mapping_revision": 1
+    },
+    {
+      "id": "ui",
+      "name": "ui",
+      "roots": ["enterprise/packages/ui"],
+      "shared_paths": [],
+      "summary_path": "enterprise/conclusions/packages/ui_conclusion.md",
+      "mapping_revision": 1
+    },
+    {
+      "id": "plugins-overview",
+      "name": "plugins-overview",
+      "roots": ["enterprise/plugins"],
+      "shared_paths": [],
+      "summary_path": "enterprise/conclusions/plugins/plugins_overview_conclusion.md",
+      "mapping_revision": 1
+    },
+    {
+      "id": "deploy",
+      "name": "deploy",
+      "roots": ["enterprise/deploy"],
+      "shared_paths": [],
+      "summary_path": "enterprise/conclusions/deploy/deploy_conclusion.md",
+      "mapping_revision": 1
+    }
+  ],
+  "retired_modules": []
+}
