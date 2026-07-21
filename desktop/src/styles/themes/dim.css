@@ -22,8 +22,8 @@
   --surface-hover: rgba(255, 255, 255, 0.075);
   --surface-bubble: rgba(255, 255, 255, 0.1);
   --surface-bubble-user: rgba(91, 157, 255, 0.36);
-  --chat-im-user-bg: rgba(34, 197, 94, 0.4);
-  --chat-im-user-border: rgba(74, 222, 128, 0.5);
+  --chat-im-user-bg: rgba(34, 197, 94, 0.32);
+  --chat-im-user-border: rgba(74, 222, 128, 0.18);
   --chat-im-user-text: #ecfff3;
   --chat-im-assistant-bg: rgba(255, 255, 255, 0.08);
   --chat-im-assistant-border: rgba(255, 255, 255, 0.11);
