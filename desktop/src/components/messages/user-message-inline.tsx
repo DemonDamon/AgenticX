@@ -19,6 +19,7 @@ import {
 } from "../../utils/reference-attachment";
 import { HoverTip } from "../ds/HoverTip";
 import {
+  fileNameFromPath,
   formatReferenceChipLabel,
   resolveReferenceSourcePath,
 } from "../../utils/chat-file-mention";
@@ -59,6 +60,19 @@ export function UserSkillRefChip({ name }: { name: string }) {
   );
 }
 
+function truncateSnippetId(id: string, maxLen = 16): string {
+  const raw = String(id || "").trim();
+  if (raw.length <= maxLen) return raw;
+  return `${raw.slice(0, Math.max(8, maxLen - 1))}…`;
+}
+
+function parseSnippetIdFromLabel(label: string): string {
+  const m = String(label || "")
+    .trim()
+    .match(/:(el-snippet-[a-z0-9]+)$/i);
+  return m?.[1] ?? "";
+}
+
 export function UserFileRefChip({
   name,
   referenceAttachments = [],
@@ -75,9 +89,15 @@ export function UserFileRefChip({
     parseLineRangeFromReferenceLabel(name);
   const htmlEl = meta?.htmlElementRef;
   const htmlComment = String(htmlEl?.comment || "").trim();
-  const htmlTag = String(htmlEl?.tagName || "").trim();
-  const baseName = htmlEl
-    ? htmlTag || String(meta?.composerRefLabel || name).trim()
+  const snippetId =
+    String(meta?.snippetRef || "").trim() || parseSnippetIdFromLabel(name) || parseSnippetIdFromLabel(meta?.name || "");
+  const fileBasename = sourcePath
+    ? fileNameFromPath(sourcePath)
+    : formatReferenceChipLabel(name, sourcePath, lineRange)
+        .replace(/\s*\(\d+-\d+\)\s*$/, "")
+        .replace(/:el-snippet-[a-z0-9]+$/i, "");
+  const baseName = htmlEl || snippetId
+    ? fileBasename || String(htmlEl?.tagName || meta?.composerRefLabel || name).trim()
     : formatReferenceChipLabel(name, sourcePath, lineRange).replace(
         /\s*\(\d+-\d+\)\s*$/,
         ""
@@ -89,38 +109,39 @@ export function UserFileRefChip({
         ? `:${lineRange.start}-${lineRange.end}`
         : "";
   const resolvedPath = resolveReferenceSourcePath(name, sourcePath);
-  const kind = resolveComposerRefIconKindFromAttachments(name, referenceAttachments);
+  const kind = htmlEl || snippetId
+    ? "file"
+    : resolveComposerRefIconKindFromAttachments(name, referenceAttachments);
   const openRequest = buildFileReferenceOpenRequest(name, meta);
   const clickable = !!openRequest && !!onOpenReference;
   const hoverTitle = resolvedPath
-    ? lineRange
-      ? `${resolvedPath} · 第 ${lineRange.start}${lineRange.end !== lineRange.start ? `–${lineRange.end}` : ""} 行`
-      : resolvedPath
+    ? [
+        resolvedPath,
+        snippetId || null,
+        lineRange
+          ? `第 ${lineRange.start}${lineRange.end !== lineRange.start ? `–${lineRange.end}` : ""} 行`
+          : null,
+        htmlComment || null,
+      ]
+        .filter(Boolean)
+        .join(" · ")
     : undefined;
 
-  // Trae Work sent chip: [cursor] tag · [bubble] comment
-  const chipInner = htmlEl ? (
+  // Element / snippet chip: file · muted id（必要时再跟 comment）
+  const chipInner = htmlEl || snippetId ? (
     <>
-      <ComposerRefIcon kind="element" />
+      <ComposerRefIcon kind={kind} />
       <span className="agx-file-ref-chip-name">{baseName}</span>
+      {snippetId ? (
+        <>
+          <span className="agx-file-ref-chip-sep">·</span>
+          <span className="agx-file-ref-chip-meta">{truncateSnippetId(snippetId)}</span>
+        </>
+      ) : null}
       {htmlComment ? (
         <>
-          <span className="mx-0.5 opacity-50">·</span>
-          <span
-            className="inline-flex shrink-0 text-emerald-600 dark:text-emerald-400"
-            aria-hidden
-          >
-            <svg viewBox="0 0 16 16" fill="none" className="h-3 w-3">
-              <path
-                d="M3 3.5h10a1.5 1.5 0 011.5 1.5v5A1.5 1.5 0 0113 11.5H8l-2.5 2v-2H3A1.5 1.5 0 011.5 10V5A1.5 1.5 0 013 3.5z"
-                stroke="currentColor"
-                strokeWidth="1.2"
-                strokeLinejoin="round"
-              />
-              <circle cx="11.5" cy="4" r="1" fill="currentColor" />
-            </svg>
-          </span>
-          <span className="agx-file-ref-chip-name">{htmlComment}</span>
+          <span className="agx-file-ref-chip-sep">·</span>
+          <span className="agx-file-ref-chip-meta">{htmlComment}</span>
         </>
       ) : null}
     </>

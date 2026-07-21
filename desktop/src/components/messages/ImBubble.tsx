@@ -563,7 +563,7 @@ export function ImBubble({
                 compactAssistant && noBubbleBorder
                   ? `relative min-w-0 w-full px-3 py-0 text-[var(--agx-chat-im-body-font-size)] ${assistantBodyLeadingClass}`
                   : isUser
-                    ? "agx-im-user-bubble relative min-w-0 w-fit max-w-full rounded-xl border px-3 py-3 text-[var(--agx-chat-im-body-font-size)] leading-relaxed rounded-tr-[4px]"
+                    ? "agx-im-user-bubble relative min-w-0 w-fit max-w-full rounded-xl border px-3.5 py-2.5 text-[var(--agx-chat-im-body-font-size)] leading-relaxed rounded-tr-[4px]"
                     : isMetaPendingWork
                       ? `relative min-w-0 w-full px-3 py-0 text-[var(--agx-chat-im-body-font-size)] ${assistantBodyLeadingClass}`
                     : groupIdentityLayout
@@ -709,45 +709,43 @@ export function ImBubble({
               </div>
             ) : null}
             {hideActions ? null : isUser ? (
-              <div className="mt-0.5 flex w-full flex-wrap items-center justify-end gap-0.5 pb-0 leading-none pr-2 text-text-faint">
+              <div className="agx-im-user-actions">
                 <MessageTimestamp ts={message.timestamp} align="right" />
                 <HoverTip label="复制">
                   <button
                     type="button"
-                    className="rounded p-1 hover:bg-surface-hover hover:text-text-strong"
                     onMouseDown={(e) => e.preventDefault()}
                     onClick={() => onCopyMessage?.(message)}
                   >
-                    <Copy size={13} />
+                    <Copy size={13} strokeWidth={1.5} />
                   </button>
                 </HoverTip>
                 <HoverTip label="引用">
-                  <button type="button" className="rounded p-1 hover:bg-surface-hover hover:text-text-strong" onMouseDown={(e) => e.preventDefault()} onClick={runQuote}>
-                    <Quote size={13} />
+                  <button type="button" onMouseDown={(e) => e.preventDefault()} onClick={runQuote}>
+                    <Quote size={13} strokeWidth={1.5} />
                   </button>
                 </HoverTip>
                 <HoverTip label="收藏">
-                  <button type="button" className="rounded p-1 hover:bg-surface-hover hover:text-text-strong" onMouseDown={(e) => e.preventDefault()} onClick={runFavorite}>
-                    <Bookmark size={13} />
+                  <button type="button" onMouseDown={(e) => e.preventDefault()} onClick={runFavorite}>
+                    <Bookmark size={13} strokeWidth={1.5} />
                   </button>
                 </HoverTip>
                 <HoverTip label="转发">
-                  <button type="button" className="rounded p-1 hover:bg-surface-hover hover:text-text-strong" onMouseDown={(e) => e.preventDefault()} onClick={runForward}>
-                    <Forward size={13} />
+                  <button type="button" onMouseDown={(e) => e.preventDefault()} onClick={runForward}>
+                    <Forward size={13} strokeWidth={1.5} />
                   </button>
                 </HoverTip>
                 {onEditMessage ? (
                   <HoverTip label="修改">
                     <button
                       type="button"
-                      className="rounded p-1 hover:bg-surface-hover hover:text-text-strong"
                       onMouseDown={(e) => e.preventDefault()}
                       onClick={() => {
                         setEditContent(message.content);
                         setIsEditing(true);
                       }}
                     >
-                      <Pencil size={13} />
+                      <Pencil size={13} strokeWidth={1.5} />
                     </button>
                   </HoverTip>
                 ) : null}
@@ -755,22 +753,20 @@ export function ImBubble({
                   <HoverTip label="重试">
                     <button
                       type="button"
-                      className="rounded p-1 hover:bg-surface-hover hover:text-text-strong"
                       onMouseDown={(e) => e.preventDefault()}
                       onClick={() => onRetryMessage(message)}
                     >
-                      <RotateCcw size={13} />
+                      <RotateCcw size={13} strokeWidth={1.5} />
                     </button>
                   </HoverTip>
                 ) : null}
                 <HoverTip label="多选">
                   <button
                     type="button"
-                    className="rounded p-1 hover:bg-surface-hover hover:text-text-strong"
                     onMouseDown={(e) => e.preventDefault()}
                     onClick={() => onToggleSelectMessage?.(message)}
                   >
-                    <LayoutList size={13} />
+                    <LayoutList size={13} strokeWidth={1.5} />
                   </button>
                 </HoverTip>
               </div>
