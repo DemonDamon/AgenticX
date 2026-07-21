@@ -60,7 +60,6 @@ import { shouldDisableMcpToggle } from "../utils/mcp-toggle-state";
 import { ForwardPicker, type ForwardConfirmPayload } from "./ForwardPicker";
 import { QrConnectModal } from "./QrConnectModal";
 import { AutomationTab } from "./automation/AutomationTab";
-import { DeliveryConfigSection } from "./delivery/DeliveryConfigSection";
 import { AutomationTaskIcon } from "./icons/AutomationTaskIcon";
 import { SkillPuzzleIcon } from "./icons/SkillPuzzleIcon";
 import { PendingProposalsList } from "./settings/skills/PendingProposalsList";
@@ -9746,7 +9745,6 @@ export function SettingsPanel({
 
             {tab === "automation" && (
               <div className="space-y-4">
-                <DeliveryConfigSection apiBase={apiBase} apiToken={apiToken} />
                 <AutomationTab />
               </div>
             )}

@@ -408,7 +408,6 @@ type Props = {
   onChatSubAgent: (agentId: string) => void;
   onModelChangeSubAgent?: (agentId: string, provider: string, model: string) => void;
   onConfirmResolveSubAgent?: (agentId: string, approved: boolean) => void;
-  onOpenDelivery: () => void;
 };
 
 function uid(): string {
@@ -539,7 +538,6 @@ export function WorkPanel({
   onChatSubAgent,
   onModelChangeSubAgent,
   onConfirmResolveSubAgent,
-  onOpenDelivery,
 }: Props) {
   const addPaneTerminalTab = useAppStore((s) => s.addPaneTerminalTab);
   const removePaneTerminalTab = useAppStore((s) => s.removePaneTerminalTab);
@@ -1390,16 +1388,6 @@ export function WorkPanel({
               onToggle={toggleSection}
               scrollBody
               hasContent={artifactPaths.length > 0}
-              footer={
-                <button
-                  type="button"
-                  className="flex w-full items-center justify-center gap-1.5 rounded-lg border border-dashed border-border px-2 py-2 text-[12px] text-text-subtle transition hover:border-[var(--ui-btn-primary-border,#3b82f6)] hover:bg-[color-mix(in_srgb,var(--ui-btn-primary-bg,#3b82f6)_12%,transparent)] hover:text-[var(--ui-btn-primary-bg,#3b82f6)]"
-                  onClick={onOpenDelivery}
-                >
-                  <Boxes className="h-3.5 w-3.5" strokeWidth={1.7} />
-                  新建交付任务（POC / MVP）
-                </button>
-              }
             >
               {artifactPaths.length === 0 ? (
                 <EmptyBlock

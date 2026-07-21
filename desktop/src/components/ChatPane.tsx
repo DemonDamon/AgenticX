@@ -2302,7 +2302,6 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
   const cycleSidePanel = useAppStore((s) => s.cycleSidePanel);
   const toggleFocusMode = useAppStore((s) => s.toggleFocusMode);
   const openSidePanel = useAppStore((s) => s.openSidePanel);
-  const openDeliveryPanel = useAppStore((s) => s.openDeliveryPanel);
   const addPaneTerminalTab = useAppStore((s) => s.addPaneTerminalTab);
   const setActiveTaskspace = useAppStore((s) => s.setActiveTaskspace);
   const addPaneMessage = useAppStore((s) => s.addPaneMessage);
@@ -11732,7 +11731,6 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
             onConfirmResolveSubAgent={(agentId, approved) =>
               void resolvePaneSubAgentConfirm(agentId, approved)
             }
-            onOpenDelivery={() => openDeliveryPanel()}
           />
         </div>
       ) : null}
@@ -11850,7 +11848,6 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
                 onConfirmResolveSubAgent={(agentId, approved) =>
                   void resolvePaneSubAgentConfirm(agentId, approved)
                 }
-                onOpenDelivery={() => openDeliveryPanel()}
               />
             </div>
           ) : null}
