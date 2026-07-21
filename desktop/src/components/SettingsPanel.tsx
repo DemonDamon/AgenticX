@@ -2235,6 +2235,7 @@ const ToolsTab = forwardRef<ToolsTabHandle, Record<string, never>>(function Tool
   const [maxTaskspaces, setMaxTaskspaces] = useState(RUNTIME_DEFAULT_TASKSPACES);
   const [toolSearchMode, setToolSearchMode] = useState<"off" | "auto" | "always">("off");
   const [toolSearchThreshold, setToolSearchThreshold] = useState(6000);
+  const [toolSearchPersistError, setToolSearchPersistError] = useState("");
   const [stallNudge, setStallNudge] = useState<StallNudgeConfig>({
     stall_detect_silence_seconds: 90,
     stall_auto_nudge_enabled: false,
@@ -2253,6 +2254,59 @@ const ToolsTab = forwardRef<ToolsTabHandle, Record<string, never>>(function Tool
     normalizeTokenBudgetConfig(undefined),
   );
   const [runtimeLoadError, setRuntimeLoadError] = useState("");
+  const toolSearchThresholdTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const persistToolSearchConfig = useCallback(
+    async (mode: "off" | "auto" | "always", threshold: number) => {
+      try {
+        const rtRes = await window.agenticxDesktop.saveRuntimeConfig({
+          tool_search_mode: mode,
+          tool_search_auto_schema_token_threshold: threshold,
+        });
+        if (!rtRes?.ok) {
+          setToolSearchPersistError(
+            rtRes?.error ? String(rtRes.error) : "工具按需加载配置写入失败",
+          );
+          return false;
+        }
+        setToolSearchPersistError("");
+        return true;
+      } catch (err) {
+        setToolSearchPersistError(err instanceof Error ? err.message : String(err));
+        return false;
+      }
+    },
+    [],
+  );
+
+  const handleToolSearchModeChange = useCallback(
+    (mode: "off" | "auto" | "always") => {
+      setToolSearchMode(mode);
+      void persistToolSearchConfig(mode, toolSearchThreshold);
+    },
+    [persistToolSearchConfig, toolSearchThreshold],
+  );
+
+  const handleToolSearchThresholdChange = useCallback(
+    (threshold: number) => {
+      setToolSearchThreshold(threshold);
+      if (toolSearchThresholdTimerRef.current) {
+        clearTimeout(toolSearchThresholdTimerRef.current);
+      }
+      toolSearchThresholdTimerRef.current = setTimeout(() => {
+        void persistToolSearchConfig(toolSearchMode, threshold);
+      }, 350);
+    },
+    [persistToolSearchConfig, toolSearchMode],
+  );
+
+  useEffect(() => {
+    return () => {
+      if (toolSearchThresholdTimerRef.current) {
+        clearTimeout(toolSearchThresholdTimerRef.current);
+      }
+    };
+  }, []);
 
   const loadAll = useCallback(async () => {
     setLoading(true);
@@ -2539,14 +2593,19 @@ const ToolsTab = forwardRef<ToolsTabHandle, Record<string, never>>(function Tool
       />
       <ToolSearchConfigSection
         mode={toolSearchMode}
-        onModeChange={setToolSearchMode}
+        onModeChange={handleToolSearchModeChange}
         threshold={toolSearchThreshold}
-        onThresholdChange={setToolSearchThreshold}
+        onThresholdChange={handleToolSearchThresholdChange}
         disabled={loading}
       />
       <TokenBudgetConfigSection value={tokenBudget} onChange={setTokenBudget} disabled={loading} />
       <StallNudgeConfigSection value={stallNudge} onChange={setStallNudge} disabled={loading} />
       <UnattendedConfigSection value={unattended} onChange={setUnattended} disabled={loading} />
+      {toolSearchPersistError ? (
+        <div className="rounded border border-amber-500/40 bg-amber-500/10 px-2 py-1 text-xs text-amber-200">
+          {toolSearchPersistError}
+        </div>
+      ) : null}
       {runtimeLoadError ? (
         <div className="rounded border border-amber-500/40 bg-amber-500/10 px-2 py-1 text-xs text-amber-200">
           {runtimeLoadError}
@@ -7336,7 +7395,9 @@ export function SettingsPanel({
       );
       if (!still) return;
     }
-    if (tab === "tools") {
+    // ToolsTab stays mounted (hidden when inactive); always flush so tool_search /
+    // runtime knobs persist even if the user left the Tools tab before Exit.
+    {
       const toolsRes = await toolsTabRef.current?.saveAll();
       if (toolsRes && !toolsRes.ok) {
         window.alert(toolsRes.error || "工具页保存失败");
@@ -9640,7 +9701,9 @@ export function SettingsPanel({
                 onRefreshMcp={onRefreshMcp}
               />
             )}
-            {tab === "tools" && <ToolsTab ref={toolsTabRef} />}
+            <div className={tab === "tools" ? "space-y-4" : "hidden"}>
+              <ToolsTab ref={toolsTabRef} />
+            </div>
 
             {/* === SKILLS TAB === */}
             {tab === "skills" && (

@@ -37,7 +37,7 @@ export function ToolSearchConfigSection({
         <div className="min-w-0 flex-1">
           <div className="text-xs font-semibold text-text-strong">工具按需加载</div>
           <p className="mt-1 text-xs leading-relaxed text-text-muted">
-            首轮仅暴露核心工具；需要更多能力时由模型检索后再加载完整定义，减少上下文占用。关闭时与旧版一致。
+            首轮仅暴露核心工具；需要更多能力时由模型检索后再加载完整定义，减少上下文占用。关闭时与旧版一致。切换后即时写入本机配置。
           </p>
         </div>
         <SettingsDropdown
