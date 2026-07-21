@@ -175,7 +175,7 @@ export function HtmlPreviewChrome({
             <Share2 className="h-3.5 w-3.5" strokeWidth={1.8} />
           </IconBtn>
           {shareOpen ? (
-            <div className="absolute right-0 top-full z-50 mt-1 min-w-[180px] rounded-md border border-border bg-surface-card py-1 shadow-lg">
+            <div className="absolute right-0 top-full z-50 mt-1 min-w-[180px] overflow-hidden rounded-md border border-border bg-surface-popover py-1 shadow-xl backdrop-blur-xl">
               <button
                 type="button"
                 className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-[12px] text-text-primary hover:bg-surface-hover"
@@ -222,7 +222,7 @@ export function HtmlPreviewChrome({
             <Ellipsis className="h-3.5 w-3.5" strokeWidth={1.8} />
           </IconBtn>
           {moreOpen ? (
-            <div className="absolute right-0 top-full z-50 mt-1 min-w-[160px] rounded-md border border-border bg-surface-card py-1 shadow-lg">
+            <div className="absolute right-0 top-full z-50 mt-1 min-w-[160px] overflow-hidden rounded-md border border-border bg-surface-popover py-1 shadow-xl backdrop-blur-xl">
               {onViewSource ? (
                 <button
                   type="button"
