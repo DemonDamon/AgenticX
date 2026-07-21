@@ -1,12 +1,9 @@
 import { useEffect, useMemo, useState } from "react";
 import { AlertTriangle, ChevronDown, ChevronUp, ListChecks, Check, Circle, Loader2 } from "lucide-react";
-import { pickLatestTodoFromMessages } from "./TodoUpdateCard";
 import type { Message } from "../store";
 import {
   isTodoSnapshotSuperseded,
-  resolveStickyTodoDisplay,
-  detectDiskEvidenceForInProgressTodos,
-  detectModelForgotFinalTodoUpdate,
+  resolveDisplayedTodoFromMessages,
 } from "../utils/task-stall-policy";
 import type { SessionExecutionState } from "../utils/streaming-stop-policy";
 
@@ -54,25 +51,16 @@ export function StickyTaskBar({
   toolBudget,
   readFiles,
 }: StickyTaskBarProps) {
-  const rawSnapshot = useMemo(() => pickLatestTodoFromMessages(messages), [messages]);
-  const todoSuperseded = useMemo(() => {
-    if (!rawSnapshot) return false;
-    return isTodoSnapshotSuperseded(messages, rawSnapshot.index);
-  }, [messages, rawSnapshot]);
-  const rawParsed = rawSnapshot?.parsed ?? null;
-  const promotePending = useMemo(() => {
-    if (!rawSnapshot) return false;
-    if (liveness !== "idle") return false;
-    if (rawParsed && detectDiskEvidenceForInProgressTodos(messages, rawParsed)) return true;
-    return detectModelForgotFinalTodoUpdate(messages, rawSnapshot.index);
-  }, [messages, rawSnapshot, liveness, rawParsed]);
-  const parsed = useMemo(
-    () =>
-      rawParsed
-        ? resolveStickyTodoDisplay(rawParsed, liveness, executionState, { promotePending })
-        : null,
-    [rawParsed, liveness, executionState, promotePending]
+  const displayed = useMemo(
+    () => resolveDisplayedTodoFromMessages(messages, liveness, executionState),
+    [messages, liveness, executionState],
   );
+  const todoSuperseded = useMemo(() => {
+    if (!displayed) return false;
+    return isTodoSnapshotSuperseded(messages, displayed.index);
+  }, [messages, displayed]);
+  const parsed = displayed?.parsed ?? null;
+  const rawTotal = parsed?.total;
   const [expanded, setExpanded] = useState(true);
   const [dismissed, setDismissed] = useState(false);
 
@@ -98,7 +86,7 @@ export function StickyTaskBar({
 
   useEffect(() => {
     if (!runEnded) setDismissed(false);
-  }, [runEnded, rawParsed?.total]);
+  }, [runEnded, rawTotal]);
 
   if (!parsed) return null;
   if (todoSuperseded) return null;

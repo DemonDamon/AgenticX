@@ -2,7 +2,11 @@
  * Stall detection thresholds and helpers for long-running Near tasks.
  */
 
-import type { ParsedTodo, TodoItem } from "../components/TodoUpdateCard";
+import {
+  pickLatestTodoFromMessages,
+  type ParsedTodo,
+  type TodoItem,
+} from "../components/TodoUpdateCard";
 import type { Message } from "../store";
 import { parseReasoningContent } from "../components/messages/reasoning-parser";
 import { assistantBodyText, looksLikeUnfinishedAssistantBody } from "./budget-incomplete-message";
@@ -341,6 +345,48 @@ export function resolveStickyTodoDisplay(
   const completed = items.filter((item) => item.status === "completed").length;
   const total = parsed.total > 0 ? parsed.total : items.length;
   return { items, completed, total };
+}
+
+/**
+ * Shared displayed todo for StickyTaskBar + WorkPanel「待办」.
+ * Picks latest todo_write, then applies the same promotePending / idle demotion
+ * rules so left progress card and right summary stay in sync.
+ */
+export function resolveDisplayedTodoFromMessages(
+  messages: Message[],
+  liveness: "active" | "stalled" | "idle" = "idle",
+  executionState?: string,
+): { parsed: ParsedTodo; index: number } | null {
+  const snap = pickLatestTodoFromMessages(messages);
+  if (!snap) return null;
+  let promotePending = false;
+  if (liveness === "idle") {
+    if (detectDiskEvidenceForInProgressTodos(messages, snap.parsed)) {
+      promotePending = true;
+    } else if (detectModelForgotFinalTodoUpdate(messages, snap.index)) {
+      promotePending = true;
+    }
+  }
+  return {
+    index: snap.index,
+    parsed: resolveStickyTodoDisplay(snap.parsed, liveness, executionState, { promotePending }),
+  };
+}
+
+/**
+ * WorkPanel「待办」：与 StickyTaskBar 同源展示，但用户已发出下一轮且尚未出现
+ * 新的 todo_write 时必须清空旧清单（Trae：刷新掉），禁止把已 promote 的完成态
+ * 因 liveness→active 打回 raw pending 空心圆。
+ */
+export function resolveWorkPanelTodoFromMessages(
+  messages: Message[],
+  liveness: "active" | "stalled" | "idle" = "idle",
+  executionState?: string,
+): ParsedTodo | null {
+  const displayed = resolveDisplayedTodoFromMessages(messages, liveness, executionState);
+  if (!displayed) return null;
+  if (isTodoSnapshotSuperseded(messages, displayed.index)) return null;
+  return displayed.parsed;
 }
 
 /**

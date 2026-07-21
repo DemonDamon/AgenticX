@@ -11731,6 +11731,8 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
             onConfirmResolveSubAgent={(agentId, approved) =>
               void resolvePaneSubAgentConfirm(agentId, approved)
             }
+            todoLiveness={taskLiveness}
+            todoExecutionState={sessionExecutionState}
           />
         </div>
       ) : null}
@@ -11848,6 +11850,8 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
                 onConfirmResolveSubAgent={(agentId, approved) =>
                   void resolvePaneSubAgentConfirm(agentId, approved)
                 }
+                todoLiveness={taskLiveness}
+                todoExecutionState={sessionExecutionState}
               />
             </div>
           ) : null}

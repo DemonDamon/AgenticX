@@ -41,7 +41,15 @@ Suggested-Impl-Model: cursor-grok-4.5
 | 用户发下一轮、尚无新 todo_write | **继续展示上一轮清单**（不空） | 因 superseded 隐藏，避免幽灵卡 |
 | 新一轮写出新 todo_write | **整栏替换（reset）**，不累积旧项 | 展示新清单 |
 
-实现：侧栏只用 `pickLatestTodoFromMessages`，**不**套 `isTodoSnapshotSuperseded` / ghost `hasAnyProgress`。
+实现：侧栏经 `resolveWorkPanelTodoFromMessages`（内部用 `resolveDisplayedTodoFromMessages` +
+`isTodoSnapshotSuperseded`），`todoLiveness` / `todoExecutionState` 从 ChatPane 注入。
+
+**状态不同步修复（2026-07-22）**：此前侧栏只读 raw `todo_write`，模型若只写一次全 pending
+清单、收尾忘记再更新，左侧 StickyTaskBar 会 promote 成全完成，右侧一直空心圆——现已同源。
+
+**新轮次「完成态被打回空心圆」修复（2026-07-22）**：用户发出下一轮后 liveness→active，
+promote 失效会把旧清单打回 raw pending；Trae 语义应**刷新清空**旧清单，等新 `todo_write`
+再填，禁止保留旧项并重置勾选。
 
 ## AC
 
