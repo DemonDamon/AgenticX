@@ -736,6 +736,22 @@ def _build_followup_questions_block() -> str:
     )
 
 
+def _meta_prompt_has_tool_search() -> bool:
+    """Whether Studio tool surface currently registers ``tool_search``."""
+    try:
+        from agenticx.cli.agent_tools import STUDIO_TOOLS
+
+        for tool in STUDIO_TOOLS:
+            if not isinstance(tool, dict):
+                continue
+            fn = tool.get("function")
+            if isinstance(fn, dict) and str(fn.get("name") or "") == "tool_search":
+                return True
+    except Exception:
+        return False
+    return False
+
+
 def build_meta_agent_system_prompt(
     session: StudioSession,
     *,
@@ -887,8 +903,13 @@ def build_meta_agent_system_prompt(
         "再分章追加并同步 `todo_write`；禁止一次写整页。\n"
         "- 需要用户决策时，明确给出选项（A/B/C），但仅限业务方案选择。\n\n"
         "## MCP 工具管理闭环\n"
-        "- 当任务需要 MCP 能力时，先调用 `list_mcps` 查看配置与连接状态。\n"
-        "- `mcp_call.tool_name` 必须来自 `list_mcps` 返回的 `mcp_tool_names`，禁止臆造工具名（如 `web.fetch.*`、`list_tools`）。\n"
+        + (
+            "- 当可用工具包含 `tool_search` 时：优先用 `tool_search` 检索延迟加载的 MCP/内置工具；"
+            "命中后完整 schema 在下一轮才可调用。`list_mcps` → `mcp_call` 仍为兼容路径。\n"
+            if _meta_prompt_has_tool_search()
+            else "- 当任务需要 MCP 能力时，先调用 `list_mcps` 查看配置与连接状态。\n"
+        )
+        + "- `mcp_call.tool_name` 必须来自 `list_mcps` 返回的 `mcp_tool_names`（或 `tool_search` 命中的公开名），禁止臆造工具名（如 `web.fetch.*`、`list_tools`）。\n"
         "- `mcp_call` 参数对象字段应使用 `arguments`（兼容 `args`）；调用前先核对目标工具所需字段。\n"
         "- 若存在配置但未连接，先明确告知用户需在 MCP 管理接口完成连接。\n"
         "- 若用户明确提供外部 mcp.json 路径，先调用 `mcp_import` 导入，再连接。\n"

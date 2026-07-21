@@ -15,6 +15,10 @@ TOOL_SEARCH_STATE_KEY = "__tool_search_state_v1__"
 TOOL_SEARCH_TOOL_NAME = "tool_search"
 TOOL_SEARCH_MAX_LOADED = 24
 DEFAULT_AUTO_SCHEMA_TOKEN_THRESHOLD = 6000
+TOOL_NOT_YET_LOADED_TEMPLATE = (
+    "Tool '{name}' schema is not loaded yet. "
+    "Call tool_search and retry on the next round."
+)
 
 CORE_ALWAYS_LOAD_TOOLS: frozenset[str] = frozenset(
     {
@@ -581,3 +585,34 @@ def known_unloaded_names(ctx: ToolSearchRuntimeContext) -> set[str]:
         if d.kind == "mcp" or d.name in BUILTIN_DEFER_ALLOWLIST:
             out.add(d.name)
     return out
+
+
+def is_tool_pending_next_round(
+    ctx: ToolSearchRuntimeContext,
+    name: str,
+    *,
+    allowed_tool_names: set[str],
+    full_openai_tools: list[dict],
+) -> bool:
+    """True when ``name`` is a deferred/MCP catalog tool missing from this round's projection.
+
+    Includes the same-batch case: ``tool_search`` already marked the id loaded, but
+    schemas only enter ``tools[]`` on the *next* model round.
+    """
+    name = str(name or "").strip()
+    if not name or name in allowed_tool_names:
+        return False
+    tokens = estimate_schema_tokens(list(full_openai_tools))
+    if not should_apply_tool_search(
+        ctx.config,
+        full_pool_schema_tokens=tokens,
+        tool_search_allowed=ctx.tool_search_allowed,
+    ):
+        return False
+    for d in ctx.catalog.descriptors:
+        if d.name != name:
+            continue
+        if d.always_load or d.name in CORE_ALWAYS_LOAD_TOOLS:
+            return False
+        return d.kind == "mcp" or d.name in BUILTIN_DEFER_ALLOWLIST
+    return False

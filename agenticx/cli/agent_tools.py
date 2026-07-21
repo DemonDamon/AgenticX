@@ -822,6 +822,30 @@ STUDIO_TOOLS: List[Dict[str, Any]] = [
     {
         "type": "function",
         "function": {
+            "name": "tool_search",
+            "description": (
+                "Search deferred tools (builtin and connected MCP) by keyword. "
+                "Matched tool schemas become available on the NEXT model round. "
+                "Use select:<exact_name> for exact match; +token requires token."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "query": {"type": "string"},
+                    "max_results": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "maximum": 20,
+                    },
+                },
+                "required": ["query"],
+                "additionalProperties": False,
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "mcp_import",
             "description": (
                 "Import MCP server configs from external mcp.json into AgenticX workspace config. "
@@ -4902,6 +4926,52 @@ def _check_mcp_repeat_guard(session: StudioSession, tool_name: str, args_obj: Di
     )
 
 
+def _tool_tool_search(
+    arguments: Dict[str, Any],
+    session: StudioSession,
+    *,
+    runtime_tool_context: Optional[Any] = None,
+) -> str:
+    """Run local ToolSearch ranking; schemas load on the next model round."""
+    if runtime_tool_context is None:
+        return json.dumps(
+            {"error": "tool_search unavailable in this context"},
+            ensure_ascii=False,
+        )
+    from agenticx.runtime.tool_search import (
+        apply_search,
+        dump_state_to_scratchpad,
+    )
+
+    query = str((arguments or {}).get("query") or "").strip()
+    if not query:
+        return json.dumps({"error": "query is required"}, ensure_ascii=False)
+    max_results_raw = (arguments or {}).get("max_results", 5)
+    try:
+        max_results = int(max_results_raw)
+    except (TypeError, ValueError):
+        max_results = 5
+    new_ctx, result = apply_search(
+        runtime_tool_context,
+        query,
+        max_results=max_results,
+    )
+    # Mutate turn-local context so the next round projection sees loaded ids.
+    try:
+        runtime_tool_context.state = new_ctx.state
+    except Exception:
+        pass
+    scratchpad = getattr(session, "scratchpad", None)
+    if not isinstance(scratchpad, dict):
+        scratchpad = {}
+        try:
+            setattr(session, "scratchpad", scratchpad)
+        except Exception:
+            pass
+    dump_state_to_scratchpad(scratchpad, new_ctx.state)
+    return json.dumps(result, ensure_ascii=False)
+
+
 async def _tool_mcp_call_async(arguments: Dict[str, Any], session: StudioSession) -> str:
     if session.mcp_hub is None:
         return "ERROR: no MCP hub connected"
@@ -7343,6 +7413,7 @@ async def dispatch_tool_async(
     team_manager: Optional[Any] = None,
     clarify_gate: Optional[ClarifyGate] = None,
     is_unattended: bool = False,
+    runtime_tool_context: Optional[Any] = None,
 ) -> str:
     """Dispatch one tool call asynchronously and return result text."""
     arguments = _repair_malformed_file_tool_arguments(name, arguments)
@@ -7441,6 +7512,8 @@ async def dispatch_tool_async(
             return await _tool_desktop_keyboard_type(arguments, session, confirm_gate=gate, emit_event=event_callback)
         if name == "mcp_call":
             return await _tool_mcp_call_async(arguments, session)
+        if name == "tool_search":
+            return _tool_tool_search(arguments, session, runtime_tool_context=runtime_tool_context)
         if name == "mcp_import":
             return _tool_mcp_import(arguments, session)
         if name == "skill_use":

@@ -2064,24 +2064,46 @@ class AgentRuntime:
         self._exploratory_error_streak = 0
 
         current_system_prompt = system_prompt or _build_agent_system_prompt(session)
-        active_tools: Sequence[Dict[str, Any]] = (
+        full_tool_pool: list[Dict[str, Any]] = list(
             studio_tools_for_session(session) if tools is None else tools
         )
         from agenticx.runtime.context_budget import maybe_compact_meta_turn_context
+        from agenticx.runtime.tool_search import (
+            TOOL_NOT_YET_LOADED_TEMPLATE,
+            is_tool_pending_next_round,
+            project_tools_for_round,
+        )
+        from agenticx.runtime.tool_search_runtime import build_runtime_context
 
         compact_prompt, compact_tools, compact_notice = maybe_compact_meta_turn_context(
             session,
             system_prompt=current_system_prompt,
-            tools=list(active_tools),
+            tools=list(full_tool_pool),
         )
         if compact_notice:
             current_system_prompt = compact_prompt
-            active_tools = compact_tools
-        allowed_tool_names = {
-            str(tool.get("function", {}).get("name", "")).strip()
-            for tool in active_tools
-            if isinstance(tool, dict)
-        }
+            full_tool_pool = list(compact_tools)
+
+        ts_ctx = build_runtime_context(
+            session=session,
+            full_openai_tools=full_tool_pool,
+            mcp_descriptors=(),
+        )
+
+        def _project_active_tools() -> tuple[list[Dict[str, Any]], set[str]]:
+            projected = project_tools_for_round(
+                ts_ctx,
+                full_openai_tools=full_tool_pool,
+            )
+            names = {
+                str(tool.get("function", {}).get("name", "")).strip()
+                for tool in projected
+                if isinstance(tool, dict)
+            }
+            names.discard("")
+            return list(projected), names
+
+        active_tools, allowed_tool_names = _project_active_tools()
         # KB "always" mode: force knowledge_search on the first round so weak
         # function-calling models (e.g. qwen-plus) actually invoke the tool
         # instead of narrating fake retrieval results in prose.
@@ -2362,6 +2384,8 @@ class AgentRuntime:
             if await _check_should_stop():
                 yield RuntimeEvent(type=EventType.ERROR.value, data={"text": STOP_MESSAGE}, agent_id=agent_id)
                 return
+            # Re-project each round so tool_search loads take effect next round.
+            active_tools, allowed_tool_names = _project_active_tools()
             if self._pending_loop_nudge:
                 nudge_text = self._pending_loop_nudge
                 self._pending_loop_nudge = None
@@ -3217,15 +3241,16 @@ class AgentRuntime:
                         self._forced_budget_compact_this_turn = True
                         compact_prompt, compact_tools, compact_notice = force_compact_meta_turn_context(
                             session,
-                            tools=active_tools,
+                            tools=full_tool_pool,
                         )
                         current_system_prompt = compact_prompt
-                        active_tools = compact_tools
-                        allowed_tool_names = {
-                            str(tool.get("function", {}).get("name", "")).strip()
-                            for tool in active_tools
-                            if isinstance(tool, dict)
-                        }
+                        full_tool_pool = list(compact_tools)
+                        ts_ctx = build_runtime_context(
+                            session=session,
+                            full_openai_tools=full_tool_pool,
+                            mcp_descriptors=(),
+                        )
+                        active_tools, allowed_tool_names = _project_active_tools()
                         if messages and str(messages[0].get("role", "")).lower() == "system":
                             messages[0] = {"role": "system", "content": current_system_prompt}
                         yield RuntimeEvent(
@@ -3739,7 +3764,15 @@ class AgentRuntime:
                     _record_tool_turn_outcome("failed")
                     continue
                 if tool_name not in allowed_tool_names:
-                    denied_message = f"工具 '{tool_name}' 不在当前允许列表中，已拒绝执行。"
+                    if is_tool_pending_next_round(
+                        ts_ctx,
+                        tool_name,
+                        allowed_tool_names=allowed_tool_names,
+                        full_openai_tools=full_tool_pool,
+                    ):
+                        denied_message = TOOL_NOT_YET_LOADED_TEMPLATE.format(name=tool_name)
+                    else:
+                        denied_message = f"工具 '{tool_name}' 不在当前允许列表中，已拒绝执行。"
                     messages.append(
                         {
                             "role": "tool",
@@ -4067,6 +4100,7 @@ class AgentRuntime:
                             team_manager=effective_tm,
                             clarify_gate=self.clarify_gate,
                             is_unattended=self.is_unattended,
+                            runtime_tool_context=ts_ctx,
                         )
                     )
 
