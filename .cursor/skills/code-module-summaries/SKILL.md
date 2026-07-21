@@ -210,22 +210,60 @@ you orchestrate them using the `dispatching-parallel-agents` skill. The
 per-module `summary_path` isolation is what makes this safe — each subagent
 writes exactly one file and shares no state.
 
+#### 6.1 Subagent model selection (mandatory, cost-first)
+
+**Never silently inherit the parent chat's model for batch subagents.**
+Conclusion writing is mostly structured code reading + Markdown drafting; a
+top-tier parent model (e.g. Opus) is usually wasteful when multiplied across
+dozens of modules.
+
+Before the first `Task` dispatch in a batch run:
+
+1. Ask the user which model slug to use for the subagents (the `model`
+   parameter on `Task`). Present a short recommendation table; do not invent
+   slugs outside the currently available Task model list.
+2. Wait for an explicit choice (or an explicit "use your recommended
+   default"). Do not start parallel generation until confirmed.
+3. Pass that slug as `model` on every summary-writing subagent in the run.
+   Parent-side `plan` / `checkpoint` / registry edits stay on the parent
+   model; only the per-module Markdown writers use the chosen cheap model.
+4. Optional: allow a two-tier split if the user wants it — cheap default for
+   stubs/small packages, a mid-tier model only for a few heavy modules the
+   user names. Do not up-tier the whole batch without asking.
+
+Recommended defaults (prefer the cheapest tier that still produces accurate
+maintainer docs; update names when the Task model list changes):
+
+| Module kind | Suggested `Task` model | Why |
+|---|---|---|
+| Default / most modules (CRUD packages, stubs, thin apps, deploy notes) | `composer-2.5-fast` | Lowest cost; enough for template-shaped conclusions |
+| Code-heavy but bounded modules (single service, clear entry points) | `kimi-k2.7-code` or `glm-5.2-max` | Cheap code-specialist; good when symbol/path fidelity matters |
+| Few high-risk / cross-stack modules the user flags (e.g. gateway + policy + IAM together) | `gpt-5.6-sol-medium` or `claude-sonnet-5-thinking-medium` | Mid-tier reasoning only where cheap models keep missing contracts |
+| Never the default for batch writers | Opus / other top-tier parent models | Reserve for parent planning/review, not N-way parallel drafting |
+
+If the user declines to pick, use **`composer-2.5-fast` for the whole batch**
+and state that choice in the final report. Re-ask before switching tiers mid-run.
+
+#### 6.2 Dispatch steps
+
 1. As the parent, run `plan` (full or a selected set) at a single frozen
    `target_commit`. Confirm zero blockers, then record each module's
    `checkpoint_token`, `summary_sha256_at_plan`, and `summary_path`.
-2. For every `new`/`changed` module, dispatch one subagent with a
-   self-contained prompt that includes: the module `roots`, the frozen
+2. Complete §6.1 (user-chosen or confirmed-default subagent model) before any
+   parallel `Task` calls.
+3. For every `new`/`changed` module, dispatch one subagent with that `model`
+   and a self-contained prompt that includes: the module `roots`, the frozen
    `target_commit` (instruct it to read exact versions via
    `git show <TARGET>:path`), the exact output `summary_path`, the summary
    template (REFERENCE §7), the repository's existing conclusion style, and a
    hard boundary: write only its own summary file — never touch other
    summaries, `registry.json`, `state/`, or the `index_path` overview.
-3. When all subagents return, the parent runs `checkpoint` for each module with
+4. When all subagents return, the parent runs `checkpoint` for each module with
    that module's own token and hash. A failed or unverified module is left
    without a checkpoint so the next run still reports it as `new`/`changed`.
-4. `unchanged` modules get no subagent; the parent checkpoints them directly
+5. `unchanged` modules get no subagent; the parent checkpoints them directly
    (with `--summary-unchanged` only after review) or skips them.
-5. Keep the overview/index file (`INDEX.md`, or the custom `index_path`
+6. Keep the overview/index file (`INDEX.md`, or the custom `index_path`
    README) as a final parent-authored step after the module summaries settle,
    never inside a module subagent.
 
@@ -285,3 +323,6 @@ Report:
 - Rebuilding all summaries because one module changed.
 - Overwriting manually edited Markdown without explicit acceptance.
 - Guessing after force-push, shallow history, module split, or missing state.
+- Dispatching batch summary subagents on the parent’s expensive model
+  (e.g. Opus) without asking — always complete §6.1 first; default writers to
+  `composer-2.5-fast` unless the user picks another slug.

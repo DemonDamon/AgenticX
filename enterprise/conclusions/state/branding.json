@@ -1,0 +1,12 @@
+{
+  "schema_version": 1,
+  "module_id": "branding",
+  "generation": "69538ea2b64f4f52aac079dee613f22c",
+  "mapping_revision": 1,
+  "baseline_commit": "8ebec3b5b2baaf7f0f76e2e8c2a2dcd5e811d3da",
+  "baseline_tree": "9937fea679618cc28fa8e4897053b5ef2b43d280",
+  "source_fingerprint": "sha256:d67f95346f37d8810ef0d152dde2fd2b4c3b85793a3527ddec2eaf12eb3257ea",
+  "summary_path": "enterprise/conclusions/packages/branding_conclusion.md",
+  "summary_sha256": "sha256:a0ac8753eb1b71f04338bae1e83ea3db6b928a21e41459dc5fe6f83f2a27ee0f",
+  "updated_at": "2026-07-21T07:50:34.378308+00:00"
+}

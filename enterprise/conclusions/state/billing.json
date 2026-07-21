@@ -1,0 +1,12 @@
+{
+  "schema_version": 1,
+  "module_id": "billing",
+  "generation": "f3aa816a62bb4b02b19dba1dbd73b870",
+  "mapping_revision": 1,
+  "baseline_commit": "8ebec3b5b2baaf7f0f76e2e8c2a2dcd5e811d3da",
+  "baseline_tree": "9937fea679618cc28fa8e4897053b5ef2b43d280",
+  "source_fingerprint": "sha256:06aa3858dc0dcee2525aa2b55a27412544f0fdc0cf221508764ebed83e05200e",
+  "summary_path": "enterprise/conclusions/features/billing_conclusion.md",
+  "summary_sha256": "sha256:c2e38fa091d3ac02c2ebc84547a78aa51caca5f7fc77219fcb21fcca88cad4e5",
+  "updated_at": "2026-07-21T07:39:22.514759+00:00"
+}

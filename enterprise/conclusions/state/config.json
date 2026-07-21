@@ -1,0 +1,12 @@
+{
+  "schema_version": 1,
+  "module_id": "config",
+  "generation": "bbf90f903c7945399d4c564b79c068ce",
+  "mapping_revision": 1,
+  "baseline_commit": "8ebec3b5b2baaf7f0f76e2e8c2a2dcd5e811d3da",
+  "baseline_tree": "9937fea679618cc28fa8e4897053b5ef2b43d280",
+  "source_fingerprint": "sha256:a6b9435ccdecbcb228beb71b6fbab8b5d6c0fb79a24c3ba978da924c1310343e",
+  "summary_path": "enterprise/conclusions/packages/config_conclusion.md",
+  "summary_sha256": "sha256:5a5e1bc38274893e5e7da122145861acbb7284558ec04367739bbadc8f3c7790",
+  "updated_at": "2026-07-21T07:50:32.897121+00:00"
+}

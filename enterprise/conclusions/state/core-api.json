@@ -1,0 +1,12 @@
+{
+  "schema_version": 1,
+  "module_id": "core-api",
+  "generation": "f388e79b4add4a30821cb980383983c8",
+  "mapping_revision": 1,
+  "baseline_commit": "8ebec3b5b2baaf7f0f76e2e8c2a2dcd5e811d3da",
+  "baseline_tree": "9937fea679618cc28fa8e4897053b5ef2b43d280",
+  "source_fingerprint": "sha256:1905761f0912b20e97632085f9cd65ed85b536e45ea329525340d1a61dc82f8e",
+  "summary_path": "enterprise/conclusions/packages/core-api_conclusion.md",
+  "summary_sha256": "sha256:2c8ce0f995fd5a433d358b3331874fbf9ef6a6060696c3d4cd346f7f5c99636a",
+  "updated_at": "2026-07-21T07:46:59.277115+00:00"
+}

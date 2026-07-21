@@ -1,0 +1,12 @@
+{
+  "schema_version": 1,
+  "module_id": "policy",
+  "generation": "f15db67bc79645469f3c199b19b65418",
+  "mapping_revision": 1,
+  "baseline_commit": "8ebec3b5b2baaf7f0f76e2e8c2a2dcd5e811d3da",
+  "baseline_tree": "9937fea679618cc28fa8e4897053b5ef2b43d280",
+  "source_fingerprint": "sha256:3630998bf15d03a8892449daeb74900ee4edef9b8da84cde40dbd23d04b3015c",
+  "summary_path": "enterprise/conclusions/features/policy_conclusion.md",
+  "summary_sha256": "sha256:5173ab0e77be1959e0ac8aa90b70204cd4ef4d1c60fbcae3da42d5b054340d5d",
+  "updated_at": "2026-07-21T07:39:23.238169+00:00"
+}

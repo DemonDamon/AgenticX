@@ -1,0 +1,12 @@
+{
+  "schema_version": 1,
+  "module_id": "plugins-overview",
+  "generation": "67bbb3c15d40486c98b0646c9d0c0d04",
+  "mapping_revision": 1,
+  "baseline_commit": "8ebec3b5b2baaf7f0f76e2e8c2a2dcd5e811d3da",
+  "baseline_tree": "9937fea679618cc28fa8e4897053b5ef2b43d280",
+  "source_fingerprint": "sha256:b6b2ab10054b9023ab96958d6ee87fffbc53148d9ba4a841f7dcc2d54f5be82b",
+  "summary_path": "enterprise/conclusions/plugins/plugins_overview_conclusion.md",
+  "summary_sha256": "sha256:2eae8d964b64b609557bc886adf7208f3acc0b15c42d4d64d2386b088835ddb3",
+  "updated_at": "2026-07-21T07:50:35.045066+00:00"
+}

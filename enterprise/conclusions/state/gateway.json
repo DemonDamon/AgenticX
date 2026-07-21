@@ -1,0 +1,12 @@
+{
+  "schema_version": 1,
+  "module_id": "gateway",
+  "generation": "efb4b6e2c7c740569a97afd78ef8a5ad",
+  "mapping_revision": 1,
+  "baseline_commit": "8ebec3b5b2baaf7f0f76e2e8c2a2dcd5e811d3da",
+  "baseline_tree": "9937fea679618cc28fa8e4897053b5ef2b43d280",
+  "source_fingerprint": "sha256:9323add9848c3242fb63c61c2cf73630f00e840cf98293ab12d0d5f604b9f5b7",
+  "summary_path": "enterprise/conclusions/apps/gateway_conclusion.md",
+  "summary_sha256": "sha256:0ee630b7494bbc6e00fd6a4967ce687f96db01977e4f9a8b322a17c04f9ade31",
+  "updated_at": "2026-07-21T07:36:28.812267+00:00"
+}

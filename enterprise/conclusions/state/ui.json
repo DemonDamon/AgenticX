@@ -1,0 +1,12 @@
+{
+  "schema_version": 1,
+  "module_id": "ui",
+  "generation": "f70536051ab24cb5b234a32488c092b1",
+  "mapping_revision": 1,
+  "baseline_commit": "8ebec3b5b2baaf7f0f76e2e8c2a2dcd5e811d3da",
+  "baseline_tree": "9937fea679618cc28fa8e4897053b5ef2b43d280",
+  "source_fingerprint": "sha256:c9758c762931177a6dc0d8bb1562f37d67c162dc6a6287b70f941236d28bc541",
+  "summary_path": "enterprise/conclusions/packages/ui_conclusion.md",
+  "summary_sha256": "sha256:d70d477d67bc1bfa5412366758fa81160b3329230ce2e1fe766874af8b1241aa",
+  "updated_at": "2026-07-21T07:46:57.528383+00:00"
+}

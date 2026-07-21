@@ -1,0 +1,12 @@
+{
+  "schema_version": 1,
+  "module_id": "telemetry",
+  "generation": "81352714ec33420eba80d1f910f189e4",
+  "mapping_revision": 1,
+  "baseline_commit": "8ebec3b5b2baaf7f0f76e2e8c2a2dcd5e811d3da",
+  "baseline_tree": "9937fea679618cc28fa8e4897053b5ef2b43d280",
+  "source_fingerprint": "sha256:39b6d3efcae7106f0ca7d0ebbf0c9eeba12f616e45d76a7f1de90c0e49689c4f",
+  "summary_path": "enterprise/conclusions/packages/telemetry_conclusion.md",
+  "summary_sha256": "sha256:294b46221f51426a9617e26fc5cef265567800ff109b8871a6756c1306c77a83",
+  "updated_at": "2026-07-21T07:50:33.635531+00:00"
+}

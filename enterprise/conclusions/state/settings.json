@@ -1,0 +1,12 @@
+{
+  "schema_version": 1,
+  "module_id": "settings",
+  "generation": "aa2b944cfd094419ae3fcc169dc4e332",
+  "mapping_revision": 1,
+  "baseline_commit": "8ebec3b5b2baaf7f0f76e2e8c2a2dcd5e811d3da",
+  "baseline_tree": "9937fea679618cc28fa8e4897053b5ef2b43d280",
+  "source_fingerprint": "sha256:aa70813480c446e344fe4b07e18470a736825264ac920818ffba5cff5bb90eec",
+  "summary_path": "enterprise/conclusions/features/settings_conclusion.md",
+  "summary_sha256": "sha256:6a080e2ce9fabc713adb86ef871a12cc79f385b47814e7607c2f6732e4e2c614",
+  "updated_at": "2026-07-21T07:46:54.186287+00:00"
+}

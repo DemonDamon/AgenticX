@@ -1,0 +1,12 @@
+{
+  "schema_version": 1,
+  "module_id": "policy-engine",
+  "generation": "2b6cef5c478a4a348020d881779d3fd9",
+  "mapping_revision": 1,
+  "baseline_commit": "8ebec3b5b2baaf7f0f76e2e8c2a2dcd5e811d3da",
+  "baseline_tree": "9937fea679618cc28fa8e4897053b5ef2b43d280",
+  "source_fingerprint": "sha256:77c7507d518843e4f5cf1b36aae6c31f0d00d17fe8b4888520a23df022ab0230",
+  "summary_path": "enterprise/conclusions/packages/policy-engine_conclusion.md",
+  "summary_sha256": "sha256:ce662206f04d5c3ad7000daf1ca174b07686c9b25e8f64dd0e64e707ca74cf92",
+  "updated_at": "2026-07-21T07:46:58.263260+00:00"
+}

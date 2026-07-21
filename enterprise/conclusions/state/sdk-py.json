@@ -1,0 +1,12 @@
+{
+  "schema_version": 1,
+  "module_id": "sdk-py",
+  "generation": "44abafa8b3fb402f80adcedac9c18cb5",
+  "mapping_revision": 1,
+  "baseline_commit": "8ebec3b5b2baaf7f0f76e2e8c2a2dcd5e811d3da",
+  "baseline_tree": "9937fea679618cc28fa8e4897053b5ef2b43d280",
+  "source_fingerprint": "sha256:b7fba798c8e5ae8a5be69603351da6f14f83889c452fc48d9aa89499ec68fa77",
+  "summary_path": "enterprise/conclusions/packages/sdk-py_conclusion.md",
+  "summary_sha256": "sha256:85d131e7db80de58182d2675b9ef726fde6c2cfc9b95366453824f633b71a77c",
+  "updated_at": "2026-07-21T07:50:32.177479+00:00"
+}

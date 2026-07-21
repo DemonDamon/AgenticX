@@ -1,0 +1,12 @@
+{
+  "schema_version": 1,
+  "module_id": "iam",
+  "generation": "358e72fc948a4a3cb879c119d96a40ae",
+  "mapping_revision": 1,
+  "baseline_commit": "8ebec3b5b2baaf7f0f76e2e8c2a2dcd5e811d3da",
+  "baseline_tree": "9937fea679618cc28fa8e4897053b5ef2b43d280",
+  "source_fingerprint": "sha256:ea242e0b205ce4f4724280937e79b763613676e919232f07968bcb16b133c6e1",
+  "summary_path": "enterprise/conclusions/features/iam_conclusion.md",
+  "summary_sha256": "sha256:6caf6a5ab82526532e4eca99ff5c2fc64679cf36544f52813d4db857011d12b5",
+  "updated_at": "2026-07-21T07:39:20.441307+00:00"
+}

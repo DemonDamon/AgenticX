@@ -1,0 +1,12 @@
+{
+  "schema_version": 1,
+  "module_id": "deploy",
+  "generation": "27b68832438c417884ee3a4f0bf40333",
+  "mapping_revision": 1,
+  "baseline_commit": "8ebec3b5b2baaf7f0f76e2e8c2a2dcd5e811d3da",
+  "baseline_tree": "9937fea679618cc28fa8e4897053b5ef2b43d280",
+  "source_fingerprint": "sha256:c4a23b522c84624bbf2b59bbef426e1f6de9f71b9c716f75272891856ac90c59",
+  "summary_path": "enterprise/conclusions/deploy/deploy_conclusion.md",
+  "summary_sha256": "sha256:250b924860c0aa76d21a5f8fe0bd4a0a62e05adfb911084900e82b3cf0ead17e",
+  "updated_at": "2026-07-21T07:50:35.881515+00:00"
+}
