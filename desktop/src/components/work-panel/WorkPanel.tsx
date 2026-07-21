@@ -58,6 +58,8 @@ import {
 } from "../workspace/html-preview-device";
 import { SessionArtifactList } from "./SessionArtifactList";
 import { SessionReferenceList } from "./SessionReferenceList";
+import { SessionTodoList } from "./SessionTodoList";
+import { pickLatestTodoFromMessages } from "../TodoUpdateCard";
 import { collectSessionReferences } from "../../utils/session-references";
 
 /**
@@ -582,6 +584,18 @@ export function WorkPanel({
     [paneMessages],
   );
 
+  /**
+   * Trae Work 语义（侧栏只读）：
+   * - 同轮：始终展示最新一条 todo_write，状态随工具调用更新
+   * - 新一轮若写出新待办：自然整栏替换（reset），不累积历史清单
+   * - 用户已发下一轮但模型尚未 todo_write：继续展示上一轮清单，不因
+   *   superseded 清空（与 StickyTaskBar 作曲区「新提问后藏卡」区分）
+   */
+  const sessionTodo = useMemo(() => {
+    const snap = pickLatestTodoFromMessages(paneMessages);
+    return snap?.parsed ?? null;
+  }, [paneMessages]);
+
   const activeBrowser = useMemo(
     () => browserTabs.find((t) => t.id === activeBrowserId) ?? null,
     [browserTabs, activeBrowserId]
@@ -793,6 +807,15 @@ export function WorkPanel({
       setOpenSections((prev) => (!prev.refs ? prev : { ...prev, refs: false }));
     }
   }, [referenceBundle.isEmpty]);
+
+  const hasSessionTodo = !!sessionTodo;
+  useEffect(() => {
+    if (hasSessionTodo) {
+      setOpenSections((prev) => (prev.todo ? prev : { ...prev, todo: true }));
+    } else {
+      setOpenSections((prev) => (!prev.todo ? prev : { ...prev, todo: false }));
+    }
+  }, [hasSessionTodo]);
 
   useEffect(() => {
     setExtraArtifactPaths([]);
@@ -1371,13 +1394,17 @@ export function WorkPanel({
               open={openSections.todo}
               onToggle={toggleSection}
               scrollBody
-              hasContent={false}
+              hasContent={!!sessionTodo}
             >
-              <EmptyBlock
-                icon={<CheckSquare className="h-9 w-9" strokeWidth={1.3} />}
-                title="暂无待办"
-                subtitle="复杂任务的进展会显示在这里"
-              />
+              {!sessionTodo ? (
+                <EmptyBlock
+                  icon={<CheckSquare className="h-9 w-9" strokeWidth={1.3} />}
+                  title="暂无待办"
+                  subtitle="复杂任务的进展会显示在这里"
+                />
+              ) : (
+                <SessionTodoList todo={sessionTodo} />
+              )}
             </Section>
 
             <Section

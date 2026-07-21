@@ -1,4 +1,5 @@
 import { useMemo, useState } from "react";
+import type { Message } from "../store";
 
 export type TodoStatus = "pending" | "in_progress" | "completed";
 
@@ -13,6 +14,35 @@ export type ParsedTodo = {
   completed: number;
   total: number;
 };
+
+/**
+ * Find the latest todo snapshot from pane messages.
+ *
+ * Priority:
+ *   1. role=tool && toolName="todo_write" — canonical signal (live SSE or history)
+ *   2. Any message whose content parses as a todo render — fallback when toolName lost
+ */
+export function pickLatestTodoFromMessages(
+  messages: Message[],
+): { parsed: ParsedTodo; index: number } | null {
+  for (let i = messages.length - 1; i >= 0; i -= 1) {
+    const m = messages[i];
+    if (!m) continue;
+    if (m.role === "tool" && (m.toolName ?? "").trim() === "todo_write") {
+      const parsed = parseTodoMessage(typeof m.content === "string" ? m.content : "");
+      if (parsed) return { parsed, index: i };
+    }
+  }
+  for (let i = messages.length - 1; i >= 0; i -= 1) {
+    const m = messages[i];
+    if (!m) continue;
+    const content = typeof m.content === "string" ? m.content : "";
+    if (!content) continue;
+    const parsed = parseTodoMessage(content);
+    if (parsed) return { parsed, index: i };
+  }
+  return null;
+}
 
 export function parseTodoMessage(text: string): ParsedTodo | null {
   if (!text) return null;
