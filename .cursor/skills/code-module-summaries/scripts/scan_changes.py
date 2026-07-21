@@ -48,6 +48,7 @@ class Context:
     object_format: str
     layout: str
     summary_name: str
+    index_path: str | None
     exclude_paths: tuple[str, ...]
     modules: tuple[Module, ...]
 
@@ -114,8 +115,10 @@ def load_context(repo_arg: str, control_arg: str) -> Context:
     if raw_registry.get("schema_version") != SCHEMA_VERSION:
         raise ScanError(f"registry schema_version must be {SCHEMA_VERSION}")
     layout = raw_registry.get("layout")
-    if layout not in {"centralized", "colocated"}:
-        raise ScanError("registry layout must be centralized or colocated")
+    if layout not in {"centralized", "colocated", "custom"}:
+        raise ScanError(
+            "registry layout must be centralized, colocated, or custom"
+        )
     summary_name = raw_registry.get("summary_name", "MODULE_SUMMARY.md")
     if (
         not isinstance(summary_name, str)
@@ -123,6 +126,14 @@ def load_context(repo_arg: str, control_arg: str) -> Context:
         or PurePosixPath(summary_name).name != summary_name
     ):
         raise ScanError("summary_name must be a Markdown filename")
+    raw_index_path = raw_registry.get("index_path")
+    if raw_index_path is None:
+        index_path: str | None = None
+    else:
+        index_path = normalize_repo_path(raw_index_path, "index_path")
+        if not index_path.endswith(".md"):
+            raise ScanError("index_path must be a Markdown file")
+        path_inside((repo / index_path).resolve(), repo, "index_path")
     raw_exclude_paths = raw_registry.get("exclude_paths", [])
     if not isinstance(raw_exclude_paths, list):
         raise ScanError("exclude_paths must be an array")
@@ -243,7 +254,7 @@ def load_context(repo_arg: str, control_arg: str) -> Context:
                     f"centralized summary for {module_id} must be "
                     f"{expected_summary_path}"
                 )
-        else:
+        elif layout == "colocated":
             if primary_root is None:
                 if len(roots) != 1:
                     raise ScanError(
@@ -263,6 +274,11 @@ def load_context(repo_arg: str, control_arg: str) -> Context:
                 raise ScanError(
                     f"colocated summary for {module_id} must be "
                     f"{expected_summary_path}"
+                )
+        else:
+            if not summary_path.endswith(".md"):
+                raise ScanError(
+                    f"custom summary for {module_id} must be a Markdown file"
                 )
         mapping_revision = raw_module.get("mapping_revision", 1)
         if not isinstance(mapping_revision, int) or mapping_revision < 1:
@@ -290,6 +306,7 @@ def load_context(repo_arg: str, control_arg: str) -> Context:
         object_format=object_format,
         layout=layout,
         summary_name=summary_name,
+        index_path=index_path,
         exclude_paths=exclude_paths,
         modules=tuple(modules),
     )
@@ -323,6 +340,8 @@ def path_matches_prefix(path: str, prefix: str) -> bool:
 
 def managed_path(context: Context, path: str) -> bool:
     if path_matches_prefix(path, context.control_rel):
+        return True
+    if context.index_path is not None and path == context.index_path:
         return True
     return any(path == module.summary_path for module in context.modules)
 

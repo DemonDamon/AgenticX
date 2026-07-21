@@ -841,3 +841,87 @@ def test_retired_module_id_cannot_be_reused_as_active(tmp_path: Path) -> None:
 
     assert result.returncode == 2
     assert "retired module id cannot be reused" in result.stderr
+
+
+def test_custom_layout_allows_arbitrary_nested_summary_path(
+    tmp_path: Path,
+) -> None:
+    repo, control = make_repo(tmp_path)
+    registry_path = control / "registry.json"
+    registry = json.loads(registry_path.read_text(encoding="utf-8"))
+    registry["layout"] = "custom"
+    registry["modules"][0]["summary_path"] = (
+        "docs-conclusions/apps/alpha_conclusion.md"
+    )
+    write(registry_path, json.dumps(registry))
+    write(repo / "packages" / "alpha" / "core.py", "VALUE = 1\n")
+    first = commit(repo, "add alpha", "packages/alpha")
+
+    checkpoint(repo, control, "alpha", first)
+    assert (repo / "docs-conclusions" / "apps" / "alpha_conclusion.md").is_file()
+
+    _, unchanged = plan(repo, control, "alpha")
+    assert unchanged["modules"][0]["status"] == "unchanged"
+
+    write(repo / "packages" / "alpha" / "core.py", "VALUE = 2\n")
+    commit(repo, "change alpha", "packages/alpha/core.py")
+    _, changed = plan(repo, control, "alpha")
+    assert changed["modules"][0]["status"] == "changed"
+
+
+def test_custom_layout_requires_markdown_summary_path(tmp_path: Path) -> None:
+    repo, control = make_repo(tmp_path)
+    registry_path = control / "registry.json"
+    registry = json.loads(registry_path.read_text(encoding="utf-8"))
+    registry["layout"] = "custom"
+    registry["modules"][0]["summary_path"] = (
+        "docs-conclusions/apps/alpha_conclusion.txt"
+    )
+    write(registry_path, json.dumps(registry))
+    write(repo / "packages" / "alpha" / "core.py", "VALUE = 1\n")
+    commit(repo, "add alpha", "packages/alpha")
+
+    result = cli(repo, control, "plan", "--module", "alpha", check=False)
+
+    assert result.returncode == 2
+    assert "must be a Markdown file" in result.stderr
+
+
+def test_custom_index_path_is_managed(tmp_path: Path) -> None:
+    repo, control = make_repo(tmp_path)
+    registry_path = control / "registry.json"
+    registry = json.loads(registry_path.read_text(encoding="utf-8"))
+    registry["layout"] = "custom"
+    registry["index_path"] = "docs-conclusions/README.md"
+    registry["modules"][0]["summary_path"] = (
+        "docs-conclusions/apps/alpha_conclusion.md"
+    )
+    registry["modules"][1]["summary_path"] = (
+        "docs-conclusions/apps/beta_conclusion.md"
+    )
+    write(registry_path, json.dumps(registry))
+    write(repo / "packages" / "alpha" / "core.py", "VALUE = 1\n")
+    write(repo / "packages" / "beta" / "core.py", "VALUE = 1\n")
+    write(repo / "docs-conclusions" / "README.md", "# overview\n")
+    first = commit(
+        repo,
+        "add modules and overview",
+        "packages/alpha",
+        "packages/beta",
+        "docs-conclusions/README.md",
+    )
+    checkpoint(repo, control, "alpha", first)
+    checkpoint(repo, control, "beta", first)
+
+    full = cli(repo, control, "plan")
+    payload = json.loads(full.stdout)
+    assert full.returncode == 0
+    assert "UNASSIGNED_TRACKED_PATHS" not in payload["global_blockers"]
+    assert payload["unassigned_paths"] == []
+
+    write(repo / "docs-conclusions" / "README.md", "# overview v2\n")
+    commit(repo, "update overview", "docs-conclusions/README.md")
+    _, alpha_payload = plan(repo, control, "alpha")
+    _, beta_payload = plan(repo, control, "beta")
+    assert alpha_payload["modules"][0]["status"] == "unchanged"
+    assert beta_payload["modules"][0]["status"] == "unchanged"

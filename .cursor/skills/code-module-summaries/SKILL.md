@@ -25,7 +25,7 @@ Interpret user arguments with this contract:
 ```text
 /code-module-summaries [repo]
   [--output <control-dir>]
-  [--layout centralized|colocated]
+  [--layout centralized|colocated|custom]
   [--update]
   [--module <id-or-exact-name>]...
   [--target <git-ref>]
@@ -44,6 +44,16 @@ Defaults:
 - `--layout`: `centralized`.
 - `--target`: the registry's `tracked_ref`, normally `HEAD`.
 - `--summary-name`: `MODULE_SUMMARY.md` for colocated summaries.
+
+`--layout custom` places each module's Markdown at an arbitrary in-repository
+`.md` path declared per module in `registry.json` (`summary_path`), with no
+fixed directory shape. This is the layout for a shared `conclusions/`-style
+tree, for example `enterprise/conclusions/apps/gateway_conclusion.md`. A custom
+registry may also declare a top-level `index_path` (e.g.
+`enterprise/conclusions/README.md`): a managed overview file the agent
+maintains, excluded from module source diffs and unassigned-path checks. See
+[REFERENCE.md](REFERENCE.md) §9 for exact rules. `centralized` and `colocated`
+are unchanged.
 
 `--module` is repeatable and case-sensitive. It selects exact IDs first, then
 an exact unique name. Never use fuzzy matching for a write operation.
@@ -191,6 +201,33 @@ and the returned token/hash. Rebaseline is not a date-based diff.
 `--refresh-modules`, layout selection, and summary generation are Skill-level
 operations. The helper deliberately implements only deterministic `plan` and
 `checkpoint`; it does not guess repository architecture.
+
+### 6. Batch subagent orchestration
+
+For a whole-repository or large-scope initial generation (many `new`/`changed`
+modules), generate summaries in parallel. The helper never dispatches agents;
+you orchestrate them using the `dispatching-parallel-agents` skill. The
+per-module `summary_path` isolation is what makes this safe — each subagent
+writes exactly one file and shares no state.
+
+1. As the parent, run `plan` (full or a selected set) at a single frozen
+   `target_commit`. Confirm zero blockers, then record each module's
+   `checkpoint_token`, `summary_sha256_at_plan`, and `summary_path`.
+2. For every `new`/`changed` module, dispatch one subagent with a
+   self-contained prompt that includes: the module `roots`, the frozen
+   `target_commit` (instruct it to read exact versions via
+   `git show <TARGET>:path`), the exact output `summary_path`, the summary
+   template (REFERENCE §7), the repository's existing conclusion style, and a
+   hard boundary: write only its own summary file — never touch other
+   summaries, `registry.json`, `state/`, or the `index_path` overview.
+3. When all subagents return, the parent runs `checkpoint` for each module with
+   that module's own token and hash. A failed or unverified module is left
+   without a checkpoint so the next run still reports it as `new`/`changed`.
+4. `unchanged` modules get no subagent; the parent checkpoints them directly
+   (with `--summary-unchanged` only after review) or skips them.
+5. Keep the overview/index file (`INDEX.md`, or the custom `index_path`
+   README) as a final parent-authored step after the module summaries settle,
+   never inside a module subagent.
 
 ## Accuracy Invariants
 
