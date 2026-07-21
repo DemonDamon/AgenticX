@@ -13,6 +13,16 @@ const TASKSPACES_STEP = 1;
 
 export type ToolSearchMode = "off" | "auto" | "always";
 
+const TOOL_SEARCH_MODE_OPTIONS: Array<{
+  value: ToolSearchMode;
+  label: string;
+  title: string;
+}> = [
+  { value: "off", label: "关闭", title: "与旧版一致：每轮暴露完整工具面" },
+  { value: "auto", label: "自动", title: "工具 schema 超过阈值时启用按需加载" },
+  { value: "always", label: "始终", title: "始终按需加载工具定义" },
+];
+
 type RuntimeConfigSectionProps = {
   maxToolRounds: number;
   onMaxToolRoundsChange: (value: number) => void;
@@ -88,22 +98,43 @@ export function RuntimeConfigSection({
         </div>
 
         <div className="rounded-lg border border-border bg-surface-panel px-3 py-3">
-          <div className="mb-1.5 text-xs font-medium text-text-primary">工具按需加载</div>
-          <p className="mb-2.5 text-[11px] leading-relaxed text-text-faint">
-            首轮只提供核心工具，需要时通过检索加载更多工具定义，可减少上下文占用。关闭时与旧版行为一致。
-          </p>
-          <select
-            className="w-full rounded-md border border-border bg-surface-card px-2.5 py-1.5 pr-8 text-xs text-text-primary"
-            value={toolSearchMode}
-            disabled={disabled}
-            onChange={(e) => onToolSearchModeChange(e.target.value as ToolSearchMode)}
-          >
-            <option value="off">关闭</option>
-            <option value="auto">自动（超过阈值启用）</option>
-            <option value="always">始终</option>
-          </select>
+          <div className="flex items-start justify-between gap-3">
+            <div className="min-w-0 flex-1">
+              <div className="text-xs font-medium text-text-primary">工具按需加载</div>
+              <p className="mt-1 text-[11px] leading-relaxed text-text-faint">
+                首轮只提供核心工具，需要时通过检索加载更多工具定义，可减少上下文占用。关闭时与旧版行为一致。
+              </p>
+            </div>
+            <div
+              className="inline-grid shrink-0 grid-cols-3 rounded-md border border-border bg-surface-card p-0.5"
+              role="radiogroup"
+              aria-label="工具按需加载模式"
+            >
+              {TOOL_SEARCH_MODE_OPTIONS.map((opt) => {
+                const active = toolSearchMode === opt.value;
+                return (
+                  <button
+                    key={opt.value}
+                    type="button"
+                    role="radio"
+                    aria-checked={active}
+                    disabled={disabled}
+                    title={opt.title}
+                    className={`rounded-[4px] px-2.5 py-1 text-xs font-medium transition ${
+                      active
+                        ? "bg-[var(--settings-accent-solid)] text-[var(--settings-accent-solid-text)] shadow-sm"
+                        : "text-text-muted hover:bg-surface-hover hover:text-text-strong"
+                    } disabled:cursor-not-allowed disabled:opacity-50`}
+                    onClick={() => onToolSearchModeChange(opt.value)}
+                  >
+                    {opt.label}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
           {toolSearchMode === "auto" ? (
-            <div className="mt-3">
+            <div className="mt-3 border-t border-border/60 pt-3">
               <div className="mb-2 flex items-center justify-between gap-2">
                 <span className="text-[11px] text-text-muted">自动启用阈值（约 token）</span>
                 <span className="text-[11px] tabular-nums text-text-muted">
