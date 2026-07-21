@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { AlertTriangle, ChevronDown, ChevronUp, ListChecks, Check, Circle, Loader2 } from "lucide-react";
-import { parseTodoMessage, type ParsedTodo } from "./TodoUpdateCard";
+import { pickLatestTodoFromMessages } from "./TodoUpdateCard";
 import type { Message } from "../store";
 import {
   isTodoSnapshotSuperseded,
@@ -9,38 +9,6 @@ import {
   detectModelForgotFinalTodoUpdate,
 } from "../utils/task-stall-policy";
 import type { SessionExecutionState } from "../utils/streaming-stop-policy";
-
-/**
- * Find the latest todo snapshot from pane messages.
- *
- * Priority:
- *   1. role=tool && toolName="todo_write" — the canonical signal whether the
- *      content was wrapped by `formatToolResultMessage` (live SSE) or kept raw
- *      (history loaded from messages.json via `mapLoadedSessionMessage`).
- *   2. Any message whose content parses as a todo render — fallback for paths
- *      that lost the toolName metadata.
- */
-function pickLatestTodoFromMessages(
-  messages: Message[],
-): { parsed: ParsedTodo; index: number } | null {
-  for (let i = messages.length - 1; i >= 0; i -= 1) {
-    const m = messages[i];
-    if (!m) continue;
-    if (m.role === "tool" && (m.toolName ?? "").trim() === "todo_write") {
-      const parsed = parseTodoMessage(typeof m.content === "string" ? m.content : "");
-      if (parsed) return { parsed, index: i };
-    }
-  }
-  for (let i = messages.length - 1; i >= 0; i -= 1) {
-    const m = messages[i];
-    if (!m) continue;
-    const content = typeof m.content === "string" ? m.content : "";
-    if (!content) continue;
-    const parsed = parseTodoMessage(content);
-    if (parsed) return { parsed, index: i };
-  }
-  return null;
-}
 
 type HarnessPhase = "explore" | "read" | "author";
 
