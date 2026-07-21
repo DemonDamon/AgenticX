@@ -205,9 +205,9 @@ export function WebSearchSettingsPanel() {
           }`}
         >
           <span
-            className={`pointer-events-none absolute left-0.5 top-0.5 h-4 w-4 rounded-full bg-white shadow-sm transition-transform ${
-              draft.enabled ? "translate-x-4" : "translate-x-0"
-            }`}
+            className={`pointer-events-none absolute left-0.5 top-0.5 h-4 w-4 rounded-full shadow-sm transition-transform ${
+              draft.enabled ? "bg-[var(--theme-color-text)]" : "bg-white"
+            } ${draft.enabled ? "translate-x-4" : "translate-x-0"}`}
           />
         </button>
       </div>
@@ -387,9 +387,9 @@ export function SuggestedQuestionsSettingsPanel() {
           }`}
         >
           <span
-            className={`pointer-events-none absolute left-0.5 top-0.5 h-4 w-4 rounded-full bg-white shadow-sm transition-transform ${
-              enabled ? "translate-x-4" : "translate-x-0"
-            }`}
+            className={`pointer-events-none absolute left-0.5 top-0.5 h-4 w-4 rounded-full shadow-sm transition-transform ${
+              enabled ? "bg-[var(--theme-color-text)]" : "bg-white"
+            } ${enabled ? "translate-x-4" : "translate-x-0"}`}
           />
         </button>
       </div>

@@ -54,6 +54,13 @@ export function avatarBgClass(color?: string | null): string {
   return `bg-${key}-600`;
 }
 
+/** Initials on avatar circle: theme default uses --theme-color-text; palette keeps white. */
+export function avatarFgClass(color?: string | null): string {
+  const key = normalizeAvatarColor(color);
+  if (!key) return "text-[var(--theme-color-text)]";
+  return "text-white";
+}
+
 export function groupColorKey(id: string): GroupPaletteKey {
   const raw = rawGroupId(id);
   return GROUP_PALETTE[hashToIndex(raw, GROUP_PALETTE.length)];

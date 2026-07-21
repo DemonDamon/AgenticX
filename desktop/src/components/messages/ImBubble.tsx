@@ -25,7 +25,7 @@ import {
   getAssistantTextStyle,
 } from "./im-layout";
 import { resolveMetaDisplayName } from "../../utils/display-name";
-import { avatarBgClass } from "../../utils/avatar-color";
+import { avatarBgClass, avatarFgClass } from "../../utils/avatar-color";
 import { shouldShowAssistantFollowups, shouldShowAssistantIconButtons } from "../../utils/im-bubble-actions";
 import { MessageTimestamp } from "./MessageTimestamp";
 
@@ -164,7 +164,7 @@ export function ChatImAvatar({
       />
     );
   }
-  const tintClass = avatarId ? `${avatarBgClass(resolvedColor)} text-white` : "";
+  const tintClass = avatarId ? `${avatarBgClass(resolvedColor)} ${avatarFgClass(resolvedColor)}` : "";
   return (
     <div
       className={`flex h-8 w-8 shrink-0 items-center justify-center text-xs font-bold ${rounded} ${tintClass}`}
@@ -173,7 +173,7 @@ export function ChatImAvatar({
           ? undefined
           : {
               background: "var(--chat-im-avatar-bg)",
-              color: "var(--text-strong)",
+              color: "var(--chat-im-avatar-fg, var(--text-strong))",
             }
       }
     >

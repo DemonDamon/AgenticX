@@ -563,6 +563,7 @@ body.agx-settings-nav-resizing {
   --chat-im-user-bg: rgba(var(--theme-color-rgb), 0.15);
   --chat-im-user-border: rgba(var(--theme-color-rgb), 0.35);
   --chat-im-avatar-bg: rgba(var(--theme-color-rgb), 0.9);
+  --chat-im-avatar-fg: var(--theme-color-text);
   --settings-accent-focus: rgba(var(--theme-color-rgb), 0.5);
   --ui-btn-primary-border: rgba(var(--theme-color-rgb), 0.5);
   /* 输入框内 @file / skill 占位胶囊：与「主题色」同系，避免蓝/紫与焦点环割裂 */

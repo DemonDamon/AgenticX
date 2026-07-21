@@ -4696,9 +4696,9 @@ function SettingsSwitch({
       }`}
     >
       <span
-        className={`pointer-events-none absolute ${knobClass} rounded-full bg-white shadow-sm transition-transform ${
-          checked ? knobTranslate : "translate-x-0"
-        }`}
+        className={`pointer-events-none absolute ${knobClass} rounded-full shadow-sm transition-transform ${
+          checked ? "bg-[var(--theme-color-text)]" : "bg-white"
+        } ${checked ? knobTranslate : "translate-x-0"}`}
       />
     </button>
   );
@@ -8148,7 +8148,11 @@ export function SettingsPanel({
                         { id: "green", color: "bg-emerald-500", label: "绿色" },
                         { id: "pink", color: "bg-pink-500", label: "粉红色" },
                         { id: "yellow", color: "bg-amber-500", label: "黄色" },
-                        { id: "white", color: "bg-slate-900 dark:bg-white", label: "白色/单色" },
+                        {
+                          id: "white",
+                          color: theme === "light" ? "bg-slate-900" : "bg-white",
+                          label: "白色/单色",
+                        },
                       ].map((tc) => (
                         <button
                           key={tc.id}
@@ -8177,7 +8181,7 @@ export function SettingsPanel({
                           className="h-16 w-16 rounded-full border border-border object-cover shadow-sm"
                         />
                       ) : (
-                        <div className="flex h-16 w-16 items-center justify-center rounded-full bg-[rgba(var(--theme-color-rgb),0.9)] text-lg font-semibold text-black shadow-sm">
+                        <div className="flex h-16 w-16 items-center justify-center rounded-full bg-[rgba(var(--theme-color-rgb),0.9)] text-lg font-semibold text-[var(--theme-color-text)] shadow-sm">
                           {(userNicknameDraft.trim().slice(0, 1) || "我").toUpperCase()}
                         </div>
                       )}
@@ -8712,9 +8716,9 @@ export function SettingsPanel({
                           }}
                         >
                           <span
-                            className={`pointer-events-none inline-block h-[18px] w-[18px] rounded-full bg-white shadow-md ring-0 transition-transform duration-200 ${
-                              currentEffectiveOn ? "translate-x-[18px]" : "translate-x-[2px]"
-                            } mt-[2px]`}
+                            className={`pointer-events-none inline-block h-[18px] w-[18px] rounded-full shadow-md ring-0 transition-transform duration-200 ${
+                              currentEffectiveOn ? "bg-[var(--ui-btn-primary-text)]" : "bg-white"
+                            } ${currentEffectiveOn ? "translate-x-[18px]" : "translate-x-[2px]"} mt-[2px]`}
                           />
                         </button>
                       </label>
@@ -8749,9 +8753,9 @@ export function SettingsPanel({
                           }}
                         >
                           <span
-                            className={`pointer-events-none inline-block h-[18px] w-[18px] rounded-full bg-white shadow-md ring-0 transition-transform duration-200 ${
-                              defProv === active ? "translate-x-[18px]" : "translate-x-[2px]"
-                            } mt-[2px]`}
+                            className={`pointer-events-none inline-block h-[18px] w-[18px] rounded-full shadow-md ring-0 transition-transform duration-200 ${
+                              defProv === active ? "bg-[var(--ui-btn-primary-text)]" : "bg-white"
+                            } ${defProv === active ? "translate-x-[18px]" : "translate-x-[2px]"} mt-[2px]`}
                           />
                         </button>
                       </label>

@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Save, RotateCcw, X } from "lucide-react";
 import type { Avatar } from "../store";
-import { avatarBgClass, AVATAR_PALETTE, AVATAR_COLOR_SWATCH, normalizeAvatarColor } from "../utils/avatar-color";
+import { avatarBgClass, avatarFgClass, AVATAR_PALETTE, AVATAR_COLOR_SWATCH, normalizeAvatarColor } from "../utils/avatar-color";
 import type { AvatarPaletteKey } from "../utils/avatar-color";
 import { DefaultModelSelect } from "./DefaultModelSelect";
 
@@ -44,9 +44,9 @@ function SettingsSwitch({
       }`}
     >
       <span
-        className={`pointer-events-none absolute left-0.5 top-0.5 h-4 w-4 rounded-full bg-white shadow-sm transition-transform ${
-          checked ? "translate-x-4" : "translate-x-0"
-        }`}
+        className={`pointer-events-none absolute left-0.5 top-0.5 h-4 w-4 rounded-full shadow-sm transition-transform ${
+          checked ? "bg-[var(--theme-color-text)]" : "bg-white"
+        } ${checked ? "translate-x-4" : "translate-x-0"}`}
       />
     </button>
   );
@@ -441,7 +441,7 @@ export function AvatarSettingsPanel(props: Props) {
                     />
                   ) : (
                     <div
-                      className={`flex h-12 w-12 shrink-0 items-center justify-center rounded-full text-xs font-bold text-white ${avatar ? avatarBgClass(colorDraft) : "bg-surface-hover text-text-primary"}`}
+                      className={`flex h-12 w-12 shrink-0 items-center justify-center rounded-full text-xs font-bold ${avatar ? `${avatarBgClass(colorDraft)} ${avatarFgClass(colorDraft)}` : "bg-surface-hover text-text-primary"}`}
                     >
                       {avatarInitials(name || avatar?.name || "")}
                     </div>

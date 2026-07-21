@@ -2520,7 +2520,7 @@ export function ChatView({ onOpenConfirm, onOpenClarification, onSubmitClarifica
               }}
               title={agxAccount.displayName || agxAccount.email || "已登录"}
             >
-              <span className="inline-flex h-4 w-4 items-center justify-center rounded-full bg-[rgba(var(--theme-color-rgb),0.9)] text-[9px] font-semibold text-black">
+              <span className="inline-flex h-4 w-4 items-center justify-center rounded-full bg-[rgba(var(--theme-color-rgb),0.9)] text-[9px] font-semibold text-[var(--theme-color-text)]">
                 {(agxAccount.displayName || agxAccount.email || "?").trim().charAt(0).toUpperCase()}
               </span>
               <span className="max-w-[80px] truncate">

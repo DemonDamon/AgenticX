@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { Loader2, MoreHorizontal, Plus, Sparkles, Star } from "lucide-react";
 import { MainViewShell } from "../ds/MainViewShell";
 import { useAppStore } from "../../store";
-import { avatarBgClass } from "../../utils/avatar-color";
+import { avatarBgClass, avatarFgClass } from "../../utils/avatar-color";
 import { AvatarCreateDialog } from "../AvatarCreateDialog";
 import { AvatarSettingsPanel } from "../AvatarSettingsPanel";
 import { usePaneNavigation } from "../../hooks/usePaneNavigation";
@@ -247,7 +247,7 @@ export function AvatarGalleryView() {
                       />
                     ) : (
                       <div
-                        className={`flex h-14 w-14 items-center justify-center rounded-2xl text-base font-bold text-white ${avatarBgClass(avatar.color)}`}
+                        className={`flex h-14 w-14 items-center justify-center rounded-2xl text-base font-bold ${avatarBgClass(avatar.color)} ${avatarFgClass(avatar.color)}`}
                       >
                         {avatarInitials(avatar.name)}
                       </div>

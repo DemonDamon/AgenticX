@@ -21,7 +21,7 @@ import { defaultKBConfig, normalizeKbConfig } from "../knowledge/types";
 import { BrainScopePanel, type BrainScopePanelHandle } from "./BrainScopePanel";
 import { brainScopeBadge, brainTypeShort } from "./brainScopeUi";
 import { CodeIndexBrainPanel, type CodeIndexBrainPanelHandle } from "./CodeIndexBrainPanel";
-import { SettingsOnOffSwitch } from "../SettingsSwitch";
+import { SettingsSwitch } from "../SettingsSwitch";
 import { BackendDepsPanel } from "../knowledge/BackendDepsPanel";
 import {
   KbGlobalChatRetrievalPanel,
@@ -371,13 +371,13 @@ export const BrainsSettings = forwardRef<BrainsSettingsHandle>(function BrainsSe
                     ) : null}
                   </h3>
                   {selected.type === "code" ? (
-                    <SettingsOnOffSwitch
+                    <SettingsSwitch
                       checked={codeEnabledDraft}
                       onChange={setCodeEnabledDraft}
                       aria-label="启用此代码脑"
                     />
                   ) : selected.type === "docs" ? (
-                    <SettingsOnOffSwitch
+                    <SettingsSwitch
                       checked={kbDraft.enabled}
                       onChange={(enabled) => applyKbDraft((prev) => ({ ...prev, enabled }))}
                       aria-label="启用此文档库"

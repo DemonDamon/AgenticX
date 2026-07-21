@@ -78,9 +78,9 @@ function PreventSleepToggle() {
         } ${saving || loading ? "cursor-not-allowed opacity-50" : ""}`}
       >
         <span
-          className={`pointer-events-none absolute left-0.5 top-0.5 h-4 w-4 rounded-full bg-white shadow-sm ring-1 ring-black/5 transition-transform duration-200 ease-out ${
-            enabled ? "translate-x-4" : ""
-          }`}
+          className={`pointer-events-none absolute left-0.5 top-0.5 h-4 w-4 rounded-full shadow-sm ring-1 ring-black/5 transition-transform duration-200 ease-out ${
+            enabled ? "bg-[var(--ui-btn-primary-text)]" : "bg-white"
+          } ${enabled ? "translate-x-4" : ""}`}
         />
       </button>
     </div>

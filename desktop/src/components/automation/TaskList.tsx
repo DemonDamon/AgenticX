@@ -31,9 +31,9 @@ function SettingsSwitch({
       } ${disabled ? "opacity-50" : ""}`}
     >
       <span
-        className={`pointer-events-none absolute left-0.5 top-0.5 h-4 w-4 rounded-full bg-white shadow transition-transform ${
-          checked ? "translate-x-4" : ""
-        }`}
+        className={`pointer-events-none absolute left-0.5 top-0.5 h-4 w-4 rounded-full shadow transition-transform ${
+          checked ? "bg-[var(--ui-btn-primary-text)]" : "bg-white"
+        } ${checked ? "translate-x-4" : ""}`}
       />
     </button>
   );

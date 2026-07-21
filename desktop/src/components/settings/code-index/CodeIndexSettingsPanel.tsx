@@ -40,8 +40,8 @@ function SettingsSwitch({
       } ${disabled ? "opacity-40" : ""}`}
     >
       <span
-        className={`absolute top-0.5 h-5 w-5 rounded-full bg-white shadow transition ${
-          checked ? "left-5" : "left-0.5"
+        className={`absolute top-0.5 h-5 w-5 rounded-full shadow transition ${
+          checked ? "left-5 bg-[var(--theme-color-text)]" : "left-0.5 bg-white"
         }`}
       />
     </button>
