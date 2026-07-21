@@ -59,8 +59,8 @@ import {
 import { SessionArtifactList } from "./SessionArtifactList";
 import { SessionReferenceList } from "./SessionReferenceList";
 import { SessionTodoList } from "./SessionTodoList";
-import { pickLatestTodoFromMessages } from "../TodoUpdateCard";
 import { collectSessionReferences } from "../../utils/session-references";
+import { resolveWorkPanelTodoFromMessages } from "../../utils/task-stall-policy";
 
 /**
  * Multipane: each WorkPanel may register a handler. First one that claims the URL
@@ -410,6 +410,9 @@ type Props = {
   onChatSubAgent: (agentId: string) => void;
   onModelChangeSubAgent?: (agentId: string, provider: string, model: string) => void;
   onConfirmResolveSubAgent?: (agentId: string, approved: boolean) => void;
+  /** Align「待办」status with StickyTaskBar (in_progress spinner + idle promote). */
+  todoLiveness?: "active" | "stalled" | "idle";
+  todoExecutionState?: string;
 };
 
 function uid(): string {
@@ -540,6 +543,8 @@ export function WorkPanel({
   onChatSubAgent,
   onModelChangeSubAgent,
   onConfirmResolveSubAgent,
+  todoLiveness = "idle",
+  todoExecutionState,
 }: Props) {
   const addPaneTerminalTab = useAppStore((s) => s.addPaneTerminalTab);
   const removePaneTerminalTab = useAppStore((s) => s.removePaneTerminalTab);
@@ -586,15 +591,14 @@ export function WorkPanel({
 
   /**
    * Trae Work 语义（侧栏只读）：
-   * - 同轮：始终展示最新一条 todo_write，状态随工具调用更新
-   * - 新一轮若写出新待办：自然整栏替换（reset），不累积历史清单
-   * - 用户已发下一轮但模型尚未 todo_write：继续展示上一轮清单，不因
-   *   superseded 清空（与 StickyTaskBar 作曲区「新提问后藏卡」区分）
+   * - 与 StickyTaskBar 同源展示（含 idle promote / 运行中 in_progress 转圈）
+   * - 用户已发下一轮且尚未新 todo_write：清空旧清单（刷新），勿把完成态打回空心圆
+   * - 新一轮写出新 todo_write：整栏替换为新清单
    */
-  const sessionTodo = useMemo(() => {
-    const snap = pickLatestTodoFromMessages(paneMessages);
-    return snap?.parsed ?? null;
-  }, [paneMessages]);
+  const sessionTodo = useMemo(
+    () => resolveWorkPanelTodoFromMessages(paneMessages, todoLiveness, todoExecutionState),
+    [paneMessages, todoLiveness, todoExecutionState],
+  );
 
   const activeBrowser = useMemo(
     () => browserTabs.find((t) => t.id === activeBrowserId) ?? null,
@@ -1391,6 +1395,7 @@ export function WorkPanel({
             <Section
               id="todo"
               title="待办"
+              count={sessionTodo?.total ?? 0}
               open={openSections.todo}
               onToggle={toggleSection}
               scrollBody

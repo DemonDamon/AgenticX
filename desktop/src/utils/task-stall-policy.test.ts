@@ -12,7 +12,9 @@ import {
   lastTurnHasToolActivity,
   lastTurnPromisedActionWithoutFollowThrough,
   messageLooksLikeAssistantFinal,
+  resolveDisplayedTodoFromMessages,
   resolveStickyTodoDisplay,
+  resolveWorkPanelTodoFromMessages,
   sessionMessagesHydrated,
   shouldAllowStallAutoNudge,
   shouldResetStallDetectorsOnSessionSwitch,
@@ -617,6 +619,117 @@ describe("extractDiskWritePathsFromMessages / detectDiskEvidenceForInProgressTod
       }),
     ];
     expect(detectDiskEvidenceForInProgressTodos(messages, parsed)).toBe(false);
+  });
+});
+
+describe("resolveDisplayedTodoFromMessages", () => {
+  it("keeps in_progress while agent is active", () => {
+    const messages: Message[] = [
+      msg({
+        id: "t1",
+        role: "tool",
+        toolName: "todo_write",
+        content: "[x] a\n[>] 正在做 b\n[ ] c\n\n(1/3 completed)",
+      }),
+    ];
+    const out = resolveDisplayedTodoFromMessages(messages, "active", "running");
+    expect(out?.parsed.items.map((i) => i.status)).toEqual([
+      "completed",
+      "in_progress",
+      "pending",
+    ]);
+  });
+
+  it("promotes all pending to completed when idle after substantial final reply", () => {
+    const finalBody = [
+      "团长，已完成。我已经基于会议记录与技术规格书重新做了成本测算，并生成了新版 Excel。",
+      "",
+      "## 1. 新 Excel 已保存",
+      "",
+      "路径：",
+      "",
+      "`/Users/damon/Desktop/out/quote.xlsx`",
+      "",
+      "本次重新评估修正了规格书里的几个关键点，并把知识中台等已有能力改为接入与运营管理口径，同时给出了新的报价结构与风险缓冲。",
+    ].join("\n");
+    const messages: Message[] = [
+      msg({
+        id: "t1",
+        role: "tool",
+        toolName: "todo_write",
+        content: "[ ] a\n[ ] b\n[ ] c\n[ ] d\n[ ] e\n\n(0/5 completed)",
+      }),
+      msg({ id: "a1", role: "assistant", content: finalBody }),
+    ];
+    const out = resolveDisplayedTodoFromMessages(messages, "idle", "idle");
+    expect(out?.parsed.items.every((i) => i.status === "completed")).toBe(true);
+    expect(out?.parsed.completed).toBe(5);
+  });
+});
+
+describe("resolveWorkPanelTodoFromMessages", () => {
+  const finalBody = [
+    "团长，已完成。我已经基于会议记录与技术规格书重新做了成本测算，并生成了新版 Excel。",
+    "",
+    "## 1. 新 Excel 已保存",
+    "",
+    "路径：",
+    "",
+    "`/Users/damon/Desktop/out/quote.xlsx`",
+    "",
+    "本次重新评估修正了规格书里的几个关键点，并把知识中台等已有能力改为接入与运营管理口径，同时给出了新的报价结构与风险缓冲。",
+  ].join("\n");
+
+  it("shows promoted completed list while idle", () => {
+    const messages: Message[] = [
+      msg({
+        id: "t1",
+        role: "tool",
+        toolName: "todo_write",
+        content: "[ ] a\n[ ] b\n[ ] c\n\n(0/3 completed)",
+      }),
+      msg({ id: "a1", role: "assistant", content: finalBody }),
+    ];
+    const out = resolveWorkPanelTodoFromMessages(messages, "idle", "idle");
+    expect(out?.items.every((i) => i.status === "completed")).toBe(true);
+  });
+
+  it("clears superseded old list instead of demoting completed to pending on new user turn", () => {
+    const messages: Message[] = [
+      msg({
+        id: "t1",
+        role: "tool",
+        toolName: "todo_write",
+        content: "[ ] a\n[ ] b\n[ ] c\n\n(0/3 completed)",
+      }),
+      msg({ id: "a1", role: "assistant", content: finalBody }),
+      msg({ id: "u2", role: "user", content: "好的，简单写几个待办，关于如何复习的计划" }),
+    ];
+    // Bug regression: active+raw would show empty circles for the OLD list.
+    expect(resolveWorkPanelTodoFromMessages(messages, "active", "running")).toBeNull();
+    expect(resolveWorkPanelTodoFromMessages(messages, "idle", "idle")).toBeNull();
+  });
+
+  it("shows the new todo_write after a new user turn", () => {
+    const messages: Message[] = [
+      msg({
+        id: "t1",
+        role: "tool",
+        toolName: "todo_write",
+        content: "[ ] old-a\n[ ] old-b\n\n(0/2 completed)",
+      }),
+      msg({ id: "a1", role: "assistant", content: finalBody }),
+      msg({ id: "u2", role: "user", content: "写复习待办" }),
+      msg({
+        id: "t2",
+        role: "tool",
+        toolName: "todo_write",
+        content: "[>] 梳理知识点\n[ ] 做真题\n\n(0/2 completed)",
+      }),
+    ];
+    const out = resolveWorkPanelTodoFromMessages(messages, "active", "running");
+    expect(out?.items.map((i) => i.content)).toEqual(["梳理知识点", "做真题"]);
+    expect(out?.items[0]?.status).toBe("in_progress");
   });
 });
 
