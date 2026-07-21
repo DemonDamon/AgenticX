@@ -72,6 +72,7 @@ import {
   RUNTIME_MIN_TASKSPACES,
   RUNTIME_MIN_TOOL_ROUNDS,
 } from "./automation/RuntimeConfigSection";
+import { ToolSearchConfigSection } from "./automation/ToolSearchConfigSection";
 import {
   StallNudgeConfigSection,
   type StallNudgeConfig,
@@ -2534,10 +2535,13 @@ const ToolsTab = forwardRef<ToolsTabHandle, Record<string, never>>(function Tool
         onMaxToolRoundsChange={setMaxToolRounds}
         maxTaskspaces={maxTaskspaces}
         onMaxTaskspacesChange={setMaxTaskspaces}
-        toolSearchMode={toolSearchMode}
-        onToolSearchModeChange={setToolSearchMode}
-        toolSearchThreshold={toolSearchThreshold}
-        onToolSearchThresholdChange={setToolSearchThreshold}
+        disabled={loading}
+      />
+      <ToolSearchConfigSection
+        mode={toolSearchMode}
+        onModeChange={setToolSearchMode}
+        threshold={toolSearchThreshold}
+        onThresholdChange={setToolSearchThreshold}
         disabled={loading}
       />
       <TokenBudgetConfigSection value={tokenBudget} onChange={setTokenBudget} disabled={loading} />
