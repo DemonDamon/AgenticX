@@ -10865,6 +10865,23 @@ function registerIpc(): void {
     }
   });
 
+  /** Lightweight path metadata (size only) — for artifact list UI, not file contents. */
+  ipcMain.handle("stat-local-path", async (_event, inputPath: string) => {
+    try {
+      const normalized = normalizeLocalFsPath(inputPath);
+      if (!normalized) return { ok: false, error: "empty path" };
+      const stat = await fs.promises.stat(normalized);
+      return {
+        ok: true,
+        size: stat.size,
+        isDirectory: stat.isDirectory(),
+        mtimeMs: stat.mtimeMs,
+      };
+    } catch (err) {
+      return { ok: false, error: String(err) };
+    }
+  });
+
   const WRITE_LOCAL_TEXT_MAX_BYTES = 512 * 1024;
 
   ipcMain.handle("write-local-text-file", async (_event, payload: { path?: string; content?: string }) => {
