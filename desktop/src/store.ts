@@ -511,6 +511,13 @@ type AppState = {
   /** Which content the right main area shows (chat / gallery / projects / automation). */
   mainView: MainView;
   setMainView: (view: MainView) => void;
+  /**
+   * Snapshot of the active chat pane when leaving `mainView: "chat"` for a landing
+   * page (avatars / groups / automation). Used by MainViewShell's back button.
+   */
+  chatReturnSnapshot: { paneId: string; sessionId?: string } | null;
+  /** Restore the snapshotted chat pane and switch mainView back to chat. */
+  returnToPreviousChat: () => void;
   /** Incremented when local session list should refresh (e.g. new session created). SidebarSessionHistory subscribes. */
   sessionCatalogRevision: number;
   bumpSessionCatalogRevision: () => void;
@@ -1010,7 +1017,36 @@ export const useAppStore = create<AppState>((set, get) => ({
   panes: [makeDefaultPane()],
   activePaneId: "pane-meta",
   mainView: "chat",
-  setMainView: (view) => set({ mainView: view }),
+  setMainView: (view) =>
+    set((state) => {
+      // Leaving chat → landing: remember the active pane so landing pages can offer "back".
+      if (state.mainView === "chat" && view !== "chat") {
+        const pane = state.panes.find((p) => p.id === state.activePaneId);
+        return {
+          mainView: view,
+          chatReturnSnapshot: {
+            paneId: state.activePaneId,
+            sessionId: pane?.sessionId ? String(pane.sessionId) : undefined,
+          },
+        };
+      }
+      // Entering chat via any path clears the snapshot (returnToPreviousChat also clears).
+      if (view === "chat") {
+        return { mainView: view, chatReturnSnapshot: null };
+      }
+      // Landing → landing: keep the original chat snapshot.
+      return { mainView: view };
+    }),
+  chatReturnSnapshot: null,
+  returnToPreviousChat: () => {
+    const { chatReturnSnapshot, panes } = get();
+    const paneId = chatReturnSnapshot?.paneId;
+    if (paneId && panes.some((p) => p.id === paneId)) {
+      set({ activePaneId: paneId, mainView: "chat", chatReturnSnapshot: null });
+      return;
+    }
+    set({ mainView: "chat", chatReturnSnapshot: null });
+  },
   sessionCatalogRevision: 0,
   bumpSessionCatalogRevision: () =>
     set((state) => ({ sessionCatalogRevision: state.sessionCatalogRevision + 1 })),

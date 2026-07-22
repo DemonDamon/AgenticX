@@ -139,6 +139,11 @@ body,
   user-select: none;
 }
 
+/* Landing views (avatars / groups / automation): no divider under 「本地」. */
+.agx-topbar--no-border {
+  border-bottom: none;
+}
+
 html[data-platform="win32"] .agx-topbar {
   padding-right: 140px;
 }

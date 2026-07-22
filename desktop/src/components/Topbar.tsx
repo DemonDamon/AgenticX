@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { Gauge, LogIn, LogOut, Moon, Settings, Sun, User } from "lucide-react";
+import { ArrowLeft, Gauge, LogIn, LogOut, Moon, Settings, Sun, User } from "lucide-react";
 import { useAppStore } from "../store";
 import { TopbarLeftControls } from "./TopbarLeftControls";
 import { BackendModeChip } from "./BackendModeChip";
@@ -16,6 +16,11 @@ export function Topbar({ sidebarCollapsed, onToggleSidebar }: Props) {
   const openTokenDashboard = useAppStore((s) => s.openTokenDashboard);
   const agxAccount = useAppStore((s) => s.agxAccount);
   const setAgxAccount = useAppStore((s) => s.setAgxAccount);
+  const mainView = useAppStore((s) => s.mainView);
+  const chatReturnSnapshot = useAppStore((s) => s.chatReturnSnapshot);
+  const returnToPreviousChat = useAppStore((s) => s.returnToPreviousChat);
+  /** Landing pages: hide topbar bottom border so 「本地」下不出现横线。 */
+  const hideTopbarBorder = mainView !== "chat";
 
   const [loginBusy, setLoginBusy] = useState(false);
   const [userMenuOpen, setUserMenuOpen] = useState(false);
@@ -89,7 +94,7 @@ export function Topbar({ sidebarCollapsed, onToggleSidebar }: Props) {
     .toUpperCase();
 
   return (
-    <div className="agx-topbar">
+    <div className={`agx-topbar${hideTopbarBorder ? " agx-topbar--no-border" : ""}`}>
       <div className="agx-topbar-left">
         {sidebarCollapsed ? (
           <TopbarLeftControls
@@ -99,6 +104,17 @@ export function Topbar({ sidebarCollapsed, onToggleSidebar }: Props) {
           />
         ) : null}
         <BackendModeChip />
+        {chatReturnSnapshot ? (
+          <button
+            type="button"
+            className="flex items-center gap-1 rounded-md px-1.5 py-1 text-[12px] font-medium text-text-faint transition-colors hover:bg-surface-hover hover:text-text-strong"
+            onClick={returnToPreviousChat}
+            aria-label="返回"
+          >
+            <ArrowLeft className="h-3.5 w-3.5 shrink-0" strokeWidth={1.8} />
+            <span>返回</span>
+          </button>
+        ) : null}
       </div>
       <div className="agx-topbar-right">
         <button
