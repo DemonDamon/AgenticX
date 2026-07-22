@@ -471,11 +471,11 @@ function Section({
   const grow = Boolean(open && scrollBody && hasContent);
   return (
     <section
-      className={`flex min-h-0 flex-col border-b border-border ${grow ? "flex-1" : "shrink-0"}`}
+      className={`flex min-h-0 flex-col border-b border-border last:border-b-0 ${grow ? "flex-1" : "shrink-0"}`}
     >
       <button
         type="button"
-        className="flex w-full shrink-0 items-center gap-2 px-3 py-2.5 text-left text-[13px] font-medium text-text-strong hover:bg-surface-hover/60"
+        className="group flex w-full shrink-0 items-center gap-2 px-3 py-3.5 text-left text-[13px] text-text-strong hover:bg-surface-hover/40"
         onClick={() => onToggle(id)}
         aria-expanded={open}
       >
@@ -483,7 +483,7 @@ function Section({
           className={`h-3.5 w-3.5 shrink-0 text-text-faint transition-transform ${open ? "" : "-rotate-90"}`}
           strokeWidth={2}
         />
-        <span>{title}</span>
+        <span className="font-normal group-hover:font-semibold">{title}</span>
         {typeof count === "number" ? (
           <span className="text-[11px] font-normal text-text-faint">{count}</span>
         ) : null}
