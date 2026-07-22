@@ -10946,6 +10946,7 @@ function registerIpc(): void {
         }
 
         const usedNames = new Set<string>();
+        const stagedSources = new Set<string>();
         let linked = 0;
         const uniqueName = (sourcePath: string): string => {
           const base = path.basename(sourcePath) || "artifact";
@@ -10977,6 +10978,9 @@ function registerIpc(): void {
           }
           if (!st.isFile()) continue;
           const resolvedSource = path.resolve(source);
+          // Same inode/path via `~/…` vs absolute → stage once (avoid Desktop_ dup copies).
+          if (stagedSources.has(resolvedSource)) continue;
+          stagedSources.add(resolvedSource);
           const stagingResolved = path.resolve(stagingDir);
           // Never stage a file that already lives inside the staging dir.
           if (
@@ -11014,9 +11018,8 @@ function registerIpc(): void {
 
   ipcMain.handle("load-local-file-data-url", async (_event, inputPath: string) => {
     try {
-      const raw = String(inputPath || "").trim();
-      if (!raw) return { ok: false, error: "empty path" };
-      const normalized = raw.startsWith("file://") ? decodeURIComponent(raw.replace(/^file:\/\//, "")) : raw;
+      const normalized = normalizeLocalFsPath(inputPath);
+      if (!normalized) return { ok: false, error: "empty path" };
       if (!fs.existsSync(normalized)) {
         return { ok: false, error: "file not found" };
       }

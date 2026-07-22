@@ -526,9 +526,18 @@ export async function runSystemSearch(
   }
 }
 
+/** Expand `~/…` before path.resolve — otherwise cwd/`~/…` becomes a literal `~` segment. */
+function expandLocalFsPath(filePath: string): string {
+  const raw = String(filePath || "").trim();
+  if (!raw) return "";
+  if (raw === "~") return os.homedir();
+  if (raw.startsWith("~/")) return path.join(os.homedir(), raw.slice(2));
+  return raw;
+}
+
 export async function previewSystemSearchFile(filePath: string): Promise<SystemSearchPreviewResult> {
   try {
-    const resolved = path.resolve(filePath);
+    const resolved = path.resolve(expandLocalFsPath(filePath));
     const st = await fs.promises.stat(resolved);
     if (st.isDirectory()) {
       return {
@@ -568,7 +577,7 @@ export async function previewSystemSearchFile(filePath: string): Promise<SystemS
 
 export async function openSystemSearchPath(filePath: string): Promise<{ ok: boolean; error?: string }> {
   try {
-    const err = await shell.openPath(filePath);
+    const err = await shell.openPath(expandLocalFsPath(filePath));
     if (err) return { ok: false, error: err };
     return { ok: true };
   } catch (error) {
@@ -578,7 +587,7 @@ export async function openSystemSearchPath(filePath: string): Promise<{ ok: bool
 
 export async function revealSystemSearchPath(filePath: string): Promise<{ ok: boolean; error?: string }> {
   try {
-    shell.showItemInFolder(path.resolve(filePath));
+    shell.showItemInFolder(path.resolve(expandLocalFsPath(filePath)));
     return { ok: true };
   } catch (error) {
     return { ok: false, error: String(error) };
@@ -591,7 +600,7 @@ function escapeAppleScriptPath(filePath: string): string {
 
 /** macOS Finder Get Info; other platforms fall back to reveal in file manager. */
 export async function getSystemSearchInfo(filePath: string): Promise<{ ok: boolean; error?: string }> {
-  const resolved = path.resolve(filePath);
+  const resolved = path.resolve(expandLocalFsPath(filePath));
   if (process.platform === "darwin") {
     try {
       const script = `tell application "Finder" to open information window of (POSIX file "${escapeAppleScriptPath(resolved)}" as alias)`;
@@ -610,7 +619,7 @@ export async function getSystemSearchInfo(filePath: string): Promise<{ ok: boole
 export async function openSystemSearchWith(
   filePath: string
 ): Promise<{ ok: boolean; hint?: string; error?: string }> {
-  const resolved = path.resolve(filePath);
+  const resolved = path.resolve(expandLocalFsPath(filePath));
   try {
     const st = await fs.promises.stat(resolved);
     if (st.isDirectory()) {
