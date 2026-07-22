@@ -564,20 +564,22 @@ export function ImBubble({
           </div>
         ) : isUser ? (
           <div className="agx-im-user-stack" style={userStackStyle}>
+            {/* Trae-style: attachment chips sit above the text bubble, not inside it. */}
+            {displayAttachments.length > 0 ? (
+              <div className="mb-1.5 flex flex-wrap justify-end gap-2">
+                {displayAttachments.map((attachment) => (
+                  <AttachmentCard
+                    key={`${attachment.name}:${attachment.size}:${attachment.mimeType}`}
+                    attachment={attachment}
+                  />
+                ))}
+              </div>
+            ) : null}
+            {hasBody || message.quotedContent || message.forwardedHistory || contentBadge ? (
             <div
               className="agx-im-user-bubble relative min-w-0 max-w-full rounded-xl border px-3.5 py-2.5 text-[var(--agx-chat-im-body-font-size)] leading-relaxed rounded-tr-[4px]"
               style={userBubbleStyle}
             >
-              {displayAttachments.length > 0 ? (
-                <div className="mb-2 flex flex-wrap gap-2">
-                  {displayAttachments.map((attachment) => (
-                    <AttachmentCard
-                      key={`${attachment.name}:${attachment.size}:${attachment.mimeType}`}
-                      attachment={attachment}
-                    />
-                  ))}
-                </div>
-              ) : null}
               <div ref={msgContentRef} className="msg-content min-w-0 break-words">
                 {contentBadge}
                 {message.quotedContent ? (
@@ -613,6 +615,9 @@ export function ImBubble({
                 ) : null}
               </div>
             </div>
+            ) : (
+              <div ref={msgContentRef} className="hidden" aria-hidden />
+            )}
             {hideActions ? null : (
               <div className="agx-im-user-actions">
                 <div className="agx-im-user-actions-icons">
