@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { Message, SubAgent } from "../store";
 import {
   artifactBaseName,
+  collectArtifactPathsFromAgentMessages,
   collectSessionArtifactPaths,
   isInAppArtifactPreviewPath,
   isInAppHtmlPreviewPath,
@@ -201,6 +202,39 @@ describe("collectSessionArtifactPaths", () => {
       }),
     ];
     expect(collectSessionArtifactPaths(messages, null, null, "sess-a")).toEqual(["/tmp/a.txt"]);
+  });
+});
+
+describe("collectArtifactPathsFromAgentMessages", () => {
+  it("collects HTML from agent_messages tool name + OK: wrote (chat pane gap)", () => {
+    const html = "/Users/damon/cursor_billing_report.html";
+    const rows = [
+      {
+        role: "assistant",
+        content: " ",
+        tool_calls: [
+          {
+            id: "functions.file_write:24",
+            type: "function",
+            function: {
+              name: "file_write",
+              arguments: JSON.stringify({ path: html, content: "<!DOCTYPE html>" }),
+            },
+          },
+        ],
+      },
+      {
+        role: "tool",
+        tool_call_id: "functions.file_write:24",
+        name: "file_write",
+        content: `OK: wrote ${html}`,
+      },
+      {
+        role: "assistant",
+        content: `## 分析完成\n报告路径：\`${html}\``,
+      },
+    ];
+    expect(collectArtifactPathsFromAgentMessages(rows)).toEqual([html]);
   });
 });
 
