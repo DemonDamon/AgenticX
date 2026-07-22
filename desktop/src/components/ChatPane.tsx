@@ -52,8 +52,10 @@ import { StickyTaskBar } from "./StickyTaskBar";
 import { ContextUsageButton } from "./ContextUsagePopup";
 import type { WorkspacePreviewOpenRequest, WorkspacePreviewQuotePayload } from "./workspace/workspace-preview-types";
 import {
+  NEAR_WORKSPACE_OPEN_PREVIEW,
   NEAR_WORKSPACE_PICK_DIR,
   NEAR_WORKSPACE_PICK_FILE,
+  type NearWorkspaceOpenPreviewDetail,
   type NearWorkspacePickDirDetail,
   type NearWorkspacePickFileDetail,
 } from "../utils/workspace-sidebar-events";
@@ -4442,6 +4444,19 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
     },
     [pane.id, pane.taskspacePanelOpen, paneWidth, openSidePanel],
   );
+
+  /** Left-sidebar file-manage → Trae WorkPanel preview tab on the right. */
+  useEffect(() => {
+    const onOpenPreview = (ev: Event) => {
+      const detail = (ev as CustomEvent<NearWorkspaceOpenPreviewDetail>).detail;
+      if (!detail || detail.paneId !== pane.id) return;
+      const abs = String(detail.absolutePath || "").trim();
+      if (!abs) return;
+      openWorkspaceFilePreview(abs);
+    };
+    window.addEventListener(NEAR_WORKSPACE_OPEN_PREVIEW, onOpenPreview);
+    return () => window.removeEventListener(NEAR_WORKSPACE_OPEN_PREVIEW, onOpenPreview);
+  }, [pane.id, openWorkspaceFilePreview]);
 
   const openFileReferencePreview = useCallback(
     (request: WorkspacePreviewOpenRequest) => {

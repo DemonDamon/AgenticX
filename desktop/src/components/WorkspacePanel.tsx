@@ -14,8 +14,10 @@ import {
 } from "lucide-react";
 import { createPortal } from "react-dom";
 import type { DragEvent as ReactDragEvent, MouseEvent as ReactMouseEvent } from "react";
-import type { Taskspace } from "../store";
+import type { PaneTerminalTab, Taskspace } from "../store";
 import { useAppStore } from "../store";
+
+const EMPTY_TERMINAL_TABS: PaneTerminalTab[] = [];
 import { createResizeRafScheduler } from "../utils/resize-raf";
 import { ContextMenu } from "./ContextMenu";
 import { TerminalEmbed } from "./TerminalEmbed";
@@ -48,6 +50,12 @@ import {
   isTaskspaceAtLimit,
 } from "../utils/taskspace-errors";
 import { RUNTIME_DEFAULT_TASKSPACES } from "./automation/RuntimeConfigSection";
+import {
+  NEAR_ARTIFACT_TASKSPACES_SYNCED,
+  dispatchWorkspaceOpenPreview,
+  type NearArtifactTaskspacesSyncedDetail,
+} from "../utils/workspace-sidebar-events";
+import { ensureSessionArtifactsFromAvailableSources } from "../utils/ensure-artifact-taskspaces";
 
 type TaskspaceFile = {
   name: string;
@@ -177,7 +185,9 @@ export function WorkspacePanel({
   const addPaneTerminalTab = useAppStore((s) => s.addPaneTerminalTab);
   const removePaneTerminalTab = useAppStore((s) => s.removePaneTerminalTab);
   const setActivePaneTerminalTab = useAppStore((s) => s.setActivePaneTerminalTab);
-  const terminalTabs = useAppStore((s) => s.panes.find((p) => p.id === paneId)?.terminalTabs ?? []);
+  const terminalTabs = useAppStore(
+    (s) => s.panes.find((p) => p.id === paneId)?.terminalTabs ?? EMPTY_TERMINAL_TABS,
+  );
   const activeTerminalTabId = useAppStore((s) => s.panes.find((p) => p.id === paneId)?.activeTerminalTabId ?? null);
   const paneAvatarId = useAppStore((s) => s.panes.find((p) => p.id === paneId)?.avatarId ?? null);
   const paneAvatarName = useAppStore((s) => s.panes.find((p) => p.id === paneId)?.avatarName ?? "");
@@ -247,12 +257,15 @@ export function WorkspacePanel({
     if (!isSidebarEmbed) return taskspaces;
     return taskspaces.filter((t) => t.id !== "default");
   }, [isSidebarEmbed, taskspaces]);
+  /** Sidebar: true while eagerly staging session artifacts on first open. */
+  const [sidebarBootstrapping, setSidebarBootstrapping] = useState(false);
+
   /**
-   * Sidebar file-manage: show Trae empty UI as soon as there are no attached
-   * folders (including the initial listTaskspaces round-trip) so we never flash
-   * skeleton → empty. After load, attached folders replace this with the tree.
+   * Sidebar file-manage: empty only after bootstrap finishes with no folders.
+   * While bootstrapping, show loading instead of「工作区为空」flash.
    */
-  const showConversationEmpty = isSidebarEmbed && visibleTaskspaces.length === 0;
+  const showConversationEmpty =
+    isSidebarEmbed && visibleTaskspaces.length === 0 && !sidebarBootstrapping && workspaceLoadedOnce;
 
   const listViewFiles = useMemo(() => {
     if (viewMode !== "list" || !isSidebarEmbed) return null;
@@ -368,15 +381,22 @@ export function WorkspacePanel({
     const browseSessionId = getBrowseSessionId();
     if (!browseSessionId) return undefined;
     setLoading(true);
+    // Read live store value — event-handler closures can stale-capture null and
+    // call onActiveTaskspaceChange on every refresh → update-depth loop.
+    const applyWorkspaces = (workspaces: Taskspace[]) => {
+      setTaskspaces(workspaces);
+      if (workspaces.length === 0) return;
+      const currentActiveId =
+        useAppStore.getState().panes.find((p) => p.id === paneId)?.activeTaskspaceId ?? null;
+      const active =
+        workspaces.find((item) => item.id === currentActiveId) ?? workspaces[0];
+      if (active && active.id !== currentActiveId) {
+        onActiveTaskspaceChange(active.id);
+      }
+    };
     if (corePreloadAttempted && preloadedTaskspacesBySessionId[browseSessionId]) {
       const workspaces = preloadedTaskspacesBySessionId[browseSessionId];
-      setTaskspaces(workspaces);
-      if (workspaces.length > 0) {
-        const active = workspaces.find((item) => item.id === activeTaskspaceId) ?? workspaces[0];
-        if (!workspaces.some((item) => item.id === activeTaskspaceId)) {
-          onActiveTaskspaceChange(active.id);
-        }
-      }
+      applyWorkspaces(workspaces);
       setWorkspaceLoadedOnce(true);
       setLoading(false);
       return workspaces;
@@ -388,13 +408,7 @@ export function WorkspacePanel({
       return undefined;
     }
     const workspaces = Array.isArray(result.workspaces) ? result.workspaces : [];
-    setTaskspaces(workspaces);
-    if (workspaces.length > 0) {
-      const active = workspaces.find((item) => item.id === activeTaskspaceId) ?? workspaces[0];
-      if (!workspaces.some((item) => item.id === activeTaskspaceId)) {
-        onActiveTaskspaceChange(active.id);
-      }
-    }
+    applyWorkspaces(workspaces);
     setWorkspaceLoadedOnce(true);
     setLoading(false);
     return workspaces;
@@ -528,6 +542,60 @@ export function WorkspacePanel({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sessionId]);
 
+  // Sidebar file-manage: eagerly stage session artifacts so the tree is not empty
+  // while waiting for WorkPanel's debounced sync.
+  useEffect(() => {
+    if (!isSidebarEmbed) return;
+    const sid = String(sessionId ?? "").trim();
+    if (!sid) return;
+    let cancelled = false;
+    setSidebarBootstrapping(true);
+    void (async () => {
+      try {
+        let max = maxTaskspaces;
+        try {
+          const runtime = await window.agenticxDesktop?.loadRuntimeConfig?.();
+          if (runtime?.ok && Number.isFinite(runtime.max_taskspaces)) {
+            max = runtime.max_taskspaces;
+          }
+        } catch {
+          /* keep default */
+        }
+        if (cancelled) return;
+        await ensureSessionArtifactsFromAvailableSources(sid, { maxTaskspaces: max });
+        if (cancelled) return;
+        await refreshListAndActiveTaskspace();
+      } catch (err) {
+        console.warn("[WorkspacePanel] sidebar artifact bootstrap failed:", err);
+      } finally {
+        if (!cancelled) setSidebarBootstrapping(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isSidebarEmbed, sessionId]);
+
+  // Sidebar: auto-expand attached roots so files show without an extra click.
+  useEffect(() => {
+    if (!isSidebarEmbed || visibleTaskspaces.length === 0) return;
+    setExpandedDirs((prev) => {
+      const next = new Set(prev);
+      let changed = false;
+      for (const ts of visibleTaskspaces) {
+        const key = nodeKey(ts.id, ".");
+        if (!next.has(key)) {
+          next.add(key);
+          changed = true;
+          void loadDir(ts.id, ".");
+        }
+      }
+      return changed ? next : prev;
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isSidebarEmbed, visibleTaskspaces.map((t) => t.id).join("|")]);
+
   useEffect(() => {
     if (!viewMenuOpen && !moreMenuOpen) return;
     const onDown = (e: MouseEvent) => {
@@ -633,6 +701,20 @@ export function WorkspacePanel({
     void refreshListAndActiveTaskspace();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [autoRefreshKey, sessionId, awaitingFreshSession]);
+
+  // WorkPanel auto-attaches artifact parent dirs → reload so sidebar file-manage is not empty.
+  useEffect(() => {
+    const onSynced = (ev: Event) => {
+      const detail = (ev as CustomEvent<NearArtifactTaskspacesSyncedDetail>).detail;
+      const browseSessionId = getBrowseSessionId();
+      if (!browseSessionId || !detail?.sessionId) return;
+      if (detail.sessionId !== browseSessionId) return;
+      void refreshListAndActiveTaskspace();
+    };
+    window.addEventListener(NEAR_ARTIFACT_TASKSPACES_SYNCED, onSynced);
+    return () => window.removeEventListener(NEAR_ARTIFACT_TASKSPACES_SYNCED, onSynced);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sessionId, awaitingFreshSession]);
 
   useLayoutEffect(() => {
     const element = panelRef.current;
@@ -879,6 +961,20 @@ export function WorkspacePanel({
     if (activeTaskspaceId !== taskspaceId) {
       onActiveTaskspaceChange(taskspaceId);
     }
+    const ts = taskspaces.find((t) => t.id === taskspaceId);
+    // Sidebar file-manage: open Trae WorkPanel preview on the right, not the
+    // floating popover (which anchors off the left rail and is easy to miss).
+    if (isSidebarEmbed) {
+      const abs = absoluteTaskspacePath(ts?.path || "", relPath);
+      if (!abs) {
+        setErrorText("无法解析文件路径");
+        return;
+      }
+      setSelectedFilePath(relPath);
+      setErrorText("");
+      dispatchWorkspaceOpenPreview({ paneId, absolutePath: abs });
+      return;
+    }
     const result = await window.agenticxDesktop.readTaskspaceFile({ sessionId: browseSessionId, taskspaceId, path: relPath });
     if (!result.ok) {
       if ((result.error ?? "").includes("session not found")) return;
@@ -886,7 +982,6 @@ export function WorkspacePanel({
       return;
     }
     setSelectedFilePath(relPath);
-    const ts = taskspaces.find((t) => t.id === taskspaceId);
     const preview = mapTaskspaceFileToWorkspacePreview(result, relPath, ts?.path);
     if (!preview) {
       setErrorText(result.error ?? "读取文件失败");
@@ -1331,7 +1426,10 @@ export function WorkspacePanel({
           ) : null}
         </div>
         <div className="min-h-0 flex-1 overflow-y-auto px-2 py-2">
-          {!isSidebarEmbed && (loading || !workspaceLoadedOnce) ? (
+          {(!isSidebarEmbed && (loading || !workspaceLoadedOnce)) ||
+          (isSidebarEmbed &&
+            (sidebarBootstrapping || loading || !workspaceLoadedOnce) &&
+            visibleTaskspaces.length === 0) ? (
             <div className="space-y-2 py-1">
               {[0, 1, 2].map((i) => (
                 <div key={i} className="h-7 animate-pulse rounded-md bg-surface-hover" />

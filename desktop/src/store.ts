@@ -2086,11 +2086,15 @@ export const useAppStore = create<AppState>((set, get) => ({
     get().cycleSidePanel(paneId, "members");
   },
   setActiveTaskspace: (paneId, taskspaceId) =>
-    set((state) => ({
-      panes: state.panes.map((pane) =>
-        pane.id === paneId ? { ...pane, activeTaskspaceId: taskspaceId } : pane
-      ),
-    })),
+    set((state) => {
+      const pane = state.panes.find((item) => item.id === paneId);
+      if (!pane || pane.activeTaskspaceId === taskspaceId) return state;
+      return {
+        panes: state.panes.map((item) =>
+          item.id === paneId ? { ...item, activeTaskspaceId: taskspaceId } : item
+        ),
+      };
+    }),
   setPaneContextInherited: (paneId, inherited) =>
     set((state) => ({
       panes: state.panes.map((pane) => (pane.id === paneId ? { ...pane, contextInherited: inherited } : pane)),

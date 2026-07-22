@@ -773,6 +773,14 @@ contextBridge.exposeInMainWorld("agenticxDesktop", {
   writeLocalTextFile: async (payload: { path: string; content: string }) =>
     ipcRenderer.invoke("write-local-text-file", payload),
   readLocalTextFile: async (path: string) => ipcRenderer.invoke("read-local-text-file", path),
+  stageSessionArtifacts: async (payload: { sessionId: string; paths: string[] }) =>
+    ipcRenderer.invoke("stage-session-artifacts", payload) as Promise<{
+      ok: boolean;
+      stagingDir?: string;
+      homeDir?: string;
+      linked?: number;
+      error?: string;
+    }>,
   loadLocalFileDataUrl: async (path: string) => ipcRenderer.invoke("load-local-file-data-url", path),
   installFromRegistry: async (args: {
     source: string;

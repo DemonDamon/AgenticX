@@ -28,7 +28,7 @@ import {
   Terminal as TerminalIcon,
   X,
 } from "lucide-react";
-import { useAppStore, type SubAgent } from "../../store";
+import { useAppStore, type Message, type PaneTerminalTab, type SubAgent } from "../../store";
 import { WorkspacePanel } from "../WorkspacePanel";
 import {
   loadAbsoluteFilePreview,
@@ -62,6 +62,8 @@ import { SessionReferenceList } from "./SessionReferenceList";
 import { SessionTodoList } from "./SessionTodoList";
 import { collectSessionReferences } from "../../utils/session-references";
 import { resolveWorkPanelTodoFromMessages } from "../../utils/task-stall-policy";
+import { ensureArtifactTaskspacesForSession } from "../../utils/ensure-artifact-taskspaces";
+import { RUNTIME_DEFAULT_TASKSPACES } from "../automation/RuntimeConfigSection";
 
 /**
  * Multipane: each WorkPanel may register a handler. First one that claims the URL
@@ -70,6 +72,9 @@ import { resolveWorkPanelTodoFromMessages } from "../../utils/task-stall-policy"
 type InAppBrowserOpenHandler = (url: string) => boolean;
 const inAppBrowserOpenHandlers = new Set<InAppBrowserOpenHandler>();
 let inAppBrowserOpenIpcWired = false;
+
+const EMPTY_MESSAGES: Message[] = [];
+const EMPTY_TERMINAL_TABS: PaneTerminalTab[] = [];
 
 function ensureInAppBrowserOpenIpc(): void {
   if (inAppBrowserOpenIpcWired) return;
@@ -547,11 +552,17 @@ export function WorkPanel({
   const addPaneTerminalTab = useAppStore((s) => s.addPaneTerminalTab);
   const removePaneTerminalTab = useAppStore((s) => s.removePaneTerminalTab);
   const setActivePaneTerminalTab = useAppStore((s) => s.setActivePaneTerminalTab);
-  const terminalTabs = useAppStore((s) => s.panes.find((p) => p.id === paneId)?.terminalTabs ?? []);
+  // Stable fallbacks: `?? []` inline creates a new array every snapshot and can
+  // infinite-loop useSyncExternalStore when the pane field is briefly missing.
+  const terminalTabs = useAppStore(
+    (s) => s.panes.find((p) => p.id === paneId)?.terminalTabs ?? EMPTY_TERMINAL_TABS,
+  );
   const activeTerminalTabId = useAppStore(
     (s) => s.panes.find((p) => p.id === paneId)?.activeTerminalTabId ?? null
   );
-  const paneMessages = useAppStore((s) => s.panes.find((p) => p.id === paneId)?.messages ?? []);
+  const paneMessages = useAppStore(
+    (s) => s.panes.find((p) => p.id === paneId)?.messages ?? EMPTY_MESSAGES,
+  );
 
   const [summaryTabOpen, setSummaryTabOpen] = useState(true);
   const [activeKind, setActiveKind] = useState<WorkPanelTabKind | null>("summary");
@@ -624,6 +635,48 @@ export function WorkPanel({
       ),
     [paneMessages, subAgents, extraArtifactPaths, agentArtifactPaths, sessionId],
   );
+
+  /** Content-stable key so effect does not re-fire on new array identity. */
+  const artifactSyncKey = useMemo(
+    () => [...artifactPaths].sort().join("\0"),
+    [artifactPaths],
+  );
+  const artifactSyncDoneKeyRef = useRef<string>("");
+
+  // Keep left-sidebar「历史对话 → 文件管理」in sync: stage this session's
+  // artifacts into task_artifacts/ and attach that single folder.
+  useEffect(() => {
+    const sid = String(sessionId || "").trim();
+    if (!sid || !artifactSyncKey) return;
+    const runKey = `${sid}\n${artifactSyncKey}`;
+    if (artifactSyncDoneKeyRef.current === runKey) return;
+    let cancelled = false;
+    const timer = window.setTimeout(() => {
+      void (async () => {
+        try {
+          let maxTaskspaces = RUNTIME_DEFAULT_TASKSPACES;
+          const runtime = await window.agenticxDesktop?.loadRuntimeConfig?.();
+          if (runtime?.ok && Number.isFinite(runtime.max_taskspaces)) {
+            maxTaskspaces = runtime.max_taskspaces;
+          }
+          if (cancelled) return;
+          const paths = artifactSyncKey.split("\0").filter(Boolean);
+          const result = await ensureArtifactTaskspacesForSession(sid, paths, {
+            maxTaskspaces,
+          });
+          if (!cancelled && result.ok) {
+            artifactSyncDoneKeyRef.current = runKey;
+          }
+        } catch (err) {
+          console.warn("[WorkPanel] artifact → workspace sync failed:", err);
+        }
+      })();
+    }, 400);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
+  }, [sessionId, artifactSyncKey]);
 
   const referenceBundle = useMemo(
     () => collectSessionReferences(paneMessages),
