@@ -4,6 +4,8 @@ import type { ReactNode } from "react";
  * Shared scrollable container for the main-area landing views
  * (avatar gallery / projects / automation). Keeps padding, background and
  * scroll behaviour consistent across the three landing views.
+ *
+ * 「返回上一对话」入口在全局 Topbar（「本地」旁），不在此壳层重复渲染。
  */
 export function MainViewShell({ children }: { children: ReactNode }) {
   return (
