@@ -218,6 +218,15 @@ function RemoteBrowserPane({
         onOpenInBrowser={() => {
           void window.agenticxDesktop?.openExternal?.(url);
         }}
+        onOpenDevTools={() => {
+          const wv = webviewRef.current;
+          try {
+            wv?.openDevTools?.();
+          } catch {
+            void window.agenticxDesktop?.openHtmlPreviewDevTools?.({ url });
+          }
+        }}
+        openDevToolsDisabled={!/^https?:\/\//i.test(url)}
       />
       <div className="flex min-h-0 flex-1 justify-center overflow-auto bg-[color-mix(in_oklab,var(--surface-hover)_80%,transparent)] p-3">
         <div
@@ -454,9 +463,6 @@ function Section({
   onToggle,
   children,
   footer,
-  /** When open + has content, body fills remaining height and scrolls inside (Trae fixed zones). */
-  scrollBody = false,
-  hasContent = false,
 }: {
   id: SummarySectionId;
   title: string;
@@ -465,14 +471,11 @@ function Section({
   onToggle: (id: SummarySectionId) => void;
   children: ReactNode;
   footer?: ReactNode;
-  scrollBody?: boolean;
-  hasContent?: boolean;
 }) {
-  const grow = Boolean(open && scrollBody && hasContent);
+  // Size to content (no flex-1 fill). Parent summary column scrolls as a whole when
+  // sections exceed the panel — avoids large empty gaps under short lists like「待办」.
   return (
-    <section
-      className={`flex min-h-0 flex-col border-b border-border last:border-b-0 ${grow ? "flex-1" : "shrink-0"}`}
-    >
+    <section className="flex shrink-0 flex-col border-b border-border last:border-b-0">
       <button
         type="button"
         className="group flex w-full shrink-0 items-center gap-2 px-3 py-3.5 text-left text-[13px] text-text-strong hover:bg-surface-hover/40"
@@ -488,13 +491,7 @@ function Section({
           <span className="text-[11px] font-normal text-text-faint">{count}</span>
         ) : null}
       </button>
-      {open ? (
-        <div
-          className={`min-h-0 px-3 pb-3 ${grow ? "flex-1 overflow-y-auto overscroll-contain" : ""}`}
-        >
-          {children}
-        </div>
-      ) : null}
+      {open ? <div className="px-3 pb-3">{children}</div> : null}
       {open && footer ? <div className="shrink-0 px-3 pb-3">{footer}</div> : null}
     </section>
   );
@@ -1392,15 +1389,13 @@ export function WorkPanel({
         ) : null}
 
         {hasAnyTab && activeKind === "summary" && summaryTabOpen ? (
-          <div className="flex h-full min-h-0 flex-col overflow-hidden">
+          <div className="flex h-full min-h-0 flex-col overflow-y-auto overscroll-contain">
             <Section
               id="todo"
               title="待办"
               count={sessionTodo?.total ?? 0}
               open={openSections.todo}
               onToggle={toggleSection}
-              scrollBody
-              hasContent={!!sessionTodo}
             >
               {!sessionTodo ? (
                 <EmptyBlock
@@ -1419,8 +1414,6 @@ export function WorkPanel({
               count={artifactPaths.length}
               open={openSections.artifacts}
               onToggle={toggleSection}
-              scrollBody
-              hasContent={artifactPaths.length > 0}
             >
               {artifactPaths.length === 0 ? (
                 <EmptyBlock
@@ -1463,8 +1456,6 @@ export function WorkPanel({
               }
               open={openSections.refs}
               onToggle={toggleSection}
-              scrollBody
-              hasContent={!referenceBundle.isEmpty}
             >
               {referenceBundle.isEmpty ? (
                 <EmptyBlock
@@ -1486,8 +1477,6 @@ export function WorkPanel({
               count={subAgents.length}
               open={openSections.spawns}
               onToggle={toggleSection}
-              scrollBody
-              hasContent={subAgents.length > 0}
             >
               {subAgents.length === 0 ? (
                 <EmptyBlock

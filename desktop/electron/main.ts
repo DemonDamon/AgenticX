@@ -14,7 +14,7 @@ import {
   Tray
 } from "electron";
 import { spawn, ChildProcess, execFile, execFileSync } from "node:child_process";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 
 // Before app.ready: mitigate Chromium paint corruption (smearing/ghosting) on
 // some Windows + NVIDIA (or hybrid GPU) stacks.
@@ -9815,6 +9815,65 @@ function registerIpc(): void {
     try {
       const err = await shell.openPath(target);
       if (err) return { ok: false, error: err };
+      return { ok: true };
+    } catch (e) {
+      return { ok: false, error: String(e) };
+    }
+  });
+
+  /**
+   * Trae-style「打开开发者工具」for local HTML preview (iframe srcDoc cannot host
+   * guest DevTools). Loads the file in a dedicated window and opens detached DevTools.
+   */
+  let htmlPreviewInspectWindow: BrowserWindow | null = null;
+  ipcMain.handle("html-preview-open-devtools", async (_event, payload: unknown) => {
+    const body =
+      payload && typeof payload === "object" ? (payload as Record<string, unknown>) : {};
+    const rawPath = String(body.path ?? "").trim();
+    const rawUrl = String(body.url ?? "").trim();
+    let targetUrl = "";
+    if (rawPath) {
+      const fsPath = expandDesktopLocalPath(rawPath);
+      if (!fsPath || !fs.existsSync(fsPath)) {
+        return { ok: false, error: "file not found" };
+      }
+      targetUrl = pathToFileURL(fsPath).href;
+    } else if (/^https?:\/\//i.test(rawUrl)) {
+      targetUrl = rawUrl;
+    } else {
+      return { ok: false, error: "path or http(s) url required" };
+    }
+
+    try {
+      if (htmlPreviewInspectWindow && !htmlPreviewInspectWindow.isDestroyed()) {
+        const current = htmlPreviewInspectWindow.webContents.getURL();
+        if (current !== targetUrl) {
+          await htmlPreviewInspectWindow.loadURL(targetUrl);
+        }
+        if (!htmlPreviewInspectWindow.webContents.isDevToolsOpened()) {
+          htmlPreviewInspectWindow.webContents.openDevTools({ mode: "detach" });
+        }
+        htmlPreviewInspectWindow.show();
+        htmlPreviewInspectWindow.focus();
+        return { ok: true };
+      }
+
+      htmlPreviewInspectWindow = new BrowserWindow({
+        width: 1100,
+        height: 800,
+        show: true,
+        title: "HTML Preview",
+        webPreferences: {
+          nodeIntegration: false,
+          contextIsolation: true,
+          sandbox: true,
+        },
+      });
+      htmlPreviewInspectWindow.on("closed", () => {
+        htmlPreviewInspectWindow = null;
+      });
+      await htmlPreviewInspectWindow.loadURL(targetUrl);
+      htmlPreviewInspectWindow.webContents.openDevTools({ mode: "detach" });
       return { ok: true };
     } catch (e) {
       return { ok: false, error: String(e) };

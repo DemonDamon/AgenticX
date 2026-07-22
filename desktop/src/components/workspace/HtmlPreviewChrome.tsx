@@ -17,7 +17,6 @@ import { HoverTip } from "../ds/HoverTip";
 import { pathToFileUrl } from "../../utils/session-artifacts";
 import {
   applyDevicePreset,
-  DEFAULT_HTML_PREVIEW_VIEWPORT,
   HTML_DEVICE_PRESETS,
   HTML_ZOOM_OPTIONS,
   type HtmlDevicePresetId,
@@ -46,6 +45,10 @@ type HtmlPreviewChromeProps = {
   onRefresh?: () => void;
   /** Optional: jump to source view (WorkspaceFilePreview). */
   onViewSource?: () => void;
+  /** Trae-style: open Chromium DevTools for the preview document. */
+  onOpenDevTools?: () => void;
+  /** Disable DevTools when there is no inspectable target. */
+  openDevToolsDisabled?: boolean;
   className?: string;
 };
 
@@ -98,6 +101,8 @@ export function HtmlPreviewChrome({
   onOpenInBrowser,
   onRefresh,
   onViewSource,
+  onOpenDevTools,
+  openDevToolsDisabled = false,
   className,
 }: HtmlPreviewChromeProps) {
   const [shareOpen, setShareOpen] = useState(false);
@@ -105,6 +110,7 @@ export function HtmlPreviewChrome({
   const [copied, setCopied] = useState<"path" | "url" | null>(null);
   const shareRef = useRef<HTMLDivElement>(null);
   const moreRef = useRef<HTMLDivElement>(null);
+  const hasMoreMenu = Boolean(onViewSource);
 
   useEffect(() => {
     if (!shareOpen && !moreOpen) return;
@@ -162,6 +168,15 @@ export function HtmlPreviewChrome({
         >
           <Smartphone className="h-3.5 w-3.5" strokeWidth={1.8} />
         </IconBtn>
+        {onOpenDevTools ? (
+          <IconBtn
+            label="打开开发者工具"
+            disabled={openDevToolsDisabled}
+            onClick={onOpenDevTools}
+          >
+            <Code2 className="h-3.5 w-3.5" strokeWidth={1.8} />
+          </IconBtn>
+        ) : null}
 
         <div className="relative" ref={shareRef}>
           <IconBtn
@@ -210,20 +225,20 @@ export function HtmlPreviewChrome({
           ) : null}
         </div>
 
-        <div className="relative" ref={moreRef}>
-          <IconBtn
-            label="更多"
-            active={moreOpen}
-            onClick={() => {
-              setShareOpen(false);
-              setMoreOpen((v) => !v);
-            }}
-          >
-            <Ellipsis className="h-3.5 w-3.5" strokeWidth={1.8} />
-          </IconBtn>
-          {moreOpen ? (
-            <div className="absolute right-0 top-full z-50 mt-1 min-w-[160px] overflow-hidden rounded-md border border-border bg-surface-popover py-1 shadow-xl backdrop-blur-xl">
-              {onViewSource ? (
+        {hasMoreMenu ? (
+          <div className="relative" ref={moreRef}>
+            <IconBtn
+              label="更多"
+              active={moreOpen}
+              onClick={() => {
+                setShareOpen(false);
+                setMoreOpen((v) => !v);
+              }}
+            >
+              <Ellipsis className="h-3.5 w-3.5" strokeWidth={1.8} />
+            </IconBtn>
+            {moreOpen && onViewSource ? (
+              <div className="absolute right-0 top-full z-50 mt-1 min-w-[160px] overflow-hidden rounded-md border border-border bg-surface-popover py-1 shadow-xl backdrop-blur-xl">
                 <button
                   type="button"
                   className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-[12px] text-text-primary hover:bg-surface-hover"
@@ -235,22 +250,10 @@ export function HtmlPreviewChrome({
                   <Code2 className="h-3.5 w-3.5" />
                   查看源码
                 </button>
-              ) : null}
-              <button
-                type="button"
-                className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-[12px] text-text-primary hover:bg-surface-hover"
-                onClick={() => {
-                  onViewportChange(DEFAULT_HTML_PREVIEW_VIEWPORT);
-                  onDeviceToolbarVisibleChange(false);
-                  onInspectEnabledChange(false);
-                  setMoreOpen(false);
-                }}
-              >
-                重置预览视图
-              </button>
-            </div>
-          ) : null}
-        </div>
+              </div>
+            ) : null}
+          </div>
+        ) : null}
       </div>
 
       {deviceToolbarVisible ? (
