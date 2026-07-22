@@ -733,7 +733,7 @@ function SkillGroup({
   skillScanBusy: boolean;
   onToggleGlobalSkill: (name: string, enabled: boolean) => void;
 }) {
-  const [expanded, setExpanded] = useState(true);
+  const [expanded, setExpanded] = useState(false);
   if (skills.length === 0) return null;
 
   return (
@@ -3504,7 +3504,7 @@ function SkillsTab() {
       )}
 
       {/* Skill scan roots (presets + custom paths) */}
-      <Panel title="扫描路径" collapsible defaultCollapsed titleClassName={SKILLS_SECTION_PANEL_TITLE_CLASS}>
+      <Panel title="扫描路径" collapsible titleClassName={SKILLS_SECTION_PANEL_TITLE_CLASS}>
         <p className="mb-3 text-xs leading-relaxed text-text-subtle">
           项目内 <code className="text-text-muted">.agents/skills</code>、<code className="text-text-muted">.claude/skills</code>、<code className="text-text-muted">~/.agenticx/skills</code>（含 ClawHub 安装、智能体创建）以及内置包始终参与扫描。以下第三方根目录可按开关启用；也可添加自定义文件夹。
         </p>
