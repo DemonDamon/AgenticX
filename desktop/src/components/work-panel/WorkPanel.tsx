@@ -1133,26 +1133,27 @@ export function WorkPanel({
             }`}
             onClick={() => setActiveKind("summary")}
           >
-            <span
-              role="button"
-              tabIndex={0}
-              className="inline-flex h-[18px] w-[18px] shrink-0 items-center justify-center rounded-full bg-text-faint/40 text-white transition hover:bg-text-faint/60"
-              onClick={(e) => {
-                e.stopPropagation();
-                closeSummaryTab();
-              }}
-              onKeyDown={(e) => {
-                if (e.key === "Enter" || e.key === " ") {
-                  e.preventDefault();
+            <HoverTip label="关闭任务摘要">
+              <span
+                role="button"
+                tabIndex={0}
+                className="group/close inline-flex shrink-0 items-center justify-center text-text-muted transition hover:text-text-strong"
+                onClick={(e) => {
                   e.stopPropagation();
                   closeSummaryTab();
-                }
-              }}
-              aria-label="关闭任务摘要"
-              title="关闭任务摘要"
-            >
-              <X className="h-2.5 w-2.5" strokeWidth={2.4} />
-            </span>
+                }}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" || e.key === " ") {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    closeSummaryTab();
+                  }
+                }}
+                aria-label="关闭任务摘要"
+              >
+                <X className="h-3 w-3 stroke-[2] group-hover/close:stroke-[3]" />
+              </span>
+            </HoverTip>
             <span className="truncate">任务摘要</span>
           </button>
         ) : null}
