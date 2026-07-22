@@ -126,6 +126,12 @@ export function HtmlPreviewShell({
         onOpenInBrowser={openInBrowser}
         onRefresh={showChromeRefresh ? refresh : undefined}
         onViewSource={onViewSource}
+        onOpenDevTools={() => {
+          void window.agenticxDesktop?.openHtmlPreviewDevTools?.(
+            absPath ? { path: absPath } : { url },
+          );
+        }}
+        openDevToolsDisabled={!absPath && !/^https?:\/\//i.test(url)}
       />
       <div className="min-h-0 flex-1">
         <HtmlPreviewBody

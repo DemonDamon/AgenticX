@@ -8,6 +8,8 @@ type NearElectronWebview = HTMLElement & {
   loadURL: (url: string) => Promise<void> | void;
   reload: () => Promise<void> | void;
   getURL: () => string;
+  /** Open Chromium DevTools for this guest (Trae-style HTML/browser preview). */
+  openDevTools: () => void;
 };
 
 declare namespace React {
@@ -1350,6 +1352,11 @@ declare global {
         error?: string;
       }>;
       openExternal: (url: string) => Promise<{ ok: boolean; error?: string }>;
+      /** Local HTML preview: open file/url in a window + detached Chromium DevTools. */
+      openHtmlPreviewDevTools: (payload: {
+        path?: string;
+        url?: string;
+      }) => Promise<{ ok: boolean; error?: string }>;
       /** Popup / top-level http(s) from iframe → navigate WorkPanel browser in-app. */
       onInAppBrowserOpen: (cb: (url: string) => void) => () => void;
       copyPngToClipboard: (buffer: ArrayBuffer) => Promise<{ ok: boolean; error?: string }>;

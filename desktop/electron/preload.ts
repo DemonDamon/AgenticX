@@ -894,6 +894,11 @@ contextBridge.exposeInMainWorld("agenticxDesktop", {
     }>,
   openExternal: async (url: string) =>
     ipcRenderer.invoke("open-external", url) as Promise<{ ok: boolean; error?: string }>,
+  openHtmlPreviewDevTools: async (payload: { path?: string; url?: string }) =>
+    ipcRenderer.invoke("html-preview-open-devtools", payload) as Promise<{
+      ok: boolean;
+      error?: string;
+    }>,
   /** WorkPanel in-app browser: main denied window.open / will-navigate → navigate here. */
   onInAppBrowserOpen: (cb: (url: string) => void): (() => void) => {
     const handler = (_event: unknown, url: string) => {
