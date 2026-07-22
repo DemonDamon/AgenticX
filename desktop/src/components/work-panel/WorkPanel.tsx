@@ -594,7 +594,12 @@ export function WorkPanel({
       if (!read) return;
       try {
         const res = await read(diskPath);
-        if (cancelled || !res?.ok || typeof res.content !== "string") return;
+        if (cancelled || !res?.ok || typeof res.content !== "string") {
+          if (!cancelled && res && !res.ok) {
+            console.warn("[WorkPanel] agent_messages read failed:", res.error || diskPath);
+          }
+          return;
+        }
         const parsed = JSON.parse(res.content) as unknown;
         const paths = collectArtifactPathsFromAgentMessages(
           Array.isArray(parsed) ? parsed : [],
