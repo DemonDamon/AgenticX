@@ -1,6 +1,9 @@
 import type { SubAgent, SubAgentStatus } from "../store";
+import { useAppStore } from "../store";
 import type { SubAgentRunRecord } from "../components/subagent/badge-vm";
 import type { ActivityEntry } from "../components/subagent/run-drawer-api";
+import { fetchSubAgentClusters } from "../components/subagent/run-drawer-api";
+import { isSubAgentLiveStatus } from "./stream-overlay-policy";
 
 function normalizeStatus(raw: string | undefined): SubAgentStatus {
   const status = String(raw ?? "").trim() as SubAgentStatus;
@@ -70,4 +73,81 @@ export function buildSubAgentFromRunRecord(
     outputFiles,
     events: activityToEvents(activities),
   };
+}
+
+/**
+ * Cold-start: load persisted `subagent_runs` clusters for a session into the
+ * Zustand `subAgents` list so WorkPanel「子智能体」survives Desktop / agx restart.
+ * Never clobber an in-memory live (running / awaiting_*) agent.
+ */
+export async function hydrateSessionSubAgentsFromDisk(
+  apiBase: string,
+  apiToken: string,
+  sessionId: string,
+): Promise<{ ok: boolean; hydrated: number; error?: string }> {
+  const sid = String(sessionId || "").trim();
+  const base = String(apiBase || "").trim();
+  const token = String(apiToken || "").trim();
+  if (!sid || !base || !token) {
+    return { ok: false, hydrated: 0, error: "missing session or api credentials" };
+  }
+
+  const resp = await fetchSubAgentClusters(base, token, sid);
+  if (!resp.ok || !Array.isArray(resp.clusters)) {
+    return {
+      ok: false,
+      hydrated: 0,
+      error: resp.error || resp.detail || "subagent clusters fetch failed",
+    };
+  }
+
+  let hydrated = 0;
+  for (const cluster of resp.clusters) {
+    const members = Array.isArray(cluster.members) ? cluster.members : [];
+    for (const member of members) {
+      const rid = String(member.run_id ?? "").trim();
+      if (!rid) continue;
+      const store = useAppStore.getState();
+      const existing = store.subAgents.find((item) => item.id === rid);
+      if (existing && isSubAgentLiveStatus(existing.status)) {
+        continue;
+      }
+      const built = buildSubAgentFromRunRecord(member, [], sid);
+      if (existing) {
+        store.updateSubAgent(rid, {
+          name: built.name,
+          role: built.role,
+          provider: built.provider,
+          model: built.model,
+          status: built.status,
+          currentAction: built.currentAction,
+          progress: built.progress,
+          resultSummary: built.resultSummary,
+          resultFile: built.resultFile,
+          outputFiles: built.outputFiles,
+          sessionId: sid,
+        });
+      } else {
+        store.addSubAgent({
+          id: rid,
+          name: built.name,
+          role: built.role,
+          task: "",
+          provider: built.provider,
+          model: built.model,
+          sessionId: sid,
+        });
+        store.updateSubAgent(rid, {
+          status: built.status,
+          currentAction: built.currentAction,
+          progress: built.progress,
+          resultSummary: built.resultSummary,
+          resultFile: built.resultFile,
+          outputFiles: built.outputFiles,
+        });
+      }
+      hydrated += 1;
+    }
+  }
+  return { ok: true, hydrated };
 }

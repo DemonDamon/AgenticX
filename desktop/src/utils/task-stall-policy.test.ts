@@ -777,4 +777,35 @@ describe("detectModelForgotFinalTodoUpdate", () => {
     ];
     expect(detectModelForgotFinalTodoUpdate(messages, 0)).toBe(false);
   });
+
+  it("promotes when a long completion is followed by short failure notices", () => {
+    const longBody =
+      "子智能体汇总: [数据透视分析师] 状态=completed。分析已完成，完整报告已写入工作目录。" +
+      "以下是基于账单记录的结构化分析结果，包含按模型分组的 token 用量、成本归因摘要，" +
+      "以及后续可执行的优化建议清单。另外补充了高成本会话的典型模式与降本优先级。".padEnd(
+        160,
+        "详",
+      );
+    expect(longBody.length).toBeGreaterThanOrEqual(150);
+    const messages: Message[] = [
+      msg({
+        id: "t1",
+        role: "tool",
+        toolName: "todo_write",
+        content: "[>] 启动子智能体\n[ ] 汇总报告\n[ ] 交付建议\n\n(0/3 completed)",
+      }),
+      msg({ id: "a1", role: "assistant", content: longBody }),
+      msg({
+        id: "a2",
+        role: "assistant",
+        content: "子智能体汇总: [成本归因专家] 状态=failed 执行失败：路径不存在",
+      }),
+      msg({
+        id: "a3",
+        role: "assistant",
+        content: "子智能体汇总: [worker] 状态=failed 执行失败：请检查网络与模型配置后重试。",
+      }),
+    ];
+    expect(detectModelForgotFinalTodoUpdate(messages, 0)).toBe(true);
+  });
 });

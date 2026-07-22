@@ -178,7 +178,10 @@ import {
   type PendingToolResult,
 } from "../utils/pending-tool-result";
 import { injectLiveSubAgentClusterAnchors } from "../utils/subagent-cluster-inline";
-import { buildSubAgentFromRunRecord } from "../utils/subagent-hydrate";
+import {
+  buildSubAgentFromRunRecord,
+  hydrateSessionSubAgentsFromDisk,
+} from "../utils/subagent-hydrate";
 import { fetchRunActivityPage, fetchRunDetail } from "./subagent/run-drawer-api";
 import type { SubAgentRunRecord } from "./subagent/badge-vm";
 import {
@@ -2838,6 +2841,20 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
     if (!sid) return [];
     return subAgents.filter((item) => (item.sessionId ?? "").trim() === sid);
   }, [pane?.sessionId, subAgents]);
+
+  // Cold-start: rehydrate WorkPanel「子智能体」from persisted subagent_runs after restart.
+  useEffect(() => {
+    const sid = (pane?.sessionId ?? "").trim();
+    if (!sid || !apiBase || !apiToken) return;
+    let cancelled = false;
+    void hydrateSessionSubAgentsFromDisk(apiBase, apiToken, sid).then((result) => {
+      if (cancelled || !result.ok) return;
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [pane?.sessionId, apiBase, apiToken]);
+
   const anchoredSubAgentRunIds = useMemo(() => {
     const ids = new Set<string>();
     for (const msg of pane.messages ?? []) {
