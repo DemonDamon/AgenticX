@@ -12,8 +12,8 @@ type Props = {
   todo: ParsedTodo;
 };
 
-/** Soft sage green matching Trae Work completed check. */
-const TRAE_CHECK_CLASS = "text-[#5B9A6F]";
+/** Soft sage green matching Trae Work completed check (shared with StickyTaskBar). */
+export const TRAE_TODO_CHECK_CLASS = "text-[#5B9A6F]";
 
 export function SessionTodoList({ todo }: Props) {
   return (
@@ -25,7 +25,7 @@ export function SessionTodoList({ todo }: Props) {
             aria-hidden
           >
             {item.status === "completed" ? (
-              <CircleCheck className={`h-4 w-4 ${TRAE_CHECK_CLASS}`} strokeWidth={1.75} />
+              <CircleCheck className={`h-4 w-4 ${TRAE_TODO_CHECK_CLASS}`} strokeWidth={1.75} />
             ) : item.status === "in_progress" ? (
               <Loader2 className="h-3.5 w-3.5 animate-spin text-[rgb(var(--theme-color-rgb,59,130,246))]" />
             ) : (

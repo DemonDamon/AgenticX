@@ -1,11 +1,12 @@
 import { useEffect, useMemo, useState } from "react";
-import { AlertTriangle, ChevronDown, ChevronUp, ListChecks, Check, Circle, Loader2 } from "lucide-react";
+import { AlertTriangle, ChevronDown, ChevronUp, ListChecks, Circle, CircleCheck, Loader2 } from "lucide-react";
 import type { Message } from "../store";
 import {
   isTodoSnapshotSuperseded,
   resolveDisplayedTodoFromMessages,
 } from "../utils/task-stall-policy";
 import type { SessionExecutionState } from "../utils/streaming-stop-policy";
+import { TRAE_TODO_CHECK_CLASS } from "./work-panel/SessionTodoList";
 
 type HarnessPhase = "explore" | "read" | "author";
 
@@ -202,23 +203,23 @@ export function StickyTaskBar({
                 aria-hidden
               >
                 {item.status === "completed" ? (
-                  <Check className="h-4 w-4 text-emerald-400" strokeWidth={2.5} />
+                  <CircleCheck className={`h-4 w-4 ${TRAE_TODO_CHECK_CLASS}`} strokeWidth={1.75} />
                 ) : item.status === "in_progress" && liveness === "stalled" ? (
                   <AlertTriangle className="h-3.5 w-3.5 text-amber-400" />
                 ) : item.status === "in_progress" ? (
                   <Loader2 className="h-3.5 w-3.5 animate-spin text-[rgb(var(--theme-color-rgb,59,130,246))]" />
                 ) : (
-                  <Circle className="h-3.5 w-3.5 text-text-faint" />
+                  <Circle className="h-3.5 w-3.5 text-text-faint" strokeWidth={1.75} />
                 )}
               </span>
               <div className="min-w-0 flex-1">
                 <div
                   className={
                     item.status === "completed"
-                      ? "text-[12px] leading-snug text-text-subtle line-through"
+                      ? "text-[12px] leading-snug text-text-primary"
                       : item.status === "in_progress"
                         ? "text-[12px] font-medium leading-snug text-text-strong"
-                        : "text-[12px] leading-snug text-text-primary"
+                        : "text-[12px] leading-snug text-text-muted"
                   }
                 >
                   {item.content}
