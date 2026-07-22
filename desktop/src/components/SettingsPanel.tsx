@@ -44,6 +44,7 @@ import {
   Mic,
   Network,
   Database,
+  X,
 } from "lucide-react";
 import { Panel } from "./ds/Panel";
 import { SettingsDropdown } from "./ds/SettingsDropdown";
@@ -8075,15 +8076,17 @@ export function SettingsPanel({
 
         {/* Right: content */}
         <div className="flex h-full min-h-0 flex-1 flex-col overflow-hidden">
-          <div className="flex shrink-0 items-center justify-between border-b border-border pl-5 pr-5 py-3">
-            <h3 className="text-[15px] font-semibold text-text-strong">
+          <div className="relative z-20 flex shrink-0 items-center justify-between gap-3 border-b border-border bg-surface-panel pl-5 pr-5 py-3">
+            <h3 className="min-w-0 flex-1 truncate text-[15px] font-semibold text-text-strong">
               {TABS.find((t) => t.id === tab)?.label ?? "设置"}
             </h3>
             <button
-              className="rounded-lg border border-transparent p-1.5 text-text-faint transition hover:border-border-strong hover:bg-surface-card hover:text-text-strong"
+              type="button"
+              aria-label="关闭"
+              className="no-drag inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-transparent text-text-faint transition hover:border-border-strong hover:bg-surface-card hover:text-text-strong"
               onClick={onClose}
             >
-              <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" /></svg>
+              <X className="h-4 w-4" strokeWidth={2} aria-hidden />
             </button>
           </div>
 
