@@ -48,6 +48,47 @@ function looksLikeArtifactFile(path: string): boolean {
   return Boolean(base && /\.[a-zA-Z0-9]{1,12}$/.test(base));
 }
 
+/** Best-effort $HOME for expanding `~/…` during normalize (Node/Electron/Vitest). */
+function homeDirForArtifacts(): string {
+  try {
+    const env = typeof process !== "undefined" ? process.env : undefined;
+    const fromEnv = String(env?.HOME || env?.USERPROFILE || "").trim();
+    if (fromEnv) return fromEnv.replace(/\\/g, "/").replace(/\/+$/, "");
+  } catch {
+    /* ignore */
+  }
+  return "";
+}
+
+/** Expand `~/…` when home is known; otherwise return the path unchanged. */
+export function expandArtifactHomePath(value: string, homeDir?: string): string {
+  const raw = String(value || "").trim().replace(/\\/g, "/");
+  if (!raw) return "";
+  const home = String(homeDir || homeDirForArtifacts() || "")
+    .trim()
+    .replace(/\\/g, "/")
+    .replace(/\/+$/, "");
+  if (!home) return raw;
+  if (raw === "~") return home;
+  if (raw.startsWith("~/")) return `${home}/${raw.slice(2)}`;
+  return raw;
+}
+
+/**
+ * Home-relative key so `~/Desktop/a.md` and `/Users/<name>/Desktop/a.md`
+ * collide for dedupe even when $HOME is unavailable in the renderer.
+ */
+export function artifactHomeRelativeKey(normalized: string): string | null {
+  const value = String(normalized || "").trim().replace(/\\/g, "/");
+  if (!value) return null;
+  if (value.startsWith("~/")) return value;
+  const posix = value.match(/^\/(?:Users|home)\/[^/]+\/(.+)$/);
+  if (posix?.[1]) return `~/${posix[1]}`;
+  const win = value.match(/^[a-zA-Z]:\/Users\/[^/]+\/(.+)$/i);
+  if (win?.[1]) return `~/${win[1]}`;
+  return null;
+}
+
 function normalizeArtifactPath(raw: string): string | null {
   let value = String(raw || "").trim();
   if (!value) return null;
@@ -69,8 +110,27 @@ function normalizeArtifactPath(raw: string): string | null {
 
 function addPath(paths: string[], seen: Set<string>, raw: string): void {
   const normalized = normalizeArtifactPath(raw);
-  if (!normalized || seen.has(normalized)) return;
-  seen.add(normalized);
+  if (!normalized) return;
+
+  // `~/Desktop/a.md` ≡ `/Users/<name>/Desktop/a.md` (string-level home-relative key).
+  const relKey = artifactHomeRelativeKey(normalized);
+  const keys = [normalized];
+  if (relKey) keys.push(relKey);
+
+  if (keys.some((k) => seen.has(k))) {
+    // Upgrade a previously stored tilde path to the concrete absolute form.
+    if (!normalized.startsWith("~/") && relKey) {
+      const idx = paths.findIndex(
+        (p) => p === relKey || artifactHomeRelativeKey(p) === relKey,
+      );
+      if (idx >= 0 && String(paths[idx] || "").startsWith("~/")) {
+        paths[idx] = normalized;
+        seen.add(normalized);
+      }
+    }
+    return;
+  }
+  for (const k of keys) seen.add(k);
   paths.push(normalized);
 }
 

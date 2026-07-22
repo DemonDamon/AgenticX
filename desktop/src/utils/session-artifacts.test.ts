@@ -2,8 +2,10 @@ import { describe, expect, it } from "vitest";
 import type { Message, SubAgent } from "../store";
 import {
   artifactBaseName,
+  artifactHomeRelativeKey,
   collectArtifactPathsFromAgentMessages,
   collectSessionArtifactPaths,
+  expandArtifactHomePath,
   isInAppArtifactPreviewPath,
   isInAppHtmlPreviewPath,
   looksLikeDirectoryPath,
@@ -203,6 +205,43 @@ describe("collectSessionArtifactPaths", () => {
     ];
     expect(collectSessionArtifactPaths(messages, null, null, "sess-a")).toEqual(["/tmp/a.txt"]);
   });
+
+  it("dedupes ~/Desktop/file and /Users/<name>/Desktop/file as one artifact", () => {
+    const abs = "/Users/damon/Desktop/harness_ai_security_proposal.md";
+    const tilde = "~/Desktop/harness_ai_security_proposal.md";
+    const messages: Message[] = [
+      toolMsg({
+        id: "t1",
+        toolName: "file_write",
+        toolArgs: { path: abs },
+        content: `OK: wrote ${abs}`,
+      }),
+      assistantMsg({
+        id: "a1",
+        content: `报告已保存至 \`${tilde}\``,
+      }),
+    ];
+    const paths = collectSessionArtifactPaths(messages);
+    expect(paths).toEqual([abs]);
+  });
+
+  it("upgrades tilde path to absolute when absolute form arrives later", () => {
+    const abs = "/Users/damon/Desktop/attack_chain.svg";
+    const tilde = "~/Desktop/attack_chain.svg";
+    const messages: Message[] = [
+      assistantMsg({
+        id: "a1",
+        content: `已保存至 \`${tilde}\``,
+      }),
+      toolMsg({
+        id: "t1",
+        toolName: "file_write",
+        toolArgs: { path: abs },
+        content: `OK: wrote ${abs}`,
+      }),
+    ];
+    expect(collectSessionArtifactPaths(messages)).toEqual([abs]);
+  });
 });
 
 describe("collectArtifactPathsFromAgentMessages", () => {
@@ -239,6 +278,15 @@ describe("collectArtifactPathsFromAgentMessages", () => {
 });
 
 describe("artifact helpers", () => {
+  it("expandArtifactHomePath and artifactHomeRelativeKey", () => {
+    expect(expandArtifactHomePath("~/Desktop/a.md", "/Users/damon")).toBe(
+      "/Users/damon/Desktop/a.md",
+    );
+    expect(artifactHomeRelativeKey("/Users/damon/Desktop/a.md")).toBe("~/Desktop/a.md");
+    expect(artifactHomeRelativeKey("~/Desktop/a.md")).toBe("~/Desktop/a.md");
+    expect(artifactHomeRelativeKey("/tmp/a.md")).toBeNull();
+  });
+
   it("artifactBaseName", () => {
     expect(artifactBaseName("/a/b/c.svg")).toBe("c.svg");
     expect(artifactBaseName("/a/b/charts/")).toBe("charts");
