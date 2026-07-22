@@ -1301,54 +1301,149 @@ function ActionCircleButton({
   );
 }
 
+function composerFileExt(name: string): string {
+  const idx = name.lastIndexOf(".");
+  if (idx < 0 || idx === name.length - 1) return "FILE";
+  return name.slice(idx + 1).toUpperCase();
+}
+
+function composerFileIconKind(name: string, mimeType: string): "spreadsheet" | "document" | "code" | "image" | "generic" {
+  const lower = name.toLowerCase();
+  const mime = mimeType.toLowerCase();
+  if (mime.startsWith("image/") || /\.(png|jpe?g|gif|webp|bmp|svg|heic|avif)$/.test(lower)) return "image";
+  if (/\.(xls|xlsx|csv|tsv|ods)$/.test(lower) || mime.includes("spreadsheet") || mime === "text/csv") {
+    return "spreadsheet";
+  }
+  if (/\.(pdf|doc|docx|ppt|pptx|pages|rtf|odt|txt|md)$/.test(lower)) return "document";
+  if (/\.(ts|tsx|js|jsx|mjs|cjs|py|go|rs|java|kt|swift|c|cpp|h|hpp|cs|rb|php|sh|json|yaml|yml|toml|xml|html|css|sql)$/.test(lower)) {
+    return "code";
+  }
+  return "generic";
+}
+
+function composerIconPalette(kind: ReturnType<typeof composerFileIconKind>): { bg: string; fg: string } {
+  switch (kind) {
+    case "spreadsheet":
+      return { bg: "rgba(34, 197, 94, 0.16)", fg: "rgb(22, 163, 74)" };
+    case "document":
+      return { bg: "rgba(59, 130, 246, 0.14)", fg: "rgb(37, 99, 235)" };
+    case "code":
+      return { bg: "rgba(168, 85, 247, 0.14)", fg: "rgb(147, 51, 234)" };
+    case "image":
+      return { bg: "rgba(236, 72, 153, 0.12)", fg: "rgb(219, 39, 119)" };
+    default:
+      return { bg: "var(--surface-hover)", fg: "var(--text-faint)" };
+  }
+}
+
+function ComposerFileGlyph({ kind }: { kind: ReturnType<typeof composerFileIconKind> }) {
+  const common = {
+    viewBox: "0 0 24 24",
+    fill: "none",
+    stroke: "currentColor",
+    strokeWidth: 1.8,
+    className: "h-[18px] w-[18px]",
+  } as const;
+  if (kind === "spreadsheet") {
+    return (
+      <svg {...common}>
+        <path strokeLinecap="round" strokeLinejoin="round" d="M4 5.5A1.5 1.5 0 015.5 4h13A1.5 1.5 0 0120 5.5v13a1.5 1.5 0 01-1.5 1.5h-13A1.5 1.5 0 014 18.5v-13z" />
+        <path strokeLinecap="round" strokeLinejoin="round" d="M4 9.5h16M4 14.5h16M9.5 4v16" />
+      </svg>
+    );
+  }
+  if (kind === "document") {
+    return (
+      <svg {...common}>
+        <path strokeLinecap="round" strokeLinejoin="round" d="M7 3.5h6.5L19 9v11.5A1.5 1.5 0 0117.5 22h-10A1.5 1.5 0 016 20.5v-15A1.5 1.5 0 017.5 4" />
+        <path strokeLinecap="round" strokeLinejoin="round" d="M13.5 3.5V9H19M9 13h6M9 17h4" />
+      </svg>
+    );
+  }
+  if (kind === "code") {
+    return (
+      <svg {...common}>
+        <path strokeLinecap="round" strokeLinejoin="round" d="M8 8l-4 4 4 4M16 8l4 4-4 4M13 5l-2 14" />
+      </svg>
+    );
+  }
+  return (
+    <svg {...common}>
+      <path strokeLinecap="round" strokeLinejoin="round" d="M8 3.5h5.5L18 8v12.5A1.5 1.5 0 0116.5 22h-8A1.5 1.5 0 017 20.5v-15A1.5 1.5 0 018.5 4" />
+      <path strokeLinecap="round" strokeLinejoin="round" d="M13.5 3.5V8H18" />
+    </svg>
+  );
+}
+
+/** Trae Work–style composer attachment chip (matches sent-message AttachmentCard). */
 function AttachmentChip({ file, onRemove }: { file: AttachedFile; onRemove: () => void }) {
-  const isImage = !!file.dataUrl || file.mimeType.startsWith("image/");
+  const isImage = !!file.dataUrl && file.mimeType.startsWith("image/");
   const isReferenceToken = !!file.referenceToken;
   const pathHint =
     isReferenceToken && file.sourcePath ? formatReferencePathHint(file.sourcePath) : "";
+  const ext = composerFileExt(file.name);
+  const kind = composerFileIconKind(file.name, file.mimeType);
+  const palette = composerIconPalette(kind);
+  const secondary = isReferenceToken
+    ? pathHint
+      ? `@ ${pathHint}`
+      : "@ 文件引用"
+    : file.status === "parsing"
+      ? "解析中..."
+      : file.status === "error"
+        ? file.errorText || "解析失败"
+        : ext;
+
   return (
     <div
-      className={`group relative inline-flex items-center gap-3 rounded-xl border px-3 py-2 text-sm transition-colors ${
+      className={`group relative inline-flex min-w-[148px] max-w-[200px] items-center gap-2.5 rounded-2xl border px-2.5 py-2 text-left transition-colors ${
         isReferenceToken
-          ? "border-sky-500/40 bg-sky-500/10 text-sky-100"
-          : "border-border bg-surface-card hover:bg-surface-hover"
+          ? "border-sky-500/40 bg-sky-500/10"
+          : "border-border/70 bg-surface-panel hover:bg-surface-hover/80"
       }`}
-      style={{ maxWidth: "320px" }}
-      title={file.sourcePath ? resolveReferenceSourcePath(file.name, file.sourcePath) : undefined}
+      title={file.sourcePath ? resolveReferenceSourcePath(file.name, file.sourcePath) : file.name}
     >
-      {isImage && file.dataUrl ? (
-        <img src={file.dataUrl} alt={file.name} className="h-10 w-10 shrink-0 rounded-lg object-cover" />
-      ) : isReferenceToken ? (
-        <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-sky-500/20 text-sky-400">
-          <span className="text-lg">↘</span>
-        </div>
-      ) : (
-        <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-[#3b82f6] text-white">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} className="h-5 w-5">
-            <path strokeLinecap="round" strokeLinejoin="round" d="M10 20l4-16m4 4l4 4-4 4M6 16l-4-4 4-4" />
-          </svg>
-        </div>
-      )}
-      <div className="flex min-w-0 flex-col justify-center">
-        <div className={`truncate font-medium leading-tight ${isReferenceToken ? "text-sky-100" : "text-text-primary"}`}>
-          {file.name}
-        </div>
-        {isReferenceToken ? (
-          <div className="truncate text-xs text-sky-200/80 mt-0.5">
-            {pathHint ? `@ ${pathHint}` : "@ 文件引用"}
+      <div className="flex h-10 w-10 shrink-0 items-center justify-center overflow-hidden rounded-[10px]">
+        {isImage && file.dataUrl ? (
+          <img src={file.dataUrl} alt={file.name} className="h-full w-full object-cover" />
+        ) : isReferenceToken ? (
+          <div className="flex h-full w-full items-center justify-center bg-sky-500/20 text-sky-400">
+            <span className="text-base leading-none">↘</span>
           </div>
-        ) : file.status === "parsing" ? (
-          <div className="text-xs text-text-faint animate-pulse mt-0.5">解析中...</div>
-        ) : file.status === "error" ? (
-          <div className="truncate text-xs text-status-error mt-0.5">{file.errorText || "解析失败"}</div>
         ) : (
-          <div className="text-xs text-text-faint mt-0.5">
-            {file.name.includes('.') ? file.name.split('.').pop()?.toUpperCase() : '文件'} · {formatFileSize(file.size)}
+          <div
+            className="flex h-full w-full items-center justify-center"
+            style={{ background: palette.bg, color: palette.fg }}
+          >
+            <ComposerFileGlyph kind={kind} />
           </div>
         )}
       </div>
+      <div className="min-w-0 flex-1 pr-4">
+        <div
+          className={`truncate text-[13px] font-medium leading-tight ${
+            isReferenceToken ? "text-sky-100" : "text-text-strong"
+          }`}
+        >
+          {file.name}
+        </div>
+        <div
+          className={`mt-0.5 truncate text-[11px] tracking-wide ${
+            isReferenceToken
+              ? "text-sky-200/80"
+              : file.status === "parsing"
+                ? "animate-pulse text-text-faint normal-case"
+                : file.status === "error"
+                  ? "text-status-error normal-case"
+                  : "uppercase text-text-faint"
+          }`}
+        >
+          {secondary}
+        </div>
+      </div>
       <button
-        className={`absolute right-2 top-2 flex h-5 w-5 items-center justify-center rounded-full opacity-0 transition-opacity group-hover:opacity-100 ${
+        type="button"
+        className={`absolute right-1.5 top-1.5 flex h-5 w-5 items-center justify-center rounded-full opacity-0 transition-opacity group-hover:opacity-100 ${
           isReferenceToken
             ? "bg-sky-500/20 text-sky-200 hover:bg-sky-500/40 hover:text-sky-100"
             : "bg-surface-panel text-text-muted hover:bg-surface-hover hover:text-text-primary"
@@ -1752,12 +1847,6 @@ function isLikelyTextFile(file: File): boolean {
 function isReferenceableDocumentFile(file: File): boolean {
   const lower = file.name.toLowerCase();
   return [".doc", ".docx", ".ppt", ".pptx", ".xls", ".xlsx", ".pdf"].some((ext) => lower.endsWith(ext));
-}
-
-function formatFileSize(size: number): string {
-  if (size < 1024) return `${size}B`;
-  if (size < 1024 * 1024) return `${(size / 1024).toFixed(1)}KB`;
-  return `${(size / (1024 * 1024)).toFixed(1)}MB`;
 }
 
 /** Match composer attachment to parsed contextFiles row for /api/chat context_files body. */
