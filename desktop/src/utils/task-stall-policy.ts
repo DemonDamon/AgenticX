@@ -626,16 +626,16 @@ export function detectModelForgotFinalTodoUpdate(
   lastTodoIndex: number,
 ): boolean {
   if (lastTodoIndex < 0 || lastTodoIndex >= messages.length - 1) return false;
-  let lastAssistant: Message | undefined;
+  // Scan ANY substantial assistant after the last todo_write — not only the
+  // chronologically last one. Common cold-start case: a long subagent completion
+  // summary is later followed by short failure notices (<150 chars); using only
+  // the tail message would incorrectly skip promote and demote checks to empty circles.
   for (let i = lastTodoIndex + 1; i < messages.length; i += 1) {
     const m = messages[i];
     if (!m) continue;
-    if (m.role === "assistant" && m.id !== "__stream__") {
-      lastAssistant = m;
-    }
+    if (m.role !== "assistant" || m.id === "__stream__") continue;
+    if (!messageLooksLikeAssistantFinal(m)) continue;
+    if (assistantBodyText(m).length >= 150) return true;
   }
-  if (!messageLooksLikeAssistantFinal(lastAssistant)) return false;
-  const body = assistantBodyText(lastAssistant!);
-  if (body.length < 150) return false;
-  return true;
+  return false;
 }

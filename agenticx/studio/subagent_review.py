@@ -68,6 +68,11 @@ def run_record_to_member_summary(
         "kind": record.kind,
         "cluster_id": record.cluster_id,
         "updated_at": record.updated_at,
+        # Cold-start WorkPanel / Spawns hydration needs these without N+1 run detail fetches.
+        "task": record.task or "",
+        "result_summary": record.result_summary or "",
+        "result_file": record.result_file,
+        "output_files": list(record.output_files or []),
     }
     if memory:
         _apply_memory_overrides(summary, record, memory, summary_only=True)
