@@ -10891,6 +10891,102 @@ function registerIpc(): void {
     }
   });
 
+  /**
+   * Stage session「任务产物」into ~/.agenticx/sessions/<sid>/task_artifacts
+   * as real file copies (not symlinks). Studio `read_taskspace_file` resolves
+   * paths with Path.resolve(), so symlinks into /tmp would raise
+   * "path escapes taskspace root". Copies keep files inside the taskspace root.
+   * Originals are left untouched.
+   */
+  ipcMain.handle(
+    "stage-session-artifacts",
+    async (
+      _event,
+      payload: { sessionId?: string; paths?: string[] },
+    ) => {
+      try {
+        const sid = String(payload?.sessionId || "").trim();
+        if (!sid || !/^[A-Za-z0-9._-]+$/.test(sid)) {
+          return { ok: false, error: "invalid sessionId" };
+        }
+        const rawPaths = Array.isArray(payload?.paths) ? payload.paths : [];
+        const stagingDir = path.join(
+          os.homedir(),
+          ".agenticx",
+          "sessions",
+          sid,
+          "task_artifacts",
+        );
+        await fs.promises.mkdir(stagingDir, { recursive: true });
+
+        // Refresh staging: remove previous entries (links/copies), keep dir.
+        const existing = await fs.promises.readdir(stagingDir);
+        for (const name of existing) {
+          await fs.promises.rm(path.join(stagingDir, name), {
+            force: true,
+            recursive: true,
+          });
+        }
+
+        const usedNames = new Set<string>();
+        let linked = 0;
+        const uniqueName = (sourcePath: string): string => {
+          const base = path.basename(sourcePath) || "artifact";
+          if (!usedNames.has(base)) {
+            usedNames.add(base);
+            return base;
+          }
+          const parent = path.basename(path.dirname(sourcePath)) || "dir";
+          const alt = `${parent}_${base}`;
+          if (!usedNames.has(alt)) {
+            usedNames.add(alt);
+            return alt;
+          }
+          let i = 2;
+          while (usedNames.has(`${i}_${base}`)) i += 1;
+          const finalName = `${i}_${base}`;
+          usedNames.add(finalName);
+          return finalName;
+        };
+
+        for (const raw of rawPaths) {
+          const source = normalizeLocalFsPath(String(raw || ""));
+          if (!source || !fs.existsSync(source)) continue;
+          let st: fs.Stats;
+          try {
+            st = await fs.promises.stat(source);
+          } catch {
+            continue;
+          }
+          if (!st.isFile()) continue;
+          const resolvedSource = path.resolve(source);
+          const stagingResolved = path.resolve(stagingDir);
+          // Never stage a file that already lives inside the staging dir.
+          if (
+            resolvedSource === stagingResolved ||
+            resolvedSource.startsWith(stagingResolved + path.sep)
+          ) {
+            continue;
+          }
+          const name = uniqueName(source);
+          const dest = path.join(stagingDir, name);
+          // Real copy (not symlink): Studio resolve() must stay under taskspace root.
+          await fs.promises.copyFile(resolvedSource, dest);
+          linked += 1;
+        }
+
+        return {
+          ok: true,
+          stagingDir,
+          homeDir: os.homedir(),
+          linked,
+        };
+      } catch (err) {
+        return { ok: false, error: String(err) };
+      }
+    },
+  );
+
   const PREVIEW_MAX_BYTES = 25 * 1024 * 1024;
   const PREVIEW_FILE_MIME_BY_EXT: Record<string, string> = {
     ".pdf": "application/pdf",
