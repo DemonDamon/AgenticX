@@ -174,6 +174,86 @@ function extractTableFilesUnderSaveDirs(content: string, paths: string[], seen: 
   }
 }
 
+/**
+ * Map persisted `agent_messages.json` rows into collector-friendly Message shapes.
+ * Agent rows use OpenAI-style `name` + optional assistant `tool_calls`, while the
+ * chat pane uses `toolName` / `toolArgs` — without this bridge, HTML writes that
+ * only landed in agent_messages never appear under WorkPanel「任务产物」.
+ */
+export function agentMessageRowsToCollectorMessages(rows: unknown[] | undefined | null): Message[] {
+  const out: Message[] = [];
+  if (!Array.isArray(rows)) return out;
+
+  for (let i = 0; i < rows.length; i += 1) {
+    const row = rows[i];
+    if (!row || typeof row !== "object") continue;
+    const r = row as Record<string, unknown>;
+    const role = String(r.role || "").trim();
+
+    if (role === "tool") {
+      out.push({
+        id: String(r.tool_call_id || r.id || `am-tool-${i}`),
+        role: "tool",
+        content: String(r.content ?? ""),
+        toolName: String(r.name || r.tool_name || "").trim() || undefined,
+        timestamp: 0,
+      });
+      continue;
+    }
+
+    if (role === "assistant") {
+      out.push({
+        id: String(r.id || `am-asst-${i}`),
+        role: "assistant",
+        content: String(r.content ?? ""),
+        timestamp: 0,
+      });
+      const toolCalls = r.tool_calls;
+      if (!Array.isArray(toolCalls)) continue;
+      for (let j = 0; j < toolCalls.length; j += 1) {
+        const tc = toolCalls[j];
+        if (!tc || typeof tc !== "object") continue;
+        const call = tc as Record<string, unknown>;
+        const fn = call.function;
+        if (!fn || typeof fn !== "object") continue;
+        const fnObj = fn as Record<string, unknown>;
+        const name = String(fnObj.name || "").trim();
+        if (name !== "file_write" && name !== "file_edit") continue;
+        let args: Record<string, unknown> = {};
+        const rawArgs = fnObj.arguments;
+        if (typeof rawArgs === "string" && rawArgs.trim()) {
+          try {
+            const parsed = JSON.parse(rawArgs) as unknown;
+            if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+              args = parsed as Record<string, unknown>;
+            }
+          } catch {
+            /* ignore malformed tool args */
+          }
+        } else if (rawArgs && typeof rawArgs === "object" && !Array.isArray(rawArgs)) {
+          args = rawArgs as Record<string, unknown>;
+        }
+        out.push({
+          id: String(call.id || `am-tc-${i}-${j}`),
+          role: "tool",
+          toolName: name,
+          toolArgs: args,
+          content: "",
+          timestamp: 0,
+        });
+      }
+    }
+  }
+  return out;
+}
+
+/** Collect artifact paths from raw `agent_messages.json` rows. */
+export function collectArtifactPathsFromAgentMessages(
+  rows: unknown[] | undefined | null,
+): string[] {
+  return collectSessionArtifactPaths(agentMessageRowsToCollectorMessages(rows));
+}
+
 /** Extract artifact absolute paths from pane messages + sub-agent outputs. */
 export function collectSessionArtifactPaths(
   messages: Message[] | undefined | null,

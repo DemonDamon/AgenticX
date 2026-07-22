@@ -44,6 +44,7 @@ import { HoverTip } from "../ds/HoverTip";
 import { loadPreparedHtmlSrcDoc } from "../../utils/html-preview-assets";
 import {
   artifactBaseName,
+  collectArtifactPathsFromAgentMessages,
   collectSessionArtifactPaths,
   isInAppArtifactPreviewPath,
   isInAppHtmlPreviewPath,
@@ -574,11 +575,49 @@ export function WorkPanel({
     refs: false,
   });
   const [extraArtifactPaths, setExtraArtifactPaths] = useState<string[]>([]);
+  /** Paths only present in agent_messages.json (ahead of chat messages.json). */
+  const [agentArtifactPaths, setAgentArtifactPaths] = useState<string[]>([]);
   const [artifactHighlightPath, setArtifactHighlightPath] = useState<string | null>(null);
 
+  // Cold-start / SSE gap: chat `messages.json` can lag `agent_messages.json`
+  // (e.g. HTML file_write after UI disconnect). Merge agent-side writes into「任务产物」.
+  useEffect(() => {
+    const sid = String(sessionId || "").trim();
+    if (!sid) {
+      setAgentArtifactPaths([]);
+      return;
+    }
+    let cancelled = false;
+    const diskPath = `~/.agenticx/sessions/${sid}/agent_messages.json`;
+    void (async () => {
+      const read = window.agenticxDesktop?.readLocalTextFile;
+      if (!read) return;
+      try {
+        const res = await read(diskPath);
+        if (cancelled || !res?.ok || typeof res.content !== "string") return;
+        const parsed = JSON.parse(res.content) as unknown;
+        const paths = collectArtifactPathsFromAgentMessages(
+          Array.isArray(parsed) ? parsed : [],
+        );
+        if (!cancelled) setAgentArtifactPaths(paths);
+      } catch {
+        if (!cancelled) setAgentArtifactPaths([]);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [sessionId, paneMessages.length, summaryTabOpen]);
+
   const artifactPaths = useMemo(
-    () => collectSessionArtifactPaths(paneMessages, subAgents, extraArtifactPaths, sessionId),
-    [paneMessages, subAgents, extraArtifactPaths, sessionId],
+    () =>
+      collectSessionArtifactPaths(
+        paneMessages,
+        subAgents,
+        [...extraArtifactPaths, ...agentArtifactPaths],
+        sessionId,
+      ),
+    [paneMessages, subAgents, extraArtifactPaths, agentArtifactPaths, sessionId],
   );
 
   const referenceBundle = useMemo(
