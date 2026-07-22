@@ -748,6 +748,13 @@ export function SidebarSessionHistory() {
     }
   };
 
+  const openSessionInNewPane = (row: SidebarSessionRow) => {
+    const avatarId = String(row.avatar_id ?? "").trim() || null;
+    const avatarName = resolveSidebarAvatarChipName(row, avatarNameById);
+    const paneId = addPane(avatarId, avatarName, "");
+    void openSession(row, paneId);
+  };
+
   const deleteOneSession = async (row: SidebarSessionRow) => {
     const api = window.agenticxDesktop;
     if (typeof api.deleteSession !== "function") return;
@@ -792,11 +799,8 @@ export function SidebarSessionHistory() {
       setEditingName(sidebarSessionLabel(row));
       return;
     }
-    if (action === "open_new_tab") {
-      const avatarId = String(row.avatar_id ?? "").trim() || null;
-      const avatarName = resolveSidebarAvatarChipName(row, avatarNameById);
-      const paneId = addPane(avatarId, avatarName, "");
-      void openSession(row, paneId);
+    if (action === "toggle_pin") {
+      await togglePinSession(row);
       return;
     }
     if (action === "fork") {
@@ -1019,19 +1023,17 @@ export function SidebarSessionHistory() {
                   <MoreHorizontal className="h-3.5 w-3.5" strokeWidth={1.8} />
                 </button>
               </HoverTip>
-              <HoverTip label={row.pinned ? "取消置顶" : "置顶"}>
+              <HoverTip label="在新标签页打开">
                 <button
                   type="button"
-                  className={`inline-flex h-6 w-6 items-center justify-center rounded-md hover:bg-surface-card ${
-                    row.pinned ? "text-amber-400" : "text-text-muted hover:text-text-strong"
-                  }`}
+                  className="inline-flex h-6 w-6 items-center justify-center rounded-md text-text-muted transition-[color,transform,background-color] duration-100 ease-out hover:bg-surface-card hover:text-text-strong active:scale-[0.96]"
                   onClick={(e) => {
                     e.stopPropagation();
-                    void togglePinSession(row);
+                    openSessionInNewPane(row);
                   }}
-                  aria-label={row.pinned ? "取消置顶" : "置顶"}
+                  aria-label="在新标签页打开"
                 >
-                  <Pin className="h-3.5 w-3.5" strokeWidth={1.8} />
+                  <SquareArrowOutUpRight className="h-3.5 w-3.5" strokeWidth={1.8} />
                 </button>
               </HoverTip>
               <HoverTip label="文件管理">
@@ -1369,8 +1371,13 @@ export function SidebarSessionHistory() {
               {(
                 [
                   { id: "rename" as const, label: "重命名", icon: Pencil, danger: false },
+                  {
+                    id: "toggle_pin" as const,
+                    label: moreMenuRow.pinned ? "取消置顶" : "置顶",
+                    icon: Pin,
+                    danger: false,
+                  },
                   { id: "file_manage" as const, label: "文件管理", icon: ListTree, danger: false },
-                  { id: "open_new_tab" as const, label: "在新标签打开", icon: SquareArrowOutUpRight, danger: false },
                   { id: "fork" as const, label: "分叉会话", icon: GitBranch, danger: false },
                   ...(!isAutomationPaneAvatarId(moreMenuRow.avatar_id)
                     ? [
@@ -1409,7 +1416,13 @@ export function SidebarSessionHistory() {
                     onClick={() => void runMoreAction(item.id, moreMenuRow)}
                   >
                     <Icon
-                      className={`h-3.5 w-3.5 shrink-0 ${item.danger ? "text-rose-400" : "text-text-faint"}`}
+                      className={`h-3.5 w-3.5 shrink-0 ${
+                        item.danger
+                          ? "text-rose-400"
+                          : item.id === "toggle_pin" && moreMenuRow.pinned
+                            ? "text-amber-400"
+                            : "text-text-faint"
+                      }`}
                       strokeWidth={1.75}
                     />
                     <span className="truncate">{item.label}</span>
