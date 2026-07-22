@@ -1435,7 +1435,8 @@ function normalizeLocalFsPath(raw: string): string {
       return decodeURIComponent(trimmed.replace(/^file:\/\//, ""));
     }
   }
-  return trimmed;
+  // Expand ~/… so renderer callers (e.g. WorkPanel agent_messages.json) resolve.
+  return expandDesktopLocalPath(trimmed);
 }
 
 function decodeLocalTextBuffer(buf: Buffer): { content: string; encodingError?: string } {
