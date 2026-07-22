@@ -7,7 +7,9 @@ import {
   useState,
   type ReactNode,
 } from "react";
-import { Copy, Download, Minimize2, Move, ZoomIn, ZoomOut } from "lucide-react";
+import { Copy, Download, Maximize2, Minimize2, Move, ZoomIn, ZoomOut } from "lucide-react";
+import { Modal } from "../ds/Modal";
+import { ZoomableViewport } from "../ds/ZoomableViewport";
 import { mermaidThemeFromApp, renderMermaidSvg } from "../../utils/mermaid-render";
 
 const MIN_SCALE = 0.25;
@@ -15,6 +17,18 @@ const MAX_SCALE = 4;
 const ZOOM_FACTOR = 1.2;
 const VIEWPORT_MIN_H = 280;
 const VIEWPORT_MAX_H = 560;
+const FIT_PAD = 20;
+
+/** Prefer width-fit height so tall flowcharts are not crushed into a short strip. */
+function computeAdaptiveViewportH(
+  viewportWidth: number,
+  natural: { w: number; h: number },
+): number {
+  if (viewportWidth <= 0 || natural.w <= 0 || natural.h <= 0) return VIEWPORT_MIN_H;
+  const widthFitScale = Math.min((viewportWidth - FIT_PAD) / natural.w, MAX_SCALE);
+  const neededH = Math.ceil(natural.h * Math.max(widthFitScale, 0.05) + FIT_PAD);
+  return Math.min(VIEWPORT_MAX_H, Math.max(VIEWPORT_MIN_H, neededH));
+}
 
 function useDocumentDataTheme(): string {
   const [theme, setTheme] = useState(
@@ -211,6 +225,8 @@ export function MermaidBlock({ code }: Props) {
   const [panMode, setPanMode] = useState(true);
   const [copied, setCopied] = useState(false);
   const [exporting, setExporting] = useState(false);
+  const [zoomOpen, setZoomOpen] = useState(false);
+  const [viewportH, setViewportH] = useState(VIEWPORT_MIN_H);
 
   const [draggingUi, setDraggingUi] = useState(false);
   const draggingRef = useRef(false);
@@ -246,15 +262,14 @@ export function MermaidBlock({ code }: Props) {
     };
   }, [code, renderId, appTheme]);
 
-  const fitToView = useCallback(() => {
+  const fitToView = useCallback((overrideH?: number) => {
     const vp = viewportRef.current;
     const dims = dimsRef.current;
     if (!vp || !dims) return;
-    const pad = 20;
     const pw = vp.clientWidth;
-    const ph = vp.clientHeight;
+    const ph = overrideH ?? vp.clientHeight;
     if (pw <= 0 || ph <= 0) return;
-    const s = Math.min((pw - pad) / dims.w, (ph - pad) / dims.h, MAX_SCALE);
+    const s = Math.min((pw - FIT_PAD) / dims.w, (ph - FIT_PAD) / dims.h, MAX_SCALE);
     const scaleFit = Math.max(s, 0.05);
     setScale(scaleFit);
     setTx((pw - dims.w * scaleFit) / 2);
@@ -271,8 +286,11 @@ export function MermaidBlock({ code }: Props) {
       normalizeMermaidSvgInContainer(host);
       const svgEl = host.querySelector("svg");
       if (!svgEl) return;
-      dimsRef.current = readSvgNaturalSize(svgEl);
-      fitToView();
+      const dims = readSvgNaturalSize(svgEl);
+      dimsRef.current = dims;
+      const nextH = computeAdaptiveViewportH(vp.clientWidth, dims);
+      setViewportH((prev) => (prev === nextH ? prev : nextH));
+      fitToView(nextH);
     };
 
     measureAndFit();
@@ -417,79 +435,97 @@ export function MermaidBlock({ code }: Props) {
   }
 
   return (
-    <div className="group/mmd relative my-2 overflow-hidden rounded-md border border-border bg-surface-panel/50">
-      <div
-        className="no-drag pointer-events-auto absolute left-1/2 top-2 z-10 flex -translate-x-1/2 items-center gap-0.5 rounded-lg border px-1 py-0.5 opacity-60 shadow-md transition-opacity duration-150 group-hover/mmd:opacity-100"
-        style={{
-          background: "color-mix(in srgb, var(--surface-card) 92%, transparent)",
-          borderColor: "var(--border-subtle)",
-        }}
-        title="Ctrl/⌘ + 滚轮缩放"
-      >
-        <ToolbarButton
-          title="平移（拖动画布）"
-          active={panMode}
-          onClick={() => setPanMode((v) => !v)}
-        >
-          <Move className="h-4 w-4" strokeWidth={2} />
-        </ToolbarButton>
-        <ToolbarButton title="缩小" onClick={() => zoomAtCenter(1 / ZOOM_FACTOR)}>
-          <ZoomOut className="h-4 w-4" strokeWidth={2} />
-        </ToolbarButton>
-        <ToolbarButton title="放大" onClick={() => zoomAtCenter(ZOOM_FACTOR)}>
-          <ZoomIn className="h-4 w-4" strokeWidth={2} />
-        </ToolbarButton>
-        <ToolbarButton title="适应窗口" onClick={fitToView}>
-          <Minimize2 className="h-4 w-4" strokeWidth={2} />
-        </ToolbarButton>
+    <>
+      <div className="group/mmd relative my-2 overflow-hidden rounded-md border border-border bg-surface-panel/50">
         <div
-          className="mx-0.5 h-5 w-px shrink-0"
-          style={{ background: "var(--border-subtle)" }}
-          aria-hidden
-        />
-        <ToolbarButton title="复制 Mermaid 源码" onClick={() => void copyCode()}>
-          <Copy className="h-4 w-4" strokeWidth={2} />
-        </ToolbarButton>
-        <ToolbarButton
-          title={exporting ? "导出中…" : "下载 PNG"}
-          onClick={() => void downloadPng()}
-        >
-          <Download className={`h-4 w-4 ${exporting ? "opacity-50" : ""}`} strokeWidth={2} />
-        </ToolbarButton>
-      </div>
-
-      {copied ? (
-        <div className="pointer-events-none absolute right-2 top-2 z-10 rounded border border-border bg-surface-panel/95 px-2 py-0.5 text-[11px] text-text-faint">
-          已复制源码
-        </div>
-      ) : null}
-
-      <div
-        ref={viewportRef}
-        title="悬停顶部工具栏高亮；Ctrl/⌘ + 滚轮缩放"
-        className={`relative w-full touch-none overflow-hidden ${panMode ? (draggingUi ? "cursor-grabbing" : "cursor-grab") : "cursor-default"}`}
-        style={{
-          minHeight: VIEWPORT_MIN_H,
-          maxHeight: VIEWPORT_MAX_H,
-          height: VIEWPORT_MIN_H,
-        }}
-        onWheel={onWheel}
-      >
-        <div
-          ref={contentRef}
-          role="presentation"
-          className="inline-block origin-top-left will-change-transform [&_svg]:block [&_svg]:max-h-none [&_svg]:max-w-none"
+          className="no-drag pointer-events-auto absolute right-2 top-2 z-10 flex items-center gap-0.5 rounded-lg border px-1 py-0.5 opacity-60 shadow-md transition-opacity duration-150 group-hover/mmd:opacity-100"
           style={{
-            transform: `translate(${tx}px, ${ty}px) scale(${scale})`,
+            background: "color-mix(in srgb, var(--surface-card) 92%, transparent)",
+            borderColor: "var(--border-subtle)",
           }}
-          onPointerDown={onPointerDownPan}
-          onPointerMove={onPointerMovePan}
-          onPointerUp={onPointerUpPan}
-          onPointerCancel={onPointerUpPan}
-          dangerouslySetInnerHTML={{ __html: svg }}
-        />
+          title="Ctrl/⌘ + 滚轮缩放"
+        >
+          <ToolbarButton
+            title="平移（拖动画布）"
+            active={panMode}
+            onClick={() => setPanMode((v) => !v)}
+          >
+            <Move className="h-4 w-4" strokeWidth={2} />
+          </ToolbarButton>
+          <ToolbarButton title="缩小" onClick={() => zoomAtCenter(1 / ZOOM_FACTOR)}>
+            <ZoomOut className="h-4 w-4" strokeWidth={2} />
+          </ToolbarButton>
+          <ToolbarButton title="放大" onClick={() => zoomAtCenter(ZOOM_FACTOR)}>
+            <ZoomIn className="h-4 w-4" strokeWidth={2} />
+          </ToolbarButton>
+          <ToolbarButton title="适应窗口" onClick={() => fitToView()}>
+            <Minimize2 className="h-4 w-4" strokeWidth={2} />
+          </ToolbarButton>
+          <ToolbarButton title="放大查看" onClick={() => setZoomOpen(true)}>
+            <Maximize2 className="h-4 w-4" strokeWidth={2} />
+          </ToolbarButton>
+          <div
+            className="mx-0.5 h-5 w-px shrink-0"
+            style={{ background: "var(--border-subtle)" }}
+            aria-hidden
+          />
+          <ToolbarButton title="复制 Mermaid 源码" onClick={() => void copyCode()}>
+            <Copy className="h-4 w-4" strokeWidth={2} />
+          </ToolbarButton>
+          <ToolbarButton
+            title={exporting ? "导出中…" : "下载 PNG"}
+            onClick={() => void downloadPng()}
+          >
+            <Download className={`h-4 w-4 ${exporting ? "opacity-50" : ""}`} strokeWidth={2} />
+          </ToolbarButton>
+        </div>
+
+        {copied ? (
+          <div className="pointer-events-none absolute left-2 top-2 z-10 rounded border border-border bg-surface-panel/95 px-2 py-0.5 text-[11px] text-text-faint">
+            已复制源码
+          </div>
+        ) : null}
+
+        <div
+          ref={viewportRef}
+          title="悬停右侧工具栏高亮；Ctrl/⌘ + 滚轮缩放；可点放大查看"
+          className={`relative w-full touch-none overflow-hidden ${panMode ? (draggingUi ? "cursor-grabbing" : "cursor-grab") : "cursor-default"}`}
+          style={{
+            minHeight: VIEWPORT_MIN_H,
+            maxHeight: VIEWPORT_MAX_H,
+            height: viewportH,
+          }}
+          onWheel={onWheel}
+        >
+          <div
+            ref={contentRef}
+            role="presentation"
+            className="inline-block origin-top-left will-change-transform [&_svg]:block [&_svg]:max-h-none [&_svg]:max-w-none"
+            style={{
+              transform: `translate(${tx}px, ${ty}px) scale(${scale})`,
+            }}
+            onPointerDown={onPointerDownPan}
+            onPointerMove={onPointerMovePan}
+            onPointerUp={onPointerUpPan}
+            onPointerCancel={onPointerUpPan}
+            dangerouslySetInnerHTML={{ __html: svg }}
+          />
+        </div>
       </div>
 
-    </div>
+      <Modal
+        open={zoomOpen}
+        title="查看图表"
+        onClose={() => setZoomOpen(false)}
+        panelClassName="w-[92vw] max-w-5xl bg-surface-popover"
+      >
+        <ZoomableViewport stageWidth={900} viewportHeight="75vh">
+          <div
+            className="flex w-full justify-center [&_svg]:block [&_svg]:h-auto [&_svg]:max-h-none [&_svg]:max-w-full"
+            dangerouslySetInnerHTML={{ __html: svg }}
+          />
+        </ZoomableViewport>
+      </Modal>
+    </>
   );
 }

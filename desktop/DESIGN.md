@@ -243,6 +243,55 @@ accent tint via `--theme-color-rgb` when accent mode demands; assistant bubbles 
 neutral so tool cards and markdown remain the focal layer. Reasoning blocks fold inside
 the bubble — no separate white card chrome.
 
+### User message action bar (timestamp + icons) — **locked layout**
+
+User query bubbles (`ImBubble` user branch) have a footer under the gray bubble:
+**timestamp + action icons**. This layout was hard-won; do **not** “improve” it without
+re-reading this section and verifying against a real Desktop screenshot.
+
+**Desired geometry (acceptance):**
+
+1. **Right edge** — The last action control (「多选」/`LayoutList`, including its hover
+   background’s outer box) aligns with the **user bubble’s right border** (same vertical
+   line). Icon glyph may sit slightly inset inside padding; that is fine.
+2. **Timestamp** — Sits **immediately left of 「复制」**, in the same flex group as the
+   icons. It must **not** stretch to the bubble’s far-left edge or float outside the
+   bubble’s left border.
+3. **Hover** — Every action button (including the last 「多选」) uses **symmetric
+   padding** on all four sides so the hover fill is a complete rounded rect — never
+   `padding-right: 0` (that clips the right half of the hover background).
+4. **Tooltip** — 「多选」uses `HoverTip` with `tooltipAlign="end"` so the tip anchors to
+   the button’s right edge and is not half-cut by the pane’s `overflow-x-hidden`.
+
+**DOM / CSS contract (implement, don’t reinvent):**
+
+| Piece | Role |
+|-------|------|
+| `.agx-im-user-stack` | Flex column; `width: max-content`; **horizontal gutter** (`USER_BUBBLE_GUTTER_PX`, default 14) via **inline `userStackStyle` on the stack**, not on the bubble |
+| `.agx-im-user-bubble` | `width: fit-content; maxWidth: 100%` — **no** `marginLeft` / `marginRight` gutter |
+| `.agx-im-user-actions` | `width: 0; min-width: 100%` so it **does not widen** the stack; final width = bubble width; `justify-content: flex-end` |
+| `.agx-im-user-actions-icons` | Contains `MessageTimestamp` **then** Copy → … → 多选; whole cluster right-aligned |
+| `.agx-im-user-timestamp` | In-flow sibling before Copy (not `absolute` / not `space-between` across full bubble width) |
+
+Code anchors: `desktop/src/components/messages/ImBubble.tsx` (user stack),
+`desktop/src/components/messages/MessageTimestamp.tsx`,
+`desktop/src/components/ds/HoverTip.tsx` (`tooltipAlign`),
+`desktop/src/index.css` (`.agx-im-user-*`).
+
+**Known failure modes (do not regress):**
+
+- Putting `marginLeft`/`marginRight` on the **bubble** while the action row is a sibling →
+  timestamp drifts left of the bubble / icons miss the bubble’s right border.
+- Making the action row `width: 100%` of the **pane column** (or `justify-content:
+  space-between` with timestamp as a separate full-width child) → timestamp glued to the
+  bubble’s left edge.
+- Anchoring timestamp with `position: absolute; right: 100%` on a full-width row →
+  “时间飘出去”.
+- Zeroing `padding-right` on the last button “for flush align” → hover background looks
+  squeezed/clipped on the right.
+- Centering the 「多选」tooltip over a right-edge button → tip half-obscured by scroll
+  clip.
+
 ### Composer (`composer-shell`)
 
 `bg-surface-card`, `{rounded.composer}`, focus ring via `.agx-theme-focus-ring`
@@ -298,6 +347,9 @@ vs disabled — not decorative.
   (This is distinct from Topbar/toolbar icon buttons, where the icon is always visible
   and only its background box reveals on hover — see "Icon-only Topbar / toolbar
   buttons" above.)
+- **Don't** move the user-message timestamp to the bubble’s far left, strip last-button
+  hover padding, or put horizontal gutter on the bubble instead of `.agx-im-user-stack`
+  — see **User message action bar** above; treat that layout as locked.
 - **Don't** lock scroll-to-bottom during streaming; users must scroll up freely.
 - **Don't** use `window.confirm` — use themed in-app dialogs with app icon.
 - **Don't** treat avatar/group hash colors as the global primary — they identify entities,

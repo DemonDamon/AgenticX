@@ -7,10 +7,18 @@ type Props = {
   delayMs?: number;
   /** Keep wrapper inline for @file chips inside message text. */
   inline?: boolean;
+  /** Tooltip horizontal anchor; `end` keeps the bubble inside narrow right-aligned rows. */
+  tooltipAlign?: "center" | "end";
   children: ReactNode;
 };
 
-export function HoverTip({ label, delayMs = 280, inline = false, children }: Props) {
+export function HoverTip({
+  label,
+  delayMs = 280,
+  inline = false,
+  tooltipAlign = "center",
+  children,
+}: Props) {
   const [open, setOpen] = useState(false);
   const [coords, setCoords] = useState<{ x: number; y: number } | null>(null);
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -27,7 +35,11 @@ export function HoverTip({ label, delayMs = 280, inline = false, children }: Pro
     const el = anchorRef.current;
     if (!el) return;
     const rect = el.getBoundingClientRect();
-    setCoords({ x: rect.left + rect.width / 2, y: rect.top });
+    if (tooltipAlign === "end") {
+      setCoords({ x: rect.right, y: rect.top });
+    } else {
+      setCoords({ x: rect.left + rect.width / 2, y: rect.top });
+    }
   };
 
   useEffect(() => () => clearTimer(), []);
@@ -56,7 +68,10 @@ export function HoverTip({ label, delayMs = 280, inline = false, children }: Pro
             style={{
               left: coords.x,
               top: coords.y,
-              transform: "translate(-50%, calc(-100% - 6px))",
+              transform:
+                tooltipAlign === "end"
+                  ? "translate(-100%, calc(-100% - 6px))"
+                  : "translate(-50%, calc(-100% - 6px))",
             }}
           >
             {label}

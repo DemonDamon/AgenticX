@@ -350,13 +350,19 @@ export function ImBubble({
   const headerBadge = groupIdentityLayout && !isUser ? badge : null;
   const contentBadge = headerBadge ? null : badge;
   const userBubbleGutterPx = groupIdentityLayout && isUser ? 0 : USER_BUBBLE_GUTTER_PX;
+  // Gutter 挂在 stack 上（非整气泡 margin），保证操作栏与气泡边框同宽、左右缘对齐。
+  const userStackStyle = isUser
+    ? {
+        marginLeft: userBubbleGutterPx,
+        marginRight: userBubbleGutterPx,
+        maxWidth: `calc(100% - ${userBubbleGutterPx * 2}px)`,
+      }
+    : undefined;
   const userBubbleStyle = isUser
     ? {
         ...bubbleStyle,
-        marginLeft: userBubbleGutterPx,
-        marginRight: userBubbleGutterPx,
         width: "fit-content",
-        maxWidth: `calc(100% - ${userBubbleGutterPx * 2}px)`,
+        maxWidth: "100%",
       }
     : bubbleStyle;
 
@@ -556,25 +562,13 @@ export function ImBubble({
               </button>
             </div>
           </div>
-        ) : (
-          <>
+        ) : isUser ? (
+          <div className="agx-im-user-stack" style={userStackStyle}>
             <div
-              className={
-                compactAssistant && noBubbleBorder
-                  ? `relative min-w-0 w-full px-3 py-0 text-[var(--agx-chat-im-body-font-size)] ${assistantBodyLeadingClass}`
-                  : isUser
-                    ? "agx-im-user-bubble relative min-w-0 w-fit max-w-full rounded-xl border px-3.5 py-2.5 text-[var(--agx-chat-im-body-font-size)] leading-relaxed rounded-tr-[4px]"
-                    : isMetaPendingWork
-                      ? `relative min-w-0 w-full px-3 py-0 text-[var(--agx-chat-im-body-font-size)] ${assistantBodyLeadingClass}`
-                    : groupIdentityLayout
-                      ? `relative min-w-0 w-full px-3 pt-1 pb-0 text-[var(--agx-chat-im-body-font-size)] ${assistantBodyLeadingClass}`
-                      : (message.references?.length ?? 0) > 0
-                        ? `relative min-w-0 w-full px-3 pt-1 pb-0 text-[var(--agx-chat-im-body-font-size)] ${assistantBodyLeadingClass}`
-                        : `relative min-w-0 w-full px-3 pt-3 pb-0 text-[var(--agx-chat-im-body-font-size)] ${assistantBodyLeadingClass}`
-              }
-              style={compactAssistant && noBubbleBorder ? undefined : userBubbleStyle}
+              className="agx-im-user-bubble relative min-w-0 max-w-full rounded-xl border px-3.5 py-2.5 text-[var(--agx-chat-im-body-font-size)] leading-relaxed rounded-tr-[4px]"
+              style={userBubbleStyle}
             >
-              {isUser && displayAttachments.length > 0 ? (
+              {displayAttachments.length > 0 ? (
                 <div className="mb-2 flex flex-wrap gap-2">
                   {displayAttachments.map((attachment) => (
                     <AttachmentCard
@@ -584,6 +578,123 @@ export function ImBubble({
                   ))}
                 </div>
               ) : null}
+              <div ref={msgContentRef} className="msg-content min-w-0 break-words">
+                {contentBadge}
+                {message.quotedContent ? (
+                  <div className="mb-2 rounded-md border border-border bg-surface-panel/70 px-2 py-1 text-xs text-text-faint">
+                    <span className="line-clamp-2">{message.quotedContent}</span>
+                  </div>
+                ) : null}
+                {message.forwardedHistory ? (
+                  <div className="space-y-2">
+                    <div className="rounded-md border border-border bg-surface-panel/70 px-2 py-1 text-xs text-text-faint">
+                      {message.forwardedHistory.note ? (
+                        <div className="mb-1 break-words text-text-primary">{message.forwardedHistory.note}</div>
+                      ) : null}
+                      <div className="space-y-1">
+                        {message.forwardedHistory.items.slice(0, 2).map((item, index) => (
+                          <div
+                            key={`${item.sender}-${index}-${item.content.slice(0, 20)}`}
+                            className="line-clamp-2 break-words"
+                          >
+                            {formatForwardSender(item.sender)}: {item.content}
+                          </div>
+                        ))}
+                        {message.forwardedHistory.items.length > 2 ? (
+                          <div className="text-[11px] text-text-faint">...</div>
+                        ) : null}
+                      </div>
+                    </div>
+                  </div>
+                ) : hasBody ? (
+                  <div className="whitespace-pre-wrap break-words">
+                    {renderUserMessageInlineBody(bodyText, referenceAttachments, onOpenFileReference)}
+                  </div>
+                ) : null}
+              </div>
+            </div>
+            {hideActions ? null : (
+              <div className="agx-im-user-actions">
+                <div className="agx-im-user-actions-icons">
+                  <MessageTimestamp ts={message.timestamp} align="right" />
+                  <HoverTip label="复制">
+                    <button
+                      type="button"
+                      onMouseDown={(e) => e.preventDefault()}
+                      onClick={() => onCopyMessage?.(message)}
+                    >
+                      <Copy size={13} strokeWidth={1.5} />
+                    </button>
+                  </HoverTip>
+                  <HoverTip label="引用">
+                    <button type="button" onMouseDown={(e) => e.preventDefault()} onClick={runQuote}>
+                      <Quote size={13} strokeWidth={1.5} />
+                    </button>
+                  </HoverTip>
+                  <HoverTip label="收藏">
+                    <button type="button" onMouseDown={(e) => e.preventDefault()} onClick={runFavorite}>
+                      <Bookmark size={13} strokeWidth={1.5} />
+                    </button>
+                  </HoverTip>
+                  <HoverTip label="转发">
+                    <button type="button" onMouseDown={(e) => e.preventDefault()} onClick={runForward}>
+                      <Forward size={13} strokeWidth={1.5} />
+                    </button>
+                  </HoverTip>
+                  {onEditMessage ? (
+                    <HoverTip label="修改">
+                      <button
+                        type="button"
+                        onMouseDown={(e) => e.preventDefault()}
+                        onClick={() => {
+                          setEditContent(message.content);
+                          setIsEditing(true);
+                        }}
+                      >
+                        <Pencil size={13} strokeWidth={1.5} />
+                      </button>
+                    </HoverTip>
+                  ) : null}
+                  {onRetryMessage ? (
+                    <HoverTip label="重试">
+                      <button
+                        type="button"
+                        onMouseDown={(e) => e.preventDefault()}
+                        onClick={() => onRetryMessage(message)}
+                      >
+                        <RotateCcw size={13} strokeWidth={1.5} />
+                      </button>
+                    </HoverTip>
+                  ) : null}
+                  <HoverTip label="多选" tooltipAlign="end">
+                    <button
+                      type="button"
+                      onMouseDown={(e) => e.preventDefault()}
+                      onClick={() => onToggleSelectMessage?.(message)}
+                    >
+                      <LayoutList size={13} strokeWidth={1.5} />
+                    </button>
+                  </HoverTip>
+                </div>
+              </div>
+            )}
+          </div>
+        ) : (
+          <>
+            <div
+              className={
+                compactAssistant && noBubbleBorder
+                  ? `relative min-w-0 w-full px-3 py-0 text-[var(--agx-chat-im-body-font-size)] ${assistantBodyLeadingClass}`
+                  : isMetaPendingWork
+                    ? `relative min-w-0 w-full px-3 py-0 text-[var(--agx-chat-im-body-font-size)] ${assistantBodyLeadingClass}`
+                    : groupIdentityLayout
+                      ? `relative min-w-0 w-full px-3 pt-1 pb-0 text-[var(--agx-chat-im-body-font-size)] ${assistantBodyLeadingClass}`
+                      : (message.references?.length ?? 0) > 0
+                        ? `relative min-w-0 w-full px-3 pt-1 pb-0 text-[var(--agx-chat-im-body-font-size)] ${assistantBodyLeadingClass}`
+                        : `relative min-w-0 w-full px-3 pt-3 pb-0 text-[var(--agx-chat-im-body-font-size)] ${assistantBodyLeadingClass}`
+              }
+              style={compactAssistant && noBubbleBorder ? undefined : userBubbleStyle}
+            >
               <div ref={msgContentRef} className="msg-content min-w-0 break-words">
                 {contentBadge}
                 {message.quotedContent ? (
@@ -625,21 +736,19 @@ export function ImBubble({
                   </span>
                 ) : (
                   <>
-                    {!isUser && (citationReferences?.length ?? 0) > 0 ? (
+                    {(citationReferences?.length ?? 0) > 0 ? (
                       <ReferencesCard
                         references={citationReferences ?? []}
                         searchedQueries={message.searchedQueries}
                       />
                     ) : null}
-                    {!isUser && message.reasoning && !isStreaming ? (
+                    {message.reasoning && !isStreaming ? (
                       <ReasoningBlock
                         text={message.reasoning}
                         seconds={resolvePersistedReasoningSeconds(message.reasoning, message.reasoningSeconds)}
                       />
                     ) : null}
-                    {!isUser &&
-                    !message.reasoning &&
-                    parsed?.reasoning ? (
+                    {!message.reasoning && parsed?.reasoning ? (
                       <ReasoningBlock
                         text={parsed.reasoning}
                         seconds={
@@ -650,7 +759,7 @@ export function ImBubble({
                         streaming={isStreaming && hasThinkTag && !reasoningClosed}
                       />
                     ) : null}
-                    {!isUser && isStreaming && !hasBody && (!hasThinkTag || reasoningClosed) ? (
+                    {isStreaming && !hasBody && (!hasThinkTag || reasoningClosed) ? (
                       streamStalled ? (
                         <StalledStreamIndicator silentSeconds={streamStalledSeconds} />
                       ) : (
@@ -658,26 +767,17 @@ export function ImBubble({
                       )
                     ) : null}
                     {hasBody ? (
-                      isUser ? (
-                        <div className="whitespace-pre-wrap break-words">
-                          {renderUserMessageInlineBody(bodyText, referenceAttachments, onOpenFileReference)}
-                        </div>
-                      ) : (
-                        <div className={assistantTextClassName} style={assistantTextStyle}>
-                          <CitationMarkdownBody
-                            content={bodyText}
-                            references={citationReferences}
-                            isStreaming={isStreaming}
-                            onQuoteText={(text) => onQuoteMessage?.(message, text)}
-                            onRevealPath={onRevealPath}
-                          />
-                        </div>
-                      )
+                      <div className={assistantTextClassName} style={assistantTextStyle}>
+                        <CitationMarkdownBody
+                          content={bodyText}
+                          references={citationReferences}
+                          isStreaming={isStreaming}
+                          onQuoteText={(text) => onQuoteMessage?.(message, text)}
+                          onRevealPath={onRevealPath}
+                        />
+                      </div>
                     ) : null}
-                    {!isUser &&
-                    isStreaming &&
-                    hasBody &&
-                    (!hasThinkTag || reasoningClosed) ? (
+                    {isStreaming && hasBody && (!hasThinkTag || reasoningClosed) ? (
                       streamStalled ? (
                         <StalledStreamIndicator silentSeconds={streamStalledSeconds} />
                       ) : (
@@ -708,69 +808,7 @@ export function ImBubble({
                 {assistantFollowupChipButtons}
               </div>
             ) : null}
-            {hideActions ? null : isUser ? (
-              <div className="agx-im-user-actions">
-                <MessageTimestamp ts={message.timestamp} align="right" />
-                <HoverTip label="复制">
-                  <button
-                    type="button"
-                    onMouseDown={(e) => e.preventDefault()}
-                    onClick={() => onCopyMessage?.(message)}
-                  >
-                    <Copy size={13} strokeWidth={1.5} />
-                  </button>
-                </HoverTip>
-                <HoverTip label="引用">
-                  <button type="button" onMouseDown={(e) => e.preventDefault()} onClick={runQuote}>
-                    <Quote size={13} strokeWidth={1.5} />
-                  </button>
-                </HoverTip>
-                <HoverTip label="收藏">
-                  <button type="button" onMouseDown={(e) => e.preventDefault()} onClick={runFavorite}>
-                    <Bookmark size={13} strokeWidth={1.5} />
-                  </button>
-                </HoverTip>
-                <HoverTip label="转发">
-                  <button type="button" onMouseDown={(e) => e.preventDefault()} onClick={runForward}>
-                    <Forward size={13} strokeWidth={1.5} />
-                  </button>
-                </HoverTip>
-                {onEditMessage ? (
-                  <HoverTip label="修改">
-                    <button
-                      type="button"
-                      onMouseDown={(e) => e.preventDefault()}
-                      onClick={() => {
-                        setEditContent(message.content);
-                        setIsEditing(true);
-                      }}
-                    >
-                      <Pencil size={13} strokeWidth={1.5} />
-                    </button>
-                  </HoverTip>
-                ) : null}
-                {onRetryMessage ? (
-                  <HoverTip label="重试">
-                    <button
-                      type="button"
-                      onMouseDown={(e) => e.preventDefault()}
-                      onClick={() => onRetryMessage(message)}
-                    >
-                      <RotateCcw size={13} strokeWidth={1.5} />
-                    </button>
-                  </HoverTip>
-                ) : null}
-                <HoverTip label="多选">
-                  <button
-                    type="button"
-                    onMouseDown={(e) => e.preventDefault()}
-                    onClick={() => onToggleSelectMessage?.(message)}
-                  >
-                    <LayoutList size={13} strokeWidth={1.5} />
-                  </button>
-                </HoverTip>
-              </div>
-            ) : showAssistantFollowups || !assistantIconButtons ? null : (
+            {hideActions || showAssistantFollowups || !assistantIconButtons ? null : (
               <div className={ASSISTANT_ACTION_ICON_ONLY_CLASS}>
                 <div className={ASSISTANT_ACTION_ICON_ROW_CLASS} style={assistantActionStyle}>
                   {assistantIconButtons}

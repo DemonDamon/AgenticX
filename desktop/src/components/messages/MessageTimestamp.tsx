@@ -11,12 +11,16 @@ export function MessageTimestamp({ ts, align }: { ts?: number; align: "left" | "
   if (typeof ts !== "number" || !Number.isFinite(ts) || ts <= 0) return null;
   const label = formatMessageTimestamp(ts);
   if (!label) return null;
+  // User rows: inside `.agx-im-user-actions-icons`, immediately left of 复制 (see index.css).
+  if (align === "right") {
+    return (
+      <span className="agx-im-user-timestamp pointer-events-none select-none whitespace-nowrap text-[11px] leading-none text-text-faint opacity-0 transition-opacity duration-150 group-hover:opacity-100">
+        {label}
+      </span>
+    );
+  }
   return (
-    <span
-      className={`pointer-events-none select-none whitespace-nowrap text-[11px] leading-none text-text-faint opacity-0 transition-opacity duration-150 group-hover:opacity-100 ${
-        align === "right" ? "ml-1 mr-1" : "ml-1"
-      }`}
-    >
+    <span className="pointer-events-none ml-1 select-none whitespace-nowrap text-[11px] leading-none text-text-faint opacity-0 transition-opacity duration-150 group-hover:opacity-100">
       {label}
     </span>
   );

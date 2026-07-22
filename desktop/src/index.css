@@ -647,32 +647,73 @@ body.agx-settings-nav-resizing {
   padding: 0;
 }
 
-/* 用户消息操作栏：更松、更淡，不抢气泡内容 */
-.agx-im-user-actions {
-  margin-top: 0.35rem;
+/*
+ * 用户气泡 + 操作栏（locked — 详见 desktop/DESIGN.md「User message action bar」）：
+ * gutter 在 stack 上；操作栏 width:0;min-width:100% 与气泡同宽右对齐；
+ * 时间戳在图标簇内、紧挨「复制」左侧；末枚按钮四边对称 padding。
+ */
+.agx-im-user-stack {
   display: flex;
-  width: 100%;
-  flex-wrap: wrap;
+  flex-direction: column;
+  align-items: stretch;
+  width: max-content;
+  max-width: 100%;
+  align-self: flex-end;
+  box-sizing: border-box;
+  overflow: visible;
+}
+
+.agx-im-user-stack .agx-im-user-bubble {
+  min-width: 0;
+  max-width: 100%;
+  box-sizing: border-box;
+}
+
+.agx-im-user-actions {
+  /* width:0 + min-width:100%：不参与撑开 stack，最终宽度严格等于气泡 */
+  display: flex;
   align-items: center;
   justify-content: flex-end;
-  gap: 0.35rem;
-  padding-right: 0.15rem;
-  padding-bottom: 0.1rem;
+  width: 0;
+  min-width: 100%;
+  box-sizing: border-box;
+  margin-top: 0.35rem;
+  overflow: visible;
   line-height: 1;
   color: var(--text-faint);
 }
 
-.agx-im-user-actions button {
+.agx-im-user-actions-icons {
+  display: flex;
+  flex-wrap: nowrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 0.35rem;
+  flex-shrink: 0;
+}
+
+/* 时间紧挨「复制」左侧，与图标同组右对齐 */
+.agx-im-user-timestamp {
+  flex-shrink: 0;
+  margin-right: 0.125rem;
+}
+
+.agx-im-user-actions-icons button {
   display: inline-flex;
   align-items: center;
   justify-content: center;
   border-radius: 0.35rem;
+  /* 四边对称 padding，避免末枚悬停底「右半被挤扁」 */
   padding: 0.28rem;
   opacity: 0.72;
   transition: opacity 120ms ease-out, color 120ms ease-out, background-color 120ms ease-out;
 }
 
-.agx-im-user-actions button:hover {
+.agx-im-user-actions-icons > :last-child {
+  margin-right: 0;
+}
+
+.agx-im-user-actions-icons button:hover {
   opacity: 1;
   color: var(--text-strong);
   background: var(--surface-hover);
