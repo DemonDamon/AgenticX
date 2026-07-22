@@ -1281,6 +1281,14 @@ declare global {
       loadLocalImageDataUrl: (path: string) => Promise<{ ok: boolean; dataUrl?: string; error?: string }>;
       writeLocalTextFile: (payload: { path: string; content: string }) => Promise<{ ok: boolean; size?: number; error?: string }>;
       readLocalTextFile: (path: string) => Promise<{ ok: boolean; content?: string; size?: number; error?: string }>;
+      /** Stat a local path for size/mtime without reading file contents. */
+      statLocalPath: (path: string) => Promise<{
+        ok: boolean;
+        size?: number;
+        isDirectory?: boolean;
+        mtimeMs?: number;
+        error?: string;
+      }>;
       /** Stage artifact files into ~/.agenticx/sessions/<id>/task_artifacts (file copies). */
       stageSessionArtifacts: (payload: {
         sessionId: string;

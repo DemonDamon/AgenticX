@@ -4,13 +4,14 @@
  * Author: Damon Li
  */
 
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Eye, FileText, FolderOpen, ExternalLink } from "lucide-react";
 import {
   artifactBaseName,
   isInAppArtifactPreviewPath,
   isInAppHtmlPreviewPath,
 } from "../../utils/session-artifacts";
+import { formatPreviewBytes } from "../workspace/workspace-preview-types";
 
 type Props = {
   paths: string[];
@@ -27,6 +28,7 @@ export function SessionArtifactList({
   onOpenPath,
 }: Props) {
   const rowRefs = useRef<Record<string, HTMLDivElement | null>>({});
+  const [sizeByPath, setSizeByPath] = useState<Record<string, number | null>>({});
 
   useEffect(() => {
     const target = String(highlightPath || "").trim().replace(/\\/g, "/").replace(/\/+$/, "");
@@ -48,6 +50,33 @@ export function SessionArtifactList({
     onHighlightHandled?.();
     return undefined;
   }, [highlightPath, paths, onHighlightHandled]);
+
+  useEffect(() => {
+    let cancelled = false;
+    const stat = window.agenticxDesktop?.statLocalPath;
+    if (!stat || paths.length === 0) {
+      setSizeByPath({});
+      return;
+    }
+    void Promise.all(
+      paths.map(async (path) => {
+        try {
+          const result = await stat(path);
+          if (!result.ok || result.isDirectory || typeof result.size !== "number") {
+            return [path, null] as const;
+          }
+          return [path, result.size] as const;
+        } catch {
+          return [path, null] as const;
+        }
+      })
+    ).then((entries) => {
+      if (!cancelled) setSizeByPath(Object.fromEntries(entries));
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [paths]);
 
   const openPath = (path: string) => {
     if (onOpenPath) {
@@ -74,6 +103,8 @@ export function SessionArtifactList({
       {paths.map((path) => {
         const inAppPreview =
           isInAppHtmlPreviewPath(path) || isInAppArtifactPreviewPath(path);
+        const size = sizeByPath[path];
+        const sizeLabel = size != null ? formatPreviewBytes(size) : "—";
         return (
           <div
             key={path}
@@ -115,9 +146,7 @@ export function SessionArtifactList({
                 定位
               </button>
             </div>
-            <div className="truncate px-2.5 pb-2 font-mono text-[10.5px] text-text-faint" title={path}>
-              {path}
-            </div>
+            <div className="truncate px-2.5 pb-2 text-[10.5px] text-text-faint">{sizeLabel}</div>
           </div>
         );
       })}
