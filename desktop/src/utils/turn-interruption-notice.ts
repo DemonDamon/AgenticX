@@ -31,6 +31,7 @@ export function isTurnInterruptionNoticeMessage(message: NoticePick): boolean {
 export function parseTurnInterruptionNotice(message: NoticePick): {
   cause: TurnInterruptionCause;
   text: string;
+  failureSummary: string;
 } | null {
   if (!isTurnInterruptionNoticeMessage(message)) return null;
   const meta = (message.metadata ?? {}) as Record<string, unknown>;
@@ -46,7 +47,8 @@ export function parseTurnInterruptionNotice(message: NoticePick): {
       : "unknown";
   const text = String(message.content ?? "").trim();
   if (!text) return null;
-  return { cause, text };
+  const failureSummary = String(meta.failure_summary ?? "").trim();
+  return { cause, text, failureSummary };
 }
 
 export function turnInterruptionToastForCause(cause: TurnInterruptionCause | null): string {

@@ -246,6 +246,37 @@ def test_handoff_negative_with_tool_row_in_turn() -> None:
     assert _messages_last_turn_promised_action_without_followthrough(messages) is False
 
 
+def test_midturn_search_stub_after_tools_is_deferred() -> None:
+    """Path D: after tools, short「让我搜索…：」 without tool_calls is deferred."""
+    messages = [
+        {"role": "user", "content": "按 Apple.com 风格美化这个 HTML"},
+        {
+            "role": "assistant",
+            "content": "先读一下附件",
+            "tool_calls": [{"id": "c1", "function": {"name": "file_read"}}],
+        },
+        {"role": "tool", "content": "File not found", "tool_name": "file_read"},
+        {
+            "role": "assistant",
+            "content": "让我搜索一下这个HTML文件：",
+        },
+    ]
+    assert _messages_last_turn_promised_action_without_followthrough(messages) is True
+
+
+def test_midturn_path_d_negative_completed_sentence() -> None:
+    """Path D negative: midturn phrase but completed sentence after tools."""
+    messages = [
+        {"role": "user", "content": "go"},
+        {"role": "tool", "content": "OK", "tool_name": "file_read"},
+        {
+            "role": "assistant",
+            "content": "我已经读取完附件了，下面给出美化方案。",
+        },
+    ]
+    assert _messages_last_turn_promised_action_without_followthrough(messages) is False
+
+
 def test_handoff_negative_with_tool_calls() -> None:
     """Path B negative: assistant has tool_calls populated -> not deferred."""
     messages = [

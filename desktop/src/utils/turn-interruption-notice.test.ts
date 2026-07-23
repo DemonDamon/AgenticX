@@ -25,4 +25,19 @@ describe("turn-interruption-notice", () => {
       }),
     ).toBe(false);
   });
+
+  it("exposes failure_summary for runtime_failure", () => {
+    const msg = {
+      role: "tool" as const,
+      content: "模型调用失败：API 调用参数有误，请检查文档。invalid input。可点「恢复执行」重试。",
+      metadata: {
+        kind: TURN_INTERRUPTED_KIND,
+        cause: "runtime_failure",
+        failure_summary: "API 调用参数有误，请检查文档。invalid input",
+      },
+    };
+    const parsed = parseTurnInterruptionNotice(msg);
+    expect(parsed?.cause).toBe("runtime_failure");
+    expect(parsed?.failureSummary).toContain("invalid input");
+  });
 });

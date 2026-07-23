@@ -2309,6 +2309,23 @@ def create_studio_app() -> FastAPI:
                     session.chat_history or [], session.agent_messages
                 )
                 matched_agent = matched_agent or removed_agent > 0
+            # Orphan tool/assistant tails with zero user rows (e.g. continue/retry pollution):
+            # sync-by-user-count cannot cut them — clear so retry does not "remember" later rounds.
+            if mode == "after" and removed_chat > 0 and isinstance(session.agent_messages, list):
+                agent_user_count = sum(
+                    1
+                    for row in session.agent_messages
+                    if isinstance(row, dict) and str(row.get("role", "") or "").strip() == "user"
+                )
+                chat_user_count = sum(
+                    1
+                    for row in (session.chat_history or [])
+                    if isinstance(row, dict) and str(row.get("role", "") or "").strip() == "user"
+                )
+                if chat_user_count > 0 and agent_user_count == 0 and session.agent_messages:
+                    removed_agent += len(session.agent_messages)
+                    session.agent_messages.clear()
+                    matched_agent = True
             if mode == "after" and (matched_chat or matched_agent):
                 removed_agent += _strip_compacted_blocks(session.agent_messages)
         if matched_chat or matched_agent:
@@ -2488,6 +2505,47 @@ def create_studio_app() -> FastAPI:
                     continue
                 if not _is_placeholder:
                     session.context_files[_cf_key] = _cf_val
+            # Retry often only has attachment metadata → rehydrate from session/uploads
+            # or prior history source_path, then materialize bare names to durable paths.
+            try:
+                from agenticx.studio.chat_attachments import (
+                    materialize_session_text_context_files,
+                    patch_chat_history_attachment_source_paths,
+                    rehydrate_session_text_context_files,
+                )
+
+                turn_context_files = rehydrate_session_text_context_files(
+                    payload.session_id,
+                    turn_context_files,
+                    chat_history=getattr(session, "chat_history", None),
+                )
+                _cf_before = dict(turn_context_files)
+                turn_context_files = materialize_session_text_context_files(
+                    payload.session_id, turn_context_files
+                )
+                for _old_key in _cf_before:
+                    if _old_key not in turn_context_files and _old_key in session.context_files:
+                        del session.context_files[_old_key]
+                for _new_key, _new_val in turn_context_files.items():
+                    if not str(_new_val or "").startswith("[附件] ") and not str(_new_val or "").startswith(
+                        "[文件引用] "
+                    ):
+                        session.context_files[_new_key] = _new_val
+                if patch_chat_history_attachment_source_paths(
+                    getattr(session, "chat_history", None),
+                    turn_context_files,
+                ):
+                    # Persist patched source_path so later retries don't depend on in-memory only.
+                    try:
+                        await manager.persist_async(payload.session_id)
+                    except Exception:
+                        logger.debug(
+                            "patch attachment source_path persist skipped session=%s",
+                            payload.session_id,
+                            exc_info=True,
+                        )
+            except Exception:
+                logger.exception("text context materialize failed session=%s", payload.session_id)
         if payload.skill_slugs:
             try:
                 from agenticx.tools.skill_bundle import SkillBundleLoader
