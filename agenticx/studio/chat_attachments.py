@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
-"""Session-scoped chat image attachment helpers.
+"""Session-scoped chat attachment helpers.
 
-Persist user-uploaded images under ~/.agenticx/sessions/<id>/uploads/ and
-resolve them for vision replay / view_image without fragile client paths.
+Persist user-uploaded images and text context files under
+~/.agenticx/sessions/<id>/uploads/ for stable file_read / reload paths.
 
 Author: Damon Li
 """
@@ -13,7 +13,7 @@ import base64
 import hashlib
 import os
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Sequence, Tuple
+from typing import Any, Dict, List, Mapping, Optional, Sequence, Tuple
 from urllib.parse import unquote_to_bytes
 
 _SESSIONS_ROOT = Path(os.path.expanduser("~")) / ".agenticx" / "sessions"
@@ -26,6 +26,13 @@ _MIME_EXT = {
     "image/webp": ".webp",
     "image/bmp": ".bmp",
 }
+
+_TEXT_PLACEHOLDER_PREFIXES = (
+    "[附件] ",
+    "[文件引用] ",
+    "[附件解析失败]",
+    "[图片:",
+)
 
 
 def parse_data_image_url(target: str) -> tuple[bytes, str] | None:
@@ -73,6 +80,270 @@ def _clean_image_attachment_rows(atts: Sequence[Any]) -> list[dict[str, Any]]:
 
 def session_uploads_dir(session_id: str) -> Path:
     return _SESSIONS_ROOT / str(session_id or "").strip() / "uploads"
+
+
+def _display_name_from_context_key(key: str) -> str:
+    base = os.path.basename(str(key or "").replace("\\", "/"))
+    # Composer keys may append ":snippet" / ":1-10" after the filename.
+    name = base.split(":", 1)[0] if base else ""
+    return name.strip() or "attachment.txt"
+
+
+def _text_ext_from_context_key(key: str) -> str:
+    name = _display_name_from_context_key(key)
+    _, ext = os.path.splitext(name)
+    if ext and 1 < len(ext) <= 10 and all(ch.isalnum() or ch == "." for ch in ext):
+        return ext.lower()
+    return ".txt"
+
+
+def _safe_upload_basename(key: str) -> str:
+    """Stable, filesystem-safe basename preserving original extension when possible."""
+    name = _display_name_from_context_key(key)
+    # Keep unicode filenames (user expectation: 断舍离待办清单.html); strip path separators only.
+    cleaned = name.replace("/", "_").replace("\\", "_").replace("\x00", "").strip()
+    if not cleaned or cleaned in {".", ".."}:
+        cleaned = f"attachment{_text_ext_from_context_key(key)}"
+    return cleaned
+
+
+def _is_readable_abs_file(key: str) -> bool:
+    text = str(key or "").strip()
+    if not text:
+        return False
+    expanded = os.path.expanduser(text)
+    if not os.path.isabs(expanded):
+        return False
+    try:
+        return Path(expanded).is_file()
+    except (OSError, ValueError):
+        return False
+
+
+def _is_text_attachment_placeholder(body: str) -> bool:
+    stripped = str(body or "").strip()
+    if not stripped:
+        return True
+    if stripped == "[图片文件]":
+        return True
+    return any(stripped.startswith(prefix) for prefix in _TEXT_PLACEHOLDER_PREFIXES)
+
+
+def _should_skip_text_context_materialize(key: str, body: str) -> bool:
+    if not key:
+        return True
+    if key.startswith("skill:") or key.startswith("@dir:"):
+        return True
+    if _is_text_attachment_placeholder(body):
+        return True
+    if _is_readable_abs_file(key):
+        return True
+    return False
+
+
+def _read_text_file(path: Path) -> str | None:
+    try:
+        if not path.is_file():
+            return None
+        return path.read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError, ValueError):
+        return None
+
+
+def _find_upload_by_basename(session_id: str, basename: str) -> Path | None:
+    name = str(basename or "").strip()
+    if not name:
+        return None
+    uploads = session_uploads_dir(session_id)
+    if not uploads.is_dir():
+        return None
+    direct = uploads / name
+    if direct.is_file():
+        return direct
+    # Legacy digest-named uploads: <sha16>.ext or <sha16>_<name>
+    lower = name.casefold()
+    stem, ext = os.path.splitext(name)
+    for cand in uploads.iterdir():
+        if not cand.is_file():
+            continue
+        cname = cand.name
+        if cname.casefold() == lower:
+            return cand
+        if stem and cname.endswith(f"_{name}"):
+            return cand
+        if ext and cname.endswith(ext) and len(cname) == 16 + len(ext) and cname[:16].isalnum():
+            # Ambiguous digest-only legacy file: only match when unique for this ext.
+            continue
+    # Second pass for unique legacy digest+ext when basename matches one upload.
+    matches = [
+        cand
+        for cand in uploads.iterdir()
+        if cand.is_file()
+        and cand.suffix.casefold() == ext.casefold()
+        and len(cand.stem) == 16
+        and cand.stem.isalnum()
+    ]
+    if len(matches) == 1 and name:
+        return matches[0]
+    return None
+
+
+def _source_path_from_chat_history(
+    chat_history: Sequence[Any] | None,
+    basename: str,
+) -> str:
+    want = str(basename or "").strip().casefold()
+    if not want or not chat_history:
+        return ""
+    for row in reversed(list(chat_history)):
+        if not isinstance(row, dict) or str(row.get("role", "")).strip() != "user":
+            continue
+        atts = row.get("attachments")
+        if not isinstance(atts, list):
+            continue
+        for att in atts:
+            if not isinstance(att, dict):
+                continue
+            name = str(att.get("name", "") or "").strip()
+            if name.casefold() != want:
+                continue
+            sp = str(att.get("source_path", "") or att.get("storage_path", "") or "").strip()
+            if sp and _is_readable_abs_file(sp):
+                return sp
+    return ""
+
+
+def rehydrate_session_text_context_files(
+    session_id: str,
+    context_files: Mapping[str, str],
+    *,
+    chat_history: Sequence[Any] | None = None,
+) -> dict[str, str]:
+    """Fill ``[附件] name`` placeholders from session uploads / history source_path.
+
+    Enables retry of an earlier user turn when Desktop only has attachment metadata
+    (name/size) but the body was previously materialized under session/uploads.
+    """
+    sid = str(session_id or "").strip()
+    if not sid or not context_files:
+        return {str(k): str(v or "") for k, v in (context_files or {}).items() if str(k or "").strip()}
+
+    out: dict[str, str] = {}
+    for raw_key, raw_body in context_files.items():
+        key = str(raw_key or "").strip()
+        body = str(raw_body or "")
+        if not key:
+            continue
+        if not _is_text_attachment_placeholder(body):
+            out[key] = body
+            continue
+        # Prefer reading the key itself when it already points at a durable file.
+        if _is_readable_abs_file(key):
+            text = _read_text_file(Path(os.path.expanduser(key)))
+            if text is not None:
+                out[key] = text
+                continue
+        display = _display_name_from_context_key(key)
+        if body.strip().startswith("[附件] "):
+            display = body.strip()[len("[附件] ") :].strip() or display
+        # History source_path (may already be session/uploads/…).
+        hist_path = _source_path_from_chat_history(chat_history, display)
+        if hist_path:
+            text = _read_text_file(Path(os.path.expanduser(hist_path)))
+            if text is not None:
+                out[hist_path] = text
+                continue
+        upload = _find_upload_by_basename(sid, display)
+        if upload is not None:
+            text = _read_text_file(upload)
+            if text is not None:
+                out[str(upload)] = text
+                continue
+        out[key] = body
+    return out
+
+
+def patch_chat_history_attachment_source_paths(
+    chat_history: Sequence[Any] | None,
+    context_files: Mapping[str, str],
+) -> bool:
+    """Write materialized abs paths back onto matching history attachment rows."""
+    if not chat_history or not context_files:
+        return False
+    name_to_path: dict[str, str] = {}
+    for key, body in context_files.items():
+        path = str(key or "").strip()
+        if not path or _is_text_attachment_placeholder(str(body or "")):
+            continue
+        if not _is_readable_abs_file(path):
+            continue
+        name_to_path[_display_name_from_context_key(path).casefold()] = path
+    if not name_to_path:
+        return False
+    changed = False
+    for row in chat_history:
+        if not isinstance(row, dict) or str(row.get("role", "")).strip() != "user":
+            continue
+        atts = row.get("attachments")
+        if not isinstance(atts, list):
+            continue
+        for att in atts:
+            if not isinstance(att, dict):
+                continue
+            name = str(att.get("name", "") or "").strip().casefold()
+            if not name or name not in name_to_path:
+                continue
+            new_path = name_to_path[name]
+            old = str(att.get("source_path", "") or "").strip()
+            if old != new_path:
+                att["source_path"] = new_path
+                changed = True
+    return changed
+
+
+def materialize_session_text_context_files(
+    session_id: str,
+    context_files: Mapping[str, str],
+) -> dict[str, str]:
+    """Write bare-name text context bodies to session uploads/ and rewrite keys.
+
+    Uses the original basename under ``uploads/`` so retry can rehydrate by name.
+    Keys that already point at readable absolute files (or placeholders / skill /
+    dir refs) are left unchanged. Returns a new dict; values are unchanged.
+    """
+    sid = str(session_id or "").strip()
+    if not sid or not context_files:
+        return {str(k): str(v or "") for k, v in (context_files or {}).items() if str(k or "").strip()}
+
+    uploads_dir = session_uploads_dir(sid)
+    out: dict[str, str] = {}
+    for raw_key, raw_body in context_files.items():
+        key = str(raw_key or "").strip()
+        body = str(raw_body or "")
+        if not key:
+            continue
+        if _should_skip_text_context_materialize(key, body):
+            out[key] = body
+            continue
+        uploads_dir.mkdir(parents=True, exist_ok=True)
+        safe_name = _safe_upload_basename(key)
+        dest = uploads_dir / safe_name
+        if dest.is_file():
+            existing = _read_text_file(dest)
+            if existing is not None and existing != body:
+                digest = hashlib.sha256(body.encode("utf-8")).hexdigest()[:8]
+                stem, ext = os.path.splitext(safe_name)
+                dest = uploads_dir / f"{stem}_{digest}{ext or _text_ext_from_context_key(key)}"
+        if not dest.is_file():
+            dest.write_text(body, encoding="utf-8")
+        else:
+            # Same content already present — keep path stable for retries.
+            pass
+        # Ensure content matches (overwrite identical-name when equal path reused).
+        if _read_text_file(dest) != body:
+            dest.write_text(body, encoding="utf-8")
+        out[str(dest)] = body
+    return out
 
 
 def materialize_session_image_uploads(

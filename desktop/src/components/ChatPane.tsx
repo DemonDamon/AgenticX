@@ -208,6 +208,7 @@ import {
   isWorkspaceReferenceAttachment,
   parseLineRangeFromReferenceLabel,
 } from "../utils/reference-attachment";
+import { isLikelyTextFile } from "../utils/text-attachment";
 import { isViewImageInjectMessage, viewImageInjectRowFromSession } from "../utils/view-image-inject";
 import { resolveSessionTailForSwitch, invalidateSessionTail } from "../utils/session-tail-cache";
 import { visibleMessagesForSession } from "../utils/message-ownership";
@@ -1818,29 +1819,6 @@ type AttachedFile = {
 
 function isImageFile(file: File): boolean {
   return file.type.startsWith("image/");
-}
-
-function isLikelyTextFile(file: File): boolean {
-  if (file.type.startsWith("text/")) return true;
-  const lower = file.name.toLowerCase();
-  return [
-    ".py",
-    ".ts",
-    ".tsx",
-    ".js",
-    ".jsx",
-    ".json",
-    ".md",
-    ".txt",
-    ".yaml",
-    ".yml",
-    ".sh",
-    ".bash",
-    ".toml",
-    ".xml",
-    ".csv",
-    ".sql",
-  ].some((ext) => lower.endsWith(ext));
 }
 
 /** Office/PDF documents the frontend cannot parse inline; backend skills (liteparse/docx) handle them via absolute path. */
@@ -7404,6 +7382,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
     }
 
     if (isLikelyTextFile(file)) {
+      const absolutePath = window.agenticxDesktop?.getPathForFile?.(file) || "";
       const reader = new FileReader();
       reader.onload = () => {
         const text = typeof reader.result === "string" ? reader.result : "";
@@ -7415,6 +7394,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
             mimeType: file.type || "text/plain",
             status: "ready",
             content: text.slice(0, TEXT_ATTACHMENT_LIMIT),
+            ...(absolutePath ? { sourcePath: absolutePath } : {}),
           },
         }));
       };
@@ -7428,6 +7408,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
             status: "error",
             content: "",
             errorText: "文本解析失败",
+            ...(absolutePath ? { sourcePath: absolutePath } : {}),
           },
         }));
       };
