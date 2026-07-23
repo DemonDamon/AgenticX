@@ -603,6 +603,20 @@ OpeniLink Hub 的 [OpenClaw App](https://github.com/openilink/openilink-hub) 也
 
 **桌面端开发：** 个人微信 iLink 的 Go sidecar 可执行文件**不纳入**本仓库。首次在本地使用该能力前，请在 [`packaging/wechat-sidecar/`](packaging/wechat-sidecar/) 执行 `make build`（需 Go 1.22+）。说明见 [`packaging/wechat-sidecar/README.md`](packaging/wechat-sidecar/README.md)。
 
+## 引用
+
+如在研究或论文中使用 AgenticX，请引用：
+
+```bibtex
+@software{agenticx2026,
+  author  = {{AgenticX Team}},
+  title   = {AgenticX: Unified Multi-Agent Framework},
+  year    = {2026},
+  url     = {https://github.com/DemonDamon/AgenticX},
+  license = {Apache-2.0}
+}
+```
+
 ## 许可证
 
 本项目采用 Apache License 2.0（Apache-2.0）许可，详见 [LICENSE](LICENSE) 文件。
