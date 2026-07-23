@@ -1,4 +1,12 @@
-import { useState, useRef, useCallback, type WheelEvent, type MouseEvent } from "react";
+import {
+  useState,
+  useRef,
+  useCallback,
+  useEffect,
+  type WheelEvent,
+  type MouseEvent,
+  type SyntheticEvent,
+} from "react";
 import { ZoomIn, ZoomOut, Maximize2 } from "lucide-react";
 import { HoverTip } from "./HoverTip";
 
@@ -9,61 +17,103 @@ type Props = {
   maxHeight?: string;
 };
 
-const MIN_SCALE = 0.1;
-const MAX_SCALE = 10;
+const MIN_USER_SCALE = 0.1;
+const MAX_USER_SCALE = 10;
 const STEP = 0.25;
+
+function clampUserScale(scale: number): number {
+  return Math.min(MAX_USER_SCALE, Math.max(MIN_USER_SCALE, scale));
+}
 
 /**
  * 支持鼠标滚轮缩放（以光标为中心）+ 拖拽平移的图片查看器。
- * 双击还原至适应模式。
+ * 默认 100% = 适应容器完整显示；双击还原至适应模式。
  */
 export function ZoomableImage({ src, alt, maxHeight = "68vh" }: Props) {
-  const [scale, setScale] = useState(1);
+  const [fitScale, setFitScale] = useState(1);
+  const [userScale, setUserScale] = useState(1);
+  const [naturalSize, setNaturalSize] = useState<{ w: number; h: number } | null>(null);
   const [offset, setOffset] = useState({ x: 0, y: 0 });
   const [isDragging, setIsDragging] = useState(false);
 
-  // 用 ref 存储拖拽起点，避免触发 re-render
   const dragOrigin = useRef<{ mx: number; my: number; ox: number; oy: number } | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
+  const imgRef = useRef<HTMLImageElement>(null);
 
-  const clampScale = (s: number) => Math.min(MAX_SCALE, Math.max(MIN_SCALE, s));
+  const computeFitScale = useCallback((resetView = false) => {
+    const container = containerRef.current;
+    const img = imgRef.current;
+    if (!container || !img || img.naturalWidth <= 0 || img.naturalHeight <= 0) return;
+
+    const scale = Math.min(
+      container.clientWidth / img.naturalWidth,
+      container.clientHeight / img.naturalHeight,
+      1,
+    );
+    setFitScale(scale);
+    if (resetView) {
+      setUserScale(1);
+      setOffset({ x: 0, y: 0 });
+    }
+  }, []);
+
+  useEffect(() => {
+    setNaturalSize(null);
+    setFitScale(1);
+    setUserScale(1);
+    setOffset({ x: 0, y: 0 });
+  }, [src]);
+
+  useEffect(() => {
+    const container = containerRef.current;
+    if (!container) return;
+    const observer = new ResizeObserver(() => computeFitScale(false));
+    observer.observe(container);
+    return () => observer.disconnect();
+  }, [computeFitScale]);
 
   const reset = useCallback(() => {
-    setScale(1);
+    setUserScale(1);
     setOffset({ x: 0, y: 0 });
   }, []);
 
-  /** 以鼠标在容器内的位置为缩放中心 */
-  const handleWheel = useCallback(
-    (e: WheelEvent<HTMLDivElement>) => {
-      e.preventDefault();
-      e.stopPropagation();
-      const container = containerRef.current;
-      if (!container) return;
-
-      const rect = container.getBoundingClientRect();
-      // 鼠标相对于容器中心的偏移
-      const mx = e.clientX - rect.left - rect.width / 2;
-      const my = e.clientY - rect.top - rect.height / 2;
-
-      setScale((prev) => {
-        const delta = e.deltaY < 0 ? 1.12 : 1 / 1.12;
-        const next = clampScale(prev * delta);
-        // 以鼠标位置为缩放中心修正平移量
-        const ratio = next / prev;
-        setOffset((o) => ({ x: mx - (mx - o.x) * ratio, y: my - (my - o.y) * ratio }));
-        return next;
-      });
+  const handleImageLoad = useCallback(
+    (event: SyntheticEvent<HTMLImageElement>) => {
+      const img = event.currentTarget;
+      setNaturalSize({ w: img.naturalWidth, h: img.naturalHeight });
+      computeFitScale(true);
     },
-    [],
+    [computeFitScale],
   );
 
-  const handleMouseDown = useCallback((e: MouseEvent<HTMLDivElement>) => {
-    if (e.button !== 0) return;
+  const handleWheel = useCallback((e: WheelEvent<HTMLDivElement>) => {
     e.preventDefault();
-    setIsDragging(true);
-    dragOrigin.current = { mx: e.clientX, my: e.clientY, ox: offset.x, oy: offset.y };
-  }, [offset]);
+    e.stopPropagation();
+    const container = containerRef.current;
+    if (!container) return;
+
+    const rect = container.getBoundingClientRect();
+    const mx = e.clientX - rect.left - rect.width / 2;
+    const my = e.clientY - rect.top - rect.height / 2;
+
+    setUserScale((prev) => {
+      const delta = e.deltaY < 0 ? 1.12 : 1 / 1.12;
+      const next = clampUserScale(prev * delta);
+      const ratio = next / prev;
+      setOffset((o) => ({ x: mx - (mx - o.x) * ratio, y: my - (my - o.y) * ratio }));
+      return next;
+    });
+  }, []);
+
+  const handleMouseDown = useCallback(
+    (e: MouseEvent<HTMLDivElement>) => {
+      if (e.button !== 0) return;
+      e.preventDefault();
+      setIsDragging(true);
+      dragOrigin.current = { mx: e.clientX, my: e.clientY, ox: offset.x, oy: offset.y };
+    },
+    [offset],
+  );
 
   const handleMouseMove = useCallback(
     (e: MouseEvent<HTMLDivElement>) => {
@@ -83,14 +133,14 @@ export function ZoomableImage({ src, alt, maxHeight = "68vh" }: Props) {
 
   const handleDoubleClick = useCallback(() => reset(), [reset]);
 
-  const zoomIn  = () => setScale((s) => clampScale(+(s + STEP).toFixed(2)));
-  const zoomOut = () => setScale((s) => clampScale(+(s - STEP).toFixed(2)));
+  const zoomIn = () => setUserScale((s) => clampUserScale(+(s + STEP).toFixed(2)));
+  const zoomOut = () => setUserScale((s) => clampUserScale(+(s - STEP).toFixed(2)));
 
-  const pct = Math.round(scale * 100);
+  const effectiveScale = fitScale * userScale;
+  const pct = Math.round(userScale * 100);
 
   return (
     <div className="flex flex-col gap-2">
-      {/* 工具栏 */}
       <div className="flex items-center justify-center gap-1">
         <HoverTip label="缩小">
           <button
@@ -129,7 +179,6 @@ export function ZoomableImage({ src, alt, maxHeight = "68vh" }: Props) {
         <span className="ml-2 text-[11px] text-text-faint">滚轮缩放 · 拖拽平移 · 双击还原</span>
       </div>
 
-      {/* 图片容器 */}
       <div
         ref={containerRef}
         className="relative overflow-hidden rounded-lg border border-border bg-black/10"
@@ -141,18 +190,21 @@ export function ZoomableImage({ src, alt, maxHeight = "68vh" }: Props) {
         onMouseLeave={handleMouseUp}
         onDoubleClick={handleDoubleClick}
       >
-        {/* 撑开容器高度用的透明占位，防止 0 高度 */}
         <div style={{ height: maxHeight === "68vh" ? "60vh" : maxHeight, minHeight: 200 }} />
 
         <img
+          ref={imgRef}
           src={src}
           alt={alt ?? "image"}
           draggable={false}
+          onLoad={handleImageLoad}
           style={{
             position: "absolute",
             top: "50%",
             left: "50%",
-            transform: `translate(calc(-50% + ${offset.x}px), calc(-50% + ${offset.y}px)) scale(${scale})`,
+            width: naturalSize?.w,
+            height: naturalSize?.h,
+            transform: `translate(calc(-50% + ${offset.x}px), calc(-50% + ${offset.y}px)) scale(${effectiveScale})`,
             transformOrigin: "center center",
             maxWidth: "none",
             maxHeight: "none",
