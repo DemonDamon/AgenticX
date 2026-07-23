@@ -876,7 +876,7 @@ function loadThemeColor(): ThemeColor {
   } catch {
     // ignore storage errors
   }
-  return "pink";
+  return "white";
 }
 
 function loadUserNickname(): string {
