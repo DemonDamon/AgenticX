@@ -157,8 +157,16 @@ _HANDOFF_BODY_RE = re.compile(
     r"|接下来我(?:就|来|去|会)(?:读取|执行|改|优化|开始)",  # 接下来我去执行
 )
 
+# Mid-turn incomplete handoff after tools already ran (Path D).
+_MIDTURN_HANDOFF_RE = re.compile(
+    r"让我(?:搜索|查找|读取|打开|看看|定位)|我(?:再|继续)?(?:搜索|查找|读取)"
+)
+_MIDTURN_INCOMPLETE_ENDINGS = frozenset({":", "：", "…"})
+_MIDTURN_COMPLETED_ENDINGS = frozenset({".", "。", "!", "！", "?", "？"})
+
 # Body length cap for path C — beyond this, treat the message as a real reply.
 _HANDOFF_BODY_MAX_CHARS = 300
+_MIDTURN_HANDOFF_BODY_MAX_CHARS = 220
 
 
 def _turn_has_any_tool_row(tail: List[Dict[str, Any]]) -> bool:
@@ -216,6 +224,20 @@ def _messages_last_turn_promised_action_without_followthrough(
     # have an earlier tool call in the same turn, so we tighten here.
     if body and _HANDOFF_BODY_RE.search(body) and len(body) < _HANDOFF_BODY_MAX_CHARS:
         if not _turn_has_any_tool_row(tail):
+            return True
+
+    # Path D: tools already ran this turn, then a short incomplete "I'll search/read…"
+    # stub with no further tool_calls (e.g. 「让我搜索一下这个HTML文件：」).
+    if (
+        body
+        and _turn_has_any_tool_row(tail)
+        and len(body) < _MIDTURN_HANDOFF_BODY_MAX_CHARS
+        and _MIDTURN_HANDOFF_RE.search(body)
+    ):
+        ending = body.rstrip()[-1:] if body.rstrip() else ""
+        if ending in _MIDTURN_INCOMPLETE_ENDINGS:
+            return True
+        if ending not in _MIDTURN_COMPLETED_ENDINGS:
             return True
 
     return False

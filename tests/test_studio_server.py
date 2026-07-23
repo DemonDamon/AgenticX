@@ -262,6 +262,42 @@ def test_truncate_after_clears_model_context_for_retry() -> None:
     assert not any("[compacted]" in c for c in agent_contents)
 
 
+def test_truncate_after_clears_orphan_agent_tools_without_user_rows() -> None:
+    """Retry turn-1 must not keep later-round orphan tool tails (no user rows)."""
+    app = create_studio_app()
+    client, session_id, managed = _seed_truncate_session(app)
+    managed.studio_session.chat_history = [
+        {"role": "user", "content": "first", "timestamp": 1},
+        {"role": "assistant", "content": "ans1", "timestamp": 2},
+        {"role": "user", "content": "second", "timestamp": 3},
+        {"role": "assistant", "content": "ans2", "timestamp": 4},
+    ]
+    # Polluted agent store: tool/assistant only — sync-by-user-count cannot cut.
+    managed.studio_session.agent_messages = [
+        {
+            "role": "assistant",
+            "content": "",
+            "tool_calls": [{"id": "t1", "function": {"name": "bash_exec"}}],
+        },
+        {"role": "tool", "tool_call_id": "t1", "name": "bash_exec", "content": "ok"},
+        {"role": "assistant", "content": "later round leftover"},
+    ]
+
+    resp = client.post(
+        "/api/session/messages/truncate",
+        json={
+            "session_id": session_id,
+            "user_content": "first",
+            "mode": "after",
+            "user_occurrence": 1,
+        },
+    )
+    assert resp.status_code == 200
+    assert resp.json()["ok"] is True
+    assert [x["content"] for x in managed.studio_session.chat_history] == ["first"]
+    assert managed.studio_session.agent_messages == []
+
+
 def test_truncate_after_deletes_session_summary_file(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

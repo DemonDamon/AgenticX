@@ -24,16 +24,28 @@ def _minimax_m2_family_no_vision(model_name: str) -> bool:
     return bool(re.match(r"^m2[.\-_]?\d", raw))
 
 
-def _zhipu_glm5_family_no_vision(model_name: str) -> bool:
-    """GLM-5 chat SKUs on BigModel v4 reject multimodal message parts (image_url)."""
+def _zhipu_text_only_family(model_name: str) -> bool:
+    """GLM chat SKUs that reject multimodal image_url parts on BigModel v4.
+
+    Zhipu vision SKUs always carry a digit+"v" marker (glm-4v, glm-4.1v,
+    glm-4.5v, glm-4.6v, ...). Anything on the known GLM text families without
+    that marker rejects image_url and must have images stripped. Unknown model
+    names are left vision-capable to avoid wrongly stripping images from a
+    future vision SKU.
+    """
     raw = str(model_name or "").strip().lower()
     if not raw:
         return False
     if "/" in raw:
         raw = raw.rsplit("/", 1)[-1]
-    if "vl" in raw or "vision" in raw or "4v" in raw or "5v" in raw:
+    # Vision marker -> treat as vision-capable (do not strip).
+    if re.search(r"\dv|vision|vl", raw):
         return False
-    return raw == "glm-5" or raw.startswith("glm-5-")
+    return raw.startswith(("glm-5", "glm-4.6", "glm-4.5", "glm-4", "glm-z1", "glm-zero"))
+
+
+# Backward-compatible alias for studio.server thin wrapper (do not remove).
+_zhipu_glm5_family_no_vision = _zhipu_text_only_family
 
 
 def _bailian_qwen_text_no_vision(model_name: str) -> bool:
@@ -54,7 +66,7 @@ def is_vision_capable(provider_name: str, model_name: str) -> bool:
     model = str(model_name or "").strip()
     if provider == "minimax" and _minimax_m2_family_no_vision(model):
         return False
-    if provider == "zhipu" and _zhipu_glm5_family_no_vision(model):
+    if provider == "zhipu" and _zhipu_text_only_family(model):
         return False
     if provider in {"bailian", "dashscope"} and _bailian_qwen_text_no_vision(model):
         return False

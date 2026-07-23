@@ -24,6 +24,30 @@ _DETECTOR_MESSAGES: dict[str, str] = {
 }
 
 
+def _last_failure_summary(session: Any) -> str:
+    """Short, user-facing summary of the last hard model failure (if any)."""
+    scratch = getattr(session, "scratchpad", None)
+    if not isinstance(scratch, dict):
+        return ""
+    raw = scratch.get("__last_turn_failure__")
+    if not isinstance(raw, dict):
+        return ""
+    text = str(raw.get("text", "") or "").strip()
+    if not text:
+        return ""
+    # Strip noisy SDK prefixes so the user sees the vendor message.
+    for prefix in (
+        "模型调用失败: ",
+        "litellm.BadRequestError: ",
+        "OpenAIException - ",
+    ):
+        if text.startswith(prefix):
+            text = text[len(prefix) :].lstrip()
+    # Some messages are "A: B: <real>"; collapse repeated prefixes once more.
+    text = text.replace("litellm.BadRequestError: ", "").replace("OpenAIException - ", "")
+    return text[:120].strip()
+
+
 def _last_history_row(session: Any) -> dict[str, Any] | None:
     history = getattr(session, "chat_history", None)
     if not isinstance(history, list) or not history:
@@ -81,6 +105,10 @@ def interruption_notice_content(
     detector: str | None = None,
 ) -> str:
     key = cause if cause in _CAUSE_MESSAGES else "unknown"
+    if key == "runtime_failure":
+        summary = _last_failure_summary(session)
+        if summary:
+            return f"模型调用失败：{summary}。可点「恢复执行」重试。"
     if key in {"no_final", "unknown"} and _last_row_is_tool_result(session):
         return _CAUSE_MESSAGES["no_final"] + _detector_suffix(detector)
     return _CAUSE_MESSAGES[key] + _detector_suffix(detector)
@@ -132,6 +160,10 @@ def append_turn_interruption_notice(
     normalized_detector = _normalize_detector(detector)
     if normalized_detector:
         metadata["detector"] = normalized_detector
+    if cause == "runtime_failure":
+        _summary = _last_failure_summary(session)
+        if _summary:
+            metadata["failure_summary"] = _summary
     history.append(
         {
             "id": uuid.uuid4().hex,

@@ -13,8 +13,21 @@ type Props = {
 
 export function TurnInterruptionNoticeLine({ message, resumeInFlight = false, onResume, isFutile = false }: Props) {
   const parsed = parseTurnInterruptionNotice(message);
-  const isUserInterrupt = parsed?.cause === "user_interrupt";
-  const text = isUserInterrupt ? "已中断" : "上一步工具执行后未收到模型响应";
+  const cause = parsed?.cause;
+  const isUserInterrupt = cause === "user_interrupt";
+  let text: string;
+  if (isUserInterrupt) {
+    text = "已中断";
+  } else if (cause === "runtime_failure") {
+    // Prefer the real upstream error surfaced by the backend; fall back to the
+    // notice content, then a generic label. Never mislabel a model API 400 as
+    // "工具执行后未收到模型响应".
+    text = parsed?.failureSummary
+      ? `模型调用失败：${parsed.failureSummary}`
+      : (parsed?.text || "模型调用失败，本轮未完成");
+  } else {
+    text = "上一步工具执行后未收到模型响应";
+  }
 
   return (
     <SystemStatusLine icon={CirclePause} tone="info" data-status-kind="turn-interrupted">

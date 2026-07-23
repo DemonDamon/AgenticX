@@ -1139,6 +1139,37 @@ def _message_content_is_empty(content: Any) -> bool:
     return not str(content).strip()
 
 
+# OpenAI-compatible chat message keys. Studio may persist extras (metadata,
+# attachments, …) on agent_messages; strict gateways (e.g. Zhipu) reject them
+# with「API 调用参数有误」when those fields are forwarded upstream.
+_LLM_MESSAGE_KEEP_KEYS = frozenset(
+    {
+        "role",
+        "content",
+        "name",
+        "tool_calls",
+        "tool_call_id",
+        "function_call",
+        "refusal",
+    }
+)
+
+
+def _strip_non_llm_message_fields(
+    messages: Sequence[Dict[str, Any]],
+) -> List[Dict[str, Any]]:
+    """Return a shallow-copied message list safe to send to chat completions APIs."""
+    out: List[Dict[str, Any]] = []
+    for msg in messages:
+        if not isinstance(msg, dict):
+            continue
+        cleaned = {k: v for k, v in msg.items() if k in _LLM_MESSAGE_KEEP_KEYS}
+        if "role" not in cleaned:
+            continue
+        out.append(cleaned)
+    return out
+
+
 def _sanitize_context_messages(messages: Sequence[Dict[str, Any]]) -> List[Dict[str, Any]]:
     """
     Repair history to satisfy strict tool-call pairing providers.
@@ -1254,6 +1285,85 @@ def _is_minimax_chat_setting_error(error: Exception) -> bool:
         "invalid chat setting" in text
         or "invalid params" in text and "(2013)" in text
     )
+
+
+def _messages_contain_image(messages: Any) -> bool:
+    """True when any message carries an image_url content block."""
+    if not isinstance(messages, (list, tuple)):
+        return False
+    for msg in messages:
+        if not isinstance(msg, dict):
+            continue
+        content = msg.get("content")
+        if isinstance(content, list):
+            for block in content:
+                if isinstance(block, dict) and str(block.get("type", "")) == "image_url":
+                    return True
+    return False
+
+
+def _is_zhipu_transient_invalid_input(exc: BaseException) -> bool:
+    """Zhipu multimodal requests flake with 1210 'invalid input' upstream.
+
+    Excludes the *deterministic* text-only rejection (content.type 参数非法,
+    取值范围 ['text']) which must NOT be retried — that model simply cannot
+    take images (handled by vision stripping instead).
+    """
+    text = f"{type(exc).__name__} {exc}".lower()
+    if "取值范围" in text and "text" in text:
+        return False
+    return "invalid input" in text or "1210" in text
+
+
+_GLM_TOOL_STREAM_MODEL_PREFIXES = (
+    "glm-5.2",
+    "glm-5.1",
+    "glm-5",
+    "glm-4.7",
+    "glm-4.6",
+)
+
+
+def _zhipu_tool_stream_supported(provider_name: str, model_name: str) -> bool:
+    """Return whether the configured GLM route supports incremental tool calls.
+
+    The company GLM gateway is exposed as ``custom_openai_*`` and is resolved
+    to the generic OpenAI-compatible provider.  Capability detection therefore
+    cannot be restricted to the native ``zhipu`` provider name.
+
+    Vision SKUs (glm-4.6v, glm-4.5v, ...) must not opt into incremental
+    tool-call streaming; the prefix table targets text GLM-4.7/5.x only.
+    """
+    provider = str(provider_name or "").strip().lower()
+    model = str(model_name or "").strip().lower().split("/")[-1]
+    is_glm_route = provider == "zhipu" or provider.startswith("custom_openai_")
+    if re.search(r"\dv|vision|vl", model):
+        return False
+    return is_glm_route and model.startswith(_GLM_TOOL_STREAM_MODEL_PREFIXES)
+
+
+_MAX_TOKENS_CAP_RE = re.compile(
+    r"max_tokens.*?[\[（(]\s*1\s*[,，]\s*(\d+)\s*[\]）)]",
+    re.IGNORECASE,
+)
+
+
+def _parse_max_tokens_cap(exc: BaseException) -> Optional[int]:
+    """Parse vendor max_tokens upper bound from an error message, if present."""
+    text = str(exc or "")
+    if "max_tokens" not in text.lower():
+        return None
+    match = _MAX_TOKENS_CAP_RE.search(text)
+    if not match:
+        # Common Zhipu flash wording without needing the full regex match shape.
+        if "1024" in text and "max_tokens" in text.lower():
+            return 1024
+        return None
+    try:
+        cap = int(match.group(1))
+    except (TypeError, ValueError):
+        return None
+    return cap if cap >= 1 else None
 
 
 def _merge_consecutive_simple_roles_for_minimax(
@@ -2649,6 +2759,8 @@ class AgentRuntime:
                 messages_for_llm = strip_nonvision_multimodal_messages(
                     messages_for_llm, provider_name, model_name
                 )
+                # Drop Studio-only fields (metadata/attachments/…) before upstream call.
+                messages_for_llm = _strip_non_llm_message_fields(messages_for_llm)
                 if provider_name.strip().lower() == "minimax":
                     messages_for_llm = _merge_consecutive_simple_roles_for_minimax(messages_for_llm)
                 response_text = ""
@@ -2678,17 +2790,25 @@ class AgentRuntime:
                                     and provider_name.strip().lower() != "minimax"
                                 ):
                                     _round_tool_choice = _KB_FORCED_TOOL_CHOICE
+                                _max_tokens = (
+                                    getattr(session, "_max_tokens_override", None) or 8192
+                                )
                                 stream_kwargs: Dict[str, Any] = {
                                     "tools": list(active_tools),
                                     "tool_choice": _round_tool_choice,
                                     "temperature": 0.2,
-                                    "max_tokens": 8192,
+                                    "max_tokens": int(_max_tokens),
                                     "timeout": request_timeout_seconds,
                                 }
+                                if _zhipu_tool_stream_supported(provider_name, model_name):
+                                    # BigModel exposes incremental tool-call deltas as
+                                    # a separate opt-in capability for GLM-4.7/5.x text.
+                                    # Vision SKUs are excluded by the gate.
+                                    stream_kwargs["tool_stream"] = True
                                 if provider_name.strip().lower() == "minimax":
                                     stream_kwargs.pop("tool_choice", None)
                                     stream_kwargs.pop("temperature", None)
-                                    stream_kwargs["max_tokens"] = 4096
+                                    stream_kwargs["max_tokens"] = min(4096, int(_max_tokens))
                                 stream_kwargs.update(llm_call_kwargs)
                                 for chunk in stream_with_tools(
                                     messages_for_llm,
@@ -2948,7 +3068,9 @@ class AgentRuntime:
                                 tools=active_tools,
                                 tool_choice=_fallback_tool_choice,
                                 temperature=0.2,
-                                max_tokens=8192,
+                                max_tokens=int(
+                                    getattr(session, "_max_tokens_override", None) or 8192
+                                ),
                                 timeout=request_timeout_seconds,
                                 **llm_call_kwargs,
                             )
@@ -3275,6 +3397,45 @@ class AgentRuntime:
                     provider_name,
                     fault=fault,
                 )
+                # 智谱视觉模型「多模态 + 工具」请求偶发 1210 invalid input（上游抖动）。
+                # 同请求重试常成功，做一次会话级一次性重试再放弃。
+                if (
+                    provider_name.strip().lower() == "zhipu"
+                    and _messages_contain_image(messages_for_llm)
+                    and _is_zhipu_transient_invalid_input(exc)
+                    and not getattr(session, "_zhipu_vision_flake_retry_attempted", False)
+                ):
+                    setattr(session, "_zhipu_vision_flake_retry_attempted", True)
+                    yield RuntimeEvent(
+                        type=EventType.ERROR.value,
+                        data={
+                            "text": "视觉模型上游返回参数错误，正在自动重试一次…",
+                            "severity": "warning",
+                            "detector": "zhipu_vision_flake_retry",
+                            "retryable": True,
+                        },
+                        agent_id=agent_id,
+                    )
+                    continue
+                # Vendor rejected max_tokens (e.g. glm-4v-flash cap 1024). Downshift once.
+                _cap = _parse_max_tokens_cap(exc)
+                if (
+                    _cap is not None
+                    and not getattr(session, "_max_tokens_downshifted", False)
+                ):
+                    setattr(session, "_max_tokens_downshifted", True)
+                    setattr(session, "_max_tokens_override", int(_cap))
+                    yield RuntimeEvent(
+                        type=EventType.ERROR.value,
+                        data={
+                            "text": f"模型不支持当前 max_tokens，已降到 {_cap} 并自动重试…",
+                            "severity": "warning",
+                            "detector": "max_tokens_cap_retry",
+                            "retryable": True,
+                        },
+                        agent_id=agent_id,
+                    )
+                    continue
                 if fault == "rate_limit" and agent_id != "meta":
                     pause_text = (
                         f"模型供应商触发限流（provider={provider_name or '(unknown)'}, "
@@ -3532,7 +3693,9 @@ class AgentRuntime:
                                 for chunk in self.llm.stream(
                                     messages,
                                     temperature=0.2,
-                                    max_tokens=8192,
+                                    max_tokens=int(
+                                        getattr(session, "_max_tokens_override", None) or 8192
+                                    ),
                                     timeout=request_timeout_seconds,
                                     **llm_call_kwargs,
                                 ):

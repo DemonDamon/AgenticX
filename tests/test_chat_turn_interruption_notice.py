@@ -81,6 +81,27 @@ def test_append_writes_with_user_message() -> None:
     assert session.chat_history[-1]["metadata"]["kind"] == TURN_INTERRUPTED_KIND
 
 
+def test_append_runtime_failure_surfaces_last_turn_failure_summary() -> None:
+    session = _session_with_history([{"role": "user", "content": "看图"}])
+    session.scratchpad = {
+        "__last_turn_failure__": {
+            "text": (
+                "模型调用失败: litellm.BadRequestError: OpenAIException - "
+                "API 调用参数有误，请检查文档。invalid input"
+            ),
+            "detector": "unknown",
+        }
+    }
+    assert append_turn_interruption_notice(session, cause="runtime_failure", saw_final=False) is True
+    row = session.chat_history[-1]
+    assert "模型调用失败：" in row["content"]
+    assert "invalid input" in row["content"]
+    assert "工具执行后未收到模型响应" not in row["content"]
+    assert row["metadata"]["failure_summary"]
+    assert "invalid input" in row["metadata"]["failure_summary"]
+    assert "litellm.BadRequestError" not in row["metadata"]["failure_summary"]
+
+
 def test_append_runtime_failure_includes_detector_hint() -> None:
     session = _session_with_history([{"role": "user", "content": "跑一下"}])
     assert (
