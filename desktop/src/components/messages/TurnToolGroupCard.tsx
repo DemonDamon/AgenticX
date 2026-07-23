@@ -115,7 +115,7 @@ export function TurnToolGroupCard({
             </span>
           ) : (
             <span className="flex h-4 w-4 items-center justify-center rounded-full bg-[rgb(var(--theme-color-rgb,59,130,246))] ring-1 ring-[rgba(var(--theme-color-rgb,59,130,246),0.35)]">
-              <Check className="h-2.5 w-2.5 text-white" strokeWidth={2.45} />
+              <Check className="h-2.5 w-2.5 text-[var(--theme-color-text)]" strokeWidth={2.45} />
             </span>
           )}
         </span>
