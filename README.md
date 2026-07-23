@@ -606,6 +606,20 @@ Additional reference: [WorkBuddy — WeixinBot Guide](https://www.codebuddy.cn/d
 
 **Desktop development:** The iLink Go sidecar binary is **not** committed to this repository. Before using the personal WeChat bridge locally, run `make build` in [`packaging/wechat-sidecar/`](packaging/wechat-sidecar/) (requires Go 1.22+). See [`packaging/wechat-sidecar/README.md`](packaging/wechat-sidecar/README.md).
 
+## Citation
+
+If you use AgenticX in your research, please cite:
+
+```bibtex
+@software{agenticx2026,
+  author  = {{AgenticX Team}},
+  title   = {AgenticX: Unified Multi-Agent Framework},
+  year    = {2026},
+  url     = {https://github.com/DemonDamon/AgenticX},
+  license = {Apache-2.0}
+}
+```
+
 ## License
 
 This project is licensed under the Apache License, Version 2.0 — see the [LICENSE](LICENSE) file for details.
