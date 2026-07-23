@@ -27,7 +27,10 @@ import {
   type CitationSegment,
 } from "./citation-normalize";
 import { buildDocNumberMap } from "../../utils/citation-doc-grouping";
-import { extractSourceAttribution } from "./source-attribution-parse";
+import {
+  extractSourceAttribution,
+  type KeyCitationItem,
+} from "./source-attribution-parse";
 
 type Props = {
   content: string;
@@ -38,6 +41,40 @@ type Props = {
   className?: string;
   style?: CSSProperties;
 };
+
+/** Dedicated block for model-authored「关键引用」quotes — uniform row layout. */
+function KeyCitationsBlock({
+  items,
+  refMap,
+  docNumberById,
+}: {
+  items: KeyCitationItem[];
+  refMap: Map<number, SearchReference>;
+  docNumberById: Map<number, number>;
+}) {
+  if (items.length === 0) return null;
+  return (
+    <div className="mt-3 space-y-2 border-t border-border/60 pt-3">
+      <div className="text-[13px] font-semibold text-text-strong">关键引用</div>
+      <ol className="m-0 space-y-2 pl-0">
+        {items.map((item, index) => {
+          const rawId = item.id ?? index + 1;
+          const docNumber = docNumberById.get(rawId) ?? rawId;
+          const refs = [refMap.get(rawId)].filter((r): r is SearchReference => Boolean(r));
+          return (
+            <li
+              key={`key-cite-${rawId}-${index}`}
+              className="flex items-start gap-1.5 text-[13px] leading-relaxed text-text-primary"
+            >
+              <CitationBadge docNumber={docNumber} references={refs} />
+              <span className="min-w-0 flex-1 whitespace-pre-wrap break-words">{item.text}</span>
+            </li>
+          );
+        })}
+      </ol>
+    </div>
+  );
+}
 
 /** Headings must stay inline so a trailing [N] segment is not forced onto the next line. */
 function inlineCitationHeading(className: string) {
@@ -268,9 +305,10 @@ export function CitationMarkdownBody({
   }, [references]);
   const docNumberById = useMemo(() => buildDocNumberMap(references ?? []), [references]);
 
-  // Strip model-authored「数据来源标注」legends (epistemic theater, not real
-  // provenance). Leaving them in-body makes `[N]` collide with citation pills.
-  const { body: contentWithoutAttribution } = useMemo(
+  // Strip model-authored legends from body:
+  // - 数据来源标注 → discarded (epistemic theater)
+  // - 关键引用 → re-rendered as KeyCitationsBlock (keeps English quotes, uniform rows)
+  const { body: contentWithoutAttribution, keyCitations } = useMemo(
     () => extractSourceAttribution(content),
     [content],
   );
@@ -312,6 +350,7 @@ export function CitationMarkdownBody({
             )}
           </div>
         ))}
+        <KeyCitationsBlock items={keyCitations} refMap={refMap} docNumberById={docNumberById} />
       </MarkdownContext.Provider>
     </div>
   );

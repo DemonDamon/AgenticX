@@ -195,7 +195,13 @@ export function buildCitationRenderGroups(segments: CitationSegment[]): Citation
     i = j;
 
     const next = segments[i + 1];
-    if (next?.kind === "text" && /^\s*\n/.test(next.value)) {
+    // Flush before a new prose paragraph, but keep consecutive list items in the
+    // same group so trailing [N] stays on the bullet line (not orphaned below).
+    if (
+      next?.kind === "text" &&
+      /^\s*\n/.test(next.value) &&
+      !/^\s*\n(?:[-*]|\d+\.)\s+\S/.test(next.value)
+    ) {
       flush();
     }
   }

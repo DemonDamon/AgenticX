@@ -115,6 +115,14 @@ test("buildCitationRenderGroups: mid-sentence cites stay in one group", () => {
   assert.equal(groups[0].length, 4);
 });
 
+test("buildCitationRenderGroups: consecutive list items with trailing cites stay one group", () => {
+  const groups = buildCitationRenderGroups(
+    splitCitationSegments("- 合作披露细节[1]\n- 防御核心教训[2]"),
+  );
+  assert.equal(groups.length, 1);
+  assert.equal(groups[0].filter((s) => s.kind === "citation").length, 2);
+});
+
 test("mergeAdjacentCitations: merges adjacent same-document numbers, keeps text", () => {
   // ids 4,5 both map to document number 3; ids 1,2 are docs 1,2.
   const docMap = new Map<number, number>([
