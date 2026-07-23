@@ -11,6 +11,16 @@
           "data-theme",
           savedTheme === "light" ? "light" : "dark"
         );
+        var savedThemeColor = localStorage.getItem("agx-theme-color");
+        var themeColor =
+          savedThemeColor === "blue" ||
+          savedThemeColor === "green" ||
+          savedThemeColor === "pink" ||
+          savedThemeColor === "yellow" ||
+          savedThemeColor === "white"
+            ? savedThemeColor
+            : "white";
+        document.documentElement.setAttribute("data-theme-color", themeColor);
       } catch (e) {}
     </script>
   </head>
