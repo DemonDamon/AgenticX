@@ -1,5 +1,6 @@
 import { useMemo, useState } from "react";
 import type { Message } from "../store";
+import { TRAE_TODO_CHECK_CLASS } from "./work-panel/SessionTodoList";
 
 export type TodoStatus = "pending" | "in_progress" | "completed";
 
@@ -114,13 +115,15 @@ export function TodoUpdateCard({ content }: { content: string }) {
     <div className="rounded-lg border border-border bg-surface-card px-2.5 py-2">
       <div className="mb-2 flex items-center justify-between gap-2">
         <div className="flex items-center gap-2">
-          <span className="text-[11px] font-medium text-cyan-300">任务清单</span>
-          <span className="rounded bg-emerald-500/15 px-1.5 py-0.5 text-[10px] text-emerald-300">
+          <span className="text-[11px] font-medium text-text-strong">任务清单</span>
+          <span className="rounded bg-[color-mix(in_srgb,var(--status-success)_15%,transparent)] px-1.5 py-0.5 text-[10px] text-[var(--status-success)]">
             {parsed.completed}/{parsed.total}
           </span>
           <span className="rounded bg-surface-hover px-1.5 py-0.5 text-[10px] text-text-muted">{percent}%</span>
           {inProgress > 0 ? (
-            <span className="rounded bg-amber-500/15 px-1.5 py-0.5 text-[10px] text-amber-300">进行中 {inProgress}</span>
+            <span className="rounded bg-[color-mix(in_srgb,var(--status-warning)_15%,transparent)] px-1.5 py-0.5 text-[10px] text-[var(--status-warning)]">
+              进行中 {inProgress}
+            </span>
           ) : null}
           {pending > 0 ? (
             <span className="rounded bg-surface-card px-1.5 py-0.5 text-[10px] text-text-muted">待办 {pending}</span>
@@ -135,7 +138,10 @@ export function TodoUpdateCard({ content }: { content: string }) {
         </button>
       </div>
       <div className="mb-2 h-1.5 overflow-hidden rounded-full bg-surface-hover">
-        <div className="h-full rounded-full bg-cyan-400/80 transition-all" style={{ width: `${percent}%` }} />
+        <div
+          className="h-full rounded-full bg-[rgb(var(--theme-color-rgb,59,130,246))] transition-all"
+          style={{ width: `${percent}%` }}
+        />
       </div>
       {expanded ? (
         <div className="space-y-1">
@@ -144,10 +150,10 @@ export function TodoUpdateCard({ content }: { content: string }) {
               <span
                 className={
                   item.status === "completed"
-                    ? "mt-0.5 text-[11px] text-emerald-300"
+                    ? `mt-0.5 text-[11px] ${TRAE_TODO_CHECK_CLASS}`
                     : item.status === "in_progress"
-                      ? "mt-0.5 text-[11px] text-amber-300"
-                      : "mt-0.5 text-[11px] text-text-subtle"
+                      ? "mt-0.5 text-[11px] text-[var(--status-warning)]"
+                      : "mt-0.5 text-[11px] text-text-faint"
                 }
               >
                 {item.status === "completed" ? "✓" : item.status === "in_progress" ? "●" : "○"}
@@ -156,16 +162,18 @@ export function TodoUpdateCard({ content }: { content: string }) {
                 <div
                   className={
                     item.status === "completed"
-                      ? "text-[11px] text-text-subtle line-through"
+                      ? "text-[11px] text-text-muted line-through"
                       : item.status === "in_progress"
-                        ? "text-[11px] font-medium text-amber-100"
+                        ? "text-[11px] font-medium text-text-strong"
                         : "text-[11px] text-text-primary"
                   }
                 >
                   {item.content}
                 </div>
                 {item.status === "in_progress" && item.activeForm && item.activeForm !== item.content ? (
-                  <div className="mt-0.5 text-[10px] text-amber-300/80">当前动作：{item.activeForm}</div>
+                  <div className="mt-0.5 text-[10px] text-[rgba(var(--theme-color-rgb,59,130,246),0.8)]">
+                    当前动作：{item.activeForm}
+                  </div>
                 ) : null}
               </div>
             </div>
