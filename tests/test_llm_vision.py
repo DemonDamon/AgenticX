@@ -22,6 +22,24 @@ def test_bailian_qwen_vl_is_vision_capable() -> None:
     assert is_vision_capable("bailian", "qwen2.5-vl-72b-instruct") is True
 
 
+def test_zhipu_text_only_glm_skus_are_not_vision_capable() -> None:
+    assert is_vision_capable("zhipu", "glm-4.5-air") is False
+    assert is_vision_capable("zhipu", "glm-4.5-airx") is False
+    assert is_vision_capable("zhipu", "glm-4.6") is False
+    assert is_vision_capable("zhipu", "glm-4-plus") is False
+    assert is_vision_capable("zhipu", "glm-5") is False
+
+
+def test_zhipu_vision_glm_skus_are_vision_capable() -> None:
+    assert is_vision_capable("zhipu", "glm-4v") is True
+    assert is_vision_capable("zhipu", "glm-4v-flash") is True
+    assert is_vision_capable("zhipu", "glm-4.1v-thinking-flash") is True
+    assert is_vision_capable("zhipu", "glm-4.5v") is True
+    assert is_vision_capable("zhipu", "glm-4.6v") is True
+    assert is_vision_capable("zhipu", "openai/glm-4.6v") is True
+    assert is_vision_capable("zhipu", "glm-6-future-vision") is True
+
+
 def test_strip_nonvision_multimodal_messages_flattens_image_url() -> None:
     messages = [
         {

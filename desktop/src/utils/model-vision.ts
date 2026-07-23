@@ -18,11 +18,11 @@ function minimaxM2TextOnlySlug(slug: string): boolean {
   return false;
 }
 
-/** Zhipu GLM-5 line: text chat only on paas v4; multimodal parts return 400. */
-function zhipuGlm5TextOnlySlug(slug: string): boolean {
+/** Zhipu GLM text SKUs (no digit+"v" vision marker) reject image_url on paas v4. */
+function zhipuTextOnlySlug(slug: string): boolean {
   const s = slug.toLowerCase();
-  if (/vl|vision|4v|5v/.test(s)) return false;
-  return s === "glm-5" || /^glm-5([.\-_]|$)/.test(s);
+  if (/\dv|vision|vl/.test(s)) return false;
+  return /^glm-(5|4\.6|4\.5|4|z1|zero)/.test(s);
 }
 
 /** Bailian/DashScope text Qwen SKUs reject OpenAI-style image_url blocks (e.g. qwen3.7-max). */
@@ -46,7 +46,7 @@ export function isKnownNonVisionChatModel(provider: string, model: string): bool
 
   if (KNOWN_TEXT_ONLY_RE.test(combined) || KNOWN_TEXT_ONLY_RE.test(modelLower)) return true;
   if (p === "minimax" && minimaxM2TextOnlySlug(slug)) return true;
-  if (p === "zhipu" && zhipuGlm5TextOnlySlug(slug)) return true;
+  if (p === "zhipu" && zhipuTextOnlySlug(slug)) return true;
   if ((p === "bailian" || p === "dashscope") && bailianQwenTextOnlySlug(slug)) return true;
   return false;
 }
