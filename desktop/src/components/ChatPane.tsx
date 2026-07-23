@@ -1396,10 +1396,10 @@ function AttachmentChip({ file, onRemove }: { file: AttachedFile; onRemove: () =
 
   return (
     <div
-      className={`group relative inline-flex min-w-[148px] max-w-[200px] items-center gap-2.5 rounded-2xl border px-2.5 py-2 text-left transition-colors ${
+      className={`group relative inline-flex min-w-[148px] max-w-[200px] items-center gap-2.5 rounded-2xl px-2.5 py-2 text-left transition-colors ${
         isReferenceToken
-          ? "border-sky-500/40 bg-sky-500/10"
-          : "border-border/70 bg-surface-panel hover:bg-surface-hover/80"
+          ? "border border-sky-500/40 bg-sky-500/10"
+          : "bg-surface-panel hover:bg-surface-hover/80"
       }`}
       title={file.sourcePath ? resolveReferenceSourcePath(file.name, file.sourcePath) : file.name}
     >

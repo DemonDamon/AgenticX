@@ -112,7 +112,7 @@ function AttachmentCardShell({
   interactive?: boolean;
 }) {
   const className =
-    "group flex min-w-[148px] max-w-[200px] items-center gap-2.5 rounded-2xl border border-border/70 bg-surface-panel px-2.5 py-2 text-left shadow-[0_1px_0_rgba(0,0,0,0.03)] transition-colors hover:bg-surface-hover/80";
+    "group flex min-w-[148px] max-w-[200px] items-center gap-2.5 rounded-2xl bg-surface-panel px-2.5 py-2 text-left transition-colors hover:bg-surface-hover/80 outline-none focus:outline-none focus-visible:outline-none focus-visible:ring-0";
   const body = (
     <>
       <div className="flex h-10 w-10 shrink-0 items-center justify-center overflow-hidden rounded-[10px]">
