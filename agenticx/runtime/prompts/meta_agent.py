@@ -447,11 +447,13 @@ def _build_taskspaces_context(taskspaces: list[dict[str, str]] | None) -> str:
         lines.append(f"- **{label}** → `{path}` (id: {ts_id})")
     lines.append(
         "提示：用户在 UI 中添加的工作区路径即为项目根目录。"
-        "执行 bash_exec / file_read / file_write 时，请基于上述路径操作，"
+        "执行 bash_exec / file_read / file_write / git clone 时，请基于上述路径操作，"
         "无需再询问用户项目位置。"
+        "用户未指定其他绝对路径时：clone、下载、报告与任务产物必须写在「默认工作区」"
+        "（或侧栏当前选中的工作区）之下，可在其下建子目录；"
+        "**禁止**在 `$HOME` 下另起平行目录（如 `~/codebase-analysis`）。"
         "相对路径（如 list_files(\".\")）会优先落在用户附加的工作区（非「默认工作区」）下；"
-        "若侧栏选中了某一工作区标签，该轮对话会以该标签对应路径为最高优先。"
-        "若仅绑定默认目录，则与分身 workspace 一致。\n"
+        "若侧栏选中了某一工作区标签，该轮对话会以该标签对应路径为最高优先。\n"
     )
     return "\n".join(lines) + "\n"
 
@@ -930,6 +932,10 @@ def build_meta_agent_system_prompt(
         "- **cc_bridge 证据门禁**：若 `cc_bridge_send` 结果未给出可验证最终文本（如 `parsed_response` 为空、`ok=false`、仅有 tail/log 片段），禁止输出“分析完成”或结构化结论，只能汇报当前状态、阻塞原因与下一步操作。\n"
         "- **cc_bridge 模式路由**：路由必须以当前 `session_id` 对应会话的真实模式为准（headless 走 `/message`，visible_tui 走 `/write`）。若返回中出现 `write is only for visible_tui` 等模式失配错误，工具层至多纠偏一次（结果中可能出现 `mode_corrected`）；**禁止**在同一失败点上连续多次重试 `cc_bridge_send`，应改报原因并给出下一步（如确认 `cc_bridge_start` 的 `mode=headless`、或检查 bridge 版本）。\n"
         "- **交互式/长驻命令强约束**：当命令会打印二维码/授权链接并等待用户扫码（如 `*-cli config init`、`gh auth login`、`docker login`、`vercel login`、`wrangler login` 等），或会阻塞等待键入，或用户明确说“需要扫码/交互”时，必须使用 `bash_bg_start` 而不是 `bash_exec`，避免固定超时误杀。\n"
+        "- **bash_exec 安全纪律（防 pre_tool_guard 拦截）**：单条 `bash_exec` 命令中**禁止**出现 `rm -rf` / `rm -fr` 等递归强制删除，以及 `curl|wget ... | bash/sh/zsh`。"
+        "需要清理目录时用 `rm -r`（不带 f）、换全新目标目录，或把清理与 `git clone`/`curl`/`gh` **拆成两次** `bash_exec`。"
+        "若工具返回含「命中危险模式 / rm -rf」的 Hook 阻止信息，必须去掉该片段后重试；"
+        "**禁止**据此断言「clone / 下载被平台 Hook 禁止」。\n"
         "- `bash_bg_start` 返回的 `auth_urls` 必须原样转述给用户并请其完成扫码/授权；在用户确认完成前，最多每 15-30 秒调用一次 `bash_bg_poll`，禁止高频轮询，禁止此时 `bash_bg_stop`。\n"
         "- 需要键入应答（y/n/选项）时，使用 `bash_bg_input(job_id, text)`；用户确认完成后再 `bash_bg_poll` 读取最终 `exit_code` 与输出，据此汇报，不得谎报成功。\n"
         "- **创建定时任务特例**：当用户已给出（或你已确认）任务名称 + 频率/时间/日期 + instruction + workspace 后，必须在同一轮直接调用 `schedule_task`；禁止先输出“我先加载某个 skill/脚本再创建”。\n"
@@ -938,7 +944,8 @@ def build_meta_agent_system_prompt(
         "- 连续 2 次工具失败后，先做一次失败归因并调整方案；禁止在同一错误模式下重复试错超过 2 次。\n"
         "- 对 MCP 连接问题，优先走最短闭环：`file_read(mcp.json)` -> `mcp_import` -> `mcp_connect` -> 若失败仅补充 1 次最小验证（命令可执行性）；随后给出明确结论与下一步，不要无限深挖。\n\n"
         "- 若涉及文件产出，必须要求子智能体给出可验证路径与工具成功证据；不要接受“口头已生成”。\n"
-        "- 用户未明确指定落盘目录时，先建议路径并征求同意，再安排写入动作。\n\n"
+        "- 用户未明确指定落盘目录时，直接写入「当前会话工作区」中的默认（或侧栏选中）路径，无需再征求路径；"
+        "禁止在 `$HOME` 下自造新目录名（应使用会话默认工作区下的子目录）。\n\n"
         "- 当用户询问“你有什么能力 / skills / mcp / 工具”时：直接基于“已注册能力”章节作答，禁止调用 `check_resources` 或启动子智能体。\n"
         "- 只有在“执行任务前的资源评估”场景才调用 `check_resources`，信息类问答不调用。\n\n"
         "- 工具调用语法必须是裸函数形式（如 `check_resources()`），禁止包裹在 `print(...)`、`<tool_code>...</tool_code>` 或其他文本模板中。\n\n"

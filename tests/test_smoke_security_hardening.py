@@ -259,6 +259,46 @@ class TestPreToolGuard:
         event = self._make_event("bash_exec", {"command": "rm -rf /"})
         result = await handle(event)
         assert result is False
+        reason = str(event.context.get("block_reason") or "")
+        assert "rm -rf" in reason
+        assert "git clone" in reason
+
+    @pytest.mark.asyncio
+    async def test_allows_git_clone_without_rm_rf(self) -> None:
+        from agenticx.hooks.bundled.pre_tool_guard.handler import handle
+
+        event = self._make_event(
+            "bash_exec",
+            {
+                "command": (
+                    "mkdir -p /tmp/code-tools-research && "
+                    "cd /tmp/code-tools-research && "
+                    "git clone --depth 1 https://github.com/example/repo.git"
+                )
+            },
+        )
+        result = await handle(event)
+        assert result is True
+        assert not event.context.get("block_reason")
+
+    @pytest.mark.asyncio
+    async def test_blocks_rm_rf_prefixed_clone_with_actionable_reason(self) -> None:
+        from agenticx.hooks.bundled.pre_tool_guard.handler import handle
+
+        event = self._make_event(
+            "bash_exec",
+            {
+                "command": (
+                    "cd /tmp/code-tools-research && rm -rf graphify 2>/dev/null\n"
+                    "git clone --depth 1 https://github.com/example/graphify.git"
+                )
+            },
+        )
+        result = await handle(event)
+        assert result is False
+        reason = str(event.context.get("block_reason") or "")
+        assert "rm -rf" in reason
+        assert "拆成两次" in reason or "不带 f" in reason
 
     @pytest.mark.asyncio
     async def test_blocks_rm_rf_via_run_terminal_cmd(self) -> None:

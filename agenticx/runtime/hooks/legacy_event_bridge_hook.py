@@ -41,17 +41,19 @@ class LegacyEventBridgeHook(AgentHook):
         if tool_name == "bash_exec":
             context["command"] = str(arguments.get("command", "") if isinstance(arguments, dict) else "")
 
-        allowed = await trigger_hook_event(
-            HookEvent(
-                type="tool",
-                action="before_call",
-                agent_id="meta",
-                session_key=self._session_key(session),
-                context=context,
-            )
+        event = HookEvent(
+            type="tool",
+            action="before_call",
+            agent_id="meta",
+            session_key=self._session_key(session),
+            context=context,
         )
+        allowed = await trigger_hook_event(event)
         if not allowed:
-            return HookOutcome(blocked=True, reason="工具调用被 Hook 策略阻止。")
+            reason = str(event.context.get("block_reason") or "").strip()
+            if not reason:
+                reason = "工具调用被 Hook 策略阻止。"
+            return HookOutcome(blocked=True, reason=reason)
         return None
 
     async def after_tool_call(self, tool_name: str, result: str, session: Any) -> str | None:
