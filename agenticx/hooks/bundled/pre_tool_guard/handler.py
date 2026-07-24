@@ -34,24 +34,74 @@ _SHELL_TOOL_NAMES = frozenset(
 _COMMAND_FIELDS = ("command", "cmd", "script", "code", "shell_command")
 
 _RM_PREFIX = r"(?m)(?:^|[;&]|\|\||&&)\s*"
-_DANGEROUS_PATTERNS = [
-    re.compile(
-        _RM_PREFIX + r"rm\s+-(?:[\w-]*r[\w-]*f|[\w-]*f[\w-]*r)\b",
-        re.IGNORECASE,
+# (pattern, short label for agent-facing block_reason)
+_DANGEROUS_PATTERNS: list[tuple[re.Pattern[str], str]] = [
+    (
+        re.compile(
+            _RM_PREFIX + r"rm\s+-(?:[\w-]*r[\w-]*f|[\w-]*f[\w-]*r)\b",
+            re.IGNORECASE,
+        ),
+        "rm -rf",
     ),
-    re.compile(_RM_PREFIX + r"rm\s+-\w*r\b\s+-\w*f\b", re.IGNORECASE),
-    re.compile(_RM_PREFIX + r"rm\s+-\w*f\b\s+-\w*r\b", re.IGNORECASE),
-    re.compile(r"\bDROP\s+(TABLE|DATABASE)\b", re.IGNORECASE),
-    re.compile(r"\bformat\s+[a-zA-Z]:", re.IGNORECASE),
-    re.compile(r">\s*/dev/sd[a-z]", re.IGNORECASE),
-    re.compile(r"\bmkfs\b", re.IGNORECASE),
-    re.compile(r"\bdd\s+.*\bof=/dev/", re.IGNORECASE),
+    (
+        re.compile(_RM_PREFIX + r"rm\s+-\w*r\b\s+-\w*f\b", re.IGNORECASE),
+        "rm -rf",
+    ),
+    (
+        re.compile(_RM_PREFIX + r"rm\s+-\w*f\b\s+-\w*r\b", re.IGNORECASE),
+        "rm -rf",
+    ),
+    (re.compile(r"\bDROP\s+(TABLE|DATABASE)\b", re.IGNORECASE), "DROP TABLE/DATABASE"),
+    (re.compile(r"\bformat\s+[a-zA-Z]:", re.IGNORECASE), "format drive"),
+    (re.compile(r">\s*/dev/sd[a-z]", re.IGNORECASE), "write to /dev/sd*"),
+    (re.compile(r"\bmkfs\b", re.IGNORECASE), "mkfs"),
+    (re.compile(r"\bdd\s+.*\bof=/dev/", re.IGNORECASE), "dd to /dev"),
     # Download-and-execute via shell pipe (classic remote script execution).
-    re.compile(r"\b(?:curl|wget)\b[^\n|]*\|\s*(?:bash|sh|zsh)\b", re.IGNORECASE),
+    (
+        re.compile(
+            r"\b(?:curl|wget)\b[^\n|]*\|\s*(?:bash|sh|zsh)\b",
+            re.IGNORECASE,
+        ),
+        "curl|wget piped to shell",
+    ),
     # Reverse shell-ish patterns.
-    re.compile(r"/dev/tcp/\d{1,3}(?:\.\d{1,3}){3}/\d{1,5}", re.IGNORECASE),
-    re.compile(r"\b(?:nc|ncat|netcat)\b[^\n]*\s(?:-e|--exec)\b", re.IGNORECASE),
+    (
+        re.compile(r"/dev/tcp/\d{1,3}(?:\.\d{1,3}){3}/\d{1,5}", re.IGNORECASE),
+        "/dev/tcp reverse shell",
+    ),
+    (
+        re.compile(r"\b(?:nc|ncat|netcat)\b[^\n]*\s(?:-e|--exec)\b", re.IGNORECASE),
+        "netcat -e",
+    ),
 ]
+
+_DEFAULT_BLOCK_REASON = "工具调用被 Hook 策略阻止。"
+
+
+def _set_block_reason(event: HookEvent, detail: str) -> None:
+    """Attach an agent-facing reason so callers do not mis-attribute the block."""
+    text = str(detail or "").strip() or _DEFAULT_BLOCK_REASON
+    event.context["block_reason"] = text
+
+
+def _reason_for_dangerous_label(label: str) -> str:
+    if label == "rm -rf":
+        return (
+            f"{_DEFAULT_BLOCK_REASON}命中危险模式：`rm -rf`。"
+            "请去掉 `rm -rf`/`rm -fr` 后重试；"
+            "`git clone` / `curl` 下载 / `gh repo clone` 本身未被禁止。"
+            "清理目录请用 `rm -r`（不带 f）、换新目录，或将清理与下载拆成两次 `bash_exec`。"
+        )
+    if label == "curl|wget piped to shell":
+        return (
+            f"{_DEFAULT_BLOCK_REASON}命中危险模式：`curl|wget | bash`。"
+            "请改为先下载文件再执行，或使用不含管道执行的安装方式；"
+            "普通 `curl`/`wget` 下载本身未被禁止。"
+        )
+    return (
+        f"{_DEFAULT_BLOCK_REASON}命中危险模式：{label}。"
+        "请去掉该危险片段后重试，不要据此断言网络下载或 clone 被平台禁止。"
+    )
 
 _CC_BRIDGE_LOG_TAIL_PATTERN = re.compile(
     r"\btail\b[^\n]*\.agenticx/logs/cc-bridge/.*\.log",
@@ -134,10 +184,16 @@ async def handle(event: HookEvent) -> Optional[bool]:
 
     if _CC_BRIDGE_LOG_TAIL_PATTERN.search(command):
         if await _has_active_visible_tui_session():
+            _set_block_reason(
+                event,
+                f"{_DEFAULT_BLOCK_REASON}可见 TUI 会话期间禁止用 bash_exec 轮询 cc-bridge 日志；"
+                "请向用户报告已投递并等待终端交互。",
+            )
             return False
 
-    for pattern in _DANGEROUS_PATTERNS:
+    for pattern, label in _DANGEROUS_PATTERNS:
         if pattern.search(command):
+            _set_block_reason(event, _reason_for_dangerous_label(label))
             return False
 
     return True

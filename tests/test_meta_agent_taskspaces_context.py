@@ -20,6 +20,8 @@ def test_build_taskspaces_context_includes_paths_and_labels() -> None:
     assert "/Users/demo/avatar-ws" in block
     assert "/Users/demo/myproject" in block
     assert "我的项目" in block
+    assert "禁止" in block and "$HOME" in block
+    assert "默认工作区" in block
 
 
 def test_build_taskspaces_context_empty() -> None:

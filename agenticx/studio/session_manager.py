@@ -2840,38 +2840,34 @@ class SessionManager:
         *,
         avatar_workspace_dir: str | None = None,
     ) -> None:
-        """Set session workspace_dir from avatar override or global config default."""
+        """Set session workspace_dir from avatar override or per-session Meta default."""
         from agenticx.workspace.loader import resolve_default_session_workspace_dir
 
-        resolved = resolve_default_session_workspace_dir(
-            avatar_workspace_dir=avatar_workspace_dir,
-        )
+        avatar_raw = (avatar_workspace_dir or "").strip()
+        if avatar_raw:
+            resolved = resolve_default_session_workspace_dir(
+                avatar_workspace_dir=avatar_raw,
+            )
+        elif not str(getattr(managed, "avatar_id", "") or "").strip():
+            # Meta sessions: isolate work under ~/.agenticx/taskspaces/<sid>/default
+            resolved = Path(self._resolve_taskspace_root(managed.session_id, None))
+        else:
+            resolved = resolve_default_session_workspace_dir()
         managed.studio_session.workspace_dir = str(resolved)
         self.rebind_default_taskspace_to_workspace(managed)
 
     def align_meta_session_workspace(self, managed: ManagedSession) -> None:
-        """Keep meta-agent sessions on the configured default workspace, not legacy home/cwd."""
+        """Keep meta-agent sessions on a per-session taskspace root (not $HOME / shared ws)."""
         if str(getattr(managed, "avatar_id", "") or "").strip():
             return
-        from agenticx.workspace.loader import resolve_default_session_workspace_dir
-
-        canonical = resolve_default_session_workspace_dir()
-        current_raw = str(getattr(managed.studio_session, "workspace_dir", "") or "").strip()
-        if not current_raw:
-            managed.studio_session.workspace_dir = str(canonical)
-            self.rebind_default_taskspace_to_workspace(managed)
-            return
-        try:
-            current = Path(current_raw).expanduser().resolve(strict=False)
-            canonical_res = canonical.resolve(strict=False)
-        except Exception:
-            return
-        if current == canonical_res:
-            return
-        home = Path.home().resolve(strict=False)
-        if current == home:
-            managed.studio_session.workspace_dir = str(canonical_res)
-            self.rebind_default_taskspace_to_workspace(managed)
+        session_root = self._resolve_taskspace_root(managed.session_id, None)
+        managed.studio_session.workspace_dir = session_root
+        self._ensure_default_taskspace(managed)
+        for ts in managed.taskspaces:
+            if ts.get("id") == "default":
+                ts["path"] = session_root
+                ts["label"] = ts.get("label") or "默认工作区"
+                return
 
     def apply_avatar_binding(
         self,

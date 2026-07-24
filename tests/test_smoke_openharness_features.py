@@ -664,6 +664,55 @@ class TestPreToolGuardHook:
         )
         assert await handle(ev) is True
 
+    @pytest.mark.asyncio
+    async def test_rm_rf_block_sets_actionable_reason(self):
+        from agenticx.hooks.bundled.pre_tool_guard.handler import handle
+        from agenticx.hooks.types import HookEvent
+
+        ev = HookEvent(
+            type="tool",
+            action="before_call",
+            agent_id="meta",
+            context={"command": "rm -rf ~/agx-hook-e2e-test"},
+        )
+        assert await handle(ev) is False
+        reason = str(ev.context.get("block_reason") or "")
+        assert "rm -rf" in reason
+        assert "git clone" in reason
+
+
+class TestLegacyEventBridgeHookReason:
+    @pytest.mark.asyncio
+    async def test_bridge_passes_pre_tool_guard_block_reason(self):
+        from agenticx.hooks import get_global_hook_registry
+        from agenticx.hooks.bundled.pre_tool_guard.handler import handle as pre_tool_guard_handle
+        from agenticx.runtime.hooks.legacy_event_bridge_hook import LegacyEventBridgeHook
+
+        registry = get_global_hook_registry()
+        previous = registry.get_registered_handlers("tool:before_call")
+        registry.clear()
+        try:
+            registry.register("tool:before_call", pre_tool_guard_handle)
+            bridge = LegacyEventBridgeHook()
+            outcome = await bridge.before_tool_call(
+                "bash_exec",
+                {
+                    "command": (
+                        "cd /tmp/x && rm -rf graphify 2>/dev/null\n"
+                        "git clone --depth 1 https://github.com/example/graphify.git"
+                    )
+                },
+                session=type("S", (), {"_session_id": "test-session"})(),
+            )
+            assert outcome is not None
+            assert outcome.blocked is True
+            assert "rm -rf" in outcome.reason
+            assert "git clone" in outcome.reason
+        finally:
+            registry.clear()
+            for handler in previous:
+                registry.register("tool:before_call", handler)
+
 
 class TestParallelToolsEnabled:
     def test_env_var_1(self, monkeypatch):
