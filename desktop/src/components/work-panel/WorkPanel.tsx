@@ -1667,6 +1667,9 @@ export function WorkPanel({
             autoRefreshKey={autoRefreshKey}
             tintColor={tintColor}
             hidePanelClose
+            onFocusTerminalTab={() => {
+              setActiveKind("terminal");
+            }}
             onPickFileForReference={onPickFileForReference}
             onPickDirectoryForReference={onPickDirectoryForReference}
             onQuotePreviewSnippet={onQuotePreviewSnippet}
