@@ -33,7 +33,7 @@ type NavEntry =
 
 const NAV_ENTRIES: NavEntry[] = [
   { kind: "action", id: "new-task", label: "新建任务", icon: MessageSquarePlus },
-  { kind: "view", id: "avatars", label: "数字分身", icon: UserRound },
+  { kind: "view", id: "avatars", label: "数字专家", icon: UserRound },
   { kind: "view", id: "groups", label: "项目群聊", icon: Waypoints },
   { kind: "view", id: "automation", label: "定时任务", icon: AlarmClock },
 ];

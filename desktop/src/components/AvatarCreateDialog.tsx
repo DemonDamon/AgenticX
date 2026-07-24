@@ -145,7 +145,7 @@ export function AvatarCreateDialog({ open, onClose, onCreate, onCreateViaChat }:
           className="agx-avatar-create-dialog w-[440px] max-w-[95vw] rounded-xl border border-border p-5 shadow-2xl"
           style={{ backgroundColor: "var(--surface-base-fallback, var(--surface-panel))" }}
         >
-        <h3 className="mb-4 text-[16px] font-semibold text-text-primary">创建数字分身</h3>
+        <h3 className="mb-4 text-[16px] font-semibold text-text-primary">创建数字专家</h3>
 
         <div className="mb-4 flex gap-1 rounded-lg bg-surface-card p-0.5">
           {([["manual", "手动创建"], ["ai", "AI 创建"]] as const).map(([key, label]) => (

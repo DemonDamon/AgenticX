@@ -181,9 +181,9 @@ export function AvatarGalleryView() {
       <div className="sticky top-0 z-10 -mx-6 -mt-6 mb-5 border-b border-border bg-surface-base px-6 pb-4 pt-6">
         <div className="flex items-start justify-between gap-4">
           <div className="min-w-0">
-            <h2 className="text-lg font-semibold text-text-strong">数字分身</h2>
+            <h2 className="text-lg font-semibold text-text-strong">数字专家</h2>
             <p className="mt-1 text-sm text-text-muted">
-              为你的团队召集专精分身；点击卡片可编辑设置，点「唤起」开始对话。
+              为你的团队召集专精专家；点击卡片可编辑设置，点「唤起」开始对话。
             </p>
           </div>
           <button
@@ -192,7 +192,7 @@ export function AvatarGalleryView() {
             onClick={() => setCreateOpen(true)}
           >
             <Plus className="h-4 w-4" />
-            新建分身
+            新建专家
           </button>
         </div>
       </div>
@@ -200,22 +200,22 @@ export function AvatarGalleryView() {
       {!avatarsLoaded ? (
         <div className="flex items-center justify-center gap-2 py-16 text-sm text-text-faint">
           <Loader2 className="h-4 w-4 animate-spin" />
-          正在加载分身…
+          正在加载专家…
         </div>
       ) : sortedAvatars.length === 0 ? (
         <div className="flex flex-col items-center justify-center gap-3 rounded-xl border border-dashed border-border py-16 text-center">
           <div className="flex h-12 w-12 items-center justify-center rounded-full bg-surface-card text-text-faint">
             <Sparkles className="h-5 w-5" />
           </div>
-          <div className="text-[15px] font-semibold text-text-strong">还没有数字分身</div>
-          <p className="text-sm text-text-muted">创建属于你的数字分身，处理专精任务</p>
+          <div className="text-[15px] font-semibold text-text-strong">还没有数字专家</div>
+          <p className="text-sm text-text-muted">创建属于你的数字专家，处理专精任务</p>
           <button
             type="button"
             className="mt-1 flex items-center gap-1.5 rounded-lg bg-btnPrimary px-3 py-2 text-[13px] font-medium text-btnPrimary-text transition hover:bg-btnPrimary-hover"
             onClick={() => setCreateOpen(true)}
           >
             <Plus className="h-4 w-4" />
-            新建分身
+            新建专家
           </button>
         </div>
       ) : (
@@ -318,7 +318,7 @@ export function AvatarGalleryView() {
             onClick={() => setCreateOpen(true)}
           >
             <Plus className="h-5 w-5" />
-            <span className="text-[13px] font-medium">创建分身</span>
+            <span className="text-[13px] font-medium">创建专家</span>
           </button>
         </div>
       )}
