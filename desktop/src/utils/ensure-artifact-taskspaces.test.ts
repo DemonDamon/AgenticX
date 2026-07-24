@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   SESSION_TASK_ARTIFACTS_DIRNAME,
+  SESSION_TASK_ARTIFACTS_LABEL,
   sessionTaskArtifactsDir,
   shouldPruneAutoArtifactRoot,
 } from "./ensure-artifact-taskspaces";
@@ -21,8 +22,14 @@ describe("shouldPruneAutoArtifactRoot", () => {
     homeDir: "/Users/damon",
   };
 
-  it("keeps the staging root", () => {
-    expect(shouldPruneAutoArtifactRoot(staging, opts)).toBe(false);
+  it("prunes the legacy staging /「任务产物」root", () => {
+    expect(shouldPruneAutoArtifactRoot(staging, opts)).toBe(true);
+    expect(
+      shouldPruneAutoArtifactRoot("/Users/damon/projects", {
+        ...opts,
+        label: SESSION_TASK_ARTIFACTS_LABEL,
+      }),
+    ).toBe(true);
   });
 
   it("prunes /tmp and home from naive parent sync", () => {

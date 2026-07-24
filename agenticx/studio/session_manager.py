@@ -1579,16 +1579,28 @@ class SessionManager:
             raise KeyError("taskspace not found")
         root = Path(taskspace["path"]).expanduser().resolve(strict=False)
         target = self._resolve_inside_root(root, rel_path, expect_dir=True)
+        base_parts = self._normalize_rel_parts(rel_path)
         rows: list[dict[str, Any]] = []
         for entry in sorted(target.iterdir(), key=lambda p: (0 if p.is_dir() else 1, p.name.lower())):
-            stat = entry.stat()
+            # Logical path under the taskspace root (works when listing through
+            # an outbound directory symlink whose real entries are outside root).
+            logical_parts = [*base_parts, entry.name]
+            logical = "/".join(logical_parts) if logical_parts else entry.name
+            try:
+                stat = entry.stat()
+                size = int(stat.st_size)
+                modified = float(stat.st_mtime)
+            except OSError:
+                size = 0
+                modified = 0.0
             rows.append(
                 {
                     "name": entry.name,
                     "type": "dir" if entry.is_dir() else "file",
-                    "path": str(entry.relative_to(root)),
-                    "size": int(stat.st_size),
-                    "modified": float(stat.st_mtime),
+                    "path": logical,
+                    "size": size,
+                    "modified": modified,
+                    "is_symlink": entry.is_symlink(),
                 }
             )
         return rows
@@ -1614,10 +1626,15 @@ class SessionManager:
             raise IsADirectoryError(str(target))
         size = int(target.stat().st_size)
         classification = classify_taskspace_file(target)
+        logical = "/".join(self._normalize_rel_parts(rel_path)) or target.name
+        try:
+            absolute = str(target.resolve(strict=False))
+        except OSError:
+            absolute = str(target)
         result: dict[str, Any] = {
             "name": target.name,
-            "path": str(target.relative_to(root)),
-            "absolute_path": str(target),
+            "path": logical,
+            "absolute_path": absolute,
             "size": size,
             **classification,
         }
@@ -2927,14 +2944,43 @@ class SessionManager:
                 return item
         return None
 
-    def _resolve_inside_root(self, root: Path, rel_path: str, *, expect_dir: bool) -> Path:
+    @staticmethod
+    def _normalize_rel_parts(rel_path: str) -> list[str]:
+        """Normalize a relative path into parts; reject absolute / ``..`` escape."""
         clean_rel = str(rel_path or ".").strip() or "."
-        target = (root / clean_rel).resolve(strict=False)
+        rel = Path(clean_rel)
+        if rel.is_absolute():
+            raise ValueError("path escapes taskspace root")
+        parts: list[str] = []
+        for part in rel.parts:
+            if part in ("", "."):
+                continue
+            if part == "..":
+                if not parts:
+                    raise ValueError("path escapes taskspace root")
+                parts.pop()
+                continue
+            parts.append(part)
+        return parts
+
+    def _resolve_inside_root(self, root: Path, rel_path: str, *, expect_dir: bool) -> Path:
+        """Resolve ``rel_path`` under ``root`` without treating outbound symlinks as escape.
+
+        Containment is lexical (path under root before following the final symlink
+        target). I/O callers may then ``stat``/``open`` and follow symlinks.
+        """
+        root_resolved = Path(root).expanduser().resolve(strict=False)
+        parts = self._normalize_rel_parts(rel_path)
+        joined = root_resolved.joinpath(*parts) if parts else root_resolved
+        # Normpath can collapse extra separators; still must stay under root.
+        joined_norm = Path(os.path.normpath(str(joined)))
         try:
-            target.relative_to(root)
+            joined_norm.relative_to(root_resolved)
         except ValueError as exc:
             raise ValueError("path escapes taskspace root") from exc
-        if not target.exists():
+        # Prefer the normed path for subsequent checks.
+        target = joined_norm
+        if not target.exists() and not target.is_symlink():
             raise FileNotFoundError(str(target))
         if expect_dir and not target.is_dir():
             raise NotADirectoryError(str(target))

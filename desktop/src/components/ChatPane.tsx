@@ -210,6 +210,7 @@ import {
   isWorkspaceReferenceAttachment,
   parseLineRangeFromReferenceLabel,
 } from "../utils/reference-attachment";
+import { NEAR_ARTIFACT_TASKSPACES_SYNCED } from "../utils/workspace-sidebar-events";
 import { isLikelyTextFile } from "../utils/text-attachment";
 import { isViewImageInjectMessage, viewImageInjectRowFromSession } from "../utils/view-image-inject";
 import { resolveSessionTailForSwitch, invalidateSessionTail } from "../utils/session-tail-cache";
@@ -8040,6 +8041,53 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
       suppressUserEcho = true;
       skipUserHistory = true;
     }
+
+    // Chat uploads (not workspace @file refs) → real files under <default>/attachments/.
+    let sendAttachments: MessageAttachment[] = userAttachments;
+    if (
+      !isContinuation &&
+      requestSessionId &&
+      userAttachments.length > 0 &&
+      typeof window.agenticxDesktop?.materializeSessionAttachments === "function"
+    ) {
+      const materializeIdx: number[] = [];
+      const filesPayload: Array<{ name?: string; path?: string; dataUrl?: string }> = [];
+      userAttachments.forEach((att, idx) => {
+        if (isWorkspaceReferenceAttachment(att)) return;
+        if (!att.dataUrl && !String(att.sourcePath || "").trim()) return;
+        materializeIdx.push(idx);
+        filesPayload.push({
+          name: att.name,
+          path: att.sourcePath,
+          dataUrl: att.dataUrl,
+        });
+      });
+      if (filesPayload.length > 0) {
+        try {
+          const materialized = await window.agenticxDesktop.materializeSessionAttachments({
+            sessionId: requestSessionId,
+            files: filesPayload,
+          });
+          if (materialized.ok && Array.isArray(materialized.files)) {
+            const next = userAttachments.map((att) => ({ ...att }));
+            materialized.files.forEach((row, i) => {
+              const at = materializeIdx[i];
+              if (at === undefined || !row?.path) return;
+              next[at] = { ...next[at], sourcePath: row.path };
+            });
+            sendAttachments = next;
+            window.dispatchEvent(
+              new CustomEvent(NEAR_ARTIFACT_TASKSPACES_SYNCED, {
+                detail: { sessionId: requestSessionId, added: materialized.files.length },
+              }),
+            );
+          }
+        } catch (err) {
+          console.warn("[ChatPane] materializeSessionAttachments failed:", err);
+        }
+      }
+    }
+
     if (targetAgentId === "meta") {
       if (!suppressUserEcho) {
         addPaneMessage(
@@ -8049,7 +8097,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
           "meta",
           undefined,
           undefined,
-          userAttachments,
+          sendAttachments,
           {
             ownerSessionId: requestSessionId,
             metadata: { client_turn_id: clientTurnId },
@@ -8378,8 +8426,8 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
         const skillSlugs = [...new Set(skillSlugMatches.map((m) => m.replace("@skill://", "")))];
         if (skillSlugs.length > 0) body.skill_slugs = skillSlugs;
       }
-      if (userAttachments.length > 0) {
-        const imageInputs = userAttachments
+      if (sendAttachments.length > 0) {
+        const imageInputs = sendAttachments
           .filter((file) => !!file.dataUrl && file.mimeType.startsWith("image/"))
           .map((file) => ({
             name: file.name,
@@ -8397,7 +8445,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
           body.image_inputs = imageInputs;
         }
         const contextFilePayload: Record<string, string> = {};
-        for (const file of userAttachments) {
+        for (const file of sendAttachments) {
           const key = buildContextFileKeyFromAttachment(file);
           if (!key) continue;
           const ready = resolveReadyAttachment(file, readyEntries);
