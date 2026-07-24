@@ -16,6 +16,24 @@ from agenticx.studio import session_manager as session_manager_module
 from agenticx.studio.session_manager import SessionManager
 
 
+def test_normalize_messages_strips_unclosed_followups_from_history_api() -> None:
+    manager = SessionManager()
+    raw = (
+        "全部修复完成。\n\n粒子间距离 < 120px 时自动连线。\n\n"
+        "<followups>粒子动画太卡了怎么优化\n"
+        "待办事项能不能按分类筛选\n"
+        "背景粒子颜色能不能换成其他配色"
+    )
+
+    rows = manager._normalize_messages(
+        [{"id": "a1", "role": "assistant", "content": raw}]
+    )
+
+    assert rows[0]["content"] == "全部修复完成。\n\n粒子间距离 < 120px 时自动连线。\n\n"
+    assert "followups" not in rows[0]["content"]
+    assert "suggested_questions" not in rows[0]
+
+
 def test_session_manager_restores_and_persists(tmp_path: Path) -> None:
     store = SessionStore(tmp_path / "sessions.sqlite")
     manager = SessionManager()

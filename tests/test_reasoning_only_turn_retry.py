@@ -257,3 +257,170 @@ def test_interleaved_duplicate_reasoning_is_stripped_clean() -> None:
     assert reasoning, "reasoning text must be captured"
     assert _THINK_OPEN not in body
 
+
+class _ToolThenPublicFinalInReasoningStream:
+    """GLM-like stream: successful edit, then polished final only in reasoning."""
+
+    def __init__(self) -> None:
+        self.calls = 0
+        self.kwargs_seen: List[Dict[str, Any]] = []
+
+    def stream_with_tools(self, *_args, **kwargs):
+        self.calls += 1
+        self.kwargs_seen.append(dict(kwargs))
+        if self.calls == 1:
+            yield {
+                "type": "tool_call_delta",
+                "tool_index": 0,
+                "tool_call_id": "call-edit",
+                "tool_name": "file_edit",
+                "arguments_delta": (
+                    '{"path":"/tmp/demo.html","old_text":"width: 0",'
+                    '"new_text":"min-width: 30px"}'
+                ),
+            }
+            yield {"type": "done", "finish_reason": "tool_calls"}
+            return
+        yield {
+            "type": "content",
+            "text": (
+                _THINK_OPEN
+                + "\n✅ **已修复进度条显示问题！**\n\n"
+                + "在 `.progress-fill` 中添加了 `min-width: 30px;`，现在会显示完整的 0%。"
+                + _THINK_CLOSE
+            ),
+        }
+        yield {"type": "done", "finish_reason": "stop"}
+
+
+class _ToolThenReadFinalInReasoningStream(_ToolThenPublicFinalInReasoningStream):
+    """A non-file successful tool followed by a public final in reasoning."""
+
+    def stream_with_tools(self, *_args, **kwargs):
+        self.calls += 1
+        self.kwargs_seen.append(dict(kwargs))
+        if self.calls == 1:
+            yield {
+                "type": "tool_call_delta",
+                "tool_index": 0,
+                "tool_call_id": "call-read",
+                "tool_name": "file_read",
+                "arguments_delta": '{"path":"/tmp/demo.html"}',
+            }
+            yield {"type": "done", "finish_reason": "tool_calls"}
+            return
+        yield {
+            "type": "content",
+            "text": _THINK_OPEN + "\n✅ 已读取并确认文件内容。" + _THINK_CLOSE,
+        }
+        yield {"type": "done", "finish_reason": "stop"}
+
+
+@pytest.mark.parametrize("model_name", ["glm-4.5-air", "glm-4.7"])
+def test_public_completion_in_reasoning_is_recovered_after_successful_file_edit(
+    monkeypatch,
+    model_name: str,
+) -> None:
+    from agenticx.runtime import agent_runtime as runtime_module
+
+    async def _fake_dispatch(*_args, **_kwargs):
+        return "OK: edited /tmp/demo.html"
+
+    monkeypatch.setattr(runtime_module, "dispatch_tool_async", _fake_dispatch)
+    llm = _ToolThenPublicFinalInReasoningStream()
+    runtime = AgentRuntime(llm, _ApproveGate(), max_tool_rounds=30)
+    session = StudioSession()
+    session.provider_name = "zhipu"
+    session.model_name = model_name
+
+    events = asyncio.run(
+        _collect(
+            runtime,
+            session,
+            "@/tmp/demo.html:el-snippet-a1b2c3 修复 0% 显示",
+        )
+    )
+
+    assert llm.calls == 2
+    final = [event for event in events if event["type"] == EventType.FINAL.value][-1]
+    assert final["data"]["text"].startswith("✅ **已修复进度条显示问题！**")
+    assert final["data"]["terminal_reason"] == "reasoning_field_final_recovered"
+    assert final["data"]["model_finish_reason"] == "stop"
+    assert final["data"]["reasoning_field_final_recovered"] is True
+    assert _THINK_OPEN not in final["data"]["text"]
+    assert session.chat_history[-1]["content"] == final["data"]["text"]
+    assert session.chat_history[-1]["metadata"]["model_finish_reason"] == "stop"
+
+
+def test_public_completion_in_reasoning_is_recovered_after_successful_read(monkeypatch) -> None:
+    from agenticx.runtime import agent_runtime as runtime_module
+
+    async def _fake_dispatch(*_args, **_kwargs):
+        return "<html><body>demo</body></html>"
+
+    monkeypatch.setattr(runtime_module, "dispatch_tool_async", _fake_dispatch)
+    llm = _ToolThenReadFinalInReasoningStream()
+    runtime = AgentRuntime(llm, _ApproveGate(), max_tool_rounds=30)
+    session = StudioSession()
+    session.provider_name = "zhipu"
+    session.model_name = "glm-4.7"
+
+    events = asyncio.run(_collect(runtime, session, "读取 /tmp/demo.html 并汇报"))
+
+    final = [event for event in events if event["type"] == EventType.FINAL.value][-1]
+    assert final["data"]["text"].startswith("✅ 已读取并确认")
+    assert final["data"]["terminal_reason"] == "reasoning_field_final_recovered"
+    assert _THINK_OPEN not in final["data"]["text"]
+
+
+def test_streamed_ordinary_tool_delta_is_visible_before_tool_dispatch(monkeypatch) -> None:
+    from agenticx.runtime import agent_runtime as runtime_module
+
+    async def _fake_dispatch(*_args, **_kwargs):
+        return "OK: read /tmp/demo.html"
+
+    monkeypatch.setattr(runtime_module, "dispatch_tool_async", _fake_dispatch)
+    llm = _ToolThenReadFinalInReasoningStream()
+    runtime = AgentRuntime(llm, _ApproveGate(), max_tool_rounds=30)
+    session = StudioSession()
+    session.provider_name = "zhipu"
+    session.model_name = "glm-4.7"
+
+    events = asyncio.run(_collect(runtime, session, "读取 /tmp/demo.html 并汇报"))
+    deltas = [
+        event for event in events
+        if event["type"] == EventType.TOOL_CALL_DELTA.value
+        and event["data"].get("name") == "file_read"
+    ]
+    calls = [
+        event for event in events
+        if event["type"] == EventType.TOOL_CALL.value
+        and event["data"].get("name") == "file_read"
+    ]
+    assert deltas
+    assert calls
+    assert deltas[0]["data"]["tool_call_id"] == calls[0]["data"]["tool_call_id"]
+
+
+def test_internal_reasoning_is_not_promoted_even_after_successful_write() -> None:
+    from agenticx.runtime.agent_runtime import _recover_public_completion_from_reasoning
+
+    assert (
+        _recover_public_completion_from_reasoning(
+            "我需要先继续检查工具结果，再确认问题是否已经修复。",
+            has_successful_file_write=True,
+            last_tool_outcome="success",
+            finish_reason="stop",
+        )
+        == ""
+    )
+    assert (
+        _recover_public_completion_from_reasoning(
+            "✅ 已修复显示问题。",
+            has_successful_file_write=True,
+            last_tool_outcome="success",
+            finish_reason="length",
+        )
+        == ""
+    )
+

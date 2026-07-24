@@ -29,6 +29,10 @@ import { extractPartialShowWidgetArgs, finalizePartialSvg, type PartialShowWidge
 import { parseBashBgStart } from "./bash-bg-preview";
 import { openExternalUrl } from "../../utils/open-external";
 import { isHookBlockedToolMessage } from "../../utils/hook-block-message";
+import {
+  formatToolElapsedSeconds,
+  useLiveToolElapsedSeconds,
+} from "./tool-elapsed-timer";
 
 type Props = {
   message: Message;
@@ -306,6 +310,13 @@ export function ToolCallCard({
     if ((message.toolName ?? "").trim() !== "skill_manage") return null;
     return parseSkillManageError(message.content);
   }, [message.toolName, message.content]);
+  const status = message.toolStatus;
+  const toolIsActive = status === "running" || status === "pending";
+  const liveElapsedSec = useLiveToolElapsedSeconds(
+    String(message.toolCallId || message.id),
+    toolIsActive,
+    message.toolElapsedSec,
+  );
 
   // Keep this effect above any early return so the hook count/order stays
   // stable across renders (show_widget streaming paths return before the
@@ -380,7 +391,6 @@ export function ToolCallCard({
   const Icon = isHookBlocked
     ? ShieldAlert
     : pickToolIcon(toolName || extractToolSummary(message.content).split(/\s/)[0] || "tool");
-  const status = message.toolStatus;
   const hasDetail = !isHookBlocked && (message.content.length > 0 || hasStream);
 
   const iconColorClass = isHookBlocked ? "text-amber-400" : iconTone(status);
@@ -398,11 +408,11 @@ export function ToolCallCard({
     <span className="text-[13px] font-medium text-text-subtle">{title}</span>
   );
 
-  const sec = message.toolElapsedSec;
-  const metaRight =
-    sec != null && Number.isFinite(sec) && (status === "running" || status === "pending") ? (
-      <span className="shrink-0 text-[12px] text-text-faint tabular-nums">{sec}s</span>
-    ) : null;
+  const metaRight = toolIsActive ? (
+    <span className="shrink-0 text-[12px] text-text-faint tabular-nums">
+      运行中 · {formatToolElapsedSeconds(liveElapsedSec)}
+    </span>
+  ) : null;
 
   const expandedDetailClass =
     variant === "flat"

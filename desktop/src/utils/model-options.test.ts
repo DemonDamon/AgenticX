@@ -8,6 +8,7 @@ import {
   listProviderVisibleModelIds,
   normalizeProviderEntry,
   reconcilePaneModelsWithSettings,
+  resolveSessionBindingModel,
 } from "./model-options";
 
 const TEST_PROVIDER_KEY = ["place", "holder"].join("");
@@ -98,5 +99,59 @@ describe("model-options", () => {
     expect(result.activeModel).toBe("gpt-5-chat");
     expect(result.panes[0]).toMatchObject({ modelProvider: "openai", modelName: "gpt-5-chat" });
     expect(result.panes[1]).toMatchObject({ modelProvider: "zhipu", modelName: "GLM-5.1" });
+  });
+
+  it("prefers global default over inherited pane snapshot when session metadata is empty", () => {
+    const gateway: ProviderEntry = {
+      ...openaiGateway,
+      model: "glm-5.2",
+      models: ["glm-4.5-air", "glm-5.2"],
+    };
+    expect(
+      resolveSessionBindingModel({
+        providers: { custom_openai_glm: gateway },
+        sessionModelKnown: true,
+        paneProvider: "custom_openai_glm",
+        paneModel: "glm-4.5-air",
+        defaultProvider: "custom_openai_glm",
+        defaultModel: "glm-5.2",
+      }),
+    ).toEqual({ provider: "custom_openai_glm", model: "glm-5.2" });
+  });
+
+  it("preserves a manual pane pick during lazy session creation", () => {
+    const gateway: ProviderEntry = {
+      ...openaiGateway,
+      model: "glm-5.2",
+      models: ["glm-4.5-air", "glm-5.2"],
+    };
+    expect(
+      resolveSessionBindingModel({
+        providers: { custom_openai_glm: gateway },
+        sessionModelKnown: false,
+        paneProvider: "custom_openai_glm",
+        paneModel: "glm-4.5-air",
+        defaultProvider: "custom_openai_glm",
+        defaultModel: "glm-5.2",
+      }),
+    ).toEqual({ provider: "custom_openai_glm", model: "glm-4.5-air" });
+  });
+
+  it("keeps an explicit session model ahead of a changed global default", () => {
+    const gateway: ProviderEntry = {
+      ...openaiGateway,
+      model: "glm-5.2",
+      models: ["glm-4.5-air", "glm-5.2"],
+    };
+    expect(
+      resolveSessionBindingModel({
+        providers: { custom_openai_glm: gateway },
+        sessionModelKnown: true,
+        sessionProvider: "custom_openai_glm",
+        sessionModel: "glm-4.5-air",
+        defaultProvider: "custom_openai_glm",
+        defaultModel: "glm-5.2",
+      }),
+    ).toEqual({ provider: "custom_openai_glm", model: "glm-4.5-air" });
   });
 });

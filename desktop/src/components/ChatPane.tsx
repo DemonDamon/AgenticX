@@ -199,7 +199,9 @@ import {
 } from "../utils/session-message-map";
 import {
   assistantVisibleBodyForUi,
+  buildCommittedAssistantPatch,
   normalizeFinalAssistantPayload,
+  reasoningDuplicatesVisibleBody,
 } from "../utils/assistant-output";
 import {
   buildContextFileKeyFromAttachment,
@@ -8222,6 +8224,45 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
       showWidgetDeltaTimers.set(toolCallId, timer);
     };
     let streamReasoningStartedAt: number | null = null;
+    /**
+     * FR-F1 keeps tool-preface body out of chat, but still persist the closed
+     * think segment so the streaming ReasoningBlock does not vanish when
+     * resetTurnSegment clears the overlay. Does NOT mark the stream committed —
+     * the terminal answer still needs its own assistant row.
+     */
+    const preserveStreamReasoningAtToolBoundary = () => {
+      const raw = streamCommitRegistryRef.current.getText(requestSessionId).trim();
+      if (!raw || isThinkingPlaceholderText(raw)) return false;
+      const parsed = parseReasoningContent(raw);
+      const reasoningText = parsed.reasoning.trim();
+      if (!reasoningText) return false;
+      const bodyContent = parsed.response.replace(/[：:]\s*$/, "").trimEnd();
+      // Same-text echo belongs on the final body, not a mid-turn think card.
+      if (reasoningDuplicatesVisibleBody(reasoningText, bodyContent)) return false;
+      const commitExtras: Record<string, unknown> = {
+        reasoning: reasoningText.slice(0, 16384),
+      };
+      let seconds = getCachedReasoningDuration(reasoningText);
+      if (seconds === undefined && streamReasoningStartedAt !== null) {
+        seconds = measureReasoningSeconds(streamReasoningStartedAt, Date.now());
+        setCachedReasoningDuration(reasoningText, seconds);
+      }
+      if (seconds !== undefined && seconds >= 1) {
+        commitExtras.reasoningSeconds = seconds;
+      }
+      addPaneMessageIfSessionActive(
+        pane.id,
+        "assistant",
+        "",
+        "meta",
+        chatProvider,
+        chatModel,
+        undefined,
+        commitExtras,
+      );
+      streamReasoningStartedAt = null;
+      return true;
+    };
     const commitCurrentStreamIfNeeded = () => {
       const raw = streamCommitRegistryRef.current.getText(requestSessionId).trim();
       // Trim trailing colon ("：" or ":") that model writes just before calling a tool
@@ -8241,14 +8282,16 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
       const commitExtras: Record<string, unknown> = {};
       let commitContent = partial;
       if (reasoningText) {
-        commitExtras.reasoning = reasoningText.slice(0, 16384);
-        let seconds = getCachedReasoningDuration(reasoningText);
-        if (seconds === undefined && streamReasoningStartedAt !== null) {
-          seconds = measureReasoningSeconds(streamReasoningStartedAt, Date.now());
-          setCachedReasoningDuration(reasoningText, seconds);
-        }
-        if (seconds !== undefined && seconds >= 1) {
-          commitExtras.reasoningSeconds = seconds;
+        if (!reasoningDuplicatesVisibleBody(reasoningText, bodyContent)) {
+          commitExtras.reasoning = reasoningText.slice(0, 16384);
+          let seconds = getCachedReasoningDuration(reasoningText);
+          if (seconds === undefined && streamReasoningStartedAt !== null) {
+            seconds = measureReasoningSeconds(streamReasoningStartedAt, Date.now());
+            setCachedReasoningDuration(reasoningText, seconds);
+          }
+          if (seconds !== undefined && seconds >= 1) {
+            commitExtras.reasoningSeconds = seconds;
+          }
         }
         commitContent = bodyContent;
       }
@@ -8912,7 +8955,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
                         undefined,
                         clarifyExtras,
                       );
-                      commitCurrentStreamIfNeeded();
+                      preserveStreamReasoningAtToolBoundary();
                       full = "";
                       streamReasoningStartedAt = null;
                       streamCommitRegistryRef.current.resetTurnSegment(requestSessionId);
@@ -8921,7 +8964,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
                       continue;
                     }
                   }
-                  commitCurrentStreamIfNeeded();
+                  preserveStreamReasoningAtToolBoundary();
                   full = "";
                   streamReasoningStartedAt = null;
                   streamCommitRegistryRef.current.resetTurnSegment(requestSessionId);
@@ -9625,12 +9668,17 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
                 pendingSearchedQueries = appliedRefs.queries;
                 const finalReasoningRaw = payload.data?.reasoning;
                 if (typeof finalReasoningRaw === "string" && finalReasoningRaw.trim()) {
-                  pendingReasoning = finalReasoningRaw.trim().slice(0, 16384);
+                  const candidate = finalReasoningRaw.trim().slice(0, 16384);
+                  // GLM may echo the public answer into reasoning_content; drop it.
+                  if (!reasoningDuplicatesVisibleBody(candidate, finalText)) {
+                    pendingReasoning = candidate;
+                  }
                 }
                 const finalReasoningSecondsRaw = payload.data?.reasoning_seconds;
                 if (
                   typeof finalReasoningSecondsRaw === "number" &&
-                  finalReasoningSecondsRaw >= 1
+                  finalReasoningSecondsRaw >= 1 &&
+                  pendingReasoning
                 ) {
                   pendingReasoningSeconds = Math.round(finalReasoningSecondsRaw);
                 }
@@ -9775,9 +9823,14 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
           ? { suggestedQuestions: pendingSuggestedQuestions.slice(0, 3) }
           : undefined;
       const reasoningExtras: Record<string, unknown> = {};
-      if (pendingReasoning) reasoningExtras.reasoning = pendingReasoning;
-      if (pendingReasoningSeconds !== undefined)
-        reasoningExtras.reasoningSeconds = pendingReasoningSeconds;
+      if (
+        pendingReasoning &&
+        !reasoningDuplicatesVisibleBody(pendingReasoning, full)
+      ) {
+        reasoningExtras.reasoning = pendingReasoning;
+        if (pendingReasoningSeconds !== undefined)
+          reasoningExtras.reasoningSeconds = pendingReasoningSeconds;
+      }
       const terminalMetaExtras: Record<string, unknown> = receivedFinalEvent
         ? {
             metadata: {
@@ -9828,9 +9881,14 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
         !isThinkingPlaceholderText(full) &&
         streamCommitRegistryRef.current.isCommitted(requestSessionId)
       ) {
-        if (turnExtras) {
+        const committedPatch = buildCommittedAssistantPatch(
+          full,
+          turnExtras,
+          receivedFinalEvent,
+        );
+        if (committedPatch) {
           useAppStore.getState().mergeLastPaneMessageByRole(pane.id, "assistant", {
-            ...turnExtras,
+            ...committedPatch,
             timestamp: completedAt,
           });
         } else {

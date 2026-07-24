@@ -498,6 +498,7 @@ class SessionManager:
         self.ttl_seconds = ttl_seconds
         self._sessions: Dict[str, ManagedSession] = {}
         self._interrupt_requests: set[str] = set()
+        self._continuation_locks: Dict[str, asyncio.Lock] = {}
         self._session_store = SessionStore()
         self._sessions_root = os.path.join(os.path.expanduser("~"), ".agenticx", "sessions")
         self._taskspaces_root = os.path.join(os.path.expanduser("~"), ".agenticx", "taskspaces")
@@ -694,6 +695,13 @@ class SessionManager:
             return False
         self._interrupt_requests.add(sid)
         return True
+
+    def get_continuation_lock(self, session_id: str) -> asyncio.Lock:
+        """Return the process-local single-flight lock for session recovery."""
+        sid = str(session_id or "").strip()
+        if not sid:
+            raise ValueError("session_id is required")
+        return self._continuation_locks.setdefault(sid, asyncio.Lock())
 
     def clear_interrupt(self, session_id: str) -> None:
         sid = str(session_id or "").strip()
@@ -2218,6 +2226,7 @@ class SessionManager:
             if role == "assistant":
                 content_for_parse = str(item.get("content", "") or "")
                 parsed_out = parse_assistant_output(content_for_parse)
+                row["content"] = parsed_out.visible_body
                 raw_sq = item.get("suggested_questions")
                 if parsed_out.malformed:
                     # Detached SQ from malformed protocol must not ship to clients.

@@ -8,6 +8,7 @@ import { META_AGENT_DISPLAY_NAME } from "./constants/branding";
 import {
   coerceSelectableModel,
   reconcilePaneModelsWithSettings as reconcilePaneModelsPure,
+  resolveSessionBindingModel,
 } from "./utils/model-options";
 import type { SearchReference } from "./types/search-references";
 import { shouldClearMessagesOnSessionSwitch } from "./utils/pane-session-switch";
@@ -1511,15 +1512,17 @@ export const useAppStore = create<AppState>((set, get) => ({
     const paneId = uid();
     set((state) => {
       const av = avatarId ? state.avatars.find((a) => a.id === avatarId) : null;
-      const rawProvider =
-        (av?.defaultProvider || "").trim() || (state.activeProvider || "").trim();
-      const rawModel = (av?.defaultModel || "").trim() || (state.activeModel || "").trim();
-      const coerced = coerceSelectableModel(
-        state.settings.providers,
-        rawProvider,
-        rawModel,
-        rawProvider,
-      );
+      const defaultProvider = (state.settings.defaultProvider || "").trim();
+      const coerced = resolveSessionBindingModel({
+        providers: state.settings.providers,
+        sessionModelKnown: false,
+        avatarProvider: av?.defaultProvider,
+        avatarModel: av?.defaultModel,
+        defaultProvider,
+        defaultModel: state.settings.providers[defaultProvider]?.model,
+        activeProvider: state.activeProvider,
+        activeModel: state.activeModel,
+      });
       const modelProvider = coerced?.provider ?? "";
       const modelName = coerced?.model ?? "";
       return {
@@ -1864,54 +1867,29 @@ export const useAppStore = create<AppState>((set, get) => ({
     const hintProvider = String(modelHint?.provider ?? "").trim();
     const hintModel = String(modelHint?.model ?? "").trim();
     set((state) => {
-      // Priority chain when binding a session to a pane:
-      //   modelHint (session.provider/model from backend, e.g. history switch)
-      //   > pane.modelProvider/modelName (user's current picker selection)
-      //   > avatar.defaultProvider/defaultModel
-      //   > settings.defaultProvider + providers[default].model
-      // Lazy session create must not clobber a manual model switch on the pane.
       const pane = state.panes.find((p) => p.id === paneId);
       const paneProvider = (pane?.modelProvider || "").trim();
       const paneModel = (pane?.modelName || "").trim();
-      let resolvedProvider = hintProvider;
-      let resolvedModel = hintModel;
-      if (!resolvedProvider || !resolvedModel) {
-        if (paneProvider && paneModel) {
-          if (!resolvedProvider) resolvedProvider = paneProvider;
-          if (!resolvedModel) resolvedModel = paneModel;
-        }
-      }
-      if (!resolvedProvider || !resolvedModel) {
-        const avatar = pane?.avatarId
-          ? state.avatars.find((a) => a.id === pane.avatarId)
-          : null;
-        const avatarProvider = (avatar?.defaultProvider || "").trim();
-        const avatarModel = (avatar?.defaultModel || "").trim();
-        if (avatarProvider && avatarModel) {
-          if (!resolvedProvider) resolvedProvider = avatarProvider;
-          if (!resolvedModel) resolvedModel = avatarModel;
-        } else {
-          const dp = (state.settings.defaultProvider || "").trim();
-          const fallback = coerceSelectableModel(state.settings.providers, dp, "", dp);
-          if (fallback) {
-            if (!resolvedProvider) resolvedProvider = fallback.provider;
-            if (!resolvedModel) resolvedModel = fallback.model;
-          }
-        }
-      }
-      const coerced = coerceSelectableModel(
-        state.settings.providers,
-        resolvedProvider,
-        resolvedModel,
-        resolvedProvider,
-      );
-      if (coerced) {
-        resolvedProvider = coerced.provider;
-        resolvedModel = coerced.model;
-      } else {
-        resolvedProvider = "";
-        resolvedModel = "";
-      }
+      const avatar = pane?.avatarId
+        ? state.avatars.find((a) => a.id === pane.avatarId)
+        : null;
+      const defaultProvider = (state.settings.defaultProvider || "").trim();
+      const resolved = resolveSessionBindingModel({
+        providers: state.settings.providers,
+        sessionModelKnown: modelHint !== undefined,
+        sessionProvider: hintProvider,
+        sessionModel: hintModel,
+        paneProvider,
+        paneModel,
+        avatarProvider: avatar?.defaultProvider,
+        avatarModel: avatar?.defaultModel,
+        defaultProvider,
+        defaultModel: state.settings.providers[defaultProvider]?.model,
+        activeProvider: state.activeProvider,
+        activeModel: state.activeModel,
+      });
+      const resolvedProvider = resolved?.provider ?? "";
+      const resolvedModel = resolved?.model ?? "";
       const isActive = state.activePaneId === paneId;
       const nextTrimmed = String(sessionId ?? "").trim();
       const nextPanes = state.panes.map((p) => {

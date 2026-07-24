@@ -130,6 +130,38 @@ def test_followup_emitter_still_streams_think_reasoning() -> None:
     assert body == "可见正文"
 
 
+# Ported-ref: fix/glm-stream-common-finalization@5bf63d3e
+def test_followup_emitter_disabled_still_filters_protocol_tags() -> None:
+    emitter = FollowupStreamEmitter(enabled=False)
+    chunks = [
+        emitter.feed_append("<think>内部推理</think>可见正文"),
+        emitter.feed_append("</think></think>"),
+        emitter.feed_append("<followups>问题1\n问题2\n问题3</followups>"),
+    ]
+    streamed = "".join(chunks)
+    assert "<think>内部推理</think>" in streamed
+    assert "</think></think>" not in streamed
+    assert "问题1" not in streamed
+    body, lines = emitter.finalize_text()
+    assert body == "可见正文"
+    assert lines == []
+
+
+# Ported-ref: fix/glm-stream-common-finalization@5bf63d3e
+def test_prose_less_than_does_not_swallow_followups() -> None:
+    raw = (
+        "全部修复完成。\n粒子间距离 < 120px 时自动连线。\n"
+        "<followups>粒子动画太卡了怎么优化\n"
+        "待办事项能不能按分类筛选\n"
+        "背景粒子颜色能不能换成其他配色"
+    )
+    parsed = parse_assistant_output(raw)
+    assert "粒子间距离 < 120px 时自动连线。" in parsed.visible_body
+    assert "followups" not in parsed.visible_body
+    assert "粒子动画太卡了怎么优化" not in parsed.visible_body
+    assert parsed.malformed is True
+
+
 def test_sanitize_public_tool_summary_rejects_unsafe() -> None:
     ok = "数字分身「侠客」已创建并加入分身列表（id=avatar-1）。"
     assert sanitize_public_tool_summary(ok) == ok

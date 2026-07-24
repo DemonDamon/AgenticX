@@ -701,3 +701,94 @@ def test_status_query_final_has_turn_terminal_marker() -> None:
     assert events[-1]["type"] == EventType.FINAL.value
     assert events[-1]["data"]["turn_terminal"] is True
     assert session.chat_history[-1]["metadata"]["turn_terminal"] is True
+
+
+class _FallbackReplacementLLM:
+    pass
+
+
+def test_runtime_preserves_reasoning_content_for_tool_round(monkeypatch) -> None:
+    import asyncio
+    from agenticx.runtime import agent_runtime as runtime_module
+
+    async def _fake_dispatch(*_args, **_kwargs):
+        return "tool-ok"
+
+    class _ThinkingToolLLM:
+        def __init__(self) -> None:
+            self.calls = 0
+
+        def invoke(self, *_args, **_kwargs):
+            self.calls += 1
+            if self.calls == 1:
+                return _FakeResponse(
+                    "<think>完整的工具前思考</think>需要读取文件",
+                    [
+                        {
+                            "id": "call-thinking-1",
+                            "type": "function",
+                            "function": {"name": "list_files", "arguments": {"path": "."}},
+                        }
+                    ],
+                )
+            return _FakeResponse("完成", [])
+
+        def stream(self, *_args, **_kwargs):
+            yield ""
+
+    async def _collect(runtime: AgentRuntime, session: StudioSession, text: str):
+        items = []
+        async for event in runtime.run_turn(text, session):
+            items.append(event)
+        return items
+
+    monkeypatch.setattr(runtime_module, "dispatch_tool_async", _fake_dispatch)
+    llm = _ThinkingToolLLM()
+    session = StudioSession()
+    runtime = AgentRuntime(llm, _ApproveGate())
+    asyncio.run(_collect(runtime, session, "读取文件"))
+
+    tool_assistant = next(
+        row for row in session.agent_messages
+        if row.get("role") == "assistant" and row.get("tool_calls")
+    )
+    assert tool_assistant["reasoning_content"] == "完整的工具前思考"
+
+
+def test_runtime_tool_round_appends_single_assistant(monkeypatch) -> None:
+    import asyncio
+    from agenticx.runtime import agent_runtime as runtime_module
+
+    async def _fake_dispatch(*_args, **_kwargs):
+        return "tool-ok"
+
+    async def _collect(runtime: AgentRuntime, session: StudioSession, text: str):
+        items = []
+        async for event in runtime.run_turn(text, session):
+            items.append(event)
+        return items
+
+    monkeypatch.setattr(runtime_module, "dispatch_tool_async", _fake_dispatch)
+    session = StudioSession()
+    runtime = AgentRuntime(_ToolThenFinalLLM(), _ApproveGate())
+    asyncio.run(_collect(runtime, session, "do it"))
+
+    tool_assistants = [
+        row
+        for row in session.agent_messages
+        if row.get("role") == "assistant" and row.get("tool_calls")
+    ]
+    assert len(tool_assistants) == 1
+    idx = session.agent_messages.index(tool_assistants[0])
+    assert idx + 1 < len(session.agent_messages)
+    assert session.agent_messages[idx + 1].get("role") == "tool"
+
+
+def test_runtime_can_replace_active_llm_after_fallback() -> None:
+    initial = object()
+    replacement = _FallbackReplacementLLM()
+    runtime = AgentRuntime(initial, _ApproveGate(), llm_factory=lambda: replacement)
+
+    assert runtime._reload_llm_for_session(StudioSession()) is True
+    assert runtime.llm is replacement
+    assert runtime.compactor.llm is replacement

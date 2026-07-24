@@ -1,13 +1,17 @@
 import { useMemo, useState } from "react";
 import type { Message } from "../../store";
 import { Check, ChevronDown, ChevronRight, Wrench } from "lucide-react";
-import { ToolCallCard } from "./ToolCallCard";
+import { buildToolCardTitle, ToolCallCard } from "./ToolCallCard";
 import type { ReactNode } from "react";
 import { TodoUpdateCard } from "../TodoUpdateCard";
 import { isTodoUpdateToolMessage } from "./MessageRenderer";
 import type { SkillPatchPreviewPayload } from "./skill-manage-preview";
 import { REACT_RAIL_ICON_TILE_STYLE, REACT_RAIL_TITLE_CLASS } from "./im-layout";
 import { isToolGroupInProgress } from "./group-tool-messages";
+import {
+  formatToolElapsedSeconds,
+  useLiveToolElapsedSeconds,
+} from "./tool-elapsed-timer";
 
 type Props = {
   messages: Message[];
@@ -89,6 +93,17 @@ export function TurnToolGroupCard({
     () => isToolGroupInProgress(messages) || holdProgress,
     [holdProgress, messages],
   );
+  const activeTools = useMemo(
+    () => messages.filter((message) => message.toolStatus === "running" || message.toolStatus === "pending"),
+    [messages],
+  );
+  const activeTool = activeTools[activeTools.length - 1];
+  const liveElapsedSec = useLiveToolElapsedSeconds(
+    String(activeTool?.toolCallId || activeTool?.id || "tool-group-idle"),
+    Boolean(activeTool),
+    activeTool?.toolElapsedSec,
+  );
+  const activeToolTitle = activeTool ? buildToolCardTitle(activeTool) : "工具";
 
   const cardContent = (
     <div
@@ -119,18 +134,26 @@ export function TurnToolGroupCard({
             </span>
           )}
         </span>
-        <span className="flex min-w-0 shrink items-center gap-1.5">
+        <span className="flex min-w-0 flex-1 items-center gap-1.5">
           {inProgress ? (
-            <span className={`truncate ${REACT_RAIL_TITLE_CLASS}`}>正在调用工具</span>
+            <span className={`min-w-0 truncate ${REACT_RAIL_TITLE_CLASS}`}>
+              正在调用 {activeToolTitle}
+              {activeTools.length > 1 ? ` 等 ${activeTools.length} 个工具` : ""}
+            </span>
           ) : (
             <CompletedToolSummary messages={messages} />
           )}
-          {expanded ? (
-            <ChevronDown className="h-3.5 w-3.5 shrink-0 text-text-muted" strokeWidth={2} aria-hidden />
-          ) : (
-            <ChevronRight className="h-3.5 w-3.5 shrink-0 text-text-muted" strokeWidth={2} aria-hidden />
-          )}
         </span>
+        {activeTool ? (
+          <span className="shrink-0 text-[12px] text-text-faint tabular-nums">
+            运行中 · {formatToolElapsedSeconds(liveElapsedSec)}
+          </span>
+        ) : null}
+        {expanded ? (
+          <ChevronDown className="h-3.5 w-3.5 shrink-0 text-text-muted" strokeWidth={2} aria-hidden />
+        ) : (
+          <ChevronRight className="h-3.5 w-3.5 shrink-0 text-text-muted" strokeWidth={2} aria-hidden />
+        )}
       </button>
       {expanded && (
         <div

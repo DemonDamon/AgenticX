@@ -80,6 +80,20 @@ def test_is_continuation_user_prompt_internal() -> None:
     assert is_continuation_user_prompt(resolve_continuation_prompt("exhausted")) is True
 
 
+def test_manual_continue_single_flight_lock_is_per_session() -> None:
+    from agenticx.studio.session_manager import SessionManager
+
+    manager = SessionManager.__new__(SessionManager)
+    manager._continuation_locks = {}
+
+    first = manager.get_continuation_lock("session-a")
+    same = manager.get_continuation_lock("session-a")
+    other = manager.get_continuation_lock("session-b")
+
+    assert first is same
+    assert first is not other
+
+
 def test_is_continuation_user_prompt_with_retry_constraints() -> None:
     managed = _FakeManaged()
     managed.studio_session.scratchpad["__last_turn_failure__"] = {

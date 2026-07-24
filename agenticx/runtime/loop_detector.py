@@ -9,6 +9,7 @@ from __future__ import annotations
 from collections import deque
 from dataclasses import dataclass
 import json
+from pathlib import Path
 import re
 from typing import Any, Deque, Dict, List, Optional, Tuple
 
@@ -39,6 +40,17 @@ class LoopDetector:
         self._progress_marks: Deque[bool] = deque(maxlen=self.history_size)
         self._guard_rejections: Deque[str] = deque(maxlen=self.history_size)
         self._last_success_fingerprint: Dict[str, str] = {}
+        self._file_edit_failures: Dict[str, int] = {}
+        self._latest_file_edit_failure: Optional[Tuple[str, str, int]] = None
+
+    def reset(self) -> None:
+        """Clear per-turn detector state without changing configured thresholds."""
+        self._calls.clear()
+        self._progress_marks.clear()
+        self._guard_rejections.clear()
+        self._last_success_fingerprint.clear()
+        self._file_edit_failures.clear()
+        self._latest_file_edit_failure = None
 
     @staticmethod
     def args_signature(arguments: Dict[str, Any]) -> str:
@@ -70,6 +82,57 @@ class LoopDetector:
             return False
         return "guard rejected" in text or "安全策略拦截" in text
 
+    @staticmethod
+    def _file_edit_path(args_signature: str) -> str:
+        try:
+            parsed = json.loads(args_signature)
+        except Exception:
+            parsed = None
+        if isinstance(parsed, dict):
+            path = str(parsed.get("path", "") or "").strip()
+            if path:
+                try:
+                    return str(Path(path).expanduser().resolve(strict=False))
+                except Exception:
+                    return path
+        return "(unknown path)"
+
+    @staticmethod
+    def _file_edit_error_code(result_text: Optional[str]) -> Optional[str]:
+        text = str(result_text or "").strip()
+        lower = text.lower()
+        if not lower.startswith("error:"):
+            return None
+        if "file_edit_stale_snapshot" in lower or "modified on disk" in lower:
+            return "file_edit_stale_snapshot"
+        if "file_edit_old_text_not_found" in lower or (
+            "old_text" in lower and "not found" in lower
+        ):
+            return "file_edit_old_text_not_found"
+        if "cannot be empty" in lower or "occurrence must be" in lower or "file not found" in lower:
+            return "file_edit_invalid_arguments"
+        if "write failed" in lower:
+            return "file_edit_write_failed"
+        return "file_edit_error"
+
+    def _record_file_edit_outcome(
+        self,
+        tool_name: str,
+        args_signature: str,
+        result_text: Optional[str],
+    ) -> None:
+        self._latest_file_edit_failure = None
+        if tool_name != "file_edit":
+            return
+        path = self._file_edit_path(args_signature)
+        error_code = self._file_edit_error_code(result_text)
+        if error_code is None:
+            self._file_edit_failures.pop(path, None)
+            return
+        count = self._file_edit_failures.get(path, 0) + 1
+        self._file_edit_failures[path] = count
+        self._latest_file_edit_failure = (path, error_code, count)
+
     def record_call(
         self,
         tool_name: str,
@@ -81,6 +144,7 @@ class LoopDetector:
     ) -> None:
         self._calls.append((tool_name, args_signature))
         self._progress_marks.append(bool(has_progress))
+        self._record_file_edit_outcome(tool_name, args_signature, result_text)
         if result_text and self.is_guard_rejection(result_text):
             self._guard_rejections.append(tool_name)
         if result_fingerprint:
@@ -113,6 +177,7 @@ class LoopDetector:
     def check(self) -> Optional[LoopCheckResult]:
         for detector in (
             self._detect_guard_rejection_loop,
+            self._detect_file_edit_failure,
             self._detect_generic_repeat,
             self._detect_ping_pong,
             self._detect_no_progress,
@@ -122,6 +187,35 @@ class LoopDetector:
             if result is not None:
                 return result
         return None
+
+    def _detect_file_edit_failure(self) -> Optional[LoopCheckResult]:
+        latest = self._latest_file_edit_failure
+        if latest is None:
+            return None
+        path, error_code, count = latest
+        if count >= 2:
+            return LoopCheckResult(
+                stuck=True,
+                level="critical",
+                detector="file_edit_failure",
+                message=(
+                    f"同一文件的 file_edit 已失败 {count} 次（{error_code}, path={path}）。"
+                    "已停止继续编辑，避免重复消耗；请基于当前文件内容重新规划后再试。"
+                ),
+            )
+        return LoopCheckResult(
+            stuck=True,
+            level="warning",
+            detector="file_edit_failure",
+            message=(
+                f"file_edit 首次失败（{error_code}, path={path}）。"
+                "下一步必须先用 file_read 读取目标范围，再根据当前内容构造最小补丁。"
+            ),
+            nudge=(
+                "上一次 file_edit 失败。先调用 file_read 刷新目标片段；"
+                "不要复用旧快照或原 old_text。"
+            ),
+        )
 
     def _classify(self, count: int) -> str:
         return "critical" if count >= self.critical_threshold else "warning"

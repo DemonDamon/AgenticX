@@ -53,20 +53,23 @@ def split_final_answer_and_followups(full: str) -> Tuple[str, List[str]]:
 
 
 class FollowupStreamEmitter:
-    """Emit only visible token deltas while accumulating raw assistant text."""
+    """Emit protocol-safe token deltas while accumulating raw assistant text.
 
-    __slots__ = ("_enabled", "_raw", "_parser", "_emitted_visible_len")
+    ``enabled`` controls only whether suggested follow-up questions are returned.
+    Reasoning/control-tag parsing must remain active for every stream; otherwise
+    disabling suggestions also leaks provider ``</think>`` artifacts to users.
+    """
+
+    __slots__ = ("_enabled", "_raw", "_parser")
 
     def __init__(self, enabled: bool) -> None:
         self._enabled = enabled
         self._raw = ""
         self._parser = AssistantOutputStreamParser()
-        self._emitted_visible_len = 0
 
     def reset(self) -> None:
         self._raw = ""
         self._parser = AssistantOutputStreamParser()
-        self._emitted_visible_len = 0
 
     @property
     def raw(self) -> str:
@@ -77,16 +80,10 @@ class FollowupStreamEmitter:
         if not token:
             return ""
         self._raw += token
-        if not self._enabled:
-            delta = self._raw[self._emitted_visible_len :]
-            self._emitted_visible_len = len(self._raw)
-            return delta
-        delta = self._parser.feed(token)
-        return delta
+        return self._parser.feed(token)
 
     def finalize_text(self) -> Tuple[str, List[str]]:
         """Return cleaned body + suggestions from accumulated raw."""
-        if not self._enabled:
-            return (self._raw or "").strip(), []
         parsed = self._parser.finalize()
-        return parsed.visible_body.strip(), list(parsed.suggested_questions)
+        suggestions = list(parsed.suggested_questions) if self._enabled else []
+        return parsed.visible_body.strip(), suggestions

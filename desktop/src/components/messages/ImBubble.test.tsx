@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
+import { renderToStaticMarkup } from "react-dom/server";
 import { shouldShowAssistantFollowups, shouldShowAssistantIconButtons } from "../../utils/im-bubble-actions";
+import { ImBubble } from "./ImBubble";
 
 const baseVisible = {
   hideActions: false,
@@ -95,5 +97,40 @@ describe("shouldShowAssistantFollowups", () => {
 
   it("hides followups when assistant body is empty", () => {
     expect(shouldShowAssistantFollowups({ ...baseFollowups, hasBody: false })).toBe(false);
+  });
+});
+
+// Ported-ref: fix/glm-stream-common-finalization@5bf63d3e
+describe("ImBubble assistant protocol boundary", () => {
+  it("does not render an unclosed followups tail from historical messages", () => {
+    const raw =
+      "全部修复完成。\n\n粒子间距离 < 120px 时自动连线。\n\n<followups>粒子动画太卡了怎么优化\n待办事项能不能按分类筛选\n背景粒子颜色能不能换成其他配色";
+    const html = renderToStaticMarkup(
+      <ImBubble message={{ id: "historical-assistant", role: "assistant", content: raw }} />,
+    );
+
+    expect(html).toContain("全部修复完成。");
+    expect(html).not.toContain("followups");
+    expect(html).not.toContain("粒子动画太卡了怎么优化");
+  });
+
+  it("does not render a ReasoningBlock when reasoning only echoes the body", () => {
+    const body =
+      "## 总结\n\n当前目录有两个 .py 文件：\n- `analyze_cursor_cost.py`\n- `simple.py`";
+    const html = renderToStaticMarkup(
+      <ImBubble
+        message={{
+          id: "dup-reasoning",
+          role: "assistant",
+          content: body,
+          reasoning: body,
+          reasoningSeconds: 5,
+        }}
+      />,
+    );
+
+    expect(html).toContain("总结");
+    expect(html).not.toContain("思考了");
+    expect(html).not.toContain("Thought");
   });
 });

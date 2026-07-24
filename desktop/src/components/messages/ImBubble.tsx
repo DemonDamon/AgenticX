@@ -15,6 +15,10 @@ import { HoverTip } from "../ds/HoverTip";
 import { CitationMarkdownBody } from "./CitationMarkdownBody";
 import { renderUserMessageInlineBody } from "./user-message-inline";
 import {
+  parseAssistantOutputForUi,
+  reasoningDuplicatesVisibleBody,
+} from "../../utils/assistant-output";
+import {
   ASSISTANT_ACTION_ICON_ONLY_CLASS,
   ASSISTANT_ACTION_ICON_ROW_CLASS,
   ASSISTANT_ACTION_RHYTHM_GAP_CLASS,
@@ -234,11 +238,17 @@ export function ImBubble({
   const showIdentityRail = showSenderIdentity && !compactAssistant;
   const hideActions = compactAssistant && assistantVisual !== "compact-inline-with-actions";
   const parsed = !isUser ? parseReasoningContent(message.content) : null;
+  const protocolParsed = !isUser ? parseAssistantOutputForUi(message.content) : null;
   const hasThinkTag = parsed?.hasReasoningTag ?? false;
   /** True once </think> has arrived in the stream; lets us collapse reasoning and show waiting dots while a tool call runs. */
   const reasoningClosed =
     hasThinkTag && /<\/think>/i.test(String(message.content ?? ""));
-  const bodyText = !isUser && hasThinkTag ? (parsed?.response ?? "") : message.content;
+  // Messages created in live state do not always pass through the history
+  // mapper. Apply the same protocol parser at the final render boundary so a
+  // malformed/unclosed <followups> tail can never become Markdown body text.
+  const bodyText = !isUser
+    ? (protocolParsed?.visibleBody ?? (hasThinkTag ? (parsed?.response ?? "") : message.content))
+    : message.content;
   const citationReferences =
     (resolvedReferences?.length ?? 0) > 0 ? resolvedReferences : message.references;
   const referenceAttachments = isUser
@@ -747,13 +757,17 @@ export function ImBubble({
                         searchedQueries={message.searchedQueries}
                       />
                     ) : null}
-                    {message.reasoning && !isStreaming ? (
+                    {message.reasoning &&
+                    !isStreaming &&
+                    !reasoningDuplicatesVisibleBody(message.reasoning, bodyText) ? (
                       <ReasoningBlock
                         text={message.reasoning}
                         seconds={resolvePersistedReasoningSeconds(message.reasoning, message.reasoningSeconds)}
                       />
                     ) : null}
-                    {!message.reasoning && parsed?.reasoning ? (
+                    {!message.reasoning &&
+                    parsed?.reasoning &&
+                    !reasoningDuplicatesVisibleBody(parsed.reasoning, bodyText) ? (
                       <ReasoningBlock
                         text={parsed.reasoning}
                         seconds={

@@ -12,7 +12,10 @@ from __future__ import annotations
 from pathlib import Path
 
 from agenticx.memory.session_store import SessionStore
-from agenticx.runtime.agent_runtime import _split_reasoning_and_body
+from agenticx.runtime.agent_runtime import (
+    _dedupe_reasoning_against_body,
+    _split_reasoning_and_body,
+)
 from agenticx.studio.session_manager import SessionManager
 
 _THINK_OPEN = chr(60) + "think" + chr(62)
@@ -37,6 +40,14 @@ def test_split_reasoning_and_body_no_think_returns_empty_reasoning() -> None:
     reasoning, body = _split_reasoning_and_body("普通正文，无推理")
     assert reasoning == ""
     assert body == "普通正文，无推理"
+
+
+def test_dedupe_reasoning_against_body_drops_echoed_answer() -> None:
+    answer = "## 总结\n\n当前目录有两个 .py 文件。"
+    assert _dedupe_reasoning_against_body(answer, answer) == ""
+    assert _dedupe_reasoning_against_body(answer, answer + "\n") == ""
+    assert _dedupe_reasoning_against_body("先读文件再总结", answer) == "先读文件再总结"
+    assert _dedupe_reasoning_against_body("", answer) == ""
 
 
 def test_split_reasoning_and_body_preserves_long_reasoning_for_truncation() -> None:

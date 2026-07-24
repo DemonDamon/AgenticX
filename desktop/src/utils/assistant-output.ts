@@ -149,6 +149,15 @@ class StreamParser {
         this.emitText(data.slice(i));
         return;
       }
+      // Prose may contain a less-than sign before the next real protocol tag
+      // (for example `distance < 120px ... <followups>`). Do not consume the
+      // reserved opener's `>` as if it closed the earlier prose fragment.
+      const nestedOpen = data.indexOf("<", i + 1);
+      if (nestedOpen >= 0 && nestedOpen < close) {
+        this.emitText("<");
+        i += 1;
+        continue;
+      }
       const inner = data.slice(i + 1, close);
       const classified = classifyTag(inner);
       if (!classified) {
@@ -359,6 +368,16 @@ export function assistantVisibleBodyForUi(content: string): string {
   return parseAssistantOutputForUi(content).visibleBody;
 }
 
+/** True when persisted reasoning is only a copy of the visible answer body. */
+export function reasoningDuplicatesVisibleBody(
+  reasoning: string | undefined | null,
+  visibleBody: string | undefined | null,
+): boolean {
+  const r = String(reasoning ?? "").trim();
+  const b = String(visibleBody ?? "").trim();
+  return Boolean(r) && Boolean(b) && r === b;
+}
+
 export function normalizeFinalAssistantPayload(
   rawText: unknown,
   rawQuestions: unknown,
@@ -388,4 +407,25 @@ export function normalizeFinalAssistantPayload(
           : text.length > 0,
     terminalReason,
   };
+}
+
+/** Build a merge patch for an already-committed assistant bubble after FINAL. */
+export function buildCommittedAssistantPatch(
+  content: string,
+  extras: Record<string, unknown> | undefined,
+  receivedFinalEvent: boolean,
+): Record<string, unknown> | undefined {
+  const patch: Record<string, unknown> = { ...(extras ?? {}) };
+  if (receivedFinalEvent && content.trim()) {
+    patch.content = content;
+  }
+  const body = String(patch.content ?? content ?? "");
+  if (
+    typeof patch.reasoning === "string" &&
+    reasoningDuplicatesVisibleBody(patch.reasoning, body)
+  ) {
+    delete patch.reasoning;
+    delete patch.reasoningSeconds;
+  }
+  return Object.keys(patch).length > 0 ? patch : undefined;
 }

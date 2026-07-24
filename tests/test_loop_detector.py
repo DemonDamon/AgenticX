@@ -53,3 +53,85 @@ def test_loop_detector_tool_saturation_detected() -> None:
 def test_confirmation_spam_score_for_path() -> None:
     assert _confirmation_spam_score_for_path("/tmp/TODO_FINAL.md") >= 2
     assert _confirmation_spam_score_for_path("/tmp/README.md") == 0
+
+
+def test_file_edit_first_failure_emits_read_nudge() -> None:
+    detector = LoopDetector(warning_threshold=6, critical_threshold=12)
+    detector.record_call(
+        "file_edit",
+        '{"path":"/tmp/demo.html","old_text":"old"}',
+        has_progress=False,
+        result_text=(
+            "ERROR: file_edit_old_text_not_found: old_text not found in file. "
+            "Call file_read for the target range."
+        ),
+    )
+
+    result = detector.check()
+
+    assert result is not None
+    assert result.detector == "file_edit_failure"
+    assert result.level == "warning"
+    assert result.nudge is not None
+    assert "file_read" in result.nudge
+
+
+def test_file_edit_second_failure_on_same_path_is_critical() -> None:
+    detector = LoopDetector(warning_threshold=6, critical_threshold=12)
+    for old_text in ("old-a", "old-b"):
+        detector.record_call(
+            "file_edit",
+            f'{{"path":"/tmp/demo.html","old_text":"{old_text}"}}',
+            has_progress=False,
+            result_text="ERROR: file_edit_old_text_not_found: old_text not found in file.",
+        )
+
+    result = detector.check()
+
+    assert result is not None
+    assert result.detector == "file_edit_failure"
+    assert result.level == "critical"
+    assert "2" in result.message
+
+
+def test_successful_file_edit_resets_path_failure_count() -> None:
+    detector = LoopDetector(warning_threshold=6, critical_threshold=12)
+    signature = '{"path":"/tmp/demo.html","old_text":"old"}'
+    detector.record_call(
+        "file_edit",
+        signature,
+        has_progress=False,
+        result_text="ERROR: file_edit_old_text_not_found: old_text not found in file.",
+    )
+    detector.record_call(
+        "file_edit",
+        signature,
+        has_progress=True,
+        result_text="OK: edited /tmp/demo.html",
+    )
+    detector.record_call(
+        "file_edit",
+        signature,
+        has_progress=False,
+        result_text="ERROR: file_edit_old_text_not_found: old_text not found in file.",
+    )
+
+    result = detector.check()
+
+    assert result is not None
+    assert result.detector == "file_edit_failure"
+    assert result.level == "warning"
+
+
+def test_loop_detector_reset_clears_file_edit_failures() -> None:
+    detector = LoopDetector(warning_threshold=6, critical_threshold=12)
+    signature = '{"path":"/tmp/demo.html"}'
+    detector.record_call(
+        "file_edit",
+        signature,
+        has_progress=False,
+        result_text="ERROR: file_edit_old_text_not_found",
+    )
+    detector.reset()
+
+    assert detector.check() is None
