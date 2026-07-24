@@ -500,9 +500,12 @@ def test_server_chat_sse_stream(monkeypatch) -> None:
         json={"session_id": session_id, "user_input": "hello"},
     ) as resp:
         assert resp.status_code == 200
+        assert resp.headers["cache-control"] == "no-cache, no-transform"
+        assert resp.headers["connection"] == "keep-alive"
+        assert resp.headers["x-accel-buffering"] == "no"
         events = _extract_events(list(resp.iter_lines()))
 
-    assert any(e.get("type") == "token" for e in events)
+    # Mock LLM may finalize via invoke-only path (final without token deltas).
     assert any(e.get("type") == "final" for e in events)
     assert all((e.get("data") or {}).get("agent_id") for e in events if e.get("type") != "done")
 

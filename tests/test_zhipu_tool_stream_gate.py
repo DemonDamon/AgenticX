@@ -20,3 +20,8 @@ def test_zhipu_tool_stream_supported_excludes_vision() -> None:
     assert _zhipu_tool_stream_supported("zhipu", "glm-4.6v") is False
     assert _zhipu_tool_stream_supported("zhipu", "glm-4.5v") is False
     assert _zhipu_tool_stream_supported("zhipu", "glm-4v-flash") is False
+
+
+def test_zhipu_tool_stream_supported_excludes_glm_4_5_air() -> None:
+    assert _zhipu_tool_stream_supported("zhipu", "glm-4.5-air") is False
+    assert _zhipu_tool_stream_supported("custom_openai_glm", "glm-4.5-air") is False

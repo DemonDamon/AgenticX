@@ -29,6 +29,7 @@ import {
 } from "../utils/session-message-map";
 import {
   assistantVisibleBodyForUi,
+  buildCommittedAssistantPatch,
   normalizeFinalAssistantPayload,
 } from "../utils/assistant-output";
 import { MessageRenderer, renderToolMessageExtras } from "./messages/MessageRenderer";
@@ -1506,14 +1507,12 @@ export function ChatView({ onOpenConfirm, onOpenClarification, onSubmitClarifica
                         undefined,
                         clarifyExtras,
                       );
-                      commitCurrentStreamIfNeeded();
                       full = "";
                       resetStreamSegment();
                       scheduleStreamTextUpdate("");
                       continue;
                     }
                   }
-                  commitCurrentStreamIfNeeded();
                   full = "";
                   resetStreamSegment();
                   if (toolCallId) {
@@ -2051,6 +2050,20 @@ export function ChatView({ onOpenConfirm, onOpenClarification, onSubmitClarifica
           streamCommittedRef.current = true;
         }
         void speak(full);
+      } else if (
+        isCurrentRequest()
+        && trimmedFull
+        && !isThinkingPlaceholderText(full)
+        && streamCommittedRef.current
+      ) {
+        const committedPatch = buildCommittedAssistantPatch(
+          full,
+          turnExtras,
+          receivedFinalEvent,
+        );
+        if (committedPatch) {
+          mergeLastMessageByRole("assistant", committedPatch);
+        }
       }
     } catch (err) {
       if (!isCurrentRequest()) return;

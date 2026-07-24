@@ -288,6 +288,13 @@ class AssistantOutputStreamParser:
                     return
                 self._emit_text(data[i:])
                 return
+            # A prose less-than sign may occur before the next real reserved
+            # tag (for example ``distance < 120px ... <followups>``).  Never
+            # let that earlier ``<`` consume the reserved opener's ``>``.
+            if data.find("<", i + 1, close) >= 0:
+                self._emit_text("<")
+                i += 1
+                continue
             inner = data[i + 1 : close]
             classified = _classify_tag(inner)
             if classified is None:

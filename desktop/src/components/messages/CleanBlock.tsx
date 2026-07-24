@@ -5,7 +5,7 @@ import { ReasoningBlock } from "./ReasoningBlock";
 import { parseReasoningContent } from "./reasoning-parser";
 import { CitationMarkdownBody } from "./CitationMarkdownBody";
 import { renderUserMessageInlineBody } from "./user-message-inline";
-import { isWorkspaceReferenceAttachment, type FileReferenceOpenRequest } from "../../utils/reference-attachment";
+import { assistantVisibleBodyForUi } from "../../utils/assistant-output";
 
 type Props = {
   message: Message;
@@ -21,7 +21,7 @@ export function CleanBlock({ message, badge, onRevealPath, onOpenFileReference }
   const hasThinkTag = parsed?.hasReasoningTag ?? false;
   const reasoningClosed =
     hasThinkTag && /<\/think>/i.test(String(message.content ?? ""));
-  const bodyText = !isUser && hasThinkTag ? (parsed?.response ?? "") : message.content;
+  const bodyText = !isUser ? assistantVisibleBodyForUi(message.content) : message.content;
   const hasBody = !!bodyText?.trim();
   return (
     <div

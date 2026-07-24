@@ -19,6 +19,14 @@ export function parseReasoningContent(content: string): ReasoningParseResult {
 
   while (cursor < text.length) {
     const openIdx = lower.indexOf(openTagLower, cursor);
+    const strayCloseIdx = lower.indexOf(closeTagLower, cursor);
+    if (strayCloseIdx >= 0 && (openIdx < 0 || strayCloseIdx < openIdx)) {
+      // Some OpenAI-compatible reasoning streams emit an extra closing tag
+      // without a matching opening tag. It is protocol residue, never body.
+      responseParts.push(text.slice(cursor, strayCloseIdx));
+      cursor = strayCloseIdx + closeTag.length;
+      continue;
+    }
     if (openIdx < 0) {
       responseParts.push(text.slice(cursor));
       break;
@@ -43,4 +51,3 @@ export function parseReasoningContent(content: string): ReasoningParseResult {
     hasReasoningTag,
   };
 }
-

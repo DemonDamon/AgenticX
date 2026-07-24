@@ -299,6 +299,15 @@ def _resolve_chat_end_execution_state(
     return "idle"
 
 
+# Anti-buffering headers for SSE streams (nginx/proxy friendly).
+# Ported-ref: fix/glm-stream-finalization-port@f525277a
+_STREAMING_SSE_HEADERS = {
+    "Cache-Control": "no-cache, no-transform",
+    "Connection": "keep-alive",
+    "X-Accel-Buffering": "no",
+}
+
+
 def _flush_taskspace_hint(
     manager: SessionManager,
     session_id: str,
@@ -3006,6 +3015,7 @@ def create_studio_app() -> FastAPI:
                 mid_turn_persist=_mid_turn_persist_cb,
                 clarify_gate=meta_clarify_gate,
                 is_unattended=is_automation_session,
+                llm_factory=_resolve_llm,
             )
         except TypeError:
             runtime = AgentRuntime(
@@ -3506,7 +3516,11 @@ def create_studio_app() -> FastAPI:
             if not client_disconnected and event_hub is None:
                 yield 'data: {"type":"done","data":{}}\n\n'
 
-        return StreamingResponse(_event_stream(), media_type="text/event-stream")
+        return StreamingResponse(
+            _event_stream(),
+            media_type="text/event-stream",
+            headers=_STREAMING_SSE_HEADERS,
+        )
 
     @app.post("/api/sessions/{session_id}/continue")
     async def continue_session(
@@ -3530,64 +3544,89 @@ def create_studio_app() -> FastAPI:
         if source not in {"desktop_manual", "desktop_auto_nudge", "supervisor"}:
             source = "desktop_manual"
 
-        exec_state = str(getattr(managed, "execution_state", "idle") or "idle")
-        if source in {"desktop_manual", "supervisor"} and exec_state == "running":
-            from agenticx.studio.continuation import interrupt_running_for_continue
+        continuation_lock = manager.get_continuation_lock(sid)
 
-            exec_state = await interrupt_running_for_continue(manager, sid)
+        async def _reject_continuation(text: str) -> AsyncGenerator[str, None]:
+            evt = SseEvent(type="continuation_rejected", data={"text": text})
+            yield f"data: {json.dumps(evt.model_dump(), ensure_ascii=False)}\n\n"
+            yield 'data: {"type":"done","data":{}}\n\n'
 
-        max_nudge = int(
-            __import__("agenticx.studio.continuation", fromlist=["get_runtime_value"]).get_runtime_value(
-                "runtime.stall_auto_nudge_max_per_session", 2
+        if continuation_lock.locked():
+            return StreamingResponse(
+                _reject_continuation("该会话已有恢复执行正在进行，请等待当前恢复结果。"),
+                media_type="text/event-stream",
+                headers=_STREAMING_SSE_HEADERS,
             )
-            or 2
-        )
-        ok, prompt, round_n, notice = prepare_continue(
-            managed,
-            reason=reason,  # type: ignore[arg-type]
-            source=source,  # type: ignore[arg-type]
-            execution_state=exec_state,
-            max_rounds=max_nudge if source == "desktop_auto_nudge" else None,
-            skip_dedupe=source == "desktop_manual",
-        )
-        if not ok:
-            async def _deduped() -> AsyncGenerator[str, None]:
+        await continuation_lock.acquire()
+
+        try:
+            exec_state = str(getattr(managed, "execution_state", "idle") or "idle")
+            if source in {"desktop_manual", "supervisor"} and exec_state == "running":
+                from agenticx.studio.continuation import interrupt_running_for_continue
+
+                exec_state = await interrupt_running_for_continue(manager, sid)
+
+            max_nudge = int(
+                __import__("agenticx.studio.continuation", fromlist=["get_runtime_value"]).get_runtime_value(
+                    "runtime.stall_auto_nudge_max_per_session", 2
+                )
+                or 2
+            )
+            ok, prompt, round_n, notice = prepare_continue(
+                managed,
+                reason=reason,  # type: ignore[arg-type]
+                source=source,  # type: ignore[arg-type]
+                execution_state=exec_state,
+                max_rounds=max_nudge if source == "desktop_auto_nudge" else None,
+                skip_dedupe=source == "desktop_manual",
+            )
+            if not ok:
                 reject_text = str(notice.get("reject_text", "") or "").strip()
-                if not reject_text:
-                    reject_text = "续跑请求已去重，请稍后再试"
-                evt = SseEvent(type="continuation_rejected", data={"text": reject_text})
-                yield f"data: {json.dumps(evt.model_dump(), ensure_ascii=False)}\n\n"
-                yield 'data: {"type":"done","data":{}}\n\n'
+                continuation_lock.release()
+                return StreamingResponse(
+                    _reject_continuation(reject_text or "续跑请求已去重，请稍后再试"),
+                    media_type="text/event-stream",
+                    headers=_STREAMING_SSE_HEADERS,
+                )
 
-            return StreamingResponse(_deduped(), media_type="text/event-stream")
-
-        await manager.persist_async(sid)
+            await manager.persist_async(sid)
+        except Exception:
+            continuation_lock.release()
+            raise
 
         async def _wrapped_stream() -> AsyncGenerator[str, None]:
-            notice_evt = SseEvent(
-                type="continuation_notice",
-                data={
-                    "text": notice.get("content", ""),
-                    "reason": reason,
-                    "source": source,
-                    "continuation_round": round_n,
-                    "metadata": notice.get("metadata", {}),
-                },
-            )
-            yield f"data: {json.dumps(notice_evt.model_dump(), ensure_ascii=False)}\n\n"
-            chat_payload = ChatRequest(
-                session_id=sid,
-                user_input=prompt,
-                skip_user_history=True,
-                provider=managed.studio_session.provider_name,
-                model=managed.studio_session.model_name,
-            )
-            inner = await chat(chat_payload, request, x_agx_desktop_token)
-            if inner.body_iterator is not None:
-                async for chunk in inner.body_iterator:
-                    yield chunk
+            try:
+                notice_evt = SseEvent(
+                    type="continuation_notice",
+                    data={
+                        "text": notice.get("content", ""),
+                        "reason": reason,
+                        "source": source,
+                        "continuation_round": round_n,
+                        "metadata": notice.get("metadata", {}),
+                    },
+                )
+                yield f"data: {json.dumps(notice_evt.model_dump(), ensure_ascii=False)}\n\n"
+                chat_payload = ChatRequest(
+                    session_id=sid,
+                    user_input=prompt,
+                    skip_user_history=True,
+                    provider=managed.studio_session.provider_name,
+                    model=managed.studio_session.model_name,
+                )
+                inner = await chat(chat_payload, request, x_agx_desktop_token)
+                if inner.body_iterator is not None:
+                    async for chunk in inner.body_iterator:
+                        yield chunk
+            finally:
+                if continuation_lock.locked():
+                    continuation_lock.release()
 
-        return StreamingResponse(_wrapped_stream(), media_type="text/event-stream")
+        return StreamingResponse(
+            _wrapped_stream(),
+            media_type="text/event-stream",
+            headers=_STREAMING_SSE_HEADERS,
+        )
 
     @app.get("/api/sessions/{session_id}/stream")
     async def reattach_session_stream(

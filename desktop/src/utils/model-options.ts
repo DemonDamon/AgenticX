@@ -151,6 +151,43 @@ export function coerceSelectableModel(
   return resolveFallbackModel(providers, preferredProvider || providerId);
 }
 
+export type SessionBindingModelInput = {
+  providers: Record<string, ProviderCatalogEntry>;
+  /** True when the caller queried session metadata, even if it found no model. */
+  sessionModelKnown: boolean;
+  sessionProvider?: string;
+  sessionModel?: string;
+  paneProvider?: string;
+  paneModel?: string;
+  avatarProvider?: string;
+  avatarModel?: string;
+  defaultProvider?: string;
+  defaultModel?: string;
+  activeProvider?: string;
+  activeModel?: string;
+};
+
+/** Resolve a pane model without mistaking an inherited layout snapshot for a session override. */
+export function resolveSessionBindingModel(
+  input: SessionBindingModelInput,
+): { provider: string; model: string } | null {
+  const candidates: Array<[string | undefined, string | undefined]> = [
+    [input.sessionProvider, input.sessionModel],
+    ...(input.sessionModelKnown ? [] : [[input.paneProvider, input.paneModel] as const]),
+    [input.avatarProvider, input.avatarModel],
+    [input.defaultProvider, input.defaultModel],
+    [input.activeProvider, input.activeModel],
+  ];
+  for (const [rawProvider, rawModel] of candidates) {
+    const provider = String(rawProvider ?? "").trim();
+    const model = String(rawModel ?? "").trim();
+    if (!provider || !model) continue;
+    const resolved = coerceSelectableModel(input.providers, provider, model, provider);
+    if (resolved) return resolved;
+  }
+  return resolveFallbackModel(input.providers, input.defaultProvider || input.activeProvider);
+}
+
 export type PaneModelLike = {
   id: string;
   modelProvider?: string;

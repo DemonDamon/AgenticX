@@ -460,12 +460,22 @@ def _resolve_llm_invoke_timeout_seconds(session: StudioSession) -> float:
                 return value
     except Exception:
         pass
-    model_name = str(getattr(session, "model_name", "") or "").strip().lower()
-    if model_name and model_name in MODEL_INVOKE_TIMEOUT_SECONDS:
-        return MODEL_INVOKE_TIMEOUT_SECONDS[model_name]
+    # Strip LiteLLM-style routing prefixes (e.g. openai/glm-5.2).
+    model_name = str(getattr(session, "model_name", "") or "").strip().lower().split("/")[-1]
+    if model_name:
+        for model_prefix, timeout in sorted(
+            MODEL_INVOKE_TIMEOUT_SECONDS.items(), key=lambda item: len(item[0]), reverse=True
+        ):
+            if model_name == model_prefix or model_name.startswith(model_prefix):
+                return timeout
     provider_name = str(getattr(session, "provider_name", "") or "").strip().lower()
     if provider_name and provider_name in PROVIDER_INVOKE_TIMEOUT_SECONDS:
         return PROVIDER_INVOKE_TIMEOUT_SECONDS[provider_name]
+    if model_name.startswith("glm-") and (
+        provider_name == "zhipu" or provider_name.startswith("custom_openai_")
+    ):
+        # Company OpenAI-compatible GLM routes share native BigModel latency.
+        return PROVIDER_INVOKE_TIMEOUT_SECONDS["zhipu"]
     return DEFAULT_LLM_INVOKE_TIMEOUT_SECONDS
 
 
@@ -481,6 +491,11 @@ def _resolve_llm_first_feedback_seconds(session: StudioSession) -> float:
     provider_name = str(getattr(session, "provider_name", "") or "").strip().lower()
     if provider_name and provider_name in PROVIDER_FIRST_FEEDBACK_SECONDS:
         return PROVIDER_FIRST_FEEDBACK_SECONDS[provider_name]
+    model_name = str(getattr(session, "model_name", "") or "").strip().lower().split("/")[-1]
+    if model_name.startswith("glm-") and (
+        provider_name == "zhipu" or provider_name.startswith("custom_openai_")
+    ):
+        return PROVIDER_FIRST_FEEDBACK_SECONDS["zhipu"]
     return DEFAULT_LLM_FIRST_FEEDBACK_SECONDS
 
 
@@ -648,6 +663,7 @@ async def _iter_sync_stream_with_watchdog(
                 emit_waiting_hint
                 and first_feedback_seconds > 0
                 and (not waiting_hint_emitted)
+                and first_chunk_at <= 0
                 and elapsed >= first_feedback_seconds
             ):
                 waiting_hint_emitted = True
@@ -1151,6 +1167,7 @@ _LLM_MESSAGE_KEEP_KEYS = frozenset(
         "tool_call_id",
         "function_call",
         "refusal",
+        "reasoning_content",
     }
 )
 
@@ -1342,6 +1359,23 @@ def _zhipu_tool_stream_supported(provider_name: str, model_name: str) -> bool:
     return is_glm_route and model.startswith(_GLM_TOOL_STREAM_MODEL_PREFIXES)
 
 
+def _response_finish_reason(response: Any) -> str:
+    """Best-effort normalized finish reason for stream and invoke responses."""
+    direct = getattr(response, "finish_reason", None)
+    if isinstance(direct, str) and direct.strip():
+        return direct.strip().lower()
+    choices = getattr(response, "choices", None)
+    if isinstance(choices, Sequence) and choices:
+        first = choices[0]
+        if isinstance(first, Mapping):
+            raw = first.get("finish_reason")
+        else:
+            raw = getattr(first, "finish_reason", None)
+        if isinstance(raw, str) and raw.strip():
+            return raw.strip().lower()
+    return ""
+
+
 _MAX_TOKENS_CAP_RE = re.compile(
     r"max_tokens.*?[\[（(]\s*1\s*[,，]\s*(\d+)\s*[\]）)]",
     re.IGNORECASE,
@@ -1512,9 +1546,102 @@ def _split_reasoning_and_body(text: str) -> tuple[str, str]:
     return parsed.reasoning, parsed.visible_body.strip()
 
 
+def _dedupe_reasoning_against_body(reasoning_text: str, body: str) -> str:
+    """Drop reasoning that is only a copy of the public body.
+
+    Some providers (notably GLM via reasoning_content + content) echo the same
+    completion into both fields. Persisting both makes the UI render the answer
+    twice (ReasoningBlock + body).
+    """
+    reasoning = str(reasoning_text or "").strip()
+    visible = str(body or "").strip()
+    if not reasoning or not visible:
+        return str(reasoning_text or "")
+    if reasoning == visible:
+        return ""
+    return str(reasoning_text or "")
+
+
 _PUBLIC_TERMINAL_MESSAGE_TOOLS = frozenset({"create_avatar"})
 
 ToolTurnOutcome = Literal["success", "failed", "pending", "unknown"]
+
+_PUBLIC_COMPLETION_SIGNAL_RE = re.compile(
+    r"(?:已(?:经)?(?:完成|修复|修改|更新|处理|解决|创建|删除|调整|添加|写入|保存|落盘)"
+    r"|已(?:经)?(?:读取|查询|找到|确认|检查|生成|导出|汇总)"
+    r"|(?:修复|修改|更新|处理|创建|删除|调整|添加|写入|保存)(?:方案)?(?:已经)?完成"
+    r"|(?:问题|任务).{0,16}已(?:经)?(?:修复|解决|完成)"
+    r"|(?:结果如下|以下是(?:结果|说明|汇总)|最终(?:结果|说明))"
+    r"|\b(?:done|completed|complete|fixed|updated|created|deleted|saved|written|resolved|finished)\b)",
+    re.IGNORECASE | re.DOTALL,
+)
+_INTERNAL_REASONING_HEAD_RE = re.compile(
+    r"^(?:我(?:需要|得|应该|将|先)|让我|先(?:分析|检查|读取|查看|思考)"
+    r"|(?:接下来|下一步)(?:需要|应该|先)|用户(?:要求|想要|提到)"
+    r"|系统(?:提示|要求)|根据(?:用户|系统)(?:要求|提示)"
+    r"|(?:需要|应该)(?:调用|使用)(?:工具|\s*file_)"
+    r"|(?:调用|使用)(?:工具|\s*file_)|tool[_ -]?call"
+    r"|(?:i(?:'m| am)?\s+(?:going to|need to|should|will)|let me)"
+    r"|first\s+(?:analyze|check|read|inspect|think)|next\s+(?:step|i\s+need)|tool\s+call)",
+    re.IGNORECASE,
+)
+_NON_TERMINAL_FINISH_REASONS = frozenset(
+    {
+        "length",
+        "max_tokens",
+        "token_limit",
+        "context_length",
+        "content_filter",
+        "safety",
+        "error",
+    }
+)
+
+
+def _recover_public_completion_from_reasoning(
+    reasoning_text: str,
+    *,
+    has_successful_file_write: bool,
+    has_successful_tool: bool = False,
+    last_tool_outcome: ToolTurnOutcome,
+    finish_reason: str,
+) -> str:
+    """Promote a strict completion-shaped reasoning payload without leaking CoT.
+
+    Ported-ref: fix/glm-stream-common-finalization@5bf63d3e
+    """
+    if not (has_successful_file_write or has_successful_tool):
+        return ""
+    if last_tool_outcome in {"failed", "pending"}:
+        return ""
+    normalized_finish = str(finish_reason or "").strip().lower()
+    if normalized_finish in _NON_TERMINAL_FINISH_REASONS:
+        return ""
+    cleaned = sanitize_public_tool_summary(str(reasoning_text or ""))
+    if not cleaned or not (12 <= len(cleaned) <= 6000):
+        return ""
+    lowered = cleaned.lower()
+    if (
+        "[runtime-" in lowered
+        or "<tool_code" in lowered
+        or "<analysis" in lowered
+        or "reasoning:" in lowered
+        or "thought:" in lowered
+    ):
+        return ""
+    nonempty_lines = [line.strip() for line in cleaned.splitlines() if line.strip()]
+    first_line = nonempty_lines[0] if nonempty_lines else ""
+    public_head = re.sub(r"^[\s#>*_`~\-✅☑️🎉🛠️]+", "", first_line).strip()
+    if not public_head or _INTERNAL_REASONING_HEAD_RE.search(public_head[:240]):
+        return ""
+    for line in nonempty_lines[1:]:
+        public_line = re.sub(r"^[\s#>*_`~\-✅☑️🎉🛠️]+", "", line).strip()
+        if public_line and _INTERNAL_REASONING_HEAD_RE.search(public_line[:240]):
+            return ""
+    if not _PUBLIC_COMPLETION_SIGNAL_RE.search(cleaned[:480]):
+        return ""
+    return cleaned.strip()
+
 
 _EMPTY_RESPONSE_FALLBACK = "本轮模型未能生成完整的可见回复，请重新提问。"
 _TOOL_TURN_EMPTY_FALLBACK = (
@@ -1581,12 +1708,14 @@ def _classify_tool_turn_outcome(
     return "unknown"
 
 
-# Nudge hint injected when a round produces reasoning (< Mattis>...</ Mattis>) but no
+# Nudge hint injected when a round produces reasoning (think tags) but no
 # visible body and no tool_calls — i.e. the model "thought but said/did nothing".
 # Forces one retry so the model emits a real final reply or an explicit tool_call,
 # instead of the runtime misjudging the turn as complete and surfacing a "继续" button.
 _REASONING_ONLY_NUDGE_HINT = (
-    "[runtime-reasoning-only] 上一轮只输出了思考内容（< Mattis>），"
+    "[runtime-reasoning-only] 上一轮只输出了思考内容（"
+    + _THINK_OPEN_TAG
+    + "），"
     "没有给出用户可见的回复，也没有发出 tool_call。"
     "请基于已有上下文与工具结果，直接给出用户可见的最终回复，"
     "或发出明确的 tool_call；不要只输出思考。"
@@ -1923,8 +2052,10 @@ class AgentRuntime:
         mid_turn_persist: Optional[Callable[[], None]] = None,
         clarify_gate: Optional[Any] = None,
         is_unattended: bool = False,
+        llm_factory: Optional[Callable[[], Any]] = None,
     ) -> None:
         self.llm = llm
+        self._llm_factory = llm_factory
         self.confirm_gate = confirm_gate
         self.clarify_gate = clarify_gate
         self.is_unattended = bool(is_unattended)
@@ -1996,6 +2127,21 @@ class AgentRuntime:
                 self.hooks.register(TurnArchiveHook(enabled=True), priority=-60)
         except Exception:
             pass
+
+    def _reload_llm_for_session(self, session: Any) -> bool:
+        """Rebuild the active provider after a session-level fallback switch.
+
+        Ported-ref: fix/glm-stream-common-finalization@5bf63d3e
+        """
+        del session
+        if not callable(self._llm_factory):
+            return False
+        next_llm = self._llm_factory()
+        if next_llm is None:
+            return False
+        self.llm = next_llm
+        self.compactor.llm = next_llm
+        return True
 
     def _maybe_mid_turn_persist(self) -> None:
         """Fire incremental persist if interval or tool-count thresholds are met."""
@@ -2072,15 +2218,30 @@ class AgentRuntime:
         terminal_reason: str,
         agent_id: str,
         is_system_trigger: bool,
+        terminal_metadata: Mapping[str, Any] | None = None,
         extra_final: Mapping[str, Any] | None = None,
     ) -> RuntimeEvent:
         """Persist one terminal assistant reply and build the FINAL event."""
-        body = str(clean_body or "")
+        # FINAL is the last invariant boundary before text reaches both SSE and
+        # disk. Recovery paths may supply a raw provider payload even when the
+        # normal per-round parser already reported malformed protocol (for
+        # example an unclosed ``<followups>`` block). Parse once more here so a
+        # recovery branch can never persist model-control tags as public text.
+        terminal_parsed = parse_assistant_output(str(clean_body or ""))
+        body = terminal_parsed.visible_body
+        if terminal_parsed.malformed:
+            suggestions = ()
+            if terminal_reason == "model_final":
+                terminal_reason = "malformed_model_final_recovered"
         if not is_system_trigger and not body.strip():
             raise RuntimeError("interactive FINAL must have visible body")
 
         safe_reasoning = str(reasoning_text or "")
-        sug_list = [str(s) for s in suggestions if str(s).strip()]
+        if not safe_reasoning.strip() and not terminal_parsed.malformed:
+            safe_reasoning = terminal_parsed.reasoning
+        safe_reasoning = _dedupe_reasoning_against_body(safe_reasoning, body)
+        terminal_suggestions = suggestions or terminal_parsed.suggested_questions
+        sug_list = [str(s) for s in terminal_suggestions if str(s).strip()]
 
         if session.agent_messages and isinstance(session.agent_messages[-1], dict):
             last_am = session.agent_messages[-1]
@@ -2095,13 +2256,18 @@ class AgentRuntime:
             session.agent_messages.append({"role": "assistant", "content": body})
 
         if not is_system_trigger:
+            persisted_metadata: Dict[str, Any] = {
+                "turn_terminal": True,
+                "terminal_reason": terminal_reason,
+            }
+            if terminal_metadata:
+                for key, value in terminal_metadata.items():
+                    if key not in {"turn_terminal", "terminal_reason"}:
+                        persisted_metadata[str(key)] = value
             hist: Dict[str, Any] = {
                 "role": "assistant",
                 "content": body,
-                "metadata": {
-                    "turn_terminal": True,
-                    "terminal_reason": terminal_reason,
-                },
+                "metadata": persisted_metadata,
             }
             if sug_list:
                 hist["suggested_questions"] = list(sug_list)
@@ -2122,6 +2288,10 @@ class AgentRuntime:
             "turn_terminal": True,
             "terminal_reason": terminal_reason,
         }
+        if terminal_metadata:
+            for key, value in terminal_metadata.items():
+                if key not in {"turn_terminal", "terminal_reason"}:
+                    final_data[str(key)] = value
         if sug_list:
             final_data["suggested_questions"] = list(sug_list)
         if safe_reasoning.strip():
@@ -2169,6 +2339,7 @@ class AgentRuntime:
                 return False
 
         self.token_budget.reset_turn()
+        self.loop_detector.reset()
         self._forced_budget_compact_this_turn = False
         self._proactive_compact_this_turn = False
         self._budget_compress_notice_sent_this_turn = False
@@ -2455,14 +2626,23 @@ class AgentRuntime:
         unresolved_after_public_summary = False
         disk_write_paths: set[str] = set()
         write_path_counts: Dict[str, int] = {}
+        completed_tool_names: set[str] = set()
+        last_tool_outcome: ToolTurnOutcome = "unknown"
         confirmation_spam_count = 0
         rounds_without_todo = 0
         # Turn-level counter for reasoning-only rounds (model emitted < Mattis> but no
         # visible body and no tool_call). Capped at 1 to avoid infinite nudge loops.
         reason_only_retry = 0
 
-        def _record_tool_turn_outcome(outcome: ToolTurnOutcome) -> None:
+        def _record_tool_turn_outcome(
+            outcome: ToolTurnOutcome,
+            tool_name: str = "",
+        ) -> None:
             nonlocal unresolved_after_public_summary
+            nonlocal last_tool_outcome
+            last_tool_outcome = outcome
+            if outcome in {"success", "unknown"} and tool_name:
+                completed_tool_names.add(tool_name)
             if not public_tool_summaries:
                 return
             if outcome in ("failed", "pending", "unknown"):
@@ -2828,6 +3008,7 @@ class AgentRuntime:
                         tool_calls_acc: Dict[int, Dict[str, str]] = {}
                         show_widget_delta_state: Dict[int, Dict[str, float]] = {}
                         stream_usage: Dict[str, int] = {}
+                        stream_finish_reason = ""
 
                         def _safe_int(value: Any) -> int:
                             if isinstance(value, bool):
@@ -2859,8 +3040,12 @@ class AgentRuntime:
                         ):
                             if stream_chunk is _STREAM_WAITING_HINT:
                                 yield RuntimeEvent(
-                                    type=EventType.TOKEN.value,
-                                    data={"text": "⏳"},
+                                    type=EventType.TOOL_PROGRESS.value,
+                                    data={
+                                        "name": "模型响应",
+                                        "phase": "waiting_for_model",
+                                        "tool_call_id": "",
+                                    },
                                     agent_id=agent_id,
                                 )
                                 continue
@@ -2911,6 +3096,10 @@ class AgentRuntime:
                                             "completion_tokens": ct,
                                             "total_tokens": tt,
                                         }
+                            elif chunk_type == "done":
+                                raw_finish = stream_chunk.get("finish_reason", "")
+                                if isinstance(raw_finish, str) and raw_finish.strip():
+                                    stream_finish_reason = raw_finish.strip().lower()
                             elif chunk_type == "tool_call_delta":
                                 raw_idx = stream_chunk.get("tool_index", 0)
                                 idx = raw_idx if isinstance(raw_idx, int) else 0
@@ -2948,6 +3137,19 @@ class AgentRuntime:
                                             },
                                             agent_id=agent_id,
                                         )
+                                elif accumulated_name:
+                                    yield RuntimeEvent(
+                                        type=EventType.TOOL_CALL_DELTA.value,
+                                        data={
+                                            "name": accumulated_name,
+                                            "tool_call_id": str(
+                                                acc.get("id") or f"stream-pending-{idx}"
+                                            ),
+                                            "arguments_raw": str(acc.get("arguments") or ""),
+                                            "partial": True,
+                                        },
+                                        agent_id=agent_id,
+                                    )
                         for idx in sorted(tool_calls_acc.keys()):
                             item = tool_calls_acc[idx]
                             accumulated_name = str(item.get("name") or "").strip()
@@ -3031,7 +3233,12 @@ class AgentRuntime:
                         response = type(
                             "StreamResponse",
                             (),
-                            {"content": response_text, "tool_calls": tool_calls, "usage": stream_usage},
+                            {
+                                "content": response_text,
+                                "tool_calls": tool_calls,
+                                "usage": stream_usage,
+                                "finish_reason": stream_finish_reason,
+                            },
                         )()
                         used_stream_path = True
                     except _StreamWatchdogUserStop:
@@ -3142,8 +3349,12 @@ class AgentRuntime:
                             waiting_hint_emitted = True
                             last_pulse_at = now
                             yield RuntimeEvent(
-                                type=EventType.TOKEN.value,
-                                data={"text": "⏳"},
+                                type=EventType.TOOL_PROGRESS.value,
+                                data={
+                                    "name": "模型响应",
+                                    "phase": "waiting_for_model",
+                                    "tool_call_id": "",
+                                },
                                 agent_id=agent_id,
                             )
                         if elapsed >= invoke_timeout_seconds:
@@ -3332,8 +3543,32 @@ class AgentRuntime:
                 streak = record_provider_timeout(session)
                 applied, fallback_msg = maybe_apply_provider_fallback(session)
                 if applied and fallback_msg:
+                    fallback_reloaded = False
+                    try:
+                        fallback_reloaded = self._reload_llm_for_session(session)
+                    except Exception:
+                        logger.warning(
+                            "failed to rebuild LLM after fallback session=%s",
+                            getattr(session, "session_id", ""),
+                            exc_info=True,
+                        )
+                    if not fallback_reloaded:
+                        logger.warning(
+                            "fallback model recorded but active LLM was not rebuilt session=%s",
+                            getattr(session, "session_id", ""),
+                        )
                     provider_name = str(getattr(session, "provider_name", "") or provider_name)
                     model_name = str(getattr(session, "model_name", "") or model_name)
+                    invoke_timeout_seconds = _resolve_llm_invoke_timeout_seconds(session)
+                    heartbeat_timeout_seconds = _resolve_llm_heartbeat_timeout_seconds(session)
+                    hard_timeout_seconds = _resolve_llm_hard_timeout_seconds(session)
+                    first_feedback_seconds = _resolve_llm_first_feedback_seconds(session)
+                    request_timeout_seconds = max(
+                        invoke_timeout_seconds,
+                        heartbeat_timeout_seconds,
+                        hard_timeout_seconds,
+                        provider_read_timeout,
+                    ) + 15.0
                     yield RuntimeEvent(
                         type=EventType.TOOL_RESULT.value,
                         data={
@@ -3593,6 +3828,33 @@ class AgentRuntime:
                             },
                         }
                     ]
+            model_finish_reason = _response_finish_reason(response)
+            reasoning_field_final_recovered = False
+            if not tool_calls and not ac_clean.strip():
+                reasoning_candidate = parsed.reasoning or _nonstream_reasoning
+                recovered_body = _recover_public_completion_from_reasoning(
+                    reasoning_candidate,
+                    has_successful_file_write=bool(disk_write_paths),
+                    has_successful_tool=bool(completed_tool_names),
+                    last_tool_outcome=last_tool_outcome,
+                    finish_reason=model_finish_reason,
+                )
+                if recovered_body:
+                    reasoning_field_final_recovered = True
+                    parsed = ParsedAssistantOutput(
+                        reasoning="",
+                        visible_body=recovered_body,
+                        suggested_questions=(),
+                        protocol_errors=(),
+                    )
+                    ac_clean = recovered_body
+                    response_text = recovered_body
+                    logger.warning(
+                        "reasoning_field_final_recovered session=%s round=%s finish_reason=%s",
+                        getattr(session, "session_id", ""),
+                        round_idx,
+                        model_finish_reason or "unknown",
+                    )
             # --- Widget flow guard: detect text-based diagrams and force retry ---
             if not tool_calls and "show_widget" in allowed_tool_names:
                 from agenticx.runtime.widget_flow_guard import (
@@ -3652,9 +3914,16 @@ class AgentRuntime:
                     session.agent_messages.append({"role": "system", "content": ds_nudge})
                     continue
             # --- End data source flow guard ---
+            reasoning_for_tool_call = (
+                _streamed_reasoning
+                or _nonstream_reasoning
+                or parsed.reasoning
+            )
             assistant_message: Dict[str, Any] = {"role": "assistant", "content": ac_clean}
             if tool_calls:
                 assistant_message["tool_calls"] = tool_calls
+                if isinstance(reasoning_for_tool_call, str) and reasoning_for_tool_call:
+                    assistant_message["reasoning_content"] = reasoning_for_tool_call
             session.agent_messages.append(assistant_message)
             synced_session_message_count = len(session.agent_messages)
 
@@ -3769,7 +4038,9 @@ class AgentRuntime:
                             ):
                                 _last_am["content"] = ac_clean
 
-                if parsed.malformed:
+                if reasoning_field_final_recovered:
+                    reasoning_text = ""
+                elif parsed.malformed:
                     reasoning_text = ""
                 elif authoritative_source_kind == "final_content":
                     reasoning_text = parsed.reasoning or _nonstream_reasoning
@@ -3794,11 +4065,14 @@ class AgentRuntime:
                         clean_body = _EMPTY_RESPONSE_FALLBACK
                         terminal_reason = "empty_response_fallback"
                 else:
-                    terminal_reason = (
-                        "malformed_model_final_recovered"
-                        if parsed.malformed
-                        else "model_final"
-                    )
+                    if reasoning_field_final_recovered:
+                        terminal_reason = "reasoning_field_final_recovered"
+                    else:
+                        terminal_reason = (
+                            "malformed_model_final_recovered"
+                            if parsed.malformed
+                            else "model_final"
+                        )
 
                 if parsed.malformed or terminal_reason != "model_final":
                     logger.warning(
@@ -3861,6 +4135,18 @@ class AgentRuntime:
                     terminal_reason=terminal_reason,
                     agent_id=agent_id,
                     is_system_trigger=_is_system_trigger,
+                    terminal_metadata={
+                        **(
+                            {"model_finish_reason": model_finish_reason}
+                            if model_finish_reason
+                            else {}
+                        ),
+                        **(
+                            {"reasoning_field_final_recovered": True}
+                            if reasoning_field_final_recovered
+                            else {}
+                        ),
+                    },
                 )
                 return
 
@@ -4398,7 +4684,10 @@ class AgentRuntime:
                 budget_cfg = load_tool_result_budget_config()
                 raw_result = str(result)
                 _note_public_tool_summary(tool_name, raw_result)
-                _record_tool_turn_outcome(_classify_tool_turn_outcome(tool_name, raw_result))
+                _record_tool_turn_outcome(
+                    _classify_tool_turn_outcome(tool_name, raw_result),
+                    tool_name,
+                )
                 rclass = get_result_class(tool_name, raw_result)
                 archive_path = None
                 if rclass in {"large", "blob"} or approx_tokens(raw_result) >= budget_cfg.large_threshold_tokens:
