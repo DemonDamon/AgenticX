@@ -781,6 +781,26 @@ contextBridge.exposeInMainWorld("agenticxDesktop", {
       mtimeMs?: number;
       error?: string;
     }>,
+  linkIntoSessionWorkspace: async (payload: { sessionId: string; sources: string[] }) =>
+    ipcRenderer.invoke("link-into-session-workspace", payload) as Promise<{
+      ok: boolean;
+      defaultDir?: string;
+      homeDir?: string;
+      linked?: number;
+      created?: string[];
+      error?: string;
+    }>,
+  materializeSessionAttachments: async (payload: {
+    sessionId: string;
+    files: Array<{ name?: string; path?: string; dataBase64?: string; dataUrl?: string }>;
+  }) =>
+    ipcRenderer.invoke("materialize-session-attachments", payload) as Promise<{
+      ok: boolean;
+      defaultDir?: string;
+      attachDir?: string;
+      files?: Array<{ name: string; path: string }>;
+      error?: string;
+    }>,
   stageSessionArtifacts: async (payload: { sessionId: string; paths: string[] }) =>
     ipcRenderer.invoke("stage-session-artifacts", payload) as Promise<{
       ok: boolean;

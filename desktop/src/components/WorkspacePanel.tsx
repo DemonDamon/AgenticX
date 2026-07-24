@@ -26,7 +26,6 @@ import { isPaneAwaitingFreshSession } from "../utils/pane-fresh-session";
 import { shouldKeepWorkspaceVisibleWhenSessionMissing } from "../utils/workspace-session-visibility";
 import {
   findTaskspaceForAbsPath,
-  parentDirectory,
   relativePathFromRoot,
   absoluteTaskspacePath,
 } from "../utils/workspace-file-path";
@@ -45,10 +44,6 @@ import {
   type WorkspacePreviewQuotePayload,
   type WorkspacePreview,
 } from "./workspace/workspace-preview-types";
-import {
-  formatTaskspaceAddError,
-  isTaskspaceAtLimit,
-} from "../utils/taskspace-errors";
 import { RUNTIME_DEFAULT_TASKSPACES } from "./automation/RuntimeConfigSection";
 import {
   NEAR_ARTIFACT_TASKSPACES_SYNCED,
@@ -248,38 +243,46 @@ export function WorkspacePanel({
     () => taskspaces.find((item) => item.id === activeTaskspaceId) ?? taskspaces[0] ?? null,
     [taskspaces, activeTaskspaceId]
   );
-  const taskspaceAtLimit = useMemo(
-    () => isTaskspaceAtLimit(taskspaces, maxTaskspaces),
-    [taskspaces, maxTaskspaces],
+  /** Flat workspace UI: only the session `default` root (no「任务产物」/extra roots). */
+  const defaultTaskspace = useMemo(
+    () => taskspaces.find((t) => t.id === "default") ?? null,
+    [taskspaces],
   );
-  /** Conversation-attached folders (sidebar file-manage hides shared default root). */
-  const visibleTaskspaces = useMemo(() => {
-    if (!isSidebarEmbed) return taskspaces;
-    return taskspaces.filter((t) => t.id !== "default");
-  }, [isSidebarEmbed, taskspaces]);
-  /** Sidebar: true while eagerly staging session artifacts on first open. */
+  const visibleTaskspaces = useMemo(
+    () => (defaultTaskspace ? [defaultTaskspace] : []),
+    [defaultTaskspace],
+  );
+  /** Sidebar: true while eagerly linking session artifacts on first open. */
   const [sidebarBootstrapping, setSidebarBootstrapping] = useState(false);
 
+  const defaultRootKey = nodeKey("default", ".");
+  const defaultRootEntries = entriesByDir[defaultRootKey];
+  const defaultContentReady = defaultRootEntries !== undefined;
+
   /**
-   * Sidebar file-manage: empty only after bootstrap finishes with no folders.
-   * While bootstrapping, show loading instead of「工作区为空」flash.
+   * Empty after default dir listing finishes with no children.
+   * While bootstrapping / loading, show skeleton instead of empty flash.
    */
   const showConversationEmpty =
-    isSidebarEmbed && visibleTaskspaces.length === 0 && !sidebarBootstrapping && workspaceLoadedOnce;
+    workspaceLoadedOnce &&
+    !loading &&
+    !sidebarBootstrapping &&
+    !!defaultTaskspace &&
+    defaultContentReady &&
+    defaultRootEntries.length === 0 &&
+    !fileSearchQuery.trim();
 
   const listViewFiles = useMemo(() => {
     if (viewMode !== "list" || !isSidebarEmbed) return null;
     const results: { taskspaceId: string; file: TaskspaceFile }[] = [];
-    for (const ts of visibleTaskspaces) {
-      const entries = entriesByDir[nodeKey(ts.id, ".")] ?? [];
-      for (const entry of entries) {
-        if (entry.type === "file") {
-          results.push({ taskspaceId: ts.id, file: entry });
-        }
+    const entries = defaultRootEntries ?? [];
+    for (const entry of entries) {
+      if (entry.type === "file") {
+        results.push({ taskspaceId: "default", file: entry });
       }
     }
     return results;
-  }, [viewMode, isSidebarEmbed, visibleTaskspaces, entriesByDir]);
+  }, [viewMode, isSidebarEmbed, defaultRootEntries]);
 
   useEffect(() => {
     let disposed = false;
@@ -440,6 +443,11 @@ export function WorkspacePanel({
   const refreshListAndActiveTaskspace = async () => {
     const workspaces = await loadTaskspaces();
     if (!workspaces?.length) return;
+    // Flat view always shows default children — force-refresh that listing.
+    if (workspaces.some((ts) => ts.id === "default")) {
+      await refreshTaskspace("default");
+      return;
+    }
     await Promise.all(
       workspaces.map((ts) => {
         const key = nodeKey(ts.id, ".");
@@ -577,24 +585,12 @@ export function WorkspacePanel({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isSidebarEmbed, sessionId]);
 
-  // Sidebar: auto-expand attached roots so files show without an extra click.
+  // Flat view: always load default root children (no collapsible root row).
   useEffect(() => {
-    if (!isSidebarEmbed || visibleTaskspaces.length === 0) return;
-    setExpandedDirs((prev) => {
-      const next = new Set(prev);
-      let changed = false;
-      for (const ts of visibleTaskspaces) {
-        const key = nodeKey(ts.id, ".");
-        if (!next.has(key)) {
-          next.add(key);
-          changed = true;
-          void loadDir(ts.id, ".");
-        }
-      }
-      return changed ? next : prev;
-    });
+    if (!defaultTaskspace) return;
+    void loadDir("default", ".");
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isSidebarEmbed, visibleTaskspaces.map((t) => t.id).join("|")]);
+  }, [defaultTaskspace?.id, sessionId]);
 
   useEffect(() => {
     if (!viewMenuOpen && !moreMenuOpen) return;
@@ -730,7 +726,10 @@ export function WorkspacePanel({
     };
   }, []);
 
-  const addTaskspace = async (pathValue: string, labelValue: string) => {
+  /** Ensure a session exists, then symlink sources into its default workspace. */
+  const linkSourcesIntoDefault = async (sources: string[]): Promise<boolean> => {
+    const cleaned = sources.map((s) => String(s || "").trim()).filter(Boolean);
+    if (cleaned.length === 0) return false;
     setAdding(true);
     let effectiveSessionId = sessionId;
     if (!effectiveSessionId) {
@@ -739,7 +738,7 @@ export function WorkspacePanel({
       if (isGroupOrAutomationPane) {
         setAdding(false);
         setErrorText("会话正在初始化，请稍候再试");
-        return;
+        return false;
       }
       if (isPaneAwaitingFreshSession(paneId)) {
         if (typeof onEnsureSessionForWorkspace === "function") {
@@ -748,18 +747,18 @@ export function WorkspacePanel({
             if (!ensured) {
               setAdding(false);
               setErrorText("创建会话失败，无法添加工作区");
-              return;
+              return false;
             }
             effectiveSessionId = ensured;
           } catch (err) {
             setAdding(false);
             setErrorText(`创建会话失败：${String(err)}`);
-            return;
+            return false;
           }
         } else {
           setAdding(false);
           setErrorText("请先发送一条消息，再添加工作区目录");
-          return;
+          return false;
         }
       } else {
         try {
@@ -770,32 +769,46 @@ export function WorkspacePanel({
           if (!created.ok || !created.session_id) {
             setAdding(false);
             setErrorText(created.error ?? "创建会话失败，无法添加工作区");
-            return;
+            return false;
           }
           effectiveSessionId = created.session_id;
           setPaneSessionId(paneId, effectiveSessionId);
         } catch (err) {
           setAdding(false);
           setErrorText(`创建会话失败：${String(err)}`);
-          return;
+          return false;
         }
       }
     }
-    const result = await window.agenticxDesktop.addTaskspace({
-      sessionId: effectiveSessionId,
-      path: pathValue.trim() || undefined,
-      label: labelValue.trim() || undefined,
-    });
+    const linker = window.agenticxDesktop.linkIntoSessionWorkspace;
+    if (typeof linker !== "function") {
+      setAdding(false);
+      setErrorText("当前客户端不支持软链添加，请完全重启桌面端后重试。");
+      return false;
+    }
+    const result = await linker({ sessionId: effectiveSessionId, sources: cleaned });
     setAdding(false);
     if (!result.ok) {
-      setErrorText(formatTaskspaceAddError(result.error, maxTaskspaces));
-      return;
+      setErrorText(result.error || "软链添加到工作区失败");
+      return false;
     }
     setErrorText("");
     setShowAddForm(false);
     setNewPath("");
     setNewLabel("");
     await loadTaskspaces();
+    await loadDir("default", ".", true);
+    return true;
+  };
+
+  /** @deprecated name kept for form handlers — now symlinks into default. */
+  const addTaskspace = async (pathValue: string, _labelValue: string) => {
+    const path = pathValue.trim();
+    if (!path) {
+      setErrorText("请填写要添加的文件或目录路径");
+      return;
+    }
+    await linkSourcesIntoDefault([path]);
   };
 
   const removeTaskspace = async (taskspaceId: string) => {
@@ -899,10 +912,6 @@ export function WorkspacePanel({
 
   const pickAndAttachDirectory = async () => {
     setMoreMenuOpen(false);
-    if (taskspaceAtLimit) {
-      setErrorText(formatTaskspaceAddError(`taskspace limit reached (${maxTaskspaces})`, maxTaskspaces));
-      return;
-    }
     try {
       const picker = window.agenticxDesktop.chooseDirectory;
       if (typeof picker !== "function") {
@@ -914,8 +923,7 @@ export function WorkspacePanel({
         if (!picked.canceled) setErrorText(picked.error ?? "目录选择失败");
         return;
       }
-      const label = picked.path.split(/[\\/]/).filter(Boolean).pop() || "folder";
-      await addTaskspace(picked.path, label);
+      await linkSourcesIntoDefault([picked.path]);
     } catch (err) {
       setErrorText(`目录选择失败：${String(err)}`);
     }
@@ -923,10 +931,6 @@ export function WorkspacePanel({
 
   const pickAndAttachFiles = async () => {
     setMoreMenuOpen(false);
-    if (taskspaceAtLimit) {
-      setErrorText(formatTaskspaceAddError(`taskspace limit reached (${maxTaskspaces})`, maxTaskspaces));
-      return;
-    }
     try {
       const picker = window.agenticxDesktop.chooseFiles;
       if (typeof picker !== "function") {
@@ -938,18 +942,7 @@ export function WorkspacePanel({
         if (!picked.canceled) setErrorText(picked.error ?? "文件选择失败");
         return;
       }
-      const parents = new Map<string, string>();
-      for (const filePath of picked.paths) {
-        const normalized = filePath.replace(/\\/g, "/");
-        const idx = normalized.lastIndexOf("/");
-        const parent = idx > 0 ? normalized.slice(0, idx) : normalized;
-        if (!parent || parents.has(parent)) continue;
-        const label = parent.split("/").filter(Boolean).pop() || "folder";
-        parents.set(parent, label);
-      }
-      for (const [dir, label] of parents) {
-        await addTaskspace(dir, label);
-      }
+      await linkSourcesIntoDefault(picked.paths);
     } catch (err) {
       setErrorText(`文件选择失败：${String(err)}`);
     }
@@ -1047,24 +1040,37 @@ export function WorkspacePanel({
     }
     let match = findTaskspaceForAbsPath(workspaces, targetPath);
     if (!match) {
-      const parent = parentDirectory(targetPath);
-      const addResult = await window.agenticxDesktop.addTaskspace({
+      const linker = window.agenticxDesktop.linkIntoSessionWorkspace;
+      if (typeof linker !== "function") {
+        setErrorText(directPreview.error ?? "无法预览该文件（请完全重启桌面端）");
+        return;
+      }
+      const linkResult = await linker({
         sessionId: browseSessionId,
-        path: parent,
-        label: parent.split(/[\\/]/).pop() || "workspace",
+        sources: [targetPath],
       });
-      if (!addResult.ok || !addResult.workspace?.id) {
-        setErrorText(addResult.error ?? directPreview.error ?? "无法预览该文件");
+      if (!linkResult.ok) {
+        setErrorText(linkResult.error ?? directPreview.error ?? "无法预览该文件");
         return;
       }
       const reloaded = await loadTaskspaces();
       workspaces = reloaded ?? workspaces;
+      await loadDir("default", ".", true);
       match = findTaskspaceForAbsPath(workspaces, targetPath);
-      if (!match && addResult.workspace) {
-        match = {
-          taskspaceId: addResult.workspace.id,
-          relPath: relativePathFromRoot(addResult.workspace.path, targetPath),
-        };
+      if (!match) {
+        const created = Array.isArray(linkResult.created) ? linkResult.created : [];
+        const linkedAbs = created[0] || "";
+        const defaultRoot = String(linkResult.defaultDir || defaultTaskspace?.path || "").trim();
+        if (linkedAbs && defaultRoot) {
+          const rel = relativePathFromRoot(defaultRoot, linkedAbs);
+          if (rel) {
+            match = { taskspaceId: "default", relPath: rel };
+          }
+        }
+        if (!match) {
+          const base = targetPath.split(/[\\/]/).filter(Boolean).pop() || "";
+          if (base) match = { taskspaceId: "default", relPath: base };
+        }
       }
     }
     if (!match) {
@@ -1313,21 +1319,10 @@ export function WorkspacePanel({
                 <button
                   className={`agx-topbar-btn !px-[5px] ${showAddForm ? "agx-topbar-btn--active" : ""}`}
                   onClick={() => {
-                    if (taskspaceAtLimit) {
-                      setErrorText(
-                        formatTaskspaceAddError(`taskspace limit reached (${maxTaskspaces})`, maxTaskspaces)
-                      );
-                      return;
-                    }
                     setShowAddForm((prev) => !prev);
                     setErrorText("");
                   }}
-                  title={
-                    taskspaceAtLimit
-                      ? `已达工作区上限（${taskspaces.length}/${maxTaskspaces}）`
-                      : "新增工作区"
-                  }
-                  disabled={taskspaceAtLimit}
+                  title="软链添加文件/文件夹到当前会话工作区"
                 >
                   <FolderPlus className="h-4 w-4" strokeWidth={1.8} />
                 </button>
@@ -1374,10 +1369,10 @@ export function WorkspacePanel({
               style={tintColor ? { backgroundColor: tintColor } : undefined}
             >
               <div className="mb-2 flex items-center justify-between gap-2 text-[13px] font-medium text-text-subtle">
-                <span>新增工作区</span>
-                <span className="text-[11px] font-normal tabular-nums text-text-faint">
-                  已用 {taskspaces.length}/{maxTaskspaces}
-                </span>
+                <span>软链添加到会话工作区</span>
+              </div>
+              <div className="mb-2 text-[11px] leading-relaxed text-text-faint">
+                不会复制文件，也不会挂载第二根目录；仅在当前会话 default 下创建软链。
               </div>
               <input
                 value={newPath}
@@ -1416,20 +1411,20 @@ export function WorkspacePanel({
                 <button
                   className="rounded px-2 py-1 text-[13px] transition disabled:opacity-50"
                   style={{ background: "var(--ui-btn-primary-bg)", color: "var(--ui-btn-primary-text)" }}
-                  disabled={adding || taskspaceAtLimit}
+                  disabled={adding}
                   onClick={() => void addTaskspace(newPath, newLabel)}
                 >
-                  {adding ? "添加中..." : taskspaceAtLimit ? "已达上限" : "确认添加"}
+                  {adding ? "添加中..." : "确认添加"}
                 </button>
               </div>
             </div>
           ) : null}
         </div>
         <div className="min-h-0 flex-1 overflow-y-auto px-2 py-2">
-          {(!isSidebarEmbed && (loading || !workspaceLoadedOnce)) ||
-          (isSidebarEmbed &&
-            (sidebarBootstrapping || loading || !workspaceLoadedOnce) &&
-            visibleTaskspaces.length === 0) ? (
+          {loading ||
+          !workspaceLoadedOnce ||
+          sidebarBootstrapping ||
+          (!!defaultTaskspace && !defaultContentReady && !fileSearchQuery.trim()) ? (
             <div className="space-y-2 py-1">
               {[0, 1, 2].map((i) => (
                 <div key={i} className="h-7 animate-pulse rounded-md bg-surface-hover" />
@@ -1442,24 +1437,22 @@ export function WorkspacePanel({
                 <FilePlus className="h-7 w-7" strokeWidth={1.5} />
               </div>
               <div className="space-y-1">
-                <div className="text-[14px] font-medium text-text-primary">工作区为空</div>
+                <div className="text-[14px] font-medium text-text-primary">当前会话工作区为空</div>
                 <div className="text-[12px] leading-relaxed text-text-faint">
-                  添加文件或文件夹到当前对话的可见工作区
+                  添加文件或文件夹将以软链放入本会话工作区（不复制、不挂第二根）
                 </div>
               </div>
               <div className="flex flex-wrap items-center justify-center gap-2">
                 <button
                   type="button"
-                  className="rounded-lg border border-border bg-surface-hover px-3.5 py-1.5 text-[13px] text-text-primary transition-colors hover:bg-surface-card-strong disabled:opacity-50"
-                  disabled={taskspaceAtLimit}
+                  className="rounded-lg border border-border bg-surface-hover px-3.5 py-1.5 text-[13px] text-text-primary transition-colors hover:bg-surface-card-strong"
                   onClick={() => void pickAndAttachFiles()}
                 >
                   添加文件
                 </button>
                 <button
                   type="button"
-                  className="rounded-lg border border-border bg-surface-hover px-3.5 py-1.5 text-[13px] text-text-primary transition-colors hover:bg-surface-card-strong disabled:opacity-50"
-                  disabled={taskspaceAtLimit}
+                  className="rounded-lg border border-border bg-surface-hover px-3.5 py-1.5 text-[13px] text-text-primary transition-colors hover:bg-surface-card-strong"
                   onClick={() => void pickAndAttachDirectory()}
                 >
                   添加文件夹
@@ -1467,14 +1460,15 @@ export function WorkspacePanel({
               </div>
             </div>
           ) : null}
-          {!isSidebarEmbed && workspaceLoadedOnce && !loading && taskspaces.length === 0 ? (
-            getBrowseSessionId() ? (
-              <div className="px-2 py-4 text-[13px] text-text-faint">暂无工作区</div>
-            ) : (
-              <div className="px-2 py-4 text-[13px] text-text-faint">
-                选择或新建一个对话后，这里会显示工作区文件
-              </div>
-            )
+          {!showConversationEmpty &&
+          workspaceLoadedOnce &&
+          !loading &&
+          !sidebarBootstrapping &&
+          !defaultTaskspace &&
+          !getBrowseSessionId() ? (
+            <div className="px-2 py-4 text-[13px] text-text-faint">
+              选择或新建一个对话后，这里会显示工作区文件
+            </div>
           ) : null}
           {!showConversationEmpty && !loading && filteredFiles !== null ? (
             filteredFiles.length === 0 ? (
@@ -1549,68 +1543,15 @@ export function WorkspacePanel({
               ))
             )
           ) : null}
-          {!showConversationEmpty && !loading && filteredFiles === null && !listViewFiles && visibleTaskspaces.map((ts) => {
-            const key = nodeKey(ts.id, ".");
-            const isExpanded = expandedDirs.has(key);
-            const isActive = activeTaskspaceId === ts.id;
-            
-            return (
-              <div key={ts.id} className="mb-0.5">
-                <div
-                  className="flex min-w-0 items-center gap-1"
-                  draggable
-                  onDragStart={(e) =>
-                    startWorkspaceEntryDrag(e, {
-                      type: "dir",
-                      taskspaceId: ts.id,
-                      relPath: ".",
-                      label: taskspaceReferenceLabel(ts),
-                    })
-                  }
-                >
-                  <button
-                    className={`flex min-w-0 flex-1 items-center gap-1.5 rounded px-1 py-1.5 text-left text-[13px] font-medium transition ${
-                      isActive ? "bg-surface-hover text-text-strong" : "text-text-subtle hover:bg-surface-hover hover:text-text-primary"
-                    }`}
-                    onClick={() => {
-                      onActiveTaskspaceChange(ts.id);
-                      const next = new Set(expandedDirs);
-                      if (next.has(key)) {
-                        next.delete(key);
-                      } else {
-                        next.add(key);
-                        void loadDir(ts.id, ".");
-                      }
-                      setExpandedDirs(next);
-                    }}
-                    onContextMenu={(e) => {
-                      e.preventDefault();
-                      setCtxMenu({ kind: "taskspace", x: e.clientX, y: e.clientY, taskspace: ts });
-                    }}
-                    title={ts.id === "default" ? (ts.path || ts.label) : ts.path}
-                  >
-                    <span className="inline-block w-3 shrink-0 text-center text-text-faint">{isExpanded ? "▾" : "▸"}</span>
-                    <Folder className="h-3.5 w-3.5 shrink-0 opacity-70" strokeWidth={1.8} />
-                    <span className="min-w-0 flex-1 truncate">{ts.id !== "default" ? ts.label : (ts.path || ts.label || "默认工作区")}</span>
-                  </button>
-                  <button
-                    className="rounded px-1.5 py-0.5 text-xs text-text-faint transition hover:bg-surface-hover hover:text-text-muted"
-                    onClick={() =>
-                      onPickDirectoryForReference?.({
-                        taskspaceId: ts.id,
-                        relPath: ".",
-                        label: taskspaceReferenceLabel(ts),
-                      })
-                    }
-                    title="引用到输入框"
-                  >
-                    @
-                  </button>
-                </div>
-                {isExpanded ? renderDir(ts.id, ".", 1) : null}
-              </div>
-            );
-          })}
+          {!showConversationEmpty &&
+          !loading &&
+          !sidebarBootstrapping &&
+          filteredFiles === null &&
+          !listViewFiles &&
+          defaultTaskspace &&
+          defaultContentReady
+            ? renderDir("default", ".", 0)
+            : null}
         </div>
       </div>
 
@@ -1828,7 +1769,7 @@ export function WorkspacePanel({
                 onClick={() => void pickAndAttachFiles()}
               >
                 <FilePlus className="h-3.5 w-3.5 shrink-0 text-text-faint" strokeWidth={1.75} />
-                <span>添加文件</span>
+                <span>添加文件（软链）</span>
               </button>
               <button
                 type="button"
@@ -1836,7 +1777,7 @@ export function WorkspacePanel({
                 onClick={() => void pickAndAttachDirectory()}
               >
                 <FolderPlus className="h-3.5 w-3.5 shrink-0 text-text-faint" strokeWidth={1.75} />
-                <span>添加文件夹</span>
+                <span>添加文件夹（软链）</span>
               </button>
               <button
                 type="button"

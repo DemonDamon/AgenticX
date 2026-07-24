@@ -10908,12 +10908,215 @@ function registerIpc(): void {
     }
   });
 
+  /** Default Meta session workspace: ~/.agenticx/taskspaces/<sid>/default */
+  const resolveSessionDefaultWorkspaceDir = async (sid: string): Promise<string> => {
+    const fallback = path.join(os.homedir(), ".agenticx", "taskspaces", sid, "default");
+    try {
+      const resp = await fetch(
+        `${getStudioUrl()}/api/taskspace/workspaces?session_id=${encodeURIComponent(sid)}`,
+        { headers: { "x-agx-desktop-token": getStudioToken() } },
+      );
+      if (resp.ok) {
+        const data = (await resp.json()) as {
+          ok?: boolean;
+          workspaces?: Array<{ id?: string; path?: string }>;
+        };
+        const row = (data.workspaces || []).find((w) => String(w.id || "") === "default");
+        const p = String(row?.path || "").trim();
+        if (p) return normalizeLocalFsPath(p) || fallback;
+      }
+    } catch {
+      // fall through
+    }
+    return fallback;
+  };
+
+  const uniqueLinkName = (destDir: string, sourcePath: string, used: Set<string>): string => {
+    const base = path.basename(sourcePath) || "item";
+    if (!used.has(base) && !fs.existsSync(path.join(destDir, base))) {
+      used.add(base);
+      return base;
+    }
+    const parent = path.basename(path.dirname(sourcePath)) || "dir";
+    const alt = `${parent}_${base}`;
+    if (!used.has(alt) && !fs.existsSync(path.join(destDir, alt))) {
+      used.add(alt);
+      return alt;
+    }
+    let i = 2;
+    while (used.has(`${i}_${base}`) || fs.existsSync(path.join(destDir, `${i}_${base}`))) {
+      i += 1;
+    }
+    const finalName = `${i}_${base}`;
+    used.add(finalName);
+    return finalName;
+  };
+
   /**
-   * Stage session「任务产物」into ~/.agenticx/sessions/<sid>/task_artifacts
-   * as real file copies (not symlinks). Studio `read_taskspace_file` resolves
-   * paths with Path.resolve(), so symlinks into /tmp would raise
-   * "path escapes taskspace root". Copies keep files inside the taskspace root.
-   * Originals are left untouched.
+   * Symlink external files/folders into the session default workspace.
+   * Paths already under default are skipped. Does not add a second taskspace root.
+   */
+  ipcMain.handle(
+    "link-into-session-workspace",
+    async (
+      _event,
+      payload: { sessionId?: string; sources?: string[] },
+    ) => {
+      try {
+        const sid = String(payload?.sessionId || "").trim();
+        if (!sid || !/^[A-Za-z0-9._-]+$/.test(sid)) {
+          return { ok: false, error: "invalid sessionId" };
+        }
+        const rawSources = Array.isArray(payload?.sources) ? payload.sources : [];
+        const defaultDir = await resolveSessionDefaultWorkspaceDir(sid);
+        await fs.promises.mkdir(defaultDir, { recursive: true });
+        const defaultResolved = path.resolve(defaultDir);
+        const usedNames = new Set<string>();
+        try {
+          for (const name of await fs.promises.readdir(defaultDir)) {
+            usedNames.add(name);
+          }
+        } catch {
+          // ignore
+        }
+        const seen = new Set<string>();
+        let linked = 0;
+        const created: string[] = [];
+
+        for (const raw of rawSources) {
+          const source = normalizeLocalFsPath(String(raw || ""));
+          if (!source || !fs.existsSync(source)) continue;
+          let st: fs.Stats;
+          try {
+            st = await fs.promises.lstat(source);
+          } catch {
+            continue;
+          }
+          const resolvedSource = path.resolve(source);
+          if (seen.has(resolvedSource)) continue;
+          seen.add(resolvedSource);
+          if (
+            resolvedSource === defaultResolved ||
+            resolvedSource.startsWith(defaultResolved + path.sep)
+          ) {
+            continue;
+          }
+          const name = uniqueLinkName(defaultDir, source, usedNames);
+          const dest = path.join(defaultDir, name);
+          try {
+            await fs.promises.symlink(
+              resolvedSource,
+              dest,
+              st.isDirectory() ? "dir" : "file",
+            );
+            linked += 1;
+            created.push(dest);
+          } catch (err) {
+            // macOS may need 'junction' on Windows; on Darwin retry without type.
+            try {
+              await fs.promises.symlink(resolvedSource, dest);
+              linked += 1;
+              created.push(dest);
+            } catch {
+              console.warn("[link-into-session-workspace] symlink failed:", dest, err);
+            }
+          }
+        }
+
+        return {
+          ok: true,
+          defaultDir,
+          homeDir: os.homedir(),
+          linked,
+          created,
+        };
+      } catch (err) {
+        return { ok: false, error: String(err) };
+      }
+    },
+  );
+
+  /**
+   * Materialize chat attachments as real files under <default>/attachments/.
+   */
+  ipcMain.handle(
+    "materialize-session-attachments",
+    async (
+      _event,
+      payload: {
+        sessionId?: string;
+        files?: Array<{
+          name?: string;
+          path?: string;
+          dataBase64?: string;
+          dataUrl?: string;
+        }>;
+      },
+    ) => {
+      try {
+        const sid = String(payload?.sessionId || "").trim();
+        if (!sid || !/^[A-Za-z0-9._-]+$/.test(sid)) {
+          return { ok: false, error: "invalid sessionId", files: [] };
+        }
+        const files = Array.isArray(payload?.files) ? payload.files : [];
+        const defaultDir = await resolveSessionDefaultWorkspaceDir(sid);
+        const attachDir = path.join(defaultDir, "attachments");
+        await fs.promises.mkdir(attachDir, { recursive: true });
+        const used = new Set<string>();
+        try {
+          for (const name of await fs.promises.readdir(attachDir)) used.add(name);
+        } catch {
+          // ignore
+        }
+        const written: Array<{ name: string; path: string }> = [];
+
+        for (const file of files) {
+          const rawName = String(file?.name || path.basename(String(file?.path || "")) || "file").trim();
+          const safeBase = rawName.replace(/[\\/:\0]/g, "_") || "file";
+          let destName = safeBase;
+          if (used.has(destName) || fs.existsSync(path.join(attachDir, destName))) {
+            const ext = path.extname(safeBase);
+            const stem = ext ? safeBase.slice(0, -ext.length) : safeBase;
+            let i = 2;
+            while (
+              used.has(`${stem}_${i}${ext}`) ||
+              fs.existsSync(path.join(attachDir, `${stem}_${i}${ext}`))
+            ) {
+              i += 1;
+            }
+            destName = `${stem}_${i}${ext}`;
+          }
+          used.add(destName);
+          const dest = path.join(attachDir, destName);
+
+          const srcPath = normalizeLocalFsPath(String(file?.path || ""));
+          if (srcPath && fs.existsSync(srcPath)) {
+            await fs.promises.copyFile(srcPath, dest);
+            written.push({ name: destName, path: dest });
+            continue;
+          }
+
+          let b64 = String(file?.dataBase64 || "").trim();
+          const dataUrl = String(file?.dataUrl || "").trim();
+          if (!b64 && dataUrl.startsWith("data:") && dataUrl.includes(",")) {
+            b64 = dataUrl.slice(dataUrl.indexOf(",") + 1);
+          }
+          if (!b64) continue;
+          const buf = Buffer.from(b64, "base64");
+          await fs.promises.writeFile(dest, buf);
+          written.push({ name: destName, path: dest });
+        }
+
+        return { ok: true, defaultDir, attachDir, files: written };
+      } catch (err) {
+        return { ok: false, error: String(err), files: [] };
+      }
+    },
+  );
+
+  /**
+   * Legacy alias: symlink artifact paths into the session default workspace
+   * (no longer copies into sessions/<sid>/task_artifacts).
    */
   ipcMain.handle(
     "stage-session-artifacts",
@@ -10927,81 +11130,58 @@ function registerIpc(): void {
           return { ok: false, error: "invalid sessionId" };
         }
         const rawPaths = Array.isArray(payload?.paths) ? payload.paths : [];
-        const stagingDir = path.join(
-          os.homedir(),
-          ".agenticx",
-          "sessions",
-          sid,
-          "task_artifacts",
-        );
-        await fs.promises.mkdir(stagingDir, { recursive: true });
-
-        // Refresh staging: remove previous entries (links/copies), keep dir.
-        const existing = await fs.promises.readdir(stagingDir);
-        for (const name of existing) {
-          await fs.promises.rm(path.join(stagingDir, name), {
-            force: true,
-            recursive: true,
-          });
-        }
-
-        const usedNames = new Set<string>();
-        const stagedSources = new Set<string>();
-        let linked = 0;
-        const uniqueName = (sourcePath: string): string => {
-          const base = path.basename(sourcePath) || "artifact";
-          if (!usedNames.has(base)) {
-            usedNames.add(base);
-            return base;
-          }
-          const parent = path.basename(path.dirname(sourcePath)) || "dir";
-          const alt = `${parent}_${base}`;
-          if (!usedNames.has(alt)) {
-            usedNames.add(alt);
-            return alt;
-          }
-          let i = 2;
-          while (usedNames.has(`${i}_${base}`)) i += 1;
-          const finalName = `${i}_${base}`;
-          usedNames.add(finalName);
-          return finalName;
-        };
-
-        for (const raw of rawPaths) {
-          const source = normalizeLocalFsPath(String(raw || ""));
-          if (!source || !fs.existsSync(source)) continue;
-          let st: fs.Stats;
+        const result = (await (async () => {
+          // Reuse the same handler body via direct invoke pattern:
+          const defaultDir = await resolveSessionDefaultWorkspaceDir(sid);
+          await fs.promises.mkdir(defaultDir, { recursive: true });
+          const defaultResolved = path.resolve(defaultDir);
+          const usedNames = new Set<string>();
           try {
-            st = await fs.promises.stat(source);
+            for (const name of await fs.promises.readdir(defaultDir)) usedNames.add(name);
           } catch {
-            continue;
+            // ignore
           }
-          if (!st.isFile()) continue;
-          const resolvedSource = path.resolve(source);
-          // Same inode/path via `~/…` vs absolute → stage once (avoid Desktop_ dup copies).
-          if (stagedSources.has(resolvedSource)) continue;
-          stagedSources.add(resolvedSource);
-          const stagingResolved = path.resolve(stagingDir);
-          // Never stage a file that already lives inside the staging dir.
-          if (
-            resolvedSource === stagingResolved ||
-            resolvedSource.startsWith(stagingResolved + path.sep)
-          ) {
-            continue;
+          const seen = new Set<string>();
+          let linked = 0;
+          for (const raw of rawPaths) {
+            const source = normalizeLocalFsPath(String(raw || ""));
+            if (!source || !fs.existsSync(source)) continue;
+            let st: fs.Stats;
+            try {
+              st = await fs.promises.lstat(source);
+            } catch {
+              continue;
+            }
+            const resolvedSource = path.resolve(source);
+            if (seen.has(resolvedSource)) continue;
+            seen.add(resolvedSource);
+            if (
+              resolvedSource === defaultResolved ||
+              resolvedSource.startsWith(defaultResolved + path.sep)
+            ) {
+              continue;
+            }
+            const name = uniqueLinkName(defaultDir, source, usedNames);
+            const dest = path.join(defaultDir, name);
+            try {
+              await fs.promises.symlink(
+                resolvedSource,
+                dest,
+                st.isDirectory() ? "dir" : "file",
+              );
+              linked += 1;
+            } catch {
+              try {
+                await fs.promises.symlink(resolvedSource, dest);
+                linked += 1;
+              } catch {
+                // skip failed link
+              }
+            }
           }
-          const name = uniqueName(source);
-          const dest = path.join(stagingDir, name);
-          // Real copy (not symlink): Studio resolve() must stay under taskspace root.
-          await fs.promises.copyFile(resolvedSource, dest);
-          linked += 1;
-        }
-
-        return {
-          ok: true,
-          stagingDir,
-          homeDir: os.homedir(),
-          linked,
-        };
+          return { ok: true as const, stagingDir: defaultDir, homeDir: os.homedir(), linked };
+        })());
+        return result;
       } catch (err) {
         return { ok: false, error: String(err) };
       }

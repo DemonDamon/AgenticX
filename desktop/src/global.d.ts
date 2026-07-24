@@ -1289,7 +1289,35 @@ declare global {
         mtimeMs?: number;
         error?: string;
       }>;
-      /** Stage artifact files into ~/.agenticx/sessions/<id>/task_artifacts (file copies). */
+      /** Symlink external paths into the session default workspace. */
+      linkIntoSessionWorkspace: (payload: {
+        sessionId: string;
+        sources: string[];
+      }) => Promise<{
+        ok: boolean;
+        defaultDir?: string;
+        homeDir?: string;
+        linked?: number;
+        created?: string[];
+        error?: string;
+      }>;
+      /** Write chat attachments as real files under <default>/attachments/. */
+      materializeSessionAttachments: (payload: {
+        sessionId: string;
+        files: Array<{
+          name?: string;
+          path?: string;
+          dataBase64?: string;
+          dataUrl?: string;
+        }>;
+      }) => Promise<{
+        ok: boolean;
+        defaultDir?: string;
+        attachDir?: string;
+        files?: Array<{ name: string; path: string }>;
+        error?: string;
+      }>;
+      /** Legacy: symlink artifact paths into the session default workspace. */
       stageSessionArtifacts: (payload: {
         sessionId: string;
         paths: string[];
