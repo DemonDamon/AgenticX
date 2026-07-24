@@ -78,6 +78,8 @@ type Props = {
   /** Sidebar file-manage mode: replace title with back control (Trae-style). */
   backAction?: { label: string; onClick: () => void };
   tintColor?: string;
+  /** WorkPanel 嵌入时：开终端后让父级切到顶栏 terminal tab */
+  onFocusTerminalTab?: () => void;
   onQuotePreviewSnippet?: (payload: WorkspacePreviewQuotePayload) => void;
   /** Absolute path (+ optional line range) requested from chat (@file chip / path click). */
   previewOpenRequest?: WorkspacePreviewOpenRequest | null;
@@ -172,6 +174,7 @@ export function WorkspacePanel({
   hidePanelClose = false,
   backAction,
   tintColor,
+  onFocusTerminalTab,
   onQuotePreviewSnippet,
   previewOpenRequest,
   onPreviewOpenRequestHandled,
@@ -226,6 +229,8 @@ export function WorkspacePanel({
   const panelRef = useRef<HTMLDivElement | null>(null);
   const awaitingFreshSession = isPaneAwaitingFreshSession(paneId);
   const isSidebarEmbed = !!backAction;
+  /** WorkPanel / sidebar embed: match parent `bg-surface-sidebar`, no avatar tint overlay. */
+  const useSidebarSurface = isSidebarEmbed || hidePanelClose;
   const getBrowseSessionId = () => {
     const direct = String(sessionId ?? "").trim();
     if (direct) return direct;
@@ -842,6 +847,7 @@ export function WorkspacePanel({
     }
     setErrorText("");
     addPaneTerminalTab(paneId, p, labelHint);
+    onFocusTerminalTab?.();
   };
 
   useEffect(() => {
@@ -1234,15 +1240,16 @@ export function WorkspacePanel({
       return;
     }
     addPaneTerminalTab(paneId, cwd, activeTaskspace?.label);
+    onFocusTerminalTab?.();
   };
 
   return (
     <div
       ref={panelRef}
       className={`relative flex h-full min-h-0 w-full flex-col ${
-        isSidebarEmbed ? "bg-surface-sidebar" : "bg-surface-card"
+        useSidebarSurface ? "bg-surface-sidebar" : "bg-surface-card"
       }`}
-      style={!isSidebarEmbed && tintColor ? { backgroundColor: tintColor } : undefined}
+      style={!useSidebarSurface && tintColor ? { backgroundColor: tintColor } : undefined}
     >
       <div className="flex min-h-0 flex-1 flex-col">
         <div className="flex flex-col">
@@ -1366,7 +1373,7 @@ export function WorkspacePanel({
           {showAddForm ? (
             <div
               className="border-b border-border px-3 py-2"
-              style={tintColor ? { backgroundColor: tintColor } : undefined}
+              style={!useSidebarSurface && tintColor ? { backgroundColor: tintColor } : undefined}
             >
               <div className="mb-2 flex items-center justify-between gap-2 text-[13px] font-medium text-text-subtle">
                 <span>软链添加到会话工作区</span>
@@ -1555,7 +1562,7 @@ export function WorkspacePanel({
         </div>
       </div>
 
-      {!isSidebarEmbed && terminalTabs.length > 0 ? (
+      {!isSidebarEmbed && !hidePanelClose && terminalTabs.length > 0 ? (
         <>
           <div
             className="group relative min-h-[14px] shrink-0 cursor-row-resize px-2 py-2 touch-none"
