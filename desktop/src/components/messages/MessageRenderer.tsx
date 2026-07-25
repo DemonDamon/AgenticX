@@ -65,6 +65,8 @@ type Props = {
   userAvatarUrl?: string;
   onCopyMessage?: (message: Message) => void;
   onQuoteMessage?: (message: Message, selectedText?: string) => void;
+  onWebSearchMessage?: (message: Message, selectedText: string) => void;
+  onQuoteToNewPane?: (message: Message, selectedText?: string) => void;
   onFavoriteMessage?: (message: Message, selectedText?: string) => void;
   onToggleSelectMessage?: (message: Message) => void;
   onForwardMessage?: (message: Message, selectedText?: string) => void;
@@ -228,6 +230,8 @@ export function MessageRenderer({
   userAvatarUrl,
   onCopyMessage,
   onQuoteMessage,
+  onWebSearchMessage,
+  onQuoteToNewPane,
   onFavoriteMessage,
   onToggleSelectMessage,
   onForwardMessage,
@@ -324,6 +328,8 @@ export function MessageRenderer({
         userAvatarUrl={userAvatarUrl}
         onCopyMessage={onCopyMessage}
         onQuoteMessage={onQuoteMessage}
+        onWebSearchMessage={onWebSearchMessage}
+        onQuoteToNewPane={onQuoteToNewPane}
         onFavoriteMessage={onFavoriteMessage}
         onToggleSelectMessage={onToggleSelectMessage}
         onForwardMessage={onForwardMessage}

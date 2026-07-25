@@ -592,6 +592,28 @@ body.agx-settings-nav-resizing {
   margin-right: 0.22em;
 }
 
+/* Cursor-style quote chip: compact pill, short truncated preview */
+.agx-composer-quote-chip,
+.agx-im-user-bubble .agx-composer-quote-chip {
+  display: inline-flex !important;
+  align-items: center;
+  max-width: 148px !important;
+  overflow: hidden;
+  vertical-align: middle;
+  padding-inline: 0.35rem;
+  padding-block: 0.05rem;
+  border-radius: 0.35rem;
+  font-size: 0.88em;
+  line-height: 1.35;
+}
+
+.agx-composer-quote-chip .agx-composer-quote-chip-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 /* 用户气泡内 @file chip：柔和 pill，避免「框套框」与重阴影 */
 .agx-im-user-bubble .agx-composer-inline-chip {
   display: inline-flex;

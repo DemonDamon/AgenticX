@@ -169,6 +169,8 @@ export type ChatPane = {
   historySearchTerms: string[];
   /** One-shot scroll target: user query message id inside the current session. */
   historyJumpMessageId?: string | null;
+  /** One-shot cross-pane quote payload set by "引用至新对话"; consumed once on mount then cleared. */
+  pendingQuote?: { messageId: string; body: string; label: string } | null;
   /** Harness mode for this pane's session (code_dev vs daily_office). */
   sessionMode?: "code_dev" | "daily_office";
   /** True while messages are being fetched after a session switch (shows skeleton). */
@@ -704,6 +706,7 @@ type AppState = {
   dropCachedSessionMessages: (sessionId: string | Iterable<string>) => void;
   setPaneHistorySearchTerms: (paneId: string, terms: string[]) => void;
   setPaneHistoryJumpMessageId: (paneId: string, messageId: string | null) => void;
+  setPanePendingQuote: (paneId: string, payload: ChatPane["pendingQuote"]) => void;
   togglePaneHistory: (paneId: string) => void;
   togglePaneMemoryGraph: (paneId: string) => void;
   /** @deprecated Prefer cycleSidePanel / openSidePanel */
@@ -2064,6 +2067,12 @@ export const useAppStore = create<AppState>((set, get) => ({
               historyJumpMessageId: messageId ? String(messageId).trim() || null : null,
             }
           : pane
+      ),
+    })),
+  setPanePendingQuote: (paneId, payload) =>
+    set((state) => ({
+      panes: state.panes.map((pane) =>
+        pane.id === paneId ? { ...pane, pendingQuote: payload ?? null } : pane
       ),
     })),
   togglePaneHistory: (paneId) =>

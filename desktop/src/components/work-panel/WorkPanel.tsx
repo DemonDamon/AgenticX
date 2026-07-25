@@ -906,6 +906,24 @@ export function WorkPanel({
             createBrowserTab({ id: nextId, title, url: focusUrl, srcDoc: focusSrcDoc }),
           ];
         });
+      } else if (focusUrl) {
+        const title = String(focusRequest.title || "").trim() || focusUrl;
+        const nextId = uid();
+        const entry = browserEntry(focusUrl, title, null);
+        setBrowserTabs((prev) => {
+          const existing = prev.find((t) => t.url === focusUrl && t.srcDoc == null);
+          if (existing) {
+            queueMicrotask(() => setActiveBrowserId(existing.id));
+            return prev.map((t) =>
+              t.id === existing.id ? pushBrowserHistory(t, entry) : t,
+            );
+          }
+          queueMicrotask(() => setActiveBrowserId(nextId));
+          return [
+            ...prev,
+            createBrowserTab({ id: nextId, title, url: focusUrl, srcDoc: null }),
+          ];
+        });
       } else if (focusRequest.tabId) {
         setActiveBrowserId(focusRequest.tabId);
       }

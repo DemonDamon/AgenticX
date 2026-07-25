@@ -1,17 +1,29 @@
 import type { Message } from "../store";
 import { parseReasoningContent } from "../components/messages/reasoning-parser";
 import { maskSecretsForDisplay } from "./secret-mask";
+import { resolveUserMessageQuoteDisplay, expandInlineQuotePlaceholdersForCopy, bodyHasInlineQuotePlaceholders } from "./user-quote-display";
 
 const FENCED_BLOCK_RE = /(```[\s\S]*?```|~~~[\s\S]*?~~~)/g;
 
 /** 单条消息写入剪贴板用的纯文本：去掉推理标签可见部分，并展开粘连 Markdown。用户消息与展示层同步做敏感信息遮蔽。 */
-export function messagePlainTextForClipboard(message: Pick<Message, "content" | "role">): string {
+export function messagePlainTextForClipboard(
+  message: Pick<Message, "content" | "role"> & { quotedContent?: string }
+): string {
   let t = message.content || "";
   if (message.role === "assistant") {
     const parsed = parseReasoningContent(t);
     if (parsed.hasReasoningTag) t = parsed.response || t;
   } else if (message.role === "user") {
-    t = maskSecretsForDisplay(t);
+    const { body, quotedItems } = resolveUserMessageQuoteDisplay(t, message.quotedContent);
+    if (bodyHasInlineQuotePlaceholders(body)) {
+      t = maskSecretsForDisplay(expandInlineQuotePlaceholdersForCopy(body, quotedItems));
+    } else {
+      t =
+        quotedItems.length > 0
+          ? `${body}${body.trim() ? "\n" : ""}${quotedItems.map((q) => `「引用」${q}`).join("\n")}`
+          : body;
+      t = maskSecretsForDisplay(t);
+    }
   }
   return expandMarkdownPlainTextForCopy(t);
 }

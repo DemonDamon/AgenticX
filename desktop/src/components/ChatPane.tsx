@@ -111,6 +111,15 @@ import {
   composerRefIconInnerHtml,
   resolveComposerRefIconKind,
 } from "./icons/ComposerRefIcon";
+import { composerQuoteIconInnerHtml, formatQuoteChipLabel } from "./icons/ComposerQuoteIcon";
+import {
+  composerQuotePlaceholder,
+  matchComposerQuotePlaceholder,
+  normalizeComposerQuotePlaceholdersToIndices,
+  serializeQuotedContent,
+  stripComposerQuotePlaceholders,
+  type QuotePayloadItem,
+} from "../utils/user-quote-display";
 import { Toast } from "./ds/Toast";
 import { extractClipboardImageFiles, withClipboardImageNames } from "../utils/clipboard-images";
 import { clipboardPlainTextForPaste } from "../utils/clipboard-plain-text";
@@ -2389,6 +2398,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
   const setPaneMessagePaging = useAppStore((s) => s.setPaneMessagePaging);
   const setPaneLoadingMessages = useAppStore((s) => s.setPaneLoadingMessages);
   const setPaneHistoryJumpMessageId = useAppStore((s) => s.setPaneHistoryJumpMessageId);
+  const setPanePendingQuote = useAppStore((s) => s.setPanePendingQuote);
   const setPaneHistorySearchTerms = useAppStore((s) => s.setPaneHistorySearchTerms);
   const setActiveAvatarId = useAppStore((s) => s.setActiveAvatarId);
   const setPaneContextInherited = useAppStore((s) => s.setPaneContextInherited);
@@ -2637,7 +2647,42 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
   const [atCandidates, setAtCandidates] = useState<AtCandidate[]>([]);
   const [groupTyping, setGroupTyping] = useState<Record<string, string>>({});
   const lastGroupProgressRef = useRef<Record<string, string>>({});
-  const [quoteTarget, setQuoteTarget] = useState<{ message: Message; body: string } | null>(null);
+  type QuoteTarget = { id: string; message: Message; body: string };
+  const [quoteTargets, setQuoteTargets] = useState<QuoteTarget[]>([]);
+  const quoteTargetsRef = useRef<QuoteTarget[]>([]);
+  quoteTargetsRef.current = quoteTargets;
+  /** Newly added quote id — insert at caret once (not prepended to composer start). */
+  const pendingCaretQuoteIdRef = useRef<string | null>(null);
+  const addQuoteTarget = useCallback((message: Message, body: string) => {
+    const cleanBody = String(body || "").trim();
+    if (!cleanBody) return;
+    setQuoteTargets((prev) => {
+      if (prev.some((q) => q.message.id === message.id && q.body === cleanBody)) {
+        return prev;
+      }
+      const id = crypto.randomUUID();
+      pendingCaretQuoteIdRef.current = id;
+      return [...prev, { id, message, body: cleanBody }];
+    });
+  }, []);
+  const clearQuoteTargets = useCallback(() => {
+    pendingCaretQuoteIdRef.current = null;
+    setQuoteTargets([]);
+  }, []);
+  useEffect(() => {
+    const pending = pane.pendingQuote;
+    if (!pending) return;
+    addQuoteTarget(
+      {
+        id: pending.messageId,
+        role: "assistant",
+        content: pending.body,
+        avatarName: pending.label,
+      },
+      pending.body
+    );
+    setPanePendingQuote(pane.id, null);
+  }, [pane.pendingQuote, pane.id, setPanePendingQuote, addQuoteTarget]);
   const [selectedMessageIds, setSelectedMessageIds] = useState<Set<string>>(new Set());
   const [forwardPickerOpen, setForwardPickerOpen] = useState(false);
   const [pendingForwardMessages, setPendingForwardMessages] = useState<
@@ -2656,6 +2701,8 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
   const [wechatDesktopBound, setWechatDesktopBound] = useState(false);
   const [automationTaskErrorHint, setAutomationTaskErrorHint] = useState<string | null>(null);
   const composerRef = useRef<HTMLDivElement | null>(null);
+  /** Last caret inside composer — survives blur when quoting from message context menu. */
+  const composerSavedRangeRef = useRef<Range | null>(null);
   const composerRefPathsRef = useRef<Record<string, string>>({});
   /** Chip meta available before setContextFiles re-renders (fixes html-element → index.html flash). */
   const composerRefMetaOverrideRef = useRef<
@@ -3855,8 +3902,32 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
       const name = String(node.dataset.skillName || "").trim();
       node.textContent = name ? `@skill://${name}` : "";
     }
+    // Keep quote chips as positional placeholders so setComposerText / @file round-trips
+    // do not yank them back to the start of the composer.
+    clone.querySelectorAll<HTMLElement>("[data-quote-token='1']").forEach((node) => {
+      const id = String(node.getAttribute("data-quote-id") || "").trim();
+      node.textContent = id ? composerQuotePlaceholder(id) : "";
+    });
     return (clone.innerText || "").replace(/\u00a0/g, " ");
   }, []);
+
+  const extractComposerSendText = useCallback((): string => {
+    return stripComposerQuotePlaceholders(extractComposerText());
+  }, [extractComposerText]);
+
+  /** Display/history text: keeps inline quote placeholders with stable index ids. */
+  const buildComposerDisplayText = useCallback((): string => {
+    const raw = extractComposerText();
+    const el = composerRef.current;
+    if (!el) return raw;
+    const orderedIds = Array.from(
+      el.querySelectorAll<HTMLElement>('[data-quote-token="1"]')
+    )
+      .map((node) => node.getAttribute("data-quote-id") || "")
+      .filter(Boolean);
+    if (orderedIds.length === 0) return raw;
+    return normalizeComposerQuotePlaceholdersToIndices(raw, orderedIds);
+  }, [extractComposerText]);
 
   const focusComposerEnd = useCallback(() => {
     const el = composerRef.current;
@@ -3869,7 +3940,24 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
     range.collapse(false);
     selection.removeAllRanges();
     selection.addRange(range);
+    composerSavedRangeRef.current = range.cloneRange();
   }, []);
+
+  const saveComposerCaret = useCallback(() => {
+    const el = composerRef.current;
+    if (!el) return;
+    const selection = window.getSelection();
+    if (!selection || selection.rangeCount === 0) return;
+    const range = selection.getRangeAt(0);
+    if (!el.contains(range.commonAncestorContainer)) return;
+    composerSavedRangeRef.current = range.cloneRange();
+  }, []);
+
+  useEffect(() => {
+    const onSelectionChange = () => saveComposerCaret();
+    document.addEventListener("selectionchange", onSelectionChange);
+    return () => document.removeEventListener("selectionchange", onSelectionChange);
+  }, [saveComposerCaret]);
 
   useEffect(() => {
     const root = composerRef.current;
@@ -4065,6 +4153,167 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
     return token;
   }, []);
 
+  const createQuoteRefToken = useCallback((target: QuoteTarget) => {
+    const sender =
+      target.message.avatarName ||
+      target.message.agentId ||
+      (target.message.role === "user" ? "我" : "AI");
+    const token = document.createElement("span");
+    token.setAttribute("contenteditable", "false");
+    token.setAttribute("data-quote-token", "1");
+    token.setAttribute("data-quote-id", target.id);
+    token.setAttribute("data-quote-message-id", target.message.id);
+    // Override shared chip max-width — quote preview must stay compact (Cursor-style).
+    token.className = `${COMPOSER_INLINE_CHIP_CLASS} agx-composer-quote-chip`;
+    token.title = `${sender}: ${target.body}`;
+    const icon = document.createElement("span");
+    icon.innerHTML = composerQuoteIconInnerHtml(12);
+    token.appendChild(icon);
+    const label = document.createElement("span");
+    label.className = "agx-composer-quote-chip-label";
+    label.textContent = formatQuoteChipLabel(target.body);
+    token.appendChild(label);
+    return token;
+  }, []);
+
+  const removeComposerQuoteTokens = useCallback(() => {
+    const el = composerRef.current;
+    if (!el) return;
+    el.querySelectorAll('[data-quote-token="1"]').forEach((node) => {
+      const next = node.nextSibling;
+      node.remove();
+      if (next?.nodeType === Node.TEXT_NODE && (next.textContent === " " || next.textContent === "\u00a0")) {
+        next.remove();
+      }
+    });
+  }, []);
+
+  const focusAfterNode = useCallback((node: Node) => {
+    const el = composerRef.current;
+    if (!el) return;
+    el.focus();
+    const selection = window.getSelection();
+    if (!selection) return;
+    const range = document.createRange();
+    const after = node.nextSibling;
+    if (after?.nodeType === Node.TEXT_NODE) {
+      range.setStart(after, Math.min(1, after.textContent?.length ?? 0));
+    } else {
+      range.setStartAfter(node);
+    }
+    range.collapse(true);
+    selection.removeAllRanges();
+    selection.addRange(range);
+  }, []);
+
+  /** Insert a quote chip at the current caret (Cursor-style inline semantics). */
+  const insertQuoteTokenAtCaret = useCallback(
+    (target: QuoteTarget) => {
+      const el = composerRef.current;
+      if (!el) return;
+      if (el.querySelector(`[data-quote-id="${target.id}"]`)) return;
+      const token = createQuoteRefToken(target);
+      const spacer = document.createTextNode(" ");
+      const selection = window.getSelection();
+      let range: Range | null = null;
+      const saved = composerSavedRangeRef.current;
+      if (
+        saved &&
+        el.contains(saved.startContainer) &&
+        el.contains(saved.endContainer)
+      ) {
+        range = saved.cloneRange();
+      }
+      // Do not el.focus() before resolving range — focus() resets caret to composer start.
+      if (!range && selection && selection.rangeCount > 0) {
+        const current = selection.getRangeAt(0);
+        if (el.contains(current.commonAncestorContainer)) {
+          range = current.cloneRange();
+        }
+      }
+      if (!range) {
+        range = document.createRange();
+        range.selectNodeContents(el);
+        range.collapse(false);
+      }
+      range.deleteContents();
+      // insertNode puts the node at the start of the range; insert spacer then token so order is token+spacer.
+      range.insertNode(spacer);
+      range.insertNode(token);
+      focusAfterNode(token);
+    },
+    [createQuoteRefToken, focusAfterNode]
+  );
+
+  const syncQuoteTargetsFromComposer = useCallback(() => {
+    const el = composerRef.current;
+    if (!el || quoteTargetsRef.current.length === 0) return;
+    const remaining = new Set(
+      Array.from(el.querySelectorAll('[data-quote-token="1"]')).map(
+        (node) => node.getAttribute("data-quote-id") || ""
+      )
+    );
+    setQuoteTargets((prev) => {
+      const next = prev.filter((q) => remaining.has(q.id));
+      return next.length === prev.length ? prev : next;
+    });
+  }, []);
+
+  // Insert newly added quotes at caret; clear DOM chips when state empties.
+  useEffect(() => {
+    if (quoteTargets.length === 0) {
+      removeComposerQuoteTokens();
+      return;
+    }
+    const pendingId = pendingCaretQuoteIdRef.current;
+    if (!pendingId) return;
+    pendingCaretQuoteIdRef.current = null;
+    const target = quoteTargets.find((q) => q.id === pendingId);
+    if (!target) return;
+    insertQuoteTokenAtCaret(target);
+    const value = extractComposerSendText();
+    setInput(value);
+    updateAtStateFromText(value);
+  }, [
+    quoteTargets,
+    insertQuoteTokenAtCaret,
+    removeComposerQuoteTokens,
+    extractComposerSendText,
+    updateAtStateFromText,
+  ]);
+
+  const buildQuotedPayload = useCallback((): {
+    quotedMessageId?: string;
+    quotedContent?: string;
+  } => {
+    if (quoteTargets.length === 0) return {};
+    // Preserve semantic order as chips appear in the composer (not append order).
+    const byId = new Map(quoteTargets.map((q) => [q.id, q]));
+    const orderedIds = Array.from(
+      composerRef.current?.querySelectorAll('[data-quote-token="1"]') ?? []
+    ).map((node) => node.getAttribute("data-quote-id") || "");
+    const ordered: QuoteTarget[] = [];
+    for (const id of orderedIds) {
+      const hit = byId.get(id);
+      if (hit) {
+        ordered.push(hit);
+        byId.delete(id);
+      }
+    }
+    for (const leftover of byId.values()) ordered.push(leftover);
+    const items: QuotePayloadItem[] = ordered.map((q) => ({
+      label:
+        q.message.avatarName ||
+        q.message.agentId ||
+        (q.message.role === "user" ? "我" : "AI"),
+      body: q.body,
+    }));
+    return {
+      quotedMessageId: ordered.map((q) => q.message.id).join(","),
+      quotedContent: serializeQuotedContent(items),
+    };
+  }, [quoteTargets]);
+
   const setComposerText = useCallback(
     (value: string, options?: { tokenNames?: string[]; refSourcePaths?: Record<string, string> }) => {
       const el = composerRef.current;
@@ -4093,9 +4342,23 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
       }
       el.innerHTML = "";
       const tokenNamesByLength = Array.from(tokenNames).sort((a, b) => b.length - a.length);
+      const quoteById = new Map(quoteTargetsRef.current.map((q) => [q.id, q]));
       let cursor = 0;
       let textBuffer = "";
       while (cursor < value.length) {
+        const quotePh = matchComposerQuotePlaceholder(value, cursor);
+        if (quotePh) {
+          if (textBuffer) {
+            el.appendChild(document.createTextNode(textBuffer));
+            textBuffer = "";
+          }
+          const target = quoteById.get(quotePh.id);
+          if (target) {
+            el.appendChild(createQuoteRefToken(target));
+          }
+          cursor += quotePh.len;
+          continue;
+        }
         if (value[cursor] !== "@") {
           textBuffer += value[cursor];
           cursor += 1;
@@ -4137,11 +4400,19 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
       if (textBuffer) {
         el.appendChild(document.createTextNode(textBuffer));
       }
-      setInput(value);
-      updateAtStateFromText(value);
+      const visible = stripComposerQuotePlaceholders(value);
+      setInput(visible);
+      updateAtStateFromText(visible);
       focusComposerEnd();
     },
-    [contextFiles, createFileRefToken, createSkillRefToken, focusComposerEnd, updateAtStateFromText]
+    [
+      contextFiles,
+      createFileRefToken,
+      createSkillRefToken,
+      createQuoteRefToken,
+      focusComposerEnd,
+      updateAtStateFromText,
+    ]
   );
 
   const addContextFile = async (
@@ -6873,8 +7144,39 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
               senderAvatarId={groupSender?.avatarId}
               onCopyMessage={copyMessage}
               onQuoteMessage={(msg, selectedText) =>
-                setQuoteTarget({ message: msg, body: resolveQuoteBody(msg, selectedText) })
+                addQuoteTarget(msg, resolveQuoteBody(msg, selectedText))
               }
+              onWebSearchMessage={(_msg, selectedText) => {
+                const q = selectedText.trim();
+                if (!q) return;
+                if (!pane.taskspacePanelOpen) {
+                  openWorkspaceSidebarForPane(
+                    pane.id,
+                    paneRef.current?.clientWidth ?? paneWidth,
+                    openSidePanel,
+                  );
+                }
+                setWorkPanelFocus({
+                  kind: "browser",
+                  url: `https://www.google.com/search?q=${encodeURIComponent(q)}`,
+                  title: `搜索：${q}`,
+                });
+              }}
+              onQuoteToNewPane={(msg, selectedText) => {
+                const body = resolveQuoteBody(msg, selectedText);
+                const label =
+                  msg.avatarName ||
+                  msg.agentId ||
+                  (msg.role === "user" ? userBubbleLabel || "我" : paneAvatarMeta.name || "AI");
+                const newPaneId = addPane(pane.avatarId, pane.avatarName, "");
+                markPaneAwaitingFreshSession(newPaneId);
+                setPanePendingQuote(newPaneId, {
+                  messageId: msg.id,
+                  body,
+                  label,
+                });
+                setActivePaneId(newPaneId);
+              }}
               onFavoriteMessage={favoriteMessage}
               onForwardMessage={forwardOneMessage}
               onRetryMessage={canRetryThisUserMessage ? retryUserMessage : undefined}
@@ -7050,10 +7352,10 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
                                   className="rounded p-1 hover:bg-surface-hover hover:text-text-strong"
                                   onMouseDown={(e) => e.preventDefault()}
                                   onClick={() =>
-                                    setQuoteTarget({
-                                      message: lastAssistantInBlock,
-                                      body: resolveQuoteBody(lastAssistantInBlock, undefined),
-                                    })
+                                    addQuoteTarget(
+                                      lastAssistantInBlock,
+                                      resolveQuoteBody(lastAssistantInBlock, undefined)
+                                    )
                                   }
                                 >
                                   <Quote size={13} />
@@ -7321,7 +7623,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
       )}
     </>
     );
-  }, [autoNudgeCount, budgetExceededInfo, chatStyle, copyMessage, copyReActBlock, currentModelLabel, exhaustedRounds, favoriteMessage, forwardOneMessage, groupChatUserLabel, groupTyping, groupedVisibleMessages, openSubAgentDetailFromCluster, hideStreamOverlayAsDuplicate, input, isGroupPane, isRunGuardCurrentSession, isStreamingCurrentSession, lastAssistantMessageId, midTurnStreamActivity, openFileReferencePreview, pane.historySearchTerms, pane.messages, pane.sessionId, paneAvatarMeta, paneId, readyAttachments.length, resolveGroupInlineConfirm, resolveGroupSender, resolveQuoteBody, resumeCurrentTask, resumeInFlight, resumeWithModel, revealFileInTaskspace, retryUserMessage, selectUpTo, selectedMessageIds, sendFollowupChip, sessionBusy, sessionWorkInProgress, setQuoteTarget, showInlineAssistantModelBadge, silentSeconds, stallModelOptions, stallRejectReason, stallRuntimeConfig.stall_auto_nudge_max_per_session, stallState, stopCurrentRun, streamTextForCurrentSession, streamingModel, toggleSelectBlock, toggleSelectMessage, topLevelRowsIm, userAvatarUrl, userBubbleLabel]);
+  }, [autoNudgeCount, budgetExceededInfo, chatStyle, copyMessage, copyReActBlock, currentModelLabel, exhaustedRounds, favoriteMessage, forwardOneMessage, groupChatUserLabel, groupTyping, groupedVisibleMessages, openSubAgentDetailFromCluster, hideStreamOverlayAsDuplicate, input, isGroupPane, isRunGuardCurrentSession, isStreamingCurrentSession, lastAssistantMessageId, midTurnStreamActivity, openFileReferencePreview, pane.historySearchTerms, pane.messages, pane.sessionId, paneAvatarMeta, paneId, readyAttachments.length, resolveGroupInlineConfirm, resolveGroupSender, resolveQuoteBody, resumeCurrentTask, resumeInFlight, resumeWithModel, revealFileInTaskspace, retryUserMessage, selectUpTo, selectedMessageIds, sendFollowupChip, sessionBusy, sessionWorkInProgress, addQuoteTarget, showInlineAssistantModelBadge, silentSeconds, stallModelOptions, stallRejectReason, stallRuntimeConfig.stall_auto_nudge_max_per_session, stallState, stopCurrentRun, streamTextForCurrentSession, streamingModel, toggleSelectBlock, toggleSelectMessage, topLevelRowsIm, userAvatarUrl, userBubbleLabel]);
 
   const removeAttachment = useCallback((key: string) => {
     setContextFiles((prev) => {
@@ -7634,8 +7936,13 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
   ) => {
     const continuation = options?.continuation;
     const isContinuation = !!continuation;
+    const composerDisplayText = buildComposerDisplayText();
     const text = userText.trim();
-    const messageText = isContinuation ? " " : text || ATTACHMENT_ONLY_USER_PROMPT;
+    const hasQuotePayloadEarly = quoteTargetsRef.current.length > 0;
+    // Quote-only turns: keep user_input empty (chips carry context); avoid "见附件" placeholder.
+    const messageText = isContinuation
+      ? " "
+      : text || (hasQuotePayloadEarly ? "" : ATTACHMENT_ONLY_USER_PROMPT);
     const clientTurnId = isContinuation ? "" : crypto.randomUUID();
     const retryAttachments = options?.retryAttachments;
     let suppressUserEcho = isContinuation || !!options?.suppressUserEcho;
@@ -7675,7 +7982,8 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
       }
     }
     const hasReadyAttachments = userAttachments.length > 0;
-    if (!isContinuation && !text && !hasReadyAttachments) return;
+    const hasQuotePayload = quoteTargetsRef.current.length > 0;
+    if (!isContinuation && !text && !hasReadyAttachments && !hasQuotePayload) return;
     if (!apiBase) return;
 
     // Exact 「确认/取消」 phrases resolve a unique pending action card without a new LLM turn.
@@ -7688,7 +7996,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
         });
         if (found.kind === "hit") {
           setComposerText("");
-          setQuoteTarget(null);
+          clearQuoteTargets();
           await resolveActionConfirmation(found.confirmation, decision, "manual");
           return;
         }
@@ -7736,7 +8044,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
         timestamp: Date.now(),
       });
       setComposerText("");
-      setQuoteTarget(null);
+      clearQuoteTargets();
       setContextFiles({});
       return true;
     };
@@ -8090,10 +8398,12 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
 
     if (targetAgentId === "meta") {
       if (!suppressUserEcho) {
+        const userEchoContent =
+          quoteTargetsRef.current.length > 0 ? composerDisplayText : messageText;
         addPaneMessage(
           pane.id,
           "user",
-          messageText,
+          userEchoContent,
           "meta",
           undefined,
           undefined,
@@ -8101,12 +8411,14 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
           {
             ownerSessionId: requestSessionId,
             metadata: { client_turn_id: clientTurnId },
-            ...(quoteTarget
-              ? {
-                  quotedMessageId: quoteTarget.message.id,
-                  quotedContent: `${quoteTarget.message.avatarName || quoteTarget.message.agentId || quoteTarget.message.role}: ${quoteTarget.body.slice(0, 120)}`,
-                }
-              : {}),
+            ...(() => {
+              const payload = buildQuotedPayload();
+              if (!payload.quotedContent) return {};
+              return {
+                quotedMessageId: payload.quotedMessageId,
+                quotedContent: payload.quotedContent,
+              };
+            })(),
           }
         );
       }
@@ -8115,7 +8427,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
       addPaneMessage(pane.id, "tool", `🗣 发送给 ${targetAgentId}: ${messageText}`, "meta");
     }
     setComposerText("");
-    setQuoteTarget(null);
+    clearQuoteTargets();
     // Clear attachments immediately so chips do not linger until the stream ends (finally also clears).
     setContextFiles({});
     sessionStreamStateRef.current[requestSessionId] = {
@@ -8392,9 +8704,13 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
       if (skipUserHistory) body.skip_user_history = true;
       const ats = (pane.activeTaskspaceId || "").trim();
       if (ats) body.active_taskspace_id = ats;
-      if (quoteTarget) {
-        body.quoted_message_id = quoteTarget.message.id;
-        body.quoted_content = `${quoteTarget.message.avatarName || quoteTarget.message.agentId || quoteTarget.message.role}: ${quoteTarget.body}`;
+      {
+        const quotePayload = buildQuotedPayload();
+        if (quotePayload.quotedContent) {
+          body.quoted_message_id = quotePayload.quotedMessageId;
+          body.quoted_content = quotePayload.quotedContent;
+          body.user_display_content = composerDisplayText;
+        }
       }
       if (chatProvider) body.provider = chatProvider;
       if (chatModel) body.model = chatModel;
@@ -11246,15 +11562,6 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
               </button>
             </div>
           ) : null}
-          {quoteTarget ? (
-            <div className="mb-1 flex items-center gap-2 rounded border border-border bg-surface-card px-2 py-1 text-xs text-text-muted">
-              <span className="truncate">
-                引用 {quoteTarget.message.avatarName || quoteTarget.message.agentId || quoteTarget.message.role}:{" "}
-                {quoteTarget.body.slice(0, 80)}
-              </span>
-              <button className="rounded px-1 hover:bg-surface-hover" onClick={() => setQuoteTarget(null)}>取消</button>
-            </div>
-          ) : null}
           {selectedMessageIds.size > 0 ? (
             <div className="mb-1 flex items-center gap-2 rounded border border-border bg-surface-card px-2 py-1 text-xs text-text-muted">
               <span>已多选 {selectedMessageIds.size} 条</span>
@@ -11468,10 +11775,14 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
               contentEditable
               suppressContentEditableWarning
               onInput={() => {
-                const value = extractComposerText();
+                syncQuoteTargetsFromComposer();
+                const value = extractComposerSendText();
                 setInput(value);
                 updateAtStateFromText(value);
+                saveComposerCaret();
               }}
+              onKeyUp={() => saveComposerCaret()}
+              onMouseUp={() => saveComposerCaret()}
               onCompositionStart={() => {
                 imeComposingRef.current = true;
               }}
@@ -11543,7 +11854,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
                   const files = withClipboardImageNames(raw);
                   if (plainText) {
                     document.execCommand("insertText", false, plainText);
-                    const value = extractComposerText();
+                    const value = extractComposerSendText();
                     setInput(value);
                     updateAtStateFromText(value);
                   }
@@ -11558,7 +11869,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
                 if (!plainText.trim()) return;
                 e.preventDefault();
                 document.execCommand("insertText", false, plainText);
-                const value = extractComposerText();
+                const value = extractComposerSendText();
                 setInput(value);
                 updateAtStateFromText(value);
               }}
@@ -11601,14 +11912,15 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
                     if (e.metaKey || e.ctrlKey) {
                       e.preventDefault();
                       lastComposerEnterAtRef.current = 0;
-                      void sendChat(extractComposerText());
+                      void sendChat(extractComposerSendText());
                     }
                     return;
                   }
                   e.preventDefault();
-                  const composerText = extractComposerText();
+                  const composerText = extractComposerSendText();
                   const trimmedComposer = composerText.trim();
-                  const hasComposerPayload = !!trimmedComposer || readyAttachments.length > 0;
+                  const hasComposerPayload =
+                    !!trimmedComposer || readyAttachments.length > 0 || quoteTargets.length > 0;
                   const sid = (pane.sessionId || "").trim();
                   const inFlightSid =
                     sendChatInFlightRef.current?.paneId === pane.id
@@ -11661,7 +11973,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
                 composerExpanded ? "max-h-[62vh] min-h-[260px] pr-40" : "max-h-[220px] min-h-[72px] pr-14"
               }`}
             />
-            {input.trim().length === 0 ? (
+            {input.trim().length === 0 && quoteTargets.length === 0 ? (
               <div className="agx-pane-composer-placeholder pointer-events-none absolute left-4 top-4 text-[15px] text-text-faint">
                 发消息...
               </div>
@@ -11727,7 +12039,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
                       focusComposerEnd();
                     }
                     // Sync input state
-                    setInput(extractComposerText());
+                    setInput(extractComposerSendText());
                   }}
                 />
                 <div className="flex items-center">
@@ -11786,7 +12098,10 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
                 )}
                 <PaneModelPicker paneId={pane.id} />
                 <ActionCircleButton
-                  hasInput={!!pane.sessionId && (!!input.trim() || readyAttachments.length > 0)}
+                  hasInput={
+                    !!pane.sessionId &&
+                    (!!input.trim() || readyAttachments.length > 0 || quoteTargets.length > 0)
+                  }
                   /* `canInterruptCurrentSession` 只覆盖"当前 pane 自己发起 SSE"的场景。
                    * 分身被 Meta 委派时，分身 pane 自己没有 SSE，但任务确实在跑。
                    * 用 `hasDelegation` 兜底，让分身/Meta 视角下都能看到 stop 按钮，
@@ -11796,7 +12111,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
                   transcribing={voiceTranscribing}
                   onSend={() => {
                     lastComposerEnterAtRef.current = 0;
-                    void sendChat(extractComposerText());
+                    void sendChat(extractComposerSendText());
                   }}
                   onMic={onMicClick}
                   onStop={stopCurrentRun}
