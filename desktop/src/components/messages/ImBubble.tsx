@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import type { CSSProperties, ReactNode, MouseEvent as ReactMouseEvent } from "react";
-import { Bookmark, Copy, Forward, LayoutList, Quote, RotateCcw, Pencil, X, ArrowUp, ArrowRight, AlertTriangle } from "lucide-react";
+import { Bookmark, Copy, Forward, LayoutList, Quote, RotateCcw, Pencil, X, ArrowUp, ArrowRight, AlertTriangle, TextSelect, Search, MessageSquarePlus } from "lucide-react";
 import type { Message, MessageAttachment } from "../../store";
 import { useAppStore } from "../../store";
 import type { SearchReference } from "../../types/search-references";
@@ -13,7 +14,11 @@ import { parseReasoningContent } from "./reasoning-parser";
 import { getContainedSelectionText } from "../../utils/favorite-selection";
 import { HoverTip } from "../ds/HoverTip";
 import { CitationMarkdownBody } from "./CitationMarkdownBody";
-import { renderUserMessageInlineBody } from "./user-message-inline";
+import { renderUserMessageInlineBody, UserQuoteRefChip, renderUserBubbleInlineContent } from "./user-message-inline";
+import {
+  parseQuotedContentItems,
+  resolveUserMessageQuoteDisplay,
+} from "../../utils/user-quote-display";
 import {
   parseAssistantOutputForUi,
   reasoningDuplicatesVisibleBody,
@@ -52,6 +57,8 @@ type Props = {
   userAvatarUrl?: string;
   onCopyMessage?: (message: Message) => void;
   onQuoteMessage?: (message: Message, selectedText?: string) => void;
+  onWebSearchMessage?: (message: Message, selectedText: string) => void;
+  onQuoteToNewPane?: (message: Message, selectedText?: string) => void;
   onFavoriteMessage?: (message: Message, selectedText?: string) => void;
   onToggleSelectMessage?: (message: Message) => void;
   onForwardMessage?: (message: Message, selectedText?: string) => void;
@@ -197,6 +204,8 @@ export function ImBubble({
   userAvatarUrl,
   onCopyMessage,
   onQuoteMessage,
+  onWebSearchMessage,
+  onQuoteToNewPane,
   onFavoriteMessage,
   onToggleSelectMessage,
   onForwardMessage,
@@ -246,9 +255,15 @@ export function ImBubble({
   // Messages created in live state do not always pass through the history
   // mapper. Apply the same protocol parser at the final render boundary so a
   // malformed/unclosed <followups> tail can never become Markdown body text.
+  const userQuoteDisplay = isUser
+    ? resolveUserMessageQuoteDisplay(message.content, message.quotedContent)
+    : null;
   const bodyText = !isUser
     ? (protocolParsed?.visibleBody ?? (hasThinkTag ? (parsed?.response ?? "") : message.content))
-    : message.content;
+    : (userQuoteDisplay?.body ?? message.content);
+  const displayQuotedItems = isUser
+    ? (userQuoteDisplay?.quotedItems ?? [])
+    : parseQuotedContentItems(message.quotedContent);
   const citationReferences =
     (resolvedReferences?.length ?? 0) > 0 ? resolvedReferences : message.references;
   const referenceAttachments = isUser
@@ -257,7 +272,7 @@ export function ImBubble({
   const displayAttachments = isUser
     ? (message.attachments ?? []).filter((attachment) => !isWorkspaceReferenceAttachment(attachment))
     : [];
-  const hasBody = !!bodyText?.trim();
+  const hasBody = !!bodyText?.trim() || displayQuotedItems.length > 0;
   const bubbleStyle: CSSProperties = isUser
     ? {
         background: "var(--chat-im-user-bg)",
@@ -272,6 +287,7 @@ export function ImBubble({
       };
   const [menuOpen, setMenuOpen] = useState(false);
   const [menuPos, setMenuPos] = useState<{ x: number; y: number }>({ x: 0, y: 0 });
+  const [menuHasSelection, setMenuHasSelection] = useState(false);
   const menuRef = useRef<HTMLDivElement | null>(null);
   const msgContentRef = useRef<HTMLDivElement | null>(null);
 
@@ -299,6 +315,40 @@ export function ImBubble({
     onQuoteMessage?.(message, picked ?? undefined);
   };
 
+  const runWebSearch = () => {
+    const picked = getContainedSelectionText(msgContentRef.current);
+    if (!picked) return;
+    onWebSearchMessage?.(message, picked);
+  };
+
+  const runQuoteToNewPane = () => {
+    const picked = getContainedSelectionText(msgContentRef.current);
+    onQuoteToNewPane?.(message, picked ?? undefined);
+  };
+
+  const runSelectAll = () => {
+    const root = msgContentRef.current;
+    if (!root) return;
+    const range = document.createRange();
+    range.selectNodeContents(root);
+    const sel = window.getSelection();
+    sel?.removeAllRanges();
+    sel?.addRange(range);
+  };
+
+  const runCopy = async () => {
+    const picked = getContainedSelectionText(msgContentRef.current);
+    if (picked) {
+      try {
+        await navigator.clipboard.writeText(picked);
+      } catch {
+        /* clipboard may be unavailable */
+      }
+      return;
+    }
+    onCopyMessage?.(message);
+  };
+
   const runForward = () => {
     const picked = getContainedSelectionText(msgContentRef.current);
     onForwardMessage?.(message, picked ?? undefined);
@@ -313,12 +363,24 @@ export function ImBubble({
   useEffect(() => {
     if (!menuOpen) return;
     const onDown = (ev: globalThis.MouseEvent) => {
+      // Ignore the right-click that opened the menu (some platforms emit mousedown after contextmenu).
+      if (ev.button === 2) return;
       if (menuRef.current && !menuRef.current.contains(ev.target as Node)) {
         setMenuOpen(false);
       }
     };
-    window.addEventListener("mousedown", onDown);
-    return () => window.removeEventListener("mousedown", onDown);
+    const onKey = (ev: KeyboardEvent) => {
+      if (ev.key === "Escape") setMenuOpen(false);
+    };
+    const attach = window.setTimeout(() => {
+      window.addEventListener("mousedown", onDown, true);
+      window.addEventListener("keydown", onKey);
+    }, 0);
+    return () => {
+      window.clearTimeout(attach);
+      window.removeEventListener("mousedown", onDown, true);
+      window.removeEventListener("keydown", onKey);
+    };
   }, [menuOpen]);
 
   useEffect(() => {
@@ -328,8 +390,9 @@ export function ImBubble({
   }, [highlightTerms, message.content, message.quotedContent, message.forwardedHistory, isStreaming, isGroupTyping, hasBody]);
 
   const openContextMenu = (ev: ReactMouseEvent) => {
-    if (compactAssistant) return;
     ev.preventDefault();
+    ev.stopPropagation();
+    setMenuHasSelection(Boolean(getContainedSelectionText(msgContentRef.current)));
     setMenuPos({ x: ev.clientX, y: ev.clientY });
     setMenuOpen(true);
   };
@@ -585,18 +648,13 @@ export function ImBubble({
                 ))}
               </div>
             ) : null}
-            {hasBody || message.quotedContent || message.forwardedHistory || contentBadge ? (
+            {hasBody || message.forwardedHistory || contentBadge ? (
             <div
               className="agx-im-user-bubble relative min-w-0 max-w-full rounded-xl border px-3.5 py-2.5 text-[var(--agx-chat-im-body-font-size)] leading-relaxed rounded-tr-[4px]"
               style={userBubbleStyle}
             >
               <div ref={msgContentRef} className="msg-content min-w-0 break-words">
                 {contentBadge}
-                {message.quotedContent ? (
-                  <div className="mb-2 rounded-md border border-border bg-surface-panel/70 px-2 py-1 text-xs text-text-faint">
-                    <span className="line-clamp-2">{message.quotedContent}</span>
-                  </div>
-                ) : null}
                 {message.forwardedHistory ? (
                   <div className="space-y-2">
                     <div className="rounded-md border border-border bg-surface-panel/70 px-2 py-1 text-xs text-text-faint">
@@ -618,9 +676,14 @@ export function ImBubble({
                       </div>
                     </div>
                   </div>
-                ) : hasBody ? (
+                ) : bodyText.trim() || displayQuotedItems.length > 0 ? (
                   <div className="whitespace-pre-wrap break-words">
-                    {renderUserMessageInlineBody(bodyText, referenceAttachments, onOpenFileReference)}
+                    {renderUserBubbleInlineContent(
+                      bodyText,
+                      displayQuotedItems,
+                      referenceAttachments,
+                      onOpenFileReference
+                    )}
                   </div>
                 ) : null}
               </div>
@@ -712,9 +775,14 @@ export function ImBubble({
             >
               <div ref={msgContentRef} className="msg-content min-w-0 break-words">
                 {contentBadge}
-                {message.quotedContent ? (
-                  <div className="mb-2 rounded-md border border-border bg-surface-panel/70 px-2 py-1 text-xs text-text-faint">
-                    <span className="line-clamp-2">{message.quotedContent}</span>
+                {displayQuotedItems.length > 0 ? (
+                  <div className="mb-1.5">
+                    {displayQuotedItems.map((quoted, idx) => (
+                      <span key={`aq-${idx}-${quoted.slice(0, 12)}`}>
+                        <UserQuoteRefChip quoted={quoted} />
+                        {idx < displayQuotedItems.length - 1 ? " " : null}
+                      </span>
+                    ))}
                   </div>
                 ) : null}
                 {message.forwardedHistory ? (
@@ -848,16 +916,18 @@ export function ImBubble({
           />
         </div>
       ) : null}
-      {menuOpen && !compactAssistant ? (
+      {menuOpen
+        ? createPortal(
         <div
           ref={menuRef}
-          className="fixed z-[80] w-36 rounded-lg border border-border bg-surface-base p-1 shadow-2xl"
+          className="fixed z-[200] w-44 rounded-lg border border-border bg-surface-base p-1 shadow-2xl"
           style={{ left: menuPos.x, top: menuPos.y }}
+          role="menu"
         >
           <button
             className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-xs text-text-primary hover:bg-surface-hover"
             onMouseDown={(e) => e.preventDefault()}
-            onClick={() => { setMenuOpen(false); onCopyMessage?.(message); }}
+            onClick={() => { void runCopy(); setMenuOpen(false); }}
           >
             <Copy size={12} className="shrink-0 text-text-faint" />复制
           </button>
@@ -866,8 +936,36 @@ export function ImBubble({
             onMouseDown={(e) => e.preventDefault()}
             onClick={() => { setMenuOpen(false); runQuote(); }}
           >
-            <Quote size={12} className="shrink-0 text-text-faint" />引用
+            <Quote size={12} className="shrink-0 text-text-faint" />引用至当前对话
           </button>
+          <button
+            className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-xs text-text-primary hover:bg-surface-hover"
+            onMouseDown={(e) => e.preventDefault()}
+            onClick={() => { setMenuOpen(false); runSelectAll(); }}
+          >
+            <TextSelect size={12} className="shrink-0 text-text-faint" />全选
+          </button>
+          <button
+            className={`flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-xs hover:bg-surface-hover ${
+              menuHasSelection && onWebSearchMessage
+                ? "text-text-primary"
+                : "cursor-not-allowed text-text-faint opacity-50"
+            }`}
+            disabled={!menuHasSelection || !onWebSearchMessage}
+            onMouseDown={(e) => e.preventDefault()}
+            onClick={() => { setMenuOpen(false); runWebSearch(); }}
+          >
+            <Search size={12} className="shrink-0 text-text-faint" />用网络搜索
+          </button>
+          {onQuoteToNewPane ? (
+            <button
+              className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-xs text-text-primary hover:bg-surface-hover"
+              onMouseDown={(e) => e.preventDefault()}
+              onClick={() => { setMenuOpen(false); runQuoteToNewPane(); }}
+            >
+              <MessageSquarePlus size={12} className="shrink-0 text-text-faint" />引用至新对话
+            </button>
+          ) : null}
           <button
             className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-xs text-text-primary hover:bg-surface-hover"
             onMouseDown={(e) => e.preventDefault()}
@@ -911,8 +1009,10 @@ export function ImBubble({
           >
             <LayoutList size={12} className="shrink-0 text-text-faint" />多选
           </button>
-        </div>
-      ) : null}
+        </div>,
+        document.body,
+      )
+        : null}
     </div>
   );
 }

@@ -3213,7 +3213,12 @@ def create_studio_app() -> FastAPI:
                         auto = AutoSolveMode()
                         effective_input = payload.user_input
                         quoted_content = str(payload.quoted_content or "").strip()
+                        quoted_message_id = str(payload.quoted_message_id or "").strip()
+                        user_display_content = str(
+                            getattr(payload, "user_display_content", "") or ""
+                        ).strip()
                         if quoted_content:
+                            # Inject quote only into model context; chat_history keeps clean text.
                             effective_input = f"{effective_input}\n\n[用户引用内容]\n{quoted_content}"
                         # Per-session KB retrieval mode: bind the desktop's choice to
                         # this in-memory session so continue/loop prompt builds honor
@@ -3338,6 +3343,13 @@ def create_studio_app() -> FastAPI:
                             history_user_metadata=(
                                 {"client_turn_id": _ctid} if _ctid else None
                             ),
+                            history_user_content=(
+                                user_display_content or str(payload.user_input or "")
+                                if quoted_content
+                                else None
+                            ),
+                            history_quoted_content=quoted_content or None,
+                            history_quoted_message_id=quoted_message_id or None,
                             persist_user_message=not bool(getattr(payload, "skip_user_history", False)),
                             usage_session_id=payload.session_id,
                             usage_avatar_id=str(getattr(managed, "avatar_id", "") or ""),

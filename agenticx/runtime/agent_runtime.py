@@ -2323,6 +2323,9 @@ class AgentRuntime:
         user_message_content: Optional[Any] = None,
         history_user_attachments: Optional[list[dict[str, Any]]] = None,
         history_user_metadata: Optional[dict[str, Any]] = None,
+        history_user_content: Optional[str] = None,
+        history_quoted_content: Optional[str] = None,
+        history_quoted_message_id: Optional[str] = None,
         persist_user_message: bool = True,
         usage_session_id: Optional[str] = None,
         usage_avatar_id: Optional[str] = None,
@@ -2558,15 +2561,33 @@ class AgentRuntime:
         await self.hooks.run_on_agent_start(session, agent_id, user_input)
         synced_session_message_count = len(session.agent_messages)
         _should_mid_turn_persist = False
-        if persist_user_message and not _is_system_trigger:
-            hist_user: dict[str, Any] = {"role": "user", "content": user_input}
+        # Visible chat history should keep the clean user utterance; model context
+        # may still use effective_input (e.g. with an injected quote block).
+        _history_text = (
+            str(history_user_content)
+            if history_user_content is not None
+            else str(user_input or "")
+        )
+        _history_quoted = str(history_quoted_content or "").strip()
+        _history_quoted_id = str(history_quoted_message_id or "").strip()
+
+        def _build_hist_user(content: str) -> dict[str, Any]:
+            row: dict[str, Any] = {"role": "user", "content": content}
             if history_user_attachments:
-                hist_user["attachments"] = list(history_user_attachments)
+                row["attachments"] = list(history_user_attachments)
             if history_user_metadata:
-                hist_user["metadata"] = dict(history_user_metadata)
+                row["metadata"] = dict(history_user_metadata)
+            if _history_quoted:
+                row["quoted_content"] = _history_quoted
+            if _history_quoted_id:
+                row["quoted_message_id"] = _history_quoted_id
+            return row
+
+        if persist_user_message and not _is_system_trigger:
+            hist_user = _build_hist_user(_history_text)
             _chat_history_append_deduped(session.chat_history, hist_user)
             # Set current user intent for goal anchor injection (FR-1)
-            session.current_user_intent = user_input
+            session.current_user_intent = _history_text or user_input
             _should_mid_turn_persist = True
             # Persist the user turn to disk immediately. Otherwise messages.json
             # lags until the first mid-turn checkpoint, and a client that reloads
@@ -2578,7 +2599,7 @@ class AgentRuntime:
             # not already contain this utterance (retry keeps the truncated row).
             from agenticx.studio.continuation import is_continuation_user_prompt
 
-            ui_text = str(user_input or "").strip()
+            ui_text = str(_history_text or user_input or "").strip()
             if ui_text and not is_continuation_user_prompt(ui_text):
                 last_user_text = ""
                 for item in reversed(session.chat_history or []):
@@ -2586,13 +2607,9 @@ class AgentRuntime:
                         last_user_text = str(item.get("content", "")).strip()
                         break
                 if last_user_text != ui_text:
-                    hist_user: dict[str, Any] = {"role": "user", "content": user_input}
-                    if history_user_attachments:
-                        hist_user["attachments"] = list(history_user_attachments)
-                    if history_user_metadata:
-                        hist_user["metadata"] = dict(history_user_metadata)
+                    hist_user = _build_hist_user(_history_text or user_input)
                     _chat_history_append_deduped(session.chat_history, hist_user)
-                    session.current_user_intent = user_input
+                    session.current_user_intent = _history_text or user_input
                     _should_mid_turn_persist = True
         # FR-1: append visible compaction notice after the user chat_history row
         # so reload order is [user] → [compaction notice] → [assistant].

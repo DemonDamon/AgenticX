@@ -31,6 +31,8 @@ class ChatRequest(BaseModel):
     mentioned_avatar_ids: Optional[List[str]] = None
     quoted_message_id: Optional[str] = None
     quoted_content: Optional[str] = None
+    # Visible user bubble text with inline quote placeholders; model still uses user_input.
+    user_display_content: Optional[str] = None
     # Meta-Agent display name when acting as group leader (UI bubble title, not system role text).
     meta_leader_display_name: Optional[str] = None
     # Human user's display name in group chat (shown in dialogue context; optional).

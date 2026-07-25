@@ -6,6 +6,7 @@ import {
   ComposerRefIcon,
   resolveComposerRefIconKindFromAttachments,
 } from "../icons/ComposerRefIcon";
+import { ComposerQuoteIcon, formatQuoteChipLabel } from "../icons/ComposerQuoteIcon";
 import type { Components } from "react-markdown";
 import type { MessageAttachment } from "../../store";
 import {
@@ -31,6 +32,13 @@ import {
   normalizeChatMarkdownContent,
 } from "./markdown-components";
 import { maskSecretsForDisplay } from "../../utils/secret-mask";
+import {
+  bodyHasInlineQuotePlaceholders,
+  indexOfNextComposerQuotePlaceholder,
+  matchComposerQuotePlaceholder,
+  normalizeInlineQuoteBodyForDisplay,
+  resolveInlineQuoteDisplayText,
+} from "../../utils/user-quote-display";
 
 const SKILL_PREFIX = "@skill://";
 
@@ -56,6 +64,21 @@ export function UserSkillRefChip({ name }: { name: string }) {
     <span className={COMPOSER_INLINE_CHIP_CLASS} title={`@skill://${name}`}>
       <SkillPuzzleIcon className="agx-composer-inline-chip-icon h-[0.95em] w-[0.95em] shrink-0 opacity-90" />
       <span className="min-w-0 truncate">{name}</span>
+    </span>
+  );
+}
+
+/** Cursor-style compact quote pill inside a sent user bubble. */
+export function UserQuoteRefChip({ quoted }: { quoted: string }) {
+  const full = String(quoted || "").trim();
+  if (!full) return null;
+  return (
+    <span
+      className={`${COMPOSER_INLINE_CHIP_CLASS} agx-composer-quote-chip`}
+      title={full}
+    >
+      <ComposerQuoteIcon />
+      <span className="agx-composer-quote-chip-label">{formatQuoteChipLabel(full)}</span>
     </span>
   );
 }
@@ -185,7 +208,8 @@ export function UserFileRefChip({
 export function renderUserMessageInlineBody(
   bodyText: string,
   referenceAttachments: MessageAttachment[],
-  onOpenFileReference?: (request: FileReferenceOpenRequest) => void
+  onOpenFileReference?: (request: FileReferenceOpenRequest) => void,
+  quotedItems: string[] = []
 ): ReactNode {
   const refs = normalizeReferenceAttachments(referenceAttachments) ?? [];
 
@@ -210,15 +234,38 @@ export function renderUserMessageInlineBody(
 
   let chipKey = 0;
   while (cursor < bodyText.length) {
+    const quotePhAtCursor = matchComposerQuotePlaceholder(bodyText, cursor);
+    if (quotePhAtCursor) {
+      const quoted =
+        resolveInlineQuoteDisplayText(quotePhAtCursor.id, quotedItems) || "引用";
+      chunks.push(<UserQuoteRefChip key={`q-${chipKey++}`} quoted={quoted} />);
+      cursor += quotePhAtCursor.len;
+      continue;
+    }
+
+    // Break on the nearest @mention OR inline quote placeholder (not only @).
+    const nextQuote = indexOfNextComposerQuotePlaceholder(bodyText, cursor);
     const nextAt = bodyText.indexOf("@", cursor);
-    if (nextAt < 0) {
+    let nextSpecial = -1;
+    if (nextQuote >= 0 && nextAt >= 0) nextSpecial = Math.min(nextQuote, nextAt);
+    else nextSpecial = nextQuote >= 0 ? nextQuote : nextAt;
+
+    if (nextSpecial < 0) {
       pushMarkdown(bodyText.slice(cursor));
       break;
     }
-    if (nextAt > cursor) {
-      pushMarkdown(bodyText.slice(cursor, nextAt));
+    if (nextSpecial > cursor) {
+      pushMarkdown(bodyText.slice(cursor, nextSpecial));
     }
-    cursor = nextAt;
+    cursor = nextSpecial;
+
+    const quotePh = matchComposerQuotePlaceholder(bodyText, cursor);
+    if (quotePh) {
+      const quoted = resolveInlineQuoteDisplayText(quotePh.id, quotedItems) || "引用";
+      chunks.push(<UserQuoteRefChip key={`q-${chipKey++}`} quoted={quoted} />);
+      cursor += quotePh.len;
+      continue;
+    }
 
     const sk = tryConsumeSkillRef(bodyText, cursor);
     if (sk) {
@@ -247,4 +294,41 @@ export function renderUserMessageInlineBody(
   }
 
   return chunks.length > 0 ? <>{chunks}</> : null;
+}
+
+/** User bubble body: inline quote chips follow placeholder order when present. */
+export function renderUserBubbleInlineContent(
+  bodyText: string,
+  quotedItems: string[],
+  referenceAttachments: MessageAttachment[],
+  onOpenFileReference?: (request: FileReferenceOpenRequest) => void
+): ReactNode {
+  const normalized = normalizeInlineQuoteBodyForDisplay(bodyText, quotedItems);
+  const trimmed = String(normalized || "").trim();
+  if (bodyHasInlineQuotePlaceholders(normalized) && normalized.includes("[[agx-quote:")) {
+    return renderUserMessageInlineBody(
+      normalized,
+      referenceAttachments,
+      onOpenFileReference,
+      quotedItems
+    );
+  }
+  if (quotedItems.length > 0) {
+    return (
+      <>
+        {quotedItems.map((quoted, idx) => (
+          <span key={`q-legacy-${idx}-${quoted.slice(0, 12)}`}>
+            <UserQuoteRefChip quoted={quoted} />
+            {idx < quotedItems.length - 1 || trimmed ? " " : null}
+          </span>
+        ))}
+        {trimmed
+          ? renderUserMessageInlineBody(trimmed, referenceAttachments, onOpenFileReference)
+          : null}
+      </>
+    );
+  }
+  return trimmed
+    ? renderUserMessageInlineBody(trimmed, referenceAttachments, onOpenFileReference)
+    : null;
 }
