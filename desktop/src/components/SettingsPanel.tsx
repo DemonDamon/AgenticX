@@ -7119,9 +7119,16 @@ export function SettingsPanel({
       setFetchedModels(normalized);
       setFetchModelsSearch("");
       setFetchModelsModalOpen(true);
-      const authProbeCandidates = normalized.filter((m) => !current.models.includes(m));
-      if (authProbeCandidates.length > 0) {
-        void runAuthProbeQueue(requestProvider, authProbeCandidates, requestApiKey, requestBaseUrl);
+      // Probe the full catalog (incl. already-visible): mark unauthorized, and
+      // auto-purge historically "+" models the key can no longer call.
+      if (normalized.length > 0) {
+        void runAuthProbeQueue(
+          requestProvider,
+          normalized,
+          requestApiKey,
+          requestBaseUrl,
+          { purgeVisibleUnauthorized: true, visibleModels: [...current.models] },
+        );
       }
     } catch (err) {
       if (
@@ -7147,78 +7154,9 @@ export function SettingsPanel({
     setFetchModelsSearch("");
   };
 
-  /**
-   * Sequentially probes auth status for models not yet visible, so the fetch
-   * modal can flag "未授权" before the user tries to add them. Skips models
-   * already present in modelHealthMap (already checked via this queue or the
-   * main list's manual/batch health check). Cancellable via generation ref:
-   * closing the modal or switching provider bumps the ref, causing in-flight
-   * loop iterations to stop writing further state.
-   */
-  const runAuthProbeQueue = useCallback(
-    async (provider: string, models: string[], apiKey: string, baseUrl: string | undefined) => {
-      const generation = ++authProbeGenerationRef.current;
-      const pending = models.filter((m) => !modelHealthMap[`${provider}:${m}`]);
-      if (pending.length === 0) {
-        setAuthProbeProgress(null);
-        return;
-      }
-      setAuthProbeProgress({ done: 0, total: pending.length });
-      for (let i = 0; i < pending.length; i += 1) {
-        if (authProbeGenerationRef.current !== generation) return;
-        const model = pending[i];
-        const key = `${provider}:${model}`;
-        setModelHealthMap((p) => (p[key] ? p : { ...p, [key]: { phase: "checking" } }));
-        // Sequential avoids hammering the same endpoint in parallel.
-        // eslint-disable-next-line no-await-in-loop
-        const res = await window.agenticxDesktop.healthCheckModel({ provider, apiKey, baseUrl, model });
-        if (authProbeGenerationRef.current !== generation) return;
-        setModelHealthMap((p) => ({ ...p, [key]: healthEntryFromCheckResult(res) }));
-        setAuthProbeProgress({ done: i + 1, total: pending.length });
-      }
-      if (authProbeGenerationRef.current === generation) setAuthProbeProgress(null);
-    },
-    [modelHealthMap],
-  );
-
   const makeModelVisible = (model: string) => {
     if (!model || current.models.includes(model)) return;
     updateField("models", [...current.models, model]);
-  };
-
-  const onHealthCheck = async (model: string) => {
-    const key = `${active}:${model}`;
-    setModelHealthMap((p) => ({ ...p, [key]: { phase: "checking" } }));
-    const res = await window.agenticxDesktop.healthCheckModel({
-      provider: active,
-      apiKey: current.apiKey,
-      baseUrl: current.baseUrl || undefined,
-      model,
-    });
-    setModelHealthMap((p) => ({
-      ...p,
-      [key]: healthEntryFromCheckResult(res),
-    }));
-  };
-
-  const onBatchHealthCheck = async () => {
-    if (!providerCredentialed(current) || current.models.length === 0) return;
-    for (const m of current.models) {
-      const key = `${active}:${m}`;
-      setModelHealthMap((p) => ({ ...p, [key]: { phase: "checking" } }));
-      // Sequential avoids hammering the same endpoint in parallel.
-      // eslint-disable-next-line no-await-in-loop
-      const res = await window.agenticxDesktop.healthCheckModel({
-        provider: active,
-        apiKey: current.apiKey,
-        baseUrl: current.baseUrl || undefined,
-        model: m,
-      });
-      setModelHealthMap((p) => ({
-        ...p,
-        [key]: healthEntryFromCheckResult(res),
-      }));
-    }
   };
 
   const onRemoveModel = (model: string) => {
@@ -7241,6 +7179,165 @@ export function SettingsPanel({
         [active]: normalizeProviderEntry({ ...prevEntry, models: nextModels, model: nextModel }),
       };
     });
+  };
+
+  /**
+   * Drop an unauthorized model from the visible list and persist immediately so
+   * chat pickers cannot keep selecting it if the user closes settings without Save.
+   */
+  const purgeUnauthorizedVisibleModel = async (model: string) => {
+    let nextEntry: ProviderEntry | null = null;
+    let didRemove = false;
+    setDraft((prev) => {
+      const prevEntry = prev[active] ?? {
+        apiKey: "",
+        baseUrl: "",
+        model: "",
+        models: [],
+        enabled: false,
+        dropParams: false,
+      };
+      if (!prevEntry.models.includes(model)) {
+        return prev;
+      }
+      const nextModels = prevEntry.models.filter((m) => m !== model);
+      let nextModel = prevEntry.model;
+      if (nextModel === model || (nextModels.length > 0 && !nextModels.includes(nextModel))) {
+        nextModel = nextModels[0] ?? "";
+      }
+      nextEntry = normalizeProviderEntry({ ...prevEntry, models: nextModels, model: nextModel });
+      didRemove = true;
+      return { ...prev, [active]: nextEntry };
+    });
+    if (!didRemove || !nextEntry) return;
+    try {
+      await window.agenticxDesktop.saveProvider({
+        name: active,
+        apiKey: nextEntry.apiKey || undefined,
+        baseUrl: nextEntry.baseUrl || undefined,
+        model: nextEntry.model || undefined,
+        models: nextEntry.models,
+        enabled: nextEntry.enabled,
+        dropParams: nextEntry.dropParams,
+        ...(nextEntry.displayName !== undefined
+          ? { displayName: nextEntry.displayName.trim() }
+          : {}),
+        ...(nextEntry.interface === "openai" || nextEntry.interface === "ollama"
+          ? { interface: nextEntry.interface }
+          : {}),
+      });
+      const store = useAppStore.getState();
+      store.updateSettings({
+        providers: {
+          ...store.settings.providers,
+          [active]: nextEntry,
+        },
+      });
+      setProviderSavedSnapshot((prev) => ({
+        ...prev,
+        [active]: { ...nextEntry! },
+      }));
+    } catch (err) {
+      console.warn("[SettingsPanel] persist unauthorized model purge failed:", err);
+    }
+  };
+
+  /**
+   * Sequentially probes auth for catalog models. Marks "未授权" for add-blocking;
+   * optionally purges models that were already visible but fail Model Auth.
+   * Skips models already present in modelHealthMap. Cancellable via generation ref.
+   */
+  const runAuthProbeQueue = useCallback(
+    async (
+      provider: string,
+      models: string[],
+      apiKey: string,
+      baseUrl: string | undefined,
+      options?: { purgeVisibleUnauthorized?: boolean; visibleModels?: string[] },
+    ) => {
+      const generation = ++authProbeGenerationRef.current;
+      const pending = models.filter((m) => !modelHealthMap[`${provider}:${m}`]);
+      if (pending.length === 0) {
+        setAuthProbeProgress(null);
+        return;
+      }
+      const visibleSet = new Set(options?.visibleModels ?? []);
+      setAuthProbeProgress({ done: 0, total: pending.length });
+      for (let i = 0; i < pending.length; i += 1) {
+        if (authProbeGenerationRef.current !== generation) return;
+        const model = pending[i];
+        const key = `${provider}:${model}`;
+        setModelHealthMap((p) => (p[key] ? p : { ...p, [key]: { phase: "checking" } }));
+        // Sequential avoids hammering the same endpoint in parallel.
+        // eslint-disable-next-line no-await-in-loop
+        const res = await window.agenticxDesktop.healthCheckModel({ provider, apiKey, baseUrl, model });
+        if (authProbeGenerationRef.current !== generation) return;
+        const health = healthEntryFromCheckResult(res);
+        setModelHealthMap((p) => ({ ...p, [key]: health }));
+        if (
+          options?.purgeVisibleUnauthorized
+          && health.phase === "unauthorized"
+          && visibleSet.has(model)
+        ) {
+          // eslint-disable-next-line no-await-in-loop
+          await purgeUnauthorizedVisibleModel(model);
+        }
+        setAuthProbeProgress({ done: i + 1, total: pending.length });
+      }
+      if (authProbeGenerationRef.current === generation) setAuthProbeProgress(null);
+    },
+    // purgeUnauthorizedVisibleModel closes over latest active/draft; omit from deps
+    // to avoid re-creating the queue on every draft keystroke.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [modelHealthMap, active],
+  );
+
+  const onHealthCheck = async (model: string) => {
+    const key = `${active}:${model}`;
+    setModelHealthMap((p) => ({ ...p, [key]: { phase: "checking" } }));
+    const res = await window.agenticxDesktop.healthCheckModel({
+      provider: active,
+      apiKey: current.apiKey,
+      baseUrl: current.baseUrl || undefined,
+      model,
+    });
+    const health = healthEntryFromCheckResult(res);
+    setModelHealthMap((p) => ({
+      ...p,
+      [key]: health,
+    }));
+    // Historically "+" visible models may lose key permission later; drop them
+    // from the visible list as soon as Model Auth denies the probe.
+    if (health.phase === "unauthorized" && current.models.includes(model)) {
+      await purgeUnauthorizedVisibleModel(model);
+    }
+  };
+
+  const onBatchHealthCheck = async () => {
+    if (!providerCredentialed(current) || current.models.length === 0) return;
+    // Snapshot: purge mutates draft.models mid-loop.
+    const modelsSnapshot = [...current.models];
+    for (const m of modelsSnapshot) {
+      const key = `${active}:${m}`;
+      setModelHealthMap((p) => ({ ...p, [key]: { phase: "checking" } }));
+      // Sequential avoids hammering the same endpoint in parallel.
+      // eslint-disable-next-line no-await-in-loop
+      const res = await window.agenticxDesktop.healthCheckModel({
+        provider: active,
+        apiKey: current.apiKey,
+        baseUrl: current.baseUrl || undefined,
+        model: m,
+      });
+      const health = healthEntryFromCheckResult(res);
+      setModelHealthMap((p) => ({
+        ...p,
+        [key]: health,
+      }));
+      if (health.phase === "unauthorized") {
+        // eslint-disable-next-line no-await-in-loop
+        await purgeUnauthorizedVisibleModel(m);
+      }
+    }
   };
 
   const closeAddModelModal = () => {
