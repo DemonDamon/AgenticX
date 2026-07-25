@@ -785,6 +785,7 @@ contextBridge.exposeInMainWorld("agenticxDesktop", {
     sessionId: string;
     sources: string[];
     mode?: "reference" | "copy" | "link";
+    explicit?: boolean;
   }) =>
     ipcRenderer.invoke("link-into-session-workspace", payload) as Promise<{
       ok: boolean;

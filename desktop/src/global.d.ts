@@ -1316,6 +1316,8 @@ declare global {
         sessionId: string;
         sources: string[];
         mode?: TaskspaceMountMode;
+        /** When true, skip covering-reference guard for mode=link (user-initiated). */
+        explicit?: boolean;
       }) => Promise<{
         ok: boolean;
         defaultDir?: string;

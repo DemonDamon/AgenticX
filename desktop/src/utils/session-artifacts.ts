@@ -242,6 +242,26 @@ function extractTableFilesUnderSaveDirs(content: string, paths: string[], seen: 
   }
 }
 
+/** True when a write-tool result body indicates failure (not merely in-flight). */
+export function isFailedWriteResultText(text: string | undefined | null): boolean {
+  const body = String(text ?? "");
+  const trimmed = body.trimStart();
+  if (trimmed.startsWith("ERROR:")) return true;
+  if (body.includes("path escapes workspace")) return true;
+  return false;
+}
+
+/**
+ * True when a pane tool message must not contribute `toolArgs.path` as an artifact.
+ * Explicit failure only — `toolStatus` undefined (history / agent_messages) is not failure.
+ */
+export function isFailedWriteToolMessage(message: Message): boolean {
+  if (message.toolStatus === "error") return true;
+  if (isFailedWriteResultText(message.content)) return true;
+  if (isFailedWriteResultText(message.toolResultPreview)) return true;
+  return false;
+}
+
 /**
  * Map persisted `agent_messages.json` rows into collector-friendly Message shapes.
  * Agent rows use OpenAI-style `name` + optional assistant `tool_calls`, while the
@@ -251,6 +271,18 @@ function extractTableFilesUnderSaveDirs(content: string, paths: string[], seen: 
 export function agentMessageRowsToCollectorMessages(rows: unknown[] | undefined | null): Message[] {
   const out: Message[] = [];
   if (!Array.isArray(rows)) return out;
+
+  // Pair assistant tool_calls with later role:tool results by tool_call_id.
+  const toolResultsById = new Map<string, string>();
+  for (let i = 0; i < rows.length; i += 1) {
+    const row = rows[i];
+    if (!row || typeof row !== "object") continue;
+    const r = row as Record<string, unknown>;
+    if (String(r.role || "").trim() !== "tool") continue;
+    const callId = String(r.tool_call_id || "").trim();
+    if (!callId) continue;
+    toolResultsById.set(callId, String(r.content ?? ""));
+  }
 
   for (let i = 0; i < rows.length; i += 1) {
     const row = rows[i];
@@ -301,11 +333,22 @@ export function agentMessageRowsToCollectorMessages(rows: unknown[] | undefined 
         } else if (rawArgs && typeof rawArgs === "object" && !Array.isArray(rawArgs)) {
           args = rawArgs as Record<string, unknown>;
         }
+        // Only trust toolArgs.path when a matching tool result exists and succeeded.
+        // In-flight calls (no result yet) and denied writes must not become artifacts.
+        const callId = String(call.id || "").trim();
+        const resultContent = callId ? toolResultsById.get(callId) : undefined;
+        const nextArgs: Record<string, unknown> = { ...args };
+        const argPath = String(args.path ?? "").trim();
+        if (argPath) {
+          if (resultContent === undefined || isFailedWriteResultText(resultContent)) {
+            delete nextArgs.path;
+          }
+        }
         out.push({
           id: String(call.id || `am-tc-${i}-${j}`),
           role: "tool",
           toolName: name,
-          toolArgs: args,
+          toolArgs: nextArgs,
           content: "",
           timestamp: 0,
         });
@@ -340,8 +383,11 @@ export function collectSessionArtifactPaths(
     if (role === "tool") {
       const toolName = String(message.toolName || "").trim();
       if (toolName === "file_write" || toolName === "file_edit") {
-        const argPath = String(message.toolArgs?.path ?? "").trim();
-        if (argPath) addPath(paths, seen, argPath);
+        // Denied / failed writes must not become auto-mount inputs (privilege escalation).
+        if (!isFailedWriteToolMessage(message)) {
+          const argPath = String(message.toolArgs?.path ?? "").trim();
+          if (argPath) addPath(paths, seen, argPath);
+        }
         extractOkWritePaths(String(message.content || ""), paths, seen);
         extractOkWritePaths(String(message.toolResultPreview || ""), paths, seen);
       } else if (toolName === "bash_exec") {

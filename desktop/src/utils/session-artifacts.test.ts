@@ -303,6 +303,147 @@ describe("collectArtifactPathsFromAgentMessages", () => {
     ];
     expect(collectArtifactPathsFromAgentMessages(rows)).toEqual([html]);
   });
+
+  it("does not collect path when paired tool result is ERROR / path escapes", () => {
+    const p = "/Users/damon/myWork/research-agent/requirements.txt";
+    const rows = [
+      {
+        role: "assistant",
+        content: "",
+        tool_calls: [
+          {
+            id: "call-edit-1",
+            type: "function",
+            function: {
+              name: "file_edit",
+              arguments: JSON.stringify({ path: p, old_str: "a", new_str: "b" }),
+            },
+          },
+        ],
+      },
+      {
+        role: "tool",
+        tool_call_id: "call-edit-1",
+        name: "file_edit",
+        content: `ERROR: path escapes workspace: ${p}`,
+      },
+    ];
+    expect(collectArtifactPathsFromAgentMessages(rows)).toEqual([]);
+  });
+
+  it("collects path when paired tool result is OK: edited", () => {
+    const p = "/Users/damon/x/a.txt";
+    const rows = [
+      {
+        role: "assistant",
+        content: "",
+        tool_calls: [
+          {
+            id: "call-edit-ok",
+            type: "function",
+            function: {
+              name: "file_edit",
+              arguments: JSON.stringify({ path: p, old_str: "a", new_str: "b" }),
+            },
+          },
+        ],
+      },
+      {
+        role: "tool",
+        tool_call_id: "call-edit-ok",
+        name: "file_edit",
+        content: `OK: edited ${p}`,
+      },
+    ];
+    expect(collectArtifactPathsFromAgentMessages(rows)).toEqual([p]);
+  });
+});
+
+describe("collectSessionArtifactPaths — successful write only", () => {
+  it("skips toolArgs.path when toolStatus is error + ERROR body", () => {
+    const p = "/Users/damon/myWork/research-agent/requirements.txt";
+    const messages: Message[] = [
+      toolMsg({
+        id: "t-err",
+        toolName: "file_edit",
+        toolStatus: "error",
+        toolArgs: { path: p },
+        content: `ERROR: path escapes workspace: ${p}`,
+      }),
+    ];
+    expect(collectSessionArtifactPaths(messages)).toEqual([]);
+  });
+
+  it("collects toolArgs.path when OK: edited and no failure status", () => {
+    const p = "/Users/damon/x/a.txt";
+    const messages: Message[] = [
+      toolMsg({
+        id: "t-ok",
+        toolName: "file_edit",
+        toolStatus: "done",
+        toolArgs: { path: p },
+        content: `OK: edited ${p}`,
+      }),
+    ];
+    expect(collectSessionArtifactPaths(messages)).toEqual([p]);
+  });
+
+  it("still collects when toolStatus is undefined and body is OK: edited", () => {
+    const p = "/Users/damon/x/a.txt";
+    const messages: Message[] = [
+      toolMsg({
+        id: "t-legacy",
+        toolName: "file_edit",
+        toolArgs: { path: p },
+        content: `OK: edited ${p}`,
+      }),
+    ];
+    expect(collectSessionArtifactPaths(messages)).toEqual([p]);
+  });
+});
+
+describe("denied write must not become an artifact", () => {
+  it("reproduces privilege-escalation accident: denied file_edit is not collected", () => {
+    const p = "/Users/damon/myWork/research-agent/requirements.txt";
+    const rows = [
+      {
+        role: "assistant",
+        content: "",
+        tool_calls: [
+          {
+            id: "functions.file_edit:denied",
+            type: "function",
+            function: {
+              name: "file_edit",
+              arguments: JSON.stringify({
+                path: p,
+                old_str: "langchain>=0.1.0",
+                new_str: "langchain>=0.1.0\ntorch==2.2.0",
+              }),
+            },
+          },
+        ],
+      },
+      {
+        role: "tool",
+        tool_call_id: "functions.file_edit:denied",
+        name: "file_edit",
+        content: `ERROR: path escapes workspace: ${p}`,
+      },
+    ];
+    expect(collectArtifactPathsFromAgentMessages(rows)).toEqual([]);
+
+    const paneMessages: Message[] = [
+      toolMsg({
+        id: "pane-denied",
+        toolName: "file_edit",
+        toolStatus: "error",
+        toolArgs: { path: p },
+        content: `ERROR: path escapes workspace: ${p}`,
+      }),
+    ];
+    expect(collectSessionArtifactPaths(paneMessages)).toEqual([]);
+  });
 });
 
 describe("artifact helpers", () => {

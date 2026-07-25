@@ -153,7 +153,8 @@ export async function ensureArtifactTaskspacesForSession(
         ? desktop.linkIntoSessionWorkspace.bind(desktop)
         : null;
     if (linker) {
-      const result = await linker({ sessionId: sid, sources: paths });
+      // Auto-sync is visibility-only: never grant write via default mode=link.
+      const result = await linker({ sessionId: sid, sources: paths, mode: "reference" });
       if (!result.ok) {
         return {
           ok: false,
