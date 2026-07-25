@@ -63,6 +63,7 @@ import {
   copySourceIntoWorkspace,
   createWorkspaceLink,
   diffSessionWorkspaceCopy,
+  findCoveringNonLinkMount,
   findMountForSource,
   type MountMode,
   upsertMount,
@@ -10987,7 +10988,13 @@ function registerIpc(): void {
     "link-into-session-workspace",
     async (
       _event,
-      payload: { sessionId?: string; sources?: string[]; mode?: MountMode },
+      payload: {
+        sessionId?: string;
+        sources?: string[];
+        mode?: MountMode;
+        /** User-initiated: skip covering-reference guard for mode=link. */
+        explicit?: boolean;
+      },
     ) => {
       try {
         const sid = String(payload?.sessionId || "").trim();
@@ -10999,6 +11006,7 @@ function registerIpc(): void {
           modeRaw === "reference" || modeRaw === "copy" || modeRaw === "link"
             ? modeRaw
             : "link";
+        const explicit = Boolean(payload?.explicit);
         const rawSources = Array.isArray(payload?.sources) ? payload.sources : [];
         const defaultDir = await resolveSessionDefaultWorkspaceDir(sid);
         await fs.promises.mkdir(defaultDir, { recursive: true });
@@ -11044,6 +11052,14 @@ function registerIpc(): void {
             if (existing.mode === mode) {
               linked += 1;
               created.push(path.join(defaultDir, existing.name));
+              continue;
+            }
+          }
+          // Block auto-link of a file already covered by a parent reference/copy mount.
+          // User-initiated mounts pass explicit:true to opt out.
+          if (mode === "link" && !explicit) {
+            const covering = await findCoveringNonLinkMount(defaultDir, sourceReal);
+            if (covering) {
               continue;
             }
           }

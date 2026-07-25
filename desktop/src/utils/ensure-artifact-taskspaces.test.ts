@@ -1,7 +1,8 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   SESSION_TASK_ARTIFACTS_DIRNAME,
   SESSION_TASK_ARTIFACTS_LABEL,
+  ensureArtifactTaskspacesForSession,
   sessionTaskArtifactsDir,
   shouldPruneAutoArtifactRoot,
 } from "./ensure-artifact-taskspaces";
@@ -51,5 +52,84 @@ describe("shouldPruneAutoArtifactRoot", () => {
     expect(
       shouldPruneAutoArtifactRoot("/Users/damon/myWork/AgenticX", opts),
     ).toBe(false);
+  });
+});
+
+describe("ensureArtifactTaskspacesForSession", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.restoreAllMocks();
+  });
+
+  it("calls linker with mode reference", async () => {
+    const linkIntoSessionWorkspace = vi.fn(
+      async (_payload: {
+        sessionId: string;
+        sources: string[];
+        mode?: string;
+      }) => ({
+        ok: true,
+        linked: 1,
+        defaultDir: "/tmp/d",
+      }),
+    );
+    const listTaskspaces = vi.fn(async () => ({
+      ok: true,
+      workspaces: [{ id: "default", path: "/tmp/d", label: "default" }],
+    }));
+    vi.stubGlobal("window", {
+      agenticxDesktop: {
+        listTaskspaces,
+        linkIntoSessionWorkspace,
+      },
+      dispatchEvent: vi.fn(() => true),
+    });
+    if (typeof globalThis.CustomEvent === "undefined") {
+      vi.stubGlobal(
+        "CustomEvent",
+        class CustomEvent {
+          type: string;
+          detail: unknown;
+          constructor(type: string, init?: { detail?: unknown }) {
+            this.type = type;
+            this.detail = init?.detail;
+          }
+        },
+      );
+    }
+
+    const result = await ensureArtifactTaskspacesForSession("sess-1", [
+      "/Users/damon/x/a.txt",
+    ]);
+    expect(result.ok).toBe(true);
+    expect(linkIntoSessionWorkspace).toHaveBeenCalledTimes(1);
+    expect(linkIntoSessionWorkspace.mock.calls[0]?.[0]).toMatchObject({
+      sessionId: "sess-1",
+      sources: ["/Users/damon/x/a.txt"],
+      mode: "reference",
+    });
+  });
+
+  it("does not call linker when paths are empty", async () => {
+    const linkIntoSessionWorkspace = vi.fn(async () => ({
+      ok: true,
+      linked: 0,
+      defaultDir: "/tmp/d",
+    }));
+    const listTaskspaces = vi.fn(async () => ({
+      ok: true,
+      workspaces: [{ id: "default", path: "/tmp/d", label: "default" }],
+    }));
+    vi.stubGlobal("window", {
+      agenticxDesktop: {
+        listTaskspaces,
+        linkIntoSessionWorkspace,
+      },
+      dispatchEvent: vi.fn(() => true),
+    });
+
+    const result = await ensureArtifactTaskspacesForSession("sess-1", []);
+    expect(result.ok).toBe(true);
+    expect(linkIntoSessionWorkspace).not.toHaveBeenCalled();
   });
 });

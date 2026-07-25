@@ -839,7 +839,13 @@ export function WorkspacePanel({
       setErrorText("当前客户端不支持添加到工作区，请完全重启桌面端后重试。");
       return false;
     }
-    const result = await linker({ sessionId: effectiveSessionId, sources: cleaned, mode });
+    const result = await linker({
+      sessionId: effectiveSessionId,
+      sources: cleaned,
+      mode,
+      // User-initiated mount: allow explicit link even under a covering reference.
+      explicit: true,
+    });
     setAdding(false);
     const failed = Array.isArray(result.failed) ? result.failed : [];
     const linked = Number(result.linked || 0);
@@ -1200,6 +1206,7 @@ export function WorkspacePanel({
       const linkResult = await linker({
         sessionId: browseSessionId,
         sources: [targetPath],
+        mode: "link",
       });
       if (!linkResult.ok) {
         setErrorText(linkResult.error ?? directPreview.error ?? "无法预览该文件");

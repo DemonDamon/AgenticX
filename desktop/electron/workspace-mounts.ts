@@ -93,6 +93,21 @@ export async function findMountForSource(
   return mounts.find((m) => m.name === base) ?? null;
 }
 
+/** Find a reference/copy mount whose source covers `sourcePath` (self or ancestor). */
+export async function findCoveringNonLinkMount(
+  defaultDir: string,
+  sourcePath: string,
+): Promise<MountRecord | null> {
+  const mounts = await readMounts(defaultDir);
+  for (const m of mounts) {
+    if (!m || m.mode === "link") continue;
+    if (await isRealpathUnder(sourcePath, m.source_path)) {
+      return m;
+    }
+  }
+  return null;
+}
+
 export function uniqueLinkName(destDir: string, sourcePath: string, used: Set<string>): string {
   const base = path.basename(sourcePath) || "item";
   if (!used.has(base) && !fs.existsSync(path.join(destDir, base))) {
