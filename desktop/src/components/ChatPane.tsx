@@ -11872,13 +11872,13 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
       </div>
 
       {!compactSidePanels && isGroupPane && pane.membersPanelOpen ? (
-        <div className="relative h-full shrink-0 overflow-hidden border-l border-border" style={{ width: taskspaceWidth }}>
+        <div className="relative h-full shrink-0 overflow-hidden" style={{ width: taskspaceWidth }}>
           <div
             className="group absolute -left-[3px] top-0 z-20 h-full w-2 cursor-col-resize"
             onMouseDown={startResizeTaskspace}
             title="拖拽调整面板宽度"
           >
-            <div className="mx-auto h-full w-px bg-[var(--ui-accent-divider)] transition-all duration-200 group-hover:w-[2px] group-hover:bg-[var(--ui-btn-primary-bg)]" />
+            <div className="mx-auto h-full w-px bg-[var(--border-strong)] transition-all duration-200 group-hover:w-[2px] group-hover:bg-[var(--ui-btn-primary-bg)]" />
           </div>
           <GroupMembersSidePanel
             groupId={groupChatId}
@@ -11893,7 +11893,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
           className={
             workExpandedLayout
               ? "relative h-full min-w-0 flex-1 overflow-hidden"
-              : "relative h-full shrink-0 overflow-hidden border-l border-border"
+              : "relative h-full shrink-0 overflow-hidden"
           }
           style={workExpandedLayout ? undefined : { width: taskspaceWidth }}
         >
@@ -11903,7 +11903,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
               onMouseDown={startResizeTaskspace}
               title="拖拽调整工作台面板宽度"
             >
-              <div className="mx-auto h-full w-px bg-[var(--ui-accent-divider)] transition-all duration-200 group-hover:w-[2px] group-hover:bg-[var(--ui-btn-primary-bg)]" />
+              <div className="mx-auto h-full w-px bg-[var(--border-strong)] transition-all duration-200 group-hover:w-[2px] group-hover:bg-[var(--ui-btn-primary-bg)]" />
             </div>
           ) : null}
           <WorkPanel
@@ -11958,13 +11958,13 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
         />
       ) : null}
       {!compactSidePanels && pane.memoryGraphOpen ? (
-        <div className="relative h-full shrink-0 overflow-hidden border-l border-border" style={{ width: historyWidth }}>
+        <div className="relative h-full shrink-0 overflow-hidden" style={{ width: historyWidth }}>
           <div
             className="group absolute -left-[3px] top-0 z-20 h-full w-2 cursor-col-resize"
             onMouseDown={startResizeHistory}
             title="拖拽调整记忆图谱面板宽度"
           >
-            <div className="mx-auto h-full w-px bg-[var(--ui-accent-divider)] transition-all duration-200 group-hover:w-[2px] group-hover:bg-[var(--ui-btn-primary-bg)]" />
+            <div className="mx-auto h-full w-px bg-[var(--border-strong)] transition-all duration-200 group-hover:w-[2px] group-hover:bg-[var(--ui-btn-primary-bg)]" />
           </div>
           <MemoryGraphPanel pane={pane} onClose={closeMemoryGraphPanelOnly} tintColor={paneTint} />
         </div>
@@ -11985,7 +11985,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
           />
           {isGroupPane && pane.membersPanelOpen ? (
             <div
-              className="pointer-events-auto absolute bottom-0 right-0 top-10 z-50 shrink-0 overflow-hidden border-l border-border bg-surface-base shadow-[6px_0_24px_rgba(0,0,0,0.28)]"
+              className="pointer-events-auto absolute bottom-0 right-0 top-10 z-50 shrink-0 overflow-hidden bg-surface-base shadow-[6px_0_24px_rgba(0,0,0,0.28)]"
               style={{ width: overlayTaskspaceWidth, WebkitAppRegion: "no-drag" } as CSSProperties}
             >
               <div
@@ -11993,7 +11993,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
                 onMouseDown={startResizeTaskspace}
                 title="拖拽调整面板宽度"
               >
-                <div className="mx-auto h-full w-px bg-[var(--ui-accent-divider)] transition-all duration-200 group-hover:w-[2px] group-hover:bg-[var(--ui-btn-primary-bg)]" />
+                <div className="mx-auto h-full w-px bg-[var(--border-strong)] transition-all duration-200 group-hover:w-[2px] group-hover:bg-[var(--ui-btn-primary-bg)]" />
               </div>
               <GroupMembersSidePanel
                 groupId={groupChatId}
@@ -12008,7 +12008,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
               className={
                 workExpandedLayout
                   ? "pointer-events-auto absolute inset-0 z-50 overflow-hidden bg-surface-base"
-                  : "pointer-events-auto absolute bottom-0 right-0 top-10 z-50 shrink-0 overflow-hidden border-l border-border bg-surface-base shadow-[6px_0_24px_rgba(0,0,0,0.28)]"
+                  : "pointer-events-auto absolute bottom-0 right-0 top-10 z-50 shrink-0 overflow-hidden bg-surface-base shadow-[6px_0_24px_rgba(0,0,0,0.28)]"
               }
               style={
                 workExpandedLayout
@@ -12022,7 +12022,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
                   onMouseDown={startResizeTaskspace}
                   title="拖拽调整工作台面板宽度"
                 >
-                  <div className="mx-auto h-full w-px bg-[var(--ui-accent-divider)] transition-all duration-200 group-hover:w-[2px] group-hover:bg-[var(--ui-btn-primary-bg)]" />
+                  <div className="mx-auto h-full w-px bg-[var(--border-strong)] transition-all duration-200 group-hover:w-[2px] group-hover:bg-[var(--ui-btn-primary-bg)]" />
                 </div>
               ) : null}
               <WorkPanel
@@ -12083,7 +12083,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
           ) : null}
           {pane.memoryGraphOpen ? (
             <div
-              className="pointer-events-auto absolute bottom-0 right-0 top-10 z-50 shrink-0 overflow-hidden border-l border-border bg-surface-base shadow-[6px_0_24px_rgba(0,0,0,0.28)]"
+              className="pointer-events-auto absolute bottom-0 right-0 top-10 z-50 shrink-0 overflow-hidden bg-surface-base shadow-[6px_0_24px_rgba(0,0,0,0.28)]"
               style={{ width: overlayHistoryWidth, WebkitAppRegion: "no-drag" } as CSSProperties}
             >
               <div
@@ -12091,7 +12091,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
                 onMouseDown={startResizeHistory}
                 title="拖拽调整记忆图谱面板宽度"
               >
-                <div className="mx-auto h-full w-px bg-[var(--ui-accent-divider)] transition-all duration-200 group-hover:w-[2px] group-hover:bg-[var(--ui-btn-primary-bg)]" />
+                <div className="mx-auto h-full w-px bg-[var(--border-strong)] transition-all duration-200 group-hover:w-[2px] group-hover:bg-[var(--ui-btn-primary-bg)]" />
               </div>
               <MemoryGraphPanel pane={pane} onClose={closeMemoryGraphPanelOnly} tintColor={paneTint} />
             </div>

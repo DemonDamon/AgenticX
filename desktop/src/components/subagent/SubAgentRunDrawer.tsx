@@ -124,7 +124,7 @@ export function SubAgentRunDrawer({
 
   return (
     <div
-      className="relative flex h-full min-h-0 shrink-0 flex-col border-l border-border bg-surface-card"
+      className="relative flex h-full min-h-0 shrink-0 flex-col bg-surface-card"
       style={{ width, ...(tintColor ? { backgroundColor: tintColor } : {}) }}
     >
       <div
@@ -132,7 +132,7 @@ export function SubAgentRunDrawer({
         onMouseDown={onResizeStart}
         title="拖拽调整落盘面板宽度"
       >
-        <div className="mx-auto h-full w-px bg-[var(--ui-accent-divider)] transition-all duration-200 group-hover:w-[2px] group-hover:bg-[var(--ui-btn-primary-bg)]" />
+        <div className="mx-auto h-full w-px bg-[var(--border-strong)] transition-all duration-200 group-hover:w-[2px] group-hover:bg-[var(--ui-btn-primary-bg)]" />
       </div>
       <div className="flex h-10 shrink-0 items-center justify-between border-b border-border px-2">
         <span className="text-xs text-text-subtle">子智能体落盘</span>
