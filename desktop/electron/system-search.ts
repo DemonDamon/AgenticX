@@ -54,6 +54,8 @@ const SEARCH_TIMEOUT_MS = 5000;
 const MAX_RESULTS = 200;
 const PREVIEW_MAX_BYTES = 64 * 1024;
 const PREVIEW_MAX_FILE_BYTES = 5 * 1024 * 1024;
+/** Image preview only returns a file URL — allow large assets (Trae-style). */
+const PREVIEW_MAX_IMAGE_BYTES = 100 * 1024 * 1024;
 
 const DOC_EXTENSIONS = new Set([
   ".md",
@@ -546,14 +548,23 @@ export async function previewSystemSearchFile(filePath: string): Promise<SystemS
         content: `文件夹\n${resolved}`,
       };
     }
+
+    const ext = path.extname(resolved).toLowerCase();
+    if (IMAGE_EXTENSIONS.has(ext)) {
+      if (st.size > PREVIEW_MAX_IMAGE_BYTES) {
+        return {
+          ok: false,
+          kind: "metadata",
+          error: `图片超过 ${Math.round(PREVIEW_MAX_IMAGE_BYTES / 1024 / 1024)}MB，无法预览`,
+        };
+      }
+      return { ok: true, kind: "image", fileUrl: `file://${resolved}` };
+    }
+
     if (st.size > PREVIEW_MAX_FILE_BYTES) {
       return { ok: false, kind: "metadata", error: "文件超过 5MB，无法预览" };
     }
 
-    const ext = path.extname(resolved).toLowerCase();
-    if (IMAGE_EXTENSIONS.has(ext)) {
-      return { ok: true, kind: "image", fileUrl: `file://${resolved}` };
-    }
     if (TEXT_PREVIEW_EXTENSIONS.has(ext) || ext === "") {
       const buf = await fs.promises.readFile(resolved);
       const truncated = buf.length > PREVIEW_MAX_BYTES;

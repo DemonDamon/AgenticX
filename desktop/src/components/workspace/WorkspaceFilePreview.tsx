@@ -405,7 +405,7 @@ function ImagePreviewBody({
     <div className="relative flex h-full min-h-0 flex-col bg-surface-base">
       <div
         ref={containerRef}
-        className="relative min-h-0 flex-1 overflow-hidden"
+        className="relative flex min-h-0 flex-1 items-center justify-center overflow-hidden"
         style={{ cursor: isDragging ? "grabbing" : "grab" }}
         onWheel={handleWheel}
         onMouseDown={handleMouseDown}
@@ -419,16 +419,9 @@ function ImagePreviewBody({
           src={dataUrl}
           alt=""
           draggable={false}
-          className="rounded-lg object-contain"
+          className="max-h-full max-w-full object-contain select-none"
           style={{
-            position: "absolute",
-            top: "50%",
-            left: "50%",
-            maxWidth: "92%",
-            maxHeight: "92%",
-            width: "auto",
-            height: "auto",
-            transform: `translate(calc(-50% + ${offset.x}px), calc(-50% + ${offset.y}px)) scale(${scale})`,
+            transform: `translate(${offset.x}px, ${offset.y}px) scale(${scale})`,
             transformOrigin: "center center",
             userSelect: "none",
             pointerEvents: "none",

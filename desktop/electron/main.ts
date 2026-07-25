@@ -10823,11 +10823,19 @@ function registerIpc(): void {
   });
 
   ipcMain.handle("load-local-image-data-url", async (_event, inputPath: string) => {
+    const LOCAL_IMAGE_MAX_BYTES = 100 * 1024 * 1024;
     try {
       const normalized = normalizeLocalFsPath(inputPath);
       if (!normalized) return { ok: false, error: "empty path" };
       if (!fs.existsSync(normalized)) {
         return { ok: false, error: `file not found: ${normalized}` };
+      }
+      const stat = await fs.promises.stat(normalized);
+      if (stat.size > LOCAL_IMAGE_MAX_BYTES) {
+        return {
+          ok: false,
+          error: `图片超过 ${Math.round(LOCAL_IMAGE_MAX_BYTES / 1024 / 1024)}MB，无法预览`,
+        };
       }
       const buf = await fs.promises.readFile(normalized);
       const ext = path.extname(normalized).toLowerCase();
