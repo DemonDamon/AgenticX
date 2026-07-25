@@ -35,9 +35,11 @@ import { resolveSubAgentOutputPaths } from "./utils/subagent-output-files";
 import { addFolderToActiveWorkspace } from "./utils/global-search-workspace";
 import {
   coerceSelectableModel,
+  isModelSelectable,
   normalizeAllProviders,
   normalizeProviderEntry,
 } from "./utils/model-options";
+import { scanAndPruneUnauthorizedVisibleModels } from "./utils/prune-unauthorized-visible-models";
 import { avatarPreloadKey, fetchAvatarsWithStartupRetry, fetchGroupsWithStartupRetry, fetchSessionsWithStartupRetry, mapAvatarsFromApi, runSplashCorePreload } from "./utils/splash-preload-core";
 
 const WORKSPACE_STATE_STORAGE_KEY = "agx-workspace-state-v1";
@@ -563,6 +565,79 @@ export function App() {
       }
 
       setConfigLoaded(true);
+
+      // Background: drop historically visible models that the current key cannot call
+      // (gateway Model Auth). Must not block splash / startupRendererReady.
+      void (async () => {
+        try {
+          const providers = useAppStore.getState().settings.providers ?? {};
+          const result = await scanAndPruneUnauthorizedVisibleModels({
+            providers,
+            healthCheck: (payload) => window.agenticxDesktop.healthCheckModel(payload),
+          });
+          if (result.removed.length === 0) return;
+
+          for (const providerId of result.changedProviderIds) {
+            const entry = result.providers[providerId];
+            if (!entry) continue;
+            await window.agenticxDesktop.saveProvider({
+              name: providerId,
+              apiKey: entry.apiKey || undefined,
+              baseUrl: entry.baseUrl || undefined,
+              model: entry.model || undefined,
+              models: entry.models,
+              enabled: entry.enabled,
+              dropParams: entry.dropParams,
+              ...(entry.displayName !== undefined
+                ? { displayName: entry.displayName.trim() }
+                : {}),
+              ...(entry.interface === "openai" || entry.interface === "ollama"
+                ? { interface: entry.interface }
+                : {}),
+            });
+          }
+
+          const defP = useAppStore.getState().settings.defaultProvider ?? "";
+          const defEntry = result.providers[defP];
+          updateSettings({
+            providers: result.providers,
+            ...(defEntry
+              ? {
+                  model: defEntry.model ?? "",
+                  apiKey: defEntry.apiKey ?? "",
+                }
+              : {}),
+          });
+
+          const store = useAppStore.getState();
+          const activeProvider = (store.activeProvider || defP || "").trim();
+          const activeModel = (store.activeModel || "").trim();
+          if (
+            activeProvider
+            && activeModel
+            && !isModelSelectable(activeProvider, activeModel, result.providers)
+          ) {
+            const coerced = coerceSelectableModel(
+              result.providers,
+              activeProvider,
+              activeModel,
+              activeProvider || defP,
+            );
+            if (coerced) {
+              setActiveModel(coerced.provider, coerced.model);
+            }
+          }
+          await persistReconciledPaneModels();
+
+          setGlobalSearchToastMessage(
+            `已移出 ${result.removed.length} 个未授权模型`,
+          );
+          setGlobalSearchToastVariant("warning");
+          setGlobalSearchToastOpen(true);
+        } catch (err) {
+          console.warn("[App init] prune unauthorized visible models failed:", err);
+        }
+      })();
 
       // Splash 预加载分身 / 会话列表 / 工作区 / 活跃 session 消息，再关 splash 进主窗。
       await runSplashCorePreload();
