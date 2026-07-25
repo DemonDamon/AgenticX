@@ -58,6 +58,7 @@ import { proxyAwareFetch, logProxyConfig } from "./proxy-fetch";
 import { fetchFaviconDataUrl } from "./fetch-favicon";
 import { classifyModelHealthFailure } from "./model-health";
 import { isRealpathUnder, safeRealpath } from "./path-guard";
+import { writeLocalTextFileAtomic } from "./write-local-text-file";
 import {
   applySessionWorkspaceCopy,
   copySourceIntoWorkspace,
@@ -10909,31 +10910,24 @@ function registerIpc(): void {
     }
   });
 
-  const WRITE_LOCAL_TEXT_MAX_BYTES = 512 * 1024;
-
-  ipcMain.handle("write-local-text-file", async (_event, payload: { path?: string; content?: string }) => {
-    try {
-      const raw = String(payload?.path || "").trim();
-      if (!raw) return { ok: false, error: "empty path" };
-      const normalized = normalizeLocalFsPath(raw);
-      if (!fs.existsSync(normalized)) {
-        return { ok: false, error: "file not found" };
+  ipcMain.handle(
+    "write-local-text-file",
+    async (
+      _event,
+      payload: {
+        path?: string;
+        content?: string;
+        expectedMtimeMs?: number;
+        eol?: "lf" | "crlf";
+      },
+    ) => {
+      try {
+        return await writeLocalTextFileAtomic(payload ?? {}, normalizeLocalFsPath);
+      } catch (err) {
+        return { ok: false, error: String(err) };
       }
-      const stat = await fs.promises.stat(normalized);
-      if (stat.isDirectory()) {
-        return { ok: false, error: "path is a directory" };
-      }
-      const content = String(payload?.content ?? "");
-      const bytes = Buffer.byteLength(content, "utf8");
-      if (bytes > WRITE_LOCAL_TEXT_MAX_BYTES) {
-        return { ok: false, error: `file too large to write (${bytes} bytes > ${WRITE_LOCAL_TEXT_MAX_BYTES})` };
-      }
-      await fs.promises.writeFile(normalized, content, "utf8");
-      return { ok: true, size: bytes };
-    } catch (err) {
-      return { ok: false, error: String(err) };
-    }
-  });
+    },
+  );
 
   /** Default Meta session workspace: ~/.agenticx/taskspaces/<sid>/default */
   const resolveSessionDefaultWorkspaceDir = async (sid: string): Promise<string> => {

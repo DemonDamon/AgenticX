@@ -47,6 +47,8 @@ export type SystemSearchPreviewResult = {
   content?: string;
   fileUrl?: string;
   truncated?: boolean;
+  /** File mtime in ms since epoch — used by workspace text editor stale-write guard. */
+  mtimeMs?: number;
   error?: string;
 };
 
@@ -558,7 +560,12 @@ export async function previewSystemSearchFile(filePath: string): Promise<SystemS
           error: `图片超过 ${Math.round(PREVIEW_MAX_IMAGE_BYTES / 1024 / 1024)}MB，无法预览`,
         };
       }
-      return { ok: true, kind: "image", fileUrl: `file://${resolved}` };
+      return {
+        ok: true,
+        kind: "image",
+        fileUrl: `file://${resolved}`,
+        mtimeMs: st.mtimeMs,
+      };
     }
 
     if (st.size > PREVIEW_MAX_FILE_BYTES) {
@@ -574,12 +581,14 @@ export async function previewSystemSearchFile(filePath: string): Promise<SystemS
         kind: "text",
         content: slice.toString("utf8"),
         truncated,
+        mtimeMs: st.mtimeMs,
       };
     }
     return {
       ok: true,
       kind: "metadata",
       content: `${ext || "文件"}\n大小：${st.size} 字节\n修改时间：${new Date(st.mtimeMs).toLocaleString()}`,
+      mtimeMs: st.mtimeMs,
     };
   } catch (error) {
     return { ok: false, kind: "metadata", error: String(error) };

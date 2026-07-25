@@ -63,6 +63,14 @@ import {
   type SelectionPopupAnchor,
 } from "./selection-quote-popover";
 import { resolveMarkdownHostPath } from "../../utils/workspace-file-path";
+import { Modal } from "../ds/Modal";
+import { Button } from "../ds/Button";
+import { getEditBlockReason } from "./workspace-edit-guard";
+import {
+  detectTextEol,
+  toEditorLf,
+  type TextEol,
+} from "./workspace-edit-limits";
 
 type TextualPreview = {
   kind: "text" | "markdown" | "code";
@@ -72,6 +80,7 @@ type TextualPreview = {
   size: number;
   truncated: boolean;
   mimeType: string;
+  mtimeMs?: number;
 };
 
 type BinaryLikePreview = {
@@ -103,6 +112,15 @@ export type WorkspaceFilePreviewProps = {
   initialLineRange?: WorkspacePreviewLineRange;
   /** Taskspace root for resolving relative absolutePath / image assets. */
   taskspaceRoot?: string;
+  /** Notify parent when dirty state changes (for tab-close / tab-switch guards). */
+  onDirtyChange?: (dirty: boolean) => void;
+  /**
+   * Register requestLeave(proceed): if dirty, confirm first; on save/discard run proceed().
+   * Used for close and tab-switch guards.
+   */
+  onProvideRequestLeave?: (
+    requestLeave: ((proceed: () => void) => void) | null,
+  ) => void;
 };
 
 function detectLanguage(path: string): string {
@@ -691,6 +709,7 @@ function TextualPreviewBody({
   textareaRef,
   renderHtml,
   onViewHtmlSource,
+  allowEdit,
 }: {
   preview: TextualPreview;
   onQuoteSnippet?: (payload: WorkspacePreviewQuotePayload) => void;
@@ -703,6 +722,8 @@ function TextualPreviewBody({
   /** When true and viewMode is preview, render HTML via sandboxed iframe. */
   renderHtml?: boolean;
   onViewHtmlSource?: () => void;
+  /** When true, viewMode=edit renders a writable textarea. */
+  allowEdit?: boolean;
 }) {
   const showHtmlRender = !!renderHtml && viewMode === "preview" && !initialLineRange;
 
@@ -710,8 +731,8 @@ function TextualPreviewBody({
     if (preview.kind === "markdown" || showHtmlRender) return "";
     const language = detectLanguage(preview.path);
     const grammar = Prism.languages[language] ?? Prism.languages.clike;
-    return Prism.highlight(preview.content, grammar, language);
-  }, [preview, showHtmlRender]);
+    return Prism.highlight(editContent, grammar, language);
+  }, [preview.kind, preview.path, editContent, showHtmlRender]);
 
   const markdownContent = useMemo(() => {
     if (preview.kind !== "markdown") return "";
@@ -835,7 +856,7 @@ function TextualPreviewBody({
   if (showHtmlRender) {
     return (
       <HtmlPreviewShell
-        content={preview.content}
+        content={editContent}
         title={previewBaseName(preview.path)}
         documentPath={preview.absolutePath}
         onViewSource={onViewHtmlSource}
@@ -844,7 +865,7 @@ function TextualPreviewBody({
     );
   }
 
-  if (preview.kind === "markdown" && viewMode === "edit") {
+  if (viewMode === "edit" && allowEdit) {
     return (
       <textarea
         ref={textareaRef}
@@ -853,7 +874,7 @@ function TextualPreviewBody({
         value={editContent}
         onChange={(e) => onEditContentChange(e.target.value)}
         spellCheck={false}
-        aria-label="编辑 Markdown 源码"
+        aria-label={`编辑 ${previewBaseName(preview.path)}`}
       />
     );
   }
@@ -944,23 +965,39 @@ export function WorkspaceFilePreview({
   revealInFileManagerLabel,
   initialLineRange,
   taskspaceRoot,
+  onDirtyChange,
+  onProvideRequestLeave,
 }: WorkspaceFilePreviewProps) {
   const isPanel = layout === "panel";
   const truncated =
     preview.kind === "text" || preview.kind === "markdown" || preview.kind === "code"
       ? preview.truncated
       : false;
-  const isEditableMarkdown =
-    preview.kind === "markdown" && !truncated && !initialLineRange;
   const textualPreview =
     preview.kind === "text" || preview.kind === "markdown" || preview.kind === "code"
       ? (preview as TextualPreview)
       : null;
   const isHtmlFile =
     textualPreview != null && isHtmlPreviewPath(textualPreview.path) && !initialLineRange;
+  const isRenderablePreview =
+    preview.kind === "markdown" || isHtmlFile;
 
+  const editBlockReason = useMemo(
+    () =>
+      getEditBlockReason({
+        hasTextualPreview: textualPreview != null,
+        truncated,
+        content: textualPreview?.content ?? "",
+        size: textualPreview?.size ?? 0,
+        initialLineRange,
+      }),
+    [textualPreview, truncated, initialLineRange],
+  );
+  const isEditableText = textualPreview != null && editBlockReason === null;
+
+  const editorInitialContent = textualPreview ? toEditorLf(textualPreview.content) : "";
   const editResetKey = textualPreview
-    ? `${textualPreview.absolutePath}:${textualPreview.content.length}`
+    ? `${textualPreview.absolutePath}:${textualPreview.content.length}:${textualPreview.mtimeMs ?? ""}`
     : "";
 
   const {
@@ -970,10 +1007,16 @@ export function WorkspaceFilePreview({
     redo,
     canUndo,
     canRedo,
-  } = useTextEditHistory(textualPreview?.content ?? "", editResetKey);
+  } = useTextEditHistory(editorInitialContent, editResetKey);
 
   const [viewMode, setViewMode] = useState<TextualViewMode>("preview");
-  const [savedBaseline, setSavedBaseline] = useState(textualPreview?.content ?? "");
+  const [savedBaseline, setSavedBaseline] = useState(editorInitialContent);
+  const [fileEol, setFileEol] = useState<TextEol>(
+    textualPreview ? detectTextEol(textualPreview.content) : "lf",
+  );
+  const [baselineMtimeMs, setBaselineMtimeMs] = useState<number | undefined>(
+    typeof textualPreview?.mtimeMs === "number" ? textualPreview.mtimeMs : undefined,
+  );
   const [saveError, setSaveError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [findBarOpen, setFindBarOpen] = useState(false);
@@ -981,7 +1024,9 @@ export function WorkspaceFilePreview({
   const [replaceText, setReplaceText] = useState("");
   const [findStatus, setFindStatus] = useState<string | null>(null);
   const [saveToast, setSaveToast] = useState("");
+  const [dirtyConfirmOpen, setDirtyConfirmOpen] = useState(false);
   const saveToastTimerRef = useRef<number | null>(null);
+  const pendingLeaveRef = useRef<(() => void) | null>(null);
   const editTextareaRef = useRef<HTMLTextAreaElement | null>(null);
   const findInputRef = useRef<HTMLTextAreaElement | null>(null);
 
@@ -1008,15 +1053,25 @@ export function WorkspaceFilePreview({
   useEffect(() => {
     if (!textualPreview) return;
     setViewMode("preview");
-    setSavedBaseline(textualPreview.content);
+    const lf = toEditorLf(textualPreview.content);
+    setSavedBaseline(lf);
+    setFileEol(detectTextEol(textualPreview.content));
+    setBaselineMtimeMs(
+      typeof textualPreview.mtimeMs === "number" ? textualPreview.mtimeMs : undefined,
+    );
     setSaveError(null);
     setFindBarOpen(false);
     setFindText("");
     setReplaceText("");
     setFindStatus(null);
-  }, [textualPreview?.path, textualPreview?.absolutePath, textualPreview?.content]);
+    setDirtyConfirmOpen(false);
+  }, [textualPreview?.path, textualPreview?.absolutePath, textualPreview?.content, textualPreview?.mtimeMs]);
 
   const isDirty = textualPreview != null && editContent !== savedBaseline;
+
+  useEffect(() => {
+    onDirtyChange?.(isDirty);
+  }, [isDirty, onDirtyChange]);
 
   const persistEditContent = useCallback(async (): Promise<boolean> => {
     if (!textualPreview || !isDirty) return true;
@@ -1028,12 +1083,24 @@ export function WorkspaceFilePreview({
     setSaving(true);
     setSaveError(null);
     try {
-      const res = await api({ path: textualPreview.absolutePath, content: editContent });
+      const res = await api({
+        path: textualPreview.absolutePath,
+        content: editContent,
+        eol: fileEol,
+        ...(typeof baselineMtimeMs === "number" ? { expectedMtimeMs: baselineMtimeMs } : {}),
+      });
       if (!res.ok) {
-        setSaveError(res.error ?? "保存失败");
+        if (res.code === "STALE") {
+          setSaveError("文件已被外部修改，请关闭后重新打开");
+        } else {
+          setSaveError(res.error ?? "保存失败");
+        }
         return false;
       }
       setSavedBaseline(editContent);
+      if (typeof res.mtimeMs === "number") {
+        setBaselineMtimeMs(res.mtimeMs);
+      }
       return true;
     } catch (err) {
       setSaveError(String(err));
@@ -1041,10 +1108,10 @@ export function WorkspaceFilePreview({
     } finally {
       setSaving(false);
     }
-  }, [editContent, isDirty, textualPreview]);
+  }, [baselineMtimeMs, editContent, fileEol, isDirty, textualPreview]);
 
   const handleSave = useCallback(async () => {
-    if (!isEditableMarkdown || viewMode !== "edit") return;
+    if (!isEditableText || viewMode !== "edit") return;
     if (!isDirty) {
       showSaveToast("已是最新");
       return;
@@ -1055,7 +1122,7 @@ export function WorkspaceFilePreview({
     } else {
       showSaveToast("保存失败");
     }
-  }, [isDirty, isEditableMarkdown, persistEditContent, showSaveToast, viewMode]);
+  }, [isDirty, isEditableText, persistEditContent, showSaveToast, viewMode]);
 
   const switchToPreview = useCallback(async () => {
     if (viewMode === "preview") return;
@@ -1065,6 +1132,49 @@ export function WorkspaceFilePreview({
     }
     setViewMode("preview");
   }, [isDirty, persistEditContent, viewMode]);
+
+  const finishLeave = useCallback(() => {
+    const proceed = pendingLeaveRef.current;
+    pendingLeaveRef.current = null;
+    setDirtyConfirmOpen(false);
+    if (proceed) proceed();
+    else onClose();
+  }, [onClose]);
+
+  const requestLeave = useCallback(
+    (proceed: () => void) => {
+      if (!isDirty) {
+        proceed();
+        return;
+      }
+      pendingLeaveRef.current = proceed;
+      setDirtyConfirmOpen(true);
+    },
+    [isDirty],
+  );
+
+  const requestClose = useCallback(() => {
+    requestLeave(onClose);
+  }, [onClose, requestLeave]);
+
+  useEffect(() => {
+    if (!onProvideRequestLeave) return;
+    onProvideRequestLeave(requestLeave);
+    return () => onProvideRequestLeave(null);
+  }, [onProvideRequestLeave, requestLeave]);
+
+  const handleDirtySaveAndLeave = useCallback(async () => {
+    const ok = await persistEditContent();
+    if (!ok) {
+      showSaveToast("保存失败");
+      return;
+    }
+    finishLeave();
+  }, [finishLeave, persistEditContent, showSaveToast]);
+
+  const handleDirtyDiscardAndLeave = useCallback(() => {
+    finishLeave();
+  }, [finishLeave]);
 
   const selectTextRange = useCallback((start: number, end: number) => {
     const textarea = editTextareaRef.current;
@@ -1182,7 +1292,7 @@ export function WorkspaceFilePreview({
   }, [editContent, onCopy, preview, textualPreview]);
 
   useEffect(() => {
-    if (!isEditableMarkdown || viewMode !== "edit") return;
+    if (!isEditableText || viewMode !== "edit") return;
     const onKeyDown = (e: KeyboardEvent) => {
       const mod = e.metaKey || e.ctrlKey;
       if (mod && e.key.toLowerCase() === "z" && !e.shiftKey) {
@@ -1207,7 +1317,7 @@ export function WorkspaceFilePreview({
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [handleSave, isEditableMarkdown, openFindBar, redo, undo, viewMode]);
+  }, [handleSave, isEditableText, openFindBar, redo, undo, viewMode]);
 
   useEffect(() => {
     if (findBarOpen) {
@@ -1305,8 +1415,16 @@ export function WorkspaceFilePreview({
           ) : saving ? (
             <div className="shrink-0 text-[11px] text-text-muted">保存中…</div>
           ) : null}
+          {textualPreview != null && editBlockReason != null ? (
+            <div
+              className="ml-2 max-w-[220px] truncate text-[11px] text-text-muted"
+              title={editBlockReason}
+            >
+              {editBlockReason}
+            </div>
+          ) : null}
           <div className="ml-2 flex shrink-0 items-center gap-1">
-            {isHtmlFile ? (
+            {isHtmlFile && !isEditableText ? (
               <>
                 <button
                   type="button"
@@ -1337,7 +1455,7 @@ export function WorkspaceFilePreview({
                 <div className="h-4 w-px bg-border opacity-50" />
               </>
             ) : null}
-            {isEditableMarkdown ? (
+            {isEditableText ? (
               <>
                 <button
                   type="button"
@@ -1347,7 +1465,7 @@ export function WorkspaceFilePreview({
                       : "text-text-muted hover:bg-surface-hover hover:text-text-strong"
                   }`}
                   onClick={() => void switchToPreview()}
-                  title="预览"
+                  title={isRenderablePreview ? "预览" : "只读"}
                   aria-pressed={viewMode === "preview"}
                 >
                   <Eye className="h-4 w-4" strokeWidth={1.5} />
@@ -1360,10 +1478,14 @@ export function WorkspaceFilePreview({
                       : "text-text-muted hover:bg-surface-hover hover:text-text-strong"
                   }`}
                   onClick={() => setViewMode("edit")}
-                  title="编辑源码"
+                  title={isRenderablePreview ? "编辑源码" : "编辑"}
                   aria-pressed={viewMode === "edit"}
                 >
-                  <Pencil className="h-4 w-4" strokeWidth={1.5} />
+                  {isHtmlFile ? (
+                    <Code2 className="h-4 w-4" strokeWidth={1.5} />
+                  ) : (
+                    <Pencil className="h-4 w-4" strokeWidth={1.5} />
+                  )}
                 </button>
                 {viewMode === "edit" ? (
                   <>
@@ -1429,14 +1551,14 @@ export function WorkspaceFilePreview({
             <button
               type="button"
               className="flex h-7 w-7 items-center justify-center rounded-md text-text-muted transition-colors hover:bg-surface-hover hover:text-text-strong"
-              onClick={onClose}
+              onClick={requestClose}
               title="关闭预览（Esc）"
             >
               <X className="h-4 w-4" strokeWidth={1.5} />
             </button>
           </div>
         </div>
-        {isEditableMarkdown && viewMode === "edit" && findBarOpen ? (
+        {isEditableText && viewMode === "edit" && findBarOpen ? (
           <div className="flex shrink-0 flex-wrap items-start gap-2 border-b border-border bg-surface-panel px-4 py-2">
             <textarea
               ref={findInputRef}
@@ -1562,13 +1684,14 @@ export function WorkspaceFilePreview({
               preview={preview as TextualPreview}
               onQuoteSnippet={onQuoteSnippet}
               initialLineRange={initialLineRange}
-              viewMode={isEditableMarkdown || isHtmlFile ? viewMode : "preview"}
+              viewMode={isEditableText || isHtmlFile ? viewMode : "preview"}
               editContent={editContent}
               onEditContentChange={setEditContent}
               markdownHostPath={markdownHostPath}
               textareaRef={editTextareaRef}
               renderHtml={isHtmlFile}
               onViewHtmlSource={isHtmlFile ? () => setViewMode("edit") : undefined}
+              allowEdit={isEditableText}
             />
           )}
         </div>
@@ -1576,7 +1699,7 @@ export function WorkspaceFilePreview({
           <div className="shrink-0 border-t border-border bg-rose-500/10 px-4 py-2 text-xs text-rose-300">
             保存失败：{saveError}
           </div>
-        ) : isEditableMarkdown && viewMode === "edit" && isDirty && !saving ? (
+        ) : isEditableText && viewMode === "edit" && isDirty && !saving ? (
           <div className="shrink-0 border-t border-border bg-surface-panel px-4 py-2 text-xs text-text-muted">
             有未保存修改 · ⌘S 保存 · ⌘Z 撤销 · ⌘F 查找替换
           </div>
@@ -1586,6 +1709,43 @@ export function WorkspaceFilePreview({
             文件过大，已截断显示（{formatPreviewBytes(preview.size)}）。
           </div>
         ) : null}
+        <Modal
+          open={dirtyConfirmOpen}
+          title="有未保存修改"
+          onClose={() => {
+            pendingLeaveRef.current = null;
+            setDirtyConfirmOpen(false);
+          }}
+          panelClassName="w-full max-w-[400px] bg-surface-panel"
+          footer={
+            <div className="flex justify-end gap-2">
+              <Button variant="ghost" onClick={handleDirtyDiscardAndLeave}>
+                放弃修改
+              </Button>
+              <Button
+                variant="ghost"
+                onClick={() => {
+                  pendingLeaveRef.current = null;
+                  setDirtyConfirmOpen(false);
+                }}
+              >
+                取消
+              </Button>
+              <Button
+                variant="primary"
+                onClick={() => {
+                  void handleDirtySaveAndLeave();
+                }}
+              >
+                保存并关闭
+              </Button>
+            </div>
+          }
+        >
+          <p className="text-sm text-text-primary">
+            当前文件有未保存的修改，离开前请选择如何处理。
+          </p>
+        </Modal>
       </div>
   );
 
@@ -1603,7 +1763,7 @@ export function WorkspaceFilePreview({
           left: 0,
           right: Math.max(0, window.innerWidth - (anchor?.left ?? 0)),
         }}
-        onMouseDown={onClose}
+        onMouseDown={requestClose}
         aria-hidden
       />
       {shell}

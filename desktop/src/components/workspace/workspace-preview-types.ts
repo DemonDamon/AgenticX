@@ -72,6 +72,8 @@ export type WorkspacePreview =
       size: number;
       truncated: boolean;
       mimeType: string;
+      /** Optional mtime from preview loader — used for stale-write guard on save. */
+      mtimeMs?: number;
     }
   | {
       kind: "image";
@@ -101,6 +103,8 @@ export type TaskspaceFilePreviewApi = {
   preview_kind?: WorkspacePreviewKind;
   is_binary?: boolean;
   preview_supported?: boolean;
+  /** Optional; when absent, save falls back to no expectedMtimeMs guard. */
+  mtimeMs?: number;
   error?: string;
 };
 
@@ -169,13 +173,14 @@ export function mapTaskspaceFileToWorkspacePreview(
 
   const content = result.content ?? "";
   const truncated = !!result.truncated;
+  const mtimeMs = typeof result.mtimeMs === "number" ? result.mtimeMs : undefined;
   if (previewKind === "markdown") {
-    return { kind: "markdown", path, absolutePath, content, size, truncated, mimeType };
+    return { kind: "markdown", path, absolutePath, content, size, truncated, mimeType, mtimeMs };
   }
   if (previewKind === "text") {
-    return { kind: "text", path, absolutePath, content, size, truncated, mimeType };
+    return { kind: "text", path, absolutePath, content, size, truncated, mimeType, mtimeMs };
   }
-  return { kind: "code", path, absolutePath, content, size, truncated, mimeType };
+  return { kind: "code", path, absolutePath, content, size, truncated, mimeType, mtimeMs };
 }
 
 export function mapSystemSearchPreviewToWorkspacePreview(
@@ -186,6 +191,7 @@ export function mapSystemSearchPreviewToWorkspacePreview(
     content?: string;
     fileUrl?: string;
     truncated?: boolean;
+    mtimeMs?: number;
     error?: string;
   }
 ): WorkspacePreview | null {
@@ -214,18 +220,28 @@ export function mapSystemSearchPreviewToWorkspacePreview(
     const content = result.content;
     const size = content.length;
     const truncated = !!result.truncated;
+    const mtimeMs = typeof result.mtimeMs === "number" ? result.mtimeMs : undefined;
     if (
       lower.endsWith(".md") ||
       lower.endsWith(".mmd") ||
       lower.endsWith(".markdown") ||
       lower.endsWith(".mdx")
     ) {
-      return { kind: "markdown", path, absolutePath, content, size, truncated, mimeType };
+      return { kind: "markdown", path, absolutePath, content, size, truncated, mimeType, mtimeMs };
     }
     if (lower.endsWith(".txt") || lower.endsWith(".log")) {
-      return { kind: "text", path, absolutePath, content, size, truncated, mimeType: "text/plain" };
+      return {
+        kind: "text",
+        path,
+        absolutePath,
+        content,
+        size,
+        truncated,
+        mimeType: "text/plain",
+        mtimeMs,
+      };
     }
-    return { kind: "code", path, absolutePath, content, size, truncated, mimeType };
+    return { kind: "code", path, absolutePath, content, size, truncated, mimeType, mtimeMs };
   }
 
   return {
