@@ -5407,13 +5407,21 @@ def create_studio_app() -> FastAPI:
         if not session_id or not taskspace_id:
             raise HTTPException(status_code=400, detail="session_id and taskspace_id are required")
         try:
-            files = manager.list_taskspace_files(session_id, taskspace_id, rel_path=path)
+            listing = manager.list_taskspace_files(session_id, taskspace_id, rel_path=path)
         except KeyError as exc:
             detail = str(exc.args[0]) if getattr(exc, "args", None) else "session not found"
             raise HTTPException(status_code=404, detail=detail)
         except (ValueError, FileNotFoundError, NotADirectoryError) as exc:
             raise HTTPException(status_code=400, detail=str(exc))
-        return {"ok": True, "files": files}
+        # Backward-compatible: older callers expect ``files``; also expose truncation.
+        if isinstance(listing, dict):
+            return {
+                "ok": True,
+                "files": listing.get("files") or [],
+                "truncated": bool(listing.get("truncated")),
+                "total_seen": int(listing.get("total_seen") or 0),
+            }
+        return {"ok": True, "files": listing}
 
     @app.get("/api/taskspace/file")
     async def read_taskspace_file(

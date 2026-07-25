@@ -14,7 +14,7 @@ import {
 } from "lucide-react";
 import { createPortal } from "react-dom";
 import type { DragEvent as ReactDragEvent, MouseEvent as ReactMouseEvent } from "react";
-import type { PaneTerminalTab, Taskspace } from "../store";
+import type { PaneTerminalTab, Taskspace, TaskspaceMountMode } from "../store";
 import { useAppStore } from "../store";
 
 const EMPTY_TERMINAL_TABS: PaneTerminalTab[] = [];
@@ -58,7 +58,32 @@ type TaskspaceFile = {
   path: string;
   size: number;
   modified: number;
+  is_symlink?: boolean;
+  dangling?: boolean;
+  mount_mode?: TaskspaceMountMode;
+  source_path?: string;
+  virtual?: boolean;
 };
+
+function mountModeBadge(mode?: TaskspaceMountMode): { label: string; className: string } | null {
+  if (!mode) return null;
+  if (mode === "reference") {
+    return {
+      label: "引用",
+      className: "bg-surface-hover text-text-faint",
+    };
+  }
+  if (mode === "copy") {
+    return {
+      label: "副本",
+      className: "bg-surface-card-strong text-text-muted",
+    };
+  }
+  return {
+    label: "直连",
+    className: "bg-surface-hover text-rose-300",
+  };
+}
 
 type Props = {
   paneId: string;
@@ -205,6 +230,9 @@ export function WorkspacePanel({
   const [errorText, setErrorText] = useState("");
   const [expandedDirs, setExpandedDirs] = useState<Set<string>>(new Set());
   const [entriesByDir, setEntriesByDir] = useState<Record<string, TaskspaceFile[]>>({});
+  const [truncatedDirs, setTruncatedDirs] = useState<Record<string, { truncated: boolean; totalSeen: number }>>({});
+  const [pendingMountSources, setPendingMountSources] = useState<string[] | null>(null);
+  const [pendingMountMode, setPendingMountMode] = useState<TaskspaceMountMode>("reference");
   const [selectedFilePath, setSelectedFilePath] = useState("");
   const [filePreview, setFilePreview] = useState<WorkspacePreview | null>(null);
   const [previewAnchor, setPreviewAnchor] = useState<{ top: number; bottom: number; left: number } | null>(null);
@@ -434,6 +462,13 @@ export function WorkspacePanel({
       return;
     }
     setEntriesByDir((prev) => ({ ...prev, [key]: result.files ?? [] }));
+    setTruncatedDirs((prev) => ({
+      ...prev,
+      [key]: {
+        truncated: !!result.truncated,
+        totalSeen: Number(result.total_seen || (result.files ?? []).length),
+      },
+    }));
   };
 
   const refreshTaskspace = async (taskspaceId: string) => {
@@ -731,8 +766,11 @@ export function WorkspacePanel({
     };
   }, []);
 
-  /** Ensure a session exists, then symlink sources into its default workspace. */
-  const linkSourcesIntoDefault = async (sources: string[]): Promise<boolean> => {
+  /** Ensure a session exists, then mount sources into its default workspace. */
+  const linkSourcesIntoDefault = async (
+    sources: string[],
+    mode: TaskspaceMountMode = "link",
+  ): Promise<boolean> => {
     const cleaned = sources.map((s) => String(s || "").trim()).filter(Boolean);
     if (cleaned.length === 0) return false;
     setAdding(true);
@@ -788,17 +826,30 @@ export function WorkspacePanel({
     const linker = window.agenticxDesktop.linkIntoSessionWorkspace;
     if (typeof linker !== "function") {
       setAdding(false);
-      setErrorText("当前客户端不支持软链添加，请完全重启桌面端后重试。");
+      setErrorText("当前客户端不支持添加到工作区，请完全重启桌面端后重试。");
       return false;
     }
-    const result = await linker({ sessionId: effectiveSessionId, sources: cleaned });
+    const result = await linker({ sessionId: effectiveSessionId, sources: cleaned, mode });
     setAdding(false);
-    if (!result.ok) {
-      setErrorText(result.error || "软链添加到工作区失败");
+    const failed = Array.isArray(result.failed) ? result.failed : [];
+    const linked = Number(result.linked || 0);
+    if (!result.ok || linked === 0 || failed.length > 0) {
+      const firstFail = failed[0] || cleaned[0] || "";
+      const winHint =
+        hostPlatform === "win32" && mode === "link"
+          ? "创建直连需要开启 Windows 开发者模式或以管理员身份运行。"
+          : "";
+      setErrorText(
+        result.error ||
+          (failed.length > 0
+            ? `添加失败 ${failed.length} 项：${firstFail}${winHint ? `。${winHint}` : ""}`
+            : `添加到工作区失败${winHint ? `：${winHint}` : ""}`),
+      );
       return false;
     }
     setErrorText("");
     setShowAddForm(false);
+    setPendingMountSources(null);
     setNewPath("");
     setNewLabel("");
     await loadTaskspaces();
@@ -806,14 +857,38 @@ export function WorkspacePanel({
     return true;
   };
 
-  /** @deprecated name kept for form handlers — now symlinks into default. */
+  const confirmMountModeAndAttach = async () => {
+    if (!pendingMountSources?.length) return;
+    if (pendingMountMode === "link") {
+      const desktop = window.agenticxDesktop;
+      const sourcePreview = pendingMountSources[0] || "";
+      const confirmResult =
+        typeof desktop.confirmDialog === "function"
+          ? await desktop.confirmDialog({
+              title: "确认直连原目录",
+              message: "agent 的改动会直接写入所选路径。",
+              detail: sourcePreview
+                ? `目标：${sourcePreview}\n此操作不可自动撤销。`
+                : "此操作不可自动撤销。",
+              confirmText: "确认直连",
+              cancelText: "取消",
+              destructive: true,
+            })
+          : { ok: true, confirmed: false };
+      if (!confirmResult.confirmed) return;
+    }
+    await linkSourcesIntoDefault(pendingMountSources, pendingMountMode);
+  };
+
+  /** @deprecated name kept for form handlers — opens mount-mode picker. */
   const addTaskspace = async (pathValue: string, _labelValue: string) => {
     const path = pathValue.trim();
     if (!path) {
       setErrorText("请填写要添加的文件或目录路径");
       return;
     }
-    await linkSourcesIntoDefault([path]);
+    setPendingMountMode("reference");
+    setPendingMountSources([path]);
   };
 
   const removeTaskspace = async (taskspaceId: string) => {
@@ -929,7 +1004,9 @@ export function WorkspacePanel({
         if (!picked.canceled) setErrorText(picked.error ?? "目录选择失败");
         return;
       }
-      await linkSourcesIntoDefault([picked.path]);
+      setPendingMountMode("reference");
+      setPendingMountSources([picked.path]);
+      setErrorText("");
     } catch (err) {
       setErrorText(`目录选择失败：${String(err)}`);
     }
@@ -948,15 +1025,71 @@ export function WorkspacePanel({
         if (!picked.canceled) setErrorText(picked.error ?? "文件选择失败");
         return;
       }
-      await linkSourcesIntoDefault(picked.paths);
+      setPendingMountMode("reference");
+      setPendingMountSources(picked.paths);
+      setErrorText("");
     } catch (err) {
       setErrorText(`文件选择失败：${String(err)}`);
     }
   };
 
-  const openFile = async (taskspaceId: string, relPath: string) => {
+  const applyCopyBack = async (entry: TaskspaceFile) => {
     const browseSessionId = getBrowseSessionId();
     if (!browseSessionId) return;
+    const differ = window.agenticxDesktop.diffSessionWorkspaceCopy;
+    const applier = window.agenticxDesktop.applySessionWorkspaceCopy;
+    if (typeof differ !== "function" || typeof applier !== "function") {
+      setErrorText("当前客户端不支持副本回写，请完全重启桌面端后重试。");
+      return;
+    }
+    const diff = await differ({ sessionId: browseSessionId, name: entry.name });
+    if (!diff.ok) {
+      setErrorText(diff.error || "查看副本改动失败");
+      return;
+    }
+    const changeCount =
+      (diff.added?.length || 0) + (diff.modified?.length || 0) + (diff.deleted?.length || 0);
+    const desktop = window.agenticxDesktop;
+    const detailParts = [
+      `新增 ${diff.added?.length || 0} / 修改 ${diff.modified?.length || 0} / 删除 ${diff.deleted?.length || 0}`,
+    ];
+    if (diff.source_drifted) {
+      detailParts.push("源路径在此期间也发生了变化，回写可能覆盖外部改动。");
+    }
+    const confirmResult =
+      typeof desktop.confirmDialog === "function"
+        ? await desktop.confirmDialog({
+            title: "查看改动并回写",
+            message:
+              changeCount === 0
+                ? "副本相对基线没有可回写的改动。"
+                : `确认将副本改动回写到 ${diff.source_path || "源路径"}？`,
+            detail: detailParts.join("\n"),
+            confirmText: diff.source_drifted ? "强制回写" : "回写",
+            cancelText: "取消",
+            destructive: !!diff.source_drifted,
+          })
+        : { ok: true, confirmed: false };
+    if (!confirmResult.confirmed || changeCount === 0) return;
+    const applied = await applier({
+      sessionId: browseSessionId,
+      name: entry.name,
+      force: !!diff.source_drifted,
+    });
+    if (!applied.ok) {
+      setErrorText(applied.error || "回写失败");
+      return;
+    }
+    setErrorText("");
+  };
+
+  const openFile = async (taskspaceId: string, relPath: string, entry?: TaskspaceFile) => {
+    const browseSessionId = getBrowseSessionId();
+    if (!browseSessionId) return;
+    if (entry?.dangling) {
+      setErrorText("源已失效：链接目标不存在或不可访问");
+      return;
+    }
     if (activeTaskspaceId !== taskspaceId) {
       onActiveTaskspaceChange(taskspaceId);
     }
@@ -964,7 +1097,10 @@ export function WorkspacePanel({
     // Sidebar file-manage: open Trae WorkPanel preview on the right, not the
     // floating popover (which anchors off the left rail and is easy to miss).
     if (isSidebarEmbed) {
-      const abs = absoluteTaskspacePath(ts?.path || "", relPath);
+      const abs =
+        (entry?.mount_mode === "reference" && entry.source_path
+          ? entry.source_path
+          : absoluteTaskspacePath(ts?.path || "", relPath)) || "";
       if (!abs) {
         setErrorText("无法解析文件路径");
         return;
@@ -1136,99 +1272,140 @@ export function WorkspacePanel({
   const renderDir = (taskspaceId: string, relPath: string, depth: number) => {
     const key = nodeKey(taskspaceId, relPath);
     const rows = entriesByDir[key] ?? [];
+    const trunc = truncatedDirs[key];
     if (rows.length === 0) return null;
-    return rows.map((item) => {
-      const itemKey = nodeKey(taskspaceId, item.path);
-      const isExpanded = expandedDirs.has(itemKey);
-      const paddingLeft = 8 + depth * 14;
-      if (item.type === "dir") {
-        return (
-          <div key={item.path}>
+    const showMountBadge = depth === 0 && relPath === ".";
+    return (
+      <>
+        {rows.map((item) => {
+          const itemKey = nodeKey(taskspaceId, item.path);
+          const isExpanded = expandedDirs.has(itemKey);
+          const paddingLeft = 8 + depth * 14;
+          const badge = showMountBadge ? mountModeBadge(item.mount_mode) : null;
+          const dangling = !!item.dangling;
+          if (item.type === "dir") {
+            return (
+              <div key={item.path}>
+                <div
+                  className="flex min-w-0 items-center gap-1"
+                  draggable={!dangling}
+                  onDragStart={(e) =>
+                    startWorkspaceEntryDrag(e, {
+                      type: "dir",
+                      taskspaceId,
+                      relPath: item.path,
+                      label: item.name,
+                    })
+                  }
+                >
+                  <button
+                    className={`flex min-w-0 flex-1 items-center gap-1 rounded px-1 py-1 text-left text-[13px] hover:bg-surface-hover ${
+                      dangling ? "text-text-faint" : "text-text-muted"
+                    }`}
+                    style={{ paddingLeft }}
+                    onClick={() => {
+                      if (dangling) {
+                        setErrorText("源已失效：链接目标不存在或不可访问");
+                        return;
+                      }
+                      void toggleDir(taskspaceId, item.path);
+                    }}
+                    title={dangling ? `${item.path}（源已失效）` : item.path}
+                    onContextMenu={(e) => {
+                      e.preventDefault();
+                      const ts = taskspaces.find((t) => t.id === taskspaceId);
+                      if (!ts) return;
+                      setCtxMenu({ kind: "entry", x: e.clientX, y: e.clientY, taskspace: ts, entry: item });
+                    }}
+                  >
+                    <span className="inline-block w-3 shrink-0 text-center">{isExpanded ? "▾" : "▸"}</span>
+                    <span className="min-w-0 truncate">{item.name}/</span>
+                    {badge ? (
+                      <span className={`ml-1 shrink-0 rounded px-1 py-0.5 text-[10px] ${badge.className}`}>
+                        {badge.label}
+                      </span>
+                    ) : null}
+                    {dangling ? (
+                      <span className="ml-1 shrink-0 text-[10px] text-text-faint">源已失效</span>
+                    ) : null}
+                  </button>
+                  <button
+                    className="rounded px-1.5 py-0.5 text-xs text-text-faint transition hover:bg-surface-hover hover:text-text-muted"
+                    onClick={() =>
+                      onPickDirectoryForReference?.({
+                        taskspaceId,
+                        relPath: item.path,
+                        label: item.name,
+                      })
+                    }
+                    title="引用到输入框"
+                  >
+                    @
+                  </button>
+                </div>
+                {isExpanded && !dangling ? renderDir(taskspaceId, item.path, depth + 1) : null}
+              </div>
+            );
+          }
+          return (
             <div
+              key={item.path}
               className="flex min-w-0 items-center gap-1"
-              draggable
+              draggable={!dangling}
               onDragStart={(e) =>
                 startWorkspaceEntryDrag(e, {
-                  type: "dir",
+                  type: "file",
                   taskspaceId,
                   relPath: item.path,
                   label: item.name,
                 })
               }
+              onContextMenu={(e) => {
+                e.preventDefault();
+                const ts = taskspaces.find((t) => t.id === taskspaceId);
+                if (!ts) return;
+                setCtxMenu({ kind: "entry", x: e.clientX, y: e.clientY, taskspace: ts, entry: item });
+              }}
             >
               <button
-                className="flex min-w-0 flex-1 items-center gap-1 rounded px-1 py-1 text-left text-[13px] text-text-muted hover:bg-surface-hover"
-                style={{ paddingLeft }}
-                onClick={() => void toggleDir(taskspaceId, item.path)}
-                title={item.path}
-                onContextMenu={(e) => {
-                  e.preventDefault();
-                  const ts = taskspaces.find((t) => t.id === taskspaceId);
-                  if (!ts) return;
-                  setCtxMenu({ kind: "entry", x: e.clientX, y: e.clientY, taskspace: ts, entry: item });
-                }}
+                className={`min-w-0 flex-1 truncate rounded px-1 py-1 text-left text-[13px] transition hover:bg-surface-hover ${
+                  dangling
+                    ? "text-text-faint"
+                    : selectedFilePath === item.path
+                      ? "text-text-strong"
+                      : "text-text-subtle"
+                }`}
+                style={{ paddingLeft: paddingLeft + 16 }}
+                title={dangling ? `${item.path}（源已失效）` : item.path}
+                onClick={() => void openFile(taskspaceId, item.path, item)}
               >
-                <span className="inline-block w-3 shrink-0 text-center">{isExpanded ? "▾" : "▸"}</span>
-                <span className="min-w-0 truncate">{item.name}/</span>
+                {item.name}
+                {badge ? (
+                  <span className={`ml-1 inline-block rounded px-1 py-0.5 text-[10px] ${badge.className}`}>
+                    {badge.label}
+                  </span>
+                ) : null}
+                {dangling ? (
+                  <span className="ml-1 text-[10px] text-text-faint">源已失效</span>
+                ) : null}
               </button>
               <button
                 className="rounded px-1.5 py-0.5 text-xs text-text-faint transition hover:bg-surface-hover hover:text-text-muted"
-                onClick={() =>
-                  onPickDirectoryForReference?.({
-                    taskspaceId,
-                    relPath: item.path,
-                    label: item.name,
-                  })
-                }
+                onClick={() => onPickFileForReference?.(taskspaceId, item.path)}
                 title="引用到输入框"
               >
                 @
               </button>
             </div>
-            {isExpanded ? renderDir(taskspaceId, item.path, depth + 1) : null}
+          );
+        })}
+        {trunc?.truncated ? (
+          <div className="px-2 py-1 text-[11px] text-text-faint">
+            仅显示前 {rows.length} 项（共 {trunc.totalSeen}）
           </div>
-        );
-      }
-      return (
-        <div
-          key={item.path}
-          className="flex min-w-0 items-center gap-1"
-          draggable
-          onDragStart={(e) =>
-            startWorkspaceEntryDrag(e, {
-              type: "file",
-              taskspaceId,
-              relPath: item.path,
-              label: item.name,
-            })
-          }
-          onContextMenu={(e) => {
-            e.preventDefault();
-            const ts = taskspaces.find((t) => t.id === taskspaceId);
-            if (!ts) return;
-            setCtxMenu({ kind: "entry", x: e.clientX, y: e.clientY, taskspace: ts, entry: item });
-          }}
-        >
-          <button
-            className={`min-w-0 flex-1 truncate rounded px-1 py-1 text-left text-[13px] transition hover:bg-surface-hover ${
-              selectedFilePath === item.path ? "text-text-strong" : "text-text-subtle"
-            }`}
-            style={{ paddingLeft: paddingLeft + 16 }}
-            title={item.path}
-            onClick={() => void openFile(taskspaceId, item.path)}
-          >
-            {item.name}
-          </button>
-          <button
-            className="rounded px-1.5 py-0.5 text-xs text-text-faint transition hover:bg-surface-hover hover:text-text-muted"
-            onClick={() => onPickFileForReference?.(taskspaceId, item.path)}
-            title="引用到输入框"
-          >
-            @
-          </button>
-        </div>
-      );
-    });
+        ) : null}
+      </>
+    );
   };
 
   const activeTab = terminalTabs.find((t) => t.id === activeTerminalTabId) ?? terminalTabs[0] ?? null;
@@ -1329,7 +1506,7 @@ export function WorkspacePanel({
                     setShowAddForm((prev) => !prev);
                     setErrorText("");
                   }}
-                  title="软链添加文件/文件夹到当前会话工作区"
+                  title="添加文件/文件夹到当前会话工作区"
                 >
                   <FolderPlus className="h-4 w-4" strokeWidth={1.8} />
                 </button>
@@ -1376,10 +1553,10 @@ export function WorkspacePanel({
               style={!useSidebarSurface && tintColor ? { backgroundColor: tintColor } : undefined}
             >
               <div className="mb-2 flex items-center justify-between gap-2 text-[13px] font-medium text-text-subtle">
-                <span>软链添加到会话工作区</span>
+                <span>添加到会话工作区</span>
               </div>
               <div className="mb-2 text-[11px] leading-relaxed text-text-faint">
-                不会复制文件，也不会挂载第二根目录；仅在当前会话 default 下创建软链。
+                可选择引用（只读）、工作副本或直连原目录；不会挂载第二根目录。
               </div>
               <input
                 value={newPath}
@@ -1446,7 +1623,7 @@ export function WorkspacePanel({
               <div className="space-y-1">
                 <div className="text-[14px] font-medium text-text-primary">当前会话工作区为空</div>
                 <div className="text-[12px] leading-relaxed text-text-faint">
-                  添加文件或文件夹将以软链放入本会话工作区（不复制、不挂第二根）
+                  添加文件或文件夹时可选择引用 / 工作副本 / 直连（不挂第二根）
                 </div>
               </div>
               <div className="flex flex-wrap items-center justify-center gap-2">
@@ -1687,7 +1864,10 @@ export function WorkspacePanel({
                   {
                     label: revealInFileManagerLabel,
                     onSelect: () => {
-                      const abs = absoluteTaskspacePath(ctxMenu.taskspace.path, ctxMenu.entry.path);
+                      const abs =
+                        ctxMenu.entry.mount_mode === "reference" && ctxMenu.entry.source_path
+                          ? ctxMenu.entry.source_path
+                          : absoluteTaskspacePath(ctxMenu.taskspace.path, ctxMenu.entry.path);
                       void revealInFileManager(abs);
                     },
                   },
@@ -1698,6 +1878,14 @@ export function WorkspacePanel({
                       openTerminalForPath(cwd, ctxMenu.entry.name);
                     },
                   },
+                  ...(ctxMenu.entry.mount_mode === "copy"
+                    ? [
+                        {
+                          label: "查看改动并回写",
+                          onSelect: () => void applyCopyBack(ctxMenu.entry),
+                        },
+                      ]
+                    : []),
                 ]
             : []
         }
@@ -1724,6 +1912,106 @@ export function WorkspacePanel({
       {errorText ? (
         <div className="border-t border-border px-3 py-1.5 text-xs text-rose-300">{errorText}</div>
       ) : null}
+
+      {pendingMountSources
+        ? createPortal(
+            <div className="fixed inset-0 z-[260] flex items-center justify-center bg-black/50 p-4">
+              <div className="w-full max-w-md rounded-xl border border-border bg-surface-base p-4 shadow-2xl">
+                <div className="mb-3 text-[15px] font-medium text-text-strong">选择添加方式</div>
+                <div className="mb-3 truncate text-[12px] text-text-faint">
+                  {pendingMountSources.length === 1
+                    ? pendingMountSources[0]
+                    : `${pendingMountSources.length} 个路径`}
+                </div>
+                <div className="space-y-2">
+                  {(
+                    [
+                      {
+                        id: "reference" as const,
+                        title: "引用（只读）",
+                        desc: "agent 只能读取，不会改动你的文件",
+                      },
+                      {
+                        id: "copy" as const,
+                        title: "工作副本",
+                        desc: "复制一份到会话隔离目录，改动需你确认后才回写",
+                      },
+                      {
+                        id: "link" as const,
+                        title: "直连原目录",
+                        desc: `agent 的改动会直接写入 ${pendingMountSources[0] || "所选路径"}`,
+                        danger: true,
+                      },
+                    ] as const
+                  ).map((opt) => {
+                    const active = pendingMountMode === opt.id;
+                    const danger = "danger" in opt && opt.danger;
+                    return (
+                      <button
+                        key={opt.id}
+                        type="button"
+                        className={`flex w-full items-start gap-2.5 rounded-lg border px-3 py-2.5 text-left transition ${
+                          active
+                            ? danger
+                              ? "border-rose-400/50 bg-rose-500/10"
+                              : "border-[rgba(var(--theme-color-rgb),0.55)] bg-[rgba(var(--theme-color-rgb),0.12)]"
+                            : "border-border bg-surface-hover hover:bg-surface-card-strong"
+                        }`}
+                        onClick={() => setPendingMountMode(opt.id)}
+                      >
+                        <span
+                          className={`mt-0.5 flex h-4 w-4 shrink-0 items-center justify-center rounded-full ${
+                            active
+                              ? "bg-emerald-500 text-white"
+                              : "border border-border bg-transparent"
+                          }`}
+                          aria-hidden
+                        >
+                          {active ? <Check className="h-3 w-3" strokeWidth={2.5} /> : null}
+                        </span>
+                        <span className="min-w-0 flex-1">
+                          <span
+                            className={`block text-[13px] font-medium ${
+                              danger ? "text-rose-300" : "text-text-primary"
+                            }`}
+                          >
+                            {opt.title}
+                          </span>
+                          <span className="mt-0.5 block text-[11px] leading-relaxed text-text-faint">
+                            {opt.desc}
+                          </span>
+                        </span>
+                      </button>
+                    );
+                  })}
+                </div>
+                <div className="mt-4 flex justify-end gap-2">
+                  <button
+                    type="button"
+                    className="rounded-lg px-3 py-1.5 text-[13px] text-text-muted hover:bg-surface-hover"
+                    onClick={() => setPendingMountSources(null)}
+                    disabled={adding}
+                  >
+                    取消
+                  </button>
+                  <button
+                    type="button"
+                    className="rounded-lg px-3 py-1.5 text-[13px] hover:opacity-90 disabled:opacity-50"
+                    style={{
+                      background: "var(--ui-btn-primary-bg)",
+                      color: "var(--ui-btn-primary-text)",
+                    }}
+                    onClick={() => void confirmMountModeAndAttach()}
+                    disabled={adding}
+                  >
+                    {adding ? "添加中…" : "确认添加"}
+                  </button>
+                </div>
+              </div>
+            </div>,
+            document.body,
+          )
+        : null}
 
       {viewMenuOpen && viewMenuPos
         ? createPortal(
@@ -1776,7 +2064,7 @@ export function WorkspacePanel({
                 onClick={() => void pickAndAttachFiles()}
               >
                 <FilePlus className="h-3.5 w-3.5 shrink-0 text-text-faint" strokeWidth={1.75} />
-                <span>添加文件（软链）</span>
+                <span>添加文件</span>
               </button>
               <button
                 type="button"
@@ -1784,7 +2072,7 @@ export function WorkspacePanel({
                 onClick={() => void pickAndAttachDirectory()}
               >
                 <FolderPlus className="h-3.5 w-3.5 shrink-0 text-text-faint" strokeWidth={1.75} />
-                <span>添加文件夹（软链）</span>
+                <span>添加文件夹</span>
               </button>
               <button
                 type="button"

@@ -781,13 +781,50 @@ contextBridge.exposeInMainWorld("agenticxDesktop", {
       mtimeMs?: number;
       error?: string;
     }>,
-  linkIntoSessionWorkspace: async (payload: { sessionId: string; sources: string[] }) =>
+  linkIntoSessionWorkspace: async (payload: {
+    sessionId: string;
+    sources: string[];
+    mode?: "reference" | "copy" | "link";
+  }) =>
     ipcRenderer.invoke("link-into-session-workspace", payload) as Promise<{
       ok: boolean;
       defaultDir?: string;
       homeDir?: string;
       linked?: number;
       created?: string[];
+      failed?: string[];
+      mode?: "reference" | "copy" | "link";
+      error?: string;
+    }>,
+  copyIntoSessionWorkspace: async (payload: { sessionId: string; sources: string[] }) =>
+    ipcRenderer.invoke("copy-into-session-workspace", payload) as Promise<{
+      ok: boolean;
+      defaultDir?: string;
+      linked?: number;
+      created?: string[];
+      failed?: string[];
+      error?: string;
+    }>,
+  diffSessionWorkspaceCopy: async (payload: { sessionId: string; name: string }) =>
+    ipcRenderer.invoke("diff-session-workspace-copy", payload) as Promise<{
+      ok: boolean;
+      name?: string;
+      source_path?: string;
+      added?: string[];
+      modified?: string[];
+      deleted?: string[];
+      source_drifted?: boolean;
+      error?: string;
+    }>,
+  applySessionWorkspaceCopy: async (payload: {
+    sessionId: string;
+    name: string;
+    force?: boolean;
+  }) =>
+    ipcRenderer.invoke("apply-session-workspace-copy", payload) as Promise<{
+      ok: boolean;
+      applied?: string[];
+      source_drifted?: boolean;
       error?: string;
     }>,
   materializeSessionAttachments: async (payload: {

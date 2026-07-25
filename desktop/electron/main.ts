@@ -56,6 +56,17 @@ import {
 } from "./system-search";
 import { proxyAwareFetch, logProxyConfig } from "./proxy-fetch";
 import { fetchFaviconDataUrl } from "./fetch-favicon";
+import { isRealpathUnder, safeRealpath } from "./path-guard";
+import {
+  applySessionWorkspaceCopy,
+  copySourceIntoWorkspace,
+  createWorkspaceLink,
+  diffSessionWorkspaceCopy,
+  findMountForSource,
+  type MountMode,
+  upsertMount,
+  uniqueLinkName as uniqueMountName,
+} from "./workspace-mounts";
 import {
   listMetaWorkspaceHistory,
   parseMetaWorkspaceHistoryKind,
@@ -2729,7 +2740,8 @@ async function startStudioServe(): Promise<void> {
     AGX_DEV_PORT: devPort,
     AGX_DESKTOP_TOKEN: apiToken,
     AGX_WORKSPACE_ROOT: desktopHome,
-    AGX_DESKTOP_UNRESTRICTED_FS: "1",
+    // Intentionally NOT setting AGX_DESKTOP_UNRESTRICTED_FS — path access is
+    // gated by session workspace roots + mount modes (see agent_tools.py).
     AGX_SKILL_PROTOCOL: trinity.skill_protocol ? "true" : "false",
     AGX_SESSION_SUMMARY: trinity.session_summary ? "true" : "false",
     AGX_LEARNING_ENABLED: trinity.learning_enabled ? "true" : "false",
@@ -10953,11 +10965,166 @@ function registerIpc(): void {
   };
 
   /**
-   * Symlink external files/folders into the session default workspace.
-   * Paths already under default are skipped. Does not add a second taskspace root.
+   * Mount external files/folders into the session default workspace.
+   * mode=link (default): symlink/junction; mode=reference: metadata only;
+   * mode=copy: sandboxed copy. Paths already under default are skipped.
    */
   ipcMain.handle(
     "link-into-session-workspace",
+    async (
+      _event,
+      payload: { sessionId?: string; sources?: string[]; mode?: MountMode },
+    ) => {
+      try {
+        const sid = String(payload?.sessionId || "").trim();
+        if (!sid || !/^[A-Za-z0-9._-]+$/.test(sid)) {
+          return { ok: false, error: "invalid sessionId" };
+        }
+        const modeRaw = String(payload?.mode || "link").trim().toLowerCase();
+        const mode: MountMode =
+          modeRaw === "reference" || modeRaw === "copy" || modeRaw === "link"
+            ? modeRaw
+            : "link";
+        const rawSources = Array.isArray(payload?.sources) ? payload.sources : [];
+        const defaultDir = await resolveSessionDefaultWorkspaceDir(sid);
+        await fs.promises.mkdir(defaultDir, { recursive: true });
+        const usedNames = new Set<string>();
+        try {
+          for (const name of await fs.promises.readdir(defaultDir)) {
+            usedNames.add(name);
+          }
+        } catch {
+          // ignore
+        }
+        const seen = new Set<string>();
+        let linked = 0;
+        const created: string[] = [];
+        const failed: string[] = [];
+
+        for (const raw of rawSources) {
+          const source = normalizeLocalFsPath(String(raw || ""));
+          if (!source || !fs.existsSync(source)) {
+            if (source) failed.push(source);
+            continue;
+          }
+          let st: fs.Stats;
+          try {
+            st = await fs.promises.lstat(source);
+          } catch {
+            failed.push(source);
+            continue;
+          }
+          const sourceReal = await safeRealpath(source);
+          if (seen.has(sourceReal)) continue;
+          seen.add(sourceReal);
+          if (await isRealpathUnder(source, defaultDir)) {
+            continue;
+          }
+          // Never silently upgrade an existing reference/copy mount to link
+          // (artifact auto-linker calls this IPC with default mode=link).
+          const existing = await findMountForSource(defaultDir, sourceReal);
+          if (existing) {
+            if (mode === "link" && existing.mode !== "link") {
+              continue;
+            }
+            if (existing.mode === mode) {
+              linked += 1;
+              created.push(path.join(defaultDir, existing.name));
+              continue;
+            }
+          }
+          const name = existing?.name || uniqueMountName(defaultDir, source, usedNames);
+          const dest = path.join(defaultDir, name);
+          const linkedAt = Date.now() / 1000;
+
+          if (mode === "reference") {
+            await upsertMount(defaultDir, {
+              name,
+              mode: "reference",
+              source_path: sourceReal,
+              linked_at: linkedAt,
+            });
+            linked += 1;
+            created.push(dest);
+            continue;
+          }
+
+          if (mode === "copy") {
+            if (fs.existsSync(dest)) {
+              // Keep existing copy; refresh metadata only.
+              await upsertMount(defaultDir, {
+                name,
+                mode: "copy",
+                source_path: sourceReal,
+                linked_at: linkedAt,
+                copy_rel: name,
+              });
+              linked += 1;
+              created.push(dest);
+              continue;
+            }
+            const copied = await copySourceIntoWorkspace({
+              defaultDir,
+              source: sourceReal,
+              destName: name,
+            });
+            if (!copied.ok) {
+              failed.push(source);
+              console.warn("[link-into-session-workspace] copy failed:", source, copied.error);
+              continue;
+            }
+            await upsertMount(defaultDir, {
+              name,
+              mode: "copy",
+              source_path: sourceReal,
+              linked_at: linkedAt,
+              copy_rel: name,
+            });
+            linked += 1;
+            created.push(copied.dest || dest);
+            continue;
+          }
+
+          // mode === "link"
+          if (!fs.existsSync(dest)) {
+            const linkResult = await createWorkspaceLink({
+              source: sourceReal,
+              dest,
+              isDirectory: st.isDirectory(),
+            });
+            if (!linkResult.ok) {
+              failed.push(source);
+              console.warn("[link-into-session-workspace] symlink failed:", dest, linkResult.error);
+              continue;
+            }
+          }
+          await upsertMount(defaultDir, {
+            name,
+            mode: "link",
+            source_path: sourceReal,
+            linked_at: linkedAt,
+          });
+          linked += 1;
+          created.push(dest);
+        }
+
+        return {
+          ok: true,
+          defaultDir,
+          homeDir: os.homedir(),
+          linked,
+          created,
+          failed,
+          mode,
+        };
+      } catch (err) {
+        return { ok: false, error: String(err) };
+      }
+    },
+  );
+
+  ipcMain.handle(
+    "copy-into-session-workspace",
     async (
       _event,
       payload: { sessionId?: string; sources?: string[] },
@@ -10970,68 +11137,90 @@ function registerIpc(): void {
         const rawSources = Array.isArray(payload?.sources) ? payload.sources : [];
         const defaultDir = await resolveSessionDefaultWorkspaceDir(sid);
         await fs.promises.mkdir(defaultDir, { recursive: true });
-        const defaultResolved = path.resolve(defaultDir);
         const usedNames = new Set<string>();
         try {
-          for (const name of await fs.promises.readdir(defaultDir)) {
-            usedNames.add(name);
-          }
+          for (const name of await fs.promises.readdir(defaultDir)) usedNames.add(name);
         } catch {
           // ignore
         }
-        const seen = new Set<string>();
         let linked = 0;
         const created: string[] = [];
-
+        const failed: string[] = [];
         for (const raw of rawSources) {
           const source = normalizeLocalFsPath(String(raw || ""));
-          if (!source || !fs.existsSync(source)) continue;
-          let st: fs.Stats;
-          try {
-            st = await fs.promises.lstat(source);
-          } catch {
+          if (!source || !fs.existsSync(source)) {
+            if (source) failed.push(source);
             continue;
           }
-          const resolvedSource = path.resolve(source);
-          if (seen.has(resolvedSource)) continue;
-          seen.add(resolvedSource);
-          if (
-            resolvedSource === defaultResolved ||
-            resolvedSource.startsWith(defaultResolved + path.sep)
-          ) {
+          if (await isRealpathUnder(source, defaultDir)) continue;
+          const sourceReal = await safeRealpath(source);
+          const name = uniqueMountName(defaultDir, source, usedNames);
+          const copied = await copySourceIntoWorkspace({
+            defaultDir,
+            source: sourceReal,
+            destName: name,
+          });
+          if (!copied.ok) {
+            failed.push(source);
             continue;
           }
-          const name = uniqueLinkName(defaultDir, source, usedNames);
-          const dest = path.join(defaultDir, name);
-          try {
-            await fs.promises.symlink(
-              resolvedSource,
-              dest,
-              st.isDirectory() ? "dir" : "file",
-            );
-            linked += 1;
-            created.push(dest);
-          } catch (err) {
-            // macOS may need 'junction' on Windows; on Darwin retry without type.
-            try {
-              await fs.promises.symlink(resolvedSource, dest);
-              linked += 1;
-              created.push(dest);
-            } catch {
-              console.warn("[link-into-session-workspace] symlink failed:", dest, err);
-            }
-          }
+          await upsertMount(defaultDir, {
+            name,
+            mode: "copy",
+            source_path: sourceReal,
+            linked_at: Date.now() / 1000,
+            copy_rel: name,
+          });
+          linked += 1;
+          created.push(copied.dest || path.join(defaultDir, name));
         }
-
-        return {
-          ok: true,
-          defaultDir,
-          homeDir: os.homedir(),
-          linked,
-          created,
-        };
+        return { ok: true, defaultDir, linked, created, failed };
       } catch (err) {
         return { ok: false, error: String(err) };
+      }
+    },
+  );
+
+  ipcMain.handle(
+    "diff-session-workspace-copy",
+    async (
+      _event,
+      payload: { sessionId?: string; name?: string },
+    ) => {
+      try {
+        const sid = String(payload?.sessionId || "").trim();
+        const name = String(payload?.name || "").trim();
+        if (!sid || !/^[A-Za-z0-9._-]+$/.test(sid) || !name) {
+          return { ok: false, error: "invalid sessionId or name" };
+        }
+        const defaultDir = await resolveSessionDefaultWorkspaceDir(sid);
+        return await diffSessionWorkspaceCopy({ defaultDir, name });
+      } catch (err) {
+        return { ok: false, error: String(err) };
+      }
+    },
+  );
+
+  ipcMain.handle(
+    "apply-session-workspace-copy",
+    async (
+      _event,
+      payload: { sessionId?: string; name?: string; force?: boolean },
+    ) => {
+      try {
+        const sid = String(payload?.sessionId || "").trim();
+        const name = String(payload?.name || "").trim();
+        if (!sid || !/^[A-Za-z0-9._-]+$/.test(sid) || !name) {
+          return { ok: false, error: "invalid sessionId or name", applied: [] };
+        }
+        const defaultDir = await resolveSessionDefaultWorkspaceDir(sid);
+        return await applySessionWorkspaceCopy({
+          defaultDir,
+          name,
+          force: !!payload?.force,
+        });
+      } catch (err) {
+        return { ok: false, error: String(err), applied: [] };
       }
     },
   );

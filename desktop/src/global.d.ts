@@ -215,10 +215,14 @@ type ForwardedHistoryCard = {
   source_session: string;
   items: ForwardedHistoryItem[];
 };
+type TaskspaceMountMode = "reference" | "copy" | "link";
 type TaskspaceItem = {
   id: string;
   label: string;
   path: string;
+  mount_mode?: TaskspaceMountMode;
+  source_path?: string;
+  linked_at?: number;
 };
 type TaskspaceFileItem = {
   name: string;
@@ -226,6 +230,11 @@ type TaskspaceFileItem = {
   path: string;
   size: number;
   modified: number;
+  is_symlink?: boolean;
+  dangling?: boolean;
+  mount_mode?: TaskspaceMountMode;
+  source_path?: string;
+  virtual?: boolean;
 };
 
 type McpServerItem = {
@@ -701,7 +710,13 @@ declare global {
       chooseDirectory: () => Promise<{ ok: boolean; path?: string; canceled?: boolean; error?: string }>;
       chooseFiles: () => Promise<{ ok: boolean; paths?: string[]; canceled?: boolean; error?: string }>;
       getPathForFile: (file: File) => string;
-      listTaskspaceFiles: (payload: { sessionId: string; taskspaceId: string; path?: string }) => Promise<{ ok: boolean; files: TaskspaceFileItem[]; error?: string }>;
+      listTaskspaceFiles: (payload: { sessionId: string; taskspaceId: string; path?: string }) => Promise<{
+        ok: boolean;
+        files: TaskspaceFileItem[];
+        truncated?: boolean;
+        total_seen?: number;
+        error?: string;
+      }>;
       readTaskspaceFile: (payload: { sessionId: string; taskspaceId: string; path: string }) => Promise<{
         ok: boolean;
         name?: string;
@@ -1289,16 +1304,53 @@ declare global {
         mtimeMs?: number;
         error?: string;
       }>;
-      /** Symlink external paths into the session default workspace. */
+      /** Mount external paths into the session default workspace (reference/copy/link). */
       linkIntoSessionWorkspace: (payload: {
         sessionId: string;
         sources: string[];
+        mode?: TaskspaceMountMode;
       }) => Promise<{
         ok: boolean;
         defaultDir?: string;
         homeDir?: string;
         linked?: number;
         created?: string[];
+        failed?: string[];
+        mode?: TaskspaceMountMode;
+        error?: string;
+      }>;
+      copyIntoSessionWorkspace: (payload: {
+        sessionId: string;
+        sources: string[];
+      }) => Promise<{
+        ok: boolean;
+        defaultDir?: string;
+        linked?: number;
+        created?: string[];
+        failed?: string[];
+        error?: string;
+      }>;
+      diffSessionWorkspaceCopy: (payload: {
+        sessionId: string;
+        name: string;
+      }) => Promise<{
+        ok: boolean;
+        name?: string;
+        source_path?: string;
+        added?: string[];
+        modified?: string[];
+        deleted?: string[];
+        source_drifted?: boolean;
+        error?: string;
+      }>;
+      applySessionWorkspaceCopy: (payload: {
+        sessionId: string;
+        name: string;
+        force?: boolean;
+      }) => Promise<{
+        ok: boolean;
+        applied?: string[];
+        source_drifted?: boolean;
         error?: string;
       }>;
       /** Write chat attachments as real files under <default>/attachments/. */
