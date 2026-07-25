@@ -285,13 +285,91 @@ def test_reasoning_only_after_tool_triggers_fallback_placeholder(monkeypatch) ->
     # nudge fired on round 2 (reasoning-only after tool), exhausted on round 3.
     assert llm.calls == 3
     final = _final_text(events)
-    # Neutral tool-turn fallback (no "已完成工具调用", no replay hint).
-    assert "工具执行已经结束" in final, f"tool-turn fallback expected, got {final!r}"
+    # Neutral tool-turn fallback when the tool succeeded but the model stayed silent.
+    assert "工具已经跑完" in final, f"tool-turn fallback expected, got {final!r}"
     assert "已完成工具调用" not in final
     assert _THINK_OPEN not in final, "FINAL text must not leak Mattis"
     last = session.chat_history[-1]
     assert _THINK_OPEN not in last["content"], "chat_history content must not leak Mattis"
     assert last.get("metadata", {}).get("terminal_reason") == "tool_turn_empty_fallback"
+
+
+def test_tool_error_read_only_surfaces_plain_language_fallback(monkeypatch) -> None:
+    """When file_edit fails on a reference mount and the model stays silent, explain clearly."""
+    from agenticx.runtime import agent_runtime as runtime_module
+
+    async def _fake_dispatch(*_args, **_kwargs):
+        return (
+            "ERROR: path is read-only (mounted as reference): "
+            "/Users/damon/myWork/research-agent/requirements.txt. "
+            "Do not retry file_edit/file_write/bash_exec on this path. "
+            "Ask the user to remount the parent folder as link (直连), "
+            "or write a copy under the session workspace."
+        )
+
+    monkeypatch.setattr(runtime_module, "dispatch_tool_async", _fake_dispatch)
+
+    class _ToolEditThenSilent:
+        def __init__(self) -> None:
+            self.calls = 0
+
+        def invoke(self, *_args, **_kwargs):
+            self.calls += 1
+            if self.calls == 1:
+                return _FakeResponse(
+                    "",
+                    [
+                        {
+                            "id": "call-edit-1",
+                            "type": "function",
+                            "function": {
+                                "name": "file_edit",
+                                "arguments": {
+                                    "path": "/Users/damon/myWork/research-agent/requirements.txt",
+                                    "old_text": "a",
+                                    "new_text": "b",
+                                },
+                            },
+                        }
+                    ],
+                )
+            return _FakeResponse(_THINK_OPEN + "还在想" + _THINK_CLOSE, [])
+
+        def stream(self, *_args, **_kwargs):
+            yield _THINK_OPEN + "还在想" + _THINK_CLOSE
+
+    llm = _ToolEditThenSilent()
+    runtime = AgentRuntime(llm, _ApproveGate())
+    session = StudioSession()
+    events = asyncio.run(_collect(runtime, session, "改 requirements.txt"))
+    final = _final_text(events)
+    assert "没法修改这个文件" in final
+    assert "引用" in final
+    assert "直连" in final
+    assert "/Users/damon/myWork/research-agent/requirements.txt" in final
+    assert "未能生成完整的最终说明" not in final
+    last = session.chat_history[-1]
+    assert last.get("metadata", {}).get("terminal_reason") == "tool_turn_empty_fallback"
+
+
+def test_user_facing_tool_error_fallback_helper() -> None:
+    from agenticx.runtime.agent_runtime import _user_facing_tool_error_fallback
+
+    text = _user_facing_tool_error_fallback(
+        [
+            {
+                "role": "tool",
+                "name": "file_edit",
+                "content": (
+                    "ERROR: path is read-only (mounted as reference): /tmp/a.txt. "
+                    "Do not retry file_edit/file_write/bash_exec on this path."
+                ),
+            }
+        ]
+    )
+    assert text is not None
+    assert "没法修改这个文件" in text
+    assert "`/tmp/a.txt`" in text
 
 
 def test_stream_fallback_dict_chunk_text_key_parsed() -> None:
