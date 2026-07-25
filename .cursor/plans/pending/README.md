@@ -1,18 +1,19 @@
 # Pending Plans（未实施）
 
-本目录存放**已写好、尚未开工实施**的 plan，供全员共享 backlog。
+本目录存放**新建落盘、尚未开工实施**的 plan，供全员共享 backlog。
 
-## 谁可以放
+## 落盘规则（默认）
 
-- 仓库维护者与协作者均可把「规划完成、暂不实施」的 plan 放到这里。
+- **所有新写的 plan 必须先放到本目录**，不要直接写到 `.cursor/plans/` 根目录。
 - 命名仍遵循：`YYYY-MM-DD-<feature-name>.plan.md`。
+- 仓库维护者与协作者均可提交；定稿后随代码一起 commit。
 
 ## 与根目录的分工
 
 | 位置 | 用途 |
 |------|------|
+| `.cursor/plans/pending/` | **新建 plan 的默认落点**；规划完成、暂不实施 backlog |
 | `.cursor/plans/*.plan.md`（根目录） | 正在实施 / 已随代码提交的 plan |
-| `.cursor/plans/pending/` | 未实施 backlog；协作者也可投放 |
 
 ## 开始实施时
 
