@@ -2930,6 +2930,19 @@ def _resolve_workspace_path(
         more = "" if len(roots) <= 8 else f" (+{len(roots) - 8} more)"
         return f"path escapes workspace: {resolved} (allowed roots: {allowed}{more})"
 
+    def _format_readonly_reference(resolved: Path) -> str:
+        # Distinct from "escapes workspace" so the model stops retrying the same write
+        # (including via bash_exec redirects / tee).
+        return (
+            f"path is read-only (mounted as reference): {resolved}. "
+            "Do not retry file_edit/file_write/bash_exec on this path. "
+            "Ask the user to remount the parent folder as link (直连), "
+            "or write a copy under the session workspace."
+        )
+
+    def _under_any_root(resolved: Path, candidates: list[Path]) -> bool:
+        return any(_is_path_under_root(resolved, root) for root in candidates)
+
     if raw_path.is_absolute():
         resolved = _safe_resolve_path(raw_path)
         if _is_protected_path(resolved):
@@ -2937,6 +2950,9 @@ def _resolve_workspace_path(
         for root in roots:
             if _is_path_under_root(resolved, root):
                 return resolved
+        # Readable via reference/copy metadata, but not in write roots.
+        if for_write and _under_any_root(resolved, read_roots):
+            raise ValueError(_format_readonly_reference(resolved))
         raise ValueError(_format_escape(resolved))
 
     if pick_existing:
@@ -2954,6 +2970,8 @@ def _resolve_workspace_path(
     if _is_protected_path(resolved):
         raise ValueError(f"path is protected: {resolved}")
     if not _is_path_under_root(resolved, primary):
+        if for_write and _under_any_root(resolved, read_roots):
+            raise ValueError(_format_readonly_reference(resolved))
         raise ValueError(_format_escape(resolved))
     return resolved
 
@@ -3048,6 +3066,136 @@ def _ensure_paths_within_workspace(
             _resolve_workspace_path(path_arg, session, pick_existing=True)
         except ValueError as exc:
             return f"ERROR: {exc}"
+    return None
+
+
+# Redirect / tee write targets (aligned with desktop session-artifacts BASH_REDIRECT_RE).
+_BASH_WRITE_REDIRECT_RE = re.compile(
+    r"(?:>>?|\btee\b(?:\s+-a)?)\s+(['\"]?)([^\s'\"|;&<>]+)\1",
+    re.IGNORECASE,
+)
+_BASH_CD_SEGMENT_RE = re.compile(
+    r"(?:^|[;&|]|\|\||&&)\s*cd\s+(['\"]?)([^\s'\"|;&]+)\1",
+    re.IGNORECASE,
+)
+_BASH_ABS_PATH_TOKEN_RE = re.compile(
+    r"(?:/(?:Users|home|tmp|var|opt|private|Volumes)[^\s'\"|;&<>]+|~/[^\s'\"|;&<>]+)"
+)
+
+
+def _extract_bash_write_target_paths(command: str) -> List[str]:
+    """Best-effort extract of shell redirect / tee write destinations."""
+    paths: List[str] = []
+    seen: set[str] = set()
+
+    def _add(raw: str) -> None:
+        text = (raw or "").strip().strip("'\"")
+        if not text or text == "-":
+            return
+        if text in seen:
+            return
+        seen.add(text)
+        paths.append(text)
+
+    for match in _BASH_WRITE_REDIRECT_RE.finditer(command or ""):
+        _add(match.group(2))
+
+    try:
+        parts = shlex.split(command or "")
+    except ValueError:
+        parts = []
+    i = 0
+    while i < len(parts):
+        tok = parts[i]
+        if tok in {">", ">>"} and i + 1 < len(parts):
+            _add(parts[i + 1])
+            i += 2
+            continue
+        if Path(tok).name == "tee":
+            j = i + 1
+            while j < len(parts) and parts[j].startswith("-") and parts[j] not in {">", ">>"}:
+                j += 1
+            while j < len(parts) and parts[j] not in {">", ">>", "|", "||", "&&", ";"}:
+                if not parts[j].startswith("-"):
+                    _add(parts[j])
+                j += 1
+            i = j
+            continue
+        i += 1
+    return paths
+
+
+def _bash_cd_bases_in_command(command: str) -> List[str]:
+    return [m.group(2) for m in _BASH_CD_SEGMENT_RE.finditer(command or "")]
+
+
+def _ensure_bash_write_targets_allowed(
+    command: str,
+    session: Optional[StudioSession],
+    cwd: Optional[Path],
+) -> Optional[str]:
+    """Block bash_exec writes into reference (read-only) mounts — including ``>>`` / tee.
+
+    ``file_edit`` already enforces write roots; without this, models bypass via shell.
+    """
+    if _bash_exec_is_read_only({"command": command}):
+        return None
+
+    targets = _extract_bash_write_target_paths(command)
+    cd_bases = _bash_cd_bases_in_command(command)
+
+    def _candidates_for(raw: str) -> List[str]:
+        out: List[str] = []
+        expanded = Path(raw).expanduser()
+        if expanded.is_absolute():
+            out.append(str(expanded))
+            return out
+        if cwd is not None:
+            out.append(str((cwd / raw).expanduser()))
+        for base in cd_bases:
+            try:
+                base_path = Path(base).expanduser()
+                if not base_path.is_absolute() and cwd is not None:
+                    base_path = cwd / base_path
+                out.append(str(base_path / raw))
+            except Exception:
+                continue
+        out.append(raw)
+        return out
+
+    def _deny_if_readonly(path_arg: str) -> Optional[str]:
+        try:
+            _resolve_workspace_path(path_arg, session, for_write=True)
+            return None
+        except ValueError as exc:
+            msg = str(exc)
+            if "read-only" in msg or "escapes workspace" in msg or "protected" in msg:
+                return f"ERROR: {msg}"
+            return f"ERROR: {msg}"
+
+    for raw in targets:
+        any_ok = False
+        last_err: Optional[str] = None
+        for cand in _candidates_for(raw):
+            err = _deny_if_readonly(cand)
+            if err is None:
+                any_ok = True
+                break
+            if "read-only" in err:
+                return err
+            last_err = err
+        if not any_ok and last_err:
+            return last_err
+
+    # No redirect/tee target parsed (e.g. python -c open(...)): still block
+    # absolute paths that land on reference mounts. Skip when redirects were
+    # already checked so `cat <ref> && echo >> <writable>` stays allowed.
+    if not targets:
+        for match in _BASH_ABS_PATH_TOKEN_RE.finditer(command or ""):
+            err = _deny_if_readonly(match.group(0))
+            if err is not None and "read-only" in err:
+                return err
+
     return None
 
 
@@ -3440,6 +3588,11 @@ async def _bash_exec_prepare(
             "说明：`cd` 是 shell 内建命令，不会在无 shell 的单次执行中持久化。\n"
             "请在后续 bash_exec 调用里通过 `cwd` 参数指定工作目录。"
         )
+
+    # Before confirm gates: reject shell writes into reference mounts (no bash bypass).
+    write_guard_error = _ensure_bash_write_targets_allowed(command, session, cwd)
+    if write_guard_error:
+        return write_guard_error
 
     if command_name not in SAFE_COMMANDS:
         confirm_question = (

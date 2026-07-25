@@ -80,7 +80,7 @@ def test_reference_mount_read_ok_write_denied(tmp_path: Path, monkeypatch: pytes
     ]
     read_path = at._resolve_workspace_path(str(target), session, for_write=False)
     assert read_path == target.resolve()
-    with pytest.raises(ValueError, match="escapes workspace"):
+    with pytest.raises(ValueError, match=r"read-only \(mounted as reference\)"):
         at._resolve_workspace_path(str(target), session, for_write=True)
 
 
@@ -149,13 +149,116 @@ def test_file_edit_rejects_reference_mount(tmp_path: Path, monkeypatch: pytest.M
     session.taskspaces = [
         {"id": "default", "label": "默认工作区", "path": str(ws), "mount_mode": "link"},
     ]
-    with pytest.raises(ValueError, match="escapes workspace"):
+    with pytest.raises(ValueError, match=r"read-only \(mounted as reference\).*Do not retry"):
         at._resolve_workspace_path(
             str(target),
             session,
             pick_existing=True,
             for_write=True,
         )
+
+
+def test_bash_exec_rejects_redirect_into_reference_mount(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Regression: bash_exec must not bypass reference read-only via ``>>``."""
+    monkeypatch.delenv("AGX_DESKTOP_UNRESTRICTED_FS", raising=False)
+    ws = tmp_path / "ws"
+    ws.mkdir()
+    src = tmp_path / "research-agent"
+    src.mkdir()
+    target = src / "requirements.txt"
+    target.write_text("agenticx==0.2.10\n", encoding="utf-8")
+    (ws / ".agx-mounts.json").write_text(
+        json.dumps(
+            {
+                "version": 1,
+                "mounts": [
+                    {
+                        "name": "research-agent",
+                        "mode": "reference",
+                        "source_path": str(src.resolve()),
+                        "linked_at": 1.0,
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("AGX_WORKSPACE_ROOT", str(ws))
+    session = StudioSession()
+    session.workspace_dir = str(ws)
+    session.taskspaces = [
+        {"id": "default", "label": "默认工作区", "path": str(ws), "mount_mode": "link"},
+    ]
+    called = {"run": False}
+
+    def _fake_run(*_args, **_kwargs):
+        called["run"] = True
+        raise AssertionError("bash_exec must not run when writing into reference mount")
+
+    monkeypatch.setattr(at.subprocess, "run", _fake_run)
+    monkeypatch.setattr(at.asyncio, "create_subprocess_exec", _fake_run)
+
+    result = at.dispatch_tool(
+        "bash_exec",
+        {"command": f"echo 'torch==2.5.1' >> {target}"},
+        session,
+    )
+    assert "read-only" in result
+    assert "Do not retry" in result
+    assert called["run"] is False
+    assert target.read_text(encoding="utf-8") == "agenticx==0.2.10\n"
+
+
+def test_bash_exec_rejects_cd_then_relative_redirect_into_reference(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.delenv("AGX_DESKTOP_UNRESTRICTED_FS", raising=False)
+    ws = tmp_path / "ws"
+    ws.mkdir()
+    src = tmp_path / "research-agent"
+    src.mkdir()
+    target = src / "requirements.txt"
+    target.write_text("base\n", encoding="utf-8")
+    (ws / ".agx-mounts.json").write_text(
+        json.dumps(
+            {
+                "version": 1,
+                "mounts": [
+                    {
+                        "name": "research-agent",
+                        "mode": "reference",
+                        "source_path": str(src.resolve()),
+                        "linked_at": 1.0,
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("AGX_WORKSPACE_ROOT", str(ws))
+    session = StudioSession()
+    session.workspace_dir = str(ws)
+    session.taskspaces = [
+        {"id": "default", "label": "默认工作区", "path": str(ws), "mount_mode": "link"},
+    ]
+    called = {"run": False}
+
+    async def _fake_exec(*_args, **_kwargs):
+        called["run"] = True
+        raise AssertionError("must not execute")
+
+    monkeypatch.setattr(at.asyncio, "create_subprocess_exec", _fake_exec)
+
+    result = at.dispatch_tool(
+        "bash_exec",
+        {"command": f"cd {src} && echo 'torch==2.5.1' >> requirements.txt"},
+        session,
+    )
+    assert "read-only" in result
+    assert called["run"] is False
+    assert target.read_text(encoding="utf-8") == "base\n"
 
 
 def test_ssh_protected_even_when_mounted(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

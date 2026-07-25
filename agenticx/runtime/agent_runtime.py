@@ -1645,9 +1645,93 @@ def _recover_public_completion_from_reasoning(
 
 _EMPTY_RESPONSE_FALLBACK = "本轮模型未能生成完整的可见回复，请重新提问。"
 _TOOL_TURN_EMPTY_FALLBACK = (
-    "工具执行已经结束，但模型未能生成完整的最终说明。"
-    "上方工具结果已保留，请查看结果后明确下一步。"
+    "工具已经跑完，但我没能说明结果。"
+    "请展开上方工具卡片查看成功或失败原因，再告诉我下一步。"
 )
+
+_READONLY_REFERENCE_PATH_RE = re.compile(
+    r"path is read-only \(mounted as reference\):\s*(.+?)(?:\. Do not retry|\.\s*$|$)",
+    re.IGNORECASE | re.DOTALL,
+)
+_ESCAPES_WORKSPACE_PATH_RE = re.compile(
+    r"path escapes workspace:\s*(\S+)",
+    re.IGNORECASE,
+)
+
+
+def _iter_recent_tool_result_messages(
+    messages: Sequence[Mapping[str, Any]] | None,
+) -> list[dict[str, Any]]:
+    """Collect trailing tool results from the latest tool cluster (newest last)."""
+    out: list[dict[str, Any]] = []
+    for msg in reversed(list(messages or ())):
+        if not isinstance(msg, dict):
+            continue
+        role = str(msg.get("role", "")).lower()
+        if role == "tool":
+            out.append(msg)
+            continue
+        content = str(msg.get("content") or "")
+        if role == "assistant" and msg.get("tool_calls"):
+            # The assistant turn that issued the tools — stop above the cluster.
+            break
+        if role == "assistant" and not content.strip():
+            continue
+        if role == "system" and content.lstrip().startswith("[runtime-"):
+            continue
+        break
+    out.reverse()
+    return out
+
+
+def _user_facing_tool_error_fallback(
+    messages: Sequence[Mapping[str, Any]] | None,
+) -> str | None:
+    """Prefer a plain-language summary when the latest tools failed with ERROR."""
+    for msg in reversed(_iter_recent_tool_result_messages(messages)):
+        content = str(msg.get("content") or "").strip()
+        if not content:
+            continue
+        head = content.lstrip()
+        if not (
+            head.startswith("ERROR:")
+            or head.startswith("❌")
+            or head.startswith("CANCELLED:")
+        ):
+            continue
+        name = str(msg.get("name") or msg.get("tool_name") or "tool").strip() or "tool"
+        if "read-only (mounted as reference)" in content:
+            path = ""
+            match = _READONLY_REFERENCE_PATH_RE.search(content)
+            if match:
+                path = match.group(1).strip().rstrip(".")
+            path_line = f"\n\n路径：`{path}`" if path else ""
+            return (
+                "没法修改这个文件：它当前是「引用」挂载（只读）。"
+                f"{path_line}\n\n"
+                "请在左侧工作区把对应文件夹改成「直连」，或让我改写到会话工作区里的副本。"
+            )
+        if "path escapes workspace" in content:
+            path = ""
+            match = _ESCAPES_WORKSPACE_PATH_RE.search(content)
+            if match:
+                path = match.group(1).strip()
+            path_line = f"\n\n路径：`{path}`" if path else ""
+            return (
+                "没法写入该路径：不在当前会话的可写工作区内。"
+                f"{path_line}\n\n"
+                "请先把文件/文件夹以「直连」或「复制」加入工作区，或指定工作区内的路径。"
+            )
+        brief = head.split("\n", 1)[0]
+        for prefix in ("ERROR:", "❌", "CANCELLED:"):
+            if brief.startswith(prefix):
+                brief = brief[len(prefix) :].strip()
+                break
+        return (
+            f"工具 `{name}` 没有成功：{brief}\n\n"
+            "请展开上方工具卡片查看详情，再告诉我下一步。"
+        )
+    return None
 
 
 def _extract_public_tool_result_summary(
@@ -4087,7 +4171,12 @@ class AgentRuntime:
                         clean_body = "\n".join(public_tool_summaries[-3:])
                         terminal_reason = "tool_result_fallback"
                     elif executed_tool_names:
-                        clean_body = _TOOL_TURN_EMPTY_FALLBACK
+                        # Prefer the actual tool ERROR over an opaque "model silent" notice.
+                        clean_body = (
+                            _user_facing_tool_error_fallback(messages)
+                            or _user_facing_tool_error_fallback(session.agent_messages)
+                            or _TOOL_TURN_EMPTY_FALLBACK
+                        )
                         terminal_reason = "tool_turn_empty_fallback"
                     else:
                         clean_body = _EMPTY_RESPONSE_FALLBACK
