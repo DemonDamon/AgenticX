@@ -12240,6 +12240,42 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
               void insertWorkspaceDirectoryReference(taskspaceId, relPath, label);
             }}
             onQuotePreviewSnippet={insertWorkspaceSnippetReference}
+            onQuoteBrowserSelection={(payload) => {
+              const text = String(payload.text || "").trim();
+              if (!text) return;
+              let host = "";
+              try {
+                host = new URL(payload.url).hostname;
+              } catch {
+                /* ignore */
+              }
+              const label = (payload.title || host || "网页").trim().slice(0, 48);
+              addQuoteTarget(
+                {
+                  id: `web-${crypto.randomUUID()}`,
+                  role: "assistant",
+                  content: text,
+                  avatarName: label,
+                },
+                text,
+              );
+            }}
+            onSearchBrowserSelection={(text) => {
+              const q = String(text || "").trim();
+              if (!q) return;
+              if (!pane.taskspacePanelOpen) {
+                openWorkspaceSidebarForPane(
+                  pane.id,
+                  paneRef.current?.clientWidth ?? paneWidth,
+                  openSidePanel,
+                );
+              }
+              setWorkPanelFocus({
+                kind: "browser",
+                url: `https://www.google.com/search?q=${encodeURIComponent(q)}`,
+                title: `搜索：${q}`,
+              });
+            }}
             previewOpenRequest={pendingWorkspacePreviewRequest}
             onPreviewOpenRequestHandled={() => setPendingWorkspacePreviewRequest(null)}
             onEnsureSessionForWorkspace={materializeLazySession}
@@ -12359,6 +12395,42 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
                   void insertWorkspaceDirectoryReference(taskspaceId, relPath, label);
                 }}
                 onQuotePreviewSnippet={insertWorkspaceSnippetReference}
+                onQuoteBrowserSelection={(payload) => {
+                  const text = String(payload.text || "").trim();
+                  if (!text) return;
+                  let host = "";
+                  try {
+                    host = new URL(payload.url).hostname;
+                  } catch {
+                    /* ignore */
+                  }
+                  const label = (payload.title || host || "网页").trim().slice(0, 48);
+                  addQuoteTarget(
+                    {
+                      id: `web-${crypto.randomUUID()}`,
+                      role: "assistant",
+                      content: text,
+                      avatarName: label,
+                    },
+                    text,
+                  );
+                }}
+                onSearchBrowserSelection={(text) => {
+                  const q = String(text || "").trim();
+                  if (!q) return;
+                  if (!pane.taskspacePanelOpen) {
+                    openWorkspaceSidebarForPane(
+                      pane.id,
+                      paneRef.current?.clientWidth ?? paneWidth,
+                      openSidePanel,
+                    );
+                  }
+                  setWorkPanelFocus({
+                    kind: "browser",
+                    url: `https://www.google.com/search?q=${encodeURIComponent(q)}`,
+                    title: `搜索：${q}`,
+                  });
+                }}
                 previewOpenRequest={pendingWorkspacePreviewRequest}
                 onPreviewOpenRequestHandled={() => setPendingWorkspacePreviewRequest(null)}
                 onEnsureSessionForWorkspace={materializeLazySession}

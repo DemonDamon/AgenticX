@@ -64,6 +64,15 @@ import { collectSessionReferences } from "../../utils/session-references";
 import { resolveWorkPanelTodoFromMessages } from "../../utils/task-stall-policy";
 import { ensureArtifactTaskspacesForSession } from "../../utils/ensure-artifact-taskspaces";
 import { RUNTIME_DEFAULT_TASKSPACES } from "../automation/RuntimeConfigSection";
+import {
+  BROWSER_SELECTION_HOOK_JS,
+  BROWSER_SELECTION_READ_JS,
+  mapGuestRectToHostAnchor,
+  parseBrowserGuestSelection,
+  type BrowserQuotePayload,
+} from "./browser-selection";
+import { BrowserSelectionToolbar } from "./BrowserSelectionToolbar";
+import type { SelectionPopupAnchor } from "../workspace/selection-quote-popover";
 
 /**
  * Multipane: each WorkPanel may register a handler. First one that claims the URL
@@ -131,17 +140,26 @@ function RemoteBrowserPane({
   url,
   reloadKey = 0,
   onNavigate,
+  onQuoteSelection,
+  onSearchSelection,
 }: {
   title: string;
   url: string;
   reloadKey?: number;
   /** Guest navigated (link / redirect / intercepted window.open) → sync address bar. */
   onNavigate?: (nextUrl: string) => void;
+  onQuoteSelection?: (payload: BrowserQuotePayload) => void;
+  onSearchSelection?: (text: string) => void;
 }) {
   const [deviceToolbarVisible, setDeviceToolbarVisible] = useState(false);
   const [viewport, setViewport] = useState<HtmlPreviewViewport>(DEFAULT_HTML_PREVIEW_VIEWPORT);
   const [inspectEnabled, setInspectEnabled] = useState(false);
   const webviewRef = useRef<NearElectronWebview | null>(null);
+  const webviewHostRef = useRef<HTMLDivElement | null>(null);
+  const [selectionUi, setSelectionUi] = useState<{
+    text: string;
+    anchor: SelectionPopupAnchor;
+  } | null>(null);
   /** Initial src only — subsequent navigations use loadURL. */
   const initialSrcRef = useRef(url);
   const committedUrlRef = useRef(url);
@@ -151,12 +169,21 @@ function RemoteBrowserPane({
     viewport.width != null && viewport.height != null && viewport.width > 0 && viewport.height > 0;
   const zoom = Math.max(25, Math.min(300, viewport.zoomPercent || 100)) / 100;
 
+  const injectSelectionHook = () => {
+    const wv = webviewRef.current;
+    if (!wv?.executeJavaScript) return;
+    void wv.executeJavaScript(BROWSER_SELECTION_HOOK_JS).catch(() => {
+      /* guest may be mid-navigation */
+    });
+  };
+
   // Parent-driven navigation (address bar / back / forward) — never mutate src attr.
   useEffect(() => {
     const wv = webviewRef.current;
     if (!wv) return;
     if (url === committedUrlRef.current) return;
     committedUrlRef.current = url;
+    setSelectionUi(null);
     loadWebviewUrl(wv, url);
   }, [url]);
 
@@ -165,6 +192,7 @@ function RemoteBrowserPane({
     if (reloadKey === 0) return;
     const wv = webviewRef.current;
     if (!wv) return;
+    setSelectionUi(null);
     try {
       const result = wv.reload();
       if (result != null && typeof (result as Promise<void>).then === "function") {
@@ -183,21 +211,72 @@ function RemoteBrowserPane({
       if (!href || !/^https?:\/\//i.test(href)) return;
       if (href === committedUrlRef.current) return;
       committedUrlRef.current = href;
+      setSelectionUi(null);
       onNavigateRef.current?.(href);
     };
     const onDidNavigate = (event: Event) => {
       const e = event as Event & { url?: string };
       syncFromGuest(e.url || wv.getURL?.() || "");
+      injectSelectionHook();
     };
+    const onDomReady = () => injectSelectionHook();
+    wv.addEventListener("dom-ready", onDomReady);
+    wv.addEventListener("did-finish-load", onDomReady);
     wv.addEventListener("did-navigate", onDidNavigate);
     wv.addEventListener("did-navigate-in-page", onDidNavigate);
     wv.addEventListener("did-redirect-navigation", onDidNavigate);
+    injectSelectionHook();
     return () => {
+      wv.removeEventListener("dom-ready", onDomReady);
+      wv.removeEventListener("did-finish-load", onDomReady);
       wv.removeEventListener("did-navigate", onDidNavigate);
       wv.removeEventListener("did-navigate-in-page", onDidNavigate);
       wv.removeEventListener("did-redirect-navigation", onDidNavigate);
     };
   }, []);
+
+  // Poll guest selection → host toolbar (webview has no shared Selection API with host).
+  useEffect(() => {
+    let cancelled = false;
+    const tick = async () => {
+      const wv = webviewRef.current;
+      const host = webviewHostRef.current;
+      if (!wv?.executeJavaScript || !host) return;
+      try {
+        const raw = await wv.executeJavaScript(BROWSER_SELECTION_READ_JS);
+        if (cancelled) return;
+        const snap = parseBrowserGuestSelection(raw);
+        if (!snap) {
+          setSelectionUi((prev) => (prev ? null : prev));
+          return;
+        }
+        const hostRect = host.getBoundingClientRect();
+        const anchor = mapGuestRectToHostAnchor(snap.rect, hostRect, {
+          zoom: fixed ? zoom : 1,
+        });
+        setSelectionUi((prev) => {
+          if (
+            prev &&
+            prev.text === snap.text &&
+            prev.anchor.top === anchor.top &&
+            prev.anchor.left === anchor.left
+          ) {
+            return prev;
+          }
+          return { text: snap.text, anchor };
+        });
+      } catch {
+        /* ignore transient guest errors */
+      }
+    };
+    const id = window.setInterval(() => {
+      void tick();
+    }, 250);
+    return () => {
+      cancelled = true;
+      window.clearInterval(id);
+    };
+  }, [fixed, zoom, url]);
 
   const frameStyle: CSSProperties = fixed
     ? {
@@ -236,6 +315,7 @@ function RemoteBrowserPane({
       />
       <div className="flex min-h-0 flex-1 justify-center overflow-auto bg-[color-mix(in_oklab,var(--surface-hover)_80%,transparent)] p-3">
         <div
+          ref={webviewHostRef}
           className={
             fixed
               ? "relative shrink-0 overflow-hidden rounded-md border border-border bg-white shadow-sm"
@@ -263,6 +343,27 @@ function RemoteBrowserPane({
           />
         </div>
       </div>
+      {selectionUi ? (
+        <BrowserSelectionToolbar
+          anchor={selectionUi.anchor}
+          onSearch={() => {
+            const text = selectionUi.text.trim();
+            if (!text) return;
+            onSearchSelection?.(text);
+          }}
+          onCopy={() => {
+            const text = selectionUi.text.trim();
+            if (!text) return;
+            void navigator.clipboard.writeText(text);
+          }}
+          onQuote={() => {
+            const text = selectionUi.text.trim();
+            if (!text) return;
+            onQuoteSelection?.({ text, url, title });
+            setSelectionUi(null);
+          }}
+        />
+      ) : null}
     </div>
   );
 }
@@ -415,6 +516,10 @@ type Props = {
     label: string;
   }) => void;
   onQuotePreviewSnippet?: (payload: WorkspacePreviewQuotePayload) => void;
+  /** Remote webview text selection → quote chip in current chat. */
+  onQuoteBrowserSelection?: (payload: BrowserQuotePayload) => void;
+  /** Remote webview text selection → in-app Google search tab. */
+  onSearchBrowserSelection?: (text: string) => void;
   previewOpenRequest?: WorkspacePreviewOpenRequest | null;
   onPreviewOpenRequestHandled?: () => void;
   onEnsureSessionForWorkspace?: () => Promise<string | null>;
@@ -536,6 +641,8 @@ export function WorkPanel({
   onPickFileForReference,
   onPickDirectoryForReference,
   onQuotePreviewSnippet,
+  onQuoteBrowserSelection,
+  onSearchBrowserSelection,
   previewOpenRequest,
   onPreviewOpenRequestHandled,
   onEnsureSessionForWorkspace,
@@ -1842,6 +1949,8 @@ export function WorkPanel({
                 title={activeBrowser.title}
                 url={activeBrowser.url}
                 reloadKey={activeBrowser.reloadNonce ?? 0}
+                onQuoteSelection={onQuoteBrowserSelection}
+                onSearchSelection={onSearchBrowserSelection}
                 onNavigate={(nextUrl) => {
                   const tabId = activeBrowser.id;
                   const title = browserTitleFromUrl(nextUrl);
