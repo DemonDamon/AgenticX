@@ -54,14 +54,16 @@ def test_list_and_read_through_dir_symlink(tmp_path: Path) -> None:
     link = default / "proj"
     link.symlink_to(real_dir, target_is_directory=True)
 
-    rows = manager.list_taskspace_files("ts-dirlink", "default", ".")
+    listing = manager.list_taskspace_files("ts-dirlink", "default", ".")
+    rows = listing["files"] if isinstance(listing, dict) else listing
     names = {r["name"] for r in rows}
     assert "proj" in names
     proj = next(r for r in rows if r["name"] == "proj")
     assert proj["type"] == "dir"
     assert proj.get("is_symlink") is True
 
-    nested = manager.list_taskspace_files("ts-dirlink", "default", "proj")
+    nested_listing = manager.list_taskspace_files("ts-dirlink", "default", "proj")
+    nested = nested_listing["files"] if isinstance(nested_listing, dict) else nested_listing
     assert any(r["name"] == "main.py" and r["path"] == "proj/main.py" for r in nested)
 
     payload = manager.read_taskspace_file("ts-dirlink", "default", "proj/main.py")

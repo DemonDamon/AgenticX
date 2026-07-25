@@ -157,6 +157,34 @@ describe("collectSessionArtifactPaths", () => {
     expect(collectSessionArtifactPaths(messages)).toEqual([path]);
   });
 
+  it("does not treat prose「…路径」+ hidden dir ~/.codewiki as an artifact", () => {
+    const messages: Message[] = [
+      assistantMsg({
+        id: "a1",
+        content: [
+          "**关键发现：CodeWiki 自身不生成任何文档内容。** 它只是一个**元数据管理器**：",
+          "- `config.rs`：管理 `~/.codewiki/<project>/` 路径",
+          "- 实际的 Wiki 文档生成完全依赖外部 AI agent",
+        ].join("\n"),
+      }),
+    ];
+    expect(collectSessionArtifactPaths(messages)).toEqual([]);
+  });
+
+  it("rejects placeholder paths with <> and pure hidden-dir basenames", () => {
+    const messages: Message[] = [
+      assistantMsg({
+        id: "a1",
+        content: "路径：`~/.codewiki/<project>/notes.md`",
+      }),
+      assistantMsg({
+        id: "a2",
+        content: "路径：`~/.codewiki`",
+      }),
+    ];
+    expect(collectSessionArtifactPaths(messages)).toEqual([]);
+  });
+
   it("merges sub-agent outputs and extra paths with dedupe", () => {
     const path = "/Users/damon/out/report.md";
     const messages: Message[] = [

@@ -103,10 +103,15 @@ export type SessionItem = {
   model?: string;
 };
 
+export type TaskspaceMountMode = "reference" | "copy" | "link";
+
 export type Taskspace = {
   id: string;
   label: string;
   path: string;
+  mount_mode?: TaskspaceMountMode;
+  source_path?: string;
+  linked_at?: number;
 };
 
 export type GroupChat = {

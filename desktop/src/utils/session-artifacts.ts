@@ -28,9 +28,12 @@ const LABELED_SAVE_PATH_RE = new RegExp(
   "gi",
 );
 
-/** Line that introduces a saved artifact; path may follow on later lines. */
+/**
+ * Line that introduces a saved artifact; path may follow on later lines.
+ * Bare「路径」must be a label (`路径：`), not prose like「管理 ~/.codewiki/… 路径」.
+ */
 const SAVE_CUE_LINE_RE =
-  /(?:保存路径|路径|已保存(?:至|到)?|saved\s+to|written\s+to|report\s+saved\s+to|file\s+saved\s+to)/i;
+  /(?:保存路径|路径\s*[：:]|已保存(?:至|到)?|saved\s+to|written\s+to|report\s+saved\s+to|file\s+saved\s+to)/i;
 
 const INLINE_ABS_PATH_RE = new RegExp(`\`?${ABS_PATH_BODY}\`?`, "g");
 
@@ -45,7 +48,10 @@ const TABLE_FILENAME_RE = /^\|\s*`?([^`|/\\]+\.[a-zA-Z0-9]{1,12})`?\s*\|/gm;
 
 function looksLikeArtifactFile(path: string): boolean {
   const base = path.split("/").pop() || "";
-  return Boolean(base && /\.[a-zA-Z0-9]{1,12}$/.test(base));
+  if (!base) return false;
+  // Hidden config dirs (`.codewiki`, `.git`) look like "name.ext" to a naive regex — reject.
+  if (/^\.[A-Za-z0-9_-]+$/.test(base)) return false;
+  return /\.[a-zA-Z0-9]{1,12}$/.test(base);
 }
 
 /** Best-effort $HOME for expanding `~/…` during normalize (Node/Electron/Vitest). */
@@ -101,6 +107,8 @@ function normalizeArtifactPath(raw: string): string | null {
   }
   value = value.replace(/[，。；：！？,.]+$/u, "").trim();
   if (!value || /\s/.test(value)) return null;
+  // Docs / templates like `~/.codewiki/<project>/` are not real artifacts.
+  if (/[<>]/.test(value)) return null;
   if (!isAbsoluteFilePath(value) && !value.startsWith("/") && !/^[a-zA-Z]:[\\/]/.test(value) && !value.startsWith("~/")) {
     return null;
   }

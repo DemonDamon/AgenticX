@@ -1505,7 +1505,13 @@ class SessionManager:
         if managed is None:
             return []
         self._ensure_default_taskspace(managed)
-        return [dict(item) for item in managed.taskspaces]
+        rows: list[dict[str, str]] = []
+        for item in managed.taskspaces:
+            row = dict(item)
+            if "mount_mode" not in row:
+                row["mount_mode"] = "link"
+            rows.append(row)
+        return rows
 
     def add_taskspace(
         self,
@@ -1569,7 +1575,9 @@ class SessionManager:
         session_id: str,
         taskspace_id: str,
         rel_path: str = ".",
-    ) -> list[dict[str, Any]]:
+        *,
+        max_entries: int = 2000,
+    ) -> dict[str, Any]:
         managed = self.get(session_id, touch=False)
         if managed is None:
             raise KeyError("session not found")
@@ -1578,32 +1586,127 @@ class SessionManager:
         if taskspace is None:
             raise KeyError("taskspace not found")
         root = Path(taskspace["path"]).expanduser().resolve(strict=False)
-        target = self._resolve_inside_root(root, rel_path, expect_dir=True)
         base_parts = self._normalize_rel_parts(rel_path)
+        is_root_listing = not base_parts
+        mounts_by_name = self._load_workspace_mounts(root)
+        # Reference mount directory: list the external source instead of the
+        # (non-existent) path under the session default workspace.
+        target: Path
+        if base_parts:
+            top = base_parts[0]
+            mount = mounts_by_name.get(top)
+            if mount and str(mount.get("mode") or "") == "reference":
+                source_path = str(mount.get("source_path") or "").strip()
+                if not source_path:
+                    raise FileNotFoundError(f"reference mount missing source: {top}")
+                source_root = Path(source_path).expanduser()
+                nested = Path(*base_parts[1:]) if len(base_parts) > 1 else Path()
+                target = source_root / nested if str(nested) not in {"", "."} else source_root
+                if not target.exists():
+                    raise FileNotFoundError(str(target))
+                if not target.is_dir():
+                    raise NotADirectoryError(str(target))
+            else:
+                target = self._resolve_inside_root(root, rel_path, expect_dir=True)
+        else:
+            target = self._resolve_inside_root(root, rel_path, expect_dir=True)
         rows: list[dict[str, Any]] = []
-        for entry in sorted(target.iterdir(), key=lambda p: (0 if p.is_dir() else 1, p.name.lower())):
-            # Logical path under the taskspace root (works when listing through
-            # an outbound directory symlink whose real entries are outside root).
+        total_seen = 0
+        truncated = False
+        # Collect directory entries without following symlinks for type checks.
+        try:
+            entries = sorted(
+                target.iterdir(),
+                key=lambda p: (0 if p.is_dir() else 1, p.name.lower()),
+            )
+        except OSError:
+            entries = []
+        seen_names: set[str] = set()
+        for entry in entries:
+            if entry.name in {".agx-mounts.json", ".agx-copy-manifest.json"}:
+                continue
+            total_seen += 1
+            if len(rows) >= max_entries:
+                truncated = True
+                continue
             logical_parts = [*base_parts, entry.name]
             logical = "/".join(logical_parts) if logical_parts else entry.name
+            is_symlink = entry.is_symlink()
+            dangling = False
             try:
-                stat = entry.stat()
-                size = int(stat.st_size)
-                modified = float(stat.st_mtime)
+                # lstat: do not follow symlink for type/size metadata.
+                lstat = entry.lstat()
+                size = int(lstat.st_size)
+                modified = float(lstat.st_mtime)
             except OSError:
                 size = 0
                 modified = 0.0
-            rows.append(
-                {
-                    "name": entry.name,
-                    "type": "dir" if entry.is_dir() else "file",
-                    "path": logical,
-                    "size": size,
-                    "modified": modified,
-                    "is_symlink": entry.is_symlink(),
-                }
-            )
-        return rows
+            if is_symlink:
+                # entry.exists() follows the link; False => dangling.
+                dangling = not entry.exists()
+            entry_is_dir = entry.is_dir()
+            mount = mounts_by_name.get(entry.name) if is_root_listing else None
+            row: dict[str, Any] = {
+                "name": entry.name,
+                "type": "dir" if entry_is_dir else "file",
+                "path": logical,
+                "size": size,
+                "modified": modified,
+                "is_symlink": is_symlink,
+                "dangling": dangling,
+            }
+            if mount:
+                row["mount_mode"] = mount.get("mode") or "link"
+                row["source_path"] = mount.get("source_path") or ""
+            seen_names.add(entry.name)
+            rows.append(row)
+        # Inject virtual reference mounts that have no filesystem entry.
+        if is_root_listing:
+            for name, mount in mounts_by_name.items():
+                if name in seen_names:
+                    continue
+                if str(mount.get("mode") or "") != "reference":
+                    continue
+                total_seen += 1
+                if len(rows) >= max_entries:
+                    truncated = True
+                    continue
+                source_path = str(mount.get("source_path") or "")
+                source = Path(source_path).expanduser() if source_path else None
+                is_dir = False
+                dangling = True
+                size = 0
+                modified = float(mount.get("linked_at") or 0.0)
+                if source is not None:
+                    try:
+                        dangling = not source.exists()
+                        is_dir = source.is_dir()
+                        if source.exists():
+                            st = source.stat()
+                            size = int(st.st_size)
+                            modified = float(st.st_mtime)
+                    except OSError:
+                        dangling = True
+                rows.append(
+                    {
+                        "name": name,
+                        "type": "dir" if is_dir else "file",
+                        "path": name,
+                        "size": size,
+                        "modified": modified,
+                        "is_symlink": False,
+                        "dangling": dangling,
+                        "mount_mode": "reference",
+                        "source_path": source_path,
+                        "virtual": True,
+                    }
+                )
+        rows.sort(key=lambda r: (0 if r.get("type") == "dir" else 1, str(r.get("name", "")).lower()))
+        return {
+            "files": rows,
+            "truncated": truncated,
+            "total_seen": total_seen,
+        }
 
     def read_taskspace_file(
         self,
@@ -1621,17 +1724,56 @@ class SessionManager:
         if taskspace is None:
             raise KeyError("taskspace not found")
         root = Path(taskspace["path"]).expanduser().resolve(strict=False)
+        parts = self._normalize_rel_parts(rel_path)
+        # Virtual reference mount: resolve through external source_path.
+        if parts:
+            mounts = self._load_workspace_mounts(root)
+            mount = mounts.get(parts[0])
+            if mount and str(mount.get("mode") or "") == "reference":
+                source_path = str(mount.get("source_path") or "").strip()
+                if not source_path:
+                    raise FileNotFoundError(f"reference mount missing source: {parts[0]}")
+                source_root = Path(source_path).expanduser()
+                nested = Path(*parts[1:]) if len(parts) > 1 else Path()
+                target = source_root / nested if str(nested) not in {"", "."} else source_root
+                if not target.exists():
+                    raise FileNotFoundError(f"reference source missing: {target}")
+                if target.is_dir():
+                    raise IsADirectoryError(str(target))
+                size = int(target.stat().st_size)
+                classification = classify_taskspace_file(target)
+                logical = "/".join(parts) or target.name
+                result: dict[str, Any] = {
+                    "name": target.name,
+                    "path": logical,
+                    "absolute_path": str(target.resolve(strict=False)),
+                    "size": size,
+                    "mount_mode": "reference",
+                    "source_path": str(source_root.resolve(strict=False)),
+                    **classification,
+                }
+                if _is_textual_preview_kind(str(classification["preview_kind"])):
+                    data = target.read_bytes()
+                    truncated = False
+                    if len(data) > max_bytes:
+                        data = data[:max_bytes]
+                        truncated = True
+                    result["content"] = data.decode("utf-8", errors="replace")
+                    result["truncated"] = truncated
+                else:
+                    result["truncated"] = False
+                return result
         target = self._resolve_inside_root(root, rel_path, expect_dir=False)
         if target.is_dir():
             raise IsADirectoryError(str(target))
         size = int(target.stat().st_size)
         classification = classify_taskspace_file(target)
-        logical = "/".join(self._normalize_rel_parts(rel_path)) or target.name
+        logical = "/".join(parts) or target.name
         try:
             absolute = str(target.resolve(strict=False))
         except OSError:
             absolute = str(target)
-        result: dict[str, Any] = {
+        result = {
             "name": target.name,
             "path": logical,
             "absolute_path": absolute,
@@ -1649,6 +1791,36 @@ class SessionManager:
         else:
             result["truncated"] = False
         return result
+
+    @staticmethod
+    def _load_workspace_mounts(root: Path) -> dict[str, dict[str, Any]]:
+        """Load ``.agx-mounts.json`` from a taskspace root (name -> record)."""
+        mounts_file = Path(root) / ".agx-mounts.json"
+        try:
+            raw = json.loads(mounts_file.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError, TypeError):
+            return {}
+        rows = raw.get("mounts") if isinstance(raw, dict) else None
+        if not isinstance(rows, list):
+            return {}
+        out: dict[str, dict[str, Any]] = {}
+        for item in rows:
+            if not isinstance(item, dict):
+                continue
+            name = str(item.get("name") or "").strip()
+            if not name:
+                continue
+            mode = str(item.get("mode") or "link").strip().lower()
+            if mode not in {"reference", "copy", "link"}:
+                mode = "link"
+            out[name] = {
+                "name": name,
+                "mode": mode,
+                "source_path": str(item.get("source_path") or "").strip(),
+                "linked_at": float(item.get("linked_at") or 0.0),
+                "copy_rel": str(item.get("copy_rel") or "").strip() or None,
+            }
+        return out
 
     def cleanup_expired(self) -> None:
         now = time.time()
@@ -2915,13 +3087,26 @@ class SessionManager:
                 if not taskspace_id or not path:
                     continue
                 resolved_path = self._resolve_taskspace_root(session_id, path)
-                rows.append(
-                    {
-                        "id": taskspace_id,
-                        "label": label or Path(resolved_path).name or "taskspace",
-                        "path": resolved_path,
-                    }
-                )
+                mode = str(item.get("mount_mode") or "link").strip().lower()
+                if mode not in {"reference", "copy", "link"}:
+                    mode = "link"
+                source_path = str(item.get("source_path") or "").strip()
+                linked_at_raw = item.get("linked_at")
+                try:
+                    linked_at = float(linked_at_raw) if linked_at_raw is not None else 0.0
+                except (TypeError, ValueError):
+                    linked_at = 0.0
+                row: dict[str, Any] = {
+                    "id": taskspace_id,
+                    "label": label or Path(resolved_path).name or "taskspace",
+                    "path": resolved_path,
+                    "mount_mode": mode,
+                }
+                if source_path:
+                    row["source_path"] = source_path
+                if linked_at:
+                    row["linked_at"] = linked_at
+                rows.append(row)  # type: ignore[arg-type]
                 if len(rows) >= limit:
                     break
         if not rows:
@@ -2932,6 +3117,9 @@ class SessionManager:
             row_path = row["path"]
             if row_path in seen_paths:
                 continue
+            # Historical rows without mount_mode fall back to "link".
+            if "mount_mode" not in row:
+                row = {**row, "mount_mode": "link"}
             dedup.append(row)
             seen_paths.add(row_path)
             if len(dedup) >= limit:

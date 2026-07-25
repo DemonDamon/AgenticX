@@ -195,17 +195,38 @@ def _workspace_root() -> Path:
     return resolve_workspace_dir()
 
 
-def _session_workspace_roots(session: Optional[StudioSession]) -> List[Path]:
-    """Ordered filesystem roots for this session.
+def _load_default_workspace_mounts(default_root: Path) -> List[Dict[str, Any]]:
+    """Load ``.agx-mounts.json`` from a session default workspace root."""
+    mounts_file = Path(default_root) / ".agx-mounts.json"
+    try:
+        raw = json.loads(mounts_file.read_text(encoding="utf-8"))
+    except Exception:
+        return []
+    rows = raw.get("mounts") if isinstance(raw, dict) else None
+    if not isinstance(rows, list):
+        return []
+    out: List[Dict[str, Any]] = []
+    for item in rows:
+        if isinstance(item, dict):
+            out.append(item)
+    return out
 
-    User-added taskspaces (id != \"default\") are listed before the default taskspace
-    so tools like list_files(\".\") and relative file_read resolve to the folder the
-    user bound in the Desktop workspace panel, not only ~/.agenticx/avatars/.../workspace.
+
+def _session_workspace_root_sets(
+    session: Optional[StudioSession],
+) -> tuple[List[Path], List[Path]]:
+    """Return ``(read_roots, write_roots)`` for this session.
+
+    - ``write_roots``: session default workspace + link mounts' source paths +
+      non-reference taskspace roots.
+    - ``read_roots``: write_roots + reference mount source paths (read-only).
     """
-    roots: List[Path] = []
-    seen: set[str] = set()
+    write_roots: List[Path] = []
+    read_only_roots: List[Path] = []
+    seen_write: set[str] = set()
+    seen_read: set[str] = set()
 
-    def _add_path_str(raw: str) -> None:
+    def _add(raw: str, *, writable: bool) -> None:
         text = (raw or "").strip()
         if not text:
             return
@@ -214,16 +235,21 @@ def _session_workspace_roots(session: Optional[StudioSession]) -> List[Path]:
         except Exception:
             return
         key = str(candidate)
-        if key in seen:
+        if writable:
+            if key in seen_write:
+                return
+            seen_write.add(key)
+            write_roots.append(candidate)
+        if key in seen_read:
             return
-        seen.add(key)
-        roots.append(candidate)
+        seen_read.add(key)
+        if not writable:
+            read_only_roots.append(candidate)
 
+    default_paths: List[str] = []
     if session is not None:
         taskspaces = getattr(session, "taskspaces", None)
         if isinstance(taskspaces, list):
-            extra_paths: List[str] = []
-            default_paths: List[str] = []
             for item in taskspaces:
                 if not isinstance(item, dict):
                     continue
@@ -231,21 +257,44 @@ def _session_workspace_roots(session: Optional[StudioSession]) -> List[Path]:
                 if not raw_path:
                     continue
                 ts_id = str(item.get("id", "") or "").strip()
+                mode = str(item.get("mount_mode") or "link").strip().lower()
+                source_path = str(item.get("source_path") or "").strip()
                 if ts_id == "default":
                     default_paths.append(raw_path)
+                    _add(raw_path, writable=True)
+                    continue
+                if mode == "reference":
+                    _add(source_path or raw_path, writable=False)
                 else:
-                    extra_paths.append(raw_path)
-            for p in extra_paths:
-                _add_path_str(p)
-            for p in default_paths:
-                _add_path_str(p)
-        _add_path_str(str(getattr(session, "workspace_dir", "") or ""))
+                    _add(raw_path, writable=True)
+                    if mode == "link" and source_path:
+                        _add(source_path, writable=True)
+        _add(str(getattr(session, "workspace_dir", "") or ""), writable=True)
 
-    _add_path_str(str(_workspace_root()))
-    if not roots:
-        roots.append(Path.cwd().resolve(strict=False))
+    for p in default_paths:
+        try:
+            default_root = Path(p).expanduser().resolve(strict=False)
+        except Exception:
+            continue
+        for mount in _load_default_workspace_mounts(default_root):
+            mode = str(mount.get("mode") or "link").strip().lower()
+            source_path = str(mount.get("source_path") or "").strip()
+            if not source_path:
+                continue
+            if mode == "reference":
+                _add(source_path, writable=False)
+            elif mode == "link":
+                _add(source_path, writable=True)
+            # copy mode: destination already under default_root (writable)
 
-    # Desktop: user-selected workspace tab must win over merge order (multiple non-default taskspaces).
+    # Fallback only. Desktop sets AGX_WORKSPACE_ROOT to the user home, so adding
+    # it unconditionally would make everything under $HOME writable and defeat
+    # per-mount permissions.
+    if not write_roots:
+        _add(str(_workspace_root()), writable=True)
+    if not write_roots and not read_only_roots:
+        _add(str(Path.cwd().resolve(strict=False)), writable=True)
+
     if session is not None:
         raw_active = getattr(session, "active_taskspace_id", None)
         active_id = str(raw_active).strip() if raw_active is not None else ""
@@ -265,24 +314,45 @@ def _session_workspace_roots(session: Optional[StudioSession]) -> List[Path]:
                     except Exception:
                         break
                     tkey = str(target)
-                    roots = [r for r in roots if str(r.resolve(strict=False)) != tkey]
-                    roots.insert(0, target)
+                    write_roots = [r for r in write_roots if str(r) != tkey]
+                    write_roots.insert(0, target)
+                    seen_write.add(tkey)
                     break
+
     # Computer Use screenshots: always allow reading files under ~/.agenticx/desktop-use
     try:
         _agx_desktop = (Path.home() / ".agenticx" / "desktop-use").resolve(strict=False)
-        _add_path_str(str(_agx_desktop))
+        _add(str(_agx_desktop), writable=False)
     except Exception:
         pass
-    return roots
+
+    read_roots = list(write_roots) + [r for r in read_only_roots if str(r) not in seen_write]
+    return read_roots, write_roots
+
+
+def _session_workspace_roots(session: Optional[StudioSession]) -> List[Path]:
+    """Ordered filesystem roots for this session (read-capable)."""
+    read_roots, _write_roots = _session_workspace_root_sets(session)
+    return read_roots
 
 
 def _is_path_under_root(candidate: Path, root: Path) -> bool:
     try:
-        candidate.resolve(strict=False).relative_to(root.resolve(strict=False))
+        cand = _safe_resolve_path(candidate)
+        base = _safe_resolve_path(root)
+        cand.relative_to(base)
         return True
     except ValueError:
         return False
+
+
+def _safe_resolve_path(path: Path) -> Path:
+    """Resolve path; for missing leaves, resolve the nearest existing ancestor."""
+    expanded = path.expanduser()
+    try:
+        return expanded.resolve(strict=False)
+    except Exception:
+        return expanded.absolute()
 
 
 def _desktop_unrestricted_fs_enabled() -> bool:
@@ -2763,11 +2833,38 @@ def _path_from_arg(path_arg: str) -> Path:
 
 
 def _is_protected_config_path(path: Path) -> bool:
-    resolved = path.resolve(strict=False)
-    home_cfg = (Path.home() / ".agenticx" / "config.yaml").resolve(strict=False)
-    if resolved == home_cfg:
+    """Backward-compatible alias for config.yaml protection."""
+    return _is_protected_path(path)
+
+
+def _is_protected_path(path: Path) -> bool:
+    """Sensitive paths blocked for both read and write (above any root allowlist)."""
+    resolved = _safe_resolve_path(path)
+    home = Path.home()
+    protected: List[Path] = [
+        home / ".agenticx" / "config.yaml",
+        home / ".agenticx" / "serve.token",
+        home / ".agenticx" / "wechat_credentials.json",
+        home / ".agenticx" / "feishu_binding.json",
+        home / ".ssh",
+        home / ".aws",
+        home / ".gnupg",
+    ]
+    for item in protected:
+        try:
+            base = item.resolve(strict=False)
+        except Exception:
+            continue
+        if resolved == base:
+            return True
+        try:
+            resolved.relative_to(base)
+            return True
+        except ValueError:
+            continue
+    if resolved.name == "config.yaml" and ".agenticx" in resolved.parts:
         return True
-    return resolved.name == "config.yaml" and ".agenticx" in resolved.parts
+    return False
 
 
 _TOOL_METADATA_LINE_RE = re.compile(r"^\s*(call_[A-Za-z0-9]+|sa-[a-z0-9]+)\s*$")
@@ -2811,34 +2908,53 @@ def _resolve_workspace_path(
     session: Optional[StudioSession] = None,
     *,
     pick_existing: bool = False,
+    for_write: bool = False,
 ) -> Path:
     raw_path = _path_from_arg(path_arg)
     if _desktop_unrestricted_fs_enabled():
         if raw_path.is_absolute():
-            return raw_path.resolve(strict=False)
-        return (_workspace_root() / raw_path).resolve(strict=False)
+            resolved = _safe_resolve_path(raw_path)
+        else:
+            resolved = _safe_resolve_path(_workspace_root() / raw_path)
+        if _is_protected_path(resolved):
+            raise ValueError(f"path is protected: {resolved}")
+        return resolved
 
-    roots = _session_workspace_roots(session)
+    read_roots, write_roots = _session_workspace_root_sets(session)
+    roots = write_roots if for_write else read_roots
+    if not roots:
+        raise ValueError("path escapes workspace: no roots configured")
+
+    def _format_escape(resolved: Path) -> str:
+        allowed = ", ".join(str(r) for r in roots[:8])
+        more = "" if len(roots) <= 8 else f" (+{len(roots) - 8} more)"
+        return f"path escapes workspace: {resolved} (allowed roots: {allowed}{more})"
 
     if raw_path.is_absolute():
-        resolved = raw_path.resolve(strict=False)
+        resolved = _safe_resolve_path(raw_path)
+        if _is_protected_path(resolved):
+            raise ValueError(f"path is protected: {resolved}")
         for root in roots:
             if _is_path_under_root(resolved, root):
                 return resolved
-        raise ValueError(f"path escapes workspace: {resolved}")
+        raise ValueError(_format_escape(resolved))
 
     if pick_existing:
         for root in roots:
-            candidate = (root / raw_path).resolve(strict=False)
+            candidate = _safe_resolve_path(root / raw_path)
             if not _is_path_under_root(candidate, root):
+                continue
+            if _is_protected_path(candidate):
                 continue
             if candidate.exists():
                 return candidate
 
     primary = roots[0]
-    resolved = (primary / raw_path).resolve(strict=False)
+    resolved = _safe_resolve_path(primary / raw_path)
+    if _is_protected_path(resolved):
+        raise ValueError(f"path is protected: {resolved}")
     if not _is_path_under_root(resolved, primary):
-        raise ValueError(f"path escapes workspace: {resolved}")
+        raise ValueError(_format_escape(resolved))
     return resolved
 
 
@@ -3269,7 +3385,7 @@ async def _bash_exec_prepare(
     cwd_arg = arguments.get("cwd")
     if cwd_arg:
         try:
-            cwd = _resolve_workspace_path(str(cwd_arg), session)
+            cwd = _resolve_workspace_path(str(cwd_arg), session, for_write=True)
         except ValueError as exc:
             return f"ERROR: {exc}"
     else:
@@ -4018,12 +4134,13 @@ async def _tool_file_write(
     else:
         new_text = _strip_tool_metadata_noise_lines(str(raw_content))
     try:
-        path = _resolve_workspace_path(raw_path, session)
+        path = _resolve_workspace_path(raw_path, session, for_write=True)
     except ValueError as exc:
         return f"ERROR: {exc}"
-    if _is_protected_config_path(path):
+    if _is_protected_path(path):
         return (
-            "ERROR: direct writes to ~/.agenticx/config.yaml are blocked for safety. "
+            "ERROR: writes to protected paths are blocked for safety "
+            "(e.g. ~/.agenticx/config.yaml, ~/.ssh). "
             "Use update_email_config meta tool for notifications.email.* updates."
         )
     old_text = ""
@@ -4063,12 +4180,19 @@ async def _tool_file_edit(
     emit_event: Optional[Any] = None,
 ) -> str:
     try:
-        path = _resolve_workspace_path(str(arguments.get("path", "")), session, pick_existing=True)
+        # for_write=True: reference mounts are read-only and must not be editable.
+        path = _resolve_workspace_path(
+            str(arguments.get("path", "")),
+            session,
+            pick_existing=True,
+            for_write=True,
+        )
     except ValueError as exc:
         return f"ERROR: {exc}"
-    if _is_protected_config_path(path):
+    if _is_protected_path(path):
         return (
-            "ERROR: direct edits to ~/.agenticx/config.yaml are blocked for safety. "
+            "ERROR: edits to protected paths are blocked for safety "
+            "(e.g. ~/.agenticx/config.yaml, ~/.ssh). "
             "Use update_email_config meta tool for notifications.email.* updates."
         )
     old_text_snippet = str(arguments.get("old_text", ""))
