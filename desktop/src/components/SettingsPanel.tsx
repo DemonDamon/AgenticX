@@ -45,6 +45,7 @@ import {
   Network,
   Database,
   X,
+  TriangleAlert,
 } from "lucide-react";
 import { Panel } from "./ds/Panel";
 import { SettingsDropdown } from "./ds/SettingsDropdown";
@@ -6269,6 +6270,8 @@ export function SettingsPanel({
   const [mcpRemoteEditName, setMcpRemoteEditName] = useState<string | undefined>(undefined);
   const [mcpRemoteDetailExpanded, setMcpRemoteDetailExpanded] = useState<Set<string>>(new Set());
   const fetchModelsRequestSeqRef = useRef(0);
+  const authProbeGenerationRef = useRef(0);
+  const [authProbeProgress, setAuthProbeProgress] = useState<{ done: number; total: number } | null>(null);
   const activeProviderRef = useRef(active);
 
   const [serverMode, setServerMode] = useState<"local" | "remote">("local");
@@ -6998,6 +7001,8 @@ export function SettingsPanel({
     setFetchModelsSearch("");
     setFetchModelsError(null);
     setFetchingModels(false);
+    authProbeGenerationRef.current += 1;
+    setAuthProbeProgress(null);
     activeProviderRef.current = active;
     fetchModelsRequestSeqRef.current += 1;
   }, [active]);
@@ -7114,6 +7119,10 @@ export function SettingsPanel({
       setFetchedModels(normalized);
       setFetchModelsSearch("");
       setFetchModelsModalOpen(true);
+      const authProbeCandidates = normalized.filter((m) => !current.models.includes(m));
+      if (authProbeCandidates.length > 0) {
+        void runAuthProbeQueue(requestProvider, authProbeCandidates, requestApiKey, requestBaseUrl);
+      }
     } catch (err) {
       if (
         fetchModelsRequestSeqRef.current === requestId &&
@@ -7132,9 +7141,45 @@ export function SettingsPanel({
   };
 
   const closeFetchModelsModal = () => {
+    authProbeGenerationRef.current += 1;
+    setAuthProbeProgress(null);
     setFetchModelsModalOpen(false);
     setFetchModelsSearch("");
   };
+
+  /**
+   * Sequentially probes auth status for models not yet visible, so the fetch
+   * modal can flag "未授权" before the user tries to add them. Skips models
+   * already present in modelHealthMap (already checked via this queue or the
+   * main list's manual/batch health check). Cancellable via generation ref:
+   * closing the modal or switching provider bumps the ref, causing in-flight
+   * loop iterations to stop writing further state.
+   */
+  const runAuthProbeQueue = useCallback(
+    async (provider: string, models: string[], apiKey: string, baseUrl: string | undefined) => {
+      const generation = ++authProbeGenerationRef.current;
+      const pending = models.filter((m) => !modelHealthMap[`${provider}:${m}`]);
+      if (pending.length === 0) {
+        setAuthProbeProgress(null);
+        return;
+      }
+      setAuthProbeProgress({ done: 0, total: pending.length });
+      for (let i = 0; i < pending.length; i += 1) {
+        if (authProbeGenerationRef.current !== generation) return;
+        const model = pending[i];
+        const key = `${provider}:${model}`;
+        setModelHealthMap((p) => (p[key] ? p : { ...p, [key]: { phase: "checking" } }));
+        // Sequential avoids hammering the same endpoint in parallel.
+        // eslint-disable-next-line no-await-in-loop
+        const res = await window.agenticxDesktop.healthCheckModel({ provider, apiKey, baseUrl, model });
+        if (authProbeGenerationRef.current !== generation) return;
+        setModelHealthMap((p) => ({ ...p, [key]: healthEntryFromCheckResult(res) }));
+        setAuthProbeProgress({ done: i + 1, total: pending.length });
+      }
+      if (authProbeGenerationRef.current === generation) setAuthProbeProgress(null);
+    },
+    [modelHealthMap],
+  );
 
   const makeModelVisible = (model: string) => {
     if (!model || current.models.includes(model)) return;
@@ -9005,6 +9050,9 @@ export function SettingsPanel({
                           <div className="flex items-center justify-between gap-2">
                             <span className="text-xs text-text-faint">
                               共 {fetchedModels.length} 个，可见 {current.models.length} 个
+                              {authProbeProgress
+                                ? `，自动检测中 ${authProbeProgress.done}/${authProbeProgress.total}`
+                                : ""}
                             </span>
                             <button
                               type="button"
@@ -9031,6 +9079,10 @@ export function SettingsPanel({
                             ) : (
                               filteredFetchedModels.map((model) => {
                                 const isVisible = current.models.includes(model);
+                                const authEntry = modelHealthMap[`${active}:${model}`];
+                                const unauthorized = authEntry?.phase === "unauthorized";
+                                const checkingAuth = authEntry?.phase === "checking";
+                                const addDisabled = isVisible || unauthorized;
                                 return (
                                   <div
                                     key={model}
@@ -9038,25 +9090,49 @@ export function SettingsPanel({
                                   >
                                     <div className="min-w-0">
                                       <div className="truncate text-sm text-text-muted">{model}</div>
-                                      <div className="text-[11px] text-text-faint">
-                                        {isVisible ? "当前状态：可见" : "当前状态：不可见"}
+                                      <div className="mt-0.5 flex items-center gap-1.5">
+                                        <span className="text-[11px] text-text-faint">
+                                          {isVisible ? "当前状态：可见" : "当前状态：不可见"}
+                                        </span>
+                                        {unauthorized ? (
+                                          <HoverTip label={unauthorizedHoverLabel(authEntry?.error)}>
+                                            <span className="inline-flex items-center gap-1 rounded bg-amber-500/15 px-1.5 py-0.5 text-[11px] font-semibold text-amber-400">
+                                              <TriangleAlert className="h-3 w-3" aria-hidden />
+                                              未授权
+                                            </span>
+                                          </HoverTip>
+                                        ) : checkingAuth ? (
+                                          <span className="text-[11px] text-text-faint">检测中…</span>
+                                        ) : null}
                                       </div>
                                     </div>
                                     <ModelCapabilityBadges className="justify-end" provider={active} model={model} />
                                     <div className="flex items-center gap-1.5">
-                                      <button
-                                        type="button"
-                                        aria-label={`设为可见：${model}`}
-                                        className={`inline-flex h-8 w-8 items-center justify-center rounded-md border transition ${
-                                          isVisible
-                                            ? "border-emerald-500/40 text-emerald-400/80"
-                                            : "border-border text-text-subtle hover:bg-surface-hover hover:text-emerald-400"
-                                        }`}
-                                        disabled={isVisible}
-                                        onClick={() => makeModelVisible(model)}
+                                      <HoverTip
+                                        label={
+                                          unauthorized
+                                            ? unauthorizedHoverLabel(authEntry?.error)
+                                            : isVisible
+                                              ? "已可见"
+                                              : "设为可见"
+                                        }
                                       >
-                                        <Plus className="h-4 w-4" aria-hidden />
-                                      </button>
+                                        <button
+                                          type="button"
+                                          aria-label={`设为可见：${model}`}
+                                          className={`inline-flex h-8 w-8 items-center justify-center rounded-md border transition ${
+                                            isVisible
+                                              ? "border-emerald-500/40 text-emerald-400/80"
+                                              : unauthorized
+                                                ? "border-border text-text-faint opacity-40"
+                                                : "border-border text-text-subtle hover:bg-surface-hover hover:text-emerald-400"
+                                          }`}
+                                          disabled={addDisabled}
+                                          onClick={() => makeModelVisible(model)}
+                                        >
+                                          <Plus className="h-4 w-4" aria-hidden />
+                                        </button>
+                                      </HoverTip>
                                       <button
                                         type="button"
                                         aria-label={`设为不可见：${model}`}
