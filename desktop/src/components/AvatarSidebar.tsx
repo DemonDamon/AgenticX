@@ -5,6 +5,7 @@ import { useAppStore, type MainView } from "../store";
 import { APP_DISPLAY_NAME, APP_VERSION, META_AGENT_DISPLAY_NAME } from "../constants/branding";
 import { DEFAULT_META_AVATAR_URL } from "../constants/meta-avatar";
 import { usePaneNavigation } from "../hooks/usePaneNavigation";
+import { isNewTaskNavActive } from "../utils/workspace-session-visibility";
 import { AvatarSettingsPanel } from "./AvatarSettingsPanel";
 import { SidebarSessionHistory } from "./sidebar/SidebarSessionHistory";
 import { TopbarLeftControls } from "./TopbarLeftControls";
@@ -52,6 +53,9 @@ export function AvatarSidebar({ onToggleSidebar }: Props) {
   const [machiContextMenu, setMachiContextMenu] = useState<MachiContextMenuState>(null);
   const [machiSettingsOpen, setMachiSettingsOpen] = useState(false);
   const machiMenuRef = useRef<HTMLDivElement>(null);
+
+  const activePane = panes.find((p) => p.id === activePaneId);
+  const newTaskNavActive = isNewTaskNavActive(mainView, activePane);
 
   const metaPaneActive =
     mainView === "chat" &&
@@ -246,7 +250,7 @@ export function AvatarSidebar({ onToggleSidebar }: Props) {
           {NAV_ENTRIES.map((entry) => {
             const Icon = entry.icon;
             const active =
-              entry.kind === "action" ? mainView === "chat" : mainView === entry.id;
+              entry.kind === "action" ? newTaskNavActive : mainView === entry.id;
             return (
               <button
                 key={entry.id}
