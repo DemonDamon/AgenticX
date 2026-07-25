@@ -643,6 +643,40 @@ export function WorkPanel({
   );
   const artifactSyncDoneKeyRef = useRef<string>("");
 
+  /**
+   * Only list paths that exist on disk. Text extraction alone can false-positive
+   * (e.g. prose「管理 ~/.codewiki/… 路径」) and produce ENOENT on open.
+   */
+  const [presentArtifactPaths, setPresentArtifactPaths] = useState<string[]>([]);
+  useEffect(() => {
+    let cancelled = false;
+    if (artifactPaths.length === 0) {
+      setPresentArtifactPaths([]);
+      return;
+    }
+    const stat = window.agenticxDesktop?.statLocalPath;
+    if (!stat) {
+      setPresentArtifactPaths(artifactPaths);
+      return;
+    }
+    void Promise.all(
+      artifactPaths.map(async (path) => {
+        try {
+          const result = await stat(path);
+          return result.ok ? path : null;
+        } catch {
+          return null;
+        }
+      }),
+    ).then((rows) => {
+      if (cancelled) return;
+      setPresentArtifactPaths(rows.filter((p): p is string => Boolean(p)));
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [artifactSyncKey, artifactPaths]);
+
   // Keep left-sidebar「历史对话 → 文件管理」in sync: stage this session's
   // artifacts into task_artifacts/ and attach that single folder.
   useEffect(() => {
@@ -891,12 +925,12 @@ export function WorkPanel({
   }, [subAgents.length]);
 
   useEffect(() => {
-    if (artifactPaths.length > 0) {
+    if (presentArtifactPaths.length > 0) {
       setOpenSections((prev) => (prev.artifacts ? prev : { ...prev, artifacts: true }));
     } else {
       setOpenSections((prev) => (!prev.artifacts ? prev : { ...prev, artifacts: false }));
     }
-  }, [artifactPaths.length]);
+  }, [presentArtifactPaths.length]);
 
   useEffect(() => {
     if (!referenceBundle.isEmpty) {
@@ -1508,11 +1542,11 @@ export function WorkPanel({
             <Section
               id="artifacts"
               title="任务产物"
-              count={artifactPaths.length}
+              count={presentArtifactPaths.length}
               open={openSections.artifacts}
               onToggle={toggleSection}
             >
-              {artifactPaths.length === 0 ? (
+              {presentArtifactPaths.length === 0 ? (
                 <EmptyBlock
                   icon={<Boxes className="h-9 w-9" strokeWidth={1.3} />}
                   title="暂无产物"
@@ -1520,7 +1554,7 @@ export function WorkPanel({
                 />
               ) : (
                 <SessionArtifactList
-                  paths={artifactPaths}
+                  paths={presentArtifactPaths}
                   highlightPath={artifactHighlightPath}
                   onHighlightHandled={() => setArtifactHighlightPath(null)}
                   onOpenPath={(path) => {
