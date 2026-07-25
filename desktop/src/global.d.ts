@@ -56,7 +56,12 @@ type LoadConfigResult = {
 
 type ValidateKeyResult = { ok: boolean; error?: string; status?: number; warning?: string };
 type FetchModelsResult = { ok: boolean; models: string[]; error?: string; warning?: string };
-type HealthCheckResult = { ok: boolean; error?: string; latencyMs?: number };
+type HealthCheckResult = {
+  ok: boolean;
+  error?: string;
+  latencyMs?: number;
+  reason?: "unauthorized" | "error";
+};
 type EmailConfig = {
   enabled: boolean;
   smtp_host: string;

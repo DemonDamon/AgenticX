@@ -891,7 +891,25 @@ type Props = {
 type ModelHealthEntry =
   | { phase: "checking" }
   | { phase: "ok"; ms: number }
-  | { phase: "error" };
+  | { phase: "error" }
+  | { phase: "unauthorized"; error?: string };
+
+function healthEntryFromCheckResult(res: HealthCheckResult): ModelHealthEntry {
+  if (res.ok) {
+    const ms = typeof res.latencyMs === "number" ? res.latencyMs : 0;
+    return { phase: "ok", ms };
+  }
+  if (res.reason === "unauthorized") {
+    return { phase: "unauthorized", error: res.error };
+  }
+  return { phase: "error" };
+}
+
+function unauthorizedHoverLabel(error?: string): string {
+  const trimmed = String(error || "").trim();
+  if (!trimmed) return "当前密钥无权调用此模型";
+  return trimmed.length > 120 ? `${trimmed.slice(0, 120)}…` : trimmed;
+}
 
 /** 品牌 Avatar：优先用内联 SVG 图标，自定义厂商降级为品牌色首字母 */
 function ProviderAvatar({
@@ -7132,10 +7150,9 @@ export function SettingsPanel({
       baseUrl: current.baseUrl || undefined,
       model,
     });
-    const ms = typeof res.latencyMs === "number" ? res.latencyMs : 0;
     setModelHealthMap((p) => ({
       ...p,
-      [key]: res.ok ? { phase: "ok", ms } : { phase: "error" },
+      [key]: healthEntryFromCheckResult(res),
     }));
   };
 
@@ -7152,10 +7169,9 @@ export function SettingsPanel({
         baseUrl: current.baseUrl || undefined,
         model: m,
       });
-      const ms = typeof res.latencyMs === "number" ? res.latencyMs : 0;
       setModelHealthMap((p) => ({
         ...p,
-        [key]: res.ok ? { phase: "ok", ms } : { phase: "error" },
+        [key]: healthEntryFromCheckResult(res),
       }));
     }
   };
@@ -8916,10 +8932,11 @@ export function SettingsPanel({
                           const hk = `${active}:${model}`;
                           const entry = modelHealthMap[hk];
                           const checking = entry?.phase === "checking";
+                          const unauthorized = entry?.phase === "unauthorized";
                           return (
                             <div
                               key={model}
-                              className="grid grid-cols-[minmax(0,1fr)_minmax(6.5rem,auto)_2rem_2rem] items-center gap-2 rounded-lg border border-border bg-surface-panel px-3 py-2.5 transition hover:border-[var(--settings-accent-border-muted)]"
+                              className={`grid grid-cols-[minmax(0,1fr)_minmax(6.5rem,auto)_2rem_2rem] items-center gap-2 rounded-lg border border-border bg-surface-panel px-3 py-2.5 transition hover:border-[var(--settings-accent-border-muted)]${unauthorized ? " opacity-80" : ""}`}
                             >
                               <div className="min-w-0">
                                 <div className="truncate text-sm text-text-primary">
@@ -8933,6 +8950,12 @@ export function SettingsPanel({
                                     <span className="tabular-nums text-xs text-text-subtle">{formatHealthLatencyMs(entry.ms)}</span>
                                     <CheckCircle2 className="h-3.5 w-3.5 shrink-0 text-emerald-400" aria-hidden />
                                   </>
+                                ) : entry?.phase === "unauthorized" ? (
+                                  <HoverTip label={unauthorizedHoverLabel(entry.error)}>
+                                    <span className="shrink-0 rounded px-1.5 py-0.5 text-xs text-amber-400/90">
+                                      未授权
+                                    </span>
+                                  </HoverTip>
                                 ) : entry?.phase === "error" ? (
                                   <span className="text-xs text-rose-400/90">失败</span>
                                 ) : checking ? (
