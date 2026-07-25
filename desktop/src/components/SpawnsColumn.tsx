@@ -38,13 +38,13 @@ export function SpawnsColumn({
   tintColor,
 }: Props) {
   return (
-    <div className="relative flex h-full min-h-0 shrink-0 flex-col border-l border-border bg-surface-card" style={{ width, ...(tintColor ? { backgroundColor: tintColor } : {}) }}>
+    <div className="relative flex h-full min-h-0 shrink-0 flex-col bg-surface-card" style={{ width, ...(tintColor ? { backgroundColor: tintColor } : {}) }}>
       <div
         className="group absolute -left-[3px] top-0 z-20 h-full w-2 cursor-col-resize"
         onMouseDown={onResizeStart}
         title="拖拽调整 Spawns 列宽度"
       >
-        <div className="mx-auto h-full w-px bg-[var(--ui-accent-divider)] transition-all duration-200 group-hover:w-[2px] group-hover:bg-[var(--ui-btn-primary-bg)]" />
+        <div className="mx-auto h-full w-px bg-[var(--border-strong)] transition-all duration-200 group-hover:w-[2px] group-hover:bg-[var(--ui-btn-primary-bg)]" />
       </div>
       <div className="flex h-10 shrink-0 items-center justify-between border-b border-border px-2">
         <span className="flex items-center gap-1.5 text-xs text-text-subtle">
