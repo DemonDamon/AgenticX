@@ -56,6 +56,7 @@ import {
 } from "./system-search";
 import { proxyAwareFetch, logProxyConfig } from "./proxy-fetch";
 import { fetchFaviconDataUrl } from "./fetch-favicon";
+import { classifyModelHealthFailure } from "./model-health";
 import { isRealpathUnder, safeRealpath } from "./path-guard";
 import {
   applySessionWorkspaceCopy,
@@ -10430,9 +10431,14 @@ function registerIpc(): void {
       if (!isEmbedding && isChatProbeTokenLimitFalseNegative(resp.status, errBody)) {
         return { ok: true, latencyMs };
       }
-      return { ok: false, error: `HTTP ${resp.status}: ${errBody.slice(0, 200)}` };
+      const reason = classifyModelHealthFailure(resp.status, errBody);
+      return {
+        ok: false,
+        error: `HTTP ${resp.status}: ${errBody.slice(0, 200)}`,
+        reason,
+      };
     } catch (err) {
-      return { ok: false, error: String(err) };
+      return { ok: false, error: String(err), reason: "error" as const };
     }
   });
 
