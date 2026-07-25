@@ -10,6 +10,8 @@ type NearElectronWebview = HTMLElement & {
   getURL: () => string;
   /** Open Chromium DevTools for this guest (Trae-style HTML/browser preview). */
   openDevTools: () => void;
+  /** Run script in the guest page (used for WorkPanel browser text selection). */
+  executeJavaScript: (code: string, userGesture?: boolean) => Promise<unknown>;
 };
 
 declare namespace React {
