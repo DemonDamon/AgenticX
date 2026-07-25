@@ -76,6 +76,34 @@ class _AlwaysReasoningOnly:
         yield _THINK_OPEN + "只会思考" + _THINK_CLOSE
 
 
+class _SeparateReasoningOnlyWithEmptyStream:
+    """Return only a provider reasoning field and no streaming chunks."""
+
+    def invoke(self, *_args, **_kwargs):
+        return _FakeResponse("", [], reasoning_content="我在想")
+
+    def stream(self, *_args, **_kwargs):
+        if False:
+            yield ""
+
+
+class _ReasoningThenEmptyResponse:
+    """Emit reasoning once, then return a fully empty nudge response."""
+
+    def __init__(self) -> None:
+        self.calls = 0
+
+    def invoke(self, *_args, **_kwargs):
+        self.calls += 1
+        if self.calls == 1:
+            return _FakeResponse(_THINK_OPEN + "第一轮思考" + _THINK_CLOSE, [])
+        return _FakeResponse("", [])
+
+    def stream(self, *_args, **_kwargs):
+        if self.calls == 1:
+            yield _THINK_OPEN + "第一轮思考" + _THINK_CLOSE
+
+
 class _NormalReasoningPlusBody:
     """reasoning + body in one turn; must NOT trigger nudge."""
 
@@ -150,6 +178,14 @@ def test_reasoning_in_content_triggers_nudge_then_real_reply() -> None:
     assert last["role"] == "assistant"
     assert last["content"] == "已查到价格表"
     assert _THINK_OPEN not in last["content"], "content must not leak < Mattis>"
+    assistant_rows = [
+        message
+        for message in session.agent_messages
+        if message.get("role") == "assistant"
+    ]
+    assert len(assistant_rows) == 2
+    assert assistant_rows[0]["content"] == " "
+    assert assistant_rows[0]["reasoning_content"] == "需要继续"
 
 
 def test_reasoning_in_separate_field_triggers_nudge_then_real_reply() -> None:
@@ -178,7 +214,41 @@ def test_reasoning_only_exhausts_nudge_emits_visible_retry_fallback() -> None:
     assert last["role"] == "assistant"
     assert last["content"] == final
     assert last.get("metadata", {}).get("turn_terminal") is True
+    assert last["reasoning"] == "只会思考"
+    assert last["metadata"]["terminal_reason"] == "empty_response_fallback"
+    assert last["metadata"]["model_finish_reason"] == "unknown"
+    assert last["metadata"]["protocol_errors"] == []
     assert _THINK_OPEN not in last["content"]
+
+
+def test_sync_fallback_empty_turn_persists_provider_reasoning() -> None:
+    """A sync-fallback terminal response preserves provider reasoning."""
+    runtime = AgentRuntime(_SeparateReasoningOnlyWithEmptyStream(), _ApproveGate())
+    session = StudioSession()
+    events = asyncio.run(_collect(runtime, session, "继续"))
+    final = _final_text(events)
+    last = session.chat_history[-1]
+
+    assert "未能生成完整的可见回复" in final
+    assert last["content"] == final
+    assert last["reasoning"] == "我在想"
+    assert last["metadata"]["terminal_reason"] == "empty_response_fallback"
+    assert last["metadata"]["model_finish_reason"] == "unknown"
+
+
+def test_empty_nudge_response_preserves_prior_reasoning() -> None:
+    """A silent nudge response retains the reasoning from the prior round."""
+    llm = _ReasoningThenEmptyResponse()
+    runtime = AgentRuntime(llm, _ApproveGate())
+    session = StudioSession()
+    events = asyncio.run(_collect(runtime, session, "继续"))
+    final = _final_text(events)
+    last = session.chat_history[-1]
+
+    assert llm.calls == 2
+    assert "未能生成完整的可见回复" in final
+    assert last["reasoning"] == "第一轮思考"
+    assert last["metadata"]["terminal_reason"] == "empty_response_fallback"
 
 
 def test_normal_reasoning_plus_body_does_not_trigger_nudge() -> None:
@@ -191,6 +261,7 @@ def test_normal_reasoning_plus_body_does_not_trigger_nudge() -> None:
     assert _final_text(events) == "这是回复"
     last = session.chat_history[-1]
     assert last["content"] == "这是回复"
+    assert "model_finish_reason" not in last["metadata"]
     assert _THINK_OPEN not in last["content"]
 
 

@@ -2650,6 +2650,8 @@ class AgentRuntime:
         # Turn-level counter for reasoning-only rounds (model emitted < Mattis> but no
         # visible body and no tool_call). Capped at 1 to avoid infinite nudge loops.
         reason_only_retry = 0
+        reasoning_before_nudge = ""
+        reasoning_only_protocol_errors: list[str] = []
 
         def _record_tool_turn_outcome(
             outcome: ToolTurnOutcome,
@@ -3952,15 +3954,23 @@ class AgentRuntime:
                     and reason_only_retry < 1
                 ):
                     reason_only_retry += 1
+                    if isinstance(reasoning_for_tool_call, str) and reasoning_for_tool_call:
+                        reasoning_before_nudge = reasoning_for_tool_call
+                        assistant_message["content"] = " "
+                        assistant_message["reasoning_content"] = reasoning_for_tool_call
+                        session.agent_messages[-1] = assistant_message
+                    for protocol_error in parsed.protocol_errors:
+                        if protocol_error not in reasoning_only_protocol_errors:
+                            reasoning_only_protocol_errors.append(protocol_error)
                     logger.info(
                         "reason_only_retry session=%s round=%s reason=reasoning_only_empty_turn",
                         getattr(session, "session_id", ""),
                         round_idx,
                     )
-                    messages.append({"role": "assistant", "content": parsed.visible_body})
+                    messages.append(dict(assistant_message))
                     messages.append({"role": "system", "content": _REASONING_ONLY_NUDGE_HINT})
-                    session.agent_messages.append({"role": "assistant", "content": parsed.visible_body})
                     session.agent_messages.append({"role": "system", "content": _REASONING_ONLY_NUDGE_HINT})
+                    synced_session_message_count = len(session.agent_messages)
                     continue
 
                 if (
@@ -4059,12 +4069,13 @@ class AgentRuntime:
                     reasoning_text = ""
                 elif parsed.malformed:
                     reasoning_text = ""
-                elif authoritative_source_kind == "final_content":
-                    reasoning_text = parsed.reasoning or _nonstream_reasoning
-                elif authoritative_source_kind == "streamed_raw":
-                    reasoning_text = parsed.reasoning or _streamed_reasoning
                 else:
-                    reasoning_text = parsed.reasoning
+                    reasoning_text = (
+                        parsed.reasoning
+                        or _streamed_reasoning
+                        or _nonstream_reasoning
+                        or reasoning_before_nudge
+                    )
 
                 clean_body = parsed.visible_body
                 sug_list = (
@@ -4092,14 +4103,20 @@ class AgentRuntime:
                         )
 
                 if parsed.malformed or terminal_reason != "model_final":
+                    terminal_protocol_errors = list(reasoning_only_protocol_errors)
+                    for protocol_error in parsed.protocol_errors:
+                        if protocol_error not in terminal_protocol_errors:
+                            terminal_protocol_errors.append(protocol_error)
                     logger.warning(
                         "terminal_output_recovered session=%s round=%s reason=%s "
-                        "protocol_errors=%s tools=%s",
+                        "protocol_errors=%s tools=%s finish_reason=%s reasoning_chars=%s",
                         getattr(session, "session_id", ""),
                         round_idx,
                         terminal_reason,
-                        list(parsed.protocol_errors),
+                        terminal_protocol_errors,
                         list(dict.fromkeys(executed_tool_names))[-10:],
+                        model_finish_reason or "unknown",
+                        len(reasoning_text or ""),
                     )
 
                 _rs: int | None = None
@@ -4156,6 +4173,26 @@ class AgentRuntime:
                         **(
                             {"model_finish_reason": model_finish_reason}
                             if model_finish_reason
+                            else {}
+                        ),
+                        **(
+                            {
+                                "model_finish_reason": model_finish_reason or "unknown",
+                                "protocol_errors": list(
+                                    dict.fromkeys(
+                                        [
+                                            *reasoning_only_protocol_errors,
+                                            *parsed.protocol_errors,
+                                        ]
+                                    )
+                                ),
+                            }
+                            if terminal_reason
+                            in {
+                                "empty_response_fallback",
+                                "tool_turn_empty_fallback",
+                                "tool_result_fallback",
+                            }
                             else {}
                         ),
                         **(
