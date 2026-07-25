@@ -1301,7 +1301,12 @@ declare global {
       searchRegistry: (args: { q: string }) => Promise<RegistrySearchResult>;
       searchSkillHub: (args: { q: string }) => Promise<SkillHubSearchResult>;
       loadLocalImageDataUrl: (path: string) => Promise<{ ok: boolean; dataUrl?: string; error?: string }>;
-      writeLocalTextFile: (payload: { path: string; content: string }) => Promise<{ ok: boolean; size?: number; error?: string }>;
+      writeLocalTextFile: (payload: {
+        path: string;
+        content: string;
+        expectedMtimeMs?: number;
+        eol?: "lf" | "crlf";
+      }) => Promise<{ ok: boolean; size?: number; mtimeMs?: number; error?: string; code?: string }>;
       readLocalTextFile: (path: string) => Promise<{ ok: boolean; content?: string; size?: number; error?: string }>;
       /** Stat a local path for size/mtime without reading file contents. */
       statLocalPath: (path: string) => Promise<{
@@ -1449,6 +1454,7 @@ declare global {
         content?: string;
         fileUrl?: string;
         truncated?: boolean;
+        mtimeMs?: number;
         error?: string;
       }>;
       systemSearchOpen: (filePath: string) => Promise<{ ok: boolean; error?: string }>;

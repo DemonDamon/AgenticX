@@ -770,8 +770,19 @@ contextBridge.exposeInMainWorld("agenticxDesktop", {
   searchRegistry: async (args: { q: string }) => ipcRenderer.invoke("search-registry", args),
   searchSkillHub: async (args: { q: string }) => ipcRenderer.invoke("search-skillhub", args),
   loadLocalImageDataUrl: async (path: string) => ipcRenderer.invoke("load-local-image-data-url", path),
-  writeLocalTextFile: async (payload: { path: string; content: string }) =>
-    ipcRenderer.invoke("write-local-text-file", payload),
+  writeLocalTextFile: async (payload: {
+    path: string;
+    content: string;
+    expectedMtimeMs?: number;
+    eol?: "lf" | "crlf";
+  }) =>
+    ipcRenderer.invoke("write-local-text-file", payload) as Promise<{
+      ok: boolean;
+      size?: number;
+      mtimeMs?: number;
+      error?: string;
+      code?: string;
+    }>,
   readLocalTextFile: async (path: string) => ipcRenderer.invoke("read-local-text-file", path),
   statLocalPath: async (path: string) =>
     ipcRenderer.invoke("stat-local-path", path) as Promise<{

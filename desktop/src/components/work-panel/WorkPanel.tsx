@@ -683,6 +683,8 @@ export function WorkPanel({
   const plusBtnRef = useRef<HTMLButtonElement | null>(null);
   const activeKindRef = useRef(activeKind);
   const activeBrowserIdRef = useRef(activeBrowserId);
+  const previewDirtyRef = useRef(false);
+  const previewRequestLeaveRef = useRef<((proceed: () => void) => void) | null>(null);
   activeKindRef.current = activeKind;
   activeBrowserIdRef.current = activeBrowserId;
   // Empty zones stay collapsed by default; content arrival auto-expands (Trae-style).
@@ -931,7 +933,7 @@ export function WorkPanel({
     })();
   };
 
-  const closePreviewTab = (tabId: string) => {
+  const forceClosePreviewTab = (tabId: string) => {
     const next = previewTabs.filter((t) => t.id !== tabId);
     setPreviewTabs(next);
     if (activePreviewId === tabId) {
@@ -940,6 +942,30 @@ export function WorkPanel({
         setActiveKind(resolveFallbackKind({ excludePreviewId: tabId }));
       }
     }
+  };
+
+  const closePreviewTab = (tabId: string) => {
+    if (tabId === activePreviewId && previewDirtyRef.current && previewRequestLeaveRef.current) {
+      previewRequestLeaveRef.current(() => forceClosePreviewTab(tabId));
+      return;
+    }
+    forceClosePreviewTab(tabId);
+  };
+
+  const activatePreviewTab = (tabId: string) => {
+    if (tabId === activePreviewId) {
+      setActiveKind("preview");
+      return;
+    }
+    if (previewDirtyRef.current && previewRequestLeaveRef.current) {
+      previewRequestLeaveRef.current(() => {
+        setActivePreviewId(tabId);
+        setActiveKind("preview");
+      });
+      return;
+    }
+    setActivePreviewId(tabId);
+    setActiveKind("preview");
   };
 
   // iframe target=_blank / window.open → main denies + IPC; stay in Near browser tab.
@@ -1542,10 +1568,7 @@ export function WorkPanel({
                 ? "bg-surface-card-strong text-text-strong"
                 : "text-text-subtle hover:bg-surface-hover hover:text-text-strong"
             }`}
-            onClick={() => {
-              setActivePreviewId(tab.id);
-              setActiveKind("preview");
-            }}
+            onClick={() => activatePreviewTab(tab.id)}
             title={tab.absolutePath}
           >
             <FileText className="h-3.5 w-3.5 shrink-0" strokeWidth={1.8} />
@@ -1806,7 +1829,13 @@ export function WorkPanel({
                     );
                   }, 1600);
                 }}
-                onClose={() => closePreviewTab(activePreview.id)}
+                onClose={() => forceClosePreviewTab(activePreview.id)}
+                onDirtyChange={(dirty) => {
+                  previewDirtyRef.current = dirty;
+                }}
+                onProvideRequestLeave={(fn) => {
+                  previewRequestLeaveRef.current = fn;
+                }}
                 onQuoteSnippet={onQuotePreviewSnippet}
                 onRevealInFileManager={(abs) => {
                   void window.agenticxDesktop?.shellShowItemInFolder?.(abs);
