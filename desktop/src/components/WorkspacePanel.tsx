@@ -19,7 +19,7 @@ import { useAppStore } from "../store";
 
 const EMPTY_TERMINAL_TABS: PaneTerminalTab[] = [];
 import { createResizeRafScheduler } from "../utils/resize-raf";
-import { ContextMenu } from "./ContextMenu";
+import { ContextMenu, type ContextMenuAnchorRect } from "./ContextMenu";
 import { TerminalEmbed } from "./TerminalEmbed";
 import { getRememberedSessionForAvatar } from "../utils/avatar-last-session";
 import { isPaneAwaitingFreshSession } from "../utils/pane-fresh-session";
@@ -114,8 +114,18 @@ type Props = {
 };
 
 type CtxMenuState =
-  | { kind: "taskspace"; x: number; y: number; taskspace: Taskspace }
-  | { kind: "entry"; x: number; y: number; taskspace: Taskspace; entry: TaskspaceFile };
+  | { kind: "taskspace"; anchorRect: ContextMenuAnchorRect; taskspace: Taskspace }
+  | { kind: "entry"; anchorRect: ContextMenuAnchorRect; taskspace: Taskspace; entry: TaskspaceFile };
+
+function contextMenuAnchorFromEvent(event: ReactMouseEvent): ContextMenuAnchorRect {
+  const rect = (event.currentTarget as HTMLElement).getBoundingClientRect();
+  return {
+    left: rect.left,
+    top: rect.top,
+    right: rect.right,
+    bottom: rect.bottom,
+  };
+}
 type SessionListItem = {
   session_id: string;
   avatar_id: string | null;
@@ -1297,6 +1307,17 @@ export function WorkspacePanel({
                       label: item.name,
                     })
                   }
+                  onContextMenu={(e) => {
+                    e.preventDefault();
+                    const ts = taskspaces.find((t) => t.id === taskspaceId);
+                    if (!ts) return;
+                    setCtxMenu({
+                      kind: "entry",
+                      anchorRect: contextMenuAnchorFromEvent(e),
+                      taskspace: ts,
+                      entry: item,
+                    });
+                  }}
                 >
                   <button
                     className={`flex min-w-0 flex-1 items-center gap-1 rounded px-1 py-1 text-left text-[13px] hover:bg-surface-hover ${
@@ -1311,12 +1332,6 @@ export function WorkspacePanel({
                       void toggleDir(taskspaceId, item.path);
                     }}
                     title={dangling ? `${item.path}（源已失效）` : item.path}
-                    onContextMenu={(e) => {
-                      e.preventDefault();
-                      const ts = taskspaces.find((t) => t.id === taskspaceId);
-                      if (!ts) return;
-                      setCtxMenu({ kind: "entry", x: e.clientX, y: e.clientY, taskspace: ts, entry: item });
-                    }}
                   >
                     <span className="inline-block w-3 shrink-0 text-center">{isExpanded ? "▾" : "▸"}</span>
                     <span className="min-w-0 truncate">{item.name}/</span>
@@ -1364,7 +1379,12 @@ export function WorkspacePanel({
                 e.preventDefault();
                 const ts = taskspaces.find((t) => t.id === taskspaceId);
                 if (!ts) return;
-                setCtxMenu({ kind: "entry", x: e.clientX, y: e.clientY, taskspace: ts, entry: item });
+                setCtxMenu({
+                  kind: "entry",
+                  anchorRect: contextMenuAnchorFromEvent(e),
+                  taskspace: ts,
+                  entry: item,
+                });
               }}
             >
               <button
@@ -1676,7 +1696,12 @@ export function WorkspacePanel({
                   onContextMenu={(e) => {
                     e.preventDefault();
                     if (!ts) return;
-                    setCtxMenu({ kind: "entry", x: e.clientX, y: e.clientY, taskspace: ts, entry: file });
+                    setCtxMenu({
+                      kind: "entry",
+                      anchorRect: contextMenuAnchorFromEvent(e),
+                      taskspace: ts,
+                      entry: file,
+                    });
                   }}
                 >
                   <button
@@ -1809,8 +1834,9 @@ export function WorkspacePanel({
 
       <ContextMenu
         open={!!ctxMenu}
-        x={ctxMenu?.x ?? 0}
-        y={ctxMenu?.y ?? 0}
+        x={0}
+        y={0}
+        anchorRect={ctxMenu?.anchorRect}
         onClose={() => setCtxMenu(null)}
         items={
           ctxMenu

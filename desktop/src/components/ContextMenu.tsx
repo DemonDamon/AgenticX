@@ -1,4 +1,5 @@
 import { useEffect, useLayoutEffect, useRef } from "react";
+import { createPortal } from "react-dom";
 
 export type ContextMenuItem = {
   label?: string;
@@ -8,15 +9,24 @@ export type ContextMenuItem = {
   separator?: boolean;
 };
 
+export type ContextMenuAnchorRect = {
+  left: number;
+  top: number;
+  right: number;
+  bottom: number;
+};
+
 type Props = {
   open: boolean;
   x: number;
   y: number;
+  /** When set, menu opens below the anchor row (flips above if needed). */
+  anchorRect?: ContextMenuAnchorRect | null;
   items: ContextMenuItem[];
   onClose: () => void;
 };
 
-export function ContextMenu({ open, x, y, items, onClose }: Props) {
+export function ContextMenu({ open, x, y, anchorRect, items, onClose }: Props) {
   const ref = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
@@ -39,20 +49,33 @@ export function ContextMenu({ open, x, y, items, onClose }: Props) {
     if (!open || !ref.current) return;
     const el = ref.current;
     const pad = 8;
+    const gap = 4;
     const rect = el.getBoundingClientRect();
     const vw = window.innerWidth;
     const vh = window.innerHeight;
     let left = x;
     let top = y;
+    if (anchorRect) {
+      left = anchorRect.left;
+      top = anchorRect.bottom + gap;
+      if (top + rect.height > vh - pad) {
+        const above = anchorRect.top - rect.height - gap;
+        if (above >= pad) top = above;
+      }
+    }
     if (left + rect.width > vw - pad) left = Math.max(pad, vw - rect.width - pad);
+    if (left < pad) left = pad;
     if (top + rect.height > vh - pad) top = Math.max(pad, vh - rect.height - pad);
+    if (top < pad) top = pad;
     el.style.left = `${left}px`;
     el.style.top = `${top}px`;
-  }, [open, x, y, items]);
+  }, [open, x, y, anchorRect, items]);
 
   if (!open) return null;
 
-  return (
+  // Portal to body so fixed positioning uses viewport coords even inside
+  // transformed ancestors (e.g. SidebarSessionHistory slide panels).
+  return createPortal(
     <div
       ref={ref}
       className="fixed z-[200] min-w-[168px] rounded-xl border border-border bg-surface-panel/95 py-1 shadow-2xl backdrop-blur-md"
@@ -81,6 +104,7 @@ export function ContextMenu({ open, x, y, items, onClose }: Props) {
           </button>
         )
       )}
-    </div>
+    </div>,
+    document.body
   );
 }
