@@ -40,4 +40,17 @@ describe("turn-interruption-notice", () => {
     expect(parsed?.cause).toBe("runtime_failure");
     expect(parsed?.failureSummary).toContain("invalid input");
   });
+
+  it("preserves the suspected truncated final cause", () => {
+    const parsed = parseTurnInterruptionNotice({
+      role: "tool",
+      content: "这条回答似乎没有说完。可点「继续」补全。",
+      metadata: {
+        kind: TURN_INTERRUPTED_KIND,
+        cause: "suspected_truncated_final",
+      },
+    });
+
+    expect(parsed?.cause).toBe("suspected_truncated_final");
+  });
 });

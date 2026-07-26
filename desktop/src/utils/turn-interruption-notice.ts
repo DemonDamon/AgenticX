@@ -7,6 +7,7 @@ export type TurnInterruptionCause =
   | "cancelled"
   | "no_final"
   | "deferred_action"
+  | "suspected_truncated_final"
   | "unknown";
 
 type NoticePick = Pick<Message, "role" | "content" | "metadata">;
@@ -43,6 +44,7 @@ export function parseTurnInterruptionNotice(message: NoticePick): {
     || causeRaw === "cancelled"
     || causeRaw === "no_final"
     || causeRaw === "deferred_action"
+    || causeRaw === "suspected_truncated_final"
       ? causeRaw
       : "unknown";
   const text = String(message.content ?? "").trim();

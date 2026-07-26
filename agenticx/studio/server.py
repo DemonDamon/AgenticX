@@ -472,6 +472,18 @@ def _finalize_partial_assistant_if_needed(
     return True
 
 
+def _last_terminal_reason_is_suspected_truncated(history: list[dict[str, Any]]) -> bool:
+    for row in reversed(history):
+        if str(row.get("role", "")).strip() != "assistant":
+            continue
+        metadata = row.get("metadata")
+        return (
+            isinstance(metadata, dict)
+            and metadata.get("terminal_reason") == "suspected_truncated_final"
+        )
+    return False
+
+
 async def _finalize_chat_runtime(
     manager: SessionManager,
     session_id: str,
@@ -492,10 +504,19 @@ async def _finalize_chat_runtime(
     deferred_action = saw_final and _messages_last_turn_promised_action_without_followthrough(
         [m for m in history if isinstance(m, dict)]
     )
+    suspected_truncated = saw_final and _last_terminal_reason_is_suspected_truncated(
+        [m for m in history if isinstance(m, dict)]
+    )
     cause = interruption_cause
     detector = interruption_detector or _last_turn_failure_detector(session)
     if deferred_action:
         append_turn_interruption_notice(session, cause="deferred_action", saw_final=False)
+    elif suspected_truncated:
+        append_turn_interruption_notice(
+            session,
+            cause="suspected_truncated_final",
+            saw_final=False,
+        )
     elif not saw_final and cause is None:
         cause = resolve_turn_interruption_cause(
             manager,
@@ -516,7 +537,7 @@ async def _finalize_chat_runtime(
             saw_final=saw_final,
             detector=detector,
         )
-    effective_saw_final = saw_final and not deferred_action
+    effective_saw_final = saw_final and not deferred_action and not suspected_truncated
     end_state = _resolve_chat_end_execution_state(
         manager,
         session_id,

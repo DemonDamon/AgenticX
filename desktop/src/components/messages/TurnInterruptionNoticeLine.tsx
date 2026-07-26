@@ -25,9 +25,12 @@ export function TurnInterruptionNoticeLine({ message, resumeInFlight = false, on
     text = parsed?.failureSummary
       ? `模型调用失败：${parsed.failureSummary}`
       : (parsed?.text || "模型调用失败，本轮未完成");
+  } else if (cause === "suspected_truncated_final") {
+    text = "这条回答似乎没有说完";
   } else {
     text = "上一步工具执行后未收到模型响应";
   }
+  const isSuspectedTruncated = cause === "suspected_truncated_final";
 
   return (
     <SystemStatusLine icon={CirclePause} tone="info" data-status-kind="turn-interrupted">
@@ -39,10 +42,12 @@ export function TurnInterruptionNoticeLine({ message, resumeInFlight = false, on
             className="inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-[12px] font-medium text-text-faint transition-colors hover:text-text-subtle disabled:opacity-50"
             disabled={resumeInFlight}
             onClick={() => onResume()}
-            aria-label="恢复执行"
+            aria-label={isSuspectedTruncated ? "继续" : "恢复执行"}
           >
             <RotateCcw className="h-3 w-3" aria-hidden />
-            {resumeInFlight ? "恢复中…" : "恢复执行"}
+            {resumeInFlight
+              ? (isSuspectedTruncated ? "继续中…" : "恢复中…")
+              : (isSuspectedTruncated ? "继续" : "恢复执行")}
           </button>
         ) : null}
       </div>
