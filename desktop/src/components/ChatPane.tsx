@@ -447,9 +447,13 @@ function shellSingleQuote(input: string): string {
 }
 
 const EMPTY_QUEUE: QueuedMessage[] = [];
-const KB_RETRIEVAL_MODE_OPTIONS: { value: "auto" | "always"; label: string }[] = [
-  { value: "auto", label: "智能检索" },
-  { value: "always", label: "始终检索" },
+const KB_RETRIEVAL_MODE_OPTIONS: {
+  value: "auto" | "always";
+  label: string;
+  hint: string;
+}[] = [
+  { value: "auto", label: "智能检索", hint: "由模型判断何时查知识库" },
+  { value: "always", label: "始终检索", hint: "回答前优先检索知识库" },
 ];
 
 /** 多分窗下仅看窗口宽度不可靠：按单窗格可视宽度切换到「侧栏抽屉」模式（对齐左侧主导航 overlay，不并排挤压会话区）。 */
@@ -1128,6 +1132,9 @@ function PaneKnowledgeRetrievalModeSwitch({
   );
   const [saving, setSaving] = useState(false);
   const [open, setOpen] = useState(false);
+  const [menuPos, setMenuPos] = useState<{ bottom: number; left: number } | null>(null);
+  const rootRef = useRef<HTMLDivElement>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
   const refreshGenRef = useRef(0);
 
   // Sync toolbar icon immediately when session/pane/global default changes —
@@ -1157,6 +1164,29 @@ function PaneKnowledgeRetrievalModeSwitch({
     void refresh();
   }, [refresh]);
 
+  const openMenu = useCallback(() => {
+    if (rootRef.current) {
+      const rect = rootRef.current.getBoundingClientRect();
+      setMenuPos({
+        bottom: window.innerHeight - rect.top + 4,
+        left: rect.left,
+      });
+    }
+    setOpen(true);
+  }, []);
+
+  useEffect(() => {
+    if (!open) return;
+    const onDown = (e: MouseEvent) => {
+      const t = e.target as Node;
+      if (rootRef.current?.contains(t)) return;
+      if (menuRef.current?.contains(t)) return;
+      setOpen(false);
+    };
+    document.addEventListener("mousedown", onDown);
+    return () => document.removeEventListener("mousedown", onDown);
+  }, [open]);
+
   const saveMode = useCallback(
     async (nextMode: KbRetrievalMode) => {
       if (saving) return;
@@ -1181,35 +1211,32 @@ function PaneKnowledgeRetrievalModeSwitch({
     [mode, paneId, saving, sessionId],
   );
 
-  return (
-    <div className="relative">
-      <HoverTip label={`知识库检索模式：${KB_RETRIEVAL_MODE_OPTIONS.find((opt) => opt.value === mode)?.label ?? "智能检索"}`}>
-        <button
-          type="button"
-          className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg text-text-muted transition hover:bg-surface-hover hover:text-text-strong"
-          disabled={saving}
-          onClick={() => setOpen((v) => !v)}
-          aria-label="知识库检索模式"
-        >
-          {mode === "auto" ? (
-            <Sparkles className="h-[15px] w-[15px]" strokeWidth={2} aria-hidden />
-          ) : (
-            <Radar className="h-[15px] w-[15px]" strokeWidth={2} aria-hidden />
-          )}
-        </button>
-      </HoverTip>
-      {open && (
-        <>
-          <div className="fixed inset-0 z-30" onClick={() => setOpen(false)} />
-          <div className="absolute bottom-full left-0 z-40 mb-1 w-[120px] overflow-hidden rounded-xl border border-border bg-surface-panel p-1.5 shadow-xl backdrop-blur-xl">
+  const activeLabel =
+    KB_RETRIEVAL_MODE_OPTIONS.find((opt) => opt.value === mode)?.label ?? "智能检索";
+
+  // Portal to document.body — composer toolbar has overflow-hidden and would clip
+  // an absolute dropdown (same pattern as NewTopicSplitControl).
+  const panel =
+    open && menuPos
+      ? createPortal(
+          <div
+            ref={menuRef}
+            style={{ bottom: menuPos.bottom, left: menuPos.left }}
+            className="fixed z-[9999] w-[200px] overflow-hidden rounded-xl border border-border bg-surface-panel p-1.5 shadow-xl backdrop-blur-xl"
+            role="listbox"
+            aria-label="知识库检索模式"
+          >
             {KB_RETRIEVAL_MODE_OPTIONS.map((opt) => {
               const isActive = mode === opt.value;
+              const Icon = opt.value === "auto" ? Sparkles : Radar;
               return (
                 <button
                   key={opt.value}
                   type="button"
+                  role="option"
+                  aria-selected={isActive}
                   disabled={saving}
-                  className={`group flex w-full items-center justify-between rounded-lg px-2 py-2 text-left transition-colors ${
+                  className={`group flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-left transition-colors ${
                     isActive ? "bg-surface-hover" : "hover:bg-surface-hover"
                   } ${opt.value === "always" ? "mt-0.5" : ""}`}
                   onClick={() => {
@@ -1217,42 +1244,59 @@ function PaneKnowledgeRetrievalModeSwitch({
                     void saveMode(opt.value);
                   }}
                 >
-                  <div className="flex items-center gap-2">
-                    {opt.value === "auto" ? (
-                      <Sparkles
-                        className={`h-[15px] w-[15px] shrink-0 ${
-                          isActive ? "text-text-strong" : "text-text-muted group-hover:text-text-standard"
-                        }`}
-                        strokeWidth={2}
-                      />
-                    ) : (
-                      <Radar
-                        className={`h-[15px] w-[15px] shrink-0 ${
-                          isActive ? "text-text-strong" : "text-text-muted group-hover:text-text-standard"
-                        }`}
-                        strokeWidth={2}
-                      />
-                    )}
+                  <Icon
+                    className={`h-[15px] w-[15px] shrink-0 ${
+                      isActive ? "text-text-strong" : "text-text-muted group-hover:text-text-standard"
+                    }`}
+                    strokeWidth={2}
+                  />
+                  <span className="flex min-w-0 flex-1 flex-col gap-0.5">
                     <span
-                      className={`whitespace-nowrap text-[13px] font-medium leading-none ${
+                      className={`text-[13px] font-medium leading-none ${
                         isActive ? "text-text-strong" : "text-text-standard"
                       }`}
                     >
                       {opt.label}
                     </span>
-                  </div>
-                  {isActive ? (
-                    <Check className="h-3.5 w-3.5 shrink-0 text-text-strong" strokeWidth={2.5} />
-                  ) : (
-                    <div className="h-3.5 w-3.5 shrink-0" />
-                  )}
+                    <span className="text-[11px] leading-none text-text-faint">{opt.hint}</span>
+                  </span>
+                  <span className="flex w-4 shrink-0 justify-end">
+                    {isActive ? (
+                      <Check className="h-3.5 w-3.5 text-text-strong" strokeWidth={2.5} />
+                    ) : null}
+                  </span>
                 </button>
               );
             })}
-          </div>
-        </>
-      )}
-    </div>
+          </div>,
+          document.body,
+        )
+      : null;
+
+  return (
+    <>
+      <div ref={rootRef} className="relative">
+        <HoverTip label={`知识库检索模式：${activeLabel}`}>
+          <button
+            type="button"
+            className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-lg transition hover:bg-surface-hover hover:text-text-strong ${
+              open ? "bg-surface-hover text-text-strong" : "text-text-muted"
+            }`}
+            disabled={saving}
+            aria-label="知识库检索模式"
+            aria-expanded={open}
+            onClick={() => (open ? setOpen(false) : openMenu())}
+          >
+            {mode === "auto" ? (
+              <Sparkles className="h-[15px] w-[15px]" strokeWidth={2} aria-hidden />
+            ) : (
+              <Radar className="h-[15px] w-[15px]" strokeWidth={2} aria-hidden />
+            )}
+          </button>
+        </HoverTip>
+      </div>
+      {panel}
+    </>
   );
 }
 
