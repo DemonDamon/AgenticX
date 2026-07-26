@@ -300,6 +300,7 @@ export type ForwardedHistoryItem = {
   content: string;
   avatarUrl?: string;
   timestamp?: number;
+  attachments?: MessageAttachment[];
 };
 
 export type ForwardedHistoryCard = {

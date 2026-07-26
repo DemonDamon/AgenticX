@@ -5991,31 +5991,9 @@ def create_studio_app() -> FastAPI:
         target_managed = manager.get(target_session_id, touch=False)
         if target_managed is None:
             raise HTTPException(status_code=404, detail="target session not found")
-        normalized_items: list[dict[str, Any]] = []
-        for item in messages:
-            if not isinstance(item, dict):
-                continue
-            sender = str(item.get("sender", "") or "").strip() or "unknown"
-            role = str(item.get("role", "") or "").strip() or "assistant"
-            avatar_url = str(item.get("avatar_url", "") or "").strip()
-            content = str(item.get("content", "") or "").strip()
-            timestamp_raw = item.get("timestamp")
-            timestamp: int | None
-            try:
-                timestamp = int(timestamp_raw) if timestamp_raw is not None else None
-            except (TypeError, ValueError):
-                timestamp = None
-            if not content:
-                continue
-            normalized_items.append(
-                {
-                    "sender": sender,
-                    "role": role,
-                    "content": content,
-                    "avatar_url": avatar_url or None,
-                    "timestamp": timestamp,
-                }
-            )
+        from agenticx.studio.message_forward import build_forward_entry, normalize_forward_items
+
+        normalized_items = normalize_forward_items(messages)
         if not normalized_items:
             raise HTTPException(status_code=400, detail="no valid messages to forward")
         source_name = "会话"
@@ -6025,22 +6003,15 @@ def create_studio_app() -> FastAPI:
                 or str(getattr(source_managed, "avatar_name", "") or "").strip()
                 or source_name
             )
-        preview_lines = [f"{item['sender']}: {item['content']}" for item in normalized_items[:2]]
-        preview_text = "\n".join(preview_lines) if preview_lines else "聊天记录"
-        if follow_up_note:
-            preview_text = f"{preview_text}\n附加说明: {follow_up_note}"
-        ts = int(datetime.now().timestamp() * 1000)
-        forward_entry: dict[str, Any] = {
-            "role": "user",
-            "content": preview_text,
-            "timestamp": ts,
-            "forwarded_history": {
-                "title": f"聊天记录 · 来自 {source_name}",
-                "source_session": source_session_id,
-                "note": follow_up_note or None,
-                "items": normalized_items,
-            },
-        }
+        # Full transcript in content (forwarded_history is stripped before LLM calls).
+        # Attachments are mirrored onto the entry for UI chips + vision promotion.
+        forward_entry = build_forward_entry(
+            source_session_id=source_session_id,
+            source_name=source_name,
+            items=normalized_items,
+            follow_up_note=follow_up_note,
+            target_session_id=target_session_id,
+        )
         session = target_managed.studio_session
         session.chat_history.append(forward_entry)
         # run_turn reads agent_messages, not chat_history alone — mirror so the model sees the forward.
