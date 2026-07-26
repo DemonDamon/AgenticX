@@ -2254,6 +2254,8 @@ const ToolsTab = forwardRef<ToolsTabHandle, Record<string, never>>(function Tool
   const [maxTaskspaces, setMaxTaskspaces] = useState(RUNTIME_DEFAULT_TASKSPACES);
   const [toolSearchMode, setToolSearchMode] = useState<"off" | "auto" | "always">("off");
   const [toolSearchThreshold, setToolSearchThreshold] = useState(6000);
+  const [toolSearchStrategy, setToolSearchStrategy] = useState<"adaptive" | "manual">("adaptive");
+  const [toolSearchRatioPercent, setToolSearchRatioPercent] = useState(5);
   const [toolSearchPersistError, setToolSearchPersistError] = useState("");
   const [stallNudge, setStallNudge] = useState<StallNudgeConfig>({
     stall_detect_silence_seconds: 90,
@@ -2276,11 +2278,18 @@ const ToolsTab = forwardRef<ToolsTabHandle, Record<string, never>>(function Tool
   const toolSearchThresholdTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const persistToolSearchConfig = useCallback(
-    async (mode: "off" | "auto" | "always", threshold: number) => {
+    async (
+      mode: "off" | "auto" | "always",
+      threshold: number,
+      strategy: "adaptive" | "manual",
+      ratioPercent: number,
+    ) => {
       try {
         const rtRes = await window.agenticxDesktop.saveRuntimeConfig({
           tool_search_mode: mode,
           tool_search_auto_schema_token_threshold: threshold,
+          tool_search_threshold_strategy: strategy,
+          tool_search_context_budget_ratio: Math.max(0.01, Math.min(0.25, ratioPercent / 100)),
         });
         if (!rtRes?.ok) {
           setToolSearchPersistError(
@@ -2301,9 +2310,17 @@ const ToolsTab = forwardRef<ToolsTabHandle, Record<string, never>>(function Tool
   const handleToolSearchModeChange = useCallback(
     (mode: "off" | "auto" | "always") => {
       setToolSearchMode(mode);
-      void persistToolSearchConfig(mode, toolSearchThreshold);
+      void persistToolSearchConfig(mode, toolSearchThreshold, toolSearchStrategy, toolSearchRatioPercent);
     },
-    [persistToolSearchConfig, toolSearchThreshold],
+    [persistToolSearchConfig, toolSearchThreshold, toolSearchStrategy, toolSearchRatioPercent],
+  );
+
+  const handleToolSearchStrategyChange = useCallback(
+    (strategy: "adaptive" | "manual") => {
+      setToolSearchStrategy(strategy);
+      void persistToolSearchConfig(toolSearchMode, toolSearchThreshold, strategy, toolSearchRatioPercent);
+    },
+    [persistToolSearchConfig, toolSearchMode, toolSearchThreshold, toolSearchRatioPercent],
   );
 
   const handleToolSearchThresholdChange = useCallback(
@@ -2313,10 +2330,33 @@ const ToolsTab = forwardRef<ToolsTabHandle, Record<string, never>>(function Tool
         clearTimeout(toolSearchThresholdTimerRef.current);
       }
       toolSearchThresholdTimerRef.current = setTimeout(() => {
-        void persistToolSearchConfig(toolSearchMode, threshold);
+        void persistToolSearchConfig(
+          toolSearchMode,
+          threshold,
+          toolSearchStrategy,
+          toolSearchRatioPercent,
+        );
       }, 350);
     },
-    [persistToolSearchConfig, toolSearchMode],
+    [persistToolSearchConfig, toolSearchMode, toolSearchStrategy, toolSearchRatioPercent],
+  );
+
+  const handleToolSearchRatioPercentChange = useCallback(
+    (percent: number) => {
+      setToolSearchRatioPercent(percent);
+      if (toolSearchThresholdTimerRef.current) {
+        clearTimeout(toolSearchThresholdTimerRef.current);
+      }
+      toolSearchThresholdTimerRef.current = setTimeout(() => {
+        void persistToolSearchConfig(
+          toolSearchMode,
+          toolSearchThreshold,
+          toolSearchStrategy,
+          percent,
+        );
+      }, 350);
+    },
+    [persistToolSearchConfig, toolSearchMode, toolSearchThreshold, toolSearchStrategy],
   );
 
   useEffect(() => {
@@ -2372,6 +2412,16 @@ const ToolsTab = forwardRef<ToolsTabHandle, Record<string, never>>(function Tool
           Number.isFinite(tsThreshold)
             ? Math.max(1000, Math.min(50000, Math.round(tsThreshold)))
             : 6000,
+        );
+        const tsStrategy = String(runtimeResult.tool_search_threshold_strategy ?? "adaptive")
+          .trim()
+          .toLowerCase();
+        setToolSearchStrategy(tsStrategy === "manual" ? "manual" : "adaptive");
+        const tsRatio = Number(runtimeResult.tool_search_context_budget_ratio ?? 0.05);
+        setToolSearchRatioPercent(
+          Number.isFinite(tsRatio)
+            ? Math.max(1, Math.min(25, Math.round(tsRatio * 1000) / 10))
+            : 5,
         );
         const detectSec = Math.max(
           30,
@@ -2505,6 +2555,11 @@ const ToolsTab = forwardRef<ToolsTabHandle, Record<string, never>>(function Tool
           max_taskspaces: maxTaskspaces,
           tool_search_mode: toolSearchMode,
           tool_search_auto_schema_token_threshold: toolSearchThreshold,
+          tool_search_threshold_strategy: toolSearchStrategy,
+          tool_search_context_budget_ratio: Math.max(
+            0.01,
+            Math.min(0.25, toolSearchRatioPercent / 100),
+          ),
           stall_detect_silence_seconds: stallNudge.stall_detect_silence_seconds,
           stall_auto_nudge_enabled: stallNudge.stall_auto_nudge_enabled,
           stall_auto_nudge_after_seconds: afterSec,
@@ -2537,6 +2592,8 @@ const ToolsTab = forwardRef<ToolsTabHandle, Record<string, never>>(function Tool
       maxTaskspaces,
       toolSearchMode,
       toolSearchThreshold,
+      toolSearchStrategy,
+      toolSearchRatioPercent,
       saveBashDefaultTimeout,
       stallNudge,
       tokenBudget,
@@ -2615,6 +2672,10 @@ const ToolsTab = forwardRef<ToolsTabHandle, Record<string, never>>(function Tool
         onModeChange={handleToolSearchModeChange}
         threshold={toolSearchThreshold}
         onThresholdChange={handleToolSearchThresholdChange}
+        thresholdStrategy={toolSearchStrategy}
+        onThresholdStrategyChange={handleToolSearchStrategyChange}
+        contextBudgetRatioPercent={toolSearchRatioPercent}
+        onContextBudgetRatioPercentChange={handleToolSearchRatioPercentChange}
         disabled={loading}
       />
       <TokenBudgetConfigSection value={tokenBudget} onChange={setTokenBudget} disabled={loading} />

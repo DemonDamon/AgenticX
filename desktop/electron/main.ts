@@ -8864,6 +8864,16 @@ function registerIpc(): void {
       const toolSearchThreshold = Number.isFinite(thresholdRaw)
         ? Math.max(1000, Math.min(50000, Math.round(thresholdRaw)))
         : 6000;
+      let toolSearchStrategy = String(toolSearchRaw.threshold_strategy ?? "adaptive")
+        .trim()
+        .toLowerCase();
+      if (toolSearchStrategy !== "adaptive" && toolSearchStrategy !== "manual") {
+        toolSearchStrategy = "adaptive";
+      }
+      const ratioRaw = Number(toolSearchRaw.context_budget_ratio ?? 0.05);
+      const toolSearchRatio = Number.isFinite(ratioRaw)
+        ? Math.max(0.01, Math.min(0.25, ratioRaw))
+        : 0.05;
       return {
         ok: true,
         max_tool_rounds: Number.isFinite(val) ? Math.max(10, Math.min(120, val)) : 30,
@@ -8874,6 +8884,8 @@ function registerIpc(): void {
         max_auto_resumes: Math.max(0, Math.min(10, Number(raw.max_auto_resumes ?? 3))),
         tool_search_mode: toolSearchMode,
         tool_search_auto_schema_token_threshold: toolSearchThreshold,
+        tool_search_threshold_strategy: toolSearchStrategy,
+        tool_search_context_budget_ratio: toolSearchRatio,
         ...readStallNudgeRuntime(raw),
         ...readUnattendedRuntime(raw),
         ...readTokenBudgetRuntime(raw),
@@ -8887,6 +8899,8 @@ function registerIpc(): void {
         max_taskspaces: 20,
         tool_search_mode: "off",
         tool_search_auto_schema_token_threshold: 6000,
+        tool_search_threshold_strategy: "adaptive",
+        tool_search_context_budget_ratio: 0.05,
         auto_resume_on_exhaustion: false,
         max_auto_resumes: 3,
         stall_detect_silence_seconds: 90,
@@ -9017,7 +9031,9 @@ function registerIpc(): void {
       }
       if (
         p.tool_search_mode !== undefined ||
-        p.tool_search_auto_schema_token_threshold !== undefined
+        p.tool_search_auto_schema_token_threshold !== undefined ||
+        p.tool_search_threshold_strategy !== undefined ||
+        p.tool_search_context_budget_ratio !== undefined
       ) {
         const prevTs =
           merged.tool_search && typeof merged.tool_search === "object" && !Array.isArray(merged.tool_search)
@@ -9037,10 +9053,26 @@ function registerIpc(): void {
           }
           prevTs.auto_schema_token_threshold = Math.max(1000, Math.min(50000, Math.round(v)));
         }
+        if (p.tool_search_threshold_strategy !== undefined) {
+          const strategy = String(p.tool_search_threshold_strategy).trim().toLowerCase();
+          if (strategy !== "adaptive" && strategy !== "manual") {
+            return { ok: false, error: "tool_search_threshold_strategy must be adaptive|manual" };
+          }
+          prevTs.threshold_strategy = strategy;
+        }
+        if (p.tool_search_context_budget_ratio !== undefined) {
+          const r = Number(p.tool_search_context_budget_ratio);
+          if (!Number.isFinite(r)) {
+            return { ok: false, error: "tool_search_context_budget_ratio must be a number" };
+          }
+          prevTs.context_budget_ratio = Math.max(0.01, Math.min(0.25, r));
+        }
         if (prevTs.mode === undefined) prevTs.mode = "off";
         if (prevTs.auto_schema_token_threshold === undefined) {
           prevTs.auto_schema_token_threshold = 6000;
         }
+        if (prevTs.threshold_strategy === undefined) prevTs.threshold_strategy = "adaptive";
+        if (prevTs.context_budget_ratio === undefined) prevTs.context_budget_ratio = 0.05;
         merged.tool_search = prevTs;
       }
       root.runtime = merged;

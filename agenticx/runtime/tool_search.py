@@ -14,11 +14,20 @@ from typing import Dict, List, Optional, Sequence, Tuple
 TOOL_SEARCH_STATE_KEY = "__tool_search_state_v1__"
 TOOL_SEARCH_TOOL_NAME = "tool_search"
 TOOL_SEARCH_MAX_LOADED = 24
+TOOL_SEARCH_MIN_LOADED = 8
 DEFAULT_AUTO_SCHEMA_TOKEN_THRESHOLD = 6000
 TOOL_NOT_YET_LOADED_TEMPLATE = (
     "Tool '{name}' schema is not loaded yet. "
     "Call tool_search and retry on the next round."
 )
+DEFAULT_CONTEXT_BUDGET_RATIO = 0.05
+CONTEXT_BUDGET_RATIO_MIN = 0.01
+CONTEXT_BUDGET_RATIO_MAX = 0.25
+THRESHOLD_FLOOR = 1000
+THRESHOLD_CEIL = 50000
+HYSTERESIS_RATIO = 0.2
+TOOL_SEARCH_DECISION_KEY = "__tool_search_decision_v1__"
+_VALID_STRATEGIES = frozenset({"adaptive", "manual"})
 
 CORE_ALWAYS_LOAD_TOOLS: frozenset[str] = frozenset(
     {
@@ -132,6 +141,8 @@ class ToolDescriptor:
 class ToolSearchConfig:
     mode: str = "off"  # "off" | "auto" | "always"
     auto_schema_token_threshold: int = DEFAULT_AUTO_SCHEMA_TOKEN_THRESHOLD
+    threshold_strategy: str = "adaptive"
+    context_budget_ratio: float = DEFAULT_CONTEXT_BUDGET_RATIO
 
     def normalized(self) -> "ToolSearchConfig":
         mode = (self.mode or "off").strip().lower()
@@ -140,7 +151,22 @@ class ToolSearchConfig:
         threshold = int(self.auto_schema_token_threshold or DEFAULT_AUTO_SCHEMA_TOKEN_THRESHOLD)
         if threshold < 1:
             threshold = DEFAULT_AUTO_SCHEMA_TOKEN_THRESHOLD
-        return ToolSearchConfig(mode=mode, auto_schema_token_threshold=threshold)
+        strategy = (self.threshold_strategy or "adaptive").strip().lower()
+        if strategy not in _VALID_STRATEGIES:
+            strategy = "adaptive"
+        try:
+            ratio = float(self.context_budget_ratio)
+        except (TypeError, ValueError):
+            ratio = DEFAULT_CONTEXT_BUDGET_RATIO
+        if ratio != ratio:  # NaN
+            ratio = DEFAULT_CONTEXT_BUDGET_RATIO
+        ratio = max(CONTEXT_BUDGET_RATIO_MIN, min(CONTEXT_BUDGET_RATIO_MAX, ratio))
+        return ToolSearchConfig(
+            mode=mode,
+            auto_schema_token_threshold=threshold,
+            threshold_strategy=strategy,
+            context_budget_ratio=ratio,
+        )
 
 
 @dataclass
@@ -162,6 +188,9 @@ class ToolSearchRuntimeContext:
     catalog: ToolCatalog
     state: ToolSearchStateV1
     tool_search_allowed: bool
+    effective_threshold: Optional[int] = None
+    prev_applied: Optional[bool] = None
+    resolved_applied: Optional[bool] = None
 
 
 def slugify_mcp_segment(raw: str) -> str:
@@ -275,8 +304,16 @@ def prune_state_to_catalog(state: ToolSearchStateV1, catalog: ToolCatalog) -> To
     )
 
 
-def mark_loaded(state: ToolSearchStateV1, ids: Sequence[str]) -> ToolSearchStateV1:
+def mark_loaded(
+    state: ToolSearchStateV1,
+    ids: Sequence[str],
+    *,
+    max_loaded: Optional[int] = None,
+) -> ToolSearchStateV1:
     """Append/touch ids (LRU: most recent at end); evict oldest beyond max."""
+    limit = TOOL_SEARCH_MAX_LOADED if max_loaded is None else int(max_loaded)
+    if limit < 1:
+        limit = TOOL_SEARCH_MAX_LOADED
     loaded = [sid for sid in state.loaded_ids if sid]
     for sid in ids:
         sid_s = str(sid or "").strip()
@@ -285,7 +322,7 @@ def mark_loaded(state: ToolSearchStateV1, ids: Sequence[str]) -> ToolSearchState
         if sid_s in loaded:
             loaded.remove(sid_s)
         loaded.append(sid_s)
-    while len(loaded) > TOOL_SEARCH_MAX_LOADED:
+    while len(loaded) > limit:
         loaded.pop(0)
     return ToolSearchStateV1(
         loaded_ids=loaded,
@@ -294,11 +331,52 @@ def mark_loaded(state: ToolSearchStateV1, ids: Sequence[str]) -> ToolSearchState
     )
 
 
+def resolve_effective_threshold(
+    config: ToolSearchConfig,
+    *,
+    context_window: int,
+) -> int:
+    """Absolute schema-token threshold for the current model."""
+    cfg = config.normalized()
+    if cfg.threshold_strategy == "manual":
+        return int(cfg.auto_schema_token_threshold)
+    window = int(context_window) if int(context_window) > 0 else 128_000
+    raw = int(window * cfg.context_budget_ratio)
+    return max(THRESHOLD_FLOOR, min(THRESHOLD_CEIL, raw))
+
+
+def decide_apply_with_hysteresis(
+    *,
+    prev_applied: Optional[bool],
+    pool_tokens: int,
+    threshold: int,
+    hysteresis_ratio: float = HYSTERESIS_RATIO,
+) -> bool:
+    """Latch the previous decision unless the pool moves clear of the band."""
+    tokens = int(pool_tokens)
+    thr = int(threshold)
+    if prev_applied is None:
+        return tokens >= thr
+    if prev_applied:
+        return tokens >= int(thr * (1.0 - hysteresis_ratio))
+    return tokens >= int(thr * (1.0 + hysteresis_ratio))
+
+
+def resolve_max_loaded(*, effective_threshold: int, core_schema_tokens: int) -> int:
+    """How many deferred tools may stay hot, given the remaining budget."""
+    remaining = max(0, int(effective_threshold) - int(core_schema_tokens))
+    # ~350 tokens is a rough per-tool schema cost in this codebase.
+    est = remaining // 350
+    return max(TOOL_SEARCH_MIN_LOADED, min(TOOL_SEARCH_MAX_LOADED, est))
+
+
 def should_apply_tool_search(
     config: ToolSearchConfig,
     *,
     full_pool_schema_tokens: int,
     tool_search_allowed: bool,
+    effective_threshold: Optional[int] = None,
+    prev_applied: Optional[bool] = None,
 ) -> bool:
     """Return whether projection should shrink the tool surface.
 
@@ -312,8 +390,40 @@ def should_apply_tool_search(
         return False
     if cfg.mode == "always":
         return True
-    # auto
-    return int(full_pool_schema_tokens) >= int(cfg.auto_schema_token_threshold)
+    thr = (
+        int(effective_threshold)
+        if effective_threshold is not None
+        else int(cfg.auto_schema_token_threshold)
+    )
+    return decide_apply_with_hysteresis(
+        prev_applied=prev_applied,
+        pool_tokens=int(full_pool_schema_tokens),
+        threshold=thr,
+    )
+
+
+def _resolve_applied(ctx: ToolSearchRuntimeContext, full_openai_tools: list[dict]) -> bool:
+    if ctx.resolved_applied is not None:
+        return bool(ctx.resolved_applied)
+    return should_apply_tool_search(
+        ctx.config,
+        full_pool_schema_tokens=estimate_schema_tokens(list(full_openai_tools)),
+        tool_search_allowed=ctx.tool_search_allowed,
+        effective_threshold=ctx.effective_threshold,
+        prev_applied=ctx.prev_applied,
+    )
+
+
+def _estimate_core_schema_tokens(ctx: ToolSearchRuntimeContext) -> int:
+    """Estimate schema tokens for always-load / non-deferred catalog tools."""
+    core_tools: List[dict] = []
+    for d in ctx.catalog.descriptors:
+        if d.always_load or d.name in CORE_ALWAYS_LOAD_TOOLS:
+            core_tools.append(_descriptor_to_openai_tool(d))
+            continue
+        if d.kind == "builtin" and d.name not in BUILTIN_DEFER_ALLOWLIST:
+            core_tools.append(_descriptor_to_openai_tool(d))
+    return estimate_schema_tokens(core_tools)
 
 
 def _openai_tool_name(tool: dict) -> str:
@@ -356,12 +466,7 @@ def project_tools_for_round(
     ``tool_search`` disallowed), returns ``full_openai_tools`` unchanged
     (fail-open to today's full surface).
     """
-    tokens = estimate_schema_tokens(list(full_openai_tools))
-    if not should_apply_tool_search(
-        ctx.config,
-        full_pool_schema_tokens=tokens,
-        tool_search_allowed=ctx.tool_search_allowed,
-    ):
+    if not _resolve_applied(ctx, full_openai_tools):
         return full_openai_tools
 
     pool = _pool_by_name(full_openai_tools)
@@ -539,7 +644,16 @@ def apply_search(
     """Rank tools, mark loaded, return compact result (no full schemas)."""
     matches = rank_tools(query, ctx.catalog, max_results=max_results)
     ids = [d.stable_id for d in matches]
-    new_state = mark_loaded(ctx.state, ids)
+    thr = (
+        int(ctx.effective_threshold)
+        if ctx.effective_threshold is not None
+        else int(ctx.config.normalized().auto_schema_token_threshold)
+    )
+    max_loaded = resolve_max_loaded(
+        effective_threshold=thr,
+        core_schema_tokens=_estimate_core_schema_tokens(ctx),
+    )
+    new_state = mark_loaded(ctx.state, ids, max_loaded=max_loaded)
     new_state = ToolSearchStateV1(
         loaded_ids=new_state.loaded_ids,
         catalog_fingerprint=ctx.catalog.fingerprint,
@@ -550,6 +664,9 @@ def apply_search(
         catalog=ctx.catalog,
         state=new_state,
         tool_search_allowed=ctx.tool_search_allowed,
+        effective_threshold=ctx.effective_threshold,
+        prev_applied=ctx.prev_applied,
+        resolved_applied=ctx.resolved_applied,
     )
     result = {
         "matches": [
@@ -602,12 +719,7 @@ def is_tool_pending_next_round(
     name = str(name or "").strip()
     if not name or name in allowed_tool_names:
         return False
-    tokens = estimate_schema_tokens(list(full_openai_tools))
-    if not should_apply_tool_search(
-        ctx.config,
-        full_pool_schema_tokens=tokens,
-        tool_search_allowed=ctx.tool_search_allowed,
-    ):
+    if not _resolve_applied(ctx, full_openai_tools):
         return False
     for d in ctx.catalog.descriptors:
         if d.name != name:
