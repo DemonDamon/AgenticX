@@ -10,6 +10,7 @@ from typing import Any
 from agenticx.cli.agent_tools import STUDIO_TOOLS
 from agenticx.cli.studio_skill import get_all_skill_summaries
 from agenticx.runtime.meta_tools import META_AGENT_TOOLS
+from agenticx.runtime.model_context_window import resolve_context_window
 from agenticx.runtime.prompts.meta_agent import (
     _build_active_subagents_context,
     _build_context_files_block,
@@ -19,36 +20,7 @@ from agenticx.runtime.prompts.meta_agent import (
     build_meta_agent_system_prompt,
 )
 
-_MODEL_CONTEXT_WINDOWS: list[tuple[str, int]] = [
-    ("claude-opus-4", 200_000),
-    ("claude-sonnet-5", 200_000),
-    ("claude-sonnet-4", 200_000),
-    ("claude", 200_000),
-    ("gpt-5", 256_000),
-    ("gpt-4o", 128_000),
-    ("gpt-4", 128_000),
-    ("o1", 200_000),
-    ("o3", 200_000),
-    ("deepseek", 128_000),
-    ("qwen", 128_000),
-    ("glm", 128_000),
-    ("kimi", 256_000),
-    ("minimax", 192_000),
-    ("gemini-2.5", 1_048_576),
-    ("gemini", 1_000_000),
-]
-_DEFAULT_CONTEXT_WINDOW = 128_000
-
 _CHARS_PER_TOKEN = 4
-
-
-def resolve_context_window(model_name: str | None) -> int:
-    """Best-effort lookup of a model's context window size, by substring match."""
-    name = str(model_name or "").lower()
-    for key, window in _MODEL_CONTEXT_WINDOWS:
-        if key in name:
-            return window
-    return _DEFAULT_CONTEXT_WINDOW
 
 
 def _chars_to_tokens(chars: int) -> int:

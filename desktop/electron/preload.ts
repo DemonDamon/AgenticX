@@ -272,6 +272,8 @@ contextBridge.exposeInMainWorld("agenticxDesktop", {
     max_auto_resumes?: number;
     tool_search_mode?: "off" | "auto" | "always";
     tool_search_auto_schema_token_threshold?: number;
+    tool_search_threshold_strategy?: "adaptive" | "manual";
+    tool_search_context_budget_ratio?: number;
   }) =>
     ipcRenderer.invoke("save-runtime-config", payload),
   searchSessions: async (payload: { q: string; avatarId?: string }) => {

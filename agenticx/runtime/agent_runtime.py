@@ -2990,14 +2990,24 @@ class AgentRuntime:
 
                     _ts_before = estimate_schema_tokens(list(full_tool_pool))
                     _ts_sent = estimate_schema_tokens(list(active_tools))
-                    _ts_applied = should_apply_tool_search(
-                        ts_ctx.config,
-                        full_pool_schema_tokens=_ts_before,
-                        tool_search_allowed=ts_ctx.tool_search_allowed,
-                    )
+                    if ts_ctx.resolved_applied is not None:
+                        _ts_applied = bool(ts_ctx.resolved_applied)
+                    else:
+                        _ts_applied = should_apply_tool_search(
+                            ts_ctx.config,
+                            full_pool_schema_tokens=_ts_before,
+                            tool_search_allowed=ts_ctx.tool_search_allowed,
+                            effective_threshold=ts_ctx.effective_threshold,
+                            prev_applied=ts_ctx.prev_applied,
+                        )
                     _ts_mode = str(ts_ctx.config.normalized().mode)
                     _ts_loaded = len(ts_ctx.state.loaded_ids)
                     _ts_candidates = len(ts_ctx.catalog.descriptors)
+                    _ts_threshold = int(ts_ctx.effective_threshold or 0)
+                    _ts_strategy = str(ts_ctx.config.normalized().threshold_strategy)
+                    _ts_latched = bool(
+                        ts_ctx.prev_applied is not None and ts_ctx.prev_applied == _ts_applied
+                    )
                 except Exception:
                     _ts_before = 0
                     _ts_sent = 0
@@ -3005,6 +3015,9 @@ class AgentRuntime:
                     _ts_mode = "off"
                     _ts_loaded = 0
                     _ts_candidates = 0
+                    _ts_threshold = 0
+                    _ts_strategy = "adaptive"
+                    _ts_latched = False
                 context_payload = {
                     "round": round_idx,
                     "prompt_tokens_approx": approx_tokens(
@@ -3026,6 +3039,9 @@ class AgentRuntime:
                     "tool_search_schema_tokens_before": int(_ts_before),
                     "tool_search_schema_tokens_sent": int(_ts_sent),
                     "tool_search_schema_tokens_saved": max(0, int(_ts_before) - int(_ts_sent)),
+                    "tool_search_effective_threshold": int(_ts_threshold),
+                    "tool_search_threshold_strategy": str(_ts_strategy),
+                    "tool_search_decision_latched": bool(_ts_latched),
                 }
                 persist_context_stats(session, context_payload)
                 yield RuntimeEvent(
