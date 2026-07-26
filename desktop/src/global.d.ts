@@ -37,6 +37,10 @@ type ProviderConfig = {
   model?: string;
   models?: string[];
   drop_params?: boolean;
+  display_name?: string;
+  interface?: "openai" | "ollama";
+  enabled?: boolean;
+  managed?: boolean;
 };
 
 type LoadConfigResult = {
@@ -51,6 +55,15 @@ type LoadConfigResult = {
     loggedIn: boolean;
     email: string;
     displayName: string;
+  };
+  enterprise?: {
+    enabled: boolean;
+    baseUrl: string;
+    email: string;
+    displayName: string;
+    strict: boolean;
+    models: string[];
+    syncedAt: string;
   };
 };
 
@@ -834,6 +847,33 @@ declare global {
         email?: string;
         displayName?: string;
       }>;
+      loadEnterprise: () => Promise<{
+        ok: boolean;
+        enabled?: boolean;
+        baseUrl?: string;
+        email?: string;
+        displayName?: string;
+        strict?: boolean;
+        models?: string[];
+        syncedAt?: string;
+      }>;
+      enterpriseLogin: (payload: {
+        baseUrl: string;
+        email: string;
+        password: string;
+      }) => Promise<{
+        ok: boolean;
+        error?: string;
+        user?: { email: string; displayName: string };
+        models?: string[];
+      }>;
+      enterpriseLogout: () => Promise<{ ok: boolean }>;
+      enterpriseRefresh: () => Promise<{
+        ok: boolean;
+        error?: string;
+        unauthorized?: boolean;
+        models?: string[];
+      }>;
       onAgxAccountChanged: (cb: (payload: { email: string; displayName: string }) => void) => () => void;
       onAgxAccountLoginTimeout: (cb: () => void) => () => void;
       updateSplashStage: (
@@ -1228,6 +1268,7 @@ declare global {
         dropParams?: boolean;
         displayName?: string;
         interface?: "openai" | "ollama";
+        managed?: boolean;
       }) => Promise<{ ok: boolean }>;
       setDefaultProvider: (name: string) => Promise<{ ok: boolean }>;
       deleteProvider: (name: string) => Promise<{ ok: boolean }>;

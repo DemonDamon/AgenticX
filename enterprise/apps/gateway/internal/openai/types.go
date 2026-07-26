@@ -13,10 +13,26 @@ type Tool struct {
 	Function *ToolFunction `json:"function,omitempty"`
 }
 
+// ToolCallFunction is the function payload inside a tool_calls entry
+// (request history, non-stream assistant message, or stream delta).
+type ToolCallFunction struct {
+	Name      string `json:"name,omitempty"`
+	Arguments string `json:"arguments,omitempty"`
+}
+
+// ToolCall is an OpenAI-compatible tool call. Index is set on stream deltas.
+type ToolCall struct {
+	Index    *int              `json:"index,omitempty"`
+	ID       string            `json:"id,omitempty"`
+	Type     string            `json:"type,omitempty"`
+	Function *ToolCallFunction `json:"function,omitempty"`
+}
+
 type ChatMessage struct {
 	Role             string          `json:"role"`
 	Content          json.RawMessage `json:"content"`
 	ReasoningContent string          `json:"reasoning_content,omitempty"`
+	ToolCalls        []ToolCall      `json:"tool_calls,omitempty"`
 	ToolCallID       string          `json:"tool_call_id,omitempty"`
 	Name             string          `json:"name,omitempty"`
 	CacheControl     json.RawMessage `json:"__cache_control,omitempty"`
@@ -72,9 +88,10 @@ type ChatCompletionResponse struct {
 }
 
 type StreamDelta struct {
-	Role             string `json:"role,omitempty"`
-	Content          string `json:"content,omitempty"`
-	ReasoningContent string `json:"reasoning_content,omitempty"`
+	Role             string     `json:"role,omitempty"`
+	Content          string     `json:"content,omitempty"`
+	ReasoningContent string     `json:"reasoning_content,omitempty"`
+	ToolCalls        []ToolCall `json:"tool_calls,omitempty"`
 }
 
 type StreamChoice struct {

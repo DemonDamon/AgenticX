@@ -698,6 +698,7 @@ contextBridge.exposeInMainWorld("agenticxDesktop", {
     dropParams?: boolean;
     displayName?: string;
     interface?: "openai" | "ollama";
+    managed?: boolean;
   }) => ipcRenderer.invoke("save-provider", payload),
   setDefaultProvider: async (name: string) => ipcRenderer.invoke("set-default-provider", name),
   deleteProvider: async (name: string) => ipcRenderer.invoke("delete-provider", name),
@@ -919,6 +920,33 @@ contextBridge.exposeInMainWorld("agenticxDesktop", {
       loggedIn?: boolean;
       email?: string;
       displayName?: string;
+    }>,
+  loadEnterprise: async () =>
+    ipcRenderer.invoke("load-enterprise") as Promise<{
+      ok: boolean;
+      enabled?: boolean;
+      baseUrl?: string;
+      email?: string;
+      displayName?: string;
+      strict?: boolean;
+      models?: string[];
+      syncedAt?: string;
+    }>,
+  enterpriseLogin: async (payload: { baseUrl: string; email: string; password: string }) =>
+    ipcRenderer.invoke("enterprise-login", payload) as Promise<{
+      ok: boolean;
+      error?: string;
+      user?: { email: string; displayName: string };
+      models?: string[];
+    }>,
+  enterpriseLogout: async () =>
+    ipcRenderer.invoke("enterprise-logout") as Promise<{ ok: boolean }>,
+  enterpriseRefresh: async () =>
+    ipcRenderer.invoke("enterprise-refresh") as Promise<{
+      ok: boolean;
+      error?: string;
+      unauthorized?: boolean;
+      models?: string[];
     }>,
   onAgxAccountChanged: (cb: (payload: { email: string; displayName: string }) => void): (() => void) => {
     const handler = (_e: unknown, payload: { email: string; displayName: string }) => cb(payload);

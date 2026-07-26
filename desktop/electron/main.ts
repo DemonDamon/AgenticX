@@ -237,6 +237,24 @@ type ProviderConfig = {
   drop_params?: boolean;
   display_name?: string;
   interface?: "openai" | "ollama";
+  /** Set by enterprise login; UI treats as read-only managed provider. */
+  managed?: boolean;
+};
+
+type EnterpriseConfig = {
+  enabled?: boolean;
+  base_url?: string;
+  token?: string;
+  user?: {
+    user_id?: string;
+    email?: string;
+    display_name?: string;
+    tenant_id?: string;
+    dept_id?: string | null;
+  };
+  policy?: { strict?: boolean };
+  models?: string[];
+  synced_at?: string;
 };
 
 type RemoteServerConfig = {
@@ -308,7 +326,65 @@ type AgxConfig = {
     supabase_url?: string;
     updated_at?: string;
   };
+  /** Enterprise portal managed login (PAT + hosted models). Never log token. */
+  enterprise?: EnterpriseConfig;
 };
+
+function normalizePortalOrigin(raw: string): string {
+  return String(raw || "").trim().replace(/\/+$/, "");
+}
+
+function applyEnterpriseProvider(
+  cfg: AgxConfig,
+  opts: {
+    baseUrl: string;
+    token: string;
+    models: string[];
+    user: NonNullable<EnterpriseConfig["user"]>;
+    strict: boolean;
+  },
+): void {
+  const apiBase = `${opts.baseUrl}/api/desktop/v1`;
+  const models = opts.models.filter(Boolean);
+  cfg.enterprise = {
+    enabled: true,
+    base_url: opts.baseUrl,
+    token: opts.token,
+    user: opts.user,
+    policy: { strict: opts.strict },
+    models,
+    synced_at: new Date().toISOString(),
+  };
+  cfg.providers = cfg.providers ?? {};
+  cfg.providers.enterprise = {
+    display_name: "企业模型",
+    interface: "openai",
+    base_url: apiBase,
+    api_key: opts.token,
+    models,
+    model: models[0] ?? "",
+    enabled: true,
+    managed: true,
+    drop_params: true,
+  };
+  cfg.default_provider = "enterprise";
+  cfg.active_provider = "enterprise";
+  if (models[0]) cfg.active_model = models[0];
+}
+
+function clearEnterpriseFromConfig(cfg: AgxConfig): void {
+  delete cfg.enterprise;
+  if (cfg.providers?.enterprise) {
+    const next = { ...cfg.providers };
+    delete next.enterprise;
+    cfg.providers = next;
+  }
+  if (cfg.default_provider === "enterprise") cfg.default_provider = "";
+  if (cfg.active_provider === "enterprise") {
+    cfg.active_provider = "";
+    cfg.active_model = "";
+  }
+}
 
 type EmailConfig = {
   enabled: boolean;
@@ -6924,6 +7000,7 @@ function registerEarlyIpc(): void {
         activeModel = String(r.data.activeModel ?? "");
       }
     }
+    const ent = cfg.enterprise;
     return {
       defaultProvider,
       providers,
@@ -6936,6 +7013,15 @@ function registerEarlyIpc(): void {
         loggedIn: Boolean(acct?.access_token),
         email: acct?.user_email ?? "",
         displayName: acct?.user_display_name ?? "",
+      },
+      enterprise: {
+        enabled: Boolean(ent?.enabled && ent?.token),
+        baseUrl: ent?.base_url ?? "",
+        email: ent?.user?.email ?? "",
+        displayName: ent?.user?.display_name ?? "",
+        strict: ent?.policy?.strict !== false,
+        models: Array.isArray(ent?.models) ? ent.models : [],
+        syncedAt: ent?.synced_at ?? "",
       },
     };
   });
@@ -7169,6 +7255,202 @@ function registerIpc(): void {
       email: a?.user_email ?? "",
       displayName: a?.user_display_name ?? "",
     };
+  });
+
+  ipcMain.handle("load-enterprise", async () => {
+    const cfg = loadAgxConfig();
+    const ent = cfg.enterprise;
+    return {
+      ok: true,
+      enabled: Boolean(ent?.enabled && ent?.token),
+      baseUrl: ent?.base_url ?? "",
+      email: ent?.user?.email ?? "",
+      displayName: ent?.user?.display_name ?? "",
+      strict: ent?.policy?.strict !== false,
+      models: Array.isArray(ent?.models) ? ent.models : [],
+      syncedAt: ent?.synced_at ?? "",
+    };
+  });
+
+  ipcMain.handle(
+    "enterprise-login",
+    async (
+      _event,
+      payload: { baseUrl?: string; email?: string; password?: string },
+    ) => {
+      const baseUrl = normalizePortalOrigin(payload?.baseUrl ?? "");
+      const email = String(payload?.email ?? "").trim();
+      const password = String(payload?.password ?? "");
+      if (!baseUrl || !email || !password) {
+        return { ok: false, error: "请填写组织地址、邮箱和密码" };
+      }
+      try {
+        const tokenResp = await proxyAwareFetch(`${baseUrl}/api/desktop/auth/token`, {
+          method: "POST",
+          headers: { "content-type": "application/json", accept: "application/json" },
+          body: JSON.stringify({
+            email,
+            password,
+            deviceName: os.hostname() || "desktop",
+          }),
+        });
+        const tokenJson = (await tokenResp.json().catch(() => ({}))) as {
+          code?: string;
+          message?: string;
+          data?: {
+            token?: string;
+            user?: {
+              userId?: string;
+              email?: string;
+              displayName?: string;
+              tenantId?: string;
+              deptId?: string | null;
+            };
+          };
+        };
+        if (!tokenResp.ok || !tokenJson.data?.token) {
+          const msg =
+            tokenResp.status === 401
+              ? "邮箱或密码错误"
+              : tokenJson.message || `登录失败（HTTP ${tokenResp.status}）`;
+          return { ok: false, error: msg };
+        }
+        const pat = tokenJson.data.token;
+        const bootResp = await proxyAwareFetch(`${baseUrl}/api/desktop/bootstrap`, {
+          method: "GET",
+          headers: {
+            accept: "application/json",
+            authorization: `Bearer ${pat}`,
+          },
+        });
+        const bootJson = (await bootResp.json().catch(() => ({}))) as {
+          code?: string;
+          message?: string;
+          data?: {
+            user?: {
+              userId?: string;
+              email?: string;
+              displayName?: string;
+              tenantId?: string;
+              deptId?: string | null;
+            };
+            models?: Array<{ id?: string }>;
+            policy?: { strict?: boolean };
+          };
+        };
+        if (!bootResp.ok || !bootJson.data) {
+          return {
+            ok: false,
+            error:
+              bootResp.status === 401
+                ? "企业登录已失效，请重新登录"
+                : bootJson.message || `拉取模型失败（HTTP ${bootResp.status}）`,
+          };
+        }
+        const models = (bootJson.data.models ?? [])
+          .map((m) => String(m.id ?? "").trim())
+          .filter(Boolean);
+        const user = bootJson.data.user ?? tokenJson.data.user ?? {};
+        const cfg = loadAgxConfig();
+        applyEnterpriseProvider(cfg, {
+          baseUrl,
+          token: pat,
+          models,
+          user: {
+            user_id: user.userId ?? "",
+            email: user.email ?? email,
+            display_name: user.displayName ?? "",
+            tenant_id: user.tenantId ?? "",
+            dept_id: user.deptId ?? null,
+          },
+          strict: bootJson.data.policy?.strict !== false,
+        });
+        saveAgxConfig(cfg);
+        return {
+          ok: true,
+          user: {
+            email: cfg.enterprise?.user?.email ?? email,
+            displayName: cfg.enterprise?.user?.display_name ?? "",
+          },
+          models,
+        };
+      } catch (err) {
+        return { ok: false, error: `无法连接组织地址：${String(err)}` };
+      }
+    },
+  );
+
+  ipcMain.handle("enterprise-logout", async () => {
+    const cfg = loadAgxConfig();
+    clearEnterpriseFromConfig(cfg);
+    saveAgxConfig(cfg);
+    return { ok: true };
+  });
+
+  ipcMain.handle("enterprise-refresh", async () => {
+    const cfg = loadAgxConfig();
+    const ent = cfg.enterprise;
+    const baseUrl = normalizePortalOrigin(ent?.base_url ?? "");
+    const token = String(ent?.token ?? "").trim();
+    if (!baseUrl || !token) {
+      return { ok: false, error: "尚未登录企业账号" };
+    }
+    try {
+      const bootResp = await proxyAwareFetch(`${baseUrl}/api/desktop/bootstrap`, {
+        method: "GET",
+        headers: {
+          accept: "application/json",
+          authorization: `Bearer ${token}`,
+        },
+      });
+      const bootJson = (await bootResp.json().catch(() => ({}))) as {
+        message?: string;
+        data?: {
+          user?: {
+            userId?: string;
+            email?: string;
+            displayName?: string;
+            tenantId?: string;
+            deptId?: string | null;
+          };
+          models?: Array<{ id?: string }>;
+          policy?: { strict?: boolean };
+        };
+      };
+      if (!bootResp.ok || !bootJson.data) {
+        return {
+          ok: false,
+          error:
+            bootResp.status === 401
+              ? "企业登录已失效，请重新登录"
+              : bootJson.message || `刷新失败（HTTP ${bootResp.status}）`,
+          unauthorized: bootResp.status === 401,
+        };
+      }
+      const models = (bootJson.data.models ?? [])
+        .map((m) => String(m.id ?? "").trim())
+        .filter(Boolean);
+      const user = bootJson.data.user ?? ent?.user ?? {};
+      applyEnterpriseProvider(cfg, {
+        baseUrl,
+        token,
+        models,
+        user: {
+          user_id: (user as { userId?: string }).userId ?? ent?.user?.user_id ?? "",
+          email: (user as { email?: string }).email ?? ent?.user?.email ?? "",
+          display_name:
+            (user as { displayName?: string }).displayName ?? ent?.user?.display_name ?? "",
+          tenant_id: (user as { tenantId?: string }).tenantId ?? ent?.user?.tenant_id ?? "",
+          dept_id:
+            (user as { deptId?: string | null }).deptId ?? ent?.user?.dept_id ?? null,
+        },
+        strict: bootJson.data.policy?.strict !== false,
+      });
+      saveAgxConfig(cfg);
+      return { ok: true, models };
+    } catch (err) {
+      return { ok: false, error: `刷新失败：${String(err)}` };
+    }
   });
 
   ipcMain.handle("load-gateway-im", async () => {
@@ -10203,6 +10485,7 @@ function registerIpc(): void {
     dropParams?: boolean;
     displayName?: string;
     interface?: "openai" | "ollama";
+    managed?: boolean;
   }) => {
     if (isRemoteMode()) {
       const r = await studioFetchJson(
@@ -10214,6 +10497,21 @@ function registerIpc(): void {
     const cfg = loadAgxConfig();
     if (!cfg.providers) cfg.providers = {};
     const prev = cfg.providers[payload.name] ?? {};
+    // Managed enterprise provider: keep credential/base_url/models owned by enterprise-login/refresh.
+    if (prev.managed === true || payload.managed === true) {
+      const nextManaged: ProviderConfig = {
+        ...prev,
+        managed: true,
+        interface: prev.interface ?? "openai",
+        display_name: prev.display_name ?? "企业模型",
+        enabled: payload.enabled === false ? false : true,
+      };
+      if (payload.dropParams === true) nextManaged.drop_params = true;
+      else if (payload.dropParams === false) delete nextManaged.drop_params;
+      cfg.providers[payload.name] = nextManaged;
+      saveAgxConfig(cfg);
+      return { ok: true };
+    }
     const next: ProviderConfig = {
       ...prev,
       api_key: payload.apiKey ?? prev.api_key,
@@ -10270,6 +10568,9 @@ function registerIpc(): void {
       return r.ok ? { ok: true } : { ok: false, error: r.error || "remote delete-provider failed" };
     }
     const cfg = loadAgxConfig();
+    if (cfg.providers?.[name]?.managed === true) {
+      return { ok: false, error: "企业托管模型不可删除，请先退出企业登录" };
+    }
     if (cfg.providers) delete cfg.providers[name];
     if (cfg.default_provider === name) cfg.default_provider = Object.keys(cfg.providers ?? {})[0] ?? "";
     saveAgxConfig(cfg);

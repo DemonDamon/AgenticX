@@ -423,6 +423,8 @@ export type ProviderEntry = {
   displayName?: string;
   /** OpenAI 范式接口 */
   interface?: "openai" | "ollama";
+  /** Enterprise managed provider (read-only in settings). */
+  managed?: boolean;
 };
 
 type SettingsState = {

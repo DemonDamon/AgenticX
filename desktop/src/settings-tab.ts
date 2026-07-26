@@ -1,6 +1,7 @@
 /** 与 SettingsPanel 左侧导航 id 一致；用于从外部（如「查看账号」）打开指定设置分区。 */
 export const SETTINGS_TAB_IDS = [
   "account",
+  "enterprise",
   "general",
   "provider",
   "mcp",

@@ -46,7 +46,9 @@ import {
   Database,
   X,
   TriangleAlert,
+  Building2,
 } from "lucide-react";
+import { EnterpriseAccountPanel } from "./settings/enterprise/EnterpriseAccountPanel";
 import { Panel } from "./ds/Panel";
 import { SettingsDropdown } from "./ds/SettingsDropdown";
 import { Modal } from "./ds/Modal";
@@ -204,6 +206,8 @@ type ProviderEntry = {
   displayName?: string;
   /** 自定义厂商接口范式：OpenAI 兼容或 Ollama 原生 */
   interface?: ProviderInterfaceKind;
+  /** 企业托管 provider，设置页只读 */
+  managed?: boolean;
 };
 
 /** 至少填写了密钥或自定义 API 地址之一，才视为已配置（与「留空使用默认」的隐式地址区分）。 */
@@ -257,6 +261,7 @@ function providerEntryFromSaved(saved: Partial<ProviderEntry> | undefined): Prov
     dropParams: saved?.dropParams === true,
     displayName: dn || undefined,
     interface: iface,
+    managed: saved?.managed === true,
   };
 }
 
@@ -999,6 +1004,7 @@ function ModelCapabilityBadges({
 
 const TABS: { id: SettingsTab; label: string; icon: typeof Settings2 }[] = [
   { id: "account", label: "用户账号", icon: User },
+  { id: "enterprise", label: "企业账号", icon: Building2 },
   { id: "general", label: "通用偏好", icon: Settings2 },
   { id: "provider", label: "模型服务", icon: Cpu },
   { id: "mcp", label: "MCP", icon: Plug },
@@ -7034,6 +7040,7 @@ export function SettingsPanel({
       displayName: raw.displayName != null && String(raw.displayName).trim() ? String(raw.displayName).trim() : undefined,
       interface:
         raw.interface === "openai" || raw.interface === "ollama" ? raw.interface : undefined,
+      managed: raw.managed === true,
     };
   }, [draft, active]);
 
@@ -7097,10 +7104,75 @@ export function SettingsPanel({
     [active]
   );
 
+  const enterpriseStrict = useMemo(
+    () => Object.values(draft).some((e) => e?.managed === true),
+    [draft],
+  );
+
   const providerNames = useMemo(() => {
+    if (enterpriseStrict) {
+      return Object.keys(draft).filter((name) => draft[name]?.managed === true);
+    }
     const set = new Set<string>([...ALL_PROVIDERS, ...Object.keys(draft)]);
     return Array.from(set);
-  }, [draft]);
+  }, [draft, enterpriseStrict]);
+
+  const reloadProvidersAfterEnterpriseChange = useCallback(async () => {
+    try {
+      const cfg = await window.agenticxDesktop.loadConfig();
+      const raw = cfg.providers ?? {};
+      const mapped: Record<string, ProviderEntry> = {};
+      for (const [name, p] of Object.entries(raw)) {
+        const row = p as {
+          api_key?: string;
+          base_url?: string;
+          model?: string;
+          models?: string[];
+          display_name?: string;
+          drop_params?: boolean;
+          managed?: boolean;
+          interface?: "openai" | "ollama";
+          enabled?: boolean;
+        };
+        mapped[name] = normalizeProviderEntry({
+          apiKey: row.api_key ?? "",
+          baseUrl: row.base_url ?? "",
+          model: row.model ?? "",
+          models: row.models ?? [],
+          enabled: row.enabled !== false,
+          dropParams: row.drop_params === true,
+          displayName: row.display_name,
+          interface: row.interface,
+          managed: row.managed === true,
+        });
+      }
+      const managedOnly = cfg.enterprise?.enabled === true && cfg.enterprise?.strict !== false;
+      const visible = managedOnly
+        ? Object.fromEntries(Object.entries(mapped).filter(([, e]) => e.managed === true))
+        : mapped;
+      const defP = managedOnly
+        ? (visible.enterprise ? "enterprise" : Object.keys(visible)[0] ?? "")
+        : (cfg.defaultProvider ?? "");
+      updateSettingsSlice({
+        defaultProvider: defP,
+        providers: visible,
+        provider: defP,
+        model: visible[defP]?.model ?? "",
+        apiKey: visible[defP]?.apiKey ?? "",
+      });
+      setDraft(cloneProviderDraftMap(visible));
+      setDefProv(defP);
+      setProviderSavedSnapshot(cloneProviderDraftMap(visible));
+      setProviderSavedDefProv(defP);
+      if (visible[defP]) setActive(defP);
+      else {
+        const first = Object.keys(visible)[0];
+        if (first) setActive(first);
+      }
+    } catch (err) {
+      console.warn("[SettingsPanel] reload after enterprise change failed:", err);
+    }
+  }, [updateSettingsSlice]);
 
   const providerConfigDirty = useMemo(() => {
     if (defProv !== providerSavedDefProv) return true;
@@ -8319,6 +8391,9 @@ export function SettingsPanel({
             }`}
           >
             {tab === "account" && <AccountTab />}
+            {tab === "enterprise" && (
+              <EnterpriseAccountPanel onChanged={() => void reloadProvidersAfterEnterpriseChange()} />
+            )}
 
             {/* === GENERAL TAB ===（保持挂载以便底部「保存」能刷入权限 API，避免仅失焦写入） */}
             <div className={tab === "general" ? "space-y-4" : "hidden"}>
@@ -8805,6 +8880,11 @@ export function SettingsPanel({
             {tab === "provider" && (
               <div className="flex min-h-0 flex-1 flex-col gap-3">
                 <RemoteBackendHintBanner kind="synced" />
+                {enterpriseStrict && (
+                  <div className="rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-700 dark:text-amber-300">
+                    模型由企业管理员统一配置。可在「企业账号」刷新列表或退出登录以恢复自配服务商。
+                  </div>
+                )}
               <div className="flex min-h-0 flex-1 gap-4">
                 {/* Provider sub-list */}
                 <div className="flex w-[176px] shrink-0 flex-col self-stretch rounded-xl border border-border bg-surface-card">
@@ -8858,6 +8938,7 @@ export function SettingsPanel({
                       );
                     })}
                   </div>
+                  {!enterpriseStrict && (
                   <div className="border-t border-border p-1.5">
                     <button
                       type="button"
@@ -8872,6 +8953,7 @@ export function SettingsPanel({
                       添加
                     </button>
                   </div>
+                  )}
                 </div>
 
                 {/* Provider detail */}
@@ -9003,8 +9085,9 @@ export function SettingsPanel({
                             <input
                               type={apiKeyVisible ? "text" : "password"}
                               autoComplete="off"
-                              className="w-full rounded-md border border-border bg-surface-panel py-1.5 pl-2 pr-11 text-sm"
+                              className="w-full rounded-md border border-border bg-surface-panel py-1.5 pl-2 pr-11 text-sm disabled:opacity-60"
                               value={current.apiKey}
+                              disabled={current.managed === true}
                               onChange={(e) => updateField("apiKey", e.target.value)}
                               placeholder="sk-..."
                             />
@@ -9046,8 +9129,9 @@ export function SettingsPanel({
                       <label className="block text-sm text-text-muted">
                         API 地址 <span className="text-xs text-text-faint">(留空使用默认)</span>
                         <input
-                          className="mt-1 w-full rounded-md border border-border bg-surface-panel px-2 py-1.5 text-sm"
+                          className="mt-1 w-full rounded-md border border-border bg-surface-panel px-2 py-1.5 text-sm disabled:opacity-60"
                           value={current.baseUrl}
+                          disabled={current.managed === true}
                           onChange={(e) => updateField("baseUrl", e.target.value)}
                           placeholder={
                             isOllamaLikeProvider(active, current)
@@ -9083,7 +9167,11 @@ export function SettingsPanel({
                               type="button"
                               aria-label="批量健康检查"
                               className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-border text-text-subtle transition hover:bg-surface-hover hover:text-text-strong disabled:pointer-events-none disabled:opacity-40"
-                              disabled={!providerCredentialed(current) || current.models.length === 0}
+                              disabled={
+                                current.managed === true
+                                || !providerCredentialed(current)
+                                || current.models.length === 0
+                              }
                               onClick={() => void onBatchHealthCheck()}
                             >
                               <Activity className="h-4 w-4" aria-hidden />
@@ -9094,7 +9182,11 @@ export function SettingsPanel({
                               type="button"
                               aria-label="从 API 获取模型"
                               className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-border text-text-subtle transition hover:bg-surface-hover hover:text-text-strong disabled:pointer-events-none disabled:opacity-40"
-                              disabled={fetchingModels || !providerCredentialed(current)}
+                              disabled={
+                                current.managed === true
+                                || fetchingModels
+                                || !providerCredentialed(current)
+                              }
                               onClick={() => void onFetchModels()}
                             >
                               {fetchingModels ? (
@@ -9104,6 +9196,7 @@ export function SettingsPanel({
                               )}
                             </button>
                           </HoverTip>
+                          {!current.managed && (
                           <HoverTip label="添加模型">
                             <button
                               type="button"
@@ -9118,6 +9211,7 @@ export function SettingsPanel({
                               <Plus className="h-4 w-4" aria-hidden />
                             </button>
                           </HoverTip>
+                          )}
                         </div>
                       </div>
                       {fetchModelsError ? (

@@ -32,6 +32,7 @@
 |---|---|---|
 | `AUTH_DEV_OWNER_PASSWORD` | 🟡 dev | **`db:seed` 写入 PG 的 bcrypt 源**；web-portal 开发登录。默认种子用户 `admin@agenticx.local`。改 env 后须重跑 `db:seed` 才同步库 |
 | `ENABLE_DEV_BOOTSTRAP` | ⚪ | 非生产自动引导 seed |
+| `DESKTOP_PAT_EXPIRE_DAYS` | ⚪ | Desktop 企业登录签发 PAT 有效天数，默认 `90` |
 | `GATEWAY_COMPLETIONS_URL` | 🟡 | 默认 `http://127.0.0.1:8088/v1/chat/completions` |
 | `NEXT_PUBLIC_SSO_PROVIDERS` | ⚪ | `id:显示名` 逗号分隔，控制 SSO 按钮 |
 | `SSO_<id>_ISSUER` | OIDC | IdP issuer URL |

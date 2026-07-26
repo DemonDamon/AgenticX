@@ -132,6 +132,7 @@ export function isOfficialOpenAIBase(baseUrl: string): boolean {
 
 /** 用户通过「添加服务厂商」创建的条目，允许从设置中删除。 */
 export function isProviderDeletable(providerId: string): boolean {
+  if (providerId === "enterprise") return false;
   if (providerId.startsWith("custom_openai_") || providerId.startsWith("custom_ollama_")) {
     return true;
   }
@@ -143,6 +144,9 @@ export function isProviderDisplayNameEditable(
   providerId: string,
   entry?: ProviderDisplayEntry | null,
 ): boolean {
+  if (providerId === "enterprise" || (entry as { managed?: boolean } | null | undefined)?.managed) {
+    return false;
+  }
   if (
     providerId.startsWith("custom_openai_")
     || providerId.startsWith("custom_ollama_")
