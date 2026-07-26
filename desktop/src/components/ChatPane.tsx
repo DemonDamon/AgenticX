@@ -345,6 +345,65 @@ function resolveForwardSender(message: Message, userLabel = "我"): string {
   return resolveMetaDisplayName(raw.toLowerCase() === "meta" ? null : raw);
 }
 
+type ForwardPendingAttachment = {
+  name: string;
+  mime_type: string;
+  size: number;
+  data_url?: string;
+  source_path?: string;
+};
+
+type ForwardPendingMessage = {
+  sender: string;
+  role: string;
+  content: string;
+  avatar_url?: string;
+  timestamp?: number;
+  attachments?: ForwardPendingAttachment[];
+};
+
+function attachmentsForForwardPayload(message: Message): ForwardPendingAttachment[] | undefined {
+  const atts = message.attachments;
+  if (!Array.isArray(atts) || atts.length === 0) return undefined;
+  const out: ForwardPendingAttachment[] = [];
+  for (const att of atts) {
+    const name = String(att.name || "").trim() || "file";
+    const mime = String(att.mimeType || "").trim() || "application/octet-stream";
+    const size = Number.isFinite(att.size) ? Number(att.size) : 0;
+    const dataUrl = String(att.dataUrl || "").trim();
+    const sourcePath = String(att.sourcePath || "").trim();
+    if (!dataUrl && !sourcePath && name === "file") continue;
+    out.push({
+      name,
+      mime_type: mime,
+      size: Math.max(0, size),
+      ...(dataUrl ? { data_url: dataUrl } : {}),
+      ...(sourcePath ? { source_path: sourcePath } : {}),
+    });
+  }
+  return out.length > 0 ? out : undefined;
+}
+
+function buildForwardPendingMessage(
+  message: Message,
+  userLabel: string,
+  selectedText?: string
+): ForwardPendingMessage {
+  const attachments = attachmentsForForwardPayload(message);
+  let content = resolveQuoteBody(message, selectedText).trim();
+  if (!content && attachments?.length) {
+    content = `（见附件：${attachments.map((a) => a.name).slice(0, 3).join("、")}）`;
+  }
+  return {
+    sender: resolveForwardSender(message, userLabel),
+    role: message.role,
+    content,
+    avatar_url: message.avatarUrl,
+    timestamp: message.timestamp,
+    ...(attachments ? { attachments } : {}),
+  };
+}
+
 function resolveGroupChatSender(
   message: Pick<Message, "role" | "avatarName" | "avatarUrl" | "agentId">,
   opts: {
@@ -2686,9 +2745,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
   }, [pane.pendingQuote, pane.id, setPanePendingQuote, addQuoteTarget]);
   const [selectedMessageIds, setSelectedMessageIds] = useState<Set<string>>(new Set());
   const [forwardPickerOpen, setForwardPickerOpen] = useState(false);
-  const [pendingForwardMessages, setPendingForwardMessages] = useState<
-    Array<{ sender: string; role: string; content: string; avatar_url?: string; timestamp?: number }>
-  >([]);
+  const [pendingForwardMessages, setPendingForwardMessages] = useState<ForwardPendingMessage[]>([]);
   const [contextFiles, setContextFiles] = useState<Record<string, AttachedFile>>({});
   const [attachToastOpen, setAttachToastOpen] = useState(false);
   const [favoriteToastOpen, setFavoriteToastOpen] = useState(false);
@@ -5119,30 +5176,14 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
   );
 
   const forwardOneMessage = useCallback((message: Message, selectedText?: string) => {
-    const sender = resolveForwardSender(message, userBubbleLabel);
-    const content = resolveQuoteBody(message, selectedText);
-    setPendingForwardMessages([
-      {
-        sender,
-        role: message.role,
-        content,
-        avatar_url: message.avatarUrl,
-        timestamp: message.timestamp,
-      },
-    ]);
+    setPendingForwardMessages([buildForwardPendingMessage(message, userBubbleLabel, selectedText)]);
     setForwardPickerOpen(true);
   }, [userBubbleLabel]);
 
   const forwardSelectedMessages = useCallback(() => {
     if (selectedMessages.length === 0) return;
     setPendingForwardMessages(
-      selectedMessages.map((message) => ({
-        sender: resolveForwardSender(message, userBubbleLabel),
-        role: message.role,
-        content: resolveQuoteBody(message),
-        avatar_url: message.avatarUrl,
-        timestamp: message.timestamp,
-      }))
+      selectedMessages.map((message) => buildForwardPendingMessage(message, userBubbleLabel))
     );
     setForwardPickerOpen(true);
   }, [selectedMessages, userBubbleLabel]);

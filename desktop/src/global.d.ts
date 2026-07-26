@@ -218,6 +218,14 @@ type ForwardedHistoryItem = {
   content: string;
   avatar_url?: string;
   timestamp?: number;
+  attachments?: Array<{
+    name?: string;
+    mime_type?: string;
+    size?: number;
+    data_url?: string;
+    source_path?: string;
+    storage_path?: string;
+  }>;
 };
 type ForwardedHistoryCard = {
   title: string;

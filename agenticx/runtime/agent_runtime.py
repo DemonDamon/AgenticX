@@ -2690,7 +2690,13 @@ class AgentRuntime:
                     if item.get("role") == "user":
                         last_user_text = str(item.get("content", "")).strip()
                         break
-                if last_user_text != ui_text:
+                from agenticx.studio.message_forward import forward_note_already_on_tail
+
+                # Merge-forward already embeds the follow-up cue on the forward card.
+                # Do not append a second identical user bubble for the auto-reply turn.
+                if forward_note_already_on_tail(session.chat_history, ui_text):
+                    session.current_user_intent = _history_text or user_input
+                elif last_user_text != ui_text:
                     hist_user = _build_hist_user(_history_text or user_input)
                     _chat_history_append_deduped(session.chat_history, hist_user)
                     session.current_user_intent = _history_text or user_input

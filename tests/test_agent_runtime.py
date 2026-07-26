@@ -453,6 +453,37 @@ async def test_skip_user_history_dedupes_existing_tail_user() -> None:
     assert user_rows[0]["content"] == "能不能听到？"
 
 
+async def test_skip_user_history_skips_forward_card_follow_up_echo() -> None:
+    """Auto-reply after merge-forward must not create a second identical user bubble."""
+    runtime = AgentRuntime(_TextOnlyLLM(), _ApproveGate())
+    session = StudioSession()
+    note = "请阅读刚转发的聊天记录并继续回复。"
+    session.chat_history = [
+        {
+            "role": "user",
+            "content": f"【转发的聊天记录 · 来自 会话】\n我: hi\n\n附加说明: {note}",
+            "forwarded_history": {
+                "title": "聊天记录 · 来自 会话",
+                "source_session": "src",
+                "note": note,
+                "items": [{"sender": "我", "role": "user", "content": "hi"}],
+            },
+        }
+    ]
+    session.agent_messages = [dict(session.chat_history[0])]
+
+    async for _ in runtime.run_turn(
+        note,
+        session,
+        persist_user_message=False,
+    ):
+        pass
+
+    user_rows = [m for m in session.chat_history if m.get("role") == "user"]
+    assert len(user_rows) == 1
+    assert user_rows[0].get("forwarded_history", {}).get("note") == note
+
+
 async def test_user_history_persists_client_turn_metadata() -> None:
     runtime = AgentRuntime(_TextOnlyLLM(), _ApproveGate())
     session = StudioSession()
