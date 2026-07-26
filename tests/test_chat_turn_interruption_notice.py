@@ -141,6 +141,10 @@ def test_interruption_notice_content_by_cause() -> None:
     assert "已按用户请求中断" in interruption_notice_content(cause="user_interrupt", session=session)
     assert "运行出错" in interruption_notice_content(cause="runtime_failure", session=session)
     assert "连接已断开" in interruption_notice_content(cause="client_disconnect", session=session)
+    assert "没有说完" in interruption_notice_content(
+        cause="suspected_truncated_final",
+        session=session,
+    )
 
 
 def test_resolve_turn_interruption_cause_priority() -> None:
@@ -219,3 +223,60 @@ def test_resolve_turn_interruption_cause_priority() -> None:
 def test_all_cause_messages_non_empty(cause: str, snippet: str) -> None:
     text = interruption_notice_content(cause=cause, session=_session_with_history([]))
     assert snippet in text
+
+
+@pytest.mark.asyncio
+async def test_suspected_truncated_final_appends_continue_notice(monkeypatch) -> None:
+    from agenticx.studio.server import _finalize_chat_runtime
+
+    monkeypatch.setattr("agenticx.studio.server._flush_taskspace_hint", lambda *a, **k: None)
+    monkeypatch.setattr(
+        "agenticx.studio.server._resolve_chat_end_execution_state",
+        lambda *_args, **kwargs: "interrupted" if not kwargs["saw_final"] else "idle",
+    )
+
+    states: list[str] = []
+
+    class _Manager:
+        def clear_interrupt(self, _session_id: str) -> None:
+            pass
+
+        def set_execution_state(self, _session_id: str, state: str) -> None:
+            states.append(state)
+
+        async def persist_async(self, _session_id: str) -> None:
+            pass
+
+        def clear_event_hub(self, _session_id: str) -> None:
+            pass
+
+        def get(self, _session_id: str, touch: bool = False):
+            return None
+
+    session = _session_with_history(
+        [
+            {"role": "user", "content": "核实这条信息"},
+            {
+                "role": "assistant",
+                "content": "团长，这条信息涉及具体发布日期、定价和竞品对比",
+                "metadata": {
+                    "turn_terminal": True,
+                    "terminal_reason": "suspected_truncated_final",
+                },
+            },
+        ]
+    )
+
+    await _finalize_chat_runtime(
+        _Manager(),
+        "session-suspected-truncated",
+        session,
+        saw_final=True,
+        had_runtime_failure=False,
+    )
+
+    notice = session.chat_history[-1]
+    assert notice["role"] == "tool"
+    assert notice["metadata"]["kind"] == TURN_INTERRUPTED_KIND
+    assert notice["metadata"]["cause"] == "suspected_truncated_final"
+    assert states == ["interrupted"]
