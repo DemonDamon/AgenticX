@@ -169,12 +169,18 @@ function RemoteBrowserPane({
     viewport.width != null && viewport.height != null && viewport.width > 0 && viewport.height > 0;
   const zoom = Math.max(25, Math.min(300, viewport.zoomPercent || 100)) / 100;
 
+  // Electron throws synchronously if called before guest is attached + dom-ready;
+  // .catch() alone cannot prevent RootErrorBoundary from swallowing the page.
   const injectSelectionHook = () => {
     const wv = webviewRef.current;
     if (!wv?.executeJavaScript) return;
-    void wv.executeJavaScript(BROWSER_SELECTION_HOOK_JS).catch(() => {
-      /* guest may be mid-navigation */
-    });
+    try {
+      void wv.executeJavaScript(BROWSER_SELECTION_HOOK_JS).catch(() => {
+        /* guest may be mid-navigation */
+      });
+    } catch {
+      /* not attached / not dom-ready yet */
+    }
   };
 
   // Parent-driven navigation (address bar / back / forward) — never mutate src attr.
@@ -217,7 +223,7 @@ function RemoteBrowserPane({
     const onDidNavigate = (event: Event) => {
       const e = event as Event & { url?: string };
       syncFromGuest(e.url || wv.getURL?.() || "");
-      injectSelectionHook();
+      // Do not inject here — guest may not be dom-ready yet after navigate.
     };
     const onDomReady = () => injectSelectionHook();
     wv.addEventListener("dom-ready", onDomReady);
@@ -225,7 +231,7 @@ function RemoteBrowserPane({
     wv.addEventListener("did-navigate", onDidNavigate);
     wv.addEventListener("did-navigate-in-page", onDidNavigate);
     wv.addEventListener("did-redirect-navigation", onDidNavigate);
-    injectSelectionHook();
+    // Wait for dom-ready / did-finish-load — eager inject on mount races attach.
     return () => {
       wv.removeEventListener("dom-ready", onDomReady);
       wv.removeEventListener("did-finish-load", onDomReady);
