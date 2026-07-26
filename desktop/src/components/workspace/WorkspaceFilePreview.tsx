@@ -1351,7 +1351,7 @@ export function WorkspaceFilePreview({
         aria-label={`预览 ${previewBaseName(preview.path)}`}
         className={
           isPanel
-            ? "flex h-full min-h-0 flex-col overflow-hidden bg-surface-sidebar"
+            ? "flex h-full min-h-0 flex-col overflow-hidden bg-surface-panel"
             : "animate-preview-pop fixed z-[56] flex min-h-0 flex-col overflow-hidden rounded-2xl border border-[var(--border-subtle)] bg-surface-popover shadow-[0_20px_60px_-15px_rgba(0,0,0,0.5)]"
         }
         style={
@@ -1369,7 +1369,7 @@ export function WorkspaceFilePreview({
       >
         <div
           className={`flex shrink-0 items-center gap-3 border-b border-border px-4 py-3 ${
-            isPanel ? "bg-surface-sidebar" : "bg-surface-popover"
+            isPanel ? "bg-surface-panel" : "bg-surface-popover"
           }`}
         >
           <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-[var(--border-subtle)] bg-surface-base shadow-sm">

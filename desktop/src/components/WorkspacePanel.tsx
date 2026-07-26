@@ -267,8 +267,11 @@ export function WorkspacePanel({
   const panelRef = useRef<HTMLDivElement | null>(null);
   const awaitingFreshSession = isPaneAwaitingFreshSession(paneId);
   const isSidebarEmbed = !!backAction;
-  /** WorkPanel / sidebar embed: match parent `bg-surface-sidebar`, no avatar tint overlay. */
-  const useSidebarSurface = isSidebarEmbed || hidePanelClose;
+  /** Left-sidebar embed keeps gray chrome; WorkPanel embed uses panel (work) surface. */
+  const useWorkPanelSurface = hidePanelClose && !isSidebarEmbed;
+  const useSidebarSurface = isSidebarEmbed;
+  /** Skip avatar tint when embedded in opaque chrome (sidebar or WorkPanel). */
+  const skipTintOverlay = useSidebarSurface || useWorkPanelSurface;
   const getBrowseSessionId = () => {
     const direct = String(sessionId ?? "").trim();
     if (direct) return direct;
@@ -1451,9 +1454,13 @@ export function WorkspacePanel({
     <div
       ref={panelRef}
       className={`relative flex h-full min-h-0 w-full flex-col ${
-        useSidebarSurface ? "bg-surface-sidebar" : "bg-surface-card"
+        useSidebarSurface
+          ? "bg-surface-sidebar"
+          : useWorkPanelSurface
+            ? "bg-surface-panel"
+            : "bg-surface-card"
       }`}
-      style={!useSidebarSurface && tintColor ? { backgroundColor: tintColor } : undefined}
+      style={!skipTintOverlay && tintColor ? { backgroundColor: tintColor } : undefined}
     >
       <div className="flex min-h-0 flex-1 flex-col">
         <div className="flex flex-col">
@@ -1577,7 +1584,7 @@ export function WorkspacePanel({
           {showAddForm ? (
             <div
               className="border-b border-border px-3 py-2"
-              style={!useSidebarSurface && tintColor ? { backgroundColor: tintColor } : undefined}
+              style={!skipTintOverlay && tintColor ? { backgroundColor: tintColor } : undefined}
             >
               <div className="mb-2 flex items-center justify-between gap-2 text-[13px] font-medium text-text-subtle">
                 <span>添加到会话工作区</span>
