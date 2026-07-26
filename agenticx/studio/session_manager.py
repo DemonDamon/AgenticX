@@ -26,6 +26,10 @@ from agenticx.runtime.assistant_output import (
     parse_assistant_output,
     sanitize_suggested_questions,
 )
+from agenticx.runtime.truncated_final import (
+    ACTION_INTENT_RE,
+    detect_suspected_truncated_final,
+)
 from agenticx.studio.chat_attachments import materialize_message_lists_image_uploads
 
 _log = logging.getLogger(__name__)
@@ -139,10 +143,6 @@ def _messages_last_turn_has_completed_reply(messages: List[Dict[str, Any]]) -> b
     return True
 
 
-_REASONING_ACTION_INTENT_RE = re.compile(
-    r"让我先|我先|接下来要|然后加载|然后调用|去读取|去加载|todo_write",
-    re.IGNORECASE,
-)
 _DEFERRAL_BODY_RE = re.compile(r"我先|让我先|接下来|稍等|正在|马上")
 
 # Explicit handoff / step-entry phrases that promise next-step work without doing it.
@@ -208,11 +208,11 @@ def _messages_last_turn_promised_action_without_followthrough(
     content = str(last.get("content", "") or "")
     if "</followups>" in content.lower():
         return False
-    reasoning = _extract_assistant_reasoning(content)
+    reasoning = str(last.get("reasoning") or "").strip() or _extract_assistant_reasoning(content)
     body = _visible_assistant_body(content)
 
     # Path A (existing): reasoning promises action + short / deferring body.
-    if reasoning and _REASONING_ACTION_INTENT_RE.search(reasoning):
+    if reasoning and ACTION_INTENT_RE.search(reasoning):
         if _DEFERRAL_BODY_RE.search(body) and len(body) < 220:
             return True
         if body and body.rstrip()[-1:] in {":", "：", ",", "，", ";", "；", "、", "—", "…"}:
@@ -239,6 +239,16 @@ def _messages_last_turn_promised_action_without_followthrough(
             return True
         if ending not in _MIDTURN_COMPLETED_ENDINGS:
             return True
+
+    metadata = _assistant_metadata(last)
+    if not _turn_has_any_tool_row(tail) and detect_suspected_truncated_final(
+        visible_body=body,
+        reasoning_text=reasoning,
+        had_tool_calls_this_round=False,
+        executed_tool_names=(),
+        finish_reason=str(metadata.get("model_finish_reason") or ""),
+    ):
+        return True
 
     return False
 

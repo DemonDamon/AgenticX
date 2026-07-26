@@ -118,6 +118,53 @@ class _NormalReasoningPlusBody:
         yield _THINK_OPEN + "思考" + _THINK_CLOSE + "这是回复"
 
 
+class _ShortTruncatedThenReply:
+    """First turn is a short action-intent stub; the retry completes it."""
+
+    def __init__(self) -> None:
+        self.calls = 0
+
+    def invoke(self, *_args, **_kwargs):
+        self.calls += 1
+        if self.calls == 1:
+            return _FakeResponse(
+                "团长，这条信息涉及具体发布日期、定价和竞品对比",
+                [],
+                reasoning_content="I need to search the web to verify this. Let me do that.",
+            )
+        return _FakeResponse("这条说法并不成立，我已核实官方来源。", [])
+
+    def stream(self, *_args, **_kwargs):
+        if self.calls == 1:
+            yield {
+                "type": "content",
+                "text": "团长，这条信息涉及具体发布日期、定价和竞品对比",
+            }
+        else:
+            yield {"type": "content", "text": "这条说法并不成立，我已核实官方来源。"}
+
+
+class _AlwaysShortTruncated:
+    """Both attempts are short action-intent stubs; retry must stop after one."""
+
+    def __init__(self) -> None:
+        self.calls = 0
+
+    def invoke(self, *_args, **_kwargs):
+        self.calls += 1
+        return _FakeResponse(
+            "团长，这条信息涉及具体发布日期、定价和竞品对比",
+            [],
+            reasoning_content="I need to search the web to verify this. Let me do that.",
+        )
+
+    def stream(self, *_args, **_kwargs):
+        yield {
+            "type": "content",
+            "text": "团长，这条信息涉及具体发布日期、定价和竞品对比",
+        }
+
+
 class _ToolThenReasoningOnlyThenStillReasoning:
     """1st: tool_call. 2nd: reasoning-only (nudge). 3rd: still reasoning-only (exhaust)."""
 
@@ -261,8 +308,40 @@ def test_normal_reasoning_plus_body_does_not_trigger_nudge() -> None:
     assert _final_text(events) == "这是回复"
     last = session.chat_history[-1]
     assert last["content"] == "这是回复"
-    assert "model_finish_reason" not in last["metadata"]
+    assert last["metadata"]["model_finish_reason"] == "unknown"
+    assert last["metadata"]["body_len"] == len("这是回复")
+    assert last["metadata"]["had_tool_calls"] is False
     assert _THINK_OPEN not in last["content"]
+
+
+def test_short_truncated_action_intent_retries_once_then_returns_complete_reply() -> None:
+    llm = _ShortTruncatedThenReply()
+    runtime = AgentRuntime(llm, _ApproveGate())
+    session = StudioSession()
+
+    events = asyncio.run(_collect(runtime, session, "核实这条信息"))
+
+    assert llm.calls == 2
+    assert _final_text(events) == "这条说法并不成立，我已核实官方来源。"
+    assert session.chat_history[-1]["metadata"]["terminal_reason"] == "model_final"
+    assert session.chat_history[-1]["metadata"]["body_len"] == len(
+        "这条说法并不成立，我已核实官方来源。"
+    )
+
+
+def test_short_truncated_action_intent_stops_after_one_retry_with_suspected_terminal() -> None:
+    llm = _AlwaysShortTruncated()
+    runtime = AgentRuntime(llm, _ApproveGate())
+    session = StudioSession()
+
+    events = asyncio.run(_collect(runtime, session, "核实这条信息"))
+
+    assert llm.calls == 2
+    assert _final_text(events) == "团长，这条信息涉及具体发布日期、定价和竞品对比"
+    assert session.chat_history[-1]["metadata"]["terminal_reason"] == "suspected_truncated_final"
+    assert session.chat_history[-1]["metadata"]["truncation_signal"] == (
+        "short_unterminated_with_intent"
+    )
 
 
 def test_reasoning_only_after_tool_triggers_fallback_placeholder(monkeypatch) -> None:

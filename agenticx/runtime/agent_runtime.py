@@ -64,6 +64,7 @@ from agenticx.runtime.loop_detector import LoopDetector
 from agenticx.runtime.llm_retry import LLMRetryPolicy, _classify_error
 from agenticx.runtime.subagent_runs import SubAgentRunStore
 from agenticx.runtime.token_budget import BudgetLevel, TokenBudgetGuard
+from agenticx.runtime.truncated_final import detect_suspected_truncated_final
 from agenticx.runtime.usage_metadata import usage_metadata_from_llm_response
 from agenticx.runtime.assistant_output import (
     ParsedAssistantOutput,
@@ -1804,6 +1805,12 @@ _REASONING_ONLY_NUDGE_HINT = (
     "请基于已有上下文与工具结果，直接给出用户可见的最终回复，"
     "或发出明确的 tool_call；不要只输出思考。"
 )
+_TRUNCATED_FINAL_NUDGE_HINT = (
+    "[runtime-truncated-final] 你上一条回复似乎在中途被截断：正文很短、没有结束标记，"
+    "而你的思考表明还需要继续执行（例如调用工具核实信息）。"
+    "请直接继续完成这一轮：如需工具就发起 tool_call，否则输出完整的最终回答。"
+    "不要复述已经说过的开场白，不要向用户解释本条提示。"
+)
 
 
 def _sanitize_structured_assistant_text(text: str, allowed_tool_names: set[str]) -> str:
@@ -2740,6 +2747,8 @@ class AgentRuntime:
         # Turn-level counter for reasoning-only rounds (model emitted < Mattis> but no
         # visible body and no tool_call). Capped at 1 to avoid infinite nudge loops.
         reason_only_retry = 0
+        truncated_final_retry = 0
+        suspected_truncated_signal = ""
         reasoning_before_nudge = ""
         reasoning_only_protocol_errors: list[str] = []
 
@@ -4079,6 +4088,36 @@ class AgentRuntime:
                     synced_session_message_count = len(session.agent_messages)
                     continue
 
+                if not _is_system_trigger and truncated_final_retry < 1:
+                    truncation_signal = detect_suspected_truncated_final(
+                        visible_body=parsed.visible_body,
+                        reasoning_text=str(reasoning_for_tool_call or ""),
+                        had_tool_calls_this_round=bool(tool_calls),
+                        executed_tool_names=executed_tool_names,
+                        finish_reason=model_finish_reason,
+                    )
+                    if truncation_signal:
+                        truncated_final_retry += 1
+                        suspected_truncated_signal = truncation_signal
+                        logger.warning(
+                            "truncated_final_retry session=%s round=%s signal=%s "
+                            "body_len=%s finish_reason=%s",
+                            getattr(session, "session_id", ""),
+                            round_idx,
+                            truncation_signal,
+                            len(parsed.visible_body.strip()),
+                            model_finish_reason or "unknown",
+                        )
+                        messages.append(dict(assistant_message))
+                        messages.append(
+                            {"role": "system", "content": _TRUNCATED_FINAL_NUDGE_HINT}
+                        )
+                        session.agent_messages.append(
+                            {"role": "system", "content": _TRUNCATED_FINAL_NUDGE_HINT}
+                        )
+                        synced_session_message_count = len(session.agent_messages)
+                        continue
+
                 if (
                     authoritative_source_kind == "sync_fallback"
                     and not authoritative_raw.strip()
@@ -4206,12 +4245,23 @@ class AgentRuntime:
                 else:
                     if reasoning_field_final_recovered:
                         terminal_reason = "reasoning_field_final_recovered"
-                    else:
+                    elif parsed.malformed:
                         terminal_reason = (
                             "malformed_model_final_recovered"
-                            if parsed.malformed
-                            else "model_final"
                         )
+                    elif (
+                        suspected_truncated_signal
+                        and detect_suspected_truncated_final(
+                            visible_body=clean_body,
+                            reasoning_text=reasoning_text,
+                            had_tool_calls_this_round=False,
+                            executed_tool_names=executed_tool_names,
+                            finish_reason=model_finish_reason,
+                        )
+                    ):
+                        terminal_reason = "suspected_truncated_final"
+                    else:
+                        terminal_reason = "model_final"
 
                 if parsed.malformed or terminal_reason != "model_final":
                     terminal_protocol_errors = list(reasoning_only_protocol_errors)
@@ -4281,11 +4331,9 @@ class AgentRuntime:
                     agent_id=agent_id,
                     is_system_trigger=_is_system_trigger,
                     terminal_metadata={
-                        **(
-                            {"model_finish_reason": model_finish_reason}
-                            if model_finish_reason
-                            else {}
-                        ),
+                        "model_finish_reason": model_finish_reason or "unknown",
+                        "body_len": len((clean_body or "").strip()),
+                        "had_tool_calls": bool(executed_tool_names),
                         **(
                             {
                                 "model_finish_reason": model_finish_reason or "unknown",
@@ -4304,6 +4352,11 @@ class AgentRuntime:
                                 "tool_turn_empty_fallback",
                                 "tool_result_fallback",
                             }
+                            else {}
+                        ),
+                        **(
+                            {"truncation_signal": suspected_truncated_signal}
+                            if terminal_reason == "suspected_truncated_final"
                             else {}
                         ),
                         **(
