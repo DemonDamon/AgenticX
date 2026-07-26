@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import { Building2, Loader2, LogOut, RefreshCw } from "lucide-react";
+import { Building2, Eye, EyeOff, Loader2, LogOut, RefreshCw } from "lucide-react";
 
 type EnterpriseState = {
   enabled: boolean;
@@ -30,6 +30,7 @@ export function EnterpriseAccountPanel({ onChanged }: Props) {
   const [baseUrl, setBaseUrl] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [showPassword, setShowPassword] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -72,6 +73,7 @@ export function EnterpriseAccountPanel({ onChanged }: Props) {
         return;
       }
       setPassword("");
+      setShowPassword(false);
       await reload();
       onChanged?.();
     } catch (err) {
@@ -115,6 +117,8 @@ export function EnterpriseAccountPanel({ onChanged }: Props) {
       setBusy(false);
     }
   };
+
+  const formIncomplete = !baseUrl.trim() || !email.trim() || !password;
 
   return (
     <div className="space-y-4">
@@ -195,30 +199,52 @@ export function EnterpriseAccountPanel({ onChanged }: Props) {
           </label>
           <label className="block space-y-1">
             <span className="text-xs text-text-subtle">密码</span>
-            <input
-              type="password"
-              className="w-full rounded-lg border border-border bg-surface-panel px-3 py-2 text-sm text-text-primary outline-none focus:border-[var(--settings-accent-badge-bg)]"
-              value={password}
-              disabled={busy}
-              onChange={(e) => setPassword(e.target.value)}
-              autoComplete="current-password"
-              onKeyDown={(e) => {
-                if (e.key === "Enter") {
-                  e.preventDefault();
-                  void handleLogin();
-                }
-              }}
-            />
+            <div className="relative">
+              <input
+                type={showPassword ? "text" : "password"}
+                className="w-full rounded-lg border border-border bg-surface-panel py-2 pl-3 pr-11 text-sm text-text-primary outline-none focus:border-[var(--settings-accent-badge-bg)]"
+                value={password}
+                disabled={busy}
+                onChange={(e) => setPassword(e.target.value)}
+                autoComplete="current-password"
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") {
+                    e.preventDefault();
+                    void handleLogin();
+                  }
+                }}
+              />
+              <button
+                type="button"
+                tabIndex={-1}
+                disabled={busy}
+                aria-label={showPassword ? "隐藏密码" : "显示密码"}
+                className="absolute right-1.5 top-1/2 flex h-8 w-8 -translate-y-1/2 items-center justify-center rounded-md text-text-faint transition hover:bg-surface-hover hover:text-text-subtle disabled:opacity-50"
+                onClick={() => setShowPassword((v) => !v)}
+              >
+                {showPassword ? (
+                  <EyeOff className="h-4 w-4 shrink-0" aria-hidden />
+                ) : (
+                  <Eye className="h-4 w-4 shrink-0" aria-hidden />
+                )}
+              </button>
+            </div>
           </label>
           <button
             type="button"
-            disabled={busy || !baseUrl.trim() || !email.trim() || !password}
+            disabled={busy || formIncomplete}
+            aria-busy={busy}
             onClick={() => void handleLogin()}
-            className="inline-flex items-center justify-center gap-1.5 rounded-lg px-4 py-2 text-sm font-medium text-[var(--ui-btn-primary-fg)] disabled:opacity-50"
-            style={{ background: "var(--ui-btn-primary-bg)" }}
+            className={`inline-flex items-center justify-center gap-1.5 rounded-lg px-4 py-2 text-sm font-medium disabled:cursor-not-allowed ${
+              formIncomplete && !busy ? "opacity-50" : ""
+            }`}
+            style={{
+              background: "var(--ui-btn-primary-bg)",
+              color: "var(--ui-btn-primary-text)",
+            }}
           >
-            {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
-            登录
+            {busy ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden /> : null}
+            {busy ? "登录中…" : "登录"}
           </button>
         </div>
       )}

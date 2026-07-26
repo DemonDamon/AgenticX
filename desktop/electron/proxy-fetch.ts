@@ -32,7 +32,13 @@ function getNoProxyList(): string[] {
     .filter(Boolean);
 }
 
+function isLoopbackHost(host: string): boolean {
+  const h = host.toLowerCase();
+  return h === "localhost" || h === "127.0.0.1" || h === "::1" || h === "[::1]";
+}
+
 function hostMatchesNoProxy(host: string, noProxy: string[]): boolean {
+  if (isLoopbackHost(host)) return true;
   if (noProxy.length === 0) return false;
   const h = host.toLowerCase();
   for (const entry of noProxy) {

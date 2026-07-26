@@ -334,6 +334,22 @@ function normalizePortalOrigin(raw: string): string {
   return String(raw || "").trim().replace(/\/+$/, "");
 }
 
+/** Enterprise portal login/bootstrap — avoid infinite spinner when proxy/network stalls. */
+const ENTERPRISE_PORTAL_FETCH_TIMEOUT_MS = 15_000;
+
+function enterpriseFetchErrorMessage(err: unknown): string {
+  const name = err && typeof err === "object" && "name" in err ? String((err as { name?: unknown }).name) : "";
+  const msg = String(err ?? "");
+  if (
+    name === "AbortError" ||
+    name === "TimeoutError" ||
+    /aborted|timeout|ETIMEDOUT|timed out/i.test(msg)
+  ) {
+    return "连接组织地址超时，请确认 Portal 已启动且地址正确（本机一般为 http://localhost:3000）";
+  }
+  return `无法连接组织地址：${msg}`;
+}
+
 function applyEnterpriseProvider(
   cfg: AgxConfig,
   opts: {
@@ -7293,6 +7309,7 @@ function registerIpc(): void {
             password,
             deviceName: os.hostname() || "desktop",
           }),
+          signal: AbortSignal.timeout(ENTERPRISE_PORTAL_FETCH_TIMEOUT_MS),
         });
         const tokenJson = (await tokenResp.json().catch(() => ({}))) as {
           code?: string;
@@ -7322,6 +7339,7 @@ function registerIpc(): void {
             accept: "application/json",
             authorization: `Bearer ${pat}`,
           },
+          signal: AbortSignal.timeout(ENTERPRISE_PORTAL_FETCH_TIMEOUT_MS),
         });
         const bootJson = (await bootResp.json().catch(() => ({}))) as {
           code?: string;
@@ -7375,7 +7393,7 @@ function registerIpc(): void {
           models,
         };
       } catch (err) {
-        return { ok: false, error: `无法连接组织地址：${String(err)}` };
+        return { ok: false, error: enterpriseFetchErrorMessage(err) };
       }
     },
   );
@@ -7402,6 +7420,7 @@ function registerIpc(): void {
           accept: "application/json",
           authorization: `Bearer ${token}`,
         },
+        signal: AbortSignal.timeout(ENTERPRISE_PORTAL_FETCH_TIMEOUT_MS),
       });
       const bootJson = (await bootResp.json().catch(() => ({}))) as {
         message?: string;
@@ -7449,7 +7468,7 @@ function registerIpc(): void {
       saveAgxConfig(cfg);
       return { ok: true, models };
     } catch (err) {
-      return { ok: false, error: `刷新失败：${String(err)}` };
+      return { ok: false, error: enterpriseFetchErrorMessage(err) };
     }
   });
 
