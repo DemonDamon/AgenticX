@@ -2,6 +2,60 @@
 
 > **Brand note (2026-05-24):** The Desktop app was renamed from **Machi** to **Near**. Existing references to "Machi" in plan files, conclusions, and historical docs are intentionally preserved.
 
+## 分支分流：`hc-0730` vs `main`（强制）
+
+> **每次接到开发任务时，AI 必须先判定落点分支，再动手改代码。** 禁止在错误分支上直接实施。
+
+当前 Enterprise 交付并行分支为 **`hc-0730`**（自 `main` 拉出）。分流规则如下：
+
+### 可在 `hc-0730` 上直接开发（无需先走 main）
+
+仅限 **UI / 简单定制化**，且改动面浅、不触核心运行时语义，例如：
+
+- Enterprise 前台/后台文案、主题色、布局微调、组件样式与交互微调
+- 客户交付向的页面级定制（品牌区、空态、表单展示、列表展示密度等）
+- 纯前端展示逻辑（条件渲染、文案开关、本地 UI 状态），不改协议/持久化/鉴权语义
+- 配置面板或门户上「看得见」的简单开关接线，且后端仅做已有字段透传、无新架构
+
+**判定口诀：** 改完后产品行为语义基本不变，只是「长什么样 / 怎么展示 / 轻微定制」。
+
+### 必须走 `main` 路径（禁止直接在 `hc-0730` 落底层代码）
+
+凡属 **底层设计、架构改动、运行时/协议/数据层、或 bug fix**，一律：
+
+1. **先写 plan** 落盘到 `.cursor/plans/pending/YYYY-MM-DD-<feature-name>.plan.md`（中性表述，勿写客户名/客户 slug）
+2. **在当前工作流中提交并推远端**（plan 或含 plan 的 PR），供审核
+3. **审核通过后**，将 plan 移回 `.cursor/plans/`，**在 `main`（或其从 main 拉出的功能分支）上实施**
+4. 需要时再由 `main` **合并/同步进 `hc-0730`**，而不是在交付分支上直接改底层
+
+包括但不限于：
+
+- `agenticx/` 核心 runtime、工具链、session、memory、MCP、gateway 等行为修复或设计变更
+- Desktop 主进程 / IPC / 打包 / 后端 `agx serve` 启动与协议层 bug
+- Enterprise 网关、IAM、策略引擎、PG 落库、审计链、配额等后端逻辑
+- 任何需要改 API 契约、数据模型、并发/一致性、安全边界的改动
+- 根因型 bug fix（即使表象在 UI，根因在底层也走 main）
+
+**判定口诀：** 会动「怎么算 / 怎么存 / 怎么调 / 怎么鉴权 / 怎么修对」，就必须 main + plan 审核。
+
+### AI 强制检查清单（动手前）
+
+1. 用 `git branch --show-current` 确认当前分支。
+2. 按上表判定任务属于「hc-0730 可直开」还是「main + plan」。
+3. 若判定为 main 路径：
+   - **不要**在 `hc-0730` 上直接改底层代码；
+   - 先落盘 plan → 告知用户需推远端审核；
+   - 实施时切换/基于 `main` 开功能分支。
+4. 若判定为 hc-0730 路径：可在本分支直接开发 UI/简单定制。
+5. **存疑时先问用户**，默认按更严的「main + plan」处理，避免交付分支污染核心代码。
+6. 混合任务（UI + 底层）：拆开——UI 部分可在 `hc-0730`；底层部分单独 plan + main；禁止捆在同一未审核提交里混改。
+
+### 与既有 plan 流程的关系
+
+- 本分流规则**叠加**在既有 `.cursor/plans/pending/` 流程之上，不替代之。
+- `hc-0730` 上的 UI/简单定制：可不强制写完整 plan（小改仍须遵守 no-scope-creep；用户明确要求 plan 时仍写）。
+- 走 main 的底层/bugfix：**必须**先 pending plan → 远端审核 → 再实施。
+
 ## Learned User Preferences
 - 默认使用中文回复；技术术语可按需保留英文。
 - 进行 git commit 时，提交信息必须包含 `Made-with: Damon Li`，并偏好按功能点分组、附结构化需求块（如 FR/NFR/AC）。每个 commit 还须标注**过程元数据** trailer：`Plan-Model`（做 plan 用的模型）与 `Impl-Model`（做实施用的模型）——这不是 AI 署名（author 始终是 Damon Li），仅记录生产工具链；取值由用户提供，未提供时**主动询问**、禁止编造，纯实施类小改动可只写 `Impl-Model`。白名单 trailer 为 `Plan-Id` / `Plan-File` / `Plan-Model` / `Impl-Model` / `Made-with: Damon Li`，顺序自上而下，其它一律禁止。
