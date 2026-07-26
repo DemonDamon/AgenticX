@@ -103,6 +103,7 @@ import { CleanBlock } from "./messages/CleanBlock";
 import { MessageQueuePanel } from "./messages/MessageQueuePanel";
 import { StallRecoveryCard } from "./messages/StallRecoveryCard";
 import { ForwardPicker, type ForwardConfirmPayload } from "./ForwardPicker";
+import { resolveForwardTarget as resolveForwardTargetPayload } from "../utils/resolve-forward-target";
 import { HoverTip } from "./ds/HoverTip";
 import { ConnectorsMenuButton } from "./connectors/ConnectorsMenuButton";
 import { SkillPuzzleIcon, skillPuzzleIconInnerHtml } from "./icons/SkillPuzzleIcon";
@@ -5039,93 +5040,12 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
 
   const resolveForwardTarget = useCallback(
     async (payload: ForwardConfirmPayload): Promise<{ paneId: string; sessionId: string }> => {
-      const state = useAppStore.getState();
-      if (payload.type === "session") {
-        const sid = payload.sessionId.trim();
-        const p = state.panes.find((item) => (item.sessionId || "").trim() === sid);
-        if (!p) {
-          throw new Error("找不到对应窗格，请从侧栏重新打开该会话后再试");
-        }
-        return { paneId: p.id, sessionId: sid };
-      }
-      if (payload.type === "avatar") {
-        let pane = state.panes.find((item) => item.avatarId === payload.avatarId);
-        if (!pane) {
-          const paneId = addPane(payload.avatarId, payload.displayName, "");
-          setActiveAvatarId(payload.avatarId);
-          const created = await window.agenticxDesktop.createSession({ avatar_id: payload.avatarId });
-          if (!created.ok || !created.session_id) {
-            throw new Error(created.error || "创建分身会话失败");
-          }
-          setPaneSessionId(paneId, created.session_id);
-          return { paneId, sessionId: created.session_id };
-        }
-        if (payload.forceNewSession) {
-          const created = await window.agenticxDesktop.createSession({ avatar_id: payload.avatarId });
-          if (!created.ok || !created.session_id) {
-            throw new Error(created.error || "创建分身会话失败");
-          }
-          setPaneSessionId(pane.id, created.session_id);
-          setActivePaneId(pane.id);
-          setActiveAvatarId(payload.avatarId);
-          return { paneId: pane.id, sessionId: created.session_id };
-        }
-        let sid = (pane.sessionId || "").trim();
-        if (!sid) {
-          const created = await window.agenticxDesktop.createSession({ avatar_id: payload.avatarId });
-          if (!created.ok || !created.session_id) {
-            throw new Error(created.error || "创建分身会话失败");
-          }
-          setPaneSessionId(pane.id, created.session_id);
-          sid = created.session_id;
-        }
-        setActivePaneId(pane.id);
-        setActiveAvatarId(payload.avatarId);
-        return { paneId: pane.id, sessionId: sid };
-      }
-      const groupAvatarId = `group:${payload.groupId}`;
-      let groupPane = state.panes.find((item) => item.avatarId === groupAvatarId);
-      if (!groupPane) {
-        const paneId = addPane(groupAvatarId, `群聊 · ${payload.displayName}`, "");
-        setActiveAvatarId(null);
-        const created = await window.agenticxDesktop.createSession({
-          avatar_id: groupAvatarId,
-          name: payload.displayName,
-        });
-        if (!created.ok || !created.session_id) {
-          throw new Error(created.error || "创建群聊会话失败");
-        }
-        setPaneSessionId(paneId, created.session_id);
-        return { paneId, sessionId: created.session_id };
-      }
-      if (payload.forceNewSession) {
-        const created = await window.agenticxDesktop.createSession({
-          avatar_id: groupAvatarId,
-          name: payload.displayName,
-        });
-        if (!created.ok || !created.session_id) {
-          throw new Error(created.error || "创建群聊会话失败");
-        }
-        setPaneSessionId(groupPane.id, created.session_id);
-        setActivePaneId(groupPane.id);
-        setActiveAvatarId(null);
-        return { paneId: groupPane.id, sessionId: created.session_id };
-      }
-      let sid = (groupPane.sessionId || "").trim();
-      if (!sid) {
-        const created = await window.agenticxDesktop.createSession({
-          avatar_id: groupAvatarId,
-          name: payload.displayName,
-        });
-        if (!created.ok || !created.session_id) {
-          throw new Error(created.error || "创建群聊会话失败");
-        }
-        setPaneSessionId(groupPane.id, created.session_id);
-        sid = created.session_id;
-      }
-      setActivePaneId(groupPane.id);
-      setActiveAvatarId(null);
-      return { paneId: groupPane.id, sessionId: sid };
+      return resolveForwardTargetPayload(payload, {
+        addPane,
+        setActivePaneId,
+        setActiveAvatarId,
+        setPaneSessionId,
+      });
     },
     [addPane, setActiveAvatarId, setActivePaneId, setPaneSessionId]
   );

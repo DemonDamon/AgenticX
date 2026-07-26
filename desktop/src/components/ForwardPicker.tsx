@@ -1,9 +1,13 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { Avatar, GroupChat } from "../store";
+import { useAppStore } from "../store";
+import { META_AGENT_DISPLAY_NAME } from "../constants/branding";
+import { DEFAULT_META_AVATAR_URL } from "../constants/meta-avatar";
 
-/** Resolved on confirm: either an existing session or avatar/group to wake via createSession. */
+/** Resolved on confirm: either an existing session or avatar/group/meta to wake via createSession. */
 export type ForwardConfirmPayload =
-  | { type: "session"; sessionId: string }
+  | { type: "session"; sessionId: string; avatarId?: string | null; displayName?: string }
+  | { type: "meta"; forceNewSession?: boolean }
   | { type: "avatar"; avatarId: string; displayName: string; forceNewSession?: boolean }
   | { type: "group"; groupId: string; displayName: string; forceNewSession?: boolean };
 
@@ -30,14 +34,20 @@ type ForwardTargetItem = {
   title: string;
   subtitle: string;
   avatarUrl?: string;
+  /** Empty string = meta-agent (主智能体). */
   avatarContextId: string;
   newPayload: ForwardConfirmPayload;
 };
 
 function payloadKey(payload: ForwardConfirmPayload): string {
   if (payload.type === "session") return `s:${payload.sessionId}`;
+  if (payload.type === "meta") return `m:${payload.forceNewSession ? "new" : "reuse"}`;
   if (payload.type === "avatar") return `a:${payload.avatarId}:${payload.forceNewSession ? "new" : "reuse"}`;
   return `g:${payload.groupId}:${payload.forceNewSession ? "new" : "reuse"}`;
+}
+
+function isMetaSessionRow(avatarId: unknown): boolean {
+  return String(avatarId ?? "").trim().length === 0;
 }
 
 function TargetAvatar({ title, avatarUrl }: { title: string; avatarUrl?: string }) {
@@ -60,7 +70,8 @@ export function ForwardPicker({
   onClose,
   onConfirm,
 }: ForwardPickerProps) {
-  const [targetSearch, setTargetSearch] = useState("");
+  const metaAvatarUrl = useAppStore((s) => s.metaAvatarUrl);
+  const [sessionSearch, setSessionSearch] = useState("");
   const [selectedTargetKey, setSelectedTargetKey] = useState<string | null>(null);
   const [sessionRows, setSessionRows] = useState<ForwardRow[]>([]);
   const [sessionsLoading, setSessionsLoading] = useState(false);
@@ -72,7 +83,7 @@ export function ForwardPicker({
 
   useEffect(() => {
     if (!open) {
-      setTargetSearch("");
+      setSessionSearch("");
       setSelectedTargetKey(null);
       setSessionRows([]);
       setSessionsLoading(false);
@@ -85,10 +96,18 @@ export function ForwardPicker({
   }, [open]);
 
   const targetItems = useMemo<ForwardTargetItem[]>(() => {
+    const metaRow: ForwardTargetItem = {
+      key: "meta",
+      title: META_AGENT_DISPLAY_NAME,
+      subtitle: "主智能体",
+      avatarUrl: metaAvatarUrl.trim() || DEFAULT_META_AVATAR_URL,
+      avatarContextId: "",
+      newPayload: { type: "meta", forceNewSession: true },
+    };
     const avatarRows: ForwardTargetItem[] = avatars.map((avatar) => ({
       key: `avatar:${avatar.id}`,
       title: avatar.name,
-      subtitle: "分身",
+      subtitle: "专家",
       avatarUrl: avatar.avatarUrl || undefined,
       avatarContextId: avatar.id,
       newPayload: { type: "avatar", avatarId: avatar.id, displayName: avatar.name, forceNewSession: true },
@@ -100,8 +119,8 @@ export function ForwardPicker({
       avatarContextId: `group:${group.id}`,
       newPayload: { type: "group", groupId: group.id, displayName: group.name, forceNewSession: true },
     }));
-    return [...avatarRows, ...groupRows];
-  }, [avatars, groups]);
+    return [metaRow, ...avatarRows, ...groupRows];
+  }, [avatars, groups, metaAvatarUrl]);
 
   const selectedTarget = useMemo(
     () => targetItems.find((item) => item.key === selectedTargetKey) ?? null,
@@ -111,7 +130,9 @@ export function ForwardPicker({
   useEffect(() => {
     if (!open || selectedTargetKey) return;
     const preferred =
-      (currentAvatarId ? targetItems.find((item) => item.avatarContextId === currentAvatarId) : null) ??
+      (currentAvatarId
+        ? targetItems.find((item) => item.avatarContextId === currentAvatarId)
+        : targetItems.find((item) => item.key === "meta")) ??
       targetItems[0] ??
       null;
     if (!preferred) return;
@@ -124,6 +145,7 @@ export function ForwardPicker({
     if (!open || !selectedTarget) return;
     if (lastTargetKeyRef.current !== selectedTarget.key) {
       setSelectedPayload(selectedTarget.newPayload);
+      setSessionSearch("");
       lastTargetKeyRef.current = selectedTarget.key;
     }
   }, [open, selectedTarget]);
@@ -134,16 +156,24 @@ export function ForwardPicker({
     setSessionsLoading(true);
     setSessionsError("");
     setSessionRows([]);
+    const listArg = selectedTarget.avatarContextId || undefined;
     void window.agenticxDesktop
-      .listSessions(selectedTarget.avatarContextId)
+      .listSessions(listArg)
       .then((result) => {
         if (cancelled) return;
         if (!result.ok) {
           setSessionsError("读取历史会话失败，请稍后重试");
           return;
         }
+        const isMetaTarget = selectedTarget.key === "meta";
+        const targetAvatarId = isMetaTarget ? null : selectedTarget.avatarContextId;
         const rows = (result.sessions || [])
           .filter((row) => !row.archived)
+          .filter((row) => {
+            const aid = String(row.avatar_id ?? "").trim();
+            if (isMetaTarget) return isMetaSessionRow(aid);
+            return aid === String(targetAvatarId ?? "").trim();
+          })
           .filter((row) => String(row.session_id || "").trim() && String(row.session_id || "").trim() !== currentSessionId)
           .sort((a, b) => Number(b.updated_at || 0) - Number(a.updated_at || 0))
           .map<ForwardRow>((row) => {
@@ -153,7 +183,12 @@ export function ForwardPicker({
               title: String(row.session_name || "").trim() || "未命名会话",
               subtitle: `session: ${sid}`,
               avatarUrl: selectedTarget.avatarUrl,
-              payload: { type: "session", sessionId: sid },
+              payload: {
+                type: "session",
+                sessionId: sid,
+                avatarId: isMetaTarget ? null : selectedTarget.avatarContextId,
+                displayName: selectedTarget.title,
+              },
             };
           });
         setSessionRows(rows);
@@ -169,12 +204,14 @@ export function ForwardPicker({
     };
   }, [currentSessionId, open, selectedTarget]);
 
-  const lowered = targetSearch.trim().toLowerCase();
-  const filteredTargets = lowered
-    ? targetItems.filter(
-        (row) => row.title.toLowerCase().includes(lowered) || row.subtitle.toLowerCase().includes(lowered)
+  const sessionQuery = sessionSearch.trim().toLowerCase();
+  const filteredSessionRows = sessionQuery
+    ? sessionRows.filter(
+        (row) =>
+          row.title.toLowerCase().includes(sessionQuery) ||
+          row.subtitle.toLowerCase().includes(sessionQuery)
       )
-    : targetItems;
+    : sessionRows;
 
   if (!open) return null;
 
@@ -225,26 +262,15 @@ export function ForwardPicker({
         <div className="border-b border-border px-4 py-3">
           <div className="text-sm font-semibold text-text-strong">选择转发目标</div>
           <div className="mt-1 text-xs text-text-faint">
-            先选择分身/群聊，再决定是进入该目标的新会话，还是继续它的历史会话。
+            先在左侧点选主智能体/专家/群聊，再在右侧选择新会话或搜索并继续历史会话。
           </div>
-          <input
-            value={targetSearch}
-            onChange={(event) => setTargetSearch(event.target.value)}
-            className={
-              "mt-2 h-9 w-full rounded-lg border border-border bg-surface-card px-3 text-sm text-text-primary outline-none placeholder:text-text-faint " +
-              "focus:ring-2 focus:ring-offset-0 focus:ring-neutral-900/15 [html[data-theme=light]_&]:focus:border-neutral-900/55 " +
-              "[html[data-theme=dark]_&]:focus:border-white/45 [html[data-theme=dark]_&]:focus:ring-white/12 " +
-              "[html[data-theme=dim]_&]:focus:border-white/45 [html[data-theme=dim]_&]:focus:ring-white/12"
-            }
-            placeholder="搜索分身或群聊名称"
-          />
         </div>
         <div className="grid flex-1 min-h-0 grid-cols-2 gap-3 overflow-hidden p-4">
           <div className="min-h-0 overflow-y-auto">
-            <div className="mb-2 text-xs font-medium text-text-muted">分身 / 群聊</div>
+            <div className="mb-2 text-xs font-medium text-text-muted">主智能体 / 专家 / 群聊</div>
             <div className="space-y-2">
-              {filteredTargets.length > 0 ? (
-                filteredTargets.map((target) =>
+              {targetItems.length > 0 ? (
+                targetItems.map((target) =>
                   renderSelectableRow({
                     key: target.key,
                     title: target.title,
@@ -255,15 +281,27 @@ export function ForwardPicker({
                   })
                 )
               ) : (
-                <div className="text-xs text-text-faint">暂无匹配目标</div>
+                <div className="text-xs text-text-faint">暂无可用目标</div>
               )}
             </div>
           </div>
-          <div className="min-h-0 overflow-y-auto">
+          <div className="flex min-h-0 flex-col overflow-hidden">
             <div className="mb-2 text-xs font-medium text-text-muted">
               {selectedTarget ? `${selectedTarget.title} · 历史会话` : "历史会话"}
             </div>
-            <div className="space-y-2">
+            <input
+              value={sessionSearch}
+              onChange={(event) => setSessionSearch(event.target.value)}
+              disabled={!selectedTarget}
+              className={
+                "mb-2 h-9 w-full shrink-0 rounded-lg border border-border bg-surface-card px-3 text-sm text-text-primary outline-none placeholder:text-text-faint disabled:opacity-50 " +
+                "focus:ring-2 focus:ring-offset-0 focus:ring-neutral-900/15 [html[data-theme=light]_&]:focus:border-neutral-900/55 " +
+                "[html[data-theme=dark]_&]:focus:border-white/45 [html[data-theme=dark]_&]:focus:ring-white/12 " +
+                "[html[data-theme=dim]_&]:focus:border-white/45 [html[data-theme=dim]_&]:focus:ring-white/12"
+              }
+              placeholder="搜索历史会话标题或 session id"
+            />
+            <div className="min-h-0 flex-1 space-y-2 overflow-y-auto">
               {selectedTarget
                 ? renderSelectableRow({
                     key: `new:${selectedTarget.key}`,
@@ -278,7 +316,7 @@ export function ForwardPicker({
               {sessionsLoading ? <div className="text-xs text-text-faint">正在加载历史会话...</div> : null}
               {!sessionsLoading && sessionsError ? <div className="text-xs text-amber-400">{sessionsError}</div> : null}
               {!sessionsLoading && !sessionsError
-                ? sessionRows.map((row) =>
+                ? filteredSessionRows.map((row) =>
                     renderSelectableRow({
                       key: row.key,
                       title: row.title,
@@ -292,6 +330,13 @@ export function ForwardPicker({
                 : null}
               {!sessionsLoading && !sessionsError && selectedTarget && sessionRows.length === 0 ? (
                 <div className="text-xs text-text-faint">该目标暂无可继续的历史会话</div>
+              ) : null}
+              {!sessionsLoading &&
+              !sessionsError &&
+              selectedTarget &&
+              sessionRows.length > 0 &&
+              filteredSessionRows.length === 0 ? (
+                <div className="text-xs text-text-faint">没有匹配的历史会话</div>
               ) : null}
             </div>
           </div>
