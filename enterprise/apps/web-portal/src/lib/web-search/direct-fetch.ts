@@ -49,7 +49,9 @@ async function bodyToBuffer(body: BodyInit | null | undefined): Promise<Buffer |
 }
 
 /** Resolve an HTTP proxy suitable for CONNECT (skips socks://). */
-export function resolveHttpProxyUrl(env: NodeJS.ProcessEnv = process.env): URL | null {
+export function resolveHttpProxyUrl(
+  env: NodeJS.ProcessEnv | Record<string, string | undefined> = process.env,
+): URL | null {
   for (const key of ["https_proxy", "HTTPS_PROXY", "http_proxy", "HTTP_PROXY"]) {
     const raw = env[key]?.trim();
     if (!raw) continue;

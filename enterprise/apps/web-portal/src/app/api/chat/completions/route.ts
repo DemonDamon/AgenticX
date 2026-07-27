@@ -7,6 +7,7 @@ import { toChatHistoryContext } from "../../../../lib/chat-history-http";
 import { listAvailableModelsForUser } from "../../../../lib/admin-providers-reader";
 import { runWebSearchTurn } from "../../../../lib/web-search/tool-loop";
 import { loadTenantWebSearchConfig } from "../../../../lib/web-search/tenant-config";
+import { runDeepResearchTurn } from "../../../../lib/deep-research/orchestrator";
 
 const GATEWAY_COMPLETIONS_URL =
   process.env.GATEWAY_COMPLETIONS_URL ?? "http://127.0.0.1:8088/v1/chat/completions";
@@ -69,13 +70,23 @@ export async function POST(request: Request) {
   let providerHint = "";
   let forwardBody = rawBody;
   let enableWebSearch = false;
+  let enableDeepResearch = false;
   let parsedBody: Record<string, unknown> | null = null;
   // portal 把模型 id 编码为 "<provider>/<model>"；admin 配置好的 provider 与上游 endpoint 一一对应。
   // gateway 用 model 字段查表，所以这里把 provider 拆出来放请求头，body.model 仅保留模型名。
   try {
-    const parsed = JSON.parse(rawBody) as Record<string, unknown> & { model?: string; agenticx_web_search?: unknown };
+    const parsed = JSON.parse(rawBody) as Record<string, unknown> & {
+      model?: string;
+      agenticx_web_search?: unknown;
+      agenticx_deep_research?: unknown;
+    };
     enableWebSearch = parsed.agenticx_web_search === true;
-    const { agenticx_web_search: _strip, ...withoutFlag } = parsed;
+    enableDeepResearch = parsed.agenticx_deep_research === true;
+    const {
+      agenticx_web_search: _stripWs,
+      agenticx_deep_research: _stripDr,
+      ...withoutFlag
+    } = parsed;
     parsedBody = withoutFlag;
 
     if (typeof parsed.model === "string" && parsed.model.includes("/")) {
@@ -120,6 +131,15 @@ export async function POST(request: Request) {
     "x-session-id": session.sessionId,
     ...(providerHint ? { "x-agenticx-provider": providerHint } : {}),
   };
+
+  if (enableDeepResearch && parsedBody) {
+    return runDeepResearchTurn(parsedBody, {
+      url: GATEWAY_COMPLETIONS_URL,
+      headers: gatewayHeaders,
+      signal: request.signal,
+      loadTenantConfig: () => loadTenantWebSearchConfig(session.tenantId),
+    });
+  }
 
   if (enableWebSearch && parsedBody) {
     return runWebSearchTurn(parsedBody, {
