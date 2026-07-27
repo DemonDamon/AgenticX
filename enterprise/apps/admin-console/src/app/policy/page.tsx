@@ -34,7 +34,7 @@ import {
   toast,
 } from "@agenticx/ui";
 import { useTranslations } from "next-intl";
-import { Pencil, Plus, RotateCcw, Send, ShieldCheck, ShieldX, TestTube2, Trash2 } from "lucide-react";
+import { Pencil, Plus, PowerOff, RotateCcw, Send, ShieldCheck, ShieldX, TestTube2, Trash2 } from "lucide-react";
 
 type PolicyAppliesTo = {
   departmentIds: string[];
@@ -146,6 +146,8 @@ export default function PolicyPage() {
   const [testSummary, setTestSummary] = useState<string>("");
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [pendingDeleteRule, setPendingDeleteRule] = useState<PolicyRule | null>(null);
+  const [disableAllDialogOpen, setDisableAllDialogOpen] = useState(false);
+  const [disableAllBusy, setDisableAllBusy] = useState(false);
   const [syncStatus, setSyncStatus] = useState<"unknown" | "pending" | "synced">("unknown");
   const [form, setForm] = useState<RuleForm>({
     packId: "",
@@ -210,6 +212,11 @@ export default function PolicyPage() {
     if (tab === "keyword" || tab === "regex" || tab === "pii") return visibleRules.filter((rule) => rule.kind === tab);
     return visibleRules;
   }, [rules, tab, isDisabledPendingPublish]);
+
+  const stoppableRules = useMemo(
+    () => rules.filter((rule) => rule.status !== "disabled"),
+    [rules],
+  );
 
   const resetForm = () => {
     setForm({
@@ -342,6 +349,52 @@ export default function PolicyPage() {
     return true;
   };
 
+  /** Soft-disable without confirm — for quick debug 关停. */
+  const stopRule = async (rule: PolicyRule) => {
+    const res = await fetch(`/api/policy/rules/${rule.id}`, {
+      method: "PATCH",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ status: "disabled" }),
+    });
+    const json = (await res.json()) as { message?: string };
+    if (!res.ok) {
+      toast.error(json.message ?? t("toast.disableFailed"));
+      return;
+    }
+    toast.success(t("toast.disabledNeedPublish"));
+    await load();
+  };
+
+  const confirmDisableAll = async () => {
+    if (stoppableRules.length === 0) {
+      setDisableAllDialogOpen(false);
+      return;
+    }
+    setDisableAllBusy(true);
+    try {
+      let okCount = 0;
+      for (const rule of stoppableRules) {
+        const res = await fetch(`/api/policy/rules/${rule.id}`, {
+          method: "PATCH",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ status: "disabled" }),
+        });
+        if (res.ok) okCount += 1;
+      }
+      await load();
+      setDisableAllDialogOpen(false);
+      if (okCount === 0) {
+        toast.error(t("toast.disableFailed"));
+        return;
+      }
+      toast.success(t("toast.disabledAll", { count: okCount }));
+      // Debug-friendly: publish so gateway drops the rules immediately.
+      await triggerPublish();
+    } finally {
+      setDisableAllBusy(false);
+    }
+  };
+
   const restoreRule = async (id: string) => {
     const res = await fetch(`/api/policy/rules/${id}`, {
       method: "PATCH",
@@ -467,6 +520,15 @@ export default function PolicyPage() {
               <Plus className="h-4 w-4" />
               {t("newRule")}
             </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              disabled={stoppableRules.length === 0 || disableAllBusy}
+              onClick={() => setDisableAllDialogOpen(true)}
+            >
+              <PowerOff className="h-4 w-4" />
+              {t("stopAll")}
+            </Button>
             <Button size="sm" onClick={() => void triggerPublish()}>
               <Send className="h-4 w-4" />
               {t("publish")}
@@ -527,6 +589,12 @@ export default function PolicyPage() {
                       <Pencil className="h-4 w-4" />
                       {t("edit")}
                     </Button>
+                    {rule.status !== "disabled" ? (
+                      <Button size="sm" variant="outline" onClick={() => void stopRule(rule)}>
+                        <PowerOff className="h-4 w-4" />
+                        {t("stop")}
+                      </Button>
+                    ) : null}
                     <Button
                       size="sm"
                       variant="outline"
@@ -728,6 +796,26 @@ export default function PolicyPage() {
             </Button>
             <Button variant="destructive" onClick={() => void confirmDeleteRule()}>
               {t("deleteDialog.confirm")}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={disableAllDialogOpen} onOpenChange={setDisableAllDialogOpen}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>{t("stopAllDialog.title")}</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-2 text-sm text-text-subtle">
+            <p>{t("stopAllDialog.body", { count: stoppableRules.length })}</p>
+            <p>{t("stopAllDialog.publishHint")}</p>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" disabled={disableAllBusy} onClick={() => setDisableAllDialogOpen(false)}>
+              {tc("actions.cancel")}
+            </Button>
+            <Button variant="destructive" disabled={disableAllBusy} onClick={() => void confirmDisableAll()}>
+              {t("stopAllDialog.confirm")}
             </Button>
           </DialogFooter>
         </DialogContent>
