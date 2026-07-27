@@ -68,6 +68,50 @@ async function main(): Promise<void> {
   }
   console.log(`[smoke] pat=${maskPat(token)}`);
 
+  // Non-interactive browser-device protocol checks (no user approve in CI).
+  const initResp = await fetch(`${portal}/api/desktop/auth/device/init`, {
+    method: "POST",
+    headers: { "content-type": "application/json", accept: "application/json" },
+    body: JSON.stringify({ deviceName: "smoke-device" }),
+  });
+  const initJson = await readJson(initResp);
+  const initData = (initJson.data ?? {}) as Json;
+  const deviceId = String(initData.deviceId ?? "");
+  const deviceSecret = String(initData.deviceSecret ?? "");
+  const verificationUrl = String(initData.verificationUrl ?? "");
+  if (!initResp.ok || !deviceId || !deviceSecret || !verificationUrl.includes("/auth/desktop?device=")) {
+    throw new Error(`device init failed HTTP ${initResp.status}`);
+  }
+  const portalUrl = new URL(portal);
+  const verifyUrl = new URL(verificationUrl);
+  const loopback = new Set(["localhost", "127.0.0.1", "::1", "[::1]"]);
+  const sameOrigin =
+    portalUrl.origin === verifyUrl.origin ||
+    (portalUrl.protocol === verifyUrl.protocol &&
+      portalUrl.port === verifyUrl.port &&
+      loopback.has(portalUrl.hostname) &&
+      loopback.has(verifyUrl.hostname));
+  if (!sameOrigin || !verifyUrl.pathname.startsWith("/auth/desktop")) {
+    throw new Error("verificationUrl must be same-origin with portal");
+  }
+  const badPoll = await fetch(`${portal}/api/desktop/auth/device/poll`, {
+    method: "POST",
+    headers: { "content-type": "application/json", accept: "application/json" },
+    body: JSON.stringify({ deviceId, deviceSecret: "definitely-wrong-secret" }),
+  });
+  if (badPoll.status !== 401) {
+    throw new Error(`expected 401 for bad device secret, got ${badPoll.status}`);
+  }
+  const cancelResp = await fetch(`${portal}/api/desktop/auth/device/cancel`, {
+    method: "POST",
+    headers: { "content-type": "application/json", accept: "application/json" },
+    body: JSON.stringify({ deviceId, deviceSecret }),
+  });
+  if (!cancelResp.ok) {
+    throw new Error(`device cancel failed HTTP ${cancelResp.status}`);
+  }
+  console.log(JSON.stringify({ ok: true, scenario: "device-auth-init-cancel" }));
+
   const bootResp = await fetch(`${portal}/api/desktop/bootstrap`, {
     headers: { accept: "application/json", authorization: `Bearer ${token}` },
   });

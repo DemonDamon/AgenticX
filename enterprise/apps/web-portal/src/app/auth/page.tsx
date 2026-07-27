@@ -40,6 +40,7 @@ import {
   getPortalSsoErrorMessageZh,
 } from "@agenticx/auth/src/services/oidc-error-codes";
 import { getPortalSsoProviderOptions, pickPreferredSsoProvider } from "../../lib/sso-provider-options";
+import { resolveReturnToOrDefault } from "../../lib/sso-return-to";
 
 function AuthPageInner() {
   const searchParams = useSearchParams();
@@ -91,9 +92,7 @@ function AuthPageInner() {
         return;
       }
       setStatus({ type: "success", message: t("signInSuccess") });
-      const returnTo = searchParams.get("returnTo");
-      const destination =
-        returnTo && returnTo.startsWith("/") && !returnTo.startsWith("//") ? returnTo : "/workspace";
+      const destination = resolveReturnToOrDefault(searchParams.get("returnTo"));
       window.location.assign(destination);
     } finally {
       setBusy(false);

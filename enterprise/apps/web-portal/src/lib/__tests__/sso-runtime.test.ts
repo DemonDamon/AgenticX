@@ -52,6 +52,15 @@ describe("resolveReturnToOrDefault", () => {
     expect(resolveReturnToOrDefault("https://evil.example.com")).toBe("/workspace");
     expect(resolveReturnToOrDefault("//evil")).toBe("/workspace");
   });
+
+  it("allows /auth/desktop with query when allowlisted", () => {
+    const prev = process.env.SSO_RETURN_TO_ALLOWLIST;
+    process.env.SSO_RETURN_TO_ALLOWLIST = "/workspace,/auth/desktop";
+    expect(resolveReturnToOrDefault("/auth/desktop?device=abc")).toBe("/auth/desktop?device=abc");
+    expect(resolveReturnToOrDefault("/auth/desktop")).toBe("/auth/desktop");
+    expect(resolveReturnToOrDefault("/evil")).toBe("/workspace");
+    process.env.SSO_RETURN_TO_ALLOWLIST = prev;
+  });
 });
 
 describe("getPortalSsoProviderConfigServer", () => {
