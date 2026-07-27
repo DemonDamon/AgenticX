@@ -243,3 +243,75 @@ def test_litellm_provider_from_config_uses_placeholder_for_custom_base_without_k
         }
     )
     assert provider.api_key == "placeholder"
+
+
+def test_enterprise_managed_composite_model_outbound_body_keeps_provider_slash(
+    tmp_path: Path, monkeypatch
+):
+    """LiteLLM openai/ transport prefix must not appear in Gateway request body.model."""
+    import json
+    import threading
+    from http.server import BaseHTTPRequestHandler, HTTPServer
+
+    captured: dict[str, object] = {}
+
+    class Handler(BaseHTTPRequestHandler):
+        def do_POST(self):  # noqa: N802
+            length = int(self.headers.get("Content-Length", "0"))
+            raw = self.rfile.read(length)
+            captured["path"] = self.path
+            captured["authorization"] = self.headers.get("Authorization")
+            captured["body"] = json.loads(raw.decode("utf-8"))
+            payload = json.dumps(
+                {
+                    "id": "chatcmpl-test",
+                    "object": "chat.completion",
+                    "created": 1,
+                    "model": "provider-a/model-a",
+                    "choices": [
+                        {
+                            "index": 0,
+                            "message": {"role": "assistant", "content": "ok"},
+                            "finish_reason": "stop",
+                        }
+                    ],
+                    "usage": {"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2},
+                }
+            ).encode("utf-8")
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(payload)))
+            self.end_headers()
+            self.wfile.write(payload)
+
+        def log_message(self, format, *args):  # noqa: A003
+            return
+
+    server = HTTPServer(("127.0.0.1", 0), Handler)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        port = server.server_address[1]
+        base = f"http://127.0.0.1:{port}/v1"
+        _setup_paths(tmp_path, monkeypatch)
+        ConfigManager.set_value("default_provider", "enterprise", scope="global")
+        ConfigManager.set_value("providers.enterprise.api_key", "agx-pat-test", scope="global")
+        ConfigManager.set_value("providers.enterprise.model", "provider-a/model-a", scope="global")
+        ConfigManager.set_value("providers.enterprise.base_url", base, scope="global")
+        ConfigManager.set_value("providers.enterprise.interface", "openai", scope="global")
+        ConfigManager.set_value("providers.enterprise.managed", True, scope="global")
+        ConfigManager.set_value("providers.enterprise.drop_params", True, scope="global")
+
+        provider = ProviderResolver.resolve()
+        assert isinstance(provider, LiteLLMProvider)
+        assert provider.model == "openai/provider-a/model-a"
+        provider.invoke("hello")
+
+        assert captured.get("path") in {"/v1/chat/completions", "/chat/completions"}
+        assert captured.get("authorization") == "Bearer agx-pat-test"
+        body = captured.get("body")
+        assert isinstance(body, dict)
+        assert body.get("model") == "provider-a/model-a"
+    finally:
+        server.shutdown()
+        server.server_close()

@@ -59,6 +59,7 @@ import { fetchFaviconDataUrl } from "./fetch-favicon";
 import { classifyModelHealthFailure } from "./model-health";
 import { isRealpathUnder, safeRealpath } from "./path-guard";
 import { writeLocalTextFileAtomic } from "./write-local-text-file";
+import { selectEnterpriseInferenceBase } from "./enterprise-routing";
 import {
   applySessionWorkspaceCopy,
   copySourceIntoWorkspace,
@@ -244,6 +245,9 @@ type ProviderConfig = {
 type EnterpriseConfig = {
   enabled?: boolean;
   base_url?: string;
+  inference_base_url?: string;
+  transport?: "gateway-direct-v1" | "portal-proxy-v1";
+  reauth_required_for_direct?: boolean;
   token?: string;
   user?: {
     user_id?: string;
@@ -353,18 +357,24 @@ function enterpriseFetchErrorMessage(err: unknown): string {
 function applyEnterpriseProvider(
   cfg: AgxConfig,
   opts: {
-    baseUrl: string;
+    portalOrigin: string;
+    inferenceBaseUrl: string;
+    transport: "gateway-direct-v1" | "portal-proxy-v1";
+    reauthRequiredForDirect?: boolean;
     token: string;
     models: string[];
     user: NonNullable<EnterpriseConfig["user"]>;
     strict: boolean;
   },
 ): void {
-  const apiBase = `${opts.baseUrl}/api/desktop/v1`;
   const models = opts.models.filter(Boolean);
+  const inferenceBase = opts.inferenceBaseUrl.replace(/\/+$/, "");
   cfg.enterprise = {
     enabled: true,
-    base_url: opts.baseUrl,
+    base_url: opts.portalOrigin,
+    inference_base_url: inferenceBase,
+    transport: opts.transport,
+    reauth_required_for_direct: Boolean(opts.reauthRequiredForDirect),
     token: opts.token,
     user: opts.user,
     policy: { strict: opts.strict },
@@ -375,7 +385,7 @@ function applyEnterpriseProvider(
   cfg.providers.enterprise = {
     display_name: "企业模型",
     interface: "openai",
-    base_url: apiBase,
+    base_url: inferenceBase,
     api_key: opts.token,
     models,
     model: models[0] ?? "",
@@ -7280,6 +7290,9 @@ function registerIpc(): void {
       ok: true,
       enabled: Boolean(ent?.enabled && ent?.token),
       baseUrl: ent?.base_url ?? "",
+      inferenceBaseUrl: ent?.inference_base_url ?? "",
+      transport: ent?.transport ?? "",
+      reauthRequiredForDirect: Boolean(ent?.reauth_required_for_direct),
       email: ent?.user?.email ?? "",
       displayName: ent?.user?.display_name ?? "",
       strict: ent?.policy?.strict !== false,
@@ -7354,6 +7367,10 @@ function registerIpc(): void {
             };
             models?: Array<{ id?: string }>;
             policy?: { strict?: boolean };
+            apiBaseUrl?: string;
+            inferenceApiBaseUrl?: string;
+            inferenceTransport?: string;
+            reauthRequiredForDirect?: boolean;
           };
         };
         if (!bootResp.ok || !bootJson.data) {
@@ -7362,8 +7379,19 @@ function registerIpc(): void {
             error:
               bootResp.status === 401
                 ? "企业登录已失效，请重新登录"
-                : bootJson.message || `拉取模型失败（HTTP ${bootResp.status}）`,
+                : bootResp.status === 503
+                  ? bootJson.message || "企业推理入口未配置，请联系管理员"
+                  : bootJson.message || `拉取模型失败（HTTP ${bootResp.status}）`,
           };
+        }
+        const inference = selectEnterpriseInferenceBase({
+          apiBaseUrl: bootJson.data.apiBaseUrl || `${baseUrl}/api/desktop/v1`,
+          inferenceApiBaseUrl: bootJson.data.inferenceApiBaseUrl,
+          inferenceTransport: bootJson.data.inferenceTransport,
+          reauthRequiredForDirect: bootJson.data.reauthRequiredForDirect,
+        });
+        if (!inference.ok) {
+          return { ok: false, error: inference.error };
         }
         const models = (bootJson.data.models ?? [])
           .map((m) => String(m.id ?? "").trim())
@@ -7371,7 +7399,10 @@ function registerIpc(): void {
         const user = bootJson.data.user ?? tokenJson.data.user ?? {};
         const cfg = loadAgxConfig();
         applyEnterpriseProvider(cfg, {
-          baseUrl,
+          portalOrigin: baseUrl,
+          inferenceBaseUrl: inference.baseUrl,
+          transport: inference.transport,
+          reauthRequiredForDirect: inference.reauthRequiredForDirect,
           token: pat,
           models,
           user: {
@@ -7391,6 +7422,8 @@ function registerIpc(): void {
             displayName: cfg.enterprise?.user?.display_name ?? "",
           },
           models,
+          transport: inference.transport,
+          reauthRequiredForDirect: inference.reauthRequiredForDirect,
         };
       } catch (err) {
         return { ok: false, error: enterpriseFetchErrorMessage(err) };
@@ -7434,6 +7467,10 @@ function registerIpc(): void {
           };
           models?: Array<{ id?: string }>;
           policy?: { strict?: boolean };
+          apiBaseUrl?: string;
+          inferenceApiBaseUrl?: string;
+          inferenceTransport?: string;
+          reauthRequiredForDirect?: boolean;
         };
       };
       if (!bootResp.ok || !bootJson.data) {
@@ -7442,16 +7479,30 @@ function registerIpc(): void {
           error:
             bootResp.status === 401
               ? "企业登录已失效，请重新登录"
-              : bootJson.message || `刷新失败（HTTP ${bootResp.status}）`,
+              : bootResp.status === 503
+                ? bootJson.message || "企业推理入口未配置，请联系管理员"
+                : bootJson.message || `刷新失败（HTTP ${bootResp.status}）`,
           unauthorized: bootResp.status === 401,
         };
+      }
+      const inference = selectEnterpriseInferenceBase({
+        apiBaseUrl: bootJson.data.apiBaseUrl || `${baseUrl}/api/desktop/v1`,
+        inferenceApiBaseUrl: bootJson.data.inferenceApiBaseUrl,
+        inferenceTransport: bootJson.data.inferenceTransport,
+        reauthRequiredForDirect: bootJson.data.reauthRequiredForDirect,
+      });
+      if (!inference.ok) {
+        return { ok: false, error: inference.error };
       }
       const models = (bootJson.data.models ?? [])
         .map((m) => String(m.id ?? "").trim())
         .filter(Boolean);
       const user = bootJson.data.user ?? ent?.user ?? {};
       applyEnterpriseProvider(cfg, {
-        baseUrl,
+        portalOrigin: baseUrl,
+        inferenceBaseUrl: inference.baseUrl,
+        transport: inference.transport,
+        reauthRequiredForDirect: inference.reauthRequiredForDirect,
         token,
         models,
         user: {
@@ -7466,7 +7517,12 @@ function registerIpc(): void {
         strict: bootJson.data.policy?.strict !== false,
       });
       saveAgxConfig(cfg);
-      return { ok: true, models };
+      return {
+        ok: true,
+        models,
+        transport: inference.transport,
+        reauthRequiredForDirect: inference.reauthRequiredForDirect,
+      };
     } catch (err) {
       return { ok: false, error: enterpriseFetchErrorMessage(err) };
     }

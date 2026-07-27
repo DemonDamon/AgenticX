@@ -4,6 +4,9 @@ import { Building2, Eye, EyeOff, Loader2, LogOut, RefreshCw } from "lucide-react
 type EnterpriseState = {
   enabled: boolean;
   baseUrl: string;
+  inferenceBaseUrl: string;
+  transport: string;
+  reauthRequiredForDirect: boolean;
   email: string;
   displayName: string;
   strict: boolean;
@@ -14,6 +17,9 @@ type EnterpriseState = {
 const emptyState: EnterpriseState = {
   enabled: false,
   baseUrl: "",
+  inferenceBaseUrl: "",
+  transport: "",
+  reauthRequiredForDirect: false,
   email: "",
   displayName: "",
   strict: true,
@@ -40,6 +46,9 @@ export function EnterpriseAccountPanel({ onChanged }: Props) {
       const next: EnterpriseState = {
         enabled: Boolean(r.enabled),
         baseUrl: r.baseUrl ?? "",
+        inferenceBaseUrl: r.inferenceBaseUrl ?? "",
+        transport: r.transport ?? "",
+        reauthRequiredForDirect: Boolean(r.reauthRequiredForDirect),
         email: r.email ?? "",
         displayName: r.displayName ?? "",
         strict: r.strict !== false,
@@ -150,6 +159,11 @@ export function EnterpriseAccountPanel({ onChanged }: Props) {
           {state.strict && (
             <div className="rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-700 dark:text-amber-300">
               严格托管模式已开启：仅可使用企业模型，自配服务商已隐藏（退出登录后恢复）。
+            </div>
+          )}
+          {state.reauthRequiredForDirect && (
+            <div className="rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-700 dark:text-amber-300">
+              重新登录后启用直连通道（当前仍走组织代理）。
             </div>
           )}
           <div className="flex flex-wrap gap-2">

@@ -851,6 +851,9 @@ declare global {
         ok: boolean;
         enabled?: boolean;
         baseUrl?: string;
+        inferenceBaseUrl?: string;
+        transport?: string;
+        reauthRequiredForDirect?: boolean;
         email?: string;
         displayName?: string;
         strict?: boolean;
@@ -866,6 +869,8 @@ declare global {
         error?: string;
         user?: { email: string; displayName: string };
         models?: string[];
+        transport?: string;
+        reauthRequiredForDirect?: boolean;
       }>;
       enterpriseLogout: () => Promise<{ ok: boolean }>;
       enterpriseRefresh: () => Promise<{
@@ -873,6 +878,8 @@ declare global {
         error?: string;
         unauthorized?: boolean;
         models?: string[];
+        transport?: string;
+        reauthRequiredForDirect?: boolean;
       }>;
       onAgxAccountChanged: (cb: (payload: { email: string; displayName: string }) => void) => () => void;
       onAgxAccountLoginTimeout: (cb: () => void) => () => void;
