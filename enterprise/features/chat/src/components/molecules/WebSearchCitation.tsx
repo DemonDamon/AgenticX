@@ -6,6 +6,7 @@ import {
   hostnameFromUrl,
   siteLabelFromSource,
 } from "../../utils/web-search-citation";
+import { WebSearchFavicon } from "./WebSearchFavicon";
 
 type WebSearchCitationProps = {
   index1Based: number;
@@ -16,10 +17,6 @@ type WebSearchCitationProps = {
 export function WebSearchCitation({ index1Based, source, onOpenInSheet }: WebSearchCitationProps) {
   const label = siteLabelFromSource(source, index1Based);
   const host = hostnameFromUrl(source.url) ?? label;
-  const favicon = host
-    ? `https://www.google.com/s2/favicons?domain=${encodeURIComponent(host)}&sz=32`
-    : null;
-  const [faviconFailed, setFaviconFailed] = React.useState(false);
 
   const openUrl = (event: React.MouseEvent) => {
     event.preventDefault();
@@ -36,33 +33,20 @@ export function WebSearchCitation({ index1Based, source, onOpenInSheet }: WebSea
       <button
         type="button"
         onClick={openUrl}
-        className="mx-0.5 inline-flex max-w-[10rem] items-center truncate rounded-full border border-border/60 bg-muted/70 px-1.5 py-0.5 text-[11px] font-medium leading-none text-muted-foreground transition-colors hover:border-border hover:bg-muted hover:text-foreground"
+        className="mx-0.5 inline-flex max-w-[9rem] items-center truncate rounded-md bg-muted/80 px-1.5 py-0.5 align-middle text-[11px] font-medium leading-4 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
         title={source.title || source.url}
       >
-        {label}
+        <span className="truncate">{label}</span>
       </button>
       <span
         role="tooltip"
-        className="pointer-events-none absolute bottom-[calc(100%+6px)] left-1/2 z-50 hidden w-[min(18rem,calc(100vw-2rem))] -translate-x-1/2 rounded-xl border border-border bg-popover p-3 text-left text-popover-foreground shadow-lg group-hover/cite:block"
+        className="pointer-events-none absolute bottom-[calc(100%+8px)] left-0 z-50 hidden w-[min(20rem,calc(100vw-2rem))] rounded-2xl border border-border/80 bg-popover p-3.5 text-left text-popover-foreground shadow-xl group-hover/cite:block"
       >
-        <span className="mb-2 flex items-center gap-2">
-          <span className="flex h-6 w-6 shrink-0 items-center justify-center overflow-hidden rounded-md bg-muted text-[10px] font-semibold text-muted-foreground">
-            {favicon && !faviconFailed ? (
-              <img
-                src={favicon}
-                alt=""
-                width={16}
-                height={16}
-                className="h-4 w-4"
-                onError={() => setFaviconFailed(true)}
-              />
-            ) : (
-              (host.charAt(0) || "?").toUpperCase()
-            )}
-          </span>
+        <span className="mb-2.5 flex items-center gap-2">
+          <WebSearchFavicon host={host} label={label} size={22} rounded="lg" />
           <span className="truncate text-xs text-muted-foreground">{host}</span>
         </span>
-        <span className="mb-1 block text-sm font-semibold leading-snug text-foreground">
+        <span className="mb-1.5 block text-[13px] font-semibold leading-snug text-foreground">
           {source.title || source.url}
         </span>
         {source.snippet ? (

@@ -67,4 +67,30 @@ describe("sanitizeInboundMessages", () => {
       ]),
     ).toThrow(/image/i);
   });
+
+  it("preserves web_search_sources on assistant messages (refresh survival)", () => {
+    const messages = sanitizeInboundMessages(SESSION, TENANT, USER, [
+      {
+        id: "01JTESTMSG000000000000000004",
+        role: "assistant",
+        content: "答案 [1]",
+        created_at: "2026-07-27T12:00:00.000Z",
+        web_search_sources: [
+          {
+            title: "Opus 5",
+            url: "https://zhuanlan.zhihu.com/p/123",
+            snippet: "snippet",
+          },
+        ],
+      },
+    ]);
+
+    expect(messages[0]?.web_search_sources).toEqual([
+      {
+        title: "Opus 5",
+        url: "https://zhuanlan.zhihu.com/p/123",
+        snippet: "snippet",
+      },
+    ]);
+  });
 });

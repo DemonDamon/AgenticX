@@ -5,7 +5,7 @@
 import { directFetch } from "./direct-fetch";
 
 export const WEB_SEARCH_MAX_RESULTS_CAP = 50;
-export const DEFAULT_MAX_RESULTS = 5;
+export const DEFAULT_MAX_RESULTS = 50;
 export const DEFAULT_SNIPPET_CHARS = 600;
 
 export type WebSearchHit = {

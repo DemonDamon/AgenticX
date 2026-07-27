@@ -150,7 +150,7 @@ export const enterpriseRuntimeWebSearch = mysqlTable("enterprise_runtime_web_sea
   enabled: boolean("enabled").default(true).notNull(),
   provider: varchar("provider", { length: 32 }).default("duckduckgo").notNull(),
   apiKeyCipher: text("api_key_cipher").default("").notNull(),
-  maxResults: int("max_results").default(5).notNull(),
+  maxResults: int("max_results").default(50).notNull(),
   updatedAt: datetime("updated_at", { fsp: 6 }).default(sql`(UTC_TIMESTAMP(6))`).notNull(),
 });
 
