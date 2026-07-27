@@ -36,7 +36,6 @@ function session(id: string, title: string): ChatSession {
 class CapturingClient implements ChatClient {
   public readonly requests: ChatRequest[] = [];
   private seq = 0;
-  public streamSources = false;
 
   async sendMessage(req: ChatRequest): Promise<SendMessageResult> {
     this.requests.push(req);
@@ -46,15 +45,6 @@ class CapturingClient implements ChatClient {
 
   async *stream(requestId: string): AsyncIterable<ChatChunk> {
     yield { requestId, done: false, delta: "ok" };
-    if (this.streamSources) {
-      yield {
-        requestId,
-        done: false,
-        webSearchSources: [
-          { title: "Example", url: "https://example.com/a", snippet: "snip" },
-        ],
-      };
-    }
     yield { requestId, done: true };
   }
 
@@ -63,10 +53,10 @@ class CapturingClient implements ChatClient {
   }
 }
 
-describe("chat store webSearch request wiring", () => {
+describe("chat store deepResearch request wiring", () => {
   beforeEach(() => {
     useChatStore.setState({
-      sessions: [session("A", "web search")],
+      sessions: [session("A", "deep research")],
       activeSessionId: "A",
       messages: [],
       hydrated: true,
@@ -96,40 +86,29 @@ describe("chat store webSearch request wiring", () => {
     });
   });
 
-  it("forwards webSearch=true on sendMessage", async () => {
+  it("forwards deepResearch=true on sendMessage", async () => {
     const client = new CapturingClient();
-    await useChatStore.getState().sendMessage(client, { content: "search please", webSearch: true });
-    expect(client.requests[0]?.webSearch).toBe(true);
-    expect(useChatStore.getState().lastWebSearchBySessionId.A).toBe(true);
+    await useChatStore.getState().sendMessage(client, { content: "research please", deepResearch: true });
+    expect(client.requests[0]?.deepResearch).toBe(true);
+    expect(useChatStore.getState().lastDeepResearchBySessionId.A).toBe(true);
   });
 
-  it("omits webSearch when toggle is off", async () => {
+  it("omits deepResearch when toggle is off", async () => {
     const client = new CapturingClient();
-    await useChatStore.getState().sendMessage(client, { content: "no search", webSearch: false });
-    expect(client.requests[0]?.webSearch).toBeUndefined();
-    expect(useChatStore.getState().lastWebSearchBySessionId.A).toBe(false);
+    await useChatStore.getState().sendMessage(client, { content: "no research", deepResearch: false });
+    expect(client.requests[0]?.deepResearch).toBeUndefined();
+    expect(useChatStore.getState().lastDeepResearchBySessionId.A).toBe(false);
   });
 
-  it("keeps webSearch=true on regenerateAssistantResponse", async () => {
+  it("keeps deepResearch=true on regenerateAssistantResponse", async () => {
     const client = new CapturingClient();
-    await useChatStore.getState().sendMessage(client, { content: "latest news", webSearch: true });
+    await useChatStore.getState().sendMessage(client, { content: "deep topic", deepResearch: true });
 
     const assistantId = useChatStore.getState().messages.find((m) => m.role === "assistant")?.id;
     expect(assistantId).toBeTruthy();
 
     await useChatStore.getState().regenerateAssistantResponse(client, assistantId!);
     expect(client.requests.length).toBeGreaterThanOrEqual(2);
-    expect(client.requests.at(-1)?.webSearch).toBe(true);
-  });
-
-  it("attaches webSearchSources from stream chunks onto the assistant message", async () => {
-    const client = new CapturingClient();
-    client.streamSources = true;
-    await useChatStore.getState().sendMessage(client, { content: "with sources", webSearch: true });
-    const assistant = useChatStore.getState().messages.find((m) => m.role === "assistant");
-    expect(assistant?.web_search_sources).toEqual([
-      { title: "Example", url: "https://example.com/a", snippet: "snip" },
-    ]);
-    expect(assistant?.content).toBe("ok");
+    expect(client.requests.at(-1)?.deepResearch).toBe(true);
   });
 });
