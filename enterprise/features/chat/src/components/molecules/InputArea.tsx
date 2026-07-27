@@ -16,6 +16,8 @@ type InputAreaProps = {
   className?: string;
   appearance?: "default" | "portal";
   placeholder?: string;
+  /** Override default min height for the textarea (px). */
+  minTextareaHeight?: number;
   attachments?: ComposerAttachment[];
   onAddFiles?: (files: File[]) => void;
   onRemoveAttachment?: (id: string) => void;
@@ -51,6 +53,7 @@ export function InputArea({
   className,
   appearance = "default",
   placeholder,
+  minTextareaHeight: minTextareaHeightProp,
   attachments = [],
   onAddFiles,
   onRemoveAttachment,
@@ -63,14 +66,25 @@ export function InputArea({
   const hasContent = value.trim().length > 0 || readyCount > 0;
   const canSend = hasContent;
   const canCancel = status === "sending" || status === "streaming";
-  const minTextareaHeight = appearance === "portal" ? 48 : 40;
+  const minTextareaHeight =
+    minTextareaHeightProp ?? (appearance === "portal" ? 48 : 40);
+  /** Empty-state hero: taller box; let flex fill instead of auto-shrink height. */
+  const isHero = minTextareaHeightProp != null && minTextareaHeightProp >= 96;
 
   React.useEffect(() => {
     const element = textareaRef.current;
     if (!element) return;
+    if (isHero) {
+      // Keep flex-1 filling the hero shell; only grow past the shell when content overflows.
+      element.style.height = "";
+      if (element.scrollHeight > minTextareaHeight) {
+        element.style.height = `${Math.min(element.scrollHeight, 260)}px`;
+      }
+      return;
+    }
     element.style.height = "auto";
     element.style.height = `${Math.min(Math.max(element.scrollHeight, minTextareaHeight), 260)}px`;
-  }, [value, minTextareaHeight]);
+  }, [value, minTextareaHeight, isHero]);
 
   const appearanceClassName =
     appearance === "portal"
@@ -120,8 +134,12 @@ export function InputArea({
         onChange={(event) => onChange(event.target.value)}
         onPaste={onPaste}
         rows={1}
-        className={`w-full resize-none overflow-y-auto border-0 bg-transparent px-3 pb-2 pt-2.5 text-sm leading-6 text-foreground outline-none ring-0 placeholder:text-muted-foreground/70 focus:outline-none focus:ring-0 focus-visible:outline-none focus-visible:ring-0 ${appearance === "portal" ? "min-h-[48px]" : "min-h-[40px]"}`}
-        placeholder={placeholder ?? "发送消息给 Machi..."}
+        className={[
+          "w-full resize-none overflow-y-auto border-0 bg-transparent px-3 pb-2 pt-2.5 text-sm leading-6 text-foreground outline-none ring-0 placeholder:text-muted-foreground/70 focus:outline-none focus:ring-0 focus-visible:outline-none focus-visible:ring-0",
+          isHero ? "flex-1" : "",
+        ].join(" ")}
+        style={{ minHeight: minTextareaHeight }}
+        placeholder={placeholder ?? "发送消息给 Near..."}
         onCompositionStart={() => {
           imeComposingRef.current = true;
         }}
@@ -156,7 +174,7 @@ export function InputArea({
         }}
       />
       {(leftToolbar || rightToolbar || true) && (
-        <div className="flex items-end justify-between px-1 pb-0.5">
+        <div className="flex shrink-0 items-end justify-between px-1 pb-0.5">
           <div className="flex flex-wrap items-center gap-1.5">
             {leftToolbar}
           </div>
