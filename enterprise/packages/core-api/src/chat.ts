@@ -19,6 +19,13 @@ export type ChatMessageAttachment = {
   data_url: string;
 };
 
+/** Web-search hit attached to an assistant message (portal BFF). */
+export type WebSearchSource = {
+  title: string;
+  url: string;
+  snippet: string;
+};
+
 export type ChatMessage = {
   id: EntityId;
   session_id: EntityId;
@@ -27,6 +34,7 @@ export type ChatMessage = {
   role: ChatMessageRole;
   content: string;
   attachments?: ChatMessageAttachment[];
+  web_search_sources?: WebSearchSource[];
   model?: string;
   provider?: string;
   reasoning?: string;

@@ -144,6 +144,7 @@ export class HttpChatClient implements ChatClient {
           const chunk = JSON.parse(data) as {
             choices?: Array<{ delta?: { content?: string }; finish_reason?: string | null }>;
             agenticx_usage?: { input_tokens?: number; output_tokens?: number; total_tokens?: number };
+            agenticx_web_search_sources?: Array<{ title?: string; url?: string; snippet?: string }>;
             usage?: { prompt_tokens?: number; completion_tokens?: number; total_tokens?: number };
             error?: { code?: string; message?: string };
           };
@@ -173,6 +174,20 @@ export class HttpChatClient implements ChatClient {
                   chunk.agenticx_usage.total_tokens ??
                   (chunk.agenticx_usage.input_tokens ?? 0) + (chunk.agenticx_usage.output_tokens ?? 0),
               },
+            };
+            continue;
+          }
+
+          // Portal BFF web-search hits — structured, not delta content
+          if (Array.isArray(chunk.agenticx_web_search_sources)) {
+            yield {
+              requestId,
+              done: false,
+              webSearchSources: chunk.agenticx_web_search_sources.map((item) => ({
+                title: String(item.title ?? "").trim() || item.url || "Untitled",
+                url: String(item.url ?? "").trim(),
+                snippet: String(item.snippet ?? "").trim(),
+              })).filter((item) => item.url),
             };
             continue;
           }

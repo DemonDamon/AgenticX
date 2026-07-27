@@ -57,6 +57,7 @@ export type AssistantResponseVersion = {
   queryVersionIndex: number;
   retryAttempt: number;
   queryText: string;
+  web_search_sources?: ChatMessage["web_search_sources"];
 };
 
 export type UserResponseVersionState = {
@@ -267,7 +268,40 @@ function toAssistantVersion(
     queryVersionIndex: meta?.queryVersionIndex ?? 0,
     retryAttempt: meta?.retryAttempt ?? 0,
     queryText: meta?.queryText ?? "",
+    web_search_sources: message.web_search_sources,
   };
+}
+
+function applyWebSearchSourcesToAssistant(
+  set: ChatStoreSet,
+  assistantId: string,
+  userMessageId: string | undefined,
+  sources: NonNullable<ChatMessage["web_search_sources"]>,
+) {
+  set((prev) => {
+    const nextMessages = prev.messages.map((message) =>
+      message.id === assistantId ? { ...message, web_search_sources: sources } : message,
+    );
+    if (!userMessageId) {
+      return { messages: nextMessages };
+    }
+    const current = prev.responseVersionsByUserMessageId[userMessageId];
+    if (!current) {
+      return { messages: nextMessages };
+    }
+    return {
+      messages: nextMessages,
+      responseVersionsByUserMessageId: {
+        ...prev.responseVersionsByUserMessageId,
+        [userMessageId]: {
+          ...current,
+          versions: current.versions.map((version, index) =>
+            index === current.activeIndex ? { ...version, web_search_sources: sources } : version,
+          ),
+        },
+      },
+    };
+  });
 }
 
 function findVersionIndexByAssistantId(versions: AssistantResponseVersion[], assistantId: string): number {
@@ -913,6 +947,10 @@ export const useChatStore = create<ChatStore>((set, get) => ({
           });
         }
 
+        if (chunk.webSearchSources?.length) {
+          applyWebSearchSourcesToAssistant(set, assistantMessage.id, userMessage.id, chunk.webSearchSources);
+        }
+
         if (chunk.done) {
           setSessionStream(set, sessionId, null);
         }
@@ -1135,6 +1173,15 @@ export const useChatStore = create<ChatStore>((set, get) => ({
           });
         }
 
+        if (chunk.webSearchSources?.length) {
+          applyWebSearchSourcesToAssistant(
+            set,
+            replacementAssistant.id,
+            input.messageId,
+            chunk.webSearchSources,
+          );
+        }
+
         if (chunk.done) {
           setSessionStream(set, sessionId, null);
         }
@@ -1320,6 +1367,15 @@ export const useChatStore = create<ChatStore>((set, get) => ({
           });
         }
 
+        if (chunk.webSearchSources?.length) {
+          applyWebSearchSourcesToAssistant(
+            set,
+            replacementAssistant.id,
+            targetUserMessageId,
+            chunk.webSearchSources,
+          );
+        }
+
         if (chunk.done) {
           setSessionStream(set, sessionId, null);
         }
@@ -1390,7 +1446,11 @@ export const useChatStore = create<ChatStore>((set, get) => ({
         },
         messages: state.messages.map((message, index) =>
           index === assistantIndex
-            ? { ...message, content: targetVersion.content }
+            ? {
+                ...message,
+                content: targetVersion.content,
+                web_search_sources: targetVersion.web_search_sources,
+              }
             : index === userIndex
               ? { ...message, content: targetVersion.queryText || message.content }
               : message
@@ -1440,7 +1500,11 @@ export const useChatStore = create<ChatStore>((set, get) => ({
         },
         messages: state.messages.map((message, index) =>
           index === assistantIndex
-            ? { ...message, content: targetVersion.content }
+            ? {
+                ...message,
+                content: targetVersion.content,
+                web_search_sources: targetVersion.web_search_sources,
+              }
             : index === userIndex
               ? { ...message, content: targetVersion.queryText || message.content }
               : message
@@ -1481,7 +1545,13 @@ export const useChatStore = create<ChatStore>((set, get) => ({
           },
         },
         messages: state.messages.map((message, index) =>
-          index === assistantIndex ? { ...message, content: targetVersion.content } : message
+          index === assistantIndex
+            ? {
+                ...message,
+                content: targetVersion.content,
+                web_search_sources: targetVersion.web_search_sources,
+              }
+            : message
         ),
       };
     });
@@ -1519,7 +1589,13 @@ export const useChatStore = create<ChatStore>((set, get) => ({
           },
         },
         messages: state.messages.map((message, index) =>
-          index === assistantIndex ? { ...message, content: targetVersion.content } : message
+          index === assistantIndex
+            ? {
+                ...message,
+                content: targetVersion.content,
+                web_search_sources: targetVersion.web_search_sources,
+              }
+            : message
         ),
       };
     });
