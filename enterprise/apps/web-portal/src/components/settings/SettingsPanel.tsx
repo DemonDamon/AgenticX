@@ -16,6 +16,7 @@ import {
   SelectValue,
   Separator,
   TooltipProvider,
+  toast,
 } from "@agenticx/ui";
 import {
   Bot,
@@ -41,6 +42,11 @@ export function SettingsPanel() {
   const [active, setActive] = useState<TabId>("general");
   const [provider, setProvider] = useState<string>("deepseek");
   const [webSearchOn, setWebSearchOn] = useState(true);
+  const [webSearchProvider, setWebSearchProvider] = useState("duckduckgo");
+  const [webSearchApiKey, setWebSearchApiKey] = useState("");
+  const [webSearchHasApiKey, setWebSearchHasApiKey] = useState(false);
+  const [webSearchSaving, setWebSearchSaving] = useState(false);
+  const [webSearchLoaded, setWebSearchLoaded] = useState(false);
   const [streamingOn, setStreamingOn] = useState(true);
   const [autoTitleOn, setAutoTitleOn] = useState(true);
   const [chatStyle, setChatStyle] = useState<ChatStyleVariant>("im");
@@ -91,6 +97,61 @@ export function SettingsPanel() {
       setChatStyle(saved);
     }
   }, []);
+
+  useEffect(() => {
+    void (async () => {
+      try {
+        const res = await fetch("/api/me/web-search", { cache: "no-store" });
+        const json = (await res.json()) as {
+          data?: { enabled?: boolean; provider?: string; hasApiKey?: boolean };
+          error?: { message?: string };
+        };
+        if (!res.ok) {
+          toast.error(json.error?.message ?? t("webSearch.loadFailed"));
+          return;
+        }
+        setWebSearchOn(Boolean(json.data?.enabled ?? true));
+        setWebSearchProvider(json.data?.provider ?? "duckduckgo");
+        setWebSearchHasApiKey(Boolean(json.data?.hasApiKey));
+        setWebSearchApiKey("");
+        setWebSearchLoaded(true);
+      } catch (error) {
+        toast.error(error instanceof Error ? error.message : t("webSearch.loadFailed"));
+      }
+    })();
+  }, [t]);
+
+  const saveWebSearch = async (patch: {
+    enabled?: boolean;
+    provider?: string;
+    apiKey?: string;
+  }) => {
+    setWebSearchSaving(true);
+    try {
+      const res = await fetch("/api/me/web-search", {
+        method: "PUT",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(patch),
+      });
+      const json = (await res.json()) as {
+        data?: { enabled?: boolean; provider?: string; hasApiKey?: boolean };
+        error?: { message?: string };
+      };
+      if (!res.ok) {
+        toast.error(json.error?.message ?? t("webSearch.saveFailed"));
+        return;
+      }
+      setWebSearchOn(Boolean(json.data?.enabled));
+      setWebSearchProvider(json.data?.provider ?? "duckduckgo");
+      setWebSearchHasApiKey(Boolean(json.data?.hasApiKey));
+      if (patch.apiKey !== undefined) setWebSearchApiKey("");
+      toast.success(t("webSearch.saveSuccess"));
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : t("webSearch.saveFailed"));
+    } finally {
+      setWebSearchSaving(false);
+    }
+  };
 
   useEffect(() => {
     if (active !== "general") return;
@@ -401,17 +462,75 @@ export function SettingsPanel() {
                   control={
                     <Switch
                       checked={webSearchOn}
-                      onChange={setWebSearchOn}
+                      onChange={(next) => {
+                        setWebSearchOn(next);
+                        if (webSearchLoaded) void saveWebSearch({ enabled: next });
+                      }}
                     />
                   }
                 />
                 {webSearchOn ? (
-                  <SettingsRow
-                    label={t("webSearch.searchApiKey")}
-                    description={t("webSearch.searchApiKeyDescription")}
-                    control={<Input placeholder="search-key-..." type="password" className="w-[320px]" />}
-                    stack
-                  />
+                  <>
+                    <SettingsRow
+                      label={t("webSearch.provider")}
+                      description={t("webSearch.providerDescription")}
+                      control={
+                        <Select
+                          value={webSearchProvider}
+                          onValueChange={(next) => {
+                            setWebSearchProvider(next);
+                            if (webSearchLoaded) void saveWebSearch({ provider: next });
+                          }}
+                        >
+                          <SelectTrigger className="w-[240px]">
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="duckduckgo">DuckDuckGo</SelectItem>
+                            <SelectItem value="bocha">Bocha</SelectItem>
+                            <SelectItem value="tavily">Tavily</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      }
+                    />
+                    <SettingsRow
+                      label={t("webSearch.searchApiKey")}
+                      description={t("webSearch.searchApiKeyDescription")}
+                      control={
+                        <div className="flex w-full max-w-[420px] flex-col gap-2">
+                          <Input
+                            placeholder={
+                              webSearchHasApiKey ? t("webSearch.apiKeyConfiguredPlaceholder") : "search-key-..."
+                            }
+                            type="password"
+                            className="w-full"
+                            value={webSearchApiKey}
+                            onChange={(event) => setWebSearchApiKey(event.target.value)}
+                          />
+                          <div className="flex gap-2">
+                            <Button
+                              size="sm"
+                              disabled={webSearchSaving || !webSearchApiKey.trim()}
+                              onClick={() => void saveWebSearch({ apiKey: webSearchApiKey.trim() })}
+                            >
+                              {t("webSearch.saveApiKey")}
+                            </Button>
+                            {webSearchHasApiKey ? (
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                disabled={webSearchSaving}
+                                onClick={() => void saveWebSearch({ apiKey: "" })}
+                              >
+                                {t("webSearch.clearApiKey")}
+                              </Button>
+                            ) : null}
+                          </div>
+                        </div>
+                      }
+                      stack
+                    />
+                  </>
                 ) : null}
               </SettingsSection>
             ) : null}

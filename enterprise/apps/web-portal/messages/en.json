@@ -178,8 +178,16 @@
       "enabledDescription": "New messages may invoke Web Search",
       "enableWebSearch": "Enable web search",
       "enableWebSearchDescription": "Allow chat messages to call the Web Search tool",
+      "provider": "Search provider",
+      "providerDescription": "DuckDuckGo by default (no key); Bocha / Tavily require an API key",
       "searchApiKey": "Search Provider API Key",
-      "searchApiKeyDescription": "Supports Bing / SerpAPI / Baichuan · stored locally"
+      "searchApiKeyDescription": "Keys are encrypted at rest; the UI only shows whether a key is configured",
+      "saveApiKey": "Save key",
+      "clearApiKey": "Clear key",
+      "apiKeyConfiguredPlaceholder": "•••••••• (configured; leave blank to keep)",
+      "saveSuccess": "Web search settings saved",
+      "saveFailed": "Failed to save web search settings",
+      "loadFailed": "Failed to load web search settings"
     },
     "parser": {
       "sectionDescription": "Parsing strategy for uploaded files",
