@@ -1,3 +1,7 @@
+import type { DeepResearchEvent } from "./deep-research";
+
+export type { DeepResearchEvent, DeepResearchState, DeepResearchStatus } from "./deep-research";
+
 export type ChatRole = "system" | "user" | "assistant";
 
 export type ChatMessageAttachment = {
@@ -45,6 +49,8 @@ export type ChatChunk = {
   usage?: ChatUsage;
   /** Structured web-search hits from portal BFF (not mixed into delta). */
   webSearchSources?: WebSearchSource[];
+  /** Structured deep-research progress (not mixed into delta). */
+  deepResearchEvent?: DeepResearchEvent;
   /** 用户主动中断（非错误）：保留已生成内容，不视为失败。 */
   cancelled?: boolean;
   error?: {
@@ -56,4 +62,3 @@ export type ChatChunk = {
 export type SendMessageResult = {
   requestId: string;
 };
-

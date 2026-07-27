@@ -83,6 +83,45 @@ describe("HttpChatClient stream cancel", () => {
     expect(sourcesChunk?.delta).toBeUndefined();
   });
 
+  it("parses agenticx_deep_research_event frames without treating them as delta", async () => {
+    const payload =
+      'data: {"choices":[{"delta":{"content":"hi"}}]}\n\n' +
+      'data: {"agenticx_deep_research_event":{"type":"phase","phase":"plan","message":"规划中"}}\n\n' +
+      "data: [DONE]\n\n";
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(() =>
+        Promise.resolve(
+          new Response(payload, {
+            status: 200,
+            headers: { "content-type": "text/event-stream" },
+          }),
+        ),
+      ),
+    );
+
+    const client = new HttpChatClient({ endpoint: "/api/chat/completions" });
+    const { requestId } = await client.sendMessage({
+      sessionId: "session-1",
+      model: "test-model",
+      messages: [{ id: "u1", role: "user", content: "hello", createdAt: "2026-01-01T00:00:00.000Z" }],
+    });
+
+    const chunks = [];
+    for await (const chunk of client.stream(requestId)) {
+      chunks.push(chunk);
+    }
+
+    expect(chunks.some((c) => c.delta === "hi")).toBe(true);
+    const eventChunk = chunks.find((c) => c.deepResearchEvent);
+    expect(eventChunk?.deepResearchEvent).toEqual({
+      type: "phase",
+      phase: "plan",
+      message: "规划中",
+    });
+    expect(eventChunk?.delta).toBeUndefined();
+  });
+
   it("keeps reading after finish_reason=stop so trailer sources are not dropped", async () => {
     const payload =
       'data: {"choices":[{"delta":{"content":"hi"},"finish_reason":"stop"}]}\n\n' +

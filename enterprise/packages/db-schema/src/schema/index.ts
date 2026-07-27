@@ -11,6 +11,7 @@ export * from "./policy";
 export * from "./sso-providers";
 export * from "./chat-sessions";
 export * from "./chat-messages";
+export * from "./chat-artifacts";
 export * from "./runtime-config";
 export * from "./gateway-channels";
 export * from "./api-tokens";
