@@ -1,0 +1,37 @@
+import { describe, expect, it } from "vitest";
+import { CitationRegistry, normalizeCitationUrl } from "./registry";
+
+describe("CitationRegistry", () => {
+  it("treats utm variants as the same source", () => {
+    const registry = new CitationRegistry();
+    const a = registry.add({
+      title: "A",
+      url: "https://example.com/x?utm_source=twitter",
+      snippet: "s1",
+    });
+    const b = registry.add({
+      title: "B",
+      url: "https://example.com/x?utm_campaign=c",
+      snippet: "s2",
+    });
+    expect(a.index).toBe(1);
+    expect(b.index).toBe(1);
+    expect(registry.size).toBe(1);
+  });
+
+  it("treats trailing slash as the same source", () => {
+    const registry = new CitationRegistry();
+    registry.add({ title: "A", url: "https://a.com/x/", snippet: "" });
+    registry.add({ title: "B", url: "https://a.com/x", snippet: "" });
+    expect(registry.size).toBe(1);
+    expect(normalizeCitationUrl("https://a.com/x/")).toBe(normalizeCitationUrl("https://a.com/x"));
+  });
+
+  it("assigns contiguous indexes", () => {
+    const registry = new CitationRegistry();
+    registry.add({ title: "1", url: "https://a.com/1", snippet: "" });
+    registry.add({ title: "2", url: "https://a.com/2", snippet: "" });
+    registry.add({ title: "3", url: "https://a.com/3", snippet: "" });
+    expect(registry.list().map((c) => c.index)).toEqual([1, 2, 3]);
+  });
+});
