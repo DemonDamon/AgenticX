@@ -15,6 +15,13 @@
       "when": 1780000000000,
       "tag": "0001_audit_checksum_payload",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "5",
+      "when": 1780100000000,
+      "tag": "0002_enterprise_runtime_web_search",
+      "breakpoints": true
     }
   ]
 }

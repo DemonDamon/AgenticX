@@ -144,6 +144,16 @@ export const enterpriseRuntimeMcpServers = mysqlTable("enterprise_runtime_mcp_se
   updatedAt: datetime("updated_at", { fsp: 6 }).default(sql`(UTC_TIMESTAMP(6))`).notNull(),
 });
 
+/** 租户级联网搜索配置（开关 + provider + 密钥密文）。 */
+export const enterpriseRuntimeWebSearch = mysqlTable("enterprise_runtime_web_search", {
+  tenantId: varchar("tenant_id", { length: 26 }).primaryKey(),
+  enabled: boolean("enabled").default(true).notNull(),
+  provider: varchar("provider", { length: 32 }).default("duckduckgo").notNull(),
+  apiKeyCipher: text("api_key_cipher").default("").notNull(),
+  maxResults: int("max_results").default(5).notNull(),
+  updatedAt: datetime("updated_at", { fsp: 6 }).default(sql`(UTC_TIMESTAMP(6))`).notNull(),
+});
+
 /** web-portal refresh token 会话（多副本 serverless）。 */
 export const authRefreshSessions = mysqlTable("auth_refresh_sessions", {
   sessionId: varchar("session_id", { length: 160 }).primaryKey(),

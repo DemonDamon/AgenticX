@@ -153,6 +153,16 @@ export const enterpriseRuntimeMcpServers = pgTable("enterprise_runtime_mcp_serve
   updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
 });
 
+/** 租户级联网搜索配置（开关 + provider + 密钥密文）。 */
+export const enterpriseRuntimeWebSearch = pgTable("enterprise_runtime_web_search", {
+  tenantId: varchar("tenant_id", { length: 26 }).primaryKey(),
+  enabled: boolean("enabled").default(true).notNull(),
+  provider: varchar("provider", { length: 32 }).default("duckduckgo").notNull(),
+  apiKeyCipher: text("api_key_cipher").default("").notNull(),
+  maxResults: integer("max_results").default(5).notNull(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+});
+
 /** web-portal refresh token 会话（多副本 serverless）。 */
 export const authRefreshSessions = pgTable("auth_refresh_sessions", {
   sessionId: varchar("session_id", { length: 160 }).primaryKey(),
