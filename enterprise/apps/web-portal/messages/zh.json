@@ -178,8 +178,16 @@
       "enabledDescription": "新消息可主动调用 Web Search",
       "enableWebSearch": "启用联网搜索",
       "enableWebSearchDescription": "开启后聊天消息可调用 Web Search 工具",
+      "provider": "搜索服务商",
+      "providerDescription": "默认 DuckDuckGo（免密钥）；Bocha / Tavily 需填写 API Key",
       "searchApiKey": "Search Provider API Key",
-      "searchApiKeyDescription": "支持 Bing / SerpAPI / 百川 · 密钥仅本地存储"
+      "searchApiKeyDescription": "密钥加密落库，前端仅显示是否已配置",
+      "saveApiKey": "保存密钥",
+      "clearApiKey": "清空密钥",
+      "apiKeyConfiguredPlaceholder": "••••••••（已配置，留空则不变）",
+      "saveSuccess": "联网搜索配置已保存",
+      "saveFailed": "保存联网搜索配置失败",
+      "loadFailed": "加载联网搜索配置失败"
     },
     "parser": {
       "sectionDescription": "文件上传时的解析策略",
