@@ -9,7 +9,7 @@ import { decryptProviderApiKey, encryptProviderApiKey } from "@agenticx/iam-core
 import { eq } from "drizzle-orm";
 
 import type { TenantWebSearchRow } from "./config";
-import type { WebSearchProviderName } from "./providers";
+import { DEFAULT_MAX_RESULTS, type WebSearchProviderName } from "./providers";
 
 export type WebSearchPublicConfig = {
   enabled: boolean;
@@ -47,7 +47,7 @@ export async function loadTenantWebSearchConfig(tenantId: string): Promise<Tenan
         enabled: Boolean(row.enabled),
         provider: row.provider,
         apiKey: decryptProviderApiKey(row.apiKeyCipher ?? ""),
-        maxResults: Number(row.maxResults) || 5,
+        maxResults: Number(row.maxResults) || DEFAULT_MAX_RESULTS,
       };
     }
 
@@ -59,7 +59,7 @@ export async function loadTenantWebSearchConfig(tenantId: string): Promise<Tenan
       enabled: Boolean(row.enabled),
       provider: row.provider,
       apiKey: decryptProviderApiKey(row.apiKeyCipher ?? ""),
-      maxResults: Number(row.maxResults) || 5,
+      maxResults: Number(row.maxResults) || DEFAULT_MAX_RESULTS,
     };
   } catch {
     return null;
@@ -72,7 +72,7 @@ export async function getPublicWebSearchConfig(tenantId: string): Promise<WebSea
     return {
       enabled: true,
       provider: "duckduckgo",
-      maxResults: 5,
+      maxResults: DEFAULT_MAX_RESULTS,
       hasApiKey: false,
     };
   }
@@ -97,7 +97,7 @@ export async function upsertTenantWebSearchConfig(
   const existing = await loadTenantWebSearchConfig(tid);
   const nextEnabled = input.enabled ?? existing?.enabled ?? true;
   const nextProvider = normalizeProvider(input.provider ?? existing?.provider ?? "duckduckgo");
-  const nextMax = input.maxResults ?? existing?.maxResults ?? 5;
+  const nextMax = input.maxResults ?? existing?.maxResults ?? DEFAULT_MAX_RESULTS;
   let nextKey = existing?.apiKey ?? "";
   if (input.apiKey !== undefined) {
     nextKey = input.apiKey;

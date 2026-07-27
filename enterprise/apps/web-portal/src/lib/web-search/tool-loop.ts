@@ -19,7 +19,7 @@ export const WEB_SEARCH_TOOL = {
       type: "object",
       properties: {
         query: { type: "string", description: "搜索关键词，使用与问题相同的语言" },
-        max_results: { type: "integer", description: "返回结果条数，1-10，默认 5" },
+        max_results: { type: "integer", description: "返回结果条数，1-50，默认 50" },
       },
       required: ["query"],
     },
@@ -178,6 +178,12 @@ async function pipeWithSourcesAppendix(upstream: Response, hits: WebSearchHit[])
   const stream = new ReadableStream<Uint8Array>({
     async start(controller) {
       const encoder = new TextEncoder();
+      // Emit sources BEFORE answer tokens so the client can render the entry row /
+      // citation pills during streaming — and so trailers are not lost if a client
+      // historically stopped reading on finish_reason=stop.
+      if (sourcesFrame) {
+        controller.enqueue(encoder.encode(sourcesFrame));
+      }
       const reader = upstream.body!.getReader();
       const decoder = new TextDecoder();
       let buffer = "";
@@ -202,9 +208,6 @@ async function pipeWithSourcesAppendix(upstream: Response, hits: WebSearchHit[])
           const data = dataLine.replace(/^data:\s*/, "");
           if (data === "[DONE]") {
             sawDone = true;
-            if (sourcesFrame) {
-              controller.enqueue(encoder.encode(sourcesFrame));
-            }
             controller.enqueue(encoder.encode("data: [DONE]\n\n"));
             continue;
           }
@@ -212,9 +215,6 @@ async function pipeWithSourcesAppendix(upstream: Response, hits: WebSearchHit[])
         }
       }
       if (!sawDone) {
-        if (sourcesFrame) {
-          controller.enqueue(encoder.encode(sourcesFrame));
-        }
         controller.enqueue(encoder.encode("data: [DONE]\n\n"));
       }
       controller.close();

@@ -218,6 +218,13 @@
       "when": 1780200000000,
       "tag": "0031_enterprise_runtime_web_search",
       "breakpoints": true
+    },
+    {
+      "idx": 31,
+      "version": "7",
+      "when": 1780300000000,
+      "tag": "0032_web_search_max_results_default",
+      "breakpoints": true
     }
   ]
 }

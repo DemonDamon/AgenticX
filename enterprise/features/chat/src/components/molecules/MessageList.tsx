@@ -13,6 +13,8 @@ import {
   shouldStartLongPress,
 } from "../../utils/message-list-selection-gesture";
 import { createAssistantMdComponents } from "../../markdown/assistant-markdown-components";
+import { hostnameFromUrl, siteLabelFromSource } from "../../utils/web-search-citation";
+import { WebSearchFavicon } from "./WebSearchFavicon";
 import { WebSearchSourcesPanel } from "./WebSearchSourcesPanel";
 import "../../markdown/chat-prism-themes.css";
 
@@ -547,13 +549,35 @@ export function MessageList({
                               setSourcesPanelMessageId(message.id);
                               setSourcesHighlightIndex(null);
                             }}
-                            className="mb-2 inline-flex max-w-full items-center gap-1.5 rounded-full border border-border/50 bg-muted/40 px-2.5 py-1 text-xs text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+                            className="mb-3 inline-flex max-w-full items-center gap-2 rounded-full border border-border/60 bg-muted/50 py-1 pl-1.5 pr-2.5 text-xs text-foreground/80 transition-colors hover:border-border hover:bg-muted hover:text-foreground"
                           >
-                            <IconGlobe className="h-3.5 w-3.5 shrink-0" />
-                            <span className="truncate">
+                            <span className="flex items-center -space-x-1.5">
+                              {message.web_search_sources.slice(0, 3).map((source, idx) => {
+                                const host = hostnameFromUrl(source.url) ?? "";
+                                const label = siteLabelFromSource(source, idx + 1);
+                                return (
+                                  <span
+                                    key={`${message.id}-fav-${idx}`}
+                                    className="flex h-5 w-5 items-center justify-center overflow-hidden rounded-full border border-background bg-background shadow-sm"
+                                  >
+                                    {host ? (
+                                      <WebSearchFavicon
+                                        host={host}
+                                        label={label}
+                                        size={16}
+                                        rounded="full"
+                                      />
+                                    ) : (
+                                      <IconGlobe className="h-3 w-3 text-muted-foreground" />
+                                    )}
+                                  </span>
+                                );
+                              })}
+                            </span>
+                            <span className="truncate font-medium">
                               搜索网页 · {message.web_search_sources.length} 个结果
                             </span>
-                            <IconChevronRight className="h-3.5 w-3.5 shrink-0 opacity-70" />
+                            <IconChevronRight className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
                           </button>
                         ) : null}
 
