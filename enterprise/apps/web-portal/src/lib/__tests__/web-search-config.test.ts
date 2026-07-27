@@ -37,7 +37,7 @@ describe("resolveWebSearchConfig", () => {
     const defaults = resolveWebSearchConfig(null);
     expect(defaults.provider).toBe("duckduckgo");
     expect(defaults.enabled).toBe(true);
-    expect(defaults.maxResults).toBe(5);
+    expect(defaults.maxResults).toBe(50);
   });
 
   it("keeps enabled=false from tenant (admin closed)", () => {

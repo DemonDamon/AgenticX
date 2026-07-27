@@ -210,7 +210,6 @@ export class HttpChatClient implements ChatClient {
             | { content?: string; reasoning_content?: string }
             | undefined;
           const delta = pickStreamDelta(deltaObj);
-          const finished = chunk.choices?.[0]?.finish_reason === "stop";
           if (delta) {
             yield {
               requestId,
@@ -218,11 +217,9 @@ export class HttpChatClient implements ChatClient {
               delta,
             };
           }
-          if (finished) {
-            yield { requestId, done: true };
-            this.pending.delete(requestId);
-            return;
-          }
+          // Do NOT treat finish_reason=stop as stream end.
+          // Portal BFF appends trailer frames (agenticx_web_search_sources / agenticx_usage)
+          // after the last content chunk and before data: [DONE]. Returning here drops them.
         }
       }
       yield { requestId, done: true };
