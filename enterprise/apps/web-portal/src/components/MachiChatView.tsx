@@ -9,7 +9,6 @@ import {
   Check,
   ChevronDown,
   Cpu,
-  FileText,
   Globe,
   Microscope,
   Paperclip,
@@ -18,7 +17,6 @@ import {
   ShieldAlert,
   Sparkles,
   Trash2,
-  Wand2,
   X,
 } from "lucide-react";
 import {
@@ -27,12 +25,13 @@ import {
   AlertTitle,
   Badge,
   Button,
-  MachiAvatar,
   Tooltip,
   TooltipContent,
   TooltipProvider,
   TooltipTrigger,
+  cn,
 } from "@agenticx/ui";
+import { NearEmptyWordmark } from "./NearEmptyWordmark";
 
 // 模型清单从 /api/me/models 动态获取（admin 配置 + 用户可见性）。
 // 没有任何分配时为空，UI 会提示「请联系管理员分配模型」。
@@ -128,30 +127,6 @@ export function MachiChatView({
     left: 0,
     width: 320,
   });
-
-  const suggestions = React.useMemo(
-    () => [
-      {
-        icon: <Sparkles className="h-4 w-4" />,
-        title: t("suggestion1Title"),
-        description: t("suggestion1Description"),
-        prompt: t("suggestion1Prompt"),
-      },
-      {
-        icon: <FileText className="h-4 w-4" />,
-        title: t("suggestion2Title"),
-        description: t("suggestion2Description"),
-        prompt: t("suggestion2Prompt"),
-      },
-      {
-        icon: <Wand2 className="h-4 w-4" />,
-        title: t("suggestion3Title"),
-        description: t("suggestion3Description"),
-        prompt: t("suggestion3Prompt"),
-      },
-    ],
-    [t],
-  );
 
   // 动态拉取当前用户可见的模型清单。
   // 管理员随时可能改变部门/用户的可见模型分配，因此这里不能只在挂载时拉一次：
@@ -395,7 +370,7 @@ export function MachiChatView({
   }, [activeSessionId, pendingMessages]);
 
   const composer = (
-    <div className="mx-auto w-full max-w-4xl space-y-3">
+    <div className={cn("mx-auto w-full space-y-3", isEmpty ? "max-w-[46rem]" : "max-w-4xl")}>
       {historyError && (
         <Alert variant="warning" className="border-warning/30 bg-warning-soft/80 shadow-sm">
           <ShieldAlert className="h-5 w-5" />
@@ -451,7 +426,15 @@ export function MachiChatView({
         onForceSend={() => handleSend({ forceSend: true })}
         onCancel={() => void cancel(client)}
         appearance="portal"
-        placeholder={deepResearchMode ? tw("deepResearchPlaceholder") : undefined}
+        minTextareaHeight={isEmpty ? 96 : undefined}
+        className={
+          isEmpty
+            ? "min-h-[9.75rem] !rounded-[1.75rem] !px-4 !pb-3 !pt-3.5 shadow-[0_10px_40px_-18px_rgba(15,23,42,0.18)]"
+            : undefined
+        }
+        placeholder={
+          deepResearchMode ? tw("deepResearchPlaceholder") : "发送消息给 Near..."
+        }
         attachments={Object.values(attachments)}
         onAddFiles={handleAddFiles}
         onRemoveAttachment={removeAttachment}
@@ -659,60 +642,13 @@ export function MachiChatView({
         {/* 主对话区 */}
         <div className="relative min-h-0 flex-1 overflow-hidden">
           {isEmpty ? (
-            /* 欢迎态 / 深度研究空态 */
-            <div className="relative flex h-full flex-col items-center justify-start gap-8 overflow-y-auto px-4 py-8 md:justify-center">
-              <div className="flex flex-col items-center gap-4 text-center">
-                <div className="relative rounded-md border-2 border-border dark:border-white/90 dark:shadow-[0_0_0_1px_rgba(255,255,255,0.06)]">
-                  <MachiAvatar size={210} className="relative h-[210px] w-[210px]" />
-                </div>
-                <div>
-                  <h2 className="text-3xl font-semibold tracking-tight text-foreground">
-                    {deepResearchMode ? tw("deepResearch") : t("welcomeTitle")}
-                  </h2>
-                  <p className="mt-2 text-base text-muted-foreground/80">
-                    {deepResearchMode ? tw("deepResearchEmptySubtitle") : t("welcomeSubtitle")}
-                  </p>
-                </div>
-              </div>
+            /* 空态：NEAR 字标靠上 + 收窄加高输入区（深度研究入口暂走侧栏） */
+            <div className="relative flex h-full flex-col items-center justify-start gap-10 overflow-y-auto px-4 pt-14 pb-10 md:gap-12 md:pt-16 md:pb-16">
+              <NearEmptyWordmark
+                caption={deepResearchMode ? tw("deepResearchEmptySubtitle") : undefined}
+              />
 
-              {!deepResearchMode ? (
-                <div className="mt-4 grid w-full max-w-2xl gap-4 sm:grid-cols-2">
-                  {suggestions.slice(0, 2).map((item) => (
-                    <button
-                      key={item.title}
-                      type="button"
-                      onClick={() => {
-                        setDraft(item.prompt);
-                      }}
-                      className="group flex items-start gap-3 rounded-[20px] border border-border/40 bg-surface-subtle/50 px-5 py-4 text-left transition-all hover:-translate-y-0.5 hover:border-primary/20 hover:bg-surface-subtle hover:shadow-sm"
-                    >
-                      <span className="mt-0.5 flex shrink-0 text-muted-foreground group-hover:text-primary">
-                        {item.icon}
-                      </span>
-                      <div className="flex flex-col gap-1">
-                        <span className="text-sm font-medium text-foreground">{item.title}</span>
-                        <span className="line-clamp-2 text-xs text-muted-foreground/80">{item.description}</span>
-                      </div>
-                    </button>
-                  ))}
-                </div>
-              ) : null}
-
-              <div className="mt-2 w-full">
-                {composer}
-                {!deepResearchMode ? (
-                  <div className="mx-auto mt-4 flex w-full max-w-4xl justify-center">
-                    <button
-                      type="button"
-                      onClick={() => setDeepResearchMode(true)}
-                      className="inline-flex items-center gap-2 rounded-full border border-border/60 bg-surface-subtle/60 px-4 py-2 text-sm font-medium text-foreground transition-colors hover:border-primary/30 hover:bg-primary-soft/40 hover:text-primary"
-                    >
-                      <Microscope className="h-4 w-4" />
-                      {tw("enterDeepResearch")}
-                    </button>
-                  </div>
-                ) : null}
-              </div>
+              <div className="w-full max-w-[46rem]">{composer}</div>
             </div>
           ) : (
             <div className="relative h-full min-h-0">
