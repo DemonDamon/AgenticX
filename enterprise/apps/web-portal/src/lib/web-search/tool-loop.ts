@@ -30,6 +30,12 @@ const MAX_SEARCH_ROUNDS = 2;
 const ADMIN_DISABLED_HINT = "> 管理员已关闭联网搜索。\n\n";
 const UNAVAILABLE_HINT = "> 联网搜索暂不可用，以下回答基于模型已有知识。\n\n";
 
+/** User explicitly toggled web search — force the first probe to call the tool. */
+export const WEB_SEARCH_TOOL_CHOICE = {
+  type: "function",
+  function: { name: "web_search" },
+} as const;
+
 type ChatMessage = {
   role: string;
   content?: string | null;
@@ -118,6 +124,16 @@ function formatSourcesAppendix(hits: WebSearchHit[]): string {
 function stripWebSearchFlag<T extends Record<string, unknown>>(body: T): Omit<T, "agenticx_web_search"> {
   const { agenticx_web_search: _ignored, ...rest } = body;
   return rest;
+}
+
+export function extractLastUserQuery(messages: ChatMessage[]): string {
+  for (let i = messages.length - 1; i >= 0; i -= 1) {
+    const msg = messages[i];
+    if (msg?.role !== "user") continue;
+    const content = msg.content;
+    if (typeof content === "string" && content.trim()) return content.trim();
+  }
+  return "";
 }
 
 async function callGatewayJson(
@@ -265,13 +281,31 @@ export async function runWebSearchTurn(
   let messages = withSystemHint(originalMessages);
   const collectedHits: WebSearchHit[] = [];
 
+  const appendSearchResults = async (
+    query: string,
+    maxResults: number | undefined,
+    toolCallId: string,
+  ): Promise<boolean> => {
+    const hits = await searchFn(query, maxResults, cfg);
+    for (const hit of hits) collectedHits.push(hit);
+    messages.push({
+      role: "tool",
+      tool_call_id: toolCallId,
+      name: "web_search",
+      content: formatHits(hits),
+    });
+    return hits.length > 0;
+  };
+
   try {
     for (let round = 0; round < MAX_SEARCH_ROUNDS; round += 1) {
       const probe = await callGatewayJson(deps, {
         ...baseBody,
         stream: false,
         tools: [WEB_SEARCH_TOOL],
-        tool_choice: "auto",
+        // First round: user toggled search on — require the tool so models that only
+        // "think about searching" (e.g. MiniMax) cannot short-circuit with prose.
+        tool_choice: round === 0 ? WEB_SEARCH_TOOL_CHOICE : "auto",
         messages,
       });
 
@@ -289,15 +323,36 @@ export async function runWebSearchTurn(
 
       if (searchCalls.length === 0) {
         if (collectedHits.length === 0) {
-          const content = typeof message.content === "string" ? message.content : "";
-          return new Response(synthesizeTextSse(content, probe.json.usage), {
-            status: 200,
-            headers: {
-              "content-type": "text/event-stream",
-              "cache-control": "no-cache",
-              connection: "keep-alive",
+          // Model ignored required tool_choice (or provider stripped tools).
+          // Fall back to a server-side search using the last user query — never treat
+          // reasoning-only prose as the final answer when the user asked to search.
+          const query = extractLastUserQuery(originalMessages);
+          if (!query) {
+            throw new Error("missing user query for fallback search");
+          }
+          const fallbackId = `web_search_fallback_${Date.now()}`;
+          messages = [
+            ...messages,
+            {
+              role: "assistant",
+              content: null,
+              tool_calls: [
+                {
+                  id: fallbackId,
+                  type: "function",
+                  function: {
+                    name: "web_search",
+                    arguments: JSON.stringify({ query }),
+                  },
+                },
+              ],
             },
-          });
+          ];
+          const anyHits = await appendSearchResults(query, undefined, fallbackId);
+          if (!anyHits) {
+            throw new Error("fallback search returned no hits");
+          }
+          break;
         }
         break;
       }
@@ -314,15 +369,8 @@ export async function runWebSearchTurn(
       let anyHits = false;
       for (const call of searchCalls) {
         const args = parseToolArgs(call.function?.arguments);
-        const hits = await searchFn(args.query, args.max_results, cfg);
-        if (hits.length > 0) anyHits = true;
-        for (const hit of hits) collectedHits.push(hit);
-        messages.push({
-          role: "tool",
-          tool_call_id: call.id,
-          name: "web_search",
-          content: formatHits(hits),
-        });
+        const ok = await appendSearchResults(args.query, args.max_results, call.id);
+        if (ok) anyHits = true;
       }
 
       if (!anyHits && collectedHits.length === 0) {
