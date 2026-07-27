@@ -15,6 +15,7 @@ type InputAreaProps = {
   rightToolbar?: React.ReactNode;
   className?: string;
   appearance?: "default" | "portal";
+  placeholder?: string;
   attachments?: ComposerAttachment[];
   onAddFiles?: (files: File[]) => void;
   onRemoveAttachment?: (id: string) => void;
@@ -49,6 +50,7 @@ export function InputArea({
   rightToolbar,
   className,
   appearance = "default",
+  placeholder,
   attachments = [],
   onAddFiles,
   onRemoveAttachment,
@@ -119,7 +121,7 @@ export function InputArea({
         onPaste={onPaste}
         rows={1}
         className={`w-full resize-none overflow-y-auto border-0 bg-transparent px-3 pb-2 pt-2.5 text-sm leading-6 text-foreground outline-none ring-0 placeholder:text-muted-foreground/70 focus:outline-none focus:ring-0 focus-visible:outline-none focus-visible:ring-0 ${appearance === "portal" ? "min-h-[48px]" : "min-h-[40px]"}`}
-        placeholder="发送消息给 Machi..."
+        placeholder={placeholder ?? "发送消息给 Machi..."}
         onCompositionStart={() => {
           imeComposingRef.current = true;
         }}
