@@ -105,6 +105,7 @@ describe("mysql baseline migration inventory", () => {
       "0002_desktop_device_auth.sql",
       "0003_enterprise_runtime_web_search.sql",
       "0004_web_search_max_results_default.sql",
+      "0005_enterprise_runtime_deep_research.sql",
     ]);
 
     const sql = readFileSync(baselinePath, "utf8");
@@ -127,6 +128,7 @@ describe("mysql baseline migration inventory", () => {
       expect.objectContaining({ idx: 2, tag: "0002_desktop_device_auth" }),
       expect.objectContaining({ idx: 3, tag: "0003_enterprise_runtime_web_search" }),
       expect.objectContaining({ idx: 4, tag: "0004_web_search_max_results_default" }),
+      expect.objectContaining({ idx: 5, tag: "0005_enterprise_runtime_deep_research" }),
     ]);
     expect(readdirSync(migrationDir)).not.toContain("0016_mcp_hosting.sql");
     expect(readdirSync(migrationDir)).not.toContain(
