@@ -19,6 +19,7 @@ import {
   Sparkles,
   Trash2,
   Wand2,
+  X,
 } from "lucide-react";
 import {
   Alert,
@@ -483,27 +484,23 @@ export function MachiChatView({
               <Globe className="h-4 w-4" />
             </Button>
             {deepResearchMode ? (
-              <Button
-                variant="secondary"
-                size="sm"
-                onClick={() => setDeepResearchMode(false)}
-                className="h-8 gap-1.5 rounded-full px-3 text-xs font-medium text-primary"
+              <span
+                className="group/dr-chip inline-flex h-8 items-center gap-1.5 rounded-full bg-primary-soft/70 px-2.5 text-xs font-medium text-primary"
                 aria-label={tw("deepResearchChip")}
               >
-                <Microscope className="h-3.5 w-3.5" />
-                {tw("deepResearchChip")}
-              </Button>
-            ) : (
-              <Button
-                variant="ghost"
-                size="icon"
-                onClick={() => setDeepResearchMode(true)}
-                className="h-8 w-8 rounded-full text-muted-foreground hover:text-foreground"
-                aria-label={tw("deepResearch")}
-              >
-                <Microscope className="h-4 w-4" />
-              </Button>
-            )}
+                <button
+                  type="button"
+                  onClick={() => setDeepResearchMode(false)}
+                  className="relative flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-primary/15 text-primary transition-colors hover:bg-primary hover:text-primary-foreground"
+                  aria-label={tw("exitDeepResearch")}
+                  title={tw("exitDeepResearch")}
+                >
+                  <Microscope className="h-3.5 w-3.5 group-hover/dr-chip:hidden" />
+                  <X className="hidden h-3.5 w-3.5 group-hover/dr-chip:block" strokeWidth={2.5} />
+                </button>
+                <span>{tw("deepResearchChip")}</span>
+              </span>
+            ) : null}
           </>
         }
         rightToolbar={
