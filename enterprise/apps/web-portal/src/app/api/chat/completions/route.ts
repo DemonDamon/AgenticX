@@ -5,6 +5,8 @@ import { ACCESS_COOKIE } from "../../../../lib/session";
 import { isChatSessionOwned } from "../../../../lib/chat-history";
 import { toChatHistoryContext } from "../../../../lib/chat-history-http";
 import { listAvailableModelsForUser } from "../../../../lib/admin-providers-reader";
+import { runWebSearchTurn } from "../../../../lib/web-search/tool-loop";
+import { loadTenantWebSearchConfig } from "../../../../lib/web-search/tenant-config";
 
 const GATEWAY_COMPLETIONS_URL =
   process.env.GATEWAY_COMPLETIONS_URL ?? "http://127.0.0.1:8088/v1/chat/completions";
@@ -66,10 +68,16 @@ export async function POST(request: Request) {
   const rawBody = await request.text();
   let providerHint = "";
   let forwardBody = rawBody;
+  let enableWebSearch = false;
+  let parsedBody: Record<string, unknown> | null = null;
   // portal 把模型 id 编码为 "<provider>/<model>"；admin 配置好的 provider 与上游 endpoint 一一对应。
   // gateway 用 model 字段查表，所以这里把 provider 拆出来放请求头，body.model 仅保留模型名。
   try {
-    const parsed = JSON.parse(rawBody) as { model?: string };
+    const parsed = JSON.parse(rawBody) as Record<string, unknown> & { model?: string; agenticx_web_search?: unknown };
+    enableWebSearch = parsed.agenticx_web_search === true;
+    const { agenticx_web_search: _strip, ...withoutFlag } = parsed;
+    parsedBody = withoutFlag;
+
     if (typeof parsed.model === "string" && parsed.model.includes("/")) {
       // 服务端实时校验：用户/部门可见模型收窄后，禁止转发到已失效的模型（客户端未刷新前也不得放行）。
       const effectiveModels = await listAvailableModelsForUser(session.userId, session.email, session.deptId ?? undefined);
@@ -90,27 +98,42 @@ export async function POST(request: Request) {
       const modelName = rest.join("/");
       if (providerId && modelName) {
         providerHint = providerId;
-        forwardBody = JSON.stringify({ ...parsed, model: modelName });
+        parsedBody = { ...withoutFlag, model: modelName };
+        forwardBody = JSON.stringify(parsedBody);
+      } else {
+        forwardBody = JSON.stringify(withoutFlag);
       }
+    } else {
+      forwardBody = JSON.stringify(withoutFlag);
     }
   } catch {
     // body 不是 JSON 时维持原样转发
+  }
+
+  const gatewayHeaders: Record<string, string> = {
+    "content-type": "application/json",
+    authorization: `Bearer ${accessToken}`,
+    "x-tenant-id": session.tenantId,
+    "x-user-id": session.userId,
+    "x-dept-id": session.deptId ?? "",
+    "x-user-email": session.email,
+    "x-session-id": session.sessionId,
+    ...(providerHint ? { "x-agenticx-provider": providerHint } : {}),
+  };
+
+  if (enableWebSearch && parsedBody) {
+    return runWebSearchTurn(parsedBody, {
+      url: GATEWAY_COMPLETIONS_URL,
+      headers: gatewayHeaders,
+      loadTenantConfig: () => loadTenantWebSearchConfig(session.tenantId),
+    });
   }
 
   let upstream: Response;
   try {
     upstream = await fetch(GATEWAY_COMPLETIONS_URL, {
       method: "POST",
-      headers: {
-        "content-type": "application/json",
-        authorization: `Bearer ${accessToken}`,
-        "x-tenant-id": session.tenantId,
-        "x-user-id": session.userId,
-        "x-dept-id": session.deptId ?? "",
-        "x-user-email": session.email,
-        "x-session-id": session.sessionId,
-        ...(providerHint ? { "x-agenticx-provider": providerHint } : {}),
-      },
+      headers: gatewayHeaders,
       body: forwardBody,
     });
   } catch (error) {
@@ -145,4 +168,3 @@ export async function POST(request: Request) {
     },
   });
 }
-
