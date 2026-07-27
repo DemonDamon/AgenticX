@@ -58,13 +58,19 @@ function formatActiveModelFallback(modelId: string): string {
 
 type MachiChatViewProps = {
   client: ChatClient;
+  deepResearchMode?: boolean;
+  onDeepResearchModeChange?: (next: boolean) => void;
 };
 
 function isComplianceError(message: string): boolean {
   return (/合规|策略|compliance|policy/i.test(message) && !/Gateway/i.test(message));
 }
 
-export function MachiChatView({ client }: MachiChatViewProps) {
+export function MachiChatView({
+  client,
+  deepResearchMode = false,
+  onDeepResearchModeChange,
+}: MachiChatViewProps) {
   const t = useTranslations("chat");
   const tw = useTranslations("workspace");
   const {
@@ -96,7 +102,13 @@ export function MachiChatView({ client }: MachiChatViewProps) {
   } = useChatStore();
   const [draft, setDraft] = React.useState("");
   const [webSearch, setWebSearch] = React.useState(false);
-  const [deepResearch, setDeepResearch] = React.useState(false);
+
+  const setDeepResearchMode = React.useCallback(
+    (next: boolean) => {
+      onDeepResearchModeChange?.(next);
+    },
+    [onDeepResearchModeChange],
+  );
   const [visionWarning, setVisionWarning] = React.useState<string | null>(null);
   const fileInputRef = React.useRef<HTMLInputElement>(null);
   const {
@@ -362,13 +374,18 @@ export function MachiChatView({ client }: MachiChatViewProps) {
       if (!trimmed && messageAttachments.length === 0) return;
       void sendMessage(
         client,
-        { content: trimmed, attachments: messageAttachments, webSearch, deepResearch },
+        {
+          content: trimmed,
+          attachments: messageAttachments,
+          webSearch,
+          deepResearch: deepResearchMode,
+        },
         opts?.forceSend ? { forceSend: true } : undefined,
       );
       setDraft("");
       clearAttachments();
     },
-    [clearAttachments, client, deepResearch, draft, sendMessage, toMessageAttachments, webSearch],
+    [clearAttachments, client, deepResearchMode, draft, sendMessage, toMessageAttachments, webSearch],
   );
 
   const queuedForSession = React.useMemo(() => {
@@ -433,6 +450,7 @@ export function MachiChatView({ client }: MachiChatViewProps) {
         onForceSend={() => handleSend({ forceSend: true })}
         onCancel={() => void cancel(client)}
         appearance="portal"
+        placeholder={deepResearchMode ? tw("deepResearchPlaceholder") : undefined}
         attachments={Object.values(attachments)}
         onAddFiles={handleAddFiles}
         onRemoveAttachment={removeAttachment}
@@ -464,14 +482,28 @@ export function MachiChatView({ client }: MachiChatViewProps) {
             >
               <Globe className="h-4 w-4" />
             </Button>
-            <Button
-              variant={deepResearch ? "secondary" : "ghost"}
-              size="icon"
-              onClick={() => setDeepResearch((prev) => !prev)}
-              className={`h-8 w-8 rounded-full ${deepResearch ? "text-primary" : "text-muted-foreground hover:text-foreground"}`}
-            >
-              <Microscope className="h-4 w-4" />
-            </Button>
+            {deepResearchMode ? (
+              <Button
+                variant="secondary"
+                size="sm"
+                onClick={() => setDeepResearchMode(false)}
+                className="h-8 gap-1.5 rounded-full px-3 text-xs font-medium text-primary"
+                aria-label={tw("deepResearchChip")}
+              >
+                <Microscope className="h-3.5 w-3.5" />
+                {tw("deepResearchChip")}
+              </Button>
+            ) : (
+              <Button
+                variant="ghost"
+                size="icon"
+                onClick={() => setDeepResearchMode(true)}
+                className="h-8 w-8 rounded-full text-muted-foreground hover:text-foreground"
+                aria-label={tw("deepResearch")}
+              >
+                <Microscope className="h-4 w-4" />
+              </Button>
+            )}
           </>
         }
         rightToolbar={
@@ -630,43 +662,59 @@ export function MachiChatView({ client }: MachiChatViewProps) {
         {/* 主对话区 */}
         <div className="relative min-h-0 flex-1 overflow-hidden">
           {isEmpty ? (
-            /* 欢迎态 */
+            /* 欢迎态 / 深度研究空态 */
             <div className="relative flex h-full flex-col items-center justify-start gap-8 overflow-y-auto px-4 py-8 md:justify-center">
               <div className="flex flex-col items-center gap-4 text-center">
                 <div className="relative rounded-md border-2 border-border dark:border-white/90 dark:shadow-[0_0_0_1px_rgba(255,255,255,0.06)]">
                   <MachiAvatar size={210} className="relative h-[210px] w-[210px]" />
                 </div>
                 <div>
-                  <h2 className="text-3xl font-semibold tracking-tight text-foreground">{t("welcomeTitle")}</h2>
+                  <h2 className="text-3xl font-semibold tracking-tight text-foreground">
+                    {deepResearchMode ? tw("deepResearch") : t("welcomeTitle")}
+                  </h2>
                   <p className="mt-2 text-base text-muted-foreground/80">
-                    {t("welcomeSubtitle")}
+                    {deepResearchMode ? tw("deepResearchEmptySubtitle") : t("welcomeSubtitle")}
                   </p>
                 </div>
               </div>
 
-              <div className="mt-4 grid w-full max-w-2xl gap-4 sm:grid-cols-2">
-                {suggestions.slice(0, 2).map((item) => (
-                  <button
-                    key={item.title}
-                    type="button"
-                    onClick={() => {
-                      setDraft(item.prompt);
-                    }}
-                    className="group flex items-start gap-3 rounded-[20px] border border-border/40 bg-surface-subtle/50 px-5 py-4 text-left transition-all hover:-translate-y-0.5 hover:border-primary/20 hover:bg-surface-subtle hover:shadow-sm"
-                  >
-                    <span className="mt-0.5 flex shrink-0 text-muted-foreground group-hover:text-primary">
-                      {item.icon}
-                    </span>
-                    <div className="flex flex-col gap-1">
-                      <span className="text-sm font-medium text-foreground">{item.title}</span>
-                      <span className="line-clamp-2 text-xs text-muted-foreground/80">{item.description}</span>
-                    </div>
-                  </button>
-                ))}
-              </div>
+              {!deepResearchMode ? (
+                <div className="mt-4 grid w-full max-w-2xl gap-4 sm:grid-cols-2">
+                  {suggestions.slice(0, 2).map((item) => (
+                    <button
+                      key={item.title}
+                      type="button"
+                      onClick={() => {
+                        setDraft(item.prompt);
+                      }}
+                      className="group flex items-start gap-3 rounded-[20px] border border-border/40 bg-surface-subtle/50 px-5 py-4 text-left transition-all hover:-translate-y-0.5 hover:border-primary/20 hover:bg-surface-subtle hover:shadow-sm"
+                    >
+                      <span className="mt-0.5 flex shrink-0 text-muted-foreground group-hover:text-primary">
+                        {item.icon}
+                      </span>
+                      <div className="flex flex-col gap-1">
+                        <span className="text-sm font-medium text-foreground">{item.title}</span>
+                        <span className="line-clamp-2 text-xs text-muted-foreground/80">{item.description}</span>
+                      </div>
+                    </button>
+                  ))}
+                </div>
+              ) : null}
 
               <div className="mt-2 w-full">
                 {composer}
+                {!deepResearchMode ? (
+                  <div className="mx-auto mt-4 flex w-full max-w-4xl justify-center">
+                    <button
+                      type="button"
+                      onClick={() => setDeepResearchMode(true)}
+                      className="inline-flex items-center gap-2 rounded-full border border-border/60 bg-surface-subtle/60 px-4 py-2 text-sm font-medium text-foreground transition-colors hover:border-primary/30 hover:bg-primary-soft/40 hover:text-primary"
+                    >
+                      <Microscope className="h-4 w-4" />
+                      {tw("enterDeepResearch")}
+                    </button>
+                  </div>
+                ) : null}
               </div>
             </div>
           ) : (

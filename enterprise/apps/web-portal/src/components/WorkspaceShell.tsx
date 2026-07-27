@@ -33,6 +33,7 @@ import {
   Menu,
   MessageSquare,
   MessageSquarePlus,
+  Microscope,
   Monitor,
   Moon,
   MoreHorizontal,
@@ -124,6 +125,7 @@ export function WorkspaceShell({ userEmail, userScopes }: WorkspaceShellProps) {
   const sessions = useChatStore((s) => s.sessions);
   const activeSessionId = useChatStore((s) => s.activeSessionId);
   const activeModel = useChatStore((s) => s.activeModel);
+  const messages = useChatStore((s) => s.messages);
   const historyLoading = useChatStore((s) => s.historyLoading);
   const createSession = useChatStore((s) => s.createSession);
   const switchSession = useChatStore((s) => s.switchSession);
@@ -146,6 +148,12 @@ export function WorkspaceShell({ userEmail, userScopes }: WorkspaceShellProps) {
   const [collapsed, setCollapsed] = React.useState(false);
   const [mobileOpen, setMobileOpen] = React.useState(false);
   const [panelMode, setPanelMode] = React.useState<PanelMode>("chat");
+  const [deepResearchMode, setDeepResearchMode] = React.useState(false);
+
+  const activeSessionEmpty = React.useMemo(() => {
+    if (!activeSessionId) return true;
+    return !messages.some((message) => message.session_id === activeSessionId);
+  }, [activeSessionId, messages]);
 
   React.useEffect(() => {
     try {
@@ -172,12 +180,21 @@ export function WorkspaceShell({ userEmail, userScopes }: WorkspaceShellProps) {
 
   const onNewChat = React.useCallback(() => {
     void createSession({ defaultModel: activeModel || "deepseek-chat", title: t("newChat") });
+    setDeepResearchMode(false);
+    setPanelMode("chat");
+    setMobileOpen(false);
+  }, [createSession, activeModel, t]);
+
+  const onDeepResearchNav = React.useCallback(() => {
+    void createSession({ defaultModel: activeModel || "deepseek-chat", title: t("newChat") });
+    setDeepResearchMode(true);
     setPanelMode("chat");
     setMobileOpen(false);
   }, [createSession, activeModel, t]);
 
   const onSelectSession = React.useCallback((id: string) => {
     void switchSession(id);
+    setDeepResearchMode(false);
     setPanelMode("chat");
     setMobileOpen(false);
   }, [switchSession]);
@@ -278,6 +295,16 @@ export function WorkspaceShell({ userEmail, userScopes }: WorkspaceShellProps) {
             <Button onClick={onNewChat} className={collapsed ? "" : "w-full justify-start"} size={collapsed ? "icon" : "default"}>
               <MessageSquarePlus />
               {!collapsed && t("newChat")}
+            </Button>
+            <Button
+              variant={deepResearchMode && activeSessionEmpty ? "default" : "outline"}
+              onClick={onDeepResearchNav}
+              className={collapsed ? "" : "w-full justify-start"}
+              size={collapsed ? "icon" : "default"}
+              aria-label={t("deepResearch")}
+            >
+              <Microscope />
+              {!collapsed && t("deepResearch")}
             </Button>
           </div>
 
@@ -461,7 +488,11 @@ export function WorkspaceShell({ userEmail, userScopes }: WorkspaceShellProps) {
 
           <div className="flex h-full min-h-0 w-full flex-1 flex-col overflow-hidden">
             {panelMode === "chat" ? (
-              <MachiChatView client={client} />
+              <MachiChatView
+                client={client}
+                deepResearchMode={deepResearchMode}
+                onDeepResearchModeChange={setDeepResearchMode}
+              />
             ) : (
               <div className="h-full w-full overflow-auto">
                 <SettingsPanel />
