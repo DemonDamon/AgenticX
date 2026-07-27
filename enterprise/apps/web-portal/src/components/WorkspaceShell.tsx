@@ -149,11 +149,45 @@ export function WorkspaceShell({ userEmail, userScopes }: WorkspaceShellProps) {
   const [mobileOpen, setMobileOpen] = React.useState(false);
   const [panelMode, setPanelMode] = React.useState<PanelMode>("chat");
   const [deepResearchMode, setDeepResearchMode] = React.useState(false);
+  /** Tenant gate: sidebar entry hidden when admin disables deep research. Default ON. */
+  const [deepResearchAvailable, setDeepResearchAvailable] = React.useState(true);
 
   const activeSessionEmpty = React.useMemo(() => {
     if (!activeSessionId) return true;
     return !messages.some((message) => message.session_id === activeSessionId);
   }, [activeSessionId, messages]);
+
+  const applyDeepResearchAvailable = React.useCallback((enabled: boolean) => {
+    setDeepResearchAvailable(enabled);
+    if (!enabled) setDeepResearchMode(false);
+  }, []);
+
+  React.useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      try {
+        const res = await fetch("/api/me/web-search", { cache: "no-store" });
+        const json = (await res.json()) as {
+          data?: { deepResearchEnabled?: boolean };
+        };
+        if (cancelled || !res.ok) return;
+        applyDeepResearchAvailable(json.data?.deepResearchEnabled ?? true);
+      } catch {
+        // Keep product default ON when the flag cannot be loaded.
+      }
+    })();
+    const onConfig = (event: Event) => {
+      const detail = (event as CustomEvent<{ deepResearchEnabled?: boolean }>).detail;
+      if (typeof detail?.deepResearchEnabled === "boolean") {
+        applyDeepResearchAvailable(detail.deepResearchEnabled);
+      }
+    };
+    window.addEventListener("agenticx:web-search-config", onConfig);
+    return () => {
+      cancelled = true;
+      window.removeEventListener("agenticx:web-search-config", onConfig);
+    };
+  }, [applyDeepResearchAvailable]);
 
   React.useEffect(() => {
     try {
@@ -296,16 +330,18 @@ export function WorkspaceShell({ userEmail, userScopes }: WorkspaceShellProps) {
               <MessageSquarePlus />
               {!collapsed && t("newChat")}
             </Button>
-            <Button
-              variant={deepResearchMode && activeSessionEmpty ? "default" : "outline"}
-              onClick={onDeepResearchNav}
-              className={collapsed ? "" : "w-full justify-start"}
-              size={collapsed ? "icon" : "default"}
-              aria-label={t("deepResearch")}
-            >
-              <Microscope />
-              {!collapsed && t("deepResearch")}
-            </Button>
+            {deepResearchAvailable ? (
+              <Button
+                variant={deepResearchMode && activeSessionEmpty ? "default" : "outline"}
+                onClick={onDeepResearchNav}
+                className={collapsed ? "" : "w-full justify-start"}
+                size={collapsed ? "icon" : "default"}
+                aria-label={t("deepResearch")}
+              >
+                <Microscope />
+                {!collapsed && t("deepResearch")}
+              </Button>
+            ) : null}
           </div>
 
           <QuotaCard collapsed={collapsed} />

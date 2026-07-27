@@ -45,7 +45,7 @@ export function SettingsPanel() {
   const [webSearchProvider, setWebSearchProvider] = useState("duckduckgo");
   const [webSearchApiKey, setWebSearchApiKey] = useState("");
   const [webSearchHasApiKey, setWebSearchHasApiKey] = useState(false);
-  const [deepResearchOn, setDeepResearchOn] = useState(false);
+  const [deepResearchOn, setDeepResearchOn] = useState(true);
   const [webSearchSaving, setWebSearchSaving] = useState(false);
   const [webSearchLoaded, setWebSearchLoaded] = useState(false);
   const [streamingOn, setStreamingOn] = useState(true);
@@ -119,7 +119,7 @@ export function SettingsPanel() {
         setWebSearchOn(Boolean(json.data?.enabled ?? true));
         setWebSearchProvider(json.data?.provider ?? "duckduckgo");
         setWebSearchHasApiKey(Boolean(json.data?.hasApiKey));
-        setDeepResearchOn(Boolean(json.data?.deepResearchEnabled));
+        setDeepResearchOn(json.data?.deepResearchEnabled ?? true);
         setWebSearchApiKey("");
         setWebSearchLoaded(true);
       } catch (error) {
@@ -157,9 +157,16 @@ export function SettingsPanel() {
       setWebSearchOn(Boolean(json.data?.enabled));
       setWebSearchProvider(json.data?.provider ?? "duckduckgo");
       setWebSearchHasApiKey(Boolean(json.data?.hasApiKey));
-      setDeepResearchOn(Boolean(json.data?.deepResearchEnabled));
+      setDeepResearchOn(json.data?.deepResearchEnabled ?? true);
       if (patch.apiKey !== undefined) setWebSearchApiKey("");
       toast.success(t("webSearch.saveSuccess"));
+      if (typeof window !== "undefined" && typeof json.data?.deepResearchEnabled === "boolean") {
+        window.dispatchEvent(
+          new CustomEvent("agenticx:web-search-config", {
+            detail: { deepResearchEnabled: json.data.deepResearchEnabled },
+          }),
+        );
+      }
     } catch (error) {
       toast.error(error instanceof Error ? error.message : t("webSearch.saveFailed"));
     } finally {

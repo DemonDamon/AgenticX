@@ -78,7 +78,7 @@ export async function getPublicWebSearchConfig(tenantId: string): Promise<WebSea
       provider: "duckduckgo",
       maxResults: DEFAULT_MAX_RESULTS,
       hasApiKey: false,
-      deepResearchEnabled: false,
+      deepResearchEnabled: true,
     };
   }
   return {
@@ -105,7 +105,7 @@ export async function upsertTenantWebSearchConfig(
   const nextProvider = normalizeProvider(input.provider ?? existing?.provider ?? "duckduckgo");
   const nextMax = input.maxResults ?? existing?.maxResults ?? DEFAULT_MAX_RESULTS;
   const nextDeepResearch =
-    input.deepResearchEnabled ?? existing?.deepResearchEnabled ?? false;
+    input.deepResearchEnabled ?? existing?.deepResearchEnabled ?? true;
   let nextKey = existing?.apiKey ?? "";
   if (input.apiKey !== undefined) {
     nextKey = input.apiKey;

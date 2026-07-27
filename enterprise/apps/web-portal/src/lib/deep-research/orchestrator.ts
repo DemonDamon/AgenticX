@@ -210,7 +210,8 @@ export async function runDeepResearchTurn(
   const budgetLeft = () => TOTAL_BUDGET_MS - (now() - startedAt);
 
   const tenant = deps.loadTenantConfig ? await deps.loadTenantConfig() : null;
-  const deepResearchEnabled = Boolean(tenant?.deepResearchEnabled);
+  // No tenant row → product default ON (matches getPublicWebSearchConfig).
+  const deepResearchEnabled = tenant?.deepResearchEnabled ?? true;
   const searchCfg: WebSearchRuntimeConfig = resolveWebSearchConfig(tenant);
 
   if (!deepResearchEnabled) {
