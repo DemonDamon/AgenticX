@@ -54,8 +54,8 @@ describe("postgresql/mysql schema parity", () => {
   const pgTables = collectTables(postgresSchema);
   const mysqlTables = collectTables(mysqlSchema);
 
-  it("mirrors all 44 PostgreSQL tables in MySQL", () => {
-    expect(pgTables.size).toBe(44);
+  it("mirrors all 45 PostgreSQL tables in MySQL", () => {
+    expect(pgTables.size).toBe(45);
     expect([...mysqlTables.keys()].sort()).toEqual([...pgTables.keys()].sort());
   });
 
@@ -106,6 +106,8 @@ describe("mysql baseline migration inventory", () => {
       "0003_enterprise_runtime_web_search.sql",
       "0004_web_search_max_results_default.sql",
       "0005_enterprise_runtime_deep_research.sql",
+      "0006_deep_research_enabled_default_true.sql",
+      "0007_enterprise_chat_artifacts.sql",
     ]);
 
     const sql = readFileSync(baselinePath, "utf8");
@@ -129,6 +131,8 @@ describe("mysql baseline migration inventory", () => {
       expect.objectContaining({ idx: 3, tag: "0003_enterprise_runtime_web_search" }),
       expect.objectContaining({ idx: 4, tag: "0004_web_search_max_results_default" }),
       expect.objectContaining({ idx: 5, tag: "0005_enterprise_runtime_deep_research" }),
+      expect.objectContaining({ idx: 6, tag: "0006_deep_research_enabled_default_true" }),
+      expect.objectContaining({ idx: 7, tag: "0007_enterprise_chat_artifacts" }),
     ]);
     expect(readdirSync(migrationDir)).not.toContain("0016_mcp_hosting.sql");
     expect(readdirSync(migrationDir)).not.toContain(

@@ -239,6 +239,13 @@
       "when": 1780500000000,
       "tag": "0034_deep_research_enabled_default_true",
       "breakpoints": true
+    },
+    {
+      "idx": 34,
+      "version": "7",
+      "when": 1780600000000,
+      "tag": "0035_enterprise_chat_artifacts",
+      "breakpoints": true
     }
   ]
 }

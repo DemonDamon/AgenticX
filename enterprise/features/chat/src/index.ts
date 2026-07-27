@@ -5,6 +5,10 @@ export { sessionTitleNeedsAutoFill, buildAutoTitleFromFirstUserMessage } from "@
 export * from "./store";
 export * from "./ChatWorkspace";
 export * from "./components/molecules/MessageList";
+export * from "./components/molecules/DeepResearchTimeline";
+export * from "./components/molecules/DeepResearchClarifyCard";
+export * from "./components/molecules/DeepResearchArtifactCard";
+export * from "./components/molecules/DeepResearchFilesPanel";
 export * from "./components/molecules/InputArea";
 export * from "./components/molecules/MessageQueuePanel";
 export * from "./components/molecules/QueuedMessageBubble";

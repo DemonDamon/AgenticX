@@ -16,6 +16,10 @@ import { createAssistantMdComponents } from "../../markdown/assistant-markdown-c
 import { hostnameFromUrl, siteLabelFromSource } from "../../utils/web-search-citation";
 import { WebSearchFavicon } from "./WebSearchFavicon";
 import { WebSearchSourcesPanel } from "./WebSearchSourcesPanel";
+import { DeepResearchTimeline } from "./DeepResearchTimeline";
+import { DeepResearchClarifyCard } from "./DeepResearchClarifyCard";
+import { DeepResearchArtifactCard } from "./DeepResearchArtifactCard";
+import { DeepResearchFilesPanel } from "./DeepResearchFilesPanel";
 import "../../markdown/chat-prism-themes.css";
 
 // 内联 SVG 图标组件
@@ -218,6 +222,8 @@ export function MessageList({
   const [editingDraft, setEditingDraft] = React.useState("");
   const [sourcesPanelMessageId, setSourcesPanelMessageId] = React.useState<string | null>(null);
   const [sourcesHighlightIndex, setSourcesHighlightIndex] = React.useState<number | null>(null);
+  const [filesPanelSessionId, setFilesPanelSessionId] = React.useState<string | null>(null);
+  const [filesPanelFocusId, setFilesPanelFocusId] = React.useState<string | null>(null);
   const longPressTimerRef = React.useRef<Map<string, NodeJS.Timeout>>(new Map());
   const activeLongPressRef = React.useRef<{ messageId: string; x: number; y: number } | null>(null);
   const LONG_PRESS_MS = 500;
@@ -401,18 +407,25 @@ export function MessageList({
             const displayContent = parsedAssistant ? parsedAssistant.displayContent : message.content;
             const displayText = displayContent?.trim() ?? "";
             const hasVisibleContent = displayText.length > 0;
+            const hasDeepResearchWorkbench = isAssistant && Boolean(message.deep_research);
+            // Deep-research workbench (timeline / clarify / files) must not be replaced by bare dots.
             const showThinkingDots =
               isAssistant &&
               !hasVisibleContent &&
               !parsedAssistant?.thinkingStarted &&
-              !(message.reasoning?.trim());
+              !(message.reasoning?.trim()) &&
+              !hasDeepResearchWorkbench;
             const showReasoningBlock =
               isAssistant &&
               !!parsedAssistant &&
               (parsedAssistant.thinkingStarted || parsedAssistant.reasoningContent.trim().length > 0);
             const displayContentForRender =
               isAssistant && showReasoningBlock ? displayContent.replace(/^\s+/, "") : displayContent;
-            const hideContentParagraph = isAssistant && (showThinkingDots || (!hasVisibleContent && showReasoningBlock));
+            const hideContentParagraph =
+              isAssistant &&
+              (showThinkingDots ||
+                (!hasVisibleContent && showReasoningBlock) ||
+                (!hasVisibleContent && hasDeepResearchWorkbench));
             const isEditingThisUserMessage = isUser && editingMessageId === message.id;
             const linkedUserMessageId = isUser
               ? message.id
@@ -521,6 +534,51 @@ export function MessageList({
                               thinkingInProgress={parsedAssistant.thinkingInProgress}
                             />
                           </div>
+                        ) : null}
+
+                        {isAssistant && message.deep_research ? (
+                          <>
+                            <DeepResearchTimeline
+                              events={message.deep_research.events}
+                              status={message.deep_research.status}
+                            />
+                            {message.deep_research.status === "awaiting_clarify" ? (
+                              <DeepResearchClarifyCard events={message.deep_research.events} />
+                            ) : null}
+                            {message.deep_research.events
+                              .filter(
+                                (event): event is Extract<typeof event, { type: "artifact" }> =>
+                                  event.type === "artifact",
+                              )
+                              .map((artifact) => (
+                                <DeepResearchArtifactCard
+                                  key={artifact.id}
+                                  artifact={artifact}
+                                  onPreview={(id) => {
+                                    setFilesPanelSessionId(message.session_id);
+                                    setFilesPanelFocusId(id);
+                                  }}
+                                />
+                              ))}
+                            {message.deep_research.artifactIds &&
+                            message.deep_research.artifactIds.length > 0 ? (
+                              <button
+                                type="button"
+                                className="mb-3 text-xs font-medium text-primary hover:underline"
+                                onClick={() => {
+                                  setFilesPanelSessionId(message.session_id);
+                                  setFilesPanelFocusId(null);
+                                }}
+                              >
+                                全部文件
+                              </button>
+                            ) : null}
+                            {!hasVisibleContent &&
+                            message.deep_research.events.length > 0 &&
+                            message.deep_research.status === "running" ? (
+                              <ThinkingDotsPlaceholder />
+                            ) : null}
+                          </>
                         ) : null}
 
                         {/* 用户图片附件 */}
@@ -949,6 +1007,17 @@ export function MessageList({
           messages.find((m) => m.id === sourcesPanelMessageId)?.web_search_sources ?? []
         }
         highlightIndex={sourcesHighlightIndex}
+      />
+      <DeepResearchFilesPanel
+        open={filesPanelSessionId != null}
+        onOpenChange={(open) => {
+          if (!open) {
+            setFilesPanelSessionId(null);
+            setFilesPanelFocusId(null);
+          }
+        }}
+        sessionId={filesPanelSessionId}
+        focusArtifactId={filesPanelFocusId}
       />
       <style>{`
         @keyframes agx-thinking-dot-pulse {

@@ -36,6 +36,7 @@ function session(id: string, title: string): ChatSession {
 class CapturingClient implements ChatClient {
   public readonly requests: ChatRequest[] = [];
   private seq = 0;
+  public streamChunks: ChatChunk[] | null = null;
 
   async sendMessage(req: ChatRequest): Promise<SendMessageResult> {
     this.requests.push(req);
@@ -44,6 +45,12 @@ class CapturingClient implements ChatClient {
   }
 
   async *stream(requestId: string): AsyncIterable<ChatChunk> {
+    if (this.streamChunks) {
+      for (const chunk of this.streamChunks) {
+        yield { ...chunk, requestId };
+      }
+      return;
+    }
     yield { requestId, done: false, delta: "ok" };
     yield { requestId, done: true };
   }
@@ -110,5 +117,34 @@ describe("chat store deepResearch request wiring", () => {
     await useChatStore.getState().regenerateAssistantResponse(client, assistantId!);
     expect(client.requests.length).toBeGreaterThanOrEqual(2);
     expect(client.requests.at(-1)?.deepResearch).toBe(true);
+  });
+
+  it("applies deepResearchEvent into message.deep_research without polluting content", async () => {
+    const client = new CapturingClient();
+    client.streamChunks = [
+      {
+        requestId: "req-1",
+        done: false,
+        deepResearchEvent: { type: "run_started", runId: "run-1" },
+      },
+      {
+        requestId: "req-1",
+        done: false,
+        deepResearchEvent: {
+          type: "phase",
+          phase: "plan",
+          message: "正在规划研究路径…",
+        },
+      },
+      { requestId: "req-1", done: false, delta: "报告正文" },
+      { requestId: "req-1", done: true },
+    ];
+
+    await useChatStore.getState().sendMessage(client, { content: "research", deepResearch: true });
+    const assistant = useChatStore.getState().messages.find((m) => m.role === "assistant");
+    expect(assistant?.content).toBe("报告正文");
+    expect(assistant?.content).not.toContain("正在规划");
+    expect(assistant?.deep_research?.runId).toBe("run-1");
+    expect(assistant?.deep_research?.events.some((e) => e.type === "phase")).toBe(true);
   });
 });

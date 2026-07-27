@@ -1,4 +1,10 @@
-import type { ChatMessage, ChatMessageAttachment, WebSearchSource } from "@agenticx/core-api";
+import type {
+  ChatMessage,
+  ChatMessageAttachment,
+  ChatMessageDeepResearch,
+  DeepResearchEvent,
+  WebSearchSource,
+} from "@agenticx/core-api";
 
 const ALLOWED_ROLES = new Set(["system", "user", "assistant", "tool"]);
 export const MAX_MESSAGES_PER_WRITE = 100;
@@ -8,6 +14,7 @@ export const MAX_IMAGE_ATTACHMENTS = 4;
 export const MAX_ATTACHMENT_DATA_URL_CHARS = 8_000_000;
 export const MAX_WEB_SEARCH_SOURCES = 50;
 export const MAX_SOURCE_FIELD_CHARS = 4_000;
+export const MAX_DEEP_RESEARCH_EVENTS = 200;
 
 function sanitizeAttachments(raw: unknown): ChatMessageAttachment[] | undefined {
   if (raw == null) return undefined;
@@ -72,6 +79,33 @@ function sanitizeWebSearchSources(raw: unknown): WebSearchSource[] | undefined {
   return out.length > 0 ? out : undefined;
 }
 
+function sanitizeDeepResearch(raw: unknown): ChatMessageDeepResearch | undefined {
+  if (raw == null) return undefined;
+  if (!raw || typeof raw !== "object") throw new Error("invalid deep_research");
+  const row = raw as Record<string, unknown>;
+  const runId = typeof row.runId === "string" ? row.runId.trim() : "";
+  if (!runId) throw new Error("deep_research.runId required");
+  const statusRaw = typeof row.status === "string" ? row.status : "completed";
+  const allowed = new Set([
+    "running",
+    "awaiting_clarify",
+    "completed",
+    "failed",
+    "cancelled",
+  ]);
+  const status = allowed.has(statusRaw)
+    ? (statusRaw as ChatMessageDeepResearch["status"])
+    : "completed";
+  const eventsRaw = Array.isArray(row.events) ? row.events : [];
+  const events = eventsRaw
+    .filter((e): e is DeepResearchEvent => Boolean(e && typeof e === "object" && "type" in e))
+    .slice(-MAX_DEEP_RESEARCH_EVENTS);
+  const artifactIds = Array.isArray(row.artifactIds)
+    ? row.artifactIds.filter((id): id is string => typeof id === "string").slice(0, 40)
+    : undefined;
+  return { runId, status, events, artifactIds };
+}
+
 export function sanitizeInboundMessages(
   sessionId: string,
   tenantId: string,
@@ -93,6 +127,7 @@ export function sanitizeInboundMessages(
     if (!ALLOWED_ROLES.has(role)) throw new Error(`invalid role: ${role}`);
     const attachments = sanitizeAttachments(row.attachments);
     const webSearchSources = sanitizeWebSearchSources(row.web_search_sources);
+    const deepResearch = sanitizeDeepResearch(row.deep_research);
     if (role === "user" && !content.trim() && !attachments?.length) {
       throw new Error("message content required");
     }
@@ -109,6 +144,7 @@ export function sanitizeInboundMessages(
       content,
       attachments,
       web_search_sources: webSearchSources,
+      deep_research: deepResearch,
       model,
       created_at: createdAt,
     });

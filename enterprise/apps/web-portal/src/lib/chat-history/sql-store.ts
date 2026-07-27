@@ -56,6 +56,7 @@ function mapSession(row: Record<string, unknown>): ChatSession {
 type MessageMetadata = {
   attachments?: ChatMessage["attachments"];
   web_search_sources?: ChatMessage["web_search_sources"];
+  deep_research?: ChatMessage["deep_research"];
 };
 
 function parseMetadata(value: unknown): MessageMetadata | null {
@@ -78,6 +79,12 @@ function serializeMessageMetadata(message: ChatMessage): string | null {
   if (message.web_search_sources?.length) {
     metadata.web_search_sources = message.web_search_sources;
   }
+  if (message.deep_research) {
+    const events = Array.isArray(message.deep_research.events)
+      ? message.deep_research.events.slice(-200)
+      : [];
+    metadata.deep_research = { ...message.deep_research, events };
+  }
   return Object.keys(metadata).length > 0 ? JSON.stringify(metadata) : null;
 }
 
@@ -92,6 +99,7 @@ function mapMessage(row: Record<string, unknown>): ChatMessage {
     content: String(row.content),
     attachments: metadata?.attachments,
     web_search_sources: metadata?.web_search_sources,
+    deep_research: metadata?.deep_research,
     model: row.model == null ? undefined : String(row.model),
     created_at: toDate(row.created_at).toISOString(),
   };
