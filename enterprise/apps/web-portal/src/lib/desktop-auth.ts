@@ -1,5 +1,8 @@
 import { getAdminUser, touchPatLastUsed, verifyPat } from "@agenticx/iam-core";
 
+/** Scopes issued for Near Desktop device PATs (control + managed inference). */
+export const DESKTOP_MANAGED_PAT_SCOPES = ["workspace:chat", "desktop:managed"] as const;
+
 export type DesktopIdentity = {
   userId: string;
   tenantId: string;
@@ -7,6 +10,8 @@ export type DesktopIdentity = {
   email: string;
   displayName: string;
   tokenId: number;
+  /** Trusted scopes from verifyPat only — never from client headers. */
+  scopes: string[];
 };
 
 /**
@@ -30,6 +35,8 @@ export async function resolveDesktopIdentity(request: Request): Promise<DesktopI
     /* best-effort */
   });
 
+  const scopes = Array.isArray(verified.scopes) ? verified.scopes.map(String) : [];
+
   return {
     userId: verified.userId,
     tenantId: verified.tenantId,
@@ -37,5 +44,6 @@ export async function resolveDesktopIdentity(request: Request): Promise<DesktopI
     email: user.email,
     displayName: user.displayName ?? "",
     tokenId: verified.id,
+    scopes,
   };
 }

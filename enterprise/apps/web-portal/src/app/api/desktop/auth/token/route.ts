@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { createPat } from "@agenticx/iam-core";
 import { loginAndGetIdentity } from "../../../../../lib/auth-runtime";
+import { DESKTOP_MANAGED_PAT_SCOPES } from "../../../../../lib/desktop-auth";
 
 function desktopPatExpireDays(): number {
   const raw = Number(process.env.DESKTOP_PAT_EXPIRE_DAYS ?? "90");
@@ -48,6 +49,7 @@ export async function POST(request: Request) {
       name: `Near Desktop · ${deviceName}`,
       createdBy: identity.userId,
       expireDays,
+      scopes: [...DESKTOP_MANAGED_PAT_SCOPES],
     });
     const expiresAt = new Date(Date.now() + expireDays * 24 * 60 * 60 * 1000).toISOString();
     return NextResponse.json({

@@ -1439,12 +1439,17 @@ func (s *Server) identityFromRequest(r *http.Request) (requestIdentity, error) {
 		if err != nil {
 			return requestIdentity{}, err
 		}
+		clientType := "api-token"
+		if gatewayauth.HasScope(pat.Scopes, "desktop:managed") {
+			clientType = "desktop"
+		}
 		return enrichTraceFromRequest(requestIdentity{
 			TenantID:     pat.TenantID,
 			UserID:       pat.UserID,
+			UserEmail:    pat.UserEmail,
 			DepartmentID: pat.DeptID,
 			Scopes:       pat.Scopes,
-			ClientType:   "api-token",
+			ClientType:   clientType,
 			APITokenID:   pat.APITokenID,
 			AuthViaPAT:   true,
 		}, r), nil

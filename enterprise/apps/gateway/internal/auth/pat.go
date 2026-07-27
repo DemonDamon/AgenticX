@@ -38,6 +38,7 @@ type PATVerifier struct {
 	touchPending    map[int64]struct{}
 	touchStarted    bool
 	revocationStore *PATRevocationStore
+	lookup          func(ctx context.Context, tokenHash string) (patTokenRow, error)
 }
 
 func NewPATVerifier(handle *database.Handle) *PATVerifier {
@@ -117,40 +118,98 @@ func (v *PATVerifier) Verify(ctx context.Context, token string) (PATIdentity, er
 		}
 		return cached.identity, nil
 	}
-	if v.database == nil {
-		return PATIdentity{}, errors.New("auth:pat:database_unavailable")
-	}
-	var id int64
-	var tenantID, userID, deptID, status string
-	var scopes []byte
-	var expireAt *time.Time
-	row, err := v.database.QueryRowContext(ctx, `
-SELECT id, tenant_id, user_id, COALESCE(dept_id, ''), status, scopes, expire_at
-FROM api_tokens WHERE token_hash = ? LIMIT 1`, hash)
+	row, err := v.lookupToken(ctx, hash)
 	if err != nil {
-		return PATIdentity{}, errors.New("auth:pat:invalid")
+		return PATIdentity{}, err
 	}
-	err = row.Scan(&id, &tenantID, &userID, &deptID, &status, &scopes, &expireAt)
-	if err != nil {
-		return PATIdentity{}, errors.New("auth:pat:invalid")
-	}
-	if status == "revoked" {
+	if row.Status == "revoked" {
 		v.storeCache(hash, patCacheEntry{revoked: true, expires: time.Now().Add(v.ttl)})
 		return PATIdentity{}, errors.New("auth:pat_revoked")
 	}
-	if expireAt != nil && time.Now().UTC().After(*expireAt) {
+	if row.ExpireAt != nil && time.Now().UTC().After(*row.ExpireAt) {
 		return PATIdentity{}, errors.New("auth:pat:expired")
 	}
-	parsedScopes := parseScopesJSON(scopes)
+	userStatus := strings.TrimSpace(strings.ToLower(row.UserStatus))
+	if row.UserEmail == "" || userStatus == "" || userStatus != "active" {
+		// Stable internal code; do not expose DB join details to clients.
+		return PATIdentity{}, errors.New("auth:pat:user_inactive")
+	}
+	parsedScopes := parseScopesJSON(row.Scopes)
 	identity := PATIdentity{
-		APITokenID: id,
-		TenantID:   strings.TrimSpace(tenantID),
-		UserID:     strings.TrimSpace(userID),
-		DeptID:     strings.TrimSpace(deptID),
+		APITokenID: row.ID,
+		TenantID:   strings.TrimSpace(row.TenantID),
+		UserID:     strings.TrimSpace(row.UserID),
+		DeptID:     strings.TrimSpace(row.DeptID),
 		Scopes:     parsedScopes,
+		UserEmail:  strings.TrimSpace(row.UserEmail),
 	}
 	v.storeCache(hash, patCacheEntry{identity: identity, expires: time.Now().Add(v.ttl)})
 	return identity, nil
+}
+
+type patTokenRow struct {
+	ID         int64
+	TenantID   string
+	UserID     string
+	DeptID     string
+	Status     string
+	Scopes     []byte
+	ExpireAt   *time.Time
+	UserEmail  string
+	UserStatus string
+}
+
+// lookup is an optional test seam; production uses SQL via database.Handle.
+func (v *PATVerifier) withLookup(fn func(ctx context.Context, tokenHash string) (patTokenRow, error)) *PATVerifier {
+	v.lookup = fn
+	return v
+}
+
+func (v *PATVerifier) lookupToken(ctx context.Context, hash string) (patTokenRow, error) {
+	if v.lookup != nil {
+		return v.lookup(ctx, hash)
+	}
+	if v.database == nil {
+		return patTokenRow{}, errors.New("auth:pat:database_unavailable")
+	}
+	var row patTokenRow
+	sqlRow, err := v.database.QueryRowContext(ctx, `
+SELECT
+  t.id,
+  t.tenant_id,
+  t.user_id,
+  COALESCE(t.dept_id, ''),
+  t.status,
+  t.scopes,
+  t.expire_at,
+  COALESCE(u.email, ''),
+  COALESCE(u.status, '')
+FROM api_tokens t
+LEFT JOIN users u
+  ON u.id = t.user_id
+ AND u.tenant_id = t.tenant_id
+ AND u.is_deleted = FALSE
+ AND u.deleted_at IS NULL
+WHERE t.token_hash = ?
+LIMIT 1`, hash)
+	if err != nil {
+		return patTokenRow{}, errors.New("auth:pat:invalid")
+	}
+	err = sqlRow.Scan(
+		&row.ID,
+		&row.TenantID,
+		&row.UserID,
+		&row.DeptID,
+		&row.Status,
+		&row.Scopes,
+		&row.ExpireAt,
+		&row.UserEmail,
+		&row.UserStatus,
+	)
+	if err != nil {
+		return patTokenRow{}, errors.New("auth:pat:invalid")
+	}
+	return row, nil
 }
 
 func (v *PATVerifier) Invalidate(token string) {
