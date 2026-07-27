@@ -48,3 +48,14 @@ bash enterprise/scripts/perf/run-app-baseline.sh
 **验收映射（规范书 1.1.13）**：k6 场景 ramp `0→50(30s)→200(30s)→200(60s)`；通过标准以现场 4C/8G 环境 P95≤800ms 为目标，本地 dev 脚本默认阈值较宽松（P95<5000ms）避免误伤。
 
 CI：可在单独 workflow 里夜间触发 k6，将摘要或 JSON artifact 上传；主仓不强制。
+
+## Desktop 企业直连 Gateway smoke
+
+| 项 | 说明 |
+|---|---|
+| 脚本 | `pnpm -C enterprise exec tsx scripts/perf/desktop-enterprise-smoke.ts` |
+| 环境变量 | `PORTAL_BASE_URL` / `GATEWAY_PUBLIC_BASE_URL` / `DESKTOP_TEST_EMAIL` / `DESKTOP_TEST_PASSWORD` |
+| 行为 | 账密签发 managed PAT → bootstrap → Gateway 流式 hello；校验未分配模型 403、Header 冲突 400 |
+| 隐私 | 不打印 password；PAT 仅掩码 |
+
+缺环境变量时脚本以 `skipped: true` 退出 0（便于本地无栈时跑单元验收）。
