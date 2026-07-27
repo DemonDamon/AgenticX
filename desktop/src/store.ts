@@ -493,8 +493,13 @@ type AppState = {
   focusExitScrollBottomPaneId: string | null;
   clearFocusExitScrollBottomPaneId: () => void;
   theme: ThemeMode;
-  /** Near 官网账号登录状态（与 AccountTab / Topbar 共享，首屏和事件回调同步）。 */
-  agxAccount: { loggedIn: boolean; email: string; displayName: string };
+  /** Enterprise 用户账号登录状态（与 AccountTab / Topbar 共享，首屏和事件回调同步）。 */
+  userAccount: {
+    loggedIn: boolean;
+    email: string;
+    displayName: string;
+    baseUrl?: string;
+  };
   chatStyle: ChatStyle;
   themeColor: ThemeColor;
   /** Global user nickname shown on all bubbles and sent as context label (empty → 「我」). */
@@ -581,7 +586,12 @@ type AppState = {
   toggleFocusMode: (paneId?: string) => void;
   setTheme: (theme: ThemeMode) => void;
   setThemeColor: (color: ThemeColor) => void;
-  setAgxAccount: (acct: { loggedIn: boolean; email: string; displayName: string }) => void;
+  setUserAccount: (acct: {
+    loggedIn: boolean;
+    email: string;
+    displayName: string;
+    baseUrl?: string;
+  }) => void;
   setChatStyle: (style: ChatStyle) => void;
   setUserNickname: (name: string) => void;
   setUserAvatarUrl: (url: string) => void;
@@ -1011,7 +1021,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   focusExitScrollBottomPaneId: null,
   theme: loadTheme(),
   themeColor: loadThemeColor(),
-  agxAccount: { loggedIn: false, email: "", displayName: "" },
+  userAccount: { loggedIn: false, email: "", displayName: "", baseUrl: "" },
   chatStyle: loadChatStyle(),
   userNickname: loadUserNickname(),
   userAvatarUrl: loadUserAvatarUrl(),
@@ -1251,7 +1261,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       }
       return { themeColor };
     }),
-  setAgxAccount: (agxAccount) => set({ agxAccount }),
+  setUserAccount: (userAccount) => set({ userAccount }),
   setChatStyle: (chatStyle) =>
     set(() => {
       try {

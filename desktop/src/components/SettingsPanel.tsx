@@ -46,9 +46,7 @@ import {
   Database,
   X,
   TriangleAlert,
-  Building2,
 } from "lucide-react";
-import { EnterpriseAccountPanel } from "./settings/enterprise/EnterpriseAccountPanel";
 import { Panel } from "./ds/Panel";
 import { SettingsDropdown } from "./ds/SettingsDropdown";
 import { Modal } from "./ds/Modal";
@@ -1004,7 +1002,6 @@ function ModelCapabilityBadges({
 
 const TABS: { id: SettingsTab; label: string; icon: typeof Settings2 }[] = [
   { id: "account", label: "用户账号", icon: User },
-  { id: "enterprise", label: "企业账号", icon: Building2 },
   { id: "general", label: "通用偏好", icon: Settings2 },
   { id: "provider", label: "模型服务", icon: Cpu },
   { id: "mcp", label: "MCP", icon: Plug },
@@ -8390,9 +8387,8 @@ export function SettingsPanel({
                   : "overflow-y-auto py-3"
             }`}
           >
-            {tab === "account" && <AccountTab />}
-            {tab === "enterprise" && (
-              <EnterpriseAccountPanel onChanged={() => void reloadProvidersAfterEnterpriseChange()} />
+            {tab === "account" && (
+              <AccountTab onChanged={() => void reloadProvidersAfterEnterpriseChange()} />
             )}
 
             {/* === GENERAL TAB ===（保持挂载以便底部「保存」能刷入权限 API，避免仅失焦写入） */}
@@ -8881,8 +8877,8 @@ export function SettingsPanel({
               <div className="flex min-h-0 flex-1 flex-col gap-3">
                 <RemoteBackendHintBanner kind="synced" />
                 {enterpriseStrict && (
-                  <div className="rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-700 dark:text-amber-300">
-                    模型由企业管理员统一配置。可在「企业账号」刷新列表或退出登录以恢复自配服务商。
+                  <div className="rounded-lg border border-[color-mix(in_srgb,var(--status-warning)_40%,transparent)] bg-[color-mix(in_srgb,var(--status-warning)_12%,transparent)] px-3 py-2 text-xs font-medium leading-relaxed text-[var(--status-warning)]">
+                    模型由企业管理员统一配置。可在「用户账号」刷新列表或退出登录以恢复自配服务商。
                   </div>
                 )}
               <div className="flex min-h-0 flex-1 gap-4">

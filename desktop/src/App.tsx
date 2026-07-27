@@ -271,7 +271,7 @@ export function App() {
   const theme = useAppStore((s) => s.theme);
   const themeColor = useAppStore((s) => s.themeColor);
   const setTheme = useAppStore((s) => s.setTheme);
-  const setAgxAccount = useAppStore((s) => s.setAgxAccount);
+  const setUserAccount = useAppStore((s) => s.setUserAccount);
   const chatStyle = useAppStore((s) => s.chatStyle);
   const setChatStyle = useAppStore((s) => s.setChatStyle);
   const subAgents = useAppStore((s) => s.subAgents);
@@ -1589,33 +1589,36 @@ export function App() {
   }, []);
 
   useEffect(() => {
-    // Initial account hydration and subscription to device-flow OAuth events.
-    // Both Topbar and Settings → AccountTab consume agxAccount via store; keep them in sync.
+    // Initial account hydration and subscription to enterprise browser-login events.
+    // Topbar and Settings → AccountTab share userAccount via store.
     let cancelled = false;
     void (async () => {
       try {
-        const r = await window.agenticxDesktop.loadAgxAccount();
+        const r = await window.agenticxDesktop.loadUserAccount();
         if (cancelled || !r.ok) return;
-        setAgxAccount({
+        setUserAccount({
           loggedIn: Boolean(r.loggedIn),
           email: String(r.email ?? ""),
           displayName: String(r.displayName ?? ""),
+          baseUrl: String(r.baseUrl ?? ""),
         });
       } catch {
         // ignore; account is optional for most local workflows
       }
     })();
 
-    const offChanged = window.agenticxDesktop.onAgxAccountChanged((payload) => {
-      const email = String(payload.email ?? "");
-      const displayName = String(payload.displayName ?? "");
-      setAgxAccount({ loggedIn: Boolean(email.trim()), email, displayName });
+    const offChanged = window.agenticxDesktop.onUserAccountChanged((payload) => {
+      setUserAccount({
+        loggedIn: Boolean(payload.loggedIn),
+        email: String(payload.email ?? ""),
+        displayName: String(payload.displayName ?? ""),
+        baseUrl: String(payload.baseUrl ?? ""),
+      });
     });
-    const offTimeout = window.agenticxDesktop.onAgxAccountLoginTimeout(() => {
+    const offTimeout = window.agenticxDesktop.onUserAccountLoginTimeout(() => {
       void window.agenticxDesktop.confirmDialog({
         title: "登录等待超时",
-        message: "未在有效时间内完成官网登录确认。请重新点击「登录」再试。",
-        detail: "错误代码 AGX-AUTH-201（向支持反馈时请一并提供）",
+        message: "未在有效时间内完成企业登录确认。请打开「设置 → 用户账号」重新登录。",
         confirmText: "确定",
       });
     });
@@ -1624,7 +1627,7 @@ export function App() {
       offChanged();
       offTimeout();
     };
-  }, [setAgxAccount]);
+  }, [setUserAccount]);
 
   useEffect(() => {
     const onWindowResize = () => {

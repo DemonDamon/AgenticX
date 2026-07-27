@@ -904,22 +904,31 @@ contextBridge.exposeInMainWorld("agenticxDesktop", {
     return () => ipcRenderer.removeListener("terminal-exit", handler);
   },
 
-  agxAccountLoginStart: async () =>
-    ipcRenderer.invoke("agx-account-login-start") as Promise<{
+  userAccountLoginStart: async (payload: { baseUrl?: string }) =>
+    ipcRenderer.invoke("user-account-login-start", payload) as Promise<{
       ok: boolean;
-      device_id?: string;
-      open_url?: string;
+      deviceId?: string;
+      openUrl?: string;
       error?: string;
     }>,
-  agxAccountLoginCancel: async () =>
-    ipcRenderer.invoke("agx-account-login-cancel") as Promise<{ ok: boolean }>,
-  agxAccountLogout: async () => ipcRenderer.invoke("agx-account-logout") as Promise<{ ok: boolean }>,
-  loadAgxAccount: async () =>
-    ipcRenderer.invoke("load-agx-account") as Promise<{
+  userAccountLoginCancel: async () =>
+    ipcRenderer.invoke("user-account-login-cancel") as Promise<{ ok: boolean }>,
+  userAccountLogout: async () =>
+    ipcRenderer.invoke("user-account-logout") as Promise<{ ok: boolean }>,
+  loadUserAccount: async () =>
+    ipcRenderer.invoke("load-user-account") as Promise<{
       ok: boolean;
       loggedIn?: boolean;
       email?: string;
       displayName?: string;
+      baseUrl?: string;
+      defaultBaseUrl?: string;
+      inferenceBaseUrl?: string;
+      transport?: string;
+      reauthRequiredForDirect?: boolean;
+      strict?: boolean;
+      models?: string[];
+      syncedAt?: string;
     }>,
   loadEnterprise: async () =>
     ipcRenderer.invoke("load-enterprise") as Promise<{
@@ -931,6 +940,9 @@ contextBridge.exposeInMainWorld("agenticxDesktop", {
       strict?: boolean;
       models?: string[];
       syncedAt?: string;
+      inferenceBaseUrl?: string;
+      transport?: string;
+      reauthRequiredForDirect?: boolean;
     }>,
   enterpriseLogin: async (payload: { baseUrl: string; email: string; password: string }) =>
     ipcRenderer.invoke("enterprise-login", payload) as Promise<{
@@ -948,15 +960,25 @@ contextBridge.exposeInMainWorld("agenticxDesktop", {
       unauthorized?: boolean;
       models?: string[];
     }>,
-  onAgxAccountChanged: (cb: (payload: { email: string; displayName: string }) => void): (() => void) => {
-    const handler = (_e: unknown, payload: { email: string; displayName: string }) => cb(payload);
-    ipcRenderer.on("agx-account-changed", handler);
-    return () => ipcRenderer.removeListener("agx-account-changed", handler);
+  onUserAccountChanged: (
+    cb: (payload: {
+      email: string;
+      displayName: string;
+      loggedIn: boolean;
+      baseUrl?: string;
+    }) => void,
+  ): (() => void) => {
+    const handler = (
+      _e: unknown,
+      payload: { email: string; displayName: string; loggedIn: boolean; baseUrl?: string },
+    ) => cb(payload);
+    ipcRenderer.on("user-account-changed", handler);
+    return () => ipcRenderer.removeListener("user-account-changed", handler);
   },
-  onAgxAccountLoginTimeout: (cb: () => void): (() => void) => {
+  onUserAccountLoginTimeout: (cb: () => void): (() => void) => {
     const handler = () => cb();
-    ipcRenderer.on("agx-account-login-timeout", handler);
-    return () => ipcRenderer.removeListener("agx-account-login-timeout", handler);
+    ipcRenderer.on("user-account-login-timeout", handler);
+    return () => ipcRenderer.removeListener("user-account-login-timeout", handler);
   },
   updateSplashStage: async (stage: string) =>
     ipcRenderer.invoke("update-splash-stage", stage) as Promise<{ ok: boolean }>,

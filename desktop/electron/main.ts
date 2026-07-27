@@ -61,6 +61,13 @@ import { isRealpathUnder, safeRealpath } from "./path-guard";
 import { writeLocalTextFileAtomic } from "./write-local-text-file";
 import { selectEnterpriseInferenceBase } from "./enterprise-routing";
 import {
+  computePollMaxTicks,
+  isVerificationUrlSameOrigin,
+  normalizePortalOrigin,
+  parseDeviceInitPayload,
+  validatePortalOriginForBrowserLogin,
+} from "./enterprise-browser-login";
+import {
   applySessionWorkspaceCopy,
   copySourceIntoWorkspace,
   createWorkspaceLink,
@@ -244,6 +251,8 @@ type ProviderConfig = {
 
 type EnterpriseConfig = {
   enabled?: boolean;
+  /** Portal origin remembered for employees; survives logout. */
+  default_portal_url?: string;
   base_url?: string;
   inference_base_url?: string;
   transport?: "gateway-direct-v1" | "portal-proxy-v1";
@@ -260,6 +269,17 @@ type EnterpriseConfig = {
   models?: string[];
   synced_at?: string;
 };
+
+/** Resolve org portal URL for employee login without asking them to type it. */
+function resolveEnterprisePortalDefault(cfg: AgxConfig): string {
+  const fromEnv = String(process.env.AGX_ENTERPRISE_PORTAL_URL ?? "").trim();
+  const fromDefault = String(cfg.enterprise?.default_portal_url ?? "").trim();
+  const fromLast = String(cfg.enterprise?.base_url ?? "").trim();
+  const candidate = fromEnv || fromDefault || fromLast;
+  if (!candidate) return "";
+  const validated = validatePortalOriginForBrowserLogin(candidate);
+  return validated.ok ? validated.origin : "";
+}
 
 type RemoteServerConfig = {
   enabled?: boolean;
@@ -321,7 +341,7 @@ type AgxConfig = {
   skills?: { non_high_risk_auto_install?: boolean };
   /** Meta-agent default workspace root (supports ~); mirrors config.yaml workspace_dir */
   workspace_dir?: string;
-  /** Near 官网 / Supabase 账号（桌面端轮询写入，勿在日志中打印 token） */
+  /** @deprecated Ignored; enterprise login is the only account source. */
   agx_account?: {
     user_email?: string;
     user_display_name?: string;
@@ -333,10 +353,6 @@ type AgxConfig = {
   /** Enterprise portal managed login (PAT + hosted models). Never log token. */
   enterprise?: EnterpriseConfig;
 };
-
-function normalizePortalOrigin(raw: string): string {
-  return String(raw || "").trim().replace(/\/+$/, "");
-}
 
 /** Enterprise portal login/bootstrap — avoid infinite spinner when proxy/network stalls. */
 const ENTERPRISE_PORTAL_FETCH_TIMEOUT_MS = 15_000;
@@ -371,6 +387,7 @@ function applyEnterpriseProvider(
   const inferenceBase = opts.inferenceBaseUrl.replace(/\/+$/, "");
   cfg.enterprise = {
     enabled: true,
+    default_portal_url: opts.portalOrigin,
     base_url: opts.portalOrigin,
     inference_base_url: inferenceBase,
     transport: opts.transport,
@@ -399,7 +416,16 @@ function applyEnterpriseProvider(
 }
 
 function clearEnterpriseFromConfig(cfg: AgxConfig): void {
-  delete cfg.enterprise;
+  const rememberedPortal =
+    String(cfg.enterprise?.default_portal_url ?? "").trim() ||
+    String(cfg.enterprise?.base_url ?? "").trim() ||
+    String(process.env.AGX_ENTERPRISE_PORTAL_URL ?? "").trim();
+  const validated = validatePortalOriginForBrowserLogin(rememberedPortal);
+  if (validated.ok) {
+    cfg.enterprise = { default_portal_url: validated.origin };
+  } else {
+    delete cfg.enterprise;
+  }
   if (cfg.providers?.enterprise) {
     const next = { ...cfg.providers };
     delete next.enterprise;
@@ -410,6 +436,104 @@ function clearEnterpriseFromConfig(cfg: AgxConfig): void {
     cfg.active_provider = "";
     cfg.active_model = "";
   }
+}
+
+type EnterpriseTokenUser = {
+  userId?: string;
+  email?: string;
+  displayName?: string;
+  tenantId?: string;
+  deptId?: string | null;
+};
+
+async function finishEnterpriseLogin(
+  baseUrl: string,
+  pat: string,
+  fallbackUser?: EnterpriseTokenUser,
+): Promise<
+  | {
+      ok: true;
+      user: { email: string; displayName: string };
+      models: string[];
+      transport: "gateway-direct-v1" | "portal-proxy-v1";
+      reauthRequiredForDirect: boolean;
+    }
+  | { ok: false; error: string }
+> {
+  const bootResp = await proxyAwareFetch(`${baseUrl}/api/desktop/bootstrap`, {
+    method: "GET",
+    headers: {
+      accept: "application/json",
+      authorization: `Bearer ${pat}`,
+    },
+    signal: AbortSignal.timeout(ENTERPRISE_PORTAL_FETCH_TIMEOUT_MS),
+  });
+  const bootJson = (await bootResp.json().catch(() => ({}))) as {
+    code?: string;
+    message?: string;
+    data?: {
+      user?: EnterpriseTokenUser;
+      models?: Array<{ id?: string }>;
+      policy?: { strict?: boolean };
+      apiBaseUrl?: string;
+      inferenceApiBaseUrl?: string;
+      inferenceTransport?: string;
+      reauthRequiredForDirect?: boolean;
+    };
+  };
+  if (!bootResp.ok || !bootJson.data) {
+    return {
+      ok: false,
+      error:
+        bootResp.status === 401
+          ? "企业登录已失效，请重新登录"
+          : bootResp.status === 503
+            ? bootJson.message || "企业推理入口未配置，请联系管理员"
+            : bootJson.message || `拉取模型失败（HTTP ${bootResp.status}）`,
+    };
+  }
+  const inference = selectEnterpriseInferenceBase({
+    apiBaseUrl: bootJson.data.apiBaseUrl || `${baseUrl}/api/desktop/v1`,
+    inferenceApiBaseUrl: bootJson.data.inferenceApiBaseUrl,
+    inferenceTransport: bootJson.data.inferenceTransport,
+    reauthRequiredForDirect: bootJson.data.reauthRequiredForDirect,
+  });
+  if (!inference.ok) {
+    return { ok: false, error: inference.error };
+  }
+  const models = (bootJson.data.models ?? [])
+    .map((m) => String(m.id ?? "").trim())
+    .filter(Boolean);
+  const user = bootJson.data.user ?? fallbackUser ?? {};
+  const cfg = loadAgxConfig();
+  delete cfg.agx_account;
+  applyEnterpriseProvider(cfg, {
+    portalOrigin: baseUrl,
+    inferenceBaseUrl: inference.baseUrl,
+    transport: inference.transport,
+    reauthRequiredForDirect: inference.reauthRequiredForDirect,
+    token: pat,
+    models,
+    user: {
+      user_id: user.userId ?? "",
+      email: user.email ?? "",
+      display_name: user.displayName ?? "",
+      tenant_id: user.tenantId ?? "",
+      dept_id: user.deptId ?? null,
+    },
+    strict: bootJson.data.policy?.strict !== false,
+  });
+  saveAgxConfig(cfg);
+  return {
+    ok: true,
+    user: {
+      email: cfg.enterprise?.user?.email ?? "",
+      displayName: cfg.enterprise?.user?.display_name ?? "",
+    },
+    models,
+    transport: inference.transport,
+    reauthRequiredForDirect: inference.reauthRequiredForDirect,
+  };
 }
 
 type EmailConfig = {
@@ -1959,25 +2083,23 @@ let serveStderrBuffer = "";
 let remoteConfig: ResolvedRemoteConfig | null = null;
 let skillsDirWatchers: fs.FSWatcher[] = [];
 let skillsChangedDebounceTimer: NodeJS.Timeout | null = null;
-let agxAccountLoginPollTimer: NodeJS.Timeout | null = null;
-let agxAccountLoginDeviceId: string | null = null;
-let agxAccountLoginPollTicks = 0;
+let userAccountLoginPollTimer: NodeJS.Timeout | null = null;
+let userAccountLoginPollTicks = 0;
+let userAccountLoginContext: {
+  baseUrl: string;
+  deviceId: string;
+  deviceSecret: string;
+  pollIntervalMs: number;
+  maxTicks: number;
+} | null = null;
 
-const AGX_ACCOUNT_WEB_BASE_DEFAULT = "https://www.agxbuilder.com";
-
-function getAgxAccountWebBase(): string {
-  const raw = process.env.AGX_ACCOUNT_WEB_BASE?.trim();
-  if (raw) return raw.replace(/\/+$/, "");
-  return AGX_ACCOUNT_WEB_BASE_DEFAULT;
-}
-
-function clearAgxAccountLoginPoll(): void {
-  if (agxAccountLoginPollTimer) {
-    clearInterval(agxAccountLoginPollTimer);
-    agxAccountLoginPollTimer = null;
+function clearUserAccountLoginPoll(): void {
+  if (userAccountLoginPollTimer) {
+    clearInterval(userAccountLoginPollTimer);
+    userAccountLoginPollTimer = null;
   }
-  agxAccountLoginDeviceId = null;
-  agxAccountLoginPollTicks = 0;
+  userAccountLoginPollTicks = 0;
+  userAccountLoginContext = null;
 }
 
 function loadRemoteConfig(): ResolvedRemoteConfig | null {
@@ -7002,11 +7124,10 @@ function registerEarlyIpc(): void {
       cfg.onboarding_completed = true;
       saveAgxConfig(cfg);
     }
-    const acct = cfg.agx_account;
     // Provider/active model fields: in remote mode, read from the connected
     // backend so the UI reflects the actually-used config (the local file is
     // not what the remote model loader sees). Other fields — userMode,
-    // onboarding, agxAccount — remain Desktop-local concerns.
+    // onboarding, userAccount — remain Desktop-local concerns.
     let defaultProvider = cfg.default_provider ?? "";
     let providers: Record<string, ProviderConfig> = cfg.providers ?? {};
     let activeProvider = cfg.active_provider ?? "";
@@ -7035,10 +7156,11 @@ function registerEarlyIpc(): void {
       confirmStrategy: cfg.confirm_strategy ?? "semi-auto",
       activeProvider,
       activeModel,
-      agxAccount: {
-        loggedIn: Boolean(acct?.access_token),
-        email: acct?.user_email ?? "",
-        displayName: acct?.user_display_name ?? "",
+      userAccount: {
+        loggedIn: Boolean(ent?.enabled && ent?.token),
+        email: ent?.user?.email ?? "",
+        displayName: ent?.user?.display_name ?? "",
+        baseUrl: ent?.base_url ?? "",
       },
       enterprise: {
         enabled: Boolean(ent?.enabled && ent?.token),
@@ -7179,107 +7301,195 @@ function registerIpc(): void {
     }
   });
 
-  ipcMain.handle("agx-account-login-start", async () => {
-    clearAgxAccountLoginPoll();
-    const base = getAgxAccountWebBase();
-    const deviceId = crypto.randomUUID();
-    try {
-      const initRes = await fetch(`${base}/api/auth/device/init`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ device_id: deviceId }),
-      });
-      const initJson = (await initRes.json().catch(() => ({}))) as { ok?: boolean; error?: string };
-      if (!initRes.ok || !initJson.ok) {
+  ipcMain.handle(
+    "user-account-login-start",
+    async (_event, payload: { baseUrl?: string }) => {
+      const cfg = loadAgxConfig();
+      const requested = String(payload?.baseUrl ?? "").trim();
+      const resolved = requested || resolveEnterprisePortalDefault(cfg);
+      const validated = validatePortalOriginForBrowserLogin(resolved);
+      if (!validated.ok) {
         return {
           ok: false,
-          error:
-            typeof initJson.error === "string" && initJson.error
-              ? initJson.error
-              : `init_http_${initRes.status}`,
+          error: requested
+            ? validated.error
+            : "尚未配置组织地址。请由管理员预置，或点击「更换组织地址」填写。",
         };
       }
-    } catch (err) {
-      return { ok: false, error: String(err) };
-    }
-
-    const openUrl = `${base}/auth?desktop=1&device_id=${encodeURIComponent(deviceId)}`;
-    void shell.openExternal(openUrl);
-    agxAccountLoginDeviceId = deviceId;
-    agxAccountLoginPollTicks = 0;
-
-    agxAccountLoginPollTimer = setInterval(() => {
-      void (async () => {
-        const id = agxAccountLoginDeviceId;
-        if (!id) return;
-        agxAccountLoginPollTicks += 1;
-        if (agxAccountLoginPollTicks > 144) {
-          clearAgxAccountLoginPoll();
-          mainWindow?.webContents.send("agx-account-login-timeout", {});
-          return;
-        }
-        try {
-          const pollRes = await fetch(
-            `${getAgxAccountWebBase()}/api/auth/device/poll?device_id=${encodeURIComponent(id)}`
-          );
-          const data = (await pollRes.json().catch(() => ({}))) as {
-            ok?: boolean;
-            status?: string;
-            access_token?: string;
-            refresh_token?: string;
-            supabase_url?: string;
-            user?: { email?: string; display_name?: string };
+      const baseUrl = validated.origin;
+      if (userAccountLoginContext) {
+        const prev = userAccountLoginContext;
+        clearUserAccountLoginPoll();
+        void proxyAwareFetch(`${prev.baseUrl}/api/desktop/auth/device/cancel`, {
+          method: "POST",
+          headers: { "content-type": "application/json", accept: "application/json" },
+          body: JSON.stringify({
+            deviceId: prev.deviceId,
+            deviceSecret: prev.deviceSecret,
+          }),
+          signal: AbortSignal.timeout(ENTERPRISE_PORTAL_FETCH_TIMEOUT_MS),
+        }).catch(() => undefined);
+      }
+      try {
+        const initResp = await proxyAwareFetch(`${baseUrl}/api/desktop/auth/device/init`, {
+          method: "POST",
+          headers: { "content-type": "application/json", accept: "application/json" },
+          body: JSON.stringify({ deviceName: os.hostname() || "Near Desktop" }),
+          signal: AbortSignal.timeout(ENTERPRISE_PORTAL_FETCH_TIMEOUT_MS),
+        });
+        const initJson = (await initResp.json().catch(() => ({}))) as {
+          message?: string;
+          data?: unknown;
+        };
+        const parsed = parseDeviceInitPayload(initJson.data);
+        if (!initResp.ok || !parsed) {
+          return {
+            ok: false,
+            error: initJson.message || `无法开始企业登录（HTTP ${initResp.status}）`,
           };
-          if (!pollRes.ok || data.ok === false) return;
-          if (data.status === "completed" && data.access_token) {
-            clearAgxAccountLoginPoll();
-            const cfg = loadAgxConfig();
-            cfg.agx_account = {
-              user_email: String(data.user?.email ?? ""),
-              user_display_name: String(
-                data.user?.display_name ?? data.user?.email ?? ""
-              ),
-              access_token: String(data.access_token),
-              refresh_token: String(data.refresh_token ?? ""),
-              supabase_url: String(data.supabase_url ?? ""),
-              updated_at: new Date().toISOString(),
-            };
-            saveAgxConfig(cfg);
-            mainWindow?.webContents.send("agx-account-changed", {
-              email: cfg.agx_account.user_email ?? "",
-              displayName: cfg.agx_account.user_display_name ?? "",
-            });
-          }
-        } catch {
-          // ignore transient network errors
         }
-      })();
-    }, 2500);
+        if (!isVerificationUrlSameOrigin(baseUrl, parsed.verificationUrl)) {
+          return { ok: false, error: "组织返回的登录地址无效，请检查组织地址" };
+        }
+        void shell.openExternal(parsed.verificationUrl);
+        const maxTicks = computePollMaxTicks(parsed.expiresIn, parsed.pollIntervalMs);
+        userAccountLoginContext = {
+          baseUrl,
+          deviceId: parsed.deviceId,
+          deviceSecret: parsed.deviceSecret,
+          pollIntervalMs: parsed.pollIntervalMs,
+          maxTicks,
+        };
+        userAccountLoginPollTicks = 0;
+        userAccountLoginPollTimer = setInterval(() => {
+          void (async () => {
+            const ctx = userAccountLoginContext;
+            if (!ctx) return;
+            userAccountLoginPollTicks += 1;
+            if (userAccountLoginPollTicks > ctx.maxTicks) {
+              const timedOut = userAccountLoginContext;
+              clearUserAccountLoginPoll();
+              if (timedOut) {
+                void proxyAwareFetch(`${timedOut.baseUrl}/api/desktop/auth/device/cancel`, {
+                  method: "POST",
+                  headers: { "content-type": "application/json", accept: "application/json" },
+                  body: JSON.stringify({
+                    deviceId: timedOut.deviceId,
+                    deviceSecret: timedOut.deviceSecret,
+                  }),
+                  signal: AbortSignal.timeout(ENTERPRISE_PORTAL_FETCH_TIMEOUT_MS),
+                }).catch(() => undefined);
+              }
+              mainWindow?.webContents.send("user-account-login-timeout", {});
+              return;
+            }
+            try {
+              const pollRes = await proxyAwareFetch(
+                `${ctx.baseUrl}/api/desktop/auth/device/poll`,
+                {
+                  method: "POST",
+                  headers: { "content-type": "application/json", accept: "application/json" },
+                  body: JSON.stringify({
+                    deviceId: ctx.deviceId,
+                    deviceSecret: ctx.deviceSecret,
+                  }),
+                  signal: AbortSignal.timeout(ENTERPRISE_PORTAL_FETCH_TIMEOUT_MS),
+                },
+              );
+              const pollJson = (await pollRes.json().catch(() => ({}))) as {
+                data?: {
+                  status?: string;
+                  token?: string;
+                  user?: EnterpriseTokenUser;
+                };
+              };
+              const status = String(pollJson.data?.status ?? "");
+              if (pollRes.status === 410 || status === "expired" || status === "cancelled" || status === "consumed") {
+                clearUserAccountLoginPoll();
+                mainWindow?.webContents.send("user-account-login-timeout", {});
+                return;
+              }
+              if (!pollRes.ok || status !== "completed" || !pollJson.data?.token) return;
+              const pat = String(pollJson.data.token);
+              clearUserAccountLoginPoll();
+              const finished = await finishEnterpriseLogin(ctx.baseUrl, pat, pollJson.data.user);
+              if (!finished.ok) {
+                mainWindow?.webContents.send("user-account-login-timeout", {});
+                return;
+              }
+              mainWindow?.webContents.send("user-account-changed", {
+                email: finished.user.email,
+                displayName: finished.user.displayName,
+                loggedIn: true,
+                baseUrl: ctx.baseUrl,
+              });
+            } catch {
+              // ignore transient network errors while polling
+            }
+          })();
+        }, Math.max(1000, parsed.pollIntervalMs));
+        return {
+          ok: true,
+          deviceId: parsed.deviceId,
+          openUrl: parsed.verificationUrl,
+        };
+      } catch (err) {
+        clearUserAccountLoginPoll();
+        return { ok: false, error: enterpriseFetchErrorMessage(err) };
+      }
+    },
+  );
 
-    return { ok: true, device_id: deviceId, open_url: openUrl };
-  });
-
-  ipcMain.handle("agx-account-login-cancel", async () => {
-    clearAgxAccountLoginPoll();
+  ipcMain.handle("user-account-login-cancel", async () => {
+    const ctx = userAccountLoginContext;
+    clearUserAccountLoginPoll();
+    if (ctx) {
+      void proxyAwareFetch(`${ctx.baseUrl}/api/desktop/auth/device/cancel`, {
+        method: "POST",
+        headers: { "content-type": "application/json", accept: "application/json" },
+        body: JSON.stringify({
+          deviceId: ctx.deviceId,
+          deviceSecret: ctx.deviceSecret,
+        }),
+        signal: AbortSignal.timeout(ENTERPRISE_PORTAL_FETCH_TIMEOUT_MS),
+      }).catch(() => undefined);
+    }
     return { ok: true };
   });
 
-  ipcMain.handle("agx-account-logout", async () => {
+  ipcMain.handle("user-account-logout", async () => {
+    clearUserAccountLoginPoll();
     const cfg = loadAgxConfig();
+    clearEnterpriseFromConfig(cfg);
     delete cfg.agx_account;
     saveAgxConfig(cfg);
-    mainWindow?.webContents.send("agx-account-changed", { email: "", displayName: "" });
+    const remembered = resolveEnterprisePortalDefault(cfg);
+    mainWindow?.webContents.send("user-account-changed", {
+      email: "",
+      displayName: "",
+      loggedIn: false,
+      baseUrl: remembered,
+    });
     return { ok: true };
   });
 
-  ipcMain.handle("load-agx-account", async () => {
+  ipcMain.handle("load-user-account", async () => {
     const cfg = loadAgxConfig();
-    const a = cfg.agx_account;
+    const ent = cfg.enterprise;
+    const defaultBaseUrl = resolveEnterprisePortalDefault(cfg);
     return {
       ok: true,
-      loggedIn: Boolean(a?.access_token),
-      email: a?.user_email ?? "",
-      displayName: a?.user_display_name ?? "",
+      loggedIn: Boolean(ent?.enabled && ent?.token),
+      email: ent?.user?.email ?? "",
+      displayName: ent?.user?.display_name ?? "",
+      baseUrl: ent?.base_url || defaultBaseUrl,
+      defaultBaseUrl,
+      inferenceBaseUrl: ent?.inference_base_url ?? "",
+      transport: ent?.transport ?? "",
+      reauthRequiredForDirect: Boolean(ent?.reauth_required_for_direct),
+      strict: ent?.policy?.strict !== false,
+      models: Array.isArray(ent?.models) ? ent.models : [],
+      syncedAt: ent?.synced_at ?? "",
     };
   });
 
@@ -7307,11 +7517,16 @@ function registerIpc(): void {
       _event,
       payload: { baseUrl?: string; email?: string; password?: string },
     ) => {
-      const baseUrl = normalizePortalOrigin(payload?.baseUrl ?? "");
+      // Compatibility path for automation/smoke; Desktop UI uses browser device login.
+      const validated = validatePortalOriginForBrowserLogin(payload?.baseUrl ?? "");
+      if (!validated.ok) {
+        return { ok: false, error: validated.error };
+      }
+      const baseUrl = validated.origin;
       const email = String(payload?.email ?? "").trim();
       const password = String(payload?.password ?? "");
-      if (!baseUrl || !email || !password) {
-        return { ok: false, error: "请填写组织地址、邮箱和密码" };
+      if (!email || !password) {
+        return { ok: false, error: "请填写邮箱和密码" };
       }
       try {
         const tokenResp = await proxyAwareFetch(`${baseUrl}/api/desktop/auth/token`, {
@@ -7329,13 +7544,7 @@ function registerIpc(): void {
           message?: string;
           data?: {
             token?: string;
-            user?: {
-              userId?: string;
-              email?: string;
-              displayName?: string;
-              tenantId?: string;
-              deptId?: string | null;
-            };
+            user?: EnterpriseTokenUser;
           };
         };
         if (!tokenResp.ok || !tokenJson.data?.token) {
@@ -7345,86 +7554,19 @@ function registerIpc(): void {
               : tokenJson.message || `登录失败（HTTP ${tokenResp.status}）`;
           return { ok: false, error: msg };
         }
-        const pat = tokenJson.data.token;
-        const bootResp = await proxyAwareFetch(`${baseUrl}/api/desktop/bootstrap`, {
-          method: "GET",
-          headers: {
-            accept: "application/json",
-            authorization: `Bearer ${pat}`,
-          },
-          signal: AbortSignal.timeout(ENTERPRISE_PORTAL_FETCH_TIMEOUT_MS),
+        const finished = await finishEnterpriseLogin(
+          baseUrl,
+          tokenJson.data.token,
+          tokenJson.data.user,
+        );
+        if (!finished.ok) return finished;
+        mainWindow?.webContents.send("user-account-changed", {
+          email: finished.user.email,
+          displayName: finished.user.displayName,
+          loggedIn: true,
+          baseUrl,
         });
-        const bootJson = (await bootResp.json().catch(() => ({}))) as {
-          code?: string;
-          message?: string;
-          data?: {
-            user?: {
-              userId?: string;
-              email?: string;
-              displayName?: string;
-              tenantId?: string;
-              deptId?: string | null;
-            };
-            models?: Array<{ id?: string }>;
-            policy?: { strict?: boolean };
-            apiBaseUrl?: string;
-            inferenceApiBaseUrl?: string;
-            inferenceTransport?: string;
-            reauthRequiredForDirect?: boolean;
-          };
-        };
-        if (!bootResp.ok || !bootJson.data) {
-          return {
-            ok: false,
-            error:
-              bootResp.status === 401
-                ? "企业登录已失效，请重新登录"
-                : bootResp.status === 503
-                  ? bootJson.message || "企业推理入口未配置，请联系管理员"
-                  : bootJson.message || `拉取模型失败（HTTP ${bootResp.status}）`,
-          };
-        }
-        const inference = selectEnterpriseInferenceBase({
-          apiBaseUrl: bootJson.data.apiBaseUrl || `${baseUrl}/api/desktop/v1`,
-          inferenceApiBaseUrl: bootJson.data.inferenceApiBaseUrl,
-          inferenceTransport: bootJson.data.inferenceTransport,
-          reauthRequiredForDirect: bootJson.data.reauthRequiredForDirect,
-        });
-        if (!inference.ok) {
-          return { ok: false, error: inference.error };
-        }
-        const models = (bootJson.data.models ?? [])
-          .map((m) => String(m.id ?? "").trim())
-          .filter(Boolean);
-        const user = bootJson.data.user ?? tokenJson.data.user ?? {};
-        const cfg = loadAgxConfig();
-        applyEnterpriseProvider(cfg, {
-          portalOrigin: baseUrl,
-          inferenceBaseUrl: inference.baseUrl,
-          transport: inference.transport,
-          reauthRequiredForDirect: inference.reauthRequiredForDirect,
-          token: pat,
-          models,
-          user: {
-            user_id: user.userId ?? "",
-            email: user.email ?? email,
-            display_name: user.displayName ?? "",
-            tenant_id: user.tenantId ?? "",
-            dept_id: user.deptId ?? null,
-          },
-          strict: bootJson.data.policy?.strict !== false,
-        });
-        saveAgxConfig(cfg);
-        return {
-          ok: true,
-          user: {
-            email: cfg.enterprise?.user?.email ?? email,
-            displayName: cfg.enterprise?.user?.display_name ?? "",
-          },
-          models,
-          transport: inference.transport,
-          reauthRequiredForDirect: inference.reauthRequiredForDirect,
-        };
+        return finished;
       } catch (err) {
         return { ok: false, error: enterpriseFetchErrorMessage(err) };
       }
@@ -7432,9 +7574,18 @@ function registerIpc(): void {
   );
 
   ipcMain.handle("enterprise-logout", async () => {
+    clearUserAccountLoginPoll();
     const cfg = loadAgxConfig();
     clearEnterpriseFromConfig(cfg);
+    delete cfg.agx_account;
     saveAgxConfig(cfg);
+    const remembered = resolveEnterprisePortalDefault(cfg);
+    mainWindow?.webContents.send("user-account-changed", {
+      email: "",
+      displayName: "",
+      loggedIn: false,
+      baseUrl: remembered,
+    });
     return { ok: true };
   });
 
@@ -7444,7 +7595,7 @@ function registerIpc(): void {
     const baseUrl = normalizePortalOrigin(ent?.base_url ?? "");
     const token = String(ent?.token ?? "").trim();
     if (!baseUrl || !token) {
-      return { ok: false, error: "尚未登录企业账号" };
+      return { ok: false, error: "尚未登录用户账号" };
     }
     try {
       const bootResp = await proxyAwareFetch(`${baseUrl}/api/desktop/bootstrap`, {
@@ -12164,7 +12315,7 @@ if (!gotTheLock) {
       // `await startStudioServe()` below. On macOS `app.on("activate")`
       // fires during that await and — together with the idempotent
       // `createWindow()` guard — opens the window early. The renderer
-      // then boots and a burst of invoke("load-agx-account"),
+      // then boots and a burst of invoke("load-user-account"),
       // invoke("list-avatars"), invoke("list-groups"),
       // invoke("load-automation-tasks"), invoke("load-feishu-binding"),
       // invoke("load-mcp-status") etc. fires on mount. If those handlers

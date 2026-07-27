@@ -51,10 +51,11 @@ type LoadConfigResult = {
   confirmStrategy?: "manual" | "semi-auto" | "auto";
   activeProvider?: string;
   activeModel?: string;
-  agxAccount?: {
+  userAccount?: {
     loggedIn: boolean;
     email: string;
     displayName: string;
+    baseUrl?: string;
   };
   enterprise?: {
     enabled: boolean;
@@ -833,19 +834,28 @@ declare global {
         changed?: boolean;
         error?: string;
       }>;
-      agxAccountLoginStart: () => Promise<{
+      userAccountLoginStart: (payload: { baseUrl?: string }) => Promise<{
         ok: boolean;
-        device_id?: string;
-        open_url?: string;
+        deviceId?: string;
+        openUrl?: string;
         error?: string;
       }>;
-      agxAccountLoginCancel: () => Promise<{ ok: boolean }>;
-      agxAccountLogout: () => Promise<{ ok: boolean }>;
-      loadAgxAccount: () => Promise<{
+      userAccountLoginCancel: () => Promise<{ ok: boolean }>;
+      userAccountLogout: () => Promise<{ ok: boolean }>;
+      loadUserAccount: () => Promise<{
         ok: boolean;
         loggedIn?: boolean;
         email?: string;
         displayName?: string;
+        baseUrl?: string;
+        /** Remembered / env-preconfigured portal; employees need not type this. */
+        defaultBaseUrl?: string;
+        inferenceBaseUrl?: string;
+        transport?: string;
+        reauthRequiredForDirect?: boolean;
+        strict?: boolean;
+        models?: string[];
+        syncedAt?: string;
       }>;
       loadEnterprise: () => Promise<{
         ok: boolean;
@@ -881,8 +891,15 @@ declare global {
         transport?: string;
         reauthRequiredForDirect?: boolean;
       }>;
-      onAgxAccountChanged: (cb: (payload: { email: string; displayName: string }) => void) => () => void;
-      onAgxAccountLoginTimeout: (cb: () => void) => () => void;
+      onUserAccountChanged: (
+        cb: (payload: {
+          email: string;
+          displayName: string;
+          loggedIn: boolean;
+          baseUrl?: string;
+        }) => void,
+      ) => () => void;
+      onUserAccountLoginTimeout: (cb: () => void) => () => void;
       updateSplashStage: (
         stage:
           | "initializing"

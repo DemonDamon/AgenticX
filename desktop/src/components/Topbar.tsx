@@ -14,15 +14,14 @@ export function Topbar({ sidebarCollapsed, onToggleSidebar }: Props) {
   const setTheme = useAppStore((s) => s.setTheme);
   const openSettings = useAppStore((s) => s.openSettings);
   const openTokenDashboard = useAppStore((s) => s.openTokenDashboard);
-  const agxAccount = useAppStore((s) => s.agxAccount);
-  const setAgxAccount = useAppStore((s) => s.setAgxAccount);
+  const userAccount = useAppStore((s) => s.userAccount);
+  const setUserAccount = useAppStore((s) => s.setUserAccount);
   const mainView = useAppStore((s) => s.mainView);
   const chatReturnSnapshot = useAppStore((s) => s.chatReturnSnapshot);
   const returnToPreviousChat = useAppStore((s) => s.returnToPreviousChat);
   /** Landing pages: hide topbar bottom border so 「本地」下不出现横线。 */
   const hideTopbarBorder = mainView !== "chat";
 
-  const [loginBusy, setLoginBusy] = useState(false);
   const [userMenuOpen, setUserMenuOpen] = useState(false);
   const userMenuRef = useRef<HTMLDivElement>(null);
 
@@ -33,41 +32,21 @@ export function Topbar({ sidebarCollapsed, onToggleSidebar }: Props) {
     setTheme(isDarkLike ? "light" : "dark");
   };
 
-  const onLoginClick = async () => {
-    if (loginBusy) return;
-    setLoginBusy(true);
-    try {
-      const r = await window.agenticxDesktop.agxAccountLoginStart();
-      if (!r.ok) {
-        await window.agenticxDesktop.confirmDialog({
-          title: "无法开始登录",
-          message: "未能开始官网账号登录，请稍后再试。",
-          detail: typeof r.error === "string" && r.error ? `错误：${r.error}` : undefined,
-          confirmText: "确定",
-        });
-      }
-    } catch (err) {
-      await window.agenticxDesktop.confirmDialog({
-        title: "无法开始登录",
-        message: String(err),
-        confirmText: "确定",
-      });
-    } finally {
-      setLoginBusy(false);
-    }
+  const onLoginClick = () => {
+    openSettings("account");
   };
 
   const onLogoutClick = async () => {
     setUserMenuOpen(false);
     const r = await window.agenticxDesktop.confirmDialog({
-      title: "退出官网账号",
-      message: "确定要清除本机已保存的 Near 官网登录状态吗？",
+      title: "退出用户账号",
+      message: "确定要清除本机已保存的登录状态吗？退出后将恢复本地模型配置。",
       confirmText: "退出",
       destructive: true,
     });
     if (!r.confirmed) return;
-    await window.agenticxDesktop.agxAccountLogout();
-    setAgxAccount({ loggedIn: false, email: "", displayName: "" });
+    await window.agenticxDesktop.userAccountLogout();
+    setUserAccount({ loggedIn: false, email: "", displayName: "", baseUrl: "" });
   };
 
   const onViewAccount = () => {
@@ -88,7 +67,7 @@ export function Topbar({ sidebarCollapsed, onToggleSidebar }: Props) {
     return () => window.removeEventListener("mousedown", onDown);
   }, [userMenuOpen]);
 
-  const userInitial = (agxAccount.displayName || agxAccount.email || "?")
+  const userInitial = (userAccount.displayName || userAccount.email || "?")
     .trim()
     .charAt(0)
     .toUpperCase();
@@ -146,19 +125,19 @@ export function Topbar({ sidebarCollapsed, onToggleSidebar }: Props) {
         >
           <Settings className="h-[18px] w-[18px]" strokeWidth={1.8} />
         </button>
-        {agxAccount.loggedIn ? (
+        {userAccount.loggedIn ? (
           <div ref={userMenuRef} className="relative">
             <button
               className="agx-topbar-btn"
               onClick={() => setUserMenuOpen((v) => !v)}
-              title={agxAccount.displayName || agxAccount.email || "已登录"}
+              title={userAccount.displayName || userAccount.email || "已登录"}
               aria-label="账号菜单"
             >
               <span className="inline-flex h-5 w-5 items-center justify-center rounded-full bg-[rgba(var(--theme-color-rgb),0.9)] text-[10px] font-semibold text-[var(--theme-color-text)]">
                 {userInitial}
               </span>
               <span className="max-w-[120px] truncate text-[12px]">
-                {agxAccount.displayName || agxAccount.email}
+                {userAccount.displayName || userAccount.email}
               </span>
             </button>
             {userMenuOpen ? (
@@ -188,13 +167,12 @@ export function Topbar({ sidebarCollapsed, onToggleSidebar }: Props) {
         ) : (
           <button
             className="agx-topbar-btn"
-            onClick={() => void onLoginClick()}
-            disabled={loginBusy}
-            title="登录 Near 官网账号"
+            onClick={onLoginClick}
+            title="登录用户账号"
             aria-label="登录"
           >
             <LogIn className="h-[18px] w-[18px]" strokeWidth={1.8} />
-            <span className="text-[12px]">{loginBusy ? "登录中..." : "登录"}</span>
+            <span className="text-[12px]">登录</span>
           </button>
         )}
       </div>
