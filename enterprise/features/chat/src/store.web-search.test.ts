@@ -36,6 +36,7 @@ function session(id: string, title: string): ChatSession {
 class CapturingClient implements ChatClient {
   public readonly requests: ChatRequest[] = [];
   private seq = 0;
+  public streamSources = false;
 
   async sendMessage(req: ChatRequest): Promise<SendMessageResult> {
     this.requests.push(req);
@@ -45,6 +46,15 @@ class CapturingClient implements ChatClient {
 
   async *stream(requestId: string): AsyncIterable<ChatChunk> {
     yield { requestId, done: false, delta: "ok" };
+    if (this.streamSources) {
+      yield {
+        requestId,
+        done: false,
+        webSearchSources: [
+          { title: "Example", url: "https://example.com/a", snippet: "snip" },
+        ],
+      };
+    }
     yield { requestId, done: true };
   }
 
@@ -109,5 +119,16 @@ describe("chat store webSearch request wiring", () => {
     await useChatStore.getState().regenerateAssistantResponse(client, assistantId!);
     expect(client.requests.length).toBeGreaterThanOrEqual(2);
     expect(client.requests.at(-1)?.webSearch).toBe(true);
+  });
+
+  it("attaches webSearchSources from stream chunks onto the assistant message", async () => {
+    const client = new CapturingClient();
+    client.streamSources = true;
+    await useChatStore.getState().sendMessage(client, { content: "with sources", webSearch: true });
+    const assistant = useChatStore.getState().messages.find((m) => m.role === "assistant");
+    expect(assistant?.web_search_sources).toEqual([
+      { title: "Example", url: "https://example.com/a", snippet: "snip" },
+    ]);
+    expect(assistant?.content).toBe("ok");
   });
 });

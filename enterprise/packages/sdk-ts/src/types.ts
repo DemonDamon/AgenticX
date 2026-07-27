@@ -30,11 +30,19 @@ export type ChatUsage = {
   totalTokens: number;
 };
 
+export type WebSearchSource = {
+  title: string;
+  url: string;
+  snippet: string;
+};
+
 export type ChatChunk = {
   requestId: string;
   delta?: string;
   done: boolean;
   usage?: ChatUsage;
+  /** Structured web-search hits from portal BFF (not mixed into delta). */
+  webSearchSources?: WebSearchSource[];
   /** 用户主动中断（非错误）：保留已生成内容，不视为失败。 */
   cancelled?: boolean;
   error?: {

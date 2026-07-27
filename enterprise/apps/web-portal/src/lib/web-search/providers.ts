@@ -2,6 +2,8 @@
  * Enterprise portal web search providers (TypeScript, independent of Desktop Python).
  */
 
+import { directFetch } from "./direct-fetch";
+
 export const WEB_SEARCH_MAX_RESULTS_CAP = 50;
 export const DEFAULT_MAX_RESULTS = 5;
 export const DEFAULT_SNIPPET_CHARS = 600;
@@ -94,13 +96,18 @@ async function searchDuckDuckGo(
       "user-agent": "Mozilla/5.0 (compatible; AgenticXPortalWebSearch/1.0)",
     },
     body,
-    signal: AbortSignal.timeout(10_000),
+    signal: AbortSignal.timeout(20_000),
   });
   if (!response.ok) {
     throw new Error(`duckduckgo http ${response.status}`);
   }
   const html = await response.text();
-  return parseDuckDuckGoHtml(html, maxResults);
+  const hits = parseDuckDuckGoHtml(html, maxResults);
+  // DDG sometimes returns 2xx anomaly/challenge HTML with zero result__a anchors.
+  if (hits.length === 0) {
+    throw new Error("duckduckgo returned no parseable results");
+  }
+  return hits;
 }
 
 async function searchBocha(
@@ -116,7 +123,7 @@ async function searchBocha(
       authorization: `Bearer ${apiKey}`,
     },
     body: JSON.stringify({ query, count: maxResults }),
-    signal: AbortSignal.timeout(10_000),
+    signal: AbortSignal.timeout(20_000),
   });
   if (!response.ok) {
     throw new Error(`bocha http ${response.status}`);
@@ -146,7 +153,7 @@ async function searchTavily(
       query,
       max_results: maxResults,
     }),
-    signal: AbortSignal.timeout(10_000),
+    signal: AbortSignal.timeout(20_000),
   });
   if (!response.ok) {
     throw new Error(`tavily http ${response.status}`);
@@ -172,7 +179,7 @@ export async function executeWebSearch(
   query: string,
   maxResults: number | undefined,
   cfg: Pick<WebSearchRuntimeConfig, "provider" | "apiKey" | "maxResults">,
-  fetchImpl: FetchLike = fetch,
+  fetchImpl: FetchLike = directFetch as FetchLike,
 ): Promise<WebSearchHit[]> {
   const q = query.trim();
   if (!q) return [];

@@ -12,7 +12,8 @@ import {
   shouldCancelLongPressOnMove,
   shouldStartLongPress,
 } from "../../utils/message-list-selection-gesture";
-import { ASSISTANT_MD_COMPONENTS } from "../../markdown/assistant-markdown-components";
+import { createAssistantMdComponents } from "../../markdown/assistant-markdown-components";
+import { WebSearchSourcesPanel } from "./WebSearchSourcesPanel";
 import "../../markdown/chat-prism-themes.css";
 
 // 内联 SVG 图标组件
@@ -150,13 +151,37 @@ function ThinkingDotsPlaceholder() {
   );
 }
 
-function AssistantMessageMarkdown({ text, className }: { text: string; className?: string }) {
+function AssistantMessageMarkdown({
+  text,
+  className,
+  sources,
+  onOpenCitationInSheet,
+}: {
+  text: string;
+  className?: string;
+  sources?: ChatMessage["web_search_sources"];
+  onOpenCitationInSheet?: (index1Based: number) => void;
+}) {
+  const components = React.useMemo(
+    () => createAssistantMdComponents({ sources, onOpenCitationInSheet }),
+    [sources, onOpenCitationInSheet],
+  );
   return (
     <div className={`agx-assistant-md ${className ?? ""}`.trim()}>
-      <ReactMarkdown remarkPlugins={[remarkGfm]} components={ASSISTANT_MD_COMPONENTS}>
+      <ReactMarkdown remarkPlugins={[remarkGfm]} components={components}>
         {text}
       </ReactMarkdown>
     </div>
+  );
+}
+
+function IconGlobe({ className }: { className?: string }) {
+  return (
+    <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}>
+      <circle cx="12" cy="12" r="10" />
+      <path d="M12 2a14.5 14.5 0 0 0 0 20 14.5 14.5 0 0 0 0-20" />
+      <path d="M2 12h20" />
+    </svg>
   );
 }
 
@@ -189,6 +214,8 @@ export function MessageList({
   const [copiedId, setCopiedId] = React.useState<string | null>(null);
   const [editingMessageId, setEditingMessageId] = React.useState<string | null>(null);
   const [editingDraft, setEditingDraft] = React.useState("");
+  const [sourcesPanelMessageId, setSourcesPanelMessageId] = React.useState<string | null>(null);
+  const [sourcesHighlightIndex, setSourcesHighlightIndex] = React.useState<number | null>(null);
   const longPressTimerRef = React.useRef<Map<string, NodeJS.Timeout>>(new Map());
   const activeLongPressRef = React.useRef<{ messageId: string; x: number; y: number } | null>(null);
   const LONG_PRESS_MS = 500;
@@ -510,12 +537,37 @@ export function MessageList({
                           </div>
                         ) : null}
 
+                        {isAssistant &&
+                        message.web_search_sources &&
+                        message.web_search_sources.length > 0 ? (
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setSourcesPanelMessageId(message.id);
+                              setSourcesHighlightIndex(null);
+                            }}
+                            className="mb-2 inline-flex max-w-full items-center gap-1.5 rounded-full border border-border/50 bg-muted/40 px-2.5 py-1 text-xs text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+                          >
+                            <IconGlobe className="h-3.5 w-3.5 shrink-0" />
+                            <span className="truncate">
+                              搜索网页 · {message.web_search_sources.length} 个结果
+                            </span>
+                            <IconChevronRight className="h-3.5 w-3.5 shrink-0 opacity-70" />
+                          </button>
+                        ) : null}
+
                         {/* 消息内容 */}
                         {!hideContentParagraph ? (
                           isAssistant ? (
                             <AssistantMessageMarkdown
                               text={displayContentForRender || "..."}
                               className={`break-words text-base leading-7 ${!message.content ? "opacity-70" : ""}`}
+                              sources={message.web_search_sources}
+                              onOpenCitationInSheet={(index1Based) => {
+                                setSourcesPanelMessageId(message.id);
+                                setSourcesHighlightIndex(index1Based);
+                              }}
                             />
                           ) : message.content.trim() ? (
                             <p
@@ -861,6 +913,19 @@ export function MessageList({
           </div>
         </div>
       )}
+      <WebSearchSourcesPanel
+        open={sourcesPanelMessageId != null}
+        onOpenChange={(open) => {
+          if (!open) {
+            setSourcesPanelMessageId(null);
+            setSourcesHighlightIndex(null);
+          }
+        }}
+        sources={
+          messages.find((m) => m.id === sourcesPanelMessageId)?.web_search_sources ?? []
+        }
+        highlightIndex={sourcesHighlightIndex}
+      />
       <style>{`
         @keyframes agx-thinking-dot-pulse {
           0%, 80%, 100% {
