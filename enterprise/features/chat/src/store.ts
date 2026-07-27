@@ -25,6 +25,7 @@ type SendMessageInput = {
   attachments?: import("@agenticx/core-api").ChatMessageAttachment[];
   tenantId?: string;
   userId?: string;
+  webSearch?: boolean;
 };
 
 type SendMessageOptions = {
@@ -89,6 +90,8 @@ export type ChatStoreState = {
   streamingSessionId: string | null;
   /** 按 session 隔离的流式状态，支持多 session 并发 */
   streamStateBySessionId: Record<string, SessionStreamState>;
+  /** Last composer web-search toggle per session (retry / regenerate / queue). */
+  lastWebSearchBySessionId: Record<string, boolean>;
 };
 
 const EMPTY_USAGE: SessionTokenUsage = {
@@ -194,7 +197,12 @@ function setSessionStream(set: ChatStoreSet, sessionId: string, next: SessionStr
   });
 }
 
-function toSdkRequest(sessionId: string, model: string, messages: ChatMessage[]): SdkChatRequest {
+function toSdkRequest(
+  sessionId: string,
+  model: string,
+  messages: ChatMessage[],
+  webSearch?: boolean,
+): SdkChatRequest {
   return {
     sessionId,
     model,
@@ -211,6 +219,7 @@ function toSdkRequest(sessionId: string, model: string, messages: ChatMessage[])
       })),
       createdAt: message.created_at,
     })),
+    ...(webSearch ? { webSearch: true } : {}),
   };
 }
 
@@ -422,6 +431,7 @@ export const useChatStore = create<ChatStore>((set, get) => ({
   pendingMessages: [],
   streamingSessionId: null,
   streamStateBySessionId: {},
+  lastWebSearchBySessionId: {},
 
   removePendingMessage(messageId) {
     set((state) => ({
@@ -447,7 +457,11 @@ export const useChatStore = create<ChatStore>((set, get) => ({
     }));
     await get().sendMessage(
       client,
-      { content: item.content, attachments: item.attachments },
+      {
+        content: item.content,
+        attachments: item.attachments,
+        webSearch: get().lastWebSearchBySessionId[item.sessionId],
+      },
       { forceSend: true }
     );
   },
@@ -801,9 +815,14 @@ export const useChatStore = create<ChatStore>((set, get) => ({
     const priorUserCount = sessionMessages.filter((m) => m.role === "user").length;
     const shouldAutoTitle = priorUserCount === 0;
 
+    const webSearchEnabled = Boolean(input.webSearch);
     set((prev) => ({
       messages: mergeSessionMessages(prev.messages, sessionId, nextSessionMessages),
       errorMessage: null,
+      lastWebSearchBySessionId: {
+        ...prev.lastWebSearchBySessionId,
+        [sessionId]: webSearchEnabled,
+      },
       responseVersionsByUserMessageId: {
         ...prev.responseVersionsByUserMessageId,
         [userMessage.id]: {
@@ -830,7 +849,7 @@ export const useChatStore = create<ChatStore>((set, get) => ({
     setSessionStream(set, sessionId, { status: "sending", activeRequestId: "" });
 
     try {
-      const request = toSdkRequest(sessionId, get().activeModel, nextSessionMessages);
+      const request = toSdkRequest(sessionId, get().activeModel, nextSessionMessages, webSearchEnabled);
       const { requestId } = await client.sendMessage(request);
       setSessionStream(set, sessionId, { status: "streaming", activeRequestId: requestId });
 
@@ -936,7 +955,11 @@ export const useChatStore = create<ChatStore>((set, get) => ({
         pendingMessages: prev.pendingMessages.filter((_, index) => index !== idx),
       }));
       queueMicrotask(() => {
-        void get().sendMessage(client, { content: next.content, attachments: next.attachments });
+        void get().sendMessage(client, {
+          content: next.content,
+          attachments: next.attachments,
+          webSearch: get().lastWebSearchBySessionId[next.sessionId],
+        });
       });
     }
   },
@@ -1044,7 +1067,12 @@ export const useChatStore = create<ChatStore>((set, get) => ({
     setSessionStream(set, sessionId, { status: "sending", activeRequestId: "" });
 
     try {
-      const request = toSdkRequest(sessionId, state.activeModel, truncatedSessionMessages);
+      const request = toSdkRequest(
+        sessionId,
+        state.activeModel,
+        truncatedSessionMessages,
+        Boolean(state.lastWebSearchBySessionId[sessionId]),
+      );
       const { requestId } = await client.sendMessage(request);
       setSessionStream(set, sessionId, { status: "streaming", activeRequestId: requestId });
 
@@ -1224,7 +1252,12 @@ export const useChatStore = create<ChatStore>((set, get) => ({
     setSessionStream(set, sessionId, { status: "sending", activeRequestId: "" });
 
     try {
-      const request = toSdkRequest(sessionId, state.activeModel, regenerateRequestMessages);
+      const request = toSdkRequest(
+        sessionId,
+        state.activeModel,
+        regenerateRequestMessages,
+        Boolean(state.lastWebSearchBySessionId[sessionId]),
+      );
       const { requestId } = await client.sendMessage(request);
       setSessionStream(set, sessionId, { status: "streaming", activeRequestId: requestId });
 
