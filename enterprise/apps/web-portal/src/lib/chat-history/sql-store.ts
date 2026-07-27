@@ -53,16 +53,32 @@ function mapSession(row: Record<string, unknown>): ChatSession {
   };
 }
 
-function parseMetadata(value: unknown): { attachments?: ChatMessage["attachments"] } | null {
+type MessageMetadata = {
+  attachments?: ChatMessage["attachments"];
+  web_search_sources?: ChatMessage["web_search_sources"];
+};
+
+function parseMetadata(value: unknown): MessageMetadata | null {
   if (value == null) return null;
   if (typeof value === "string") {
     try {
-      return JSON.parse(value) as { attachments?: ChatMessage["attachments"] };
+      return JSON.parse(value) as MessageMetadata;
     } catch {
       return null;
     }
   }
-  return value as { attachments?: ChatMessage["attachments"] };
+  return value as MessageMetadata;
+}
+
+function serializeMessageMetadata(message: ChatMessage): string | null {
+  const metadata: MessageMetadata = {};
+  if (message.attachments?.length) {
+    metadata.attachments = message.attachments;
+  }
+  if (message.web_search_sources?.length) {
+    metadata.web_search_sources = message.web_search_sources;
+  }
+  return Object.keys(metadata).length > 0 ? JSON.stringify(metadata) : null;
 }
 
 function mapMessage(row: Record<string, unknown>): ChatMessage {
@@ -75,6 +91,7 @@ function mapMessage(row: Record<string, unknown>): ChatMessage {
     role: normalizeRole(String(row.role)),
     content: String(row.content),
     attachments: metadata?.attachments,
+    web_search_sources: metadata?.web_search_sources,
     model: row.model == null ? undefined : String(row.model),
     created_at: toDate(row.created_at).toISOString(),
   };
@@ -190,7 +207,7 @@ export class SqlChatHistoryStore implements ChatHistoryStore {
         message.content,
         message.model?.trim() || null,
         "complete",
-        message.attachments?.length ? JSON.stringify({ attachments: message.attachments }) : null,
+        serializeMessageMetadata(message),
         createdAt,
         createdAt,
       );
