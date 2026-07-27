@@ -204,6 +204,13 @@
       "when": 1780000000000,
       "tag": "0029_audit_checksum_payload",
       "breakpoints": true
+    },
+    {
+      "idx": 29,
+      "version": "7",
+      "when": 1780100000000,
+      "tag": "0030_desktop_device_auth",
+      "breakpoints": true
     }
   ]
 }

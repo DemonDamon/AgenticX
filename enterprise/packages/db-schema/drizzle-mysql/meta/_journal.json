@@ -12,8 +12,15 @@
     {
       "idx": 1,
       "version": "5",
-      "when": 1780000000000,
+      "when": 1784158783966,
       "tag": "0001_audit_checksum_payload",
+      "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "5",
+      "when": 1784158783967,
+      "tag": "0002_desktop_device_auth",
       "breakpoints": true
     }
   ]

@@ -12,5 +12,6 @@ export * from "./repos/users";
 export * from "./pat-service";
 export * from "./pat-revocation-store";
 export * from "./session-grant-service";
+export * from "./desktop-device-auth-service";
 export * from "./compliance-service";
 export * from "./quota-remaining";
