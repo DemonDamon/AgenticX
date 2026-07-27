@@ -26,6 +26,7 @@ type SendMessageInput = {
   tenantId?: string;
   userId?: string;
   webSearch?: boolean;
+  deepResearch?: boolean;
 };
 
 type SendMessageOptions = {
@@ -93,6 +94,8 @@ export type ChatStoreState = {
   streamStateBySessionId: Record<string, SessionStreamState>;
   /** Last composer web-search toggle per session (retry / regenerate / queue). */
   lastWebSearchBySessionId: Record<string, boolean>;
+  /** Last composer deep-research toggle per session (retry / regenerate / queue). */
+  lastDeepResearchBySessionId: Record<string, boolean>;
 };
 
 const EMPTY_USAGE: SessionTokenUsage = {
@@ -203,6 +206,7 @@ function toSdkRequest(
   model: string,
   messages: ChatMessage[],
   webSearch?: boolean,
+  deepResearch?: boolean,
 ): SdkChatRequest {
   return {
     sessionId,
@@ -221,6 +225,7 @@ function toSdkRequest(
       createdAt: message.created_at,
     })),
     ...(webSearch ? { webSearch: true } : {}),
+    ...(deepResearch ? { deepResearch: true } : {}),
   };
 }
 
@@ -466,6 +471,7 @@ export const useChatStore = create<ChatStore>((set, get) => ({
   streamingSessionId: null,
   streamStateBySessionId: {},
   lastWebSearchBySessionId: {},
+  lastDeepResearchBySessionId: {},
 
   removePendingMessage(messageId) {
     set((state) => ({
@@ -495,6 +501,7 @@ export const useChatStore = create<ChatStore>((set, get) => ({
         content: item.content,
         attachments: item.attachments,
         webSearch: get().lastWebSearchBySessionId[item.sessionId],
+        deepResearch: get().lastDeepResearchBySessionId[item.sessionId],
       },
       { forceSend: true }
     );
@@ -850,12 +857,17 @@ export const useChatStore = create<ChatStore>((set, get) => ({
     const shouldAutoTitle = priorUserCount === 0;
 
     const webSearchEnabled = Boolean(input.webSearch);
+    const deepResearchEnabled = Boolean(input.deepResearch);
     set((prev) => ({
       messages: mergeSessionMessages(prev.messages, sessionId, nextSessionMessages),
       errorMessage: null,
       lastWebSearchBySessionId: {
         ...prev.lastWebSearchBySessionId,
         [sessionId]: webSearchEnabled,
+      },
+      lastDeepResearchBySessionId: {
+        ...prev.lastDeepResearchBySessionId,
+        [sessionId]: deepResearchEnabled,
       },
       responseVersionsByUserMessageId: {
         ...prev.responseVersionsByUserMessageId,
@@ -883,7 +895,13 @@ export const useChatStore = create<ChatStore>((set, get) => ({
     setSessionStream(set, sessionId, { status: "sending", activeRequestId: "" });
 
     try {
-      const request = toSdkRequest(sessionId, get().activeModel, nextSessionMessages, webSearchEnabled);
+      const request = toSdkRequest(
+        sessionId,
+        get().activeModel,
+        nextSessionMessages,
+        webSearchEnabled,
+        deepResearchEnabled,
+      );
       const { requestId } = await client.sendMessage(request);
       setSessionStream(set, sessionId, { status: "streaming", activeRequestId: requestId });
 
@@ -997,6 +1015,7 @@ export const useChatStore = create<ChatStore>((set, get) => ({
           content: next.content,
           attachments: next.attachments,
           webSearch: get().lastWebSearchBySessionId[next.sessionId],
+          deepResearch: get().lastDeepResearchBySessionId[next.sessionId],
         });
       });
     }
@@ -1110,6 +1129,7 @@ export const useChatStore = create<ChatStore>((set, get) => ({
         state.activeModel,
         truncatedSessionMessages,
         Boolean(state.lastWebSearchBySessionId[sessionId]),
+        Boolean(state.lastDeepResearchBySessionId[sessionId]),
       );
       const { requestId } = await client.sendMessage(request);
       setSessionStream(set, sessionId, { status: "streaming", activeRequestId: requestId });
@@ -1304,6 +1324,7 @@ export const useChatStore = create<ChatStore>((set, get) => ({
         state.activeModel,
         regenerateRequestMessages,
         Boolean(state.lastWebSearchBySessionId[sessionId]),
+        Boolean(state.lastDeepResearchBySessionId[sessionId]),
       );
       const { requestId } = await client.sendMessage(request);
       setSessionStream(set, sessionId, { status: "streaming", activeRequestId: requestId });

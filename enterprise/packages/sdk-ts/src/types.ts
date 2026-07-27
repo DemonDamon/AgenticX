@@ -22,6 +22,8 @@ export type ChatRequest = {
   stream?: boolean;
   /** User toggled web search in the composer; BFF injects the web_search tool when true. */
   webSearch?: boolean;
+  /** User toggled deep research in the composer; BFF runs the multi-stage research pipeline. */
+  deepResearch?: boolean;
 };
 
 export type ChatUsage = {

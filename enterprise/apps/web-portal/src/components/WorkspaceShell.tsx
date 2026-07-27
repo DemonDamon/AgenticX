@@ -33,7 +33,6 @@ import {
   Menu,
   MessageSquare,
   MessageSquarePlus,
-  Microscope,
   Monitor,
   Moon,
   MoreHorizontal,
@@ -146,7 +145,6 @@ export function WorkspaceShell({ userEmail, userScopes }: WorkspaceShellProps) {
 
   const [collapsed, setCollapsed] = React.useState(false);
   const [mobileOpen, setMobileOpen] = React.useState(false);
-  const [deepResearch, setDeepResearch] = React.useState(false);
   const [panelMode, setPanelMode] = React.useState<PanelMode>("chat");
 
   React.useEffect(() => {
@@ -280,15 +278,6 @@ export function WorkspaceShell({ userEmail, userScopes }: WorkspaceShellProps) {
             <Button onClick={onNewChat} className={collapsed ? "" : "w-full justify-start"} size={collapsed ? "icon" : "default"}>
               <MessageSquarePlus />
               {!collapsed && t("newChat")}
-            </Button>
-            <Button
-              variant={deepResearch ? "default" : "outline"}
-              onClick={() => setDeepResearch((prev) => !prev)}
-              className={collapsed ? "" : "w-full justify-start"}
-              size={collapsed ? "icon" : "default"}
-            >
-              <Microscope />
-              {!collapsed && t("deepResearch")}
             </Button>
           </div>
 
