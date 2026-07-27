@@ -178,6 +178,8 @@
       "enabledDescription": "New messages may invoke Web Search",
       "enableWebSearch": "Enable web search",
       "enableWebSearchDescription": "Allow chat messages to call the Web Search tool",
+      "enableDeepResearch": "Deep research",
+      "enableDeepResearchDescription": "Enable multi-stage research in chat; uses significantly more tokens and is off by default",
       "provider": "Search provider",
       "providerDescription": "DuckDuckGo by default (no key); Bocha / Tavily require an API key",
       "searchApiKey": "Search Provider API Key",

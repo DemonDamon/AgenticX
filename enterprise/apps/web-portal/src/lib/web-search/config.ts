@@ -10,6 +10,8 @@ export type TenantWebSearchRow = {
   provider: string;
   apiKey: string;
   maxResults: number;
+  /** Opt-in deep research (default false). */
+  deepResearchEnabled?: boolean;
 } | null;
 
 function normalizeProvider(raw: string | undefined): WebSearchProviderName {

@@ -36,6 +36,13 @@
       "when": 1784158783969,
       "tag": "0004_web_search_max_results_default",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "5",
+      "when": 1784158783970,
+      "tag": "0005_enterprise_runtime_deep_research",
+      "breakpoints": true
     }
   ]
 }
