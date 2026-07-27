@@ -8,6 +8,7 @@ import { listAvailableModelsForUser } from "../../../../lib/admin-providers-read
 import { runWebSearchTurn } from "../../../../lib/web-search/tool-loop";
 import { loadTenantWebSearchConfig } from "../../../../lib/web-search/tenant-config";
 import { runDeepResearchTurn } from "../../../../lib/deep-research/orchestrator";
+import { defaultArtifactStore } from "../../../../lib/deep-research/artifact-store";
 
 const GATEWAY_COMPLETIONS_URL =
   process.env.GATEWAY_COMPLETIONS_URL ?? "http://127.0.0.1:8088/v1/chat/completions";
@@ -138,6 +139,10 @@ export async function POST(request: Request) {
       headers: gatewayHeaders,
       signal: request.signal,
       loadTenantConfig: () => loadTenantWebSearchConfig(session.tenantId),
+      artifactStore: defaultArtifactStore,
+      tenantId: session.tenantId,
+      userId: session.userId,
+      sessionId: chatSessionId,
     });
   }
 

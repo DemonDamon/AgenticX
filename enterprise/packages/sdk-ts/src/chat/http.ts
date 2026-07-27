@@ -1,4 +1,5 @@
 import type { ChatClient } from "./client";
+import type { DeepResearchEvent } from "../deep-research";
 import type { ChatChunk, ChatMessage, ChatRequest, SendMessageResult } from "../types";
 import { toGatewayMessage } from "./multimodal";
 
@@ -146,6 +147,7 @@ export class HttpChatClient implements ChatClient {
             choices?: Array<{ delta?: { content?: string }; finish_reason?: string | null }>;
             agenticx_usage?: { input_tokens?: number; output_tokens?: number; total_tokens?: number };
             agenticx_web_search_sources?: Array<{ title?: string; url?: string; snippet?: string }>;
+            agenticx_deep_research_event?: DeepResearchEvent;
             usage?: { prompt_tokens?: number; completion_tokens?: number; total_tokens?: number };
             error?: { code?: string; message?: string };
           };
@@ -189,6 +191,15 @@ export class HttpChatClient implements ChatClient {
                 url: String(item.url ?? "").trim(),
                 snippet: String(item.snippet ?? "").trim(),
               })).filter((item) => item.url),
+            };
+            continue;
+          }
+
+          if (chunk.agenticx_deep_research_event && typeof chunk.agenticx_deep_research_event === "object") {
+            yield {
+              requestId,
+              done: false,
+              deepResearchEvent: chunk.agenticx_deep_research_event,
             };
             continue;
           }

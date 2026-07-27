@@ -7,7 +7,11 @@ import {
   type ChatMessage,
   type ChatSession,
 } from "@agenticx/core-api";
-import type { ChatClient, ChatRequest as SdkChatRequest } from "@agenticx/sdk-ts";
+import type {
+  ChatClient,
+  ChatRequest as SdkChatRequest,
+  DeepResearchEvent,
+} from "@agenticx/sdk-ts";
 import { ChatHistoryHttpError, createPortalChatHistoryClient } from "./history-client";
 import type { QueuedMessage } from "./types/queued-message";
 import { shouldEnqueueOnResend } from "./utils/message-queue";
@@ -59,6 +63,7 @@ export type AssistantResponseVersion = {
   retryAttempt: number;
   queryText: string;
   web_search_sources?: ChatMessage["web_search_sources"];
+  deep_research?: ChatMessage["deep_research"];
 };
 
 export type UserResponseVersionState = {
@@ -274,7 +279,68 @@ function toAssistantVersion(
     retryAttempt: meta?.retryAttempt ?? 0,
     queryText: meta?.queryText ?? "",
     web_search_sources: message.web_search_sources,
+    deep_research: message.deep_research,
   };
+}
+
+function applyDeepResearchEventToAssistant(
+  set: ChatStoreSet,
+  assistantId: string,
+  userMessageId: string | undefined,
+  event: DeepResearchEvent,
+) {
+  const patchMessage = (message: ChatMessage): ChatMessage => {
+    if (message.id !== assistantId) return message;
+    const prev = message.deep_research;
+    const runId =
+      ("runId" in event && typeof event.runId === "string" && event.runId) ||
+      prev?.runId ||
+      "unknown";
+    let status: NonNullable<ChatMessage["deep_research"]>["status"] = prev?.status ?? "running";
+    if (event.type === "clarify") {
+      status = "awaiting_clarify";
+    } else if (event.type === "phase" && event.phase === "done") {
+      status = "completed";
+    } else if (
+      status === "awaiting_clarify" &&
+      (event.type === "clarify_timeout" ||
+        event.type === "lane_started" ||
+        event.type === "phase" ||
+        event.type === "run_started")
+    ) {
+      status = "running";
+    }
+    const events = [...(prev?.events ?? []), event].slice(-200);
+    const artifactIds = [...(prev?.artifactIds ?? [])];
+    if (event.type === "artifact" && !artifactIds.includes(event.id)) {
+      artifactIds.push(event.id);
+    }
+    return {
+      ...message,
+      deep_research: { runId, status, events, artifactIds },
+    };
+  };
+
+  set((prev) => {
+    const nextMessages = prev.messages.map(patchMessage);
+    if (!userMessageId) return { messages: nextMessages };
+    const current = prev.responseVersionsByUserMessageId[userMessageId];
+    if (!current) return { messages: nextMessages };
+    return {
+      messages: nextMessages,
+      responseVersionsByUserMessageId: {
+        ...prev.responseVersionsByUserMessageId,
+        [userMessageId]: {
+          ...current,
+          versions: current.versions.map((version, index) =>
+            index === current.activeIndex
+              ? { ...version, deep_research: nextMessages.find((m) => m.id === assistantId)?.deep_research }
+              : version,
+          ),
+        },
+      },
+    };
+  });
 }
 
 function applyWebSearchSourcesToAssistant(
@@ -840,6 +906,8 @@ export const useChatStore = create<ChatStore>((set, get) => ({
       attachments: attachments.length > 0 ? attachments : undefined,
       created_at: createdAtPair.user,
     };
+    const webSearchEnabled = Boolean(input.webSearch);
+    const deepResearchEnabled = Boolean(input.deepResearch);
     const assistantMessage: ChatMessage = {
       id: makeId(),
       session_id: sessionId,
@@ -849,15 +917,22 @@ export const useChatStore = create<ChatStore>((set, get) => ({
       content: "",
       model: latest.activeModel,
       created_at: createdAtPair.assistant,
+      ...(deepResearchEnabled
+        ? {
+            deep_research: {
+              runId: "pending",
+              status: "running" as const,
+              events: [],
+              artifactIds: [],
+            },
+          }
+        : {}),
     };
 
     const sessionMessages = getSessionMessages(latest.messages, sessionId);
     const nextSessionMessages = [...sessionMessages, userMessage, assistantMessage];
     const priorUserCount = sessionMessages.filter((m) => m.role === "user").length;
     const shouldAutoTitle = priorUserCount === 0;
-
-    const webSearchEnabled = Boolean(input.webSearch);
-    const deepResearchEnabled = Boolean(input.deepResearch);
     set((prev) => ({
       messages: mergeSessionMessages(prev.messages, sessionId, nextSessionMessages),
       errorMessage: null,
@@ -967,6 +1042,15 @@ export const useChatStore = create<ChatStore>((set, get) => ({
 
         if (chunk.webSearchSources?.length) {
           applyWebSearchSourcesToAssistant(set, assistantMessage.id, userMessage.id, chunk.webSearchSources);
+        }
+
+        if (chunk.deepResearchEvent) {
+          applyDeepResearchEventToAssistant(
+            set,
+            assistantMessage.id,
+            userMessage.id,
+            chunk.deepResearchEvent,
+          );
         }
 
         if (chunk.done) {
@@ -1202,6 +1286,15 @@ export const useChatStore = create<ChatStore>((set, get) => ({
           );
         }
 
+        if (chunk.deepResearchEvent) {
+          applyDeepResearchEventToAssistant(
+            set,
+            replacementAssistant.id,
+            input.messageId,
+            chunk.deepResearchEvent,
+          );
+        }
+
         if (chunk.done) {
           setSessionStream(set, sessionId, null);
         }
@@ -1397,6 +1490,15 @@ export const useChatStore = create<ChatStore>((set, get) => ({
           );
         }
 
+        if (chunk.deepResearchEvent) {
+          applyDeepResearchEventToAssistant(
+            set,
+            replacementAssistant.id,
+            targetUserMessageId,
+            chunk.deepResearchEvent,
+          );
+        }
+
         if (chunk.done) {
           setSessionStream(set, sessionId, null);
         }
@@ -1471,6 +1573,7 @@ export const useChatStore = create<ChatStore>((set, get) => ({
                 ...message,
                 content: targetVersion.content,
                 web_search_sources: targetVersion.web_search_sources,
+                deep_research: targetVersion.deep_research,
               }
             : index === userIndex
               ? { ...message, content: targetVersion.queryText || message.content }
@@ -1525,6 +1628,7 @@ export const useChatStore = create<ChatStore>((set, get) => ({
                 ...message,
                 content: targetVersion.content,
                 web_search_sources: targetVersion.web_search_sources,
+                deep_research: targetVersion.deep_research,
               }
             : index === userIndex
               ? { ...message, content: targetVersion.queryText || message.content }
@@ -1571,6 +1675,7 @@ export const useChatStore = create<ChatStore>((set, get) => ({
                 ...message,
                 content: targetVersion.content,
                 web_search_sources: targetVersion.web_search_sources,
+                deep_research: targetVersion.deep_research,
               }
             : message
         ),
@@ -1615,6 +1720,7 @@ export const useChatStore = create<ChatStore>((set, get) => ({
                 ...message,
                 content: targetVersion.content,
                 web_search_sources: targetVersion.web_search_sources,
+                deep_research: targetVersion.deep_research,
               }
             : message
         ),
