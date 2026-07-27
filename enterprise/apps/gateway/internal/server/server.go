@@ -77,6 +77,7 @@ type Server struct {
 	relayExecutor         *relay.Executor
 	billingService        *billing.Service
 	patVerifier           *gatewayauth.PATVerifier
+	managedModels         gatewayauth.ManagedModelAuthorizer
 	sessionGrants         *gatewayauth.SessionGrantStore
 	compliance            *residency.ComplianceStore
 	cacheService          *cache.Service
@@ -182,8 +183,10 @@ func New(cfg config.Config, logger *slog.Logger) (*Server, error) {
 	fileWriter := audit.NewFileWriter(cfg.AuditDir)
 	var auditWriter audit.EventWriter = fileWriter
 	var patVerifier *gatewayauth.PATVerifier
+	var managedModels gatewayauth.ManagedModelAuthorizer
 	if dbHandle != nil {
 		patVerifier = gatewayauth.NewPATVerifier(dbHandle)
+		managedModels = gatewayauth.NewDBManagedModelAuthorizer(dbHandle)
 		auditWriter = audit.NewDualWriter(fileWriter, audit.NewPgWriter(dbHandle), cfg.AuditDir, logger)
 		days := audit.BackfillDaysFromEnv()
 		realHandle := dbHandle
@@ -217,6 +220,7 @@ func New(cfg config.Config, logger *slog.Logger) (*Server, error) {
 		adminLoader:        adminLoader,
 		quotaTracker:       quota.NewTracker(quotaCfgPath, quotaUsagePath, dbHandle),
 		patVerifier:        patVerifier,
+		managedModels:      managedModels,
 		sessionGrants:      gatewayauth.NewSessionGrantStore(dbHandle),
 		compliance:         residency.NewComplianceStore(dbHandle),
 		cacheService:       nil,

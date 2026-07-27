@@ -74,6 +74,8 @@
 | `GATEWAY_CONFIG_PATH` | — | YAML 配置路径（模型路由） |
 | `AUTH_JWT_PUBLIC_KEY` | — | JWT 校验（必填） |
 | `DATABASE_URL` | — | 审计 / 计量双方言双写（由 `DATABASE_DIALECT` 选驱动） |
+| `GATEWAY_MANAGED_MODEL_CACHE_TTL` | `15s` | Desktop managed PAT 模型可见性 effective-set 缓存 TTL；DB 失败时 fail-closed（503） |
+| `NEXT_PUBLIC_GATEWAY_PUBLIC_BASE_URL` | — | Portal bootstrap 下发给 Desktop 的公网 Gateway origin（再规范为 `/v1`）；生产勿用 docker 内部名 |
 
 ### 4.2 上游 Key 解析（按顺序）
 
