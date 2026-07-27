@@ -64,7 +64,10 @@ from agenticx.runtime.loop_detector import LoopDetector
 from agenticx.runtime.llm_retry import LLMRetryPolicy, _classify_error
 from agenticx.runtime.subagent_runs import SubAgentRunStore
 from agenticx.runtime.token_budget import BudgetLevel, TokenBudgetGuard
-from agenticx.runtime.truncated_final import detect_suspected_truncated_final
+from agenticx.runtime.truncated_final import (
+    detect_suspected_truncated_final,
+    reasoning_has_action_intent,
+)
 from agenticx.runtime.usage_metadata import usage_metadata_from_llm_response
 from agenticx.runtime.assistant_output import (
     ParsedAssistantOutput,
@@ -855,6 +858,16 @@ def _serialize_context_files(session: StudioSession) -> str:
     if not session.context_files:
         return "(empty)"
     return serialize_context_files(session.context_files)
+
+
+def _turn_has_external_context(session: StudioSession, user_input: Any) -> bool:
+    """Return whether this turn references external files or attachments."""
+    if getattr(session, "context_files", None):
+        return True
+    if isinstance(user_input, dict):
+        return bool(user_input.get("attachments") or user_input.get("context_files"))
+    text = str(user_input or "")
+    return "@file[" in text
 
 
 def _serialize_skill_summaries(session: StudioSession) -> str:
@@ -1797,13 +1810,21 @@ def _classify_tool_turn_outcome(
 # visible body and no tool_calls — i.e. the model "thought but said/did nothing".
 # Forces one retry so the model emits a real final reply or an explicit tool_call,
 # instead of the runtime misjudging the turn as complete and surfacing a "继续" button.
-_REASONING_ONLY_NUDGE_HINT = (
+_REASONING_ONLY_NUDGE_WITH_TOOLS_HINT = (
     "[runtime-reasoning-only] 上一轮只输出了思考内容（"
     + _THINK_OPEN_TAG
     + "），"
     "没有给出用户可见的回复，也没有发出 tool_call。"
     "请基于已有上下文与工具结果，直接给出用户可见的最终回复，"
     "或发出明确的 tool_call；不要只输出思考。"
+)
+_REASONING_ONLY_NUDGE_WITHOUT_TOOLS_HINT = (
+    "[runtime-reasoning-only] 上一轮只输出了思考内容（"
+    + _THINK_OPEN_TAG
+    + "），"
+    "没有给出用户可见的回复，也没有发出 tool_call。"
+    "本轮请直接输出简短、完整的用户可见最终回复，不要调用工具，"
+    "也不要只输出思考。"
 )
 _TRUNCATED_FINAL_NUDGE_HINT = (
     "[runtime-truncated-final] 你上一条回复似乎在中途被截断：正文很短、没有结束标记，"
@@ -2404,7 +2425,7 @@ class AgentRuntime:
 
     async def run_turn(
         self,
-        user_input: str,
+        user_input: Any,
         session: StudioSession,
         should_stop: Optional[Callable[[], bool | Awaitable[bool]]] = None,
         *,
@@ -2603,7 +2624,7 @@ class AgentRuntime:
                         scratch[EXPLORE_WHOLE_FILE_READ_WARN_KEY] = "0"
         except Exception:
             pass
-        _is_system_trigger = user_input.startswith("[系统通知]")
+        _is_system_trigger = str(user_input or "").startswith("[系统通知]")
         # Defer chat_history compaction notice until after the user row is appended
         # so transcript order stays [user] → [compaction notice] → [assistant].
         pending_compaction_notice_count: Optional[int] = None
@@ -2747,10 +2768,15 @@ class AgentRuntime:
         # Turn-level counter for reasoning-only rounds (model emitted < Mattis> but no
         # visible body and no tool_call). Capped at 1 to avoid infinite nudge loops.
         reason_only_retry = 0
+        reason_only_retry_without_tools = False
         truncated_final_retry = 0
         suspected_truncated_signal = ""
         reasoning_before_nudge = ""
         reasoning_only_protocol_errors: list[str] = []
+        round_timings: list[dict[str, Any]] = []
+        model_round_count = 0
+        first_visible_token_ms: int | None = None
+        turn_model_started_at = time.monotonic()
 
         def _record_tool_turn_outcome(
             outcome: ToolTurnOutcome,
@@ -2830,6 +2856,10 @@ class AgentRuntime:
                 return
             # Re-project each round so tool_search loads take effect next round.
             active_tools, allowed_tool_names = _project_active_tools()
+            if reason_only_retry_without_tools:
+                active_tools = []
+                allowed_tool_names = set()
+                reason_only_retry_without_tools = False
             if self._pending_loop_nudge:
                 nudge_text = self._pending_loop_nudge
                 self._pending_loop_nudge = None
@@ -2924,6 +2954,41 @@ class AgentRuntime:
                     yield _kb_evt
                 if "knowledge_search" in executed_tool_names:
                     synced_session_message_count = len(session.agent_messages)
+            model_round_count += 1
+            round_started_at = time.monotonic()
+            round_first_feedback_at: float | None = None
+            round_first_visible_at: float | None = None
+            round_tool_schema_tokens_sent = 0
+            round_timing_recorded = False
+
+            def _record_round_timing(*, reasoning_only: bool) -> None:
+                nonlocal round_timing_recorded
+                if round_timing_recorded:
+                    return
+                ended_at = time.monotonic()
+                elapsed_ms = max(0, int((ended_at - round_started_at) * 1000))
+                feedback_ms = (
+                    max(0, int((round_first_feedback_at - round_started_at) * 1000))
+                    if round_first_feedback_at is not None
+                    else elapsed_ms
+                )
+                visible_ms = (
+                    max(0, int((round_first_visible_at - round_started_at) * 1000))
+                    if round_first_visible_at is not None
+                    else 0
+                )
+                round_timings.append(
+                    {
+                        "round": round_idx,
+                        "elapsed_ms": elapsed_ms,
+                        "first_feedback_ms": feedback_ms,
+                        "first_visible_token_ms": visible_ms,
+                        "reasoning_only": bool(reasoning_only),
+                        "tool_schema_tokens_sent": int(round_tool_schema_tokens_sent),
+                    }
+                )
+                round_timing_recorded = True
+
             try:
                 # Increment per-turn counter for SessionReviewHook nudge threshold
                 session._turns_since_skill_manage = getattr(session, "_turns_since_skill_manage", 0) + 1
@@ -3005,6 +3070,7 @@ class AgentRuntime:
 
                     _ts_before = estimate_schema_tokens(list(full_tool_pool))
                     _ts_sent = estimate_schema_tokens(list(active_tools))
+                    round_tool_schema_tokens_sent = int(_ts_sent)
                     if ts_ctx.resolved_applied is not None:
                         _ts_applied = bool(ts_ctx.resolved_applied)
                     else:
@@ -3183,6 +3249,8 @@ class AgentRuntime:
                                     agent_id=agent_id,
                                 )
                                 continue
+                            if round_first_feedback_at is None:
+                                round_first_feedback_at = time.monotonic()
                             chunk_type = str(stream_chunk.get("type", "")).strip()
                             if chunk_type == "content":
                                 tok = str(stream_chunk.get("text", ""))
@@ -3203,6 +3271,23 @@ class AgentRuntime:
                                     ):
                                         _stream_body_start_ts = time.monotonic()
                                     response_text += tok
+                                    if round_first_visible_at is None:
+                                        _, streamed_visible_body = _split_reasoning_and_body(
+                                            response_text
+                                        )
+                                        if streamed_visible_body.strip():
+                                            round_first_visible_at = time.monotonic()
+                                            if first_visible_token_ms is None:
+                                                first_visible_token_ms = max(
+                                                    0,
+                                                    int(
+                                                        (
+                                                            round_first_visible_at
+                                                            - turn_model_started_at
+                                                        )
+                                                        * 1000
+                                                    ),
+                                                )
                                     _vis = followup_emitter.feed_append(tok)
                                     if _vis:
                                         yield RuntimeEvent(
@@ -3476,6 +3561,8 @@ class AgentRuntime:
                             return
                         if invoke_task.done():
                             response = await invoke_task
+                            if round_first_feedback_at is None:
+                                round_first_feedback_at = time.monotonic()
                             break
                         now = asyncio.get_running_loop().time()
                         elapsed = now - wait_started_at
@@ -3943,6 +4030,7 @@ class AgentRuntime:
             # FR-C: 如果本轮所有 tool_calls 都因流式截断被丢弃，禁止把空 tool_calls
             # 当作"模型最终回答"处理，强制进入下一轮 LLM 调用让模型重新生成完整工具调用。
             if force_retry_next_round and not tool_calls:
+                _record_round_timing(reasoning_only=False)
                 logger.info(
                     "force_retry_next_round=true session=%s round=%s reason=streamed_tool_call_truncated",
                     getattr(session, "session_id", ""),
@@ -3989,6 +4077,16 @@ class AgentRuntime:
                         round_idx,
                         model_finish_reason or "unknown",
                     )
+            if ac_clean.strip() and round_first_visible_at is None:
+                round_first_visible_at = time.monotonic()
+                if first_visible_token_ms is None:
+                    first_visible_token_ms = max(
+                        0,
+                        int((round_first_visible_at - turn_model_started_at) * 1000),
+                    )
+            _record_round_timing(
+                reasoning_only=not tool_calls and not ac_clean.strip()
+            )
             # --- Widget flow guard: detect text-based diagrams and force retry ---
             if not tool_calls and "show_widget" in allowed_tool_names:
                 from agenticx.runtime.widget_flow_guard import (
@@ -4068,6 +4166,15 @@ class AgentRuntime:
                     and not _is_system_trigger
                     and reason_only_retry < 1
                 ):
+                    can_finalize_without_tools = (
+                        round_idx == 1
+                        and not executed_tool_names
+                        and not reasoning_has_action_intent(
+                            str(reasoning_for_tool_call or "")
+                        )
+                        and not _turn_has_external_context(session, user_input)
+                    )
+                    reason_only_retry_without_tools = can_finalize_without_tools
                     reason_only_retry += 1
                     if isinstance(reasoning_for_tool_call, str) and reasoning_for_tool_call:
                         reasoning_before_nudge = reasoning_for_tool_call
@@ -4083,8 +4190,15 @@ class AgentRuntime:
                         round_idx,
                     )
                     messages.append(dict(assistant_message))
-                    messages.append({"role": "system", "content": _REASONING_ONLY_NUDGE_HINT})
-                    session.agent_messages.append({"role": "system", "content": _REASONING_ONLY_NUDGE_HINT})
+                    reasoning_only_nudge = (
+                        _REASONING_ONLY_NUDGE_WITHOUT_TOOLS_HINT
+                        if can_finalize_without_tools
+                        else _REASONING_ONLY_NUDGE_WITH_TOOLS_HINT
+                    )
+                    messages.append({"role": "system", "content": reasoning_only_nudge})
+                    session.agent_messages.append(
+                        {"role": "system", "content": reasoning_only_nudge}
+                    )
                     synced_session_message_count = len(session.agent_messages)
                     continue
 
@@ -4334,6 +4448,18 @@ class AgentRuntime:
                         "model_finish_reason": model_finish_reason or "unknown",
                         "body_len": len((clean_body or "").strip()),
                         "had_tool_calls": bool(executed_tool_names),
+                        "model_round_count": int(model_round_count),
+                        "reasoning_only_retry_count": int(reason_only_retry),
+                        "model_elapsed_ms": sum(
+                            int(item.get("elapsed_ms", 0) or 0)
+                            for item in round_timings
+                        ),
+                        "first_visible_token_ms": int(
+                            first_visible_token_ms or 0
+                        ),
+                        "round_timings": list(
+                            round_timings[: self.max_tool_rounds]
+                        ),
                         **(
                             {
                                 "model_finish_reason": model_finish_reason or "unknown",

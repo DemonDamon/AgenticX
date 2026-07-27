@@ -17,6 +17,8 @@ import pytest
 
 from agenticx.cli.studio import StudioSession
 from agenticx.runtime import AgentRuntime, ConfirmGate, EventType
+from agenticx.runtime.agent_runtime import _turn_has_external_context
+from agenticx.runtime.truncated_final import reasoning_has_action_intent
 
 _THINK_OPEN = chr(60) + "think" + chr(62)
 _THINK_CLOSE = chr(60) + "/think" + chr(62)
@@ -118,6 +120,28 @@ class _NormalReasoningPlusBody:
         yield _THINK_OPEN + "思考" + _THINK_CLOSE + "这是回复"
 
 
+class _CapturedReasoningThenReply:
+    """Capture each invoke tool projection around a reasoning-only retry."""
+
+    def __init__(self, reasoning: str = "继续思考") -> None:
+        self.calls = 0
+        self.reasoning = reasoning
+        self.tools_seen: List[List[Dict[str, Any]]] = []
+        self.messages_seen: List[List[Dict[str, Any]]] = []
+
+    def invoke(self, messages, *_args, **kwargs):
+        self.calls += 1
+        self.tools_seen.append(list(kwargs.get("tools") or []))
+        self.messages_seen.append(list(messages))
+        if self.calls == 1:
+            return _FakeResponse("", [], reasoning_content=self.reasoning)
+        return _FakeResponse("这是可见回复。", [])
+
+    def stream(self, *_args, **_kwargs):
+        if False:
+            yield ""
+
+
 class _ShortTruncatedThenReply:
     """First turn is a short action-intent stub; the retry completes it."""
 
@@ -201,9 +225,21 @@ class _TextOnlyDictStream:
         yield {"type": "content", "text": "world"}
 
 
-async def _collect(runtime: AgentRuntime, session: StudioSession, text: str) -> List[Dict[str, Any]]:
+async def _collect(runtime: AgentRuntime, session: StudioSession, text: Any) -> List[Dict[str, Any]]:
     items: List[Dict[str, Any]] = []
     async for event in runtime.run_turn(text, session):
+        items.append({"type": event.type, "data": event.data})
+    return items
+
+
+async def _collect_with_tools(
+    runtime: AgentRuntime,
+    session: StudioSession,
+    text: Any,
+    tools: List[Dict[str, Any]],
+) -> List[Dict[str, Any]]:
+    items: List[Dict[str, Any]] = []
+    async for event in runtime.run_turn(text, session, tools=tools):
         items.append({"type": event.type, "data": event.data})
     return items
 
@@ -312,6 +348,164 @@ def test_normal_reasoning_plus_body_does_not_trigger_nudge() -> None:
     assert last["metadata"]["body_len"] == len("这是回复")
     assert last["metadata"]["had_tool_calls"] is False
     assert _THINK_OPEN not in last["content"]
+
+
+def test_action_intent_helper_reuses_truncated_final_pattern() -> None:
+    assert reasoning_has_action_intent("让我先搜索并核实来源") is True
+    assert reasoning_has_action_intent("这只是内部思考") is False
+
+
+@pytest.mark.parametrize(
+    ("user_input", "context_files", "expected"),
+    [
+        ("你好", {}, False),
+        ("请看 @file[说明](/tmp/readme.md)", {}, True),
+        ({"attachments": [{"name": "a.txt"}]}, {}, True),
+        ({"context_files": ["/tmp/a.txt"]}, {}, True),
+        ("你好", {"/tmp/a.txt": "content"}, True),
+    ],
+)
+def test_turn_external_context_detection(
+    user_input: Any,
+    context_files: Dict[str, str],
+    expected: bool,
+) -> None:
+    session = StudioSession()
+    session.context_files = context_files
+    assert _turn_has_external_context(session, user_input) is expected
+
+
+def test_safe_reasoning_only_retry_removes_tools_and_records_timings() -> None:
+    llm = _CapturedReasoningThenReply()
+    runtime = AgentRuntime(llm, _ApproveGate())
+    session = StudioSession()
+    tools = [
+        {
+            "type": "function",
+            "function": {
+                "name": "list_files",
+                "description": "List files.",
+                "parameters": {"type": "object", "properties": {}},
+            },
+        }
+    ]
+
+    events = asyncio.run(_collect_with_tools(runtime, session, "你好", tools))
+
+    assert llm.calls == 2
+    assert llm.tools_seen[0]
+    assert llm.tools_seen[1] == []
+    retry_system_messages = [
+        str(message.get("content") or "")
+        for message in llm.messages_seen[1]
+        if message.get("role") == "system"
+        and "[runtime-reasoning-only]" in str(message.get("content") or "")
+    ]
+    assert retry_system_messages
+    assert "不要调用工具" in retry_system_messages[-1]
+    assert _final_text(events) == "这是可见回复。"
+
+    metadata = session.chat_history[-1]["metadata"]
+    assert metadata["model_round_count"] == 2
+    assert metadata["reasoning_only_retry_count"] == 1
+    assert metadata["model_elapsed_ms"] >= 0
+    assert metadata["first_visible_token_ms"] >= 0
+    assert len(metadata["round_timings"]) == 2
+    assert metadata["round_timings"][0]["reasoning_only"] is True
+    assert metadata["round_timings"][1]["tool_schema_tokens_sent"] == 0
+    serialized = repr(metadata).lower()
+    assert "继续思考" not in serialized
+    assert "prompt" not in serialized
+    assert "email" not in serialized
+
+
+def test_reasoning_only_with_action_intent_keeps_tools() -> None:
+    llm = _CapturedReasoningThenReply("让我先搜索并核实来源")
+    runtime = AgentRuntime(llm, _ApproveGate())
+    session = StudioSession()
+    tools = [
+        {
+            "type": "function",
+            "function": {
+                "name": "list_files",
+                "description": "List files.",
+                "parameters": {"type": "object", "properties": {}},
+            },
+        }
+    ]
+
+    asyncio.run(_collect_with_tools(runtime, session, "核实一下", tools))
+
+    assert llm.calls == 2
+    assert llm.tools_seen[1]
+    retry_hints = [
+        str(message.get("content") or "")
+        for message in llm.messages_seen[1]
+        if "[runtime-reasoning-only]" in str(message.get("content") or "")
+    ]
+    assert retry_hints
+    assert "最终回复" in retry_hints[-1]
+    assert "tool_call" in retry_hints[-1]
+
+
+def test_reasoning_only_with_context_files_keeps_tools() -> None:
+    llm = _CapturedReasoningThenReply()
+    runtime = AgentRuntime(llm, _ApproveGate())
+    session = StudioSession()
+    session.context_files = {"/tmp/a.txt": "content"}
+    tools = [
+        {
+            "type": "function",
+            "function": {
+                "name": "list_files",
+                "description": "List files.",
+                "parameters": {"type": "object", "properties": {}},
+            },
+        }
+    ]
+
+    asyncio.run(_collect_with_tools(runtime, session, "看看附件", tools))
+
+    assert llm.calls == 2
+    assert llm.tools_seen[1]
+
+
+def test_reasoning_only_with_attachments_keeps_tools() -> None:
+    llm = _CapturedReasoningThenReply()
+    runtime = AgentRuntime(llm, _ApproveGate())
+    session = StudioSession()
+    tools = [
+        {
+            "type": "function",
+            "function": {
+                "name": "list_files",
+                "description": "List files.",
+                "parameters": {"type": "object", "properties": {}},
+            },
+        }
+    ]
+
+    asyncio.run(
+        _collect_with_tools(
+            runtime,
+            session,
+            {"attachments": [{"name": "a.txt"}]},
+            tools,
+        )
+    )
+
+    assert llm.calls == 2
+    assert llm.tools_seen[1]
+
+
+def test_system_trigger_does_not_retry_reasoning_only() -> None:
+    llm = _CapturedReasoningThenReply()
+    runtime = AgentRuntime(llm, _ApproveGate())
+    session = StudioSession()
+
+    asyncio.run(_collect(runtime, session, "[系统通知] 刷新状态"))
+
+    assert llm.calls == 1
 
 
 def test_short_truncated_action_intent_retries_once_then_returns_complete_reply() -> None:

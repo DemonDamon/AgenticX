@@ -16,6 +16,13 @@ ACTION_INTENT_RE = re.compile(
 )
 
 SUSPECT_BODY_MAX_CHARS = 80
+
+
+def reasoning_has_action_intent(reasoning_text: str) -> bool:
+    """Return whether reasoning declares an unfinished external action."""
+    return bool(ACTION_INTENT_RE.search(str(reasoning_text or "")))
+
+
 def detect_suspected_truncated_final(
     *,
     visible_body: str,
@@ -39,6 +46,6 @@ def detect_suspected_truncated_final(
         return ""
     if _TERMINATOR_RE.search(body):
         return ""
-    if ACTION_INTENT_RE.search(str(reasoning_text or "")):
+    if reasoning_has_action_intent(reasoning_text):
         return "short_unterminated_with_intent"
     return ""
