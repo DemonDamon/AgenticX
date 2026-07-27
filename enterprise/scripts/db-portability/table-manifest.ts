@@ -29,6 +29,7 @@ export const TABLE_MANIFEST = [
   "enterprise_runtime_pat_revocation",
   "enterprise_runtime_mcp_servers",
   "enterprise_runtime_web_search",
+  "desktop_device_auth",
   "enterprise_quota_plans",
   "enterprise_quota_plan_assignments",
   "gateway_channels",
