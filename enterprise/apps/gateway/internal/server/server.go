@@ -703,9 +703,47 @@ func (s *Server) handleChatCompletions(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	decision := s.decider.Decide(r, req.Model)
+	requestedModelID := strings.TrimSpace(req.Model)
+	trustedProvider := ""
+	if identity.AuthViaPAT && gatewayauth.HasScope(identity.Scopes, "desktop:managed") {
+		providerID, modelName, resolveErr := resolveManagedModelCandidate(
+			req.Model,
+			r.Header.Get(routing.HeaderProvider),
+		)
+		if resolveErr != nil {
+			writeAPIError(w, openai.BadRequest(errManagedModelCandidate.Error()))
+			return
+		}
+		requestedModelID = providerID + "/" + modelName
+		if s.managedModels == nil {
+			writeAPIError(w, openai.Unavailable("managed model authorization unavailable"))
+			return
+		}
+		allowed, authErr := s.managedModels.IsAllowed(
+			r.Context(),
+			managedIdentityFromRequest(identity),
+			requestedModelID,
+		)
+		if authErr != nil {
+			writeAPIError(w, openai.Unavailable("managed model authorization unavailable"))
+			return
+		}
+		if !allowed {
+			writeAPIError(w, openai.Forbidden(errModelNotAssigned.Error()))
+			return
+		}
+		trustedProvider = providerID
+		req.Model = modelName
+	}
+
+	var decision routing.Decision
+	if trustedProvider != "" {
+		decision = s.decider.DecideForProvider(req.Model, trustedProvider)
+	} else {
+		decision = s.decider.Decide(r, req.Model)
+	}
 	s.logger.Info("gateway routing decision",
-		"model", req.Model,
+		"model", requestedModelID,
 		"route", decision.Route,
 		"provider", decision.Provider,
 		"endpoint", decision.Endpoint,
@@ -727,9 +765,10 @@ func (s *Server) handleChatCompletions(w http.ResponseWriter, r *http.Request) {
 			UserEmail:      identity.UserEmail,
 			DepartmentID:   identity.DepartmentID,
 			SessionID:      identity.SessionID,
-			ClientType:     "web-portal",
+			ClientType:     auditClientType(identity),
 			ClientIP:       r.RemoteAddr,
 			Model:          req.Model,
+			Provider:       decision.Provider,
 			Route:          decision.Route,
 			Digest:         &audit.Digest{PromptHash: hashText(joinMessages(req.Messages))},
 			LatencyMS:      time.Since(startedAt).Milliseconds(),
@@ -754,7 +793,7 @@ func (s *Server) handleChatCompletions(w http.ResponseWriter, r *http.Request) {
 			UserEmail:    identity.UserEmail,
 			DepartmentID: identity.DepartmentID,
 			SessionID:    identity.SessionID,
-			ClientType:   "web-portal",
+			ClientType:   auditClientType(identity),
 			ClientIP:     r.RemoteAddr,
 			Model:        req.Model,
 			Provider:     decision.Provider,

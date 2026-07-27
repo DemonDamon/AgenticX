@@ -55,3 +55,11 @@ func Internal(message string) APIError {
 		HTTPStatus: http.StatusInternalServerError,
 	}
 }
+
+func Unavailable(message string) APIError {
+	return APIError{
+		Code:       "50302",
+		Message:    message,
+		HTTPStatus: http.StatusServiceUnavailable,
+	}
+}

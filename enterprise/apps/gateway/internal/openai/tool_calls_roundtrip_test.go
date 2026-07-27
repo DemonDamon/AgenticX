@@ -113,3 +113,25 @@ func TestToolRoleHistoryRoundTrip(t *testing.T) {
 		t.Fatalf("history round-trip failed: %s", string(out))
 	}
 }
+
+func TestReasoningSplitRoundTrip(t *testing.T) {
+	raw := []byte(`{"model":"p/m","messages":[{"role":"user","content":"hi"}],"reasoning_split":true}`)
+	var req ChatCompletionRequest
+	if err := json.Unmarshal(raw, &req); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if req.ReasoningSplit == nil || !*req.ReasoningSplit {
+		t.Fatalf("reasoning_split not preserved on unmarshal")
+	}
+	out, err := json.Marshal(req)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	var again ChatCompletionRequest
+	if err := json.Unmarshal(out, &again); err != nil {
+		t.Fatalf("re-unmarshal: %v", err)
+	}
+	if again.ReasoningSplit == nil || !*again.ReasoningSplit {
+		t.Fatalf("reasoning_split lost after round-trip: %s", string(out))
+	}
+}

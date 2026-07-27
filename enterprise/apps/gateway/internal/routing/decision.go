@@ -52,7 +52,10 @@ func NewDeciderWithAdmin(cfg config.Config, admin *runtimeconfig.Loader) *Decide
 func (d *Decider) Decide(r *http.Request, modelName string) Decision {
 	// admin 优先：admin-console 配置的 provider+model 命中时直接出 endpoint+key。
 	if d.admin != nil {
-		explicit := strings.TrimSpace(r.Header.Get(HeaderProvider))
+		explicit := ""
+		if r != nil {
+			explicit = strings.TrimSpace(r.Header.Get(HeaderProvider))
+		}
 		if resolved, ok := d.admin.ResolveByModel(modelName, explicit); ok {
 			return Decision{
 				Route:    resolved.Route,
@@ -65,11 +68,13 @@ func (d *Decider) Decide(r *http.Request, modelName string) Decision {
 	}
 
 	// 请求头次之：支持本地/私有云/三方手动强制路由。
-	headerDecision := strings.TrimSpace(strings.ToLower(r.Header.Get(d.localRouteHeader)))
-	if headerDecision != "" {
-		return Decision{
-			Route: headerDecision,
-			Model: modelName,
+	if r != nil {
+		headerDecision := strings.TrimSpace(strings.ToLower(r.Header.Get(d.localRouteHeader)))
+		if headerDecision != "" {
+			return Decision{
+				Route: headerDecision,
+				Model: modelName,
+			}
 		}
 	}
 
@@ -86,5 +91,28 @@ func (d *Decider) Decide(r *http.Request, modelName string) Decision {
 		Provider: cfgModel.Provider,
 		Endpoint: cfgModel.Endpoint,
 		Model:    cfgModel.Name,
+	}
+}
+
+// DecideForProvider resolves using a trusted explicit provider (managed Desktop path).
+// It never falls back to YAML fuzzy model matching.
+func (d *Decider) DecideForProvider(model, explicitProvider string) Decision {
+	modelName := strings.TrimSpace(model)
+	explicit := strings.TrimSpace(explicitProvider)
+	if d.admin != nil {
+		if resolved, ok := d.admin.ResolveByModel(modelName, explicit); ok {
+			return Decision{
+				Route:    resolved.Route,
+				Provider: resolved.Provider,
+				Endpoint: resolved.Endpoint,
+				APIKey:   resolved.APIKey,
+				Model:    resolved.Model,
+			}
+		}
+	}
+	return Decision{
+		Route:    d.defaultRoute,
+		Provider: explicit,
+		Model:    modelName,
 	}
 }

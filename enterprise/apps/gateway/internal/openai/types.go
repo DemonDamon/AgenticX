@@ -52,6 +52,9 @@ type ChatCompletionRequest struct {
 	Tools               []Tool        `json:"tools,omitempty"`
 	ToolChoice          any           `json:"tool_choice,omitempty"`
 	ReasoningEffort     string        `json:"reasoning_effort,omitempty"`
+	// ReasoningSplit requests providers that support split reasoning/content streams.
+	// Pointer distinguishes omitted vs explicit false.
+	ReasoningSplit *bool `json:"reasoning_split,omitempty"`
 	// ThinkingBudget tokens for Anthropic/Gemini thinking models (internal pivot field).
 	ThinkingBudget int `json:"-"`
 }

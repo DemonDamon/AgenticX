@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"strings"
 	"sync"
@@ -163,6 +164,30 @@ type patTokenRow struct {
 func (v *PATVerifier) withLookup(fn func(ctx context.Context, tokenHash string) (patTokenRow, error)) *PATVerifier {
 	v.lookup = fn
 	return v
+}
+
+// SetPATLookupForTest installs a fixed identity for one plaintext token (tests only).
+func SetPATLookupForTest(v *PATVerifier, plainToken string, identity PATIdentity) {
+	if v == nil {
+		return
+	}
+	hash := hashPAT(strings.TrimSpace(plainToken))
+	scopesJSON, _ := json.Marshal(identity.Scopes)
+	v.lookup = func(ctx context.Context, tokenHash string) (patTokenRow, error) {
+		if tokenHash != hash {
+			return patTokenRow{}, errors.New("auth:pat:invalid")
+		}
+		return patTokenRow{
+			ID:         identity.APITokenID,
+			TenantID:   identity.TenantID,
+			UserID:     identity.UserID,
+			DeptID:     identity.DeptID,
+			Status:     "active",
+			Scopes:     scopesJSON,
+			UserEmail:  identity.UserEmail,
+			UserStatus: "active",
+		}, nil
+	}
 }
 
 func (v *PATVerifier) lookupToken(ctx context.Context, hash string) (patTokenRow, error) {
