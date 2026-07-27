@@ -43,6 +43,13 @@
       "when": 1784158783970,
       "tag": "0005_enterprise_runtime_deep_research",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "5",
+      "when": 1784158783971,
+      "tag": "0006_deep_research_enabled_default_true",
+      "breakpoints": true
     }
   ]
 }

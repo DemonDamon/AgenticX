@@ -232,6 +232,13 @@
       "when": 1780400000000,
       "tag": "0033_enterprise_runtime_deep_research",
       "breakpoints": true
+    },
+    {
+      "idx": 33,
+      "version": "7",
+      "when": 1780500000000,
+      "tag": "0034_deep_research_enabled_default_true",
+      "breakpoints": true
     }
   ]
 }
