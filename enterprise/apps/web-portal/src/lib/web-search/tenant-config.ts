@@ -16,6 +16,7 @@ export type WebSearchPublicConfig = {
   provider: WebSearchProviderName;
   maxResults: number;
   hasApiKey: boolean;
+  deepResearchEnabled: boolean;
 };
 
 export type WebSearchUpdateInput = {
@@ -24,6 +25,7 @@ export type WebSearchUpdateInput = {
   maxResults?: number;
   /** Empty string clears key; undefined leaves unchanged. */
   apiKey?: string;
+  deepResearchEnabled?: boolean;
 };
 
 function normalizeProvider(raw: string | undefined): WebSearchProviderName {
@@ -48,6 +50,7 @@ export async function loadTenantWebSearchConfig(tenantId: string): Promise<Tenan
         provider: row.provider,
         apiKey: decryptProviderApiKey(row.apiKeyCipher ?? ""),
         maxResults: Number(row.maxResults) || DEFAULT_MAX_RESULTS,
+        deepResearchEnabled: Boolean(row.deepResearchEnabled),
       };
     }
 
@@ -60,6 +63,7 @@ export async function loadTenantWebSearchConfig(tenantId: string): Promise<Tenan
       provider: row.provider,
       apiKey: decryptProviderApiKey(row.apiKeyCipher ?? ""),
       maxResults: Number(row.maxResults) || DEFAULT_MAX_RESULTS,
+      deepResearchEnabled: Boolean(row.deepResearchEnabled),
     };
   } catch {
     return null;
@@ -74,6 +78,7 @@ export async function getPublicWebSearchConfig(tenantId: string): Promise<WebSea
       provider: "duckduckgo",
       maxResults: DEFAULT_MAX_RESULTS,
       hasApiKey: false,
+      deepResearchEnabled: false,
     };
   }
   return {
@@ -81,6 +86,7 @@ export async function getPublicWebSearchConfig(tenantId: string): Promise<WebSea
     provider: normalizeProvider(row.provider),
     maxResults: row.maxResults,
     hasApiKey: Boolean(row.apiKey.trim()),
+    deepResearchEnabled: Boolean(row.deepResearchEnabled),
   };
 }
 
@@ -98,6 +104,8 @@ export async function upsertTenantWebSearchConfig(
   const nextEnabled = input.enabled ?? existing?.enabled ?? true;
   const nextProvider = normalizeProvider(input.provider ?? existing?.provider ?? "duckduckgo");
   const nextMax = input.maxResults ?? existing?.maxResults ?? DEFAULT_MAX_RESULTS;
+  const nextDeepResearch =
+    input.deepResearchEnabled ?? existing?.deepResearchEnabled ?? false;
   let nextKey = existing?.apiKey ?? "";
   if (input.apiKey !== undefined) {
     nextKey = input.apiKey;
@@ -116,6 +124,7 @@ export async function upsertTenantWebSearchConfig(
         provider: nextProvider,
         apiKeyCipher: cipher,
         maxResults: nextMax,
+        deepResearchEnabled: nextDeepResearch,
         updatedAt,
       })
       .onDuplicateKeyUpdate({
@@ -124,6 +133,7 @@ export async function upsertTenantWebSearchConfig(
           provider: nextProvider,
           apiKeyCipher: cipher,
           maxResults: nextMax,
+          deepResearchEnabled: nextDeepResearch,
           updatedAt,
         },
       });
@@ -137,6 +147,7 @@ export async function upsertTenantWebSearchConfig(
         provider: nextProvider,
         apiKeyCipher: cipher,
         maxResults: nextMax,
+        deepResearchEnabled: nextDeepResearch,
         updatedAt,
       })
       .onConflictDoUpdate({
@@ -146,6 +157,7 @@ export async function upsertTenantWebSearchConfig(
           provider: nextProvider,
           apiKeyCipher: cipher,
           maxResults: nextMax,
+          deepResearchEnabled: nextDeepResearch,
           updatedAt,
         },
       });
@@ -156,5 +168,6 @@ export async function upsertTenantWebSearchConfig(
     provider: nextProvider,
     maxResults: nextMax,
     hasApiKey: Boolean(nextKey.trim()),
+    deepResearchEnabled: nextDeepResearch,
   };
 }

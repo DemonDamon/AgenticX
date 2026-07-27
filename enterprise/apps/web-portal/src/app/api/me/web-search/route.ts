@@ -55,6 +55,7 @@ export async function PUT(request: Request) {
     provider?: unknown;
     maxResults?: unknown;
     apiKey?: unknown;
+    deepResearchEnabled?: unknown;
   };
   try {
     body = (await request.json()) as typeof body;
@@ -76,6 +77,8 @@ export async function PUT(request: Request) {
       provider: typeof body.provider === "string" ? body.provider : undefined,
       maxResults: typeof body.maxResults === "number" ? body.maxResults : undefined,
       apiKey: typeof body.apiKey === "string" ? body.apiKey : undefined,
+      deepResearchEnabled:
+        typeof body.deepResearchEnabled === "boolean" ? body.deepResearchEnabled : undefined,
     });
     return NextResponse.json({ data });
   } catch (error) {

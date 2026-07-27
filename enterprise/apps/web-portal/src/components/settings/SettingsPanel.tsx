@@ -45,6 +45,7 @@ export function SettingsPanel() {
   const [webSearchProvider, setWebSearchProvider] = useState("duckduckgo");
   const [webSearchApiKey, setWebSearchApiKey] = useState("");
   const [webSearchHasApiKey, setWebSearchHasApiKey] = useState(false);
+  const [deepResearchOn, setDeepResearchOn] = useState(false);
   const [webSearchSaving, setWebSearchSaving] = useState(false);
   const [webSearchLoaded, setWebSearchLoaded] = useState(false);
   const [streamingOn, setStreamingOn] = useState(true);
@@ -103,7 +104,12 @@ export function SettingsPanel() {
       try {
         const res = await fetch("/api/me/web-search", { cache: "no-store" });
         const json = (await res.json()) as {
-          data?: { enabled?: boolean; provider?: string; hasApiKey?: boolean };
+          data?: {
+            enabled?: boolean;
+            provider?: string;
+            hasApiKey?: boolean;
+            deepResearchEnabled?: boolean;
+          };
           error?: { message?: string };
         };
         if (!res.ok) {
@@ -113,6 +119,7 @@ export function SettingsPanel() {
         setWebSearchOn(Boolean(json.data?.enabled ?? true));
         setWebSearchProvider(json.data?.provider ?? "duckduckgo");
         setWebSearchHasApiKey(Boolean(json.data?.hasApiKey));
+        setDeepResearchOn(Boolean(json.data?.deepResearchEnabled));
         setWebSearchApiKey("");
         setWebSearchLoaded(true);
       } catch (error) {
@@ -125,6 +132,7 @@ export function SettingsPanel() {
     enabled?: boolean;
     provider?: string;
     apiKey?: string;
+    deepResearchEnabled?: boolean;
   }) => {
     setWebSearchSaving(true);
     try {
@@ -134,7 +142,12 @@ export function SettingsPanel() {
         body: JSON.stringify(patch),
       });
       const json = (await res.json()) as {
-        data?: { enabled?: boolean; provider?: string; hasApiKey?: boolean };
+        data?: {
+          enabled?: boolean;
+          provider?: string;
+          hasApiKey?: boolean;
+          deepResearchEnabled?: boolean;
+        };
         error?: { message?: string };
       };
       if (!res.ok) {
@@ -144,6 +157,7 @@ export function SettingsPanel() {
       setWebSearchOn(Boolean(json.data?.enabled));
       setWebSearchProvider(json.data?.provider ?? "duckduckgo");
       setWebSearchHasApiKey(Boolean(json.data?.hasApiKey));
+      setDeepResearchOn(Boolean(json.data?.deepResearchEnabled));
       if (patch.apiKey !== undefined) setWebSearchApiKey("");
       toast.success(t("webSearch.saveSuccess"));
     } catch (error) {
@@ -465,6 +479,19 @@ export function SettingsPanel() {
                       onChange={(next) => {
                         setWebSearchOn(next);
                         if (webSearchLoaded) void saveWebSearch({ enabled: next });
+                      }}
+                    />
+                  }
+                />
+                <SettingsRow
+                  label={t("webSearch.enableDeepResearch")}
+                  description={t("webSearch.enableDeepResearchDescription")}
+                  control={
+                    <Switch
+                      checked={deepResearchOn}
+                      onChange={(next) => {
+                        setDeepResearchOn(next);
+                        if (webSearchLoaded) void saveWebSearch({ deepResearchEnabled: next });
                       }}
                     />
                   }
