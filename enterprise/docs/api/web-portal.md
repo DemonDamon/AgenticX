@@ -92,6 +92,15 @@ SSO 按钮由 `NEXT_PUBLIC_SSO_PROVIDERS=id:显示名` 控制。配置见 [runbo
 | `AUTH_DEV_OWNER_PASSWORD` | 开发 owner 密码 |
 | `ENABLE_DEV_BOOTSTRAP` | 非生产自动引导 |
 | `DEFAULT_TENANT_ID` / `DEFAULT_DEPT_ID` | 默认租户/部门 |
+| `NEXT_PUBLIC_GATEWAY_PUBLIC_BASE_URL` | Desktop bootstrap 下发的公网 Gateway origin（规范为 `/v1`）；生产勿填 docker 内部名 |
+
+### Desktop bootstrap（Near）
+
+| 方法 | 路径 | 说明 |
+|---|---|---|
+| POST | `/api/desktop/auth/token` | 账密签发 PAT（含 `desktop:managed`） |
+| GET | `/api/desktop/bootstrap` | 用户/可见模型；managed PAT 额外返回 `inferenceApiBaseUrl` / `inferenceTransport` |
+| POST | `/api/desktop/v1/chat/completions` | 旧兼容代理（仍保留） |
 | `GATEWAY_COMPLETIONS_URL` | Gateway 转发地址 |
 | `NEXT_PUBLIC_SSO_PROVIDERS` | SSO 按钮列表 |
 

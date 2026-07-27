@@ -52,6 +52,7 @@ Framework: **Next.js** · Node: **20**。
 | 变量名 | 示例 |
 | --- | --- |
 | `GATEWAY_COMPLETIONS_URL` | `https://gateway.<你的域名>/v1/chat/completions` |
+| `NEXT_PUBLIC_GATEWAY_PUBLIC_BASE_URL` | `https://gateway.<你的域名>`（Desktop 直连；勿用内网 docker 服务名） |
 
 按需（不建议生产长期使用）：
 

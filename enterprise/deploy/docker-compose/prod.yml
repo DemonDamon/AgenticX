@@ -74,6 +74,8 @@ services:
       DATABASE_DIALECT: ${DATABASE_DIALECT:-postgresql}
       DATABASE_URL: ${DATABASE_URL:?DATABASE_URL is required}
       NEXT_PUBLIC_GATEWAY_BASE: http://nginx
+      # Public origin employees can resolve (NOT docker service names). Used by Desktop bootstrap.
+      NEXT_PUBLIC_GATEWAY_PUBLIC_BASE_URL: ${NEXT_PUBLIC_GATEWAY_PUBLIC_BASE_URL:?NEXT_PUBLIC_GATEWAY_PUBLIC_BASE_URL is required}
       AUTH_JWT_PUBLIC_KEY: ${JWT_PUBLIC_KEY}
       AUTH_JWT_PRIVATE_KEY: ${JWT_PRIVATE_KEY}
     networks:
