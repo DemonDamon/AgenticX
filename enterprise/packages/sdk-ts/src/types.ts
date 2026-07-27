@@ -20,6 +20,8 @@ export type ChatRequest = {
   model: string;
   messages: ChatMessage[];
   stream?: boolean;
+  /** User toggled web search in the composer; BFF injects the web_search tool when true. */
+  webSearch?: boolean;
 };
 
 export type ChatUsage = {

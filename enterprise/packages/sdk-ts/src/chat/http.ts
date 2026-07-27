@@ -87,6 +87,7 @@ export class HttpChatClient implements ChatClient {
           model: pending.request.model,
           stream: true,
           messages: pending.request.messages.map((message) => toGatewayMessage(message)),
+          ...(pending.request.webSearch ? { agenticx_web_search: true } : {}),
         }),
         signal: controller.signal,
       });

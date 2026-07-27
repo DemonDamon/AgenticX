@@ -362,13 +362,13 @@ export function MachiChatView({ client }: MachiChatViewProps) {
       if (!trimmed && messageAttachments.length === 0) return;
       void sendMessage(
         client,
-        { content: trimmed, attachments: messageAttachments },
+        { content: trimmed, attachments: messageAttachments, webSearch },
         opts?.forceSend ? { forceSend: true } : undefined,
       );
       setDraft("");
       clearAttachments();
     },
-    [clearAttachments, client, draft, sendMessage, toMessageAttachments],
+    [clearAttachments, client, draft, sendMessage, toMessageAttachments, webSearch],
   );
 
   const queuedForSession = React.useMemo(() => {
