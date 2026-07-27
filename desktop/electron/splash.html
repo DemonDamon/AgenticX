@@ -15,30 +15,22 @@
     <style>
       :root {
         color-scheme: dark;
-        --bg: #030305;
-        --panel: rgba(255, 255, 255, 0.045);
-        --text: rgba(255, 255, 255, 0.96);
-        --text-muted: rgba(255, 255, 255, 0.46);
-        --hairline: rgba(255, 255, 255, 0.14);
-        --track: rgba(255, 255, 255, 0.11);
-        --shimmer: rgba(255, 255, 255, 0.92);
-        --particle: 255, 255, 255;
-        --cancel-border: rgba(255, 255, 255, 0.18);
-        --cancel-text: rgba(255, 255, 255, 0.68);
+        --text: #f5f7fb;
+        --blue: #378bff;
+        --purple: #9c5cff;
+        --glass-core: rgba(238, 246, 255, 0.075);
+        --glass-blue: rgba(55, 139, 255, 0.12);
+        --glass-violet: rgba(156, 92, 255, 0.095);
       }
 
       :root[data-theme="light"] {
         color-scheme: light;
-        --bg: #f8f8f6;
-        --panel: rgba(0, 0, 0, 0.035);
-        --text: rgba(10, 10, 10, 0.92);
-        --text-muted: rgba(10, 10, 10, 0.48);
-        --hairline: rgba(10, 10, 10, 0.13);
-        --track: rgba(10, 10, 10, 0.12);
-        --shimmer: rgba(10, 10, 10, 0.88);
-        --particle: 10, 10, 10;
-        --cancel-border: rgba(10, 10, 10, 0.16);
-        --cancel-text: rgba(10, 10, 10, 0.64);
+        --text: #11131a;
+        --blue: #1671ee;
+        --purple: #7c3aed;
+        --glass-core: rgba(255, 255, 255, 0.5);
+        --glass-blue: rgba(68, 168, 211, 0.16);
+        --glass-violet: rgba(124, 58, 237, 0.1);
       }
 
       * {
@@ -51,591 +43,1104 @@
         width: 100%;
         height: 100%;
         overflow: hidden;
-        background:
-          radial-gradient(circle at 50% 27%, var(--panel), transparent 34%),
-          linear-gradient(180deg, rgba(255, 255, 255, 0.025), transparent 36%),
-          var(--bg);
+        background: transparent;
         font-family: "SF Pro Display", "SF Pro Text", "PingFang SC", "Helvetica Neue", sans-serif;
         -webkit-font-smoothing: antialiased;
       }
 
       body {
-        opacity: 1;
-        transition: opacity 180ms ease-out;
-      }
-
-      body.fade-out {
-        opacity: 0;
-      }
-
-      #particle-canvas {
-        position: fixed;
-        inset: 0;
-        width: 100%;
-        height: 100%;
-        pointer-events: none;
-        z-index: 0;
-      }
-
-      .grid {
-        position: fixed;
-        inset: 22px;
-        border: 1px solid var(--hairline);
-        border-radius: 22px;
-        opacity: 0.58;
-        pointer-events: none;
-      }
-
-      .grid::before,
-      .grid::after {
-        content: "";
-        position: absolute;
-        inset: 0;
-        border-radius: inherit;
-        background:
-          linear-gradient(var(--hairline) 1px, transparent 1px),
-          linear-gradient(90deg, var(--hairline) 1px, transparent 1px);
-        background-size: 48px 48px;
-        mask-image: radial-gradient(circle at 50% 42%, rgba(0, 0, 0, 0.6), transparent 62%);
-        opacity: 0.22;
-      }
-
-      .grid::after {
-        background: radial-gradient(circle at 50% 40%, transparent 0 42%, var(--hairline) 43%, transparent 44%);
-        opacity: 0.62;
-      }
-
-      .shell {
-        position: relative;
-        z-index: 1;
-        width: 100%;
-        height: 100%;
-        padding: 38px 46px;
-        display: flex;
-        flex-direction: row;
-        align-items: center;
-        justify-content: center;
-        gap: 44px;
         user-select: none;
         -webkit-user-select: none;
       }
 
-      .hero-wrap {
-        flex: 0 0 34%;
+      .splash {
+        position: relative;
+        width: 100%;
         height: 100%;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        width: 34%;
-        position: relative;
-        min-height: 0;
-      }
-
-      .content {
-        flex: 1 1 auto;
-        min-width: 260px;
-        max-width: 360px;
-        display: flex;
-        flex-direction: column;
-        align-items: center;
-        justify-content: center;
-        align-self: stretch;
-        text-align: center;
-      }
-
-      .brand-block {
-        display: flex;
-        flex-direction: column;
-        align-items: center;
-        gap: 8px;
-        margin: 0;
-        width: 100%;
-        text-align: center;
-      }
-
-      .brand-name {
-        font-size: 36px;
-        font-weight: 700;
-        letter-spacing: 0.24em;
-        color: var(--text);
-        line-height: 1;
-      }
-
-      .brand-tagline {
-        font-size: 10px;
-        letter-spacing: 0.22em;
-        text-transform: uppercase;
-        color: var(--text-muted);
-        line-height: 1.35;
-      }
-
-      .content-stack {
-        display: flex;
-        flex-direction: column;
-        align-items: center;
-        gap: 34px;
-        width: 100%;
-      }
-
-      .hero-aura {
-        position: absolute;
-        width: min(150px, 72%);
-        height: min(150px, 72%);
-        border-radius: 50%;
-        background:
-          radial-gradient(circle, rgba(255, 255, 255, 0.11) 0%, transparent 63%),
-          conic-gradient(from 120deg, transparent, rgba(255, 255, 255, 0.18), transparent 36%);
-        filter: blur(12px);
-        opacity: 0.72;
-        animation: aura 4s ease-in-out infinite;
-      }
-
-      :root[data-theme="light"] .hero-aura {
-        background:
-          radial-gradient(circle, rgba(0, 0, 0, 0.07) 0%, transparent 64%),
-          conic-gradient(from 120deg, transparent, rgba(0, 0, 0, 0.12), transparent 36%);
-      }
-
-      @keyframes aura {
-        0%,
-        100% {
-          transform: scale(0.96) rotate(0deg);
-          opacity: 0.5;
-        }
-        50% {
-          transform: scale(1.05) rotate(8deg);
-          opacity: 0.82;
-        }
-      }
-
-      .hero-img {
-        position: relative;
-        width: min(175px, 72%);
-        max-height: 72%;
-        object-fit: contain;
-        opacity: 0;
-        transform: translateY(10px) scale(0.965);
-        clip-path: inset(100% 0 0 0);
-        filter: drop-shadow(0 0 18px rgba(255, 255, 255, 0.12));
-        animation:
-          reveal-hero 1.5s cubic-bezier(0.16, 1, 0.3, 1) 160ms forwards,
-          breathe 4.2s ease-in-out 1.6s infinite;
-      }
-
-      /* Wireframe asset is light-on-transparent; invert for readable contrast on light bg */
-      :root[data-theme="light"] .hero-img {
-        filter:
-          invert(1)
-          contrast(1.12)
-          drop-shadow(0 2px 20px rgba(0, 0, 0, 0.12))
-          drop-shadow(0 0 1px rgba(0, 0, 0, 0.28));
-      }
-
-      @keyframes reveal-hero {
-        45% {
-          opacity: 0.72;
-        }
-        to {
-          opacity: 1;
-          transform: translateY(0) scale(1);
-          clip-path: inset(0 0 0 0);
-        }
-      }
-
-      @keyframes breathe {
-        0%,
-        100% {
-          transform: translateY(0) scale(1);
-          opacity: 0.94;
-        }
-        50% {
-          transform: translateY(-2px) scale(1.008);
-          opacity: 1;
-        }
-      }
-
-      .scanline {
-        position: absolute;
-        left: 4%;
-        right: 4%;
-        height: 2px;
-        background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.72), transparent);
-        opacity: 0;
-        pointer-events: none;
-        filter: blur(0.4px);
-        animation: scan 3.4s ease-in-out 0.5s infinite;
-      }
-
-      :root[data-theme="light"] .scanline {
-        background: linear-gradient(90deg, transparent, rgba(0, 0, 0, 0.35), transparent);
-      }
-
-      @keyframes scan {
-        0% {
-          top: 10%;
-          opacity: 0;
-        }
-        12% {
-          opacity: 0.85;
-        }
-        88% {
-          opacity: 0.85;
-        }
-        100% {
-          top: 88%;
-          opacity: 0;
-        }
-      }
-
-      .eye-pulse {
-        position: absolute;
-        width: 7px;
-        height: 7px;
-        left: 43.5%;
-        top: 41%;
-        border-radius: 50%;
-        background: rgba(255, 255, 255, 0.85);
-        box-shadow: 0 0 18px rgba(255, 255, 255, 0.75);
-        opacity: 0;
-        animation: eye 4.8s ease-in-out 1.35s infinite;
-      }
-
-      :root[data-theme="light"] .eye-pulse {
-        background: rgba(10, 10, 10, 0.82);
-        box-shadow: 0 0 16px rgba(0, 0, 0, 0.38);
-      }
-
-      @keyframes eye {
-        0%,
-        62%,
-        100% {
-          opacity: 0;
-          transform: scale(0.6);
-        }
-        68% {
-          opacity: 0.95;
-          transform: scale(1);
-        }
-        75% {
-          opacity: 0.15;
-          transform: scale(1.8);
-        }
-      }
-
-      .footer {
-        width: 100%;
-        display: flex;
-        flex-direction: column;
-        gap: 10px;
-        align-items: center;
-      }
-
-      .progress-track {
-        width: 100%;
-        height: 2px;
-        border-radius: 999px;
-        background: var(--track);
         overflow: hidden;
-        position: relative;
+        isolation: isolate;
+        color: var(--text);
+        background: transparent;
+        opacity: 0;
+        animation: air-in 520ms cubic-bezier(0.16, 1, 0.3, 1) forwards;
       }
 
-      .progress-shimmer {
+      .glass-field {
         position: absolute;
-        top: 0;
-        left: -35%;
-        width: 35%;
-        height: 100%;
-        border-radius: 999px;
-        background: var(--shimmer);
-        animation: shimmer 1.1s ease-in-out infinite;
+        inset: 0;
+        z-index: 0;
+        overflow: hidden;
+        pointer-events: none;
       }
 
-      @keyframes shimmer {
+      .glass-lens {
+        position: absolute;
+        top: 44%;
+        left: 50%;
+        width: var(--w);
+        height: var(--h);
+        border-radius: 48% 52% 58% 42% / 58% 46% 54% 42%;
+        opacity: var(--o);
+        background:
+          radial-gradient(ellipse at 32% 24%, var(--glass-core), transparent 48%),
+          radial-gradient(ellipse at 72% 68%, var(--glass-violet), transparent 58%),
+          linear-gradient(118deg, var(--glass-blue), transparent 56%);
+        -webkit-backdrop-filter: blur(22px) saturate(1.32);
+        backdrop-filter: blur(22px) saturate(1.32);
+        -webkit-mask-image: radial-gradient(ellipse at center, #000 0 38%, rgba(0, 0, 0, 0.72) 64%, transparent 100%);
+        mask-image: radial-gradient(ellipse at center, #000 0 38%, rgba(0, 0, 0, 0.72) 64%, transparent 100%);
+        transform: translate(-50%, -50%) translate(var(--x), var(--y)) rotate(var(--r));
+        transition:
+          transform 580ms cubic-bezier(0.2, 0.78, 0.18, 1),
+          opacity 440ms ease-out;
+        contain: paint;
+        will-change: transform, opacity;
+      }
+
+      body.is-pulling .glass-lens {
+        opacity: 0;
+        transform:
+          translate(-50%, -50%)
+          translate(calc(var(--x) + var(--dx)), calc(var(--y) + var(--dy)))
+          rotate(calc(var(--r) + var(--dr)))
+          scale(1.12);
+      }
+
+      canvas {
+        position: absolute;
+        inset: 0;
+        z-index: 1;
+        display: block;
+        width: 100%;
+        height: 100%;
+        pointer-events: none;
+      }
+
+      .sr-only {
+        position: absolute;
+        width: 1px;
+        height: 1px;
+        padding: 0;
+        margin: -1px;
+        overflow: hidden;
+        clip: rect(0, 0, 0, 0);
+        white-space: nowrap;
+        border: 0;
+      }
+
+      @keyframes air-in {
         0% {
-          transform: translateX(0);
+          opacity: 0;
+          filter: blur(9px);
         }
         100% {
-          transform: translateX(380%);
+          opacity: 1;
+          filter: blur(0);
         }
       }
 
-      @media (max-width: 620px) {
-        .shell {
-          padding: 30px 28px;
-          gap: 26px;
+      @media (prefers-reduced-motion: reduce) {
+        .splash {
+          animation-duration: 1ms;
         }
 
-        .hero-wrap {
-          flex-basis: 32%;
-          width: 32%;
+        .glass-lens {
+          transition-duration: 1ms;
         }
-
-        .content-stack {
-          gap: 26px;
-        }
-
-        .brand-name {
-          font-size: 30px;
-        }
-      }
-
-      .stage-text {
-        font-size: 10.5px;
-        color: var(--text-muted);
-        min-height: 16px;
-        text-align: center;
-        letter-spacing: 0.08em;
-      }
-
-      .escape {
-        display: none;
-        flex-direction: column;
-        align-items: center;
-        gap: 8px;
-        margin-top: 4px;
-      }
-
-      .escape.visible {
-        display: flex;
-      }
-
-      .escape-hint {
-        font-size: 10px;
-        color: var(--text-muted);
-        text-align: center;
-        line-height: 1.45;
-      }
-
-      .cancel-btn {
-        appearance: none;
-        border: 1px solid var(--cancel-border);
-        background: transparent;
-        color: var(--cancel-text);
-        font-size: 11px;
-        line-height: 1;
-        padding: 6px 14px;
-        border-radius: 999px;
-        cursor: pointer;
-      }
-
-      .cancel-btn:hover {
-        opacity: 0.85;
       }
     </style>
   </head>
   <body>
-    <canvas id="particle-canvas" aria-hidden="true"></canvas>
-    <div class="grid" aria-hidden="true"></div>
-
-    <div class="shell">
-      <div class="hero-wrap">
-        <div class="hero-aura" aria-hidden="true"></div>
-        <div class="scanline" aria-hidden="true"></div>
-        <div class="eye-pulse" aria-hidden="true"></div>
-        <img id="hero" class="hero-img" alt="Near wireframe" />
+    <main class="splash" aria-label="Near 正在启动">
+      <div class="glass-field" aria-hidden="true">
+        <i class="glass-lens" style="--w: 430px; --h: 208px; --x: -42px; --y: -18px; --r: -8deg; --o: 0.78; --dx: -92px; --dy: -38px; --dr: -13deg"></i>
+        <i class="glass-lens" style="--w: 340px; --h: 184px; --x: 92px; --y: 38px; --r: 14deg; --o: 0.62; --dx: 118px; --dy: 62px; --dr: 17deg"></i>
+        <i class="glass-lens" style="--w: 276px; --h: 154px; --x: -126px; --y: 66px; --r: -18deg; --o: 0.5; --dx: -142px; --dy: 78px; --dr: -21deg"></i>
+        <i class="glass-lens" style="--w: 226px; --h: 128px; --x: 142px; --y: -72px; --r: 22deg; --o: 0.42; --dx: 162px; --dy: -92px; --dr: 24deg"></i>
       </div>
+      <canvas id="flight-canvas" aria-label="Near 品牌粒子消散与纸飞机加载动画"></canvas>
 
-      <div class="content">
-        <div class="content-stack">
-          <div class="brand-block">
-            <div class="brand-name">NEAR</div>
-            <div class="brand-tagline">Near, Always Near.</div>
-          </div>
-
-          <div class="footer">
-            <div class="progress-track" aria-hidden="true">
-              <div class="progress-shimmer"></div>
-            </div>
-            <div id="stage" class="stage-text">正在初始化…</div>
-
-            <div id="escape" class="escape">
-              <div class="escape-hint">如长时间无响应，可点击取消退出</div>
-              <button id="cancel-btn" type="button" class="cancel-btn">取消</button>
-            </div>
-          </div>
-        </div>
+      <div class="sr-only" aria-live="polite">
+        <span id="stage">正在初始化…</span>
+        <span id="percent">4%</span>
+        <span id="progress"></span>
+        <span id="micro-status">LOCAL ENGINE · STANDBY</span>
       </div>
-    </div>
+    </main>
 
     <script>
       (function () {
-        var STAGE_LABELS = {
-          initializing: "正在初始化…",
-          "backend-starting": "正在唤醒本地引擎…",
-          "backend-waiting": "正在唤醒本地引擎…",
-          "pinging-remote": "正在连接远程服务器…",
-          "loading-ui": "正在加载界面…",
-          "preloading-core": "正在加载工作数据…",
-          "restoring-session": "正在恢复上次会话…",
-          ready: "准备就绪",
+        var STAGES = {
+          initializing: { label: "正在初始化…", progress: 4, micro: "LOCAL ENGINE · STANDBY" },
+          "backend-starting": { label: "正在唤醒本地引擎…", progress: 18, micro: "LOCAL ENGINE · STARTING" },
+          "backend-waiting": { label: "正在唤醒本地引擎…", progress: 32, micro: "LOCAL ENGINE · CONNECTING" },
+          "pinging-remote": { label: "正在连接远程服务器…", progress: 46, micro: "REMOTE LINK · CONNECTING" },
+          "loading-ui": { label: "正在加载界面…", progress: 62, micro: "INTERFACE · MOUNTING" },
+          "preloading-core": { label: "正在加载工作数据…", progress: 76, micro: "WORKSPACE · PRELOADING" },
+          "restoring-session": { label: "正在恢复上次会话…", progress: 90, micro: "SESSION · RESTORING" },
+          ready: { label: "准备就绪", progress: 100, micro: "SYSTEM · READY" },
         };
 
-        var params = new URLSearchParams(window.location.search);
-        var hero = params.get("hero");
-        var heroEl = document.getElementById("hero");
-        var stageEl = document.getElementById("stage");
-        var escapeEl = document.getElementById("escape");
-        var cancelBtn = document.getElementById("cancel-btn");
-        var canvas = document.getElementById("particle-canvas");
-        var ctx = canvas.getContext("2d");
-        var isLight = document.documentElement.getAttribute("data-theme") === "light";
-        var particleColor = isLight ? "rgba(10,10,10," : "rgba(255,255,255,";
-        var disperse = false;
-        var rafId = 0;
-        var particles = [];
-        var samplePoints = [];
+        var LOGO_DISSOLVE_START = 820;
+        var LOGO_DISSOLVE_END = 1580;
+        var A_MORPH_START = 1800;
+        var A_MORPH_END = 2500;
+        var TAKEOFF_START = 2320;
+        var ORBIT_START = 2860;
+        // Keep the loop calm enough to read as a paper plane, then reserve
+        // the sharp acceleration for the final pull into the main window.
+        var ORBIT_PERIOD = 5200;
+        var ORBIT_END = ORBIT_START + ORBIT_PERIOD;
+        var SETTLE_DURATION = 260;
+        var HOLD_START = ORBIT_END + SETTLE_DURATION;
+        var HOLD_MIN_MS = 180;
+        var READY_SETTLE_MS = 80;
+        var EXIT_MS = 1100;
+        var TOW_END = 0.88;
+        var CHARGE_END = 0.36;
+        var REDUCED_MOTION = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 
-        function resizeCanvas() {
-          var dpr = window.devicePixelRatio || 1;
-          canvas.width = Math.floor(window.innerWidth * dpr);
-          canvas.height = Math.floor(window.innerHeight * dpr);
-          canvas.style.width = window.innerWidth + "px";
-          canvas.style.height = window.innerHeight + "px";
-          ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+        var canvas = document.getElementById("flight-canvas");
+        var context = canvas.getContext("2d", { alpha: true });
+        var stageEl = document.getElementById("stage");
+        var percentEl = document.getElementById("percent");
+        var progressEl = document.getElementById("progress");
+        var microStatusEl = document.getElementById("micro-status");
+        var isLight = document.documentElement.getAttribute("data-theme") === "light";
+
+        var palette = isLight
+          ? { text: [17, 19, 26], bg: [248, 249, 251], blue: [22, 113, 238], purple: [124, 58, 237], hot: [255, 250, 255] }
+          : { text: [245, 247, 251], bg: [5, 6, 10], blue: [55, 139, 255], purple: [156, 92, 255], hot: [255, 246, 255] };
+
+        var width = 0;
+        var height = 0;
+        var rafId = 0;
+        var startedAt = performance.now();
+        var readyReceivedAt = 0;
+        var exitStartsAt = 0;
+        var exitPose = null;
+        var logoLayout = null;
+        var logoParticles = [];
+        var tailPoints = [];
+        var lastTrailTime = 0;
+        var lastPlanePose = null;
+        var emissionClock = 0;
+        var displayProgress = 4;
+        var targetProgress = 4;
+        var currentStage = "initializing";
+        var lastMainRevealSentAt = 0;
+        var lastMainRevealProgress = -1;
+        var animationCompleteSent = false;
+
+        function clamp(value, min, max) {
+          return Math.max(min == null ? 0 : min, Math.min(max == null ? 1 : max, value));
         }
 
-        function spawnParticle(x, y, vx, vy, size, alpha) {
+        function lerp(a, b, amount) {
+          return a + (b - a) * amount;
+        }
+
+        function easeOut(value) {
+          return 1 - Math.pow(1 - clamp(value), 4);
+        }
+
+        function easeInOut(value) {
+          value = clamp(value);
+          return value < 0.5 ? 4 * value * value * value : 1 - Math.pow(-2 * value + 2, 3) / 2;
+        }
+
+        function easeIn(value) {
+          return Math.pow(clamp(value), 2.2);
+        }
+
+        function easeOutBack(value) {
+          value = clamp(value);
+          var tension = 1.28;
+          return 1 + (tension + 1) * Math.pow(value - 1, 3) + tension * Math.pow(value - 1, 2);
+        }
+
+        function rgba(color, alpha) {
+          return "rgba(" + color[0] + "," + color[1] + "," + color[2] + "," + alpha + ")";
+        }
+
+        function mixColor(from, to, amount) {
+          amount = clamp(amount);
+          return [
+            Math.round(lerp(from[0], to[0], amount)),
+            Math.round(lerp(from[1], to[1], amount)),
+            Math.round(lerp(from[2], to[2], amount)),
+          ];
+        }
+
+        function cubicPoint(a, b, c, d, amount) {
+          var inverse = 1 - amount;
+          return (
+            inverse * inverse * inverse * a +
+            3 * inverse * inverse * amount * b +
+            3 * inverse * amount * amount * c +
+            amount * amount * amount * d
+          );
+        }
+
+        function trackedLayout(targetContext) {
+          var fontSize = Math.max(48, Math.min(74, width * 0.094));
+          var spacing = fontSize * 0.22;
+          var letters = ["N", "E", "A", "R"];
+          targetContext.font = "560 " + fontSize + "px SF Pro Display, SF Pro Text, sans-serif";
+          targetContext.textBaseline = "middle";
+          var widths = letters.map(function (letter) {
+            return targetContext.measureText(letter).width;
+          });
+          var total = widths.reduce(function (sum, value) {
+            return sum + value;
+          }, 0) + spacing * (letters.length - 1);
+          var positions = [];
+          var x = width * 0.5 - total / 2;
+          widths.forEach(function (letterWidth) {
+            positions.push(x);
+            x += letterWidth + spacing;
+          });
           return {
-            x: x,
-            y: y,
-            ox: x,
-            oy: y,
-            vx: vx,
-            vy: vy,
-            size: size,
-            alpha: alpha,
-            phase: Math.random() * Math.PI * 2,
+            fontSize: fontSize,
+            letters: letters,
+            widths: widths,
+            total: total,
+            positions: positions,
+            y: height * 0.43,
+            centerX: width * 0.5,
           };
         }
 
-        function initAmbientParticles() {
-          particles = [];
-          var count = 34;
-          for (var i = 0; i < count; i++) {
-            particles.push(
-              spawnParticle(
-                Math.random() * window.innerWidth,
-                Math.random() * window.innerHeight,
-                (Math.random() - 0.5) * 0.18,
-                (Math.random() - 0.5) * 0.18,
-                Math.random() * 0.9 + 0.3,
-                Math.random() * 0.22 + 0.1
-              )
-            );
-          }
+        function drawLogoGlyphs(targetContext, layout) {
+          layout.letters.forEach(function (letter, index) {
+            if (index !== 2) targetContext.fillText(letter, layout.positions[index], layout.y);
+          });
         }
 
-        function sampleHero(img) {
-          samplePoints = [];
-          var off = document.createElement("canvas");
-          var maxW = 260;
-          var scale = Math.min(1, maxW / img.naturalWidth);
-          off.width = Math.floor(img.naturalWidth * scale);
-          off.height = Math.floor(img.naturalHeight * scale);
-          var octx = off.getContext("2d");
-          octx.drawImage(img, 0, 0, off.width, off.height);
-          var data = octx.getImageData(0, 0, off.width, off.height).data;
-          var rect = img.getBoundingClientRect();
-          var cx = rect.left + rect.width / 2;
-          var cy = rect.top + rect.height / 2;
-          for (var y = 0; y < off.height; y += 3) {
-            for (var x = 0; x < off.width; x += 3) {
-              var idx = (y * off.width + x) * 4;
-              var r = data[idx];
-              var g = data[idx + 1];
-              var b = data[idx + 2];
-              var a = data[idx + 3];
-              var lum = 0.299 * r + 0.587 * g + 0.114 * b;
-              if (a > 36 && lum > 60) {
-                var px = cx + (x - off.width / 2) * (rect.width / off.width);
-                var py = cy + (y - off.height / 2) * (rect.height / off.height);
-                samplePoints.push({ x: px, y: py });
+        function rebuildLogoParticles() {
+          var offscreen = document.createElement("canvas");
+          offscreen.width = Math.max(1, Math.round(width));
+          offscreen.height = Math.max(1, Math.round(height));
+          var offscreenContext = offscreen.getContext("2d");
+          logoLayout = trackedLayout(offscreenContext);
+          offscreenContext.fillStyle = rgba(palette.text, 1);
+          offscreenContext.font = "560 " + logoLayout.fontSize + "px SF Pro Display, SF Pro Text, sans-serif";
+          offscreenContext.textBaseline = "middle";
+          drawLogoGlyphs(offscreenContext, logoLayout);
+
+          var image = offscreenContext.getImageData(0, 0, offscreen.width, offscreen.height).data;
+          var points = [];
+          var step = 4;
+          var left = Math.max(0, Math.floor(logoLayout.centerX - logoLayout.total * 0.58));
+          var right = Math.min(offscreen.width, Math.ceil(logoLayout.centerX + logoLayout.total * 0.58));
+          var top = Math.max(0, Math.floor(logoLayout.y - logoLayout.fontSize * 0.66));
+          var bottom = Math.min(offscreen.height, Math.ceil(logoLayout.y + logoLayout.fontSize * 0.66));
+
+          for (var y = top; y < bottom; y += step) {
+            for (var x = left; x < right; x += step) {
+              if (image[(y * offscreen.width + x) * 4 + 3] < 72) continue;
+              var seed = Math.abs(Math.sin(x * 12.9898 + y * 78.233) * 43758.5453) % 1;
+              var seed2 = Math.abs(Math.sin(x * 91.731 + y * 17.117) * 18371.159) % 1;
+              var glyphIndex = 0;
+              var glyphDistance = Infinity;
+              logoLayout.positions.forEach(function (position, index) {
+                var center = position + logoLayout.widths[index] / 2;
+                var distance = Math.abs(x - center);
+                if (distance < glyphDistance) {
+                  glyphDistance = distance;
+                  glyphIndex = index;
+                }
+              });
+              var glyphCenterX = logoLayout.positions[glyphIndex] + logoLayout.widths[glyphIndex] / 2;
+              var radial = clamp(
+                Math.hypot(
+                  (x - glyphCenterX) / Math.max(1, logoLayout.widths[glyphIndex] * 0.58),
+                  (y - logoLayout.y) / (logoLayout.fontSize * 0.58)
+                )
+              );
+              points.push({
+                x: x,
+                y: y,
+                centerX: glyphCenterX,
+                centerY: logoLayout.y,
+                delay: clamp((1 - radial) * 0.18 + seed * 0.22),
+                size: 0.58 + seed2 * 0.92,
+                accent: seed > 0.84,
+              });
+            }
+          }
+
+          logoParticles = points.filter(function (_point, index) {
+            return index % 2 === 0;
+          }).slice(0, 720);
+        }
+
+        function resetTrail() {
+          tailPoints = [];
+          lastTrailTime = 0;
+          lastPlanePose = null;
+          emissionClock = 0;
+        }
+
+        function resize() {
+          var rect = canvas.getBoundingClientRect();
+          width = rect.width;
+          height = rect.height;
+          canvas.width = Math.max(1, Math.round(width));
+          canvas.height = Math.max(1, Math.round(height));
+          context.setTransform(1, 0, 0, 1, 0, 0);
+          rebuildLogoParticles();
+          resetTrail();
+        }
+
+        function planeHome() {
+          if (!logoLayout) return { x: width * 0.5, y: height * 0.44 };
+          return {
+            x: logoLayout.positions[2] + logoLayout.widths[2] * 0.52,
+            y: logoLayout.y,
+          };
+        }
+
+        function interpolateMorphPoints(start, folded, end, foldProgress, unfoldProgress) {
+          return start.map(function (point, index) {
+            var foldedPoint = {
+              x: lerp(point.x, folded[index].x, foldProgress),
+              y: lerp(point.y, folded[index].y, foldProgress),
+            };
+            return {
+              x: lerp(foldedPoint.x, end[index].x, unfoldProgress),
+              y: lerp(foldedPoint.y, end[index].y, unfoldProgress),
+            };
+          });
+        }
+
+        function drawMorphPolygon(points) {
+          context.beginPath();
+          context.moveTo(points[0].x, points[0].y);
+          for (var index = 1; index < points.length; index += 1) {
+            context.lineTo(points[index].x, points[index].y);
+          }
+          context.closePath();
+        }
+
+        function drawMorphingA(reveal, morph) {
+          if (!logoLayout) return;
+          var center = planeHome();
+          var fontSize = logoLayout.fontSize;
+          var halfHeight = fontSize * 0.37;
+          var halfWidth = logoLayout.widths[2] * 0.48;
+          var stroke = fontSize * 0.09;
+          var barY = fontSize * 0.075;
+          var barHalf = logoLayout.widths[2] * 0.25;
+          var barThickness = stroke * 0.72;
+          var planeScale = 1.64;
+          var foldProgress = easeInOut(clamp(morph / 0.42));
+          var unfoldProgress = Math.min(1.065, easeOutBack(clamp((morph - 0.3) / 0.7)));
+          var surfaceBlend = easeInOut(clamp((morph - 0.28) / 0.62));
+          var morphAlpha = 1 - easeInOut(clamp((morph - 0.82) / 0.18));
+
+          var leftStart = [
+            { x: -stroke * 0.46, y: -halfHeight },
+            { x: -halfWidth, y: halfHeight },
+            { x: -halfWidth + stroke, y: halfHeight },
+            { x: stroke * 0.5, y: -halfHeight + stroke * 1.28 },
+          ];
+          var rightStart = [
+            { x: stroke * 0.46, y: -halfHeight },
+            { x: halfWidth, y: halfHeight },
+            { x: halfWidth - stroke, y: halfHeight },
+            { x: -stroke * 0.5, y: -halfHeight + stroke * 1.28 },
+          ];
+          var leftFolded = [
+            { x: -2, y: -halfHeight * 0.92 },
+            { x: -4.4, y: halfHeight * 0.72 },
+            { x: -1.2, y: halfHeight * 0.62 },
+            { x: 0, y: -halfHeight * 0.65 },
+          ];
+          var rightFolded = leftFolded.map(function (point) {
+            return { x: -point.x, y: point.y };
+          });
+          var leftEnd = [
+            { x: 0, y: -21 * planeScale },
+            { x: -11 * planeScale, y: 19 * planeScale },
+            { x: -2.8 * planeScale, y: 8 * planeScale },
+            { x: 0, y: -8.5 * planeScale },
+          ];
+          var rightEnd = [
+            { x: 0, y: -21 * planeScale },
+            { x: 12 * planeScale, y: 17 * planeScale },
+            { x: 3 * planeScale, y: 8 * planeScale },
+            { x: 0, y: -8.5 * planeScale },
+          ];
+          var barStart = [
+            { x: -barHalf, y: barY - barThickness * 0.5 },
+            { x: barHalf, y: barY - barThickness * 0.5 },
+            { x: barHalf, y: barY + barThickness * 0.5 },
+            { x: -barHalf, y: barY + barThickness * 0.5 },
+          ];
+          var barFolded = [
+            { x: -4, y: -1.2 },
+            { x: 4, y: -1.2 },
+            { x: 4, y: 1.2 },
+            { x: -4, y: 1.2 },
+          ];
+          var barEnd = [
+            { x: -0.86, y: -21 * planeScale },
+            { x: 0.86, y: -21 * planeScale },
+            { x: 0.86, y: 8 * planeScale },
+            { x: -0.86, y: 8 * planeScale },
+          ];
+
+          var leftWing = interpolateMorphPoints(leftStart, leftFolded, leftEnd, foldProgress, unfoldProgress);
+          var rightWing = interpolateMorphPoints(rightStart, rightFolded, rightEnd, foldProgress, unfoldProgress);
+          var spine = interpolateMorphPoints(barStart, barFolded, barEnd, foldProgress, unfoldProgress);
+          var planeSurface = mixColor(palette.bg, palette.blue, 0.14);
+          var morphFill = mixColor(palette.blue, planeSurface, surfaceBlend);
+
+          context.save();
+          context.translate(center.x, center.y);
+          context.lineJoin = "round";
+          context.lineCap = "round";
+          context.shadowColor = isLight ? "rgba(255,255,255,0.58)" : "rgba(0,0,0,0.34)";
+          context.shadowBlur = 14;
+          context.globalAlpha = (0.1 + 0.9 * reveal) * morphAlpha;
+          context.fillStyle = rgba(morphFill, 1);
+          context.strokeStyle = rgba(palette.blue, surfaceBlend * 0.92);
+          context.lineWidth = lerp(0.7, 1.72, surfaceBlend);
+
+          drawMorphPolygon(leftWing);
+          context.fill();
+          if (surfaceBlend > 0.02) context.stroke();
+          drawMorphPolygon(rightWing);
+          context.fill();
+          if (surfaceBlend > 0.02) context.stroke();
+
+          context.fillStyle = rgba(palette.blue, 1);
+          drawMorphPolygon(spine);
+          context.fill();
+          context.restore();
+        }
+
+        function drawTrackedLogo(reveal, dissolve, morph) {
+          if (!logoLayout) return;
+          context.save();
+          context.font = "560 " + logoLayout.fontSize + "px SF Pro Display, SF Pro Text, sans-serif";
+          context.textBaseline = "middle";
+          context.shadowColor = isLight ? "rgba(255,255,255,0.64)" : "rgba(0,0,0,0.42)";
+          context.shadowBlur = 16;
+          if (dissolve < 1) {
+            context.fillStyle = rgba(palette.text, 1);
+            var solidFade = 1 - easeOut(dissolve / 0.16);
+            context.globalAlpha = (0.1 + 0.9 * reveal) * solidFade;
+            var spread = (1 - reveal) * logoLayout.fontSize * 0.12;
+            logoLayout.letters.forEach(function (letter, index) {
+              if (index === 2) return;
+              context.fillText(letter, logoLayout.positions[index] + (index - 1.5) * spread, logoLayout.y);
+            });
+          }
+          context.restore();
+          drawMorphingA(reveal, morph);
+        }
+
+        function drawLogoParticles(dissolve) {
+          if (dissolve <= 0 || dissolve >= 1) return;
+          var particleAlpha = easeOut(dissolve / 0.075) * (1 - easeInOut((dissolve - 0.64) / 0.36));
+          context.save();
+          context.globalAlpha = particleAlpha * 0.92;
+
+          context.beginPath();
+          logoParticles.forEach(function (particle) {
+            if (particle.accent) return;
+            var local = clamp((dissolve - particle.delay) / (1 - particle.delay));
+            var sink = easeInOut(local);
+            var depthScale = 1 - sink * 0.56;
+            var x = particle.centerX + (particle.x - particle.centerX) * depthScale;
+            var y = particle.centerY + (particle.y - particle.centerY) * depthScale;
+            var radius = Math.max(0.1, particle.size * (1 - sink * 0.9));
+            context.moveTo(x + radius, y);
+            context.arc(x, y, radius, 0, Math.PI * 2);
+          });
+          context.fillStyle = rgba(palette.text, 1);
+          context.fill();
+
+          context.beginPath();
+          logoParticles.forEach(function (particle) {
+            if (!particle.accent) return;
+            var local = clamp((dissolve - particle.delay) / (1 - particle.delay));
+            var sink = easeInOut(local);
+            var depthScale = 1 - sink * 0.56;
+            var x = particle.centerX + (particle.x - particle.centerX) * depthScale;
+            var y = particle.centerY + (particle.y - particle.centerY) * depthScale;
+            var radius = Math.max(0.1, particle.size * (1 - sink * 0.9));
+            context.moveTo(x + radius, y);
+            context.arc(x, y, radius, 0, Math.PI * 2);
+          });
+          context.fillStyle = rgba(palette.blue, 1);
+          context.fill();
+          context.restore();
+        }
+
+        function drawPaperPlane(x, y, angle, bank, scale, color, alpha, deployment) {
+          var wingProgress = clamp(deployment == null ? 1 : deployment);
+          var upperWing = Math.min(1.08, easeOutBack(clamp(wingProgress / 0.78)));
+          var lowerWing = Math.min(1.08, easeOutBack(clamp((wingProgress - 0.12) / 0.88)));
+          var upperTipX = lerp(-7.5, -19, upperWing);
+          var upperTipY = lerp(-1.15, -11, upperWing);
+          var lowerTipX = lerp(-7, -17, lowerWing);
+          var lowerTipY = lerp(1.2, 12, lowerWing);
+          var upperRootY = lerp(-0.55, -2.8, upperWing);
+          var lowerRootY = lerp(0.55, 3, lowerWing);
+          var baseAlpha = alpha;
+
+          context.save();
+          context.globalAlpha = baseAlpha;
+          context.translate(x, y);
+          context.rotate(angle);
+          context.scale(scale, scale * (1 - bank * 0.14));
+          context.lineWidth = 1.72;
+          context.lineJoin = "round";
+          context.lineCap = "round";
+          context.shadowColor = rgba(color, 0.3);
+          context.shadowBlur = 11;
+          context.strokeStyle = rgba(color, 1);
+          context.fillStyle = rgba(mixColor(palette.bg, color, 0.14), 0.98);
+          context.beginPath();
+          context.moveTo(upperTipX, upperTipY);
+          context.lineTo(21, 0);
+          context.lineTo(lowerTipX, lowerTipY);
+          context.lineTo(-8, lowerRootY);
+          context.lineTo(8.5, 0);
+          context.lineTo(-8, upperRootY);
+          context.closePath();
+          context.fill();
+          context.stroke();
+
+          context.globalAlpha = baseAlpha * (0.12 + lowerWing * 0.42);
+          context.fillStyle = rgba(mixColor(palette.bg, color, 0.3), 1);
+          context.beginPath();
+          context.moveTo(21, 0);
+          context.lineTo(lowerTipX, lowerTipY);
+          context.lineTo(-8, lowerRootY);
+          context.lineTo(8.5, 0);
+          context.closePath();
+          context.fill();
+
+          context.globalAlpha = baseAlpha * (0.35 + wingProgress * 0.48);
+          context.beginPath();
+          context.moveTo(-8, lowerRootY);
+          context.lineTo(lerp(-5, -2.5, lowerWing), lerp(1.2, 9.5, lowerWing));
+          context.moveTo(-8, upperRootY);
+          context.lineTo(8.5, 0);
+          context.stroke();
+          context.restore();
+        }
+
+        function traceSmooth(points, move) {
+          if (points.length < 2) return;
+          if (move !== false) context.moveTo(points[0].x, points[0].y);
+          else context.lineTo(points[0].x, points[0].y);
+          for (var index = 1; index < points.length - 1; index += 1) {
+            var point = points[index];
+            var next = points[index + 1];
+            context.quadraticCurveTo(point.x, point.y, (point.x + next.x) / 2, (point.y + next.y) / 2);
+          }
+          var last = points[points.length - 1];
+          context.lineTo(last.x, last.y);
+        }
+
+        function fillTailRibbon(points, maxWidth, wave, phase, fill, alpha, elapsed) {
+          if (points.length < 4) return;
+          var upper = [];
+          var lower = [];
+          points.forEach(function (point, index) {
+            var previous = points[Math.max(0, index - 1)];
+            var next = points[Math.min(points.length - 1, index + 1)];
+            var dx = next.x - previous.x;
+            var dy = next.y - previous.y;
+            var length = Math.max(1, Math.hypot(dx, dy));
+            var normalX = -dy / length;
+            var normalY = dx / length;
+            var ageRatio = clamp(point.age / point.life);
+            var envelope = Math.pow(Math.sin(ageRatio * Math.PI), 0.62) * Math.pow(1 - ageRatio, 0.16);
+            var ribbonWidth = 1.1 + maxWidth * envelope;
+            var drift = Math.sin(point.phase + elapsed * 0.0031 + ageRatio * 9 + phase) * wave * ageRatio;
+            upper.push({ x: point.x + normalX * (ribbonWidth + drift), y: point.y + normalY * (ribbonWidth + drift) });
+            lower.push({ x: point.x - normalX * (ribbonWidth - drift), y: point.y - normalY * (ribbonWidth - drift) });
+          });
+          context.save();
+          context.globalAlpha = alpha;
+          context.fillStyle = fill;
+          context.beginPath();
+          traceSmooth(upper, true);
+          traceSmooth(lower.reverse(), false);
+          context.closePath();
+          context.fill();
+          context.restore();
+        }
+
+        function drawTrail(pose, strength, elapsed, exitProgress) {
+          var dt = Math.min(34, Math.max(8, lastTrailTime ? elapsed - lastTrailTime : 16.7));
+          lastTrailTime = elapsed;
+          if (strength <= 0) {
+            lastPlanePose = { x: pose.x, y: pose.y };
+            return;
+          }
+
+          var boost = pose.boostProgress || 0;
+          var charging = pose.chargeProgress || 0;
+          var heat = clamp(displayProgress / 100 * 0.74 + exitProgress * 0.12 + boost * 0.48);
+          var cos = Math.cos(pose.angle);
+          var sin = Math.sin(pose.angle);
+          var tailOffset = 17 * pose.scale;
+          var anchorX = pose.x - cos * tailOffset;
+          var anchorY = pose.y - sin * tailOffset;
+          var motionX = lastPlanePose ? (pose.x - lastPlanePose.x) / dt : 0;
+          var motionY = lastPlanePose ? (pose.y - lastPlanePose.y) / dt : 0;
+          lastPlanePose = { x: pose.x, y: pose.y };
+          emissionClock += dt;
+
+          var emissionStep = boost > 0
+            ? lerp(22, 12, boost)
+            : charging > 0
+              ? lerp(34, 24, charging)
+              : pose.holding
+                ? 40
+                : pose.orbiting
+                  ? 46
+                  : pose.settling
+                    ? 38
+                    : 28;
+          while (emissionClock >= emissionStep) {
+            var exhaustSpeed = 0.07 + strength * 0.1 + boost * 0.42;
+            tailPoints.unshift({
+              x: anchorX,
+              y: anchorY,
+              vx: motionX * 0.14 - cos * exhaustSpeed,
+              vy: motionY * 0.14 - sin * exhaustSpeed,
+              phase: elapsed * 0.0127,
+              age: 0,
+              life: pose.holding
+                ? 980 + strength * 260
+                : pose.orbiting
+                  ? 520 + strength * 110
+                  : pose.settling
+                    ? 760 + strength * 220
+                    : 920 + strength * 360 + boost * 620,
+            });
+            emissionClock -= emissionStep;
+          }
+
+          tailPoints.forEach(function (point) {
+            point.age += dt;
+            var curl = Math.sin(point.phase + point.age * 0.0042) * (0.000018 + strength * 0.000018) * dt;
+            point.vx -= 0.000017 * dt * (0.55 + strength);
+            point.vy += curl;
+            point.vx *= Math.pow(0.9986, dt);
+            point.vy *= Math.pow(0.9988, dt);
+            point.x += point.vx * dt;
+            point.y += point.vy * dt;
+          });
+
+          tailPoints = tailPoints.filter(function (point) {
+            return point.age < point.life;
+          }).slice(0, boost > 0 ? 58 : pose.holding ? 32 : pose.orbiting ? 20 : pose.settling ? 28 : 44);
+          if (tailPoints.length < 4) return;
+
+          var oldest = tailPoints[tailPoints.length - 1];
+          function plumeGradient(bias, alpha) {
+            var gradient = context.createLinearGradient(oldest.x, oldest.y, anchorX, anchorY);
+            var innerColor = mixColor(
+              palette.blue,
+              palette.purple,
+              clamp(heat * 0.9 + bias + 0.08)
+            );
+            gradient.addColorStop(0, rgba(palette.blue, 0));
+            gradient.addColorStop(0.26, rgba(palette.blue, alpha * 0.42));
+            gradient.addColorStop(0.7, rgba(mixColor(palette.blue, palette.purple, clamp(heat * 0.68 + bias)), alpha * 0.82));
+            gradient.addColorStop(0.88, rgba(mixColor(innerColor, palette.hot, boost * 0.52), alpha * 0.96));
+            gradient.addColorStop(1, rgba(mixColor(innerColor, palette.hot, boost * 0.92), alpha));
+            return gradient;
+          }
+
+          var scale = pose.holding
+            ? 0.72
+            : pose.orbiting
+              ? 0.58
+              : pose.settling
+                ? 0.78
+                : 1 + boost * 0.4;
+          fillTailRibbon(tailPoints, (30 + strength * 8) * scale, 6.2 * scale, 0, plumeGradient(0.02, 0.52), 0.28, elapsed);
+          fillTailRibbon(tailPoints, (17 + strength * 5) * scale, 4.0 * scale, 1.7, plumeGradient(0.12, 0.68), 0.34, elapsed);
+          fillTailRibbon(tailPoints, (7 + strength * 2) * scale, 2.0 * scale, 3.1, plumeGradient(0.25, 0.88), 0.42, elapsed);
+        }
+
+        function drawBoostFlare(pose, elapsed) {
+          var boost = pose.boostProgress || 0;
+          if (boost <= 0) return;
+          var intensity = easeOut(boost / 0.18);
+          var pulse = 0.92 + Math.sin(elapsed * 0.022) * 0.08;
+          var cos = Math.cos(pose.angle);
+          var sin = Math.sin(pose.angle);
+          var anchorX = pose.x - cos * 18 * pose.scale;
+          var anchorY = pose.y - sin * 18 * pose.scale;
+          var radius = (10 + boost * 20) * pose.scale * pulse;
+          var gradient = context.createRadialGradient(anchorX, anchorY, 0, anchorX, anchorY, radius);
+          gradient.addColorStop(0, rgba(palette.hot, 0.92 * intensity));
+          gradient.addColorStop(0.22, rgba(palette.purple, 0.62 * intensity));
+          gradient.addColorStop(0.58, rgba(palette.blue, 0.24 * intensity));
+          gradient.addColorStop(1, rgba(palette.blue, 0));
+
+          context.save();
+          context.globalCompositeOperation = "screen";
+          context.fillStyle = gradient;
+          context.beginPath();
+          context.ellipse(anchorX, anchorY, radius * 1.3, radius * 0.72, pose.angle, 0, Math.PI * 2);
+          context.fill();
+          context.restore();
+        }
+
+        function flightGeometry() {
+          var radius = Math.min(width, height) * 0.23;
+          var centerX = width * 0.5;
+          var centerY = height * 0.44;
+          var radiusX = radius * 1.72;
+          var radiusY = radius * 0.84;
+          return {
+            radius: radius,
+            radiusX: radiusX,
+            radiusY: radiusY,
+            // The loop is deliberately horizontal. Rotating the figure-eight
+            // makes it read like a tilted orbit instead of a clean Mobius path.
+            rotation: 0,
+            startX: centerX,
+            startY: centerY,
+            centerX: centerX,
+            centerY: centerY,
+            holdX: centerX,
+            holdY: centerY,
+          };
+        }
+
+        function mobiusOrbitPoint(phase, geometry) {
+          var rawX = Math.sin(phase) * geometry.radiusX;
+          var rawY = Math.sin(phase * 2) * geometry.radiusY;
+          var cosRotation = Math.cos(geometry.rotation);
+          var sinRotation = Math.sin(geometry.rotation);
+          return {
+            x: geometry.centerX + rawX * cosRotation - rawY * sinRotation,
+            y: geometry.centerY + rawX * sinRotation + rawY * cosRotation,
+            depth: 0.5 + Math.cos(phase * 2) * 0.5,
+          };
+        }
+
+        function introPose(elapsed) {
+          var home = planeHome();
+          var geometry = flightGeometry();
+          var release = easeInOut((elapsed - TAKEOFF_START) / (ORBIT_START - TAKEOFF_START));
+          var x = lerp(home.x, geometry.startX, release);
+          var y = lerp(home.y, geometry.startY, release) - Math.sin(release * Math.PI) * height * 0.035;
+          return {
+            x: x,
+            y: y,
+            angle: lerp(-Math.PI / 2, 0, release) + Math.sin(release * Math.PI) * Math.PI * 2,
+            bank: Math.sin(release * Math.PI) * 0.34,
+            scale: lerp(1.64, 1.23, release),
+            orbiting: false,
+            holding: false,
+            settling: false,
+          };
+        }
+
+        function orbitPose(elapsed) {
+          var geometry = flightGeometry();
+          var rawProgress = clamp((elapsed - ORBIT_START) / ORBIT_PERIOD);
+          var orbitProgress = 0.5 - Math.cos(rawProgress * Math.PI) * 0.5;
+          var phase = orbitProgress * Math.PI * 2;
+          var point = mobiusOrbitPoint(phase, geometry);
+          var next = mobiusOrbitPoint(phase + 0.012, geometry);
+          return {
+            x: point.x,
+            y: point.y,
+            angle: Math.atan2(next.y - point.y, next.x - point.x),
+            bank: (0.5 - point.depth) * 0.42 + Math.sin(phase) * 0.13,
+            scale: 1.08 + point.depth * 0.15,
+            orbiting: rawProgress < 1,
+            holding: false,
+            settling: false,
+          };
+        }
+
+        function settlePose(elapsed) {
+          var geometry = flightGeometry();
+          var progress = clamp((elapsed - ORBIT_END) / SETTLE_DURATION);
+          var settle = easeOut(progress);
+          return {
+            x: geometry.holdX,
+            y: geometry.holdY,
+            angle: 0,
+            bank: lerp(-0.21, 0, settle),
+            scale: lerp(1.23, 1.18, settle),
+            orbiting: false,
+            holding: false,
+            settling: progress < 1,
+          };
+        }
+
+        function livePose(elapsed) {
+          var pose = elapsed < ORBIT_START
+            ? introPose(elapsed)
+            : elapsed < ORBIT_END
+              ? orbitPose(elapsed)
+              : settlePose(elapsed);
+          if (elapsed >= HOLD_START) {
+            var holdElapsed = elapsed - HOLD_START;
+            var holdBlend = easeInOut(holdElapsed / 880);
+            var climbPhase = holdElapsed * 0.00096;
+            var forwardBreath = Math.sin(holdElapsed * 0.00132 + 0.3);
+            var verticalFlight = Math.sin(climbPhase);
+            var verticalBreath = Math.sin(holdElapsed * 0.00208 + 0.55);
+            var wingBreath = Math.sin(holdElapsed * 0.00168 + 0.25);
+            var thrustPulse = Math.pow(
+              0.5 + Math.sin(holdElapsed * 0.00232 - Math.PI / 2) * 0.5,
+              3
+            );
+            pose.x += (forwardBreath * 8.8 + thrustPulse * 4.2) * holdBlend;
+            pose.y += (
+              verticalFlight * Math.min(30, height * 0.042) +
+              verticalBreath * 4.8 -
+              thrustPulse * 1.4
+            ) * holdBlend;
+            pose.angle = (
+              Math.cos(climbPhase) * 0.118 +
+              Math.sin(holdElapsed * 0.00192) * 0.022
+            ) * holdBlend;
+            pose.bank = wingBreath * 0.34 * holdBlend;
+            pose.scale = 1.18 + Math.sin(holdElapsed * 0.0017) * 0.03 * holdBlend;
+            pose.orbiting = false;
+            pose.holding = true;
+            pose.settling = false;
+            pose.holdBlend = holdBlend;
+            pose.holdPulse = 0.5 + Math.sin(holdElapsed * 0.00232 - Math.PI / 2) * 0.5;
+          }
+          return pose;
+        }
+
+        function startExit(now) {
+          if (exitPose) return;
+          var elapsed = now - startedAt;
+          var pose = livePose(elapsed);
+          exitPose = {
+            x: pose.x,
+            y: pose.y,
+            angle: pose.angle,
+            scale: pose.scale,
+            tangentX: Math.cos(pose.angle),
+            tangentY: Math.sin(pose.angle),
+          };
+        }
+
+        function pagePullProgress(towLinear) {
+          if (towLinear <= CHARGE_END) {
+            return 0.008 * easeOut(towLinear / CHARGE_END);
+          }
+          var launch = clamp((towLinear - CHARGE_END) / (1 - CHARGE_END));
+          var travel = Math.pow(launch, 1.55);
+          var overshoot = launch > 0.82
+            ? Math.sin(clamp((launch - 0.82) / 0.18) * Math.PI) * 0.11
+            : 0;
+          return lerp(0.008, 1, travel) + overshoot;
+        }
+
+        function exitPointAt(progress, start) {
+          var towLinear = clamp(progress / TOW_END);
+          var towEndY = start.y - height * 0.025;
+          var x;
+          var y;
+          var chargeProgress = 0;
+          var launchProgress = 0;
+          var boostProgress = 0;
+
+          if (towLinear <= CHARGE_END) {
+            chargeProgress = easeInOut(towLinear / CHARGE_END);
+            // A single smooth backward draw gives the plane room to load up
+            // before the forward thrust; no shake or random wobble here.
+            x = start.x - chargeProgress * 42;
+            y = start.y + Math.sin(chargeProgress * Math.PI) * 2.4;
+          } else {
+            chargeProgress = 1;
+            launchProgress = clamp((towLinear - CHARGE_END) / (1 - CHARGE_END));
+            boostProgress = easeOut(launchProgress / 0.34);
+            // Hold the first part of the launch, then let the final third
+            // carry the unmistakable acceleration into the window pull.
+            var travel = Math.pow(launchProgress, 1.55);
+            var lead = Math.sin(travel * Math.PI) * 22 + travel * 44;
+            x = lerp(start.x - 24, width, travel) + lead;
+            y =
+              lerp(start.y, towEndY, travel) -
+              Math.sin(travel * Math.PI) * height * 0.024;
+          }
+
+          if (progress > TOW_END) {
+            var releaseLinear = clamp((progress - TOW_END) / (1 - TOW_END));
+            var release = releaseLinear * (0.62 + releaseLinear * 0.38);
+            x = lerp(width + 44, width * 1.24, release);
+            y = lerp(towEndY, towEndY - height * 0.05, release);
+            chargeProgress = 1;
+            launchProgress = 1;
+            boostProgress = 1;
+          }
+
+          return {
+            x: x,
+            y: y,
+            windowProgress: progress > TOW_END ? 1 : pagePullProgress(towLinear),
+            chargeProgress: chargeProgress,
+            launchProgress: launchProgress,
+            boostProgress: boostProgress,
+          };
+        }
+
+        function exitingPose(progress) {
+          var start = exitPose;
+          var point = exitPointAt(progress, start);
+          var lookAheadProgress = Math.min(1, progress + 0.012);
+          var next = exitPointAt(lookAheadProgress, start);
+          var towLinear = clamp(progress / TOW_END);
+          var pathAngle = Math.atan2(next.y - point.y, next.x - point.x);
+          var angle = towLinear <= CHARGE_END
+            ? lerp(start.angle, -0.035, point.chargeProgress)
+            : lerp(-0.035, pathAngle, easeOut((towLinear - CHARGE_END) / 0.08));
+          var scale = towLinear <= CHARGE_END
+            ? lerp(start.scale || 1.18, 1.08, point.chargeProgress)
+            : lerp(1.08, 1.38, easeIn(point.launchProgress));
+          return {
+            x: point.x,
+            y: point.y,
+            angle: angle,
+            bank: -Math.sin(point.chargeProgress * Math.PI) * 0.12,
+            scale: scale,
+            orbiting: false,
+            holding: false,
+            windowProgress: point.windowProgress,
+            chargeProgress: point.chargeProgress,
+            boostProgress: point.boostProgress,
+          };
+        }
+
+        function updateStageDisplay() {
+          var stage = STAGES[currentStage] || STAGES.initializing;
+          stageEl.textContent = stage.label;
+          microStatusEl.textContent = stage.micro;
+          percentEl.textContent = Math.round(displayProgress) + "%";
+          progressEl.style.width = displayProgress + "%";
+        }
+
+        function setStage(stageName) {
+          var stage = STAGES[stageName] || STAGES.initializing;
+          currentStage = STAGES[stageName] ? stageName : "initializing";
+          targetProgress = Math.max(targetProgress, stage.progress);
+          if (stageName === "ready" && !readyReceivedAt) {
+            readyReceivedAt = performance.now();
+          }
+          updateStageDisplay();
+        }
+
+        function frame(now) {
+          var elapsed = now - startedAt;
+          var reveal = easeOut((elapsed - 150) / 760);
+          var dissolve = clamp((elapsed - LOGO_DISSOLVE_START) / (LOGO_DISSOLVE_END - LOGO_DISSOLVE_START));
+          var morph = clamp((elapsed - A_MORPH_START) / (A_MORPH_END - A_MORPH_START));
+
+          if (readyReceivedAt && !exitStartsAt) {
+            exitStartsAt = Math.max(
+              startedAt + HOLD_START + HOLD_MIN_MS,
+              readyReceivedAt + READY_SETTLE_MS
+            );
+          }
+          var exitProgress = exitStartsAt ? clamp((now - exitStartsAt) / EXIT_MS) : 0;
+
+          displayProgress += (targetProgress - displayProgress) * 0.065;
+          if (targetProgress === 100 && 100 - displayProgress < 0.2) displayProgress = 100;
+          updateStageDisplay();
+
+          if (exitStartsAt && now >= exitStartsAt && !exitPose) startExit(now);
+
+          var pose = exitPose ? exitingPose(exitProgress) : livePose(elapsed);
+          document.body.classList.toggle("is-pulling", Boolean(exitPose));
+          if (
+            exitPose &&
+            window.nearSplash &&
+            window.nearSplash.revealMain &&
+            (now - lastMainRevealSentAt >= 16 || pose.windowProgress >= 1) &&
+            pose.windowProgress !== lastMainRevealProgress
+          ) {
+            lastMainRevealSentAt = now;
+            lastMainRevealProgress = pose.windowProgress;
+            window.nearSplash.revealMain(pose.windowProgress);
+          }
+          var heat = clamp(displayProgress / 100 * 0.86 + exitProgress * 0.14);
+          var flightHeat = heat * easeInOut((elapsed - A_MORPH_END) / 900);
+          var planeColor = mixColor(palette.blue, palette.purple, flightHeat);
+          var trailBirth = easeOut((elapsed - TAKEOFF_START) / 440);
+          var idleTrailStrength = 0.46 + (pose.holdPulse || 0) * 0.4;
+          var trailStrength = trailBirth * lerp(0.72, idleTrailStrength, pose.holdBlend || 0);
+          if (exitPose) {
+            trailStrength = trailBirth * (
+              0.62 +
+              (pose.chargeProgress || 0) * 0.5 +
+              (pose.boostProgress || 0) * 1.35
+            );
+          }
+          var planeBirth = clamp((morph - 0.62) / 0.38);
+          var wingDeployment = clamp((morph - 0.3) / 0.7);
+          var planeAlpha = easeOut(planeBirth) * (0.12 + reveal * 0.88);
+
+          context.clearRect(0, 0, width, height);
+          drawTrackedLogo(reveal, dissolve, morph);
+          drawLogoParticles(dissolve);
+          if (!REDUCED_MOTION) {
+            drawTrail(pose, trailStrength, elapsed, exitProgress);
+            drawBoostFlare(pose, elapsed);
+          }
+          drawPaperPlane(
+            pose.x,
+            pose.y,
+            pose.angle,
+            pose.bank,
+            pose.scale,
+            planeColor,
+            planeAlpha,
+            wingDeployment
+          );
+
+          if (exitProgress >= 1) {
+            if (!animationCompleteSent) {
+              animationCompleteSent = true;
+              if (
+                window.nearSplash &&
+                window.nearSplash.revealMain &&
+                lastMainRevealProgress < 1
+              ) {
+                lastMainRevealProgress = 1;
+                window.nearSplash.revealMain(1);
+              }
+              if (window.nearSplash && window.nearSplash.animationComplete) {
+                void window.nearSplash.animationComplete();
               }
             }
+            return;
           }
-          var meshCount = Math.min(180, samplePoints.length);
-          for (var j = 0; j < meshCount; j++) {
-            var pt = samplePoints[(Math.random() * samplePoints.length) | 0];
-            if (!pt) continue;
-            var p = spawnParticle(
-              pt.x + (Math.random() - 0.5) * 18,
-              pt.y + (Math.random() - 0.5) * 18,
-              (Math.random() - 0.5) * 0.1,
-              (Math.random() - 0.5) * 0.1,
-              Math.random() * 0.85 + 0.35,
-              Math.random() * 0.45 + 0.18
-            );
-            p.ox = pt.x;
-            p.oy = pt.y;
-            particles.push(p);
-          }
-        }
-
-        function drawParticles(t) {
-          ctx.clearRect(0, 0, window.innerWidth, window.innerHeight);
-          for (var i = 0; i < particles.length; i++) {
-            var p = particles[i];
-            if (disperse) {
-              p.x += p.vx * 6;
-              p.y += p.vy * 6;
-              p.alpha *= 0.94;
-            } else if (p.ox != null) {
-              p.x += (p.ox - p.x) * 0.018 + Math.sin(t * 0.0015 + p.phase) * 0.25;
-              p.y += (p.oy - p.y) * 0.018 + Math.cos(t * 0.0013 + p.phase) * 0.25;
-              p.alpha = 0.25 + Math.abs(Math.sin(t * 0.002 + p.phase)) * 0.45;
-            } else {
-              p.x += p.vx;
-              p.y += p.vy;
-              if (p.x < 0) p.x = window.innerWidth;
-              if (p.x > window.innerWidth) p.x = 0;
-              if (p.y < 0) p.y = window.innerHeight;
-              if (p.y > window.innerHeight) p.y = 0;
-              p.alpha = 0.12 + Math.abs(Math.sin(t * 0.0018 + p.phase)) * 0.28;
-            }
-            ctx.beginPath();
-            ctx.arc(p.x, p.y, p.size, 0, Math.PI * 2);
-            ctx.fillStyle = particleColor + p.alpha + ")";
-            ctx.fill();
-          }
-          rafId = requestAnimationFrame(drawParticles);
-        }
-
-        function setStage(stage) {
-          var label = STAGE_LABELS[stage] || STAGE_LABELS.initializing;
-          if (stageEl) stageEl.textContent = label;
-          if (stage === "ready") {
-            disperse = true;
-            document.body.classList.add("fade-out");
-          }
+          rafId = requestAnimationFrame(frame);
         }
 
         if (window.nearSplash && window.nearSplash.onStage) {
           window.nearSplash.onStage(setStage);
         }
 
-        resizeCanvas();
-        initAmbientParticles();
-        rafId = requestAnimationFrame(drawParticles);
-        window.addEventListener("resize", resizeCanvas);
-
-        if (hero && heroEl) {
-          heroEl.addEventListener("load", function () {
-            sampleHero(heroEl);
-          });
-          heroEl.src = hero;
-        }
-
-        setTimeout(function () {
-          if (escapeEl) escapeEl.classList.add("visible");
-        }, 12000);
-
-        if (cancelBtn) {
-          cancelBtn.addEventListener("click", function () {
-            if (window.nearSplash && window.nearSplash.requestQuit) {
-              void window.nearSplash.requestQuit();
-            }
-          });
-        }
+        resize();
+        setStage("initializing");
+        rafId = requestAnimationFrame(frame);
+        window.addEventListener("resize", resize);
 
         window.addEventListener("beforeunload", function () {
           if (rafId) cancelAnimationFrame(rafId);

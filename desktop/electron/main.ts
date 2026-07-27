@@ -14,7 +14,7 @@ import {
   Tray
 } from "electron";
 import { spawn, ChildProcess, execFile, execFileSync } from "node:child_process";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 
 // Before app.ready: mitigate Chromium paint corruption (smearing/ghosting) on
 // some Windows + NVIDIA (or hybrid GPU) stacks.
@@ -42,6 +42,7 @@ import {
   createSplashWindow,
   onMainWindowDidFinishLoad,
   registerSplashIpcHandlers,
+  resolveStartupWindowBounds,
   scheduleSplashForceShowFallback,
   updateSplashStage,
 } from "./splash";
@@ -1435,7 +1436,8 @@ function normalizeLocalFsPath(raw: string): string {
       return decodeURIComponent(trimmed.replace(/^file:\/\//, ""));
     }
   }
-  return trimmed;
+  // Expand ~/… so renderer callers (e.g. WorkPanel agent_messages.json) resolve.
+  return expandDesktopLocalPath(trimmed);
 }
 
 function decodeLocalTextBuffer(buf: Buffer): { content: string; encodingError?: string } {
@@ -1731,6 +1733,33 @@ function validateTrinityConfigPayload(input: unknown): { ok: true; config: Trini
 let mainWindow: BrowserWindow | null = null;
 let mainWindowReadyToShow = false;
 let mainWindowRevealPending = false;
+let mainWindowPreparedForSplashReveal = false;
+let mainWindowRevealFinalBounds: { x: number; y: number; width: number; height: number } | null = null;
+let mainWindowRevealInitialBounds: { x: number; y: number; width: number; height: number } | null = null;
+let mainWindowRevealUsesBounds = false;
+let mainWindowRevealFullyOpaque = false;
+
+// Splash exit reveal style.
+// Moving the OS window every animation frame (setPosition per rAF) is the main
+// cause of the visible stutter when the splash plane flies away, because native
+// window moves cannot stay in sync with the transparent always-on-top splash
+// compositor. The default reveal is now a pure opacity crossfade, which is
+// smooth on every platform. The horizontal "slide-in" remains available as an
+// opt-in alternative behind this flag.
+const MAIN_WINDOW_REVEAL_SLIDE = false;
+// When sliding is enabled the real window starts with its right edge aligned to
+// the plane's 50% hold point.
+const MAIN_WINDOW_PULL_DISTANCE_RATIO = 0.5;
+const MAIN_WINDOW_PULL_MAX_PROGRESS = 1;
+
+function setMainWindowOpacity(opacity: number): void {
+  if (!mainWindow || mainWindow.isDestroyed()) return;
+  try {
+    mainWindow.setOpacity(Math.max(0, Math.min(1, opacity)));
+  } catch {
+    // Some Linux window managers do not expose native opacity controls.
+  }
+}
 
 function showMainWindowSafely(): void {
   if (!mainWindow || mainWindow.isDestroyed()) return;
@@ -1740,6 +1769,77 @@ function showMainWindowSafely(): void {
   if (mainWindow.isMinimized()) mainWindow.restore();
   mainWindow.show();
   mainWindow.focus();
+}
+
+function prepareMainWindowForSplashReveal(): void {
+  if (!mainWindow || mainWindow.isDestroyed()) return;
+  mainWindowPreparedForSplashReveal = true;
+  mainWindowRevealFullyOpaque = false;
+  mainWindowRevealFinalBounds = mainWindow.getBounds();
+  mainWindowRevealUsesBounds =
+    MAIN_WINDOW_REVEAL_SLIDE && !mainWindow.isMaximized() && !mainWindow.isFullScreen();
+  if (mainWindowRevealUsesBounds) {
+    const finalBounds = mainWindowRevealFinalBounds;
+    mainWindowRevealInitialBounds = {
+      ...finalBounds,
+      x: finalBounds.x - Math.round(finalBounds.width * MAIN_WINDOW_PULL_DISTANCE_RATIO),
+    };
+    mainWindow.setBounds(mainWindowRevealInitialBounds, false);
+  } else {
+    mainWindowRevealInitialBounds = null;
+  }
+  setMainWindowOpacity(0);
+  showMainWindowSafely();
+}
+
+function updateMainWindowSplashReveal(rawProgress: number): void {
+  if (!mainWindow || mainWindow.isDestroyed()) return;
+  if (!mainWindowPreparedForSplashReveal) prepareMainWindowForSplashReveal();
+  const progress = Math.max(
+    0,
+    Math.min(
+      MAIN_WINDOW_PULL_MAX_PROGRESS,
+      Number.isFinite(rawProgress) ? rawProgress : 0,
+    ),
+  );
+  if (!mainWindowRevealFullyOpaque) {
+    const opacityProgress = Math.min(1, progress);
+    const easedOpacity = opacityProgress * opacityProgress * (3 - 2 * opacityProgress);
+    setMainWindowOpacity(easedOpacity);
+    mainWindowRevealFullyOpaque = opacityProgress >= 1;
+  }
+
+  if (
+    mainWindowRevealUsesBounds &&
+    mainWindowRevealInitialBounds &&
+    mainWindowRevealFinalBounds
+  ) {
+    const initial = mainWindowRevealInitialBounds;
+    const final = mainWindowRevealFinalBounds;
+    mainWindow.setPosition(
+      Math.round(initial.x + (final.x - initial.x) * progress),
+      final.y,
+      false,
+    );
+  }
+}
+
+function finishMainWindowSplashReveal(): void {
+  if (
+    mainWindow &&
+    !mainWindow.isDestroyed() &&
+    mainWindowRevealUsesBounds &&
+    mainWindowRevealFinalBounds
+  ) {
+    mainWindow.setBounds(mainWindowRevealFinalBounds, false);
+  }
+  mainWindowPreparedForSplashReveal = false;
+  mainWindowRevealFinalBounds = null;
+  mainWindowRevealInitialBounds = null;
+  mainWindowRevealUsesBounds = false;
+  mainWindowRevealFullyOpaque = false;
+  setMainWindowOpacity(1);
+  showMainWindowSafely();
 }
 
 async function revealMainWindowAfterSplash(options?: { fade?: boolean }): Promise<void> {
@@ -6319,6 +6419,11 @@ function createWindow(): void {
   }
   mainWindowReadyToShow = false;
   mainWindowRevealPending = false;
+  mainWindowPreparedForSplashReveal = false;
+  mainWindowRevealFinalBounds = null;
+  mainWindowRevealInitialBounds = null;
+  mainWindowRevealUsesBounds = false;
+  mainWindowRevealFullyOpaque = false;
   const vibrancyEnabled = process.env.AGX_ENABLE_VIBRANCY === "1";
   const devPort = process.env.AGX_DEV_PORT || "5713";
   const devUrl =
@@ -6327,65 +6432,9 @@ function createWindow(): void {
     ? `file://${path.join(__dirname, "..", "dist", "index.html")}`
     : devUrl;
   const savedBounds = loadLayoutData().mainWindow ?? {};
-  // Reject bounds that fell outside all displays (e.g. the external monitor
-  // that held the window last time was unplugged). We can't use
-  // screen.getAllDisplays() before app.whenReady on some platforms, so we
-  // simply clamp obviously-bad coordinates; the OS otherwise handles clipping.
-  const boundsOverride: {
-    x?: number;
-    y?: number;
-    width: number;
-    height: number;
-  } = {
-    width:
-      typeof savedBounds.width === "number" && savedBounds.width >= 680
-        ? Math.floor(savedBounds.width)
-        : 900,
-    height:
-      typeof savedBounds.height === "number" && savedBounds.height >= 480
-        ? Math.floor(savedBounds.height)
-        : 700,
-  };
-  if (
-    typeof savedBounds.x === "number" &&
-    typeof savedBounds.y === "number" &&
-    Number.isFinite(savedBounds.x) &&
-    Number.isFinite(savedBounds.y) &&
-    savedBounds.x > -20000 &&
-    savedBounds.y > -20000 &&
-    savedBounds.x < 20000 &&
-    savedBounds.y < 20000
-  ) {
-    boundsOverride.x = Math.floor(savedBounds.x);
-    boundsOverride.y = Math.floor(savedBounds.y);
-  }
-  if (typeof boundsOverride.x === "number" && typeof boundsOverride.y === "number") {
-    const candidate = {
-      x: boundsOverride.x,
-      y: boundsOverride.y,
-      width: boundsOverride.width,
-      height: boundsOverride.height,
-    };
-    const minVisibleWidth = 120;
-    const minVisibleHeight = 80;
-    const hasVisibleIntersection = screen.getAllDisplays().some((display) => {
-      const area = display.workArea;
-      const overlapWidth = Math.max(
-        0,
-        Math.min(candidate.x + candidate.width, area.x + area.width) - Math.max(candidate.x, area.x),
-      );
-      const overlapHeight = Math.max(
-        0,
-        Math.min(candidate.y + candidate.height, area.y + area.height) - Math.max(candidate.y, area.y),
-      );
-      return overlapWidth >= minVisibleWidth && overlapHeight >= minVisibleHeight;
-    });
-    if (!hasVisibleIntersection) {
-      const primaryArea = screen.getPrimaryDisplay().workArea;
-      boundsOverride.x = Math.round(primaryArea.x + (primaryArea.width - boundsOverride.width) / 2);
-      boundsOverride.y = Math.round(primaryArea.y + Math.max(20, (primaryArea.height - boundsOverride.height) / 6));
-    }
-  }
+  // Splash and chat must resolve through the same geometry path so the splash
+  // behaves as a true overlay instead of shrinking into a separate card.
+  const boundsOverride = resolveStartupWindowBounds(savedBounds);
   const transparentMainWindow = process.platform !== "win32";
   const mainWindowBackgroundColor = transparentMainWindow ? "#00000000" : "#14141c";
   mainWindow = new BrowserWindow({
@@ -6433,7 +6482,7 @@ function createWindow(): void {
     if (!mainWindow || mainWindow.isDestroyed()) return;
     // Focus mode forces a tiny capsule size; never persist that to disk —
     // otherwise the next cold start would launch as a tiny 560x120 window.
-    if (focusModeActive) return;
+    if (focusModeActive || mainWindowPreparedForSplashReveal) return;
     if (boundsSaveTimer) clearTimeout(boundsSaveTimer);
     boundsSaveTimer = setTimeout(() => {
       boundsSaveTimer = null;
@@ -9821,6 +9870,65 @@ function registerIpc(): void {
     }
   });
 
+  /**
+   * Trae-style「打开开发者工具」for local HTML preview (iframe srcDoc cannot host
+   * guest DevTools). Loads the file in a dedicated window and opens detached DevTools.
+   */
+  let htmlPreviewInspectWindow: BrowserWindow | null = null;
+  ipcMain.handle("html-preview-open-devtools", async (_event, payload: unknown) => {
+    const body =
+      payload && typeof payload === "object" ? (payload as Record<string, unknown>) : {};
+    const rawPath = String(body.path ?? "").trim();
+    const rawUrl = String(body.url ?? "").trim();
+    let targetUrl = "";
+    if (rawPath) {
+      const fsPath = expandDesktopLocalPath(rawPath);
+      if (!fsPath || !fs.existsSync(fsPath)) {
+        return { ok: false, error: "file not found" };
+      }
+      targetUrl = pathToFileURL(fsPath).href;
+    } else if (/^https?:\/\//i.test(rawUrl)) {
+      targetUrl = rawUrl;
+    } else {
+      return { ok: false, error: "path or http(s) url required" };
+    }
+
+    try {
+      if (htmlPreviewInspectWindow && !htmlPreviewInspectWindow.isDestroyed()) {
+        const current = htmlPreviewInspectWindow.webContents.getURL();
+        if (current !== targetUrl) {
+          await htmlPreviewInspectWindow.loadURL(targetUrl);
+        }
+        if (!htmlPreviewInspectWindow.webContents.isDevToolsOpened()) {
+          htmlPreviewInspectWindow.webContents.openDevTools({ mode: "detach" });
+        }
+        htmlPreviewInspectWindow.show();
+        htmlPreviewInspectWindow.focus();
+        return { ok: true };
+      }
+
+      htmlPreviewInspectWindow = new BrowserWindow({
+        width: 1100,
+        height: 800,
+        show: true,
+        title: "HTML Preview",
+        webPreferences: {
+          nodeIntegration: false,
+          contextIsolation: true,
+          sandbox: true,
+        },
+      });
+      htmlPreviewInspectWindow.on("closed", () => {
+        htmlPreviewInspectWindow = null;
+      });
+      await htmlPreviewInspectWindow.loadURL(targetUrl);
+      htmlPreviewInspectWindow.webContents.openDevTools({ mode: "detach" });
+      return { ok: true };
+    } catch (e) {
+      return { ok: false, error: String(e) };
+    }
+  });
+
   ipcMain.handle("shell-show-item-in-folder", async (_event, fullPath: string) => {
     const fsPath = expandDesktopLocalPath(fullPath);
     if (!fsPath) return { ok: false, error: "path is required" };
@@ -10805,6 +10913,23 @@ function registerIpc(): void {
     }
   });
 
+  /** Lightweight path metadata (size only) — for artifact list UI, not file contents. */
+  ipcMain.handle("stat-local-path", async (_event, inputPath: string) => {
+    try {
+      const normalized = normalizeLocalFsPath(inputPath);
+      if (!normalized) return { ok: false, error: "empty path" };
+      const stat = await fs.promises.stat(normalized);
+      return {
+        ok: true,
+        size: stat.size,
+        isDirectory: stat.isDirectory(),
+        mtimeMs: stat.mtimeMs,
+      };
+    } catch (err) {
+      return { ok: false, error: String(err) };
+    }
+  });
+
   const WRITE_LOCAL_TEXT_MAX_BYTES = 512 * 1024;
 
   ipcMain.handle("write-local-text-file", async (_event, payload: { path?: string; content?: string }) => {
@@ -10831,6 +10956,106 @@ function registerIpc(): void {
     }
   });
 
+  /**
+   * Stage session「任务产物」into ~/.agenticx/sessions/<sid>/task_artifacts
+   * as real file copies (not symlinks). Studio `read_taskspace_file` resolves
+   * paths with Path.resolve(), so symlinks into /tmp would raise
+   * "path escapes taskspace root". Copies keep files inside the taskspace root.
+   * Originals are left untouched.
+   */
+  ipcMain.handle(
+    "stage-session-artifacts",
+    async (
+      _event,
+      payload: { sessionId?: string; paths?: string[] },
+    ) => {
+      try {
+        const sid = String(payload?.sessionId || "").trim();
+        if (!sid || !/^[A-Za-z0-9._-]+$/.test(sid)) {
+          return { ok: false, error: "invalid sessionId" };
+        }
+        const rawPaths = Array.isArray(payload?.paths) ? payload.paths : [];
+        const stagingDir = path.join(
+          os.homedir(),
+          ".agenticx",
+          "sessions",
+          sid,
+          "task_artifacts",
+        );
+        await fs.promises.mkdir(stagingDir, { recursive: true });
+
+        // Refresh staging: remove previous entries (links/copies), keep dir.
+        const existing = await fs.promises.readdir(stagingDir);
+        for (const name of existing) {
+          await fs.promises.rm(path.join(stagingDir, name), {
+            force: true,
+            recursive: true,
+          });
+        }
+
+        const usedNames = new Set<string>();
+        const stagedSources = new Set<string>();
+        let linked = 0;
+        const uniqueName = (sourcePath: string): string => {
+          const base = path.basename(sourcePath) || "artifact";
+          if (!usedNames.has(base)) {
+            usedNames.add(base);
+            return base;
+          }
+          const parent = path.basename(path.dirname(sourcePath)) || "dir";
+          const alt = `${parent}_${base}`;
+          if (!usedNames.has(alt)) {
+            usedNames.add(alt);
+            return alt;
+          }
+          let i = 2;
+          while (usedNames.has(`${i}_${base}`)) i += 1;
+          const finalName = `${i}_${base}`;
+          usedNames.add(finalName);
+          return finalName;
+        };
+
+        for (const raw of rawPaths) {
+          const source = normalizeLocalFsPath(String(raw || ""));
+          if (!source || !fs.existsSync(source)) continue;
+          let st: fs.Stats;
+          try {
+            st = await fs.promises.stat(source);
+          } catch {
+            continue;
+          }
+          if (!st.isFile()) continue;
+          const resolvedSource = path.resolve(source);
+          // Same inode/path via `~/…` vs absolute → stage once (avoid Desktop_ dup copies).
+          if (stagedSources.has(resolvedSource)) continue;
+          stagedSources.add(resolvedSource);
+          const stagingResolved = path.resolve(stagingDir);
+          // Never stage a file that already lives inside the staging dir.
+          if (
+            resolvedSource === stagingResolved ||
+            resolvedSource.startsWith(stagingResolved + path.sep)
+          ) {
+            continue;
+          }
+          const name = uniqueName(source);
+          const dest = path.join(stagingDir, name);
+          // Real copy (not symlink): Studio resolve() must stay under taskspace root.
+          await fs.promises.copyFile(resolvedSource, dest);
+          linked += 1;
+        }
+
+        return {
+          ok: true,
+          stagingDir,
+          homeDir: os.homedir(),
+          linked,
+        };
+      } catch (err) {
+        return { ok: false, error: String(err) };
+      }
+    },
+  );
+
   const PREVIEW_MAX_BYTES = 25 * 1024 * 1024;
   const PREVIEW_FILE_MIME_BY_EXT: Record<string, string> = {
     ".pdf": "application/pdf",
@@ -10841,9 +11066,8 @@ function registerIpc(): void {
 
   ipcMain.handle("load-local-file-data-url", async (_event, inputPath: string) => {
     try {
-      const raw = String(inputPath || "").trim();
-      if (!raw) return { ok: false, error: "empty path" };
-      const normalized = raw.startsWith("file://") ? decodeURIComponent(raw.replace(/^file:\/\//, "")) : raw;
+      const normalized = normalizeLocalFsPath(inputPath);
+      if (!normalized) return { ok: false, error: "empty path" };
       if (!fs.existsSync(normalized)) {
         return { ok: false, error: "file not found" };
       }
@@ -11172,10 +11396,14 @@ if (!gotTheLock) {
         return theme === "light" ? "light" : "dark";
       });
       registerSplashIpcHandlers({
-        showMainWindow: showMainWindowSafely,
+        prepareMainWindowReveal: prepareMainWindowForSplashReveal,
+        updateMainWindowReveal: updateMainWindowSplashReveal,
+        finishMainWindowReveal: finishMainWindowSplashReveal,
         quitApp: () => app.quit(),
       });
-      createSplashWindow();
+      createSplashWindow({
+        bounds: resolveStartupWindowBounds(loadLayoutData().mainWindow ?? {}, { forSplash: true }),
+      });
 
       // Register basic IPC handlers immediately so the renderer never hits
       // "No handler registered" errors during the agx serve startup delay.

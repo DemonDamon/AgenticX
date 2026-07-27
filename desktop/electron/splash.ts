@@ -1,7 +1,6 @@
 import { app, BrowserWindow, ipcMain, screen } from "electron";
 import fs from "node:fs";
 import path from "node:path";
-import { pathToFileURL } from "node:url";
 
 export type SplashStage =
   | "initializing"
@@ -13,7 +12,15 @@ export type SplashStage =
   | "restoring-session"
   | "ready";
 
-const SPLASH_FADE_MS = 180;
+export type StartupWindowBoundsInput = {
+  x?: number;
+  y?: number;
+  width?: number;
+  height?: number;
+  isMaximized?: boolean;
+};
+
+const SPLASH_ANIMATION_TIMEOUT_MS = 9_000;
 /** After backend is ready: allow preload + session restore before force-showing main window. */
 const SPLASH_FORCE_SHOW_MS = 25_000;
 
@@ -21,7 +28,8 @@ let splashWindow: BrowserWindow | null = null;
 let splashShownOnce = false;
 let rendererReadyReceived = false;
 let splashForceShowTimer: NodeJS.Timeout | null = null;
-let splashAlwaysOnTopTimer: NodeJS.Timeout | null = null;
+let splashAnimationCompleted = false;
+let resolveSplashAnimation: (() => void) | null = null;
 
 type LayoutThemeReader = () => "light" | "dark";
 
@@ -51,56 +59,66 @@ function resolveSplashPreloadPath(): string {
   return packaged;
 }
 
-function resolveSplashIconPath(): string {
-  const iconPath = app.isPackaged
-    ? path.join(process.resourcesPath, "assets", "icon.png")
-    : path.resolve(process.cwd(), "assets", "icon.png");
-  if (fs.existsSync(iconPath)) return iconPath;
-  const embedded = app.isPackaged
-    ? path.join(process.resourcesPath, "assets", "export_embedded.png")
-    : path.resolve(process.cwd(), "assets", "export_embedded.png");
-  if (fs.existsSync(embedded)) return embedded;
-  return iconPath;
-}
-
-function resolveSplashHeroPath(): string {
-  const heroPath = app.isPackaged
-    ? path.join(process.resourcesPath, "assets", "splash-wireframe-cutout.png")
-    : path.resolve(process.cwd(), "assets", "splash-wireframe-cutout.png");
-  if (fs.existsSync(heroPath)) return heroPath;
-  const rawHeroPath = app.isPackaged
-    ? path.join(process.resourcesPath, "assets", "splash-wireframe.png")
-    : path.resolve(process.cwd(), "assets", "splash-wireframe.png");
-  if (fs.existsSync(rawHeroPath)) return rawHeroPath;
-  return resolveSplashIconPath();
-}
-
 function resolveSplashTheme(): "light" | "dark" {
   const theme = readLayoutTheme();
   return theme === "light" ? "light" : "dark";
 }
 
-function splashBackgroundColor(theme: "light" | "dark"): string {
-  return theme === "light" ? "#ffffff" : "#000000";
-}
+export function resolveStartupWindowBounds(
+  savedBounds: StartupWindowBoundsInput,
+  options?: { forSplash?: boolean },
+): { x: number; y: number; width: number; height: number } {
+  const width =
+    typeof savedBounds.width === "number" && savedBounds.width >= 680
+      ? Math.floor(savedBounds.width)
+      : 900;
+  const height =
+    typeof savedBounds.height === "number" && savedBounds.height >= 480
+      ? Math.floor(savedBounds.height)
+      : 700;
+  const hasSavedPosition =
+    typeof savedBounds.x === "number" &&
+    typeof savedBounds.y === "number" &&
+    Number.isFinite(savedBounds.x) &&
+    Number.isFinite(savedBounds.y) &&
+    savedBounds.x > -20_000 &&
+    savedBounds.y > -20_000 &&
+    savedBounds.x < 20_000 &&
+    savedBounds.y < 20_000;
+  const candidate = {
+    x: hasSavedPosition ? Math.floor(savedBounds.x as number) : 0,
+    y: hasSavedPosition ? Math.floor(savedBounds.y as number) : 0,
+    width,
+    height,
+  };
 
-function clamp(value: number, min: number, max: number): number {
-  return Math.max(min, Math.min(max, value));
-}
+  const hasVisibleIntersection = hasSavedPosition && screen.getAllDisplays().some((display) => {
+    const area = display.workArea;
+    const overlapWidth = Math.max(
+      0,
+      Math.min(candidate.x + candidate.width, area.x + area.width) - Math.max(candidate.x, area.x),
+    );
+    const overlapHeight = Math.max(
+      0,
+      Math.min(candidate.y + candidate.height, area.y + area.height) - Math.max(candidate.y, area.y),
+    );
+    return overlapWidth >= 120 && overlapHeight >= 80;
+  });
 
-function centerSplashBounds(): { x: number; y: number; width: number; height: number } {
-  const { workArea } = screen.getPrimaryDisplay();
-  const availableWidth = Math.max(360, workArea.width - 48);
-  const availableHeight = Math.max(280, workArea.height - 48);
-  const targetWidth = clamp(Math.round(workArea.width * 0.54), 660, 860);
-  const width = Math.min(targetWidth, availableWidth);
-  const targetHeight = clamp(Math.round(width * 0.56), 360, 480);
-  const height = Math.min(targetHeight, availableHeight);
+  const display = hasVisibleIntersection
+    ? screen.getDisplayMatching(candidate)
+    : screen.getPrimaryDisplay();
+  if (options?.forSplash && savedBounds.isMaximized) {
+    return { ...display.workArea };
+  }
+  if (hasVisibleIntersection) return candidate;
+
+  const area = display.workArea;
   return {
     width,
     height,
-    x: Math.round(workArea.x + (workArea.width - width) / 2),
-    y: Math.round(workArea.y + (workArea.height - height) / 2),
+    x: Math.round(area.x + (area.width - width) / 2),
+    y: Math.round(area.y + Math.max(20, (area.height - height) / 6)),
   };
 }
 
@@ -109,20 +127,40 @@ function clearSplashTimers(): void {
     clearTimeout(splashForceShowTimer);
     splashForceShowTimer = null;
   }
-  if (splashAlwaysOnTopTimer) {
-    clearTimeout(splashAlwaysOnTopTimer);
-    splashAlwaysOnTopTimer = null;
-  }
 }
 
 function destroySplashWindow(): void {
   clearSplashTimers();
+  resolveSplashAnimation?.();
+  resolveSplashAnimation = null;
   if (!splashWindow || splashWindow.isDestroyed()) {
     splashWindow = null;
     return;
   }
   splashWindow.destroy();
   splashWindow = null;
+}
+
+function markSplashAnimationComplete(): void {
+  splashAnimationCompleted = true;
+  resolveSplashAnimation?.();
+  resolveSplashAnimation = null;
+}
+
+async function waitForSplashAnimation(): Promise<void> {
+  if (splashAnimationCompleted) return;
+  await new Promise<void>((resolve) => {
+    let settled = false;
+    const finish = () => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timeout);
+      if (resolveSplashAnimation === finish) resolveSplashAnimation = null;
+      resolve();
+    };
+    const timeout = setTimeout(finish, SPLASH_ANIMATION_TIMEOUT_MS);
+    resolveSplashAnimation = finish;
+  });
 }
 
 export function updateSplashStage(stage: SplashStage): void {
@@ -138,31 +176,51 @@ export async function closeSplash(options?: { fade?: boolean }): Promise<void> {
   const win = splashWindow;
   if (options?.fade !== false) {
     try {
+      win.setAlwaysOnTop(true);
       win.webContents.send("splash:stage", "ready");
     } catch {
       // ignore
     }
-    await new Promise((resolve) => setTimeout(resolve, SPLASH_FADE_MS));
+    await waitForSplashAnimation();
   }
   destroySplashWindow();
 }
 
 export function registerSplashIpcHandlers(deps: {
-  showMainWindow: () => void;
+  prepareMainWindowReveal: () => void;
+  updateMainWindowReveal: (progress: number) => void;
+  finishMainWindowReveal: () => void;
   quitApp: () => void;
 }): void {
   ipcMain.handle("startup:renderer-ready", async () => {
     if (rendererReadyReceived) return { ok: true, duplicate: true };
     rendererReadyReceived = true;
     updateSplashStage("ready");
+    deps.prepareMainWindowReveal();
     await closeSplash({ fade: true });
-    deps.showMainWindow();
+    deps.finishMainWindowReveal();
     return { ok: true };
   });
 
   ipcMain.handle("splash-request-quit", async () => {
     deps.quitApp();
     return { ok: true };
+  });
+
+  ipcMain.handle("splash-animation-complete", async (event) => {
+    if (!splashWindow || splashWindow.isDestroyed() || event.sender !== splashWindow.webContents) {
+      return { ok: false };
+    }
+    markSplashAnimationComplete();
+    return { ok: true };
+  });
+
+  ipcMain.on("splash-reveal-main", (event, progress: unknown) => {
+    if (!splashWindow || splashWindow.isDestroyed() || event.sender !== splashWindow.webContents) {
+      return;
+    }
+    if (typeof progress !== "number" || !Number.isFinite(progress)) return;
+    deps.updateMainWindowReveal(progress);
   });
 
   ipcMain.handle("update-splash-stage", async (_event, stage: SplashStage) => {
@@ -187,28 +245,29 @@ export function scheduleSplashForceShowFallback(showMainWindow: () => void): voi
   }, SPLASH_FORCE_SHOW_MS);
 }
 
-export function createSplashWindow(): BrowserWindow | null {
+export function createSplashWindow(options?: { bounds?: { x: number; y: number; width: number; height: number } }): BrowserWindow | null {
   if (splashShownOnce) return null;
   splashShownOnce = true;
   rendererReadyReceived = false;
+  splashAnimationCompleted = false;
+  resolveSplashAnimation = null;
 
   const theme = resolveSplashTheme();
-  const heroPath = resolveSplashHeroPath();
-  const heroUrl = fs.existsSync(heroPath) ? pathToFileURL(heroPath).href : "";
 
   splashWindow = new BrowserWindow({
-    ...centerSplashBounds(),
+    ...(options?.bounds ?? resolveStartupWindowBounds({}, { forSplash: true })),
     frame: false,
     resizable: false,
     movable: false,
     minimizable: false,
     maximizable: false,
     fullscreenable: false,
+    hasShadow: false,
     show: false,
     alwaysOnTop: true,
     skipTaskbar: true,
-    transparent: false,
-    backgroundColor: splashBackgroundColor(theme),
+    transparent: true,
+    backgroundColor: "#00000000",
     autoHideMenuBar: true,
     webPreferences: {
       preload: resolveSplashPreloadPath(),
@@ -223,18 +282,10 @@ export function createSplashWindow(): BrowserWindow | null {
     updateSplashStage("initializing");
   });
 
-  splashAlwaysOnTopTimer = setTimeout(() => {
-    splashAlwaysOnTopTimer = null;
-    if (splashWindow && !splashWindow.isDestroyed()) {
-      splashWindow.setAlwaysOnTop(false);
-    }
-  }, 5000);
-
   const htmlPath = resolveSplashHtmlPath();
   const query: Record<string, string> = {
     theme,
   };
-  if (heroUrl) query.hero = heroUrl;
 
   if (fs.existsSync(htmlPath)) {
     void splashWindow.loadFile(htmlPath, { query }).catch((err) => {
