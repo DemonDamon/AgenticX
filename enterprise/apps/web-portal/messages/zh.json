@@ -184,7 +184,7 @@
       "enableWebSearch": "启用联网搜索",
       "enableWebSearchDescription": "开启后聊天消息可调用 Web Search 工具",
       "enableDeepResearch": "深度研究",
-      "enableDeepResearchDescription": "开启后对话可走多阶段研究流水线；单次消耗显著更高，默认关闭",
+      "enableDeepResearchDescription": "开启后对话可走多阶段研究流水线；单次消耗显著更高，默认开启",
       "provider": "搜索服务商",
       "providerDescription": "默认 DuckDuckGo（免密钥）；Bocha / Tavily 需填写 API Key",
       "searchApiKey": "Search Provider API Key",
