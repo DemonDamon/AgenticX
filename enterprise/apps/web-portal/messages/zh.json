@@ -48,6 +48,7 @@
     "deepResearchPlaceholder": "描述你的问题，生成深度研究报告",
     "deepResearchChip": "深度研究",
     "enterDeepResearch": "深度研究",
+    "exitDeepResearch": "退出深度研究",
     "noHistory": "暂无历史，点击 New chat 开始",
     "loadingHistory": "加载历史…",
     "settings": "设置",
