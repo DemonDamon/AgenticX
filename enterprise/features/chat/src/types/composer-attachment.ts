@@ -18,8 +18,16 @@ export type ComposerAttachment = {
 export const MAX_ATTACHMENTS = 50;
 /** Per-file size cap for upload (bytes). */
 export const MAX_FILE_BYTES = 100 * 1024 * 1024;
-/** Images still inlined as data URL — keep smaller. */
-export const MAX_IMAGE_BYTES = 5 * 1024 * 1024;
+/**
+ * Compressed image data URL char budget (align with sanitize ~8e6, with margin).
+ * Upload may accept larger files; they are compressed before embedding.
+ */
+export const MAX_IMAGE_DATA_URL_CHARS = 7_500_000;
+/**
+ * @deprecated No longer a hard reject for uploads — images up to MAX_FILE_BYTES
+ * are accepted then compressed. Alias kept for callers that still import it.
+ */
+export const MAX_IMAGE_BYTES = MAX_FILE_BYTES;
 /** @deprecated use MAX_ATTACHMENTS */
 export const MAX_IMAGE_ATTACHMENTS = MAX_ATTACHMENTS;
 
