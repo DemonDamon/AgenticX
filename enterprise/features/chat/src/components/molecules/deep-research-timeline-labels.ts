@@ -20,6 +20,8 @@ export function labelForDeepResearchEvent(event: DeepResearchEvent): string {
         : "车道失败";
     case "artifact":
       return `产物：${event.title}`;
+    case "narrative":
+      return event.text;
     default: {
       const _exhaustive: never = event;
       return String(_exhaustive);

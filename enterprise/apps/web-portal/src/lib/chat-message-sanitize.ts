@@ -103,7 +103,17 @@ function sanitizeDeepResearch(raw: unknown): ChatMessageDeepResearch | undefined
   const artifactIds = Array.isArray(row.artifactIds)
     ? row.artifactIds.filter((id): id is string => typeof id === "string").slice(0, 40)
     : undefined;
-  return { runId, status, events, artifactIds };
+  let clarifyAnswers: Record<string, string> | undefined;
+  if (row.clarifyAnswers && typeof row.clarifyAnswers === "object" && !Array.isArray(row.clarifyAnswers)) {
+    clarifyAnswers = {};
+    for (const [key, value] of Object.entries(row.clarifyAnswers as Record<string, unknown>)) {
+      if (typeof key === "string" && typeof value === "string" && key.trim() && value.trim()) {
+        clarifyAnswers[key.trim()] = value.trim().slice(0, 500);
+      }
+    }
+    if (Object.keys(clarifyAnswers).length === 0) clarifyAnswers = undefined;
+  }
+  return { runId, status, events, artifactIds, clarifyAnswers };
 }
 
 export function sanitizeInboundMessages(

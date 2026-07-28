@@ -55,13 +55,17 @@ export type DeepResearchEvent =
       kind: "memo" | "report" | "other";
       bytes: number;
     }
-  | { type: "clarify_timeout"; runId: string };
+  | { type: "clarify_timeout"; runId: string }
+  /** Short assistant prose between workbench steps (not part of final report content). */
+  | { type: "narrative"; text: string };
 
 export type ChatMessageDeepResearch = {
   runId: string;
   status: "running" | "awaiting_clarify" | "completed" | "failed" | "cancelled";
   events: DeepResearchEvent[];
   artifactIds?: string[];
+  /** User answers from clarify panel (client + persist). */
+  clarifyAnswers?: Record<string, string>;
 };
 
 export type ChatMessage = {

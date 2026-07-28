@@ -9,6 +9,8 @@ export * from "./components/molecules/DeepResearchTimeline";
 export * from "./components/molecules/DeepResearchClarifyCard";
 export * from "./components/molecules/DeepResearchArtifactCard";
 export * from "./components/molecules/DeepResearchFilesPanel";
+export * from "./components/molecules/DeepResearchWorkbench";
+export * from "./components/molecules/deep-research-segments";
 export * from "./components/molecules/InputArea";
 export * from "./components/molecules/MessageQueuePanel";
 export * from "./components/molecules/QueuedMessageBubble";
