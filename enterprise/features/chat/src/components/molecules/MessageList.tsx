@@ -1,7 +1,7 @@
 import * as React from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import type { ChatMessage } from "@agenticx/core-api";
+import type { ChatMessage, ChatMessageAttachment } from "@agenticx/core-api";
 import { Button, Tooltip, TooltipContent, TooltipTrigger } from "@agenticx/ui";
 import { ReasoningBlock } from "../atoms/ReasoningBlock";
 import { ToolCallCard } from "../atoms/ToolCallCard";
@@ -19,6 +19,8 @@ import { WebSearchSourcesPanel } from "./WebSearchSourcesPanel";
 import { DeepResearchWorkbench } from "./DeepResearchWorkbench";
 import { DeepResearchDelivery } from "./DeepResearchDelivery";
 import { DeepResearchFilesPanel } from "./DeepResearchFilesPanel";
+import { AttachmentContentPanel } from "./AttachmentContentPanel";
+import { UserMessageAttachmentCard } from "../atoms/UserMessageAttachmentCard";
 import { stripDeepResearchProgressFromContent } from "./deep-research-segments";
 import { useChatStore } from "../../store";
 import "../../markdown/chat-prism-themes.css";
@@ -151,6 +153,8 @@ type MessageListProps = {
    * MessageList will not render DeepResearchFilesPanel itself.
    */
   onRequestDeepResearchFiles?: (sessionId: string, focusArtifactId?: string | null) => void;
+  /** When set, attachment preview is owned by the parent (docked side pane). */
+  onRequestAttachmentPreview?: (attachment: ChatMessageAttachment) => void;
 };
 
 function ThinkingDotsPlaceholder() {
@@ -167,16 +171,26 @@ function AssistantMessageMarkdown({
   text,
   className,
   sources,
+  sessionAttachments,
+  onOpenAttachment,
   onOpenCitationInSheet,
 }: {
   text: string;
   className?: string;
   sources?: ChatMessage["web_search_sources"];
+  sessionAttachments?: ChatMessageAttachment[];
+  onOpenAttachment?: (attachment: ChatMessageAttachment) => void;
   onOpenCitationInSheet?: (index1Based: number) => void;
 }) {
   const components = React.useMemo(
-    () => createAssistantMdComponents({ sources, onOpenCitationInSheet }),
-    [sources, onOpenCitationInSheet],
+    () =>
+      createAssistantMdComponents({
+        sources,
+        sessionAttachments,
+        onOpenAttachment,
+        onOpenCitationInSheet,
+      }),
+    [sources, sessionAttachments, onOpenAttachment, onOpenCitationInSheet],
   );
   return (
     <div className={`agx-assistant-md ${className ?? ""}`.trim()}>
@@ -218,6 +232,7 @@ export function MessageList({
   showScrollToBottomFab = true,
   scrollToBottomLabel = "回到底部",
   onRequestDeepResearchFiles,
+  onRequestAttachmentPreview,
 }: MessageListProps) {
   const parentRef = React.useRef<HTMLDivElement>(null);
   const autoScrollPinnedRef = React.useRef(true);
@@ -246,6 +261,7 @@ export function MessageList({
   const [sourcesHighlightIndex, setSourcesHighlightIndex] = React.useState<number | null>(null);
   const [filesPanelSessionId, setFilesPanelSessionId] = React.useState<string | null>(null);
   const [filesPanelFocusId, setFilesPanelFocusId] = React.useState<string | null>(null);
+  const [attachmentPreview, setAttachmentPreview] = React.useState<ChatMessageAttachment | null>(null);
   const longPressTimerRef = React.useRef<Map<string, NodeJS.Timeout>>(new Map());
   const activeLongPressRef = React.useRef<{ messageId: string; x: number; y: number } | null>(null);
   const LONG_PRESS_MS = 500;
@@ -404,6 +420,19 @@ export function MessageList({
   }
 
   const hostFilesPanel = !onRequestDeepResearchFiles;
+  const hostAttachmentPanel = !onRequestAttachmentPreview;
+
+  const openAttachmentPreview = React.useCallback(
+    (attachment: ChatMessageAttachment) => {
+      if (!attachment.parsed_text?.trim()) return;
+      if (onRequestAttachmentPreview) {
+        onRequestAttachmentPreview(attachment);
+        return;
+      }
+      setAttachmentPreview(attachment);
+    },
+    [onRequestAttachmentPreview],
+  );
 
   return (
     <div className={["flex h-full min-h-0 w-full", className].filter(Boolean).join(" ")}>
@@ -480,7 +509,15 @@ export function MessageList({
                   }
                   return undefined;
                 })();
-            const userResponseVersionMeta = linkedUserMessageId ? responseVersionMetaByUserMessageId?.[linkedUserMessageId] : undefined;
+            const linkedUserMessage = linkedUserMessageId
+              ? messages.find((item) => item.id === linkedUserMessageId)
+              : undefined;
+            const linkedUserAttachments = linkedUserMessage?.attachments?.filter(
+              (item) => item.parsed_text?.trim(),
+            );
+            const userResponseVersionMeta = linkedUserMessageId
+              ? responseVersionMetaByUserMessageId?.[linkedUserMessageId]
+              : undefined;
             const hasUserResponseVersions = !!userResponseVersionMeta && userResponseVersionMeta.total > 1;
             const canShowPreviousUserVersion = !!userResponseVersionMeta && userResponseVersionMeta.activeIndex > 0;
             const canShowNextUserVersion =
@@ -495,6 +532,12 @@ export function MessageList({
                 message.deep_research?.status === "awaiting_clarify");
             const hideMessageActions =
               deepResearchInFlight || (isAssistant && message.id === inFlightAssistantId);
+            const userAttachments = isUser ? (message.attachments ?? []) : [];
+            const userHasAttachments = userAttachments.length > 0;
+            const userHasText = isUser && displayContentForRender.trim().length > 0;
+            /** Kimi-style: file card(s) and text prompt as separate bubbles. */
+            const userSplitBubbles =
+              isUser && userHasAttachments && styleVariant === "im" && !isTerminal && !isClean;
 
             const onPointerDown = (e: React.PointerEvent) => {
               if (!shouldStartLongPress(e.pointerType)) return;
@@ -564,17 +607,23 @@ export function MessageList({
                     >
                       <div
                         className={[
-                          "relative",
-                          isTerminal
+                          userSplitBubbles
+                            ? "ml-auto flex w-fit max-w-[min(90%,38rem)] flex-col items-end gap-2"
+                            : "relative",
+                          !userSplitBubbles && isTerminal
                             ? "flex-1 rounded-xl border border-border/70 bg-surface-subtle/45 px-4 py-3"
-                            : isClean
+                            : !userSplitBubbles && isClean
                               ? "w-full rounded-2xl border border-border/70 bg-card/85 px-5 py-3 shadow-sm"
-                              : isUser
+                              : !userSplitBubbles && isUser
                                 ? "ml-auto block w-fit max-w-[min(90%,38rem)] rounded-[24px] bg-primary px-4 py-2.5 text-primary-foreground"
-                              : assistantFrameless
-                                ? "w-full bg-transparent px-0 py-0 text-foreground"
-                                : "w-full rounded-[24px] border border-border/40 bg-card px-5 py-3 text-card-foreground shadow-sm",
-                        ].join(" ")}
+                                : !userSplitBubbles && assistantFrameless
+                                  ? "w-full bg-transparent px-0 py-0 text-foreground"
+                                  : !userSplitBubbles
+                                    ? "w-full rounded-[24px] border border-border/40 bg-card px-5 py-3 text-card-foreground shadow-sm"
+                                    : "",
+                        ]
+                          .filter(Boolean)
+                          .join(" ")}
                       >
                         {/* 普通对话：思考链仍在正文前。深度研究：先工作台（澄清/检索），
                             综合阶段才出现的 Thinking 必须跟在工作台之后，不能顶到最上面。 */}
@@ -612,8 +661,41 @@ export function MessageList({
                           </div>
                         ) : null}
 
-                        {/* 用户图片附件 */}
-                        {isUser && message.attachments && message.attachments.length > 0 ? (
+                        {/* 用户附件：Kimi 式分开展示（文件卡片 + 独立文本气泡） */}
+                        {userSplitBubbles ? (
+                          <>
+                            {userAttachments.map((attachment) =>
+                              attachment.mime_type.startsWith("image/") && attachment.data_url ? (
+                                <img
+                                  key={`${message.id}-${attachment.name}`}
+                                  src={attachment.data_url}
+                                  alt={attachment.name}
+                                  className="max-h-40 max-w-full rounded-2xl object-cover"
+                                />
+                              ) : (
+                                <UserMessageAttachmentCard
+                                  key={`${message.id}-${attachment.name}`}
+                                  attachment={attachment}
+                                  onPreview={
+                                    attachment.parsed_text?.trim()
+                                      ? () => openAttachmentPreview(attachment)
+                                      : undefined
+                                  }
+                                />
+                              ),
+                            )}
+                            {userHasText ? (
+                              <div className="rounded-[24px] bg-primary px-4 py-2.5 text-primary-foreground">
+                                <p className="whitespace-pre-wrap break-words text-base leading-7">
+                                  {displayContentForRender}
+                                </p>
+                              </div>
+                            ) : null}
+                          </>
+                        ) : null}
+
+                        {/* 用户图片/文档附件（合并在同一气泡内，非 Kimi 分栏样式） */}
+                        {!userSplitBubbles && isUser && userHasAttachments ? (
                           <div className="mb-2 flex flex-wrap gap-2">
                             {message.attachments.map((attachment) =>
                               attachment.mime_type.startsWith("image/") && attachment.data_url ? (
@@ -626,18 +708,37 @@ export function MessageList({
                               ) : (
                                 <div
                                   key={`${message.id}-${attachment.name}`}
-                                  className="inline-flex max-w-[240px] items-center gap-2 rounded-xl border border-border/60 bg-muted/40 px-3 py-2 text-xs"
+                                  className={[
+                                    "inline-flex max-w-[min(100%,320px)] items-center gap-2 rounded-xl border px-3 py-2 text-xs",
+                                    isUser
+                                      ? "border-primary-foreground/30 bg-primary-foreground/10"
+                                      : "border-border/60 bg-muted/40",
+                                  ].join(" ")}
                                 >
-                                  <span className="truncate font-medium text-foreground">
+                                  <span className="min-w-0 flex-1 truncate font-medium">
                                     {attachment.name}
                                   </span>
-                                  <span className="shrink-0 text-muted-foreground">
-                                    {attachment.kind === "video"
-                                      ? "视频"
-                                      : attachment.parsed_text
-                                        ? "已解析"
-                                        : "附件"}
-                                  </span>
+                                  {attachment.parsed_text?.trim() ? (
+                                    <button
+                                      type="button"
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        openAttachmentPreview(attachment);
+                                      }}
+                                      className={[
+                                        "shrink-0 rounded-md px-2 py-0.5 text-[11px] font-medium transition-colors",
+                                        isUser
+                                          ? "bg-primary-foreground/15 text-primary-foreground hover:bg-primary-foreground/25"
+                                          : "bg-background text-foreground hover:bg-muted",
+                                      ].join(" ")}
+                                    >
+                                      预览
+                                    </button>
+                                  ) : (
+                                    <span className="shrink-0 opacity-80">
+                                      {attachment.kind === "video" ? "视频" : "附件"}
+                                    </span>
+                                  )}
                                 </div>
                               ),
                             )}
@@ -693,12 +794,14 @@ export function MessageList({
                               text={displayContentForRender || "..."}
                               className={`break-words text-base leading-7 ${!message.content ? "opacity-70" : ""}`}
                               sources={message.web_search_sources}
+                              sessionAttachments={linkedUserAttachments}
+                              onOpenAttachment={openAttachmentPreview}
                               onOpenCitationInSheet={(index1Based) => {
                                 setSourcesPanelMessageId(message.id);
                                 setSourcesHighlightIndex(index1Based);
                               }}
                             />
-                          ) : message.content.trim() ? (
+                          ) : message.content.trim() && !userSplitBubbles ? (
                             <p
                               className={`whitespace-pre-wrap break-words text-base leading-7 ${!message.content ? "opacity-70" : ""}`}
                             >
@@ -1069,6 +1172,15 @@ export function MessageList({
         }
         highlightIndex={sourcesHighlightIndex}
       />
+      {hostAttachmentPanel ? (
+        <AttachmentContentPanel
+          open={attachmentPreview != null}
+          onOpenChange={(open) => {
+            if (!open) setAttachmentPreview(null);
+          }}
+          attachment={attachmentPreview}
+        />
+      ) : null}
       <style>{`
         @keyframes agx-thinking-dot-pulse {
           0%, 80%, 100% {

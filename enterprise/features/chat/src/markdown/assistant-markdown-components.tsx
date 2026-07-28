@@ -1,12 +1,13 @@
 import * as React from "react";
 import type { Components } from "react-markdown";
-import type { WebSearchSource } from "@agenticx/core-api";
+import type { ChatMessageAttachment, WebSearchSource } from "@agenticx/core-api";
 import { FencedCodeBlock } from "./FencedCodeBlock";
 import { WebSearchCitation } from "../components/molecules/WebSearchCitation";
 import {
   resolveCitationSource,
   splitCitationText,
 } from "../utils/web-search-citation";
+import { splitTextByAttachmentNames } from "../utils/attachment-link";
 
 function reactNodeToPlainText(node: React.ReactNode): string {
   if (node == null || typeof node === "boolean") return "";
@@ -74,17 +75,74 @@ function injectCitations(
   return mapNode(children, "cite");
 }
 
+function injectAttachmentLinks(
+  children: React.ReactNode,
+  attachments: ChatMessageAttachment[] | undefined,
+  onOpenAttachment?: (attachment: ChatMessageAttachment) => void,
+): React.ReactNode {
+  if (!attachments?.length || !onOpenAttachment) return children;
+
+  const mapNode = (node: React.ReactNode, keyPrefix: string): React.ReactNode => {
+    if (node == null || typeof node === "boolean") return node;
+    if (typeof node === "number") return node;
+    if (typeof node === "string") {
+      const parts = splitTextByAttachmentNames(node, attachments);
+      if (parts.length === 1 && parts[0]?.type === "text") return node;
+      return parts.map((part, i) => {
+        if (part.type === "text") {
+          return <React.Fragment key={`${keyPrefix}-at-${i}`}>{part.value}</React.Fragment>;
+        }
+        return (
+          <button
+            key={`${keyPrefix}-af-${i}-${part.attachment.name}`}
+            type="button"
+            className="inline cursor-pointer font-medium text-primary underline-offset-2 hover:underline"
+            onClick={(event) => {
+              event.stopPropagation();
+              onOpenAttachment(part.attachment);
+            }}
+          >
+            {part.value}
+          </button>
+        );
+      });
+    }
+    if (Array.isArray(node)) {
+      return node.map((child, i) => mapNode(child, `${keyPrefix}-${i}`));
+    }
+    if (React.isValidElement<{ children?: React.ReactNode }>(node)) {
+      const type = node.type;
+      if (type === "code" || type === "pre") return node;
+      if (node.props.children == null) return node;
+      return React.cloneElement(node, {
+        ...node.props,
+        children: mapNode(node.props.children, `${keyPrefix}-ch`),
+      });
+    }
+    return node;
+  };
+
+  return mapNode(children, "attach");
+}
+
 type AssistantMdOptions = {
   sources?: WebSearchSource[];
   onOpenCitationInSheet?: (index1Based: number) => void;
+  sessionAttachments?: ChatMessageAttachment[];
+  onOpenAttachment?: (attachment: ChatMessageAttachment) => void;
   /** document: roomier report preview typography + list-outside numbering */
   variant?: "chat" | "document";
 };
 
 export function createAssistantMdComponents(options: AssistantMdOptions = {}): Components {
   const doc = options.variant === "document";
-  const cite = (children: React.ReactNode) =>
-    injectCitations(children, options.sources, options.onOpenCitationInSheet);
+  const enrich = (children: React.ReactNode) =>
+    injectCitations(
+      injectAttachmentLinks(children, options.sessionAttachments, options.onOpenAttachment),
+      options.sources,
+      options.onOpenCitationInSheet,
+    );
+  const cite = enrich;
 
   const wrap =
     (Tag: "h1" | "h2" | "h3" | "p", className: string) =>
