@@ -77,39 +77,77 @@ function injectCitations(
 type AssistantMdOptions = {
   sources?: WebSearchSource[];
   onOpenCitationInSheet?: (index1Based: number) => void;
+  /** document: roomier report preview typography + list-outside numbering */
+  variant?: "chat" | "document";
 };
 
 export function createAssistantMdComponents(options: AssistantMdOptions = {}): Components {
+  const doc = options.variant === "document";
+  const cite = (children: React.ReactNode) =>
+    injectCitations(children, options.sources, options.onOpenCitationInSheet);
+
   const wrap =
     (Tag: "h1" | "h2" | "h3" | "p", className: string) =>
     ({ children }: { children?: React.ReactNode }) => {
-      const content = injectCitations(children, options.sources, options.onOpenCitationInSheet);
-      return React.createElement(Tag, { className }, content);
+      return React.createElement(Tag, { className }, cite(children));
     };
 
   return {
-    h1: wrap("h1", "mb-2 mt-3 text-balance pl-0 text-xl font-semibold first:mt-0"),
-    h2: wrap("h2", "mb-1.5 mt-3 text-balance pl-0 text-lg font-semibold first:mt-0"),
-    h3: wrap("h3", "mb-1.5 mt-2 text-balance pl-0 text-base font-semibold first:mt-0"),
-    p: wrap("p", "mb-2.5 pl-0 last:mb-0"),
+    h1: wrap(
+      "h1",
+      doc
+        ? "mb-4 mt-0 text-balance text-2xl font-semibold tracking-tight first:mt-0"
+        : "mb-2 mt-3 text-balance pl-0 text-xl font-semibold first:mt-0",
+    ),
+    h2: wrap(
+      "h2",
+      doc
+        ? "mb-3 mt-6 text-balance text-lg font-semibold tracking-tight first:mt-0"
+        : "mb-1.5 mt-3 text-balance pl-0 text-lg font-semibold first:mt-0",
+    ),
+    h3: wrap(
+      "h3",
+      doc
+        ? "mb-2 mt-5 text-balance text-base font-semibold first:mt-0"
+        : "mb-1.5 mt-2 text-balance pl-0 text-base font-semibold first:mt-0",
+    ),
+    p: wrap("p", doc ? "mb-3.5 text-[15px] leading-7 last:mb-0" : "mb-2.5 pl-0 last:mb-0"),
     ul: ({ children }) => (
-      <ul className="mb-2.5 list-inside list-disc pl-0 last:mb-0">
-        {injectCitations(children, options.sources, options.onOpenCitationInSheet)}
+      <ul
+        className={
+          doc
+            ? "mb-3.5 list-outside list-disc space-y-2 pl-6 text-[15px] leading-7 last:mb-0"
+            : "mb-2.5 list-inside list-disc pl-0 last:mb-0"
+        }
+      >
+        {cite(children)}
       </ul>
     ),
     ol: ({ children }) => (
-      <ol className="mb-2.5 list-inside list-decimal pl-0 last:mb-0">
-        {injectCitations(children, options.sources, options.onOpenCitationInSheet)}
+      <ol
+        className={
+          doc
+            ? "mb-3.5 list-outside list-decimal space-y-2.5 pl-6 text-[15px] leading-7 marker:font-medium marker:text-muted-foreground last:mb-0"
+            : "mb-2.5 list-inside list-decimal pl-0 last:mb-0"
+        }
+      >
+        {cite(children)}
       </ol>
     ),
     li: ({ children }) => (
-      <li className="mb-0.5 pl-0 [&>p]:mb-0">
-        {injectCitations(children, options.sources, options.onOpenCitationInSheet)}
+      <li className={doc ? "pl-1 [&>p]:mb-2 [&>p:last-child]:mb-0" : "mb-0.5 pl-0 [&>p]:mb-0"}>
+        {cite(children)}
       </li>
     ),
     blockquote: ({ children }) => (
-      <blockquote className="my-2 border-l-2 border-border pl-3 text-muted-foreground">
-        {injectCitations(children, options.sources, options.onOpenCitationInSheet)}
+      <blockquote
+        className={
+          doc
+            ? "my-4 border-l-[3px] border-primary/40 pl-4 text-[15px] leading-7 text-muted-foreground"
+            : "my-2 border-l-2 border-border pl-3 text-muted-foreground"
+        }
+      >
+        {cite(children)}
       </blockquote>
     ),
     a: ({ children, href }) => (
@@ -118,29 +156,21 @@ export function createAssistantMdComponents(options: AssistantMdOptions = {}): C
       </a>
     ),
     strong: ({ children }) => (
-      <strong className="font-semibold text-foreground">
-        {injectCitations(children, options.sources, options.onOpenCitationInSheet)}
-      </strong>
+      <strong className="font-semibold text-foreground">{cite(children)}</strong>
     ),
-    em: ({ children }) => (
-      <em className="italic">{injectCitations(children, options.sources, options.onOpenCitationInSheet)}</em>
-    ),
-    hr: () => <hr className="my-3 border-border" />,
+    em: ({ children }) => <em className="italic">{cite(children)}</em>,
+    hr: () => <hr className={doc ? "my-6 border-border/80" : "my-3 border-border"} />,
     table: ({ children }) => (
-      <div className="my-2 max-w-full overflow-x-auto rounded-md border border-border">
+      <div className={doc ? "my-4 max-w-full overflow-x-auto rounded-lg border border-border" : "my-2 max-w-full overflow-x-auto rounded-md border border-border"}>
         <table className="w-full min-w-[280px] border-collapse text-left text-sm">{children}</table>
       </div>
     ),
     thead: ({ children }) => <thead className="bg-muted/50">{children}</thead>,
     th: ({ children }) => (
-      <th className="border-b border-border px-3 py-2 font-medium">
-        {injectCitations(children, options.sources, options.onOpenCitationInSheet)}
-      </th>
+      <th className="border-b border-border px-3 py-2 font-medium">{cite(children)}</th>
     ),
     td: ({ children }) => (
-      <td className="border-b border-border/80 px-3 py-2 align-top">
-        {injectCitations(children, options.sources, options.onOpenCitationInSheet)}
-      </td>
+      <td className="border-b border-border/80 px-3 py-2 align-top">{cite(children)}</td>
     ),
     code: ({ className, children, ...rest }) => {
       const isBlock = /language-/.test(className ?? "");
