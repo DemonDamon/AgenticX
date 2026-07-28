@@ -54,7 +54,12 @@ import { HoverTip } from "./ds/HoverTip";
 import type { Avatar, ChatPane, ChatStyle, GroupChat, McpServer } from "../store";
 import { useAppStore } from "../store";
 import { DEFAULT_META_AVATAR_URL } from "../constants/meta-avatar";
-import { RECOMMENDED_SKILLS } from "../data/recommended-skills";
+import {
+  RECOMMENDED_SKILLS,
+  RECOMMENDED_TIER_LABEL,
+  type RecommendedSkillTier,
+} from "../data/recommended-skills";
+import { buildOfficeCliInstallPrompt } from "../utils/officecli-install-prompt";
 import { buildSkillHubAgentInstallPrompt } from "../utils/skillhub-install-prompt";
 import { buildGuardFixPrompt, type GuardFixScanItem } from "../utils/guard-fix-prompt";
 import { META_AGENT_DISPLAY_NAME } from "../constants/branding";
@@ -2958,6 +2963,9 @@ function SkillsTab() {
     Object.fromEntries(RECOMMENDED_SKILLS.map((skill) => [skill.id, skill.icon_src]))
   );
   const [recommendedIconBroken, setRecommendedIconBroken] = useState<Record<string, boolean>>({});
+  const [recommendedTierFilter, setRecommendedTierFilter] = useState<
+    "all" | RecommendedSkillTier
+  >("all");
 
   useEffect(() => {
     let cancelled = false;
@@ -3322,6 +3330,20 @@ function SkillsTab() {
     if (!prompt.trim()) return;
     void runInstallPromptInMetaAgent(prompt);
   };
+
+  const onRecommendedSkillInstall = (skillId: string) => {
+    if (skillId === "officecli") {
+      const prompt = buildOfficeCliInstallPrompt();
+      if (!prompt.trim()) return;
+      void runInstallPromptInMetaAgent(prompt);
+      return;
+    }
+  };
+
+  const filteredRecommendedSkills =
+    recommendedTierFilter === "all"
+      ? RECOMMENDED_SKILLS
+      : RECOMMENDED_SKILLS.filter((s) => s.tier === recommendedTierFilter);
 
   const onSkillHubSearch = async () => {
     setSkillhubLoading(true);
@@ -3887,27 +3909,71 @@ function SkillsTab() {
         titleClassName={SKILLS_SECTION_PANEL_TITLE_CLASS}
       >
         <div className="space-y-4 pt-1 pb-1">
-          {/* === Recommended official shortcuts === */}
-            <section className="rounded-lg bg-surface-panel p-3 border border-border">
-              <div className="mb-3 text-[11px] font-semibold text-text-strong">
-                官方推荐
+          {/* === Recommended official shortcuts (suite-style cards, 图2) === */}
+            <section className="pt-0.5">
+              <div className="mb-3 flex flex-wrap items-end justify-between gap-3">
+                <div className="text-[11px] font-semibold tracking-wide text-text-strong">
+                  官方推荐
+                </div>
+                <div
+                  className="inline-flex rounded-full bg-surface-panel p-0.5"
+                  role="tablist"
+                  aria-label="推荐来源档筛选"
+                >
+                  {(
+                    [
+                      { id: "all" as const, label: "全部" },
+                      { id: "enterprise" as const, label: RECOMMENDED_TIER_LABEL.enterprise },
+                      { id: "third_party" as const, label: RECOMMENDED_TIER_LABEL.third_party },
+                    ] as const
+                  ).map((tab) => {
+                    const active = recommendedTierFilter === tab.id;
+                    return (
+                      <button
+                        key={tab.id}
+                        type="button"
+                        role="tab"
+                        aria-selected={active}
+                        className={
+                          active
+                            ? "rounded-full bg-surface-card px-2.5 py-1 text-[11px] font-medium text-text-strong shadow-sm"
+                            : "rounded-full px-2.5 py-1 text-[11px] text-text-faint transition-colors hover:text-text-primary"
+                        }
+                        onClick={() => setRecommendedTierFilter(tab.id)}
+                      >
+                        {tab.label}
+                      </button>
+                    );
+                  })}
+                </div>
               </div>
-              <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 md:grid-cols-3">
-                {RECOMMENDED_SKILLS.map((skill) => (
+              {filteredRecommendedSkills.length === 0 ? (
+                <p className="py-8 text-center text-xs text-text-faint">
+                  该来源档暂无推荐技能
+                </p>
+              ) : (
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
+                {filteredRecommendedSkills.map((skill) => {
+                  const canInstall = skill.cta === "install";
+                  const primaryAction = () => {
+                    if (canInstall) onRecommendedSkillInstall(skill.id);
+                    else window.open(skill.official_url, "_blank", "noopener,noreferrer");
+                  };
+                  return (
                   <div
                     key={skill.id}
-                    className="flex flex-col rounded-md border border-border bg-surface-card px-3 py-2.5 transition hover:bg-surface-hover/40"
+                    className="flex min-h-[132px] flex-col rounded-2xl border border-black/[0.08] bg-surface-panel px-3.5 py-3.5 transition-colors hover:bg-surface-hover/50 dark:border-white/[0.1]"
                   >
-                    <div className="flex items-start gap-2">
+                    <div className="flex items-center gap-2.5">
                       {recommendedIconBroken[skill.id] || !(recommendedIconData[skill.id] || skill.icon_src) ? (
-                        <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-md border border-border/70 bg-surface-panel text-xs font-semibold text-text-subtle">
+                        <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-surface-panel text-[13px] font-semibold text-text-subtle">
                           {(skill.name || skill.id).slice(0, 1).toUpperCase()}
                         </div>
                       ) : (
                         <img
                           src={recommendedIconData[skill.id] || skill.icon_src}
-                          alt={`${skill.name} 图标`}
-                          className="h-9 w-9 shrink-0 rounded-md border border-border/70 bg-white object-cover"
+                          alt=""
+                          className="h-9 w-9 shrink-0 rounded-full bg-white object-cover ring-1 ring-black/[0.04]"
                           loading="lazy"
                           onError={() =>
                             setRecommendedIconBroken((prev) =>
@@ -3917,30 +3983,51 @@ function SkillsTab() {
                         />
                       )}
                       <div className="min-w-0 flex-1">
-                        <div className="flex flex-wrap items-center gap-1.5">
-                          <span className="text-sm font-medium text-text-primary">{skill.name}</span>
-                          <span className="shrink-0 rounded-full border border-border px-1.5 text-[10px] text-text-faint">
-                            {skill.provider}
-                          </span>
-                          <span className="shrink-0 rounded-full border border-border/80 px-1.5 text-[10px] text-text-muted">
-                            {skill.category}
-                          </span>
+                        <div className="truncate text-[13px] font-semibold tracking-tight text-text-strong">
+                          {skill.name}
                         </div>
-                        <p className="mt-1 line-clamp-2 text-xs text-text-muted">{skill.description}</p>
+                        <div
+                          className={
+                            skill.tier === "enterprise"
+                              ? "mt-0.5 text-[10px] font-medium text-[#07C160]"
+                              : "mt-0.5 text-[10px] text-text-faint"
+                          }
+                        >
+                          {RECOMMENDED_TIER_LABEL[skill.tier]}
+                          <span className="mx-1 text-border">·</span>
+                          <span className="font-normal text-text-faint">{skill.category}</span>
+                        </div>
                       </div>
-                    </div>
-                    <div className="mt-2 flex flex-wrap gap-2">
                       <button
                         type="button"
-                        className="rounded-md border border-border px-2.5 py-1 text-[11px] text-text-subtle transition hover:bg-surface-hover hover:text-text-primary"
-                        onClick={() => window.open(skill.official_url, "_blank", "noopener,noreferrer")}
+                        title={canInstall ? "安装" : "打开官网"}
+                        aria-label={canInstall ? `安装 ${skill.name}` : `打开 ${skill.name} 官网`}
+                        disabled={canInstall && installPromptBusy}
+                        className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg border border-border bg-black/[0.06] text-text-strong transition-colors hover:bg-black/[0.1] active:scale-[0.97] disabled:opacity-40 dark:bg-white/10 dark:hover:bg-white/15"
+                        onClick={primaryAction}
                       >
-                        官网 ↗
+                        <span className="text-[17px] font-medium leading-none" aria-hidden>
+                          +
+                        </span>
                       </button>
                     </div>
+                    <p className="mt-2.5 line-clamp-2 flex-1 text-[12px] leading-relaxed text-text-muted">
+                      {skill.description}
+                    </p>
+                    {!canInstall ? (
+                      <button
+                        type="button"
+                        className="mt-2 self-start text-[11px] text-text-faint transition hover:text-text-primary"
+                        onClick={() => window.open(skill.official_url, "_blank", "noopener,noreferrer")}
+                      >
+                        官网
+                      </button>
+                    ) : null}
                   </div>
-                ))}
+                  );
+                })}
               </div>
+              )}
             </section>
 
             {/* === ClawHub marketplace (registry aggregate) === */}
