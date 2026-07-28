@@ -324,8 +324,13 @@ export function MachiChatView({
   const titleInputRef = React.useRef<HTMLInputElement>(null);
 
   React.useEffect(() => {
-    if (activeSession) setSessionTitle(activeSession.title);
-  }, [activeSession?.id, activeSession?.title]);
+    setIsEditingTitle(false);
+    if (activeSession) {
+      setSessionTitle(activeSession.title);
+      return;
+    }
+    setSessionTitle(t("newConversation"));
+  }, [activeSession?.id, activeSession?.title, activeSessionId, t]);
 
   const activeModelOption = React.useMemo(
     () => availableModels.find((item) => item.id === activeModel),
