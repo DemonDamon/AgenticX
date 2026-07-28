@@ -120,19 +120,19 @@ function ExpandableStepRow({
           setOpen((v) => !v);
         }}
         className={[
-          "flex w-full items-start gap-2 rounded-lg px-1.5 py-1.5 text-left text-xs transition-colors",
+          "flex w-full items-start gap-2 rounded-lg px-1.5 py-1.5 text-left text-sm leading-5 transition-colors",
           canExpand ? "hover:bg-muted/60" : "cursor-default",
           step.status === "running" ? "bg-muted/45" : "",
-          step.status === "failed" ? "text-destructive" : "text-foreground/90",
+          step.status === "failed" ? "text-destructive" : "text-foreground",
         ].join(" ")}
       >
         <span className="relative z-[1] mt-0.5 flex h-4 w-4 items-center justify-center">
           {step.status === "running" ? (
-            <IconSpinner className="h-3.5 w-3.5 animate-spin text-primary" />
+            <IconSpinner className="h-4 w-4 animate-spin text-primary" />
           ) : step.status === "failed" ? (
-            <IconSearch className="h-3.5 w-3.5 text-destructive" />
+            <IconSearch className="h-4 w-4 text-destructive" />
           ) : (
-            <IconSearch className="h-3.5 w-3.5 text-muted-foreground" />
+            <IconSearch className="h-4 w-4 text-muted-foreground" />
           )}
         </span>
         <span className="min-w-0 flex-1">
@@ -144,14 +144,14 @@ function ExpandableStepRow({
         {canExpand ? (
           <IconChevronRight
             className={[
-              "mt-0.5 h-3.5 w-3.5 shrink-0 text-muted-foreground transition-transform",
+              "mt-0.5 h-4 w-4 shrink-0 text-muted-foreground transition-transform",
               open ? "rotate-90" : "",
             ].join(" ")}
           />
         ) : null}
       </button>
       {open && canExpand ? (
-        <div className="mb-1 ml-7 space-y-1 rounded-md border border-border/40 bg-background/80 px-2.5 py-2 text-[11px] leading-5 text-muted-foreground">
+        <div className="mb-1 ml-7 space-y-1 rounded-md border border-border/40 bg-background/80 px-2.5 py-2 text-sm leading-5 text-muted-foreground">
           {step.detailLines.map((line, i) => (
             <p key={`${step.id}-d-${i}`} className="whitespace-pre-wrap">
               {line}
@@ -197,44 +197,46 @@ function ToolsCard({
 
   return (
     <div
-      className="mb-3 rounded-xl border border-border/50 bg-muted/20 px-3 py-2.5"
+      className="mb-3 overflow-hidden rounded-xl border border-border/60 bg-card shadow-sm"
       data-testid="deep-research-tools-card"
       data-collapsed={open ? "false" : "true"}
     >
       <button
         type="button"
         onClick={() => setOpen((v) => !v)}
-        className="flex w-full items-center gap-2 text-left text-xs text-muted-foreground"
+        className="flex w-full items-center gap-2 px-3 py-2.5 text-left"
         aria-expanded={open}
       >
         {running ? (
-          <IconSpinner className="h-3.5 w-3.5 shrink-0 animate-spin text-primary" />
+          <IconSpinner className="h-4 w-4 shrink-0 animate-spin text-primary" />
         ) : (
-          <IconCheck className="h-3.5 w-3.5 shrink-0" />
+          <IconCheck className="h-4 w-4 shrink-0 text-muted-foreground" />
         )}
-        <span className="min-w-0 flex-1 font-medium text-foreground/80">{title}</span>
+        <span className="min-w-0 flex-1 text-sm font-medium text-foreground">{title}</span>
         <IconChevronRight
           className={[
-            "h-3.5 w-3.5 shrink-0 text-muted-foreground transition-transform",
+            "ml-auto h-4 w-4 shrink-0 text-muted-foreground transition-transform",
             open ? "rotate-90" : "",
           ].join(" ")}
         />
       </button>
       {open ? (
-        steps.length > 0 ? (
-          <ol className="relative mt-1.5 space-y-0.5">
-            {steps.map((step, index) => (
-              <ExpandableStepRow
-                key={step.id}
-                step={step}
-                showRail={index < steps.length - 1}
-                onOpenArtifact={onOpenArtifact}
-              />
-            ))}
-          </ol>
-        ) : (
-          <div className="mt-1.5 text-xs text-muted-foreground">准备检索…</div>
-        )
+        <div className="border-t border-border/50 px-3 py-2">
+          {steps.length > 0 ? (
+            <ol className="relative space-y-0.5">
+              {steps.map((step, index) => (
+                <ExpandableStepRow
+                  key={step.id}
+                  step={step}
+                  showRail={index < steps.length - 1}
+                  onOpenArtifact={onOpenArtifact}
+                />
+              ))}
+            </ol>
+          ) : (
+            <div className="text-sm leading-5 text-muted-foreground">准备检索…</div>
+          )}
+        </div>
       ) : null}
     </div>
   );
@@ -248,13 +250,13 @@ function StatusRow({
   status: "running" | "done" | "failed";
 }) {
   return (
-    <div className="mb-3 flex items-center gap-2 text-xs text-foreground/85">
+    <div className="mb-3 flex items-center gap-2 text-sm leading-5 text-foreground">
       {status === "running" ? (
-        <IconSpinner className="h-3.5 w-3.5 animate-spin text-primary" />
+        <IconSpinner className="h-4 w-4 animate-spin text-primary" />
       ) : status === "failed" ? (
         <span className="h-1.5 w-1.5 rounded-full bg-destructive" />
       ) : (
-        <IconCheck className="h-3.5 w-3.5 text-muted-foreground" />
+        <IconCheck className="h-4 w-4 text-muted-foreground" />
       )}
       <span>{title}</span>
     </div>
@@ -283,9 +285,9 @@ export function DeepResearchWorkbench({
 
   if (waitingShell) {
     return (
-      <div className={["mb-3 text-xs text-foreground/85", className].filter(Boolean).join(" ")}>
+      <div className={["mb-3 text-sm leading-5 text-foreground", className].filter(Boolean).join(" ")}>
         <div className="flex items-center gap-2">
-          <IconSpinner className="h-3.5 w-3.5 animate-spin text-primary" />
+          <IconSpinner className="h-4 w-4 animate-spin text-primary" />
           <span>正在启动深度研究…</span>
         </div>
       </div>

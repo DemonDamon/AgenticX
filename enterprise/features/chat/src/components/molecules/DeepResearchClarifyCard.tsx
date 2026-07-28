@@ -136,7 +136,7 @@ export function DeepResearchClarifyCard({
       >
         <IconMessageCircle className="h-4 w-4 shrink-0 text-muted-foreground" />
         <span className="text-sm font-medium text-foreground">询问工具</span>
-        <span className="text-xs text-muted-foreground">| {statusLabel}</span>
+        <span className="text-sm text-muted-foreground">| {statusLabel}</span>
         <IconChevronDown
           className={[
             "ml-auto h-4 w-4 shrink-0 text-muted-foreground transition-transform",
@@ -149,13 +149,13 @@ export function DeepResearchClarifyCard({
         <div className="border-t border-border/50 px-3 py-3">
           {showInteractive ? (
             <>
-              <p className="mb-3 text-xs text-muted-foreground">
+              <p className="mb-3 text-sm leading-5 text-muted-foreground">
                 我先快速确认一下调研方向，然后开始系统检索。
               </p>
               <div className="space-y-3">
                 {clarifyEvents.map((q) => (
                   <div key={`${q.runId}-${q.questionId}`}>
-                    <div className="mb-1.5 text-xs font-medium text-foreground/90">
+                    <div className="mb-1.5 text-sm font-medium leading-5 text-foreground">
                       {q.step}/{q.total} · {q.question}
                     </div>
                     <div className="flex flex-wrap gap-1.5">
@@ -171,7 +171,7 @@ export function DeepResearchClarifyCard({
                               setCustom((prev) => ({ ...prev, [q.questionId]: "" }));
                             }}
                             className={[
-                              "rounded-full border px-2.5 py-1 text-xs transition-colors",
+                              "rounded-full border px-2.5 py-1 text-sm leading-5 transition-colors",
                               selected
                                 ? "border-primary bg-primary/10 text-foreground"
                                 : "border-border/70 bg-muted/40 text-foreground/80 hover:bg-muted",
@@ -184,7 +184,7 @@ export function DeepResearchClarifyCard({
                     </div>
                     {q.allowCustom ? (
                       <input
-                        className="mt-2 w-full rounded-md border border-border/70 bg-background px-2 py-1.5 text-xs"
+                        className="mt-2 w-full rounded-md border border-border/70 bg-background px-2 py-1.5 text-sm"
                         placeholder="其他（可选）"
                         value={custom[q.questionId] ?? ""}
                         disabled={disabled || submitting}
@@ -204,7 +204,7 @@ export function DeepResearchClarifyCard({
                   </div>
                 ))}
               </div>
-              {error ? <p className="mt-2 text-xs text-destructive">{error}</p> : null}
+              {error ? <p className="mt-2 text-sm text-destructive">{error}</p> : null}
               <div className="mt-3 flex items-center gap-2">
                 <Button
                   type="button"
@@ -229,8 +229,8 @@ export function DeepResearchClarifyCard({
             <div className="space-y-3">
               {resolvedLines.map((row, index) => (
                 <div key={`resolved-${index}`}>
-                  <div className="text-xs text-foreground/90">{row.question}</div>
-                  <div className="mt-0.5 pl-2 text-xs text-muted-foreground">
+                  <div className="text-sm leading-5 text-foreground">{row.question}</div>
+                  <div className="mt-0.5 pl-2 text-sm leading-5 text-muted-foreground">
                     {row.answer || (timedOut ? "（未回答，已按默认假设继续）" : "—")}
                   </div>
                 </div>

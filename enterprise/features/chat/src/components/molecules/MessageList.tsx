@@ -638,7 +638,7 @@ export function MessageList({
                               setSourcesPanelMessageId(message.id);
                               setSourcesHighlightIndex(null);
                             }}
-                            className="mb-3 inline-flex max-w-full items-center gap-2 rounded-full border border-border/60 bg-muted/50 py-1 pl-1.5 pr-2.5 text-xs text-foreground/80 transition-colors hover:border-border hover:bg-muted hover:text-foreground"
+                            className="mb-3 inline-flex max-w-full items-center gap-2 rounded-full border border-border/60 bg-muted/50 py-1 pl-1.5 pr-2.5 text-sm leading-5 text-foreground/80 transition-colors hover:border-border hover:bg-muted hover:text-foreground"
                           >
                             <span className="flex items-center -space-x-1.5">
                               {message.web_search_sources.slice(0, 3).map((source, idx) => {
@@ -666,7 +666,7 @@ export function MessageList({
                             <span className="truncate font-medium">
                               搜索网页 · {message.web_search_sources.length} 个结果
                             </span>
-                            <IconChevronRight className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+                            <IconChevronRight className="h-4 w-4 shrink-0 text-muted-foreground" />
                           </button>
                         ) : null}
 
