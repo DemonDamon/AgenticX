@@ -17,6 +17,7 @@ export const chatSessions = mysqlTable(
     activeModel: varchar("active_model", { length: 160 }),
     messageCount: int("message_count").notNull().default(0),
     lastMessageAt: datetime("last_message_at", { fsp: 6 }),
+    pinnedAt: datetime("pinned_at", { fsp: 6 }),
     deletedAt: datetime("deleted_at", { fsp: 6 }),
     ...auditColumns,
   },
@@ -35,6 +36,11 @@ export const chatSessions = mysqlTable(
       table.tenantId,
       table.userId,
       table.deletedAt
+    ),
+    tenantUserPinnedIdx: index("chat_sessions_tenant_user_pinned_idx").on(
+      table.tenantId,
+      table.userId,
+      table.pinnedAt
     ),
     userTenantFk: foreignKey({
       name: "chat_sessions_user_tenant_fk",

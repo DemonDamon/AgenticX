@@ -96,6 +96,10 @@ export type ChatSession = {
   active_model?: string;
   message_count: number;
   last_message_at?: IsoDateTime;
+  /** ISO time when pinned; omit/undefined when not pinned. */
+  pinned_at?: IsoDateTime;
+  /** Short preview for history list (first assistant, else first user). */
+  preview?: string;
   created_at: IsoDateTime;
   updated_at: IsoDateTime;
 };
