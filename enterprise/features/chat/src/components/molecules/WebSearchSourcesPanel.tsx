@@ -45,7 +45,8 @@ export function WebSearchSourcesPanel({
           <ul className="space-y-1">
             {sources.map((source, index) => {
               const index1Based = index + 1;
-              const host = hostnameFromUrl(source.url) ?? source.url;
+              // Real hostname only — never pass display label / raw URL into favicon fetch.
+              const host = hostnameFromUrl(source.url) ?? "";
               const siteLabel = siteLabelFromSource(source, index1Based);
               const highlighted = highlightIndex === index1Based;
               return (

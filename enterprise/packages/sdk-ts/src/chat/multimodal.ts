@@ -9,11 +9,11 @@ export function buildOpenAIMessageContent(
   attachments?: ChatMessageAttachment[],
 ): string | OpenAIContentPart[] {
   const imageParts = (attachments ?? [])
-    .filter((item) => item.mimeType.startsWith("image/") && item.dataUrl.trim())
+    .filter((item) => item.mimeType.startsWith("image/") && Boolean(item.dataUrl?.trim()))
     .map(
       (item): OpenAIContentPart => ({
         type: "image_url",
-        image_url: { url: item.dataUrl },
+        image_url: { url: item.dataUrl!.trim() },
       }),
     );
 

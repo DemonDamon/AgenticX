@@ -74,6 +74,14 @@ function isLoopbackHost(hostname: string): boolean {
   return hostname === "127.0.0.1" || hostname === "localhost" || hostname === "::1";
 }
 
+/**
+ * curl path must keep the body as raw bytes.
+ *
+ * Previous implementation did `Buffer.toString("utf8")` before splitting the
+ * status trailer — that replaces any byte ≥ 0x80 with U+FFFD, which corrupts
+ * PNG/ICO favicons (magic `89 50 4E 47` → `EF BF BD 50 4E 47`). Near Desktop
+ * avoids this by fetching binary in the main process and serving data URLs.
+ */
 async function curlFetchWithBody(
   url: string,
   method: string,
@@ -89,8 +97,9 @@ async function curlFetchWithBody(
       method,
       "--max-time",
       String(Math.max(1, Math.ceil(timeoutMs / 1000))),
+      // Trailer stays ASCII; body stays binary — never decode the whole stdout as utf8.
       "-w",
-      "\n__CURL_STATUS__%{http_code}",
+      "\n__CURL_META__%{http_code}\n%{content_type}",
     ];
     // Local vitals / loopback must not go through Clash etc. (returns 502).
     if (isLoopbackHost(parsed.hostname)) {
@@ -119,16 +128,27 @@ async function curlFetchWithBody(
         reject(new Error(`curl exit ${code}: ${Buffer.concat(errChunks).toString("utf8")}`));
         return;
       }
-      const text = Buffer.concat(chunks).toString("utf8");
-      const marker = "\n__CURL_STATUS__";
-      const idx = text.lastIndexOf(marker);
+      const raw = Buffer.concat(chunks);
+      const marker = Buffer.from("\n__CURL_META__");
+      const idx = raw.lastIndexOf(marker);
       if (idx < 0) {
         reject(new Error("curl missing status trailer"));
         return;
       }
-      const body = text.slice(0, idx);
-      const status = Number(text.slice(idx + marker.length).trim());
-      resolve(new Response(body, { status, headers: { "content-type": "text/html; charset=utf-8" } }));
+      const body = raw.subarray(0, idx);
+      const metaLines = raw.subarray(idx + marker.length).toString("utf8").trim().split("\n");
+      const status = Number((metaLines[0] ?? "").trim());
+      const contentType = (metaLines[1] ?? "").trim() || "application/octet-stream";
+      if (!Number.isFinite(status) || status <= 0) {
+        reject(new Error(`curl invalid status: ${metaLines[0] ?? ""}`));
+        return;
+      }
+      resolve(
+        new Response(body, {
+          status,
+          headers: { "content-type": contentType },
+        }),
+      );
     });
     if (bodyBuf) {
       child.stdin.write(bodyBuf);
