@@ -23,6 +23,57 @@ const menuItemClass =
 const submenuItemClass =
   "flex w-full cursor-pointer items-start gap-2.5 rounded-xl px-2.5 py-2 text-left transition-colors hover:bg-black/[0.06] focus-visible:bg-black/[0.06] focus-visible:outline-none dark:hover:bg-white/10 dark:focus-visible:bg-white/10";
 
+/**
+ * Kimi-style dark capability tip (beak below). Content must reflect real product limits.
+ * Uses CSS group-hover so it works inside Popover without nested Tooltip focus traps.
+ */
+function CapabilityHoverTip({
+  label,
+  lines,
+  children,
+  disabled = false,
+}: {
+  label: string;
+  lines: string[];
+  children: React.ReactNode;
+  disabled?: boolean;
+}) {
+  return (
+    <div className="group/cap relative">
+      {children}
+      {!disabled && lines.length > 0 ? (
+        <div
+          role="tooltip"
+          aria-label={label}
+          className={cn(
+            "pointer-events-none absolute bottom-[calc(100%+6px)] left-1/2 z-40 w-max max-w-[17rem] -translate-x-1/2",
+            "hidden flex-col items-center group-hover/cap:flex group-focus-within/cap:flex",
+          )}
+        >
+          <div className="rounded-xl bg-zinc-900 px-3 py-2 text-left text-[12px] leading-[1.45] text-white shadow-lg dark:bg-zinc-800">
+            {lines.map((line) => (
+              <p key={line} className="whitespace-normal">
+                {line}
+              </p>
+            ))}
+          </div>
+          <div
+            className="h-0 w-0 border-x-[6px] border-t-[6px] border-x-transparent border-t-zinc-900 dark:border-t-zinc-800"
+            aria-hidden
+          />
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+function hintLines(raw: string): string[] {
+  return raw
+    .split(/\n+/)
+    .map((s) => s.trim())
+    .filter(Boolean);
+}
+
 type ComposerPlusMenuProps = {
   webSearchMode: WebSearchMode;
   onWebSearchModeChange: (mode: WebSearchMode) => void;
@@ -42,6 +93,9 @@ export function ComposerPlusMenu({
   const t = useTranslations("chat");
   const [open, setOpen] = React.useState(false);
   const [webSearchOpen, setWebSearchOpen] = React.useState(false);
+
+  const filesHint = hintLines(t("filesAndImagesHint"));
+  const webSearchHint = hintLines(t("webSearchMenuHint"));
 
   React.useEffect(() => {
     if (!open) setWebSearchOpen(false);
@@ -74,35 +128,39 @@ export function ComposerPlusMenu({
         side={menuSide}
         align="start"
         sideOffset={8}
-        className="w-44 rounded-2xl border-border/70 bg-popover p-1 shadow-xl"
+        className="w-44 overflow-visible rounded-2xl border-border/70 bg-popover p-1 shadow-xl"
       >
-        <button
-          type="button"
-          className={menuItemClass}
-          onMouseEnter={() => setWebSearchOpen(false)}
-          onClick={() => {
-            setOpen(false);
-            onPickFiles();
-          }}
-        >
-          <Paperclip className="h-4 w-4 shrink-0 text-muted-foreground" />
-          <span className="min-w-0 flex-1 font-medium">{t("filesAndImages")}</span>
-        </button>
+        <CapabilityHoverTip label={t("filesAndImages")} lines={filesHint}>
+          <button
+            type="button"
+            className={menuItemClass}
+            onMouseEnter={() => setWebSearchOpen(false)}
+            onClick={() => {
+              setOpen(false);
+              onPickFiles();
+            }}
+          >
+            <Paperclip className="h-4 w-4 shrink-0 text-muted-foreground" />
+            <span className="min-w-0 flex-1 font-medium">{t("filesAndImages")}</span>
+          </button>
+        </CapabilityHoverTip>
 
         <div
           className="relative"
           onMouseEnter={() => setWebSearchOpen(true)}
           onMouseLeave={() => setWebSearchOpen(false)}
         >
-          <button
-            type="button"
-            className={cn(menuItemClass, webSearchOpen && "bg-black/[0.06] dark:bg-white/10")}
-            onClick={() => setWebSearchOpen((v) => !v)}
-          >
-            <Globe className="h-4 w-4 shrink-0 text-muted-foreground" />
-            <span className="min-w-0 flex-1 font-medium">{t("webSearchMenu")}</span>
-            <ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground" />
-          </button>
+          <CapabilityHoverTip label={t("webSearchMenu")} lines={webSearchHint}>
+            <button
+              type="button"
+              className={cn(menuItemClass, webSearchOpen && "bg-black/[0.06] dark:bg-white/10")}
+              onClick={() => setWebSearchOpen((v) => !v)}
+            >
+              <Globe className="h-4 w-4 shrink-0 text-muted-foreground" />
+              <span className="min-w-0 flex-1 font-medium">{t("webSearchMenu")}</span>
+              <ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground" />
+            </button>
+          </CapabilityHoverTip>
 
           {webSearchOpen ? (
             <div
