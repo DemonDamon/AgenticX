@@ -34,7 +34,7 @@ export interface ChatHistoryStore {
   patchChatSession(
     ctx: ChatHistoryContext,
     sessionId: string,
-    patch: { title?: string; activeModel?: string | null },
+    patch: { title?: string; activeModel?: string | null; pinned?: boolean },
   ): Promise<ChatSession>;
   renameChatSession(
     ctx: ChatHistoryContext,
@@ -42,6 +42,7 @@ export interface ChatHistoryStore {
     title: string,
   ): Promise<ChatSession>;
   softDeleteChatSession(ctx: ChatHistoryContext, sessionId: string): Promise<void>;
+  softDeleteChatSessions(ctx: ChatHistoryContext, sessionIds: string[]): Promise<number>;
   syncAuthUser(user: AuthUser): Promise<void>;
   resetForTests(): void | Promise<void>;
 }

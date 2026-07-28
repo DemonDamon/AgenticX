@@ -52,6 +52,7 @@ export type ChatSession = {
   activeModel: string | null;
   messageCount: number;
   lastMessageAt: Date | string | null;
+  pinnedAt: Date | string | null;
   deletedAt: Date | string | null;
   createdAt: Date | string;
   updatedAt: Date | string;

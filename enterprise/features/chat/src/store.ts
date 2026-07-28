@@ -118,7 +118,9 @@ export type ChatStoreActions = {
   createSession(params?: { tenantId?: string; userId?: string; defaultModel?: string; title?: string }): Promise<void>;
   switchSession(sessionId: string): Promise<void>;
   renameSession(sessionId: string, title: string): Promise<void>;
+  pinSession(sessionId: string, pinned: boolean): Promise<void>;
   deleteSession(sessionId: string): Promise<void>;
+  deleteSessions(sessionIds: string[]): Promise<void>;
   switchModel(model: string): void;
   sendMessage(client: ChatClient, input: SendMessageInput, options?: SendMessageOptions): Promise<void>;
   sendQueuedMessageNow(client: ChatClient, messageId: string): Promise<void>;
@@ -451,6 +453,22 @@ function isDraftSessionId(state: Pick<ChatStoreState, "draftSessionId">, session
   return !!sessionId && sessionId === state.draftSessionId;
 }
 
+function sortSessionsForHistory(sessions: ChatSession[]): ChatSession[] {
+  return [...sessions].sort((a, b) => {
+    const aPinned = a.pinned_at ? Date.parse(a.pinned_at) : 0;
+    const bPinned = b.pinned_at ? Date.parse(b.pinned_at) : 0;
+    if (aPinned !== bPinned) {
+      if (aPinned === 0) return 1;
+      if (bPinned === 0) return -1;
+      return bPinned - aPinned;
+    }
+    const aCreated = Date.parse(a.created_at) || 0;
+    const bCreated = Date.parse(b.created_at) || 0;
+    if (aCreated !== bCreated) return bCreated - aCreated;
+    return b.id.localeCompare(a.id);
+  });
+}
+
 function discardDraftSessionPatch(state: ChatStoreState): Partial<ChatStoreState> {
   if (!state.draftSessionId) return {};
   const draftId = state.draftSessionId;
@@ -592,7 +610,7 @@ export const useChatStore = create<ChatStore>((set, get) => ({
     chatHydrateInFlight = (async () => {
       set({ historyLoading: true, historyError: null });
       try {
-        const sessions = await portalHistory.listSessions();
+        const sessions = sortSessionsForHistory(await portalHistory.listSessions());
         if (sessions.length === 0) {
           set({
             ...beginDraftSessionPatch(get()),
@@ -739,36 +757,79 @@ export const useChatStore = create<ChatStore>((set, get) => ({
     }
   },
 
+  async pinSession(sessionId, pinned) {
+    if (isDraftSessionId(get(), sessionId)) return;
+    const optimisticAt = pinned ? now() : undefined;
+    set((state) => ({
+      sessions: sortSessionsForHistory(
+        state.sessions.map((session) =>
+          session.id === sessionId
+            ? { ...session, pinned_at: optimisticAt, updated_at: now() }
+            : session,
+        ),
+      ),
+    }));
+    if (!get().hydrated) return;
+    try {
+      const updated = await portalHistory.pinSession(sessionId, pinned);
+      set((state) => ({
+        sessions: sortSessionsForHistory(
+          state.sessions.map((session) => (session.id === sessionId ? updated : session)),
+        ),
+      }));
+    } catch (error) {
+      set({ historyError: error instanceof Error ? error.message : "置顶失败" });
+      void get().hydrateSessions();
+    }
+  },
+
   async deleteSession(sessionId) {
     if (isDraftSessionId(get(), sessionId)) return;
+    await get().deleteSessions([sessionId]);
+  },
+
+  async deleteSessions(sessionIds) {
+    const ids = [
+      ...new Set(
+        sessionIds.filter((id) => id && !isDraftSessionId(get(), id)),
+      ),
+    ];
+    if (ids.length === 0) return;
 
     if (get().hydrated) {
       try {
-        await portalHistory.deleteSession(sessionId);
+        if (ids.length === 1) {
+          await portalHistory.deleteSession(ids[0]!);
+        } else {
+          await portalHistory.deleteSessions(ids);
+        }
       } catch (error) {
         set({ historyError: error instanceof Error ? error.message : "删除失败" });
         return;
       }
     }
 
-    const willBeEmpty = get().sessions.filter((s) => s.id !== sessionId).length === 0;
+    const idSet = new Set(ids);
+    const willBeEmpty = get().sessions.filter((s) => !idSet.has(s.id)).length === 0;
 
     set((state) => {
       const removedUserIds = new Set(
         state.messages
-          .filter((message) => message.session_id === sessionId && message.role === "user")
+          .filter((message) => idSet.has(message.session_id) && message.role === "user")
           .map((message) => message.id),
       );
-      const nextMessages = state.messages.filter((message) => message.session_id !== sessionId);
-      const nextSessions = state.sessions.filter((session) => session.id !== sessionId);
+      const nextMessages = state.messages.filter((message) => !idSet.has(message.session_id));
+      const nextSessions = state.sessions.filter((session) => !idSet.has(session.id));
       const nextTokensMap = { ...state.sessionTokensBySessionId };
-      delete nextTokensMap[sessionId];
+      for (const id of ids) {
+        delete nextTokensMap[id];
+      }
       const nextVersions = { ...state.responseVersionsByUserMessageId };
       for (const id of removedUserIds) {
         delete nextVersions[id];
       }
       let nextActive = state.activeSessionId;
-      if (nextActive === sessionId) {
+      if (nextActive && idSet.has(nextActive)) {
         nextActive = nextSessions[0]?.id ?? null;
       }
       const nextTarget = nextSessions.find((session) => session.id === nextActive);

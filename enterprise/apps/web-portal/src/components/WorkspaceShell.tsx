@@ -25,6 +25,7 @@ import {
 } from "@agenticx/ui";
 import { getEnterpriseVersionLabel } from "@agenticx/branding";
 import {
+  ChevronDown,
   ChevronLeft,
   ChevronRight,
   Crown,
@@ -38,6 +39,8 @@ import {
   Moon,
   MoreHorizontal,
   Pencil,
+  Pin,
+  PinOff,
   Settings,
   Sun,
   Trash2,
@@ -48,6 +51,12 @@ import { MachiChatView } from "./MachiChatView";
 import { QuotaCard } from "./QuotaCard";
 import { SettingsPanel } from "./settings/SettingsPanel";
 import { SessionGeneratingDots } from "./SessionGeneratingDots";
+import { HistorySessionsPanel } from "./HistorySessionsPanel";
+import {
+  groupHistory,
+  sortHistorySessions,
+  type HistoryListItem,
+} from "../lib/history-grouping";
 
 type WorkspaceShellProps = {
   userEmail: string;
@@ -55,66 +64,10 @@ type WorkspaceShellProps = {
 };
 
 type PanelMode = "chat" | "settings";
-type HistorySession = {
-  id: string;
-  title: string;
-  /** 列表排序与分组锚点：对齐 Machi Desktop，仅用创建时间，避免切换 session 时 updated_at 变化导致跳动 */
-  createdAt: number;
-};
+type HistorySession = HistoryListItem;
 
 const COLLAPSED_KEY = "agenticx-portal-sidebar-collapsed";
-
-function getSessionCreatedTimestampMs(session: Pick<HistorySession, "createdAt">): number {
-  const created = Number(session.createdAt);
-  return Number.isFinite(created) && created > 0 ? created : 0;
-}
-
-function sortHistorySessions(rows: HistorySession[]): HistorySession[] {
-  return [...rows].sort((a, b) => {
-    const tsDiff = getSessionCreatedTimestampMs(b) - getSessionCreatedTimestampMs(a);
-    if (tsDiff !== 0) return tsDiff;
-    return b.id.localeCompare(a.id);
-  });
-}
-
-function groupHistory(
-  history: HistorySession[],
-  labels: {
-    today: string;
-    yesterday: string;
-    week: string;
-    month: string;
-    older: string;
-  },
-): Array<{ key: string; label: string; items: HistorySession[] }> {
-  const now = new Date();
-  const startToday = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
-  const startYesterday = startToday - 24 * 3600 * 1000;
-  const startWeek = startToday - 7 * 24 * 3600 * 1000;
-  const startMonth = startToday - 30 * 24 * 3600 * 1000;
-  const buckets = {
-    today: [] as HistorySession[],
-    yesterday: [] as HistorySession[],
-    week: [] as HistorySession[],
-    month: [] as HistorySession[],
-    older: [] as HistorySession[],
-  };
-  for (const item of history) {
-    const createdAt = getSessionCreatedTimestampMs(item);
-    if (createdAt >= startToday) buckets.today.push(item);
-    else if (createdAt >= startYesterday) buckets.yesterday.push(item);
-    else if (createdAt >= startWeek) buckets.week.push(item);
-    else if (createdAt >= startMonth) buckets.month.push(item);
-    else buckets.older.push(item);
-  }
-  return [
-    { key: "today", label: labels.today, items: buckets.today },
-    { key: "yesterday", label: labels.yesterday, items: buckets.yesterday },
-    { key: "week", label: labels.week, items: buckets.week },
-    { key: "month", label: labels.month, items: buckets.month },
-    { key: "older", label: labels.older, items: buckets.older },
-  ].filter((group) => group.items.length > 0);
-}
+const HISTORY_SECTION_KEY = "agenticx-portal-history-section-collapsed";
 
 export function WorkspaceShell({ userEmail, userScopes }: WorkspaceShellProps) {
   const router = useRouter();
@@ -130,7 +83,9 @@ export function WorkspaceShell({ userEmail, userScopes }: WorkspaceShellProps) {
   const createSession = useChatStore((s) => s.createSession);
   const switchSession = useChatStore((s) => s.switchSession);
   const renameSessionInStore = useChatStore((s) => s.renameSession);
+  const pinSessionInStore = useChatStore((s) => s.pinSession);
   const deleteSessionInStore = useChatStore((s) => s.deleteSession);
+  const deleteSessionsInStore = useChatStore((s) => s.deleteSessions);
   const streamStateBySessionId = useChatStore((s) => s.streamStateBySessionId);
 
   const history = React.useMemo<HistorySession[]>(
@@ -140,12 +95,16 @@ export function WorkspaceShell({ userEmail, userScopes }: WorkspaceShellProps) {
           id: session.id,
           title: session.title,
           createdAt: new Date(session.created_at).getTime(),
+          pinnedAt: session.pinned_at ? new Date(session.pinned_at).getTime() : null,
+          preview: session.preview,
         })),
       ),
     [sessions],
   );
 
   const [collapsed, setCollapsed] = React.useState(false);
+  const [historySectionCollapsed, setHistorySectionCollapsed] = React.useState(false);
+  const [historyPanelOpen, setHistoryPanelOpen] = React.useState(false);
   const [mobileOpen, setMobileOpen] = React.useState(false);
   const [panelMode, setPanelMode] = React.useState<PanelMode>("chat");
   const [deepResearchMode, setDeepResearchMode] = React.useState(false);
@@ -193,6 +152,8 @@ export function WorkspaceShell({ userEmail, userScopes }: WorkspaceShellProps) {
     try {
       const stored = window.localStorage.getItem(COLLAPSED_KEY);
       if (stored === "1") setCollapsed(true);
+      const historyStored = window.localStorage.getItem(HISTORY_SECTION_KEY);
+      if (historyStored === "1") setHistorySectionCollapsed(true);
     } catch {
       // noop
     }
@@ -205,6 +166,14 @@ export function WorkspaceShell({ userEmail, userScopes }: WorkspaceShellProps) {
       // noop
     }
   }, [collapsed]);
+
+  React.useEffect(() => {
+    try {
+      window.localStorage.setItem(HISTORY_SECTION_KEY, historySectionCollapsed ? "1" : "0");
+    } catch {
+      // noop
+    }
+  }, [historySectionCollapsed]);
 
   const client = React.useMemo(() => {
     const mode = process.env.NEXT_PUBLIC_CHAT_CLIENT_MODE;
@@ -248,6 +217,20 @@ export function WorkspaceShell({ userEmail, userScopes }: WorkspaceShellProps) {
     [deleteSessionInStore, t],
   );
 
+  const onPinSession = React.useCallback(
+    (id: string, pinned: boolean) => {
+      void pinSessionInStore(id, pinned);
+    },
+    [pinSessionInStore],
+  );
+
+  const onDeleteManySessions = React.useCallback(
+    (ids: string[]) => {
+      void deleteSessionsInStore(ids);
+    },
+    [deleteSessionsInStore],
+  );
+
   const onSignOut = React.useCallback(async () => {
     await fetch("/api/auth/logout", { method: "POST" });
     router.replace("/auth");
@@ -256,6 +239,7 @@ export function WorkspaceShell({ userEmail, userScopes }: WorkspaceShellProps) {
   const grouped = React.useMemo(
     () =>
       groupHistory(history, {
+        pinned: t("historyPinned"),
         today: t("historyToday"),
         yesterday: t("historyYesterday"),
         week: t("historyWeek"),
@@ -349,41 +333,85 @@ export function WorkspaceShell({ userEmail, userScopes }: WorkspaceShellProps) {
           <Separator className="bg-sidebar-border" />
 
           {/* 历史分组 */}
-          <div className="flex-1 overflow-y-auto px-2 py-2">
+          <div className="flex min-h-0 flex-1 flex-col overflow-hidden px-2 py-2">
             {!collapsed ? (
-              historyLoading ? (
-                <div className="px-3 py-4 text-xs text-muted-foreground">{t("loadingHistory")}</div>
-              ) : grouped.length === 0 ? (
-                <div className="flex h-full flex-col items-center justify-center gap-2 px-3 py-10 text-center text-xs text-muted-foreground">
-                  <MessageSquare className="h-5 w-5" />
-                  <span>{t("noHistory")}</span>
+              <>
+                <div className="mb-1 flex items-center gap-1 px-1">
+                  <button
+                    type="button"
+                    onClick={() => setHistorySectionCollapsed((v) => !v)}
+                    className="flex min-w-0 flex-1 items-center gap-1 rounded-md px-2 py-1.5 text-sm font-medium text-foreground/90 transition-colors hover:bg-muted"
+                    aria-expanded={!historySectionCollapsed}
+                  >
+                    <span className="truncate">{t("historySection")}</span>
+                    <ChevronDown
+                      className={[
+                        "h-4 w-4 shrink-0 text-muted-foreground transition-transform",
+                        historySectionCollapsed ? "-rotate-90" : "",
+                      ].join(" ")}
+                    />
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setHistoryPanelOpen(true)}
+                    className="shrink-0 rounded-md px-2 py-1.5 text-xs text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+                  >
+                    {t("viewAllHistory")}
+                  </button>
                 </div>
-              ) : (
-                <div className="space-y-4">
-                  {grouped.map((group) => (
-                    <div key={group.key}>
-                      <div className="px-2 pb-1 text-[10px] font-semibold uppercase tracking-[0.14em] text-muted-foreground/70">
-                        {group.label}
+                {historySectionCollapsed ? null : (
+                  <div className="min-h-0 flex-1 overflow-y-auto">
+                    {historyLoading ? (
+                      <div className="px-3 py-4 text-xs text-muted-foreground">{t("loadingHistory")}</div>
+                    ) : grouped.length === 0 ? (
+                      <div className="flex flex-col items-center justify-center gap-2 px-3 py-10 text-center text-xs text-muted-foreground">
+                        <MessageSquare className="h-5 w-5" />
+                        <span>{t("noHistory")}</span>
                       </div>
-                      <div className="space-y-0.5">
-                        {group.items.map((item) => (
-                          <SessionItem
-                            key={item.id}
-                            session={item}
-                            active={activeSessionId === item.id}
-                            isGenerating={Boolean(streamStateBySessionId[item.id])}
-                            onSelect={() => onSelectSession(item.id)}
-                            onRename={() => onRenameSession(item.id)}
-                            onDelete={() => onDeleteSession(item.id)}
-                          />
+                    ) : (
+                      <div className="space-y-4">
+                        {grouped.map((group) => (
+                          <div key={group.key}>
+                            <div className="px-2 pb-1 text-[10px] font-semibold uppercase tracking-[0.14em] text-muted-foreground/70">
+                              {group.label}
+                            </div>
+                            <div className="space-y-0.5">
+                              {group.items.map((item) => (
+                                <SessionItem
+                                  key={item.id}
+                                  session={item}
+                                  active={activeSessionId === item.id}
+                                  isGenerating={Boolean(streamStateBySessionId[item.id])}
+                                  onSelect={() => onSelectSession(item.id)}
+                                  onRename={() => onRenameSession(item.id)}
+                                  onPin={() => onPinSession(item.id, !Boolean(item.pinnedAt))}
+                                  onDelete={() => onDeleteSession(item.id)}
+                                />
+                              ))}
+                            </div>
+                          </div>
                         ))}
                       </div>
-                    </div>
-                  ))}
-                </div>
-              )
+                    )}
+                  </div>
+                )}
+              </>
             ) : (
               <div className="flex flex-col items-center gap-2 py-2">
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="h-8 w-8"
+                      onClick={() => setHistoryPanelOpen(true)}
+                      aria-label={t("viewAllHistory")}
+                    >
+                      <MessageSquare className="h-4 w-4" />
+                    </Button>
+                  </TooltipTrigger>
+                  <TooltipContent side="right">{t("viewAllHistory")}</TooltipContent>
+                </Tooltip>
                 {history.slice(0, 8).map((item) => (
                   <Tooltip key={item.id}>
                     <TooltipTrigger asChild>
@@ -402,6 +430,8 @@ export function WorkspaceShell({ userEmail, userScopes }: WorkspaceShellProps) {
                       >
                         {streamStateBySessionId[item.id] ? (
                           <SessionGeneratingDots className="text-foreground/75" />
+                        ) : item.pinnedAt ? (
+                          <Pin className="h-4 w-4" />
                         ) : (
                           <MessageSquare className="h-4 w-4" />
                         )}
@@ -537,6 +567,20 @@ export function WorkspaceShell({ userEmail, userScopes }: WorkspaceShellProps) {
           </div>
         </section>
 
+        <HistorySessionsPanel
+          open={historyPanelOpen}
+          onOpenChange={setHistoryPanelOpen}
+          sessions={history}
+          activeSessionId={activeSessionId}
+          onSelect={onSelectSession}
+          onRename={onRenameSession}
+          onPin={onPinSession}
+          onDelete={(id) => {
+            void deleteSessionInStore(id);
+          }}
+          onDeleteMany={onDeleteManySessions}
+        />
+
         <Toaster />
       </main>
     </TooltipProvider>
@@ -549,6 +593,7 @@ function SessionItem({
   isGenerating,
   onSelect,
   onRename,
+  onPin,
   onDelete,
 }: {
   session: HistorySession;
@@ -556,9 +601,11 @@ function SessionItem({
   isGenerating: boolean;
   onSelect: () => void;
   onRename: () => void;
+  onPin: () => void;
   onDelete: () => void;
 }) {
   const t = useTranslations("workspace");
+  const pinned = Boolean(session.pinnedAt && session.pinnedAt > 0);
 
   return (
     <div
@@ -581,6 +628,8 @@ function SessionItem({
           >
             <SessionGeneratingDots />
           </span>
+        ) : pinned ? (
+          <Pin className="h-3.5 w-3.5 shrink-0 text-primary" />
         ) : null}
         <span className="min-w-0 flex-1 truncate">{session.title}</span>
       </button>
@@ -599,6 +648,14 @@ function SessionItem({
           <DropdownMenuItem onClick={onRename}>
             <Pencil className="mr-2 h-3.5 w-3.5" />
             {t("rename")}
+          </DropdownMenuItem>
+          <DropdownMenuItem onClick={onPin}>
+            {pinned ? (
+              <PinOff className="mr-2 h-3.5 w-3.5" />
+            ) : (
+              <Pin className="mr-2 h-3.5 w-3.5" />
+            )}
+            {pinned ? t("unpin") : t("pin")}
           </DropdownMenuItem>
           <DropdownMenuItem onClick={onDelete} className="text-danger focus:text-danger">
             <Trash2 className="mr-2 h-3.5 w-3.5" />

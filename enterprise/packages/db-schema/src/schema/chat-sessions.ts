@@ -17,6 +17,7 @@ export const chatSessions = pgTable(
     activeModel: varchar("active_model", { length: 160 }),
     messageCount: integer("message_count").notNull().default(0),
     lastMessageAt: timestamp("last_message_at", { withTimezone: true }),
+    pinnedAt: timestamp("pinned_at", { withTimezone: true }),
     deletedAt: timestamp("deleted_at", { withTimezone: true }),
     ...auditColumns,
   },
@@ -35,6 +36,11 @@ export const chatSessions = pgTable(
       table.tenantId,
       table.userId,
       table.deletedAt
+    ),
+    tenantUserPinnedIdx: index("chat_sessions_tenant_user_pinned_idx").on(
+      table.tenantId,
+      table.userId,
+      table.pinnedAt
     ),
     userTenantFk: foreignKey({
       name: "chat_sessions_user_tenant_fk",

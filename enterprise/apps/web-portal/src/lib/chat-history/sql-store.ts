@@ -39,6 +39,13 @@ function toDate(value: unknown): Date {
   return value instanceof Date ? value : new Date(String(value));
 }
 
+function truncatePreview(value: unknown, max = 160): string | undefined {
+  if (value == null) return undefined;
+  const text = String(value).replace(/\s+/g, " ").trim();
+  if (!text) return undefined;
+  return text.length > max ? `${text.slice(0, max)}…` : text;
+}
+
 function mapSession(row: Record<string, unknown>): ChatSession {
   return {
     id: String(row.id),
@@ -48,6 +55,8 @@ function mapSession(row: Record<string, unknown>): ChatSession {
     active_model: row.active_model == null ? undefined : String(row.active_model),
     message_count: Number(row.message_count ?? 0),
     last_message_at: row.last_message_at == null ? undefined : toDate(row.last_message_at).toISOString(),
+    pinned_at: row.pinned_at == null ? undefined : toDate(row.pinned_at).toISOString(),
+    preview: truncatePreview(row.preview_text),
     created_at: toDate(row.created_at).toISOString(),
     updated_at: toDate(row.updated_at).toISOString(),
   };
@@ -140,12 +149,41 @@ export class SqlChatHistoryStore implements ChatHistoryStore {
   }
 
   public async listChatSessions(ctx: ChatHistoryContext): Promise<ChatSession[]> {
+    const p1 = this.dialect === "postgresql" ? "$1" : "?";
+    const p2 = this.dialect === "postgresql" ? "$2" : "?";
+    const previewExpr =
+      this.dialect === "postgresql"
+        ? `coalesce(
+             (select left(m.content, 160) from chat_messages m
+              where m.session_id = s.id and m.tenant_id = s.tenant_id and m.user_id = s.user_id
+                and m.role = 'assistant'
+              order by m.created_at asc limit 1),
+             (select left(m.content, 160) from chat_messages m
+              where m.session_id = s.id and m.tenant_id = s.tenant_id and m.user_id = s.user_id
+                and m.role = 'user'
+              order by m.created_at asc limit 1)
+           ) as preview_text`
+        : `coalesce(
+             (select left(m.content, 160) from chat_messages m
+              where m.session_id = s.id and m.tenant_id = s.tenant_id and m.user_id = s.user_id
+                and m.role = 'assistant'
+              order by m.created_at asc limit 1),
+             (select left(m.content, 160) from chat_messages m
+              where m.session_id = s.id and m.tenant_id = s.tenant_id and m.user_id = s.user_id
+                and m.role = 'user'
+              order by m.created_at asc limit 1)
+           ) as preview_text`;
+    const orderBy =
+      this.dialect === "postgresql"
+        ? `(s.pinned_at is null) asc, s.pinned_at desc nulls last, s.created_at desc`
+        : `(s.pinned_at is null) asc, s.pinned_at desc, s.created_at desc`;
     const result = await this.client.query(
-      `select * from chat_sessions
-       where tenant_id = ${this.dialect === "postgresql" ? "$1" : "?"}
-         and user_id = ${this.dialect === "postgresql" ? "$2" : "?"}
-         and deleted_at is null and message_count > 0
-       order by created_at desc`,
+      `select s.*, ${previewExpr}
+       from chat_sessions s
+       where s.tenant_id = ${p1}
+         and s.user_id = ${p2}
+         and s.deleted_at is null and s.message_count > 0
+       order by ${orderBy}`,
       [ctx.tenantId, ctx.userId],
     );
     return result.rows.map(mapSession);
@@ -323,10 +361,14 @@ export class SqlChatHistoryStore implements ChatHistoryStore {
   public async patchChatSession(
     ctx: ChatHistoryContext,
     sessionId: string,
-    patch: { title?: string; activeModel?: string | null },
+    patch: { title?: string; activeModel?: string | null; pinned?: boolean },
   ): Promise<ChatSession> {
-    if (patch.title === undefined && patch.activeModel === undefined) {
-      throw new Error("patch must include title or active_model");
+    if (
+      patch.title === undefined &&
+      patch.activeModel === undefined &&
+      patch.pinned === undefined
+    ) {
+      throw new Error("patch must include title, active_model, or pinned");
     }
     const fields: string[] = [];
     const params: unknown[] = [];
@@ -336,6 +378,8 @@ export class SqlChatHistoryStore implements ChatHistoryStore {
     };
     if (patch.title !== undefined) add("title", patch.title.trim() || "New chat");
     if (patch.activeModel !== undefined) add("active_model", patch.activeModel?.trim() || null);
+    if (patch.pinned === true) add("pinned_at", new Date());
+    else if (patch.pinned === false) add("pinned_at", null);
     add("updated_at", new Date());
     params.push(sessionId, ctx.tenantId, ctx.userId);
     const base = params.length - 3;
@@ -362,17 +406,26 @@ export class SqlChatHistoryStore implements ChatHistoryStore {
   }
 
   public async softDeleteChatSession(ctx: ChatHistoryContext, sessionId: string): Promise<void> {
+    const deleted = await this.softDeleteChatSessions(ctx, [sessionId]);
+    if (deleted === 0) throw new ChatHistoryNotFoundError();
+  }
+
+  public async softDeleteChatSessions(ctx: ChatHistoryContext, sessionIds: string[]): Promise<number> {
+    const ids = [...new Set(sessionIds.map((id) => id.trim()).filter((id) => ULID_RE.test(id)))];
+    if (ids.length === 0) return 0;
     const now = new Date();
+    // $1 deleted_at, $2 updated_at, $3 tenant, $4 user, $5… ids
+    const placeholders = this.placeholders(ids.length, 4);
     const result = await this.client.query(
       `update chat_sessions set deleted_at = ${this.dialect === "postgresql" ? "$1" : "?"},
        updated_at = ${this.dialect === "postgresql" ? "$2" : "?"}
-       where id = ${this.dialect === "postgresql" ? "$3" : "?"}
-         and tenant_id = ${this.dialect === "postgresql" ? "$4" : "?"}
-         and user_id = ${this.dialect === "postgresql" ? "$5" : "?"}
-         and deleted_at is null`,
-      [now, now, sessionId, ctx.tenantId, ctx.userId],
+       where tenant_id = ${this.dialect === "postgresql" ? "$3" : "?"}
+         and user_id = ${this.dialect === "postgresql" ? "$4" : "?"}
+         and deleted_at is null
+         and id in (${placeholders})`,
+      [now, now, ctx.tenantId, ctx.userId, ...ids],
     );
-    if (result.rowCount === 0) throw new ChatHistoryNotFoundError();
+    return result.rowCount;
   }
 
   public async syncAuthUser(user: AuthUser): Promise<void> {

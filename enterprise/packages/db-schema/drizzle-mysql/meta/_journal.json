@@ -57,6 +57,13 @@
       "when": 1784158783972,
       "tag": "0007_enterprise_chat_artifacts",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "5",
+      "when": 1784158783973,
+      "tag": "0008_chat_sessions_pinned_at",
+      "breakpoints": true
     }
   ]
 }

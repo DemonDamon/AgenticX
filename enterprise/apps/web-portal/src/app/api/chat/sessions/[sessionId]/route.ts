@@ -17,16 +17,17 @@ export async function PATCH(request: Request, segmentData: { params: Params }) {
   if (!sessionId?.trim()) {
     return NextResponse.json({ error: { code: "40001", message: "missing session id" } }, { status: 400 });
   }
-  let body: { title?: unknown; active_model?: unknown };
+  let body: { title?: unknown; active_model?: unknown; pinned?: unknown };
   try {
-    body = (await request.json()) as { title?: unknown; active_model?: unknown };
+    body = (await request.json()) as { title?: unknown; active_model?: unknown; pinned?: unknown };
   } catch {
     body = {};
   }
-  const patch: { title?: string; activeModel?: string | null } = {};
+  const patch: { title?: string; activeModel?: string | null; pinned?: boolean } = {};
   if (typeof body.title === "string") patch.title = body.title;
   if (body.active_model === null) patch.activeModel = null;
   else if (typeof body.active_model === "string") patch.activeModel = body.active_model;
+  if (typeof body.pinned === "boolean") patch.pinned = body.pinned;
 
   try {
     const ctx = toChatHistoryContext(session);

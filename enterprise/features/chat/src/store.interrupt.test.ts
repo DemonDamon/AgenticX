@@ -16,6 +16,8 @@ vi.mock("./history-client", () => ({
     renameSession: vi.fn(),
     patchSession: vi.fn(),
     deleteSession: vi.fn(),
+    deleteSessions: vi.fn(),
+    pinSession: vi.fn(),
   }),
   ChatHistoryHttpError: class ChatHistoryHttpError extends Error {
     status = 500;
