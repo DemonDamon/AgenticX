@@ -83,4 +83,18 @@ describe("admin saml start cookie policy", () => {
     const setCookie = response.headers.get("set-cookie") ?? "";
     expect(setCookie).toMatch(/samesite=lax/i);
   });
+
+  it("allows insecure cookies when AUTH_COOKIE_SECURE=false", async () => {
+    vi.stubEnv("NODE_ENV", "production");
+    vi.stubEnv("AUTH_COOKIE_SECURE", "false");
+    const { GET } = await import("../start/route");
+    const response = await GET(
+      new Request("https://admin.example.com/api/auth/sso/saml/start?provider=default")
+    );
+
+    expect(response.status).toBeGreaterThanOrEqual(300);
+    const setCookie = response.headers.get("set-cookie") ?? "";
+    expect(setCookie).toMatch(/samesite=lax/i);
+    expect(setCookie).not.toContain("Secure");
+  });
 });

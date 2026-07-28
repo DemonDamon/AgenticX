@@ -11,7 +11,7 @@ import {
 } from "../transforms";
 
 describe("table manifest", () => {
-  it("lists exactly 42 tables", () => {
+  it("lists exactly 45 tables", () => {
     expect(TABLE_MANIFEST).toHaveLength(EXPECTED_TABLE_COUNT);
     expect(new Set(TABLE_MANIFEST).size).toBe(EXPECTED_TABLE_COUNT);
   });

@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import {
   ADMIN_SESSION_COOKIE,
   createAdminSessionToken,
+  isAdminCookieSecure,
   resolveAdminCredentials,
 } from "../../../../lib/admin-session";
 import { authenticateAdminConsoleUser } from "../../../../lib/admin-pg-auth";
@@ -16,7 +17,7 @@ function jsonWithSessionCookie(email: string, userId: string, tenantId: string) 
   response.cookies.set(ADMIN_SESSION_COOKIE, token, {
     httpOnly: true,
     sameSite: "lax",
-    secure: process.env.NODE_ENV === "production",
+    secure: isAdminCookieSecure(),
     path: "/",
     maxAge: 60 * 60 * 8,
   });
