@@ -48,7 +48,8 @@ function ThinkingGlyph() {
 
 export function ReasoningBlock({ reasoning, thinkingStarted, thinkingInProgress }: ReasoningBlockProps) {
   const content = reasoning.trim();
-  const [open, setOpen] = React.useState(true);
+  // 流式思考中默认展开；完成后默认折叠（历史消息同理），避免长思考链刷屏
+  const [open, setOpen] = React.useState(thinkingInProgress);
   const [tick, setTick] = React.useState(0);
   const startedAtRef = React.useRef<number | null>(null);
   const finishedAtRef = React.useRef<number | null>(null);
@@ -57,14 +58,15 @@ export function ReasoningBlock({ reasoning, thinkingStarted, thinkingInProgress 
     if (!thinkingStarted) return;
     if (startedAtRef.current === null) {
       startedAtRef.current = Date.now();
-      setOpen(true);
     }
     if (thinkingInProgress) {
       finishedAtRef.current = null;
+      setOpen(true);
       return;
     }
     if (finishedAtRef.current === null) {
       finishedAtRef.current = Date.now();
+      setOpen(false);
     }
   }, [thinkingStarted, thinkingInProgress]);
 
