@@ -27,16 +27,20 @@
     "@agenticx/sdk-ts": "workspace:^",
     "@agenticx/ui": "workspace:*",
     "drizzle-orm": "^0.45.2",
+    "jszip": "^3.10.1",
     "lucide-react": "^0.542.0",
+    "mammoth": "^1.12.0",
+    "mysql2": "^3.14.1",
     "next": "^15.1.0",
     "next-intl": "^3",
-    "mysql2": "^3.14.1",
     "openid-client": "^6.0.0",
     "pg": "^8.20.0",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
     "server-only": "^0.0.1",
-    "ulid": "^2.3.0"
+    "ulid": "^2.3.0",
+    "unpdf": "^1.8.0",
+    "xlsx": "^0.18.5"
   },
   "devDependencies": {
     "@eslint/eslintrc": "^3.3.5",

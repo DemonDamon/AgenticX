@@ -78,12 +78,49 @@ export function synthesizeTextSse(
   return frames.join("");
 }
 
+/** Keep search keywords short — full document dumps make DDG challenge / return empty. */
+export const MAX_WEB_SEARCH_QUERY_CHARS = 240;
+
+function textFromMessageContent(content: unknown): string {
+  if (typeof content === "string") return content.trim();
+  if (!Array.isArray(content)) return "";
+  const parts: string[] = [];
+  for (const part of content) {
+    if (!part || typeof part !== "object") continue;
+    const row = part as { type?: unknown; text?: unknown };
+    if (row.type === "text" && typeof row.text === "string" && row.text.trim()) {
+      parts.push(row.text.trim());
+    }
+  }
+  return parts.join("\n").trim();
+}
+
+/**
+ * Strip portal-injected attachment bodies (`--- 附件: name ---…`) so web search
+ * uses the user's short question (e.g. 「总结一下」), not the whole parsed file.
+ */
+export function sanitizeWebSearchQuery(raw: string, maxChars = MAX_WEB_SEARCH_QUERY_CHARS): string {
+  let text = raw.replace(/\r\n/g, "\n").trim();
+  if (!text) return "";
+  const attachIdx = text.search(/\n---\s*附件\s*[:：]/);
+  if (attachIdx >= 0) {
+    text = text.slice(0, attachIdx).trim();
+  } else if (/^---\s*附件\s*[:：]/.test(text)) {
+    // User sent attachment-only turn — fall back to filename line if present.
+    const nameMatch = text.match(/^---\s*附件\s*[:：]\s*(.+?)\s*---/);
+    text = nameMatch?.[1]?.trim() || "";
+  }
+  text = text.replace(/\s+/g, " ").trim();
+  if (text.length <= maxChars) return text;
+  return text.slice(0, Math.max(1, maxChars - 1)).trimEnd();
+}
+
 export function extractLastUserQuery(messages: ChatMessage[]): string {
   for (let i = messages.length - 1; i >= 0; i -= 1) {
     const msg = messages[i];
     if (msg?.role !== "user") continue;
-    const content = msg.content;
-    if (typeof content === "string" && content.trim()) return content.trim();
+    const text = textFromMessageContent(msg.content);
+    if (text) return sanitizeWebSearchQuery(text);
   }
   return "";
 }

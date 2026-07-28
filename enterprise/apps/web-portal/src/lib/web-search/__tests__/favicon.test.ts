@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { faviconFetchUrls, normalizeFaviconHost } from "../favicon";
+import { faviconFetchUrls, hostVariants, normalizeFaviconHost } from "../favicon";
 
 describe("normalizeFaviconHost", () => {
   it("accepts public hostnames", () => {
@@ -16,6 +16,13 @@ describe("normalizeFaviconHost", () => {
   });
 });
 
+describe("hostVariants", () => {
+  it("adds parent domain for subdomains", () => {
+    expect(hostVariants("zhuanlan.zhihu.com")).toEqual(["zhuanlan.zhihu.com", "zhihu.com"]);
+    expect(hostVariants("cn.bing.com")).toEqual(["cn.bing.com", "bing.com"]);
+  });
+});
+
 describe("faviconFetchUrls", () => {
   it("lists ddg before google", () => {
     const urls = faviconFetchUrls("example.com");
@@ -23,3 +30,4 @@ describe("faviconFetchUrls", () => {
     expect(urls.at(-1)).toContain("google.com/s2/favicons");
   });
 });
+

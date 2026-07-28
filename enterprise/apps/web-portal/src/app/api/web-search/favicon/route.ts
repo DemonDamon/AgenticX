@@ -18,7 +18,9 @@ export async function GET(request: Request) {
     status: 200,
     headers: {
       "content-type": payload.contentType,
-      "cache-control": "public, max-age=86400, stale-while-revalidate=604800",
+      // Short cache: a prior bug served UTF-8-corrupted bytes with max-age=86400;
+      // avoid sticky broken icons in the browser disk cache.
+      "cache-control": "public, max-age=300, stale-while-revalidate=3600",
     },
   });
 }

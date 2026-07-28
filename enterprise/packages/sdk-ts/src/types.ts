@@ -8,7 +8,9 @@ export type ChatMessageAttachment = {
   name: string;
   mimeType: string;
   size?: number;
-  dataUrl: string;
+  dataUrl?: string;
+  parsedText?: string;
+  kind?: "image" | "document" | "video";
 };
 
 export type ChatMessage = {

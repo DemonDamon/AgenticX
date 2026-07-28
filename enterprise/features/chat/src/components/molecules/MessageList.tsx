@@ -623,7 +623,23 @@ export function MessageList({
                                   alt={attachment.name}
                                   className="max-h-40 max-w-full rounded-xl object-cover"
                                 />
-                              ) : null,
+                              ) : (
+                                <div
+                                  key={`${message.id}-${attachment.name}`}
+                                  className="inline-flex max-w-[240px] items-center gap-2 rounded-xl border border-border/60 bg-muted/40 px-3 py-2 text-xs"
+                                >
+                                  <span className="truncate font-medium text-foreground">
+                                    {attachment.name}
+                                  </span>
+                                  <span className="shrink-0 text-muted-foreground">
+                                    {attachment.kind === "video"
+                                      ? "视频"
+                                      : attachment.parsed_text
+                                        ? "已解析"
+                                        : "附件"}
+                                  </span>
+                                </div>
+                              ),
                             )}
                           </div>
                         ) : null}

@@ -31,6 +31,7 @@ describe("sanitizeInboundMessages", () => {
         name: "rocket.png",
         mime_type: "image/png",
         size: 128,
+        kind: "image",
         data_url: dataUrl,
       },
     ]);
@@ -55,17 +56,36 @@ describe("sanitizeInboundMessages", () => {
     expect(messages[0]?.attachments).toHaveLength(1);
   });
 
-  it("rejects non-image attachments", () => {
+  it("preserves document attachments with parsed_text", () => {
+    const messages = sanitizeInboundMessages(SESSION, TENANT, USER, [
+      {
+        id: "01JTESTMSG000000000000000003",
+        role: "user",
+        content: "总结这份文档",
+        attachments: [
+          {
+            name: "a.pdf",
+            mime_type: "application/pdf",
+            kind: "document",
+            parsed_text: "hello document",
+          },
+        ],
+      },
+    ]);
+    expect(messages[0]?.attachments?.[0]?.parsed_text).toBe("hello document");
+  });
+
+  it("rejects document attachments without parsed_text", () => {
     expect(() =>
       sanitizeInboundMessages(SESSION, TENANT, USER, [
         {
-          id: "01JTESTMSG000000000000000003",
+          id: "01JTESTMSG000000000000000003b",
           role: "user",
           content: "hi",
-          attachments: [{ name: "a.pdf", mime_type: "application/pdf", data_url: "data:application/pdf;base64,x" }],
+          attachments: [{ name: "a.pdf", mime_type: "application/pdf", kind: "document" }],
         },
       ]),
-    ).toThrow(/image/i);
+    ).toThrow(/parsed_text/i);
   });
 
   it("preserves web_search_sources on assistant messages (refresh survival)", () => {

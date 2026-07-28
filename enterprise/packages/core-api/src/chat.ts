@@ -11,12 +11,20 @@ export type ToolCallSummary = {
   result_preview?: string;
 };
 
-/** Image attachment persisted in chat_messages.metadata and sent as OpenAI image_url. */
+/**
+ * Chat attachment persisted in chat_messages.metadata.
+ * - images: `data_url` → OpenAI image_url
+ * - documents: `parsed_text` injected into user content for Q&A
+ */
 export type ChatMessageAttachment = {
   name: string;
   mime_type: string;
   size?: number;
-  data_url: string;
+  /** Image (or small binary) data URL; omit for text-only document attachments. */
+  data_url?: string;
+  /** Extracted plain text for document Q&A. */
+  parsed_text?: string;
+  kind?: "image" | "document" | "video";
 };
 
 /** Web-search hit attached to an assistant message (portal BFF). */

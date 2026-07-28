@@ -16,7 +16,8 @@ type WebSearchCitationProps = {
 
 export function WebSearchCitation({ index1Based, source, onOpenInSheet }: WebSearchCitationProps) {
   const label = siteLabelFromSource(source, index1Based);
-  const host = hostnameFromUrl(source.url) ?? label;
+  // Must be a real hostname for favicon CDNs — never fall back to display label ("Zhihu").
+  const host = hostnameFromUrl(source.url) ?? "";
 
   const openUrl = (event: React.MouseEvent) => {
     event.preventDefault();
@@ -36,7 +37,7 @@ export function WebSearchCitation({ index1Based, source, onOpenInSheet }: WebSea
         className="mx-0.5 inline-flex max-w-[10rem] items-center gap-1 truncate rounded-md bg-muted/80 px-1.5 py-0.5 align-middle text-[11px] font-medium leading-4 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
         title={source.title || source.url}
       >
-        <WebSearchFavicon host={host} label={label} size={12} rounded="md" />
+        {host ? <WebSearchFavicon host={host} label={label} size={12} rounded="md" /> : null}
         <span className="truncate">{label}</span>
       </button>
       <span
@@ -44,8 +45,8 @@ export function WebSearchCitation({ index1Based, source, onOpenInSheet }: WebSea
         className="pointer-events-none absolute bottom-[calc(100%+8px)] left-0 z-50 hidden w-[min(20rem,calc(100vw-2rem))] rounded-2xl border border-border/80 bg-popover p-3.5 text-left text-popover-foreground shadow-xl group-hover/cite:block"
       >
         <span className="mb-2.5 flex items-center gap-2">
-          <WebSearchFavicon host={host} label={label} size={22} rounded="lg" />
-          <span className="truncate text-xs text-muted-foreground">{host}</span>
+          {host ? <WebSearchFavicon host={host} label={label} size={22} rounded="lg" /> : null}
+          <span className="truncate text-xs text-muted-foreground">{host || label}</span>
         </span>
         <span className="mb-1.5 block text-[13px] font-semibold leading-snug text-foreground">
           {source.title || source.url}

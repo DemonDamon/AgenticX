@@ -4,9 +4,11 @@ import * as React from "react";
 import { useTranslations } from "next-intl";
 import {
   DeepResearchFilesPanel,
+  DOCUMENT_ACCEPT,
   InputArea,
   MessageList,
   MessageQueuePanel,
+  classifyAttachment,
   useChatStore,
   useComposerAttachments,
   extractClipboardImageFiles,
@@ -19,9 +21,7 @@ import {
   Check,
   ChevronDown,
   Cpu,
-  Globe,
   Microscope,
-  Paperclip,
   Pencil,
   Share,
   ShieldAlert,
@@ -42,6 +42,7 @@ import {
   cn,
 } from "@agenticx/ui";
 import { NearEmptyWordmark } from "./NearEmptyWordmark";
+import { ComposerPlusMenu, type WebSearchMode } from "./ComposerPlusMenu";
 
 // 模型清单从 /api/me/models 动态获取（admin 配置 + 用户可见性）。
 // 没有任何分配时为空，UI 会提示「请联系管理员分配模型」。
@@ -111,7 +112,8 @@ export function MachiChatView({
     cancel,
   } = useChatStore();
   const [draft, setDraft] = React.useState("");
-  const [webSearch, setWebSearch] = React.useState(false);
+  /** Default auto (on) — aligned with product expectation for portal chat. */
+  const [webSearchMode, setWebSearchMode] = React.useState<WebSearchMode>("auto");
   const [filesPanelSessionId, setFilesPanelSessionId] = React.useState<string | null>(null);
   const [filesPanelFocusId, setFilesPanelFocusId] = React.useState<string | null>(null);
 
@@ -356,10 +358,15 @@ export function MachiChatView({
 
   const handleAddFiles = React.useCallback(
     (files: File[]) => {
-      const imageFiles = files.filter((file) => file.type.startsWith("image/"));
-      if (imageFiles.length === 0) return;
-      if (warnIfNonVision()) return;
-      addFiles(imageFiles);
+      if (files.length === 0) return;
+      const hasImages = files.some((file) => classifyAttachment(file) === "image");
+      if (hasImages && warnIfNonVision()) {
+        const nonImages = files.filter((file) => classifyAttachment(file) !== "image");
+        if (nonImages.length === 0) return;
+        addFiles(nonImages);
+        return;
+      }
+      addFiles(files);
     },
     [addFiles, warnIfNonVision],
   );
@@ -385,7 +392,7 @@ export function MachiChatView({
         {
           content: trimmed,
           attachments: messageAttachments,
-          webSearch,
+          webSearch: webSearchMode === "auto",
           deepResearch: deepResearchMode,
         },
         opts?.forceSend ? { forceSend: true } : undefined,
@@ -393,7 +400,15 @@ export function MachiChatView({
       setDraft("");
       clearAttachments();
     },
-    [clearAttachments, client, deepResearchMode, draft, sendMessage, toMessageAttachments, webSearch],
+    [
+      clearAttachments,
+      client,
+      deepResearchMode,
+      draft,
+      sendMessage,
+      toMessageAttachments,
+      webSearchMode,
+    ],
   );
 
   const queuedForSession = React.useMemo(() => {
@@ -433,7 +448,7 @@ export function MachiChatView({
       <input
         ref={fileInputRef}
         type="file"
-        accept="image/*"
+        accept={DOCUMENT_ACCEPT}
         multiple
         className="hidden"
         onChange={(event) => {
@@ -473,33 +488,16 @@ export function MachiChatView({
         onPaste={handlePaste}
         leftToolbar={
           <>
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  aria-label={t("attachment")}
-                  className="h-8 w-8 rounded-full text-muted-foreground hover:text-foreground"
-                  onClick={() => {
-                    if (warnIfNonVision()) return;
-                    fileInputRef.current?.click();
-                  }}
-                >
-                  <Paperclip className="h-4 w-4" />
-                </Button>
-              </TooltipTrigger>
-              <TooltipContent>{t("uploadImage")}</TooltipContent>
-            </Tooltip>
-            <Button
-              variant={webSearch ? "secondary" : "ghost"}
-              size="icon"
-              onClick={() => setWebSearch((prev) => !prev)}
-              className={`h-8 w-8 rounded-full ${webSearch ? "text-primary" : "text-muted-foreground hover:text-foreground"}`}
-            >
-              <Globe className="h-4 w-4" />
-            </Button>
+            <ComposerPlusMenu
+              key="composer-plus"
+              webSearchMode={webSearchMode}
+              onWebSearchModeChange={setWebSearchMode}
+              onPickFiles={() => fileInputRef.current?.click()}
+              menuSide={isEmpty ? "bottom" : "top"}
+            />
             {deepResearchMode ? (
               <span
+                key="deep-research-chip"
                 className="group/dr-chip inline-flex h-8 items-center gap-1.5 rounded-full bg-primary-soft/70 px-2.5 text-xs font-medium text-primary"
                 aria-label={tw("deepResearchChip")}
               >

@@ -83,31 +83,112 @@ export function parseDuckDuckGoHtml(html: string, maxResults: number): WebSearch
   return hits;
 }
 
+function hrefFromAnchorOpenTag(tagOpen: string): string {
+  const m = /href=['"]([^'"]+)['"]/i.exec(tagOpen);
+  return (m?.[1] ?? "").trim();
+}
+
+/** Aligned with Near `search_duckduckgo_lite` / `_DDG_LITE_*` parsers. */
+export function parseDuckDuckGoLite(html: string, maxResults: number): WebSearchHit[] {
+  const hits: WebSearchHit[] = [];
+  // class 可能在 href 前或后（真实 Lite 页常见 href 在前）
+  const linkRe = /(<a[^>]*class=['"]result-link['"][^>]*>)([\s\S]*?)<\/a>/gi;
+  const snippetRe = /<td[^>]*class=['"]result-snippet['"][^>]*>([\s\S]*?)<\/td>/gi;
+  const snippets = Array.from(html.matchAll(snippetRe)).map((m) => stripHtml(m[1] ?? ""));
+
+  let snippetIdx = 0;
+  for (const match of html.matchAll(linkRe)) {
+    if (hits.length >= maxResults) break;
+    let href = unwrapDuckDuckGoRedirect(hrefFromAnchorOpenTag(match[1] ?? ""));
+    if (!href || href.startsWith("#")) continue;
+    if (href.startsWith("//")) href = `https:${href}`;
+    const title = stripHtml(match[2] ?? "");
+    hits.push({
+      title: title || href,
+      url: href,
+      snippet: truncateSnippet(snippets[snippetIdx] ?? ""),
+    });
+    snippetIdx += 1;
+  }
+  return hits;
+}
+
+/** Aligned with Near `_looks_like_ddg_challenge`. */
+export function looksLikeDdgChallenge(statusCode: number, html: string): boolean {
+  if (statusCode === 202) return true;
+  const t = (html || "").toLowerCase();
+  return (
+    t.includes("anomaly.js") ||
+    t.includes("automated requests") ||
+    t.includes("unusual traffic") ||
+    t.includes("challenge") ||
+    t.includes("unfortunately")
+  );
+}
+
+const DDG_UA = "Mozilla/5.0 (compatible; AgenticXPortalWebSearch/1.0)";
+
+async function searchDuckDuckGoLite(
+  query: string,
+  maxResults: number,
+  fetchImpl: FetchLike,
+): Promise<WebSearchHit[]> {
+  const url = `https://lite.duckduckgo.com/lite/?${new URLSearchParams({ q: query }).toString()}`;
+  const response = await fetchImpl(url, {
+    method: "GET",
+    headers: { "user-agent": DDG_UA },
+    signal: AbortSignal.timeout(20_000),
+  });
+  const html = await response.text();
+  // 202 / anomaly pages are still HTTP "ok" for fetch — must detect explicitly.
+  if (!response.ok || looksLikeDdgChallenge(response.status, html)) {
+    throw new Error(`duckduckgo lite challenge/http ${response.status}`);
+  }
+  const hits = parseDuckDuckGoLite(html, maxResults);
+  if (hits.length === 0) {
+    throw new Error("duckduckgo lite returned no parseable results");
+  }
+  return hits;
+}
+
+/**
+ * Free DuckDuckGo search (no API key), aligned with Near `search_duckduckgo_html`:
+ * HTML endpoint first → on challenge / empty / HTTP error, fall back to Lite.
+ */
 async function searchDuckDuckGo(
   query: string,
   maxResults: number,
   fetchImpl: FetchLike,
 ): Promise<WebSearchHit[]> {
   const body = new URLSearchParams({ q: query });
-  const response = await fetchImpl("https://html.duckduckgo.com/html/", {
-    method: "POST",
-    headers: {
-      "content-type": "application/x-www-form-urlencoded",
-      "user-agent": "Mozilla/5.0 (compatible; AgenticXPortalWebSearch/1.0)",
-    },
-    body,
-    signal: AbortSignal.timeout(20_000),
-  });
-  if (!response.ok) {
-    throw new Error(`duckduckgo http ${response.status}`);
+  let htmlError: Error | null = null;
+  try {
+    const response = await fetchImpl("https://html.duckduckgo.com/html/", {
+      method: "POST",
+      headers: {
+        "content-type": "application/x-www-form-urlencoded",
+        "user-agent": DDG_UA,
+      },
+      body,
+      signal: AbortSignal.timeout(20_000),
+    });
+    const html = await response.text();
+    if (response.ok && !looksLikeDdgChallenge(response.status, html)) {
+      const hits = parseDuckDuckGoHtml(html, maxResults);
+      if (hits.length > 0) return hits;
+    }
+  } catch (error) {
+    htmlError = error instanceof Error ? error : new Error(String(error));
   }
-  const html = await response.text();
-  const hits = parseDuckDuckGoHtml(html, maxResults);
-  // DDG sometimes returns 2xx anomaly/challenge HTML with zero result__a anchors.
-  if (hits.length === 0) {
-    throw new Error("duckduckgo returned no parseable results");
+
+  try {
+    return await searchDuckDuckGoLite(query, maxResults, fetchImpl);
+  } catch (liteError) {
+    throw (
+      htmlError ??
+      (liteError instanceof Error ? liteError : new Error(String(liteError)))
+    );
   }
-  return hits;
 }
 
 async function searchBocha(

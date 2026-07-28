@@ -5,6 +5,7 @@ import {
   sessionTitleNeedsAutoFill,
   toComplianceMessage,
   type ChatMessage,
+  type ChatMessageAttachment,
   type ChatSession,
 } from "@agenticx/core-api";
 import type {
@@ -209,6 +210,19 @@ function setSessionStream(set: ChatStoreSet, sessionId: string, next: SessionStr
   });
 }
 
+function buildUserContentWithDocuments(
+  content: string,
+  attachments: ChatMessageAttachment[] | undefined,
+): string {
+  const docs = (attachments ?? []).filter((item) => item.parsed_text?.trim());
+  if (docs.length === 0) return content;
+  const blocks = docs
+    .map((item) => `--- 附件: ${item.name} ---\n${item.parsed_text!.trim()}`)
+    .join("\n\n");
+  const trimmed = content.trim();
+  return trimmed ? `${trimmed}\n\n${blocks}` : blocks;
+}
+
 function toSdkRequest(
   sessionId: string,
   model: string,
@@ -220,18 +234,29 @@ function toSdkRequest(
     sessionId,
     model,
     stream: true,
-    messages: messages.map((message) => ({
-      id: message.id,
-      role: message.role === "tool" ? "assistant" : message.role,
-      content: message.content,
-      attachments: message.attachments?.map((item) => ({
-        name: item.name,
-        mimeType: item.mime_type,
-        size: item.size,
-        dataUrl: item.data_url,
-      })),
-      createdAt: message.created_at,
-    })),
+    messages: messages.map((message) => {
+      const content =
+        message.role === "user"
+          ? buildUserContentWithDocuments(message.content, message.attachments)
+          : message.content;
+      const imageAttachments = message.attachments?.filter(
+        (item) => item.mime_type.startsWith("image/") && item.data_url?.trim(),
+      );
+      return {
+        id: message.id,
+        role: message.role === "tool" ? "assistant" : message.role,
+        content,
+        attachments: imageAttachments?.map((item) => ({
+          name: item.name,
+          mimeType: item.mime_type,
+          size: item.size,
+          dataUrl: item.data_url,
+          kind: item.kind,
+          parsedText: item.parsed_text,
+        })),
+        createdAt: message.created_at,
+      };
+    }),
     ...(webSearch ? { webSearch: true } : {}),
     ...(deepResearch ? { deepResearch: true } : {}),
   };
@@ -888,7 +913,10 @@ export const useChatStore = create<ChatStore>((set, get) => ({
     if (!sessionId) return;
 
     const content = input.content.trim();
-    const attachments = input.attachments?.filter((item) => item.data_url?.trim()) ?? [];
+    const attachments =
+      input.attachments?.filter(
+        (item) => item.data_url?.trim() || item.parsed_text?.trim() || item.kind === "video",
+      ) ?? [];
     if (!content && attachments.length === 0) return;
 
     if (shouldEnqueueOnResend({ isStreamActive: isSessionStreaming(state, sessionId), forceSend: options?.forceSend })) {
