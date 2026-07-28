@@ -1,0 +1,31 @@
+# Override fragment for HTTP test stacks.
+# Usage: docker compose -f <base>.yml -f admin_test.yml up -d admin-console
+services:
+  admin-console:
+    ports:
+      - "3001:3001"
+    environment:
+      DATABASE_DIALECT: ${DATABASE_DIALECT:-postgresql}
+      DATABASE_URL: ${DATABASE_URL:?DATABASE_URL is required}
+      AUTH_COOKIE_SECURE: ${AUTH_COOKIE_SECURE:-false}
+      GATEWAY_BASE_URL: ${GATEWAY_BASE_URL:?GATEWAY_BASE_URL is required}
+      AUTH_JWT_PUBLIC_KEY: ${JWT_PUBLIC_KEY:?JWT_PUBLIC_KEY is required}
+      AUTH_JWT_PRIVATE_KEY: ${JWT_PRIVATE_KEY:?JWT_PRIVATE_KEY is required}
+      AUTH_DEV_OWNER_PASSWORD: ${AUTH_DEV_OWNER_PASSWORD:-}
+      AGX_PROVIDER_SECRET_KEY: ${AGX_PROVIDER_SECRET_KEY:?AGX_PROVIDER_SECRET_KEY is required}
+      GATEWAY_INTERNAL_TOKEN: ${GATEWAY_INTERNAL_TOKEN:?GATEWAY_INTERNAL_TOKEN is required}
+      GATEWAY_INTERNAL_BASE_URL: ${GATEWAY_INTERNAL_BASE_URL:?GATEWAY_INTERNAL_BASE_URL is required}
+      GATEWAY_INTERNAL_URL: ${GATEWAY_INTERNAL_URL:?GATEWAY_INTERNAL_URL is required}
+      ADMIN_CONSOLE_LOGIN_PASSWORD: ${ADMIN_CONSOLE_LOGIN_PASSWORD:?ADMIN_CONSOLE_LOGIN_PASSWORD is required}
+      ADMIN_CONSOLE_SESSION_SECRET: ${ADMIN_CONSOLE_SESSION_SECRET:?ADMIN_CONSOLE_SESSION_SECRET is required}
+      DEFAULT_TENANT_ID: ${DEFAULT_TENANT_ID:?DEFAULT_TENANT_ID is required}
+      DEFAULT_DEPT_ID: ${DEFAULT_DEPT_ID:-default}
+      ENTERPRISE_ADMIN_RUNTIME_DIR: /runtime/admin
+      ENTERPRISE_QUOTA_CONFIG_FILE: /runtime/admin/quotas.json
+      ENTERPRISE_POLICY_SNAPSHOT_FILE: /runtime/admin/policy-snapshot.json
+      ENTERPRISE_POLICY_OVERRIDE_FILE: /runtime/admin/policy-overrides.json
+    volumes:
+      - gateway_runtime:/runtime
+      - ../../plugins:/app/plugins:ro
+    networks:
+      - agenticx-backbone
