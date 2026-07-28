@@ -121,7 +121,7 @@
     "uploadComingSoon": "上传文件（即将上线）",
     "plusMenuTooltip": "上传文件和更多工具",
     "filesAndImages": "文件和图片",
-    "filesAndImagesHint": "支持 PDF、Word、Excel、PPT、图片及视频。最多 50 个文件（单个不超过 100MB）",
+    "filesAndImagesHint": "支持 PDF、Word（含旧版 .doc，需本机 LibreOffice）、Excel、PPT（含旧版 .ppt）、图片及视频。最多 50 个文件（单个不超过 100MB；大图会自动压缩后供视觉模型使用；视频默认提取元数据，完整转写需额外工具）。",
     "webSearchMenu": "联网搜索",
     "webSearchAuto": "自动",
     "webSearchAutoHint": "自动判断联网获取信息",

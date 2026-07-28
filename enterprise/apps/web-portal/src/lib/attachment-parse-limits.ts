@@ -1,0 +1,2 @@
+export const MAX_PARSE_FILE_BYTES = 100 * 1024 * 1024;
+export const MAX_PARSED_TEXT_CHARS = 120_000;
