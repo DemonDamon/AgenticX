@@ -1,7 +1,7 @@
 # Enterprise 测试环境部署与 Cookie Secure 开关提交清单
 
-Planned-with: GPT-5.6 Sol
-Suggested-Impl-Model: gpt-5.3-codex
+Planned-with: cursor-grok-4.5
+Suggested-Impl-Model: cursor-grok-4.5
 Status: implemented-on-branch (chore/enterprise-test-deploy-cookie-secure)
 Notes: Public main landing sanitizes compose defaults (no lab IPs/secrets); portal SSO/logout cookie paths unified onto `isAuthCookieSecure()`.
 
