@@ -5,6 +5,25 @@ import { parseAttachmentFile, MAX_PARSE_FILE_BYTES } from "../../../../../lib/at
 export const runtime = "nodejs";
 
 const MAX_FILES_PER_REQUEST = 10;
+const PARSE_TIMEOUT_MS = 60_000;
+
+function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(() => {
+      reject(new Error(`解析超时（${Math.round(ms / 1000)}s）：${label}`));
+    }, ms);
+    promise.then(
+      (value) => {
+        clearTimeout(timer);
+        resolve(value);
+      },
+      (error: unknown) => {
+        clearTimeout(timer);
+        reject(error);
+      },
+    );
+  });
+}
 
 export async function POST(request: Request) {
   const session = await getSessionFromCookies();
@@ -52,11 +71,15 @@ export async function POST(request: Request) {
     }
     try {
       const buffer = Buffer.from(await file.arrayBuffer());
-      const parsed = await parseAttachmentFile({
-        name: file.name,
-        type: file.type,
-        buffer,
-      });
+      const parsed = await withTimeout(
+        parseAttachmentFile({
+          name: file.name,
+          type: file.type,
+          buffer,
+        }),
+        PARSE_TIMEOUT_MS,
+        file.name,
+      );
       results.push({
         name: parsed.name,
         mime_type: parsed.mimeType,

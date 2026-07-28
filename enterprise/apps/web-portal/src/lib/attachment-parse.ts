@@ -1,15 +1,22 @@
 import mammoth from "mammoth";
 import * as XLSX from "xlsx";
 import JSZip from "jszip";
+import { convertLegacyOffice } from "./office-convert";
+import { parseVideoAttachment } from "./video-probe";
+import { MAX_PARSE_FILE_BYTES, MAX_PARSED_TEXT_CHARS } from "./attachment-parse-limits";
 
-export const MAX_PARSE_FILE_BYTES = 100 * 1024 * 1024;
-export const MAX_PARSED_TEXT_CHARS = 120_000;
+export { MAX_PARSE_FILE_BYTES, MAX_PARSED_TEXT_CHARS };
 
 export type ParsedAttachment = {
   name: string;
   mimeType: string;
   kind: "document" | "video";
   parsedText: string;
+};
+
+export type ParseAttachmentDeps = {
+  convertLegacyOffice?: typeof convertLegacyOffice;
+  parseVideoAttachment?: typeof parseVideoAttachment;
 };
 
 function truncate(text: string, max = MAX_PARSED_TEXT_CHARS): string {
@@ -66,23 +73,29 @@ async function extractPptx(buffer: Buffer): Promise<string> {
   return texts.join("\n\n");
 }
 
-export async function parseAttachmentFile(file: {
-  name: string;
-  type: string;
-  buffer: Buffer;
-}): Promise<ParsedAttachment> {
+export async function parseAttachmentFile(
+  file: {
+    name: string;
+    type: string;
+    buffer: Buffer;
+  },
+  deps: ParseAttachmentDeps = {},
+): Promise<ParsedAttachment> {
   if (file.buffer.byteLength > MAX_PARSE_FILE_BYTES) {
     throw new Error(`文件超过 ${Math.round(MAX_PARSE_FILE_BYTES / 1024 / 1024)}MB 上限`);
   }
   const mime = (file.type || "application/octet-stream").toLowerCase();
   const ext = extOf(file.name);
+  const convert = deps.convertLegacyOffice ?? convertLegacyOffice;
+  const parseVideo = deps.parseVideoAttachment ?? parseVideoAttachment;
 
   if (mime.startsWith("video/") || ["mp4", "webm", "mov", "m4v", "avi", "mkv"].includes(ext)) {
+    const video = await parseVideo({ name: file.name, buffer: file.buffer });
     return {
       name: file.name,
       mimeType: mime.startsWith("video/") ? mime : "video/mp4",
       kind: "video",
-      parsedText: `【视频附件】${file.name}\n（当前仅携带文件名，暂不解析视频画面/音轨内容）`,
+      parsedText: video.parsedText,
     };
   }
 
@@ -92,8 +105,14 @@ export async function parseAttachmentFile(file: {
   } else if (ext === "docx" || mime.includes("wordprocessingml")) {
     text = await extractDocx(file.buffer);
   } else if (ext === "doc") {
-    throw new Error("暂不支持旧版 .doc，请另存为 .docx 后上传");
-  } else if (["xlsx", "xls", "csv"].includes(ext) || mime.includes("sheet") || mime.includes("excel") || mime === "text/csv") {
+    const converted = await convert({ buffer: file.buffer, fromExt: "doc", toExt: "docx" });
+    text = await extractDocx(converted);
+  } else if (
+    ["xlsx", "xls", "csv"].includes(ext) ||
+    mime.includes("sheet") ||
+    mime.includes("excel") ||
+    mime === "text/csv"
+  ) {
     if (ext === "csv" || mime === "text/csv") {
       text = file.buffer.toString("utf8");
     } else {
@@ -102,7 +121,8 @@ export async function parseAttachmentFile(file: {
   } else if (ext === "pptx" || mime.includes("presentationml")) {
     text = await extractPptx(file.buffer);
   } else if (ext === "ppt") {
-    throw new Error("暂不支持旧版 .ppt，请另存为 .pptx 后上传");
+    const converted = await convert({ buffer: file.buffer, fromExt: "ppt", toExt: "pptx" });
+    text = await extractPptx(converted);
   } else if (["txt", "md", "json"].includes(ext) || mime.startsWith("text/") || mime === "application/json") {
     text = file.buffer.toString("utf8");
   } else {

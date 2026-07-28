@@ -7,18 +7,9 @@ import type { ComposerAttachment } from "../types/composer-attachment";
 import {
   MAX_ATTACHMENTS,
   MAX_FILE_BYTES,
-  MAX_IMAGE_BYTES,
   classifyAttachment,
 } from "../types/composer-attachment";
-
-async function readAsDataUrl(file: File): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => resolve(typeof reader.result === "string" ? reader.result : "");
-    reader.onerror = () => reject(new Error("读取文件失败"));
-    reader.readAsDataURL(file);
-  });
-}
+import { compressImageForChat } from "../utils/compress-image";
 
 async function parseRemoteFiles(files: File[]): Promise<
   Array<{
@@ -120,10 +111,6 @@ export function useComposerAttachments() {
             return;
           }
           if (kind === "image") {
-            if (file.size > MAX_IMAGE_BYTES) {
-              setError(`图片「${file.name}」不能超过 ${Math.round(MAX_IMAGE_BYTES / 1024 / 1024)}MB`);
-              return;
-            }
             images.push(file);
           } else {
             docs.push(file);
@@ -171,10 +158,17 @@ export function useComposerAttachments() {
 
         for (const slot of imageSlots) {
           try {
-            const dataUrl = await readAsDataUrl(slot.file);
-            patchAttachment(slot.id, { status: "ready", dataUrl });
-          } catch {
-            patchAttachment(slot.id, { status: "error", errorText: "图片读取失败" });
+            const compressed = await compressImageForChat(slot.file);
+            patchAttachment(slot.id, {
+              status: "ready",
+              dataUrl: compressed.dataUrl,
+              mimeType: compressed.mimeType,
+              size: compressed.size,
+            });
+          } catch (err) {
+            const message = err instanceof Error ? err.message : "图片压缩失败";
+            patchAttachment(slot.id, { status: "error", errorText: message });
+            setError(message);
           }
         }
 

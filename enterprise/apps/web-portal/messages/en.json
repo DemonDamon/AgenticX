@@ -121,7 +121,7 @@
     "uploadComingSoon": "Upload files (coming soon)",
     "plusMenuTooltip": "Upload files and more tools",
     "filesAndImages": "Files and images",
-    "filesAndImagesHint": "Supports PDF, Word, Excel, PPT, images, and videos. Up to 50 files (100MB each).",
+    "filesAndImagesHint": "Supports PDF, Word (legacy .doc needs LibreOffice), Excel, PPT (legacy .ppt), images, and videos. Up to 50 files (100MB each; large images are auto-compressed for vision models; videos extract metadata by default, full transcription needs extra tools).",
     "webSearchMenu": "Web search",
     "webSearchAuto": "Auto",
     "webSearchAutoHint": "Automatically search the web when needed",
