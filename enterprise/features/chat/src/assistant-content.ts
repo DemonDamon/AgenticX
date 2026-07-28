@@ -17,6 +17,30 @@ export function normalizeThinkTags(raw: string): string {
   return raw.replaceAll(THINK_OPEN, REDACTED_OPEN).replaceAll(THINK_CLOSE, REDACTED_CLOSE);
 }
 
+/** MiniMax 等模型在附件问答里会输出 `<citations>…</citations>` 占位，前台不应原样展示。 */
+export function stripModelCitationTags(raw: string): string {
+  if (!raw) return raw;
+  return raw
+    .replace(/<\s*citations?\s*>/gi, "")
+    .replace(/<\s*\/\s*citations?\s*>/gi, "")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+}
+
+/** 模型占位 `[N]`（非数字引用）与附件说明行前缀，避免像渲染失败。 */
+export function stripPlaceholderCitationMarkers(raw: string): string {
+  if (!raw) return raw;
+  return raw
+    .replace(/\[N\]\s*/gi, "")
+    .replace(/^[ \t]*[-•·]\s*文档内容基于提供的附件[：:]\s*/gm, "")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+}
+
+function finalizeAssistantDisplayContent(raw: string): string {
+  return stripPlaceholderCitationMarkers(stripModelCitationTags(raw));
+}
+
 /** MiniMax 等模型常在推理段写好代码，可见正文却在 ``` 处提前 stop；从推理段补全未闭合代码块。 */
 export function recoverIncompleteCodeFences(displayContent: string, reasoningContent: string): string {
   const trimmed = displayContent.replace(/\s+$/, "");
@@ -54,7 +78,7 @@ export function parseAssistantContent(message: ChatMessage): ParsedAssistantCont
   const openIdx = lower.indexOf(REDACTED_OPEN);
 
   if (openIdx < 0) {
-    const displayContent = recoverIncompleteCodeFences(raw, fallbackReasoning);
+    const displayContent = finalizeAssistantDisplayContent(recoverIncompleteCodeFences(raw, fallbackReasoning));
     return {
       displayContent,
       reasoningContent: fallbackReasoning,
@@ -70,7 +94,7 @@ export function parseAssistantContent(message: ChatMessage): ParsedAssistantCont
   if (closeIdx < 0) {
     const reasoningContent = raw.slice(reasoningStart);
     return {
-      displayContent: recoverIncompleteCodeFences(before, reasoningContent),
+      displayContent: finalizeAssistantDisplayContent(recoverIncompleteCodeFences(before, reasoningContent)),
       reasoningContent,
       thinkingStarted: true,
       thinkingInProgress: true,
@@ -78,9 +102,11 @@ export function parseAssistantContent(message: ChatMessage): ParsedAssistantCont
   }
 
   const reasoningContent = raw.slice(reasoningStart, closeIdx);
-  const displayContent = recoverIncompleteCodeFences(
-    `${before}${raw.slice(closeIdx + REDACTED_CLOSE.length)}`,
-    reasoningContent
+  const displayContent = finalizeAssistantDisplayContent(
+    recoverIncompleteCodeFences(
+      `${before}${raw.slice(closeIdx + REDACTED_CLOSE.length)}`,
+      reasoningContent,
+    ),
   );
 
   return {

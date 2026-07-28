@@ -4,6 +4,7 @@ import * as React from "react";
 import { useTranslations } from "next-intl";
 import {
   DeepResearchFilesPanel,
+  AttachmentContentPanel,
   DOCUMENT_ACCEPT,
   InputArea,
   MessageList,
@@ -16,6 +17,7 @@ import {
   modelSupportsVision,
 } from "@agenticx/feature-chat";
 import { type ChatClient } from "@agenticx/sdk-ts";
+import type { ChatMessageAttachment } from "@agenticx/core-api";
 import {
   Activity,
   Check,
@@ -116,6 +118,7 @@ export function MachiChatView({
   const [webSearchMode, setWebSearchMode] = React.useState<WebSearchMode>("auto");
   const [filesPanelSessionId, setFilesPanelSessionId] = React.useState<string | null>(null);
   const [filesPanelFocusId, setFilesPanelFocusId] = React.useState<string | null>(null);
+  const [attachmentPreview, setAttachmentPreview] = React.useState<ChatMessageAttachment | null>(null);
 
   React.useEffect(() => {
     setFilesPanelSessionId(null);
@@ -701,8 +704,14 @@ export function MachiChatView({
                 onShowPreviousRetryVersion={showPreviousRetryVersion}
                 onShowNextRetryVersion={showNextRetryVersion}
                 onRequestDeepResearchFiles={(sessionId, focusArtifactId) => {
+                  setAttachmentPreview(null);
                   setFilesPanelSessionId(sessionId);
                   setFilesPanelFocusId(focusArtifactId ?? null);
+                }}
+                onRequestAttachmentPreview={(attachment) => {
+                  setFilesPanelSessionId(null);
+                  setFilesPanelFocusId(null);
+                  setAttachmentPreview(attachment);
                 }}
                 onCopy={(content) => {
                   console.log("Copied:", content);
@@ -744,6 +753,13 @@ export function MachiChatView({
         sessionId={filesPanelSessionId}
         focusArtifactId={filesPanelFocusId}
         sources={filesPanelSources}
+      />
+      <AttachmentContentPanel
+        open={attachmentPreview != null}
+        onOpenChange={(open) => {
+          if (!open) setAttachmentPreview(null);
+        }}
+        attachment={attachmentPreview}
       />
       </div>
     </TooltipProvider>
