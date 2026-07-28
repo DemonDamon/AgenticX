@@ -17,6 +17,7 @@ import { hostnameFromUrl, siteLabelFromSource } from "../../utils/web-search-cit
 import { WebSearchFavicon } from "./WebSearchFavicon";
 import { WebSearchSourcesPanel } from "./WebSearchSourcesPanel";
 import { DeepResearchWorkbench } from "./DeepResearchWorkbench";
+import { DeepResearchDelivery } from "./DeepResearchDelivery";
 import { DeepResearchFilesPanel } from "./DeepResearchFilesPanel";
 import { stripDeepResearchProgressFromContent } from "./deep-research-segments";
 import { useChatStore } from "../../store";
@@ -598,9 +599,6 @@ export function MessageList({
                             onOpenArtifact={(id) => {
                               openDeepResearchFiles(message.session_id, id);
                             }}
-                            onOpenFiles={() => {
-                              openDeepResearchFiles(message.session_id, null);
-                            }}
                           />
                         ) : null}
 
@@ -691,6 +689,19 @@ export function MessageList({
                               {displayContentForRender}
                             </p>
                           ) : null
+                        ) : null}
+
+                        {/* 深度研究交付物：终稿 + 全部文件，放在正文之后 */}
+                        {isAssistant && message.deep_research ? (
+                          <DeepResearchDelivery
+                            deepResearch={message.deep_research}
+                            onOpenArtifact={(id) => {
+                              openDeepResearchFiles(message.session_id, id);
+                            }}
+                            onOpenFiles={() => {
+                              openDeepResearchFiles(message.session_id, null);
+                            }}
+                          />
                         ) : null}
 
                         {/* 工具调用 */}

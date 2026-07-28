@@ -16,12 +16,9 @@ export type DeepResearchSegment =
       title: string;
       status: "running" | "done" | "failed";
       detailLines: string[];
-    }
-  | {
-      kind: "artifact";
-      id: string;
-      artifact: Extract<DeepResearchEvent, { type: "artifact" }>;
     };
+
+export type DeepResearchArtifactEvent = Extract<DeepResearchEvent, { type: "artifact" }>;
 
 type LaneDraft = {
   laneId: string;
@@ -52,9 +49,26 @@ function laneToStep(lane: LaneDraft): ResearchStep {
 }
 
 /**
+ * Final / non-memo artifacts for the delivery strip after the report body.
+ * Lane memos stay attached to expandable search steps only.
+ */
+export function collectDeepResearchDeliveryArtifacts(
+  events: DeepResearchEvent[],
+): DeepResearchArtifactEvent[] {
+  const out: DeepResearchArtifactEvent[] = [];
+  for (const event of events) {
+    if (event.type !== "artifact") continue;
+    if (event.kind === "memo") continue;
+    out.push(event);
+  }
+  return out;
+}
+
+/**
  * Chronological segments for interleaved rendering:
- * narrative → clarify → narrative → tools card → narrative → status → artifact …
+ * narrative → clarify → narrative → tools card → narrative → status …
  * Planning phases fold into the tools card title (no giant checklist dump).
+ * Report artifacts are deferred to {@link collectDeepResearchDeliveryArtifacts}.
  */
 export function buildDeepResearchSegments(
   events: DeepResearchEvent[],
@@ -159,21 +173,15 @@ export function buildDeepResearchSegments(
         break;
       }
       case "artifact": {
+        // Intermediate memos → expandable lane steps; report/other → delivery strip after body.
         if (event.kind === "memo") {
-          for (const [laneId, lane] of lanes) {
-            if (event.path.includes(`/${laneId}/`)) {
+          for (const [, lane] of lanes) {
+            if (event.path.includes(`/${lane.laneId}/`)) {
               lane.artifactId = event.id;
               lane.artifactPath = event.path;
             }
           }
-          break;
         }
-        flushTools();
-        segments.push({
-          kind: "artifact",
-          id: `artifact-${event.id}`,
-          artifact: event,
-        });
         break;
       }
       default:
