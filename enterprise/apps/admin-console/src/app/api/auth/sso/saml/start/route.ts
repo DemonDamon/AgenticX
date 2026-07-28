@@ -5,6 +5,7 @@ import {
   DEFAULT_SAML_ADMIN_STATE_COOKIE,
 } from "@agenticx/auth";
 import { NextResponse } from "next/server";
+import { isAdminCookieSecure } from "../../../../../../lib/admin-session";
 import { getAdminSamlProviderConfigServer } from "../../../../../../lib/admin-sso-runtime";
 
 const ADMIN_SAML_STATE_COOKIE = DEFAULT_SAML_ADMIN_STATE_COOKIE;
@@ -27,10 +28,10 @@ function mapStartError(error: unknown): string {
 }
 
 function resolveStateCookiePolicy(): { secure: boolean; sameSite: "none" | "lax" } {
-  const isProduction = process.env.NODE_ENV === "production";
+  const secure = isAdminCookieSecure();
   return {
-    secure: isProduction,
-    sameSite: isProduction ? "none" : "lax",
+    secure,
+    sameSite: secure ? "none" : "lax",
   };
 }
 

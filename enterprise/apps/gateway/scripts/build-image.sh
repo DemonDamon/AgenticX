@@ -8,6 +8,7 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../../.." && pwd)"
 ENTERPRISE_DIR="${ROOT}/enterprise"
 IMAGE="${IMAGE:-ghcr.io/agenticx/enterprise-gateway:latest}"
+RUNTIME_IMAGE="${RUNTIME_IMAGE:-gcr.io/distroless/static-debian12:nonroot}"
 DOCKERFILE="${ENTERPRISE_DIR}/apps/gateway/Dockerfile"
 
 if ! command -v docker >/dev/null 2>&1; then
@@ -15,6 +16,10 @@ if ! command -v docker >/dev/null 2>&1; then
   exit 1
 fi
 
-echo "[build-image] context=${ENTERPRISE_DIR} image=${IMAGE}"
-docker build -f "${DOCKERFILE}" -t "${IMAGE}" "${ENTERPRISE_DIR}"
+echo "[build-image] context=${ENTERPRISE_DIR} image=${IMAGE} runtime=${RUNTIME_IMAGE}"
+docker build \
+  --build-arg "RUNTIME_IMAGE=${RUNTIME_IMAGE}" \
+  -f "${DOCKERFILE}" \
+  -t "${IMAGE}" \
+  "${ENTERPRISE_DIR}"
 echo "[build-image] done: ${IMAGE}"
