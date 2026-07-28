@@ -14,12 +14,15 @@ export type ArtifactTreeNode =
       key: string;
       name: string;
       byteSize: number;
+      fileCount: number;
       children: ArtifactTreeNode[];
     }
   | {
       type: "file";
       key: string;
       name: string;
+      /** Optional context line, e.g. parent lane title when a wrapper dir was collapsed. */
+      subtitle?: string;
       artifact: ArtifactListItem;
     };
 
@@ -50,6 +53,57 @@ function commonPathPrefix(paths: string[]): string {
   const maxPrefix = Math.max(0, Math.min(...split.map((p) => p.length - 1)));
   end = Math.min(end, maxPrefix);
   return end > 0 ? `${first.slice(0, end).join("/")}/` : "";
+}
+
+function countFiles(nodes: ArtifactTreeNode[]): number {
+  let n = 0;
+  for (const node of nodes) {
+    if (node.type === "file") n += 1;
+    else n += node.fileCount;
+  }
+  return n;
+}
+
+/**
+ * Collapse directories that only wrap a single file (common for lane memos):
+ * `lanes/q1-long-title/memo.md` → one file row titled with the lane name.
+ */
+export function collapseSingleFileDirs(nodes: ArtifactTreeNode[]): ArtifactTreeNode[] {
+  return nodes.map((node) => {
+    if (node.type === "file") return node;
+    const children = collapseSingleFileDirs(node.children);
+    if (children.length === 1 && children[0]?.type === "file") {
+      const only = children[0];
+      return {
+        type: "file",
+        key: only.key,
+        name: node.name,
+        subtitle: `${only.name} · ${formatArtifactByteSize(only.artifact.byteSize)}`,
+        artifact: only.artifact,
+      };
+    }
+    const byteSize = children.reduce(
+      (sum, n) => sum + (n.type === "file" ? n.artifact.byteSize : n.byteSize),
+      0,
+    );
+    return {
+      type: "dir",
+      key: node.key,
+      name: node.name,
+      byteSize,
+      fileCount: countFiles(children),
+      children,
+    };
+  });
+}
+
+/** Zip entry path relative to the shared research/<runId>/ prefix when possible. */
+export function artifactZipEntryPath(artifact: ArtifactListItem, all: ArtifactListItem[]): string {
+  const prefix = commonPathPrefix(all.map((a) => a.path));
+  if (prefix && artifact.path.startsWith(prefix)) {
+    return artifact.path.slice(prefix.length) || artifact.path.split("/").pop() || "file.md";
+  }
+  return artifact.path.replace(/^\//, "") || "file.md";
 }
 
 /**
@@ -117,6 +171,7 @@ export function buildArtifactTree(artifacts: ArtifactListItem[]): ArtifactTreeNo
         key: child.key,
         name: child.name,
         byteSize,
+        fileCount: countFiles(children),
         children,
       });
     }
@@ -127,5 +182,5 @@ export function buildArtifactTree(artifacts: ArtifactListItem[]): ArtifactTreeNo
     });
   };
 
-  return finalize(root);
+  return collapseSingleFileDirs(finalize(root));
 }
