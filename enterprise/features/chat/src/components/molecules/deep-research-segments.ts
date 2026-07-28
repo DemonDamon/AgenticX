@@ -48,6 +48,34 @@ function laneToStep(lane: LaneDraft): ResearchStep {
   };
 }
 
+/** Rewrite in-progress tools title once all lanes have settled (or run completed). */
+export function finalizeToolsCardTitle(
+  title: string,
+  stepCount: number,
+  settled: boolean,
+): string {
+  const raw = title.trim() || "正在并行检索…";
+  if (!settled) return raw;
+
+  let next = raw
+    .replace(/[，,]?\s*正在并行检索…?\s*$/u, "")
+    .replace(/正在并行检索…?/gu, "")
+    .trim();
+
+  if (!next) {
+    return `已完成 ${stepCount} 条调研车道检索`;
+  }
+  if (/已拆解/.test(next)) {
+    next = next.replace(/已拆解/, "已完成");
+    if (!/检索/.test(next)) next = `${next}检索`;
+    return next;
+  }
+  if (!/完成|已完成|结束/.test(next)) {
+    return `${next} · 已完成`;
+  }
+  return next;
+}
+
 /**
  * Final / non-memo artifacts for the delivery strip after the report body.
  * Lane memos stay attached to expandable search steps only.
@@ -86,10 +114,13 @@ export function buildDeepResearchSegments(
     const steps = [...lanes.values()]
       .sort((a, b) => a.index - b.index)
       .map(laneToStep);
+    const allSettled = steps.every((s) => s.status === "done" || s.status === "failed");
+    const runTerminal =
+      status === "completed" || status === "failed" || status === "cancelled";
     segments.push({
       kind: "tools",
       id: toolsId,
-      title: toolsTitle,
+      title: finalizeToolsCardTitle(toolsTitle, steps.length, allSettled || runTerminal),
       steps,
     });
     lanes = new Map();

@@ -74,7 +74,10 @@ describe("buildDeepResearchSegments", () => {
 
     const tools = segments.find((s) => s.kind === "tools");
     expect(tools && tools.kind === "tools" ? tools.steps : []).toHaveLength(2);
-    expect(tools && tools.kind === "tools" ? tools.title : "").toContain("2 条调研车道");
+    const toolsTitle = tools && tools.kind === "tools" ? tools.title : "";
+    expect(toolsTitle).toContain("2 条调研车道");
+    expect(toolsTitle).toContain("已完成");
+    expect(toolsTitle).not.toContain("正在并行检索");
 
     // Planning phases must not appear as separate checklist spam.
     expect(
@@ -118,6 +121,24 @@ describe("buildDeepResearchSegments", () => {
     const tools = segments.find((s) => s.kind === "tools");
     const steps = tools && tools.kind === "tools" ? tools.steps : [];
     expect(steps[0]?.artifactId).toBe("m1");
+  });
+});
+
+describe("finalizeToolsCardTitle via completed segments", () => {
+  it("keeps in-progress title while lanes still running", () => {
+    const events: DeepResearchEvent[] = [
+      { type: "phase", phase: "lanes", message: "已拆解 1 条调研车道，正在并行检索…" },
+      {
+        type: "lane_started",
+        laneId: "a",
+        title: "定价",
+        index: 1,
+        total: 1,
+      },
+    ];
+    const segments = buildDeepResearchSegments(events, "running");
+    const tools = segments.find((s) => s.kind === "tools");
+    expect(tools && tools.kind === "tools" ? tools.title : "").toContain("正在并行检索");
   });
 });
 
