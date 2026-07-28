@@ -76,7 +76,7 @@ export function replaceAllChatSessionMessages(
 export function patchChatSession(
   ctx: ChatHistoryContext,
   sessionId: string,
-  patch: { title?: string; activeModel?: string | null },
+  patch: { title?: string; activeModel?: string | null; pinned?: boolean },
 ): Promise<ChatSession> {
   return store().patchChatSession(ctx, sessionId, patch);
 }
@@ -94,6 +94,13 @@ export function softDeleteChatSession(
   sessionId: string,
 ): Promise<void> {
   return store().softDeleteChatSession(ctx, sessionId);
+}
+
+export function softDeleteChatSessions(
+  ctx: ChatHistoryContext,
+  sessionIds: string[],
+): Promise<number> {
+  return store().softDeleteChatSessions(ctx, sessionIds);
 }
 
 export function syncAuthUserToDatabase(user: AuthUser): Promise<void> {

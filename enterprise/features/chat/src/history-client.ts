@@ -35,8 +35,13 @@ export type PortalChatHistoryClient = {
   appendMessages(sessionId: string, messages: ChatMessage[]): Promise<void>;
   replaceMessages(sessionId: string, messages: ChatMessage[]): Promise<void>;
   renameSession(sessionId: string, title: string): Promise<ChatSession>;
-  patchSession(sessionId: string, patch: { title?: string; activeModel?: string | null }): Promise<ChatSession>;
+  patchSession(
+    sessionId: string,
+    patch: { title?: string; activeModel?: string | null; pinned?: boolean },
+  ): Promise<ChatSession>;
+  pinSession(sessionId: string, pinned: boolean): Promise<ChatSession>;
   deleteSession(sessionId: string): Promise<void>;
+  deleteSessions(sessionIds: string[]): Promise<number>;
 };
 
 export function createPortalChatHistoryClient(): PortalChatHistoryClient {
@@ -108,14 +113,28 @@ export function createPortalChatHistoryClient(): PortalChatHistoryClient {
     },
 
     async patchSession(sessionId, patch) {
-      const body: { title?: string; active_model?: string | null } = {};
+      const body: { title?: string; active_model?: string | null; pinned?: boolean } = {};
       if (patch.title !== undefined) body.title = patch.title;
       if (patch.activeModel !== undefined) body.active_model = patch.activeModel;
+      if (patch.pinned !== undefined) body.pinned = patch.pinned;
       const res = await fetch(`${BASE}/${encodeURIComponent(sessionId)}`, {
         method: "PATCH",
         credentials: "same-origin",
         headers: { "content-type": "application/json" },
         body: JSON.stringify(body),
+      });
+      await ensureOk(res);
+      const json = (await res.json()) as { data?: { session?: ChatSession } };
+      if (!json.data?.session) throw new Error("missing session in response");
+      return json.data.session;
+    },
+
+    async pinSession(sessionId, pinned) {
+      const res = await fetch(`${BASE}/${encodeURIComponent(sessionId)}`, {
+        method: "PATCH",
+        credentials: "same-origin",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ pinned }),
       });
       await ensureOk(res);
       const json = (await res.json()) as { data?: { session?: ChatSession } };
@@ -129,6 +148,18 @@ export function createPortalChatHistoryClient(): PortalChatHistoryClient {
         credentials: "same-origin",
       });
       await ensureOk(res);
+    },
+
+    async deleteSessions(sessionIds) {
+      const res = await fetch(`${BASE}/batch-delete`, {
+        method: "POST",
+        credentials: "same-origin",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ session_ids: sessionIds }),
+      });
+      await ensureOk(res);
+      const json = (await res.json()) as { data?: { deleted?: number } };
+      return Number(json.data?.deleted ?? 0);
     },
   };
 }
