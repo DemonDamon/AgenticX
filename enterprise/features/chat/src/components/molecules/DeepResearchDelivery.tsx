@@ -37,18 +37,19 @@ function AllFilesCard({ onOpen }: { onOpen?: () => void }) {
     <button
       type="button"
       onClick={onOpen}
-      className="flex w-full max-w-xl items-center gap-3 rounded-2xl border border-border/55 bg-muted/35 px-3.5 py-3 text-left transition-colors hover:bg-muted/55"
+      className="flex w-full max-w-md items-center gap-3 rounded-2xl border border-border/45 bg-card px-3 py-2.5 text-left shadow-sm transition-colors hover:bg-muted/40"
       data-testid="deep-research-all-files-card"
     >
-      <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-border/40 bg-background text-muted-foreground shadow-sm">
+      <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-[10px] bg-muted/70 text-foreground/70">
         <IconFolder className="h-5 w-5" />
       </span>
       <span className="min-w-0 flex-1">
-        <span className="block truncate text-sm font-medium text-foreground">全部文件</span>
-        <span className="block truncate text-xs text-muted-foreground">预览或者下载文件</span>
-      </span>
-      <span className="shrink-0 rounded-lg border border-border/50 bg-background px-2.5 py-1 text-xs font-medium text-foreground/80">
-        预览
+        <span className="block truncate text-[15px] font-medium leading-5 text-foreground">
+          全部文件
+        </span>
+        <span className="mt-0.5 block truncate text-[12px] leading-4 text-muted-foreground">
+          预览或者下载文件
+        </span>
       </span>
     </button>
   );
