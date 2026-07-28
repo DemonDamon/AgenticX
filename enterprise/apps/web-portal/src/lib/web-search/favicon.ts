@@ -2,7 +2,32 @@
  * Server-side favicon fetch for portal UI (client cannot rely on Google s2 in CN).
  */
 
-import { directFetch } from "./direct-fetch";
+import { directFetch, type DirectFetch } from "./direct-fetch";
+
+export type FaviconPayload = {
+  bytes: Uint8Array;
+  contentType: string;
+};
+
+/** Per upstream candidate — keep short so Clash/proxy hangs cannot pin Next.js. */
+const PER_URL_MS = 1_200;
+/** Hard budget for the whole host (all variants × candidates). */
+const OVERALL_MS = 2_500;
+const POSITIVE_TTL_MS = 5 * 60_000;
+const NEGATIVE_TTL_MS = 60_000;
+
+type CacheEntry =
+  | { ok: true; payload: FaviconPayload; expiresAt: number }
+  | { ok: false; expiresAt: number };
+
+const faviconCache = new Map<string, CacheEntry>();
+const faviconInflight = new Map<string, Promise<FaviconPayload | null>>();
+
+/** Test-only: clear process-local favicon cache / in-flight map. */
+export function resetFaviconCacheForTests(): void {
+  faviconCache.clear();
+  faviconInflight.clear();
+}
 
 const HOST_RE = /^(?=.{1,253}$)(?!-)(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,}$/i;
 const BLOCKED_HOSTS = new Set([
@@ -65,11 +90,6 @@ export function faviconFetchUrls(host: string): string[] {
   ];
 }
 
-export type FaviconPayload = {
-  bytes: Uint8Array;
-  contentType: string;
-};
-
 function sniffContentType(bytes: Uint8Array, fallback: string): string {
   if (bytes.length >= 3 && bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff) {
     return "image/jpeg";
@@ -113,20 +133,25 @@ function sniffContentType(bytes: Uint8Array, fallback: string): string {
   return fallback.includes("image/") ? fallback : "image/x-icon";
 }
 
-export async function fetchFaviconBytes(
+async function fetchFaviconBytesUncached(
   host: string,
-  fetchImpl: typeof fetch = directFetch as unknown as typeof fetch,
+  fetchImpl: DirectFetch,
 ): Promise<FaviconPayload | null> {
   const variants = hostVariants(host);
   if (variants.length === 0) return null;
 
+  const started = Date.now();
   for (const variant of variants) {
     for (const url of faviconFetchUrls(variant)) {
+      const elapsed = Date.now() - started;
+      if (elapsed >= OVERALL_MS) return null;
+      const perTry = Math.min(PER_URL_MS, Math.max(200, OVERALL_MS - elapsed));
       try {
         const res = await fetchImpl(url, {
           method: "GET",
           headers: { accept: "image/*,*/*;q=0.8" },
-          signal: AbortSignal.timeout(8_000),
+          signal: AbortSignal.timeout(perTry),
+          timeoutMs: perTry,
           redirect: "follow",
         });
         if (!res.ok) continue;
@@ -144,4 +169,44 @@ export async function fetchFaviconBytes(
     }
   }
   return null;
+}
+
+export async function fetchFaviconBytes(
+  host: string,
+  fetchImpl: DirectFetch = directFetch,
+): Promise<FaviconPayload | null> {
+  const cacheKey = normalizeFaviconHost(host);
+  if (!cacheKey) return null;
+
+  const cached = faviconCache.get(cacheKey);
+  if (cached && cached.expiresAt > Date.now()) {
+    return cached.ok ? cached.payload : null;
+  }
+
+  const existing = faviconInflight.get(cacheKey);
+  if (existing) return existing;
+
+  const run = (async () => {
+    const payload = await fetchFaviconBytesUncached(cacheKey, fetchImpl);
+    if (payload) {
+      faviconCache.set(cacheKey, {
+        ok: true,
+        payload,
+        expiresAt: Date.now() + POSITIVE_TTL_MS,
+      });
+    } else {
+      faviconCache.set(cacheKey, {
+        ok: false,
+        expiresAt: Date.now() + NEGATIVE_TTL_MS,
+      });
+    }
+    return payload;
+  })();
+
+  faviconInflight.set(cacheKey, run);
+  try {
+    return await run;
+  } finally {
+    faviconInflight.delete(cacheKey);
+  }
 }

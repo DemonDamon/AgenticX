@@ -18,7 +18,10 @@ import tls from "node:tls";
 import { URL } from "node:url";
 import type { Duplex } from "node:stream";
 
-export type DirectFetch = (input: string | URL, init?: RequestInit) => Promise<Response>;
+/** Extra `timeoutMs` is honored by curl `--max-time` (AbortSignal alone is not enough). */
+export type DirectFetchInit = RequestInit & { timeoutMs?: number };
+
+export type DirectFetch = (input: string | URL, init?: DirectFetchInit) => Promise<Response>;
 
 function headersToRecord(headers?: HeadersInit): Record<string, string> {
   if (!headers) return {};
@@ -65,9 +68,14 @@ export function resolveHttpProxyUrl(
   return null;
 }
 
-function timeoutMsFromSignal(signal?: AbortSignal | null): number {
-  // AbortSignal.timeout(n) doesn't expose remaining ms; use a sane default.
-  return signal ? 20_000 : 20_000;
+function resolveTimeoutMs(init: DirectFetchInit): number {
+  if (typeof init.timeoutMs === "number" && Number.isFinite(init.timeoutMs) && init.timeoutMs > 0) {
+    return Math.min(Math.floor(init.timeoutMs), 120_000);
+  }
+  // AbortSignal.timeout() does not expose the original ms. When a signal is present,
+  // prefer a short curl --max-time so hung proxy fetches cannot pin Next.js for 20s+.
+  if (init.signal) return 8_000;
+  return 20_000;
 }
 
 function isLoopbackHost(hostname: string): boolean {
@@ -88,6 +96,7 @@ async function curlFetchWithBody(
   headers: Record<string, string>,
   bodyBuf: Buffer | undefined,
   timeoutMs: number,
+  signal?: AbortSignal | null,
 ): Promise<Response> {
   const parsed = new URL(url);
   return new Promise((resolve, reject) => {
@@ -96,7 +105,8 @@ async function curlFetchWithBody(
       "-X",
       method,
       "--max-time",
-      String(Math.max(1, Math.ceil(timeoutMs / 1000))),
+      // curl accepts fractional seconds (e.g. 1.2); keep aligned with AbortSignal budget.
+      String(Math.max(0.2, Math.round(timeoutMs) / 1000)),
       // Trailer stays ASCII; body stays binary — never decode the whole stdout as utf8.
       "-w",
       "\n__CURL_META__%{http_code}\n%{content_type}",
@@ -120,10 +130,33 @@ async function curlFetchWithBody(
     const child = spawn("curl", args, { env: process.env });
     const chunks: Buffer[] = [];
     const errChunks: Buffer[] = [];
+    let settled = false;
+    const settleReject = (err: Error) => {
+      if (settled) return;
+      settled = true;
+      signal?.removeEventListener("abort", onAbort);
+      try {
+        child.kill("SIGKILL");
+      } catch {
+        // ignore
+      }
+      reject(err);
+    };
+    const onAbort = () => {
+      settleReject(new DOMException("The operation was aborted due to timeout", "TimeoutError"));
+    };
+    if (signal?.aborted) {
+      onAbort();
+      return;
+    }
+    signal?.addEventListener("abort", onAbort, { once: true });
     child.stdout.on("data", (c) => chunks.push(c));
     child.stderr.on("data", (c) => errChunks.push(c));
-    child.on("error", reject);
+    child.on("error", (err) => settleReject(err instanceof Error ? err : new Error(String(err))));
     child.on("close", (code) => {
+      if (settled) return;
+      settled = true;
+      signal?.removeEventListener("abort", onAbort);
       if (code !== 0) {
         reject(new Error(`curl exit ${code}: ${Buffer.concat(errChunks).toString("utf8")}`));
         return;
@@ -317,11 +350,18 @@ export const directFetch: DirectFetch = async (input, init = {}) => {
   if (bodyBuf && headers["content-length"] == null && headers["Content-Length"] == null) {
     headers["content-length"] = String(bodyBuf.byteLength);
   }
-  const timeoutMs = timeoutMsFromSignal(init.signal);
+  const timeoutMs = resolveTimeoutMs(init);
 
   // 1) curl — best proxy/SOCKS compatibility with shell env
   try {
-    return await curlFetchWithBody(url.toString(), method, headers, bodyBuf, timeoutMs);
+    return await curlFetchWithBody(
+      url.toString(),
+      method,
+      headers,
+      bodyBuf,
+      timeoutMs,
+      init.signal,
+    );
   } catch {
     // fall through
   }

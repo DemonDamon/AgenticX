@@ -11,16 +11,21 @@ export async function GET(request: Request) {
 
   const payload = await fetchFaviconBytes(host);
   if (!payload) {
-    return new NextResponse(null, { status: 404 });
+    // Negative cache in browser briefly — source lists remount often and must not
+    // re-stampede slow upstream favicon CDNs (was starving /api/chat/.../artifacts).
+    return new NextResponse(null, {
+      status: 404,
+      headers: {
+        "cache-control": "public, max-age=60, stale-while-revalidate=300",
+      },
+    });
   }
 
   return new NextResponse(Buffer.from(payload.bytes), {
     status: 200,
     headers: {
       "content-type": payload.contentType,
-      // Short cache: a prior bug served UTF-8-corrupted bytes with max-age=86400;
-      // avoid sticky broken icons in the browser disk cache.
-      "cache-control": "public, max-age=300, stale-while-revalidate=3600",
+      "cache-control": "public, max-age=3600, stale-while-revalidate=86400",
     },
   });
 }

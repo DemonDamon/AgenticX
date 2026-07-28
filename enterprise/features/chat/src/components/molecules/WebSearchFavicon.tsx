@@ -82,7 +82,9 @@ async function fetchBffFaviconObjectUrl(host: string): Promise<string | null> {
   for (const variant of variants) {
     const url = `/api/web-search/favicon?host=${encodeURIComponent(variant)}&v=2`;
     try {
-      const res = await fetch(url, { cache: "no-store", credentials: "same-origin" });
+      // Honor BFF Cache-Control — `no-store` previously re-stampeded slow favicon
+      // upstreams on every source-chip remount and starved other portal APIs.
+      const res = await fetch(url, { credentials: "same-origin" });
       if (!res.ok) continue;
       const bytes = new Uint8Array(await res.arrayBuffer());
       if (!looksLikeImageBytes(bytes)) continue;
