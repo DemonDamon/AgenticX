@@ -3,7 +3,11 @@ import { insertAuditEvent, sanitizeSsoAuditDetail } from "@agenticx/iam-core";
 import { cookies } from "next/headers";
 import { NextResponse } from "next/server";
 import { authenticateAdminConsoleViaOidc } from "../../../../../../lib/admin-pg-auth";
-import { ADMIN_SESSION_COOKIE, createAdminSessionToken } from "../../../../../../lib/admin-session";
+import {
+  ADMIN_SESSION_COOKIE,
+  createAdminSessionToken,
+  isAdminCookieSecure,
+} from "../../../../../../lib/admin-session";
 import {
   getAdminSsoProviderConfigServer,
   getOidcClientService,
@@ -115,7 +119,7 @@ export async function GET(request: Request) {
       response.cookies.set(ADMIN_OIDC_STATE_COOKIE, "", {
         httpOnly: true,
         sameSite: "lax",
-        secure: process.env.NODE_ENV === "production",
+        secure: isAdminCookieSecure(),
         path: "/api/auth/sso/oidc",
         maxAge: 0,
       });
@@ -149,14 +153,14 @@ export async function GET(request: Request) {
     response.cookies.set(ADMIN_SESSION_COOKIE, token, {
       httpOnly: true,
       sameSite: "lax",
-      secure: process.env.NODE_ENV === "production",
+      secure: isAdminCookieSecure(),
       path: "/",
       maxAge: 60 * 60 * 8,
     });
     response.cookies.set(ADMIN_OIDC_STATE_COOKIE, "", {
       httpOnly: true,
       sameSite: "lax",
-      secure: process.env.NODE_ENV === "production",
+      secure: isAdminCookieSecure(),
       path: "/api/auth/sso/oidc",
       maxAge: 0,
     });
@@ -174,7 +178,7 @@ export async function GET(request: Request) {
     response.cookies.set(ADMIN_OIDC_STATE_COOKIE, "", {
       httpOnly: true,
       sameSite: "lax",
-      secure: process.env.NODE_ENV === "production",
+      secure: isAdminCookieSecure(),
       path: "/api/auth/sso/oidc",
       maxAge: 0,
     });

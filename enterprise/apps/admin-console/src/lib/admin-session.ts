@@ -2,6 +2,13 @@ import { createHmac, timingSafeEqual } from "node:crypto";
 
 export const ADMIN_SESSION_COOKIE = "admin_console_session";
 
+export function isAdminCookieSecure(): boolean {
+  const configured = process.env.AUTH_COOKIE_SECURE?.trim().toLowerCase();
+  if (configured === "true") return true;
+  if (configured === "false") return false;
+  return process.env.NODE_ENV === "production";
+}
+
 type AdminSessionPayload = {
   email: string;
   userId: string;
@@ -98,4 +105,3 @@ export function resolveAdminCredentials():
   if (!password) return null;
   return { email, password };
 }
-

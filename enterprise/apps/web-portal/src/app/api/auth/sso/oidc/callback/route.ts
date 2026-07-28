@@ -3,7 +3,7 @@ import { insertAuditEvent, sanitizeSsoAuditDetail } from "@agenticx/iam-core";
 import { cookies } from "next/headers";
 import { NextResponse } from "next/server";
 import { loginWithOidcClaims } from "../../../../../../lib/auth-runtime";
-import { ACCESS_COOKIE, REFRESH_COOKIE } from "../../../../../../lib/session";
+import { ACCESS_COOKIE, REFRESH_COOKIE, isAuthCookieSecure } from "../../../../../../lib/session";
 import {
   getOidcClientService,
   getPortalSsoProviderConfigServer,
@@ -103,21 +103,21 @@ export async function GET(request: Request) {
     response.cookies.set(ACCESS_COOKIE, loginResult.tokens.accessToken, {
       httpOnly: true,
       sameSite: "lax",
-      secure: process.env.NODE_ENV === "production",
+      secure: isAuthCookieSecure(),
       maxAge: loginResult.tokens.expiresInSeconds,
       path: "/",
     });
     response.cookies.set(REFRESH_COOKIE, loginResult.tokens.refreshToken, {
       httpOnly: true,
       sameSite: "lax",
-      secure: process.env.NODE_ENV === "production",
+      secure: isAuthCookieSecure(),
       maxAge: 7 * 24 * 60 * 60,
       path: "/",
     });
     response.cookies.set(PORTAL_OIDC_STATE_COOKIE, "", {
       httpOnly: true,
       sameSite: "lax",
-      secure: process.env.NODE_ENV === "production",
+      secure: isAuthCookieSecure(),
       path: "/api/auth/sso/oidc",
       maxAge: 0,
     });
@@ -134,7 +134,7 @@ export async function GET(request: Request) {
     response.cookies.set(PORTAL_OIDC_STATE_COOKIE, "", {
       httpOnly: true,
       sameSite: "lax",
-      secure: process.env.NODE_ENV === "production",
+      secure: isAuthCookieSecure(),
       path: "/api/auth/sso/oidc",
       maxAge: 0,
     });

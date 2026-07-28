@@ -1,5 +1,6 @@
 import { SamlCallbackError, SamlConfigError, createSamlProtocolHandler, DEFAULT_SAML_PORTAL_STATE_COOKIE } from "@agenticx/auth";
 import { NextResponse } from "next/server";
+import { isAuthCookieSecure } from "../../../../../../lib/session";
 import {
   getPortalSamlProviderConfigServer,
   resolveReturnToOrDefault,
@@ -27,10 +28,10 @@ function mapStartError(error: unknown): string {
 }
 
 function resolveStateCookiePolicy(): { secure: boolean; sameSite: "none" | "lax" } {
-  const isProduction = process.env.NODE_ENV === "production";
+  const secure = isAuthCookieSecure();
   return {
-    secure: isProduction,
-    sameSite: isProduction ? "none" : "lax",
+    secure,
+    sameSite: secure ? "none" : "lax",
   };
 }
 

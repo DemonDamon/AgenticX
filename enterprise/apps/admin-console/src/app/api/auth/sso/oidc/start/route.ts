@@ -5,6 +5,7 @@ import {
   getAdminSsoProviderOptions,
   getOidcClientService,
 } from "../../../../../../lib/admin-sso-runtime";
+import { isAdminCookieSecure } from "../../../../../../lib/admin-session";
 
 const ADMIN_OIDC_STATE_COOKIE = "agenticx_oidc_state_admin";
 
@@ -85,7 +86,7 @@ export async function GET(request: Request) {
     const response = NextResponse.redirect(authorizationUrl);
     response.cookies.set(ADMIN_OIDC_STATE_COOKIE, cookieValue, {
       httpOnly: true,
-      secure: process.env.NODE_ENV === "production",
+      secure: isAdminCookieSecure(),
       sameSite: "lax",
       path: "/api/auth/sso/oidc",
       maxAge: 10 * 60,

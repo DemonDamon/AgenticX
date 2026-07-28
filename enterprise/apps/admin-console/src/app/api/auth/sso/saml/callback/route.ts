@@ -10,7 +10,11 @@ import { insertAuditEvent, sanitizeSsoAuditDetail } from "@agenticx/iam-core";
 import { cookies } from "next/headers";
 import { NextResponse } from "next/server";
 import { authenticateAdminConsoleViaOidc } from "../../../../../../lib/admin-pg-auth";
-import { ADMIN_SESSION_COOKIE, createAdminSessionToken } from "../../../../../../lib/admin-session";
+import {
+  ADMIN_SESSION_COOKIE,
+  createAdminSessionToken,
+  isAdminCookieSecure,
+} from "../../../../../../lib/admin-session";
 import { getAdminSamlProviderConfigServer } from "../../../../../../lib/admin-sso-runtime";
 
 const ADMIN_SAML_STATE_COOKIE = DEFAULT_SAML_ADMIN_STATE_COOKIE;
@@ -75,10 +79,10 @@ async function recordAdminSamlLoginFailed(input: {
 }
 
 function resolveStateCookiePolicy(): { secure: boolean; sameSite: "none" | "lax" } {
-  const isProduction = process.env.NODE_ENV === "production";
+  const secure = isAdminCookieSecure();
   return {
-    secure: isProduction,
-    sameSite: isProduction ? "none" : "lax",
+    secure,
+    sameSite: secure ? "none" : "lax",
   };
 }
 
@@ -216,7 +220,7 @@ export async function POST(request: Request) {
     response.cookies.set(ADMIN_SESSION_COOKIE, token, {
       httpOnly: true,
       sameSite: "lax",
-      secure: process.env.NODE_ENV === "production",
+      secure: isAdminCookieSecure(),
       path: "/",
       maxAge: 60 * 60 * 8,
     });
