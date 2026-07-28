@@ -9,9 +9,10 @@ import type {
 const ALLOWED_ROLES = new Set(["system", "user", "assistant", "tool"]);
 export const MAX_MESSAGES_PER_WRITE = 100;
 export const MAX_MESSAGE_CONTENT_CHARS = 128_000;
-export const MAX_IMAGE_ATTACHMENTS = 4;
+export const MAX_IMAGE_ATTACHMENTS = 50;
 /** Base64 data URLs for up to ~5MB images. */
 export const MAX_ATTACHMENT_DATA_URL_CHARS = 8_000_000;
+export const MAX_ATTACHMENT_PARSED_TEXT_CHARS = 120_000;
 export const MAX_WEB_SEARCH_SOURCES = 50;
 export const MAX_SOURCE_FIELD_CHARS = 4_000;
 export const MAX_DEEP_RESEARCH_EVENTS = 200;
@@ -30,16 +31,40 @@ function sanitizeAttachments(raw: unknown): ChatMessageAttachment[] | undefined 
     const name = typeof row.name === "string" ? row.name.trim() : "";
     const mimeType = typeof row.mime_type === "string" ? row.mime_type.trim() : "";
     const dataUrl = typeof row.data_url === "string" ? row.data_url.trim() : "";
+    const parsedText =
+      typeof row.parsed_text === "string" ? row.parsed_text.trim().slice(0, MAX_ATTACHMENT_PARSED_TEXT_CHARS) : "";
+    const kindRaw = typeof row.kind === "string" ? row.kind.trim() : "";
+    const kind =
+      kindRaw === "image" || kindRaw === "document" || kindRaw === "video"
+        ? kindRaw
+        : mimeType.startsWith("image/")
+          ? "image"
+          : mimeType.startsWith("video/")
+            ? "video"
+            : "document";
     if (!name) throw new Error("attachment name required");
-    if (!mimeType.startsWith("image/")) throw new Error("attachment mime_type must be image/*");
-    if (!dataUrl.startsWith("data:image/")) throw new Error("attachment data_url must be image data URL");
-    if (dataUrl.length > MAX_ATTACHMENT_DATA_URL_CHARS) throw new Error("attachment data_url too large");
+    if (!mimeType) throw new Error("attachment mime_type required");
+
+    if (kind === "image") {
+      if (!mimeType.startsWith("image/")) throw new Error("image attachment mime_type must be image/*");
+      if (!dataUrl.startsWith("data:image/")) throw new Error("attachment data_url must be image data URL");
+      if (dataUrl.length > MAX_ATTACHMENT_DATA_URL_CHARS) throw new Error("attachment data_url too large");
+    } else if (kind === "document") {
+      if (!parsedText && !dataUrl) throw new Error("document attachment requires parsed_text");
+    } else if (kind === "video") {
+      // Filename-only placeholder for now; binary is not forwarded to the model.
+    } else {
+      throw new Error("unsupported attachment kind");
+    }
+
     const size = typeof row.size === "number" && Number.isFinite(row.size) ? row.size : undefined;
     out.push({
       name,
       mime_type: mimeType,
       size,
-      data_url: dataUrl,
+      kind,
+      ...(dataUrl ? { data_url: dataUrl } : {}),
+      ...(parsedText ? { parsed_text: parsedText } : {}),
     });
   }
   return out.length > 0 ? out : undefined;

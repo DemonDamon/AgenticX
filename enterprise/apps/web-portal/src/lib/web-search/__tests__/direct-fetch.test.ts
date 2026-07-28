@@ -41,4 +41,31 @@ describe("directFetch", () => {
       await new Promise<void>((resolve, reject) => server.close((err) => (err ? reject(err) : resolve())));
     }
   });
+
+  it("preserves binary bodies with high bytes (favicon PNG)", async () => {
+    // Real PNG magic starts with 0x89; UTF-8 string decode would turn it into EF BF BD.
+    const png = Buffer.from([
+      0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00, 0x00, 0x00, 0x0d, 0x49, 0x48, 0x44, 0x52,
+      0x80, 0xff, 0xfe, 0xfd, 0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0a, 0x0b,
+    ]);
+    const server = createServer((_req, res) => {
+      res.writeHead(200, { "content-type": "image/png" });
+      res.end(png);
+    });
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", () => resolve()));
+    const addr = server.address();
+    if (!addr || typeof addr === "string") throw new Error("no port");
+    const url = `http://127.0.0.1:${addr.port}/icon.png`;
+
+    try {
+      const res = await directFetch(url, { method: "GET" });
+      expect(res.status).toBe(200);
+      expect(res.headers.get("content-type")).toMatch(/image\/png/i);
+      const buf = Buffer.from(await res.arrayBuffer());
+      expect(buf[0]).toBe(0x89);
+      expect(buf.equals(png)).toBe(true);
+    } finally {
+      await new Promise<void>((resolve, reject) => server.close((err) => (err ? reject(err) : resolve())));
+    }
+  });
 });

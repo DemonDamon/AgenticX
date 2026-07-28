@@ -37,6 +37,20 @@ describe("web search tool loop", () => {
     ).toBe("opus 5.0");
   });
 
+  it("strips injected attachment bodies from the search query", async () => {
+    const { sanitizeWebSearchQuery } = await import("../tool-loop");
+    const raw = [
+      "总结一下",
+      "",
+      "--- 附件: 方案.md ---",
+      "很长的正文".repeat(80),
+    ].join("\n");
+    expect(sanitizeWebSearchQuery(raw)).toBe("总结一下");
+    expect(
+      extractLastUserQuery([{ role: "user", content: raw }]),
+    ).toBe("总结一下");
+  });
+
   it("injects search hits into system context without tools", () => {
     const hits: WebSearchHit[] = [{ title: "T", url: "https://example.com", snippet: "s" }];
     const msgs = withSearchContext([{ role: "user", content: "q" }], hits);

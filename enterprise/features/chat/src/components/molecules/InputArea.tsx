@@ -119,9 +119,9 @@ export function InputArea({
     >
       {attachments.length > 0 ? (
         <div className="flex flex-wrap gap-2 px-2 pt-1">
-          {attachments.map((file) => (
+          {attachments.map((file, index) => (
             <AttachmentChip
-              key={file.id}
+              key={file.id || `${file.name}-${file.size}-${index}`}
               file={file}
               onRemove={() => onRemoveAttachment?.(file.id)}
             />

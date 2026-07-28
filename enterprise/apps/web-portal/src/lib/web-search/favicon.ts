@@ -36,6 +36,26 @@ export function normalizeFaviconHost(raw: string): string | null {
   return host;
 }
 
+/** Parent domain variants — aligned with Near Desktop / portal chat favicon-url. */
+export function hostVariants(host: string): string[] {
+  const h = normalizeFaviconHost(host);
+  if (!h) return [];
+  const out: string[] = [h];
+  const parts = h.split(".");
+  if (
+    parts.length >= 3 &&
+    parts[parts.length - 1] === "cn" &&
+    ["com", "net", "org", "gov", "edu"].includes(parts[parts.length - 2] ?? "")
+  ) {
+    const parent = parts.slice(-3).join(".");
+    if (!out.includes(parent)) out.push(parent);
+  } else if (parts.length >= 3) {
+    const parent = parts.slice(-2).join(".");
+    if (!out.includes(parent)) out.push(parent);
+  }
+  return out;
+}
+
 export function faviconFetchUrls(host: string): string[] {
   return [
     `https://icons.duckduckgo.com/ip3/${host}.ico`,
@@ -97,28 +117,30 @@ export async function fetchFaviconBytes(
   host: string,
   fetchImpl: typeof fetch = directFetch as unknown as typeof fetch,
 ): Promise<FaviconPayload | null> {
-  const normalized = normalizeFaviconHost(host);
-  if (!normalized) return null;
+  const variants = hostVariants(host);
+  if (variants.length === 0) return null;
 
-  for (const url of faviconFetchUrls(normalized)) {
-    try {
-      const res = await fetchImpl(url, {
-        method: "GET",
-        headers: { accept: "image/*,*/*;q=0.8" },
-        signal: AbortSignal.timeout(8_000),
-        redirect: "follow",
-      });
-      if (!res.ok) continue;
-      const buf = new Uint8Array(await res.arrayBuffer());
-      if (buf.byteLength < 16 || buf.byteLength > 512_000) continue;
-      const contentType = sniffContentType(
-        buf,
-        res.headers.get("content-type")?.split(";")[0]?.trim() || "image/x-icon",
-      );
-      if (!contentType.startsWith("image/")) continue;
-      return { bytes: buf, contentType };
-    } catch {
-      // try next candidate
+  for (const variant of variants) {
+    for (const url of faviconFetchUrls(variant)) {
+      try {
+        const res = await fetchImpl(url, {
+          method: "GET",
+          headers: { accept: "image/*,*/*;q=0.8" },
+          signal: AbortSignal.timeout(8_000),
+          redirect: "follow",
+        });
+        if (!res.ok) continue;
+        const buf = new Uint8Array(await res.arrayBuffer());
+        if (buf.byteLength < 16 || buf.byteLength > 512_000) continue;
+        const contentType = sniffContentType(
+          buf,
+          res.headers.get("content-type")?.split(";")[0]?.trim() || "image/x-icon",
+        );
+        if (!contentType.startsWith("image/")) continue;
+        return { bytes: buf, contentType };
+      } catch {
+        // try next candidate
+      }
     }
   }
   return null;
