@@ -794,6 +794,31 @@ def _streamed_tool_call_truncated(name: str, args_obj: Dict[str, Any]) -> bool:
     return False
 
 
+def _resolve_round_max_tokens(
+    base: int,
+    recent_tools: Sequence[str],
+    *,
+    provider: str = "",
+) -> int:
+    """Resolve per-round max_tokens, raising budget after recent file writes."""
+    try:
+        resolved_base = int(base)
+    except Exception:
+        resolved_base = 8192
+    if resolved_base <= 0:
+        resolved_base = 8192
+    write_heavy = any(
+        str(name or "").strip() in {"file_write", "file_edit"}
+        for name in list(recent_tools or ())[-8:]
+    )
+    resolved = (
+        min(16384, max(resolved_base, 12288)) if write_heavy else resolved_base
+    )
+    if str(provider or "").strip().lower() == "minimax":
+        return min(4096, int(resolved))
+    return int(resolved)
+
+
 def _build_streamed_tool_truncation_hint(names: Sequence[str]) -> str:
     """FR-C: human-readable retry hint appended to assistant text when streamed
     tool calls were dropped due to truncation.
@@ -804,11 +829,17 @@ def _build_streamed_tool_truncation_hint(names: Sequence[str]) -> str:
     unique_names = ", ".join(sorted({n for n in names if n}))
     if not unique_names:
         unique_names = "<unknown>"
-    return (
+    hint = (
         f"[系统通知] 上一次工具调用（{unique_names}）因流式输出被截断导致参数为空，已被丢弃。"
         f"请立即重新调用同一工具，并把所有 required 参数完整填写一次"
         f"（file_write/file_edit 必须包含完整的 path 与 content/old_string/new_string）。"
     )
+    if {"file_write", "file_edit"} & {str(n or "").strip() for n in names}:
+        hint += (
+            "请改用小块写入：file_write 先写骨架（< 80 行），再用多次 file_edit 追加章节；"
+            "单次 new_text/content 建议不超过 120 行，禁止一次生成完整长 HTML。"
+        )
+    return hint
 
 
 def _repair_streamed_tool_arguments(raw: str) -> Dict[str, Any]:
@@ -1454,6 +1485,80 @@ def _merge_consecutive_simple_roles_for_minimax(
     return out
 
 
+_GLM_TOOL_CALL_RE = re.compile(
+    r"<tool_call>\s*([A-Za-z0-9_./-]+)\s*(.*?)\s*</tool_call>",
+    re.IGNORECASE | re.DOTALL,
+)
+_GLM_ARG_KEY_OPEN = "<arg_key>"
+_GLM_ARG_VALUE_CLOSE = "</arg_value>"
+_GLM_ARG_CANONICAL_SPLIT_RE = re.compile(
+    r"</arg_key>\s*<arg_value>",
+    re.IGNORECASE,
+)
+
+
+def _normalize_file_tool_arg_aliases(
+    tool_name: str, args: Dict[str, Any]
+) -> Dict[str, Any]:
+    """Normalize common file-tool arg aliases to schema keys."""
+    if not isinstance(args, dict):
+        return {}
+    out = dict(args)
+    if tool_name == "file_edit":
+        alias_map = (
+            ("old_str", "old_text"),
+            ("old_string", "old_text"),
+            ("new_str", "new_text"),
+            ("new_string", "new_text"),
+        )
+    elif tool_name == "file_write":
+        alias_map = (
+            ("text", "content"),
+            ("body", "content"),
+            ("new_content", "content"),
+        )
+    else:
+        return out
+    for src, dst in alias_map:
+        if src in out and dst not in out:
+            out[dst] = out.pop(src)
+        elif src in out:
+            out.pop(src, None)
+    return out
+
+
+def _parse_glm_arg_key_value_body(body: str) -> Dict[str, Any]:
+    """Parse GLM <arg_key>/<arg_value> pairs, including sticky key: value forms."""
+    args: Dict[str, Any] = {}
+    text = str(body or "")
+    lower = text.lower()
+    pos = 0
+    while True:
+        start = lower.find(_GLM_ARG_KEY_OPEN, pos)
+        if start < 0:
+            break
+        key_start = start + len(_GLM_ARG_KEY_OPEN)
+        value_end = lower.find(_GLM_ARG_VALUE_CLOSE, key_start)
+        if value_end < 0:
+            break
+        segment = text[key_start:value_end]
+        canonical = _GLM_ARG_CANONICAL_SPLIT_RE.search(segment)
+        if canonical:
+            key = segment[: canonical.start()].strip()
+            value = segment[canonical.end() :]
+        else:
+            colon = segment.find(":")
+            if colon < 0:
+                pos = value_end + len(_GLM_ARG_VALUE_CLOSE)
+                continue
+            key = segment[:colon].strip()
+            value = segment[colon + 1 :]
+        if key:
+            args[key] = value
+        pos = value_end + len(_GLM_ARG_VALUE_CLOSE)
+    return args
+
+
 def _extract_inline_tool_call(
     text: str, allowed_tool_names: set[str]
 ) -> Optional[Dict[str, Any]]:
@@ -1489,7 +1594,10 @@ def _extract_inline_tool_call(
                     args_obj = parsed_args
             except Exception:
                 args_obj = {}
-        return {"name": name, "arguments": args_obj}
+        return {
+            "name": name,
+            "arguments": _normalize_file_tool_arg_aliases(name, args_obj),
+        }
 
     # Some models (notably Ollama variants without strict tool-call support)
     # may emit OpenAI-style tool_calls JSON as plain text.
@@ -1512,6 +1620,15 @@ def _extract_inline_tool_call(
         except Exception:
             pass
 
+    # GLM / Zhipu dialect: <tool_call>name<arg_key>…</arg_key><arg_value>…
+    for glm_match in _GLM_TOOL_CALL_RE.finditer(text):
+        name = str(glm_match.group(1) or "").strip()
+        if name not in allowed_tool_names:
+            continue
+        args = _parse_glm_arg_key_value_body(glm_match.group(2))
+        args = _normalize_file_tool_arg_aliases(name, args)
+        return {"name": name, "arguments": args}
+
     # Find the first allowed tool call anywhere in the snippet.
     # This supports wrappers such as print(check_resources()).
     tool_name: Optional[str] = None
@@ -1526,7 +1643,7 @@ def _extract_inline_tool_call(
         return None
 
     if not raw_args:
-        args_obj: Dict[str, Any] = {}
+        args_obj = {}
     else:
         # Allow JSON object in parentheses: foo({"a":1})
         try:
@@ -1534,7 +1651,10 @@ def _extract_inline_tool_call(
             args_obj = parsed if isinstance(parsed, dict) else {}
         except Exception:
             args_obj = {}
-    return {"name": tool_name, "arguments": args_obj}
+    return {
+        "name": tool_name,
+        "arguments": _normalize_file_tool_arg_aliases(tool_name, args_obj),
+    }
 
 
 _THINK_OPEN_TAG = chr(60) + "think" + chr(62)
@@ -1659,9 +1779,42 @@ def _recover_public_completion_from_reasoning(
 
 _EMPTY_RESPONSE_FALLBACK = "本轮模型未能生成完整的可见回复，请重新提问。"
 _TOOL_TURN_EMPTY_FALLBACK = (
-    "工具已经跑完，但我没能说明结果。"
-    "请展开上方工具卡片查看成功或失败原因，再告诉我下一步。"
+    "工具已执行完成，但模型没有给出总结说明。"
+    "请直接回复「继续」让我基于已有结果完成说明，或告诉我下一步。"
 )
+
+
+def _user_facing_tool_success_silence_fallback(
+    executed_tool_names: Sequence[str],
+    disk_write_paths: Sequence[str] | set[str] | None = None,
+) -> str:
+    """User-facing notice when tools succeeded but the model stayed silent."""
+    recent: list[str] = []
+    for name in reversed(list(executed_tool_names or ())):
+        text = str(name or "").strip()
+        if not text or text in recent:
+            continue
+        recent.append(text)
+        if len(recent) >= 5:
+            break
+    recent.reverse()
+    lines = ["工具已执行完成，但模型没有给出总结说明。"]
+    if recent:
+        joined = ", ".join(f"`{name}`" for name in recent)
+        lines.append(f"最近工具：{joined}")
+    write_paths: list[str] = []
+    for path in list(disk_write_paths or ()):
+        text = str(path or "").strip()
+        if not text or text in write_paths:
+            continue
+        write_paths.append(text)
+        if len(write_paths) >= 3:
+            break
+    if write_paths:
+        path_text = ", ".join(f"`{path}`" for path in write_paths)
+        lines.append(f"产物路径：{path_text}")
+    lines.append("请直接回复「继续」让我基于已有结果完成说明，或告诉我下一步。")
+    return "\n".join(lines)
 
 _READONLY_REFERENCE_PATH_RE = re.compile(
     r"path is read-only \(mounted as reference\):\s*(.+?)(?:\. Do not retry|\.\s*$|$)",
@@ -2777,6 +2930,7 @@ class AgentRuntime:
         model_round_count = 0
         first_visible_token_ms: int | None = None
         turn_model_started_at = time.monotonic()
+        setattr(session, "_empty_tool_calls_retry_used", False)
 
         def _record_tool_turn_outcome(
             outcome: ToolTurnOutcome,
@@ -3170,8 +3324,13 @@ class AgentRuntime:
                                     and provider_name.strip().lower() != "minimax"
                                 ):
                                     _round_tool_choice = _KB_FORCED_TOOL_CHOICE
-                                _max_tokens = (
-                                    getattr(session, "_max_tokens_override", None) or 8192
+                                _max_tokens = _resolve_round_max_tokens(
+                                    int(
+                                        getattr(session, "_max_tokens_override", None)
+                                        or 8192
+                                    ),
+                                    executed_tool_names,
+                                    provider=provider_name,
                                 )
                                 stream_kwargs: Dict[str, Any] = {
                                     "tools": list(active_tools),
@@ -3188,7 +3347,8 @@ class AgentRuntime:
                                 if provider_name.strip().lower() == "minimax":
                                     stream_kwargs.pop("tool_choice", None)
                                     stream_kwargs.pop("temperature", None)
-                                    stream_kwargs["max_tokens"] = min(4096, int(_max_tokens))
+                                    # _resolve_round_max_tokens already clamps MiniMax.
+                                    stream_kwargs["max_tokens"] = int(_max_tokens)
                                 stream_kwargs.update(llm_call_kwargs)
                                 for chunk in stream_with_tools(
                                     messages_for_llm,
@@ -3494,8 +3654,13 @@ class AgentRuntime:
                                 tools=active_tools,
                                 tool_choice=_fallback_tool_choice,
                                 temperature=0.2,
-                                max_tokens=int(
-                                    getattr(session, "_max_tokens_override", None) or 8192
+                                max_tokens=_resolve_round_max_tokens(
+                                    int(
+                                        getattr(session, "_max_tokens_override", None)
+                                        or 8192
+                                    ),
+                                    executed_tool_names,
+                                    provider=provider_name,
                                 ),
                                 timeout=request_timeout_seconds,
                                 **llm_call_kwargs,
@@ -4051,6 +4216,38 @@ class AgentRuntime:
                         }
                     ]
             model_finish_reason = _response_finish_reason(response)
+            _fr = str(model_finish_reason or "").strip().lower()
+            if (
+                not tool_calls
+                and not str(ac_clean or "").strip()
+                and _fr in {"tool_calls", "tool_call", "function_call", "functions"}
+                and not getattr(session, "_empty_tool_calls_retry_used", False)
+            ):
+                setattr(session, "_empty_tool_calls_retry_used", True)
+                hint = (
+                    "[系统通知] 上一轮 finish_reason 表明模型要调用工具，但没有收到完整可用的 tool_call。"
+                    "请立即重新发出明确的 tool_call（补全所有 required 参数）；"
+                    "若已无需工具，请直接给出用户可见的最终说明。"
+                )
+                messages.append({"role": "system", "content": hint})
+                session.agent_messages.append({"role": "system", "content": hint})
+                logger.info(
+                    "empty_tool_calls_with_tool_finish session=%s round=%s finish_reason=%s",
+                    getattr(session, "session_id", ""),
+                    round_idx,
+                    _fr,
+                )
+                yield RuntimeEvent(
+                    type=EventType.ROUND_END.value,
+                    data={
+                        "round": round_idx,
+                        "max_rounds": self.max_tool_rounds,
+                        "auto_retry": True,
+                        "reason": "empty_tool_calls_with_tool_finish",
+                    },
+                    agent_id=agent_id,
+                )
+                continue
             reasoning_field_final_recovered = False
             if not tool_calls and not ac_clean.strip():
                 reasoning_candidate = parsed.reasoning or _nonstream_reasoning
@@ -4160,11 +4357,13 @@ class AgentRuntime:
             synced_session_message_count = len(session.agent_messages)
 
             if not tool_calls:
-                # Reasoning-only / bodyless turn: nudge once, then deterministic fallback.
+                # Reasoning-only / bodyless turn: nudge, then deterministic fallback.
+                # After tools have already run, allow more retries (Kimi tool-only style).
+                _reason_only_budget = 3 if executed_tool_names else 1
                 if (
                     not parsed.visible_body.strip()
                     and not _is_system_trigger
-                    and reason_only_retry < 1
+                    and reason_only_retry < _reason_only_budget
                 ):
                     can_finalize_without_tools = (
                         round_idx == 1
@@ -4248,8 +4447,13 @@ class AgentRuntime:
                                 for chunk in self.llm.stream(
                                     messages,
                                     temperature=0.2,
-                                    max_tokens=int(
-                                        getattr(session, "_max_tokens_override", None) or 8192
+                                    max_tokens=_resolve_round_max_tokens(
+                                        int(
+                                            getattr(session, "_max_tokens_override", None)
+                                            or 8192
+                                        ),
+                                        executed_tool_names,
+                                        provider=provider_name,
                                     ),
                                     timeout=request_timeout_seconds,
                                     **llm_call_kwargs,
@@ -4340,6 +4544,7 @@ class AgentRuntime:
                 sug_list = (
                     list(parsed.suggested_questions) if _followups_enabled else []
                 )
+                tool_silence_kind = ""
                 if not clean_body.strip() and not _is_system_trigger:
                     sug_list = []
                     if public_tool_summaries and not unresolved_after_public_summary:
@@ -4347,11 +4552,19 @@ class AgentRuntime:
                         terminal_reason = "tool_result_fallback"
                     elif executed_tool_names:
                         # Prefer the actual tool ERROR over an opaque "model silent" notice.
-                        clean_body = (
+                        error_body = (
                             _user_facing_tool_error_fallback(messages)
                             or _user_facing_tool_error_fallback(session.agent_messages)
-                            or _TOOL_TURN_EMPTY_FALLBACK
                         )
+                        if error_body:
+                            clean_body = error_body
+                            tool_silence_kind = "error"
+                        else:
+                            clean_body = _user_facing_tool_success_silence_fallback(
+                                executed_tool_names,
+                                disk_write_paths,
+                            )
+                            tool_silence_kind = "success"
                         terminal_reason = "tool_turn_empty_fallback"
                     else:
                         clean_body = _EMPTY_RESPONSE_FALLBACK
@@ -4478,6 +4691,12 @@ class AgentRuntime:
                                 "tool_turn_empty_fallback",
                                 "tool_result_fallback",
                             }
+                            else {}
+                        ),
+                        **(
+                            {"tool_silence_kind": tool_silence_kind}
+                            if terminal_reason == "tool_turn_empty_fallback"
+                            and tool_silence_kind
                             else {}
                         ),
                         **(

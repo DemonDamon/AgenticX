@@ -190,7 +190,7 @@ class _AlwaysShortTruncated:
 
 
 class _ToolThenReasoningOnlyThenStillReasoning:
-    """1st: tool_call. 2nd: reasoning-only (nudge). 3rd: still reasoning-only (exhaust)."""
+    """1st: tool_call; then keep reasoning-only until post-tool budget (3) exhausts."""
 
     def __init__(self) -> None:
         self.calls = 0
@@ -212,6 +212,36 @@ class _ToolThenReasoningOnlyThenStillReasoning:
 
     def stream(self, *_args, **_kwargs):
         yield _THINK_OPEN + "还在思考" + _THINK_CLOSE
+
+
+class _ToolThenTwoReasoningOnlyThenReply:
+    """Tool success, two reasoning-only nudges, then a visible reply."""
+
+    def __init__(self) -> None:
+        self.calls = 0
+
+    def invoke(self, *_args, **_kwargs):
+        self.calls += 1
+        if self.calls == 1:
+            return _FakeResponse(
+                "",
+                [
+                    {
+                        "id": "call-1",
+                        "type": "function",
+                        "function": {"name": "list_files", "arguments": {"path": "."}},
+                    }
+                ],
+            )
+        if self.calls <= 3:
+            return _FakeResponse(_THINK_OPEN + "还在想" + _THINK_CLOSE, [])
+        return _FakeResponse("根据工具结果：目录已列出。", [])
+
+    def stream(self, *_args, **_kwargs):
+        if self.calls <= 3:
+            yield _THINK_OPEN + "还在想" + _THINK_CLOSE
+        else:
+            yield "根据工具结果：目录已列出。"
 
 
 class _TextOnlyDictStream:
@@ -555,16 +585,47 @@ def test_reasoning_only_after_tool_triggers_fallback_placeholder(monkeypatch) ->
     runtime = AgentRuntime(llm, _ApproveGate())
     session = StudioSession()
     events = asyncio.run(_collect(runtime, session, "do it"))
-    # nudge fired on round 2 (reasoning-only after tool), exhausted on round 3.
-    assert llm.calls == 3
+    # Post-tool reason-only budget is 3: tool + 3 nudges + terminal = 5 calls.
+    assert llm.calls == 5
     final = _final_text(events)
-    # Neutral tool-turn fallback when the tool succeeded but the model stayed silent.
-    assert "工具已经跑完" in final, f"tool-turn fallback expected, got {final!r}"
+    # Success-silence fallback when the tool succeeded but the model stayed silent.
+    assert "没有给出总结" in final, f"tool-turn success silence expected, got {final!r}"
+    assert "失败原因" not in final
     assert "已完成工具调用" not in final
     assert _THINK_OPEN not in final, "FINAL text must not leak Mattis"
     last = session.chat_history[-1]
     assert _THINK_OPEN not in last["content"], "chat_history content must not leak Mattis"
     assert last.get("metadata", {}).get("terminal_reason") == "tool_turn_empty_fallback"
+    assert last.get("metadata", {}).get("tool_silence_kind") == "success"
+
+
+def test_reasoning_only_budget_after_tools_allows_two_nudges_then_reply(monkeypatch) -> None:
+    from agenticx.runtime import agent_runtime as runtime_module
+
+    async def _fake_dispatch(*_args, **_kwargs):
+        return "tool-ok"
+
+    monkeypatch.setattr(runtime_module, "dispatch_tool_async", _fake_dispatch)
+    llm = _ToolThenTwoReasoningOnlyThenReply()
+    runtime = AgentRuntime(llm, _ApproveGate())
+    session = StudioSession()
+    events = asyncio.run(_collect(runtime, session, "do it"))
+    assert llm.calls == 4
+    assert _final_text(events) == "根据工具结果：目录已列出。"
+
+
+def test_user_facing_tool_success_silence_fallback_helper() -> None:
+    from agenticx.runtime.agent_runtime import _user_facing_tool_success_silence_fallback
+
+    text = _user_facing_tool_success_silence_fallback(
+        ["file_read", "list_files", "file_read"],
+        {"/tmp/out.html"},
+    )
+    assert "没有给出总结" in text
+    assert "失败原因" not in text
+    assert "`list_files`" in text
+    assert "`file_read`" in text
+    assert "`/tmp/out.html`" in text
 
 
 def test_tool_error_read_only_surfaces_plain_language_fallback(monkeypatch) -> None:
