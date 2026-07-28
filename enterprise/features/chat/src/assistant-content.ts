@@ -34,6 +34,19 @@ export function recoverIncompleteCodeFences(displayContent: string, reasoningCon
   return `${trimmed}${needsLeadingNewline ? "\n" : ""}${inner}\n\`\`\``;
 }
 
+/** Preview / artifact helpers: strip think blocks from raw assistant-shaped text. */
+export function displayContentFromRawAssistantText(raw: string): string {
+  return parseAssistantContent({
+    id: "_preview",
+    session_id: "_",
+    tenant_id: "_",
+    user_id: "_",
+    role: "assistant",
+    content: raw ?? "",
+    created_at: new Date(0).toISOString(),
+  }).displayContent;
+}
+
 export function parseAssistantContent(message: ChatMessage): ParsedAssistantContent {
   const fallbackReasoning = (message.reasoning ?? "").trim();
   const raw = normalizeThinkTags(message.content ?? "");

@@ -33,9 +33,10 @@ export function WebSearchCitation({ index1Based, source, onOpenInSheet }: WebSea
       <button
         type="button"
         onClick={openUrl}
-        className="mx-0.5 inline-flex max-w-[9rem] items-center truncate rounded-md bg-muted/80 px-1.5 py-0.5 align-middle text-[11px] font-medium leading-4 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+        className="mx-0.5 inline-flex max-w-[10rem] items-center gap-1 truncate rounded-md bg-muted/80 px-1.5 py-0.5 align-middle text-[11px] font-medium leading-4 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
         title={source.title || source.url}
       >
+        <WebSearchFavicon host={host} label={label} size={12} rounded="md" />
         <span className="truncate">{label}</span>
       </button>
       <span

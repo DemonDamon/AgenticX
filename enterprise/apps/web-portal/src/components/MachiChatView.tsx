@@ -2,7 +2,17 @@
 
 import * as React from "react";
 import { useTranslations } from "next-intl";
-import { InputArea, MessageList, MessageQueuePanel, useChatStore, useComposerAttachments, extractClipboardImageFiles, withClipboardImageNames, modelSupportsVision } from "@agenticx/feature-chat";
+import {
+  DeepResearchFilesPanel,
+  InputArea,
+  MessageList,
+  MessageQueuePanel,
+  useChatStore,
+  useComposerAttachments,
+  extractClipboardImageFiles,
+  withClipboardImageNames,
+  modelSupportsVision,
+} from "@agenticx/feature-chat";
 import { type ChatClient } from "@agenticx/sdk-ts";
 import {
   Activity,
@@ -102,6 +112,23 @@ export function MachiChatView({
   } = useChatStore();
   const [draft, setDraft] = React.useState("");
   const [webSearch, setWebSearch] = React.useState(false);
+  const [filesPanelSessionId, setFilesPanelSessionId] = React.useState<string | null>(null);
+  const [filesPanelFocusId, setFilesPanelFocusId] = React.useState<string | null>(null);
+
+  React.useEffect(() => {
+    setFilesPanelSessionId(null);
+    setFilesPanelFocusId(null);
+  }, [activeSessionId]);
+
+  const filesPanelSources = React.useMemo(() => {
+    if (!filesPanelSessionId) return [];
+    const sessionMsgs = messages.filter((m) => m.session_id === filesPanelSessionId);
+    for (let i = sessionMsgs.length - 1; i >= 0; i -= 1) {
+      const sources = sessionMsgs[i]?.web_search_sources;
+      if (sources && sources.length > 0) return sources;
+    }
+    return [];
+  }, [messages, filesPanelSessionId]);
 
   const setDeepResearchMode = React.useCallback(
     (next: boolean) => {
@@ -553,7 +580,8 @@ export function MachiChatView({
 
   return (
     <TooltipProvider delayDuration={200}>
-      <div className="flex h-full min-h-0 flex-1 flex-col overflow-hidden">
+      <div className="flex h-full min-h-0 flex-1 overflow-hidden">
+      <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
         {/* 顶部 - 对话标题 */}
         <div className="flex shrink-0 items-center justify-between px-6 py-4 pl-14 lg:pl-6">
           <div className="flex items-center gap-2">
@@ -669,6 +697,10 @@ export function MachiChatView({
                 onShowNextResponseVersion={showNextResponseVersion}
                 onShowPreviousRetryVersion={showPreviousRetryVersion}
                 onShowNextRetryVersion={showNextRetryVersion}
+                onRequestDeepResearchFiles={(sessionId, focusArtifactId) => {
+                  setFilesPanelSessionId(sessionId);
+                  setFilesPanelFocusId(focusArtifactId ?? null);
+                }}
                 onCopy={(content) => {
                   console.log("Copied:", content);
                 }}
@@ -697,6 +729,19 @@ export function MachiChatView({
             {composer}
           </div>
         )}
+      </div>
+      <DeepResearchFilesPanel
+        open={filesPanelSessionId != null}
+        onOpenChange={(open) => {
+          if (!open) {
+            setFilesPanelSessionId(null);
+            setFilesPanelFocusId(null);
+          }
+        }}
+        sessionId={filesPanelSessionId}
+        focusArtifactId={filesPanelFocusId}
+        sources={filesPanelSources}
+      />
       </div>
     </TooltipProvider>
   );

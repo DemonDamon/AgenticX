@@ -13,6 +13,7 @@ import { formatWebSearchSourcesSse } from "../web-search/tool-loop";
 import { buildResearchPlan, type ResearchPlan } from "./planner";
 import { CitationRegistry, type Citation } from "./registry";
 import { formatDeepResearchEventSse } from "./events";
+import { stripThinkBlocks } from "./content-clean";
 import {
   proposeClarification,
   type ClarifierResult,
@@ -639,7 +640,7 @@ export async function runDeepResearchTurn(
           }
         }
 
-        const finalReport = reportContentParts.join("");
+        const finalReport = stripThinkBlocks(reportContentParts.join(""));
         if (finalReport.trim() && artifactsWritten < MAX_ARTIFACTS_PER_RUN) {
           const path = `research/${runId}/final-report.md`;
           const record = await artifactStore.write({

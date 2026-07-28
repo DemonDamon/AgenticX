@@ -145,6 +145,11 @@ type MessageListProps = {
   /** Kimi-style jump-to-bottom control when user scrolls up during streaming. */
   showScrollToBottomFab?: boolean;
   scrollToBottomLabel?: string;
+  /**
+   * When set, file preview is owned by the parent (docked next to chat).
+   * MessageList will not render DeepResearchFilesPanel itself.
+   */
+  onRequestDeepResearchFiles?: (sessionId: string, focusArtifactId?: string | null) => void;
 };
 
 function ThinkingDotsPlaceholder() {
@@ -211,6 +216,7 @@ export function MessageList({
   onFeedback,
   showScrollToBottomFab = true,
   scrollToBottomLabel = "回到底部",
+  onRequestDeepResearchFiles,
 }: MessageListProps) {
   const parentRef = React.useRef<HTMLDivElement>(null);
   const autoScrollPinnedRef = React.useRef(true);
@@ -376,6 +382,18 @@ export function MessageList({
     [enterSelectionMode],
   );
 
+  const openDeepResearchFiles = React.useCallback(
+    (sessionId: string, focusArtifactId?: string | null) => {
+      if (onRequestDeepResearchFiles) {
+        onRequestDeepResearchFiles(sessionId, focusArtifactId);
+        return;
+      }
+      setFilesPanelSessionId(sessionId);
+      setFilesPanelFocusId(focusArtifactId ?? null);
+    },
+    [onRequestDeepResearchFiles],
+  );
+
   if (messages.length === 0) {
     return (
       <div className="flex h-full items-center justify-center px-6 text-center">
@@ -384,8 +402,11 @@ export function MessageList({
     );
   }
 
+  const hostFilesPanel = !onRequestDeepResearchFiles;
+
   return (
-    <div className="relative h-full">
+    <div className={["flex h-full min-h-0 w-full", className].filter(Boolean).join(" ")}>
+    <div className="relative min-h-0 min-w-0 flex-1">
       {/* 多选模式工具栏 */}
       {isSelectionMode && (
         <div className="sticky top-0 z-10 flex items-center justify-between border-b border-border bg-background/95 px-4 py-2 backdrop-blur">
@@ -409,7 +430,7 @@ export function MessageList({
       <div
         ref={parentRef}
         style={height ? { height } : undefined}
-        className={`min-h-0 overflow-y-auto px-4 sm:px-6 ${className ?? ""}`}
+        className="h-full min-h-0 overflow-y-auto px-4 sm:px-6"
       >
         <div className="mx-auto flex w-full max-w-4xl flex-col gap-4 py-4">
           {messages.map((message, messageIndex) => {
@@ -575,12 +596,10 @@ export function MessageList({
                                 .setDeepResearchClarifyAnswers(message.id, answers);
                             }}
                             onOpenArtifact={(id) => {
-                              setFilesPanelSessionId(message.session_id);
-                              setFilesPanelFocusId(id);
+                              openDeepResearchFiles(message.session_id, id);
                             }}
                             onOpenFiles={() => {
-                              setFilesPanelSessionId(message.session_id);
-                              setFilesPanelFocusId(null);
+                              openDeepResearchFiles(message.session_id, null);
                             }}
                           />
                         ) : null}
@@ -1023,17 +1042,6 @@ export function MessageList({
         }
         highlightIndex={sourcesHighlightIndex}
       />
-      <DeepResearchFilesPanel
-        open={filesPanelSessionId != null}
-        onOpenChange={(open) => {
-          if (!open) {
-            setFilesPanelSessionId(null);
-            setFilesPanelFocusId(null);
-          }
-        }}
-        sessionId={filesPanelSessionId}
-        focusArtifactId={filesPanelFocusId}
-      />
       <style>{`
         @keyframes agx-thinking-dot-pulse {
           0%, 80%, 100% {
@@ -1058,6 +1066,31 @@ export function MessageList({
           }
         }
       `}</style>
+    </div>
+    {hostFilesPanel ? (
+      <DeepResearchFilesPanel
+        open={filesPanelSessionId != null}
+        onOpenChange={(open) => {
+          if (!open) {
+            setFilesPanelSessionId(null);
+            setFilesPanelFocusId(null);
+          }
+        }}
+        sessionId={filesPanelSessionId}
+        focusArtifactId={filesPanelFocusId}
+        sources={(() => {
+          if (!filesPanelSessionId) return [];
+          for (let i = messages.length - 1; i >= 0; i -= 1) {
+            const m = messages[i];
+            if (m?.session_id !== filesPanelSessionId) continue;
+            if (m.web_search_sources && m.web_search_sources.length > 0) {
+              return m.web_search_sources;
+            }
+          }
+          return [];
+        })()}
+      />
+    ) : null}
     </div>
   );
 }
