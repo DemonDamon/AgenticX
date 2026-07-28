@@ -169,8 +169,12 @@ export function MachiChatView({
   const refreshAvailableModels = React.useCallback(async () => {
     try {
       const res = await fetch("/api/me/models", { cache: "no-store" });
+      if (!res.ok) return;
       const json = (await res.json()) as { data?: { models: PortalModelOption[] } };
       setAvailableModels(json.data?.models ?? []);
+    } catch {
+      // 开发服过载 / 本机代理劫持 localhost 时 fetch 会抛 TypeError: Failed to fetch。
+      // 轮询失败不应打到 Next 运行时错误浮层；保留上一份 models，等下次轮询。
     } finally {
       setModelsLoaded(true);
     }

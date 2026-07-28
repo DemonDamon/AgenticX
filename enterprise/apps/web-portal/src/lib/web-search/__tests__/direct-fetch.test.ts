@@ -42,6 +42,30 @@ describe("directFetch", () => {
     }
   });
 
+  it("honors timeoutMs for hung upstream (does not wait ~20s)", async () => {
+    const server = createServer((_req, _res) => {
+      // never respond
+    });
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", () => resolve()));
+    const addr = server.address();
+    if (!addr || typeof addr === "string") throw new Error("no port");
+    const url = `http://127.0.0.1:${addr.port}/hang`;
+
+    try {
+      const started = Date.now();
+      await expect(
+        directFetch(url, {
+          method: "GET",
+          timeoutMs: 400,
+          signal: AbortSignal.timeout(400),
+        }),
+      ).rejects.toBeTruthy();
+      expect(Date.now() - started).toBeLessThan(3_000);
+    } finally {
+      await new Promise<void>((resolve, reject) => server.close((err) => (err ? reject(err) : resolve())));
+    }
+  });
+
   it("preserves binary bodies with high bytes (favicon PNG)", async () => {
     // Real PNG magic starts with 0x89; UTF-8 string decode would turn it into EF BF BD.
     const png = Buffer.from([
