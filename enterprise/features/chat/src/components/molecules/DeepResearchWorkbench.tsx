@@ -182,33 +182,60 @@ function ToolsCard({
   onOpenArtifact?: (artifactId: string) => void;
 }) {
   const running = steps.some((s) => s.status === "running");
+  // In-progress: keep open; completed: default collapsed so the long lane list does not dominate.
+  const [open, setOpen] = React.useState(running);
+  const prevRunning = React.useRef(running);
+
+  React.useEffect(() => {
+    if (prevRunning.current && !running) {
+      setOpen(false);
+    } else if (!prevRunning.current && running) {
+      setOpen(true);
+    }
+    prevRunning.current = running;
+  }, [running]);
+
   return (
     <div
       className="mb-3 rounded-xl border border-border/50 bg-muted/20 px-3 py-2.5"
       data-testid="deep-research-tools-card"
+      data-collapsed={open ? "false" : "true"}
     >
-      <div className="mb-1.5 flex items-center gap-2 text-xs text-muted-foreground">
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        className="flex w-full items-center gap-2 text-left text-xs text-muted-foreground"
+        aria-expanded={open}
+      >
         {running ? (
-          <IconSpinner className="h-3.5 w-3.5 animate-spin text-primary" />
+          <IconSpinner className="h-3.5 w-3.5 shrink-0 animate-spin text-primary" />
         ) : (
-          <IconCheck className="h-3.5 w-3.5" />
+          <IconCheck className="h-3.5 w-3.5 shrink-0" />
         )}
-        <span className="font-medium text-foreground/80">{title}</span>
-      </div>
-      {steps.length > 0 ? (
-        <ol className="relative space-y-0.5">
-          {steps.map((step, index) => (
-            <ExpandableStepRow
-              key={step.id}
-              step={step}
-              showRail={index < steps.length - 1}
-              onOpenArtifact={onOpenArtifact}
-            />
-          ))}
-        </ol>
-      ) : (
-        <div className="text-xs text-muted-foreground">准备检索…</div>
-      )}
+        <span className="min-w-0 flex-1 font-medium text-foreground/80">{title}</span>
+        <IconChevronRight
+          className={[
+            "h-3.5 w-3.5 shrink-0 text-muted-foreground transition-transform",
+            open ? "rotate-90" : "",
+          ].join(" ")}
+        />
+      </button>
+      {open ? (
+        steps.length > 0 ? (
+          <ol className="relative mt-1.5 space-y-0.5">
+            {steps.map((step, index) => (
+              <ExpandableStepRow
+                key={step.id}
+                step={step}
+                showRail={index < steps.length - 1}
+                onOpenArtifact={onOpenArtifact}
+              />
+            ))}
+          </ol>
+        ) : (
+          <div className="mt-1.5 text-xs text-muted-foreground">准备检索…</div>
+        )
+      ) : null}
     </div>
   );
 }
