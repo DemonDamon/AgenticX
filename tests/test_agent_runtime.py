@@ -659,7 +659,8 @@ def test_create_avatar_malformed_final_uses_public_message(monkeypatch) -> None:
         return events
 
     events = __import__("asyncio").run(_run())
-    assert llm.calls == 3
+    # Post-tool reason-only budget is 3: tool + 3 nudges + terminal fallback.
+    assert llm.calls == 5
     final = events[-1]
     assert final["type"] == EventType.FINAL.value
     assert final["data"]["text"] == public_msg
