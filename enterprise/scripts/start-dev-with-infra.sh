@@ -32,6 +32,7 @@ start-dev-with-infra.sh — 本地开发一键启动（中间件 + 应用）
   --db=postgresql|mysql  选择业务数据库（默认 postgresql）
   --all                  透传给 start-dev.sh（enterprise + customers）
   --ui=tui|stream        透传给 start-dev.sh
+  --webpack              透传给 start-dev.sh（Next 不用 Turbopack）
   --infra-only           仅启动所选数据库 + Redis，不启动应用
   --skip-infra           跳过中间件启动，直接启动应用
   --down                 仅关闭中间件（不启动应用）
@@ -46,7 +47,7 @@ for arg in "$@"; do
     --infra-only) INFRA_ONLY=1 ;;
     --skip-infra) SKIP_INFRA=1 ;;
     --down) DOWN_ONLY=1 ;;
-    --all|--ui=tui|--ui=stream) APP_ARGS+=("$arg") ;;
+    --all|--ui=tui|--ui=stream|--webpack) APP_ARGS+=("$arg") ;;
     -h|--help) print_help; exit 0 ;;
     *)
       echo "[start-dev-with-infra] 未知参数: $arg" >&2
