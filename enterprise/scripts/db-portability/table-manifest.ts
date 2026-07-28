@@ -1,5 +1,5 @@
 /**
- * Explicit 42-table migration order (parents before children).
+ * Explicit 45-table migration order (parents before children).
  * `usage_records_daily_mv` is a VIEW created by MySQL migrations — not copied.
  */
 export const TABLE_MANIFEST = [
@@ -52,7 +52,7 @@ export const TABLE_MANIFEST = [
 
 export type PortableTable = (typeof TABLE_MANIFEST)[number];
 
-export const EXPECTED_TABLE_COUNT = 42;
+export const EXPECTED_TABLE_COUNT = 45;
 
 export const SENSITIVE_COLUMNS = new Set([
   "password_hash",
