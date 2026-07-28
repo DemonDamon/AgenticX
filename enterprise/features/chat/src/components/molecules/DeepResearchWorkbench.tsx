@@ -3,15 +3,14 @@
 import * as React from "react";
 import type { ChatMessageDeepResearch, DeepResearchEvent } from "@agenticx/core-api";
 import { DeepResearchClarifyCard } from "./DeepResearchClarifyCard";
-import { DeepResearchArtifactCard } from "./DeepResearchArtifactCard";
 import { buildDeepResearchSegments } from "./deep-research-segments";
 import type { ResearchStep } from "./deep-research-steps";
 
 export type DeepResearchWorkbenchProps = {
   deepResearch: ChatMessageDeepResearch;
   onClarifySubmitted?: (answers: Record<string, string>) => void;
+  /** Intermediate lane memos via expandable step "查看产物". */
   onOpenArtifact?: (artifactId: string) => void;
-  onOpenFiles?: () => void;
   className?: string;
 };
 
@@ -239,7 +238,6 @@ export function DeepResearchWorkbench({
   deepResearch,
   onClarifySubmitted,
   onOpenArtifact,
-  onOpenFiles,
   className,
 }: DeepResearchWorkbenchProps) {
   const segments = React.useMemo(
@@ -307,30 +305,12 @@ export function DeepResearchWorkbench({
             return (
               <StatusRow key={segment.id} title={segment.title} status={segment.status} />
             );
-          case "artifact":
-            return (
-              <DeepResearchArtifactCard
-                key={segment.id}
-                artifact={segment.artifact}
-                onPreview={onOpenArtifact}
-              />
-            );
           default: {
             const _exhaustive: never = segment;
             return _exhaustive;
           }
         }
       })}
-
-      {deepResearch.artifactIds && deepResearch.artifactIds.length > 0 && onOpenFiles ? (
-        <button
-          type="button"
-          className="mb-3 text-xs font-medium text-primary hover:underline"
-          onClick={onOpenFiles}
-        >
-          全部文件
-        </button>
-      ) : null}
     </div>
   );
 }

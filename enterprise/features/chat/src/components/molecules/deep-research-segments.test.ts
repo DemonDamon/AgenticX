@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { DeepResearchEvent } from "@agenticx/core-api";
 import {
   buildDeepResearchSegments,
+  collectDeepResearchDeliveryArtifacts,
   stripDeepResearchProgressFromContent,
 } from "./deep-research-segments";
 
@@ -68,7 +69,6 @@ describe("buildDeepResearchSegments", () => {
       "tools",
       "narrative",
       "status",
-      "artifact",
       "status",
     ]);
 
@@ -80,6 +80,44 @@ describe("buildDeepResearchSegments", () => {
     expect(
       segments.some((s) => s.kind === "status" && s.title.includes("规划研究路径")),
     ).toBe(false);
+
+    // Report artifacts are deferred to the delivery strip after the body.
+    expect(collectDeepResearchDeliveryArtifacts(events)).toEqual([
+      expect.objectContaining({ id: "rep", kind: "report" }),
+    ]);
+  });
+
+  it("keeps lane memos off the delivery strip", () => {
+    const events: DeepResearchEvent[] = [
+      {
+        type: "lane_started",
+        laneId: "a",
+        title: "定价",
+        index: 1,
+        total: 1,
+      },
+      {
+        type: "artifact",
+        id: "m1",
+        path: "research/r1/lanes/a/memo.md",
+        title: "备忘",
+        kind: "memo",
+        bytes: 4,
+      },
+      {
+        type: "artifact",
+        id: "rep",
+        path: "research/r1/final-report.md",
+        title: "终稿",
+        kind: "report",
+        bytes: 10,
+      },
+    ];
+    expect(collectDeepResearchDeliveryArtifacts(events).map((a) => a.id)).toEqual(["rep"]);
+    const segments = buildDeepResearchSegments(events, "running");
+    const tools = segments.find((s) => s.kind === "tools");
+    const steps = tools && tools.kind === "tools" ? tools.steps : [];
+    expect(steps[0]?.artifactId).toBe("m1");
   });
 });
 
