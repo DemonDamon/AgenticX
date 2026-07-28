@@ -132,6 +132,7 @@ export type ChatStoreActions = {
   showNextRetryVersion(userMessageId: string): void;
   cancel(client: ChatClient): Promise<void>;
   deleteMessage(messageId: string): void;
+  setDeepResearchClarifyAnswers(assistantMessageId: string, answers: Record<string, string>): void;
 };
 
 export type ChatStore = ChatStoreState & ChatStoreActions;
@@ -306,8 +307,10 @@ function applyDeepResearchEventToAssistant(
       (event.type === "clarify_timeout" ||
         event.type === "lane_started" ||
         event.type === "phase" ||
-        event.type === "run_started")
+        event.type === "run_started" ||
+        event.type === "narrative")
     ) {
+      // Post-resume / timeout narratives also leave the clarify gate.
       status = "running";
     }
     const events = [...(prev?.events ?? []), event].slice(-200);
@@ -317,7 +320,13 @@ function applyDeepResearchEventToAssistant(
     }
     return {
       ...message,
-      deep_research: { runId, status, events, artifactIds },
+      deep_research: {
+        runId,
+        status,
+        events,
+        artifactIds,
+        clarifyAnswers: prev?.clarifyAnswers,
+      },
     };
   };
 
@@ -1752,6 +1761,26 @@ export const useChatStore = create<ChatStore>((set, get) => ({
         messages: filteredMessages,
         responseVersionsByUserMessageId: nextVersionMap,
       };
+    });
+  },
+
+  setDeepResearchClarifyAnswers(assistantMessageId, answers) {
+    set((prev) => {
+      const nextMessages = prev.messages.map((message) => {
+        if (message.id !== assistantMessageId || !message.deep_research) return message;
+        return {
+          ...message,
+          deep_research: {
+            ...message.deep_research,
+            clarifyAnswers: answers,
+            status:
+              message.deep_research.status === "awaiting_clarify"
+                ? "running"
+                : message.deep_research.status,
+          },
+        };
+      });
+      return { messages: nextMessages };
     });
   },
 }));

@@ -382,6 +382,10 @@ export async function runDeepResearchTurn(
 
         if (clarifyResult.needed) {
           const questions = clarifyResult.questions;
+          enqueueEvent({
+            type: "narrative",
+            text: "我先快速确认一下调研方向，然后开始系统检索。",
+          });
           for (let i = 0; i < questions.length; i += 1) {
             const q = questions[i]!;
             enqueueEvent({
@@ -402,6 +406,11 @@ export async function runDeepResearchTurn(
             resume = await waitForClarifyResume(runId, clarifyTimeoutMs);
             if (resume.timedOut) {
               enqueueEvent({ type: "clarify_timeout", runId });
+              enqueueEvent({ type: "narrative", text: "澄清超时，按默认假设继续。" });
+            } else if (!resume.skip) {
+              enqueueEvent({ type: "narrative", text: "已明确调研方向，开始系统检索。" });
+            } else {
+              enqueueEvent({ type: "narrative", text: "已跳过确认，按默认假设继续检索。" });
             }
           }
           userQuery = applyClarifyAnswers(userQuery, questions, resume);
@@ -557,6 +566,10 @@ export async function runDeepResearchTurn(
         if (deps.signal?.aborted) throw new DOMException("Aborted", "AbortError");
 
         // --- Synthesize ---
+        enqueueEvent({
+          type: "narrative",
+          text: "检索阶段完成，数据已足够。现在进入综合分析与报告撰写。",
+        });
         enqueueEvent({ type: "phase", phase: "synthesize", message: "正在综合分析…" });
 
         const evidence = formatEvidencePack(plan, citationsByQuestion);
