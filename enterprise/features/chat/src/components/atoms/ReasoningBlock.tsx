@@ -96,7 +96,7 @@ export function ReasoningBlock({ reasoning, thinkingStarted, thinkingInProgress 
           <ThinkingGlyph />
         </span>
         <span className="ml-2.5 flex min-w-0 flex-1 items-center gap-1">
-          <span className="truncate text-[16px] font-medium text-muted-foreground">{title}</span>
+          <span className="truncate text-sm font-medium leading-5 text-muted-foreground">{title}</span>
           <span className="shrink-0 text-muted-foreground/80" aria-hidden>
             <Chevron open={open} />
           </span>
@@ -105,7 +105,7 @@ export function ReasoningBlock({ reasoning, thinkingStarted, thinkingInProgress 
       {showContent && (
         <div className="mt-1.5 min-h-[1.25rem]">
           {content.length > 0 ? (
-            <div className="flex items-stretch text-[13px] leading-[1.7] text-muted-foreground">
+            <div className="flex items-stretch text-sm leading-6 text-muted-foreground">
               {/* 左轨：固定宽度与上方图标一致，确保圆点和竖线绝对居中对齐 */}
               <div
                 className="flex w-5 shrink-0 flex-col items-center pt-[0.45rem]"
