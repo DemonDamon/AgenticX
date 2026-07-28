@@ -8,11 +8,13 @@ import { Button, Tooltip, TooltipContent, TooltipTrigger } from "@agenticx/ui";
 import { displayContentFromRawAssistantText } from "../../assistant-content";
 import { createAssistantMdComponents } from "../../markdown/assistant-markdown-components";
 import {
+  artifactZipEntryPath,
   buildArtifactTree,
   formatArtifactByteSize,
   type ArtifactListItem,
   type ArtifactTreeNode,
 } from "./deep-research-artifact-tree";
+import { buildStoreZip } from "./zip-store";
 import "../../markdown/chat-prism-themes.css";
 
 export type { ArtifactListItem };
@@ -196,93 +198,127 @@ function IconChevronDown({ className }: { className?: string }) {
   );
 }
 
-function collectDirKeys(nodes: ArtifactTreeNode[]): string[] {
-  const keys: string[] = [];
-  for (const node of nodes) {
-    if (node.type !== "dir") continue;
-    keys.push(node.key);
-    keys.push(...collectDirKeys(node.children));
-  }
-  return keys;
+/** Expand only top-level folders by default (children live in an inset group). */
+function topLevelDirKeys(nodes: ArtifactTreeNode[]): string[] {
+  return nodes.filter((n) => n.type === "dir").map((n) => n.key);
+}
+
+function ArtifactFileRow({
+  node,
+  onOpenFile,
+  onDownloadFile,
+}: {
+  node: Extract<ArtifactTreeNode, { type: "file" }>;
+  onOpenFile: (id: string) => void;
+  onDownloadFile: (id: string) => void;
+}) {
+  return (
+    <li className="group/file flex items-center gap-1 rounded-xl transition-colors hover:bg-background/80">
+      <button
+        type="button"
+        onClick={() => onOpenFile(node.artifact.id)}
+        className="flex min-w-0 flex-1 items-center gap-3 px-2.5 py-2.5 text-left"
+        data-testid="deep-research-browse-file"
+      >
+        <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-[10px] bg-muted/60 text-foreground/65">
+          <IconDoc className="h-[18px] w-[18px]" />
+        </span>
+        <span className="min-w-0 flex-1">
+          <span className="block truncate text-[14px] font-medium leading-5 text-foreground">
+            {node.name}
+          </span>
+          <span className="mt-0.5 block truncate text-[12px] leading-4 text-muted-foreground">
+            {node.subtitle ?? formatArtifactByteSize(node.artifact.byteSize)}
+          </span>
+        </span>
+      </button>
+      <button
+        type="button"
+        className="mr-1.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-muted-foreground opacity-70 transition-opacity hover:bg-muted hover:text-foreground hover:opacity-100 group-hover/file:opacity-100"
+        aria-label={`下载 ${node.name}`}
+        data-testid="deep-research-file-download"
+        onClick={(e) => {
+          e.stopPropagation();
+          onDownloadFile(node.artifact.id);
+        }}
+      >
+        <IconDownload className="h-4 w-4" />
+      </button>
+    </li>
+  );
 }
 
 function ArtifactBrowseRow({
   node,
-  depth,
   expanded,
   onToggle,
   onOpenFile,
+  onDownloadFile,
 }: {
   node: ArtifactTreeNode;
-  depth: number;
   expanded: Set<string>;
   onToggle: (key: string) => void;
   onOpenFile: (id: string) => void;
+  onDownloadFile: (id: string) => void;
 }) {
   if (node.type === "dir") {
     const isOpen = expanded.has(node.key);
     return (
-      <li>
+      <li className="mb-1">
         <button
           type="button"
           onClick={() => onToggle(node.key)}
-          className="flex w-full items-center gap-3 rounded-xl px-2 py-2.5 text-left transition-colors hover:bg-muted/50"
-          style={{ paddingLeft: 8 + depth * 14 }}
+          className="flex w-full items-center gap-3 rounded-2xl px-2.5 py-2.5 text-left transition-colors hover:bg-muted/50"
         >
-          <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-border/40 bg-background text-muted-foreground">
-            <IconFolder className="h-4.5 w-4.5 h-[18px] w-[18px]" />
+          <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-[10px] bg-muted/70 text-foreground/70">
+            <IconFolder className="h-5 w-5" />
           </span>
           <span className="min-w-0 flex-1">
-            <span className="block truncate text-sm font-medium text-foreground">{node.name}</span>
-            <span className="block text-xs text-muted-foreground">
-              {formatArtifactByteSize(node.byteSize)}
+            <span className="block truncate text-[15px] font-medium leading-5 text-foreground">
+              {node.name}
+            </span>
+            <span className="mt-0.5 block text-[12px] leading-4 text-muted-foreground">
+              {node.fileCount} 个文件 · {formatArtifactByteSize(node.byteSize)}
             </span>
           </span>
           <IconChevronDown
             className={[
-              "h-4 w-4 shrink-0 text-muted-foreground transition-transform",
+              "mr-1 h-4 w-4 shrink-0 text-muted-foreground/80 transition-transform",
               isOpen ? "" : "-rotate-90",
             ].join(" ")}
           />
         </button>
         {isOpen ? (
-          <ul className="m-0 list-none p-0">
-            {node.children.map((child) => (
-              <ArtifactBrowseRow
-                key={child.key}
-                node={child}
-                depth={depth + 1}
-                expanded={expanded}
-                onToggle={onToggle}
-                onOpenFile={onOpenFile}
-              />
-            ))}
-          </ul>
+          <div className="ml-3 mt-1 rounded-2xl bg-muted/35 p-1.5 ring-1 ring-border/40">
+            <ul className="m-0 list-none space-y-0.5 p-0">
+              {node.children.map((child) =>
+                child.type === "file" ? (
+                  <ArtifactFileRow
+                    key={child.key}
+                    node={child}
+                    onOpenFile={onOpenFile}
+                    onDownloadFile={onDownloadFile}
+                  />
+                ) : (
+                  <ArtifactBrowseRow
+                    key={child.key}
+                    node={child}
+                    expanded={expanded}
+                    onToggle={onToggle}
+                    onOpenFile={onOpenFile}
+                    onDownloadFile={onDownloadFile}
+                  />
+                ),
+              )}
+            </ul>
+          </div>
         ) : null}
       </li>
     );
   }
 
   return (
-    <li>
-      <button
-        type="button"
-        onClick={() => onOpenFile(node.artifact.id)}
-        className="flex w-full items-center gap-3 rounded-xl px-2 py-2.5 text-left transition-colors hover:bg-muted/50"
-        style={{ paddingLeft: 8 + depth * 14 }}
-        data-testid="deep-research-browse-file"
-      >
-        <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-border/40 bg-background text-muted-foreground">
-          <IconDoc className="h-[18px] w-[18px]" />
-        </span>
-        <span className="min-w-0 flex-1">
-          <span className="block truncate text-sm font-medium text-foreground">{node.name}</span>
-          <span className="block text-xs text-muted-foreground">
-            {formatArtifactByteSize(node.artifact.byteSize)}
-          </span>
-        </span>
-      </button>
-    </li>
+    <ArtifactFileRow node={node} onOpenFile={onOpenFile} onDownloadFile={onDownloadFile} />
   );
 }
 
@@ -306,6 +342,7 @@ export function DeepResearchFilesPanel({
   const [error, setError] = React.useState<string | null>(null);
   const [fullscreen, setFullscreen] = React.useState(false);
   const [expanded, setExpanded] = React.useState<Set<string>>(() => new Set());
+  const [zipping, setZipping] = React.useState(false);
 
   const tree = React.useMemo(() => buildArtifactTree(artifacts), [artifacts]);
 
@@ -345,7 +382,7 @@ export function DeepResearchFilesPanel({
         const list = json.data?.artifacts ?? [];
         setArtifacts(list);
         const treeNodes = buildArtifactTree(list);
-        setExpanded(new Set(collectDirKeys(treeNodes)));
+        setExpanded(new Set(topLevelDirKeys(treeNodes)));
 
         const focus = focusArtifactId ? list.find((a) => a.id === focusArtifactId) : null;
         if (focus) {
@@ -395,15 +432,28 @@ export function DeepResearchFilesPanel({
     [previewRaw],
   );
 
-  const downloadTextFile = (item: ArtifactListItem, text: string) => {
-    const blob = new Blob([text], { type: "text/markdown;charset=utf-8" });
+  const triggerBlobDownload = (blob: Blob, filename: string) => {
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
-    a.download = item.path.split("/").pop() || "artifact.md";
+    a.download = filename;
     a.click();
     URL.revokeObjectURL(url);
   };
+
+  const downloadTextFile = (item: ArtifactListItem, text: string) => {
+    const blob = new Blob([text], { type: "text/markdown;charset=utf-8" });
+    triggerBlobDownload(blob, item.path.split("/").pop() || "artifact.md");
+  };
+
+  const fetchArtifactText = React.useCallback(async (id: string): Promise<string> => {
+    const res = await fetch(`/api/chat/artifacts/${encodeURIComponent(id)}`);
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const json = (await res.json()) as {
+      data?: { artifact?: { content?: string } };
+    };
+    return displayContentFromRawAssistantText(json.data?.artifact?.content ?? "");
+  }, []);
 
   const downloadSelected = () => {
     const item = selected;
@@ -411,23 +461,48 @@ export function DeepResearchFilesPanel({
     downloadTextFile(item, previewMarkdown);
   };
 
-  const downloadPrimaryFromBrowse = () => {
-    const item = artifacts.find((a) => a.kind === "report") ?? artifacts[0] ?? null;
-    if (!item) return;
+  const downloadOneById = React.useCallback(
+    (id: string) => {
+      const item = artifacts.find((a) => a.id === id);
+      if (!item) return;
+      void (async () => {
+        try {
+          const text = await fetchArtifactText(id);
+          if (text) downloadTextFile(item, text);
+        } catch {
+          // ignore
+        }
+      })();
+    },
+    [artifacts, fetchArtifactText],
+  );
+
+  const downloadAllAsZip = React.useCallback(() => {
+    if (artifacts.length === 0 || zipping) return;
+    setZipping(true);
     void (async () => {
       try {
-        const res = await fetch(`/api/chat/artifacts/${encodeURIComponent(item.id)}`);
-        if (!res.ok) return;
-        const json = (await res.json()) as {
-          data?: { artifact?: { content?: string } };
-        };
-        const text = displayContentFromRawAssistantText(json.data?.artifact?.content ?? "");
-        if (text) downloadTextFile(item, text);
-      } catch {
-        // ignore
+        const entries = [];
+        for (const item of artifacts) {
+          try {
+            const text = await fetchArtifactText(item.id);
+            entries.push({
+              path: artifactZipEntryPath(item, artifacts),
+              data: new TextEncoder().encode(text),
+            });
+          } catch {
+            // skip failed item
+          }
+        }
+        if (entries.length === 0) return;
+        const zipBlob = buildStoreZip(entries);
+        const stamp = new Date().toISOString().slice(0, 10);
+        triggerBlobDownload(zipBlob, `deep-research-files-${stamp}.zip`);
+      } finally {
+        setZipping(false);
       }
     })();
-  };
+  }, [artifacts, fetchArtifactText, zipping]);
 
   if (!open || !sessionId) return null;
 
@@ -451,7 +526,7 @@ export function DeepResearchFilesPanel({
       data-fullscreen={fullscreen ? "true" : "false"}
       aria-label={browsing ? "全部文件" : "文件预览"}
     >
-      <div className="flex shrink-0 items-center gap-1 border-b border-border px-3 py-2.5 sm:gap-2">
+      <div className="flex shrink-0 items-center gap-0.5 px-4 pb-1 pt-3.5 sm:gap-1">
         {!browsing ? (
           <Button
             type="button"
@@ -468,7 +543,9 @@ export function DeepResearchFilesPanel({
             <IconBack className="h-4 w-4" />
           </Button>
         ) : null}
-        <div className="min-w-0 flex-1 truncate text-sm font-medium text-foreground">{title}</div>
+        <div className="min-w-0 flex-1 truncate text-[15px] font-semibold text-foreground">
+          {title}
+        </div>
         {!browsing ? (
           <Tooltip>
             <TooltipTrigger asChild>
@@ -515,14 +592,15 @@ export function DeepResearchFilesPanel({
                 size="icon"
                 variant="ghost"
                 className="h-8 w-8 shrink-0"
-                disabled={artifacts.length === 0}
-                onClick={downloadPrimaryFromBrowse}
-                aria-label="下载"
+                disabled={artifacts.length === 0 || zipping}
+                onClick={downloadAllAsZip}
+                aria-label="下载所有文件"
+                data-testid="deep-research-download-all"
               >
                 <IconDownload className="h-4 w-4" />
               </Button>
             </TooltipTrigger>
-            <TooltipContent>下载终稿</TooltipContent>
+            <TooltipContent>{zipping ? "打包中…" : "下载所有文件"}</TooltipContent>
           </Tooltip>
         )}
         <Tooltip>
@@ -546,11 +624,14 @@ export function DeepResearchFilesPanel({
       </div>
 
       {browsing ? (
-        <div className="min-h-0 flex-1 overflow-y-auto px-3 py-3" data-testid="deep-research-browse-list">
-          {loading ? <p className="px-2 text-xs text-muted-foreground">加载中…</p> : null}
-          {error ? <p className="px-2 text-xs text-destructive">{error}</p> : null}
+        <div
+          className="min-h-0 flex-1 overflow-y-auto px-3 pb-4 pt-2"
+          data-testid="deep-research-browse-list"
+        >
+          {loading ? <p className="px-3 text-xs text-muted-foreground">加载中…</p> : null}
+          {error ? <p className="px-3 text-xs text-destructive">{error}</p> : null}
           {!loading && !error && tree.length === 0 ? (
-            <p className="px-2 text-xs text-muted-foreground">暂无文件</p>
+            <p className="px-3 text-xs text-muted-foreground">暂无文件</p>
           ) : null}
           {!loading && !error && tree.length > 0 ? (
             <ul className="m-0 list-none space-y-0.5 p-0">
@@ -558,7 +639,6 @@ export function DeepResearchFilesPanel({
                 <ArtifactBrowseRow
                   key={node.key}
                   node={node}
-                  depth={0}
                   expanded={expanded}
                   onToggle={(key) => {
                     setExpanded((prev) => {
@@ -572,6 +652,7 @@ export function DeepResearchFilesPanel({
                     setSelectedId(id);
                     setView("preview");
                   }}
+                  onDownloadFile={downloadOneById}
                 />
               ))}
             </ul>
