@@ -16,10 +16,10 @@ import { createAssistantMdComponents } from "../../markdown/assistant-markdown-c
 import { hostnameFromUrl, siteLabelFromSource } from "../../utils/web-search-citation";
 import { WebSearchFavicon } from "./WebSearchFavicon";
 import { WebSearchSourcesPanel } from "./WebSearchSourcesPanel";
-import { DeepResearchTimeline } from "./DeepResearchTimeline";
-import { DeepResearchClarifyCard } from "./DeepResearchClarifyCard";
-import { DeepResearchArtifactCard } from "./DeepResearchArtifactCard";
+import { DeepResearchWorkbench } from "./DeepResearchWorkbench";
 import { DeepResearchFilesPanel } from "./DeepResearchFilesPanel";
+import { stripDeepResearchProgressFromContent } from "./deep-research-segments";
+import { useChatStore } from "../../store";
 import "../../markdown/chat-prism-themes.css";
 
 // 内联 SVG 图标组件
@@ -214,6 +214,21 @@ export function MessageList({
 }: MessageListProps) {
   const parentRef = React.useRef<HTMLDivElement>(null);
   const autoScrollPinnedRef = React.useRef(true);
+  const listSessionIdForStream = messages[0]?.session_id ?? null;
+  const sessionStreamBusy = useChatStore((state) => {
+    if (!listSessionIdForStream) return false;
+    const sessionStatus =
+      state.streamStateBySessionId[listSessionIdForStream]?.status ??
+      (state.activeSessionId === listSessionIdForStream ? state.status : "idle");
+    return sessionStatus === "sending" || sessionStatus === "streaming";
+  });
+  const inFlightAssistantId = React.useMemo(() => {
+    if (!sessionStreamBusy) return null;
+    for (let i = messages.length - 1; i >= 0; i -= 1) {
+      if (messages[i]?.role === "assistant") return messages[i]!.id;
+    }
+    return null;
+  }, [messages, sessionStreamBusy]);
   const [showJumpToBottomFab, setShowJumpToBottomFab] = React.useState(false);
   const [selectedMessages, setSelectedMessages] = React.useState<Set<string>>(new Set());
   const [isSelectionMode, setIsSelectionMode] = React.useState(false);
@@ -404,7 +419,14 @@ export function MessageList({
             const isClean = styleVariant === "clean";
             const isSelected = selectedMessages.has(message.id);
             const parsedAssistant = isAssistant ? parseAssistantContent(message) : null;
-            const displayContent = parsedAssistant ? parsedAssistant.displayContent : message.content;
+            const rawDisplayContent = parsedAssistant
+              ? parsedAssistant.displayContent
+              : message.content;
+            // Progress prose lives in workbench narrative segments; keep content = final report only.
+            const displayContent =
+              isAssistant && message.deep_research
+                ? stripDeepResearchProgressFromContent(rawDisplayContent)
+                : rawDisplayContent;
             const displayText = displayContent?.trim() ?? "";
             const hasVisibleContent = displayText.length > 0;
             const hasDeepResearchWorkbench = isAssistant && Boolean(message.deep_research);
@@ -445,6 +467,12 @@ export function MessageList({
             const hasRetryVersions = !!retryVersionMeta && retryVersionMeta.total > 1;
             const canShowPreviousRetryVersion = !!retryVersionMeta && retryVersionMeta.activeIndex > 0;
             const canShowNextRetryVersion = !!retryVersionMeta && retryVersionMeta.activeIndex < retryVersionMeta.total - 1;
+            const deepResearchInFlight =
+              isAssistant &&
+              (message.deep_research?.status === "running" ||
+                message.deep_research?.status === "awaiting_clarify");
+            const hideMessageActions =
+              deepResearchInFlight || (isAssistant && message.id === inFlightAssistantId);
 
             const onPointerDown = (e: React.PointerEvent) => {
               if (!shouldStartLongPress(e.pointerType)) return;
@@ -526,7 +554,9 @@ export function MessageList({
                                 : "w-full rounded-[24px] border border-border/40 bg-card px-5 py-3 text-card-foreground shadow-sm",
                         ].join(" ")}
                       >
-                        {showReasoningBlock && parsedAssistant ? (
+                        {/* 普通对话：思考链仍在正文前。深度研究：先工作台（澄清/检索），
+                            综合阶段才出现的 Thinking 必须跟在工作台之后，不能顶到最上面。 */}
+                        {showReasoningBlock && parsedAssistant && !message.deep_research ? (
                           <div className={hasVisibleContent ? "mb-1.5" : ""}>
                             <ReasoningBlock
                               reasoning={parsedAssistant.reasoningContent}
@@ -537,48 +567,32 @@ export function MessageList({
                         ) : null}
 
                         {isAssistant && message.deep_research ? (
-                          <>
-                            <DeepResearchTimeline
-                              events={message.deep_research.events}
-                              status={message.deep_research.status}
+                          <DeepResearchWorkbench
+                            deepResearch={message.deep_research}
+                            onClarifySubmitted={(answers) => {
+                              useChatStore
+                                .getState()
+                                .setDeepResearchClarifyAnswers(message.id, answers);
+                            }}
+                            onOpenArtifact={(id) => {
+                              setFilesPanelSessionId(message.session_id);
+                              setFilesPanelFocusId(id);
+                            }}
+                            onOpenFiles={() => {
+                              setFilesPanelSessionId(message.session_id);
+                              setFilesPanelFocusId(null);
+                            }}
+                          />
+                        ) : null}
+
+                        {showReasoningBlock && parsedAssistant && message.deep_research ? (
+                          <div className={hasVisibleContent ? "mb-1.5" : "mb-3"}>
+                            <ReasoningBlock
+                              reasoning={parsedAssistant.reasoningContent}
+                              thinkingStarted={parsedAssistant.thinkingStarted}
+                              thinkingInProgress={parsedAssistant.thinkingInProgress}
                             />
-                            {message.deep_research.status === "awaiting_clarify" ? (
-                              <DeepResearchClarifyCard events={message.deep_research.events} />
-                            ) : null}
-                            {message.deep_research.events
-                              .filter(
-                                (event): event is Extract<typeof event, { type: "artifact" }> =>
-                                  event.type === "artifact",
-                              )
-                              .map((artifact) => (
-                                <DeepResearchArtifactCard
-                                  key={artifact.id}
-                                  artifact={artifact}
-                                  onPreview={(id) => {
-                                    setFilesPanelSessionId(message.session_id);
-                                    setFilesPanelFocusId(id);
-                                  }}
-                                />
-                              ))}
-                            {message.deep_research.artifactIds &&
-                            message.deep_research.artifactIds.length > 0 ? (
-                              <button
-                                type="button"
-                                className="mb-3 text-xs font-medium text-primary hover:underline"
-                                onClick={() => {
-                                  setFilesPanelSessionId(message.session_id);
-                                  setFilesPanelFocusId(null);
-                                }}
-                              >
-                                全部文件
-                              </button>
-                            ) : null}
-                            {!hasVisibleContent &&
-                            message.deep_research.events.length > 0 &&
-                            message.deep_research.status === "running" ? (
-                              <ThinkingDotsPlaceholder />
-                            ) : null}
-                          </>
+                          </div>
                         ) : null}
 
                         {/* 用户图片附件 */}
@@ -669,8 +683,9 @@ export function MessageList({
                       </div>
 
                       {/* 消息操作按钮 - 移到气泡外部
-                       *  不使用负外边距，避免左右边界“超出正文容器”的观感。 */}
-                      {!isSelectionMode && (
+                       *  不使用负外边距，避免左右边界“超出正文容器”的观感。
+                       *  流式 / 深度研究进行中不展示（避免未完成就出现复制/重试/反馈）。 */}
+                      {!isSelectionMode && !hideMessageActions && (
                         <div
                           className={`mt-1.5 flex items-center gap-1 opacity-0 transition-opacity group-hover/message:opacity-100 ${
                             isUser ? "justify-end" : "justify-start -ml-1.5"

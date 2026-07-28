@@ -28,7 +28,8 @@ export type DeepResearchEvent =
       kind: "memo" | "report" | "other";
       bytes: number;
     }
-  | { type: "clarify_timeout"; runId: string };
+  | { type: "clarify_timeout"; runId: string }
+  | { type: "narrative"; text: string };
 
 export type DeepResearchStatus =
   | "running"
@@ -42,4 +43,5 @@ export type DeepResearchState = {
   status: DeepResearchStatus;
   events: DeepResearchEvent[];
   artifactIds?: string[];
+  clarifyAnswers?: Record<string, string>;
 };
