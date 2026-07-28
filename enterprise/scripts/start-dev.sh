@@ -10,6 +10,7 @@
 #   bash scripts/start-dev.sh              # 仅 enterprise（推荐日常）
 #   bash scripts/start-dev.sh --all        # enterprise + customers/*
 #   bash scripts/start-dev.sh --ui=stream  # 关闭 Turbo TUI，输出纯日志
+#   bash scripts/start-dev.sh --webpack    # Next 不用 Turbopack（本机卡死/Failed to fetch 时用）
 #   bash scripts/start-dev.sh -h           # 帮助
 
 set -euo pipefail
@@ -22,6 +23,7 @@ source "$SCRIPT_DIR/lib/logging.sh"
 
 ALL_APPS=0
 TURBO_UI="tui"
+USE_WEBPACK=0
 
 print_help() {
   cat <<'EOF'
@@ -35,6 +37,8 @@ start-dev.sh — 本机启动 enterprise 一条命令
   --ui=tui | --ui=stream
                         Turbo UI 模式：tui（默认，可上下键切任务）
                         或 stream（无交互，纯日志滚动，方便看 Ctrl+C 与日志）
+  --webpack             Next 走 webpack（package.json 的 dev:webpack），不用 --turbopack。
+                        本机出现「加载很久 → Failed to fetch」、next-server CPU 长期很高时可试。
   -h, --help            显示本帮助
 
 端口：
@@ -51,6 +55,7 @@ for arg in "$@"; do
     --all) ALL_APPS=1 ;;
     --ui=tui) TURBO_UI="tui" ;;
     --ui=stream) TURBO_UI="stream" ;;
+    --webpack) USE_WEBPACK=1 ;;
     -h|--help) print_help; exit 0 ;;
     *) echo "[start-dev] 未知参数: $arg (可用 --help 查看)" >&2; exit 2 ;;
   esac
@@ -250,13 +255,21 @@ else
   SCOPE="ALL workspace apps (enterprise + customers/*)"
 fi
 
-echo "[start-dev] booting Next apps → $SCOPE"
+NEXT_DEV_SCRIPT="dev"
+if [ "$USE_WEBPACK" -eq 1 ]; then
+  NEXT_DEV_SCRIPT="dev:webpack"
+fi
+
+echo "[start-dev] booting Next apps → $SCOPE (script=$NEXT_DEV_SCRIPT)"
+if [ "$USE_WEBPACK" -eq 1 ]; then
+  echo "[start-dev] Next bundler: webpack（已跳过 --turbopack）"
+fi
 if [ "$TURBO_UI" = "tui" ]; then
   echo "[start-dev] 提示：pnpm parallel 无 Turbo TUI；要看纯日志可加 --ui=stream（行为相同）。"
 fi
 (
   cd "$ENTERPRISE_DIR"
-  exec pnpm "${PNPM_DEV_FILTERS[@]}" --parallel dev
+  exec pnpm "${PNPM_DEV_FILTERS[@]}" --parallel "$NEXT_DEV_SCRIPT"
 ) &
 PIDS+=("$!")
 
