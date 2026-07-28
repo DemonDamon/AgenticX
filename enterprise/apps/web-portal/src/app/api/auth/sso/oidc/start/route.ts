@@ -1,5 +1,6 @@
 import { OidcConfigError, buildStateCookieValue } from "@agenticx/auth";
 import { NextResponse } from "next/server";
+import { isAuthCookieSecure } from "../../../../../../lib/session";
 import {
   getOidcClientService,
   getPortalSsoProviderConfigServer,
@@ -96,7 +97,7 @@ export async function GET(request: Request) {
     const response = NextResponse.redirect(authorizationUrl);
     response.cookies.set(PORTAL_OIDC_STATE_COOKIE, cookieValue, {
       httpOnly: true,
-      secure: process.env.NODE_ENV === "production",
+      secure: isAuthCookieSecure(),
       sameSite: "lax",
       path: "/api/auth/sso/oidc",
       maxAge: 10 * 60,

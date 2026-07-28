@@ -5,6 +5,13 @@ import { refreshTokens, verifyAccessToken } from "./auth-runtime";
 export const ACCESS_COOKIE = "agenticx_access_token";
 export const REFRESH_COOKIE = "agenticx_refresh_token";
 
+export function isAuthCookieSecure(): boolean {
+  const configured = process.env.AUTH_COOKIE_SECURE?.trim().toLowerCase();
+  if (configured === "true") return true;
+  if (configured === "false") return false;
+  return process.env.NODE_ENV === "production";
+}
+
 async function hydrateFromDatabase<
   T extends { userId: string; tenantId: string; email: string; scopes: string[]; deptId?: string | null },
 >(context: T): Promise<T | null> {
@@ -58,14 +65,14 @@ export async function getSessionFromCookies() {
     cookieStore.set(ACCESS_COOKIE, nextTokens.accessToken, {
       httpOnly: true,
       sameSite: "lax",
-      secure: process.env.NODE_ENV === "production",
+      secure: isAuthCookieSecure(),
       maxAge: nextTokens.expiresInSeconds,
       path: "/",
     });
     cookieStore.set(REFRESH_COOKIE, nextTokens.refreshToken, {
       httpOnly: true,
       sameSite: "lax",
-      secure: process.env.NODE_ENV === "production",
+      secure: isAuthCookieSecure(),
       maxAge: 7 * 24 * 60 * 60,
       path: "/",
     });
