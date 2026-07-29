@@ -9,6 +9,12 @@ import {
   type UserGroupRecord,
 } from "./user-groups-store";
 import { collectUserAssignmentKeys, listAllAssignments, mergeUserStoredSet } from "./user-models-store";
+import {
+  computeEffectiveDeptAllowed,
+  computeEffectiveUserAllowed,
+  isUsageModelCurrentlyAllowed,
+} from "./effective-models";
+import { listAllEnabledModelIds } from "./model-providers-store";
 
 export type OverviewMember = Pick<AdminUserDto, "id" | "displayName" | "email" | "deptId"> & {
   usedTokens: number;
@@ -21,7 +27,7 @@ export type GroupMemberOverview = OverviewMember & {
   hasIndividualOverride: boolean;
 };
 
-export type ModelUsage = { model: string; tokens: number };
+export type ModelUsage = { model: string; tokens: number; currentlyAllowed: boolean };
 
 export type GroupQuotaOverview = UserGroupRecord & {
   unlimited: boolean;
@@ -108,7 +114,7 @@ function membersFor(ids: string[], usersById: Map<string, AdminUserDto>, usage: 
     .sort((a, b) => b.usedTokens - a.usedTokens || a.displayName.localeCompare(b.displayName));
 }
 
-function modelsFor(memberIds: string[], usage: UsageIndex): ModelUsage[] {
+function modelsFor(memberIds: string[], usage: UsageIndex, allowedModelIds: readonly string[]): ModelUsage[] {
   const totals = new Map<string, number>();
   for (const memberId of memberIds) {
     for (const [model, tokens] of usage.byUserModel.get(memberId) ?? []) {
@@ -116,9 +122,28 @@ function modelsFor(memberIds: string[], usage: UsageIndex): ModelUsage[] {
     }
   }
   return [...totals.entries()]
-    .map(([model, tokens]) => ({ model, tokens }))
+    .map(([model, tokens]) => ({
+      model,
+      tokens,
+      currentlyAllowed: isUsageModelCurrentlyAllowed(model, allowedModelIds),
+    }))
     .sort((a, b) => b.tokens - a.tokens || a.model.localeCompare(b.model))
     .slice(0, 4);
+}
+
+function departmentAncestorChain(
+  deptId: string,
+  departmentsById: ReadonlyMap<string, Awaited<ReturnType<typeof listDepartmentsFlat>>[number]>,
+): string[] {
+  const chain: string[] = [];
+  const visited = new Set<string>();
+  let current = departmentsById.get(deptId);
+  while (current && !visited.has(current.id)) {
+    visited.add(current.id);
+    chain.push(current.id);
+    current = current.parentId ? departmentsById.get(current.parentId) : undefined;
+  }
+  return chain;
 }
 
 function isAdministrator(user: AdminUserDto): boolean {
@@ -234,14 +259,27 @@ export async function loadGroupQuotaOverview(tenantId: string): Promise<{
 }
 
 export async function loadUserQuotaOverview(tenantId: string): Promise<UserQuotaOverview[]> {
-  const [users, config, groups, departments] = await Promise.all([
+  const [users, config, groups, departments, assignments, allEnabledModelIds] = await Promise.all([
     listAllUsers(tenantId),
     getQuotaConfig(),
     listUserGroups(),
     listDepartmentsFlat(tenantId),
+    listAllAssignments(),
+    listAllEnabledModelIds(),
   ]);
   const usage = await buildUsageIndex(users.map((user) => user.id));
   const departmentsById = new Map(departments.map((department) => [department.id, department]));
+  const effectiveModelsByDepartment = new Map<string, string[]>();
+  for (const department of departments) {
+    effectiveModelsByDepartment.set(
+      department.id,
+      computeEffectiveDeptAllowed({
+        allEnabledIds: allEnabledModelIds,
+        userVisibleMap: assignments,
+        ancestorChain: departmentAncestorChain(department.id, departmentsById),
+      }),
+    );
+  }
   const groupNamesByUser = new Map<string, string[]>();
   for (const group of groups) {
     for (const userId of group.memberIds) {
@@ -256,6 +294,17 @@ export async function loadUserQuotaOverview(tenantId: string): Promise<UserQuota
       const selected = ruleForUser(config, groups, user);
       const monthlyTokens = Math.max(0, Number(selected.rule?.monthlyTokens ?? 0));
       const department = user.deptId ? departmentsById.get(user.deptId) : undefined;
+      const parentAllowedModelIds = user.deptId
+        ? effectiveModelsByDepartment.get(user.deptId) ?? allEnabledModelIds
+        : allEnabledModelIds;
+      const storedModelIds = mergeUserStoredSet(assignments, collectUserAssignmentKeys(user.id, user.email));
+      const groupModelIds = groupModelIdsForUser(groups, user.id);
+      const effectiveModelIds = computeEffectiveUserAllowed(
+        parentAllowedModelIds,
+        storedModelIds,
+        groupModelIds,
+        groupModelExclusionsForUser(config, user.id),
+      );
       return {
         id: user.id,
         displayName: user.displayName,
@@ -273,7 +322,7 @@ export async function loadUserQuotaOverview(tenantId: string): Promise<UserQuota
         quotaSource: selected.quotaSource,
         ...(selected.quotaSourceLabel ? { quotaSourceLabel: selected.quotaSourceLabel } : {}),
         groupNames: groupNamesByUser.get(user.id) ?? [],
-        topModels: modelsFor([user.id], usage),
+        topModels: modelsFor([user.id], usage, effectiveModelIds),
       } satisfies UserQuotaOverview;
     })
     .sort((a, b) => b.usedTokens - a.usedTokens || a.displayName.localeCompare(b.displayName));

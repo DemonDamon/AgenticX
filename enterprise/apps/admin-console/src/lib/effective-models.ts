@@ -121,3 +121,14 @@ export function computeEffectiveUserAllowed(
   if (userStored === null) return [...deptEffective];
   return [...intersectSets(deptSet, userStored)];
 }
+
+/** 用量记录可能只保存模型名；配置项则使用 `providerId/modelName`。 */
+export function isUsageModelCurrentlyAllowed(usageModel: string, allowedModelIds: readonly string[]): boolean {
+  const normalizedUsageModel = usageModel.trim().toLowerCase();
+  if (!normalizedUsageModel) return false;
+
+  return allowedModelIds.some((modelId) => {
+    const normalizedModelId = modelId.trim().toLowerCase();
+    return normalizedModelId === normalizedUsageModel || normalizedModelId.endsWith(`/${normalizedUsageModel}`);
+  });
+}

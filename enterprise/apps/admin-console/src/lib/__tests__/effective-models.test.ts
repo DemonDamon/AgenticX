@@ -6,6 +6,7 @@ import {
   computeEffectiveUserAllowed,
   computeParentAllowedIds,
   computePrunedModelIds,
+  isUsageModelCurrentlyAllowed,
   mergeUserStoredSet,
 } from "../effective-models";
 
@@ -100,5 +101,11 @@ describe("effective-models", () => {
 
   it("computePrunedModelIds lists stored outside allowed", () => {
     expect(computePrunedModelIds(["a/A", "x/Y"], new Set(["a/A"]))).toEqual(["x/Y"]);
+  });
+
+  it("matches a usage model name against provider-scoped effective models", () => {
+    expect(isUsageModelCurrentlyAllowed("glm-5.2", ["provider-a/glm-5.2"])).toBe(true);
+    expect(isUsageModelCurrentlyAllowed("provider-a/glm-5.2", ["provider-a/glm-5.2"])).toBe(true);
+    expect(isUsageModelCurrentlyAllowed("gpt-5.4-nano", ["provider-a/glm-5.2"])).toBe(false);
   });
 });

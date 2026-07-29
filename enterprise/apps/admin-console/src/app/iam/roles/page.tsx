@@ -26,7 +26,7 @@ import { ArrowUpRight, Copy, KeyRound, Pencil, RefreshCw, UsersRound } from "luc
 import { adminFetch } from "../../../lib/admin-client-auth";
 import { QuotaRing, formatTokenCount } from "../../../components/QuotaRing";
 
-type ModelUsage = { model: string; tokens: number };
+type ModelUsage = { model: string; tokens: number; currentlyAllowed: boolean };
 type UserQuotaOverview = {
   id: string;
   displayName: string;
@@ -386,7 +386,16 @@ export default function RolesPage() {
                 <div className="flex flex-wrap gap-1.5">
                   {user.topModels.length
                     ? user.topModels.map((model) => (
-                        <Badge key={model.model} variant="secondary" className="max-w-full truncate font-normal">
+                        <Badge
+                          key={model.model}
+                          variant="outline"
+                          title={model.currentlyAllowed ? "当前可用模型" : "历史消耗模型，当前未开通"}
+                          className={`max-w-full truncate font-normal ${
+                            model.currentlyAllowed
+                              ? "border-amber-400/70 bg-amber-300/30 text-amber-950 dark:border-amber-300/50 dark:bg-amber-400/20 dark:text-amber-100"
+                              : "bg-background"
+                          }`}
+                        >
                           {model.model} · {formatTokenCount(model.tokens)}
                         </Badge>
                       ))
