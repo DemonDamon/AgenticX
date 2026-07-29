@@ -34,7 +34,7 @@ import { parseContextNotice } from "../../utils/context-notice";
 import { parseBudgetExceededFromText } from "../../utils/budget-exceeded";
 import { shouldShowBudgetIncompleteHint } from "../../utils/budget-incomplete-message";
 import { isViewImageInjectMessage } from "../../utils/view-image-inject";
-import { parseTodoMessage, TodoUpdateCard } from "../TodoUpdateCard";
+import { parseTodoMessage } from "../TodoUpdateCard";
 import { isMetaLeaderIdentity, resolveMetaDisplayName } from "../../utils/display-name";
 import { resolveReferencesForAssistant } from "../../utils/turn-reference-context";
 import type { SkillPatchPreviewPayload } from "./skill-manage-preview";
@@ -402,12 +402,9 @@ export function MessageRenderer({
         />
       );
     }
-    if (isTodoUpdateToolMessage(message.content)) {
-      return (
-        <div className="rounded-lg border border-border bg-surface-card px-3 py-3 text-[13px] text-text-muted">
-          <TodoUpdateCard content={message.content} />
-        </div>
-      );
+    // Inline「任务清单」card removed — StickyTaskBar owns the live checklist UI.
+    if (isTodoUpdateToolMessage(message.content) || (message.toolName ?? "").trim() === "todo_write") {
+      return null;
     }
     if ((message.toolName ?? "").trim() === "show_widget") {
       const payload = parseWidgetPayload(message.content);
