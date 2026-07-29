@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   isTurnInterruptionNoticeMessage,
   parseTurnInterruptionNotice,
+  shouldAutoResumeTruncationInterruption,
   TURN_INTERRUPTED_KIND,
 } from "./turn-interruption-notice";
 
@@ -52,5 +53,29 @@ describe("turn-interruption-notice", () => {
     });
 
     expect(parsed?.cause).toBe("suspected_truncated_final");
+  });
+
+  it("auto-resumes streamed tool truncation but not user interrupt", () => {
+    expect(
+      shouldAutoResumeTruncationInterruption({
+        role: "tool",
+        content: "本轮生成已取消…（原因：工具参数流式截断）",
+        metadata: {
+          kind: TURN_INTERRUPTED_KIND,
+          cause: "cancelled",
+          detector: "streamed_tool_call_truncated",
+        },
+      }),
+    ).toBe(true);
+    expect(
+      shouldAutoResumeTruncationInterruption({
+        role: "tool",
+        content: "已按用户请求中断当前生成。可点「恢复执行」继续。",
+        metadata: {
+          kind: TURN_INTERRUPTED_KIND,
+          cause: "user_interrupt",
+        },
+      }),
+    ).toBe(false);
   });
 });

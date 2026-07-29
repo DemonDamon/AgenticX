@@ -3442,9 +3442,9 @@ def create_studio_app() -> FastAPI:
                 else:
                     while True:
                         if await request.is_disconnected():
+                            client_disconnected = True
                             if not keep_runtime_after_disconnect:
                                 break
-                            client_disconnected = True
                         timed_out = False
                         try:
                             event = await asyncio.wait_for(event_queue.get(), timeout=0.1)
@@ -3498,13 +3498,80 @@ def create_studio_app() -> FastAPI:
                             payload.session_id,
                         )
                     elif keep_runtime_after_disconnect and client_disconnected:
+                        # Without event hub, drain the local queue while awaiting
+                        # completion so saw_final/had_runtime_failure stay accurate.
+                        # Previous 1s wait + cancel defeated keep_runtime (network
+                        # blips killed truncation auto-retries mid-flight).
+                        logger.info(
+                            "[chat] client disconnected, awaiting runtime (keep_runtime) session=%s",
+                            payload.session_id,
+                        )
+                        while True:
+                            if runtime_task.done() and event_queue.empty():
+                                break
+                            try:
+                                event = await asyncio.wait_for(event_queue.get(), timeout=0.5)
+                            except asyncio.TimeoutError:
+                                if runtime_task.done():
+                                    while True:
+                                        try:
+                                            queued = event_queue.get_nowait()
+                                        except asyncio.QueueEmpty:
+                                            break
+                                        if queued is None:
+                                            meta_done = True
+                                            continue
+                                        partial_meta_text = _accumulate_meta_partial_text(
+                                            partial_meta_text, queued
+                                        )
+                                        if (
+                                            queued.type == EventType.FINAL.value
+                                            and queued.agent_id == "meta"
+                                        ):
+                                            saw_final = True
+                                        elif _runtime_error_counts_as_failure(queued):
+                                            had_runtime_failure = True
+                                            _record_last_turn_failure(session, queued)
+                                        if (
+                                            queued.agent_id == "meta"
+                                            and queued.type == EventType.ROUND_END.value
+                                        ):
+                                            _record_last_turn_failure(session, queued)
+                                    break
+                                continue
+                            if event is None:
+                                meta_done = True
+                                if runtime_task.done():
+                                    break
+                                continue
+                            partial_meta_text = _accumulate_meta_partial_text(
+                                partial_meta_text, event
+                            )
+                            if event.agent_id == "meta" and event.type == EventType.TOOL_RESULT.value:
+                                _flush_taskspace_hint(manager, payload.session_id, session)
+                            if event.agent_id == "meta" and event.type == EventType.ROUND_END.value:
+                                _record_last_turn_failure(session, event)
+                            if event.type == EventType.FINAL.value and event.agent_id == "meta":
+                                saw_final = True
+                            elif _runtime_error_counts_as_failure(event):
+                                had_runtime_failure = True
+                                _record_last_turn_failure(session, event)
                         with contextlib.suppress(Exception):
-                            await asyncio.wait_for(runtime_task, timeout=1.0)
+                            await runtime_task
+                        logger.info(
+                            "[chat] runtime finished after disconnect session=%s saw_final=%s",
+                            payload.session_id,
+                            saw_final,
+                        )
                     if runtime_task is not None and not runtime_task.done():
-                        if event_hub is None or not client_disconnected:
+                        keep_alive = (
+                            (event_hub is not None and client_disconnected)
+                            or (keep_runtime_after_disconnect and client_disconnected)
+                        )
+                        if not keep_alive:
                             runtime_was_cancelled = True
                             runtime_task.cancel()
-                    else:
+                    elif client_disconnected:
                         logger.info(
                             "[chat] runtime finished after disconnect session=%s",
                             payload.session_id,
@@ -3646,6 +3713,7 @@ def create_studio_app() -> FastAPI:
                     skip_user_history=True,
                     provider=managed.studio_session.provider_name,
                     model=managed.studio_session.model_name,
+                    keep_runtime_after_disconnect=True,
                 )
                 inner = await chat(chat_payload, request, x_agx_desktop_token)
                 if inner.body_iterator is not None:

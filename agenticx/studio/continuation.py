@@ -153,9 +153,12 @@ def _last_failure_label(session: Any) -> str:
             meta = meta_raw if isinstance(meta_raw, dict) else {}
             if str(meta.get("kind", "") or "") != "turn_interrupted":
                 continue
+            detector = str(meta.get("detector", "") or "").strip()
+            if detector:
+                return detector
             cause = str(meta.get("cause", "") or "").strip()
-            if cause in {"runtime_failure", "no_final"}:
-                return str(meta.get("detector", "") or "").strip() or cause
+            if cause in {"runtime_failure", "no_final", "cancelled", "client_disconnect"}:
+                return cause
             break
     return ""
 

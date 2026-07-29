@@ -29,10 +29,18 @@ export function isTurnInterruptionNoticeMessage(message: NoticePick): boolean {
   );
 }
 
+/** Detectors that are safe to auto-resume once without unattended mode. */
+const AUTO_RESUME_DETECTORS = new Set([
+  "streamed_tool_call_truncated",
+  "llm_stream_timeout",
+  "llm_round_timeout",
+]);
+
 export function parseTurnInterruptionNotice(message: NoticePick): {
   cause: TurnInterruptionCause;
   text: string;
   failureSummary: string;
+  detector: string;
 } | null {
   if (!isTurnInterruptionNoticeMessage(message)) return null;
   const meta = (message.metadata ?? {}) as Record<string, unknown>;
@@ -50,7 +58,20 @@ export function parseTurnInterruptionNotice(message: NoticePick): {
   const text = String(message.content ?? "").trim();
   if (!text) return null;
   const failureSummary = String(meta.failure_summary ?? "").trim();
-  return { cause, text, failureSummary };
+  const detector = String(meta.detector ?? "").trim().toLowerCase();
+  return { cause, text, failureSummary, detector };
+}
+
+/**
+ * True when a turn_interrupted notice should auto-continue once (Cursor-like),
+ * without requiring global「无人值守」. User interrupts are never auto-resumed.
+ */
+export function shouldAutoResumeTruncationInterruption(message: NoticePick): boolean {
+  const parsed = parseTurnInterruptionNotice(message);
+  if (!parsed) return false;
+  if (parsed.cause === "user_interrupt") return false;
+  if (AUTO_RESUME_DETECTORS.has(parsed.detector)) return true;
+  return parsed.text.includes("工具参数流式截断") || parsed.text.includes("模型流式响应超时");
 }
 
 export function turnInterruptionToastForCause(cause: TurnInterruptionCause | null): string {
