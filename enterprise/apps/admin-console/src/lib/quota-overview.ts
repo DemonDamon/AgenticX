@@ -2,6 +2,7 @@ import { listAdminUsers, listDepartmentsFlat, type AdminUserDto } from "@agentic
 import { queryMetering } from "./metering-service";
 import { getQuotaConfig, type QuotaRule } from "./token-quota-store";
 import {
+  groupModelExclusionsForUser,
   groupModelIdsForUser,
   groupQuotaSourceForUser,
   listUserGroups,
@@ -16,6 +17,7 @@ export type OverviewMember = Pick<AdminUserDto, "id" | "displayName" | "email" |
 export type GroupMemberOverview = OverviewMember & {
   hasIndividualQuotaOverride: boolean;
   individualExtraModelIds: string[];
+  excludedGroupModelIds: string[];
   hasIndividualOverride: boolean;
 };
 
@@ -27,7 +29,9 @@ export type GroupQuotaOverview = UserGroupRecord & {
   members: GroupMemberOverview[];
 };
 
-export type UserQuotaOverview = OverviewMember & {
+export type UserQuotaOverview = OverviewMember & Pick<AdminUserDto, "status" | "phone" | "employeeNo" | "jobTitle"> & {
+  departmentName?: string;
+  departmentPath?: string;
   monthlyTokens: number;
   unlimited: boolean;
   inherited: boolean;
@@ -189,11 +193,13 @@ function groupMemberOverview(
   const inheritedModelIds = new Set(groupModelIdsForUser(groups, user.id));
   const directModelIds = mergeUserStoredSet(assignments, collectUserAssignmentKeys(user.id, user.email)) ?? [];
   const individualExtraModelIds = directModelIds.filter((modelId) => !inheritedModelIds.has(modelId));
+  const excludedGroupModelIds = groupModelExclusionsForUser(config, user.id).filter((modelId) => inheritedModelIds.has(modelId));
   return {
     ...user,
     hasIndividualQuotaOverride,
     individualExtraModelIds,
-    hasIndividualOverride: hasIndividualQuotaOverride || individualExtraModelIds.length > 0,
+    excludedGroupModelIds,
+    hasIndividualOverride: hasIndividualQuotaOverride || individualExtraModelIds.length > 0 || excludedGroupModelIds.length > 0,
   };
 }
 
@@ -228,8 +234,14 @@ export async function loadGroupQuotaOverview(tenantId: string): Promise<{
 }
 
 export async function loadUserQuotaOverview(tenantId: string): Promise<UserQuotaOverview[]> {
-  const [users, config, groups] = await Promise.all([listAllUsers(tenantId), getQuotaConfig(), listUserGroups()]);
+  const [users, config, groups, departments] = await Promise.all([
+    listAllUsers(tenantId),
+    getQuotaConfig(),
+    listUserGroups(),
+    listDepartmentsFlat(tenantId),
+  ]);
   const usage = await buildUsageIndex(users.map((user) => user.id));
+  const departmentsById = new Map(departments.map((department) => [department.id, department]));
   const groupNamesByUser = new Map<string, string[]>();
   for (const group of groups) {
     for (const userId of group.memberIds) {
@@ -243,11 +255,17 @@ export async function loadUserQuotaOverview(tenantId: string): Promise<UserQuota
     .map((user) => {
       const selected = ruleForUser(config, groups, user);
       const monthlyTokens = Math.max(0, Number(selected.rule?.monthlyTokens ?? 0));
+      const department = user.deptId ? departmentsById.get(user.deptId) : undefined;
       return {
         id: user.id,
         displayName: user.displayName,
         email: user.email,
         deptId: user.deptId,
+        ...(department ? { departmentName: department.name, departmentPath: department.path } : {}),
+        status: user.status,
+        phone: user.phone,
+        employeeNo: user.employeeNo,
+        jobTitle: user.jobTitle,
         usedTokens: usage.byUser.get(user.id) ?? 0,
         monthlyTokens,
         unlimited: monthlyTokens <= 0,

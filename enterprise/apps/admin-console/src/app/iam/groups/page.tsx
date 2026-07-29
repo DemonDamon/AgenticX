@@ -412,42 +412,42 @@ export default function GroupsPage() {
                   <CardTitle className="truncate">{group.name}</CardTitle>
                   <CardDescription className="mt-1 line-clamp-2 min-h-10">{group.description || "批量管理成员的额度和基础可用模型"}</CardDescription>
                 </div>
-                <Badge variant="secondary" className="shrink-0">{group.memberCount} 人</Badge>
+                <Badge variant="secondary" className="shrink-0">成员 {group.memberCount}</Badge>
               </div>
             </CardHeader>
             <CardContent className="space-y-4">
-              <div className="flex items-center justify-between rounded-xl border border-border bg-muted/20 px-4 py-3">
-                <div>
-                  <p className="text-xs text-muted-foreground">每人月额度</p>
-                  <p className="mt-1 font-semibold">{tokenSetting(group.monthlyTokens)}</p>
-                </div>
-                <span className="inline-flex items-center gap-1 text-xs text-primary"><Pencil className="h-3 w-3" />编辑用户组</span>
-              </div>
               <section className="space-y-2">
-                <p className="text-xs font-medium text-muted-foreground">基础可用模型</p>
-                <div className="flex flex-wrap gap-1.5">
-                  {group.modelIds.length ? group.modelIds.map((modelId) => {
-                    const model = modelLabels.get(modelId);
-                    return <Badge key={modelId} variant="outline" className="max-w-full truncate font-normal">{model?.label ?? modelId}</Badge>;
-                  }) : <span className="text-sm text-muted-foreground">未指定基础模型</span>}
+                <div className="flex items-center justify-between gap-3">
+                  <p className="text-sm font-medium">成员</p>
+                  <span className="inline-flex items-center gap-1 text-xs text-primary"><Pencil className="h-3 w-3" />编辑用户组</span>
                 </div>
-              </section>
-              <section className="space-y-2 border-t border-border pt-3">
-                <p className="text-xs font-medium text-muted-foreground">成员</p>
-                <div className="flex flex-wrap gap-1.5">
+                <div className="grid max-h-72 gap-2 overflow-y-auto rounded-xl border border-border p-2 sm:grid-cols-2">
                   {group.members.length ? group.members.map((member) => (
                     <Link
                       key={member.id}
                       href={`/iam/roles?user=${encodeURIComponent(member.id)}`}
                       onClick={(event) => event.stopPropagation()}
-                      className="inline-flex max-w-full items-center gap-1 rounded-md border border-border px-2 py-1 text-xs transition-colors hover:border-primary/50 hover:bg-muted"
+                      className="flex min-w-0 items-center gap-2 rounded-lg border border-transparent px-2 py-2 text-sm transition-colors hover:border-primary/50 hover:bg-muted"
                     >
-                      <span className="truncate">{member.displayName}</span>
-                      {member.hasIndividualOverride ? <Badge variant="outline" className="border-amber-500/50 px-1 py-0 text-[10px] text-amber-700 dark:text-amber-300">个人特例</Badge> : null}
+                      <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-primary/10 text-xs font-semibold text-primary">{member.displayName.slice(0, 1)}</span>
+                      <span className="min-w-0 flex-1"><span className="block truncate font-medium">{member.displayName}</span><span className="block truncate text-xs text-muted-foreground">{member.email}</span></span>
+                      {member.hasIndividualOverride ? <Badge variant="outline" className="shrink-0 border-amber-500/50 px-1 py-0 text-[10px] text-amber-700 dark:text-amber-300">个人特例</Badge> : null}
                     </Link>
-                  )) : <span className="text-sm text-muted-foreground">尚未选择成员</span>}
+                  )) : <span className="p-2 text-sm text-muted-foreground">尚未选择成员</span>}
                 </div>
               </section>
+              <div className="flex flex-wrap items-start justify-between gap-3 border-t border-border pt-3">
+                <section className="min-w-0 flex-1 space-y-2">
+                  <p className="text-xs font-medium text-muted-foreground">基础可用模型</p>
+                  <div className="flex flex-wrap gap-1.5">
+                    {group.modelIds.length ? group.modelIds.map((modelId) => {
+                      const model = modelLabels.get(modelId);
+                      return <Badge key={modelId} variant="outline" className="max-w-full truncate font-normal">{model?.label ?? modelId}</Badge>;
+                    }) : <span className="text-sm text-muted-foreground">未指定基础模型</span>}
+                  </div>
+                </section>
+                <Badge variant="outline" className="shrink-0 font-normal">每人 {tokenSetting(group.monthlyTokens)}</Badge>
+              </div>
             </CardContent>
           </Card>
         ))}
@@ -458,8 +458,13 @@ export default function GroupsPage() {
           {editing ? (
             <>
               <SheetHeader className="border-b border-border pb-5">
-                <SheetTitle>{editing === "new" ? "新建用户组" : `编辑 ${editing.name}`}</SheetTitle>
-                <SheetDescription>保存后会为成员应用每人月额度；基础模型在运行时自动继承，成员可以在用户页面额外开通模型。</SheetDescription>
+                <div className="flex items-start justify-between gap-4">
+                  <div className="min-w-0">
+                    <SheetTitle>{editing === "new" ? "新建用户组" : `编辑 ${editing.name}`}</SheetTitle>
+                    <SheetDescription className="mt-1">保存后会为成员应用每人月额度；基础模型在运行时自动继承，成员可以在用户页面额外开通或关闭模型。</SheetDescription>
+                  </div>
+                  <Button size="sm" onClick={() => void save()} disabled={saving}>{saving ? "保存中…" : "保存并应用"}</Button>
+                </div>
               </SheetHeader>
               <div className="space-y-6 py-6">
                 <div className="grid gap-4 sm:grid-cols-2">
@@ -529,8 +534,7 @@ export default function GroupsPage() {
                 ) : null}
               </div>
               <div className="mt-auto flex justify-end gap-2 border-t border-border pt-4">
-                <Button variant="outline" onClick={() => setEditing(null)}>取消</Button>
-                <Button onClick={() => void save()} disabled={saving}>{saving ? "保存中…" : "保存并应用"}</Button>
+                <Button variant="outline" onClick={() => setEditing(null)}>关闭</Button>
               </div>
             </>
           ) : null}

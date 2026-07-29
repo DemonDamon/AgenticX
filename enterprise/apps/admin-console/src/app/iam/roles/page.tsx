@@ -22,7 +22,7 @@ import {
   Skeleton,
   toast,
 } from "@agenticx/ui";
-import { ArrowUpRight, Pencil, RefreshCw, UsersRound } from "lucide-react";
+import { ArrowUpRight, Copy, KeyRound, Pencil, RefreshCw, UsersRound } from "lucide-react";
 import { adminFetch } from "../../../lib/admin-client-auth";
 import { QuotaRing, formatTokenCount } from "../../../components/QuotaRing";
 
@@ -32,6 +32,12 @@ type UserQuotaOverview = {
   displayName: string;
   email: string;
   deptId: string | null;
+  departmentName?: string;
+  departmentPath?: string;
+  status: "active" | "disabled" | "locked";
+  phone: string | null;
+  employeeNo: string | null;
+  jobTitle: string | null;
   usedTokens: number;
   monthlyTokens: number;
   unlimited: boolean;
@@ -46,6 +52,7 @@ type ModelAccess = {
   parentAllowedIds: string[];
   individualModelIds?: string[];
   groupModelIds?: string[];
+  excludedGroupModelIds?: string[];
   groupModelSources?: Array<{ id: string; name: string; modelIds: string[] }>;
   effectiveModelIds?: string[];
 };
@@ -73,8 +80,12 @@ export default function RolesPage() {
   const [modelAccess, setModelAccess] = useState<ModelAccess | null>(null);
   const [manualModelIds, setManualModelIds] = useState<string[]>([]);
   const [initialManualModelIds, setInitialManualModelIds] = useState<string[]>([]);
+  const [excludedGroupModelIds, setExcludedGroupModelIds] = useState<string[]>([]);
+  const [initialExcludedGroupModelIds, setInitialExcludedGroupModelIds] = useState<string[]>([]);
   const [loadingModels, setLoadingModels] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [resetPasswordPending, setResetPasswordPending] = useState(false);
+  const [newPassword, setNewPassword] = useState<string | null>(null);
   const openedFromQueryRef = useRef<string | null>(null);
 
   const load = useCallback(async () => {
@@ -127,6 +138,10 @@ export default function RolesPage() {
     setModelAccess(null);
     setManualModelIds([]);
     setInitialManualModelIds([]);
+    setExcludedGroupModelIds([]);
+    setInitialExcludedGroupModelIds([]);
+    setResetPasswordPending(false);
+    setNewPassword(null);
     setLoadingModels(true);
     try {
       const response = await adminFetch(`/api/admin/users/${user.id}/models`, { cache: "no-store" });
@@ -137,6 +152,9 @@ export default function RolesPage() {
       setModelAccess(json.data);
       setManualModelIds(individualModelIds);
       setInitialManualModelIds(individualModelIds);
+      const excludedIds = json.data.excludedGroupModelIds ?? [];
+      setExcludedGroupModelIds(excludedIds);
+      setInitialExcludedGroupModelIds(excludedIds);
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "加载可用模型失败");
     } finally {
@@ -159,20 +177,28 @@ export default function RolesPage() {
   }, [items, loading, openEditor, searchParams]);
 
   const groupModelIdSet = useMemo(() => new Set(modelAccess?.groupModelIds ?? []), [modelAccess]);
+  const excludedGroupModelIdSet = useMemo(() => new Set(excludedGroupModelIds), [excludedGroupModelIds]);
+  const parentAllowedModelIdSet = useMemo(() => new Set(modelAccess?.parentAllowedIds ?? []), [modelAccess]);
   const visibleModelIds = useMemo(() => {
     if (!modelAccess) return new Set<string>();
-    if (groupModelIdSet.size > 0) return new Set([...(modelAccess.groupModelIds ?? []), ...manualModelIds]);
+    if (groupModelIdSet.size > 0) {
+      return new Set([
+        ...(modelAccess.groupModelIds ?? []).filter((modelId) => !excludedGroupModelIdSet.has(modelId)),
+        ...manualModelIds,
+      ]);
+    }
     if (manualModelIds.length > 0) return new Set(manualModelIds);
     return new Set(modelAccess.parentAllowedIds);
-  }, [groupModelIdSet, manualModelIds, modelAccess]);
-  const allowedModelOptions = useMemo(() => {
-    if (!modelAccess) return modelOptions;
-    const allowed = new Set(modelAccess.parentAllowedIds);
-    return modelOptions.filter((model) => allowed.has(model.id));
-  }, [modelAccess, modelOptions]);
+  }, [excludedGroupModelIdSet, groupModelIdSet, manualModelIds, modelAccess]);
 
   const toggleModel = (modelId: string) => {
-    if (!modelAccess || groupModelIdSet.has(modelId)) return;
+    if (!modelAccess || !parentAllowedModelIdSet.has(modelId)) return;
+    if (groupModelIdSet.has(modelId)) {
+      setExcludedGroupModelIds((current) =>
+        current.includes(modelId) ? current.filter((id) => id !== modelId) : [...current, modelId],
+      );
+      return;
+    }
     setManualModelIds((current) => {
       const next = new Set(current);
       if (next.size === 0 && groupModelIdSet.size === 0) {
@@ -192,7 +218,9 @@ export default function RolesPage() {
       return;
     }
     const quotaChanged = Math.floor(nextQuota) !== selected.monthlyTokens;
-    const modelsChanged = !sameIds(manualModelIds, initialManualModelIds);
+    const modelsChanged =
+      !sameIds(manualModelIds, initialManualModelIds) ||
+      !sameIds(excludedGroupModelIds, initialExcludedGroupModelIds);
     if (!quotaChanged && !modelsChanged) {
       setSelected(null);
       return;
@@ -214,7 +242,7 @@ export default function RolesPage() {
           adminFetch(`/api/admin/users/${selected.id}/models`, {
             method: "PUT",
             headers: { "content-type": "application/json" },
-            body: JSON.stringify({ modelIds: manualModelIds }),
+            body: JSON.stringify({ modelIds: manualModelIds, excludedGroupModelIds }),
           }),
         );
       }
@@ -251,6 +279,33 @@ export default function RolesPage() {
       toast.error(error instanceof Error ? error.message : "恢复继承额度失败");
     } finally {
       setSaving(false);
+    }
+  };
+
+  const resetPassword = async () => {
+    if (!selected || saving) return;
+    setSaving(true);
+    try {
+      const response = await adminFetch(`/api/admin/users/${selected.id}/reset-password`, { method: "POST" });
+      const json = (await response.json()) as ApiEnvelope<{ initialPassword?: string }>;
+      if (!response.ok || !json.data?.initialPassword) throw new Error(json.message || "重置密码失败");
+      setNewPassword(json.data.initialPassword);
+      setResetPasswordPending(false);
+      toast.success("已生成新的登录密码");
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "重置密码失败");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const copyPassword = async () => {
+    if (!newPassword) return;
+    try {
+      await navigator.clipboard.writeText(newPassword);
+      toast.success("新密码已复制");
+    } catch {
+      toast.error("复制失败，请手动复制密码");
     }
   };
 
@@ -303,6 +358,9 @@ export default function RolesPage() {
                 <div className="min-w-0">
                   <CardTitle className="truncate">{user.displayName}</CardTitle>
                   <CardDescription className="mt-1 truncate">{user.email}</CardDescription>
+                  <p className="mt-1 truncate text-xs text-muted-foreground">
+                    {user.departmentPath || user.departmentName || "未归属组织"}{user.jobTitle ? ` · ${user.jobTitle}` : ""}
+                  </p>
                 </div>
                 <Badge variant={user.inherited ? "secondary" : "outline"} className="max-w-36 shrink-0 truncate">
                   {quotaSourceLabel(user)}
@@ -346,12 +404,18 @@ export default function RolesPage() {
             <>
               <SheetHeader className="border-b border-border pb-5">
                 <SheetTitle>编辑用户</SheetTitle>
-                <SheetDescription>额度始终由该用户独立计量；来自用户组的模型会自动可用，个人设置只增加额外模型。</SheetDescription>
+                <SheetDescription>额度始终由该用户独立计量；个人可以增加模型，也可以关闭来自用户组的模型。</SheetDescription>
               </SheetHeader>
               <div className="space-y-6 py-6">
                 <div className="rounded-xl border border-border bg-muted/20 p-4">
                   <p className="font-medium">{selected.displayName}</p>
                   <p className="mt-1 text-sm text-muted-foreground">本月已用 {formatTokenCount(selected.usedTokens)} Token · {quotaSourceLabel(selected)}</p>
+                  <div className="mt-3 grid gap-2 text-sm sm:grid-cols-2">
+                    <p><span className="text-muted-foreground">邮箱：</span>{selected.email}</p>
+                    <p><span className="text-muted-foreground">部门：</span>{selected.departmentPath || selected.departmentName || "未归属组织"}</p>
+                    {selected.jobTitle ? <p><span className="text-muted-foreground">岗位：</span>{selected.jobTitle}</p> : null}
+                    <p><span className="text-muted-foreground">状态：</span>{selected.status === "active" ? "正常" : selected.status === "locked" ? "已锁定" : "已停用"}</p>
+                  </div>
                 </div>
                 <div className="space-y-2">
                   <Label htmlFor="user-monthly-tokens">每月 Token 额度</Label>
@@ -367,7 +431,7 @@ export default function RolesPage() {
                 <section className="space-y-3">
                   <div>
                     <h2 className="text-sm font-medium">可用模型</h2>
-                    <p className="mt-1 text-xs text-muted-foreground">用户组模型自动点亮且不能在这里关闭；勾选其他模型会保存为该用户的个人特例。</p>
+                    <p className="mt-1 text-xs text-muted-foreground">可用模型高亮；灰色模型受组织上限限制。用户可关闭来自用户组的模型，也可额外开通组织允许的模型。</p>
                   </div>
                   {loadingModels ? (
                     <div className="grid gap-2 rounded-xl border border-border p-3 sm:grid-cols-2">
@@ -383,21 +447,24 @@ export default function RolesPage() {
                         </div>
                       ) : null}
                       <div className="grid max-h-80 gap-2 overflow-y-auto rounded-xl border border-border p-3 sm:grid-cols-2">
-                        {allowedModelOptions.length ? allowedModelOptions.map((model) => {
+                        {modelOptions.length ? modelOptions.map((model) => {
+                          const allowedByOrganization = parentAllowedModelIdSet.has(model.id);
                           const inheritedFromGroup = groupModelIdSet.has(model.id);
+                          const excludedFromGroup = inheritedFromGroup && excludedGroupModelIdSet.has(model.id);
                           const individualExtra = manualModelIds.includes(model.id);
+                          const available = allowedByOrganization && visibleModelIds.has(model.id);
                           return (
                             <label
                               key={model.id}
-                              className={`flex items-start gap-2 rounded-lg p-2 text-sm ${inheritedFromGroup || !modelAccess ? "cursor-default bg-muted/50" : "cursor-pointer hover:bg-muted"}`}
+                              className={`flex items-start gap-2 rounded-lg border p-2 text-sm ${!allowedByOrganization || !modelAccess ? "cursor-not-allowed border-transparent bg-muted/50 opacity-45" : available ? "cursor-pointer border-primary/30 bg-primary/5" : "cursor-pointer border-transparent bg-muted/30 hover:bg-muted"}`}
                             >
                               <Checkbox
-                                checked={visibleModelIds.has(model.id)}
-                                disabled={inheritedFromGroup || !modelAccess}
+                                checked={available}
+                                disabled={!allowedByOrganization || !modelAccess}
                                 onCheckedChange={() => toggleModel(model.id)}
                               />
                               <span className="min-w-0 flex-1">
-                                <span className="flex items-center gap-1.5"><span className="truncate font-medium">{model.label}</span>{inheritedFromGroup ? <Badge variant="secondary">用户组</Badge> : individualExtra ? <Badge variant="outline">个人特例</Badge> : null}</span>
+                                <span className="flex items-center gap-1.5"><span className="truncate font-medium">{model.label}</span>{!allowedByOrganization ? <Badge variant="outline">组织不可用</Badge> : excludedFromGroup ? <Badge variant="outline">个人关闭</Badge> : inheritedFromGroup ? <Badge variant="secondary">用户组</Badge> : individualExtra ? <Badge variant="outline">个人特例</Badge> : available ? <Badge variant="secondary">可用</Badge> : <Badge variant="outline">未开通</Badge>}</span>
                                 <span className="block truncate text-xs text-muted-foreground">{model.providerLabel} · {model.id}</span>
                               </span>
                             </label>
@@ -405,6 +472,26 @@ export default function RolesPage() {
                         }) : <p className="col-span-full p-2 text-sm text-muted-foreground">暂无可配置的已启用模型</p>}
                       </div>
                     </>
+                  )}
+                </section>
+                <section className="space-y-3 border-t border-border pt-5">
+                  <div>
+                    <h2 className="text-sm font-medium">登录密码</h2>
+                    <p className="mt-1 text-xs text-muted-foreground">重置后会生成新的随机登录密码，并解除该用户的登录锁定状态。</p>
+                  </div>
+                  {newPassword ? (
+                    <div className="flex flex-wrap items-center gap-2 rounded-xl border border-primary/30 bg-primary/5 p-3">
+                      <code className="min-w-0 flex-1 break-all text-sm font-medium">{newPassword}</code>
+                      <Button size="sm" variant="outline" onClick={() => void copyPassword()}><Copy />复制</Button>
+                    </div>
+                  ) : resetPasswordPending ? (
+                    <div className="flex flex-wrap items-center gap-2 rounded-xl border border-amber-500/30 bg-amber-500/5 p-3 text-sm">
+                      <span className="flex-1">确认要为 {selected.displayName} 生成新的随机密码吗？</span>
+                      <Button size="sm" variant="outline" onClick={() => setResetPasswordPending(false)} disabled={saving}>取消</Button>
+                      <Button size="sm" onClick={() => void resetPassword()} disabled={saving}>{saving ? "重置中…" : "确认重置"}</Button>
+                    </div>
+                  ) : (
+                    <Button variant="outline" onClick={() => setResetPasswordPending(true)} disabled={saving}><KeyRound />重置登录密码</Button>
                   )}
                 </section>
               </div>
