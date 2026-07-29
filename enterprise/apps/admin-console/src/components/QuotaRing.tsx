@@ -26,7 +26,8 @@ export function QuotaRing({
   const circumference = 2 * Math.PI * radius;
   const ratio = unlimited || limit <= 0 ? 0 : Math.min(Math.max(used / limit, 0), 1);
   const dash = circumference * ratio;
-  const overLimit = !unlimited && limit > 0 && used > limit;
+  const overLimit = !unlimited && limit > 0 && used >= limit;
+  const nearingLimit = !unlimited && limit > 0 && ratio >= 0.8;
 
   return (
     <div
@@ -43,7 +44,7 @@ export function QuotaRing({
           fill="none"
           strokeWidth="8"
           strokeLinecap="round"
-          className={overLimit ? "stroke-destructive" : "stroke-primary"}
+          className={overLimit ? "stroke-destructive" : nearingLimit ? "stroke-amber-500" : "stroke-primary"}
           style={{ strokeDasharray: `${dash} ${circumference}` }}
         />
       </svg>

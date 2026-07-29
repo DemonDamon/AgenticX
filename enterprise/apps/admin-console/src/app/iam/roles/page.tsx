@@ -26,7 +26,7 @@ import { ArrowUpRight, Copy, KeyRound, Pencil, RefreshCw, UsersRound } from "luc
 import { adminFetch } from "../../../lib/admin-client-auth";
 import { QuotaRing, formatTokenCount } from "../../../components/QuotaRing";
 
-type ModelUsage = { model: string; tokens: number; currentlyAllowed: boolean };
+type UserModelSummary = { model: string; tokens: number; currentlyAllowed: boolean };
 type UserQuotaOverview = {
   id: string;
   displayName: string;
@@ -45,7 +45,7 @@ type UserQuotaOverview = {
   quotaSource: "group" | "personal" | "default";
   quotaSourceLabel?: string;
   groupNames: string[];
-  topModels: ModelUsage[];
+  models: UserModelSummary[];
 };
 type ModelOption = { id: string; providerLabel: string; label: string };
 type ModelAccess = {
@@ -68,6 +68,18 @@ function quotaSourceLabel(user: UserQuotaOverview): string {
   if (user.quotaSource === "group") return user.quotaSourceLabel ? `继承自 ${user.quotaSourceLabel}` : "继承自用户组";
   if (user.quotaSource === "personal") return "个人设置";
   return "默认设置";
+}
+
+function modelQuotaStateClass(
+  user: Pick<UserQuotaOverview, "usedTokens" | "monthlyTokens" | "unlimited">,
+  model: UserModelSummary,
+): string {
+  if (!model.currentlyAllowed) return "border-border bg-muted/30 text-muted-foreground";
+  if (user.unlimited || user.monthlyTokens <= 0) return "border-border bg-background text-foreground";
+  const ratio = user.usedTokens / user.monthlyTokens;
+  if (ratio >= 1) return "border-destructive/50 bg-destructive/10 text-destructive";
+  if (ratio >= 0.8) return "border-amber-400/70 bg-amber-300/30 text-amber-950 dark:border-amber-300/50 dark:bg-amber-400/20 dark:text-amber-100";
+  return "border-border bg-background text-foreground";
 }
 
 export default function RolesPage() {
@@ -384,22 +396,20 @@ export default function RolesPage() {
                     : <span className="text-xs text-muted-foreground">未加入用户组</span>}
                 </div>
                 <div className="flex flex-wrap gap-1.5">
-                  {user.topModels.length
-                    ? user.topModels.map((model) => (
+                  {user.models.length
+                    ? user.models.map((model) => (
                         <Badge
-                          key={model.model}
+                          key={`${model.model}:${model.currentlyAllowed}`}
                           variant="outline"
-                          title={model.currentlyAllowed ? "当前可用模型" : "历史消耗模型，当前未开通"}
-                          className={`max-w-full truncate font-normal ${
-                            model.currentlyAllowed
-                              ? "border-amber-400/70 bg-amber-300/30 text-amber-950 dark:border-amber-300/50 dark:bg-amber-400/20 dark:text-amber-100"
-                              : "bg-background"
-                          }`}
+                          title={model.currentlyAllowed ? "当前可用模型" : "历史消耗模型，当前不可用"}
+                          className={`max-w-full truncate font-normal ${modelQuotaStateClass(user, model)}`}
                         >
-                          {model.model} · {formatTokenCount(model.tokens)}
+                          {model.model}
+                          {model.tokens > 0 ? ` · ${formatTokenCount(model.tokens)}` : ""}
+                          {` · ${model.currentlyAllowed ? "可用" : "当前不可用"}`}
                         </Badge>
                       ))
-                    : <span className="text-xs text-muted-foreground">本月尚无模型消耗</span>}
+                    : <span className="text-xs text-muted-foreground">当前未开通模型</span>}
                 </div>
               </div>
             </CardContent>

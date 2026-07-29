@@ -12,7 +12,6 @@ import { collectUserAssignmentKeys, listAllAssignments, mergeUserStoredSet } fro
 import {
   computeEffectiveDeptAllowed,
   computeEffectiveUserAllowed,
-  isUsageModelCurrentlyAllowed,
 } from "./effective-models";
 import { listAllEnabledModelIds } from "./model-providers-store";
 
@@ -29,7 +28,7 @@ export type GroupMemberOverview = OverviewMember & {
   hasIndividualOverride: boolean;
 };
 
-export type ModelUsage = { model: string; tokens: number; currentlyAllowed: boolean };
+export type UserModelSummary = { model: string; tokens: number; currentlyAllowed: boolean };
 
 export type GroupQuotaOverview = UserGroupRecord & {
   unlimited: boolean;
@@ -46,7 +45,7 @@ export type UserQuotaOverview = OverviewMember & Pick<AdminUserDto, "status" | "
   quotaSource: "group" | "personal" | "default";
   quotaSourceLabel?: string;
   groupNames: string[];
-  topModels: ModelUsage[];
+  models: UserModelSummary[];
 };
 
 export type OrganizationNode = {
@@ -116,21 +115,46 @@ function membersFor(ids: string[], usersById: Map<string, AdminUserDto>, usage: 
     .sort((a, b) => b.usedTokens - a.usedTokens || a.displayName.localeCompare(b.displayName));
 }
 
-function modelsFor(memberIds: string[], usage: UsageIndex, allowedModelIds: readonly string[]): ModelUsage[] {
+function modelLabel(modelId: string): string {
+  const normalized = modelId.trim();
+  const separator = normalized.indexOf("/");
+  return separator >= 0 ? normalized.slice(separator + 1) : normalized;
+}
+
+function usageMatchesModelId(usageModel: string, modelId: string): boolean {
+  const normalizedUsage = usageModel.trim().toLowerCase();
+  const normalizedModelId = modelId.trim().toLowerCase();
+  return normalizedModelId === normalizedUsage || normalizedModelId.endsWith(`/${normalizedUsage}`);
+}
+
+function modelsFor(memberIds: string[], usage: UsageIndex, allowedModelIds: readonly string[]): UserModelSummary[] {
   const totals = new Map<string, number>();
   for (const memberId of memberIds) {
     for (const [model, tokens] of usage.byUserModel.get(memberId) ?? []) {
       totals.set(model, (totals.get(model) ?? 0) + tokens);
     }
   }
-  return [...totals.entries()]
+  const unmatchedUsage = new Map(totals);
+  const availableModels = [...new Set(allowedModelIds)]
+    .map((modelId) => {
+      let tokens = 0;
+      for (const [usageModel, usageTokens] of unmatchedUsage) {
+        if (!usageMatchesModelId(usageModel, modelId)) continue;
+        tokens += usageTokens;
+        unmatchedUsage.delete(usageModel);
+      }
+      return { model: modelLabel(modelId), tokens, currentlyAllowed: true } satisfies UserModelSummary;
+    })
+    .sort((a, b) => b.tokens - a.tokens || a.model.localeCompare(b.model));
+  const unavailableHistory = [...unmatchedUsage.entries()]
     .map(([model, tokens]) => ({
       model,
       tokens,
-      currentlyAllowed: isUsageModelCurrentlyAllowed(model, allowedModelIds),
+      currentlyAllowed: false,
     }))
     .sort((a, b) => b.tokens - a.tokens || a.model.localeCompare(b.model))
     .slice(0, 4);
+  return [...availableModels, ...unavailableHistory];
 }
 
 function departmentAncestorChain(
@@ -327,7 +351,7 @@ export async function loadUserQuotaOverview(tenantId: string): Promise<UserQuota
         quotaSource: selected.quotaSource,
         ...(selected.quotaSourceLabel ? { quotaSourceLabel: selected.quotaSourceLabel } : {}),
         groupNames: groupNamesByUser.get(user.id) ?? [],
-        topModels: modelsFor([user.id], usage, effectiveModelIds),
+        models: modelsFor([user.id], usage, effectiveModelIds),
       } satisfies UserQuotaOverview;
     })
     .sort((a, b) => b.usedTokens - a.usedTokens || a.displayName.localeCompare(b.displayName));
