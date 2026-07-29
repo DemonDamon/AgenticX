@@ -27,6 +27,8 @@ import { adminFetch } from "../../../lib/admin-client-auth";
 
 type OverviewMember = { id: string; displayName: string; email: string; deptId: string | null; usedTokens: number };
 type GroupMemberOverview = OverviewMember & {
+  monthlyTokens: number;
+  unlimited: boolean;
   hasIndividualQuotaOverride: boolean;
   individualExtraModelIds: string[];
   hasIndividualOverride: boolean;
@@ -51,6 +53,47 @@ const EMPTY_FORM: EditorForm = { name: "", description: "", monthlyTokens: "", m
 
 function tokenSetting(monthlyTokens: number): string {
   return monthlyTokens <= 0 ? "不限制" : `${new Intl.NumberFormat("zh-CN").format(monthlyTokens)} Token`;
+}
+
+function MemberQuotaRing({
+  used,
+  limit,
+  unlimited,
+}: {
+  used: number;
+  limit: number;
+  unlimited: boolean;
+}) {
+  const safeUsed = Math.max(0, Number(used) || 0);
+  const safeLimit = Math.max(0, Number(limit) || 0);
+  const remainingRatio = unlimited || safeLimit <= 0 ? 1 : Math.max(0, Math.min(1, (safeLimit - safeUsed) / safeLimit));
+  const radius = 42;
+  const circumference = 2 * Math.PI * radius;
+  const dash = circumference * remainingRatio;
+  const stateClass = remainingRatio <= 0 ? "stroke-destructive" : remainingRatio <= 0.2 ? "stroke-amber-500" : "stroke-primary";
+
+  return (
+    <span
+      role="img"
+      aria-label={unlimited ? "每月额度未设上限" : "每月额度剩余状态"}
+      title={unlimited ? "未设上限" : "额度剩余"}
+      className="h-8 w-8 shrink-0"
+    >
+      <svg viewBox="0 0 100 100" className="h-full w-full -rotate-90" aria-hidden="true">
+        <circle cx="50" cy="50" r={radius} fill="none" strokeWidth="10" className="stroke-muted" />
+        <circle
+          cx="50"
+          cy="50"
+          r={radius}
+          fill="none"
+          strokeWidth="10"
+          strokeLinecap="round"
+          className={stateClass}
+          style={{ strokeDasharray: `${dash} ${circumference}` }}
+        />
+      </svg>
+    </span>
+  );
 }
 
 function organizationChildren(nodes: OrganizationNode[]) {
@@ -432,6 +475,7 @@ export default function GroupsPage() {
                       <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-primary/10 text-xs font-semibold text-primary">{member.displayName.slice(0, 1)}</span>
                       <span className="min-w-0 flex-1"><span className="block truncate font-medium">{member.displayName}</span><span className="block truncate text-xs text-muted-foreground">{member.email}</span></span>
                       {member.hasIndividualOverride ? <Badge variant="outline" className="shrink-0 border-amber-500/50 px-1 py-0 text-[10px] text-amber-700 dark:text-amber-300">个人特例</Badge> : null}
+                      <MemberQuotaRing used={member.usedTokens} limit={member.monthlyTokens} unlimited={member.unlimited} />
                     </Link>
                   )) : <span className="p-2 text-sm text-muted-foreground">尚未选择成员</span>}
                 </div>

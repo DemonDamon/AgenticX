@@ -21,6 +21,8 @@ export type OverviewMember = Pick<AdminUserDto, "id" | "displayName" | "email" |
 };
 
 export type GroupMemberOverview = OverviewMember & {
+  monthlyTokens: number;
+  unlimited: boolean;
   hasIndividualQuotaOverride: boolean;
   individualExtraModelIds: string[];
   excludedGroupModelIds: string[];
@@ -212,6 +214,7 @@ function groupMemberOverview(
 ): GroupMemberOverview {
   const quotaSource = groupQuotaSourceForUser(groups, user.id);
   const personalQuota = config.users[user.id] as QuotaRule | undefined;
+  const monthlyTokens = Math.max(0, Number(personalQuota?.monthlyTokens ?? quotaSource?.monthlyTokens ?? 0));
   const hasIndividualQuotaOverride = Boolean(
     personalQuota && (!quotaSource || Number(personalQuota.monthlyTokens) !== quotaSource.monthlyTokens),
   );
@@ -221,6 +224,8 @@ function groupMemberOverview(
   const excludedGroupModelIds = groupModelExclusionsForUser(config, user.id).filter((modelId) => inheritedModelIds.has(modelId));
   return {
     ...user,
+    monthlyTokens,
+    unlimited: monthlyTokens <= 0,
     hasIndividualQuotaOverride,
     individualExtraModelIds,
     excludedGroupModelIds,
