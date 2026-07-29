@@ -20,7 +20,6 @@ import {
   DropdownMenuLabel,
   DropdownMenuSeparator,
   DropdownMenuTrigger,
-  MachiAvatar,
   Separator,
   Toaster,
   Tooltip,
@@ -32,11 +31,12 @@ import {
 } from "@agenticx/ui";
 import { getEnterpriseVersionLabel } from "@agenticx/branding";
 import { useTranslations } from "next-intl";
+import { EnterpriseBrandMark } from "./EnterpriseBrandMark";
 import {
   Activity,
   BarChart3,
   Bell,
-  Building2,
+  ChevronDown,
   ChevronRight,
   PanelLeftClose,
   PanelLeftOpen,
@@ -49,9 +49,10 @@ import {
   LucideIcon,
   Menu,
   Monitor,
+  Network,
   Moon,
   Package,
-  Puzzle,
+  Route,
   Search,
   Shield,
   Sliders,
@@ -60,7 +61,6 @@ import {
   Users,
   Wand2,
   Database,
-  Plug,
 } from "lucide-react";
 
 type AppShellProps = {
@@ -77,6 +77,7 @@ type NavGroup = {
   id: string;
   label: string;
   items: NavItem[];
+  collapsible?: boolean;
 };
 
 const NAV_GROUPS: NavGroup[] = [
@@ -89,41 +90,35 @@ const NAV_GROUPS: NavGroup[] = [
     id: "iam",
     label: "iam",
     items: [
-      { href: "/iam/users", labelKey: "users", icon: Users },
-      { href: "/iam/departments", labelKey: "departments", icon: Building2 },
-      { href: "/iam/roles", labelKey: "roles", icon: UserCog },
-      { href: "/iam/bulk-import", labelKey: "bulkImport", icon: Wand2 },
+      { href: "/iam/users", labelKey: "members", icon: Users },
+      { href: "/iam/groups", labelKey: "userGroups", icon: Network },
+      { href: "/iam/roles", labelKey: "userQuota", icon: UserCog },
+      { href: "/iam/bulk-import", labelKey: "organization", icon: Wand2 },
     ],
   },
   {
     id: "ops",
     label: "ops",
     items: [
+      { href: "/metering", labelKey: "metering", icon: BarChart3 },
       { href: "/audit", labelKey: "audit", icon: FileWarning },
       { href: "/admin/compliance", labelKey: "compliance", icon: Shield },
-      { href: "/metering", labelKey: "metering", icon: BarChart3 },
-      { href: "/metering/quota", labelKey: "quota", icon: Sliders },
-      { href: "/metering/plans", labelKey: "quotaPlans", icon: Package },
-      { href: "/metering/split", labelKey: "billingSplit", icon: Gauge },
-      { href: "/metering/agent-traces", labelKey: "agentTraces", icon: Activity },
+      { href: "/policy", labelKey: "policy", icon: Shield },
     ],
   },
   {
     id: "platform",
     label: "platform",
     items: [
-      { href: "/policy", labelKey: "policy", icon: Shield },
       { href: "/admin/models", labelKey: "models", icon: Package },
-      { href: "/admin/channels", labelKey: "channels", icon: Activity },
+      { href: "/admin/routing", labelKey: "autoRouting", icon: Route },
       { href: "/admin/cache", labelKey: "cache", icon: Database },
-      { href: "/admin/api-tokens", labelKey: "apiTokens", icon: KeyRound },
-      { href: "/admin/mcp-servers", labelKey: "mcpServers", icon: Plug },
-      { href: "/admin/plugins", labelKey: "plugins", icon: Puzzle },
     ],
   },
   {
     id: "observability",
     label: "observability",
+    collapsible: true,
     items: [
       { href: "/admin/errors", labelKey: "errors", icon: FileWarning },
       { href: "/admin/perf", labelKey: "perf", icon: Activity },
@@ -132,6 +127,7 @@ const NAV_GROUPS: NavGroup[] = [
 ];
 
 const FLAT_NAV: NavItem[] = NAV_GROUPS.flatMap((group) => group.items);
+const COMMAND_NAV_GROUPS = NAV_GROUPS.filter((group) => !group.collapsible);
 
 type HealthStatus = "healthy" | "degraded" | "offline";
 
@@ -197,6 +193,7 @@ export function AppShell({ children }: AppShellProps) {
   const [commandQuery, setCommandQuery] = useState("");
   const [searchHistory, setSearchHistory] = useState<string[]>([]);
   const [mobileOpen, setMobileOpen] = useState(false);
+  const [openNavGroups, setOpenNavGroups] = useState<Record<string, boolean>>({});
   const commandHasQuery = commandQuery.trim().length > 0;
   const runtimeEnv = process.env.NODE_ENV ?? "development";
 
@@ -346,9 +343,7 @@ export function AppShell({ children }: AppShellProps) {
         >
           {/* brand */}
           <div className="flex h-14 items-center justify-center gap-2 px-3">
-            <span className="relative flex h-8 w-8 shrink-0 items-center justify-center rounded-md bg-primary text-primary-foreground shadow-sm">
-              <MachiAvatar size={22} className="h-[22px] w-[22px] rounded-sm" />
-            </span>
+            <EnterpriseBrandMark size={32} className="shadow-sm" />
             {!collapsed && (
               <div className="min-w-0 flex-1">
                 <div className="truncate text-sm font-semibold">AgenticX</div>
@@ -361,14 +356,28 @@ export function AppShell({ children }: AppShellProps) {
 
           {/* nav */}
           <nav className="flex-1 space-y-4 overflow-y-auto px-2 py-3">
-            {NAV_GROUPS.map((group) => (
-              <div key={group.id} className="space-y-1">
-                {!collapsed && (
-                  <div className="px-2 pb-1 text-[10px] font-semibold uppercase tracking-[0.14em] text-muted-foreground/70">
-                    {t(`nav.groups.${group.id}`)}
-                  </div>
-                )}
-                {group.items.map((item) => {
+            {NAV_GROUPS.map((group) => {
+              const groupHasActiveItem = group.items.some((item) => activeItem?.href === item.href);
+              const groupOpen =
+                !group.collapsible || groupHasActiveItem || (!collapsed && Boolean(openNavGroups[group.id]));
+              return (
+                <div key={group.id} className="space-y-1">
+                  {!collapsed && group.collapsible ? (
+                    <button
+                      type="button"
+                      className="flex w-full items-center justify-between rounded-md px-2 py-1 text-left text-[10px] font-semibold uppercase tracking-[0.14em] text-muted-foreground/70 transition-colors hover:bg-muted hover:text-foreground"
+                      aria-expanded={groupOpen}
+                      onClick={() => setOpenNavGroups((current) => ({ ...current, [group.id]: !groupOpen }))}
+                    >
+                      <span>{t(`nav.groups.${group.id}`)}</span>
+                      <ChevronDown className={groupOpen ? "h-3.5 w-3.5" : "h-3.5 w-3.5 -rotate-90"} />
+                    </button>
+                  ) : !collapsed ? (
+                    <div className="px-2 pb-1 text-[10px] font-semibold uppercase tracking-[0.14em] text-muted-foreground/70">
+                      {t(`nav.groups.${group.id}`)}
+                    </div>
+                  ) : null}
+                  {groupOpen && group.items.map((item) => {
                   const Icon = item.icon;
                   const active = activeItem?.href === item.href;
                   const itemLabel = t(`nav.items.${item.labelKey}`);
@@ -401,9 +410,10 @@ export function AppShell({ children }: AppShellProps) {
                       </TooltipContent>
                     </Tooltip>
                   );
-                })}
-              </div>
-            ))}
+                  })}
+                </div>
+              );
+            })}
           </nav>
 
           <Separator className="bg-sidebar-border" />
@@ -571,7 +581,7 @@ export function AppShell({ children }: AppShellProps) {
                     type="button"
                     className="flex items-center gap-2 rounded-md px-1.5 py-1 hover:bg-muted"
                   >
-                    <MachiAvatar size={24} className="h-6 w-6" />
+                    <EnterpriseBrandMark size={24} />
                     <span className="hidden text-sm font-medium sm:inline">admin</span>
                   </button>
                 </DropdownMenuTrigger>
@@ -647,7 +657,7 @@ export function AppShell({ children }: AppShellProps) {
             ) : (
               <>
                 <CommandEmpty>{t("commandEmpty")}</CommandEmpty>
-                {NAV_GROUPS.map((group) => (
+                {COMMAND_NAV_GROUPS.map((group) => (
                   <CommandGroup key={group.id} heading={t(`nav.groups.${group.id}`)}>
                     {group.items.map((item) => {
                       const Icon = item.icon;
