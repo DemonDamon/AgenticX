@@ -2787,6 +2787,9 @@ class AgentRuntime:
                 data={
                     "compacted_count": compacted_count,
                     "summary": compact_summary,
+                    "trigger_reason": str(
+                        getattr(self.compactor, "last_trigger_reason", "") or ""
+                    ),
                 },
                 agent_id=agent_id,
             )
@@ -3885,6 +3888,9 @@ class AgentRuntime:
                                 "compacted_count": react_count,
                                 "summary": react_summary,
                                 "reactive": True,
+                                "trigger_reason": str(
+                                    getattr(self.compactor, "last_trigger_reason", "") or ""
+                                ),
                             },
                             agent_id=agent_id,
                         )

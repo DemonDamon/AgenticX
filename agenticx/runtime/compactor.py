@@ -16,11 +16,18 @@ import os
 import re
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
+from agenticx.runtime.model_context_window import resolve_context_window
+
 _log = logging.getLogger(__name__)
 
 _MAX_CONSECUTIVE_AUTOCOMPACT_FAILURES = 3
 
-# Rough context window limits (chars used as proxy when model unknown).
+DEFAULT_THRESHOLD_MESSAGES = 200
+DEFAULT_THRESHOLD_CHARS = 200_000
+DEFAULT_SUMMARY_RESERVE_TOKENS = 20_000
+DEFAULT_COMPACT_BUFFER_TOKENS = 13_000
+
+# Legacy char-proxy hints (escape-hatch / AGX_CONTEXT_WINDOW_CHARS only; not full-compact primary).
 _MODEL_CONTEXT_CHARS_HINT: Dict[str, int] = {
     "gpt-4o": 128_000,
     "gpt-4o-mini": 128_000,
@@ -43,6 +50,19 @@ def _env_int(key: str, default: int) -> int:
         except ValueError:
             pass
     return default
+
+
+def _env_autocompact_pct() -> Optional[float]:
+    raw = os.environ.get("AGX_AUTOCOMPACT_PCT", "").strip()
+    if not raw:
+        return None
+    try:
+        pct = float(raw)
+    except ValueError:
+        return None
+    if 0.50 <= pct <= 0.99:
+        return pct
+    return None
 
 
 def _compact_query_data_source_result(result: str, budget: int) -> str:
@@ -109,24 +129,44 @@ _HARD_CONSTRAINT_PATTERNS = (
 
 
 class ContextCompactor:
-    """Compact older conversation history into a short summary block."""
+    """Compact older conversation history into a short summary block.
+
+    Full autocompact is primarily driven by model context-window token usage
+    (shared ``resolve_context_window``). Message-count / char thresholds are
+    escape hatches only.
+    """
 
     def __init__(
         self,
         llm: Any,
         *,
-        threshold_messages: int = 20,
-        threshold_chars: int = 48_000,
+        threshold_messages: Optional[int] = None,
+        threshold_chars: Optional[int] = None,
         retain_recent_messages: int = 8,
         token_compact_ratio: float = 0.80,
     ) -> None:
         self.llm = llm
-        self.threshold_messages = max(8, threshold_messages)
-        self.threshold_chars = max(4_000, threshold_chars)
+        if threshold_messages is None:
+            threshold_messages = _env_int(
+                "AGX_COMPACT_THRESHOLD_MESSAGES",
+                DEFAULT_THRESHOLD_MESSAGES,
+            )
+        if threshold_chars is None:
+            threshold_chars = _env_int(
+                "AGX_COMPACT_THRESHOLD_CHARS",
+                DEFAULT_THRESHOLD_CHARS,
+            )
+        self.threshold_messages = max(8, int(threshold_messages))
+        self.threshold_chars = max(4_000, int(threshold_chars))
         self.retain_recent_messages = max(4, retain_recent_messages)
+        # Deprecated: retained for API compatibility; not used by _should_compact.
         self.token_compact_ratio = min(0.99, max(0.5, token_compact_ratio))
         self._consecutive_failures = 0
         self._tiktoken_encoder: Any = None
+        self.last_trigger_reason: str = ""
+        self._last_est_tokens: int = 0
+        self._last_threshold: int = 0
+        self._last_window: int = 0
         # Rolling compaction cooldown: after a successful compaction, require a
         # minimum growth in tail messages before compacting again, unless token
         # usage is already critically high.
@@ -156,8 +196,15 @@ class ContextCompactor:
                 pass
         return max(1, int(len(text) / 3.5))
 
+    @staticmethod
+    def _resolve_context_window_tokens(model: str) -> int:
+        """Token-window limit shared with Desktop/Studio Context chip."""
+        return int(resolve_context_window(model or None))
+
     def _get_context_window_chars(self, model: str) -> int:
-        default_chars = _env_int("AGX_CONTEXT_WINDOW_CHARS", 96_000)
+        """Legacy char proxy; not used for full-compact primary trigger."""
+        window_tokens = self._resolve_context_window_tokens(model)
+        default_chars = _env_int("AGX_CONTEXT_WINDOW_CHARS", window_tokens * 4)
         m = (model or "").strip().lower()
         if not m:
             return default_chars
@@ -166,13 +213,40 @@ class ContextCompactor:
                 return val * 4
         return default_chars
 
-    def _should_compact_by_tokens(self, messages: Sequence[Dict[str, Any]], model: str) -> bool:
+    def _compute_autocompact_threshold(self, window: int) -> int:
+        """effective_window - buffer, optionally tightened by AGX_AUTOCOMPACT_PCT."""
+        window = max(1024, int(window))
+        summary_reserve = _env_int(
+            "AGX_COMPACT_SUMMARY_RESERVE_TOKENS",
+            DEFAULT_SUMMARY_RESERVE_TOKENS,
+        )
+        buffer = _env_int("AGX_COMPACT_BUFFER_TOKENS", DEFAULT_COMPACT_BUFFER_TOKENS)
+        effective = max(1024, window - min(summary_reserve, max(1, window // 4)))
+        threshold = max(1, effective - buffer)
+        pct = _env_autocompact_pct()
+        if pct is not None:
+            # Only allow earlier compaction (tighter threshold), never later.
+            threshold = min(threshold, max(1, int(effective * pct)))
+        return max(1, int(threshold))
+
+    def _token_threshold_exceeded(
+        self,
+        messages: Sequence[Dict[str, Any]],
+        model: str,
+    ) -> bool:
         if not messages:
             return False
-        limit_chars = self._get_context_window_chars(model)
+        window = self._resolve_context_window_tokens(model)
+        threshold = self._compute_autocompact_threshold(window)
         est_tokens = self._estimate_token_usage(messages)
-        limit_tokens = max(1024, int(limit_chars / 4))
-        return est_tokens > limit_tokens * self.token_compact_ratio
+        self._last_window = window
+        self._last_threshold = threshold
+        self._last_est_tokens = est_tokens
+        return est_tokens >= threshold
+
+    def _should_compact_by_tokens(self, messages: Sequence[Dict[str, Any]], model: str) -> bool:
+        """Backward-compatible alias for token-window primary trigger."""
+        return self._token_threshold_exceeded(messages, model)
 
     @staticmethod
     def _has_compacted_prefix(messages: Sequence[Dict[str, Any]]) -> bool:
@@ -209,40 +283,63 @@ class ContextCompactor:
             return ""
         return parts[1].strip()[:1500]
 
+    def _should_compact_with_reason(
+        self,
+        messages: Sequence[Dict[str, Any]],
+        *,
+        model: str = "",
+        force: bool = False,
+    ) -> Tuple[bool, str]:
+        if force:
+            return True, "force"
+        _prefix, tail = self._split_compacted_messages(messages)
+        # After a prior compaction, only the post-summary tail decides whether to
+        # roll forward — the compact block itself must not re-trigger every turn.
+        eval_msgs: List[Dict[str, Any]]
+        if _prefix is not None:
+            eval_msgs = list(tail)
+        else:
+            eval_msgs = [m for m in messages if isinstance(m, dict)]
+        if len(eval_msgs) <= self.retain_recent_messages:
+            return False, ""
+
+        total_chars = sum(
+            len(_message_text_for_tokens(item))
+            for item in eval_msgs
+            if isinstance(item, dict)
+        )
+        token_hit = self._token_threshold_exceeded(eval_msgs, model)
+
+        if _prefix is not None:
+            min_tail_before_recompact = self.retain_recent_messages + max(
+                1, self.min_new_messages_after_compact
+            )
+            if len(eval_msgs) <= min_tail_before_recompact:
+                if token_hit:
+                    return True, "cooldown_token_escape"
+                # Keep a hard escape hatch for unusually verbose tails.
+                if total_chars > self.threshold_chars * 2:
+                    return True, "char_escape"
+                return False, ""
+
+        if token_hit:
+            return True, "token_window"
+        if len(eval_msgs) > self.threshold_messages:
+            return True, "message_escape"
+        if total_chars > self.threshold_chars:
+            return True, "char_escape"
+        return False, ""
+
     def _should_compact(
         self,
         messages: Sequence[Dict[str, Any]],
         *,
         model: str = "",
     ) -> bool:
-        _prefix, tail = self._split_compacted_messages(messages)
-        # After a prior compaction, only the post-summary tail decides whether to
-        # roll forward — the compact block itself must not re-trigger every turn.
-        eval_msgs = tail if _prefix is not None else messages
-        if len(eval_msgs) <= self.retain_recent_messages:
-            return False
-        if _prefix is not None:
-            min_tail_before_recompact = self.retain_recent_messages + max(
-                1, self.min_new_messages_after_compact
-            )
-            if len(eval_msgs) <= min_tail_before_recompact:
-                if model and self._should_compact_by_tokens(eval_msgs, model):
-                    return True
-                total_chars = sum(
-                    len(_message_text_for_tokens(item))
-                    for item in eval_msgs
-                    if isinstance(item, dict)
-                )
-                # Keep a hard escape hatch for unusually verbose tails.
-                if total_chars > self.threshold_chars * 2:
-                    return True
-                return False
-        if model and self._should_compact_by_tokens(eval_msgs, model):
-            return True
-        if len(eval_msgs) > self.threshold_messages:
-            return True
-        total_chars = sum(len(_message_text_for_tokens(item)) for item in eval_msgs if isinstance(item, dict))
-        return total_chars > self.threshold_chars
+        should, reason = self._should_compact_with_reason(messages, model=model, force=False)
+        if should:
+            self.last_trigger_reason = reason
+        return should
 
     def _split_for_compaction(
         self,
@@ -436,8 +533,10 @@ class ContextCompactor:
             "要求：",
             "1. 仅输出摘要正文，不要复述本指令、不要输出任何形如 `[xxx]` 或 `[/xxx]` 的标签。",
             "2. 必须逐字保留用户硬约束，尤其含有「必须 / 不要 / 始终 / must / never / always」的原句片段。",
-            "3. 摘要必须覆盖 8 类信息：用户完整指令、任务模板、约束规则、已执行操作、错误与修复记录、进度追踪、当前状态、下一步动作。",
-            "4. 输出中文，长度控制在 400 字以内，使用条目式，不要写客套话或解释。",
+            "3. 摘要必须覆盖：用户目标与硬约束、关键文件路径、错误与已尝试修复、当前进度与下一步、"
+            "以及用户最近一条尚未被完整回答的原始问题（若存在）。",
+            "4. 同时保留：用户完整指令、任务模板、约束规则、已执行操作、进度追踪、当前状态。",
+            "5. 输出中文，长度控制在 400 字以内，使用条目式，不要写客套话或解释。",
             "",
         ]
         if memory_prefix:
@@ -578,11 +677,18 @@ class ContextCompactor:
         compact_block, tail = self._split_compacted_messages(copied)
         working = tail if compact_block is not None else copied
         if len(working) <= self.retain_recent_messages:
+            self.last_trigger_reason = ""
             return copied, False, "", 0, ""
 
-        should = force or self._should_compact(copied, model=model)
+        should, reason = self._should_compact_with_reason(
+            copied,
+            model=model,
+            force=force,
+        )
         if not should:
+            self.last_trigger_reason = ""
             return copied, False, "", 0, ""
+        self.last_trigger_reason = reason
 
         if not force and self._consecutive_failures >= _MAX_CONSECUTIVE_AUTOCOMPACT_FAILURES:
             _log.warning(
@@ -593,8 +699,17 @@ class ContextCompactor:
 
         to_compact, retained = self._split_for_compaction(working)
         if not to_compact:
+            self.last_trigger_reason = ""
             return copied, False, "", 0, ""
         compacted_count = len(to_compact)
+        _log.info(
+            "context_compaction trigger_reason=%s est_tokens=%s threshold=%s window=%s compacted_count=%s",
+            self.last_trigger_reason,
+            self._last_est_tokens,
+            self._last_threshold,
+            self._last_window,
+            compacted_count,
+        )
         memory = self._extract_session_memory(to_compact)
 
         # FR-6: Extract pending user question (hard-coded at top of content)
