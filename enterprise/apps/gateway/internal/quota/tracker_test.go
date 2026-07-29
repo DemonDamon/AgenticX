@@ -38,6 +38,37 @@ func TestRollbackUsesSharedUsageFileAsSourceOfTruth(t *testing.T) {
 	}
 }
 
+func TestUnlimitedUsageIsPersistedAndReconciled(t *testing.T) {
+	dir := t.TempDir()
+	cfgPath := filepath.Join(dir, "quotas.json")
+	usagePath := filepath.Join(dir, "usage.json")
+	cfg := `{"defaults":{"role":{"staff":{"monthlyTokens":0,"action":"block"}},"model":{}},"users":{},"departments":{}}`
+	if err := os.WriteFile(cfgPath, []byte(cfg), 0o600); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	tracker := NewTracker(cfgPath, usagePath, nil)
+	ctx := RequestContext{UserID: "u1", Role: "staff", Model: "m"}
+	if decision := tracker.CheckAndAddContext(ctx, 120, LedgerEventReserve); !decision.Allowed || decision.UsedAfter != 120 || decision.ExceededBy != 0 {
+		t.Fatalf("unlimited reservation should record without blocking: %+v", decision)
+	}
+	if ok := tracker.RollbackContext(ctx, 20); !ok {
+		t.Fatal("unlimited rollback failed")
+	}
+	if decision := tracker.CheckAndAddContext(ctx, 25, LedgerEventSettle); !decision.Allowed || decision.UsedAfter != 125 {
+		t.Fatalf("unlimited settlement should keep recording usage: %+v", decision)
+	}
+
+	rows := readUsageRowsForTest(t, usagePath)
+	if len(rows) != 1 || rows[0].UsedTotal != 125 {
+		t.Fatalf("usage ledger = %+v, want one row with 125 tokens", rows)
+	}
+	remaining := tracker.Remaining(ctx)
+	if !remaining.Unlimited || remaining.Used != 125 || remaining.Remaining != nil {
+		t.Fatalf("unlimited remaining should expose tracked usage: %+v", remaining)
+	}
+}
+
 func readUsageRowsForTest(t *testing.T, path string) []usageRow {
 	t.Helper()
 	raw, err := os.ReadFile(path)
