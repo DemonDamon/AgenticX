@@ -30,6 +30,7 @@ import {
   toast,
 } from "@agenticx/ui";
 import { useTranslations } from "next-intl";
+import { OrganizationEditor } from "../../../components/OrganizationEditor";
 import {
   Check,
   ChevronRight,
@@ -334,8 +335,8 @@ export default function BulkImportPage() {
             </BreadcrumbList>
           </Breadcrumb>
         }
-        title={t("title")}
-        description={t("description")}
+        title={t("organizationTitle")}
+        description={t("organizationDescription")}
         actions={
           <div className="flex flex-wrap gap-2">
             <Button variant="outline" size="sm" asChild>
@@ -351,6 +352,13 @@ export default function BulkImportPage() {
           </div>
         }
       />
+
+      <OrganizationEditor />
+
+      <div className="pt-2">
+        <h2 className="text-lg font-semibold tracking-tight">{t("bulkProvisioningTitle")}</h2>
+        <p className="mt-1 text-sm text-muted-foreground">{t("bulkProvisioningDescription")}</p>
+      </div>
 
       <Card>
         <CardContent className="p-5">
