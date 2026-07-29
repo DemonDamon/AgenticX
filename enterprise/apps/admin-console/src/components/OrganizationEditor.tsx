@@ -27,6 +27,7 @@ import {
 } from "@agenticx/ui";
 import { ChevronDown, ChevronRight, FolderTree, MoreHorizontal, MoveRight, Pencil, Plus, RefreshCw, Save, Trash2, Users } from "lucide-react";
 import { adminFetch } from "../lib/admin-client-auth";
+import { VisibleModelsEditor } from "./visible-models-editor";
 
 type OrganizationNode = {
   id: string;
@@ -504,7 +505,59 @@ export function OrganizationEditor() {
           {organizationTree}
         </div>
         <div className="rounded-xl border border-border bg-muted/10 p-5">
-          {selected ? <div className="space-y-5"><div className="flex items-center gap-2"><span className="rounded-lg bg-primary/10 p-2 text-primary"><Pencil className="h-4 w-4" /></span><div><p className="font-medium">编辑组织</p><p className="text-xs text-muted-foreground">成员 {selected.memberCount ?? 0} 人</p></div></div><div className="space-y-2"><Label htmlFor="organization-name">名称</Label><Input id="organization-name" value={draftName} onChange={(event) => setDraftName(event.target.value)} /></div><div className="space-y-2"><Label htmlFor="organization-parent">上级组织</Label><select id="organization-parent" className="w-full rounded-md border border-border bg-background px-3 py-2 pr-8 text-sm" value={draftParentId ?? ""} onChange={(event) => setDraftParentId(event.target.value || null)}><option value="">顶层组织</option>{flatNodes.filter((node) => !blockedParentIds.has(node.id)).map((node) => <option key={node.id} value={node.id}>{node.path}</option>)}</select><p className="text-xs text-muted-foreground">不能移动到自身或子组织之下。</p></div><div className="flex flex-wrap justify-between gap-2"><Button variant="outline" onClick={() => { setCreateParentId(selected.id); setCreateOpen(true); }}><Plus />新增下级</Button><Button onClick={() => void save()} disabled={saving || !draftName.trim()}><Save />保存组织</Button></div><div className="border-t border-border pt-5"><p className="text-sm font-medium text-destructive">删除当前组织</p><p className="mt-1 text-xs text-muted-foreground">只有没有成员和下级组织时才可删除。</p>{deleteConfirm ? <div className="mt-3 flex gap-2"><Button size="sm" variant="destructive" onClick={() => void remove()} disabled={saving}>再次确认删除</Button><Button size="sm" variant="outline" onClick={() => setDeleteConfirm(false)}>取消</Button></div> : <Button size="sm" variant="outline" className="mt-3 text-destructive hover:text-destructive" onClick={() => setDeleteConfirm(true)}><Trash2 />删除组织</Button>}</div></div> : <div className="flex h-full min-h-56 flex-col items-center justify-center text-center"><FolderTree className="h-8 w-8 text-muted-foreground" /><p className="mt-3 font-medium">选择一个组织进行编辑</p><p className="mt-1 text-sm text-muted-foreground">也可以直接新建顶层组织。</p></div>}
+          {selected ? (
+            <div className="space-y-5">
+              <div className="flex items-center gap-2">
+                <span className="rounded-lg bg-primary/10 p-2 text-primary"><Pencil className="h-4 w-4" /></span>
+                <div><p className="font-medium">编辑组织</p><p className="text-xs text-muted-foreground">成员 {selected.memberCount ?? 0} 人</p></div>
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="organization-name">名称</Label>
+                <Input id="organization-name" value={draftName} onChange={(event) => setDraftName(event.target.value)} />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="organization-parent">上级组织</Label>
+                <select id="organization-parent" className="w-full rounded-md border border-border bg-background px-3 py-2 pr-8 text-sm" value={draftParentId ?? ""} onChange={(event) => setDraftParentId(event.target.value || null)}>
+                  <option value="">顶层组织</option>
+                  {flatNodes.filter((node) => !blockedParentIds.has(node.id)).map((node) => <option key={node.id} value={node.id}>{node.path}</option>)}
+                </select>
+                <p className="text-xs text-muted-foreground">不能移动到自身或子组织之下。</p>
+              </div>
+              <div className="flex flex-wrap justify-between gap-2">
+                <Button variant="outline" onClick={() => { setCreateParentId(selected.id); setCreateOpen(true); }}><Plus />新增下级</Button>
+                <Button onClick={() => void save()} disabled={saving || !draftName.trim()}><Save />保存组织</Button>
+              </div>
+              <section className="border-t border-border pt-5">
+                <h3 className="text-sm font-medium">模型边界</h3>
+                <p className="mt-1 text-xs text-muted-foreground">为当前组织设置可用模型的上限；下级组织和成员只能在此范围内继续收窄。未配置时继承上级范围，修改会即时保存。</p>
+                <div className="mt-3">
+                  <VisibleModelsEditor
+                    key={selected.id}
+                    target={{ kind: "dept", id: selected.id }}
+                    variant="inline"
+                  />
+                </div>
+              </section>
+              <div className="border-t border-border pt-5">
+                <p className="text-sm font-medium text-destructive">删除当前组织</p>
+                <p className="mt-1 text-xs text-muted-foreground">只有没有成员和下级组织时才可删除。</p>
+                {deleteConfirm ? (
+                  <div className="mt-3 flex gap-2">
+                    <Button size="sm" variant="destructive" onClick={() => void remove()} disabled={saving}>再次确认删除</Button>
+                    <Button size="sm" variant="outline" onClick={() => setDeleteConfirm(false)}>取消</Button>
+                  </div>
+                ) : (
+                  <Button size="sm" variant="outline" className="mt-3 text-destructive hover:text-destructive" onClick={() => setDeleteConfirm(true)}><Trash2 />删除组织</Button>
+                )}
+              </div>
+            </div>
+          ) : (
+            <div className="flex h-full min-h-56 flex-col items-center justify-center text-center">
+              <FolderTree className="h-8 w-8 text-muted-foreground" />
+              <p className="mt-3 font-medium">选择一个组织进行编辑</p>
+              <p className="mt-1 text-sm text-muted-foreground">也可以直接新建顶层组织。</p>
+            </div>
+          )}
         </div>
       </CardContent>
 
