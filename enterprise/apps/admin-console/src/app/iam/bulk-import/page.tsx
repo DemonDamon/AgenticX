@@ -619,7 +619,7 @@ export default function BulkImportPage() {
                 <Separator />
                 <div className="flex flex-wrap gap-2">
                   <Button variant="outline" asChild>
-                    <Link href="/iam/users">{t("result.goUsers")}</Link>
+                    <Link href="/iam/roles">{t("result.goUsers")}</Link>
                   </Button>
                   <Button onClick={resetAll}>{t("result.nextBatch")}</Button>
                 </div>

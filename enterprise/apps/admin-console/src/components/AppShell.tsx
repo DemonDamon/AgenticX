@@ -43,7 +43,6 @@ import {
   FileWarning,
   Gauge,
   History,
-  KeyRound,
   Languages,
   LogOut,
   LucideIcon,
@@ -57,7 +56,6 @@ import {
   Shield,
   Sliders,
   Sun,
-  UserCog,
   Users,
   Wand2,
   Database,
@@ -90,9 +88,8 @@ const NAV_GROUPS: NavGroup[] = [
     id: "iam",
     label: "iam",
     items: [
-      { href: "/iam/users", labelKey: "members", icon: Users },
+      { href: "/iam/roles", labelKey: "users", icon: Users },
       { href: "/iam/groups", labelKey: "userGroups", icon: Network },
-      { href: "/iam/roles", labelKey: "userQuota", icon: UserCog },
       { href: "/iam/bulk-import", labelKey: "organization", icon: Wand2 },
     ],
   },
@@ -594,13 +591,9 @@ export function AppShell({ children }: AppShellProps) {
                     <div className="text-xs font-normal text-muted-foreground">admin@agenticx.local</div>
                   </DropdownMenuLabel>
                   <DropdownMenuSeparator />
-                  <DropdownMenuItem onClick={() => router.push("/iam/users")}>
+                  <DropdownMenuItem onClick={() => router.push("/iam/roles")}>
                     <Users className="mr-2 h-4 w-4" />
                     {t("userMgmt")}
-                  </DropdownMenuItem>
-                  <DropdownMenuItem onClick={() => router.push("/iam/roles")}>
-                    <KeyRound className="mr-2 h-4 w-4" />
-                    {t("rolePerm")}
                   </DropdownMenuItem>
                   <DropdownMenuItem onClick={toggleTheme}>
                     <Sliders className="mr-2 h-4 w-4" />
