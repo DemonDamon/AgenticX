@@ -45,6 +45,12 @@ type GroupQuotaOverview = {
   memberCount: number;
   members: GroupMemberOverview[];
 };
+type UserQuotaSnapshot = {
+  id: string;
+  usedTokens: number;
+  monthlyTokens: number;
+  unlimited: boolean;
+};
 type ModelOption = { id: string; providerLabel: string; label: string };
 type ApiEnvelope<T> = { code: string; message: string; data?: T };
 type EditorForm = { name: string; description: string; monthlyTokens: string; memberIds: string[]; modelIds: string[] };
@@ -94,6 +100,24 @@ function MemberQuotaRing({
       </svg>
     </span>
   );
+}
+
+function applyMemberQuotaSnapshots(groups: GroupQuotaOverview[], snapshots: UserQuotaSnapshot[]): GroupQuotaOverview[] {
+  const quotaByUserId = new Map(snapshots.map((snapshot) => [snapshot.id, snapshot]));
+  return groups.map((group) => ({
+    ...group,
+    members: group.members.map((member) => {
+      const quota = quotaByUserId.get(member.id);
+      return quota
+        ? {
+            ...member,
+            usedTokens: quota.usedTokens,
+            monthlyTokens: quota.monthlyTokens,
+            unlimited: quota.unlimited,
+          }
+        : member;
+    }),
+  }));
 }
 
 function organizationChildren(nodes: OrganizationNode[]) {
@@ -269,16 +293,21 @@ export default function GroupsPage() {
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const response = await adminFetch("/api/admin/user-groups/overview", { cache: "no-store" });
-      const json = (await response.json()) as ApiEnvelope<{
+      const [groupsResponse, userQuotaResponse] = await Promise.all([
+        adminFetch("/api/admin/user-groups/overview", { cache: "no-store" }),
+        adminFetch("/api/admin/users/quota-overview", { cache: "no-store" }),
+      ]);
+      const groupsJson = (await groupsResponse.json()) as ApiEnvelope<{
         groups: GroupQuotaOverview[];
         organization: OrganizationNode[];
         users: OverviewMember[];
       }>;
-      if (!response.ok || json.code !== "00000") throw new Error(json.message || "加载用户组失败");
-      setGroups(json.data?.groups ?? []);
-      setOrganization(json.data?.organization ?? []);
-      setUsers(json.data?.users ?? []);
+      const userQuotaJson = (await userQuotaResponse.json()) as ApiEnvelope<{ items: UserQuotaSnapshot[] }>;
+      if (!groupsResponse.ok || groupsJson.code !== "00000") throw new Error(groupsJson.message || "加载用户组失败");
+      if (!userQuotaResponse.ok || userQuotaJson.code !== "00000") throw new Error(userQuotaJson.message || "加载用户额度失败");
+      setGroups(applyMemberQuotaSnapshots(groupsJson.data?.groups ?? [], userQuotaJson.data?.items ?? []));
+      setOrganization(groupsJson.data?.organization ?? []);
+      setUsers(groupsJson.data?.users ?? []);
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "加载用户组失败");
     } finally {
