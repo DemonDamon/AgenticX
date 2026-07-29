@@ -87,6 +87,20 @@ export function groupModelIdsForUser(groups: readonly UserGroupRecord[], userId:
   return [...new Set(groupModelSourcesForUser(groups, userId).flatMap((group) => group.modelIds))];
 }
 
+export function groupModelExclusionsForUser(config: QuotaConfig, userId: string): string[] {
+  return normalizeIds(config.modelExclusions?.[userId]);
+}
+
+export async function setUserGroupModelExclusions(userId: string, modelIds: unknown): Promise<string[]> {
+  const config = await getQuotaConfig();
+  const exclusions = { ...(config.modelExclusions ?? {}) };
+  const normalized = normalizeIds(modelIds);
+  if (normalized.length > 0) exclusions[userId] = normalized;
+  else delete exclusions[userId];
+  await setQuotaConfig({ ...config, modelExclusions: exclusions });
+  return normalized;
+}
+
 export function groupQuotaSourceForUser(
   groups: readonly UserGroupRecord[],
   userId: string,

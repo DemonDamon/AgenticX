@@ -26,7 +26,7 @@ export type UserGroup = {
   memberIds: string[];
   /** 保存时写入每位成员的个人月额度；0 表示不限制。 */
   monthlyTokens: number;
-  /** 用户组派生的可用模型范围；成员可在此基础上增加个人模型。 */
+  /** 用户组派生的可用模型范围；成员可在此基础上增加或关闭个人模型。 */
   modelIds: string[];
   createdAt: string;
   updatedAt: string;
@@ -35,6 +35,8 @@ export type UserGroup = {
 export type QuotaConfig = SharedQuotaConfig & {
   apiTokens?: Record<string, QuotaRule>;
   groups?: Record<string, UserGroup>;
+  /** 用户可撤销用户组派生模型的个人例外。 */
+  modelExclusions?: Record<string, string[]>;
 };
 
 const LEGACY_FILE = path.join(resolveRuntimeAdminDir(), "quotas.json");
@@ -51,6 +53,7 @@ const DEFAULT_CONFIG: QuotaConfig = {
   users: {},
   departments: {},
   groups: {},
+  modelExclusions: {},
   updatedAt: new Date().toISOString(),
 };
 
@@ -111,12 +114,25 @@ function normalizeGroup(input: Partial<UserGroup> | undefined): UserGroup {
   };
 }
 
+function normalizeModelExclusions(input: unknown): Record<string, string[]> {
+  if (!input || typeof input !== "object" || Array.isArray(input)) return {};
+  const exclusions: Record<string, string[]> = {};
+  for (const [userId, value] of Object.entries(input)) {
+    const id = userId.trim();
+    if (!id || !Array.isArray(value)) continue;
+    const modelIds = [...new Set(value.map((modelId) => String(modelId).trim()).filter(Boolean))];
+    if (modelIds.length > 0) exclusions[id] = modelIds;
+  }
+  return exclusions;
+}
+
 function normalizeQuota(input: Partial<QuotaConfig> | undefined): QuotaConfig {
   const next: QuotaConfig = {
     defaults: { role: {}, model: {} },
     users: {},
     departments: {},
     groups: {},
+    modelExclusions: {},
     apiTokens: {},
     updatedAt: new Date().toISOString(),
   };
@@ -130,6 +146,7 @@ function normalizeQuota(input: Partial<QuotaConfig> | undefined): QuotaConfig {
   for (const [key, value] of Object.entries(depts)) next.departments[key] = normalizeRule(value);
   const groups = input?.groups ?? {};
   for (const [key, value] of Object.entries(groups)) next.groups![key] = normalizeGroup(value);
+  next.modelExclusions = normalizeModelExclusions(input?.modelExclusions);
   const apiTokens = input?.apiTokens ?? {};
   for (const [key, value] of Object.entries(apiTokens)) next.apiTokens![key] = normalizeRule(value);
   return next;

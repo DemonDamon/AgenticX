@@ -75,6 +75,14 @@ describe("effective-models", () => {
     expect(computeEffectiveUserAllowed(dept, null, ["a/B", "outside/X"])).toEqual(["a/B"]);
   });
 
+  it("allows a user to turn off a model inherited from a group", () => {
+    const dept = ["a/A", "a/B", "a/C"];
+    expect(computeEffectiveUserAllowed(dept, ["a/A", "a/C"], ["a/A", "a/B"], ["a/A"])).toEqual([
+      "a/B",
+      "a/C",
+    ]);
+  });
+
   it("clipToAllowed prunes out-of-parent ids", () => {
     const { saved, prunedModelIds } = clipToAllowed(["a/A", "a/C"], new Set(["a/A", "a/B"]));
     expect(saved).toEqual(["a/A"]);

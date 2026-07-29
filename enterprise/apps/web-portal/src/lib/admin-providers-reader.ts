@@ -149,19 +149,26 @@ function idsFrom(value: unknown): string[] {
   return [...new Set(value.map((id) => String(id).trim()).filter(Boolean))];
 }
 
-function groupModelIdsFromQuotaConfig(config: unknown, userId: string): string[] {
-  const groups = asRecord(asRecord(config)?.groups);
-  if (!groups) return [];
+type GroupModelPolicy = {
+  groupModelIds: string[];
+  excludedGroupModelIds: string[];
+};
+
+function groupModelPolicyFromQuotaConfig(config: unknown, userId: string): GroupModelPolicy {
+  const root = asRecord(config);
+  const groups = asRecord(root?.groups);
+  if (!groups) return { groupModelIds: [], excludedGroupModelIds: [] };
   const modelIds = new Set<string>();
   for (const group of Object.values(groups)) {
     const record = asRecord(group);
     if (!record || !idsFrom(record.memberIds).includes(userId)) continue;
     for (const modelId of idsFrom(record.modelIds)) modelIds.add(modelId);
   }
-  return [...modelIds];
+  const exclusions = idsFrom(asRecord(root?.modelExclusions)?.[userId]).filter((modelId) => modelIds.has(modelId));
+  return { groupModelIds: [...modelIds], excludedGroupModelIds: exclusions };
 }
 
-async function readGroupModelIds(userId: string): Promise<string[]> {
+async function readGroupModelPolicy(userId: string): Promise<GroupModelPolicy> {
   const tid = requiredTenant();
   const config = resolveDatabaseConfig();
   if (config.dialect === "mysql") {
@@ -171,7 +178,7 @@ async function readGroupModelIds(userId: string): Promise<string[]> {
       .from(mysqlQuotaTable)
       .where(eq(mysqlQuotaTable.tenantId, tid))
       .limit(1);
-    return groupModelIdsFromQuotaConfig(rows[0]?.config, userId);
+    return groupModelPolicyFromQuotaConfig(rows[0]?.config, userId);
   }
   const db = getIamDb();
   const rows = await db
@@ -179,7 +186,7 @@ async function readGroupModelIds(userId: string): Promise<string[]> {
     .from(pgQuotaTable)
     .where(eq(pgQuotaTable.tenantId, tid))
     .limit(1);
-  return groupModelIdsFromQuotaConfig(rows[0]?.config, userId);
+  return groupModelPolicyFromQuotaConfig(rows[0]?.config, userId);
 }
 
 function flattenEnabledModelIds(providers: ProviderRecord[]): string[] {
@@ -210,10 +217,10 @@ export async function listAvailableModelsForUser(
   email?: string,
   deptId?: string | null,
 ): Promise<PortalModelOption[]> {
-  const [providers, userMap, groupModelIds] = await Promise.all([
+  const [providers, userMap, groupModelPolicy] = await Promise.all([
     readProviders(),
     readUserModels(),
-    readGroupModelIds(userId),
+    readGroupModelPolicy(userId),
   ]);
   const allEnabled = flattenEnabledModelIds(providers);
 
@@ -230,7 +237,14 @@ export async function listAvailableModelsForUser(
 
   const userKeys = resolveUserKeys(userId, email);
   const userStored = mergeUserStoredSet(userMap, userKeys);
-  const effectiveIds = new Set(computeEffectiveUserAllowed(deptEffective, userStored, groupModelIds));
+  const effectiveIds = new Set(
+    computeEffectiveUserAllowed(
+      deptEffective,
+      userStored,
+      groupModelPolicy.groupModelIds,
+      groupModelPolicy.excludedGroupModelIds,
+    ),
+  );
 
   const out: PortalModelOption[] = [];
   for (const p of providers) {
