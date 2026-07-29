@@ -141,7 +141,11 @@ import {
   shouldShowStopButton,
   type SessionExecutionState,
 } from "../utils/streaming-stop-policy";
-import { TURN_INTERRUPTED_TOAST, isTurnInterruptionNoticeMessage } from "../utils/turn-interruption-notice";
+import {
+  TURN_INTERRUPTED_TOAST,
+  isTurnInterruptionNoticeMessage,
+  shouldAutoResumeTruncationInterruption,
+} from "../utils/turn-interruption-notice";
 import {
   CHANNEL_C_GRACE_MS,
   stallDetectSilenceMs,
@@ -2718,6 +2722,10 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
   const [unattendedContinueCount, setUnattendedContinueCount] = useState(0);
   const unattendedContinueTriggeredRef = useRef<Record<string, number>>({});
   const unattendedContinueBucketRef = useRef<Record<string, number>>({});
+  /** sid → last auto-resumed turn_interrupted message id (truncation/timeout). */
+  const truncationAutoResumeNoticeRef = useRef<Record<string, string>>({});
+  /** sid → auto-resume count for truncation detectors (cap 2, no unattended needed). */
+  const truncationAutoResumeCountRef = useRef<Record<string, number>>({});
   // Tracks the id of the trailing "无人值守已停止" marker we've already reacted to
   // per session, so the auto-disable effect does not fight a later manual re-enable.
   const unattendedAutoStopAckRef = useRef<Record<string, string>>({});
@@ -6886,6 +6894,28 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
     [pane.id, pane.sessionId, resumeCurrentTask, setPaneModel]
   );
 
+  // Cursor-like: tool-arg truncation / stream timeout → auto-continue once or twice
+  // without requiring「无人值守」. Manual user_interrupt is never auto-resumed.
+  useEffect(() => {
+    const sid = (pane.sessionId || "").trim();
+    if (!sid) return;
+    if (resumeInFlightRef.current[sid]) return;
+    if (sessionAbortControllersRef.current[sid]) return;
+    if (userStoppedSessionRef.current[sid]) return;
+    if ((truncationAutoResumeCountRef.current[sid] ?? 0) >= 2) return;
+    const msgs = pane.messages ?? [];
+    for (let i = msgs.length - 1; i >= 0; i -= 1) {
+      const m = msgs[i];
+      if (!m || !shouldAutoResumeTruncationInterruption(m)) continue;
+      if (truncationAutoResumeNoticeRef.current[sid] === m.id) return;
+      truncationAutoResumeNoticeRef.current[sid] = m.id;
+      truncationAutoResumeCountRef.current[sid] =
+        (truncationAutoResumeCountRef.current[sid] ?? 0) + 1;
+      void resumeCurrentTask();
+      return;
+    }
+  }, [pane.messages, pane.sessionId, resumeCurrentTask]);
+
   const sendFollowupChip = useCallback(
     (text: string, ctx?: { ownerSessionId?: string }) => {
       const t = String(text || "").trim();
@@ -8703,6 +8733,9 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
 
     try {
       const body: Record<string, unknown> = { session_id: requestSessionId, user_input: outboundMessageText };
+      // Keep backend turn alive across brief SSE drops (network blip / sleep).
+      // Without this, streamed tool-arg truncation retries get cancelled mid-flight.
+      body.keep_runtime_after_disconnect = true;
       // Idempotency key: backend short-circuits a duplicate POST (double-click /
       // chip burst / retry race) so it never appends a second user row.
       body.client_turn_id = clientTurnId;
