@@ -1,9 +1,12 @@
 import { NextResponse } from "next/server";
 import { getQuotaSummaryForSession } from "@agenticx/iam-core";
-import { getSessionFromCookies } from "../../../../../lib/session";
+import { getSessionFromCookies, passwordChangeRequiredResponse } from "../../../../../lib/session";
 
 export async function GET(request: Request) {
   const session = await getSessionFromCookies();
+  if (session?.mustChangePassword) {
+    return passwordChangeRequiredResponse();
+  }
   if (!session) {
     return NextResponse.json(
       { code: "40101", message: "unauthorized" },

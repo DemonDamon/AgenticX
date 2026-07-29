@@ -247,7 +247,10 @@ export async function loginAndGetIdentity(email: string, password: string): Prom
   displayName: string;
 }> {
   const runtime = await getRuntime();
-  await runtime.authService.loginWithPassword({ email, password });
+  const tokens = await runtime.authService.loginWithPassword({ email, password });
+  if (tokens.mustChangePassword) {
+    throw new Error("password_change_required");
+  }
   const user = await runtime.repo.findByEmail(email.toLowerCase());
   if (!user) throw new Error("user not found after login");
   try {
@@ -451,6 +454,23 @@ export async function loginWithOidcClaims(input: OidcLoginInput): Promise<OidcLo
     tenantId: user.tenantId,
     jitCreated,
   };
+}
+
+export async function completeRequiredPasswordChange(
+  context: AuthContext,
+  newPassword: string,
+): Promise<AuthTokens> {
+  const runtime = await getRuntime();
+  const tokens = await runtime.authService.completeRequiredPasswordChange({ context, newPassword });
+  const user = await runtime.repo.findByEmail(context.email.toLowerCase());
+  if (user) {
+    try {
+      await syncAuthUserToPostgres(user);
+    } catch (error) {
+      console.error("[web-portal] syncAuthUserToPostgres after password change failed:", error);
+    }
+  }
+  return tokens;
 }
 
 export async function verifyAccessToken(accessToken: string): Promise<AuthContext | null> {

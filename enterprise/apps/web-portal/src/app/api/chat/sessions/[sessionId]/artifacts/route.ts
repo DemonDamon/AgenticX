@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { getSessionFromCookies } from "../../../../../../lib/session";
+import { getSessionFromCookies, passwordChangeRequiredResponse } from "../../../../../../lib/session";
 import { isChatSessionOwned } from "../../../../../../lib/chat-history";
 import { toChatHistoryContext } from "../../../../../../lib/chat-history-http";
 import { defaultArtifactStore } from "../../../../../../lib/deep-research/artifact-store";
@@ -8,6 +8,9 @@ type Params = Promise<{ sessionId: string }>;
 
 export async function GET(_request: Request, segmentData: { params: Params }) {
   const session = await getSessionFromCookies();
+  if (session?.mustChangePassword) {
+    return passwordChangeRequiredResponse();
+  }
   if (!session) {
     return NextResponse.json(
       { error: { code: "40101", message: "unauthorized" } },

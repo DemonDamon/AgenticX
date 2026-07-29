@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { cookies } from "next/headers";
-import { getSessionFromCookies } from "../../../../lib/session";
+import { getSessionFromCookies, passwordChangeRequiredResponse } from "../../../../lib/session";
 import { ACCESS_COOKIE } from "../../../../lib/session";
 import { isChatSessionOwned } from "../../../../lib/chat-history";
 import { toChatHistoryContext } from "../../../../lib/chat-history-http";
@@ -15,6 +15,9 @@ const GATEWAY_COMPLETIONS_URL =
 
 export async function POST(request: Request) {
   const session = await getSessionFromCookies();
+  if (session?.mustChangePassword) {
+    return passwordChangeRequiredResponse();
+  }
   if (!session) {
     return NextResponse.json(
       {

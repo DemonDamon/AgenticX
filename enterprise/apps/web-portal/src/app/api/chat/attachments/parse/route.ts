@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { getSessionFromCookies } from "../../../../../lib/session";
+import { getSessionFromCookies, passwordChangeRequiredResponse } from "../../../../../lib/session";
 import { parseAttachmentFile, MAX_PARSE_FILE_BYTES } from "../../../../../lib/attachment-parse";
 
 export const runtime = "nodejs";
@@ -27,6 +27,9 @@ function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise
 
 export async function POST(request: Request) {
   const session = await getSessionFromCookies();
+  if (session?.mustChangePassword) {
+    return passwordChangeRequiredResponse();
+  }
   if (!session) {
     return NextResponse.json({ error: { code: "40101", message: "unauthorized" } }, { status: 401 });
   }

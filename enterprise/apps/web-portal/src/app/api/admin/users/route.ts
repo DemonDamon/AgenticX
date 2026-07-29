@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { provisionUserFromAdmin } from "../../../../lib/auth-runtime";
-import { getSessionFromCookies } from "../../../../lib/session";
+import { getSessionFromCookies, passwordChangeRequiredResponse } from "../../../../lib/session";
 
 function isEmail(value: string): boolean {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value);
@@ -9,6 +9,9 @@ function isEmail(value: string): boolean {
 export async function POST(request: Request) {
   try {
     const session = await getSessionFromCookies();
+    if (session?.mustChangePassword) {
+      return passwordChangeRequiredResponse();
+    }
     if (!session || !session.scopes.includes("user:create")) {
       return NextResponse.json({ code: "40101", message: "unauthorized" }, { status: 401 });
     }
@@ -55,4 +58,3 @@ export async function POST(request: Request) {
     );
   }
 }
-

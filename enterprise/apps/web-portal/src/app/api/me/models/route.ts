@@ -1,9 +1,12 @@
 import { NextResponse } from "next/server";
-import { getSessionFromCookies } from "../../../../lib/session";
+import { getSessionFromCookies, passwordChangeRequiredResponse } from "../../../../lib/session";
 import { listAvailableModelsForUser } from "../../../../lib/admin-providers-reader";
 
 export async function GET() {
   const session = await getSessionFromCookies();
+  if (session?.mustChangePassword) {
+    return passwordChangeRequiredResponse();
+  }
   if (!session) {
     return NextResponse.json(
       { error: { code: "40101", message: "unauthorized" } },

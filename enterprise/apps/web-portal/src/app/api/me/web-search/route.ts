@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { getSessionFromCookies } from "../../../../lib/session";
+import { getSessionFromCookies, passwordChangeRequiredResponse } from "../../../../lib/session";
 import {
   getPublicWebSearchConfig,
   upsertTenantWebSearchConfig,
@@ -7,6 +7,7 @@ import {
 
 export async function GET() {
   const session = await getSessionFromCookies();
+  if (session?.mustChangePassword) return passwordChangeRequiredResponse();
   if (!session) {
     return NextResponse.json(
       {
@@ -38,6 +39,7 @@ export async function GET() {
 
 export async function PUT(request: Request) {
   const session = await getSessionFromCookies();
+  if (session?.mustChangePassword) return passwordChangeRequiredResponse();
   if (!session) {
     return NextResponse.json(
       {

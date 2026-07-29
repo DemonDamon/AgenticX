@@ -1,4 +1,5 @@
 import { loadAuthUserByEmail } from "@agenticx/iam-core";
+import type { AuthContext } from "@agenticx/auth";
 import { cookies } from "next/headers";
 import { refreshTokens, verifyAccessToken } from "./auth-runtime";
 
@@ -13,7 +14,14 @@ export function isAuthCookieSecure(): boolean {
 }
 
 async function hydrateFromDatabase<
-  T extends { userId: string; tenantId: string; email: string; scopes: string[]; deptId?: string | null },
+  T extends {
+    userId: string;
+    tenantId: string;
+    email: string;
+    scopes: string[];
+    deptId?: string | null;
+    mustChangePassword: boolean;
+  },
 >(context: T): Promise<T | null> {
   if (!process.env.DATABASE_URL?.trim()) return context;
   try {
@@ -30,6 +38,7 @@ async function hydrateFromDatabase<
       userId: live.id,
       scopes: live.scopes,
       deptId: live.deptId ?? null,
+      mustChangePassword: live.mustChangePassword,
     };
   } catch (error) {
     if (process.env.NODE_ENV !== "production") {
@@ -39,7 +48,7 @@ async function hydrateFromDatabase<
   }
 }
 
-export async function getSessionFromCookies() {
+export async function getSessionFromCookies(): Promise<AuthContext | null> {
   const cookieStore = await cookies();
   const accessToken = cookieStore.get(ACCESS_COOKIE)?.value;
   if (accessToken) {
@@ -82,3 +91,23 @@ export async function getSessionFromCookies() {
   }
 }
 
+export type WorkspaceSessionResult =
+  | { status: "ready"; session: AuthContext }
+  | { status: "unauthenticated" }
+  | { status: "password_change_required"; session: AuthContext };
+
+export async function getWorkspaceSessionFromCookies(): Promise<WorkspaceSessionResult> {
+  const session = await getSessionFromCookies();
+  if (!session) return { status: "unauthenticated" };
+  if (session.mustChangePassword) {
+    return { status: "password_change_required", session };
+  }
+  return { status: "ready", session };
+}
+
+export function passwordChangeRequiredResponse(): Response {
+  return Response.json(
+    { code: "40302", message: "password_change_required" },
+    { status: 403 },
+  );
+}
