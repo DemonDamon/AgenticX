@@ -19,6 +19,11 @@ class _LLM:
 
 
 def test_compactor_compacts_when_message_count_exceeded() -> None:
+    """Escape hatch / explicit override: low threshold_messages still forces compact.
+
+    Default constructor no longer triggers on message count alone (see
+    tests/test_compactor_token_window_trigger.py).
+    """
     compactor = ContextCompactor(_LLM(), threshold_messages=8, retain_recent_messages=4)
     messages = [{"role": "user", "content": f"msg-{i}"} for i in range(12)]
     compacted, changed, summary, count, pending_q = asyncio.run(compactor.maybe_compact(messages))
