@@ -20,8 +20,22 @@ export type QuotaRule = {
   action: QuotaAction;
 };
 
+/** 用户组是批量管理成员的模板，不参与网关的共享额度计算。 */
+export type UserGroup = {
+  name: string;
+  description?: string;
+  memberIds: string[];
+  /** 保存时写入每位成员的个人月额度；0 表示不限制。 */
+  monthlyTokens: number;
+  /** 保存时批量下发到成员的可用模型；空数组表示不改成员现有模型范围。 */
+  modelIds: string[];
+  createdAt: string;
+  updatedAt: string;
+};
+
 export type QuotaConfig = SharedQuotaConfig & {
   apiTokens?: Record<string, QuotaRule>;
+  groups?: Record<string, UserGroup>;
 };
 
 const LEGACY_FILE = path.join(resolveRuntimeAdminDir(), "quotas.json");
@@ -29,14 +43,15 @@ const LEGACY_FILE = path.join(resolveRuntimeAdminDir(), "quotas.json");
 const DEFAULT_CONFIG: QuotaConfig = {
   defaults: {
     role: {
-      admin: { monthlyTokens: 1_500_000, action: "warn" },
-      staff: { monthlyTokens: 600_000, action: "warn" },
+      admin: { monthlyTokens: 1_500_000, action: "block" },
+      staff: { monthlyTokens: 600_000, action: "block" },
       guest: { monthlyTokens: 300_000, action: "block" },
     },
     model: {},
   },
   users: {},
   departments: {},
+  groups: {},
   updatedAt: new Date().toISOString(),
 };
 
@@ -60,8 +75,7 @@ function normalizeRule(input: Partial<QuotaRule> | undefined): QuotaRule {
   const requestsPerMonth = Number(input?.requestsPerMonth ?? 0);
   const action = input?.action ?? "warn";
   const poolScopeRaw = String(input?.poolScope ?? "").trim();
-  const poolScope =
-    poolScopeRaw === "dept" || poolScopeRaw === "tenant" ? poolScopeRaw : ("" as const);
+  const poolScope = poolScopeRaw === "dept" || poolScopeRaw === "tenant" ? poolScopeRaw : ("" as const);
   return {
     monthlyTokens: Number.isFinite(monthlyTokens) && monthlyTokens > 0 ? Math.floor(monthlyTokens) : 0,
     dailyTokens: Number.isFinite(dailyTokens) && dailyTokens > 0 ? Math.floor(dailyTokens) : 0,
@@ -77,11 +91,33 @@ function normalizeRule(input: Partial<QuotaRule> | undefined): QuotaRule {
   };
 }
 
+function normalizeGroup(input: Partial<UserGroup> | undefined): UserGroup {
+  const now = new Date().toISOString();
+  const memberIds = Array.isArray(input?.memberIds)
+    ? [...new Set(input.memberIds.map((id) => String(id).trim()).filter(Boolean))]
+    : [];
+  const modelIds = Array.isArray(input?.modelIds)
+    ? [...new Set(input.modelIds.map((id) => String(id).trim()).filter(Boolean))]
+    : [];
+  const description = typeof input?.description === "string" ? input.description.trim() : "";
+  const monthlyTokens = Number(input?.monthlyTokens ?? 0);
+  return {
+    name: String(input?.name ?? "").trim() || "未命名用户组",
+    ...(description ? { description } : {}),
+    memberIds,
+    modelIds,
+    monthlyTokens: Number.isFinite(monthlyTokens) && monthlyTokens > 0 ? Math.floor(monthlyTokens) : 0,
+    createdAt: typeof input?.createdAt === "string" && input.createdAt ? input.createdAt : now,
+    updatedAt: typeof input?.updatedAt === "string" && input.updatedAt ? input.updatedAt : now,
+  };
+}
+
 function normalizeQuota(input: Partial<QuotaConfig> | undefined): QuotaConfig {
   const next: QuotaConfig = {
     defaults: { role: {}, model: {} },
     users: {},
     departments: {},
+    groups: {},
     apiTokens: {},
     updatedAt: new Date().toISOString(),
   };
@@ -93,6 +129,8 @@ function normalizeQuota(input: Partial<QuotaConfig> | undefined): QuotaConfig {
   for (const [key, value] of Object.entries(users)) next.users[key] = normalizeRule(value);
   const depts = input?.departments ?? {};
   for (const [key, value] of Object.entries(depts)) next.departments[key] = normalizeRule(value);
+  const groups = input?.groups ?? {};
+  for (const [key, value] of Object.entries(groups)) next.groups![key] = normalizeGroup(value);
   const apiTokens = input?.apiTokens ?? {};
   for (const [key, value] of Object.entries(apiTokens)) next.apiTokens![key] = normalizeRule(value);
   return next;

@@ -275,6 +275,13 @@ func (t *Tracker) RollbackContext(ctx RequestContext, tokens int64) bool {
 	cfg := t.loadConfig()
 	rule := selectRule(cfg, ctx.UserID, ctx.DeptID, ctx.Role, ctx.Model)
 	month := time.Now().UTC().Format("2006-01")
+	if rule.MonthlyTokens <= 0 {
+		return true
+	}
+	return t.rollbackRuleLocked(rule, ctx, month, tokens)
+}
+
+func (t *Tracker) rollbackRuleLocked(rule Rule, ctx RequestContext, month string, tokens int64) bool {
 	if poolKey, ok := poolKeyFor(rule, ctx, month); ok && t.poolCounter != nil {
 		_, err := t.poolCounter.Add(poolKey, -tokens, LedgerEventRefund, "")
 		return err == nil

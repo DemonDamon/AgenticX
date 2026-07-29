@@ -217,8 +217,7 @@ function normalizeRule(input: Partial<QuotaRuleSnapshot> | undefined): QuotaRule
   const dailyTokens = Number(input?.dailyTokens ?? 0);
   const weeklyTokens = Number(input?.weeklyTokens ?? 0);
   const poolScopeRaw = String(input?.poolScope ?? "").trim();
-  const poolScope =
-    poolScopeRaw === "dept" || poolScopeRaw === "tenant" ? poolScopeRaw : ("" as const);
+  const poolScope = poolScopeRaw === "dept" || poolScopeRaw === "tenant" ? poolScopeRaw : ("" as const);
   return {
     monthlyTokens: Number.isFinite(monthlyTokens) && monthlyTokens > 0 ? Math.floor(monthlyTokens) : 0,
     dailyTokens: Number.isFinite(dailyTokens) && dailyTokens > 0 ? Math.floor(dailyTokens) : 0,
@@ -429,7 +428,7 @@ export function tokenWindowIdentity(ctx: {
   return `tenant::${ctx.tenantId.trim()}`;
 }
 
-/** Day/week usage reads only apply to user/pat scopes; dept/tenant have no separate tok_day/tok_week pool keys. */
+/** Day/week usage reads only apply to user/pat scopes; shared pools have no separate tok_day/tok_week keys. */
 function tokenWindowUsageSupported(scope: QuotaUsageScope): boolean {
   return scope === "user" || scope === "pat";
 }
