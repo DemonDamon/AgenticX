@@ -22,11 +22,7 @@ function modelIdsFrom(value: unknown): string[] | undefined {
 async function resolveKnownMembers(tenantId: string, memberIds: string[]): Promise<UserGroupPolicyMember[]> {
   const rows = await Promise.all(memberIds.map((id) => getAdminUser(tenantId, id)));
   if (rows.some((row) => !row)) throw new Error("one or more members do not exist");
-  return rows.map((row) => ({
-    id: row!.id,
-    email: row!.email,
-    deptId: row!.deptId,
-  }));
+  return rows.map((row) => ({ id: row!.id }));
 }
 
 export async function GET(_request: Request, context: { params: Promise<{ id: string }> }) {

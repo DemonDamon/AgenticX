@@ -69,6 +69,12 @@ describe("effective-models", () => {
     expect(computeEffectiveUserAllowed(dept, null)).toEqual(dept);
   });
 
+  it("group models are available to members and individual models are additive", () => {
+    const dept = ["a/A", "a/B", "a/C"];
+    expect(computeEffectiveUserAllowed(dept, ["a/C"], ["a/A", "a/B"])).toEqual(["a/A", "a/B", "a/C"]);
+    expect(computeEffectiveUserAllowed(dept, null, ["a/B", "outside/X"])).toEqual(["a/B"]);
+  });
+
   it("clipToAllowed prunes out-of-parent ids", () => {
     const { saved, prunedModelIds } = clipToAllowed(["a/A", "a/C"], new Set(["a/A", "a/B"]));
     expect(saved).toEqual(["a/A"]);

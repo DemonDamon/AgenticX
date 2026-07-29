@@ -27,7 +27,7 @@ export type UserGroup = {
   memberIds: string[];
   /** 保存时写入每位成员的个人月额度；0 表示不限制。 */
   monthlyTokens: number;
-  /** 保存时批量下发到成员的可用模型；空数组表示不改成员现有模型范围。 */
+  /** 用户组派生的可用模型范围；成员可在此基础上增加个人模型。 */
   modelIds: string[];
   createdAt: string;
   updatedAt: string;

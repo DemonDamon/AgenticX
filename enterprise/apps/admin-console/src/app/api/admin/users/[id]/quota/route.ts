@@ -2,6 +2,7 @@ import { getAdminUser } from "@agenticx/iam-core";
 import { NextResponse } from "next/server";
 import { requireAdminScope } from "../../../../../../lib/admin-auth";
 import { getQuotaConfig, setQuotaConfig, type QuotaRule } from "../../../../../../lib/token-quota-store";
+import { groupQuotaSourceForUser, listUserGroups } from "../../../../../../lib/user-groups-store";
 
 export async function PUT(request: Request, context: { params: Promise<{ id: string }> }) {
   const auth = await requireAdminScope(["user:update"]);
@@ -16,9 +17,24 @@ export async function PUT(request: Request, context: { params: Promise<{ id: str
     const config = await getQuotaConfig();
     const users = { ...config.users };
     if (body.inherit === true) {
+      const groupSource = groupQuotaSourceForUser(await listUserGroups(), id);
+      if (groupSource) {
+        users[id] = {
+          ...(users[id] as QuotaRule | undefined),
+          monthlyTokens: groupSource.monthlyTokens,
+          poolScope: "",
+          action: "block",
+        };
+        const quota = await setQuotaConfig({ ...config, users });
+        return NextResponse.json({
+          code: "00000",
+          message: "ok",
+          data: { quota: quota.users[id], inherited: true, source: "group", sourceLabel: groupSource.name },
+        });
+      }
       delete users[id];
       const quota = await setQuotaConfig({ ...config, users });
-      return NextResponse.json({ code: "00000", message: "ok", data: { quota: quota.users[id] ?? null, inherited: true } });
+      return NextResponse.json({ code: "00000", message: "ok", data: { quota: quota.users[id] ?? null, inherited: true, source: "default" } });
     }
 
     const monthlyTokens = Number(body.monthlyTokens);

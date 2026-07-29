@@ -1,7 +1,15 @@
 import { getAdminUser } from "@agenticx/iam-core";
 import { NextResponse } from "next/server";
 import { requireAdminScope } from "../../../../../../lib/admin-auth";
-import { getUserModels, readUserEditPayload, setUserModels } from "../../../../../../lib/user-models-store";
+import { computeEffectiveUserAllowed } from "../../../../../../lib/effective-models";
+import { groupModelSourcesForUser, listUserGroups } from "../../../../../../lib/user-groups-store";
+import {
+  collectUserAssignmentKeys,
+  listAllAssignments,
+  mergeUserStoredSet,
+  readUserEditPayload,
+  setUserModels,
+} from "../../../../../../lib/user-models-store";
 
 export async function GET(_req: Request, context: { params: Promise<{ id: string }> }) {
   const auth = await requireAdminScope(["user:read"]);
@@ -11,13 +19,33 @@ export async function GET(_req: Request, context: { params: Promise<{ id: string
   if (!user) {
     return NextResponse.json({ code: "40400", message: "user not found" }, { status: 404 });
   }
-  const payload = await readUserEditPayload(id, user.email, user.deptId);
+  const [payload, groups, assignments] = await Promise.all([
+    readUserEditPayload(id, user.email, user.deptId),
+    listUserGroups(),
+    listAllAssignments(),
+  ]);
+  const allowed = new Set(payload.parentAllowedIds);
+  const individualModelIds = mergeUserStoredSet(assignments, collectUserAssignmentKeys(id, user.email)) ?? [];
+  const groupModelSources = groupModelSourcesForUser(groups, id).map((group) => ({
+    ...group,
+    modelIds: group.modelIds.filter((modelId) => allowed.has(modelId)),
+  }));
+  const groupModelIds = [...new Set(groupModelSources.flatMap((group) => group.modelIds))];
+  const effectiveModelIds = computeEffectiveUserAllowed(
+    payload.parentAllowedIds,
+    individualModelIds.length > 0 ? individualModelIds : null,
+    groupModelIds,
+  );
   return NextResponse.json({
     code: "00000",
     message: "ok",
     data: {
       ...payload,
       parentSourceLabel: payload.parentLabel,
+      individualModelIds,
+      groupModelIds,
+      groupModelSources,
+      effectiveModelIds,
     },
   });
 }

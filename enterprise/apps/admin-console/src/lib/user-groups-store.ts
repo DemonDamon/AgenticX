@@ -5,7 +5,6 @@ import {
   type QuotaConfig,
   type UserGroup,
 } from "./token-quota-store";
-import { setUserModels } from "./user-models-store";
 
 export type UserGroupRecord = UserGroup & { id: string };
 
@@ -19,8 +18,6 @@ export type UserGroupInput = {
 
 export type UserGroupPolicyMember = {
   id: string;
-  email: string;
-  deptId: string | null;
 };
 
 function normalizeIds(value: unknown): string[] {
@@ -72,6 +69,35 @@ export async function getUserGroup(id: string): Promise<UserGroupRecord | null> 
   return group ? asRecord(id, group) : null;
 }
 
+export type UserGroupModelSource = Pick<UserGroupRecord, "id" | "name"> & {
+  modelIds: string[];
+};
+
+export function groupModelSourcesForUser(
+  groups: readonly UserGroupRecord[],
+  userId: string,
+): UserGroupModelSource[] {
+  return groups
+    .filter((group) => group.memberIds.includes(userId) && group.modelIds.length > 0)
+    .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))
+    .map((group) => ({ id: group.id, name: group.name, modelIds: [...group.modelIds] }));
+}
+
+export function groupModelIdsForUser(groups: readonly UserGroupRecord[], userId: string): string[] {
+  return [...new Set(groupModelSourcesForUser(groups, userId).flatMap((group) => group.modelIds))];
+}
+
+export function groupQuotaSourceForUser(
+  groups: readonly UserGroupRecord[],
+  userId: string,
+): UserGroupRecord | null {
+  return (
+    groups
+      .filter((group) => group.memberIds.includes(userId))
+      .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))[0] ?? null
+  );
+}
+
 export async function createUserGroup(input: UserGroupInput): Promise<UserGroupRecord> {
   const config = await getQuotaConfig();
   const id = ulid();
@@ -114,10 +140,7 @@ export async function updateUserGroup(id: string, input: Partial<UserGroupInput>
   return asRecord(id, next);
 }
 
-/**
- * 用户组是批量编辑入口：保存后把月额度与模型范围分别写入每个成员，
- * 网关始终按成员自己的规则计量和拦截，不存在用户组共享额度池。
- */
+/** 保存用户组的每人额度；模型范围始终在运行时由用户组派生。 */
 export async function applyUserGroupPolicy(
   group: UserGroupRecord,
   members: UserGroupPolicyMember[],
@@ -135,14 +158,6 @@ export async function applyUserGroupPolicy(
     };
   }
   await setQuotaConfig({ ...config, users });
-
-  if (group.modelIds.length === 0) return;
-  await Promise.all(
-    members.flatMap((member) => [
-      setUserModels(member.id, group.modelIds, member.deptId),
-      setUserModels(`email:${member.email.trim().toLowerCase()}`, group.modelIds, member.deptId),
-    ]),
-  );
 }
 
 export async function deleteUserGroup(id: string): Promise<boolean> {

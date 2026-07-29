@@ -1,26 +1,38 @@
 import { listAdminUsers, listDepartmentsFlat, type AdminUserDto } from "@agenticx/iam-core";
 import { queryMetering } from "./metering-service";
 import { getQuotaConfig, type QuotaRule } from "./token-quota-store";
-import { listUserGroups, type UserGroupRecord } from "./user-groups-store";
+import {
+  groupModelIdsForUser,
+  groupQuotaSourceForUser,
+  listUserGroups,
+  type UserGroupRecord,
+} from "./user-groups-store";
+import { collectUserAssignmentKeys, listAllAssignments, mergeUserStoredSet } from "./user-models-store";
 
 export type OverviewMember = Pick<AdminUserDto, "id" | "displayName" | "email" | "deptId"> & {
   usedTokens: number;
 };
 
+export type GroupMemberOverview = OverviewMember & {
+  hasIndividualQuotaOverride: boolean;
+  individualExtraModelIds: string[];
+  hasIndividualOverride: boolean;
+};
+
 export type ModelUsage = { model: string; tokens: number };
 
 export type GroupQuotaOverview = UserGroupRecord & {
-  usedTokens: number;
   unlimited: boolean;
   memberCount: number;
-  members: OverviewMember[];
-  topModels: ModelUsage[];
+  members: GroupMemberOverview[];
 };
 
 export type UserQuotaOverview = OverviewMember & {
   monthlyTokens: number;
   unlimited: boolean;
   inherited: boolean;
+  quotaSource: "group" | "personal" | "default";
+  quotaSourceLabel?: string;
   groupNames: string[];
   topModels: ModelUsage[];
 };
@@ -126,10 +138,27 @@ function roleRule(config: Awaited<ReturnType<typeof getQuotaConfig>>, code: "adm
   return config.defaults.role[code] as QuotaRule | undefined;
 }
 
-function ruleForUser(config: Awaited<ReturnType<typeof getQuotaConfig>>, user: AdminUserDto): { rule?: QuotaRule; inherited: boolean } {
+function ruleForUser(
+  config: Awaited<ReturnType<typeof getQuotaConfig>>,
+  groups: readonly UserGroupRecord[],
+  user: AdminUserDto,
+): {
+  rule?: QuotaRule;
+  inherited: boolean;
+  quotaSource: UserQuotaOverview["quotaSource"];
+  quotaSourceLabel?: string;
+} {
   const personal = config.users[user.id] as QuotaRule | undefined;
-  if (personal) return { rule: personal, inherited: false };
-  return { rule: roleRule(config, isAdministrator(user) ? "admin" : "staff"), inherited: true };
+  const group = groupQuotaSourceForUser(groups, user.id);
+  if (group && personal && Number(personal.monthlyTokens) === group.monthlyTokens) {
+    return { rule: personal, inherited: true, quotaSource: "group", quotaSourceLabel: group.name };
+  }
+  if (personal) return { rule: personal, inherited: false, quotaSource: "personal" };
+  return {
+    rule: roleRule(config, isAdministrator(user) ? "admin" : "staff"),
+    inherited: true,
+    quotaSource: "default",
+  };
 }
 
 function organizationFrom(users: AdminUserDto[], departments: Awaited<ReturnType<typeof listDepartmentsFlat>>): OrganizationNode[] {
@@ -146,32 +175,56 @@ function organizationFrom(users: AdminUserDto[], departments: Awaited<ReturnType
   }));
 }
 
+function groupMemberOverview(
+  user: OverviewMember,
+  config: Awaited<ReturnType<typeof getQuotaConfig>>,
+  groups: readonly UserGroupRecord[],
+  assignments: Record<string, string[]>,
+): GroupMemberOverview {
+  const quotaSource = groupQuotaSourceForUser(groups, user.id);
+  const personalQuota = config.users[user.id] as QuotaRule | undefined;
+  const hasIndividualQuotaOverride = Boolean(
+    personalQuota && (!quotaSource || Number(personalQuota.monthlyTokens) !== quotaSource.monthlyTokens),
+  );
+  const inheritedModelIds = new Set(groupModelIdsForUser(groups, user.id));
+  const directModelIds = mergeUserStoredSet(assignments, collectUserAssignmentKeys(user.id, user.email)) ?? [];
+  const individualExtraModelIds = directModelIds.filter((modelId) => !inheritedModelIds.has(modelId));
+  return {
+    ...user,
+    hasIndividualQuotaOverride,
+    individualExtraModelIds,
+    hasIndividualOverride: hasIndividualQuotaOverride || individualExtraModelIds.length > 0,
+  };
+}
+
 export async function loadGroupQuotaOverview(tenantId: string): Promise<{
   groups: GroupQuotaOverview[];
   organization: OrganizationNode[];
   users: OverviewMember[];
 }> {
-  const [groups, users, departments] = await Promise.all([
+  const [groups, users, departments, config, assignments] = await Promise.all([
     listUserGroups(),
     listAllUsers(tenantId),
     listDepartmentsFlat(tenantId),
+    getQuotaConfig(),
+    listAllAssignments(),
   ]);
-  const usage = await buildUsageIndex(users.map((user) => user.id));
   const usersById = new Map(users.map((user) => [user.id, user]));
-  const userDirectory = membersFor(users.map((user) => user.id), usersById, usage);
-  const groupsWithUsage = groups.map((group) => {
-    const members = membersFor(group.memberIds, usersById, usage);
+  const noUsage: UsageIndex = { byUser: new Map(), byUserModel: new Map() };
+  const userDirectory = membersFor(users.map((user) => user.id), usersById, noUsage);
+  const groupCards = groups.map((group) => {
+    const members = membersFor(group.memberIds, usersById, noUsage).map((member) =>
+      groupMemberOverview(member, config, groups, assignments),
+    );
     return {
       ...group,
-      usedTokens: members.reduce((total, member) => total + member.usedTokens, 0),
       unlimited: group.monthlyTokens <= 0,
       memberCount: members.length,
       members,
-      topModels: modelsFor(group.memberIds, usage),
     } satisfies GroupQuotaOverview;
   });
 
-  return { groups: groupsWithUsage, organization: organizationFrom(users, departments), users: userDirectory };
+  return { groups: groupCards, organization: organizationFrom(users, departments), users: userDirectory };
 }
 
 export async function loadUserQuotaOverview(tenantId: string): Promise<UserQuotaOverview[]> {
@@ -188,7 +241,7 @@ export async function loadUserQuotaOverview(tenantId: string): Promise<UserQuota
 
   return users
     .map((user) => {
-      const selected = ruleForUser(config, user);
+      const selected = ruleForUser(config, groups, user);
       const monthlyTokens = Math.max(0, Number(selected.rule?.monthlyTokens ?? 0));
       return {
         id: user.id,
@@ -199,6 +252,8 @@ export async function loadUserQuotaOverview(tenantId: string): Promise<UserQuota
         monthlyTokens,
         unlimited: monthlyTokens <= 0,
         inherited: selected.inherited,
+        quotaSource: selected.quotaSource,
+        ...(selected.quotaSourceLabel ? { quotaSourceLabel: selected.quotaSourceLabel } : {}),
         groupNames: groupNamesByUser.get(user.id) ?? [],
         topModels: modelsFor([user.id], usage),
       } satisfies UserQuotaOverview;
