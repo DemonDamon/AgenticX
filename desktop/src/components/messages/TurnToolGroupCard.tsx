@@ -3,7 +3,6 @@ import type { Message } from "../../store";
 import { Check, ChevronDown, ChevronRight, Wrench } from "lucide-react";
 import { buildToolCardTitle, ToolCallCard } from "./ToolCallCard";
 import type { ReactNode } from "react";
-import { TodoUpdateCard } from "../TodoUpdateCard";
 import { isTodoUpdateToolMessage } from "./MessageRenderer";
 import type { SkillPatchPreviewPayload } from "./skill-manage-preview";
 import { REACT_RAIL_ICON_TILE_STYLE, REACT_RAIL_TITLE_CLASS } from "./im-layout";
@@ -12,6 +11,7 @@ import {
   formatToolElapsedSeconds,
   useLiveToolElapsedSeconds,
 } from "./tool-elapsed-timer";
+import { isNoisyToolStatusMessage } from "../../utils/noisy-chat-messages";
 
 type Props = {
   messages: Message[];
@@ -89,13 +89,27 @@ export function TurnToolGroupCard({
   onSkillManageApply,
 }: Props) {
   const [expanded, setExpanded] = useState(false);
+  // todo_write snapshots are owned by StickyTaskBar; never nest TodoUpdateCard here.
+  const visibleMessages = useMemo(
+    () =>
+      messages.filter(
+        (m) =>
+          !isNoisyToolStatusMessage(m) &&
+          !isTodoUpdateToolMessage(m.content) &&
+          (m.toolName ?? "").trim() !== "todo_write",
+      ),
+    [messages],
+  );
   const inProgress = useMemo(
-    () => isToolGroupInProgress(messages) || holdProgress,
-    [holdProgress, messages],
+    () => isToolGroupInProgress(visibleMessages) || holdProgress,
+    [holdProgress, visibleMessages],
   );
   const activeTools = useMemo(
-    () => messages.filter((message) => message.toolStatus === "running" || message.toolStatus === "pending"),
-    [messages],
+    () =>
+      visibleMessages.filter(
+        (message) => message.toolStatus === "running" || message.toolStatus === "pending",
+      ),
+    [visibleMessages],
   );
   const activeTool = activeTools[activeTools.length - 1];
   const liveElapsedSec = useLiveToolElapsedSeconds(
@@ -104,6 +118,9 @@ export function TurnToolGroupCard({
     activeTool?.toolElapsedSec,
   );
   const activeToolTitle = activeTool ? buildToolCardTitle(activeTool) : "工具";
+
+  // Group may consist solely of todo_write (hidden); do not render an empty shell.
+  if (visibleMessages.length === 0) return null;
 
   const cardContent = (
     <div
@@ -141,7 +158,7 @@ export function TurnToolGroupCard({
               {activeTools.length > 1 ? ` 等 ${activeTools.length} 个工具` : ""}
             </span>
           ) : (
-            <CompletedToolSummary messages={messages} />
+            <CompletedToolSummary messages={visibleMessages} />
           )}
         </span>
         {activeTool ? (
@@ -155,7 +172,7 @@ export function TurnToolGroupCard({
           <ChevronRight className="h-3.5 w-3.5 shrink-0 text-text-muted" strokeWidth={2} aria-hidden />
         )}
       </button>
-      {expanded && (
+      {expanded && visibleMessages.length > 0 ? (
         <div
           className={
             flat
@@ -169,36 +186,24 @@ export function TurnToolGroupCard({
             aria-hidden
           />
           <div className="relative z-[1] space-y-2.5">
-            {messages.map((m) =>
-              isTodoUpdateToolMessage(m.content) ? (
-                <div key={m.id} className="relative w-full min-w-0 text-[13px] text-text-muted">
-                  <div
-                    className="pointer-events-none absolute left-[10px] top-[15px] z-[2] h-2 w-2 -translate-x-1/2 rounded-full border-2 border-surface-card bg-border"
-                    aria-hidden
-                  />
-                  <div className="ml-[28px] w-fit max-w-full rounded-lg border border-border bg-surface-card px-3 py-2 text-[13px] text-text-muted">
-                    <TodoUpdateCard content={m.content} />
-                  </div>
-                </div>
-              ) : (
-                <ToolCallCard
-                  key={m.id}
-                  message={m}
-                  highlightTerms={highlightTerms}
-                  forceExpand={!!m.inlineConfirm}
-                  selectable={selectable}
-                  selected={selectedIds?.has(m.id)}
-                  onToggleSelectMessage={onToggleSelectMessage}
-                  action={renderExtras?.(m)}
-                  variant="nested"
-                  omitLeadingSpacer={flat}
-                  onSkillManageApply={onSkillManageApply}
-                />
-              )
-            )}
+            {visibleMessages.map((m) => (
+              <ToolCallCard
+                key={m.id}
+                message={m}
+                highlightTerms={highlightTerms}
+                forceExpand={!!m.inlineConfirm}
+                selectable={selectable}
+                selected={selectedIds?.has(m.id)}
+                onToggleSelectMessage={onToggleSelectMessage}
+                action={renderExtras?.(m)}
+                variant="nested"
+                omitLeadingSpacer={flat}
+                onSkillManageApply={onSkillManageApply}
+              />
+            ))}
           </div>
         </div>
-      )}
+      ) : null}
     </div>
   );
 

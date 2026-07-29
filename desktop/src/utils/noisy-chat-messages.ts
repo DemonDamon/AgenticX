@@ -37,7 +37,11 @@ export function isNoisyToolStatusMessage(
   if (isOrphanFormattedToolResultMessage(message)) return true;
   const toolName = (message.toolName ?? "").trim();
   if (toolName === "check_resources") return true;
+  // StickyTaskBar (输入框上方「任务进度」) is the sole surface for todo_write snapshots.
+  // Keep the message in the store for progress parsing; hide the inline duplicate card.
+  if (toolName === "todo_write") return true;
   const content = String(message.content ?? "").trim();
+  if (content.startsWith("🗂 任务清单更新")) return true;
   const normalized = normalizeNoisyToolStatusContent(content);
   if (isEphemeralStopErrorText(content)) return true;
   if (!toolName && /^[✅🔧⚠️❌🗣]?\s*check_resources\b/i.test(content)) return true;

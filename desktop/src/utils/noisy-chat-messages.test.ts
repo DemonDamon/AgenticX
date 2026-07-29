@@ -34,6 +34,24 @@ test("isNoisyToolStatusMessage hides ephemeral interruption meta rows", () => {
     true,
     "orphan formatted fallback rows are hidden",
   );
+  assert.equal(
+    isNoisyToolStatusMessage({
+      role: "tool",
+      content: "🗂 任务清单更新\n[>] a\n[ ] b\n(0/2 completed)",
+      toolName: "todo_write",
+    }),
+    true,
+    "todo_write snapshots are hidden (StickyTaskBar owns display)",
+  );
+  assert.equal(
+    isNoisyToolStatusMessage({
+      role: "tool",
+      content: "🗂 任务清单更新\n[>] a\n[ ] b\n(0/2 completed)",
+      toolName: "",
+    }),
+    true,
+    "legacy todo snapshot prefix without toolName is hidden",
+  );
 });
 
 test("isEphemeralStopErrorText matches runtime STOP_MESSAGE variants", () => {
