@@ -16,6 +16,7 @@ export class PostgresqlRefreshTokenStore implements RefreshTokenStore {
         deptId: session.deptId ?? null,
         email: session.email,
         scopesJson: session.scopes,
+        mustChangePassword: session.mustChangePassword,
         expiresAt: new Date(session.expiresAt),
       })
       .onConflictDoUpdate({
@@ -26,6 +27,7 @@ export class PostgresqlRefreshTokenStore implements RefreshTokenStore {
           deptId: session.deptId ?? null,
           email: session.email,
           scopesJson: session.scopes,
+          mustChangePassword: session.mustChangePassword,
           expiresAt: new Date(session.expiresAt),
         },
       });
@@ -51,6 +53,7 @@ export class PostgresqlRefreshTokenStore implements RefreshTokenStore {
       deptId: row.deptId ?? undefined,
       email: row.email,
       scopes: Array.isArray(row.scopesJson) ? row.scopesJson.map(String) : [],
+      mustChangePassword: row.mustChangePassword,
       expiresAt,
     };
   }

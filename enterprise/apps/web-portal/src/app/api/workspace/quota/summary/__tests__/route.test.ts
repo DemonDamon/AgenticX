@@ -29,6 +29,7 @@ describe("GET /api/workspace/quota/summary", () => {
       tenantId: "tenant-1",
       email: "a@example.com",
       scopes: [],
+      mustChangePassword: false,
       deptId: "dept-a",
       sessionId: "sess-1",
     });

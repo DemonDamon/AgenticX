@@ -124,6 +124,7 @@ export class JwtService {
       const sessionId = payload.sessionId;
       const scopes = payload.scopes;
       const deptId = payload.deptId;
+      const mustChangePassword = payload.mustChangePassword;
 
       if (
         typeof userId !== "string" ||
@@ -142,6 +143,7 @@ export class JwtService {
         email,
         sessionId,
         scopes: scopes.filter((scope): scope is string => typeof scope === "string"),
+        mustChangePassword: mustChangePassword === true,
       };
     } catch {
       return null;
@@ -156,4 +158,3 @@ export class JwtService {
     return this.verify(token, "refresh");
   }
 }
-

@@ -253,6 +253,13 @@
       "when": 1780700000000,
       "tag": "0036_chat_sessions_pinned_at",
       "breakpoints": true
+    },
+    {
+      "idx": 36,
+      "version": "7",
+      "when": 1785322028582,
+      "tag": "0037_user_password_change_required",
+      "breakpoints": true
     }
   ]
 }

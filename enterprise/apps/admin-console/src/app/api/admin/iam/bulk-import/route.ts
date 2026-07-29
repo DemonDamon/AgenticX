@@ -130,6 +130,7 @@ export async function POST(request: Request) {
           employeeNo: row.employeeNo ?? null,
           jobTitle: row.jobTitle ?? null,
           passwordHash,
+          mustChangePassword: !row.initialPassword?.trim(),
           status: row.status,
           roleCodes,
           defaultOrgId: orgId,

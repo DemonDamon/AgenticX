@@ -22,6 +22,7 @@ export class MysqlRefreshTokenStore implements RefreshTokenStore {
         deptId: session.deptId ?? null,
         email: session.email,
         scopesJson: session.scopes,
+        mustChangePassword: session.mustChangePassword,
         expiresAt: new Date(session.expiresAt),
       })
       .onDuplicateKeyUpdate({
@@ -31,6 +32,7 @@ export class MysqlRefreshTokenStore implements RefreshTokenStore {
           deptId: session.deptId ?? null,
           email: session.email,
           scopesJson: session.scopes,
+          mustChangePassword: session.mustChangePassword,
           expiresAt: new Date(session.expiresAt),
         },
       });
@@ -56,6 +58,7 @@ export class MysqlRefreshTokenStore implements RefreshTokenStore {
       deptId: row.deptId ?? undefined,
       email: row.email,
       scopes: normalizeScopes(row.scopesJson),
+      mustChangePassword: row.mustChangePassword,
       expiresAt,
     };
   }

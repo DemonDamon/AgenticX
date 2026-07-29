@@ -29,6 +29,7 @@ export interface UsersRepository extends DialectRepository {
   loadAuthUserByEmail(tenantId: string, email: string): Promise<AuthUser | null>;
   updateFailedLogin(tenantId: string, email: string, nextFailedCount: number, lockedUntilMs: number | null): Promise<void>;
   resetFailedLogin(tenantId: string, email: string): Promise<void>;
+  updatePasswordAndClearRequirement(tenantId: string, email: string, passwordHash: string): Promise<AuthUser | null>;
   listAdminUsers(tenantId: string, filter?: ListUsersFilter): Promise<ListUsersResult>;
   getAdminUser(tenantId: string, id: string): Promise<AdminUserDto | null>;
   createAdminUser(input: {
@@ -53,7 +54,7 @@ export interface UsersRepository extends DialectRepository {
   upsertUserByEmail(input: {
     tenantId: string; email: string; displayName: string; deptId: string | null;
     phone?: string | null; employeeNo?: string | null; jobTitle?: string | null;
-    passwordHash: string; status?: AdminUserStatus; roleCodes: string[];
+    passwordHash: string; mustChangePassword?: boolean; status?: AdminUserStatus; roleCodes: string[];
     defaultOrgId: string | null; actorUserId?: string | null;
   }): Promise<AdminUserDto>;
   replaceUserRoleAssignments(input: {
