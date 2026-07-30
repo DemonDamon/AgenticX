@@ -120,7 +120,7 @@ export const CodeIndexSettingsPanel = forwardRef<CodeIndexSettingsHandle>(functi
     try {
       await api.writeConfig(draftRef.current);
       dirtyRef.current = false;
-      setMsg("已保存，立即生效（无需重启 Near）。");
+      setMsg("已保存，立即生效（无需重启和创智派）。");
       await reloadTasks();
       return { ok: true as const };
     } catch (e) {

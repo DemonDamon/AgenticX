@@ -85,6 +85,7 @@ import {
   referenceExtrasFromTurn,
 } from "../utils/search-reference-sse";
 import { mergeSearchedQueries, type SearchReference } from "../types/search-references";
+import { META_AGENT_DISPLAY_NAME } from "../constants/branding";
 
 const SEARCH_REFERENCE_TOOLS = new Set(["web_search", "knowledge_search"]);
 const EMPTY_QUEUE: QueuedMessage[] = [];
@@ -345,7 +346,7 @@ function StreamingThinkingIndicator() {
         <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-cyan-400/50" />
         <span className="relative inline-flex h-3 w-3 animate-pulse rounded-full bg-cyan-300" />
       </span>
-      <span className="text-xs font-medium tracking-wide text-cyan-200/90">AgenticX 正在深度思考</span>
+      <span className="text-xs font-medium tracking-wide text-cyan-200/90">{META_AGENT_DISPLAY_NAME} 正在深度思考</span>
     </div>
   );
 }
@@ -2446,7 +2447,7 @@ export function ChatView({ onOpenConfirm, onOpenClarification, onSubmitClarifica
       <div className="drag-region flex h-12 shrink-0 items-center justify-between border-b border-border px-4">
         <div className="flex w-20 items-center" />
         <div className="flex items-center gap-2">
-          <span className="text-sm font-medium text-text-muted">AgenticX</span>
+          <span className="text-sm font-medium text-text-muted">{META_AGENT_DISPLAY_NAME}</span>
           {!isLite && <span className="text-text-faint">·</span>}
           {!isLite && (
             <div className="relative">
@@ -2580,7 +2581,7 @@ export function ChatView({ onOpenConfirm, onOpenClarification, onSubmitClarifica
                     <MessageRenderer
                       message={m}
                       assistantBadge={!isLite && m.role === "assistant" ? <ModelBadge provider={m.provider} model={m.model} /> : undefined}
-                      assistantName="Near"
+                      assistantName={META_AGENT_DISPLAY_NAME}
                       imAssistantVisual={
                         m.role === "assistant" && reactWorkCol ? "compact-inline" : "default"
                       }
@@ -2684,7 +2685,7 @@ export function ChatView({ onOpenConfirm, onOpenClarification, onSubmitClarifica
                 <ImBubble
                   message={streamAssistantMessage}
                   badge={!isLite && streamingModel ? <ModelBadge provider={streamingModel.provider} model={streamingModel.model} /> : undefined}
-                  assistantName="Near"
+                  assistantName={META_AGENT_DISPLAY_NAME}
                   streamStalled={stallState === "stall"}
                 />
               )}
@@ -2694,7 +2695,7 @@ export function ChatView({ onOpenConfirm, onOpenClarification, onSubmitClarifica
             <div className="-mt-2">
               <ImBubble
                 message={{ id: "typing-meta", role: "assistant", content: "" }}
-                assistantName="Near"
+                assistantName={META_AGENT_DISPLAY_NAME}
                 assistantVisual="compact-inline"
                 noBubbleBorder
                 streamStalled={stallState === "stall"}

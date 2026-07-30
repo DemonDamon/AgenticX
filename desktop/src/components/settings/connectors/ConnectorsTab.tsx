@@ -767,7 +767,7 @@ export function ConnectorsTab({ sessionId, tapdConnected, onRefreshMcp }: Props)
       <div className="space-y-4 p-4">
         <div className="flex flex-wrap items-start justify-between gap-3">
           <p className="max-w-xl text-xs text-text-muted">
-            连接常用账号与服务，让 Near 在获得授权后调用对应能力。
+            连接常用账号与服务，让和创智派在获得授权后调用对应能力。
           </p>
           {unavailableCount > 0 ? (
             <label className="flex shrink-0 items-center gap-2 text-[12px] text-text-muted">
@@ -872,7 +872,7 @@ export function ConnectorsTab({ sessionId, tapdConnected, onRefreshMcp }: Props)
             </div>
             <p className="text-sm leading-relaxed text-text-muted">
               使用腾讯会议官方 CLI 的设备码授权。点击连接后将在系统浏览器打开官方扫码页，凭证由 CLI
-              在本机加密保存，Near 不会读取或保存你的腾讯会议密码。
+              在本机加密保存，和创智派不会读取或保存你的腾讯会议密码。
             </p>
             {tmeetPhase ? (
               <div className="flex items-center gap-2 rounded-lg border border-border bg-surface-card px-3 py-2 text-xs text-text-muted" role="status">
@@ -931,9 +931,9 @@ export function ConnectorsTab({ sessionId, tapdConnected, onRefreshMcp }: Props)
               </div>
             </div>
             <p className="text-sm leading-relaxed text-text-muted">
-              使用 GitHub 官方 CLI（gh）完成浏览器 Device Flow 授权。连接后 Near
+              使用 GitHub 官方 CLI（gh）完成浏览器 Device Flow 授权。连接后和创智派
               会写入托管技能，Agent 可通过 gh 查询与管理仓库、Issue 与 Pull Request。凭证由 gh
-              在本机保存，Near 不会读取你的 GitHub 密码。
+              在本机保存，和创智派不会读取你的 GitHub 密码。
             </p>
             {githubDeviceCode ? (
               <div className="rounded-lg border border-border bg-surface-card px-4 py-3">
@@ -1017,7 +1017,7 @@ export function ConnectorsTab({ sessionId, tapdConnected, onRefreshMcp }: Props)
             </div>
             <p className="text-sm leading-relaxed text-text-muted">
               使用飞书官方 CLI（lark-cli）完成两段式授权：首次需在浏览器创建飞书应用（一次性），随后完成用户授权。连接后
-              Near 会写入托管技能，Agent 可通过 lark-cli
+              和创智派会写入托管技能，Agent 可通过 lark-cli
               操作消息、文档、多维表格、日历与任务。凭证由 CLI 在本机保存。
             </p>
             {feishuVerifyUrl ? (
@@ -1104,7 +1104,7 @@ export function ConnectorsTab({ sessionId, tapdConnected, onRefreshMcp }: Props)
             </div>
             <p className="text-sm leading-relaxed text-text-muted">
               使用企业微信官方 CLI（wecom-cli）。请先在企业微信管理后台创建 API
-              模式智能机器人，复制 Bot ID 与 Secret 填入下方。连接后 Near 会写入托管技能，Agent
+              模式智能机器人，复制 Bot ID 与 Secret 填入下方。连接后和创智派会写入托管技能，Agent
               可通过 wecom-cli 操作消息、文档、智能表格、通讯录、待办与会议。凭证由 CLI
               加密保存在本机。
             </p>
@@ -1223,7 +1223,7 @@ export function ConnectorsTab({ sessionId, tapdConnected, onRefreshMcp }: Props)
             </div>
             <p className="text-sm leading-relaxed text-text-muted">
               Agently Mail 是 QQ 邮箱团队为 Agent 打造的专属邮箱（与个人 QQ
-              邮箱隔离）。通过官方 CLI（agently-cli）微信扫码授权后，Near
+              邮箱隔离）。通过官方 CLI（agently-cli）微信扫码授权后，和创智派
               会写入托管技能，Agent 可收发、搜索、回复与转发邮件。管理端：
               agent.qq.com。
             </p>

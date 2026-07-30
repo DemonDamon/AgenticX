@@ -341,7 +341,7 @@ export const VoiceSettingsPanel = forwardRef<VoiceSettingsPanelHandle>(function 
   return (
     <Panel title="语音">
       <p className="mb-4 text-[11px] leading-relaxed text-text-faint">
-        灵巧模式胶囊走 Meta-Agent（Near）：对话轮次归档到当前元智能体会话，`metadata.source = voice-focus`。
+        灵巧模式胶囊走 Meta-Agent（和创智派）：对话轮次归档到当前元智能体会话，`metadata.source = voice-focus`。
         实时链路按使用量计费——OpenAI Realtime 与豆包/火山均需自备账号与密钥。国内调用 OpenAI 需自行配置可访问代理的{" "}
         <code className="text-text-subtle">base_url</code>。请使用窗口<strong>底部</strong>的「退出」将本页写入{" "}
         <code className="text-text-subtle">~/.agenticx/config.yaml</code>（本页不再提供重复保存按钮）。
@@ -610,7 +610,7 @@ export const VoiceSettingsPanel = forwardRef<VoiceSettingsPanelHandle>(function 
               角色称呼（仅 O 版本生效，≤20 字）
               <input
                 maxLength={20}
-                placeholder="Near"
+                placeholder="和创智派"
                 className="mt-1 w-full rounded-md border border-border bg-surface-panel px-2 py-1 text-sm text-text-primary"
                 value={draft.doubao_realtime.bot_name}
                 onChange={(e) =>

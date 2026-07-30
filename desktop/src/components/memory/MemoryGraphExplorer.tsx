@@ -675,7 +675,7 @@ function MemoryGraphExplorerInner({
       }
       setError(
         /无法连接 agx serve|failed to fetch|networkerror|load failed/i.test(msg)
-          ? "后端无响应（可能仍在删除中或已退出）。请等待约 1 分钟后再点「刷新」，勿重复点删除；若仍失败请 ⌘Q 退出 Near 后重开。"
+          ? "后端无响应（可能仍在删除中或已退出）。请等待约 1 分钟后再点「刷新」，勿重复点删除；若仍失败请 ⌘Q 退出和创智派后重开。"
           : msg,
       );
       return;

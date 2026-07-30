@@ -179,7 +179,7 @@ export const BrainScopePanel = forwardRef<BrainScopePanelHandle, Props>(function
                 全局可见
               </div>
               <p className="mt-1 text-xs leading-snug text-text-muted">
-                Near（Meta）与分身均可检索；适合团队共享资料与代码库。
+                和创智派（Meta）与分身均可检索；适合团队共享资料与代码库。
               </p>
             </button>
             <button

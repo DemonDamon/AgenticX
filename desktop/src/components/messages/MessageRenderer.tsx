@@ -418,7 +418,7 @@ export function MessageRenderer({
       if (/\[micro-compact tool=show_widget/i.test(message.content)) {
         return (
           <div className="my-2 w-full min-w-0 rounded border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-[12px] text-amber-200">
-            图表内容被上下文压缩截断，无法渲染。请重新生成或升级 Near 后重试本对话。
+            图表内容被上下文压缩截断，无法渲染。请重新生成或升级和创智派后重试本对话。
           </div>
         );
       }

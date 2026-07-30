@@ -1,6 +1,6 @@
 # 签名 + 公证专用配置；CI 在注入 CSC_LINK 时使用（见 build-desktop.yml）。
 appId: com.agenticx.desktop
-productName: Near
+productName: 和创智派
 directories:
   output: release
 files:

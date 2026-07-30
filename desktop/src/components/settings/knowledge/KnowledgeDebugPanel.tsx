@@ -46,7 +46,7 @@ function DebugAlert({ message }: { message: string }) {
         <p className="font-medium leading-snug">{message}</p>
         {isNetwork ? (
           <p className="text-[11px] leading-relaxed text-rose-700/90 dark:text-rose-300/90">
-            请确认 Near 已启动本地后端（agx serve），且当前知识库已保存并启用后再试。
+            请确认和创智派已启动本地后端（agx serve），且当前知识库已保存并启用后再试。
           </p>
         ) : null}
       </div>

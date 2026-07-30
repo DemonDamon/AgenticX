@@ -13,7 +13,7 @@ exports.default = async function verifyBundledBackend(context) {
   // nothing to verify there.
   if (platform === "linux") return;
 
-  const productFilename = context.packager.appInfo.productFilename; // e.g. "Near"
+  const productFilename = context.packager.appInfo.productFilename; // e.g. "和创智派"
   const exe = platform === "win32" ? "agx-server.exe" : "agx-server";
   const backendDir =
     platform === "darwin"

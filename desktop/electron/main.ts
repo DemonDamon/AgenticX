@@ -108,6 +108,15 @@ import {
   wecomNpmPlatformPackage,
 } from "./native-connectors-core";
 
+const DESKTOP_PRODUCT_NAME = "和创智派";
+const DESKTOP_PRODUCT_LABEL = `${DESKTOP_PRODUCT_NAME} Desktop`;
+
+function resolveDesktopAppIconPath(): string {
+  return app.isPackaged
+    ? path.join(process.resourcesPath, "assets", "icon.png")
+    : path.resolve(process.cwd(), "assets", "icon.png");
+}
+
 /** Node fetch honors HTTP_PROXY; localhost cc-bridge POSTs then fail (e.g. 502) and PTY input never reaches Claude. */
 function ccBridgeUrlIsLoopback(urlStr: string): boolean {
   try {
@@ -2597,7 +2606,7 @@ function buildMenuTemplate(): MenuItemConstructorOptions[] {
   if (process.platform === "darwin") {
     return [
       {
-        label: "AgenticX",
+        label: DESKTOP_PRODUCT_NAME,
         submenu: [
           { role: "about" },
           { type: "separator" },
@@ -3356,7 +3365,7 @@ async function runTmeetCommand(args: string[], timeoutMs = 15000): Promise<strin
         maxBuffer: 1024 * 1024,
         env: {
           ...process.env,
-          TMEET_AGENT: "Near",
+          TMEET_AGENT: DESKTOP_PRODUCT_NAME,
           TMEET_MODEL: "user-selected",
         },
       },
@@ -3561,7 +3570,7 @@ function startTmeetLogin(): Promise<NativeConnectorStatusResult> {
         stdio: ["ignore", "pipe", "pipe"],
         env: {
           ...process.env,
-          TMEET_AGENT: "Near",
+          TMEET_AGENT: DESKTOP_PRODUCT_NAME,
           TMEET_MODEL: "user-selected",
         },
       });
@@ -6630,7 +6639,8 @@ function createWindow(): void {
   const mainWindowBackgroundColor = transparentMainWindow ? "#00000000" : "#14141c";
   mainWindow = new BrowserWindow({
     ...boundsOverride,
-    title: "Near",
+    title: DESKTOP_PRODUCT_NAME,
+    icon: resolveDesktopAppIconPath(),
     minWidth: 680,
     minHeight: 480,
     show: false,
@@ -6732,7 +6742,7 @@ function createWindow(): void {
       void mainWindow
         ?.loadURL(
           `data:text/html;charset=utf-8,${encodeURIComponent(
-            `<!DOCTYPE html><html><head><meta charset="utf-8"></head><body style="margin:0;height:100vh;display:flex;align-items:center;justify-content:center;font-family:SF Pro Text,PingFang SC,sans-serif;background:#14141c;color:rgba(255,255,255,.7);padding:1.5rem;box-sizing:border-box;-webkit-app-region:drag"><div style="text-align:center;max-width:36rem"><h3 style="margin:0">无法加载 Near 界面</h3><p style="margin-top:.75rem;font-size:.85rem;opacity:.85;white-space:pre-wrap;word-break:break-all">${detail}</p><p style="margin-top:.5rem;font-size:.8rem;opacity:.6">请重新安装应用或从源码构建。</p></div></body></html>`
+            `<!DOCTYPE html><html><head><meta charset="utf-8"></head><body style="margin:0;height:100vh;display:flex;align-items:center;justify-content:center;font-family:SF Pro Text,PingFang SC,sans-serif;background:#14141c;color:rgba(255,255,255,.7);padding:1.5rem;box-sizing:border-box;-webkit-app-region:drag"><div style="text-align:center;max-width:36rem"><h3 style="margin:0">无法加载${DESKTOP_PRODUCT_NAME}界面</h3><p style="margin-top:.75rem;font-size:.85rem;opacity:.85;white-space:pre-wrap;word-break:break-all">${detail}</p><p style="margin-top:.5rem;font-size:.8rem;opacity:.6">请重新安装应用或从源码构建。</p></div></body></html>`
           )}`
         )
         .then(() => {
@@ -6822,7 +6832,7 @@ function createTray(): void {
       mainWindow.focus();
     }
   });
-  tray.setToolTip("Near");
+  tray.setToolTip(DESKTOP_PRODUCT_NAME);
 }
 
 /**
@@ -7334,7 +7344,7 @@ function registerIpc(): void {
         const initResp = await proxyAwareFetch(`${baseUrl}/api/desktop/auth/device/init`, {
           method: "POST",
           headers: { "content-type": "application/json", accept: "application/json" },
-          body: JSON.stringify({ deviceName: os.hostname() || "Near Desktop" }),
+          body: JSON.stringify({ deviceName: os.hostname() || DESKTOP_PRODUCT_LABEL }),
           signal: AbortSignal.timeout(ENTERPRISE_PORTAL_FETCH_TIMEOUT_MS),
         });
         const initJson = (await initResp.json().catch(() => ({}))) as {
@@ -8444,7 +8454,7 @@ function registerIpc(): void {
         send("error", "socksio 安装后仍无法导入，请查看上方 pip 日志");
         return { ok: false, error: "socksio verify failed" };
       }
-      send("done", "后端依赖修复完成。请完全退出并重启 Near 使其生效。", 100);
+      send("done", `后端依赖修复完成。请完全退出并重启${DESKTOP_PRODUCT_NAME}使其生效。`, 100);
       return { ok: true, venvPython: venvPy };
     } catch (err) {
       send("error", String(err));
@@ -9721,7 +9731,8 @@ function registerIpc(): void {
         ? (payload as { html?: unknown; defaultFileName?: unknown })
         : {};
     const html = typeof p.html === "string" ? p.html : "";
-    const defaultFileName = String(p.defaultFileName ?? "Near对话.pdf").trim() || "Near对话.pdf";
+    const brandedPdfName = `${DESKTOP_PRODUCT_NAME}对话.pdf`;
+    const defaultFileName = String(p.defaultFileName ?? brandedPdfName).trim() || brandedPdfName;
     if (!html) return { ok: false, canceled: false, error: "empty html" };
 
     const focused = BrowserWindow.getFocusedWindow() ?? mainWindow ?? null;
@@ -12276,7 +12287,9 @@ if (!gotTheLock) {
     }
   });
 
-  app.setName("Near");
+  // Keep the OS-level development process identity unchanged; this only
+  // controls Electron's internal product name and packaged UI strings.
+  app.setName(DESKTOP_PRODUCT_NAME);
 
   app.whenReady().then(async () => {
     try {
@@ -12287,9 +12300,7 @@ if (!gotTheLock) {
         Menu.setApplicationMenu(Menu.buildFromTemplate(buildMenuTemplate()));
       }
       if (process.platform === "darwin") {
-        const iconPath = app.isPackaged
-          ? path.join(process.resourcesPath, "assets", "icon.png")
-          : path.resolve(process.cwd(), "assets", "icon.png");
+        const iconPath = resolveDesktopAppIconPath();
         if (fs.existsSync(iconPath)) {
           app.dock.setIcon(iconPath);
         }
@@ -12349,7 +12360,7 @@ if (!gotTheLock) {
             const { response } = await dialog.showMessageBox({
               type: "warning",
               title: "缺少 agx 命令行工具",
-              message: "Near 需要本地 agx CLI 或内嵌后端才能启动",
+              message: `${DESKTOP_PRODUCT_NAME}需要本地 agx CLI 或内嵌后端才能启动`,
               detail: [
                 ctxHint,
                 "",
@@ -12460,7 +12471,7 @@ if (!gotTheLock) {
     } catch (error) {
       await closeSplash({ fade: false });
       await dialog.showErrorBox(
-        "Near 启动失败",
+        `${DESKTOP_PRODUCT_NAME}启动失败`,
         remoteConfig
           ? `无法连接远程服务器。\n\n${String(error)}`
           : `无法启动本地服务，请检查 agx 是否可用。\n\n${String(error)}`

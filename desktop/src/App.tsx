@@ -2338,7 +2338,7 @@ export function App() {
         <VoiceFocusMode />
       ) : focusMode ? (
         <div className="flex h-full min-h-0 w-full items-center justify-center px-6 text-center text-sm text-[var(--text-danger,var(--destructive,#ef4444))]">
-          AgenticX 后端未就绪，无法进入灵巧语音模式。
+          {META_AGENT_DISPLAY_NAME} 后端未就绪，无法进入灵巧语音模式。
         </div>
       ) : apiBase ? (
         <>

@@ -55,23 +55,17 @@ function resolveSplashIconPath(): string {
   const iconPath = app.isPackaged
     ? path.join(process.resourcesPath, "assets", "icon.png")
     : path.resolve(process.cwd(), "assets", "icon.png");
-  if (fs.existsSync(iconPath)) return iconPath;
-  const embedded = app.isPackaged
-    ? path.join(process.resourcesPath, "assets", "export_embedded.png")
-    : path.resolve(process.cwd(), "assets", "export_embedded.png");
-  if (fs.existsSync(embedded)) return embedded;
   return iconPath;
 }
 
 function resolveSplashHeroPath(): string {
-  const heroPath = app.isPackaged
-    ? path.join(process.resourcesPath, "assets", "splash-wireframe-cutout.png")
-    : path.resolve(process.cwd(), "assets", "splash-wireframe-cutout.png");
-  if (fs.existsSync(heroPath)) return heroPath;
-  const rawHeroPath = app.isPackaged
-    ? path.join(process.resourcesPath, "assets", "splash-wireframe.png")
-    : path.resolve(process.cwd(), "assets", "splash-wireframe.png");
-  if (fs.existsSync(rawHeroPath)) return rawHeroPath;
+  const assetRoot = app.isPackaged
+    ? path.join(process.resourcesPath, "assets")
+    : path.resolve(process.cwd(), "assets");
+  for (const fileName of ["hechuang-zhihui-logo.svg", "hechuang-zhihui-logo.jpg"]) {
+    const heroPath = path.join(assetRoot, fileName);
+    if (fs.existsSync(heroPath)) return heroPath;
+  }
   return resolveSplashIconPath();
 }
 
@@ -81,7 +75,7 @@ function resolveSplashTheme(): "light" | "dark" {
 }
 
 function splashBackgroundColor(theme: "light" | "dark"): string {
-  return theme === "light" ? "#ffffff" : "#000000";
+  return theme === "light" ? "#f3f8fb" : "#05080d";
 }
 
 function clamp(value: number, min: number, max: number): number {

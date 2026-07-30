@@ -2135,7 +2135,7 @@ const CcBridgeSettingsPanel = forwardRef<CcBridgePanelHandle, Record<string, nev
       <div className="mb-2 space-y-1 text-xs text-text-subtle">
         <p>
           与终端中运行的 <code className="rounded bg-surface-panel px-0.5">agx cc-bridge serve</code>{" "}
-          通信。首次使用会在本机配置中自动生成 token（与 Near 工具 <code className="rounded bg-surface-panel px-0.5">cc_bridge_*</code>{" "}
+          通信。首次使用会在本机配置中自动生成 token（与和创智派工具 <code className="rounded bg-surface-panel px-0.5">cc_bridge_*</code>{" "}
           一致）。
         </p>
         <p className="text-text-faint">
@@ -3316,7 +3316,7 @@ function SkillsTab() {
           return;
         }
         const sid = created.session_id;
-        const paneId = addPane(null, "Near", sid);
+        const paneId = addPane(null, META_AGENT_DISPLAY_NAME, sid);
         setForwardAutoReply({ paneId, sessionId: sid, text });
         closeSettings();
       } catch (e) {
@@ -4921,7 +4921,7 @@ function ComputerUseGeneralPanel() {
       }
       setEnabled(next);
       setMessage(
-        "已保存到本机配置。请完全退出 Near 后重新打开（勿仅关闭窗口）；内置助手会随应用一起重启并加载新设置。若使用「设置 → 服务器连接」中的远程模式，请在服务器环境同步该配置并重启远端服务。"
+        "已保存到本机配置。请完全退出和创智派后重新打开（勿仅关闭窗口）；内置助手会随应用一起重启并加载新设置。若使用「设置 → 服务器连接」中的远程模式，请在服务器环境同步该配置并重启远端服务。"
       );
     } catch (e) {
       setMessage(e instanceof Error ? e.message : "保存失败。");
@@ -4943,7 +4943,7 @@ function ComputerUseGeneralPanel() {
     <Panel title="桌面操控">
       <p className="mb-3 text-xs text-text-faint">
         写入本机 <code className="text-text-subtle">~/.agenticx/config.yaml</code> 中的{" "}
-        <code className="text-text-subtle">computer_use.enabled</code>。开启后由 Near 随应用启动的内置助手读取该开关并尝试加载桌面级能力。若对话里仍看不到相关工具，请确认已安装包含该能力的 Near 版本；修改后需完全退出并重新打开 Near（远程模式见保存成功后的说明）。
+        <code className="text-text-subtle">computer_use.enabled</code>。开启后由和创智派随应用启动的内置助手读取该开关并尝试加载桌面级能力。若对话里仍看不到相关工具，请确认已安装包含该能力的和创智派版本；修改后需完全退出并重新打开和创智派（远程模式见保存成功后的说明）。
       </p>
       <div className="flex items-center justify-between gap-4">
         <span className="text-sm text-text-subtle">
@@ -4999,15 +4999,15 @@ async function promptNearRestartAfterTrinitySave(
   let message: string;
   if ("skill_manage_enabled" in patch) {
     message = patch.skill_manage_enabled
-      ? "「允许助手改本地技能」已开启。需完全退出 Near（⌘Q）后重新打开，模型才能调用 skill_manage 修改 ~/.agenticx/skills/ 下的技能。"
-      : "「允许助手改本地技能」已关闭。需重启 Near 后，后端才会禁止 skill_manage。";
+      ? "「允许助手改本地技能」已开启。需完全退出和创智派（⌘Q）后重新打开，模型才能调用 skill_manage 修改 ~/.agenticx/skills/ 下的技能。"
+      : "「允许助手改本地技能」已关闭。需重启和创智派后，后端才会禁止 skill_manage。";
   } else {
     message =
-      "智能体三件套设置已保存。需完全退出 Near（⌘Q）后重新打开，内置助手才会加载新配置。";
+      "智能体三件套设置已保存。需完全退出和创智派（⌘Q）后重新打开，内置助手才会加载新配置。";
   }
 
   const restartDlg = await window.agenticxDesktop.confirmDialog({
-    title: "需要重启 Near",
+    title: "需要重启和创智派",
     message,
     detail:
       "内置 agx serve 仅在启动时注入相关环境变量；不重启则当前对话里 skill_manage 等能力仍按旧设置运行。",
@@ -5080,7 +5080,7 @@ function useTrinityConfig() {
       setLastSaved(next);
       const relaunched = await promptNearRestartAfterTrinitySave(patch);
       if (!relaunched) {
-        setMessage("已保存。完全退出 Near（⌘Q）后重新打开生效。");
+        setMessage("已保存。完全退出和创智派（⌘Q）后重新打开生效。");
       }
     } catch (e) {
       setForm(lastSaved);
@@ -5537,7 +5537,7 @@ function SkillAdvancedPanel() {
         />
         <SettingsToggleCard
           title="允许助手改本地技能"
-          description="开启后，模型可在授权范围内通过 skill_manage 新增、改写或删除 ~/.agenticx/skills/ 下的技能；保存后需完全退出并重启 Near 才生效。"
+          description="开启后，模型可在授权范围内通过 skill_manage 新增、改写或删除 ~/.agenticx/skills/ 下的技能；保存后需完全退出并重启和创智派才生效。"
           checked={form.skill_manage_enabled}
           disabled={busy}
           onChange={(next) => void update({ skill_manage_enabled: next })}
@@ -6935,7 +6935,7 @@ export function SettingsPanel({
           title: "工作区已更新",
           message: "新建元智能体对话将使用新目录；已有会话仍保留原工作区。",
           detail:
-            "建议完全退出 Near（⌘Q）后重新打开，以确保 Machi 人格文件、用户档案与记忆索引路径一致。",
+            "建议完全退出和创智派（⌘Q）后重新打开，以确保和创智派人格文件、用户档案与记忆索引路径一致。",
           confirmText: "立即重启",
           cancelText: "稍后手动重启",
         });
@@ -6943,7 +6943,7 @@ export function SettingsPanel({
           await window.agenticxDesktop.appRelaunch();
           return;
         }
-        setWorkspaceDirMessage("已保存。请新建对话使新路径生效；建议稍后重启 Near。");
+        setWorkspaceDirMessage("已保存。请新建对话使新路径生效；建议稍后重启和创智派。");
       } else {
         setWorkspaceDirMessage("已保存，路径未变更。");
       }
@@ -6966,7 +6966,7 @@ export function SettingsPanel({
             "你是一个帮助用户配置 AI 助理身份定义的助手。直接输出可填入 IDENTITY.md 的 Markdown 内容，不要加任何解释或前缀。",
           user: currentContent.trim()
             ? `请对以下身份定义进行润色，让它更清晰、更有个性，保留 Markdown 格式：\n\n${currentContent}`
-            : "请为一个名为 Near 的个人 AI 助理生成一份简洁的身份定义（IDENTITY.md），Markdown 格式，包含 Name、Role、Persona 字段。",
+            : "请为一个名为和创智派的企业 AI 助理生成一份简洁的身份定义（IDENTITY.md），Markdown 格式，包含 Name、Role、Persona 字段。",
         },
         soul: {
           system:
@@ -7059,7 +7059,7 @@ export function SettingsPanel({
           setUserAvatarMessage("已更新我的头像。");
         } else {
           setMetaAvatarUrl(result);
-          setMetaAvatarMessage("已更新 Near 头像。");
+          setMetaAvatarMessage("已更新和创智派头像。");
         }
       };
       reader.onerror = () => {
@@ -7830,8 +7830,8 @@ export function SettingsPanel({
     });
     if (remoteSave.mode_changed) {
       const restartDlg = await window.agenticxDesktop.confirmDialog({
-        title: "需要重启 Near",
-        message: "连接模式已切换，需要重启 Near 以加载新后端工作区。",
+        title: "需要重启和创智派",
+        message: "连接模式已切换，需要重启和创智派以加载新后端工作区。",
         detail:
           "会话、窗格、分身与 MCP 状态将按新后端隔离，不会与上一套后端混用。",
         confirmText: "立即重启",
@@ -7865,7 +7865,7 @@ export function SettingsPanel({
         : await window.agenticxDesktop.disconnectMcp({ sessionId, name });
       if (result.ok) {
         await onRefreshMcp(sessionId);
-        setMcpMessage(next ? `已连接 ${name}；下次启动 Near 将自动重连此项。` : `已断开 ${name}，且不再自动连接。`);
+        setMcpMessage(next ? `已连接 ${name}；下次启动和创智派将自动重连此项。` : `已断开 ${name}，且不再自动连接。`);
       } else {
         const detail = String(result.error ?? "未知错误");
         if (detail.includes("连接已取消")) return;
@@ -8579,7 +8579,7 @@ export function SettingsPanel({
                 </Panel>
                 <Panel title="用户档案">
                   <p className="mb-3 text-[11px] leading-relaxed text-text-subtle">
-                    「你」的身份与展示，以及<strong className="font-medium text-text-muted">对所有元智能体 / 分身 / 群聊生效的全局用户偏好基线</strong>（称呼、头像、偏好与风格）。各主体还会在各自的 MEMORY.md 中单独记录对本主体的理解；全局人格（SOUL）仍在下方 Near 区块。
+                    「你」的身份与展示，以及<strong className="font-medium text-text-muted">对所有元智能体 / 分身 / 群聊生效的全局用户偏好基线</strong>（称呼、头像、偏好与风格）。各主体还会在各自的 MEMORY.md 中单独记录对本主体的理解；全局人格（SOUL）仍在下方和创智派区块。
                   </p>
                   <div className="flex items-start gap-6">
                     {/* 左侧：头像区 */}
@@ -8706,13 +8706,13 @@ export function SettingsPanel({
                     </div>
                   </div>
                 </Panel>
-                <Panel title="元智能体（Near）">
+                <Panel title={`元智能体（${META_AGENT_DISPLAY_NAME}）`}>
                   <div className="flex items-start gap-6">
                     {/* 左侧：头像区 */}
                     <div className="flex shrink-0 flex-col items-center gap-3 pt-1">
                       <img
                         src={effectiveMetaAvatarUrl}
-                        alt="Near 头像"
+                        alt="和创智派头像"
                         className="h-16 w-16 rounded-full border border-border object-cover shadow-sm"
                       />
                       <div className="flex items-center gap-2">
@@ -8758,7 +8758,7 @@ export function SettingsPanel({
                         rows={3}
                         externalHint={metaExternalHintIdentity}
                         externalHintText="磁盘上的身份定义可能已在外部修改。"
-                        placeholder={"例如：\n- Name: Near\n- Role: 你的个人 AI 助理\n- Vibe: 务实、简洁、执行优先"}
+                        placeholder={"例如：\n- Name: 和创智派\n- Role: 你的企业 AI 助理\n- Vibe: 务实、简洁、执行优先"}
                         onAiAssist={() => void callAiAssist("identity")}
                         aiAssistLoading={aiAssistLoading === "identity"}
                         onOpenInEditor={() => void openMetaWorkspaceInEditor("identity")}
@@ -8908,14 +8908,14 @@ export function SettingsPanel({
                         : "默认全部自动执行，不再询问（高风险）。"}
                   </div>
                   <p className="mt-2 text-[11px] text-text-faint">
-                    下方「路径 / 命令 / 工具拒绝」修改后，请点击窗口底部「退出」写入 Studio（与失焦保存等效）。未配置远程 URL 时使用本机内置 API；若仍出现 HTTP 404，请升级远端 agenticx 版本或核对服务器地址是否指向当前 Near 使用的同一 Studio。
+                    下方「路径 / 命令 / 工具拒绝」修改后，请点击窗口底部「退出」写入 Studio（与失焦保存等效）。未配置远程 URL 时使用本机内置 API；若仍出现 HTTP 404，请升级远端 agenticx 版本或核对服务器地址是否指向当前和创智派使用的同一 Studio。
                   </p>
                   <div className="mt-3 rounded-md border border-border bg-status-warning/10 px-3 py-2.5 text-xs text-text-subtle">
                     <div className="font-medium text-status-warning">凭据安全</div>
                     <p className="mt-1 leading-relaxed">
                       API Key、Token、密码<strong className="font-medium text-text-primary">请勿在对话中发送</strong>
                       ——聊天记录会保存在本机。模型密钥请在侧栏「模型服务」配置；MCP 密钥请在「MCP 服务」安装或编辑时的环境变量中填写（写入{" "}
-                      <code className="text-[10px]">~/.agenticx/mcp.json</code>）。Near 不会要求你在聊天里粘贴密钥来代为配置。
+                      <code className="text-[10px]">~/.agenticx/mcp.json</code>）。和创智派不会要求你在聊天里粘贴密钥来代为配置。
                     </p>
                   </div>
                 </Panel>
@@ -8952,7 +8952,7 @@ export function SettingsPanel({
                       </span>
                     ) : null}
                     <span className="mt-1 block text-xs text-text-faint">
-                      Machi 默认读写根目录（IDENTITY / USER / SOUL / MEMORY 等）。保存后新建对话生效；已有会话仍用原路径。
+                      和创智派默认读写根目录（IDENTITY / USER / SOUL / MEMORY 等）。保存后新建对话生效；已有会话仍用原路径。
                     </span>
                   </label>
                   <div className="mt-3 flex flex-wrap items-center gap-2">
@@ -9756,7 +9756,7 @@ export function SettingsPanel({
                     MCP（模型上下文协议）服务为 Agent 扩展外部工具 — 文件系统、数据库、网页搜索等。
                   </div>
                   <div className="text-[11px] text-text-faint">
-                    已连接的 MCP 服务是 Near <strong>进程级</strong>资源，所有对话共享；Near 启动时自动恢复上次的连接记录，新建对话不会触发额外连接或断开。
+                    已连接的 MCP 服务是和创智派<strong>进程级</strong>资源，所有对话共享；和创智派启动时自动恢复上次的连接记录，新建对话不会触发额外连接或断开。
                   </div>
                   <div className="text-[11px] text-status-warning">
                     所需 API Key 请在本页安装弹窗或 JSON 的 <code className="text-[10px]">env</code> 中填写，勿在聊天里发送给 Agent。
@@ -10353,7 +10353,7 @@ export function SettingsPanel({
                   {imTab === "feishu" && (
                     <div className="space-y-3">
                       <p className="text-xs text-text-faint">
-                        无需公网服务器，使用飞书官方 WebSocket 长连接接收消息，Near 启动后自动在后台运行。
+                        无需公网服务器，使用飞书官方 WebSocket 长连接接收消息，和创智派启动后自动在后台运行。
                       </p>
                       <div className="flex items-center justify-between gap-4">
                         <span className="text-sm text-text-subtle">启用飞书机器人</span>
@@ -10394,7 +10394,7 @@ export function SettingsPanel({
                             </div>
                           </label>
                           <p className="text-xs text-text-faint">
-                            保存后 Near 自动在后台启动飞书长连接，无需额外开终端。
+                            保存后和创智派自动在后台启动飞书长连接，无需额外开终端。
                             飞书应用须开启「机器人」能力，订阅 <code className="rounded bg-surface-hover px-1">im.message.receive_v1</code> 长连接事件。
                           </p>
                         </>
@@ -10406,7 +10406,7 @@ export function SettingsPanel({
                   {imTab === "webhook" && (
                     <div className="space-y-3">
                       <p className="text-xs text-text-faint">
-                        需要公网可访问的服务器部署云端 Gateway，再通过扫码与 Near 绑定。
+                        需要公网可访问的服务器部署云端 Gateway，再通过扫码与和创智派绑定。
                       </p>
                       <label className="block text-sm text-text-muted">
                         网关地址
@@ -10539,7 +10539,7 @@ export function SettingsPanel({
                         />
                       </label>
                       <p className="mt-1 text-xs text-text-faint">
-                        修改后点底部「退出」统一生效；需重启 Near / agx serve。
+                        修改后点底部「退出」统一生效；需重启和创智派 / agx serve。
                       </p>
                     </div>
                   )}
@@ -10550,7 +10550,7 @@ export function SettingsPanel({
                   {wechatStatus === "idle" && !wechatBotId && (
                     <div className="space-y-3">
                       <p className="text-xs text-text-faint">
-                        扫码绑定个人微信，绑定后可在微信中给 Near 发消息触发 Agent 执行。基于微信官方 iLink 协议。
+                        扫码绑定个人微信，绑定后可在微信中给和创智派发消息触发 Agent 执行。基于微信官方 iLink 协议。
                       </p>
                       <button
                         type="button"
@@ -10829,7 +10829,7 @@ export function SettingsPanel({
                   <p>1. 在云主机上安装 agenticx: <code className="text-text-muted">pip install agenticx</code></p>
                   <p>2. 启动服务: <code className="text-text-muted">agx serve --host 0.0.0.0 --port 8080 --token YOUR_TOKEN</code></p>
                   <p>3. 确保防火墙放行对应端口，生产环境建议配置 HTTPS (Nginx 反向代理)。</p>
-                  <p className="text-text-faint">修改后点底部「退出」统一生效；切换模式需重启 Near。</p>
+                  <p className="text-text-faint">修改后点底部「退出」统一生效；切换模式需重启和创智派。</p>
                 </div>
               </div>
             )}

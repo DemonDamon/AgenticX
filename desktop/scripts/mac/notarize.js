@@ -1,5 +1,5 @@
 /**
- * electron-builder afterSign: submit Near.app for Apple notarization when credentials exist.
+ * electron-builder afterSign: submit the 和创智派 app bundle for Apple notarization when credentials exist.
  * Skips silently if APPLE_ID / password / APPLE_TEAM_ID are unset.
  * Password: APPLE_APP_SPECIFIC_PASSWORD（electron-builder 约定）或 APPLE_ID_PASSWORD（GitHub Secret 名）。
  */

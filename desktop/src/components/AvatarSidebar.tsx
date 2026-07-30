@@ -233,7 +233,7 @@ export function AvatarSidebar({ onToggleSidebar }: Props) {
           <img
             src={metaAvatarUrl.trim() || DEFAULT_META_AVATAR_URL}
             alt={APP_DISPLAY_NAME}
-            className="h-8 w-8 shrink-0 rounded-[7px] object-cover"
+            className="h-8 w-8 shrink-0 rounded-[7px] object-contain drop-shadow-[0_2px_6px_rgba(14,132,197,0.22)]"
           />
           <div className="flex min-w-0 items-baseline gap-1.5">
             <span className="truncate text-[20px] font-bold leading-none text-text-strong">

@@ -85,7 +85,7 @@ describe("sidebar-session-history utils", () => {
 
   it("resolves chip names", () => {
     const map = new Map([["av1", "飞廉"]]);
-    expect(resolveSidebarAvatarChipName({ avatar_id: null }, map)).toBe("Near");
+    expect(resolveSidebarAvatarChipName({ avatar_id: null }, map)).toBe("和创智派");
     expect(resolveSidebarAvatarChipName({ avatar_id: "av1" }, map)).toBe("飞廉");
     expect(
       resolveSidebarAvatarChipName({ avatar_id: "group:g1", avatar_name: "项目组" }, map)

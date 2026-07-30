@@ -295,7 +295,7 @@ export function assertManagedSkillDirectory(
   markerExists: boolean,
 ): void {
   if (directoryExists && !markerExists) {
-    throw new Error("检测到同名用户技能目录，Near 不会覆盖该目录");
+    throw new Error("检测到同名用户技能目录，和创智派不会覆盖该目录");
   }
 }
 

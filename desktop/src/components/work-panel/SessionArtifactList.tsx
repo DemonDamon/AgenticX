@@ -127,7 +127,7 @@ export function SessionArtifactList({
                 type="button"
                 className="flex shrink-0 items-center gap-1 rounded px-1.5 py-0.5 text-[10.5px] text-text-muted hover:bg-surface-hover hover:text-text-primary"
                 onClick={() => openPath(path)}
-                title={inAppPreview ? "在 Near 内预览" : "用系统应用打开"}
+                title={inAppPreview ? "在和创智派内预览" : "用系统应用打开"}
               >
                 {inAppPreview ? (
                   <Eye className="h-3 w-3" strokeWidth={1.5} />

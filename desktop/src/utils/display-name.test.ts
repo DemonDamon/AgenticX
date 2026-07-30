@@ -6,17 +6,18 @@ import {
 } from "./display-name";
 
 describe("resolveMetaDisplayName", () => {
-  it("maps legacy Machi variants to Near", () => {
-    expect(resolveMetaDisplayName("Machi")).toBe("Near");
-    expect(resolveMetaDisplayName("machi")).toBe("Near");
-    expect(resolveMetaDisplayName("meta")).toBe("Near");
+  it("maps legacy product variants to the current brand", () => {
+    expect(resolveMetaDisplayName("Near")).toBe("和创智派");
+    expect(resolveMetaDisplayName("Machi")).toBe("和创智派");
+    expect(resolveMetaDisplayName("machi")).toBe("和创智派");
+    expect(resolveMetaDisplayName("meta")).toBe("和创智派");
   });
 
-  it("maps empty and avatar placeholder to Near", () => {
-    expect(resolveMetaDisplayName("")).toBe("Near");
-    expect(resolveMetaDisplayName(null)).toBe("Near");
-    expect(resolveMetaDisplayName(undefined)).toBe("Near");
-    expect(resolveMetaDisplayName("分身")).toBe("Near");
+  it("maps empty and avatar placeholder to the current brand", () => {
+    expect(resolveMetaDisplayName("")).toBe("和创智派");
+    expect(resolveMetaDisplayName(null)).toBe("和创智派");
+    expect(resolveMetaDisplayName(undefined)).toBe("和创智派");
+    expect(resolveMetaDisplayName("分身")).toBe("和创智派");
   });
 
   it("preserves custom display names", () => {

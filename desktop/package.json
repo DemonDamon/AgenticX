@@ -2,9 +2,9 @@
   "name": "agenticx-desktop",
   "version": "0.2.5",
   "private": true,
-  "description": "Near — AgenticX Desktop",
+  "description": "和创智派 — 企业智能工作台",
   "author": "DemonDamon",
-  "productName": "Near",
+  "productName": "和创智派",
   "main": "dist-electron/main.js",
   "scripts": {
     "dev": "cp electron/splash.html dist-electron/splash.html 2>/dev/null || true && concurrently \"vite\" \"tsc -p electron/tsconfig.json --watch\" \"node scripts/wait-and-electron.mjs\"",

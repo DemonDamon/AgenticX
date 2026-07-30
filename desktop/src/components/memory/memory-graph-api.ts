@@ -85,16 +85,16 @@ export function humanizeMemoryGraphError(message: string): string {
   const msg = message.trim();
   if (!msg) return "记忆图谱暂时不可用，请稍后点「刷新」重试。";
   if (isLikelyGraphCorruptionError(msg)) {
-    return "记忆图谱本地数据异常，Near 正在尝试自动修复，请稍候…";
+    return "记忆图谱本地数据异常，和创智派正在尝试自动修复，请稍候…";
   }
   if (/lock on file|could not set lock|图谱库被占用|kuzu.*占用/i.test(msg)) {
-    return "记忆图谱引擎正忙，请稍等几秒后点「刷新」；若仍无效，请完全退出并重新打开 Near。";
+    return "记忆图谱引擎正忙，请稍等几秒后点「刷新」；若仍无效，请完全退出并重新打开和创智派。";
   }
   if (/timed out|超时|无响应/i.test(msg)) {
     return "记忆图谱加载较慢，请稍候再试。";
   }
   if (/graphiti-core is not installed|graphiti.*未安装/i.test(msg)) {
-    return "当前后端未安装记忆图谱组件，请使用完整版 Near。";
+    return "当前后端未安装记忆图谱组件，请使用完整版和创智派。";
   }
   if (/failed to fetch|networkerror|load failed|无法连接 agx serve/i.test(msg)) {
     return "暂时无法连接本地助手后端，请稍候再试；若聊天正常，点「刷新」即可。";

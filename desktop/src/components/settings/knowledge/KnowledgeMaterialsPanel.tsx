@@ -227,7 +227,7 @@ export function KnowledgeMaterialsPanel({ api, enabled, extensions }: Props) {
     (d) => d.error && isDesktopRuntimeIngestError(d.error),
   );
   // 依赖已安装（磁盘上检测就绪）但仍有运行期失败 → 多半是当前后端进程在依赖
-  // 安装之前启动，Python 进程看不到后装入的包，必须完全重启 Near。
+  // 安装之前启动，Python 进程看不到后装入的包，必须完全重启应用。
   const depsInstalledButStale =
     backendDepsReady === true && depsMissing.length === 0 && hasRuntimeIngestError;
   const showDepsBanner =
@@ -242,7 +242,7 @@ export function KnowledgeMaterialsPanel({ api, enabled, extensions }: Props) {
               <p className="font-medium">后端依赖已安装，但当前服务进程需要完全重启</p>
               <p className="mt-1 text-[11px] leading-relaxed text-amber-100/90">
                 socksio 等依赖刚装好，但当前后端是在安装之前启动的，运行中的进程看不到新装的包。
-                请<strong>完全退出 Near（⌘Q）后重新打开</strong>，再对失败文件点右侧 ⟳ 重建索引即可，无需再次修复。
+                请<strong>完全退出和创智派（⌘Q）后重新打开</strong>，再对失败文件点右侧 ⟳ 重建索引即可，无需再次修复。
               </p>
             </>
           ) : (
@@ -349,7 +349,7 @@ export function KnowledgeMaterialsPanel({ api, enabled, extensions }: Props) {
                             {backendDepsReady === false
                               ? "请到本页顶部的「知识库」设置，使用「一键修复」安装依赖后点「立即重启」，再对本文件点右侧 ⟳ 重建索引。"
                               : backendDepsReady === true
-                                ? "依赖已安装；若刚修复过，当前后端进程可能在安装前启动，请完全退出并重启 Near（⌘Q）后再点右侧 ⟳ 重建索引。"
+                                ? "依赖已安装；若刚修复过，当前后端进程可能在安装前启动，请完全退出并重启和创智派（⌘Q）后再点右侧 ⟳ 重建索引。"
                                 : "正在检测后端依赖…"}
                           </p>
                         ) : null}

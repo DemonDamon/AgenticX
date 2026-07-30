@@ -90,7 +90,7 @@ fi
 npx electron-builder --mac "--${ARCH}" --config "${CONFIG}" --publish never
 
 if [[ "${CONFIG}" == "electron-builder.signing.yml" ]]; then
-  APP="release/mac-${ARCH}/Near.app"
+  APP="release/mac-${ARCH}/和创智派.app"
   echo "==> Verifying code signature on ${APP}"
   SIG_INFO="$(codesign -dv --verbose=2 "${APP}" 2>&1 || true)"
   echo "${SIG_INFO}" | head -20

@@ -6,6 +6,7 @@ import { resolveMetaDisplayName } from "./display-name";
 import { isShowWidgetToolMessage, parseWidgetPayload } from "../components/messages/widget-preview";
 import { adaptSvgMarkupColors } from "./adapt-svg-theme";
 import { mermaidThemeFromApp, renderMermaidSvg } from "./mermaid-render";
+import { APP_DISPLAY_NAME } from "../constants/branding";
 
 const PDF_STYLES = `
   @page { margin: 16mm; }
@@ -298,12 +299,12 @@ export async function buildMessagesPdfHtml(args: {
 <html lang="zh-CN">
 <head>
 <meta charset="utf-8">
-<title>Near 对话记录</title>
+<title>${APP_DISPLAY_NAME} 对话记录</title>
 <style>${WIDGET_THEME_VAR_DEFAULTS}${PDF_STYLES}</style>
 </head>
 <body>
 <header class="doc-header">
-  <h1>Near 对话记录</h1>
+  <h1>${APP_DISPLAY_NAME} 对话记录</h1>
   <p class="subtitle">${title}</p>
   <p class="meta-line">导出时间：${exportDate} · 共 ${count} 条消息</p>
 </header>

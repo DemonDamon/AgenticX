@@ -12,7 +12,7 @@ const OFFICECLI_INSTALL_SH =
  */
 export function buildOfficeCliInstallPrompt(): string {
   return [
-    "请为本机 Near / Meta-Agent 安装第三方技能「OfficeCLI」（Word / Excel / PowerPoint 创作与编辑）。",
+    "请为本机和创智派 / Meta-Agent 安装第三方技能「OfficeCLI」（Word / Excel / PowerPoint 创作与编辑）。",
     "",
     "安装要求（必须遵守，以便设置页正确归类为「第三方技能」）：",
     "1. 将官方 SKILL.md（及若有的子技能 pptx/docx/xlsx）安装到：",
@@ -26,6 +26,6 @@ export function buildOfficeCliInstallPrompt(): string {
     "   - 向用户说明二进制为可选运行时依赖，未安装时 skill 仍可见但无法真正改文档。",
     "5. 安装结束后简要汇报：技能路径、source 标记、officecli 是否在 PATH。",
     "",
-    "不要把 OfficeCLI 标成内置技能，也不要修改 Near 内置 skill 包。",
+    "不要把 OfficeCLI 标成内置技能，也不要修改和创智派内置 skill 包。",
   ].join("\n");
 }

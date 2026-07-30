@@ -1,13 +1,13 @@
-# Build Near Desktop: macOS DMG + Windows NSIS (bundled agx-server + wechat sidecar).
+# Build 和创智派 Desktop: macOS DMG + Windows NSIS (bundled agx-server + wechat sidecar).
 # Optional secrets: CSC_LINK, CSC_KEY_PASSWORD, APPLE_ID, APPLE_ID_PASSWORD, APPLE_TEAM_ID
 # APPLE_APP_SPECIFIC_PASSWORD is mirrored from APPLE_ID_PASSWORD at runtime (electron-builder 25 convention).
 
-name: Near Desktop Build
+name: 和创智派 Desktop Build
 
 run-name: >-
   ${{ github.event_name == 'workflow_dispatch'
-      && format('Near Desktop Build manual {0}', github.event.inputs.arch)
-      || format('Near Desktop Build {0}', github.ref_name) }}
+      && format('和创智派 Desktop Build manual {0}', github.event.inputs.arch)
+      || format('和创智派 Desktop Build {0}', github.ref_name) }}
 
 on:
   workflow_dispatch:
@@ -108,7 +108,7 @@ jobs:
       - name: Verify bundled backend in app
         working-directory: desktop
         run: |
-          APP_DIR="release/mac-${{ matrix.arch }}/Near.app/Contents/Resources/backend"
+          APP_DIR="release/mac-${{ matrix.arch }}/和创智派.app/Contents/Resources/backend"
           test -x "${APP_DIR}/agx-server"
           test -x "${APP_DIR}/agx-wechat-sidecar"
           echo "Verified backend binaries in ${APP_DIR}:"
@@ -117,7 +117,7 @@ jobs:
       - name: Upload artifacts
         uses: actions/upload-artifact@v6
         with:
-          name: near-${{ matrix.arch }}
+          name: hechuang-zhihui-${{ matrix.arch }}
           path: desktop/release/*-${{ matrix.arch }}.dmg
 
   build-tag-windows:
@@ -170,8 +170,8 @@ jobs:
       - name: Upload artifacts
         uses: actions/upload-artifact@v6
         with:
-          name: near-windows-x64
-          path: desktop/release/Near-*-win-x64.exe
+          name: hechuang-zhihui-windows-x64
+          path: desktop/release/和创智派-*-win-x64.exe
 
   build-dispatch:
     if: github.event_name == 'workflow_dispatch' && github.event.inputs.arch != 'windows-amd64'
@@ -255,7 +255,7 @@ jobs:
       - name: Verify bundled backend in app
         working-directory: desktop
         run: |
-          APP_DIR="release/mac-${{ env.ARCH }}/Near.app/Contents/Resources/backend"
+          APP_DIR="release/mac-${{ env.ARCH }}/和创智派.app/Contents/Resources/backend"
           test -x "${APP_DIR}/agx-server"
           test -x "${APP_DIR}/agx-wechat-sidecar"
           echo "Verified backend binaries in ${APP_DIR}:"
@@ -264,7 +264,7 @@ jobs:
       - name: Upload artifacts
         uses: actions/upload-artifact@v6
         with:
-          name: near-${{ env.ARCH }}
+          name: hechuang-zhihui-${{ env.ARCH }}
           path: desktop/release/*-${{ env.ARCH }}.dmg
 
   build-dispatch-windows:
@@ -317,5 +317,5 @@ jobs:
       - name: Upload artifacts
         uses: actions/upload-artifact@v6
         with:
-          name: near-windows-x64
-          path: desktop/release/Near-*-win-x64.exe
+          name: hechuang-zhihui-windows-x64
+          path: desktop/release/和创智派-*-win-x64.exe

@@ -3,7 +3,7 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Near</title>
+    <title>和创智派</title>
     <script>
       (function () {
         var params = new URLSearchParams(window.location.search);
@@ -15,30 +15,34 @@
     <style>
       :root {
         color-scheme: dark;
-        --bg: #030305;
-        --panel: rgba(255, 255, 255, 0.045);
-        --text: rgba(255, 255, 255, 0.96);
-        --text-muted: rgba(255, 255, 255, 0.46);
-        --hairline: rgba(255, 255, 255, 0.14);
-        --track: rgba(255, 255, 255, 0.11);
-        --shimmer: rgba(255, 255, 255, 0.92);
-        --particle: 255, 255, 255;
-        --cancel-border: rgba(255, 255, 255, 0.18);
-        --cancel-text: rgba(255, 255, 255, 0.68);
+        --bg: #05080d;
+        --surface: rgba(11, 19, 29, 0.82);
+        --surface-soft: rgba(255, 255, 255, 0.04);
+        --text: rgba(246, 250, 255, 0.96);
+        --text-muted: rgba(217, 228, 241, 0.52);
+        --line: rgba(126, 201, 235, 0.14);
+        --line-strong: rgba(126, 201, 235, 0.28);
+        --blue: #0b85c8;
+        --cyan: #35b6dc;
+        --glow: rgba(33, 166, 218, 0.32);
+        --track: rgba(139, 204, 231, 0.12);
+        --cancel-border: rgba(137, 203, 232, 0.2);
+        --cancel-text: rgba(218, 235, 245, 0.64);
       }
 
       :root[data-theme="light"] {
         color-scheme: light;
-        --bg: #f8f8f6;
-        --panel: rgba(0, 0, 0, 0.035);
-        --text: rgba(10, 10, 10, 0.92);
-        --text-muted: rgba(10, 10, 10, 0.48);
-        --hairline: rgba(10, 10, 10, 0.13);
-        --track: rgba(10, 10, 10, 0.12);
-        --shimmer: rgba(10, 10, 10, 0.88);
-        --particle: 10, 10, 10;
-        --cancel-border: rgba(10, 10, 10, 0.16);
-        --cancel-text: rgba(10, 10, 10, 0.64);
+        --bg: #f3f8fb;
+        --surface: rgba(255, 255, 255, 0.86);
+        --surface-soft: rgba(11, 133, 200, 0.035);
+        --text: rgba(7, 29, 45, 0.94);
+        --text-muted: rgba(26, 57, 77, 0.54);
+        --line: rgba(11, 133, 200, 0.12);
+        --line-strong: rgba(11, 133, 200, 0.24);
+        --glow: rgba(33, 166, 218, 0.2);
+        --track: rgba(11, 133, 200, 0.1);
+        --cancel-border: rgba(11, 90, 132, 0.16);
+        --cancel-text: rgba(13, 58, 84, 0.64);
       }
 
       * {
@@ -51,21 +55,38 @@
         width: 100%;
         height: 100%;
         overflow: hidden;
-        background:
-          radial-gradient(circle at 50% 27%, var(--panel), transparent 34%),
-          linear-gradient(180deg, rgba(255, 255, 255, 0.025), transparent 36%),
-          var(--bg);
-        font-family: "SF Pro Display", "SF Pro Text", "PingFang SC", "Helvetica Neue", sans-serif;
+        background: var(--bg);
+        font-family:
+          "SF Pro Display",
+          "SF Pro Text",
+          "PingFang SC",
+          "Microsoft YaHei",
+          sans-serif;
         -webkit-font-smoothing: antialiased;
       }
 
       body {
+        position: relative;
         opacity: 1;
-        transition: opacity 180ms ease-out;
+        transition:
+          opacity 180ms ease-out,
+          transform 180ms ease-out;
       }
 
       body.fade-out {
         opacity: 0;
+        transform: scale(1.008);
+      }
+
+      body::before {
+        content: "";
+        position: fixed;
+        inset: 0;
+        background:
+          radial-gradient(circle at 26% 45%, rgba(24, 162, 216, 0.14), transparent 31%),
+          radial-gradient(circle at 76% 12%, rgba(39, 118, 201, 0.1), transparent 28%),
+          linear-gradient(135deg, rgba(255, 255, 255, 0.025), transparent 44%);
+        pointer-events: none;
       }
 
       #particle-canvas {
@@ -74,419 +95,595 @@
         width: 100%;
         height: 100%;
         pointer-events: none;
-        z-index: 0;
+        z-index: 1;
       }
 
-      .grid {
+      .frame {
         position: fixed;
-        inset: 22px;
-        border: 1px solid var(--hairline);
-        border-radius: 22px;
-        opacity: 0.58;
+        inset: 18px;
+        z-index: 2;
+        overflow: hidden;
+        border: 1px solid var(--line);
+        border-radius: 24px;
+        background:
+          linear-gradient(var(--line) 1px, transparent 1px),
+          linear-gradient(90deg, var(--line) 1px, transparent 1px),
+          var(--surface-soft);
+        background-size: 48px 48px;
+        box-shadow:
+          inset 0 1px 0 rgba(255, 255, 255, 0.04),
+          0 24px 80px rgba(0, 25, 45, 0.12);
         pointer-events: none;
       }
 
-      .grid::before,
-      .grid::after {
+      .frame::before {
         content: "";
         position: absolute;
         inset: 0;
-        border-radius: inherit;
-        background:
-          linear-gradient(var(--hairline) 1px, transparent 1px),
-          linear-gradient(90deg, var(--hairline) 1px, transparent 1px);
-        background-size: 48px 48px;
-        mask-image: radial-gradient(circle at 50% 42%, rgba(0, 0, 0, 0.6), transparent 62%);
-        opacity: 0.22;
+        background: radial-gradient(circle at 31% 50%, transparent 0 23%, var(--line) 23.2%, transparent 23.5%);
+        opacity: 0.52;
       }
 
-      .grid::after {
-        background: radial-gradient(circle at 50% 40%, transparent 0 42%, var(--hairline) 43%, transparent 44%);
-        opacity: 0.62;
+      .frame::after {
+        content: "";
+        position: absolute;
+        inset: 0;
+        background: linear-gradient(105deg, transparent 32%, rgba(73, 187, 228, 0.055) 48%, transparent 64%);
+        transform: translateX(-80%);
+        animation: field-scan 5.8s ease-in-out infinite;
       }
 
       .shell {
         position: relative;
-        z-index: 1;
+        z-index: 3;
+        display: grid;
+        grid-template-columns: minmax(280px, 0.94fr) minmax(300px, 1.06fr);
         width: 100%;
         height: 100%;
-        padding: 38px 46px;
-        display: flex;
-        flex-direction: row;
-        align-items: center;
-        justify-content: center;
-        gap: 44px;
-        user-select: none;
-        -webkit-user-select: none;
+        padding: 34px 52px 34px 44px;
       }
 
-      .hero-wrap {
-        flex: 0 0 34%;
-        height: 100%;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        width: 34%;
+      .logo-stage {
         position: relative;
-        min-height: 0;
+        display: grid;
+        place-items: center;
+        min-width: 0;
       }
 
-      .content {
-        flex: 1 1 auto;
-        min-width: 260px;
-        max-width: 360px;
-        display: flex;
-        flex-direction: column;
-        align-items: center;
-        justify-content: center;
-        align-self: stretch;
-        text-align: center;
+      .logo-system {
+        position: relative;
+        width: 250px;
+        height: 250px;
+        display: grid;
+        place-items: center;
       }
 
-      .brand-block {
-        display: flex;
-        flex-direction: column;
-        align-items: center;
-        gap: 8px;
-        margin: 0;
-        width: 100%;
-        text-align: center;
-      }
-
-      .brand-name {
-        font-size: 36px;
-        font-weight: 700;
-        letter-spacing: 0.24em;
-        color: var(--text);
-        line-height: 1;
-      }
-
-      .brand-tagline {
-        font-size: 10px;
-        letter-spacing: 0.22em;
-        text-transform: uppercase;
-        color: var(--text-muted);
-        line-height: 1.35;
-      }
-
-      .content-stack {
-        display: flex;
-        flex-direction: column;
-        align-items: center;
-        gap: 34px;
-        width: 100%;
-      }
-
-      .hero-aura {
+      .logo-system::before,
+      .logo-system::after {
+        content: "";
         position: absolute;
-        width: min(150px, 72%);
-        height: min(150px, 72%);
         border-radius: 50%;
-        background:
-          radial-gradient(circle, rgba(255, 255, 255, 0.11) 0%, transparent 63%),
-          conic-gradient(from 120deg, transparent, rgba(255, 255, 255, 0.18), transparent 36%);
-        filter: blur(12px);
-        opacity: 0.72;
-        animation: aura 4s ease-in-out infinite;
-      }
-
-      :root[data-theme="light"] .hero-aura {
-        background:
-          radial-gradient(circle, rgba(0, 0, 0, 0.07) 0%, transparent 64%),
-          conic-gradient(from 120deg, transparent, rgba(0, 0, 0, 0.12), transparent 36%);
-      }
-
-      @keyframes aura {
-        0%,
-        100% {
-          transform: scale(0.96) rotate(0deg);
-          opacity: 0.5;
-        }
-        50% {
-          transform: scale(1.05) rotate(8deg);
-          opacity: 0.82;
-        }
-      }
-
-      .hero-img {
-        position: relative;
-        width: min(175px, 72%);
-        max-height: 72%;
-        object-fit: contain;
-        opacity: 0;
-        transform: translateY(10px) scale(0.965);
-        clip-path: inset(100% 0 0 0);
-        filter: drop-shadow(0 0 18px rgba(255, 255, 255, 0.12));
-        animation:
-          reveal-hero 1.5s cubic-bezier(0.16, 1, 0.3, 1) 160ms forwards,
-          breathe 4.2s ease-in-out 1.6s infinite;
-      }
-
-      /* Wireframe asset is light-on-transparent; invert for readable contrast on light bg */
-      :root[data-theme="light"] .hero-img {
-        filter:
-          invert(1)
-          contrast(1.12)
-          drop-shadow(0 2px 20px rgba(0, 0, 0, 0.12))
-          drop-shadow(0 0 1px rgba(0, 0, 0, 0.28));
-      }
-
-      @keyframes reveal-hero {
-        45% {
-          opacity: 0.72;
-        }
-        to {
-          opacity: 1;
-          transform: translateY(0) scale(1);
-          clip-path: inset(0 0 0 0);
-        }
-      }
-
-      @keyframes breathe {
-        0%,
-        100% {
-          transform: translateY(0) scale(1);
-          opacity: 0.94;
-        }
-        50% {
-          transform: translateY(-2px) scale(1.008);
-          opacity: 1;
-        }
-      }
-
-      .scanline {
-        position: absolute;
-        left: 4%;
-        right: 4%;
-        height: 2px;
-        background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.72), transparent);
-        opacity: 0;
         pointer-events: none;
-        filter: blur(0.4px);
-        animation: scan 3.4s ease-in-out 0.5s infinite;
       }
 
-      :root[data-theme="light"] .scanline {
-        background: linear-gradient(90deg, transparent, rgba(0, 0, 0, 0.35), transparent);
+      .logo-system::before {
+        inset: 20px;
+        border: 1px solid var(--line-strong);
+        box-shadow:
+          0 0 56px var(--glow),
+          inset 0 0 36px rgba(42, 180, 226, 0.08);
+        animation: ring-breathe 3.8s ease-in-out infinite;
       }
 
-      @keyframes scan {
-        0% {
-          top: 10%;
-          opacity: 0;
-        }
-        12% {
-          opacity: 0.85;
-        }
-        88% {
-          opacity: 0.85;
-        }
-        100% {
-          top: 88%;
-          opacity: 0;
-        }
+      .logo-system::after {
+        inset: 2px;
+        border: 1px dashed var(--line);
+        animation: orbit 22s linear infinite;
       }
 
-      .eye-pulse {
+      .orbit {
+        position: absolute;
+        inset: 8px;
+        border-radius: 50%;
+        animation: orbit 12s linear infinite;
+      }
+
+      .orbit::before,
+      .orbit::after {
+        content: "";
         position: absolute;
         width: 7px;
         height: 7px;
-        left: 43.5%;
-        top: 41%;
         border-radius: 50%;
-        background: rgba(255, 255, 255, 0.85);
-        box-shadow: 0 0 18px rgba(255, 255, 255, 0.75);
+        background: var(--cyan);
+        box-shadow: 0 0 15px rgba(53, 182, 220, 0.8);
+      }
+
+      .orbit::before {
+        top: 21px;
+        left: 45px;
+      }
+
+      .orbit::after {
+        right: 20px;
+        bottom: 52px;
+        width: 4px;
+        height: 4px;
+        opacity: 0.66;
+      }
+
+      .orbit-secondary {
+        inset: 34px;
+        animation-duration: 8s;
+        animation-direction: reverse;
+      }
+
+      .orbit-secondary::before {
+        top: auto;
+        bottom: 1px;
+        left: 83px;
+        width: 5px;
+        height: 5px;
+        background: var(--blue);
+      }
+
+      .orbit-secondary::after {
+        display: none;
+      }
+
+      .axis {
+        position: absolute;
+        width: 1px;
+        height: 224px;
+        background: linear-gradient(transparent, var(--line-strong), transparent);
+        opacity: 0.7;
+      }
+
+      .axis-horizontal {
+        transform: rotate(90deg);
+      }
+
+      .logo-tile {
+        position: relative;
+        width: 178px;
+        height: 178px;
+        overflow: visible;
+        border: 0;
+        border-radius: 0;
+        background: transparent;
+        filter: drop-shadow(0 22px 34px rgba(0, 53, 86, 0.24)) drop-shadow(0 0 20px var(--glow));
+        transform: scale(0.92);
         opacity: 0;
-        animation: eye 4.8s ease-in-out 1.35s infinite;
+        transition:
+          transform 680ms cubic-bezier(0.16, 1, 0.3, 1),
+          opacity 420ms ease;
       }
 
-      :root[data-theme="light"] .eye-pulse {
-        background: rgba(10, 10, 10, 0.82);
-        box-shadow: 0 0 16px rgba(0, 0, 0, 0.38);
+      body.is-loaded .logo-tile {
+        opacity: 1;
+        transform: scale(1);
+        animation: logo-float 4.8s ease-in-out 1.3s infinite;
       }
 
-      @keyframes eye {
-        0%,
-        62%,
-        100% {
-          opacity: 0;
-          transform: scale(0.6);
-        }
-        68% {
-          opacity: 0.95;
-          transform: scale(1);
-        }
-        75% {
-          opacity: 0.15;
-          transform: scale(1.8);
-        }
-      }
-
-      .footer {
+      .logo-piece {
+        position: absolute;
+        inset: 0;
         width: 100%;
+        height: 100%;
+        object-fit: contain;
+        user-select: none;
+        -webkit-user-drag: none;
+      }
+
+      .piece-top {
+        clip-path: inset(0 0 50% 0);
+        transform: translate(-24px, -18px) rotate(-4deg);
+        opacity: 0;
+      }
+
+      .piece-bottom {
+        clip-path: inset(50% 0 0 0);
+        transform: translate(24px, 18px) rotate(4deg);
+        opacity: 0;
+      }
+
+      body.is-loaded .piece-top,
+      body.is-loaded .piece-bottom {
+        animation: assemble 920ms cubic-bezier(0.16, 1, 0.3, 1) 120ms forwards;
+      }
+
+      body.is-loaded .piece-bottom {
+        animation-delay: 220ms;
+      }
+
+      .assembly-label {
+        position: absolute;
+        left: 50%;
+        bottom: -4px;
         display: flex;
-        flex-direction: column;
-        gap: 10px;
         align-items: center;
+        gap: 7px;
+        color: var(--text-muted);
+        font-family: "SF Mono", "Menlo", monospace;
+        font-size: 9px;
+        letter-spacing: 0.18em;
+        text-transform: uppercase;
+        white-space: nowrap;
+        opacity: 0;
+        transform: translate(-50%, 8px);
+        transition:
+          opacity 500ms ease 650ms,
+          transform 500ms ease 650ms;
+      }
+
+      body.is-loaded .assembly-label {
+        opacity: 0.72;
+        transform: translate(-50%, 0);
+      }
+
+      .assembly-label::before {
+        content: "";
+        width: 4px;
+        height: 4px;
+        border-radius: 50%;
+        background: var(--cyan);
+        box-shadow: 0 0 9px rgba(53, 182, 220, 0.74);
+        animation: status-pulse 1.8s ease-in-out infinite;
+      }
+
+      .content {
+        display: flex;
+        min-width: 0;
+        align-items: center;
+        padding-left: 28px;
+      }
+
+      .content-stack {
+        width: min(100%, 370px);
+        opacity: 0;
+        transform: translateY(12px);
+        transition:
+          opacity 640ms ease 280ms,
+          transform 640ms cubic-bezier(0.16, 1, 0.3, 1) 280ms;
+      }
+
+      body.is-loaded .content-stack {
+        opacity: 1;
+        transform: translateY(0);
+      }
+
+      .eyebrow {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        margin-bottom: 18px;
+        color: var(--cyan);
+        font-family: "SF Mono", "Menlo", monospace;
+        font-size: 9px;
+        font-weight: 600;
+        letter-spacing: 0.2em;
+        text-transform: uppercase;
+      }
+
+      .eyebrow::before {
+        content: "";
+        width: 30px;
+        height: 1px;
+        background: linear-gradient(90deg, var(--blue), var(--cyan));
+      }
+
+      h1 {
+        margin: 0;
+        color: var(--text);
+        font-size: clamp(38px, 5.2vw, 54px);
+        font-weight: 680;
+        letter-spacing: 0.08em;
+        line-height: 1.04;
+        text-shadow: 0 8px 28px rgba(8, 101, 151, 0.12);
+      }
+
+      .tagline {
+        margin: 13px 0 0;
+        color: var(--text-muted);
+        font-size: 15px;
+        font-weight: 450;
+        letter-spacing: 0.24em;
+      }
+
+      .divider {
+        width: 100%;
+        height: 1px;
+        margin: 31px 0 22px;
+        background: linear-gradient(90deg, var(--line-strong), var(--line), transparent);
       }
 
       .progress-track {
-        width: 100%;
-        height: 2px;
-        border-radius: 999px;
-        background: var(--track);
-        overflow: hidden;
         position: relative;
+        width: 100%;
+        height: 3px;
+        overflow: hidden;
+        border-radius: 99px;
+        background: var(--track);
       }
 
-      .progress-shimmer {
+      .progress-bar {
         position: absolute;
-        top: 0;
-        left: -35%;
-        width: 35%;
-        height: 100%;
-        border-radius: 999px;
-        background: var(--shimmer);
-        animation: shimmer 1.1s ease-in-out infinite;
+        inset: 0 auto 0 0;
+        width: 10%;
+        border-radius: inherit;
+        background: linear-gradient(90deg, var(--blue), var(--cyan));
+        box-shadow: 0 0 14px rgba(42, 179, 225, 0.56);
+        transition: width 540ms cubic-bezier(0.16, 1, 0.3, 1);
       }
 
-      @keyframes shimmer {
-        0% {
-          transform: translateX(0);
-        }
-        100% {
-          transform: translateX(380%);
-        }
+      .progress-bar::after {
+        content: "";
+        position: absolute;
+        inset: 0;
+        background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.8), transparent);
+        transform: translateX(-110%);
+        animation: progress-scan 1.8s ease-in-out infinite;
       }
 
-      @media (max-width: 620px) {
-        .shell {
-          padding: 30px 28px;
-          gap: 26px;
-        }
-
-        .hero-wrap {
-          flex-basis: 32%;
-          width: 32%;
-        }
-
-        .content-stack {
-          gap: 26px;
-        }
-
-        .brand-name {
-          font-size: 30px;
-        }
+      .stage-row {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 18px;
+        margin-top: 13px;
       }
 
       .stage-text {
-        font-size: 10.5px;
         color: var(--text-muted);
-        min-height: 16px;
-        text-align: center;
-        letter-spacing: 0.08em;
+        font-size: 12px;
+        letter-spacing: 0.04em;
+        transition: color 180ms ease;
+      }
+
+      .stage-index {
+        color: var(--cyan);
+        font-family: "SF Mono", "Menlo", monospace;
+        font-size: 10px;
+        letter-spacing: 0.12em;
+      }
+
+      body.is-ready .stage-text {
+        color: var(--text);
+      }
+
+      body.is-ready .logo-system::before {
+        border-color: rgba(53, 182, 220, 0.58);
+        box-shadow:
+          0 0 72px rgba(33, 166, 218, 0.42),
+          inset 0 0 38px rgba(42, 180, 226, 0.12);
       }
 
       .escape {
-        display: none;
-        flex-direction: column;
+        display: flex;
         align-items: center;
-        gap: 8px;
-        margin-top: 4px;
+        justify-content: space-between;
+        gap: 16px;
+        min-height: 30px;
+        margin-top: 20px;
+        opacity: 0;
+        transform: translateY(5px);
+        pointer-events: none;
+        transition:
+          opacity 240ms ease,
+          transform 240ms ease;
       }
 
       .escape.visible {
-        display: flex;
+        opacity: 1;
+        transform: translateY(0);
+        pointer-events: auto;
       }
 
       .escape-hint {
-        font-size: 10px;
         color: var(--text-muted);
-        text-align: center;
-        line-height: 1.45;
+        font-size: 10px;
       }
 
       .cancel-btn {
-        appearance: none;
+        height: 28px;
+        padding: 0 13px;
         border: 1px solid var(--cancel-border);
+        border-radius: 8px;
         background: transparent;
         color: var(--cancel-text);
+        font: inherit;
         font-size: 11px;
-        line-height: 1;
-        padding: 6px 14px;
-        border-radius: 999px;
         cursor: pointer;
+        transition:
+          color 150ms ease,
+          border-color 150ms ease,
+          background 150ms ease;
       }
 
       .cancel-btn:hover {
-        opacity: 0.85;
+        border-color: var(--line-strong);
+        background: rgba(36, 159, 210, 0.07);
+        color: var(--text);
+      }
+
+      @keyframes assemble {
+        to {
+          opacity: 1;
+          transform: translate(0, 0) rotate(0);
+        }
+      }
+
+      @keyframes logo-float {
+        0%,
+        100% {
+          transform: translateY(0) scale(1);
+        }
+        50% {
+          transform: translateY(-5px) scale(1.01);
+        }
+      }
+
+      @keyframes orbit {
+        to {
+          transform: rotate(360deg);
+        }
+      }
+
+      @keyframes ring-breathe {
+        0%,
+        100% {
+          transform: scale(0.985);
+          opacity: 0.66;
+        }
+        50% {
+          transform: scale(1.018);
+          opacity: 1;
+        }
+      }
+
+      @keyframes status-pulse {
+        0%,
+        100% {
+          opacity: 0.42;
+          transform: scale(0.8);
+        }
+        50% {
+          opacity: 1;
+          transform: scale(1.18);
+        }
+      }
+
+      @keyframes field-scan {
+        0%,
+        20% {
+          transform: translateX(-82%);
+        }
+        65%,
+        100% {
+          transform: translateX(82%);
+        }
+      }
+
+      @keyframes progress-scan {
+        0%,
+        28% {
+          transform: translateX(-110%);
+        }
+        82%,
+        100% {
+          transform: translateX(110%);
+        }
+      }
+
+      @media (max-height: 390px) {
+        .shell {
+          padding-top: 22px;
+          padding-bottom: 22px;
+        }
+
+        .logo-system {
+          width: 218px;
+          height: 218px;
+        }
+
+        .logo-tile {
+          width: 136px;
+          height: 136px;
+        }
+
+        .divider {
+          margin: 24px 0 18px;
+        }
+
+        .escape {
+          margin-top: 14px;
+        }
+      }
+
+      @media (prefers-reduced-motion: reduce) {
+        *,
+        *::before,
+        *::after {
+          animation-duration: 1ms !important;
+          animation-iteration-count: 1 !important;
+          transition-duration: 1ms !important;
+        }
       }
     </style>
   </head>
   <body>
     <canvas id="particle-canvas" aria-hidden="true"></canvas>
-    <div class="grid" aria-hidden="true"></div>
+    <div class="frame" aria-hidden="true"></div>
 
-    <div class="shell">
-      <div class="hero-wrap">
-        <div class="hero-aura" aria-hidden="true"></div>
-        <div class="scanline" aria-hidden="true"></div>
-        <div class="eye-pulse" aria-hidden="true"></div>
-        <img id="hero" class="hero-img" alt="Near wireframe" />
-      </div>
+    <main class="shell">
+      <section class="logo-stage" aria-label="和创智派正在启动">
+        <div class="logo-system">
+          <div class="axis" aria-hidden="true"></div>
+          <div class="axis axis-horizontal" aria-hidden="true"></div>
+          <div class="orbit" aria-hidden="true"></div>
+          <div class="orbit orbit-secondary" aria-hidden="true"></div>
+          <div class="logo-tile">
+            <img id="logo-image-top" class="logo-piece piece-top" alt="和创智派 Logo" />
+            <img id="logo-image-bottom" class="logo-piece piece-bottom" alt="" aria-hidden="true" />
+          </div>
+          <div class="assembly-label">Intelligence connected</div>
+        </div>
+      </section>
 
-      <div class="content">
+      <section class="content">
         <div class="content-stack">
-          <div class="brand-block">
-            <div class="brand-name">NEAR</div>
-            <div class="brand-tagline">Near, Always Near.</div>
+          <div class="eyebrow">Enterprise intelligence</div>
+          <h1>和创智派</h1>
+          <p class="tagline">企业智能工作台</p>
+
+          <div class="divider" aria-hidden="true"></div>
+
+          <div class="progress-track" aria-hidden="true">
+            <div id="progress-bar" class="progress-bar"></div>
+          </div>
+          <div class="stage-row">
+            <div id="stage" class="stage-text">正在初始化…</div>
+            <div id="stage-index" class="stage-index">01 / 08</div>
           </div>
 
-          <div class="footer">
-            <div class="progress-track" aria-hidden="true">
-              <div class="progress-shimmer"></div>
-            </div>
-            <div id="stage" class="stage-text">正在初始化…</div>
-
-            <div id="escape" class="escape">
-              <div class="escape-hint">如长时间无响应，可点击取消退出</div>
-              <button id="cancel-btn" type="button" class="cancel-btn">取消</button>
-            </div>
+          <div id="escape" class="escape">
+            <div class="escape-hint">如长时间无响应，可取消退出</div>
+            <button id="cancel-btn" type="button" class="cancel-btn">取消</button>
           </div>
         </div>
-      </div>
-    </div>
+      </section>
+    </main>
 
     <script>
       (function () {
-        var STAGE_LABELS = {
-          initializing: "正在初始化…",
-          "backend-starting": "正在唤醒本地引擎…",
-          "backend-waiting": "正在唤醒本地引擎…",
-          "pinging-remote": "正在连接远程服务器…",
-          "loading-ui": "正在加载界面…",
-          "preloading-core": "正在加载工作数据…",
-          "restoring-session": "正在恢复上次会话…",
-          ready: "准备就绪",
+        var STAGES = {
+          initializing: { label: "正在初始化…", progress: 10, index: "01 / 08" },
+          "backend-starting": { label: "正在唤醒本地引擎…", progress: 24, index: "02 / 08" },
+          "backend-waiting": { label: "正在等待本地引擎…", progress: 38, index: "03 / 08" },
+          "pinging-remote": { label: "正在连接远程服务器…", progress: 52, index: "04 / 08" },
+          "loading-ui": { label: "正在加载界面…", progress: 67, index: "05 / 08" },
+          "preloading-core": { label: "正在加载工作数据…", progress: 80, index: "06 / 08" },
+          "restoring-session": { label: "正在恢复上次会话…", progress: 92, index: "07 / 08" },
+          ready: { label: "准备就绪", progress: 100, index: "08 / 08" },
         };
 
         var params = new URLSearchParams(window.location.search);
         var hero = params.get("hero");
-        var heroEl = document.getElementById("hero");
+        var logoTop = document.getElementById("logo-image-top");
+        var logoBottom = document.getElementById("logo-image-bottom");
         var stageEl = document.getElementById("stage");
+        var stageIndexEl = document.getElementById("stage-index");
+        var progressBar = document.getElementById("progress-bar");
         var escapeEl = document.getElementById("escape");
         var cancelBtn = document.getElementById("cancel-btn");
         var canvas = document.getElementById("particle-canvas");
         var ctx = canvas.getContext("2d");
-        var isLight = document.documentElement.getAttribute("data-theme") === "light";
-        var particleColor = isLight ? "rgba(10,10,10," : "rgba(255,255,255,";
         var disperse = false;
         var rafId = 0;
         var particles = [];
-        var samplePoints = [];
 
         function resizeCanvas() {
-          var dpr = window.devicePixelRatio || 1;
+          var dpr = Math.min(window.devicePixelRatio || 1, 2);
           canvas.width = Math.floor(window.innerWidth * dpr);
           canvas.height = Math.floor(window.innerHeight * dpr);
           canvas.style.width = window.innerWidth + "px";
@@ -494,119 +691,145 @@
           ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
         }
 
-        function spawnParticle(x, y, vx, vy, size, alpha) {
+        function createParticle(x, y, color, anchored) {
           return {
             x: x,
             y: y,
             ox: x,
             oy: y,
-            vx: vx,
-            vy: vy,
-            size: size,
-            alpha: alpha,
+            vx: (Math.random() - 0.5) * (anchored ? 0.1 : 0.24),
+            vy: (Math.random() - 0.5) * (anchored ? 0.1 : 0.24),
+            size: Math.random() * 0.9 + 0.35,
+            alpha: Math.random() * 0.34 + 0.14,
             phase: Math.random() * Math.PI * 2,
+            color: color,
+            anchored: anchored,
           };
         }
 
         function initAmbientParticles() {
           particles = [];
-          var count = 34;
-          for (var i = 0; i < count; i++) {
+          var palette = ["11,133,200", "53,182,220", "104,203,235"];
+          for (var i = 0; i < 38; i += 1) {
             particles.push(
-              spawnParticle(
+              createParticle(
                 Math.random() * window.innerWidth,
                 Math.random() * window.innerHeight,
-                (Math.random() - 0.5) * 0.18,
-                (Math.random() - 0.5) * 0.18,
-                Math.random() * 0.9 + 0.3,
-                Math.random() * 0.22 + 0.1
+                palette[i % palette.length],
+                false
               )
             );
           }
         }
 
-        function sampleHero(img) {
-          samplePoints = [];
-          var off = document.createElement("canvas");
-          var maxW = 260;
-          var scale = Math.min(1, maxW / img.naturalWidth);
-          off.width = Math.floor(img.naturalWidth * scale);
-          off.height = Math.floor(img.naturalHeight * scale);
-          var octx = off.getContext("2d");
-          octx.drawImage(img, 0, 0, off.width, off.height);
-          var data = octx.getImageData(0, 0, off.width, off.height).data;
+        function sampleLogo(img) {
+          var offscreen = document.createElement("canvas");
+          var size = 150;
+          offscreen.width = size;
+          offscreen.height = size;
+          var offscreenContext = offscreen.getContext("2d", { willReadFrequently: true });
+          offscreenContext.drawImage(img, 0, 0, size, size);
+          var data = offscreenContext.getImageData(0, 0, size, size).data;
           var rect = img.getBoundingClientRect();
-          var cx = rect.left + rect.width / 2;
-          var cy = rect.top + rect.height / 2;
-          for (var y = 0; y < off.height; y += 3) {
-            for (var x = 0; x < off.width; x += 3) {
-              var idx = (y * off.width + x) * 4;
-              var r = data[idx];
-              var g = data[idx + 1];
-              var b = data[idx + 2];
-              var a = data[idx + 3];
-              var lum = 0.299 * r + 0.587 * g + 0.114 * b;
-              if (a > 36 && lum > 60) {
-                var px = cx + (x - off.width / 2) * (rect.width / off.width);
-                var py = cy + (y - off.height / 2) * (rect.height / off.height);
-                samplePoints.push({ x: px, y: py });
+          var candidates = [];
+
+          for (var y = 0; y < size; y += 3) {
+            for (var x = 0; x < size; x += 3) {
+              var offset = (y * size + x) * 4;
+              var r = data[offset];
+              var g = data[offset + 1];
+              var b = data[offset + 2];
+              var a = data[offset + 3];
+              var maxChannel = Math.max(r, g, b);
+              var minChannel = Math.min(r, g, b);
+              var isBrandColor =
+                a > 40 &&
+                b > 95 &&
+                g > 70 &&
+                maxChannel - minChannel > 36 &&
+                b > r + 28;
+
+              if (isBrandColor) {
+                candidates.push({
+                  x: rect.left + (x / size) * rect.width,
+                  y: rect.top + (y / size) * rect.height,
+                  color: r + "," + g + "," + b,
+                });
               }
             }
           }
-          var meshCount = Math.min(180, samplePoints.length);
-          for (var j = 0; j < meshCount; j++) {
-            var pt = samplePoints[(Math.random() * samplePoints.length) | 0];
-            if (!pt) continue;
-            var p = spawnParticle(
-              pt.x + (Math.random() - 0.5) * 18,
-              pt.y + (Math.random() - 0.5) * 18,
-              (Math.random() - 0.5) * 0.1,
-              (Math.random() - 0.5) * 0.1,
-              Math.random() * 0.85 + 0.35,
-              Math.random() * 0.45 + 0.18
+
+          var count = Math.min(140, candidates.length);
+          for (var i = 0; i < count; i += 1) {
+            var candidate = candidates[(Math.random() * candidates.length) | 0];
+            var particle = createParticle(
+              candidate.x + (Math.random() - 0.5) * 14,
+              candidate.y + (Math.random() - 0.5) * 14,
+              candidate.color,
+              true
             );
-            p.ox = pt.x;
-            p.oy = pt.y;
-            particles.push(p);
+            particle.ox = candidate.x;
+            particle.oy = candidate.y;
+            particles.push(particle);
           }
         }
 
-        function drawParticles(t) {
+        function drawParticles(time) {
           ctx.clearRect(0, 0, window.innerWidth, window.innerHeight);
-          for (var i = 0; i < particles.length; i++) {
-            var p = particles[i];
+
+          for (var i = 0; i < particles.length; i += 1) {
+            var particle = particles[i];
             if (disperse) {
-              p.x += p.vx * 6;
-              p.y += p.vy * 6;
-              p.alpha *= 0.94;
-            } else if (p.ox != null) {
-              p.x += (p.ox - p.x) * 0.018 + Math.sin(t * 0.0015 + p.phase) * 0.25;
-              p.y += (p.oy - p.y) * 0.018 + Math.cos(t * 0.0013 + p.phase) * 0.25;
-              p.alpha = 0.25 + Math.abs(Math.sin(t * 0.002 + p.phase)) * 0.45;
+              particle.x += particle.vx * 8;
+              particle.y += particle.vy * 8;
+              particle.alpha *= 0.92;
+            } else if (particle.anchored) {
+              particle.x +=
+                (particle.ox - particle.x) * 0.022 +
+                Math.sin(time * 0.0015 + particle.phase) * 0.16;
+              particle.y +=
+                (particle.oy - particle.y) * 0.022 +
+                Math.cos(time * 0.0013 + particle.phase) * 0.16;
+              particle.alpha = 0.18 + Math.abs(Math.sin(time * 0.0018 + particle.phase)) * 0.38;
             } else {
-              p.x += p.vx;
-              p.y += p.vy;
-              if (p.x < 0) p.x = window.innerWidth;
-              if (p.x > window.innerWidth) p.x = 0;
-              if (p.y < 0) p.y = window.innerHeight;
-              if (p.y > window.innerHeight) p.y = 0;
-              p.alpha = 0.12 + Math.abs(Math.sin(t * 0.0018 + p.phase)) * 0.28;
+              particle.x += particle.vx;
+              particle.y += particle.vy;
+              if (particle.x < 0) particle.x = window.innerWidth;
+              if (particle.x > window.innerWidth) particle.x = 0;
+              if (particle.y < 0) particle.y = window.innerHeight;
+              if (particle.y > window.innerHeight) particle.y = 0;
+              particle.alpha = 0.09 + Math.abs(Math.sin(time * 0.0015 + particle.phase)) * 0.22;
             }
+
             ctx.beginPath();
-            ctx.arc(p.x, p.y, p.size, 0, Math.PI * 2);
-            ctx.fillStyle = particleColor + p.alpha + ")";
+            ctx.arc(particle.x, particle.y, particle.size, 0, Math.PI * 2);
+            ctx.fillStyle = "rgba(" + particle.color + "," + particle.alpha + ")";
             ctx.fill();
           }
+
           rafId = requestAnimationFrame(drawParticles);
         }
 
         function setStage(stage) {
-          var label = STAGE_LABELS[stage] || STAGE_LABELS.initializing;
-          if (stageEl) stageEl.textContent = label;
+          var state = STAGES[stage] || STAGES.initializing;
+          stageEl.textContent = state.label;
+          stageIndexEl.textContent = state.index;
+          progressBar.style.width = state.progress + "%";
+
           if (stage === "ready") {
+            document.body.classList.add("is-ready");
             disperse = true;
-            document.body.classList.add("fade-out");
+            window.setTimeout(function () {
+              document.body.classList.add("fade-out");
+            }, 60);
           }
+        }
+
+        function revealLogo() {
+          document.body.classList.add("is-loaded");
+          window.setTimeout(function () {
+            sampleLogo(logoTop);
+          }, 360);
         }
 
         if (window.nearSplash && window.nearSplash.onStage) {
@@ -618,14 +841,15 @@
         rafId = requestAnimationFrame(drawParticles);
         window.addEventListener("resize", resizeCanvas);
 
-        if (hero && heroEl) {
-          heroEl.addEventListener("load", function () {
-            sampleHero(heroEl);
-          });
-          heroEl.src = hero;
+        if (hero) {
+          logoTop.addEventListener("load", revealLogo, { once: true });
+          logoTop.src = hero;
+          logoBottom.src = hero;
+        } else {
+          document.body.classList.add("is-loaded");
         }
 
-        setTimeout(function () {
+        window.setTimeout(function () {
           if (escapeEl) escapeEl.classList.add("visible");
         }, 12000);
 

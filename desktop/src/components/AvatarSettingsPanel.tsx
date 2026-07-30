@@ -109,7 +109,7 @@ export function AvatarSettingsPanel(props: Props) {
   const [soulValue, setSoulValue] = useState("");
   const [loadingSoul, setLoadingSoul] = useState(false);
 
-  const title = mode === "avatar" ? `${avatar?.name ?? "分身"} · 设置` : "Near · 设置";
+  const title = mode === "avatar" ? `${avatar?.name ?? "分身"} · 设置` : "和创智派 · 设置";
 
   const loadTools = useCallback(async () => {
     setLoadingTools(true);
@@ -247,8 +247,8 @@ export function AvatarSettingsPanel(props: Props) {
 
   const toolsModeHint =
     mode === "avatar"
-      ? "未设置项继承 Near 全局策略；如全局未设置，则默认启用。"
-      : "Near 全局策略将作为所有分身默认值；未设置项默认启用。";
+      ? "未设置项继承和创智派全局策略；如全局未设置，则默认启用。"
+      : "和创智派全局策略将作为所有分身默认值；未设置项默认启用。";
 
   /** 分身「基本信息」Tab：名称 / 角色 / System Prompt + SOUL 一并保存 */
   const handleSaveGeneralAndSoul = async () => {
@@ -355,7 +355,7 @@ export function AvatarSettingsPanel(props: Props) {
     setMessage("");
     try {
       const res = await window.agenticxDesktop.saveMetaSoul({ content: soulValue });
-      setMessage(res?.ok ? "已保存，下一轮 Near 对话生效。" : `保存失败: ${res?.error ?? "未知错误"}`);
+      setMessage(res?.ok ? "已保存，下一轮和创智派对话生效。" : `保存失败: ${res?.error ?? "未知错误"}`);
     } catch (err) {
       setMessage(`保存失败: ${String(err)}`);
     } finally {
@@ -803,7 +803,7 @@ export function AvatarSettingsPanel(props: Props) {
           {activeTab === "soul" && mode === "machi" && (
             <div className="space-y-3">
               <p className="text-xs text-text-faint">
-                支持自由 Markdown 文本。该配置用于塑造 Near（Meta-Agent）的长期行为风格。
+                支持自由 Markdown 文本。该配置用于塑造和创智派（Meta-Agent）的长期行为风格。
               </p>
               {loadingSoul ? (
                 <div className="rounded-md border border-border bg-surface-card px-3 py-2 text-xs text-text-faint">

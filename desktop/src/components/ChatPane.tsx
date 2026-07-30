@@ -260,7 +260,6 @@ import { buildMessagesPdfHtml, expandSelectionForCompletePdfExport } from "../ut
 import { buildCompactionNoticeText } from "../utils/context-notice";
 import { usePaneSortableHandle } from "./pane-sortable-context";
 import { FeishuBadge } from "./FeishuBadge";
-import machiEmptyState from "../assets/machi-logo-transparent.png";
 import { APP_DISPLAY_NAME, APP_TAGLINE, META_AGENT_DISPLAY_NAME } from "../constants/branding";
 import { DEFAULT_META_AVATAR_URL } from "../constants/meta-avatar";
 import { isMetaLeaderIdentity, resolveMetaDisplayName } from "../utils/display-name";
@@ -5265,7 +5264,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
         .slice(0, 32);
       const res = await window.agenticxDesktop.exportMessagesPdf({
         html,
-        defaultFileName: `Near对话_${sessionSlug}_${stamp}.pdf`,
+        defaultFileName: `和创智派对话_${sessionSlug}_${stamp}.pdf`,
       });
       if (res.canceled) return;
       if (res.ok && res.path) {
@@ -11475,14 +11474,14 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
             (pane.sessionId && visibleMessages.length === 0) ? (
             <div className="flex h-full flex-col items-center justify-center gap-5 px-4 text-center text-xs">
               <img
-                src={machiEmptyState}
+                src={DEFAULT_META_AVATAR_URL}
                 alt={`${APP_DISPLAY_NAME} Empty State`}
-                className="w-[13.2rem] max-w-[42vw] select-none opacity-[0.85] theme-invert-logo"
+                className="w-[10.5rem] max-w-[36vw] select-none object-contain drop-shadow-[0_18px_44px_rgba(30,166,214,0.36)]"
                 draggable={false}
               />
               <div className="space-y-2 select-none">
-                <div className="text-[22px] font-semibold text-text-primary tracking-[0.24em]">
-                  {APP_DISPLAY_NAME.toUpperCase()}
+                <div className="text-[22px] font-semibold text-text-primary tracking-[0.14em]">
+                  {APP_DISPLAY_NAME}
                 </div>
                 <div className="text-text-faint tracking-[0.22em] uppercase text-[12px]">
                   {APP_TAGLINE}

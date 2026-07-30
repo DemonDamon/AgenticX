@@ -120,7 +120,7 @@ export function BackendDepsPanel() {
         <div className="min-w-0 flex-1">
           {phase === "done" ? (
             <p className="text-xs font-medium text-emerald-300">
-              后端依赖已修复，请完全退出并重启 Near 使其生效。
+              后端依赖已修复，请完全退出并重启和创智派使其生效。
             </p>
           ) : (
             <>
