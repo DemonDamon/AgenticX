@@ -1667,30 +1667,69 @@ class GroupChatRouter:
         async for r in _drain_relay():
             yield r
 
-        # ── 8. Execution: per-subtask via AgentRuntime (_run_one_target) ───
+        # ── 8. Execution: Graph DAG scheduler + AgentRuntime per node ───────
+        # Hybrid stack preserved (ADR 0002): Workforce plans; AgentRuntime executes.
+        from agenticx.runtime.graph.compiler import compile_workforce_run
+        from agenticx.runtime.graph.models import GraphNode
+        from agenticx.runtime.graph.scheduler import execute_group_run
+        from agenticx.runtime.graph.store import get_default_store
+
         responded_this_turn: set[str] = set()
+        subtask_by_id = {str(st.id): st for st in subtasks}
+        session_id = str(getattr(base_session, "session_id", "") or group_id)
+        graph_run = compile_workforce_run(
+            session_id=session_id,
+            group_id=group_id,
+            subtasks=subtasks,
+            assignment_map={str(k): str(v) for k, v in assignment_map.items()},
+        )
+        try:
+            scratch = getattr(base_session, "scratchpad", None)
+            if isinstance(scratch, dict):
+                scratch["graph_run_id"] = graph_run.run_id
+        except Exception:
+            pass
 
-        for subtask in subtasks:
-            if await self._should_stop(should_stop):
-                break
+        graph_event_queue: asyncio.Queue[GroupReply] = asyncio.Queue()
 
-            worker_id = assignment_map.get(subtask.id, "")
-            avatar_id = worker_id_to_avatar_id.get(worker_id, worker_id)
+        def _on_graph_event(etype: str, data: dict) -> None:
+            import json as _json
+            node = data.get("node") if isinstance(data, dict) else None
+            agent_id = META_LEADER_AGENT_ID
+            if isinstance(node, dict) and node.get("agent_id"):
+                agent_id = str(node.get("agent_id"))
+            graph_event_queue.put_nowait(
+                GroupReply(
+                    agent_id=agent_id,
+                    avatar_name="Graph",
+                    avatar_url="",
+                    content=_json.dumps(data, ensure_ascii=False),
+                    skipped=True,
+                    event_type=str(etype),
+                )
+            )
 
-            # Emit TASK_STARTED
+        async def _drain_graph_events() -> None:
+            while not graph_event_queue.empty():
+                yield graph_event_queue.get_nowait()
+
+        async def _node_runner(node: GraphNode):
+            st = subtask_by_id.get(node.id)
+            desc = (st.description if st is not None else node.task_text) or node.task_text
+            worker_id = str(node.agent_id or assignment_map.get(node.id, "") or "")
+            avatar_id = worker_id_to_avatar_id.get(worker_id, worker_id) or META_LEADER_AGENT_ID
+
             event_bus.publish(WorkforceEvent(
                 action=WorkforceAction.TASK_STARTED,
-                task_id=subtask.id,
-                agent_id=avatar_id or META_LEADER_AGENT_ID,
-                data={"task_description": subtask.description},
+                task_id=node.id,
+                agent_id=avatar_id,
+                data={"task_description": desc},
             ))
             async for r in _drain_relay():
                 yield r
+            async for r in _drain_graph_events():
+                yield r
 
-            if not avatar_id:
-                avatar_id = META_LEADER_AGENT_ID
-
-            # Show typing indicator.
             if avatar_id == META_LEADER_AGENT_ID:
                 ty_name = self._meta_leader_label
             else:
@@ -1698,10 +1737,14 @@ class GroupChatRouter:
                 ty_name = str(getattr(av, "name", "") or avatar_id) if av else avatar_id
             yield self._typing_event(avatar_id, ty_name)
 
-            # Execute via AgentRuntime (full Studio capabilities).
-            subtask_input = subtask.description
+            subtask_input = desc
             if quoted_content.strip():
                 subtask_input = f"{subtask_input}\n\n[用户引用内容]\n{quoted_content.strip()}"
+            if node.directives:
+                joined = "\n".join(f"- {d}" for d in node.directives)
+                subtask_input = (
+                    f"{subtask_input}\n\n## Graph intervention (authoritative)\n{joined}"
+                )
 
             reply: GroupReply | None = None
             async for target_evt in self._run_one_target_stream(
@@ -1723,7 +1766,7 @@ class GroupChatRouter:
             if reply is None or reply.skipped:
                 event_bus.publish(WorkforceEvent(
                     action=WorkforceAction.TASK_FAILED,
-                    task_id=subtask.id,
+                    task_id=node.id,
                     agent_id=avatar_id,
                     data={"error": reply.error if reply else "no response"},
                 ))
@@ -1732,13 +1775,28 @@ class GroupChatRouter:
                 task_lock.add_conversation("assistant", reply.content or "")
                 event_bus.publish(WorkforceEvent(
                     action=WorkforceAction.TASK_COMPLETED,
-                    task_id=subtask.id,
+                    task_id=node.id,
                     agent_id=avatar_id,
                     data={"result": (reply.content or "")[:500]},
                 ))
-
             async for r in _drain_relay():
                 yield r
+
+        max_parallel = min(4, max(1, len(worker_instances)))
+        async for item in execute_group_run(
+            graph_run,
+            runner=_node_runner,
+            on_event=_on_graph_event,
+            store=get_default_store(),
+            max_parallel=max_parallel,
+            should_stop=should_stop,
+        ):
+            yield item
+            async for r in _drain_graph_events():
+                yield r
+
+        async for r in _drain_graph_events():
+            yield r
 
         # ── 9. Leader summary ───────────────────────────────────────────────
         if not await self._should_stop(should_stop):

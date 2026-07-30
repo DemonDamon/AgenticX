@@ -5744,6 +5744,53 @@ def create_studio_app() -> FastAPI:
 
         return StreamingResponse(event_generator(), media_type="text/event-stream")
 
+    @app.get("/api/graph/runs")
+    async def list_graph_runs(
+        session_id: str = Query(default=""),
+        x_agx_desktop_token: str | None = Header(default=None),
+    ) -> dict:
+        """List WorkGraph runs for a studio session (Graph Runtime SP1)."""
+        from agenticx.runtime.graph.store import get_default_store
+
+        _check_token(x_agx_desktop_token)
+        sid = str(session_id or "").strip()
+        if not sid:
+            raise HTTPException(status_code=400, detail="session_id required")
+        runs = get_default_store().list_by_session(sid)
+        return {
+            "ok": True,
+            "session_id": sid,
+            "runs": [
+                {
+                    "run_id": r.run_id,
+                    "session_id": r.session_id,
+                    "group_id": r.group_id,
+                    "status": r.status,
+                    "version": r.version,
+                    "node_count": len(r.nodes),
+                    "edge_count": len(r.edges),
+                }
+                for r in runs
+            ],
+        }
+
+    @app.get("/api/graph/runs/{run_id}")
+    async def get_graph_run(
+        run_id: str,
+        x_agx_desktop_token: str | None = Header(default=None),
+    ) -> dict:
+        """Return a full GraphRun snapshot."""
+        from agenticx.runtime.graph.store import get_default_store
+
+        _check_token(x_agx_desktop_token)
+        rid = str(run_id or "").strip()
+        if not rid:
+            raise HTTPException(status_code=400, detail="run_id required")
+        run = get_default_store().load(rid)
+        if run is None:
+            raise HTTPException(status_code=404, detail="graph run not found")
+        return {"ok": True, "run": run.to_dict()}
+
     @app.post("/api/groups/{group_id}/action")
     async def post_group_action(
         group_id: str,

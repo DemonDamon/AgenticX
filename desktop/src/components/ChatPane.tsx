@@ -9148,6 +9148,10 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
               });
               continue;
             }
+            // Graph Runtime events (SP1+): consumed by Run Graph panel later; ignore in chat.
+            if (typeof payload.type === "string" && payload.type.startsWith("graph.")) {
+              continue;
+            }
             // ── workforce.* events (routing="team") ──────────────────────
             if (typeof payload.type === "string" && payload.type.startsWith("workforce.")) {
               const wfAction = payload.type.replace("workforce.", "");
