@@ -378,7 +378,7 @@ func (s *Server) protocolStream(
 			writeStreamError(w, flusher, adaptor.MapUpstreamError(up.StatusCode, up.Body, session.inbound).Message)
 			return
 		}
-		writeStreamError(w, flusher, streamErr.Error())
+		writeStreamError(w, flusher, formatStreamError(streamErr))
 		return
 	}
 
