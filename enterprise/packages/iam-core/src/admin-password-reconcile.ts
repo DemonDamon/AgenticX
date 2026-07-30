@@ -1,8 +1,14 @@
-import { hashPassword, verifyPassword } from "@agenticx/auth";
+import { hashPassword, verifyPassword, type AuthUser } from "@agenticx/auth";
 import {
   loadAuthUserByEmail,
-  updatePasswordAndClearRequirementPg,
+  upsertUserRowFromAuthUser,
 } from "./repos/users";
+
+export type ReconcileUserPasswordHashByEmailResult = {
+  found: boolean;
+  updated: boolean;
+  user: AuthUser | null;
+};
 
 /**
  * Align a configured administrator password with the persisted account only
@@ -14,19 +20,30 @@ export async function reconcileUserPasswordHashByEmail(input: {
   tenantId: string;
   email: string;
   password: string;
-}): Promise<void> {
+}): Promise<ReconcileUserPasswordHashByEmailResult> {
   const tenantId = input.tenantId.trim();
   const email = input.email.trim().toLowerCase();
-  if (!tenantId || !email) return;
+  if (!tenantId || !email) {
+    return { found: false, updated: false, user: null };
+  }
 
   const user = await loadAuthUserByEmail(tenantId, email);
-  if (!user) return;
+  if (!user) {
+    return { found: false, updated: false, user: null };
+  }
 
-  if (await verifyPassword(input.password, user.passwordHash)) return;
+  if (await verifyPassword(input.password, user.passwordHash)) {
+    return { found: true, updated: false, user };
+  }
 
-  await updatePasswordAndClearRequirementPg(
-    tenantId,
+  const nextUser: AuthUser = {
+    ...user,
     email,
-    await hashPassword(input.password),
-  );
+    passwordHash: await hashPassword(input.password),
+    failedLoginCount: 0,
+    lockedUntil: null,
+    status: "active",
+  };
+  await upsertUserRowFromAuthUser(nextUser);
+  return { found: true, updated: true, user: nextUser };
 }
