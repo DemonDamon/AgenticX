@@ -5,10 +5,28 @@ import {
   buildInterveneBody,
   classifyDirectiveText,
   emptyPaneGraphState,
+  graphHasTaskNodes,
   layoutGraphNodes,
 } from "./graph-types";
 
 describe("graph-types", () => {
+  it("graphHasTaskNodes is false for presence-only agent graphs", () => {
+    expect(
+      graphHasTaskNodes({
+        human: { id: "human", kind: "human", label: "你", status: "ready" },
+        "agent:a1": { id: "agent:a1", kind: "agent", label: "架构师·阿析", status: "ready" },
+      }),
+    ).toBe(false);
+  });
+
+  it("graphHasTaskNodes is true when workforce tasks exist", () => {
+    expect(
+      graphHasTaskNodes({
+        t1: { id: "t1", kind: "task", label: "拆解", status: "ready" },
+      }),
+    ).toBe(true);
+  });
+
   it("classifyDirectiveText detects retract phrases", () => {
     expect(classifyDirectiveText("这个不用做了")).toBe("node_retract");
     expect(classifyDirectiveText("请补充验收清单")).toBe("node_inject");

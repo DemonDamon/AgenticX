@@ -6,6 +6,7 @@ import { GraphInterveneDock } from "./GraphInterveneDock";
 import {
   buildInterveneBody,
   EMPTY_PANE_GRAPH_STATE,
+  graphHasTaskNodes,
   type GraphNodeSnapshot,
   type InterveneRequest,
 } from "./graph-types";
@@ -114,6 +115,14 @@ export function RunGraphPanel({ pane, onClose, tintColor, embedded = false }: Pr
   );
 
   const hasRun = Boolean(runId && (Object.keys(graphState.nodes).length > 0 || graphState.projection));
+  // Presence / H2A·A2A social graphs are already expert nodes — hide the
+  // 专家/任务 toggle until a real Workforce task DAG exists.
+  const hasTaskNodes = useMemo(
+    () => graphHasTaskNodes(graphState.nodes),
+    [graphState.nodes],
+  );
+  // No tasks → show raw presence nodes (includes「你」); with tasks → honor toggle.
+  const effectivePreferAgentView = hasTaskNodes ? preferAgentView : false;
 
   return (
     <div
@@ -127,39 +136,43 @@ export function RunGraphPanel({ pane, onClose, tintColor, embedded = false }: Pr
             <span className="text-[14px] font-medium text-text-strong">运行图</span>
           </>
         ) : null}
-        <div
-          className={`inline-flex items-center gap-0.5 rounded-lg border border-border bg-surface-base p-0.5 ${
-            embedded ? "" : "ml-1"
-          }`}
-        >
-          <button
-            type="button"
-            className={`rounded-md px-2.5 py-1 text-[13px] font-medium transition ${
-              preferAgentView
-                ? "bg-[var(--ui-btn-primary-bg)] text-white shadow-sm"
-                : "text-text-subtle hover:bg-surface-hover hover:text-text-strong"
+        {hasTaskNodes ? (
+          <div
+            className={`inline-flex items-center gap-0.5 rounded-lg border border-border bg-surface-base p-0.5 ${
+              embedded ? "" : "ml-1"
             }`}
-            onClick={() => setPreferAgentView(true)}
-            aria-pressed={preferAgentView}
           >
-            专家
-          </button>
-          <button
-            type="button"
-            className={`rounded-md px-2.5 py-1 text-[13px] font-medium transition ${
-              !preferAgentView
-                ? "bg-[var(--ui-btn-primary-bg)] text-white shadow-sm"
-                : "text-text-subtle hover:bg-surface-hover hover:text-text-strong"
-            }`}
-            onClick={() => setPreferAgentView(false)}
-            aria-pressed={!preferAgentView}
-          >
-            任务
-          </button>
-        </div>
+            <button
+              type="button"
+              className={`rounded-md px-2.5 py-1 text-[13px] font-medium transition ${
+                preferAgentView
+                  ? "bg-[var(--ui-btn-primary-bg)] text-white shadow-sm"
+                  : "text-text-subtle hover:bg-surface-hover hover:text-text-strong"
+              }`}
+              onClick={() => setPreferAgentView(true)}
+              aria-pressed={preferAgentView}
+            >
+              专家
+            </button>
+            <button
+              type="button"
+              className={`rounded-md px-2.5 py-1 text-[13px] font-medium transition ${
+                !preferAgentView
+                  ? "bg-[var(--ui-btn-primary-bg)] text-white shadow-sm"
+                  : "text-text-subtle hover:bg-surface-hover hover:text-text-strong"
+              }`}
+              onClick={() => setPreferAgentView(false)}
+              aria-pressed={!preferAgentView}
+            >
+              任务
+            </button>
+          </div>
+        ) : null}
         <button
           type="button"
-          className="rounded-md p-1.5 text-text-subtle hover:bg-surface-hover hover:text-text-strong"
+          className={`rounded-md p-1.5 text-text-subtle hover:bg-surface-hover hover:text-text-strong ${
+            !hasTaskNodes && !embedded ? "ml-1" : ""
+          }`}
           onClick={() => void refresh()}
           title="刷新"
           aria-label="刷新运行图"
@@ -207,7 +220,7 @@ export function RunGraphPanel({ pane, onClose, tintColor, embedded = false }: Pr
             >
               <RunGraphCanvas
                 state={graphState}
-                preferAgentView={preferAgentView}
+                preferAgentView={effectivePreferAgentView}
                 onSelectIds={(ids) => setSelected(pane.id, ids)}
                 onIntervene={intervene}
                 onRequestForceReassign={(body) => setForceBody(body)}
