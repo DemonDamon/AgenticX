@@ -8997,6 +8997,8 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
               const progressCallId = `${groupProgressRunId}:group-progress:${eventAgentId}`;
               setGroupTyping((prev) => ({ ...prev, [eventAgentId]: avatarName }));
               if (!progressText) continue;
+              // Round-start chatter is covered by expert label + stream dots.
+              if (/^开始处理任务/.test(progressText) || /^已接收任务/.test(progressText)) continue;
               const prevText = lastGroupProgressRef.current[eventAgentId] ?? "";
               if (prevText === progressText) continue;
               lastGroupProgressRef.current[eventAgentId] = progressText;

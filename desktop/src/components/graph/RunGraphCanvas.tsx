@@ -21,7 +21,9 @@ import {
   type OnSelectionChangeParams,
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
-import { useAppStore } from "../../store";
+import { META_AGENT_DISPLAY_NAME } from "../../constants/branding";
+import { useAppStore, type Avatar } from "../../store";
+import { isMetaLeaderAgentId, resolveMetaDisplayName } from "../../utils/display-name";
 import { GraphNodeView, type GraphFlowNodeData } from "./GraphNodeView";
 import {
   buildInterveneBody,
@@ -33,6 +35,40 @@ import {
 } from "./graph-types";
 
 const nodeTypes = { graphNode: GraphNodeView };
+
+function agentIdFromGraphNode(node: GraphNodeSnapshot): string {
+  const fromField = String(node.agent_id || "").trim();
+  if (fromField) return fromField.replace(/^agent:/, "");
+  const id = String(node.id || "").trim();
+  return id.startsWith("agent:") ? id.slice("agent:".length) : id;
+}
+
+/** Map avatar hex ids / __meta__ to proper display names for Run Graph cards. */
+function withDisplayLabels(
+  nodes: GraphNodeSnapshot[],
+  avatars: Avatar[],
+  metaLabel: string,
+): GraphNodeSnapshot[] {
+  const byId = new Map(avatars.map((a) => [a.id, a.name] as const));
+  return nodes.map((node) => {
+    const isAgent = node.view_role === "agent" || String(node.kind) === "agent";
+    if (!isAgent) return node;
+    const aid = agentIdFromGraphNode(node);
+    if (!aid || aid === "human" || aid === "__unassigned__") return node;
+    if (isMetaLeaderAgentId(aid)) {
+      const label = resolveMetaDisplayName(metaLabel);
+      return label && label !== node.label ? { ...node, label } : node;
+    }
+    const name = String(byId.get(aid) || "").trim();
+    if (!name) return node;
+    const raw = String(node.label || "").trim();
+    // Replace empty / id / agent:id labels (backend historically used hex ids).
+    if (!raw || raw === aid || raw === `agent:${aid}` || raw === node.id) {
+      return { ...node, label: name };
+    }
+    return node;
+  });
+}
 
 type Props = {
   state: PaneGraphState;
@@ -92,15 +128,17 @@ function CanvasInner({
   // Bind to app theme (dark/dim/light), not OS prefers-color-scheme —
   // otherwise a dark RF canvas can render with light-theme dark text.
   const appTheme = useAppStore((s) => s.theme);
+  const avatars = useAppStore((s) => s.avatars);
   const colorMode = appTheme === "light" ? "light" : "dark";
   const isDarkCanvas = colorMode === "dark";
 
   const viewNodes = useMemo(() => {
-    if (preferAgentView && state.projection?.agent_nodes?.length) {
-      return state.projection.agent_nodes;
-    }
-    return Object.values(state.nodes);
-  }, [preferAgentView, state.nodes, state.projection]);
+    const raw =
+      preferAgentView && state.projection?.agent_nodes?.length
+        ? state.projection.agent_nodes
+        : Object.values(state.nodes);
+    return withDisplayLabels(raw, avatars, META_AGENT_DISPLAY_NAME);
+  }, [preferAgentView, state.nodes, state.projection, avatars]);
 
   const viewEdges = useMemo(() => {
     if (preferAgentView && state.projection?.agent_edges?.length) {

@@ -295,6 +295,19 @@ class GroupChatRouter:
             event_type="group_typing",
         )
 
+    def _graph_member_labels(self, group_avatar_ids: Sequence[str]) -> Dict[str, str]:
+        """avatar_id → display name for Run Graph node labels (not hex ids)."""
+        labels: Dict[str, str] = {META_LEADER_AGENT_ID: self._meta_leader_label}
+        for aid in group_avatar_ids:
+            sid = str(aid or "").strip()
+            if not sid:
+                continue
+            avatar = self.avatar_registry.get_avatar(sid)
+            name = str(getattr(avatar, "name", "") or "").strip() if avatar else ""
+            if name:
+                labels[sid] = name
+        return labels
+
     def _group_user_addressing_rules(self, user_display_name: str) -> str:
         u = str(user_display_name or "").strip() or "用户"
         ml = self._meta_leader_label
@@ -436,7 +449,9 @@ class GroupChatRouter:
         """Map runtime event to user-visible progress text."""
         et = str(event_type or "")
         if et == EventType.ROUND_START.value:
-            return "开始处理任务..."
+            # No chat-line for round start — frontend shows the expert label +
+            # stream placeholder instead of a noisy "开始处理任务..." row.
+            return ""
         if et == EventType.TOOL_CALL.value:
             tool_name = str(data.get("name", "") or data.get("tool_name", "") or "tool")
             raw_args = data.get("arguments", data.get("args", {}))
@@ -532,12 +547,14 @@ class GroupChatRouter:
                 except Exception:
                     return []
             existing = str(pad.get("graph_run_id") or "").strip() or None
+            member_labels = self._graph_member_labels(group_avatar_ids)
             run = ensure_presence_run(
                 session_id=str(getattr(base_session, "session_id", "") or ""),
                 group_id=group_id,
                 member_ids=list(group_avatar_ids) + [META_LEADER_AGENT_ID],
                 store=get_default_store(),
                 existing_run_id=existing,
+                member_labels=member_labels,
             )
             pad["graph_run_id"] = run.run_id
             src = (
@@ -585,15 +602,19 @@ class GroupChatRouter:
                 except Exception:
                     return []
             existing = str(pad.get("graph_run_id") or "").strip() or None
+            member_labels = self._graph_member_labels(group_avatar_ids)
             run = ensure_presence_run(
                 session_id=str(getattr(base_session, "session_id", "") or ""),
                 group_id=group_id,
                 member_ids=list(group_avatar_ids) + [META_LEADER_AGENT_ID],
                 store=get_default_store(),
                 existing_run_id=existing,
+                member_labels=member_labels,
             )
             pad["graph_run_id"] = run.run_id
-            edges, events = project_h2a_fanout(run, target_agent_ids)
+            edges, events = project_h2a_fanout(
+                run, target_agent_ids, member_labels=member_labels
+            )
             for edge in edges:
                 note_debate_edge(pad, source=edge.source, target=edge.target)
             get_default_store().save(run, bump_version=True)
