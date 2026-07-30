@@ -101,6 +101,8 @@
     "complianceTitle": "合规拦截",
     "chatErrorTitle": "聊天请求失败",
     "historySyncTitle": "历史同步",
+    "historySyncPending": "这段对话尚未同步到服务器，将自动重试",
+    "historySyncRetry": "立即重试",
     "suggestion1Title": "产品设计头脑风暴",
     "suggestion1Description": "给我 5 个改善员工入职体验的创意",
     "suggestion1Prompt": "帮我头脑风暴 5 个改善员工入职体验的创意，并给出可落地的第一步",

@@ -28,7 +28,14 @@ function pool(): Pool {
       user: decodeURIComponent(parsed.username),
       password: decodeURIComponent(parsed.password),
       database: parsed.pathname.replace(/^\//, ""),
-      connectionLimit: 5,
+      // Chat hydrate + append after long SSE can contend; keep a small queue instead of
+      // hanging forever or failing open with opaque browser "Failed to fetch".
+      connectionLimit: 10,
+      waitForConnections: true,
+      queueLimit: 40,
+      connectTimeout: 10_000,
+      enableKeepAlive: true,
+      keepAliveInitialDelay: 10_000,
       timezone: "Z",
       charset: "utf8mb4",
     });

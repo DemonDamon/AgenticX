@@ -22,6 +22,10 @@ export function chatHistoryBadRequest(message: string) {
   return NextResponse.json({ error: { code: "40001", message } }, { status: 400 });
 }
 
+export function chatHistoryConflict(message: string) {
+  return NextResponse.json({ error: { code: "40901", message } }, { status: 409 });
+}
+
 export function chatHistoryServerError(error?: unknown) {
   if (process.env.NODE_ENV !== "production") {
     console.error("[chat-history] server error:", error);

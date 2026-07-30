@@ -9,6 +9,7 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 
@@ -176,28 +177,85 @@ func (p *OpenAICompatibleProvider) Stream(
 		return fmt.Errorf("marshal upstream request: %w", err)
 	}
 
-	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, joinURL(endpoint, "/chat/completions"), bytes.NewReader(body))
-	if err != nil {
-		return fmt.Errorf("build upstream request: %w", err)
-	}
-	httpReq.Header.Set("Content-Type", "application/json")
-	httpReq.Header.Set("Accept", "text/event-stream")
-	httpReq.Header.Set("Authorization", "Bearer "+apiKey)
-
 	streamClient := *p.httpClient
 	streamClient.Timeout = 0
-	resp, err := streamClient.Do(httpReq)
-	if err != nil {
-		return fmt.Errorf("upstream request failed: %w", err)
-	}
-	defer resp.Body.Close()
+	var lastErr error
+	for attempt := 0; attempt < 2; attempt++ {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		httpReq, err := http.NewRequestWithContext(
+			ctx,
+			http.MethodPost,
+			joinURL(endpoint, "/chat/completions"),
+			bytes.NewReader(body),
+		)
+		if err != nil {
+			return fmt.Errorf("build upstream request: %w", err)
+		}
+		httpReq.Header.Set("Content-Type", "application/json")
+		httpReq.Header.Set("Accept", "text/event-stream")
+		httpReq.Header.Set("Authorization", "Bearer "+apiKey)
 
-	if resp.StatusCode >= 400 {
-		preview, _ := io.ReadAll(io.LimitReader(resp.Body, 2048))
-		return fmt.Errorf("upstream %d: %s", resp.StatusCode, strings.TrimSpace(string(preview)))
+		resp, err := streamClient.Do(httpReq)
+		if err != nil {
+			lastErr = fmt.Errorf("upstream request failed: %w", err)
+		} else {
+			pushed := false
+			if resp.StatusCode >= 400 {
+				preview, _ := io.ReadAll(io.LimitReader(resp.Body, 2048))
+				lastErr = fmt.Errorf("upstream %d: %s", resp.StatusCode, strings.TrimSpace(string(preview)))
+			} else {
+				lastErr = parseSSEStream(resp.Body, streamIdleTimeoutFromEnv(), func(chunk openai.StreamChunk) error {
+					pushed = true
+					return push(chunk)
+				})
+			}
+			_ = resp.Body.Close()
+			if lastErr == nil {
+				return nil
+			}
+			// Never replay after any chunk reached the client: that would duplicate output.
+			if pushed {
+				return lastErr
+			}
+		}
+		if attempt == 0 && isRetryableInitialStreamError(lastErr) {
+			time.Sleep(150 * time.Millisecond)
+			continue
+		}
+		return lastErr
 	}
+	return lastErr
+}
 
-	return parseSSEStream(resp.Body, push)
+func isRetryableInitialStreamError(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := strings.ToLower(err.Error())
+	return strings.Contains(msg, "network error") ||
+		strings.Contains(msg, "connection reset") ||
+		strings.Contains(msg, "connection refused") ||
+		strings.Contains(msg, "socket hang up") ||
+		strings.Contains(msg, "unexpected eof") ||
+		strings.Contains(msg, "timeout") ||
+		strings.Contains(msg, "upstream 429") ||
+		strings.Contains(msg, "upstream 500") ||
+		strings.Contains(msg, "upstream 502") ||
+		strings.Contains(msg, "upstream 503") ||
+		strings.Contains(msg, "upstream 504")
+}
+
+func streamIdleTimeoutFromEnv() time.Duration {
+	// Keep in sync with adaptor.StreamConfigFromEnv default (web-search TTFT headroom).
+	idle := 180 * time.Second
+	if v := strings.TrimSpace(os.Getenv("GATEWAY_STREAM_IDLE_TIMEOUT")); v != "" {
+		if sec, err := strconv.Atoi(v); err == nil && sec > 0 {
+			idle = time.Duration(sec) * time.Second
+		}
+	}
+	return idle
 }
 
 func (p *OpenAICompatibleProvider) Embeddings(
@@ -243,10 +301,38 @@ func (p *OpenAICompatibleProvider) Embeddings(
 }
 
 // parseSSEStream 增量解析 OpenAI 兼容的 SSE 流：忽略心跳/注释行，遇到 `data: [DONE]` 即终止。
-func parseSSEStream(body io.Reader, push func(openai.StreamChunk) error) error {
+// idle>0 时：任意两次可读字节间隔超过阈值 → stream:idle_timeout（避免浏览器侧裸 network error）。
+func parseSSEStream(body io.Reader, idle time.Duration, push func(openai.StreamChunk) error) error {
+	if idle <= 0 {
+		idle = 180 * time.Second
+	}
 	reader := bufio.NewReader(body)
 	var eventName string
 	var dataLines []string
+
+	type readResult struct {
+		line []byte
+		err  error
+	}
+	readCh := make(chan readResult, 1)
+	pendingRead := false
+	readOne := func() (readResult, error) {
+		if !pendingRead {
+			pendingRead = true
+			go func() {
+				line, err := reader.ReadBytes('\n')
+				readCh <- readResult{line: line, err: err}
+			}()
+		}
+		select {
+		case res := <-readCh:
+			pendingRead = false
+			return res, nil
+		case <-time.After(idle):
+			return readResult{}, fmt.Errorf("stream:idle_timeout")
+		}
+	}
+
 	flushEvent := func() (bool, error) {
 		if len(dataLines) == 0 {
 			eventName = ""
@@ -298,7 +384,12 @@ func parseSSEStream(body io.Reader, push func(openai.StreamChunk) error) error {
 	}
 
 	for {
-		line, readErr := reader.ReadBytes('\n')
+		res, idleErr := readOne()
+		if idleErr != nil {
+			return idleErr
+		}
+		line := res.line
+		readErr := res.err
 		if len(line) > 0 {
 			trimmed := bytes.TrimRight(line, "\r\n")
 			if len(trimmed) == 0 {

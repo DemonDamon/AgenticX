@@ -24,9 +24,38 @@ function parseErrorPayload(raw: unknown): { code: string; message: string } {
     const error = (raw as { error?: { code?: unknown; message?: unknown } }).error;
     const code = typeof error?.code === "string" ? error.code : "50000";
     const message = typeof error?.message === "string" ? error.message : "Gateway request failed";
+    // A structured server/upstream error is not a browser transport failure.
+    // Preserve it so operators can diagnose the real provider error.
     return { code, message };
   }
   return { code: "50000", message: "Gateway request failed" };
+}
+
+/** Map browser/undici opaque fetch failures to actionable copy for acceptance UX. */
+export function normalizeTransportErrorMessage(raw: string): string {
+  const message = raw.trim();
+  if (!message) return "request failed";
+  const lower = message.toLowerCase();
+  if (
+    lower === "failed to fetch" ||
+    lower === "network error" ||
+    lower === "networkerror when attempting to fetch resource." ||
+    lower.includes("networkerror") ||
+    lower === "load failed" ||
+    lower.includes("fetch failed")
+  ) {
+    return (
+      "无法连接门户服务（网络中断或开发服务未响应）。" +
+      "对话若已显示完整回答，多半是历史同步失败；请确认门户仍在运行后刷新页面，或再发一条消息触发重试。"
+    );
+  }
+  return message;
+}
+
+function isAbortError(error: unknown): boolean {
+  if (!error || typeof error !== "object") return false;
+  const name = "name" in error ? String((error as { name?: unknown }).name ?? "") : "";
+  return name === "AbortError";
 }
 
 function pickStreamDelta(deltaObj: { content?: string; reasoning_content?: string } | undefined): string | undefined {
@@ -143,7 +172,7 @@ export class HttpChatClient implements ChatClient {
             this.pending.delete(requestId);
             return;
           }
-          const chunk = JSON.parse(data) as {
+          let chunk: {
             choices?: Array<{ delta?: { content?: string }; finish_reason?: string | null }>;
             agenticx_usage?: { input_tokens?: number; output_tokens?: number; total_tokens?: number };
             agenticx_web_search_sources?: Array<{ title?: string; url?: string; snippet?: string }>;
@@ -151,6 +180,12 @@ export class HttpChatClient implements ChatClient {
             usage?: { prompt_tokens?: number; completion_tokens?: number; total_tokens?: number };
             error?: { code?: string; message?: string };
           };
+          try {
+            chunk = JSON.parse(data) as typeof chunk;
+          } catch {
+            // Tolerate malformed keepalive / partial frames from proxies.
+            continue;
+          }
 
           if (chunk.error) {
             yield {
@@ -158,6 +193,8 @@ export class HttpChatClient implements ChatClient {
               done: true,
               error: {
                 code: chunk.error.code ?? "50000",
+                // Preserve structured Gateway/upstream errors. Only exceptions thrown
+                // by browser fetch/read are normalized in the outer catch below.
                 message: chunk.error.message ?? "Gateway request failed",
               },
             };
@@ -236,7 +273,7 @@ export class HttpChatClient implements ChatClient {
       }
       yield { requestId, done: true };
     } catch (error) {
-      if (pending.cancelled) {
+      if (pending.cancelled || isAbortError(error)) {
         yield { requestId, done: true, cancelled: true };
       } else {
         yield {
@@ -244,7 +281,9 @@ export class HttpChatClient implements ChatClient {
           done: true,
           error: {
             code: "50000",
-            message: error instanceof Error ? error.message : "request failed",
+            message: normalizeTransportErrorMessage(
+              error instanceof Error ? error.message : "request failed",
+            ),
           },
         };
       }

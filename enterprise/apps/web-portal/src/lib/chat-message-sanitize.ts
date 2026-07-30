@@ -7,6 +7,7 @@ import type {
 } from "@agenticx/core-api";
 
 const ALLOWED_ROLES = new Set(["system", "user", "assistant", "tool"]);
+const ULID_RE = /^[0-7][0-9A-HJKMNP-TV-Z]{25}$/;
 export const MAX_MESSAGES_PER_WRITE = 100;
 export const MAX_MESSAGE_CONTENT_CHARS = 128_000;
 export const MAX_IMAGE_ATTACHMENTS = 50;
@@ -156,9 +157,12 @@ export function sanitizeInboundMessages(
   for (const item of raw) {
     if (!item || typeof item !== "object") throw new Error("invalid message entry");
     const row = item as Record<string, unknown>;
-    const id = typeof row.id === "string" ? row.id : "";
+    const id = typeof row.id === "string" ? row.id.trim() : "";
     const role = typeof row.role === "string" ? row.role : "";
     const content = typeof row.content === "string" ? row.content : "";
+    if (!id || !ULID_RE.test(id)) {
+      throw new Error("invalid message id: must be a valid ULID");
+    }
     if (!ALLOWED_ROLES.has(role)) throw new Error(`invalid role: ${role}`);
     const attachments = sanitizeAttachments(row.attachments);
     const webSearchSources = sanitizeWebSearchSources(row.web_search_sources);
