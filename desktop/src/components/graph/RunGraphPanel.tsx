@@ -5,7 +5,7 @@ import { useAppStore } from "../../store";
 import { GraphInterveneDock } from "./GraphInterveneDock";
 import {
   buildInterveneBody,
-  emptyPaneGraphState,
+  EMPTY_PANE_GRAPH_STATE,
   type GraphNodeSnapshot,
   type InterveneRequest,
 } from "./graph-types";
@@ -29,7 +29,9 @@ type Props = {
 export function RunGraphPanel({ pane, onClose, tintColor }: Props) {
   const apiBase = useAppStore((s) => s.apiBase);
   const apiToken = useAppStore((s) => s.apiToken);
-  const graphState = useGraphRunStore((s) => s.byPane[pane.id] ?? emptyPaneGraphState());
+  // Must use a stable empty object — `?? emptyPaneGraphState()` allocates every
+  // snapshot and trips React useSyncExternalStore into an infinite update loop.
+  const graphState = useGraphRunStore((s) => s.byPane[pane.id] ?? EMPTY_PANE_GRAPH_STATE);
   const applySnapshot = useGraphRunStore((s) => s.applySnapshot);
   const setSelected = useGraphRunStore((s) => s.setSelected);
   const [busy, setBusy] = useState(false);

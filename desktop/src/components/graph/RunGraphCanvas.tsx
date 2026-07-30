@@ -1,4 +1,11 @@
-import { useCallback, useEffect, useMemo, useState, type MouseEvent as ReactMouseEvent } from "react";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type MouseEvent as ReactMouseEvent,
+} from "react";
 import {
   Background,
   Controls,
@@ -38,14 +45,14 @@ function toFlow(
   nodes: GraphNodeSnapshot[],
   edges: GraphEdgeSnapshot[],
   pulseEdges: Record<string, number>,
-  selectedIds: Set<string>,
 ): { nodes: Node[]; edges: Edge[] } {
   const positions = layoutGraphNodes(nodes);
+  // Do NOT stamp `selected` here — ReactFlow owns selection locally.
+  // Pushing selected from store → setNodes → onSelectionChange → setSelected loops forever.
   const flowNodes: Node[] = nodes.map((n) => ({
     id: n.id,
     type: "graphNode",
     position: positions[n.id] || { x: 0, y: 0 },
-    selected: selectedIds.has(n.id),
     data: { node: n } satisfies GraphFlowNodeData,
   }));
   const now = Date.now();
@@ -95,9 +102,8 @@ function CanvasInner({
     return state.edges;
   }, [preferAgentView, state.edges, state.projection]);
 
-  const selectedSet = useMemo(() => new Set(state.selectedNodeIds), [state.selectedNodeIds]);
   const initial = useMemo(
-    () => toFlow(viewNodes, viewEdges, state.pulseEdges, selectedSet),
+    () => toFlow(viewNodes, viewEdges, state.pulseEdges),
     // eslint-disable-next-line react-hooks/exhaustive-deps -- sync via effect below
     [],
   );
@@ -105,16 +111,33 @@ function CanvasInner({
   const [nodes, setNodes, onNodesChange] = useNodesState(initial.nodes);
   const [edges, setEdges, onEdgesChange] = useEdgesState(initial.edges);
   const [ctxMenu, setCtxMenu] = useState<{ x: number; y: number; nodeId: string } | null>(null);
+  const lastSelectKeyRef = useRef("");
 
   useEffect(() => {
-    const next = toFlow(viewNodes, viewEdges, state.pulseEdges, selectedSet);
-    setNodes(next.nodes);
+    const next = toFlow(viewNodes, viewEdges, state.pulseEdges);
+    // Preserve ReactFlow-local selection / positions when graph data refreshes.
+    setNodes((prev) => {
+      const prevById = new Map(prev.map((n) => [n.id, n]));
+      return next.nodes.map((n) => {
+        const old = prevById.get(n.id);
+        if (!old) return n;
+        return {
+          ...n,
+          position: old.position,
+          selected: old.selected,
+        };
+      });
+    });
     setEdges(next.edges);
-  }, [viewNodes, viewEdges, state.pulseEdges, selectedSet, setNodes, setEdges]);
+  }, [viewNodes, viewEdges, state.pulseEdges, setNodes, setEdges]);
 
   const onSelectionChange = useCallback(
     (params: OnSelectionChangeParams) => {
-      onSelectIds(params.nodes.map((n) => n.id));
+      const ids = params.nodes.map((n) => n.id);
+      const key = ids.join("\0");
+      if (key === lastSelectKeyRef.current) return;
+      lastSelectKeyRef.current = key;
+      onSelectIds(ids);
     },
     [onSelectIds],
   );
