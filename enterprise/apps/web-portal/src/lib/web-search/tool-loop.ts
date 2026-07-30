@@ -4,6 +4,13 @@
  * Why not OpenAI tools probe for MiniMax-class models:
  * - Many providers ignore tool_choice / emit prose or proprietary XML (minimax:tool_call)
  * - User toggle already means "must search"; waiting on model tool_calls is brittle
+ *
+ * Stream reliability (production):
+ * - Sources are emitted before answer tokens so the UI can show the search row early.
+ * - Upstream read failures MUST become SSE `error` frames (never hard-close the body),
+ *   otherwise the browser surfaces opaque "network error" / "Failed to fetch".
+ * - Search failures and gateway failures are separate paths (do not mis-label gateway
+ *   outages as "联网搜索暂不可用").
  */
 
 import { stripEmptyAssistantMessages } from "../chat-completion-sanitize";
@@ -40,6 +47,10 @@ export const WEB_SEARCH_TOOL_CHOICE = {
 const ADMIN_DISABLED_HINT = "> 管理员已关闭联网搜索。\n\n";
 const UNAVAILABLE_HINT = "> 联网搜索暂不可用，以下回答基于模型已有知识。\n\n";
 
+/** Cap model-bound context (UI sources may still list the full hit set). */
+export const WEB_SEARCH_CONTEXT_HIT_LIMIT = 10;
+export const WEB_SEARCH_CONTEXT_SNIPPET_CHARS = 320;
+
 type ChatMessage = {
   role: string;
   content?: string | null;
@@ -52,12 +63,22 @@ export type GatewayFetchDeps = {
   url: string;
   headers: Record<string, string>;
   fetchImpl?: typeof fetch;
+  signal?: AbortSignal;
   loadTenantConfig?: () => Promise<TenantWebSearchRow>;
   executeSearch?: typeof executeWebSearch;
 };
 
 function sseDataFrame(payload: unknown): string {
   return `data: ${JSON.stringify(payload)}\n\n`;
+}
+
+export function formatSseErrorFrame(message: string, code = "50201"): string {
+  return sseDataFrame({
+    error: {
+      code,
+      message,
+    },
+  });
 }
 
 export function synthesizeTextSse(
@@ -141,6 +162,21 @@ export function formatWebSearchSourcesSse(hits: WebSearchHit[]): string {
   return sseDataFrame({ agenticx_web_search_sources: payload });
 }
 
+function truncateSnippet(text: string, maxChars: number): string {
+  const normalized = text.replace(/\s+/g, " ").trim();
+  if (normalized.length <= maxChars) return normalized;
+  return `${normalized.slice(0, Math.max(1, maxChars - 1)).trimEnd()}…`;
+}
+
+/** Shrink hits before injecting into the model prompt (UI still gets full `hits`). */
+export function compactHitsForModel(hits: WebSearchHit[]): WebSearchHit[] {
+  return hits.slice(0, WEB_SEARCH_CONTEXT_HIT_LIMIT).map((hit) => ({
+    title: hit.title,
+    url: hit.url,
+    snippet: truncateSnippet(hit.snippet, WEB_SEARCH_CONTEXT_SNIPPET_CHARS),
+  }));
+}
+
 export function withSearchContext(messages: ChatMessage[], hits: WebSearchHit[]): ChatMessage[] {
   const resultsBlock =
     `${WEB_SEARCH_SYSTEM_HINT}\n\n--- 联网搜索结果 ---\n${formatHits(hits)}\n--- 搜索结果结束 ---`;
@@ -167,98 +203,230 @@ function eventStreamResponse(stream: ReadableStream<Uint8Array>): Response {
   });
 }
 
+function gatewayUnavailableResponse(detail: string): Response {
+  return new Response(
+    JSON.stringify({
+      error: {
+        code: "50301",
+        message: `Gateway 不可用：${detail}。请确认网关进程正常，然后重试。`,
+      },
+    }),
+    {
+      status: 503,
+      headers: { "content-type": "application/json" },
+    },
+  );
+}
+
+function extractUpstreamErrorMessage(errText: string, status: number): string {
+  const trimmed = errText.trim();
+  if (!trimmed) return `上游返回 HTTP ${status || 502}`;
+  try {
+    const parsed = JSON.parse(trimmed) as {
+      error?: { message?: unknown };
+      message?: unknown;
+    };
+    if (typeof parsed.error?.message === "string" && parsed.error.message.trim()) {
+      return parsed.error.message.trim();
+    }
+    if (typeof parsed.message === "string" && parsed.message.trim()) {
+      return parsed.message.trim();
+    }
+  } catch {
+    // keep raw text
+  }
+  return trimmed.length > 480 ? `${trimmed.slice(0, 480)}…` : trimmed;
+}
+
 async function callGatewayStream(
   deps: GatewayFetchDeps,
   body: Record<string, unknown>,
 ): Promise<Response> {
   const fetchImpl = deps.fetchImpl ?? fetch;
-  return fetchImpl(deps.url, {
-    method: "POST",
-    headers: deps.headers,
-    body: JSON.stringify(body),
+  try {
+    return await fetchImpl(deps.url, {
+      method: "POST",
+      headers: deps.headers,
+      body: JSON.stringify(body),
+      signal: deps.signal,
+    });
+  } catch (error) {
+    if (deps.signal?.aborted) {
+      throw error;
+    }
+    const detail = error instanceof Error ? error.message : "fetch failed";
+    throw new Error(`connect ${deps.url}: ${detail}`);
+  }
+}
+
+type PipeOptions = {
+  sourcesFrame?: string;
+  prefixText?: string;
+};
+
+function frameHasErrorPayload(data: string): boolean {
+  if (!data || data === "[DONE]") return false;
+  try {
+    const parsed = JSON.parse(data) as { error?: unknown };
+    return Boolean(parsed && typeof parsed === "object" && parsed.error);
+  } catch {
+    return false;
+  }
+}
+
+function frameHasContentDelta(data: string): boolean {
+  if (!data || data === "[DONE]") return false;
+  try {
+    const parsed = JSON.parse(data) as {
+      choices?: Array<{ delta?: { content?: unknown; reasoning_content?: unknown } }>;
+    };
+    const delta = parsed.choices?.[0]?.delta;
+    if (!delta) return false;
+    if (typeof delta.content === "string" && delta.content.length > 0) return true;
+    if (typeof delta.reasoning_content === "string" && delta.reasoning_content.length > 0) {
+      return true;
+    }
+    return false;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Pipe an upstream SSE body to the browser. Never leave the client with a hard-closed
+ * stream after sources were already sent — always finish with an error frame + [DONE].
+ */
+export async function pipeUpstreamSse(upstream: Response, options: PipeOptions = {}): Promise<Response> {
+  const sourcesFrame = options.sourcesFrame ?? "";
+  const prefixText = options.prefixText ?? "";
+
+  if (!upstream.ok || !upstream.body) {
+    const errText = await upstream.text().catch(() => "gateway error");
+    const message = extractUpstreamErrorMessage(errText, upstream.status);
+    if (sourcesFrame) {
+      const stream = new ReadableStream<Uint8Array>({
+        start(controller) {
+          const encoder = new TextEncoder();
+          controller.enqueue(encoder.encode(sourcesFrame));
+          controller.enqueue(
+            encoder.encode(
+              formatSseErrorFrame(`模型回答失败：${message}`, String(upstream.status || 502)),
+            ),
+          );
+          controller.enqueue(encoder.encode("data: [DONE]\n\n"));
+          controller.close();
+        },
+      });
+      return eventStreamResponse(stream);
+    }
+    return new Response(errText, {
+      status: upstream.status || 502,
+      headers: { "content-type": "application/json" },
+    });
+  }
+
+  const stream = new ReadableStream<Uint8Array>({
+    async start(controller) {
+      const encoder = new TextEncoder();
+      let sawDone = false;
+      let sawError = false;
+      let sawContent = false;
+      try {
+        if (prefixText) {
+          const prefix = synthesizeTextSse(prefixText).replace("data: [DONE]\n\n", "");
+          controller.enqueue(encoder.encode(prefix));
+          sawContent = true;
+        }
+        if (sourcesFrame) {
+          controller.enqueue(encoder.encode(sourcesFrame));
+        }
+
+        const reader = upstream.body!.getReader();
+        const decoder = new TextDecoder();
+        let buffer = "";
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          buffer += decoder.decode(value, { stream: true });
+          let idx = buffer.indexOf("\n\n");
+          while (idx >= 0) {
+            const frame = buffer.slice(0, idx);
+            buffer = buffer.slice(idx + 2);
+            idx = buffer.indexOf("\n\n");
+            const dataLine = frame
+              .split("\n")
+              .map((line) => line.trim())
+              .find((line) => line.startsWith("data:"));
+            if (!dataLine) {
+              controller.enqueue(encoder.encode(`${frame}\n\n`));
+              continue;
+            }
+            const data = dataLine.replace(/^data:\s*/, "");
+            if (data === "[DONE]") {
+              sawDone = true;
+              controller.enqueue(encoder.encode("data: [DONE]\n\n"));
+              continue;
+            }
+            if (frameHasErrorPayload(data)) {
+              sawError = true;
+            }
+            if (frameHasContentDelta(data)) {
+              sawContent = true;
+            }
+            controller.enqueue(encoder.encode(`${frame}\n\n`));
+          }
+        }
+
+        if (!sawDone && !sawError && !sawContent && sourcesFrame) {
+          controller.enqueue(
+            encoder.encode(
+              formatSseErrorFrame(
+                "上游模型在联网检索后未返回内容，连接已中断。请重试，或先关闭联网搜索后再试。",
+              ),
+            ),
+          );
+          sawError = true;
+        }
+        if (!sawDone) {
+          controller.enqueue(encoder.encode("data: [DONE]\n\n"));
+        }
+        controller.close();
+      } catch (error) {
+        const detail = error instanceof Error ? error.message : "stream interrupted";
+        try {
+          if (!sawError) {
+            controller.enqueue(
+              encoder.encode(
+                formatSseErrorFrame(
+                  `聊天流式连接中断：${detail}。若刚完成联网搜索，多为网关或上游模型超时/断连，请重试。`,
+                ),
+              ),
+            );
+          }
+          if (!sawDone) {
+            controller.enqueue(encoder.encode("data: [DONE]\n\n"));
+          }
+          controller.close();
+        } catch {
+          try {
+            controller.error(error);
+          } catch {
+            // controller already closed
+          }
+        }
+      }
+    },
   });
+  return eventStreamResponse(stream);
 }
 
 async function pipeWithPrefix(upstream: Response, prefixText: string): Promise<Response> {
-  if (!upstream.ok || !upstream.body) {
-    const errText = await upstream.text().catch(() => "gateway error");
-    return new Response(errText, {
-      status: upstream.status || 502,
-      headers: { "content-type": "application/json" },
-    });
-  }
-  const prefix = synthesizeTextSse(prefixText).replace("data: [DONE]\n\n", "");
-  const stream = new ReadableStream<Uint8Array>({
-    async start(controller) {
-      const encoder = new TextEncoder();
-      controller.enqueue(encoder.encode(prefix));
-      const reader = upstream.body!.getReader();
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        if (value) controller.enqueue(value);
-      }
-      controller.close();
-    },
-  });
-  return eventStreamResponse(stream);
+  return pipeUpstreamSse(upstream, { prefixText });
 }
 
 async function pipeWithSourcesAppendix(upstream: Response, hits: WebSearchHit[]): Promise<Response> {
-  if (!upstream.ok || !upstream.body) {
-    const errText = await upstream.text().catch(() => "gateway error");
-    return new Response(errText, {
-      status: upstream.status || 502,
-      headers: { "content-type": "application/json" },
-    });
-  }
   const sourcesFrame = hits.length > 0 ? formatWebSearchSourcesSse(hits) : "";
-  const stream = new ReadableStream<Uint8Array>({
-    async start(controller) {
-      const encoder = new TextEncoder();
-      // Emit sources BEFORE answer tokens so the client can render the entry row /
-      // citation pills during streaming — and so trailers are not lost if a client
-      // historically stopped reading on finish_reason=stop.
-      if (sourcesFrame) {
-        controller.enqueue(encoder.encode(sourcesFrame));
-      }
-      const reader = upstream.body!.getReader();
-      const decoder = new TextDecoder();
-      let buffer = "";
-      let sawDone = false;
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        buffer += decoder.decode(value, { stream: true });
-        let idx = buffer.indexOf("\n\n");
-        while (idx >= 0) {
-          const frame = buffer.slice(0, idx);
-          buffer = buffer.slice(idx + 2);
-          idx = buffer.indexOf("\n\n");
-          const dataLine = frame
-            .split("\n")
-            .map((line) => line.trim())
-            .find((line) => line.startsWith("data:"));
-          if (!dataLine) {
-            controller.enqueue(encoder.encode(`${frame}\n\n`));
-            continue;
-          }
-          const data = dataLine.replace(/^data:\s*/, "");
-          if (data === "[DONE]") {
-            sawDone = true;
-            controller.enqueue(encoder.encode("data: [DONE]\n\n"));
-            continue;
-          }
-          controller.enqueue(encoder.encode(`${frame}\n\n`));
-        }
-      }
-      if (!sawDone) {
-        controller.enqueue(encoder.encode("data: [DONE]\n\n"));
-      }
-      controller.close();
-    },
-  });
-  return eventStreamResponse(stream);
+  return pipeUpstreamSse(upstream, { sourcesFrame });
 }
 
 export async function runWebSearchTurn(
@@ -272,46 +440,56 @@ export async function runWebSearchTurn(
 
   const tenant = deps.loadTenantConfig ? await deps.loadTenantConfig() : null;
   const cfg: WebSearchRuntimeConfig = resolveWebSearchConfig(tenant);
+  const { tools: _tools, tool_choice: _toolChoice, ...rest } = baseBody;
 
   if (!cfg.enabled) {
-    const upstream = await callGatewayStream(deps, {
-      ...baseBody,
-      stream: true,
-      messages: originalMessages,
-    });
-    return pipeWithPrefix(upstream, ADMIN_DISABLED_HINT);
+    try {
+      const upstream = await callGatewayStream(deps, {
+        ...rest,
+        stream: true,
+        messages: originalMessages,
+      });
+      return pipeWithPrefix(upstream, ADMIN_DISABLED_HINT);
+    } catch (error) {
+      return gatewayUnavailableResponse(error instanceof Error ? error.message : "gateway unreachable");
+    }
   }
 
   const searchFn = deps.executeSearch ?? executeWebSearch;
   const query = extractLastUserQuery(originalMessages);
+  let hits: WebSearchHit[] = [];
+  let searchFailed = false;
 
   try {
     if (!query) {
       throw new Error("missing user query for web search");
     }
-
-    const hits = await searchFn(query, undefined, cfg);
+    hits = await searchFn(query, undefined, cfg);
     if (hits.length === 0) {
       throw new Error("search returned no hits");
     }
+  } catch (error) {
+    searchFailed = true;
+    console.warn("[web-search] search failed, degrading:", error instanceof Error ? error.message : error);
+  }
 
-    // Strip tools from the final completion — MiniMax may otherwise dump XML tool calls.
-    const { tools: _tools, tool_choice: _toolChoice, ...rest } = baseBody;
-    const messages = withSearchContext(originalMessages, hits);
-    const finalUpstream = await callGatewayStream(deps, {
+  const messages = searchFailed
+    ? originalMessages
+    : withSearchContext(originalMessages, compactHitsForModel(hits));
+
+  let upstream: Response;
+  try {
+    upstream = await callGatewayStream(deps, {
       ...rest,
       stream: true,
       messages,
     });
-    return pipeWithSourcesAppendix(finalUpstream, hits);
   } catch (error) {
-    console.warn("[web-search] turn failed, degrading:", error instanceof Error ? error.message : error);
-    const { tools: _tools, tool_choice: _toolChoice, ...rest } = baseBody;
-    const upstream = await callGatewayStream(deps, {
-      ...rest,
-      stream: true,
-      messages: originalMessages,
-    });
+    return gatewayUnavailableResponse(error instanceof Error ? error.message : "gateway unreachable");
+  }
+
+  if (searchFailed) {
     return pipeWithPrefix(upstream, UNAVAILABLE_HINT);
   }
+  return pipeWithSourcesAppendix(upstream, hits);
 }

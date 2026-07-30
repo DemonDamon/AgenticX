@@ -101,6 +101,8 @@
     "complianceTitle": "Compliance block",
     "chatErrorTitle": "Chat request failed",
     "historySyncTitle": "History sync",
+    "historySyncPending": "This conversation has not synced to the server yet. Retrying automatically.",
+    "historySyncRetry": "Retry now",
     "suggestion1Title": "Product design brainstorm",
     "suggestion1Description": "Give me 5 ideas to improve employee onboarding",
     "suggestion1Prompt": "Brainstorm 5 ideas to improve employee onboarding and suggest a practical first step for each",

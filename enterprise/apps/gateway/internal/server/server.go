@@ -1190,7 +1190,7 @@ func (s *Server) handleStream(
 		if code := streamErrorCode(streamErr); code != "" {
 			writeStreamPolicyError(w, flusher, code, formatStreamError(streamErr), nil)
 		} else {
-			writeStreamError(w, flusher, streamErr.Error())
+			writeStreamError(w, flusher, formatStreamError(streamErr))
 		}
 		return
 	}
