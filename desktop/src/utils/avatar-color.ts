@@ -206,3 +206,60 @@ export function avatarTintBorder(
   };
   return AVATAR_BORDER[key];
 }
+
+/** sRGB triples matching AVATAR_COLOR_SWATCH — for soft chips with theme-aware alpha. */
+const AVATAR_RGB: Record<AvatarPaletteKey, readonly [number, number, number]> = {
+  cyan:    [8, 145, 178],
+  violet:  [124, 58, 237],
+  rose:    [225, 29, 72],
+  amber:   [217, 119, 6],
+  emerald: [5, 150, 105],
+  fuchsia: [192, 38, 211],
+  sky:     [2, 132, 199],
+  orange:  [234, 88, 12],
+};
+
+export type ExpertLabelChipStyle = {
+  backgroundColor: string;
+  borderColor: string;
+  /** Applied only to the expert name text — chevron / 展开 stay neutral. */
+  color: string;
+};
+
+function rgba(rgb: readonly [number, number, number], alpha: number): string {
+  return `rgba(${rgb[0]},${rgb[1]},${rgb[2]},${alpha})`;
+}
+
+/**
+ * Soft name chip for group-chat expert labels.
+ * - Prefer configured avatar color; else hash id into AVATAR_PALETTE.
+ * - Meta / missing id → theme accent via CSS vars (works in light/dim/dark).
+ */
+export function expertLabelChipStyle(
+  id: string | null | undefined,
+  color?: string | null,
+  theme: "light" | "dim" | "dark" = "dark",
+): ExpertLabelChipStyle {
+  const light = theme === "light";
+  const aid = String(id ?? "").trim();
+  if (!aid || aid === "meta") {
+    return {
+      backgroundColor: light
+        ? "rgba(var(--theme-color-rgb, 59, 130, 246), 0.10)"
+        : "rgba(var(--theme-color-rgb, 59, 130, 246), 0.16)",
+      borderColor: light
+        ? "rgba(var(--theme-color-rgb, 59, 130, 246), 0.22)"
+        : "rgba(var(--theme-color-rgb, 59, 130, 246), 0.34)",
+      color: "rgb(var(--theme-color-rgb, 59, 130, 246))",
+    };
+  }
+  const key =
+    normalizeAvatarColor(color) ||
+    AVATAR_PALETTE[hashToIndex(aid, AVATAR_PALETTE.length)];
+  const rgb = AVATAR_RGB[key];
+  return {
+    backgroundColor: rgba(rgb, light ? 0.10 : 0.16),
+    borderColor: rgba(rgb, light ? 0.22 : 0.34),
+    color: light ? AVATAR_COLOR_SWATCH[key] : AVATAR_DOT[key],
+  };
+}

@@ -89,7 +89,7 @@ import { resolveSubAgentOutputPaths } from "../utils/subagent-output-files";
 import { TurnToolGroupCard } from "./messages/TurnToolGroupCard";
 import { ReactWorkCollapse } from "./messages/ReactWorkCollapse";
 import { WorkingIndicator } from "./messages/WorkingIndicator";
-import { ChatImAvatar, ImBubble } from "./messages/ImBubble";
+import { ImBubble } from "./messages/ImBubble";
 import { MessageTimestamp } from "./messages/MessageTimestamp";
 import {
   ASSISTANT_ACTION_ICON_ROW_CLASS,
