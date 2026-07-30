@@ -117,6 +117,14 @@ export function emptyPaneGraphState(): PaneGraphState {
  */
 export const EMPTY_PANE_GRAPH_STATE: PaneGraphState = emptyPaneGraphState();
 
+/** True when the run contains Workforce task nodes (not presence-only agent/human). */
+export function graphHasTaskNodes(
+  nodes: Record<string, GraphNodeSnapshot> | GraphNodeSnapshot[] | null | undefined,
+): boolean {
+  const list = Array.isArray(nodes) ? nodes : Object.values(nodes || {});
+  return list.some((n) => String(n?.kind || "").toLowerCase() === "task");
+}
+
 /** Heuristic: retract vs inject from dock free text. */
 export function classifyDirectiveText(text: string): "node_retract" | "node_inject" {
   const t = text.trim();
