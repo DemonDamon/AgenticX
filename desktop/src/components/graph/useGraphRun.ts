@@ -2,6 +2,7 @@ import { create } from "zustand";
 import {
   applyGraphEvent,
   applyGraphSnapshot,
+  EMPTY_PANE_GRAPH_STATE,
   emptyPaneGraphState,
   type GraphProjection,
   type GraphRunSnapshot,
@@ -23,7 +24,8 @@ type GraphRunStore = {
   getPane: (paneId: string) => PaneGraphState;
 };
 
-function ensure(state: GraphRunStore["byPane"], paneId: string): PaneGraphState {
+/** Read/write path: return existing or a fresh mutable copy (never the shared EMPTY). */
+function ensureMutable(state: GraphRunStore["byPane"], paneId: string): PaneGraphState {
   return state[paneId] ?? emptyPaneGraphState();
 }
 
@@ -33,30 +35,41 @@ export const useGraphRunStore = create<GraphRunStore>((set, get) => ({
     set((s) => ({
       byPane: {
         ...s.byPane,
-        [paneId]: applyGraphEvent(ensure(s.byPane, paneId), payload),
+        [paneId]: applyGraphEvent(ensureMutable(s.byPane, paneId), payload),
       },
     })),
   applySnapshot: (paneId, run, projection) =>
     set((s) => ({
       byPane: {
         ...s.byPane,
-        [paneId]: applyGraphSnapshot(ensure(s.byPane, paneId), run, projection),
+        [paneId]: applyGraphSnapshot(ensureMutable(s.byPane, paneId), run, projection),
       },
     })),
   setSelected: (paneId, nodeIds) =>
-    set((s) => ({
-      byPane: {
-        ...s.byPane,
-        [paneId]: { ...ensure(s.byPane, paneId), selectedNodeIds: [...nodeIds] },
-      },
-    })),
+    set((s) => {
+      const cur = s.byPane[paneId];
+      const nextIds = [...nodeIds];
+      const prev = cur?.selectedNodeIds ?? EMPTY_PANE_GRAPH_STATE.selectedNodeIds;
+      if (
+        prev.length === nextIds.length &&
+        prev.every((id, i) => id === nextIds[i])
+      ) {
+        return s;
+      }
+      return {
+        byPane: {
+          ...s.byPane,
+          [paneId]: { ...(cur ?? emptyPaneGraphState()), selectedNodeIds: nextIds },
+        },
+      };
+    }),
   resetPane: (paneId) =>
     set((s) => {
       const next = { ...s.byPane };
       delete next[paneId];
       return { byPane: next };
     }),
-  getPane: (paneId) => ensure(get().byPane, paneId),
+  getPane: (paneId) => get().byPane[paneId] ?? EMPTY_PANE_GRAPH_STATE,
 }));
 
 export async function fetchGraphRun(

@@ -109,6 +109,14 @@ export function emptyPaneGraphState(): PaneGraphState {
   };
 }
 
+/**
+ * Stable empty snapshot for zustand selectors.
+ * Never allocate a new object inside `useStore(s => ... ?? …)` — that breaks
+ * useSyncExternalStore and causes "Maximum update depth exceeded".
+ * Do not mutate this object; copy before writing.
+ */
+export const EMPTY_PANE_GRAPH_STATE: PaneGraphState = emptyPaneGraphState();
+
 /** Heuristic: retract vs inject from dock free text. */
 export function classifyDirectiveText(text: string): "node_retract" | "node_inject" {
   const t = text.trim();
