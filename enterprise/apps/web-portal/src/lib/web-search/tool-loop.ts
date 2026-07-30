@@ -6,6 +6,7 @@
  * - User toggle already means "must search"; waiting on model tool_calls is brittle
  */
 
+import { stripEmptyAssistantMessages } from "../chat-completion-sanitize";
 import { executeWebSearch, formatHits, type WebSearchHit, type WebSearchRuntimeConfig } from "./providers";
 import { resolveWebSearchConfig, type TenantWebSearchRow } from "./config";
 
@@ -265,9 +266,9 @@ export async function runWebSearchTurn(
   deps: GatewayFetchDeps,
 ): Promise<Response> {
   const baseBody = stripWebSearchFlag(parsedBody);
-  const originalMessages = Array.isArray(baseBody.messages)
-    ? (baseBody.messages as ChatMessage[])
-    : [];
+  const originalMessages = stripEmptyAssistantMessages(
+    Array.isArray(baseBody.messages) ? (baseBody.messages as ChatMessage[]) : [],
+  );
 
   const tenant = deps.loadTenantConfig ? await deps.loadTenantConfig() : null;
   const cfg: WebSearchRuntimeConfig = resolveWebSearchConfig(tenant);

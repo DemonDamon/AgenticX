@@ -75,7 +75,11 @@ describe("web search tool loop", () => {
     const res = await runWebSearchTurn(
       {
         model: "m",
-        messages: [{ role: "user", content: "搜一下关于opus 5.0的信息" }],
+        // Include optimistic empty assistant — must not be forwarded to Moonshot-class upstreams.
+        messages: [
+          { role: "user", content: "搜一下关于opus 5.0的信息" },
+          { role: "assistant", content: "" },
+        ],
         agenticx_web_search: true,
         tools: [{ type: "function", function: { name: "web_search" } }],
         tool_choice: "auto",
@@ -103,6 +107,9 @@ describe("web search tool loop", () => {
     expect(finalBody.tool_choice).toBeUndefined();
     expect(finalBody.stream).toBe(true);
     expect(finalBody.messages?.[0]?.content).toContain("联网搜索结果");
+    expect(finalBody.messages?.some((m) => m.role === "assistant" && !String(m.content ?? "").trim())).toBe(
+      false,
+    );
 
     const text = await readText(res);
     expect(text).toContain("基于检索的回答");

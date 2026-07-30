@@ -223,6 +223,17 @@ function buildUserContentWithDocuments(
   return trimmed ? `${trimmed}\n\n${blocks}` : blocks;
 }
 
+/**
+ * Optimistic UI appends an empty assistant placeholder for streaming.
+ * Upstream providers such as Moonshot/Kimi reject empty assistant content.
+ */
+export function filterMessagesForCompletion(messages: ChatMessage[]): ChatMessage[] {
+  return messages.filter((message) => {
+    if (message.role !== "assistant") return true;
+    return Boolean(message.content?.trim());
+  });
+}
+
 function toSdkRequest(
   sessionId: string,
   model: string,
@@ -234,7 +245,7 @@ function toSdkRequest(
     sessionId,
     model,
     stream: true,
-    messages: messages.map((message) => {
+    messages: filterMessagesForCompletion(messages).map((message) => {
       const content =
         message.role === "user"
           ? buildUserContentWithDocuments(message.content, message.attachments)

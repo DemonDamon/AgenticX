@@ -104,6 +104,7 @@ def test_fill_reasoning_content_for_tool_calls_inserts_placeholder():
     patched = provider._fill_reasoning_content_for_tool_call_messages(history)
     assistant = patched[1]
     assert assistant.get("reasoning_content") == " "
+    assert assistant.get("content") == " "
 
 
 def test_fill_reasoning_content_extracts_from_redacted_thinking_tags():
@@ -120,16 +121,56 @@ def test_fill_reasoning_content_extracts_from_redacted_thinking_tags():
     assert patched[0].get("content") == "Calling tool now."
 
 
-def test_prepare_request_skips_patch_when_thinking_disabled():
+def test_fill_reasoning_content_think_only_keeps_non_empty_content():
+    provider = KimiProvider(model="kimi-k2.6", api_key="k")
+    history = [
+        {
+            "role": "assistant",
+            "content": "<think>only thinking</think>",
+            "tool_calls": [
+                {"id": "c1", "type": "function", "function": {"name": "x", "arguments": "{}"}}
+            ],
+        },
+    ]
+    patched = provider._fill_reasoning_content_for_tool_call_messages(history)
+    assert patched[0].get("reasoning_content") == "only thinking"
+    assert patched[0].get("content") == " "
+
+
+def test_prepare_request_placeholders_null_content_when_thinking_disabled():
+    """Moonshot 400: assistant content must not be empty — even with tool_calls."""
     provider = KimiProvider(model="kimi-k2.6", api_key="k")
     history = [
         {
             "role": "assistant",
             "content": None,
-            "tool_calls": [{"id": "c1", "type": "function", "function": {"name": "x", "arguments": "{}"}}],
+            "tool_calls": [
+                {"id": "c1", "type": "function", "function": {"name": "x", "arguments": "{}"}}
+            ],
         },
+        {"role": "assistant", "content": None},
     ]
     kwargs = {"thinking": {"type": "disabled"}}
     out = provider._prepare_request_messages(history, kwargs)
-    assert out is history
+    assert len(out) == 1
+    assert out[0].get("content") == " "
+    assert out[0].get("tool_calls")
     assert "reasoning_content" not in out[0]
+
+
+def test_prepare_request_placeholders_null_content_when_thinking_enabled():
+    provider = KimiProvider(model="kimi-k2.6", api_key="k")
+    history = [
+        {
+            "role": "assistant",
+            "content": None,
+            "tool_calls": [
+                {"id": "c1", "type": "function", "function": {"name": "web_search", "arguments": "{}"}}
+            ],
+        },
+        {"role": "tool", "tool_call_id": "c1", "content": "10 results"},
+    ]
+    out = provider._prepare_request_messages(history, {})
+    assert out[0].get("content") == " "
+    assert out[0].get("reasoning_content") == " "
+    assert out[0].get("tool_calls")
