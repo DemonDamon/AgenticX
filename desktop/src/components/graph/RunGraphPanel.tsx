@@ -24,9 +24,11 @@ type Props = {
   pane: ChatPane;
   onClose: () => void;
   tintColor?: string | null;
+  /** WorkPanel tab: hide duplicate title/close; tab bar owns chrome. */
+  embedded?: boolean;
 };
 
-export function RunGraphPanel({ pane, onClose, tintColor }: Props) {
+export function RunGraphPanel({ pane, onClose, tintColor, embedded = false }: Props) {
   const apiBase = useAppStore((s) => s.apiBase);
   const apiToken = useAppStore((s) => s.apiToken);
   // Must use a stable empty object — `?? emptyPaneGraphState()` allocates every
@@ -119,11 +121,15 @@ export function RunGraphPanel({ pane, onClose, tintColor }: Props) {
       style={tintColor ? { backgroundColor: tintColor } : undefined}
     >
       <div className="flex shrink-0 items-center gap-2 border-b border-border px-2.5 py-2">
-        <Share2 className="h-4 w-4 text-text-subtle" strokeWidth={1.8} />
-        <span className="text-[13px] font-medium text-text-strong">运行图</span>
+        {!embedded ? (
+          <>
+            <Share2 className="h-4 w-4 text-text-subtle" strokeWidth={1.8} />
+            <span className="text-[13px] font-medium text-text-strong">运行图</span>
+          </>
+        ) : null}
         <button
           type="button"
-          className={`ml-1 rounded px-1.5 py-0.5 text-[10px] ${
+          className={`rounded px-1.5 py-0.5 text-[10px] ${embedded ? "" : "ml-1 "} ${
             preferAgentView ? "bg-surface-card-strong text-text-strong" : "text-text-faint"
           }`}
           onClick={() => setPreferAgentView(true)}
@@ -147,15 +153,19 @@ export function RunGraphPanel({ pane, onClose, tintColor }: Props) {
         >
           <RefreshCw className="h-3.5 w-3.5" />
         </button>
-        <button
-          type="button"
-          className="ml-auto rounded p-1 text-text-faint hover:bg-surface-hover hover:text-text-strong"
-          onClick={onClose}
-          title="关闭运行图"
-          aria-label="关闭运行图"
-        >
-          <X className="h-4 w-4" />
-        </button>
+        {!embedded ? (
+          <button
+            type="button"
+            className="ml-auto rounded p-1 text-text-faint hover:bg-surface-hover hover:text-text-strong"
+            onClick={onClose}
+            title="关闭运行图"
+            aria-label="关闭运行图"
+          >
+            <X className="h-4 w-4" />
+          </button>
+        ) : (
+          <div className="ml-auto" />
+        )}
       </div>
 
       {banner ? (
