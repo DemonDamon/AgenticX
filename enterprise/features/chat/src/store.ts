@@ -8,10 +8,11 @@ import {
   type ChatMessageAttachment,
   type ChatSession,
 } from "@agenticx/core-api";
-import type {
-  ChatClient,
-  ChatRequest as SdkChatRequest,
-  DeepResearchEvent,
+import {
+  normalizeTransportErrorMessage,
+  type ChatClient,
+  type ChatRequest as SdkChatRequest,
+  type DeepResearchEvent,
 } from "@agenticx/sdk-ts";
 import { ChatHistoryHttpError, createPortalChatHistoryClient } from "./history-client";
 import type { QueuedMessage } from "./types/queued-message";
@@ -468,7 +469,9 @@ function resolveHistoryErrorMessage(error: unknown, fallback: string): string {
     return "登录已过期，请重新登录";
   }
 
-  return error instanceof Error ? error.message : fallback;
+  const raw = error instanceof Error ? error.message : fallback;
+  // Reuse chat transport copy so "Failed to fetch" never surfaces raw in 历史同步.
+  return normalizeTransportErrorMessage(raw);
 }
 
 function stripVersionsForSession(
@@ -769,7 +772,7 @@ export const useChatStore = create<ChatStore>((set, get) => ({
       if (loadSeq !== sessionMessageLoadSeq || get().activeSessionId !== sessionId) return;
       set({
         sessionMessagesLoading: false,
-        historyError: error instanceof Error ? error.message : "加载消息失败",
+        historyError: resolveHistoryErrorMessage(error, "加载消息失败"),
       });
     }
   },
@@ -789,7 +792,7 @@ export const useChatStore = create<ChatStore>((set, get) => ({
         sessions: state.sessions.map((s) => (s.id === sessionId ? updated : s)),
       }));
     } catch (error) {
-      set({ historyError: error instanceof Error ? error.message : "重命名失败" });
+      set({ historyError: resolveHistoryErrorMessage(error, "重命名失败") });
     }
   },
 
@@ -814,7 +817,7 @@ export const useChatStore = create<ChatStore>((set, get) => ({
         ),
       }));
     } catch (error) {
-      set({ historyError: error instanceof Error ? error.message : "置顶失败" });
+      set({ historyError: resolveHistoryErrorMessage(error, "置顶失败") });
       void get().hydrateSessions();
     }
   },
@@ -840,7 +843,7 @@ export const useChatStore = create<ChatStore>((set, get) => ({
           await portalHistory.deleteSessions(ids);
         }
       } catch (error) {
-        set({ historyError: error instanceof Error ? error.message : "删除失败" });
+        set({ historyError: resolveHistoryErrorMessage(error, "删除失败") });
         return;
       }
     }
@@ -913,7 +916,7 @@ export const useChatStore = create<ChatStore>((set, get) => ({
     }));
     if (get().hydrated && sessionId) {
       void portalHistory.patchSession(sessionId, { activeModel: model }).catch((error) => {
-        set({ historyError: error instanceof Error ? error.message : "更新模型失败" });
+        set({ historyError: resolveHistoryErrorMessage(error, "更新模型失败") });
       });
     }
   },
@@ -1173,10 +1176,15 @@ export const useChatStore = create<ChatStore>((set, get) => ({
         const a = after.messages.find((m) => m.id === assistantMessage.id);
         if (u && a && u.role === "user" && a.role === "assistant") {
           try {
+            // Yield one tick after SSE teardown so the portal can accept the follow-up POST.
+            await new Promise<void>((resolve) => setTimeout(resolve, 0));
             await portalHistory.appendMessages(sessionId, [u, a]);
+            if (get().historyError) {
+              set({ historyError: null });
+            }
           } catch (persistErr) {
             set({
-              historyError: persistErr instanceof Error ? persistErr.message : "保存消息失败",
+              historyError: resolveHistoryErrorMessage(persistErr, "保存消息失败"),
             });
           }
         }
@@ -1413,10 +1421,12 @@ export const useChatStore = create<ChatStore>((set, get) => ({
       if (afterEdit.status !== "error" && afterEdit.hydrated) {
         const snapshot = getSessionMessages(afterEdit.messages, sessionId);
         try {
+          await new Promise<void>((resolve) => setTimeout(resolve, 0));
           await portalHistory.replaceMessages(sessionId, snapshot);
+          if (get().historyError) set({ historyError: null });
         } catch (persistErr) {
           set({
-            historyError: persistErr instanceof Error ? persistErr.message : "保存消息失败",
+            historyError: resolveHistoryErrorMessage(persistErr, "保存消息失败"),
           });
         }
       }
@@ -1617,10 +1627,12 @@ export const useChatStore = create<ChatStore>((set, get) => ({
       if (afterRegen.status !== "error" && afterRegen.hydrated) {
         const snapshot = getSessionMessages(afterRegen.messages, sessionId);
         try {
+          await new Promise<void>((resolve) => setTimeout(resolve, 0));
           await portalHistory.replaceMessages(sessionId, snapshot);
+          if (get().historyError) set({ historyError: null });
         } catch (persistErr) {
           set({
-            historyError: persistErr instanceof Error ? persistErr.message : "保存消息失败",
+            historyError: resolveHistoryErrorMessage(persistErr, "保存消息失败"),
           });
         }
       }

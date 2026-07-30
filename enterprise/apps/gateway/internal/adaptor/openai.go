@@ -25,8 +25,10 @@ type StreamConfig struct {
 }
 
 func StreamConfigFromEnv() StreamConfig {
+	// Default 180s: grounded answers after web-search inject a large system block;
+	// slow third-party gateways often need >60s before the first token.
 	cfg := StreamConfig{
-		IdleTimeout:       60 * time.Second,
+		IdleTimeout:       180 * time.Second,
 		ScannerMaxBufferB: 16 * 1024 * 1024,
 	}
 	if v := strings.TrimSpace(os.Getenv("GATEWAY_STREAM_IDLE_TIMEOUT")); v != "" {

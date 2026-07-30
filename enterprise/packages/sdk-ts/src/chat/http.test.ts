@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { HttpChatClient } from "./http";
+import { HttpChatClient, normalizeTransportErrorMessage } from "./http";
 
 describe("HttpChatClient stream cancel", () => {
   it("yields cancelled chunk without error when fetch is aborted", async () => {
@@ -155,5 +155,36 @@ describe("HttpChatClient stream cancel", () => {
       "https://ex.com",
     );
     expect(chunks.at(-1)?.done).toBe(true);
+  });
+
+  it("normalizes opaque browser network errors to actionable Chinese copy", () => {
+    expect(normalizeTransportErrorMessage("Failed to fetch")).toContain("无法连接门户服务");
+    expect(normalizeTransportErrorMessage("network error")).toContain("无法连接门户服务");
+    expect(normalizeTransportErrorMessage("Failed to fetch")).toContain("历史同步");
+    expect(normalizeTransportErrorMessage("upstream stream error: boom")).toBe(
+      "upstream stream error: boom",
+    );
+  });
+
+  it("surfaces fetch TypeError as normalized error chunk", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(() => Promise.reject(new TypeError("Failed to fetch"))),
+    );
+
+    const client = new HttpChatClient({ endpoint: "/api/chat/completions" });
+    const { requestId } = await client.sendMessage({
+      sessionId: "session-1",
+      model: "test-model",
+      messages: [{ id: "u1", role: "user", content: "hello", createdAt: "2026-01-01T00:00:00.000Z" }],
+    });
+
+    const chunks = [];
+    for await (const chunk of client.stream(requestId)) {
+      chunks.push(chunk);
+    }
+    const last = chunks.at(-1);
+    expect(last?.done).toBe(true);
+    expect(last?.error?.message).toContain("无法连接门户服务");
   });
 });

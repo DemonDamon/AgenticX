@@ -80,7 +80,8 @@ function parseMetadata(value: unknown): MessageMetadata | null {
   return value as MessageMetadata;
 }
 
-function serializeMessageMetadata(message: ChatMessage): string | null {
+/** Exported for unit tests — keep MySQL JSON binding semantics stable. */
+export function serializeMessageMetadata(message: ChatMessage): string | null {
   const metadata: MessageMetadata = {};
   if (message.attachments?.length) {
     metadata.attachments = message.attachments;
@@ -94,6 +95,9 @@ function serializeMessageMetadata(message: ChatMessage): string | null {
       : [];
     metadata.deep_research = { ...message.deep_research, events };
   }
+  // IMPORTANT: mysql2 + MySQL JSON columns reject JS objects here with
+  // ER_INVALID_JSON_TEXT ("Invalid value." at position 1). Always pass a
+  // JSON string (or null). PostgreSQL jsonb accepts the string equally well.
   return Object.keys(metadata).length > 0 ? JSON.stringify(metadata) : null;
 }
 

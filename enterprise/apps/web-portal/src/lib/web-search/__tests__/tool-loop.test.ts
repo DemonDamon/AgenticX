@@ -1,8 +1,11 @@
 import { describe, expect, it, vi } from "vitest";
 import {
+  compactHitsForModel,
   extractLastUserQuery,
+  pipeUpstreamSse,
   runWebSearchTurn,
   synthesizeTextSse,
+  WEB_SEARCH_CONTEXT_SNIPPET_CHARS,
   withSearchContext,
 } from "../tool-loop";
 import type { WebSearchHit } from "../providers";
@@ -177,5 +180,75 @@ describe("web search tool loop", () => {
     const text = await readText(res);
     expect(text).toContain("联网搜索暂不可用");
     expect(text).toContain("fallback");
+  });
+
+  it("returns JSON 503 when gateway fetch throws after successful search (not search-degrade)", async () => {
+    const fetchImpl = vi.fn(async () => {
+      throw new Error("ECONNREFUSED");
+    });
+
+    const res = await runWebSearchTurn(
+      {
+        model: "m",
+        messages: [{ role: "user", content: "给个个人介绍模板" }],
+      },
+      {
+        url: "http://gateway.test/v1/chat/completions",
+        headers: { authorization: "Bearer t" },
+        fetchImpl: fetchImpl as unknown as typeof fetch,
+        loadTenantConfig: async () => ({ enabled: true, provider: "duckduckgo", apiKey: "", maxResults: 5 }),
+        executeSearch: async () => [{ title: "T", url: "https://ex.com", snippet: "s" }],
+      },
+    );
+
+    expect(res.status).toBe(503);
+    const payload = (await res.json()) as { error?: { code?: string; message?: string } };
+    expect(payload.error?.code).toBe("50301");
+    expect(payload.error?.message).toContain("Gateway 不可用");
+    expect(payload.error?.message).toContain("ECONNREFUSED");
+  });
+
+  it("emits SSE error after sources when upstream body read fails (no hard-close)", async () => {
+    const upstream = new Response(
+      new ReadableStream<Uint8Array>({
+        start(controller) {
+          controller.error(new Error("socket hang up"));
+        },
+      }),
+      { status: 200, headers: { "content-type": "text/event-stream" } },
+    );
+    const hits: WebSearchHit[] = [{ title: "T", url: "https://ex.com", snippet: "s" }];
+    const res = await pipeUpstreamSse(upstream, {
+      sourcesFrame: `data: ${JSON.stringify({ agenticx_web_search_sources: hits })}\n\n`,
+    });
+    expect(res.status).toBe(200);
+    const text = await readText(res);
+    expect(text).toContain("agenticx_web_search_sources");
+    expect(text).toContain("聊天流式连接中断");
+    expect(text).toContain("socket hang up");
+    expect(text.trimEnd().endsWith("data: [DONE]")).toBe(true);
+  });
+
+  it("emits SSE error after sources when upstream HTTP fails", async () => {
+    const upstream = new Response(JSON.stringify({ error: { message: "network error" } }), {
+      status: 502,
+      headers: { "content-type": "application/json" },
+    });
+    const hits: WebSearchHit[] = [{ title: "T", url: "https://ex.com", snippet: "s" }];
+    const res = await pipeUpstreamSse(upstream, {
+      sourcesFrame: `data: ${JSON.stringify({ agenticx_web_search_sources: hits })}\n\n`,
+    });
+    expect(res.status).toBe(200);
+    const text = await readText(res);
+    expect(text).toContain("agenticx_web_search_sources");
+    expect(text).toContain("模型回答失败");
+    expect(text).toContain("network error");
+    expect(text.trimEnd().endsWith("data: [DONE]")).toBe(true);
+  });
+
+  it("compacts long snippets before model injection", () => {
+    const long = "字".repeat(WEB_SEARCH_CONTEXT_SNIPPET_CHARS + 80);
+    const compacted = compactHitsForModel([{ title: "T", url: "https://ex.com", snippet: long }]);
+    expect(compacted[0]?.snippet.length).toBeLessThanOrEqual(WEB_SEARCH_CONTEXT_SNIPPET_CHARS);
   });
 });

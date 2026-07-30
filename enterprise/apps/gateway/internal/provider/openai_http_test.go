@@ -71,7 +71,7 @@ func TestOpenAIHTTP_Complete_SendsBearerAndDecodesResponse(t *testing.T) {
 	resp, err := provider.Complete(context.Background(),
 		openai.ChatCompletionRequest{
 			Model:    "deepseek-chat",
-			Messages: []openai.ChatMessage{{Role: "user", Content: "hi"}},
+			Messages: []openai.ChatMessage{{Role: "user", Content: json.RawMessage(`"hi"`)}},
 		},
 		routing.Decision{Provider: "deepseek", Endpoint: server.URL + "/v1", Model: "deepseek-chat"},
 	)
@@ -84,7 +84,7 @@ func TestOpenAIHTTP_Complete_SendsBearerAndDecodesResponse(t *testing.T) {
 	if receivedBody.Stream {
 		t.Errorf("Complete should send stream=false to upstream")
 	}
-	if len(resp.Choices) != 1 || resp.Choices[0].Message.Content != "你好，世界" {
+	if len(resp.Choices) != 1 || string(resp.Choices[0].Message.Content) != `"你好，世界"` {
 		t.Errorf("unexpected upstream response: %+v", resp)
 	}
 }
@@ -97,14 +97,14 @@ func TestOpenAIHTTP_Complete_FallsBackWhenKeyMissing(t *testing.T) {
 	resp, err := provider.Complete(context.Background(),
 		openai.ChatCompletionRequest{
 			Model:    "deepseek-chat",
-			Messages: []openai.ChatMessage{{Role: "user", Content: "hi"}},
+			Messages: []openai.ChatMessage{{Role: "user", Content: json.RawMessage(`"hi"`)}},
 		},
 		routing.Decision{Provider: "deepseek", Endpoint: "https://example.com/v1", Model: "deepseek-chat"},
 	)
 	if err != nil {
 		t.Fatalf("expected fallback success, got error: %v", err)
 	}
-	if len(resp.Choices) != 1 || !strings.Contains(resp.Choices[0].Message.Content, "mock") {
+	if len(resp.Choices) != 1 || !strings.Contains(string(resp.Choices[0].Message.Content), "mock") {
 		t.Errorf("expected mock fallback content, got %+v", resp)
 	}
 }
@@ -133,7 +133,7 @@ func TestOpenAIHTTP_Stream_ParsesSSEChunksAndStopsOnDone(t *testing.T) {
 	err := provider.Stream(context.Background(),
 		openai.ChatCompletionRequest{
 			Model:    "m",
-			Messages: []openai.ChatMessage{{Role: "user", Content: "hi"}},
+			Messages: []openai.ChatMessage{{Role: "user", Content: json.RawMessage(`"hi"`)}},
 			Stream:   true,
 		},
 		routing.Decision{Provider: "moonshot", Endpoint: server.URL + "/v1", Model: "m"},
@@ -168,7 +168,7 @@ func TestOpenAIHTTP_Stream_PropagatesUpstreamSSEError(t *testing.T) {
 	err := provider.Stream(context.Background(),
 		openai.ChatCompletionRequest{
 			Model:    "m",
-			Messages: []openai.ChatMessage{{Role: "user", Content: "hi"}},
+			Messages: []openai.ChatMessage{{Role: "user", Content: json.RawMessage(`"hi"`)}},
 			Stream:   true,
 		},
 		routing.Decision{Provider: "moonshot", Endpoint: server.URL + "/v1", Model: "m"},
@@ -196,11 +196,57 @@ func TestOpenAIHTTP_Complete_PropagatesUpstreamError(t *testing.T) {
 	_, err := provider.Complete(context.Background(),
 		openai.ChatCompletionRequest{
 			Model:    "deepseek-chat",
-			Messages: []openai.ChatMessage{{Role: "user", Content: "hi"}},
+			Messages: []openai.ChatMessage{{Role: "user", Content: json.RawMessage(`"hi"`)}},
 		},
 		routing.Decision{Provider: "deepseek", Endpoint: server.URL + "/v1", Model: "deepseek-chat"},
 	)
 	if err == nil || !strings.Contains(err.Error(), "401") {
 		t.Fatalf("expected upstream 401 error, got %v", err)
+	}
+}
+
+func TestOpenAIHTTP_Stream_RetriesTransientErrorBeforeFirstChunk(t *testing.T) {
+	var attempts int
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		attempts++
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.WriteHeader(http.StatusOK)
+		if attempts == 1 {
+			_, _ = io.WriteString(w, "event: error\n")
+			_, _ = io.WriteString(w, `data: {"error":{"message":"network error"}}`+"\n\n")
+			return
+		}
+		_, _ = io.WriteString(w, `data: {"id":"c2","object":"chat.completion.chunk","model":"m","choices":[{"index":0,"delta":{"content":"ok"}}]}`+"\n\n")
+		_, _ = io.WriteString(w, "data: [DONE]\n\n")
+	}))
+	defer server.Close()
+
+	provider := NewOpenAICompatibleProvider(
+		WithKeyResolver(func(string) string { return "test-key" }),
+	)
+	var collected strings.Builder
+	err := provider.Stream(
+		context.Background(),
+		openai.ChatCompletionRequest{
+			Model:    "m",
+			Messages: []openai.ChatMessage{{Role: "user", Content: json.RawMessage(`"hi"`)}},
+			Stream:   true,
+		},
+		routing.Decision{Provider: "caixun", Endpoint: server.URL + "/v1", Model: "m"},
+		func(chunk openai.StreamChunk) error {
+			if len(chunk.Choices) > 0 {
+				collected.WriteString(chunk.Choices[0].Delta.Content)
+			}
+			return nil
+		},
+	)
+	if err != nil {
+		t.Fatalf("expected retry success, got %v", err)
+	}
+	if attempts != 2 {
+		t.Fatalf("expected 2 attempts, got %d", attempts)
+	}
+	if collected.String() != "ok" {
+		t.Fatalf("expected retried content, got %q", collected.String())
 	}
 }

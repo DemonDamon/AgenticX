@@ -24,6 +24,10 @@ function withSanitizedMessages(body: Record<string, unknown>): Record<string, un
 const GATEWAY_COMPLETIONS_URL =
   process.env.GATEWAY_COMPLETIONS_URL ?? "http://127.0.0.1:8088/v1/chat/completions";
 
+/** Web-search + slow upstream first-token can exceed the platform default (often 60s). */
+export const maxDuration = 300;
+export const runtime = "nodejs";
+
 export async function POST(request: Request) {
   const session = await getSessionFromCookies();
   if (session?.mustChangePassword) {
@@ -161,11 +165,25 @@ export async function POST(request: Request) {
   }
 
   if (enableWebSearch && parsedBody) {
-    return runWebSearchTurn(withSanitizedMessages(parsedBody), {
-      url: GATEWAY_COMPLETIONS_URL,
-      headers: gatewayHeaders,
-      loadTenantConfig: () => loadTenantWebSearchConfig(session.tenantId),
-    });
+    try {
+      return await runWebSearchTurn(withSanitizedMessages(parsedBody), {
+        url: GATEWAY_COMPLETIONS_URL,
+        headers: gatewayHeaders,
+        signal: request.signal,
+        loadTenantConfig: () => loadTenantWebSearchConfig(session.tenantId),
+      });
+    } catch (error) {
+      const detail = error instanceof Error ? error.message : "web search turn failed";
+      return NextResponse.json(
+        {
+          error: {
+            code: "50000",
+            message: `联网搜索对话失败：${detail}`,
+          },
+        },
+        { status: 500 },
+      );
+    }
   }
 
   if (parsedBody) {
@@ -178,6 +196,7 @@ export async function POST(request: Request) {
       method: "POST",
       headers: gatewayHeaders,
       body: forwardBody,
+      signal: request.signal,
     });
   } catch (error) {
     const detail = error instanceof Error ? error.message : "gateway unreachable";
