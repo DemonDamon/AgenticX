@@ -31,7 +31,7 @@ import {
 } from "@agenticx/ui";
 import { getEnterpriseVersionLabel } from "@agenticx/branding";
 import { useTranslations } from "next-intl";
-import { EnterpriseBrandMark } from "./EnterpriseBrandMark";
+import { ENTERPRISE_PRODUCT_NAME, EnterpriseBrandMark } from "./EnterpriseBrandMark";
 import {
   Activity,
   BarChart3,
@@ -340,10 +340,10 @@ export function AppShell({ children }: AppShellProps) {
         >
           {/* brand */}
           <div className="flex h-14 items-center justify-center gap-2 px-3">
-            <EnterpriseBrandMark size={32} className="shadow-sm" />
+            <EnterpriseBrandMark size={32} />
             {!collapsed && (
               <div className="min-w-0 flex-1">
-                <div className="truncate text-sm font-semibold">AgenticX</div>
+                <div className="truncate text-sm font-semibold">{ENTERPRISE_PRODUCT_NAME}</div>
                 <div className="truncate text-[11px] text-muted-foreground">
                   {t("adminLabel")} · {getEnterpriseVersionLabel()}
                 </div>

@@ -45,6 +45,7 @@ import {
 } from "@agenticx/ui";
 import { NearEmptyWordmark } from "./NearEmptyWordmark";
 import { ComposerPlusMenu, type WebSearchMode } from "./ComposerPlusMenu";
+import { ENTERPRISE_PRODUCT_NAME } from "./EnterpriseBrandMark";
 
 // 模型清单从 /api/me/models 动态获取（admin 配置 + 用户可见性）。
 // 没有任何分配时为空，UI 会提示「请联系管理员分配模型」。
@@ -487,7 +488,7 @@ export function MachiChatView({
             : undefined
         }
         placeholder={
-          deepResearchMode ? tw("deepResearchPlaceholder") : "发送消息给 Near..."
+          deepResearchMode ? tw("deepResearchPlaceholder") : `发送消息给${ENTERPRISE_PRODUCT_NAME}...`
         }
         attachments={Object.values(attachments)}
         onAddFiles={handleAddFiles}
@@ -680,7 +681,7 @@ export function MachiChatView({
         {/* 主对话区 */}
         <div className="relative min-h-0 flex-1 overflow-hidden">
           {isEmpty ? (
-            /* 空态：NEAR 字标靠上 + 收窄加高输入区（深度研究入口暂走侧栏） */
+            /* 空态：品牌字标靠上 + 收窄加高输入区（深度研究入口暂走侧栏） */
             <div className="relative flex h-full flex-col items-center justify-start gap-10 overflow-y-auto px-4 pt-14 pb-10 md:gap-12 md:pt-16 md:pb-16">
               <NearEmptyWordmark
                 caption={deepResearchMode ? tw("deepResearchEmptySubtitle") : undefined}

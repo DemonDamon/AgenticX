@@ -143,7 +143,7 @@ export async function pollDesktopDeviceAuth(input: {
       tenantId: claimed.tenantId,
       userId: claimed.userId!,
       deptId: claimed.deptId,
-      name: `Near Desktop · ${claimed.deviceName}`,
+      name: `和创智派 Desktop · ${claimed.deviceName}`,
       createdBy: claimed.userId!,
       expireDays,
       scopes: [...DESKTOP_MANAGED_PAT_SCOPES],

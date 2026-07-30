@@ -45,5 +45,5 @@ export default async function RootLayout({ children }: { children: ReactNode }) 
 }
 
 export const metadata = {
-  title: "AgenticX Enterprise · admin-console",
+  title: "和创智派 · 管理后台",
 };

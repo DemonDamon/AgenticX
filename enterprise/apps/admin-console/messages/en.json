@@ -211,7 +211,7 @@
       },
       "mcpServers": {
         "title": "MCP Server Hosting",
-        "description": "Expose OpenAPI backends as MCP remote tool pools for Machi / Cursor via gateway PAT.",
+        "description": "Expose OpenAPI backends as MCP remote tool pools for Hechuang Zhipai Desktop / Cursor via gateway PAT.",
         "createTitle": "New MCP Server",
         "createDescription": "Built-in demo echo: `/mcp/demo/streamable-http` (requires PAT scope `mcp:*`)",
         "listTitle": "Server list",
@@ -436,7 +436,7 @@
       "viewAudit": "View audit",
       "viewMetering": "Metering",
       "welcomeBadge": "Welcome back",
-      "welcomeTitle": "AgenticX Enterprise Control Center",
+      "welcomeTitle": "和创智派 Enterprise Control Center",
       "welcomeSummary": "Today: {users} active users, {calls} model calls, ${cost} cost, {hits} policy hits.",
       "quickLinks": {
         "users": "User management",
@@ -486,7 +486,7 @@
       }
     },
     "login": {
-      "brandName": "AgenticX Enterprise",
+      "brandName": "和创智派",
       "heroTitle": "Enterprise LLM",
       "heroTitleAccent": "unified platform",
       "heroDescription": "Portal + admin + AI gateway · cloud control · edge security · metering and compliance audit.",
@@ -496,7 +496,7 @@
         "controlTitle": "Deep control",
         "controlDesc": "Dept × user × vendor × model metering drill-down",
         "whitelabelTitle": "White-label delivery",
-        "whitelabelDesc": "Machi base + customer brand tokens · reskin in minutes"
+        "whitelabelDesc": "和创智派 base + enterprise brand configuration · rapid interface customization"
       },
       "cardTitle": "Admin sign-in",
       "cardDescription": "Sign in with your enterprise admin account",

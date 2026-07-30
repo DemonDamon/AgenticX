@@ -41,7 +41,7 @@ export async function POST(request: Request) {
     });
     return NextResponse.json({
       code: "00000",
-      message: "已授权，可关闭此页并返回 Near Desktop",
+      message: "已授权，可关闭此页并返回和创智派 Desktop",
     });
   } catch (error) {
     const code = (error as { code?: string })?.code;

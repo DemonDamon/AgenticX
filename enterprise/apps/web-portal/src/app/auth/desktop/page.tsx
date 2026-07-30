@@ -11,9 +11,12 @@ import {
   CardDescription,
   CardHeader,
   CardTitle,
-  MachiAvatar,
 } from "@agenticx/ui";
 import { CheckCircle2, Loader2, MonitorSmartphone, ShieldCheck } from "lucide-react";
+import {
+  ENTERPRISE_PRODUCT_NAME,
+  EnterpriseBrandMark,
+} from "../../../components/EnterpriseBrandMark";
 
 type SessionUser = {
   email?: string;
@@ -38,7 +41,7 @@ function DesktopAuthInner() {
     let cancelled = false;
     (async () => {
       if (!deviceId) {
-        setError("缺少设备授权参数，请从 Near Desktop 重新发起登录。");
+        setError(`缺少设备授权参数，请从 ${ENTERPRISE_PRODUCT_NAME} Desktop 重新发起登录。`);
         setLoading(false);
         return;
       }
@@ -104,8 +107,8 @@ function DesktopAuthInner() {
   return (
     <main className="relative flex min-h-screen items-center justify-center bg-background px-4 py-10">
       <div className="absolute left-6 top-6 flex items-center gap-3">
-        <MachiAvatar size={36} className="h-9 w-9 shadow-sm" />
-        <span className="text-lg font-semibold tracking-tight">AgenticX Enterprise</span>
+        <EnterpriseBrandMark size={36} />
+        <span className="text-lg font-semibold tracking-tight">{ENTERPRISE_PRODUCT_NAME}</span>
       </div>
 
       <Card className="w-full max-w-md border-border/70 shadow-lg">
@@ -113,7 +116,7 @@ function DesktopAuthInner() {
           <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-primary/10 text-primary">
             <MonitorSmartphone className="h-5 w-5" />
           </div>
-          <CardTitle>授权 Near Desktop</CardTitle>
+          <CardTitle>授权 {ENTERPRISE_PRODUCT_NAME} Desktop</CardTitle>
           <CardDescription>
             确认后，桌面端将获得企业托管模型访问权限。此页面不会显示或传递任何密钥。
           </CardDescription>
@@ -128,7 +131,7 @@ function DesktopAuthInner() {
             <Alert>
               <CheckCircle2 className="h-4 w-4" />
               <AlertDescription>
-                已授权成功。请返回 Near Desktop，应用会自动完成登录。你可以关闭此页面。
+                已授权成功。请返回 {ENTERPRISE_PRODUCT_NAME} Desktop，应用会自动完成登录。你可以关闭此页面。
               </AlertDescription>
             </Alert>
           ) : (

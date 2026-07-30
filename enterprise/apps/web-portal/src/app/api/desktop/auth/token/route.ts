@@ -46,7 +46,7 @@ export async function POST(request: Request) {
       tenantId: identity.tenantId,
       userId: identity.userId,
       deptId: identity.deptId,
-      name: `Near Desktop · ${deviceName}`,
+      name: `和创智派 Desktop · ${deviceName}`,
       createdBy: identity.userId,
       expireDays,
       scopes: [...DESKTOP_MANAGED_PAT_SCOPES],

@@ -13,7 +13,6 @@ import {
   DropdownMenuLabel,
   DropdownMenuSeparator,
   DropdownMenuTrigger,
-  MachiAvatar,
   Separator,
   Toaster,
   Tooltip,
@@ -48,6 +47,10 @@ import {
 } from "lucide-react";
 import { useChatStore } from "@agenticx/feature-chat";
 import { MachiChatView } from "./MachiChatView";
+import {
+  ENTERPRISE_PRODUCT_NAME,
+  EnterpriseBrandMark,
+} from "./EnterpriseBrandMark";
 import { QuotaCard } from "./QuotaCard";
 import { SettingsPanel } from "./settings/SettingsPanel";
 import { SessionGeneratingDots } from "./SessionGeneratingDots";
@@ -275,12 +278,10 @@ export function WorkspaceShell({ userEmail, userScopes }: WorkspaceShellProps) {
             ].join(" ")}
           >
             <div className={`flex min-w-0 items-center gap-2 ${collapsed ? "justify-center" : "flex-1"}`}>
-              <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-md bg-primary text-primary-foreground">
-                <MachiAvatar size={22} className="h-[22px] w-[22px] rounded-sm" />
-              </span>
+              <EnterpriseBrandMark size={36} />
               {!collapsed && (
                 <div className="min-w-0 flex-1">
-                  <div className="truncate text-sm font-semibold">AgenticX</div>
+                  <div className="truncate text-sm font-semibold">{ENTERPRISE_PRODUCT_NAME}</div>
                   <div className="truncate text-[11px] text-muted-foreground">
                     {t("brandSubtitle")} · {getEnterpriseVersionLabel()}
                   </div>
@@ -460,7 +461,7 @@ export function WorkspaceShell({ userEmail, userScopes }: WorkspaceShellProps) {
                   ].join(" ")}
                 >
                   <div className="relative shrink-0">
-                    <MachiAvatar size={32} className="h-8 w-8" />
+                    <EnterpriseBrandMark size={32} />
                     <span className="absolute -bottom-0.5 -right-0.5 flex h-3.5 w-3.5 items-center justify-center rounded-full bg-primary text-primary-foreground">
                       <Crown className="h-2 w-2" />
                     </span>

@@ -16,7 +16,6 @@ import {
   GridBackdrop,
   Input,
   Label,
-  MachiAvatar,
   Separator,
   useLocale,
 } from "@agenticx/ui";
@@ -36,6 +35,10 @@ import {
 } from "@agenticx/auth/src/services/oidc-error-codes";
 import { getPortalSsoProviderOptions, pickPreferredSsoProvider } from "../../lib/sso-provider-options";
 import { resolveReturnToOrDefault } from "../../lib/sso-return-to";
+import {
+  ENTERPRISE_PRODUCT_NAME,
+  EnterpriseBrandMark,
+} from "../../components/EnterpriseBrandMark";
 
 function AuthPageInner() {
   const searchParams = useSearchParams();
@@ -99,8 +102,8 @@ function AuthPageInner() {
     <main className="relative min-h-screen overflow-x-hidden bg-background">
       {/* 顶部 Logo */}
       <div className="absolute left-6 top-6 z-50 flex items-center gap-3 md:left-10 md:top-8">
-        <MachiAvatar size={40} className="h-10 w-10 shadow-sm" />
-        <span className="text-xl font-bold tracking-tight text-foreground">AgenticX Enterprise</span>
+        <EnterpriseBrandMark size={40} />
+        <span className="text-xl font-bold tracking-tight text-foreground">{ENTERPRISE_PRODUCT_NAME}</span>
       </div>
 
       {/* 装饰背景：grid + 双光晕 */}

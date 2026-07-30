@@ -583,7 +583,7 @@ export function SettingsPanel() {
                         <SelectValue />
                       </SelectTrigger>
                       <SelectContent>
-                        <SelectItem value="machi-ai">Machi AI</SelectItem>
+                        <SelectItem value="machi-ai">和创智派 AI</SelectItem>
                         <SelectItem value="mineru">MinerU</SelectItem>
                         <SelectItem value="textract">Textract</SelectItem>
                       </SelectContent>

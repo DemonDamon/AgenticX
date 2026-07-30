@@ -21,7 +21,10 @@ import { ArrowRight, ShieldAlert, ShieldCheck } from "lucide-react";
 import { safeAdminNextPath } from "../../lib/admin-client-auth";
 import { getAdminSsoProviderOptions, pickPreferredSsoProvider } from "../../lib/admin-sso-provider-options";
 import { useTranslations } from "next-intl";
-import { EnterpriseBrandMark } from "../../components/EnterpriseBrandMark";
+import {
+  ENTERPRISE_PRODUCT_NAME,
+  EnterpriseBrandMark,
+} from "../../components/EnterpriseBrandMark";
 
 function LoginPageInner() {
   const t = useTranslations("pages.login");
@@ -65,8 +68,8 @@ function LoginPageInner() {
     <main className="relative min-h-screen overflow-hidden bg-background">
       {/* 顶部 Logo */}
       <div className="absolute left-6 top-6 z-50 flex items-center gap-3 md:left-10 md:top-8">
-        <EnterpriseBrandMark size={40} className="shadow-sm" />
-        <span className="text-xl font-bold tracking-tight text-foreground">{t("brandName")}</span>
+        <EnterpriseBrandMark size={40} />
+        <span className="text-xl font-bold tracking-tight text-foreground">{ENTERPRISE_PRODUCT_NAME}</span>
       </div>
 
       {/* 装饰背景 */}

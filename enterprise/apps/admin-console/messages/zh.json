@@ -211,7 +211,7 @@
       },
       "mcpServers": {
         "title": "MCP Server 托管",
-        "description": "将 OpenAPI 等后端暴露为符合 MCP 协议的远程工具池，供 Machi / Cursor 等客户端通过网关 PAT 调用。",
+        "description": "将 OpenAPI 等后端暴露为符合 MCP 协议的远程工具池，供和创智派 Desktop / Cursor 等客户端通过网关 PAT 调用。",
         "createTitle": "新建 MCP Server",
         "createDescription": "内置 demo echo：`/mcp/demo/streamable-http`（需 PAT scope `mcp:*`）",
         "listTitle": "Server 列表",
@@ -436,7 +436,7 @@
       "viewAudit": "查看审计",
       "viewMetering": "四维消耗",
       "welcomeBadge": "欢迎回来",
-      "welcomeTitle": "AgenticX 企业管控中心",
+      "welcomeTitle": "和创智派企业管控中心",
       "welcomeSummary": "今日已为 {users} 位活跃用户提供 {calls} 次模型调用，成本 ${cost}，触发合规策略 {hits} 次。",
       "quickLinks": {
         "users": "用户管理",
@@ -486,7 +486,7 @@
       }
     },
     "login": {
-      "brandName": "AgenticX Enterprise",
+      "brandName": "和创智派",
       "heroTitle": "企业级大模型",
       "heroTitleAccent": "应用一体化平台",
       "heroDescription": "前台 + 后台 + AI 网关三端联动 · 云端统一管控 · 端侧安全闭环 · 四维计量与合规审计全覆盖。",
@@ -496,7 +496,7 @@
         "controlTitle": "管控深度",
         "controlDesc": "部门 × 员工 × 厂商 × 模型四维消耗穿透分析",
         "whitelabelTitle": "白标交付",
-        "whitelabelDesc": "Machi 基底 + 客户 brand token 覆盖 · 5 分钟换肤"
+        "whitelabelDesc": "和创智派基底 + 企业品牌配置 · 快速完成界面定制"
       },
       "cardTitle": "管理员登录",
       "cardDescription": "使用企业管理员账号进入控制台",

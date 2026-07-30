@@ -1,13 +1,6 @@
 "use client";
 
-import { Syne } from "next/font/google";
-
-/** Mid weight — brand presence without shouting over the composer. */
-const nearDisplay = Syne({
-  subsets: ["latin"],
-  weight: ["600", "700"],
-  display: "swap",
-});
+import { ENTERPRISE_PRODUCT_NAME } from "./EnterpriseBrandMark";
 
 type NearEmptyWordmarkProps = {
   className?: string;
@@ -15,7 +8,7 @@ type NearEmptyWordmarkProps = {
 };
 
 /**
- * Empty-state brand mark: a single baseline-aligned NEAR wordmark.
+ * Empty-state brand mark for the customer-facing product name.
  * Hover: deepen color + slightly tighten tracking + grow a thin underline.
  */
 export function NearEmptyWordmark({ className, caption }: NearEmptyWordmarkProps) {
@@ -23,18 +16,17 @@ export function NearEmptyWordmark({ className, caption }: NearEmptyWordmarkProps
     <div className={["flex flex-col items-center gap-2.5 text-center", className].filter(Boolean).join(" ")}>
       <div
         className={[
-          nearDisplay.className,
           "group/near relative inline-block select-none",
-          "text-[clamp(3.15rem,7.5vw,4.5rem)] font-semibold leading-none tracking-[-0.02em]",
+          "text-[clamp(2.65rem,6.4vw,4.15rem)] font-semibold leading-none tracking-[0.08em]",
           "text-foreground/80",
           "transition-[color,letter-spacing] duration-300 ease-out",
-          "hover:tracking-[-0.045em] hover:text-foreground",
-          "motion-reduce:transition-none motion-reduce:hover:tracking-[-0.02em]",
+          "hover:tracking-[0.045em] hover:text-foreground",
+          "motion-reduce:transition-none motion-reduce:hover:tracking-[0.08em]",
         ].join(" ")}
-        aria-label="NEAR"
+        aria-label={ENTERPRISE_PRODUCT_NAME}
         role="img"
       >
-        NEAR
+        {ENTERPRISE_PRODUCT_NAME}
         <span
           aria-hidden
           className={[
