@@ -9,7 +9,9 @@ import {
 import { ulid } from "ulid";
 import { normalizeChatMessageOrder } from "../chat-message-order";
 import {
+  ChatHistoryConflictError,
   ChatHistoryNotFoundError,
+  type AppendChatMessagesOptions,
   type ChatHistoryContext,
   type ChatHistoryStore,
 } from "./types";
@@ -248,8 +250,11 @@ export class SqlChatHistoryStore implements ChatHistoryStore {
     for (const message of messages) {
       const createdAt = message.created_at ? new Date(message.created_at) : now;
       lastAt = createdAt;
+      if (!ULID_RE.test(message.id)) {
+        throw new Error("invalid message id: must be a valid ULID");
+      }
       params.push(
-        ULID_RE.test(message.id) ? message.id : ulid(),
+        message.id,
         sessionId,
         ctx.tenantId,
         ctx.userId,
@@ -303,30 +308,151 @@ export class SqlChatHistoryStore implements ChatHistoryStore {
     return lastAt;
   }
 
+  private async refreshSessionStats(
+    client: SqlClient,
+    ctx: ChatHistoryContext,
+    sessionId: string,
+    title: string,
+    now: Date,
+  ): Promise<void> {
+    const p = this.dialect === "postgresql";
+    const stats = await client.query(
+      this.dialect === "postgresql"
+        ? `select count(*)::int as message_count, max(created_at) as last_message_at
+           from chat_messages
+           where session_id = $1 and tenant_id = $2 and user_id = $3`
+        : `select count(*) as message_count, max(created_at) as last_message_at
+           from chat_messages
+           where session_id = ? and tenant_id = ? and user_id = ?`,
+      [sessionId, ctx.tenantId, ctx.userId],
+    );
+    const row = stats.rows[0] ?? {};
+    await client.query(
+      `update chat_sessions set title = ${p ? "$1" : "?"},
+        message_count = ${p ? "$2" : "?"},
+        last_message_at = ${p ? "$3" : "?"},
+        updated_at = ${p ? "$4" : "?"}
+       where id = ${p ? "$5" : "?"}
+         and tenant_id = ${p ? "$6" : "?"}
+         and user_id = ${p ? "$7" : "?"}`,
+      [
+        title,
+        Number(row.message_count ?? 0),
+        row.last_message_at == null ? null : toDate(row.last_message_at),
+        now,
+        sessionId,
+        ctx.tenantId,
+        ctx.userId,
+      ],
+    );
+  }
+
+  private messagesEquivalent(existing: ChatMessage, incoming: ChatMessage): boolean {
+    return (
+      existing.role === incoming.role &&
+      existing.content === incoming.content &&
+      existing.created_at === incoming.created_at &&
+      (existing.model ?? "") === (incoming.model ?? "")
+    );
+  }
+
+  private async ensureMessagesCompatible(
+    client: SqlClient,
+    ctx: ChatHistoryContext,
+    sessionId: string,
+    messages: ChatMessage[],
+  ): Promise<"all_exist" | "none_exist"> {
+    let existingCount = 0;
+    for (const message of messages) {
+      const result = await client.query(
+        `select * from chat_messages
+         where id = ${this.dialect === "postgresql" ? "$1" : "?"}
+         limit 1`,
+        [message.id],
+      );
+      const row = result.rows[0];
+      if (!row) continue;
+      existingCount += 1;
+      const mapped = mapMessage(row);
+      if (
+        mapped.session_id !== sessionId ||
+        mapped.tenant_id !== ctx.tenantId ||
+        mapped.user_id !== ctx.userId ||
+        !this.messagesEquivalent(mapped, message)
+      ) {
+        throw new ChatHistoryConflictError("message id conflict with different payload");
+      }
+    }
+    if (existingCount === 0) return "none_exist";
+    if (existingCount === messages.length) return "all_exist";
+    throw new ChatHistoryConflictError("partial message id overlap");
+  }
+
   public async appendChatMessages(
     ctx: ChatHistoryContext,
     sessionId: string,
     messages: ChatMessage[],
+    options?: AppendChatMessagesOptions,
   ): Promise<void> {
     if (messages.length === 0) return;
+    const operationId = options?.operationId?.trim() || undefined;
+    const payloadHash = options?.payloadHash?.trim() || undefined;
+    if (operationId) {
+      if (!ULID_RE.test(operationId)) {
+        throw new Error("invalid operation_id: must be a valid ULID");
+      }
+      if (!payloadHash || !/^[a-f0-9]{64}$/i.test(payloadHash)) {
+        throw new Error("invalid payload_hash: must be sha256 hex");
+      }
+    }
+
     await this.client.transaction(async (tx) => {
       const session = await this.ownedSession(tx, ctx, sessionId, true);
       if (!session) throw new ChatHistoryNotFoundError();
       const now = new Date();
-      const lastAt = await this.insertMessages(tx, ctx, sessionId, messages, now);
+
+      if (operationId && payloadHash) {
+        const existingOp = await tx.query(
+          `select operation_id, payload_hash, session_id, tenant_id, user_id
+           from chat_history_operations
+           where operation_id = ${this.dialect === "postgresql" ? "$1" : "?"}
+           limit 1`,
+          [operationId],
+        );
+        const opRow = existingOp.rows[0];
+        if (opRow) {
+          if (
+            String(opRow.payload_hash).toLowerCase() !== payloadHash.toLowerCase() ||
+            String(opRow.session_id) !== sessionId ||
+            String(opRow.tenant_id) !== ctx.tenantId ||
+            String(opRow.user_id) !== ctx.userId
+          ) {
+            throw new ChatHistoryConflictError("operation_id conflict with different payload");
+          }
+          return;
+        }
+      }
+
+      const compatibility = await this.ensureMessagesCompatible(tx, ctx, sessionId, messages);
+      if (compatibility === "none_exist") {
+        await this.insertMessages(tx, ctx, sessionId, messages, now);
+      }
+
+      if (operationId && payloadHash) {
+        await tx.query(
+          `insert into chat_history_operations
+           (operation_id, tenant_id, user_id, session_id, payload_hash, created_at)
+           values (${this.placeholders(6)})`,
+          [operationId, ctx.tenantId, ctx.userId, sessionId, payloadHash.toLowerCase(), now],
+        );
+      }
+
       const firstUser = messages.find((message) => message.role === "user");
       const title =
         firstUser && sessionTitleNeedsAutoFill(String(session.title))
           ? buildAutoTitleFromFirstUserMessage(firstUser.content) || String(session.title)
           : String(session.title);
-      await tx.query(
-        `update chat_sessions set title = ${this.dialect === "postgresql" ? "$1" : "?"},
-          message_count = ${this.dialect === "postgresql" ? "$2" : "?"},
-          last_message_at = ${this.dialect === "postgresql" ? "$3" : "?"},
-          updated_at = ${this.dialect === "postgresql" ? "$4" : "?"}
-         where id = ${this.dialect === "postgresql" ? "$5" : "?"}`,
-        [title, Number(session.message_count) + messages.length, lastAt, now, sessionId],
-      );
+      await this.refreshSessionStats(tx, ctx, sessionId, title, now);
     });
   }
 
