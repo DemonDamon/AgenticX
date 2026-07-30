@@ -75,7 +75,7 @@ import {
   type ContinueSource,
 } from "../utils/session-continue";
 import { shouldDropDuplicateUserSend, type SendDedupeEntry } from "../utils/send-dedupe";
-import { ChatImAvatar, ImBubble } from "./messages/ImBubble";
+import { ImBubble } from "./messages/ImBubble";
 import { TerminalLine } from "./messages/TerminalLine";
 import { CleanBlock } from "./messages/CleanBlock";
 import { MessageQueuePanel } from "./messages/MessageQueuePanel";
