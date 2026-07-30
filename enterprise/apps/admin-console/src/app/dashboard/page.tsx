@@ -266,7 +266,7 @@ export default function DashboardPage() {
             </p>
           </div>
           <div className="grid grid-cols-3 gap-2">
-            <QuickLink icon={<Users className="h-4 w-4" />} label={t("quickLinks.users")} href="/iam/users" />
+            <QuickLink icon={<Users className="h-4 w-4" />} label={t("quickLinks.users")} href="/iam/roles" />
             <QuickLink icon={<ShieldAlert className="h-4 w-4" />} label={t("quickLinks.audit")} href="/audit" />
             <QuickLink icon={<BarChart3 className="h-4 w-4" />} label={t("quickLinks.metering")} href="/metering" />
           </div>

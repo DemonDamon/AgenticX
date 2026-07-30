@@ -7533,7 +7533,7 @@ def _repair_malformed_file_tool_arguments(name: str, arguments: Dict[str, Any]) 
         for key in extra_keys:
             if key not in alias_keys:
                 continue
-            raw = arguments.get(key, "")
+            raw = repaired.get(key, "")
             if _is_tool_metadata_noise(raw):
                 continue
             text = _strip_tool_metadata_noise_lines(str(raw)).strip()
@@ -7541,12 +7541,34 @@ def _repair_malformed_file_tool_arguments(name: str, arguments: Dict[str, Any]) 
                 payloads.append(text)
         return "\n".join(payloads)
 
+    repaired = dict(arguments)
+    if name == "file_edit":
+        for src, dst in (
+            ("old_str", "old_text"),
+            ("old_string", "old_text"),
+            ("new_str", "new_text"),
+            ("new_string", "new_text"),
+        ):
+            if src in repaired and dst not in repaired:
+                repaired[dst] = repaired.pop(src)
+            elif src in repaired:
+                repaired.pop(src, None)
+    elif name == "file_write":
+        for src, dst in (
+            ("text", "content"),
+            ("body", "content"),
+            ("new_content", "content"),
+        ):
+            if src in repaired and dst not in repaired:
+                repaired[dst] = repaired.pop(src)
+            elif src in repaired:
+                repaired.pop(src, None)
+
     if name == "file_write":
         allowed_keys = {"path", "content"}
-        extra_keys = [k for k in arguments.keys() if k not in allowed_keys]
+        extra_keys = [k for k in repaired.keys() if k not in allowed_keys]
         if not extra_keys:
-            return arguments
-        repaired = dict(arguments)
+            return repaired
         extra_payload = _collect_safe_extra_payload(extra_keys)
         existing_content = _strip_tool_metadata_noise_lines(str(repaired.get("content", "")))
         if extra_payload:
@@ -7560,10 +7582,9 @@ def _repair_malformed_file_tool_arguments(name: str, arguments: Dict[str, Any]) 
         return repaired
 
     allowed_keys = {"path", "old_text", "new_text", "occurrence"}
-    extra_keys = [k for k in arguments.keys() if k not in allowed_keys]
+    extra_keys = [k for k in repaired.keys() if k not in allowed_keys]
     if not extra_keys:
-        return arguments
-    repaired = dict(arguments)
+        return repaired
     extra_payload = _collect_safe_extra_payload(extra_keys)
     if extra_payload:
         base_new_text = _strip_tool_metadata_noise_lines(str(repaired.get("new_text", "")))

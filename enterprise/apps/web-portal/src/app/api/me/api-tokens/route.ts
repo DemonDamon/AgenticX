@@ -1,9 +1,10 @@
 import { NextResponse } from "next/server";
 import { createPat, listPats, revokePat } from "@agenticx/iam-core";
-import { getSessionFromCookies } from "../../../../lib/session";
+import { getSessionFromCookies, passwordChangeRequiredResponse } from "../../../../lib/session";
 
 export async function GET() {
   const session = await getSessionFromCookies();
+  if (session?.mustChangePassword) return passwordChangeRequiredResponse();
   if (!session?.userId || !session.tenantId) {
     return NextResponse.json({ code: "40100", message: "unauthorized" }, { status: 401 });
   }
@@ -13,6 +14,7 @@ export async function GET() {
 
 export async function POST(request: Request) {
   const session = await getSessionFromCookies();
+  if (session?.mustChangePassword) return passwordChangeRequiredResponse();
   if (!session?.userId || !session.tenantId) {
     return NextResponse.json({ code: "40100", message: "unauthorized" }, { status: 401 });
   }
@@ -44,6 +46,7 @@ export async function POST(request: Request) {
 
 export async function DELETE(request: Request) {
   const session = await getSessionFromCookies();
+  if (session?.mustChangePassword) return passwordChangeRequiredResponse();
   if (!session?.userId || !session.tenantId) {
     return NextResponse.json({ code: "40100", message: "unauthorized" }, { status: 401 });
   }

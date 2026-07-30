@@ -1046,12 +1046,10 @@ func (s *Server) handleEmbeddings(w http.ResponseWriter, r *http.Request) {
 	}
 	req.Input = sanitizedInputs
 	estimatedInputTokens := estimateTextTokens(strings.Join(req.Input, "\n"))
-	quotaDecision := s.quotaTracker.CheckAndAdd(
-		identity.UserID,
-		identity.DepartmentID,
-		roleFromScopes(identity.Scopes),
-		req.Model,
+	quotaDecision := s.quotaTracker.CheckAndAddContext(
+		s.quotaContext(identity, req.Model),
 		int64(estimatedInputTokens),
+		quota.LedgerEventReserve,
 	)
 	if !quotaDecision.Allowed {
 		writeAPIError(w, openai.QuotaExceeded("token quota exceeded"))
@@ -1450,9 +1448,19 @@ func (s *Server) quotaContext(identity requestIdentity, model string) quota.Requ
 		UserID:     identity.UserID,
 		DeptID:     identity.DepartmentID,
 		APITokenID: apiTokenID,
-		Role:       roleFromScopes(identity.Scopes),
+		Role:       quotaRoleForIdentity(identity),
 		Model:      model,
 	}
+}
+
+func quotaRoleForIdentity(identity requestIdentity) string {
+	for _, code := range identity.RoleCodes {
+		switch strings.ToLower(strings.TrimSpace(code)) {
+		case "super_admin", "owner", "admin", "dept_admin", "auditor", "sso_admin", "policy_admin", "policy_publisher", "policy_auditor":
+			return "admin"
+		}
+	}
+	return roleFromScopes(identity.Scopes)
 }
 
 func (s *Server) applyQuotaHeaders(w http.ResponseWriter, check quota.CheckResult) {

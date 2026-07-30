@@ -75,8 +75,21 @@ export function mergeUserStoredSet(
 export function computeEffectiveUserAllowed(
   deptEffective: readonly string[],
   userStored: readonly string[] | null,
+  groupModelIds: readonly string[] = [],
+  excludedGroupModelIds: readonly string[] = [],
 ): string[] {
   const deptSet = new Set(deptEffective);
+  if (groupModelIds.length > 0) {
+    const effective = intersectSets(deptSet, groupModelIds);
+    const groupSet = new Set(groupModelIds);
+    for (const modelId of excludedGroupModelIds) effective.delete(modelId);
+    if (userStored) {
+      for (const modelId of userStored) {
+        if (deptSet.has(modelId) && !groupSet.has(modelId)) effective.add(modelId);
+      }
+    }
+    return [...effective];
+  }
   if (userStored === null) return [...deptEffective];
   return [...intersectSets(deptSet, userStored)];
 }

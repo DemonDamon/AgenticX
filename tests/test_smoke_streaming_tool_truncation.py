@@ -14,6 +14,7 @@ sys.path.insert(0, str(__file__).rsplit("/tests", 1)[0])
 
 from agenticx.runtime.agent_runtime import (
     _build_streamed_tool_truncation_hint,
+    _resolve_round_max_tokens,
     _streamed_tool_call_truncated,
 )
 
@@ -72,3 +73,33 @@ class TestBuildTruncationHint:
     def test_hint_handles_empty_list(self):
         text = _build_streamed_tool_truncation_hint([])
         assert "立即重新调用" in text
+
+    def test_hint_file_write_mentions_chunked_write(self):
+        text = _build_streamed_tool_truncation_hint(["file_write"])
+        assert "小块写入" in text or "file_edit 追加" in text
+
+    def test_hint_bash_exec_omits_chunked_write(self):
+        text = _build_streamed_tool_truncation_hint(["bash_exec"])
+        assert "小块写入" not in text
+        assert "file_edit 追加" not in text
+
+
+def test_repair_file_edit_aliases_old_str_new_str() -> None:
+    from agenticx.cli.agent_tools import _repair_malformed_file_tool_arguments
+
+    repaired = _repair_malformed_file_tool_arguments(
+        "file_edit",
+        {"path": "p", "old_str": "a", "new_str": "b"},
+    )
+    assert repaired["path"] == "p"
+    assert repaired["old_text"] == "a"
+    assert repaired["new_text"] == "b"
+    assert "old_str" not in repaired
+    assert "new_str" not in repaired
+
+
+def test_resolve_round_max_tokens_default_and_write_heavy() -> None:
+    assert _resolve_round_max_tokens(8192, ["file_read"]) == 8192
+    write_budget = _resolve_round_max_tokens(8192, ["file_write"])
+    assert 12288 <= write_budget <= 16384
+    assert _resolve_round_max_tokens(8192, ["file_write"], provider="minimax") <= 4096

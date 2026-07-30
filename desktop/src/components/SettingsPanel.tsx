@@ -1025,6 +1025,10 @@ const TABS: { id: SettingsTab; label: string; icon: typeof Settings2 }[] = [
   { id: "server", label: "远程连接", icon: Globe },
 ];
 
+const PRIMARY_TAB_IDS = new Set<SettingsTab>(["general", "provider", "mcp", "connectors", "skills"]);
+const PRIMARY_TABS = TABS.filter((tab) => PRIMARY_TAB_IDS.has(tab.id));
+const ADVANCED_TABS = TABS.filter((tab) => !PRIMARY_TAB_IDS.has(tab.id));
+
 const EMAIL_PRESETS: Array<{
   id: EmailPresetId;
   label: string;
@@ -6246,6 +6250,7 @@ export function SettingsPanel({
   const voiceSettingsRef = useRef<VoiceSettingsPanelHandle>(null);
   const permissionsPanelRef = useRef<PermissionsAdvancedPanelHandle>(null);
   const [tab, setTab] = useState<SettingsTab>("general");
+  const [advancedOpen, setAdvancedOpen] = useState(false);
   const [panelSize, setPanelSize] = useState<SettingsPanelSize>(() => loadSettingsPanelSize());
   const [navWidth, setNavWidth] = useState(() =>
     loadSettingsNavWidth(loadSettingsPanelSize().width),
@@ -6255,6 +6260,13 @@ export function SettingsPanel({
     setTab(settingsOpenToTab);
     updateSettingsSlice({ openToTab: undefined });
   }, [open, settingsOpenToTab, updateSettingsSlice]);
+  useEffect(() => {
+    if (!open) {
+      setAdvancedOpen(false);
+      return;
+    }
+    if (!PRIMARY_TAB_IDS.has(tab)) setAdvancedOpen(true);
+  }, [open, tab]);
   useEffect(() => {
     if (!open) return;
     const size = loadSettingsPanelSize();
@@ -8393,6 +8405,26 @@ export function SettingsPanel({
   if (!open) return null;
 
   const ks = keyStatus[active] ?? "idle";
+  const advancedVisible = advancedOpen || !PRIMARY_TAB_IDS.has(tab);
+  const renderTabButton = (item: (typeof TABS)[number]) => {
+    const Icon = item.icon;
+    const isActive = tab === item.id;
+    return (
+      <button
+        key={item.id}
+        className={`flex w-full min-w-0 items-center gap-2.5 rounded-[10px] border px-2.5 py-2 text-left text-[13px] font-semibold transition-all ${
+          isActive
+            ? "border-transparent bg-btnPrimary text-btnPrimary-text"
+            : "border-transparent text-text-subtle hover:border-border-strong hover:bg-surface-card hover:text-text-strong"
+        }`}
+        onClick={() => setTab(item.id)}
+        title={item.label}
+      >
+        <Icon className="h-4 w-4 shrink-0" aria-hidden />
+        <span className="min-w-0 truncate">{item.label}</span>
+      </button>
+    );
+  };
 
   return (
     <>
@@ -8413,29 +8445,27 @@ export function SettingsPanel({
         >
           <div className="mb-4 pr-2 text-[15px] font-semibold text-text-strong">设置</div>
           <nav className="agx-settings-nav-scroll flex flex-1 flex-col gap-1 overflow-y-auto">
-            {TABS.map((t) => {
-              const Icon = t.icon;
-              const isActive = tab === t.id;
-              return (
-                <button
-                  key={t.id}
-                  className={`flex w-full min-w-0 items-center gap-2.5 rounded-[10px] border px-2.5 py-2 text-left text-[13px] font-semibold transition-all ${
-                    isActive
-                      ? "border-transparent bg-btnPrimary text-btnPrimary-text"
-                      : "border-transparent text-text-subtle hover:border-border-strong hover:bg-surface-card hover:text-text-strong"
-                  }`}
-                  onClick={() => setTab(t.id)}
-                  title={t.label}
-                >
-                  {Icon ? (
-                    <Icon className="h-4 w-4 shrink-0" aria-hidden />
-                  ) : (
-                    <span className="h-4 w-4 shrink-0 rounded-sm bg-surface-hover" aria-hidden />
-                  )}
-                  <span className="min-w-0 truncate">{t.label}</span>
-                </button>
-              );
-            })}
+            {PRIMARY_TABS.map(renderTabButton)}
+            <div className="mt-3 border-t border-border/70 pt-3 pr-2">
+              <button
+                type="button"
+                className="flex w-full items-center justify-between gap-2 rounded-[10px] px-2.5 py-2 text-left text-[13px] font-semibold text-text-subtle transition hover:bg-surface-card hover:text-text-strong"
+                aria-expanded={advancedVisible}
+                aria-controls="settings-advanced-tabs"
+                onClick={() => setAdvancedOpen((value) => !value)}
+              >
+                <span className="inline-flex min-w-0 items-center gap-2.5">
+                  <Settings2 className="h-4 w-4 shrink-0" aria-hidden />
+                  <span className="truncate">高级设置</span>
+                </span>
+                {advancedVisible ? <ChevronDown className="h-4 w-4 shrink-0" aria-hidden /> : <ChevronRight className="h-4 w-4 shrink-0" aria-hidden />}
+              </button>
+              {advancedVisible ? (
+                <div id="settings-advanced-tabs" className="mt-1 space-y-1">
+                  {ADVANCED_TABS.map(renderTabButton)}
+                </div>
+              ) : null}
+            </div>
           </nav>
           <div
             className="group absolute right-0 top-0 z-20 h-full w-3 cursor-col-resize"

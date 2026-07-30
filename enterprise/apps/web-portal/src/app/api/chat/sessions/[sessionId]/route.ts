@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { getSessionFromCookies } from "../../../../../lib/session";
+import { getSessionFromCookies, passwordChangeRequiredResponse } from "../../../../../lib/session";
 import {
   chatHistoryNotFound,
   chatHistoryServerError,
@@ -12,6 +12,7 @@ type Params = Promise<{ sessionId: string }>;
 
 export async function PATCH(request: Request, segmentData: { params: Params }) {
   const session = await getSessionFromCookies();
+  if (session?.mustChangePassword) return passwordChangeRequiredResponse();
   if (!session) return chatHistoryUnauthorized();
   const { sessionId } = await segmentData.params;
   if (!sessionId?.trim()) {
@@ -48,6 +49,7 @@ export async function PATCH(request: Request, segmentData: { params: Params }) {
 
 export async function DELETE(_request: Request, segmentData: { params: Params }) {
   const session = await getSessionFromCookies();
+  if (session?.mustChangePassword) return passwordChangeRequiredResponse();
   if (!session) return chatHistoryUnauthorized();
   const { sessionId } = await segmentData.params;
   if (!sessionId?.trim()) {

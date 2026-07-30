@@ -6,6 +6,7 @@ import {
   computeEffectiveUserAllowed,
   computeParentAllowedIds,
   computePrunedModelIds,
+  isUsageModelCurrentlyAllowed,
   mergeUserStoredSet,
 } from "../effective-models";
 
@@ -69,6 +70,20 @@ describe("effective-models", () => {
     expect(computeEffectiveUserAllowed(dept, null)).toEqual(dept);
   });
 
+  it("group models are available to members and individual models are additive", () => {
+    const dept = ["a/A", "a/B", "a/C"];
+    expect(computeEffectiveUserAllowed(dept, ["a/C"], ["a/A", "a/B"])).toEqual(["a/A", "a/B", "a/C"]);
+    expect(computeEffectiveUserAllowed(dept, null, ["a/B", "outside/X"])).toEqual(["a/B"]);
+  });
+
+  it("allows a user to turn off a model inherited from a group", () => {
+    const dept = ["a/A", "a/B", "a/C"];
+    expect(computeEffectiveUserAllowed(dept, ["a/A", "a/C"], ["a/A", "a/B"], ["a/A"])).toEqual([
+      "a/B",
+      "a/C",
+    ]);
+  });
+
   it("clipToAllowed prunes out-of-parent ids", () => {
     const { saved, prunedModelIds } = clipToAllowed(["a/A", "a/C"], new Set(["a/A", "a/B"]));
     expect(saved).toEqual(["a/A"]);
@@ -86,5 +101,11 @@ describe("effective-models", () => {
 
   it("computePrunedModelIds lists stored outside allowed", () => {
     expect(computePrunedModelIds(["a/A", "x/Y"], new Set(["a/A"]))).toEqual(["x/Y"]);
+  });
+
+  it("matches a usage model name against provider-scoped effective models", () => {
+    expect(isUsageModelCurrentlyAllowed("glm-5.2", ["provider-a/glm-5.2"])).toBe(true);
+    expect(isUsageModelCurrentlyAllowed("provider-a/glm-5.2", ["provider-a/glm-5.2"])).toBe(true);
+    expect(isUsageModelCurrentlyAllowed("gpt-5.4-nano", ["provider-a/glm-5.2"])).toBe(false);
   });
 });

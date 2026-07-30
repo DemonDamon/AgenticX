@@ -1,9 +1,12 @@
 import { NextResponse } from "next/server";
 import { approveDesktopDeviceForSession } from "../../../../../../lib/desktop-device-auth";
-import { getSessionFromCookies } from "../../../../../../lib/session";
+import { getSessionFromCookies, passwordChangeRequiredResponse } from "../../../../../../lib/session";
 
 export async function POST(request: Request) {
   const session = await getSessionFromCookies();
+  if (session?.mustChangePassword) {
+    return passwordChangeRequiredResponse();
+  }
   if (!session) {
     return NextResponse.json(
       { code: "40101", message: "请先登录企业账号" },

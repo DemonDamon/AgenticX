@@ -1351,6 +1351,7 @@ export function ChatView({ onOpenConfirm, onOpenClarification, onSubmitClarifica
 
     try {
       const body: Record<string, unknown> = { session_id: sessionId, user_input: effectiveUserText };
+      body.keep_runtime_after_disconnect = true;
       if (!isContinuation) body.client_turn_id = clientTurnId;
       if (reqProvider) body.provider = reqProvider;
       if (reqModel) body.model = reqModel;

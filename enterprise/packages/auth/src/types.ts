@@ -5,6 +5,7 @@ export type AuthUser = {
   email: string;
   displayName: string;
   passwordHash: string;
+  mustChangePassword: boolean;
   status: "active" | "disabled" | "locked";
   failedLoginCount: number;
   lockedUntil?: number | null;
@@ -17,6 +18,7 @@ export type AuthContext = {
   deptId?: string | null;
   email: string;
   scopes: string[];
+  mustChangePassword: boolean;
   sessionId: string;
 };
 
@@ -25,6 +27,7 @@ export type AuthTokens = {
   refreshToken: string;
   tokenType: "Bearer";
   expiresInSeconds: number;
+  mustChangePassword: boolean;
 };
 
 export type LoginInput = {
@@ -39,6 +42,7 @@ export type RefreshSession = {
   deptId?: string | null;
   email: string;
   scopes: string[];
+  mustChangePassword: boolean;
   expiresAt: number;
 };
 
@@ -52,5 +56,5 @@ export interface AuthUserRepository {
   findByEmail(email: string): Promise<AuthUser | null>;
   updateFailedLogin(email: string, nextFailedCount: number, lockedUntil: number | null): Promise<void>;
   resetFailedLogin(email: string): Promise<void>;
+  updatePasswordAndClearRequirement(email: string, passwordHash: string): Promise<AuthUser | null>;
 }
-

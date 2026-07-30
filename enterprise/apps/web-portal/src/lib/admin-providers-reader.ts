@@ -3,10 +3,14 @@
  * 支持 PostgreSQL / MySQL（DATABASE_DIALECT）。
  */
 
-import { enterpriseRuntimeModelProviders as pgMpTable } from "@agenticx/db-schema";
-import { enterpriseRuntimeUserVisibleModels as pgUvmTable } from "@agenticx/db-schema";
+import {
+  enterpriseRuntimeModelProviders as pgMpTable,
+  enterpriseRuntimeTokenQuotas as pgQuotaTable,
+  enterpriseRuntimeUserVisibleModels as pgUvmTable,
+} from "@agenticx/db-schema";
 import {
   enterpriseRuntimeModelProviders as mysqlMpTable,
+  enterpriseRuntimeTokenQuotas as mysqlQuotaTable,
   enterpriseRuntimeUserVisibleModels as mysqlUvmTable,
 } from "@agenticx/db-schema/mysql";
 import {
@@ -136,6 +140,55 @@ async function readUserModels(): Promise<Record<string, string[]>> {
   return map;
 }
 
+function asRecord(value: unknown): Record<string, unknown> | null {
+  return value && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, unknown>) : null;
+}
+
+function idsFrom(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+  return [...new Set(value.map((id) => String(id).trim()).filter(Boolean))];
+}
+
+type GroupModelPolicy = {
+  groupModelIds: string[];
+  excludedGroupModelIds: string[];
+};
+
+function groupModelPolicyFromQuotaConfig(config: unknown, userId: string): GroupModelPolicy {
+  const root = asRecord(config);
+  const groups = asRecord(root?.groups);
+  if (!groups) return { groupModelIds: [], excludedGroupModelIds: [] };
+  const modelIds = new Set<string>();
+  for (const group of Object.values(groups)) {
+    const record = asRecord(group);
+    if (!record || !idsFrom(record.memberIds).includes(userId)) continue;
+    for (const modelId of idsFrom(record.modelIds)) modelIds.add(modelId);
+  }
+  const exclusions = idsFrom(asRecord(root?.modelExclusions)?.[userId]).filter((modelId) => modelIds.has(modelId));
+  return { groupModelIds: [...modelIds], excludedGroupModelIds: exclusions };
+}
+
+async function readGroupModelPolicy(userId: string): Promise<GroupModelPolicy> {
+  const tid = requiredTenant();
+  const config = resolveDatabaseConfig();
+  if (config.dialect === "mysql") {
+    const { raw: db } = await createMysqlDb(config);
+    const rows = await db
+      .select({ config: mysqlQuotaTable.config })
+      .from(mysqlQuotaTable)
+      .where(eq(mysqlQuotaTable.tenantId, tid))
+      .limit(1);
+    return groupModelPolicyFromQuotaConfig(rows[0]?.config, userId);
+  }
+  const db = getIamDb();
+  const rows = await db
+    .select({ config: pgQuotaTable.config })
+    .from(pgQuotaTable)
+    .where(eq(pgQuotaTable.tenantId, tid))
+    .limit(1);
+  return groupModelPolicyFromQuotaConfig(rows[0]?.config, userId);
+}
+
 function flattenEnabledModelIds(providers: ProviderRecord[]): string[] {
   const ids: string[] = [];
   for (const p of providers) {
@@ -164,8 +217,11 @@ export async function listAvailableModelsForUser(
   email?: string,
   deptId?: string | null,
 ): Promise<PortalModelOption[]> {
-  const providers = await readProviders();
-  const userMap = await readUserModels();
+  const [providers, userMap, groupModelPolicy] = await Promise.all([
+    readProviders(),
+    readUserModels(),
+    readGroupModelPolicy(userId),
+  ]);
   const allEnabled = flattenEnabledModelIds(providers);
 
   let deptEffective = allEnabled;
@@ -181,7 +237,14 @@ export async function listAvailableModelsForUser(
 
   const userKeys = resolveUserKeys(userId, email);
   const userStored = mergeUserStoredSet(userMap, userKeys);
-  const effectiveIds = new Set(computeEffectiveUserAllowed(deptEffective, userStored));
+  const effectiveIds = new Set(
+    computeEffectiveUserAllowed(
+      deptEffective,
+      userStored,
+      groupModelPolicy.groupModelIds,
+      groupModelPolicy.excludedGroupModelIds,
+    ),
+  );
 
   const out: PortalModelOption[] = [];
   for (const p of providers) {

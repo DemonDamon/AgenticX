@@ -19,8 +19,24 @@ export type QuotaRule = {
   action: QuotaAction;
 };
 
+/** 用户组是批量管理成员的模板，不参与网关的共享额度计算。 */
+export type UserGroup = {
+  name: string;
+  description?: string;
+  memberIds: string[];
+  /** 保存时写入每位成员的个人月额度；0 表示不限制。 */
+  monthlyTokens: number;
+  /** 用户组派生的可用模型范围；成员可在此基础上增加或关闭个人模型。 */
+  modelIds: string[];
+  createdAt: string;
+  updatedAt: string;
+};
+
 export type QuotaConfig = SharedQuotaConfig & {
   apiTokens?: Record<string, QuotaRule>;
+  groups?: Record<string, UserGroup>;
+  /** 用户可撤销用户组派生模型的个人例外。 */
+  modelExclusions?: Record<string, string[]>;
 };
 
 const LEGACY_FILE = path.join(resolveRuntimeAdminDir(), "quotas.json");
@@ -28,14 +44,16 @@ const LEGACY_FILE = path.join(resolveRuntimeAdminDir(), "quotas.json");
 const DEFAULT_CONFIG: QuotaConfig = {
   defaults: {
     role: {
-      admin: { monthlyTokens: 1_500_000, action: "warn" },
-      staff: { monthlyTokens: 600_000, action: "warn" },
+      admin: { monthlyTokens: 1_500_000, action: "block" },
+      staff: { monthlyTokens: 600_000, action: "block" },
       guest: { monthlyTokens: 300_000, action: "block" },
     },
     model: {},
   },
   users: {},
   departments: {},
+  groups: {},
+  modelExclusions: {},
   updatedAt: new Date().toISOString(),
 };
 
@@ -59,8 +77,7 @@ function normalizeRule(input: Partial<QuotaRule> | undefined): QuotaRule {
   const requestsPerMonth = Number(input?.requestsPerMonth ?? 0);
   const action = input?.action ?? "warn";
   const poolScopeRaw = String(input?.poolScope ?? "").trim();
-  const poolScope =
-    poolScopeRaw === "dept" || poolScopeRaw === "tenant" ? poolScopeRaw : ("" as const);
+  const poolScope = poolScopeRaw === "dept" || poolScopeRaw === "tenant" ? poolScopeRaw : ("" as const);
   return {
     monthlyTokens: Number.isFinite(monthlyTokens) && monthlyTokens > 0 ? Math.floor(monthlyTokens) : 0,
     dailyTokens: Number.isFinite(dailyTokens) && dailyTokens > 0 ? Math.floor(dailyTokens) : 0,
@@ -76,11 +93,46 @@ function normalizeRule(input: Partial<QuotaRule> | undefined): QuotaRule {
   };
 }
 
+function normalizeGroup(input: Partial<UserGroup> | undefined): UserGroup {
+  const now = new Date().toISOString();
+  const memberIds = Array.isArray(input?.memberIds)
+    ? [...new Set(input.memberIds.map((id) => String(id).trim()).filter(Boolean))]
+    : [];
+  const modelIds = Array.isArray(input?.modelIds)
+    ? [...new Set(input.modelIds.map((id) => String(id).trim()).filter(Boolean))]
+    : [];
+  const description = typeof input?.description === "string" ? input.description.trim() : "";
+  const monthlyTokens = Number(input?.monthlyTokens ?? 0);
+  return {
+    name: String(input?.name ?? "").trim() || "未命名用户组",
+    ...(description ? { description } : {}),
+    memberIds,
+    modelIds,
+    monthlyTokens: Number.isFinite(monthlyTokens) && monthlyTokens > 0 ? Math.floor(monthlyTokens) : 0,
+    createdAt: typeof input?.createdAt === "string" && input.createdAt ? input.createdAt : now,
+    updatedAt: typeof input?.updatedAt === "string" && input.updatedAt ? input.updatedAt : now,
+  };
+}
+
+function normalizeModelExclusions(input: unknown): Record<string, string[]> {
+  if (!input || typeof input !== "object" || Array.isArray(input)) return {};
+  const exclusions: Record<string, string[]> = {};
+  for (const [userId, value] of Object.entries(input)) {
+    const id = userId.trim();
+    if (!id || !Array.isArray(value)) continue;
+    const modelIds = [...new Set(value.map((modelId) => String(modelId).trim()).filter(Boolean))];
+    if (modelIds.length > 0) exclusions[id] = modelIds;
+  }
+  return exclusions;
+}
+
 function normalizeQuota(input: Partial<QuotaConfig> | undefined): QuotaConfig {
   const next: QuotaConfig = {
     defaults: { role: {}, model: {} },
     users: {},
     departments: {},
+    groups: {},
+    modelExclusions: {},
     apiTokens: {},
     updatedAt: new Date().toISOString(),
   };
@@ -92,6 +144,9 @@ function normalizeQuota(input: Partial<QuotaConfig> | undefined): QuotaConfig {
   for (const [key, value] of Object.entries(users)) next.users[key] = normalizeRule(value);
   const depts = input?.departments ?? {};
   for (const [key, value] of Object.entries(depts)) next.departments[key] = normalizeRule(value);
+  const groups = input?.groups ?? {};
+  for (const [key, value] of Object.entries(groups)) next.groups![key] = normalizeGroup(value);
+  next.modelExclusions = normalizeModelExclusions(input?.modelExclusions);
   const apiTokens = input?.apiTokens ?? {};
   for (const [key, value] of Object.entries(apiTokens)) next.apiTokens![key] = normalizeRule(value);
   return next;

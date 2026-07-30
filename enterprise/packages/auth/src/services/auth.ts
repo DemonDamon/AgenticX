@@ -1,5 +1,5 @@
 import { JwtService } from "./jwt";
-import { verifyPassword } from "./password";
+import { hashPassword, verifyPassword } from "./password";
 import type {
   AuthContext,
   AuthTokens,
@@ -71,6 +71,22 @@ export class InMemoryAuthUserRepository implements AuthUserRepository {
       status: current.status === "locked" ? "active" : current.status,
     });
   }
+
+  public async updatePasswordAndClearRequirement(email: string, passwordHash: string): Promise<AuthUser | null> {
+    const key = email.toLowerCase();
+    const current = this.users.get(key);
+    if (!current) return null;
+    const updated: AuthUser = {
+      ...current,
+      passwordHash,
+      mustChangePassword: false,
+      failedLoginCount: 0,
+      lockedUntil: null,
+      status: "active",
+    };
+    this.users.set(key, updated);
+    return updated;
+  }
 }
 
 type AuthServiceDeps = {
@@ -97,7 +113,32 @@ export class AuthService {
       deptId: user.deptId ?? null,
       email: user.email,
       scopes: user.scopes,
+      mustChangePassword: user.mustChangePassword,
       sessionId: `${user.id}_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+    };
+  }
+
+  private async issueTokens(context: AuthContext): Promise<AuthTokens> {
+    const access = await this.jwtService.signAccessToken(context);
+    const refresh = await this.jwtService.signRefreshToken(context);
+
+    await this.refreshStore.set({
+      sessionId: context.sessionId,
+      userId: context.userId,
+      tenantId: context.tenantId,
+      deptId: context.deptId ?? null,
+      email: context.email,
+      scopes: context.scopes,
+      mustChangePassword: context.mustChangePassword,
+      expiresAt: Date.now() + refresh.expiresInSeconds * 1000,
+    });
+
+    return {
+      accessToken: access.token,
+      refreshToken: refresh.token,
+      tokenType: "Bearer",
+      expiresInSeconds: access.expiresInSeconds,
+      mustChangePassword: context.mustChangePassword,
     };
   }
 
@@ -120,25 +161,7 @@ export class AuthService {
 
     await this.userRepo.resetFailedLogin(user.email);
     const context = this.toContext(user);
-    const access = await this.jwtService.signAccessToken(context);
-    const refresh = await this.jwtService.signRefreshToken(context);
-
-    await this.refreshStore.set({
-      sessionId: context.sessionId,
-      userId: context.userId,
-      tenantId: context.tenantId,
-      deptId: context.deptId ?? null,
-      email: context.email,
-      scopes: context.scopes,
-      expiresAt: Date.now() + refresh.expiresInSeconds * 1000,
-    });
-
-    return {
-      accessToken: access.token,
-      refreshToken: refresh.token,
-      tokenType: "Bearer",
-      expiresInSeconds: access.expiresInSeconds,
-    };
+    return this.issueTokens(context);
   }
 
   public async verifyAccess(token: string): Promise<AuthContext | null> {
@@ -154,20 +177,46 @@ export class AuthService {
       throw new Error("Refresh session expired.");
     }
 
-    const access = await this.jwtService.signAccessToken(refreshContext);
-    const nextRefresh = await this.jwtService.signRefreshToken(refreshContext);
+    const user = await this.userRepo.findByEmail(refreshContext.email);
+    if (!user || user.tenantId !== refreshContext.tenantId) {
+      throw new Error("Refresh session expired.");
+    }
+    if (user.status === "disabled" || user.status === "locked" || (user.lockedUntil && user.lockedUntil > Date.now())) {
+      throw new Error("Refresh session expired.");
+    }
 
-    await this.refreshStore.set({
-      ...stored,
-      expiresAt: Date.now() + nextRefresh.expiresInSeconds * 1000,
+    return this.issueTokens({
+      ...refreshContext,
+      userId: user.id,
+      tenantId: user.tenantId,
+      deptId: user.deptId ?? null,
+      email: user.email,
+      scopes: user.scopes,
+      mustChangePassword: user.mustChangePassword,
     });
+  }
 
-    return {
-      accessToken: access.token,
-      refreshToken: nextRefresh.token,
-      tokenType: "Bearer",
-      expiresInSeconds: access.expiresInSeconds,
-    };
+  public async completeRequiredPasswordChange(input: {
+    context: AuthContext;
+    newPassword: string;
+  }): Promise<AuthTokens> {
+    if (!input.context.mustChangePassword) {
+      throw new Error("Password change is not required.");
+    }
+
+    const passwordHash = await hashPassword(input.newPassword);
+    const updatedUser = await this.userRepo.updatePasswordAndClearRequirement(
+      input.context.email,
+      passwordHash,
+    );
+    if (!updatedUser || updatedUser.tenantId !== input.context.tenantId) {
+      throw new Error("Account unavailable.");
+    }
+
+    await this.refreshStore.delete(input.context.sessionId);
+    return this.issueTokens({
+      ...this.toContext(updatedUser),
+      mustChangePassword: false,
+    });
   }
 }
-

@@ -18,16 +18,11 @@ import {
   Label,
   MachiAvatar,
   Separator,
-  Tabs,
-  TabsContent,
-  TabsList,
-  TabsTrigger,
   useLocale,
 } from "@agenticx/ui";
 import {
   ArrowRight,
   CheckCircle2,
-  ChevronRight,
   Github,
   Languages,
   ShieldAlert,
@@ -48,10 +43,6 @@ function AuthPageInner() {
   const { locale, setLocale } = useLocale();
   const [signInEmail, setSignInEmail] = useState("admin@agenticx.local");
   const [signInPassword, setSignInPassword] = useState("");
-  const [signUpEmail, setSignUpEmail] = useState("");
-  const [signUpUsername, setSignUpUsername] = useState("");
-  const [signUpPassword, setSignUpPassword] = useState("");
-  const [confirmPassword, setConfirmPassword] = useState("");
   const [status, setStatus] = useState<{ type: "error" | "success" | "info"; message: string } | null>(null);
   const [busy, setBusy] = useState(false);
   const ssoProviders = useMemo(() => getPortalSsoProviderOptions(), []);
@@ -86,59 +77,19 @@ function AuthPageInner() {
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ email: signInEmail, password: signInPassword }),
       });
-      const data = await response.json();
+      const data = (await response.json()) as {
+        data?: { mustChangePassword?: boolean };
+        message?: string;
+      };
       if (!response.ok) {
         setStatus({ type: "error", message: data.message ?? t("loginFailed") });
         return;
       }
       setStatus({ type: "success", message: t("signInSuccess") });
-      const destination = resolveReturnToOrDefault(searchParams.get("returnTo"));
+      const destination = data.data?.mustChangePassword
+        ? "/auth/change-password"
+        : resolveReturnToOrDefault(searchParams.get("returnTo"));
       window.location.assign(destination);
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  const handleSignUp = async (event: React.FormEvent) => {
-    event.preventDefault();
-    if (signUpPassword !== confirmPassword) {
-      setStatus({ type: "error", message: t("passwordMismatch") });
-      return;
-    }
-    setBusy(true);
-    setStatus(null);
-    try {
-      const response = await fetch("/api/admin/users", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({
-          email: signUpEmail,
-          displayName: signUpUsername,
-          password: signUpPassword,
-        }),
-      });
-      let ok = response.ok;
-      let data = await response.json();
-      if (!ok && response.status === 401) {
-        const fallback = await fetch("/api/auth/register", {
-          method: "POST",
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify({
-            email: signUpEmail,
-            displayName: signUpUsername,
-            password: signUpPassword,
-          }),
-        });
-        ok = fallback.ok;
-        data = await fallback.json();
-      }
-      if (!ok) {
-        setStatus({ type: "error", message: data.message ?? t("signupFailed") });
-        return;
-      }
-      setStatus({ type: "success", message: t("signUpSuccess") });
-      setSignInEmail(signUpEmail);
-      setSignInPassword(signUpPassword);
     } finally {
       setBusy(false);
     }
@@ -222,15 +173,8 @@ function AuthPageInner() {
               </div>
             </CardHeader>
             <CardContent className="space-y-4">
-              <Tabs defaultValue="signin">
-                <TabsList className="grid w-full grid-cols-2">
-                  <TabsTrigger value="signin">{t("signIn")}</TabsTrigger>
-                  <TabsTrigger value="signup">{t("signUp")}</TabsTrigger>
-                </TabsList>
-
-                {/* 登录 */}
-                <TabsContent value="signin" className="space-y-3 pt-3">
-                  <form onSubmit={handleSignIn} className="space-y-3">
+              <div className="space-y-3">
+                <form onSubmit={handleSignIn} className="space-y-3">
                     <div className="space-y-1.5">
                       <Label htmlFor="signin-email">{t("email")}</Label>
                       <Input
@@ -267,60 +211,8 @@ function AuthPageInner() {
                       {busy ? t("signingIn") : t("loginAction")}
                       <ArrowRight />
                     </Button>
-                  </form>
-                </TabsContent>
-
-                {/* 注册 */}
-                <TabsContent value="signup" className="space-y-3 pt-3">
-                  <form onSubmit={handleSignUp} className="space-y-3">
-                    <div className="space-y-1.5">
-                      <Label htmlFor="signup-email">{t("email")}</Label>
-                      <Input
-                        id="signup-email"
-                        type="email"
-                        required
-                        value={signUpEmail}
-                        onChange={(event) => setSignUpEmail(event.target.value)}
-                      />
-                    </div>
-                    <div className="space-y-1.5">
-                      <Label htmlFor="signup-name">{t("username")}</Label>
-                      <Input
-                        id="signup-name"
-                        required
-                        value={signUpUsername}
-                        onChange={(event) => setSignUpUsername(event.target.value)}
-                      />
-                    </div>
-                    <div className="grid grid-cols-2 gap-3">
-                      <div className="space-y-1.5">
-                        <Label htmlFor="signup-password">{t("password")}</Label>
-                        <Input
-                          id="signup-password"
-                          type="password"
-                          required
-                          value={signUpPassword}
-                          onChange={(event) => setSignUpPassword(event.target.value)}
-                        />
-                      </div>
-                      <div className="space-y-1.5">
-                        <Label htmlFor="signup-confirm">{t("confirmPassword")}</Label>
-                        <Input
-                          id="signup-confirm"
-                          type="password"
-                          required
-                          value={confirmPassword}
-                          onChange={(event) => setConfirmPassword(event.target.value)}
-                        />
-                      </div>
-                    </div>
-                    <Button type="submit" className="w-full" disabled={busy}>
-                      {busy ? t("processing") : t("signupAction")}
-                      <ChevronRight />
-                    </Button>
-                  </form>
-                </TabsContent>
-              </Tabs>
+                </form>
+              </div>
 
               {status ? (
                 <Alert

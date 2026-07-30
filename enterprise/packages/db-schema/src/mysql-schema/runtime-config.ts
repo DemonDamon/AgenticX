@@ -163,6 +163,7 @@ export const authRefreshSessions = mysqlTable("auth_refresh_sessions", {
   deptId: varchar("dept_id", { length: 26 }),
   email: text("email").notNull(),
   scopesJson: json("scopes_json").notNull().$type<string[]>(),
+  mustChangePassword: boolean("must_change_password").notNull().default(false),
   expiresAt: datetime("expires_at", { fsp: 6 }).notNull(),
   createdAt: datetime("created_at", { fsp: 6 }).default(sql`(UTC_TIMESTAMP(6))`).notNull(),
 });

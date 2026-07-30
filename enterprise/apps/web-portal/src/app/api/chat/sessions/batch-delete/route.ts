@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { getSessionFromCookies } from "../../../../../lib/session";
+import { getSessionFromCookies, passwordChangeRequiredResponse } from "../../../../../lib/session";
 import {
   chatHistoryServerError,
   chatHistoryUnauthorized,
@@ -11,6 +11,7 @@ const MAX_BATCH = 100;
 
 export async function POST(request: Request) {
   const session = await getSessionFromCookies();
+  if (session?.mustChangePassword) return passwordChangeRequiredResponse();
   if (!session) return chatHistoryUnauthorized();
 
   let body: { session_ids?: unknown };

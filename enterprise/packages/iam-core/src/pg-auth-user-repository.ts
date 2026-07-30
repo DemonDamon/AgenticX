@@ -4,6 +4,7 @@ import { MysqlAuthUserRepository } from "./mysql-auth-user-repository";
 import {
   loadAuthUserByEmail,
   resetFailedLoginPg,
+  updatePasswordAndClearRequirementPg,
   updateFailedLoginPg,
   upsertUserRowFromAuthUser,
 } from "./repos/users";
@@ -40,6 +41,13 @@ export class PgAuthUserRepository implements AuthUserRepository {
       return;
     }
     await resetFailedLoginPg(this.tenantId, email);
+  }
+
+  public async updatePasswordAndClearRequirement(email: string, passwordHash: string): Promise<AuthUser | null> {
+    if (this.mysqlDelegate) {
+      return this.mysqlDelegate.updatePasswordAndClearRequirement(email, passwordHash);
+    }
+    return updatePasswordAndClearRequirementPg(this.tenantId, email, passwordHash);
   }
 
   /** 扩展能力（非 AuthUserRepository 接口）：dev bootstrap / sync */

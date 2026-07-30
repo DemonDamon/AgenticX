@@ -64,6 +64,13 @@
       "when": 1784158783973,
       "tag": "0008_chat_sessions_pinned_at",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "5",
+      "when": 1785322028583,
+      "tag": "0009_user_password_change_required",
+      "breakpoints": true
     }
   ]
 }

@@ -29,7 +29,14 @@ export async function POST(request: Request) {
       throw new Error("invalid credentials");
     }
     const tokens = await loginWithPassword(email, password);
-    const response = NextResponse.json({ code: "00000", message: "ok", data: { expiresInSeconds: tokens.expiresInSeconds } });
+    const response = NextResponse.json({
+      code: "00000",
+      message: "ok",
+      data: {
+        expiresInSeconds: tokens.expiresInSeconds,
+        mustChangePassword: tokens.mustChangePassword,
+      },
+    });
     response.cookies.set(ACCESS_COOKIE, tokens.accessToken, {
       httpOnly: true,
       sameSite: "lax",
@@ -56,4 +63,3 @@ export async function POST(request: Request) {
     );
   }
 }
-

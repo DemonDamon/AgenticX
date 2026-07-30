@@ -142,14 +142,19 @@ func (t *Tracker) CheckAndAddContext(ctx RequestContext, tokens int64, ledgerEve
 	defer t.mu.Unlock()
 	cfg := t.loadConfig()
 	rule := selectRule(cfg, ctx.UserID, ctx.DeptID, ctx.Role, ctx.Model)
-	if rule.MonthlyTokens <= 0 {
-		return Decision{Allowed: true, Rule: rule, Description: "no quota"}
-	}
 	month := time.Now().UTC().Format("2006-01")
+	if rule.MonthlyTokens <= 0 {
+		if strings.TrimSpace(ctx.UserID) == "" {
+			return Decision{Allowed: true, Rule: rule, Description: "no quota"}
+		}
+		// Unlimited rules still keep a per-user usage ledger so the portal can
+		// report consumed tokens without treating the rule as an enforced cap.
+		return t.checkAndAddUserLocked(rule, ctx.UserID, month, tokens, true)
+	}
 	if poolKey, ok := poolKeyFor(rule, ctx, month); ok && t.poolCounter != nil {
 		return t.checkAndAddSharedPool(rule, poolKey, tokens, ledgerEvent)
 	}
-	return t.checkAndAddUserLocked(rule, ctx.UserID, month, tokens)
+	return t.checkAndAddUserLocked(rule, ctx.UserID, month, tokens, false)
 }
 
 func (t *Tracker) checkAndAddSharedPool(rule Rule, key PoolKey, tokens int64, ledgerEvent string) Decision {
@@ -195,10 +200,10 @@ func (t *Tracker) checkAndAddSharedPool(rule Rule, key PoolKey, tokens int64, le
 	}
 }
 
-func (t *Tracker) checkAndAddUserLocked(rule Rule, userID, month string, tokens int64) Decision {
+func (t *Tracker) checkAndAddUserLocked(rule Rule, userID, month string, tokens int64, recordOnly bool) Decision {
 	unlock, lockOK := t.lockUsageFile()
 	if !lockOK {
-		if rule.Action == ActionBlock {
+		if !recordOnly && rule.Action == ActionBlock {
 			return Decision{
 				Allowed:     false,
 				Rule:        rule,
@@ -221,7 +226,7 @@ func (t *Tracker) checkAndAddUserLocked(rule Rule, userID, month string, tokens 
 		used = cached
 	}
 	after := used + max64(tokens, 0)
-	allowed := after <= rule.MonthlyTokens || rule.Action != ActionBlock
+	allowed := recordOnly || after <= rule.MonthlyTokens || rule.Action != ActionBlock
 	if allowed {
 		updated := false
 		for i := range rows {
@@ -237,7 +242,9 @@ func (t *Tracker) checkAndAddUserLocked(rule Rule, userID, month string, tokens 
 		t.usageCache[key] = after
 		if !t.writeUsage(rows) {
 			log.Printf("[quota] persist usage failed user=%s month=%s action=%s", userID, month, rule.Action)
-			if rule.Action == ActionBlock {
+			if recordOnly {
+				t.usageCache[key] = used
+			} else if rule.Action == ActionBlock {
 				// fail-closed for strict quota policy; avoid silent bypass.
 				t.usageCache[key] = used
 				return Decision{
@@ -252,12 +259,17 @@ func (t *Tracker) checkAndAddUserLocked(rule Rule, userID, month string, tokens 
 		}
 	}
 	desc := fmt.Sprintf("quota %s %d/%d", key, after, rule.MonthlyTokens)
+	exceededBy := max64(after-rule.MonthlyTokens, 0)
+	if recordOnly {
+		desc = fmt.Sprintf("unlimited usage %s %d", key, after)
+		exceededBy = 0
+	}
 	return Decision{
 		Allowed:     allowed,
 		Rule:        rule,
 		UsedBefore:  used,
 		UsedAfter:   after,
-		ExceededBy:  max64(after-rule.MonthlyTokens, 0),
+		ExceededBy:  exceededBy,
 		Description: desc,
 	}
 }
@@ -275,6 +287,16 @@ func (t *Tracker) RollbackContext(ctx RequestContext, tokens int64) bool {
 	cfg := t.loadConfig()
 	rule := selectRule(cfg, ctx.UserID, ctx.DeptID, ctx.Role, ctx.Model)
 	month := time.Now().UTC().Format("2006-01")
+	if rule.MonthlyTokens <= 0 {
+		if strings.TrimSpace(ctx.UserID) == "" {
+			return true
+		}
+		return t.rollbackUserLocked(ctx.UserID, month, tokens)
+	}
+	return t.rollbackRuleLocked(rule, ctx, month, tokens)
+}
+
+func (t *Tracker) rollbackRuleLocked(rule Rule, ctx RequestContext, month string, tokens int64) bool {
 	if poolKey, ok := poolKeyFor(rule, ctx, month); ok && t.poolCounter != nil {
 		_, err := t.poolCounter.Add(poolKey, -tokens, LedgerEventRefund, "")
 		return err == nil
