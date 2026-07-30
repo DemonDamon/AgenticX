@@ -2,7 +2,6 @@ package server
 
 import (
 	"encoding/json"
-	"fmt"
 	"net/http"
 	"os"
 	"strings"
@@ -245,12 +244,12 @@ func streamErrorCode(err error) string {
 		return ""
 	}
 	msg := err.Error()
+	// buffer overrun is treated as a hard stream safety stop (policy channel).
 	if strings.Contains(msg, "stream:buffer_exceeded") {
 		return "90002"
 	}
-	if strings.Contains(msg, "stream:idle_timeout") {
-		return "90002"
-	}
+	// idle_timeout is upstream stall / transport — never map to 9xxxx policy codes,
+	// or the portal will show a false “合规拦截” banner.
 	return ""
 }
 
@@ -258,7 +257,14 @@ func formatStreamError(err error) string {
 	if err == nil {
 		return "stream failed"
 	}
-	return fmt.Sprintf("%v", err)
+	msg := err.Error()
+	if strings.Contains(msg, "stream:idle_timeout") {
+		return "上游模型长时间无响应（流式空闲超时）。请重试；若刚使用联网搜索，可先关闭搜索或更换模型后再试。"
+	}
+	if strings.Contains(msg, "stream:buffer_exceeded") {
+		return "上游响应过大，流式缓冲已超限。"
+	}
+	return msg
 }
 
 func routingDecisionFromStream(result relay.StreamResult, model string, fallback routing.Decision) routing.Decision {
