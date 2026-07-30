@@ -5,6 +5,7 @@ import enterprisePkg from "../../package.json";
 const withNextIntl = createNextIntlPlugin("./src/i18n/request.ts");
 
 const config: NextConfig = {
+  output: "standalone",
   env: {
     NEXT_PUBLIC_ENTERPRISE_VERSION: enterprisePkg.version,
   },

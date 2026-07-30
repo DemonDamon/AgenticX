@@ -1,5 +1,29 @@
 import { verifyPassword } from "@agenticx/auth";
-import { aggregateScopesForUser, ensureSystemRoles, getDefaultOrgId, hasSomeScope, loadAuthUserByEmail } from "@agenticx/iam-core";
+import {
+  aggregateScopesForUser,
+  ensureSystemRoles,
+  getDefaultOrgId,
+  hasSomeScope,
+  loadAuthUserByEmail,
+  reconcileUserPasswordHashByEmail,
+} from "@agenticx/iam-core";
+import { resolveAdminCredentials } from "./admin-session";
+
+async function reconcileConfiguredAdminPasswordIfNeeded(input: {
+  email: string;
+  password: string;
+  tenantId: string;
+}): Promise<void> {
+  const configured = resolveAdminCredentials();
+  if (!configured) return;
+  if (input.email.trim().toLowerCase() !== configured.email.trim().toLowerCase()) return;
+  if (input.password !== configured.password) return;
+  await reconcileUserPasswordHashByEmail({
+    tenantId: input.tenantId,
+    email: configured.email,
+    password: configured.password,
+  });
+}
 
 export async function authenticateAdminConsoleUser(input: {
   email: string;
@@ -7,6 +31,7 @@ export async function authenticateAdminConsoleUser(input: {
   tenantId: string;
 }): Promise<{ userId: string; tenantId: string; email: string } | null> {
   await ensureSystemRoles(input.tenantId);
+  await reconcileConfiguredAdminPasswordIfNeeded(input);
   const user = await loadAuthUserByEmail(input.tenantId, input.email.trim().toLowerCase());
   if (!user) return null;
   if (user.status === "disabled") return null;

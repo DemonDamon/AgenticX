@@ -26,6 +26,8 @@ export type ArtifactTreeNode =
       artifact: ArtifactListItem;
     };
 
+type ArtifactFileNode = Extract<ArtifactTreeNode, { type: "file" }>;
+
 /** Format byte size like "25.87 KB". */
 export function formatArtifactByteSize(bytes: number): string {
   if (!Number.isFinite(bytes) || bytes < 0) return "0 B";
@@ -119,7 +121,7 @@ export function buildArtifactTree(artifacts: ArtifactListItem[]): ArtifactTreeNo
     type: "dir";
     key: string;
     name: string;
-    children: Map<string, DirDraft | ArtifactTreeNode>;
+    children: Map<string, DirDraft | ArtifactFileNode>;
   };
 
   const root: DirDraft = { type: "dir", key: "", name: "", children: new Map() };
@@ -135,9 +137,12 @@ export function buildArtifactTree(artifacts: ArtifactListItem[]): ArtifactTreeNo
     for (let i = 0; i < parts.length - 1; i += 1) {
       const name = parts[i]!;
       const key = parts.slice(0, i + 1).join("/");
-      let next = cursor.children.get(name);
-      if (!next || next.type !== "dir") {
-        next = { type: "dir", key, name, children: new Map() };
+      const existing = cursor.children.get(name);
+      const next: DirDraft =
+        existing && existing.type === "dir"
+          ? existing
+          : { type: "dir", key, name, children: new Map() };
+      if (!existing || existing.type !== "dir") {
         cursor.children.set(name, next);
       }
       cursor = next;

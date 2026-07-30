@@ -1,15 +1,17 @@
 import {
-  AuthService,
   InMemoryRefreshTokenStore,
   JwtService,
   hashPassword,
+  verifyPassword,
   type AuthContext,
   type AuthTokens,
 } from "@agenticx/auth";
 import {
   assignRolesIfNone,
+  createSessionGrant,
   PgAuthUserRepository,
   PgRefreshTokenStore,
+  reconcileUserPasswordHashByEmail,
   ensureSystemRoles,
   getDefaultOrgId,
   insertAuditEvent,
@@ -22,6 +24,7 @@ import { createHash } from "node:crypto";
 import { randomBytes } from "node:crypto";
 import { syncAuthUserToPostgres } from "./chat-history";
 import { getEffectiveUserScopes } from "./auth-scopes";
+import { buildPortalTokenContext } from "./portal-auth-token-context";
 import { ulid } from "ulid";
 
 const DEFAULT_TENANT_ID = process.env.DEFAULT_TENANT_ID?.trim();
@@ -31,6 +34,20 @@ const DEV_OWNER_PASSWORD = process.env.AUTH_DEV_OWNER_PASSWORD;
 const DEV_ADMIN_EMAIL = "admin@agenticx.local";
 const LEGACY_OWNER_EMAIL = "owner@agenticx.local";
 const WEAK_PASSWORDS = new Set(["admin123", "admin123!", "password", "password123", "qwerty123"]);
+const MAX_FAILED_ATTEMPTS = 5;
+const LOCK_MINUTES = 15;
+const PORTAL_SESSION_GRANT_SCOPES = ["workspace:chat", "workspace:read", "workspace:manage"] as const;
+
+async function reconcileConfiguredAdminPasswordIfNeeded(email: string, password: string): Promise<void> {
+  if (!DEFAULT_TENANT_ID || !DEV_OWNER_PASSWORD) return;
+  if (email.trim().toLowerCase() !== DEV_ADMIN_EMAIL) return;
+  if (password !== DEV_OWNER_PASSWORD) return;
+  await reconcileUserPasswordHashByEmail({
+    tenantId: DEFAULT_TENANT_ID,
+    email: DEV_ADMIN_EMAIL,
+    password: DEV_OWNER_PASSWORD,
+  });
+}
 
 type ProvisionInput = {
   tenantId: string;
@@ -43,7 +60,6 @@ type ProvisionInput = {
 
 type AuthRuntime = {
   repo: PgAuthUserRepository;
-  authService: AuthService;
   jwtService: JwtService;
   refreshStore: InMemoryRefreshTokenStore | PgRefreshTokenStore;
   tenantId: string;
@@ -66,7 +82,6 @@ function createRuntime(): AuthRuntime {
     accessTtlSeconds: 60 * 60,
     refreshTtlSeconds: 7 * 24 * 60 * 60,
   });
-  const authService = new AuthService({ userRepo: repo, jwtService, refreshStore });
 
   const bootstrapPromise = (async () => {
     if (!process.env.DATABASE_URL?.trim() || !tenantId) {
@@ -147,7 +162,6 @@ function createRuntime(): AuthRuntime {
 
   return {
     repo,
-    authService,
     jwtService,
     refreshStore,
     tenantId,
@@ -183,6 +197,26 @@ function roleCodesForProvisionScopes(scopes: string[] | undefined): string[] {
     return ["admin", "member"];
   }
   return ["member"];
+}
+
+function createPortalSessionId(userId: string): string {
+  return `${userId}_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+}
+
+async function ensurePortalSessionGrant(
+  user: Pick<import("@agenticx/auth").AuthUser, "tenantId" | "email">,
+  sessionId: string,
+  ttlSeconds: number,
+): Promise<void> {
+  if (!process.env.DATABASE_URL?.trim()) return;
+  await createSessionGrant({
+    tenantId: user.tenantId,
+    sessionId,
+    scopes: [...PORTAL_SESSION_GRANT_SCOPES],
+    ttlSeconds,
+    createdBy: user.email,
+    description: "web-portal session access",
+  });
 }
 
 export async function provisionUserFromAdmin(input: ProvisionInput): Promise<void> {
@@ -223,14 +257,13 @@ export async function provisionUserFromAdmin(input: ProvisionInput): Promise<voi
 
 export async function loginWithPassword(email: string, password: string): Promise<AuthTokens> {
   const runtime = await getRuntime();
-  const tokens = await runtime.authService.loginWithPassword({ email, password });
-  const user = await runtime.repo.findByEmail(email.toLowerCase());
-  if (user) {
-    try {
-      await syncAuthUserToPostgres(user);
-    } catch (err) {
-      console.error("[web-portal] syncAuthUserToPostgres after login failed:", err);
-    }
+  await reconcileConfiguredAdminPasswordIfNeeded(email, password);
+  const user = await authenticatePortalUser(runtime, email, password);
+  const tokens = await issueTokensForUser(runtime, user);
+  try {
+    await syncAuthUserToPostgres(user);
+  } catch (err) {
+    console.error("[web-portal] syncAuthUserToPostgres after login failed:", err);
   }
   return tokens;
 }
@@ -244,8 +277,8 @@ export async function loginAndGetIdentity(email: string, password: string): Prom
   displayName: string;
 }> {
   const runtime = await getRuntime();
-  await runtime.authService.loginWithPassword({ email, password });
-  const user = await runtime.repo.findByEmail(email.toLowerCase());
+  await reconcileConfiguredAdminPasswordIfNeeded(email, password);
+  const user = await authenticatePortalUser(runtime, email, password);
   if (!user) throw new Error("user not found after login");
   try {
     await syncAuthUserToPostgres(user);
@@ -303,15 +336,7 @@ function parseJitRoleAllowlist(): Set<string> {
 }
 
 async function issueTokensForUser(runtime: AuthRuntime, user: import("@agenticx/auth").AuthUser): Promise<AuthTokens> {
-  const effectiveScopes = getEffectiveUserScopes(user.scopes);
-  const context: AuthContext = {
-    userId: user.id,
-    tenantId: user.tenantId,
-    deptId: user.deptId ?? null,
-    email: user.email,
-    scopes: effectiveScopes,
-    sessionId: `${user.id}_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
-  };
+  const context = buildPortalTokenContext(user, createPortalSessionId(user.id));
   const access = await runtime.jwtService.signAccessToken(context);
   const refresh = await runtime.jwtService.signRefreshToken(context);
   await runtime.refreshStore.set({
@@ -323,12 +348,43 @@ async function issueTokensForUser(runtime: AuthRuntime, user: import("@agenticx/
     scopes: context.scopes,
     expiresAt: Date.now() + refresh.expiresInSeconds * 1000,
   });
+  try {
+    await ensurePortalSessionGrant(user, context.sessionId, refresh.expiresInSeconds);
+  } catch (error) {
+    await runtime.refreshStore.delete(context.sessionId);
+    throw error;
+  }
   return {
     accessToken: access.token,
     refreshToken: refresh.token,
     tokenType: "Bearer",
     expiresInSeconds: access.expiresInSeconds,
   };
+}
+
+async function authenticatePortalUser(
+  runtime: AuthRuntime,
+  email: string,
+  password: string,
+): Promise<import("@agenticx/auth").AuthUser> {
+  const user = await runtime.repo.findByEmail(email.trim().toLowerCase());
+  if (!user) throw new Error("Invalid credentials.");
+  if (user.status === "disabled") throw new Error("Account disabled.");
+  if (user.lockedUntil && user.lockedUntil > Date.now()) {
+    throw new Error("Account temporarily locked.");
+  }
+
+  const valid = await verifyPassword(password, user.passwordHash);
+  if (!valid) {
+    const failedCount = user.failedLoginCount + 1;
+    const shouldLock = failedCount >= MAX_FAILED_ATTEMPTS;
+    const lockedUntil = shouldLock ? Date.now() + LOCK_MINUTES * 60 * 1000 : null;
+    await runtime.repo.updateFailedLogin(user.email, failedCount, lockedUntil);
+    throw new Error("Invalid credentials.");
+  }
+
+  await runtime.repo.resetFailedLogin(user.email);
+  return user;
 }
 
 export async function loginWithOidcClaims(input: OidcLoginInput): Promise<OidcLoginResult> {
@@ -448,7 +504,7 @@ export async function loginWithOidcClaims(input: OidcLoginInput): Promise<OidcLo
 
 export async function verifyAccessToken(accessToken: string): Promise<AuthContext | null> {
   const runtime = await getRuntime();
-  return runtime.authService.verifyAccess(accessToken);
+  return runtime.jwtService.verifyAccessToken(accessToken);
 }
 
 export async function refreshTokens(refreshToken: string): Promise<AuthTokens> {
@@ -466,21 +522,28 @@ export async function refreshTokens(refreshToken: string): Promise<AuthTokens> {
   if (user.status === "locked") throw new Error("Refresh session expired.");
   if (user.lockedUntil && user.lockedUntil > Date.now()) throw new Error("Refresh session expired.");
 
-  const nextContext: AuthContext = {
-    ...refreshContext,
-    scopes: user.scopes,
-    deptId: user.deptId ?? null,
-  };
+  const nextContext = buildPortalTokenContext(user, createPortalSessionId(user.id));
 
   const access = await runtime.jwtService.signAccessToken(nextContext);
   const nextRefresh = await runtime.jwtService.signRefreshToken(nextContext);
 
   await runtime.refreshStore.set({
     ...stored,
+    sessionId: nextContext.sessionId,
+    userId: nextContext.userId,
+    tenantId: nextContext.tenantId,
+    email: nextContext.email,
     scopes: nextContext.scopes,
     deptId: nextContext.deptId ?? null,
     expiresAt: Date.now() + nextRefresh.expiresInSeconds * 1000,
   });
+  try {
+    await ensurePortalSessionGrant(user, nextContext.sessionId, nextRefresh.expiresInSeconds);
+  } catch (error) {
+    await runtime.refreshStore.delete(nextContext.sessionId);
+    throw error;
+  }
+  await runtime.refreshStore.delete(refreshContext.sessionId);
 
   return {
     accessToken: access.token,
