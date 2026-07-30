@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import time
 import uuid
-from typing import Any, Dict, List, Optional, Sequence, Tuple
+from typing import Any, Dict, List, Mapping, Optional, Sequence, Tuple
 
 from agenticx.runtime.graph.events import graph_event
 from agenticx.runtime.graph.models import (
@@ -31,6 +31,21 @@ DEBATE_NUDGE_TEXT = (
 )
 
 
+def _member_display_label(
+    member_id: str,
+    member_labels: Optional[Mapping[str, str]] = None,
+) -> str:
+    """Prefer human-readable avatar name; fall back to id."""
+    mid = str(member_id or "").strip()
+    if not mid:
+        return ""
+    if member_labels:
+        name = str(member_labels.get(mid) or "").strip()
+        if name:
+            return name
+    return mid
+
+
 def ensure_presence_run(
     *,
     session_id: str,
@@ -38,6 +53,7 @@ def ensure_presence_run(
     member_ids: Sequence[str],
     store: Optional[GraphRunStore] = None,
     existing_run_id: Optional[str] = None,
+    member_labels: Optional[Mapping[str, str]] = None,
 ) -> GraphRun:
     """Return (create if needed) an ephemeral presence GraphRun for chat projection."""
     store = store or get_default_store()
@@ -78,15 +94,19 @@ def ensure_presence_run(
 
     for mid in members:
         nid = f"agent:{mid}"
+        label = _member_display_label(mid, member_labels)
         if nid not in run.nodes:
             run.nodes[nid] = GraphNode(
                 id=nid,
                 kind=NodeKind.AGENT,
-                label=mid,
+                label=label,
                 status=NodeStatus.READY,
                 agent_id=mid,
                 meta={"view_role": "agent"},
             )
+        elif label and label != mid:
+            # Refresh hex/id labels when display names become available.
+            run.nodes[nid].label = label
 
     store.save(run, bump_version=True)
     return run
@@ -206,6 +226,7 @@ def maybe_debate_nudge(
 def project_h2a_fanout(
     run: GraphRun,
     target_agent_ids: Sequence[str],
+    member_labels: Optional[Mapping[str, str]] = None,
 ) -> Tuple[List[GraphEdge], List[Dict[str, Any]]]:
     """Create human→agent MESSAGE edges for each target; return edges + SSE events."""
     events: List[Dict[str, Any]] = []
@@ -215,15 +236,19 @@ def project_h2a_fanout(
         if not tid:
             continue
         node_id = tid if tid.startswith("agent:") else f"agent:{tid}"
+        agent_id = tid.removeprefix("agent:")
+        label = _member_display_label(agent_id, member_labels)
         if node_id not in run.nodes:
             run.nodes[node_id] = GraphNode(
                 id=node_id,
                 kind=NodeKind.AGENT,
-                label=tid.removeprefix("agent:"),
+                label=label,
                 status=NodeStatus.READY,
-                agent_id=tid.removeprefix("agent:"),
+                agent_id=agent_id,
                 meta={"view_role": "agent"},
             )
+        elif label and label != agent_id:
+            run.nodes[node_id].label = label
         edge = upsert_message_edge(run, source=HUMAN_NODE_ID, target=node_id, label="user")
         edges.append(edge)
         events.extend(message_edge_events(run, edge, summary="user→agent"))

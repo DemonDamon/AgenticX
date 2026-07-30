@@ -83,11 +83,25 @@ def build_agent_projection(run: GraphRun) -> Dict[str, Any]:
         else:
             status = NodeStatus.PENDING.value
         labels = [run.nodes[tid].label for tid in task_ids if tid in run.nodes]
+        # Prefer display name already stored on the agent presence node (not hex id).
+        display = ""
+        presence = run.nodes.get(f"agent:{aid}")
+        if presence is not None:
+            display = str(presence.label or "").strip()
+        if not display or display == aid:
+            for tid in task_ids:
+                n = run.nodes.get(tid)
+                if n is None:
+                    continue
+                cand = str(n.label or "").strip()
+                if cand and cand != aid and cand != tid and not cand.startswith("agent:"):
+                    display = cand
+                    break
         agent_nodes.append(
             {
                 "id": f"agent:{aid}",
                 "kind": NodeKind.AGENT.value,
-                "label": aid,
+                "label": display or aid,
                 "status": status,
                 "agent_id": aid if aid != "__unassigned__" else None,
                 "task_ids": task_ids,

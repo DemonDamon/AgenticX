@@ -37,6 +37,34 @@ def test_ensure_presence_run_ephemeral_and_members(tmp_path: Path) -> None:
     assert "agent:a3" in again.nodes
 
 
+def test_ensure_presence_run_uses_member_display_names(tmp_path: Path) -> None:
+    store = GraphRunStore(root=tmp_path)
+    run = ensure_presence_run(
+        session_id="s1",
+        group_id="g1",
+        member_ids=["12e6fedc069f", "__meta__"],
+        store=store,
+        member_labels={
+            "12e6fedc069f": "架构师·阿析",
+            "__meta__": "Machi",
+        },
+    )
+    assert run.nodes["agent:12e6fedc069f"].label == "架构师·阿析"
+    assert run.nodes["agent:__meta__"].label == "Machi"
+    # Refresh previously hex-labeled node when names arrive later.
+    run.nodes["agent:12e6fedc069f"].label = "12e6fedc069f"
+    store.save(run, bump_version=True)
+    again = ensure_presence_run(
+        session_id="s1",
+        group_id="g1",
+        member_ids=["12e6fedc069f", "__meta__"],
+        store=store,
+        existing_run_id=run.run_id,
+        member_labels={"12e6fedc069f": "架构师·阿析", "__meta__": "Machi"},
+    )
+    assert again.nodes["agent:12e6fedc069f"].label == "架构师·阿析"
+
+
 def test_upsert_message_edge_reuses_id(tmp_path: Path) -> None:
     store = GraphRunStore(root=tmp_path)
     run = ensure_presence_run(

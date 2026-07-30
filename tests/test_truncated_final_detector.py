@@ -64,3 +64,27 @@ def test_treats_ellipsis_as_unterminated_when_action_is_declared() -> None:
         reasoning="Let me search the web.",
         finish_reason="stop",
     ) == "short_unterminated_with_intent"
+
+
+def test_finish_reason_length_triggers_even_for_long_bodies() -> None:
+    body = (
+        "风险\n\n- bug 修复窗口只有 1 小时。\n\n"
+        "**一句话：1 天能做出演示版，演示完必须补 T4/T"
+    )
+    assert _detect(body=body, finish_reason="length") == "finish_reason_length"
+
+
+def test_unbalanced_bold_markers_on_long_body() -> None:
+    body = (
+        "## 风险\n\n"
+        "- bug 修复窗口只有 1 小时，演示前不要加新功能，有 bug 就绕过。\n\n"
+        "---\n\n"
+        "**一句话：1 天能做出「能看、能点、能干预」的演示版，但安全性和审计是裸的，演示完必须补 T4/T"
+    )
+    assert len(body) > 80
+    assert _detect(body=body, finish_reason="stop") == "unbalanced_markdown"
+
+
+def test_mid_path_cut_on_long_body_without_terminator() -> None:
+    body = ("这是一段足够长的说明文字，用来超过短回复阈值。" * 3) + "\n\n补齐清单后还需完成 T4/T"
+    assert _detect(body=body, finish_reason="stop") == "mid_path_cut"

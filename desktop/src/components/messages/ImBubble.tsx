@@ -95,22 +95,6 @@ type Props = {
   streamStalledSeconds?: number;
 };
 
-/** Cycling 1→3 dots for group-chat typing rows (name shown in header only). */
-function TypingDots() {
-  const [count, setCount] = useState(1);
-  useEffect(() => {
-    const id = window.setInterval(() => {
-      setCount((c) => (c >= 3 ? 1 : c + 1));
-    }, 400);
-    return () => clearInterval(id);
-  }, []);
-  return (
-    <span className="inline-block min-w-[1em] tabular-nums" aria-hidden>
-      {".".repeat(count)}
-    </span>
-  );
-}
-
 function StalledStreamIndicator({ silentSeconds }: { silentSeconds: number }) {
   return (
     <div
@@ -445,10 +429,6 @@ export function ImBubble({
   const userBubbleGutterPx = USER_BUBBLE_GUTTER_PX;
   const canFoldExpertReply =
     showExpertLabel && !isStreaming && !isGroupTyping && !isMetaPendingWork && hasBody;
-  const expertPreview = String(bodyText || "")
-    .replace(/\s+/g, " ")
-    .trim()
-    .slice(0, 120);
   // Gutter 挂在 stack 上（非整气泡 margin），保证操作栏与气泡边框同宽、左右缘对齐。
   const userStackStyle = isUser
     ? {
@@ -813,20 +793,7 @@ export function ImBubble({
           </div>
         ) : expertCollapsed && canFoldExpertReply ? (
           <>
-            <button
-              type="button"
-              className="w-full min-w-0 rounded-lg px-3 py-1.5 text-left transition hover:bg-surface-hover/50"
-              onClick={() => setExpertCollapsed(false)}
-            >
-              <p className="line-clamp-2 text-[13px] leading-relaxed text-text-subtle">
-                {expertPreview}
-                {expertPreview.length >= 120 ? "…" : ""}
-              </p>
-              <span className="mt-1 inline-block text-[12px] font-medium text-[color:var(--ui-btn-primary-bg)]">
-                展开全文
-              </span>
-            </button>
-            {/* Keep a content root for copy/quote fallbacks while the full body is folded. */}
+            {/* Body hidden while folded — expand via expert label. Keep root for copy/quote. */}
             <div ref={msgContentRef} className="hidden" aria-hidden>
               {bodyText}
             </div>
@@ -895,10 +862,7 @@ export function ImBubble({
                     <StreamingDots compact />
                   )
                 ) : isGroupTyping ? (
-                  <span className="inline-flex items-baseline gap-0.5" aria-live="polite" aria-label="正在输入">
-                    <span>正在输入</span>
-                    <TypingDots />
-                  </span>
+                  <StreamingDots compact />
                 ) : (
                   <>
                     {(citationReferences?.length ?? 0) > 0 ? (
