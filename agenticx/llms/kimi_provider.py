@@ -115,6 +115,24 @@ class KimiProvider(BaseLLMProvider):
         return self._is_k2_series_model()
 
     @staticmethod
+    def _assistant_content_is_empty(content: Any) -> bool:
+        """True when Moonshot would treat assistant content as empty."""
+        if content is None:
+            return True
+        if isinstance(content, str):
+            return not content.strip()
+        if isinstance(content, list):
+            for block in content:
+                if not isinstance(block, dict):
+                    continue
+                if str(block.get("type", "")).strip() != "text":
+                    continue
+                if str(block.get("text", "")).strip():
+                    return False
+            return True
+        return not str(content).strip()
+
+    @staticmethod
     def _fill_reasoning_content_for_tool_call_messages(
         messages: List[Dict[str, Any]],
     ) -> List[Dict[str, Any]]:
@@ -134,7 +152,13 @@ class KimiProvider(BaseLLMProvider):
 
             rc_existing = msg.get("reasoning_content")
             if rc_existing is not None and str(rc_existing).strip():
-                out.append(msg)
+                # Still normalize empty content so Moonshot does not 400.
+                if KimiProvider._assistant_content_is_empty(msg.get("content")):
+                    patched = dict(msg)
+                    patched["content"] = " "
+                    out.append(patched)
+                else:
+                    out.append(msg)
                 continue
 
             patched = dict(msg)
@@ -146,17 +170,19 @@ class KimiProvider(BaseLLMProvider):
                     reasoning = (match.group(1) or "").strip()
                     stripped = _REDACTED_THINKING_BLOCK.sub("", content_str).strip()
                     patched["reasoning_content"] = reasoning if reasoning else " "
-                    patched["content"] = stripped if stripped else None
+                    # Never emit null/empty content: Moonshot rejects empty assistant rows.
+                    patched["content"] = stripped if stripped else " "
                 else:
                     patched["reasoning_content"] = " "
             else:
                 patched["reasoning_content"] = " "
+                patched["content"] = " "
             out.append(patched)
         return out
 
     @staticmethod
     def _drop_empty_assistant_content(messages: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-        """Moonshot rejects assistant rows whose content is an empty string."""
+        """Moonshot rejects assistant rows whose content is null/empty/whitespace-only."""
         out: List[Dict[str, Any]] = []
         for msg in messages:
             if not isinstance(msg, dict):
@@ -165,23 +191,24 @@ class KimiProvider(BaseLLMProvider):
             if str(msg.get("role", "")).strip() != "assistant":
                 out.append(msg)
                 continue
-            content = msg.get("content")
-            if isinstance(content, str) and not content.strip():
-                if msg.get("tool_calls"):
-                    patched = dict(msg)
-                    patched["content"] = " "
-                    out.append(patched)
+            if not KimiProvider._assistant_content_is_empty(msg.get("content")):
+                out.append(msg)
                 continue
-            out.append(msg)
+            if msg.get("tool_calls"):
+                patched = dict(msg)
+                patched["content"] = " "
+                out.append(patched)
+            # else: drop orphan empty assistant (no tool_calls)
         return out
 
     def _prepare_request_messages(
         self, messages: List[Dict[str, Any]], kwargs: Dict[str, Any]
     ) -> List[Dict[str, Any]]:
         messages = self._drop_empty_assistant_content(messages)
-        if not self._should_patch_reasoning_content_for_tool_calls(kwargs):
-            return messages
-        return self._fill_reasoning_content_for_tool_call_messages(messages)
+        if self._should_patch_reasoning_content_for_tool_calls(kwargs):
+            messages = self._fill_reasoning_content_for_tool_call_messages(messages)
+        # Fill may rewrite content; re-normalize so null/empty never reaches Moonshot.
+        return self._drop_empty_assistant_content(messages)
     
     def _invoke_with_messages(
         self, messages: List[Dict], tools: Optional[List[Dict]] = None, **kwargs
