@@ -124,34 +124,47 @@ export function RunGraphPanel({ pane, onClose, tintColor, embedded = false }: Pr
         {!embedded ? (
           <>
             <Share2 className="h-4 w-4 text-text-subtle" strokeWidth={1.8} />
-            <span className="text-[13px] font-medium text-text-strong">运行图</span>
+            <span className="text-[14px] font-medium text-text-strong">运行图</span>
           </>
         ) : null}
-        <button
-          type="button"
-          className={`rounded px-1.5 py-0.5 text-[10px] ${embedded ? "" : "ml-1 "} ${
-            preferAgentView ? "bg-surface-card-strong text-text-strong" : "text-text-faint"
+        <div
+          className={`inline-flex items-center gap-0.5 rounded-lg border border-border bg-surface-base p-0.5 ${
+            embedded ? "" : "ml-1"
           }`}
-          onClick={() => setPreferAgentView(true)}
         >
-          专家
-        </button>
+          <button
+            type="button"
+            className={`rounded-md px-2.5 py-1 text-[13px] font-medium transition ${
+              preferAgentView
+                ? "bg-[var(--ui-btn-primary-bg)] text-white shadow-sm"
+                : "text-text-subtle hover:bg-surface-hover hover:text-text-strong"
+            }`}
+            onClick={() => setPreferAgentView(true)}
+            aria-pressed={preferAgentView}
+          >
+            专家
+          </button>
+          <button
+            type="button"
+            className={`rounded-md px-2.5 py-1 text-[13px] font-medium transition ${
+              !preferAgentView
+                ? "bg-[var(--ui-btn-primary-bg)] text-white shadow-sm"
+                : "text-text-subtle hover:bg-surface-hover hover:text-text-strong"
+            }`}
+            onClick={() => setPreferAgentView(false)}
+            aria-pressed={!preferAgentView}
+          >
+            任务
+          </button>
+        </div>
         <button
           type="button"
-          className={`rounded px-1.5 py-0.5 text-[10px] ${
-            !preferAgentView ? "bg-surface-card-strong text-text-strong" : "text-text-faint"
-          }`}
-          onClick={() => setPreferAgentView(false)}
-        >
-          任务
-        </button>
-        <button
-          type="button"
-          className="rounded p-1 text-text-faint hover:bg-surface-hover hover:text-text-strong"
+          className="rounded-md p-1.5 text-text-subtle hover:bg-surface-hover hover:text-text-strong"
           onClick={() => void refresh()}
           title="刷新"
+          aria-label="刷新运行图"
         >
-          <RefreshCw className="h-3.5 w-3.5" />
+          <RefreshCw className="h-4 w-4" strokeWidth={2} />
         </button>
         {!embedded ? (
           <button
