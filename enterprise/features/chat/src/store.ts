@@ -15,6 +15,18 @@ import {
   type DeepResearchEvent,
 } from "@agenticx/sdk-ts";
 import { ChatHistoryHttpError, createPortalChatHistoryClient } from "./history-client";
+import {
+  computePayloadHash,
+  enqueueAppend,
+  flushHistoryOutbox,
+  hasPendingAppendOps,
+  listPendingOverlayMessages,
+  markSessionsDeleted,
+  retryDeadLetter,
+  stripToAppendPayload,
+  type HistoryPrincipal,
+  type HistorySyncSessionState,
+} from "./history-outbox";
 import type { QueuedMessage } from "./types/queued-message";
 import { shouldEnqueueOnResend } from "./utils/message-queue";
 import { getSessionRequestId, isSessionStreaming } from "./utils/session-stream-state";
@@ -90,6 +102,9 @@ export type ChatStoreState = {
   hydrated: boolean;
   historyLoading: boolean;
   historyError: string | null;
+  /** Per-session durable history sync status (separate from rename/delete historyError). */
+  historySyncBySessionId: Record<string, HistorySyncSessionState>;
+  historyPrincipal: HistoryPrincipal | null;
   sessionMessagesLoading: boolean;
   /** 本地草稿 session：用户发送首条消息前不落盘（对齐 Machi Desktop lazy create） */
   draftSessionId: string | null;
@@ -137,6 +152,10 @@ export type ChatStoreActions = {
   cancel(client: ChatClient): Promise<void>;
   deleteMessage(messageId: string): void;
   setDeepResearchClarifyAnswers(assistantMessageId: string, answers: Record<string, string>): void;
+  setHistoryPrincipal(principal: HistoryPrincipal | null): void;
+  setHistorySyncBySessionId(bySessionId: Record<string, HistorySyncSessionState>): void;
+  retryHistorySync(sessionId: string): Promise<void>;
+  refetchSessionMessages(sessionId: string): Promise<void>;
 };
 
 export type ChatStore = ChatStoreState & ChatStoreActions;
@@ -453,6 +472,83 @@ let sessionMessageLoadSeq = 0;
 let historyAuthRedirectScheduled = false;
 const portalHistory = createPortalChatHistoryClient();
 
+function mergeOverlayMessages(remote: ChatMessage[], overlay: ChatMessage[]): ChatMessage[] {
+  if (overlay.length === 0) return remote;
+  const byId = new Map<string, ChatMessage>();
+  for (const message of remote) byId.set(message.id, message);
+  for (const message of overlay) {
+    if (!byId.has(message.id)) byId.set(message.id, message);
+  }
+  return [...byId.values()].sort((a, b) => {
+    const at = Date.parse(a.created_at) || 0;
+    const bt = Date.parse(b.created_at) || 0;
+    if (at !== bt) return at - bt;
+    return a.id.localeCompare(b.id);
+  });
+}
+
+function setSessionHistorySync(
+  set: (partial: Partial<ChatStoreState> | ((state: ChatStoreState) => Partial<ChatStoreState>)) => void,
+  sessionId: string,
+  sync: HistorySyncSessionState | null,
+): void {
+  set((prev) => {
+    const next = { ...prev.historySyncBySessionId };
+    if (!sync || sync.state === "idle") {
+      delete next[sessionId];
+    } else {
+      next[sessionId] = sync;
+    }
+    return { historySyncBySessionId: next };
+  });
+}
+
+async function persistAppendMessages(
+  set: (partial: Partial<ChatStoreState> | ((state: ChatStoreState) => Partial<ChatStoreState>)) => void,
+  sessionId: string,
+  messages: ChatMessage[],
+): Promise<void> {
+  const payloads = messages.map(stripToAppendPayload);
+  const operationId = newUlid();
+  const payloadHash = await computePayloadHash(payloads);
+  const queuedFirst = await hasPendingAppendOps(sessionId);
+  if (queuedFirst) {
+    const result = await enqueueAppend(sessionId, messages, { operationId, payloadHash });
+    if (!result.enqueued) {
+      setSessionHistorySync(set, sessionId, {
+        pendingCount: 1,
+        state: "dead_letter",
+        message: result.reason || "这段对话尚未同步到服务器",
+      });
+      return;
+    }
+    void flushHistoryOutbox();
+    return;
+  }
+
+  try {
+    await portalHistory.appendMessages(sessionId, payloads, {
+      operationId,
+      payloadHash,
+      retries: 5,
+    });
+    setSessionHistorySync(set, sessionId, null);
+  } catch (persistErr) {
+    const result = await enqueueAppend(sessionId, messages, { operationId, payloadHash });
+    if (!result.enqueued) {
+      setSessionHistorySync(set, sessionId, {
+        pendingCount: 1,
+        state: "dead_letter",
+        message:
+          result.reason ||
+          resolveHistoryErrorMessage(persistErr, "这段对话尚未同步到服务器，将自动重试"),
+      });
+      return;
+    }
+    void flushHistoryOutbox();
+  }
+}
+
 function resolveHistoryErrorMessage(error: unknown, fallback: string): string {
   const unauthorized =
     (error instanceof ChatHistoryHttpError && error.status === 401) ||
@@ -597,6 +693,8 @@ export const useChatStore = create<ChatStore>((set, get) => ({
   hydrated: false,
   historyLoading: false,
   historyError: null,
+  historySyncBySessionId: {},
+  historyPrincipal: null,
   sessionMessagesLoading: false,
   draftSessionId: null,
   pendingMessages: [],
@@ -604,6 +702,42 @@ export const useChatStore = create<ChatStore>((set, get) => ({
   streamStateBySessionId: {},
   lastWebSearchBySessionId: {},
   lastDeepResearchBySessionId: {},
+
+  setHistoryPrincipal(principal) {
+    set({ historyPrincipal: principal });
+  },
+
+  setHistorySyncBySessionId(bySessionId) {
+    set({ historySyncBySessionId: bySessionId });
+  },
+
+  async retryHistorySync(sessionId) {
+    await retryDeadLetter(sessionId);
+  },
+
+  async refetchSessionMessages(sessionId) {
+    if (!get().hydrated || isDraftSessionId(get(), sessionId)) return;
+    try {
+      const remoteMessages = await portalHistory.getMessages(sessionId);
+      const overlay = await listPendingOverlayMessages(sessionId);
+      const merged = mergeOverlayMessages(remoteMessages, overlay);
+      set((prev) => {
+        const others = prev.messages.filter((message) => message.session_id !== sessionId);
+        return {
+          messages: [...others, ...merged],
+          responseVersionsByUserMessageId: {
+            ...stripVersionsForSession(prev, sessionId),
+            ...buildHydratedResponseVersions(merged),
+          },
+        };
+      });
+      if (overlay.length === 0) {
+        setSessionHistorySync(set, sessionId, null);
+      }
+    } catch {
+      // keep overlay; flush will retry
+    }
+  },
 
   removePendingMessage(messageId) {
     set((state) => ({
@@ -659,18 +793,21 @@ export const useChatStore = create<ChatStore>((set, get) => ({
             historyError: null,
           });
           historyAuthRedirectScheduled = false;
+          void flushHistoryOutbox();
           return;
         }
         const activeSession = sessions[0]!;
         const activeSessionId = activeSession.id;
         const remoteMessages = await portalHistory.getMessages(activeSessionId);
-        const responseVersions = buildHydratedResponseVersions(remoteMessages);
+        const overlay = await listPendingOverlayMessages(activeSessionId);
+        const merged = mergeOverlayMessages(remoteMessages, overlay);
+        const responseVersions = buildHydratedResponseVersions(merged);
 
         set({
           sessions,
           activeSessionId,
           draftSessionId: null,
-          messages: remoteMessages,
+          messages: merged,
           hydrated: true,
           historyLoading: false,
           historyError: null,
@@ -683,6 +820,11 @@ export const useChatStore = create<ChatStore>((set, get) => ({
           responseVersionsByUserMessageId: responseVersions,
         });
         historyAuthRedirectScheduled = false;
+        void flushHistoryOutbox().then(async (sessionIds) => {
+          for (const id of sessionIds) {
+            await get().refetchSessionMessages(id);
+          }
+        });
       } catch (error) {
         const message = resolveHistoryErrorMessage(error, "加载历史失败");
         const unauthorized = message === "登录已过期，请重新登录";
@@ -758,16 +900,23 @@ export const useChatStore = create<ChatStore>((set, get) => ({
 
     try {
       const remoteMessages = await portalHistory.getMessages(sessionId);
-      const responseVersions = buildHydratedResponseVersions(remoteMessages);
+      const overlay = await listPendingOverlayMessages(sessionId);
+      const merged = mergeOverlayMessages(remoteMessages, overlay);
+      const responseVersions = buildHydratedResponseVersions(merged);
       if (loadSeq !== sessionMessageLoadSeq || get().activeSessionId !== sessionId) return;
       set((state) => ({
-        messages: mergeSessionMessages(state.messages, sessionId, remoteMessages),
+        messages: mergeSessionMessages(state.messages, sessionId, merged),
         responseVersionsByUserMessageId: {
           ...stripVersionsForSession(state, sessionId),
           ...responseVersions,
         },
         sessionMessagesLoading: false,
       }));
+      void flushHistoryOutbox().then(async (sessionIds) => {
+        for (const id of sessionIds) {
+          await get().refetchSessionMessages(id);
+        }
+      });
     } catch (error) {
       if (loadSeq !== sessionMessageLoadSeq || get().activeSessionId !== sessionId) return;
       set({
@@ -842,10 +991,13 @@ export const useChatStore = create<ChatStore>((set, get) => ({
         } else {
           await portalHistory.deleteSessions(ids);
         }
+        await markSessionsDeleted(ids);
       } catch (error) {
         set({ historyError: resolveHistoryErrorMessage(error, "删除失败") });
         return;
       }
+    } else {
+      await markSessionsDeleted(ids);
     }
 
     const idSet = new Set(ids);
@@ -932,6 +1084,9 @@ export const useChatStore = create<ChatStore>((set, get) => ({
         (item) => item.data_url?.trim() || item.parsed_text?.trim() || item.kind === "video",
       ) ?? [];
     if (!content && attachments.length === 0) return;
+
+    // Best-effort outbox flush before a new turn; do not block typing/send.
+    void flushHistoryOutbox({ timeoutMs: 800 });
 
     if (shouldEnqueueOnResend({ isStreamActive: isSessionStreaming(state, sessionId), forceSend: options?.forceSend })) {
       const enqueueSessionId = sessionId;
@@ -1175,18 +1330,9 @@ export const useChatStore = create<ChatStore>((set, get) => ({
         const u = after.messages.find((m) => m.id === userMessage.id);
         const a = after.messages.find((m) => m.id === assistantMessage.id);
         if (u && a && u.role === "user" && a.role === "assistant") {
-          try {
-            // Yield one tick after SSE teardown so the portal can accept the follow-up POST.
-            await new Promise<void>((resolve) => setTimeout(resolve, 0));
-            await portalHistory.appendMessages(sessionId, [u, a]);
-            if (get().historyError) {
-              set({ historyError: null });
-            }
-          } catch (persistErr) {
-            set({
-              historyError: resolveHistoryErrorMessage(persistErr, "保存消息失败"),
-            });
-          }
+          // Yield one tick after SSE teardown so the portal can accept the follow-up POST.
+          await new Promise<void>((resolve) => setTimeout(resolve, 0));
+          await persistAppendMessages(set, sessionId, [u, a]);
         }
       }
     } catch (error) {
@@ -1423,11 +1569,15 @@ export const useChatStore = create<ChatStore>((set, get) => ({
         try {
           await new Promise<void>((resolve) => setTimeout(resolve, 0));
           await portalHistory.replaceMessages(sessionId, snapshot);
-          if (get().historyError) set({ historyError: null });
+          setSessionHistorySync(set, sessionId, null);
         } catch (persistErr) {
-          set({
-            historyError: resolveHistoryErrorMessage(persistErr, "保存消息失败"),
+          // P0: replace_all is not durable-retried (needs history_revision + CAS).
+          setSessionHistorySync(set, sessionId, {
+            pendingCount: 0,
+            state: "dead_letter",
+            message: "编辑结果未保存，请重试",
           });
+          void persistErr;
         }
       }
     } catch (error) {
@@ -1629,11 +1779,15 @@ export const useChatStore = create<ChatStore>((set, get) => ({
         try {
           await new Promise<void>((resolve) => setTimeout(resolve, 0));
           await portalHistory.replaceMessages(sessionId, snapshot);
-          if (get().historyError) set({ historyError: null });
+          setSessionHistorySync(set, sessionId, null);
         } catch (persistErr) {
-          set({
-            historyError: resolveHistoryErrorMessage(persistErr, "保存消息失败"),
+          // P0: replace_all is not durable-retried (needs history_revision + CAS).
+          setSessionHistorySync(set, sessionId, {
+            pendingCount: 0,
+            state: "dead_letter",
+            message: "编辑结果未保存，请重试",
           });
+          void persistErr;
         }
       }
     } catch (error) {

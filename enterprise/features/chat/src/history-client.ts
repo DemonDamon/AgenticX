@@ -32,9 +32,13 @@ async function ensureOk(res: Response): Promise<void> {
   );
 }
 
+function isRetryableStatus(status: number): boolean {
+  return status === 408 || status === 429 || status === 502 || status === 503 || status === 504;
+}
+
 function isRetryableTransportError(error: unknown): boolean {
   if (error instanceof ChatHistoryHttpError) {
-    return error.status === 502 || error.status === 503 || error.status === 504;
+    return isRetryableStatus(error.status);
   }
   if (!(error instanceof Error)) return false;
   if (error.name === "AbortError") return false;
@@ -53,6 +57,21 @@ function isRetryableTransportError(error: unknown): boolean {
 
 async function sleep(ms: number): Promise<void> {
   await new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function retryDelayMs(attempt: number, res?: Response): number {
+  const retryAfter = res?.headers.get("Retry-After");
+  if (retryAfter) {
+    const asNumber = Number(retryAfter);
+    if (Number.isFinite(asNumber) && asNumber >= 0) {
+      return Math.min(10_000, asNumber * 1000);
+    }
+    const asDate = Date.parse(retryAfter);
+    if (Number.isFinite(asDate)) {
+      return Math.min(10_000, Math.max(0, asDate - Date.now()));
+    }
+  }
+  return Math.min(2000, 200 * 2 ** attempt);
 }
 
 /**
@@ -86,11 +105,60 @@ export async function historyFetch(
   throw new Error(normalizeTransportErrorMessage(raw));
 }
 
+/**
+ * Unified history HTTP helper: transport retries + HTTP 408/429/5xx retries
+ * happen inside the same loop (unlike historyFetch + ensureOk outside).
+ */
+export async function historyRequest(
+  input: string,
+  init?: RequestInit,
+  options?: { retries?: number },
+): Promise<Response> {
+  const retries = Math.max(0, options?.retries ?? 2);
+  let lastError: unknown;
+  for (let attempt = 0; attempt <= retries; attempt += 1) {
+    try {
+      const res = await fetch(input, {
+        ...init,
+        credentials: init?.credentials ?? "same-origin",
+      });
+      if (res.ok) return res;
+      if (isRetryableStatus(res.status) && attempt < retries) {
+        await res.text().catch(() => undefined);
+        await sleep(retryDelayMs(attempt, res));
+        continue;
+      }
+      await ensureOk(res);
+      return res;
+    } catch (error) {
+      lastError = error;
+      if (error instanceof ChatHistoryHttpError) throw error;
+      if (attempt >= retries || !isRetryableTransportError(error)) {
+        const raw = error instanceof Error ? error.message : "request failed";
+        throw new Error(normalizeTransportErrorMessage(raw));
+      }
+      await sleep(retryDelayMs(attempt));
+    }
+  }
+  const raw = lastError instanceof Error ? lastError.message : "request failed";
+  throw new Error(normalizeTransportErrorMessage(raw));
+}
+
+export type AppendMessagesOptions = {
+  operationId?: string;
+  payloadHash?: string;
+  retries?: number;
+};
+
 export type PortalChatHistoryClient = {
   listSessions(): Promise<ChatSession[]>;
   createSession(input: { title: string; activeModel?: string }): Promise<ChatSession>;
   getMessages(sessionId: string): Promise<ChatMessage[]>;
-  appendMessages(sessionId: string, messages: ChatMessage[]): Promise<void>;
+  appendMessages(
+    sessionId: string,
+    messages: ChatMessage[] | Array<Record<string, unknown>>,
+    options?: AppendMessagesOptions,
+  ): Promise<void>;
   replaceMessages(sessionId: string, messages: ChatMessage[]): Promise<void>;
   renameSession(sessionId: string, title: string): Promise<ChatSession>;
   patchSession(
@@ -105,14 +173,13 @@ export type PortalChatHistoryClient = {
 export function createPortalChatHistoryClient(): PortalChatHistoryClient {
   return {
     async listSessions() {
-      const res = await historyFetch(BASE, { cache: "no-store" });
-      await ensureOk(res);
+      const res = await historyRequest(BASE, { cache: "no-store" });
       const json = (await res.json()) as { data?: { sessions?: ChatSession[] } };
       return json.data?.sessions ?? [];
     },
 
     async createSession(input) {
-      const res = await historyFetch(BASE, {
+      const res = await historyRequest(BASE, {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
@@ -120,37 +187,36 @@ export function createPortalChatHistoryClient(): PortalChatHistoryClient {
           active_model: input.activeModel,
         }),
       });
-      await ensureOk(res);
       const json = (await res.json()) as { data?: { session?: ChatSession } };
       if (!json.data?.session) throw new Error("missing session in response");
       return json.data.session;
     },
 
     async getMessages(sessionId) {
-      const res = await historyFetch(`${BASE}/${encodeURIComponent(sessionId)}/messages`, {
+      const res = await historyRequest(`${BASE}/${encodeURIComponent(sessionId)}/messages`, {
         cache: "no-store",
       });
-      await ensureOk(res);
       const json = (await res.json()) as { data?: { messages?: ChatMessage[] } };
       return json.data?.messages ?? [];
     },
 
-    async appendMessages(sessionId, messages) {
-      const res = await historyFetch(
+    async appendMessages(sessionId, messages, options) {
+      const body: Record<string, unknown> = { messages, replace_all: false };
+      if (options?.operationId) body.operation_id = options.operationId;
+      if (options?.payloadHash) body.payload_hash = options.payloadHash;
+      await historyRequest(
         `${BASE}/${encodeURIComponent(sessionId)}/messages`,
         {
           method: "POST",
           headers: { "content-type": "application/json" },
-          body: JSON.stringify({ messages, replace_all: false }),
+          body: JSON.stringify(body),
         },
-        // Persist right after SSE is the flakiest path — give it one extra retry.
-        { retries: 3 },
+        { retries: options?.retries ?? 5 },
       );
-      await ensureOk(res);
     },
 
     async replaceMessages(sessionId, messages) {
-      const res = await historyFetch(
+      await historyRequest(
         `${BASE}/${encodeURIComponent(sessionId)}/messages`,
         {
           method: "POST",
@@ -159,16 +225,14 @@ export function createPortalChatHistoryClient(): PortalChatHistoryClient {
         },
         { retries: 3 },
       );
-      await ensureOk(res);
     },
 
     async renameSession(sessionId, title) {
-      const res = await historyFetch(`${BASE}/${encodeURIComponent(sessionId)}`, {
+      const res = await historyRequest(`${BASE}/${encodeURIComponent(sessionId)}`, {
         method: "PATCH",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ title }),
       });
-      await ensureOk(res);
       const json = (await res.json()) as { data?: { session?: ChatSession } };
       if (!json.data?.session) throw new Error("missing session in response");
       return json.data.session;
@@ -179,43 +243,39 @@ export function createPortalChatHistoryClient(): PortalChatHistoryClient {
       if (patch.title !== undefined) body.title = patch.title;
       if (patch.activeModel !== undefined) body.active_model = patch.activeModel;
       if (patch.pinned !== undefined) body.pinned = patch.pinned;
-      const res = await historyFetch(`${BASE}/${encodeURIComponent(sessionId)}`, {
+      const res = await historyRequest(`${BASE}/${encodeURIComponent(sessionId)}`, {
         method: "PATCH",
         headers: { "content-type": "application/json" },
         body: JSON.stringify(body),
       });
-      await ensureOk(res);
       const json = (await res.json()) as { data?: { session?: ChatSession } };
       if (!json.data?.session) throw new Error("missing session in response");
       return json.data.session;
     },
 
     async pinSession(sessionId, pinned) {
-      const res = await historyFetch(`${BASE}/${encodeURIComponent(sessionId)}`, {
+      const res = await historyRequest(`${BASE}/${encodeURIComponent(sessionId)}`, {
         method: "PATCH",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ pinned }),
       });
-      await ensureOk(res);
       const json = (await res.json()) as { data?: { session?: ChatSession } };
       if (!json.data?.session) throw new Error("missing session in response");
       return json.data.session;
     },
 
     async deleteSession(sessionId) {
-      const res = await historyFetch(`${BASE}/${encodeURIComponent(sessionId)}`, {
+      await historyRequest(`${BASE}/${encodeURIComponent(sessionId)}`, {
         method: "DELETE",
       });
-      await ensureOk(res);
     },
 
     async deleteSessions(sessionIds) {
-      const res = await historyFetch(`${BASE}/batch-delete`, {
+      const res = await historyRequest(`${BASE}/batch-delete`, {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ session_ids: sessionIds }),
       });
-      await ensureOk(res);
       const json = (await res.json()) as { data?: { deleted?: number } };
       return Number(json.data?.deleted ?? 0);
     },

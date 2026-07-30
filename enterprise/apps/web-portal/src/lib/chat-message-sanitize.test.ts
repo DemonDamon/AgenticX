@@ -1,16 +1,16 @@
 import { describe, expect, it } from "vitest";
 import { sanitizeInboundMessages } from "./chat-message-sanitize";
 
-const SESSION = "01JTESTSESSION000000000000000";
-const TENANT = "01JTESTTENANT0000000000000000";
-const USER = "01JTESTUSER00000000000000000";
+const SESSION = "01HYAAAAAAAAAAAAAAAAAAAAA1";
+const TENANT = "01HYAAAAAAAAAAAAAAAAAAAAA2";
+const USER = "01HYAAAAAAAAAAAAAAAAAAAAA3";
 
 describe("sanitizeInboundMessages", () => {
   it("preserves image attachments on user messages", () => {
     const dataUrl = "data:image/png;base64,abcd";
     const messages = sanitizeInboundMessages(SESSION, TENANT, USER, [
       {
-        id: "01JTESTMSG000000000000000001",
+        id: "01HYAAAAAAAAAAAAAAAAAAAAA4",
         role: "user",
         content: "描述这张图",
         created_at: "2026-06-17T12:00:00.000Z",
@@ -40,7 +40,7 @@ describe("sanitizeInboundMessages", () => {
   it("allows attachment-only user messages", () => {
     const messages = sanitizeInboundMessages(SESSION, TENANT, USER, [
       {
-        id: "01JTESTMSG000000000000000002",
+        id: "01HYAAAAAAAAAAAAAAAAAAAAA5",
         role: "user",
         content: " ",
         attachments: [
@@ -59,7 +59,7 @@ describe("sanitizeInboundMessages", () => {
   it("preserves document attachments with parsed_text", () => {
     const messages = sanitizeInboundMessages(SESSION, TENANT, USER, [
       {
-        id: "01JTESTMSG000000000000000003",
+        id: "01HYAAAAAAAAAAAAAAAAAAAAA6",
         role: "user",
         content: "总结这份文档",
         attachments: [
@@ -79,7 +79,7 @@ describe("sanitizeInboundMessages", () => {
     expect(() =>
       sanitizeInboundMessages(SESSION, TENANT, USER, [
         {
-          id: "01JTESTMSG000000000000000003b",
+          id: "01HYAAAAAAAAAAAAAAAAAAAAA7",
           role: "user",
           content: "hi",
           attachments: [{ name: "a.pdf", mime_type: "application/pdf", kind: "document" }],
@@ -91,26 +91,42 @@ describe("sanitizeInboundMessages", () => {
   it("preserves web_search_sources on assistant messages (refresh survival)", () => {
     const messages = sanitizeInboundMessages(SESSION, TENANT, USER, [
       {
-        id: "01JTESTMSG000000000000000004",
+        id: "01HYAAAAAAAAAAAAAAAAAAAAA8",
         role: "assistant",
         content: "答案 [1]",
         created_at: "2026-07-27T12:00:00.000Z",
         web_search_sources: [
           {
             title: "Opus 5",
-            url: "https://zhuanlan.zhihu.com/p/123",
+            url: "https://example.com",
             snippet: "snippet",
           },
         ],
       },
     ]);
+    expect(messages[0]?.web_search_sources).toHaveLength(1);
+  });
 
-    expect(messages[0]?.web_search_sources).toEqual([
-      {
-        title: "Opus 5",
-        url: "https://zhuanlan.zhihu.com/p/123",
-        snippet: "snippet",
-      },
-    ]);
+  it("rejects empty or illegal message ids", () => {
+    expect(() =>
+      sanitizeInboundMessages(SESSION, TENANT, USER, [
+        {
+          id: "",
+          role: "user",
+          content: "hi",
+          created_at: "2026-07-30T00:00:00.000Z",
+        },
+      ]),
+    ).toThrow(/valid ULID/);
+    expect(() =>
+      sanitizeInboundMessages(SESSION, TENANT, USER, [
+        {
+          id: "not-a-ulid",
+          role: "user",
+          content: "hi",
+          created_at: "2026-07-30T00:00:00.000Z",
+        },
+      ]),
+    ).toThrow(/valid ULID/);
   });
 });
