@@ -282,12 +282,9 @@ export async function loginAndGetIdentity(email: string, password: string): Prom
   const runtime = await getRuntime();
   await reconcileConfiguredAdminPasswordIfNeeded(email, password);
   const user = await authenticatePortalUser(runtime, email, password);
-  const tokens = await runtime.authService.loginWithPassword({ email, password });
-  if (tokens.mustChangePassword) {
+  if (user.mustChangePassword) {
     throw new Error("password_change_required");
   }
-  const user = await runtime.repo.findByEmail(email.toLowerCase());
-  if (!user) throw new Error("user not found after login");
   try {
     await syncAuthUserToPostgres(user);
   } catch (err) {
@@ -345,16 +342,6 @@ function parseJitRoleAllowlist(): Set<string> {
 
 async function issueTokensForUser(runtime: AuthRuntime, user: import("@agenticx/auth").AuthUser): Promise<AuthTokens> {
   const context = buildPortalTokenContext(user, createPortalSessionId(user.id));
-  const effectiveScopes = getEffectiveUserScopes(user.scopes);
-  const context: AuthContext = {
-    userId: user.id,
-    tenantId: user.tenantId,
-    deptId: user.deptId ?? null,
-    email: user.email,
-    scopes: effectiveScopes,
-    mustChangePassword: user.mustChangePassword,
-    sessionId: `${user.id}_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
-  };
   const access = await runtime.jwtService.signAccessToken(context);
   const refresh = await runtime.jwtService.signRefreshToken(context);
   await runtime.refreshStore.set({
@@ -528,14 +515,24 @@ export async function completeRequiredPasswordChange(
   newPassword: string,
 ): Promise<AuthTokens> {
   const runtime = await getRuntime();
-  const tokens = await runtime.authService.completeRequiredPasswordChange({ context, newPassword });
-  const user = await runtime.repo.findByEmail(context.email.toLowerCase());
-  if (user) {
-    try {
-      await syncAuthUserToPostgres(user);
-    } catch (error) {
-      console.error("[web-portal] syncAuthUserToPostgres after password change failed:", error);
-    }
+  if (!context.mustChangePassword) {
+    throw new Error("Password change is not required.");
+  }
+
+  const user = await runtime.repo.updatePasswordAndClearRequirement(
+    context.email,
+    await hashPassword(newPassword),
+  );
+  if (!user || user.tenantId !== context.tenantId) {
+    throw new Error("Account unavailable.");
+  }
+
+  await runtime.refreshStore.delete(context.sessionId);
+  const tokens = await issueTokensForUser(runtime, user);
+  try {
+    await syncAuthUserToPostgres(user);
+  } catch (error) {
+    console.error("[web-portal] syncAuthUserToPostgres after password change failed:", error);
   }
   return tokens;
 }
@@ -560,12 +557,6 @@ export async function refreshTokens(refreshToken: string): Promise<AuthTokens> {
   if (user.status === "locked") throw new Error("Refresh session expired.");
   if (user.lockedUntil && user.lockedUntil > Date.now()) throw new Error("Refresh session expired.");
 
-  const nextContext: AuthContext = {
-    ...refreshContext,
-    scopes: user.scopes,
-    deptId: user.deptId ?? null,
-    mustChangePassword: user.mustChangePassword,
-  };
   const nextContext = buildPortalTokenContext(user, createPortalSessionId(user.id));
 
   const access = await runtime.jwtService.signAccessToken(nextContext);
