@@ -124,7 +124,7 @@ export type GroupChat = {
 /** Main-area view router state for button-style sidebar navigation. */
 export type MainView = "chat" | "avatars" | "groups" | "automation";
 
-export type SidePanelTab = "workspace" | "members";
+export type SidePanelTab = "workspace" | "members" | "graph";
 
 export type PaneTerminalTab = {
   id: string;
@@ -151,6 +151,10 @@ export type ChatPane = {
   contextInherited: boolean;
   taskspacePanelOpen: boolean;
   membersPanelOpen: boolean;
+  /** Run Graph God-View panel (right side, SP3). */
+  graphPanelOpen?: boolean;
+  /** Active WorkGraph run id for this pane (from graph.run_created / list). */
+  activeGraphRunId?: string | null;
   /** Legacy persisted field; no longer used for visibility control. */
   sidePanelTab: SidePanelTab;
   activeTaskspaceId: string | null;
@@ -823,6 +827,8 @@ function makeDefaultPane(): ChatPane {
     contextInherited: false,
     taskspacePanelOpen: false,
     membersPanelOpen: false,
+    graphPanelOpen: false,
+    activeGraphRunId: null,
     sidePanelTab: "workspace",
     activeTaskspaceId: null,
     spawnsColumnOpen: false,
@@ -1552,6 +1558,8 @@ export const useAppStore = create<AppState>((set, get) => ({
           contextInherited: false,
           taskspacePanelOpen: false,
           membersPanelOpen: false,
+          graphPanelOpen: false,
+          activeGraphRunId: null,
           sidePanelTab: "workspace",
           activeTaskspaceId: null,
           spawnsColumnOpen: false,
@@ -2095,18 +2103,35 @@ export const useAppStore = create<AppState>((set, get) => ({
         if (tab === "workspace") {
           return { ...pane, taskspacePanelOpen: !pane.taskspacePanelOpen, sidePanelTab: "workspace" };
         }
+        if (tab === "graph") {
+          return {
+            ...pane,
+            graphPanelOpen: !pane.graphPanelOpen,
+            sidePanelTab: "graph",
+          };
+        }
         return { ...pane, membersPanelOpen: !pane.membersPanelOpen, sidePanelTab: "members" };
       }),
     })),
   openSidePanel: (paneId, tab) =>
     set((state) => ({
-      panes: state.panes.map((pane) =>
-        pane.id === paneId
-          ? tab === "workspace"
-            ? { ...pane, taskspacePanelOpen: true, sidePanelTab: "workspace" }
-            : { ...pane, membersPanelOpen: true, sidePanelTab: "members" }
-          : pane
-      ),
+      panes: state.panes.map((pane) => {
+        if (pane.id !== paneId) return pane;
+        if (tab === "workspace") {
+          return { ...pane, taskspacePanelOpen: true, sidePanelTab: "workspace" };
+        }
+        if (tab === "graph") {
+          return {
+            ...pane,
+            graphPanelOpen: true,
+            sidePanelTab: "graph",
+            taskspacePanelOpen: false,
+            membersPanelOpen: false,
+            memoryGraphOpen: false,
+          };
+        }
+        return { ...pane, membersPanelOpen: true, sidePanelTab: "members" };
+      }),
     })),
   toggleTaskspacePanel: (paneId) => {
     get().cycleSidePanel(paneId, "workspace");
@@ -2173,6 +2198,7 @@ export const useAppStore = create<AppState>((set, get) => ({
               // drawer does not stack on top of workspace/members/memory-graph.
               taskspacePanelOpen: false,
               membersPanelOpen: false,
+              graphPanelOpen: false,
               memoryGraphOpen: false,
             }
           : pane

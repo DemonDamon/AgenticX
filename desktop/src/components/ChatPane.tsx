@@ -27,6 +27,7 @@ import {
   PanelRightClose,
   ArrowRight,
   Loader2,
+  Share2,
 } from "lucide-react";
 import {
   useAppStore,
@@ -36,7 +37,10 @@ import {
   type MessageAttachment,
   type PendingConfirm,
   type QueuedMessage,
+  type SidePanelTab,
 } from "../store";
+import { RunGraphPanel } from "./graph/RunGraphPanel";
+import { useGraphRunStore } from "./graph/useGraphRun";
 import {
   appendDictationText,
   cancelDictation,
@@ -467,7 +471,7 @@ const CHATPANE_SIDE_OVERLAY_BREAK = 760;
 function openWorkspaceSidebarForPane(
   paneId: string,
   paneOuterWidthPx: number,
-  openSidePanel: (paneId: string, tab: "workspace" | "members") => void,
+  openSidePanel: (paneId: string, tab: SidePanelTab) => void,
 ) {
   const compact =
     paneOuterWidthPx > 0 && paneOuterWidthPx < CHATPANE_SIDE_OVERLAY_BREAK;
@@ -486,6 +490,7 @@ function openWorkspaceSidebarForPane(
             historyOpen: false,
             memoryGraphOpen: false,
             membersPanelOpen: false,
+            graphPanelOpen: false,
             spawnsColumnOpen: false,
           },
     ),
@@ -505,6 +510,8 @@ const FALLBACK_PANE: ChatPaneState = {
   contextInherited: false,
   taskspacePanelOpen: false,
   membersPanelOpen: false,
+  graphPanelOpen: false,
+  activeGraphRunId: null,
   sidePanelTab: "workspace",
   activeTaskspaceId: null,
   spawnsColumnOpen: false,
@@ -9148,8 +9155,25 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
               });
               continue;
             }
-            // Graph Runtime events (SP1+): consumed by Run Graph panel later; ignore in chat.
+            // Graph Runtime events → Run Graph panel store (do not render as chat bubbles).
             if (typeof payload.type === "string" && payload.type.startsWith("graph.")) {
+              useGraphRunStore.getState().applyEvent(pane.id, payload);
+              if (payload.type === "graph.run_created" && payload.run_id) {
+                const rid = String(payload.run_id);
+                useAppStore.setState((s) => ({
+                  panes: s.panes.map((row) =>
+                    row.id === pane.id ? { ...row, activeGraphRunId: rid } : row,
+                  ),
+                }));
+                try {
+                  if (localStorage.getItem("agx-graph-panel-autopen-v1") !== "done") {
+                    useAppStore.getState().openSidePanel(pane.id, "graph");
+                    localStorage.setItem("agx-graph-panel-autopen-v1", "done");
+                  }
+                } catch {
+                  /* ignore */
+                }
+              }
               continue;
             }
             // ── workforce.* events (routing="team") ──────────────────────
@@ -10996,18 +11020,26 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
 
   useEffect(() => {
     // 历史面板已改为不挤占布局的锚定浮层（不再计入互斥占位），此处仅在工作区/记忆图谱/
-    // 成员列表/Spawns/落盘 drawer 之间做单选互斥（窄窗格 overlay 模式）。
+    // 成员列表/运行图/Spawns/落盘 drawer 之间做单选互斥（窄窗格 overlay 模式）。
     if (!compactSidePanels) return;
     const p = pane;
     const stacked =
       Number(!!p.taskspacePanelOpen) +
       Number(!!p.memoryGraphOpen) +
       Number(!!p.membersPanelOpen) +
+      Number(!!p.graphPanelOpen) +
       Number(!!p.spawnsColumnOpen) +
       Number(!!p.runDrawerOpen);
     if (stacked <= 1) return;
-    let keep: "workspace" | "memory-graph" | "members" | "spawns" | "run-drawer" = "run-drawer";
+    let keep:
+      | "workspace"
+      | "memory-graph"
+      | "members"
+      | "graph"
+      | "spawns"
+      | "run-drawer" = "run-drawer";
     if (p.runDrawerOpen) keep = "run-drawer";
+    else if (p.graphPanelOpen) keep = "graph";
     else if (p.taskspacePanelOpen) keep = "workspace";
     else if (p.memoryGraphOpen) keep = "memory-graph";
     else if (p.membersPanelOpen) keep = "members";
@@ -11016,6 +11048,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
       taskspacePanelOpen: keep === "workspace",
       memoryGraphOpen: keep === "memory-graph",
       membersPanelOpen: keep === "members",
+      graphPanelOpen: keep === "graph",
       spawnsColumnOpen: keep === "spawns",
       runDrawerOpen: keep === "run-drawer",
     };
@@ -11026,6 +11059,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
         row.taskspacePanelOpen === desired.taskspacePanelOpen &&
         row.memoryGraphOpen === desired.memoryGraphOpen &&
         row.membersPanelOpen === desired.membersPanelOpen &&
+        !!row.graphPanelOpen === desired.graphPanelOpen &&
         row.spawnsColumnOpen === desired.spawnsColumnOpen &&
         row.runDrawerOpen === desired.runDrawerOpen
       ) {
@@ -11041,6 +11075,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
     pane.taskspacePanelOpen,
     pane.memoryGraphOpen,
     pane.membersPanelOpen,
+    pane.graphPanelOpen,
     pane.spawnsColumnOpen,
     pane.runDrawerOpen,
   ]);
@@ -11056,6 +11091,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
               historyOpen: false,
               memoryGraphOpen: false,
               membersPanelOpen: false,
+              graphPanelOpen: false,
               spawnsColumnOpen: false,
               runDrawerOpen: false,
             }
@@ -11090,6 +11126,12 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
     }));
   };
 
+  const closeGraphPanelOnly = () => {
+    useAppStore.setState((s) => ({
+      panes: s.panes.map((row) => (row.id !== pane.id ? row : { ...row, graphPanelOpen: false })),
+    }));
+  };
+
   const closeHistoryPanelOnly = () => {
     useAppStore.setState((s) => ({
       panes: s.panes.map((row) => (row.id !== pane.id ? row : { ...row, historyOpen: false })),
@@ -11117,9 +11159,36 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
               historyOpen: false,
               memoryGraphOpen: false,
               membersPanelOpen: false,
+              graphPanelOpen: false,
               spawnsColumnOpen: false,
             }
           : { ...p, taskspacePanelOpen: false };
+      }),
+    }));
+  };
+
+  const toggleGraphSidePanel = () => {
+    if (!compactSidePanels) {
+      if (!pane.graphPanelOpen) closeHistoryPanelOnly();
+      cycleSidePanel(pane.id, "graph");
+      return;
+    }
+    useAppStore.setState((s) => ({
+      panes: s.panes.map((p) => {
+        if (p.id !== pane.id) return p;
+        const opening = !p.graphPanelOpen;
+        return opening
+          ? {
+              ...p,
+              graphPanelOpen: true,
+              sidePanelTab: "graph" as const,
+              taskspacePanelOpen: false,
+              historyOpen: false,
+              memoryGraphOpen: false,
+              membersPanelOpen: false,
+              spawnsColumnOpen: false,
+            }
+          : { ...p, graphPanelOpen: false };
       }),
     }));
   };
@@ -11169,6 +11238,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
                 historyOpen: false,
                 memoryGraphOpen: false,
                 membersPanelOpen: false,
+                graphPanelOpen: false,
                 spawnsColumnOpen: false,
               }
             : { ...p, taskspacePanelOpen: false };
@@ -11215,6 +11285,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
               taskspacePanelOpen: false,
               historyOpen: false,
               memoryGraphOpen: false,
+              graphPanelOpen: false,
               spawnsColumnOpen: false,
             }
           : { ...p, membersPanelOpen: false };
@@ -11390,6 +11461,21 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
                 <Users className="h-[18px] w-[18px]" strokeWidth={1.8} />
               </button>
             )}
+            <HoverTip label="运行图">
+              <button
+                type="button"
+                className={`agx-topbar-btn relative !px-[5px] ${pane.graphPanelOpen ? "agx-topbar-btn--active" : ""}`}
+                onClick={toggleGraphSidePanel}
+                title="运行图"
+                aria-label="运行图"
+                aria-pressed={!!pane.graphPanelOpen}
+              >
+                <Share2 className="h-[18px] w-[18px]" strokeWidth={1.8} />
+                {!pane.graphPanelOpen && pane.activeGraphRunId ? (
+                  <span className="absolute right-0.5 top-0.5 h-1.5 w-1.5 rounded-full bg-[var(--ui-btn-primary-bg)]" />
+                ) : null}
+              </button>
+            </HoverTip>
             {paneSettingsAvatar ? (
               <button
                 type="button"
@@ -12245,6 +12331,18 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
           />
         </div>
       ) : null}
+      {!compactSidePanels && pane.graphPanelOpen ? (
+        <div className="relative h-full shrink-0 overflow-hidden" style={{ width: taskspaceWidth }}>
+          <div
+            className="group absolute -left-[3px] top-0 z-20 h-full w-2 cursor-col-resize"
+            onMouseDown={startResizeTaskspace}
+            title="拖拽调整运行图面板宽度"
+          >
+            <div className="mx-auto h-full w-px bg-[var(--border-strong)] transition-all duration-200 group-hover:w-[2px] group-hover:bg-[var(--ui-btn-primary-bg)]" />
+          </div>
+          <RunGraphPanel pane={pane} onClose={closeGraphPanelOnly} tintColor={paneTint} />
+        </div>
+      ) : null}
       {!compactSidePanels && workspacePanelOpen ? (
         <div
           className={
@@ -12366,6 +12464,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
       (workspacePanelOpen ||
         pane.memoryGraphOpen ||
         (isGroupPane && pane.membersPanelOpen) ||
+        pane.graphPanelOpen ||
         pane.spawnsColumnOpen ||
         pane.runDrawerOpen) ? (
         <>
@@ -12376,6 +12475,21 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
             style={{ WebkitAppRegion: "no-drag" } as CSSProperties}
             onClick={dismissAuxiliaryOverlays}
           />
+          {pane.graphPanelOpen ? (
+            <div
+              className="pointer-events-auto absolute bottom-0 right-0 top-10 z-50 shrink-0 overflow-hidden bg-surface-base shadow-[6px_0_24px_rgba(0,0,0,0.28)]"
+              style={{ width: overlayTaskspaceWidth, WebkitAppRegion: "no-drag" } as CSSProperties}
+            >
+              <div
+                className="group absolute -left-[3px] top-0 z-20 h-full w-2 cursor-col-resize"
+                onMouseDown={startResizeTaskspace}
+                title="拖拽调整运行图面板宽度"
+              >
+                <div className="mx-auto h-full w-px bg-[var(--border-strong)] transition-all duration-200 group-hover:w-[2px] group-hover:bg-[var(--ui-btn-primary-bg)]" />
+              </div>
+              <RunGraphPanel pane={pane} onClose={closeGraphPanelOnly} tintColor={paneTint} />
+            </div>
+          ) : null}
           {isGroupPane && pane.membersPanelOpen ? (
             <div
               className="pointer-events-auto absolute bottom-0 right-0 top-10 z-50 shrink-0 overflow-hidden bg-surface-base shadow-[6px_0_24px_rgba(0,0,0,0.28)]"
