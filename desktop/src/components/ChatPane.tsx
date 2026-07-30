@@ -2807,6 +2807,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
   const [pendingForwardMessages, setPendingForwardMessages] = useState<ForwardPendingMessage[]>([]);
   const [contextFiles, setContextFiles] = useState<Record<string, AttachedFile>>({});
   const [attachToastOpen, setAttachToastOpen] = useState(false);
+  const [debateNudgeText, setDebateNudgeText] = useState("");
   const [favoriteToastOpen, setFavoriteToastOpen] = useState(false);
   const [favoriteToastMsg, setFavoriteToastMsg] = useState("");
   const [feishuDesktopBound, setFeishuDesktopBound] = useState(false);
@@ -9156,10 +9157,23 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
               continue;
             }
             // Graph Runtime events → Run Graph panel store (do not render as chat bubbles).
+            // Group SSE wraps graph payloads as { type, data: { content: "<json>" } }.
             if (typeof payload.type === "string" && payload.type.startsWith("graph.")) {
-              useGraphRunStore.getState().applyEvent(pane.id, payload);
-              if (payload.type === "graph.run_created" && payload.run_id) {
-                const rid = String(payload.run_id);
+              let graphPayload: Record<string, unknown> = { type: payload.type };
+              const rawContent = payload.data?.content;
+              if (typeof rawContent === "string" && rawContent.trim().startsWith("{")) {
+                try {
+                  const inner = JSON.parse(rawContent) as Record<string, unknown>;
+                  graphPayload = { ...inner, type: payload.type || inner.type };
+                } catch {
+                  graphPayload = { type: payload.type, content: rawContent };
+                }
+              } else if (payload.data && typeof payload.data === "object") {
+                graphPayload = { type: payload.type, ...(payload.data as Record<string, unknown>) };
+              }
+              useGraphRunStore.getState().applyEvent(pane.id, graphPayload);
+              const rid = String(graphPayload.run_id || "").trim();
+              if (payload.type === "graph.run_created" && rid) {
                 useAppStore.setState((s) => ({
                   panes: s.panes.map((row) =>
                     row.id === pane.id ? { ...row, activeGraphRunId: rid } : row,
@@ -9173,6 +9187,10 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
                 } catch {
                   /* ignore */
                 }
+              }
+              if (payload.type === "graph.debate_nudge") {
+                const tip = String(payload.data?.content ?? "").trim();
+                if (tip) setDebateNudgeText(tip);
               }
               continue;
             }
@@ -11605,6 +11623,32 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
               {renderedMessages}
             </div>
           )}
+          {debateNudgeText ? (
+            <div className="pointer-events-none absolute inset-x-0 bottom-3 z-30 flex justify-center px-4">
+              <div className="pointer-events-auto flex max-w-md items-center gap-2 rounded-lg border border-amber-500/35 bg-surface-card-strong/95 px-3 py-2 text-[11px] text-amber-700 shadow-lg backdrop-blur-sm dark:text-amber-200">
+                <span className="min-w-0 flex-1 leading-relaxed">{debateNudgeText}</span>
+                <button
+                  type="button"
+                  className="shrink-0 rounded px-2 py-1 text-[11px] text-white"
+                  style={{ background: "var(--ui-btn-primary-bg)" }}
+                  onClick={() => {
+                    setDebateNudgeText("");
+                    openSidePanel(pane.id, "graph");
+                  }}
+                >
+                  打开运行图
+                </button>
+                <button
+                  type="button"
+                  className="shrink-0 rounded p-1 text-text-faint hover:bg-surface-hover"
+                  aria-label="关闭提示"
+                  onClick={() => setDebateNudgeText("")}
+                >
+                  <X className="h-3.5 w-3.5" />
+                </button>
+              </div>
+            </div>
+          ) : null}
           <Toast
             placement="inline-bottom-center"
             variant="warning"
