@@ -2,7 +2,7 @@
 
 Planned-with: Cursor Grok 4.5  
 Suggested-Impl-Model: Cursor Grok 4.5  
-Parent: `.cursor/plans/pending/2026-07-30-near-graph-godview-master.plan.md`  
+Parent: `.cursor/plans/2026-07-30-near-graph-godview-master.plan.md`  
 Depends-on: `2026-07-30-graph-runtime-core`
 
 **Goal:** 提供统一干预 API 与稳定的 `graph.*` SSE 事件契约，落地主规划 I1–I6 的后端语义（含运行中改道规则），让 Desktop 上帝视角面板（SP3）只消费契约而不各自解析 chat 碎片。

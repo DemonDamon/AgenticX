@@ -5779,7 +5779,8 @@ def create_studio_app() -> FastAPI:
         run_id: str,
         x_agx_desktop_token: str | None = Header(default=None),
     ) -> dict:
-        """Return a full GraphRun snapshot."""
+        """Return a full GraphRun snapshot + agent projection for God-View UI."""
+        from agenticx.runtime.graph.intervene import build_agent_projection
         from agenticx.runtime.graph.store import get_default_store
 
         _check_token(x_agx_desktop_token)
@@ -5789,7 +5790,88 @@ def create_studio_app() -> FastAPI:
         run = get_default_store().load(rid)
         if run is None:
             raise HTTPException(status_code=404, detail="graph run not found")
-        return {"ok": True, "run": run.to_dict()}
+        return {
+            "ok": True,
+            "run": run.to_dict(),
+            "projection": build_agent_projection(run),
+        }
+
+    @app.post("/api/graph/runs/{run_id}/intervene")
+    async def post_graph_intervene(
+        run_id: str,
+        payload: dict,
+        x_agx_desktop_token: str | None = Header(default=None),
+    ) -> dict:
+        """Apply I1–I6 graph interventions (optimistic version lock)."""
+        from agenticx.runtime.graph.intervene import (
+            CONVERGE_SCRATCH_KEY,
+            InterveneError,
+            apply_intervention,
+            scratchpad_key_for_agent,
+        )
+        from agenticx.runtime.graph.store import get_default_store
+
+        _check_token(x_agx_desktop_token)
+        rid = str(run_id or "").strip()
+        if not rid:
+            raise HTTPException(status_code=400, detail="run_id required")
+        if not isinstance(payload, dict):
+            raise HTTPException(status_code=400, detail="JSON object required")
+        store = get_default_store()
+        run = store.load(rid)
+        if run is None:
+            raise HTTPException(status_code=404, detail="graph run not found")
+        try:
+            result = apply_intervention(
+                run,
+                op=str(payload.get("op") or ""),
+                version=payload.get("version"),
+                node_ids=payload.get("node_ids") or [],
+                edge_ids=payload.get("edge_ids") or [],
+                payload=payload.get("payload") if isinstance(payload.get("payload"), dict) else payload,
+            )
+        except InterveneError as exc:
+            detail = {"detail": str(exc), **(exc.extra or {})}
+            raise HTTPException(status_code=int(exc.status_code), detail=detail) from exc
+
+        store.save(result.run, bump_version=True)
+
+        # Push live directives / converge policy onto the owning session scratchpad.
+        sid = str(result.run.session_id or "").strip()
+        if sid:
+            managed = manager.get(sid, touch=False)
+            if managed is not None:
+                sess = getattr(managed, "session", managed)
+                pad = getattr(sess, "scratchpad", None)
+                if not isinstance(pad, dict):
+                    pad = {}
+                    try:
+                        setattr(sess, "scratchpad", pad)
+                    except Exception:
+                        pass
+                if isinstance(pad, dict):
+                    for agent_id, items in result.scratchpad_directives.items():
+                        key = scratchpad_key_for_agent(agent_id)
+                        existing = pad.get(key)
+                        if not isinstance(existing, list):
+                            existing = []
+                        existing.extend(items)
+                        pad[key] = existing
+                    if result.converge_policy:
+                        pad[CONVERGE_SCRATCH_KEY] = dict(result.converge_policy)
+                    try:
+                        manager.persist(sid)
+                    except Exception:
+                        pass
+
+        return {
+            "ok": True,
+            "run_id": result.run.run_id,
+            "version": result.run.version,
+            "applied": result.applied,
+            "warnings": result.warnings,
+            "events": result.events,
+        }
 
     @app.post("/api/groups/{group_id}/action")
     async def post_group_action(

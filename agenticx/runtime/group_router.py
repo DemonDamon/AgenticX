@@ -507,6 +507,15 @@ class GroupChatRouter:
         hops: int,
         responded_this_turn: set[str],
     ) -> AsyncGenerator[GroupReply, None]:
+        # Selection-rule converge policy can suppress A2A mention hops.
+        try:
+            from agenticx.runtime.graph.intervene import effective_mention_hops
+
+            pad = getattr(base_session, "scratchpad", None)
+            if isinstance(pad, dict):
+                hops = effective_mention_hops(pad, hops)
+        except Exception:
+            pass
         if hops <= 0:
             return
         if reply.skipped or not str(reply.content or "").strip():
@@ -901,6 +910,22 @@ class GroupChatRouter:
             f"## 你的长期指令\n{avatar_prompt or '(无)'}\n\n"
             f"## 最近群聊上下文\n{dialogue_context}\n"
         )
+        # Graph Runtime interventions queued on the owner session scratchpad.
+        try:
+            from agenticx.runtime.graph.intervene import consume_graph_directives
+
+            owner_pad = getattr(base_session, "scratchpad", None)
+            if isinstance(owner_pad, dict):
+                gdirs = consume_graph_directives(owner_pad, str(avatar_id))
+                if gdirs:
+                    joined = "\n".join(f"- {d}" for d in gdirs)
+                    system_prompt = (
+                        f"{system_prompt}\n"
+                        "## Graph intervention (authoritative)\n"
+                        f"{joined}\n"
+                    )
+        except Exception:
+            pass
         if quoted_content.strip():
             local_user_input = f"{user_input}\n\n[用户引用内容]\n{quoted_content.strip()}"
         else:
