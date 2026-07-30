@@ -21,6 +21,7 @@ import {
   type OnSelectionChangeParams,
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
+import { useAppStore } from "../../store";
 import { GraphNodeView, type GraphFlowNodeData } from "./GraphNodeView";
 import {
   buildInterveneBody,
@@ -88,6 +89,12 @@ function CanvasInner({
   onIntervene,
   onRequestForceReassign,
 }: Props) {
+  // Bind to app theme (dark/dim/light), not OS prefers-color-scheme —
+  // otherwise a dark RF canvas can render with light-theme dark text.
+  const appTheme = useAppStore((s) => s.theme);
+  const colorMode = appTheme === "light" ? "light" : "dark";
+  const isDarkCanvas = colorMode === "dark";
+
   const viewNodes = useMemo(() => {
     if (preferAgentView && state.projection?.agent_nodes?.length) {
       return state.projection.agent_nodes;
@@ -196,7 +203,7 @@ function CanvasInner({
   };
 
   return (
-    <div className="relative h-full w-full min-h-0">
+    <div className="relative h-full w-full min-h-0 bg-surface-base">
       <ReactFlow
         nodes={nodes}
         edges={edges}
@@ -210,15 +217,21 @@ function CanvasInner({
         selectionOnDrag
         fitView
         proOptions={{ hideAttribution: true }}
-        colorMode="system"
+        colorMode={colorMode}
+        style={{ backgroundColor: "var(--surface-base)" }}
       >
-        <Background gap={18} size={1} color="var(--border)" />
+        <Background
+          gap={18}
+          size={1}
+          color="var(--border)"
+          bgColor="var(--surface-base)"
+        />
         <Controls showInteractive={false} />
         <MiniMap
           pannable
           zoomable
           className="!bg-surface-card !border-border"
-          maskColor="rgba(0,0,0,0.35)"
+          maskColor={isDarkCanvas ? "rgba(0,0,0,0.45)" : "rgba(240,240,240,0.55)"}
         />
       </ReactFlow>
       {ctxMenu ? (
