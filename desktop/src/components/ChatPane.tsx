@@ -11017,24 +11017,8 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
 
   const paneTint = (() => {
     if (!pane.avatarId) return undefined;
-    if (pane.avatarId.startsWith("group:")) {
-      const rawId = pane.avatarId.slice(6);
-      const idx = groups.findIndex((g) => g.id === rawId);
-      if (idx >= 0) {
-        // reuse GROUP_TINT colors in same order as groupColorByIndex
-        const GROUP_TINT_LIST = [
-          "rgba(99,102,241,0.07)",   // indigo
-          "rgba(20,184,166,0.07)",   // teal
-          "rgba(236,72,153,0.07)",   // pink
-          "rgba(132,204,22,0.07)",   // lime
-          "rgba(239,68,68,0.07)",    // red
-          "rgba(59,130,246,0.07)",   // blue
-          "rgba(234,179,8,0.07)",    // yellow
-          "rgba(168,85,247,0.07)",   // purple
-        ];
-        return GROUP_TINT_LIST[idx % GROUP_TINT_LIST.length];
-      }
-    }
+    // Group chat: same as Meta — page surface, no per-group tint wash.
+    if (pane.avatarId.startsWith("group:")) return undefined;
     const avatarColor = avatars.find((a) => a.id === pane.avatarId)?.color;
     return avatarTintBg(pane.avatarId, avatarColor);
   })();
