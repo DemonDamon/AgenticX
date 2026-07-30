@@ -5,10 +5,21 @@ import { ACCESS_COOKIE } from "../../../../lib/session";
 import { isChatSessionOwned } from "../../../../lib/chat-history";
 import { toChatHistoryContext } from "../../../../lib/chat-history-http";
 import { listAvailableModelsForUser } from "../../../../lib/admin-providers-reader";
+import { stripEmptyAssistantMessages } from "../../../../lib/chat-completion-sanitize";
 import { runWebSearchTurn } from "../../../../lib/web-search/tool-loop";
 import { loadTenantWebSearchConfig } from "../../../../lib/web-search/tenant-config";
 import { runDeepResearchTurn } from "../../../../lib/deep-research/orchestrator";
 import { defaultArtifactStore } from "../../../../lib/deep-research/artifact-store";
+
+function withSanitizedMessages(body: Record<string, unknown>): Record<string, unknown> {
+  if (!Array.isArray(body.messages)) return body;
+  return {
+    ...body,
+    messages: stripEmptyAssistantMessages(
+      body.messages as Array<{ role?: unknown; content?: unknown; tool_calls?: unknown }>,
+    ),
+  };
+}
 
 const GATEWAY_COMPLETIONS_URL =
   process.env.GATEWAY_COMPLETIONS_URL ?? "http://127.0.0.1:8088/v1/chat/completions";
@@ -137,7 +148,7 @@ export async function POST(request: Request) {
   };
 
   if (enableDeepResearch && parsedBody) {
-    return runDeepResearchTurn(parsedBody, {
+    return runDeepResearchTurn(withSanitizedMessages(parsedBody), {
       url: GATEWAY_COMPLETIONS_URL,
       headers: gatewayHeaders,
       signal: request.signal,
@@ -150,11 +161,15 @@ export async function POST(request: Request) {
   }
 
   if (enableWebSearch && parsedBody) {
-    return runWebSearchTurn(parsedBody, {
+    return runWebSearchTurn(withSanitizedMessages(parsedBody), {
       url: GATEWAY_COMPLETIONS_URL,
       headers: gatewayHeaders,
       loadTenantConfig: () => loadTenantWebSearchConfig(session.tenantId),
     });
+  }
+
+  if (parsedBody) {
+    forwardBody = JSON.stringify(withSanitizedMessages(parsedBody));
   }
 
   let upstream: Response;
