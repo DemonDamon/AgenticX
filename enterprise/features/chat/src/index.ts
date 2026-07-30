@@ -1,6 +1,7 @@
 export * from "./types";
 export * from "./types/composer-attachment";
 export * from "./history-client";
+export * from "./history-outbox";
 export { sessionTitleNeedsAutoFill, buildAutoTitleFromFirstUserMessage } from "@agenticx/core-api";
 export * from "./store";
 export * from "./ChatWorkspace";

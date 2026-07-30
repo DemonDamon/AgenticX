@@ -4,13 +4,15 @@ import { resolveDatabaseConfig } from "@agenticx/iam-core";
 import { mysqlChatHistoryStore } from "./chat-history/mysql";
 import { postgresqlChatHistoryStore } from "./chat-history/postgresql";
 import {
+  ChatHistoryConflictError,
   ChatHistoryNotFoundError,
+  type AppendChatMessagesOptions,
   type ChatHistoryContext,
   type ChatHistoryStore,
 } from "./chat-history/types";
 
-export { ChatHistoryNotFoundError };
-export type { ChatHistoryContext };
+export { ChatHistoryConflictError, ChatHistoryNotFoundError };
+export type { AppendChatMessagesOptions, ChatHistoryContext };
 
 const ULID_RE = /^[0-7][0-9A-HJKMNP-TV-Z]{25}$/;
 
@@ -61,8 +63,9 @@ export function appendChatMessages(
   ctx: ChatHistoryContext,
   sessionId: string,
   messages: ChatMessage[],
+  options?: AppendChatMessagesOptions,
 ): Promise<void> {
-  return store().appendChatMessages(ctx, sessionId, messages);
+  return store().appendChatMessages(ctx, sessionId, messages, options);
 }
 
 export function replaceAllChatSessionMessages(

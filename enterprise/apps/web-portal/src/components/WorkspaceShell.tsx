@@ -45,7 +45,13 @@ import {
   Trash2,
   Languages,
 } from "lucide-react";
-import { useChatStore } from "@agenticx/feature-chat";
+import {
+  createPortalChatHistoryClient,
+  disposeHistoryOutbox,
+  startHistoryOutboxCoordinator,
+  useChatStore,
+  type HistoryAppendPayload,
+} from "@agenticx/feature-chat";
 import { MachiChatView } from "./MachiChatView";
 import {
   ENTERPRISE_PRODUCT_NAME,
@@ -234,7 +240,61 @@ export function WorkspaceShell({ userEmail, userScopes }: WorkspaceShellProps) {
     [deleteSessionsInStore],
   );
 
+  React.useEffect(() => {
+    let cancelled = false;
+    const historyClient = createPortalChatHistoryClient();
+    (async () => {
+      try {
+        const res = await fetch("/api/auth/session", { cache: "no-store" });
+        if (!res.ok || cancelled) return;
+        const json = (await res.json()) as {
+          data?: { tenantId?: string; userId?: string };
+        };
+        const tenantId = json.data?.tenantId?.trim();
+        const userId = json.data?.userId?.trim();
+        if (!tenantId || !userId || cancelled) return;
+        const principal = { tenantId, userId };
+        useChatStore.getState().setHistoryPrincipal(principal);
+        startHistoryOutboxCoordinator(
+          principal,
+          {
+            async appendMessages(sessionId, messages, opts) {
+              await historyClient.appendMessages(
+                sessionId,
+                messages as HistoryAppendPayload[],
+                {
+                  operationId: opts.operationId,
+                  payloadHash: opts.payloadHash,
+                  retries: 5,
+                },
+              );
+            },
+          },
+          {
+            onSyncStateChange(bySessionId) {
+              useChatStore.getState().setHistorySyncBySessionId(bySessionId);
+            },
+            async onFlushSuccess(sessionIds) {
+              for (const sessionId of sessionIds) {
+                await useChatStore.getState().refetchSessionMessages(sessionId);
+              }
+            },
+          },
+        );
+      } catch {
+        // Principal not ready — outbox stays idle until next mount/login.
+      }
+    })();
+    return () => {
+      cancelled = true;
+      disposeHistoryOutbox();
+      useChatStore.getState().setHistoryPrincipal(null);
+    };
+  }, []);
+
   const onSignOut = React.useCallback(async () => {
+    disposeHistoryOutbox();
+    useChatStore.getState().setHistoryPrincipal(null);
     await fetch("/api/auth/logout", { method: "POST" });
     router.replace("/auth");
   }, [router]);

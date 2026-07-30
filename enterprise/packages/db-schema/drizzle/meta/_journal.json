@@ -260,6 +260,13 @@
       "when": 1785322028582,
       "tag": "0037_user_password_change_required",
       "breakpoints": true
+    },
+    {
+      "idx": 37,
+      "version": "7",
+      "when": 1785322028585,
+      "tag": "0038_chat_history_operations",
+      "breakpoints": true
     }
   ]
 }

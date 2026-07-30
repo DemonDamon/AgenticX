@@ -98,6 +98,8 @@ export function MachiChatView({
     responseVersionsByUserMessageId,
     hydrateSessions,
     historyError,
+    historySyncBySessionId,
+    retryHistorySync,
     sessionMessagesLoading,
     renameSession,
     switchModel,
@@ -424,6 +426,16 @@ export function MachiChatView({
     return pendingMessages.filter((message) => message.sessionId === activeSessionId);
   }, [activeSessionId, pendingMessages]);
 
+  const activeHistorySync = activeSessionId
+    ? historySyncBySessionId[activeSessionId]
+    : undefined;
+  const showSessionHistorySync =
+    !!activeHistorySync &&
+    activeHistorySync.state !== "idle" &&
+    (activeHistorySync.pendingCount > 0 ||
+      activeHistorySync.state === "dead_letter" ||
+      activeHistorySync.state === "paused");
+
   const composer = (
     <div className={cn("mx-auto w-full space-y-3", isEmpty ? "max-w-[46rem]" : "max-w-4xl")}>
       {historyError && (
@@ -432,6 +444,42 @@ export function MachiChatView({
           <div>
             <AlertTitle>{t("historySyncTitle")}</AlertTitle>
             <AlertDescription>{historyError}</AlertDescription>
+          </div>
+        </Alert>
+      )}
+      {showSessionHistorySync && activeHistorySync && (
+        <Alert
+          variant="warning"
+          className="border-warning/30 bg-warning-soft/80 shadow-sm"
+          aria-live={
+            activeHistorySync.state === "dead_letter" || activeHistorySync.state === "paused"
+              ? "assertive"
+              : "polite"
+          }
+        >
+          <ShieldAlert className="h-5 w-5" />
+          <div className="flex flex-1 items-start justify-between gap-3">
+            <div>
+              <AlertTitle>{t("historySyncTitle")}</AlertTitle>
+              <AlertDescription>
+                {activeHistorySync.message || t("historySyncPending")}
+              </AlertDescription>
+            </div>
+            {activeHistorySync.state === "dead_letter" &&
+              activeHistorySync.pendingCount > 0 &&
+              activeSessionId && (
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                className="shrink-0"
+                onClick={() => {
+                  void retryHistorySync(activeSessionId);
+                }}
+              >
+                {t("historySyncRetry")}
+              </Button>
+            )}
           </div>
         </Alert>
       )}

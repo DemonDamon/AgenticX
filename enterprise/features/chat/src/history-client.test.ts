@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { createPortalChatHistoryClient, historyFetch } from "./history-client";
+import { createPortalChatHistoryClient, historyFetch, historyRequest } from "./history-client";
 
 describe("historyFetch", () => {
   it("retries Failed to fetch then succeeds", async () => {
@@ -23,6 +23,20 @@ describe("historyFetch", () => {
     await expect(historyFetch("/api/chat/sessions", {}, { retries: 1 })).rejects.toThrow(
       /无法连接门户服务/,
     );
+  });
+});
+
+describe("historyRequest", () => {
+  it("retries HTTP 503 at least once (AC-8)", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(new Response("busy", { status: 503 }))
+      .mockResolvedValueOnce(new Response("{}", { status: 200 }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const res = await historyRequest("/api/chat/sessions", { method: "GET" }, { retries: 2 });
+    expect(res.status).toBe(200);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 });
 

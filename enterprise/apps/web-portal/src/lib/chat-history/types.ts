@@ -13,6 +13,18 @@ export class ChatHistoryNotFoundError extends Error {
   }
 }
 
+export class ChatHistoryConflictError extends Error {
+  public constructor(message = "conflict") {
+    super(message);
+    this.name = "ChatHistoryConflictError";
+  }
+}
+
+export type AppendChatMessagesOptions = {
+  operationId?: string;
+  payloadHash?: string;
+};
+
 export interface ChatHistoryStore {
   isChatSessionOwned(ctx: ChatHistoryContext, sessionId: string): Promise<boolean>;
   listChatSessions(ctx: ChatHistoryContext): Promise<ChatSession[]>;
@@ -25,6 +37,7 @@ export interface ChatHistoryStore {
     ctx: ChatHistoryContext,
     sessionId: string,
     messages: ChatMessage[],
+    options?: AppendChatMessagesOptions,
   ): Promise<void>;
   replaceAllChatSessionMessages(
     ctx: ChatHistoryContext,
