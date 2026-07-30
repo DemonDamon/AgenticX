@@ -1,0 +1,57 @@
+# Build from the enterprise/ directory, for example:
+#   docker build -f apps/Dockerfile.next \
+#     --build-arg APP_NAME=web-portal \
+#     --build-arg APP_PACKAGE=@agenticx/app-web-portal \
+#     --build-arg APP_PORT=3000 \
+#     -t ghcr.io/agenticx/enterprise-web-portal:local .
+#
+#   docker build -f apps/Dockerfile.next \
+#     --build-arg APP_NAME=admin-console \
+#     --build-arg APP_PACKAGE=@agenticx/app-admin-console \
+#     --build-arg APP_PORT=3001 \
+#     -t ghcr.io/agenticx/enterprise-admin-console:local .
+
+FROM node:20-bookworm-slim AS base
+ENV PNPM_HOME=/pnpm
+ENV PATH=$PNPM_HOME:$PATH
+WORKDIR /work
+RUN corepack enable
+
+FROM base AS deps
+COPY package.json pnpm-lock.yaml pnpm-workspace.yaml turbo.json tsconfig.base.json ./
+COPY apps ./apps
+COPY features ./features
+COPY packages ./packages
+COPY plugins ./plugins
+RUN pnpm install --frozen-lockfile
+
+FROM deps AS build
+ARG APP_NAME
+ARG APP_PACKAGE
+ARG BUILD_DATABASE_DIALECT=postgresql
+ARG BUILD_DATABASE_URL=postgresql://agenticx:agenticx@127.0.0.1:5432/agenticx?sslmode=disable
+ENV NODE_ENV=production
+ENV NEXT_TELEMETRY_DISABLED=1
+ENV DATABASE_DIALECT=${BUILD_DATABASE_DIALECT}
+ENV DATABASE_URL=${BUILD_DATABASE_URL}
+RUN pnpm --filter "${APP_PACKAGE}" build
+RUN mkdir -p "apps/${APP_NAME}/public"
+
+FROM node:20-bookworm-slim AS runner
+ARG APP_NAME
+ARG APP_PORT=3000
+ENV NODE_ENV=production
+ENV HOSTNAME=0.0.0.0
+ENV PORT=${APP_PORT}
+WORKDIR /app/apps/${APP_NAME}
+
+RUN groupadd --system --gid 1001 nodejs \
+  && useradd --system --uid 1001 --gid nodejs nextjs
+
+COPY --from=build --chown=nextjs:nodejs /work/apps/${APP_NAME}/.next/standalone /app
+COPY --from=build --chown=nextjs:nodejs /work/apps/${APP_NAME}/.next/static /app/apps/${APP_NAME}/.next/static
+COPY --from=build --chown=nextjs:nodejs /work/apps/${APP_NAME}/public /app/apps/${APP_NAME}/public
+
+USER nextjs
+EXPOSE ${APP_PORT}
+CMD ["node", "server.js"]

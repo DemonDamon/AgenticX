@@ -177,7 +177,7 @@ async function maybeTranscribe(
     try {
       transcript = (await read(join(work, "audio.txt"))).toString("utf8");
     } catch {
-      transcript = stdout.toString("utf8");
+      transcript = stdout;
     }
     const trimmed = transcript.trim();
     return { text: trimmed || null, used };

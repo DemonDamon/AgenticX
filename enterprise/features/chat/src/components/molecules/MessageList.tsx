@@ -697,7 +697,7 @@ export function MessageList({
                         {/* 用户图片/文档附件（合并在同一气泡内，非 Kimi 分栏样式） */}
                         {!userSplitBubbles && isUser && userHasAttachments ? (
                           <div className="mb-2 flex flex-wrap gap-2">
-                            {message.attachments.map((attachment) =>
+                            {userAttachments.map((attachment) =>
                               attachment.mime_type.startsWith("image/") && attachment.data_url ? (
                                 <img
                                   key={`${message.id}-${attachment.name}`}

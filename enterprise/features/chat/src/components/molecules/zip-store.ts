@@ -54,6 +54,12 @@ function concat(parts: Uint8Array[]): Uint8Array {
   return out;
 }
 
+function toBlobPart(bytes: Uint8Array): Uint8Array<ArrayBuffer> {
+  const copy = new Uint8Array(bytes.byteLength);
+  copy.set(bytes);
+  return copy;
+}
+
 export type ZipStoreEntry = {
   /** Path inside the archive, using `/` separators. */
   path: string;
@@ -126,5 +132,7 @@ export function buildStoreZip(entries: ZipStoreEntry[]): Blob {
     u16(0),
   ]);
 
-  return new Blob([localDir, centralDir, end], { type: "application/zip" });
+  return new Blob([toBlobPart(localDir), toBlobPart(centralDir), toBlobPart(end)], {
+    type: "application/zip",
+  });
 }

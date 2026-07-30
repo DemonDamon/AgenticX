@@ -25,6 +25,9 @@ services:
     image: ghcr.io/agenticx/enterprise-gateway:latest
     container_name: agenticx-gateway-a
     restart: unless-stopped
+    # Gateway test stack writes audit files under /runtime/audit on a shared volume.
+    # Run as root here so first boot can create runtime directories without manual chown.
+    user: "0:0"
     environment:
       GATEWAY_PORT: 8088
       DATABASE_DIALECT: ${DATABASE_DIALECT:-postgresql}
