@@ -628,20 +628,40 @@ export default function DepartmentsPage() {
                         key={member.id}
                         className="flex items-center gap-3 px-4 py-3 hover:bg-muted/40 transition-colors"
                       >
-                        <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-primary/10 text-sm font-semibold text-primary">
-                          {member.displayName.slice(0, 1) || "?"}
-                        </span>
-                        <div className="min-w-0 flex-1">
-                          <div className="truncate text-sm font-medium text-foreground">
-                            {member.displayName}
-                          </div>
-                          <div className="truncate text-xs text-muted-foreground">
-                            {member.jobTitle ? `${member.jobTitle} · ` : ""}{member.email}
-                          </div>
-                        </div>
+                        <Link
+                          href={`/iam/users?dept=${encodeURIComponent(currentDeptId ?? "")}&user=${encodeURIComponent(member.id)}`}
+                          className="flex min-w-0 flex-1 items-center gap-3 rounded-md outline-none focus-visible:ring-2 focus-visible:ring-primary"
+                          title={t("membersManage")}
+                        >
+                          <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-primary/10 text-sm font-semibold text-primary">
+                            {member.displayName.slice(0, 1) || "?"}
+                          </span>
+                          <span className="min-w-0 flex-1">
+                            <span className="block truncate text-sm font-medium text-foreground hover:text-primary">
+                              {member.displayName}
+                            </span>
+                            <span className="block truncate text-xs text-muted-foreground">
+                              {member.jobTitle ? `${member.jobTitle} · ` : ""}{member.email}
+                            </span>
+                          </span>
+                        </Link>
                         <Badge variant={MEMBER_STATUS_VARIANT[member.status]} className="shadow-none">
                           {tu(`status.${member.status}`)}
                         </Badge>
+                        <Button
+                          asChild
+                          variant="ghost"
+                          size="icon"
+                          className="h-8 w-8 shrink-0 text-muted-foreground hover:text-foreground"
+                          title={t("membersManage")}
+                          >
+                            <Link
+                            href={`/iam/users?dept=${encodeURIComponent(currentDeptId ?? "")}&user=${encodeURIComponent(member.id)}&edit=1`}
+                            aria-label={t("membersManage")}
+                          >
+                            <Pencil className="h-4 w-4" />
+                          </Link>
+                        </Button>
                       </div>
                     ))}
 

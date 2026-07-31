@@ -700,6 +700,7 @@
         "move": "Move",
         "delete": "Delete",
         "membersLinkTitle": "Go to member management",
+        "membersManage": "Manage member",
         "membersSectionLabel": "Members",
         "membersEmpty": "No members in this department",
         "emptyDept": "No members or sub-departments yet",

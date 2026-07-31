@@ -99,6 +99,8 @@ function UsersPageContent() {
   const statusMeta = useMemo(() => getStatusMeta(t), [t]);
   const searchParams = useSearchParams();
   const initialDept = searchParams.get("dept") || "all";
+  const initialUserId = searchParams.get("user") || "";
+  const initialEdit = searchParams.get("edit") === "1";
 
   const [users, setUsers] = useState<AdminUser[]>([]);
   const [loading, setLoading] = useState(true);
@@ -117,6 +119,29 @@ function UsersPageContent() {
     for (const d of deptOptions) m.set(d.id, d.label);
     return m;
   }, [deptOptions]);
+
+  const createInitial = useMemo(
+    () => ({ ...EMPTY_USER_FORM, deptId: initialDept === "all" ? "" : initialDept }),
+    [initialDept],
+  );
+
+  const selectedInitial = useMemo(
+    () =>
+      selected
+        ? {
+            email: selected.email,
+            displayName: selected.displayName,
+            status: selected.status,
+            deptId: selected.deptId ?? "",
+            phone: selected.phone ?? "",
+            employeeNo: selected.employeeNo ?? "",
+            jobTitle: selected.jobTitle ?? "",
+            roleCodes: selected.roleCodes ?? [],
+            initialPassword: "",
+          }
+        : undefined,
+    [selected],
+  );
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -144,6 +169,14 @@ function UsersPageContent() {
   useEffect(() => {
     void load();
   }, [load]);
+
+  useEffect(() => {
+    if (!initialUserId || loading) return;
+    const user = users.find((item) => item.id === initialUserId);
+    if (!user || selected?.id === user.id) return;
+    setSelected(user);
+    setEditOpen(initialEdit);
+  }, [initialEdit, initialUserId, loading, selected?.id, users]);
 
   useEffect(() => {
     let alive = true;
@@ -550,80 +583,116 @@ function UsersPageContent() {
       </div>
 
       {/* 详情抽屉 */}
-      <Sheet open={!!selected && !editOpen} onOpenChange={(open) => !open && setSelected(null)}>
+      <Sheet
+        open={!!selected}
+        onOpenChange={(open) => {
+          if (open) return;
+          setEditOpen(false);
+          setSelected(null);
+        }}
+      >
         <SheetContent className="w-full sm:max-w-xl">
           {selected ? (
-            <div className="flex h-full flex-col gap-4">
-              <SheetHeader>
-                <div className="flex items-center gap-3">
-                  <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-primary-soft text-base font-semibold text-primary">
-                    {selected.displayName.slice(0, 1)}
-                  </span>
-                  <div className="min-w-0">
-                    <SheetTitle className="truncate">{selected.displayName}</SheetTitle>
-                    <SheetDescription className="truncate">{selected.email}</SheetDescription>
-                  </div>
+            editOpen ? (
+              <div className="flex h-full flex-col gap-4">
+                <SheetHeader>
+                  <SheetTitle>{t("form.editTitle")}</SheetTitle>
+                  <SheetDescription>{selected.email}</SheetDescription>
+                </SheetHeader>
+                <div className="min-h-0 flex-1 overflow-y-auto pr-1">
+                  <UserFormFields
+                    submitLabel={t("form.submitSave")}
+                    initial={selectedInitial}
+                    emailReadOnly
+                    deptOptions={deptOptions}
+                    roleOptions={roleOptions}
+                    onCancel={() => setEditOpen(false)}
+                    onSubmit={async (values) => {
+                      const ok = await handleUpdate(selected.id, {
+                        displayName: values.displayName,
+                        status: values.status,
+                        deptId: values.deptId || null,
+                        phone: values.phone || null,
+                        employeeNo: values.employeeNo || null,
+                        jobTitle: values.jobTitle || null,
+                        roleCodes: values.roleCodes,
+                      });
+                      if (ok) setEditOpen(false);
+                    }}
+                  />
                 </div>
-              </SheetHeader>
-
-              <div className="flex-1 space-y-4 overflow-y-auto pr-1">
-                <DetailRow label={t("detail.userId")} value={<span className="font-mono text-xs">{selected.id}</span>} />
-                <DetailRow label={t("detail.tenant")} value={<span className="font-mono text-xs">{selected.tenantId}</span>} />
-                <DetailRow
-                  label={t("columns.department")}
-                  value={
-                    selected.deptId ? (deptLabelMap.get(selected.deptId) ?? selected.deptId) : "—"
-                  }
-                />
-                <DetailRow label={t("detail.phone")} value={selected.phone ?? "—"} />
-                <DetailRow label={t("detail.employeeNo")} value={selected.employeeNo ?? "—"} />
-                <DetailRow label={t("detail.jobTitle")} value={selected.jobTitle ?? "—"} />
-                <DetailRow
-                  label={t("detail.roles")}
-                  value={
-                    selected.roleCodes?.length ? (
-                      <div className="flex flex-wrap gap-1">
-                        {selected.roleCodes.map((c) => (
-                          <Badge key={c} variant="outline" className="font-mono text-[10px]">
-                            {c}
-                          </Badge>
-                        ))}
-                      </div>
-                    ) : (
-                      "—"
-                    )
-                  }
-                />
-                <DetailRow
-                  label={t("columns.status")}
-                  value={<Badge variant={statusMeta[selected.status].variant}>{statusMeta[selected.status].label}</Badge>}
-                />
-                <DetailRow
-                  label={t("detail.scopes")}
-                  value={
-                    <div className="flex flex-wrap gap-1">
-                      {selected.scopes.length === 0 ? (
-                        <span className="text-sm text-muted-foreground">{t("detail.none")}</span>
-                      ) : (
-                        selected.scopes.map((scope) => (
-                          <Badge key={scope} variant="soft" className="font-mono text-[10px]">
-                            {scope}
-                          </Badge>
-                        ))
-                      )}
+              </div>
+            ) : (
+              <div className="flex h-full flex-col gap-4">
+                <SheetHeader>
+                  <div className="flex items-center gap-3">
+                    <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-primary-soft text-base font-semibold text-primary">
+                      {selected.displayName.slice(0, 1)}
+                    </span>
+                    <div className="min-w-0">
+                      <SheetTitle className="truncate">{selected.displayName}</SheetTitle>
+                      <SheetDescription className="truncate">{selected.email}</SheetDescription>
                     </div>
-                  }
-                />
-                <DetailRow
-                  label={t("detail.createdAt")}
-                  value={<span className="font-mono text-xs">{new Date(selected.createdAt).toLocaleString("zh-CN")}</span>}
-                />
-                <DetailRow
-                  label={t("columns.updatedAt")}
-                  value={<span className="font-mono text-xs">{new Date(selected.updatedAt).toLocaleString("zh-CN")}</span>}
-                />
+                  </div>
+                </SheetHeader>
 
-                {selected ? (
+                <div className="flex-1 space-y-4 overflow-y-auto pr-1">
+                  <DetailRow label={t("detail.userId")} value={<span className="font-mono text-xs">{selected.id}</span>} />
+                  <DetailRow label={t("detail.tenant")} value={<span className="font-mono text-xs">{selected.tenantId}</span>} />
+                  <DetailRow
+                    label={t("columns.department")}
+                    value={
+                      selected.deptId ? (deptLabelMap.get(selected.deptId) ?? selected.deptId) : "—"
+                    }
+                  />
+                  <DetailRow label={t("detail.phone")} value={selected.phone ?? "—"} />
+                  <DetailRow label={t("detail.employeeNo")} value={selected.employeeNo ?? "—"} />
+                  <DetailRow label={t("detail.jobTitle")} value={selected.jobTitle ?? "—"} />
+                  <DetailRow
+                    label={t("detail.roles")}
+                    value={
+                      selected.roleCodes?.length ? (
+                        <div className="flex flex-wrap gap-1">
+                          {selected.roleCodes.map((c) => (
+                            <Badge key={c} variant="outline" className="font-mono text-[10px]">
+                              {c}
+                            </Badge>
+                          ))}
+                        </div>
+                      ) : (
+                        "—"
+                      )
+                    }
+                  />
+                  <DetailRow
+                    label={t("columns.status")}
+                    value={<Badge variant={statusMeta[selected.status].variant}>{statusMeta[selected.status].label}</Badge>}
+                  />
+                  <DetailRow
+                    label={t("detail.scopes")}
+                    value={
+                      <div className="flex flex-wrap gap-1">
+                        {selected.scopes.length === 0 ? (
+                          <span className="text-sm text-muted-foreground">{t("detail.none")}</span>
+                        ) : (
+                          selected.scopes.map((scope) => (
+                            <Badge key={scope} variant="soft" className="font-mono text-[10px]">
+                              {scope}
+                            </Badge>
+                          ))
+                        )}
+                      </div>
+                    }
+                  />
+                  <DetailRow
+                    label={t("detail.createdAt")}
+                    value={<span className="font-mono text-xs">{new Date(selected.createdAt).toLocaleString("zh-CN")}</span>}
+                  />
+                  <DetailRow
+                    label={t("columns.updatedAt")}
+                    value={<span className="font-mono text-xs">{new Date(selected.updatedAt).toLocaleString("zh-CN")}</span>}
+                  />
+
                   <VisibleModelsEditor
                     target={{
                       kind: "user",
@@ -632,30 +701,30 @@ function UsersPageContent() {
                     }}
                     variant="inline"
                   />
-                ) : null}
-              </div>
+                </div>
 
-              <div className="flex flex-wrap gap-2 border-t border-border pt-3">
-                <Button variant="outline" className="flex-1 min-w-[100px]" onClick={() => setEditOpen(true)}>
-                  <Pencil />
-                  {t("actions.edit")}
-                </Button>
-                <Button variant="outline" className="flex-1 min-w-[100px]" onClick={() => void handleResetPassword(selected)}>
-                  {t("detail.resetPassword")}
-                </Button>
-                <Button
-                  variant={selected.status === "active" ? "outline" : "default"}
-                  className="flex-1"
-                  onClick={() => void handleQuickToggleStatus(selected)}
-                >
-                  {selected.status === "active" ? <ShieldX /> : <ShieldCheck />}
-                  {selected.status === "active" ? t("status.disabled") : t("status.active")}
-                </Button>
-                <Button variant="destructive" onClick={() => void handleDelete(selected)}>
-                  <Trash2 />
-                </Button>
+                <div className="flex flex-wrap gap-2 border-t border-border pt-3">
+                  <Button variant="outline" className="flex-1 min-w-[100px]" onClick={() => setEditOpen(true)}>
+                    <Pencil />
+                    {t("actions.edit")}
+                  </Button>
+                  <Button variant="outline" className="flex-1 min-w-[100px]" onClick={() => void handleResetPassword(selected)}>
+                    {t("detail.resetPassword")}
+                  </Button>
+                  <Button
+                    variant={selected.status === "active" ? "outline" : "default"}
+                    className="flex-1"
+                    onClick={() => void handleQuickToggleStatus(selected)}
+                  >
+                    {selected.status === "active" ? <ShieldX /> : <ShieldCheck />}
+                    {selected.status === "active" ? t("status.disabled") : t("status.active")}
+                  </Button>
+                  <Button variant="destructive" onClick={() => void handleDelete(selected)}>
+                    <Trash2 />
+                  </Button>
+                </div>
               </div>
-            </div>
+            )
           ) : null}
         </SheetContent>
       </Sheet>
@@ -667,6 +736,7 @@ function UsersPageContent() {
         title={t("newUser")}
         description={t("form.createDescription")}
         submitLabel={t("form.submitCreate")}
+        initial={createInitial}
         roleOptions={roleOptions}
         deptOptions={deptOptions}
         onSubmit={async (values) => {
@@ -685,48 +755,6 @@ function UsersPageContent() {
         }}
       />
 
-      {/* 编辑 */}
-      <UserFormDialog
-        open={editOpen && !!selected}
-        onOpenChange={(open) => {
-          setEditOpen(open);
-          if (!open) setSelected(selected);
-        }}
-        title={t("form.editTitle")}
-        description={selected?.email}
-        submitLabel={t("form.submitSave")}
-        roleOptions={roleOptions}
-        deptOptions={deptOptions}
-        initial={
-          selected
-            ? {
-                email: selected.email,
-                displayName: selected.displayName,
-                status: selected.status,
-                deptId: selected.deptId ?? "",
-                phone: selected.phone ?? "",
-                employeeNo: selected.employeeNo ?? "",
-                jobTitle: selected.jobTitle ?? "",
-                roleCodes: selected.roleCodes ?? [],
-                initialPassword: "",
-              }
-            : undefined
-        }
-        emailReadOnly
-        onSubmit={async (values) => {
-          if (!selected) return;
-          const ok = await handleUpdate(selected.id, {
-            displayName: values.displayName,
-            status: values.status,
-            deptId: values.deptId || null,
-            phone: values.phone || null,
-            employeeNo: values.employeeNo || null,
-            jobTitle: values.jobTitle || null,
-            roleCodes: values.roleCodes,
-          });
-          if (ok) setEditOpen(false);
-        }}
-      />
     </div>
   );
 }
@@ -764,27 +792,23 @@ const EMPTY_USER_FORM: UserFormValues = {
   initialPassword: "",
 };
 
-function UserFormDialog({
+function UserFormFields({
   open,
-  onOpenChange,
-  title,
-  description,
   submitLabel,
   initial,
   emailReadOnly,
   deptOptions,
   roleOptions,
+  onCancel,
   onSubmit,
 }: {
-  open: boolean;
-  onOpenChange: (next: boolean) => void;
-  title: string;
-  description?: React.ReactNode;
+  open?: boolean;
   submitLabel: string;
   initial?: UserFormValues;
   emailReadOnly?: boolean;
   deptOptions: DeptOption[];
   roleOptions: RoleOption[];
+  onCancel: () => void;
   onSubmit: (values: UserFormValues) => Promise<void>;
 }) {
   const t = useTranslations("pages.iam.users");
@@ -793,7 +817,7 @@ function UserFormDialog({
   const [submitting, setSubmitting] = useState(false);
 
   useEffect(() => {
-    if (open) {
+    if (open === undefined || open) {
       setValues(initial ?? EMPTY_USER_FORM);
     }
   }, [open, initial]);
@@ -810,14 +834,7 @@ function UserFormDialog({
   };
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent>
-        <DialogHeader>
-          <DialogTitle>{title}</DialogTitle>
-          {description ? <DialogDescription>{description}</DialogDescription> : null}
-        </DialogHeader>
-
-        <form onSubmit={handleSubmit} className="space-y-3">
+    <form onSubmit={handleSubmit} className="space-y-3">
           <div className="space-y-1.5">
             <Label htmlFor="user-email">{t("form.emailLabel")}</Label>
             <Input
@@ -956,16 +973,59 @@ function UserFormDialog({
             </div>
           ) : null}
 
-          <DialogFooter className="mt-4">
-            <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
-              {tc("actions.cancel")}
-            </Button>
-            <Button type="submit" disabled={submitting}>
-              <Plus />
-              {submitting ? t("form.processing") : submitLabel}
-            </Button>
-          </DialogFooter>
-        </form>
+      <div className="mt-4 flex justify-end gap-2">
+        <Button type="button" variant="outline" onClick={onCancel}>
+          {tc("actions.cancel")}
+        </Button>
+        <Button type="submit" disabled={submitting}>
+          <Plus />
+          {submitting ? t("form.processing") : submitLabel}
+        </Button>
+      </div>
+    </form>
+  );
+}
+
+function UserFormDialog({
+  open,
+  onOpenChange,
+  title,
+  description,
+  submitLabel,
+  initial,
+  emailReadOnly,
+  deptOptions,
+  roleOptions,
+  onSubmit,
+}: {
+  open: boolean;
+  onOpenChange: (next: boolean) => void;
+  title: string;
+  description?: React.ReactNode;
+  submitLabel: string;
+  initial?: UserFormValues;
+  emailReadOnly?: boolean;
+  deptOptions: DeptOption[];
+  roleOptions: RoleOption[];
+  onSubmit: (values: UserFormValues) => Promise<void>;
+}) {
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>{title}</DialogTitle>
+          {description ? <DialogDescription>{description}</DialogDescription> : null}
+        </DialogHeader>
+        <UserFormFields
+          open={open}
+          submitLabel={submitLabel}
+          initial={initial}
+          emailReadOnly={emailReadOnly}
+          deptOptions={deptOptions}
+          roleOptions={roleOptions}
+          onCancel={() => onOpenChange(false)}
+          onSubmit={onSubmit}
+        />
       </DialogContent>
     </Dialog>
   );

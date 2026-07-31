@@ -700,6 +700,7 @@
         "move": "移动",
         "delete": "删除",
         "membersLinkTitle": "点击跳转至成员管理页面",
+        "membersManage": "管理成员",
         "membersSectionLabel": "成员",
         "membersEmpty": "该部门暂无成员",
         "emptyDept": "该部门暂无成员与子部门",
