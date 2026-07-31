@@ -101,6 +101,46 @@ async function fetchBffFaviconObjectUrl(host: string): Promise<string | null> {
   return null;
 }
 
+/**
+ * Streaming markdown re-creates citation chips on every token, so each chip
+ * remounts hundreds of times per answer. Without this per-host cache every
+ * remount issued another BFF request, saturating Chrome's 6-connection
+ * HTTP/1.1 pool and making the chat SSE / history writes fail with
+ * `Failed to fetch` until a page reload.
+ */
+const faviconObjectUrlByHost = new Map<string, string | null>();
+const faviconRequestsByHost = new Map<string, Promise<string | null>>();
+
+export function loadFaviconObjectUrl(host: string): Promise<string | null> {
+  if (faviconObjectUrlByHost.has(host)) {
+    return Promise.resolve(faviconObjectUrlByHost.get(host) ?? null);
+  }
+  const inFlight = faviconRequestsByHost.get(host);
+  if (inFlight) return inFlight;
+
+  const request = fetchBffFaviconObjectUrl(host)
+    .catch(() => null)
+    .then((url) => {
+      faviconObjectUrlByHost.set(host, url);
+      faviconRequestsByHost.delete(host);
+      return url;
+    });
+  faviconRequestsByHost.set(host, request);
+  return request;
+}
+
+/** Blob URL is shared across mounts, so a broken icon invalidates the host once. */
+function invalidateFaviconObjectUrl(host: string): void {
+  const cached = faviconObjectUrlByHost.get(host);
+  if (cached) URL.revokeObjectURL(cached);
+  faviconObjectUrlByHost.set(host, null);
+}
+
+export function __resetFaviconCacheForTests(): void {
+  faviconObjectUrlByHost.clear();
+  faviconRequestsByHost.clear();
+}
+
 function isUsableFaviconImage(img: HTMLImageElement): boolean {
   if (img.naturalWidth < 8 || img.naturalHeight < 8) return false;
   return true;
@@ -135,19 +175,14 @@ export function WebSearchFavicon({
 
   React.useEffect(() => {
     let cancelled = false;
-    let objectUrl: string | null = null;
     setBlobSrc(null);
     setCdnIdx(0);
     setImgReady(false);
     setBffDone(false);
 
     void (async () => {
-      const url = await fetchBffFaviconObjectUrl(host);
-      if (cancelled) {
-        if (url) URL.revokeObjectURL(url);
-        return;
-      }
-      objectUrl = url;
+      const url = await loadFaviconObjectUrl(host);
+      if (cancelled) return;
       setBlobSrc(url);
       setBffDone(true);
       // Do NOT set imgReady here — wait for <img onLoad> so we never stack
@@ -156,7 +191,6 @@ export function WebSearchFavicon({
 
     return () => {
       cancelled = true;
-      if (objectUrl) URL.revokeObjectURL(objectUrl);
     };
   }, [host]);
 
@@ -212,7 +246,7 @@ export function WebSearchFavicon({
             const img = event.currentTarget;
             if (!isUsableFaviconImage(img)) {
               if (blobSrc) {
-                URL.revokeObjectURL(blobSrc);
+                invalidateFaviconObjectUrl(host);
                 setBlobSrc(null);
                 setImgReady(false);
                 return;
@@ -224,7 +258,7 @@ export function WebSearchFavicon({
           }}
           onError={() => {
             if (blobSrc) {
-              URL.revokeObjectURL(blobSrc);
+              invalidateFaviconObjectUrl(host);
               setBlobSrc(null);
               setImgReady(false);
               return;
