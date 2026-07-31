@@ -25,7 +25,7 @@ import {
   Skeleton,
   toast,
 } from "@agenticx/ui";
-import { ChevronDown, ChevronRight, FolderTree, MoreHorizontal, MoveRight, Pencil, Plus, RefreshCw, Save, Trash2, Users } from "lucide-react";
+import { ChevronDown, ChevronRight, FolderTree, MoreHorizontal, MoveRight, Pencil, Plus, RefreshCw, Save, Trash2, UserPlus, Users } from "lucide-react";
 import { adminFetch } from "../lib/admin-client-auth";
 import { VisibleModelsEditor } from "./visible-models-editor";
 
@@ -540,7 +540,12 @@ export function OrganizationEditor() {
                 <p className="text-xs text-muted-foreground">不能移动到自身或子组织之下。</p>
               </div>
               <div className="flex flex-wrap justify-between gap-2">
-                <Button variant="outline" onClick={() => { setCreateParentId(selected.id); setCreateOpen(true); }}><Plus />新增下级</Button>
+                <div className="flex flex-wrap gap-2">
+                  <Button variant="outline" onClick={() => { setCreateParentId(selected.id); setCreateOpen(true); }}><Plus />新增下级</Button>
+                  <Button variant="outline" asChild>
+                    <Link href={`/iam/users?dept=${encodeURIComponent(selected.id)}&create=1`}><UserPlus />新建用户</Link>
+                  </Button>
+                </div>
                 <Button onClick={() => void save()} disabled={saving || !draftName.trim()}><Save />保存组织</Button>
               </div>
               <section className="border-t border-border pt-5">
