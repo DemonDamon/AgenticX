@@ -1,12 +1,12 @@
-# Compact single-gateway test stack (HTTP-friendly via AUTH_COOKIE_SECURE).
-# Prefer sourcing a local env file derived from load-test-runtime-env.sh first.
 services:
   nginx:
     image: nginx:1.27-alpine
-    container_name: agenticx-nginx-test
+    container_name: agenticx-nginx-prod
     restart: unless-stopped
     depends_on:
       gateway-a:
+        condition: service_started
+      gateway-b:
         condition: service_started
       web-portal:
         condition: service_started
@@ -25,17 +25,16 @@ services:
     image: ghcr.io/agenticx/enterprise-gateway:latest
     container_name: agenticx-gateway-a
     restart: unless-stopped
-    # Gateway test stack writes audit files under /runtime/audit on a shared volume.
-    # Run as root here so first boot can create runtime directories without manual chown.
     user: "0:0"
     environment:
       GATEWAY_PORT: 8088
       DATABASE_DIALECT: ${DATABASE_DIALECT:-postgresql}
-      DATABASE_URL: ${DATABASE_URL:?DATABASE_URL is required}
-      REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
-      DEFAULT_TENANT_ID: ${DEFAULT_TENANT_ID:?DEFAULT_TENANT_ID is required}
-      DEFAULT_DEPT_ID: ${DEFAULT_DEPT_ID:-default}
-      AUTH_JWT_PUBLIC_KEY: ${JWT_PUBLIC_KEY:?JWT_PUBLIC_KEY is required}
+      DATABASE_URL: ${DATABASE_URL}
+      REDIS_URL: redis://redis:6379/0
+      DEFAULT_TENANT_ID: ${DEFAULT_TENANT_ID}
+      AGX_PROVIDER_SECRET_KEY: ${AGX_PROVIDER_SECRET_KEY}
+      DEFAULT_DEPT_ID: ${DEFAULT_DEPT_ID}
+      AUTH_JWT_PUBLIC_KEY: ${JWT_PUBLIC_KEY}
       GATEWAY_CONFIG_PATH: /app/config/policies.yaml
       GATEWAY_QUOTA_CONFIG_FILE: /runtime/admin/quotas.json
       GATEWAY_QUOTA_USAGE_FILE: /runtime/gateway/quota-usage.json
@@ -55,13 +54,13 @@ services:
     environment:
       NODE_ENV: production
       DATABASE_DIALECT: ${DATABASE_DIALECT:-postgresql}
-      DATABASE_URL: ${DATABASE_URL:?DATABASE_URL is required}
-      NEXT_PUBLIC_GATEWAY_BASE: ${NEXT_PUBLIC_GATEWAY_BASE:-http://nginx}
-      AUTH_COOKIE_SECURE: ${AUTH_COOKIE_SECURE:-false}
-      AUTH_JWT_PUBLIC_KEY: ${JWT_PUBLIC_KEY:?JWT_PUBLIC_KEY is required}
-      AUTH_JWT_PRIVATE_KEY: ${JWT_PRIVATE_KEY:?JWT_PRIVATE_KEY is required}
-      DEFAULT_TENANT_ID: ${DEFAULT_TENANT_ID:?DEFAULT_TENANT_ID is required}
-      DEFAULT_DEPT_ID: ${DEFAULT_DEPT_ID:-default}
+      DATABASE_URL: ${DATABASE_URL}
+      AGX_PROVIDER_SECRET_KEY: ${AGX_PROVIDER_SECRET_KEY}
+      NEXT_PUBLIC_GATEWAY_BASE: http://nginx
+      AUTH_JWT_PUBLIC_KEY: ${JWT_PUBLIC_KEY}
+      AUTH_JWT_PRIVATE_KEY: ${JWT_PRIVATE_KEY}
+      DEFAULT_TENANT_ID: ${DEFAULT_TENANT_ID}
+      DEFAULT_DEPT_ID: ${DEFAULT_DEPT_ID}
     networks:
       - agenticx-backbone
 
@@ -73,10 +72,10 @@ services:
       NODE_ENV: production
       DATABASE_DIALECT: ${DATABASE_DIALECT:-postgresql}
       DATABASE_URL: ${DATABASE_URL:?DATABASE_URL is required}
-      AUTH_COOKIE_SECURE: ${AUTH_COOKIE_SECURE:-false}
-      GATEWAY_BASE_URL: ${GATEWAY_BASE_URL:-http://gateway-a:8088}
-      AUTH_JWT_PUBLIC_KEY: ${JWT_PUBLIC_KEY:?JWT_PUBLIC_KEY is required}
-      AUTH_JWT_PRIVATE_KEY: ${JWT_PRIVATE_KEY:?JWT_PRIVATE_KEY is required}
+      AUTH_COOKIE_SECURE: ${AUTH_COOKIE_SECURE:-true}
+      GATEWAY_BASE_URL: ${GATEWAY_BASE_URL:-http://192.168.16.66:8088}
+      AUTH_JWT_PUBLIC_KEY: ${JWT_PUBLIC_KEY}
+      AUTH_JWT_PRIVATE_KEY: ${JWT_PRIVATE_KEY}
       ADMIN_CONSOLE_LOGIN_PASSWORD: ${ADMIN_CONSOLE_LOGIN_PASSWORD:?ADMIN_CONSOLE_LOGIN_PASSWORD is required}
       ADMIN_CONSOLE_SESSION_SECRET: ${ADMIN_CONSOLE_SESSION_SECRET:?ADMIN_CONSOLE_SESSION_SECRET is required}
       DEFAULT_TENANT_ID: ${DEFAULT_TENANT_ID:?DEFAULT_TENANT_ID is required}
@@ -91,11 +90,52 @@ services:
     networks:
       - agenticx-backbone
 
+  postgres-primary:
+    profiles: ["postgresql"]
+    image: postgres:16-alpine
+    container_name: agenticx-postgres-primary
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: agenticx
+      POSTGRES_USER: agenticx
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      TZ: UTC
+    volumes:
+      - pg_primary_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U agenticx -d agenticx"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    networks:
+      - agenticx-backbone
+
+  postgres-replica:
+    profiles: ["postgresql"]
+    image: postgres:16-alpine
+    container_name: agenticx-postgres-replica
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: agenticx
+      POSTGRES_USER: agenticx
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      TZ: UTC
+      # 说明：实际主从复制参数（wal_level/primary_conninfo 等）由客户环境初始化脚本注入。
+    volumes:
+      - pg_replica_data:/var/lib/postgresql/data
+    depends_on:
+      postgres-primary:
+        condition: service_healthy
+    networks:
+      - agenticx-backbone
+
   redis:
     image: redis:7-alpine
-    container_name: agenticx-redis-test
+    container_name: agenticx-redis-prod
     restart: unless-stopped
     command: ["redis-server", "--appendonly", "yes", "--save", "900", "1", "300", "10"]
+    ports:
+      - "6379:6379"
     volumes:
       - redis_data:/data
     networks:
@@ -107,4 +147,6 @@ networks:
 
 volumes:
   gateway_runtime:
+  pg_primary_data:
+  pg_replica_data:
   redis_data:
