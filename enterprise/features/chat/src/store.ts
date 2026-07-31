@@ -567,6 +567,8 @@ async function persistAppendMessagesNow(
       retries: 5,
     });
     setSessionHistorySync(set, sessionId, null);
+    // Same global-banner-stickiness fix as switchSession/refetchSessionMessages.
+    set({ historyError: null });
   } catch (persistErr) {
     const result = await enqueueAppend(sessionId, messages, { operationId, payloadHash });
     if (!result.enqueued) {
@@ -763,6 +765,9 @@ export const useChatStore = create<ChatStore>((set, get) => ({
             ...stripVersionsForSession(prev, sessionId),
             ...buildHydratedResponseVersions(merged),
           },
+          // Same global-banner-stickiness fix as switchSession: a successful fetch here
+          // proves the portal is reachable again, so clear the global historyError too.
+          historyError: null,
         };
       });
       if (overlay.length === 0) {
@@ -945,6 +950,11 @@ export const useChatStore = create<ChatStore>((set, get) => ({
           ...responseVersions,
         },
         sessionMessagesLoading: false,
+        // historyError is a global banner (not scoped to a session): a successful switch
+        // proves connectivity has recovered, so clear it here too. Otherwise one earlier
+        // transient failure keeps the "历史同步" banner stuck on every session until a
+        // full page refresh re-runs hydrateSessions (the only other place that clears it).
+        historyError: null,
       }));
       void flushHistoryOutbox().then(async (sessionIds) => {
         for (const id of sessionIds) {
