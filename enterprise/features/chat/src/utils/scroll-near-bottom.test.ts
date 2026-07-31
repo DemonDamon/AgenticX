@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { isNearBottom, shouldShowScrollToBottomFab } from "./scroll-near-bottom";
+import {
+  isNearBottom,
+  nextJumpToBottomFabVisible,
+  shouldShowScrollToBottomFab,
+} from "./scroll-near-bottom";
 
 function mockScrollEl(partial: Partial<HTMLElement>): HTMLElement {
   return partial as HTMLElement;
@@ -32,5 +36,17 @@ describe("scroll-near-bottom", () => {
       scrollTop: 0,
     });
     expect(shouldShowScrollToBottomFab(el, 96)).toBe(false);
+  });
+
+  it("nextJumpToBottomFabVisible bails out when value unchanged", () => {
+    const el = mockScrollEl({
+      scrollHeight: 1000,
+      clientHeight: 400,
+      scrollTop: 100,
+    });
+    expect(nextJumpToBottomFabVisible(true, true, el, 96)).toBe(true);
+    expect(nextJumpToBottomFabVisible(false, true, el, 96)).toBe(true);
+    expect(nextJumpToBottomFabVisible(false, true, null, 96)).toBe(false);
+    expect(nextJumpToBottomFabVisible(true, true, null, 96)).toBe(false);
   });
 });
