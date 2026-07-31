@@ -22,7 +22,7 @@ import { safeAdminNextPath } from "../../lib/admin-client-auth";
 import { getAdminSsoProviderOptions, pickPreferredSsoProvider } from "../../lib/admin-sso-provider-options";
 import { useTranslations } from "next-intl";
 import {
-  ENTERPRISE_PRODUCT_NAME,
+  ENTERPRISE_ORG_NAME,
   EnterpriseBrandMark,
 } from "../../components/EnterpriseBrandMark";
 
@@ -69,7 +69,7 @@ function LoginPageInner() {
       {/* 顶部 Logo */}
       <div className="absolute left-6 top-6 z-50 flex items-center gap-3 md:left-10 md:top-8">
         <EnterpriseBrandMark size={40} />
-        <span className="text-xl font-bold tracking-tight text-foreground">{ENTERPRISE_PRODUCT_NAME}</span>
+        <span className="text-xl font-bold tracking-tight text-foreground">{ENTERPRISE_ORG_NAME}</span>
       </div>
 
       {/* 装饰背景 */}
@@ -80,7 +80,7 @@ function LoginPageInner() {
       />
       <div
         aria-hidden
-        className="pointer-events-none absolute -right-40 bottom-0 h-[420px] w-[420px] rounded-full bg-chart-5/15 blur-3xl"
+        className="pointer-events-none absolute -right-40 bottom-0 h-[420px] w-[420px] rounded-full bg-primary/15 blur-3xl"
       />
 
       <div className="relative mx-auto grid min-h-screen max-w-6xl grid-cols-1 gap-10 px-6 py-10 lg:grid-cols-[1.1fr_1fr] lg:items-center">

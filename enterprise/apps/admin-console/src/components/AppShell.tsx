@@ -57,9 +57,9 @@ import {
   Sliders,
   Sun,
   Users,
-  Wand2,
   Database,
   KeyRound,
+  FolderTree,
   PlugZap,
 } from "lucide-react";
 
@@ -92,7 +92,7 @@ const NAV_GROUPS: NavGroup[] = [
     items: [
       { href: "/iam/roles", labelKey: "users", icon: Users },
       { href: "/iam/groups", labelKey: "userGroups", icon: Network },
-      { href: "/iam/bulk-import", labelKey: "organization", icon: Wand2 },
+      { href: "/iam/bulk-import", labelKey: "organization", icon: FolderTree },
     ],
   },
   {
@@ -111,7 +111,6 @@ const NAV_GROUPS: NavGroup[] = [
     items: [
       { href: "/admin/models", labelKey: "models", icon: Package },
       { href: "/admin/routing", labelKey: "autoRouting", icon: Route },
-      { href: "/admin/channels", labelKey: "channels", icon: Activity },
       { href: "/admin/mcp-servers", labelKey: "mcpServers", icon: PlugZap },
       { href: "/admin/api-tokens", labelKey: "apiTokens", icon: KeyRound },
       { href: "/admin/cache", labelKey: "cache", icon: Database },

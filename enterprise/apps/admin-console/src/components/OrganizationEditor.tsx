@@ -117,8 +117,7 @@ function TreeBranch({
   const selected = selectedId === node.id;
   return (
     <div>
-      <button
-        type="button"
+      <div
         className={[
           "flex w-full items-center gap-1.5 rounded-lg py-1.5 pr-2 text-left text-sm transition-colors",
           selected || dropTargetDeptId === node.id
@@ -126,10 +125,6 @@ function TreeBranch({
             : "hover:bg-muted",
         ].join(" ")}
         style={{ paddingLeft: `${8 + depth * 16}px` }}
-        onClick={() => {
-          onSelect(node.id);
-          if (hasChildren) onToggle(node.id);
-        }}
         onDragOver={(event) => {
           if (!draggingMemberId) return;
           event.preventDefault();
@@ -142,13 +137,34 @@ function TreeBranch({
           onMemberDrop(draggingMemberId, node.id);
         }}
       >
-        <span className="flex h-4 w-4 shrink-0 items-center justify-center">
-          {hasChildren ? expanded ? <ChevronDown className="h-3.5 w-3.5" /> : <ChevronRight className="h-3.5 w-3.5" /> : null}
-        </span>
-        <FolderTree className="h-3.5 w-3.5 shrink-0" />
-        <span className="min-w-0 flex-1 truncate">{node.name}</span>
-        {(node.memberCount ?? 0) > 0 ? <span className="rounded-full bg-muted px-1.5 py-0.5 text-[10px] text-muted-foreground">{node.memberCount}</span> : null}
-      </button>
+        <button
+          type="button"
+          className={[
+            "flex h-4 w-4 shrink-0 items-center justify-center rounded-sm",
+            hasChildren ? "text-muted-foreground hover:text-foreground" : "cursor-default text-transparent",
+          ].join(" ")}
+          aria-label={hasChildren ? (expanded ? `收起 ${node.name}` : `展开 ${node.name}`) : undefined}
+          disabled={!hasChildren}
+          onClick={(event) => {
+            event.stopPropagation();
+            if (hasChildren) onToggle(node.id);
+          }}
+        >
+          {hasChildren ? (expanded ? <ChevronDown className="h-3.5 w-3.5" /> : <ChevronRight className="h-3.5 w-3.5" />) : null}
+        </button>
+        <button
+          type="button"
+          className={[
+            "flex min-w-0 flex-1 items-center gap-1.5 text-left",
+            "focus-visible:outline-none",
+          ].join(" ")}
+          onClick={() => onSelect(node.id)}
+        >
+          <FolderTree className="h-3.5 w-3.5 shrink-0" />
+          <span className="min-w-0 flex-1 truncate">{node.name}</span>
+          {(node.memberCount ?? 0) > 0 ? <span className="rounded-full bg-muted px-1.5 py-0.5 text-[10px] text-muted-foreground">{node.memberCount}</span> : null}
+        </button>
+      </div>
       {expanded ? (
         <div>
           {children.map((child) => (

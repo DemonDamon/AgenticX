@@ -42,6 +42,7 @@ import {
   RotateCcw,
   ShieldCheck,
   Upload,
+  FolderTree,
 } from "lucide-react";
 
 const LS_MAP_KEY = "agx-iam-bulk-import-column-map-v1";
@@ -335,7 +336,12 @@ export default function BulkImportPage() {
             </BreadcrumbList>
           </Breadcrumb>
         }
-        title={t("organizationTitle")}
+        title={
+          <span className="inline-flex items-center gap-2">
+            <FolderTree className="h-5 w-5 text-primary" />
+            {t("organizationTitle")}
+          </span>
+        }
         description={t("organizationDescription")}
         actions={
           <div className="flex flex-wrap gap-2">

@@ -384,7 +384,8 @@ export function SettingsPanel() {
                         <div className="flex gap-2">
                           <Input
                             type="password"
-                            autoComplete="current-password"
+                            autoComplete="new-password"
+                            name="verify-current-password"
                             value={currentPassword}
                             onChange={(event) => {
                               setCurrentPassword(event.target.value);
@@ -416,12 +417,14 @@ export function SettingsPanel() {
                     label={t("password.newPassword")}
                     description={t("password.newPasswordDescription")}
                     control={
-                      <Input
-                        type="password"
-                        autoComplete="new-password"
-                        value={newPassword}
-                        onChange={(event) => setNewPassword(event.target.value)}
-                      />
+                      <div className="flex w-full flex-col gap-2 sm:max-w-[460px]">
+                        <Input
+                          type="password"
+                          autoComplete="new-password"
+                          value={newPassword}
+                          onChange={(event) => setNewPassword(event.target.value)}
+                        />
+                      </div>
                     }
                     stack
                   />
