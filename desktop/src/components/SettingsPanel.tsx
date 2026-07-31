@@ -114,6 +114,8 @@ import {
 } from "../utils/provider-display";
 import { PROVIDER_ICON_MAP } from "../utils/provider-icons";
 import { normalizeProviderEntry } from "../utils/model-options";
+import { isEnterpriseModelManagementLocked } from "../utils/enterprise-model-management";
+import { SHOW_DESKTOP_EXTERNAL_IM } from "../constants/desktop-feature-visibility";
 import { classifyModelKind, isEmbeddingModelKind } from "../utils/model-kind";
 import type { SettingsTab } from "../settings-tab";
 import type { MCPDiscoveryHit } from "./settings/mcp/MCPDiscoveryPanel";
@@ -6224,6 +6226,7 @@ export function SettingsPanel({
   onForwardFavorite,
 }: Props) {
   const userNickname = useAppStore((s) => s.userNickname);
+  const userAccount = useAppStore((s) => s.userAccount);
   const setUserNickname = useAppStore((s) => s.setUserNickname);
   const userAvatarUrl = useAppStore((s) => s.userAvatarUrl);
   const setUserAvatarUrl = useAppStore((s) => s.setUserAvatarUrl);
@@ -7204,6 +7207,7 @@ export function SettingsPanel({
     () => Object.values(draft).some((e) => e?.managed === true),
     [draft],
   );
+  const enterpriseModelManagementLocked = isEnterpriseModelManagementLocked(userAccount);
 
   const providerNames = useMemo(() => {
     if (enterpriseStrict) {
@@ -7384,11 +7388,12 @@ export function SettingsPanel({
   };
 
   const makeModelVisible = (model: string) => {
-    if (!model || current.models.includes(model)) return;
+    if (enterpriseModelManagementLocked || !model || current.models.includes(model)) return;
     updateField("models", [...current.models, model]);
   };
 
   const onRemoveModel = (model: string) => {
+    if (enterpriseModelManagementLocked) return;
     setDraft((prev) => {
       const prevEntry = prev[active] ?? {
         apiKey: "",
@@ -7576,6 +7581,11 @@ export function SettingsPanel({
   };
 
   const submitAddModelFromModal = () => {
+    if (enterpriseModelManagementLocked) {
+      closeAddModelModal();
+      setTab("account");
+      return;
+    }
     const id = addModelFormId.trim();
     if (!id || current.models.includes(id)) return;
     updateField("models", [...current.models, id]);
@@ -7589,6 +7599,11 @@ export function SettingsPanel({
   };
 
   const submitAddServiceVendorFromModal = () => {
+    if (enterpriseModelManagementLocked) {
+      closeAddServiceVendorModal();
+      setTab("account");
+      return;
+    }
     const name = addVendorFormName.trim();
     if (!name) return;
     const isOllama = addVendorFormType === "ollama";
@@ -8993,9 +9008,20 @@ export function SettingsPanel({
             {tab === "provider" && (
               <div className="flex min-h-0 flex-1 flex-col gap-3">
                 <RemoteBackendHintBanner kind="synced" />
-                {enterpriseStrict && (
+                {(enterpriseStrict || enterpriseModelManagementLocked) && (
                   <div className="rounded-lg border border-[color-mix(in_srgb,var(--status-warning)_40%,transparent)] bg-[color-mix(in_srgb,var(--status-warning)_12%,transparent)] px-3 py-2 text-xs font-medium leading-relaxed text-[var(--status-warning)]">
-                    模型由企业管理员统一配置。可在「用户账号」刷新列表或退出登录以恢复自配服务商。
+                    {enterpriseStrict
+                      ? "模型由企业管理员统一配置。可在「用户账号」刷新列表或退出登录以恢复自配服务商。"
+                      : "请先完成企业账号登录，登录前不可创建或添加本地模型。"}
+                    {enterpriseModelManagementLocked && !enterpriseStrict ? (
+                      <button
+                        type="button"
+                        className="ml-2 underline underline-offset-2 hover:text-text-primary"
+                        onClick={() => setTab("account")}
+                      >
+                        去登录
+                      </button>
+                    ) : null}
                   </div>
                 )}
               <div className="flex min-h-0 flex-1 gap-4">
@@ -9051,7 +9077,7 @@ export function SettingsPanel({
                       );
                     })}
                   </div>
-                  {!enterpriseStrict && (
+                  {!enterpriseStrict && !enterpriseModelManagementLocked && (
                   <div className="border-t border-border p-1.5">
                     <button
                       type="button"
@@ -9297,6 +9323,7 @@ export function SettingsPanel({
                               className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-border text-text-subtle transition hover:bg-surface-hover hover:text-text-strong disabled:pointer-events-none disabled:opacity-40"
                               disabled={
                                 current.managed === true
+                                || enterpriseModelManagementLocked
                                 || fetchingModels
                                 || !providerCredentialed(current)
                               }
@@ -9309,7 +9336,7 @@ export function SettingsPanel({
                               )}
                             </button>
                           </HoverTip>
-                          {!current.managed && (
+                          {!current.managed && !enterpriseModelManagementLocked && (
                           <HoverTip label="添加模型">
                             <button
                               type="button"
@@ -9335,7 +9362,9 @@ export function SettingsPanel({
                       <div className="space-y-1.5">
                         {current.models.length === 0 ? (
                           <div className="rounded-lg border border-dashed border-border px-3 py-8 text-center text-sm text-text-faint">
-                            暂无模型，可从 API 拉取或点击 + 手动添加
+                            {enterpriseModelManagementLocked
+                              ? "请先完成企业账号登录后管理模型"
+                              : "暂无模型，可从 API 拉取或点击 + 手动添加"}
                           </div>
                         ) : null}
                         {current.models.map((model) => {
@@ -10330,7 +10359,7 @@ export function SettingsPanel({
                   </fieldset>
                 </Panel>
 
-                <Panel title="飞书集成">
+                <Panel title="飞书集成" className={SHOW_DESKTOP_EXTERNAL_IM ? "" : "hidden"}>
                   {/* Tab switcher */}
                   <div className="mb-4 flex gap-1 rounded-lg bg-surface-hover p-0.5">
                     {(["feishu", "webhook"] as const).map((t) => (
@@ -10546,7 +10575,7 @@ export function SettingsPanel({
                   </>)}
                 </Panel>
 
-                <Panel title="微信集成">
+                <Panel title="微信集成" className={SHOW_DESKTOP_EXTERNAL_IM ? "" : "hidden"}>
                   {wechatStatus === "idle" && !wechatBotId && (
                     <div className="space-y-3">
                       <p className="text-xs text-text-faint">

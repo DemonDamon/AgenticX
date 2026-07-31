@@ -17,6 +17,7 @@ import {
 } from "lucide-react";
 import { createPortal } from "react-dom";
 import { META_AGENT_DISPLAY_NAME } from "../../constants/branding";
+import { SHOW_DESKTOP_EXTERNAL_IM } from "../../constants/desktop-feature-visibility";
 import { useAppStore, type Message } from "../../store";
 import { rememberSessionForAvatar } from "../../utils/avatar-last-session";
 import { avatarDotColorForIdentity, groupDotColor } from "../../utils/avatar-color";
@@ -401,8 +402,8 @@ export function SidebarSessionHistory() {
 
   const selectableRows = useMemo(() => {
     const map = new Map<string, SidebarSessionRow>();
-    if (wechatRow) map.set(wechatRow.session_id, wechatRow);
-    if (feishuRow) map.set(feishuRow.session_id, feishuRow);
+    if (SHOW_DESKTOP_EXTERNAL_IM && wechatRow) map.set(wechatRow.session_id, wechatRow);
+    if (SHOW_DESKTOP_EXTERNAL_IM && feishuRow) map.set(feishuRow.session_id, feishuRow);
     for (const row of buckets.pinned) map.set(row.session_id, row);
     for (const row of chronological) map.set(row.session_id, row);
     return Array.from(map.values());
@@ -1223,49 +1224,53 @@ export function SidebarSessionHistory() {
       ) : null}
 
       <div className="min-h-0 flex-1 overflow-y-auto px-1 pb-3">
-        {/* WeChat IM */}
-        {sectionHeader("wechat", "微信 IM", {
-          accentClass: "text-[#25D366]",
-          badge: wechatBoundId
-            ? {
-                text: "已绑定",
-                className: "bg-[rgba(37,211,102,0.15)] text-[#25D366]",
-              }
-            : undefined,
-        })}
-        {!collapse.wechat && (
-          <div className="mb-1">
-            {wechatRow ? (
-              renderRow(wechatRow)
-            ) : (
-              <div className="px-2 py-1 text-[11px] text-text-faint">
-                {wechatBoundId && searchQuery.trim() ? "无匹配" : "未绑定会话"}
+        {SHOW_DESKTOP_EXTERNAL_IM ? (
+          <>
+            {/* WeChat IM */}
+            {sectionHeader("wechat", "微信 IM", {
+              accentClass: "text-[#25D366]",
+              badge: wechatBoundId
+                ? {
+                    text: "已绑定",
+                    className: "bg-[rgba(37,211,102,0.15)] text-[#25D366]",
+                  }
+                : undefined,
+            })}
+            {!collapse.wechat && (
+              <div className="mb-1">
+                {wechatRow ? (
+                  renderRow(wechatRow)
+                ) : (
+                  <div className="px-2 py-1 text-[11px] text-text-faint">
+                    {wechatBoundId && searchQuery.trim() ? "无匹配" : "未绑定会话"}
+                  </div>
+                )}
               </div>
             )}
-          </div>
-        )}
 
-        {/* Feishu IM */}
-        {sectionHeader("feishu", "飞书 IM", {
-          accentClass: "text-[#3370FF]",
-          badge: feishuBoundId
-            ? {
-                text: "已绑定",
-                className: "bg-[rgba(51,112,255,0.15)] text-[#3370FF]",
-              }
-            : undefined,
-        })}
-        {!collapse.feishu && (
-          <div className="mb-1">
-            {feishuRow ? (
-              renderRow(feishuRow)
-            ) : (
-              <div className="px-2 py-1 text-[11px] text-text-faint">
-                {feishuBoundId && searchQuery.trim() ? "无匹配" : "未绑定会话"}
+            {/* Feishu IM */}
+            {sectionHeader("feishu", "飞书 IM", {
+              accentClass: "text-[#3370FF]",
+              badge: feishuBoundId
+                ? {
+                    text: "已绑定",
+                    className: "bg-[rgba(51,112,255,0.15)] text-[#3370FF]",
+                  }
+                : undefined,
+            })}
+            {!collapse.feishu && (
+              <div className="mb-1">
+                {feishuRow ? (
+                  renderRow(feishuRow)
+                ) : (
+                  <div className="px-2 py-1 text-[11px] text-text-faint">
+                    {feishuBoundId && searchQuery.trim() ? "无匹配" : "未绑定会话"}
+                  </div>
+                )}
               </div>
             )}
-          </div>
-        )}
+          </>
+        ) : null}
 
         {/* Pinned */}
         {sectionHeader("pinned", "PINNED")}

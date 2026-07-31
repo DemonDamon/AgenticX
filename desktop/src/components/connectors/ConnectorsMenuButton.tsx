@@ -3,7 +3,11 @@ import { createPortal } from "react-dom";
 import { ExternalLink, Link2, Loader2, SquareArrowOutUpRight } from "lucide-react";
 
 import { nativeConnectorAvailability, resolveConnectedConnectorIds } from "../../../electron/native-connectors-core";
-import { CONNECTORS, type ConnectorId } from "../settings/connectors/connector-catalog";
+import {
+  HIDDEN_DESKTOP_CONNECTOR_IDS,
+  VISIBLE_CONNECTORS,
+  type ConnectorId,
+} from "../settings/connectors/connector-catalog";
 import { SettingsSwitch } from "../settings/SettingsSwitch";
 import { Modal } from "../ds/Modal";
 import { Toast } from "../ds/Toast";
@@ -191,14 +195,14 @@ export function ConnectorsMenuButton({ sessionId }: Props) {
         feishuConnected,
         wecomConnected,
         qqmailConnected,
-      ),
+      ).filter((id) => !HIDDEN_DESKTOP_CONNECTOR_IDS.has(id)),
     [feishuConnected, githubConnected, mcpServers, qqmailConnected, tmeetConnected, wecomConnected],
   );
 
   const connectedLabel = useMemo(
     () =>
       connectedIds
-        .map((id) => CONNECTORS.find((item) => item.id === id)?.name ?? id)
+        .map((id) => VISIBLE_CONNECTORS.find((item) => item.id === id)?.name ?? id)
         .join("、"),
     [connectedIds],
   );
@@ -218,7 +222,7 @@ export function ConnectorsMenuButton({ sessionId }: Props) {
 
   /** WorkBuddy popup: only truly connected connectors. */
   const visibleConnectors = useMemo(
-    () => CONNECTORS.filter((item) => isConnectorConnected(item.id)),
+    () => VISIBLE_CONNECTORS.filter((item) => isConnectorConnected(item.id)),
     [isConnectorConnected],
   );
 
@@ -536,7 +540,7 @@ export function ConnectorsMenuButton({ sessionId }: Props) {
       {connectedIds.length > 0 ? (
         <span className="flex items-center">
           {connectedIds.map((id, index) => {
-            const item = CONNECTORS.find((connector) => connector.id === id);
+            const item = VISIBLE_CONNECTORS.find((connector) => connector.id === id);
             if (!item) return null;
             return (
               <span

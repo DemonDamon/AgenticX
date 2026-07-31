@@ -87,3 +87,11 @@ export const CONNECTORS: ConnectorDefinition[] = [
   { id: "supabase", name: "Supabase", description: "访问项目数据与服务", iconSrc: supabaseIcon },
   { id: "bigquery", name: "BigQuery", description: "查询和分析数据集", iconSrc: bigqueryIcon },
 ];
+
+/** Customer-facing desktop catalog: keep the IM backends available, but hide
+ * their setup cards and shortcut entries from the desktop UI. */
+export const HIDDEN_DESKTOP_CONNECTOR_IDS = new Set<ConnectorId>(["feishu", "wecom"]);
+
+export const VISIBLE_CONNECTORS = CONNECTORS.filter(
+  (item) => !HIDDEN_DESKTOP_CONNECTOR_IDS.has(item.id),
+);

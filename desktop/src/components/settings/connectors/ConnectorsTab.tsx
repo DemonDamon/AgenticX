@@ -4,7 +4,7 @@ import { Modal } from "../../ds/Modal";
 import { Toast } from "../../ds/Toast";
 import { SettingsSwitch } from "../SettingsSwitch";
 import { nativeConnectorAvailability } from "../../../../electron/native-connectors-core";
-import { CONNECTORS, type ConnectorDefinition, type ConnectorId } from "./connector-catalog";
+import { VISIBLE_CONNECTORS, type ConnectorDefinition, type ConnectorId } from "./connector-catalog";
 
 type Props = {
   sessionId: string;
@@ -145,7 +145,7 @@ export function ConnectorsTab({ sessionId, tapdConnected, onRefreshMcp }: Props)
   const [dialogError, setDialogError] = useState("");
 
   const selected = useMemo(
-    () => CONNECTORS.find((item) => item.id === selectedId) ?? null,
+    () => VISIBLE_CONNECTORS.find((item) => item.id === selectedId) ?? null,
     [selectedId],
   );
 
@@ -204,7 +204,7 @@ export function ConnectorsTab({ sessionId, tapdConnected, onRefreshMcp }: Props)
 
   const visibleConnectors = useMemo(
     () =>
-      CONNECTORS.filter((item) => {
+      VISIBLE_CONNECTORS.filter((item) => {
         if (showUnavailable) return true;
         const { available, connected } = connectorState(item);
         return available || connected;
@@ -213,7 +213,7 @@ export function ConnectorsTab({ sessionId, tapdConnected, onRefreshMcp }: Props)
   );
 
   const unavailableCount = useMemo(
-    () => CONNECTORS.filter((item) => !connectorState(item).available && !connectorState(item).connected).length,
+    () => VISIBLE_CONNECTORS.filter((item) => !connectorState(item).available && !connectorState(item).connected).length,
     [connectorState],
   );
 

@@ -260,6 +260,7 @@ import { buildMessagesPdfHtml, expandSelectionForCompletePdfExport } from "../ut
 import { buildCompactionNoticeText } from "../utils/context-notice";
 import { usePaneSortableHandle } from "./pane-sortable-context";
 import { FeishuBadge } from "./FeishuBadge";
+import { SHOW_DESKTOP_EXTERNAL_IM } from "../constants/desktop-feature-visibility";
 import { APP_DISPLAY_NAME, APP_TAGLINE, META_AGENT_DISPLAY_NAME } from "../constants/branding";
 import { DEFAULT_META_AVATAR_URL } from "../constants/meta-avatar";
 import { isMetaLeaderIdentity, resolveMetaDisplayName } from "../utils/display-name";
@@ -11268,10 +11269,10 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
                     {(pane.sessionId || "").trim()}
                   </span>
                 ) : null}
-                {shouldShowFeishuBadge && (
+                {SHOW_DESKTOP_EXTERNAL_IM && shouldShowFeishuBadge && (
                   <FeishuBadge variant="topbar" />
                 )}
-                {shouldShowWechatBadge && (
+                {SHOW_DESKTOP_EXTERNAL_IM && shouldShowWechatBadge && (
                   <span
                     className="inline-flex shrink-0 items-center rounded-sm px-1 py-px text-[9px] font-medium leading-tight"
                     style={{ backgroundColor: "rgba(37,211,102,0.15)", color: "#25D366" }}
