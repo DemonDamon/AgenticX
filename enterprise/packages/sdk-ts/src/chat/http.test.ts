@@ -157,6 +157,82 @@ describe("HttpChatClient stream cancel", () => {
     expect(chunks.at(-1)?.done).toBe(true);
   });
 
+  it("releases the body reader after [DONE] so the browser frees the connection", async () => {
+    const payload = 'data: {"choices":[{"delta":{"content":"hi"}}]}\n\n' + "data: [DONE]\n\n";
+    const bodyStream = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(new TextEncoder().encode(payload));
+        controller.close();
+      },
+    });
+    const realReader = bodyStream.getReader();
+    const cancelSpy = vi.spyOn(realReader, "cancel");
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(() =>
+        Promise.resolve({
+          ok: true,
+          json: async () => ({}),
+          body: { getReader: () => realReader },
+        } as unknown as Response),
+      ),
+    );
+
+    const client = new HttpChatClient({ endpoint: "/api/chat/completions" });
+    const { requestId } = await client.sendMessage({
+      sessionId: "session-1",
+      model: "test-model",
+      messages: [{ id: "u1", role: "user", content: "hello", createdAt: "2026-01-01T00:00:00.000Z" }],
+    });
+
+    const chunks = [];
+    for await (const chunk of client.stream(requestId)) {
+      chunks.push(chunk);
+    }
+
+    expect(chunks.at(-1)?.done).toBe(true);
+    // Without releaseStreamReader() this never fires, and the browser keeps the
+    // HTTP/1.1 connection out of the per-origin pool until the tab is reloaded.
+    expect(cancelSpy).toHaveBeenCalled();
+  });
+
+  it("releases the body reader when the gateway sends a chunk.error frame", async () => {
+    const payload = 'data: {"error":{"code":"50000","message":"boom"}}\n\n';
+    const bodyStream = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(new TextEncoder().encode(payload));
+        controller.close();
+      },
+    });
+    const realReader = bodyStream.getReader();
+    const cancelSpy = vi.spyOn(realReader, "cancel");
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(() =>
+        Promise.resolve({
+          ok: true,
+          json: async () => ({}),
+          body: { getReader: () => realReader },
+        } as unknown as Response),
+      ),
+    );
+
+    const client = new HttpChatClient({ endpoint: "/api/chat/completions" });
+    const { requestId } = await client.sendMessage({
+      sessionId: "session-1",
+      model: "test-model",
+      messages: [{ id: "u1", role: "user", content: "hello", createdAt: "2026-01-01T00:00:00.000Z" }],
+    });
+
+    const chunks = [];
+    for await (const chunk of client.stream(requestId)) {
+      chunks.push(chunk);
+    }
+
+    expect(chunks.at(-1)?.error?.message).toBe("boom");
+    expect(cancelSpy).toHaveBeenCalled();
+  });
+
   it("normalizes opaque browser network errors to actionable Chinese copy", () => {
     expect(normalizeTransportErrorMessage("Failed to fetch")).toContain("无法连接门户服务");
     expect(normalizeTransportErrorMessage("network error")).toContain("无法连接门户服务");

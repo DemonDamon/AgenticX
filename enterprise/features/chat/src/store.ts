@@ -484,6 +484,7 @@ function mergeSessionMessages(messages: ChatMessage[], sessionId: string, sessio
 let chatHydrateInFlight: Promise<void> | null = null;
 let sessionMessageLoadSeq = 0;
 let historyAuthRedirectScheduled = false;
+const historyAppendChainsBySessionId = new Map<string, Promise<void>>();
 const portalHistory = createPortalChatHistoryClient();
 
 function mergeOverlayMessages(remote: ChatMessage[], overlay: ChatMessage[]): ChatMessage[] {
@@ -522,6 +523,25 @@ async function persistAppendMessages(
   sessionId: string,
   messages: ChatMessage[],
 ): Promise<void> {
+  const prior = historyAppendChainsBySessionId.get(sessionId) ?? Promise.resolve();
+  const current = prior
+    .catch(() => undefined)
+    .then(() => persistAppendMessagesNow(set, sessionId, messages));
+  historyAppendChainsBySessionId.set(sessionId, current);
+  try {
+    await current;
+  } finally {
+    if (historyAppendChainsBySessionId.get(sessionId) === current) {
+      historyAppendChainsBySessionId.delete(sessionId);
+    }
+  }
+}
+
+async function persistAppendMessagesNow(
+  set: (partial: Partial<ChatStoreState> | ((state: ChatStoreState) => Partial<ChatStoreState>)) => void,
+  sessionId: string,
+  messages: ChatMessage[],
+): Promise<void> {
   const payloads = messages.map(stripToAppendPayload);
   const operationId = newUlid();
   const payloadHash = await computePayloadHash(payloads);
@@ -547,6 +567,8 @@ async function persistAppendMessages(
       retries: 5,
     });
     setSessionHistorySync(set, sessionId, null);
+    // Same global-banner-stickiness fix as switchSession/refetchSessionMessages.
+    set({ historyError: null });
   } catch (persistErr) {
     const result = await enqueueAppend(sessionId, messages, { operationId, payloadHash });
     if (!result.enqueued) {
@@ -743,6 +765,9 @@ export const useChatStore = create<ChatStore>((set, get) => ({
             ...stripVersionsForSession(prev, sessionId),
             ...buildHydratedResponseVersions(merged),
           },
+          // Same global-banner-stickiness fix as switchSession: a successful fetch here
+          // proves the portal is reachable again, so clear the global historyError too.
+          historyError: null,
         };
       });
       if (overlay.length === 0) {
@@ -925,6 +950,11 @@ export const useChatStore = create<ChatStore>((set, get) => ({
           ...responseVersions,
         },
         sessionMessagesLoading: false,
+        // historyError is a global banner (not scoped to a session): a successful switch
+        // proves connectivity has recovered, so clear it here too. Otherwise one earlier
+        // transient failure keeps the "历史同步" banner stuck on every session until a
+        // full page refresh re-runs hydrateSessions (the only other place that clears it).
+        historyError: null,
       }));
       void flushHistoryOutbox().then(async (sessionIds) => {
         for (const id of sessionIds) {
