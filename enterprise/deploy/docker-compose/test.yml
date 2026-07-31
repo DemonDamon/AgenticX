@@ -22,7 +22,7 @@ services:
       - agenticx-backbone
 
   gateway-a:
-    image: ghcr.io/agenticx/enterprise-gateway:latest
+    image: agenticx-registry.cn-shanghai.cr.aliyuncs.com/agenticx/enterprise-gateway:latest
     container_name: agenticx-gateway-a
     restart: unless-stopped
     user: "0:0"
@@ -48,7 +48,7 @@ services:
       - agenticx-backbone
 
   web-portal:
-    image: ghcr.io/agenticx/enterprise-web-portal:latest
+    image: agenticx-registry.cn-shanghai.cr.aliyuncs.com/agenticx/enterprise-web-portal:latest
     container_name: agenticx-web-portal
     restart: unless-stopped
     environment:
@@ -65,7 +65,7 @@ services:
       - agenticx-backbone
 
   admin-console:
-    image: ghcr.io/agenticx/enterprise-admin-console:latest
+    image: agenticx-registry.cn-shanghai.cr.aliyuncs.com/agenticx/enterprise-admin-console:latest
     container_name: agenticx-admin-console
     restart: unless-stopped
     environment:
