@@ -2,6 +2,7 @@ import { cn } from "@agenticx/ui";
 import Image from "next/image";
 
 export const ENTERPRISE_PRODUCT_NAME = "和创智派";
+export const ENTERPRISE_ORG_NAME = "和创投资";
 export const ENTERPRISE_LOGO_SRC = "/hechuang-zhihui-logo.svg";
 
 export function EnterpriseBrandMark({

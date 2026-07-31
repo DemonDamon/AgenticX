@@ -54,7 +54,7 @@ import {
 } from "@agenticx/feature-chat";
 import { MachiChatView } from "./MachiChatView";
 import {
-  ENTERPRISE_PRODUCT_NAME,
+  ENTERPRISE_ORG_NAME,
   EnterpriseBrandMark,
 } from "./EnterpriseBrandMark";
 import { QuotaCard } from "./QuotaCard";
@@ -341,7 +341,7 @@ export function WorkspaceShell({ userEmail, userScopes }: WorkspaceShellProps) {
               <EnterpriseBrandMark size={36} />
               {!collapsed && (
                 <div className="min-w-0 flex-1">
-                  <div className="truncate text-sm font-semibold">{ENTERPRISE_PRODUCT_NAME}</div>
+                  <div className="truncate text-sm font-semibold">{ENTERPRISE_ORG_NAME}</div>
                   <div className="truncate text-[11px] text-muted-foreground">
                     {t("brandSubtitle")} · {getEnterpriseVersionLabel()}
                   </div>

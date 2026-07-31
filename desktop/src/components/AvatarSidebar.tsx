@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import type { LucideIcon } from "lucide-react";
 import { AlarmClock, MessageSquarePlus, UserRound, Waypoints } from "lucide-react";
 import { useAppStore, type MainView } from "../store";
-import { APP_DISPLAY_NAME, APP_VERSION, META_AGENT_DISPLAY_NAME } from "../constants/branding";
+import { APP_DISPLAY_NAME, APP_VERSION, META_AGENT_DISPLAY_NAME, ORG_DISPLAY_NAME } from "../constants/branding";
 import { DEFAULT_META_AVATAR_URL } from "../constants/meta-avatar";
 import { usePaneNavigation } from "../hooks/usePaneNavigation";
 import { isNewTaskNavActive } from "../utils/workspace-session-visibility";
@@ -237,7 +237,7 @@ export function AvatarSidebar({ onToggleSidebar }: Props) {
           />
           <div className="flex min-w-0 items-baseline gap-1.5">
             <span className="truncate text-[20px] font-bold leading-none text-text-strong">
-              {APP_DISPLAY_NAME}
+              {ORG_DISPLAY_NAME}
             </span>
             <span className="shrink-0 text-[11px] font-medium leading-none text-text-faint">
               {APP_VERSION}
