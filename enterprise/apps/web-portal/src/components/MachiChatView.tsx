@@ -10,6 +10,8 @@ import {
   MessageList,
   MessageQueuePanel,
   classifyAttachment,
+  STREAM_UPDATE_DEPTH_ERROR,
+  probeNote,
   useChatStore,
   useComposerAttachments,
   extractClipboardImageFiles,
@@ -88,35 +90,37 @@ export function MachiChatView({
 }: MachiChatViewProps) {
   const t = useTranslations("chat");
   const tw = useTranslations("workspace");
-  const {
-    sessions,
-    activeSessionId,
-    messages,
-    status,
-    activeModel,
-    errorMessage,
-    sessionTokens,
-    responseVersionsByUserMessageId,
-    hydrateSessions,
-    historyError,
-    historySyncBySessionId,
-    retryHistorySync,
-    sessionMessagesLoading,
-    renameSession,
-    switchModel,
-    sendMessage,
-    sendQueuedMessageNow,
-    removePendingMessage,
-    editPendingMessage,
-    pendingMessages,
-    editUserMessageAndResend,
-    regenerateAssistantResponse,
-    showPreviousResponseVersion,
-    showNextResponseVersion,
-    showPreviousRetryVersion,
-    showNextRetryVersion,
-    cancel,
-  } = useChatStore();
+  // Selector split: avoid bare useChatStore() so stream message/token ticks do not
+  // re-run model-menu / switchModel fallback logic on every delta.
+  const sessions = useChatStore((s) => s.sessions);
+  const activeSessionId = useChatStore((s) => s.activeSessionId);
+  const messages = useChatStore((s) => s.messages);
+  const status = useChatStore((s) => s.status);
+  const activeModel = useChatStore((s) => s.activeModel);
+  const errorMessage = useChatStore((s) => s.errorMessage);
+  const sessionTokens = useChatStore((s) => s.sessionTokens);
+  const responseVersionsByUserMessageId = useChatStore((s) => s.responseVersionsByUserMessageId);
+  const hydrateSessions = useChatStore((s) => s.hydrateSessions);
+  const historyError = useChatStore((s) => s.historyError);
+  const historySyncBySessionId = useChatStore((s) => s.historySyncBySessionId);
+  const retryHistorySync = useChatStore((s) => s.retryHistorySync);
+  const sessionMessagesLoading = useChatStore((s) => s.sessionMessagesLoading);
+  const renameSession = useChatStore((s) => s.renameSession);
+  const switchModel = useChatStore((s) => s.switchModel);
+  const sendMessage = useChatStore((s) => s.sendMessage);
+  const sendQueuedMessageNow = useChatStore((s) => s.sendQueuedMessageNow);
+  const removePendingMessage = useChatStore((s) => s.removePendingMessage);
+  const editPendingMessage = useChatStore((s) => s.editPendingMessage);
+  const pendingMessages = useChatStore((s) => s.pendingMessages);
+  const editUserMessageAndResend = useChatStore((s) => s.editUserMessageAndResend);
+  const regenerateAssistantResponse = useChatStore((s) => s.regenerateAssistantResponse);
+  const showPreviousResponseVersion = useChatStore((s) => s.showPreviousResponseVersion);
+  const showNextResponseVersion = useChatStore((s) => s.showNextResponseVersion);
+  const showPreviousRetryVersion = useChatStore((s) => s.showPreviousRetryVersion);
+  const showNextRetryVersion = useChatStore((s) => s.showNextRetryVersion);
+  const cancel = useChatStore((s) => s.cancel);
+  const displayErrorMessage =
+    errorMessage === STREAM_UPDATE_DEPTH_ERROR ? t("updateDepthError") : errorMessage;
   const [draft, setDraft] = React.useState("");
   /** Default auto (on) — aligned with product expectation for portal chat. */
   const [webSearchMode, setWebSearchMode] = React.useState<WebSearchMode>("auto");
@@ -199,15 +203,22 @@ export function MachiChatView({
     };
   }, [refreshAvailableModels]);
 
-  // 收到模型列表后兜底选默认：优先 isDefault，否则首项
+  // 收到模型列表后兜底选默认：优先 isDefault，否则首项。
+  // 依赖模型 id 序列而非 availableModels 数组引用，避免轮询刷新单独触发无意义 switchModel。
+  const availableModelIdsKey = availableModels.map((m) => m.id).join("|");
   React.useEffect(() => {
     if (!modelsLoaded) return;
-    if (availableModels.length === 0) return;
-    const exists = availableModels.find((m) => m.id === activeModel);
+    if (!availableModelIdsKey) return;
+    const exists = availableModels.some((m) => m.id === activeModel);
     if (exists) return;
     const next = availableModels.find((m) => m.isDefault) ?? availableModels[0];
-    if (next) switchModel(next.id);
-  }, [modelsLoaded, availableModels, activeModel, switchModel]);
+    if (!next) return;
+    if (useChatStore.getState().activeModel === next.id) return;
+    probeNote("MachiChatView.switchModelFallback", { from: activeModel, to: next.id });
+    switchModel(next.id);
+    // availableModels read from latest render when ids key / activeModel changes
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- availableModelIdsKey proxies list identity
+  }, [modelsLoaded, availableModelIdsKey, activeModel, switchModel]);
 
   // 若发送因「模型已不在可见范围内」被服务端拒绝（管理员刚收窄了权限，轮询尚未来得及刷新），
   // 立即补拉一次最新列表，让下拉框与兜底选择马上纠正，不必等下一个轮询周期或用户手动刷新整页。
@@ -484,14 +495,18 @@ export function MachiChatView({
           </div>
         </Alert>
       )}
-      {errorMessage && (
+      {displayErrorMessage && (
         <Alert variant="warning" className="border-warning/30 bg-warning-soft/80 shadow-sm">
           <ShieldAlert className="h-5 w-5" />
           <div>
             <AlertTitle>
-              {isComplianceError(errorMessage) ? t("complianceTitle") : t("chatErrorTitle")}
+              {errorMessage === STREAM_UPDATE_DEPTH_ERROR
+                ? t("updateDepthTitle")
+                : isComplianceError(errorMessage ?? "")
+                  ? t("complianceTitle")
+                  : t("chatErrorTitle")}
             </AlertTitle>
-            <AlertDescription>{errorMessage}</AlertDescription>
+            <AlertDescription>{displayErrorMessage}</AlertDescription>
           </div>
         </Alert>
       )}

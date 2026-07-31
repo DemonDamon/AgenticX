@@ -100,6 +100,8 @@
   "chat": {
     "complianceTitle": "合规拦截",
     "chatErrorTitle": "聊天请求失败",
+    "updateDepthTitle": "界面更新异常",
+    "updateDepthError": "界面更新异常，已保留已生成内容。请重试或刷新页面。",
     "historySyncTitle": "历史同步",
     "historySyncPending": "这段对话尚未同步到服务器，将自动重试",
     "historySyncRetry": "立即重试",

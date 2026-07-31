@@ -4,6 +4,7 @@ export * from "./history-client";
 export * from "./history-outbox";
 export { sessionTitleNeedsAutoFill, buildAutoTitleFromFirstUserMessage } from "@agenticx/core-api";
 export * from "./store";
+export { probeNote, isUpdateDepthProbeEnabled, getUpdateDepthProbeBuffer } from "./debug/update-depth-probe";
 export * from "./ChatWorkspace";
 export * from "./components/molecules/MessageList";
 export * from "./components/molecules/DeepResearchTimeline";
