@@ -563,12 +563,6 @@ export default function DepartmentsPage() {
                   </div>
 
                   <div className="flex flex-wrap gap-2">
-                    <Button size="sm" asChild>
-                      <Link href={`/iam/users?dept=${encodeURIComponent(currentNode.id)}&create=1`}>
-                        <UserPlus className="mr-1.5 h-4 w-4" />
-                        {tu("newUser")}
-                      </Link>
-                    </Button>
                     <Button
                       variant="ghost"
                       size="icon"
@@ -577,6 +571,12 @@ export default function DepartmentsPage() {
                       onClick={() => { setNewName(""); setCreateOpen(true); }}
                     >
                       <Plus className="h-4 w-4" />
+                    </Button>
+                    <Button size="sm" variant="outline" asChild>
+                      <Link href={`/iam/users?dept=${encodeURIComponent(currentNode.id)}&create=1`}>
+                        <UserPlus className="mr-1.5 h-4 w-4" />
+                        {tu("newUser")}
+                      </Link>
                     </Button>
                     <Button
                       variant="ghost"
