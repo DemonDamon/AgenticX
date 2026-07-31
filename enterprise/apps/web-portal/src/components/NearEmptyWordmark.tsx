@@ -5,18 +5,19 @@ import { ENTERPRISE_PRODUCT_NAME } from "./EnterpriseBrandMark";
 type NearEmptyWordmarkProps = {
   className?: string;
   caption?: string;
+  badgeLabel?: string;
 };
 
 /**
  * Empty-state brand mark for the customer-facing product name.
  * Hover: deepen color + slightly tighten tracking + grow a thin underline.
  */
-export function NearEmptyWordmark({ className, caption }: NearEmptyWordmarkProps) {
+export function NearEmptyWordmark({ className, caption, badgeLabel }: NearEmptyWordmarkProps) {
   return (
     <div className={["flex flex-col items-center gap-2.5 text-center", className].filter(Boolean).join(" ")}>
       <div
         className={[
-          "group/near relative inline-block select-none",
+          "group/near relative inline-flex select-none items-start gap-3",
           "text-[clamp(2.65rem,6.4vw,4.15rem)] font-semibold leading-none tracking-[0.08em]",
           "text-foreground/80",
           "transition-[color,letter-spacing] duration-300 ease-out",
@@ -26,7 +27,18 @@ export function NearEmptyWordmark({ className, caption }: NearEmptyWordmarkProps
         aria-label={ENTERPRISE_PRODUCT_NAME}
         role="img"
       >
-        {ENTERPRISE_PRODUCT_NAME}
+        <span>{ENTERPRISE_PRODUCT_NAME}</span>
+        {badgeLabel ? (
+          <span
+            className={[
+              "mt-1 rounded-full border border-primary/25 bg-primary-soft px-2 py-0.5",
+              "text-[clamp(0.65rem,1.3vw,0.8rem)] font-semibold leading-none tracking-[0.08em] text-primary",
+              "shadow-[0_8px_20px_-16px_var(--primary)]",
+            ].join(" ")}
+          >
+            {badgeLabel}
+          </span>
+        ) : null}
         <span
           aria-hidden
           className={[

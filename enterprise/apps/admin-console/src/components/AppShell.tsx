@@ -31,7 +31,7 @@ import {
 } from "@agenticx/ui";
 import { getEnterpriseVersionLabel } from "@agenticx/branding";
 import { useTranslations } from "next-intl";
-import { ENTERPRISE_PRODUCT_NAME, EnterpriseBrandMark } from "./EnterpriseBrandMark";
+import { ENTERPRISE_ORG_NAME, EnterpriseBrandMark } from "./EnterpriseBrandMark";
 import {
   Activity,
   BarChart3,
@@ -57,8 +57,10 @@ import {
   Sliders,
   Sun,
   Users,
-  Wand2,
   Database,
+  KeyRound,
+  FolderTree,
+  PlugZap,
 } from "lucide-react";
 
 type AppShellProps = {
@@ -90,7 +92,7 @@ const NAV_GROUPS: NavGroup[] = [
     items: [
       { href: "/iam/roles", labelKey: "users", icon: Users },
       { href: "/iam/groups", labelKey: "userGroups", icon: Network },
-      { href: "/iam/bulk-import", labelKey: "organization", icon: Wand2 },
+      { href: "/iam/bulk-import", labelKey: "organization", icon: FolderTree },
     ],
   },
   {
@@ -109,6 +111,8 @@ const NAV_GROUPS: NavGroup[] = [
     items: [
       { href: "/admin/models", labelKey: "models", icon: Package },
       { href: "/admin/routing", labelKey: "autoRouting", icon: Route },
+      { href: "/admin/mcp-servers", labelKey: "mcpServers", icon: PlugZap },
+      { href: "/admin/api-tokens", labelKey: "apiTokens", icon: KeyRound },
       { href: "/admin/cache", labelKey: "cache", icon: Database },
     ],
   },
@@ -343,7 +347,7 @@ export function AppShell({ children }: AppShellProps) {
             <EnterpriseBrandMark size={32} />
             {!collapsed && (
               <div className="min-w-0 flex-1">
-                <div className="truncate text-sm font-semibold">{ENTERPRISE_PRODUCT_NAME}</div>
+                <div className="truncate text-sm font-semibold">{ENTERPRISE_ORG_NAME}</div>
                 <div className="truncate text-[11px] text-muted-foreground">
                   {t("adminLabel")} · {getEnterpriseVersionLabel()}
                 </div>

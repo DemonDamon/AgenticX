@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   computePollMaxTicks,
+  enterpriseFetchErrorMessage,
   isVerificationUrlSameOrigin,
   parseDeviceInitPayload,
   validatePortalOriginForBrowserLogin,
@@ -52,5 +53,24 @@ describe("enterprise-browser-login helpers", () => {
     });
     expect(parsed?.deviceId).toBe("d1");
     expect(parsed?.deviceSecret).toBe("s1");
+  });
+
+  it("maps TLS / timeout / generic fetch failures to readable Chinese copy", () => {
+    const tlsErr = new TypeError("fetch failed");
+    (tlsErr as Error & { cause?: Error }).cause = Object.assign(
+      new Error("Hostname/IP does not match certificate's altnames: Host: test.pal.example.com"),
+      { code: "ERR_TLS_CERT_ALTNAME_INVALID" },
+    );
+    expect(enterpriseFetchErrorMessage(tlsErr)).toBe(
+      "无法连接组织地址：HTTPS 证书无效或与域名不匹配，请联系运维。",
+    );
+
+    const timeoutErr = Object.assign(new Error("The operation was aborted due to timeout"), {
+      name: "TimeoutError",
+    });
+    expect(enterpriseFetchErrorMessage(timeoutErr)).toBe("连接组织地址超时");
+
+    const bareFetch = new TypeError("fetch failed");
+    expect(enterpriseFetchErrorMessage(bareFetch)).toContain("网络或 HTTPS 校验失败");
   });
 });

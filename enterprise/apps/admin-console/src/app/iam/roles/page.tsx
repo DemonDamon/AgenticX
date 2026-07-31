@@ -12,6 +12,12 @@ import {
   CardHeader,
   CardTitle,
   Checkbox,
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
   Input,
   Label,
   Sheet,
@@ -22,7 +28,7 @@ import {
   Skeleton,
   toast,
 } from "@agenticx/ui";
-import { ArrowUpRight, Copy, KeyRound, Pencil, RefreshCw, UsersRound } from "lucide-react";
+import { ArrowUpRight, Copy, KeyRound, Pencil, Plus, RefreshCw, UsersRound } from "lucide-react";
 import { adminFetch } from "../../../lib/admin-client-auth";
 import { QuotaRing, formatTokenCount } from "../../../components/QuotaRing";
 
@@ -57,6 +63,23 @@ type ModelAccess = {
   effectiveModelIds?: string[];
 };
 type ApiEnvelope<T> = { code: string; message: string; data?: T };
+type CreateUserForm = {
+  displayName: string;
+  email: string;
+  initialPassword: string;
+  phone: string;
+  employeeNo: string;
+  jobTitle: string;
+};
+
+const EMPTY_CREATE_USER_FORM: CreateUserForm = {
+  displayName: "",
+  email: "",
+  initialPassword: "",
+  phone: "",
+  employeeNo: "",
+  jobTitle: "",
+};
 
 function sameIds(left: readonly string[], right: readonly string[]): boolean {
   if (left.length !== right.length) return false;
@@ -98,6 +121,10 @@ export default function RolesPage() {
   const [saving, setSaving] = useState(false);
   const [resetPasswordPending, setResetPasswordPending] = useState(false);
   const [newPassword, setNewPassword] = useState<string | null>(null);
+  const [createOpen, setCreateOpen] = useState(false);
+  const [createForm, setCreateForm] = useState<CreateUserForm>(EMPTY_CREATE_USER_FORM);
+  const [creatingUser, setCreatingUser] = useState(false);
+  const [createdInitialPassword, setCreatedInitialPassword] = useState<string | null>(null);
   const openedFromQueryRef = useRef<string | null>(null);
 
   const load = useCallback(async () => {
@@ -321,6 +348,67 @@ export default function RolesPage() {
     }
   };
 
+  const updateCreateForm = (field: keyof CreateUserForm, value: string) => {
+    setCreatedInitialPassword(null);
+    setCreateForm((current) => ({ ...current, [field]: value }));
+  };
+
+  const createUser = async () => {
+    if (creatingUser) return;
+    const email = createForm.email.trim();
+    const displayName = createForm.displayName.trim();
+    if (!displayName) {
+      toast.error("请输入姓名");
+      return;
+    }
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+      toast.error("请输入有效邮箱");
+      return;
+    }
+    if (createForm.initialPassword.trim() && createForm.initialPassword.trim().length < 8) {
+      toast.error("初始密码至少 8 位");
+      return;
+    }
+
+    setCreatingUser(true);
+    try {
+      const response = await adminFetch("/api/admin/users", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          email,
+          displayName,
+          initialPassword: createForm.initialPassword.trim() || undefined,
+          phone: createForm.phone.trim() || null,
+          employeeNo: createForm.employeeNo.trim() || null,
+          jobTitle: createForm.jobTitle.trim() || null,
+          status: "active",
+          roleCodes: ["member"],
+        }),
+      });
+      const json = (await response.json()) as ApiEnvelope<{ initialPassword?: string }>;
+      if (!response.ok || json.code !== "00000") throw new Error(json.message || "创建用户失败");
+      setCreatedInitialPassword(json.data?.initialPassword ?? null);
+      setCreateForm(EMPTY_CREATE_USER_FORM);
+      toast.success("已创建用户");
+      await load();
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "创建用户失败");
+    } finally {
+      setCreatingUser(false);
+    }
+  };
+
+  const copyCreatedPassword = async () => {
+    if (!createdInitialPassword) return;
+    try {
+      await navigator.clipboard.writeText(createdInitialPassword);
+      toast.success("初始密码已复制");
+    } catch {
+      toast.error("复制失败，请手动复制密码");
+    }
+  };
+
   return (
     <div className="space-y-6">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
@@ -332,6 +420,9 @@ export default function RolesPage() {
           </p>
         </div>
         <div className="flex flex-wrap gap-2">
+          <Button onClick={() => setCreateOpen(true)}>
+            <Plus className="h-4 w-4" />新建用户
+          </Button>
           <Button variant="outline" asChild>
             <Link href="/iam/groups">管理用户组<ArrowUpRight /></Link>
           </Button>
@@ -527,6 +618,113 @@ export default function RolesPage() {
           ) : null}
         </SheetContent>
       </Sheet>
+
+      <Dialog
+        open={createOpen}
+        onOpenChange={(open) => {
+          setCreateOpen(open);
+          if (!open) {
+            setCreateForm(EMPTY_CREATE_USER_FORM);
+            setCreatedInitialPassword(null);
+          }
+        }}
+      >
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>新建用户</DialogTitle>
+            <DialogDescription>
+              创建后用户会进入当前“用户”视图；未填写初始密码时系统会生成随机密码，并要求首次登录后修改。
+            </DialogDescription>
+          </DialogHeader>
+          <div className="grid gap-4 py-2">
+            {createdInitialPassword ? (
+              <div className="rounded-xl border border-primary/30 bg-primary/5 p-3">
+                <p className="text-sm font-medium">初始密码（仅显示一次）</p>
+                <div className="mt-2 flex items-center gap-2">
+                  <code className="min-w-0 flex-1 break-all rounded-md bg-background px-2 py-1 text-sm">
+                    {createdInitialPassword}
+                  </code>
+                  <Button size="sm" variant="outline" onClick={() => void copyCreatedPassword()}>
+                    <Copy className="h-4 w-4" />复制
+                  </Button>
+                </div>
+              </div>
+            ) : null}
+            <div className="grid gap-2 sm:grid-cols-2">
+              <div className="space-y-1.5">
+                <Label htmlFor="create-user-name">姓名</Label>
+                <Input
+                  id="create-user-name"
+                  value={createForm.displayName}
+                  onChange={(event) => updateCreateForm("displayName", event.target.value)}
+                  placeholder="例如：张三"
+                />
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="create-user-email">邮箱</Label>
+                <Input
+                  id="create-user-email"
+                  type="email"
+                  value={createForm.email}
+                  onChange={(event) => updateCreateForm("email", event.target.value)}
+                  placeholder="name@example.com"
+                />
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="create-user-phone">手机</Label>
+                <Input
+                  id="create-user-phone"
+                  value={createForm.phone}
+                  onChange={(event) => updateCreateForm("phone", event.target.value)}
+                  placeholder="可选"
+                />
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="create-user-employee-no">工号</Label>
+                <Input
+                  id="create-user-employee-no"
+                  value={createForm.employeeNo}
+                  onChange={(event) => updateCreateForm("employeeNo", event.target.value)}
+                  placeholder="可选"
+                />
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="create-user-job-title">职位</Label>
+                <Input
+                  id="create-user-job-title"
+                  value={createForm.jobTitle}
+                  onChange={(event) => updateCreateForm("jobTitle", event.target.value)}
+                  placeholder="可选"
+                />
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="create-user-password">初始密码</Label>
+                <Input
+                  id="create-user-password"
+                  type="password"
+                  autoComplete="new-password"
+                  value={createForm.initialPassword}
+                  onChange={(event) => updateCreateForm("initialPassword", event.target.value)}
+                  placeholder="留空自动生成"
+                />
+              </div>
+            </div>
+          </div>
+          <DialogFooter>
+            {createdInitialPassword ? (
+              <Button variant="outline" onClick={() => setCreatedInitialPassword(null)}>
+                继续新建
+              </Button>
+            ) : null}
+            <Button variant="outline" onClick={() => setCreateOpen(false)} disabled={creatingUser}>
+              取消
+            </Button>
+            <Button onClick={() => void createUser()} disabled={creatingUser}>
+              {creatingUser ? "创建中…" : "创建用户"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

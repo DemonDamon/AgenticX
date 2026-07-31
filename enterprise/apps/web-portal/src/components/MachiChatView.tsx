@@ -24,6 +24,7 @@ import {
   ChevronDown,
   Cpu,
   Microscope,
+  Paperclip,
   Pencil,
   Share,
   ShieldAlert,
@@ -544,11 +545,27 @@ export function MachiChatView({
         onPaste={handlePaste}
         leftToolbar={
           <>
+            <Tooltip key="composer-upload">
+              <TooltipTrigger asChild>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon"
+                  aria-label={t("filesAndImages")}
+                  className="h-8 w-8 rounded-full text-muted-foreground hover:bg-primary-soft hover:text-primary"
+                  onClick={() => fileInputRef.current?.click()}
+                >
+                  <Paperclip className="h-4 w-4" />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent>{t("filesAndImages")}</TooltipContent>
+            </Tooltip>
             <ComposerPlusMenu
               key="composer-plus"
               webSearchMode={webSearchMode}
               onWebSearchModeChange={setWebSearchMode}
               onPickFiles={() => fileInputRef.current?.click()}
+              showFileEntry={false}
               menuSide={isEmpty ? "bottom" : "top"}
             />
             {deepResearchMode ? (
@@ -733,6 +750,7 @@ export function MachiChatView({
             <div className="relative flex h-full flex-col items-center justify-start gap-10 overflow-y-auto px-4 pt-14 pb-10 md:gap-12 md:pt-16 md:pb-16">
               <NearEmptyWordmark
                 caption={deepResearchMode ? tw("deepResearchEmptySubtitle") : undefined}
+                badgeLabel={t("beta")}
               />
 
               <div className="w-full max-w-[46rem]">{composer}</div>

@@ -78,6 +78,7 @@ type ComposerPlusMenuProps = {
   webSearchMode: WebSearchMode;
   onWebSearchModeChange: (mode: WebSearchMode) => void;
   onPickFiles: () => void;
+  showFileEntry?: boolean;
   /** 新建对话空态向下展开，避免挡住输入框；有消息时向上展开 */
   menuSide?: "top" | "bottom";
   className?: string;
@@ -87,6 +88,7 @@ export function ComposerPlusMenu({
   webSearchMode,
   onWebSearchModeChange,
   onPickFiles,
+  showFileEntry = true,
   menuSide = "top",
   className,
 }: ComposerPlusMenuProps) {
@@ -130,20 +132,22 @@ export function ComposerPlusMenu({
         sideOffset={8}
         className="w-44 overflow-visible rounded-2xl border-border/70 bg-popover p-1 shadow-xl"
       >
-        <CapabilityHoverTip label={t("filesAndImages")} lines={filesHint}>
-          <button
-            type="button"
-            className={menuItemClass}
-            onMouseEnter={() => setWebSearchOpen(false)}
-            onClick={() => {
-              setOpen(false);
-              onPickFiles();
-            }}
-          >
-            <Paperclip className="h-4 w-4 shrink-0 text-muted-foreground" />
-            <span className="min-w-0 flex-1 font-medium">{t("filesAndImages")}</span>
-          </button>
-        </CapabilityHoverTip>
+        {showFileEntry ? (
+          <CapabilityHoverTip label={t("filesAndImages")} lines={filesHint}>
+            <button
+              type="button"
+              className={menuItemClass}
+              onMouseEnter={() => setWebSearchOpen(false)}
+              onClick={() => {
+                setOpen(false);
+                onPickFiles();
+              }}
+            >
+              <Paperclip className="h-4 w-4 shrink-0 text-muted-foreground" />
+              <span className="min-w-0 flex-1 font-medium">{t("filesAndImages")}</span>
+            </button>
+          </CapabilityHoverTip>
+        ) : null}
 
         <div
           className="relative"
