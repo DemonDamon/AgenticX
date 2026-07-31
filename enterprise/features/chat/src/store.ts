@@ -30,6 +30,20 @@ import {
 import type { QueuedMessage } from "./types/queued-message";
 import { shouldEnqueueOnResend } from "./utils/message-queue";
 import { getSessionRequestId, isSessionStreaming } from "./utils/session-stream-state";
+import { probeNote } from "./debug/update-depth-probe";
+
+const UPDATE_DEPTH_ERROR_RE = /Maximum update depth exceeded/i;
+
+/** Stable code mapped to i18n in web-portal; keep messages intact on catch. */
+export const STREAM_UPDATE_DEPTH_ERROR = "STREAM_UPDATE_DEPTH";
+
+function toStreamCatchErrorMessage(error: unknown): string {
+  const raw = error instanceof Error ? error.message : "Unknown send error";
+  if (UPDATE_DEPTH_ERROR_RE.test(raw)) {
+    return STREAM_UPDATE_DEPTH_ERROR;
+  }
+  return raw;
+}
 
 export type ChatStatus = "idle" | "sending" | "streaming" | "error";
 
@@ -1049,21 +1063,29 @@ export const useChatStore = create<ChatStore>((set, get) => ({
   },
 
   switchModel(model) {
-    const sessionId = get().activeSessionId;
-    if (isDraftSessionId(get(), sessionId)) {
+    const state = get();
+    const sessionId = state.activeSessionId;
+    if (isDraftSessionId(state, sessionId)) {
+      if (state.activeModel === model) return;
+      probeNote("store.switchModel", { model, draft: true });
       set({ activeModel: model });
       return;
     }
-    set((state) => ({
+    const session = state.sessions.find((item) => item.id === sessionId);
+    if (state.activeModel === model && session?.active_model === model) {
+      return;
+    }
+    probeNote("store.switchModel", { model, sessionId });
+    set((prev) => ({
       activeModel: model,
-      sessions: state.sessions.map((session) =>
-        session.id === state.activeSessionId
+      sessions: prev.sessions.map((item) =>
+        item.id === prev.activeSessionId
           ? {
-              ...session,
+              ...item,
               active_model: model,
               updated_at: now(),
             }
-          : session
+          : item
       ),
     }));
     if (get().hydrated && sessionId) {
@@ -1267,6 +1289,7 @@ export const useChatStore = create<ChatStore>((set, get) => ({
         }
 
         if (chunk.delta) {
+          probeNote("stream.delta", { sessionId, assistantId: assistantMessage.id, n: chunk.delta.length });
           set((prev) => {
             const current = prev.responseVersionsByUserMessageId[userMessage.id];
             const nextVersionState = current
@@ -1341,7 +1364,7 @@ export const useChatStore = create<ChatStore>((set, get) => ({
         prev.activeSessionId === sessionId
           ? {
               status: "error" as const,
-              errorMessage: error instanceof Error ? error.message : "Unknown send error",
+              errorMessage: toStreamCatchErrorMessage(error),
             }
           : {},
       );
@@ -1501,6 +1524,12 @@ export const useChatStore = create<ChatStore>((set, get) => ({
         }
 
         if (chunk.delta) {
+          probeNote("stream.delta", {
+            sessionId,
+            assistantId: replacementAssistant.id,
+            n: chunk.delta.length,
+            via: "edit",
+          });
           set((prev) => {
             const versionState = prev.responseVersionsByUserMessageId[input.messageId];
             const nextVersionState = versionState
@@ -1586,7 +1615,7 @@ export const useChatStore = create<ChatStore>((set, get) => ({
         prev.activeSessionId === sessionId
           ? {
               status: "error" as const,
-              errorMessage: error instanceof Error ? error.message : "Unknown send error",
+              errorMessage: toStreamCatchErrorMessage(error),
             }
           : {},
       );
@@ -1711,6 +1740,12 @@ export const useChatStore = create<ChatStore>((set, get) => ({
         }
 
         if (chunk.delta) {
+          probeNote("stream.delta", {
+            sessionId,
+            assistantId: replacementAssistant.id,
+            n: chunk.delta.length,
+            via: "regenerate",
+          });
           set((prev) => {
             const versionState = prev.responseVersionsByUserMessageId[targetUserMessageId];
             const nextVersionState = versionState
@@ -1796,7 +1831,7 @@ export const useChatStore = create<ChatStore>((set, get) => ({
         prev.activeSessionId === sessionId
           ? {
               status: "error" as const,
-              errorMessage: error instanceof Error ? error.message : "Unknown send error",
+              errorMessage: toStreamCatchErrorMessage(error),
             }
           : {},
       );

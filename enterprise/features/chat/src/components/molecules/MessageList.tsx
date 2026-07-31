@@ -6,7 +6,8 @@ import { Button, Tooltip, TooltipContent, TooltipTrigger } from "@agenticx/ui";
 import { ReasoningBlock } from "../atoms/ReasoningBlock";
 import { ToolCallCard } from "../atoms/ToolCallCard";
 import { parseAssistantContent } from "../../assistant-content";
-import { isNearBottom, shouldShowScrollToBottomFab } from "../../utils/scroll-near-bottom";
+import { isNearBottom, nextJumpToBottomFabVisible } from "../../utils/scroll-near-bottom";
+import { probeNote } from "../../debug/update-depth-probe";
 import {
   hasActiveTextSelection,
   shouldCancelLongPressOnMove,
@@ -173,6 +174,7 @@ function AssistantMessageMarkdown({
   sources,
   sessionAttachments,
   onOpenAttachment,
+  citationMessageId,
   onOpenCitationInSheet,
 }: {
   text: string;
@@ -180,7 +182,8 @@ function AssistantMessageMarkdown({
   sources?: ChatMessage["web_search_sources"];
   sessionAttachments?: ChatMessageAttachment[];
   onOpenAttachment?: (attachment: ChatMessageAttachment) => void;
-  onOpenCitationInSheet?: (index1Based: number) => void;
+  citationMessageId?: string;
+  onOpenCitationInSheet?: (messageId: string, index1Based: number) => void;
 }) {
   const components = React.useMemo(
     () =>
@@ -188,9 +191,12 @@ function AssistantMessageMarkdown({
         sources,
         sessionAttachments,
         onOpenAttachment,
-        onOpenCitationInSheet,
+        onOpenCitationInSheet:
+          onOpenCitationInSheet && citationMessageId
+            ? (index1Based) => onOpenCitationInSheet(citationMessageId, index1Based)
+            : undefined,
       }),
-    [sources, sessionAttachments, onOpenAttachment, onOpenCitationInSheet],
+    [sources, sessionAttachments, onOpenAttachment, citationMessageId, onOpenCitationInSheet],
   );
   return (
     <div className={`agx-assistant-md ${className ?? ""}`.trim()}>
@@ -269,12 +275,48 @@ export function MessageList({
   const flushJumpToBottomFab = React.useCallback(() => {
     const container = parentRef.current;
     if (!container) {
-      setShowJumpToBottomFab(false);
+      setShowJumpToBottomFab((prev) => nextJumpToBottomFabVisible(prev, showScrollToBottomFab, null));
       return;
     }
     autoScrollPinnedRef.current = isNearBottom(container);
-    setShowJumpToBottomFab(showScrollToBottomFab && shouldShowScrollToBottomFab(container));
+    setShowJumpToBottomFab((prev) =>
+      nextJumpToBottomFabVisible(prev, showScrollToBottomFab, container),
+    );
   }, [showScrollToBottomFab]);
+
+  const openCitationInSheet = React.useCallback((messageId: string, index1Based: number) => {
+    setSourcesPanelMessageId(messageId);
+    setSourcesHighlightIndex(index1Based);
+  }, []);
+
+  const userAttachmentsFingerprint = React.useMemo(
+    () =>
+      messages
+        .filter((item) => item.role === "user")
+        .map((item) => {
+          const parts = (item.attachments ?? [])
+            .filter((attachment) => attachment.parsed_text?.trim())
+            .map(
+              (attachment) =>
+                `${attachment.name}|${attachment.mime_type}|${attachment.size ?? ""}|${attachment.parsed_text?.length ?? 0}`,
+            );
+          return `${item.id}:${parts.join(",")}`;
+        })
+        .join("||"),
+    [messages],
+  );
+
+  const attachmentsByUserMessageId = React.useMemo(() => {
+    const map = new Map<string, ChatMessageAttachment[]>();
+    for (const item of messages) {
+      if (item.role !== "user") continue;
+      const filtered = item.attachments?.filter((attachment) => attachment.parsed_text?.trim());
+      if (filtered?.length) map.set(item.id, filtered);
+    }
+    return map;
+    // Fingerprint ignores assistant text deltas so markdown components stay stable while streaming.
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- intentional: key on attachment content, not messages ref
+  }, [userAttachmentsFingerprint]);
 
   const listSessionId = messages[0]?.session_id ?? "";
   const prevListSessionIdRef = React.useRef(listSessionId);
@@ -286,13 +328,14 @@ export function MessageList({
   }, [listSessionId]);
 
   React.useEffect(() => {
+    probeNote("MessageList.scrollEffect", { n: messages.length, sessionId: listSessionId });
     const container = parentRef.current;
     if (!container) return;
     if (autoScrollPinnedRef.current) {
       container.scrollTop = container.scrollHeight;
     }
     flushJumpToBottomFab();
-  }, [messages, flushJumpToBottomFab]);
+  }, [messages, flushJumpToBottomFab, listSessionId]);
 
   React.useEffect(() => {
     const container = parentRef.current;
@@ -512,9 +555,9 @@ export function MessageList({
             const linkedUserMessage = linkedUserMessageId
               ? messages.find((item) => item.id === linkedUserMessageId)
               : undefined;
-            const linkedUserAttachments = linkedUserMessage?.attachments?.filter(
-              (item) => item.parsed_text?.trim(),
-            );
+            const linkedUserAttachments = linkedUserMessageId
+              ? attachmentsByUserMessageId.get(linkedUserMessageId)
+              : undefined;
             const userResponseVersionMeta = linkedUserMessageId
               ? responseVersionMetaByUserMessageId?.[linkedUserMessageId]
               : undefined;
@@ -796,10 +839,8 @@ export function MessageList({
                               sources={message.web_search_sources}
                               sessionAttachments={linkedUserAttachments}
                               onOpenAttachment={openAttachmentPreview}
-                              onOpenCitationInSheet={(index1Based) => {
-                                setSourcesPanelMessageId(message.id);
-                                setSourcesHighlightIndex(index1Based);
-                              }}
+                              citationMessageId={message.id}
+                              onOpenCitationInSheet={openCitationInSheet}
                             />
                           ) : message.content.trim() && !userSplitBubbles ? (
                             <p

@@ -1,4 +1,5 @@
 import * as React from "react";
+import { probeNote } from "../../debug/update-depth-probe";
 
 type ReasoningBlockProps = {
   reasoning: string;
@@ -56,17 +57,18 @@ export function ReasoningBlock({ reasoning, thinkingStarted, thinkingInProgress 
 
   React.useEffect(() => {
     if (!thinkingStarted) return;
+    probeNote("ReasoningBlock.effect", { thinkingInProgress });
     if (startedAtRef.current === null) {
       startedAtRef.current = Date.now();
     }
     if (thinkingInProgress) {
       finishedAtRef.current = null;
-      setOpen(true);
+      setOpen((prev) => (prev ? prev : true));
       return;
     }
     if (finishedAtRef.current === null) {
       finishedAtRef.current = Date.now();
-      setOpen(false);
+      setOpen((prev) => (!prev ? prev : false));
     }
   }, [thinkingStarted, thinkingInProgress]);
 
