@@ -62,6 +62,7 @@ import { writeLocalTextFileAtomic } from "./write-local-text-file";
 import { selectEnterpriseInferenceBase } from "./enterprise-routing";
 import {
   computePollMaxTicks,
+  enterpriseFetchErrorMessage,
   isVerificationUrlSameOrigin,
   normalizePortalOrigin,
   parseDeviceInitPayload,
@@ -365,19 +366,6 @@ type AgxConfig = {
 
 /** Enterprise portal login/bootstrap — avoid infinite spinner when proxy/network stalls. */
 const ENTERPRISE_PORTAL_FETCH_TIMEOUT_MS = 15_000;
-
-function enterpriseFetchErrorMessage(err: unknown): string {
-  const name = err && typeof err === "object" && "name" in err ? String((err as { name?: unknown }).name) : "";
-  const msg = String(err ?? "");
-  if (
-    name === "AbortError" ||
-    name === "TimeoutError" ||
-    /aborted|timeout|ETIMEDOUT|timed out/i.test(msg)
-  ) {
-    return "连接组织地址超时，请确认 Portal 已启动且地址正确（本机一般为 http://localhost:3000）";
-  }
-  return `无法连接组织地址：${msg}`;
-}
 
 function applyEnterpriseProvider(
   cfg: AgxConfig,
