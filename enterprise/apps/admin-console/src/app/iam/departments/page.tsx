@@ -42,6 +42,7 @@ import {
   Plus,
   RefreshCw,
   Trash2,
+  UserPlus,
   Users,
 } from "lucide-react";
 import { VisibleModelsEditor } from "../../../components/visible-models-editor";
@@ -562,6 +563,12 @@ export default function DepartmentsPage() {
                   </div>
 
                   <div className="flex flex-wrap gap-2">
+                    <Button size="sm" asChild>
+                      <Link href={`/iam/users?dept=${encodeURIComponent(currentNode.id)}&create=1`}>
+                        <UserPlus className="mr-1.5 h-4 w-4" />
+                        {tu("newUser")}
+                      </Link>
+                    </Button>
                     <Button
                       variant="ghost"
                       size="icon"
@@ -799,6 +806,14 @@ export default function DepartmentsPage() {
               )}
               <p className="mt-1 break-all font-mono text-xs text-muted-foreground">{currentNode?.path}</p>
             </div>
+            {currentNode ? (
+              <Button size="sm" asChild>
+                <Link href={`/iam/users?dept=${encodeURIComponent(currentNode.id)}&create=1`}>
+                  <UserPlus className="mr-1.5 h-4 w-4" />
+                  {tu("newUser")}
+                </Link>
+              </Button>
+            ) : null}
           </div>
 
           {/* 配置区 */}

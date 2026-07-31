@@ -101,6 +101,7 @@ function UsersPageContent() {
   const initialDept = searchParams.get("dept") || "all";
   const initialUserId = searchParams.get("user") || "";
   const initialEdit = searchParams.get("edit") === "1";
+  const initialCreate = searchParams.get("create") === "1";
 
   const [users, setUsers] = useState<AdminUser[]>([]);
   const [loading, setLoading] = useState(true);
@@ -109,7 +110,7 @@ function UsersPageContent() {
   const [statusFilter, setStatusFilter] = useState<"all" | Status>("all");
   const [deptFilter, setDeptFilter] = useState<string>(initialDept);
   const [selected, setSelected] = useState<AdminUser | null>(null);
-  const [createOpen, setCreateOpen] = useState(false);
+  const [createOpen, setCreateOpen] = useState(initialCreate);
   const [editOpen, setEditOpen] = useState(false);
   const [deptOptions, setDeptOptions] = useState<DeptOption[]>([]);
   const [roleOptions, setRoleOptions] = useState<RoleOption[]>([]);
