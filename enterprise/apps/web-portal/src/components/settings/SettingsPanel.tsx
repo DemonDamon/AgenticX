@@ -23,6 +23,7 @@ import {
   Check,
   FileSearch,
   Globe,
+  LockKeyhole,
   MessageSquare,
   Settings as SettingsIcon,
   Shield,
@@ -32,6 +33,7 @@ import {
 } from "lucide-react";
 
 type TabId = "model-service" | "defaults" | "web-search" | "parser" | "chat" | "general";
+type CurrentPasswordStatus = "idle" | "checking" | "valid" | "invalid";
 
 const CHAT_STYLE_STORAGE_KEY = "agx-enterprise-chat-style";
 const CHAT_STYLE_IDS = ["im", "terminal", "clean"] as const;
@@ -54,6 +56,11 @@ export function SettingsPanel() {
   const [patName, setPatName] = useState("");
   const [patPlain, setPatPlain] = useState<string | null>(null);
   const [patRows, setPatRows] = useState<Array<{ id: number; name: string; tokenPrefix: string; status: string }>>([]);
+  const [currentPassword, setCurrentPassword] = useState("");
+  const [currentPasswordStatus, setCurrentPasswordStatus] = useState<CurrentPasswordStatus>("idle");
+  const [newPassword, setNewPassword] = useState("");
+  const [confirmNewPassword, setConfirmNewPassword] = useState("");
+  const [passwordSaving, setPasswordSaving] = useState(false);
 
   const tabs = useMemo(
     () =>
@@ -81,6 +88,11 @@ export function SettingsPanel() {
       })),
     [t],
   );
+
+  const newPasswordTooShort = newPassword.length > 0 && newPassword.length < 8;
+  const newPasswordsMatch = newPassword.length >= 8 && newPassword === confirmNewPassword;
+  const newPasswordsMismatch = confirmNewPassword.length > 0 && newPassword !== confirmNewPassword;
+  const canChangePassword = currentPasswordStatus === "valid" && newPasswordsMatch && !passwordSaving;
 
   const providers = useMemo(
     () => [
@@ -207,6 +219,47 @@ export function SettingsPanel() {
     setPatRows((rows) => rows.filter((r) => r.id !== id));
   };
 
+  const verifyCurrentPasswordInput = async () => {
+    if (!currentPassword.trim() || currentPasswordStatus === "checking") return;
+    setCurrentPasswordStatus("checking");
+    try {
+      const res = await fetch("/api/me/password", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ currentPassword }),
+      });
+      setCurrentPasswordStatus(res.ok ? "valid" : "invalid");
+    } catch {
+      setCurrentPasswordStatus("invalid");
+    }
+  };
+
+  const changePassword = async () => {
+    if (!canChangePassword) return;
+    setPasswordSaving(true);
+    try {
+      const res = await fetch("/api/me/password", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ currentPassword, newPassword }),
+      });
+      if (!res.ok) {
+        setCurrentPasswordStatus("invalid");
+        toast.error(t("password.failed"));
+        return;
+      }
+      setCurrentPassword("");
+      setCurrentPasswordStatus("idle");
+      setNewPassword("");
+      setConfirmNewPassword("");
+      toast.success(t("password.success"));
+    } catch {
+      toast.error(t("password.failed"));
+    } finally {
+      setPasswordSaving(false);
+    }
+  };
+
   const updateChatStyle = (next: ChatStyleVariant) => {
     setChatStyle(next);
     window.localStorage.setItem(CHAT_STYLE_STORAGE_KEY, next);
@@ -314,6 +367,98 @@ export function SettingsPanel() {
                   }
                 />
               </SettingsSection>
+            ) : null}
+
+            {active === "general" ? (
+              <div className="mt-6">
+                <SettingsSection
+                  title={t("password.title")}
+                  description={t("password.description")}
+                  icon={<LockKeyhole className="h-4 w-4" />}
+                >
+                  <SettingsRow
+                    label={t("password.currentPassword")}
+                    description={t("password.currentPasswordDescription")}
+                    control={
+                      <div className="flex w-full flex-col gap-2 sm:max-w-[460px]">
+                        <div className="flex gap-2">
+                          <Input
+                            type="password"
+                            autoComplete="current-password"
+                            value={currentPassword}
+                            onChange={(event) => {
+                              setCurrentPassword(event.target.value);
+                              setCurrentPasswordStatus("idle");
+                            }}
+                            onKeyDown={(event) => {
+                              if (event.key === "Enter") void verifyCurrentPasswordInput();
+                            }}
+                          />
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            disabled={!currentPassword.trim() || currentPasswordStatus === "checking"}
+                            onClick={() => void verifyCurrentPasswordInput()}
+                          >
+                            {currentPasswordStatus === "checking" ? t("password.checking") : t("password.verify")}
+                          </Button>
+                        </div>
+                        {currentPasswordStatus === "valid" ? (
+                          <Badge variant="success">{t("password.currentValid")}</Badge>
+                        ) : currentPasswordStatus === "invalid" ? (
+                          <Badge variant="destructive">{t("password.currentInvalid")}</Badge>
+                        ) : null}
+                      </div>
+                    }
+                    stack
+                  />
+                  <SettingsRow
+                    label={t("password.newPassword")}
+                    description={t("password.newPasswordDescription")}
+                    control={
+                      <Input
+                        type="password"
+                        autoComplete="new-password"
+                        value={newPassword}
+                        onChange={(event) => setNewPassword(event.target.value)}
+                      />
+                    }
+                    stack
+                  />
+                  <SettingsRow
+                    label={t("password.confirmNewPassword")}
+                    control={
+                      <div className="flex w-full flex-col gap-2 sm:max-w-[460px]">
+                        <Input
+                          type="password"
+                          autoComplete="new-password"
+                          value={confirmNewPassword}
+                          onChange={(event) => setConfirmNewPassword(event.target.value)}
+                          onKeyDown={(event) => {
+                            if (event.key === "Enter") void changePassword();
+                          }}
+                        />
+                        {newPasswordsMatch ? (
+                          <Badge variant="success">{t("password.match")}</Badge>
+                        ) : newPasswordsMismatch ? (
+                          <Badge variant="destructive">{t("password.mismatch")}</Badge>
+                        ) : newPasswordTooShort ? (
+                          <Badge variant="warning">{t("password.tooShort")}</Badge>
+                        ) : null}
+                      </div>
+                    }
+                    stack
+                  />
+                  <SettingsRow
+                    label={t("password.submit")}
+                    control={
+                      <Button onClick={() => void changePassword()} disabled={!canChangePassword}>
+                        {passwordSaving ? t("password.saving") : t("password.submit")}
+                      </Button>
+                    }
+                  />
+                </SettingsSection>
+              </div>
             ) : null}
 
             {active === "general" ? (

@@ -394,6 +394,24 @@ async function authenticatePortalUser(
   return user;
 }
 
+async function authenticateCurrentSessionPassword(
+  context: AuthContext,
+  password: string,
+): Promise<{ runtime: AuthRuntime; user: import("@agenticx/auth").AuthUser }> {
+  const runtime = await getRuntime();
+  await reconcileConfiguredAdminPasswordIfNeeded(context.email, password);
+  const user = await authenticatePortalUser(runtime, context.email, password);
+  if (user.id !== context.userId || user.tenantId !== context.tenantId) {
+    throw new Error("Invalid credentials.");
+  }
+  return { runtime, user };
+}
+
+export async function verifyCurrentPassword(context: AuthContext, password: string): Promise<boolean> {
+  await authenticateCurrentSessionPassword(context, password);
+  return true;
+}
+
 export async function loginWithOidcClaims(input: OidcLoginInput): Promise<OidcLoginResult> {
   const runtime = await getRuntime();
   const normalizedEmail = input.email.trim().toLowerCase();
@@ -533,6 +551,34 @@ export async function completeRequiredPasswordChange(
     await syncAuthUserToPostgres(user);
   } catch (error) {
     console.error("[web-portal] syncAuthUserToPostgres after password change failed:", error);
+  }
+  return tokens;
+}
+
+export async function changeCurrentPassword(
+  context: AuthContext,
+  currentPassword: string,
+  newPassword: string,
+): Promise<AuthTokens> {
+  if (context.mustChangePassword) {
+    throw new Error("Password change is required.");
+  }
+
+  const { runtime } = await authenticateCurrentSessionPassword(context, currentPassword);
+  const user = await runtime.repo.updatePasswordAndClearRequirement(
+    context.email,
+    await hashPassword(newPassword),
+  );
+  if (!user || user.id !== context.userId || user.tenantId !== context.tenantId) {
+    throw new Error("Account unavailable.");
+  }
+
+  await runtime.refreshStore.delete(context.sessionId);
+  const tokens = await issueTokensForUser(runtime, user);
+  try {
+    await syncAuthUserToPostgres(user);
+  } catch (error) {
+    console.error("[web-portal] syncAuthUserToPostgres after self-service password change failed:", error);
   }
   return tokens;
 }
