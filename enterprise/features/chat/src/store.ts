@@ -484,6 +484,7 @@ function mergeSessionMessages(messages: ChatMessage[], sessionId: string, sessio
 let chatHydrateInFlight: Promise<void> | null = null;
 let sessionMessageLoadSeq = 0;
 let historyAuthRedirectScheduled = false;
+const historyAppendChainsBySessionId = new Map<string, Promise<void>>();
 const portalHistory = createPortalChatHistoryClient();
 
 function mergeOverlayMessages(remote: ChatMessage[], overlay: ChatMessage[]): ChatMessage[] {
@@ -518,6 +519,25 @@ function setSessionHistorySync(
 }
 
 async function persistAppendMessages(
+  set: (partial: Partial<ChatStoreState> | ((state: ChatStoreState) => Partial<ChatStoreState>)) => void,
+  sessionId: string,
+  messages: ChatMessage[],
+): Promise<void> {
+  const prior = historyAppendChainsBySessionId.get(sessionId) ?? Promise.resolve();
+  const current = prior
+    .catch(() => undefined)
+    .then(() => persistAppendMessagesNow(set, sessionId, messages));
+  historyAppendChainsBySessionId.set(sessionId, current);
+  try {
+    await current;
+  } finally {
+    if (historyAppendChainsBySessionId.get(sessionId) === current) {
+      historyAppendChainsBySessionId.delete(sessionId);
+    }
+  }
+}
+
+async function persistAppendMessagesNow(
   set: (partial: Partial<ChatStoreState> | ((state: ChatStoreState) => Partial<ChatStoreState>)) => void,
   sessionId: string,
   messages: ChatMessage[],
