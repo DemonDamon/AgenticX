@@ -20,6 +20,7 @@ from agenticx.runtime import AgentRuntime
 from agenticx.runtime import AsyncClarifyGate, AsyncConfirmGate
 from agenticx.runtime.events import EventType
 from agenticx.runtime.group_context import GroupChatContext
+from agenticx.runtime.prompts.current_time import build_current_time_block
 from agenticx.branding import DEFAULT_META_PRODUCT_LABEL, LEGACY_META_LABELS
 
 META_LEADER_AGENT_ID = "__meta__"
@@ -889,6 +890,7 @@ class GroupChatRouter:
             f"所在群聊：{group_name}\n"
             f"群聊ID：{group_id}\n\n"
             f"{addressing}\n"
+            f"{build_current_time_block()}"
             "## 行为要求\n"
             "- 你是微信群聊中的一个成员，遵循自然对话风格。\n"
             f"{force_rule}"

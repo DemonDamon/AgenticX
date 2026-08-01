@@ -109,6 +109,7 @@ describe("web search tool loop", () => {
     expect(finalBody.tools).toBeUndefined();
     expect(finalBody.tool_choice).toBeUndefined();
     expect(finalBody.stream).toBe(true);
+    expect(finalBody.messages?.[0]?.content).toContain("当前时间");
     expect(finalBody.messages?.[0]?.content).toContain("联网搜索结果");
     expect(finalBody.messages?.some((m) => m.role === "assistant" && !String(m.content ?? "").trim())).toBe(
       false,
@@ -120,6 +121,46 @@ describe("web search tool loop", () => {
     expect(text).toContain("https://news.example/opus");
     expect(text.includes("**来源**")).toBe(false);
     expect(text.includes("minimax:tool_call")).toBe(false);
+  });
+
+  it("skips web search for pure current-date questions and grounds on local clock", async () => {
+    const bodies: unknown[] = [];
+    const executeSearch = vi.fn(async () => []);
+    const fetchImpl = vi.fn(async (_url: string, init?: RequestInit) => {
+      bodies.push(JSON.parse(String(init?.body ?? "{}")));
+      return sseResponse(
+        'data: {"choices":[{"delta":{"content":"今天是2026年8月1日"}}]}\n\ndata: [DONE]\n\n',
+      );
+    });
+
+    const res = await runWebSearchTurn(
+      {
+        model: "m",
+        messages: [{ role: "user", content: "今天几号啊" }],
+        agenticx_web_search: true,
+      },
+      {
+        url: "http://gateway.test/v1/chat/completions",
+        headers: { authorization: "Bearer t" },
+        fetchImpl: fetchImpl as unknown as typeof fetch,
+        loadTenantConfig: async () => ({
+          enabled: true,
+          provider: "duckduckgo",
+          apiKey: "",
+          maxResults: 5,
+        }),
+        executeSearch,
+      },
+    );
+
+    expect(executeSearch).not.toHaveBeenCalled();
+    const body = bodies[0] as { messages?: Array<{ role?: string; content?: string }> };
+    expect(body.messages?.[0]?.role).toBe("system");
+    expect(String(body.messages?.[0]?.content)).toContain("当前时间");
+    expect(String(body.messages?.[0]?.content)).not.toContain("联网搜索结果");
+    const text = await readText(res);
+    expect(text).toContain("今天是2026年8月1日");
+    expect(text).not.toContain("agenticx_web_search_sources");
   });
 
   it("does not search when tenant enabled=false", async () => {
