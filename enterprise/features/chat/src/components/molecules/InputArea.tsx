@@ -88,7 +88,8 @@ export function InputArea({
 
   const appearanceClassName =
     appearance === "portal"
-      ? "border-zinc-200/90 dark:border-zinc-700/80 focus-within:!border-indigo-600 dark:focus-within:!border-indigo-500 focus-within:shadow-[0_0_0_1px_rgba(79,70,229,0.78),0_18px_38px_-20px_rgba(79,70,229,0.45)] dark:focus-within:shadow-[0_0_0_1px_rgba(99,102,241,0.78),0_18px_38px_-20px_rgba(79,70,229,0.42)]"
+      ? // Align focus ring with brand sky-blue (--primary), not hard-coded indigo.
+        "border-zinc-200/90 dark:border-zinc-700/80 focus-within:!border-primary dark:focus-within:!border-primary focus-within:shadow-[0_0_0_1px_color-mix(in_oklab,var(--primary)_78%,transparent),0_18px_38px_-20px_color-mix(in_oklab,var(--primary)_42%,transparent)] dark:focus-within:shadow-[0_0_0_1px_color-mix(in_oklab,var(--primary)_78%,transparent),0_18px_38px_-20px_color-mix(in_oklab,var(--primary)_40%,transparent)]"
       : "border-border/80 focus-within:!border-border/80 focus-within:shadow-[0_16px_40px_-12px_rgba(0,0,0,0.15)]";
 
   const handleDragOver = (event: React.DragEvent) => {

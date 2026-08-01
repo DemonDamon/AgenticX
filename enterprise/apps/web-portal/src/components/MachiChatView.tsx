@@ -560,6 +560,14 @@ export function MachiChatView({
         onPaste={handlePaste}
         leftToolbar={
           <>
+            <ComposerPlusMenu
+              key="composer-plus"
+              webSearchMode={webSearchMode}
+              onWebSearchModeChange={setWebSearchMode}
+              onPickFiles={() => fileInputRef.current?.click()}
+              showFileEntry={false}
+              menuSide={isEmpty ? "bottom" : "top"}
+            />
             <Tooltip key="composer-upload">
               <TooltipTrigger asChild>
                 <Button
@@ -575,14 +583,6 @@ export function MachiChatView({
               </TooltipTrigger>
               <TooltipContent>{t("filesAndImages")}</TooltipContent>
             </Tooltip>
-            <ComposerPlusMenu
-              key="composer-plus"
-              webSearchMode={webSearchMode}
-              onWebSearchModeChange={setWebSearchMode}
-              onPickFiles={() => fileInputRef.current?.click()}
-              showFileEntry={false}
-              menuSide={isEmpty ? "bottom" : "top"}
-            />
             {deepResearchMode ? (
               <span
                 key="deep-research-chip"
