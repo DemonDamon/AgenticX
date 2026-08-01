@@ -1,6 +1,10 @@
 import { NextResponse } from "next/server";
 import { getSessionFromCookies, passwordChangeRequiredResponse } from "../../../../../lib/session";
 import { parseAttachmentFile, MAX_PARSE_FILE_BYTES } from "../../../../../lib/attachment-parse";
+import {
+  defaultOriginalStore,
+  MAX_ORIGINAL_RETAIN_BYTES,
+} from "../../../../../lib/attachments/original-store";
 
 export const runtime = "nodejs";
 
@@ -58,6 +62,7 @@ export async function POST(request: Request) {
     kind: "document" | "video";
     parsed_text: string;
     size: number;
+    attachment_id?: string;
   }> = [];
 
   for (const file of files) {
@@ -83,12 +88,32 @@ export async function POST(request: Request) {
         PARSE_TIMEOUT_MS,
         file.name,
       );
+      let attachmentId: string | undefined;
+      if (MAX_ORIGINAL_RETAIN_BYTES > 0 && file.size <= MAX_ORIGINAL_RETAIN_BYTES) {
+        try {
+          const stored = await defaultOriginalStore.put({
+            tenantId: session.tenantId,
+            userId: session.userId,
+            fileName: parsed.name,
+            mimeType: parsed.mimeType,
+            kind: parsed.kind,
+            buffer,
+          });
+          attachmentId = stored.id;
+        } catch (storeError) {
+          console.warn(
+            "[attachments/parse] original retain failed:",
+            storeError instanceof Error ? storeError.message : storeError,
+          );
+        }
+      }
       results.push({
         name: parsed.name,
         mime_type: parsed.mimeType,
         kind: parsed.kind,
         parsed_text: parsed.parsedText,
         size: file.size,
+        ...(attachmentId ? { attachment_id: attachmentId } : {}),
       });
     } catch (error) {
       const message = error instanceof Error ? error.message : "文件解析失败";

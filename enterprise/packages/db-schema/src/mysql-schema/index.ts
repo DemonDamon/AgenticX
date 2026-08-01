@@ -13,6 +13,8 @@ export * from "./chat-sessions";
 export * from "./chat-messages";
 export * from "./chat-history-operations";
 export * from "./chat-artifacts";
+export * from "./chat-attachments";
+
 export * from "./runtime-config";
 export * from "./gateway-channels";
 export * from "./api-tokens";

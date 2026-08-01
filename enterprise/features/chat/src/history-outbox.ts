@@ -27,6 +27,8 @@ export type HistoryAppendAttachmentMeta = {
   kind?: "image" | "document" | "video";
   /** Truncated extracted text for document preview / follow-up after refresh. Never data_url. */
   parsed_text?: string;
+  /** Original-file blob id — kept even when parsed_text is stripped for budget. */
+  attachment_id?: string;
 };
 
 export type HistoryAppendPayload = {
@@ -211,6 +213,10 @@ export function stripToAppendPayload(message: ChatMessage): HistoryAppendPayload
       const parsed = item.parsed_text?.trim();
       if (parsed) {
         meta.parsed_text = parsed.slice(0, MAX_HISTORY_PARSED_TEXT_CHARS);
+      }
+      const attachmentId = item.attachment_id?.trim();
+      if (attachmentId && isValidUlid(attachmentId)) {
+        meta.attachment_id = attachmentId;
       }
       return meta;
     });
@@ -601,6 +607,7 @@ export async function listPendingOverlayMessages(
           size: item.size,
           kind: item.kind,
           ...(item.parsed_text ? { parsed_text: item.parsed_text } : {}),
+          ...(item.attachment_id ? { attachment_id: item.attachment_id } : {}),
         })),
       });
     }
@@ -654,6 +661,8 @@ export async function enqueueAppend(
         mime_type: item.mime_type,
         size: item.size,
         kind: item.kind,
+        // Keep attachment_id — last fallback for original preview after text drop.
+        ...(item.attachment_id ? { attachment_id: item.attachment_id } : {}),
       })),
     }));
     payloadHash = await computePayloadHash(payloads);

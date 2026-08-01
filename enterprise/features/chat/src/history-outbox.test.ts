@@ -160,6 +160,44 @@ describe("history-outbox", () => {
     expect((payload.attachments?.[1] as { data_url?: string }).data_url).toBeUndefined();
   });
 
+  it("keeps attachment_id when budget strip drops parsed_text", async () => {
+    const append = vi.fn(async () => undefined);
+    startHistoryOutboxCoordinator(
+      { tenantId: "01TENANTAAAAAAAAAAAAAAAAAA", userId: "01USERAAAAAAAAAAAAAAAAAAAA" },
+      { appendMessages: append },
+    );
+    const sessionId = "01SESSIONAAAAAAAAAAAAAAAAA";
+    const attachmentId = "01HYATTACHAAAAAAAAAAAAAAAA";
+    // ~900k content + 120k parsed_text → over MAX_JOB_BYTES; after drop text → under budget.
+    const result = await enqueueAppend(sessionId, [
+      {
+        ...msg({ content: "总结" }),
+        attachments: [
+          {
+            name: "huge.pdf",
+            mime_type: "application/pdf",
+            size: 40_000_000,
+            kind: "document",
+            parsed_text: "x".repeat(120_000),
+            attachment_id: attachmentId,
+          },
+        ],
+      },
+      {
+        ...msg({ content: "pad" }),
+        role: "assistant" as const,
+        content: "y".repeat(900_000),
+      },
+    ]);
+    expect(result.enqueued).toBe(true);
+    await flushHistoryOutbox();
+    expect(append).toHaveBeenCalled();
+    const call = append.mock.calls[0] as unknown as [string, HistoryAppendPayload[]];
+    const att = call[1]?.[0]?.attachments?.[0];
+    expect(att?.attachment_id).toBe(attachmentId);
+    expect(att?.parsed_text).toBeUndefined();
+  });
+
   it("flushes document metadata+parsed_text append without dead-letter", async () => {
     const append = vi.fn(async () => undefined);
     startHistoryOutboxCoordinator(
@@ -184,7 +222,7 @@ describe("history-outbox", () => {
     expect(result.enqueued).toBe(true);
     await flushHistoryOutbox();
     expect(append).toHaveBeenCalledTimes(1);
-    const sent = append.mock.calls[0]?.[1] as HistoryAppendPayload[];
-    expect(sent[0]?.attachments?.[0]?.parsed_text).toBe("RAG 算法测试文档正文");
+    const call = append.mock.calls[0] as unknown as [string, HistoryAppendPayload[]];
+    expect(call[1]?.[0]?.attachments?.[0]?.parsed_text).toBe("RAG 算法测试文档正文");
   });
 });

@@ -64,6 +64,8 @@ function sanitizeAttachments(raw: unknown): ChatMessageAttachment[] | undefined 
     }
 
     const size = typeof row.size === "number" && Number.isFinite(row.size) ? row.size : undefined;
+    const attachmentIdRaw = typeof row.attachment_id === "string" ? row.attachment_id.trim() : "";
+    const attachmentId = ULID_RE.test(attachmentIdRaw) ? attachmentIdRaw : undefined;
     out.push({
       name,
       mime_type: mimeType,
@@ -71,6 +73,7 @@ function sanitizeAttachments(raw: unknown): ChatMessageAttachment[] | undefined 
       kind,
       ...(dataUrl ? { data_url: dataUrl } : {}),
       ...(parsedText ? { parsed_text: parsedText } : {}),
+      ...(attachmentId ? { attachment_id: attachmentId } : {}),
     });
   }
   return out.length > 0 ? out : undefined;
