@@ -144,6 +144,32 @@ describe("sanitizeInboundMessages", () => {
     expect(messages[0]?.web_search_sources).toHaveLength(1);
   });
 
+  it("keeps valid attachment_id and drops invalid ones without throwing", () => {
+    const messages = sanitizeInboundMessages(SESSION, TENANT, USER, [
+      {
+        id: "01HYAAAAAAAAAAAAAAAAAAAAB1",
+        role: "user",
+        content: "总结",
+        attachments: [
+          {
+            name: "a.pdf",
+            mime_type: "application/pdf",
+            kind: "document",
+            attachment_id: "01HYAAAAAAAAAAAAAAAAAAAAB2",
+          },
+          {
+            name: "b.pdf",
+            mime_type: "application/pdf",
+            kind: "document",
+            attachment_id: "not-a-ulid",
+          },
+        ],
+      },
+    ]);
+    expect(messages[0]?.attachments?.[0]?.attachment_id).toBe("01HYAAAAAAAAAAAAAAAAAAAAB2");
+    expect(messages[0]?.attachments?.[1]?.attachment_id).toBeUndefined();
+  });
+
   it("rejects empty or illegal message ids", () => {
     expect(() =>
       sanitizeInboundMessages(SESSION, TENANT, USER, [
