@@ -48,10 +48,15 @@ function sanitizeAttachments(raw: unknown): ChatMessageAttachment[] | undefined 
 
     if (kind === "image") {
       if (!mimeType.startsWith("image/")) throw new Error("image attachment mime_type must be image/*");
-      if (!dataUrl.startsWith("data:image/")) throw new Error("attachment data_url must be image data URL");
-      if (dataUrl.length > MAX_ATTACHMENT_DATA_URL_CHARS) throw new Error("attachment data_url too large");
+      // History outbox strips data_url for size/privacy; metadata-only rows are valid.
+      // When a data_url is present, keep the existing image-data-URL checks.
+      if (dataUrl) {
+        if (!dataUrl.startsWith("data:image/")) throw new Error("attachment data_url must be image data URL");
+        if (dataUrl.length > MAX_ATTACHMENT_DATA_URL_CHARS) throw new Error("attachment data_url too large");
+      }
     } else if (kind === "document") {
-      if (!parsedText && !dataUrl) throw new Error("document attachment requires parsed_text");
+      // History append intentionally sends {name,mime_type,size,kind} without parsed_text
+      // (see stripToAppendPayload). Accept metadata-only; keep parsed_text when provided.
     } else if (kind === "video") {
       // Filename-only placeholder for now; binary is not forwarded to the model.
     } else {

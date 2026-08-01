@@ -75,17 +75,54 @@ describe("sanitizeInboundMessages", () => {
     expect(messages[0]?.attachments?.[0]?.parsed_text).toBe("hello document");
   });
 
-  it("rejects document attachments without parsed_text", () => {
-    expect(() =>
-      sanitizeInboundMessages(SESSION, TENANT, USER, [
-        {
-          id: "01HYAAAAAAAAAAAAAAAAAAAAA7",
-          role: "user",
-          content: "hi",
-          attachments: [{ name: "a.pdf", mime_type: "application/pdf", kind: "document" }],
-        },
-      ]),
-    ).toThrow(/parsed_text/i);
+  it("allows metadata-only document attachments (history outbox strip)", () => {
+    const messages = sanitizeInboundMessages(SESSION, TENANT, USER, [
+      {
+        id: "01HYAAAAAAAAAAAAAAAAAAAAA7",
+        role: "user",
+        content: "hi",
+        attachments: [
+          {
+            name: "a.pdf",
+            mime_type: "application/pdf",
+            size: 15_200_000,
+            kind: "document",
+          },
+        ],
+      },
+    ]);
+    expect(messages[0]?.attachments).toEqual([
+      {
+        name: "a.pdf",
+        mime_type: "application/pdf",
+        size: 15_200_000,
+        kind: "document",
+      },
+    ]);
+  });
+
+  it("allows metadata-only image attachments without data_url", () => {
+    const messages = sanitizeInboundMessages(SESSION, TENANT, USER, [
+      {
+        id: "01HYAAAAAAAAAAAAAAAAAAAAA9",
+        role: "user",
+        content: "看这张图",
+        attachments: [
+          {
+            name: "shot.png",
+            mime_type: "image/png",
+            size: 2048,
+            kind: "image",
+          },
+        ],
+      },
+    ]);
+    expect(messages[0]?.attachments?.[0]).toEqual({
+      name: "shot.png",
+      mime_type: "image/png",
+      size: 2048,
+      kind: "image",
+    });
   });
 
   it("preserves web_search_sources on assistant messages (refresh survival)", () => {
