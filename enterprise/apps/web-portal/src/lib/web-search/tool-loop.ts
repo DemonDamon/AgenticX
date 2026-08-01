@@ -39,8 +39,11 @@ export const WEB_SEARCH_TOOL = {
 
 export const WEB_SEARCH_SYSTEM_HINT =
   "系统已完成联网搜索，并将结果附在下方。请严格基于这些结果作答；事实句末用 [N] 标注来源编号。" +
+  "必须直接提炼并给出可核验事实（如天气状况、气温、湿度、风力、时间、价格、版本号等），用简洁结构化表述回复用户。" +
+  "禁止只罗列网站名称、禁止让用户自行打开链接查看；禁止输出「推荐查询渠道」式清单来代替答案。" +
+  "若片段不足以完全回答，先基于已有信息尽力汇总，并明确哪些字段不确定；仍禁止声称无法联网。" +
   "例外：当前公历日期、星期、时刻必须以系统提示「当前时间」章节为准，禁止用搜索结果覆盖本机日期。" +
-  "禁止声称无法联网；禁止输出任何工具调用 XML/标签（包括 minimax:tool_call、<invoke>、tool_call 等）。";
+  "禁止输出任何工具调用 XML/标签（包括 minimax:tool_call、<invoke>、tool_call 等）。";
 
 /**
  * Injected on search-skip turns so thinking models (Kimi-like) do not narrate
@@ -160,6 +163,43 @@ export function extractLastUserQuery(messages: ChatMessage[]): string {
     if (text) return sanitizeWebSearchQuery(text);
   }
   return "";
+}
+
+/** Intent-bearing words: short turns containing these are full questions, not slot-fills. */
+const FOLLOW_UP_INTENT =
+  /天气|气温|温度|湿度|预报|新闻|头条|价格|股价|汇率|怎么样|如何|多少|最新|查询|搜索|财报|官网|是谁|哪里|哪个/;
+
+/**
+ * True when last user turn looks like a slot-fill (e.g. city name), not a full question.
+ * Used so multi-turn search can keep prior intent: 「今天天气怎么样」→「广州南沙」.
+ */
+export function isShortFollowUpQuery(query: string): boolean {
+  const q = query.trim();
+  if (!q || q.length > 24) return false;
+  if (FOLLOW_UP_INTENT.test(q)) return false;
+  return true;
+}
+
+/**
+ * Keywords for executeWebSearch on the current turn.
+ * Default = last user text. When last is a short follow-up and a previous user
+ * turn exists, prepend the slot-fill: 「广州南沙 今天天气怎么样」.
+ */
+export function buildWebSearchQuery(messages: ChatMessage[]): string {
+  const users: string[] = [];
+  for (let i = messages.length - 1; i >= 0 && users.length < 2; i -= 1) {
+    const msg = messages[i];
+    if (msg?.role !== "user") continue;
+    const text = textFromMessageContent(msg.content);
+    if (!text) continue;
+    users.push(sanitizeWebSearchQuery(text));
+  }
+  const last = users[0] ?? "";
+  if (!last) return "";
+  const prev = users[1] ?? "";
+  // Only splice when prior turn carried searchable intent (天气/新闻/…), not 「你好」.
+  if (!prev || !isShortFollowUpQuery(last) || !FOLLOW_UP_INTENT.test(prev)) return last;
+  return sanitizeWebSearchQuery(`${last} ${prev}`);
 }
 
 /** Raw last-user text (attachment bodies NOT stripped) — for skip classification. */
@@ -509,7 +549,10 @@ export async function runWebSearchTurn(
     }
   }
 
-  const query = extractLastUserQuery(originalMessages);
+  // Skip classification uses the bare last-user turn (greetings must not inherit prior intent).
+  const queryForSkip = extractLastUserQuery(originalMessages);
+  // Search keywords may splice a short slot-fill onto the previous user intent.
+  const query = buildWebSearchQuery(originalMessages);
 
   // Before: only pure date/time questions short-circuited search-first.
   // After: any self-contained turn (greeting / assistant meta / attachment-only /
@@ -518,7 +561,7 @@ export async function runWebSearchTurn(
   const skip = webSearchAlwaysOn()
     ? null
     : classifyWebSearchNeed({
-        query,
+        query: queryForSkip,
         rawQuery: extractLastUserRawText(originalMessages),
       });
   if (skip && skip.need === "skip") {
