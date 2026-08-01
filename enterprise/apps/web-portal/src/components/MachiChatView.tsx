@@ -162,10 +162,16 @@ export function MachiChatView({
   const [modelMenuOpen, setModelMenuOpen] = React.useState(false);
   const modelMenuRef = React.useRef<HTMLDivElement>(null);
   const modelTriggerRef = React.useRef<HTMLButtonElement>(null);
-  const [modelMenuPosition, setModelMenuPosition] = React.useState<{ top: number; left: number; width: number }>({
+  const [modelMenuPosition, setModelMenuPosition] = React.useState<{
+    top: number;
+    left: number;
+    width: number;
+    maxHeight: number;
+  }>({
     top: 0,
     left: 0,
     width: 320,
+    maxHeight: 320,
   });
 
   // 动态拉取当前用户可见的模型清单。
@@ -237,11 +243,15 @@ export function MachiChatView({
     const updatePosition = () => {
       const trigger = modelTriggerRef.current;
       if (!trigger) return;
+      const margin = 8;
+      const minMaxHeight = 120;
       const rect = trigger.getBoundingClientRect();
       const width = Math.min(360, Math.max(280, rect.width + 88));
-      const left = Math.min(window.innerWidth - width - 8, Math.max(8, rect.right - width));
-      const top = Math.max(8, rect.top - 8);
-      setModelMenuPosition({ top, left, width });
+      const left = Math.min(window.innerWidth - width - margin, Math.max(margin, rect.right - width));
+      // 菜单向上展开（translateY(-100%)），CSS top 即视觉底边；上方可用高度 = top - margin
+      const top = Math.max(margin, rect.top - margin);
+      const maxHeight = Math.max(minMaxHeight, top - margin);
+      setModelMenuPosition({ top, left, width, maxHeight });
     };
     updatePosition();
 
@@ -608,11 +618,12 @@ export function MachiChatView({
           <div ref={modelMenuRef} className="relative">
             {modelMenuOpen ? (
               <div
-                className="fixed z-[80] overflow-hidden rounded-2xl border border-border/70 bg-popover/95 p-1 shadow-2xl backdrop-blur"
+                className="fixed z-[80] overflow-y-auto overscroll-contain rounded-2xl border border-border/70 bg-popover/95 p-1 shadow-2xl backdrop-blur"
                 style={{
                   width: modelMenuPosition.width,
                   left: modelMenuPosition.left,
                   top: modelMenuPosition.top,
+                  maxHeight: modelMenuPosition.maxHeight,
                   transform: "translateY(-100%)",
                 }}
               >
