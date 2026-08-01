@@ -3,7 +3,7 @@
 import * as React from "react";
 import type { ChatMessageDeepResearch, DeepResearchEvent } from "@agenticx/core-api";
 import { DeepResearchClarifyCard } from "./DeepResearchClarifyCard";
-import { buildDeepResearchSegments } from "./deep-research-segments";
+import { buildDeepResearchSegments, deepResearchWaitingLabel } from "./deep-research-segments";
 import type { ResearchStep } from "./deep-research-steps";
 
 export type DeepResearchWorkbenchProps = {
@@ -274,8 +274,10 @@ export function DeepResearchWorkbench({
     [deepResearch.events, deepResearch.status],
   );
 
+  // clarify / plan phases render no segment, so events alone can't tell whether the
+  // user sees anything — keep the spinner until a real segment lands.
   const waitingShell =
-    deepResearch.events.length === 0 &&
+    segments.length === 0 &&
     (deepResearch.status === "running" || deepResearch.status === "awaiting_clarify");
 
   const timedOut = deepResearch.events.some((e) => e.type === "clarify_timeout");
@@ -288,7 +290,7 @@ export function DeepResearchWorkbench({
       <div className={["mb-3 text-sm leading-5 text-foreground", className].filter(Boolean).join(" ")}>
         <div className="flex items-center gap-2">
           <IconSpinner className="h-4 w-4 animate-spin text-primary" />
-          <span>正在启动深度研究…</span>
+          <span>{deepResearchWaitingLabel(deepResearch.events)}</span>
         </div>
       </div>
     );

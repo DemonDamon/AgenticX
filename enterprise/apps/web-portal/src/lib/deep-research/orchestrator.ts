@@ -35,7 +35,8 @@ export const RESULTS_PER_QUESTION = 5;
 export const MAX_SOURCES = 25;
 export const MAX_LANES = 5;
 export const TOTAL_BUDGET_MS = 180_000;
-export const CLARIFY_TIMEOUT_MS = 120_000;
+/** Default wait for clarify answers before continuing with skip/defaults. */
+export const CLARIFY_TIMEOUT_MS = 300_000;
 /** Max wait for the optional clarifier LLM call (not the user resume wait). */
 export const CLARIFIER_LLM_TIMEOUT_MS = 20_000;
 
