@@ -224,6 +224,21 @@ export function buildDeepResearchSegments(
   return segments;
 }
 
+/**
+ * Label for the pre-segment spinner. `clarify` / `plan` phases produce no segment,
+ * so their message is the only progress signal the user can get in that window.
+ */
+export function deepResearchWaitingLabel(events: DeepResearchEvent[]): string {
+  for (let i = events.length - 1; i >= 0; i -= 1) {
+    const event = events[i];
+    if (event?.type === "phase") {
+      const message = event.message?.trim();
+      if (message) return message;
+    }
+  }
+  return "正在启动深度研究…";
+}
+
 /** Legacy content deltas that used to leak into the report body. */
 const LEGACY_NARRATIVE_LINES = [
   "我先快速确认一下调研方向，然后开始系统检索。",

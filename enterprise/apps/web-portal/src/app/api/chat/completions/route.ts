@@ -24,8 +24,11 @@ function withSanitizedMessages(body: Record<string, unknown>): Record<string, un
 const GATEWAY_COMPLETIONS_URL =
   process.env.GATEWAY_COMPLETIONS_URL ?? "http://127.0.0.1:8088/v1/chat/completions";
 
-/** Web-search + slow upstream first-token can exceed the platform default (often 60s). */
-export const maxDuration = 300;
+/**
+ * Deep-research clarify alone can wait up to 5 minutes, then still needs plan/search
+ * time. Keep this above CLARIFY_TIMEOUT_MS in the deep-research orchestrator.
+ */
+export const maxDuration = 900;
 export const runtime = "nodejs";
 
 export async function POST(request: Request) {

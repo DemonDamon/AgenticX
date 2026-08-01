@@ -45,10 +45,14 @@ export async function POST(request: Request) {
   const skip = body.skip === true || Object.keys(answers).length === 0;
   const ok = resolveClarifyResume(runId, { answers, skip });
   if (!ok) {
-    return NextResponse.json(
-      { error: { code: "40401", message: "no pending clarify for runId" } },
-      { status: 404 },
-    );
+    // Idempotent: timeout / prior resume already cleared the in-memory waiter and
+    // the orchestrator continued. Returning 404 made the clarify card dump raw
+    // JSON while the research was already running.
+    return NextResponse.json({
+      code: "00000",
+      message: "ok",
+      data: { runId, resumed: false, alreadyContinued: true },
+    });
   }
 
   return NextResponse.json({ code: "00000", message: "ok", data: { runId, resumed: true } });
