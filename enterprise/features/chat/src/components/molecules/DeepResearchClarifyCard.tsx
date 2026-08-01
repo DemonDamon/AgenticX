@@ -45,6 +45,17 @@ function IconChevronDown({ className }: { className?: string }) {
   );
 }
 
+/** Join multi-selected option labels (+ optional custom) for resume payload. */
+export function formatClarifyAnswer(
+  selectedLabels: readonly string[],
+  customText?: string,
+): string {
+  const parts = selectedLabels.map((s) => s.trim()).filter(Boolean);
+  const custom = customText?.trim();
+  if (custom) parts.push(custom);
+  return parts.join("、");
+}
+
 export type DeepResearchClarifyCardProps = {
   events: DeepResearchEvent[];
   /** When false, render read-only「已收集信息」panel after answers / timeout. */
@@ -67,7 +78,8 @@ export function DeepResearchClarifyCard({
     () => events.filter((e): e is ClarifyEvent => e.type === "clarify"),
     [events],
   );
-  const [answers, setAnswers] = React.useState<Record<string, string>>({});
+  /** Per-question selected option labels (multi-select). */
+  const [answers, setAnswers] = React.useState<Record<string, string[]>>({});
   const [custom, setCustom] = React.useState<Record<string, string>>({});
   const [submitting, setSubmitting] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
@@ -77,6 +89,21 @@ export function DeepResearchClarifyCard({
   React.useEffect(() => {
     setCollapsed(!awaiting);
   }, [awaiting]);
+
+  const toggleOption = React.useCallback((questionId: string, label: string) => {
+    setAnswers((prev) => {
+      const current = prev[questionId] ?? [];
+      const next = current.includes(label)
+        ? current.filter((item) => item !== label)
+        : [...current, label];
+      if (next.length === 0) {
+        const cleared = { ...prev };
+        delete cleared[questionId];
+        return cleared;
+      }
+      return { ...prev, [questionId]: next };
+    });
+  }, []);
 
   if (clarifyEvents.length === 0) return null;
   const runId = clarifyEvents[0]!.runId;
@@ -97,9 +124,10 @@ export function DeepResearchClarifyCard({
       const payloadAnswers: Record<string, string> = {};
       if (!skip) {
         for (const q of clarifyEvents) {
-          const selected = answers[q.questionId]?.trim();
-          const customText = custom[q.questionId]?.trim();
-          const value = customText || selected;
+          const value = formatClarifyAnswer(
+            answers[q.questionId] ?? [],
+            custom[q.questionId],
+          );
           if (value) payloadAnswers[q.questionId] = value;
         }
       }
@@ -162,27 +190,35 @@ export function DeepResearchClarifyCard({
           {showInteractive ? (
             <>
               <p className="mb-3 text-sm leading-5 text-muted-foreground">
-                我先快速确认一下调研方向，然后开始系统检索。请在 5
+                我先快速确认一下调研方向，然后开始系统检索。每题可多选；请在 5
                 分钟内确认；超时将按默认假设继续。
               </p>
               <div className="space-y-3">
                 {clarifyEvents.map((q) => (
                   <div key={`${q.runId}-${q.questionId}`}>
-                    <div className="mb-1.5 text-sm font-medium leading-5 text-foreground">
-                      {q.step}/{q.total} · {q.question}
+                    <div className="mb-1.5 flex items-baseline gap-1.5 text-sm font-medium leading-5 text-foreground">
+                      <span>
+                        {q.step}/{q.total} · {q.question}
+                      </span>
+                      <span className="shrink-0 text-xs font-normal text-muted-foreground">
+                        可多选
+                      </span>
                     </div>
-                    <div className="flex flex-wrap gap-1.5">
+                    <div
+                      className="flex flex-wrap gap-1.5"
+                      role="group"
+                      aria-label={q.question}
+                    >
                       {q.options.map((opt) => {
-                        const selected = answers[q.questionId] === opt.label;
+                        const selected = (answers[q.questionId] ?? []).includes(opt.label);
                         return (
                           <button
                             key={opt.id}
                             type="button"
+                            role="checkbox"
+                            aria-checked={selected}
                             disabled={disabled || submitting}
-                            onClick={() => {
-                              setAnswers((prev) => ({ ...prev, [q.questionId]: opt.label }));
-                              setCustom((prev) => ({ ...prev, [q.questionId]: "" }));
-                            }}
+                            onClick={() => toggleOption(q.questionId, opt.label)}
                             className={[
                               "rounded-full border px-2.5 py-1 text-sm leading-5 transition-colors",
                               selected
@@ -198,19 +234,12 @@ export function DeepResearchClarifyCard({
                     {q.allowCustom ? (
                       <input
                         className="mt-2 w-full rounded-md border border-border/70 bg-background px-2 py-1.5 text-sm"
-                        placeholder="其他（可选）"
+                        placeholder="其他（可选，可与上方选项组合）"
                         value={custom[q.questionId] ?? ""}
                         disabled={disabled || submitting}
                         onChange={(e) => {
                           const value = e.target.value;
                           setCustom((prev) => ({ ...prev, [q.questionId]: value }));
-                          if (value.trim()) {
-                            setAnswers((prev) => {
-                              const next = { ...prev };
-                              delete next[q.questionId];
-                              return next;
-                            });
-                          }
                         }}
                       />
                     ) : null}
