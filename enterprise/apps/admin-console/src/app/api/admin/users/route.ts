@@ -1,5 +1,6 @@
 import {
   createAdminUser,
+  ensureSystemRoles,
   listAdminUsers,
   type AdminUserStatus,
   type ListUsersFilter,
@@ -61,9 +62,14 @@ export async function POST(request: Request) {
     const phone = typeof body.phone === "string" ? body.phone : null;
     const employeeNo = typeof body.employeeNo === "string" ? body.employeeNo : null;
     const jobTitle = typeof body.jobTitle === "string" ? body.jobTitle : null;
-    const roleCodes = Array.isArray(body.roleCodes)
-      ? body.roleCodes.filter((x): x is string => typeof x === "string")
-      : undefined;
+    const roleCodes =
+      body.isAdmin === true
+        ? ["member", "admin"]
+        : body.isAdmin === false
+          ? ["member"]
+          : Array.isArray(body.roleCodes)
+            ? body.roleCodes.filter((x): x is string => typeof x === "string")
+            : undefined;
 
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
       return NextResponse.json({ code: "40000", message: "invalid email" }, { status: 400 });
@@ -79,6 +85,7 @@ export async function POST(request: Request) {
     }
 
     const defaultOrgId = await getDefaultOrgId(auth.session.tenantId);
+    await ensureSystemRoles(auth.session.tenantId);
     const created = await createAdminUser({
       tenantId: auth.session.tenantId,
       email,

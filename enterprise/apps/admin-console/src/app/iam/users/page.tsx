@@ -47,6 +47,7 @@ import {
 import { useTranslations } from "next-intl";
 import type { ColumnDef } from "@tanstack/react-table";
 import { MoreHorizontal, Pencil, Plus, RefreshCcw, ShieldCheck, ShieldX, Trash2, UserPlus, Users, Check } from "lucide-react";
+import { CreateUserDialog } from "../../../components/CreateUserDialog";
 import { VisibleModelsEditor } from "../../../components/visible-models-editor";
 
 type Status = "active" | "disabled" | "locked";
@@ -185,31 +186,6 @@ function UsersPageContent() {
       alive = false;
     };
   }, []);
-
-  const handleCreate = async (input: Record<string, unknown>) => {
-    const res = await adminFetch("/api/admin/users", {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify(input),
-    });
-    const json = (await res.json()) as ApiUserResp;
-    if (!res.ok || !json.data?.user) {
-      toast.error(json.message ?? t("toast.createFailed"));
-      return false;
-    }
-    toast.success(`${t("toast.created")} ${json.data.user.email}`);
-    if (json.data.initialPassword) {
-      toast.success(`${t("toast.initialPassword")}${json.data.initialPassword}`, { duration: 15_000 });
-      try {
-        await navigator.clipboard.writeText(json.data.initialPassword);
-        toast.success(t("toast.passwordCopied"));
-      } catch {
-        /* ignore */
-      }
-    }
-    await load();
-    return true;
-  };
 
   const handleUpdate = async (id: string, patch: Partial<AdminUser> & Record<string, unknown>) => {
     const res = await fetch(`/api/admin/users/${id}`, {
@@ -661,28 +637,11 @@ function UsersPageContent() {
       </Sheet>
 
       {/* 新建 */}
-      <UserFormDialog
+      <CreateUserDialog
         open={createOpen}
         onOpenChange={setCreateOpen}
-        title={t("newUser")}
-        description={t("form.createDescription")}
-        submitLabel={t("form.submitCreate")}
-        roleOptions={roleOptions}
-        deptOptions={deptOptions}
-        onSubmit={async (values) => {
-          const ok = await handleCreate({
-            email: values.email,
-            displayName: values.displayName,
-            status: values.status,
-            deptId: values.deptId || null,
-            phone: values.phone || null,
-            employeeNo: values.employeeNo || null,
-            jobTitle: values.jobTitle || null,
-            roleCodes: values.roleCodes.length ? values.roleCodes : undefined,
-            initialPassword: values.initialPassword || undefined,
-          });
-          if (ok) setCreateOpen(false);
-        }}
+        departmentOptions={deptOptions}
+        onCreated={load}
       />
 
       {/* 编辑 */}

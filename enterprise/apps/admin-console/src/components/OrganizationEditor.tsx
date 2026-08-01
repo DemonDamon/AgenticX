@@ -25,8 +25,9 @@ import {
   Skeleton,
   toast,
 } from "@agenticx/ui";
-import { ChevronDown, ChevronRight, FolderTree, MoreHorizontal, MoveRight, Pencil, Plus, RefreshCw, Save, Trash2, Users } from "lucide-react";
+import { ChevronDown, ChevronRight, FolderTree, MoreHorizontal, MoveRight, Pencil, Plus, RefreshCw, Save, Trash2, UserPlus, Users } from "lucide-react";
 import { adminFetch } from "../lib/admin-client-auth";
+import { CreateUserDialog, type CreateUserDepartmentOption } from "./CreateUserDialog";
 import { VisibleModelsEditor } from "./visible-models-editor";
 
 type OrganizationNode = {
@@ -282,6 +283,7 @@ export function OrganizationEditor() {
   const [createOpen, setCreateOpen] = useState(false);
   const [createName, setCreateName] = useState("");
   const [createParentId, setCreateParentId] = useState<string | null>(null);
+  const [createUserOpen, setCreateUserOpen] = useState(false);
   const [deleteConfirm, setDeleteConfirm] = useState(false);
   const [movingMember, setMovingMember] = useState<OrganizationMember | null>(null);
   const [moveTargetDeptId, setMoveTargetDeptId] = useState<string | null>(null);
@@ -312,6 +314,10 @@ export function OrganizationEditor() {
 
   const selected = useMemo(() => findNode(tree, selectedId), [tree, selectedId]);
   const flatNodes = useMemo(() => collectNodes(tree), [tree]);
+  const departmentOptions = useMemo<CreateUserDepartmentOption[]>(
+    () => flatNodes.map((node) => ({ id: node.id, label: node.path })),
+    [flatNodes],
+  );
   const blockedParentIds = useMemo(() => selected ? new Set([selected.id, ...collectDescendantIds(selected)]) : new Set<string>(), [selected]);
   const membersByDept = useMemo(() => {
     const departmentIds = new Set(flatNodes.map((node) => node.id));
@@ -540,7 +546,10 @@ export function OrganizationEditor() {
                 <p className="text-xs text-muted-foreground">不能移动到自身或子组织之下。</p>
               </div>
               <div className="flex flex-wrap justify-between gap-2">
-                <Button variant="outline" onClick={() => { setCreateParentId(selected.id); setCreateOpen(true); }}><Plus />新增下级</Button>
+                <div className="flex flex-wrap gap-2">
+                  <Button variant="outline" onClick={() => { setCreateParentId(selected.id); setCreateOpen(true); }}><Plus />新增下级</Button>
+                  <Button variant="outline" onClick={() => setCreateUserOpen(true)}><UserPlus />新建用户</Button>
+                </div>
                 <Button onClick={() => void save()} disabled={saving || !draftName.trim()}><Save />保存组织</Button>
               </div>
               <section className="border-t border-border pt-5">
@@ -584,6 +593,14 @@ export function OrganizationEditor() {
           <DialogFooter><Button variant="outline" onClick={() => setCreateOpen(false)}>取消</Button><Button onClick={() => void create()} disabled={saving || !createName.trim()}>{saving ? "创建中…" : "创建组织"}</Button></DialogFooter>
         </DialogContent>
       </Dialog>
+
+      <CreateUserDialog
+        open={createUserOpen}
+        onOpenChange={setCreateUserOpen}
+        defaultDeptId={selected?.id}
+        departmentOptions={departmentOptions}
+        onCreated={load}
+      />
 
       <Dialog
         open={Boolean(movingMember)}
