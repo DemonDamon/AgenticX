@@ -76,6 +76,7 @@ from agenticx.cli.agent_tools import (
     merge_computer_use_tools_into,
 )
 from agenticx.runtime.meta_tools import META_AGENT_TOOLS, META_LEADER_LABEL_SCRATCH_KEY
+from agenticx.runtime.prompts.current_time import build_current_time_block
 from agenticx.runtime.prompts.meta_agent import _build_taskspaces_context, build_meta_agent_system_prompt
 from agenticx.runtime.group_router import (
     META_LEADER_AGENT_ID,
@@ -779,6 +780,7 @@ def _build_automation_runner_system_prompt(
         "# 定时 / 自动化任务执行器",
         "你是 Near 的**定时任务执行器**。本轮用户输入即任务说明（含输出格式、数据来源与失败处理等硬性要求）。",
         "- **当前是执行阶段，不是建任务阶段**：禁止询问执行频率、日期、时间等调度参数；这些参数已由调度器确定。",
+        build_current_time_block().rstrip(),
         "## 任务根目录（与 Desktop 配置一致）",
         "- **定义**：用户在自动化设置里填写的 **工作区**；若留空，则为 `~/.agenticx/crontask/<task_id>`（每个定时任务独占一个子目录，与对话一一对应）。",
         "- **Python 虚拟环境**：必须在**任务根目录**下维护，标准路径为 **`<任务根>/.venv`**。安装依赖用 `<任务根>/.venv/bin/pip install …`，执行脚本用 `<任务根>/.venv/bin/python …`（不要在未约定的仓库 `.venv`、全局 python 里装定时任务专属依赖，除非用户显式把该路径设为工作区）。",
@@ -3068,6 +3070,7 @@ def create_studio_app() -> FastAPI:
                 f"你是 AgenticX 分身 **{name}**。\n"
                 f"角色: {role or 'General Assistant'}\n"
             )
+            prompt += build_current_time_block()
             if sys_prompt:
                 prompt += f"分身自定义指令: {sys_prompt}\n"
             prompt += (

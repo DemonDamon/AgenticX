@@ -144,6 +144,7 @@ _CONCURRENCY_SAFE_STUDIO_TOOLS = frozenset(
         "knowledge_search",  # Plan-Id: machi-kb-stage1-local-mvp — read-only vector search.
         "knowledge_synthesize",
         "web_search",
+        "get_current_datetime",
         "web_fetch",
         "view_image",
         "show_widget",
@@ -1807,7 +1808,9 @@ STUDIO_TOOLS: List[Dict[str, Any]] = [
             "description": (
                 "Search the public web for up-to-date information (news, live data, documentation "
                 "beyond knowledge cutoff). Prefer this for time-sensitive or externally verifiable "
-                "facts before answering."
+                "facts before answering. "
+                "Do NOT use this tool to determine the current date, weekday or clock time; "
+                "use get_current_datetime instead."
             ),
             "parameters": {
                 "type": "object",
@@ -1822,6 +1825,22 @@ STUDIO_TOOLS: List[Dict[str, Any]] = [
                     },
                 },
                 "required": ["query"],
+                "additionalProperties": False,
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "get_current_datetime",
+            "description": (
+                "Return the authoritative current date and time from the local system clock "
+                "(local ISO datetime, date, weekday, timezone and UTC offset). Use this instead "
+                "of web_search whenever the current date, weekday or clock time matters."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {},
                 "additionalProperties": False,
             },
         },
@@ -5627,6 +5646,15 @@ def _tool_web_search(arguments: Dict[str, Any], session: Optional["StudioSession
         return f"ERROR: web_search failed: {exc}"
 
 
+def _tool_get_current_datetime(arguments: Dict[str, Any]) -> str:
+    """Return local clock facts as JSON for the model to quote verbatim."""
+    from agenticx.runtime.prompts.current_time import get_current_time_facts
+
+    payload = dict(get_current_time_facts())
+    payload["source"] = "local_system_clock"
+    return json.dumps(payload, ensure_ascii=False)
+
+
 PENDING_VISUAL_ATTACHMENTS_KEY = "__pending_visual_attachments__"
 VIEW_IMAGE_INJECT_LLM_TEXT = (
     "<system-injected> attached images requested via view_image tool:"
@@ -7860,6 +7888,8 @@ async def dispatch_tool_async(
             return await asyncio.to_thread(_tool_knowledge_synthesize, arguments, session)
         if name == "web_search":
             return await asyncio.to_thread(_tool_web_search, arguments, session)
+        if name == "get_current_datetime":
+            return _tool_get_current_datetime(arguments)
         if name == "web_fetch":
             return await _tool_web_fetch(arguments, session)
         if name == "view_image":

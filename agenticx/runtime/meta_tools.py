@@ -29,6 +29,7 @@ from agenticx.llms.provider_display import format_model_option_label, resolve_pr
 from agenticx.llms.provider_fault import is_provider_session_blocked
 from agenticx.llms.provider_resolver import ProviderResolver
 from agenticx.memory.workspace_memory import WorkspaceMemoryStore
+from agenticx.runtime.prompts.current_time import build_current_time_block
 from agenticx.runtime.team_manager import AgentTeamManager
 from agenticx.runtime.events import EventType
 from agenticx.runtime.subagent_runs import SubAgentRunStore
@@ -1884,6 +1885,7 @@ async def _run_delegation_in_avatar_session(
         f"你是 AgenticX 分身 **{avatar_name}**。\n"
         f"角色: {avatar_role or 'General Assistant'}\n"
     )
+    delegation_system_prompt += build_current_time_block()
     if avatar_sys_prompt:
         delegation_system_prompt += f"分身自定义指令: {avatar_sys_prompt}\n"
     delegation_system_prompt += (

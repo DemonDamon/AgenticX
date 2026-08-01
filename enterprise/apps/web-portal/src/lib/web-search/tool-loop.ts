@@ -14,6 +14,10 @@
  */
 
 import { stripEmptyAssistantMessages } from "../chat-completion-sanitize";
+import {
+  isCurrentDateTimeQuery,
+  withCurrentTimeContext,
+} from "../current-time";
 import { executeWebSearch, formatHits, type WebSearchHit, type WebSearchRuntimeConfig } from "./providers";
 import { resolveWebSearchConfig, type TenantWebSearchRow } from "./config";
 
@@ -22,7 +26,8 @@ export const WEB_SEARCH_TOOL = {
   function: {
     name: "web_search",
     description:
-      "检索公开网页，获取最新资讯、实时数据，以及超出模型知识截止日期的信息。用户问题涉及时效性、当前事实或外部网页时必须调用。",
+      "检索公开网页，获取最新资讯、实时数据，以及超出模型知识截止日期的信息。用户问题涉及时效性、当前事实或外部网页时必须调用。" +
+      "禁止用本工具查询当前公历日期、星期或时刻；那些必须以系统提示「当前时间」章节为准。",
     parameters: {
       type: "object",
       properties: {
@@ -36,6 +41,7 @@ export const WEB_SEARCH_TOOL = {
 
 export const WEB_SEARCH_SYSTEM_HINT =
   "系统已完成联网搜索，并将结果附在下方。请严格基于这些结果作答；事实句末用 [N] 标注来源编号。" +
+  "例外：当前公历日期、星期、时刻必须以系统提示「当前时间」章节为准，禁止用搜索结果覆盖本机日期。" +
   "禁止声称无法联网；禁止输出任何工具调用 XML/标签（包括 minimax:tool_call、<invoke>、tool_call 等）。";
 
 /** @deprecated Kept for tests / compatibility; search-first path does not probe tools. */
@@ -447,7 +453,7 @@ export async function runWebSearchTurn(
       const upstream = await callGatewayStream(deps, {
         ...rest,
         stream: true,
-        messages: originalMessages,
+        messages: withCurrentTimeContext(originalMessages),
       });
       return pipeWithPrefix(upstream, ADMIN_DISABLED_HINT);
     } catch (error) {
@@ -455,8 +461,23 @@ export async function runWebSearchTurn(
     }
   }
 
-  const searchFn = deps.executeSearch ?? executeWebSearch;
   const query = extractLastUserQuery(originalMessages);
+
+  // Pure date/time questions must not search-first: SEO date pages are not a clock.
+  if (isCurrentDateTimeQuery(query)) {
+    try {
+      const upstream = await callGatewayStream(deps, {
+        ...rest,
+        stream: true,
+        messages: withCurrentTimeContext(originalMessages),
+      });
+      return pipeUpstreamSse(upstream, {});
+    } catch (error) {
+      return gatewayUnavailableResponse(error instanceof Error ? error.message : "gateway unreachable");
+    }
+  }
+
+  const searchFn = deps.executeSearch ?? executeWebSearch;
   let hits: WebSearchHit[] = [];
   let searchFailed = false;
 
@@ -473,9 +494,11 @@ export async function runWebSearchTurn(
     console.warn("[web-search] search failed, degrading:", error instanceof Error ? error.message : error);
   }
 
-  const messages = searchFailed
-    ? originalMessages
-    : withSearchContext(originalMessages, compactHitsForModel(hits));
+  const messages = withCurrentTimeContext(
+    searchFailed
+      ? originalMessages
+      : withSearchContext(originalMessages, compactHitsForModel(hits)),
+  );
 
   let upstream: Response;
   try {
