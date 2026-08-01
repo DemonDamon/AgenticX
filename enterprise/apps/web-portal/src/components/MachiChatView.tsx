@@ -47,7 +47,12 @@ import {
   cn,
 } from "@agenticx/ui";
 import { NearEmptyWordmark } from "./NearEmptyWordmark";
-import { ComposerPlusMenu, type WebSearchMode } from "./ComposerPlusMenu";
+import {
+  CapabilityHoverTip,
+  ComposerPlusMenu,
+  hintLines,
+  type WebSearchMode,
+} from "./ComposerPlusMenu";
 import { ENTERPRISE_PRODUCT_NAME } from "./EnterpriseBrandMark";
 
 // 模型清单从 /api/me/models 动态获取（admin 配置 + 用户可见性）。
@@ -578,21 +583,22 @@ export function MachiChatView({
               showFileEntry={false}
               menuSide={isEmpty ? "bottom" : "top"}
             />
-            <Tooltip key="composer-upload">
-              <TooltipTrigger asChild>
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="icon"
-                  aria-label={t("filesAndImages")}
-                  className="h-8 w-8 rounded-full text-muted-foreground hover:bg-primary-soft hover:text-primary"
-                  onClick={() => fileInputRef.current?.click()}
-                >
-                  <Paperclip className="h-4 w-4" />
-                </Button>
-              </TooltipTrigger>
-              <TooltipContent>{t("filesAndImages")}</TooltipContent>
-            </Tooltip>
+            <CapabilityHoverTip
+              key="composer-upload"
+              label={t("filesAndImages")}
+              lines={hintLines(t("filesAndImagesHint"))}
+            >
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon"
+                aria-label={t("filesAndImages")}
+                className="h-8 w-8 rounded-full text-muted-foreground hover:bg-primary-soft hover:text-primary"
+                onClick={() => fileInputRef.current?.click()}
+              >
+                <Paperclip className="h-4 w-4" />
+              </Button>
+            </CapabilityHoverTip>
             {deepResearchMode ? (
               <span
                 key="deep-research-chip"
