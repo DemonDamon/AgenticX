@@ -2,6 +2,7 @@
 
 import * as React from "react";
 import type { ChatMessageAttachment } from "@agenticx/core-api";
+import { formatFileSize } from "../../utils/format-file-size";
 
 function IconFile({ className }: { className?: string }) {
   return (
@@ -26,16 +27,6 @@ function IconFile({ className }: { className?: string }) {
   );
 }
 
-function formatFileSize(size?: number): string {
-  if (size == null || !Number.isFinite(size) || size <= 0) return "";
-  if (size < 1024) return `${size} B`;
-  if (size < 1024 * 1024) {
-    const kb = size / 1024;
-    return kb < 10 ? `${kb.toFixed(2)} KB` : `${kb.toFixed(1)} KB`;
-  }
-  return `${(size / (1024 * 1024)).toFixed(1)} MB`;
-}
-
 function fileExtLabel(name: string, kind?: ChatMessageAttachment["kind"]): string {
   if (kind === "video") return "VIDEO";
   const ext = name.includes(".") ? name.split(".").pop()?.toUpperCase() : "";
@@ -47,9 +38,11 @@ type UserMessageAttachmentCardProps = {
   onPreview?: () => void;
 };
 
-/** Kimi-style neutral file card — separate from the text message bubble. */
+/** Neutral file card — separate from the text message bubble. */
 export function UserMessageAttachmentCard({ attachment, onPreview }: UserMessageAttachmentCardProps) {
-  const canPreview = Boolean(attachment.parsed_text?.trim() && onPreview);
+  const canPreview = Boolean(
+    (attachment.attachment_id || attachment.parsed_text?.trim()) && onPreview,
+  );
   const metaParts = [
     fileExtLabel(attachment.name, attachment.kind),
     formatFileSize(attachment.size),

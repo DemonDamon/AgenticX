@@ -11,44 +11,81 @@ import {
 } from "../types/composer-attachment";
 import { compressImageForChat } from "../utils/compress-image";
 
-async function parseRemoteFiles(files: File[]): Promise<
-  Array<{
-    name: string;
-    mime_type: string;
-    kind: "document" | "video";
-    parsed_text: string;
-    size: number;
-  }>
-> {
-  const body = new FormData();
-  for (const file of files) body.append("files", file);
-  const res = await fetch("/api/chat/attachments/parse", {
-    method: "POST",
-    credentials: "same-origin",
-    body,
-  });
-  if (!res.ok) {
-    let message = res.statusText;
-    try {
-      const json = (await res.json()) as { error?: { message?: string } };
-      if (json.error?.message) message = json.error.message;
-    } catch {
-      // keep statusText
-    }
-    throw new Error(message || "文件解析失败");
-  }
-  const json = (await res.json()) as {
-    data?: {
-      attachments?: Array<{
-        name: string;
-        mime_type: string;
-        kind: "document" | "video";
-        parsed_text: string;
-        size: number;
-      }>;
+type ParsedRow = {
+  name: string;
+  mime_type: string;
+  kind: "document" | "video";
+  parsed_text: string;
+  size: number;
+  attachment_id?: string;
+};
+
+const PARSE_CONCURRENCY = 3;
+
+function parseRemoteFile(
+  file: File,
+  onProgress: (percent: number) => void,
+  onUploadComplete: () => void,
+): Promise<ParsedRow> {
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open("POST", "/api/chat/attachments/parse");
+    xhr.withCredentials = true;
+    xhr.upload.onprogress = (event) => {
+      if (!event.lengthComputable || event.total <= 0) return;
+      onProgress(Math.min(99, Math.round((event.loaded / event.total) * 100)));
     };
-  };
-  return json.data?.attachments ?? [];
+    xhr.upload.onload = () => {
+      onProgress(99);
+      onUploadComplete();
+    };
+    xhr.onload = () => {
+      let body: {
+        error?: { message?: string };
+        data?: { attachments?: ParsedRow[] };
+      } = {};
+      try {
+        body = JSON.parse(xhr.responseText) as typeof body;
+      } catch {
+        // keep empty body
+      }
+      if (xhr.status < 200 || xhr.status >= 300) {
+        const message = body.error?.message || xhr.statusText || "文件解析失败";
+        reject(new Error(message));
+        return;
+      }
+      const row = body.data?.attachments?.[0];
+      if (!row) {
+        reject(new Error("解析结果缺失"));
+        return;
+      }
+      resolve(row);
+    };
+    xhr.onerror = () => reject(new Error("网络错误，文件上传失败"));
+    xhr.ontimeout = () => reject(new Error("上传超时"));
+    const form = new FormData();
+    form.append("files", file);
+    xhr.send(form);
+  });
+}
+
+async function mapPool<T, R>(
+  items: T[],
+  concurrency: number,
+  worker: (item: T, index: number) => Promise<R>,
+): Promise<R[]> {
+  const results = new Array<R>(items.length);
+  let next = 0;
+  async function run(): Promise<void> {
+    while (next < items.length) {
+      const index = next;
+      next += 1;
+      results[index] = await worker(items[index]!, index);
+    }
+  }
+  const runners = Array.from({ length: Math.min(concurrency, items.length) }, () => run());
+  await Promise.all(runners);
+  return results;
 }
 
 export function useComposerAttachments() {
@@ -140,7 +177,8 @@ export function useComposerAttachments() {
               size: slot.file.size,
               mimeType: slot.file.type || "image/*",
               kind: "image",
-              status: "parsing",
+              status: "uploading",
+              uploadProgress: 0,
             };
           }
           for (const slot of docSlots) {
@@ -150,7 +188,8 @@ export function useComposerAttachments() {
               size: slot.file.size,
               mimeType: slot.file.type || "application/octet-stream",
               kind: classifyAttachment(slot.file) === "video" ? "video" : "document",
-              status: "parsing",
+              status: "uploading",
+              uploadProgress: 0,
             };
           }
           return next;
@@ -158,12 +197,14 @@ export function useComposerAttachments() {
 
         for (const slot of imageSlots) {
           try {
+            patchAttachment(slot.id, { status: "uploading", uploadProgress: 50 });
             const compressed = await compressImageForChat(slot.file);
             patchAttachment(slot.id, {
               status: "ready",
               dataUrl: compressed.dataUrl,
               mimeType: compressed.mimeType,
               size: compressed.size,
+              uploadProgress: 100,
             });
           } catch (err) {
             const message = err instanceof Error ? err.message : "图片压缩失败";
@@ -174,28 +215,36 @@ export function useComposerAttachments() {
 
         if (docSlots.length === 0) return;
 
-        try {
-          const parsed = await parseRemoteFiles(docSlots.map((slot) => slot.file));
-          for (let i = 0; i < docSlots.length; i += 1) {
-            const slot = docSlots[i]!;
-            const row = parsed[i];
-            if (!row) {
-              patchAttachment(slot.id, { status: "error", errorText: "解析结果缺失" });
-              continue;
-            }
+        const outcomes = await mapPool(docSlots, PARSE_CONCURRENCY, async (slot) => {
+          try {
+            const row = await parseRemoteFile(
+              slot.file,
+              (percent) => {
+                patchAttachment(slot.id, { status: "uploading", uploadProgress: percent });
+              },
+              () => {
+                patchAttachment(slot.id, { status: "parsing", uploadProgress: 100 });
+              },
+            );
             patchAttachment(slot.id, {
               status: "ready",
               mimeType: row.mime_type,
               kind: row.kind,
               parsedText: row.parsed_text,
+              size: typeof row.size === "number" ? row.size : slot.file.size,
+              ...(row.attachment_id ? { attachmentId: row.attachment_id } : {}),
             });
-          }
-        } catch (err) {
-          const message = err instanceof Error ? err.message : "文件解析失败";
-          setError(message);
-          for (const slot of docSlots) {
+            return { ok: true as const };
+          } catch (err) {
+            const message = err instanceof Error ? err.message : "文件解析失败";
             patchAttachment(slot.id, { status: "error", errorText: message });
+            return { ok: false as const, message };
           }
+        });
+
+        const failures = outcomes.filter((item) => !item.ok);
+        if (failures.length === docSlots.length && failures[0] && !failures[0].ok) {
+          setError(failures[0].message);
         }
       })();
     },
@@ -210,6 +259,7 @@ export function useComposerAttachments() {
       kind: item.kind,
       ...(item.dataUrl ? { data_url: item.dataUrl } : {}),
       ...(item.parsedText ? { parsed_text: item.parsedText } : {}),
+      ...(item.attachmentId ? { attachment_id: item.attachmentId } : {}),
     }));
   }, [readyAttachments]);
 
