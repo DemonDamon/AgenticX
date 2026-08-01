@@ -14,12 +14,10 @@
  */
 
 import { stripEmptyAssistantMessages } from "../chat-completion-sanitize";
-import {
-  isCurrentDateTimeQuery,
-  withCurrentTimeContext,
-} from "../current-time";
+import { withCurrentTimeContext } from "../current-time";
 import { executeWebSearch, formatHits, type WebSearchHit, type WebSearchRuntimeConfig } from "./providers";
 import { resolveWebSearchConfig, type TenantWebSearchRow } from "./config";
+import { classifyWebSearchNeed } from "./search-necessity";
 
 export const WEB_SEARCH_TOOL = {
   type: "function",
@@ -43,6 +41,17 @@ export const WEB_SEARCH_SYSTEM_HINT =
   "系统已完成联网搜索，并将结果附在下方。请严格基于这些结果作答；事实句末用 [N] 标注来源编号。" +
   "例外：当前公历日期、星期、时刻必须以系统提示「当前时间」章节为准，禁止用搜索结果覆盖本机日期。" +
   "禁止声称无法联网；禁止输出任何工具调用 XML/标签（包括 minimax:tool_call、<invoke>、tool_call 等）。";
+
+/**
+ * Injected on search-skip turns so thinking models (Kimi-like) do not narrate
+ * "不需要复杂的功能调用" — the toggle stays on, but this turn needs no tools.
+ */
+export const TRIVIAL_TURN_SYSTEM_HINT =
+  "## 本轮说明\n" +
+  "用户本轮是寒暄、简单确认或无需外部检索的问题。请直接友好地回复。\n" +
+  "思考过程与回复中都不要提及工具、功能调用、联网搜索、function call、tool_call。\n";
+
+const TRIVIAL_TURN_MARKER = "## 本轮说明";
 
 /** @deprecated Kept for tests / compatibility; search-first path does not probe tools. */
 export const WEB_SEARCH_TOOL_CHOICE = {
@@ -153,6 +162,23 @@ export function extractLastUserQuery(messages: ChatMessage[]): string {
   return "";
 }
 
+/** Raw last-user text (attachment bodies NOT stripped) — for skip classification. */
+export function extractLastUserRawText(messages: ChatMessage[]): string {
+  for (let i = messages.length - 1; i >= 0; i -= 1) {
+    const msg = messages[i];
+    if (msg?.role !== "user") continue;
+    const text = textFromMessageContent(msg.content);
+    if (text) return text;
+  }
+  return "";
+}
+
+/** Escape hatch: set AGENTICX_WEB_SEARCH_ALWAYS=1 to restore unconditional search-first. */
+function webSearchAlwaysOn(): boolean {
+  const raw = process.env.AGENTICX_WEB_SEARCH_ALWAYS?.trim().toLowerCase();
+  return raw === "1" || raw === "true";
+}
+
 function stripWebSearchFlag<T extends Record<string, unknown>>(body: T): Omit<T, "agenticx_web_search"> {
   const { agenticx_web_search: _ignored, ...rest } = body;
   return rest;
@@ -196,6 +222,28 @@ export function withSearchContext(messages: ChatMessage[], hits: WebSearchHit[])
     return next;
   }
   return [{ role: "system", content: resultsBlock }, ...next];
+}
+
+/** Prepend the trivial-turn hint so skip-path reasoning stays Kimi-clean. */
+export function withTrivialTurnContext(messages: ChatMessage[]): ChatMessage[] {
+  const next = messages.map((m) => ({ ...m }));
+  if (
+    next[0]?.role === "system" &&
+    typeof next[0].content === "string" &&
+    next[0].content.includes(TRIVIAL_TURN_MARKER)
+  ) {
+    return next;
+  }
+  const block = TRIVIAL_TURN_SYSTEM_HINT.trimEnd();
+  if (next[0]?.role === "system") {
+    const existing = typeof next[0].content === "string" ? next[0].content : "";
+    next[0] = {
+      ...next[0],
+      content: existing ? `${block}\n\n${existing}` : block,
+    };
+    return next;
+  }
+  return [{ role: "system", content: block }, ...next];
 }
 
 function eventStreamResponse(stream: ReadableStream<Uint8Array>): Response {
@@ -463,13 +511,24 @@ export async function runWebSearchTurn(
 
   const query = extractLastUserQuery(originalMessages);
 
-  // Pure date/time questions must not search-first: SEO date pages are not a clock.
-  if (isCurrentDateTimeQuery(query)) {
+  // Before: only pure date/time questions short-circuited search-first.
+  // After: any self-contained turn (greeting / assistant meta / attachment-only /
+  // arithmetic / datetime) answers directly — matching Doubao / Kimi behavior where
+  // the toggle stays on but trivial turns do not pay an外网 round-trip.
+  const skip = webSearchAlwaysOn()
+    ? null
+    : classifyWebSearchNeed({
+        query,
+        rawQuery: extractLastUserRawText(originalMessages),
+      });
+  if (skip && skip.need === "skip") {
+    console.info(`[web-search] skipped search-first (reason=${skip.reason})`);
     try {
       const upstream = await callGatewayStream(deps, {
         ...rest,
         stream: true,
-        messages: withCurrentTimeContext(originalMessages),
+        // Hint first so thinking models do not narrate "无需功能调用".
+        messages: withTrivialTurnContext(withCurrentTimeContext(originalMessages)),
       });
       return pipeUpstreamSse(upstream, {});
     } catch (error) {
