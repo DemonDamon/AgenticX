@@ -1,4 +1,4 @@
-export type ComposerAttachmentStatus = "parsing" | "ready" | "error";
+export type ComposerAttachmentStatus = "uploading" | "parsing" | "ready" | "error";
 
 export type ComposerAttachmentKind = "image" | "document" | "video";
 
@@ -12,6 +12,10 @@ export type ComposerAttachment = {
   dataUrl?: string;
   parsedText?: string;
   errorText?: string;
+  /** 0-100, meaningful only while status === "uploading" */
+  uploadProgress?: number;
+  /** Set by parse API when original file is retained (P2). */
+  attachmentId?: string;
 };
 
 /** Max attachments per message (aligned with common product caps). */
