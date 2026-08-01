@@ -3,6 +3,7 @@
 import * as React from "react";
 import type { DeepResearchEvent } from "@agenticx/core-api";
 import { Button } from "@agenticx/ui";
+import { parseClarifyResumeResponse } from "../../utils/deep-research-clarify-resume";
 
 type ClarifyEvent = Extract<DeepResearchEvent, { type: "clarify" }>;
 
@@ -70,6 +71,7 @@ export function DeepResearchClarifyCard({
   const [custom, setCustom] = React.useState<Record<string, string>>({});
   const [submitting, setSubmitting] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
+  const [localTimedOut, setLocalTimedOut] = React.useState(false);
   const [collapsed, setCollapsed] = React.useState(!awaiting);
 
   React.useEffect(() => {
@@ -79,6 +81,7 @@ export function DeepResearchClarifyCard({
   if (clarifyEvents.length === 0) return null;
   const runId = clarifyEvents[0]!.runId;
   const savedAnswers = clarifyAnswers ?? {};
+  const effectivelyTimedOut = timedOut || localTimedOut;
   const showInteractive = awaiting;
 
   const resolvedLines = clarifyEvents.map((q) => {
@@ -105,14 +108,23 @@ export function DeepResearchClarifyCard({
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ runId, answers: payloadAnswers, skip }),
       });
-      if (!response.ok) {
-        const text = await response.text().catch(() => "");
-        throw new Error(text || `HTTP ${response.status}`);
+      const text = await response.text().catch(() => "");
+      const parsed = parseClarifyResumeResponse(response.status, text);
+      if (parsed.kind === "error") {
+        setError(parsed.message);
+        return;
       }
-      onSubmitted?.(payloadAnswers);
+      if (parsed.kind === "already_continued") {
+        // Server already timed out / continued — do not persist late answers as
+        // if they were applied; flip the card out of awaiting instead.
+        setLocalTimedOut(true);
+        onSubmitted?.({});
+      } else {
+        onSubmitted?.(payloadAnswers);
+      }
       setCollapsed(true);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "提交失败");
+    } catch {
+      setError("提交失败，请稍后重试");
     } finally {
       setSubmitting(false);
     }
@@ -120,7 +132,7 @@ export function DeepResearchClarifyCard({
 
   const statusLabel = showInteractive
     ? "等待确认"
-    : timedOut && !hasSavedAnswers
+    : effectivelyTimedOut && !hasSavedAnswers
       ? "超时后按默认假设继续"
       : "已收集信息";
 
@@ -150,7 +162,8 @@ export function DeepResearchClarifyCard({
           {showInteractive ? (
             <>
               <p className="mb-3 text-sm leading-5 text-muted-foreground">
-                我先快速确认一下调研方向，然后开始系统检索。
+                我先快速确认一下调研方向，然后开始系统检索。请在 5
+                分钟内确认；超时将按默认假设继续。
               </p>
               <div className="space-y-3">
                 {clarifyEvents.map((q) => (
@@ -231,7 +244,8 @@ export function DeepResearchClarifyCard({
                 <div key={`resolved-${index}`}>
                   <div className="text-sm leading-5 text-foreground">{row.question}</div>
                   <div className="mt-0.5 pl-2 text-sm leading-5 text-muted-foreground">
-                    {row.answer || (timedOut ? "（未回答，已按默认假设继续）" : "—")}
+                    {row.answer ||
+                      (effectivelyTimedOut ? "（未回答，已按默认假设继续）" : "—")}
                   </div>
                 </div>
               ))}

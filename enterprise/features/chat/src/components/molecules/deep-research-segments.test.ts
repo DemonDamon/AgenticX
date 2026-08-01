@@ -3,8 +3,24 @@ import type { DeepResearchEvent } from "@agenticx/core-api";
 import {
   buildDeepResearchSegments,
   collectDeepResearchDeliveryArtifacts,
+  deepResearchWaitingLabel,
   stripDeepResearchProgressFromContent,
 } from "./deep-research-segments";
+
+describe("deepResearchWaitingLabel", () => {
+  it("falls back to a startup label before any event lands", () => {
+    expect(deepResearchWaitingLabel([])).toBe("正在启动深度研究…");
+  });
+
+  it("surfaces the latest phase message while clarify/plan render no segment", () => {
+    const events: DeepResearchEvent[] = [
+      { type: "run_started", runId: "r1" },
+      { type: "phase", phase: "clarify", message: "正在判断是否需要澄清…" },
+    ];
+    expect(deepResearchWaitingLabel(events)).toBe("正在判断是否需要澄清…");
+    expect(buildDeepResearchSegments(events, "running")).toHaveLength(0);
+  });
+});
 
 describe("buildDeepResearchSegments", () => {
   it("interleaves narrative → clarify → tools → narrative → status instead of one dump", () => {
