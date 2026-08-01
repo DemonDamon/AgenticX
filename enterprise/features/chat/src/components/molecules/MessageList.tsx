@@ -720,7 +720,7 @@ export function MessageList({
                                   key={`${message.id}-${attachment.name}`}
                                   attachment={attachment}
                                   onPreview={
-                                    attachment.parsed_text?.trim()
+                                    attachment.attachment_id || attachment.parsed_text?.trim()
                                       ? () => openAttachmentPreview(attachment)
                                       : undefined
                                   }
@@ -737,10 +737,11 @@ export function MessageList({
                           </>
                         ) : null}
 
-                        {/* 用户图片/文档附件（合并在同一气泡内，非 Kimi 分栏样式） */}
+                        {/* 用户图片/文档附件（合并在同一气泡内） */}
                         {!userSplitBubbles && isUser && userHasAttachments ? (
                           <div className="mb-2 flex flex-wrap gap-2">
                             {userAttachments.map((attachment) =>
+
                               attachment.mime_type.startsWith("image/") && attachment.data_url ? (
                                 <img
                                   key={`${message.id}-${attachment.name}`}
@@ -761,7 +762,7 @@ export function MessageList({
                                   <span className="min-w-0 flex-1 truncate font-medium">
                                     {attachment.name}
                                   </span>
-                                  {attachment.parsed_text?.trim() ? (
+                                  {attachment.attachment_id || attachment.parsed_text?.trim() ? (
                                     <button
                                       type="button"
                                       onClick={(e) => {
