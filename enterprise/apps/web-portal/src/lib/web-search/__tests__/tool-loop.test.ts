@@ -1,11 +1,14 @@
 import { describe, expect, it, vi } from "vitest";
 import {
+  buildWebSearchQuery,
   compactHitsForModel,
   extractLastUserQuery,
+  isShortFollowUpQuery,
   pipeUpstreamSse,
   runWebSearchTurn,
   synthesizeTextSse,
   WEB_SEARCH_CONTEXT_SNIPPET_CHARS,
+  WEB_SEARCH_SYSTEM_HINT,
   withSearchContext,
 } from "../tool-loop";
 import type { WebSearchHit } from "../providers";
@@ -54,12 +57,47 @@ describe("web search tool loop", () => {
     ).toBe("总结一下");
   });
 
+  it("detects short follow-up slot fills vs full questions", () => {
+    expect(isShortFollowUpQuery("广州南沙")).toBe(true);
+    expect(isShortFollowUpQuery("广州南沙天气如何")).toBe(false);
+  });
+
+  it("builds contextual search query for multi-turn slot fill", () => {
+    expect(
+      buildWebSearchQuery([
+        { role: "user", content: "今天天气怎么样" },
+        { role: "assistant", content: "请问哪个城市？" },
+        { role: "user", content: "广州南沙" },
+      ]),
+    ).toBe("广州南沙 今天天气怎么样");
+
+    expect(
+      buildWebSearchQuery([{ role: "user", content: "广州南沙天气如何" }]),
+    ).toBe("广州南沙天气如何");
+
+    // Prior turn was greeting — do not splice into search keywords.
+    expect(
+      buildWebSearchQuery([
+        { role: "user", content: "你好" },
+        { role: "assistant", content: "你好！" },
+        { role: "user", content: "广州南沙" },
+      ]),
+    ).toBe("广州南沙");
+  });
+
+  it("grounded hint forbids channel-list answers", () => {
+    expect(WEB_SEARCH_SYSTEM_HINT).toContain("推荐查询渠道");
+    expect(WEB_SEARCH_SYSTEM_HINT).toMatch(/禁止声称无法联网|仍禁止声称无法联网/);
+    expect(WEB_SEARCH_SYSTEM_HINT).toContain("可核验事实");
+  });
+
   it("injects search hits into system context without tools", () => {
     const hits: WebSearchHit[] = [{ title: "T", url: "https://example.com", snippet: "s" }];
     const msgs = withSearchContext([{ role: "user", content: "q" }], hits);
     expect(msgs[0]?.role).toBe("system");
     expect(String(msgs[0]?.content)).toContain("https://example.com");
     expect(String(msgs[0]?.content)).toContain("禁止输出任何工具调用");
+    expect(String(msgs[0]?.content)).toContain("推荐查询渠道");
   });
 
   it("runs server-side search first and strips agenticx_web_search / tools on final stream", async () => {
@@ -223,6 +261,42 @@ describe("web search tool loop", () => {
     const text = await readText(res);
     expect(text).toContain("联网搜索暂不可用");
     expect(text).toContain("fallback");
+  });
+
+  it("searches with contextual query when user fills a slot across turns", async () => {
+    const executeSearch = vi.fn(async (q: string) => [
+      { title: "南沙天气", url: "https://weather.example/nansha", snippet: "气温 24~30℃" },
+    ]);
+    const fetchImpl = vi.fn(async () =>
+      sseResponse('data: {"choices":[{"delta":{"content":"南沙今天大雨"}}]}\n\ndata: [DONE]\n\n'),
+    );
+
+    await runWebSearchTurn(
+      {
+        model: "m",
+        messages: [
+          { role: "user", content: "今天天气怎么样" },
+          { role: "assistant", content: "请问哪个城市？" },
+          { role: "user", content: "广州南沙" },
+        ],
+        agenticx_web_search: true,
+      },
+      {
+        url: "http://gateway.test/v1/chat/completions",
+        headers: { authorization: "Bearer t" },
+        fetchImpl: fetchImpl as unknown as typeof fetch,
+        loadTenantConfig: async () => ({
+          enabled: true,
+          provider: "duckduckgo",
+          apiKey: "",
+          maxResults: 5,
+        }),
+        executeSearch,
+      },
+    );
+
+    expect(executeSearch).toHaveBeenCalledTimes(1);
+    expect(executeSearch.mock.calls[0]?.[0]).toBe("广州南沙 今天天气怎么样");
   });
 
   it("skips web search for greetings", async () => {
