@@ -78,6 +78,13 @@
       "when": 1785322028584,
       "tag": "0010_chat_history_operations",
       "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "5",
+      "when": 1785600000001,
+      "tag": "0011_enterprise_chat_attachments",
+      "breakpoints": true
     }
   ]
 }

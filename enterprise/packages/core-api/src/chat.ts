@@ -25,6 +25,8 @@ export type ChatMessageAttachment = {
   /** Extracted plain text for document Q&A. */
   parsed_text?: string;
   kind?: "image" | "document" | "video";
+  /** Original-file blob id in enterprise_chat_attachments (when retained). */
+  attachment_id?: string;
 };
 
 /** Web-search hit attached to an assistant message (portal BFF). */
