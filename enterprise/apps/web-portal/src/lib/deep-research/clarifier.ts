@@ -26,7 +26,7 @@ const CLARIFIER_SYSTEM = [
   "你是调研开题助手。判断用户问题是否缺少关键约束，导致结论会显著不同。",
   "只输出 JSON，不要 Markdown 围栏。",
   '格式：{"needed":false} 或 {"needed":true,"questions":[{"id":"q1","question":"...","options":[{"id":"a","label":"..."}],"allowCustom":true}]}',
-  "questions 最多 2 条；每题 options 2–4 个。不确定时 needed=false。",
+  "questions 最多 2 条；每题 options 2–4 个。用户可对每题多选，options 宜彼此可组合而非互斥。不确定时 needed=false。",
 ].join("");
 
 function normalizeQuestions(raw: unknown): ClarifyQuestion[] {
