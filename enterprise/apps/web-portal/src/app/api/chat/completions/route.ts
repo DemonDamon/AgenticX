@@ -6,6 +6,7 @@ import { isChatSessionOwned } from "../../../../lib/chat-history";
 import { toChatHistoryContext } from "../../../../lib/chat-history-http";
 import { listAvailableModelsForUser } from "../../../../lib/admin-providers-reader";
 import { stripEmptyAssistantMessages } from "../../../../lib/chat-completion-sanitize";
+import { withCurrentTimeContext } from "../../../../lib/current-time";
 import { runWebSearchTurn } from "../../../../lib/web-search/tool-loop";
 import { loadTenantWebSearchConfig } from "../../../../lib/web-search/tenant-config";
 import { runDeepResearchTurn } from "../../../../lib/deep-research/orchestrator";
@@ -13,11 +14,13 @@ import { defaultArtifactStore } from "../../../../lib/deep-research/artifact-sto
 
 function withSanitizedMessages(body: Record<string, unknown>): Record<string, unknown> {
   if (!Array.isArray(body.messages)) return body;
+  const cleaned = stripEmptyAssistantMessages(
+    body.messages as Array<{ role: string; content?: string | null; tool_calls?: unknown }>,
+  );
   return {
     ...body,
-    messages: stripEmptyAssistantMessages(
-      body.messages as Array<{ role?: unknown; content?: unknown; tool_calls?: unknown }>,
-    ),
+    // Direct (non-web-search) turns still need clock grounding — same as Desktop/Kimi.
+    messages: withCurrentTimeContext(cleaned),
   };
 }
 
