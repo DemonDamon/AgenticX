@@ -82,6 +82,7 @@ type Tracker struct {
 	usageCache           map[string]int64
 	budgetAlertSink      BudgetAlertSink
 	poolCounter          PoolCounter
+	tokenWindowCounter   PoolCounter
 	requestCounter       *RequestCountCounter
 }
 
@@ -99,16 +100,17 @@ func NewTracker(cfgPath, usagePath string, handle *database.Handle) *Tracker {
 		poolUsagePath = DefaultPoolUsagePath()
 	}
 	return &Tracker{
-		cfgPath:         cfgPath,
-		usagePath:       usagePath,
-		poolUsagePath:   poolUsagePath,
-		remoteURL:       strings.TrimSpace(os.Getenv("GATEWAY_REMOTE_QUOTA_CONFIG_URL")),
-		budgetCfgPath:   budgetCfgPath,
-		budgetUsagePath: budgetUsagePath,
-		budgetRemoteURL: strings.TrimSpace(os.Getenv("GATEWAY_REMOTE_BUDGET_CONFIG_URL")),
-		usageCache:      map[string]int64{},
-		poolCounter:     newPoolCounter(handle, poolUsagePath),
-		requestCounter:  newRequestCountCounter(handle, poolUsagePath),
+		cfgPath:            cfgPath,
+		usagePath:          usagePath,
+		poolUsagePath:      poolUsagePath,
+		remoteURL:          strings.TrimSpace(os.Getenv("GATEWAY_REMOTE_QUOTA_CONFIG_URL")),
+		budgetCfgPath:      budgetCfgPath,
+		budgetUsagePath:    budgetUsagePath,
+		budgetRemoteURL:    strings.TrimSpace(os.Getenv("GATEWAY_REMOTE_BUDGET_CONFIG_URL")),
+		usageCache:         map[string]int64{},
+		poolCounter:        newPoolCounter(handle, poolUsagePath),
+		tokenWindowCounter: newTokenWindowCounter(handle, poolUsagePath),
+		requestCounter:     newRequestCountCounter(handle, poolUsagePath),
 	}
 }
 

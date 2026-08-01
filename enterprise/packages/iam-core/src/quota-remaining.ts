@@ -122,7 +122,7 @@ async function readPoolUsed(
   }
   try {
     if (resolveDatabaseConfig().dialect === "mysql") {
-      return await readMysqlQuotaUsage(tenantId, scopeType, scopeId, period);
+      return (await readMysqlQuotaUsage(tenantId, scopeType, scopeId, period)) ?? 0;
     }
     const db = getIamDb();
     const row = await db
@@ -154,7 +154,8 @@ async function readTokenWindowUsed(
   }
   try {
     if (resolveDatabaseConfig().dialect === "mysql") {
-      return await readMysqlQuotaUsage(tenantId, scopeType, scopeId, period);
+      const used = await readMysqlQuotaUsage(tenantId, scopeType, scopeId, period);
+      return used ?? readLocalPoolUsed(tenantId, scopeType, scopeId, period);
     }
     const db = getIamDb();
     const row = await db
@@ -169,7 +170,8 @@ async function readTokenWindowUsed(
         ),
       )
       .limit(1);
-    return row[0]?.usedTotal ?? 0;
+    if (row[0]?.usedTotal != null) return row[0].usedTotal;
+    return readLocalPoolUsed(tenantId, scopeType, scopeId, period);
   } catch {
     return readLocalPoolUsed(tenantId, scopeType, scopeId, period);
   }

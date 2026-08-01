@@ -140,7 +140,7 @@ func (t *Tracker) readUsedForRule(rule Rule, ctx RequestContext, period string) 
 func (t *Tracker) readWindowUsed(window QuotaWindow, ctx RequestContext, period string, rule Rule) int64 {
 	switch window {
 	case QuotaWindowDay, QuotaWindowWeek:
-		if t.poolCounter == nil {
+		if t.tokenWindowCounter == nil {
 			return 0
 		}
 		kind := "day"
@@ -148,7 +148,7 @@ func (t *Tracker) readWindowUsed(window QuotaWindow, ctx RequestContext, period 
 			kind = "week"
 		}
 		key := tokenWindowPoolKey(kind, ctx, period)
-		used, err := t.poolCounter.Current(key)
+		used, err := t.tokenWindowCounter.Current(key)
 		if err != nil {
 			return 0
 		}

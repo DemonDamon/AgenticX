@@ -54,6 +54,27 @@ type PoolCounter interface {
 	Current(key PoolKey) (int64, error)
 }
 
+type fallbackPoolCounter struct {
+	primary  PoolCounter
+	fallback PoolCounter
+}
+
+func (c *fallbackPoolCounter) Add(key PoolKey, delta int64, event string, requestID string) (int64, error) {
+	used, err := c.primary.Add(key, delta, event, requestID)
+	if err == nil {
+		return used, nil
+	}
+	return c.fallback.Add(key, delta, event, requestID)
+}
+
+func (c *fallbackPoolCounter) Current(key PoolKey) (int64, error) {
+	used, err := c.primary.Current(key)
+	if err == nil {
+		return used, nil
+	}
+	return c.fallback.Current(key)
+}
+
 type poolUsageRow struct {
 	TenantID  string `json:"tenant_id"`
 	ScopeType string `json:"scope_type"`
@@ -116,6 +137,30 @@ func newPoolCounter(handle *database.Handle, usagePath string) PoolCounter {
 		usagePath:  usagePath,
 		usageCache: map[string]int64{},
 	}
+}
+
+// newTokenWindowCounter creates the per-identity day/week usage ledger. Unlike
+// shared quota pools, this ledger is needed for portal metering even when the
+// optional shared-pool enforcement feature is disabled.
+func newTokenWindowCounter(handle *database.Handle, usagePath string) PoolCounter {
+	backend := strings.ToLower(strings.TrimSpace(os.Getenv("GATEWAY_QUOTA_POOL_BACKEND")))
+	preferDatabase := backend == "pg" || backend == "postgres" ||
+		backend == "postgresql" || backend == "mysql" ||
+		(backend == "" && handle != nil && handle.DB != nil)
+	local := &LocalPoolCounter{
+		usagePath:  usagePath,
+		usageCache: map[string]int64{},
+	}
+	if preferDatabase {
+		if handle != nil && handle.DB != nil {
+			return &fallbackPoolCounter{
+				primary:  &PGPoolCounter{database: handle},
+				fallback: local,
+			}
+		}
+		log.Printf("[quota] token window database backend requested but DATABASE_URL unavailable, falling back to local counter")
+	}
+	return local
 }
 
 // LocalPoolCounter stores shared pool usage in a JSON file (dev / single replica).

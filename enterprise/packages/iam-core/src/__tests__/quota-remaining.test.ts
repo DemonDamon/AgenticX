@@ -269,4 +269,37 @@ describe("quota-remaining", () => {
     });
     expect(daily.unlimited).toBe(true);
   });
+
+  it("keeps recorded day usage visible when the day limit is unlimited", async () => {
+    delete process.env.DATABASE_URL;
+    const day = new Date().toISOString().slice(0, 10);
+    fs.writeFileSync(
+      path.join(tmpDir, "quota-pool-usage.json"),
+      JSON.stringify([
+        {
+          tenant_id: "tenant-test",
+          scope_type: "tok_day",
+          scope_id: "user::u1",
+          period: day,
+          used_total: 321,
+        },
+      ]),
+    );
+    const cfg: QuotaConfigSnapshot = {
+      defaults: { role: { staff: { monthlyTokens: 0, dailyTokens: 0 } }, model: {} },
+      users: {},
+      departments: {},
+    };
+    const daily = await getQuotaWindowUsageForScope({
+      tenantId: "tenant-test",
+      scope: "user",
+      scopeId: "u1",
+      role: "staff",
+      window: "day",
+      configOverride: cfg,
+    });
+    expect(daily.unlimited).toBe(true);
+    expect(daily.used).toBe(321);
+    expect(daily.remaining).toBeNull();
+  });
 });
