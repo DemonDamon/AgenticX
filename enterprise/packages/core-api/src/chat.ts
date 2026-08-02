@@ -43,7 +43,7 @@ export type DeepResearchEvent =
   | { type: "run_started"; runId: string }
   | {
       type: "phase";
-      phase: "clarify" | "plan" | "lanes" | "synthesize" | "done";
+      phase: "recon" | "clarify" | "plan" | "lanes" | "reflect" | "synthesize" | "done";
       message: string;
     }
   | {
@@ -68,6 +68,14 @@ export type DeepResearchEvent =
       bytes: number;
     }
   | { type: "clarify_timeout"; runId: string }
+  | { type: "reflection"; gaps: string[] }
+  | {
+      type: "research_stats";
+      queriesPlanned: number;
+      urlsDiscovered: number;
+      sourcesSelected: number;
+      pagesFetched: number;
+    }
   /** Short assistant prose between workbench steps (not part of final report content). */
   | { type: "narrative"; text: string };
 

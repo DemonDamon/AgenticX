@@ -20,6 +20,35 @@ describe("deepResearchWaitingLabel", () => {
     expect(deepResearchWaitingLabel(events)).toBe("正在判断是否需要澄清…");
     expect(buildDeepResearchSegments(events, "running")).toHaveLength(0);
   });
+
+  it("surfaces recon cold-start as a visible search tools card before clarify", () => {
+    const events: DeepResearchEvent[] = [
+      { type: "run_started", runId: "r1" },
+      { type: "narrative", text: "我先快速检索最新公开资料，校准调研前提。" },
+      { type: "phase", phase: "recon", message: "正在快速侦查最新现状…" },
+      { type: "phase", phase: "lanes", message: "开题冷启动检索…" },
+      {
+        type: "lane_started",
+        laneId: "recon-cold-start",
+        title: "deepseek v4 核心技术点",
+        index: 1,
+        total: 1,
+      },
+      {
+        type: "lane_progress",
+        laneId: "recon-cold-start",
+        message: "已收集 3 个来源",
+        sourcesCollected: 3,
+      },
+      { type: "lane_done", laneId: "recon-cold-start", status: "ok" },
+      { type: "narrative", text: "现状已校准，再确认一下调研方向。" },
+    ];
+    expect(deepResearchWaitingLabel(events)).toBe("开题冷启动检索…");
+    const segments = buildDeepResearchSegments(events, "running");
+    expect(segments.map((s) => s.kind)).toEqual(["narrative", "tools", "narrative"]);
+    const tools = segments[1];
+    expect(tools && tools.kind === "tools" ? tools.title : "").toContain("开题冷启动");
+  });
 });
 
 describe("buildDeepResearchSegments", () => {
@@ -155,6 +184,33 @@ describe("finalizeToolsCardTitle via completed segments", () => {
     const segments = buildDeepResearchSegments(events, "running");
     const tools = segments.find((s) => s.kind === "tools");
     expect(tools && tools.kind === "tools" ? tools.title : "").toContain("正在并行检索");
+  });
+});
+
+describe("reflection / research_stats segments", () => {
+  it("renders reflection gaps and stats label", () => {
+    const events: DeepResearchEvent[] = [
+      {
+        type: "reflection",
+        gaps: ["缺官方论文", "单一来源未交叉验证"],
+      },
+      {
+        type: "research_stats",
+        queriesPlanned: 12,
+        urlsDiscovered: 40,
+        sourcesSelected: 8,
+        pagesFetched: 5,
+      },
+    ];
+    const segments = buildDeepResearchSegments(events, "running");
+    expect(segments.map((s) => s.kind)).toEqual(["reflection", "stats"]);
+    const reflection = segments[0];
+    expect(reflection && reflection.kind === "reflection" ? reflection.gaps : []).toEqual([
+      "缺官方论文",
+      "单一来源未交叉验证",
+    ]);
+    const stats = segments[1];
+    expect(stats && stats.kind === "stats" ? stats.label : "").toContain("检索式 12 条");
   });
 });
 
