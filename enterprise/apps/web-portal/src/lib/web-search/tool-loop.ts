@@ -41,9 +41,15 @@ export const WEB_SEARCH_SYSTEM_HINT =
   "系统已完成联网搜索，并将结果附在下方。请严格基于这些结果作答；事实句末用 [N] 标注来源编号。" +
   "必须直接提炼并给出可核验事实（如天气状况、气温、湿度、风力、时间、价格、版本号等），用简洁结构化表述回复用户。" +
   "禁止只罗列网站名称、禁止让用户自行打开链接查看；禁止输出「推荐查询渠道」式清单来代替答案。" +
+  "禁止以「建议直接访问某网站获取详情」「请自行查看某链接」等说法收尾来代替回答——" +
+  "即使某些字段（如精确实时数值）片段中未显示，也要先给出片段中能找到的最接近事实" +
+  "（如当日/前一日预报的天气状况、温度区间、风力等级等），并直接标注「此为预报数据，" +
+  "非实时更新」之类的不确定性说明，而不是让用户自己去查。" +
   "若片段不足以完全回答，先基于已有信息尽力汇总，并明确哪些字段不确定；仍禁止声称无法联网。" +
   "例外：当前公历日期、星期、时刻必须以系统提示「当前时间」章节为准，禁止用搜索结果覆盖本机日期。" +
-  "禁止输出任何工具调用 XML/标签（包括 minimax:tool_call、<invoke>、tool_call 等）。";
+  "禁止输出任何工具调用 XML/标签（包括 minimax:tool_call、<invoke>、tool_call 等）。" +
+  "部分结果附带「发布时间」。若其与系统提示的当前时间相差较大（例如非同一天的天气、非近期的行情），" +
+  "须明确标注该数据的日期并说明可能已过时，禁止把历史数据当作今日事实陈述。";
 
 /**
  * Injected on search-skip turns so thinking models (Kimi-like) do not narrate
@@ -246,6 +252,7 @@ export function compactHitsForModel(hits: WebSearchHit[]): WebSearchHit[] {
     title: hit.title,
     url: hit.url,
     snippet: truncateSnippet(hit.snippet, WEB_SEARCH_CONTEXT_SNIPPET_CHARS),
+    publishedAt: hit.publishedAt,
   }));
 }
 

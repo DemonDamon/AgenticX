@@ -91,6 +91,27 @@ describe("web search tool loop", () => {
     expect(WEB_SEARCH_SYSTEM_HINT).toContain("可核验事实");
   });
 
+  it("grounded hint forbids ending with 'please visit the site yourself'", () => {
+    expect(WEB_SEARCH_SYSTEM_HINT).toContain("建议直接访问某网站获取详情");
+    expect(WEB_SEARCH_SYSTEM_HINT).toContain("而不是让用户自己去查");
+  });
+
+  it("grounded hint requires handling stale publishedAt", () => {
+    expect(WEB_SEARCH_SYSTEM_HINT).toContain("发布时间");
+  });
+
+  it("compactHitsForModel preserves publishedAt", () => {
+    const compacted = compactHitsForModel([
+      {
+        title: "t",
+        url: "https://a",
+        snippet: "s",
+        publishedAt: "2026-08-02T00:00:00+08:00",
+      },
+    ]);
+    expect(compacted[0]?.publishedAt).toBe("2026-08-02T00:00:00+08:00");
+  });
+
   it("injects search hits into system context without tools", () => {
     const hits: WebSearchHit[] = [{ title: "T", url: "https://example.com", snippet: "s" }];
     const msgs = withSearchContext([{ role: "user", content: "q" }], hits);

@@ -99,6 +99,10 @@ async function curlFetchWithBody(
   signal?: AbortSignal | null,
 ): Promise<Response> {
   const parsed = new URL(url);
+  const declaredType = (headers["content-type"] ?? headers["Content-Type"] ?? "").toLowerCase();
+  // JSON APIs (Bocha, Tavily) reject form-encoded bodies with HTTP 415, so their
+  // content-type must survive; only search forms may fall back to curl's `-d` default.
+  const isFormBody = !declaredType || declaredType.includes("application/x-www-form-urlencoded");
   return new Promise((resolve, reject) => {
     const args = [
       "-sS",
@@ -120,11 +124,11 @@ async function curlFetchWithBody(
       if (key === "content-length") continue;
       // Let curl set form content-type when using -d; an explicit type + --data-binary
       // has been observed to trigger DuckDuckGo HTTP 202 empty SERP pages.
-      if (bodyBuf && key === "content-type") continue;
+      if (bodyBuf && isFormBody && key === "content-type") continue;
       args.push("-H", `${k}: ${v}`);
     }
     // Prefer -d (application/x-www-form-urlencoded) over --data-binary for search forms.
-    if (bodyBuf) args.push("-d", "@-");
+    if (bodyBuf) args.push(isFormBody ? "-d" : "--data-binary", "@-");
     args.push(url);
 
     const child = spawn("curl", args, { env: process.env });
