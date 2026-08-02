@@ -9,7 +9,8 @@ export type WebSearchSkipReason =
   | "greeting" // 寒暄、道谢、告别、确认
   | "assistant_meta" // 问助手身份/能力
   | "attachment_only" // 只让处理已注入的附件内容
-  | "arithmetic"; // 纯算式
+  | "arithmetic" // 纯算式
+  | "referential_no_entity"; // 指代追问但历史消解不出实体（由 tool-loop 构造）
 
 export type WebSearchNeed =
   | { need: "search" }

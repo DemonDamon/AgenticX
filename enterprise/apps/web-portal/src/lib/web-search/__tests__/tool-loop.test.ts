@@ -100,6 +100,18 @@ describe("web search tool loop", () => {
     expect(WEB_SEARCH_SYSTEM_HINT).toContain("发布时间");
   });
 
+  it("grounded hint scopes [N] to current turn and allows off-topic escape", () => {
+    expect(WEB_SEARCH_SYSTEM_HINT).toContain("仅对应本轮搜索结果");
+    expect(WEB_SEARCH_SYSTEM_HINT).toContain("与问题无关");
+    const msgs = withSearchContext(
+      [{ role: "user", content: "q" }],
+      [{ title: "T", url: "https://example.com", snippet: "s" }],
+    );
+    const system = String(msgs[0]?.content);
+    expect(system).toContain("仅对应本轮搜索结果");
+    expect(system).toContain("与问题无关");
+  });
+
   it("compactHitsForModel preserves publishedAt", () => {
     const compacted = compactHitsForModel([
       {
@@ -607,5 +619,174 @@ describe("web search tool loop", () => {
     expect(sources.slice(0, k).every((s) => s.usedByModel === true)).toBe(true);
     expect(sources.slice(k).every((s) => s.usedByModel === false)).toBe(true);
     expect(sources.length).toBe(hits.length);
+  });
+
+  it("resolves referential follow-up entity into the search query", async () => {
+    const executeSearch = vi.fn(async (q: string) => [
+      { title: "宗主梗", url: "https://ex.com/zongzhu", snippet: "蔡徐坤 宗主" },
+    ]);
+    const fetchImpl = vi.fn(async () =>
+      sseResponse('data: {"choices":[{"delta":{"content":"答"}}]}\n\ndata: [DONE]\n\n'),
+    );
+
+    await runWebSearchTurn(
+      {
+        model: "m",
+        messages: [
+          { role: "user", content: "你认识宗主吗" },
+          { role: "assistant", content: '百科式回答。' },
+          { role: "user", content: "我说的是最近比较活人的宗主" },
+          {
+            role: "assistant",
+            content: '根据搜索结果，最近活跃的应该是指**蔡徐坤**。[8]',
+          },
+          { role: "user", content: "他为什么被封为宗主呢" },
+        ],
+        agenticx_web_search: true,
+      },
+      {
+        url: "http://gateway.test/v1/chat/completions",
+        headers: { authorization: "Bearer t" },
+        fetchImpl: fetchImpl as unknown as typeof fetch,
+        loadTenantConfig: async () => ({
+          enabled: true,
+          provider: "duckduckgo",
+          apiKey: "",
+          maxResults: 5,
+        }),
+        executeSearch,
+      },
+    );
+
+    expect(executeSearch).toHaveBeenCalledTimes(1);
+    expect(String(executeSearch.mock.calls[0]?.[0])).toContain("蔡徐坤");
+  });
+
+  it("skips search when referential follow-up has no resolvable entity", async () => {
+    const bodies: unknown[] = [];
+    const executeSearch = vi.fn(async () => []);
+    const fetchImpl = vi.fn(async (_url: string, init?: RequestInit) => {
+      bodies.push(JSON.parse(String(init?.body ?? "{}")));
+      return sseResponse('data: {"choices":[{"delta":{"content":"基于上下文"}}]}\n\ndata: [DONE]\n\n');
+    });
+
+    await runWebSearchTurn(
+      {
+        model: "m",
+        messages: [
+          { role: "user", content: "你认识宗主吗" },
+          { role: "assistant", content: "这是一个很宽泛的称呼，没有具体人名。" },
+          { role: "user", content: "他为什么被封为宗主呢" },
+        ],
+        agenticx_web_search: true,
+      },
+      {
+        url: "http://gateway.test/v1/chat/completions",
+        headers: { authorization: "Bearer t" },
+        fetchImpl: fetchImpl as unknown as typeof fetch,
+        loadTenantConfig: async () => ({
+          enabled: true,
+          provider: "duckduckgo",
+          apiKey: "",
+          maxResults: 5,
+        }),
+        executeSearch,
+      },
+    );
+
+    expect(executeSearch).not.toHaveBeenCalled();
+    const body = bodies[0] as { messages?: Array<{ role?: string; content?: string }> };
+    const system = String(body.messages?.[0]?.content ?? "");
+    expect(system).not.toContain("联网搜索结果");
+  });
+
+  it("AGENTICX_WEB_SEARCH_ALWAYS still searches referential follow-ups without entity", async () => {
+    const prev = process.env.AGENTICX_WEB_SEARCH_ALWAYS;
+    process.env.AGENTICX_WEB_SEARCH_ALWAYS = "1";
+    try {
+      const executeSearch = vi.fn(async (q: string) => [
+        { title: "T", url: "https://ex.com/t", snippet: String(q) },
+      ]);
+      const fetchImpl = vi.fn(async () =>
+        sseResponse('data: {"choices":[{"delta":{"content":"forced"}}]}\n\ndata: [DONE]\n\n'),
+      );
+
+      await runWebSearchTurn(
+        {
+          model: "m",
+          messages: [
+            { role: "user", content: "你认识宗主吗" },
+            { role: "assistant", content: "这是一个很宽泛的称呼，没有具体人名。" },
+            { role: "user", content: "他为什么被封为宗主呢" },
+          ],
+          agenticx_web_search: true,
+        },
+        {
+          url: "http://gateway.test/v1/chat/completions",
+          headers: { authorization: "Bearer t" },
+          fetchImpl: fetchImpl as unknown as typeof fetch,
+          loadTenantConfig: async () => ({
+            enabled: true,
+            provider: "duckduckgo",
+            apiKey: "",
+            maxResults: 5,
+          }),
+          executeSearch,
+        },
+      );
+
+      expect(executeSearch).toHaveBeenCalledTimes(1);
+    } finally {
+      if (prev === undefined) delete process.env.AGENTICX_WEB_SEARCH_ALWAYS;
+      else process.env.AGENTICX_WEB_SEARCH_ALWAYS = prev;
+    }
+  });
+
+  it("strips prior assistant think blocks and citation indices before upstream", async () => {
+    const THINK_OPEN = "<" + "think" + ">";
+    const THINK_CLOSE = "<" + "/" + "think" + ">";
+    const bodies: Array<{ messages?: Array<{ role?: string; content?: string }> }> = [];
+    const fetchImpl = vi.fn(async (_url: string, init?: RequestInit) => {
+      bodies.push(JSON.parse(String(init?.body ?? "{}")));
+      return sseResponse('data: {"choices":[{"delta":{"content":"ok"}}]}\n\ndata: [DONE]\n\n');
+    });
+
+    await runWebSearchTurn(
+      {
+        model: "m",
+        messages: [
+          { role: "user", content: "你认识宗主吗" },
+          {
+            role: "assistant",
+            content: `${THINK_OPEN}长推理${THINK_CLOSE}答案提到**蔡徐坤**[8]`,
+          },
+          { role: "user", content: "他为什么被封为宗主呢" },
+        ],
+        agenticx_web_search: true,
+      },
+      {
+        url: "http://gateway.test/v1/chat/completions",
+        headers: { authorization: "Bearer t" },
+        fetchImpl: fetchImpl as unknown as typeof fetch,
+        loadTenantConfig: async () => ({
+          enabled: true,
+          provider: "duckduckgo",
+          apiKey: "",
+          maxResults: 5,
+        }),
+        executeSearch: async () => [
+          { title: "T", url: "https://ex.com/t", snippet: "蔡徐坤 宗主梗" },
+        ],
+      },
+    );
+
+    const historyAssistant = bodies[0]?.messages?.find(
+      (m) => m.role === "assistant" && String(m.content).includes("蔡徐坤"),
+    );
+    expect(historyAssistant).toBeTruthy();
+    const content = String(historyAssistant?.content);
+    expect(content).not.toContain(THINK_OPEN);
+    expect(content).not.toContain("[8]");
+    expect(content).toContain("蔡徐坤");
   });
 });
