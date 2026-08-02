@@ -34,6 +34,8 @@ export type WebSearchSource = {
   title: string;
   url: string;
   snippet: string;
+  /** True when this hit was injected into the model prompt for the turn. */
+  usedByModel?: boolean;
 };
 
 /** Deep-research workbench state attached to an assistant message. */

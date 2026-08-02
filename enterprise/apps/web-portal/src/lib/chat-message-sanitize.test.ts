@@ -144,6 +144,33 @@ describe("sanitizeInboundMessages", () => {
     expect(messages[0]?.web_search_sources).toHaveLength(1);
   });
 
+  it("preserves usedByModel on web_search_sources", () => {
+    const messages = sanitizeInboundMessages(SESSION, TENANT, USER, [
+      {
+        id: "01HYAAAAAAAAAAAAAAAAAAAAA9",
+        role: "assistant",
+        content: "答案 [1]",
+        created_at: "2026-08-02T12:00:00.000Z",
+        web_search_sources: [
+          {
+            title: "Used",
+            url: "https://example.com/used",
+            snippet: "snippet",
+            usedByModel: true,
+          },
+          {
+            title: "Unused",
+            url: "https://example.com/unused",
+            snippet: "snippet",
+            usedByModel: false,
+          },
+        ],
+      },
+    ]);
+    expect(messages[0]?.web_search_sources?.[0]?.usedByModel).toBe(true);
+    expect(messages[0]?.web_search_sources?.[1]?.usedByModel).toBe(false);
+  });
+
   it("keeps valid attachment_id and drops invalid ones without throwing", () => {
     const messages = sanitizeInboundMessages(SESSION, TENANT, USER, [
       {

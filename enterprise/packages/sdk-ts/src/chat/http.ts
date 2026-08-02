@@ -194,7 +194,12 @@ export class HttpChatClient implements ChatClient {
           let chunk: {
             choices?: Array<{ delta?: { content?: string }; finish_reason?: string | null }>;
             agenticx_usage?: { input_tokens?: number; output_tokens?: number; total_tokens?: number };
-            agenticx_web_search_sources?: Array<{ title?: string; url?: string; snippet?: string }>;
+            agenticx_web_search_sources?: Array<{
+              title?: string;
+              url?: string;
+              snippet?: string;
+              usedByModel?: boolean;
+            }>;
             agenticx_deep_research_event?: DeepResearchEvent;
             usage?: { prompt_tokens?: number; completion_tokens?: number; total_tokens?: number };
             error?: { code?: string; message?: string };
@@ -242,11 +247,21 @@ export class HttpChatClient implements ChatClient {
             yield {
               requestId,
               done: false,
-              webSearchSources: chunk.agenticx_web_search_sources.map((item) => ({
-                title: String(item.title ?? "").trim() || item.url || "Untitled",
-                url: String(item.url ?? "").trim(),
-                snippet: String(item.snippet ?? "").trim(),
-              })).filter((item) => item.url),
+              webSearchSources: chunk.agenticx_web_search_sources
+                .map((item) => {
+                  const title = String(item.title ?? "").trim() || item.url || "Untitled";
+                  const url = String(item.url ?? "").trim();
+                  const snippet = String(item.snippet ?? "").trim();
+                  const usedByModel =
+                    item.usedByModel === true ? true : item.usedByModel === false ? false : undefined;
+                  return {
+                    title,
+                    url,
+                    snippet,
+                    ...(usedByModel === undefined ? {} : { usedByModel }),
+                  };
+                })
+                .filter((item) => item.url),
             };
             continue;
           }

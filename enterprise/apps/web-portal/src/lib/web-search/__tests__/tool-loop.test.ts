@@ -506,4 +506,106 @@ describe("web search tool loop", () => {
     const compacted = compactHitsForModel([{ title: "T", url: "https://ex.com", snippet: long }]);
     expect(compacted[0]?.snippet.length).toBeLessThanOrEqual(WEB_SEARCH_CONTEXT_SNIPPET_CHARS);
   });
+
+  it("injects more than 10 hits for large-context models (AC-5)", async () => {
+    const bodies: Array<{ messages?: Array<{ role?: string; content?: string | null }> }> = [];
+    const fetchImpl = vi.fn(async (_url: string, init?: RequestInit) => {
+      bodies.push(JSON.parse(String(init?.body ?? "{}")));
+      return sseResponse('data: {"choices":[{"delta":{"content":"ok"}}]}\n\ndata: [DONE]\n\n');
+    });
+    const hits: WebSearchHit[] = Array.from({ length: 30 }, (_, i) => ({
+      title: `Hit ${i + 1}`,
+      url: `https://ex.com/${i + 1}`,
+      snippet: `snippet ${i + 1} 字`.repeat(20),
+    }));
+    const executeSearch = vi.fn(async () => hits);
+
+    await runWebSearchTurn(
+      {
+        model: "glm-5.2",
+        messages: [{ role: "user", content: "英伟达最新财报摘要" }],
+        agenticx_web_search: true,
+      },
+      {
+        url: "http://gateway.test/v1/chat/completions",
+        headers: {},
+        fetchImpl: fetchImpl as unknown as typeof fetch,
+        loadTenantConfig: async () => ({
+          enabled: true,
+          provider: "duckduckgo",
+          apiKey: "",
+          maxResults: 50,
+        }),
+        executeSearch,
+      },
+    );
+
+    const system = String(bodies[0]?.messages?.[0]?.content ?? "");
+    const injectedCount = (system.match(/^\[\d+\] /gm) ?? []).length;
+    expect(injectedCount).toBeGreaterThan(10);
+  });
+
+  it("keeps SSE source order aligned with model injection indices (AC-6)", async () => {
+    const bodies: Array<{ messages?: Array<{ role?: string; content?: string | null }> }> = [];
+    const fetchImpl = vi.fn(async (_url: string, init?: RequestInit) => {
+      bodies.push(JSON.parse(String(init?.body ?? "{}")));
+      return sseResponse('data: {"choices":[{"delta":{"content":"ok"}}]}\n\ndata: [DONE]\n\n');
+    });
+    const hits: WebSearchHit[] = Array.from({ length: 20 }, (_, i) => ({
+      title: `Hit ${i + 1}`,
+      url: `https://ex.com/${i + 1}`,
+      snippet: `snippet ${i + 1}`,
+    }));
+    // Put the most relevant hits at the end so rerank must promote them.
+    hits[18] = {
+      title: "广州南沙今日天气",
+      url: "https://ex.com/weather-a",
+      snippet: "南沙天气 气温 湿度 风力",
+    };
+    hits[19] = {
+      title: "南沙天气预报",
+      url: "https://ex.com/weather-b",
+      snippet: "南沙 天气 降水",
+    };
+    const executeSearch = vi.fn(async () => hits);
+
+    const res = await runWebSearchTurn(
+      {
+        model: "glm-5.2",
+        messages: [{ role: "user", content: "广州南沙天气如何" }],
+        agenticx_web_search: true,
+      },
+      {
+        url: "http://gateway.test/v1/chat/completions",
+        headers: {},
+        fetchImpl: fetchImpl as unknown as typeof fetch,
+        loadTenantConfig: async () => ({
+          enabled: true,
+          provider: "duckduckgo",
+          apiKey: "",
+          maxResults: 50,
+        }),
+        executeSearch,
+      },
+    );
+
+    const system = String(bodies[0]?.messages?.[0]?.content ?? "");
+    const injectedUrls = [...system.matchAll(/^URL: (https:\/\/\S+)/gm)].map((m) => m[1]!);
+    expect(injectedUrls.length).toBeGreaterThan(0);
+
+    const text = await readText(res);
+    const sourcesLine = text
+      .split("\n")
+      .find((line) => line.includes("agenticx_web_search_sources"));
+    expect(sourcesLine).toBeTruthy();
+    const payload = JSON.parse(sourcesLine!.replace(/^data:\s*/, "")) as {
+      agenticx_web_search_sources: Array<{ url: string; usedByModel?: boolean }>;
+    };
+    const sources = payload.agenticx_web_search_sources;
+    const k = injectedUrls.length;
+    expect(sources.slice(0, k).map((s) => s.url)).toEqual(injectedUrls);
+    expect(sources.slice(0, k).every((s) => s.usedByModel === true)).toBe(true);
+    expect(sources.slice(k).every((s) => s.usedByModel === false)).toBe(true);
+    expect(sources.length).toBe(hits.length);
+  });
 });

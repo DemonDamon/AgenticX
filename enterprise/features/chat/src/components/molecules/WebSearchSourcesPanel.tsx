@@ -9,7 +9,7 @@ import {
   SheetHeader,
   SheetTitle,
 } from "@agenticx/ui";
-import { hostnameFromUrl, siteLabelFromSource } from "../../utils/web-search-citation";
+import { hostnameFromUrl, partitionSourcesByUsage, siteLabelFromSource } from "../../utils/web-search-citation";
 import { WebSearchFavicon } from "./WebSearchFavicon";
 
 type WebSearchSourcesPanelProps = {
@@ -20,6 +20,54 @@ type WebSearchSourcesPanelProps = {
   highlightIndex?: number | null;
 };
 
+function SourceListItem({
+  source,
+  index1Based,
+  highlighted,
+  muted,
+  itemRefs,
+}: {
+  source: WebSearchSource;
+  index1Based: number;
+  highlighted: boolean;
+  muted?: boolean;
+  itemRefs: React.MutableRefObject<Map<number, HTMLAnchorElement>>;
+}) {
+  const host = hostnameFromUrl(source.url) ?? "";
+  const siteLabel = siteLabelFromSource(source, index1Based);
+  return (
+    <li>
+      <a
+        ref={(node) => {
+          if (node) itemRefs.current.set(index1Based, node);
+          else itemRefs.current.delete(index1Based);
+        }}
+        href={source.url}
+        target="_blank"
+        rel="noreferrer"
+        className={[
+          "block rounded-xl px-3 py-3 transition-colors hover:bg-muted/70",
+          highlighted ? "bg-muted ring-1 ring-border" : "",
+          muted ? "opacity-70" : "",
+        ].join(" ")}
+      >
+        <div className="mb-1.5 flex items-center gap-2">
+          <WebSearchFavicon host={host} label={siteLabel} size={20} rounded="md" />
+          <span className="truncate text-xs text-muted-foreground">{siteLabel}</span>
+        </div>
+        <div className="mb-1 line-clamp-2 text-sm font-semibold leading-snug text-foreground">
+          {source.title || source.url}
+        </div>
+        {source.snippet ? (
+          <p className="line-clamp-2 text-xs leading-relaxed text-muted-foreground">
+            {source.snippet}
+          </p>
+        ) : null}
+      </a>
+    </li>
+  );
+}
+
 export function WebSearchSourcesPanel({
   open,
   onOpenChange,
@@ -27,6 +75,7 @@ export function WebSearchSourcesPanel({
   highlightIndex = null,
 }: WebSearchSourcesPanelProps) {
   const itemRefs = React.useRef<Map<number, HTMLAnchorElement>>(new Map());
+  const { used, unused } = partitionSourcesByUsage(sources);
 
   React.useEffect(() => {
     if (!open || !highlightIndex) return;
@@ -43,44 +92,35 @@ export function WebSearchSourcesPanel({
         </SheetHeader>
         <div className="flex-1 overflow-y-auto px-3 py-3">
           <ul className="space-y-1">
-            {sources.map((source, index) => {
-              const index1Based = index + 1;
-              // Real hostname only — never pass display label / raw URL into favicon fetch.
-              const host = hostnameFromUrl(source.url) ?? "";
-              const siteLabel = siteLabelFromSource(source, index1Based);
-              const highlighted = highlightIndex === index1Based;
-              return (
-                <li key={`${index1Based}-${source.url}`}>
-                  <a
-                    ref={(node) => {
-                      if (node) itemRefs.current.set(index1Based, node);
-                      else itemRefs.current.delete(index1Based);
-                    }}
-                    href={source.url}
-                    target="_blank"
-                    rel="noreferrer"
-                    className={[
-                      "block rounded-xl px-3 py-3 transition-colors hover:bg-muted/70",
-                      highlighted ? "bg-muted ring-1 ring-border" : "",
-                    ].join(" ")}
-                  >
-                    <div className="mb-1.5 flex items-center gap-2">
-                      <WebSearchFavicon host={host} label={siteLabel} size={20} rounded="md" />
-                      <span className="truncate text-xs text-muted-foreground">{siteLabel}</span>
-                    </div>
-                    <div className="mb-1 line-clamp-2 text-sm font-semibold leading-snug text-foreground">
-                      {source.title || source.url}
-                    </div>
-                    {source.snippet ? (
-                      <p className="line-clamp-2 text-xs leading-relaxed text-muted-foreground">
-                        {source.snippet}
-                      </p>
-                    ) : null}
-                  </a>
-                </li>
-              );
-            })}
+            {used.map(({ source, index1Based }) => (
+              <SourceListItem
+                key={`used-${index1Based}-${source.url}`}
+                source={source}
+                index1Based={index1Based}
+                highlighted={highlightIndex === index1Based}
+                itemRefs={itemRefs}
+              />
+            ))}
           </ul>
+          {unused.length > 0 ? (
+            <div className="mt-4">
+              <div className="mb-2 px-3 text-xs font-medium text-muted-foreground">
+                未纳入本次回答（{unused.length}）
+              </div>
+              <ul className="space-y-1">
+                {unused.map(({ source, index1Based }) => (
+                  <SourceListItem
+                    key={`unused-${index1Based}-${source.url}`}
+                    source={source}
+                    index1Based={index1Based}
+                    highlighted={highlightIndex === index1Based}
+                    muted
+                    itemRefs={itemRefs}
+                  />
+                ))}
+              </ul>
+            </div>
+          ) : null}
         </div>
       </SheetContent>
     </Sheet>

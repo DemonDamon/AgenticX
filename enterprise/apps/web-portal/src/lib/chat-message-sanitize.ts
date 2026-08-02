@@ -108,6 +108,7 @@ function sanitizeWebSearchSources(raw: unknown): WebSearchSource[] | undefined {
       title: title || url,
       url,
       snippet: snippet.slice(0, MAX_SOURCE_FIELD_CHARS),
+      ...(row.usedByModel === true ? { usedByModel: true } : row.usedByModel === false ? { usedByModel: false } : {}),
     });
   }
   return out.length > 0 ? out : undefined;
