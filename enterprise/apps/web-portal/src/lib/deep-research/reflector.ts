@@ -2,6 +2,8 @@
  * Reflect on collected lane memos and propose follow-up search gaps.
  */
 
+import { parseLlmJson } from "./llm-json";
+
 export const MAX_GAPS = 4;
 export const MAX_FOLLOWUP_QUERIES = 8;
 
@@ -25,43 +27,35 @@ const REFLECT_SYSTEM = [
   `gaps 最多 ${MAX_GAPS} 条，每条 1–3 个 queries。只报能靠再搜一次解决的缺口。`,
 ].join("\n");
 
-function stripFence(raw: string): string {
-  const trimmed = raw.trim();
-  const m = trimmed.match(/^```(?:json)?\s*([\s\S]*?)```$/i);
-  return (m?.[1] ?? trimmed).trim();
-}
-
 export function parseGapsJson(raw: string): ResearchGap[] {
-  try {
-    const parsed = JSON.parse(stripFence(raw)) as Record<string, unknown>;
-    const gapsRaw = Array.isArray(parsed.gaps) ? parsed.gaps : [];
-    const gaps: ResearchGap[] = [];
-    let queryBudget = MAX_FOLLOWUP_QUERIES;
-    for (const item of gapsRaw) {
-      if (gaps.length >= MAX_GAPS || queryBudget <= 0) break;
-      if (!item || typeof item !== "object") continue;
-      const obj = item as Record<string, unknown>;
-      const description =
-        typeof obj.description === "string" ? obj.description.trim() : "";
-      if (!description) continue;
-      const queries = Array.isArray(obj.queries)
-        ? obj.queries
-            .filter((q): q is string => typeof q === "string" && q.trim().length > 0)
-            .map((q) => q.trim())
-            .slice(0, Math.min(3, queryBudget))
-        : [];
-      if (queries.length === 0) continue;
-      queryBudget -= queries.length;
-      const id =
-        typeof obj.id === "string" && obj.id.trim()
-          ? obj.id.trim()
-          : `g${gaps.length + 1}`;
-      gaps.push({ id, description, queries });
-    }
-    return gaps;
-  } catch {
-    return [];
+  const parsed = parseLlmJson<Record<string, unknown>>(raw);
+  if (!parsed || typeof parsed !== "object") return [];
+
+  const gapsRaw = Array.isArray(parsed.gaps) ? parsed.gaps : [];
+  const gaps: ResearchGap[] = [];
+  let queryBudget = MAX_FOLLOWUP_QUERIES;
+  for (const item of gapsRaw) {
+    if (gaps.length >= MAX_GAPS || queryBudget <= 0) break;
+    if (!item || typeof item !== "object") continue;
+    const obj = item as Record<string, unknown>;
+    const description =
+      typeof obj.description === "string" ? obj.description.trim() : "";
+    if (!description) continue;
+    const queries = Array.isArray(obj.queries)
+      ? obj.queries
+          .filter((q): q is string => typeof q === "string" && q.trim().length > 0)
+          .map((q) => q.trim())
+          .slice(0, Math.min(3, queryBudget))
+      : [];
+    if (queries.length === 0) continue;
+    queryBudget -= queries.length;
+    const id =
+      typeof obj.id === "string" && obj.id.trim()
+        ? obj.id.trim()
+        : `g${gaps.length + 1}`;
+    gaps.push({ id, description, queries });
   }
+  return gaps;
 }
 
 /** 失败或无缺口时返回 []，绝不抛。 */

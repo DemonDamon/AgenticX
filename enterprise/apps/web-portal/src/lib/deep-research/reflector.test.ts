@@ -11,6 +11,13 @@ describe("parseGapsJson", () => {
     expect(gaps[0]?.description).toContain("官方");
   });
 
+  it("parses gaps when the model prefixes a think block", () => {
+    const raw = `<think>还缺什么？{也许缺论文}</think>{"gaps":[{"id":"g1","description":"缺官方论文","queries":["deepseek paper"]}]}`;
+    const gaps = parseGapsJson(raw);
+    expect(gaps).toHaveLength(1);
+    expect(gaps[0]?.queries).toEqual(["deepseek paper"]);
+  });
+
   it("returns empty on empty gaps or invalid json", () => {
     expect(parseGapsJson('{"gaps":[]}')).toEqual([]);
     expect(parseGapsJson("nope")).toEqual([]);

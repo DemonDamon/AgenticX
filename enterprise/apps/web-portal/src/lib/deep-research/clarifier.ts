@@ -2,6 +2,7 @@
  * Optional clarification gate before deep-research planning.
  */
 
+import { extractJsonText } from "./llm-json";
 import {
   defaultFocusOptions,
   looksOpenEndedResearchQuery,
@@ -102,7 +103,8 @@ export function parseClarifierJson(text: string): ClarifierResult {
     }
   };
 
-  const trimmed = text.trim();
+  // Models wrap payloads in <think> / fences / prose; normalize before the tier chain.
+  const trimmed = extractJsonText(text) || text.trim();
   if (!trimmed) return { needed: false };
   const direct = tryParse(trimmed);
   if (direct) return direct;

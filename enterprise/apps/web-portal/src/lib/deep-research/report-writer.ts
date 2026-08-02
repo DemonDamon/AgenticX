@@ -3,6 +3,8 @@
  * outline → per-section stream → join, to bypass single-completion max_tokens.
  */
 
+import { parseLlmJson } from "./llm-json";
+
 export const MIN_SECTIONS = 5;
 export const MAX_SECTIONS = 9;
 export const SECTION_TARGET_CHARS = 1_500;
@@ -42,7 +44,17 @@ const SECTION_SYSTEM = [
   `目标篇幅 ≥ ${SECTION_TARGET_CHARS} 字：展开论证、给出具体数字与机制细节，禁止空话凑字。`,
   "每条事实必须以 [N] 标注，N 必须在证据包中存在，禁止编造编号。",
   "若提供了「前文已写内容摘要」，避免重复已写过的表述。",
+  "本节不要重复首节已给出的结论表述，聚焦本节主题的机制、数据与论证。",
   "只输出本节 Markdown 正文。",
+].join("\n");
+
+/** 首节是全文结论摘要，篇幅与体例都与分项分析不同，否则会与后文大面积重复。 */
+const LEAD_SECTION_SYSTEM = [
+  "你是深度研究报告首节「核心结论」写作助手。",
+  "本节是全文结论摘要，不是综述：用 4–8 条要点式结论呈现最关键判断，每条 1–3 句。",
+  "目标篇幅 400–800 字，禁止展开机制细节与背景铺陈——那些属于后续分项分析章节。",
+  "每条结论必须以 [N] 标注支撑证据，N 必须在证据包中存在，禁止编造编号。",
+  "只输出本节 Markdown 正文，不要重复输出标题。",
 ].join("\n");
 
 function defaultOutline(fallbackTitle: string): ReportOutline {
@@ -71,12 +83,6 @@ function defaultOutline(fallbackTitle: string): ReportOutline {
   };
 }
 
-function stripJsonFence(raw: string): string {
-  const trimmed = raw.trim();
-  const fenced = trimmed.match(/^```(?:json)?\s*([\s\S]*?)```$/i);
-  return (fenced?.[1] ?? trimmed).trim();
-}
-
 function normalizeSection(
   raw: unknown,
   index: number,
@@ -101,22 +107,20 @@ function normalizeSection(
 
 export function parseOutlineJson(raw: string, fallbackTitle: string): ReportOutline {
   const fallback = defaultOutline(fallbackTitle);
-  try {
-    const parsed = JSON.parse(stripJsonFence(raw)) as Record<string, unknown>;
-    const title =
-      typeof parsed.title === "string" && parsed.title.trim()
-        ? parsed.title.trim()
-        : fallback.title;
-    const sectionsRaw = Array.isArray(parsed.sections) ? parsed.sections : [];
-    const sections = sectionsRaw
-      .map((item, i) => normalizeSection(item, i))
-      .filter((s): s is ReportSection => s != null)
-      .slice(0, MAX_SECTIONS);
-    if (sections.length === 0) return { ...fallback, title };
-    return { title, sections };
-  } catch {
-    return fallback;
-  }
+  const parsed = parseLlmJson<Record<string, unknown>>(raw);
+  if (!parsed || typeof parsed !== "object") return fallback;
+
+  const title =
+    typeof parsed.title === "string" && parsed.title.trim()
+      ? parsed.title.trim()
+      : fallback.title;
+  const sectionsRaw = Array.isArray(parsed.sections) ? parsed.sections : [];
+  const sections = sectionsRaw
+    .map((item, i) => normalizeSection(item, i))
+    .filter((s): s is ReportSection => s != null)
+    .slice(0, MAX_SECTIONS);
+  if (sections.length === 0) return { ...fallback, title };
+  return { title, sections };
 }
 
 export async function buildReportOutline(deps: OutlineDeps): Promise<ReportOutline> {
@@ -150,7 +154,10 @@ export function buildSectionMessages(args: {
       ? `建议重点引用编号：${args.section.citationIndexes.join(", ")}`
       : "请优先引用与本节相关的证据编号。";
   return [
-    { role: "system", content: SECTION_SYSTEM },
+    {
+      role: "system",
+      content: args.sectionIndex === 0 ? LEAD_SECTION_SYSTEM : SECTION_SYSTEM,
+    },
     {
       role: "user",
       content: [

@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   MAX_SECTIONS,
+  SECTION_TARGET_CHARS,
   buildSectionMessages,
   linkifyCitations,
   parseOutlineJson,
@@ -15,6 +16,20 @@ describe("parseOutlineJson", () => {
     expect(outline.sections).toHaveLength(1);
     expect(outline.sections[0]?.title).toBe("核心结论");
     expect(outline.sections[0]?.citationIndexes).toEqual([1]);
+  });
+
+  it("keeps a full outline when the model prefixes a think block", () => {
+    const sections = Array.from({ length: 6 }, (_, i) => ({
+      id: `s${i + 1}`,
+      title: `章节${i + 1}`,
+      brief: "b",
+      citation_indexes: [i + 1],
+    }));
+    const raw = `<think>先想大纲，可能要 {5} 节</think>${JSON.stringify({ title: "T", sections })}`;
+    const outline = parseOutlineJson(raw, "fallback");
+    expect(outline.title).toBe("T");
+    expect(outline.sections).toHaveLength(6);
+    expect(outline.sections[5]?.title).toBe("章节6");
   });
 
   it("falls back to default three sections when sections empty", () => {
@@ -80,6 +95,34 @@ describe("renderTableOfContents / buildSectionMessages", () => {
     expect(user).toContain("证据包正文");
     expect(user).toContain("前文摘要一段");
     expect(user).toContain("2");
+  });
+
+  it("gives the lead section a distinct, shorter brief than later sections", () => {
+    const outline = parseOutlineJson(
+      JSON.stringify({
+        title: "T",
+        sections: [
+          { id: "s1", title: "核心结论", brief: "总结" },
+          { id: "s2", title: "分项分析", brief: "展开" },
+        ],
+      }),
+      "T",
+    );
+    const systemAt = (sectionIndex: number) =>
+      buildSectionMessages({
+        outline,
+        section: outline.sections[sectionIndex]!,
+        sectionIndex,
+        evidence: "e",
+        previousSummaries: [],
+      }).find((m) => m.role === "system")?.content ?? "";
+
+    const lead = systemAt(0);
+    const body = systemAt(1);
+    expect(lead).toContain("400–800 字");
+    expect(body).toContain(String(SECTION_TARGET_CHARS));
+    expect(body).not.toContain("400–800 字");
+    expect(lead).not.toBe(body);
   });
 });
 
