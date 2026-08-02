@@ -16,6 +16,16 @@ export type DeepResearchSegment =
       title: string;
       status: "running" | "done" | "failed";
       detailLines: string[];
+    }
+  | {
+      kind: "reflection";
+      id: string;
+      gaps: string[];
+    }
+  | {
+      kind: "stats";
+      id: string;
+      label: string;
     };
 
 export type DeepResearchArtifactEvent = Extract<DeepResearchEvent, { type: "artifact" }>;
@@ -150,12 +160,12 @@ export function buildDeepResearchSegments(
       case "clarify_timeout":
         break;
       case "phase": {
-        if (event.phase === "clarify" || event.phase === "plan") {
+        if (event.phase === "recon" || event.phase === "clarify" || event.phase === "plan") {
           break;
         }
-        if (event.phase === "lanes") {
+        if (event.phase === "lanes" || event.phase === "reflect") {
           flushTools();
-          toolsTitle = event.message || "正在并行检索…";
+          toolsTitle = event.message || (event.phase === "reflect" ? "复盘信息缺口…" : "正在并行检索…");
           break;
         }
         if (event.phase === "synthesize" || event.phase === "done") {
@@ -173,6 +183,24 @@ export function buildDeepResearchSegments(
             detailLines: event.message ? [event.message] : [],
           });
         }
+        break;
+      }
+      case "reflection": {
+        flushTools();
+        segments.push({
+          kind: "reflection",
+          id: `reflection-${seq++}`,
+          gaps: event.gaps.slice(),
+        });
+        break;
+      }
+      case "research_stats": {
+        flushTools();
+        segments.push({
+          kind: "stats",
+          id: `stats-${seq++}`,
+          label: `检索式 ${event.queriesPlanned} 条 · 发现 ${event.urlsDiscovered} 个来源 · 采用 ${event.sourcesSelected} 个 · 读取正文 ${event.pagesFetched} 篇`,
+        });
         break;
       }
       case "lane_started": {
@@ -241,11 +269,15 @@ export function deepResearchWaitingLabel(events: DeepResearchEvent[]): string {
 
 /** Legacy content deltas that used to leak into the report body. */
 const LEGACY_NARRATIVE_LINES = [
+  "我先快速检索最新公开资料，校准调研前提。",
+  "现状已校准，再确认一下调研方向。",
   "我先快速确认一下调研方向，然后开始系统检索。",
   "已明确调研方向，开始系统检索。",
   "澄清超时，按默认假设继续。",
   "已跳过确认，按默认假设继续检索。",
   "检索阶段完成，数据已足够。现在进入综合分析与报告撰写。",
+  "发现 1 处信息缺口，正在补充检索。",
+  "证据交叉验证充分，未发现需要补搜的缺口。",
 ];
 
 /** Strip progress sentences from assistant content so only the final report remains. */

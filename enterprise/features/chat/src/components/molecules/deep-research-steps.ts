@@ -22,12 +22,16 @@ export type ResearchStep = {
 function phaseTitle(phase: string, message: string): string {
   if (message?.trim()) return message.trim();
   switch (phase) {
+    case "recon":
+      return "侦查最新现状";
     case "clarify":
       return "确认调研方向";
     case "plan":
       return "规划研究路径";
     case "lanes":
       return "并行检索";
+    case "reflect":
+      return "复盘信息缺口";
     case "synthesize":
       return "综合分析";
     case "done":
@@ -112,6 +116,8 @@ export function buildDeepResearchSteps(
         sawClarifyTimeout = true;
         break;
       case "narrative":
+      case "reflection":
+      case "research_stats":
         break;
       case "lane_started": {
         laneMap.set(event.laneId, {

@@ -2,6 +2,8 @@
 
 import * as React from "react";
 import type { ChatMessageDeepResearch } from "@agenticx/core-api";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@agenticx/ui";
+import { Download, Eye, FileText, Printer } from "lucide-react";
 import { DeepResearchArtifactCard } from "./DeepResearchArtifactCard";
 import { collectDeepResearchDeliveryArtifacts } from "./deep-research-segments";
 
@@ -55,6 +57,119 @@ function AllFilesCard({ onOpen }: { onOpen?: () => void }) {
   );
 }
 
+function isPrimaryDeliveryArtifact(path: string): boolean {
+  const lower = path.toLowerCase();
+  if (lower.endsWith("/report.html") || lower.endsWith("report.html")) return false;
+  if (lower.endsWith("/report.md") || lower.endsWith("report.md")) return false;
+  return true;
+}
+
+function hasCompletedReportArtifact(
+  deepResearch: ChatMessageDeepResearch,
+): boolean {
+  if (deepResearch.status !== "completed") return false;
+  return deepResearch.events.some(
+    (event) =>
+      event.type === "artifact" &&
+      event.kind === "report" &&
+      (event.path.toLowerCase().includes("final-report") ||
+        event.path.toLowerCase().endsWith("report.html") ||
+        event.path.toLowerCase().endsWith("report.md")),
+  );
+}
+
+function exportUrl(runId: string, format: "html" | "md" | "docx", inline?: boolean): string {
+  const qs = new URLSearchParams({ format });
+  if (inline) qs.set("inline", "1");
+  return `/api/chat/deep-research/runs/${encodeURIComponent(runId)}/export?${qs.toString()}`;
+}
+
+function ExportActions({ runId }: { runId: string }) {
+  const openHtml = React.useCallback(
+    (printAfterLoad: boolean) => {
+      const href = exportUrl(runId, "html", true);
+      const win = window.open(href, "_blank", "noopener,noreferrer");
+      if (!win || !printAfterLoad) return;
+      // Best-effort print once the report document is ready.
+      const timer = window.setInterval(() => {
+        try {
+          if (win.closed) {
+            window.clearInterval(timer);
+            return;
+          }
+          if (win.document?.readyState === "complete") {
+            window.clearInterval(timer);
+            win.focus();
+            win.print();
+          }
+        } catch {
+          window.clearInterval(timer);
+        }
+      }, 300);
+      window.setTimeout(() => window.clearInterval(timer), 15_000);
+    },
+    [runId],
+  );
+
+  const actions = [
+    {
+      key: "view-html",
+      label: "查看可视化报告",
+      icon: Eye,
+      onClick: () => openHtml(false),
+    },
+    {
+      key: "download-md",
+      label: "下载 Markdown",
+      icon: FileText,
+      onClick: () => {
+        window.location.assign(exportUrl(runId, "md"));
+      },
+    },
+    {
+      key: "download-docx",
+      label: "下载 Word",
+      icon: Download,
+      onClick: () => {
+        window.location.assign(exportUrl(runId, "docx"));
+      },
+    },
+    {
+      key: "print-pdf",
+      label: "打印 / 存为 PDF",
+      icon: Printer,
+      onClick: () => openHtml(true),
+    },
+  ] as const;
+
+  return (
+    <div
+      className="flex flex-wrap items-center gap-1 pt-1"
+      data-testid="deep-research-export-actions"
+    >
+      {actions.map((action) => {
+        const Icon = action.icon;
+        return (
+          <Tooltip key={action.key}>
+            <TooltipTrigger asChild>
+              <button
+                type="button"
+                onClick={action.onClick}
+                className="inline-flex h-8 items-center gap-1.5 rounded-lg px-2.5 text-[13px] text-muted-foreground transition-colors hover:bg-muted/60 hover:text-foreground"
+                aria-label={action.label}
+              >
+                <Icon className="h-3.5 w-3.5 shrink-0" aria-hidden />
+                <span>{action.label}</span>
+              </button>
+            </TooltipTrigger>
+            <TooltipContent>{action.label}</TooltipContent>
+          </Tooltip>
+        );
+      })}
+    </div>
+  );
+}
+
 /**
  * Kimi-style delivery strip: final report card(s) + folder card for all files.
  * Render after the report body so deliverables sit at the end of the turn.
@@ -66,7 +181,10 @@ export function DeepResearchDelivery({
   className,
 }: DeepResearchDeliveryProps) {
   const deliveryArtifacts = React.useMemo(
-    () => collectDeepResearchDeliveryArtifacts(deepResearch.events),
+    () =>
+      collectDeepResearchDeliveryArtifacts(deepResearch.events).filter((artifact) =>
+        isPrimaryDeliveryArtifact(artifact.path),
+      ),
     [deepResearch.events],
   );
 
@@ -76,9 +194,10 @@ export function DeepResearchDelivery({
     deepResearch.status === "completed" ||
     deepResearch.status === "failed" ||
     deepResearch.status === "cancelled";
+  const showExport = hasCompletedReportArtifact(deepResearch);
 
   // Show as soon as a report artifact exists; also after terminal if any files remain.
-  if (deliveryArtifacts.length === 0 && !(terminal && showAllFiles)) {
+  if (deliveryArtifacts.length === 0 && !(terminal && showAllFiles) && !showExport) {
     return null;
   }
 
@@ -95,6 +214,7 @@ export function DeepResearchDelivery({
         />
       ))}
       {showAllFiles ? <AllFilesCard onOpen={onOpenFiles} /> : null}
+      {showExport ? <ExportActions runId={deepResearch.runId} /> : null}
     </div>
   );
 }

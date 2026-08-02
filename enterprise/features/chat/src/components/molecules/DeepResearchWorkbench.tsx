@@ -336,6 +336,33 @@ export function DeepResearchWorkbench({
             return (
               <StatusRow key={segment.id} title={segment.title} status={segment.status} />
             );
+          case "reflection":
+            return (
+              <details
+                key={segment.id}
+                className="mb-3 rounded-md border border-border/60 bg-muted/20 px-3 py-2 text-sm"
+                data-testid="deep-research-reflection"
+              >
+                <summary className="cursor-pointer select-none text-foreground">
+                  发现 {segment.gaps.length} 处信息缺口
+                </summary>
+                <ul className="mt-2 list-disc space-y-1 pl-5 text-muted-foreground">
+                  {segment.gaps.map((gap, i) => (
+                    <li key={`${segment.id}-${i}`}>{gap}</li>
+                  ))}
+                </ul>
+              </details>
+            );
+          case "stats":
+            return (
+              <p
+                key={segment.id}
+                className="mb-3 text-xs leading-5 text-muted-foreground"
+                data-testid="deep-research-stats"
+              >
+                {segment.label}
+              </p>
+            );
           default: {
             const _exhaustive: never = segment;
             return _exhaustive;
