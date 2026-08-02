@@ -128,11 +128,15 @@ function injectAttachmentLinks(
   return mapNode(children, "attach");
 }
 
+export const ARTIFACT_HREF_PREFIX = "artifact:";
+
 type AssistantMdOptions = {
   sources?: WebSearchSource[];
   onOpenCitationInSheet?: (index1Based: number) => void;
   sessionAttachments?: ChatMessageAttachment[];
   onOpenAttachment?: (attachment: ChatMessageAttachment) => void;
+  /** Deep-research deliverable: open docked files pane on this artifact id. */
+  onOpenArtifact?: (artifactId: string) => void;
   /** document: roomier report preview typography + list-outside numbering */
   variant?: "chat" | "document";
 };
@@ -211,11 +215,39 @@ export function createAssistantMdComponents(options: AssistantMdOptions = {}): C
         {cite(children)}
       </blockquote>
     ),
-    a: ({ children, href }) => (
-      <a href={href} className="text-primary underline-offset-2 hover:underline" target="_blank" rel="noreferrer">
-        {children}
-      </a>
-    ),
+    a: ({ children, href }) => {
+      if (
+        href?.startsWith(ARTIFACT_HREF_PREFIX) &&
+        options.onOpenArtifact
+      ) {
+        const artifactId = href.slice(ARTIFACT_HREF_PREFIX.length).trim();
+        if (artifactId) {
+          return (
+            <button
+              type="button"
+              className="inline cursor-pointer font-medium text-primary underline underline-offset-2 hover:opacity-90"
+              onClick={(event) => {
+                event.preventDefault();
+                event.stopPropagation();
+                options.onOpenArtifact?.(artifactId);
+              }}
+            >
+              {children}
+            </button>
+          );
+        }
+      }
+      return (
+        <a
+          href={href}
+          className="text-primary underline-offset-2 hover:underline"
+          target="_blank"
+          rel="noreferrer"
+        >
+          {children}
+        </a>
+      );
+    },
     strong: ({ children }) => (
       <strong className="font-semibold text-foreground">{cite(children)}</strong>
     ),

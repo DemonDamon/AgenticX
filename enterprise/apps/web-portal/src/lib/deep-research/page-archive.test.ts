@@ -4,8 +4,10 @@ import {
   archivePage,
   MAX_ARCHIVE_CHARS,
   MAX_ARCHIVED_PAGES_PER_RUN,
+  pageArchiveFileName,
   pageArchiveKey,
   pageArchivePath,
+  pageArchiveSlug,
 } from "./page-archive";
 
 describe("pageArchiveKey / pageArchivePath", () => {
@@ -18,9 +20,16 @@ describe("pageArchiveKey / pageArchivePath", () => {
     expect(a).toMatch(/^[0-9a-f]{16}$/);
   });
 
-  it("builds research/<runId>/pages/<16hex>.md", () => {
-    const path = pageArchivePath("r1", "https://example.com/a");
-    expect(path).toMatch(/^research\/r1\/pages\/[0-9a-f]{16}\.md$/);
+  it("builds research/<runId>/pages/<slug>_<16hex>.md", () => {
+    const path = pageArchivePath("r1", "https://example.com/a", "DeepSeek V4 解读");
+    expect(path).toMatch(/^research\/r1\/pages\/DeepSeek-V4-解读_[0-9a-f]{16}\.md$/);
+  });
+
+  it("slug falls back to host when title empty", () => {
+    expect(pageArchiveSlug("", "https://www.51cto.com/article/123.html")).toContain("51cto");
+    expect(pageArchiveFileName("", "https://example.com/x")).toMatch(
+      /^example-com-x_[0-9a-f]{16}\.md$/,
+    );
   });
 });
 
@@ -42,7 +51,8 @@ describe("archivePage", () => {
     expect(ok).toBe(true);
     const rows = await store.listByRun("t1", "u1", "run1");
     expect(rows).toHaveLength(1);
-    expect(rows[0]?.path).toMatch(/^research\/run1\/pages\//);
+    expect(rows[0]?.path).toMatch(/^research\/run1\/pages\/文档标题_[0-9a-f]{16}\.md$/);
+    expect(rows[0]?.title).toBe("文档标题");
     expect(rows[0]?.content).toContain("url: https://example.com/doc");
     expect(rows[0]?.content).toContain("backend: jina");
     expect(rows[0]?.content).toContain("正文内容段落");

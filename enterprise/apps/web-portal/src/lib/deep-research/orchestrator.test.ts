@@ -264,6 +264,81 @@ describe("runDeepResearchTurn", () => {
     expect(text).not.toContain(DEEP_RESEARCH_SEARCH_FAILED);
   });
 
+  it("still completes when finalizeReportArtifacts throws after final-report is written", async () => {
+    const store = createMemoryArtifactStore();
+    const realWrite = store.write.bind(store);
+    vi.spyOn(store, "write").mockImplementation(async (input) => {
+      // Only fail P3 deliverables — not final-report.md (which also ends with report.md).
+      if (input.path.endsWith("/report.html") || input.path.endsWith("/report.md")) {
+        throw new Error("html boom");
+      }
+      return realWrite(input);
+    });
+    const response = await runDeepResearchTurn(
+      { model: "m", messages: [{ role: "user", content: "主题调研" }] },
+      {
+        ...baseDeps({
+          artifactStore: store,
+          runId: "run-wrapup-degrade",
+          fetchImpl: vi.fn(async (_url: string, init?: RequestInit) => {
+            const body = JSON.parse(String(init?.body ?? "{}")) as {
+              stream?: boolean;
+              messages?: Array<{ role: string; content?: string }>;
+            };
+            if (body.stream === false) {
+              const sys = body.messages?.[0]?.content ?? "";
+              if (sys.includes("大纲")) {
+                return {
+                  ok: true,
+                  json: async () => ({
+                    choices: [
+                      {
+                        message: {
+                          content: JSON.stringify({
+                            title: "主题调研",
+                            sections: [
+                              { id: "s1", title: "核心结论", brief: "b1" },
+                              { id: "s2", title: "分项分析", brief: "b2" },
+                            ],
+                          }),
+                        },
+                      },
+                    ],
+                  }),
+                } as Response;
+              }
+              return {
+                ok: true,
+                json: async () => ({ choices: [{ message: { content: "memo" } }] }),
+              } as Response;
+            }
+            return synthUpstream("章节正文");
+          }) as unknown as typeof fetch,
+          buildPlan: async () => ({
+            topic: "主题调研",
+            complexity: "moderate" as const,
+            subQuestions: ["侧面A", "侧面B"],
+          }),
+          executeSearch: async () => [
+            { title: "Doc", url: "https://example.com/doc", snippet: "s" },
+          ],
+        }),
+      },
+    );
+    const { text, events } = await readSsePayload(response);
+    expect(text).not.toContain(DEEP_RESEARCH_SEARCH_FAILED);
+    expect(
+      events.some(
+        (e) =>
+          e.type === "phase" &&
+          e.phase === "done" &&
+          String(e.message).includes("深度研究完成"),
+      ),
+    ).toBe(true);
+    const rows = await store.listByRun("t1", "u1", "run-wrapup-degrade");
+    expect(rows.some((r) => r.path.endsWith("final-report.md"))).toBe(true);
+  });
+
   it("emits failure copy when all searches fail", async () => {
     const plan: ResearchPlan = { topic: "T", complexity: "simple", subQuestions: ["a", "b"] };
     const response = await runDeepResearchTurn(

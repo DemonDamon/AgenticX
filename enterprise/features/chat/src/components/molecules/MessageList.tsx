@@ -174,6 +174,7 @@ function AssistantMessageMarkdownImpl({
   sources,
   sessionAttachments,
   onOpenAttachment,
+  onOpenArtifact,
   citationMessageId,
   onOpenCitationInSheet,
 }: {
@@ -182,6 +183,7 @@ function AssistantMessageMarkdownImpl({
   sources?: ChatMessage["web_search_sources"];
   sessionAttachments?: ChatMessageAttachment[];
   onOpenAttachment?: (attachment: ChatMessageAttachment) => void;
+  onOpenArtifact?: (artifactId: string) => void;
   citationMessageId?: string;
   onOpenCitationInSheet?: (messageId: string, index1Based: number) => void;
 }) {
@@ -193,13 +195,16 @@ function AssistantMessageMarkdownImpl({
   // (sources / attachments) can rebuild the component map.
   const onOpenAttachmentRef = React.useRef(onOpenAttachment);
   const onOpenCitationInSheetRef = React.useRef(onOpenCitationInSheet);
+  const onOpenArtifactRef = React.useRef(onOpenArtifact);
   React.useEffect(() => {
     onOpenAttachmentRef.current = onOpenAttachment;
     onOpenCitationInSheetRef.current = onOpenCitationInSheet;
-  }, [onOpenAttachment, onOpenCitationInSheet]);
+    onOpenArtifactRef.current = onOpenArtifact;
+  }, [onOpenAttachment, onOpenCitationInSheet, onOpenArtifact]);
 
   const hasOpenAttachment = Boolean(onOpenAttachment);
   const hasOpenCitation = Boolean(onOpenCitationInSheet && citationMessageId);
+  const hasOpenArtifact = Boolean(onOpenArtifact);
 
   const stableOpenAttachment = React.useCallback((attachment: ChatMessageAttachment) => {
     onOpenAttachmentRef.current?.(attachment);
@@ -211,6 +216,9 @@ function AssistantMessageMarkdownImpl({
     },
     [citationMessageId],
   );
+  const stableOpenArtifact = React.useCallback((artifactId: string) => {
+    onOpenArtifactRef.current?.(artifactId);
+  }, []);
 
   const components = React.useMemo(
     () =>
@@ -219,14 +227,17 @@ function AssistantMessageMarkdownImpl({
         sessionAttachments,
         onOpenAttachment: hasOpenAttachment ? stableOpenAttachment : undefined,
         onOpenCitationInSheet: hasOpenCitation ? stableOpenCitation : undefined,
+        onOpenArtifact: hasOpenArtifact ? stableOpenArtifact : undefined,
       }),
     [
       sources,
       sessionAttachments,
       hasOpenAttachment,
       hasOpenCitation,
+      hasOpenArtifact,
       stableOpenAttachment,
       stableOpenCitation,
+      stableOpenArtifact,
     ],
   );
   return (
@@ -873,6 +884,11 @@ export function MessageList({
                               sources={message.web_search_sources}
                               sessionAttachments={linkedUserAttachments}
                               onOpenAttachment={openAttachmentPreview}
+                              onOpenArtifact={
+                                message.deep_research
+                                  ? (id) => openDeepResearchFiles(message.session_id, id)
+                                  : undefined
+                              }
                               citationMessageId={message.id}
                               onOpenCitationInSheet={openCitationInSheet}
                             />

@@ -2,8 +2,35 @@ import { describe, expect, it } from "vitest";
 import {
   buildArtifactTree,
   collapseSingleFileDirs,
+  displayNameForArtifactFile,
   formatArtifactByteSize,
 } from "./deep-research-artifact-tree";
+
+describe("displayNameForArtifactFile", () => {
+  it("uses title for pages/ and legacy hex names", () => {
+    expect(
+      displayNameForArtifactFile("a1b2c3d4e5f60789.md", {
+        path: "research/r1/pages/a1b2c3d4e5f60789.md",
+        title: "DeepSeek V4 技术解读",
+      }),
+    ).toBe("DeepSeek V4 技术解读.md");
+    expect(
+      displayNameForArtifactFile("DeepSeek-V4_a1b2c3d4e5f60789.md", {
+        path: "research/r1/pages/DeepSeek-V4_a1b2c3d4e5f60789.md",
+        title: "DeepSeek V4 技术解读",
+      }),
+    ).toBe("DeepSeek V4 技术解读.md");
+  });
+
+  it("keeps report filenames as-is", () => {
+    expect(
+      displayNameForArtifactFile("final-report.md", {
+        path: "research/r1/final-report.md",
+        title: "终稿",
+      }),
+    ).toBe("final-report.md");
+  });
+});
 
 describe("formatArtifactByteSize", () => {
   it("formats B / KB / MB", () => {
