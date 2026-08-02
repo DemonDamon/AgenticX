@@ -54,19 +54,31 @@ export function ReasoningBlock({ reasoning, thinkingStarted, thinkingInProgress 
   const [tick, setTick] = React.useState(0);
   const startedAtRef = React.useRef<number | null>(null);
   const finishedAtRef = React.useRef<number | null>(null);
+  const autoPhaseRef = React.useRef<"idle" | "thinking" | "done">(
+    thinkingStarted ? (thinkingInProgress ? "thinking" : "done") : "idle",
+  );
 
   React.useEffect(() => {
-    if (!thinkingStarted) return;
+    if (!thinkingStarted) {
+      autoPhaseRef.current = "idle";
+      startedAtRef.current = null;
+      finishedAtRef.current = null;
+      return;
+    }
     probeNote("ReasoningBlock.effect", { thinkingInProgress });
     if (startedAtRef.current === null) {
       startedAtRef.current = Date.now();
     }
     if (thinkingInProgress) {
       finishedAtRef.current = null;
-      setOpen((prev) => (prev ? prev : true));
+      if (autoPhaseRef.current !== "thinking") {
+        autoPhaseRef.current = "thinking";
+        setOpen((prev) => (prev ? prev : true));
+      }
       return;
     }
-    if (finishedAtRef.current === null) {
+    if (autoPhaseRef.current !== "done") {
+      autoPhaseRef.current = "done";
       finishedAtRef.current = Date.now();
       setOpen((prev) => (!prev ? prev : false));
     }
@@ -134,4 +146,3 @@ export function ReasoningBlock({ reasoning, thinkingStarted, thinkingInProgress 
     </div>
   );
 }
-

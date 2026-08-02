@@ -302,6 +302,7 @@ export function MessageList({
   const [filesPanelSessionId, setFilesPanelSessionId] = React.useState<string | null>(null);
   const [filesPanelFocusId, setFilesPanelFocusId] = React.useState<string | null>(null);
   const [attachmentPreview, setAttachmentPreview] = React.useState<ChatMessageAttachment | null>(null);
+  const scrollEffectFrameRef = React.useRef<number | null>(null);
   const longPressTimerRef = React.useRef<Map<string, NodeJS.Timeout>>(new Map());
   const activeLongPressRef = React.useRef<{ messageId: string; x: number; y: number } | null>(null);
   const LONG_PRESS_MS = 500;
@@ -365,10 +366,22 @@ export function MessageList({
     probeNote("MessageList.scrollEffect", { n: messages.length, sessionId: listSessionId });
     const container = parentRef.current;
     if (!container) return;
-    if (autoScrollPinnedRef.current) {
-      container.scrollTop = container.scrollHeight;
+    if (scrollEffectFrameRef.current != null) {
+      window.cancelAnimationFrame(scrollEffectFrameRef.current);
     }
-    flushJumpToBottomFab();
+    scrollEffectFrameRef.current = window.requestAnimationFrame(() => {
+      scrollEffectFrameRef.current = null;
+      if (autoScrollPinnedRef.current) {
+        container.scrollTop = container.scrollHeight;
+      }
+      flushJumpToBottomFab();
+    });
+    return () => {
+      if (scrollEffectFrameRef.current != null) {
+        window.cancelAnimationFrame(scrollEffectFrameRef.current);
+        scrollEffectFrameRef.current = null;
+      }
+    };
   }, [messages, flushJumpToBottomFab, listSessionId]);
 
   React.useEffect(() => {
@@ -395,6 +408,10 @@ export function MessageList({
   // 清理所有长按计时器
   React.useEffect(() => {
     return () => {
+      if (scrollEffectFrameRef.current != null) {
+        window.cancelAnimationFrame(scrollEffectFrameRef.current);
+        scrollEffectFrameRef.current = null;
+      }
       longPressTimerRef.current.forEach((timer) => clearTimeout(timer));
       longPressTimerRef.current.clear();
     };
@@ -488,14 +505,6 @@ export function MessageList({
     [onRequestDeepResearchFiles],
   );
 
-  if (messages.length === 0) {
-    return (
-      <div className="flex h-full items-center justify-center px-6 text-center">
-        <p className="max-w-md text-sm text-muted-foreground">{emptyText}</p>
-      </div>
-    );
-  }
-
   const hostFilesPanel = !onRequestDeepResearchFiles;
   const hostAttachmentPanel = !onRequestAttachmentPreview;
 
@@ -510,6 +519,14 @@ export function MessageList({
     },
     [onRequestAttachmentPreview],
   );
+
+  if (messages.length === 0) {
+    return (
+      <div className="flex h-full items-center justify-center px-6 text-center">
+        <p className="max-w-md text-sm text-muted-foreground">{emptyText}</p>
+      </div>
+    );
+  }
 
   return (
     <div className={["flex h-full min-h-0 w-full", className].filter(Boolean).join(" ")}>
