@@ -26,6 +26,33 @@ export type ArtifactTreeNode =
       artifact: ArtifactListItem;
     };
 
+/** Pure 16-hex legacy page archives (pre readable-slug naming). */
+const HEX_PAGE_NAME = /^[0-9a-f]{16}\.md$/i;
+
+/**
+ * Browse-list label for a file node.
+ * Prefer artifact.title for pages/ (and legacy hex-only names) so users see
+ * the source title instead of a content-hash filename.
+ */
+export function displayNameForArtifactFile(
+  fileName: string,
+  artifact: Pick<ArtifactListItem, "path" | "title">,
+): string {
+  const title = artifact.title?.trim();
+  if (!title) return fileName;
+  const underPages = artifact.path.includes("/pages/");
+  if (underPages || HEX_PAGE_NAME.test(fileName)) {
+    const safe = title
+      .normalize("NFKC")
+      .replace(/[^\u4e00-\u9fff\u3400-\u4dbfa-zA-Z0-9._\- ]+/g, "")
+      .trim()
+      .slice(0, 60);
+    if (!safe) return fileName;
+    return safe.toLowerCase().endsWith(".md") ? safe : `${safe}.md`;
+  }
+  return fileName;
+}
+
 /** Format byte size like "25.87 KB". */
 export function formatArtifactByteSize(bytes: number): string {
   if (!Number.isFinite(bytes) || bytes < 0) return "0 B";
@@ -148,7 +175,7 @@ export function buildArtifactTree(artifacts: ArtifactListItem[]): ArtifactTreeNo
     cursor.children.set(fileName, {
       type: "file",
       key: fileKey,
-      name: fileName,
+      name: displayNameForArtifactFile(fileName, artifact),
       artifact,
     });
   }

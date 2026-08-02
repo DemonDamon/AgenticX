@@ -1,8 +1,10 @@
 import { describe, expect, it, vi } from "vitest";
 import {
+  ARTIFACT_HREF_PREFIX,
   buildCompletionSummary,
   COMPLETION_SUMMARY_MAX_CHARS,
   fallbackSummary,
+  linkifyArtifactMentions,
   type CompletionSummaryInput,
 } from "./completion-summary";
 
@@ -24,18 +26,57 @@ const baseInput: CompletionSummaryInput = {
     citationCount: 26,
   },
   artifacts: [
-    { path: "research/r1/final-report.md", title: "终稿", kind: "report" },
-    { path: "research/r1/report.html", title: "HTML", kind: "report" },
+    {
+      id: "art-final",
+      path: "research/r1/final-report.md",
+      title: "终稿",
+      kind: "report",
+    },
+    {
+      id: "art-html",
+      path: "research/r1/report.html",
+      title: "HTML",
+      kind: "report",
+    },
   ],
   runId: "r1",
 };
 
+describe("linkifyArtifactMentions", () => {
+  it("turns backtick paths into artifact: links", () => {
+    const out = linkifyArtifactMentions(
+      "见 `research/r1/final-report.md`",
+      baseInput.artifacts,
+    );
+    expect(out).toBe(`见 [终稿](${ARTIFACT_HREF_PREFIX}art-final)`);
+  });
+
+  it("turns bare paths into artifact: links", () => {
+    const out = linkifyArtifactMentions(
+      "路径 research/r1/report.html 可打开",
+      baseInput.artifacts,
+    );
+    expect(out).toContain(`[HTML](${ARTIFACT_HREF_PREFIX}art-html)`);
+    expect(out).not.toContain("research/r1/report.html");
+  });
+});
+
 describe("buildCompletionSummary", () => {
   it("returns LLM text when callJson succeeds", async () => {
-    const callJson = vi.fn(async () => "本次调研覆盖 V4 架构与训练创新，关键结论是 MoE + MLA。产物见 final-report.md。");
+    const callJson = vi.fn(async () => "本次调研覆盖 V4 架构与训练创新，关键结论是 MoE + MLA。");
     const out = await buildCompletionSummary(baseInput, { callJson });
     expect(out).toContain("MoE + MLA");
     expect(callJson).toHaveBeenCalledOnce();
+  });
+
+  it("rewrites bare paths from the model into clickable artifact links", async () => {
+    const out = await buildCompletionSummary(baseInput, {
+      callJson: async () =>
+        "产物在：\n- `research/r1/final-report.md`\n- research/r1/report.html",
+    });
+    expect(out).toContain(`[终稿](${ARTIFACT_HREF_PREFIX}art-final)`);
+    expect(out).toContain(`[HTML](${ARTIFACT_HREF_PREFIX}art-html)`);
+    expect(out).not.toContain("`research/r1/final-report.md`");
   });
 
   it("falls back when callJson returns empty", async () => {
@@ -43,7 +84,7 @@ describe("buildCompletionSummary", () => {
       callJson: async () => "",
     });
     expect(out).toContain("DeepSeek V4 核心技术点");
-    expect(out).toContain("final-report.md");
+    expect(out).toContain(`${ARTIFACT_HREF_PREFIX}art-final`);
   });
 
   it("falls back when callJson throws", async () => {
@@ -58,7 +99,7 @@ describe("buildCompletionSummary", () => {
 
   it("drops a long think block instead of letting it eat the truncate window", async () => {
     const think = `<think>${"我先想想这次要怎么写摘要".repeat(200)}</think>`;
-    const body = "本次调研覆盖 V4 架构与训练创新。产物见 final-report.md。";
+    const body = "本次调研覆盖 V4 架构与训练创新。";
     const out = await buildCompletionSummary(baseInput, {
       callJson: async () => `${think}\n\n${body}`,
     });
@@ -85,20 +126,22 @@ describe("buildCompletionSummary", () => {
 });
 
 describe("fallbackSummary", () => {
-  it("includes topic, stats, and final-report path when present", () => {
+  it("includes topic, stats, and clickable final-report link when present", () => {
     const out = fallbackSummary(baseInput);
     expect(out).toContain("DeepSeek V4 核心技术点");
     expect(out).toContain("12");
-    expect(out).toContain("final-report.md");
+    expect(out).toContain(`[终稿](${ARTIFACT_HREF_PREFIX}art-final)`);
   });
 
-  it("does not mention final-report.md when no such artifact", () => {
+  it("does not mention final-report when no such artifact", () => {
     const out = fallbackSummary({
       ...baseInput,
-      artifacts: [{ path: "research/r1/report.html", title: "HTML", kind: "report" }],
+      artifacts: [
+        { id: "art-html", path: "research/r1/report.html", title: "HTML", kind: "report" },
+      ],
     });
-    expect(out).not.toContain("final-report.md");
-    expect(out).toContain("report.html");
+    expect(out).not.toContain("final-report");
+    expect(out).toContain(`[HTML](${ARTIFACT_HREF_PREFIX}art-html)`);
   });
 
   it("caps section list at 8", () => {

@@ -20,7 +20,7 @@ import {
   summarizeFetchFailures,
 } from "../web-search/page-fetch";
 import { archivePage } from "./page-archive";
-import { buildCompletionSummary } from "./completion-summary";
+import { buildCompletionSummary, fallbackSummary } from "./completion-summary";
 import { buildResearchPlan, enforcePlanBreadth, type ResearchPlan } from "./planner";
 import { formatTodayLine, runRecon, type ReconResult } from "./recon";
 import { CitationRegistry, type Citation } from "./registry";
@@ -92,6 +92,9 @@ export const DEEP_RESEARCH_SEARCH_DISABLED_HINT =
   "> 管理员未开启联网搜索，深度研究不可用，以下为普通回答。\n\n";
 export const DEEP_RESEARCH_SEARCH_FAILED =
   "> 深度研究检索失败，请稍后重试或改用普通对话。";
+/** 检索已成功、终稿已落盘，但 HTML/摘要等收尾步骤失败时的文案（勿误报成检索失败）。 */
+export const DEEP_RESEARCH_WRAPUP_DEGRADED =
+  "> 完整报告已生成并可下载；部分收尾步骤未成功，摘要为系统兜底。";
 
 const LANE_SUMMARY_SYSTEM =
   "你是调研备忘助手。根据检索摘录写一段简洁 Markdown 备忘（≤400 字），保留关键事实与 [N] 引用。只输出正文。";
@@ -550,7 +553,16 @@ export async function runDeepResearchTurn(
       let pagesArchived = 0;
       const reportContentParts: string[] = [];
       /** Final-report + P3 deliverables produced this run, for completion summary. */
-      const producedArtifacts: Array<{ path: string; title: string; kind: string }> = [];
+      const producedArtifacts: Array<{
+        id: string;
+        path: string;
+        title: string;
+        kind: string;
+      }> = [];
+      /** Hoisted so the outer catch can degrade gracefully after synthesize. */
+      let finalReportReady = false;
+      let summarySent = false;
+      let wrapupFallback: Parameters<typeof fallbackSummary>[0] | null = null;
 
       try {
         if (runSignal.aborted) throw new DOMException("Aborted", "AbortError");
@@ -1249,6 +1261,23 @@ export async function runDeepResearchTurn(
           stripThinkBlocks(reportContentParts.join("")),
           validIndexes,
         );
+        // Once the markdown body exists, later wrap-up failures must not look like
+        // a search failure — the user already has a usable report artifact.
+        const summaryInput = {
+          topic: plan.topic || originalUserQuery || "调研报告",
+          outline,
+          stats: {
+            queriesPlanned: totalQueries,
+            urlsDiscovered: totalDiscovered,
+            sourcesSelected: totalSelected,
+            pagesFetched: totalPagesFetched,
+            citationCount: citations.length,
+          },
+          artifacts: producedArtifacts,
+          runId,
+        };
+        wrapupFallback = summaryInput;
+
         if (finalReport.trim() && artifactsWritten < MAX_ARTIFACTS_PER_RUN) {
           const path = `research/${runId}/final-report.md`;
           const record = await artifactStore.write({
@@ -1262,7 +1291,13 @@ export async function runDeepResearchTurn(
             content: finalReport,
           });
           artifactsWritten += 1;
-          producedArtifacts.push({ path: record.path, title: record.title, kind: "report" });
+          producedArtifacts.push({
+            id: record.id,
+            path: record.path,
+            title: record.title,
+            kind: "report",
+          });
+          finalReportReady = true;
           enqueueEvent({
             type: "artifact",
             id: record.id,
@@ -1271,13 +1306,16 @@ export async function runDeepResearchTurn(
             kind: "report",
             bytes: record.byteSize,
           });
+        } else if (finalReport.trim()) {
+          finalReportReady = true;
         }
 
-        // P3: HTML / Markdown deliverables (isolated helper — keep this hook minimal).
+        // P3: HTML / Markdown deliverables — best-effort; do not fail the run.
         if (finalReport.trim()) {
           const collectArtifactEvent = (event: DeepResearchEvent) => {
-            if (event.type === "artifact" && event.path) {
+            if (event.type === "artifact" && event.path && event.id) {
               producedArtifacts.push({
+                id: event.id,
                 path: event.path,
                 title: event.title ?? "",
                 kind: event.kind ?? "report",
@@ -1285,59 +1323,67 @@ export async function runDeepResearchTurn(
             }
             enqueueEvent(event);
           };
-          artifactsWritten = await finalizeReportArtifacts({
-            artifactStore,
-            tenantId,
-            userId,
-            sessionId,
-            runId,
-            topic: plan.topic || originalUserQuery || "调研报告",
-            outline,
-            markdown: finalReport,
-            citations,
-            stats: {
-              queriesPlanned: totalQueries,
-              urlsDiscovered: totalDiscovered,
-              sourcesSelected: totalSelected,
-              pagesFetched: totalPagesFetched,
-            },
-            artifactsWritten,
-            enqueueEvent: collectArtifactEvent,
-          });
-        }
-
-        // Completion summary: LLM-generated natural-language wrap-up (not the full report).
-        // The chat area shows only this summary; the full report lives in artifacts.
-        try {
-          const summary = await buildCompletionSummary(
-            {
+          try {
+            artifactsWritten = await finalizeReportArtifacts({
+              artifactStore,
+              tenantId,
+              userId,
+              sessionId,
+              runId,
               topic: plan.topic || originalUserQuery || "调研报告",
               outline,
+              markdown: finalReport,
+              citations,
               stats: {
                 queriesPlanned: totalQueries,
                 urlsDiscovered: totalDiscovered,
                 sourcesSelected: totalSelected,
                 pagesFetched: totalPagesFetched,
-                citationCount: citations.length,
               },
-              artifacts: producedArtifacts,
-              runId,
-            },
-            {
-              callJson: (messages) =>
-                callGatewayJson(toolDeps, { ...baseBody, messages }),
-            },
-          );
-          if (summary.trim()) enqueueDelta(summary);
+              artifactsWritten,
+              enqueueEvent: collectArtifactEvent,
+            });
+          } catch (finalizeError) {
+            console.warn(
+              "[deep-research] finalizeReportArtifacts failed:",
+              finalizeError instanceof Error ? finalizeError.message : finalizeError,
+            );
+          }
+        }
+
+        // Completion summary: LLM-generated natural-language wrap-up (not the full report).
+        // The chat area shows only this summary; the full report lives in artifacts.
+        try {
+          summaryInput.artifacts = producedArtifacts;
+          const summary = await buildCompletionSummary(summaryInput, {
+            callJson: (messages) =>
+              callGatewayJson(toolDeps, { ...baseBody, messages }),
+          });
+          if (summary.trim()) {
+            enqueueDelta(summary);
+            summarySent = true;
+          }
         } catch (summaryError) {
           console.warn(
             "[deep-research] completion summary failed:",
             summaryError instanceof Error ? summaryError.message : summaryError,
           );
         }
+        if (!summarySent && finalReportReady) {
+          summaryInput.artifacts = producedArtifacts;
+          enqueueDelta(fallbackSummary(summaryInput));
+          summarySent = true;
+        }
 
-        const sourcesFrame = formatWebSearchSourcesSse(citationsToHits(citations));
-        if (sourcesFrame) safeControllerEnqueue(encoder.encode(sourcesFrame));
+        try {
+          const sourcesFrame = formatWebSearchSourcesSse(citationsToHits(citations));
+          if (sourcesFrame) safeControllerEnqueue(encoder.encode(sourcesFrame));
+        } catch (sourcesError) {
+          console.warn(
+            "[deep-research] sources frame failed:",
+            sourcesError instanceof Error ? sourcesError.message : sourcesError,
+          );
+        }
 
         enqueueEvent({ type: "phase", phase: "done", message: "深度研究完成" });
         await persistFinish("completed");
@@ -1352,10 +1398,30 @@ export async function runDeepResearchTurn(
           return;
         }
         console.warn("[deep-research] pipeline failed:", error);
-        enqueueDelta(`\n\n${DEEP_RESEARCH_SEARCH_FAILED}`);
-        enqueueEvent({ type: "phase", phase: "done", message: "失败" });
         const message = error instanceof Error ? error.message : "pipeline failed";
-        await persistFinish("failed", message);
+        // If the markdown report already landed, degrade gracefully instead of
+        // claiming "检索失败" (which is wrong after synthesize has finished).
+        if (finalReportReady) {
+          try {
+            if (!summarySent && wrapupFallback) {
+              wrapupFallback.artifacts = producedArtifacts;
+              enqueueDelta(fallbackSummary(wrapupFallback));
+            }
+            enqueueDelta(`\n\n${DEEP_RESEARCH_WRAPUP_DEGRADED}`);
+          } catch {
+            enqueueDelta(`\n\n${DEEP_RESEARCH_WRAPUP_DEGRADED}`);
+          }
+          enqueueEvent({
+            type: "phase",
+            phase: "done",
+            message: "深度研究完成（部分收尾失败）",
+          });
+          await persistFinish("completed", message);
+        } else {
+          enqueueDelta(`\n\n${DEEP_RESEARCH_SEARCH_FAILED}`);
+          enqueueEvent({ type: "phase", phase: "done", message: "失败" });
+          await persistFinish("failed", message);
+        }
         safeControllerEnqueue(encoder.encode("data: [DONE]\n\n"));
         controller.close();
       }
