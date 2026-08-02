@@ -173,7 +173,9 @@ describe("runDeepResearchTurn", () => {
     const { text, raw, events, hasSourcesFrame } = await readSsePayload(response);
     expect(raw).not.toContain("> 1/3");
     expect(raw).not.toContain("**来源**");
-    expect(text).toContain("核心结论正文");
+    // Report body is not streamed into chat; only a completion summary is.
+    expect(text).not.toContain("核心结论正文");
+    expect(events.some((e) => e.type === "artifact" && String(e.path).endsWith("final-report.md"))).toBe(true);
     expect(text).not.toContain("正在规划研究路径");
     expect(events.some((e) => e.type === "run_started")).toBe(true);
     expect(events.some((e) => e.type === "lane_started")).toBe(true);
@@ -255,8 +257,9 @@ describe("runDeepResearchTurn", () => {
       },
     );
 
-    const { text, hasSourcesFrame } = await readSsePayload(response);
-    expect(text).toContain("report");
+    const { text, hasSourcesFrame, events } = await readSsePayload(response);
+    // Report body lives in artifacts, not chat text.
+    expect(events.some((e) => e.type === "artifact" && String(e.path).endsWith("final-report.md"))).toBe(true);
     expect(hasSourcesFrame).toBe(true);
     expect(text).not.toContain(DEEP_RESEARCH_SEARCH_FAILED);
   });
@@ -366,8 +369,9 @@ describe("runDeepResearchTurn", () => {
 
     const { text, events, raw } = await readSsePayload(response);
     expect(events.some((e) => e.type === "phase" && e.phase === "synthesize")).toBe(true);
-    // Sectioned writer may emit section bodies and/or a budget truncation note.
-    expect(text.includes("budget-report") || text.includes("报告因时间预算截断")).toBe(true);
+    // Budget-exhausted runs still persist a final report artifact; chat shows summary only.
+    expect(events.some((e) => e.type === "artifact" && String(e.path).endsWith("final-report.md"))).toBe(true);
+    expect(text).not.toContain("budget-report");
     expect(raw).toContain("[DONE]");
   });
 
@@ -423,7 +427,9 @@ describe("runDeepResearchTurn", () => {
     const { text, events } = await readSsePayload(response);
     expect(lanesStarted).toBe(true);
     expect(events.some((e) => e.type === "clarify")).toBe(true);
-    expect(text).toContain("after-clarify");
+    // After clarify resumes, a final report artifact is produced; chat shows summary only.
+    expect(events.some((e) => e.type === "artifact" && String(e.path).endsWith("final-report.md"))).toBe(true);
+    expect(text).not.toContain("after-clarify");
     clearClarifyWaiters();
   });
 
@@ -585,8 +591,10 @@ describe("recon cold-start", () => {
       },
     );
 
-    const { text } = await readSsePayload(response);
-    expect(text).toContain("still-ok");
+    const { text, events } = await readSsePayload(response);
+    // Recon failure does not block the run; final report is still persisted.
+    expect(events.some((e) => e.type === "artifact" && String(e.path).endsWith("final-report.md"))).toBe(true);
+    expect(text).not.toContain("still-ok");
   });
 });
 
@@ -952,9 +960,16 @@ describe("page fetch + sectioned report", () => {
       },
     );
     const ok = await readSsePayload(responseOk);
-    expect(ok.text).toContain("# 主题调研");
-    expect(ok.text).toContain("## 目录");
-    expect((ok.text.match(/^## /gm) ?? []).length).toBeGreaterThanOrEqual(4);
+    // Chat area shows only a completion summary, not the full report body.
+    expect(ok.text).not.toContain("# 主题调研");
+    expect(ok.text).not.toContain("## 目录");
+    expect((ok.text.match(/^## /gm) ?? []).length).toBeLessThan(2);
+    // Final report is still persisted as an artifact.
+    expect(
+      ok.events.some(
+        (e) => e.type === "artifact" && String(e.path).endsWith("final-report.md"),
+      ),
+    ).toBe(true);
     expect(
       ok.events.some(
         (e) =>
@@ -1090,8 +1105,75 @@ describe("page fetch + sectioned report", () => {
       },
     );
     const { text, raw } = await readSsePayload(response);
-    expect(text).toContain("报告因时间预算截断");
+    // Truncation note lives in the persisted report, not the chat body.
+    expect(text).not.toContain("# 主题调研");
     expect(raw).toContain("[DONE]");
+  });
+
+  it("reserves write budget so sections finish after retrieval overruns", async () => {
+    const store = createMemoryArtifactStore();
+    let nowMs = 1_000_000;
+    const response = await runDeepResearchTurn(
+      { model: "m", messages: [{ role: "user", content: "主题调研" }] },
+      {
+        ...baseDeps({
+          artifactStore: store,
+          runId: "run-write-reserve",
+          now: () => nowMs,
+          fetchImpl: vi.fn(async (_url: string, init?: RequestInit) => {
+            const body = JSON.parse(String(init?.body ?? "{}")) as {
+              stream?: boolean;
+              messages?: Array<{ role: string; content?: string }>;
+            };
+            if (body.stream === false) {
+              const sys = body.messages?.[0]?.content ?? "";
+              if (sys.includes("大纲")) {
+                return {
+                  ok: true,
+                  json: async () => ({
+                    choices: [
+                      {
+                        message: {
+                          content: JSON.stringify({
+                            title: "主题调研",
+                            sections: [
+                              { id: "s1", title: "核心结论", brief: "b1" },
+                              { id: "s2", title: "分项分析", brief: "b2" },
+                              { id: "s3", title: "不确定性与信息缺口", brief: "b3" },
+                            ],
+                          }),
+                        },
+                      },
+                    ],
+                  }),
+                } as Response;
+              }
+              return {
+                ok: true,
+                json: async () => ({ choices: [{ message: { content: "memo" } }] }),
+              } as Response;
+            }
+            return synthUpstream("章节正文");
+          }) as unknown as typeof fetch,
+          buildPlan: async () => ({
+            topic: "主题调研",
+            complexity: "moderate" as const,
+            subQuestions: ["侧面A", "侧面B", "侧面C"],
+          }),
+          // Retrieval alone eats past TOTAL_BUDGET_MS - WRITE_RESERVE_MIN_MS.
+          executeSearch: async () => {
+            nowMs += 500_000;
+            return [{ title: "Doc", url: "https://example.com/doc", snippet: "s" }];
+          },
+        }),
+      },
+    );
+    await readSsePayload(response);
+    const rows = await store.listByRun("t1", "u1", "run-write-reserve");
+    const report = rows.find((r) => r.path.endsWith("final-report.md"));
+    expect(report).toBeDefined();
+    expect(report!.content).not.toContain("因时间预算截断");
+    expect(report!.content).toContain("不确定性与信息缺口");
   });
 
   it("archives fetched pages under research/<runId>/pages/", async () => {

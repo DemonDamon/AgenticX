@@ -2,6 +2,7 @@
  * Deep research stage 1: plan sub-questions via a non-streaming JSON completion.
  */
 
+import { extractJsonText } from "./llm-json";
 import {
   defaultFacetLanes,
   looksOpenEndedResearchQuery,
@@ -130,7 +131,8 @@ export function parseResearchPlanJson(text: string, fallbackQuery: string): Rese
     }
   };
 
-  const trimmed = text.trim();
+  // Models wrap payloads in <think> / fences / prose; normalize before the tier chain.
+  const trimmed = extractJsonText(text) || text.trim();
   if (!trimmed) return fallback;
 
   const direct = tryParse(trimmed);

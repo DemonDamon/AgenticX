@@ -20,6 +20,7 @@ import {
   summarizeFetchFailures,
 } from "../web-search/page-fetch";
 import { archivePage } from "./page-archive";
+import { buildCompletionSummary } from "./completion-summary";
 import { buildResearchPlan, enforcePlanBreadth, type ResearchPlan } from "./planner";
 import { formatTodayLine, runRecon, type ReconResult } from "./recon";
 import { CitationRegistry, type Citation } from "./registry";
@@ -70,12 +71,17 @@ export const MAX_LANES = 8;
 export const MIN_RESULTS_PER_LANE = 4;
 export const MAX_RESULTS_PER_LANE = 10;
 export const RECON_TIMEOUT_MS = 15_000;
-/** route.ts maxDuration = 900s；留 300s 给综述与网络抖动。 */
-export const TOTAL_BUDGET_MS = 600_000;
+/** route.ts maxDuration = 1500s；留 300s 给收尾与网络抖动。 */
+export const TOTAL_BUDGET_MS = 1_200_000;
 /** 车道内抓正文的时间上限，超出则该车道剩余来源只保留 snippet。 */
 export const FETCH_BUDGET_MS = 180_000;
 /** 低于此预算则跳过反思补搜，直接进综述。 */
 export const REFLECT_MIN_BUDGET_MS = 150_000;
+/**
+ * 写作阶段最低保留预算：检索/反思一旦触及该线就收尾，把剩余时间留给分节写作，
+ * 否则大纲会被写到一半就触发「因时间预算截断」。
+ */
+export const WRITE_RESERVE_MIN_MS = 240_000;
 /** Default wait for clarify answers before continuing with skip/defaults. */
 export const CLARIFY_TIMEOUT_MS = 300_000;
 /** Max wait for the optional clarifier LLM call (not the user resume wait). */
@@ -420,6 +426,8 @@ export async function runDeepResearchTurn(
   // research budget — otherwise a slow answer collapses planning to 1 lane.
   let budgetPausedMs = 0;
   const budgetLeft = () => TOTAL_BUDGET_MS - (now() - startedAt - budgetPausedMs);
+  /** Retrieval-side budget: keeps WRITE_RESERVE_MIN_MS untouched for section writing. */
+  const searchBudgetLeft = () => budgetLeft() - WRITE_RESERVE_MIN_MS;
   const runId = deps.runId ?? ulid().toLowerCase();
   const tenantId = deps.tenantId ?? "tenant";
   const userId = deps.userId ?? "user";
@@ -541,6 +549,8 @@ export async function runDeepResearchTurn(
       /** Separate from memo/report quota — page full-text archives. */
       let pagesArchived = 0;
       const reportContentParts: string[] = [];
+      /** Final-report + P3 deliverables produced this run, for completion summary. */
+      const producedArtifacts: Array<{ path: string; title: string; kind: string }> = [];
 
       try {
         if (runSignal.aborted) throw new DOMException("Aborted", "AbortError");
@@ -676,7 +686,7 @@ export async function runDeepResearchTurn(
         enqueueEvent({ type: "phase", phase: "plan", message: "正在规划研究路径…" });
 
         let plan: ResearchPlan;
-        if (budgetLeft() <= 0) {
+        if (searchBudgetLeft() <= 0) {
           plan = {
             topic: originalUserQuery || "研究主题",
             complexity: "moderate",
@@ -770,7 +780,7 @@ export async function runDeepResearchTurn(
 
           try {
             if (runSignal?.aborted) throw new DOMException("Aborted", "AbortError");
-            if (budgetLeft() <= 0) {
+            if (searchBudgetLeft() <= 0) {
               enqueueEvent({ type: "lane_done", laneId, status: "failed" });
               return empty;
             }
@@ -800,7 +810,7 @@ export async function runDeepResearchTurn(
               SEARCH_CONCURRENCY,
               async (variant) => {
                 try {
-                  if (budgetLeft() <= 0) return;
+                  if (searchBudgetLeft() <= 0) return;
                   const hits = await searchFn(
                     variant.query,
                     resultsPerLane,
@@ -854,7 +864,7 @@ export async function runDeepResearchTurn(
             });
 
             let pagesFetched = 0;
-            if (questionCitations.length > 0 && budgetLeft() > 0) {
+            if (questionCitations.length > 0 && searchBudgetLeft() > 0) {
               try {
                 const { pages, stats } = await fetchPages(
                   questionCitations.map((c) => c.url),
@@ -862,7 +872,7 @@ export async function runDeepResearchTurn(
                     signal: runSignal,
                     timeoutMs: Math.min(
                       PAGE_FETCH_TIMEOUT_MS,
-                      Math.max(1_000, budgetLeft()),
+                      Math.max(1_000, searchBudgetLeft()),
                     ),
                     backends: pageFetchCfg.backends,
                     apiKeys: pageFetchCfg.apiKeys,
@@ -909,7 +919,7 @@ export async function runDeepResearchTurn(
             }
 
             let memo = "";
-            if (questionCitations.length > 0 && budgetLeft() > 0) {
+            if (questionCitations.length > 0 && searchBudgetLeft() > 0) {
               const evidenceBits = questionCitations
                 .map((c) => {
                   const body = c.fullText ? c.fullText.slice(0, 2_000) : c.snippet;
@@ -1026,7 +1036,7 @@ export async function runDeepResearchTurn(
         if (runSignal?.aborted) throw new DOMException("Aborted", "AbortError");
 
         // --- Reflect + one-shot follow-up search ---
-        if (budgetLeft() > REFLECT_MIN_BUDGET_MS) {
+        if (searchBudgetLeft() > REFLECT_MIN_BUDGET_MS) {
           enqueueEvent({
             type: "phase",
             phase: "reflect",
@@ -1158,11 +1168,13 @@ export async function runDeepResearchTurn(
                 .map((line) => line.trim())
                 .find((line) => line.startsWith("data:"));
               if (!dataLine) {
+                // forward non-data keepalive/comment frames as-is
                 safeControllerEnqueue(encoder.encode(`${frame}\n\n`));
                 continue;
               }
               const data = dataLine.replace(/^data:\s*/, "");
               if (data === "[DONE]") continue;
+              let isContentDelta = false;
               try {
                 const parsed = JSON.parse(data) as {
                   choices?: Array<{ delta?: { content?: string } }>;
@@ -1172,21 +1184,25 @@ export async function runDeepResearchTurn(
                   sectionParts.push(piece);
                   reportContentParts.push(piece);
                   writer?.pushReport(piece);
+                  isContentDelta = true;
                 }
               } catch {
                 // forward non-delta frames as-is
               }
-              safeControllerEnqueue(encoder.encode(`${frame}\n\n`));
+              // Report content deltas are NOT forwarded to the chat transport —
+              // the chat area shows only a completion summary, not the full report.
+              if (!isContentDelta) {
+                safeControllerEnqueue(encoder.encode(`${frame}\n\n`));
+              }
             }
           }
           return stripThinkBlocks(sectionParts.join(""));
         };
 
+        // Build report content silently: accumulate into reportContentParts + run-store only.
         const titleBlock = `# ${outline.title}\n\n`;
-        enqueueDelta(titleBlock);
         reportContentParts.push(titleBlock);
         const toc = renderTableOfContents(outline);
-        enqueueDelta(toc);
         reportContentParts.push(toc);
 
         const previousSummaries: string[] = [];
@@ -1200,7 +1216,6 @@ export async function runDeepResearchTurn(
               .map((s) => s.title)
               .join("、");
             const note = `\n\n> 报告因时间预算截断，以下章节未展开：${remaining}`;
-            enqueueDelta(note);
             reportContentParts.push(note);
             break;
           }
@@ -1210,7 +1225,6 @@ export async function runDeepResearchTurn(
             message: `正在撰写第 ${i + 1}/${outline.sections.length} 节：${section.title}`,
           });
           const heading = `\n\n## ${section.title}\n\n`;
-          enqueueDelta(heading);
           reportContentParts.push(heading);
           const sectionBody = await streamSectionInto(
             buildSectionMessages({
@@ -1248,6 +1262,7 @@ export async function runDeepResearchTurn(
             content: finalReport,
           });
           artifactsWritten += 1;
+          producedArtifacts.push({ path: record.path, title: record.title, kind: "report" });
           enqueueEvent({
             type: "artifact",
             id: record.id,
@@ -1260,6 +1275,16 @@ export async function runDeepResearchTurn(
 
         // P3: HTML / Markdown deliverables (isolated helper — keep this hook minimal).
         if (finalReport.trim()) {
+          const collectArtifactEvent = (event: DeepResearchEvent) => {
+            if (event.type === "artifact" && event.path) {
+              producedArtifacts.push({
+                path: event.path,
+                title: event.title ?? "",
+                kind: event.kind ?? "report",
+              });
+            }
+            enqueueEvent(event);
+          };
           artifactsWritten = await finalizeReportArtifacts({
             artifactStore,
             tenantId,
@@ -1277,8 +1302,38 @@ export async function runDeepResearchTurn(
               pagesFetched: totalPagesFetched,
             },
             artifactsWritten,
-            enqueueEvent,
+            enqueueEvent: collectArtifactEvent,
           });
+        }
+
+        // Completion summary: LLM-generated natural-language wrap-up (not the full report).
+        // The chat area shows only this summary; the full report lives in artifacts.
+        try {
+          const summary = await buildCompletionSummary(
+            {
+              topic: plan.topic || originalUserQuery || "调研报告",
+              outline,
+              stats: {
+                queriesPlanned: totalQueries,
+                urlsDiscovered: totalDiscovered,
+                sourcesSelected: totalSelected,
+                pagesFetched: totalPagesFetched,
+                citationCount: citations.length,
+              },
+              artifacts: producedArtifacts,
+              runId,
+            },
+            {
+              callJson: (messages) =>
+                callGatewayJson(toolDeps, { ...baseBody, messages }),
+            },
+          );
+          if (summary.trim()) enqueueDelta(summary);
+        } catch (summaryError) {
+          console.warn(
+            "[deep-research] completion summary failed:",
+            summaryError instanceof Error ? summaryError.message : summaryError,
+          );
         }
 
         const sourcesFrame = formatWebSearchSourcesSse(citationsToHits(citations));

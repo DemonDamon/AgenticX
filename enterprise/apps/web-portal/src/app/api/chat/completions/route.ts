@@ -29,9 +29,10 @@ const GATEWAY_COMPLETIONS_URL =
 
 /**
  * Deep-research clarify alone can wait up to 5 minutes, then still needs plan/search
- * time. Keep this above CLARIFY_TIMEOUT_MS in the deep-research orchestrator.
+ * time. Keep this above CLARIFY_TIMEOUT_MS in the deep-research orchestrator, and
+ * above TOTAL_BUDGET_MS (20m) plus headroom for network jitter.
  */
-export const maxDuration = 900;
+export const maxDuration = 1500;
 export const runtime = "nodejs";
 
 export async function POST(request: Request) {

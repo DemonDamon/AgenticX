@@ -20,6 +20,16 @@ describe("parseResearchPlanJson", () => {
     expect(plan.subQuestions).toEqual(["能力对比", "Agent 工具", "部署成本"]);
   });
 
+  it("keeps every lane when the model prefixes a think block", () => {
+    const raw = `<think>该拆几条？也许 {3} 条吧</think>${JSON.stringify({
+      topic: "T",
+      sub_questions: ["A", "B", "C", "D"],
+    })}`;
+    const plan = parseResearchPlanJson(raw, "fallback");
+    expect(plan.topic).toBe("T");
+    expect(plan.subQuestions).toEqual(["A", "B", "C", "D"]);
+  });
+
   it("extracts JSON from markdown fences", () => {
     const plan = parseResearchPlanJson(
       '```json\n{"topic":"T","sub_questions":["A","B","C"]}\n```',

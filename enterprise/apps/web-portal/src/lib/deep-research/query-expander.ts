@@ -2,6 +2,8 @@
  * Expand one research sub-question into multiple search query variants.
  */
 
+import { parseLlmJson } from "./llm-json";
+
 export const MIN_VARIANTS_PER_LANE = 3;
 export const MAX_VARIANTS_PER_LANE = 6;
 
@@ -36,12 +38,6 @@ const KIND_SET = new Set<QueryVariant["kind"]>([
   "contrarian",
 ]);
 
-function stripFence(raw: string): string {
-  const trimmed = raw.trim();
-  const m = trimmed.match(/^```(?:json)?\s*([\s\S]*?)```$/i);
-  return (m?.[1] ?? trimmed).trim();
-}
-
 function dedupeVariants(variants: QueryVariant[]): QueryVariant[] {
   const seen = new Set<string>();
   const out: QueryVariant[] = [];
@@ -71,33 +67,30 @@ export function heuristicVariants(subQuestion: string): QueryVariant[] {
 
 export function parseVariantsJson(raw: string, subQuestion: string): QueryVariant[] {
   const fallback = heuristicVariants(subQuestion);
-  try {
-    const parsed = JSON.parse(stripFence(raw)) as unknown;
-    if (!Array.isArray(parsed)) return fallback;
-    const variants: QueryVariant[] = [];
-    for (const item of parsed) {
-      if (!item || typeof item !== "object") continue;
-      const obj = item as Record<string, unknown>;
-      const query = typeof obj.query === "string" ? obj.query.trim() : "";
-      if (!query) continue;
-      const kindRaw = typeof obj.kind === "string" ? obj.kind : "term";
-      const kind = KIND_SET.has(kindRaw as QueryVariant["kind"])
-        ? (kindRaw as QueryVariant["kind"])
-        : "term";
-      variants.push({ query, kind });
-    }
-    const deduped = dedupeVariants(variants);
-    if (deduped.length === 0) return fallback;
-    if (!deduped.some((v) => v.kind === "primary")) {
-      deduped.unshift({ query: subQuestion.trim() || "research", kind: "primary" });
-      return dedupeVariants(deduped);
-    }
-    return deduped.length >= MIN_VARIANTS_PER_LANE
-      ? deduped
-      : dedupeVariants([...deduped, ...fallback]);
-  } catch {
-    return fallback;
+  const parsed = parseLlmJson<unknown>(raw);
+  if (!Array.isArray(parsed)) return fallback;
+
+  const variants: QueryVariant[] = [];
+  for (const item of parsed) {
+    if (!item || typeof item !== "object") continue;
+    const obj = item as Record<string, unknown>;
+    const query = typeof obj.query === "string" ? obj.query.trim() : "";
+    if (!query) continue;
+    const kindRaw = typeof obj.kind === "string" ? obj.kind : "term";
+    const kind = KIND_SET.has(kindRaw as QueryVariant["kind"])
+      ? (kindRaw as QueryVariant["kind"])
+      : "term";
+    variants.push({ query, kind });
   }
+  const deduped = dedupeVariants(variants);
+  if (deduped.length === 0) return fallback;
+  if (!deduped.some((v) => v.kind === "primary")) {
+    deduped.unshift({ query: subQuestion.trim() || "research", kind: "primary" });
+    return dedupeVariants(deduped);
+  }
+  return deduped.length >= MIN_VARIANTS_PER_LANE
+    ? deduped
+    : dedupeVariants([...deduped, ...fallback]);
 }
 
 /** LLM 扩展失败时回落到 heuristicVariants，绝不抛。 */

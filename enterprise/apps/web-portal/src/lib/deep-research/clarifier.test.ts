@@ -7,6 +7,26 @@ describe("parseClarifierJson", () => {
     expect(parseClarifierJson("")).toEqual({ needed: false });
   });
 
+  it("still clarifies when the model prefixes a think block", () => {
+    const payload = {
+      needed: true,
+      questions: [
+        {
+          id: "q1",
+          question: "想了解哪些方向？",
+          options: [
+            { id: "a", label: "架构" },
+            { id: "b", label: "成本" },
+          ],
+        },
+      ],
+    };
+    const raw = `<think>需要澄清吗？大概 {需要}</think>${JSON.stringify(payload)}`;
+    const result = parseClarifierJson(raw);
+    expect(result.needed).toBe(true);
+    expect(result.needed && result.questions).toHaveLength(1);
+  });
+
   it("parses standard JSON and clamps to 2 questions", () => {
     const payload = {
       needed: true,

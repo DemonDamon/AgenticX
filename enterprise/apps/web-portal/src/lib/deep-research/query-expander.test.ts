@@ -19,6 +19,12 @@ describe("heuristicVariants", () => {
 });
 
 describe("parseVariantsJson", () => {
+  it("keeps model variants when a think block is prefixed", () => {
+    const raw = `<think>要几条变体？{4}条</think>[{"query":"A","kind":"primary"},{"query":"B","kind":"english"},{"query":"C","kind":"authority"}]`;
+    const variants = parseVariantsJson(raw, "原始子问题");
+    expect(variants.map((v) => v.query)).toEqual(["A", "B", "C"]);
+  });
+
   it("parses fenced json and dedupes", () => {
     const raw = `\`\`\`json
 [{"query":"A","kind":"primary"},{"query":"a","kind":"term"},{"query":"B","kind":"authority"}]

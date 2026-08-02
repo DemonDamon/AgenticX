@@ -172,7 +172,7 @@ function ExportActions({ runId }: { runId: string }) {
 
 /**
  * Kimi-style delivery strip: final report card(s) + folder card for all files.
- * Render after the report body so deliverables sit at the end of the turn.
+ * Render after the completion summary so deliverables sit at the end of the turn.
  */
 export function DeepResearchDelivery({
   deepResearch,
