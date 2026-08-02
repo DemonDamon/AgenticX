@@ -168,7 +168,7 @@ function ThinkingDotsPlaceholder() {
   );
 }
 
-function AssistantMessageMarkdown({
+function AssistantMessageMarkdownImpl({
   text,
   className,
   sources,
@@ -185,18 +185,49 @@ function AssistantMessageMarkdown({
   citationMessageId?: string;
   onOpenCitationInSheet?: (messageId: string, index1Based: number) => void;
 }) {
+  // createAssistantMdComponents() mints fresh component functions, so react-markdown
+  // sees new element *types* whenever the returned object changes identity — React then
+  // unmounts and rebuilds the whole markdown subtree, remounting every citation chip and
+  // favicon. Callers pass inline arrows for these handlers, which used to invalidate the
+  // memo on every keystroke. Route the handlers through refs so only real content changes
+  // (sources / attachments) can rebuild the component map.
+  const onOpenAttachmentRef = React.useRef(onOpenAttachment);
+  const onOpenCitationInSheetRef = React.useRef(onOpenCitationInSheet);
+  React.useEffect(() => {
+    onOpenAttachmentRef.current = onOpenAttachment;
+    onOpenCitationInSheetRef.current = onOpenCitationInSheet;
+  }, [onOpenAttachment, onOpenCitationInSheet]);
+
+  const hasOpenAttachment = Boolean(onOpenAttachment);
+  const hasOpenCitation = Boolean(onOpenCitationInSheet && citationMessageId);
+
+  const stableOpenAttachment = React.useCallback((attachment: ChatMessageAttachment) => {
+    onOpenAttachmentRef.current?.(attachment);
+  }, []);
+  const stableOpenCitation = React.useCallback(
+    (index1Based: number) => {
+      if (!citationMessageId) return;
+      onOpenCitationInSheetRef.current?.(citationMessageId, index1Based);
+    },
+    [citationMessageId],
+  );
+
   const components = React.useMemo(
     () =>
       createAssistantMdComponents({
         sources,
         sessionAttachments,
-        onOpenAttachment,
-        onOpenCitationInSheet:
-          onOpenCitationInSheet && citationMessageId
-            ? (index1Based) => onOpenCitationInSheet(citationMessageId, index1Based)
-            : undefined,
+        onOpenAttachment: hasOpenAttachment ? stableOpenAttachment : undefined,
+        onOpenCitationInSheet: hasOpenCitation ? stableOpenCitation : undefined,
       }),
-    [sources, sessionAttachments, onOpenAttachment, citationMessageId, onOpenCitationInSheet],
+    [
+      sources,
+      sessionAttachments,
+      hasOpenAttachment,
+      hasOpenCitation,
+      stableOpenAttachment,
+      stableOpenCitation,
+    ],
   );
   return (
     <div className={`agx-assistant-md ${className ?? ""}`.trim()}>
@@ -206,6 +237,9 @@ function AssistantMessageMarkdown({
     </div>
   );
 }
+
+/** Memoized so composer keystrokes never re-parse settled assistant markdown. */
+const AssistantMessageMarkdown = React.memo(AssistantMessageMarkdownImpl);
 
 function IconGlobe({ className }: { className?: string }) {
   return (

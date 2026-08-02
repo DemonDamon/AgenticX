@@ -111,6 +111,19 @@ async function fetchBffFaviconObjectUrl(host: string): Promise<string | null> {
 const faviconObjectUrlByHost = new Map<string, string | null>();
 const faviconRequestsByHost = new Map<string, Promise<string | null>>();
 
+/**
+ * host → the exact src (blob or CDN fallback) that already decoded into a usable image.
+ * Remounts can then paint the icon on the very first frame instead of flashing the muted
+ * placeholder — that flash is what made source chips look like they were jittering /
+ * duplicating while the composer or the streaming answer re-rendered the message tree.
+ */
+const faviconVerifiedSrcByHost = new Map<string, string>();
+
+/** `undefined` = never resolved; `null` = resolved as unavailable. */
+export function getCachedFaviconObjectUrl(host: string): string | null | undefined {
+  return faviconObjectUrlByHost.get(host);
+}
+
 export function loadFaviconObjectUrl(host: string): Promise<string | null> {
   if (faviconObjectUrlByHost.has(host)) {
     return Promise.resolve(faviconObjectUrlByHost.get(host) ?? null);
@@ -134,11 +147,13 @@ function invalidateFaviconObjectUrl(host: string): void {
   const cached = faviconObjectUrlByHost.get(host);
   if (cached) URL.revokeObjectURL(cached);
   faviconObjectUrlByHost.set(host, null);
+  faviconVerifiedSrcByHost.delete(host);
 }
 
 export function __resetFaviconCacheForTests(): void {
   faviconObjectUrlByHost.clear();
   faviconRequestsByHost.clear();
+  faviconVerifiedSrcByHost.clear();
 }
 
 function isUsableFaviconImage(img: HTMLImageElement): boolean {
@@ -153,7 +168,7 @@ function isUsableFaviconImage(img: HTMLImageElement): boolean {
  * Success → favicon only (letter unmounted — no stacking over translucent PNGs).
  * Failure → letter avatar only.
  */
-export function WebSearchFavicon({
+function WebSearchFaviconImpl({
   host,
   label,
   size = 18,
@@ -163,10 +178,15 @@ export function WebSearchFavicon({
   const cdnCandidates = React.useMemo(() => {
     return resolveFaviconCandidates(host, 64).filter((u) => !u.startsWith("/api/"));
   }, [host]);
-  const [blobSrc, setBlobSrc] = React.useState<string | null>(null);
+  // Seed from the module caches so a remount does not blank an already-known icon.
+  const cachedOnMount = getCachedFaviconObjectUrl(host);
+  const verifiedOnMount = faviconVerifiedSrcByHost.get(host) ?? null;
+  const [verifiedSrc, setVerifiedSrc] = React.useState<string | null>(verifiedOnMount);
+  const [blobSrc, setBlobSrc] = React.useState<string | null>(cachedOnMount ?? null);
   const [cdnIdx, setCdnIdx] = React.useState(0);
-  const [imgReady, setImgReady] = React.useState(false);
-  const [bffDone, setBffDone] = React.useState(false);
+  const [imgReady, setImgReady] = React.useState(Boolean(verifiedOnMount));
+  const [bffDone, setBffDone] = React.useState(cachedOnMount !== undefined);
+  const hostRef = React.useRef(host);
   const letter = (label || host || "?").replace(/^www\./i, "").charAt(0).toUpperCase() || "?";
   const color = PALETTE[hashHue(host || letter)] ?? PALETTE[0];
   const radius =
@@ -174,12 +194,26 @@ export function WebSearchFavicon({
   const fontSize = Math.max(8, Math.min(Math.round(size * 0.55), size - 2));
 
   React.useEffect(() => {
-    let cancelled = false;
-    setBlobSrc(null);
-    setCdnIdx(0);
-    setImgReady(false);
-    setBffDone(false);
+    const hostChanged = hostRef.current !== host;
+    hostRef.current = host;
+    const cached = getCachedFaviconObjectUrl(host);
+    const verified = faviconVerifiedSrcByHost.get(host) ?? null;
 
+    // Only reset on an actual host change — resetting on every mount is what
+    // produced the placeholder→icon flash on each re-render of the message tree.
+    if (hostChanged) {
+      setVerifiedSrc(verified);
+      setBlobSrc(cached ?? null);
+      setCdnIdx(0);
+      setImgReady(Boolean(verified));
+      setBffDone(cached !== undefined);
+    }
+
+    // Already-painted icon, or a cache hit (resolved URL / known-unavailable):
+    // no async round trip, and no src churn that would re-trigger decoding.
+    if (verified || cached !== undefined) return;
+
+    let cancelled = false;
     void (async () => {
       const url = await loadFaviconObjectUrl(host);
       if (cancelled) return;
@@ -195,7 +229,7 @@ export function WebSearchFavicon({
   }, [host]);
 
   const cdnSrc = bffDone && !blobSrc ? cdnCandidates[cdnIdx] : undefined;
-  const src = blobSrc ?? cdnSrc;
+  const src = verifiedSrc ?? blobSrc ?? cdnSrc;
   const cdnExhausted = bffDone && !blobSrc && cdnIdx >= cdnCandidates.length;
   const showIcon = Boolean(src && imgReady);
   const showLetter = cdnExhausted && !showIcon;
@@ -203,8 +237,16 @@ export function WebSearchFavicon({
 
   const advanceCdn = React.useCallback(() => {
     setImgReady(false);
+    // A previously verified src can go stale (revoked blob); make sure the CDN chain is
+    // reachable even when the BFF round trip was skipped thanks to the caches above.
+    setBffDone(true);
     setCdnIdx((v) => v + 1);
   }, []);
+
+  const dropVerified = React.useCallback(() => {
+    faviconVerifiedSrcByHost.delete(host);
+    setVerifiedSrc(null);
+  }, [host]);
 
   return (
     <span
@@ -245,22 +287,27 @@ export function WebSearchFavicon({
           onLoad={(event) => {
             const img = event.currentTarget;
             if (!isUsableFaviconImage(img)) {
+              dropVerified();
               if (blobSrc) {
                 invalidateFaviconObjectUrl(host);
                 setBlobSrc(null);
                 setImgReady(false);
+                setBffDone(true);
                 return;
               }
               advanceCdn();
               return;
             }
+            faviconVerifiedSrcByHost.set(host, src);
             setImgReady(true);
           }}
           onError={() => {
+            dropVerified();
             if (blobSrc) {
               invalidateFaviconObjectUrl(host);
               setBlobSrc(null);
               setImgReady(false);
+              setBffDone(true);
               return;
             }
             advanceCdn();
@@ -270,3 +317,9 @@ export function WebSearchFavicon({
     </span>
   );
 }
+
+/**
+ * Memoized: the composer and streaming tokens re-render the whole message tree on
+ * every keystroke / chunk, and re-rendering identical chips only risked layout churn.
+ */
+export const WebSearchFavicon = React.memo(WebSearchFaviconImpl);

@@ -133,6 +133,23 @@ export function MachiChatView({
   const [filesPanelFocusId, setFilesPanelFocusId] = React.useState<string | null>(null);
   const [attachmentPreview, setAttachmentPreview] = React.useState<ChatMessageAttachment | null>(null);
 
+  // Stable identities: MessageList folds these into memo dependencies that decide whether
+  // the assistant markdown component map is rebuilt, so inline arrows here would rebuild
+  // (and visibly re-mount) every rendered citation chip on each composer keystroke.
+  const requestDeepResearchFiles = React.useCallback(
+    (sessionId: string, focusArtifactId?: string | null) => {
+      setAttachmentPreview(null);
+      setFilesPanelSessionId(sessionId);
+      setFilesPanelFocusId(focusArtifactId ?? null);
+    },
+    [],
+  );
+  const requestAttachmentPreview = React.useCallback((attachment: ChatMessageAttachment) => {
+    setFilesPanelSessionId(null);
+    setFilesPanelFocusId(null);
+    setAttachmentPreview(attachment);
+  }, []);
+
   React.useEffect(() => {
     setFilesPanelSessionId(null);
     setFilesPanelFocusId(null);
@@ -806,16 +823,8 @@ export function MachiChatView({
                 onShowNextResponseVersion={showNextResponseVersion}
                 onShowPreviousRetryVersion={showPreviousRetryVersion}
                 onShowNextRetryVersion={showNextRetryVersion}
-                onRequestDeepResearchFiles={(sessionId, focusArtifactId) => {
-                  setAttachmentPreview(null);
-                  setFilesPanelSessionId(sessionId);
-                  setFilesPanelFocusId(focusArtifactId ?? null);
-                }}
-                onRequestAttachmentPreview={(attachment) => {
-                  setFilesPanelSessionId(null);
-                  setFilesPanelFocusId(null);
-                  setAttachmentPreview(attachment);
-                }}
+                onRequestDeepResearchFiles={requestDeepResearchFiles}
+                onRequestAttachmentPreview={requestAttachmentPreview}
                 onCopy={(content) => {
                   console.log("Copied:", content);
                 }}

@@ -47,8 +47,11 @@ function injectCitations(
           return <React.Fragment key={`${keyPrefix}-f-${i}`}>{part.value}</React.Fragment>;
         }
         return (
+          // Key intentionally excludes keyPrefix: streaming reshapes the markdown AST,
+          // so a path-derived key remounted every chip on each token and made the
+          // favicons flash / appear to jump.
           <WebSearchCitation
-            key={`${keyPrefix}-c-${i}-${part.index1Based}`}
+            key={`cite-${part.index1Based}-${i}`}
             index1Based={part.index1Based}
             source={source}
             onOpenInSheet={onOpenInSheet}
