@@ -20,6 +20,8 @@ import {
   selectHitsWithinBudget,
   WEB_SEARCH_SNIPPET_CHARS,
 } from "./context-budget";
+import { resolveFollowUpQuery } from "./follow-up";
+import { sanitizeHistoryForUpstream } from "./history-sanitize";
 import { executeWebSearch, formatHits, type WebSearchHit, type WebSearchRuntimeConfig } from "./providers";
 import { resolveWebSearchConfig, type TenantWebSearchRow } from "./config";
 import { rerankHits } from "./rerank";
@@ -55,7 +57,12 @@ export const WEB_SEARCH_SYSTEM_HINT =
   "例外：当前公历日期、星期、时刻必须以系统提示「当前时间」章节为准，禁止用搜索结果覆盖本机日期。" +
   "禁止输出任何工具调用 XML/标签（包括 minimax:tool_call、<invoke>、tool_call 等）。" +
   "部分结果附带「发布时间」。若其与系统提示的当前时间相差较大（例如非同一天的天气、非近期的行情），" +
-  "须明确标注该数据的日期并说明可能已过时，禁止把历史数据当作今日事实陈述。";
+  "须明确标注该数据的日期并说明可能已过时，禁止把历史数据当作今日事实陈述。" +
+  "下方 [N] 编号仅对应本轮搜索结果；对话历史中出现过的编号属于往轮、已失效，" +
+  "禁止拿历史编号与本轮结果互相比对，也不要因编号对不上而推翻自己此前的结论。" +
+  "若本轮结果整体与用户问题无关（例如检索词被泛化、命中的都是同名的其他事物），" +
+  "须直接说明「本次检索结果与问题无关」，随后基于对话上下文已确认的事实作答，" +
+  "禁止用无关结果拼凑答案或改写此前结论。";
 
 /**
  * Injected on search-skip turns so thinking models (Kimi-like) do not narrate
@@ -548,13 +555,32 @@ export async function runWebSearchTurn(
   deps: GatewayFetchDeps,
 ): Promise<Response> {
   const baseBody = stripWebSearchFlag(parsedBody);
-  const originalMessages = stripEmptyAssistantMessages(
-    Array.isArray(baseBody.messages) ? (baseBody.messages as ChatMessage[]) : [],
+  // Sanitize assistant history before search/skip paths so prior <think> chains and
+  // stale [N] citation indices never reach the upstream model.
+  const originalMessages = sanitizeHistoryForUpstream(
+    stripEmptyAssistantMessages(
+      Array.isArray(baseBody.messages) ? (baseBody.messages as ChatMessage[]) : [],
+    ),
   );
 
   const tenant = deps.loadTenantConfig ? await deps.loadTenantConfig() : null;
   const cfg: WebSearchRuntimeConfig = resolveWebSearchConfig(tenant);
   const { tools: _tools, tool_choice: _toolChoice, ...rest } = baseBody;
+
+  const respondWithoutSearch = async (reason: string): Promise<Response> => {
+    console.info(`[web-search] skipped search-first (reason=${reason})`);
+    try {
+      const upstream = await callGatewayStream(deps, {
+        ...rest,
+        stream: true,
+        // Hint first so thinking models do not narrate "无需功能调用".
+        messages: withTrivialTurnContext(withCurrentTimeContext(originalMessages)),
+      });
+      return pipeUpstreamSse(upstream, {});
+    } catch (error) {
+      return gatewayUnavailableResponse(error instanceof Error ? error.message : "gateway unreachable");
+    }
+  };
 
   if (!cfg.enabled) {
     try {
@@ -571,8 +597,22 @@ export async function runWebSearchTurn(
 
   // Skip classification uses the bare last-user turn (greetings must not inherit prior intent).
   const queryForSkip = extractLastUserQuery(originalMessages);
-  // Search keywords may splice a short slot-fill onto the previous user intent.
-  const query = buildWebSearchQuery(originalMessages);
+  // Referential follow-ups resolve entity from prior assistant reply; else slot-fill / raw last.
+  const resolved = resolveFollowUpQuery(originalMessages);
+
+  // 指代追问但历史里消解不出实体 → 本轮不搜（搜代词只会得到跑题 SERP），
+  // 直接基于对话上下文作答。
+  if (!webSearchAlwaysOn() && resolved && !resolved.entity) {
+    return respondWithoutSearch("referential_no_entity");
+  }
+  if (resolved?.entity) {
+    console.info(`[web-search] follow-up resolved entity=${resolved.entity}`);
+  }
+  // When ALWAYS=1 and entity resolution failed, fall back to the raw last-user text
+  // so the escape hatch still performs a search instead of a missing-query degrade.
+  const query = resolved
+    ? resolved.query || extractLastUserQuery(originalMessages)
+    : buildWebSearchQuery(originalMessages);
 
   // Before: only pure date/time questions short-circuited search-first.
   // After: any self-contained turn (greeting / assistant meta / attachment-only /
@@ -585,18 +625,7 @@ export async function runWebSearchTurn(
         rawQuery: extractLastUserRawText(originalMessages),
       });
   if (skip && skip.need === "skip") {
-    console.info(`[web-search] skipped search-first (reason=${skip.reason})`);
-    try {
-      const upstream = await callGatewayStream(deps, {
-        ...rest,
-        stream: true,
-        // Hint first so thinking models do not narrate "无需功能调用".
-        messages: withTrivialTurnContext(withCurrentTimeContext(originalMessages)),
-      });
-      return pipeUpstreamSse(upstream, {});
-    } catch (error) {
-      return gatewayUnavailableResponse(error instanceof Error ? error.message : "gateway unreachable");
-    }
+    return respondWithoutSearch(skip.reason);
   }
 
   const searchFn = deps.executeSearch ?? executeWebSearch;
