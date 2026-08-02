@@ -52,6 +52,29 @@ export function resolveCitationSource(
   return sources[index1Based - 1];
 }
 
+export type PartitionedSource = {
+  source: WebSearchSource;
+  /** 1-based index in the original sources array (for [N] highlight). */
+  index1Based: number;
+};
+
+/** Split sources into model-used vs unused; legacy rows without the flag all count as used. */
+export function partitionSourcesByUsage(sources: WebSearchSource[] | undefined): {
+  used: PartitionedSource[];
+  unused: PartitionedSource[];
+} {
+  if (!sources?.length) return { used: [], unused: [] };
+  const hasFlag = sources.some((s) => typeof s.usedByModel === "boolean");
+  const used: PartitionedSource[] = [];
+  const unused: PartitionedSource[] = [];
+  sources.forEach((source, index) => {
+    const row = { source, index1Based: index + 1 };
+    if (!hasFlag || source.usedByModel === true) used.push(row);
+    else unused.push(row);
+  });
+  return { used, unused };
+}
+
 export type CitationMatch = {
   type: "text" | "citation";
   value: string;

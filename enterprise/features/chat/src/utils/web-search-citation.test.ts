@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { WebSearchSource } from "@agenticx/core-api";
 import {
+  partitionSourcesByUsage,
   resolveCitationSource,
   siteLabelFromSource,
   splitCitationText,
@@ -47,5 +48,23 @@ describe("web-search-citation", () => {
     expect(resolveCitationSource(sources, 1)?.url).toContain("venturebeat");
     expect(resolveCitationSource(sources, 0)).toBeUndefined();
     expect(resolveCitationSource(sources, 99)).toBeUndefined();
+  });
+
+  it("partitionSourcesByUsage splits mixed usedByModel flags", () => {
+    const mixed: WebSearchSource[] = [
+      { title: "A", url: "https://a.com", snippet: "a", usedByModel: true },
+      { title: "B", url: "https://b.com", snippet: "b", usedByModel: false },
+      { title: "C", url: "https://c.com", snippet: "c", usedByModel: true },
+    ];
+    const { used, unused } = partitionSourcesByUsage(mixed);
+    expect(used.map((r) => r.index1Based)).toEqual([1, 3]);
+    expect(unused.map((r) => r.index1Based)).toEqual([2]);
+  });
+
+  it("partitionSourcesByUsage treats legacy sources without flag as all used", () => {
+    const { used, unused } = partitionSourcesByUsage(sources);
+    expect(used).toHaveLength(2);
+    expect(unused).toHaveLength(0);
+    expect(used.map((r) => r.index1Based)).toEqual([1, 2]);
   });
 });

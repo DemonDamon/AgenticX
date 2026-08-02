@@ -15,8 +15,14 @@
 
 import { stripEmptyAssistantMessages } from "../chat-completion-sanitize";
 import { withCurrentTimeContext } from "../current-time";
+import {
+  resolveInjectionBudgetChars,
+  selectHitsWithinBudget,
+  WEB_SEARCH_SNIPPET_CHARS,
+} from "./context-budget";
 import { executeWebSearch, formatHits, type WebSearchHit, type WebSearchRuntimeConfig } from "./providers";
 import { resolveWebSearchConfig, type TenantWebSearchRow } from "./config";
+import { rerankHits } from "./rerank";
 import { classifyWebSearchNeed } from "./search-necessity";
 
 export const WEB_SEARCH_TOOL = {
@@ -71,9 +77,8 @@ export const WEB_SEARCH_TOOL_CHOICE = {
 const ADMIN_DISABLED_HINT = "> 管理员已关闭联网搜索。\n\n";
 const UNAVAILABLE_HINT = "> 联网搜索暂不可用，以下回答基于模型已有知识。\n\n";
 
-/** Cap model-bound context (UI sources may still list the full hit set). */
-export const WEB_SEARCH_CONTEXT_HIT_LIMIT = 10;
-export const WEB_SEARCH_CONTEXT_SNIPPET_CHARS = 320;
+/** @deprecated Prefer WEB_SEARCH_SNIPPET_CHARS from context-budget; kept for test imports. */
+export const WEB_SEARCH_CONTEXT_SNIPPET_CHARS = WEB_SEARCH_SNIPPET_CHARS;
 
 type ChatMessage = {
   role: string;
@@ -230,30 +235,33 @@ function stripWebSearchFlag<T extends Record<string, unknown>>(body: T): Omit<T,
   return rest;
 }
 
-/** Structured SSE frame (not mixed into delta.content). */
-export function formatWebSearchSourcesSse(hits: WebSearchHit[]): string {
-  const payload = hits.map((hit) => ({
-    title: hit.title,
-    url: hit.url,
-    snippet: hit.snippet,
-  }));
+/** Structured SSE frame (not mixed into delta.content). selected first for [N] alignment. */
+export function formatWebSearchSourcesSse(
+  selected: WebSearchHit[],
+  remainder: WebSearchHit[] = [],
+): string {
+  const payload = [
+    ...selected.map((hit) => ({
+      title: hit.title,
+      url: hit.url,
+      snippet: hit.snippet,
+      usedByModel: true,
+    })),
+    ...remainder.map((hit) => ({
+      title: hit.title,
+      url: hit.url,
+      snippet: hit.snippet,
+      usedByModel: false,
+    })),
+  ];
   return sseDataFrame({ agenticx_web_search_sources: payload });
 }
 
-function truncateSnippet(text: string, maxChars: number): string {
-  const normalized = text.replace(/\s+/g, " ").trim();
-  if (normalized.length <= maxChars) return normalized;
-  return `${normalized.slice(0, Math.max(1, maxChars - 1)).trimEnd()}…`;
-}
-
-/** Shrink hits before injecting into the model prompt (UI still gets full `hits`). */
+/**
+ * @deprecated Prefer selectHitsWithinBudget + rerankHits. Thin wrapper for older tests.
+ */
 export function compactHitsForModel(hits: WebSearchHit[]): WebSearchHit[] {
-  return hits.slice(0, WEB_SEARCH_CONTEXT_HIT_LIMIT).map((hit) => ({
-    title: hit.title,
-    url: hit.url,
-    snippet: truncateSnippet(hit.snippet, WEB_SEARCH_CONTEXT_SNIPPET_CHARS),
-    publishedAt: hit.publishedAt,
-  }));
+  return selectHitsWithinBudget(hits, undefined).selected;
 }
 
 export function withSearchContext(messages: ChatMessage[], hits: WebSearchHit[]): ChatMessage[] {
@@ -525,8 +533,13 @@ async function pipeWithPrefix(upstream: Response, prefixText: string): Promise<R
   return pipeUpstreamSse(upstream, { prefixText });
 }
 
-async function pipeWithSourcesAppendix(upstream: Response, hits: WebSearchHit[]): Promise<Response> {
-  const sourcesFrame = hits.length > 0 ? formatWebSearchSourcesSse(hits) : "";
+async function pipeWithSourcesAppendix(
+  upstream: Response,
+  selected: WebSearchHit[],
+  remainder: WebSearchHit[] = [],
+): Promise<Response> {
+  const sourcesFrame =
+    selected.length + remainder.length > 0 ? formatWebSearchSourcesSse(selected, remainder) : "";
   return pipeUpstreamSse(upstream, { sourcesFrame });
 }
 
@@ -603,10 +616,20 @@ export async function runWebSearchTurn(
     console.warn("[web-search] search failed, degrading:", error instanceof Error ? error.message : error);
   }
 
+  const modelName = typeof rest.model === "string" ? rest.model : undefined;
+  const ranked = searchFailed ? [] : rerankHits(query, hits);
+  const { selected, remainder } = searchFailed
+    ? { selected: [] as WebSearchHit[], remainder: [] as WebSearchHit[] }
+    : selectHitsWithinBudget(ranked, modelName);
+  if (!searchFailed) {
+    const budget = resolveInjectionBudgetChars(modelName);
+    console.info(
+      `[web-search] model=${modelName ?? "unknown"} budget=${budget} selected=${selected.length}/${hits.length}`,
+    );
+  }
+
   const messages = withCurrentTimeContext(
-    searchFailed
-      ? originalMessages
-      : withSearchContext(originalMessages, compactHitsForModel(hits)),
+    searchFailed ? originalMessages : withSearchContext(originalMessages, selected),
   );
 
   let upstream: Response;
@@ -623,5 +646,5 @@ export async function runWebSearchTurn(
   if (searchFailed) {
     return pipeWithPrefix(upstream, UNAVAILABLE_HINT);
   }
-  return pipeWithSourcesAppendix(upstream, hits);
+  return pipeWithSourcesAppendix(upstream, selected, remainder);
 }
