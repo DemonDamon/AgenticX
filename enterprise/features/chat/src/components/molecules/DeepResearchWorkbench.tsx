@@ -253,16 +253,57 @@ function StatusRow({
   title: string;
   status: "running" | "done" | "failed";
 }) {
+  // Match ToolsCard chrome so phase status rows share the same corner radius.
   return (
-    <div className="mb-3 flex items-center gap-2 text-sm leading-5 text-foreground">
+    <div
+      className="mb-3 flex items-center gap-2 rounded-xl border border-border/60 bg-card px-3 py-2.5 shadow-sm"
+      data-testid="deep-research-status-row"
+    >
       {status === "running" ? (
-        <IconSpinner className="h-4 w-4 animate-spin text-primary" />
+        <IconSpinner className="h-4 w-4 shrink-0 animate-spin text-primary" />
       ) : status === "failed" ? (
-        <span className="h-1.5 w-1.5 rounded-full bg-destructive" />
+        <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-destructive" />
       ) : (
-        <IconCheck className="h-4 w-4 text-muted-foreground" />
+        <IconCheck className="h-4 w-4 shrink-0 text-muted-foreground" />
       )}
-      <span>{title}</span>
+      <span className="min-w-0 flex-1 text-sm font-medium text-foreground">{title}</span>
+    </div>
+  );
+}
+
+function ReflectionCard({ gaps }: { gaps: string[] }) {
+  const [open, setOpen] = React.useState(false);
+
+  return (
+    <div
+      className="mb-3 overflow-hidden rounded-xl border border-border/60 bg-card shadow-sm"
+      data-testid="deep-research-reflection"
+      data-collapsed={open ? "false" : "true"}
+    >
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        className="flex w-full items-center gap-2 px-3 py-2.5 text-left"
+        aria-expanded={open}
+      >
+        <IconCheck className="h-4 w-4 shrink-0 text-muted-foreground" />
+        <span className="min-w-0 flex-1 text-sm font-medium text-foreground">
+          发现 {gaps.length} 处信息缺口
+        </span>
+        <IconChevronRight
+          className={[
+            "ml-auto h-4 w-4 shrink-0 text-muted-foreground transition-transform",
+            open ? "rotate-90" : "",
+          ].join(" ")}
+        />
+      </button>
+      {open ? (
+        <ul className="list-disc space-y-1 border-t border-border/50 px-3 py-2 pl-8 text-sm leading-5 text-muted-foreground">
+          {gaps.map((gap, i) => (
+            <li key={`gap-${i}`}>{gap}</li>
+          ))}
+        </ul>
+      ) : null}
     </div>
   );
 }
@@ -357,22 +398,7 @@ export function DeepResearchWorkbench({
               <StatusRow key={segment.id} title={segment.title} status={segment.status} />
             );
           case "reflection":
-            return (
-              <details
-                key={segment.id}
-                className="mb-3 rounded-md border border-border/60 bg-muted/20 px-3 py-2 text-sm"
-                data-testid="deep-research-reflection"
-              >
-                <summary className="cursor-pointer select-none text-foreground">
-                  发现 {segment.gaps.length} 处信息缺口
-                </summary>
-                <ul className="mt-2 list-disc space-y-1 pl-5 text-muted-foreground">
-                  {segment.gaps.map((gap, i) => (
-                    <li key={`${segment.id}-${i}`}>{gap}</li>
-                  ))}
-                </ul>
-              </details>
-            );
+            return <ReflectionCard key={segment.id} gaps={segment.gaps} />;
           case "stats":
             return (
               <p
