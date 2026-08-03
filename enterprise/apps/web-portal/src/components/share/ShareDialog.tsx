@@ -15,7 +15,11 @@ import {
 import { Image, Link2, ListChecks } from "lucide-react";
 import { useTranslations } from "next-intl";
 import { copyText } from "../../lib/chat-share-client";
-import { toChatShareMessage, type ChatShareMessage } from "../../lib/chat-share-types";
+import {
+  expandChatShareTurnSelection,
+  toChatShareMessage,
+  type ChatShareMessage,
+} from "../../lib/chat-share-types";
 
 type ShareDialogProps = {
   open: boolean;
@@ -93,7 +97,12 @@ export function ShareDialog({
     setBusy("image");
     setStatus(null);
     try {
-      await onGenerateImage(shareMessages.filter((message) => selected.has(message.id)));
+      const imageMessageIds = new Set<string>();
+      shareMessages.forEach((message) => {
+        if (!selected.has(message.id)) return;
+        expandChatShareTurnSelection(shareMessages, message.id).forEach((id) => imageMessageIds.add(id));
+      });
+      await onGenerateImage(shareMessages.filter((message) => imageMessageIds.has(message.id)));
       setStatus(t("shareImageReady"));
     } catch (error) {
       setStatus(error instanceof Error ? error.message : t("shareFailed"));

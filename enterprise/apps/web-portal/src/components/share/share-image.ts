@@ -1,4 +1,4 @@
-import type { ChatShareSnapshot } from "../../lib/chat-share-types";
+import { cleanChatShareContent, type ChatShareSnapshot } from "../../lib/chat-share-types";
 import { ENTERPRISE_PRODUCT_NAME } from "../EnterpriseBrandMark";
 
 const IMAGE_WIDTH = 1200;
@@ -58,9 +58,10 @@ export async function createSharePng(snapshot: ChatShareSnapshot): Promise<Blob>
   const bodyFont = '28px -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei", sans-serif';
   const lineHeight = 44;
   const prepared = snapshot.messages.map((message) => {
-    const content = message.content.length > MAX_MESSAGE_CHARS
-      ? `${message.content.slice(0, MAX_MESSAGE_CHARS)}…`
-      : message.content;
+    const imageContent = cleanChatShareContent(message.content, { stripCitationMarkers: true });
+    const content = imageContent.length > MAX_MESSAGE_CHARS
+      ? `${imageContent.slice(0, MAX_MESSAGE_CHARS)}…`
+      : imageContent;
     context.font = bodyFont;
     return { message, lines: wrapCanvasText(context, content, contentWidth) };
   });
