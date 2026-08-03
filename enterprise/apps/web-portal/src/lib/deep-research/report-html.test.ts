@@ -106,4 +106,12 @@ describe("renderHtmlReport", () => {
     expect(html).toContain('class="icon-moon"');
     expect(html).not.toMatch(/>明暗切换</);
   });
+
+  it("intercepts in-document hash clicks to avoid parent navigation", () => {
+    const html = renderHtmlReport(base);
+    expect(html).toContain("function scrollToHash");
+    expect(html).toContain('href.charAt(0) !== "#"');
+    expect(html).toContain("scrollIntoView");
+    expect(html).toContain("preventDefault");
+  });
 });

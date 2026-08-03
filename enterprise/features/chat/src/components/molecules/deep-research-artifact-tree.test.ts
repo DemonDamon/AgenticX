@@ -51,6 +51,8 @@ describe("prepareHtmlPreviewSrcDoc", () => {
     expect(out).toContain(".sidebar:not(.toc-open) .toc");
     expect(out).toContain('id="agx-portal-toc-narrow-js"');
     expect(out).toContain(".theme-toggle { display: none !important; }");
+    expect(out).toContain("__agxPortalHashNav");
+    expect(out).toContain("scrollToHash");
   });
 });
 
