@@ -22,7 +22,7 @@ import {
   Skeleton,
   toast,
 } from "@agenticx/ui";
-import { ArrowUpRight, Copy, KeyRound, Pencil, Plus, RefreshCw, UsersRound } from "lucide-react";
+import { ArrowUpRight, Copy, KeyRound, Pencil, Plus, RefreshCw, Trash2, UsersRound } from "lucide-react";
 import { adminFetch } from "../../../lib/admin-client-auth";
 import { CreateUserDialog } from "../../../components/CreateUserDialog";
 import { QuotaRing, formatTokenCount } from "../../../components/QuotaRing";
@@ -88,6 +88,7 @@ export default function RolesPage() {
   const [modelOptions, setModelOptions] = useState<ModelOption[]>([]);
   const [loading, setLoading] = useState(true);
   const [selected, setSelected] = useState<UserQuotaOverview | null>(null);
+  const [email, setEmail] = useState("");
   const [monthlyTokens, setMonthlyTokens] = useState("");
   const [modelAccess, setModelAccess] = useState<ModelAccess | null>(null);
   const [manualModelIds, setManualModelIds] = useState<string[]>([]);
@@ -147,6 +148,7 @@ export default function RolesPage() {
 
   const openEditor = useCallback(async (user: UserQuotaOverview) => {
     setSelected(user);
+    setEmail(user.email);
     setMonthlyTokens(String(user.monthlyTokens));
     setModelAccess(null);
     setManualModelIds([]);
@@ -225,22 +227,37 @@ export default function RolesPage() {
 
   const save = async () => {
     if (!selected || saving) return;
+    const nextEmail = email.trim().toLowerCase();
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(nextEmail)) {
+      toast.error("请输入有效的邮箱地址");
+      return;
+    }
     const nextQuota = Number(monthlyTokens || 0);
     if (!Number.isFinite(nextQuota) || nextQuota < 0) {
       toast.error("请输入大于或等于 0 的 Token 数");
       return;
     }
+    const emailChanged = nextEmail !== selected.email.toLowerCase();
     const quotaChanged = Math.floor(nextQuota) !== selected.monthlyTokens;
     const modelsChanged =
       !sameIds(manualModelIds, initialManualModelIds) ||
       !sameIds(excludedGroupModelIds, initialExcludedGroupModelIds);
-    if (!quotaChanged && !modelsChanged) {
+    if (!emailChanged && !quotaChanged && !modelsChanged) {
       setSelected(null);
       return;
     }
     setSaving(true);
     try {
       const requests: Promise<Response>[] = [];
+      if (emailChanged) {
+        requests.push(
+          adminFetch(`/api/admin/users/${selected.id}`, {
+            method: "PATCH",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({ email: nextEmail }),
+          }),
+        );
+      }
       if (quotaChanged) {
         requests.push(
           adminFetch(`/api/admin/users/${selected.id}/quota`, {
@@ -307,6 +324,24 @@ export default function RolesPage() {
       toast.success("已生成新的登录密码");
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "重置密码失败");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const deleteUser = async () => {
+    if (!selected || saving) return;
+    if (!window.confirm(`确认删除用户 ${selected.email}？该操作不可撤销。`)) return;
+    setSaving(true);
+    try {
+      const response = await adminFetch(`/api/admin/users/${selected.id}`, { method: "DELETE" });
+      const json = (await response.json()) as ApiEnvelope<unknown>;
+      if (!response.ok || json.code !== "00000") throw new Error(json.message || "删除用户失败");
+      toast.success(`用户已删除：${selected.email}`);
+      setSelected(null);
+      await load();
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "删除用户失败");
     } finally {
       setSaving(false);
     }
@@ -426,15 +461,32 @@ export default function RolesPage() {
           {selected ? (
             <>
               <SheetHeader className="border-b border-border pb-5">
-                <SheetTitle>编辑用户</SheetTitle>
-                <SheetDescription>额度始终由该用户独立计量；个人可以增加模型，也可以关闭来自用户组的模型。</SheetDescription>
+                <div className="flex items-start justify-between gap-3">
+                  <div className="min-w-0">
+                    <SheetTitle>编辑用户</SheetTitle>
+                    <SheetDescription>额度始终由该用户独立计量；个人可以增加模型，也可以关闭来自用户组的模型。</SheetDescription>
+                  </div>
+                  <Button variant="outline" size="sm" className="shrink-0" asChild>
+                    <Link href={`/iam/users?userId=${encodeURIComponent(selected.id)}`}>
+                      <Pencil />用户管理<ArrowUpRight />
+                    </Link>
+                  </Button>
+                </div>
               </SheetHeader>
               <div className="space-y-6 py-6">
                 <div className="rounded-xl border border-border bg-muted/20 p-4">
                   <p className="font-medium">{selected.displayName}</p>
                   <p className="mt-1 text-sm text-muted-foreground">本月已用 {formatTokenCount(selected.usedTokens)} Token · {quotaSourceLabel(selected)}</p>
-                  <div className="mt-3 grid gap-2 text-sm sm:grid-cols-2">
-                    <p><span className="text-muted-foreground">邮箱：</span>{selected.email}</p>
+                  <div className="mt-3 grid gap-3 text-sm sm:grid-cols-2">
+                    <div className="space-y-1 sm:col-span-2">
+                      <Label htmlFor="user-email-from-quota">邮箱</Label>
+                      <Input
+                        id="user-email-from-quota"
+                        type="email"
+                        value={email}
+                        onChange={(event) => setEmail(event.target.value)}
+                      />
+                    </div>
                     <p><span className="text-muted-foreground">部门：</span>{selected.departmentPath || selected.departmentName || "未归属组织"}</p>
                     {selected.jobTitle ? <p><span className="text-muted-foreground">岗位：</span>{selected.jobTitle}</p> : null}
                     <p><span className="text-muted-foreground">状态：</span>{selected.status === "active" ? "正常" : selected.status === "locked" ? "已锁定" : "已停用"}</p>
@@ -519,9 +571,14 @@ export default function RolesPage() {
                 </section>
               </div>
               <div className="mt-auto flex flex-wrap justify-between gap-2 border-t border-border pt-4">
-                <Button variant="outline" onClick={() => void restoreInheritedQuota()} disabled={saving || selected.quotaSource !== "personal"}>
-                  恢复继承额度
-                </Button>
+                <div className="flex flex-wrap gap-2">
+                  <Button variant="destructive" onClick={() => void deleteUser()} disabled={saving}>
+                    <Trash2 />删除用户
+                  </Button>
+                  <Button variant="outline" onClick={() => void restoreInheritedQuota()} disabled={saving || selected.quotaSource !== "personal"}>
+                    恢复继承额度
+                  </Button>
+                </div>
                 <div className="flex gap-2">
                   <Button variant="outline" onClick={() => setSelected(null)}>取消</Button>
                   <Button onClick={() => void save()} disabled={saving || loadingModels}>{saving ? "保存中…" : "保存设置"}</Button>
