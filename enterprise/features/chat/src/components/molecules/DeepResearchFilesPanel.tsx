@@ -12,9 +12,14 @@ import {
   buildArtifactTree,
   formatArtifactByteSize,
   isHtmlArtifact,
+  prepareHtmlPreviewSrcDoc,
   type ArtifactListItem,
   type ArtifactTreeNode,
 } from "./deep-research-artifact-tree";
+import {
+  clampFilesPanelWidth,
+  defaultFilesPanelWidth,
+} from "./deep-research-files-panel-resize";
 import { buildStoreZip } from "./zip-store";
 import "../../markdown/chat-prism-themes.css";
 
@@ -93,6 +98,52 @@ function IconExpand({ className }: { className?: string }) {
       <path d="M21 8V5a2 2 0 0 0-2-2h-3" />
       <path d="M3 16v3a2 2 0 0 0 2 2h3" />
       <path d="M16 21h3a2 2 0 0 0 2-2v-3" />
+    </svg>
+  );
+}
+
+function IconSun({ className }: { className?: string }) {
+  return (
+    <svg
+      xmlns="http://www.w3.org/2000/svg"
+      width="24"
+      height="24"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      className={className}
+    >
+      <circle cx="12" cy="12" r="4" />
+      <path d="M12 2v2" />
+      <path d="M12 20v2" />
+      <path d="m4.93 4.93 1.41 1.41" />
+      <path d="m17.66 17.66 1.41 1.41" />
+      <path d="M2 12h2" />
+      <path d="M20 12h2" />
+      <path d="m6.34 17.66-1.41 1.41" />
+      <path d="m19.07 4.93-1.41 1.41" />
+    </svg>
+  );
+}
+
+function IconMoon({ className }: { className?: string }) {
+  return (
+    <svg
+      xmlns="http://www.w3.org/2000/svg"
+      width="24"
+      height="24"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      className={className}
+    >
+      <path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z" />
     </svg>
   );
 }
@@ -344,12 +395,56 @@ export function DeepResearchFilesPanel({
   const [fullscreen, setFullscreen] = React.useState(false);
   const [expanded, setExpanded] = React.useState<Set<string>>(() => new Set());
   const [zipping, setZipping] = React.useState(false);
+  const [panelWidthPx, setPanelWidthPx] = React.useState(480);
+  const panelRef = React.useRef<HTMLElement | null>(null);
+  const userResizedRef = React.useRef(false);
 
   const tree = React.useMemo(() => buildArtifactTree(artifacts), [artifacts]);
 
+  const measureContainerWidth = React.useCallback(() => {
+    return (
+      panelRef.current?.parentElement?.clientWidth ||
+      (typeof window !== "undefined" ? window.innerWidth : 1200)
+    );
+  }, []);
+
   React.useEffect(() => {
-    if (!open) setFullscreen(false);
-  }, [open]);
+    if (!open) {
+      setFullscreen(false);
+      userResizedRef.current = false;
+      return;
+    }
+    // Initial docked width (browse); HTML focus may widen below.
+    setPanelWidthPx(defaultFilesPanelWidth(measureContainerWidth(), { htmlPreview: false }));
+  }, [open, sessionId, measureContainerWidth]);
+
+  const onResizePointerDown = React.useCallback(
+    (event: React.PointerEvent<HTMLDivElement>) => {
+      if (fullscreen || event.button !== 0) return;
+      event.preventDefault();
+      const startX = event.clientX;
+      const startWidth = panelWidthPx;
+      const containerPx = measureContainerWidth();
+      document.body.style.cursor = "col-resize";
+      document.body.style.userSelect = "none";
+
+      const onMove = (moveEvent: PointerEvent) => {
+        // Drag handle left → wider panel; right → narrower panel.
+        const next = clampFilesPanelWidth(startWidth + (startX - moveEvent.clientX), containerPx);
+        userResizedRef.current = true;
+        setPanelWidthPx(next);
+      };
+      const onUp = () => {
+        document.body.style.cursor = "";
+        document.body.style.userSelect = "";
+        window.removeEventListener("pointermove", onMove);
+        window.removeEventListener("pointerup", onUp);
+      };
+      window.addEventListener("pointermove", onMove);
+      window.addEventListener("pointerup", onUp, { once: true });
+    },
+    [fullscreen, panelWidthPx, measureContainerWidth],
+  );
 
   React.useEffect(() => {
     if (!fullscreen) return;
@@ -392,6 +487,7 @@ export function DeepResearchFilesPanel({
         } else {
           setSelectedId(null);
           setView("browse");
+          setFullscreen(false);
         }
       } catch (err) {
         if (!cancelled) setError(err instanceof Error ? err.message : "加载失败");
@@ -436,6 +532,49 @@ export function DeepResearchFilesPanel({
     [previewRaw, selectedIsHtml],
   );
   const hasPreview = selectedIsHtml ? previewRaw.trim().length > 0 : previewMarkdown.length > 0;
+
+  // Portal theme → report.html (iframe sandbox cannot read parent localStorage).
+  // Toolbar icon toggles preview theme; portal theme changes re-sync.
+  const [portalDark, setPortalDark] = React.useState(false);
+  React.useEffect(() => {
+    if (typeof document === "undefined") return;
+    const root = document.documentElement;
+    const sync = () => {
+      setPortalDark(
+        root.classList.contains("dark") ||
+          root.getAttribute("data-theme") === "dark" ||
+          root.dataset.theme === "dark",
+      );
+    };
+    sync();
+    const observer = new MutationObserver(sync);
+    observer.observe(root, { attributes: true, attributeFilter: ["class", "data-theme"] });
+    return () => observer.disconnect();
+  }, []);
+
+  const htmlSrcDoc = React.useMemo(
+    () => (selectedIsHtml ? prepareHtmlPreviewSrcDoc(previewRaw, portalDark) : ""),
+    [selectedIsHtml, previewRaw, portalDark],
+  );
+
+  // Prefer a wider docked width for HTML so the report TOC can sit beside content
+  // when the viewport allows — never force fullscreen; user may drag or toggle.
+  React.useEffect(() => {
+    if (!open || fullscreen || userResizedRef.current) return;
+    if (view === "preview" && selectedIsHtml) {
+      setPanelWidthPx(defaultFilesPanelWidth(measureContainerWidth(), { htmlPreview: true }));
+    }
+  }, [open, fullscreen, view, selectedIsHtml, selectedId, measureContainerWidth]);
+
+  // Keep the panel inside constraints when the window shrinks.
+  React.useEffect(() => {
+    if (!open || fullscreen) return;
+    const onWinResize = () => {
+      setPanelWidthPx((width) => clampFilesPanelWidth(width, measureContainerWidth()));
+    };
+    window.addEventListener("resize", onWinResize);
+    return () => window.removeEventListener("resize", onWinResize);
+  }, [open, fullscreen, measureContainerWidth]);
 
   const triggerBlobDownload = (blob: Blob, filename: string) => {
     const url = URL.createObjectURL(blob);
@@ -537,19 +676,46 @@ export function DeepResearchFilesPanel({
 
   return (
     <aside
+      ref={panelRef}
       className={[
         fullscreen
           ? "fixed inset-0 z-50 flex min-h-0 w-full flex-col bg-background shadow-2xl"
-          : "flex h-full min-h-0 w-[min(48%,36rem)] shrink-0 flex-col border-l border-border bg-background",
+          : "relative flex h-full min-h-0 shrink-0 flex-col border-l border-border bg-background",
         className,
       ]
         .filter(Boolean)
         .join(" ")}
+      style={fullscreen ? undefined : { width: panelWidthPx }}
       data-testid="deep-research-files-panel"
       data-view={view}
       data-fullscreen={fullscreen ? "true" : "false"}
+      data-panel-width={fullscreen ? undefined : String(panelWidthPx)}
       aria-label={browsing ? "全部文件" : "文件预览"}
     >
+      {!fullscreen ? (
+        <div
+          role="separator"
+          aria-orientation="vertical"
+          aria-label="拖拽调整文件区宽度"
+          aria-valuenow={panelWidthPx}
+          tabIndex={0}
+          onPointerDown={onResizePointerDown}
+          onKeyDown={(event) => {
+            if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
+            event.preventDefault();
+            const containerPx = measureContainerWidth();
+            const step = event.shiftKey ? 48 : 16;
+            // ArrowLeft grows the files panel (chat shrinks); ArrowRight shrinks it.
+            const delta = event.key === "ArrowLeft" ? step : -step;
+            userResizedRef.current = true;
+            setPanelWidthPx(clampFilesPanelWidth(panelWidthPx + delta, containerPx));
+          }}
+          className="group/resize absolute left-0 top-0 z-20 hidden h-full w-3 -translate-x-1/2 cursor-col-resize touch-none sm:block"
+          data-testid="deep-research-files-resize-handle"
+        >
+          <span className="absolute left-1/2 top-0 h-full w-px -translate-x-1/2 bg-border transition-all duration-150 group-hover/resize:w-1 group-hover/resize:bg-primary group-active/resize:w-1 group-active/resize:bg-primary" />
+        </div>
+      ) : null}
       <div className="flex shrink-0 items-center gap-0.5 px-4 pb-1 pt-3.5 sm:gap-1">
         {!browsing ? (
           <Button
@@ -570,6 +736,24 @@ export function DeepResearchFilesPanel({
         <div className="min-w-0 flex-1 truncate text-[15px] font-semibold text-foreground">
           {title}
         </div>
+        {!browsing && selectedIsHtml ? (
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                type="button"
+                size="icon"
+                variant="ghost"
+                className="h-8 w-8 shrink-0"
+                onClick={() => setPortalDark((v) => !v)}
+                aria-label={portalDark ? "切换为浅色" : "切换为深色"}
+                data-testid="deep-research-html-theme-toggle"
+              >
+                {portalDark ? <IconSun className="h-4 w-4" /> : <IconMoon className="h-4 w-4" />}
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent>{portalDark ? "浅色" : "深色"}</TooltipContent>
+          </Tooltip>
+        ) : null}
         {!browsing ? (
           <Tooltip>
             <TooltipTrigger asChild>
@@ -698,13 +882,13 @@ export function DeepResearchFilesPanel({
             <p className="px-5 py-4 text-xs text-muted-foreground">加载中…</p>
           ) : null}
           {error ? <p className="px-5 py-4 text-xs text-destructive">{error}</p> : null}
-          {!loading && !error && selectedIsHtml && previewRaw.trim() ? (
+          {!loading && !error && selectedIsHtml && htmlSrcDoc.trim() ? (
             <iframe
               title={title}
-              srcDoc={previewRaw}
+              srcDoc={htmlSrcDoc}
               // Scripts needed for Mermaid CDN; content is tenant-owned report HTML.
               sandbox="allow-scripts allow-popups allow-downloads"
-              className="h-full min-h-0 w-full flex-1 border-0 bg-white"
+              className="h-full min-h-0 w-full flex-1 border-0 bg-transparent"
               data-testid="deep-research-html-preview"
             />
           ) : null}

@@ -298,9 +298,16 @@ body {
 .main { flex: 1; min-width: 0; padding: 2rem 2.5rem 4rem; max-width: 920px; }
 .topbar { display: flex; justify-content: space-between; gap: 1rem; align-items: flex-start; margin-bottom: 1.25rem; }
 .theme-toggle {
+  flex-shrink: 0; width: 2rem; height: 2rem; padding: 0;
+  display: inline-flex; align-items: center; justify-content: center;
   border: 1px solid var(--border); background: var(--card); color: var(--fg);
-  border-radius: 999px; padding: 0.35rem 0.85rem; cursor: pointer; font-size: 0.85rem;
+  border-radius: 999px; cursor: pointer;
 }
+.theme-toggle:hover { background: var(--primary-soft); color: var(--primary); }
+.theme-toggle svg { width: 1rem; height: 1rem; display: none; }
+/* Light → show moon (switch to dark); dark → show sun (switch to light). */
+html:not(.dark) .theme-toggle .icon-moon { display: block; }
+html.dark .theme-toggle .icon-sun { display: block; }
 h1 { font-size: 1.85rem; line-height: 1.3; margin: 0 0 0.35rem; }
 .meta { color: var(--muted); font-size: 0.9rem; margin-bottom: 1rem; }
 .stats { display: flex; flex-wrap: wrap; gap: 0.75rem; margin: 1rem 0 1.5rem; }
@@ -340,9 +347,38 @@ h1 { font-size: 1.85rem; line-height: 1.3; margin: 0 0 0.35rem; }
   .main { max-width: none; padding: 0; }
   a[href^="http"]::after { content: " (" attr(href) ")"; font-size: 0.8em; color: #555; }
 }
-@media (max-width: 860px) {
+/* Mid width: keep TOC on the left (thinner), avoid dumping it above the article. */
+@media (max-width: 860px) and (min-width: 521px) {
+  .layout { flex-direction: row; }
+  .sidebar {
+    position: sticky; top: 0; align-self: flex-start;
+    width: 180px; max-height: 100vh; overflow: auto;
+    border-right: 1px solid var(--border); border-bottom: none;
+  }
+  .main { padding: 1.5rem 1.25rem 3rem; }
+}
+/* Very narrow: stack, but collapse TOC by default (click heading to expand). */
+@media (max-width: 520px) {
   .layout { flex-direction: column; }
-  .sidebar { position: relative; width: 100%; max-height: none; border-right: none; border-bottom: 1px solid var(--border); }
+  .sidebar {
+    position: sticky; top: 0; z-index: 10;
+    width: 100%; max-height: none;
+    border-right: none; border-bottom: 1px solid var(--border);
+  }
+  .sidebar:not(.toc-open) .toc { display: none; }
+  .sidebar.toc-open .toc {
+    display: block; max-height: min(50vh, 20rem); overflow: auto;
+  }
+  .sidebar > h2 {
+    cursor: pointer; user-select: none; margin-bottom: 0;
+    display: flex; align-items: center; justify-content: space-between;
+  }
+  .sidebar > h2::after {
+    content: "▸"; color: var(--muted); font-size: 0.85rem;
+  }
+  .sidebar.toc-open > h2 { margin-bottom: 0.75rem; }
+  .sidebar.toc-open > h2::after { content: "▾"; }
+  .main { padding: 1.25rem 1.25rem 3rem; }
 }
 `.trim();
 
@@ -381,6 +417,24 @@ const REPORT_JS = `
   }
   window.addEventListener("scroll", onScroll, { passive: true });
   onScroll();
+  var sidebar = document.getElementById("toc") || document.querySelector(".sidebar");
+  var narrowMq = window.matchMedia("(max-width: 520px)");
+  function syncNarrowToc() {
+    if (!sidebar) return;
+    if (!narrowMq.matches) sidebar.classList.remove("toc-open");
+  }
+  if (sidebar) {
+    var heading = sidebar.querySelector(":scope > h2");
+    if (heading) {
+      heading.addEventListener("click", function () {
+        if (!narrowMq.matches) return;
+        sidebar.classList.toggle("toc-open");
+      });
+    }
+    if (narrowMq.addEventListener) narrowMq.addEventListener("change", syncNarrowToc);
+    else if (narrowMq.addListener) narrowMq.addListener(syncNarrowToc);
+    syncNarrowToc();
+  }
   document.querySelectorAll('.article a[href^="#ref-"]').forEach(function (a) {
     a.addEventListener("click", function () {
       var id = (a.getAttribute("href") || "").slice(1);
@@ -451,7 +505,10 @@ ${tocHtml}
         <h1>${escapeHtml(title)}</h1>
         <div class="meta">主题：${escapeHtml(input.topic || title)} · 生成于 ${escapeHtml(input.generatedAt)}</div>
       </div>
-      <button type="button" class="theme-toggle" id="theme-toggle">明暗切换</button>
+      <button type="button" class="theme-toggle" id="theme-toggle" aria-label="明暗切换" title="明暗切换">
+        <svg class="icon-sun" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2v2"/><path d="M12 20v2"/><path d="m4.93 4.93 1.41 1.41"/><path d="m17.66 17.66 1.41 1.41"/><path d="M2 12h2"/><path d="M20 12h2"/><path d="m6.34 17.66-1.41 1.41"/><path d="m19.07 4.93-1.41 1.41"/></svg>
+        <svg class="icon-moon" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z"/></svg>
+      </button>
     </div>
     ${renderStats(input.stats)}
     <article class="article">
