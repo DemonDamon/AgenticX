@@ -59,8 +59,9 @@ function AllFilesCard({ onOpen }: { onOpen?: () => void }) {
 
 function isPrimaryDeliveryArtifact(path: string): boolean {
   const lower = path.toLowerCase();
-  if (lower.endsWith("/report.html") || lower.endsWith("report.html")) return false;
-  if (lower.endsWith("/report.md") || lower.endsWith("report.md")) return false;
+  const base = lower.split("/").pop() || lower;
+  // Hide duplicate secondary exports; keep final-report.md as the primary card.
+  if (base === "report.html" || base === "report.md") return false;
   return true;
 }
 

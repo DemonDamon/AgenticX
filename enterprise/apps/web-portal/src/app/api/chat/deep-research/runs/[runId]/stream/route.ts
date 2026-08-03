@@ -1,7 +1,7 @@
 import { getSessionFromCookies } from "../../../../../../../lib/session";
 import { formatDeepResearchEventSse } from "../../../../../../../lib/deep-research/events";
 import {
-  createRunStore,
+  defaultRunStore,
   newEventsSince,
   type DeepResearchRunStatus,
 } from "../../../../../../../lib/deep-research/run-store";
@@ -44,7 +44,7 @@ export async function GET(request: Request, segmentData: { params: Params }) {
     });
   }
 
-  const store = createRunStore();
+  const store = defaultRunStore;
   const initial = await store.get(session.tenantId, session.userId, runId);
   if (!initial) {
     // 404 (not 403) — avoid runId probing

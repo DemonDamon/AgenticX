@@ -1,5 +1,10 @@
 import { ulid } from "ulid";
-import type { ChatMessage, ChatMessageRole, WebSearchSource } from "@agenticx/core-api";
+import type {
+  ChatMessage,
+  ChatMessageDeepResearch,
+  ChatMessageRole,
+  WebSearchSource,
+} from "@agenticx/core-api";
 import { ChatHistoryHttpError } from "./history-client";
 
 const DB_NAME = "agx-portal-history-outbox-v1";
@@ -13,6 +18,8 @@ const MAX_JOB_BYTES = 1_000_000;
 const MAX_QUEUE_BYTES = 8_000_000;
 /** Align with portal MAX_ATTACHMENT_PARSED_TEXT_CHARS — keep preview + follow-up Q&A after refresh. */
 const MAX_HISTORY_PARSED_TEXT_CHARS = 120_000;
+/** Align with portal chat-message-sanitize MAX_DEEP_RESEARCH_EVENTS. */
+const MAX_HISTORY_DEEP_RESEARCH_EVENTS = 200;
 const LOCK_NAME_PREFIX = "agx-history-outbox:";
 
 export type HistoryPrincipal = {
@@ -39,6 +46,8 @@ export type HistoryAppendPayload = {
   created_at: string;
   web_search_sources?: WebSearchSource[];
   attachments?: HistoryAppendAttachmentMeta[];
+  /** Deep-research workbench state — must survive refresh / session switch. */
+  deep_research?: ChatMessageDeepResearch;
 };
 
 export type HistoryOutboxOp = {
@@ -220,6 +229,22 @@ export function stripToAppendPayload(message: ChatMessage): HistoryAppendPayload
       }
       return meta;
     });
+  }
+  if (message.deep_research?.runId) {
+    const events = Array.isArray(message.deep_research.events)
+      ? message.deep_research.events.slice(-MAX_HISTORY_DEEP_RESEARCH_EVENTS)
+      : [];
+    payload.deep_research = {
+      runId: message.deep_research.runId,
+      status: message.deep_research.status,
+      events,
+      ...(message.deep_research.artifactIds?.length
+        ? { artifactIds: message.deep_research.artifactIds.slice(0, 40) }
+        : {}),
+      ...(message.deep_research.clarifyAnswers
+        ? { clarifyAnswers: message.deep_research.clarifyAnswers }
+        : {}),
+    };
   }
   return payload;
 }
@@ -601,6 +626,7 @@ export async function listPendingOverlayMessages(
         model: message.model,
         created_at: message.created_at,
         web_search_sources: message.web_search_sources,
+        deep_research: message.deep_research,
         attachments: message.attachments?.map((item) => ({
           name: item.name,
           mime_type: item.mime_type,

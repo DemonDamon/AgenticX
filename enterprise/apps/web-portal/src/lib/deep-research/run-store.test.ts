@@ -5,6 +5,7 @@ import {
   createMemoryRunStore,
   createRunWriter,
   newEventsSince,
+  runLooksFinished,
   trimEvents,
 } from "./run-store";
 import type { DeepResearchEvent } from "@agenticx/sdk-ts";
@@ -124,6 +125,62 @@ describe("memory run store", () => {
     expect(row!.status).toBe("failed");
     expect(row!.errorMessage).toBe("boom");
     expect(row!.events).toHaveLength(0);
+  });
+
+  it("runLooksFinished detects delivered final report while status still running", () => {
+    expect(
+      runLooksFinished({
+        phase: "synthesize",
+        reportMarkdown: "# report\n\nbody",
+        events: [
+          {
+            type: "artifact",
+            id: "a1",
+            path: "research/r1/final-report.md",
+            title: "终稿",
+            kind: "report",
+          },
+        ],
+      }),
+    ).toBe(true);
+    expect(
+      runLooksFinished({
+        phase: "synthesize",
+        reportMarkdown: "x".repeat(2_500),
+        events: [{ type: "phase", phase: "synthesize", message: "撰写中" }],
+      }),
+    ).toBe(true);
+    expect(
+      runLooksFinished({
+        phase: "lanes",
+        reportMarkdown: "",
+        events: [{ type: "phase", phase: "lanes", message: "检索中" }],
+      }),
+    ).toBe(false);
+  });
+
+  it("getLatestBySession returns most recently updated run", async () => {
+    const store = createMemoryRunStore();
+    await store.create({
+      runId: "r1",
+      tenantId: "t1",
+      userId: "u1",
+      sessionId: "s1",
+      topic: "old",
+    });
+    await store.finish("r1", "completed");
+    await store.create({
+      runId: "r2",
+      tenantId: "t1",
+      userId: "u1",
+      sessionId: "s1",
+      topic: "new",
+    });
+    // Ensure r2 is strictly newer even when creates share the same ms timestamp.
+    await new Promise((r) => setTimeout(r, 5));
+    await store.appendEvents("r2", [{ type: "narrative", text: "bump" }]);
+    const latest = await store.getLatestBySession("t1", "u1", "s1");
+    expect(latest?.runId).toBe("r2");
   });
 
   it("listActive only returns running / awaiting_clarify", async () => {
