@@ -19,7 +19,7 @@ import {
   PAGE_FETCH_TIMEOUT_MS,
   summarizeFetchFailures,
 } from "../web-search/page-fetch";
-import { archivePage } from "./page-archive";
+import { archivePage, pageArchivePath } from "./page-archive";
 import { buildCompletionSummary, fallbackSummary } from "./completion-summary";
 import { buildResearchPlan, enforcePlanBreadth, type ResearchPlan } from "./planner";
 import { formatTodayLine, runRecon, type ReconResult } from "./recon";
@@ -930,6 +930,8 @@ export async function runDeepResearchTurn(
             });
 
             let pagesFetched = 0;
+            const fetchedUrls = new Set<string>();
+            const archivedUrls = new Set<string>();
             if (questionCitations.length > 0 && searchBudgetLeft() > 0) {
               try {
                 const { pages, stats } = await fetchPages(
@@ -951,6 +953,7 @@ export async function runDeepResearchTurn(
                   registry.attachFullText(citation.url, page.text);
                   citation.fullText = page.text;
                   pagesFetched += 1;
+                  fetchedUrls.add(citation.url);
                   if (pageFetchCfg.archivePages) {
                     const ok = await archivePage({
                       artifactStore,
@@ -964,7 +967,10 @@ export async function runDeepResearchTurn(
                       text: page.text,
                       archivedSoFar: pagesArchived,
                     });
-                    if (ok) pagesArchived += 1;
+                    if (ok) {
+                      pagesArchived += 1;
+                      archivedUrls.add(citation.url);
+                    }
                   }
                 }
                 const failureNote = summarizeFetchFailures(stats);
@@ -982,6 +988,25 @@ export async function runDeepResearchTurn(
                   error instanceof Error ? error.message : error,
                 );
               }
+            }
+
+            if (questionCitations.length > 0) {
+              enqueueEvent({
+                type: "lane_sources",
+                laneId,
+                sources: questionCitations.map((c) => {
+                  const snippet = c.snippet?.trim() ?? "";
+                  return {
+                    title: c.title,
+                    url: c.url,
+                    ...(snippet ? { snippet: snippet.slice(0, 200) } : {}),
+                    ...(archivedUrls.has(c.url)
+                      ? { archivedPath: pageArchivePath(runId, c.url, c.title) }
+                      : {}),
+                    fetched: fetchedUrls.has(c.url),
+                  };
+                }),
+              });
             }
 
             let memo = "";

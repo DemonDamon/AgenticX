@@ -4,6 +4,7 @@ import * as React from "react";
 import { useTranslations } from "next-intl";
 import {
   DeepResearchFilesPanel,
+  type DeepResearchPanelLane,
   DeepResearchRecoverBanner,
   AttachmentContentPanel,
   DOCUMENT_ACCEPT,
@@ -127,6 +128,9 @@ export function MachiChatView({
   const [webSearchMode, setWebSearchMode] = React.useState<WebSearchMode>("auto");
   const [filesPanelSessionId, setFilesPanelSessionId] = React.useState<string | null>(null);
   const [filesPanelFocusId, setFilesPanelFocusId] = React.useState<string | null>(null);
+  const [filesPanelLane, setFilesPanelLane] = React.useState<DeepResearchPanelLane | null>(
+    null,
+  );
   const [attachmentPreview, setAttachmentPreview] = React.useState<ChatMessageAttachment | null>(null);
 
   // Stable identities: MessageList folds these into memo dependencies that decide whether
@@ -136,13 +140,24 @@ export function MachiChatView({
     (sessionId: string, focusArtifactId?: string | null) => {
       setAttachmentPreview(null);
       setFilesPanelSessionId(sessionId);
+      setFilesPanelLane(null);
       setFilesPanelFocusId(focusArtifactId ?? null);
+    },
+    [],
+  );
+  const requestDeepResearchLaneSources = React.useCallback(
+    (sessionId: string, lane: DeepResearchPanelLane) => {
+      setAttachmentPreview(null);
+      setFilesPanelSessionId(sessionId);
+      setFilesPanelFocusId(null);
+      setFilesPanelLane(lane);
     },
     [],
   );
   const requestAttachmentPreview = React.useCallback((attachment: ChatMessageAttachment) => {
     setFilesPanelSessionId(null);
     setFilesPanelFocusId(null);
+    setFilesPanelLane(null);
     setAttachmentPreview(attachment);
   }, []);
 
@@ -905,6 +920,7 @@ export function MachiChatView({
                   onShowPreviousRetryVersion={showPreviousRetryVersion}
                   onShowNextRetryVersion={showNextRetryVersion}
                   onRequestDeepResearchFiles={requestDeepResearchFiles}
+                  onRequestDeepResearchLaneSources={requestDeepResearchLaneSources}
                   onRequestAttachmentPreview={requestAttachmentPreview}
                   onCopy={(content) => {
                     console.log("Copied:", content);
@@ -942,10 +958,12 @@ export function MachiChatView({
           if (!open) {
             setFilesPanelSessionId(null);
             setFilesPanelFocusId(null);
+            setFilesPanelLane(null);
           }
         }}
         sessionId={filesPanelSessionId}
         focusArtifactId={filesPanelFocusId}
+        focusLane={filesPanelLane}
         sources={filesPanelSources}
       />
       <AttachmentContentPanel

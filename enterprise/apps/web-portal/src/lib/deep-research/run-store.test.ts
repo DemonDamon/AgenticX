@@ -38,6 +38,39 @@ describe("trimEvents", () => {
       events.filter((e) => e.type === "lane_progress").length,
     );
   });
+
+  it("drops lane_sources only after lane_progress is exhausted", () => {
+    const laneSources: DeepResearchEvent = {
+      type: "lane_sources",
+      laneId: "l1",
+      sources: [{ title: "t", url: "https://example.com" }],
+    };
+    const events: DeepResearchEvent[] = [
+      { type: "run_started", runId: "r1" },
+      laneSources,
+      ...Array.from({ length: 10 }, (_, i) => progress(i)),
+      ...Array.from({ length: MAX_EVENTS_PER_RUN }, (): DeepResearchEvent => {
+        return { type: "lane_done", laneId: "l1", status: "ok" };
+      }),
+    ];
+    const trimmed = trimEvents(events);
+    expect(trimmed.some((e) => e.type === "run_started")).toBe(true);
+    // lane_progress goes first, so none survive while lane_sources is still around.
+    expect(trimmed.filter((e) => e.type === "lane_progress")).toHaveLength(0);
+
+    const fewer: DeepResearchEvent[] = [
+      { type: "run_started", runId: "r1" },
+      laneSources,
+      progress(0),
+      ...Array.from({ length: MAX_EVENTS_PER_RUN - 3 }, (): DeepResearchEvent => {
+        return { type: "lane_done", laneId: "l1", status: "ok" };
+      }),
+      { type: "lane_done", laneId: "l1", status: "ok" },
+    ];
+    const trimmedFewer = trimEvents(fewer);
+    expect(trimmedFewer.some((e) => e.type === "lane_sources")).toBe(true);
+    expect(trimmedFewer.some((e) => e.type === "lane_progress")).toBe(false);
+  });
 });
 
 describe("memory run store", () => {

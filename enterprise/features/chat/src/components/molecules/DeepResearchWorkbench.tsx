@@ -9,14 +9,30 @@ import {
   deepResearchWaitingLabel,
 } from "./deep-research-segments";
 import type { ResearchStep } from "./deep-research-steps";
+import {
+  laneSourceHost,
+  parseLaneMetrics,
+  type LaneSource,
+} from "./deep-research-lane-sources";
+import { WebSearchFavicon } from "./WebSearchFavicon";
+
+/** A lane plus the pages it searched, handed to the docked source panel. */
+export type DeepResearchLaneSelection = { title: string; sources: LaneSource[] };
 
 export type DeepResearchWorkbenchProps = {
   deepResearch: ChatMessageDeepResearch;
   onClarifySubmitted?: (answers: Record<string, string>) => void;
   /** Intermediate lane memos via expandable step "查看产物". */
   onOpenArtifact?: (artifactId: string) => void;
+  /** Open the docked panel on every page this lane searched. */
+  onOpenLaneSources?: (lane: DeepResearchLaneSelection) => void;
+  /** Open a single searched page. */
+  onOpenLaneSource?: (source: LaneSource) => void;
   className?: string;
 };
+
+/** Inline lane preview stays short; the rest lives in the docked panel. */
+const INLINE_SOURCE_LIMIT = 4;
 
 function IconSearch({ className }: { className?: string }) {
   return (
@@ -96,17 +112,63 @@ function IconChevronRight({ className }: { className?: string }) {
   );
 }
 
+function LaneSourceRow({
+  source,
+  onOpen,
+}: {
+  source: LaneSource;
+  onOpen?: (source: LaneSource) => void;
+}) {
+  const host = laneSourceHost(source.url);
+  return (
+    <button
+      type="button"
+      onClick={() => onOpen?.(source)}
+      disabled={!onOpen}
+      className={[
+        "flex w-full items-center gap-2 rounded-lg px-1.5 py-1.5 text-left",
+        onOpen ? "transition-colors hover:bg-muted/60" : "cursor-default",
+      ].join(" ")}
+      data-testid="deep-research-lane-source"
+    >
+      <WebSearchFavicon host={host} label={source.title} size={16} />
+      <span className="min-w-0 flex-1">
+        <span className="block truncate text-[13px] leading-5 text-foreground">
+          {source.title || source.url}
+        </span>
+        <span className="block truncate text-[11px] leading-4 text-muted-foreground">
+          {host}
+          {source.fetched ? " · 已读取" : ""}
+        </span>
+      </span>
+    </button>
+  );
+}
+
 function ExpandableStepRow({
   step,
   showRail,
   onOpenArtifact,
+  onOpenLaneSources,
+  onOpenLaneSource,
 }: {
   step: ResearchStep;
   showRail: boolean;
   onOpenArtifact?: (artifactId: string) => void;
+  onOpenLaneSources?: (lane: DeepResearchLaneSelection) => void;
+  onOpenLaneSource?: (source: LaneSource) => void;
 }) {
   const [open, setOpen] = React.useState(false);
-  const canExpand = step.detailLines.length > 0 || Boolean(step.artifactId);
+  const sources = step.sources ?? [];
+  const metrics = React.useMemo(
+    () => parseLaneMetrics(step.detailLines),
+    [step.detailLines],
+  );
+  // Metrics render inline below the row, so they alone are not a reason to expand.
+  const canExpand =
+    sources.length > 0 ||
+    Boolean(step.artifactId) ||
+    (metrics.length === 0 && step.detailLines.length > 0);
 
   return (
     <li className="relative">
@@ -154,22 +216,72 @@ function ExpandableStepRow({
           />
         ) : null}
       </button>
-      {open && canExpand ? (
-        <div className="mb-1 ml-7 space-y-1 rounded-md border border-border/40 bg-background/80 px-2.5 py-2 text-sm leading-5 text-muted-foreground">
-          {step.detailLines.map((line, i) => (
-            <p key={`${step.id}-d-${i}`} className="whitespace-pre-wrap">
-              {line}
-            </p>
-          ))}
-          {step.artifactId && onOpenArtifact ? (
-            <button
-              type="button"
-              className="text-primary hover:underline"
-              onClick={() => onOpenArtifact(step.artifactId!)}
+      {metrics.length > 0 ? (
+        <div
+          className="mb-1 ml-6 flex flex-wrap gap-1.5 px-1.5"
+          data-testid="deep-research-lane-metrics"
+        >
+          {metrics.map((metric) => (
+            <span
+              key={`${step.id}-m-${metric.key}`}
+              className={[
+                "rounded-full px-2 py-0.5 text-[11px] leading-4",
+                metric.tone === "warning"
+                  ? "bg-amber-500/15 text-amber-700 dark:text-amber-400"
+                  : "bg-muted/70 text-foreground/75",
+              ].join(" ")}
             >
-              查看产物
-            </button>
+              {metric.text}
+            </span>
+          ))}
+        </div>
+      ) : null}
+      {open && canExpand ? (
+        <div className="mb-1 ml-7 space-y-2 rounded-md border border-border/40 bg-background/80 px-2.5 py-2 text-sm leading-5 text-muted-foreground">
+          {metrics.length === 0
+            ? step.detailLines.map((line, i) => (
+                <p key={`${step.id}-d-${i}`} className="whitespace-pre-wrap">
+                  {line}
+                </p>
+              ))
+            : null}
+          {sources.length > 0 ? (
+            <div className="space-y-0.5">
+              {sources.slice(0, INLINE_SOURCE_LIMIT).map((source, i) => (
+                <LaneSourceRow
+                  key={`${step.id}-s-${i}`}
+                  source={source}
+                  onOpen={onOpenLaneSource}
+                />
+              ))}
+            </div>
           ) : null}
+          <div className="flex flex-wrap items-center gap-3 text-[13px]">
+            {sources.length > 0 && onOpenLaneSources ? (
+              <button
+                type="button"
+                className="text-primary hover:underline"
+                data-testid="deep-research-lane-sources-all"
+                onClick={() =>
+                  onOpenLaneSources({
+                    title: step.subtitle ?? step.title,
+                    sources,
+                  })
+                }
+              >
+                查看全部 {sources.length} 个来源
+              </button>
+            ) : null}
+            {step.artifactId && onOpenArtifact ? (
+              <button
+                type="button"
+                className="text-primary hover:underline"
+                onClick={() => onOpenArtifact(step.artifactId!)}
+              >
+                查看产物
+              </button>
+            ) : null}
+          </div>
         </div>
       ) : null}
     </li>
@@ -180,10 +292,14 @@ function ToolsCard({
   title,
   steps,
   onOpenArtifact,
+  onOpenLaneSources,
+  onOpenLaneSource,
 }: {
   title: string;
   steps: ResearchStep[];
   onOpenArtifact?: (artifactId: string) => void;
+  onOpenLaneSources?: (lane: DeepResearchLaneSelection) => void;
+  onOpenLaneSource?: (source: LaneSource) => void;
 }) {
   const running = steps.some((s) => s.status === "running");
   // In-progress: keep open; completed: default collapsed so the long lane list does not dominate.
@@ -234,6 +350,8 @@ function ToolsCard({
                   step={step}
                   showRail={index < steps.length - 1}
                   onOpenArtifact={onOpenArtifact}
+                  onOpenLaneSources={onOpenLaneSources}
+                  onOpenLaneSource={onOpenLaneSource}
                 />
               ))}
             </ol>
@@ -327,6 +445,8 @@ export function DeepResearchWorkbench({
   deepResearch,
   onClarifySubmitted,
   onOpenArtifact,
+  onOpenLaneSources,
+  onOpenLaneSource,
   className,
 }: DeepResearchWorkbenchProps) {
   const segments = React.useMemo(
@@ -391,6 +511,8 @@ export function DeepResearchWorkbench({
                 title={segment.title}
                 steps={segment.steps}
                 onOpenArtifact={onOpenArtifact}
+                onOpenLaneSources={onOpenLaneSources}
+                onOpenLaneSource={onOpenLaneSource}
               />
             );
           case "status":

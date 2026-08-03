@@ -176,7 +176,8 @@ export function runLooksFinished(row: Pick<RunRecord, "phase" | "events" | "repo
 
 /**
  * Trim events when over MAX_EVENTS_PER_RUN.
- * Prefer dropping oldest lane_progress, then oldest narrative; never drop run_started/clarify.
+ * Prefer dropping oldest lane_progress, then narrative, then lane_sources;
+ * never drop run_started/clarify.
  */
 export function trimEvents(events: DeepResearchEvent[]): DeepResearchEvent[] {
   if (events.length <= MAX_EVENTS_PER_RUN) return events;
@@ -190,6 +191,7 @@ export function trimEvents(events: DeepResearchEvent[]): DeepResearchEvent[] {
   while (next.length > MAX_EVENTS_PER_RUN) {
     if (dropOldestOfType("lane_progress")) continue;
     if (dropOldestOfType("narrative")) continue;
+    if (dropOldestOfType("lane_sources")) continue;
     // Last resort: drop oldest non-critical event
     const idx = next.findIndex((e) => !NEVER_DROP_TYPES.has(e.type));
     if (idx < 0) break;

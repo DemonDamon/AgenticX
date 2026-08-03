@@ -61,6 +61,21 @@ export type DeepResearchEvent =
   | { type: "lane_started"; laneId: string; title: string; index: number; total: number }
   | { type: "lane_progress"; laneId: string; message: string; sourcesCollected?: number }
   | { type: "lane_done"; laneId: string; artifactPath?: string; status: "ok" | "failed" }
+  /** Per-lane source list so the workbench can show which pages were searched. */
+  | {
+      type: "lane_sources";
+      laneId: string;
+      sources: Array<{
+        title: string;
+        url: string;
+        /** Truncated search snippet (<= 200 chars). */
+        snippet?: string;
+        /** Artifact path when the full text was archived. */
+        archivedPath?: string;
+        /** Whether the full text was fetched successfully. */
+        fetched?: boolean;
+      }>;
+    }
   | {
       type: "artifact";
       id: string;

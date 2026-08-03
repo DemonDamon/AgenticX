@@ -16,6 +16,7 @@ export * from "./components/molecules/AttachmentContentPanel";
 export * from "./components/molecules/DeepResearchWorkbench";
 export * from "./components/molecules/DeepResearchRecoverBanner";
 export * from "./components/molecules/deep-research-artifact-tree";
+export * from "./components/molecules/deep-research-lane-sources";
 export * from "./components/molecules/deep-research-segments";
 export * from "./utils/deep-research-active-run";
 export * from "./utils/deep-research-hydrate";

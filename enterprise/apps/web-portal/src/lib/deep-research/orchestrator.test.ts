@@ -1167,6 +1167,16 @@ describe("page fetch + sectioned report", () => {
           String(e.message).includes("已读取"),
       ),
     ).toBe(true);
+    // Lane sources power the docked "searched pages" view.
+    const laneSources = ok.events.filter((e) => e.type === "lane_sources");
+    expect(laneSources.length).toBeGreaterThan(0);
+    const firstSources = (laneSources[0] as { sources: Array<Record<string, unknown>> })
+      .sources;
+    expect(firstSources.length).toBeGreaterThan(0);
+    expect(firstSources[0]).toMatchObject({
+      url: "https://example.com/doc",
+      fetched: true,
+    });
 
     const responseFail = await runDeepResearchTurn(
       { model: "m", messages: [{ role: "user", content: "主题调研" }] },
