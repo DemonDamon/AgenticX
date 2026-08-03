@@ -290,34 +290,53 @@ function ArtifactFileRow({
   node,
   onOpenFile,
   onDownloadFile,
+  nested = false,
 }: {
   node: Extract<ArtifactTreeNode, { type: "file" }>;
   onOpenFile: (id: string) => void;
   onDownloadFile: (id: string) => void;
+  /** Inside an expanded folder — slightly tighter chrome. */
+  nested?: boolean;
 }) {
   return (
-    <li className="group/file flex items-center gap-1 rounded-xl transition-colors hover:bg-background/80">
+    <li
+      className={[
+        "group/file flex items-center gap-0.5 rounded-xl",
+        "transition-[background-color,transform,box-shadow] duration-200 ease-out",
+        "hover:bg-background hover:shadow-[0_4px_14px_rgba(15,23,42,0.06)]",
+        "dark:hover:shadow-[0_4px_14px_rgba(0,0,0,0.28)]",
+      ].join(" ")}
+    >
       <button
         type="button"
         onClick={() => onOpenFile(node.artifact.id)}
-        className="flex min-w-0 flex-1 items-center gap-3 px-2.5 py-2.5 text-left"
+        className={[
+          "flex min-w-0 flex-1 items-center gap-2.5 text-left",
+          nested ? "px-2 py-2" : "px-2.5 py-2.5",
+        ].join(" ")}
         data-testid="deep-research-browse-file"
       >
-        <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-[10px] bg-muted/60 text-foreground/65">
-          <IconDoc className="h-[18px] w-[18px]" />
+        <span
+          className={[
+            "flex shrink-0 items-center justify-center rounded-full bg-background text-foreground/65 shadow-sm",
+            "transition-transform duration-200 group-hover/file:scale-105",
+            nested ? "h-8 w-8" : "h-9 w-9",
+          ].join(" ")}
+        >
+          <IconDoc className={nested ? "h-4 w-4" : "h-[18px] w-[18px]"} />
         </span>
         <span className="min-w-0 flex-1">
-          <span className="block truncate text-[14px] font-medium leading-5 text-foreground">
+          <span className="block truncate text-[13px] font-medium leading-5 text-foreground">
             {node.name}
           </span>
-          <span className="mt-0.5 block truncate text-[12px] leading-4 text-muted-foreground">
+          <span className="mt-0.5 block truncate text-[11px] leading-4 text-muted-foreground">
             {node.subtitle ?? formatArtifactByteSize(node.artifact.byteSize)}
           </span>
         </span>
       </button>
       <button
         type="button"
-        className="mr-1.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-muted-foreground opacity-70 transition-opacity hover:bg-muted hover:text-foreground hover:opacity-100 group-hover/file:opacity-100"
+        className="mr-1 flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-muted-foreground opacity-0 transition-all hover:bg-muted hover:text-foreground group-hover/file:opacity-100"
         aria-label={`下载 ${node.name}`}
         data-testid="deep-research-file-download"
         onClick={(e) => {
@@ -325,7 +344,7 @@ function ArtifactFileRow({
           onDownloadFile(node.artifact.id);
         }}
       >
-        <IconDownload className="h-4 w-4" />
+        <IconDownload className="h-3.5 w-3.5" />
       </button>
     </li>
   );
@@ -402,17 +421,24 @@ function ArtifactBrowseRow({
   if (node.type === "dir") {
     const isOpen = expanded.has(node.key);
     return (
-      <li className="mb-1">
+      <li className="mb-1.5">
         <button
           type="button"
           onClick={() => onToggle(node.key)}
-          className="flex w-full items-center gap-3 rounded-2xl px-2.5 py-2.5 text-left transition-colors hover:bg-muted/50"
+          className={[
+            "group/dir flex w-full items-center gap-3 rounded-2xl px-2.5 py-2.5 text-left",
+            "bg-muted/40 transition-[background-color,transform,box-shadow] duration-200 ease-out",
+            "hover:-translate-y-px hover:bg-muted/70",
+            "hover:shadow-[0_8px_20px_rgba(15,23,42,0.06)]",
+            "dark:hover:shadow-[0_8px_20px_rgba(0,0,0,0.3)]",
+            isOpen ? "bg-muted/55" : "",
+          ].join(" ")}
         >
-          <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-[10px] bg-muted/70 text-foreground/70">
+          <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-background text-foreground/70 shadow-sm transition-transform duration-200 group-hover/dir:scale-105">
             <IconFolder className="h-5 w-5" />
           </span>
           <span className="min-w-0 flex-1">
-            <span className="block truncate text-[15px] font-medium leading-5 text-foreground">
+            <span className="block truncate text-[14px] font-medium leading-5 text-foreground">
               {node.name}
             </span>
             <span className="mt-0.5 block text-[12px] leading-4 text-muted-foreground">
@@ -421,35 +447,34 @@ function ArtifactBrowseRow({
           </span>
           <IconChevronDown
             className={[
-              "mr-1 h-4 w-4 shrink-0 text-muted-foreground/80 transition-transform",
+              "mr-1 h-4 w-4 shrink-0 text-muted-foreground/80 transition-transform duration-200",
               isOpen ? "" : "-rotate-90",
             ].join(" ")}
           />
         </button>
         {isOpen ? (
-          <div className="ml-3 mt-1 rounded-2xl bg-muted/35 p-1.5 ring-1 ring-border/40">
-            <ul className="m-0 list-none space-y-0.5 p-0">
-              {node.children.map((child) =>
-                child.type === "file" ? (
-                  <ArtifactFileRow
-                    key={child.key}
-                    node={child}
-                    onOpenFile={onOpenFile}
-                    onDownloadFile={onDownloadFile}
-                  />
-                ) : (
-                  <ArtifactBrowseRow
-                    key={child.key}
-                    node={child}
-                    expanded={expanded}
-                    onToggle={onToggle}
-                    onOpenFile={onOpenFile}
-                    onDownloadFile={onDownloadFile}
-                  />
-                ),
-              )}
-            </ul>
-          </div>
+          <ul className="relative m-0 mt-1.5 list-none space-y-0.5 border-l border-border/50 py-0.5 pl-3 ml-[1.35rem] p-0">
+            {node.children.map((child) =>
+              child.type === "file" ? (
+                <ArtifactFileRow
+                  key={child.key}
+                  node={child}
+                  nested
+                  onOpenFile={onOpenFile}
+                  onDownloadFile={onDownloadFile}
+                />
+              ) : (
+                <ArtifactBrowseRow
+                  key={child.key}
+                  node={child}
+                  expanded={expanded}
+                  onToggle={onToggle}
+                  onOpenFile={onOpenFile}
+                  onDownloadFile={onDownloadFile}
+                />
+              ),
+            )}
+          </ul>
         ) : null}
       </li>
     );
