@@ -1,7 +1,12 @@
 import { NextResponse } from "next/server";
 import { cookies } from "next/headers";
-import { getSessionFromCookies } from "../../../../lib/session";
-import { ACCESS_COOKIE } from "../../../../lib/session";
+import {
+  ACCESS_COOKIE,
+  REFRESH_COOKIE,
+  getSessionAuthFromCookies,
+  isAuthCookieSecure,
+} from "../../../../lib/session";
+import { refreshTokens } from "../../../../lib/auth-runtime";
 import { isChatSessionOwned } from "../../../../lib/chat-history";
 import { toChatHistoryContext } from "../../../../lib/chat-history-http";
 import { listAvailableModelsForUser } from "../../../../lib/admin-providers-reader";
@@ -36,8 +41,8 @@ export const maxDuration = 1500;
 export const runtime = "nodejs";
 
 export async function POST(request: Request) {
-  const session = await getSessionFromCookies();
-  if (!session) {
+  const auth = await getSessionAuthFromCookies();
+  if (!auth) {
     return NextResponse.json(
       {
         error: {
@@ -48,19 +53,8 @@ export async function POST(request: Request) {
       { status: 401 }
     );
   }
-  const cookieStore = await cookies();
-  const accessToken = cookieStore.get(ACCESS_COOKIE)?.value;
-  if (!accessToken) {
-    return NextResponse.json(
-      {
-        error: {
-          code: "40101",
-          message: "missing access token",
-        },
-      },
-      { status: 401 }
-    );
-  }
+  const { session, accessToken } = auth;
+  let refreshToken = auth.refreshToken;
 
   const chatSessionId = request.headers.get("x-chat-session-id")?.trim();
   if (!chatSessionId) {
@@ -165,6 +159,37 @@ export async function POST(request: Request) {
       tenantId: session.tenantId,
       userId: session.userId,
       sessionId: chatSessionId,
+      refreshAccessToken: async () => {
+        if (!refreshToken) return null;
+        try {
+          const next = await refreshTokens(refreshToken);
+          refreshToken = next.refreshToken;
+          // Best-effort: attach rotated cookies on the (still-open) response.
+          // In-memory Bearer update for subsequent Gateway calls is what matters.
+          try {
+            const cookieStore = await cookies();
+            cookieStore.set(ACCESS_COOKIE, next.accessToken, {
+              httpOnly: true,
+              sameSite: "lax",
+              secure: isAuthCookieSecure(),
+              maxAge: next.expiresInSeconds,
+              path: "/",
+            });
+            cookieStore.set(REFRESH_COOKIE, next.refreshToken, {
+              httpOnly: true,
+              sameSite: "lax",
+              secure: isAuthCookieSecure(),
+              maxAge: 7 * 24 * 60 * 60,
+              path: "/",
+            });
+          } catch {
+            // Streaming responses may reject mid-flight cookie writes; ignore.
+          }
+          return { accessToken: next.accessToken };
+        } catch {
+          return null;
+        }
+      },
     });
   }
 
