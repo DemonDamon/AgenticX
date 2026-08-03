@@ -98,3 +98,12 @@ export function expandChatShareSelection(
   }
   return messages.filter((message) => expandedIds.has(message.id));
 }
+
+/** Keep only the messages explicitly checked by the user. */
+export function selectChatShareMessages(
+  messages: ChatShareMessage[],
+  selectedIds: Iterable<string>,
+): ChatShareMessage[] {
+  const selected = new Set(selectedIds);
+  return messages.filter((message) => selected.has(message.id));
+}

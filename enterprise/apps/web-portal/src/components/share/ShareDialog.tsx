@@ -17,7 +17,7 @@ import { Image, Link2, ListChecks } from "lucide-react";
 import { useTranslations } from "next-intl";
 import { copyText } from "../../lib/chat-share-client";
 import {
-  expandChatShareSelection,
+  selectChatShareMessages,
   toChatShareMessage,
   type ChatShareMessage,
 } from "../../lib/chat-share-types";
@@ -101,7 +101,7 @@ export function ShareDialog({
     setBusy("image");
     setStatus(null);
     try {
-      await onGenerateImage(expandChatShareSelection(shareMessages, selected));
+      await onGenerateImage(selectChatShareMessages(shareMessages, selected));
       setStatus(t("shareImageReady"));
     } catch (error) {
       setStatus(error instanceof Error ? error.message : t("shareFailed"));

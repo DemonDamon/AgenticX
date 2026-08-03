@@ -152,7 +152,7 @@
     "shareAssistantMessage": "Assistant",
     "shareNoMessages": "There are no messages available to share.",
     "shareNoSelection": "Select at least one message.",
-    "shareSnapshotHint": "Links use the selected messages; images include the complete selected turns. Links are limited to signed-in members of this enterprise.",
+    "shareSnapshotHint": "Links include complete turns for selected messages; images include only the checked messages. Links are limited to signed-in members of this enterprise.",
     "shareCopyLink": "Copy link",
     "shareGenerateImage": "Generate image",
     "shareLinkCopied": "Share link copied",

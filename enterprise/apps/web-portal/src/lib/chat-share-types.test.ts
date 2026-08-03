@@ -5,6 +5,7 @@ import {
   expandChatShareSelection,
   expandChatShareTurnSelection,
   normalizeChatShareMessage,
+  selectChatShareMessages,
   toChatShareMessage,
   type ChatShareMessage,
 } from "./chat-share-types";
@@ -72,5 +73,9 @@ describe("chat share turn selection", () => {
 
   it("expands mixed selections once and preserves the original order", () => {
     expect(expandChatShareSelection(messages, ["a2", "u1"])).toEqual(messages);
+  });
+
+  it("keeps image generation to the messages explicitly checked", () => {
+    expect(selectChatShareMessages(messages, ["a2"])).toEqual([messages[3]]);
   });
 });
