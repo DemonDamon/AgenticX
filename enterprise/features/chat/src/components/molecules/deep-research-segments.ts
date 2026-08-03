@@ -1,5 +1,6 @@
 import type { ChatMessageDeepResearch, DeepResearchEvent } from "@agenticx/core-api";
 import type { ResearchStep } from "./deep-research-steps";
+import type { LaneSource } from "./deep-research-lane-sources";
 
 export type DeepResearchSegment =
   | { kind: "narrative"; id: string; text: string }
@@ -35,11 +36,12 @@ type LaneDraft = {
   title: string;
   index: number;
   total: number;
-  sources?: number;
   status: "running" | "done" | "failed";
   artifactPath?: string;
   artifactId?: string;
   detailLines: string[];
+  /** Web pages searched by this lane. */
+  sourceList?: LaneSource[];
 };
 
 function laneToStep(lane: LaneDraft): ResearchStep {
@@ -47,14 +49,14 @@ function laneToStep(lane: LaneDraft): ResearchStep {
     id: `lane-${lane.laneId}`,
     kind: "lane",
     title: "搜索网页",
-    subtitle:
-      typeof lane.sources === "number"
-        ? `${lane.title} · ${lane.sources} 个结果`
-        : lane.title,
+    // The always-visible metric chips carry the counts; a "· N 个结果" suffix
+    // would only compete with them for the truncated subtitle line.
+    subtitle: lane.title,
     status: lane.status,
     detailLines: lane.detailLines,
     artifactPath: lane.artifactPath,
     artifactId: lane.artifactId,
+    sources: lane.sourceList,
   };
 }
 
@@ -217,8 +219,13 @@ export function buildDeepResearchSegments(
       case "lane_progress": {
         const lane = lanes.get(event.laneId);
         if (!lane) break;
-        if (typeof event.sourcesCollected === "number") lane.sources = event.sourcesCollected;
         if (event.message) lane.detailLines.push(event.message);
+        break;
+      }
+      case "lane_sources": {
+        const lane = lanes.get(event.laneId);
+        if (!lane) break;
+        lane.sourceList = event.sources.slice();
         break;
       }
       case "lane_done": {

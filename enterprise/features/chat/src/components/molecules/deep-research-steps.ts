@@ -1,4 +1,5 @@
 import type { ChatMessageDeepResearch, DeepResearchEvent } from "@agenticx/core-api";
+import type { LaneSource } from "./deep-research-lane-sources";
 
 export type ResearchStepKind =
   | "phase"
@@ -17,6 +18,8 @@ export type ResearchStep = {
   detailLines: string[];
   artifactId?: string;
   artifactPath?: string;
+  /** Web pages this lane searched (lane_sources event). */
+  sources?: LaneSource[];
 };
 
 function phaseTitle(phase: string, message: string): string {

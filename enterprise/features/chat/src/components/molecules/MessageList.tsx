@@ -22,7 +22,10 @@ import { WebSearchFavicon } from "./WebSearchFavicon";
 import { WebSearchSourcesPanel } from "./WebSearchSourcesPanel";
 import { DeepResearchWorkbench } from "./DeepResearchWorkbench";
 import { DeepResearchDelivery } from "./DeepResearchDelivery";
-import { DeepResearchFilesPanel } from "./DeepResearchFilesPanel";
+import {
+  DeepResearchFilesPanel,
+  type DeepResearchPanelLane,
+} from "./DeepResearchFilesPanel";
 import { AttachmentContentPanel } from "./AttachmentContentPanel";
 import { UserMessageAttachmentCard } from "../atoms/UserMessageAttachmentCard";
 import { stripDeepResearchProgressFromContent } from "./deep-research-segments";
@@ -157,6 +160,11 @@ type MessageListProps = {
    * MessageList will not render DeepResearchFilesPanel itself.
    */
   onRequestDeepResearchFiles?: (sessionId: string, focusArtifactId?: string | null) => void;
+  /** Same ownership rule, for a lane's searched-pages view. */
+  onRequestDeepResearchLaneSources?: (
+    sessionId: string,
+    lane: DeepResearchPanelLane,
+  ) => void;
   /** When set, attachment preview is owned by the parent (docked side pane). */
   onRequestAttachmentPreview?: (attachment: ChatMessageAttachment) => void;
 };
@@ -290,6 +298,7 @@ export function MessageList({
   showScrollToBottomFab = true,
   scrollToBottomLabel = "回到底部",
   onRequestDeepResearchFiles,
+  onRequestDeepResearchLaneSources,
   onRequestAttachmentPreview,
 }: MessageListProps) {
   const parentRef = React.useRef<HTMLDivElement>(null);
@@ -319,6 +328,9 @@ export function MessageList({
   const [sourcesHighlightIndex, setSourcesHighlightIndex] = React.useState<number | null>(null);
   const [filesPanelSessionId, setFilesPanelSessionId] = React.useState<string | null>(null);
   const [filesPanelFocusId, setFilesPanelFocusId] = React.useState<string | null>(null);
+  const [filesPanelLane, setFilesPanelLane] = React.useState<DeepResearchPanelLane | null>(
+    null,
+  );
   const [attachmentPreview, setAttachmentPreview] = React.useState<ChatMessageAttachment | null>(null);
   const longPressTimerRef = React.useRef<Map<string, NodeJS.Timeout>>(new Map());
   const activeLongPressRef = React.useRef<{ messageId: string; x: number; y: number } | null>(null);
@@ -501,9 +513,23 @@ export function MessageList({
         return;
       }
       setFilesPanelSessionId(sessionId);
+      setFilesPanelLane(null);
       setFilesPanelFocusId(focusArtifactId ?? null);
     },
     [onRequestDeepResearchFiles],
+  );
+
+  const openDeepResearchLaneSources = React.useCallback(
+    (sessionId: string, lane: DeepResearchPanelLane) => {
+      if (onRequestDeepResearchLaneSources) {
+        onRequestDeepResearchLaneSources(sessionId, lane);
+        return;
+      }
+      setFilesPanelSessionId(sessionId);
+      setFilesPanelFocusId(null);
+      setFilesPanelLane(lane);
+    },
+    [onRequestDeepResearchLaneSources],
   );
 
   if (messages.length === 0) {
@@ -742,6 +768,12 @@ export function MessageList({
                             }}
                             onOpenArtifact={(id) => {
                               openDeepResearchFiles(message.session_id, id);
+                            }}
+                            onOpenLaneSources={(lane) => {
+                              openDeepResearchLaneSources(message.session_id, lane);
+                            }}
+                            onOpenLaneSource={(source) => {
+                              window.open(source.url, "_blank", "noopener,noreferrer");
                             }}
                           />
                         ) : null}
@@ -1311,10 +1343,12 @@ export function MessageList({
           if (!open) {
             setFilesPanelSessionId(null);
             setFilesPanelFocusId(null);
+            setFilesPanelLane(null);
           }
         }}
         sessionId={filesPanelSessionId}
         focusArtifactId={filesPanelFocusId}
+        focusLane={filesPanelLane}
         sources={(() => {
           if (!filesPanelSessionId) return [];
           for (let i = messages.length - 1; i >= 0; i -= 1) {

@@ -216,6 +216,55 @@ describe("buildDeepResearchSegments", () => {
   });
 });
 
+describe("lane_sources", () => {
+  it("attaches searched pages to the lane step", () => {
+    const events: DeepResearchEvent[] = [
+      { type: "phase", phase: "lanes", message: "已拆解 1 条调研车道，正在并行检索…" },
+      { type: "lane_started", laneId: "a", title: "定价", index: 1, total: 1 },
+      {
+        type: "lane_sources",
+        laneId: "a",
+        sources: [
+          {
+            title: "定价页",
+            url: "https://example.com/pricing",
+            snippet: "每百万 token…",
+            archivedPath: "research/r1/pages/pricing_abc123.md",
+            fetched: true,
+          },
+          { title: "对比", url: "https://other.com/compare", fetched: false },
+        ],
+      },
+      { type: "lane_done", laneId: "a", status: "ok" },
+    ];
+    const segments = buildDeepResearchSegments(events, "completed");
+    const tools = segments.find((s) => s.kind === "tools");
+    const step = tools && tools.kind === "tools" ? tools.steps[0] : undefined;
+    expect(step?.sources).toHaveLength(2);
+    expect(step?.sources?.[0]).toMatchObject({
+      url: "https://example.com/pricing",
+      archivedPath: "research/r1/pages/pricing_abc123.md",
+      fetched: true,
+    });
+  });
+
+  it("ignores sources for an unknown lane", () => {
+    const events: DeepResearchEvent[] = [
+      { type: "phase", phase: "lanes", message: "正在并行检索…" },
+      { type: "lane_started", laneId: "a", title: "定价", index: 1, total: 1 },
+      {
+        type: "lane_sources",
+        laneId: "ghost",
+        sources: [{ title: "x", url: "https://x.com" }],
+      },
+    ];
+    const segments = buildDeepResearchSegments(events, "running");
+    const tools = segments.find((s) => s.kind === "tools");
+    const step = tools && tools.kind === "tools" ? tools.steps[0] : undefined;
+    expect(step?.sources).toBeUndefined();
+  });
+});
+
 describe("finalizeToolsCardTitle via completed segments", () => {
   it("keeps in-progress title while lanes still running", () => {
     const events: DeepResearchEvent[] = [

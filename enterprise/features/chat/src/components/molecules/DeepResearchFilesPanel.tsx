@@ -21,9 +21,14 @@ import {
   defaultFilesPanelWidth,
 } from "./deep-research-files-panel-resize";
 import { buildStoreZip } from "./zip-store";
+import { laneSourceHost, type LaneSource } from "./deep-research-lane-sources";
+import { WebSearchFavicon } from "./WebSearchFavicon";
 import "../../markdown/chat-prism-themes.css";
 
 export type { ArtifactListItem };
+
+/** A research lane plus every page it searched. */
+export type DeepResearchPanelLane = { title: string; sources: LaneSource[] };
 
 export type DeepResearchFilesPanelProps = {
   open: boolean;
@@ -34,10 +39,36 @@ export type DeepResearchFilesPanelProps = {
    * When null/undefined, open the browse list (「全部文件」).
    */
   focusArtifactId?: string | null;
+  /**
+   * When set (and no focusArtifactId), open on that lane's searched pages.
+   * Clicking a page previews its archived full text, or opens the original URL.
+   */
+  focusLane?: DeepResearchPanelLane | null;
   /** Session web-search sources so [N] citations render as clickable site chips. */
   sources?: WebSearchSource[];
   className?: string;
 };
+
+function IconExternalLink({ className }: { className?: string }) {
+  return (
+    <svg
+      xmlns="http://www.w3.org/2000/svg"
+      width="24"
+      height="24"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      className={className}
+    >
+      <path d="M15 3h6v6" />
+      <path d="M10 14 21 3" />
+      <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6" />
+    </svg>
+  );
+}
 
 function IconClose({ className }: { className?: string }) {
   return (
@@ -300,6 +331,61 @@ function ArtifactFileRow({
   );
 }
 
+function LaneSourceCard({
+  source,
+  onOpen,
+}: {
+  source: LaneSource;
+  onOpen: (source: LaneSource) => void;
+}) {
+  const host = laneSourceHost(source.url);
+  return (
+    <li className="group/source flex items-start gap-1 rounded-xl transition-colors hover:bg-muted/40">
+      <button
+        type="button"
+        onClick={() => onOpen(source)}
+        className="flex min-w-0 flex-1 items-start gap-3 px-2.5 py-2.5 text-left"
+        data-testid="deep-research-panel-source"
+      >
+        <span className="mt-0.5 shrink-0">
+          <WebSearchFavicon host={host} label={source.title} size={18} />
+        </span>
+        <span className="min-w-0 flex-1">
+          <span className="flex items-center gap-1.5">
+            <span className="min-w-0 truncate text-[12px] leading-4 text-muted-foreground">
+              {host}
+            </span>
+            {source.fetched ? (
+              <span className="shrink-0 rounded-full bg-muted/70 px-1.5 py-px text-[10px] leading-4 text-muted-foreground">
+                已读取
+              </span>
+            ) : null}
+          </span>
+          <span className="mt-0.5 line-clamp-2 block text-[14px] font-medium leading-5 text-foreground">
+            {source.title || source.url}
+          </span>
+          {source.snippet ? (
+            <span className="mt-1 line-clamp-2 block text-[12px] leading-[18px] text-muted-foreground">
+              {source.snippet}
+            </span>
+          ) : null}
+        </span>
+      </button>
+      <a
+        href={source.url}
+        target="_blank"
+        rel="noopener noreferrer"
+        onClick={(e) => e.stopPropagation()}
+        className="mr-1.5 mt-2 flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-muted-foreground opacity-70 transition-opacity hover:bg-muted hover:text-foreground hover:opacity-100 group-hover/source:opacity-100"
+        aria-label="打开原网页"
+        data-testid="deep-research-panel-source-external"
+      >
+        <IconExternalLink className="h-4 w-4" />
+      </a>
+    </li>
+  );
+}
+
 function ArtifactBrowseRow({
   node,
   expanded,
@@ -383,12 +469,15 @@ export function DeepResearchFilesPanel({
   onOpenChange,
   sessionId,
   focusArtifactId = null,
+  focusLane = null,
   sources,
   className,
 }: DeepResearchFilesPanelProps) {
   const [artifacts, setArtifacts] = React.useState<ArtifactListItem[]>([]);
   const [selectedId, setSelectedId] = React.useState<string | null>(null);
-  const [view, setView] = React.useState<"browse" | "preview">("browse");
+  const [view, setView] = React.useState<"browse" | "preview" | "sources">("browse");
+  /** Where a preview was entered from, so the back button returns there. */
+  const [previewOrigin, setPreviewOrigin] = React.useState<"browse" | "sources">("browse");
   const [previewRaw, setPreviewRaw] = React.useState<string>("");
   const [loading, setLoading] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
@@ -483,7 +572,12 @@ export function DeepResearchFilesPanel({
         const focus = focusArtifactId ? list.find((a) => a.id === focusArtifactId) : null;
         if (focus) {
           setSelectedId(focus.id);
+          setPreviewOrigin("browse");
           setView("preview");
+        } else if (focusLane) {
+          setSelectedId(null);
+          setView("sources");
+          setFullscreen(false);
         } else {
           setSelectedId(null);
           setView("browse");
@@ -498,7 +592,7 @@ export function DeepResearchFilesPanel({
     return () => {
       cancelled = true;
     };
-  }, [open, sessionId, focusArtifactId]);
+  }, [open, sessionId, focusArtifactId, focusLane]);
 
   React.useEffect(() => {
     if (!open || view !== "preview" || !selectedId) {
@@ -670,9 +764,28 @@ export function DeepResearchFilesPanel({
   if (!open || !sessionId) return null;
 
   const browsing = view === "browse";
+  const sourcesView = view === "sources";
+  const previewing = view === "preview";
+  const laneSources = focusLane?.sources ?? [];
   const title = browsing
     ? "全部文件"
-    : selected?.path.split("/").pop() || selected?.title || "文件预览";
+    : sourcesView
+      ? `网页搜索 ${laneSources.length}`
+      : selected?.path.split("/").pop() || selected?.title || "文件预览";
+
+  // Archived full text lives in the artifact list; fall back to the live page.
+  const openLaneSource = (source: LaneSource) => {
+    const archived = source.archivedPath
+      ? artifacts.find((a) => a.path === source.archivedPath)
+      : undefined;
+    if (archived) {
+      setSelectedId(archived.id);
+      setPreviewOrigin("sources");
+      setView("preview");
+      return;
+    }
+    window.open(source.url, "_blank", "noopener,noreferrer");
+  };
 
   return (
     <aside
@@ -690,7 +803,7 @@ export function DeepResearchFilesPanel({
       data-view={view}
       data-fullscreen={fullscreen ? "true" : "false"}
       data-panel-width={fullscreen ? undefined : String(panelWidthPx)}
-      aria-label={browsing ? "全部文件" : "文件预览"}
+      aria-label={browsing ? "全部文件" : sourcesView ? "网页搜索来源" : "文件预览"}
     >
       {!fullscreen ? (
         <div
@@ -725,18 +838,25 @@ export function DeepResearchFilesPanel({
             className="h-8 w-8 shrink-0"
             onClick={() => {
               setFullscreen(false);
-              setView("browse");
               setSelectedId(null);
+              setView(previewing && previewOrigin === "sources" ? "sources" : "browse");
             }}
-            aria-label="返回全部文件"
+            aria-label={
+              previewing && previewOrigin === "sources" ? "返回来源列表" : "返回全部文件"
+            }
           >
             <IconBack className="h-4 w-4" />
           </Button>
         ) : null}
         <div className="min-w-0 flex-1 truncate text-[15px] font-semibold text-foreground">
           {title}
+          {sourcesView && focusLane?.title ? (
+            <span className="ml-2 truncate text-[12px] font-normal text-muted-foreground">
+              {focusLane.title}
+            </span>
+          ) : null}
         </div>
-        {!browsing && selectedIsHtml ? (
+        {previewing && selectedIsHtml ? (
           <Tooltip>
             <TooltipTrigger asChild>
               <Button
@@ -754,7 +874,7 @@ export function DeepResearchFilesPanel({
             <TooltipContent>{portalDark ? "浅色" : "深色"}</TooltipContent>
           </Tooltip>
         ) : null}
-        {!browsing ? (
+        {previewing ? (
           <Tooltip>
             <TooltipTrigger asChild>
               <Button
@@ -775,7 +895,7 @@ export function DeepResearchFilesPanel({
             <TooltipContent>{fullscreen ? "退出全屏" : "全屏预览"}</TooltipContent>
           </Tooltip>
         ) : null}
-        {!browsing ? (
+        {previewing ? (
           <Tooltip>
             <TooltipTrigger asChild>
               <Button
@@ -792,7 +912,7 @@ export function DeepResearchFilesPanel({
             </TooltipTrigger>
             <TooltipContent>下载</TooltipContent>
           </Tooltip>
-        ) : (
+        ) : sourcesView ? null : (
           <Tooltip>
             <TooltipTrigger asChild>
               <Button
@@ -865,6 +985,25 @@ export function DeepResearchFilesPanel({
               ))}
             </ul>
           ) : null}
+        </div>
+      ) : sourcesView ? (
+        <div
+          className="min-h-0 flex-1 overflow-y-auto px-3 pb-4 pt-2"
+          data-testid="deep-research-sources-list"
+        >
+          {laneSources.length === 0 ? (
+            <p className="px-3 text-xs text-muted-foreground">暂无来源</p>
+          ) : (
+            <ul className="m-0 list-none space-y-0.5 p-0">
+              {laneSources.map((source, i) => (
+                <LaneSourceCard
+                  key={`${source.url}-${i}`}
+                  source={source}
+                  onOpen={openLaneSource}
+                />
+              ))}
+            </ul>
+          )}
         </div>
       ) : (
         <div
