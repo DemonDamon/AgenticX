@@ -105,6 +105,10 @@ describe("chat store stream interrupt", () => {
         expect.objectContaining({ role: "user", content: "hello" }),
         expect.objectContaining({ role: "assistant", content: partialBeforeCancel }),
       ]),
+      expect.objectContaining({
+        operationId: expect.any(String),
+        payloadHash: expect.any(String),
+      }),
     );
   });
 });
