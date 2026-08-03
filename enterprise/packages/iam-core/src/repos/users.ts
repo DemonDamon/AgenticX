@@ -77,6 +77,12 @@ function generateInitialPassword(): string {
   return out;
 }
 
+function normalizeAdminEmail(value: string): string {
+  const email = value.trim().toLowerCase();
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) throw new Error("invalid email");
+  return email;
+}
+
 async function listDepartmentSubtreeIdsLocal(tenantId: string, deptId: string): Promise<string[]> {
   const db = getIamDb();
   const self = await db
@@ -449,6 +455,7 @@ export async function createAdminUser(input: {
 }
 
 export type UpdateAdminUserInput = {
+  email?: string;
   displayName?: string;
   deptId?: string | null;
   status?: AdminUserStatus;
@@ -477,6 +484,16 @@ export async function updateAdminUser(
 
   const now = new Date();
   const next: Partial<typeof users.$inferInsert> = { updatedAt: now };
+  if (patch.email !== undefined) {
+    const email = normalizeAdminEmail(patch.email);
+    if (email !== row[0].email) {
+      const existing = await findUserRowByTenantEmail(db, tenantId, email);
+      if (existing && existing.id !== id && !existing.isDeleted && existing.deletedAt == null) {
+        throw new Error("email already exists");
+      }
+    }
+    next.email = email;
+  }
   if (patch.displayName !== undefined) next.displayName = patch.displayName.trim();
   if (patch.deptId !== undefined) next.deptId = patch.deptId;
   if (patch.phone !== undefined) next.phone = patch.phone;

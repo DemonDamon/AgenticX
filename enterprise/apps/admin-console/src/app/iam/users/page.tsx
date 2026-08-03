@@ -100,6 +100,7 @@ function UsersPageContent() {
   const statusMeta = useMemo(() => getStatusMeta(t), [t]);
   const searchParams = useSearchParams();
   const initialDept = searchParams.get("dept") || "all";
+  const initialUserId = searchParams.get("userId");
 
   const [users, setUsers] = useState<AdminUser[]>([]);
   const [loading, setLoading] = useState(true);
@@ -145,6 +146,15 @@ function UsersPageContent() {
   useEffect(() => {
     void load();
   }, [load]);
+
+  useEffect(() => {
+    if (!initialUserId || loading) return;
+    const user = users.find((item) => item.id === initialUserId);
+    if (user && selected?.id !== user.id) {
+      setSelected(user);
+      setEditOpen(false);
+    }
+  }, [initialUserId, loading, selected?.id, users]);
 
   useEffect(() => {
     let alive = true;
@@ -296,7 +306,33 @@ function UsersPageContent() {
         header: "",
         enableHiding: false,
         cell: ({ row }) => (
-          <div className="flex justify-end">
+          <div className="flex justify-end gap-1">
+            <Button
+              variant="ghost"
+              size="icon-sm"
+              title={t("actions.edit")}
+              aria-label={t("actions.edit")}
+              onClick={(event) => {
+                event.stopPropagation();
+                setSelected(row.original);
+                setEditOpen(true);
+              }}
+            >
+              <Pencil />
+            </Button>
+            <Button
+              variant="ghost"
+              size="icon-sm"
+              className="text-danger hover:bg-danger/10 hover:text-danger"
+              title={t("actions.delete")}
+              aria-label={t("actions.delete")}
+              onClick={(event) => {
+                event.stopPropagation();
+                void handleDelete(row.original);
+              }}
+            >
+              <Trash2 />
+            </Button>
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
                 <Button
@@ -314,16 +350,6 @@ function UsersPageContent() {
                 <DropdownMenuItem
                   onClick={(event) => {
                     event.stopPropagation();
-                    setSelected(row.original);
-                    setEditOpen(true);
-                  }}
-                >
-                  <Pencil className="mr-2 h-4 w-4" />
-                  {t("actions.edit")}
-                </DropdownMenuItem>
-                <DropdownMenuItem
-                  onClick={(event) => {
-                    event.stopPropagation();
                     void handleQuickToggleStatus(row.original);
                   }}
                 >
@@ -338,17 +364,6 @@ function UsersPageContent() {
                       {t("actions.enable")}
                     </>
                   )}
-                </DropdownMenuItem>
-                <DropdownMenuSeparator />
-                <DropdownMenuItem
-                  className="text-danger focus:text-danger"
-                  onClick={(event) => {
-                    event.stopPropagation();
-                    void handleDelete(row.original);
-                  }}
-                >
-                  <Trash2 className="mr-2 h-4 w-4" />
-                  {t("actions.delete")}
                 </DropdownMenuItem>
               </DropdownMenuContent>
             </DropdownMenu>
@@ -629,6 +644,7 @@ function UsersPageContent() {
                 </Button>
                 <Button variant="destructive" onClick={() => void handleDelete(selected)}>
                   <Trash2 />
+                  {t("actions.delete")}
                 </Button>
               </div>
             </div>
@@ -671,10 +687,10 @@ function UsersPageContent() {
               }
             : undefined
         }
-        emailReadOnly
         onSubmit={async (values) => {
           if (!selected) return;
           const ok = await handleUpdate(selected.id, {
+            email: values.email.trim(),
             displayName: values.displayName,
             status: values.status,
             deptId: values.deptId || null,
@@ -730,7 +746,6 @@ function UserFormDialog({
   description,
   submitLabel,
   initial,
-  emailReadOnly,
   deptOptions,
   roleOptions,
   onSubmit,
@@ -741,7 +756,6 @@ function UserFormDialog({
   description?: React.ReactNode;
   submitLabel: string;
   initial?: UserFormValues;
-  emailReadOnly?: boolean;
   deptOptions: DeptOption[];
   roleOptions: RoleOption[];
   onSubmit: (values: UserFormValues) => Promise<void>;
@@ -785,7 +799,6 @@ function UserFormDialog({
               required
               value={values.email}
               onChange={(event) => setValues((prev) => ({ ...prev, email: event.target.value }))}
-              readOnly={emailReadOnly}
               placeholder="user@your-company.com"
             />
           </div>
@@ -902,19 +915,6 @@ function UserFormDialog({
               })}
             </div>
           </div>
-          {!emailReadOnly ? (
-            <div className="space-y-1.5">
-              <Label htmlFor="user-init-pw">{t("form.initialPasswordLabel")}</Label>
-              <Input
-                id="user-init-pw"
-                type="password"
-                autoComplete="new-password"
-                value={values.initialPassword}
-                onChange={(e) => setValues((prev) => ({ ...prev, initialPassword: e.target.value }))}
-              />
-            </div>
-          ) : null}
-
           <DialogFooter className="mt-4">
             <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
               {tc("actions.cancel")}
