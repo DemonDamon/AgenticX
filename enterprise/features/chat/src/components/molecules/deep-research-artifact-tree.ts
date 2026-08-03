@@ -7,6 +7,16 @@ export type ArtifactListItem = {
   mimeType?: string;
 };
 
+/** True for HTML report deliverables that must render in an iframe, not as markdown. */
+export function isHtmlArtifact(
+  item: Pick<ArtifactListItem, "path" | "mimeType"> | null | undefined,
+): boolean {
+  if (!item) return false;
+  const mime = (item.mimeType ?? "").toLowerCase();
+  if (mime.includes("html")) return true;
+  return item.path.toLowerCase().endsWith(".html");
+}
+
 export type ArtifactTreeNode =
   | {
       type: "dir";
