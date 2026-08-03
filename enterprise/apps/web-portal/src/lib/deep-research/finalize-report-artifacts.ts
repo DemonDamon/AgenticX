@@ -12,6 +12,7 @@ import {
 import {
   DEFAULT_DELIVERY_PREFS,
   primaryArtifactTitle,
+  sanitizeResearchTopic,
   type DeliveryPrefs,
 } from "./delivery-prefs";
 import type { Citation } from "./registry";
@@ -118,8 +119,8 @@ export async function finalizeReportArtifacts(
 
   const validIndexes = new Set(input.citations.map((c) => c.index));
   const linkified = linkifyCitations(input.markdown, validIndexes);
-  const title = input.outline.title || input.topic || "调研报告";
-  const topic = input.topic || title;
+  const title = sanitizeResearchTopic(input.outline.title || input.topic || "调研报告");
+  const topic = sanitizeResearchTopic(input.topic || title);
   const generatedAt = (input.now?.() ?? new Date()).toISOString();
   const prefs = input.deliveryPrefs ?? DEFAULT_DELIVERY_PREFS;
 
@@ -149,7 +150,11 @@ export async function finalizeReportArtifacts(
     });
   }
 
-  if (written >= MAX_ARTIFACTS_PER_RUN) return written;
+  // HTML is a primary deliverable (especially when user picked html/pdf). Never
+  // skip it solely because lane memos already hit MAX_ARTIFACTS_PER_RUN.
+  const mustWriteHtml =
+    prefs.format === "html" || prefs.format === "pdf" || written < MAX_ARTIFACTS_PER_RUN;
+  if (!mustWriteHtml) return written;
 
   const htmlTitle = primaryArtifactTitle(topic, {
     ...prefs,

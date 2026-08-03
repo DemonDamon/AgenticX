@@ -44,6 +44,15 @@ const HEX_PAGE_NAME = /^[0-9a-f]{16}\.md$/i;
  * Prefer artifact.title for pages/ (and legacy hex-only names) so users see
  * the source title instead of a content-hash filename.
  */
+function isPrimaryReportFileName(fileName: string): boolean {
+  const lower = fileName.toLowerCase();
+  return (
+    lower === "final-report.md" ||
+    lower === "report.md" ||
+    lower === "report.html"
+  );
+}
+
 export function displayNameForArtifactFile(
   fileName: string,
   artifact: Pick<ArtifactListItem, "path" | "title">,
@@ -51,14 +60,21 @@ export function displayNameForArtifactFile(
   const title = artifact.title?.trim();
   if (!title) return fileName;
   const underPages = artifact.path.includes("/pages/");
-  if (underPages || HEX_PAGE_NAME.test(fileName)) {
+  // Prefer human titles for pages AND primary report deliverables so users who
+  // asked for HTML do not land on a cryptic `final-report.md` label.
+  if (underPages || HEX_PAGE_NAME.test(fileName) || isPrimaryReportFileName(fileName)) {
     const safe = title
       .normalize("NFKC")
       .replace(/[^\u4e00-\u9fff\u3400-\u4dbfa-zA-Z0-9._\- ]+/g, "")
       .trim()
       .slice(0, 60);
     if (!safe) return fileName;
-    return safe.toLowerCase().endsWith(".md") ? safe : `${safe}.md`;
+    const lower = safe.toLowerCase();
+    if (lower.endsWith(".md") || lower.endsWith(".html") || lower.endsWith(".doc")) {
+      return safe;
+    }
+    const ext = fileName.toLowerCase().endsWith(".html") ? ".html" : ".md";
+    return `${safe}${ext}`;
   }
   return fileName;
 }
@@ -212,9 +228,19 @@ export function buildArtifactTree(artifacts: ArtifactListItem[]): ArtifactTreeNo
         children,
       });
     }
-    // Folders first, then files — closer to a finder / Kimi listing.
+    // Deliverable reports first (html before md), then other files, then folders.
+    const rank = (node: ArtifactTreeNode): number => {
+      if (node.type === "dir") return 50;
+      const base = (node.artifact.path.split("/").pop() || node.name).toLowerCase();
+      if (base === "report.html") return 0;
+      if (base === "final-report.md") return 1;
+      if (base === "report.md") return 2;
+      return 10;
+    };
     return nodes.sort((a, b) => {
-      if (a.type !== b.type) return a.type === "dir" ? -1 : 1;
+      const ra = rank(a);
+      const rb = rank(b);
+      if (ra !== rb) return ra - rb;
       return a.name.localeCompare(b.name);
     });
   };

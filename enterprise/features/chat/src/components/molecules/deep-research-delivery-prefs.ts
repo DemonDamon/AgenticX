@@ -7,16 +7,19 @@ export type ClientDeliveryFormat = "md" | "html" | "docx" | "pdf";
 
 const FORMAT_QUESTION_ID = "q_delivery_format";
 
-/** Infer primary format from persisted clarify answers (label match). */
+/** Infer primary format from persisted clarify answers (label / id / keyword). */
 export function inferDeliveryFormat(
   clarifyAnswers?: Record<string, string> | null,
 ): ClientDeliveryFormat {
   const raw = clarifyAnswers?.[FORMAT_QUESTION_ID]?.trim() ?? "";
   if (!raw) return "md";
-  if (raw.includes("可视化网页") || raw.includes(".html")) return "html";
-  if (raw.includes("PDF") || raw.includes("打印")) return "pdf";
-  if (raw.includes("Word") || raw.includes(".doc")) return "docx";
-  if (raw.includes("Markdown") || raw.includes(".md")) return "md";
+  const lower = raw.toLowerCase();
+  if (lower === "html" || raw.includes("可视化网页") || lower.includes(".html")) {
+    return "html";
+  }
+  if (lower === "pdf" || raw.includes("PDF") || raw.includes("打印")) return "pdf";
+  if (lower === "docx" || raw.includes("Word") || lower.includes(".doc")) return "docx";
+  if (lower === "md" || raw.includes("Markdown") || lower.includes(".md")) return "md";
   return "md";
 }
 

@@ -111,10 +111,28 @@ export function parseDeliveryPrefs(
       id === "structured" || id === "matrix" || id === "viz" || id === "decision",
   );
 
-  const formatIds = matchOptionIds(formatAnswer, formatQ.options).filter(
+  let formatIds = matchOptionIds(formatAnswer, formatQ.options).filter(
     (id): id is DeliveryFormat =>
       id === "md" || id === "html" || id === "docx" || id === "pdf",
   );
+
+  // Loose fallback when labels drift (half-width parens / option id / keyword).
+  if (formatIds.length === 0 && formatAnswer) {
+    const lower = formatAnswer.toLowerCase();
+    if (
+      lower === "html" ||
+      lower.includes("可视化网页") ||
+      lower.includes(".html")
+    ) {
+      formatIds = ["html"];
+    } else if (lower === "pdf" || lower.includes("打印")) {
+      formatIds = ["pdf"];
+    } else if (lower === "docx" || lower.includes("word") || lower.includes(".doc")) {
+      formatIds = ["docx"];
+    } else if (lower === "md" || lower.includes("markdown") || lower.includes(".md")) {
+      formatIds = ["md"];
+    }
+  }
 
   return {
     shapes: shapeIds.length > 0 ? shapeIds : [...DEFAULT_DELIVERY_PREFS.shapes],
@@ -144,9 +162,24 @@ export function shouldEmphasizeHtmlArtifact(prefs: DeliveryPrefs): boolean {
 
 /** Human title for the primary delivery card (no · 终稿 noise). */
 export function primaryArtifactTitle(topic: string, prefs: DeliveryPrefs): string {
-  const base = topic.trim() || "调研报告";
+  const base = sanitizeResearchTopic(topic);
   if (prefs.format === "html" || prefs.format === "pdf") {
     return `${base}.html`;
   }
   return `${base}.md`;
+}
+
+/**
+ * Strip clarify / delivery-preference meta blocks from a topic or outline title.
+ * These belong in planner prompts only — never in final-report.md headings.
+ */
+export function sanitizeResearchTopic(raw: string): string {
+  let text = (raw ?? "").trim();
+  if (!text) return "调研报告";
+  // Drop from the first meta marker (multiline block or inline suffix).
+  const cut = text.search(/【(?:用户澄清|交付偏好)】/);
+  if (cut >= 0) text = text.slice(0, cut).trim();
+  // Planner sometimes keeps a trailing colon / punctuation from the cut.
+  text = text.replace(/[:：\-\s]+$/u, "").trim();
+  return text || "调研报告";
 }

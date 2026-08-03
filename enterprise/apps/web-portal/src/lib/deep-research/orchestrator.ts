@@ -38,6 +38,7 @@ import {
   isDeliveryClarifyQuestionId,
   parseDeliveryPrefs,
   primaryArtifactTitle,
+  sanitizeResearchTopic,
   type DeliveryPrefs,
 } from "./delivery-prefs";
 import { looksOpenEndedResearchQuery } from "./research-intent";
@@ -668,6 +669,7 @@ export async function runDeepResearchTurn(
 
         let clarifyExpandedLanes: string[] | null = null;
         let deliveryPrefs: DeliveryPrefs = { ...DEFAULT_DELIVERY_PREFS };
+        let clarifyResume: ClarifyResumePayload = { answers: {}, skip: true };
         const directionQuestions = clarifyResult.needed ? clarifyResult.questions : [];
         const askDelivery =
           clarifyResult.needed || looksOpenEndedResearchQuery(originalUserQuery);
@@ -699,25 +701,24 @@ export async function runDeepResearchTurn(
           }
           enqueueFlush();
 
-          let resume: ClarifyResumePayload = { answers: {}, skip: true };
           if (awaitClarify) {
             const waitStarted = now();
-            resume = await waitForClarifyResume(runId, clarifyTimeoutMs);
+            clarifyResume = await waitForClarifyResume(runId, clarifyTimeoutMs);
             budgetPausedMs += Math.max(0, now() - waitStarted);
             await runStore.appendEvents(runId, [], { status: "running" });
-            if (resume.timedOut) {
+            if (clarifyResume.timedOut) {
               enqueueEvent({ type: "clarify_timeout", runId });
               enqueueEvent({ type: "narrative", text: "澄清超时，按默认假设继续。" });
-            } else if (!resume.skip) {
+            } else if (!clarifyResume.skip) {
               enqueueEvent({ type: "narrative", text: "已明确调研方向，开始系统检索。" });
             } else {
               enqueueEvent({ type: "narrative", text: "已跳过确认，按默认假设继续检索。" });
             }
           }
-          if (resume.skip || resume.timedOut) {
+          if (clarifyResume.skip || clarifyResume.timedOut) {
             deliveryPrefs = { ...DEFAULT_DELIVERY_PREFS };
           } else {
-            deliveryPrefs = parseDeliveryPrefs(resume.answers, clarifyQuestions);
+            deliveryPrefs = parseDeliveryPrefs(clarifyResume.answers, clarifyQuestions);
           }
           const laneQuestions = clarifyQuestions.filter(
             (q) => !isDeliveryClarifyQuestionId(q.id),
@@ -725,13 +726,23 @@ export async function runDeepResearchTurn(
           clarifyExpandedLanes = expandLanesFromClarifyAnswers(
             originalUserQuery,
             laneQuestions,
-            resume,
+            clarifyResume,
           );
-          userQuery = applyClarifyAnswers(userQuery, clarifyQuestions, resume);
         }
 
-        // Soft-constrain writing regardless of whether the user answered clarify.
-        userQuery = `${userQuery}\n\n${deliveryPrefsPromptBlock(deliveryPrefs)}`;
+        // Clarify + delivery prefs are planner/writer hints only — never mutate the
+        // display topic / final-report title via userQuery concatenation.
+        let planningContext = applyClarifyAnswers(
+          originalUserQuery,
+          clarifyQuestions,
+          clarifyResume,
+        );
+        planningContext = `${planningContext}\n\n${deliveryPrefsPromptBlock(deliveryPrefs)}`;
+        const prefsWritingHint = [
+          deliveryPrefsPromptBlock(deliveryPrefs),
+          "",
+          "（以上交付偏好仅供写作约束，禁止原样写入报告正文或标题。）",
+        ].join("\n");
 
         // --- Plan ---
         enqueueEvent({ type: "phase", phase: "plan", message: "正在规划研究路径…" });
@@ -739,7 +750,7 @@ export async function runDeepResearchTurn(
         let plan: ResearchPlan;
         if (searchBudgetLeft() <= 0) {
           plan = {
-            topic: originalUserQuery || "研究主题",
+            topic: sanitizeResearchTopic(originalUserQuery || "研究主题"),
             complexity: "moderate",
             subQuestions: clarifyExpandedLanes?.length
               ? clarifyExpandedLanes
@@ -750,7 +761,7 @@ export async function runDeepResearchTurn(
             url: deps.url,
             headers: deps.headers,
             body: baseBody,
-            userQuery,
+            userQuery: planningContext,
             todayLine,
             reconBrief: recon.brief,
             fetchImpl: deps.fetchImpl,
@@ -774,6 +785,10 @@ export async function runDeepResearchTurn(
           // Injected buildPlan mocks / budget fallback can still collapse open asks.
           plan = enforcePlanBreadth(plan, originalUserQuery);
         }
+        plan = {
+          ...plan,
+          topic: sanitizeResearchTopic(plan.topic || originalUserQuery || "研究主题"),
+        };
 
         if (runSignal?.aborted) throw new DOMException("Aborted", "AbortError");
 
@@ -999,7 +1014,10 @@ export async function runDeepResearchTurn(
             }
 
             let artifactPath: string | undefined;
-            if (memo.trim() && artifactsWritten < MAX_ARTIFACTS_PER_RUN) {
+            // Reserve slots for final-report.md + report.html so lane memos cannot
+            // exhaust the run quota before primary deliverables are written.
+            const memoQuota = Math.max(0, MAX_ARTIFACTS_PER_RUN - 2);
+            if (memo.trim() && artifactsWritten < memoQuota) {
               const path = `research/${runId}/lanes/${laneId}/memo.md`;
               const record = await artifactStore.write({
                 tenantId,
@@ -1177,9 +1195,13 @@ export async function runDeepResearchTurn(
         }
         enqueueEvent({ type: "phase", phase: "synthesize", message: "正在拟定报告大纲…" });
 
-        const evidence = formatEvidencePack(plan, citationsByQuestion, reconCitations);
+        const evidence = [
+          prefsWritingHint,
+          "",
+          formatEvidencePack(plan, citationsByQuestion, reconCitations),
+        ].join("\n");
         const outline = await buildReportOutline({
-          topic: plan.topic || originalUserQuery || "调研报告",
+          topic: sanitizeResearchTopic(plan.topic || originalUserQuery || "调研报告"),
           evidence,
           callJson: async (messages) =>
             callGatewayJson(toolDeps, {
@@ -1187,6 +1209,7 @@ export async function runDeepResearchTurn(
               messages,
             }),
         });
+        outline.title = sanitizeResearchTopic(outline.title);
 
         const streamSectionInto = async (
           messages: Array<{ role: string; content: string }>,
@@ -1262,7 +1285,7 @@ export async function runDeepResearchTurn(
         };
 
         // Build report content silently: accumulate into reportContentParts + run-store only.
-        const titleBlock = `# ${outline.title}\n\n`;
+        const titleBlock = `# ${sanitizeResearchTopic(outline.title)}\n\n`;
         reportContentParts.push(titleBlock);
         const toc = renderTableOfContents(outline);
         reportContentParts.push(toc);
@@ -1321,8 +1344,15 @@ export async function runDeepResearchTurn(
         // Once the markdown body exists, later wrap-up failures must not look like
         // a search failure — the user already has a usable report artifact.
         const summaryInput = {
-          topic: plan.topic || originalUserQuery || "调研报告",
-          outline,
+          topic: sanitizeResearchTopic(plan.topic || originalUserQuery || "调研报告"),
+          outline: {
+            ...outline,
+            title: sanitizeResearchTopic(outline.title),
+            sections: outline.sections.map((sec) => ({
+              ...sec,
+              title: sanitizeResearchTopic(sec.title),
+            })),
+          },
           stats: {
             queriesPlanned: totalQueries,
             urlsDiscovered: totalDiscovered,
@@ -1330,7 +1360,10 @@ export async function runDeepResearchTurn(
             pagesFetched: totalPagesFetched,
             citationCount: citations.length,
           },
-          artifacts: producedArtifacts,
+          artifacts: producedArtifacts.map((a) => ({
+            ...a,
+            title: sanitizeResearchTopic(a.title || a.path),
+          })),
           runId,
           deliveryPrefs,
         };
