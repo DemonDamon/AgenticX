@@ -1156,13 +1156,17 @@ export async function runDeepResearchTurn(
           }
 
           if (gaps.length > 0) {
+            // The gap card is itself the "发现 N 处信息缺口" announcement, and the
+            // follow-up lanes card carries the "补充检索" step — a narrative saying
+            // both would just duplicate the two cards around it.
             enqueueEvent({
               type: "reflection",
               gaps: gaps.map((g) => g.description),
             });
             enqueueEvent({
-              type: "narrative",
-              text: `发现 ${gaps.length} 处信息缺口，正在补充检索。`,
+              type: "phase",
+              phase: "lanes",
+              message: `正在针对 ${gaps.length} 处缺口补充检索…`,
             });
             const gapResults = await mapPool(
               gaps,

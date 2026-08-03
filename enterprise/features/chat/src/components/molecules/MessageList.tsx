@@ -1,7 +1,11 @@
 import * as React from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import type { ChatMessage, ChatMessageAttachment } from "@agenticx/core-api";
+import type {
+  ChatMessage,
+  ChatMessageAttachment,
+  WebSearchSource,
+} from "@agenticx/core-api";
 import { Button, Tooltip, TooltipContent, TooltipTrigger } from "@agenticx/ui";
 import { ReasoningBlock } from "../atoms/ReasoningBlock";
 import { ToolCallCard } from "../atoms/ToolCallCard";
@@ -274,6 +278,63 @@ function IconGlobe({ className }: { className?: string }) {
       <path d="M12 2a14.5 14.5 0 0 0 0 20 14.5 14.5 0 0 0 0-20" />
       <path d="M2 12h20" />
     </svg>
+  );
+}
+
+/** Favicon stack + "引用" — opens the docked sources sheet. */
+function CitationSourcesChip({
+  messageId,
+  sources,
+  onOpen,
+  className,
+}: {
+  messageId: string;
+  sources: WebSearchSource[];
+  onOpen: () => void;
+  className?: string;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={(e) => {
+        e.stopPropagation();
+        onOpen();
+      }}
+      className={[
+        "group/cite inline-flex h-7 max-w-full shrink-0 items-center gap-1.5",
+        "rounded-full bg-muted/55 py-0 pl-1 pr-2.5 text-[12px] leading-none text-foreground/75",
+        "transition-[transform,box-shadow,background-color,color] duration-200 ease-out",
+        "hover:-translate-y-px hover:bg-muted hover:text-foreground",
+        "hover:shadow-[0_6px_16px_rgba(15,23,42,0.08)]",
+        "active:translate-y-0 active:shadow-none",
+        "dark:hover:shadow-[0_6px_16px_rgba(0,0,0,0.35)]",
+        className,
+      ]
+        .filter(Boolean)
+        .join(" ")}
+      data-testid="citation-sources-chip"
+      aria-label={`引用来源 ${sources.length}`}
+    >
+      <span className="flex items-center -space-x-1.5 transition-transform duration-200 ease-out group-hover/cite:scale-[1.04]">
+        {sources.slice(0, 3).map((source, idx) => {
+          const host = hostnameFromUrl(source.url) ?? "";
+          const label = siteLabelFromSource(source, idx + 1);
+          return (
+            <span
+              key={`${messageId}-fav-${idx}`}
+              className="flex h-4 w-4 items-center justify-center overflow-hidden rounded-full border border-background bg-background shadow-sm"
+            >
+              {host ? (
+                <WebSearchFavicon host={host} label={label} size={14} rounded="full" />
+              ) : (
+                <IconGlobe className="h-2.5 w-2.5 text-muted-foreground" />
+              )}
+            </span>
+          );
+        })}
+      </span>
+      <span className="truncate font-medium">引用</span>
+    </button>
   );
 }
 
@@ -653,6 +714,8 @@ export function MessageList({
                 message.deep_research?.status === "awaiting_clarify");
             const hideMessageActions =
               deepResearchInFlight || (isAssistant && message.id === inFlightAssistantId);
+            const citationSources = isAssistant ? message.web_search_sources : undefined;
+            const hasCitationSources = Boolean(citationSources && citationSources.length > 0);
             const userAttachments = isUser ? (message.attachments ?? []) : [];
             const userHasAttachments = userAttachments.length > 0;
             const userHasText = isUser && displayContentForRender.trim().length > 0;
@@ -872,48 +935,6 @@ export function MessageList({
                           </div>
                         ) : null}
 
-                        {isAssistant &&
-                        message.web_search_sources &&
-                        message.web_search_sources.length > 0 ? (
-                          <button
-                            type="button"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              setSourcesPanelMessageId(message.id);
-                              setSourcesHighlightIndex(null);
-                            }}
-                            className="mb-3 inline-flex max-w-full items-center gap-2 rounded-full border border-border/60 bg-muted/50 py-1 pl-1.5 pr-2.5 text-sm leading-5 text-foreground/80 transition-colors hover:border-border hover:bg-muted hover:text-foreground"
-                          >
-                            <span className="flex items-center -space-x-1.5">
-                              {message.web_search_sources.slice(0, 3).map((source, idx) => {
-                                const host = hostnameFromUrl(source.url) ?? "";
-                                const label = siteLabelFromSource(source, idx + 1);
-                                return (
-                                  <span
-                                    key={`${message.id}-fav-${idx}`}
-                                    className="flex h-5 w-5 items-center justify-center overflow-hidden rounded-full border border-background bg-background shadow-sm"
-                                  >
-                                    {host ? (
-                                      <WebSearchFavicon
-                                        host={host}
-                                        label={label}
-                                        size={16}
-                                        rounded="full"
-                                      />
-                                    ) : (
-                                      <IconGlobe className="h-3 w-3 text-muted-foreground" />
-                                    )}
-                                  </span>
-                                );
-                              })}
-                            </span>
-                            <span className="truncate font-medium">
-                              搜索网页 · {message.web_search_sources.length} 个结果
-                            </span>
-                            <IconChevronRight className="h-4 w-4 shrink-0 text-muted-foreground" />
-                          </button>
-                        ) : null}
-
                         {/* 消息内容 */}
                         {!hideContentParagraph ? (
                           isAssistant ? (
@@ -968,7 +989,7 @@ export function MessageList({
                         <div
                           className={`mt-1.5 flex items-center gap-1 opacity-0 transition-opacity group-hover/message:opacity-100 ${
                             isUser ? "justify-end" : "justify-start -ml-1.5"
-                          } ${(isUser && hasUserResponseVersions) || (isAssistant && hasRetryVersions) ? "opacity-100" : ""}`}
+                          } ${(isUser && hasUserResponseVersions) || (isAssistant && hasRetryVersions) || hasCitationSources ? "opacity-100" : ""}`}
                         >
                           {isAssistant && hasRetryVersions && linkedUserMessageId && (
                             <>
@@ -1156,10 +1177,9 @@ export function MessageList({
                             </>
                           )}
 
-                          {/* 反馈 - 仅对助手消息 */}
+                          {/* 反馈 - 仅对助手消息；与分享同组，竖线只留给「引用」。 */}
                           {isAssistant && (
                             <>
-                              <div className="mx-1 h-4 w-px bg-border" />
                               <Tooltip>
                                 <TooltipTrigger asChild>
                                   <Button
@@ -1192,6 +1212,19 @@ export function MessageList({
                                 </TooltipTrigger>
                                 <TooltipContent>没帮助</TooltipContent>
                               </Tooltip>
+                              {hasCitationSources && citationSources ? (
+                                <>
+                                  <div className="mx-1 h-4 w-px bg-border" />
+                                  <CitationSourcesChip
+                                    messageId={message.id}
+                                    sources={citationSources}
+                                    onOpen={() => {
+                                      setSourcesPanelMessageId(message.id);
+                                      setSourcesHighlightIndex(null);
+                                    }}
+                                  />
+                                </>
+                              ) : null}
                             </>
                           )}
                         </div>

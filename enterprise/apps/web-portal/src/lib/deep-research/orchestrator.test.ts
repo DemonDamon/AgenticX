@@ -1083,6 +1083,29 @@ describe("P1 multi-variant + reflect", () => {
     expect(events.some((e) => e.type === "reflection")).toBe(true);
     expect(events.some((e) => e.type === "lane_started" && e.laneId === "gap-g1")).toBe(true);
     expect(events.some((e) => e.type === "research_stats")).toBe(true);
+    // Gap card first, then the follow-up search card — no narrative saying both.
+    const reflectionIdx = events.findIndex((e) => e.type === "reflection");
+    const followUpIdx = events.findIndex(
+      (e) =>
+        e.type === "phase" &&
+        e.phase === "lanes" &&
+        typeof e.message === "string" &&
+        e.message.includes("补充检索"),
+    );
+    const gapLaneIdx = events.findIndex(
+      (e) => e.type === "lane_started" && e.laneId === "gap-g1",
+    );
+    expect(reflectionIdx).toBeGreaterThanOrEqual(0);
+    expect(followUpIdx).toBeGreaterThan(reflectionIdx);
+    expect(gapLaneIdx).toBeGreaterThan(followUpIdx);
+    expect(
+      events.some(
+        (e) =>
+          e.type === "narrative" &&
+          typeof e.text === "string" &&
+          e.text.includes("信息缺口，正在补充检索"),
+      ),
+    ).toBe(false);
   });
 });
 

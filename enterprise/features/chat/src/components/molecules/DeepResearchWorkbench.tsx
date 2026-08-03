@@ -195,10 +195,20 @@ function ExpandableStepRow({
         <span className="relative z-[1] mt-0.5 flex h-4 w-4 items-center justify-center">
           {step.status === "running" ? (
             <IconSpinner className="h-4 w-4 animate-spin text-primary" />
-          ) : step.status === "failed" ? (
-            <IconSearch className="h-4 w-4 text-destructive" />
+          ) : step.kind === "lane" ? (
+            <IconSearch
+              className={[
+                "h-4 w-4",
+                step.status === "failed" ? "text-destructive" : "text-muted-foreground",
+              ].join(" ")}
+            />
           ) : (
-            <IconSearch className="h-4 w-4 text-muted-foreground" />
+            <IconCheck
+              className={[
+                "h-4 w-4",
+                step.status === "failed" ? "text-destructive" : "text-muted-foreground",
+              ].join(" ")}
+            />
           )}
         </span>
         <span className="min-w-0 flex-1">
