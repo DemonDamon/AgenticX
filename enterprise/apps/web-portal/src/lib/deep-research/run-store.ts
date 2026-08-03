@@ -6,7 +6,7 @@ import { enterpriseDeepResearchRuns as pgTable } from "@agenticx/db-schema";
 import { enterpriseDeepResearchRuns as mysqlTable } from "@agenticx/db-schema/mysql";
 import { createMysqlDb, getIamDb, resolveDatabaseConfig } from "@agenticx/iam-core";
 import type { DeepResearchEvent } from "@agenticx/sdk-ts";
-import { and, eq, inArray, lt, sql } from "drizzle-orm";
+import { and, desc, eq, inArray, lt, sql } from "drizzle-orm";
 import type { Citation } from "./registry";
 
 export const MAX_EVENTS_PER_RUN = 400;
@@ -70,6 +70,12 @@ export type RunStore = {
   ): Promise<void>;
   get(tenantId: string, userId: string, runId: string): Promise<RunRecord | null>;
   listActive(tenantId: string, userId: string, sessionId?: string): Promise<RunRecord[]>;
+  /** Most recently updated run for a session (any status) — used to rehydrate workbench after refresh. */
+  getLatestBySession(
+    tenantId: string,
+    userId: string,
+    sessionId: string,
+  ): Promise<RunRecord | null>;
   /** Mark stale non-terminal runs as failed (process restart safety net). */
   reapStaleRuns(olderThanMs: number): Promise<number>;
 };
@@ -140,6 +146,32 @@ function mapRow(row: {
     createdAt: toIso(row.createdAt),
     updatedAt: toIso(row.updatedAt),
   };
+}
+
+/**
+ * Report body long enough that synthesize clearly produced a usable draft.
+ * Used when the handler died after writing reportMarkdown / artifacts but before
+ * flushing final-report artifact events + `finish()`.
+ */
+export const FINISHED_REPORT_MARKDOWN_MIN_CHARS = 2_000;
+
+/**
+ * True when the run already delivered a terminal outcome but status may still be
+ * `running` (e.g. Next.js killed the handler after client disconnect mid-wrap-up).
+ */
+export function runLooksFinished(row: Pick<RunRecord, "phase" | "events" | "reportMarkdown">): boolean {
+  if (row.phase === "done") return true;
+  if (row.events.some((e) => e.type === "phase" && e.phase === "done")) return true;
+  const hasFinalReportArtifact = row.events.some(
+    (e) =>
+      e.type === "artifact" &&
+      (e.kind === "report" ||
+        (typeof e.path === "string" && e.path.includes("final-report"))),
+  );
+  if (hasFinalReportArtifact) return true;
+  // Artifact events may be missing even though reportMarkdown was flushed.
+  if (row.reportMarkdown.trim().length >= FINISHED_REPORT_MARKDOWN_MIN_CHARS) return true;
+  return false;
 }
 
 /**
@@ -256,6 +288,24 @@ function createMemoryStore(): RunStore {
           events: [...row.events],
           citations: [...row.citations],
         }));
+    },
+
+    async getLatestBySession(tenantId, userId, sessionId) {
+      const rows = [...bucket.values()]
+        .filter(
+          (row) =>
+            row.tenantId === tenantId &&
+            row.userId === userId &&
+            row.sessionId === sessionId,
+        )
+        .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
+      const row = rows[0];
+      if (!row) return null;
+      return {
+        ...row,
+        events: [...row.events],
+        citations: [...row.citations],
+      };
     },
 
     async reapStaleRuns(olderThanMs) {
@@ -533,6 +583,40 @@ function createSqlStore(): RunStore {
       return rows.map(mapRow).sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
     },
 
+    async getLatestBySession(tenantId, userId, sessionId) {
+      const config = resolveDatabaseConfig();
+      if (config.dialect === "mysql") {
+        const { raw: db } = await createMysqlDb(config);
+        const rows = await db
+          .select()
+          .from(mysqlTable)
+          .where(
+            and(
+              eq(mysqlTable.tenantId, tenantId),
+              eq(mysqlTable.userId, userId),
+              eq(mysqlTable.sessionId, sessionId),
+            ),
+          )
+          .orderBy(desc(mysqlTable.updatedAt))
+          .limit(1);
+        return rows[0] ? mapRow(rows[0]) : null;
+      }
+      const db = getIamDb();
+      const rows = await db
+        .select()
+        .from(pgTable)
+        .where(
+          and(
+            eq(pgTable.tenantId, tenantId),
+            eq(pgTable.userId, userId),
+            eq(pgTable.sessionId, sessionId),
+          ),
+        )
+        .orderBy(desc(pgTable.updatedAt))
+        .limit(1);
+      return rows[0] ? mapRow(rows[0]) : null;
+    },
+
     async reapStaleRuns(olderThanMs) {
       const cutoff = new Date(Date.now() - olderThanMs);
       const config = resolveDatabaseConfig();
@@ -606,11 +690,13 @@ export function createRunWriter(store: RunStore, runId: string): RunWriter {
     if (events.length === 0 && !patch && !report) return;
 
     flushChain = flushChain.then(async () => {
-      if (events.length > 0 || patch) {
-        await store.appendEvents(runId, events, patch);
-      }
+      // Report chunks first: a terminal status patch in the same flush must not
+      // block appendReport (finish / phase=done often lands with the last summary).
       if (report) {
         await store.appendReport(runId, report);
+      }
+      if (events.length > 0 || patch) {
+        await store.appendEvents(runId, events, patch);
       }
     });
     await flushChain;

@@ -41,7 +41,7 @@ import {
   MAX_ARTIFACTS_PER_RUN,
 } from "./artifact-store";
 import {
-  createRunStore,
+  defaultRunStore,
   createRunWriter,
   type DeepResearchRunStatus,
   type RunStore,
@@ -446,7 +446,7 @@ export async function runDeepResearchTurn(
   const userId = deps.userId ?? "user";
   const sessionId = deps.sessionId ?? "session";
   const artifactStore = deps.artifactStore ?? createArtifactStore();
-  const runStore = deps.runStore ?? createRunStore();
+  const runStore = deps.runStore ?? defaultRunStore;
   const awaitClarify = deps.awaitClarify !== false;
   const clarifyTimeoutMs = deps.clarifyTimeoutMs ?? CLARIFY_TIMEOUT_MS;
 
@@ -1047,7 +1047,10 @@ export async function runDeepResearchTurn(
           0,
         );
         if (laneCitationCount === 0 && searchFailures >= questions.length) {
-          enqueueEvent({ type: "phase", phase: "done", message: "检索全部失败" });
+          enqueueEvent(
+            { type: "phase", phase: "done", message: "检索全部失败" },
+            { status: "failed", phase: "done" },
+          );
           enqueueDelta(DEEP_RESEARCH_SEARCH_FAILED);
           await persistFinish("failed", DEEP_RESEARCH_SEARCH_FAILED);
           safeControllerEnqueue(encoder.encode("data: [DONE]\n\n"));
@@ -1410,13 +1413,19 @@ export async function runDeepResearchTurn(
           );
         }
 
-        enqueueEvent({ type: "phase", phase: "done", message: "深度研究完成" });
+        enqueueEvent(
+          { type: "phase", phase: "done", message: "深度研究完成" },
+          { status: "completed", phase: "done" },
+        );
         await persistFinish("completed");
         safeControllerEnqueue(encoder.encode("data: [DONE]\n\n"));
         controller.close();
       } catch (error) {
         if (error instanceof DOMException && error.name === "AbortError") {
-          enqueueEvent({ type: "phase", phase: "done", message: "已取消" });
+          enqueueEvent(
+            { type: "phase", phase: "done", message: "已取消" },
+            { status: "cancelled", phase: "done" },
+          );
           await persistFinish("cancelled");
           safeControllerEnqueue(encoder.encode("data: [DONE]\n\n"));
           controller.close();
@@ -1436,15 +1445,21 @@ export async function runDeepResearchTurn(
           } catch {
             enqueueDelta(`\n\n${DEEP_RESEARCH_WRAPUP_DEGRADED}`);
           }
-          enqueueEvent({
-            type: "phase",
-            phase: "done",
-            message: "深度研究完成（部分收尾失败）",
-          });
+          enqueueEvent(
+            {
+              type: "phase",
+              phase: "done",
+              message: "深度研究完成（部分收尾失败）",
+            },
+            { status: "completed", phase: "done" },
+          );
           await persistFinish("completed", message);
         } else {
           enqueueDelta(`\n\n${DEEP_RESEARCH_SEARCH_FAILED}`);
-          enqueueEvent({ type: "phase", phase: "done", message: "失败" });
+          enqueueEvent(
+            { type: "phase", phase: "done", message: "失败" },
+            { status: "failed", phase: "done" },
+          );
           await persistFinish("failed", message);
         }
         safeControllerEnqueue(encoder.encode("data: [DONE]\n\n"));

@@ -31,6 +31,7 @@ import type { QueuedMessage } from "./types/queued-message";
 import { shouldEnqueueOnResend } from "./utils/message-queue";
 import { getSessionRequestId, isSessionStreaming } from "./utils/session-stream-state";
 import { probeNote } from "./debug/update-depth-probe";
+import { hydrateMessagesDeepResearch } from "./utils/deep-research-hydrate";
 
 const UPDATE_DEPTH_ERROR_RE = /Maximum update depth exceeded/i;
 
@@ -756,7 +757,10 @@ export const useChatStore = create<ChatStore>((set, get) => ({
     try {
       const remoteMessages = await portalHistory.getMessages(sessionId);
       const overlay = await listPendingOverlayMessages(sessionId);
-      const merged = mergeOverlayMessages(remoteMessages, overlay);
+      const merged = await hydrateMessagesDeepResearch(
+        sessionId,
+        mergeOverlayMessages(remoteMessages, overlay),
+      );
       set((prev) => {
         const others = prev.messages.filter((message) => message.session_id !== sessionId);
         return {
@@ -839,7 +843,10 @@ export const useChatStore = create<ChatStore>((set, get) => ({
         const activeSessionId = activeSession.id;
         const remoteMessages = await portalHistory.getMessages(activeSessionId);
         const overlay = await listPendingOverlayMessages(activeSessionId);
-        const merged = mergeOverlayMessages(remoteMessages, overlay);
+        const merged = await hydrateMessagesDeepResearch(
+          activeSessionId,
+          mergeOverlayMessages(remoteMessages, overlay),
+        );
         const responseVersions = buildHydratedResponseVersions(merged);
 
         set({
@@ -940,7 +947,10 @@ export const useChatStore = create<ChatStore>((set, get) => ({
     try {
       const remoteMessages = await portalHistory.getMessages(sessionId);
       const overlay = await listPendingOverlayMessages(sessionId);
-      const merged = mergeOverlayMessages(remoteMessages, overlay);
+      const merged = await hydrateMessagesDeepResearch(
+        sessionId,
+        mergeOverlayMessages(remoteMessages, overlay),
+      );
       const responseVersions = buildHydratedResponseVersions(merged);
       if (loadSeq !== sessionMessageLoadSeq || get().activeSessionId !== sessionId) return;
       set((state) => ({

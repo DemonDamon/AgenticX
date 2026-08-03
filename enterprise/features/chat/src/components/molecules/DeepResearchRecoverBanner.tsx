@@ -40,6 +40,10 @@ export function DeepResearchRecoverBanner({
   }, [sessionId]);
 
   if (!run) return null;
+  // Defensive: healed / terminal runs must never show the recover banner.
+  if (run.phase === "done" || run.status === "completed" || run.status === "failed" || run.status === "cancelled") {
+    return null;
+  }
 
   const label = `深度调研进行中（${phaseLabelZh(run.phase)}）· 点击继续查看`;
 
