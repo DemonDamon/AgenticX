@@ -129,6 +129,22 @@ describe("displaySubtitleForCollapsedFile", () => {
   });
 });
 
+describe("displayNameForArtifactDir", () => {
+  it("localizes known research folders", () => {
+    expect(displayNameForArtifactDir("lanes")).toBe("调研车道");
+    expect(displayNameForArtifactDir("pages")).toBe("网页正文");
+    expect(displayNameForArtifactDir("assets")).toBe("资源");
+    expect(displayNameForArtifactDir("custom")).toBe("custom");
+  });
+});
+
+describe("displaySubtitleForCollapsedFile", () => {
+  it("uses Chinese kind labels instead of raw filenames", () => {
+    expect(displaySubtitleForCollapsedFile("memo.md", 2048)).toBe("备忘 · 2.00 KB");
+    expect(displaySubtitleForCollapsedFile("note.md", 512)).toBe("文档 · 512 B");
+  });
+});
+
 describe("displayNameForArtifactFile", () => {
   it("uses title for pages/ and legacy hex names", () => {
     expect(
