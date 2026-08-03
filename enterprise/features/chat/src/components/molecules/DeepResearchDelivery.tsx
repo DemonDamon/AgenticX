@@ -2,14 +2,10 @@
 
 import * as React from "react";
 import type { ChatMessageDeepResearch } from "@agenticx/core-api";
-import { Tooltip, TooltipContent, TooltipTrigger } from "@agenticx/ui";
-import { Download, Eye, FileText, Printer } from "lucide-react";
 import { DeepResearchArtifactCard } from "./DeepResearchArtifactCard";
 import {
-  exportActionKeyForFormat,
   inferDeliveryFormat,
   isPrimaryDeliveryArtifactPath,
-  type ClientDeliveryFormat,
 } from "./deep-research-delivery-prefs";
 import { collectDeepResearchDeliveryArtifacts } from "./deep-research-segments";
 
@@ -63,127 +59,6 @@ function AllFilesCard({ onOpen }: { onOpen?: () => void }) {
   );
 }
 
-function hasCompletedReportArtifact(
-  deepResearch: ChatMessageDeepResearch,
-): boolean {
-  if (deepResearch.status !== "completed") return false;
-  return deepResearch.events.some(
-    (event) =>
-      event.type === "artifact" &&
-      event.kind === "report" &&
-      (event.path.toLowerCase().includes("final-report") ||
-        event.path.toLowerCase().endsWith("report.html") ||
-        event.path.toLowerCase().endsWith("report.md")),
-  );
-}
-
-function exportUrl(runId: string, format: "html" | "md" | "docx", inline?: boolean): string {
-  const qs = new URLSearchParams({ format });
-  if (inline) qs.set("inline", "1");
-  return `/api/chat/deep-research/runs/${encodeURIComponent(runId)}/export?${qs.toString()}`;
-}
-
-function ExportActions({
-  runId,
-  primaryFormat,
-}: {
-  runId: string;
-  primaryFormat: ClientDeliveryFormat;
-}) {
-  const openHtml = React.useCallback(
-    (printAfterLoad: boolean) => {
-      const href = exportUrl(runId, "html", true);
-      const win = window.open(href, "_blank", "noopener,noreferrer");
-      if (!win || !printAfterLoad) return;
-      // Best-effort print once the report document is ready.
-      const timer = window.setInterval(() => {
-        try {
-          if (win.closed) {
-            window.clearInterval(timer);
-            return;
-          }
-          if (win.document?.readyState === "complete") {
-            window.clearInterval(timer);
-            win.focus();
-            win.print();
-          }
-        } catch {
-          window.clearInterval(timer);
-        }
-      }, 300);
-      window.setTimeout(() => window.clearInterval(timer), 15_000);
-    },
-    [runId],
-  );
-
-  const emphasized = exportActionKeyForFormat(primaryFormat);
-
-  const actions = [
-    {
-      key: "view-html" as const,
-      label: "查看可视化报告",
-      icon: Eye,
-      onClick: () => openHtml(false),
-    },
-    {
-      key: "download-md" as const,
-      label: "下载 Markdown",
-      icon: FileText,
-      onClick: () => {
-        window.location.assign(exportUrl(runId, "md"));
-      },
-    },
-    {
-      key: "download-docx" as const,
-      label: "下载 Word",
-      icon: Download,
-      onClick: () => {
-        window.location.assign(exportUrl(runId, "docx"));
-      },
-    },
-    {
-      key: "print-pdf" as const,
-      label: "打印 / 存为 PDF",
-      icon: Printer,
-      onClick: () => openHtml(true),
-    },
-  ];
-
-  return (
-    <div
-      className="flex flex-wrap items-center gap-1 pt-1"
-      data-testid="deep-research-export-actions"
-    >
-      {actions.map((action) => {
-        const Icon = action.icon;
-        const isPrimary = action.key === emphasized;
-        return (
-          <Tooltip key={action.key}>
-            <TooltipTrigger asChild>
-              <button
-                type="button"
-                onClick={action.onClick}
-                className={[
-                  "inline-flex h-8 items-center gap-1.5 rounded-lg px-2.5 text-[13px] transition-colors hover:bg-muted/60",
-                  isPrimary
-                    ? "text-foreground font-medium"
-                    : "text-muted-foreground hover:text-foreground",
-                ].join(" ")}
-                aria-label={action.label}
-                data-primary-export={isPrimary ? "true" : undefined}
-              >
-                <Icon className="h-3.5 w-3.5 shrink-0" aria-hidden />
-                <span>{action.label}</span>
-              </button>
-            </TooltipTrigger>
-            <TooltipContent>{action.label}</TooltipContent>
-          </Tooltip>
-        );
-      })}
-    </div>
-  );
-}
-
 /**
  * Delivery strip: one primary report card + folder card for all files.
  * Render after the completion summary so deliverables sit at the end of the turn.
@@ -213,10 +88,9 @@ export function DeepResearchDelivery({
     deepResearch.status === "completed" ||
     deepResearch.status === "failed" ||
     deepResearch.status === "cancelled";
-  const showExport = hasCompletedReportArtifact(deepResearch);
 
   // Show as soon as a report artifact exists; also after terminal if any files remain.
-  if (deliveryArtifacts.length === 0 && !(terminal && showAllFiles) && !showExport) {
+  if (deliveryArtifacts.length === 0 && !(terminal && showAllFiles)) {
     return null;
   }
 
@@ -233,9 +107,6 @@ export function DeepResearchDelivery({
         />
       ))}
       {showAllFiles ? <AllFilesCard onOpen={onOpenFiles} /> : null}
-      {showExport ? (
-        <ExportActions runId={deepResearch.runId} primaryFormat={primaryFormat} />
-      ) : null}
     </div>
   );
 }

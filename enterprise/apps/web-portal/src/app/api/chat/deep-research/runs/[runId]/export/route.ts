@@ -1,6 +1,6 @@
 /**
  * Deep-research export: HTML / Markdown / Word-compatible .doc
- * PDF is client-side print only (see DeepResearchDelivery).
+ * Kept for direct/API download; chat UI uses artifact cards + files panel.
  */
 
 import { NextResponse } from "next/server";

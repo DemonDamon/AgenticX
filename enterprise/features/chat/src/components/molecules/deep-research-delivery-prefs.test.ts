@@ -1,7 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
   displayDeliveryFileName,
-  exportActionKeyForFormat,
   inferDeliveryFormat,
   isPrimaryDeliveryArtifactPath,
 } from "./deep-research-delivery-prefs";
@@ -56,14 +55,5 @@ describe("displayDeliveryFileName", () => {
         title: "DeepSeek V4.html",
       }),
     ).toBe("DeepSeek V4.html");
-  });
-});
-
-describe("exportActionKeyForFormat", () => {
-  it("maps formats to export action keys", () => {
-    expect(exportActionKeyForFormat("html")).toBe("view-html");
-    expect(exportActionKeyForFormat("md")).toBe("download-md");
-    expect(exportActionKeyForFormat("docx")).toBe("download-docx");
-    expect(exportActionKeyForFormat("pdf")).toBe("print-pdf");
   });
 });
