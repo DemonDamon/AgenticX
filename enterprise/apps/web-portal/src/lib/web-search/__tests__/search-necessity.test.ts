@@ -20,7 +20,7 @@ describe("classifyWebSearchNeed", () => {
   });
 
   it("skips assistant meta questions (AC-1)", () => {
-    for (const query of ["你是谁", "你能做什么", "你是什么模型"]) {
+    for (const query of ["你是谁", "你能做什么", "你是什么模型", "现在有联网功能吗", "你能联网搜索吗"]) {
       expect(classifyWebSearchNeed({ query }), query).toEqual({
         need: "skip",
         reason: "assistant_meta",
@@ -85,14 +85,29 @@ describe("classifyWebSearchNeed", () => {
     ).toEqual({ need: "search" });
   });
 
-  it("length guard: long text containing 你好 still searches (AC-4)", () => {
-    const long = `${"你好，".repeat(10)}${"这是一段很长的用户问题，需要联网核实事实。".repeat(12)}`;
+  it("skips ordinary self-contained work even when it is long", () => {
+    const long = `${"请帮我整理这段材料并写成一封正式邮件。".repeat(12)}`;
     expect(long.length).toBeGreaterThan(200);
-    expect(classifyWebSearchNeed({ query: long })).toEqual({ need: "search" });
+    expect(classifyWebSearchNeed({ query: long })).toEqual({
+      need: "skip",
+      reason: "self_contained",
+    });
   });
 
-  it("empty query without attachment falls through to search", () => {
-    expect(classifyWebSearchNeed({ query: "" })).toEqual({ need: "search" });
+  it("skips an empty query without attachment", () => {
+    expect(classifyWebSearchNeed({ query: "" })).toEqual({
+      need: "skip",
+      reason: "self_contained",
+    });
+  });
+
+  it("skips ordinary writing and explanation requests", () => {
+    for (const query of ["帮我写一封请假邮件", "解释一下递归", "把这段话翻译成英文"]) {
+      expect(classifyWebSearchNeed({ query }), query).toEqual({
+        need: "skip",
+        reason: "self_contained",
+      });
+    }
   });
 
   it("shouldSkipWebSearch mirrors classify", () => {

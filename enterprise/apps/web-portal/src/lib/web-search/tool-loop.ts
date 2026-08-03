@@ -46,7 +46,10 @@ export const WEB_SEARCH_TOOL = {
 } as const;
 
 export const WEB_SEARCH_SYSTEM_HINT =
-  "系统已完成联网搜索，并将结果附在下方。请严格基于这些结果作答；事实句末用 [N] 标注来源编号。" +
+  "## 本轮检索状态\n" +
+  "本轮已经由平台成功完成联网搜索，并将结果附在下方；这不是等待用户开启的状态。" +
+  "请严格基于这些结果作答；不得说自己不能联网、无法搜索或要求用户手动开启联网搜索。" +
+  "事实句末用 [N] 标注来源编号。" +
   "必须直接提炼并给出可核验事实（如天气状况、气温、湿度、风力、时间、价格、版本号等），用简洁结构化表述回复用户。" +
   "禁止只罗列网站名称、禁止让用户自行打开链接查看；禁止输出「推荐查询渠道」式清单来代替答案。" +
   "禁止以「建议直接访问某网站获取详情」「请自行查看某链接」等说法收尾来代替回答——" +
@@ -70,8 +73,13 @@ export const WEB_SEARCH_SYSTEM_HINT =
  */
 export const TRIVIAL_TURN_SYSTEM_HINT =
   "## 本轮说明\n" +
-  "用户本轮是寒暄、简单确认或无需外部检索的问题。请直接友好地回复。\n" +
+  "用户本轮是寒暄、简单确认或无需外部检索的问题。请直接友好地回复，不要为了凑答案而联网。\n" +
   "思考过程与回复中都不要提及工具、功能调用、联网搜索、function call、tool_call。\n";
+
+export const ASSISTANT_CAPABILITY_SYSTEM_HINT =
+  "## 当前能力说明\n" +
+  "用户正在询问助手或平台的能力。请直接回答当前系统状态；如果用户问联网搜索，说明本平台支持联网搜索，" +
+  "本轮自动模式会按问题需要决定是否检索，不要声称必须手动开启，也不要把本轮未检索误说成平台不支持。\n";
 
 const TRIVIAL_TURN_MARKER = "## 本轮说明";
 
@@ -297,6 +305,20 @@ export function withTrivialTurnContext(messages: ChatMessage[]): ChatMessage[] {
     return next;
   }
   const block = TRIVIAL_TURN_SYSTEM_HINT.trimEnd();
+  if (next[0]?.role === "system") {
+    const existing = typeof next[0].content === "string" ? next[0].content : "";
+    next[0] = {
+      ...next[0],
+      content: existing ? `${block}\n\n${existing}` : block,
+    };
+    return next;
+  }
+  return [{ role: "system", content: block }, ...next];
+}
+
+export function withAssistantCapabilityContext(messages: ChatMessage[]): ChatMessage[] {
+  const next = messages.map((m) => ({ ...m }));
+  const block = ASSISTANT_CAPABILITY_SYSTEM_HINT.trimEnd();
   if (next[0]?.role === "system") {
     const existing = typeof next[0].content === "string" ? next[0].content : "";
     next[0] = {
@@ -570,11 +592,14 @@ export async function runWebSearchTurn(
   const respondWithoutSearch = async (reason: string): Promise<Response> => {
     console.info(`[web-search] skipped search-first (reason=${reason})`);
     try {
+      const directMessages =
+        reason === "assistant_meta"
+          ? withAssistantCapabilityContext(withCurrentTimeContext(originalMessages))
+          : withTrivialTurnContext(withCurrentTimeContext(originalMessages));
       const upstream = await callGatewayStream(deps, {
         ...rest,
         stream: true,
-        // Hint first so thinking models do not narrate "无需功能调用".
-        messages: withTrivialTurnContext(withCurrentTimeContext(originalMessages)),
+        messages: directMessages,
       });
       return pipeUpstreamSse(upstream, {});
     } catch (error) {
@@ -595,8 +620,6 @@ export async function runWebSearchTurn(
     }
   }
 
-  // Skip classification uses the bare last-user turn (greetings must not inherit prior intent).
-  const queryForSkip = extractLastUserQuery(originalMessages);
   // Referential follow-ups resolve entity from prior assistant reply; else slot-fill / raw last.
   const resolved = resolveFollowUpQuery(originalMessages);
 
@@ -614,16 +637,16 @@ export async function runWebSearchTurn(
     ? resolved.query || extractLastUserQuery(originalMessages)
     : buildWebSearchQuery(originalMessages);
 
-  // Before: only pure date/time questions short-circuited search-first.
-  // After: any self-contained turn (greeting / assistant meta / attachment-only /
-  // arithmetic / datetime) answers directly — matching Doubao / Kimi behavior where
-  // the toggle stays on but trivial turns do not pay an外网 round-trip.
+  // Auto mode skips high-confidence self-contained turns and searches only when
+  // the query has explicit lookup or current/public-web fact signals.
   const skip = webSearchAlwaysOn()
     ? null
-    : classifyWebSearchNeed({
-        query: queryForSkip,
-        rawQuery: extractLastUserRawText(originalMessages),
-      });
+    : resolved?.entity
+      ? null
+      : classifyWebSearchNeed({
+          query,
+          rawQuery: extractLastUserRawText(originalMessages),
+        });
   if (skip && skip.need === "skip") {
     return respondWithoutSearch(skip.reason);
   }

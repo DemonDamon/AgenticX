@@ -235,6 +235,74 @@ describe("web search tool loop", () => {
     expect(text).not.toContain("agenticx_web_search_sources");
   });
 
+  it("skips search for self-contained work in auto mode", async () => {
+    const bodies: unknown[] = [];
+    const executeSearch = vi.fn(async () => []);
+    const fetchImpl = vi.fn(async (_url: string, init?: RequestInit) => {
+      bodies.push(JSON.parse(String(init?.body ?? "{}")));
+      return sseResponse('data: {"choices":[{"delta":{"content":"邮件草稿"}}]}\n\ndata: [DONE]\n\n');
+    });
+
+    const res = await runWebSearchTurn(
+      {
+        model: "m",
+        messages: [{ role: "user", content: "帮我写一封请假邮件" }],
+        agenticx_web_search: true,
+      },
+      {
+        url: "http://gateway.test/v1/chat/completions",
+        headers: { authorization: "Bearer t" },
+        fetchImpl: fetchImpl as unknown as typeof fetch,
+        loadTenantConfig: async () => ({
+          enabled: true,
+          provider: "duckduckgo",
+          apiKey: "",
+          maxResults: 5,
+        }),
+        executeSearch,
+      },
+    );
+
+    expect(executeSearch).not.toHaveBeenCalled();
+    const body = bodies[0] as { messages?: Array<{ role?: string; content?: string }> };
+    expect(String(body.messages?.[0]?.content)).not.toContain("联网搜索结果");
+    expect(String(body.messages?.[0]?.content)).toContain("不要为了凑答案而联网");
+    expect(await readText(res)).toContain("邮件草稿");
+  });
+
+  it("answers web-search capability directly instead of searching", async () => {
+    const bodies: unknown[] = [];
+    const executeSearch = vi.fn(async () => []);
+    const fetchImpl = vi.fn(async (_url: string, init?: RequestInit) => {
+      bodies.push(JSON.parse(String(init?.body ?? "{}")));
+      return sseResponse('data: {"choices":[{"delta":{"content":"支持联网搜索"}}]}\n\ndata: [DONE]\n\n');
+    });
+
+    await runWebSearchTurn(
+      {
+        model: "m",
+        messages: [{ role: "user", content: "现在有联网功能吗" }],
+        agenticx_web_search: true,
+      },
+      {
+        url: "http://gateway.test/v1/chat/completions",
+        headers: { authorization: "Bearer t" },
+        fetchImpl: fetchImpl as unknown as typeof fetch,
+        loadTenantConfig: async () => ({
+          enabled: true,
+          provider: "duckduckgo",
+          apiKey: "",
+          maxResults: 5,
+        }),
+        executeSearch,
+      },
+    );
+
+    expect(executeSearch).not.toHaveBeenCalled();
+    const body = bodies[0] as { messages?: Array<{ role?: string; content?: string }> };
+    expect(String(body.messages?.[0]?.content)).toContain("本平台支持联网搜索");
+  });
+
   it("does not search when tenant enabled=false", async () => {
     const bodies: unknown[] = [];
     const executeSearch = vi.fn(async () => []);
