@@ -5,6 +5,7 @@ import {
   displayNameForArtifactFile,
   formatArtifactByteSize,
   isHtmlArtifact,
+  prepareHtmlPreviewSrcDoc,
 } from "./deep-research-artifact-tree";
 
 describe("isHtmlArtifact", () => {
@@ -15,6 +16,41 @@ describe("isHtmlArtifact", () => {
       false,
     );
     expect(isHtmlArtifact(null)).toBe(false);
+  });
+});
+
+describe("prepareHtmlPreviewSrcDoc", () => {
+  it("stamps dark class onto html for portal dark theme", () => {
+    const out = prepareHtmlPreviewSrcDoc(
+      '<!DOCTYPE html><html lang="zh"><head></head></html>',
+      true,
+    );
+    expect(out).toMatch(/<html\b[^>]*\bclass="dark"[^>]*>/i);
+    expect(out).toContain('lang="zh"');
+  });
+
+  it("appends dark to an existing class list without dropping other attrs", () => {
+    const out = prepareHtmlPreviewSrcDoc('<html class="report" lang="zh">', true);
+    expect(out).toContain('class="report dark"');
+    expect(out).toContain('lang="zh"');
+  });
+
+  it("removes dark class for light theme", () => {
+    const out = prepareHtmlPreviewSrcDoc('<html class="dark report">', false);
+    expect(out).toContain('class="report"');
+    expect(out).not.toMatch(/\bdark\b/);
+  });
+
+  it("injects narrow toc collapse patch for portal preview of saved html", () => {
+    const out = prepareHtmlPreviewSrcDoc(
+      "<!DOCTYPE html><html><head><title>t</title></head><body><div class=\"sidebar\"><h2>目录</h2><ul class=\"toc\"></ul></div></body></html>",
+      false,
+    );
+    expect(out).toContain('id="agx-portal-toc-narrow"');
+    expect(out).toContain("max-width: 520px");
+    expect(out).toContain(".sidebar:not(.toc-open) .toc");
+    expect(out).toContain('id="agx-portal-toc-narrow-js"');
+    expect(out).toContain(".theme-toggle { display: none !important; }");
   });
 });
 

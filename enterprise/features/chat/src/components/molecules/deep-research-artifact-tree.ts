@@ -17,6 +17,129 @@ export function isHtmlArtifact(
   return item.path.toLowerCase().endsWith(".html");
 }
 
+/**
+ * Portal-only CSS/JS for already-saved report.html that still stacks a full TOC
+ * above the article under `@media (max-width: 860px)`.
+ * Mid widths keep a thin left TOC; very narrow collapses TOC by default.
+ */
+const PORTAL_TOC_NARROW_PATCH = `
+<style id="agx-portal-toc-narrow">
+/* Theme is controlled by the panel toolbar — hide the in-document control. */
+.theme-toggle { display: none !important; }
+@media (max-width: 860px) and (min-width: 521px) {
+  .layout { flex-direction: row !important; }
+  .sidebar {
+    position: sticky !important; top: 0 !important; align-self: flex-start !important;
+    width: 180px !important; max-height: 100vh !important; overflow: auto !important;
+    border-right: 1px solid var(--border) !important; border-bottom: none !important;
+  }
+  .sidebar .toc { display: block !important; }
+  .sidebar > h2 { cursor: default; }
+  .sidebar > h2::after { content: none !important; }
+  .main { padding: 1.5rem 1.25rem 3rem !important; }
+}
+@media (max-width: 520px) {
+  .layout { flex-direction: column !important; }
+  .sidebar {
+    position: sticky !important; top: 0 !important; z-index: 10 !important;
+    width: 100% !important; max-height: none !important;
+    border-right: none !important; border-bottom: 1px solid var(--border) !important;
+  }
+  .sidebar:not(.toc-open) .toc { display: none !important; }
+  .sidebar.toc-open .toc {
+    display: block !important; max-height: min(50vh, 20rem) !important; overflow: auto !important;
+  }
+  .sidebar > h2 {
+    cursor: pointer !important; user-select: none; margin-bottom: 0 !important;
+    display: flex !important; align-items: center; justify-content: space-between;
+  }
+  .sidebar > h2::after {
+    content: "▸" !important; color: var(--muted); font-size: 0.85rem;
+  }
+  .sidebar.toc-open > h2 { margin-bottom: 0.75rem !important; }
+  .sidebar.toc-open > h2::after { content: "▾" !important; }
+  .main { padding: 1.25rem 1.25rem 3rem !important; }
+}
+</style>
+<script id="agx-portal-toc-narrow-js">
+(function () {
+  if (window.__agxPortalTocNarrow) return;
+  window.__agxPortalTocNarrow = true;
+  var sidebar = document.getElementById("toc") || document.querySelector(".sidebar");
+  if (!sidebar) return;
+  var narrowMq = window.matchMedia("(max-width: 520px)");
+  function sync() {
+    if (!narrowMq.matches) sidebar.classList.remove("toc-open");
+  }
+  var heading = sidebar.querySelector(":scope > h2");
+  if (heading && !heading.dataset.agxTocBound) {
+    heading.dataset.agxTocBound = "1";
+    heading.addEventListener("click", function () {
+      if (!narrowMq.matches) return;
+      sidebar.classList.toggle("toc-open");
+    });
+  }
+  if (narrowMq.addEventListener) narrowMq.addEventListener("change", sync);
+  else if (narrowMq.addListener) narrowMq.addListener(sync);
+  sync();
+})();
+</script>
+`.trim();
+
+function stampHtmlDarkClass(html: string, dark: boolean): string {
+  const match = html.match(/<html(\s[^>]*)?>/i);
+  if (!match || match.index === undefined) return html;
+  const openTag = match[0];
+  const attrs = match[1] ?? "";
+  const classMatch = attrs.match(/\bclass\s*=\s*(["'])([^"']*)\1/i);
+
+  let nextAttrs = attrs;
+  if (classMatch) {
+    const quote = classMatch[1]!;
+    const tokens = classMatch[2]!
+      .split(/\s+/)
+      .filter((token) => token && token !== "dark");
+    if (dark) tokens.push("dark");
+    if (tokens.length === 0) {
+      nextAttrs = attrs.replace(/\s*\bclass\s*=\s*(["'])([^"']*)\1/i, "");
+    } else {
+      nextAttrs = attrs.replace(
+        /\bclass\s*=\s*(["'])([^"']*)\1/i,
+        `class=${quote}${tokens.join(" ")}${quote}`,
+      );
+    }
+  } else if (dark) {
+    nextAttrs = `${attrs} class="dark"`;
+  } else {
+    return html;
+  }
+
+  const nextTag = `<html${nextAttrs}>`.replace(/\s+>/g, ">").replace(/^<html\s{2,}/, "<html ");
+  return html.slice(0, match.index) + nextTag + html.slice(match.index + openTag.length);
+}
+
+function injectPortalTocNarrowPatch(html: string): string {
+  if (html.includes('id="agx-portal-toc-narrow"')) return html;
+  if (/<\/head>/i.test(html)) {
+    return html.replace(/<\/head>/i, `${PORTAL_TOC_NARROW_PATCH}\n</head>`);
+  }
+  if (/<\/body>/i.test(html)) {
+    return html.replace(/<\/body>/i, `${PORTAL_TOC_NARROW_PATCH}\n</body>`);
+  }
+  return `${html}\n${PORTAL_TOC_NARROW_PATCH}`;
+}
+
+/**
+ * Align sandboxed report.html srcDoc with the portal theme.
+ * Sandbox without allow-same-origin cannot read localStorage / parent CSS vars,
+ * so we stamp `class="dark"` onto <html> before handing it to the iframe.
+ * Also patches narrow-viewport TOC stacking for already-saved report.html files.
+ */
+export function prepareHtmlPreviewSrcDoc(html: string, dark: boolean): string {
+  const stamped = stampHtmlDarkClass(html ?? "", dark);
+  return injectPortalTocNarrowPatch(stamped);
+}
+
 export type ArtifactTreeNode =
   | {
       type: "dir";

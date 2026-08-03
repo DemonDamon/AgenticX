@@ -86,4 +86,24 @@ describe("renderHtmlReport", () => {
     expect(html).toContain('class="language-ts"');
     expect(html).not.toContain('class="mermaid"');
   });
+
+  it("keeps left toc at mid width and collapses toc under 520px", () => {
+    const html = renderHtmlReport(base);
+    expect(html).toContain("max-width: 860px) and (min-width: 521px)");
+    expect(html).toContain("max-width: 520px");
+    expect(html).toContain(".sidebar:not(.toc-open) .toc { display: none; }");
+    expect(html).toContain('classList.toggle("toc-open")');
+    // Legacy full-stack-at-860 behavior must be gone.
+    expect(html).not.toMatch(
+      /@media \(max-width: 860px\) \{\s*\.layout \{ flex-direction: column; \}/,
+    );
+  });
+
+  it("uses icon theme toggle instead of text pill", () => {
+    const html = renderHtmlReport(base);
+    expect(html).toContain('aria-label="明暗切换"');
+    expect(html).toContain('class="icon-sun"');
+    expect(html).toContain('class="icon-moon"');
+    expect(html).not.toMatch(/>明暗切换</);
+  });
 });
