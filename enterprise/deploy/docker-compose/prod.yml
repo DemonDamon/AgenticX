@@ -80,6 +80,7 @@ services:
       NEXT_PUBLIC_GATEWAY_BASE: http://nginx
       # Public origin employees can resolve (NOT docker service names). Used by Desktop bootstrap.
       NEXT_PUBLIC_GATEWAY_PUBLIC_BASE_URL: ${NEXT_PUBLIC_GATEWAY_PUBLIC_BASE_URL:?NEXT_PUBLIC_GATEWAY_PUBLIC_BASE_URL is required}
+      WEB_PORTAL_PUBLIC_BASE_URL: ${WEB_PORTAL_PUBLIC_BASE_URL:-}
       AUTH_JWT_PUBLIC_KEY: ${JWT_PUBLIC_KEY}
       AUTH_JWT_PRIVATE_KEY: ${JWT_PRIVATE_KEY}
       DEFAULT_TENANT_ID: ${DEFAULT_TENANT_ID:?DEFAULT_TENANT_ID is required}

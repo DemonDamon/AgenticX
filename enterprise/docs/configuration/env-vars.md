@@ -35,6 +35,7 @@
 | `DESKTOP_PAT_EXPIRE_DAYS` | ⚪ | Desktop 企业登录签发 PAT 有效天数，默认 `90` |
 | `GATEWAY_COMPLETIONS_URL` | 🟡 | 默认 `http://127.0.0.1:8088/v1/chat/completions` |
 | `NEXT_PUBLIC_SSO_PROVIDERS` | ⚪ | `id:显示名` 逗号分隔，控制 SSO 按钮 |
+| `WEB_PORTAL_PUBLIC_BASE_URL` | 🟡 | 分享链接使用员工设备可访问的 Portal origin；未配置时回退到当前请求 origin，本地通常会生成 `localhost` 链接 |
 | `SSO_<id>_ISSUER` | OIDC | IdP issuer URL |
 | `SSO_<id>_CLIENT_ID` | OIDC | OIDC client_id |
 | `SSO_<id>_CLIENT_SECRET` | OIDC | OIDC client_secret |

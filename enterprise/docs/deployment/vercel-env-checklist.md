@@ -39,6 +39,7 @@ Framework: **Next.js** · Node: **20**。
 | `DEFAULT_TENANT_ID` | 默认租户 |
 | `DEFAULT_DEPT_ID` | 默认部门 |
 | `NEXT_PUBLIC_SSO_PROVIDERS` | 如：`id:显示名`，多个逗号分隔 |
+| `WEB_PORTAL_PUBLIC_BASE_URL` | Portal 分享链接使用的员工可访问 origin，例如 `https://portal.example.com` |
 | `SSO_STATE_SIGNING_SECRET` | OIDC state 签名 |
 | `SSO_PROVIDER_SECRET_KEY` | 与 SSO 会话/加密相关的密钥（按仓库实际约定填写） |
 | `AGX_PROVIDER_SECRET_KEY` | Admin 写入 provider Key 的对称加密密钥（AES-GCM），须与文档/实现一致 |

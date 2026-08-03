@@ -103,5 +103,6 @@ SSO 按钮由 `NEXT_PUBLIC_SSO_PROVIDERS=id:显示名` 控制。配置见 [runbo
 | POST | `/api/desktop/v1/chat/completions` | 旧兼容代理（仍保留） |
 | `GATEWAY_COMPLETIONS_URL` | Gateway 转发地址 |
 | `NEXT_PUBLIC_SSO_PROVIDERS` | SSO 按钮列表 |
+| `WEB_PORTAL_PUBLIC_BASE_URL` | 分享链接的员工可访问 Portal origin；生产/测试环境应配置为实际域名或可访问 IP |
 
 完整清单见 `enterprise/.env.local.example` 与 [deployment/vercel-env-checklist.md](../deployment/vercel-env-checklist.md)。

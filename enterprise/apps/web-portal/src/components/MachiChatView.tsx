@@ -433,13 +433,13 @@ export function MachiChatView({
         body: JSON.stringify({ session_id: activeSessionId, message_ids: messageIds }),
       });
       const payload = (await response.json().catch(() => ({}))) as {
-        data?: { path?: string };
+        data?: { path?: string; share_url?: string };
         error?: { message?: string };
       };
       if (!response.ok || !payload.data?.path) {
         throw new Error(payload.error?.message ?? t("shareFailed"));
       }
-      return `${window.location.origin}${payload.data.path}`;
+      return payload.data.share_url ?? new URL(payload.data.path, window.location.origin).toString();
     },
     [activeSessionId, t],
   );

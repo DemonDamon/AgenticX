@@ -147,7 +147,7 @@ export function SharedConversationView({ snapshot }: { snapshot: ChatShareSnapsh
           sources={snapshot.messages.find((message) => message.id === sourcesPanelMessageId)?.web_search_sources ?? []}
         />
 
-        <div className="sticky bottom-4 mt-10 flex flex-wrap items-center justify-center gap-2 rounded-2xl border border-border/70 bg-background/90 p-3 shadow-lg backdrop-blur">
+        <div className="sticky bottom-4 z-30 isolate mt-10 flex flex-wrap items-center justify-center gap-2 overflow-hidden rounded-2xl border border-border/70 bg-background/95 p-3 shadow-2xl backdrop-blur-2xl backdrop-saturate-150">
           <Button type="button" variant="outline" onClick={() => void generateImage()} disabled={busy}>
             <Image className="h-4 w-4" />
             {t("shareGenerateImage")}

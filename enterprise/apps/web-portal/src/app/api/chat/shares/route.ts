@@ -12,6 +12,7 @@ import {
   ChatShareValidationError,
   createChatShareSnapshot,
 } from "../../../../lib/chat-history";
+import { buildShareUrl } from "../../../../lib/share-url";
 
 const MAX_MESSAGE_IDS = 200;
 
@@ -46,12 +47,14 @@ export async function POST(request: Request) {
       sessionId,
       messageIds,
     );
+    const path = `/share/${encodeURIComponent(snapshot.token)}`;
     return NextResponse.json({
       code: "00000",
       message: "ok",
       data: {
         token: snapshot.token,
-        path: `/share/${encodeURIComponent(snapshot.token)}`,
+        path,
+        share_url: buildShareUrl(path, request.url),
       },
     });
   } catch (error) {
