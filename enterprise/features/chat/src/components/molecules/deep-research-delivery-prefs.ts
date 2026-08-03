@@ -58,19 +58,3 @@ export function displayDeliveryFileName(input: {
   }
   return input.path.split("/").pop()?.trim() || `report${ext}`;
 }
-
-export function exportActionKeyForFormat(
-  format: ClientDeliveryFormat,
-): "view-html" | "download-md" | "download-docx" | "print-pdf" {
-  switch (format) {
-    case "html":
-      return "view-html";
-    case "docx":
-      return "download-docx";
-    case "pdf":
-      return "print-pdf";
-    case "md":
-    default:
-      return "download-md";
-  }
-}
