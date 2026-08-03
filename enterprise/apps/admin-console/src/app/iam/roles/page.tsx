@@ -105,7 +105,6 @@ export default function RolesPage() {
   const [modelOptions, setModelOptions] = useState<ModelOption[]>([]);
   const [loading, setLoading] = useState(true);
   const [selected, setSelected] = useState<UserQuotaOverview | null>(null);
-  const [email, setEmail] = useState("");
   const [monthlyTokens, setMonthlyTokens] = useState("");
   const [modelAccess, setModelAccess] = useState<ModelAccess | null>(null);
   const [manualModelIds, setManualModelIds] = useState<string[]>([]);
@@ -171,7 +170,6 @@ export default function RolesPage() {
 
   const openEditor = useCallback(async (user: UserQuotaOverview) => {
     setSelected(user);
-    setEmail(user.email);
     setMonthlyTokens(String(user.monthlyTokens));
     setModelAccess(null);
     setManualModelIds([]);
@@ -274,7 +272,6 @@ export default function RolesPage() {
       return;
     }
     const updated = json.data.user;
-    setEmail(updated.email);
     setSelected((current) =>
       current && current.id === updated.id
         ? {
@@ -377,37 +374,22 @@ export default function RolesPage() {
 
   const save = async () => {
     if (!selected || saving) return;
-    const nextEmail = email.trim().toLowerCase();
-    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(nextEmail)) {
-      toast.error("请输入有效的邮箱地址");
-      return;
-    }
     const nextQuota = Number(monthlyTokens || 0);
     if (!Number.isFinite(nextQuota) || nextQuota < 0) {
       toast.error("请输入大于或等于 0 的 Token 数");
       return;
     }
-    const emailChanged = nextEmail !== selected.email.toLowerCase();
     const quotaChanged = Math.floor(nextQuota) !== selected.monthlyTokens;
     const modelsChanged =
       !sameIds(manualModelIds, initialManualModelIds) ||
       !sameIds(excludedGroupModelIds, initialExcludedGroupModelIds);
-    if (!emailChanged && !quotaChanged && !modelsChanged) {
+    if (!quotaChanged && !modelsChanged) {
       setSelected(null);
       return;
     }
     setSaving(true);
     try {
       const requests: Promise<Response>[] = [];
-      if (emailChanged) {
-        requests.push(
-          adminFetch(`/api/admin/users/${selected.id}`, {
-            method: "PATCH",
-            headers: { "content-type": "application/json" },
-            body: JSON.stringify({ email: nextEmail }),
-          }),
-        );
-      }
       if (quotaChanged) {
         requests.push(
           adminFetch(`/api/admin/users/${selected.id}/quota`, {
@@ -636,15 +618,7 @@ export default function RolesPage() {
                   <p className="font-medium">{selected.displayName}</p>
                   <p className="mt-1 text-sm text-muted-foreground">本月已用 {formatTokenCount(selected.usedTokens)} Token · {quotaSourceLabel(selected)}</p>
                   <div className="mt-3 grid gap-3 text-sm sm:grid-cols-2">
-                    <div className="space-y-1 sm:col-span-2">
-                      <Label htmlFor="user-email-from-quota">邮箱</Label>
-                      <Input
-                        id="user-email-from-quota"
-                        type="email"
-                        value={email}
-                        onChange={(event) => setEmail(event.target.value)}
-                      />
-                    </div>
+                    <p className="break-all sm:col-span-2"><span className="text-muted-foreground">邮箱：</span>{selected.email}</p>
                     <p><span className="text-muted-foreground">部门：</span>{selected.departmentPath || selected.departmentName || "未归属组织"}</p>
                     {selected.jobTitle ? <p><span className="text-muted-foreground">岗位：</span>{selected.jobTitle}</p> : null}
                     <p><span className="text-muted-foreground">状态：</span>{selected.status === "active" ? "正常" : selected.status === "locked" ? "已锁定" : "已停用"}</p>
