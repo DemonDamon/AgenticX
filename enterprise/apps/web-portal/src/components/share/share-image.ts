@@ -1,10 +1,27 @@
-import { cleanChatShareContent, type ChatShareSnapshot } from "../../lib/chat-share-types";
+import { markdownToPlainText } from "@agenticx/feature-chat";
+import {
+  cleanChatShareContent,
+  normalizeChatShareMessage,
+  type ChatShareMessage,
+  type ChatShareSnapshot,
+} from "../../lib/chat-share-types";
 import { ENTERPRISE_PRODUCT_NAME } from "../EnterpriseBrandMark";
 
 const IMAGE_WIDTH = 1200;
 const IMAGE_PADDING = 64;
 const MAX_IMAGE_HEIGHT = 30_000;
 const MAX_MESSAGE_CHARS = 12_000;
+let imageShareInFlight: Promise<"shared" | "downloaded"> | null = null;
+
+export function prepareShareImageMessages(snapshot: ChatShareSnapshot): ChatShareMessage[] {
+  return snapshot.messages
+    .map((message) => normalizeChatShareMessage(message))
+    .filter((message): message is ChatShareMessage => message !== null);
+}
+
+function toReadableImageText(raw: string): string {
+  return markdownToPlainText(cleanChatShareContent(raw, { stripCitationMarkers: true }));
+}
 
 export function wrapCanvasText(
   context: CanvasRenderingContext2D,
@@ -57,8 +74,8 @@ export async function createSharePng(snapshot: ChatShareSnapshot): Promise<Blob>
   const contentWidth = IMAGE_WIDTH - IMAGE_PADDING * 2 - 48;
   const bodyFont = '28px -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei", sans-serif';
   const lineHeight = 44;
-  const prepared = snapshot.messages.map((message) => {
-    const imageContent = cleanChatShareContent(message.content, { stripCitationMarkers: true });
+  const prepared = prepareShareImageMessages(snapshot).map((message) => {
+    const imageContent = toReadableImageText(message.content);
     const content = imageContent.length > MAX_MESSAGE_CHARS
       ? `${imageContent.slice(0, MAX_MESSAGE_CHARS)}…`
       : imageContent;
@@ -89,17 +106,21 @@ export async function createSharePng(snapshot: ChatShareSnapshot): Promise<Blob>
   y += 72;
 
   for (const item of prepared) {
-    const cardHeight = 64 + item.lines.length * lineHeight + 28;
-    if (y + cardHeight > height - IMAGE_PADDING) break;
+    const availableHeight = height - IMAGE_PADDING - y;
+    const visibleLineCount = Math.max(1, Math.floor((availableHeight - 64 - 28) / lineHeight));
+    const lines = item.lines.length > visibleLineCount
+      ? [...item.lines.slice(0, Math.max(1, visibleLineCount - 1)), "…"]
+      : item.lines;
+    const visibleCardHeight = 64 + lines.length * lineHeight + 28;
     const isUser = item.message.role === "user";
     const cardX = isUser ? IMAGE_PADDING + 48 : IMAGE_PADDING;
     const cardWidth = IMAGE_WIDTH - cardX - IMAGE_PADDING;
     context.fillStyle = isUser ? "#0ea5e9" : "#ffffff";
-    roundedRect(context, cardX, y, cardWidth, cardHeight, 24);
+    roundedRect(context, cardX, y, cardWidth, visibleCardHeight, 24);
     context.fill();
     context.strokeStyle = isUser ? "#0ea5e9" : "#e2e8f0";
     context.lineWidth = 2;
-    roundedRect(context, cardX, y, cardWidth, cardHeight, 24);
+    roundedRect(context, cardX, y, cardWidth, visibleCardHeight, 24);
     context.stroke();
 
     context.fillStyle = isUser ? "#e0f2fe" : "#64748b";
@@ -107,10 +128,11 @@ export async function createSharePng(snapshot: ChatShareSnapshot): Promise<Blob>
     context.fillText(isUser ? "用户" : "助手", cardX + 24, y + 34);
     context.fillStyle = isUser ? "#ffffff" : "#1e293b";
     context.font = bodyFont;
-    item.lines.forEach((line, index) => {
+    lines.forEach((line, index) => {
       context.fillText(line, cardX + 24, y + 78 + index * lineHeight);
     });
-    y += cardHeight + 24;
+    y += visibleCardHeight + 24;
+    if (lines.length < item.lines.length) break;
   }
 
   return await new Promise<Blob>((resolve, reject) => {
@@ -125,20 +147,23 @@ export async function shareOrDownloadImage(
   snapshot: ChatShareSnapshot,
   filename = "agenticx-conversation.png",
 ): Promise<"shared" | "downloaded"> {
-  const blob = await createSharePng(snapshot);
-  const file = new File([blob], filename, { type: "image/png" });
-  if (navigator.share && (!navigator.canShare || navigator.canShare({ files: [file] }))) {
-    await navigator.share({ title: snapshot.title, files: [file] });
-    return "shared";
-  }
+  if (imageShareInFlight) return imageShareInFlight;
 
-  const url = URL.createObjectURL(blob);
-  const anchor = document.createElement("a");
-  anchor.href = url;
-  anchor.download = filename;
-  document.body.appendChild(anchor);
-  anchor.click();
-  anchor.remove();
-  window.setTimeout(() => URL.revokeObjectURL(url), 0);
-  return "downloaded";
+  const operation = (async (): Promise<"shared" | "downloaded"> => {
+    const blob = await createSharePng(snapshot);
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement("a");
+    anchor.href = url;
+    anchor.download = filename;
+    document.body.appendChild(anchor);
+    anchor.click();
+    anchor.remove();
+    window.setTimeout(() => URL.revokeObjectURL(url), 0);
+    return "downloaded";
+  })();
+  const settled = operation.finally(() => {
+    if (imageShareInFlight === settled) imageShareInFlight = null;
+  });
+  imageShareInFlight = settled;
+  return settled;
 }

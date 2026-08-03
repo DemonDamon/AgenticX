@@ -1,5 +1,6 @@
 export * from "./types";
 export * from "./types/composer-attachment";
+export { markdownToPlainText } from "./assistant-content";
 export * from "./history-client";
 export * from "./history-outbox";
 export { sessionTitleNeedsAutoFill, buildAutoTitleFromFirstUserMessage } from "@agenticx/core-api";
