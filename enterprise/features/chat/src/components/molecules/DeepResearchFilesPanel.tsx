@@ -11,6 +11,7 @@ import {
   artifactZipEntryPath,
   buildArtifactTree,
   formatArtifactByteSize,
+  isHtmlArtifact,
   type ArtifactListItem,
   type ArtifactTreeNode,
 } from "./deep-research-artifact-tree";
@@ -408,6 +409,8 @@ export function DeepResearchFilesPanel({
       setPreviewRaw("");
       return;
     }
+    // Clear immediately so HTML/markdown previews never flash the previous file.
+    setPreviewRaw("");
     let cancelled = false;
     void (async () => {
       try {
@@ -427,10 +430,12 @@ export function DeepResearchFilesPanel({
   }, [open, view, selectedId]);
 
   const selected = artifacts.find((a) => a.id === selectedId) ?? null;
+  const selectedIsHtml = isHtmlArtifact(selected);
   const previewMarkdown = React.useMemo(
-    () => displayContentFromRawAssistantText(previewRaw),
-    [previewRaw],
+    () => (selectedIsHtml ? "" : displayContentFromRawAssistantText(previewRaw)),
+    [previewRaw, selectedIsHtml],
   );
+  const hasPreview = selectedIsHtml ? previewRaw.trim().length > 0 : previewMarkdown.length > 0;
 
   const triggerBlobDownload = (blob: Blob, filename: string) => {
     const url = URL.createObjectURL(blob);
@@ -442,23 +447,42 @@ export function DeepResearchFilesPanel({
   };
 
   const downloadTextFile = (item: ArtifactListItem, text: string) => {
-    const blob = new Blob([text], { type: "text/markdown;charset=utf-8" });
-    triggerBlobDownload(blob, item.path.split("/").pop() || "artifact.md");
+    const html = isHtmlArtifact(item);
+    const blob = new Blob([text], {
+      type: html ? "text/html;charset=utf-8" : "text/markdown;charset=utf-8",
+    });
+    triggerBlobDownload(
+      blob,
+      item.path.split("/").pop() || (html ? "report.html" : "artifact.md"),
+    );
   };
 
-  const fetchArtifactText = React.useCallback(async (id: string): Promise<string> => {
-    const res = await fetch(`/api/chat/artifacts/${encodeURIComponent(id)}`);
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    const json = (await res.json()) as {
-      data?: { artifact?: { content?: string } };
-    };
-    return displayContentFromRawAssistantText(json.data?.artifact?.content ?? "");
-  }, []);
+  const fetchArtifactText = React.useCallback(
+    async (id: string, itemHint?: ArtifactListItem): Promise<string> => {
+      const res = await fetch(`/api/chat/artifacts/${encodeURIComponent(id)}`);
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const json = (await res.json()) as {
+        data?: {
+          artifact?: { content?: string; path?: string; mimeType?: string };
+        };
+      };
+      const art = json.data?.artifact;
+      const content = art?.content ?? "";
+      const meta = {
+        path: art?.path ?? itemHint?.path ?? "",
+        mimeType: art?.mimeType ?? itemHint?.mimeType,
+      };
+      // Keep HTML bytes intact — assistant markdown stripping would corrupt the document.
+      if (isHtmlArtifact(meta)) return content;
+      return displayContentFromRawAssistantText(content);
+    },
+    [],
+  );
 
   const downloadSelected = () => {
     const item = selected;
-    if (!item || !previewMarkdown) return;
-    downloadTextFile(item, previewMarkdown);
+    if (!item || !hasPreview) return;
+    downloadTextFile(item, selectedIsHtml ? previewRaw : previewMarkdown);
   };
 
   const downloadOneById = React.useCallback(
@@ -467,7 +491,7 @@ export function DeepResearchFilesPanel({
       if (!item) return;
       void (async () => {
         try {
-          const text = await fetchArtifactText(id);
+          const text = await fetchArtifactText(id, item);
           if (text) downloadTextFile(item, text);
         } catch {
           // ignore
@@ -485,7 +509,7 @@ export function DeepResearchFilesPanel({
         const entries = [];
         for (const item of artifacts) {
           try {
-            const text = await fetchArtifactText(item.id);
+            const text = await fetchArtifactText(item.id, item);
             entries.push({
               path: artifactZipEntryPath(item, artifacts),
               data: new TextEncoder().encode(text),
@@ -576,7 +600,7 @@ export function DeepResearchFilesPanel({
                 variant="ghost"
                 className="h-8 w-8 shrink-0"
                 onClick={downloadSelected}
-                disabled={!previewMarkdown}
+                disabled={!hasPreview}
                 aria-label="下载"
               >
                 <IconDownload className="h-4 w-4" />
@@ -661,23 +685,38 @@ export function DeepResearchFilesPanel({
       ) : (
         <div
           className={[
-            "min-h-0 flex-1 overflow-y-auto px-5 py-4",
-            fullscreen ? "mx-auto w-full max-w-3xl px-6 py-8 sm:px-10" : "",
+            "min-h-0 flex-1",
+            selectedIsHtml
+              ? "flex flex-col overflow-hidden bg-background"
+              : "overflow-y-auto px-5 py-4",
+            !selectedIsHtml && fullscreen ? "mx-auto w-full max-w-3xl px-6 py-8 sm:px-10" : "",
           ]
             .filter(Boolean)
             .join(" ")}
         >
-          {loading ? <p className="text-xs text-muted-foreground">加载中…</p> : null}
-          {error ? <p className="text-xs text-destructive">{error}</p> : null}
-          {!loading && !error && previewMarkdown ? (
-            <div className="agx-assistant-md agx-assistant-md--document max-w-none break-words text-foreground">
+          {loading ? (
+            <p className="px-5 py-4 text-xs text-muted-foreground">加载中…</p>
+          ) : null}
+          {error ? <p className="px-5 py-4 text-xs text-destructive">{error}</p> : null}
+          {!loading && !error && selectedIsHtml && previewRaw.trim() ? (
+            <iframe
+              title={title}
+              srcDoc={previewRaw}
+              // Scripts needed for Mermaid CDN; content is tenant-owned report HTML.
+              sandbox="allow-scripts allow-popups allow-downloads"
+              className="h-full min-h-0 w-full flex-1 border-0 bg-white"
+              data-testid="deep-research-html-preview"
+            />
+          ) : null}
+          {!loading && !error && !selectedIsHtml && previewMarkdown ? (
+            <div className="agx-assistant-md agx-assistant-md--document max-w-none break-words text-base">
               <ReactMarkdown remarkPlugins={[remarkGfm]} components={mdComponents}>
                 {previewMarkdown}
               </ReactMarkdown>
             </div>
           ) : null}
-          {!loading && !error && !previewMarkdown ? (
-            <p className="text-xs text-muted-foreground">暂无可预览内容</p>
+          {!loading && !error && !hasPreview ? (
+            <p className="px-5 py-4 text-xs text-muted-foreground">暂无可预览内容</p>
           ) : null}
         </div>
       )}

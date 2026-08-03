@@ -4,7 +4,19 @@ import {
   collapseSingleFileDirs,
   displayNameForArtifactFile,
   formatArtifactByteSize,
+  isHtmlArtifact,
 } from "./deep-research-artifact-tree";
+
+describe("isHtmlArtifact", () => {
+  it("detects html by mimeType or .html path", () => {
+    expect(isHtmlArtifact({ path: "research/r1/report.html", mimeType: "text/html" })).toBe(true);
+    expect(isHtmlArtifact({ path: "research/r1/report.html", mimeType: "text/plain" })).toBe(true);
+    expect(isHtmlArtifact({ path: "research/r1/final-report.md", mimeType: "text/markdown" })).toBe(
+      false,
+    );
+    expect(isHtmlArtifact(null)).toBe(false);
+  });
+});
 
 describe("displayNameForArtifactFile", () => {
   it("uses title for pages/ and legacy hex names", () => {
