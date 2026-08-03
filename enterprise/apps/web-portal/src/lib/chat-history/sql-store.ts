@@ -10,6 +10,7 @@ import { ulid } from "ulid";
 import { randomBytes } from "node:crypto";
 import { normalizeChatMessageOrder } from "../chat-message-order";
 import {
+  expandChatShareSelection,
   normalizeChatShareMessage,
   toChatShareMessage,
   type ChatShareMessage,
@@ -614,10 +615,10 @@ export class SqlChatHistoryStore implements ChatHistoryStore {
 
     const messages = await this.getChatSessionMessages(ctx, sessionId);
     const requestedIds = new Set(messageIds.map((id) => id.trim()).filter(Boolean));
-    const selected = messages
+    const shareMessages = messages
       .map(toChatShareMessage)
-      .filter((message): message is ChatShareMessage => message !== null)
-      .filter((message) => requestedIds.has(message.id));
+      .filter((message): message is ChatShareMessage => message !== null);
+    const selected = expandChatShareSelection(shareMessages, requestedIds);
 
     if (selected.length === 0) {
       throw new ChatShareValidationError("select at least one message to share");

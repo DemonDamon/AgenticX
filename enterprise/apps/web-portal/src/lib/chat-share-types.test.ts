@@ -2,6 +2,7 @@ import type { ChatMessage } from "@agenticx/core-api";
 import { describe, expect, it } from "vitest";
 import {
   cleanChatShareContent,
+  expandChatShareSelection,
   expandChatShareTurnSelection,
   normalizeChatShareMessage,
   toChatShareMessage,
@@ -67,5 +68,9 @@ describe("chat share turn selection", () => {
 
   it("selects the preceding question when sharing an assistant message", () => {
     expect(expandChatShareTurnSelection(messages, "a2")).toEqual(["u2", "a2"]);
+  });
+
+  it("expands mixed selections once and preserves the original order", () => {
+    expect(expandChatShareSelection(messages, ["a2", "u1"])).toEqual(messages);
   });
 });

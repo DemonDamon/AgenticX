@@ -86,3 +86,15 @@ export function expandChatShareTurnSelection(messages: ChatShareMessage[], selec
   }
   return messages.slice(start, end).map((message) => message.id);
 }
+
+/** Expand any selected message to its complete user-assistant turn and keep conversation order. */
+export function expandChatShareSelection(
+  messages: ChatShareMessage[],
+  selectedIds: Iterable<string>,
+): ChatShareMessage[] {
+  const expandedIds = new Set<string>();
+  for (const selectedId of selectedIds) {
+    expandChatShareTurnSelection(messages, selectedId).forEach((id) => expandedIds.add(id));
+  }
+  return messages.filter((message) => expandedIds.has(message.id));
+}

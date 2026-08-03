@@ -86,7 +86,7 @@ function createShareClient() {
 }
 
 describe.each(["postgresql", "mysql"] as const)("chat sharing (%s)", (dialect) => {
-  it("creates an immutable selected-message snapshot and reads it back", async () => {
+  it("creates an immutable complete-turn snapshot and reads it back", async () => {
     const fixture = createShareClient();
     const store = new SqlChatHistoryStore(dialect, fixture.client);
     const snapshot = await store.createChatShareSnapshot(
@@ -96,11 +96,11 @@ describe.each(["postgresql", "mysql"] as const)("chat sharing (%s)", (dialect) =
     );
 
     expect(snapshot.token).toHaveLength(32);
-    expect(snapshot.messages.map((message) => message.content)).toEqual(["world"]);
-    expect(JSON.parse(fixture.getToken() ? String(fixture.calls.find((call) => call.sql.startsWith("insert into chat_share_snapshots"))?.params[5]) : "[]")).toHaveLength(1);
+    expect(snapshot.messages.map((message) => message.content)).toEqual(["hello", "world"]);
+    expect(JSON.parse(fixture.getToken() ? String(fixture.calls.find((call) => call.sql.startsWith("insert into chat_share_snapshots"))?.params[5]) : "[]")).toHaveLength(2);
 
     const loaded = await store.getChatShareSnapshot(snapshot.token, tenantId);
-    expect(loaded?.messages[0]?.content).toBe("world");
+    expect(loaded?.messages.map((message) => message.content)).toEqual(["hello", "world"]);
     expect(fixture.calls.some((call) => call.sql.startsWith("select sh.token") && call.params[1] === tenantId)).toBe(true);
   });
 

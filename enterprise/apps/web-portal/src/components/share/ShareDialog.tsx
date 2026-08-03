@@ -16,7 +16,7 @@ import { Image, Link2, ListChecks } from "lucide-react";
 import { useTranslations } from "next-intl";
 import { copyText } from "../../lib/chat-share-client";
 import {
-  expandChatShareTurnSelection,
+  expandChatShareSelection,
   toChatShareMessage,
   type ChatShareMessage,
 } from "../../lib/chat-share-types";
@@ -50,6 +50,7 @@ export function ShareDialog({
   const [selected, setSelected] = React.useState<Set<string>>(() => new Set());
   const [busy, setBusy] = React.useState<"link" | "image" | null>(null);
   const [status, setStatus] = React.useState<string | null>(null);
+  const imageRequestInFlightRef = React.useRef(false);
 
   React.useEffect(() => {
     if (!open) return;
@@ -94,20 +95,18 @@ export function ShareDialog({
       setStatus(t("shareNoSelection"));
       return;
     }
+    if (imageRequestInFlightRef.current) return;
+    imageRequestInFlightRef.current = true;
     setBusy("image");
     setStatus(null);
     try {
-      const imageMessageIds = new Set<string>();
-      shareMessages.forEach((message) => {
-        if (!selected.has(message.id)) return;
-        expandChatShareTurnSelection(shareMessages, message.id).forEach((id) => imageMessageIds.add(id));
-      });
-      await onGenerateImage(shareMessages.filter((message) => imageMessageIds.has(message.id)));
+      await onGenerateImage(expandChatShareSelection(shareMessages, selected));
       setStatus(t("shareImageReady"));
     } catch (error) {
       setStatus(error instanceof Error ? error.message : t("shareFailed"));
     } finally {
       setBusy(null);
+      imageRequestInFlightRef.current = false;
     }
   };
 
