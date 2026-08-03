@@ -14,6 +14,7 @@ export * from "./chat-messages";
 export * from "./chat-history-operations";
 export * from "./chat-artifacts";
 export * from "./chat-attachments";
+export * from "./chat-share-snapshots";
 
 export * from "./runtime-config";
 export * from "./gateway-channels";

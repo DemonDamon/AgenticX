@@ -274,6 +274,13 @@
       "when": 1785600000000,
       "tag": "0039_enterprise_chat_attachments",
       "breakpoints": true
+    },
+    {
+      "idx": 39,
+      "version": "7",
+      "when": 1785700000000,
+      "tag": "0040_chat_share_snapshots",
+      "breakpoints": true
     }
   ]
 }

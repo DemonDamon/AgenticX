@@ -47,6 +47,8 @@ import {
   cn,
 } from "@agenticx/ui";
 import { NearEmptyWordmark } from "./NearEmptyWordmark";
+import { ShareDialog } from "./share/ShareDialog";
+import { shareOrDownloadImage } from "./share/share-image";
 import {
   CapabilityHoverTip,
   ComposerPlusMenu,
@@ -54,6 +56,7 @@ import {
   type WebSearchMode,
 } from "./ComposerPlusMenu";
 import { ENTERPRISE_PRODUCT_NAME } from "./EnterpriseBrandMark";
+import { toChatShareMessage, type ChatShareMessage, type ChatShareSnapshot } from "../lib/chat-share-types";
 
 // 模型清单从 /api/me/models 动态获取（admin 配置 + 用户可见性）。
 // 没有任何分配时为空，UI 会提示「请联系管理员分配模型」。
@@ -103,7 +106,6 @@ export function MachiChatView({
   const status = useChatStore((s) => s.status);
   const activeModel = useChatStore((s) => s.activeModel);
   const errorMessage = useChatStore((s) => s.errorMessage);
-  const sessionTokens = useChatStore((s) => s.sessionTokens);
   const responseVersionsByUserMessageId = useChatStore((s) => s.responseVersionsByUserMessageId);
   const hydrateSessions = useChatStore((s) => s.hydrateSessions);
   const historyError = useChatStore((s) => s.historyError);
@@ -111,6 +113,7 @@ export function MachiChatView({
   const retryHistorySync = useChatStore((s) => s.retryHistorySync);
   const sessionMessagesLoading = useChatStore((s) => s.sessionMessagesLoading);
   const renameSession = useChatStore((s) => s.renameSession);
+  const deleteSession = useChatStore((s) => s.deleteSession);
   const switchModel = useChatStore((s) => s.switchModel);
   const sendMessage = useChatStore((s) => s.sendMessage);
   const sendQueuedMessageNow = useChatStore((s) => s.sendQueuedMessageNow);
@@ -132,6 +135,8 @@ export function MachiChatView({
   const [filesPanelSessionId, setFilesPanelSessionId] = React.useState<string | null>(null);
   const [filesPanelFocusId, setFilesPanelFocusId] = React.useState<string | null>(null);
   const [attachmentPreview, setAttachmentPreview] = React.useState<ChatMessageAttachment | null>(null);
+  const [shareDialogOpen, setShareDialogOpen] = React.useState(false);
+  const [shareInitialSelectedIds, setShareInitialSelectedIds] = React.useState<string[]>([]);
 
   // Stable identities: MessageList folds these into memo dependencies that decide whether
   // the assistant markdown component map is rebuilt, so inline arrows here would rebuild
@@ -324,6 +329,24 @@ export function MachiChatView({
     return messages.filter((message) => message.session_id === activeSessionId);
   }, [messages, activeSessionId]);
 
+  const shareableMessages = React.useMemo(
+    () => visibleMessages.map(toChatShareMessage).filter((message): message is ChatShareMessage => message !== null),
+    [visibleMessages],
+  );
+
+  const openShareDialog = React.useCallback(
+    (messageSelection?: string) => {
+      const allIds = shareableMessages.map((message) => message.id);
+      const requestedIds = (messageSelection ?? "")
+        .split(",")
+        .map((id) => id.trim())
+        .filter((id) => allIds.includes(id));
+      setShareInitialSelectedIds(requestedIds.length > 0 ? requestedIds : allIds);
+      setShareDialogOpen(true);
+    },
+    [shareableMessages],
+  );
+
   const userIdsInActiveSession = React.useMemo(() => {
     return new Set(visibleMessages.filter((message) => message.role === "user").map((message) => message.id));
   }, [visibleMessages]);
@@ -387,6 +410,49 @@ export function MachiChatView({
     }
     setSessionTitle(t("newConversation"));
   }, [activeSession?.id, activeSession?.title, activeSessionId, t]);
+
+  const createShareLink = React.useCallback(
+    async (messageIds: string[]) => {
+      if (!activeSessionId) throw new Error(t("shareFailed"));
+      const response = await fetch("/api/chat/shares", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ session_id: activeSessionId, message_ids: messageIds }),
+      });
+      const payload = (await response.json().catch(() => ({}))) as {
+        data?: { path?: string };
+        error?: { message?: string };
+      };
+      if (!response.ok || !payload.data?.path) {
+        throw new Error(payload.error?.message ?? t("shareFailed"));
+      }
+      return `${window.location.origin}${payload.data.path}`;
+    },
+    [activeSessionId, t],
+  );
+
+  const generateShareImage = React.useCallback(
+    async (selectedMessages: ChatShareMessage[]) => {
+      const snapshot: ChatShareSnapshot = {
+        token: "preview",
+        session_id: activeSessionId ?? "preview",
+        title: sessionTitle,
+        messages: selectedMessages,
+        created_at: new Date().toISOString(),
+      };
+      const safeTitle = (sessionTitle || t("newConversation"))
+        .replace(/[\\/:*?"<>|]+/g, "_")
+        .slice(0, 80);
+      await shareOrDownloadImage(snapshot, `${safeTitle}.png`);
+    },
+    [activeSessionId, sessionTitle, t],
+  );
+
+  const deleteCurrentSession = React.useCallback(() => {
+    if (!activeSessionId) return;
+    if (!window.confirm(tw("deleteSessionConfirm"))) return;
+    void deleteSession(activeSessionId);
+  }, [activeSessionId, deleteSession, tw]);
 
   const activeModelOption = React.useMemo(
     () => availableModels.find((item) => item.id === activeModel),
@@ -749,32 +815,16 @@ export function MachiChatView({
               <span className="hidden sm:inline">{t("gatewayOnline")}</span>
               <span className="sm:hidden">{t("gatewayOnlineShort")}</span>
             </Badge>
-            {sessionTokens.totalTokens > 0 && (
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <Badge variant="soft" className="mr-2 gap-1 px-2.5 py-0.5 font-mono text-[11px]">
-                    <span aria-hidden>↑</span>
-                    {sessionTokens.inputTokens.toLocaleString()}
-                    <span className="opacity-50" aria-hidden>·</span>
-                    <span aria-hidden>↓</span>
-                    {sessionTokens.outputTokens.toLocaleString()}
-                    <span className="opacity-50" aria-hidden>·</span>
-                    Σ {sessionTokens.totalTokens.toLocaleString()}
-                  </Badge>
-                </TooltipTrigger>
-                <TooltipContent>
-                  {t("tokenTooltip", {
-                    input: sessionTokens.inputTokens.toLocaleString(),
-                    output: sessionTokens.outputTokens.toLocaleString(),
-                    total: sessionTokens.totalTokens.toLocaleString(),
-                  })}
-                </TooltipContent>
-              </Tooltip>
-            )}
             {!isEmpty && (
               <Tooltip>
                 <TooltipTrigger asChild>
-                  <Button variant="ghost" size="icon" className="h-8 w-8 rounded-full text-muted-foreground hover:text-foreground">
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="h-8 w-8 rounded-full text-muted-foreground hover:text-foreground"
+                    aria-label={t("shareConversation")}
+                    onClick={() => openShareDialog()}
+                  >
                     <Share className="h-4 w-4" />
                   </Button>
                 </TooltipTrigger>
@@ -783,7 +833,14 @@ export function MachiChatView({
             )}
             <Tooltip>
               <TooltipTrigger asChild>
-                <Button variant="ghost" size="icon" className="h-8 w-8 rounded-full text-muted-foreground hover:text-foreground">
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="h-8 w-8 rounded-full text-muted-foreground hover:text-foreground"
+                  aria-label={t("deleteConversation")}
+                  disabled={!activeSessionId}
+                  onClick={deleteCurrentSession}
+                >
                   <Trash2 className="h-4 w-4" />
                 </Button>
               </TooltipTrigger>
@@ -836,9 +893,7 @@ export function MachiChatView({
                   void editUserMessageAndResend(client, { messageId, content });
                 }}
                 onShare={(messageId) => {
-                  const url = `${window.location.origin}/workspace?share=${messageId}`;
-                  navigator.clipboard.writeText(url);
-                  console.log("Shared:", url);
+                  openShareDialog(messageId);
                 }}
                 onFeedback={(messageId, type) => {
                   console.log(`Feedback ${type} for message ${messageId}`);
@@ -872,6 +927,15 @@ export function MachiChatView({
           if (!open) setAttachmentPreview(null);
         }}
         attachment={attachmentPreview}
+      />
+      <ShareDialog
+        open={shareDialogOpen}
+        onOpenChange={setShareDialogOpen}
+        title={sessionTitle}
+        messages={visibleMessages}
+        initialSelectedIds={shareInitialSelectedIds}
+        onCreateLink={createShareLink}
+        onGenerateImage={generateShareImage}
       />
       </div>
     </TooltipProvider>

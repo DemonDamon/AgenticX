@@ -7,10 +7,13 @@ import {
   type ChatSession,
 } from "@agenticx/core-api";
 import { ulid } from "ulid";
+import { randomBytes } from "node:crypto";
 import { normalizeChatMessageOrder } from "../chat-message-order";
+import { toChatShareMessage, type ChatShareMessage, type ChatShareSnapshot } from "../chat-share-types";
 import {
   ChatHistoryConflictError,
   ChatHistoryNotFoundError,
+  ChatShareValidationError,
   type AppendChatMessagesOptions,
   type ChatHistoryContext,
   type ChatHistoryStore,
@@ -31,6 +34,9 @@ export interface SqlClient {
 
 const ALLOWED_ROLES: ChatMessageRole[] = ["system", "user", "assistant", "tool"];
 const ULID_RE = /^[0-7][0-9A-HJKMNP-TV-Z]{25}$/;
+const SHARE_TOKEN_BYTES = 24;
+const MAX_SHARE_MESSAGES = 200;
+const MAX_SHARE_CONTENT_CHARS = 500_000;
 
 function normalizeRole(role: string): ChatMessageRole {
   if (ALLOWED_ROLES.includes(role as ChatMessageRole)) return role as ChatMessageRole;
@@ -118,6 +124,28 @@ function mapMessage(row: Record<string, unknown>): ChatMessage {
     model: row.model == null ? undefined : String(row.model),
     created_at: toDate(row.created_at).toISOString(),
   };
+}
+
+function parseShareMessages(value: unknown): ChatShareMessage[] {
+  let parsed: unknown = value;
+  if (typeof parsed === "string") {
+    try {
+      parsed = JSON.parse(parsed);
+    } catch {
+      return [];
+    }
+  }
+  if (!Array.isArray(parsed)) return [];
+  return parsed.filter((item): item is ChatShareMessage => {
+    if (!item || typeof item !== "object") return false;
+    const message = item as Partial<ChatShareMessage>;
+    return (
+      typeof message.id === "string" &&
+      (message.role === "user" || message.role === "assistant") &&
+      typeof message.content === "string" &&
+      typeof message.created_at === "string"
+    );
+  });
 }
 
 export class SqlChatHistoryStore implements ChatHistoryStore {
@@ -555,7 +583,100 @@ export class SqlChatHistoryStore implements ChatHistoryStore {
          and id in (${placeholders})`,
       [now, now, ctx.tenantId, ctx.userId, ...ids],
     );
+    if (result.rowCount > 0) {
+      const sharePlaceholders = this.placeholders(ids.length, 2);
+      await this.client.query(
+        `update chat_share_snapshots set revoked_at = ${this.dialect === "postgresql" ? "$1" : "?"}
+         where tenant_id = ${this.dialect === "postgresql" ? "$2" : "?"}
+           and session_id in (${sharePlaceholders})
+           and revoked_at is null`,
+        [now, ctx.tenantId, ...ids],
+      );
+    }
     return result.rowCount;
+  }
+
+  public async createChatShareSnapshot(
+    ctx: ChatHistoryContext,
+    sessionId: string,
+    messageIds: string[],
+  ): Promise<ChatShareSnapshot> {
+    const session = await this.ownedSession(this.client, ctx, sessionId);
+    if (!session) throw new ChatHistoryNotFoundError();
+
+    const messages = await this.getChatSessionMessages(ctx, sessionId);
+    const requestedIds = new Set(messageIds.map((id) => id.trim()).filter(Boolean));
+    const selected = messages
+      .map(toChatShareMessage)
+      .filter((message): message is ChatShareMessage => message !== null)
+      .filter((message) => requestedIds.has(message.id));
+
+    if (selected.length === 0) {
+      throw new ChatShareValidationError("select at least one message to share");
+    }
+    if (selected.length > MAX_SHARE_MESSAGES) {
+      throw new ChatShareValidationError(`a share can contain at most ${MAX_SHARE_MESSAGES} messages`);
+    }
+    const contentLength = selected.reduce((sum, message) => sum + message.content.length, 0);
+    if (contentLength > MAX_SHARE_CONTENT_CHARS) {
+      throw new ChatShareValidationError("the selected messages are too large to share");
+    }
+
+    const token = randomBytes(SHARE_TOKEN_BYTES).toString("base64url");
+    const createdAt = new Date();
+    await this.client.query(
+      `insert into chat_share_snapshots
+       (token, session_id, tenant_id, user_id, title, messages, created_at, revoked_at)
+       values (${this.placeholders(8)})`,
+      [
+        token,
+        sessionId,
+        ctx.tenantId,
+        ctx.userId,
+        String(session.title),
+        JSON.stringify(selected),
+        createdAt,
+        null,
+      ],
+    );
+
+    return {
+      token,
+      session_id: sessionId,
+      title: String(session.title),
+      messages: selected,
+      created_at: createdAt.toISOString(),
+    };
+  }
+
+  public async getChatShareSnapshot(token: string, tenantId?: string): Promise<ChatShareSnapshot | null> {
+    const normalizedToken = token.trim();
+    if (!normalizedToken || normalizedToken.length > 64) return null;
+    const tenantFilter = tenantId
+      ? `\n         and sh.tenant_id = ${this.dialect === "postgresql" ? "$2" : "?"}`
+      : "";
+    const result = await this.client.query(
+      `select sh.token, sh.session_id, sh.title, sh.messages, sh.created_at
+       from chat_share_snapshots sh
+       inner join chat_sessions s
+         on s.id = sh.session_id
+        and s.tenant_id = sh.tenant_id
+        and s.user_id = sh.user_id
+       where sh.token = ${this.dialect === "postgresql" ? "$1" : "?"}
+         and sh.revoked_at is null
+         and s.deleted_at is null${tenantFilter}
+       limit 1`,
+      tenantId ? [normalizedToken, tenantId] : [normalizedToken],
+    );
+    const row = result.rows[0];
+    if (!row) return null;
+    return {
+      token: String(row.token),
+      session_id: String(row.session_id),
+      title: String(row.title),
+      messages: parseShareMessages(row.messages),
+      created_at: toDate(row.created_at).toISOString(),
+    };
   }
 
   public async syncAuthUser(user: AuthUser): Promise<void> {

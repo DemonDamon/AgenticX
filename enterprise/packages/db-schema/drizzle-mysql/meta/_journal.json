@@ -85,6 +85,13 @@
       "when": 1785600000001,
       "tag": "0011_enterprise_chat_attachments",
       "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "5",
+      "when": 1785700000001,
+      "tag": "0012_chat_share_snapshots",
+      "breakpoints": true
     }
   ]
 }

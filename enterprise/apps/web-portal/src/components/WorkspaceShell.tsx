@@ -57,7 +57,6 @@ import {
   ENTERPRISE_ORG_NAME,
   EnterpriseBrandMark,
 } from "./EnterpriseBrandMark";
-import { QuotaCard } from "./QuotaCard";
 import { SettingsPanel } from "./settings/SettingsPanel";
 import { SessionGeneratingDots } from "./SessionGeneratingDots";
 import { HistorySessionsPanel } from "./HistorySessionsPanel";
@@ -388,8 +387,6 @@ export function WorkspaceShell({ userEmail, userScopes }: WorkspaceShellProps) {
               </Button>
             ) : null}
           </div>
-
-          <QuotaCard collapsed={collapsed} />
 
           <Separator className="bg-sidebar-border" />
 

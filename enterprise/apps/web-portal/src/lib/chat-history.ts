@@ -6,13 +6,15 @@ import { postgresqlChatHistoryStore } from "./chat-history/postgresql";
 import {
   ChatHistoryConflictError,
   ChatHistoryNotFoundError,
+  ChatShareValidationError,
   type AppendChatMessagesOptions,
   type ChatHistoryContext,
   type ChatHistoryStore,
+  type ChatShareSnapshot,
 } from "./chat-history/types";
 
-export { ChatHistoryConflictError, ChatHistoryNotFoundError };
-export type { AppendChatMessagesOptions, ChatHistoryContext };
+export { ChatHistoryConflictError, ChatHistoryNotFoundError, ChatShareValidationError };
+export type { AppendChatMessagesOptions, ChatHistoryContext, ChatShareSnapshot };
 
 const ULID_RE = /^[0-7][0-9A-HJKMNP-TV-Z]{25}$/;
 
@@ -104,6 +106,18 @@ export function softDeleteChatSessions(
   sessionIds: string[],
 ): Promise<number> {
   return store().softDeleteChatSessions(ctx, sessionIds);
+}
+
+export function createChatShareSnapshot(
+  ctx: ChatHistoryContext,
+  sessionId: string,
+  messageIds: string[],
+) {
+  return store().createChatShareSnapshot(ctx, sessionId, messageIds);
+}
+
+export function getChatShareSnapshot(token: string, tenantId?: string) {
+  return store().getChatShareSnapshot(token, tenantId);
 }
 
 export function syncAuthUserToDatabase(user: AuthUser): Promise<void> {
