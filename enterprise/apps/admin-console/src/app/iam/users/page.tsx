@@ -153,7 +153,26 @@ function UsersPageContent() {
     if (user && selected?.id !== user.id) {
       setSelected(user);
       setEditOpen(false);
+      return;
     }
+
+    if (user || selected?.id === initialUserId) return;
+    let alive = true;
+    void (async () => {
+      try {
+        const res = await adminFetch(`/api/admin/users/${encodeURIComponent(initialUserId)}`, { cache: "no-store" });
+        const json = (await res.json()) as ApiUserResp;
+        if (alive && res.ok && json.data?.user) {
+          setSelected(json.data.user);
+          setEditOpen(false);
+        }
+      } catch {
+        /* 详情入口仅用于定位用户，列表本身仍可正常使用 */
+      }
+    })();
+    return () => {
+      alive = false;
+    };
   }, [initialUserId, loading, selected?.id, users]);
 
   useEffect(() => {
