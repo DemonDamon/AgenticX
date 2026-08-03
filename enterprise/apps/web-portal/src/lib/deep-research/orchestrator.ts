@@ -32,6 +32,16 @@ import {
   type ClarifyQuestion,
 } from "./clarifier";
 import {
+  DEFAULT_DELIVERY_PREFS,
+  deliveryClarifyQuestions,
+  deliveryPrefsPromptBlock,
+  isDeliveryClarifyQuestionId,
+  parseDeliveryPrefs,
+  primaryArtifactTitle,
+  type DeliveryPrefs,
+} from "./delivery-prefs";
+import { looksOpenEndedResearchQuery } from "./research-intent";
+import {
   waitForClarifyResume,
   type ClarifyResumePayload,
 } from "./run-wait";
@@ -657,11 +667,18 @@ export async function runDeepResearchTurn(
         }
 
         let clarifyExpandedLanes: string[] | null = null;
-        if (clarifyResult.needed) {
-          const clarifyQuestions = clarifyResult.questions;
+        let deliveryPrefs: DeliveryPrefs = { ...DEFAULT_DELIVERY_PREFS };
+        const directionQuestions = clarifyResult.needed ? clarifyResult.questions : [];
+        const askDelivery =
+          clarifyResult.needed || looksOpenEndedResearchQuery(originalUserQuery);
+        const clarifyQuestions = askDelivery
+          ? [...directionQuestions, ...deliveryClarifyQuestions()].slice(0, 4)
+          : [];
+
+        if (clarifyQuestions.length > 0) {
           enqueueEvent({
             type: "narrative",
-            text: "现状已校准，再确认一下调研方向。",
+            text: "现状已校准，再确认一下调研方向与交付偏好。",
           });
           for (let i = 0; i < clarifyQuestions.length; i += 1) {
             const q = clarifyQuestions[i]!;
@@ -675,6 +692,7 @@ export async function runDeepResearchTurn(
                 question: q.question,
                 options: q.options,
                 allowCustom: q.allowCustom,
+                multiSelect: q.multiSelect,
               },
               i === 0 ? { status: "awaiting_clarify", phase: "clarify" } : undefined,
             );
@@ -696,13 +714,24 @@ export async function runDeepResearchTurn(
               enqueueEvent({ type: "narrative", text: "已跳过确认，按默认假设继续检索。" });
             }
           }
+          if (resume.skip || resume.timedOut) {
+            deliveryPrefs = { ...DEFAULT_DELIVERY_PREFS };
+          } else {
+            deliveryPrefs = parseDeliveryPrefs(resume.answers, clarifyQuestions);
+          }
+          const laneQuestions = clarifyQuestions.filter(
+            (q) => !isDeliveryClarifyQuestionId(q.id),
+          );
           clarifyExpandedLanes = expandLanesFromClarifyAnswers(
             originalUserQuery,
-            clarifyQuestions,
+            laneQuestions,
             resume,
           );
           userQuery = applyClarifyAnswers(userQuery, clarifyQuestions, resume);
         }
+
+        // Soft-constrain writing regardless of whether the user answered clarify.
+        userQuery = `${userQuery}\n\n${deliveryPrefsPromptBlock(deliveryPrefs)}`;
 
         // --- Plan ---
         enqueueEvent({ type: "phase", phase: "plan", message: "正在规划研究路径…" });
@@ -1303,18 +1332,23 @@ export async function runDeepResearchTurn(
           },
           artifacts: producedArtifacts,
           runId,
+          deliveryPrefs,
         };
         wrapupFallback = summaryInput;
 
         if (finalReport.trim() && artifactsWritten < MAX_ARTIFACTS_PER_RUN) {
           const path = `research/${runId}/final-report.md`;
+          const mdTitle = primaryArtifactTitle(
+            plan.topic || outline.title || "调研报告",
+            { ...deliveryPrefs, format: "md" },
+          );
           const record = await artifactStore.write({
             tenantId,
             userId,
             sessionId,
             runId,
             path,
-            title: `${plan.topic || "调研报告"} · 终稿`,
+            title: mdTitle,
             kind: "report",
             content: finalReport,
           });
@@ -1338,7 +1372,7 @@ export async function runDeepResearchTurn(
           finalReportReady = true;
         }
 
-        // P3: HTML / Markdown deliverables — best-effort; do not fail the run.
+        // P3: HTML deliverable — best-effort; do not fail the run.
         if (finalReport.trim()) {
           const collectArtifactEvent = (event: DeepResearchEvent) => {
             if (event.type === "artifact" && event.path && event.id) {
@@ -1369,6 +1403,7 @@ export async function runDeepResearchTurn(
                 pagesFetched: totalPagesFetched,
               },
               artifactsWritten,
+              deliveryPrefs,
               enqueueEvent: collectArtifactEvent,
             });
           } catch (finalizeError) {
@@ -1383,6 +1418,7 @@ export async function runDeepResearchTurn(
         // The chat area shows only this summary; the full report lives in artifacts.
         try {
           summaryInput.artifacts = producedArtifacts;
+          summaryInput.deliveryPrefs = deliveryPrefs;
           const summary = await buildCompletionSummary(summaryInput, {
             callJson: (messages) =>
               callGatewayJson(toolDeps, { ...baseBody, messages }),
@@ -1399,6 +1435,7 @@ export async function runDeepResearchTurn(
         }
         if (!summarySent && finalReportReady) {
           summaryInput.artifacts = producedArtifacts;
+          summaryInput.deliveryPrefs = deliveryPrefs;
           enqueueDelta(fallbackSummary(summaryInput));
           summarySent = true;
         }

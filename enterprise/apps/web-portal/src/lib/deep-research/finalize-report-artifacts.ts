@@ -9,6 +9,11 @@ import {
   MAX_ARTIFACTS_PER_RUN,
   type ArtifactStore,
 } from "./artifact-store";
+import {
+  DEFAULT_DELIVERY_PREFS,
+  primaryArtifactTitle,
+  type DeliveryPrefs,
+} from "./delivery-prefs";
 import type { Citation } from "./registry";
 import { renderHtmlReport } from "./report-html";
 import { buildMindmap } from "./report-mindmap";
@@ -34,6 +39,8 @@ export type FinalizeReportArtifactsInput = {
   stats?: ResearchStats;
   sectionKeyPoints?: Record<string, string[]>;
   artifactsWritten: number;
+  /** Controls HTML title; report.md duplicate is never written. */
+  deliveryPrefs?: DeliveryPrefs;
   enqueueEvent: (event: DeepResearchEvent) => void;
   now?: () => Date;
 };
@@ -99,7 +106,8 @@ function buildCompactHtml(input: {
 }
 
 /**
- * Write report.md + report.html (+ emit artifact events) after final report is ready.
+ * Write report.html (+ emit artifact events) after final report is ready.
+ * Markdown body lives in final-report.md (orchestrator); do not duplicate as report.md.
  * Returns updated artifactsWritten count.
  */
 export async function finalizeReportArtifacts(
@@ -113,6 +121,7 @@ export async function finalizeReportArtifacts(
   const title = input.outline.title || input.topic || "调研报告";
   const topic = input.topic || title;
   const generatedAt = (input.now?.() ?? new Date()).toISOString();
+  const prefs = input.deliveryPrefs ?? DEFAULT_DELIVERY_PREFS;
 
   const mindmapMermaid = buildMindmap({
     topic,
@@ -140,49 +149,38 @@ export async function finalizeReportArtifacts(
     });
   }
 
-  const writes: Array<{
-    path: string;
-    title: string;
-    mimeType: string;
-    content: string;
-  }> = [
-    {
-      path: `research/${input.runId}/report.md`,
-      title: `${topic} · Markdown`,
-      mimeType: "text/markdown",
-      content: linkified,
-    },
-    {
-      path: `research/${input.runId}/report.html`,
-      title: `${topic} · 可视化报告`,
-      mimeType: "text/html",
-      content: html,
-    },
-  ];
+  if (written >= MAX_ARTIFACTS_PER_RUN) return written;
 
-  for (const item of writes) {
-    if (written >= MAX_ARTIFACTS_PER_RUN) break;
-    const record = await input.artifactStore.write({
-      tenantId: input.tenantId,
-      userId: input.userId,
-      sessionId: input.sessionId,
-      runId: input.runId,
-      path: item.path,
-      title: item.title,
-      kind: "report",
-      mimeType: item.mimeType,
-      content: item.content,
-    });
-    written += 1;
-    input.enqueueEvent({
-      type: "artifact",
-      id: record.id,
-      path: record.path,
-      title: record.title,
-      kind: "report",
-      bytes: record.byteSize,
-    });
-  }
+  const htmlTitle = primaryArtifactTitle(topic, {
+    ...prefs,
+    format: prefs.format === "pdf" || prefs.format === "html" ? prefs.format : "html",
+  });
+  // Always use .html title for the HTML artifact path (even when md is primary).
+  const artifactTitle =
+    prefs.format === "html" || prefs.format === "pdf"
+      ? htmlTitle
+      : `${topic.trim() || "调研报告"}.html`;
+
+  const record = await input.artifactStore.write({
+    tenantId: input.tenantId,
+    userId: input.userId,
+    sessionId: input.sessionId,
+    runId: input.runId,
+    path: `research/${input.runId}/report.html`,
+    title: artifactTitle,
+    kind: "report",
+    mimeType: "text/html",
+    content: html,
+  });
+  written += 1;
+  input.enqueueEvent({
+    type: "artifact",
+    id: record.id,
+    path: record.path,
+    title: record.title,
+    kind: "report",
+    bytes: record.byteSize,
+  });
 
   return written;
 }

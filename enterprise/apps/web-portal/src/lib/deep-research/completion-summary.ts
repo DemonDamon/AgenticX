@@ -4,6 +4,11 @@
  */
 
 import { stripThinkBlocks } from "./content-clean";
+import {
+  DEFAULT_DELIVERY_PREFS,
+  primaryReportPathSuffix,
+  type DeliveryPrefs,
+} from "./delivery-prefs";
 import type { ReportOutline } from "./report-writer";
 
 export const COMPLETION_SUMMARY_MAX_CHARS = 1_600;
@@ -28,6 +33,7 @@ export type CompletionSummaryInput = {
   };
   artifacts: CompletionSummaryArtifact[];
   runId: string;
+  deliveryPrefs?: DeliveryPrefs;
 };
 
 export type CompletionSummaryDeps = {
@@ -40,7 +46,7 @@ const SUMMARY_SYSTEM = [
   "必须包含三块信息，但措辞与详略由你据实决定，不要机械堆数字：",
   "1. 本次做了什么：基于大纲章节与统计，概括调研覆盖范围与关键发现（不要复述整篇报告正文）。",
   "2. 关键结论亮点：提炼 2–4 条最有价值的结论；若引用证据则带 [N] 编号，编号必须真实存在。",
-  "3. 产物在哪：用 Markdown 链接列出实际产物，格式必须是 [显示名](artifact:<id>)，id 只能来自下方「实际产物」列表；不要写裸路径或 `路径` 代码块。",
+  "3. 产物在哪：主报告链接至多 1 个，格式必须是 [显示名](artifact:<id>)，id 只能来自下方「实际产物」列表；不要罗列多份等价报告（md/html 双份）；其余引导用户使用下方交付卡片。不要写裸路径或 `路径` 代码块。",
   "禁止复述报告全文；禁止编造文件；禁止编造引用编号；禁止编造 artifact id。",
 ].join("\n");
 
@@ -67,6 +73,35 @@ function artifactLinkLabel(artifact: CompletionSummaryArtifact): string {
 
 function artifactMarkdownLink(artifact: CompletionSummaryArtifact): string {
   return `[${artifactLinkLabel(artifact)}](${ARTIFACT_HREF_PREFIX}${artifact.id})`;
+}
+
+function isReportPath(path: string): boolean {
+  const lower = path.toLowerCase();
+  return (
+    lower.endsWith("final-report.md") ||
+    lower.endsWith("report.md") ||
+    lower.endsWith("report.html")
+  );
+}
+
+/**
+ * Keep at most one primary report artifact (+ any non-report attachments).
+ */
+export function selectSummaryArtifacts(
+  artifacts: CompletionSummaryArtifact[],
+  prefs: DeliveryPrefs = DEFAULT_DELIVERY_PREFS,
+): CompletionSummaryArtifact[] {
+  const suffix = primaryReportPathSuffix(prefs);
+  const reports = artifacts.filter((a) => a.id && a.path && isReportPath(a.path));
+  const others = artifacts.filter((a) => a.id && a.path && !isReportPath(a.path));
+
+  const primary =
+    reports.find((a) => a.path.toLowerCase().endsWith(suffix)) ??
+    reports.find((a) => a.path.toLowerCase().endsWith("final-report.md")) ??
+    reports.find((a) => a.path.toLowerCase().endsWith("report.html")) ??
+    reports[0];
+
+  return primary ? [primary, ...others] : others;
 }
 
 /**
@@ -99,6 +134,7 @@ export function linkifyArtifactMentions(
 
 /** 极简兜底，不调模型。 */
 export function fallbackSummary(input: CompletionSummaryInput): string {
+  const prefs = input.deliveryPrefs ?? DEFAULT_DELIVERY_PREFS;
   const lines: string[] = [];
   lines.push(`🎉「${input.topic || input.outline.title || "调研"}」深度调研完成。`);
   lines.push("");
@@ -107,15 +143,13 @@ export function fallbackSummary(input: CompletionSummaryInput): string {
     `本次规划检索 ${s.queriesPlanned} 次、选用来源 ${s.sourcesSelected} 个、抓取正文 ${s.pagesFetched} 篇，共 ${s.citationCount} 个引用。`,
   );
   lines.push(`报告章节：${sectionList(input.outline)}。`);
-  const withId = input.artifacts.filter((a) => a.id && a.path);
+  const withId = selectSummaryArtifacts(input.artifacts, prefs);
   if (withId.length > 0) {
     lines.push("");
     lines.push("产物：");
     for (const a of withId) lines.push(`- ${artifactMarkdownLink(a)}`);
-    if (withId.some((a) => a.path.endsWith("final-report.md"))) {
-      lines.push("");
-      lines.push("完整正文请打开终稿链接，或使用下方交付卡片。");
-    }
+    lines.push("");
+    lines.push("完整正文请打开上方链接，或使用下方交付卡片。");
   }
   return truncate(lines.join("\n"), COMPLETION_SUMMARY_MAX_CHARS);
 }
@@ -125,11 +159,13 @@ export async function buildCompletionSummary(
   input: CompletionSummaryInput,
   deps: CompletionSummaryDeps,
 ): Promise<string> {
+  const prefs = input.deliveryPrefs ?? DEFAULT_DELIVERY_PREFS;
+  const summaryArtifacts = selectSummaryArtifacts(input.artifacts, prefs);
   const s = input.stats;
   const sections = input.outline.sections
     .map((sec, i) => `${i + 1}. ${sec.title}：${sec.brief}`)
     .join("\n");
-  const artifacts = input.artifacts
+  const artifacts = summaryArtifacts
     .map((a) => `- id=${a.id} path=${a.path} title=${a.title || a.path} kind=${a.kind}`)
     .join("\n");
 
@@ -138,7 +174,7 @@ export async function buildCompletionSummary(
     `大纲章节：`,
     sections || "（无）",
     `统计：规划检索 ${s.queriesPlanned} 次，发现 ${s.urlsDiscovered} 个候选，选用 ${s.sourcesSelected} 个，抓取正文 ${s.pagesFetched} 篇，引用源 ${s.citationCount} 个。`,
-    `实际产物（链接必须用这些 id）：`,
+    `实际产物（链接必须用这些 id；主报告仅此一份）：`,
     artifacts || "（无）",
     `runId：${input.runId}`,
   ].join("\n\n");
@@ -152,7 +188,10 @@ export async function buildCompletionSummary(
     // whole window and leave the chat with reasoning-only content.
     const text = stripThinkBlocks(raw ?? "").trim();
     if (!text) return fallbackSummary(input);
-    return truncate(linkifyArtifactMentions(text, input.artifacts), COMPLETION_SUMMARY_MAX_CHARS);
+    return truncate(
+      linkifyArtifactMentions(text, summaryArtifacts),
+      COMPLETION_SUMMARY_MAX_CHARS,
+    );
   } catch {
     return fallbackSummary(input);
   }

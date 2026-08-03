@@ -14,6 +14,8 @@ export type ClarifyQuestion = {
   question: string;
   options: Array<{ id: string; label: string }>;
   allowCustom?: boolean;
+  /** default true；false = 单选（点选切换，不可叠多个） */
+  multiSelect?: boolean;
 };
 
 export type ClarifierResult =

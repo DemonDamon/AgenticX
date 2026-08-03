@@ -2,6 +2,7 @@
 
 import * as React from "react";
 import type { DeepResearchEvent } from "@agenticx/core-api";
+import { displayDeliveryFileName } from "./deep-research-delivery-prefs";
 
 type ArtifactEvent = Extract<DeepResearchEvent, { type: "artifact" }>;
 
@@ -35,11 +36,7 @@ function IconDoc({ className }: { className?: string }) {
 }
 
 function fileNameFromArtifact(artifact: ArtifactEvent): string {
-  const fromPath = artifact.path.split("/").pop()?.trim();
-  if (fromPath) return fromPath;
-  const title = artifact.title.trim();
-  if (title.toLowerCase().endsWith(".md")) return title;
-  return `${title || "report"}.md`;
+  return displayDeliveryFileName({ path: artifact.path, title: artifact.title });
 }
 
 export function DeepResearchArtifactCard({ artifact, onPreview }: DeepResearchArtifactCardProps) {

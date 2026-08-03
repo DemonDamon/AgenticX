@@ -591,10 +591,13 @@ describe("runDeepResearchTurn", () => {
     const memos = list.filter((a) => a.kind === "memo");
     const reports = list.filter((a) => a.kind === "report");
     expect(memos.length).toBe(2);
-    // final-report.md + P3 report.md + report.html
-    expect(reports.length).toBeGreaterThanOrEqual(1);
+    // final-report.md + report.html (no duplicate report.md)
+    expect(reports.length).toBeGreaterThanOrEqual(2);
     expect(reports.some((a) => a.path.endsWith("final-report.md"))).toBe(true);
     expect(reports.some((a) => a.path.endsWith("report.html"))).toBe(true);
+    expect(reports.some((a) => a.path.endsWith("/report.md") || a.path === "report.md")).toBe(
+      false,
+    );
   });
 });
 

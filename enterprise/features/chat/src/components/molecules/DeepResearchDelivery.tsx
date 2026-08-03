@@ -5,6 +5,12 @@ import type { ChatMessageDeepResearch } from "@agenticx/core-api";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@agenticx/ui";
 import { Download, Eye, FileText, Printer } from "lucide-react";
 import { DeepResearchArtifactCard } from "./DeepResearchArtifactCard";
+import {
+  exportActionKeyForFormat,
+  inferDeliveryFormat,
+  isPrimaryDeliveryArtifactPath,
+  type ClientDeliveryFormat,
+} from "./deep-research-delivery-prefs";
 import { collectDeepResearchDeliveryArtifacts } from "./deep-research-segments";
 
 export type DeepResearchDeliveryProps = {
@@ -57,14 +63,6 @@ function AllFilesCard({ onOpen }: { onOpen?: () => void }) {
   );
 }
 
-function isPrimaryDeliveryArtifact(path: string): boolean {
-  const lower = path.toLowerCase();
-  const base = lower.split("/").pop() || lower;
-  // Hide duplicate secondary exports; keep final-report.md as the primary card.
-  if (base === "report.html" || base === "report.md") return false;
-  return true;
-}
-
 function hasCompletedReportArtifact(
   deepResearch: ChatMessageDeepResearch,
 ): boolean {
@@ -85,7 +83,13 @@ function exportUrl(runId: string, format: "html" | "md" | "docx", inline?: boole
   return `/api/chat/deep-research/runs/${encodeURIComponent(runId)}/export?${qs.toString()}`;
 }
 
-function ExportActions({ runId }: { runId: string }) {
+function ExportActions({
+  runId,
+  primaryFormat,
+}: {
+  runId: string;
+  primaryFormat: ClientDeliveryFormat;
+}) {
   const openHtml = React.useCallback(
     (printAfterLoad: boolean) => {
       const href = exportUrl(runId, "html", true);
@@ -112,15 +116,17 @@ function ExportActions({ runId }: { runId: string }) {
     [runId],
   );
 
+  const emphasized = exportActionKeyForFormat(primaryFormat);
+
   const actions = [
     {
-      key: "view-html",
+      key: "view-html" as const,
       label: "查看可视化报告",
       icon: Eye,
       onClick: () => openHtml(false),
     },
     {
-      key: "download-md",
+      key: "download-md" as const,
       label: "下载 Markdown",
       icon: FileText,
       onClick: () => {
@@ -128,7 +134,7 @@ function ExportActions({ runId }: { runId: string }) {
       },
     },
     {
-      key: "download-docx",
+      key: "download-docx" as const,
       label: "下载 Word",
       icon: Download,
       onClick: () => {
@@ -136,12 +142,12 @@ function ExportActions({ runId }: { runId: string }) {
       },
     },
     {
-      key: "print-pdf",
+      key: "print-pdf" as const,
       label: "打印 / 存为 PDF",
       icon: Printer,
       onClick: () => openHtml(true),
     },
-  ] as const;
+  ];
 
   return (
     <div
@@ -150,14 +156,21 @@ function ExportActions({ runId }: { runId: string }) {
     >
       {actions.map((action) => {
         const Icon = action.icon;
+        const isPrimary = action.key === emphasized;
         return (
           <Tooltip key={action.key}>
             <TooltipTrigger asChild>
               <button
                 type="button"
                 onClick={action.onClick}
-                className="inline-flex h-8 items-center gap-1.5 rounded-lg px-2.5 text-[13px] text-muted-foreground transition-colors hover:bg-muted/60 hover:text-foreground"
+                className={[
+                  "inline-flex h-8 items-center gap-1.5 rounded-lg px-2.5 text-[13px] transition-colors hover:bg-muted/60",
+                  isPrimary
+                    ? "text-foreground font-medium"
+                    : "text-muted-foreground hover:text-foreground",
+                ].join(" ")}
                 aria-label={action.label}
+                data-primary-export={isPrimary ? "true" : undefined}
               >
                 <Icon className="h-3.5 w-3.5 shrink-0" aria-hidden />
                 <span>{action.label}</span>
@@ -172,7 +185,7 @@ function ExportActions({ runId }: { runId: string }) {
 }
 
 /**
- * Kimi-style delivery strip: final report card(s) + folder card for all files.
+ * Delivery strip: one primary report card + folder card for all files.
  * Render after the completion summary so deliverables sit at the end of the turn.
  */
 export function DeepResearchDelivery({
@@ -181,12 +194,17 @@ export function DeepResearchDelivery({
   onOpenFiles,
   className,
 }: DeepResearchDeliveryProps) {
+  const primaryFormat = React.useMemo(
+    () => inferDeliveryFormat(deepResearch.clarifyAnswers),
+    [deepResearch.clarifyAnswers],
+  );
+
   const deliveryArtifacts = React.useMemo(
     () =>
       collectDeepResearchDeliveryArtifacts(deepResearch.events).filter((artifact) =>
-        isPrimaryDeliveryArtifact(artifact.path),
+        isPrimaryDeliveryArtifactPath(artifact.path, primaryFormat),
       ),
-    [deepResearch.events],
+    [deepResearch.events, primaryFormat],
   );
 
   const totalCount = deepResearch.artifactIds?.length ?? 0;
@@ -215,7 +233,9 @@ export function DeepResearchDelivery({
         />
       ))}
       {showAllFiles ? <AllFilesCard onOpen={onOpenFiles} /> : null}
-      {showExport ? <ExportActions runId={deepResearch.runId} /> : null}
+      {showExport ? (
+        <ExportActions runId={deepResearch.runId} primaryFormat={primaryFormat} />
+      ) : null}
     </div>
   );
 }

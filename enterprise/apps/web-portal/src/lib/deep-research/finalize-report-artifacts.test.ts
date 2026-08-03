@@ -20,7 +20,7 @@ describe("safeFilename", () => {
 });
 
 describe("finalizeReportArtifacts", () => {
-  it("writes report.md and report.html artifacts", async () => {
+  it("writes report.html only (no report.md duplicate)", async () => {
     const store = createMemoryArtifactStore();
     const events: Array<{ type: string; path?: string }> = [];
     const written = await finalizeReportArtifacts({
@@ -43,16 +43,13 @@ describe("finalizeReportArtifacts", () => {
       artifactsWritten: 0,
       enqueueEvent: (e) => events.push(e),
     });
-    expect(written).toBe(2);
+    expect(written).toBe(1);
     const list = await store.listByRun("t1", "u1", "run-1");
-    expect(list.map((a) => a.path).sort()).toEqual([
-      "research/run-1/report.html",
-      "research/run-1/report.md",
-    ]);
-    const md = list.find((a) => a.path.endsWith("report.md"));
-    expect(md?.content).toContain("[1](#ref-1)");
+    expect(list.map((a) => a.path)).toEqual(["research/run-1/report.html"]);
+    expect(list.some((a) => a.path.endsWith("report.md"))).toBe(false);
     const html = list.find((a) => a.path.endsWith("report.html"));
     expect(html?.content.startsWith("<!DOCTYPE html>")).toBe(true);
-    expect(events.filter((e) => e.type === "artifact")).toHaveLength(2);
+    expect(html?.content).toContain("ref-1");
+    expect(events.filter((e) => e.type === "artifact")).toHaveLength(1);
   });
 });
