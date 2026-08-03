@@ -6,25 +6,18 @@ import {
   insertGatewayAuditExportEvent,
   verifyGatewayAuditChain,
 } from "@agenticx/feature-audit";
-import { getIamDb } from "@agenticx/iam-core";
-import { users } from "@agenticx/db-schema";
-import { and, eq } from "drizzle-orm";
+import { getUsersRepository } from "@agenticx/iam-core";
 import type { AdminSession } from "./admin-auth";
 
 const store = createAuditStore();
 const api = new AuditApi(store);
 
 export async function buildAuditActor(session: AdminSession, scopes: string[]): Promise<AuditActor> {
-  const db = getIamDb();
-  const [row] = await db
-    .select({ deptId: users.deptId })
-    .from(users)
-    .where(and(eq(users.tenantId, session.tenantId), eq(users.id, session.userId)))
-    .limit(1);
+  const user = await getUsersRepository().getAdminUser(session.tenantId, session.userId);
   return {
     tenantId: session.tenantId,
     userId: session.userId,
-    deptId: row?.deptId ?? null,
+    deptId: user?.deptId ?? null,
     scopes,
   };
 }

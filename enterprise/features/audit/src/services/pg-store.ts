@@ -311,7 +311,7 @@ export type ChainVerifyResult = {
 };
 
 /** Full-table scan (batched) for one tenant; skips admin-console injected rows in chain math. */
-export async function verifyGatewayAuditChain(
+export async function verifyPgGatewayAuditChain(
   actor: AuditActor,
   tenantId: string
 ): Promise<ChainVerifyResult> {
@@ -402,7 +402,7 @@ export async function verifyGatewayAuditChain(
   };
 }
 
-export async function insertGatewayAuditExportEvent(
+export async function insertPgGatewayAuditExportEvent(
   actor: AuditActor,
   detail: Record<string, unknown>
 ): Promise<void> {

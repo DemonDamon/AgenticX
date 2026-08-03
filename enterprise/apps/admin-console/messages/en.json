@@ -979,6 +979,8 @@
         "applyFilters": "Apply filters",
         "emptyLoadingTitle": "Loading...",
         "emptyLoadingDescription": "Querying gateway audit stream",
+        "loadErrorTitle": "Failed to load audit logs",
+        "loadErrorDescription": "The audit API returned an error: {error}",
         "emptyTitle": "No audit events",
         "emptyDescription": "No records match filters",
         "exportSuccess": "Exported {count} records",
