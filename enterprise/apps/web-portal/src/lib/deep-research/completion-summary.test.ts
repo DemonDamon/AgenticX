@@ -5,6 +5,7 @@ import {
   COMPLETION_SUMMARY_MAX_CHARS,
   fallbackSummary,
   linkifyArtifactMentions,
+  selectSummaryArtifacts,
   type CompletionSummaryInput,
 } from "./completion-summary";
 
@@ -29,18 +30,45 @@ const baseInput: CompletionSummaryInput = {
     {
       id: "art-final",
       path: "research/r1/final-report.md",
-      title: "终稿",
+      title: "DeepSeek V4 核心技术点.md",
       kind: "report",
     },
     {
       id: "art-html",
       path: "research/r1/report.html",
-      title: "HTML",
+      title: "DeepSeek V4 核心技术点.html",
+      kind: "report",
+    },
+    {
+      id: "art-md-dup",
+      path: "research/r1/report.md",
+      title: "Markdown",
       kind: "report",
     },
   ],
   runId: "r1",
+  deliveryPrefs: { shapes: ["structured"], format: "md" },
 };
+
+describe("selectSummaryArtifacts", () => {
+  it("keeps only the primary report for md prefs", () => {
+    const out = selectSummaryArtifacts(baseInput.artifacts, {
+      shapes: ["structured"],
+      format: "md",
+    });
+    expect(out).toHaveLength(1);
+    expect(out[0]!.id).toBe("art-final");
+  });
+
+  it("keeps html primary for html prefs", () => {
+    const out = selectSummaryArtifacts(baseInput.artifacts, {
+      shapes: ["structured"],
+      format: "html",
+    });
+    expect(out).toHaveLength(1);
+    expect(out[0]!.id).toBe("art-html");
+  });
+});
 
 describe("linkifyArtifactMentions", () => {
   it("turns backtick paths into artifact: links", () => {
@@ -48,7 +76,9 @@ describe("linkifyArtifactMentions", () => {
       "见 `research/r1/final-report.md`",
       baseInput.artifacts,
     );
-    expect(out).toBe(`见 [终稿](${ARTIFACT_HREF_PREFIX}art-final)`);
+    expect(out).toBe(
+      `见 [DeepSeek V4 核心技术点.md](${ARTIFACT_HREF_PREFIX}art-final)`,
+    );
   });
 
   it("turns bare paths into artifact: links", () => {
@@ -56,7 +86,9 @@ describe("linkifyArtifactMentions", () => {
       "路径 research/r1/report.html 可打开",
       baseInput.artifacts,
     );
-    expect(out).toContain(`[HTML](${ARTIFACT_HREF_PREFIX}art-html)`);
+    expect(out).toContain(
+      `[DeepSeek V4 核心技术点.html](${ARTIFACT_HREF_PREFIX}art-html)`,
+    );
     expect(out).not.toContain("research/r1/report.html");
   });
 });
@@ -71,12 +103,14 @@ describe("buildCompletionSummary", () => {
 
   it("rewrites bare paths from the model into clickable artifact links", async () => {
     const out = await buildCompletionSummary(baseInput, {
-      callJson: async () =>
-        "产物在：\n- `research/r1/final-report.md`\n- research/r1/report.html",
+      callJson: async () => "产物在：\n- `research/r1/final-report.md`",
     });
-    expect(out).toContain(`[终稿](${ARTIFACT_HREF_PREFIX}art-final)`);
-    expect(out).toContain(`[HTML](${ARTIFACT_HREF_PREFIX}art-html)`);
+    expect(out).toContain(
+      `[DeepSeek V4 核心技术点.md](${ARTIFACT_HREF_PREFIX}art-final)`,
+    );
     expect(out).not.toContain("`research/r1/final-report.md`");
+    // Secondary report paths are not offered to the model / linkifier.
+    expect(out).not.toContain(ARTIFACT_HREF_PREFIX + "art-html");
   });
 
   it("falls back when callJson returns empty", async () => {
@@ -126,14 +160,18 @@ describe("buildCompletionSummary", () => {
 });
 
 describe("fallbackSummary", () => {
-  it("includes topic, stats, and clickable final-report link when present", () => {
+  it("includes topic, stats, and a single primary report link", () => {
     const out = fallbackSummary(baseInput);
     expect(out).toContain("DeepSeek V4 核心技术点");
     expect(out).toContain("12");
-    expect(out).toContain(`[终稿](${ARTIFACT_HREF_PREFIX}art-final)`);
+    expect(out).toContain(
+      `[DeepSeek V4 核心技术点.md](${ARTIFACT_HREF_PREFIX}art-final)`,
+    );
+    expect(out).not.toContain(ARTIFACT_HREF_PREFIX + "art-html");
+    expect(out).not.toContain(ARTIFACT_HREF_PREFIX + "art-md-dup");
   });
 
-  it("does not mention final-report when no such artifact", () => {
+  it("falls back to html when md primary is missing", () => {
     const out = fallbackSummary({
       ...baseInput,
       artifacts: [

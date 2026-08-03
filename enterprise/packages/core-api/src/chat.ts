@@ -55,6 +55,8 @@ export type DeepResearchEvent =
       question: string;
       options: Array<{ id: string; label: string }>;
       allowCustom?: boolean;
+      /** default true；false = single-select chips */
+      multiSelect?: boolean;
     }
   | { type: "lane_started"; laneId: string; title: string; index: number; total: number }
   | { type: "lane_progress"; laneId: string; message: string; sourcesCollected?: number }

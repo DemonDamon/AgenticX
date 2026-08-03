@@ -56,6 +56,21 @@ export function formatClarifyAnswer(
   return parts.join("、");
 }
 
+/** Multi-select toggle, or single-select replace when multiSelect is false. */
+export function nextClarifySelection(
+  current: readonly string[],
+  label: string,
+  multiSelect: boolean,
+): string[] {
+  if (!multiSelect) {
+    return current.includes(label) ? [] : [label];
+  }
+  if (current.includes(label)) {
+    return current.filter((item) => item !== label);
+  }
+  return [...current, label];
+}
+
 export type DeepResearchClarifyCardProps = {
   events: DeepResearchEvent[];
   /** When false, render read-only「已收集信息」panel after answers / timeout. */
@@ -90,20 +105,21 @@ export function DeepResearchClarifyCard({
     setCollapsed(!awaiting);
   }, [awaiting]);
 
-  const toggleOption = React.useCallback((questionId: string, label: string) => {
-    setAnswers((prev) => {
-      const current = prev[questionId] ?? [];
-      const next = current.includes(label)
-        ? current.filter((item) => item !== label)
-        : [...current, label];
-      if (next.length === 0) {
-        const cleared = { ...prev };
-        delete cleared[questionId];
-        return cleared;
-      }
-      return { ...prev, [questionId]: next };
-    });
-  }, []);
+  const toggleOption = React.useCallback(
+    (questionId: string, label: string, multiSelect: boolean) => {
+      setAnswers((prev) => {
+        const current = prev[questionId] ?? [];
+        const next = nextClarifySelection(current, label, multiSelect);
+        if (next.length === 0) {
+          const cleared = { ...prev };
+          delete cleared[questionId];
+          return cleared;
+        }
+        return { ...prev, [questionId]: next };
+      });
+    },
+    [],
+  );
 
   if (clarifyEvents.length === 0) return null;
   const runId = clarifyEvents[0]!.runId;
@@ -194,14 +210,16 @@ export function DeepResearchClarifyCard({
                 分钟内确认；超时将按默认假设继续。
               </p>
               <div className="space-y-3">
-                {clarifyEvents.map((q) => (
+                {clarifyEvents.map((q) => {
+                  const multiSelect = q.multiSelect !== false;
+                  return (
                   <div key={`${q.runId}-${q.questionId}`}>
                     <div className="mb-1.5 flex items-baseline gap-1.5 text-sm font-medium leading-5 text-foreground">
                       <span>
                         {q.step}/{q.total} · {q.question}
                       </span>
                       <span className="shrink-0 text-xs font-normal text-muted-foreground">
-                        可多选
+                        {multiSelect ? "可多选" : "请选一个"}
                       </span>
                     </div>
                     <div
@@ -215,10 +233,12 @@ export function DeepResearchClarifyCard({
                           <button
                             key={opt.id}
                             type="button"
-                            role="checkbox"
+                            role={multiSelect ? "checkbox" : "radio"}
                             aria-checked={selected}
                             disabled={disabled || submitting}
-                            onClick={() => toggleOption(q.questionId, opt.label)}
+                            onClick={() =>
+                              toggleOption(q.questionId, opt.label, multiSelect)
+                            }
                             className={[
                               "rounded-full border px-2.5 py-1 text-sm leading-5 transition-colors",
                               selected
@@ -244,7 +264,8 @@ export function DeepResearchClarifyCard({
                       />
                     ) : null}
                   </div>
-                ))}
+                  );
+                })}
               </div>
               {error ? <p className="mt-2 text-sm text-destructive">{error}</p> : null}
               <div className="mt-3 flex items-center gap-2">
