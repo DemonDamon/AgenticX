@@ -2,7 +2,9 @@ import { describe, expect, it } from "vitest";
 import {
   buildArtifactTree,
   collapseSingleFileDirs,
+  displayNameForArtifactDir,
   displayNameForArtifactFile,
+  displaySubtitleForCollapsedFile,
   formatArtifactByteSize,
   isHtmlArtifact,
   prepareHtmlPreviewSrcDoc,
@@ -53,6 +55,22 @@ describe("prepareHtmlPreviewSrcDoc", () => {
     expect(out).toContain(".theme-toggle { display: none !important; }");
     expect(out).toContain("__agxPortalHashNav");
     expect(out).toContain("scrollToHash");
+  });
+});
+
+describe("displayNameForArtifactDir", () => {
+  it("localizes known research folders", () => {
+    expect(displayNameForArtifactDir("lanes")).toBe("调研车道");
+    expect(displayNameForArtifactDir("pages")).toBe("网页正文");
+    expect(displayNameForArtifactDir("assets")).toBe("资源");
+    expect(displayNameForArtifactDir("custom")).toBe("custom");
+  });
+});
+
+describe("displaySubtitleForCollapsedFile", () => {
+  it("uses Chinese kind labels instead of raw filenames", () => {
+    expect(displaySubtitleForCollapsedFile("memo.md", 2048)).toBe("备忘 · 2.00 KB");
+    expect(displaySubtitleForCollapsedFile("note.md", 512)).toBe("文档 · 512 B");
   });
 });
 
@@ -122,8 +140,8 @@ describe("buildArtifactTree", () => {
       },
     ]);
 
-    // Primary report first (human title), then lanes folder.
-    expect(tree.map((n) => n.name)).toEqual(["终稿.md", "lanes"]);
+    // Primary report first (human title), then localized lanes folder.
+    expect(tree.map((n) => n.name)).toEqual(["终稿.md", "调研车道"]);
     const lanes = tree[1]!;
     expect(lanes.type).toBe("dir");
     if (lanes.type !== "dir") return;
@@ -132,6 +150,10 @@ describe("buildArtifactTree", () => {
     // q1/memo.md collapsed into a file row titled with the lane folder name
     expect(lanes.children.map((c) => c.type)).toEqual(["file", "file"]);
     expect(lanes.children.map((c) => c.name)).toEqual(["q1-pricing", "q2-benchmark"]);
+    expect(lanes.children.map((c) => (c.type === "file" ? c.subtitle : ""))).toEqual([
+      "备忘 · 200 B",
+      "备忘 · 300 B",
+    ]);
   });
 
   it("lists report.html ahead of final-report.md", () => {

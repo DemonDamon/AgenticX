@@ -215,6 +215,36 @@ function isPrimaryReportFileName(fileName: string): boolean {
   );
 }
 
+/** Known research/ run folder segments → Chinese browse labels. */
+const ARTIFACT_DIR_LABELS: Record<string, string> = {
+  lanes: "调研车道",
+  pages: "网页正文",
+  assets: "资源",
+};
+
+/** Map internal path segments (lanes/pages) to UI Chinese names. */
+export function displayNameForArtifactDir(name: string): string {
+  const key = name.trim().toLowerCase();
+  return ARTIFACT_DIR_LABELS[key] ?? name;
+}
+
+/** Secondary line for a collapsed single-file folder (avoid raw memo.md). */
+export function displaySubtitleForCollapsedFile(
+  fileName: string,
+  byteSize: number,
+): string {
+  const base = fileName.split("/").pop()?.toLowerCase() ?? fileName.toLowerCase();
+  const kind =
+    base === "memo.md"
+      ? "备忘"
+      : base.endsWith(".html")
+        ? "网页报告"
+        : base.endsWith(".md")
+          ? "文档"
+          : "文件";
+  return `${kind} · ${formatArtifactByteSize(byteSize)}`;
+}
+
 export function displayNameForArtifactFile(
   fileName: string,
   artifact: Pick<ArtifactListItem, "path" | "title">,
@@ -289,11 +319,12 @@ export function collapseSingleFileDirs(nodes: ArtifactTreeNode[]): ArtifactTreeN
     const children = collapseSingleFileDirs(node.children);
     if (children.length === 1 && children[0]?.type === "file") {
       const only = children[0];
+      const rawFileName = only.artifact.path.split("/").pop() || only.name;
       return {
         type: "file",
         key: only.key,
         name: node.name,
-        subtitle: `${only.name} · ${formatArtifactByteSize(only.artifact.byteSize)}`,
+        subtitle: displaySubtitleForCollapsedFile(rawFileName, only.artifact.byteSize),
         artifact: only.artifact,
       };
     }
@@ -384,7 +415,7 @@ export function buildArtifactTree(artifacts: ArtifactListItem[]): ArtifactTreeNo
       nodes.push({
         type: "dir",
         key: child.key,
-        name: child.name,
+        name: displayNameForArtifactDir(child.name),
         byteSize,
         fileCount: countFiles(children),
         children,
