@@ -97,10 +97,18 @@ export function markdownToHtml(markdown: string): { html: string; toc: TocEntry[
         i += 1;
       }
       if (i < lines.length) i += 1;
-      const langAttr = lang ? ` class="language-${escapeHtml(lang)}"` : "";
-      blocks.push(
-        `<pre><code${langAttr}>${escapeHtml(codeLines.join("\n"))}</code></pre>`,
-      );
+      const source = codeLines.join("\n");
+      if (lang.toLowerCase() === "mermaid") {
+        const escaped = escapeHtml(source);
+        blocks.push(
+          `<div class="mermaid-wrap"><pre class="mermaid">${escaped}</pre><pre class="mermaid-fallback" hidden>${escaped}</pre></div>`,
+        );
+      } else {
+        const langAttr = lang ? ` class="language-${escapeHtml(lang)}"` : "";
+        blocks.push(
+          `<pre><code${langAttr}>${escapeHtml(source)}</code></pre>`,
+        );
+      }
       continue;
     }
 
@@ -413,7 +421,9 @@ export function renderHtmlReport(input: HtmlReportInput): string {
           .join("\n");
 
   const mindmapBlock = renderMindmap(input.mindmapMermaid);
-  const mermaidScript = input.mindmapMermaid.trim()
+  const bodyHasMermaid = /```mermaid\b/i.test(input.markdown);
+  const needMermaid = Boolean(input.mindmapMermaid.trim()) || bodyHasMermaid;
+  const mermaidScript = needMermaid
     ? `<script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js" onerror="document.querySelectorAll('.mermaid').forEach(function(e){e.hidden=true});document.querySelectorAll('.mermaid-fallback').forEach(function(e){e.hidden=false})"></script>`
     : "";
 

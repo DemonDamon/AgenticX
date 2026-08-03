@@ -52,6 +52,7 @@ import {
   buildSectionMessages,
   linkifyCitations,
   renderTableOfContents,
+  sectionMeetsFormat,
 } from "./report-writer";
 import { finalizeReportArtifacts } from "./finalize-report-artifacts";
 import {
@@ -1264,6 +1265,13 @@ export async function runDeepResearchTurn(
               previousSummaries,
             }),
           );
+          if (!sectionMeetsFormat(section, sectionBody)) {
+            console.warn(
+              "[deep-research] section format miss",
+              section.id,
+              section.format,
+            );
+          }
           if (sectionBody.trim()) {
             previousSummaries.push(sectionBody.trim().slice(0, 200));
           }
