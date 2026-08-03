@@ -33,7 +33,7 @@ describe("finalizeReportArtifacts", () => {
       outline: {
         title: "报告标题",
         sections: [
-          { id: "s1", title: "核心结论", brief: "b", citationIndexes: [1] },
+          { id: "s1", title: "核心结论", brief: "b", citationIndexes: [1], format: "prose" },
         ],
       },
       markdown: "# 报告标题\n\n结论 [1]\n",

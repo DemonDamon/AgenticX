@@ -9,6 +9,21 @@ export const MIN_SECTIONS = 5;
 export const MAX_SECTIONS = 9;
 export const SECTION_TARGET_CHARS = 1_500;
 
+export type SectionFormat =
+  | "prose"
+  | "comparison_table"
+  | "timeline"
+  | "mermaid"
+  | "tradeoff";
+
+const FORMAT_SET = new Set<SectionFormat>([
+  "prose",
+  "comparison_table",
+  "timeline",
+  "mermaid",
+  "tradeoff",
+]);
+
 export type ReportSection = {
   id: string;
   /** 章节标题，不含 "##" 前缀。 */
@@ -17,6 +32,8 @@ export type ReportSection = {
   brief: string;
   /** 该节应重点引用的证据编号。 */
   citationIndexes: number[];
+  /** 本节主表达形态；缺省 prose */
+  format: SectionFormat;
 };
 
 export type ReportOutline = {
@@ -32,9 +49,13 @@ export type OutlineDeps = {
 
 const OUTLINE_SYSTEM = [
   "你是深度研究报告大纲助手。只输出 JSON，不要 Markdown 围栏。",
-  '格式：{"title":"...","sections":[{"id":"s1","title":"...","brief":"...","citation_indexes":[1,4,7]}]}',
+  '格式：{"title":"...","sections":[{"id":"s1","title":"...","brief":"...","citation_indexes":[1,4,7],"format":"prose"}]}',
   `章节数 ${MIN_SECTIONS}-${MAX_SECTIONS}，按证据密度决定，宁少勿滥。`,
   "必须包含首节「核心结论」与末节「不确定性与信息缺口」，中间为分项分析。",
+  "format 取值：prose | comparison_table | timeline | mermaid | tradeoff",
+  "首节「核心结论」与末节「不确定性与信息缺口」必须 format=prose。",
+  "中间章节按证据选择形态：对比/选型/竞品至少 1 节 comparison_table；演进/版本/时间节点至少 1 节 timeline；架构/关系/流程可用 1 节 mermaid。",
+  "全篇中间节不得全部为 prose（至少 1 节为 comparison_table / timeline / mermaid / tradeoff 之一）。",
   "citation_indexes 只能引用证据包中真实存在的编号。",
   "使用与用户提问相同的语言。",
 ].join("\n");
@@ -57,6 +78,18 @@ const LEAD_SECTION_SYSTEM = [
   "只输出本节 Markdown 正文，不要重复输出标题。",
 ].join("\n");
 
+const FORMAT_DIRECTIVES: Record<SectionFormat, string> = {
+  prose: "表达形态 prose：以论述为主；合适处可插入小表，但不强制。",
+  comparison_table:
+    "表达形态 comparison_table：必须含 ≥1 张 GFM 对比表（表头+分隔行+|---|+≥3 数据行）；列含可对比维度与证据 [N]；表后可有简短解读；禁止用纯列表代替表。",
+  timeline:
+    "表达形态 timeline：必须用 GFM 表或有序时间线列出 ≥4 个带时间/版本节点的事件，每行带 [N]。",
+  mermaid:
+    "表达形态 mermaid：必须含一个 ```mermaid 代码块（flowchart 或 mindmap）；节点标签短；图后 3–6 句解读；禁止只写「如下图所示」而无代码块。",
+  tradeoff:
+    "表达形态 tradeoff：必须含「方案 × 维度」GFM 对比表，并另起一段写清推荐/不推荐/风险。",
+};
+
 function defaultOutline(fallbackTitle: string): ReportOutline {
   return {
     title: fallbackTitle || "调研报告",
@@ -66,21 +99,31 @@ function defaultOutline(fallbackTitle: string): ReportOutline {
         title: "核心结论",
         brief: "概括主题核心发现与判断",
         citationIndexes: [],
+        format: "prose",
       },
       {
         id: "s2",
         title: "分项分析",
-        brief: "按证据展开分项论证",
+        brief: "按证据展开分项论证。请用 Markdown 对比表呈现关键维度",
         citationIndexes: [],
+        format: "comparison_table",
       },
       {
         id: "s3",
         title: "不确定性与信息缺口",
         brief: "说明证据不足与待核实点",
         citationIndexes: [],
+        format: "prose",
       },
     ],
   };
+}
+
+function normalizeFormat(raw: unknown): SectionFormat {
+  if (typeof raw === "string" && FORMAT_SET.has(raw as SectionFormat)) {
+    return raw as SectionFormat;
+  }
+  return "prose";
 }
 
 function normalizeSection(
@@ -102,7 +145,25 @@ function normalizeSection(
         .map((n) => (typeof n === "number" && Number.isFinite(n) ? Math.floor(n) : NaN))
         .filter((n) => Number.isFinite(n) && n > 0)
     : [];
-  return { id, title, brief, citationIndexes };
+  return { id, title, brief, citationIndexes, format: normalizeFormat(obj.format) };
+}
+
+/** 中间节不得全是 prose：否则把第二节强制改为 comparison_table。 */
+export function ensureRichOutlineFormats(outline: ReportOutline): ReportOutline {
+  if (outline.sections.length < 3) return outline;
+  const middle = outline.sections.slice(1, -1);
+  if (middle.length === 0) return outline;
+  if (middle.some((s) => s.format !== "prose")) return outline;
+
+  const targetIndex = 1;
+  const sections = outline.sections.map((section, i) => {
+    if (i !== targetIndex) return section;
+    const brief = section.brief.includes("请用 Markdown 对比表")
+      ? section.brief
+      : `${section.brief.replace(/。$/, "")}。请用 Markdown 对比表呈现关键维度`;
+    return { ...section, format: "comparison_table" as const, brief };
+  });
+  return { ...outline, sections };
 }
 
 export function parseOutlineJson(raw: string, fallbackTitle: string): ReportOutline {
@@ -120,7 +181,7 @@ export function parseOutlineJson(raw: string, fallbackTitle: string): ReportOutl
     .filter((s): s is ReportSection => s != null)
     .slice(0, MAX_SECTIONS);
   if (sections.length === 0) return { ...fallback, title };
-  return { title, sections };
+  return ensureRichOutlineFormats({ title, sections });
 }
 
 export async function buildReportOutline(deps: OutlineDeps): Promise<ReportOutline> {
@@ -153,10 +214,13 @@ export function buildSectionMessages(args: {
     args.section.citationIndexes.length > 0
       ? `建议重点引用编号：${args.section.citationIndexes.join(", ")}`
       : "请优先引用与本节相关的证据编号。";
+  const isLead = args.sectionIndex === 0;
+  const format = args.section.format;
+  const formatLine = isLead ? null : FORMAT_DIRECTIVES[format] ?? FORMAT_DIRECTIVES.prose;
   return [
     {
       role: "system",
-      content: args.sectionIndex === 0 ? LEAD_SECTION_SYSTEM : SECTION_SYSTEM,
+      content: isLead ? LEAD_SECTION_SYSTEM : SECTION_SYSTEM,
     },
     {
       role: "user",
@@ -164,14 +228,61 @@ export function buildSectionMessages(args: {
         `报告标题：${args.outline.title}`,
         `当前章节（第 ${args.sectionIndex + 1}/${args.outline.sections.length}）：${args.section.title}`,
         `章节写作要点：${args.section.brief}`,
+        isLead ? null : `本节表达形态：${format}`,
+        formatLine,
         citeHint,
         prev,
         "",
         "证据包：",
         args.evidence,
-      ].join("\n"),
+      ]
+        .filter((line): line is string => line != null && line !== "")
+        .join("\n"),
     },
   ];
+}
+
+function hasGfmTable(body: string): boolean {
+  const lines = body.replace(/\r\n/g, "\n").split("\n");
+  for (let i = 0; i < lines.length - 1; i += 1) {
+    const row = (lines[i] ?? "").trim();
+    const sep = (lines[i + 1] ?? "").trim();
+    if (/^\|.+\|$/.test(row) && /^\|[\s|:-]+\|$/.test(sep)) return true;
+  }
+  return false;
+}
+
+function hasTimelineHeuristic(body: string): boolean {
+  if (hasGfmTable(body)) return true;
+  const bullets = body
+    .replace(/\r\n/g, "\n")
+    .split("\n")
+    .filter((line) => /^\s*([-*]|\d+\.)\s+/.test(line));
+  return bullets.length >= 4;
+}
+
+function hasMermaidFence(body: string): boolean {
+  return /```mermaid[\s\S]*?```/i.test(body);
+}
+
+/** 轻量结构校验：不满足也不阻断落盘，供 orchestrator warn。 */
+export function sectionMeetsFormat(section: ReportSection, body: string): boolean {
+  switch (section.format) {
+    case "prose":
+      return true;
+    case "comparison_table":
+    case "tradeoff":
+      return hasGfmTable(body);
+    case "timeline":
+      return hasTimelineHeuristic(body);
+    case "mermaid":
+      return hasMermaidFence(body);
+    default: {
+      const _exhaustive: never = section.format;
+      void _exhaustive;
+      return true;
+    }
+  }
 }
 
 /** 由各节标题生成 Markdown 目录。 */

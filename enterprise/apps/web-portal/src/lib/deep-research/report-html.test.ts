@@ -62,4 +62,28 @@ describe("renderHtmlReport", () => {
     expect(html).not.toContain('id="mindmap"');
     expect(html).not.toContain("mermaid.min.js");
   });
+
+  it("renders body mermaid fences as .mermaid, not language-mermaid code", () => {
+    const markdown = "## 架构\n\n```mermaid\nflowchart LR\n  A-->B\n```\n";
+    const { html } = markdownToHtml(markdown);
+    expect(html).toContain('class="mermaid"');
+    expect(html).toContain("mermaid-wrap");
+    expect(html).not.toContain('class="language-mermaid"');
+  });
+
+  it("loads mermaid CDN when body has mermaid but mindmap is empty", () => {
+    const html = renderHtmlReport({
+      ...base,
+      mindmapMermaid: "",
+      markdown: "## 架构\n\n```mermaid\nflowchart LR\n  A-->B\n```\n",
+    });
+    expect(html).toContain("mermaid.min.js");
+    expect(html).not.toContain('id="mindmap"');
+  });
+
+  it("keeps ordinary fences as language code blocks", () => {
+    const { html } = markdownToHtml("```ts\nconst x = 1;\n```");
+    expect(html).toContain('class="language-ts"');
+    expect(html).not.toContain('class="mermaid"');
+  });
 });

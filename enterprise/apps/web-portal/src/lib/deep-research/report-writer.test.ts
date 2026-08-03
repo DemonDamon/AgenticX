@@ -3,9 +3,12 @@ import {
   MAX_SECTIONS,
   SECTION_TARGET_CHARS,
   buildSectionMessages,
+  ensureRichOutlineFormats,
   linkifyCitations,
   parseOutlineJson,
   renderTableOfContents,
+  sectionMeetsFormat,
+  type ReportOutline,
 } from "./report-writer";
 
 describe("parseOutlineJson", () => {
@@ -16,6 +19,27 @@ describe("parseOutlineJson", () => {
     expect(outline.sections).toHaveLength(1);
     expect(outline.sections[0]?.title).toBe("核心结论");
     expect(outline.sections[0]?.citationIndexes).toEqual([1]);
+    expect(outline.sections[0]?.format).toBe("prose");
+  });
+
+  it("parses section format timeline", () => {
+    const outline = parseOutlineJson(
+      JSON.stringify({
+        title: "T",
+        sections: [
+          { id: "s1", title: "核心结论", brief: "b", format: "prose" },
+          { id: "s2", title: "演进", brief: "b", format: "timeline" },
+          { id: "s3", title: "缺口", brief: "b", format: "prose" },
+        ],
+      }),
+      "T",
+    );
+    expect(outline.sections[1]?.format).toBe("timeline");
+  });
+
+  it("defaultOutline middle section is comparison_table", () => {
+    const outline = parseOutlineJson("memo", "主题");
+    expect(outline.sections[1]?.format).toBe("comparison_table");
   });
 
   it("keeps a full outline when the model prefixes a think block", () => {
@@ -102,8 +126,8 @@ describe("renderTableOfContents / buildSectionMessages", () => {
       JSON.stringify({
         title: "T",
         sections: [
-          { id: "s1", title: "核心结论", brief: "总结" },
-          { id: "s2", title: "分项分析", brief: "展开" },
+          { id: "s1", title: "核心结论", brief: "总结", format: "prose" },
+          { id: "s2", title: "分项分析", brief: "展开", format: "comparison_table" },
         ],
       }),
       "T",
@@ -123,6 +147,129 @@ describe("renderTableOfContents / buildSectionMessages", () => {
     expect(body).toContain(String(SECTION_TARGET_CHARS));
     expect(body).not.toContain("400–800 字");
     expect(lead).not.toBe(body);
+  });
+
+  it("injects GFM comparison_table directives for non-lead sections", () => {
+    const outline = parseOutlineJson(
+      JSON.stringify({
+        title: "T",
+        sections: [
+          { id: "s1", title: "核心结论", brief: "总结", format: "prose" },
+          { id: "s2", title: "对比", brief: "展开", format: "comparison_table" },
+        ],
+      }),
+      "T",
+    );
+    const messages = buildSectionMessages({
+      outline,
+      section: outline.sections[1]!,
+      sectionIndex: 1,
+      evidence: "e",
+      previousSummaries: [],
+    });
+    const user = messages.find((m) => m.role === "user")?.content ?? "";
+    expect(user).toMatch(/GFM|对比表/);
+    expect(user).toContain("本节表达形态：comparison_table");
+  });
+
+  it("injects mermaid fence requirement for mermaid format", () => {
+    const outline = parseOutlineJson(
+      JSON.stringify({
+        title: "T",
+        sections: [
+          { id: "s1", title: "核心结论", brief: "总结", format: "prose" },
+          { id: "s2", title: "架构", brief: "图", format: "mermaid" },
+        ],
+      }),
+      "T",
+    );
+    const messages = buildSectionMessages({
+      outline,
+      section: outline.sections[1]!,
+      sectionIndex: 1,
+      evidence: "e",
+      previousSummaries: [],
+    });
+    const user = messages.find((m) => m.role === "user")?.content ?? "";
+    expect(user).toContain("```mermaid");
+  });
+
+  it("lead section ignores hard format constraints even if mislabeled", () => {
+    const outline: ReportOutline = {
+      title: "T",
+      sections: [
+        {
+          id: "s1",
+          title: "核心结论",
+          brief: "总结",
+          citationIndexes: [],
+          format: "comparison_table",
+        },
+      ],
+    };
+    const messages = buildSectionMessages({
+      outline,
+      section: outline.sections[0]!,
+      sectionIndex: 0,
+      evidence: "e",
+      previousSummaries: [],
+    });
+    const joined = messages.map((m) => m.content).join("\n");
+    expect(joined).not.toContain("必须含 ≥1 张");
+    expect(joined).not.toContain("必须含一个");
+  });
+});
+
+describe("ensureRichOutlineFormats", () => {
+  it("forces at least one non-prose middle section", () => {
+    const outline: ReportOutline = {
+      title: "T",
+      sections: [
+        { id: "s1", title: "核心结论", brief: "b", citationIndexes: [], format: "prose" },
+        { id: "s2", title: "分析", brief: "展开", citationIndexes: [], format: "prose" },
+        { id: "s3", title: "更多", brief: "展开", citationIndexes: [], format: "prose" },
+        { id: "s4", title: "缺口", brief: "b", citationIndexes: [], format: "prose" },
+      ],
+    };
+    const fixed = ensureRichOutlineFormats(outline);
+    expect(fixed.sections.slice(1, -1).some((s) => s.format !== "prose")).toBe(true);
+    expect(fixed.sections[1]?.format).toBe("comparison_table");
+    expect(fixed.sections[1]?.brief).toContain("请用 Markdown 对比表");
+  });
+});
+
+describe("sectionMeetsFormat", () => {
+  const base = {
+    id: "s2",
+    title: "节",
+    brief: "b",
+    citationIndexes: [] as number[],
+  };
+
+  it("accepts GFM table for comparison_table", () => {
+    const body = [
+      "| 维度 | A | B |",
+      "| --- | --- | --- |",
+      "| 成本 | 1 [1] | 2 [2] |",
+      "| 性能 | 3 [1] | 4 [2] |",
+      "| 生态 | 5 [1] | 6 [2] |",
+    ].join("\n");
+    expect(sectionMeetsFormat({ ...base, format: "comparison_table" }, body)).toBe(true);
+  });
+
+  it("rejects prose-only body for comparison_table", () => {
+    expect(
+      sectionMeetsFormat({ ...base, format: "comparison_table" }, "只有散文没有表 [1]"),
+    ).toBe(false);
+  });
+
+  it("accepts mermaid fence for mermaid format", () => {
+    const body = "说明\n\n```mermaid\nflowchart LR\n  A-->B\n```\n\n解读";
+    expect(sectionMeetsFormat({ ...base, format: "mermaid" }, body)).toBe(true);
+  });
+
+  it("rejects missing mermaid fence", () => {
+    expect(sectionMeetsFormat({ ...base, format: "mermaid" }, "如下图所示")).toBe(false);
   });
 });
 
