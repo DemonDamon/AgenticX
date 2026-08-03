@@ -191,6 +191,54 @@ describe("runDeepResearchTurn", () => {
     expect(lastUser?.content).toContain("[1]");
   });
 
+  it("refreshes gateway bearer before synthesize so section writes use the new token", async () => {
+    const plan: ResearchPlan = {
+      topic: "主题",
+      complexity: "simple",
+      subQuestions: ["子问1"],
+    };
+    const headers: Record<string, string> = { authorization: "Bearer stale-at-start" };
+    const authSeen: string[] = [];
+    const refreshAccessToken = vi.fn(async () => ({ accessToken: "fresh-after-search" }));
+
+    const fetchImpl = vi.fn(async (_url: string, init?: RequestInit) => {
+      const hdrs = (init?.headers ?? {}) as Record<string, string>;
+      authSeen.push(String(hdrs.authorization ?? ""));
+      const body = JSON.parse(String(init?.body ?? "{}")) as { stream?: boolean };
+      if (body.stream === false) {
+        return {
+          ok: true,
+          json: async () => ({
+            choices: [{ message: { content: '{"title":"T","sections":[{"id":"s1","title":"核心结论","brief":"b"}]}' } }],
+          }),
+        } as Response;
+      }
+      return synthUpstream("section-body");
+    });
+
+    const response = await runDeepResearchTurn(
+      { model: "m", messages: [{ role: "user", content: "调研一下" }] },
+      {
+        ...baseDeps({
+          headers,
+          fetchImpl: fetchImpl as unknown as typeof fetch,
+          buildPlan: async () => plan,
+          executeSearch: async () => [
+            { title: "t", url: "https://ex.com/1", snippet: "s" },
+          ],
+          refreshAccessToken,
+        }),
+      },
+    );
+
+    await readSsePayload(response);
+    expect(refreshAccessToken).toHaveBeenCalled();
+    expect(headers.authorization).toBe("Bearer fresh-after-search");
+    // At least one Gateway call after refresh must carry the new Bearer
+    // (outline JSON and/or section stream).
+    expect(authSeen.some((a) => a === "Bearer fresh-after-search")).toBe(true);
+  });
+
   it("clamps total sources to MAX_SOURCES", async () => {
     const plan: ResearchPlan = {
       topic: "T",

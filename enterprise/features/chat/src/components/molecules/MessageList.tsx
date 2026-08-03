@@ -13,7 +13,10 @@ import {
   shouldCancelLongPressOnMove,
   shouldStartLongPress,
 } from "../../utils/message-list-selection-gesture";
-import { createAssistantMdComponents } from "../../markdown/assistant-markdown-components";
+import {
+  assistantUrlTransform,
+  createAssistantMdComponents,
+} from "../../markdown/assistant-markdown-components";
 import { hostnameFromUrl, siteLabelFromSource } from "../../utils/web-search-citation";
 import { WebSearchFavicon } from "./WebSearchFavicon";
 import { WebSearchSourcesPanel } from "./WebSearchSourcesPanel";
@@ -242,7 +245,11 @@ function AssistantMessageMarkdownImpl({
   );
   return (
     <div className={`agx-assistant-md ${className ?? ""}`.trim()}>
-      <ReactMarkdown remarkPlugins={[remarkGfm]} components={components}>
+      <ReactMarkdown
+        remarkPlugins={[remarkGfm]}
+        urlTransform={assistantUrlTransform}
+        components={components}
+      >
         {text}
       </ReactMarkdown>
     </div>

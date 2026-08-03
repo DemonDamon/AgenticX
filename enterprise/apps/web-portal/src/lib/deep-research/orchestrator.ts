@@ -54,6 +54,10 @@ import {
   renderTableOfContents,
 } from "./report-writer";
 import { finalizeReportArtifacts } from "./finalize-report-artifacts";
+import {
+  refreshGatewayBearer,
+  type RefreshAccessToken,
+} from "./gateway-auth-refresh";
 import { expandQueries, type QueryVariant } from "./query-expander";
 import {
   SourcePool,
@@ -131,6 +135,11 @@ export type DeepResearchDeps = {
   awaitClarify?: boolean;
   signal?: AbortSignal;
   now?: () => number;
+  /**
+   * Optional: mint a fresh access JWT before synthesize (outline + sections).
+   * Long retrieve can outlive the 1h cookie captured at request start.
+   */
+  refreshAccessToken?: RefreshAccessToken;
 };
 
 type LaneResult = {
@@ -1125,6 +1134,14 @@ export async function runDeepResearchTurn(
           type: "narrative",
           text: "检索阶段完成，数据已足够。现在进入综合分析与报告撰写。",
         });
+        // Refresh Bearer before outline/section writes — search may have run for
+        // many minutes on a frozen access JWT from request start.
+        if (deps.refreshAccessToken) {
+          await refreshGatewayBearer({
+            headers: toolDeps.headers,
+            refreshAccessToken: deps.refreshAccessToken,
+          });
+        }
         enqueueEvent({ type: "phase", phase: "synthesize", message: "正在拟定报告大纲…" });
 
         const evidence = formatEvidencePack(plan, citationsByQuestion, reconCitations);
