@@ -66,22 +66,61 @@ const PORTAL_TOC_NARROW_PATCH = `
   if (window.__agxPortalTocNarrow) return;
   window.__agxPortalTocNarrow = true;
   var sidebar = document.getElementById("toc") || document.querySelector(".sidebar");
-  if (!sidebar) return;
   var narrowMq = window.matchMedia("(max-width: 520px)");
   function sync() {
+    if (!sidebar) return;
     if (!narrowMq.matches) sidebar.classList.remove("toc-open");
   }
-  var heading = sidebar.querySelector(":scope > h2");
-  if (heading && !heading.dataset.agxTocBound) {
-    heading.dataset.agxTocBound = "1";
-    heading.addEventListener("click", function () {
-      if (!narrowMq.matches) return;
-      sidebar.classList.toggle("toc-open");
-    });
+  if (sidebar) {
+    var heading = sidebar.querySelector(":scope > h2");
+    if (heading && !heading.dataset.agxTocBound) {
+      heading.dataset.agxTocBound = "1";
+      heading.addEventListener("click", function () {
+        if (!narrowMq.matches) return;
+        sidebar.classList.toggle("toc-open");
+      });
+    }
+    if (narrowMq.addEventListener) narrowMq.addEventListener("change", sync);
+    else if (narrowMq.addListener) narrowMq.addListener(sync);
+    sync();
   }
-  if (narrowMq.addEventListener) narrowMq.addEventListener("change", sync);
-  else if (narrowMq.addListener) narrowMq.addListener(sync);
-  sync();
+  // srcDoc hash links otherwise navigate the parent portal (often to login).
+  if (!window.__agxPortalHashNav) {
+    window.__agxPortalHashNav = true;
+    function scrollToHash(href) {
+      if (!href || href.charAt(0) !== "#") return false;
+      var id = href.slice(1);
+      try { id = decodeURIComponent(id); } catch (e) {}
+      if (!id) return false;
+      var target = document.getElementById(id);
+      if (!target) return false;
+      if (typeof target.scrollIntoView === "function") {
+        target.scrollIntoView({ behavior: "smooth", block: "start" });
+      } else {
+        target.scrollIntoView(true);
+      }
+      if (id.indexOf("ref-") === 0) {
+        target.classList.add("flash");
+        setTimeout(function () { target.classList.remove("flash"); }, 1200);
+      }
+      return true;
+    }
+    document.addEventListener("click", function (event) {
+      var node = event.target;
+      var a = null;
+      while (node && node !== document) {
+        if (node.tagName === "A") { a = node; break; }
+        node = node.parentNode;
+      }
+      if (!a) return;
+      var href = a.getAttribute("href") || "";
+      if (href.charAt(0) !== "#") return;
+      if (scrollToHash(href)) {
+        event.preventDefault();
+        if (event.stopPropagation) event.stopPropagation();
+      }
+    }, true);
+  }
 })();
 </script>
 `.trim();

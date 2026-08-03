@@ -399,6 +399,42 @@ const REPORT_JS = `
   if (btn) btn.addEventListener("click", function () {
     apply(root.classList.contains("dark") ? "light" : "dark");
   });
+  // srcDoc / sandboxed iframe: bare #hash links resolve against the parent
+  // portal URL and can navigate the top window (e.g. kick users to login).
+  // Keep in-document jumps local via preventDefault + scrollIntoView.
+  function scrollToHash(href) {
+    if (!href || href.charAt(0) !== "#") return false;
+    var id = href.slice(1);
+    try { id = decodeURIComponent(id); } catch (e) {}
+    if (!id) return false;
+    var target = document.getElementById(id);
+    if (!target) return false;
+    if (typeof target.scrollIntoView === "function") {
+      target.scrollIntoView({ behavior: "smooth", block: "start" });
+    } else {
+      target.scrollIntoView(true);
+    }
+    if (id.indexOf("ref-") === 0) {
+      target.classList.add("flash");
+      setTimeout(function () { target.classList.remove("flash"); }, 1200);
+    }
+    return true;
+  }
+  document.addEventListener("click", function (event) {
+    var node = event.target;
+    var a = null;
+    while (node && node !== document) {
+      if (node.tagName === "A") { a = node; break; }
+      node = node.parentNode;
+    }
+    if (!a) return;
+    var href = a.getAttribute("href") || "";
+    if (href.charAt(0) !== "#") return;
+    if (scrollToHash(href)) {
+      event.preventDefault();
+      if (event.stopPropagation) event.stopPropagation();
+    }
+  }, true);
   var links = document.querySelectorAll(".toc a");
   var sections = [];
   links.forEach(function (a) {
@@ -435,17 +471,6 @@ const REPORT_JS = `
     else if (narrowMq.addListener) narrowMq.addListener(syncNarrowToc);
     syncNarrowToc();
   }
-  document.querySelectorAll('.article a[href^="#ref-"]').forEach(function (a) {
-    a.addEventListener("click", function () {
-      var id = (a.getAttribute("href") || "").slice(1);
-      var target = document.getElementById(id);
-      if (!target) return;
-      setTimeout(function () {
-        target.classList.add("flash");
-        setTimeout(function () { target.classList.remove("flash"); }, 1200);
-      }, 50);
-    });
-  });
   function showFallback() {
     document.querySelectorAll(".mermaid").forEach(function (el) { el.hidden = true; });
     document.querySelectorAll(".mermaid-fallback").forEach(function (el) { el.hidden = false; });
