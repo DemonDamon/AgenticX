@@ -253,6 +253,27 @@ export function buildDeepResearchSegments(
 }
 
 /**
+ * True when the run is still active but the workbench has no in-card spinner
+ * (e.g. cold-start tools settled, waiting for clarify / plan / next lanes).
+ * Callers should render trailing thinking dots so the UI does not look stalled.
+ */
+export function deepResearchNeedsTrailingActivity(
+  segments: DeepResearchSegment[],
+  status: ChatMessageDeepResearch["status"] | undefined,
+): boolean {
+  if (status !== "running") return false;
+  for (const segment of segments) {
+    if (segment.kind === "tools" && segment.steps.some((step) => step.status === "running")) {
+      return false;
+    }
+    if (segment.kind === "status" && segment.status === "running") {
+      return false;
+    }
+  }
+  return true;
+}
+
+/**
  * Label for the pre-segment spinner. `clarify` / `plan` phases produce no segment,
  * so their message is the only progress signal the user can get in that window.
  */

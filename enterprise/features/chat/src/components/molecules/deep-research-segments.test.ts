@@ -3,6 +3,7 @@ import type { DeepResearchEvent } from "@agenticx/core-api";
 import {
   buildDeepResearchSegments,
   collectDeepResearchDeliveryArtifacts,
+  deepResearchNeedsTrailingActivity,
   deepResearchWaitingLabel,
   stripDeepResearchProgressFromContent,
 } from "./deep-research-segments";
@@ -48,6 +49,52 @@ describe("deepResearchWaitingLabel", () => {
     expect(segments.map((s) => s.kind)).toEqual(["narrative", "tools", "narrative"]);
     const tools = segments[1];
     expect(tools && tools.kind === "tools" ? tools.title : "").toContain("开题冷启动");
+    // Cold-start settled but run still active → trailing dots (no in-card spinner).
+    expect(deepResearchNeedsTrailingActivity(segments, "running")).toBe(true);
+  });
+});
+
+describe("deepResearchNeedsTrailingActivity", () => {
+  it("is true after clarify resume narrative while waiting for lanes", () => {
+    const events: DeepResearchEvent[] = [
+      { type: "narrative", text: "已明确调研方向，开始系统检索。" },
+      { type: "phase", phase: "plan", message: "正在规划研究路径…" },
+    ];
+    const segments = buildDeepResearchSegments(events, "running");
+    expect(deepResearchNeedsTrailingActivity(segments, "running")).toBe(true);
+  });
+
+  it("is false while a tools card still has a running lane", () => {
+    const events: DeepResearchEvent[] = [
+      { type: "phase", phase: "lanes", message: "正在并行检索…" },
+      {
+        type: "lane_started",
+        laneId: "q1",
+        title: "架构",
+        index: 1,
+        total: 1,
+      },
+    ];
+    const segments = buildDeepResearchSegments(events, "running");
+    expect(deepResearchNeedsTrailingActivity(segments, "running")).toBe(false);
+  });
+
+  it("is false while awaiting clarify answers", () => {
+    const events: DeepResearchEvent[] = [
+      { type: "narrative", text: "现状已校准，再确认一下调研方向。" },
+      {
+        type: "clarify",
+        runId: "r1",
+        step: 1,
+        total: 1,
+        questionId: "q1",
+        question: "方向？",
+        options: [{ id: "a", label: "A" }],
+        allowCustom: true,
+      },
+    ];
+    const segments = buildDeepResearchSegments(events, "awaiting_clarify");
+    expect(deepResearchNeedsTrailingActivity(segments, "awaiting_clarify")).toBe(false);
   });
 });
 

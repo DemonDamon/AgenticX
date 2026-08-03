@@ -3,7 +3,11 @@
 import * as React from "react";
 import type { ChatMessageDeepResearch, DeepResearchEvent } from "@agenticx/core-api";
 import { DeepResearchClarifyCard } from "./DeepResearchClarifyCard";
-import { buildDeepResearchSegments, deepResearchWaitingLabel } from "./deep-research-segments";
+import {
+  buildDeepResearchSegments,
+  deepResearchNeedsTrailingActivity,
+  deepResearchWaitingLabel,
+} from "./deep-research-segments";
 import type { ResearchStep } from "./deep-research-steps";
 
 export type DeepResearchWorkbenchProps = {
@@ -263,6 +267,21 @@ function StatusRow({
   );
 }
 
+/** Same cadence as MessageList ThinkingDotsPlaceholder — keeps deep-research gaps alive. */
+function TrailingThinkingDots() {
+  return (
+    <div
+      className="mb-1 inline-flex min-h-[32px] items-center gap-2 py-1"
+      data-testid="deep-research-trailing-dots"
+      aria-label="深度调研进行中"
+    >
+      <span className="agx-thinking-dot h-2.5 w-2.5 rounded-full bg-muted-foreground/70" />
+      <span className="agx-thinking-dot h-2.5 w-2.5 rounded-full bg-muted-foreground/70 [animation-delay:160ms]" />
+      <span className="agx-thinking-dot h-2.5 w-2.5 rounded-full bg-muted-foreground/70 [animation-delay:320ms]" />
+    </div>
+  );
+}
+
 export function DeepResearchWorkbench({
   deepResearch,
   onClarifySubmitted,
@@ -284,6 +303,7 @@ export function DeepResearchWorkbench({
   const hasClarify = deepResearch.events.some((e): e is Extract<DeepResearchEvent, { type: "clarify" }> =>
     e.type === "clarify",
   );
+  const showTrailingDots = deepResearchNeedsTrailingActivity(segments, deepResearch.status);
 
   if (waitingShell) {
     return (
@@ -369,6 +389,7 @@ export function DeepResearchWorkbench({
           }
         }
       })}
+      {showTrailingDots ? <TrailingThinkingDots /> : null}
     </div>
   );
 }
