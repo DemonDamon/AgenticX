@@ -92,6 +92,13 @@
       "when": 1785700000001,
       "tag": "0012_chat_share_snapshots",
       "breakpoints": true
+    },
+    {
+      "idx": 13,
+      "version": "5",
+      "when": 1785800000001,
+      "tag": "0013_enterprise_deep_research_runs",
+      "breakpoints": true
     }
   ]
 }

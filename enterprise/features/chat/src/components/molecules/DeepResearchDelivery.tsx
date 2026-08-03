@@ -2,7 +2,15 @@
 
 import * as React from "react";
 import type { ChatMessageDeepResearch } from "@agenticx/core-api";
-import { DeepResearchArtifactCard } from "./DeepResearchArtifactCard";
+import {
+  DeepResearchArtifactCard,
+  DELIVERY_CARD_CLASS,
+  DELIVERY_ICON_WELL_CLASS,
+} from "./DeepResearchArtifactCard";
+import {
+  inferDeliveryFormat,
+  isPrimaryDeliveryArtifactPath,
+} from "./deep-research-delivery-prefs";
 import { collectDeepResearchDeliveryArtifacts } from "./deep-research-segments";
 
 export type DeepResearchDeliveryProps = {
@@ -21,7 +29,7 @@ function IconFolder({ className }: { className?: string }) {
       viewBox="0 0 24 24"
       fill="none"
       stroke="currentColor"
-      strokeWidth="1.8"
+      strokeWidth="1.75"
       strokeLinecap="round"
       strokeLinejoin="round"
       className={className}
@@ -37,14 +45,14 @@ function AllFilesCard({ onOpen }: { onOpen?: () => void }) {
     <button
       type="button"
       onClick={onOpen}
-      className="flex w-full max-w-md items-center gap-3 rounded-2xl border border-border/45 bg-card px-3 py-2.5 text-left shadow-sm transition-colors hover:bg-muted/40"
+      className={DELIVERY_CARD_CLASS}
       data-testid="deep-research-all-files-card"
     >
-      <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-[10px] bg-muted/70 text-foreground/70">
+      <span className={DELIVERY_ICON_WELL_CLASS}>
         <IconFolder className="h-5 w-5" />
       </span>
       <span className="min-w-0 flex-1">
-        <span className="block truncate text-[15px] font-medium leading-5 text-foreground">
+        <span className="block truncate text-[14px] font-medium leading-5 text-foreground">
           全部文件
         </span>
         <span className="mt-0.5 block truncate text-[12px] leading-4 text-muted-foreground">
@@ -56,8 +64,8 @@ function AllFilesCard({ onOpen }: { onOpen?: () => void }) {
 }
 
 /**
- * Kimi-style delivery strip: final report card(s) + folder card for all files.
- * Render after the report body so deliverables sit at the end of the turn.
+ * Delivery strip: one primary report card + folder card for all files.
+ * Soft filled cards (no hard border) with a light hover lift.
  */
 export function DeepResearchDelivery({
   deepResearch,
@@ -65,9 +73,17 @@ export function DeepResearchDelivery({
   onOpenFiles,
   className,
 }: DeepResearchDeliveryProps) {
+  const primaryFormat = React.useMemo(
+    () => inferDeliveryFormat(deepResearch.clarifyAnswers),
+    [deepResearch.clarifyAnswers],
+  );
+
   const deliveryArtifacts = React.useMemo(
-    () => collectDeepResearchDeliveryArtifacts(deepResearch.events),
-    [deepResearch.events],
+    () =>
+      collectDeepResearchDeliveryArtifacts(deepResearch.events).filter((artifact) =>
+        isPrimaryDeliveryArtifactPath(artifact.path, primaryFormat),
+      ),
+    [deepResearch.events, primaryFormat],
   );
 
   const totalCount = deepResearch.artifactIds?.length ?? 0;
@@ -84,7 +100,7 @@ export function DeepResearchDelivery({
 
   return (
     <div
-      className={["mt-4 space-y-2", className].filter(Boolean).join(" ")}
+      className={["mt-3 flex flex-col gap-2", className].filter(Boolean).join(" ")}
       data-testid="deep-research-delivery"
     >
       {deliveryArtifacts.map((artifact) => (

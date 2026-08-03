@@ -1,7 +1,11 @@
 import * as React from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import type { ChatMessage, ChatMessageAttachment } from "@agenticx/core-api";
+import type {
+  ChatMessage,
+  ChatMessageAttachment,
+  WebSearchSource,
+} from "@agenticx/core-api";
 import { Button, Tooltip, TooltipContent, TooltipTrigger } from "@agenticx/ui";
 import { ReasoningBlock } from "../atoms/ReasoningBlock";
 import { ToolCallCard } from "../atoms/ToolCallCard";
@@ -13,13 +17,19 @@ import {
   shouldCancelLongPressOnMove,
   shouldStartLongPress,
 } from "../../utils/message-list-selection-gesture";
-import { createAssistantMdComponents } from "../../markdown/assistant-markdown-components";
+import {
+  assistantUrlTransform,
+  createAssistantMdComponents,
+} from "../../markdown/assistant-markdown-components";
 import { hostnameFromUrl, siteLabelFromSource } from "../../utils/web-search-citation";
 import { WebSearchFavicon } from "./WebSearchFavicon";
 import { WebSearchSourcesPanel } from "./WebSearchSourcesPanel";
 import { DeepResearchWorkbench } from "./DeepResearchWorkbench";
 import { DeepResearchDelivery } from "./DeepResearchDelivery";
-import { DeepResearchFilesPanel } from "./DeepResearchFilesPanel";
+import {
+  DeepResearchFilesPanel,
+  type DeepResearchPanelLane,
+} from "./DeepResearchFilesPanel";
 import { AttachmentContentPanel } from "./AttachmentContentPanel";
 import { UserMessageAttachmentCard } from "../atoms/UserMessageAttachmentCard";
 import { stripDeepResearchProgressFromContent } from "./deep-research-segments";
@@ -154,6 +164,11 @@ type MessageListProps = {
    * MessageList will not render DeepResearchFilesPanel itself.
    */
   onRequestDeepResearchFiles?: (sessionId: string, focusArtifactId?: string | null) => void;
+  /** Same ownership rule, for a lane's searched-pages view. */
+  onRequestDeepResearchLaneSources?: (
+    sessionId: string,
+    lane: DeepResearchPanelLane,
+  ) => void;
   /** When set, attachment preview is owned by the parent (docked side pane). */
   onRequestAttachmentPreview?: (attachment: ChatMessageAttachment) => void;
 };
@@ -174,6 +189,7 @@ function AssistantMessageMarkdownImpl({
   sources,
   sessionAttachments,
   onOpenAttachment,
+  onOpenArtifact,
   citationMessageId,
   onOpenCitationInSheet,
 }: {
@@ -182,6 +198,7 @@ function AssistantMessageMarkdownImpl({
   sources?: ChatMessage["web_search_sources"];
   sessionAttachments?: ChatMessageAttachment[];
   onOpenAttachment?: (attachment: ChatMessageAttachment) => void;
+  onOpenArtifact?: (artifactId: string) => void;
   citationMessageId?: string;
   onOpenCitationInSheet?: (messageId: string, index1Based: number) => void;
 }) {
@@ -193,13 +210,16 @@ function AssistantMessageMarkdownImpl({
   // (sources / attachments) can rebuild the component map.
   const onOpenAttachmentRef = React.useRef(onOpenAttachment);
   const onOpenCitationInSheetRef = React.useRef(onOpenCitationInSheet);
+  const onOpenArtifactRef = React.useRef(onOpenArtifact);
   React.useEffect(() => {
     onOpenAttachmentRef.current = onOpenAttachment;
     onOpenCitationInSheetRef.current = onOpenCitationInSheet;
-  }, [onOpenAttachment, onOpenCitationInSheet]);
+    onOpenArtifactRef.current = onOpenArtifact;
+  }, [onOpenAttachment, onOpenCitationInSheet, onOpenArtifact]);
 
   const hasOpenAttachment = Boolean(onOpenAttachment);
   const hasOpenCitation = Boolean(onOpenCitationInSheet && citationMessageId);
+  const hasOpenArtifact = Boolean(onOpenArtifact);
 
   const stableOpenAttachment = React.useCallback((attachment: ChatMessageAttachment) => {
     onOpenAttachmentRef.current?.(attachment);
@@ -211,6 +231,9 @@ function AssistantMessageMarkdownImpl({
     },
     [citationMessageId],
   );
+  const stableOpenArtifact = React.useCallback((artifactId: string) => {
+    onOpenArtifactRef.current?.(artifactId);
+  }, []);
 
   const components = React.useMemo(
     () =>
@@ -219,19 +242,26 @@ function AssistantMessageMarkdownImpl({
         sessionAttachments,
         onOpenAttachment: hasOpenAttachment ? stableOpenAttachment : undefined,
         onOpenCitationInSheet: hasOpenCitation ? stableOpenCitation : undefined,
+        onOpenArtifact: hasOpenArtifact ? stableOpenArtifact : undefined,
       }),
     [
       sources,
       sessionAttachments,
       hasOpenAttachment,
       hasOpenCitation,
+      hasOpenArtifact,
       stableOpenAttachment,
       stableOpenCitation,
+      stableOpenArtifact,
     ],
   );
   return (
     <div className={`agx-assistant-md ${className ?? ""}`.trim()}>
-      <ReactMarkdown remarkPlugins={[remarkGfm]} components={components}>
+      <ReactMarkdown
+        remarkPlugins={[remarkGfm]}
+        urlTransform={assistantUrlTransform}
+        components={components}
+      >
         {text}
       </ReactMarkdown>
     </div>
@@ -248,6 +278,63 @@ function IconGlobe({ className }: { className?: string }) {
       <path d="M12 2a14.5 14.5 0 0 0 0 20 14.5 14.5 0 0 0 0-20" />
       <path d="M2 12h20" />
     </svg>
+  );
+}
+
+/** Favicon stack + "引用" — opens the docked sources sheet. */
+function CitationSourcesChip({
+  messageId,
+  sources,
+  onOpen,
+  className,
+}: {
+  messageId: string;
+  sources: WebSearchSource[];
+  onOpen: () => void;
+  className?: string;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={(e) => {
+        e.stopPropagation();
+        onOpen();
+      }}
+      className={[
+        "group/cite inline-flex h-7 max-w-full shrink-0 items-center gap-1.5",
+        "rounded-full bg-muted/55 py-0 pl-1 pr-2.5 text-[12px] leading-none text-foreground/75",
+        "transition-[transform,box-shadow,background-color,color] duration-200 ease-out",
+        "hover:-translate-y-px hover:bg-muted hover:text-foreground",
+        "hover:shadow-[0_6px_16px_rgba(15,23,42,0.08)]",
+        "active:translate-y-0 active:shadow-none",
+        "dark:hover:shadow-[0_6px_16px_rgba(0,0,0,0.35)]",
+        className,
+      ]
+        .filter(Boolean)
+        .join(" ")}
+      data-testid="citation-sources-chip"
+      aria-label={`引用来源 ${sources.length}`}
+    >
+      <span className="flex items-center -space-x-1.5 transition-transform duration-200 ease-out group-hover/cite:scale-[1.04]">
+        {sources.slice(0, 3).map((source, idx) => {
+          const host = hostnameFromUrl(source.url) ?? "";
+          const label = siteLabelFromSource(source, idx + 1);
+          return (
+            <span
+              key={`${messageId}-fav-${idx}`}
+              className="flex h-4 w-4 items-center justify-center overflow-hidden rounded-full border border-background bg-background shadow-sm"
+            >
+              {host ? (
+                <WebSearchFavicon host={host} label={label} size={14} rounded="full" />
+              ) : (
+                <IconGlobe className="h-2.5 w-2.5 text-muted-foreground" />
+              )}
+            </span>
+          );
+        })}
+      </span>
+      <span className="truncate font-medium">引用</span>
+    </button>
   );
 }
 
@@ -272,6 +359,7 @@ export function MessageList({
   showScrollToBottomFab = true,
   scrollToBottomLabel = "回到底部",
   onRequestDeepResearchFiles,
+  onRequestDeepResearchLaneSources,
   onRequestAttachmentPreview,
 }: MessageListProps) {
   const parentRef = React.useRef<HTMLDivElement>(null);
@@ -301,6 +389,9 @@ export function MessageList({
   const [sourcesHighlightIndex, setSourcesHighlightIndex] = React.useState<number | null>(null);
   const [filesPanelSessionId, setFilesPanelSessionId] = React.useState<string | null>(null);
   const [filesPanelFocusId, setFilesPanelFocusId] = React.useState<string | null>(null);
+  const [filesPanelLane, setFilesPanelLane] = React.useState<DeepResearchPanelLane | null>(
+    null,
+  );
   const [attachmentPreview, setAttachmentPreview] = React.useState<ChatMessageAttachment | null>(null);
   const scrollEffectFrameRef = React.useRef<number | null>(null);
   const longPressTimerRef = React.useRef<Map<string, NodeJS.Timeout>>(new Map());
@@ -500,9 +591,23 @@ export function MessageList({
         return;
       }
       setFilesPanelSessionId(sessionId);
+      setFilesPanelLane(null);
       setFilesPanelFocusId(focusArtifactId ?? null);
     },
     [onRequestDeepResearchFiles],
+  );
+
+  const openDeepResearchLaneSources = React.useCallback(
+    (sessionId: string, lane: DeepResearchPanelLane) => {
+      if (onRequestDeepResearchLaneSources) {
+        onRequestDeepResearchLaneSources(sessionId, lane);
+        return;
+      }
+      setFilesPanelSessionId(sessionId);
+      setFilesPanelFocusId(null);
+      setFilesPanelLane(lane);
+    },
+    [onRequestDeepResearchLaneSources],
   );
 
   const hostFilesPanel = !onRequestDeepResearchFiles;
@@ -626,6 +731,8 @@ export function MessageList({
                 message.deep_research?.status === "awaiting_clarify");
             const hideMessageActions =
               deepResearchInFlight || (isAssistant && message.id === inFlightAssistantId);
+            const citationSources = isAssistant ? message.web_search_sources : undefined;
+            const hasCitationSources = Boolean(citationSources && citationSources.length > 0);
             const userAttachments = isUser ? (message.attachments ?? []) : [];
             const userHasAttachments = userAttachments.length > 0;
             const userHasText = isUser && displayContentForRender.trim().length > 0;
@@ -742,6 +849,12 @@ export function MessageList({
                             onOpenArtifact={(id) => {
                               openDeepResearchFiles(message.session_id, id);
                             }}
+                            onOpenLaneSources={(lane) => {
+                              openDeepResearchLaneSources(message.session_id, lane);
+                            }}
+                            onOpenLaneSource={(source) => {
+                              window.open(source.url, "_blank", "noopener,noreferrer");
+                            }}
                           />
                         ) : null}
 
@@ -840,48 +953,6 @@ export function MessageList({
                           </div>
                         ) : null}
 
-                        {isAssistant &&
-                        message.web_search_sources &&
-                        message.web_search_sources.length > 0 ? (
-                          <button
-                            type="button"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              setSourcesPanelMessageId(message.id);
-                              setSourcesHighlightIndex(null);
-                            }}
-                            className="mb-3 inline-flex max-w-full items-center gap-2 rounded-full border border-border/60 bg-muted/50 py-1 pl-1.5 pr-2.5 text-sm leading-5 text-foreground/80 transition-colors hover:border-border hover:bg-muted hover:text-foreground"
-                          >
-                            <span className="flex items-center -space-x-1.5">
-                              {message.web_search_sources.slice(0, 3).map((source, idx) => {
-                                const host = hostnameFromUrl(source.url) ?? "";
-                                const label = siteLabelFromSource(source, idx + 1);
-                                return (
-                                  <span
-                                    key={`${message.id}-fav-${idx}`}
-                                    className="flex h-5 w-5 items-center justify-center overflow-hidden rounded-full border border-background bg-background shadow-sm"
-                                  >
-                                    {host ? (
-                                      <WebSearchFavicon
-                                        host={host}
-                                        label={label}
-                                        size={16}
-                                        rounded="full"
-                                      />
-                                    ) : (
-                                      <IconGlobe className="h-3 w-3 text-muted-foreground" />
-                                    )}
-                                  </span>
-                                );
-                              })}
-                            </span>
-                            <span className="truncate font-medium">
-                              搜索网页 · {message.web_search_sources.length} 个结果
-                            </span>
-                            <IconChevronRight className="h-4 w-4 shrink-0 text-muted-foreground" />
-                          </button>
-                        ) : null}
-
                         {/* 消息内容 */}
                         {!hideContentParagraph ? (
                           isAssistant ? (
@@ -891,6 +962,11 @@ export function MessageList({
                               sources={message.web_search_sources}
                               sessionAttachments={linkedUserAttachments}
                               onOpenAttachment={openAttachmentPreview}
+                              onOpenArtifact={
+                                message.deep_research
+                                  ? (id) => openDeepResearchFiles(message.session_id, id)
+                                  : undefined
+                              }
                               citationMessageId={message.id}
                               onOpenCitationInSheet={openCitationInSheet}
                             />
@@ -931,7 +1007,7 @@ export function MessageList({
                         <div
                           className={`mt-1.5 flex items-center gap-1 opacity-0 transition-opacity group-hover/message:opacity-100 ${
                             isUser ? "justify-end" : "justify-start -ml-1.5"
-                          } ${(isUser && hasUserResponseVersions) || (isAssistant && hasRetryVersions) ? "opacity-100" : ""}`}
+                          } ${(isUser && hasUserResponseVersions) || (isAssistant && hasRetryVersions) || hasCitationSources ? "opacity-100" : ""}`}
                         >
                           {isAssistant && hasRetryVersions && linkedUserMessageId && (
                             <>
@@ -1120,10 +1196,9 @@ export function MessageList({
                             </>
                           )}
 
-                          {/* 反馈 - 仅对助手消息 */}
+                          {/* 反馈 - 仅对助手消息；与分享同组，竖线只留给「引用」。 */}
                           {isAssistant && (
                             <>
-                              <div className="mx-1 h-4 w-px bg-border" />
                               <Tooltip>
                                 <TooltipTrigger asChild>
                                   <Button
@@ -1156,6 +1231,19 @@ export function MessageList({
                                 </TooltipTrigger>
                                 <TooltipContent>没帮助</TooltipContent>
                               </Tooltip>
+                              {hasCitationSources && citationSources ? (
+                                <>
+                                  <div className="mx-1 h-4 w-px bg-border" />
+                                  <CitationSourcesChip
+                                    messageId={message.id}
+                                    sources={citationSources}
+                                    onOpen={() => {
+                                      setSourcesPanelMessageId(message.id);
+                                      setSourcesHighlightIndex(null);
+                                    }}
+                                  />
+                                </>
+                              ) : null}
                             </>
                           )}
                         </div>
@@ -1307,10 +1395,12 @@ export function MessageList({
           if (!open) {
             setFilesPanelSessionId(null);
             setFilesPanelFocusId(null);
+            setFilesPanelLane(null);
           }
         }}
         sessionId={filesPanelSessionId}
         focusArtifactId={filesPanelFocusId}
+        focusLane={filesPanelLane}
         sources={(() => {
           if (!filesPanelSessionId) return [];
           for (let i = messages.length - 1; i >= 0; i -= 1) {

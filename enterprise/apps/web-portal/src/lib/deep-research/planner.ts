@@ -2,10 +2,22 @@
  * Deep research stage 1: plan sub-questions via a non-streaming JSON completion.
  */
 
-export const MAX_SUB_QUESTIONS = 5;
+import { extractJsonText } from "./llm-json";
+import {
+  defaultFacetLanes,
+  looksOpenEndedResearchQuery,
+} from "./research-intent";
+
+export const MIN_SUB_QUESTIONS = 2;
+export const MAX_SUB_QUESTIONS = 8;
+/** Open-ended research asks should fan out at least this many lanes. */
+export const OPEN_ENDED_MIN_LANES = 4;
+
+export type ResearchComplexity = "simple" | "moderate" | "complex";
 
 export type ResearchPlan = {
   topic: string;
+  complexity: ResearchComplexity;
   subQuestions: string[];
 };
 
@@ -14,6 +26,10 @@ export type PlannerDeps = {
   headers: Record<string, string>;
   body: Record<string, unknown>;
   userQuery: string;
+  /** Current-date grounding line (see recon.formatTodayLine). */
+  todayLine?: string;
+  /** Cold-start search digest (see recon.buildReconBrief). */
+  reconBrief?: string;
   fetchImpl?: typeof fetch;
   signal?: AbortSignal;
 };
@@ -21,9 +37,49 @@ export type PlannerDeps = {
 const PLANNER_SYSTEM = [
   "你是研究规划助手。根据用户问题拆解研究路径。",
   "只输出 JSON，不要 Markdown 围栏，不要其它解释。",
-  '格式严格为：{"topic":"...","sub_questions":["...","..."]}',
-  `sub_questions 必须 3 到 ${MAX_SUB_QUESTIONS} 条，覆盖不同角度，使用与用户提问相同的语言。`,
+  '格式严格为：{"topic":"...","complexity":"simple|moderate|complex","sub_questions":["...","..."]}',
+  `先判断问题复杂度，再据此决定 sub_questions 条数：simple（单一事实或定义类）${MIN_SUB_QUESTIONS}-3 条；moderate（多维度对比或需要几个侧面）4-5 条；complex（跨领域、需时间线或多方观点或技术细节分层）6-${MAX_SUB_QUESTIONS} 条。`,
+  "『核心技术点』『全面分析』『综述』『对比』『调研』等开放题一律至少 moderate，禁止只输出 1 条子问题，也禁止把用户原问原样当作唯一子问题。",
+  "禁止为凑数拆出重复或空洞的子问题：宁少勿滥，每条必须能独立检索且彼此不重叠。",
+  "若用户澄清中列出了多个彼此独立的技术方向/关注点，必须为每个方向各建一条 sub_question，禁止合并成一条综合检索，也禁止把整段『【用户澄清】』原文当作唯一子问题。",
+  "若下方提供了检索现状，据其判断该主题的信息密度与复杂度，并以其为事实基线；检索现状不能成为只拆 1 条车道的理由。",
+  "使用与用户提问相同的语言。",
 ].join("");
+
+function normalizeKey(text: string): string {
+  return text.trim().toLowerCase().replace(/\s+/g, "");
+}
+
+/** Keep open-ended asks from collapsing into a single raw-query lane after recon. */
+export function enforcePlanBreadth(plan: ResearchPlan, userQuery: string): ResearchPlan {
+  const base = userQuery.trim() || plan.topic;
+  const openEnded = looksOpenEndedResearchQuery(base);
+  if (!openEnded) return plan;
+
+  const onlyRaw =
+    plan.subQuestions.length <= 1 &&
+    plan.subQuestions.every((q) => {
+      const a = normalizeKey(q);
+      const b = normalizeKey(base);
+      return !a || a === b || a.includes(b) || b.includes(a);
+    });
+
+  // Already a real multi-lane plan — only bump complexity if the model under-labeled it.
+  if (!onlyRaw && plan.subQuestions.length >= MIN_SUB_QUESTIONS) {
+    return plan.complexity === "simple" ? { ...plan, complexity: "moderate" } : plan;
+  }
+
+  const facets = defaultFacetLanes(plan.topic || base).slice(0, OPEN_ENDED_MIN_LANES);
+  return {
+    topic: plan.topic || base,
+    complexity: plan.complexity === "simple" ? "moderate" : plan.complexity,
+    subQuestions: facets,
+  };
+}
+
+function normalizeComplexity(raw: unknown): ResearchComplexity {
+  return raw === "simple" || raw === "complex" ? raw : "moderate";
+}
 
 function normalizeSubQuestions(raw: unknown, fallbackQuery: string): string[] {
   const list = Array.isArray(raw) ? raw : [];
@@ -49,6 +105,7 @@ function normalizeSubQuestions(raw: unknown, fallbackQuery: string): string[] {
 export function parseResearchPlanJson(text: string, fallbackQuery: string): ResearchPlan {
   const fallback: ResearchPlan = {
     topic: fallbackQuery.trim() || "研究主题",
+    complexity: "moderate",
     subQuestions: [fallbackQuery.trim() || "研究该主题"],
   };
 
@@ -56,6 +113,7 @@ export function parseResearchPlanJson(text: string, fallbackQuery: string): Rese
     try {
       const parsed = JSON.parse(raw) as {
         topic?: unknown;
+        complexity?: unknown;
         sub_questions?: unknown;
         subQuestions?: unknown;
       };
@@ -67,13 +125,14 @@ export function parseResearchPlanJson(text: string, fallbackQuery: string): Rese
         parsed.sub_questions ?? parsed.subQuestions,
         fallbackQuery,
       );
-      return { topic, subQuestions };
+      return { topic, complexity: normalizeComplexity(parsed.complexity), subQuestions };
     } catch {
       return null;
     }
   };
 
-  const trimmed = text.trim();
+  // Models wrap payloads in <think> / fences / prose; normalize before the tier chain.
+  const trimmed = extractJsonText(text) || text.trim();
   if (!trimmed) return fallback;
 
   const direct = tryParse(trimmed);
@@ -132,6 +191,8 @@ export async function buildResearchPlan(deps: PlannerDeps): Promise<ResearchPlan
   const { tools: _tools, tool_choice: _toolChoice, stream: _stream, ...rest } = deps.body;
   const messages = [
     { role: "system", content: PLANNER_SYSTEM },
+    ...(deps.todayLine ? [{ role: "system", content: deps.todayLine }] : []),
+    ...(deps.reconBrief ? [{ role: "system", content: deps.reconBrief }] : []),
     { role: "user", content: userQuery },
   ];
 
@@ -151,9 +212,9 @@ export async function buildResearchPlan(deps: PlannerDeps): Promise<ResearchPlan
     }
     const payload = (await response.json()) as unknown;
     const text = extractCompletionText(payload);
-    return parseResearchPlanJson(text, userQuery);
+    return enforcePlanBreadth(parseResearchPlanJson(text, userQuery), userQuery);
   } catch {
-    return parseResearchPlanJson("", userQuery);
+    return enforcePlanBreadth(parseResearchPlanJson("", userQuery), userQuery);
   } finally {
     clearTimeout(timeoutId);
     deps.signal?.removeEventListener("abort", onParentAbort);

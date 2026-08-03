@@ -1,5 +1,21 @@
 import { describe, expect, it } from "vitest";
-import { formatClarifyAnswer } from "./DeepResearchClarifyCard";
+import { formatClarifyAnswer, nextClarifySelection } from "./DeepResearchClarifyCard";
+
+describe("nextClarifySelection", () => {
+  it("toggles multi-select without clearing others", () => {
+    expect(nextClarifySelection(["A"], "B", true)).toEqual(["A", "B"]);
+    expect(nextClarifySelection(["A", "B"], "A", true)).toEqual(["B"]);
+  });
+
+  it("single-select replaces previous choice", () => {
+    expect(nextClarifySelection(["Markdown（.md）"], "可视化网页（.html）", false)).toEqual([
+      "可视化网页（.html）",
+    ]);
+    expect(nextClarifySelection(["可视化网页（.html）"], "可视化网页（.html）", false)).toEqual(
+      [],
+    );
+  });
+});
 
 describe("formatClarifyAnswer", () => {
   it("joins multiple selected labels with顿号", () => {

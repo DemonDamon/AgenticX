@@ -4,6 +4,8 @@ import * as React from "react";
 import { useTranslations } from "next-intl";
 import {
   DeepResearchFilesPanel,
+  type DeepResearchPanelLane,
+  DeepResearchRecoverBanner,
   AttachmentContentPanel,
   DOCUMENT_ACCEPT,
   InputArea,
@@ -17,6 +19,8 @@ import {
   extractClipboardImageFiles,
   withClipboardImageNames,
   modelSupportsVision,
+  consumeDeepResearchReconnectStream,
+  type ActiveDeepResearchRun,
 } from "@agenticx/feature-chat";
 import { type ChatClient } from "@agenticx/sdk-ts";
 import type { ChatMessageAttachment } from "@agenticx/core-api";
@@ -146,6 +150,9 @@ export function MachiChatView({
   const [webSearchMode, setWebSearchMode] = React.useState<WebSearchMode>("auto");
   const [filesPanelSessionId, setFilesPanelSessionId] = React.useState<string | null>(null);
   const [filesPanelFocusId, setFilesPanelFocusId] = React.useState<string | null>(null);
+  const [filesPanelLane, setFilesPanelLane] = React.useState<DeepResearchPanelLane | null>(
+    null,
+  );
   const [attachmentPreview, setAttachmentPreview] = React.useState<ChatMessageAttachment | null>(null);
   const [shareDialogOpen, setShareDialogOpen] = React.useState(false);
   const [shareInitialSelectedIds, setShareInitialSelectedIds] = React.useState<string[]>([]);
@@ -157,13 +164,24 @@ export function MachiChatView({
     (sessionId: string, focusArtifactId?: string | null) => {
       setAttachmentPreview(null);
       setFilesPanelSessionId(sessionId);
+      setFilesPanelLane(null);
       setFilesPanelFocusId(focusArtifactId ?? null);
+    },
+    [],
+  );
+  const requestDeepResearchLaneSources = React.useCallback(
+    (sessionId: string, lane: DeepResearchPanelLane) => {
+      setAttachmentPreview(null);
+      setFilesPanelSessionId(sessionId);
+      setFilesPanelFocusId(null);
+      setFilesPanelLane(lane);
     },
     [],
   );
   const requestAttachmentPreview = React.useCallback((attachment: ChatMessageAttachment) => {
     setFilesPanelSessionId(null);
     setFilesPanelFocusId(null);
+    setFilesPanelLane(null);
     setAttachmentPreview(attachment);
   }, []);
 
@@ -171,6 +189,102 @@ export function MachiChatView({
     setFilesPanelSessionId(null);
     setFilesPanelFocusId(null);
   }, [activeSessionId]);
+
+  const handleDeepResearchRecover = React.useCallback((run: ActiveDeepResearchRun) => {
+    const sessionId = run.sessionId;
+    const state = useChatStore.getState();
+    const existing = [...state.messages]
+      .reverse()
+      .find(
+        (m) =>
+          m.session_id === sessionId &&
+          m.role === "assistant" &&
+          m.deep_research?.runId === run.runId,
+      );
+    const targetId = existing?.id;
+    if (!targetId) {
+      // No matching bubble yet — stream still reconnects into a local placeholder via content only.
+      console.info("[deep-research] reconnect: no assistant bubble for", run.runId);
+    } else {
+      useChatStore.setState((prev) => ({
+        messages: prev.messages.map((m) =>
+          m.id === targetId
+            ? {
+                ...m,
+                content: "",
+                deep_research: {
+                  runId: run.runId,
+                  status: run.status === "awaiting_clarify" ? "awaiting_clarify" : "running",
+                  events: [],
+                  artifactIds: [],
+                  clarifyAnswers: m.deep_research?.clarifyAnswers,
+                },
+              }
+            : m,
+        ),
+      }));
+    }
+
+    void consumeDeepResearchReconnectStream(run.runId, {
+      onEvent: (event) => {
+        if (!targetId) return;
+        useChatStore.setState((prev) => ({
+          messages: prev.messages.map((m) => {
+            if (m.id !== targetId) return m;
+            const prevDr = m.deep_research;
+            let status: NonNullable<typeof prevDr>["status"] = prevDr?.status ?? "running";
+            if (event.type === "clarify") status = "awaiting_clarify";
+            else if (event.type === "phase" && event.phase === "done") status = "completed";
+            else if (status === "awaiting_clarify") status = "running";
+            const events = [...(prevDr?.events ?? []), event].slice(-400);
+            const artifactIds = [...(prevDr?.artifactIds ?? [])];
+            if (event.type === "artifact" && !artifactIds.includes(event.id)) {
+              artifactIds.push(event.id);
+            }
+            return {
+              ...m,
+              deep_research: {
+                runId: run.runId,
+                status,
+                events,
+                artifactIds,
+                clarifyAnswers: prevDr?.clarifyAnswers,
+              },
+            };
+          }),
+        }));
+      },
+      onDelta: (text) => {
+        if (!targetId) return;
+        useChatStore.setState((prev) => ({
+          messages: prev.messages.map((m) =>
+            m.id === targetId ? { ...m, content: `${m.content ?? ""}${text}` } : m,
+          ),
+        }));
+      },
+      onDone: () => {
+        if (!targetId) return;
+        useChatStore.setState((prev) => ({
+          messages: prev.messages.map((m) =>
+            m.id === targetId && m.deep_research
+              ? {
+                  ...m,
+                  deep_research: {
+                    ...m.deep_research,
+                    status:
+                      m.deep_research.status === "awaiting_clarify"
+                        ? "awaiting_clarify"
+                        : "completed",
+                  },
+                }
+              : m,
+          ),
+        }));
+      },
+    }).catch((error) => {
+      console.warn("[deep-research] reconnect failed:", error);
+    });
+  }, []);
 
   const filesPanelSources = React.useMemo(() => {
     if (!filesPanelSessionId) return [];
@@ -889,37 +1003,46 @@ export function MachiChatView({
                   {t("loadingMessages")}
                 </div>
               )}
-              <MessageList
-                messages={visibleMessages}
-                className="h-full"
-                styleVariant="im"
-                assistantFrameless
-                scrollToBottomLabel={t("scrollToBottom")}
-                responseVersionMetaByUserMessageId={responseVersionMetaByUserMessageId}
-                retryVersionMetaByUserMessageId={retryVersionMetaByUserMessageId}
-                onShowPreviousResponseVersion={showPreviousResponseVersion}
-                onShowNextResponseVersion={showNextResponseVersion}
-                onShowPreviousRetryVersion={showPreviousRetryVersion}
-                onShowNextRetryVersion={showNextRetryVersion}
-                onRequestDeepResearchFiles={requestDeepResearchFiles}
-                onRequestAttachmentPreview={requestAttachmentPreview}
-                onCopy={(content) => {
-                  console.log("Copied:", content);
-                }}
-                onRetry={(messageId) => {
-                  void regenerateAssistantResponse(client, messageId);
-                }}
-                onUserEditResend={(messageId, content) => {
-                  if (!content.trim()) return;
-                  void editUserMessageAndResend(client, { messageId, content });
-                }}
-                onShare={(messageId) => {
-                  openShareDialog(messageId);
-                }}
-                onFeedback={(messageId, type) => {
-                  console.log(`Feedback ${type} for message ${messageId}`);
-                }}
-              />
+              <div className="flex h-full min-h-0 flex-col">
+                <div className="shrink-0 px-4 pt-2">
+                  <DeepResearchRecoverBanner
+                    sessionId={activeSessionId}
+                    onRecover={handleDeepResearchRecover}
+                  />
+                </div>
+                <MessageList
+                  messages={visibleMessages}
+                  className="min-h-0 flex-1"
+                  styleVariant="im"
+                  assistantFrameless
+                  scrollToBottomLabel={t("scrollToBottom")}
+                  responseVersionMetaByUserMessageId={responseVersionMetaByUserMessageId}
+                  retryVersionMetaByUserMessageId={retryVersionMetaByUserMessageId}
+                  onShowPreviousResponseVersion={showPreviousResponseVersion}
+                  onShowNextResponseVersion={showNextResponseVersion}
+                  onShowPreviousRetryVersion={showPreviousRetryVersion}
+                  onShowNextRetryVersion={showNextRetryVersion}
+                  onRequestDeepResearchFiles={requestDeepResearchFiles}
+                  onRequestDeepResearchLaneSources={requestDeepResearchLaneSources}
+                  onRequestAttachmentPreview={requestAttachmentPreview}
+                  onCopy={(content) => {
+                    console.log("Copied:", content);
+                  }}
+                  onRetry={(messageId) => {
+                    void regenerateAssistantResponse(client, messageId);
+                  }}
+                  onUserEditResend={(messageId, content) => {
+                    if (!content.trim()) return;
+                    void editUserMessageAndResend(client, { messageId, content });
+                  }}
+                  onShare={(messageId) => {
+                    openShareDialog(messageId);
+                  }}
+                  onFeedback={(messageId, type) => {
+                    console.log(`Feedback ${type} for message ${messageId}`);
+                  }}
+                />
+              </div>
             </div>
           )}
         </div>
@@ -936,10 +1059,12 @@ export function MachiChatView({
           if (!open) {
             setFilesPanelSessionId(null);
             setFilesPanelFocusId(null);
+            setFilesPanelLane(null);
           }
         }}
         sessionId={filesPanelSessionId}
         focusArtifactId={filesPanelFocusId}
+        focusLane={filesPanelLane}
         sources={filesPanelSources}
       />
       <AttachmentContentPanel

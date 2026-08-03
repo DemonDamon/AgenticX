@@ -124,6 +124,36 @@ describe("history-outbox", () => {
     expect(append).toHaveBeenCalled();
   });
 
+  it("stripToAppendPayload keeps deep_research workbench events", () => {
+    const payload = stripToAppendPayload({
+      id: ulid(),
+      session_id: "01SESSIONAAAAAAAAAAAAAAAAA",
+      tenant_id: "01TENANTAAAAAAAAAAAAAAAAAA",
+      user_id: "01USERAAAAAAAAAAAAAAAAAAAA",
+      role: "assistant",
+      content: "调研完成摘要",
+      created_at: "2026-08-01T00:00:00.000Z",
+      deep_research: {
+        runId: "run-abc",
+        status: "completed",
+        events: [
+          { type: "phase", phase: "lanes", message: "开题冷启动检索…" },
+          { type: "phase", phase: "done", message: "深度研究完成" },
+        ],
+        artifactIds: ["art-1"],
+      },
+    });
+    expect(payload.deep_research).toEqual({
+      runId: "run-abc",
+      status: "completed",
+      events: [
+        { type: "phase", phase: "lanes", message: "开题冷启动检索…" },
+        { type: "phase", phase: "done", message: "深度研究完成" },
+      ],
+      artifactIds: ["art-1"],
+    });
+  });
+
   it("stripToAppendPayload keeps truncated parsed_text and drops image data_url", () => {
     const longText = "文档正文".repeat(40_000); // > 120k chars
     const payload = stripToAppendPayload({

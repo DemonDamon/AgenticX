@@ -41,6 +41,8 @@ export type ArtifactWriteInput = {
 export type ArtifactStore = {
   write(input: ArtifactWriteInput): Promise<ArtifactRecord>;
   listBySession(tenantId: string, userId: string, sessionId: string): Promise<ArtifactRecord[]>;
+  /** Artifacts for a single deep-research run (tenant + user scoped). */
+  listByRun(tenantId: string, userId: string, runId: string): Promise<ArtifactRecord[]>;
   get(tenantId: string, userId: string, id: string): Promise<ArtifactRecord | null>;
 };
 
@@ -94,6 +96,14 @@ function createMemoryStore(): ArtifactStore {
         .filter(
           (row) =>
             row.tenantId === tenantId && row.userId === userId && row.sessionId === sessionId,
+        )
+        .sort((a, b) => a.path.localeCompare(b.path));
+    },
+    async listByRun(tenantId, userId, runId) {
+      return [...bucket.values()]
+        .filter(
+          (row) =>
+            row.tenantId === tenantId && row.userId === userId && row.runId === runId,
         )
         .sort((a, b) => a.path.localeCompare(b.path));
     },
@@ -246,6 +256,36 @@ function createSqlStore(): ArtifactStore {
             eq(pgTable.tenantId, tenantId),
             eq(pgTable.userId, userId),
             eq(pgTable.sessionId, sessionId),
+          ),
+        );
+      return rows.map(mapRow).sort((a, b) => a.path.localeCompare(b.path));
+    },
+
+    async listByRun(tenantId, userId, runId) {
+      const config = resolveDatabaseConfig();
+      if (config.dialect === "mysql") {
+        const { raw: db } = await createMysqlDb(config);
+        const rows = await db
+          .select()
+          .from(mysqlTable)
+          .where(
+            and(
+              eq(mysqlTable.tenantId, tenantId),
+              eq(mysqlTable.userId, userId),
+              eq(mysqlTable.runId, runId),
+            ),
+          );
+        return rows.map(mapRow).sort((a, b) => a.path.localeCompare(b.path));
+      }
+      const db = getIamDb();
+      const rows = await db
+        .select()
+        .from(pgTable)
+        .where(
+          and(
+            eq(pgTable.tenantId, tenantId),
+            eq(pgTable.userId, userId),
+            eq(pgTable.runId, runId),
           ),
         );
       return rows.map(mapRow).sort((a, b) => a.path.localeCompare(b.path));

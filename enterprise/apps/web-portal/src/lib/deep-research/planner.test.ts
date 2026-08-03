@@ -1,5 +1,11 @@
 import { describe, expect, it, vi } from "vitest";
-import { buildResearchPlan, parseResearchPlanJson, MAX_SUB_QUESTIONS } from "./planner";
+import {
+  buildResearchPlan,
+  enforcePlanBreadth,
+  parseResearchPlanJson,
+  MAX_SUB_QUESTIONS,
+  OPEN_ENDED_MIN_LANES,
+} from "./planner";
 
 describe("parseResearchPlanJson", () => {
   it("parses standard JSON", () => {
@@ -12,6 +18,16 @@ describe("parseResearchPlanJson", () => {
     );
     expect(plan.topic).toBe("开源大模型");
     expect(plan.subQuestions).toEqual(["能力对比", "Agent 工具", "部署成本"]);
+  });
+
+  it("keeps every lane when the model prefixes a think block", () => {
+    const raw = `<think>该拆几条？也许 {3} 条吧</think>${JSON.stringify({
+      topic: "T",
+      sub_questions: ["A", "B", "C", "D"],
+    })}`;
+    const plan = parseResearchPlanJson(raw, "fallback");
+    expect(plan.topic).toBe("T");
+    expect(plan.subQuestions).toEqual(["A", "B", "C", "D"]);
   });
 
   it("extracts JSON from markdown fences", () => {
@@ -29,14 +45,46 @@ describe("parseResearchPlanJson", () => {
     expect(plan.subQuestions).toEqual(["原始问题"]);
   });
 
-  it("truncates to MAX_SUB_QUESTIONS", () => {
+  it("keeps up to MAX_SUB_QUESTIONS lanes for complex topics", () => {
     const many = Array.from({ length: 8 }, (_, i) => `q${i + 1}`);
+    const plan = parseResearchPlanJson(
+      JSON.stringify({ topic: "T", complexity: "complex", sub_questions: many }),
+      "fallback",
+    );
+    expect(plan.subQuestions).toHaveLength(8);
+    expect(plan.complexity).toBe("complex");
+  });
+
+  it("keeps a short plan short instead of padding to a fixed count", () => {
+    const plan = parseResearchPlanJson(
+      JSON.stringify({ topic: "T", complexity: "simple", sub_questions: ["A", "B"] }),
+      "fallback",
+    );
+    expect(plan.subQuestions).toEqual(["A", "B"]);
+    expect(plan.complexity).toBe("simple");
+  });
+
+  it("truncates beyond MAX_SUB_QUESTIONS", () => {
+    const many = Array.from({ length: 10 }, (_, i) => `q${i + 1}`);
     const plan = parseResearchPlanJson(
       JSON.stringify({ topic: "T", sub_questions: many }),
       "fallback",
     );
     expect(plan.subQuestions).toHaveLength(MAX_SUB_QUESTIONS);
-    expect(plan.subQuestions).toEqual(["q1", "q2", "q3", "q4", "q5"]);
+    expect(plan.subQuestions.at(-1)).toBe(`q${MAX_SUB_QUESTIONS}`);
+  });
+
+  it("defaults complexity to moderate when absent or invalid", () => {
+    const missing = parseResearchPlanJson(
+      JSON.stringify({ topic: "T", sub_questions: ["A"] }),
+      "fallback",
+    );
+    expect(missing.complexity).toBe("moderate");
+    const invalid = parseResearchPlanJson(
+      JSON.stringify({ topic: "T", complexity: "epic", sub_questions: ["A"] }),
+      "fallback",
+    );
+    expect(invalid.complexity).toBe("moderate");
   });
 
   it("deduplicates sub-questions", () => {
@@ -48,6 +96,31 @@ describe("parseResearchPlanJson", () => {
       "fallback",
     );
     expect(plan.subQuestions).toEqual(["同一问题", "另一问题"]);
+  });
+});
+
+describe("enforcePlanBreadth", () => {
+  it("expands a collapsed open-ended plan into facet lanes", () => {
+    const plan = enforcePlanBreadth(
+      {
+        topic: "deepseek v4 核心技术点",
+        complexity: "simple",
+        subQuestions: ["deepseek v4 核心技术点"],
+      },
+      "deepseek v4 核心技术点",
+    );
+    expect(plan.subQuestions.length).toBeGreaterThanOrEqual(OPEN_ENDED_MIN_LANES);
+    expect(plan.complexity).toBe("moderate");
+    expect(plan.subQuestions.every((q) => q !== "deepseek v4 核心技术点")).toBe(true);
+  });
+
+  it("leaves a already-broad plan alone", () => {
+    const subQuestions = ["架构", "训练", "推理", "评测"];
+    const plan = enforcePlanBreadth(
+      { topic: "T", complexity: "moderate", subQuestions },
+      "deepseek v4 核心技术点",
+    );
+    expect(plan.subQuestions).toEqual(subQuestions);
   });
 });
 
@@ -82,5 +155,54 @@ describe("buildResearchPlan", () => {
     const init = fetchImpl.mock.calls[0]?.[1] as RequestInit;
     const body = JSON.parse(String(init.body)) as { stream: boolean };
     expect(body.stream).toBe(false);
+  });
+
+  it("injects today's date and recon brief as system grounding", async () => {
+    const fetchImpl = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        choices: [{ message: { content: '{"topic":"T","sub_questions":["A"]}' } }],
+      }),
+    });
+
+    await buildResearchPlan({
+      url: "http://gw/v1/chat/completions",
+      headers: {},
+      body: { model: "m" },
+      userQuery: "用户问题",
+      todayLine: "今天是 2026-08-02（UTC+8）。",
+      reconBrief: "【检索到的现状】- 已发布",
+      fetchImpl: fetchImpl as unknown as typeof fetch,
+    });
+
+    const init = fetchImpl.mock.calls[0]?.[1] as RequestInit;
+    const body = JSON.parse(String(init.body)) as {
+      messages: Array<{ role: string; content: string }>;
+    };
+    expect(body.messages).toHaveLength(4);
+    expect(body.messages[1]?.content).toContain("2026-08-02");
+    expect(body.messages[2]?.content).toContain("已发布");
+    expect(body.messages[3]?.role).toBe("user");
+  });
+
+  it("omits grounding messages when recon produced nothing", async () => {
+    const fetchImpl = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        choices: [{ message: { content: '{"topic":"T","sub_questions":["A"]}' } }],
+      }),
+    });
+
+    await buildResearchPlan({
+      url: "http://gw/v1/chat/completions",
+      headers: {},
+      body: { model: "m" },
+      userQuery: "用户问题",
+      fetchImpl: fetchImpl as unknown as typeof fetch,
+    });
+
+    const init = fetchImpl.mock.calls[0]?.[1] as RequestInit;
+    const body = JSON.parse(String(init.body)) as { messages: unknown[] };
+    expect(body.messages).toHaveLength(2);
   });
 });

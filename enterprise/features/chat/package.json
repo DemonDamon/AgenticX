@@ -16,6 +16,7 @@
     "@agenticx/sdk-ts": "workspace:^",
     "@agenticx/ui": "workspace:^",
     "@tanstack/react-virtual": "^3.13.24",
+    "lucide-react": "^0.542.0",
     "pdfjs-dist": "4.10.38",
     "prismjs": "^1.29.0",
     "react": "^19.0.0",
