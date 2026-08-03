@@ -16,6 +16,10 @@ describe("inferDeliveryFormat", () => {
     expect(
       inferDeliveryFormat({ q_delivery_format: "可视化网页（.html）" }),
     ).toBe("html");
+    expect(inferDeliveryFormat({ q_delivery_format: "可视化网页 (.html)" })).toBe(
+      "html",
+    );
+    expect(inferDeliveryFormat({ q_delivery_format: "html" })).toBe("html");
     expect(inferDeliveryFormat({ q_delivery_format: "PDF（打印导出）" })).toBe("pdf");
     expect(inferDeliveryFormat({ q_delivery_format: "Word（.doc）" })).toBe("docx");
     expect(inferDeliveryFormat({ q_delivery_format: "Markdown（.md）" })).toBe("md");

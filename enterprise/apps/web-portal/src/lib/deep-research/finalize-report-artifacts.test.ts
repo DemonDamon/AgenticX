@@ -52,4 +52,30 @@ describe("finalizeReportArtifacts", () => {
     expect(html?.content).toContain("ref-1");
     expect(events.filter((e) => e.type === "artifact")).toHaveLength(1);
   });
+
+  it("still writes report.html when artifact quota is already full and format is html", async () => {
+    const store = createMemoryArtifactStore();
+    const written = await finalizeReportArtifacts({
+      artifactStore: store,
+      tenantId: "t1",
+      userId: "u1",
+      sessionId: "s1",
+      runId: "run-full",
+      topic: "主题",
+      outline: {
+        title: "报告标题",
+        sections: [
+          { id: "s1", title: "核心结论", brief: "b", citationIndexes: [], format: "prose" },
+        ],
+      },
+      markdown: "# 报告\n\n结论\n",
+      citations: [],
+      artifactsWritten: 40,
+      deliveryPrefs: { shapes: ["structured"], format: "html" },
+      enqueueEvent: () => {},
+    });
+    expect(written).toBe(41);
+    const list = await store.listByRun("t1", "u1", "run-full");
+    expect(list.some((a) => a.path.endsWith("report.html"))).toBe(true);
+  });
 });

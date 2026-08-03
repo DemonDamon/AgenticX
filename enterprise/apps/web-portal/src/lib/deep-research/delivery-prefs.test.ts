@@ -8,6 +8,7 @@ import {
   parseDeliveryPrefs,
   primaryArtifactTitle,
   primaryReportPathSuffix,
+  sanitizeResearchTopic,
 } from "./delivery-prefs";
 
 describe("deliveryClarifyQuestions", () => {
@@ -55,6 +56,18 @@ describe("parseDeliveryPrefs", () => {
     // Longest-label-first may match either; first in FORMAT order after match list uses formatIds[0]
     expect(["docx", "md"]).toContain(prefs.format);
   });
+
+  it("accepts loose html keywords when labels drift", () => {
+    expect(
+      parseDeliveryPrefs(
+        { [DELIVERY_FORMAT_QUESTION_ID]: "可视化网页 (.html)" },
+        questions,
+      ).format,
+    ).toBe("html");
+    expect(
+      parseDeliveryPrefs({ [DELIVERY_FORMAT_QUESTION_ID]: "html" }, questions).format,
+    ).toBe("html");
+  });
 });
 
 describe("deliveryPrefsPromptBlock", () => {
@@ -67,6 +80,29 @@ describe("deliveryPrefsPromptBlock", () => {
     expect(block).toContain("对比矩阵/时间线");
     expect(block).toContain("决策建议");
     expect(block).toContain("可视化网页（html）");
+  });
+});
+
+describe("sanitizeResearchTopic", () => {
+  it("strips clarify and delivery-preference blocks from titles", () => {
+    const polluted = [
+      "minimax H3 核心技术点",
+      "",
+      "【用户澄清】",
+      "- 场景：全方向",
+      "",
+      "【交付偏好】",
+      "- 主格式：可视化网页（html）",
+    ].join("\n");
+    expect(sanitizeResearchTopic(polluted)).toBe("minimax H3 核心技术点");
+  });
+
+  it("strips inline meta markers", () => {
+    expect(sanitizeResearchTopic("DeepSeek V4 【用户澄清】 全方向")).toBe("DeepSeek V4");
+  });
+
+  it("falls back when only meta remains", () => {
+    expect(sanitizeResearchTopic("【交付偏好】\n- 主格式：md")).toBe("调研报告");
   });
 });
 

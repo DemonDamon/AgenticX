@@ -34,13 +34,19 @@ describe("displayNameForArtifactFile", () => {
     ).toBe("DeepSeek V4 技术解读.md");
   });
 
-  it("keeps report filenames as-is", () => {
+  it("uses human titles for primary report deliverables", () => {
     expect(
       displayNameForArtifactFile("final-report.md", {
         path: "research/r1/final-report.md",
-        title: "终稿",
+        title: "MiniMax H3 核心技术点.md",
       }),
-    ).toBe("final-report.md");
+    ).toBe("MiniMax H3 核心技术点.md");
+    expect(
+      displayNameForArtifactFile("report.html", {
+        path: "research/r1/report.html",
+        title: "MiniMax H3 核心技术点.html",
+      }),
+    ).toBe("MiniMax H3 核心技术点.html");
   });
 });
 
@@ -78,8 +84,9 @@ describe("buildArtifactTree", () => {
       },
     ]);
 
-    expect(tree.map((n) => n.name)).toEqual(["lanes", "final-report.md"]);
-    const lanes = tree[0]!;
+    // Primary report first (human title), then lanes folder.
+    expect(tree.map((n) => n.name)).toEqual(["终稿.md", "lanes"]);
+    const lanes = tree[1]!;
     expect(lanes.type).toBe("dir");
     if (lanes.type !== "dir") return;
     expect(lanes.byteSize).toBe(500);
@@ -87,6 +94,26 @@ describe("buildArtifactTree", () => {
     // q1/memo.md collapsed into a file row titled with the lane folder name
     expect(lanes.children.map((c) => c.type)).toEqual(["file", "file"]);
     expect(lanes.children.map((c) => c.name)).toEqual(["q1-pricing", "q2-benchmark"]);
+  });
+
+  it("lists report.html ahead of final-report.md", () => {
+    const tree = buildArtifactTree([
+      {
+        id: "md",
+        path: "research/r1/final-report.md",
+        title: "主题.md",
+        kind: "report",
+        byteSize: 1000,
+      },
+      {
+        id: "html",
+        path: "research/r1/report.html",
+        title: "主题.html",
+        kind: "report",
+        byteSize: 2000,
+      },
+    ]);
+    expect(tree.map((n) => n.name)).toEqual(["主题.html", "主题.md"]);
   });
 });
 

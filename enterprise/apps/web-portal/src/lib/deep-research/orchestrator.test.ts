@@ -599,6 +599,69 @@ describe("runDeepResearchTurn", () => {
       false,
     );
   });
+
+  it("honors clarify html format: report.html is written and summary links to it", async () => {
+    clearClarifyWaiters();
+    const store = createMemoryArtifactStore();
+    const fetchImpl = vi.fn(async (_url: string, init?: RequestInit) => {
+      const body = JSON.parse(String(init?.body ?? "{}")) as { stream?: boolean };
+      if (body.stream === false) {
+        return {
+          ok: true,
+          json: async () => ({
+            choices: [{ message: { content: "本次调研覆盖 H3 架构与多模态能力。" } }],
+          }),
+        } as Response;
+      }
+      return synthUpstream("# 报告\n\n结论 [1]\n");
+    });
+
+    const responsePromise = runDeepResearchTurn(
+      { model: "m", messages: [{ role: "user", content: "minimax h3 核心技术点" }] },
+      {
+        ...baseDeps({
+          awaitClarify: true,
+          clarifyTimeoutMs: 5_000,
+          artifactStore: store,
+          runId: "run-html-prefs",
+          fetchImpl: fetchImpl as unknown as typeof fetch,
+          proposeClarify: async () => ({ needed: false as const }),
+          buildPlan: async () => ({
+            topic: "minimax H3 核心技术点",
+            complexity: "simple" as const,
+            subQuestions: ["架构"],
+          }),
+          executeSearch: async () => [
+            { title: "t", url: "https://ex.com/h3", snippet: "s" },
+          ],
+        }),
+      },
+    );
+
+    await new Promise((r) => setTimeout(r, 30));
+    expect(
+      resolveClarifyResume("run-html-prefs", {
+        answers: {
+          q_delivery_shape: "结构化报告——完整论证链",
+          q_delivery_format: "可视化网页（.html）",
+        },
+        skip: false,
+      }),
+    ).toBe(true);
+
+    const response = await responsePromise;
+    const { text, events } = await readSsePayload(response);
+    const htmlEvent = events.find(
+      (e) => e.type === "artifact" && String(e.path).endsWith("report.html"),
+    );
+    expect(htmlEvent).toBeTruthy();
+    // Summary must surface the HTML primary even if the model forgot the link.
+    expect(text).toContain(`artifact:${String(htmlEvent!.id)}`);
+
+    const list = await store.listByRun("t1", "u1", "run-html-prefs");
+    expect(list.some((a) => a.path.endsWith("report.html"))).toBe(true);
+    expect(list.some((a) => a.path.endsWith("final-report.md"))).toBe(true);
+  });
 });
 
 describe("recon cold-start", () => {
