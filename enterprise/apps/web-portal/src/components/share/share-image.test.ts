@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { ChatShareSnapshot } from "../../lib/chat-share-types";
-import { createSharePng, prepareShareImageMessages, shareOrDownloadImage } from "./share-image";
+import { createSharePng, downloadShareImage, prepareShareImageMessages } from "./share-image";
 
 const snapshot: ChatShareSnapshot = {
   token: "preview",
@@ -117,9 +117,13 @@ describe("share image", () => {
     vi.stubGlobal("window", { setTimeout });
     vi.stubGlobal("URL", { createObjectURL: () => "blob:test", revokeObjectURL: () => {} });
 
-    const first = shareOrDownloadImage(snapshot, "conversation.png");
-    const second = shareOrDownloadImage(snapshot, "conversation.png");
+    const nativeShare = vi.fn();
+    vi.stubGlobal("navigator", { share: nativeShare });
+
+    const first = downloadShareImage(snapshot, "conversation.png");
+    const second = downloadShareImage(snapshot, "conversation.png");
     await Promise.all([first, second]);
     expect(anchorClicks).toEqual(["conversation.png"]);
+    expect(nativeShare).not.toHaveBeenCalled();
   });
 });

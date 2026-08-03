@@ -48,7 +48,7 @@ import {
 } from "@agenticx/ui";
 import { NearEmptyWordmark } from "./NearEmptyWordmark";
 import { ShareDialog } from "./share/ShareDialog";
-import { shareOrDownloadImage } from "./share/share-image";
+import { downloadShareImage } from "./share/share-image";
 import {
   CapabilityHoverTip,
   ComposerPlusMenu,
@@ -456,7 +456,7 @@ export function MachiChatView({
       const safeTitle = (sessionTitle || t("newConversation"))
         .replace(/[\\/:*?"<>|]+/g, "_")
         .slice(0, 80);
-      await shareOrDownloadImage(snapshot, `${safeTitle}.png`);
+      await downloadShareImage(snapshot, `${safeTitle}.png`);
     },
     [activeSessionId, sessionTitle, t],
   );

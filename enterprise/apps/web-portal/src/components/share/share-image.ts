@@ -11,7 +11,7 @@ const IMAGE_WIDTH = 1200;
 const IMAGE_PADDING = 64;
 const MAX_IMAGE_HEIGHT = 30_000;
 const MAX_MESSAGE_CHARS = 12_000;
-let imageShareInFlight: Promise<"shared" | "downloaded"> | null = null;
+let imageShareInFlight: Promise<"downloaded"> | null = null;
 
 export function prepareShareImageMessages(snapshot: ChatShareSnapshot): ChatShareMessage[] {
   return snapshot.messages
@@ -143,13 +143,19 @@ export async function createSharePng(snapshot: ChatShareSnapshot): Promise<Blob>
   });
 }
 
-export async function shareOrDownloadImage(
+/**
+ * Download the same rendered share image from both the conversation page and
+ * the public share page. Keep this deliberately separate from the Web Share
+ * API: sharing a File through the system sheet produced duplicate/blank
+ * images in the portal and does not match the share page experience.
+ */
+export async function downloadShareImage(
   snapshot: ChatShareSnapshot,
   filename = "agenticx-conversation.png",
-): Promise<"shared" | "downloaded"> {
+): Promise<"downloaded"> {
   if (imageShareInFlight) return imageShareInFlight;
 
-  const operation = (async (): Promise<"shared" | "downloaded"> => {
+  const operation = (async (): Promise<"downloaded"> => {
     const blob = await createSharePng(snapshot);
     const url = URL.createObjectURL(blob);
     const anchor = document.createElement("a");

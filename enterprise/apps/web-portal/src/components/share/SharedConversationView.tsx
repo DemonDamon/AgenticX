@@ -14,7 +14,7 @@ import { useTranslations } from "next-intl";
 import { ENTERPRISE_PRODUCT_NAME } from "../EnterpriseBrandMark";
 import type { ChatShareMessage, ChatShareSnapshot } from "../../lib/chat-share-types";
 import { copyText } from "../../lib/chat-share-client";
-import { shareOrDownloadImage } from "./share-image";
+import { downloadShareImage } from "./share-image";
 
 function SharedAssistantContent({ message }: { message: ChatShareMessage }) {
   return <SharedAssistantMarkdown text={message.content} sources={message.web_search_sources} />;
@@ -82,8 +82,8 @@ export function SharedConversationView({ snapshot }: { snapshot: ChatShareSnapsh
     setBusy(true);
     setStatus(null);
     try {
-      const result = await shareOrDownloadImage(snapshot);
-      setStatus(result === "shared" ? t("shareImageShared") : t("shareImageDownloaded"));
+      await downloadShareImage(snapshot);
+      setStatus(t("shareImageDownloaded"));
     } catch (error) {
       if (error instanceof Error && error.name === "AbortError") return;
       setStatus(error instanceof Error ? error.message : t("shareFailed"));
