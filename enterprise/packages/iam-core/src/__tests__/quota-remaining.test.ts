@@ -68,6 +68,42 @@ describe("quota-remaining", () => {
     expect(usage.unlimited).toBe(false);
   });
 
+  it("prefers the shared monthly user ledger while retaining the legacy file fallback", async () => {
+    const month = new Date().toISOString().slice(0, 7);
+    fs.writeFileSync(
+      path.join(tmpDir, "quota-pool-usage.json"),
+      JSON.stringify([
+        {
+          tenant_id: "tenant-test",
+          scope_type: "tok_month",
+          scope_id: "user::u1",
+          period: month,
+          used_total: 900,
+        },
+      ]),
+    );
+    fs.writeFileSync(
+      path.join(tmpDir, "quota-usage.json"),
+      JSON.stringify([{ user_id: "u1", month, used_total: 700 }]),
+    );
+    const cfg: QuotaConfigSnapshot = {
+      defaults: { role: { staff: { monthlyTokens: 1000, action: "block" } }, model: {} },
+      users: {},
+      departments: {},
+    };
+
+    const usage = await getQuotaUsageForScope({
+      tenantId: "tenant-test",
+      scope: "user",
+      scopeId: "u1",
+      role: "staff",
+      configOverride: cfg,
+    });
+
+    expect(usage.used).toBe(900);
+    expect(usage.remaining).toBe(100);
+  });
+
   it("computes dept shared pool remaining (AC-1)", async () => {
     const period = new Date();
     const month = `${period.getUTCFullYear()}-${String(period.getUTCMonth() + 1).padStart(2, "0")}`;

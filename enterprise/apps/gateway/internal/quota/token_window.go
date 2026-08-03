@@ -9,8 +9,9 @@ import (
 )
 
 const (
-	tokenScopeDay  = "tok_day"
-	tokenScopeWeek = "tok_week"
+	tokenScopeDay   = "tok_day"
+	tokenScopeWeek  = "tok_week"
+	tokenScopeMonth = "tok_month"
 )
 
 func tokenWindowFeatureEnabled() bool {
@@ -19,8 +20,11 @@ func tokenWindowFeatureEnabled() bool {
 
 func tokenWindowPoolKey(kind string, ctx RequestContext, period string) PoolKey {
 	scopeType := tokenScopeDay
-	if strings.EqualFold(kind, "week") {
+	switch strings.ToLower(strings.TrimSpace(kind)) {
+	case "week":
 		scopeType = tokenScopeWeek
+	case "month":
+		scopeType = tokenScopeMonth
 	}
 	tenantID := strings.TrimSpace(ctx.TenantID)
 	if tenantID == "" {

@@ -12,6 +12,14 @@ type HttpChatClientOptions = {
   endpoint?: string;
 };
 
+/** Browser event emitted after a completed gateway stream settles usage. */
+export const QUOTA_USAGE_CHANGED_EVENT = "agenticx:quota-usage-changed";
+
+function notifyQuotaUsageChanged(): void {
+  if (typeof window === "undefined") return;
+  window.dispatchEvent(new Event(QUOTA_USAGE_CHANGED_EVENT));
+}
+
 function makeRequestId(): string {
   if (typeof crypto !== "undefined" && "randomUUID" in crypto) {
     return crypto.randomUUID();
@@ -187,6 +195,7 @@ export class HttpChatClient implements ChatClient {
           if (dataLines.length === 0) continue;
           const data = dataLines.join("\n");
           if (data === "[DONE]") {
+            notifyQuotaUsageChanged();
             yield { requestId, done: true };
             this.pending.delete(requestId);
             return;
@@ -305,6 +314,7 @@ export class HttpChatClient implements ChatClient {
           // after the last content chunk and before data: [DONE]. Returning here drops them.
         }
       }
+      notifyQuotaUsageChanged();
       yield { requestId, done: true };
       } finally {
         await releaseStreamReader(reader);
@@ -336,4 +346,3 @@ export class HttpChatClient implements ChatClient {
     this.controllers.get(requestId)?.abort();
   }
 }
-

@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 )
 
 func TestRollbackUsesSharedUsageFileAsSourceOfTruth(t *testing.T) {
@@ -69,6 +70,46 @@ func TestUnlimitedUsageIsPersistedAndReconciled(t *testing.T) {
 	}
 }
 
+func TestMonthlyUserUsageIsMirroredToSharedLedger(t *testing.T) {
+	t.Setenv("GATEWAY_QUOTA_POOL", "off")
+	t.Setenv("GATEWAY_QUOTA_POOL_BACKEND", "local")
+	t.Setenv("GATEWAY_TOKEN_WINDOW_QUOTA", "off")
+	dir := t.TempDir()
+	cfgPath := filepath.Join(dir, "quotas.json")
+	usagePath := filepath.Join(dir, "usage.json")
+	poolPath := filepath.Join(dir, "pool-usage.json")
+	t.Setenv("GATEWAY_QUOTA_POOL_USAGE_FILE", poolPath)
+	cfg := `{"defaults":{"role":{"staff":{"monthlyTokens":1000,"action":"block"}},"model":{}},"users":{},"departments":{}}`
+	if err := os.WriteFile(cfgPath, []byte(cfg), 0o600); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	tracker := NewTracker(cfgPath, usagePath, nil)
+	ctx := RequestContext{TenantID: "tenant-1", UserID: "u1", Role: "staff"}
+	month := time.Now().UTC().Format("2006-01")
+
+	if decision := tracker.CheckAndAddContext(ctx, 120, LedgerEventReserve); !decision.Allowed {
+		t.Fatalf("reserve denied: %+v", decision)
+	}
+	if rows := readPoolUsageRowsForTest(t, poolPath); len(rows) != 1 || rows[0].ScopeType != tokenScopeMonth || rows[0].ScopeID != "user::u1" || rows[0].Period != month || rows[0].UsedTotal != 120 {
+		t.Fatalf("monthly ledger after reserve = %+v", rows)
+	}
+
+	if ok := tracker.RollbackContext(ctx, 20); !ok {
+		t.Fatal("monthly rollback failed")
+	}
+	if rows := readPoolUsageRowsForTest(t, poolPath); len(rows) != 1 || rows[0].UsedTotal != 100 {
+		t.Fatalf("monthly ledger after rollback = %+v", rows)
+	}
+
+	if decision := tracker.CheckAndAddContext(ctx, 25, LedgerEventSettle); !decision.Allowed {
+		t.Fatalf("settlement denied: %+v", decision)
+	}
+	if rows := readPoolUsageRowsForTest(t, poolPath); len(rows) != 1 || rows[0].UsedTotal != 125 {
+		t.Fatalf("monthly ledger after settlement = %+v", rows)
+	}
+}
+
 func readUsageRowsForTest(t *testing.T, path string) []usageRow {
 	t.Helper()
 	raw, err := os.ReadFile(path)
@@ -78,6 +119,19 @@ func readUsageRowsForTest(t *testing.T, path string) []usageRow {
 	var rows []usageRow
 	if err := json.Unmarshal(raw, &rows); err != nil {
 		t.Fatalf("parse usage: %v", err)
+	}
+	return rows
+}
+
+func readPoolUsageRowsForTest(t *testing.T, path string) []poolUsageRow {
+	t.Helper()
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read pool usage: %v", err)
+	}
+	var rows []poolUsageRow
+	if err := json.Unmarshal(raw, &rows); err != nil {
+		t.Fatalf("parse pool usage: %v", err)
 	}
 	return rows
 }

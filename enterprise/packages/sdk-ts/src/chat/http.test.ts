@@ -83,6 +83,38 @@ describe("HttpChatClient stream cancel", () => {
     expect(sourcesChunk?.delta).toBeUndefined();
   });
 
+  it("notifies the portal quota card after a completed stream", async () => {
+    const payload = 'data: {"choices":[{"delta":{"content":"hi"}}]}\n\n' + "data: [DONE]\n\n";
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(() =>
+        Promise.resolve(
+          new Response(payload, {
+            status: 200,
+            headers: { "content-type": "text/event-stream" },
+          }),
+        ),
+      ),
+    );
+    const dispatchEvent = vi.fn();
+    vi.stubGlobal("window", { dispatchEvent });
+
+    const client = new HttpChatClient({ endpoint: "/api/chat/completions" });
+    const { requestId } = await client.sendMessage({
+      sessionId: "session-1",
+      model: "test-model",
+      messages: [{ id: "u1", role: "user", content: "hello", createdAt: "2026-01-01T00:00:00.000Z" }],
+    });
+
+    for await (const _chunk of client.stream(requestId)) {
+      // consume the stream
+    }
+
+    expect(dispatchEvent).toHaveBeenCalledTimes(1);
+    expect(dispatchEvent.mock.calls[0]?.[0]).toMatchObject({ type: "agenticx:quota-usage-changed" });
+    vi.unstubAllGlobals();
+  });
+
   it("parses agenticx_deep_research_event frames without treating them as delta", async () => {
     const payload =
       'data: {"choices":[{"delta":{"content":"hi"}}]}\n\n' +
