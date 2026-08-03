@@ -26,6 +26,12 @@ import { ArrowUpRight, Copy, KeyRound, Pencil, Plus, RefreshCw, Trash2, UsersRou
 import { adminFetch } from "../../../lib/admin-client-auth";
 import { CreateUserDialog } from "../../../components/CreateUserDialog";
 import { QuotaRing, formatTokenCount } from "../../../components/QuotaRing";
+import {
+  UserFormDialog,
+  type UserFormDeptOption,
+  type UserFormRoleOption,
+  type UserFormValues,
+} from "../../../components/UserFormDialog";
 
 type UserModelSummary = { model: string; tokens: number; currentlyAllowed: boolean };
 type UserQuotaOverview = {
@@ -58,6 +64,17 @@ type ModelAccess = {
   effectiveModelIds?: string[];
 };
 type ApiEnvelope<T> = { code: string; message: string; data?: T };
+type EditableUser = {
+  id: string;
+  email: string;
+  displayName: string;
+  status: "active" | "disabled" | "locked";
+  deptId: string | null;
+  phone: string | null;
+  employeeNo: string | null;
+  jobTitle: string | null;
+  roleCodes: string[];
+};
 function sameIds(left: readonly string[], right: readonly string[]): boolean {
   if (left.length !== right.length) return false;
   const rightSet = new Set(right);
@@ -100,6 +117,12 @@ export default function RolesPage() {
   const [resetPasswordPending, setResetPasswordPending] = useState(false);
   const [newPassword, setNewPassword] = useState<string | null>(null);
   const [createOpen, setCreateOpen] = useState(false);
+  const [userFormOpen, setUserFormOpen] = useState(false);
+  const [userFormLoading, setUserFormLoading] = useState(false);
+  const [userFormInitial, setUserFormInitial] = useState<UserFormValues | null>(null);
+  const [userFormDeptOptions, setUserFormDeptOptions] = useState<UserFormDeptOption[]>([]);
+  const [userFormRoleOptions, setUserFormRoleOptions] = useState<UserFormRoleOption[]>([]);
+  const [currentUserId, setCurrentUserId] = useState<string | null>(null);
   const openedFromQueryRef = useRef<string | null>(null);
 
   const load = useCallback(async () => {
@@ -177,10 +200,137 @@ export default function RolesPage() {
     }
   }, []);
 
+  const openUserManagement = async () => {
+    if (!selected || userFormLoading) return;
+    setUserFormLoading(true);
+    try {
+      const [userResponse, departmentResponse, roleResponse] = await Promise.all([
+        adminFetch(`/api/admin/users/${encodeURIComponent(selected.id)}`, { cache: "no-store" }),
+        adminFetch("/api/admin/departments?shape=flat", { cache: "no-store" }),
+        adminFetch("/api/admin/roles", { cache: "no-store" }),
+      ]);
+      const userJson = (await userResponse.json()) as ApiEnvelope<{ user: EditableUser }>;
+      const departmentJson = (await departmentResponse.json()) as ApiEnvelope<{
+        items: Array<{ id: string; name: string; path: string }>;
+      }>;
+      const roleJson = (await roleResponse.json()) as ApiEnvelope<{
+        items: UserFormRoleOption[];
+      }>;
+      if (!userResponse.ok || userJson.code !== "00000" || !userJson.data?.user) {
+        throw new Error(userJson.message || "加载用户信息失败");
+      }
+      if (!departmentResponse.ok || departmentJson.code !== "00000") {
+        throw new Error(departmentJson.message || "加载部门失败");
+      }
+      if (!roleResponse.ok || roleJson.code !== "00000") {
+        throw new Error(roleJson.message || "加载角色失败");
+      }
+      const user = userJson.data.user;
+      setUserFormInitial({
+        email: user.email,
+        displayName: user.displayName,
+        status: user.status,
+        deptId: user.deptId ?? "",
+        phone: user.phone ?? "",
+        employeeNo: user.employeeNo ?? "",
+        jobTitle: user.jobTitle ?? "",
+        roleCodes: user.roleCodes.length ? user.roleCodes : ["member"],
+        initialPassword: "",
+      });
+      setUserFormDeptOptions(
+        (departmentJson.data?.items ?? []).map((department) => ({
+          id: department.id,
+          label: `${department.name}（${department.path}）`,
+        })),
+      );
+      setUserFormRoleOptions(roleJson.data?.items ?? []);
+      setUserFormOpen(true);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "加载用户信息失败");
+    } finally {
+      setUserFormLoading(false);
+    }
+  };
+
+  const saveUserDetails = async (values: UserFormValues) => {
+    if (!selected) return;
+    const response = await adminFetch(`/api/admin/users/${encodeURIComponent(selected.id)}`, {
+      method: "PATCH",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        email: values.email.trim(),
+        displayName: values.displayName.trim(),
+        status: values.status,
+        deptId: values.deptId || null,
+        phone: values.phone.trim() || null,
+        employeeNo: values.employeeNo.trim() || null,
+        jobTitle: values.jobTitle.trim() || null,
+        roleCodes: values.roleCodes,
+      }),
+    });
+    const json = (await response.json()) as ApiEnvelope<{ user: EditableUser }>;
+    if (!response.ok || json.code !== "00000" || !json.data?.user) {
+      toast.error(json.message || "保存用户信息失败");
+      return;
+    }
+    const updated = json.data.user;
+    setEmail(updated.email);
+    setSelected((current) =>
+      current && current.id === updated.id
+        ? {
+            ...current,
+            email: updated.email,
+            displayName: updated.displayName,
+            deptId: updated.deptId,
+            status: updated.status,
+            phone: updated.phone,
+            employeeNo: updated.employeeNo,
+            jobTitle: updated.jobTitle,
+          }
+        : current,
+    );
+    setItems((current) =>
+      current.map((item) =>
+        item.id === updated.id
+          ? {
+              ...item,
+              email: updated.email,
+              displayName: updated.displayName,
+              deptId: updated.deptId,
+              status: updated.status,
+              phone: updated.phone,
+              employeeNo: updated.employeeNo,
+              jobTitle: updated.jobTitle,
+            }
+          : item,
+      ),
+    );
+    toast.success("用户信息已保存");
+    setUserFormOpen(false);
+    setUserFormInitial(null);
+    await load();
+  };
+
   useEffect(() => {
     void load();
     void loadModelOptions();
   }, [load, loadModelOptions]);
+
+  useEffect(() => {
+    let alive = true;
+    void (async () => {
+      try {
+        const response = await adminFetch("/api/auth/session", { cache: "no-store" });
+        const json = (await response.json()) as { data?: { userId?: string } };
+        if (alive) setCurrentUserId(json.data?.userId ?? null);
+      } catch {
+        /* 删除接口仍会在服务端阻止删除当前登录用户。 */
+      }
+    })();
+    return () => {
+      alive = false;
+    };
+  }, []);
 
   useEffect(() => {
     const userId = searchParams.get("user");
@@ -331,6 +481,10 @@ export default function RolesPage() {
 
   const deleteUser = async () => {
     if (!selected || saving) return;
+    if (selected.id === currentUserId) {
+      toast.error("不能删除当前登录用户");
+      return;
+    }
     if (!window.confirm(`确认删除用户 ${selected.email}？该操作不可撤销。`)) return;
     setSaving(true);
     try {
@@ -466,10 +620,14 @@ export default function RolesPage() {
                     <SheetTitle>编辑用户</SheetTitle>
                     <SheetDescription>额度始终由该用户独立计量；个人可以增加模型，也可以关闭来自用户组的模型。</SheetDescription>
                   </div>
-                  <Button variant="outline" size="sm" className="shrink-0" asChild>
-                    <Link href={`/iam/users?userId=${encodeURIComponent(selected.id)}`}>
-                      <Pencil />用户管理<ArrowUpRight />
-                    </Link>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="shrink-0"
+                    onClick={() => void openUserManagement()}
+                    disabled={userFormLoading}
+                  >
+                    <Pencil />{userFormLoading ? "加载中…" : "用户管理"}<ArrowUpRight />
                   </Button>
                 </div>
               </SheetHeader>
@@ -572,12 +730,29 @@ export default function RolesPage() {
               </div>
               <div className="mt-auto flex flex-wrap justify-between gap-2 border-t border-border pt-4">
                 <div className="flex flex-wrap gap-2">
-                  <Button variant="destructive" onClick={() => void deleteUser()} disabled={saving}>
+                  <Button
+                    variant="destructive"
+                    onClick={() => void deleteUser()}
+                    disabled={saving || selected.id === currentUserId}
+                    title={selected.id === currentUserId ? "不能删除当前登录用户" : "删除用户"}
+                  >
                     <Trash2 />删除用户
                   </Button>
-                  <Button variant="outline" onClick={() => void restoreInheritedQuota()} disabled={saving || selected.quotaSource !== "personal"}>
-                    恢复继承额度
-                  </Button>
+                  <div className="flex flex-col gap-1">
+                    <Button
+                      variant="outline"
+                      onClick={() => void restoreInheritedQuota()}
+                      disabled={saving || selected.quotaSource !== "personal"}
+                      title="恢复用户组或默认额度，不会清零已用 Token"
+                    >
+                      恢复继承额度
+                    </Button>
+                    {selected.quotaSource === "personal" ? (
+                      <span className="max-w-56 text-[11px] text-muted-foreground">
+                        恢复用户组（无用户组时为默认）额度，不会清零已用 Token。
+                      </span>
+                    ) : null}
+                  </div>
                 </div>
                 <div className="flex gap-2">
                   <Button variant="outline" onClick={() => setSelected(null)}>取消</Button>
@@ -588,6 +763,21 @@ export default function RolesPage() {
           ) : null}
         </SheetContent>
       </Sheet>
+
+      <UserFormDialog
+        open={userFormOpen}
+        onOpenChange={(open) => {
+          setUserFormOpen(open);
+          if (!open) setUserFormInitial(null);
+        }}
+        title="编辑用户"
+        description={userFormInitial?.email}
+        submitLabel="保存"
+        initial={userFormInitial ?? undefined}
+        deptOptions={userFormDeptOptions}
+        roleOptions={userFormRoleOptions}
+        onSubmit={saveUserDetails}
+      />
 
       <CreateUserDialog
         open={createOpen}

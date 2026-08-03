@@ -16,12 +16,6 @@ import {
   Card,
   CardContent,
   DataTable,
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
@@ -29,8 +23,6 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
   EmptyState,
-  Input,
-  Label,
   PageHeader,
   Select,
   SelectContent,
@@ -46,11 +38,18 @@ import {
 } from "@agenticx/ui";
 import { useTranslations } from "next-intl";
 import type { ColumnDef } from "@tanstack/react-table";
-import { MoreHorizontal, Pencil, Plus, RefreshCcw, ShieldCheck, ShieldX, Trash2, UserPlus, Users, Check } from "lucide-react";
+import { MoreHorizontal, Pencil, RefreshCcw, ShieldCheck, ShieldX, Trash2, UserPlus, Users } from "lucide-react";
 import { CreateUserDialog } from "../../../components/CreateUserDialog";
+import {
+  UserFormDialog,
+  type UserFormDeptOption,
+  type UserFormRoleOption,
+  type UserFormStatus,
+  type UserFormValues,
+} from "../../../components/UserFormDialog";
 import { VisibleModelsEditor } from "../../../components/visible-models-editor";
 
-type Status = "active" | "disabled" | "locked";
+type Status = UserFormStatus;
 
 interface AdminUser {
   id: string;
@@ -88,15 +87,13 @@ function getStatusMeta(t: ReturnType<typeof useTranslations<"pages.iam.users">>)
   } satisfies Record<Status, { label: string; variant: "success" | "warning" | "destructive" }>;
 }
 
-type DeptOption = { id: string; label: string };
-type RoleOption = { id: string; code: string; name: string };
+type DeptOption = UserFormDeptOption;
+type RoleOption = UserFormRoleOption;
 
 const PAGE_SIZE = 50;
 
 function UsersPageContent() {
   const t = useTranslations("pages.iam.users");
-  const tc = useTranslations("common");
-  const ts = useTranslations("shell");
   const statusMeta = useMemo(() => getStatusMeta(t), [t]);
   const searchParams = useSearchParams();
   const initialDept = searchParams.get("dept") || "all";
@@ -113,6 +110,7 @@ function UsersPageContent() {
   const [editOpen, setEditOpen] = useState(false);
   const [deptOptions, setDeptOptions] = useState<DeptOption[]>([]);
   const [roleOptions, setRoleOptions] = useState<RoleOption[]>([]);
+  const [currentUserId, setCurrentUserId] = useState<string | null>(null);
 
   const deptLabelMap = useMemo(() => {
     const m = new Map<string, string>();
@@ -203,6 +201,22 @@ function UsersPageContent() {
     let alive = true;
     void (async () => {
       try {
+        const res = await adminFetch("/api/auth/session", { cache: "no-store" });
+        const json = (await res.json()) as { data?: { userId?: string } };
+        if (alive) setCurrentUserId(json.data?.userId ?? null);
+      } catch {
+        /* 删除接口仍会在服务端阻止删除当前登录用户。 */
+      }
+    })();
+    return () => {
+      alive = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    let alive = true;
+    void (async () => {
+      try {
         const res = await adminFetch("/api/admin/roles", { cache: "no-store" });
         const json = (await res.json()) as { data?: { items: RoleOption[] } };
         if (!alive || !json.data?.items) return;
@@ -250,6 +264,10 @@ function UsersPageContent() {
   };
 
   const handleDelete = async (user: AdminUser) => {
+    if (user.id === currentUserId) {
+      toast.error("不能删除当前登录用户");
+      return;
+    }
     if (!window.confirm(t("toast.deleteConfirm", { email: user.email }))) return;
     const res = await fetch(`/api/admin/users/${user.id}`, { method: "DELETE" });
     if (!res.ok) {
@@ -343,8 +361,9 @@ function UsersPageContent() {
               variant="ghost"
               size="icon-sm"
               className="text-danger hover:bg-danger/10 hover:text-danger"
-              title={t("actions.delete")}
+              title={row.original.id === currentUserId ? "不能删除当前登录用户" : t("actions.delete")}
               aria-label={t("actions.delete")}
+              disabled={row.original.id === currentUserId}
               onClick={(event) => {
                 event.stopPropagation();
                 void handleDelete(row.original);
@@ -390,7 +409,7 @@ function UsersPageContent() {
         ),
       },
     ],
-    [selected?.id, deptLabelMap]
+    [currentUserId, selected?.id, deptLabelMap]
   );
 
   const activeFilters = useMemo(() => {
@@ -661,7 +680,12 @@ function UsersPageContent() {
                   {selected.status === "active" ? <ShieldX /> : <ShieldCheck />}
                   {selected.status === "active" ? t("status.disabled") : t("status.active")}
                 </Button>
-                <Button variant="destructive" onClick={() => void handleDelete(selected)}>
+                <Button
+                  variant="destructive"
+                  onClick={() => void handleDelete(selected)}
+                  disabled={selected.id === currentUserId}
+                  title={selected.id === currentUserId ? "不能删除当前登录用户" : t("actions.delete")}
+                >
                   <Trash2 />
                   {t("actions.delete")}
                 </Button>
@@ -731,221 +755,6 @@ function DetailRow({ label, value }: { label: string; value: React.ReactNode }) 
       <span className="text-muted-foreground">{label}</span>
       <span className="min-w-0 text-foreground">{value}</span>
     </div>
-  );
-}
-
-interface UserFormValues {
-  email: string;
-  displayName: string;
-  status: Status;
-  deptId: string;
-  phone: string;
-  employeeNo: string;
-  jobTitle: string;
-  roleCodes: string[];
-  initialPassword: string;
-}
-
-const EMPTY_USER_FORM: UserFormValues = {
-  email: "",
-  displayName: "",
-  status: "active",
-  deptId: "",
-  phone: "",
-  employeeNo: "",
-  jobTitle: "",
-  roleCodes: ["member"],
-  initialPassword: "",
-};
-
-function UserFormDialog({
-  open,
-  onOpenChange,
-  title,
-  description,
-  submitLabel,
-  initial,
-  deptOptions,
-  roleOptions,
-  onSubmit,
-}: {
-  open: boolean;
-  onOpenChange: (next: boolean) => void;
-  title: string;
-  description?: React.ReactNode;
-  submitLabel: string;
-  initial?: UserFormValues;
-  deptOptions: DeptOption[];
-  roleOptions: RoleOption[];
-  onSubmit: (values: UserFormValues) => Promise<void>;
-}) {
-  const t = useTranslations("pages.iam.users");
-  const tc = useTranslations("common");
-  const [values, setValues] = useState<UserFormValues>(() => initial ?? EMPTY_USER_FORM);
-  const [submitting, setSubmitting] = useState(false);
-
-  useEffect(() => {
-    if (open) {
-      setValues(initial ?? EMPTY_USER_FORM);
-    }
-  }, [open, initial]);
-
-  const handleSubmit = async (event: React.FormEvent) => {
-    event.preventDefault();
-    if (submitting) return;
-    setSubmitting(true);
-    try {
-      await onSubmit(values);
-    } finally {
-      setSubmitting(false);
-    }
-  };
-
-  return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent>
-        <DialogHeader>
-          <DialogTitle>{title}</DialogTitle>
-          {description ? <DialogDescription>{description}</DialogDescription> : null}
-        </DialogHeader>
-
-        <form onSubmit={handleSubmit} className="space-y-3">
-          <div className="space-y-1.5">
-            <Label htmlFor="user-email">{t("form.emailLabel")}</Label>
-            <Input
-              id="user-email"
-              type="email"
-              required
-              value={values.email}
-              onChange={(event) => setValues((prev) => ({ ...prev, email: event.target.value }))}
-              placeholder="user@your-company.com"
-            />
-          </div>
-          <div className="space-y-1.5">
-            <Label htmlFor="user-name">{t("form.nameLabel")}</Label>
-            <Input
-              id="user-name"
-              required
-              value={values.displayName}
-              onChange={(event) => setValues((prev) => ({ ...prev, displayName: event.target.value }))}
-              placeholder={t("form.namePlaceholder")}
-            />
-          </div>
-            <div className="grid grid-cols-2 gap-3">
-            <div className="space-y-1.5">
-              <Label>{t("columns.status")}</Label>
-              <Select
-                value={values.status}
-                onValueChange={(value) => setValues((prev) => ({ ...prev, status: value as Status }))}
-              >
-                <SelectTrigger>
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="active">{t("status.active")}</SelectItem>
-                  <SelectItem value="disabled">{t("status.disabled")}</SelectItem>
-                  <SelectItem value="locked">{t("status.locked")}</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-            <div className="space-y-1.5">
-              <Label>{t("columns.department")}</Label>
-              <Select
-                value={values.deptId || "__none__"}
-                onValueChange={(v) => setValues((prev) => ({ ...prev, deptId: v === "__none__" ? "" : v }))}
-              >
-                <SelectTrigger>
-                  <SelectValue placeholder={t("form.deptPlaceholder")} />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="__none__">{t("form.deptUnassigned")}</SelectItem>
-                  {deptOptions.map((d) => (
-                    <SelectItem key={d.id} value={d.id}>
-                      {d.label}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-          </div>
-
-          <div className="grid grid-cols-2 gap-3">
-            <div className="space-y-1.5">
-              <Label htmlFor="user-phone">{t("detail.phone")}</Label>
-              <Input
-                id="user-phone"
-                value={values.phone}
-                onChange={(e) => setValues((prev) => ({ ...prev, phone: e.target.value }))}
-              />
-            </div>
-            <div className="space-y-1.5">
-              <Label htmlFor="user-eno">{t("detail.employeeNo")}</Label>
-              <Input
-                id="user-eno"
-                value={values.employeeNo}
-                onChange={(e) => setValues((prev) => ({ ...prev, employeeNo: e.target.value }))}
-              />
-            </div>
-          </div>
-          <div className="space-y-1.5">
-            <Label htmlFor="user-job">{t("detail.jobTitle")}</Label>
-            <Input
-              id="user-job"
-              value={values.jobTitle}
-              onChange={(e) => setValues((prev) => ({ ...prev, jobTitle: e.target.value }))}
-            />
-          </div>
-          <div className="space-y-2">
-            <Label>{t("detail.roles")}</Label>
-            <div className="grid max-h-40 gap-1.5 overflow-y-auto rounded-md border border-border p-2 sm:grid-cols-2">
-              {roleOptions.map((r) => {
-                const checked = values.roleCodes.includes(r.code);
-                return (
-                  <button
-                    key={r.id}
-                    type="button"
-                    className={[
-                      "flex items-center gap-2 rounded px-2 py-1 text-left text-xs",
-                      checked ? "bg-primary-soft ring-1 ring-primary" : "hover:bg-muted",
-                    ].join(" ")}
-                    onClick={() =>
-                      setValues((prev) => {
-                        const next = new Set(prev.roleCodes);
-                        if (next.has(r.code)) next.delete(r.code);
-                        else next.add(r.code);
-                        const arr = [...next];
-                        return { ...prev, roleCodes: arr.length ? arr : ["member"] };
-                      })
-                    }
-                  >
-                    <span
-                      className={[
-                        "flex h-3.5 w-3.5 shrink-0 items-center justify-center rounded border",
-                        checked ? "border-primary bg-primary text-primary-foreground" : "border-border",
-                      ].join(" ")}
-                    >
-                      {checked ? <Check className="h-2.5 w-2.5" /> : null}
-                    </span>
-                    <span className="min-w-0">
-                      <span className="font-mono text-[10px] text-muted-foreground">{r.code}</span> · {r.name}
-                    </span>
-                  </button>
-                );
-              })}
-            </div>
-          </div>
-          <DialogFooter className="mt-4">
-            <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
-              {tc("actions.cancel")}
-            </Button>
-            <Button type="submit" disabled={submitting}>
-              <Plus />
-              {submitting ? t("form.processing") : submitLabel}
-            </Button>
-          </DialogFooter>
-        </form>
-      </DialogContent>
-    </Dialog>
   );
 }
 

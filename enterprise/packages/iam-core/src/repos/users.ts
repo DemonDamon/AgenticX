@@ -542,6 +542,7 @@ export async function softDeleteUser(
   id: string,
   actorUserId?: string | null
 ): Promise<void> {
+  if (actorUserId && actorUserId === id) throw new Error("不能删除当前登录用户");
   if (resolveDatabaseConfig().dialect === "mysql") {
     return mysqlUsersRepo.softDeleteUser(tenantId, id, actorUserId);
   }

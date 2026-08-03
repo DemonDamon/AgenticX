@@ -474,6 +474,7 @@ export const mysqlUsersRepository: UsersRepository = {
     return updated;
   },
   async softDeleteUser(tenantId, id, actorUserId) {
+    if (actorUserId && actorUserId === id) throw new Error("不能删除当前登录用户");
     const db = await getMysqlRepositoryDb();
     const [row] = await db
       .select({ email: users.email, displayName: users.displayName })
