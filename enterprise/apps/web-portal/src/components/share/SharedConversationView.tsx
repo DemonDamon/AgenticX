@@ -2,17 +2,72 @@
 
 import * as React from "react";
 import { Button } from "@agenticx/ui";
-import { Image, Link2, Sparkles } from "lucide-react";
+import {
+  hostnameFromUrl,
+  siteLabelFromSource,
+  SharedAssistantMarkdown,
+  WebSearchFavicon,
+  WebSearchSourcesPanel,
+} from "@agenticx/feature-chat";
+import { ChevronRight, Image, Link2, Sparkles } from "lucide-react";
 import { useTranslations } from "next-intl";
 import { ENTERPRISE_PRODUCT_NAME } from "../EnterpriseBrandMark";
-import type { ChatShareSnapshot } from "../../lib/chat-share-types";
+import type { ChatShareMessage, ChatShareSnapshot } from "../../lib/chat-share-types";
 import { copyText } from "../../lib/chat-share-client";
 import { shareOrDownloadImage } from "./share-image";
+
+function SharedAssistantContent({ message }: { message: ChatShareMessage }) {
+  return <SharedAssistantMarkdown text={message.content} sources={message.web_search_sources} />;
+}
+
+function SharedSearchSourcesButton({
+  message,
+  onOpen,
+  label,
+}: {
+  message: ChatShareMessage;
+  onOpen: () => void;
+  label: string;
+}) {
+  const sources = message.web_search_sources;
+  if (!sources?.length) return null;
+
+  return (
+    <button
+      type="button"
+      onClick={(event) => {
+        event.stopPropagation();
+        onOpen();
+      }}
+      className="mb-3 inline-flex max-w-full items-center gap-2 rounded-full border border-border/60 bg-muted/50 py-1 pl-1.5 pr-2.5 text-sm leading-5 text-foreground/80 transition-colors hover:border-border hover:bg-muted hover:text-foreground"
+    >
+      <span className="flex items-center -space-x-1.5">
+        {sources.slice(0, 3).map((source, index) => {
+          const host = hostnameFromUrl(source.url) ?? "";
+          const siteLabel = siteLabelFromSource(source, index + 1);
+          return (
+            <span
+              key={`${message.id}-source-${index}`}
+              className="flex h-5 w-5 items-center justify-center overflow-hidden rounded-full border border-background bg-background shadow-sm"
+            >
+              {host ? (
+                <WebSearchFavicon host={host} label={siteLabel} size={16} rounded="full" />
+              ) : null}
+            </span>
+          );
+        })}
+      </span>
+      <span className="truncate font-medium">{label}</span>
+      <ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground" />
+    </button>
+  );
+}
 
 export function SharedConversationView({ snapshot }: { snapshot: ChatShareSnapshot }) {
   const t = useTranslations("chat");
   const [status, setStatus] = React.useState<string | null>(null);
   const [busy, setBusy] = React.useState(false);
+  const [sourcesPanelMessageId, setSourcesPanelMessageId] = React.useState<string | null>(null);
 
   const copyLink = async () => {
     try {
@@ -66,35 +121,31 @@ export function SharedConversationView({ snapshot }: { snapshot: ChatShareSnapsh
                   <div className={isUser ? "mb-2 text-xs font-semibold text-primary-foreground/75" : "mb-2 text-xs font-semibold text-muted-foreground"}>
                     {isUser ? t("shareUserMessage") : t("shareAssistantMessage")}
                   </div>
-                  <p className="whitespace-pre-wrap break-words text-[15px] leading-7">{message.content}</p>
-                  {message.web_search_sources?.length ? (
-                    <div className="mt-4 border-t border-current/10 pt-3">
-                      <p className="mb-2 text-xs font-semibold opacity-70">{t("shareSources")}</p>
-                      <div className="space-y-1.5">
-                        {message.web_search_sources.slice(0, 10).map((source, index) => (
-                          <a
-                            key={`${message.id}-${source.url}-${index}`}
-                            href={source.url}
-                            target="_blank"
-                            rel="noreferrer"
-                            className="flex min-w-0 items-center gap-2 rounded-md bg-muted/45 px-2 py-1.5 text-xs opacity-80 hover:opacity-100"
-                          >
-                            <span className="inline-flex h-5 min-w-5 shrink-0 items-center justify-center rounded-full bg-background px-1.5 font-mono text-[10px] font-semibold text-muted-foreground">
-                              {index + 1}
-                            </span>
-                            <span className="min-w-0 truncate underline underline-offset-2">
-                              {source.title || source.url}
-                            </span>
-                          </a>
-                        ))}
-                      </div>
-                    </div>
-                  ) : null}
+                  {!isUser ? (
+                    <>
+                      <SharedSearchSourcesButton
+                        message={message}
+                        onOpen={() => setSourcesPanelMessageId(message.id)}
+                        label={t("shareSearchResults", { count: message.web_search_sources?.length ?? 0 })}
+                      />
+                      <SharedAssistantContent message={message} />
+                    </>
+                  ) : (
+                    <p className="whitespace-pre-wrap break-words text-base leading-7">{message.content}</p>
+                  )}
                 </div>
               </article>
             );
           })}
         </div>
+
+        <WebSearchSourcesPanel
+          open={sourcesPanelMessageId != null}
+          onOpenChange={(open) => {
+            if (!open) setSourcesPanelMessageId(null);
+          }}
+          sources={snapshot.messages.find((message) => message.id === sourcesPanelMessageId)?.web_search_sources ?? []}
+        />
 
         <div className="sticky bottom-4 mt-10 flex flex-wrap items-center justify-center gap-2 rounded-2xl border border-border/70 bg-background/90 p-3 shadow-lg backdrop-blur">
           <Button type="button" variant="outline" onClick={() => void generateImage()} disabled={busy}>

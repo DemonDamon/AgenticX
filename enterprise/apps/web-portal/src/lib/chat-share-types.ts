@@ -33,12 +33,15 @@ function stripThinkBlocks(raw: string): string {
   return text;
 }
 
-/** Remove model-internal reasoning and raw web-search markers from share output. */
-export function cleanChatShareContent(raw: string, hasSearchSources = false): string {
+/** Remove model-internal reasoning while preserving citation markers for the rich share view. */
+export function cleanChatShareContent(
+  raw: string,
+  options: { stripCitationMarkers?: boolean } = {},
+): string {
   let text = stripThinkBlocks(raw ?? "")
     .replace(/<\s*citations?\s*>/gi, "")
     .replace(/<\s*\/\s*citations?\s*>/gi, "");
-  if (hasSearchSources) text = text.replace(/\[(?:\d{1,3}|N)\]/gi, "");
+  if (options.stripCitationMarkers) text = text.replace(/\[(?:\d{1,3}|N)\]/gi, "");
   return text
     .replace(/[ \t]{2,}/g, " ")
     .replace(/[ \t]+\n/g, "\n")
@@ -48,7 +51,7 @@ export function cleanChatShareContent(raw: string, hasSearchSources = false): st
 
 export function toChatShareMessage(message: ChatMessage): ChatShareMessage | null {
   if (message.role !== "user" && message.role !== "assistant") return null;
-  const content = cleanChatShareContent(message.content, Boolean(message.web_search_sources?.length));
+  const content = cleanChatShareContent(message.content);
   if (!content) return null;
   return {
     id: message.id,
@@ -62,7 +65,7 @@ export function toChatShareMessage(message: ChatMessage): ChatShareMessage | nul
 
 /** Normalize snapshots created before share-content sanitization was added. */
 export function normalizeChatShareMessage(message: ChatShareMessage): ChatShareMessage | null {
-  const content = cleanChatShareContent(message.content, Boolean(message.web_search_sources?.length));
+  const content = cleanChatShareContent(message.content);
   return content ? { ...message, content } : null;
 }
 

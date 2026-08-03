@@ -28,19 +28,20 @@ function shareMessage(id: string, role: "user" | "assistant", content: string): 
 }
 
 describe("chat share content", () => {
-  it("removes think blocks and raw search citation markers", () => {
+  it("removes think blocks while preserving citations for rich rendering", () => {
     const thinkOpen = "<" + "think" + ">";
     const thinkClose = "<" + "/" + "think" + ">";
-    expect(cleanChatShareContent(`${thinkOpen}内部推理${thinkClose}\n答案 [10]`, true)).toBe("答案");
+    expect(cleanChatShareContent(`${thinkOpen}内部推理${thinkClose}\n答案 [10]`)).toBe("答案 [10]");
+    expect(cleanChatShareContent(`${thinkOpen}内部推理${thinkClose}\n答案 [10]`, { stripCitationMarkers: true })).toBe("答案");
   });
 
   it("cleans assistant messages before storing a share snapshot", () => {
     const message = toChatShareMessage({
       ...baseMessage,
-      content: "<think>reasoning</think>正文",
+      content: "<think>reasoning</think>正文 [1]",
       web_search_sources: [{ title: "Source", url: "https://example.com", snippet: "" }],
     });
-    expect(message?.content).toBe("正文");
+    expect(message?.content).toBe("正文 [1]");
   });
 
   it("normalizes snapshots created before sanitization", () => {
@@ -48,7 +49,7 @@ describe("chat share content", () => {
       ...shareMessage("a1", "assistant", "<think>reasoning</think>正文 [1]"),
       web_search_sources: [{ title: "Source", url: "https://example.com", snippet: "" }],
     });
-    expect(message?.content).toBe("正文");
+    expect(message?.content).toBe("正文 [1]");
   });
 });
 
