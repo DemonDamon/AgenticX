@@ -82,10 +82,25 @@ export function finalizeToolsCardTitle(
     if (!/检索/.test(next)) next = `${next}检索`;
     return next;
   }
+  if (next.startsWith("正在")) {
+    return `已${next.replace(/^正在/u, "").replace(/…+$/u, "")}`;
+  }
   if (!/完成|已完成|结束/.test(next)) {
     return `${next} · 已完成`;
   }
   return next;
+}
+
+/**
+ * Past-tense title for a finished phase row, so a completed step never keeps
+ * reading "正在撰写…" next to a check mark.
+ */
+export function completedPhaseTitle(title: string): string {
+  const raw = title.trim().replace(/…+$/u, "");
+  if (!raw) return title.trim();
+  if (raw === "正在综合分析") return "已完成综合分析";
+  if (raw.startsWith("正在")) return `已${raw.replace(/^正在/u, "")}`;
+  return raw;
 }
 
 /**
@@ -120,6 +135,41 @@ export function buildDeepResearchSegments(
   let toolsId = "tools-1";
   let lanes = new Map<string, LaneDraft>();
   let seq = 0;
+  // Writing phases are one task list, not one card per phase message.
+  let writeSteps: ResearchStep[] = [];
+  let writeId = "synthesize-1";
+  let wroteCard = false;
+  const runTerminal =
+    status === "completed" || status === "failed" || status === "cancelled";
+
+  /** A writing step is finished the moment the next one starts. */
+  const settleWriteSteps = (outcome: "done" | "failed") => {
+    for (const step of writeSteps) {
+      if (step.status !== "running") continue;
+      if (outcome === "failed") {
+        step.status = "failed";
+        continue;
+      }
+      step.status = "done";
+      step.title = completedPhaseTitle(step.title);
+    }
+  };
+
+  const flushWrite = () => {
+    if (writeSteps.length === 0) return;
+    // A settled run can have no live step, even if no `done` phase arrived.
+    if (runTerminal) settleWriteSteps(status === "completed" ? "done" : "failed");
+    const running = writeSteps.some((s) => s.status === "running");
+    segments.push({
+      kind: "tools",
+      id: writeId,
+      title: running ? "正在撰写报告…" : `已完成报告撰写 · ${writeSteps.length} 步`,
+      steps: writeSteps,
+    });
+    wroteCard = true;
+    writeSteps = [];
+    writeId = `synthesize-${++seq}`;
+  };
 
   const flushTools = () => {
     if (lanes.size === 0) return;
@@ -127,8 +177,6 @@ export function buildDeepResearchSegments(
       .sort((a, b) => a.index - b.index)
       .map(laneToStep);
     const allSettled = steps.every((s) => s.status === "done" || s.status === "failed");
-    const runTerminal =
-      status === "completed" || status === "failed" || status === "cancelled";
     segments.push({
       kind: "tools",
       id: toolsId,
@@ -139,12 +187,18 @@ export function buildDeepResearchSegments(
     toolsId = `tools-${++seq}`;
   };
 
+  /** Lanes precede writing steps chronologically, so flush in that order. */
+  const flushCards = () => {
+    flushTools();
+    flushWrite();
+  };
+
   for (const event of events) {
     switch (event.type) {
       case "run_started":
         break;
       case "narrative": {
-        flushTools();
+        flushCards();
         const text = event.text.trim();
         if (text) {
           segments.push({ kind: "narrative", id: `narrative-${seq++}`, text });
@@ -153,7 +207,7 @@ export function buildDeepResearchSegments(
       }
       case "clarify": {
         if (!clarifyPushed) {
-          flushTools();
+          flushCards();
           segments.push({ kind: "clarify", id: "clarify" });
           clarifyPushed = true;
         }
@@ -166,29 +220,46 @@ export function buildDeepResearchSegments(
           break;
         }
         if (event.phase === "lanes" || event.phase === "reflect") {
-          flushTools();
+          flushCards();
           toolsTitle = event.message || (event.phase === "reflect" ? "复盘信息缺口…" : "正在并行检索…");
           break;
         }
-        if (event.phase === "synthesize" || event.phase === "done") {
+        if (event.phase === "synthesize") {
           flushTools();
-          const terminal =
-            event.phase === "done" ||
-            status === "completed" ||
-            status === "failed" ||
-            status === "cancelled";
-          segments.push({
-            kind: "status",
-            id: `phase-${event.phase}-${seq++}`,
-            title: event.message || event.phase,
-            status: status === "failed" ? "failed" : terminal ? "done" : "running",
-            detailLines: event.message ? [event.message] : [],
+          settleWriteSteps("done");
+          writeSteps.push({
+            id: `synthesize-step-${seq++}`,
+            kind: "phase",
+            title: event.message?.trim() || "综合分析",
+            status: "running",
+            detailLines: [],
           });
+          break;
+        }
+        if (event.phase === "done") {
+          flushTools();
+          settleWriteSteps(status === "failed" || status === "cancelled" ? "failed" : "done");
+          flushWrite();
+          // The writing card already says "已完成报告撰写" — a second "深度研究完成"
+          // pill just repeats the same signal. Keep failed / cancelled / partial rows.
+          const message = event.message?.trim() || "";
+          const plainSuccess =
+            status === "completed" &&
+            (message === "" || message === "深度研究完成");
+          if (!(wroteCard && plainSuccess)) {
+            segments.push({
+              kind: "status",
+              id: `phase-done-${seq++}`,
+              title: message || event.phase,
+              status: status === "failed" ? "failed" : "done",
+              detailLines: message ? [message] : [],
+            });
+          }
         }
         break;
       }
       case "reflection": {
-        flushTools();
+        flushCards();
         segments.push({
           kind: "reflection",
           id: `reflection-${seq++}`,
@@ -197,7 +268,7 @@ export function buildDeepResearchSegments(
         break;
       }
       case "research_stats": {
-        flushTools();
+        flushCards();
         segments.push({
           kind: "stats",
           id: `stats-${seq++}`,
@@ -255,7 +326,7 @@ export function buildDeepResearchSegments(
     }
   }
 
-  flushTools();
+  flushCards();
   return segments;
 }
 

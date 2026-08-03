@@ -11,6 +11,22 @@ export type DeepResearchArtifactCardProps = {
   onPreview?: (artifactId: string) => void;
 };
 
+/** Soft filled delivery card — shared with the all-files row. */
+export const DELIVERY_CARD_CLASS = [
+  "group/delivery flex w-full max-w-[24rem] items-center gap-3 rounded-2xl",
+  "bg-muted/55 px-3.5 py-3 text-left",
+  "transition-[transform,box-shadow,background-color] duration-200 ease-out",
+  "hover:-translate-y-0.5 hover:bg-muted/85 hover:shadow-[0_10px_28px_rgba(15,23,42,0.08)]",
+  "active:translate-y-0 active:shadow-none",
+  "dark:hover:shadow-[0_10px_28px_rgba(0,0,0,0.35)]",
+].join(" ");
+
+export const DELIVERY_ICON_WELL_CLASS = [
+  "flex h-10 w-10 shrink-0 items-center justify-center rounded-full",
+  "bg-background text-foreground/70 shadow-sm",
+  "transition-transform duration-200 ease-out group-hover/delivery:scale-105",
+].join(" ");
+
 function IconDoc({ className }: { className?: string }) {
   return (
     <svg
@@ -20,7 +36,7 @@ function IconDoc({ className }: { className?: string }) {
       viewBox="0 0 24 24"
       fill="none"
       stroke="currentColor"
-      strokeWidth="1.8"
+      strokeWidth="1.75"
       strokeLinecap="round"
       strokeLinejoin="round"
       className={className}
@@ -44,14 +60,14 @@ export function DeepResearchArtifactCard({ artifact, onPreview }: DeepResearchAr
     <button
       type="button"
       onClick={() => onPreview?.(artifact.id)}
-      className="flex w-full max-w-md items-center gap-3 rounded-2xl border border-border/45 bg-card px-3 py-2.5 text-left shadow-sm transition-colors hover:bg-muted/40"
+      className={DELIVERY_CARD_CLASS}
       data-testid="deep-research-artifact-card"
     >
-      <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-[10px] bg-muted/70 text-foreground/70">
+      <span className={DELIVERY_ICON_WELL_CLASS}>
         <IconDoc className="h-5 w-5" />
       </span>
       <span className="min-w-0 flex-1">
-        <span className="block truncate text-[15px] font-medium leading-5 text-foreground">
+        <span className="block truncate text-[14px] font-medium leading-5 text-foreground">
           {fileNameFromArtifact(artifact)}
         </span>
         <span className="mt-0.5 block truncate text-[12px] leading-4 text-muted-foreground">

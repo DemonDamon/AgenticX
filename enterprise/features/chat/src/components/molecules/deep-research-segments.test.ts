@@ -160,8 +160,8 @@ describe("buildDeepResearchSegments", () => {
       "narrative",
       "tools",
       "narrative",
-      "status",
-      "status",
+      // Writing phases collapse into one card; plain "深度研究完成" is omitted.
+      "tools",
     ]);
 
     const tools = segments.find((s) => s.kind === "tools");
@@ -307,6 +307,87 @@ describe("reflection / research_stats segments", () => {
     ]);
     const stats = segments[1];
     expect(stats && stats.kind === "stats" ? stats.label : "").toContain("检索式 12 条");
+  });
+
+  it("puts the gap card above the follow-up search card", () => {
+    const events: DeepResearchEvent[] = [
+      {
+        type: "reflection",
+        gaps: ["缺官方论文", "单一来源未交叉验证"],
+      },
+      { type: "phase", phase: "lanes", message: "正在针对 2 处缺口补充检索…" },
+      { type: "lane_started", laneId: "gap-1", title: "官方论文", index: 1, total: 2 },
+      { type: "lane_done", laneId: "gap-1", status: "ok" },
+    ];
+    const segments = buildDeepResearchSegments(events, "completed");
+    expect(segments.map((s) => s.kind)).toEqual(["reflection", "tools"]);
+    const tools = segments[1];
+    // "正在…" would contradict the check mark once the run settled.
+    expect(tools && tools.kind === "tools" ? tools.title : "").toBe(
+      "已针对 2 处缺口补充检索",
+    );
+  });
+});
+
+describe("writing phases", () => {
+  const writing: DeepResearchEvent[] = [
+    { type: "phase", phase: "synthesize", message: "正在拟定报告大纲…" },
+    { type: "phase", phase: "synthesize", message: "正在撰写第 1/2 节：核心结论" },
+    { type: "phase", phase: "synthesize", message: "正在撰写第 2/2 节：分项分析" },
+    { type: "phase", phase: "synthesize", message: "正在综合分析…" },
+  ];
+
+  it("collapses into one card and only the live step spins", () => {
+    const segments = buildDeepResearchSegments(writing, "running");
+    expect(segments.map((s) => s.kind)).toEqual(["tools"]);
+    const card = segments[0];
+    if (!card || card.kind !== "tools") throw new Error("expected tools card");
+    expect(card.title).toBe("正在撰写报告…");
+    expect(card.steps.map((s) => [s.title, s.status])).toEqual([
+      ["已拟定报告大纲", "done"],
+      ["已撰写第 1/2 节：核心结论", "done"],
+      ["已撰写第 2/2 节：分项分析", "done"],
+      ["正在综合分析…", "running"],
+    ]);
+  });
+
+  it("rewrites every step to past tense once the run finishes", () => {
+    const segments = buildDeepResearchSegments(
+      [...writing, { type: "phase", phase: "done", message: "深度研究完成" }],
+      "completed",
+    );
+    expect(segments.map((s) => s.kind)).toEqual(["tools"]);
+    const card = segments[0];
+    if (!card || card.kind !== "tools") throw new Error("expected tools card");
+    expect(card.title).toBe("已完成报告撰写 · 4 步");
+    expect(card.steps.every((s) => s.status === "done")).toBe(true);
+    expect(card.steps.map((s) => s.title)).toContain("已完成综合分析");
+    expect(card.steps.some((s) => s.title.startsWith("正在"))).toBe(false);
+  });
+
+  it("fails only the step that was live when the run failed", () => {
+    const segments = buildDeepResearchSegments(
+      [...writing, { type: "phase", phase: "done", message: "失败" }],
+      "failed",
+    );
+    const card = segments[0];
+    if (!card || card.kind !== "tools") throw new Error("expected tools card");
+    expect(card.steps.map((s) => s.status)).toEqual(["done", "done", "done", "failed"]);
+    // Non-success terminal still surfaces as its own status row.
+    expect(segments.map((s) => s.kind)).toEqual(["tools", "status"]);
+  });
+
+  it("keeps a partial-finish status when wrap-up degraded", () => {
+    const segments = buildDeepResearchSegments(
+      [
+        ...writing,
+        { type: "phase", phase: "done", message: "深度研究完成（部分收尾失败）" },
+      ],
+      "completed",
+    );
+    expect(segments.map((s) => s.kind)).toEqual(["tools", "status"]);
+    const status = segments[1];
+    expect(status && status.kind === "status" ? status.title : "").toContain("部分收尾失败");
   });
 });
 
