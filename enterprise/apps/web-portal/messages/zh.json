@@ -100,6 +100,10 @@
   "chat": {
     "complianceTitle": "合规拦截",
     "chatErrorTitle": "聊天请求失败",
+    "quotaExhaustedTitle": "Token 配额已用尽",
+    "quotaExhaustedDescription": "当前账号的 Token 配额已用尽，暂时无法继续发送消息，请联系管理员调整额度。",
+    "quotaExhaustedPageNotice": "Token 配额已用尽，暂时无法继续发送消息。请联系管理员调整额度。",
+    "quotaExhaustedAcknowledge": "知道了",
     "updateDepthTitle": "界面更新异常",
     "updateDepthError": "界面更新异常，已保留已生成内容。请重试或刷新页面。",
     "historySyncTitle": "历史同步",

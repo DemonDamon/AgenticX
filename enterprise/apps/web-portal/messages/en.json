@@ -100,6 +100,10 @@
   "chat": {
     "complianceTitle": "Compliance block",
     "chatErrorTitle": "Chat request failed",
+    "quotaExhaustedTitle": "Token quota exhausted",
+    "quotaExhaustedDescription": "Your account has used all available token quota and cannot send more messages. Please contact an administrator to adjust the quota.",
+    "quotaExhaustedPageNotice": "Token quota exhausted. You cannot send more messages until an administrator adjusts the quota.",
+    "quotaExhaustedAcknowledge": "Got it",
     "updateDepthTitle": "Display update issue",
     "updateDepthError": "A display update issue occurred. Generated content was kept. Please retry or refresh.",
     "historySyncTitle": "History sync",

@@ -47,6 +47,7 @@ import {
   cn,
 } from "@agenticx/ui";
 import { NearEmptyWordmark } from "./NearEmptyWordmark";
+import { QuotaLimitNotice } from "./QuotaLimitNotice";
 import { ShareDialog } from "./share/ShareDialog";
 import { downloadShareImage } from "./share/share-image";
 import {
@@ -96,6 +97,11 @@ function isComplianceError(message: string): boolean {
   return (/合规|策略|compliance|policy/i.test(message) && !/Gateway/i.test(message));
 }
 
+function isQuotaExhaustedError(message: string | null): boolean {
+  if (!message) return false;
+  return /(?:token\s*(?:配额|quota)|(?:配额|quota)).*(?:用尽|超出|exhausted|exceeded)/i.test(message);
+}
+
 export function MachiChatView({
   client,
   deepResearchMode = false,
@@ -134,6 +140,7 @@ export function MachiChatView({
   const cancel = useChatStore((s) => s.cancel);
   const displayErrorMessage =
     errorMessage === STREAM_UPDATE_DEPTH_ERROR ? t("updateDepthError") : errorMessage;
+  const quotaError = isQuotaExhaustedError(errorMessage);
   const [draft, setDraft] = React.useState("");
   /** Default auto (on) — aligned with product expectation for portal chat. */
   const [webSearchMode, setWebSearchMode] = React.useState<WebSearchMode>("auto");
@@ -561,6 +568,7 @@ export function MachiChatView({
 
   const composer = (
     <div className={cn("mx-auto w-full space-y-3", isEmpty ? "max-w-[46rem]" : "max-w-4xl")}>
+      <QuotaLimitNotice forceOpen={quotaError} />
       {historyError && (
         <Alert variant="warning" className="border-warning/30 bg-warning-soft/80 shadow-sm">
           <ShieldAlert className="h-5 w-5" />
@@ -606,7 +614,7 @@ export function MachiChatView({
           </div>
         </Alert>
       )}
-      {displayErrorMessage && (
+      {displayErrorMessage && !quotaError && (
         <Alert variant="warning" className="border-warning/30 bg-warning-soft/80 shadow-sm">
           <ShieldAlert className="h-5 w-5" />
           <div>
