@@ -9,7 +9,12 @@ import {
 import { ulid } from "ulid";
 import { randomBytes } from "node:crypto";
 import { normalizeChatMessageOrder } from "../chat-message-order";
-import { toChatShareMessage, type ChatShareMessage, type ChatShareSnapshot } from "../chat-share-types";
+import {
+  normalizeChatShareMessage,
+  toChatShareMessage,
+  type ChatShareMessage,
+  type ChatShareSnapshot,
+} from "../chat-share-types";
 import {
   ChatHistoryConflictError,
   ChatHistoryNotFoundError,
@@ -136,16 +141,19 @@ function parseShareMessages(value: unknown): ChatShareMessage[] {
     }
   }
   if (!Array.isArray(parsed)) return [];
-  return parsed.filter((item): item is ChatShareMessage => {
-    if (!item || typeof item !== "object") return false;
-    const message = item as Partial<ChatShareMessage>;
-    return (
-      typeof message.id === "string" &&
-      (message.role === "user" || message.role === "assistant") &&
-      typeof message.content === "string" &&
-      typeof message.created_at === "string"
-    );
-  });
+  return parsed
+    .filter((item): item is ChatShareMessage => {
+      if (!item || typeof item !== "object") return false;
+      const message = item as Partial<ChatShareMessage>;
+      return (
+        typeof message.id === "string" &&
+        (message.role === "user" || message.role === "assistant") &&
+        typeof message.content === "string" &&
+        typeof message.created_at === "string"
+      );
+    })
+    .map(normalizeChatShareMessage)
+    .filter((message): message is ChatShareMessage => message !== null);
 }
 
 export class SqlChatHistoryStore implements ChatHistoryStore {

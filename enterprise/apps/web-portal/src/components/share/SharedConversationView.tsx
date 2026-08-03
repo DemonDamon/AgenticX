@@ -70,16 +70,21 @@ export function SharedConversationView({ snapshot }: { snapshot: ChatShareSnapsh
                   {message.web_search_sources?.length ? (
                     <div className="mt-4 border-t border-current/10 pt-3">
                       <p className="mb-2 text-xs font-semibold opacity-70">{t("shareSources")}</p>
-                      <div className="space-y-1">
-                        {message.web_search_sources.slice(0, 10).map((source) => (
+                      <div className="space-y-1.5">
+                        {message.web_search_sources.slice(0, 10).map((source, index) => (
                           <a
-                            key={`${message.id}-${source.url}`}
+                            key={`${message.id}-${source.url}-${index}`}
                             href={source.url}
                             target="_blank"
                             rel="noreferrer"
-                            className="block truncate text-xs underline underline-offset-2 opacity-80 hover:opacity-100"
+                            className="flex min-w-0 items-center gap-2 rounded-md bg-muted/45 px-2 py-1.5 text-xs opacity-80 hover:opacity-100"
                           >
-                            {source.title || source.url}
+                            <span className="inline-flex h-5 min-w-5 shrink-0 items-center justify-center rounded-full bg-background px-1.5 font-mono text-[10px] font-semibold text-muted-foreground">
+                              {index + 1}
+                            </span>
+                            <span className="min-w-0 truncate underline underline-offset-2">
+                              {source.title || source.url}
+                            </span>
                           </a>
                         ))}
                       </div>

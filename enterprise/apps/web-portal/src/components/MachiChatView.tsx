@@ -56,7 +56,12 @@ import {
   type WebSearchMode,
 } from "./ComposerPlusMenu";
 import { ENTERPRISE_PRODUCT_NAME } from "./EnterpriseBrandMark";
-import { toChatShareMessage, type ChatShareMessage, type ChatShareSnapshot } from "../lib/chat-share-types";
+import {
+  expandChatShareTurnSelection,
+  toChatShareMessage,
+  type ChatShareMessage,
+  type ChatShareSnapshot,
+} from "../lib/chat-share-types";
 
 // 模型清单从 /api/me/models 动态获取（admin 配置 + 用户可见性）。
 // 没有任何分配时为空，UI 会提示「请联系管理员分配模型」。
@@ -341,7 +346,15 @@ export function MachiChatView({
         .split(",")
         .map((id) => id.trim())
         .filter((id) => allIds.includes(id));
-      setShareInitialSelectedIds(requestedIds.length > 0 ? requestedIds : allIds);
+      if (requestedIds.length === 0) {
+        setShareInitialSelectedIds(allIds);
+      } else {
+        const selectedIds = new Set<string>();
+        requestedIds.forEach((id) => {
+          expandChatShareTurnSelection(shareableMessages, id).forEach((selectedId) => selectedIds.add(selectedId));
+        });
+        setShareInitialSelectedIds(allIds.filter((id) => selectedIds.has(id)));
+      }
       setShareDialogOpen(true);
     },
     [shareableMessages],
