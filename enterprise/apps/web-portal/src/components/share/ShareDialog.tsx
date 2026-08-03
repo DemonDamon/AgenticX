@@ -2,6 +2,7 @@
 
 import * as React from "react";
 import type { ChatMessage } from "@agenticx/core-api";
+import { SharedAssistantMarkdown } from "@agenticx/feature-chat";
 import {
   Button,
   Checkbox,
@@ -152,14 +153,23 @@ export function ShareDialog({
                     className="mt-0.5"
                     aria-label={message.role === "user" ? t("shareUserMessage") : t("shareAssistantMessage")}
                   />
-                  <span className="min-w-0 flex-1">
-                    <span className="mb-1 block text-xs font-semibold text-muted-foreground">
+                  <div className="min-w-0 flex-1">
+                    <div className="mb-1 text-xs font-semibold text-muted-foreground">
                       {message.role === "user" ? t("shareUserMessage") : t("shareAssistantMessage")}
-                    </span>
-                    <span className="line-clamp-3 whitespace-pre-wrap break-words text-sm leading-6 text-foreground">
-                      {message.content}
-                    </span>
-                  </span>
+                    </div>
+                    {message.role === "assistant" ? (
+                      <div className="pointer-events-none max-h-40 overflow-hidden text-sm">
+                        <SharedAssistantMarkdown
+                          text={message.content}
+                          sources={message.web_search_sources}
+                        />
+                      </div>
+                    ) : (
+                      <p className="line-clamp-3 whitespace-pre-wrap break-words text-sm leading-6 text-foreground">
+                        {message.content}
+                      </p>
+                    )}
+                  </div>
                 </label>
               ))}
             </div>
