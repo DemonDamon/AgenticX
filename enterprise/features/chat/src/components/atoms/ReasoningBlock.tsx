@@ -1,5 +1,11 @@
 import * as React from "react";
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
 import { probeNote } from "../../debug/update-depth-probe";
+import {
+  ASSISTANT_MD_COMPONENTS,
+  assistantUrlTransform,
+} from "../../markdown/assistant-markdown-components";
 
 type ReasoningBlockProps = {
   reasoning: string;
@@ -128,7 +134,15 @@ export function ReasoningBlock({ reasoning, thinkingStarted, thinkingInProgress 
                 <span className="h-2 w-2 shrink-0 rounded-full bg-muted-foreground/70" />
                 <div className="mt-1.5 w-px min-h-3 flex-1 bg-border/55" />
               </div>
-              <p className="ml-2.5 min-w-0 flex-1 whitespace-pre-wrap break-words pb-0.5">{content}</p>
+              <div className="agx-assistant-md ml-2.5 min-w-0 flex-1 break-words pb-0.5 text-sm leading-6 text-muted-foreground">
+                <ReactMarkdown
+                  remarkPlugins={[remarkGfm]}
+                  urlTransform={assistantUrlTransform}
+                  components={ASSISTANT_MD_COMPONENTS}
+                >
+                  {content}
+                </ReactMarkdown>
+              </div>
             </div>
           ) : (
             <div className="flex items-stretch text-muted-foreground">
