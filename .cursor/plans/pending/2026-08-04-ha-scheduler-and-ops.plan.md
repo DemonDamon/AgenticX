@@ -87,9 +87,32 @@ Covers-Gap: G-004 + G-006，证据见 `research/codedeepresearch/agentscope/agen
 
 - `docker-compose.yml`：`redis:7` + 2 个 `agx serve` 副本（env：`AGX_HA_MODE=redis`、`AGX_REDIS_URL=redis://redis:6379/0`、`AGX_AUTOMATION_SCHEDULER=server`）+ `nginx`。
 - `nginx.conf`：upstream 两副本；sticky 策略 = 按请求头/参数中的 session 维度 hash（`hash $arg_session_id` 兜底 `$remote_addr`；chat 请求体里的 session_id 无法参与 hash，文档中说明该限制与「会话锁兜底」的关系：打错副本会收到 `session_busy_elsewhere`，客户端应重试另一副本或由 LB 重试）。
-- `ha-deployment.md`：架构图（mermaid）、配置项清单（本路线图全部新增 env/config 键）、已知限制（MCP stdio 每副本独立、taskspaces 本机目录不共享、FTS 每副本各自 backfill 建议 `AGX_SESSION_FTS=0` 选一）、滚动重启操作步骤、故障接管验证步骤。
+- `ha-deployment.md`：架构图（mermaid）、配置项清单（本路线图全部新增 env/config 键）、已知限制（MCP stdio 每副本独立、taskspaces 本机目录不共享、FTS 每副本各自 backfill 建议 `AGX_SESSION_FTS=0` 选一）、滚动重启操作步骤、故障接管验证步骤、**云部署测试清单**（见下）。
 
 **AC-5**：`docker compose -f deploy/ha-docker-compose/docker-compose.yml up` 可起栈；文档中「故障接管验证」章节步骤可手工复现：A 副本会话进行中 `docker stop` A，B 副本 resume 接管（依赖 Plan B/C 已落地）。
+
+#### `ha-deployment.md` 大纲（实施时按此展开）
+
+1. **架构图**（mermaid）：LB → 2×`agx serve` → Redis（+可选 PG）；标注每副本本地态（MCP stdio / taskspaces）。
+2. **配置项清单**：`AGX_HA_MODE`、`AGX_STORAGE_BACKEND`、`AGX_COORDINATION_BACKEND`、`AGX_REDIS_URL`、`AGX_AUTOMATION_SCHEDULER`、`AGX_RESUME_INTERRUPTED`、`AGX_SESSION_FTS`、`AGX_DRAIN_TIMEOUT_SEC` 的默认值 / HA 取值 / 说明。
+3. **本地 compose 快速验收**：起栈 → `/api/health` `/api/ready` → 故障注入（`docker stop` 副本）→ 恢复。
+4. **云部署测试清单**（阿里云 / 移动云 / 自建 VM 通用，逐项可勾选）：
+   - **资源**：2× 同 VPC 算力（ECS / 弹性云主机 / 自建 VM）；托管 Redis（或独立第三台自建，**禁止**与 serve 同机，否则 kill 错节点连 Redis 一起没）；LB（SLB/ALB/云 LB）。
+   - **网络**：安全组仅放行 LB→serve、serve→Redis；Redis 不公网暴露；出网/代理（`HTTP(S)_PROXY`、模型 API 白名单）已配。
+   - **LB**：健康检查路径 = `/api/ready`（非仅 `/api/health`）；SSE idle timeout ≥ 5–10 分钟；会话亲和策略已记录（`hash $arg_session_id` 或源地址，及「打错副本返回 `session_busy_elsewhere` 需重试」的兜底语义）。
+   - **部署**：两副本 env 一致（`AGX_HA_MODE=redis` 等）；`AGX_SESSION_FTS=0`；镜像/版本一致。
+   - **验收用例**：
+     1. 两副本 `/api/ready` 均 200；
+     2. 经 LB 发起多轮工具调用会话，记录 `session_id`；
+     3. `kill`/停掉当前持有该会话的副本，LB 健康检查摘流；
+     4. 同 `session_id` 继续对话 / SSE 带 `resume_cursor` 重连 → 另一副本接管续跑、事件补发无缺口；
+     5. 定时任务在 leader 单副本仅 fire 一次（停 leader 后 35s 内另一副本接管且不重复 fire 同分钟任务）；
+     6. 滚动重启：先停一副本（draining → 摘流 → 恢复）再停另一副本，全程会话不丢。
+   - **观测**：各副本日志中 lock/leader/resume 关键事件可查；Redis key（`agenticx:sess:*`、`agenticx:leader:automation`）可核对。
+5. **滚动重启操作步骤** 与 **故障接管验证步骤**（含预期现象与回退）。
+6. **已知限制**：MCP stdio 每副本独立、taskspaces 不共享、FTS 每副本 backfill、nginx 无法按请求体 session_id 路由（见「发现的非目标问题」）。
+
+**AC-6**：`docs/guides/ha-deployment.md` 含上述「云部署测试清单」一节，且清单中「验收用例」6 条在本地 compose 环境全部可手工复现（云环境仅替换为托管 Redis + 云 LB，步骤不变）。
 
 ## 发现的非目标问题（记录，不修）
 
