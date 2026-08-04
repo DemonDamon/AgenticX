@@ -385,6 +385,9 @@ describe("runDeepResearchTurn", () => {
     ).toBe(true);
     const rows = await store.listByRun("t1", "u1", "run-wrapup-degrade");
     expect(rows.some((r) => r.path.endsWith("final-report.md"))).toBe(true);
+    expect(
+      events.some((e) => e.type === "narrative" && String(e.text).includes("HTML")),
+    ).toBe(true);
   });
 
   it("emits failure copy when all searches fail", async () => {

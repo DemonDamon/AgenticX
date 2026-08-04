@@ -3,6 +3,7 @@ import {
   datetime,
   index,
   int,
+  mediumtext,
   mysqlTable,
   text,
   uniqueIndex,
@@ -22,7 +23,8 @@ export const enterpriseChatArtifacts = mysqlTable(
     title: text("title").notNull(),
     kind: varchar("kind", { length: 32 }).default("other").notNull(),
     mimeType: varchar("mime_type", { length: 128 }).default("text/markdown").notNull(),
-    content: text("content").notNull(),
+    /** MEDIUMTEXT (16MB): TEXT's 64KB cap truncated large HTML reports. */
+    content: mediumtext("content").notNull(),
     byteSize: int("byte_size").notNull(),
     createdAt: datetime("created_at", { fsp: 6 }).default(sql`(UTC_TIMESTAMP(6))`).notNull(),
   },
