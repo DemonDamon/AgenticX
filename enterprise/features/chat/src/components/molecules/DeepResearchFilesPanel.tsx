@@ -504,6 +504,8 @@ export function DeepResearchFilesPanel({
   /** Where a preview was entered from, so the back button returns there. */
   const [previewOrigin, setPreviewOrigin] = React.useState<"browse" | "sources">("browse");
   const [previewRaw, setPreviewRaw] = React.useState<string>("");
+  const [previewLoading, setPreviewLoading] = React.useState(false);
+  const [previewError, setPreviewError] = React.useState<string | null>(null);
   const [loading, setLoading] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
   const [fullscreen, setFullscreen] = React.useState(false);
@@ -622,10 +624,14 @@ export function DeepResearchFilesPanel({
   React.useEffect(() => {
     if (!open || view !== "preview" || !selectedId) {
       setPreviewRaw("");
+      setPreviewLoading(false);
+      setPreviewError(null);
       return;
     }
     // Clear immediately so HTML/markdown previews never flash the previous file.
     setPreviewRaw("");
+    setPreviewError(null);
+    setPreviewLoading(true);
     let cancelled = false;
     void (async () => {
       try {
@@ -635,8 +641,13 @@ export function DeepResearchFilesPanel({
           data?: { artifact?: { content?: string } };
         };
         if (!cancelled) setPreviewRaw(json.data?.artifact?.content ?? "");
-      } catch {
-        if (!cancelled) setPreviewRaw("");
+      } catch (err) {
+        if (!cancelled) {
+          setPreviewRaw("");
+          setPreviewError(err instanceof Error ? err.message : "预览加载失败");
+        }
+      } finally {
+        if (!cancelled) setPreviewLoading(false);
       }
     })();
     return () => {
@@ -1042,12 +1053,15 @@ export function DeepResearchFilesPanel({
             .filter(Boolean)
             .join(" ")}
         >
-          {loading ? (
+          {previewLoading ? (
             <p className="px-5 py-4 text-xs text-muted-foreground">加载中…</p>
           ) : null}
-          {error ? <p className="px-5 py-4 text-xs text-destructive">{error}</p> : null}
-          {!loading && !error && selectedIsHtml && htmlSrcDoc.trim() ? (
+          {previewError ? (
+            <p className="px-5 py-4 text-xs text-destructive">{previewError}</p>
+          ) : null}
+          {!previewLoading && !previewError && selectedIsHtml && htmlSrcDoc.trim() ? (
             <iframe
+              key={selectedId ?? title}
               title={title}
               srcDoc={htmlSrcDoc}
               // Scripts needed for Mermaid CDN; content is tenant-owned report HTML.
@@ -1056,14 +1070,14 @@ export function DeepResearchFilesPanel({
               data-testid="deep-research-html-preview"
             />
           ) : null}
-          {!loading && !error && !selectedIsHtml && previewMarkdown ? (
+          {!previewLoading && !previewError && !selectedIsHtml && previewMarkdown ? (
             <div className="agx-assistant-md agx-assistant-md--document max-w-none break-words text-base">
               <ReactMarkdown remarkPlugins={[remarkGfm]} components={mdComponents}>
                 {previewMarkdown}
               </ReactMarkdown>
             </div>
           ) : null}
-          {!loading && !error && !hasPreview ? (
+          {!previewLoading && !previewError && !hasPreview ? (
             <p className="px-5 py-4 text-xs text-muted-foreground">暂无可预览内容</p>
           ) : null}
         </div>

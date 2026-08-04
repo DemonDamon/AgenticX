@@ -32,6 +32,15 @@ export function escapeHtml(raw: string): string {
 export function safeHref(raw: string): string {
   const trimmed = raw.trim();
   if (!trimmed) return "#";
+  // In-document anchors (citations `#ref-N`, TOC `#section`) must stay fragment-only.
+  // Stripping them to bare `#` breaks scroll + lets sandboxed srcDoc navigate the parent.
+  if (trimmed.startsWith("#")) {
+    const id = trimmed.slice(1);
+    if (!id) return "#";
+    // Disallow whitespace / control chars in fragment ids.
+    if (/[\s\0]/.test(id)) return "#";
+    return trimmed;
+  }
   try {
     const url = new URL(trimmed);
     if (url.protocol === "http:" || url.protocol === "https:") return trimmed;
@@ -430,10 +439,10 @@ const REPORT_JS = `
     if (!a) return;
     var href = a.getAttribute("href") || "";
     if (href.charAt(0) !== "#") return;
-    if (scrollToHash(href)) {
-      event.preventDefault();
-      if (event.stopPropagation) event.stopPropagation();
-    }
+    // Always stop hash navigation escaping the sandbox (bare hash or missing targets).
+    event.preventDefault();
+    if (event.stopPropagation) event.stopPropagation();
+    scrollToHash(href);
   }, true);
   var links = document.querySelectorAll(".toc a");
   var sections = [];

@@ -115,10 +115,10 @@ const PORTAL_TOC_NARROW_PATCH = `
       if (!a) return;
       var href = a.getAttribute("href") || "";
       if (href.charAt(0) !== "#") return;
-      if (scrollToHash(href)) {
-        event.preventDefault();
-        if (event.stopPropagation) event.stopPropagation();
-      }
+      // Always stop hash navigation escaping the sandbox (bare hash or missing targets).
+      event.preventDefault();
+      if (event.stopPropagation) event.stopPropagation();
+      scrollToHash(href);
     }, true);
   }
 })();
@@ -169,13 +169,31 @@ function injectPortalTocNarrowPatch(html: string): string {
 }
 
 /**
+ * Repair already-saved report.html where citation anchors were wrongly sanitized
+ * from `#ref-N` to bare `#` (label remains the citation index).
+ */
+export function repairBrokenCitationHrefs(html: string): string {
+  return html.replace(/<a href="#">(\d{1,3})<\/a>/g, (match, n: string) => {
+    const id = `ref-${n}`;
+    if (html.includes(`id="${id}"`)) {
+      return `<a href="#${id}">${n}</a>`;
+    }
+    return match;
+  });
+}
+
+/**
  * Align sandboxed report.html srcDoc with the portal theme.
  * Sandbox without allow-same-origin cannot read localStorage / parent CSS vars,
  * so we stamp `class="dark"` onto <html> before handing it to the iframe.
  * Also patches narrow-viewport TOC stacking for already-saved report.html files.
+ * Empty content returns "" so the panel does not paint a blank white iframe.
  */
 export function prepareHtmlPreviewSrcDoc(html: string, dark: boolean): string {
-  const stamped = stampHtmlDarkClass(html ?? "", dark);
+  const raw = html ?? "";
+  if (!raw.trim()) return "";
+  const repaired = repairBrokenCitationHrefs(raw);
+  const stamped = stampHtmlDarkClass(repaired, dark);
   return injectPortalTocNarrowPatch(stamped);
 }
 
