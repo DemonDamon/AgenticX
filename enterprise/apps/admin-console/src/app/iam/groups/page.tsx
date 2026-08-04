@@ -287,6 +287,8 @@ export default function GroupsPage() {
   const [loading, setLoading] = useState(true);
   const [editing, setEditing] = useState<GroupQuotaOverview | null | "new">(null);
   const [form, setForm] = useState<EditorForm>(EMPTY_FORM);
+  const [unlimitedTokens, setUnlimitedTokens] = useState(true);
+  const [finiteMonthlyTokens, setFiniteMonthlyTokens] = useState("");
   const [saving, setSaving] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
 
@@ -353,19 +355,36 @@ export default function GroupsPage() {
   const openCreate = () => {
     setEditing("new");
     setConfirmDelete(false);
-    setForm(EMPTY_FORM);
+    setUnlimitedTokens(true);
+    setFiniteMonthlyTokens("");
+    setForm({ ...EMPTY_FORM, monthlyTokens: "0" });
   };
 
   const openEdit = (group: GroupQuotaOverview) => {
     setEditing(group);
     setConfirmDelete(false);
+    const groupHasNoLimit = group.unlimited || group.monthlyTokens <= 0;
+    const initialMonthlyTokens = groupHasNoLimit ? "0" : String(group.monthlyTokens);
+    setUnlimitedTokens(groupHasNoLimit);
+    setFiniteMonthlyTokens(groupHasNoLimit ? "" : initialMonthlyTokens);
     setForm({
       name: group.name,
       description: group.description ?? "",
-      monthlyTokens: String(group.monthlyTokens || "0"),
+      monthlyTokens: initialMonthlyTokens,
       memberIds: group.memberIds,
       modelIds: group.modelIds,
     });
+  };
+
+  const setQuotaUnlimited = (next: boolean) => {
+    if (next) {
+      const currentFiniteValue = Number(form.monthlyTokens) > 0 ? form.monthlyTokens : "";
+      setFiniteMonthlyTokens((current) => current || currentFiniteValue);
+      setForm((current) => ({ ...current, monthlyTokens: "0" }));
+    } else {
+      setForm((current) => ({ ...current, monthlyTokens: finiteMonthlyTokens }));
+    }
+    setUnlimitedTokens(next);
   };
 
   const toggleMember = (id: string) => {
@@ -388,9 +407,11 @@ export default function GroupsPage() {
 
   const save = async () => {
     if (!editing || saving) return;
-    const monthlyTokens = Number(form.monthlyTokens || 0);
+    const monthlyTokens = unlimitedTokens ? 0 : Number(form.monthlyTokens);
     if (!form.name.trim()) return toast.error("请输入用户组名称");
-    if (!Number.isFinite(monthlyTokens) || monthlyTokens < 0) return toast.error("请输入大于或等于 0 的 Token 数");
+    if (!unlimitedTokens && (!Number.isInteger(monthlyTokens) || monthlyTokens <= 0)) {
+      return toast.error("请关闭不限额后输入正整数 Token 额度");
+    }
     setSaving(true);
     try {
       const isNew = editing === "new";
@@ -546,14 +567,35 @@ export default function GroupsPage() {
                     <Input id="group-name" value={form.name} onChange={(event) => setForm((value) => ({ ...value, name: event.target.value }))} placeholder="例如：项目成员" />
                   </div>
                   <div className="space-y-2">
-                    <Label htmlFor="group-monthly-tokens">每人月额度（Token）</Label>
+                    <div className="flex items-center justify-between gap-3">
+                      <Label htmlFor="group-monthly-tokens">每人月额度（Token）</Label>
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant={unlimitedTokens ? "secondary" : "outline"}
+                        aria-pressed={unlimitedTokens}
+                        onClick={() => setQuotaUnlimited(!unlimitedTokens)}
+                        disabled={saving}
+                      >
+                        {unlimitedTokens ? "不限额（已启用）" : "不限额"}
+                      </Button>
+                    </div>
                     <Input
                       id="group-monthly-tokens"
                       inputMode="numeric"
-                      value={form.monthlyTokens}
-                      onChange={(event) => setForm((value) => ({ ...value, monthlyTokens: event.target.value.replace(/[^0-9]/g, "") }))}
-                      placeholder="0 表示不限制"
+                      value={unlimitedTokens ? "0" : form.monthlyTokens}
+                      onChange={(event) => {
+                        const value = event.target.value.replace(/[^0-9]/g, "");
+                        setForm((current) => ({ ...current, monthlyTokens: value }));
+                        setFiniteMonthlyTokens(value);
+                      }}
+                      placeholder="请输入正整数"
+                      disabled={unlimitedTokens}
+                      className={unlimitedTokens ? "bg-muted text-muted-foreground" : undefined}
                     />
+                    <p className="text-xs text-muted-foreground">
+                      {unlimitedTokens ? "已启用不限额，保存后以 0 兼容存储。" : "请输入正整数；如不限制额度，请点击右侧“不限额”。"}
+                    </p>
                   </div>
                 </div>
                 <div className="space-y-2">

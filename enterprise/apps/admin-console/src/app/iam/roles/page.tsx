@@ -106,6 +106,8 @@ export default function RolesPage() {
   const [loading, setLoading] = useState(true);
   const [selected, setSelected] = useState<UserQuotaOverview | null>(null);
   const [monthlyTokens, setMonthlyTokens] = useState("");
+  const [unlimitedTokens, setUnlimitedTokens] = useState(false);
+  const [finiteMonthlyTokens, setFiniteMonthlyTokens] = useState("");
   const [modelAccess, setModelAccess] = useState<ModelAccess | null>(null);
   const [manualModelIds, setManualModelIds] = useState<string[]>([]);
   const [initialManualModelIds, setInitialManualModelIds] = useState<string[]>([]);
@@ -170,7 +172,11 @@ export default function RolesPage() {
 
   const openEditor = useCallback(async (user: UserQuotaOverview) => {
     setSelected(user);
-    setMonthlyTokens(String(user.monthlyTokens));
+    const userHasNoLimit = user.unlimited || user.monthlyTokens <= 0;
+    const initialMonthlyTokens = userHasNoLimit ? "0" : String(user.monthlyTokens);
+    setUnlimitedTokens(userHasNoLimit);
+    setMonthlyTokens(initialMonthlyTokens);
+    setFiniteMonthlyTokens(userHasNoLimit ? "" : initialMonthlyTokens);
     setModelAccess(null);
     setManualModelIds([]);
     setInitialManualModelIds([]);
@@ -372,11 +378,22 @@ export default function RolesPage() {
     });
   };
 
+  const setQuotaUnlimited = (next: boolean) => {
+    if (next) {
+      const currentFiniteValue = Number(monthlyTokens) > 0 ? monthlyTokens : "";
+      setFiniteMonthlyTokens((current) => current || currentFiniteValue);
+      setMonthlyTokens("0");
+    } else {
+      setMonthlyTokens(finiteMonthlyTokens);
+    }
+    setUnlimitedTokens(next);
+  };
+
   const save = async () => {
     if (!selected || saving) return;
-    const nextQuota = Number(monthlyTokens || 0);
-    if (!Number.isFinite(nextQuota) || nextQuota < 0) {
-      toast.error("请输入大于或等于 0 的 Token 数");
+    const nextQuota = unlimitedTokens ? 0 : Number(monthlyTokens);
+    if (!unlimitedTokens && (!Number.isInteger(nextQuota) || nextQuota <= 0)) {
+      toast.error("请关闭不限额后输入正整数 Token 额度");
       return;
     }
     const quotaChanged = Math.floor(nextQuota) !== selected.monthlyTokens;
@@ -625,15 +642,35 @@ export default function RolesPage() {
                   </div>
                 </div>
                 <div className="space-y-2">
-                  <Label htmlFor="user-monthly-tokens">每月 Token 额度</Label>
+                  <div className="flex items-center justify-between gap-3">
+                    <Label htmlFor="user-monthly-tokens">每月 Token 额度</Label>
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant={unlimitedTokens ? "secondary" : "outline"}
+                      aria-pressed={unlimitedTokens}
+                      onClick={() => setQuotaUnlimited(!unlimitedTokens)}
+                      disabled={saving}
+                    >
+                      {unlimitedTokens ? "不限额（已启用）" : "不限额"}
+                    </Button>
+                  </div>
                   <Input
                     id="user-monthly-tokens"
                     inputMode="numeric"
-                    value={monthlyTokens}
-                    onChange={(event) => setMonthlyTokens(event.target.value.replace(/[^0-9]/g, ""))}
-                    placeholder="0 表示不限制"
+                    value={unlimitedTokens ? "0" : monthlyTokens}
+                    onChange={(event) => {
+                      const value = event.target.value.replace(/[^0-9]/g, "");
+                      setMonthlyTokens(value);
+                      setFiniteMonthlyTokens(value);
+                    }}
+                    placeholder="请输入正整数"
+                    disabled={unlimitedTokens}
+                    className={unlimitedTokens ? "bg-muted text-muted-foreground" : undefined}
                   />
-                  <p className="text-xs text-muted-foreground">设置为 0 时，该用户不受月度 Token 上限限制。</p>
+                  <p className="text-xs text-muted-foreground">
+                    {unlimitedTokens ? "已启用不限额，保存后以 0 兼容存储。" : "请输入正整数；如不限制额度，请点击右侧“不限额”。"}
+                  </p>
                 </div>
                 <section className="space-y-3">
                   <div>
