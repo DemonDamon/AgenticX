@@ -113,6 +113,7 @@ describe("mysql baseline migration inventory", () => {
       "0010_chat_history_operations.sql",
       "0011_enterprise_chat_attachments.sql",
       "0012_enterprise_deep_research_runs.sql",
+      "0013_chat_artifacts_content_mediumtext.sql",
     ]);
 
     const sql = readFileSync(baselinePath, "utf8");
@@ -143,6 +144,7 @@ describe("mysql baseline migration inventory", () => {
       expect.objectContaining({ idx: 10, tag: "0010_chat_history_operations" }),
       expect.objectContaining({ idx: 11, tag: "0011_enterprise_chat_attachments" }),
       expect.objectContaining({ idx: 12, tag: "0012_enterprise_deep_research_runs" }),
+      expect.objectContaining({ idx: 13, tag: "0013_chat_artifacts_content_mediumtext" }),
     ]);
     expect(readdirSync(migrationDir)).not.toContain("0016_mcp_hosting.sql");
     expect(readdirSync(migrationDir)).not.toContain(

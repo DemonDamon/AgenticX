@@ -4,6 +4,7 @@ import {
   index,
   int,
   json,
+  mediumtext,
   mysqlTable,
   text,
   varchar,
@@ -24,8 +25,11 @@ export const enterpriseDeepResearchRuns = mysqlTable(
     topic: text("topic").notNull(),
     /** 有序 DeepResearchEvent[]，重连时全量重放。 */
     events: json("events").$type<unknown[]>().default([]).notNull(),
-    /** 已产出的报告 Markdown（增量追加），完成前可为部分内容。 */
-    reportMarkdown: text("report_markdown").default("").notNull(),
+    /**
+     * 已产出的报告 Markdown（增量追加），完成前可为部分内容。
+     * MEDIUMTEXT (16MB): long reports exceed TEXT's 64KB cap.
+     */
+    reportMarkdown: mediumtext("report_markdown").default("").notNull(),
     /** 序列化的 Citation[]，用于 sources 段重放。 */
     citations: json("citations").$type<unknown[]>().default([]).notNull(),
     errorMessage: text("error_message"),
