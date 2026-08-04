@@ -8,6 +8,7 @@ import {
   formatArtifactByteSize,
   isHtmlArtifact,
   prepareHtmlPreviewSrcDoc,
+  repairBrokenCitationHrefs,
 } from "./deep-research-artifact-tree";
 
 describe("isHtmlArtifact", () => {
@@ -22,6 +23,11 @@ describe("isHtmlArtifact", () => {
 });
 
 describe("prepareHtmlPreviewSrcDoc", () => {
+  it("returns empty string for blank content (no white iframe shell)", () => {
+    expect(prepareHtmlPreviewSrcDoc("", false)).toBe("");
+    expect(prepareHtmlPreviewSrcDoc("   \n", true)).toBe("");
+  });
+
   it("stamps dark class onto html for portal dark theme", () => {
     const out = prepareHtmlPreviewSrcDoc(
       '<!DOCTYPE html><html lang="zh"><head></head></html>',
@@ -55,6 +61,25 @@ describe("prepareHtmlPreviewSrcDoc", () => {
     expect(out).toContain(".theme-toggle { display: none !important; }");
     expect(out).toContain("__agxPortalHashNav");
     expect(out).toContain("scrollToHash");
+    const clickHandler = out.slice(
+      out.indexOf("__agxPortalHashNav"),
+      out.indexOf("</script>", out.indexOf("__agxPortalHashNav")),
+    );
+    expect(clickHandler.indexOf("preventDefault")).toBeLessThan(
+      clickHandler.lastIndexOf("scrollToHash(href)"),
+    );
+  });
+
+  it("repairs bare citation hrefs when ref targets exist", () => {
+    const broken =
+      '<p>见 <a href="#">3</a></p><li id="ref-3">来源</li>';
+    expect(repairBrokenCitationHrefs(broken)).toContain('href="#ref-3"');
+    const out = prepareHtmlPreviewSrcDoc(
+      `<!DOCTYPE html><html><head></head><body>${broken}</body></html>`,
+      false,
+    );
+    expect(out).toContain('href="#ref-3"');
+    expect(out).not.toMatch(/<a href="#">3<\/a>/);
   });
 });
 
