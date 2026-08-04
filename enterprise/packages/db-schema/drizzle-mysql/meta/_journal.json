@@ -99,6 +99,13 @@
       "when": 1785800000001,
       "tag": "0013_enterprise_deep_research_runs",
       "breakpoints": true
+    },
+    {
+      "idx": 14,
+      "version": "5",
+      "when": 1785900000001,
+      "tag": "0014_chat_artifacts_content_mediumtext",
+      "breakpoints": true
     }
   ]
 }

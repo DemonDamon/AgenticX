@@ -1469,10 +1469,13 @@ export async function runDeepResearchTurn(
               enqueueEvent: collectArtifactEvent,
             });
           } catch (finalizeError) {
-            console.warn(
-              "[deep-research] finalizeReportArtifacts failed:",
-              finalizeError instanceof Error ? finalizeError.message : finalizeError,
-            );
+            const reason =
+              finalizeError instanceof Error ? finalizeError.message : String(finalizeError);
+            console.warn("[deep-research] finalizeReportArtifacts failed:", reason);
+            enqueueEvent({
+              type: "narrative",
+              text: `可视化 HTML 版本生成失败（${reason}）。完整正文已保存为 Markdown 交付物，可直接下载查看。`,
+            });
           }
         }
 
