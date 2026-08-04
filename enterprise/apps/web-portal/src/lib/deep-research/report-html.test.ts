@@ -20,6 +20,16 @@ describe("escapeHtml / safeHref", () => {
   it("keeps https urls", () => {
     expect(safeHref("https://a.com")).toBe("https://a.com");
   });
+
+  it("keeps in-document fragment hrefs for citations and toc", () => {
+    expect(safeHref("#ref-1")).toBe("#ref-1");
+    expect(safeHref("#核心结论")).toBe("#核心结论");
+  });
+
+  it("keeps bare hash but rejects fragments with whitespace", () => {
+    expect(safeHref("#")).toBe("#");
+    expect(safeHref("#ref 1")).toBe("#");
+  });
 });
 
 describe("renderHtmlReport", () => {
@@ -43,6 +53,8 @@ describe("renderHtmlReport", () => {
     expect(html).toContain('id="sources"');
     expect(html).toContain('id="ref-1"');
     expect(html).toContain('id="ref-2"');
+    expect(html).toContain('href="#ref-1"');
+    expect(html).not.toMatch(/<a href="#">1<\/a>/);
   });
 
   it("matches ## heading count in toc and body ids", () => {
@@ -113,5 +125,13 @@ describe("renderHtmlReport", () => {
     expect(html).toContain('href.charAt(0) !== "#"');
     expect(html).toContain("scrollIntoView");
     expect(html).toContain("preventDefault");
+    // preventDefault must run for every # link, not only when scrollToHash succeeds.
+    const clickHandler = html.slice(
+      html.indexOf('document.addEventListener("click"'),
+      html.indexOf("var links = document.querySelectorAll"),
+    );
+    expect(clickHandler.indexOf("preventDefault")).toBeLessThan(
+      clickHandler.lastIndexOf("scrollToHash(href)"),
+    );
   });
 });
