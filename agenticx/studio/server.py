@@ -1008,7 +1008,99 @@ def create_studio_app() -> FastAPI:
         except Exception as exc:
             logger.debug("Session supervisor not started: %s", exc)
 
+        # HA Plan C: start cross-replica coordination. A redis bus that fails
+        # its startup ping falls back to in-process (single-replica semantics)
+        # instead of running degraded.
+        try:
+            from agenticx.runtime.coordination.factory import (
+                get_coordination_bus,
+                set_coordination_bus,
+            )
+            from agenticx.runtime.coordination.in_process import InProcessBus
+            from agenticx.runtime.coordination.redis_bus import RedisBus
+
+            bus = getattr(manager, "_bus", None)
+            if isinstance(bus, RedisBus) and not await bus.ping():
+                logger.warning("coordination bus ping failed; falling back to in-process")
+                set_coordination_bus(InProcessBus())
+                manager._bus = get_coordination_bus()
+            await manager.start_coordination()
+        except Exception as exc:
+            logger.debug("coordination start failed: %s", exc)
+
+        # HA Plan D: server-side automation scheduler (leader-elected).
+        automation_scheduler = None
+        try:
+            from agenticx.studio.automation_scheduler import (
+                ServerAutomationScheduler,
+                resolve_scheduler_mode,
+            )
+
+            if resolve_scheduler_mode() == "server":
+                from agenticx.runtime.coordination.leader import LeaderGate
+
+                serve_port = os.environ.get("AGX_SERVE_PORT", "").strip()
+                if serve_port:
+                    gate = LeaderGate(
+                        manager._bus,
+                        name="automation",
+                        instance_id=manager._instance_id,
+                    )
+                    automation_scheduler = ServerAutomationScheduler(
+                        gate,
+                        base_url=f"http://127.0.0.1:{serve_port}",
+                        token=os.environ.get("AGX_DESKTOP_TOKEN", "").strip(),
+                    )
+                    await automation_scheduler.start()
+                    app.state.automation_scheduler = automation_scheduler
+        except Exception as exc:
+            logger.debug("automation scheduler not started: %s", exc)
+
+        # HA Plan B: resume crash-interrupted turns in the background so
+        # startup is never blocked by long-running resumed turns.
+        resume_task = None
+        try:
+            from agenticx.runtime.checkpoint import resume_interrupted_enabled
+
+            if resume_interrupted_enabled():
+                resume_task = asyncio.create_task(manager.resume_interrupted_sessions())
+                app.state.resume_task = resume_task
+        except Exception as exc:
+            logger.debug("resume_interrupted_sessions not started: %s", exc)
+
         yield
+
+        # HA Plan D: graceful drain before shutdown — stop accepting new turns
+        # and wait for in-flight ones (their checkpoints are already on disk).
+        app.state.draining = True
+        try:
+            drain_timeout = float(os.environ.get("AGX_DRAIN_TIMEOUT_SEC", "15") or "15")
+        except ValueError:
+            drain_timeout = 15.0
+        try:
+            drained = await manager.wait_runs_drained(timeout_seconds=drain_timeout)
+            if not drained:
+                logger.warning(
+                    "drain timeout: %d run(s) still active after %.1fs",
+                    manager.active_runs,
+                    drain_timeout,
+                )
+        except Exception as exc:
+            logger.debug("drain wait failed: %s", exc)
+        if automation_scheduler is not None:
+            try:
+                await automation_scheduler.stop()
+            except Exception as exc:
+                logger.debug("automation scheduler stop error: %s", exc)
+
+        if resume_task is not None and not resume_task.done():
+            resume_task.cancel()
+            try:
+                await resume_task
+            except asyncio.CancelledError:
+                pass
+            except Exception as exc:
+                logger.debug("resume task shutdown error: %s", exc)
 
         if longrun_bg is not None:
             longrun_bg.cancel()
@@ -1072,6 +1164,7 @@ def create_studio_app() -> FastAPI:
     app.state.session_manager = manager
     app.state.avatar_registry = avatar_registry
     app.state.group_registry = group_registry
+    app.state.draining = False
     app.state.interrupted_sessions = manager.scan_interrupted_sessions()
     desktop_token = os.getenv("AGX_DESKTOP_TOKEN", "").strip()
 
@@ -2486,6 +2579,24 @@ def create_studio_app() -> FastAPI:
         x_agx_desktop_token: str | None = Header(default=None),
     ) -> StreamingResponse:
         _check_token(x_agx_desktop_token)
+        # HA Plan D: reject new turns while draining (rolling restart safety).
+        if getattr(app.state, "draining", False):
+            async def _draining_stream() -> AsyncGenerator[str, None]:
+                err = SseEvent(
+                    type="error",
+                    data={
+                        "error": "server_draining",
+                        "text": "服务器正在重启，请稍后重试。",
+                    },
+                )
+                yield f"data: {json.dumps(err.model_dump(), ensure_ascii=False)}\n\n"
+                yield 'data: {"type":"done","data":{"reason":"server_draining"}}\n\n'
+
+            return StreamingResponse(
+                _draining_stream(),
+                media_type="text/event-stream",
+                headers=_STREAMING_SSE_HEADERS,
+            )
         managed = manager.get(payload.session_id, touch=False)
         if managed is None:
             raise HTTPException(status_code=404, detail="session not found")
@@ -3492,6 +3603,12 @@ def create_studio_app() -> FastAPI:
                     yield f"data: {json.dumps(err.model_dump(), ensure_ascii=False)}\n\n"
             finally:
                 runtime_was_cancelled = False
+                manager.run_finished()
+                if run_lock is not None:
+                    try:
+                        await run_lock.release()
+                    except Exception:
+                        pass
                 if hub_sub_id is not None and event_hub is not None:
                     event_hub.unsubscribe(hub_sub_id)
                 if runtime_task is not None and not runtime_task.done():
@@ -3618,6 +3735,30 @@ def create_studio_app() -> FastAPI:
                     )
             if not client_disconnected and event_hub is None:
                 yield 'data: {"type":"done","data":{}}\n\n'
+
+        # HA Plan C: cross-replica mutual exclusion for this session's turn.
+        # In-process bus always grants (pre-HA behavior unchanged); redis mode
+        # returns None when another replica owns the session.
+        run_lock = await manager.acquire_session_run_lock(payload.session_id)
+        if run_lock is None:
+            async def _busy_stream() -> AsyncGenerator[str, None]:
+                err = SseEvent(
+                    type="error",
+                    data={
+                        "error": "session_busy_elsewhere",
+                        "text": "该会话正在另一副本上运行，请稍后重试。",
+                    },
+                )
+                yield f"data: {json.dumps(err.model_dump(), ensure_ascii=False)}\n\n"
+                yield 'data: {"type":"done","data":{"reason":"session_busy_elsewhere"}}\n\n'
+
+            return StreamingResponse(
+                _busy_stream(),
+                media_type="text/event-stream",
+                headers=_STREAMING_SSE_HEADERS,
+            )
+
+        manager.run_started()
 
         return StreamingResponse(
             _event_stream(),
@@ -3762,6 +3903,29 @@ def create_studio_app() -> FastAPI:
 
         async def _reattach_stream() -> AsyncGenerator[str, None]:
             if hub is None or not hub.is_active:
+                # HA Plan C: fall back to the coordination bus replay log so a
+                # client landing on a replica that never hosted this session
+                # (or reconnecting after a restart) still catches up on the
+                # bounded buffered events. ``since``/``Last-Event-ID`` is
+                # interpreted as a bus cursor on this path.
+                bus = getattr(manager, "_bus", None)
+                if bus is not None:
+                    try:
+                        cursor = str(since).strip() if since else None
+                        if not cursor and last_event_id:
+                            cursor = str(last_event_id).strip() or None
+                        rows = await bus.event_read(sid, since=cursor)
+                    except Exception:
+                        rows = []
+                    for _cursor, _event in rows:
+                        sse = SseEvent(
+                            type=str(_event.get("type", "")),
+                            data=_event.get("data") or {},
+                        )
+                        yield f"data: {json.dumps(sse.model_dump(), ensure_ascii=False)}\n\n"
+                    if rows:
+                        yield 'data: {"type":"done","data":{"reason":"replayed_from_store"}}\n\n'
+                        return
                 yield 'data: {"type":"done","data":{"reason":"not_running"}}\n\n'
                 return
 
@@ -3816,6 +3980,64 @@ def create_studio_app() -> FastAPI:
                 hub.unsubscribe(sub_id)
 
         return StreamingResponse(_reattach_stream(), media_type="text/event-stream")
+
+    @app.get("/api/sessions/{session_id}/events")
+    async def get_session_events(
+        session_id: str,
+        since: str | None = Query(default=None),
+        x_agx_desktop_token: str | None = Header(default=None),
+    ) -> dict:
+        """Read-only replay-log pull for a session (HA cross-replica catch-up)."""
+        _check_token(x_agx_desktop_token)
+        sid = str(session_id or "").strip()
+        if not sid:
+            raise HTTPException(status_code=400, detail="session_id is required")
+        bus = getattr(manager, "_bus", None)
+        if bus is None:
+            return {"events": []}
+        try:
+            rows = await bus.event_read(sid, since=since)
+        except Exception:
+            rows = []
+        return {
+            "events": [
+                {
+                    "cursor": cursor,
+                    "type": str(event.get("type", "")),
+                    "agent_id": str(event.get("agent_id", "meta") or "meta"),
+                    "data": event.get("data") or {},
+                }
+                for cursor, event in rows
+            ]
+        }
+
+    @app.get("/api/health")
+    async def health() -> dict:
+        """Liveness probe: always 200 when the process serves HTTP."""
+        return {"status": "ok"}
+
+    @app.get("/api/ready")
+    async def ready():
+        """Readiness probe: storage + coordination bus connectivity (HA Plan D)."""
+        from fastapi.responses import JSONResponse
+
+        from agenticx.studio.storage.factory import get_storage_backend
+
+        detail: dict[str, Any] = {}
+        try:
+            storage_ok = await get_storage_backend().ping()
+        except Exception:
+            storage_ok = False
+        detail["storage"] = storage_ok
+        bus = getattr(manager, "_bus", None)
+        try:
+            bus_ok = bool(await bus.ping()) if bus is not None else True
+        except Exception:
+            bus_ok = False
+        detail["bus"] = bus_ok
+        if storage_ok and bus_ok:
+            return {"status": "ready"}
+        return JSONResponse(status_code=503, content={"status": "not_ready", "detail": detail})
 
     @app.put("/api/sessions/{session_id}/unattended")
     async def set_session_unattended(

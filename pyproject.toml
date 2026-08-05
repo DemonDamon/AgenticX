@@ -228,6 +228,7 @@ dev = [
     "flake8>=6.0.0,<8",
     "mypy>=1.0.0,<2",
     "pre-commit>=3.0.0,<4",
+    "fakeredis>=2.20,<3",
 ]
 # ── 全部功能（不含 dev/docs）──
 all = [

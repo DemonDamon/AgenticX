@@ -38,6 +38,14 @@ class ConfirmGate(ABC):
     async def request_confirm(self, question: str, context: Optional[Dict[str, Any]] = None) -> bool:
         """Request user confirmation and return approval."""
 
+    def export_state(self) -> Dict[str, Any]:
+        """Export serializable pending-confirmation state for checkpoints."""
+        return {}
+
+    def restore_state(self, state: Dict[str, Any]) -> None:
+        """Restore pending-confirmation state from a checkpoint (no-op default)."""
+        del state
+
 
 class SyncConfirmGate(ConfirmGate):
     """CLI gate backed by blocking input()."""
@@ -60,6 +68,7 @@ class AsyncConfirmGate(ConfirmGate):
         timeout_action: str = "reject",
     ) -> None:
         self._pending: Dict[str, asyncio.Future[bool]] = {}
+        self._pending_meta: Dict[str, Dict[str, Any]] = {}
         self.last_request: Optional[Dict[str, Any]] = None
         self.last_timeout_info: Optional[Dict[str, Any]] = None
 
@@ -81,6 +90,7 @@ class AsyncConfirmGate(ConfirmGate):
         loop = asyncio.get_running_loop()
         future: asyncio.Future[bool] = loop.create_future()
         self._pending[request_id] = future
+        self._pending_meta[request_id] = {"question": question, "context": payload}
         self.last_request = {
             "id": request_id,
             "question": question,
@@ -108,6 +118,7 @@ class AsyncConfirmGate(ConfirmGate):
             return approved
         finally:
             self._pending.pop(request_id, None)
+            self._pending_meta.pop(request_id, None)
 
     def resolve(self, request_id: str, approved: bool) -> bool:
         """Resolve one pending confirmation request."""
@@ -116,6 +127,52 @@ class AsyncConfirmGate(ConfirmGate):
             return False
         fut.set_result(bool(approved))
         return True
+
+    def export_state(self) -> Dict[str, Any]:
+        """Export pending confirmations (ids + questions) for checkpoints."""
+        pending = [
+            {
+                "request_id": rid,
+                "question": meta.get("question"),
+                "context": meta.get("context") or {},
+            }
+            for rid, meta in self._pending_meta.items()
+            if rid in self._pending
+        ]
+        return {"pending": pending, "last_request": self.last_request}
+
+    def restore_state(self, state: Dict[str, Any]) -> None:
+        """Restore pending confirmations as fresh futures awaiting resolution.
+
+        The original awaiting coroutine died with the process; restored
+        futures exist so the request stays resolvable (``resolve``) and
+        visible (``last_request``) until the user answers or the resumed
+        turn re-asks. Timeout semantics are unchanged because the new
+        waiter re-arms its own timeout.
+        """
+        if not isinstance(state, dict):
+            return
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            loop = None
+        pending = state.get("pending") or []
+        if isinstance(pending, list):
+            for item in pending:
+                if not isinstance(item, dict):
+                    continue
+                rid = str(item.get("request_id") or "").strip()
+                if not rid:
+                    continue
+                self._pending_meta[rid] = {
+                    "question": item.get("question"),
+                    "context": item.get("context") or {},
+                }
+                if loop is not None:
+                    self._pending.setdefault(rid, loop.create_future())
+        last_request = state.get("last_request")
+        if isinstance(last_request, dict):
+            self.last_request = last_request
 
 
 class AutoApproveConfirmGate(ConfirmGate):
