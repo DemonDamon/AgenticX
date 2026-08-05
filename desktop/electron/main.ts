@@ -1200,6 +1200,12 @@ class AutomationScheduler {
 
 const automationScheduler = new AutomationScheduler();
 
+/** HA mode: server-side scheduling disables the Electron-side scheduler (double-fire guard). */
+function isServerAutomationScheduler(cfg: AgxConfig): boolean {
+  const runtime = (cfg as { runtime?: { automation?: { scheduler?: unknown } } }).runtime;
+  return runtime?.automation?.scheduler === "server";
+}
+
 const KNOWN_BASE_URLS: Record<string, string> = {
   openai: "https://api.openai.com/v1",
   anthropic: "https://api.anthropic.com/v1",
@@ -11921,7 +11927,10 @@ if (!gotTheLock) {
       // renderer can't hit "No handler registered" when `app.on("activate")`
       // races with the studio-serve cold start.
       applyPreventSleepFromConfig(loadAgxConfig());
-      automationScheduler.start();
+      // HA mode: server 侧调度器启用时，Electron 侧不再启动，避免双触发。
+      if (!isServerAutomationScheduler(loadAgxConfig())) {
+        automationScheduler.start();
+      }
       // 与 commandLine proxy-bypass-list 互补：部分 Chromium/Electron 版本下仅 appendSwitch 仍会让
       // 渲染进程 fetch(127.0.0.1) 走系统代理 → TypeError: network error；显式声明环回绕过。
       await session.defaultSession.setProxy({
