@@ -2297,10 +2297,14 @@ class AgentRuntime:
         clarify_gate: Optional[Any] = None,
         is_unattended: bool = False,
         llm_factory: Optional[Callable[[], Any]] = None,
+        checkpoint_store: Optional[Any] = None,
     ) -> None:
         self.llm = llm
         self._llm_factory = llm_factory
         self.confirm_gate = confirm_gate
+        self._checkpoint_store = checkpoint_store
+        self._current_turn_id: str = ""
+        self._checkpoint_created_at: float = 0.0
         self.clarify_gate = clarify_gate
         self.is_unattended = bool(is_unattended)
         self.max_tool_rounds = max_tool_rounds
@@ -2418,6 +2422,49 @@ class AgentRuntime:
             logger.exception("final session checkpoint failed")
         self._last_persist_time = time.time()
         self._tools_since_persist = 0
+
+    def _write_run_checkpoint(
+        self,
+        session: Any,
+        *,
+        round_idx: int,
+        pending_tool_calls: Optional[List[Dict[str, Any]]] = None,
+    ) -> None:
+        """Best-effort crash-recovery checkpoint (no-op when store absent)."""
+        store = self._checkpoint_store
+        if store is None:
+            return
+        session_id = str(getattr(session, "session_id", "") or "").strip()
+        if not session_id:
+            return
+        confirm_state: Optional[Dict[str, Any]] = None
+        exporter = getattr(self.confirm_gate, "export_state", None)
+        if callable(exporter):
+            try:
+                exported = exporter()
+                confirm_state = exported if isinstance(exported, dict) and exported else None
+            except Exception:
+                confirm_state = None
+        status = "awaiting_confirm" if (confirm_state or {}).get("pending") else "in_progress"
+        try:
+            from agenticx.runtime.checkpoint import AgentCheckpoint
+
+            store.save(
+                AgentCheckpoint(
+                    session_id=session_id,
+                    turn_id=self._current_turn_id,
+                    round_idx=max(0, int(round_idx)),
+                    status=status,
+                    pending_tool_calls=[
+                        dict(call) for call in (pending_tool_calls or []) if isinstance(call, dict)
+                    ],
+                    confirm_state=confirm_state,
+                    created_at=self._checkpoint_created_at or time.time(),
+                    updated_at=time.time(),
+                )
+            )
+        except Exception:
+            logger.debug("run checkpoint write failed", exc_info=True)
 
     def _append_terminal_assistant(
         self,
@@ -2573,6 +2620,100 @@ class AgentRuntime:
         persist_user_message: bool = True,
         usage_session_id: Optional[str] = None,
         usage_avatar_id: Optional[str] = None,
+        resume_start_round: int = 1,
+    ) -> AsyncGenerator[RuntimeEvent, None]:
+        """Public entry: wraps the turn with crash-recovery checkpoint lifecycle.
+
+        Without a checkpoint store this is a transparent pass-through. With
+        one, a checkpoint is written at turn entry and cleared on any normal
+        termination (FINAL, stop, or early return); abnormal termination
+        (cancellation / generator close / unexpected error) keeps the latest
+        checkpoint so a restarted process can resume the turn.
+        """
+        store = self._checkpoint_store
+        if store is None:
+            async for event in self._run_turn_inner(
+                user_input,
+                session,
+                should_stop,
+                agent_id=agent_id,
+                tools=tools,
+                system_prompt=system_prompt,
+                user_message_content=user_message_content,
+                history_user_attachments=history_user_attachments,
+                history_user_metadata=history_user_metadata,
+                history_user_content=history_user_content,
+                history_quoted_content=history_quoted_content,
+                history_quoted_message_id=history_quoted_message_id,
+                persist_user_message=persist_user_message,
+                usage_session_id=usage_session_id,
+                usage_avatar_id=usage_avatar_id,
+                resume_start_round=resume_start_round,
+            ):
+                yield event
+            return
+
+        from agenticx.runtime.checkpoint import AgentCheckpoint
+
+        session_id = str(getattr(session, "session_id", "") or "").strip()
+        self._current_turn_id = store.new_turn_id()
+        self._checkpoint_created_at = time.time()
+        start_round = max(1, int(resume_start_round))
+        if session_id:
+            self._write_run_checkpoint(session, round_idx=start_round - 1)
+        saw_final = False
+        normal_end = False
+        inner = self._run_turn_inner(
+            user_input,
+            session,
+            should_stop,
+            agent_id=agent_id,
+            tools=tools,
+            system_prompt=system_prompt,
+            user_message_content=user_message_content,
+            history_user_attachments=history_user_attachments,
+            history_user_metadata=history_user_metadata,
+            history_user_content=history_user_content,
+            history_quoted_content=history_quoted_content,
+            history_quoted_message_id=history_quoted_message_id,
+            persist_user_message=persist_user_message,
+            usage_session_id=usage_session_id,
+            usage_avatar_id=usage_avatar_id,
+            resume_start_round=resume_start_round,
+        )
+        try:
+            async for event in inner:
+                if getattr(event, "type", None) == EventType.FINAL.value:
+                    saw_final = True
+                yield event
+            normal_end = True
+        finally:
+            if session_id and (normal_end or saw_final):
+                store.clear(session_id)
+            try:
+                await inner.aclose()
+            except Exception:
+                pass
+
+    async def _run_turn_inner(
+        self,
+        user_input: str,
+        session: StudioSession,
+        should_stop: Optional[Callable[[], bool | Awaitable[bool]]] = None,
+        *,
+        agent_id: str = "meta",
+        tools: Optional[Sequence[Dict[str, Any]]] = None,
+        system_prompt: Optional[str] = None,
+        user_message_content: Optional[Any] = None,
+        history_user_attachments: Optional[list[dict[str, Any]]] = None,
+        history_user_metadata: Optional[dict[str, Any]] = None,
+        history_user_content: Optional[str] = None,
+        history_quoted_content: Optional[str] = None,
+        history_quoted_message_id: Optional[str] = None,
+        persist_user_message: bool = True,
+        usage_session_id: Optional[str] = None,
+        usage_avatar_id: Optional[str] = None,
+        resume_start_round: int = 1,
     ) -> AsyncGenerator[RuntimeEvent, None]:
         async def _check_should_stop() -> bool:
             if should_stop is None:
@@ -2981,10 +3122,12 @@ class AgentRuntime:
                 agent_id=agent_id,
             )
 
-        for round_idx in range(1, self.max_tool_rounds + 1):
+        for round_idx in range(max(1, int(resume_start_round)), self.max_tool_rounds + 1):
             if await _check_should_stop():
                 yield RuntimeEvent(type=EventType.ERROR.value, data={"text": STOP_MESSAGE}, agent_id=agent_id)
                 return
+            # Previous round (if any) fully completed at this point.
+            self._write_run_checkpoint(session, round_idx=round_idx - 1)
             # Re-project each round so tool_search loads take effect next round.
             active_tools, allowed_tool_names = _project_active_tools()
             if self._pending_loop_nudge:
@@ -4263,6 +4406,13 @@ class AgentRuntime:
                     assistant_message["reasoning_content"] = reasoning_for_tool_call
             session.agent_messages.append(assistant_message)
             synced_session_message_count = len(session.agent_messages)
+            if tool_calls:
+                # Round in flight: record dispatched-but-unanswered tool calls.
+                self._write_run_checkpoint(
+                    session,
+                    round_idx=round_idx - 1,
+                    pending_tool_calls=list(tool_calls),
+                )
 
             if not tool_calls:
                 # Reasoning-only / bodyless turn: nudge, then deterministic fallback.
