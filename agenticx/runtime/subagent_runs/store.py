@@ -25,7 +25,13 @@ _LOG = logging.getLogger(__name__)
 
 
 class SubAgentRunStore:
-    """Disk-backed run store for spawn/delegation timeline and artifacts."""
+    """Disk-backed run store for spawn/delegation timeline and artifacts.
+
+    TODO(HA): run records stay on local disk even when the session storage
+    backend is redis (Plan A scope decision). Moving run timelines into the
+    shared backend is a follow-up once multi-replica subagent observability
+    is required.
+    """
 
     _max_activity_entries = 500
     _activity_keep_head = 50
