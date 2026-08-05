@@ -1,0 +1,75 @@
+# HA validation stack: 2 x agx serve + redis + nginx (Plan D FR-5).
+#
+# Usage:
+#   docker compose -f deploy/ha-docker-compose/docker-compose.yml up --build
+#
+# Acceptance flow (docs/guides/ha-deployment.md):
+#   1. curl localhost:8080/api/health and /api/ready on the LB
+#   2. start a multi-round tool session via the LB, note session_id
+#   3. docker stop the owning replica -> continue the same session via the LB
+#      (the other replica resumes it; SSE reattach replays buffered events)
+#   4. a scheduled automation task fires exactly once (leader only)
+services:
+  redis:
+    image: redis:7-alpine
+    command: ["redis-server", "--appendonly", "no"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  agx-a:
+    build:
+      context: ../..
+      dockerfile: deploy/ha-docker-compose/Dockerfile
+    environment:
+      AGX_HA_MODE: redis
+      AGX_STORAGE_BACKEND: redis
+      AGX_COORDINATION_BACKEND: redis
+      AGX_REDIS_URL: redis://redis:6379/0
+      AGX_AUTOMATION_SCHEDULER: server
+      AGX_RESUME_INTERRUPTED: "1"
+      AGX_SESSION_FTS: "0"
+      AGX_PORT: "8000"
+      HOME: /data
+    volumes:
+      # Per-replica local state (taskspaces, MCP stdio, logs) stays local.
+      - agx-a-data:/data
+    depends_on:
+      redis:
+        condition: service_healthy
+
+  agx-b:
+    build:
+      context: ../..
+      dockerfile: deploy/ha-docker-compose/Dockerfile
+    environment:
+      AGX_HA_MODE: redis
+      AGX_STORAGE_BACKEND: redis
+      AGX_COORDINATION_BACKEND: redis
+      AGX_REDIS_URL: redis://redis:6379/0
+      AGX_AUTOMATION_SCHEDULER: server
+      AGX_RESUME_INTERRUPTED: "1"
+      AGX_SESSION_FTS: "0"
+      AGX_PORT: "8000"
+      HOME: /data
+    volumes:
+      - agx-b-data:/data
+    depends_on:
+      redis:
+        condition: service_healthy
+
+  nginx:
+    image: nginx:1.27-alpine
+    ports:
+      - "8080:80"
+    volumes:
+      - ./nginx.conf:/etc/nginx/nginx.conf:ro
+    depends_on:
+      - agx-a
+      - agx-b
+
+volumes:
+  agx-a-data:
+  agx-b-data:

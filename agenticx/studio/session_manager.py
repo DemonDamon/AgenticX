@@ -297,6 +297,10 @@ from agenticx.runtime import AsyncClarifyGate, AsyncConfirmGate
 from agenticx.runtime.team_manager import AgentTeamManager, SubAgentContext
 from agenticx.utils.atomic_writer import atomic_write_json
 from agenticx.studio.session_event_hub import SessionEventHub
+from agenticx.studio.storage.backend import SyncStorageFacade
+from agenticx.studio.storage.factory import get_storage_backend
+from agenticx.studio.storage.local_file import LocalFileBackend
+from agenticx.runtime.coordination.factory import get_coordination_bus
 
 EventEmitter = Callable[[Any], Awaitable[None]]
 SummarySink = Callable[[str, SubAgentContext], Awaitable[None]]
@@ -512,7 +516,47 @@ class SessionManager:
         self._session_store = SessionStore()
         self._sessions_root = os.path.join(os.path.expanduser("~"), ".agenticx", "sessions")
         self._taskspaces_root = os.path.join(os.path.expanduser("~"), ".agenticx", "taskspaces")
+        self._storage_backend = get_storage_backend()
+        self._bus = get_coordination_bus()
+        self._instance_id = uuid.uuid4().hex[:8]
+        self._coordination_started = False
+        self._active_runs = 0
         self._schedule_fts_backfill()
+
+    def run_started(self) -> None:
+        """Track an in-flight user-facing turn (for graceful draining)."""
+        self._active_runs += 1
+
+    def run_finished(self) -> None:
+        self._active_runs = max(0, self._active_runs - 1)
+
+    @property
+    def active_runs(self) -> int:
+        return self._active_runs
+
+    async def wait_runs_drained(self, timeout_seconds: float = 15.0) -> bool:
+        """Wait until no in-flight runs remain; False on timeout."""
+        deadline = time.monotonic() + max(0.0, float(timeout_seconds))
+        while self._active_runs > 0 and time.monotonic() < deadline:
+            await asyncio.sleep(0.1)
+        return self._active_runs == 0
+
+    @property
+    def _storage(self) -> SyncStorageFacade:
+        """Sync storage facade; local-mode paths follow ``self._sessions_root``.
+
+        Tests and embedders may override ``_sessions_root`` after construction,
+        so the local backend is re-resolved per access instead of being bound
+        once to the factory singleton's default root.
+        """
+        backend = self._storage_backend
+        if isinstance(backend, LocalFileBackend):
+            if backend.sessions_root != Path(self._sessions_root):
+                backend = LocalFileBackend(
+                    sessions_root=self._sessions_root,
+                    config_dir=backend.config_dir,
+                )
+        return SyncStorageFacade(backend)
 
     def _taskspace_limit(self) -> int:
         return _resolve_max_taskspaces()
@@ -633,7 +677,7 @@ class SessionManager:
             raise KeyError(f"unknown session_id: {session_id}")
         hub = managed.event_hub
         if hub is None or hub.is_closed or hub.is_runtime_done:
-            managed.event_hub = SessionEventHub(session_id)
+            managed.event_hub = SessionEventHub(session_id, coordination_bus=self._bus)
         return managed.event_hub
 
     def get_event_hub(self, session_id: str) -> SessionEventHub | None:
@@ -704,7 +748,60 @@ class SessionManager:
         if not sid:
             return False
         self._interrupt_requests.add(sid)
+        # HA Plan C: also broadcast so the replica actually running the
+        # session (if not this one) interrupts it. Fire-and-forget; without a
+        # running loop there is no remote replica to reach anyway.
+        try:
+            loop = asyncio.get_running_loop()
+            loop.create_task(self._bus.publish_cancel(sid))
+        except RuntimeError:
+            pass
         return True
+
+    async def start_coordination(self) -> None:
+        """Subscribe to cross-replica cancel broadcasts (idempotent).
+
+        Called from the server lifespan; a cancel for a session hosted by
+        this process is applied as a local interrupt.
+        """
+        if self._coordination_started:
+            return
+        self._coordination_started = True
+
+        async def _on_cancel(sid: str) -> None:
+            if sid in self._sessions:
+                self._interrupt_requests.add(sid)
+
+        try:
+            await self._bus.subscribe_cancel(_on_cancel)
+        except Exception:
+            _log.debug("cancel subscription failed", exc_info=True)
+
+    async def acquire_session_run_lock(self, session_id: str) -> Any:
+        """Acquire the session run lock for a new turn (HA mutual exclusion).
+
+        Returns a ``SessionLock`` to release at turn end, or ``None`` when
+        another replica holds the session (caller should answer
+        ``session_busy_elsewhere``). If the lock is lost mid-turn (lease
+        expiry / Redis outage), the local turn interrupts itself to avoid
+        double-writing against the new owner.
+        """
+        sid = str(session_id or "").strip()
+        if not sid:
+            return None
+        lock = await self._bus.acquire_session_lock(sid, owner=self._instance_id)
+        if lock is None:
+            return None
+
+        def _on_lost() -> None:
+            self._interrupt_requests.add(sid)
+
+        setter = getattr(lock, "on_lost", None)
+        try:
+            lock.on_lost = _on_lost  # type: ignore[attr-defined]
+        except Exception:
+            pass
+        return lock
 
     def get_continuation_lock(self, session_id: str) -> asyncio.Lock:
         """Return the process-local single-flight lock for session recovery."""
@@ -880,6 +977,168 @@ class SessionManager:
             if str(meta.get("execution_state", "idle")).strip() == "running":
                 out.append(row)
         return out
+
+    async def resume_interrupted_sessions(
+        self,
+        *,
+        runtime_runner: "Callable[[str, ManagedSession, Any], Awaitable[bool]] | None" = None,
+    ) -> list[str]:
+        """Resume sessions whose turn was cut by a process crash (HA Plan B).
+
+        Only sessions flagged ``interrupted`` by ``scan_interrupted_sessions``
+        AND holding a non-completed checkpoint are eligible. The turn is
+        re-entered at ``checkpoint.round_idx + 1`` with the disk-restored
+        (sanitized) context; pending tools are not re-executed. Disabled via
+        ``AGX_RESUME_INTERRUPTED=0`` / ``runtime.resume_interrupted: false``
+        (default off outside HA mode).
+        """
+        from agenticx.runtime.checkpoint import CheckpointStore, resume_interrupted_enabled
+
+        if not resume_interrupted_enabled():
+            return []
+        try:
+            interrupted = self.scan_interrupted_sessions()
+        except Exception:
+            _log.exception("resume: scan_interrupted_sessions failed")
+            return []
+        if not interrupted:
+            return []
+        store = CheckpointStore()
+        resumed: list[str] = []
+        for sid in interrupted:
+            checkpoint = store.load(sid)
+            if checkpoint is None or checkpoint.status == "completed":
+                continue
+            try:
+                ok = await self._resume_single_session(
+                    sid, checkpoint, store, runtime_runner=runtime_runner
+                )
+            except Exception:
+                _log.exception("resume failed session=%s", sid)
+                ok = False
+            if ok:
+                resumed.append(sid)
+        if resumed:
+            _log.info("Resumed %d interrupted session(s): %s", len(resumed), resumed[:5])
+        return resumed
+
+    async def _resume_single_session(
+        self,
+        session_id: str,
+        checkpoint: Any,
+        store: Any,
+        *,
+        runtime_runner: "Callable[[str, ManagedSession, Any], Awaitable[bool]] | None",
+    ) -> bool:
+        managed = self.get(session_id, touch=False)
+        if managed is None:
+            return False
+        session = managed.studio_session
+        # Restore confirm-gate state so an outstanding question stays resolvable.
+        confirm_state = getattr(checkpoint, "confirm_state", None)
+        if isinstance(confirm_state, dict) and confirm_state:
+            restorer = getattr(managed.confirm_gate, "restore_state", None)
+            if callable(restorer):
+                try:
+                    restorer(confirm_state)
+                except Exception:
+                    _log.debug("confirm gate restore failed session=%s", session_id)
+        # Subagent runs of the crashed turn are not resurrected; mark them.
+        self._mark_subagent_runs_interrupted(session_id)
+        # Guarantee provider-legal context before re-entry.
+        try:
+            from agenticx.runtime.agent_runtime import _sanitize_context_messages
+
+            session.agent_messages = _sanitize_context_messages(
+                getattr(session, "agent_messages", None) or []
+            )
+        except Exception:
+            _log.debug("resume sanitize failed session=%s", session_id, exc_info=True)
+        managed.execution_state = "running"
+        runner = runtime_runner or self._default_resume_runner
+        try:
+            ok = bool(await runner(session_id, managed, checkpoint))
+        except Exception:
+            _log.exception("resume runner raised session=%s", session_id)
+            ok = False
+        if ok:
+            store.clear(session_id)
+            managed.execution_state = "idle"
+            try:
+                await self.persist_async(session_id)
+            except Exception:
+                pass
+        else:
+            managed.execution_state = "interrupted"
+        return ok
+
+    def _mark_subagent_runs_interrupted(self, session_id: str) -> None:
+        """Mark still-running subagent run records as interrupted (FR-5)."""
+        try:
+            from agenticx.runtime.subagent_runs.store import SubAgentRunStore
+
+            run_store = SubAgentRunStore(session_id)
+            for record in run_store.list_runs():
+                if str(getattr(record, "status", "")) == "running":
+                    try:
+                        run_store.update_status(record.run_id, "interrupted")
+                    except Exception:
+                        pass
+        except Exception:
+            _log.debug("subagent run marking failed session=%s", session_id, exc_info=True)
+
+    async def _default_resume_runner(
+        self,
+        session_id: str,
+        managed: ManagedSession,
+        checkpoint: Any,
+    ) -> bool:
+        """Headless production runner: re-enter the turn with the default stack.
+
+        Tools and system prompt resolve exactly like a normal turn
+        (``tools=None`` / ``system_prompt=None``); events are forwarded to the
+        session event hub so reconnecting clients observe the resumed turn.
+        """
+        from agenticx.llms.provider_resolver import ProviderResolver
+        from agenticx.runtime.agent_runtime import AgentRuntime
+        from agenticx.runtime.checkpoint import RESUME_SYSTEM_HINT, CheckpointStore
+
+        session = managed.studio_session
+        llm = ProviderResolver.resolve(
+            provider_name=session.provider_name,
+            model=session.model_name,
+        )
+
+        def _persist_cb() -> None:
+            try:
+                self.incremental_persist(session_id)
+            except Exception:
+                pass
+
+        runtime = AgentRuntime(
+            llm,
+            managed.confirm_gate,
+            team_manager=managed.team_manager,
+            mid_turn_persist=_persist_cb,
+            clarify_gate=managed.clarify_gate,
+            checkpoint_store=CheckpointStore(),
+        )
+        hub = managed.event_hub or self.get_event_hub(session_id)
+        start_round = max(1, int(getattr(checkpoint, "round_idx", 0)) + 1)
+        async for event in runtime.run_turn(
+            RESUME_SYSTEM_HINT,
+            session,
+            resume_start_round=start_round,
+            persist_user_message=False,
+            usage_session_id=session_id,
+            usage_avatar_id=getattr(managed, "avatar_id", None),
+        ):
+            if hub is not None:
+                try:
+                    await hub.publish(event)
+                except Exception:
+                    pass
+        return True
 
     def incremental_persist(self, session_id: str) -> bool:
         """Lightweight mid-turn persist: only flush messages + agent_messages.
@@ -1877,7 +2136,7 @@ class SessionManager:
 
                 if materialize_message_lists_image_uploads(session_id, [messages]):
                     try:
-                        atomic_write_json(self._messages_path(session_id), messages)
+                        self._storage.save_messages(session_id, messages)
                     except Exception:
                         pass
                 session.chat_history = self._normalize_messages(messages)
@@ -2119,7 +2378,6 @@ class SessionManager:
         *,
         default_timestamp_ms: int | None = None,
     ) -> None:
-        path = self._messages_path(session_id)
         # Stamp ms-epoch timestamp on messages missing one (in-memory + disk).
         now_ms = default_timestamp_ms or int(time.time() * 1000)
         for item in messages:
@@ -2127,7 +2385,7 @@ class SessionManager:
                 continue
             if not item.get("timestamp"):
                 item["timestamp"] = now_ms
-        atomic_write_json(path, messages)
+        self._storage.save_messages(session_id, messages)
         self._save_messages_tail_snapshot(session_id, messages)
 
     _TAIL_SNAPSHOT_MAX = 120
@@ -2143,8 +2401,8 @@ class SessionManager:
         if not tail_rows:
             return
         start_index = max(0, total - len(tail_rows))
-        atomic_write_json(
-            self._messages_tail_path(session_id),
+        self._storage.save_messages_tail(
+            session_id,
             {
                 "total_count": total,
                 "start_index": start_index,
@@ -2152,15 +2410,16 @@ class SessionManager:
             },
         )
 
-    def _load_messages_tail_snapshot(self, session_id: str) -> dict[str, Any] | None:
-        path = self._messages_tail_path(session_id)
-        if not os.path.exists(path):
-            return None
+    def _messages_tail_exists(self, session_id: str) -> bool:
+        if isinstance(self._storage_backend, LocalFileBackend):
+            return os.path.exists(self._messages_tail_path(session_id))
         try:
-            with open(path, "r", encoding="utf-8") as fh:
-                data = json.load(fh)
-        except (OSError, json.JSONDecodeError):
-            return None
+            return self._storage.load_messages_tail(session_id) is not None
+        except Exception:
+            return False
+
+    def _load_messages_tail_snapshot(self, session_id: str) -> dict[str, Any] | None:
+        data = self._storage.load_messages_tail(session_id)
         if not isinstance(data, dict):
             return None
         rows = self._parse_messages_json_payload(data.get("messages"))
@@ -2187,13 +2446,8 @@ class SessionManager:
         return [item for item in rows if isinstance(item, dict)]
 
     def _load_messages_snapshot(self, session_id: str) -> list[dict]:
-        path = self._messages_path(session_id)
-        if not os.path.exists(path):
-            return []
-        with open(path, "r", encoding="utf-8") as fh:
-            data = json.load(fh)
-        rows = self._parse_messages_json_payload(data)
-        if rows and not os.path.exists(self._messages_tail_path(session_id)):
+        rows = self._storage.load_messages(session_id)
+        if rows and not self._messages_tail_exists(session_id):
             self._save_messages_tail_snapshot(session_id, rows)
         return rows
 
@@ -2211,19 +2465,10 @@ class SessionManager:
         return os.path.join(self._sessions_root, session_id, "agent_messages.json")
 
     def _save_agent_messages_snapshot(self, session_id: str, messages: list[dict]) -> None:
-        tail = messages[-40:]
-        path = self._agent_messages_path(session_id)
-        atomic_write_json(path, tail)
+        self._storage.save_agent_messages(session_id, messages)
 
     def _load_agent_messages_snapshot(self, session_id: str) -> list[dict]:
-        path = self._agent_messages_path(session_id)
-        if not os.path.exists(path):
-            return []
-        with open(path, "r", encoding="utf-8") as fh:
-            data = json.load(fh)
-        if not isinstance(data, list):
-            return []
-        return [item for item in data if isinstance(item, dict)]
+        return self._storage.load_agent_messages(session_id)
 
     def _context_refs_path(self, session_id: str) -> str:
         return os.path.join(self._sessions_root, session_id, "context_files_refs.json")
@@ -2805,14 +3050,10 @@ class SessionManager:
         except Exception:
             db_ok = False
         fs_ok = True
-        session_dir = Path(self._sessions_root) / sid
-        if session_dir.exists():
-            try:
-                shutil.rmtree(session_dir, ignore_errors=False)
-            except Exception:
-                fs_ok = False
-            else:
-                fs_ok = not session_dir.exists()
+        try:
+            fs_ok = self._storage.delete_session(sid)
+        except Exception:
+            fs_ok = False
         taskspace_ok = True
         default_taskspace_dir = Path(self._taskspaces_root) / sid
         if default_taskspace_dir.exists():

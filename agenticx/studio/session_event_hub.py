@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import time
 from collections import deque
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
@@ -31,7 +32,13 @@ class BufferedEvent:
 
 
 class SessionEventHub:
-    """In-memory pub-sub hub for a single chat session's runtime SSE events."""
+    """In-memory pub-sub hub for a single chat session's runtime SSE events.
+
+    When a coordination bus is attached (HA mode), every published event is
+    also appended to the bus replay log so a client reconnecting to another
+    replica can catch up. Token events are aggregated (flush every 50 tokens,
+    250ms, on any non-token event, or at run end) to keep the log bounded.
+    """
 
     def __init__(
         self,
@@ -39,6 +46,7 @@ class SessionEventHub:
         *,
         buffer_maxlen: int = DEFAULT_BUFFER_MAXLEN,
         subscriber_queue_maxsize: int = DEFAULT_SUBSCRIBER_QUEUE_MAXSIZE,
+        coordination_bus=None,
     ) -> None:
         self.session_id = session_id
         self._buffer_maxlen = max(16, int(buffer_maxlen))
@@ -50,6 +58,10 @@ class SessionEventHub:
         self._lock = asyncio.Lock()
         self._closed = False
         self._runtime_done = False
+        self._bus = coordination_bus
+        self._bus_pending_tokens: list[str] = []
+        self._bus_pending_agent_id = "meta"
+        self._bus_pending_first_ts = 0.0
 
     @property
     def current_seq(self) -> int:
@@ -77,10 +89,12 @@ class SessionEventHub:
             buffered = BufferedEvent(seq=seq, event=event)
             self._buffer.append(buffered)
             self._fanout_locked(buffered)
-            return seq
+        await self._bus_append_event(event)
+        return seq
 
     async def publish_done(self) -> int:
         """Signal that the runtime producer finished (sentinel for subscribers)."""
+        await self._flush_bus_tokens()
         async with self._lock:
             if self._closed or self._runtime_done:
                 return self._seq
@@ -91,6 +105,51 @@ class SessionEventHub:
             self._buffer.append(buffered)
             self._fanout_locked(buffered)
             return seq
+
+    # ── Coordination bus replay log (HA) ──
+
+    async def _bus_append_event(self, event: RuntimeEvent) -> None:
+        bus = self._bus
+        if bus is None:
+            return
+        try:
+            event_type = str(getattr(event, "type", ""))
+            data = getattr(event, "data", None)
+            agent_id = str(getattr(event, "agent_id", "meta") or "meta")
+            if event_type == "token":
+                text = str((data or {}).get("text", ""))
+                if not self._bus_pending_tokens:
+                    self._bus_pending_first_ts = time.monotonic()
+                    self._bus_pending_agent_id = agent_id
+                self._bus_pending_tokens.append(text)
+                if (
+                    len(self._bus_pending_tokens) >= 50
+                    or (time.monotonic() - self._bus_pending_first_ts) >= 0.25
+                ):
+                    await self._flush_bus_tokens()
+                return
+            await self._flush_bus_tokens()
+            await bus.event_append(
+                self.session_id,
+                {"type": event_type, "data": data, "agent_id": agent_id},
+            )
+        except Exception:
+            _log.debug("bus event append failed session=%s", self.session_id, exc_info=True)
+
+    async def _flush_bus_tokens(self) -> None:
+        bus = self._bus
+        if bus is None or not self._bus_pending_tokens:
+            return
+        text = "".join(self._bus_pending_tokens)
+        agent_id = self._bus_pending_agent_id
+        self._bus_pending_tokens = []
+        try:
+            await bus.event_append(
+                self.session_id,
+                {"type": "token", "data": {"text": text}, "agent_id": agent_id},
+            )
+        except Exception:
+            _log.debug("bus token flush failed session=%s", self.session_id, exc_info=True)
 
     def _fanout_locked(self, buffered: BufferedEvent) -> None:
         dead: list[int] = []
