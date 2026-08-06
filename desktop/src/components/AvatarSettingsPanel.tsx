@@ -495,10 +495,10 @@ export function AvatarSettingsPanel(props: Props) {
                       aria-label={AVATAR_COLOR_LABEL[key]}
                       aria-pressed={colorDraft === key}
                       title={AVATAR_COLOR_LABEL[key]}
-                      className={`h-7 w-7 rounded-full border-2 transition ${
+                      className={`h-8 w-8 rounded-full border-2 transition ${
                         colorDraft === key
-                          ? "border-text-strong ring-2 ring-white/20"
-                          : "border-transparent hover:scale-105"
+                          ? "border-text-strong ring-2 ring-[rgba(var(--theme-color-rgb,59,130,246),0.35)]"
+                          : "border-border-strong hover:scale-105 hover:border-text-faint"
                       }`}
                       style={{ background: AVATAR_COLOR_SWATCH[key] }}
                       onClick={() => setColorDraft(key)}
