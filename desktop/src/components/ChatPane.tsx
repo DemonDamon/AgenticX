@@ -1351,8 +1351,6 @@ function ActionCircleButton({
   onMic,
   onStop,
 }: ActionCircleButtonProps) {
-  if (!VOICE_UI_ENABLED) return null;
-
   let onClick: () => void;
   let title: string;
   let icon: ReactNode;
@@ -1373,6 +1371,12 @@ function ActionCircleButton({
     title = "发送";
     icon = <SendIcon />;
     filled = true;
+  } else if (!VOICE_UI_ENABLED) {
+    // 语音入口隐藏时仍保留发送键，避免输入区右侧失去主要操作。
+    onClick = onSend;
+    title = "发送";
+    icon = <SendIcon />;
+    filled = false;
   } else if (transcribing) {
     onClick = onMic;
     title = "识别中";
@@ -1416,6 +1420,8 @@ function ActionCircleButton({
           ? { background: "var(--ui-btn-primary-bg)", color: "var(--ui-btn-primary-text)" }
           : undefined
       }
+      disabled={!VOICE_UI_ENABLED && !hasInput && !streaming}
+      aria-label={title}
       onClick={onClick}
       title={title}
     >
