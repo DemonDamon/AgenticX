@@ -1,8 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Save, RotateCcw, X } from "lucide-react";
 import type { Avatar } from "../store";
-import { avatarBgClass, avatarFgClass, AVATAR_PALETTE, AVATAR_COLOR_SWATCH, normalizeAvatarColor } from "../utils/avatar-color";
-import type { AvatarPaletteKey } from "../utils/avatar-color";
+import { avatarBgClass, avatarFgClass, normalizeAvatarColor } from "../utils/avatar-color";
 import { DefaultModelSelect } from "./DefaultModelSelect";
 
 function avatarInitials(name: string): string {
@@ -481,9 +480,9 @@ export function AvatarSettingsPanel(props: Props) {
               <div>
                 <div className="text-sm text-text-muted">背景色</div>
                 <p className="mt-1 text-[11px] text-text-subtle">
-                  用于对话窗格轻底色与无头像时的占位色。默认与元智能体一致（主题色、无窗格 tint）。
+                  专家颜色统一跟随全局主题色（蓝 / 白 / 黑），不再提供其他颜色选项。
                 </p>
-                <div className="mt-2 flex flex-wrap items-center gap-2">
+                <div className="mt-2 flex items-center gap-2">
                   <button
                     type="button"
                     aria-label="默认（与元智能体一致）"
@@ -497,22 +496,6 @@ export function AvatarSettingsPanel(props: Props) {
                     style={{ background: "rgb(var(--theme-color-rgb, 59, 130, 246))" }}
                     onClick={() => setColorDraft("")}
                   />
-                  {AVATAR_PALETTE.map((key: AvatarPaletteKey) => (
-                    <button
-                      key={key}
-                      type="button"
-                      aria-label={key}
-                      aria-pressed={colorDraft === key}
-                      title={key}
-                      className={`h-7 w-7 rounded-full border-2 transition ${
-                        colorDraft === key
-                          ? "border-text-strong ring-2 ring-white/20"
-                          : "border-transparent hover:scale-105"
-                      }`}
-                      style={{ background: AVATAR_COLOR_SWATCH[key] }}
-                      onClick={() => setColorDraft(key)}
-                    />
-                  ))}
                 </div>
               </div>
               <label className="block text-sm text-text-muted">

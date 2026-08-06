@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { ChevronRight } from "lucide-react";
+import { ChevronRight, X } from "lucide-react";
 import { AvatarToolPermissionDialog } from "./AvatarToolPermissionDialog";
 import { DefaultModelSelect } from "./DefaultModelSelect";
 
@@ -142,12 +142,24 @@ export function AvatarCreateDialog({ open, onClose, onCreate, onCreateViaChat }:
     <>
       <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4 backdrop-blur-none">
         <div
-          className="agx-avatar-create-dialog w-[440px] max-w-[95vw] rounded-xl border border-border p-5 shadow-2xl"
+          className="agx-avatar-create-dialog flex max-h-[calc(100vh-2rem)] w-[440px] max-w-[95vw] flex-col overflow-hidden rounded-xl border border-border shadow-2xl"
           style={{ backgroundColor: "var(--surface-base-fallback, var(--surface-panel))" }}
         >
-        <h3 className="mb-4 text-[16px] font-semibold text-text-primary">创建数字专家</h3>
+          <div className="flex shrink-0 items-center justify-between gap-2 border-b border-border bg-surface-panel px-5 py-3">
+            <h3 className="text-[16px] font-semibold text-text-primary">创建数字专家</h3>
+            <button
+              type="button"
+              aria-label="关闭"
+              title="关闭"
+              className="shrink-0 rounded-md p-1.5 text-text-muted transition hover:bg-surface-hover hover:text-text-strong"
+              onClick={resetAndClose}
+            >
+              <X className="h-5 w-5" strokeWidth={2.25} />
+            </button>
+          </div>
 
-        <div className="mb-4 flex gap-1 rounded-lg bg-surface-card p-0.5">
+          <div className="min-h-0 flex-1 overflow-y-auto p-5">
+          <div className="mb-4 flex gap-1 rounded-lg bg-surface-card p-0.5">
           {([["manual", "手动创建"], ["ai", "AI 创建"]] as const).map(([key, label]) => (
             <button
               key={key}
@@ -161,9 +173,9 @@ export function AvatarCreateDialog({ open, onClose, onCreate, onCreateViaChat }:
               {label}
             </button>
           ))}
-        </div>
+          </div>
 
-        {mode === "manual" ? (
+          {mode === "manual" ? (
           <>
             <div className="space-y-3">
               <label className="block text-sm text-text-muted">
@@ -359,7 +371,8 @@ export function AvatarCreateDialog({ open, onClose, onCreate, onCreateViaChat }:
               </button>
             </div>
           </>
-        )}
+          )}
+          </div>
         </div>
       </div>
       <AvatarToolPermissionDialog
