@@ -6,6 +6,7 @@ import { parseReasoningContent } from "./reasoning-parser";
 import { CitationMarkdownBody } from "./CitationMarkdownBody";
 import { renderUserMessageInlineBody } from "./user-message-inline";
 import { assistantVisibleBodyForUi } from "../../utils/assistant-output";
+import { isWorkspaceReferenceAttachment, type FileReferenceOpenRequest } from "../../utils/reference-attachment";
 
 type Props = {
   message: Message;
