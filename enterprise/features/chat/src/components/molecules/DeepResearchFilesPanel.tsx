@@ -46,6 +46,8 @@ export type DeepResearchFilesPanelProps = {
   focusLane?: DeepResearchPanelLane | null;
   /** Session web-search sources so [N] citations render as clickable site chips. */
   sources?: WebSearchSource[];
+  /** Route external research sources through the host application's interstitial. */
+  onOpenExternalUrl?: (url: string, title?: string) => void;
   className?: string;
 };
 
@@ -353,9 +355,11 @@ function ArtifactFileRow({
 function LaneSourceCard({
   source,
   onOpen,
+  onOpenExternalUrl,
 }: {
   source: LaneSource;
   onOpen: (source: LaneSource) => void;
+  onOpenExternalUrl?: (url: string, title?: string) => void;
 }) {
   const host = laneSourceHost(source.url);
   return (
@@ -394,7 +398,12 @@ function LaneSourceCard({
         href={source.url}
         target="_blank"
         rel="noopener noreferrer"
-        onClick={(e) => e.stopPropagation()}
+        onClick={(e) => {
+          e.stopPropagation();
+          if (!onOpenExternalUrl) return;
+          e.preventDefault();
+          onOpenExternalUrl(source.url, source.title || source.url);
+        }}
         className="mr-1.5 mt-2 flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-muted-foreground opacity-70 transition-opacity hover:bg-muted hover:text-foreground hover:opacity-100 group-hover/source:opacity-100"
         aria-label="打开原网页"
         data-testid="deep-research-panel-source-external"
@@ -496,6 +505,7 @@ export function DeepResearchFilesPanel({
   focusArtifactId = null,
   focusLane = null,
   sources,
+  onOpenExternalUrl,
   className,
 }: DeepResearchFilesPanelProps) {
   const [artifacts, setArtifacts] = React.useState<ArtifactListItem[]>([]);
@@ -576,8 +586,9 @@ export function DeepResearchFilesPanel({
       createAssistantMdComponents({
         sources,
         variant: "document",
+        onOpenExternalUrl,
       }),
-    [sources],
+    [sources, onOpenExternalUrl],
   );
 
   React.useEffect(() => {
@@ -820,7 +831,11 @@ export function DeepResearchFilesPanel({
       setView("preview");
       return;
     }
-    window.open(source.url, "_blank", "noopener,noreferrer");
+    if (onOpenExternalUrl) {
+      onOpenExternalUrl(source.url, source.title || source.url);
+    } else {
+      window.open(source.url, "_blank", "noopener,noreferrer");
+    }
   };
 
   return (
@@ -1036,6 +1051,7 @@ export function DeepResearchFilesPanel({
                   key={`${source.url}-${i}`}
                   source={source}
                   onOpen={openLaneSource}
+                  onOpenExternalUrl={onOpenExternalUrl}
                 />
               ))}
             </ul>

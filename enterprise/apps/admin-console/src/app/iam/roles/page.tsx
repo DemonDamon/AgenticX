@@ -1,6 +1,5 @@
 "use client";
 
-import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
@@ -22,7 +21,18 @@ import {
   Skeleton,
   toast,
 } from "@agenticx/ui";
-import { ArrowUpRight, Copy, KeyRound, Pencil, Plus, RefreshCw, Trash2, UsersRound } from "lucide-react";
+import {
+  Copy,
+  KeyRound,
+  LayoutGrid,
+  List,
+  Pencil,
+  Plus,
+  RefreshCw,
+  Search,
+  Trash2,
+  UsersRound,
+} from "lucide-react";
 import { adminFetch } from "../../../lib/admin-client-auth";
 import { CreateUserDialog } from "../../../components/CreateUserDialog";
 import { QuotaRing, formatTokenCount } from "../../../components/QuotaRing";
@@ -99,6 +109,12 @@ function modelQuotaStateClass(
   return "border-border bg-background text-foreground";
 }
 
+function userStatusMeta(status: UserQuotaOverview["status"]) {
+  if (status === "active") return { label: "启用", variant: "success" as const };
+  if (status === "locked") return { label: "锁定", variant: "destructive" as const };
+  return { label: "停用", variant: "warning" as const };
+}
+
 export default function RolesPage() {
   const searchParams = useSearchParams();
   const [items, setItems] = useState<UserQuotaOverview[]>([]);
@@ -123,8 +139,22 @@ export default function RolesPage() {
   const [userFormInitial, setUserFormInitial] = useState<UserFormValues | null>(null);
   const [userFormDeptOptions, setUserFormDeptOptions] = useState<UserFormDeptOption[]>([]);
   const [userFormRoleOptions, setUserFormRoleOptions] = useState<UserFormRoleOption[]>([]);
+  const [userFormUser, setUserFormUser] = useState<UserQuotaOverview | null>(null);
+  const [viewMode, setViewMode] = useState<"cards" | "list">("cards");
+  const [viewModeHydrated, setViewModeHydrated] = useState(false);
+  const [searchQuery, setSearchQuery] = useState("");
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
   const openedFromQueryRef = useRef<string | null>(null);
+
+  useEffect(() => {
+    const savedViewMode = window.localStorage.getItem("admin-iam-user-view-mode");
+    if (savedViewMode === "cards" || savedViewMode === "list") setViewMode(savedViewMode);
+    setViewModeHydrated(true);
+  }, []);
+
+  useEffect(() => {
+    if (viewModeHydrated) window.localStorage.setItem("admin-iam-user-view-mode", viewMode);
+  }, [viewMode, viewModeHydrated]);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -204,12 +234,15 @@ export default function RolesPage() {
     }
   }, []);
 
-  const openUserManagement = async () => {
-    if (!selected || userFormLoading) return;
+  const openUserManagement = async (user?: UserQuotaOverview) => {
+    const target = user ?? selected;
+    if (!target || userFormLoading) return;
+    setUserFormUser(target);
+    if (user) setSelected(null);
     setUserFormLoading(true);
     try {
       const [userResponse, departmentResponse, roleResponse] = await Promise.all([
-        adminFetch(`/api/admin/users/${encodeURIComponent(selected.id)}`, { cache: "no-store" }),
+        adminFetch(`/api/admin/users/${encodeURIComponent(target.id)}`, { cache: "no-store" }),
         adminFetch("/api/admin/departments?shape=flat", { cache: "no-store" }),
         adminFetch("/api/admin/roles", { cache: "no-store" }),
       ]);
@@ -257,8 +290,9 @@ export default function RolesPage() {
   };
 
   const saveUserDetails = async (values: UserFormValues) => {
-    if (!selected) return;
-    const response = await adminFetch(`/api/admin/users/${encodeURIComponent(selected.id)}`, {
+    const target = userFormUser ?? selected;
+    if (!target) return;
+    const response = await adminFetch(`/api/admin/users/${encodeURIComponent(target.id)}`, {
       method: "PATCH",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({
@@ -311,6 +345,7 @@ export default function RolesPage() {
     toast.success("用户信息已保存");
     setUserFormOpen(false);
     setUserFormInitial(null);
+    setUserFormUser(null);
     await load();
   };
 
@@ -510,6 +545,64 @@ export default function RolesPage() {
     }
   };
 
+  const visibleItems = useMemo(() => {
+    const query = searchQuery.trim().toLocaleLowerCase();
+    if (!query) return items;
+    return items.filter((user) =>
+      [
+        user.displayName,
+        user.email,
+        user.departmentName,
+        user.departmentPath,
+        user.jobTitle,
+        user.employeeNo,
+        user.phone,
+        ...user.groupNames,
+      ]
+        .filter(Boolean)
+        .join(" ")
+        .toLocaleLowerCase()
+        .includes(query),
+    );
+  }, [items, searchQuery]);
+
+  const toolbarButtonClass =
+    "h-10 !rounded-xl shadow-sm focus-visible:!rounded-xl focus-visible:!outline-none focus-visible:ring-0";
+  const viewSwitcherButtonClass =
+    "h-9 !rounded-lg gap-1.5 px-2.5 focus-visible:!rounded-lg focus-visible:!outline-none focus-visible:ring-0";
+
+  const viewSwitcher = (
+    <div
+      className="inline-flex h-10 shrink-0 items-center rounded-xl border border-border/80 bg-background/95 p-0.5 shadow-sm"
+      role="group"
+      aria-label="切换用户视图"
+    >
+      <Button
+        type="button"
+        variant={viewMode === "cards" ? "secondary" : "ghost"}
+        size="sm"
+        className={viewSwitcherButtonClass}
+        aria-pressed={viewMode === "cards"}
+        onClick={() => setViewMode("cards")}
+      >
+        <LayoutGrid />
+        <span className="hidden sm:inline">卡片</span>
+      </Button>
+      <Button
+        type="button"
+        variant={viewMode === "list" ? "secondary" : "ghost"}
+        size="sm"
+        className={viewSwitcherButtonClass}
+        aria-pressed={viewMode === "list"}
+        onClick={() => setViewMode("list")}
+      >
+        <List />
+        <span className="hidden sm:inline">列表</span>
+      </Button>
+    </div>
+  );
+  const userListGridClass = "grid min-w-[1160px] grid-cols-[minmax(240px,1.55fr)_minmax(220px,1.25fr)_88px_minmax(160px,1fr)_minmax(180px,1.3fr)_148px] items-center gap-4";
+
   return (
     <div className="space-y-6">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
@@ -520,94 +613,240 @@ export default function RolesPage() {
             每位用户都有独立的 Token 额度、消耗记录和可用模型。用户组提供批量基线，个人可在此基础上调整额度并额外开通模型。
           </p>
         </div>
-        <div className="flex flex-wrap gap-2">
-          <Button onClick={() => setCreateOpen(true)}>
+        <div className="flex shrink-0 flex-nowrap items-center gap-2 overflow-x-auto whitespace-nowrap">
+          <Button
+            className={`${toolbarButtonClass} px-5`}
+            onClick={() => setCreateOpen(true)}
+          >
             <Plus className="h-4 w-4" />新建用户
           </Button>
-          <Button variant="outline" asChild>
-            <Link href="/iam/groups">管理用户组<ArrowUpRight /></Link>
-          </Button>
-          <Button variant="outline" onClick={() => void load()} disabled={loading}>
-            <RefreshCw className={loading ? "animate-spin" : ""} />刷新用量
+          <div className="relative shrink-0 rounded-xl transition-shadow focus-within:shadow-[0_0_0_2px_var(--primary)]">
+            <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+            <Input
+              type="search"
+              name="iam-user-search"
+              autoComplete="off"
+              autoCorrect="off"
+              autoCapitalize="none"
+              spellCheck={false}
+              value={searchQuery}
+              onChange={(event) => setSearchQuery(event.target.value)}
+              placeholder="搜索姓名、邮箱、组织"
+              aria-label="搜索用户"
+              className="h-10 w-60 appearance-none !rounded-xl border-border/80 bg-background/95 pl-9 shadow-sm transition-colors placeholder:text-muted-foreground/70 !outline-none focus-visible:border-border/80 focus-visible:!rounded-xl focus-visible:!outline-none focus-visible:ring-0"
+            />
+          </div>
+          {viewSwitcher}
+          <Button
+            type="button"
+            variant="outline"
+            size="icon"
+            className={`${toolbarButtonClass} w-10 shrink-0`}
+            aria-label="刷新用量"
+            title="刷新用量"
+            onClick={() => void load()}
+            disabled={loading}
+          >
+            <RefreshCw className={loading ? "animate-spin" : ""} />
           </Button>
         </div>
       </div>
 
-      <div className="grid gap-4 md:grid-cols-2 2xl:grid-cols-3">
-        {loading && items.length === 0
-          ? [1, 2, 3, 4, 5, 6].map((key) => (
-              <Card key={key} className="min-h-64">
-                <CardHeader><Skeleton className="h-6 w-36" /><Skeleton className="h-4 w-48" /></CardHeader>
-                <CardContent className="flex gap-5"><Skeleton className="h-28 w-28 rounded-full" /><Skeleton className="h-24 flex-1" /></CardContent>
+      {viewMode === "cards" ? (
+        <div className="grid gap-4 md:grid-cols-2 2xl:grid-cols-3">
+          {loading && items.length === 0
+            ? [1, 2, 3, 4, 5, 6].map((key) => (
+                <Card key={key} className="min-h-64">
+                  <CardHeader><Skeleton className="h-6 w-36" /><Skeleton className="h-4 w-48" /></CardHeader>
+                  <CardContent className="flex gap-5"><Skeleton className="h-28 w-28 rounded-full" /><Skeleton className="h-24 flex-1" /></CardContent>
+                </Card>
+              ))
+            : null}
+          {!loading && items.length === 0 ? (
+            <Card className="border-dashed md:col-span-2 2xl:col-span-3">
+              <CardContent className="flex min-h-64 flex-col items-center justify-center text-center">
+                <span className="rounded-full bg-primary/10 p-3 text-primary"><UsersRound className="h-6 w-6" /></span>
+                <h2 className="mt-4 font-semibold">暂无用户</h2>
+                <p className="mt-1 text-sm text-muted-foreground">开通用户后会在这里显示每个人的额度、模型和使用情况。</p>
+              </CardContent>
+            </Card>
+          ) : null}
+          {!loading && items.length > 0 && visibleItems.length === 0 ? (
+            <Card className="border-dashed md:col-span-2 2xl:col-span-3">
+              <CardContent className="flex min-h-48 flex-col items-center justify-center text-center">
+                <Search className="h-6 w-6 text-muted-foreground" />
+                <h2 className="mt-4 font-semibold">未找到匹配用户</h2>
+                <p className="mt-1 text-sm text-muted-foreground">请尝试姓名、邮箱、组织或职位关键词。</p>
+              </CardContent>
+            </Card>
+          ) : null}
+          {visibleItems.map((user) => {
+            const status = userStatusMeta(user.status);
+            return (
+              <Card
+                key={user.id}
+                className="group cursor-pointer transition-colors hover:border-primary/50 hover:bg-muted/20"
+                onClick={() => void openUserManagement(user)}
+              >
+                <CardHeader className="pb-3">
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      <CardTitle className="truncate">{user.displayName}</CardTitle>
+                      <CardDescription className="mt-1 truncate">{user.email}</CardDescription>
+                      <p className="mt-1 truncate text-xs text-muted-foreground">
+                        {user.departmentPath || user.departmentName || "未归属组织"}{user.jobTitle ? ` · ${user.jobTitle}` : ""}
+                      </p>
+                    </div>
+                    <div className="flex max-w-44 shrink-0 flex-wrap justify-end gap-1.5">
+                      <Badge variant={status.variant}>{status.label}</Badge>
+                      <Badge variant={user.inherited ? "secondary" : "outline"} className="truncate">
+                        {quotaSourceLabel(user)}
+                      </Badge>
+                    </div>
+                  </div>
+                </CardHeader>
+                <CardContent className="space-y-4">
+                  <div className="flex items-center gap-4">
+                    <QuotaRing used={user.usedTokens} limit={user.monthlyTokens} unlimited={user.unlimited} size={112} />
+                    <div className="min-w-0 space-y-2 text-sm">
+                      <p className="text-muted-foreground">本月个人额度</p>
+                      <p className="font-semibold">{user.unlimited ? "不限制" : `${formatTokenCount(user.monthlyTokens)} Token`}</p>
+                      <p className="text-xs text-muted-foreground">已用 {formatTokenCount(user.usedTokens)} Token</p>
+                      <button
+                        type="button"
+                        className="inline-flex items-center gap-1 text-xs text-primary hover:underline"
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          void openEditor(user);
+                        }}
+                      >
+                        <Pencil className="h-3 w-3" />调整额度和模型
+                      </button>
+                    </div>
+                  </div>
+                  <div className="space-y-2 border-t border-border pt-3">
+                    <div className="flex flex-wrap gap-1.5">
+                      {user.groupNames.length
+                        ? user.groupNames.map((name) => <Badge key={name} variant="outline" className="font-normal">{name}</Badge>)
+                        : <span className="text-xs text-muted-foreground">未加入用户组</span>}
+                    </div>
+                    <div className="flex flex-wrap gap-1.5">
+                      {user.models.length
+                        ? user.models.map((model) => (
+                            <Badge
+                              key={`${model.model}:${model.currentlyAllowed}`}
+                              variant="outline"
+                              title={model.currentlyAllowed ? "当前可用模型" : "历史消耗模型，当前不可用"}
+                              className={`max-w-full truncate font-normal ${modelQuotaStateClass(user, model)}`}
+                            >
+                              {model.model}
+                              {model.tokens > 0 ? ` · ${formatTokenCount(model.tokens)}` : ""}
+                              {` · ${model.currentlyAllowed ? "可用" : "当前不可用"}`}
+                            </Badge>
+                          ))
+                        : <span className="text-xs text-muted-foreground">当前未开通模型</span>}
+                    </div>
+                  </div>
+                </CardContent>
               </Card>
-            ))
-          : null}
-        {!loading && items.length === 0 ? (
-          <Card className="border-dashed md:col-span-2 2xl:col-span-3">
-            <CardContent className="flex min-h-64 flex-col items-center justify-center text-center">
+            );
+          })}
+        </div>
+      ) : (
+        <div className="overflow-hidden rounded-xl border border-border bg-card">
+          {loading && items.length === 0 ? (
+            <div className="space-y-3 p-4">
+              {[1, 2, 3, 4].map((key) => <Skeleton key={key} className="h-16 w-full" />)}
+            </div>
+          ) : items.length === 0 ? (
+            <div className="flex min-h-48 flex-col items-center justify-center text-center">
               <span className="rounded-full bg-primary/10 p-3 text-primary"><UsersRound className="h-6 w-6" /></span>
               <h2 className="mt-4 font-semibold">暂无用户</h2>
               <p className="mt-1 text-sm text-muted-foreground">开通用户后会在这里显示每个人的额度、模型和使用情况。</p>
-            </CardContent>
-          </Card>
-        ) : null}
-        {items.map((user) => (
-          <Card
-            key={user.id}
-            className="group cursor-pointer transition-colors hover:border-primary/50 hover:bg-muted/20"
-            onClick={() => void openEditor(user)}
-          >
-            <CardHeader className="pb-3">
-              <div className="flex items-start justify-between gap-3">
-                <div className="min-w-0">
-                  <CardTitle className="truncate">{user.displayName}</CardTitle>
-                  <CardDescription className="mt-1 truncate">{user.email}</CardDescription>
-                  <p className="mt-1 truncate text-xs text-muted-foreground">
-                    {user.departmentPath || user.departmentName || "未归属组织"}{user.jobTitle ? ` · ${user.jobTitle}` : ""}
-                  </p>
+            </div>
+          ) : visibleItems.length === 0 ? (
+            <div className="flex min-h-48 flex-col items-center justify-center text-center">
+              <Search className="h-6 w-6 text-muted-foreground" />
+              <h2 className="mt-4 font-semibold">未找到匹配用户</h2>
+              <p className="mt-1 text-sm text-muted-foreground">请尝试姓名、邮箱、组织或职位关键词。</p>
+            </div>
+          ) : (
+            <div className="overflow-x-auto">
+              <div className="min-w-[1160px]">
+                <div className={`${userListGridClass} border-b border-border bg-muted/20 px-4 py-3 text-xs font-medium text-muted-foreground`} role="row">
+                  <div role="columnheader">用户</div>
+                  <div role="columnheader">组织与职位</div>
+                  <div role="columnheader">状态</div>
+                  <div role="columnheader">Token 额度</div>
+                  <div role="columnheader">可用模型</div>
+                  <div role="columnheader" className="text-right">操作</div>
                 </div>
-                <Badge variant={user.inherited ? "secondary" : "outline"} className="max-w-36 shrink-0 truncate">
-                  {quotaSourceLabel(user)}
-                </Badge>
+                <div className="divide-y divide-border">
+                  {visibleItems.map((user) => {
+                    const status = userStatusMeta(user.status);
+                    return (
+                      <div
+                        key={user.id}
+                        role="button"
+                        tabIndex={0}
+                        className={`${userListGridClass} cursor-pointer px-4 py-3 transition-colors hover:bg-muted/30 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-inset`}
+                        onClick={() => void openUserManagement(user)}
+                        onKeyDown={(event) => {
+                          if (event.key === "Enter" || event.key === " ") {
+                            event.preventDefault();
+                            void openUserManagement(user);
+                          }
+                        }}
+                      >
+                        <div className="flex min-w-0 items-center gap-3">
+                          <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-primary/10 text-sm font-semibold text-primary">
+                            {user.displayName.slice(0, 1)}
+                          </span>
+                          <div className="min-w-0">
+                            <p className="truncate font-medium">{user.displayName}</p>
+                            <p className="truncate text-xs text-muted-foreground">{user.email}</p>
+                          </div>
+                        </div>
+                        <div className="min-w-0 text-sm">
+                          <p className="truncate">{user.departmentPath || user.departmentName || "未归属组织"}</p>
+                          <p className="truncate text-xs text-muted-foreground">{user.jobTitle || "未填写职位"}</p>
+                        </div>
+                        <Badge variant={status.variant} className="justify-self-start">{status.label}</Badge>
+                        <div className="min-w-0 text-sm">
+                          <p className="truncate font-medium">{user.unlimited ? "不限制" : `${formatTokenCount(user.monthlyTokens)} Token`}</p>
+                          <p className="truncate text-xs text-muted-foreground">已用 {formatTokenCount(user.usedTokens)}</p>
+                        </div>
+                        <div className="flex min-w-0 flex-wrap gap-1">
+                          {user.models.length ? user.models.slice(0, 3).map((model) => (
+                            <Badge key={`${user.id}:${model.model}`} variant="outline" className="max-w-full truncate text-xs">
+                              {model.model}
+                            </Badge>
+                          )) : <span className="text-xs text-muted-foreground">未开通模型</span>}
+                          {user.models.length > 3 ? <Badge variant="outline">+{user.models.length - 3}</Badge> : null}
+                        </div>
+                        <div className="flex justify-end">
+                          <Button
+                            type="button"
+                            variant="outline"
+                            size="sm"
+                            className="shrink-0"
+                            onClick={(event) => {
+                              event.stopPropagation();
+                              void openEditor(user);
+                            }}
+                          >
+                            <Pencil />额度与模型
+                          </Button>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
               </div>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              <div className="flex items-center gap-4">
-                <QuotaRing used={user.usedTokens} limit={user.monthlyTokens} unlimited={user.unlimited} size={112} />
-                <div className="min-w-0 space-y-2 text-sm">
-                  <p className="text-muted-foreground">本月个人额度</p>
-                  <p className="font-semibold">{user.unlimited ? "不限制" : `${formatTokenCount(user.monthlyTokens)} Token`}</p>
-                  <p className="text-xs text-muted-foreground">已用 {formatTokenCount(user.usedTokens)} Token</p>
-                  <span className="inline-flex items-center gap-1 text-xs text-primary"><Pencil className="h-3 w-3" />调整额度和模型</span>
-                </div>
-              </div>
-              <div className="space-y-2 border-t border-border pt-3">
-                <div className="flex flex-wrap gap-1.5">
-                  {user.groupNames.length
-                    ? user.groupNames.map((name) => <Badge key={name} variant="outline" className="font-normal">{name}</Badge>)
-                    : <span className="text-xs text-muted-foreground">未加入用户组</span>}
-                </div>
-                <div className="flex flex-wrap gap-1.5">
-                  {user.models.length
-                    ? user.models.map((model) => (
-                        <Badge
-                          key={`${model.model}:${model.currentlyAllowed}`}
-                          variant="outline"
-                          title={model.currentlyAllowed ? "当前可用模型" : "历史消耗模型，当前不可用"}
-                          className={`max-w-full truncate font-normal ${modelQuotaStateClass(user, model)}`}
-                        >
-                          {model.model}
-                          {model.tokens > 0 ? ` · ${formatTokenCount(model.tokens)}` : ""}
-                          {` · ${model.currentlyAllowed ? "可用" : "当前不可用"}`}
-                        </Badge>
-                      ))
-                    : <span className="text-xs text-muted-foreground">当前未开通模型</span>}
-                </div>
-              </div>
-            </CardContent>
-          </Card>
-        ))}
-      </div>
+            </div>
+          )}
+        </div>
+      )}
 
       <Sheet open={Boolean(selected)} onOpenChange={(open) => !open && setSelected(null)}>
         <SheetContent side="right" className="flex w-full flex-col gap-0 overflow-y-auto sm:max-w-2xl">
@@ -625,8 +864,9 @@ export default function RolesPage() {
                     className="shrink-0"
                     onClick={() => void openUserManagement()}
                     disabled={userFormLoading}
+                    title="打开用户资料编辑，不离开当前页面"
                   >
-                    <Pencil />{userFormLoading ? "加载中…" : "用户管理"}<ArrowUpRight />
+                    <Pencil />{userFormLoading ? "加载中…" : "用户管理"}
                   </Button>
                 </div>
               </SheetHeader>
@@ -779,7 +1019,10 @@ export default function RolesPage() {
         open={userFormOpen}
         onOpenChange={(open) => {
           setUserFormOpen(open);
-          if (!open) setUserFormInitial(null);
+          if (!open) {
+            setUserFormInitial(null);
+            setUserFormUser(null);
+          }
         }}
         title="编辑用户"
         description={userFormInitial?.email}

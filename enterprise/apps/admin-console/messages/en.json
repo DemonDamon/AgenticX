@@ -581,7 +581,7 @@
         "breadcrumbIam": "IAM",
         "breadcrumbUsers": "Users",
         "title": "User management",
-        "description": "{total} users · {pageSize} per page · search, filter, bulk actions, detail drawer",
+        "description": "{total} users · search, filters, and list / card view switching",
         "refresh": "Refresh",
         "newUser": "New user",
         "loadingTitle": "Loading...",
@@ -605,6 +605,7 @@
           "more": "More actions",
           "quickActions": "Quick actions",
           "edit": "Edit",
+          "viewDetails": "View details",
           "enable": "Enable",
           "disable": "Disable",
           "delete": "Delete"
@@ -625,6 +626,8 @@
           "status": "Status",
           "scopes": "Permission scopes",
           "none": "None",
+          "unassigned": "No department",
+          "noJobTitle": "No job title",
           "createdAt": "Created",
           "updatedAt": "Updated",
           "visibleModels": "Visible model assignment",
@@ -676,9 +679,19 @@
           "exportSuccess": "Exported {count} rows from this page"
         },
         "filterLabels": {
+          "search": "Search: ",
           "status": "Status: ",
           "department": "Department: "
         },
+        "view": {
+          "switchLabel": "Switch user view",
+          "list": "List",
+          "cards": "Cards",
+          "editHint": "Click to edit"
+        },
+        "clearFilters": "Clear filters",
+        "emptyTitle": "No matching users",
+        "emptyDescription": "Adjust the search or filters and try again",
         "suspenseLoading": "Loading..."
       },
       "departments": {

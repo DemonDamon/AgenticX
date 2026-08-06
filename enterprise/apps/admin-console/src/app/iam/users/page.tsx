@@ -23,6 +23,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
   EmptyState,
+  Input,
   PageHeader,
   Select,
   SelectContent,
@@ -38,7 +39,18 @@ import {
 } from "@agenticx/ui";
 import { useTranslations } from "next-intl";
 import type { ColumnDef } from "@tanstack/react-table";
-import { MoreHorizontal, Pencil, RefreshCcw, ShieldCheck, ShieldX, Trash2, UserPlus, Users } from "lucide-react";
+import {
+  LayoutGrid,
+  List,
+  MoreHorizontal,
+  Pencil,
+  RefreshCcw,
+  ShieldCheck,
+  ShieldX,
+  Trash2,
+  UserPlus,
+  Users,
+} from "lucide-react";
 import { CreateUserDialog } from "../../../components/CreateUserDialog";
 import {
   UserFormDialog,
@@ -90,6 +102,7 @@ type DeptOption = UserFormDeptOption;
 type RoleOption = UserFormRoleOption;
 
 const PAGE_SIZE = 50;
+type UserViewMode = "list" | "cards";
 
 function UsersPageContent() {
   const t = useTranslations("pages.iam.users");
@@ -97,7 +110,6 @@ function UsersPageContent() {
   const searchParams = useSearchParams();
   const initialDept = searchParams.get("dept") || "all";
   const initialUserId = searchParams.get("userId") || searchParams.get("user") || "";
-  const initialEdit = searchParams.get("edit") === "1";
   const initialCreate = searchParams.get("create") === "1";
 
   const [users, setUsers] = useState<AdminUser[]>([]);
@@ -106,6 +118,8 @@ function UsersPageContent() {
   const [page, setPage] = useState(1);
   const [statusFilter, setStatusFilter] = useState<"all" | Status>("all");
   const [deptFilter, setDeptFilter] = useState<string>(initialDept);
+  const [searchQuery, setSearchQuery] = useState("");
+  const [viewMode, setViewMode] = useState<UserViewMode>("list");
   const [selected, setSelected] = useState<AdminUser | null>(null);
   const [createOpen, setCreateOpen] = useState(initialCreate);
   const [editOpen, setEditOpen] = useState(false);
@@ -169,7 +183,7 @@ function UsersPageContent() {
     const user = users.find((item) => item.id === initialUserId);
     if (user && selected?.id !== user.id) {
       setSelected(user);
-      setEditOpen(initialEdit);
+      setEditOpen(true);
       return;
     }
 
@@ -181,7 +195,7 @@ function UsersPageContent() {
         const json = (await res.json()) as ApiUserResp;
         if (alive && res.ok && json.data?.user) {
           setSelected(json.data.user);
-          setEditOpen(initialEdit);
+          setEditOpen(true);
         }
       } catch {
         /* 详情入口仅用于定位用户，列表本身仍可正常使用 */
@@ -190,7 +204,7 @@ function UsersPageContent() {
     return () => {
       alive = false;
     };
-  }, [initialEdit, initialUserId, loading, selected?.id, users]);
+  }, [initialUserId, loading, selected?.id, users]);
 
   useEffect(() => {
     let alive = true;
@@ -407,6 +421,15 @@ function UsersPageContent() {
                 <DropdownMenuItem
                   onClick={(event) => {
                     event.stopPropagation();
+                    setSelected(row.original);
+                    setEditOpen(false);
+                  }}
+                >
+                  {t("actions.viewDetails")}
+                </DropdownMenuItem>
+                <DropdownMenuItem
+                  onClick={(event) => {
+                    event.stopPropagation();
                     void handleQuickToggleStatus(row.original);
                   }}
                 >
@@ -433,6 +456,13 @@ function UsersPageContent() {
 
   const activeFilters = useMemo(() => {
     const filters: Array<{ id: string; label: string; onRemove: () => void }> = [];
+    if (searchQuery.trim()) {
+      filters.push({
+        id: "search",
+        label: `${t("filterLabels.search")}${searchQuery.trim()}`,
+        onRemove: () => setSearchQuery(""),
+      });
+    }
     if (statusFilter !== "all") {
       filters.push({
         id: "status",
@@ -448,7 +478,100 @@ function UsersPageContent() {
       });
     }
     return filters;
-  }, [statusFilter, deptFilter, deptLabelMap]);
+  }, [searchQuery, statusFilter, deptFilter, deptLabelMap, statusMeta, t]);
+
+  const visibleUsers = useMemo(() => {
+    const query = searchQuery.trim().toLocaleLowerCase();
+    if (!query) return users;
+    return users.filter((user) => {
+      const department = user.deptId ? (deptLabelMap.get(user.deptId) ?? user.deptId) : "";
+      return [user.id, user.email, user.displayName, department, user.jobTitle ?? ""]
+        .join(" ")
+        .toLocaleLowerCase()
+        .includes(query);
+    });
+  }, [deptLabelMap, searchQuery, users]);
+
+  const viewSwitcher = (
+    <div
+      className="inline-flex items-center rounded-lg border border-border bg-muted/30 p-0.5"
+      role="group"
+      aria-label={t("view.switchLabel")}
+    >
+      <Button
+        type="button"
+        variant={viewMode === "list" ? "secondary" : "ghost"}
+        size="sm"
+        className="h-8 gap-1.5 px-2.5"
+        aria-pressed={viewMode === "list"}
+        onClick={() => setViewMode("list")}
+      >
+        <List />
+        <span className="hidden sm:inline">{t("view.list")}</span>
+      </Button>
+      <Button
+        type="button"
+        variant={viewMode === "cards" ? "secondary" : "ghost"}
+        size="sm"
+        className="h-8 gap-1.5 px-2.5"
+        aria-pressed={viewMode === "cards"}
+        onClick={() => setViewMode("cards")}
+      >
+        <LayoutGrid />
+        <span className="hidden sm:inline">{t("view.cards")}</span>
+      </Button>
+    </div>
+  );
+
+  const filtersToolbar = (
+    <div className="flex min-w-0 flex-1 flex-wrap items-center gap-2">
+      <div className="relative min-w-[220px] flex-1 sm:max-w-xs">
+        <Input
+          value={searchQuery}
+          onChange={(event) => setSearchQuery(event.target.value)}
+          placeholder={t("searchPlaceholder")}
+          aria-label={t("searchPlaceholder")}
+          className="h-9"
+        />
+      </div>
+      <Select
+        value={statusFilter}
+        onValueChange={(value) => {
+          setPage(1);
+          setStatusFilter(value as "all" | Status);
+        }}
+      >
+        <SelectTrigger className="h-9 w-[140px]">
+          <SelectValue placeholder={t("filterAllStatus")} />
+        </SelectTrigger>
+        <SelectContent>
+          <SelectItem value="all">{t("filterAllStatus")}</SelectItem>
+          <SelectItem value="active">{t("status.active")}</SelectItem>
+          <SelectItem value="disabled">{t("status.disabled")}</SelectItem>
+          <SelectItem value="locked">{t("status.locked")}</SelectItem>
+        </SelectContent>
+      </Select>
+      <Select
+        value={deptFilter}
+        onValueChange={(value) => {
+          setPage(1);
+          setDeptFilter(value);
+        }}
+      >
+        <SelectTrigger className="h-9 w-[200px]">
+          <SelectValue placeholder={t("filterAllDept")} />
+        </SelectTrigger>
+        <SelectContent>
+          <SelectItem value="all">{t("filterAllDept")}</SelectItem>
+          {deptOptions.map((opt) => (
+            <SelectItem key={opt.id} value={opt.id}>
+              {opt.label}
+            </SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
+    </div>
+  );
 
   return (
     <div className="space-y-5">
@@ -496,61 +619,24 @@ function UsersPageContent() {
               size="sm"
               className="border-0"
             />
-          ) : (
+          ) : viewMode === "list" ? (
             <DataTable
               columns={columns}
-              data={users}
-              searchPlaceholder={t("searchPlaceholder")}
+              data={visibleUsers}
+              enableGlobalFilter={false}
               activeFilters={activeFilters}
               onClearFilters={() => {
+                setSearchQuery("");
                 setStatusFilter("all");
                 setDeptFilter("all");
                 setPage(1);
               }}
               onRowClick={(row) => {
                 setSelected(row.original);
-                setEditOpen(false);
+                setEditOpen(true);
               }}
-              toolbarLeft={
-                <div className="flex flex-wrap gap-2">
-                  <Select
-                    value={statusFilter}
-                    onValueChange={(value) => {
-                      setPage(1);
-                      setStatusFilter(value as "all" | Status);
-                    }}
-                  >
-                    <SelectTrigger className="h-9 w-[140px]">
-                      <SelectValue placeholder={t("filterAllStatus")} />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="all">{t("filterAllStatus")}</SelectItem>
-                      <SelectItem value="active">{t("status.active")}</SelectItem>
-                      <SelectItem value="disabled">{t("status.disabled")}</SelectItem>
-                      <SelectItem value="locked">{t("status.locked")}</SelectItem>
-                    </SelectContent>
-                  </Select>
-                  <Select
-                    value={deptFilter}
-                    onValueChange={(value) => {
-                      setPage(1);
-                      setDeptFilter(value);
-                    }}
-                  >
-                    <SelectTrigger className="h-9 w-[200px]">
-                      <SelectValue placeholder={t("filterAllDept")} />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="all">{t("filterAllDept")}</SelectItem>
-                      {deptOptions.map((opt) => (
-                        <SelectItem key={opt.id} value={opt.id}>
-                          {opt.label}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-              }
+              toolbarLeft={filtersToolbar}
+              toolbarRight={viewSwitcher}
               onExport={() => {
                 const csv = [
                   ["id", "email", "displayName", "status", "deptId", "createdAt"].join(","),
@@ -571,6 +657,96 @@ function UsersPageContent() {
               }}
               getRowId={(row) => row.id}
             />
+          ) : (
+            <div className="space-y-3">
+              <div className="flex flex-wrap items-center gap-2">
+                {filtersToolbar}
+                {viewSwitcher}
+              </div>
+              {activeFilters.length > 0 ? (
+                <div className="flex flex-wrap items-center gap-1.5 text-xs text-muted-foreground">
+                  {activeFilters.map((filter) => (
+                    <button
+                      key={filter.id}
+                      type="button"
+                      className="rounded-full border border-border bg-muted/40 px-2.5 py-1 transition-colors hover:bg-muted"
+                      onClick={filter.onRemove}
+                    >
+                      {filter.label} ×
+                    </button>
+                  ))}
+                  <button
+                    type="button"
+                    className="px-2 py-1 text-muted-foreground hover:text-foreground"
+                    onClick={() => {
+                      setSearchQuery("");
+                      setStatusFilter("all");
+                      setDeptFilter("all");
+                      setPage(1);
+                    }}
+                  >
+                    {t("clearFilters")}
+                  </button>
+                </div>
+              ) : null}
+              {visibleUsers.length === 0 ? (
+                <EmptyState
+                  icon={<Users className="h-5 w-5" />}
+                  title={t("emptyTitle")}
+                  description={t("emptyDescription")}
+                  size="sm"
+                  className="border-0"
+                />
+              ) : (
+                <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+                  {visibleUsers.map((user) => {
+                    const meta = statusMeta[user.status];
+                    const department = user.deptId
+                      ? (deptLabelMap.get(user.deptId) ?? user.deptId)
+                      : t("detail.unassigned");
+                    return (
+                      <Card
+                        key={user.id}
+                        className="cursor-pointer transition-colors hover:border-primary/50 hover:bg-muted/20"
+                        onClick={() => {
+                          setSelected(user);
+                          setEditOpen(true);
+                        }}
+                      >
+                        <CardContent className="space-y-3 p-4">
+                          <div className="flex items-start gap-3">
+                            <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-primary-soft text-sm font-semibold text-primary">
+                              {user.displayName.slice(0, 1)}
+                            </span>
+                            <div className="min-w-0 flex-1">
+                              <div className="flex items-center justify-between gap-2">
+                                <p className="truncate font-medium">{user.displayName}</p>
+                                <Badge variant={meta.variant}>{meta.label}</Badge>
+                              </div>
+                              <p className="mt-0.5 truncate text-xs text-muted-foreground">{user.email}</p>
+                            </div>
+                          </div>
+                          <div className="grid grid-cols-2 gap-2 text-xs">
+                            <div className="rounded-lg bg-muted/40 px-2.5 py-2">
+                              <p className="text-muted-foreground">{t("columns.department")}</p>
+                              <p className="mt-0.5 truncate font-medium" title={department}>{department}</p>
+                            </div>
+                            <div className="rounded-lg bg-muted/40 px-2.5 py-2">
+                              <p className="text-muted-foreground">{t("columns.scopeCount")}</p>
+                              <p className="mt-0.5 font-medium">{user.scopes.length}</p>
+                            </div>
+                          </div>
+                          <div className="flex items-center justify-between gap-2 border-t border-border pt-2 text-xs text-muted-foreground">
+                            <span className="truncate">{user.jobTitle || t("detail.noJobTitle")}</span>
+                            <span className="shrink-0">{t("view.editHint")}</span>
+                          </div>
+                        </CardContent>
+                      </Card>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
           )}
         </CardContent>
       </Card>

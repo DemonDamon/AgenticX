@@ -581,7 +581,7 @@
         "breadcrumbIam": "身份与权限",
         "breadcrumbUsers": "用户",
         "title": "用户管理",
-        "description": "共 {total} 位用户 · 每页 {pageSize} 条 · 支持搜索 / 筛选 / 批量操作 / 详情抽屉",
+        "description": "共 {total} 位用户 · 支持搜索、筛选，以及列表 / 卡片视图切换",
         "refresh": "刷新",
         "newUser": "新建用户",
         "loadingTitle": "加载中...",
@@ -605,6 +605,7 @@
           "more": "更多操作",
           "quickActions": "快速操作",
           "edit": "编辑",
+          "viewDetails": "查看详情",
           "enable": "启用",
           "disable": "停用",
           "delete": "删除"
@@ -625,6 +626,8 @@
           "status": "状态",
           "scopes": "权限作用域",
           "none": "无",
+          "unassigned": "未分配部门",
+          "noJobTitle": "未填写职位",
           "createdAt": "创建时间",
           "updatedAt": "更新时间",
           "visibleModels": "可见模型分配",
@@ -676,9 +679,19 @@
           "exportSuccess": "已导出本页 {count} 条记录"
         },
         "filterLabels": {
+          "search": "搜索：",
           "status": "状态：",
           "department": "部门："
         },
+        "view": {
+          "switchLabel": "切换用户视图",
+          "list": "列表",
+          "cards": "卡片",
+          "editHint": "点击编辑"
+        },
+        "clearFilters": "清空筛选",
+        "emptyTitle": "暂无匹配用户",
+        "emptyDescription": "调整搜索或筛选条件后重试",
         "suspenseLoading": "加载中..."
       },
       "departments": {

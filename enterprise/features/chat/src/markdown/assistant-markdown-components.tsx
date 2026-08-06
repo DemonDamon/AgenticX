@@ -46,6 +46,7 @@ function injectCitations(
   children: React.ReactNode,
   sources: WebSearchSource[] | undefined,
   onOpenInSheet?: (index1Based: number) => void,
+  onOpenExternalUrl?: (url: string, title?: string) => void,
 ): React.ReactNode {
   if (!sources?.length) return children;
 
@@ -72,6 +73,7 @@ function injectCitations(
             index1Based={part.index1Based}
             source={source}
             onOpenInSheet={onOpenInSheet}
+            onOpenExternalUrl={onOpenExternalUrl}
           />
         );
       });
@@ -148,6 +150,7 @@ function injectAttachmentLinks(
 type AssistantMdOptions = {
   sources?: WebSearchSource[];
   onOpenCitationInSheet?: (index1Based: number) => void;
+  onOpenExternalUrl?: (url: string, title?: string) => void;
   sessionAttachments?: ChatMessageAttachment[];
   onOpenAttachment?: (attachment: ChatMessageAttachment) => void;
   /** Deep-research deliverable: open docked files pane on this artifact id. */
@@ -163,6 +166,7 @@ export function createAssistantMdComponents(options: AssistantMdOptions = {}): C
       injectAttachmentLinks(children, options.sessionAttachments, options.onOpenAttachment),
       options.sources,
       options.onOpenCitationInSheet,
+      options.onOpenExternalUrl,
     );
   const cite = enrich;
 

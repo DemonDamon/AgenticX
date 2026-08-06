@@ -54,6 +54,7 @@ import { NearEmptyWordmark } from "./NearEmptyWordmark";
 import { QuotaLimitNotice } from "./QuotaLimitNotice";
 import { ShareDialog } from "./share/ShareDialog";
 import { downloadShareImage } from "./share/share-image";
+import { navigateToExternalLink } from "../lib/external-link";
 import {
   CapabilityHoverTip,
   ComposerPlusMenu,
@@ -183,6 +184,9 @@ export function MachiChatView({
     setFilesPanelFocusId(null);
     setFilesPanelLane(null);
     setAttachmentPreview(attachment);
+  }, []);
+  const requestExternalLink = React.useCallback((url: string, title?: string) => {
+    navigateToExternalLink(url, title);
   }, []);
 
   React.useEffect(() => {
@@ -1024,6 +1028,7 @@ export function MachiChatView({
                   onShowNextRetryVersion={showNextRetryVersion}
                   onRequestDeepResearchFiles={requestDeepResearchFiles}
                   onRequestDeepResearchLaneSources={requestDeepResearchLaneSources}
+                  onOpenExternalUrl={requestExternalLink}
                   onRequestAttachmentPreview={requestAttachmentPreview}
                   onCopy={(content) => {
                     console.log("Copied:", content);
@@ -1066,6 +1071,7 @@ export function MachiChatView({
         focusArtifactId={filesPanelFocusId}
         focusLane={filesPanelLane}
         sources={filesPanelSources}
+        onOpenExternalUrl={requestExternalLink}
       />
       <AttachmentContentPanel
         open={attachmentPreview != null}

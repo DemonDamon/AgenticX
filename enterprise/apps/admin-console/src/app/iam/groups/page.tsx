@@ -518,7 +518,7 @@ export default function GroupsPage() {
                   {group.members.length ? group.members.map((member) => (
                     <Link
                       key={member.id}
-                      href={`/iam/roles?user=${encodeURIComponent(member.id)}`}
+                      href={`/iam/users?userId=${encodeURIComponent(member.id)}&edit=1`}
                       onClick={(event) => event.stopPropagation()}
                       className="flex min-w-0 items-center gap-2 rounded-lg border border-transparent px-2 py-2 text-sm transition-colors hover:border-primary/50 hover:bg-muted"
                     >

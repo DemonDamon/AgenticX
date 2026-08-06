@@ -18,6 +18,7 @@ type WebSearchSourcesPanelProps = {
   sources: WebSearchSource[];
   /** 1-based index to scroll into view when opened */
   highlightIndex?: number | null;
+  onOpenExternalUrl?: (url: string, title?: string) => void;
 };
 
 function SourceListItem({
@@ -26,12 +27,14 @@ function SourceListItem({
   highlighted,
   muted,
   itemRefs,
+  onOpenExternalUrl,
 }: {
   source: WebSearchSource;
   index1Based: number;
   highlighted: boolean;
   muted?: boolean;
   itemRefs: React.MutableRefObject<Map<number, HTMLAnchorElement>>;
+  onOpenExternalUrl?: (url: string, title?: string) => void;
 }) {
   const host = hostnameFromUrl(source.url) ?? "";
   const siteLabel = siteLabelFromSource(source, index1Based);
@@ -45,6 +48,12 @@ function SourceListItem({
         href={source.url}
         target="_blank"
         rel="noreferrer"
+        onClick={(event) => {
+          if (!onOpenExternalUrl) return;
+          event.preventDefault();
+          event.stopPropagation();
+          onOpenExternalUrl(source.url, source.title || source.url);
+        }}
         className={[
           "flex items-center gap-2.5 rounded-lg px-2.5 py-2.5 transition-colors hover:bg-muted/70",
           highlighted ? "bg-primary/10" : "",
@@ -68,6 +77,7 @@ export function WebSearchSourcesPanel({
   onOpenChange,
   sources,
   highlightIndex = null,
+  onOpenExternalUrl,
 }: WebSearchSourcesPanelProps) {
   const itemRefs = React.useRef<Map<number, HTMLAnchorElement>>(new Map());
   const { used, unused } = partitionSourcesByUsage(sources);
@@ -94,6 +104,7 @@ export function WebSearchSourcesPanel({
                 index1Based={index1Based}
                 highlighted={highlightIndex === index1Based}
                 itemRefs={itemRefs}
+                onOpenExternalUrl={onOpenExternalUrl}
               />
             ))}
           </ul>
@@ -111,6 +122,7 @@ export function WebSearchSourcesPanel({
                     highlighted={highlightIndex === index1Based}
                     muted
                     itemRefs={itemRefs}
+                    onOpenExternalUrl={onOpenExternalUrl}
                   />
                 ))}
               </ul>

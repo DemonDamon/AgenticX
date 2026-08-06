@@ -15,9 +15,22 @@ import { ENTERPRISE_PRODUCT_NAME } from "../EnterpriseBrandMark";
 import type { ChatShareMessage, ChatShareSnapshot } from "../../lib/chat-share-types";
 import { copyText } from "../../lib/chat-share-client";
 import { downloadShareImage } from "./share-image";
+import { navigateToExternalLink } from "../../lib/external-link";
 
-function SharedAssistantContent({ message }: { message: ChatShareMessage }) {
-  return <SharedAssistantMarkdown text={message.content} sources={message.web_search_sources} />;
+function SharedAssistantContent({
+  message,
+  onOpenExternalUrl,
+}: {
+  message: ChatShareMessage;
+  onOpenExternalUrl: (url: string, title?: string) => void;
+}) {
+  return (
+    <SharedAssistantMarkdown
+      text={message.content}
+      sources={message.web_search_sources}
+      onOpenExternalUrl={onOpenExternalUrl}
+    />
+  );
 }
 
 function SharedSearchSourcesButton({
@@ -68,6 +81,9 @@ export function SharedConversationView({ snapshot }: { snapshot: ChatShareSnapsh
   const [status, setStatus] = React.useState<string | null>(null);
   const [busy, setBusy] = React.useState(false);
   const [sourcesPanelMessageId, setSourcesPanelMessageId] = React.useState<string | null>(null);
+  const requestExternalLink = React.useCallback((url: string, title?: string) => {
+    navigateToExternalLink(url, title);
+  }, []);
 
   const copyLink = async () => {
     try {
@@ -128,7 +144,10 @@ export function SharedConversationView({ snapshot }: { snapshot: ChatShareSnapsh
                         onOpen={() => setSourcesPanelMessageId(message.id)}
                         label={t("shareSearchResults", { count: message.web_search_sources?.length ?? 0 })}
                       />
-                      <SharedAssistantContent message={message} />
+                      <SharedAssistantContent
+                        message={message}
+                        onOpenExternalUrl={requestExternalLink}
+                      />
                     </>
                   ) : (
                     <p className="whitespace-pre-wrap break-words text-base leading-7">{message.content}</p>
@@ -145,6 +164,7 @@ export function SharedConversationView({ snapshot }: { snapshot: ChatShareSnapsh
             if (!open) setSourcesPanelMessageId(null);
           }}
           sources={snapshot.messages.find((message) => message.id === sourcesPanelMessageId)?.web_search_sources ?? []}
+          onOpenExternalUrl={requestExternalLink}
         />
 
         <div className="sticky bottom-4 z-30 isolate mt-10 flex flex-wrap items-center justify-center gap-2 overflow-hidden rounded-2xl border border-border/70 bg-background/95 p-3 shadow-2xl backdrop-blur-2xl backdrop-saturate-150">

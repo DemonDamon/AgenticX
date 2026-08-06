@@ -12,9 +12,15 @@ type WebSearchCitationProps = {
   index1Based: number;
   source: WebSearchSource;
   onOpenInSheet?: (index1Based: number) => void;
+  onOpenExternalUrl?: (url: string, title?: string) => void;
 };
 
-function WebSearchCitationImpl({ index1Based, source, onOpenInSheet }: WebSearchCitationProps) {
+function WebSearchCitationImpl({
+  index1Based,
+  source,
+  onOpenInSheet,
+  onOpenExternalUrl,
+}: WebSearchCitationProps) {
   const label = siteLabelFromSource(source, index1Based);
   // Must be a real hostname for favicon CDNs — never fall back to display label ("Zhihu").
   const host = hostnameFromUrl(source.url) ?? "";
@@ -26,7 +32,11 @@ function WebSearchCitationImpl({ index1Based, source, onOpenInSheet }: WebSearch
       onOpenInSheet?.(index1Based);
       return;
     }
-    window.open(source.url, "_blank", "noopener,noreferrer");
+    if (onOpenExternalUrl) {
+      onOpenExternalUrl(source.url, source.title || source.url);
+    } else {
+      window.open(source.url, "_blank", "noopener,noreferrer");
+    }
   };
 
   return (

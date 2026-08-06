@@ -10,13 +10,15 @@ import "../../markdown/chat-prism-themes.css";
 export function SharedAssistantMarkdown({
   text,
   sources,
+  onOpenExternalUrl,
 }: {
   text: string;
   sources?: WebSearchSource[];
+  onOpenExternalUrl?: (url: string, title?: string) => void;
 }) {
   const components = React.useMemo(
-    () => createAssistantMdComponents({ sources }),
-    [sources],
+    () => createAssistantMdComponents({ sources, onOpenExternalUrl }),
+    [sources, onOpenExternalUrl],
   );
 
   return (

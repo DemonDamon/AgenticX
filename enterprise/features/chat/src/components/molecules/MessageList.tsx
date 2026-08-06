@@ -169,6 +169,8 @@ type MessageListProps = {
     sessionId: string,
     lane: DeepResearchPanelLane,
   ) => void;
+  /** Route web-search and deep-research source URLs through the host interstitial. */
+  onOpenExternalUrl?: (url: string, title?: string) => void;
   /** When set, attachment preview is owned by the parent (docked side pane). */
   onRequestAttachmentPreview?: (attachment: ChatMessageAttachment) => void;
 };
@@ -192,6 +194,7 @@ function AssistantMessageMarkdownImpl({
   onOpenArtifact,
   citationMessageId,
   onOpenCitationInSheet,
+  onOpenExternalUrl,
 }: {
   text: string;
   className?: string;
@@ -201,6 +204,7 @@ function AssistantMessageMarkdownImpl({
   onOpenArtifact?: (artifactId: string) => void;
   citationMessageId?: string;
   onOpenCitationInSheet?: (messageId: string, index1Based: number) => void;
+  onOpenExternalUrl?: (url: string, title?: string) => void;
 }) {
   // createAssistantMdComponents() mints fresh component functions, so react-markdown
   // sees new element *types* whenever the returned object changes identity — React then
@@ -211,15 +215,18 @@ function AssistantMessageMarkdownImpl({
   const onOpenAttachmentRef = React.useRef(onOpenAttachment);
   const onOpenCitationInSheetRef = React.useRef(onOpenCitationInSheet);
   const onOpenArtifactRef = React.useRef(onOpenArtifact);
+  const onOpenExternalUrlRef = React.useRef(onOpenExternalUrl);
   React.useEffect(() => {
     onOpenAttachmentRef.current = onOpenAttachment;
     onOpenCitationInSheetRef.current = onOpenCitationInSheet;
     onOpenArtifactRef.current = onOpenArtifact;
-  }, [onOpenAttachment, onOpenCitationInSheet, onOpenArtifact]);
+    onOpenExternalUrlRef.current = onOpenExternalUrl;
+  }, [onOpenAttachment, onOpenCitationInSheet, onOpenArtifact, onOpenExternalUrl]);
 
   const hasOpenAttachment = Boolean(onOpenAttachment);
   const hasOpenCitation = Boolean(onOpenCitationInSheet && citationMessageId);
   const hasOpenArtifact = Boolean(onOpenArtifact);
+  const hasOpenExternalUrl = Boolean(onOpenExternalUrl);
 
   const stableOpenAttachment = React.useCallback((attachment: ChatMessageAttachment) => {
     onOpenAttachmentRef.current?.(attachment);
@@ -234,6 +241,9 @@ function AssistantMessageMarkdownImpl({
   const stableOpenArtifact = React.useCallback((artifactId: string) => {
     onOpenArtifactRef.current?.(artifactId);
   }, []);
+  const stableOpenExternalUrl = React.useCallback((url: string, title?: string) => {
+    onOpenExternalUrlRef.current?.(url, title);
+  }, []);
 
   const components = React.useMemo(
     () =>
@@ -243,6 +253,7 @@ function AssistantMessageMarkdownImpl({
         onOpenAttachment: hasOpenAttachment ? stableOpenAttachment : undefined,
         onOpenCitationInSheet: hasOpenCitation ? stableOpenCitation : undefined,
         onOpenArtifact: hasOpenArtifact ? stableOpenArtifact : undefined,
+        onOpenExternalUrl: hasOpenExternalUrl ? stableOpenExternalUrl : undefined,
       }),
     [
       sources,
@@ -250,9 +261,11 @@ function AssistantMessageMarkdownImpl({
       hasOpenAttachment,
       hasOpenCitation,
       hasOpenArtifact,
+      hasOpenExternalUrl,
       stableOpenAttachment,
       stableOpenCitation,
       stableOpenArtifact,
+      stableOpenExternalUrl,
     ],
   );
   return (
@@ -360,6 +373,7 @@ export function MessageList({
   scrollToBottomLabel = "回到底部",
   onRequestDeepResearchFiles,
   onRequestDeepResearchLaneSources,
+  onOpenExternalUrl,
   onRequestAttachmentPreview,
 }: MessageListProps) {
   const parentRef = React.useRef<HTMLDivElement>(null);
@@ -414,6 +428,17 @@ export function MessageList({
     setSourcesPanelMessageId(messageId);
     setSourcesHighlightIndex(index1Based);
   }, []);
+
+  const openExternalUrl = React.useCallback(
+    (url: string, title?: string) => {
+      if (onOpenExternalUrl) {
+        onOpenExternalUrl(url, title);
+      } else {
+        window.open(url, "_blank", "noopener,noreferrer");
+      }
+    },
+    [onOpenExternalUrl],
+  );
 
   const userAttachmentsFingerprint = React.useMemo(
     () =>
@@ -853,7 +878,7 @@ export function MessageList({
                               openDeepResearchLaneSources(message.session_id, lane);
                             }}
                             onOpenLaneSource={(source) => {
-                              window.open(source.url, "_blank", "noopener,noreferrer");
+                              openExternalUrl(source.url, source.title || source.url);
                             }}
                           />
                         ) : null}
@@ -969,6 +994,7 @@ export function MessageList({
                               }
                               citationMessageId={message.id}
                               onOpenCitationInSheet={openCitationInSheet}
+                              onOpenExternalUrl={openExternalUrl}
                             />
                           ) : message.content.trim() && !userSplitBubbles ? (
                             <p
@@ -1353,6 +1379,7 @@ export function MessageList({
           messages.find((m) => m.id === sourcesPanelMessageId)?.web_search_sources ?? []
         }
         highlightIndex={sourcesHighlightIndex}
+        onOpenExternalUrl={openExternalUrl}
       />
       {hostAttachmentPanel ? (
         <AttachmentContentPanel
@@ -1401,6 +1428,7 @@ export function MessageList({
         sessionId={filesPanelSessionId}
         focusArtifactId={filesPanelFocusId}
         focusLane={filesPanelLane}
+        onOpenExternalUrl={openExternalUrl}
         sources={(() => {
           if (!filesPanelSessionId) return [];
           for (let i = messages.length - 1; i >= 0; i -= 1) {
