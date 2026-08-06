@@ -1,10 +1,16 @@
-import { loadAuthUserByEmail } from "@agenticx/iam-core";
 import type { AuthContext } from "@agenticx/auth";
+import { loadAuthUserByEmail } from "@agenticx/iam-core";
 import { cookies } from "next/headers";
 import { refreshTokens, verifyAccessToken } from "./auth-runtime";
 
 export const ACCESS_COOKIE = "agenticx_access_token";
 export const REFRESH_COOKIE = "agenticx_refresh_token";
+
+export type SessionAuth = {
+  session: AuthContext;
+  accessToken: string;
+  refreshToken: string | null;
+};
 
 export function isAuthCookieSecure(): boolean {
   const configured = process.env.AUTH_COOKIE_SECURE?.trim().toLowerCase();
@@ -48,19 +54,49 @@ async function hydrateFromDatabase<
   }
 }
 
-export async function getSessionFromCookies(): Promise<AuthContext | null> {
+function persistAuthCookies(
+  cookieStore: Awaited<ReturnType<typeof cookies>>,
+  accessToken: string,
+  refreshToken: string,
+  accessMaxAge: number,
+): void {
+  cookieStore.set(ACCESS_COOKIE, accessToken, {
+    httpOnly: true,
+    sameSite: "lax",
+    secure: isAuthCookieSecure(),
+    maxAge: accessMaxAge,
+    path: "/",
+  });
+  cookieStore.set(REFRESH_COOKIE, refreshToken, {
+    httpOnly: true,
+    sameSite: "lax",
+    secure: isAuthCookieSecure(),
+    maxAge: 7 * 24 * 60 * 60,
+    path: "/",
+  });
+}
+
+/**
+ * Resolve session + the exact Bearer that should be forwarded to Gateway.
+ * When access is stale but refresh succeeds, returns the *new* accessToken
+ * (do not re-read cookies().get — set() only affects the outgoing response).
+ */
+export async function getSessionAuthFromCookies(): Promise<SessionAuth | null> {
   const cookieStore = await cookies();
   const accessToken = cookieStore.get(ACCESS_COOKIE)?.value;
+  const refreshToken = cookieStore.get(REFRESH_COOKIE)?.value ?? null;
+
   if (accessToken) {
     const context = await verifyAccessToken(accessToken);
     if (context) {
       const hydrated = await hydrateFromDatabase(context);
-      if (hydrated) return hydrated;
+      if (hydrated) {
+        return { session: hydrated, accessToken, refreshToken };
+      }
       return null;
     }
   }
 
-  const refreshToken = cookieStore.get(REFRESH_COOKIE)?.value;
   if (!refreshToken) return null;
 
   try {
@@ -68,27 +104,26 @@ export async function getSessionFromCookies(): Promise<AuthContext | null> {
     const refreshed = await verifyAccessToken(nextTokens.accessToken);
     if (!refreshed) return null;
     const hydrated = await hydrateFromDatabase(refreshed);
-    if (!hydrated) {
-      return null;
-    }
-    cookieStore.set(ACCESS_COOKIE, nextTokens.accessToken, {
-      httpOnly: true,
-      sameSite: "lax",
-      secure: isAuthCookieSecure(),
-      maxAge: nextTokens.expiresInSeconds,
-      path: "/",
-    });
-    cookieStore.set(REFRESH_COOKIE, nextTokens.refreshToken, {
-      httpOnly: true,
-      sameSite: "lax",
-      secure: isAuthCookieSecure(),
-      maxAge: 7 * 24 * 60 * 60,
-      path: "/",
-    });
-    return hydrated;
+    if (!hydrated) return null;
+    persistAuthCookies(
+      cookieStore,
+      nextTokens.accessToken,
+      nextTokens.refreshToken,
+      nextTokens.expiresInSeconds,
+    );
+    return {
+      session: hydrated,
+      accessToken: nextTokens.accessToken,
+      refreshToken: nextTokens.refreshToken,
+    };
   } catch {
     return null;
   }
+}
+
+export async function getSessionFromCookies(): Promise<AuthContext | null> {
+  const auth = await getSessionAuthFromCookies();
+  return auth?.session ?? null;
 }
 
 export type WorkspaceSessionResult =

@@ -1,4 +1,5 @@
 import i18next from "eslint-plugin-i18next";
+import reactHooks from "eslint-plugin-react-hooks";
 import tseslint from "typescript-eslint";
 
 /** @type {import("eslint").Linter.Config[]} */
@@ -16,7 +17,7 @@ export default tseslint.config(
         ecmaFeatures: { jsx: true },
       },
     },
-    plugins: { i18next },
+    plugins: { i18next, "react-hooks": reactHooks },
     rules: {
       "i18next/no-literal-string": [
         "warn",

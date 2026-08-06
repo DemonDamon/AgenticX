@@ -21,7 +21,7 @@ export async function readMysqlQuotaUsage(
   scopeType: string,
   scopeId: string,
   period: string,
-): Promise<number> {
+): Promise<number | null> {
   const db = await getMysqlRepositoryDb();
   const [row] = await db
     .select({ usedTotal: gatewayQuotaPoolUsage.usedTotal })
@@ -33,5 +33,5 @@ export async function readMysqlQuotaUsage(
       eq(gatewayQuotaPoolUsage.period, period),
     ))
     .limit(1);
-  return row?.usedTotal ?? 0;
+  return row?.usedTotal ?? null;
 }

@@ -16,12 +16,6 @@ import {
   Card,
   CardContent,
   DataTable,
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
@@ -29,8 +23,6 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
   EmptyState,
-  Input,
-  Label,
   PageHeader,
   Select,
   SelectContent,
@@ -46,10 +38,17 @@ import {
 } from "@agenticx/ui";
 import { useTranslations } from "next-intl";
 import type { ColumnDef } from "@tanstack/react-table";
-import { MoreHorizontal, Pencil, Plus, RefreshCcw, ShieldCheck, ShieldX, Trash2, UserPlus, Users, Check } from "lucide-react";
+import { MoreHorizontal, Pencil, RefreshCcw, ShieldCheck, ShieldX, Trash2, UserPlus, Users } from "lucide-react";
+import { CreateUserDialog } from "../../../components/CreateUserDialog";
+import {
+  UserFormDialog,
+  type UserFormDeptOption,
+  type UserFormRoleOption,
+  type UserFormStatus,
+} from "../../../components/UserFormDialog";
 import { VisibleModelsEditor } from "../../../components/visible-models-editor";
 
-type Status = "active" | "disabled" | "locked";
+type Status = UserFormStatus;
 
 interface AdminUser {
   id: string;
@@ -87,19 +86,17 @@ function getStatusMeta(t: ReturnType<typeof useTranslations<"pages.iam.users">>)
   } satisfies Record<Status, { label: string; variant: "success" | "warning" | "destructive" }>;
 }
 
-type DeptOption = { id: string; label: string };
-type RoleOption = { id: string; code: string; name: string };
+type DeptOption = UserFormDeptOption;
+type RoleOption = UserFormRoleOption;
 
 const PAGE_SIZE = 50;
 
 function UsersPageContent() {
   const t = useTranslations("pages.iam.users");
-  const tc = useTranslations("common");
-  const ts = useTranslations("shell");
   const statusMeta = useMemo(() => getStatusMeta(t), [t]);
   const searchParams = useSearchParams();
   const initialDept = searchParams.get("dept") || "all";
-  const initialUserId = searchParams.get("user") || "";
+  const initialUserId = searchParams.get("userId") || searchParams.get("user") || "";
   const initialEdit = searchParams.get("edit") === "1";
   const initialCreate = searchParams.get("create") === "1";
 
@@ -114,17 +111,13 @@ function UsersPageContent() {
   const [editOpen, setEditOpen] = useState(false);
   const [deptOptions, setDeptOptions] = useState<DeptOption[]>([]);
   const [roleOptions, setRoleOptions] = useState<RoleOption[]>([]);
+  const [currentUserId, setCurrentUserId] = useState<string | null>(null);
 
   const deptLabelMap = useMemo(() => {
     const m = new Map<string, string>();
     for (const d of deptOptions) m.set(d.id, d.label);
     return m;
   }, [deptOptions]);
-
-  const createInitial = useMemo(
-    () => ({ ...EMPTY_USER_FORM, deptId: initialDept === "all" ? "" : initialDept }),
-    [initialDept],
-  );
 
   const selectedInitial = useMemo(
     () =>
@@ -174,9 +167,29 @@ function UsersPageContent() {
   useEffect(() => {
     if (!initialUserId || loading) return;
     const user = users.find((item) => item.id === initialUserId);
-    if (!user || selected?.id === user.id) return;
-    setSelected(user);
-    setEditOpen(initialEdit);
+    if (user && selected?.id !== user.id) {
+      setSelected(user);
+      setEditOpen(initialEdit);
+      return;
+    }
+
+    if (user || selected?.id === initialUserId) return;
+    let alive = true;
+    void (async () => {
+      try {
+        const res = await adminFetch(`/api/admin/users/${encodeURIComponent(initialUserId)}`, { cache: "no-store" });
+        const json = (await res.json()) as ApiUserResp;
+        if (alive && res.ok && json.data?.user) {
+          setSelected(json.data.user);
+          setEditOpen(initialEdit);
+        }
+      } catch {
+        /* 详情入口仅用于定位用户，列表本身仍可正常使用 */
+      }
+    })();
+    return () => {
+      alive = false;
+    };
   }, [initialEdit, initialUserId, loading, selected?.id, users]);
 
   useEffect(() => {
@@ -207,6 +220,22 @@ function UsersPageContent() {
     let alive = true;
     void (async () => {
       try {
+        const res = await adminFetch("/api/auth/session", { cache: "no-store" });
+        const json = (await res.json()) as { data?: { userId?: string } };
+        if (alive) setCurrentUserId(json.data?.userId ?? null);
+      } catch {
+        /* 删除接口仍会在服务端阻止删除当前登录用户。 */
+      }
+    })();
+    return () => {
+      alive = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    let alive = true;
+    void (async () => {
+      try {
         const res = await adminFetch("/api/admin/roles", { cache: "no-store" });
         const json = (await res.json()) as { data?: { items: RoleOption[] } };
         if (!alive || !json.data?.items) return;
@@ -219,31 +248,6 @@ function UsersPageContent() {
       alive = false;
     };
   }, []);
-
-  const handleCreate = async (input: Record<string, unknown>) => {
-    const res = await adminFetch("/api/admin/users", {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify(input),
-    });
-    const json = (await res.json()) as ApiUserResp;
-    if (!res.ok || !json.data?.user) {
-      toast.error(json.message ?? t("toast.createFailed"));
-      return false;
-    }
-    toast.success(`${t("toast.created")} ${json.data.user.email}`);
-    if (json.data.initialPassword) {
-      toast.success(`${t("toast.initialPassword")}${json.data.initialPassword}`, { duration: 15_000 });
-      try {
-        await navigator.clipboard.writeText(json.data.initialPassword);
-        toast.success(t("toast.passwordCopied"));
-      } catch {
-        /* ignore */
-      }
-    }
-    await load();
-    return true;
-  };
 
   const handleUpdate = async (id: string, patch: Partial<AdminUser> & Record<string, unknown>) => {
     const res = await fetch(`/api/admin/users/${id}`, {
@@ -279,6 +283,10 @@ function UsersPageContent() {
   };
 
   const handleDelete = async (user: AdminUser) => {
+    if (user.id === currentUserId) {
+      toast.error("不能删除当前登录用户");
+      return;
+    }
     if (!window.confirm(t("toast.deleteConfirm", { email: user.email }))) return;
     const res = await fetch(`/api/admin/users/${user.id}`, { method: "DELETE" });
     if (!res.ok) {
@@ -354,7 +362,34 @@ function UsersPageContent() {
         header: "",
         enableHiding: false,
         cell: ({ row }) => (
-          <div className="flex justify-end">
+          <div className="flex justify-end gap-1">
+            <Button
+              variant="ghost"
+              size="icon-sm"
+              title={t("actions.edit")}
+              aria-label={t("actions.edit")}
+              onClick={(event) => {
+                event.stopPropagation();
+                setSelected(row.original);
+                setEditOpen(true);
+              }}
+            >
+              <Pencil />
+            </Button>
+            <Button
+              variant="ghost"
+              size="icon-sm"
+              className="text-danger hover:bg-danger/10 hover:text-danger"
+              title={row.original.id === currentUserId ? "不能删除当前登录用户" : t("actions.delete")}
+              aria-label={t("actions.delete")}
+              disabled={row.original.id === currentUserId}
+              onClick={(event) => {
+                event.stopPropagation();
+                void handleDelete(row.original);
+              }}
+            >
+              <Trash2 />
+            </Button>
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
                 <Button
@@ -369,16 +404,6 @@ function UsersPageContent() {
               <DropdownMenuContent align="end" className="w-44">
                 <DropdownMenuLabel>{t("actions.quickActions")}</DropdownMenuLabel>
                 <DropdownMenuSeparator />
-                <DropdownMenuItem
-                  onClick={(event) => {
-                    event.stopPropagation();
-                    setSelected(row.original);
-                    setEditOpen(true);
-                  }}
-                >
-                  <Pencil className="mr-2 h-4 w-4" />
-                  {t("actions.edit")}
-                </DropdownMenuItem>
                 <DropdownMenuItem
                   onClick={(event) => {
                     event.stopPropagation();
@@ -397,24 +422,13 @@ function UsersPageContent() {
                     </>
                   )}
                 </DropdownMenuItem>
-                <DropdownMenuSeparator />
-                <DropdownMenuItem
-                  className="text-danger focus:text-danger"
-                  onClick={(event) => {
-                    event.stopPropagation();
-                    void handleDelete(row.original);
-                  }}
-                >
-                  <Trash2 className="mr-2 h-4 w-4" />
-                  {t("actions.delete")}
-                </DropdownMenuItem>
               </DropdownMenuContent>
             </DropdownMenu>
           </div>
         ),
       },
     ],
-    [selected?.id, deptLabelMap]
+    [currentUserId, selected?.id, deptLabelMap]
   );
 
   const activeFilters = useMemo(() => {
@@ -584,116 +598,80 @@ function UsersPageContent() {
       </div>
 
       {/* 详情抽屉 */}
-      <Sheet
-        open={!!selected}
-        onOpenChange={(open) => {
-          if (open) return;
-          setEditOpen(false);
-          setSelected(null);
-        }}
-      >
+      <Sheet open={!!selected && !editOpen} onOpenChange={(open) => !open && setSelected(null)}>
         <SheetContent className="w-full sm:max-w-xl">
           {selected ? (
-            editOpen ? (
-              <div className="flex h-full flex-col gap-4">
-                <SheetHeader>
-                  <SheetTitle>{t("form.editTitle")}</SheetTitle>
-                  <SheetDescription>{selected.email}</SheetDescription>
-                </SheetHeader>
-                <div className="min-h-0 flex-1 overflow-y-auto pr-1">
-                  <UserFormFields
-                    submitLabel={t("form.submitSave")}
-                    initial={selectedInitial}
-                    emailReadOnly
-                    deptOptions={deptOptions}
-                    roleOptions={roleOptions}
-                    onCancel={() => setEditOpen(false)}
-                    onSubmit={async (values) => {
-                      const ok = await handleUpdate(selected.id, {
-                        displayName: values.displayName,
-                        status: values.status,
-                        deptId: values.deptId || null,
-                        phone: values.phone || null,
-                        employeeNo: values.employeeNo || null,
-                        jobTitle: values.jobTitle || null,
-                        roleCodes: values.roleCodes,
-                      });
-                      if (ok) setEditOpen(false);
-                    }}
-                  />
-                </div>
-              </div>
-            ) : (
-              <div className="flex h-full flex-col gap-4">
-                <SheetHeader>
-                  <div className="flex items-center gap-3">
-                    <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-primary-soft text-base font-semibold text-primary">
-                      {selected.displayName.slice(0, 1)}
-                    </span>
-                    <div className="min-w-0">
-                      <SheetTitle className="truncate">{selected.displayName}</SheetTitle>
-                      <SheetDescription className="truncate">{selected.email}</SheetDescription>
-                    </div>
+            <div className="flex h-full flex-col gap-4">
+              <SheetHeader>
+                <div className="flex items-center gap-3">
+                  <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-primary-soft text-base font-semibold text-primary">
+                    {selected.displayName.slice(0, 1)}
+                  </span>
+                  <div className="min-w-0">
+                    <SheetTitle className="truncate">{selected.displayName}</SheetTitle>
+                    <SheetDescription className="truncate">{selected.email}</SheetDescription>
                   </div>
-                </SheetHeader>
+                </div>
+              </SheetHeader>
 
-                <div className="flex-1 space-y-4 overflow-y-auto pr-1">
-                  <DetailRow label={t("detail.userId")} value={<span className="font-mono text-xs">{selected.id}</span>} />
-                  <DetailRow label={t("detail.tenant")} value={<span className="font-mono text-xs">{selected.tenantId}</span>} />
-                  <DetailRow
-                    label={t("columns.department")}
-                    value={
-                      selected.deptId ? (deptLabelMap.get(selected.deptId) ?? selected.deptId) : "—"
-                    }
-                  />
-                  <DetailRow label={t("detail.phone")} value={selected.phone ?? "—"} />
-                  <DetailRow label={t("detail.employeeNo")} value={selected.employeeNo ?? "—"} />
-                  <DetailRow label={t("detail.jobTitle")} value={selected.jobTitle ?? "—"} />
-                  <DetailRow
-                    label={t("detail.roles")}
-                    value={
-                      selected.roleCodes?.length ? (
-                        <div className="flex flex-wrap gap-1">
-                          {selected.roleCodes.map((c) => (
-                            <Badge key={c} variant="outline" className="font-mono text-[10px]">
-                              {c}
-                            </Badge>
-                          ))}
-                        </div>
-                      ) : (
-                        "—"
-                      )
-                    }
-                  />
-                  <DetailRow
-                    label={t("columns.status")}
-                    value={<Badge variant={statusMeta[selected.status].variant}>{statusMeta[selected.status].label}</Badge>}
-                  />
-                  <DetailRow
-                    label={t("detail.scopes")}
-                    value={
+              <div className="flex-1 space-y-4 overflow-y-auto pr-1">
+                <DetailRow label={t("detail.userId")} value={<span className="font-mono text-xs">{selected.id}</span>} />
+                <DetailRow label={t("detail.tenant")} value={<span className="font-mono text-xs">{selected.tenantId}</span>} />
+                <DetailRow
+                  label={t("columns.department")}
+                  value={
+                    selected.deptId ? (deptLabelMap.get(selected.deptId) ?? selected.deptId) : "—"
+                  }
+                />
+                <DetailRow label={t("detail.phone")} value={selected.phone ?? "—"} />
+                <DetailRow label={t("detail.employeeNo")} value={selected.employeeNo ?? "—"} />
+                <DetailRow label={t("detail.jobTitle")} value={selected.jobTitle ?? "—"} />
+                <DetailRow
+                  label={t("detail.roles")}
+                  value={
+                    selected.roleCodes?.length ? (
                       <div className="flex flex-wrap gap-1">
-                        {selected.scopes.length === 0 ? (
-                          <span className="text-sm text-muted-foreground">{t("detail.none")}</span>
-                        ) : (
-                          selected.scopes.map((scope) => (
-                            <Badge key={scope} variant="soft" className="font-mono text-[10px]">
-                              {scope}
-                            </Badge>
-                          ))
-                        )}
+                        {selected.roleCodes.map((c) => (
+                          <Badge key={c} variant="outline" className="font-mono text-[10px]">
+                            {c}
+                          </Badge>
+                        ))}
                       </div>
-                    }
-                  />
-                  <DetailRow
-                    label={t("detail.createdAt")}
-                    value={<span className="font-mono text-xs">{new Date(selected.createdAt).toLocaleString("zh-CN")}</span>}
-                  />
-                  <DetailRow
-                    label={t("columns.updatedAt")}
-                    value={<span className="font-mono text-xs">{new Date(selected.updatedAt).toLocaleString("zh-CN")}</span>}
-                  />
+                    ) : (
+                      "—"
+                    )
+                  }
+                />
+                <DetailRow
+                  label={t("columns.status")}
+                  value={<Badge variant={statusMeta[selected.status].variant}>{statusMeta[selected.status].label}</Badge>}
+                />
+                <DetailRow
+                  label={t("detail.scopes")}
+                  value={
+                    <div className="flex flex-wrap gap-1">
+                      {selected.scopes.length === 0 ? (
+                        <span className="text-sm text-muted-foreground">{t("detail.none")}</span>
+                      ) : (
+                        selected.scopes.map((scope) => (
+                          <Badge key={scope} variant="soft" className="font-mono text-[10px]">
+                            {scope}
+                          </Badge>
+                        ))
+                      )}
+                    </div>
+                  }
+                />
+                <DetailRow
+                  label={t("detail.createdAt")}
+                  value={<span className="font-mono text-xs">{new Date(selected.createdAt).toLocaleString("zh-CN")}</span>}
+                />
+                <DetailRow
+                  label={t("columns.updatedAt")}
+                  value={<span className="font-mono text-xs">{new Date(selected.updatedAt).toLocaleString("zh-CN")}</span>}
+                />
 
+                {selected ? (
                   <VisibleModelsEditor
                     target={{
                       kind: "user",
@@ -702,60 +680,76 @@ function UsersPageContent() {
                     }}
                     variant="inline"
                   />
-                </div>
-
-                <div className="flex flex-wrap gap-2 border-t border-border pt-3">
-                  <Button variant="outline" className="flex-1 min-w-[100px]" onClick={() => setEditOpen(true)}>
-                    <Pencil />
-                    {t("actions.edit")}
-                  </Button>
-                  <Button variant="outline" className="flex-1 min-w-[100px]" onClick={() => void handleResetPassword(selected)}>
-                    {t("detail.resetPassword")}
-                  </Button>
-                  <Button
-                    variant={selected.status === "active" ? "outline" : "default"}
-                    className="flex-1"
-                    onClick={() => void handleQuickToggleStatus(selected)}
-                  >
-                    {selected.status === "active" ? <ShieldX /> : <ShieldCheck />}
-                    {selected.status === "active" ? t("status.disabled") : t("status.active")}
-                  </Button>
-                  <Button variant="destructive" onClick={() => void handleDelete(selected)}>
-                    <Trash2 />
-                  </Button>
-                </div>
+                ) : null}
               </div>
-            )
+
+              <div className="flex flex-wrap gap-2 border-t border-border pt-3">
+                <Button variant="outline" className="flex-1 min-w-[100px]" onClick={() => setEditOpen(true)}>
+                  <Pencil />
+                  {t("actions.edit")}
+                </Button>
+                <Button variant="outline" className="flex-1 min-w-[100px]" onClick={() => void handleResetPassword(selected)}>
+                  {t("detail.resetPassword")}
+                </Button>
+                <Button
+                  variant={selected.status === "active" ? "outline" : "default"}
+                  className="flex-1"
+                  onClick={() => void handleQuickToggleStatus(selected)}
+                >
+                  {selected.status === "active" ? <ShieldX /> : <ShieldCheck />}
+                  {selected.status === "active" ? t("status.disabled") : t("status.active")}
+                </Button>
+                <Button
+                  variant="destructive"
+                  onClick={() => void handleDelete(selected)}
+                  disabled={selected.id === currentUserId}
+                  title={selected.id === currentUserId ? "不能删除当前登录用户" : t("actions.delete")}
+                >
+                  <Trash2 />
+                  {t("actions.delete")}
+                </Button>
+              </div>
+            </div>
           ) : null}
         </SheetContent>
       </Sheet>
 
       {/* 新建 */}
-      <UserFormDialog
+      <CreateUserDialog
         open={createOpen}
         onOpenChange={setCreateOpen}
         title={t("newUser")}
         description={t("form.createDescription")}
-        submitLabel={t("form.submitCreate")}
-        initial={createInitial}
+        defaultDeptId={initialDept === "all" ? undefined : initialDept}
+        departmentOptions={deptOptions}
+        onCreated={load}
+      />
+
+      {/* 编辑 */}
+      <UserFormDialog
+        open={editOpen && !!selected}
+        onOpenChange={setEditOpen}
+        title={t("form.editTitle")}
+        description={selected?.email}
+        submitLabel={t("form.submitSave")}
         roleOptions={roleOptions}
         deptOptions={deptOptions}
+        initial={selectedInitial}
         onSubmit={async (values) => {
-          const ok = await handleCreate({
-            email: values.email,
+          if (!selected) return;
+          const ok = await handleUpdate(selected.id, {
+            email: values.email.trim(),
             displayName: values.displayName,
             status: values.status,
             deptId: values.deptId || null,
             phone: values.phone || null,
             employeeNo: values.employeeNo || null,
             jobTitle: values.jobTitle || null,
-            roleCodes: values.roleCodes.length ? values.roleCodes : undefined,
-            initialPassword: values.initialPassword || undefined,
+            roleCodes: values.roleCodes,
           });
-          if (ok) setCreateOpen(false);
+          if (ok) setEditOpen(false);
         }}
       />
-
     </div>
   );
 }
@@ -766,269 +760,6 @@ function DetailRow({ label, value }: { label: string; value: React.ReactNode }) 
       <span className="text-muted-foreground">{label}</span>
       <span className="min-w-0 text-foreground">{value}</span>
     </div>
-  );
-}
-
-interface UserFormValues {
-  email: string;
-  displayName: string;
-  status: Status;
-  deptId: string;
-  phone: string;
-  employeeNo: string;
-  jobTitle: string;
-  roleCodes: string[];
-  initialPassword: string;
-}
-
-const EMPTY_USER_FORM: UserFormValues = {
-  email: "",
-  displayName: "",
-  status: "active",
-  deptId: "",
-  phone: "",
-  employeeNo: "",
-  jobTitle: "",
-  roleCodes: ["member"],
-  initialPassword: "",
-};
-
-function UserFormFields({
-  open,
-  submitLabel,
-  initial,
-  emailReadOnly,
-  deptOptions,
-  roleOptions,
-  onCancel,
-  onSubmit,
-}: {
-  open?: boolean;
-  submitLabel: string;
-  initial?: UserFormValues;
-  emailReadOnly?: boolean;
-  deptOptions: DeptOption[];
-  roleOptions: RoleOption[];
-  onCancel: () => void;
-  onSubmit: (values: UserFormValues) => Promise<void>;
-}) {
-  const t = useTranslations("pages.iam.users");
-  const tc = useTranslations("common");
-  const [values, setValues] = useState<UserFormValues>(() => initial ?? EMPTY_USER_FORM);
-  const [submitting, setSubmitting] = useState(false);
-
-  useEffect(() => {
-    if (open === undefined || open) {
-      setValues(initial ?? EMPTY_USER_FORM);
-    }
-  }, [open, initial]);
-
-  const handleSubmit = async (event: React.FormEvent) => {
-    event.preventDefault();
-    if (submitting) return;
-    setSubmitting(true);
-    try {
-      await onSubmit(values);
-    } finally {
-      setSubmitting(false);
-    }
-  };
-
-  return (
-    <form onSubmit={handleSubmit} className="space-y-3">
-          <div className="space-y-1.5">
-            <Label htmlFor="user-email">{t("form.emailLabel")}</Label>
-            <Input
-              id="user-email"
-              type="email"
-              required
-              value={values.email}
-              onChange={(event) => setValues((prev) => ({ ...prev, email: event.target.value }))}
-              readOnly={emailReadOnly}
-              placeholder="user@your-company.com"
-            />
-          </div>
-          <div className="space-y-1.5">
-            <Label htmlFor="user-name">{t("form.nameLabel")}</Label>
-            <Input
-              id="user-name"
-              required
-              value={values.displayName}
-              onChange={(event) => setValues((prev) => ({ ...prev, displayName: event.target.value }))}
-              placeholder={t("form.namePlaceholder")}
-            />
-          </div>
-            <div className="grid grid-cols-2 gap-3">
-            <div className="space-y-1.5">
-              <Label>{t("columns.status")}</Label>
-              <Select
-                value={values.status}
-                onValueChange={(value) => setValues((prev) => ({ ...prev, status: value as Status }))}
-              >
-                <SelectTrigger>
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="active">{t("status.active")}</SelectItem>
-                  <SelectItem value="disabled">{t("status.disabled")}</SelectItem>
-                  <SelectItem value="locked">{t("status.locked")}</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-            <div className="space-y-1.5">
-              <Label>{t("columns.department")}</Label>
-              <Select
-                value={values.deptId || "__none__"}
-                onValueChange={(v) => setValues((prev) => ({ ...prev, deptId: v === "__none__" ? "" : v }))}
-              >
-                <SelectTrigger>
-                  <SelectValue placeholder={t("form.deptPlaceholder")} />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="__none__">{t("form.deptUnassigned")}</SelectItem>
-                  {deptOptions.map((d) => (
-                    <SelectItem key={d.id} value={d.id}>
-                      {d.label}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-          </div>
-
-          <div className="grid grid-cols-2 gap-3">
-            <div className="space-y-1.5">
-              <Label htmlFor="user-phone">{t("detail.phone")}</Label>
-              <Input
-                id="user-phone"
-                value={values.phone}
-                onChange={(e) => setValues((prev) => ({ ...prev, phone: e.target.value }))}
-              />
-            </div>
-            <div className="space-y-1.5">
-              <Label htmlFor="user-eno">{t("detail.employeeNo")}</Label>
-              <Input
-                id="user-eno"
-                value={values.employeeNo}
-                onChange={(e) => setValues((prev) => ({ ...prev, employeeNo: e.target.value }))}
-              />
-            </div>
-          </div>
-          <div className="space-y-1.5">
-            <Label htmlFor="user-job">{t("detail.jobTitle")}</Label>
-            <Input
-              id="user-job"
-              value={values.jobTitle}
-              onChange={(e) => setValues((prev) => ({ ...prev, jobTitle: e.target.value }))}
-            />
-          </div>
-          <div className="space-y-2">
-            <Label>{t("detail.roles")}</Label>
-            <div className="grid max-h-40 gap-1.5 overflow-y-auto rounded-md border border-border p-2 sm:grid-cols-2">
-              {roleOptions.map((r) => {
-                const checked = values.roleCodes.includes(r.code);
-                return (
-                  <button
-                    key={r.id}
-                    type="button"
-                    className={[
-                      "flex items-center gap-2 rounded px-2 py-1 text-left text-xs",
-                      checked ? "bg-primary-soft ring-1 ring-primary" : "hover:bg-muted",
-                    ].join(" ")}
-                    onClick={() =>
-                      setValues((prev) => {
-                        const next = new Set(prev.roleCodes);
-                        if (next.has(r.code)) next.delete(r.code);
-                        else next.add(r.code);
-                        const arr = [...next];
-                        return { ...prev, roleCodes: arr.length ? arr : ["member"] };
-                      })
-                    }
-                  >
-                    <span
-                      className={[
-                        "flex h-3.5 w-3.5 shrink-0 items-center justify-center rounded border",
-                        checked ? "border-primary bg-primary text-primary-foreground" : "border-border",
-                      ].join(" ")}
-                    >
-                      {checked ? <Check className="h-2.5 w-2.5" /> : null}
-                    </span>
-                    <span className="min-w-0">
-                      <span className="font-mono text-[10px] text-muted-foreground">{r.code}</span> · {r.name}
-                    </span>
-                  </button>
-                );
-              })}
-            </div>
-          </div>
-          {!emailReadOnly ? (
-            <div className="space-y-1.5">
-              <Label htmlFor="user-init-pw">{t("form.initialPasswordLabel")}</Label>
-              <Input
-                id="user-init-pw"
-                type="password"
-                autoComplete="new-password"
-                value={values.initialPassword}
-                onChange={(e) => setValues((prev) => ({ ...prev, initialPassword: e.target.value }))}
-              />
-            </div>
-          ) : null}
-
-      <div className="mt-4 flex justify-end gap-2">
-        <Button type="button" variant="outline" onClick={onCancel}>
-          {tc("actions.cancel")}
-        </Button>
-        <Button type="submit" disabled={submitting}>
-          <Plus />
-          {submitting ? t("form.processing") : submitLabel}
-        </Button>
-      </div>
-    </form>
-  );
-}
-
-function UserFormDialog({
-  open,
-  onOpenChange,
-  title,
-  description,
-  submitLabel,
-  initial,
-  emailReadOnly,
-  deptOptions,
-  roleOptions,
-  onSubmit,
-}: {
-  open: boolean;
-  onOpenChange: (next: boolean) => void;
-  title: string;
-  description?: React.ReactNode;
-  submitLabel: string;
-  initial?: UserFormValues;
-  emailReadOnly?: boolean;
-  deptOptions: DeptOption[];
-  roleOptions: RoleOption[];
-  onSubmit: (values: UserFormValues) => Promise<void>;
-}) {
-  return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent>
-        <DialogHeader>
-          <DialogTitle>{title}</DialogTitle>
-          {description ? <DialogDescription>{description}</DialogDescription> : null}
-        </DialogHeader>
-        <UserFormFields
-          open={open}
-          submitLabel={submitLabel}
-          initial={initial}
-          emailReadOnly={emailReadOnly}
-          deptOptions={deptOptions}
-          roleOptions={roleOptions}
-          onCancel={() => onOpenChange(false)}
-          onSubmit={onSubmit}
-        />
-      </DialogContent>
-    </Dialog>
   );
 }
 

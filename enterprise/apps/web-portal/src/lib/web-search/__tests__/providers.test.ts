@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import {
   executeWebSearch,
+  formatHits,
   looksLikeDdgChallenge,
   parseDuckDuckGoHtml,
   parseDuckDuckGoLite,
@@ -158,7 +159,89 @@ describe("web search providers", () => {
     expect(tavilyHits[0]?.title).toBe("Tavily Hit");
   });
 
+  it("sends bocha summary+freshness for weather queries and omits freshness for stable facts", async () => {
+    const bodies: unknown[] = [];
+    const fetchImpl = vi.fn(async (_url: string, init?: RequestInit) => {
+      bodies.push(JSON.parse(String(init?.body ?? "{}")));
+      return new Response(
+        JSON.stringify({
+          data: {
+            webPages: {
+              value: [{ name: "Hit", url: "https://example.com/a", snippet: "s" }],
+            },
+          },
+        }),
+        { status: 200 },
+      );
+    });
+
+    await executeWebSearch(
+      "广州南沙天气如何",
+      5,
+      { provider: "bocha", apiKey: "k", maxResults: 5 },
+      fetchImpl as unknown as typeof fetch,
+    );
+    expect(bodies[0]).toMatchObject({ summary: true, freshness: "oneDay" });
+
+    await executeWebSearch(
+      "OpenAI 是谁创办的",
+      5,
+      { provider: "bocha", apiKey: "k", maxResults: 5 },
+      fetchImpl as unknown as typeof fetch,
+    );
+    const stableBody = bodies[1] as Record<string, unknown>;
+    expect(stableBody.summary).toBe(true);
+    expect(Object.prototype.hasOwnProperty.call(stableBody, "freshness")).toBe(false);
+  });
+
+  it("prefers bocha summary over snippet and maps datePublished", async () => {
+    const fetchImpl = vi.fn(async () =>
+      new Response(
+        JSON.stringify({
+          data: {
+            webPages: {
+              value: [
+                {
+                  name: "t",
+                  url: "https://a",
+                  snippet: "s",
+                  summary: "long-summary",
+                  datePublished: "2026-08-02T00:00:00+08:00",
+                },
+              ],
+            },
+          },
+        }),
+        { status: 200 },
+      ),
+    );
+    const hits = await executeWebSearch(
+      "广州南沙天气如何",
+      5,
+      { provider: "bocha", apiKey: "k", maxResults: 5 },
+      fetchImpl as unknown as typeof fetch,
+    );
+    expect(hits[0]?.snippet).toBe("long-summary");
+    expect(hits[0]?.publishedAt).toBe("2026-08-02T00:00:00+08:00");
+  });
+
+  it("formatHits includes publishedAt when present", () => {
+    const withDate = formatHits([
+      {
+        title: "t",
+        url: "https://a",
+        snippet: "s",
+        publishedAt: "2026-08-02T00:00:00+08:00",
+      },
+    ]);
+    expect(withDate).toContain("发布时间: 2026-08-02T00:00:00+08:00");
+
+    const withoutDate = formatHits([{ title: "t", url: "https://a", snippet: "s" }]);
+    expect(withoutDate).not.toContain("发布时间");
+  });
+
   it("falls back to duckduckgo when bocha throws", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
     const fetchImpl = vi.fn(async (url: string) => {
       if (String(url).includes("bochaai.com")) {
         throw new Error("bocha down");
@@ -168,6 +251,11 @@ describe("web search providers", () => {
     const hits = await executeWebSearch("q", 5, { provider: "bocha", apiKey: "k", maxResults: 5 }, fetchImpl as unknown as typeof fetch);
     expect(hits.length).toBeGreaterThanOrEqual(2);
     expect(fetchImpl).toHaveBeenCalledTimes(2);
+    expect(warn).toHaveBeenCalledWith(
+      expect.stringContaining("[web-search] provider=bocha failed"),
+      "bocha down",
+    );
+    warn.mockRestore();
   });
 
   it("clamps max_results above cap to 50", async () => {

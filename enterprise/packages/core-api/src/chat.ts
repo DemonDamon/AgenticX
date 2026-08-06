@@ -25,6 +25,8 @@ export type ChatMessageAttachment = {
   /** Extracted plain text for document Q&A. */
   parsed_text?: string;
   kind?: "image" | "document" | "video";
+  /** Original-file blob id in enterprise_chat_attachments (when retained). */
+  attachment_id?: string;
 };
 
 /** Web-search hit attached to an assistant message (portal BFF). */
@@ -32,6 +34,8 @@ export type WebSearchSource = {
   title: string;
   url: string;
   snippet: string;
+  /** True when this hit was injected into the model prompt for the turn. */
+  usedByModel?: boolean;
 };
 
 /** Deep-research workbench state attached to an assistant message. */
@@ -39,7 +43,7 @@ export type DeepResearchEvent =
   | { type: "run_started"; runId: string }
   | {
       type: "phase";
-      phase: "clarify" | "plan" | "lanes" | "synthesize" | "done";
+      phase: "recon" | "clarify" | "plan" | "lanes" | "reflect" | "synthesize" | "done";
       message: string;
     }
   | {
@@ -51,10 +55,27 @@ export type DeepResearchEvent =
       question: string;
       options: Array<{ id: string; label: string }>;
       allowCustom?: boolean;
+      /** default true；false = single-select chips */
+      multiSelect?: boolean;
     }
   | { type: "lane_started"; laneId: string; title: string; index: number; total: number }
   | { type: "lane_progress"; laneId: string; message: string; sourcesCollected?: number }
   | { type: "lane_done"; laneId: string; artifactPath?: string; status: "ok" | "failed" }
+  /** Per-lane source list so the workbench can show which pages were searched. */
+  | {
+      type: "lane_sources";
+      laneId: string;
+      sources: Array<{
+        title: string;
+        url: string;
+        /** Truncated search snippet (<= 200 chars). */
+        snippet?: string;
+        /** Artifact path when the full text was archived. */
+        archivedPath?: string;
+        /** Whether the full text was fetched successfully. */
+        fetched?: boolean;
+      }>;
+    }
   | {
       type: "artifact";
       id: string;
@@ -64,6 +85,14 @@ export type DeepResearchEvent =
       bytes: number;
     }
   | { type: "clarify_timeout"; runId: string }
+  | { type: "reflection"; gaps: string[] }
+  | {
+      type: "research_stats";
+      queriesPlanned: number;
+      urlsDiscovered: number;
+      sourcesSelected: number;
+      pagesFetched: number;
+    }
   /** Short assistant prose between workbench steps (not part of final report content). */
   | { type: "narrative"; text: string };
 

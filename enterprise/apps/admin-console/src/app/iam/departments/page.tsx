@@ -294,6 +294,20 @@ export default function DepartmentsPage() {
     }
   }, []);
 
+  async function handleDeleteMember(member: DeptMember) {
+    if (!window.confirm(tu("toast.deleteConfirm", { email: member.email }))) return;
+    const res = await adminFetch(`/api/admin/users/${member.id}`, { method: "DELETE" });
+    const json = (await res.json()) as { message?: string };
+    if (!res.ok) {
+      toast.error(json.message ?? tu("toast.deleteFailed"));
+      return;
+    }
+    toast.success(`${tu("toast.deleted")} ${member.email}`);
+    if (currentDeptId) {
+      await Promise.all([loadDeptMembers(currentDeptId), loadTree()]);
+    }
+  }
+
   useEffect(() => {
     if (!currentDeptId) {
       setDeptMembers([]);
@@ -636,7 +650,7 @@ export default function DepartmentsPage() {
                         className="flex items-center gap-3 px-4 py-3 hover:bg-muted/40 transition-colors"
                       >
                         <Link
-                          href={`/iam/users?dept=${encodeURIComponent(currentDeptId ?? "")}&user=${encodeURIComponent(member.id)}`}
+                          href={`/iam/users?dept=${encodeURIComponent(currentDeptId ?? "")}&userId=${encodeURIComponent(member.id)}`}
                           className="flex min-w-0 flex-1 items-center gap-3 rounded-md outline-none focus-visible:ring-2 focus-visible:ring-primary"
                           title={t("membersManage")}
                         >
@@ -655,20 +669,36 @@ export default function DepartmentsPage() {
                         <Badge variant={MEMBER_STATUS_VARIANT[member.status]} className="shadow-none">
                           {tu(`status.${member.status}`)}
                         </Badge>
-                        <Button
-                          asChild
-                          variant="ghost"
-                          size="icon"
-                          className="h-8 w-8 shrink-0 text-muted-foreground hover:text-foreground"
-                          title={t("membersManage")}
+                        <div className="flex shrink-0 items-center gap-1">
+                          <Button
+                            variant="ghost"
+                            size="icon-sm"
+                            className="text-muted-foreground hover:text-foreground"
+                            asChild
                           >
                             <Link
-                            href={`/iam/users?dept=${encodeURIComponent(currentDeptId ?? "")}&user=${encodeURIComponent(member.id)}&edit=1`}
-                            aria-label={t("membersManage")}
+                              href={`/iam/users?dept=${encodeURIComponent(currentNode.id)}&userId=${encodeURIComponent(member.id)}&edit=1`}
+                              title={tu("actions.edit")}
+                              aria-label={tu("actions.edit")}
+                              onClick={(event) => event.stopPropagation()}
+                            >
+                              <Pencil />
+                            </Link>
+                          </Button>
+                          <Button
+                            variant="ghost"
+                            size="icon-sm"
+                            className="text-destructive hover:bg-destructive/10 hover:text-destructive"
+                            title={tu("actions.delete")}
+                            aria-label={tu("actions.delete")}
+                            onClick={(event) => {
+                              event.stopPropagation();
+                              void handleDeleteMember(member);
+                            }}
                           >
-                            <Pencil className="h-4 w-4" />
-                          </Link>
-                        </Button>
+                            <Trash2 />
+                          </Button>
+                        </div>
                       </div>
                     ))}
 

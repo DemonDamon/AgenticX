@@ -4,17 +4,23 @@ import * as React from "react";
 import { useTranslations } from "next-intl";
 import {
   DeepResearchFilesPanel,
+  type DeepResearchPanelLane,
+  DeepResearchRecoverBanner,
   AttachmentContentPanel,
   DOCUMENT_ACCEPT,
   InputArea,
   MessageList,
   MessageQueuePanel,
   classifyAttachment,
+  STREAM_UPDATE_DEPTH_ERROR,
+  probeNote,
   useChatStore,
   useComposerAttachments,
   extractClipboardImageFiles,
   withClipboardImageNames,
   modelSupportsVision,
+  consumeDeepResearchReconnectStream,
+  type ActiveDeepResearchRun,
 } from "@agenticx/feature-chat";
 import { type ChatClient } from "@agenticx/sdk-ts";
 import type { ChatMessageAttachment } from "@agenticx/core-api";
@@ -45,8 +51,22 @@ import {
   cn,
 } from "@agenticx/ui";
 import { NearEmptyWordmark } from "./NearEmptyWordmark";
-import { ComposerPlusMenu, type WebSearchMode } from "./ComposerPlusMenu";
+import { QuotaLimitNotice } from "./QuotaLimitNotice";
+import { ShareDialog } from "./share/ShareDialog";
+import { downloadShareImage } from "./share/share-image";
+import {
+  CapabilityHoverTip,
+  ComposerPlusMenu,
+  hintLines,
+  type WebSearchMode,
+} from "./ComposerPlusMenu";
 import { ENTERPRISE_PRODUCT_NAME } from "./EnterpriseBrandMark";
+import {
+  expandChatShareTurnSelection,
+  toChatShareMessage,
+  type ChatShareMessage,
+  type ChatShareSnapshot,
+} from "../lib/chat-share-types";
 
 // 模型清单从 /api/me/models 动态获取（admin 配置 + 用户可见性）。
 // 没有任何分配时为空，UI 会提示「请联系管理员分配模型」。
@@ -81,6 +101,11 @@ function isComplianceError(message: string): boolean {
   return (/合规|策略|compliance|policy/i.test(message) && !/Gateway/i.test(message));
 }
 
+function isQuotaExhaustedError(message: string | null): boolean {
+  if (!message) return false;
+  return /(?:token\s*(?:配额|quota)|(?:配额|quota)).*(?:用尽|超出|exhausted|exceeded)/i.test(message);
+}
+
 export function MachiChatView({
   client,
   deepResearchMode = false,
@@ -88,46 +113,178 @@ export function MachiChatView({
 }: MachiChatViewProps) {
   const t = useTranslations("chat");
   const tw = useTranslations("workspace");
-  const {
-    sessions,
-    activeSessionId,
-    messages,
-    status,
-    activeModel,
-    errorMessage,
-    sessionTokens,
-    responseVersionsByUserMessageId,
-    hydrateSessions,
-    historyError,
-    historySyncBySessionId,
-    retryHistorySync,
-    sessionMessagesLoading,
-    renameSession,
-    switchModel,
-    sendMessage,
-    sendQueuedMessageNow,
-    removePendingMessage,
-    editPendingMessage,
-    pendingMessages,
-    editUserMessageAndResend,
-    regenerateAssistantResponse,
-    showPreviousResponseVersion,
-    showNextResponseVersion,
-    showPreviousRetryVersion,
-    showNextRetryVersion,
-    cancel,
-  } = useChatStore();
+  // Selector split: avoid bare useChatStore() so stream message/token ticks do not
+  // re-run model-menu / switchModel fallback logic on every delta.
+  const sessions = useChatStore((s) => s.sessions);
+  const activeSessionId = useChatStore((s) => s.activeSessionId);
+  const messages = useChatStore((s) => s.messages);
+  const status = useChatStore((s) => s.status);
+  const activeModel = useChatStore((s) => s.activeModel);
+  const errorMessage = useChatStore((s) => s.errorMessage);
+  const responseVersionsByUserMessageId = useChatStore((s) => s.responseVersionsByUserMessageId);
+  const hydrateSessions = useChatStore((s) => s.hydrateSessions);
+  const historyError = useChatStore((s) => s.historyError);
+  const historySyncBySessionId = useChatStore((s) => s.historySyncBySessionId);
+  const retryHistorySync = useChatStore((s) => s.retryHistorySync);
+  const sessionMessagesLoading = useChatStore((s) => s.sessionMessagesLoading);
+  const renameSession = useChatStore((s) => s.renameSession);
+  const deleteSession = useChatStore((s) => s.deleteSession);
+  const switchModel = useChatStore((s) => s.switchModel);
+  const sendMessage = useChatStore((s) => s.sendMessage);
+  const sendQueuedMessageNow = useChatStore((s) => s.sendQueuedMessageNow);
+  const removePendingMessage = useChatStore((s) => s.removePendingMessage);
+  const editPendingMessage = useChatStore((s) => s.editPendingMessage);
+  const pendingMessages = useChatStore((s) => s.pendingMessages);
+  const editUserMessageAndResend = useChatStore((s) => s.editUserMessageAndResend);
+  const regenerateAssistantResponse = useChatStore((s) => s.regenerateAssistantResponse);
+  const showPreviousResponseVersion = useChatStore((s) => s.showPreviousResponseVersion);
+  const showNextResponseVersion = useChatStore((s) => s.showNextResponseVersion);
+  const showPreviousRetryVersion = useChatStore((s) => s.showPreviousRetryVersion);
+  const showNextRetryVersion = useChatStore((s) => s.showNextRetryVersion);
+  const cancel = useChatStore((s) => s.cancel);
+  const displayErrorMessage =
+    errorMessage === STREAM_UPDATE_DEPTH_ERROR ? t("updateDepthError") : errorMessage;
+  const quotaError = isQuotaExhaustedError(errorMessage);
   const [draft, setDraft] = React.useState("");
   /** Default auto (on) — aligned with product expectation for portal chat. */
   const [webSearchMode, setWebSearchMode] = React.useState<WebSearchMode>("auto");
   const [filesPanelSessionId, setFilesPanelSessionId] = React.useState<string | null>(null);
   const [filesPanelFocusId, setFilesPanelFocusId] = React.useState<string | null>(null);
+  const [filesPanelLane, setFilesPanelLane] = React.useState<DeepResearchPanelLane | null>(
+    null,
+  );
   const [attachmentPreview, setAttachmentPreview] = React.useState<ChatMessageAttachment | null>(null);
+  const [shareDialogOpen, setShareDialogOpen] = React.useState(false);
+  const [shareInitialSelectedIds, setShareInitialSelectedIds] = React.useState<string[]>([]);
+
+  // Stable identities: MessageList folds these into memo dependencies that decide whether
+  // the assistant markdown component map is rebuilt, so inline arrows here would rebuild
+  // (and visibly re-mount) every rendered citation chip on each composer keystroke.
+  const requestDeepResearchFiles = React.useCallback(
+    (sessionId: string, focusArtifactId?: string | null) => {
+      setAttachmentPreview(null);
+      setFilesPanelSessionId(sessionId);
+      setFilesPanelLane(null);
+      setFilesPanelFocusId(focusArtifactId ?? null);
+    },
+    [],
+  );
+  const requestDeepResearchLaneSources = React.useCallback(
+    (sessionId: string, lane: DeepResearchPanelLane) => {
+      setAttachmentPreview(null);
+      setFilesPanelSessionId(sessionId);
+      setFilesPanelFocusId(null);
+      setFilesPanelLane(lane);
+    },
+    [],
+  );
+  const requestAttachmentPreview = React.useCallback((attachment: ChatMessageAttachment) => {
+    setFilesPanelSessionId(null);
+    setFilesPanelFocusId(null);
+    setFilesPanelLane(null);
+    setAttachmentPreview(attachment);
+  }, []);
 
   React.useEffect(() => {
     setFilesPanelSessionId(null);
     setFilesPanelFocusId(null);
   }, [activeSessionId]);
+
+  const handleDeepResearchRecover = React.useCallback((run: ActiveDeepResearchRun) => {
+    const sessionId = run.sessionId;
+    const state = useChatStore.getState();
+    const existing = [...state.messages]
+      .reverse()
+      .find(
+        (m) =>
+          m.session_id === sessionId &&
+          m.role === "assistant" &&
+          m.deep_research?.runId === run.runId,
+      );
+    const targetId = existing?.id;
+    if (!targetId) {
+      // No matching bubble yet — stream still reconnects into a local placeholder via content only.
+      console.info("[deep-research] reconnect: no assistant bubble for", run.runId);
+    } else {
+      useChatStore.setState((prev) => ({
+        messages: prev.messages.map((m) =>
+          m.id === targetId
+            ? {
+                ...m,
+                content: "",
+                deep_research: {
+                  runId: run.runId,
+                  status: run.status === "awaiting_clarify" ? "awaiting_clarify" : "running",
+                  events: [],
+                  artifactIds: [],
+                  clarifyAnswers: m.deep_research?.clarifyAnswers,
+                },
+              }
+            : m,
+        ),
+      }));
+    }
+
+    void consumeDeepResearchReconnectStream(run.runId, {
+      onEvent: (event) => {
+        if (!targetId) return;
+        useChatStore.setState((prev) => ({
+          messages: prev.messages.map((m) => {
+            if (m.id !== targetId) return m;
+            const prevDr = m.deep_research;
+            let status: NonNullable<typeof prevDr>["status"] = prevDr?.status ?? "running";
+            if (event.type === "clarify") status = "awaiting_clarify";
+            else if (event.type === "phase" && event.phase === "done") status = "completed";
+            else if (status === "awaiting_clarify") status = "running";
+            const events = [...(prevDr?.events ?? []), event].slice(-400);
+            const artifactIds = [...(prevDr?.artifactIds ?? [])];
+            if (event.type === "artifact" && !artifactIds.includes(event.id)) {
+              artifactIds.push(event.id);
+            }
+            return {
+              ...m,
+              deep_research: {
+                runId: run.runId,
+                status,
+                events,
+                artifactIds,
+                clarifyAnswers: prevDr?.clarifyAnswers,
+              },
+            };
+          }),
+        }));
+      },
+      onDelta: (text) => {
+        if (!targetId) return;
+        useChatStore.setState((prev) => ({
+          messages: prev.messages.map((m) =>
+            m.id === targetId ? { ...m, content: `${m.content ?? ""}${text}` } : m,
+          ),
+        }));
+      },
+      onDone: () => {
+        if (!targetId) return;
+        useChatStore.setState((prev) => ({
+          messages: prev.messages.map((m) =>
+            m.id === targetId && m.deep_research
+              ? {
+                  ...m,
+                  deep_research: {
+                    ...m.deep_research,
+                    status:
+                      m.deep_research.status === "awaiting_clarify"
+                        ? "awaiting_clarify"
+                        : "completed",
+                  },
+                }
+              : m,
+          ),
+        }));
+      },
+    }).catch((error) => {
+      console.warn("[deep-research] reconnect failed:", error);
+    });
+  }, []);
 
   const filesPanelSources = React.useMemo(() => {
     if (!filesPanelSessionId) return [];
@@ -158,10 +315,16 @@ export function MachiChatView({
   const [modelMenuOpen, setModelMenuOpen] = React.useState(false);
   const modelMenuRef = React.useRef<HTMLDivElement>(null);
   const modelTriggerRef = React.useRef<HTMLButtonElement>(null);
-  const [modelMenuPosition, setModelMenuPosition] = React.useState<{ top: number; left: number; width: number }>({
+  const [modelMenuPosition, setModelMenuPosition] = React.useState<{
+    top: number;
+    left: number;
+    width: number;
+    maxHeight: number;
+  }>({
     top: 0,
     left: 0,
     width: 320,
+    maxHeight: 320,
   });
 
   // 动态拉取当前用户可见的模型清单。
@@ -199,15 +362,22 @@ export function MachiChatView({
     };
   }, [refreshAvailableModels]);
 
-  // 收到模型列表后兜底选默认：优先 isDefault，否则首项
+  // 收到模型列表后兜底选默认：优先 isDefault，否则首项。
+  // 依赖模型 id 序列而非 availableModels 数组引用，避免轮询刷新单独触发无意义 switchModel。
+  const availableModelIdsKey = availableModels.map((m) => m.id).join("|");
   React.useEffect(() => {
     if (!modelsLoaded) return;
-    if (availableModels.length === 0) return;
-    const exists = availableModels.find((m) => m.id === activeModel);
+    if (!availableModelIdsKey) return;
+    const exists = availableModels.some((m) => m.id === activeModel);
     if (exists) return;
     const next = availableModels.find((m) => m.isDefault) ?? availableModels[0];
-    if (next) switchModel(next.id);
-  }, [modelsLoaded, availableModels, activeModel, switchModel]);
+    if (!next) return;
+    if (useChatStore.getState().activeModel === next.id) return;
+    probeNote("MachiChatView.switchModelFallback", { from: activeModel, to: next.id });
+    switchModel(next.id);
+    // availableModels read from latest render when ids key / activeModel changes
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- availableModelIdsKey proxies list identity
+  }, [modelsLoaded, availableModelIdsKey, activeModel, switchModel]);
 
   // 若发送因「模型已不在可见范围内」被服务端拒绝（管理员刚收窄了权限，轮询尚未来得及刷新），
   // 立即补拉一次最新列表，让下拉框与兜底选择马上纠正，不必等下一个轮询周期或用户手动刷新整页。
@@ -226,11 +396,15 @@ export function MachiChatView({
     const updatePosition = () => {
       const trigger = modelTriggerRef.current;
       if (!trigger) return;
+      const margin = 8;
+      const minMaxHeight = 120;
       const rect = trigger.getBoundingClientRect();
       const width = Math.min(360, Math.max(280, rect.width + 88));
-      const left = Math.min(window.innerWidth - width - 8, Math.max(8, rect.right - width));
-      const top = Math.max(8, rect.top - 8);
-      setModelMenuPosition({ top, left, width });
+      const left = Math.min(window.innerWidth - width - margin, Math.max(margin, rect.right - width));
+      // 菜单向上展开（translateY(-100%)），CSS top 即视觉底边；上方可用高度 = top - margin
+      const top = Math.max(margin, rect.top - margin);
+      const maxHeight = Math.max(minMaxHeight, top - margin);
+      setModelMenuPosition({ top, left, width, maxHeight });
     };
     updatePosition();
 
@@ -280,6 +454,32 @@ export function MachiChatView({
     if (!activeSessionId) return [];
     return messages.filter((message) => message.session_id === activeSessionId);
   }, [messages, activeSessionId]);
+
+  const shareableMessages = React.useMemo(
+    () => visibleMessages.map(toChatShareMessage).filter((message): message is ChatShareMessage => message !== null),
+    [visibleMessages],
+  );
+
+  const openShareDialog = React.useCallback(
+    (messageSelection?: string) => {
+      const allIds = shareableMessages.map((message) => message.id);
+      const requestedIds = (messageSelection ?? "")
+        .split(",")
+        .map((id) => id.trim())
+        .filter((id) => allIds.includes(id));
+      if (requestedIds.length === 0) {
+        setShareInitialSelectedIds(allIds);
+      } else {
+        const selectedIds = new Set<string>();
+        requestedIds.forEach((id) => {
+          expandChatShareTurnSelection(shareableMessages, id).forEach((selectedId) => selectedIds.add(selectedId));
+        });
+        setShareInitialSelectedIds(allIds.filter((id) => selectedIds.has(id)));
+      }
+      setShareDialogOpen(true);
+    },
+    [shareableMessages],
+  );
 
   const userIdsInActiveSession = React.useMemo(() => {
     return new Set(visibleMessages.filter((message) => message.role === "user").map((message) => message.id));
@@ -344,6 +544,49 @@ export function MachiChatView({
     }
     setSessionTitle(t("newConversation"));
   }, [activeSession?.id, activeSession?.title, activeSessionId, t]);
+
+  const createShareLink = React.useCallback(
+    async (messageIds: string[]) => {
+      if (!activeSessionId) throw new Error(t("shareFailed"));
+      const response = await fetch("/api/chat/shares", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ session_id: activeSessionId, message_ids: messageIds }),
+      });
+      const payload = (await response.json().catch(() => ({}))) as {
+        data?: { path?: string; share_url?: string };
+        error?: { message?: string };
+      };
+      if (!response.ok || !payload.data?.path) {
+        throw new Error(payload.error?.message ?? t("shareFailed"));
+      }
+      return payload.data.share_url ?? new URL(payload.data.path, window.location.origin).toString();
+    },
+    [activeSessionId, t],
+  );
+
+  const generateShareImage = React.useCallback(
+    async (selectedMessages: ChatShareMessage[]) => {
+      const snapshot: ChatShareSnapshot = {
+        token: "preview",
+        session_id: activeSessionId ?? "preview",
+        title: sessionTitle,
+        messages: selectedMessages,
+        created_at: new Date().toISOString(),
+      };
+      const safeTitle = (sessionTitle || t("newConversation"))
+        .replace(/[\\/:*?"<>|]+/g, "_")
+        .slice(0, 80);
+      await downloadShareImage(snapshot, `${safeTitle}.png`);
+    },
+    [activeSessionId, sessionTitle, t],
+  );
+
+  const deleteCurrentSession = React.useCallback(() => {
+    if (!activeSessionId) return;
+    if (!window.confirm(tw("deleteSessionConfirm"))) return;
+    void deleteSession(activeSessionId);
+  }, [activeSessionId, deleteSession, tw]);
 
   const activeModelOption = React.useMemo(
     () => availableModels.find((item) => item.id === activeModel),
@@ -439,6 +682,7 @@ export function MachiChatView({
 
   const composer = (
     <div className={cn("mx-auto w-full space-y-3", isEmpty ? "max-w-[46rem]" : "max-w-4xl")}>
+      <QuotaLimitNotice forceOpen={quotaError} />
       {historyError && (
         <Alert variant="warning" className="border-warning/30 bg-warning-soft/80 shadow-sm">
           <ShieldAlert className="h-5 w-5" />
@@ -484,14 +728,18 @@ export function MachiChatView({
           </div>
         </Alert>
       )}
-      {errorMessage && (
+      {displayErrorMessage && !quotaError && (
         <Alert variant="warning" className="border-warning/30 bg-warning-soft/80 shadow-sm">
           <ShieldAlert className="h-5 w-5" />
           <div>
             <AlertTitle>
-              {isComplianceError(errorMessage) ? t("complianceTitle") : t("chatErrorTitle")}
+              {errorMessage === STREAM_UPDATE_DEPTH_ERROR
+                ? t("updateDepthTitle")
+                : isComplianceError(errorMessage ?? "")
+                  ? t("complianceTitle")
+                  : t("chatErrorTitle")}
             </AlertTitle>
-            <AlertDescription>{errorMessage}</AlertDescription>
+            <AlertDescription>{displayErrorMessage}</AlertDescription>
           </div>
         </Alert>
       )}
@@ -545,21 +793,6 @@ export function MachiChatView({
         onPaste={handlePaste}
         leftToolbar={
           <>
-            <Tooltip key="composer-upload">
-              <TooltipTrigger asChild>
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="icon"
-                  aria-label={t("filesAndImages")}
-                  className="h-8 w-8 rounded-full text-muted-foreground hover:bg-primary-soft hover:text-primary"
-                  onClick={() => fileInputRef.current?.click()}
-                >
-                  <Paperclip className="h-4 w-4" />
-                </Button>
-              </TooltipTrigger>
-              <TooltipContent>{t("filesAndImages")}</TooltipContent>
-            </Tooltip>
             <ComposerPlusMenu
               key="composer-plus"
               webSearchMode={webSearchMode}
@@ -568,6 +801,22 @@ export function MachiChatView({
               showFileEntry={false}
               menuSide={isEmpty ? "bottom" : "top"}
             />
+            <CapabilityHoverTip
+              key="composer-upload"
+              label={t("filesAndImages")}
+              lines={hintLines(t("filesAndImagesHint"))}
+            >
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon"
+                aria-label={t("filesAndImages")}
+                className="h-8 w-8 rounded-full text-muted-foreground hover:bg-primary-soft hover:text-primary"
+                onClick={() => fileInputRef.current?.click()}
+              >
+                <Paperclip className="h-4 w-4" />
+              </Button>
+            </CapabilityHoverTip>
             {deepResearchMode ? (
               <span
                 key="deep-research-chip"
@@ -593,11 +842,12 @@ export function MachiChatView({
           <div ref={modelMenuRef} className="relative">
             {modelMenuOpen ? (
               <div
-                className="fixed z-[80] overflow-hidden rounded-2xl border border-border/70 bg-popover/95 p-1 shadow-2xl backdrop-blur"
+                className="fixed z-[80] overflow-y-auto overscroll-contain rounded-2xl border border-border/70 bg-popover/95 p-1 shadow-2xl backdrop-blur"
                 style={{
                   width: modelMenuPosition.width,
                   left: modelMenuPosition.left,
                   top: modelMenuPosition.top,
+                  maxHeight: modelMenuPosition.maxHeight,
                   transform: "translateY(-100%)",
                 }}
               >
@@ -700,32 +950,16 @@ export function MachiChatView({
               <span className="hidden sm:inline">{t("gatewayOnline")}</span>
               <span className="sm:hidden">{t("gatewayOnlineShort")}</span>
             </Badge>
-            {sessionTokens.totalTokens > 0 && (
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <Badge variant="soft" className="mr-2 gap-1 px-2.5 py-0.5 font-mono text-[11px]">
-                    <span aria-hidden>↑</span>
-                    {sessionTokens.inputTokens.toLocaleString()}
-                    <span className="opacity-50" aria-hidden>·</span>
-                    <span aria-hidden>↓</span>
-                    {sessionTokens.outputTokens.toLocaleString()}
-                    <span className="opacity-50" aria-hidden>·</span>
-                    Σ {sessionTokens.totalTokens.toLocaleString()}
-                  </Badge>
-                </TooltipTrigger>
-                <TooltipContent>
-                  {t("tokenTooltip", {
-                    input: sessionTokens.inputTokens.toLocaleString(),
-                    output: sessionTokens.outputTokens.toLocaleString(),
-                    total: sessionTokens.totalTokens.toLocaleString(),
-                  })}
-                </TooltipContent>
-              </Tooltip>
-            )}
             {!isEmpty && (
               <Tooltip>
                 <TooltipTrigger asChild>
-                  <Button variant="ghost" size="icon" className="h-8 w-8 rounded-full text-muted-foreground hover:text-foreground">
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="h-8 w-8 rounded-full text-muted-foreground hover:text-foreground"
+                    aria-label={t("shareConversation")}
+                    onClick={() => openShareDialog()}
+                  >
                     <Share className="h-4 w-4" />
                   </Button>
                 </TooltipTrigger>
@@ -734,7 +968,14 @@ export function MachiChatView({
             )}
             <Tooltip>
               <TooltipTrigger asChild>
-                <Button variant="ghost" size="icon" className="h-8 w-8 rounded-full text-muted-foreground hover:text-foreground">
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="h-8 w-8 rounded-full text-muted-foreground hover:text-foreground"
+                  aria-label={t("deleteConversation")}
+                  disabled={!activeSessionId}
+                  onClick={deleteCurrentSession}
+                >
                   <Trash2 className="h-4 w-4" />
                 </Button>
               </TooltipTrigger>
@@ -762,47 +1003,46 @@ export function MachiChatView({
                   {t("loadingMessages")}
                 </div>
               )}
-              <MessageList
-                messages={visibleMessages}
-                className="h-full"
-                styleVariant="im"
-                assistantFrameless
-                scrollToBottomLabel={t("scrollToBottom")}
-                responseVersionMetaByUserMessageId={responseVersionMetaByUserMessageId}
-                retryVersionMetaByUserMessageId={retryVersionMetaByUserMessageId}
-                onShowPreviousResponseVersion={showPreviousResponseVersion}
-                onShowNextResponseVersion={showNextResponseVersion}
-                onShowPreviousRetryVersion={showPreviousRetryVersion}
-                onShowNextRetryVersion={showNextRetryVersion}
-                onRequestDeepResearchFiles={(sessionId, focusArtifactId) => {
-                  setAttachmentPreview(null);
-                  setFilesPanelSessionId(sessionId);
-                  setFilesPanelFocusId(focusArtifactId ?? null);
-                }}
-                onRequestAttachmentPreview={(attachment) => {
-                  setFilesPanelSessionId(null);
-                  setFilesPanelFocusId(null);
-                  setAttachmentPreview(attachment);
-                }}
-                onCopy={(content) => {
-                  console.log("Copied:", content);
-                }}
-                onRetry={(messageId) => {
-                  void regenerateAssistantResponse(client, messageId);
-                }}
-                onUserEditResend={(messageId, content) => {
-                  if (!content.trim()) return;
-                  void editUserMessageAndResend(client, { messageId, content });
-                }}
-                onShare={(messageId) => {
-                  const url = `${window.location.origin}/workspace?share=${messageId}`;
-                  navigator.clipboard.writeText(url);
-                  console.log("Shared:", url);
-                }}
-                onFeedback={(messageId, type) => {
-                  console.log(`Feedback ${type} for message ${messageId}`);
-                }}
-              />
+              <div className="flex h-full min-h-0 flex-col">
+                <div className="shrink-0 px-4 pt-2">
+                  <DeepResearchRecoverBanner
+                    sessionId={activeSessionId}
+                    onRecover={handleDeepResearchRecover}
+                  />
+                </div>
+                <MessageList
+                  messages={visibleMessages}
+                  className="min-h-0 flex-1"
+                  styleVariant="im"
+                  assistantFrameless
+                  scrollToBottomLabel={t("scrollToBottom")}
+                  responseVersionMetaByUserMessageId={responseVersionMetaByUserMessageId}
+                  retryVersionMetaByUserMessageId={retryVersionMetaByUserMessageId}
+                  onShowPreviousResponseVersion={showPreviousResponseVersion}
+                  onShowNextResponseVersion={showNextResponseVersion}
+                  onShowPreviousRetryVersion={showPreviousRetryVersion}
+                  onShowNextRetryVersion={showNextRetryVersion}
+                  onRequestDeepResearchFiles={requestDeepResearchFiles}
+                  onRequestDeepResearchLaneSources={requestDeepResearchLaneSources}
+                  onRequestAttachmentPreview={requestAttachmentPreview}
+                  onCopy={(content) => {
+                    console.log("Copied:", content);
+                  }}
+                  onRetry={(messageId) => {
+                    void regenerateAssistantResponse(client, messageId);
+                  }}
+                  onUserEditResend={(messageId, content) => {
+                    if (!content.trim()) return;
+                    void editUserMessageAndResend(client, { messageId, content });
+                  }}
+                  onShare={(messageId) => {
+                    openShareDialog(messageId);
+                  }}
+                  onFeedback={(messageId, type) => {
+                    console.log(`Feedback ${type} for message ${messageId}`);
+                  }}
+                />
+              </div>
             </div>
           )}
         </div>
@@ -819,10 +1059,12 @@ export function MachiChatView({
           if (!open) {
             setFilesPanelSessionId(null);
             setFilesPanelFocusId(null);
+            setFilesPanelLane(null);
           }
         }}
         sessionId={filesPanelSessionId}
         focusArtifactId={filesPanelFocusId}
+        focusLane={filesPanelLane}
         sources={filesPanelSources}
       />
       <AttachmentContentPanel
@@ -831,6 +1073,15 @@ export function MachiChatView({
           if (!open) setAttachmentPreview(null);
         }}
         attachment={attachmentPreview}
+      />
+      <ShareDialog
+        open={shareDialogOpen}
+        onOpenChange={setShareDialogOpen}
+        title={sessionTitle}
+        messages={visibleMessages}
+        initialSelectedIds={shareInitialSelectedIds}
+        onCreateLink={createShareLink}
+        onGenerateImage={generateShareImage}
       />
       </div>
     </TooltipProvider>

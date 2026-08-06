@@ -6,6 +6,7 @@ import {
   toChatHistoryContext,
 } from "../../../../../lib/chat-history-http";
 import { softDeleteChatSessions } from "../../../../../lib/chat-history";
+import { defaultOriginalStore } from "../../../../../lib/attachments/original-store";
 
 const MAX_BATCH = 100;
 
@@ -48,6 +49,16 @@ export async function POST(request: Request) {
   try {
     const ctx = toChatHistoryContext(session);
     const deleted = await softDeleteChatSessions(ctx, sessionIds);
+    for (const sessionId of sessionIds) {
+      try {
+        await defaultOriginalStore.deleteBySession(session.tenantId, sessionId);
+      } catch (cleanupError) {
+        console.warn(
+          "[chat/batch-delete] attachment cleanup failed:",
+          cleanupError instanceof Error ? cleanupError.message : cleanupError,
+        );
+      }
+    }
     return NextResponse.json({
       code: "00000",
       message: "ok",

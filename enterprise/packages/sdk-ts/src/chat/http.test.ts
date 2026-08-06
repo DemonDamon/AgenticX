@@ -83,6 +83,38 @@ describe("HttpChatClient stream cancel", () => {
     expect(sourcesChunk?.delta).toBeUndefined();
   });
 
+  it("notifies the portal quota card after a completed stream", async () => {
+    const payload = 'data: {"choices":[{"delta":{"content":"hi"}}]}\n\n' + "data: [DONE]\n\n";
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(() =>
+        Promise.resolve(
+          new Response(payload, {
+            status: 200,
+            headers: { "content-type": "text/event-stream" },
+          }),
+        ),
+      ),
+    );
+    const dispatchEvent = vi.fn();
+    vi.stubGlobal("window", { dispatchEvent });
+
+    const client = new HttpChatClient({ endpoint: "/api/chat/completions" });
+    const { requestId } = await client.sendMessage({
+      sessionId: "session-1",
+      model: "test-model",
+      messages: [{ id: "u1", role: "user", content: "hello", createdAt: "2026-01-01T00:00:00.000Z" }],
+    });
+
+    for await (const _chunk of client.stream(requestId)) {
+      // consume the stream
+    }
+
+    expect(dispatchEvent).toHaveBeenCalledTimes(1);
+    expect(dispatchEvent.mock.calls[0]?.[0]).toMatchObject({ type: "agenticx:quota-usage-changed" });
+    vi.unstubAllGlobals();
+  });
+
   it("parses agenticx_deep_research_event frames without treating them as delta", async () => {
     const payload =
       'data: {"choices":[{"delta":{"content":"hi"}}]}\n\n' +
@@ -155,6 +187,82 @@ describe("HttpChatClient stream cancel", () => {
       "https://ex.com",
     );
     expect(chunks.at(-1)?.done).toBe(true);
+  });
+
+  it("releases the body reader after [DONE] so the browser frees the connection", async () => {
+    const payload = 'data: {"choices":[{"delta":{"content":"hi"}}]}\n\n' + "data: [DONE]\n\n";
+    const bodyStream = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(new TextEncoder().encode(payload));
+        controller.close();
+      },
+    });
+    const realReader = bodyStream.getReader();
+    const cancelSpy = vi.spyOn(realReader, "cancel");
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(() =>
+        Promise.resolve({
+          ok: true,
+          json: async () => ({}),
+          body: { getReader: () => realReader },
+        } as unknown as Response),
+      ),
+    );
+
+    const client = new HttpChatClient({ endpoint: "/api/chat/completions" });
+    const { requestId } = await client.sendMessage({
+      sessionId: "session-1",
+      model: "test-model",
+      messages: [{ id: "u1", role: "user", content: "hello", createdAt: "2026-01-01T00:00:00.000Z" }],
+    });
+
+    const chunks = [];
+    for await (const chunk of client.stream(requestId)) {
+      chunks.push(chunk);
+    }
+
+    expect(chunks.at(-1)?.done).toBe(true);
+    // Without releaseStreamReader() this never fires, and the browser keeps the
+    // HTTP/1.1 connection out of the per-origin pool until the tab is reloaded.
+    expect(cancelSpy).toHaveBeenCalled();
+  });
+
+  it("releases the body reader when the gateway sends a chunk.error frame", async () => {
+    const payload = 'data: {"error":{"code":"50000","message":"boom"}}\n\n';
+    const bodyStream = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(new TextEncoder().encode(payload));
+        controller.close();
+      },
+    });
+    const realReader = bodyStream.getReader();
+    const cancelSpy = vi.spyOn(realReader, "cancel");
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(() =>
+        Promise.resolve({
+          ok: true,
+          json: async () => ({}),
+          body: { getReader: () => realReader },
+        } as unknown as Response),
+      ),
+    );
+
+    const client = new HttpChatClient({ endpoint: "/api/chat/completions" });
+    const { requestId } = await client.sendMessage({
+      sessionId: "session-1",
+      model: "test-model",
+      messages: [{ id: "u1", role: "user", content: "hello", createdAt: "2026-01-01T00:00:00.000Z" }],
+    });
+
+    const chunks = [];
+    for await (const chunk of client.stream(requestId)) {
+      chunks.push(chunk);
+    }
+
+    expect(chunks.at(-1)?.error?.message).toBe("boom");
+    expect(cancelSpy).toHaveBeenCalled();
   });
 
   it("normalizes opaque browser network errors to actionable Chinese copy", () => {

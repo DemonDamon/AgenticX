@@ -12,6 +12,14 @@ type HttpChatClientOptions = {
   endpoint?: string;
 };
 
+/** Browser event emitted after a completed gateway stream settles usage. */
+export const QUOTA_USAGE_CHANGED_EVENT = "agenticx:quota-usage-changed";
+
+function notifyQuotaUsageChanged(): void {
+  if (typeof window === "undefined") return;
+  window.dispatchEvent(new Event(QUOTA_USAGE_CHANGED_EVENT));
+}
+
 function makeRequestId(): string {
   if (typeof crypto !== "undefined" && "randomUUID" in crypto) {
     return crypto.randomUUID();
@@ -50,6 +58,19 @@ export function normalizeTransportErrorMessage(raw: string): string {
     );
   }
   return message;
+}
+
+/**
+ * Cancel a fetch body reader so the browser releases the underlying connection back to the
+ * per-origin pool right away. Safe to call after the stream already reached natural EOF
+ * (cancelling an already-closed reader resolves without error).
+ */
+async function releaseStreamReader(reader: ReadableStreamDefaultReader<Uint8Array>): Promise<void> {
+  try {
+    await reader.cancel();
+  } catch {
+    // Reader may already be closed/errored — nothing to release.
+  }
 }
 
 function isAbortError(error: unknown): boolean {
@@ -149,6 +170,12 @@ export class HttpChatClient implements ChatClient {
 
       const decoder = new TextDecoder();
       let buffer = "";
+      // Every exit from this block (natural EOF, [DONE] sentinel, chunk.error, or a thrown
+      // read error) MUST release the reader immediately. Otherwise the browser keeps the
+      // underlying HTTP/1.1 connection out of the per-origin pool (Chrome/Firefox cap at 6),
+      // and after ~5-6 chat rounds every subsequent fetch to this origin (new chat, history
+      // sync, session switch) queues forever and eventually surfaces as "Failed to fetch".
+      try {
       while (true) {
         const { value, done } = await reader.read();
         if (done) break;
@@ -168,6 +195,7 @@ export class HttpChatClient implements ChatClient {
           if (dataLines.length === 0) continue;
           const data = dataLines.join("\n");
           if (data === "[DONE]") {
+            notifyQuotaUsageChanged();
             yield { requestId, done: true };
             this.pending.delete(requestId);
             return;
@@ -175,7 +203,12 @@ export class HttpChatClient implements ChatClient {
           let chunk: {
             choices?: Array<{ delta?: { content?: string }; finish_reason?: string | null }>;
             agenticx_usage?: { input_tokens?: number; output_tokens?: number; total_tokens?: number };
-            agenticx_web_search_sources?: Array<{ title?: string; url?: string; snippet?: string }>;
+            agenticx_web_search_sources?: Array<{
+              title?: string;
+              url?: string;
+              snippet?: string;
+              usedByModel?: boolean;
+            }>;
             agenticx_deep_research_event?: DeepResearchEvent;
             usage?: { prompt_tokens?: number; completion_tokens?: number; total_tokens?: number };
             error?: { code?: string; message?: string };
@@ -223,11 +256,21 @@ export class HttpChatClient implements ChatClient {
             yield {
               requestId,
               done: false,
-              webSearchSources: chunk.agenticx_web_search_sources.map((item) => ({
-                title: String(item.title ?? "").trim() || item.url || "Untitled",
-                url: String(item.url ?? "").trim(),
-                snippet: String(item.snippet ?? "").trim(),
-              })).filter((item) => item.url),
+              webSearchSources: chunk.agenticx_web_search_sources
+                .map((item) => {
+                  const title = String(item.title ?? "").trim() || item.url || "Untitled";
+                  const url = String(item.url ?? "").trim();
+                  const snippet = String(item.snippet ?? "").trim();
+                  const usedByModel =
+                    item.usedByModel === true ? true : item.usedByModel === false ? false : undefined;
+                  return {
+                    title,
+                    url,
+                    snippet,
+                    ...(usedByModel === undefined ? {} : { usedByModel }),
+                  };
+                })
+                .filter((item) => item.url),
             };
             continue;
           }
@@ -271,7 +314,11 @@ export class HttpChatClient implements ChatClient {
           // after the last content chunk and before data: [DONE]. Returning here drops them.
         }
       }
+      notifyQuotaUsageChanged();
       yield { requestId, done: true };
+      } finally {
+        await releaseStreamReader(reader);
+      }
     } catch (error) {
       if (pending.cancelled || isAbortError(error)) {
         yield { requestId, done: true, cancelled: true };
@@ -299,4 +346,3 @@ export class HttpChatClient implements ChatClient {
     this.controllers.get(requestId)?.abort();
   }
 }
-

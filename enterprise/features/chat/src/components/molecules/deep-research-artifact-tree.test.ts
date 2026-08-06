@@ -2,8 +2,134 @@ import { describe, expect, it } from "vitest";
 import {
   buildArtifactTree,
   collapseSingleFileDirs,
+  displayNameForArtifactDir,
+  displayNameForArtifactFile,
+  displaySubtitleForCollapsedFile,
   formatArtifactByteSize,
+  isHtmlArtifact,
+  prepareHtmlPreviewSrcDoc,
+  repairBrokenCitationHrefs,
 } from "./deep-research-artifact-tree";
+
+describe("isHtmlArtifact", () => {
+  it("detects html by mimeType or .html path", () => {
+    expect(isHtmlArtifact({ path: "research/r1/report.html", mimeType: "text/html" })).toBe(true);
+    expect(isHtmlArtifact({ path: "research/r1/report.html", mimeType: "text/plain" })).toBe(true);
+    expect(isHtmlArtifact({ path: "research/r1/final-report.md", mimeType: "text/markdown" })).toBe(
+      false,
+    );
+    expect(isHtmlArtifact(null)).toBe(false);
+  });
+});
+
+describe("prepareHtmlPreviewSrcDoc", () => {
+  it("returns empty string for blank content (no white iframe shell)", () => {
+    expect(prepareHtmlPreviewSrcDoc("", false)).toBe("");
+    expect(prepareHtmlPreviewSrcDoc("   \n", true)).toBe("");
+  });
+
+  it("stamps dark class onto html for portal dark theme", () => {
+    const out = prepareHtmlPreviewSrcDoc(
+      '<!DOCTYPE html><html lang="zh"><head></head></html>',
+      true,
+    );
+    expect(out).toMatch(/<html\b[^>]*\bclass="dark"[^>]*>/i);
+    expect(out).toContain('lang="zh"');
+  });
+
+  it("appends dark to an existing class list without dropping other attrs", () => {
+    const out = prepareHtmlPreviewSrcDoc('<html class="report" lang="zh">', true);
+    expect(out).toContain('class="report dark"');
+    expect(out).toContain('lang="zh"');
+  });
+
+  it("removes dark class for light theme", () => {
+    const out = prepareHtmlPreviewSrcDoc('<html class="dark report">', false);
+    expect(out).toContain('class="report"');
+    expect(out).not.toMatch(/\bdark\b/);
+  });
+
+  it("injects narrow toc collapse patch for portal preview of saved html", () => {
+    const out = prepareHtmlPreviewSrcDoc(
+      "<!DOCTYPE html><html><head><title>t</title></head><body><div class=\"sidebar\"><h2>目录</h2><ul class=\"toc\"></ul></div></body></html>",
+      false,
+    );
+    expect(out).toContain('id="agx-portal-toc-narrow"');
+    expect(out).toContain("max-width: 520px");
+    expect(out).toContain(".sidebar:not(.toc-open) .toc");
+    expect(out).toContain('id="agx-portal-toc-narrow-js"');
+    expect(out).toContain(".theme-toggle { display: none !important; }");
+    expect(out).toContain("__agxPortalHashNav");
+    expect(out).toContain("scrollToHash");
+    const clickHandler = out.slice(
+      out.indexOf("__agxPortalHashNav"),
+      out.indexOf("</script>", out.indexOf("__agxPortalHashNav")),
+    );
+    expect(clickHandler.indexOf("preventDefault")).toBeLessThan(
+      clickHandler.lastIndexOf("scrollToHash(href)"),
+    );
+  });
+
+  it("repairs bare citation hrefs when ref targets exist", () => {
+    const broken =
+      '<p>见 <a href="#">3</a></p><li id="ref-3">来源</li>';
+    expect(repairBrokenCitationHrefs(broken)).toContain('href="#ref-3"');
+    const out = prepareHtmlPreviewSrcDoc(
+      `<!DOCTYPE html><html><head></head><body>${broken}</body></html>`,
+      false,
+    );
+    expect(out).toContain('href="#ref-3"');
+    expect(out).not.toMatch(/<a href="#">3<\/a>/);
+  });
+});
+
+describe("displayNameForArtifactDir", () => {
+  it("localizes known research folders", () => {
+    expect(displayNameForArtifactDir("lanes")).toBe("调研车道");
+    expect(displayNameForArtifactDir("pages")).toBe("网页正文");
+    expect(displayNameForArtifactDir("assets")).toBe("资源");
+    expect(displayNameForArtifactDir("custom")).toBe("custom");
+  });
+});
+
+describe("displaySubtitleForCollapsedFile", () => {
+  it("uses Chinese kind labels instead of raw filenames", () => {
+    expect(displaySubtitleForCollapsedFile("memo.md", 2048)).toBe("备忘 · 2.00 KB");
+    expect(displaySubtitleForCollapsedFile("note.md", 512)).toBe("文档 · 512 B");
+  });
+});
+
+describe("displayNameForArtifactFile", () => {
+  it("uses title for pages/ and legacy hex names", () => {
+    expect(
+      displayNameForArtifactFile("a1b2c3d4e5f60789.md", {
+        path: "research/r1/pages/a1b2c3d4e5f60789.md",
+        title: "DeepSeek V4 技术解读",
+      }),
+    ).toBe("DeepSeek V4 技术解读.md");
+    expect(
+      displayNameForArtifactFile("DeepSeek-V4_a1b2c3d4e5f60789.md", {
+        path: "research/r1/pages/DeepSeek-V4_a1b2c3d4e5f60789.md",
+        title: "DeepSeek V4 技术解读",
+      }),
+    ).toBe("DeepSeek V4 技术解读.md");
+  });
+
+  it("uses human titles for primary report deliverables", () => {
+    expect(
+      displayNameForArtifactFile("final-report.md", {
+        path: "research/r1/final-report.md",
+        title: "MiniMax H3 核心技术点.md",
+      }),
+    ).toBe("MiniMax H3 核心技术点.md");
+    expect(
+      displayNameForArtifactFile("report.html", {
+        path: "research/r1/report.html",
+        title: "MiniMax H3 核心技术点.html",
+      }),
+    ).toBe("MiniMax H3 核心技术点.html");
+  });
+});
 
 describe("formatArtifactByteSize", () => {
   it("formats B / KB / MB", () => {
@@ -39,8 +165,9 @@ describe("buildArtifactTree", () => {
       },
     ]);
 
-    expect(tree.map((n) => n.name)).toEqual(["lanes", "final-report.md"]);
-    const lanes = tree[0]!;
+    // Primary report first (human title), then localized lanes folder.
+    expect(tree.map((n) => n.name)).toEqual(["终稿.md", "调研车道"]);
+    const lanes = tree[1]!;
     expect(lanes.type).toBe("dir");
     if (lanes.type !== "dir") return;
     expect(lanes.byteSize).toBe(500);
@@ -48,6 +175,30 @@ describe("buildArtifactTree", () => {
     // q1/memo.md collapsed into a file row titled with the lane folder name
     expect(lanes.children.map((c) => c.type)).toEqual(["file", "file"]);
     expect(lanes.children.map((c) => c.name)).toEqual(["q1-pricing", "q2-benchmark"]);
+    expect(lanes.children.map((c) => (c.type === "file" ? c.subtitle : ""))).toEqual([
+      "备忘 · 200 B",
+      "备忘 · 300 B",
+    ]);
+  });
+
+  it("lists report.html ahead of final-report.md", () => {
+    const tree = buildArtifactTree([
+      {
+        id: "md",
+        path: "research/r1/final-report.md",
+        title: "主题.md",
+        kind: "report",
+        byteSize: 1000,
+      },
+      {
+        id: "html",
+        path: "research/r1/report.html",
+        title: "主题.html",
+        kind: "report",
+        byteSize: 2000,
+      },
+    ]);
+    expect(tree.map((n) => n.name)).toEqual(["主题.html", "主题.md"]);
   });
 });
 

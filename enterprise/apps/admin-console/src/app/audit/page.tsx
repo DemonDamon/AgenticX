@@ -53,8 +53,10 @@ export default function AuditPage() {
   const tc = useTranslations("common");
   const [items, setItems] = useState<AuditEvent[]>([]);
   const [selected, setSelected] = useState<AuditEvent | null>(null);
+  const [total, setTotal] = useState(0);
   const [chainValid, setChainValid] = useState(true);
   const [chainError, setChainError] = useState<{ at?: string; reason?: string } | null>(null);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [userId, setUserId] = useState("");
   const [model, setModel] = useState("");
   const [policyHit, setPolicyHit] = useState("");
@@ -75,6 +77,8 @@ export default function AuditPage() {
     try {
       const response = await adminFetch("/api/audit/chain-verify");
       const payload = (await response.json()) as {
+        code?: string;
+        message?: string;
         data?: {
           valid: boolean;
           at?: string;
@@ -85,14 +89,25 @@ export default function AuditPage() {
           legacy_unverified?: number;
         };
       };
+      if (!response.ok || payload.code !== "00000" || !payload.data) {
+        throw new Error(payload.message || `HTTP ${response.status}`);
+      }
       setChainFull(payload.data ?? null);
-    } catch {
-      setChainFull(null);
+    } catch (error) {
+      setChainFull({
+        valid: false,
+        reason: error instanceof Error ? error.message : "chain verification failed",
+        scanned: 0,
+        verification: "full",
+        verified: 0,
+        legacy_unverified: 0,
+      });
     }
   }, []);
 
   const load = useCallback(async () => {
     setLoading(true);
+    setLoadError(null);
     try {
       const response = await adminFetch("/api/audit/query", {
         method: "POST",
@@ -105,9 +120,13 @@ export default function AuditPage() {
         }),
       });
       const payload = (await response.json()) as { code?: string; data?: QueryResult; message?: string };
+      if (!response.ok || payload.code !== "00000" || !payload.data) {
+        throw new Error(payload.message || `HTTP ${response.status}`);
+      }
       const data = payload.data;
-      setItems(data?.items ?? []);
-      setChainValid(data?.chain_valid ?? true);
+      setTotal(data.total);
+      setItems(data.items);
+      setChainValid(data.chain_valid);
       setChainError(
         data?.chain_valid
           ? null
@@ -118,7 +137,9 @@ export default function AuditPage() {
       );
       await loadChainVerify();
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : t("toast.loadFailed"));
+      const message = error instanceof Error ? error.message : t("toast.loadFailed");
+      setLoadError(message);
+      toast.error(message);
     } finally {
       setLoading(false);
     }
@@ -240,7 +261,7 @@ export default function AuditPage() {
     chainFull != null && !chainFull.valid ? chainFull.at : chainFull == null && !chainValid ? chainError?.at : undefined;
 
   const headerDescription = useMemo(() => {
-    const prefix = t("description.count", { count: items.length });
+    const prefix = t("description.count", { count: total });
     if (chainFull != null) {
       const chainPart = chainFull.valid
         ? headerChainPartial
@@ -253,7 +274,7 @@ export default function AuditPage() {
       return `${prefix} ${t("description.chainLoading")}`;
     }
     return `${prefix} ${t("description.pageChainFail")}${chainError?.reason ? `（${chainError.reason}）` : ""}`;
-  }, [items.length, chainFull, chainValid, chainError, t]);
+  }, [total, chainFull, chainValid, chainError, t]);
 
   return (
     <div className="space-y-5">
@@ -312,8 +333,14 @@ export default function AuditPage() {
             emptyState={
               <EmptyState
                 icon={<FileWarning className="h-5 w-5" />}
-                title={loading ? t("emptyLoadingTitle") : t("emptyTitle")}
-                description={loading ? t("emptyLoadingDescription") : t("emptyDescription")}
+                title={loading ? t("emptyLoadingTitle") : loadError ? t("loadErrorTitle") : t("emptyTitle")}
+                description={
+                  loading
+                    ? t("emptyLoadingDescription")
+                    : loadError
+                      ? t("loadErrorDescription", { error: loadError })
+                      : t("emptyDescription")
+                }
                 size="sm"
                 className="border-0"
               />

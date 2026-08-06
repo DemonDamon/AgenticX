@@ -1,5 +1,8 @@
 import type { AuthUser } from "@agenticx/auth";
 import type { ChatMessage, ChatSession } from "@agenticx/core-api";
+import type { ChatShareSnapshot } from "../chat-share-types";
+
+export type { ChatShareMessage, ChatShareSnapshot } from "../chat-share-types";
 
 export type ChatHistoryContext = {
   tenantId: string;
@@ -17,6 +20,13 @@ export class ChatHistoryConflictError extends Error {
   public constructor(message = "conflict") {
     super(message);
     this.name = "ChatHistoryConflictError";
+  }
+}
+
+export class ChatShareValidationError extends Error {
+  public constructor(message = "invalid share request") {
+    super(message);
+    this.name = "ChatShareValidationError";
   }
 }
 
@@ -56,6 +66,12 @@ export interface ChatHistoryStore {
   ): Promise<ChatSession>;
   softDeleteChatSession(ctx: ChatHistoryContext, sessionId: string): Promise<void>;
   softDeleteChatSessions(ctx: ChatHistoryContext, sessionIds: string[]): Promise<number>;
+  createChatShareSnapshot(
+    ctx: ChatHistoryContext,
+    sessionId: string,
+    messageIds: string[],
+  ): Promise<ChatShareSnapshot>;
+  getChatShareSnapshot(token: string, tenantId?: string): Promise<ChatShareSnapshot | null>;
   syncAuthUser(user: AuthUser): Promise<void>;
   resetForTests(): void | Promise<void>;
 }

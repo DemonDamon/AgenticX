@@ -1,11 +1,18 @@
 import { NextResponse } from "next/server";
 import { cookies } from "next/headers";
-import { getSessionFromCookies, passwordChangeRequiredResponse } from "../../../../lib/session";
-import { ACCESS_COOKIE } from "../../../../lib/session";
+import {
+  ACCESS_COOKIE,
+  REFRESH_COOKIE,
+  getSessionAuthFromCookies,
+  isAuthCookieSecure,
+  passwordChangeRequiredResponse,
+} from "../../../../lib/session";
+import { refreshTokens } from "../../../../lib/auth-runtime";
 import { isChatSessionOwned } from "../../../../lib/chat-history";
 import { toChatHistoryContext } from "../../../../lib/chat-history-http";
 import { listAvailableModelsForUser } from "../../../../lib/admin-providers-reader";
 import { stripEmptyAssistantMessages } from "../../../../lib/chat-completion-sanitize";
+import { withCurrentTimeContext } from "../../../../lib/current-time";
 import { runWebSearchTurn } from "../../../../lib/web-search/tool-loop";
 import { loadTenantWebSearchConfig } from "../../../../lib/web-search/tenant-config";
 import { runDeepResearchTurn } from "../../../../lib/deep-research/orchestrator";
@@ -13,27 +20,30 @@ import { defaultArtifactStore } from "../../../../lib/deep-research/artifact-sto
 
 function withSanitizedMessages(body: Record<string, unknown>): Record<string, unknown> {
   if (!Array.isArray(body.messages)) return body;
+  const cleaned = stripEmptyAssistantMessages(
+    body.messages as Array<{ role: string; content?: string | null; tool_calls?: unknown }>,
+  );
   return {
     ...body,
-    messages: stripEmptyAssistantMessages(
-      body.messages as Array<{ role?: unknown; content?: unknown; tool_calls?: unknown }>,
-    ),
+    // Direct (non-web-search) turns still need clock grounding — same as Desktop/Kimi.
+    messages: withCurrentTimeContext(cleaned),
   };
 }
 
 const GATEWAY_COMPLETIONS_URL =
   process.env.GATEWAY_COMPLETIONS_URL ?? "http://127.0.0.1:8088/v1/chat/completions";
 
-/** Web-search + slow upstream first-token can exceed the platform default (often 60s). */
-export const maxDuration = 300;
+/**
+ * Deep-research clarify alone can wait up to 5 minutes, then still needs plan/search
+ * time. Keep this above CLARIFY_TIMEOUT_MS in the deep-research orchestrator, and
+ * above TOTAL_BUDGET_MS (20m) plus headroom for network jitter.
+ */
+export const maxDuration = 1500;
 export const runtime = "nodejs";
 
 export async function POST(request: Request) {
-  const session = await getSessionFromCookies();
-  if (session?.mustChangePassword) {
-    return passwordChangeRequiredResponse();
-  }
-  if (!session) {
+  const auth = await getSessionAuthFromCookies();
+  if (!auth) {
     return NextResponse.json(
       {
         error: {
@@ -44,19 +54,11 @@ export async function POST(request: Request) {
       { status: 401 }
     );
   }
-  const cookieStore = await cookies();
-  const accessToken = cookieStore.get(ACCESS_COOKIE)?.value;
-  if (!accessToken) {
-    return NextResponse.json(
-      {
-        error: {
-          code: "40101",
-          message: "missing access token",
-        },
-      },
-      { status: 401 }
-    );
+  if (auth.session.mustChangePassword) {
+    return passwordChangeRequiredResponse();
   }
+  const { session, accessToken } = auth;
+  let refreshToken = auth.refreshToken;
 
   const chatSessionId = request.headers.get("x-chat-session-id")?.trim();
   if (!chatSessionId) {
@@ -161,6 +163,37 @@ export async function POST(request: Request) {
       tenantId: session.tenantId,
       userId: session.userId,
       sessionId: chatSessionId,
+      refreshAccessToken: async () => {
+        if (!refreshToken) return null;
+        try {
+          const next = await refreshTokens(refreshToken);
+          refreshToken = next.refreshToken;
+          // Best-effort: attach rotated cookies on the (still-open) response.
+          // In-memory Bearer update for subsequent Gateway calls is what matters.
+          try {
+            const cookieStore = await cookies();
+            cookieStore.set(ACCESS_COOKIE, next.accessToken, {
+              httpOnly: true,
+              sameSite: "lax",
+              secure: isAuthCookieSecure(),
+              maxAge: next.expiresInSeconds,
+              path: "/",
+            });
+            cookieStore.set(REFRESH_COOKIE, next.refreshToken, {
+              httpOnly: true,
+              sameSite: "lax",
+              secure: isAuthCookieSecure(),
+              maxAge: 7 * 24 * 60 * 60,
+              path: "/",
+            });
+          } catch {
+            // Streaming responses may reject mid-flight cookie writes; ignore.
+          }
+          return { accessToken: next.accessToken };
+        } catch {
+          return null;
+        }
+      },
     });
   }
 

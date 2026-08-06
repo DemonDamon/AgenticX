@@ -1,5 +1,10 @@
 import { ulid } from "ulid";
-import type { ChatMessage, ChatMessageRole, WebSearchSource } from "@agenticx/core-api";
+import type {
+  ChatMessage,
+  ChatMessageDeepResearch,
+  ChatMessageRole,
+  WebSearchSource,
+} from "@agenticx/core-api";
 import { ChatHistoryHttpError } from "./history-client";
 
 const DB_NAME = "agx-portal-history-outbox-v1";
@@ -8,8 +13,13 @@ const STORE_META = "meta";
 const ULID_RE = /^[0-7][0-9A-HJKMNP-TV-Z]{25}$/;
 const MAX_ATTEMPTS = 8;
 const OUTBOX_TTL_MS = 24 * 60 * 60 * 1000;
-const MAX_JOB_BYTES = 256_000;
-const MAX_QUEUE_BYTES = 2_000_000;
+/** Fits truncated document parsed_text (~120k chars) + assistant turn + web sources. */
+const MAX_JOB_BYTES = 1_000_000;
+const MAX_QUEUE_BYTES = 8_000_000;
+/** Align with portal MAX_ATTACHMENT_PARSED_TEXT_CHARS — keep preview + follow-up Q&A after refresh. */
+const MAX_HISTORY_PARSED_TEXT_CHARS = 120_000;
+/** Align with portal chat-message-sanitize MAX_DEEP_RESEARCH_EVENTS. */
+const MAX_HISTORY_DEEP_RESEARCH_EVENTS = 200;
 const LOCK_NAME_PREFIX = "agx-history-outbox:";
 
 export type HistoryPrincipal = {
@@ -22,6 +32,10 @@ export type HistoryAppendAttachmentMeta = {
   mime_type: string;
   size?: number;
   kind?: "image" | "document" | "video";
+  /** Truncated extracted text for document preview / follow-up after refresh. Never data_url. */
+  parsed_text?: string;
+  /** Original-file blob id — kept even when parsed_text is stripped for budget. */
+  attachment_id?: string;
 };
 
 export type HistoryAppendPayload = {
@@ -32,6 +46,8 @@ export type HistoryAppendPayload = {
   created_at: string;
   web_search_sources?: WebSearchSource[];
   attachments?: HistoryAppendAttachmentMeta[];
+  /** Deep-research workbench state — must survive refresh / session switch. */
+  deep_research?: ChatMessageDeepResearch;
 };
 
 export type HistoryOutboxOp = {
@@ -194,12 +210,41 @@ export function stripToAppendPayload(message: ChatMessage): HistoryAppendPayload
     }));
   }
   if (message.attachments?.length) {
-    payload.attachments = message.attachments.map((item) => ({
-      name: item.name,
-      mime_type: item.mime_type,
-      size: typeof item.size === "number" ? item.size : undefined,
-      kind: item.kind,
-    }));
+    payload.attachments = message.attachments.map((item) => {
+      const meta: HistoryAppendAttachmentMeta = {
+        name: item.name,
+        mime_type: item.mime_type,
+        size: typeof item.size === "number" ? item.size : undefined,
+        kind: item.kind,
+      };
+      // Persist truncated parsed_text so document chips stay previewable after refresh.
+      // Never persist image data_url in history DTO (size + privacy).
+      const parsed = item.parsed_text?.trim();
+      if (parsed) {
+        meta.parsed_text = parsed.slice(0, MAX_HISTORY_PARSED_TEXT_CHARS);
+      }
+      const attachmentId = item.attachment_id?.trim();
+      if (attachmentId && isValidUlid(attachmentId)) {
+        meta.attachment_id = attachmentId;
+      }
+      return meta;
+    });
+  }
+  if (message.deep_research?.runId) {
+    const events = Array.isArray(message.deep_research.events)
+      ? message.deep_research.events.slice(-MAX_HISTORY_DEEP_RESEARCH_EVENTS)
+      : [];
+    payload.deep_research = {
+      runId: message.deep_research.runId,
+      status: message.deep_research.status,
+      events,
+      ...(message.deep_research.artifactIds?.length
+        ? { artifactIds: message.deep_research.artifactIds.slice(0, 40) }
+        : {}),
+      ...(message.deep_research.clarifyAnswers
+        ? { clarifyAnswers: message.deep_research.clarifyAnswers }
+        : {}),
+    };
   }
   return payload;
 }
@@ -581,11 +626,14 @@ export async function listPendingOverlayMessages(
         model: message.model,
         created_at: message.created_at,
         web_search_sources: message.web_search_sources,
+        deep_research: message.deep_research,
         attachments: message.attachments?.map((item) => ({
           name: item.name,
           mime_type: item.mime_type,
           size: item.size,
           kind: item.kind,
+          ...(item.parsed_text ? { parsed_text: item.parsed_text } : {}),
+          ...(item.attachment_id ? { attachment_id: item.attachment_id } : {}),
         })),
       });
     }
@@ -628,8 +676,24 @@ export async function enqueueAppend(
   }
 
   const operationId = options?.operationId && isValidUlid(options.operationId) ? options.operationId : ulid();
-  const payloadHash = options?.payloadHash ?? (await computePayloadHash(payloads));
-  const jobBytes = utf8Bytes({ operationId, payloads, payloadHash });
+  let payloadHash = options?.payloadHash ?? (await computePayloadHash(payloads));
+  let jobBytes = utf8Bytes({ operationId, payloads, payloadHash });
+  // If truncated parsed_text still blows the outbox budget, drop text and keep metadata chips.
+  if (jobBytes > MAX_JOB_BYTES) {
+    payloads = payloads.map((message) => ({
+      ...message,
+      attachments: message.attachments?.map((item) => ({
+        name: item.name,
+        mime_type: item.mime_type,
+        size: item.size,
+        kind: item.kind,
+        // Keep attachment_id — last fallback for original preview after text drop.
+        ...(item.attachment_id ? { attachment_id: item.attachment_id } : {}),
+      })),
+    }));
+    payloadHash = await computePayloadHash(payloads);
+    jobBytes = utf8Bytes({ operationId, payloads, payloadHash });
+  }
   if (jobBytes > MAX_JOB_BYTES) {
     return { enqueued: false, reason: "附件或内容过大，无法加入离线同步队列" };
   }

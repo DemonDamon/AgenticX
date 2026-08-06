@@ -3,6 +3,7 @@
 import * as React from "react";
 import type { DeepResearchEvent } from "@agenticx/core-api";
 import { Button } from "@agenticx/ui";
+import { parseClarifyResumeResponse } from "../../utils/deep-research-clarify-resume";
 
 type ClarifyEvent = Extract<DeepResearchEvent, { type: "clarify" }>;
 
@@ -44,6 +45,32 @@ function IconChevronDown({ className }: { className?: string }) {
   );
 }
 
+/** Join multi-selected option labels (+ optional custom) for resume payload. */
+export function formatClarifyAnswer(
+  selectedLabels: readonly string[],
+  customText?: string,
+): string {
+  const parts = selectedLabels.map((s) => s.trim()).filter(Boolean);
+  const custom = customText?.trim();
+  if (custom) parts.push(custom);
+  return parts.join("、");
+}
+
+/** Multi-select toggle, or single-select replace when multiSelect is false. */
+export function nextClarifySelection(
+  current: readonly string[],
+  label: string,
+  multiSelect: boolean,
+): string[] {
+  if (!multiSelect) {
+    return current.includes(label) ? [] : [label];
+  }
+  if (current.includes(label)) {
+    return current.filter((item) => item !== label);
+  }
+  return [...current, label];
+}
+
 export type DeepResearchClarifyCardProps = {
   events: DeepResearchEvent[];
   /** When false, render read-only「已收集信息」panel after answers / timeout. */
@@ -66,19 +93,38 @@ export function DeepResearchClarifyCard({
     () => events.filter((e): e is ClarifyEvent => e.type === "clarify"),
     [events],
   );
-  const [answers, setAnswers] = React.useState<Record<string, string>>({});
+  /** Per-question selected option labels (multi-select). */
+  const [answers, setAnswers] = React.useState<Record<string, string[]>>({});
   const [custom, setCustom] = React.useState<Record<string, string>>({});
   const [submitting, setSubmitting] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
+  const [localTimedOut, setLocalTimedOut] = React.useState(false);
   const [collapsed, setCollapsed] = React.useState(!awaiting);
 
   React.useEffect(() => {
     setCollapsed(!awaiting);
   }, [awaiting]);
 
+  const toggleOption = React.useCallback(
+    (questionId: string, label: string, multiSelect: boolean) => {
+      setAnswers((prev) => {
+        const current = prev[questionId] ?? [];
+        const next = nextClarifySelection(current, label, multiSelect);
+        if (next.length === 0) {
+          const cleared = { ...prev };
+          delete cleared[questionId];
+          return cleared;
+        }
+        return { ...prev, [questionId]: next };
+      });
+    },
+    [],
+  );
+
   if (clarifyEvents.length === 0) return null;
   const runId = clarifyEvents[0]!.runId;
   const savedAnswers = clarifyAnswers ?? {};
+  const effectivelyTimedOut = timedOut || localTimedOut;
   const showInteractive = awaiting;
 
   const resolvedLines = clarifyEvents.map((q) => {
@@ -94,9 +140,10 @@ export function DeepResearchClarifyCard({
       const payloadAnswers: Record<string, string> = {};
       if (!skip) {
         for (const q of clarifyEvents) {
-          const selected = answers[q.questionId]?.trim();
-          const customText = custom[q.questionId]?.trim();
-          const value = customText || selected;
+          const value = formatClarifyAnswer(
+            answers[q.questionId] ?? [],
+            custom[q.questionId],
+          );
           if (value) payloadAnswers[q.questionId] = value;
         }
       }
@@ -105,14 +152,23 @@ export function DeepResearchClarifyCard({
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ runId, answers: payloadAnswers, skip }),
       });
-      if (!response.ok) {
-        const text = await response.text().catch(() => "");
-        throw new Error(text || `HTTP ${response.status}`);
+      const text = await response.text().catch(() => "");
+      const parsed = parseClarifyResumeResponse(response.status, text);
+      if (parsed.kind === "error") {
+        setError(parsed.message);
+        return;
       }
-      onSubmitted?.(payloadAnswers);
+      if (parsed.kind === "already_continued") {
+        // Server already timed out / continued — do not persist late answers as
+        // if they were applied; flip the card out of awaiting instead.
+        setLocalTimedOut(true);
+        onSubmitted?.({});
+      } else {
+        onSubmitted?.(payloadAnswers);
+      }
       setCollapsed(true);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "提交失败");
+    } catch {
+      setError("提交失败，请稍后重试");
     } finally {
       setSubmitting(false);
     }
@@ -120,7 +176,7 @@ export function DeepResearchClarifyCard({
 
   const statusLabel = showInteractive
     ? "等待确认"
-    : timedOut && !hasSavedAnswers
+    : effectivelyTimedOut && !hasSavedAnswers
       ? "超时后按默认假设继续"
       : "已收集信息";
 
@@ -150,26 +206,39 @@ export function DeepResearchClarifyCard({
           {showInteractive ? (
             <>
               <p className="mb-3 text-sm leading-5 text-muted-foreground">
-                我先快速确认一下调研方向，然后开始系统检索。
+                我先快速确认一下调研方向，然后开始系统检索。每题可多选；请在 5
+                分钟内确认；超时将按默认假设继续。
               </p>
               <div className="space-y-3">
-                {clarifyEvents.map((q) => (
+                {clarifyEvents.map((q) => {
+                  const multiSelect = q.multiSelect !== false;
+                  return (
                   <div key={`${q.runId}-${q.questionId}`}>
-                    <div className="mb-1.5 text-sm font-medium leading-5 text-foreground">
-                      {q.step}/{q.total} · {q.question}
+                    <div className="mb-1.5 flex items-baseline gap-1.5 text-sm font-medium leading-5 text-foreground">
+                      <span>
+                        {q.step}/{q.total} · {q.question}
+                      </span>
+                      <span className="shrink-0 text-xs font-normal text-muted-foreground">
+                        {multiSelect ? "可多选" : "请选一个"}
+                      </span>
                     </div>
-                    <div className="flex flex-wrap gap-1.5">
+                    <div
+                      className="flex flex-wrap gap-1.5"
+                      role="group"
+                      aria-label={q.question}
+                    >
                       {q.options.map((opt) => {
-                        const selected = answers[q.questionId] === opt.label;
+                        const selected = (answers[q.questionId] ?? []).includes(opt.label);
                         return (
                           <button
                             key={opt.id}
                             type="button"
+                            role={multiSelect ? "checkbox" : "radio"}
+                            aria-checked={selected}
                             disabled={disabled || submitting}
-                            onClick={() => {
-                              setAnswers((prev) => ({ ...prev, [q.questionId]: opt.label }));
-                              setCustom((prev) => ({ ...prev, [q.questionId]: "" }));
-                            }}
+                            onClick={() =>
+                              toggleOption(q.questionId, opt.label, multiSelect)
+                            }
                             className={[
                               "rounded-full border px-2.5 py-1 text-sm leading-5 transition-colors",
                               selected
@@ -185,24 +254,18 @@ export function DeepResearchClarifyCard({
                     {q.allowCustom ? (
                       <input
                         className="mt-2 w-full rounded-md border border-border/70 bg-background px-2 py-1.5 text-sm"
-                        placeholder="其他（可选）"
+                        placeholder="其他（可选，可与上方选项组合）"
                         value={custom[q.questionId] ?? ""}
                         disabled={disabled || submitting}
                         onChange={(e) => {
                           const value = e.target.value;
                           setCustom((prev) => ({ ...prev, [q.questionId]: value }));
-                          if (value.trim()) {
-                            setAnswers((prev) => {
-                              const next = { ...prev };
-                              delete next[q.questionId];
-                              return next;
-                            });
-                          }
                         }}
                       />
                     ) : null}
                   </div>
-                ))}
+                  );
+                })}
               </div>
               {error ? <p className="mt-2 text-sm text-destructive">{error}</p> : null}
               <div className="mt-3 flex items-center gap-2">
@@ -231,7 +294,8 @@ export function DeepResearchClarifyCard({
                 <div key={`resolved-${index}`}>
                   <div className="text-sm leading-5 text-foreground">{row.question}</div>
                   <div className="mt-0.5 pl-2 text-sm leading-5 text-muted-foreground">
-                    {row.answer || (timedOut ? "（未回答，已按默认假设继续）" : "—")}
+                    {row.answer ||
+                      (effectivelyTimedOut ? "（未回答，已按默认假设继续）" : "—")}
                   </div>
                 </div>
               ))}

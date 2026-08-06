@@ -3,6 +3,7 @@
 import * as React from "react";
 import { Button } from "@agenticx/ui";
 import type { ComposerAttachment } from "../../types/composer-attachment";
+import { formatFileSize } from "../../utils/format-file-size";
 
 function IconX({ className }: { className?: string }) {
   return (
@@ -27,15 +28,7 @@ type AttachmentChipProps = {
   onRemove: () => void;
 };
 
-function statusLabel(file: ComposerAttachment): string {
-  if (file.status === "parsing") return "处理中…";
-  if (file.status === "error") return file.errorText ?? "失败";
-  if (file.kind === "video") return "视频（仅文件名）";
-  if (file.kind === "document") return "文档已解析";
-  return "已就绪";
-}
-
-function kindBadge(file: ComposerAttachment): string {
+export function kindBadge(file: ComposerAttachment): string {
   if (file.kind === "video") return "VID";
   if (file.kind === "document") {
     const ext = file.name.includes(".") ? file.name.split(".").pop()?.toUpperCase() : "DOC";
@@ -44,8 +37,18 @@ function kindBadge(file: ComposerAttachment): string {
   return "IMG";
 }
 
+/** Status / meta line under the filename (progress, waiting, type+size). */
+export function attachmentChipStatusLabel(file: ComposerAttachment): string {
+  if (file.status === "uploading") return `${file.uploadProgress ?? 0}%`;
+  if (file.status === "parsing") return "等待解析";
+  if (file.status === "error") return file.errorText ?? "失败";
+  if (file.kind === "video") return "视频（仅文件名）";
+  return [kindBadge(file), formatFileSize(file.size)].filter(Boolean).join(" ");
+}
+
 export function AttachmentChip({ file, onRemove }: AttachmentChipProps) {
   const isImage = file.kind === "image" || (!!file.dataUrl && file.mimeType.startsWith("image/"));
+  const showSpinner = file.status === "uploading" || file.status === "parsing";
   return (
     <div className="group relative inline-flex max-w-[260px] items-center gap-3 rounded-xl border border-border bg-background px-3 py-2 text-sm transition-colors hover:bg-muted/40">
       {isImage && file.dataUrl ? (
@@ -58,7 +61,15 @@ export function AttachmentChip({ file, onRemove }: AttachmentChipProps) {
       )}
       <div className="min-w-0 flex-1">
         <div className="truncate font-medium leading-tight">{file.name}</div>
-        <div className="text-xs text-muted-foreground">{statusLabel(file)}</div>
+        <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
+          {showSpinner ? (
+            <span
+              className="inline-block h-3.5 w-3.5 shrink-0 animate-spin rounded-full border-2 border-current border-t-transparent"
+              aria-hidden
+            />
+          ) : null}
+          <span>{attachmentChipStatusLabel(file)}</span>
+        </div>
       </div>
       <Button
         type="button"

@@ -12,6 +12,71 @@ export type ParsedAssistantContent = {
   thinkingInProgress: boolean;
 };
 
+/** Convert rendered-style Markdown into text suitable for copying to a human reader. */
+export function markdownToPlainText(raw: string): string {
+  let text = (raw ?? "").replace(/\r\n?/g, "\n");
+  const codeBlocks: string[] = [];
+
+  text = text.replace(/```[^\n]*\n([\s\S]*?)\n?```/g, (_match, body: string) => {
+    const marker = `\u0000code-${codeBlocks.length}\u0000`;
+    codeBlocks.push(body.replace(/\n$/, ""));
+    return marker;
+  });
+
+  text = text
+    .replace(/<!--[\s\S]*?-->/g, "")
+    .replace(/^[ \t]{0,3}\[[^\]\n]+\]:\s*\S+(?:\s+["'(].*?)?\s*$/gm, "")
+    .replace(/\[(?:\d{1,3}|N)\]/gi, "")
+    .replace(/\[\^[^\]]+\]/g, "")
+    .replace(/!\[([^\]\n]*)\]\((?:\\.|[^)])*\)/g, "$1")
+    .replace(/\[([^\]\n]+)\]\((?:\\.|[^)])*\)/g, "$1")
+    .replace(/\[([^\]\n]+)\]\s*\[[^\]\n]*\]/g, "$1")
+    .replace(/<\/?[A-Za-z][^>]*>/g, "")
+    .replace(/\\([\\`*_[\]{}()#+.!|>~-])/g, "$1");
+
+  text = text
+    .split("\n")
+    .flatMap((line) => {
+      const trimmed = line.trim();
+      if (/^\|?(?:\s*:?-{3,}:?\s*\|)+\s*:?-{3,}:?\s*\|?$/.test(trimmed)) return [];
+      if (!trimmed.includes("|")) return [line];
+      const cells = trimmed
+        .replace(/^\|/, "")
+        .replace(/\|$/, "")
+        .split("|")
+        .map((cell) => cell.trim());
+      return [cells.join("\t")];
+    })
+    .join("\n")
+    .replace(/^[ \t]{0,3}#{1,6}[ \t]+/gm, "")
+    .replace(/^[ \t]*>[ \t]?/gm, "")
+    .replace(/^[ \t]*([-*_])(?:[ \t]*\1){2,}[ \t]*$/gm, "")
+    .replace(/^[ \t]*[-+*][ \t]+/gm, "• ")
+    .replace(/^[ \t]*(\d+)[.)][ \t]+/gm, "$1. ")
+    .replace(/`([^`\n]+)`/g, "$1")
+    .replace(/\*\*(.+?)\*\*/g, "$1")
+    .replace(/__(.+?)__/g, "$1")
+    .replace(/~~(.+?)~~/g, "$1")
+    .replace(/(?<!\w)\*([^*\n]+)\*(?!\w)/g, "$1")
+    .replace(/(?<!\w)_([^_\n]+)_(?!\w)/g, "$1")
+    .replace(/[ \t]+\n/g, "\n")
+    .replace(/\n[ \t]*\n(?:[ \t]*\n)+/g, "\n\n");
+
+  for (const [index, body] of codeBlocks.entries()) {
+    text = text.replace(`\u0000code-${index}\u0000`, body);
+  }
+
+  return text.trim();
+}
+
+/** Return the visible, Markdown-free text for a message copy action. */
+export function toCopyableMessageText(message: ChatMessage): string {
+  const visibleContent = message.role === "assistant"
+    ? parseAssistantContent(message).displayContent
+    : message.content ?? "";
+  return markdownToPlainText(visibleContent);
+}
+
 export function normalizeThinkTags(raw: string): string {
   if (!raw) return raw;
   return raw.replaceAll(THINK_OPEN, REDACTED_OPEN).replaceAll(THINK_CLOSE, REDACTED_CLOSE);

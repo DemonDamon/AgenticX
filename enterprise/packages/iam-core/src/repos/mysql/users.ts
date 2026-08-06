@@ -75,6 +75,12 @@ function isActiveUserRow(row: typeof users.$inferSelect): boolean {
   return !row.isDeleted && row.deletedAt == null;
 }
 
+function normalizeAdminEmail(value: string): string {
+  const email = value.trim().toLowerCase();
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) throw new Error("invalid email");
+  return email;
+}
+
 async function findUserRowByTenantEmail(
   db: MySqlDrizzleDb,
   tenantId: string,
@@ -413,6 +419,16 @@ export const mysqlUsersRepository: UsersRepository = {
 
     const now = new Date();
     const next: Partial<typeof users.$inferInsert> = { updatedAt: now };
+    if (patch.email !== undefined) {
+      const email = normalizeAdminEmail(patch.email);
+      if (email !== row.email) {
+        const existing = await findUserRowByTenantEmail(db, tenantId, email);
+        if (existing && existing.id !== id && isActiveUserRow(existing)) {
+          throw new Error("email already exists");
+        }
+      }
+      next.email = email;
+    }
     if (patch.displayName !== undefined) next.displayName = patch.displayName.trim();
     if (patch.deptId !== undefined) next.deptId = patch.deptId;
     if (patch.phone !== undefined) next.phone = patch.phone;
@@ -458,6 +474,7 @@ export const mysqlUsersRepository: UsersRepository = {
     return updated;
   },
   async softDeleteUser(tenantId, id, actorUserId) {
+    if (actorUserId && actorUserId === id) throw new Error("不能删除当前登录用户");
     const db = await getMysqlRepositoryDb();
     const [row] = await db
       .select({ email: users.email, displayName: users.displayName })

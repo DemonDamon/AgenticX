@@ -1,4 +1,11 @@
 import * as React from "react";
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
+import { probeNote } from "../../debug/update-depth-probe";
+import {
+  ASSISTANT_MD_COMPONENTS,
+  assistantUrlTransform,
+} from "../../markdown/assistant-markdown-components";
 
 type ReasoningBlockProps = {
   reasoning: string;
@@ -53,20 +60,33 @@ export function ReasoningBlock({ reasoning, thinkingStarted, thinkingInProgress 
   const [tick, setTick] = React.useState(0);
   const startedAtRef = React.useRef<number | null>(null);
   const finishedAtRef = React.useRef<number | null>(null);
+  const autoPhaseRef = React.useRef<"idle" | "thinking" | "done">(
+    thinkingStarted ? (thinkingInProgress ? "thinking" : "done") : "idle",
+  );
 
   React.useEffect(() => {
-    if (!thinkingStarted) return;
+    if (!thinkingStarted) {
+      autoPhaseRef.current = "idle";
+      startedAtRef.current = null;
+      finishedAtRef.current = null;
+      return;
+    }
+    probeNote("ReasoningBlock.effect", { thinkingInProgress });
     if (startedAtRef.current === null) {
       startedAtRef.current = Date.now();
     }
     if (thinkingInProgress) {
       finishedAtRef.current = null;
-      setOpen(true);
+      if (autoPhaseRef.current !== "thinking") {
+        autoPhaseRef.current = "thinking";
+        setOpen((prev) => (prev ? prev : true));
+      }
       return;
     }
-    if (finishedAtRef.current === null) {
+    if (autoPhaseRef.current !== "done") {
+      autoPhaseRef.current = "done";
       finishedAtRef.current = Date.now();
-      setOpen(false);
+      setOpen((prev) => (!prev ? prev : false));
     }
   }, [thinkingStarted, thinkingInProgress]);
 
@@ -114,7 +134,15 @@ export function ReasoningBlock({ reasoning, thinkingStarted, thinkingInProgress 
                 <span className="h-2 w-2 shrink-0 rounded-full bg-muted-foreground/70" />
                 <div className="mt-1.5 w-px min-h-3 flex-1 bg-border/55" />
               </div>
-              <p className="ml-2.5 min-w-0 flex-1 whitespace-pre-wrap break-words pb-0.5">{content}</p>
+              <div className="agx-assistant-md ml-2.5 min-w-0 flex-1 break-words pb-0.5 text-sm leading-6 text-muted-foreground">
+                <ReactMarkdown
+                  remarkPlugins={[remarkGfm]}
+                  urlTransform={assistantUrlTransform}
+                  components={ASSISTANT_MD_COMPONENTS}
+                >
+                  {content}
+                </ReactMarkdown>
+              </div>
             </div>
           ) : (
             <div className="flex items-stretch text-muted-foreground">
@@ -132,4 +160,3 @@ export function ReasoningBlock({ reasoning, thinkingStarted, thinkingInProgress 
     </div>
   );
 }
-

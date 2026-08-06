@@ -14,7 +14,7 @@ type WebSearchCitationProps = {
   onOpenInSheet?: (index1Based: number) => void;
 };
 
-export function WebSearchCitation({ index1Based, source, onOpenInSheet }: WebSearchCitationProps) {
+function WebSearchCitationImpl({ index1Based, source, onOpenInSheet }: WebSearchCitationProps) {
   const label = siteLabelFromSource(source, index1Based);
   // Must be a real hostname for favicon CDNs — never fall back to display label ("Zhihu").
   const host = hostnameFromUrl(source.url) ?? "";
@@ -60,3 +60,6 @@ export function WebSearchCitation({ index1Based, source, onOpenInSheet }: WebSea
     </span>
   );
 }
+
+/** Memoized so composer keystrokes / streaming chunks do not re-render every chip. */
+export const WebSearchCitation = React.memo(WebSearchCitationImpl);

@@ -10,9 +10,9 @@ export async function GET() {
     code: "00000",
     message: "ok",
     data: {
+      userId: session.userId,
       email: session.email,
       role: "admin",
     },
   });
 }
-

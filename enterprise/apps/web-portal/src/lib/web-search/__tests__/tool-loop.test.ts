@@ -1,11 +1,14 @@
 import { describe, expect, it, vi } from "vitest";
 import {
+  buildWebSearchQuery,
   compactHitsForModel,
   extractLastUserQuery,
+  isShortFollowUpQuery,
   pipeUpstreamSse,
   runWebSearchTurn,
   synthesizeTextSse,
   WEB_SEARCH_CONTEXT_SNIPPET_CHARS,
+  WEB_SEARCH_SYSTEM_HINT,
   withSearchContext,
 } from "../tool-loop";
 import type { WebSearchHit } from "../providers";
@@ -54,12 +57,80 @@ describe("web search tool loop", () => {
     ).toBe("总结一下");
   });
 
+  it("detects short follow-up slot fills vs full questions", () => {
+    expect(isShortFollowUpQuery("广州南沙")).toBe(true);
+    expect(isShortFollowUpQuery("广州南沙天气如何")).toBe(false);
+  });
+
+  it("builds contextual search query for multi-turn slot fill", () => {
+    expect(
+      buildWebSearchQuery([
+        { role: "user", content: "今天天气怎么样" },
+        { role: "assistant", content: "请问哪个城市？" },
+        { role: "user", content: "广州南沙" },
+      ]),
+    ).toBe("广州南沙 今天天气怎么样");
+
+    expect(
+      buildWebSearchQuery([{ role: "user", content: "广州南沙天气如何" }]),
+    ).toBe("广州南沙天气如何");
+
+    // Prior turn was greeting — do not splice into search keywords.
+    expect(
+      buildWebSearchQuery([
+        { role: "user", content: "你好" },
+        { role: "assistant", content: "你好！" },
+        { role: "user", content: "广州南沙" },
+      ]),
+    ).toBe("广州南沙");
+  });
+
+  it("grounded hint forbids channel-list answers", () => {
+    expect(WEB_SEARCH_SYSTEM_HINT).toContain("推荐查询渠道");
+    expect(WEB_SEARCH_SYSTEM_HINT).toMatch(/禁止声称无法联网|仍禁止声称无法联网/);
+    expect(WEB_SEARCH_SYSTEM_HINT).toContain("可核验事实");
+  });
+
+  it("grounded hint forbids ending with 'please visit the site yourself'", () => {
+    expect(WEB_SEARCH_SYSTEM_HINT).toContain("建议直接访问某网站获取详情");
+    expect(WEB_SEARCH_SYSTEM_HINT).toContain("而不是让用户自己去查");
+  });
+
+  it("grounded hint requires handling stale publishedAt", () => {
+    expect(WEB_SEARCH_SYSTEM_HINT).toContain("发布时间");
+  });
+
+  it("grounded hint scopes [N] to current turn and allows off-topic escape", () => {
+    expect(WEB_SEARCH_SYSTEM_HINT).toContain("仅对应本轮搜索结果");
+    expect(WEB_SEARCH_SYSTEM_HINT).toContain("与问题无关");
+    const msgs = withSearchContext(
+      [{ role: "user", content: "q" }],
+      [{ title: "T", url: "https://example.com", snippet: "s" }],
+    );
+    const system = String(msgs[0]?.content);
+    expect(system).toContain("仅对应本轮搜索结果");
+    expect(system).toContain("与问题无关");
+  });
+
+  it("compactHitsForModel preserves publishedAt", () => {
+    const compacted = compactHitsForModel([
+      {
+        title: "t",
+        url: "https://a",
+        snippet: "s",
+        publishedAt: "2026-08-02T00:00:00+08:00",
+      },
+    ]);
+    expect(compacted[0]?.publishedAt).toBe("2026-08-02T00:00:00+08:00");
+  });
+
   it("injects search hits into system context without tools", () => {
     const hits: WebSearchHit[] = [{ title: "T", url: "https://example.com", snippet: "s" }];
     const msgs = withSearchContext([{ role: "user", content: "q" }], hits);
     expect(msgs[0]?.role).toBe("system");
     expect(String(msgs[0]?.content)).toContain("https://example.com");
     expect(String(msgs[0]?.content)).toContain("禁止输出任何工具调用");
+    expect(String(msgs[0]?.content)).toContain("推荐查询渠道");
   });
 
   it("runs server-side search first and strips agenticx_web_search / tools on final stream", async () => {
@@ -109,6 +180,7 @@ describe("web search tool loop", () => {
     expect(finalBody.tools).toBeUndefined();
     expect(finalBody.tool_choice).toBeUndefined();
     expect(finalBody.stream).toBe(true);
+    expect(finalBody.messages?.[0]?.content).toContain("当前时间");
     expect(finalBody.messages?.[0]?.content).toContain("联网搜索结果");
     expect(finalBody.messages?.some((m) => m.role === "assistant" && !String(m.content ?? "").trim())).toBe(
       false,
@@ -120,6 +192,115 @@ describe("web search tool loop", () => {
     expect(text).toContain("https://news.example/opus");
     expect(text.includes("**来源**")).toBe(false);
     expect(text.includes("minimax:tool_call")).toBe(false);
+  });
+
+  it("skips web search for pure current-date questions and grounds on local clock", async () => {
+    const bodies: unknown[] = [];
+    const executeSearch = vi.fn(async () => []);
+    const fetchImpl = vi.fn(async (_url: string, init?: RequestInit) => {
+      bodies.push(JSON.parse(String(init?.body ?? "{}")));
+      return sseResponse(
+        'data: {"choices":[{"delta":{"content":"今天是2026年8月1日"}}]}\n\ndata: [DONE]\n\n',
+      );
+    });
+
+    const res = await runWebSearchTurn(
+      {
+        model: "m",
+        messages: [{ role: "user", content: "今天几号啊" }],
+        agenticx_web_search: true,
+      },
+      {
+        url: "http://gateway.test/v1/chat/completions",
+        headers: { authorization: "Bearer t" },
+        fetchImpl: fetchImpl as unknown as typeof fetch,
+        loadTenantConfig: async () => ({
+          enabled: true,
+          provider: "duckduckgo",
+          apiKey: "",
+          maxResults: 5,
+        }),
+        executeSearch,
+      },
+    );
+
+    expect(executeSearch).not.toHaveBeenCalled();
+    const body = bodies[0] as { messages?: Array<{ role?: string; content?: string }> };
+    expect(body.messages?.[0]?.role).toBe("system");
+    expect(String(body.messages?.[0]?.content)).toContain("当前时间");
+    expect(String(body.messages?.[0]?.content)).toContain("本轮说明");
+    expect(String(body.messages?.[0]?.content)).not.toContain("联网搜索结果");
+    const text = await readText(res);
+    expect(text).toContain("今天是2026年8月1日");
+    expect(text).not.toContain("agenticx_web_search_sources");
+  });
+
+  it("skips search for self-contained work in auto mode", async () => {
+    const bodies: unknown[] = [];
+    const executeSearch = vi.fn(async () => []);
+    const fetchImpl = vi.fn(async (_url: string, init?: RequestInit) => {
+      bodies.push(JSON.parse(String(init?.body ?? "{}")));
+      return sseResponse('data: {"choices":[{"delta":{"content":"邮件草稿"}}]}\n\ndata: [DONE]\n\n');
+    });
+
+    const res = await runWebSearchTurn(
+      {
+        model: "m",
+        messages: [{ role: "user", content: "帮我写一封请假邮件" }],
+        agenticx_web_search: true,
+      },
+      {
+        url: "http://gateway.test/v1/chat/completions",
+        headers: { authorization: "Bearer t" },
+        fetchImpl: fetchImpl as unknown as typeof fetch,
+        loadTenantConfig: async () => ({
+          enabled: true,
+          provider: "duckduckgo",
+          apiKey: "",
+          maxResults: 5,
+        }),
+        executeSearch,
+      },
+    );
+
+    expect(executeSearch).not.toHaveBeenCalled();
+    const body = bodies[0] as { messages?: Array<{ role?: string; content?: string }> };
+    expect(String(body.messages?.[0]?.content)).not.toContain("联网搜索结果");
+    expect(String(body.messages?.[0]?.content)).toContain("不要为了凑答案而联网");
+    expect(await readText(res)).toContain("邮件草稿");
+  });
+
+  it("answers web-search capability directly instead of searching", async () => {
+    const bodies: unknown[] = [];
+    const executeSearch = vi.fn(async () => []);
+    const fetchImpl = vi.fn(async (_url: string, init?: RequestInit) => {
+      bodies.push(JSON.parse(String(init?.body ?? "{}")));
+      return sseResponse('data: {"choices":[{"delta":{"content":"支持联网搜索"}}]}\n\ndata: [DONE]\n\n');
+    });
+
+    await runWebSearchTurn(
+      {
+        model: "m",
+        messages: [{ role: "user", content: "现在有联网功能吗" }],
+        agenticx_web_search: true,
+      },
+      {
+        url: "http://gateway.test/v1/chat/completions",
+        headers: { authorization: "Bearer t" },
+        fetchImpl: fetchImpl as unknown as typeof fetch,
+        loadTenantConfig: async () => ({
+          enabled: true,
+          provider: "duckduckgo",
+          apiKey: "",
+          maxResults: 5,
+        }),
+        executeSearch,
+      },
+    );
+
+    expect(executeSearch).not.toHaveBeenCalled();
+    const body = bodies[0] as { messages?: Array<{ role?: string; content?: string }> };
+    expect(String(body.messages?.[0]?.content)).toContain("本平台支持联网搜索");
   });
 
   it("does not search when tenant enabled=false", async () => {
@@ -164,7 +345,8 @@ describe("web search tool loop", () => {
     const res = await runWebSearchTurn(
       {
         model: "m",
-        messages: [{ role: "user", content: "hi" }],
+        // Informational query — greetings like "hi" now skip search-first entirely.
+        messages: [{ role: "user", content: "最新的 AI 新闻" }],
       },
       {
         url: "http://gateway.test/v1/chat/completions",
@@ -180,6 +362,159 @@ describe("web search tool loop", () => {
     const text = await readText(res);
     expect(text).toContain("联网搜索暂不可用");
     expect(text).toContain("fallback");
+  });
+
+  it("searches with contextual query when user fills a slot across turns", async () => {
+    const executeSearch = vi.fn(async (q: string) => [
+      { title: "南沙天气", url: "https://weather.example/nansha", snippet: "气温 24~30℃" },
+    ]);
+    const fetchImpl = vi.fn(async () =>
+      sseResponse('data: {"choices":[{"delta":{"content":"南沙今天大雨"}}]}\n\ndata: [DONE]\n\n'),
+    );
+
+    await runWebSearchTurn(
+      {
+        model: "m",
+        messages: [
+          { role: "user", content: "今天天气怎么样" },
+          { role: "assistant", content: "请问哪个城市？" },
+          { role: "user", content: "广州南沙" },
+        ],
+        agenticx_web_search: true,
+      },
+      {
+        url: "http://gateway.test/v1/chat/completions",
+        headers: { authorization: "Bearer t" },
+        fetchImpl: fetchImpl as unknown as typeof fetch,
+        loadTenantConfig: async () => ({
+          enabled: true,
+          provider: "duckduckgo",
+          apiKey: "",
+          maxResults: 5,
+        }),
+        executeSearch,
+      },
+    );
+
+    expect(executeSearch).toHaveBeenCalledTimes(1);
+    expect(executeSearch.mock.calls[0]?.[0]).toBe("广州南沙 今天天气怎么样");
+  });
+
+  it("skips web search for greetings", async () => {
+    const bodies: unknown[] = [];
+    const executeSearch = vi.fn(async () => []);
+    const fetchImpl = vi.fn(async (_url: string, init?: RequestInit) => {
+      bodies.push(JSON.parse(String(init?.body ?? "{}")));
+      return sseResponse(
+        'data: {"choices":[{"delta":{"content":"你好！有什么可以帮你的？"}}]}\n\ndata: [DONE]\n\n',
+      );
+    });
+
+    const res = await runWebSearchTurn(
+      {
+        model: "m",
+        messages: [{ role: "user", content: "你好" }],
+        agenticx_web_search: true,
+      },
+      {
+        url: "http://gateway.test/v1/chat/completions",
+        headers: { authorization: "Bearer t" },
+        fetchImpl: fetchImpl as unknown as typeof fetch,
+        loadTenantConfig: async () => ({
+          enabled: true,
+          provider: "duckduckgo",
+          apiKey: "",
+          maxResults: 5,
+        }),
+        executeSearch,
+      },
+    );
+
+    expect(executeSearch).not.toHaveBeenCalled();
+    const body = bodies[0] as { messages?: Array<{ role?: string; content?: string }> };
+    const system = String(body.messages?.[0]?.content);
+    expect(system).toContain("当前时间");
+    expect(system).toContain("本轮说明");
+    expect(system).toContain("不要提及工具、功能调用");
+    expect(system).not.toContain("联网搜索结果");
+    const text = await readText(res);
+    expect(text).toContain("你好！有什么可以帮你的？");
+    expect(text).not.toContain("agenticx_web_search_sources");
+  });
+
+  it("still searches for informational queries", async () => {
+    const executeSearch = vi.fn(async () => [
+      { title: "AI News", url: "https://news.example/ai", snippet: "latest" },
+    ]);
+    const fetchImpl = vi.fn(async () =>
+      sseResponse('data: {"choices":[{"delta":{"content":"基于检索"}}]}\n\ndata: [DONE]\n\n'),
+    );
+
+    const res = await runWebSearchTurn(
+      {
+        model: "m",
+        messages: [{ role: "user", content: "最新的 AI 新闻" }],
+        agenticx_web_search: true,
+      },
+      {
+        url: "http://gateway.test/v1/chat/completions",
+        headers: { authorization: "Bearer t" },
+        fetchImpl: fetchImpl as unknown as typeof fetch,
+        loadTenantConfig: async () => ({
+          enabled: true,
+          provider: "duckduckgo",
+          apiKey: "",
+          maxResults: 5,
+        }),
+        executeSearch,
+      },
+    );
+
+    expect(executeSearch).toHaveBeenCalledTimes(1);
+    const text = await readText(res);
+    expect(text).toContain("agenticx_web_search_sources");
+    expect(text).toContain("https://news.example/ai");
+  });
+
+  it("AGENTICX_WEB_SEARCH_ALWAYS forces search even for greetings", async () => {
+    const prev = process.env.AGENTICX_WEB_SEARCH_ALWAYS;
+    process.env.AGENTICX_WEB_SEARCH_ALWAYS = "1";
+    try {
+      const executeSearch = vi.fn(async () => [
+        { title: "Hello", url: "https://ex.com/hi", snippet: "greeting" },
+      ]);
+      const fetchImpl = vi.fn(async () =>
+        sseResponse('data: {"choices":[{"delta":{"content":"forced"}}]}\n\ndata: [DONE]\n\n'),
+      );
+
+      const res = await runWebSearchTurn(
+        {
+          model: "m",
+          messages: [{ role: "user", content: "你好" }],
+          agenticx_web_search: true,
+        },
+        {
+          url: "http://gateway.test/v1/chat/completions",
+          headers: { authorization: "Bearer t" },
+          fetchImpl: fetchImpl as unknown as typeof fetch,
+          loadTenantConfig: async () => ({
+            enabled: true,
+            provider: "duckduckgo",
+            apiKey: "",
+            maxResults: 5,
+          }),
+          executeSearch,
+        },
+      );
+
+      expect(executeSearch).toHaveBeenCalledTimes(1);
+      const text = await readText(res);
+      expect(text).toContain("agenticx_web_search_sources");
+      expect(text).toContain("forced");
+    } finally {
+      if (prev === undefined) delete process.env.AGENTICX_WEB_SEARCH_ALWAYS;
+      else process.env.AGENTICX_WEB_SEARCH_ALWAYS = prev;
+    }
   });
 
   it("returns JSON 503 when gateway fetch throws after successful search (not search-degrade)", async () => {
@@ -250,5 +585,276 @@ describe("web search tool loop", () => {
     const long = "字".repeat(WEB_SEARCH_CONTEXT_SNIPPET_CHARS + 80);
     const compacted = compactHitsForModel([{ title: "T", url: "https://ex.com", snippet: long }]);
     expect(compacted[0]?.snippet.length).toBeLessThanOrEqual(WEB_SEARCH_CONTEXT_SNIPPET_CHARS);
+  });
+
+  it("injects more than 10 hits for large-context models (AC-5)", async () => {
+    const bodies: Array<{ messages?: Array<{ role?: string; content?: string | null }> }> = [];
+    const fetchImpl = vi.fn(async (_url: string, init?: RequestInit) => {
+      bodies.push(JSON.parse(String(init?.body ?? "{}")));
+      return sseResponse('data: {"choices":[{"delta":{"content":"ok"}}]}\n\ndata: [DONE]\n\n');
+    });
+    const hits: WebSearchHit[] = Array.from({ length: 30 }, (_, i) => ({
+      title: `Hit ${i + 1}`,
+      url: `https://ex.com/${i + 1}`,
+      snippet: `snippet ${i + 1} 字`.repeat(20),
+    }));
+    const executeSearch = vi.fn(async () => hits);
+
+    await runWebSearchTurn(
+      {
+        model: "glm-5.2",
+        messages: [{ role: "user", content: "英伟达最新财报摘要" }],
+        agenticx_web_search: true,
+      },
+      {
+        url: "http://gateway.test/v1/chat/completions",
+        headers: {},
+        fetchImpl: fetchImpl as unknown as typeof fetch,
+        loadTenantConfig: async () => ({
+          enabled: true,
+          provider: "duckduckgo",
+          apiKey: "",
+          maxResults: 50,
+        }),
+        executeSearch,
+      },
+    );
+
+    const system = String(bodies[0]?.messages?.[0]?.content ?? "");
+    const injectedCount = (system.match(/^\[\d+\] /gm) ?? []).length;
+    expect(injectedCount).toBeGreaterThan(10);
+  });
+
+  it("keeps SSE source order aligned with model injection indices (AC-6)", async () => {
+    const bodies: Array<{ messages?: Array<{ role?: string; content?: string | null }> }> = [];
+    const fetchImpl = vi.fn(async (_url: string, init?: RequestInit) => {
+      bodies.push(JSON.parse(String(init?.body ?? "{}")));
+      return sseResponse('data: {"choices":[{"delta":{"content":"ok"}}]}\n\ndata: [DONE]\n\n');
+    });
+    const hits: WebSearchHit[] = Array.from({ length: 20 }, (_, i) => ({
+      title: `Hit ${i + 1}`,
+      url: `https://ex.com/${i + 1}`,
+      snippet: `snippet ${i + 1}`,
+    }));
+    // Put the most relevant hits at the end so rerank must promote them.
+    hits[18] = {
+      title: "广州南沙今日天气",
+      url: "https://ex.com/weather-a",
+      snippet: "南沙天气 气温 湿度 风力",
+    };
+    hits[19] = {
+      title: "南沙天气预报",
+      url: "https://ex.com/weather-b",
+      snippet: "南沙 天气 降水",
+    };
+    const executeSearch = vi.fn(async () => hits);
+
+    const res = await runWebSearchTurn(
+      {
+        model: "glm-5.2",
+        messages: [{ role: "user", content: "广州南沙天气如何" }],
+        agenticx_web_search: true,
+      },
+      {
+        url: "http://gateway.test/v1/chat/completions",
+        headers: {},
+        fetchImpl: fetchImpl as unknown as typeof fetch,
+        loadTenantConfig: async () => ({
+          enabled: true,
+          provider: "duckduckgo",
+          apiKey: "",
+          maxResults: 50,
+        }),
+        executeSearch,
+      },
+    );
+
+    const system = String(bodies[0]?.messages?.[0]?.content ?? "");
+    const injectedUrls = [...system.matchAll(/^URL: (https:\/\/\S+)/gm)].map((m) => m[1]!);
+    expect(injectedUrls.length).toBeGreaterThan(0);
+
+    const text = await readText(res);
+    const sourcesLine = text
+      .split("\n")
+      .find((line) => line.includes("agenticx_web_search_sources"));
+    expect(sourcesLine).toBeTruthy();
+    const payload = JSON.parse(sourcesLine!.replace(/^data:\s*/, "")) as {
+      agenticx_web_search_sources: Array<{ url: string; usedByModel?: boolean }>;
+    };
+    const sources = payload.agenticx_web_search_sources;
+    const k = injectedUrls.length;
+    expect(sources.slice(0, k).map((s) => s.url)).toEqual(injectedUrls);
+    expect(sources.slice(0, k).every((s) => s.usedByModel === true)).toBe(true);
+    expect(sources.slice(k).every((s) => s.usedByModel === false)).toBe(true);
+    expect(sources.length).toBe(hits.length);
+  });
+
+  it("resolves referential follow-up entity into the search query", async () => {
+    const executeSearch = vi.fn(async (q: string) => [
+      { title: "宗主梗", url: "https://ex.com/zongzhu", snippet: "蔡徐坤 宗主" },
+    ]);
+    const fetchImpl = vi.fn(async () =>
+      sseResponse('data: {"choices":[{"delta":{"content":"答"}}]}\n\ndata: [DONE]\n\n'),
+    );
+
+    await runWebSearchTurn(
+      {
+        model: "m",
+        messages: [
+          { role: "user", content: "你认识宗主吗" },
+          { role: "assistant", content: '百科式回答。' },
+          { role: "user", content: "我说的是最近比较活人的宗主" },
+          {
+            role: "assistant",
+            content: '根据搜索结果，最近活跃的应该是指**蔡徐坤**。[8]',
+          },
+          { role: "user", content: "他为什么被封为宗主呢" },
+        ],
+        agenticx_web_search: true,
+      },
+      {
+        url: "http://gateway.test/v1/chat/completions",
+        headers: { authorization: "Bearer t" },
+        fetchImpl: fetchImpl as unknown as typeof fetch,
+        loadTenantConfig: async () => ({
+          enabled: true,
+          provider: "duckduckgo",
+          apiKey: "",
+          maxResults: 5,
+        }),
+        executeSearch,
+      },
+    );
+
+    expect(executeSearch).toHaveBeenCalledTimes(1);
+    expect(String(executeSearch.mock.calls[0]?.[0])).toContain("蔡徐坤");
+  });
+
+  it("skips search when referential follow-up has no resolvable entity", async () => {
+    const bodies: unknown[] = [];
+    const executeSearch = vi.fn(async () => []);
+    const fetchImpl = vi.fn(async (_url: string, init?: RequestInit) => {
+      bodies.push(JSON.parse(String(init?.body ?? "{}")));
+      return sseResponse('data: {"choices":[{"delta":{"content":"基于上下文"}}]}\n\ndata: [DONE]\n\n');
+    });
+
+    await runWebSearchTurn(
+      {
+        model: "m",
+        messages: [
+          { role: "user", content: "你认识宗主吗" },
+          { role: "assistant", content: "这是一个很宽泛的称呼，没有具体人名。" },
+          { role: "user", content: "他为什么被封为宗主呢" },
+        ],
+        agenticx_web_search: true,
+      },
+      {
+        url: "http://gateway.test/v1/chat/completions",
+        headers: { authorization: "Bearer t" },
+        fetchImpl: fetchImpl as unknown as typeof fetch,
+        loadTenantConfig: async () => ({
+          enabled: true,
+          provider: "duckduckgo",
+          apiKey: "",
+          maxResults: 5,
+        }),
+        executeSearch,
+      },
+    );
+
+    expect(executeSearch).not.toHaveBeenCalled();
+    const body = bodies[0] as { messages?: Array<{ role?: string; content?: string }> };
+    const system = String(body.messages?.[0]?.content ?? "");
+    expect(system).not.toContain("联网搜索结果");
+  });
+
+  it("AGENTICX_WEB_SEARCH_ALWAYS still searches referential follow-ups without entity", async () => {
+    const prev = process.env.AGENTICX_WEB_SEARCH_ALWAYS;
+    process.env.AGENTICX_WEB_SEARCH_ALWAYS = "1";
+    try {
+      const executeSearch = vi.fn(async (q: string) => [
+        { title: "T", url: "https://ex.com/t", snippet: String(q) },
+      ]);
+      const fetchImpl = vi.fn(async () =>
+        sseResponse('data: {"choices":[{"delta":{"content":"forced"}}]}\n\ndata: [DONE]\n\n'),
+      );
+
+      await runWebSearchTurn(
+        {
+          model: "m",
+          messages: [
+            { role: "user", content: "你认识宗主吗" },
+            { role: "assistant", content: "这是一个很宽泛的称呼，没有具体人名。" },
+            { role: "user", content: "他为什么被封为宗主呢" },
+          ],
+          agenticx_web_search: true,
+        },
+        {
+          url: "http://gateway.test/v1/chat/completions",
+          headers: { authorization: "Bearer t" },
+          fetchImpl: fetchImpl as unknown as typeof fetch,
+          loadTenantConfig: async () => ({
+            enabled: true,
+            provider: "duckduckgo",
+            apiKey: "",
+            maxResults: 5,
+          }),
+          executeSearch,
+        },
+      );
+
+      expect(executeSearch).toHaveBeenCalledTimes(1);
+    } finally {
+      if (prev === undefined) delete process.env.AGENTICX_WEB_SEARCH_ALWAYS;
+      else process.env.AGENTICX_WEB_SEARCH_ALWAYS = prev;
+    }
+  });
+
+  it("strips prior assistant think blocks and citation indices before upstream", async () => {
+    const THINK_OPEN = "<" + "think" + ">";
+    const THINK_CLOSE = "<" + "/" + "think" + ">";
+    const bodies: Array<{ messages?: Array<{ role?: string; content?: string }> }> = [];
+    const fetchImpl = vi.fn(async (_url: string, init?: RequestInit) => {
+      bodies.push(JSON.parse(String(init?.body ?? "{}")));
+      return sseResponse('data: {"choices":[{"delta":{"content":"ok"}}]}\n\ndata: [DONE]\n\n');
+    });
+
+    await runWebSearchTurn(
+      {
+        model: "m",
+        messages: [
+          { role: "user", content: "你认识宗主吗" },
+          {
+            role: "assistant",
+            content: `${THINK_OPEN}长推理${THINK_CLOSE}答案提到**蔡徐坤**[8]`,
+          },
+          { role: "user", content: "他为什么被封为宗主呢" },
+        ],
+        agenticx_web_search: true,
+      },
+      {
+        url: "http://gateway.test/v1/chat/completions",
+        headers: { authorization: "Bearer t" },
+        fetchImpl: fetchImpl as unknown as typeof fetch,
+        loadTenantConfig: async () => ({
+          enabled: true,
+          provider: "duckduckgo",
+          apiKey: "",
+          maxResults: 5,
+        }),
+        executeSearch: async () => [
+          { title: "T", url: "https://ex.com/t", snippet: "蔡徐坤 宗主梗" },
+        ],
+      },
+    );
+
+    const historyAssistant = bodies[0]?.messages?.find(
+      (m) => m.role === "assistant" && String(m.content).includes("蔡徐坤"),
+    );
+    expect(historyAssistant).toBeTruthy();
+    const content = String(historyAssistant?.content);
+    expect(content).not.toContain(THINK_OPEN);
+    expect(content).not.toContain("[8]");
+    expect(content).toContain("蔡徐坤");
   });
 });

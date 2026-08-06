@@ -17,6 +17,7 @@ from agenticx.cli.studio_skill import get_all_skill_summaries
 from agenticx.runtime.prompts.skill_authoring import build_skill_authoring_prompt_block
 from agenticx.skills.meta_skill import MetaSkillInjector
 from agenticx.runtime.prompts.code_mode import build_code_dev_prompt_blocks
+from agenticx.runtime.prompts.current_time import build_current_time_block
 from agenticx.runtime.prompts.credential_safety import (
     CREDENTIAL_SAFETY_BLOCK,
     CREDENTIAL_SAFETY_MCP_HINT,
@@ -614,6 +615,8 @@ def _build_web_search_capability_block() -> str:
         "## 联网搜索\n"
         "- 你 **内置** `web_search` 工具，可检索公开网页，获取最新资讯、实时数据、以及超出你知识截止日期的信息。\n"
         "- 当用户问题明显依赖时效性、当前事实或外部网页时，应 **主动** 调用 `web_search`，无需用户额外开启开关。\n"
+        "- **例外（硬性）**：当前日期、星期、时刻**禁止**用 `web_search` 查询，一律以系统提示「当前时间」章节的本机时钟为准；"
+        "日期类网页存在缓存快照，曾导致回答日期偏差超过一年。若需结构化确认，用 `get_current_datetime`。\n"
         "- 需要登录态、复杂页面交互或深度正文提取时，仍可依据 MCP 章节使用已连接的 browser-use / firecrawl 等能力。\n"
         "## 引用规范\n"
         "- 每条来自 `web_search` / `knowledge_search` 的事实，必须在句末用 `[N]` 标注来源编号，N 与本轮返回的 references id 对应。\n"
@@ -849,6 +852,7 @@ def build_meta_agent_system_prompt(
         f"{avatar_block}"
         f"{group_block}"
         f"{identity_line}"
+        f"{build_current_time_block()}"
         "你既能直接使用工具（bash_exec、file_read、file_write、file_edit 等），也能调度子智能体。\n"
         "- 简单/快速任务（查目录、读文件、执行单条命令、回答事实性问题）：直接使用工具完成，不要委派子智能体。\n"
         "- 复杂/多步骤任务（需多文件协作、长时间运行、需要专业角色）：拆解后通过 spawn_subagent 委派。\n\n"

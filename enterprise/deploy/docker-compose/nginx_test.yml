@@ -6,4 +6,5 @@ services:
     ports:
       - "80:80"
     volumes:
-      - ../nginx/edge-split.conf:/etc/nginx/nginx.conf:ro
+      - ../nginx/edge-split-https.conf:/etc/nginx/nginx.conf:ro
+      - ../nginx/certs:/etc/nginx/certs:ro

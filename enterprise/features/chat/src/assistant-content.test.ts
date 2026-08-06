@@ -1,5 +1,12 @@
 import { describe, expect, it } from "vitest";
-import { parseAssistantContent, recoverIncompleteCodeFences, stripModelCitationTags, stripPlaceholderCitationMarkers } from "./assistant-content";
+import {
+  markdownToPlainText,
+  parseAssistantContent,
+  recoverIncompleteCodeFences,
+  stripModelCitationTags,
+  stripPlaceholderCitationMarkers,
+  toCopyableMessageText,
+} from "./assistant-content";
 
 describe("recoverIncompleteCodeFences", () => {
   it("fills code body from reasoning when visible output stops at opening fence", () => {
@@ -60,5 +67,38 @@ describe("parseAssistantContent", () => {
     });
     expect(parsed.displayContent).toBe("摘要\n附件说明");
     expect(parsed.displayContent).not.toContain("<citations>");
+  });
+});
+
+describe("copyable assistant content", () => {
+  it("removes Markdown syntax while keeping readable structure", () => {
+    const markdown = [
+      "# 标题",
+      "",
+      "> **重点** [1][2]",
+      "",
+      "- [链接](https://example.com)",
+      "- `代码`",
+      "",
+      "| 项目 | 内容 |",
+      "| --- | --- |",
+      "| 一 | 二 |",
+    ].join("\n");
+
+    expect(markdownToPlainText(markdown)).toBe("标题\n\n重点\n\n• 链接\n• 代码\n\n项目\t内容\n一\t二");
+  });
+
+  it("does not copy assistant reasoning or raw citation markers", () => {
+    const message = {
+      id: "copy-1",
+      session_id: "s1",
+      tenant_id: "t1",
+      user_id: "u1",
+      role: "assistant" as const,
+      content: "<think>不要复制的思考</think>\n## 正文 [12]\n**完成**",
+      created_at: "2026-05-21T00:00:00.000Z",
+    };
+
+    expect(toCopyableMessageText(message)).toBe("正文\n完成");
   });
 });

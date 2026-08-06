@@ -1,6 +1,7 @@
 "use client";
 
 import * as React from "react";
+import { QUOTA_USAGE_CHANGED_EVENT } from "@agenticx/sdk-ts";
 
 type RemainingSlice = {
   used: number;
@@ -45,32 +46,56 @@ export function QuotaCard({ collapsed }: { collapsed?: boolean }) {
   const [summary, setSummary] = React.useState<QuotaSummary | null>(null);
   const [loading, setLoading] = React.useState(true);
   const [error, setError] = React.useState<string | null>(null);
+  const inFlightRef = React.useRef(false);
+  const mountedRef = React.useRef(false);
 
-  React.useEffect(() => {
-    let cancelled = false;
-    (async () => {
+  const refresh = React.useCallback(async (initial = false) => {
+    if (inFlightRef.current) return;
+    inFlightRef.current = true;
+    if (initial && mountedRef.current) {
       setLoading(true);
       setError(null);
-      try {
-        const res = await fetch("/api/workspace/quota/summary", { cache: "no-store" });
-        const json = (await res.json()) as { code?: string; message?: string; data?: QuotaSummary };
-        if (!res.ok) {
-          throw new Error(json.message ?? "load failed");
-        }
-        if (!cancelled) setSummary(json.data ?? null);
-      } catch (err) {
-        if (!cancelled) {
-          setError(err instanceof Error ? err.message : "load failed");
-          setSummary(null);
-        }
-      } finally {
-        if (!cancelled) setLoading(false);
+    }
+    try {
+      const res = await fetch("/api/workspace/quota/summary", { cache: "no-store" });
+      const json = (await res.json()) as { code?: string; message?: string; data?: QuotaSummary };
+      if (!res.ok) {
+        throw new Error(json.message ?? "load failed");
       }
-    })();
-    return () => {
-      cancelled = true;
-    };
+      if (mountedRef.current) setSummary(json.data ?? null);
+    } catch (err) {
+      // Keep the last good card during background refreshes. A transient quota
+      // API failure should not make the sidebar disappear or require a reload.
+      if (initial && mountedRef.current) {
+        setError(err instanceof Error ? err.message : "load failed");
+        setSummary(null);
+      }
+    } finally {
+      inFlightRef.current = false;
+      if (initial && mountedRef.current) setLoading(false);
+    }
   }, []);
+
+  React.useEffect(() => {
+    if (collapsed) return;
+    mountedRef.current = true;
+    void refresh(true);
+
+    const refreshWhenVisible = () => {
+      if (document.visibilityState === "visible") void refresh();
+    };
+    const intervalId = window.setInterval(refreshWhenVisible, 5_000);
+    window.addEventListener(QUOTA_USAGE_CHANGED_EVENT, refreshWhenVisible);
+    window.addEventListener("focus", refreshWhenVisible);
+    document.addEventListener("visibilitychange", refreshWhenVisible);
+    return () => {
+      mountedRef.current = false;
+      window.clearInterval(intervalId);
+      window.removeEventListener(QUOTA_USAGE_CHANGED_EVENT, refreshWhenVisible);
+      window.removeEventListener("focus", refreshWhenVisible);
+      document.removeEventListener("visibilitychange", refreshWhenVisible);
+    };
+  }, [collapsed, refresh]);
 
   if (collapsed) return null;
 

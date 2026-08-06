@@ -12,12 +12,6 @@ import {
   CardHeader,
   CardTitle,
   Checkbox,
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
   Input,
   Label,
   Sheet,
@@ -28,9 +22,16 @@ import {
   Skeleton,
   toast,
 } from "@agenticx/ui";
-import { ArrowUpRight, Copy, KeyRound, Pencil, Plus, RefreshCw, UsersRound } from "lucide-react";
+import { ArrowUpRight, Copy, KeyRound, Pencil, Plus, RefreshCw, Trash2, UsersRound } from "lucide-react";
 import { adminFetch } from "../../../lib/admin-client-auth";
+import { CreateUserDialog } from "../../../components/CreateUserDialog";
 import { QuotaRing, formatTokenCount } from "../../../components/QuotaRing";
+import {
+  UserFormDialog,
+  type UserFormDeptOption,
+  type UserFormRoleOption,
+  type UserFormValues,
+} from "../../../components/UserFormDialog";
 
 type UserModelSummary = { model: string; tokens: number; currentlyAllowed: boolean };
 type UserQuotaOverview = {
@@ -63,24 +64,17 @@ type ModelAccess = {
   effectiveModelIds?: string[];
 };
 type ApiEnvelope<T> = { code: string; message: string; data?: T };
-type CreateUserForm = {
-  displayName: string;
+type EditableUser = {
+  id: string;
   email: string;
-  initialPassword: string;
-  phone: string;
-  employeeNo: string;
-  jobTitle: string;
+  displayName: string;
+  status: "active" | "disabled" | "locked";
+  deptId: string | null;
+  phone: string | null;
+  employeeNo: string | null;
+  jobTitle: string | null;
+  roleCodes: string[];
 };
-
-const EMPTY_CREATE_USER_FORM: CreateUserForm = {
-  displayName: "",
-  email: "",
-  initialPassword: "",
-  phone: "",
-  employeeNo: "",
-  jobTitle: "",
-};
-
 function sameIds(left: readonly string[], right: readonly string[]): boolean {
   if (left.length !== right.length) return false;
   const rightSet = new Set(right);
@@ -112,6 +106,8 @@ export default function RolesPage() {
   const [loading, setLoading] = useState(true);
   const [selected, setSelected] = useState<UserQuotaOverview | null>(null);
   const [monthlyTokens, setMonthlyTokens] = useState("");
+  const [unlimitedTokens, setUnlimitedTokens] = useState(false);
+  const [finiteMonthlyTokens, setFiniteMonthlyTokens] = useState("");
   const [modelAccess, setModelAccess] = useState<ModelAccess | null>(null);
   const [manualModelIds, setManualModelIds] = useState<string[]>([]);
   const [initialManualModelIds, setInitialManualModelIds] = useState<string[]>([]);
@@ -122,9 +118,12 @@ export default function RolesPage() {
   const [resetPasswordPending, setResetPasswordPending] = useState(false);
   const [newPassword, setNewPassword] = useState<string | null>(null);
   const [createOpen, setCreateOpen] = useState(false);
-  const [createForm, setCreateForm] = useState<CreateUserForm>(EMPTY_CREATE_USER_FORM);
-  const [creatingUser, setCreatingUser] = useState(false);
-  const [createdInitialPassword, setCreatedInitialPassword] = useState<string | null>(null);
+  const [userFormOpen, setUserFormOpen] = useState(false);
+  const [userFormLoading, setUserFormLoading] = useState(false);
+  const [userFormInitial, setUserFormInitial] = useState<UserFormValues | null>(null);
+  const [userFormDeptOptions, setUserFormDeptOptions] = useState<UserFormDeptOption[]>([]);
+  const [userFormRoleOptions, setUserFormRoleOptions] = useState<UserFormRoleOption[]>([]);
+  const [currentUserId, setCurrentUserId] = useState<string | null>(null);
   const openedFromQueryRef = useRef<string | null>(null);
 
   const load = useCallback(async () => {
@@ -173,7 +172,11 @@ export default function RolesPage() {
 
   const openEditor = useCallback(async (user: UserQuotaOverview) => {
     setSelected(user);
-    setMonthlyTokens(String(user.monthlyTokens));
+    const userHasNoLimit = user.unlimited || user.monthlyTokens <= 0;
+    const initialMonthlyTokens = userHasNoLimit ? "0" : String(user.monthlyTokens);
+    setUnlimitedTokens(userHasNoLimit);
+    setMonthlyTokens(initialMonthlyTokens);
+    setFiniteMonthlyTokens(userHasNoLimit ? "" : initialMonthlyTokens);
     setModelAccess(null);
     setManualModelIds([]);
     setInitialManualModelIds([]);
@@ -201,10 +204,136 @@ export default function RolesPage() {
     }
   }, []);
 
+  const openUserManagement = async () => {
+    if (!selected || userFormLoading) return;
+    setUserFormLoading(true);
+    try {
+      const [userResponse, departmentResponse, roleResponse] = await Promise.all([
+        adminFetch(`/api/admin/users/${encodeURIComponent(selected.id)}`, { cache: "no-store" }),
+        adminFetch("/api/admin/departments?shape=flat", { cache: "no-store" }),
+        adminFetch("/api/admin/roles", { cache: "no-store" }),
+      ]);
+      const userJson = (await userResponse.json()) as ApiEnvelope<{ user: EditableUser }>;
+      const departmentJson = (await departmentResponse.json()) as ApiEnvelope<{
+        items: Array<{ id: string; name: string; path: string }>;
+      }>;
+      const roleJson = (await roleResponse.json()) as ApiEnvelope<{
+        items: UserFormRoleOption[];
+      }>;
+      if (!userResponse.ok || userJson.code !== "00000" || !userJson.data?.user) {
+        throw new Error(userJson.message || "加载用户信息失败");
+      }
+      if (!departmentResponse.ok || departmentJson.code !== "00000") {
+        throw new Error(departmentJson.message || "加载部门失败");
+      }
+      if (!roleResponse.ok || roleJson.code !== "00000") {
+        throw new Error(roleJson.message || "加载角色失败");
+      }
+      const user = userJson.data.user;
+      setUserFormInitial({
+        email: user.email,
+        displayName: user.displayName,
+        status: user.status,
+        deptId: user.deptId ?? "",
+        phone: user.phone ?? "",
+        employeeNo: user.employeeNo ?? "",
+        jobTitle: user.jobTitle ?? "",
+        roleCodes: user.roleCodes.length ? user.roleCodes : ["member"],
+        initialPassword: "",
+      });
+      setUserFormDeptOptions(
+        (departmentJson.data?.items ?? []).map((department) => ({
+          id: department.id,
+          label: `${department.name}（${department.path}）`,
+        })),
+      );
+      setUserFormRoleOptions(roleJson.data?.items ?? []);
+      setUserFormOpen(true);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "加载用户信息失败");
+    } finally {
+      setUserFormLoading(false);
+    }
+  };
+
+  const saveUserDetails = async (values: UserFormValues) => {
+    if (!selected) return;
+    const response = await adminFetch(`/api/admin/users/${encodeURIComponent(selected.id)}`, {
+      method: "PATCH",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        email: values.email.trim(),
+        displayName: values.displayName.trim(),
+        status: values.status,
+        deptId: values.deptId || null,
+        phone: values.phone.trim() || null,
+        employeeNo: values.employeeNo.trim() || null,
+        jobTitle: values.jobTitle.trim() || null,
+        roleCodes: values.roleCodes,
+      }),
+    });
+    const json = (await response.json()) as ApiEnvelope<{ user: EditableUser }>;
+    if (!response.ok || json.code !== "00000" || !json.data?.user) {
+      toast.error(json.message || "保存用户信息失败");
+      return;
+    }
+    const updated = json.data.user;
+    setSelected((current) =>
+      current && current.id === updated.id
+        ? {
+            ...current,
+            email: updated.email,
+            displayName: updated.displayName,
+            deptId: updated.deptId,
+            status: updated.status,
+            phone: updated.phone,
+            employeeNo: updated.employeeNo,
+            jobTitle: updated.jobTitle,
+          }
+        : current,
+    );
+    setItems((current) =>
+      current.map((item) =>
+        item.id === updated.id
+          ? {
+              ...item,
+              email: updated.email,
+              displayName: updated.displayName,
+              deptId: updated.deptId,
+              status: updated.status,
+              phone: updated.phone,
+              employeeNo: updated.employeeNo,
+              jobTitle: updated.jobTitle,
+            }
+          : item,
+      ),
+    );
+    toast.success("用户信息已保存");
+    setUserFormOpen(false);
+    setUserFormInitial(null);
+    await load();
+  };
+
   useEffect(() => {
     void load();
     void loadModelOptions();
   }, [load, loadModelOptions]);
+
+  useEffect(() => {
+    let alive = true;
+    void (async () => {
+      try {
+        const response = await adminFetch("/api/auth/session", { cache: "no-store" });
+        const json = (await response.json()) as { data?: { userId?: string } };
+        if (alive) setCurrentUserId(json.data?.userId ?? null);
+      } catch {
+        /* 删除接口仍会在服务端阻止删除当前登录用户。 */
+      }
+    })();
+    return () => {
+      alive = false;
+    };
+  }, []);
 
   useEffect(() => {
     const userId = searchParams.get("user");
@@ -249,11 +378,22 @@ export default function RolesPage() {
     });
   };
 
+  const setQuotaUnlimited = (next: boolean) => {
+    if (next) {
+      const currentFiniteValue = Number(monthlyTokens) > 0 ? monthlyTokens : "";
+      setFiniteMonthlyTokens((current) => current || currentFiniteValue);
+      setMonthlyTokens("0");
+    } else {
+      setMonthlyTokens(finiteMonthlyTokens);
+    }
+    setUnlimitedTokens(next);
+  };
+
   const save = async () => {
     if (!selected || saving) return;
-    const nextQuota = Number(monthlyTokens || 0);
-    if (!Number.isFinite(nextQuota) || nextQuota < 0) {
-      toast.error("请输入大于或等于 0 的 Token 数");
+    const nextQuota = unlimitedTokens ? 0 : Number(monthlyTokens);
+    if (!unlimitedTokens && (!Number.isInteger(nextQuota) || nextQuota <= 0)) {
+      toast.error("请关闭不限额后输入正整数 Token 额度");
       return;
     }
     const quotaChanged = Math.floor(nextQuota) !== selected.monthlyTokens;
@@ -338,72 +478,33 @@ export default function RolesPage() {
     }
   };
 
+  const deleteUser = async () => {
+    if (!selected || saving) return;
+    if (selected.id === currentUserId) {
+      toast.error("不能删除当前登录用户");
+      return;
+    }
+    if (!window.confirm(`确认删除用户 ${selected.email}？该操作不可撤销。`)) return;
+    setSaving(true);
+    try {
+      const response = await adminFetch(`/api/admin/users/${selected.id}`, { method: "DELETE" });
+      const json = (await response.json()) as ApiEnvelope<unknown>;
+      if (!response.ok || json.code !== "00000") throw new Error(json.message || "删除用户失败");
+      toast.success(`用户已删除：${selected.email}`);
+      setSelected(null);
+      await load();
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "删除用户失败");
+    } finally {
+      setSaving(false);
+    }
+  };
+
   const copyPassword = async () => {
     if (!newPassword) return;
     try {
       await navigator.clipboard.writeText(newPassword);
       toast.success("新密码已复制");
-    } catch {
-      toast.error("复制失败，请手动复制密码");
-    }
-  };
-
-  const updateCreateForm = (field: keyof CreateUserForm, value: string) => {
-    setCreatedInitialPassword(null);
-    setCreateForm((current) => ({ ...current, [field]: value }));
-  };
-
-  const createUser = async () => {
-    if (creatingUser) return;
-    const email = createForm.email.trim();
-    const displayName = createForm.displayName.trim();
-    if (!displayName) {
-      toast.error("请输入姓名");
-      return;
-    }
-    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
-      toast.error("请输入有效邮箱");
-      return;
-    }
-    if (createForm.initialPassword.trim() && createForm.initialPassword.trim().length < 8) {
-      toast.error("初始密码至少 8 位");
-      return;
-    }
-
-    setCreatingUser(true);
-    try {
-      const response = await adminFetch("/api/admin/users", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({
-          email,
-          displayName,
-          initialPassword: createForm.initialPassword.trim() || undefined,
-          phone: createForm.phone.trim() || null,
-          employeeNo: createForm.employeeNo.trim() || null,
-          jobTitle: createForm.jobTitle.trim() || null,
-          status: "active",
-          roleCodes: ["member"],
-        }),
-      });
-      const json = (await response.json()) as ApiEnvelope<{ initialPassword?: string }>;
-      if (!response.ok || json.code !== "00000") throw new Error(json.message || "创建用户失败");
-      setCreatedInitialPassword(json.data?.initialPassword ?? null);
-      setCreateForm(EMPTY_CREATE_USER_FORM);
-      toast.success("已创建用户");
-      await load();
-    } catch (error) {
-      toast.error(error instanceof Error ? error.message : "创建用户失败");
-    } finally {
-      setCreatingUser(false);
-    }
-  };
-
-  const copyCreatedPassword = async () => {
-    if (!createdInitialPassword) return;
-    try {
-      await navigator.clipboard.writeText(createdInitialPassword);
-      toast.success("初始密码已复制");
     } catch {
       toast.error("复制失败，请手动复制密码");
     }
@@ -513,30 +614,63 @@ export default function RolesPage() {
           {selected ? (
             <>
               <SheetHeader className="border-b border-border pb-5">
-                <SheetTitle>编辑用户</SheetTitle>
-                <SheetDescription>额度始终由该用户独立计量；个人可以增加模型，也可以关闭来自用户组的模型。</SheetDescription>
+                <div className="flex items-start justify-between gap-3">
+                  <div className="min-w-0">
+                    <SheetTitle>编辑用户</SheetTitle>
+                    <SheetDescription>额度始终由该用户独立计量；个人可以增加模型，也可以关闭来自用户组的模型。</SheetDescription>
+                  </div>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="shrink-0"
+                    onClick={() => void openUserManagement()}
+                    disabled={userFormLoading}
+                  >
+                    <Pencil />{userFormLoading ? "加载中…" : "用户管理"}<ArrowUpRight />
+                  </Button>
+                </div>
               </SheetHeader>
               <div className="space-y-6 py-6">
                 <div className="rounded-xl border border-border bg-muted/20 p-4">
                   <p className="font-medium">{selected.displayName}</p>
                   <p className="mt-1 text-sm text-muted-foreground">本月已用 {formatTokenCount(selected.usedTokens)} Token · {quotaSourceLabel(selected)}</p>
-                  <div className="mt-3 grid gap-2 text-sm sm:grid-cols-2">
-                    <p><span className="text-muted-foreground">邮箱：</span>{selected.email}</p>
+                  <div className="mt-3 grid gap-3 text-sm sm:grid-cols-2">
+                    <p className="break-all sm:col-span-2"><span className="text-muted-foreground">邮箱：</span>{selected.email}</p>
                     <p><span className="text-muted-foreground">部门：</span>{selected.departmentPath || selected.departmentName || "未归属组织"}</p>
                     {selected.jobTitle ? <p><span className="text-muted-foreground">岗位：</span>{selected.jobTitle}</p> : null}
                     <p><span className="text-muted-foreground">状态：</span>{selected.status === "active" ? "正常" : selected.status === "locked" ? "已锁定" : "已停用"}</p>
                   </div>
                 </div>
                 <div className="space-y-2">
-                  <Label htmlFor="user-monthly-tokens">每月 Token 额度</Label>
+                  <div className="flex items-center justify-between gap-3">
+                    <Label htmlFor="user-monthly-tokens">每月 Token 额度</Label>
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant={unlimitedTokens ? "secondary" : "outline"}
+                      aria-pressed={unlimitedTokens}
+                      onClick={() => setQuotaUnlimited(!unlimitedTokens)}
+                      disabled={saving}
+                    >
+                      {unlimitedTokens ? "不限额（已启用）" : "不限额"}
+                    </Button>
+                  </div>
                   <Input
                     id="user-monthly-tokens"
                     inputMode="numeric"
-                    value={monthlyTokens}
-                    onChange={(event) => setMonthlyTokens(event.target.value.replace(/[^0-9]/g, ""))}
-                    placeholder="0 表示不限制"
+                    value={unlimitedTokens ? "0" : monthlyTokens}
+                    onChange={(event) => {
+                      const value = event.target.value.replace(/[^0-9]/g, "");
+                      setMonthlyTokens(value);
+                      setFiniteMonthlyTokens(value);
+                    }}
+                    placeholder="请输入正整数"
+                    disabled={unlimitedTokens}
+                    className={unlimitedTokens ? "bg-muted text-muted-foreground" : undefined}
                   />
-                  <p className="text-xs text-muted-foreground">设置为 0 时，该用户不受月度 Token 上限限制。</p>
+                  <p className="text-xs text-muted-foreground">
+                    {unlimitedTokens ? "已启用不限额，保存后以 0 兼容存储。" : "请输入正整数；如不限制额度，请点击右侧“不限额”。"}
+                  </p>
                 </div>
                 <section className="space-y-3">
                   <div>
@@ -606,9 +740,31 @@ export default function RolesPage() {
                 </section>
               </div>
               <div className="mt-auto flex flex-wrap justify-between gap-2 border-t border-border pt-4">
-                <Button variant="outline" onClick={() => void restoreInheritedQuota()} disabled={saving || selected.quotaSource !== "personal"}>
-                  恢复继承额度
-                </Button>
+                <div className="flex flex-wrap gap-2">
+                  <Button
+                    variant="destructive"
+                    onClick={() => void deleteUser()}
+                    disabled={saving || selected.id === currentUserId}
+                    title={selected.id === currentUserId ? "不能删除当前登录用户" : "删除用户"}
+                  >
+                    <Trash2 />删除用户
+                  </Button>
+                  <div className="flex flex-col gap-1">
+                    <Button
+                      variant="outline"
+                      onClick={() => void restoreInheritedQuota()}
+                      disabled={saving || selected.quotaSource !== "personal"}
+                      title="恢复用户组或默认额度，不会清零已用 Token"
+                    >
+                      恢复继承额度
+                    </Button>
+                    {selected.quotaSource === "personal" ? (
+                      <span className="max-w-56 text-[11px] text-muted-foreground">
+                        恢复用户组（无用户组时为默认）额度，不会清零已用 Token。
+                      </span>
+                    ) : null}
+                  </div>
+                </div>
                 <div className="flex gap-2">
                   <Button variant="outline" onClick={() => setSelected(null)}>取消</Button>
                   <Button onClick={() => void save()} disabled={saving || loadingModels}>{saving ? "保存中…" : "保存设置"}</Button>
@@ -619,112 +775,26 @@ export default function RolesPage() {
         </SheetContent>
       </Sheet>
 
-      <Dialog
-        open={createOpen}
+      <UserFormDialog
+        open={userFormOpen}
         onOpenChange={(open) => {
-          setCreateOpen(open);
-          if (!open) {
-            setCreateForm(EMPTY_CREATE_USER_FORM);
-            setCreatedInitialPassword(null);
-          }
+          setUserFormOpen(open);
+          if (!open) setUserFormInitial(null);
         }}
-      >
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>新建用户</DialogTitle>
-            <DialogDescription>
-              创建后用户会进入当前“用户”视图；未填写初始密码时系统会生成随机密码，并要求首次登录后修改。
-            </DialogDescription>
-          </DialogHeader>
-          <div className="grid gap-4 py-2">
-            {createdInitialPassword ? (
-              <div className="rounded-xl border border-primary/30 bg-primary/5 p-3">
-                <p className="text-sm font-medium">初始密码（仅显示一次）</p>
-                <div className="mt-2 flex items-center gap-2">
-                  <code className="min-w-0 flex-1 break-all rounded-md bg-background px-2 py-1 text-sm">
-                    {createdInitialPassword}
-                  </code>
-                  <Button size="sm" variant="outline" onClick={() => void copyCreatedPassword()}>
-                    <Copy className="h-4 w-4" />复制
-                  </Button>
-                </div>
-              </div>
-            ) : null}
-            <div className="grid gap-2 sm:grid-cols-2">
-              <div className="space-y-1.5">
-                <Label htmlFor="create-user-name">姓名</Label>
-                <Input
-                  id="create-user-name"
-                  value={createForm.displayName}
-                  onChange={(event) => updateCreateForm("displayName", event.target.value)}
-                  placeholder="例如：张三"
-                />
-              </div>
-              <div className="space-y-1.5">
-                <Label htmlFor="create-user-email">邮箱</Label>
-                <Input
-                  id="create-user-email"
-                  type="email"
-                  value={createForm.email}
-                  onChange={(event) => updateCreateForm("email", event.target.value)}
-                  placeholder="name@example.com"
-                />
-              </div>
-              <div className="space-y-1.5">
-                <Label htmlFor="create-user-phone">手机</Label>
-                <Input
-                  id="create-user-phone"
-                  value={createForm.phone}
-                  onChange={(event) => updateCreateForm("phone", event.target.value)}
-                  placeholder="可选"
-                />
-              </div>
-              <div className="space-y-1.5">
-                <Label htmlFor="create-user-employee-no">工号</Label>
-                <Input
-                  id="create-user-employee-no"
-                  value={createForm.employeeNo}
-                  onChange={(event) => updateCreateForm("employeeNo", event.target.value)}
-                  placeholder="可选"
-                />
-              </div>
-              <div className="space-y-1.5">
-                <Label htmlFor="create-user-job-title">职位</Label>
-                <Input
-                  id="create-user-job-title"
-                  value={createForm.jobTitle}
-                  onChange={(event) => updateCreateForm("jobTitle", event.target.value)}
-                  placeholder="可选"
-                />
-              </div>
-              <div className="space-y-1.5">
-                <Label htmlFor="create-user-password">初始密码</Label>
-                <Input
-                  id="create-user-password"
-                  type="password"
-                  autoComplete="new-password"
-                  value={createForm.initialPassword}
-                  onChange={(event) => updateCreateForm("initialPassword", event.target.value)}
-                  placeholder="留空自动生成"
-                />
-              </div>
-            </div>
-          </div>
-          <DialogFooter>
-            {createdInitialPassword ? (
-              <Button variant="outline" onClick={() => setCreatedInitialPassword(null)}>
-                继续新建
-              </Button>
-            ) : null}
-            <Button variant="outline" onClick={() => setCreateOpen(false)} disabled={creatingUser}>
-              取消
-            </Button>
-            <Button onClick={() => void createUser()} disabled={creatingUser}>
-              {creatingUser ? "创建中…" : "创建用户"}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+        title="编辑用户"
+        description={userFormInitial?.email}
+        submitLabel="保存"
+        initial={userFormInitial ?? undefined}
+        deptOptions={userFormDeptOptions}
+        roleOptions={userFormRoleOptions}
+        onSubmit={saveUserDetails}
+      />
+
+      <CreateUserDialog
+        open={createOpen}
+        onOpenChange={setCreateOpen}
+        onCreated={load}
+      />
     </div>
   );
 }

@@ -34,4 +34,16 @@ describe("CitationRegistry", () => {
     registry.add({ title: "3", url: "https://a.com/3", snippet: "" });
     expect(registry.list().map((c) => c.index)).toEqual([1, 2, 3]);
   });
+
+  it("attachFullText matches normalized URL and ignores unknown urls", () => {
+    const registry = new CitationRegistry();
+    registry.add({
+      title: "A",
+      url: "https://a.com/x?utm_source=y",
+      snippet: "s",
+    });
+    registry.attachFullText("https://a.com/x", "全文正文");
+    expect(registry.list()[0]?.fullText).toBe("全文正文");
+    expect(() => registry.attachFullText("https://missing.com", "x")).not.toThrow();
+  });
 });

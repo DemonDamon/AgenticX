@@ -16,6 +16,7 @@ import {
   replaceAllChatSessionMessages,
 } from "../../../../../../lib/chat-history";
 import { sanitizeInboundMessages } from "../../../../../../lib/chat-message-sanitize";
+import { defaultOriginalStore } from "../../../../../../lib/attachments/original-store";
 
 type Params = Promise<{ sessionId: string }>;
 
@@ -88,6 +89,22 @@ export async function POST(request: Request, segmentData: { params: Params }) {
         operationId,
         payloadHash,
       });
+    }
+    const attachmentIds = messages.flatMap(
+      (message) =>
+        message.attachments
+          ?.map((item) => item.attachment_id)
+          .filter((id): id is string => Boolean(id)) ?? [],
+    );
+    if (attachmentIds.length > 0) {
+      try {
+        await defaultOriginalStore.bindSession(session.tenantId, attachmentIds, sessionId);
+      } catch (bindError) {
+        console.warn(
+          "[chat/messages] bind attachment session failed:",
+          bindError instanceof Error ? bindError.message : bindError,
+        );
+      }
     }
     return NextResponse.json({ code: "00000", message: "ok" });
   } catch (error) {

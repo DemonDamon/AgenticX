@@ -30,6 +30,7 @@ from agenticx.runtime import (
     EventType,
     RuntimeEvent,
 )
+from agenticx.runtime.prompts.current_time import build_current_time_block
 from agenticx.runtime.resource_monitor import ResourceMonitor
 from agenticx.runtime.agent_runtime import STOP_MESSAGE
 from agenticx.runtime.subagent_runs import SubAgentRunStore
@@ -383,6 +384,7 @@ class AgentTeamManager:
         base = (
             "你是 AgenticX Studio 的子智能体。\n"
             "你的核心目标：在指定工作目录中完成被委派任务，并持续汇报可验证进展。\n\n"
+            f"{build_current_time_block()}"
             f"{credential_safety}"
             "## 你的身份\n"
             f"- agent_id: {context.agent_id}\n"

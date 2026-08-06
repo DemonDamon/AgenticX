@@ -122,4 +122,38 @@ func TestTokenWindowFeatureOffByDefault(t *testing.T) {
 			t.Fatalf("request %d should pass when feature off: %+v", i+1, r)
 		}
 	}
+	if got := tracker.RemainingForWindow(ctx, QuotaWindowDay).Used; got != 3 {
+		t.Fatalf("day usage should be recorded when feature is off, got %d", got)
+	}
+	if got := tracker.RemainingForWindow(ctx, QuotaWindowWeek).Used; got != 3 {
+		t.Fatalf("week usage should be recorded when feature is off, got %d", got)
+	}
+}
+
+func TestTokenWindowUsageDoesNotDependOnPoolFeatureOrLimits(t *testing.T) {
+	t.Setenv("GATEWAY_TOKEN_WINDOW_QUOTA", "off")
+	t.Setenv("GATEWAY_QUOTA_POOL", "off")
+	t.Setenv("GATEWAY_QUOTA_POOL_BACKEND", "local")
+	dir := t.TempDir()
+	cfgPath := filepath.Join(dir, "q.json")
+	usagePath := filepath.Join(dir, "u.json")
+	t.Setenv("GATEWAY_QUOTA_POOL_USAGE_FILE", filepath.Join(dir, "pool.json"))
+	cfg := `{"defaults":{"role":{},"model":{}},"users":{"u1":{"monthlyTokens":0,"dailyTokens":0,"weeklyTokens":0,"action":"block"}},"departments":{},"apiTokens":{}}`
+	if err := os.WriteFile(cfgPath, []byte(cfg), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	tracker := NewTracker(cfgPath, usagePath, nil)
+	ctx := RequestContext{TenantID: "t1", UserID: "u1", Role: "staff"}
+
+	if r := tracker.CheckRequest(ctx, 123, 0); !r.Allowed {
+		t.Fatalf("unlimited request should pass: %+v", r)
+	}
+	day := tracker.RemainingForWindow(ctx, QuotaWindowDay)
+	if !day.Unlimited || day.Used != 123 {
+		t.Fatalf("unexpected unlimited day usage: %+v", day)
+	}
+	week := tracker.RemainingForWindow(ctx, QuotaWindowWeek)
+	if !week.Unlimited || week.Used != 123 {
+		t.Fatalf("unexpected unlimited week usage: %+v", week)
+	}
 }

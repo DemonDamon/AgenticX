@@ -111,6 +111,20 @@ function readUserUsed(userId: string, period: string): number {
   return 0;
 }
 
+async function readMonthlyUserUsed(tenantId: string, userId: string, period: string): Promise<number> {
+  // New gateway versions mirror monthly per-user usage into the shared ledger,
+  // which is visible across portal/gateway processes. Keep the legacy file as
+  // a compatibility fallback and take the larger value during migration so an
+  // old replica cannot make the portal under-report usage.
+  const ledgerUsed = await readTokenWindowUsed(
+    tenantId,
+    "tok_month",
+    `user::${userId}`,
+    period,
+  );
+  return Math.max(ledgerUsed, readUserUsed(userId, period));
+}
+
 async function readPoolUsed(
   tenantId: string,
   scopeType: "dept" | "tenant",
@@ -122,7 +136,7 @@ async function readPoolUsed(
   }
   try {
     if (resolveDatabaseConfig().dialect === "mysql") {
-      return await readMysqlQuotaUsage(tenantId, scopeType, scopeId, period);
+      return (await readMysqlQuotaUsage(tenantId, scopeType, scopeId, period)) ?? 0;
     }
     const db = getIamDb();
     const row = await db
@@ -145,7 +159,7 @@ async function readPoolUsed(
 
 async function readTokenWindowUsed(
   tenantId: string,
-  scopeType: "tok_day" | "tok_week",
+  scopeType: "tok_day" | "tok_week" | "tok_month",
   scopeId: string,
   period: string,
 ): Promise<number> {
@@ -154,7 +168,8 @@ async function readTokenWindowUsed(
   }
   try {
     if (resolveDatabaseConfig().dialect === "mysql") {
-      return await readMysqlQuotaUsage(tenantId, scopeType, scopeId, period);
+      const used = await readMysqlQuotaUsage(tenantId, scopeType, scopeId, period);
+      return used ?? readLocalPoolUsed(tenantId, scopeType, scopeId, period);
     }
     const db = getIamDb();
     const row = await db
@@ -169,7 +184,8 @@ async function readTokenWindowUsed(
         ),
       )
       .limit(1);
-    return row[0]?.usedTotal ?? 0;
+    if (row[0]?.usedTotal != null) return row[0].usedTotal;
+    return readLocalPoolUsed(tenantId, scopeType, scopeId, period);
   } catch {
     return readLocalPoolUsed(tenantId, scopeType, scopeId, period);
   }
@@ -399,7 +415,7 @@ async function readUsedForRule(
     const used = await readPoolUsed(tenantId, "tenant", tenantId, period);
     return { used, shared: true };
   }
-  return { used: readUserUsed(ctx.userId, period), shared: false };
+  return { used: await readMonthlyUserUsed(tenantId, ctx.userId, period), shared: false };
 }
 
 function limitForWindow(rule: QuotaRuleSnapshot, window: QuotaWindow): number {
@@ -408,8 +424,10 @@ function limitForWindow(rule: QuotaRuleSnapshot, window: QuotaWindow): number {
   return rule.monthlyTokens;
 }
 
-function tokenWindowScopeType(window: QuotaWindow): "tok_day" | "tok_week" {
-  return window === "day" ? "tok_day" : "tok_week";
+function tokenWindowScopeType(window: QuotaWindow): "tok_day" | "tok_week" | "tok_month" {
+  if (window === "day") return "tok_day";
+  if (window === "week") return "tok_week";
+  return "tok_month";
 }
 
 /**

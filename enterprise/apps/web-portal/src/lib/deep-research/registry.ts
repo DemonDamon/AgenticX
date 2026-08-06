@@ -9,6 +9,8 @@ export type Citation = {
   title: string;
   url: string;
   snippet: string;
+  /** 抓取成功的网页正文；失败时 undefined，证据包降级用 snippet。 */
+  fullText?: string;
 };
 
 export function normalizeCitationUrl(raw: string): string {
@@ -47,6 +49,12 @@ export class CitationRegistry {
     this.nextIndex += 1;
     this.byKey.set(key, citation);
     return citation;
+  }
+
+  /** 抓到正文后回填；URL 未注册时静默忽略。 */
+  attachFullText(url: string, fullText: string): void {
+    const existing = this.byKey.get(normalizeCitationUrl(url));
+    if (existing) existing.fullText = fullText;
   }
 
   list(): Citation[] {

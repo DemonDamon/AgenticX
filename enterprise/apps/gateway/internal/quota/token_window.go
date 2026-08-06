@@ -9,8 +9,9 @@ import (
 )
 
 const (
-	tokenScopeDay  = "tok_day"
-	tokenScopeWeek = "tok_week"
+	tokenScopeDay   = "tok_day"
+	tokenScopeWeek  = "tok_week"
+	tokenScopeMonth = "tok_month"
 )
 
 func tokenWindowFeatureEnabled() bool {
@@ -19,8 +20,11 @@ func tokenWindowFeatureEnabled() bool {
 
 func tokenWindowPoolKey(kind string, ctx RequestContext, period string) PoolKey {
 	scopeType := tokenScopeDay
-	if strings.EqualFold(kind, "week") {
+	switch strings.ToLower(strings.TrimSpace(kind)) {
+	case "week":
 		scopeType = tokenScopeWeek
+	case "month":
+		scopeType = tokenScopeMonth
 	}
 	tenantID := strings.TrimSpace(ctx.TenantID)
 	if tenantID == "" {
@@ -35,11 +39,15 @@ func tokenWindowPoolKey(kind string, ctx RequestContext, period string) PoolKey 
 	}
 }
 
-// checkTokenWindowLimits enforces day/week token ceilings with approximate counters.
+// checkTokenWindowLimits records day/week usage with approximate counters and
+// optionally enforces the configured ceilings. The enforcement feature flag is
+// intentionally independent from metering: the portal must still show usage
+// when a window is unlimited or hard enforcement is disabled.
 func (t *Tracker) checkTokenWindowLimits(ctx RequestContext, rule Rule, tokens int64) (CheckResult, bool) {
-	if t == nil || t.poolCounter == nil || !tokenWindowFeatureEnabled() || tokens <= 0 {
+	if t == nil || t.tokenWindowCounter == nil || tokens <= 0 {
 		return CheckResult{}, false
 	}
+	enforce := tokenWindowFeatureEnabled()
 	checks := []struct {
 		kind  string
 		limit int64
@@ -49,23 +57,23 @@ func (t *Tracker) checkTokenWindowLimits(ctx RequestContext, rule Rule, tokens i
 	}
 	now := requestCountNow()
 	for _, c := range checks {
-		if c.limit <= 0 {
-			continue
-		}
 		period := requestWindowPeriod(c.kind, now)
 		key := tokenWindowPoolKey(c.kind, ctx, period)
-		current, err := t.poolCounter.Current(key)
-		if err != nil && rule.Action == ActionBlock {
-			return blockedResult("token_"+c.kind, rule, current, c.limit), true
-		}
-		if current+tokens > c.limit {
-			if rule.Action == ActionBlock {
+		if enforce && c.limit > 0 {
+			current, err := t.tokenWindowCounter.Current(key)
+			if err != nil && rule.Action == ActionBlock {
 				return blockedResult("token_"+c.kind, rule, current, c.limit), true
 			}
-			_, _ = t.poolCounter.Add(key, tokens, LedgerEventReserve, "")
-			return warnResult("token_"+c.kind, rule), true
+			if current+tokens > c.limit {
+				if rule.Action == ActionBlock {
+					return blockedResult("token_"+c.kind, rule, current, c.limit), true
+				}
+				_, _ = t.tokenWindowCounter.Add(key, tokens, LedgerEventReserve, "")
+				return warnResult("token_"+c.kind, rule), true
+			}
 		}
-		if _, addErr := t.poolCounter.Add(key, tokens, LedgerEventReserve, ""); addErr != nil && rule.Action == ActionBlock {
+		if _, addErr := t.tokenWindowCounter.Add(key, tokens, LedgerEventReserve, ""); addErr != nil && enforce && c.limit > 0 && rule.Action == ActionBlock {
+			current, _ := t.tokenWindowCounter.Current(key)
 			return blockedResult("token_"+c.kind, rule, current, c.limit), true
 		}
 	}

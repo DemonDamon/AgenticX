@@ -1,5 +1,6 @@
 import * as React from "react";
 import type { Components } from "react-markdown";
+import { defaultUrlTransform } from "react-markdown";
 import type { ChatMessageAttachment, WebSearchSource } from "@agenticx/core-api";
 import { FencedCodeBlock } from "./FencedCodeBlock";
 import { WebSearchCitation } from "../components/molecules/WebSearchCitation";
@@ -8,6 +9,22 @@ import {
   splitCitationText,
 } from "../utils/web-search-citation";
 import { splitTextByAttachmentNames } from "../utils/attachment-link";
+
+export const ARTIFACT_HREF_PREFIX = "artifact:";
+
+/**
+ * react-markdown's defaultUrlTransform only allows http(s)/mailto/… and strips
+ * unknown schemes to "". That turns `[终稿](artifact:<id>)` into `<a href="">`
+ * with target=_blank, which opens the current route (e.g. /workspace) in a new tab.
+ * Keep the default sanitizer, but whitelist our deep-research artifact protocol.
+ */
+export function assistantUrlTransform(value: string): string {
+  const trimmed = value.trim();
+  if (trimmed.toLowerCase().startsWith(ARTIFACT_HREF_PREFIX)) {
+    return trimmed;
+  }
+  return defaultUrlTransform(value);
+}
 
 function reactNodeToPlainText(node: React.ReactNode): string {
   if (node == null || typeof node === "boolean") return "";
@@ -47,8 +64,11 @@ function injectCitations(
           return <React.Fragment key={`${keyPrefix}-f-${i}`}>{part.value}</React.Fragment>;
         }
         return (
+          // Key intentionally excludes keyPrefix: streaming reshapes the markdown AST,
+          // so a path-derived key remounted every chip on each token and made the
+          // favicons flash / appear to jump.
           <WebSearchCitation
-            key={`${keyPrefix}-c-${i}-${part.index1Based}`}
+            key={`cite-${part.index1Based}-${i}`}
             index1Based={part.index1Based}
             source={source}
             onOpenInSheet={onOpenInSheet}
@@ -130,6 +150,8 @@ type AssistantMdOptions = {
   onOpenCitationInSheet?: (index1Based: number) => void;
   sessionAttachments?: ChatMessageAttachment[];
   onOpenAttachment?: (attachment: ChatMessageAttachment) => void;
+  /** Deep-research deliverable: open docked files pane on this artifact id. */
+  onOpenArtifact?: (artifactId: string) => void;
   /** document: roomier report preview typography + list-outside numbering */
   variant?: "chat" | "document";
 };
@@ -208,11 +230,40 @@ export function createAssistantMdComponents(options: AssistantMdOptions = {}): C
         {cite(children)}
       </blockquote>
     ),
-    a: ({ children, href }) => (
-      <a href={href} className="text-primary underline-offset-2 hover:underline" target="_blank" rel="noreferrer">
-        {children}
-      </a>
-    ),
+    a: ({ children, href }) => {
+      if (href?.toLowerCase().startsWith(ARTIFACT_HREF_PREFIX)) {
+        const artifactId = href.slice(ARTIFACT_HREF_PREFIX.length).trim();
+        if (artifactId) {
+          return (
+            <button
+              type="button"
+              className="inline cursor-pointer font-medium text-primary underline underline-offset-2 hover:opacity-90"
+              onClick={(event) => {
+                event.preventDefault();
+                event.stopPropagation();
+                options.onOpenArtifact?.(artifactId);
+              }}
+            >
+              {children}
+            </button>
+          );
+        }
+      }
+      // Empty href after url sanitization must not open a blank/current-route tab.
+      if (!href) {
+        return <span className="font-medium text-primary">{children}</span>;
+      }
+      return (
+        <a
+          href={href}
+          className="text-primary underline-offset-2 hover:underline"
+          target="_blank"
+          rel="noreferrer"
+        >
+          {children}
+        </a>
+      );
+    },
     strong: ({ children }) => (
       <strong className="font-semibold text-foreground">{cite(children)}</strong>
     ),

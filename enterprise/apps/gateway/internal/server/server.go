@@ -1667,7 +1667,7 @@ func (s *Server) reconcileQuotaUsage(
 	}
 	decision := s.quotaTracker.CheckAndAddContext(qctx, int64(delta), quota.LedgerEventSettle)
 	if !decision.Allowed {
-		if usedAfter, ok := s.quotaTracker.AddUsage(identity.UserID, int64(delta)); !ok {
+		if usedAfter, ok := s.quotaTracker.AddUsageContext(s.quotaContext(identity, model), int64(delta)); !ok {
 			s.logger.Warn("quota settle persist failed",
 				"user_id", identity.UserID,
 				"model", model,

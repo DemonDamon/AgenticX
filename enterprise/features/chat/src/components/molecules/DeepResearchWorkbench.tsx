@@ -3,16 +3,36 @@
 import * as React from "react";
 import type { ChatMessageDeepResearch, DeepResearchEvent } from "@agenticx/core-api";
 import { DeepResearchClarifyCard } from "./DeepResearchClarifyCard";
-import { buildDeepResearchSegments } from "./deep-research-segments";
+import {
+  buildDeepResearchSegments,
+  deepResearchNeedsTrailingActivity,
+  deepResearchWaitingLabel,
+} from "./deep-research-segments";
 import type { ResearchStep } from "./deep-research-steps";
+import {
+  laneSourceHost,
+  parseLaneMetrics,
+  type LaneSource,
+} from "./deep-research-lane-sources";
+import { WebSearchFavicon } from "./WebSearchFavicon";
+
+/** A lane plus the pages it searched, handed to the docked source panel. */
+export type DeepResearchLaneSelection = { title: string; sources: LaneSource[] };
 
 export type DeepResearchWorkbenchProps = {
   deepResearch: ChatMessageDeepResearch;
   onClarifySubmitted?: (answers: Record<string, string>) => void;
   /** Intermediate lane memos via expandable step "查看产物". */
   onOpenArtifact?: (artifactId: string) => void;
+  /** Open the docked panel on every page this lane searched. */
+  onOpenLaneSources?: (lane: DeepResearchLaneSelection) => void;
+  /** Open a single searched page. */
+  onOpenLaneSource?: (source: LaneSource) => void;
   className?: string;
 };
+
+/** Inline lane preview stays short; the rest lives in the docked panel. */
+const INLINE_SOURCE_LIMIT = 4;
 
 function IconSearch({ className }: { className?: string }) {
   return (
@@ -92,17 +112,63 @@ function IconChevronRight({ className }: { className?: string }) {
   );
 }
 
+function LaneSourceRow({
+  source,
+  onOpen,
+}: {
+  source: LaneSource;
+  onOpen?: (source: LaneSource) => void;
+}) {
+  const host = laneSourceHost(source.url);
+  return (
+    <button
+      type="button"
+      onClick={() => onOpen?.(source)}
+      disabled={!onOpen}
+      className={[
+        "flex w-full items-center gap-2 rounded-lg px-1.5 py-1.5 text-left",
+        onOpen ? "transition-colors hover:bg-muted/60" : "cursor-default",
+      ].join(" ")}
+      data-testid="deep-research-lane-source"
+    >
+      <WebSearchFavicon host={host} label={source.title} size={16} />
+      <span className="min-w-0 flex-1">
+        <span className="block truncate text-[13px] leading-5 text-foreground">
+          {source.title || source.url}
+        </span>
+        <span className="block truncate text-[11px] leading-4 text-muted-foreground">
+          {host}
+          {source.fetched ? " · 已读取" : ""}
+        </span>
+      </span>
+    </button>
+  );
+}
+
 function ExpandableStepRow({
   step,
   showRail,
   onOpenArtifact,
+  onOpenLaneSources,
+  onOpenLaneSource,
 }: {
   step: ResearchStep;
   showRail: boolean;
   onOpenArtifact?: (artifactId: string) => void;
+  onOpenLaneSources?: (lane: DeepResearchLaneSelection) => void;
+  onOpenLaneSource?: (source: LaneSource) => void;
 }) {
   const [open, setOpen] = React.useState(false);
-  const canExpand = step.detailLines.length > 0 || Boolean(step.artifactId);
+  const sources = step.sources ?? [];
+  const metrics = React.useMemo(
+    () => parseLaneMetrics(step.detailLines),
+    [step.detailLines],
+  );
+  // Metrics render inline below the row, so they alone are not a reason to expand.
+  const canExpand =
+    sources.length > 0 ||
+    Boolean(step.artifactId) ||
+    (metrics.length === 0 && step.detailLines.length > 0);
 
   return (
     <li className="relative">
@@ -129,10 +195,20 @@ function ExpandableStepRow({
         <span className="relative z-[1] mt-0.5 flex h-4 w-4 items-center justify-center">
           {step.status === "running" ? (
             <IconSpinner className="h-4 w-4 animate-spin text-primary" />
-          ) : step.status === "failed" ? (
-            <IconSearch className="h-4 w-4 text-destructive" />
+          ) : step.kind === "lane" ? (
+            <IconSearch
+              className={[
+                "h-4 w-4",
+                step.status === "failed" ? "text-destructive" : "text-muted-foreground",
+              ].join(" ")}
+            />
           ) : (
-            <IconSearch className="h-4 w-4 text-muted-foreground" />
+            <IconCheck
+              className={[
+                "h-4 w-4",
+                step.status === "failed" ? "text-destructive" : "text-muted-foreground",
+              ].join(" ")}
+            />
           )}
         </span>
         <span className="min-w-0 flex-1">
@@ -150,22 +226,72 @@ function ExpandableStepRow({
           />
         ) : null}
       </button>
-      {open && canExpand ? (
-        <div className="mb-1 ml-7 space-y-1 rounded-md border border-border/40 bg-background/80 px-2.5 py-2 text-sm leading-5 text-muted-foreground">
-          {step.detailLines.map((line, i) => (
-            <p key={`${step.id}-d-${i}`} className="whitespace-pre-wrap">
-              {line}
-            </p>
-          ))}
-          {step.artifactId && onOpenArtifact ? (
-            <button
-              type="button"
-              className="text-primary hover:underline"
-              onClick={() => onOpenArtifact(step.artifactId!)}
+      {metrics.length > 0 ? (
+        <div
+          className="mb-1 ml-6 flex flex-wrap gap-1.5 px-1.5"
+          data-testid="deep-research-lane-metrics"
+        >
+          {metrics.map((metric) => (
+            <span
+              key={`${step.id}-m-${metric.key}`}
+              className={[
+                "rounded-full px-2 py-0.5 text-[11px] leading-4",
+                metric.tone === "warning"
+                  ? "bg-amber-500/15 text-amber-700 dark:text-amber-400"
+                  : "bg-muted/70 text-foreground/75",
+              ].join(" ")}
             >
-              查看产物
-            </button>
+              {metric.text}
+            </span>
+          ))}
+        </div>
+      ) : null}
+      {open && canExpand ? (
+        <div className="mb-1 ml-7 space-y-2 rounded-md border border-border/40 bg-background/80 px-2.5 py-2 text-sm leading-5 text-muted-foreground">
+          {metrics.length === 0
+            ? step.detailLines.map((line, i) => (
+                <p key={`${step.id}-d-${i}`} className="whitespace-pre-wrap">
+                  {line}
+                </p>
+              ))
+            : null}
+          {sources.length > 0 ? (
+            <div className="space-y-0.5">
+              {sources.slice(0, INLINE_SOURCE_LIMIT).map((source, i) => (
+                <LaneSourceRow
+                  key={`${step.id}-s-${i}`}
+                  source={source}
+                  onOpen={onOpenLaneSource}
+                />
+              ))}
+            </div>
           ) : null}
+          <div className="flex flex-wrap items-center gap-3 text-[13px]">
+            {sources.length > 0 && onOpenLaneSources ? (
+              <button
+                type="button"
+                className="text-primary hover:underline"
+                data-testid="deep-research-lane-sources-all"
+                onClick={() =>
+                  onOpenLaneSources({
+                    title: step.subtitle ?? step.title,
+                    sources,
+                  })
+                }
+              >
+                查看全部 {sources.length} 个来源
+              </button>
+            ) : null}
+            {step.artifactId && onOpenArtifact ? (
+              <button
+                type="button"
+                className="text-primary hover:underline"
+                onClick={() => onOpenArtifact(step.artifactId!)}
+              >
+                查看产物
+              </button>
+            ) : null}
+          </div>
         </div>
       ) : null}
     </li>
@@ -176,10 +302,14 @@ function ToolsCard({
   title,
   steps,
   onOpenArtifact,
+  onOpenLaneSources,
+  onOpenLaneSource,
 }: {
   title: string;
   steps: ResearchStep[];
   onOpenArtifact?: (artifactId: string) => void;
+  onOpenLaneSources?: (lane: DeepResearchLaneSelection) => void;
+  onOpenLaneSource?: (source: LaneSource) => void;
 }) {
   const running = steps.some((s) => s.status === "running");
   // In-progress: keep open; completed: default collapsed so the long lane list does not dominate.
@@ -230,6 +360,8 @@ function ToolsCard({
                   step={step}
                   showRail={index < steps.length - 1}
                   onOpenArtifact={onOpenArtifact}
+                  onOpenLaneSources={onOpenLaneSources}
+                  onOpenLaneSource={onOpenLaneSource}
                 />
               ))}
             </ol>
@@ -249,16 +381,72 @@ function StatusRow({
   title: string;
   status: "running" | "done" | "failed";
 }) {
+  // Match ToolsCard chrome so phase status rows share the same corner radius.
   return (
-    <div className="mb-3 flex items-center gap-2 text-sm leading-5 text-foreground">
+    <div
+      className="mb-3 flex items-center gap-2 rounded-xl border border-border/60 bg-card px-3 py-2.5 shadow-sm"
+      data-testid="deep-research-status-row"
+    >
       {status === "running" ? (
-        <IconSpinner className="h-4 w-4 animate-spin text-primary" />
+        <IconSpinner className="h-4 w-4 shrink-0 animate-spin text-primary" />
       ) : status === "failed" ? (
-        <span className="h-1.5 w-1.5 rounded-full bg-destructive" />
+        <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-destructive" />
       ) : (
-        <IconCheck className="h-4 w-4 text-muted-foreground" />
+        <IconCheck className="h-4 w-4 shrink-0 text-muted-foreground" />
       )}
-      <span>{title}</span>
+      <span className="min-w-0 flex-1 text-sm font-medium text-foreground">{title}</span>
+    </div>
+  );
+}
+
+function ReflectionCard({ gaps }: { gaps: string[] }) {
+  const [open, setOpen] = React.useState(false);
+
+  return (
+    <div
+      className="mb-3 overflow-hidden rounded-xl border border-border/60 bg-card shadow-sm"
+      data-testid="deep-research-reflection"
+      data-collapsed={open ? "false" : "true"}
+    >
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        className="flex w-full items-center gap-2 px-3 py-2.5 text-left"
+        aria-expanded={open}
+      >
+        <IconCheck className="h-4 w-4 shrink-0 text-muted-foreground" />
+        <span className="min-w-0 flex-1 text-sm font-medium text-foreground">
+          发现 {gaps.length} 处信息缺口
+        </span>
+        <IconChevronRight
+          className={[
+            "ml-auto h-4 w-4 shrink-0 text-muted-foreground transition-transform",
+            open ? "rotate-90" : "",
+          ].join(" ")}
+        />
+      </button>
+      {open ? (
+        <ul className="list-disc space-y-1 border-t border-border/50 px-3 py-2 pl-8 text-sm leading-5 text-muted-foreground">
+          {gaps.map((gap, i) => (
+            <li key={`gap-${i}`}>{gap}</li>
+          ))}
+        </ul>
+      ) : null}
+    </div>
+  );
+}
+
+/** Same cadence as MessageList ThinkingDotsPlaceholder — keeps deep-research gaps alive. */
+function TrailingThinkingDots() {
+  return (
+    <div
+      className="mb-1 inline-flex min-h-[32px] items-center gap-2 py-1"
+      data-testid="deep-research-trailing-dots"
+      aria-label="深度调研进行中"
+    >
+      <span className="agx-thinking-dot h-2.5 w-2.5 rounded-full bg-muted-foreground/70" />
+      <span className="agx-thinking-dot h-2.5 w-2.5 rounded-full bg-muted-foreground/70 [animation-delay:160ms]" />
+      <span className="agx-thinking-dot h-2.5 w-2.5 rounded-full bg-muted-foreground/70 [animation-delay:320ms]" />
     </div>
   );
 }
@@ -267,6 +455,8 @@ export function DeepResearchWorkbench({
   deepResearch,
   onClarifySubmitted,
   onOpenArtifact,
+  onOpenLaneSources,
+  onOpenLaneSource,
   className,
 }: DeepResearchWorkbenchProps) {
   const segments = React.useMemo(
@@ -274,21 +464,24 @@ export function DeepResearchWorkbench({
     [deepResearch.events, deepResearch.status],
   );
 
+  // clarify / plan phases render no segment, so events alone can't tell whether the
+  // user sees anything — keep the spinner until a real segment lands.
   const waitingShell =
-    deepResearch.events.length === 0 &&
+    segments.length === 0 &&
     (deepResearch.status === "running" || deepResearch.status === "awaiting_clarify");
 
   const timedOut = deepResearch.events.some((e) => e.type === "clarify_timeout");
   const hasClarify = deepResearch.events.some((e): e is Extract<DeepResearchEvent, { type: "clarify" }> =>
     e.type === "clarify",
   );
+  const showTrailingDots = deepResearchNeedsTrailingActivity(segments, deepResearch.status);
 
   if (waitingShell) {
     return (
       <div className={["mb-3 text-sm leading-5 text-foreground", className].filter(Boolean).join(" ")}>
         <div className="flex items-center gap-2">
           <IconSpinner className="h-4 w-4 animate-spin text-primary" />
-          <span>正在启动深度研究…</span>
+          <span>{deepResearchWaitingLabel(deepResearch.events)}</span>
         </div>
       </div>
     );
@@ -328,11 +521,25 @@ export function DeepResearchWorkbench({
                 title={segment.title}
                 steps={segment.steps}
                 onOpenArtifact={onOpenArtifact}
+                onOpenLaneSources={onOpenLaneSources}
+                onOpenLaneSource={onOpenLaneSource}
               />
             );
           case "status":
             return (
               <StatusRow key={segment.id} title={segment.title} status={segment.status} />
+            );
+          case "reflection":
+            return <ReflectionCard key={segment.id} gaps={segment.gaps} />;
+          case "stats":
+            return (
+              <p
+                key={segment.id}
+                className="mb-3 text-xs leading-5 text-muted-foreground"
+                data-testid="deep-research-stats"
+              >
+                {segment.label}
+              </p>
             );
           default: {
             const _exhaustive: never = segment;
@@ -340,6 +547,7 @@ export function DeepResearchWorkbench({
           }
         }
       })}
+      {showTrailingDots ? <TrailingThinkingDots /> : null}
     </div>
   );
 }

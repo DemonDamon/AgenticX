@@ -18,6 +18,8 @@ export function labelForDeepResearchEvent(event: DeepResearchEvent): string {
       return event.status === "ok"
         ? `车道完成${event.artifactPath ? ` · ${event.artifactPath}` : ""}`
         : "车道失败";
+    case "lane_sources":
+      return `车道来源 ${event.sources.length} 个`;
     case "artifact":
       return `产物：${event.title}`;
     case "narrative":

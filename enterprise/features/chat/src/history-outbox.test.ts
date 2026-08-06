@@ -12,6 +12,7 @@ import {
   listPendingOverlayMessages,
   startHistoryOutboxCoordinator,
   disposeHistoryOutbox,
+  stripToAppendPayload,
   type HistoryAppendPayload,
 } from "./history-outbox";
 
@@ -121,5 +122,137 @@ describe("history-outbox", () => {
     await enqueueAppend("01SESSIONAAAAAAAAAAAAAAAAA", [msg()]);
     await flushHistoryOutbox();
     expect(append).toHaveBeenCalled();
+  });
+
+  it("stripToAppendPayload keeps deep_research workbench events", () => {
+    const payload = stripToAppendPayload({
+      id: ulid(),
+      session_id: "01SESSIONAAAAAAAAAAAAAAAAA",
+      tenant_id: "01TENANTAAAAAAAAAAAAAAAAAA",
+      user_id: "01USERAAAAAAAAAAAAAAAAAAAA",
+      role: "assistant",
+      content: "调研完成摘要",
+      created_at: "2026-08-01T00:00:00.000Z",
+      deep_research: {
+        runId: "run-abc",
+        status: "completed",
+        events: [
+          { type: "phase", phase: "lanes", message: "开题冷启动检索…" },
+          { type: "phase", phase: "done", message: "深度研究完成" },
+        ],
+        artifactIds: ["art-1"],
+      },
+    });
+    expect(payload.deep_research).toEqual({
+      runId: "run-abc",
+      status: "completed",
+      events: [
+        { type: "phase", phase: "lanes", message: "开题冷启动检索…" },
+        { type: "phase", phase: "done", message: "深度研究完成" },
+      ],
+      artifactIds: ["art-1"],
+    });
+  });
+
+  it("stripToAppendPayload keeps truncated parsed_text and drops image data_url", () => {
+    const longText = "文档正文".repeat(40_000); // > 120k chars
+    const payload = stripToAppendPayload({
+      id: ulid(),
+      session_id: "01SESSIONAAAAAAAAAAAAAAAAA",
+      tenant_id: "01TENANTAAAAAAAAAAAAAAAAAA",
+      user_id: "01USERAAAAAAAAAAAAAAAAAAAA",
+      role: "user",
+      content: "这个文档大致内容是？",
+      created_at: "2026-08-01T00:00:00.000Z",
+      attachments: [
+        {
+          name: "rag.pdf",
+          mime_type: "application/pdf",
+          size: 15_200_000,
+          kind: "document",
+          parsed_text: longText,
+        },
+        {
+          name: "shot.png",
+          mime_type: "image/png",
+          kind: "image",
+          data_url: "data:image/png;base64,abcd",
+        },
+      ],
+    });
+    expect(payload.attachments?.[0]?.parsed_text?.length).toBe(120_000);
+    expect(payload.attachments?.[0]?.name).toBe("rag.pdf");
+    expect(payload.attachments?.[1]).toEqual({
+      name: "shot.png",
+      mime_type: "image/png",
+      kind: "image",
+    });
+    expect((payload.attachments?.[1] as { data_url?: string }).data_url).toBeUndefined();
+  });
+
+  it("keeps attachment_id when budget strip drops parsed_text", async () => {
+    const append = vi.fn(async () => undefined);
+    startHistoryOutboxCoordinator(
+      { tenantId: "01TENANTAAAAAAAAAAAAAAAAAA", userId: "01USERAAAAAAAAAAAAAAAAAAAA" },
+      { appendMessages: append },
+    );
+    const sessionId = "01SESSIONAAAAAAAAAAAAAAAAA";
+    const attachmentId = "01HYATTACHAAAAAAAAAAAAAAAA";
+    // ~900k content + 120k parsed_text → over MAX_JOB_BYTES; after drop text → under budget.
+    const result = await enqueueAppend(sessionId, [
+      {
+        ...msg({ content: "总结" }),
+        attachments: [
+          {
+            name: "huge.pdf",
+            mime_type: "application/pdf",
+            size: 40_000_000,
+            kind: "document",
+            parsed_text: "x".repeat(120_000),
+            attachment_id: attachmentId,
+          },
+        ],
+      },
+      {
+        ...msg({ content: "pad" }),
+        role: "assistant" as const,
+        content: "y".repeat(900_000),
+      },
+    ]);
+    expect(result.enqueued).toBe(true);
+    await flushHistoryOutbox();
+    expect(append).toHaveBeenCalled();
+    const call = append.mock.calls[0] as unknown as [string, HistoryAppendPayload[]];
+    const att = call[1]?.[0]?.attachments?.[0];
+    expect(att?.attachment_id).toBe(attachmentId);
+    expect(att?.parsed_text).toBeUndefined();
+  });
+
+  it("flushes document metadata+parsed_text append without dead-letter", async () => {
+    const append = vi.fn(async () => undefined);
+    startHistoryOutboxCoordinator(
+      { tenantId: "01TENANTAAAAAAAAAAAAAAAAAA", userId: "01USERAAAAAAAAAAAAAAAAAAAA" },
+      { appendMessages: append },
+    );
+    const sessionId = "01SESSIONAAAAAAAAAAAAAAAAA";
+    const result = await enqueueAppend(sessionId, [
+      {
+        ...msg({ content: "这个文档大致内容是？" }),
+        attachments: [
+          {
+            name: "rag.pdf",
+            mime_type: "application/pdf",
+            size: 15_200_000,
+            kind: "document",
+            parsed_text: "RAG 算法测试文档正文",
+          },
+        ],
+      },
+    ]);
+    expect(result.enqueued).toBe(true);
+    await flushHistoryOutbox();
+    expect(append).toHaveBeenCalledTimes(1);
+    const call = append.mock.calls[0] as unknown as [string, HistoryAppendPayload[]];
+    expect(call[1]?.[0]?.attachments?.[0]?.parsed_text).toBe("RAG 算法测试文档正文");
   });
 });

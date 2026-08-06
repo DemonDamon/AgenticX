@@ -42,6 +42,65 @@ describe("directFetch", () => {
     }
   });
 
+  it("keeps application/json content-type so JSON providers do not get HTTP 415", async () => {
+    const server = createServer((req, res) => {
+      let raw = "";
+      req.on("data", (c) => {
+        raw += c;
+      });
+      req.on("end", () => {
+        res.writeHead(200, { "content-type": "application/json" });
+        res.end(JSON.stringify({ contentType: req.headers["content-type"] ?? null, raw }));
+      });
+    });
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", () => resolve()));
+    const addr = server.address();
+    if (!addr || typeof addr === "string") throw new Error("no port");
+    const body = JSON.stringify({ query: "广州南沙天气如何", summary: true, freshness: "oneDay" });
+
+    try {
+      const res = await directFetch(`http://127.0.0.1:${addr.port}/v1/web-search`, {
+        method: "POST",
+        headers: { "content-type": "application/json", authorization: "Bearer k" },
+        body,
+      });
+      const json = (await res.json()) as { contentType: string | null; raw: string };
+      expect(json.contentType).toMatch(/application\/json/i);
+      expect(json.raw).toBe(body);
+    } finally {
+      await new Promise<void>((resolve, reject) => server.close((err) => (err ? reject(err) : resolve())));
+    }
+  });
+
+  it("still sends search forms as x-www-form-urlencoded (DuckDuckGo path unchanged)", async () => {
+    const server = createServer((req, res) => {
+      let raw = "";
+      req.on("data", (c) => {
+        raw += c;
+      });
+      req.on("end", () => {
+        res.writeHead(200, { "content-type": "application/json" });
+        res.end(JSON.stringify({ contentType: req.headers["content-type"] ?? null, raw }));
+      });
+    });
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", () => resolve()));
+    const addr = server.address();
+    if (!addr || typeof addr === "string") throw new Error("no port");
+
+    try {
+      const res = await directFetch(`http://127.0.0.1:${addr.port}/html/`, {
+        method: "POST",
+        headers: { "content-type": "application/x-www-form-urlencoded" },
+        body: new URLSearchParams({ q: "hello" }).toString(),
+      });
+      const json = (await res.json()) as { contentType: string | null; raw: string };
+      expect(json.contentType).toMatch(/application\/x-www-form-urlencoded/i);
+      expect(json.raw).toBe("q=hello");
+    } finally {
+      await new Promise<void>((resolve, reject) => server.close((err) => (err ? reject(err) : resolve())));
+    }
+  });
+
   it("honors timeoutMs for hung upstream (does not wait ~20s)", async () => {
     const server = createServer((_req, _res) => {
       // never respond

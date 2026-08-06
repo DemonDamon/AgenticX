@@ -78,6 +78,34 @@
       "when": 1785322028584,
       "tag": "0010_chat_history_operations",
       "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "5",
+      "when": 1785600000001,
+      "tag": "0011_enterprise_chat_attachments",
+      "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "5",
+      "when": 1785700000001,
+      "tag": "0012_chat_share_snapshots",
+      "breakpoints": true
+    },
+    {
+      "idx": 13,
+      "version": "5",
+      "when": 1785800000001,
+      "tag": "0013_enterprise_deep_research_runs",
+      "breakpoints": true
+    },
+    {
+      "idx": 14,
+      "version": "5",
+      "when": 1785900000001,
+      "tag": "0014_chat_artifacts_content_mediumtext",
+      "breakpoints": true
     }
   ]
 }

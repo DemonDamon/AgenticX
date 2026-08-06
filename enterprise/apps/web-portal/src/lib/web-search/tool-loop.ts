@@ -14,15 +14,26 @@
  */
 
 import { stripEmptyAssistantMessages } from "../chat-completion-sanitize";
+import { withCurrentTimeContext } from "../current-time";
+import {
+  resolveInjectionBudgetChars,
+  selectHitsWithinBudget,
+  WEB_SEARCH_SNIPPET_CHARS,
+} from "./context-budget";
+import { resolveFollowUpQuery } from "./follow-up";
+import { sanitizeHistoryForUpstream } from "./history-sanitize";
 import { executeWebSearch, formatHits, type WebSearchHit, type WebSearchRuntimeConfig } from "./providers";
 import { resolveWebSearchConfig, type TenantWebSearchRow } from "./config";
+import { rerankHits } from "./rerank";
+import { classifyWebSearchNeed } from "./search-necessity";
 
 export const WEB_SEARCH_TOOL = {
   type: "function",
   function: {
     name: "web_search",
     description:
-      "检索公开网页，获取最新资讯、实时数据，以及超出模型知识截止日期的信息。用户问题涉及时效性、当前事实或外部网页时必须调用。",
+      "检索公开网页，获取最新资讯、实时数据，以及超出模型知识截止日期的信息。用户问题涉及时效性、当前事实或外部网页时必须调用。" +
+      "禁止用本工具查询当前公历日期、星期或时刻；那些必须以系统提示「当前时间」章节为准。",
     parameters: {
       type: "object",
       properties: {
@@ -35,8 +46,42 @@ export const WEB_SEARCH_TOOL = {
 } as const;
 
 export const WEB_SEARCH_SYSTEM_HINT =
-  "系统已完成联网搜索，并将结果附在下方。请严格基于这些结果作答；事实句末用 [N] 标注来源编号。" +
-  "禁止声称无法联网；禁止输出任何工具调用 XML/标签（包括 minimax:tool_call、<invoke>、tool_call 等）。";
+  "## 本轮检索状态\n" +
+  "本轮已经由平台成功完成联网搜索，并将结果附在下方；这不是等待用户开启的状态。" +
+  "请严格基于这些结果作答；不得说自己不能联网、无法搜索或要求用户手动开启联网搜索。" +
+  "事实句末用 [N] 标注来源编号。" +
+  "必须直接提炼并给出可核验事实（如天气状况、气温、湿度、风力、时间、价格、版本号等），用简洁结构化表述回复用户。" +
+  "禁止只罗列网站名称、禁止让用户自行打开链接查看；禁止输出「推荐查询渠道」式清单来代替答案。" +
+  "禁止以「建议直接访问某网站获取详情」「请自行查看某链接」等说法收尾来代替回答——" +
+  "即使某些字段（如精确实时数值）片段中未显示，也要先给出片段中能找到的最接近事实" +
+  "（如当日/前一日预报的天气状况、温度区间、风力等级等），并直接标注「此为预报数据，" +
+  "非实时更新」之类的不确定性说明，而不是让用户自己去查。" +
+  "若片段不足以完全回答，先基于已有信息尽力汇总，并明确哪些字段不确定；仍禁止声称无法联网。" +
+  "例外：当前公历日期、星期、时刻必须以系统提示「当前时间」章节为准，禁止用搜索结果覆盖本机日期。" +
+  "禁止输出任何工具调用 XML/标签（包括 minimax:tool_call、<invoke>、tool_call 等）。" +
+  "部分结果附带「发布时间」。若其与系统提示的当前时间相差较大（例如非同一天的天气、非近期的行情），" +
+  "须明确标注该数据的日期并说明可能已过时，禁止把历史数据当作今日事实陈述。" +
+  "下方 [N] 编号仅对应本轮搜索结果；对话历史中出现过的编号属于往轮、已失效，" +
+  "禁止拿历史编号与本轮结果互相比对，也不要因编号对不上而推翻自己此前的结论。" +
+  "若本轮结果整体与用户问题无关（例如检索词被泛化、命中的都是同名的其他事物），" +
+  "须直接说明「本次检索结果与问题无关」，随后基于对话上下文已确认的事实作答，" +
+  "禁止用无关结果拼凑答案或改写此前结论。";
+
+/**
+ * Injected on search-skip turns so thinking models (Kimi-like) do not narrate
+ * "不需要复杂的功能调用" — the toggle stays on, but this turn needs no tools.
+ */
+export const TRIVIAL_TURN_SYSTEM_HINT =
+  "## 本轮说明\n" +
+  "用户本轮是寒暄、简单确认或无需外部检索的问题。请直接友好地回复，不要为了凑答案而联网。\n" +
+  "思考过程与回复中都不要提及工具、功能调用、联网搜索、function call、tool_call。\n";
+
+export const ASSISTANT_CAPABILITY_SYSTEM_HINT =
+  "## 当前能力说明\n" +
+  "用户正在询问助手或平台的能力。请直接回答当前系统状态；如果用户问联网搜索，说明本平台支持联网搜索，" +
+  "本轮自动模式会按问题需要决定是否检索，不要声称必须手动开启，也不要把本轮未检索误说成平台不支持。\n";
+
+const TRIVIAL_TURN_MARKER = "## 本轮说明";
 
 /** @deprecated Kept for tests / compatibility; search-first path does not probe tools. */
 export const WEB_SEARCH_TOOL_CHOICE = {
@@ -47,9 +92,8 @@ export const WEB_SEARCH_TOOL_CHOICE = {
 const ADMIN_DISABLED_HINT = "> 管理员已关闭联网搜索。\n\n";
 const UNAVAILABLE_HINT = "> 联网搜索暂不可用，以下回答基于模型已有知识。\n\n";
 
-/** Cap model-bound context (UI sources may still list the full hit set). */
-export const WEB_SEARCH_CONTEXT_HIT_LIMIT = 10;
-export const WEB_SEARCH_CONTEXT_SNIPPET_CHARS = 320;
+/** @deprecated Prefer WEB_SEARCH_SNIPPET_CHARS from context-budget; kept for test imports. */
+export const WEB_SEARCH_CONTEXT_SNIPPET_CHARS = WEB_SEARCH_SNIPPET_CHARS;
 
 type ChatMessage = {
   role: string;
@@ -147,34 +191,92 @@ export function extractLastUserQuery(messages: ChatMessage[]): string {
   return "";
 }
 
+/** Intent-bearing words: short turns containing these are full questions, not slot-fills. */
+const FOLLOW_UP_INTENT =
+  /天气|气温|温度|湿度|预报|新闻|头条|价格|股价|汇率|怎么样|如何|多少|最新|查询|搜索|财报|官网|是谁|哪里|哪个/;
+
+/**
+ * True when last user turn looks like a slot-fill (e.g. city name), not a full question.
+ * Used so multi-turn search can keep prior intent: 「今天天气怎么样」→「广州南沙」.
+ */
+export function isShortFollowUpQuery(query: string): boolean {
+  const q = query.trim();
+  if (!q || q.length > 24) return false;
+  if (FOLLOW_UP_INTENT.test(q)) return false;
+  return true;
+}
+
+/**
+ * Keywords for executeWebSearch on the current turn.
+ * Default = last user text. When last is a short follow-up and a previous user
+ * turn exists, prepend the slot-fill: 「广州南沙 今天天气怎么样」.
+ */
+export function buildWebSearchQuery(messages: ChatMessage[]): string {
+  const users: string[] = [];
+  for (let i = messages.length - 1; i >= 0 && users.length < 2; i -= 1) {
+    const msg = messages[i];
+    if (msg?.role !== "user") continue;
+    const text = textFromMessageContent(msg.content);
+    if (!text) continue;
+    users.push(sanitizeWebSearchQuery(text));
+  }
+  const last = users[0] ?? "";
+  if (!last) return "";
+  const prev = users[1] ?? "";
+  // Only splice when prior turn carried searchable intent (天气/新闻/…), not 「你好」.
+  if (!prev || !isShortFollowUpQuery(last) || !FOLLOW_UP_INTENT.test(prev)) return last;
+  return sanitizeWebSearchQuery(`${last} ${prev}`);
+}
+
+/** Raw last-user text (attachment bodies NOT stripped) — for skip classification. */
+export function extractLastUserRawText(messages: ChatMessage[]): string {
+  for (let i = messages.length - 1; i >= 0; i -= 1) {
+    const msg = messages[i];
+    if (msg?.role !== "user") continue;
+    const text = textFromMessageContent(msg.content);
+    if (text) return text;
+  }
+  return "";
+}
+
+/** Escape hatch: set AGENTICX_WEB_SEARCH_ALWAYS=1 to restore unconditional search-first. */
+function webSearchAlwaysOn(): boolean {
+  const raw = process.env.AGENTICX_WEB_SEARCH_ALWAYS?.trim().toLowerCase();
+  return raw === "1" || raw === "true";
+}
+
 function stripWebSearchFlag<T extends Record<string, unknown>>(body: T): Omit<T, "agenticx_web_search"> {
   const { agenticx_web_search: _ignored, ...rest } = body;
   return rest;
 }
 
-/** Structured SSE frame (not mixed into delta.content). */
-export function formatWebSearchSourcesSse(hits: WebSearchHit[]): string {
-  const payload = hits.map((hit) => ({
-    title: hit.title,
-    url: hit.url,
-    snippet: hit.snippet,
-  }));
+/** Structured SSE frame (not mixed into delta.content). selected first for [N] alignment. */
+export function formatWebSearchSourcesSse(
+  selected: WebSearchHit[],
+  remainder: WebSearchHit[] = [],
+): string {
+  const payload = [
+    ...selected.map((hit) => ({
+      title: hit.title,
+      url: hit.url,
+      snippet: hit.snippet,
+      usedByModel: true,
+    })),
+    ...remainder.map((hit) => ({
+      title: hit.title,
+      url: hit.url,
+      snippet: hit.snippet,
+      usedByModel: false,
+    })),
+  ];
   return sseDataFrame({ agenticx_web_search_sources: payload });
 }
 
-function truncateSnippet(text: string, maxChars: number): string {
-  const normalized = text.replace(/\s+/g, " ").trim();
-  if (normalized.length <= maxChars) return normalized;
-  return `${normalized.slice(0, Math.max(1, maxChars - 1)).trimEnd()}…`;
-}
-
-/** Shrink hits before injecting into the model prompt (UI still gets full `hits`). */
+/**
+ * @deprecated Prefer selectHitsWithinBudget + rerankHits. Thin wrapper for older tests.
+ */
 export function compactHitsForModel(hits: WebSearchHit[]): WebSearchHit[] {
-  return hits.slice(0, WEB_SEARCH_CONTEXT_HIT_LIMIT).map((hit) => ({
-    title: hit.title,
-    url: hit.url,
-    snippet: truncateSnippet(hit.snippet, WEB_SEARCH_CONTEXT_SNIPPET_CHARS),
-  }));
+  return selectHitsWithinBudget(hits, undefined).selected;
 }
 
 export function withSearchContext(messages: ChatMessage[], hits: WebSearchHit[]): ChatMessage[] {
@@ -190,6 +292,42 @@ export function withSearchContext(messages: ChatMessage[], hits: WebSearchHit[])
     return next;
   }
   return [{ role: "system", content: resultsBlock }, ...next];
+}
+
+/** Prepend the trivial-turn hint so skip-path reasoning stays Kimi-clean. */
+export function withTrivialTurnContext(messages: ChatMessage[]): ChatMessage[] {
+  const next = messages.map((m) => ({ ...m }));
+  if (
+    next[0]?.role === "system" &&
+    typeof next[0].content === "string" &&
+    next[0].content.includes(TRIVIAL_TURN_MARKER)
+  ) {
+    return next;
+  }
+  const block = TRIVIAL_TURN_SYSTEM_HINT.trimEnd();
+  if (next[0]?.role === "system") {
+    const existing = typeof next[0].content === "string" ? next[0].content : "";
+    next[0] = {
+      ...next[0],
+      content: existing ? `${block}\n\n${existing}` : block,
+    };
+    return next;
+  }
+  return [{ role: "system", content: block }, ...next];
+}
+
+export function withAssistantCapabilityContext(messages: ChatMessage[]): ChatMessage[] {
+  const next = messages.map((m) => ({ ...m }));
+  const block = ASSISTANT_CAPABILITY_SYSTEM_HINT.trimEnd();
+  if (next[0]?.role === "system") {
+    const existing = typeof next[0].content === "string" ? next[0].content : "";
+    next[0] = {
+      ...next[0],
+      content: existing ? `${block}\n\n${existing}` : block,
+    };
+    return next;
+  }
+  return [{ role: "system", content: block }, ...next];
 }
 
 function eventStreamResponse(stream: ReadableStream<Uint8Array>): Response {
@@ -424,8 +562,13 @@ async function pipeWithPrefix(upstream: Response, prefixText: string): Promise<R
   return pipeUpstreamSse(upstream, { prefixText });
 }
 
-async function pipeWithSourcesAppendix(upstream: Response, hits: WebSearchHit[]): Promise<Response> {
-  const sourcesFrame = hits.length > 0 ? formatWebSearchSourcesSse(hits) : "";
+async function pipeWithSourcesAppendix(
+  upstream: Response,
+  selected: WebSearchHit[],
+  remainder: WebSearchHit[] = [],
+): Promise<Response> {
+  const sourcesFrame =
+    selected.length + remainder.length > 0 ? formatWebSearchSourcesSse(selected, remainder) : "";
   return pipeUpstreamSse(upstream, { sourcesFrame });
 }
 
@@ -434,20 +577,42 @@ export async function runWebSearchTurn(
   deps: GatewayFetchDeps,
 ): Promise<Response> {
   const baseBody = stripWebSearchFlag(parsedBody);
-  const originalMessages = stripEmptyAssistantMessages(
-    Array.isArray(baseBody.messages) ? (baseBody.messages as ChatMessage[]) : [],
+  // Sanitize assistant history before search/skip paths so prior <think> chains and
+  // stale [N] citation indices never reach the upstream model.
+  const originalMessages = sanitizeHistoryForUpstream(
+    stripEmptyAssistantMessages(
+      Array.isArray(baseBody.messages) ? (baseBody.messages as ChatMessage[]) : [],
+    ),
   );
 
   const tenant = deps.loadTenantConfig ? await deps.loadTenantConfig() : null;
   const cfg: WebSearchRuntimeConfig = resolveWebSearchConfig(tenant);
   const { tools: _tools, tool_choice: _toolChoice, ...rest } = baseBody;
 
+  const respondWithoutSearch = async (reason: string): Promise<Response> => {
+    console.info(`[web-search] skipped search-first (reason=${reason})`);
+    try {
+      const directMessages =
+        reason === "assistant_meta"
+          ? withAssistantCapabilityContext(withCurrentTimeContext(originalMessages))
+          : withTrivialTurnContext(withCurrentTimeContext(originalMessages));
+      const upstream = await callGatewayStream(deps, {
+        ...rest,
+        stream: true,
+        messages: directMessages,
+      });
+      return pipeUpstreamSse(upstream, {});
+    } catch (error) {
+      return gatewayUnavailableResponse(error instanceof Error ? error.message : "gateway unreachable");
+    }
+  };
+
   if (!cfg.enabled) {
     try {
       const upstream = await callGatewayStream(deps, {
         ...rest,
         stream: true,
-        messages: originalMessages,
+        messages: withCurrentTimeContext(originalMessages),
       });
       return pipeWithPrefix(upstream, ADMIN_DISABLED_HINT);
     } catch (error) {
@@ -455,8 +620,38 @@ export async function runWebSearchTurn(
     }
   }
 
+  // Referential follow-ups resolve entity from prior assistant reply; else slot-fill / raw last.
+  const resolved = resolveFollowUpQuery(originalMessages);
+
+  // 指代追问但历史里消解不出实体 → 本轮不搜（搜代词只会得到跑题 SERP），
+  // 直接基于对话上下文作答。
+  if (!webSearchAlwaysOn() && resolved && !resolved.entity) {
+    return respondWithoutSearch("referential_no_entity");
+  }
+  if (resolved?.entity) {
+    console.info(`[web-search] follow-up resolved entity=${resolved.entity}`);
+  }
+  // When ALWAYS=1 and entity resolution failed, fall back to the raw last-user text
+  // so the escape hatch still performs a search instead of a missing-query degrade.
+  const query = resolved
+    ? resolved.query || extractLastUserQuery(originalMessages)
+    : buildWebSearchQuery(originalMessages);
+
+  // Auto mode skips high-confidence self-contained turns and searches only when
+  // the query has explicit lookup or current/public-web fact signals.
+  const skip = webSearchAlwaysOn()
+    ? null
+    : resolved?.entity
+      ? null
+      : classifyWebSearchNeed({
+          query,
+          rawQuery: extractLastUserRawText(originalMessages),
+        });
+  if (skip && skip.need === "skip") {
+    return respondWithoutSearch(skip.reason);
+  }
+
   const searchFn = deps.executeSearch ?? executeWebSearch;
-  const query = extractLastUserQuery(originalMessages);
   let hits: WebSearchHit[] = [];
   let searchFailed = false;
 
@@ -473,9 +668,21 @@ export async function runWebSearchTurn(
     console.warn("[web-search] search failed, degrading:", error instanceof Error ? error.message : error);
   }
 
-  const messages = searchFailed
-    ? originalMessages
-    : withSearchContext(originalMessages, compactHitsForModel(hits));
+  const modelName = typeof rest.model === "string" ? rest.model : undefined;
+  const ranked = searchFailed ? [] : rerankHits(query, hits);
+  const { selected, remainder } = searchFailed
+    ? { selected: [] as WebSearchHit[], remainder: [] as WebSearchHit[] }
+    : selectHitsWithinBudget(ranked, modelName);
+  if (!searchFailed) {
+    const budget = resolveInjectionBudgetChars(modelName);
+    console.info(
+      `[web-search] model=${modelName ?? "unknown"} budget=${budget} selected=${selected.length}/${hits.length}`,
+    );
+  }
+
+  const messages = withCurrentTimeContext(
+    searchFailed ? originalMessages : withSearchContext(originalMessages, selected),
+  );
 
   let upstream: Response;
   try {
@@ -491,5 +698,5 @@ export async function runWebSearchTurn(
   if (searchFailed) {
     return pipeWithPrefix(upstream, UNAVAILABLE_HINT);
   }
-  return pipeWithSourcesAppendix(upstream, hits);
+  return pipeWithSourcesAppendix(upstream, selected, remainder);
 }

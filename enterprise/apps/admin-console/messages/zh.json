@@ -980,6 +980,8 @@
         "applyFilters": "应用筛选",
         "emptyLoadingTitle": "加载中...",
         "emptyLoadingDescription": "正在查询网关审计流",
+        "loadErrorTitle": "审计日志加载失败",
+        "loadErrorDescription": "接口返回错误：{error}",
         "emptyTitle": "暂无审计事件",
         "emptyDescription": "无符合条件的记录",
         "exportSuccess": "已导出 {count} 条记录",

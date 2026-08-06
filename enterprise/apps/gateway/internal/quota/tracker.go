@@ -82,6 +82,7 @@ type Tracker struct {
 	usageCache           map[string]int64
 	budgetAlertSink      BudgetAlertSink
 	poolCounter          PoolCounter
+	tokenWindowCounter   PoolCounter
 	requestCounter       *RequestCountCounter
 }
 
@@ -99,16 +100,17 @@ func NewTracker(cfgPath, usagePath string, handle *database.Handle) *Tracker {
 		poolUsagePath = DefaultPoolUsagePath()
 	}
 	return &Tracker{
-		cfgPath:         cfgPath,
-		usagePath:       usagePath,
-		poolUsagePath:   poolUsagePath,
-		remoteURL:       strings.TrimSpace(os.Getenv("GATEWAY_REMOTE_QUOTA_CONFIG_URL")),
-		budgetCfgPath:   budgetCfgPath,
-		budgetUsagePath: budgetUsagePath,
-		budgetRemoteURL: strings.TrimSpace(os.Getenv("GATEWAY_REMOTE_BUDGET_CONFIG_URL")),
-		usageCache:      map[string]int64{},
-		poolCounter:     newPoolCounter(handle, poolUsagePath),
-		requestCounter:  newRequestCountCounter(handle, poolUsagePath),
+		cfgPath:            cfgPath,
+		usagePath:          usagePath,
+		poolUsagePath:      poolUsagePath,
+		remoteURL:          strings.TrimSpace(os.Getenv("GATEWAY_REMOTE_QUOTA_CONFIG_URL")),
+		budgetCfgPath:      budgetCfgPath,
+		budgetUsagePath:    budgetUsagePath,
+		budgetRemoteURL:    strings.TrimSpace(os.Getenv("GATEWAY_REMOTE_BUDGET_CONFIG_URL")),
+		usageCache:         map[string]int64{},
+		poolCounter:        newPoolCounter(handle, poolUsagePath),
+		tokenWindowCounter: newTokenWindowCounter(handle, poolUsagePath),
+		requestCounter:     newRequestCountCounter(handle, poolUsagePath),
 	}
 }
 
@@ -149,12 +151,12 @@ func (t *Tracker) CheckAndAddContext(ctx RequestContext, tokens int64, ledgerEve
 		}
 		// Unlimited rules still keep a per-user usage ledger so the portal can
 		// report consumed tokens without treating the rule as an enforced cap.
-		return t.checkAndAddUserLocked(rule, ctx.UserID, month, tokens, true)
+		return t.checkAndAddUserLocked(rule, ctx, month, tokens, true, ledgerEvent)
 	}
 	if poolKey, ok := poolKeyFor(rule, ctx, month); ok && t.poolCounter != nil {
 		return t.checkAndAddSharedPool(rule, poolKey, tokens, ledgerEvent)
 	}
-	return t.checkAndAddUserLocked(rule, ctx.UserID, month, tokens, false)
+	return t.checkAndAddUserLocked(rule, ctx, month, tokens, false, ledgerEvent)
 }
 
 func (t *Tracker) checkAndAddSharedPool(rule Rule, key PoolKey, tokens int64, ledgerEvent string) Decision {
@@ -200,7 +202,15 @@ func (t *Tracker) checkAndAddSharedPool(rule Rule, key PoolKey, tokens int64, le
 	}
 }
 
-func (t *Tracker) checkAndAddUserLocked(rule Rule, userID, month string, tokens int64, recordOnly bool) Decision {
+func (t *Tracker) checkAndAddUserLocked(
+	rule Rule,
+	ctx RequestContext,
+	month string,
+	tokens int64,
+	recordOnly bool,
+	ledgerEvent string,
+) Decision {
+	userID := ctx.UserID
 	unlock, lockOK := t.lockUsageFile()
 	if !lockOK {
 		if !recordOnly && rule.Action == ActionBlock {
@@ -256,6 +266,11 @@ func (t *Tracker) checkAndAddUserLocked(rule Rule, userID, month string, tokens 
 					Description: "quota persist failed in block mode",
 				}
 			}
+		} else {
+			// Keep a database-backed per-user monthly counter in sync with the
+			// legacy JSON ledger. The portal runs in a separate process/replica,
+			// so it cannot reliably read that file directly.
+			t.recordMonthlyUserLedger(ctx, month, used, max64(tokens, 0), ledgerEvent)
 		}
 	}
 	desc := fmt.Sprintf("quota %s %d/%d", key, after, rule.MonthlyTokens)
@@ -291,7 +306,7 @@ func (t *Tracker) RollbackContext(ctx RequestContext, tokens int64) bool {
 		if strings.TrimSpace(ctx.UserID) == "" {
 			return true
 		}
-		return t.rollbackUserLocked(ctx.UserID, month, tokens)
+		return t.rollbackUserLocked(ctx, month, tokens)
 	}
 	return t.rollbackRuleLocked(rule, ctx, month, tokens)
 }
@@ -301,10 +316,11 @@ func (t *Tracker) rollbackRuleLocked(rule Rule, ctx RequestContext, month string
 		_, err := t.poolCounter.Add(poolKey, -tokens, LedgerEventRefund, "")
 		return err == nil
 	}
-	return t.rollbackUserLocked(ctx.UserID, month, tokens)
+	return t.rollbackUserLocked(ctx, month, tokens)
 }
 
-func (t *Tracker) rollbackUserLocked(userID, month string, tokens int64) bool {
+func (t *Tracker) rollbackUserLocked(ctx RequestContext, month string, tokens int64) bool {
+	userID := ctx.UserID
 	unlock, lockOK := t.lockUsageFile()
 	if !lockOK {
 		return false
@@ -313,8 +329,10 @@ func (t *Tracker) rollbackUserLocked(userID, month string, tokens int64) bool {
 	rows := t.readUsage()
 	key := cacheKey(userID, month)
 	changed := false
+	usedBefore := int64(0)
 	for i := range rows {
 		if rows[i].UserID == userID && rows[i].Month == month {
+			usedBefore = rows[i].UsedTotal
 			next := rows[i].UsedTotal - tokens
 			if next < 0 {
 				next = 0
@@ -327,6 +345,7 @@ func (t *Tracker) rollbackUserLocked(userID, month string, tokens int64) bool {
 	}
 	if !changed {
 		if cache, ok := t.usageCache[key]; ok {
+			usedBefore = cache
 			next := cache - tokens
 			if next < 0 {
 				next = 0
@@ -339,12 +358,25 @@ func (t *Tracker) rollbackUserLocked(userID, month string, tokens int64) bool {
 	if !changed {
 		return true
 	}
-	return t.writeUsage(rows)
+	if !t.writeUsage(rows) {
+		return false
+	}
+	removed := min64(tokens, usedBefore)
+	t.recordMonthlyUserLedger(ctx, month, usedBefore, -removed, LedgerEventRefund)
+	return true
 }
 
 func (t *Tracker) AddUsage(userID string, tokens int64) (int64, bool) {
+	return t.AddUsageContext(RequestContext{UserID: userID}, tokens)
+}
+
+// AddUsageContext records a final monthly usage delta with the same identity
+// context used by the normal quota path. AddUsage is retained as a compatibility
+// wrapper for callers that only have a user id.
+func (t *Tracker) AddUsageContext(ctx RequestContext, tokens int64) (int64, bool) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
+	userID := ctx.UserID
 	if tokens <= 0 {
 		month := time.Now().UTC().Format("2006-01")
 		return t.currentUsed(userID, month), true
@@ -381,7 +413,45 @@ func (t *Tracker) AddUsage(userID string, tokens int64) (int64, bool) {
 		rows = append(rows, usageRow{UserID: userID, Month: month, UsedTotal: after})
 	}
 	t.usageCache[key] = after
-	return after, t.writeUsage(rows)
+	ok := t.writeUsage(rows)
+	if ok {
+		t.recordMonthlyUserLedger(ctx, month, used, tokens, LedgerEventSettle)
+	}
+	return after, ok
+}
+
+// recordMonthlyUserLedger mirrors the legacy per-user monthly file into the
+// shared usage counter used by the portal. The seed step makes existing file
+// usage visible immediately after the first request following this migration;
+// subsequent requests only apply their actual reserve/settle/refund delta.
+func (t *Tracker) recordMonthlyUserLedger(
+	ctx RequestContext,
+	month string,
+	legacyUsed int64,
+	delta int64,
+	event string,
+) {
+	if t == nil || t.tokenWindowCounter == nil || strings.TrimSpace(ctx.UserID) == "" {
+		return
+	}
+	key := tokenWindowPoolKey("month", ctx, month)
+	current, err := t.tokenWindowCounter.Current(key)
+	if err != nil {
+		log.Printf("[quota] monthly ledger read failed key=%s err=%v", key.cacheKey(), err)
+		return
+	}
+	if current == 0 && legacyUsed > 0 {
+		if _, err := t.tokenWindowCounter.Add(key, legacyUsed, event, ""); err != nil {
+			log.Printf("[quota] monthly ledger seed failed key=%s err=%v", key.cacheKey(), err)
+			return
+		}
+	}
+	if delta == 0 {
+		return
+	}
+	if _, err := t.tokenWindowCounter.Add(key, delta, event, ""); err != nil {
+		log.Printf("[quota] monthly ledger update failed key=%s delta=%d err=%v", key.cacheKey(), delta, err)
+	}
 }
 
 func (t *Tracker) loadConfig() Config {
@@ -552,6 +622,13 @@ func (t *Tracker) lockUsageFile() (func(), bool) {
 
 func max64(a, b int64) int64 {
 	if a > b {
+		return a
+	}
+	return b
+}
+
+func min64(a, b int64) int64 {
+	if a < b {
 		return a
 	}
 	return b

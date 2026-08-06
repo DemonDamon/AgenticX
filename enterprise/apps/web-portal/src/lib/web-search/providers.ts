@@ -3,6 +3,7 @@
  */
 
 import { directFetch } from "./direct-fetch";
+import { resolveFreshness, type BochaFreshness } from "./freshness";
 
 export const WEB_SEARCH_MAX_RESULTS_CAP = 50;
 export const DEFAULT_MAX_RESULTS = 50;
@@ -12,6 +13,8 @@ export type WebSearchHit = {
   title: string;
   url: string;
   snippet: string;
+  /** ISO8601，provider 提供时才有（当前仅 Bocha）。 */
+  publishedAt?: string;
 };
 
 export type WebSearchProviderName = "duckduckgo" | "bocha" | "tavily";
@@ -196,28 +199,45 @@ async function searchBocha(
   maxResults: number,
   apiKey: string,
   fetchImpl: FetchLike,
+  freshness?: BochaFreshness,
 ): Promise<WebSearchHit[]> {
+  const payload: Record<string, unknown> = { query, count: maxResults, summary: true };
+  if (freshness) payload.freshness = freshness;
   const response = await fetchImpl("https://api.bochaai.com/v1/web-search", {
     method: "POST",
     headers: {
       "content-type": "application/json",
       authorization: `Bearer ${apiKey}`,
     },
-    body: JSON.stringify({ query, count: maxResults }),
+    body: JSON.stringify(payload),
     signal: AbortSignal.timeout(20_000),
   });
   if (!response.ok) {
     throw new Error(`bocha http ${response.status}`);
   }
   const json = (await response.json()) as {
-    data?: { webPages?: { value?: Array<{ name?: string; url?: string; snippet?: string }> } };
+    data?: {
+      webPages?: {
+        value?: Array<{
+          name?: string;
+          url?: string;
+          snippet?: string;
+          summary?: string;
+          datePublished?: string;
+        }>;
+      };
+    };
   };
   const values = json.data?.webPages?.value ?? [];
-  return values.slice(0, maxResults).map((item) => ({
-    title: String(item.name ?? "").trim() || item.url || "Untitled",
-    url: String(item.url ?? "").trim(),
-    snippet: truncateSnippet(String(item.snippet ?? "")),
-  })).filter((hit) => hit.url);
+  return values
+    .slice(0, maxResults)
+    .map((item) => ({
+      title: String(item.name ?? "").trim() || item.url || "Untitled",
+      url: String(item.url ?? "").trim(),
+      snippet: truncateSnippet(String(item.summary ?? item.snippet ?? "")),
+      publishedAt: String(item.datePublished ?? "").trim() || undefined,
+    }))
+    .filter((hit) => hit.url);
 }
 
 async function searchTavily(
@@ -252,7 +272,10 @@ async function searchTavily(
 export function formatHits(hits: WebSearchHit[]): string {
   if (hits.length === 0) return "No search results found.";
   return hits
-    .map((hit, index) => `[${index + 1}] ${hit.title}\nURL: ${hit.url}\n${hit.snippet}`)
+    .map((hit, index) => {
+      const date = hit.publishedAt ? `\n发布时间: ${hit.publishedAt}` : "";
+      return `[${index + 1}] ${hit.title}\nURL: ${hit.url}${date}\n${hit.snippet}`;
+    })
     .join("\n\n");
 }
 
@@ -266,11 +289,12 @@ export async function executeWebSearch(
   if (!q) return [];
   const n = clampMaxResults(maxResults ?? cfg.maxResults ?? DEFAULT_MAX_RESULTS);
   const provider = cfg.provider || "duckduckgo";
+  const freshness = resolveFreshness(q);
 
   try {
     if (provider === "bocha") {
       if (!cfg.apiKey.trim()) throw new Error("bocha api key missing");
-      const hits = await searchBocha(q, n, cfg.apiKey, fetchImpl);
+      const hits = await searchBocha(q, n, cfg.apiKey, fetchImpl, freshness);
       if (hits.length > 0) return hits;
     } else if (provider === "tavily") {
       if (!cfg.apiKey.trim()) throw new Error("tavily api key missing");
@@ -281,7 +305,10 @@ export async function executeWebSearch(
     }
   } catch (error) {
     if (provider === "duckduckgo") throw error;
-    // Fall back to duckduckgo for paid providers (aligned with Desktop service.py).
+    console.warn(
+      `[web-search] provider=${provider} failed, falling back to duckduckgo:`,
+      error instanceof Error ? error.message : String(error),
+    );
   }
 
   return searchDuckDuckGo(q, n, fetchImpl);

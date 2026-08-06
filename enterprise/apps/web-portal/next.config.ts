@@ -14,6 +14,7 @@ const config: NextConfig = {
     "@agenticx/branding",
     "@agenticx/auth",
     "@agenticx/config",
+    "@agenticx/sdk-ts",
     "@agenticx/feature-chat",
     "@agenticx/feature-iam",
     "@agenticx/feature-model-service",

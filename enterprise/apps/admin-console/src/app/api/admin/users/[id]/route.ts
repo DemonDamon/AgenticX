@@ -33,6 +33,13 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
   try {
     const body = (await request.json()) as Record<string, unknown>;
     const patch: UpdateAdminUserInput = {};
+    if (body.email !== undefined) {
+      const email = typeof body.email === "string" ? body.email.trim() : "";
+      if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+        return NextResponse.json({ code: "40000", message: "invalid email" }, { status: 400 });
+      }
+      patch.email = email;
+    }
     if (typeof body.displayName === "string") patch.displayName = body.displayName;
     if (body.deptId === null || typeof body.deptId === "string") patch.deptId = body.deptId;
     if (isStatus(body.status)) patch.status = body.status;

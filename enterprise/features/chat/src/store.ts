@@ -30,6 +30,21 @@ import {
 import type { QueuedMessage } from "./types/queued-message";
 import { shouldEnqueueOnResend } from "./utils/message-queue";
 import { getSessionRequestId, isSessionStreaming } from "./utils/session-stream-state";
+import { probeNote } from "./debug/update-depth-probe";
+import { hydrateMessagesDeepResearch } from "./utils/deep-research-hydrate";
+
+const UPDATE_DEPTH_ERROR_RE = /Maximum update depth exceeded/i;
+
+/** Stable code mapped to i18n in web-portal; keep messages intact on catch. */
+export const STREAM_UPDATE_DEPTH_ERROR = "STREAM_UPDATE_DEPTH";
+
+function toStreamCatchErrorMessage(error: unknown): string {
+  const raw = error instanceof Error ? error.message : "Unknown send error";
+  if (UPDATE_DEPTH_ERROR_RE.test(raw)) {
+    return STREAM_UPDATE_DEPTH_ERROR;
+  }
+  return raw;
+}
 
 export type ChatStatus = "idle" | "sending" | "streaming" | "error";
 
@@ -470,6 +485,7 @@ function mergeSessionMessages(messages: ChatMessage[], sessionId: string, sessio
 let chatHydrateInFlight: Promise<void> | null = null;
 let sessionMessageLoadSeq = 0;
 let historyAuthRedirectScheduled = false;
+const historyAppendChainsBySessionId = new Map<string, Promise<void>>();
 const portalHistory = createPortalChatHistoryClient();
 
 function mergeOverlayMessages(remote: ChatMessage[], overlay: ChatMessage[]): ChatMessage[] {
@@ -508,6 +524,25 @@ async function persistAppendMessages(
   sessionId: string,
   messages: ChatMessage[],
 ): Promise<void> {
+  const prior = historyAppendChainsBySessionId.get(sessionId) ?? Promise.resolve();
+  const current = prior
+    .catch(() => undefined)
+    .then(() => persistAppendMessagesNow(set, sessionId, messages));
+  historyAppendChainsBySessionId.set(sessionId, current);
+  try {
+    await current;
+  } finally {
+    if (historyAppendChainsBySessionId.get(sessionId) === current) {
+      historyAppendChainsBySessionId.delete(sessionId);
+    }
+  }
+}
+
+async function persistAppendMessagesNow(
+  set: (partial: Partial<ChatStoreState> | ((state: ChatStoreState) => Partial<ChatStoreState>)) => void,
+  sessionId: string,
+  messages: ChatMessage[],
+): Promise<void> {
   const payloads = messages.map(stripToAppendPayload);
   const operationId = newUlid();
   const payloadHash = await computePayloadHash(payloads);
@@ -533,6 +568,8 @@ async function persistAppendMessages(
       retries: 5,
     });
     setSessionHistorySync(set, sessionId, null);
+    // Same global-banner-stickiness fix as switchSession/refetchSessionMessages.
+    set({ historyError: null });
   } catch (persistErr) {
     const result = await enqueueAppend(sessionId, messages, { operationId, payloadHash });
     if (!result.enqueued) {
@@ -720,7 +757,10 @@ export const useChatStore = create<ChatStore>((set, get) => ({
     try {
       const remoteMessages = await portalHistory.getMessages(sessionId);
       const overlay = await listPendingOverlayMessages(sessionId);
-      const merged = mergeOverlayMessages(remoteMessages, overlay);
+      const merged = await hydrateMessagesDeepResearch(
+        sessionId,
+        mergeOverlayMessages(remoteMessages, overlay),
+      );
       set((prev) => {
         const others = prev.messages.filter((message) => message.session_id !== sessionId);
         return {
@@ -729,6 +769,9 @@ export const useChatStore = create<ChatStore>((set, get) => ({
             ...stripVersionsForSession(prev, sessionId),
             ...buildHydratedResponseVersions(merged),
           },
+          // Same global-banner-stickiness fix as switchSession: a successful fetch here
+          // proves the portal is reachable again, so clear the global historyError too.
+          historyError: null,
         };
       });
       if (overlay.length === 0) {
@@ -800,7 +843,10 @@ export const useChatStore = create<ChatStore>((set, get) => ({
         const activeSessionId = activeSession.id;
         const remoteMessages = await portalHistory.getMessages(activeSessionId);
         const overlay = await listPendingOverlayMessages(activeSessionId);
-        const merged = mergeOverlayMessages(remoteMessages, overlay);
+        const merged = await hydrateMessagesDeepResearch(
+          activeSessionId,
+          mergeOverlayMessages(remoteMessages, overlay),
+        );
         const responseVersions = buildHydratedResponseVersions(merged);
 
         set({
@@ -901,7 +947,10 @@ export const useChatStore = create<ChatStore>((set, get) => ({
     try {
       const remoteMessages = await portalHistory.getMessages(sessionId);
       const overlay = await listPendingOverlayMessages(sessionId);
-      const merged = mergeOverlayMessages(remoteMessages, overlay);
+      const merged = await hydrateMessagesDeepResearch(
+        sessionId,
+        mergeOverlayMessages(remoteMessages, overlay),
+      );
       const responseVersions = buildHydratedResponseVersions(merged);
       if (loadSeq !== sessionMessageLoadSeq || get().activeSessionId !== sessionId) return;
       set((state) => ({
@@ -911,6 +960,11 @@ export const useChatStore = create<ChatStore>((set, get) => ({
           ...responseVersions,
         },
         sessionMessagesLoading: false,
+        // historyError is a global banner (not scoped to a session): a successful switch
+        // proves connectivity has recovered, so clear it here too. Otherwise one earlier
+        // transient failure keeps the "历史同步" banner stuck on every session until a
+        // full page refresh re-runs hydrateSessions (the only other place that clears it).
+        historyError: null,
       }));
       void flushHistoryOutbox().then(async (sessionIds) => {
         for (const id of sessionIds) {
@@ -1049,21 +1103,29 @@ export const useChatStore = create<ChatStore>((set, get) => ({
   },
 
   switchModel(model) {
-    const sessionId = get().activeSessionId;
-    if (isDraftSessionId(get(), sessionId)) {
+    const state = get();
+    const sessionId = state.activeSessionId;
+    if (isDraftSessionId(state, sessionId)) {
+      if (state.activeModel === model) return;
+      probeNote("store.switchModel", { model, draft: true });
       set({ activeModel: model });
       return;
     }
-    set((state) => ({
+    const session = state.sessions.find((item) => item.id === sessionId);
+    if (state.activeModel === model && session?.active_model === model) {
+      return;
+    }
+    probeNote("store.switchModel", { model, sessionId });
+    set((prev) => ({
       activeModel: model,
-      sessions: state.sessions.map((session) =>
-        session.id === state.activeSessionId
+      sessions: prev.sessions.map((item) =>
+        item.id === prev.activeSessionId
           ? {
-              ...session,
+              ...item,
               active_model: model,
               updated_at: now(),
             }
-          : session
+          : item
       ),
     }));
     if (get().hydrated && sessionId) {
@@ -1267,6 +1329,7 @@ export const useChatStore = create<ChatStore>((set, get) => ({
         }
 
         if (chunk.delta) {
+          probeNote("stream.delta", { sessionId, assistantId: assistantMessage.id, n: chunk.delta.length });
           set((prev) => {
             const current = prev.responseVersionsByUserMessageId[userMessage.id];
             const nextVersionState = current
@@ -1341,7 +1404,7 @@ export const useChatStore = create<ChatStore>((set, get) => ({
         prev.activeSessionId === sessionId
           ? {
               status: "error" as const,
-              errorMessage: error instanceof Error ? error.message : "Unknown send error",
+              errorMessage: toStreamCatchErrorMessage(error),
             }
           : {},
       );
@@ -1501,6 +1564,12 @@ export const useChatStore = create<ChatStore>((set, get) => ({
         }
 
         if (chunk.delta) {
+          probeNote("stream.delta", {
+            sessionId,
+            assistantId: replacementAssistant.id,
+            n: chunk.delta.length,
+            via: "edit",
+          });
           set((prev) => {
             const versionState = prev.responseVersionsByUserMessageId[input.messageId];
             const nextVersionState = versionState
@@ -1586,7 +1655,7 @@ export const useChatStore = create<ChatStore>((set, get) => ({
         prev.activeSessionId === sessionId
           ? {
               status: "error" as const,
-              errorMessage: error instanceof Error ? error.message : "Unknown send error",
+              errorMessage: toStreamCatchErrorMessage(error),
             }
           : {},
       );
@@ -1711,6 +1780,12 @@ export const useChatStore = create<ChatStore>((set, get) => ({
         }
 
         if (chunk.delta) {
+          probeNote("stream.delta", {
+            sessionId,
+            assistantId: replacementAssistant.id,
+            n: chunk.delta.length,
+            via: "regenerate",
+          });
           set((prev) => {
             const versionState = prev.responseVersionsByUserMessageId[targetUserMessageId];
             const nextVersionState = versionState
@@ -1796,7 +1871,7 @@ export const useChatStore = create<ChatStore>((set, get) => ({
         prev.activeSessionId === sessionId
           ? {
               status: "error" as const,
-              errorMessage: error instanceof Error ? error.message : "Unknown send error",
+              errorMessage: toStreamCatchErrorMessage(error),
             }
           : {},
       );

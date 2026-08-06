@@ -1,6 +1,7 @@
 "use client";
 
 import * as React from "react";
+import { createPortal } from "react-dom";
 import { useTranslations } from "next-intl";
 import {
   Button,
@@ -25,9 +26,9 @@ const submenuItemClass =
 
 /**
  * Kimi-style dark capability tip (beak below). Content must reflect real product limits.
- * Uses CSS group-hover so it works inside Popover without nested Tooltip focus traps.
+ * Hover-only + portal：避免 Popover 首项自动聚焦立刻弹出；也避免输入区 overflow 裁切。
  */
-function CapabilityHoverTip({
+export function CapabilityHoverTip({
   label,
   lines,
   children,
@@ -38,36 +39,78 @@ function CapabilityHoverTip({
   children: React.ReactNode;
   disabled?: boolean;
 }) {
-  return (
-    <div className="group/cap relative">
-      {children}
-      {!disabled && lines.length > 0 ? (
-        <div
-          role="tooltip"
-          aria-label={label}
-          className={cn(
-            "pointer-events-none absolute bottom-[calc(100%+6px)] left-1/2 z-40 w-max max-w-[17rem] -translate-x-1/2",
-            "hidden flex-col items-center group-hover/cap:flex group-focus-within/cap:flex",
-          )}
-        >
-          <div className="rounded-xl bg-zinc-900 px-3 py-2 text-left text-[12px] leading-[1.45] text-white shadow-lg dark:bg-zinc-800">
-            {lines.map((line) => (
-              <p key={line} className="whitespace-normal">
-                {line}
-              </p>
-            ))}
-          </div>
+  const rootRef = React.useRef<HTMLDivElement>(null);
+  const [open, setOpen] = React.useState(false);
+  const [coords, setCoords] = React.useState<{ left: number; top: number } | null>(null);
+
+  const syncPosition = React.useCallback(() => {
+    const el = rootRef.current;
+    if (!el) return;
+    const rect = el.getBoundingClientRect();
+    setCoords({
+      left: rect.left + rect.width / 2,
+      top: rect.top - 6,
+    });
+  }, []);
+
+  const show = React.useCallback(() => {
+    if (disabled || lines.length === 0) return;
+    syncPosition();
+    setOpen(true);
+  }, [disabled, lines.length, syncPosition]);
+
+  const hide = React.useCallback(() => setOpen(false), []);
+
+  React.useEffect(() => {
+    if (!open) return;
+    const onReflow = () => syncPosition();
+    window.addEventListener("resize", onReflow);
+    window.addEventListener("scroll", onReflow, true);
+    return () => {
+      window.removeEventListener("resize", onReflow);
+      window.removeEventListener("scroll", onReflow, true);
+    };
+  }, [open, syncPosition]);
+
+  const tip =
+    open && coords && typeof document !== "undefined"
+      ? createPortal(
           <div
-            className="h-0 w-0 border-x-[6px] border-t-[6px] border-x-transparent border-t-zinc-900 dark:border-t-zinc-800"
-            aria-hidden
-          />
-        </div>
-      ) : null}
+            role="tooltip"
+            aria-label={label}
+            className="pointer-events-none fixed z-[90] flex w-max max-w-[17rem] -translate-x-1/2 -translate-y-full flex-col items-center"
+            style={{ left: coords.left, top: coords.top }}
+          >
+            <div className="rounded-xl bg-zinc-900 px-3 py-2 text-left text-[12px] leading-[1.45] text-white shadow-lg dark:bg-zinc-800">
+              {lines.map((line) => (
+                <p key={line} className="whitespace-normal">
+                  {line}
+                </p>
+              ))}
+            </div>
+            <div
+              className="h-0 w-0 border-x-[6px] border-t-[6px] border-x-transparent border-t-zinc-900 dark:border-t-zinc-800"
+              aria-hidden
+            />
+          </div>,
+          document.body,
+        )
+      : null;
+
+  return (
+    <div
+      ref={rootRef}
+      className="relative"
+      onMouseEnter={show}
+      onMouseLeave={hide}
+    >
+      {children}
+      {tip}
     </div>
   );
 }
 
-function hintLines(raw: string): string[] {
+export function hintLines(raw: string): string[] {
   return raw
     .split(/\n+/)
     .map((s) => s.trim())

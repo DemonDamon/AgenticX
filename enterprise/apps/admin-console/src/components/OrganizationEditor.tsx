@@ -27,6 +27,7 @@ import {
 } from "@agenticx/ui";
 import { ChevronDown, ChevronRight, FolderTree, MoreHorizontal, MoveRight, Pencil, Plus, RefreshCw, Save, Trash2, UserPlus, Users } from "lucide-react";
 import { adminFetch } from "../lib/admin-client-auth";
+import { CreateUserDialog, type CreateUserDepartmentOption } from "./CreateUserDialog";
 import { VisibleModelsEditor } from "./visible-models-editor";
 
 type OrganizationNode = {
@@ -94,6 +95,7 @@ function TreeBranch({
   onMemberDragStart,
   onMemberDragEnd,
   onMoveMember,
+  onDeleteMember,
 }: {
   node: OrganizationNode;
   depth: number;
@@ -109,6 +111,7 @@ function TreeBranch({
   onMemberDragStart: (member: OrganizationMember) => void;
   onMemberDragEnd: () => void;
   onMoveMember: (member: OrganizationMember) => void;
+  onDeleteMember: (member: OrganizationMember) => void;
 }) {
   const children = node.children ?? [];
   const members = membersByDept.get(node.id) ?? [];
@@ -184,6 +187,7 @@ function TreeBranch({
               onMemberDragStart={onMemberDragStart}
               onMemberDragEnd={onMemberDragEnd}
               onMoveMember={onMoveMember}
+              onDeleteMember={onDeleteMember}
             />
           ))}
           {members.map((member) => (
@@ -194,6 +198,7 @@ function TreeBranch({
               onDragStart={onMemberDragStart}
               onDragEnd={onMemberDragEnd}
               onMove={onMoveMember}
+              onDelete={onDeleteMember}
             />
           ))}
         </div>
@@ -208,12 +213,14 @@ function OrganizationMemberRow({
   onDragStart,
   onDragEnd,
   onMove,
+  onDelete,
 }: {
   member: OrganizationMember;
   depth?: number;
   onDragStart: (member: OrganizationMember) => void;
   onDragEnd: () => void;
   onMove: (member: OrganizationMember) => void;
+  onDelete: (member: OrganizationMember) => void;
 }) {
   return (
     <div
@@ -228,7 +235,7 @@ function OrganizationMemberRow({
       onDragEnd={onDragEnd}
     >
       <Link
-        href={`/iam/roles?user=${encodeURIComponent(member.id)}`}
+        href={`/iam/users?userId=${encodeURIComponent(member.id)}`}
         className="flex min-w-0 flex-1 items-center gap-2 py-1.5 text-left"
       >
         <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-primary/10 text-[10px] font-semibold text-primary">{member.displayName.slice(0, 1)}</span>
@@ -238,12 +245,13 @@ function OrganizationMemberRow({
       <DropdownMenu>
         <DropdownMenuTrigger asChild>
           <Button
-            variant="ghost"
-            size="icon-sm"
-            className="shrink-0 opacity-0 transition-opacity group-hover:opacity-100 focus-visible:opacity-100"
-            aria-label={`${member.displayName} 的快捷操作`}
+            variant="outline"
+            size="sm"
+            className="shrink-0 gap-1 px-2 text-xs"
+            aria-label={`${member.displayName} 的管理`}
             onClick={(event) => event.stopPropagation()}
           >
+            管理
             <MoreHorizontal className="h-4 w-4" />
           </Button>
         </DropdownMenuTrigger>
@@ -251,12 +259,19 @@ function OrganizationMemberRow({
           <DropdownMenuLabel>用户操作</DropdownMenuLabel>
           <DropdownMenuSeparator />
           <DropdownMenuItem asChild>
-            <Link href={`/iam/roles?user=${encodeURIComponent(member.id)}`}>
+            <Link href={`/iam/users?userId=${encodeURIComponent(member.id)}`}>
               <Pencil className="mr-2 h-4 w-4" />编辑用户
             </Link>
           </DropdownMenuItem>
           <DropdownMenuItem onClick={() => onMove(member)}>
             <MoveRight className="mr-2 h-4 w-4" />移动到组织
+          </DropdownMenuItem>
+          <DropdownMenuSeparator />
+          <DropdownMenuItem
+            className="text-danger focus:text-danger"
+            onClick={() => onDelete(member)}
+          >
+            <Trash2 className="mr-2 h-4 w-4" />删除用户
           </DropdownMenuItem>
         </DropdownMenuContent>
       </DropdownMenu>
@@ -282,6 +297,7 @@ export function OrganizationEditor() {
   const [createOpen, setCreateOpen] = useState(false);
   const [createName, setCreateName] = useState("");
   const [createParentId, setCreateParentId] = useState<string | null>(null);
+  const [createUserOpen, setCreateUserOpen] = useState(false);
   const [deleteConfirm, setDeleteConfirm] = useState(false);
   const [movingMember, setMovingMember] = useState<OrganizationMember | null>(null);
   const [moveTargetDeptId, setMoveTargetDeptId] = useState<string | null>(null);
@@ -312,6 +328,10 @@ export function OrganizationEditor() {
 
   const selected = useMemo(() => findNode(tree, selectedId), [tree, selectedId]);
   const flatNodes = useMemo(() => collectNodes(tree), [tree]);
+  const departmentOptions = useMemo<CreateUserDepartmentOption[]>(
+    () => flatNodes.map((node) => ({ id: node.id, label: node.path })),
+    [flatNodes],
+  );
   const blockedParentIds = useMemo(() => selected ? new Set([selected.id, ...collectDescendantIds(selected)]) : new Set<string>(), [selected]);
   const membersByDept = useMemo(() => {
     const departmentIds = new Set(flatNodes.map((node) => node.id));
@@ -382,6 +402,19 @@ export function OrganizationEditor() {
       toast.error(error instanceof Error ? error.message : "移动用户失败");
     } finally {
       setMoving(false);
+    }
+  };
+
+  const deleteMember = async (member: OrganizationMember) => {
+    if (!window.confirm(`确认删除用户 ${member.email}？该操作不可撤销。`)) return;
+    try {
+      const response = await adminFetch(`/api/admin/users/${member.id}`, { method: "DELETE" });
+      const json = (await response.json()) as ApiEnvelope<unknown>;
+      if (!response.ok || json.code !== "00000") throw new Error(json.message || "删除用户失败");
+      toast.success(`用户已删除：${member.email}`);
+      await load();
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "删除用户失败");
     }
   };
 
@@ -478,6 +511,7 @@ export function OrganizationEditor() {
             setDropTargetDeptId(null);
           }}
           onMoveMember={openMemberMove}
+          onDeleteMember={deleteMember}
         />
       ))}
       {unassignedMembers.length ? (
@@ -498,6 +532,7 @@ export function OrganizationEditor() {
                 setDropTargetDeptId(null);
               }}
               onMove={openMemberMove}
+              onDelete={deleteMember}
             />
           ))}
         </div>
@@ -542,9 +577,7 @@ export function OrganizationEditor() {
               <div className="flex flex-wrap justify-between gap-2">
                 <div className="flex flex-wrap gap-2">
                   <Button variant="outline" onClick={() => { setCreateParentId(selected.id); setCreateOpen(true); }}><Plus />新增下级</Button>
-                  <Button variant="outline" asChild>
-                    <Link href={`/iam/users?dept=${encodeURIComponent(selected.id)}&create=1`}><UserPlus />新建用户</Link>
-                  </Button>
+                  <Button variant="outline" onClick={() => setCreateUserOpen(true)}><UserPlus />新建用户</Button>
                 </div>
                 <Button onClick={() => void save()} disabled={saving || !draftName.trim()}><Save />保存组织</Button>
               </div>
@@ -589,6 +622,14 @@ export function OrganizationEditor() {
           <DialogFooter><Button variant="outline" onClick={() => setCreateOpen(false)}>取消</Button><Button onClick={() => void create()} disabled={saving || !createName.trim()}>{saving ? "创建中…" : "创建组织"}</Button></DialogFooter>
         </DialogContent>
       </Dialog>
+
+      <CreateUserDialog
+        open={createUserOpen}
+        onOpenChange={setCreateUserOpen}
+        defaultDeptId={selected?.id}
+        departmentOptions={departmentOptions}
+        onCreated={load}
+      />
 
       <Dialog
         open={Boolean(movingMember)}
