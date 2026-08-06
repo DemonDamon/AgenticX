@@ -183,7 +183,7 @@ type AvatarItem = {
   /** Default provider/model the avatar falls back to when a session has none. */
   default_provider?: string;
   default_model?: string;
-  /** Empty = Meta default; else palette key (cyan/violet/…). */
+  /** Expert background color: blue | white | black. */
   color?: string;
   workspace_dir?: string;
   description?: string;

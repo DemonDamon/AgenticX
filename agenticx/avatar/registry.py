@@ -22,15 +22,13 @@ AVATARS_ROOT = Path.home() / ".agenticx" / "avatars"
 AVATAR_CONFIG_FILE = "avatar.yaml"
 
 # Must stay aligned with desktop/src/utils/avatar-color.ts AVATAR_PALETTE.
-AVATAR_COLOR_KEYS = frozenset(
-    {"cyan", "violet", "rose", "amber", "emerald", "fuchsia", "sky", "orange"}
-)
+AVATAR_COLOR_KEYS = frozenset({"blue", "white", "black"})
 
 
 def normalize_avatar_color(value: Any) -> str:
-    """Return a valid palette key or empty string (Meta / theme default)."""
+    """Return a valid expert background color, defaulting to blue."""
     key = str(value or "").strip().lower()
-    return key if key in AVATAR_COLOR_KEYS else ""
+    return key if key in AVATAR_COLOR_KEYS else "blue"
 
 
 AVATAR_TAGS_MAX_COUNT = 8
@@ -90,8 +88,8 @@ class AvatarConfig:
     default_provider: str = ""
     default_model: str = ""
     pinned: bool = False
-    # Empty = same as Meta (no pane tint / theme accent). Else an AVATAR_PALETTE key.
-    color: str = ""
+    # Expert background color from the monochrome AVATAR_PALETTE.
+    color: str = "blue"
     tools_enabled: Dict[str, bool] = field(default_factory=dict)
     skills_enabled: Optional[Dict[str, bool]] = None
     # None = mount global brains only; "*" = all visible brains; list = explicit ids
@@ -105,7 +103,7 @@ class AvatarConfig:
             d["brains_enabled"] = self.brains_enabled
         if self.skills_enabled is not None:
             d["skills_enabled"] = self.skills_enabled
-        # Always persist color so clearing back to Meta ("") removes a prior key.
+        # Always persist the expert background color.
         d["color"] = normalize_avatar_color(self.color)
         if self.tags:
             d["tags"] = normalize_avatar_tags(self.tags)
@@ -190,7 +188,7 @@ class AvatarRegistry:
         skills_enabled: Optional[Dict[str, bool]] = None,
         brains_enabled: Optional[Any] = None,
         workspace_dir: str = "",
-        color: str = "",
+        color: str = "blue",
     ) -> AvatarConfig:
         """Create a new avatar with isolated workspace.
 

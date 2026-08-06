@@ -1,9 +1,12 @@
 // ── Avatar (individual) palette ──────────────────────────────────────────────
-export const AVATAR_PALETTE = [
-  "cyan", "violet", "rose", "amber",
-  "emerald", "fuchsia", "sky", "orange",
-] as const;
+export const AVATAR_PALETTE = ["blue", "white", "black"] as const;
 export type AvatarPaletteKey = (typeof AVATAR_PALETTE)[number];
+
+export const AVATAR_COLOR_LABEL: Record<AvatarPaletteKey, string> = {
+  blue: "蓝色",
+  white: "白色",
+  black: "黑色",
+};
 
 // ── Group palette (distinct from avatar palette) ──────────────────────────────
 const GROUP_PALETTE = [
@@ -31,8 +34,8 @@ export function isAvatarPaletteKey(value: string): value is AvatarPaletteKey {
 }
 
 /**
- * Empty / invalid → Meta default (theme accent, no pane tint).
- * Valid palette key → that accent.
+ * Empty / invalid values are treated as the default blue avatar color by the
+ * rendering helpers below. Valid values are limited to the monochrome palette.
  */
 export function normalizeAvatarColor(color?: string | null): AvatarPaletteKey | "" {
   const key = String(color ?? "").trim().toLowerCase();
@@ -47,18 +50,18 @@ export function avatarColorKey(id: string, color?: string | null): AvatarPalette
 
 // ── Public: bg Tailwind class ─────────────────────────────────────────────────
 
-/** Solid circle / initials background. Empty color → theme (Meta). */
+/** Solid circle / initials background. Empty color → blue. */
 export function avatarBgClass(color?: string | null): string {
   const key = normalizeAvatarColor(color);
-  if (!key) return "bg-[rgb(var(--theme-color-rgb,59,130,246))]";
-  return `bg-${key}-600`;
+  if (key === "white") return "bg-white";
+  if (key === "black") return "bg-slate-900";
+  return "bg-blue-600";
 }
 
-/** Initials on avatar circle: theme default uses --theme-color-text; palette keeps white. */
+/** Initials on avatar circle: white background uses dark text. */
 export function avatarFgClass(color?: string | null): string {
   const key = normalizeAvatarColor(color);
-  if (!key) return "text-[var(--theme-color-text)]";
-  return "text-white";
+  return key === "white" ? "text-slate-900" : "text-white";
 }
 
 export function groupColorKey(id: string): GroupPaletteKey {
@@ -79,14 +82,9 @@ export function groupColorByIndex(index: number): { iconBg: string; dotColor: st
 // ── Tint rgba maps ────────────────────────────────────────────────────────────
 
 const AVATAR_TINT: Record<AvatarPaletteKey, string> = {
-  cyan:    "rgba(8,145,178,0.07)",
-  violet:  "rgba(124,58,237,0.07)",
-  rose:    "rgba(225,29,72,0.07)",
-  amber:   "rgba(217,119,6,0.07)",
-  emerald: "rgba(5,150,105,0.07)",
-  fuchsia: "rgba(192,38,211,0.07)",
-  sky:     "rgba(2,132,199,0.07)",
-  orange:  "rgba(234,88,12,0.07)",
+  blue:  "rgba(59,130,246,0.07)",
+  white: "rgba(255,255,255,0.07)",
+  black: "rgba(15,23,42,0.07)",
 };
 
 const GROUP_TINT: Record<GroupPaletteKey, string> = {
@@ -125,26 +123,16 @@ const GROUP_DOT: Record<GroupPaletteKey, string> = {
 
 /** Sidebar「已开窗格」小圆点 — 与同分身头像 `avatarBgClass` 色系一致 */
 const AVATAR_DOT: Record<AvatarPaletteKey, string> = {
-  cyan:    "rgb(34, 211, 238)",
-  violet:  "rgb(167, 139, 250)",
-  rose:    "rgb(251, 113, 133)",
-  amber:   "rgb(251, 191, 36)",
-  emerald: "rgb(52, 211, 153)",
-  fuchsia: "rgb(232, 121, 249)",
-  sky:     "rgb(56, 189, 248)",
-  orange:  "rgb(251, 146, 60)",
+  blue:  "rgb(59, 130, 246)",
+  white: "rgb(148, 163, 184)",
+  black: "rgb(15, 23, 42)",
 };
 
-/** Preview swatches for the settings color picker (solid 600-ish). */
+/** Preview swatches for the settings color picker. */
 export const AVATAR_COLOR_SWATCH: Record<AvatarPaletteKey, string> = {
-  cyan:    "rgb(8, 145, 178)",
-  violet:  "rgb(124, 58, 237)",
-  rose:    "rgb(225, 29, 72)",
-  amber:   "rgb(217, 119, 6)",
-  emerald: "rgb(5, 150, 105)",
-  fuchsia: "rgb(192, 38, 211)",
-  sky:     "rgb(2, 132, 199)",
-  orange:  "rgb(234, 88, 12)",
+  blue:  "rgb(59, 130, 246)",
+  white: "rgb(255, 255, 255)",
+  black: "rgb(15, 23, 42)",
 };
 
 // ── Public helpers ────────────────────────────────────────────────────────────
@@ -152,7 +140,7 @@ export const AVATAR_COLOR_SWATCH: Record<AvatarPaletteKey, string> = {
 /**
  * Transparent background tint for pane.
  * - group ids → group palette
- * - avatar with empty color → undefined (Meta / default surface)
+ * - avatar with empty color → blue tint
  * - avatar with palette color → that tint
  */
 export function avatarTintBg(
@@ -161,8 +149,7 @@ export function avatarTintBg(
 ): string | undefined {
   if (!id) return undefined;
   if (isGroupId(id)) return GROUP_TINT[groupColorKey(id)];
-  const key = normalizeAvatarColor(color);
-  if (!key) return undefined;
+  const key = normalizeAvatarColor(color) || "blue";
   return AVATAR_TINT[key];
 }
 
@@ -178,8 +165,7 @@ export function groupDotColor(id: string): string {
 
 /** Dot color for avatar hasPane indicator */
 export function avatarDotColor(color?: string | null): string {
-  const key = normalizeAvatarColor(color);
-  if (!key) return "rgb(var(--theme-color-rgb, 59, 130, 246))";
+  const key = normalizeAvatarColor(color) || "blue";
   return AVATAR_DOT[key];
 }
 
@@ -203,17 +189,11 @@ export function avatarTintBorder(
 ): string | undefined {
   if (!id) return undefined;
   if (isGroupId(id)) return undefined;
-  const key = normalizeAvatarColor(color);
-  if (!key) return undefined;
+  const key = normalizeAvatarColor(color) || "blue";
   const AVATAR_BORDER: Record<AvatarPaletteKey, string> = {
-    cyan:    "rgba(8,145,178,0.15)",
-    violet:  "rgba(124,58,237,0.15)",
-    rose:    "rgba(225,29,72,0.15)",
-    amber:   "rgba(217,119,6,0.15)",
-    emerald: "rgba(5,150,105,0.15)",
-    fuchsia: "rgba(192,38,211,0.15)",
-    sky:     "rgba(2,132,199,0.15)",
-    orange:  "rgba(234,88,12,0.15)",
+    blue:  "rgba(59,130,246,0.15)",
+    white: "rgba(255,255,255,0.15)",
+    black: "rgba(15,23,42,0.15)",
   };
   return AVATAR_BORDER[key];
 }

@@ -1,7 +1,15 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Save, RotateCcw, X } from "lucide-react";
 import type { Avatar } from "../store";
-import { avatarBgClass, avatarFgClass, normalizeAvatarColor } from "../utils/avatar-color";
+import {
+  avatarBgClass,
+  avatarFgClass,
+  AVATAR_COLOR_LABEL,
+  AVATAR_COLOR_SWATCH,
+  AVATAR_PALETTE,
+  normalizeAvatarColor,
+} from "../utils/avatar-color";
+import type { AvatarPaletteKey } from "../utils/avatar-color";
 import { DefaultModelSelect } from "./DefaultModelSelect";
 
 function avatarInitials(name: string): string {
@@ -88,7 +96,7 @@ export function AvatarSettingsPanel(props: Props) {
   const [avatarImageHint, setAvatarImageHint] = useState("");
   const [defaultProvider, setDefaultProvider] = useState(avatar?.defaultProvider ?? "");
   const [defaultModel, setDefaultModel] = useState(avatar?.defaultModel ?? "");
-  const [colorDraft, setColorDraft] = useState(() => normalizeAvatarColor(avatar?.color));
+  const [colorDraft, setColorDraft] = useState<AvatarPaletteKey>(() => normalizeAvatarColor(avatar?.color) || "blue");
 
   // Tools
   const [tools, setTools] = useState<ToolItem[]>(DEFAULT_TOOLS);
@@ -150,7 +158,7 @@ export function AvatarSettingsPanel(props: Props) {
       setToolsEnabled({ ...(avatar.toolsEnabled ?? {}) });
       setDefaultProvider(avatar.defaultProvider ?? "");
       setDefaultModel(avatar.defaultModel ?? "");
-      setColorDraft(normalizeAvatarColor(avatar.color));
+      setColorDraft(normalizeAvatarColor(avatar.color) || "blue");
       const raw = avatar.skillsEnabled;
       setSkillsEnabledDraft(
         raw && typeof raw === "object"
@@ -479,23 +487,23 @@ export function AvatarSettingsPanel(props: Props) {
               </div>
               <div>
                 <div className="text-sm text-text-muted">背景色</div>
-                <p className="mt-1 text-[11px] text-text-subtle">
-                  专家颜色统一跟随全局主题色（蓝 / 白 / 黑），不再提供其他颜色选项。
-                </p>
                 <div className="mt-2 flex items-center gap-2">
-                  <button
-                    type="button"
-                    aria-label="默认（与元智能体一致）"
-                    aria-pressed={colorDraft === ""}
-                    title="默认"
-                    className={`h-7 w-7 rounded-full border-2 transition ${
-                      colorDraft === ""
-                        ? "border-text-strong ring-2 ring-[rgba(var(--theme-color-rgb,59,130,246),0.35)]"
-                        : "border-border hover:border-text-faint"
-                    }`}
-                    style={{ background: "rgb(var(--theme-color-rgb, 59, 130, 246))" }}
-                    onClick={() => setColorDraft("")}
-                  />
+                  {AVATAR_PALETTE.map((key) => (
+                    <button
+                      key={key}
+                      type="button"
+                      aria-label={AVATAR_COLOR_LABEL[key]}
+                      aria-pressed={colorDraft === key}
+                      title={AVATAR_COLOR_LABEL[key]}
+                      className={`h-7 w-7 rounded-full border-2 transition ${
+                        colorDraft === key
+                          ? "border-text-strong ring-2 ring-white/20"
+                          : "border-transparent hover:scale-105"
+                      }`}
+                      style={{ background: AVATAR_COLOR_SWATCH[key] }}
+                      onClick={() => setColorDraft(key)}
+                    />
+                  ))}
                 </div>
               </div>
               <label className="block text-sm text-text-muted">
