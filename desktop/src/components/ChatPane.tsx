@@ -12145,7 +12145,6 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
                 <PaneModelPicker paneId={pane.id} />
                 <ActionCircleButton
                   hasInput={
-                    !!pane.sessionId &&
                     (!!input.trim() || readyAttachments.length > 0 || quoteTargets.length > 0)
                   }
                   /* `canInterruptCurrentSession` 只覆盖"当前 pane 自己发起 SSE"的场景。
