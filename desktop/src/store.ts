@@ -36,7 +36,7 @@ export type SubAgentStatus =
   | "cancelled";
 export type ConfirmStrategy = "manual" | "semi-auto" | "auto";
 export type ThemeMode = "dark" | "light" | "dim";
-export type ThemeColor = "blue" | "green" | "pink" | "yellow" | "white";
+export type ThemeColor = "blue" | "white" | "black";
 export type ChatStyle = "im" | "terminal" | "clean";
 /** MCP 列表展示态（与 Studio `/api/mcp/servers` 对齐，近似 Cursor 绿/红/灰语义） */
 export type McpServer = {
@@ -894,7 +894,9 @@ function loadTheme(): ThemeMode {
 function loadThemeColor(): ThemeColor {
   try {
     const saved = window.localStorage.getItem(THEME_COLOR_STORAGE_KEY);
-    if (saved === "blue" || saved === "green" || saved === "pink" || saved === "yellow" || saved === "white") return saved as ThemeColor;
+    if (saved === "blue" || saved === "white" || saved === "black") return saved;
+    // 旧版本的彩色主题不再提供入口，迁移到单色主题，避免遗留值继续渲染隐藏颜色。
+    if (saved === "green" || saved === "pink" || saved === "yellow") return "white";
   } catch {
     // ignore storage errors
   }

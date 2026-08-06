@@ -41,7 +41,6 @@ import {
   ExternalLink,
   FolderOpen,
   Library,
-  Mic,
   Network,
   Database,
   X,
@@ -63,6 +62,7 @@ import { buildOfficeCliInstallPrompt } from "../utils/officecli-install-prompt";
 import { buildSkillHubAgentInstallPrompt } from "../utils/skillhub-install-prompt";
 import { buildGuardFixPrompt, type GuardFixScanItem } from "../utils/guard-fix-prompt";
 import { META_AGENT_DISPLAY_NAME } from "../constants/branding";
+import { VOICE_UI_ENABLED } from "../constants/feature-flags";
 import { shouldDisableMcpToggle } from "../utils/mcp-toggle-state";
 import { ForwardPicker, type ForwardConfirmPayload } from "./ForwardPicker";
 import { QrConnectModal } from "./QrConnectModal";
@@ -1021,7 +1021,6 @@ const TABS: { id: SettingsTab; label: string; icon: typeof Settings2 }[] = [
   { id: "memory", label: "记忆管理", icon: Network },
   { id: "hooks", label: "钩子管理", icon: Anchor },
   { id: "automation", label: "定时任务", icon: AutomationTaskIcon },
-  { id: "voice", label: "语音服务", icon: Mic },
   { id: "email", label: "邮件通知", icon: Mail },
   { id: "favorites", label: "内容收藏", icon: Bookmark },
   { id: "server", label: "远程连接", icon: Globe },
@@ -8570,13 +8569,11 @@ export function SettingsPanel({
                     <div className="mt-2 flex items-center gap-3">
                       {[
                         { id: "blue", color: "bg-blue-500", label: "蓝色" },
-                        { id: "green", color: "bg-emerald-500", label: "绿色" },
-                        { id: "pink", color: "bg-pink-500", label: "粉红色" },
-                        { id: "yellow", color: "bg-amber-500", label: "黄色" },
+                        { id: "white", color: "bg-white border border-border", label: "白色" },
                         {
-                          id: "white",
-                          color: theme === "light" ? "bg-slate-900" : "bg-white",
-                          label: "白色/单色",
+                          id: "black",
+                          color: "bg-slate-900",
+                          label: "黑色",
                         },
                       ].map((tc) => (
                         <button
@@ -10249,7 +10246,7 @@ export function SettingsPanel({
               </div>
             )}
 
-            {tab === "voice" && <VoiceSettingsPanel ref={voiceSettingsRef} />}
+            {VOICE_UI_ENABLED && tab === "voice" && <VoiceSettingsPanel ref={voiceSettingsRef} />}
 
             {/* === EMAIL TAB === */}
             {tab === "email" && <EmailSettingsTab />}

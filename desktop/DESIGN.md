@@ -370,10 +370,9 @@ Three **appearance modes** on `:root[data-theme]`:
 | `dim` | Lower contrast charcoal `#181818` for extended night use. |
 | `light` | Paper white `#ffffff` messages well; inverted logo filter off. |
 
-Five **accent presets** on `:root[data-theme-color]`: `blue` (default), `green`, `pink`,
-`yellow`, `white`. They set `--theme-color-rgb` and `--theme-color-text` only — surfaces
-stay neutral. Special case: `white` accent on light theme flips to dark slate RGB for
-contrast.
+Three **accent presets** on `:root[data-theme-color]`: `blue`, `white`, `black`. They set
+`--theme-color-rgb` and `--theme-color-text` only — surfaces stay neutral. Special case:
+`white` accent on light theme flips to dark slate RGB for contrast.
 
 Persisted in `localStorage` keys `agx-theme` and `agx-theme-color`. Focus Mode voice
 capsule uses separate `--focus-*` tokens; it does not switch the main app to a third

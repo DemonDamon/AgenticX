@@ -1,5 +1,6 @@
 import { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState, type KeyboardEventHandler } from "react";
 import { useAppStore, type Message, type QueuedMessage } from "../store";
+import { VOICE_UI_ENABLED } from "../constants/feature-flags";
 import { formatModelOptionLabel } from "../utils/model-display";
 import { collectSelectableModelOptions, isModelSelectable } from "../utils/model-options";
 import { SubAgentPanel } from "./SubAgentPanel";
@@ -2809,13 +2810,15 @@ export function ChatView({ onOpenConfirm, onOpenClarification, onSubmitClarifica
             disabled={!canSend && !streaming}
             className="min-h-[40px] max-h-[120px] flex-1 resize-none rounded-xl border border-border bg-surface-card px-3 py-2.5 text-sm outline-none transition placeholder:text-text-faint focus:border-cyan-500/50"
           />
-          <button
-            className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-border text-lg transition hover:bg-surface-hover"
-            onClick={onMicClick}
-            title={voiceTranscribing ? "识别中" : voiceRecording ? "停止录音" : "语音输入"}
-          >
-            {voiceTranscribing ? "…" : "🎙"}
-          </button>
+          {VOICE_UI_ENABLED ? (
+            <button
+              className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-border text-lg transition hover:bg-surface-hover"
+              onClick={onMicClick}
+              title={voiceTranscribing ? "识别中" : voiceRecording ? "停止录音" : "语音输入"}
+            >
+              {voiceTranscribing ? "…" : "🎙"}
+            </button>
+          ) : null}
           {showStopButton ? (
             <div className="flex items-center gap-2">
               <button className="flex h-10 shrink-0 items-center rounded-xl bg-rose-500 px-4 text-sm font-medium text-white transition hover:bg-rose-400" onClick={stopStreaming}>中断</button>

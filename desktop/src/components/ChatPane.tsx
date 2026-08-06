@@ -19,7 +19,6 @@ import {
   SquarePen,
   Wrench,
   Users,
-  PhoneCall,
   History,
   Settings,
   X,
@@ -37,6 +36,7 @@ import {
   type PendingConfirm,
   type QueuedMessage,
 } from "../store";
+import { VOICE_UI_ENABLED } from "../constants/feature-flags";
 import {
   appendDictationText,
   cancelDictation,
@@ -1351,6 +1351,8 @@ function ActionCircleButton({
   onMic,
   onStop,
 }: ActionCircleButtonProps) {
+  if (!VOICE_UI_ENABLED) return null;
+
   let onClick: () => void;
   let title: string;
   let icon: ReactNode;
@@ -11397,7 +11399,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
                 <Settings className="h-[18px] w-[18px]" strokeWidth={1.8} />
               </button>
             ) : null}
-            {!isGroupPane && (
+            {VOICE_UI_ENABLED && !isGroupPane && (
               <button
                 type="button"
                 className="agx-topbar-btn !px-[5px]"

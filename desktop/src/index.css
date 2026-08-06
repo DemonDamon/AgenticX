@@ -538,16 +538,8 @@ body.agx-settings-nav-resizing {
   --theme-color-rgb: 59, 130, 246;
   --theme-color-text: #ffffff;
 }
-:root[data-theme-color="green"] {
-  --theme-color-rgb: 16, 185, 129;
-  --theme-color-text: #ffffff;
-}
-:root[data-theme-color="pink"] {
-  --theme-color-rgb: 236, 72, 153;
-  --theme-color-text: #ffffff;
-}
-:root[data-theme-color="yellow"] {
-  --theme-color-rgb: 245, 158, 11;
+:root[data-theme-color="black"] {
+  --theme-color-rgb: 15, 23, 42;
   --theme-color-text: #ffffff;
 }
 :root[data-theme-color="white"] {
@@ -815,4 +807,3 @@ input[type="radio"] {
   border: 3px solid transparent;
   background-clip: padding-box;
 }
-
