@@ -17,10 +17,22 @@ export type ClarifyResumePayload = {
   timedOut?: boolean;
 };
 
+/** clarify_chat 回复在 answers 中的键（对话式澄清无 questionId）。 */
+export const CHAT_CLARIFY_ANSWER_KEY = "__chat__";
+/** 计划 gate 动作（approve/edit/skip）在 answers 中的键。 */
+export const PLAN_GATE_ACTION_KEY = "__plan_action__";
+/** 计划 gate 编辑补丁（JSON string，仅 subQuestions 白名单）在 answers 中的键。 */
+export const PLAN_GATE_PATCH_KEY = "__plan_patch__";
+
+/** 单条答案 / chat 回复 / 计划补丁的长度上限（防滥用）。 */
+export const MAX_GATE_ANSWER_CHARS = 2_000;
+export const MAX_PLAN_PATCH_CHARS = 4_000;
+
 type Waiter = {
   resolve: (value: ClarifyResumePayload) => void;
   reject: (reason?: unknown) => void;
-  timer: ReturnType<typeof setTimeout>;
+  /** null = indefinite wait (no auto timeout). */
+  timer: ReturnType<typeof setTimeout> | null;
   poll: ReturnType<typeof setInterval>;
   settled: boolean;
 };
@@ -119,13 +131,17 @@ function settleWaiter(runId: string, payload: ClarifyResumePayload): void {
     return;
   }
   waiter.settled = true;
-  clearTimeout(waiter.timer);
+  if (waiter.timer !== null) clearTimeout(waiter.timer);
   clearInterval(waiter.poll);
   waiters().delete(runId);
   removePending(runId);
   waiter.resolve(payload);
 }
 
+/**
+ * Wait until resume resolves this run's gate.
+ * `timeoutMs <= 0` or non-finite → **indefinite** (no auto timeout); used by plan_chat gate.
+ */
 export function waitForClarifyResume(
   runId: string,
   timeoutMs: number,
@@ -133,18 +149,23 @@ export function waitForClarifyResume(
   const existing = waiters().get(runId);
   if (existing && !existing.settled) {
     existing.settled = true;
-    clearTimeout(existing.timer);
+    if (existing.timer !== null) clearTimeout(existing.timer);
     clearInterval(existing.poll);
     waiters().delete(runId);
-    existing.reject(new Error("clarify waiter replaced"));
+    // Prefer resolve-skip over reject to avoid unhandled rejections when the
+    // previous waiter's Promise is no longer awaited (tests / orphan reopen).
+    existing.resolve({ answers: {}, skip: true, timedOut: true });
   }
 
   writePending(runId, { status: "waiting", updatedAt: Date.now() });
 
   return new Promise<ClarifyResumePayload>((resolve, reject) => {
-    const timer = setTimeout(() => {
-      settleWaiter(runId, { answers: {}, skip: true, timedOut: true });
-    }, timeoutMs);
+    const indefinite = !(timeoutMs > 0 && Number.isFinite(timeoutMs));
+    const timer = indefinite
+      ? null
+      : setTimeout(() => {
+          settleWaiter(runId, { answers: {}, skip: true, timedOut: true });
+        }, timeoutMs);
 
     const poll = setInterval(() => {
       const doc = readPending(runId);
@@ -205,13 +226,55 @@ export function hasClarifyWaiter(runId: string): boolean {
   return readPending(runId)?.status === "waiting";
 }
 
+/**
+ * True only when THIS process still holds the Promise waiter.
+ * Disk `waiting` alone does not count — after full process restart the file may
+ * linger while nobody is listening; orphan recovery must still be allowed.
+ */
+export function hasLiveClarifyWaiter(runId: string): boolean {
+  const memory = waiters().get(runId);
+  return Boolean(memory && !memory.settled);
+}
+
+/**
+ * After resolveClarifyResume wrote disk `resolved` with no in-process waiter,
+ * wait for a peer isolate's poller to consume it (file removed).
+ * - delivered: peer settled the gate
+ * - stale: still resolved / untouched after timeout → nobody listening (orphan OK)
+ */
+export async function awaitPeerClarifyHandoff(
+  runId: string,
+  timeoutMs = 800,
+): Promise<"delivered" | "stale"> {
+  const deadline = Date.now() + Math.max(0, timeoutMs);
+  while (Date.now() <= deadline) {
+    const doc = readPending(runId);
+    if (!doc) return "delivered";
+    if (doc.status === "waiting") return "stale";
+    await new Promise((resolve) => setTimeout(resolve, 100));
+  }
+  return readPending(runId) ? "stale" : "delivered";
+}
+
 /** Test helper */
 export function clearClarifyWaiters(): void {
   for (const [runId, waiter] of waiters()) {
+    if (waiter.settled) {
+      removePending(runId);
+      continue;
+    }
     waiter.settled = true;
-    clearTimeout(waiter.timer);
+    if (waiter.timer !== null) clearTimeout(waiter.timer);
     clearInterval(waiter.poll);
     removePending(runId);
+    // Resolve (skip) instead of reject: rejecting orphaned indefinite waits
+    // surfaces as Vitest "Unhandled Rejection" when tests fire-and-forget
+    // waitForClarifyResume. Skip unblocks orchestrator loops cleanly.
+    try {
+      waiter.resolve({ answers: {}, skip: true, timedOut: true });
+    } catch {
+      // already settled
+    }
   }
   waiters().clear();
   const dir = resolveClarifyWaitDir();

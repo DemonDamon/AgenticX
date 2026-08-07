@@ -1,21 +1,29 @@
 import { describe, expect, it, vi } from "vitest";
 import {
+  CHAT_CLARIFY_ANSWER_KEY,
   DEEP_RESEARCH_SEARCH_FAILED,
   MAX_RESULTS_PER_LANE,
   MAX_SOURCES,
   MIN_RESULTS_PER_LANE,
+  PLAN_GATE_ACTION_KEY,
   SEARCH_CONCURRENCY,
   expandLanesFromClarifyAnswers,
+  filterCitationsForSection,
   formatEvidencePack,
   formatSourcesAppendix,
   mapPool,
   matchSelectedOptions,
+  parsePlanPatchSubQuestions,
   resolveResultsPerLane,
   runDeepResearchTurn,
 } from "./orchestrator";
 import { createMemoryArtifactStore } from "./artifact-store";
 import { createMemoryRunStore } from "./run-store";
-import { clearClarifyWaiters, resolveClarifyResume } from "./run-wait";
+import {
+  clearClarifyWaiters,
+  hasLiveClarifyWaiter,
+  resolveClarifyResume,
+} from "./run-wait";
 import type { ResearchPlan } from "./planner";
 import type { Citation } from "./registry";
 import { emptyFetchStats } from "../web-search/page-fetch";
@@ -603,7 +611,7 @@ describe("runDeepResearchTurn", () => {
     );
   });
 
-  it("honors clarify html format: report.html is written and summary links to it", async () => {
+  it("delivery prefs decoupled from clarify card: defaults to md, html still secondary", async () => {
     clearClarifyWaiters();
     const store = createMemoryArtifactStore();
     const fetchImpl = vi.fn(async (_url: string, init?: RequestInit) => {
@@ -619,7 +627,7 @@ describe("runDeepResearchTurn", () => {
       return synthUpstream("# 报告\n\n结论 [1]\n");
     });
 
-    const responsePromise = runDeepResearchTurn(
+    const response = await runDeepResearchTurn(
       { model: "m", messages: [{ role: "user", content: "minimax h3 核心技术点" }] },
       {
         ...baseDeps({
@@ -641,25 +649,23 @@ describe("runDeepResearchTurn", () => {
       },
     );
 
-    await new Promise((r) => setTimeout(r, 30));
-    expect(
-      resolveClarifyResume("run-html-prefs", {
-        answers: {
-          q_delivery_shape: "结构化报告——完整论证链",
-          q_delivery_format: "可视化网页（.html）",
-        },
-        skip: false,
-      }),
-    ).toBe(true);
-
-    const response = await responsePromise;
+    // 新契约：交付偏好不再以阻塞题混排进澄清卡；无方向问题时直接开跑。
     const { text, events } = await readSsePayload(response);
+    expect(
+      events.some(
+        (e) => e.type === "clarify" && String(e.questionId ?? "").startsWith("q_delivery"),
+      ),
+    ).toBe(false);
+    // 默认 md 主交付；可视化 HTML 仍作为次级产物生成。
+    const mdEvent = events.find(
+      (e) => e.type === "artifact" && String(e.path).endsWith("final-report.md"),
+    );
     const htmlEvent = events.find(
       (e) => e.type === "artifact" && String(e.path).endsWith("report.html"),
     );
+    expect(mdEvent).toBeTruthy();
     expect(htmlEvent).toBeTruthy();
-    // Summary must surface the HTML primary even if the model forgot the link.
-    expect(text).toContain(`artifact:${String(htmlEvent!.id)}`);
+    expect(text.trim().length).toBeGreaterThan(0);
 
     const list = await store.listByRun("t1", "u1", "run-html-prefs");
     expect(list.some((a) => a.path.endsWith("report.html"))).toBe(true);
@@ -969,6 +975,64 @@ describe("adaptive lane count", () => {
       (e) => e.type === "lane_started" && e.laneId !== "recon-cold-start",
     );
     expect(researchLanes).toHaveLength(2);
+  });
+
+  it("announces every planned lane before any lane progress (even when > SEARCH_CONCURRENCY)", async () => {
+    // Regression: title said「已拆解 4 条」but only 3 cards showed until a slot freed.
+    expect(SEARCH_CONCURRENCY).toBeLessThan(4);
+    const subQuestions = ["lane-a", "lane-b", "lane-c", "lane-d"];
+
+    const response = await runDeepResearchTurn(
+      { model: "m", messages: [{ role: "user", content: "q" }] },
+      {
+        ...baseDeps({
+          fetchImpl: vi.fn(async (_url: string, init?: RequestInit) => {
+            const body = JSON.parse(String(init?.body ?? "{}")) as { stream?: boolean };
+            if (body.stream === false) {
+              return {
+                ok: true,
+                json: async () => ({ choices: [{ message: { content: "memo" } }] }),
+              } as Response;
+            }
+            return synthUpstream("announce-4-lanes");
+          }) as unknown as typeof fetch,
+          buildPlan: async () => ({
+            topic: "T",
+            complexity: "moderate" as const,
+            subQuestions,
+          }),
+          executeSearch: async (query: string) => [
+            { title: query, url: `https://ex.com/${encodeURIComponent(query)}`, snippet: "s" },
+          ],
+        }),
+      },
+    );
+
+    const { events } = await readSsePayload(response);
+    const phaseIdx = events.findIndex(
+      (e) =>
+        e.type === "phase" &&
+        e.phase === "lanes" &&
+        typeof e.message === "string" &&
+        e.message.includes("4 条"),
+    );
+    expect(phaseIdx).toBeGreaterThanOrEqual(0);
+
+    const announcedBeforeProgress: string[] = [];
+    for (const event of events.slice(phaseIdx + 1)) {
+      if (event.type === "lane_started" && event.laneId !== "recon-cold-start") {
+        announcedBeforeProgress.push(String(event.laneId));
+        continue;
+      }
+      if (
+        event.type === "lane_progress" ||
+        event.type === "lane_done" ||
+        event.type === "lane_sources"
+      ) {
+        break;
+      }
+    }
+    expect(announcedBeforeProgress).toHaveLength(4);
   });
 });
 
@@ -1587,5 +1651,522 @@ describe("page fetch + sectioned report", () => {
     expect(raw).toContain("[DONE]");
     expect(events.some((e) => e.type === "phase" && e.phase === "done")).toBe(true);
     warn.mockRestore();
+  });
+});
+
+describe("interaction policy wiring", { concurrent: false }, () => {
+  it("plan_chat: multi-round reply revises plan then approve starts lanes", async () => {
+    clearClarifyWaiters();
+    const store = createMemoryArtifactStore();
+    const runStore = createMemoryRunStore();
+    const planCalls: string[] = [];
+    let planCall = 0;
+    const responsePromise = runDeepResearchTurn(
+      {
+        model: "m",
+        agenticx_deep_research: true,
+        agenticx_deep_research_interaction: "plan_chat",
+        messages: [{ role: "user", content: "调研一下向量数据库的核心技术点" }],
+      },
+      baseDeps({
+        awaitClarify: true,
+        clarifyTimeoutMs: 5_000,
+        artifactStore: store,
+        runStore,
+        runId: "run-plan-chat",
+        fetchImpl: vi.fn(async (_url: string, init?: RequestInit) => {
+          const body = JSON.parse(String(init?.body ?? "{}")) as { stream?: boolean };
+          if (body.stream === false) {
+            return {
+              ok: true,
+              json: async () => ({ choices: [{ message: { content: "memo" } }] }),
+            } as Response;
+          }
+          return synthUpstream("# 报告\n\n结论 [1]\n");
+        }) as unknown as typeof fetch,
+        buildPlan: async ({ userQuery }: { userQuery: string }) => {
+          planCalls.push(userQuery);
+          planCall += 1;
+          if (planCall === 1) {
+            return {
+              topic: "向量数据库",
+              complexity: "moderate" as const,
+              subQuestions: ["架构", "生态"],
+            };
+          }
+          return {
+            topic: "向量数据库",
+            complexity: "moderate" as const,
+            subQuestions: ["性能优化", "成本分析"],
+          };
+        },
+        executeSearch: async () => [{ title: "t", url: "https://ex.com", snippet: "s" }],
+      }),
+    );
+    const waitForGate = async (timeoutMs = 5_000) => {
+      const start = Date.now();
+      while (Date.now() - start < timeoutMs) {
+        if (hasLiveClarifyWaiter("run-plan-chat")) return;
+        await new Promise((r) => setTimeout(r, 20));
+      }
+      throw new Error("plan_chat gate waiter not ready");
+    };
+    await waitForGate();
+    // Round 1: revise plan via chat
+    expect(
+      resolveClarifyResume("run-plan-chat", {
+        answers: { [CHAT_CLARIFY_ANSWER_KEY]: "侧重性能" },
+        skip: false,
+      }),
+    ).toBe(true);
+    await waitForGate();
+    // Round 2: start research
+    expect(
+      resolveClarifyResume("run-plan-chat", {
+        answers: { [PLAN_GATE_ACTION_KEY]: "approve" },
+        skip: false,
+      }),
+    ).toBe(true);
+
+    const response = await responsePromise;
+    const { events } = await readSsePayload(response);
+    expect(events.some((e) => e.type === "research_profile" && e.planVisibility === "chat_editable")).toBe(
+      true,
+    );
+    const planEvents = events.filter((e) => e.type === "research_plan");
+    expect(planEvents.map((e) => e.action)).toEqual(["proposed", "updated", "approved"]);
+    expect(planEvents[1]?.version).toBe(2);
+    const updated = planEvents[1]?.plan as { subQuestions: Array<{ title: string }> };
+    expect(updated.subQuestions.map((sq) => sq.title)).toEqual(["性能优化", "成本分析"]);
+    const planChatPrompts = events.filter(
+      (e) => e.type === "clarify_chat" && e.phase === "plan",
+    );
+    expect(planChatPrompts.length).toBeGreaterThanOrEqual(2);
+    expect(planCalls.length).toBeGreaterThanOrEqual(2);
+    expect(planCalls[1]).toContain("侧重性能");
+    expect(planCalls[1]).toContain("【计划对话】");
+  });
+
+  it("narrow factual ask: no clarify events at all, profile mode none", async () => {
+    const response = await runDeepResearchTurn(
+      { model: "m", messages: [{ role: "user", content: "这个 API 的发布日期是什么" }] },
+      baseDeps({
+        runId: "run-narrow",
+        fetchImpl: vi.fn(async (_url: string, init?: RequestInit) => {
+          const body = JSON.parse(String(init?.body ?? "{}")) as { stream?: boolean };
+          if (body.stream === false) {
+            return {
+              ok: true,
+              json: async () => ({ choices: [{ message: { content: "memo" } }] }),
+            } as Response;
+          }
+          return synthUpstream("# 报告\n\n2026-08-01 发布 [1]\n");
+        }) as unknown as typeof fetch,
+        buildPlan: async () => ({
+          topic: "发布日期",
+          complexity: "simple" as const,
+          subQuestions: ["发布日期"],
+        }),
+        executeSearch: async () => [{ title: "t", url: "https://ex.com", snippet: "s" }],
+      }),
+    );
+    const { events } = await readSsePayload(response);
+    expect(events.some((e) => e.type === "clarify")).toBe(false);
+    expect(events.some((e) => e.type === "clarify_chat")).toBe(false);
+    const profile = events.find((e) => e.type === "research_profile");
+    expect(profile?.clarifyMode).toBe("none");
+    // research_plan 仍生成（hidden 也落事件）
+    expect(events.some((e) => e.type === "research_plan" && e.action === "proposed")).toBe(true);
+  });
+
+  it("plan_chat: does not auto-start when clarify timeout would have fired", async () => {
+    clearClarifyWaiters();
+    let lanesStarted = false;
+    const responsePromise = runDeepResearchTurn(
+      {
+        model: "m",
+        agenticx_deep_research_interaction: "plan_chat",
+        messages: [{ role: "user", content: "帮我做一份云盘记忆能力调研" }],
+      },
+      baseDeps({
+        awaitClarify: true,
+        clarifyTimeoutMs: 80,
+        runStore: createMemoryRunStore(),
+        runId: "run-plan-no-timeout",
+        fetchImpl: vi.fn(async (_url: string, init?: RequestInit) => {
+          const body = JSON.parse(String(init?.body ?? "{}")) as { stream?: boolean };
+          if (body.stream === false) {
+            return {
+              ok: true,
+              json: async () => ({ choices: [{ message: { content: "memo" } }] }),
+            } as Response;
+          }
+          return synthUpstream("# 报告\n");
+        }) as unknown as typeof fetch,
+        buildPlan: async () => ({
+          topic: "云盘记忆",
+          complexity: "moderate" as const,
+          subQuestions: ["长期记忆", "跨会话个性化"],
+        }),
+        executeSearch: async () => {
+          lanesStarted = true;
+          return [{ title: "t", url: "https://ex.com/1", snippet: "s" }];
+        },
+      }),
+    );
+
+    // Far beyond clarifyTimeoutMs — plan gate must still be waiting.
+    await new Promise((r) => setTimeout(r, 250));
+    expect(lanesStarted).toBe(false);
+    expect(hasLiveClarifyWaiter("run-plan-no-timeout")).toBe(true);
+
+    expect(
+      resolveClarifyResume("run-plan-no-timeout", {
+        answers: { [PLAN_GATE_ACTION_KEY]: "approve" },
+        skip: false,
+      }),
+    ).toBe(true);
+
+    const response = await responsePromise;
+    const { events } = await readSsePayload(response);
+    expect(
+      events.some(
+        (e) =>
+          e.type === "narrative" &&
+          typeof e.text === "string" &&
+          e.text.includes("计划确认超时"),
+      ),
+    ).toBe(false);
+    expect(events.some((e) => e.type === "research_plan" && e.action === "approved")).toBe(true);
+    expect(lanesStarted).toBe(true);
+  });
+
+  it("plan_chat: skip / 直接开始 approves current plan without extra revision", async () => {
+    clearClarifyWaiters();
+    const searchedQueries: string[] = [];
+    const responsePromise = runDeepResearchTurn(
+      {
+        model: "m",
+        agenticx_deep_research_interaction: "plan_chat",
+        messages: [{ role: "user", content: "这个 API 的发布日期是什么" }],
+      },
+      baseDeps({
+        awaitClarify: true,
+        clarifyTimeoutMs: 5_000,
+        runStore: createMemoryRunStore(),
+        runId: "run-plan-gate",
+        fetchImpl: vi.fn(async (_url: string, init?: RequestInit) => {
+          const body = JSON.parse(String(init?.body ?? "{}")) as { stream?: boolean };
+          if (body.stream === false) {
+            return {
+              ok: true,
+              json: async () => ({ choices: [{ message: { content: "memo" } }] }),
+            } as Response;
+          }
+          return synthUpstream("# 报告\n\n结论 [1]\n");
+        }) as unknown as typeof fetch,
+        buildPlan: async () => ({
+          topic: "发布日期",
+          complexity: "simple" as const,
+          subQuestions: ["原始子问题"],
+        }),
+        executeSearch: async (query: string) => {
+          searchedQueries.push(query);
+          return [{ title: "t", url: `https://ex.com/${encodeURIComponent(query)}`, snippet: "s" }];
+        },
+      }),
+    );
+    {
+      const start = Date.now();
+      while (Date.now() - start < 5_000 && !hasLiveClarifyWaiter("run-plan-gate")) {
+        await new Promise((r) => setTimeout(r, 20));
+      }
+    }
+    expect(
+      resolveClarifyResume("run-plan-gate", {
+        answers: { [CHAT_CLARIFY_ANSWER_KEY]: "直接开始" },
+        skip: false,
+      }),
+    ).toBe(true);
+
+    const response = await responsePromise;
+    const { events } = await readSsePayload(response);
+    const planEvents = events.filter((e) => e.type === "research_plan");
+    expect(planEvents.map((e) => e.action)).toEqual(["proposed", "approved"]);
+    expect(searchedQueries.some((q) => q.includes("原始子问题"))).toBe(true);
+  });
+
+  it("continueFromPlanGate: skips recon/plan wait and searches patched subQuestions", async () => {
+    clearClarifyWaiters();
+    const runStore = createMemoryRunStore();
+    await runStore.create({
+      runId: "run-orphan-continue",
+      tenantId: "t1",
+      userId: "u1",
+      sessionId: "s1",
+      topic: "云盘记忆",
+    });
+    await runStore.appendEvents(
+      "run-orphan-continue",
+      [
+        { type: "run_started", runId: "run-orphan-continue" },
+        {
+          type: "research_plan",
+          runId: "run-orphan-continue",
+          action: "updated",
+          version: 2,
+          plan: {
+            version: 2,
+            objective: "云盘记忆",
+            scope: [],
+            subQuestions: [{ id: "sq1", title: "续跑子问题" }],
+            sourceStrategy: [],
+            deliverables: [],
+            assumptions: [],
+          },
+        },
+      ],
+      { status: "running", phase: "lanes" },
+    );
+
+    const searchedQueries: string[] = [];
+    const response = await runDeepResearchTurn(
+      {
+        model: "m",
+        messages: [{ role: "user", content: "云盘记忆" }],
+      },
+      baseDeps({
+        runId: "run-orphan-continue",
+        runStore,
+        tenantId: "t1",
+        userId: "u1",
+        sessionId: "s1",
+        awaitClarify: false,
+        continueFromPlanGate: {
+          plan: {
+            topic: "云盘记忆",
+            complexity: "simple",
+            subQuestions: ["续跑子问题"],
+          },
+          planVersion: 2,
+          topic: "云盘记忆",
+          planEventEmitted: true,
+        },
+        fetchImpl: vi.fn(async (_url: string, init?: RequestInit) => {
+          const body = JSON.parse(String(init?.body ?? "{}")) as { stream?: boolean };
+          if (body.stream === false) {
+            return {
+              ok: true,
+              json: async () => ({ choices: [{ message: { content: "memo" } }] }),
+            } as Response;
+          }
+          return synthUpstream("# 报告\n");
+        }) as unknown as typeof fetch,
+        executeSearch: async (query: string) => {
+          searchedQueries.push(query);
+          return [{ title: "t", url: "https://ex.com/1", snippet: "s" }];
+        },
+      }),
+    );
+
+    const { events } = await readSsePayload(response);
+    expect(events.some((e) => e.type === "run_started")).toBe(false);
+    expect(events.some((e) => e.type === "narrative" && String(e.text).includes("恢复中断"))).toBe(
+      true,
+    );
+    expect(searchedQueries.some((q) => q.includes("续跑子问题"))).toBe(true);
+    const row = await runStore.get("t1", "u1", "run-orphan-continue");
+    expect(row?.events.some((e) => e.type === "run_started")).toBe(true);
+  });
+
+  it("midrun clarify: skipped preflight + thin evidence → second card round, constraint reaches reflect", async () => {
+    clearClarifyWaiters();
+    const reflectTopics: string[] = [];
+    const waitForMidrunGate = async () => {
+      const start = Date.now();
+      while (Date.now() - start < 5_000) {
+        if (hasLiveClarifyWaiter("run-midrun")) return;
+        await new Promise((r) => setTimeout(r, 20));
+      }
+      throw new Error("midrun clarify waiter not ready");
+    };
+    const responsePromise = runDeepResearchTurn(
+      { model: "m", messages: [{ role: "user", content: "调研一下向量数据库的核心技术点" }] },
+      baseDeps({
+        awaitClarify: true,
+        clarifyTimeoutMs: 5_000,
+        runStore: createMemoryRunStore(),
+        runId: "run-midrun",
+        fetchImpl: vi.fn(async (_url: string, init?: RequestInit) => {
+          const body = JSON.parse(String(init?.body ?? "{}")) as { stream?: boolean };
+          if (body.stream === false) {
+            return {
+              ok: true,
+              json: async () => ({ choices: [{ message: { content: "memo" } }] }),
+            } as Response;
+          }
+          return synthUpstream("# 报告\n\n结论 [1]\n");
+        }) as unknown as typeof fetch,
+        proposeClarify: async () => ({
+          needed: true as const,
+          questions: [
+            {
+              id: "q_focus",
+              question: "方向？",
+              options: [
+                { id: "a", label: "架构" },
+                { id: "b", label: "性能" },
+              ],
+              allowCustom: true,
+            },
+          ],
+        }),
+        buildPlan: async () => ({
+          topic: "向量数据库",
+          complexity: "moderate" as const,
+          subQuestions: ["架构", "性能"],
+        }),
+        // 所有车道零来源（但不抛错）→ 证据过薄触发 midrun
+        executeSearch: async () => [],
+        reflectFn: async ({ topic }: { topic: string }) => {
+          reflectTopics.push(topic);
+          return [];
+        },
+      }),
+    );
+    await waitForMidrunGate();
+    // preflight：跳过
+    expect(resolveClarifyResume("run-midrun", { answers: {}, skip: true })).toBe(true);
+    await waitForMidrunGate();
+    // midrun：补充约束
+    expect(
+      resolveClarifyResume("run-midrun", { answers: { q_focus: "性能" }, skip: false }),
+    ).toBe(true);
+
+    const response = await responsePromise;
+    const { events } = await readSsePayload(response);
+    const midrunCards = events.filter((e) => e.type === "clarify" && e.phase === "midrun");
+    expect(midrunCards.length).toBeGreaterThan(0);
+    expect(midrunCards[0]?.roundIndex).toBe(1);
+    expect(reflectTopics.some((t) => t.includes("性能"))).toBe(true);
+    const planEvents = events.filter((e) => e.type === "research_plan");
+    expect(planEvents.some((e) => e.action === "updated" && e.version === 2)).toBe(true);
+  });
+
+  it("parsePlanPatchSubQuestions: whitelist subQuestions only, caps count/length, never throws", () => {
+    expect(parsePlanPatchSubQuestions(undefined)).toEqual([]);
+    expect(parsePlanPatchSubQuestions("not-json")).toEqual([]);
+    expect(parsePlanPatchSubQuestions(JSON.stringify({ subQuestions: "nope" }))).toEqual([]);
+    expect(
+      parsePlanPatchSubQuestions(
+        JSON.stringify({ subQuestions: [" a ", "", 42, "b"], scope: ["evil"] }),
+      ),
+    ).toEqual(["a", "b"]);
+    const many = Array.from({ length: 20 }, (_, i) => `q${i}`);
+    expect(parsePlanPatchSubQuestions(JSON.stringify({ subQuestions: many })).length).toBe(8);
+  });
+
+  it("filterCitationsForSection: 按 citationIndexes 裁剪，命中无效回退全量", () => {
+    const rows = [
+      {
+        question: "q1",
+        citations: [
+          { index: 1, title: "t1", url: "https://ex.com/1", snippet: "s1" },
+          { index: 2, title: "t2", url: "https://ex.com/2", snippet: "s2" },
+        ],
+      },
+      {
+        question: "q2",
+        citations: [{ index: 3, title: "t3", url: "https://ex.com/3", snippet: "s3" }],
+      },
+    ];
+    const recon = [{ index: 4, title: "t4", url: "https://ex.com/4", snippet: "s4" }];
+
+    const hit = filterCitationsForSection(rows, recon, [2]);
+    expect(hit.fellBack).toBe(false);
+    expect(hit.filtered).toHaveLength(1);
+    expect(hit.filtered[0]?.citations.map((c) => c.index)).toEqual([2]);
+    expect(hit.filteredRecon).toEqual([]);
+
+    // 空索引 → 全量回退（首节/模型未标注场景）
+    const empty = filterCitationsForSection(rows, recon, []);
+    expect(empty.fellBack).toBe(true);
+    expect(empty.filtered).toHaveLength(2);
+
+    // 索引完全不命中 → 全量回退（宁可贵不可错）
+    const miss = filterCitationsForSection(rows, recon, [99]);
+    expect(miss.fellBack).toBe(true);
+    expect(miss.filtered).toHaveLength(2);
+  });
+
+  it("分节写作只收到该节 citationIndexes 的证据（token 不再按节数放大）", async () => {
+    const sectionPrompts: string[] = [];
+    const fetchImpl = vi.fn(async (_url: string, init?: RequestInit) => {
+      const body = JSON.parse(String(init?.body ?? "{}")) as {
+        stream?: boolean;
+        messages?: Array<{ role: string; content: string }>;
+      };
+      if (body.stream === false) {
+        const user = body.messages?.find((m) => m.role === "user")?.content ?? "";
+        // 大纲调用：返回带 citation_indexes 的两节大纲
+        if (user.includes("证据包")) {
+          return {
+            ok: true,
+            json: async () => ({
+              choices: [
+                {
+                  message: {
+                    content: JSON.stringify({
+                      title: "T",
+                      sections: [
+                        { id: "s1", title: "核心结论", brief: "b", citation_indexes: [1, 2], format: "prose" },
+                        { id: "s2", title: "架构分析", brief: "b", citation_indexes: [1], format: "comparison_table" },
+                        { id: "s3", title: "不确定性与信息缺口", brief: "b", citation_indexes: [], format: "prose" },
+                      ],
+                    }),
+                  },
+                },
+              ],
+            }),
+          } as Response;
+        }
+        return {
+          ok: true,
+          json: async () => ({ choices: [{ message: { content: "memo" } }] }),
+        } as Response;
+      }
+      // 分节写作（stream）：记录每节 user prompt
+      const user = body.messages?.find((m) => m.role === "user")?.content ?? "";
+      if (user.includes("当前章节")) sectionPrompts.push(user);
+      return synthUpstream("本节正文 | 维度 | A |\n| --- | --- |\n| x | 1 [1] |");
+    }) as unknown as typeof fetch;
+
+    const response = await runDeepResearchTurn(
+      { model: "m", messages: [{ role: "user", content: "这个 API 的发布日期是什么" }] },
+      baseDeps({
+        runId: "run-section-evidence",
+        runStore: createMemoryRunStore(),
+        fetchImpl,
+        buildPlan: async () => ({
+          topic: "T",
+          complexity: "moderate" as const,
+          subQuestions: ["架构", "性能"],
+        }),
+        executeSearch: async (query: string) => [
+          {
+            title: query.includes("架构") ? "架构来源" : "性能来源",
+            url: `https://ex.com/${encodeURIComponent(query)}`,
+            snippet: "s",
+          },
+        ],
+      }),
+    );
+    await readSsePayload(response);
+    // 首节 + 中间节（s3 被 normalize 前可能裁掉；至少有 s2 的裁剪证据）
+    const s2Prompt = sectionPrompts.find((p) => p.includes("架构分析"));
+    expect(s2Prompt).toBeTruthy();
+    // s2 只引用 [1] → 证据包只含第 1 条来源，不含第 2 条
+    expect(s2Prompt).toContain("[1]");
+    expect(s2Prompt).not.toContain("[2]");
   });
 });
