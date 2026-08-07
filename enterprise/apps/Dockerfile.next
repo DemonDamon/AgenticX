@@ -48,6 +48,12 @@ WORKDIR /app/apps/${APP_NAME}
 RUN groupadd --system --gid 1001 nodejs \
   && useradd --system --uid 1001 --gid nodejs nextjs
 
+# directFetch 优先用 curl 以继承 HTTP(S)_PROXY / SOCKS（Node undici 不读这些环境变量）。
+# slim 基础镜像不含 curl，缺失时每次外站抓取都会白 fork 一个 ENOENT 子进程。
+RUN apt-get update \
+  && apt-get install -y --no-install-recommends curl ca-certificates \
+  && rm -rf /var/lib/apt/lists/*
+
 COPY --from=build --chown=nextjs:nodejs /work/apps/${APP_NAME}/.next/standalone /app
 COPY --from=build --chown=nextjs:nodejs /work/apps/${APP_NAME}/.next/static /app/apps/${APP_NAME}/.next/static
 COPY --from=build --chown=nextjs:nodejs /work/apps/${APP_NAME}/public /app/apps/${APP_NAME}/public

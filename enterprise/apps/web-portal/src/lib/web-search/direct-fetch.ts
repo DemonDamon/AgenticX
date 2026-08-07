@@ -111,6 +111,8 @@ async function curlFetchWithBody(
       "--max-time",
       // curl accepts fractional seconds (e.g. 1.2); keep aligned with AbortSignal budget.
       String(Math.max(0.2, Math.round(timeoutMs) / 1000)),
+      "--connect-timeout",
+      String(Math.max(0.2, Math.min(5, Math.round(timeoutMs) / 1000 / 2))),
       // Trailer stays ASCII; body stays binary — never decode the whole stdout as utf8.
       "-w",
       "\n__CURL_META__%{http_code}\n%{content_type}",
@@ -192,6 +194,57 @@ async function curlFetchWithBody(
     }
     child.stdin.end();
   });
+}
+
+/**
+ * curl 是否可用只探测一次并缓存。
+ * 运行镜像若不含 curl，每次抓取都 spawn 一个必然 ENOENT 的子进程，
+ * 在 deep-research 的并发下会变成 fork 风暴（上百次/轮）。
+ */
+let curlAvailable: Promise<boolean> | null = null;
+
+export function resetCurlProbeForTests(): void {
+  curlAvailable = null;
+}
+
+function probeCurl(): Promise<boolean> {
+  return new Promise((resolve) => {
+    let settled = false;
+    const done = (ok: boolean) => {
+      if (settled) return;
+      settled = true;
+      resolve(ok);
+    };
+    try {
+      const child = spawn("curl", ["--version"], { env: process.env });
+      const timer = setTimeout(() => {
+        try {
+          child.kill("SIGKILL");
+        } catch {
+          // ignore
+        }
+        done(false);
+      }, 2_000);
+      child.on("error", () => {
+        clearTimeout(timer);
+        done(false);
+      });
+      child.on("close", (code) => {
+        clearTimeout(timer);
+        done(code === 0);
+      });
+      child.stdout.resume();
+      child.stderr.resume();
+    } catch {
+      done(false);
+    }
+  });
+}
+
+function isCurlAvailable(): Promise<boolean> {
+  if (process.env.AGX_DISABLE_CURL_FETCH === "1") return Promise.resolve(false);
+  curlAvailable ??= probeCurl();
+  return curlAvailable;
 }
 
 function connectViaHttpProxy(
@@ -357,17 +410,19 @@ export const directFetch: DirectFetch = async (input, init = {}) => {
   const timeoutMs = resolveTimeoutMs(init);
 
   // 1) curl — best proxy/SOCKS compatibility with shell env
-  try {
-    return await curlFetchWithBody(
-      url.toString(),
-      method,
-      headers,
-      bodyBuf,
-      timeoutMs,
-      init.signal,
-    );
-  } catch {
-    // fall through
+  if (await isCurlAvailable()) {
+    try {
+      return await curlFetchWithBody(
+        url.toString(),
+        method,
+        headers,
+        bodyBuf,
+        timeoutMs,
+        init.signal,
+      );
+    } catch {
+      // fall through
+    }
   }
 
   // 2) HTTP CONNECT when an http(s) proxy is configured

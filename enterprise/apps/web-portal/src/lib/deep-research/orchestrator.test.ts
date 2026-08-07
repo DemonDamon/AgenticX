@@ -19,6 +19,7 @@ import { clearClarifyWaiters, resolveClarifyResume } from "./run-wait";
 import type { ResearchPlan } from "./planner";
 import type { Citation } from "./registry";
 import { emptyFetchStats } from "../web-search/page-fetch";
+import { directFetch } from "../web-search/direct-fetch";
 
 async function readSsePayload(response: Response): Promise<{
   text: string;
@@ -98,6 +99,8 @@ function baseDeps(overrides: Record<string, unknown> = {}) {
       pages: urls.map(() => null),
       stats: emptyFetchStats(),
     }),
+    // Avoid real outbound egress probe in unit tests.
+    probeEgressFn: async () => true,
     // Keep legacy lane tests at 1 query/lane unless a case opts into multi-variant.
     expandQueriesFn: async ({ subQuestion }: { subQuestion: string }) => [
       { query: subQuestion, kind: "primary" as const },
@@ -1586,6 +1589,157 @@ describe("page fetch + sectioned report", () => {
     const { raw, events } = await readSsePayload(response);
     expect(raw).toContain("[DONE]");
     expect(events.some((e) => e.type === "phase" && e.phase === "done")).toBe(true);
+    warn.mockRestore();
+  });
+
+  it("narrates egress degradation and skips page fetch when egress is blocked", async () => {
+    const fetchPagesFn = vi.fn(async (urls: string[]) => ({
+      pages: urls.map(() => null),
+      stats: emptyFetchStats(),
+    }));
+    const response = await runDeepResearchTurn(
+      { model: "m", messages: [{ role: "user", content: "调研主题" }] },
+      {
+        ...baseDeps({
+          probeEgressFn: async () => false,
+          fetchPagesFn,
+          fetchImpl: vi.fn(async (_url: string, init?: RequestInit) => {
+            const body = JSON.parse(String(init?.body ?? "{}")) as { stream?: boolean };
+            if (body.stream === false) {
+              return {
+                ok: true,
+                json: async () => ({ choices: [{ message: { content: "memo" } }] }),
+              } as Response;
+            }
+            return synthUpstream("只有散文没有表格");
+          }) as unknown as typeof fetch,
+          buildPlan: async () => ({
+            topic: "调研主题",
+            complexity: "moderate" as const,
+            subQuestions: ["侧面A"],
+          }),
+          executeSearch: async () => [
+            { title: "Doc", url: "https://example.com/doc", snippet: "snippet" },
+          ],
+        }),
+      },
+    );
+    const { raw, events } = await readSsePayload(response);
+    expect(raw).toContain("[DONE]");
+    expect(
+      events.some(
+        (e) =>
+          e.type === "narrative" &&
+          typeof e.text === "string" &&
+          e.text.includes("无法访问外部网站"),
+      ),
+    ).toBe(true);
+    expect(fetchPagesFn).not.toHaveBeenCalled();
+  });
+
+  it("probes egress with the outbound fetch, never with the gateway fetchImpl", async () => {
+    const gatewayFetch = vi.fn(async (_url: string, init?: RequestInit) => {
+      const body = JSON.parse(String(init?.body ?? "{}")) as { stream?: boolean };
+      if (body.stream === false) {
+        return {
+          ok: true,
+          json: async () => ({ choices: [{ message: { content: "memo" } }] }),
+        } as Response;
+      }
+      return synthUpstream("正文");
+    }) as unknown as typeof fetch;
+    const probeArgs: unknown[] = [];
+
+    const response = await runDeepResearchTurn(
+      { model: "m", messages: [{ role: "user", content: "调研主题" }] },
+      {
+        ...baseDeps({
+          fetchImpl: gatewayFetch,
+          probeEgressFn: async (impl: unknown) => {
+            probeArgs.push(impl);
+            return true;
+          },
+          buildPlan: async () => ({
+            topic: "调研主题",
+            complexity: "moderate" as const,
+            subQuestions: ["侧面A"],
+          }),
+          executeSearch: async () => [
+            { title: "Doc", url: "https://example.com/doc", snippet: "snippet" },
+          ],
+        }),
+      },
+    );
+
+    await readSsePayload(response);
+    expect(probeArgs).toHaveLength(1);
+    expect(probeArgs[0]).toBe(directFetch);
+    expect(probeArgs[0]).not.toBe(gatewayFetch);
+  });
+
+  it("skips section format miss warn for table sections when there is no evidence", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const response = await runDeepResearchTurn(
+      { model: "m", messages: [{ role: "user", content: "主题调研" }] },
+      {
+        ...baseDeps({
+          fetchImpl: vi.fn(async (_url: string, init?: RequestInit) => {
+            const body = JSON.parse(String(init?.body ?? "{}")) as { stream?: boolean };
+            if (body.stream === false) {
+              return {
+                ok: true,
+                json: async () => ({ choices: [{ message: { content: "memo" } }] }),
+              } as Response;
+            }
+            return synthUpstream("只有散文没有表格");
+          }) as unknown as typeof fetch,
+          buildPlan: async () => ({
+            topic: "主题调研",
+            complexity: "moderate" as const,
+            subQuestions: ["侧面A", "侧面B"],
+          }),
+          executeSearch: async () => [],
+        }),
+      },
+    );
+    await readSsePayload(response);
+    expect(
+      warn.mock.calls.some((call) => String(call[0]).includes("section format miss")),
+    ).toBe(false);
+    warn.mockRestore();
+  });
+
+  it("still warns section format miss for table sections when evidence exists", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const response = await runDeepResearchTurn(
+      { model: "m", messages: [{ role: "user", content: "主题调研" }] },
+      {
+        ...baseDeps({
+          fetchImpl: vi.fn(async (_url: string, init?: RequestInit) => {
+            const body = JSON.parse(String(init?.body ?? "{}")) as { stream?: boolean };
+            if (body.stream === false) {
+              return {
+                ok: true,
+                json: async () => ({ choices: [{ message: { content: "memo" } }] }),
+              } as Response;
+            }
+            return synthUpstream("只有散文没有表格");
+          }) as unknown as typeof fetch,
+          buildPlan: async () => ({
+            topic: "主题调研",
+            complexity: "moderate" as const,
+            subQuestions: ["侧面A", "侧面B"],
+          }),
+          executeSearch: async () => [
+            { title: "Doc", url: "https://example.com/doc", snippet: "snippet about topic" },
+          ],
+        }),
+      },
+    );
+    await readSsePayload(response);
+    expect(
+      warn.mock.calls.some((call) => String(call[0]).includes("section format miss")),
+    ).toBe(true);
     warn.mockRestore();
   });
 });

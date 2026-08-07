@@ -17,6 +17,8 @@ services:
       DEFAULT_DEPT_ID: ${DEFAULT_DEPT_ID:-01J00000000000000000000003}
       ATTACHMENT_BLOB_DIR: /runtime/attachments
       AGX_CLARIFY_WAIT_DIR: /runtime/deep-research-clarify
+      # 若入口代理读超时 < 20min，按其数值收紧（留 2min 余量）
+      # DEEP_RESEARCH_TOTAL_BUDGET_MS: "900000"
     volumes:
       - web_portal_runtime:/runtime
     networks:
