@@ -189,13 +189,6 @@ export default function PolicyPage() {
   });
 
   const latestPublish = publishes[0] ?? null;
-  const latestPublishAtMs = latestPublish ? Date.parse(latestPublish.publishedAt) : null;
-  const isDisabledPendingPublish = useCallback(
-    (rule: PolicyRule) =>
-      rule.status === "disabled" && (latestPublishAtMs === null || Date.parse(rule.updatedAt) > latestPublishAtMs),
-    [latestPublishAtMs]
-  );
-
   const load = useCallback(async () => {
     setLoading(true);
     try {
@@ -245,11 +238,12 @@ export default function PolicyPage() {
   }, [load]);
 
   const filteredRules = useMemo(() => {
-    const visibleRules = rules.filter((rule) => rule.status !== "disabled" || isDisabledPendingPublish(rule));
-    if (tab === "all") return visibleRules;
-    if (tab === "keyword" || tab === "regex" || tab === "pii") return visibleRules.filter((rule) => rule.kind === tab);
-    return visibleRules;
-  }, [rules, tab, isDisabledPendingPublish]);
+    if (tab === "all") return rules;
+    if (tab === "keyword" || tab === "regex" || tab === "pii") {
+      return rules.filter((rule) => rule.kind === tab);
+    }
+    return rules;
+  }, [rules, tab]);
 
   const stoppableRules = useMemo(
     () => rules.filter((rule) => rule.status !== "disabled"),
