@@ -27,25 +27,45 @@ import { CitationRegistry, type Citation } from "./registry";
 import { formatDeepResearchEventSse } from "./events";
 import { stripThinkBlocks } from "./content-clean";
 import {
+  defaultOpenEndedClarification,
   proposeClarification,
   type ClarifierResult,
   type ClarifyQuestion,
 } from "./clarifier";
 import {
   DEFAULT_DELIVERY_PREFS,
-  deliveryClarifyQuestions,
   deliveryPrefsPromptBlock,
-  isDeliveryClarifyQuestionId,
   parseDeliveryPrefs,
   primaryArtifactTitle,
   sanitizeResearchTopic,
   type DeliveryPrefs,
 } from "./delivery-prefs";
-import { looksOpenEndedResearchQuery } from "./research-intent";
 import {
+  assessClarifyStrategy,
+  buildChatClarifyPrompt,
+  buildInteractionProfile,
+  buildPlanChatPrompt,
+  buildPlanRevisionUserQuery,
+  buildSlotClarifyQuestions,
+  DEFAULT_CLARIFY_MAX_ROUNDS,
+  deriveResearchDepth,
+  findMissingBlockingSlots,
+  isSkipClarifyReply,
+  parseChatClarifyReply,
+  parsePlanChatGateAction,
+  resolveDepthBudget,
+  type ClarifyStrategy,
+  type PlanChatTurn,
+} from "./interaction-policy";
+import {
+  CHAT_CLARIFY_ANSWER_KEY,
+  PLAN_GATE_ACTION_KEY,
+  PLAN_GATE_PATCH_KEY,
   waitForClarifyResume,
   type ClarifyResumePayload,
 } from "./run-wait";
+
+export { CHAT_CLARIFY_ANSWER_KEY, PLAN_GATE_ACTION_KEY, PLAN_GATE_PATCH_KEY };
 import {
   createArtifactStore,
   type ArtifactStore,
@@ -77,7 +97,7 @@ import {
   selectTopSources,
 } from "./source-pool";
 import { reflectOnGaps, type ResearchGap } from "./reflector";
-import type { DeepResearchEvent } from "@agenticx/sdk-ts";
+import type { DeepResearchEvent, ResearchPlanSnapshot } from "@agenticx/sdk-ts";
 
 export const SEARCH_CONCURRENCY = 3;
 /** Default per-lane result count; the live path uses resolveResultsPerLane(). */
@@ -123,6 +143,25 @@ type ChatMessage = {
   name?: string;
 };
 
+/** Resume a run whose plan-gate waiter died (process restart) — skip recon/clarify/plan wait. */
+export type ContinueFromPlanGate = {
+  plan: ResearchPlan;
+  planVersion: number;
+  topic: string;
+  /** Resume route already appended approved/updated — do not emit again. */
+  planEventEmitted?: boolean;
+  deliveryPrefs?: DeliveryPrefs;
+  /**
+   * Re-enter the multi-round plan_chat gate (still awaiting user) instead of
+   * jumping straight to lanes. Used when orphan resume carries a chatReply.
+   */
+  reenterPlanChat?: boolean;
+  /** Apply this user reply as a plan revision before waiting again. */
+  pendingChatReply?: string;
+  planChatHistory?: PlanChatTurn[];
+  planChatRoundsUsed?: number;
+};
+
 export type DeepResearchDeps = {
   url: string;
   headers: Record<string, string>;
@@ -152,6 +191,8 @@ export type DeepResearchDeps = {
    * Long retrieve can outlive the 1h cookie captured at request start.
    */
   refreshAccessToken?: RefreshAccessToken;
+  /** Orphan plan-gate continue: reuse runId, jump to lanes. */
+  continueFromPlanGate?: ContinueFromPlanGate;
 };
 
 type LaneResult = {
@@ -198,12 +239,14 @@ function stripFlags<T extends Record<string, unknown>>(body: T): Record<string, 
   const {
     agenticx_web_search: _ws,
     agenticx_deep_research: _dr,
+    agenticx_deep_research_interaction: _dri,
     tools: _tools,
     tool_choice: _tc,
     ...rest
   } = body as T & {
     agenticx_web_search?: unknown;
     agenticx_deep_research?: unknown;
+    agenticx_deep_research_interaction?: unknown;
     tools?: unknown;
     tool_choice?: unknown;
   };
@@ -224,6 +267,34 @@ export function resolveResultsPerLane(laneCount: number): number {
   if (laneCount <= 0) return MIN_RESULTS_PER_LANE;
   const even = Math.ceil(MAX_SOURCES / laneCount);
   return Math.min(MAX_RESULTS_PER_LANE, Math.max(MIN_RESULTS_PER_LANE, even));
+}
+
+/**
+ * 分节写作的证据裁剪：只保留该节 citationIndexes 命中的引用。
+ * 旧实现把完整证据包（几十个来源全文）原样塞进每一节调用——5–9 节就是
+ * 5–9 倍 token 放大（一轮调研 40 万+ token 的根因）。命中为空或索引无效时
+ * 回退完整证据，宁可贵不可错。
+ */
+export function filterCitationsForSection<T extends { question: string; citations: Citation[]; memo?: string }>(
+  citationsByQuestion: T[],
+  reconCitations: Citation[],
+  citationIndexes: number[],
+): { filtered: T[]; filteredRecon: Citation[]; fellBack: boolean } {
+  if (citationIndexes.length === 0) {
+    return { filtered: citationsByQuestion, filteredRecon: reconCitations, fellBack: true };
+  }
+  const wanted = new Set(citationIndexes);
+  const filtered = citationsByQuestion
+    .map((item) => ({
+      ...item,
+      citations: item.citations.filter((c) => wanted.has(c.index)),
+    }))
+    .filter((item) => item.citations.length > 0);
+  const filteredRecon = reconCitations.filter((c) => wanted.has(c.index));
+  if (filtered.length === 0 && filteredRecon.length === 0) {
+    return { filtered: citationsByQuestion, filteredRecon: reconCitations, fellBack: true };
+  }
+  return { filtered, filteredRecon, fellBack: false };
 }
 
 export function formatEvidencePack(
@@ -387,6 +458,25 @@ function applyClarifyAnswers(
 }
 
 /**
+ * 计划 gate 的编辑补丁：只允许修改子问题（白名单字段），限制数量与长度。
+ * 非法 JSON / 非数组一律返回空，不向前端抛错。
+ */
+export function parsePlanPatchSubQuestions(raw: string | undefined): string[] {
+  if (!raw) return [];
+  try {
+    const parsed = JSON.parse(raw) as { subQuestions?: unknown };
+    if (!Array.isArray(parsed.subQuestions)) return [];
+    return parsed.subQuestions
+      .map((q) => (typeof q === "string" ? q.trim() : ""))
+      .filter((q): q is string => Boolean(q))
+      .slice(0, MAX_LANES)
+      .map((q) => q.slice(0, 200));
+  } catch {
+    return [];
+  }
+}
+
+/**
  * Recover the option labels a user multi-selected from the joined answer string.
  * Longest-label-first avoids false splits when a label itself contains "、".
  */
@@ -443,7 +533,12 @@ export async function runDeepResearchTurn(
     ? (baseBody.messages as ChatMessage[])
     : [];
   let userQuery = extractLastUserQuery(originalMessages);
-  const originalUserQuery = userQuery;
+  let originalUserQuery = userQuery;
+  const continueFrom = deps.continueFromPlanGate;
+  if (continueFrom?.topic?.trim()) {
+    userQuery = continueFrom.topic.trim();
+    originalUserQuery = userQuery;
+  }
   const now = deps.now ?? Date.now;
   const startedAt = now();
   // Clarify wait can last up to CLARIFY_TIMEOUT_MS (5m) and must NOT burn the
@@ -510,13 +605,16 @@ export async function runDeepResearchTurn(
 
       let writer: RunWriter | null = null;
       try {
-        await runStore.create({
-          runId,
-          tenantId,
-          userId,
-          sessionId,
-          topic: userQuery || "深度调研",
-        });
+        // Orphan continue reuses an existing run row — never create() (would wipe events).
+        if (!continueFrom) {
+          await runStore.create({
+            runId,
+            tenantId,
+            userId,
+            sessionId,
+            topic: userQuery || "深度调研",
+          });
+        }
         writer = createRunWriter(runStore, runId);
       } catch (error) {
         console.warn("[deep-research] run-store create failed:", error);
@@ -588,6 +686,291 @@ export async function runDeepResearchTurn(
       try {
         if (runSignal.aborted) throw new DOMException("Aborted", "AbortError");
 
+        const todayLine = formatTodayLine(now);
+        let recon: ReconResult = { brief: "", hits: [] };
+        let deliveryPrefs: DeliveryPrefs = { ...DEFAULT_DELIVERY_PREFS };
+        let clarifyExpandedLanes: string[] | null = null;
+        let usedClarifyRounds = 0;
+        let prefsWritingHint = [
+          deliveryPrefsPromptBlock(deliveryPrefs),
+          "",
+          "（以上交付偏好仅供写作约束，禁止原样写入报告正文或标题。）",
+        ].join("\n");
+        let plan: ResearchPlan = {
+          topic: sanitizeResearchTopic(originalUserQuery || "研究主题"),
+          complexity: "moderate",
+          subQuestions: [originalUserQuery || "研究该主题"],
+        };
+        let planVersion = 1;
+        let profile = buildInteractionProfile({
+          query: originalUserQuery,
+          preference:
+            typeof parsedBody.agenticx_deep_research_interaction === "string"
+              ? parsedBody.agenticx_deep_research_interaction
+              : undefined,
+          strategy: {
+            mode: "none",
+            phase: "preflight",
+            blocking: false,
+            maxItems: 0,
+            reasonCodes: ["orphan_continue_placeholder"],
+          },
+        });
+        let strategy: ClarifyStrategy = {
+          mode: "none",
+          phase: "preflight",
+          blocking: false,
+          maxItems: 0,
+          reasonCodes: [],
+        };
+        let clarifyResume: ClarifyResumePayload = { answers: {}, skip: true };
+        let clarifyResult: ClarifierResult = { needed: false };
+        let clarifyQuestions: ClarifyQuestion[] = [];
+
+        const waitClarifyGate = async (options?: {
+          indefinite?: boolean;
+        }): Promise<ClarifyResumePayload> => {
+          if (!awaitClarify) return { answers: {}, skip: true };
+          const waitStarted = now();
+          const timeoutMs = options?.indefinite ? 0 : clarifyTimeoutMs;
+          const resume = await waitForClarifyResume(runId, timeoutMs);
+          budgetPausedMs += Math.max(0, now() - waitStarted);
+          await runStore.appendEvents(runId, [], { status: "running" });
+          return resume;
+        };
+
+        const narrateClarifyOutcome = (resume: ClarifyResumePayload, midrun: boolean) => {
+          if (!awaitClarify) return;
+          if (resume.timedOut) {
+            enqueueEvent({ type: "clarify_timeout", runId });
+            enqueueEvent({
+              type: "narrative",
+              text: midrun ? "补充澄清超时，按现有证据继续。" : "澄清超时，按默认假设继续。",
+            });
+          } else if (!resume.skip) {
+            enqueueEvent({
+              type: "narrative",
+              text: midrun ? "已补充调研约束，继续分析。" : "已明确调研方向，开始系统检索。",
+            });
+          } else {
+            enqueueEvent({
+              type: "narrative",
+              text: midrun ? "已跳过补充确认，继续分析。" : "已跳过确认，按默认假设继续检索。",
+            });
+          }
+        };
+
+        const toSnapshot = (
+          version: number,
+          extraAssumption?: string,
+        ): ResearchPlanSnapshot => ({
+          version,
+          objective: plan.topic,
+          scope: [],
+          subQuestions: plan.subQuestions.map((q, i) => ({ id: `sq${i + 1}`, title: q })),
+          sourceStrategy: [],
+          deliverables: [],
+          assumptions: extraAssumption
+            ? [...profile.assumptions, extraAssumption]
+            : profile.assumptions,
+        });
+
+        const runPlanChatGate = async (opts: {
+          history: PlanChatTurn[];
+          roundsUsed: number;
+          pendingReply?: string;
+        }) => {
+          let planChatHistory = [...opts.history];
+          let planChatRoundsUsed = opts.roundsUsed;
+          const maxRounds = Math.max(1, profile.clarifyBudget.maxRounds || DEFAULT_CLARIFY_MAX_ROUNDS);
+
+          const reviseFromReply = async (reply: string) => {
+            planChatHistory.push({ role: "user", content: reply });
+            planChatRoundsUsed += 1;
+            enqueueEvent({
+              type: "narrative",
+              text: `你：${reply}`,
+            });
+            enqueueEvent({
+              type: "narrative",
+              text: "正在根据你的反馈更新计划…",
+            });
+            enqueueFlush();
+            const next = await planFn({
+              url: deps.url,
+              headers: deps.headers,
+              body: baseBody,
+              userQuery: buildPlanRevisionUserQuery({
+                originalQuery: originalUserQuery,
+                plan: {
+                  topic: plan.topic,
+                  complexity: plan.complexity,
+                  subQuestions: plan.subQuestions,
+                },
+                planVersion,
+                chatHistory: planChatHistory,
+              }),
+              todayLine,
+              reconBrief: recon.brief,
+              fetchImpl: deps.fetchImpl,
+              signal: runSignal,
+            });
+            plan = enforcePlanBreadth(
+              {
+                ...next,
+                topic: sanitizeResearchTopic(next.topic || originalUserQuery || "研究主题"),
+              },
+              originalUserQuery,
+            );
+            planVersion += 1;
+            enqueueEvent({
+              type: "research_plan",
+              runId,
+              action: "updated",
+              version: planVersion,
+              plan: toSnapshot(planVersion),
+            });
+            planChatHistory.push({
+              role: "assistant",
+              content: `已更新计划 v${planVersion}`,
+            });
+          };
+
+          const approveCurrent = (narrative?: string) => {
+            enqueueEvent({
+              type: "research_plan",
+              runId,
+              action: "approved",
+              version: planVersion,
+              plan: toSnapshot(planVersion),
+            });
+            if (narrative) {
+              enqueueEvent({ type: "narrative", text: narrative });
+            }
+          };
+
+          if (opts.pendingReply?.trim()) {
+            const pending = opts.pendingReply.trim();
+            if (isSkipClarifyReply(pending)) {
+              approveCurrent("已按当前计划开始调研。");
+              return;
+            }
+            await reviseFromReply(pending);
+            if (planChatRoundsUsed >= maxRounds) {
+              approveCurrent("已达对话轮次上限，按当前计划开始调研。");
+              return;
+            }
+          }
+
+          while (true) {
+            const promptText = buildPlanChatPrompt(planVersion);
+            enqueueEvent(
+              {
+                type: "clarify_chat",
+                runId,
+                roundIndex: planChatRoundsUsed,
+                phase: "plan",
+                promptText,
+              },
+              { status: "awaiting_clarify", phase: "plan" },
+            );
+            enqueueFlush();
+            let gateResume = await waitClarifyGate({ indefinite: true });
+            while (gateResume.timedOut) {
+              gateResume = await waitClarifyGate({ indefinite: true });
+            }
+            const action = parsePlanChatGateAction({
+              answers: gateResume.answers,
+              skip: gateResume.skip,
+              planActionKey: PLAN_GATE_ACTION_KEY,
+              chatAnswerKey: CHAT_CLARIFY_ANSWER_KEY,
+            });
+            if (action === "start" || action === "skip") {
+              approveCurrent(
+                action === "skip" ? "已按当前计划开始调研。" : undefined,
+              );
+              break;
+            }
+            const reply = gateResume.answers[CHAT_CLARIFY_ANSWER_KEY]?.trim() ?? "";
+            if (!reply) {
+              approveCurrent();
+              break;
+            }
+            await reviseFromReply(reply);
+            if (planChatRoundsUsed >= maxRounds) {
+              approveCurrent("已达对话轮次上限，按当前计划开始调研。");
+              break;
+            }
+          }
+        };
+
+        if (continueFrom && !continueFrom.reenterPlanChat) {
+          enqueueEvent({
+            type: "narrative",
+            text: "已恢复中断的计划确认，继续执行研究。",
+          });
+          enqueueFlush();
+          plan = {
+            ...continueFrom.plan,
+            topic: sanitizeResearchTopic(
+              continueFrom.plan.topic || originalUserQuery || "研究主题",
+            ),
+          };
+          planVersion = continueFrom.planVersion;
+          deliveryPrefs = continueFrom.deliveryPrefs
+            ? { ...continueFrom.deliveryPrefs }
+            : { ...DEFAULT_DELIVERY_PREFS };
+          prefsWritingHint = [
+            deliveryPrefsPromptBlock(deliveryPrefs),
+            "",
+            "（以上交付偏好仅供写作约束，禁止原样写入报告正文或标题。）",
+          ].join("\n");
+          await runStore.appendEvents(runId, [], { status: "running", phase: "lanes" });
+        } else if (continueFrom?.reenterPlanChat) {
+          enqueueEvent({
+            type: "narrative",
+            text: "已恢复中断的计划对齐，可继续修改或开始调研。",
+          });
+          enqueueFlush();
+          plan = {
+            ...continueFrom.plan,
+            topic: sanitizeResearchTopic(
+              continueFrom.plan.topic || originalUserQuery || "研究主题",
+            ),
+          };
+          planVersion = continueFrom.planVersion;
+          deliveryPrefs = continueFrom.deliveryPrefs
+            ? { ...continueFrom.deliveryPrefs }
+            : { ...DEFAULT_DELIVERY_PREFS };
+          prefsWritingHint = [
+            deliveryPrefsPromptBlock(deliveryPrefs),
+            "",
+            "（以上交付偏好仅供写作约束，禁止原样写入报告正文或标题。）",
+          ].join("\n");
+          strategy = {
+            mode: "none",
+            phase: "preflight",
+            blocking: false,
+            maxItems: 0,
+            reasonCodes: ["plan_chat_reenter"],
+          };
+          profile = {
+            researchDepth: deriveResearchDepth({ query: originalUserQuery }),
+            clarifyMode: "none",
+            clarifyBudget: {
+              maxRounds: DEFAULT_CLARIFY_MAX_ROUNDS,
+              allowMidRun: true,
+            },
+            planVisibility: "chat_editable",
+            assumptions: ["计划可经多轮对话调整；未修改则按当前草案执行。"],
+          };
+          enqueueEvent({ type: "research_profile", runId, ...profile });
+          await runPlanChatGate({
+            history: continueFrom.planChatHistory ?? [],
+            roundsUsed: continueFrom.planChatRoundsUsed ?? 0,
+            pendingReply: continueFrom.pendingChatReply,
+          });
+        } else {
         enqueueEvent({ type: "run_started", runId });
         enqueueFlush();
 
@@ -610,8 +993,7 @@ export async function runDeepResearchTurn(
           total: 1,
         });
         enqueueFlush();
-        const todayLine = formatTodayLine(now);
-        let recon: ReconResult = { brief: "", hits: [] };
+        recon = { brief: "", hits: [] };
         if (budgetLeft() > 0) {
           try {
             recon = await (deps.runReconFn ?? runRecon)({
@@ -638,11 +1020,29 @@ export async function runDeepResearchTurn(
           status: recon.hits.length > 0 ? "ok" : "failed",
         });
 
-        // --- Clarify gate ---
+        // --- Interaction policy：depth / clarify mode / plan visibility 相互独立 ---
+        const interactionPref =
+          typeof parsedBody.agenticx_deep_research_interaction === "string"
+            ? parsedBody.agenticx_deep_research_interaction
+            : undefined;
+        strategy = assessClarifyStrategy({
+          query: originalUserQuery,
+          userPreference: interactionPref,
+        });
+        profile = buildInteractionProfile({
+          query: originalUserQuery,
+          preference: interactionPref,
+          strategy,
+        });
+        enqueueEvent({ type: "research_profile", runId, ...profile });
+        // 只记录分类 reason codes，不记录原始 prompt/答案。
+        console.info("[deep-research] profile", runId, strategy.reasonCodes.join("+") || "none");
+
+        // --- Clarify gate（policy 驱动：card / chat / none） ---
         enqueueEvent({ type: "phase", phase: "clarify", message: "正在判断是否需要澄清…" });
         enqueueFlush();
-        let clarifyResult: ClarifierResult = { needed: false };
-        if (budgetLeft() > 0) {
+        clarifyResult = { needed: false };
+        if (strategy.mode === "card" && budgetLeft() > 0) {
           // Bound clarifier so a slow gateway cannot leave the UI silent for minutes.
           const clarifyAbort = new AbortController();
           const onRunAbort = () => clarifyAbort.abort();
@@ -667,78 +1067,90 @@ export async function runDeepResearchTurn(
           }
         }
 
-        let clarifyExpandedLanes: string[] | null = null;
-        let deliveryPrefs: DeliveryPrefs = { ...DEFAULT_DELIVERY_PREFS };
-        let clarifyResume: ClarifyResumePayload = { answers: {}, skip: true };
-        const directionQuestions = clarifyResult.needed ? clarifyResult.questions : [];
-        const askDelivery =
-          clarifyResult.needed || looksOpenEndedResearchQuery(originalUserQuery);
-        const clarifyQuestions = askDelivery
-          ? [...directionQuestions, ...deliveryClarifyQuestions()].slice(0, 4)
-          : [];
+        clarifyResume = { answers: {}, skip: true };
+        usedClarifyRounds = 0;
+        let chatClarifyNote = "";
+        clarifyExpandedLanes = null;
+        deliveryPrefs = { ...DEFAULT_DELIVERY_PREFS };
+        clarifyQuestions = [];
 
-        if (clarifyQuestions.length > 0) {
-          enqueueEvent({
-            type: "narrative",
-            text: "现状已校准，再确认一下调研方向与交付偏好。",
-          });
-          for (let i = 0; i < clarifyQuestions.length; i += 1) {
-            const q = clarifyQuestions[i]!;
-            enqueueEvent(
-              {
-                type: "clarify",
-                runId,
-                step: i + 1,
-                total: clarifyQuestions.length,
-                questionId: q.id,
-                question: q.question,
-                options: q.options,
-                allowCustom: q.allowCustom,
-                multiSelect: q.multiSelect,
-              },
-              i === 0 ? { status: "awaiting_clarify", phase: "clarify" } : undefined,
+        if (strategy.mode === "card") {
+          let directionQuestions = clarifyResult.needed ? clarifyResult.questions : [];
+          if (strategy.blocking && directionQuestions.length === 0) {
+            // 高风险缺槽：LLM 候选为空时用确定性槽位题兜底，必问关键约束。
+            directionQuestions = buildSlotClarifyQuestions(originalUserQuery, strategy.maxItems);
+          }
+          // 交付偏好不再无条件混排进阻塞问题（使用默认值）；policy 限制每轮题数。
+          clarifyQuestions = directionQuestions.slice(0, strategy.maxItems);
+          if (clarifyQuestions.length > 0) {
+            usedClarifyRounds = 1;
+            enqueueEvent({
+              type: "narrative",
+              text: "现状已校准，再确认一下调研方向。",
+            });
+            for (let i = 0; i < clarifyQuestions.length; i += 1) {
+              const q = clarifyQuestions[i]!;
+              enqueueEvent(
+                {
+                  type: "clarify",
+                  runId,
+                  step: i + 1,
+                  total: clarifyQuestions.length,
+                  questionId: q.id,
+                  question: q.question,
+                  options: q.options,
+                  allowCustom: q.allowCustom,
+                  multiSelect: q.multiSelect,
+                  roundIndex: 0,
+                  phase: "preflight",
+                  ...(strategy.blocking ? { blocking: true } : {}),
+                },
+                i === 0 ? { status: "awaiting_clarify", phase: "clarify" } : undefined,
+              );
+            }
+            enqueueFlush();
+            clarifyResume = await waitClarifyGate();
+            narrateClarifyOutcome(clarifyResume, false);
+            deliveryPrefs = parseDeliveryPrefs(clarifyResume.answers, clarifyQuestions);
+            clarifyExpandedLanes = expandLanesFromClarifyAnswers(
+              originalUserQuery,
+              clarifyQuestions,
+              clarifyResume,
             );
           }
+        } else if (strategy.mode === "chat") {
+          usedClarifyRounds = 1;
+          const promptText = buildChatClarifyPrompt(originalUserQuery, strategy);
+          enqueueEvent(
+            { type: "clarify_chat", runId, roundIndex: 0, phase: "preflight", promptText },
+            { status: "awaiting_clarify", phase: "clarify" },
+          );
           enqueueFlush();
-
-          if (awaitClarify) {
-            const waitStarted = now();
-            clarifyResume = await waitForClarifyResume(runId, clarifyTimeoutMs);
-            budgetPausedMs += Math.max(0, now() - waitStarted);
-            await runStore.appendEvents(runId, [], { status: "running" });
-            if (clarifyResume.timedOut) {
-              enqueueEvent({ type: "clarify_timeout", runId });
-              enqueueEvent({ type: "narrative", text: "澄清超时，按默认假设继续。" });
-            } else if (!clarifyResume.skip) {
-              enqueueEvent({ type: "narrative", text: "已明确调研方向，开始系统检索。" });
-            } else {
-              enqueueEvent({ type: "narrative", text: "已跳过确认，按默认假设继续检索。" });
-            }
+          clarifyResume = await waitClarifyGate();
+          narrateClarifyOutcome(clarifyResume, false);
+          if (!clarifyResume.skip && !clarifyResume.timedOut) {
+            const reply = clarifyResume.answers[CHAT_CLARIFY_ANSWER_KEY]?.trim() ?? "";
+            const slots = parseChatClarifyReply({
+              promptText,
+              userReply: reply,
+              pendingSlots: findMissingBlockingSlots(originalUserQuery),
+            });
+            chatClarifyNote = Object.values(slots).join("；").trim();
           }
-          if (clarifyResume.skip || clarifyResume.timedOut) {
-            deliveryPrefs = { ...DEFAULT_DELIVERY_PREFS };
-          } else {
-            deliveryPrefs = parseDeliveryPrefs(clarifyResume.answers, clarifyQuestions);
-          }
-          const laneQuestions = clarifyQuestions.filter(
-            (q) => !isDeliveryClarifyQuestionId(q.id),
-          );
-          clarifyExpandedLanes = expandLanesFromClarifyAnswers(
-            originalUserQuery,
-            laneQuestions,
-            clarifyResume,
-          );
         }
 
-        // Clarify + delivery prefs are planner/writer hints only — never mutate the
+        // Clarify / delivery prefs are planner/writer hints only — never mutate the
         // display topic / final-report title via userQuery concatenation.
         let planningContext = applyClarifyAnswers(
           originalUserQuery,
           clarifyQuestions,
           clarifyResume,
         );
+        if (chatClarifyNote) {
+          planningContext = `${planningContext}\n\n【用户澄清】\n- ${chatClarifyNote}`;
+        }
         planningContext = `${planningContext}\n\n${deliveryPrefsPromptBlock(deliveryPrefs)}`;
-        const prefsWritingHint = [
+        prefsWritingHint = [
           deliveryPrefsPromptBlock(deliveryPrefs),
           "",
           "（以上交付偏好仅供写作约束，禁止原样写入报告正文或标题。）",
@@ -747,7 +1159,6 @@ export async function runDeepResearchTurn(
         // --- Plan ---
         enqueueEvent({ type: "phase", phase: "plan", message: "正在规划研究路径…" });
 
-        let plan: ResearchPlan;
         if (searchBudgetLeft() <= 0) {
           plan = {
             topic: sanitizeResearchTopic(originalUserQuery || "研究主题"),
@@ -790,11 +1201,42 @@ export async function runDeepResearchTurn(
           topic: sanitizeResearchTopic(plan.topic || originalUserQuery || "研究主题"),
         };
 
+        // --- Plan snapshot（hidden 也落事件；chat_editable 进入多轮计划对齐 gate） ---
+        planVersion = 1;
+        const planChatGate = profile.planVisibility === "chat_editable";
+        enqueueEvent(
+          {
+            type: "research_plan",
+            runId,
+            action: "proposed",
+            version: planVersion,
+            plan: toSnapshot(planVersion),
+          },
+          planChatGate ? { status: "awaiting_clarify", phase: "plan" } : undefined,
+        );
+
+        if (planChatGate) {
+          // 计划对齐：多轮自然语言改计划，与研究预算脱钩（indefinite wait）。
+          enqueueFlush();
+          await runPlanChatGate({ history: [], roundsUsed: 0 });
+        }
+        }
+
         if (runSignal?.aborted) throw new DOMException("Aborted", "AbortError");
 
+        // researchDepth 只控制目标投入上限；显式多选方向不被深度预算压缩。
+        const depth = deriveResearchDepth({
+          query: originalUserQuery,
+          subQuestionCount: plan.subQuestions.length,
+        });
+        const depthBudget = resolveDepthBudget(depth);
+        const laneCap =
+          clarifyExpandedLanes && clarifyExpandedLanes.length >= 2
+            ? MAX_LANES
+            : Math.min(MAX_LANES, depthBudget.maxLanes);
         // Never collapse an explicit multi-select plan just because budget is tight —
         // still run at least those lanes (budget checks inside each lane remain).
-        const questions = plan.subQuestions.slice(0, MAX_LANES);
+        const questions = plan.subQuestions.slice(0, laneCap);
 
         enqueueEvent({
           type: "phase",
@@ -810,7 +1252,10 @@ export async function runDeepResearchTurn(
           if (registry.size >= MAX_SOURCES) break;
           reconCitations.push(registry.add(hit));
         }
-        const resultsPerLane = resolveResultsPerLane(questions.length);
+        const resultsPerLane = Math.min(
+          resolveResultsPerLane(questions.length),
+          depthBudget.resultsPerLaneCap,
+        );
         let searchFailures = 0;
         let totalQueries = 0;
         let totalDiscovered = 0;
@@ -824,15 +1269,19 @@ export async function runDeepResearchTurn(
           total: number;
           variants?: QueryVariant[];
           skipExpand?: boolean;
+          /** 已在并发池外预告过 lane_started 时跳过，避免标题「N 条」与卡片数不同步。 */
+          alreadyAnnounced?: boolean;
         }): Promise<LaneResult> => {
           const { question, laneId, index, total } = args;
-          enqueueEvent({
-            type: "lane_started",
-            laneId,
-            title: question,
-            index,
-            total,
-          });
+          if (!args.alreadyAnnounced) {
+            enqueueEvent({
+              type: "lane_started",
+              laneId,
+              title: question,
+              index,
+              total,
+            });
+          }
 
           const empty: LaneResult = {
             question,
@@ -932,7 +1381,7 @@ export async function runDeepResearchTurn(
             let pagesFetched = 0;
             const fetchedUrls = new Set<string>();
             const archivedUrls = new Set<string>();
-            if (questionCitations.length > 0 && searchBudgetLeft() > 0) {
+            if (questionCitations.length > 0 && searchBudgetLeft() > 0 && depthBudget.fetchFullText) {
               try {
                 const { pages, stats } = await fetchPages(
                   questionCitations.map((c) => c.url),
@@ -1093,15 +1542,30 @@ export async function runDeepResearchTurn(
           }
         };
 
+        // 并发上限为 SEARCH_CONCURRENCY(3) 时，若只在 worker 内发 lane_started，
+        // 标题「已拆解 4 条」会出现但卡片只见 3 张。先广播全部车道再进池。
+        const laneJobs = questions.map((question, index) => ({
+          question,
+          laneId: slugifyLane(question, index),
+          index: index + 1,
+          total: questions.length,
+        }));
+        for (const job of laneJobs) {
+          enqueueEvent({
+            type: "lane_started",
+            laneId: job.laneId,
+            title: job.question,
+            index: job.index,
+            total: job.total,
+          });
+        }
         const citationsByQuestion = await mapPool(
-          questions,
+          laneJobs,
           SEARCH_CONCURRENCY,
-          async (question, index) =>
+          async (job) =>
             runOneLane({
-              question,
-              laneId: slugifyLane(question, index),
-              index: index + 1,
-              total: questions.length,
+              ...job,
+              alreadyAnnounced: true,
             }),
           runSignal,
         );
@@ -1132,8 +1596,104 @@ export async function runDeepResearchTurn(
 
         if (runSignal?.aborted) throw new DOMException("Aborted", "AbortError");
 
+        // --- Midrun clarify（轻量补充澄清） ---
+        // 触发：此前澄清被跳过/超时 + 证据过薄（平均每车道不足 1 个来源）+ 预算充足。
+        // 不推翻已完成车道；拿到的约束注入反思与写作上下文，并递增计划版本。
+        let midrunClarifyNote = "";
+        if (
+          strategy.mode !== "none" &&
+          profile.clarifyBudget.allowMidRun &&
+          usedClarifyRounds > 0 &&
+          usedClarifyRounds < profile.clarifyBudget.maxRounds &&
+          (clarifyResume.skip || clarifyResume.timedOut) &&
+          !strategy.blocking &&
+          laneCitationCount < questions.length &&
+          searchBudgetLeft() > REFLECT_MIN_BUDGET_MS
+        ) {
+          const roundIndex = usedClarifyRounds;
+          usedClarifyRounds += 1;
+          if (strategy.mode === "chat") {
+            const promptText = buildChatClarifyPrompt(originalUserQuery, {
+              ...strategy,
+              phase: "midrun",
+            });
+            enqueueEvent(
+              { type: "clarify_chat", runId, roundIndex, phase: "midrun", promptText },
+              { status: "awaiting_clarify", phase: "clarify" },
+            );
+            enqueueFlush();
+            const resume = await waitClarifyGate();
+            narrateClarifyOutcome(resume, true);
+            if (!resume.skip && !resume.timedOut) {
+              const reply = resume.answers[CHAT_CLARIFY_ANSWER_KEY]?.trim() ?? "";
+              const slots = parseChatClarifyReply({
+                promptText,
+                userReply: reply,
+                pendingSlots: findMissingBlockingSlots(originalUserQuery),
+              });
+              midrunClarifyNote = Object.values(slots).join("；").trim();
+            }
+          } else {
+            let fallback: ClarifyQuestion[] = [];
+            if (clarifyResult.needed && clarifyResult.questions.length > 0) {
+              fallback = clarifyResult.questions;
+            } else {
+              const defaulted = defaultOpenEndedClarification(originalUserQuery);
+              if (defaulted.needed) fallback = defaulted.questions;
+            }
+            const midQuestions = fallback.slice(0, strategy.maxItems);
+            if (midQuestions.length > 0) {
+              enqueueEvent({
+                type: "narrative",
+                text: "目前证据偏薄，再确认一个关键点后继续。",
+              });
+              for (let i = 0; i < midQuestions.length; i += 1) {
+                const q = midQuestions[i]!;
+                enqueueEvent(
+                  {
+                    type: "clarify",
+                    runId,
+                    step: i + 1,
+                    total: midQuestions.length,
+                    questionId: q.id,
+                    question: q.question,
+                    options: q.options,
+                    allowCustom: q.allowCustom,
+                    multiSelect: q.multiSelect,
+                    roundIndex,
+                    phase: "midrun",
+                  },
+                  i === 0 ? { status: "awaiting_clarify", phase: "clarify" } : undefined,
+                );
+              }
+              enqueueFlush();
+              const resume = await waitClarifyGate();
+              narrateClarifyOutcome(resume, true);
+              if (!resume.skip && !resume.timedOut) {
+                const lines = midQuestions
+                  .map((q) => {
+                    const a = resume.answers[q.id]?.trim();
+                    return a ? `- ${q.question}: ${a}` : null;
+                  })
+                  .filter((line): line is string => Boolean(line));
+                midrunClarifyNote = lines.join("\n");
+              }
+            }
+          }
+          if (midrunClarifyNote) {
+            planVersion += 1;
+            enqueueEvent({
+              type: "research_plan",
+              runId,
+              action: "updated",
+              version: planVersion,
+              plan: toSnapshot(planVersion, `运行中补充约束：${midrunClarifyNote.slice(0, 200)}`),
+            });
+          }
+        }
+
         // --- Reflect + one-shot follow-up search ---
-        if (searchBudgetLeft() > REFLECT_MIN_BUDGET_MS) {
+        if (depthBudget.allowReflect && searchBudgetLeft() > REFLECT_MIN_BUDGET_MS) {
           enqueueEvent({
             type: "phase",
             phase: "reflect",
@@ -1142,7 +1702,9 @@ export async function runDeepResearchTurn(
           let gaps: ResearchGap[] = [];
           try {
             gaps = await reflectFn({
-              topic: plan.topic || originalUserQuery,
+              topic: midrunClarifyNote
+                ? `${plan.topic || originalUserQuery}\n补充约束：${midrunClarifyNote}`
+                : plan.topic || originalUserQuery,
               todayLine,
               laneMemos: citationsByQuestion.map((r) => ({
                 question: r.question,
@@ -1168,20 +1730,37 @@ export async function runDeepResearchTurn(
               phase: "lanes",
               message: `正在针对 ${gaps.length} 处缺口补充检索…`,
             });
+            const gapJobs = gaps.map((gap, gapIndex) => ({
+              gap,
+              question: gap.description,
+              laneId: `gap-${gap.id}`,
+              index: gapIndex + 1,
+              total: gaps.length,
+            }));
+            for (const job of gapJobs) {
+              enqueueEvent({
+                type: "lane_started",
+                laneId: job.laneId,
+                title: job.question,
+                index: job.index,
+                total: job.total,
+              });
+            }
             const gapResults = await mapPool(
-              gaps,
+              gapJobs,
               SEARCH_CONCURRENCY,
-              async (gap, gapIndex) => {
-                const queries = gap.queries.map(
+              async (job) => {
+                const queries = job.gap.queries.map(
                   (q): QueryVariant => ({ query: q, kind: "term" }),
                 );
                 return runOneLane({
-                  question: gap.description,
-                  laneId: `gap-${gap.id}`,
-                  index: gapIndex + 1,
-                  total: gaps.length,
+                  question: job.question,
+                  laneId: job.laneId,
+                  index: job.index,
+                  total: job.total,
                   variants: queries,
                   skipExpand: true,
+                  alreadyAnnounced: true,
                 });
               },
               runSignal,
@@ -1226,9 +1805,28 @@ export async function runDeepResearchTurn(
 
         const evidence = [
           prefsWritingHint,
-          "",
+          midrunClarifyNote ? `【运行中补充澄清】\n${midrunClarifyNote}` : "",
           formatEvidencePack(plan, citationsByQuestion, reconCitations),
-        ].join("\n");
+        ]
+          .filter((part) => part.trim())
+          .join("\n");
+
+        /** 分节证据：按该节 citationIndexes 裁剪，命中无效时回退完整证据。 */
+        const evidenceForSection = (section: (typeof outline.sections)[number]): string => {
+          const { filtered, filteredRecon, fellBack } = filterCitationsForSection(
+            citationsByQuestion,
+            reconCitations,
+            section.citationIndexes,
+          );
+          if (fellBack) return evidence;
+          return [
+            prefsWritingHint,
+            midrunClarifyNote ? `【运行中补充澄清】\n${midrunClarifyNote}` : "",
+            formatEvidencePack(plan, filtered, filteredRecon),
+          ]
+            .filter((part) => part.trim())
+            .join("\n");
+        };
         const outline = await buildReportOutline({
           topic: sanitizeResearchTopic(plan.topic || originalUserQuery || "调研报告"),
           evidence,
@@ -1345,7 +1943,8 @@ export async function runDeepResearchTurn(
               outline,
               section,
               sectionIndex: i,
-              evidence,
+              // 首节「核心结论」需要全局证据；其余节按 citationIndexes 裁剪证据。
+              evidence: i === 0 ? evidence : evidenceForSection(section),
               previousSummaries,
             }),
           );

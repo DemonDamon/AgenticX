@@ -3,6 +3,7 @@ import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
+  awaitPeerClarifyHandoff,
   clearClarifyWaiters,
   hasClarifyWaiter,
   resolveClarifyResume,
@@ -63,6 +64,34 @@ describe("clarify resume waiters", () => {
     expect(doc.payload?.answers).toEqual({ q1: "disk" });
   });
 
+  it("awaitPeerClarifyHandoff: stale resolved file → stale; removed file → delivered", async () => {
+    fs.writeFileSync(
+      path.join(tmpDir, "run-stale.json"),
+      JSON.stringify({
+        status: "resolved",
+        updatedAt: Date.now(),
+        payload: { answers: { q1: "x" }, skip: false },
+      }),
+      "utf8",
+    );
+    await expect(awaitPeerClarifyHandoff("run-stale", 250)).resolves.toBe("stale");
+
+    fs.writeFileSync(
+      path.join(tmpDir, "run-peer.json"),
+      JSON.stringify({
+        status: "resolved",
+        updatedAt: Date.now(),
+        payload: { answers: { q1: "y" }, skip: false },
+      }),
+      "utf8",
+    );
+    const handoff = awaitPeerClarifyHandoff("run-peer", 800);
+    setTimeout(() => {
+      fs.unlinkSync(path.join(tmpDir, "run-peer.json"));
+    }, 80);
+    await expect(handoff).resolves.toBe("delivered");
+  });
+
   it("returns false when no waiter remains after timeout", async () => {
     vi.useFakeTimers();
     const pending = waitForClarifyResume("run-b", 1_000);
@@ -71,5 +100,19 @@ describe("clarify resume waiters", () => {
     // Allow poll/timer cleanup to drop the waiting file.
     await vi.advanceTimersByTimeAsync(50);
     expect(resolveClarifyResume("run-b", { answers: { q1: "late" }, skip: false })).toBe(false);
+  });
+
+  it("timeoutMs<=0 never auto-times-out (plan_first indefinite wait)", async () => {
+    vi.useFakeTimers();
+    const pending = waitForClarifyResume("run-indef", 0);
+    await vi.advanceTimersByTimeAsync(3_600_000);
+    expect(hasClarifyWaiter("run-indef")).toBe(true);
+    expect(resolveClarifyResume("run-indef", { answers: { __plan_action__: "approve" }, skip: false })).toBe(
+      true,
+    );
+    await expect(pending).resolves.toEqual({
+      answers: { __plan_action__: "approve" },
+      skip: false,
+    });
   });
 });

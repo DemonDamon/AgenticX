@@ -28,7 +28,13 @@ const TERMINAL_STATUSES: ReadonlySet<DeepResearchRunStatus> = new Set([
 
 const ACTIVE_STATUSES: DeepResearchRunStatus[] = ["running", "awaiting_clarify"];
 
-const NEVER_DROP_TYPES = new Set<DeepResearchEvent["type"]>(["run_started", "clarify"]);
+const NEVER_DROP_TYPES = new Set<DeepResearchEvent["type"]>([
+  "run_started",
+  "clarify",
+  "clarify_chat",
+  "research_profile",
+  "research_plan",
+]);
 
 export type RunRecord = {
   runId: string;
@@ -68,6 +74,14 @@ export type RunStore = {
     status: "completed" | "failed" | "cancelled",
     errorMessage?: string,
   ): Promise<void>;
+  /**
+   * Re-open a terminal (or desynced) run so orphan plan-gate continue can
+   * appendEvents again after process restart / stale reap.
+   */
+  reopenForContinue(
+    runId: string,
+    patch?: { status?: DeepResearchRunStatus; phase?: string },
+  ): Promise<boolean>;
   get(tenantId: string, userId: string, runId: string): Promise<RunRecord | null>;
   listActive(tenantId: string, userId: string, sessionId?: string): Promise<RunRecord[]>;
   /** Most recently updated run for a session (any status) — used to rehydrate workbench after refresh. */
@@ -262,6 +276,17 @@ function createMemoryStore(): RunStore {
       if (errorMessage !== undefined) row.errorMessage = errorMessage;
       row.phase = "done";
       row.updatedAt = new Date().toISOString();
+    },
+
+    async reopenForContinue(runId, patch) {
+      const row = bucket.get(runId);
+      if (!row) return false;
+      if (row.status === "completed") return false;
+      row.status = patch?.status ?? "running";
+      row.phase = patch?.phase ?? "lanes";
+      row.errorMessage = undefined;
+      row.updatedAt = new Date().toISOString();
+      return true;
     },
 
     async get(tenantId, userId, runId) {
@@ -519,6 +544,49 @@ function createSqlStore(): RunStore {
       await db.update(pgTable).set(set).where(eq(pgTable.runId, runId));
     },
 
+    async reopenForContinue(runId, patch) {
+      const config = resolveDatabaseConfig();
+      const now = new Date();
+      const nextStatus = patch?.status ?? "running";
+      const nextPhase = patch?.phase ?? "lanes";
+      if (config.dialect === "mysql") {
+        const { raw: db } = await createMysqlDb(config);
+        const rows = await db
+          .select({ status: mysqlTable.status })
+          .from(mysqlTable)
+          .where(eq(mysqlTable.runId, runId))
+          .limit(1);
+        if (!rows[0] || rows[0].status === "completed") return false;
+        await db
+          .update(mysqlTable)
+          .set({
+            status: nextStatus,
+            phase: nextPhase,
+            errorMessage: null,
+            updatedAt: now,
+          })
+          .where(eq(mysqlTable.runId, runId));
+        return true;
+      }
+      const db = getIamDb();
+      const rows = await db
+        .select({ status: pgTable.status })
+        .from(pgTable)
+        .where(eq(pgTable.runId, runId))
+        .limit(1);
+      if (!rows[0] || rows[0].status === "completed") return false;
+      await db
+        .update(pgTable)
+        .set({
+          status: nextStatus,
+          phase: nextPhase,
+          errorMessage: null,
+          updatedAt: now,
+        })
+        .where(eq(pgTable.runId, runId));
+      return true;
+    },
+
     async get(tenantId, userId, runId) {
       const config = resolveDatabaseConfig();
       if (config.dialect === "mysql") {
@@ -663,6 +731,20 @@ export function newEventsSince(record: RunRecord, lastEventSeq: number): DeepRes
   return record.events.slice(-Math.min(delta, record.events.length));
 }
 
+/** 刷新后 hydrate 依赖这些事件；不可只靠 1.5s 批量，否则断连瞬间会丢。 */
+const IMMEDIATE_FLUSH_EVENT_TYPES = new Set<DeepResearchEvent["type"]>([
+  "run_started",
+  "phase",
+  "clarify",
+  "clarify_chat",
+  "research_profile",
+  "research_plan",
+  "lane_started",
+  "lane_done",
+  "artifact",
+  "reflection",
+]);
+
 export function createRunWriter(store: RunStore, runId: string): RunWriter {
   let pendingEvents: DeepResearchEvent[] = [];
   let pendingPatch: { status?: DeepResearchRunStatus; phase?: string } | undefined;
@@ -714,7 +796,11 @@ export function createRunWriter(store: RunStore, runId: string): RunWriter {
         nextPatch.phase = event.phase;
       }
       if (Object.keys(nextPatch).length > 0) pendingPatch = nextPatch;
-      schedule();
+      if (IMMEDIATE_FLUSH_EVENT_TYPES.has(event.type)) {
+        void flush();
+      } else {
+        schedule();
+      }
     },
     pushReport(chunk) {
       if (!chunk) return;
