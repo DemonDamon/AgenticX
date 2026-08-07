@@ -119,6 +119,25 @@ function createFakeClient(): SqlClient & {
         return { rows: [], rowCount: 1 };
       }
 
+      if (sql.startsWith("update chat_messages")) {
+        // content, model, metadata, updated_at, id, session_id, tenant_id, user_id
+        const [content, model, metadata, updatedAt, id, sessionId, tenantId, userId] = params;
+        const row = messages.get(String(id));
+        if (
+          !row ||
+          row.session_id !== sessionId ||
+          row.tenant_id !== tenantId ||
+          row.user_id !== userId
+        ) {
+          return { rows: [], rowCount: 0 };
+        }
+        row.content = content;
+        row.model = model;
+        row.metadata = metadata;
+        row.updated_at = updatedAt;
+        return { rows: [], rowCount: 1 };
+      }
+
       throw new Error(`unhandled sql in fake client: ${statement}`);
     },
     async transaction(callback) {
@@ -193,7 +212,7 @@ describe.each(["postgresql", "mysql"] as const)("append idempotency (%s)", (dial
     expect(client.sessions.get(sessionId)?.message_count).toBe(2);
   });
 
-  it("same message id same payload replays 200; different content 409 (AC-3)", async () => {
+  it("same message id same payload replays; owned content/metadata checkpoint upserts (AC-3)", async () => {
     const client = createFakeClient();
     const store = new SqlChatHistoryStore(dialect, client);
     const sessionId = ulid();
@@ -204,9 +223,14 @@ describe.each(["postgresql", "mysql"] as const)("append idempotency (%s)", (dial
       session_id: sessionId,
       tenant_id: "01TENANTAAAAAAAAAAAAAAAAAA",
       user_id: "01USERAAAAAAAAAAAAAAAAAAAA",
-      role: "user" as const,
-      content: "same",
+      role: "assistant" as const,
+      content: "",
       created_at: "2026-07-30T00:00:00.000Z",
+      deep_research: {
+        runId: "pending",
+        status: "running" as const,
+        events: [] as Array<{ type: "run_started"; runId: string }>,
+      },
     };
     await store.appendChatMessages(
       { tenantId: "01TENANTAAAAAAAAAAAAAAAAAA", userId: "01USERAAAAAAAAAAAAAAAAAAAA" },
@@ -220,11 +244,38 @@ describe.each(["postgresql", "mysql"] as const)("append idempotency (%s)", (dial
     );
     expect(client.messages.size).toBe(1);
 
+    // Mid-run checkpoint: richer deep_research + grown content must update, not 409.
+    await store.appendChatMessages(
+      { tenantId: "01TENANTAAAAAAAAAAAAAAAAAA", userId: "01USERAAAAAAAAAAAAAAAAAAAA" },
+      sessionId,
+      [
+        {
+          ...base,
+          content: "partial",
+          deep_research: {
+            runId: "run-1",
+            status: "running",
+            events: [{ type: "run_started", runId: "run-1" }],
+          },
+        },
+      ],
+    );
+    expect(client.messages.size).toBe(1);
+    expect(client.messages.get(messageId)?.content).toBe("partial");
+    const meta = JSON.parse(String(client.messages.get(messageId)?.metadata ?? "{}")) as {
+      deep_research?: { runId?: string; events?: unknown[] };
+    };
+    expect(meta.deep_research?.runId).toBe("run-1");
+    expect(meta.deep_research?.events).toHaveLength(1);
+
+    // Cross-session id reuse is still a hard conflict.
+    const otherSession = ulid();
+    seedSession(client, otherSession);
     await expect(
       store.appendChatMessages(
         { tenantId: "01TENANTAAAAAAAAAAAAAAAAAA", userId: "01USERAAAAAAAAAAAAAAAAAAAA" },
-        sessionId,
-        [{ ...base, content: "different" }],
+        otherSession,
+        [{ ...base, session_id: otherSession, content: "hijack" }],
       ),
     ).rejects.toBeInstanceOf(ChatHistoryConflictError);
   });

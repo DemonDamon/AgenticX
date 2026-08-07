@@ -347,15 +347,10 @@ export class SqlChatHistoryStore implements ChatHistoryStore {
     );
   }
 
-  private messagesEquivalent(existing: ChatMessage, incoming: ChatMessage): boolean {
-    return (
-      existing.role === incoming.role &&
-      existing.content === incoming.content &&
-      existing.created_at === incoming.created_at &&
-      (existing.model ?? "") === (incoming.model ?? "")
-    );
-  }
-
+  /**
+   * Owned same-id rows may receive checkpoint updates (content / model / metadata).
+   * Cross-session or cross-principal reuse of an id remains a hard conflict.
+   */
   private async ensureMessagesCompatible(
     client: SqlClient,
     ctx: ChatHistoryContext,
@@ -378,14 +373,52 @@ export class SqlChatHistoryStore implements ChatHistoryStore {
         mapped.session_id !== sessionId ||
         mapped.tenant_id !== ctx.tenantId ||
         mapped.user_id !== ctx.userId ||
-        !this.messagesEquivalent(mapped, message)
+        mapped.role !== message.role
       ) {
+        throw new ChatHistoryConflictError("message id conflict with different payload");
+      }
+      // created_at is immutable identity for the turn; drifting it is treated as conflict.
+      if (mapped.created_at !== message.created_at) {
         throw new ChatHistoryConflictError("message id conflict with different payload");
       }
     }
     if (existingCount === 0) return "none_exist";
     if (existingCount === messages.length) return "all_exist";
     throw new ChatHistoryConflictError("partial message id overlap");
+  }
+
+  /** Upsert content/model/metadata for an already-inserted owned message (deep-research checkpoints). */
+  private async updateMessagesCheckpoint(
+    client: SqlClient,
+    ctx: ChatHistoryContext,
+    sessionId: string,
+    messages: ChatMessage[],
+    now: Date,
+  ): Promise<void> {
+    for (const message of messages) {
+      const metadata = serializeMessageMetadata(message);
+      await client.query(
+        `update chat_messages
+         set content = ${this.dialect === "postgresql" ? "$1" : "?"},
+             model = ${this.dialect === "postgresql" ? "$2" : "?"},
+             metadata = ${this.dialect === "postgresql" ? "$3" : "?"},
+             updated_at = ${this.dialect === "postgresql" ? "$4" : "?"}
+         where id = ${this.dialect === "postgresql" ? "$5" : "?"}
+           and session_id = ${this.dialect === "postgresql" ? "$6" : "?"}
+           and tenant_id = ${this.dialect === "postgresql" ? "$7" : "?"}
+           and user_id = ${this.dialect === "postgresql" ? "$8" : "?"}`,
+        [
+          message.content,
+          message.model ?? null,
+          metadata,
+          now,
+          message.id,
+          sessionId,
+          ctx.tenantId,
+          ctx.userId,
+        ],
+      );
+    }
   }
 
   public async appendChatMessages(
@@ -436,6 +469,10 @@ export class SqlChatHistoryStore implements ChatHistoryStore {
       const compatibility = await this.ensureMessagesCompatible(tx, ctx, sessionId, messages);
       if (compatibility === "none_exist") {
         await this.insertMessages(tx, ctx, sessionId, messages, now);
+      } else {
+        // Same ids already persisted (e.g. deep-research early shell) — refresh
+        // content + deep_research metadata so mid-run refresh can restore the turn.
+        await this.updateMessagesCheckpoint(tx, ctx, sessionId, messages, now);
       }
 
       if (operationId && payloadHash) {
