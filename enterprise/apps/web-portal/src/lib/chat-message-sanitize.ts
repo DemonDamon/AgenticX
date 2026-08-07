@@ -148,7 +148,119 @@ function sanitizeDeepResearch(raw: unknown): ChatMessageDeepResearch | undefined
     }
     if (Object.keys(clarifyAnswers).length === 0) clarifyAnswers = undefined;
   }
-  return { runId, status, events, artifactIds, clarifyAnswers };
+
+  const MAX_ASSUMPTIONS = 8;
+  const MAX_ASSUMPTION_CHARS = 200;
+  const MAX_SCOPE_ITEMS = 12;
+  const MAX_SUB_QUESTIONS = 12;
+  const MAX_STRATEGY_ITEMS = 8;
+  const MAX_PLAN_TEXT_CHARS = 300;
+
+  const asStringList = (value: unknown, maxItems: number, maxChars: number): string[] =>
+    Array.isArray(value)
+      ? value
+          .filter((v): v is string => typeof v === "string" && Boolean(v.trim()))
+          .slice(0, maxItems)
+          .map((v) => v.trim().slice(0, maxChars))
+      : [];
+
+  const sanitizePlanSnapshot = (
+    value: unknown,
+  ): ChatMessageDeepResearch["plan"] | undefined => {
+    if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
+    const plan = value as Record<string, unknown>;
+    const objective = typeof plan.objective === "string" ? plan.objective.trim() : "";
+    if (!objective) return undefined;
+    const version =
+      typeof plan.version === "number" && Number.isInteger(plan.version) && plan.version > 0
+        ? Math.min(plan.version, 999)
+        : 1;
+    const subQuestions = Array.isArray(plan.subQuestions)
+      ? plan.subQuestions
+          .map((item, index) => {
+            if (!item || typeof item !== "object") return null;
+            const sq = item as Record<string, unknown>;
+            const title = typeof sq.title === "string" ? sq.title.trim() : "";
+            if (!title) return null;
+            return {
+              id:
+                typeof sq.id === "string" && sq.id.trim()
+                  ? sq.id.trim().slice(0, 40)
+                  : `sq${index + 1}`,
+              title: title.slice(0, MAX_PLAN_TEXT_CHARS),
+              ...(typeof sq.purpose === "string" && sq.purpose.trim()
+                ? { purpose: sq.purpose.trim().slice(0, MAX_PLAN_TEXT_CHARS) }
+                : {}),
+            };
+          })
+          .filter((sq): sq is NonNullable<typeof sq> => sq != null)
+          .slice(0, MAX_SUB_QUESTIONS)
+      : [];
+    return {
+      version,
+      objective: objective.slice(0, MAX_PLAN_TEXT_CHARS),
+      scope: asStringList(plan.scope, MAX_SCOPE_ITEMS, MAX_PLAN_TEXT_CHARS),
+      subQuestions,
+      sourceStrategy: asStringList(plan.sourceStrategy, MAX_STRATEGY_ITEMS, MAX_PLAN_TEXT_CHARS),
+      deliverables: asStringList(plan.deliverables, MAX_STRATEGY_ITEMS, MAX_PLAN_TEXT_CHARS),
+      assumptions: asStringList(plan.assumptions, MAX_ASSUMPTIONS, MAX_ASSUMPTION_CHARS),
+    };
+  };
+
+  const sanitizeProfile = (
+    value: unknown,
+  ): ChatMessageDeepResearch["profile"] | undefined => {
+    if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
+    const profile = value as Record<string, unknown>;
+    const depth = profile.researchDepth;
+    const mode = profile.clarifyMode;
+    const visibility = profile.planVisibility;
+    if (
+      (depth !== "light" && depth !== "standard" && depth !== "deep") ||
+      (mode !== "card" && mode !== "chat" && mode !== "none") ||
+      (visibility !== "hidden" &&
+        visibility !== "preview" &&
+        visibility !== "editable" &&
+        visibility !== "chat_editable")
+    ) {
+      return undefined;
+    }
+    const budgetRaw =
+      profile.clarifyBudget && typeof profile.clarifyBudget === "object"
+        ? (profile.clarifyBudget as Record<string, unknown>)
+        : {};
+    const maxRounds =
+      typeof budgetRaw.maxRounds === "number" && Number.isInteger(budgetRaw.maxRounds)
+        ? Math.min(Math.max(budgetRaw.maxRounds, 1), 3)
+        : 3;
+    return {
+      researchDepth: depth,
+      clarifyMode: mode,
+      clarifyBudget: { maxRounds, allowMidRun: budgetRaw.allowMidRun !== false },
+      planVisibility: visibility,
+      assumptions: asStringList(profile.assumptions, MAX_ASSUMPTIONS, MAX_ASSUMPTION_CHARS),
+    };
+  };
+
+  const profile = sanitizeProfile(row.profile);
+  const plan = sanitizePlanSnapshot(row.plan);
+  const planVersion =
+    typeof row.planVersion === "number" && Number.isInteger(row.planVersion) && row.planVersion > 0
+      ? Math.min(row.planVersion, 999)
+      : undefined;
+  const assumptions = asStringList(row.assumptions, MAX_ASSUMPTIONS, MAX_ASSUMPTION_CHARS);
+
+  return {
+    runId,
+    status,
+    events,
+    artifactIds,
+    clarifyAnswers,
+    ...(profile ? { profile } : {}),
+    ...(plan ? { plan } : {}),
+    ...(planVersion ? { planVersion } : {}),
+    ...(assumptions.length > 0 ? { assumptions } : {}),
+  };
 }
 
 export function sanitizeInboundMessages(
