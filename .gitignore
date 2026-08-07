@@ -107,5 +107,6 @@ task_plan.md
 **/.playwright-state/
 **/out/
 enterprise/apps/gateway/.runtime/
+enterprise/apps/web-portal/.runtime/
 enterprise/.runtime/
 .dataset/
