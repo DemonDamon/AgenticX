@@ -7,6 +7,7 @@ import { directFetch, type DirectFetch } from "./direct-fetch";
 import {
   DEFAULT_BACKEND_CHAIN,
   isTerminalFailure,
+  isTransientFailure,
   resolveBackend,
   type PageFetchBackendName,
   type PageFetchFailure,
@@ -18,6 +19,8 @@ export {
 } from "./page-fetch-extract";
 export {
   DEFAULT_BACKEND_CHAIN,
+  isTerminalFailure,
+  isTransientFailure,
   type PageFetchBackendName,
   type PageFetchFailure,
 } from "./page-fetch-backends";
@@ -26,6 +29,25 @@ export const PAGE_FETCH_TIMEOUT_MS = 12_000;
 export const PAGE_FETCH_CONCURRENCY = 4;
 /** Same-host network/timeout failures before skipping remaining URLs in a batch. */
 export const HOST_FAILURE_THRESHOLD = 3;
+/** Same-backend retries per URL for transient failures. */
+export const TRANSIENT_RETRIES = 1;
+export const TRANSIENT_RETRY_DELAY_MS = 300;
+
+/** Abort-aware sleep; resolves early when the run is cancelled. */
+function delay(ms: number, signal?: AbortSignal): Promise<void> {
+  if (ms <= 0 || signal?.aborted) return Promise.resolve();
+  return new Promise((resolve) => {
+    const timer = setTimeout(() => {
+      signal?.removeEventListener("abort", onAbort);
+      resolve();
+    }, ms);
+    function onAbort(): void {
+      clearTimeout(timer);
+      resolve();
+    }
+    signal?.addEventListener("abort", onAbort, { once: true });
+  });
+}
 
 export type PageContent = {
   url: string;
@@ -44,6 +66,8 @@ export type PageFetchDeps = {
   /** 依次尝试，首个成功即返回；缺省用 DEFAULT_BACKEND_CHAIN。 */
   backends?: PageFetchBackendName[];
   apiKeys?: Partial<Record<PageFetchBackendName, string>>;
+  /** 瞬时失败的重试次数（按 URL 计），缺省 TRANSIENT_RETRIES；测试可置 0。 */
+  transientRetries?: number;
 };
 
 /** 批量抓取的失败原因计数（供事件展示）。 */
@@ -111,29 +135,45 @@ async function fetchPageContentWithReason(
     deps?.backends && deps.backends.length > 0 ? deps.backends : DEFAULT_BACKEND_CHAIN;
 
   let lastFailure: PageFetchFailure | undefined;
+  // One retry budget per URL (not per backend), so a flaky host gets a second
+  // chance without letting a dead one multiply the worst-case latency.
+  let transientRetriesLeft = deps?.transientRetries ?? TRANSIENT_RETRIES;
 
   for (const name of backends) {
     const backend = resolveBackend(name);
-    const result = await backend(url, {
-      fetchImpl,
-      timeoutMs,
-      signal: deps?.signal,
-      apiKey: deps?.apiKeys?.[name],
-    });
+    while (true) {
+      const result = await backend(url, {
+        fetchImpl,
+        timeoutMs,
+        signal: deps?.signal,
+        apiKey: deps?.apiKeys?.[name],
+      });
 
-    if (result.ok) {
-      return {
-        page: {
-          url,
-          text: result.text,
-          rawChars: result.rawChars,
-          backend: name,
-        },
-      };
+      if (result.ok) {
+        return {
+          page: {
+            url,
+            text: result.text,
+            rawChars: result.rawChars,
+            backend: name,
+          },
+        };
+      }
+
+      lastFailure = result.reason;
+      if (
+        transientRetriesLeft > 0 &&
+        isTransientFailure(result.reason) &&
+        !deps?.signal?.aborted
+      ) {
+        transientRetriesLeft -= 1;
+        await delay(TRANSIENT_RETRY_DELAY_MS, deps?.signal);
+        continue;
+      }
+      break;
     }
 
-    lastFailure = result.reason;
-    if (isTerminalFailure(result.reason)) {
+    if (lastFailure && isTerminalFailure(lastFailure)) {
       break;
     }
   }

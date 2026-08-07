@@ -2,7 +2,9 @@ import { describe, expect, it } from "vitest";
 import {
   MAX_VARIANTS_PER_LANE,
   heuristicVariants,
+  isNearDuplicateQuery,
   parseVariantsJson,
+  querySimilarity,
 } from "./query-expander";
 
 describe("heuristicVariants", () => {
@@ -46,5 +48,61 @@ describe("parseVariantsJson", () => {
   it("falls back on invalid / empty arrays", () => {
     expect(parseVariantsJson("not-json", "主题").some((v) => v.kind === "primary")).toBe(true);
     expect(parseVariantsJson("[]", "主题").some((v) => v.kind === "primary")).toBe(true);
+  });
+
+  it("drops variants that only differ by particles or punctuation", () => {
+    const raw = JSON.stringify([
+      { query: "MiniMax M2 的模型架构", kind: "primary" },
+      { query: "MiniMax M2 模型架构", kind: "term" },
+      { query: "MiniMax M2 模型架构？", kind: "term" },
+      { query: "MiniMax M2 architecture paper", kind: "english" },
+    ]);
+    const variants = parseVariantsJson(raw, "MiniMax M2 的模型架构");
+    expect(variants.map((v) => v.query)).toEqual([
+      "MiniMax M2 的模型架构",
+      "MiniMax M2 architecture paper",
+    ]);
+  });
+
+  it("keeps variants that add a real search angle", () => {
+    const raw = JSON.stringify([
+      { query: "MiniMax M2 模型架构", kind: "primary" },
+      { query: "MiniMax M2 模型架构 技术报告 论文", kind: "authority" },
+      { query: "MiniMax M2 模型架构 局限 质疑", kind: "contrarian" },
+    ]);
+    expect(parseVariantsJson(raw, "MiniMax M2 模型架构")).toHaveLength(3);
+  });
+});
+
+describe("querySimilarity / isNearDuplicateQuery", () => {
+  it("scores identical-after-normalization queries as 1", () => {
+    expect(querySimilarity("X 的架构", "X架构")).toBe(1);
+    expect(querySimilarity("Deep Seek", "deepseek")).toBe(1);
+  });
+
+  it("scores unrelated queries near 0", () => {
+    expect(querySimilarity("模型架构", "训练成本")).toBeLessThan(0.2);
+  });
+
+  it("treats a long added qualifier as a new angle, not a duplicate", () => {
+    const base = "MiniMax M2 混合专家路由策略与推理开销";
+    expect(isNearDuplicateQuery(base, `${base} 技术报告`)).toBe(false);
+  });
+
+  it("still catches word-order and punctuation reshuffles", () => {
+    expect(isNearDuplicateQuery("模型架构 MiniMax M2", "MiniMax M2 模型架构")).toBe(false);
+    expect(isNearDuplicateQuery("MiniMax M2, 模型架构!", "MiniMax M2 模型架构")).toBe(true);
+  });
+
+  it("ignores empty queries", () => {
+    expect(isNearDuplicateQuery("", "x")).toBe(false);
+    expect(isNearDuplicateQuery("  ", "  ")).toBe(false);
+  });
+
+  it("keeps heuristic fallback variants distinct from each other", () => {
+    const variants = heuristicVariants("MiniMax M2 混合专家路由策略与推理开销的权衡");
+    const queries = variants.map((v) => v.query);
+    expect(new Set(queries).size).toBe(queries.length);
+    expect(variants.length).toBeGreaterThanOrEqual(3);
   });
 });

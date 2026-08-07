@@ -134,21 +134,96 @@ describe("fetchPageContent", () => {
     expect(page!.text).toContain("Jina 回退正文");
   });
 
-  it("does not fall back on unsupported_content_type", async () => {
-    let calls = 0;
-    const fetchImpl: DirectFetch = async () => {
-      calls += 1;
+  it("falls back to jina for a PDF that native cannot read", async () => {
+    // Authority sources (arxiv, tech reports) are mostly PDFs; native rejects
+    // them on content-type, so the chain must still reach the reader backend.
+    const jinaBody = "论文正文段落".repeat(80);
+    const seen: string[] = [];
+    const fetchImpl: DirectFetch = async (input) => {
+      const url = String(input);
+      seen.push(url);
+      if (url.startsWith("https://r.jina.ai/")) {
+        return new Response(jinaBody, {
+          status: 200,
+          headers: { "content-type": "text/plain" },
+        });
+      }
       return new Response("%PDF", {
         status: 200,
         headers: { "content-type": "application/pdf" },
       });
     };
-    const page = await fetchPageContent("https://example.com/a.pdf", {
+    const page = await fetchPageContent("https://arxiv.org/pdf/2401.00001", {
+      fetchImpl,
+      backends: ["native", "jina"],
+    });
+    expect(page).not.toBeNull();
+    expect(page!.backend).toBe("jina");
+    expect(page!.text).toContain("论文正文段落");
+    expect(seen).toHaveLength(2);
+  });
+
+  it("stops the chain on invalid_url without touching later backends", async () => {
+    const fetchImpl = vi.fn(async () => new Response("x")) as unknown as DirectFetch;
+    const page = await fetchPageContent("ftp://example.com/a", {
       fetchImpl,
       backends: ["native", "jina"],
     });
     expect(page).toBeNull();
+    expect(fetchImpl).not.toHaveBeenCalled();
+  });
+
+  it("retries a transient failure once on the same backend", async () => {
+    const body = "重试后拿到的正文".repeat(80);
+    let calls = 0;
+    const fetchImpl: DirectFetch = async () => {
+      calls += 1;
+      if (calls === 1) throw new Error("network down");
+      return new Response(`<article><p>${body}</p></article>`, {
+        status: 200,
+        headers: { "content-type": "text/html" },
+      });
+    };
+    const page = await fetchPageContent("https://example.com/flaky", {
+      fetchImpl,
+      backends: ["native"],
+    });
+    expect(page).not.toBeNull();
+    expect(page!.backend).toBe("native");
+    expect(calls).toBe(2);
+  });
+
+  it("spends the retry budget once per url, not once per backend", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    let calls = 0;
+    const fetchImpl: DirectFetch = async () => {
+      calls += 1;
+      throw new Error("network down");
+    };
+    const page = await fetchPageContent("https://example.com/dead", {
+      fetchImpl,
+      backends: ["native", "jina"],
+    });
+    expect(page).toBeNull();
+    // native, native retry, jina — not four attempts.
+    expect(calls).toBe(3);
+    warn.mockRestore();
+  });
+
+  it("skips retries when transientRetries is 0", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    let calls = 0;
+    const fetchImpl: DirectFetch = async () => {
+      calls += 1;
+      throw new Error("network down");
+    };
+    await fetchPageContent("https://example.com/dead", {
+      fetchImpl,
+      backends: ["native"],
+      transientRetries: 0,
+    });
     expect(calls).toBe(1);
+    warn.mockRestore();
   });
 });
 
