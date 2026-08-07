@@ -16,7 +16,9 @@ services:
       DEFAULT_TENANT_ID: ${DEFAULT_TENANT_ID:-01J00000000000000000000001}
       DEFAULT_DEPT_ID: ${DEFAULT_DEPT_ID:-01J00000000000000000000003}
       ATTACHMENT_BLOB_DIR: /runtime/attachments
-      AGX_CLARIFY_WAIT_DIR: /runtime/deep-research-clarify
+      # Clarify wait files only need to survive within the app container lifetime.
+      # Keep them under /app so the non-root `nextjs` user can always write.
+      AGX_CLARIFY_WAIT_DIR: /app/.runtime/deep-research-clarify
     volumes:
       - web_portal_runtime:/runtime
     networks:

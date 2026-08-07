@@ -51,6 +51,7 @@ services:
     image: agenticx-registry.cn-shanghai.cr.aliyuncs.com/agenticx/enterprise-web-portal:latest
     container_name: agenticx-web-portal
     restart: unless-stopped
+    user: "0:0"
     environment:
       NODE_ENV: production
       DATABASE_DIALECT: ${DATABASE_DIALECT:-postgresql}
