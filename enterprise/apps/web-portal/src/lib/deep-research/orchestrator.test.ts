@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import {
   DEEP_RESEARCH_SEARCH_FAILED,
   MAX_LANES,
+  LANE_ADOPT_CAP,
   MAX_RESULTS_PER_LANE,
   MAX_SOURCES,
   MIN_RESULTS_PER_LANE,
@@ -11,6 +12,7 @@ import {
   formatSourcesAppendix,
   mapPool,
   matchSelectedOptions,
+  resolveLaneAdoptCap,
   resolveResultsPerLane,
   runDeepResearchTurn,
 } from "./orchestrator";
@@ -960,6 +962,20 @@ describe("clarify multi-select → lanes", () => {
     );
     expect(researchLanes).toHaveLength(4);
     clearClarifyWaiters();
+  });
+});
+
+describe("lane adopt cap", () => {
+  it("caps a single lane but lets it use the whole remaining budget", () => {
+    expect(resolveLaneAdoptCap(0)).toBe(LANE_ADOPT_CAP);
+    expect(resolveLaneAdoptCap(MAX_SOURCES - 3)).toBe(3);
+    expect(resolveLaneAdoptCap(MAX_SOURCES)).toBe(0);
+    expect(resolveLaneAdoptCap(MAX_SOURCES + 5)).toBe(0);
+  });
+
+  it("is decoupled from the per-query request count so adoption is not capped at it", () => {
+    // 5 lanes request 8 results per query; adoption must not inherit that 8.
+    expect(resolveLaneAdoptCap(0)).toBeGreaterThan(resolveResultsPerLane(5));
   });
 });
 

@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   SourcePool,
+  adaptiveMaxPerDomain,
   authorityBoost,
   scorePool,
   selectTopSources,
@@ -63,5 +64,24 @@ describe("authorityBoost / scorePool / selectTopSources", () => {
     }));
     expect(selectTopSources(scored, 10, 2)).toHaveLength(2);
     expect(selectTopSources(scored.slice(0, 1), 10, 2)).toHaveLength(1);
+  });
+
+  it("relaxes the per-domain quota when the candidate pool is thin", () => {
+    expect(adaptiveMaxPerDomain(6)).toBe(5);
+    expect(adaptiveMaxPerDomain(12)).toBe(5);
+    expect(adaptiveMaxPerDomain(13)).toBe(4);
+    expect(adaptiveMaxPerDomain(24)).toBe(4);
+    expect(adaptiveMaxPerDomain(40)).toBe(3);
+  });
+
+  it("adopts more single-domain pages from a thin pool than the fixed quota did", () => {
+    const scored = Array.from({ length: 6 }, (_, i) => ({
+      hit: { title: `t${i}`, url: `https://docs.same.com/${i}`, snippet: "s" },
+      matchedQueries: ["q"],
+      hitCount: 1,
+      score: 1 - i * 0.01,
+    }));
+    expect(selectTopSources(scored, 12, adaptiveMaxPerDomain(scored.length))).toHaveLength(5);
+    expect(selectTopSources(scored, 12, 3)).toHaveLength(3);
   });
 });

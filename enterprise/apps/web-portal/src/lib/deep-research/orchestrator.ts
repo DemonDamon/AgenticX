@@ -75,6 +75,7 @@ import {
 import { expandQueries, type QueryVariant } from "./query-expander";
 import {
   SourcePool,
+  adaptiveMaxPerDomain,
   scorePool,
   selectTopSources,
 } from "./source-pool";
@@ -89,6 +90,13 @@ export const MAX_SOURCES = 40;
 export const MAX_LANES = 5;
 export const MIN_RESULTS_PER_LANE = 4;
 export const MAX_RESULTS_PER_LANE = 10;
+/**
+ * 单车道采用上限，与「每条检索式请求多少条」解耦。
+ *
+ * 两者曾共用 resolveResultsPerLane()：一个车道跑 4 条检索式拿到 30+ 候选，
+ * 却只准采用 8 个，采用率天花板被锁在 25% 左右，且车道越多天花板越低。
+ */
+export const LANE_ADOPT_CAP = 12;
 export const RECON_TIMEOUT_MS = 15_000;
 
 function envMs(key: string, fallback: number): number {
@@ -230,11 +238,26 @@ function slugifyLane(title: string, index: number): string {
   return `q${index + 1}-${base || "lane"}`;
 }
 
-/** Spread the global source budget across however many lanes the planner chose. */
+/**
+ * 每条检索式向搜索提供方请求多少条结果（不是采用上限，见 resolveLaneAdoptCap）。
+ *
+ * 计费按请求次数而非返回条数，所以这里放宽不额外花钱，只是让候选池更厚。
+ */
 export function resolveResultsPerLane(laneCount: number): number {
   if (laneCount <= 0) return MIN_RESULTS_PER_LANE;
   const even = Math.ceil(MAX_SOURCES / laneCount);
   return Math.min(MAX_RESULTS_PER_LANE, Math.max(MIN_RESULTS_PER_LANE, even));
+}
+
+/**
+ * 一个车道此刻能采用多少来源：全局剩余预算与单车道上限取小。
+ *
+ * 读的是调用时刻的 registry 用量而不是均分份额，所以早跑完、用得少的车道会
+ * 把额度留给后面的批次（车道并发度 3，5 个车道天然分批），MAX_SOURCES 不再
+ * 因为均分而长期用不满。
+ */
+export function resolveLaneAdoptCap(sourcesUsed: number): number {
+  return Math.max(0, Math.min(LANE_ADOPT_CAP, MAX_SOURCES - sourcesUsed));
 }
 
 export function formatEvidencePack(
@@ -958,7 +981,11 @@ export async function runDeepResearchTurn(
             }
 
             const scored = scorePool(plan.topic || originalUserQuery, pool.list());
-            const selected = selectTopSources(scored, resultsPerLane);
+            const selected = selectTopSources(
+              scored,
+              resolveLaneAdoptCap(registry.size),
+              adaptiveMaxPerDomain(pool.size),
+            );
             enqueueEvent({
               type: "lane_progress",
               laneId,
