@@ -16,7 +16,7 @@ import {
   type DeliveryPrefs,
 } from "./delivery-prefs";
 import type { Citation } from "./registry";
-import { renderHtmlReport } from "./report-html";
+import { markdownToHtml, renderHtmlReport } from "./report-html";
 import { buildMindmap } from "./report-mindmap";
 import { linkifyCitations, type ReportOutline } from "./report-writer";
 
@@ -106,8 +106,29 @@ function buildCompactHtml(input: {
   return best;
 }
 
+function buildCompactWordDoc(title: string, markdown: string): string {
+  const note = "\n\n> 报告体积较大，Word 版本已截断正文。\n";
+  let lo = 0;
+  let hi = markdown.length;
+  let best = renderWordHtmlDocument(title, markdownToHtml(note).html);
+  while (lo < hi) {
+    const mid = Math.floor((lo + hi + 1) / 2);
+    const candidate = renderWordHtmlDocument(
+      title,
+      markdownToHtml(markdown.slice(0, mid) + note).html,
+    );
+    if (byteLength(candidate) <= MAX_ARTIFACT_BYTES) {
+      best = candidate;
+      lo = mid;
+    } else {
+      hi = mid - 1;
+    }
+  }
+  return best;
+}
+
 /**
- * Write report.html (+ emit artifact events) after final report is ready.
+ * Write report.html (+ report.doc when Word is primary) after final report is ready.
  * Markdown body lives in final-report.md (orchestrator); do not duplicate as report.md.
  * Returns updated artifactsWritten count.
  */
@@ -123,6 +144,35 @@ export async function finalizeReportArtifacts(
   const topic = sanitizeResearchTopic(input.topic || title);
   const generatedAt = (input.now?.() ?? new Date()).toISOString();
   const prefs = input.deliveryPrefs ?? DEFAULT_DELIVERY_PREFS;
+
+  // Word is a primary deliverable when user picked docx. Never skip solely because
+  // lane memos already hit MAX_ARTIFACTS_PER_RUN.
+  if (prefs.format === "docx") {
+    let doc = renderWordHtmlDocument(title, markdownToHtml(linkified).html);
+    if (byteLength(doc) > MAX_ARTIFACT_BYTES) {
+      doc = buildCompactWordDoc(title, linkified);
+    }
+    const docRecord = await input.artifactStore.write({
+      tenantId: input.tenantId,
+      userId: input.userId,
+      sessionId: input.sessionId,
+      runId: input.runId,
+      path: `research/${input.runId}/report.doc`,
+      title: primaryArtifactTitle(topic, prefs),
+      kind: "report",
+      mimeType: "application/vnd.ms-word",
+      content: doc,
+    });
+    written += 1;
+    input.enqueueEvent({
+      type: "artifact",
+      id: docRecord.id,
+      path: docRecord.path,
+      title: docRecord.title,
+      kind: "report",
+      bytes: docRecord.byteSize,
+    });
+  }
 
   const mindmapMermaid = buildMindmap({
     topic,
@@ -160,7 +210,7 @@ export async function finalizeReportArtifacts(
     ...prefs,
     format: prefs.format === "pdf" || prefs.format === "html" ? prefs.format : "html",
   });
-  // Always use .html title for the HTML artifact path (even when md is primary).
+  // Always use .html title for the HTML artifact path (even when md/docx is primary).
   const artifactTitle =
     prefs.format === "html" || prefs.format === "pdf"
       ? htmlTitle

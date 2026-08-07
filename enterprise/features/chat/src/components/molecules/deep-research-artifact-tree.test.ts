@@ -20,6 +20,29 @@ describe("isHtmlArtifact", () => {
     );
     expect(isHtmlArtifact(null)).toBe(false);
   });
+
+  it("detects Word-HTML .doc by mimeType or .doc path", () => {
+    expect(
+      isHtmlArtifact({
+        path: "research/r1/report.doc",
+        mimeType: "application/vnd.ms-word",
+      }),
+    ).toBe(true);
+    expect(isHtmlArtifact({ path: "research/r1/report.doc", mimeType: "text/plain" })).toBe(true);
+  });
+});
+
+describe("prepareHtmlPreviewSrcDoc with Word-HTML .doc", () => {
+  it("produces non-empty iframe srcDoc for Word-compatible HTML", () => {
+    const wordHtml = `<html xmlns:w="urn:schemas-microsoft-com:office:word">
+<head><title>t</title>
+<!--[if gte mso 9]><xml><w:WordDocument><w:View>Print</w:View></w:WordDocument></xml><![endif]-->
+</head><body><p>验收正文</p></body></html>`;
+    const out = prepareHtmlPreviewSrcDoc(wordHtml, false);
+    expect(out.trim().length).toBeGreaterThan(0);
+    expect(out).toContain("验收正文");
+    expect(out).toContain("WordDocument");
+  });
 });
 
 describe("prepareHtmlPreviewSrcDoc", () => {

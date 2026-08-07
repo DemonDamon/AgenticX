@@ -93,7 +93,8 @@ function isReportPath(path: string): boolean {
   return (
     lower.endsWith("final-report.md") ||
     lower.endsWith("report.md") ||
-    lower.endsWith("report.html")
+    lower.endsWith("report.html") ||
+    lower.endsWith("report.doc")
   );
 }
 
@@ -111,6 +112,7 @@ export function selectSummaryArtifacts(
   const primary =
     reports.find((a) => a.path.toLowerCase().endsWith(suffix)) ??
     reports.find((a) => a.path.toLowerCase().endsWith("final-report.md")) ??
+    reports.find((a) => a.path.toLowerCase().endsWith("report.doc")) ??
     reports.find((a) => a.path.toLowerCase().endsWith("report.html")) ??
     reports[0];
 

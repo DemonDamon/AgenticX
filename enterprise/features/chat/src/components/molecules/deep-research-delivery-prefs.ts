@@ -25,6 +25,7 @@ export function inferDeliveryFormat(
 
 export function primaryReportBasename(format: ClientDeliveryFormat): string {
   if (format === "html" || format === "pdf") return "report.html";
+  if (format === "docx") return "report.doc";
   return "final-report.md";
 }
 
@@ -48,7 +49,12 @@ export function displayDeliveryFileName(input: {
   title: string;
 }): string {
   const cleaned = cleanDeliveryArtifactTitle(input.title);
-  const ext = input.path.toLowerCase().endsWith(".html") ? ".html" : ".md";
+  const pathLower = input.path.toLowerCase();
+  const ext = pathLower.endsWith(".html")
+    ? ".html"
+    : pathLower.endsWith(".doc")
+      ? ".doc"
+      : ".md";
   if (cleaned) {
     const lower = cleaned.toLowerCase();
     if (lower.endsWith(".md") || lower.endsWith(".html") || lower.endsWith(".doc")) {

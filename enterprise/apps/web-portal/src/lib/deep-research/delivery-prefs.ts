@@ -151,8 +151,11 @@ export function deliveryPrefsPromptBlock(prefs: DeliveryPrefs): string {
   ].join("\n");
 }
 
-export function primaryReportPathSuffix(prefs: DeliveryPrefs): "final-report.md" | "report.html" {
+export function primaryReportPathSuffix(
+  prefs: DeliveryPrefs,
+): "final-report.md" | "report.html" | "report.doc" {
   if (prefs.format === "html" || prefs.format === "pdf") return "report.html";
+  if (prefs.format === "docx") return "report.doc";
   return "final-report.md";
 }
 
@@ -165,6 +168,9 @@ export function primaryArtifactTitle(topic: string, prefs: DeliveryPrefs): strin
   const base = sanitizeResearchTopic(topic);
   if (prefs.format === "html" || prefs.format === "pdf") {
     return `${base}.html`;
+  }
+  if (prefs.format === "docx") {
+    return `${base}.doc`;
   }
   return `${base}.md`;
 }
