@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { createServer } from "node:http";
 import { directFetch, resolveHttpProxyUrl } from "../direct-fetch";
 
@@ -116,11 +116,43 @@ describe("directFetch", () => {
         directFetch(url, {
           method: "GET",
           timeoutMs: 400,
-          signal: AbortSignal.timeout(400),
         }),
       ).rejects.toBeTruthy();
       expect(Date.now() - started).toBeLessThan(3_000);
     } finally {
+      await new Promise<void>((resolve, reject) => server.close((err) => (err ? reject(err) : resolve())));
+    }
+  });
+
+  it("bounds fallback paths with timeoutMs even when signal never fires", async () => {
+    vi.stubEnv("HTTPS_PROXY", "");
+    vi.stubEnv("HTTP_PROXY", "");
+    vi.stubEnv("ALL_PROXY", "");
+    vi.stubEnv("https_proxy", "");
+    vi.stubEnv("http_proxy", "");
+    vi.stubEnv("all_proxy", "");
+
+    const server = createServer((_req, _res) => {
+      // never respond — force timeout on requestDirect fallback
+    });
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", () => resolve()));
+    const addr = server.address();
+    if (!addr || typeof addr === "string") throw new Error("no port");
+    const url = `http://127.0.0.1:${addr.port}/hang-forever`;
+
+    try {
+      const started = Date.now();
+      // Never-aborting signal mirrors production runSignal (never fired by design).
+      await expect(
+        directFetch(url, {
+          method: "GET",
+          timeoutMs: 400,
+          signal: new AbortController().signal,
+        }),
+      ).rejects.toBeTruthy();
+      expect(Date.now() - started).toBeLessThan(3_000);
+    } finally {
+      vi.unstubAllEnvs();
       await new Promise<void>((resolve, reject) => server.close((err) => (err ? reject(err) : resolve())));
     }
   });
