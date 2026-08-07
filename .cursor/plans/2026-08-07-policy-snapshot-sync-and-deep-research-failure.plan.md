@@ -14,6 +14,7 @@ Suggested-Impl-Model: GPT-5（跨 Go Gateway、Next.js 管理后台、深度调�
 4. `enterprise/apps/admin-console/src/app/policy/page.tsx::triggerPublish` 轮询的是不存在的相对路径 `/healthz`，而且即便改成普通健康检查，也不能证明 Gateway 已加载本次 `publishId/version`，所以“同步状态未知/已同步”没有可信闭环。
 5. `enterprise/apps/web-portal/src/lib/deep-research/orchestrator.ts::streamSectionInto` 对非 2xx 响应直接把前 200 字原始 body 拼为“本节撰写失败”，之后仍生成 artifact 和完成事件。策略拒绝应终止本次 run，且不得把内部 JSON/hits 写进客户报告。
 6. `enterprise/packages/policy-engine/engine.go::applyHit` 仅在 `action=block` 时设置 `Blocked=true`；`redact` 只替换文本。因此错误响应中出现 redact hit 不等于“redact 被错误当作 block”，完整 hits 中至少还有 block 命中。本计划不改变策略动作语义。
+7. `buildPolicyEngine` 原先以 `len(manifests) > 0` 判断快照是否有效；当管理员发布“零 pack/零 rule”快照时会错误回退 bundled manifest，等于重新启用已停用规则。只要快照含租户发布元数据，即使规则为空也必须视为权威快照。
 
 ## In scope
 
@@ -68,6 +69,7 @@ Suggested-Impl-Model: GPT-5
   - 扩展 `tenantPolicySnapshot` 解析 `publishId`、`publishedAt`。
   - 新增不可变 `policySnapshotRuntimeStatus`，由 `snapshotManifestsFromRaw` 从同一份成功构建 engine 的 body 派生。
   - 扩展 `loadPolicySnapshot/buildPolicyEngine` 返回 runtime status；初始化和 `reloadPolicyIfNeeded` 在持有 `policyMu` 时与 engine/hash 原子替换。
+  - 含租户版本但规则为空的已发布快照仍构建空 engine，不得回退 manifest。
   - `Router` 注册 `GET /internal/policy-status`。
 - `enterprise/apps/gateway/internal/server/health.go`
   - 新增 `handleInternalPolicyStatus`；复用 `gatewayInternalAuthorized`，先触发受 5 秒节流保护的 reload，再只返回请求 tenant 的活跃 `publishId/version/publishedAt`、source、checkedAt。
@@ -95,6 +97,7 @@ Suggested-Impl-Model: GPT-5
 ### AC
 
 - `enterprise/apps/gateway/internal/server/policy_snapshot_test.go` 断言从 snapshot body 解析 version/publishId。
+- 同一测试断言零规则发布快照不会重新加载 fallback manifest。
 - `enterprise/apps/gateway/internal/server/health_test.go` 断言未授权 401、授权后只返回所请求租户的活跃版本。
 - `go test ./internal/server` 通过。
 
@@ -145,4 +148,3 @@ Suggested-Impl-Model: GPT-5
 3. web-portal orchestrator 定向测试与 `typecheck`；若全量 typecheck 命中仓库既有测试类型错误，记录基线并以改动文件 lint + 定向测试作为本修复证据。
 4. `git diff --check`。
 5. 同步到 `hc-0730` 后再次运行上述定向测试，并确认只包含本计划范围文件。
-
