@@ -20,6 +20,15 @@ import {
   withClipboardImageNames,
   modelSupportsVision,
   consumeDeepResearchReconnectStream,
+  startDeepResearchReconnect,
+  abortAllDeepResearchReconnects,
+  isSessionStreaming,
+  getDeepResearchInteractionPref,
+  setDeepResearchInteractionPref,
+  labelForDeepResearchInteractionPref,
+  DEEP_RESEARCH_INTERACTION_OPTIONS,
+  findActivePlanChatGate,
+  type DeepResearchInteractionPref,
   type ActiveDeepResearchRun,
 } from "@agenticx/feature-chat";
 import { type ChatClient } from "@agenticx/sdk-ts";
@@ -98,6 +107,7 @@ export function MachiChatView({
   const activeSessionId = useChatStore((s) => s.activeSessionId);
   const messages = useChatStore((s) => s.messages);
   const status = useChatStore((s) => s.status);
+  const planChatRevising = useChatStore((s) => s.planChatRevising);
   const activeModel = useChatStore((s) => s.activeModel);
   const errorMessage = useChatStore((s) => s.errorMessage);
   const sessionTokens = useChatStore((s) => s.sessionTokens);
@@ -110,6 +120,7 @@ export function MachiChatView({
   const renameSession = useChatStore((s) => s.renameSession);
   const switchModel = useChatStore((s) => s.switchModel);
   const sendMessage = useChatStore((s) => s.sendMessage);
+  const resumePlanChatFromComposer = useChatStore((s) => s.resumePlanChatFromComposer);
   const sendQueuedMessageNow = useChatStore((s) => s.sendQueuedMessageNow);
   const removePendingMessage = useChatStore((s) => s.removePendingMessage);
   const editPendingMessage = useChatStore((s) => s.editPendingMessage);
@@ -126,6 +137,22 @@ export function MachiChatView({
   const [draft, setDraft] = React.useState("");
   /** Default auto (on) — aligned with product expectation for portal chat. */
   const [webSearchMode, setWebSearchMode] = React.useState<WebSearchMode>("auto");
+  /** 深度研究确认方式偏好（localStorage 持久化；auto = 交给服务端 policy）。 */
+  const [interactionPref, setInteractionPref] =
+    React.useState<DeepResearchInteractionPref>(() => getDeepResearchInteractionPref());
+  const [prefMenuOpen, setPrefMenuOpen] = React.useState(false);
+  const prefMenuRef = React.useRef<HTMLDivElement>(null);
+
+  React.useEffect(() => {
+    if (!prefMenuOpen) return;
+    const onDocMouseDown = (event: MouseEvent) => {
+      if (prefMenuRef.current && !prefMenuRef.current.contains(event.target as Node)) {
+        setPrefMenuOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", onDocMouseDown);
+    return () => document.removeEventListener("mousedown", onDocMouseDown);
+  }, [prefMenuOpen]);
   const [filesPanelSessionId, setFilesPanelSessionId] = React.useState<string | null>(null);
   const [filesPanelFocusId, setFilesPanelFocusId] = React.useState<string | null>(null);
   const [filesPanelLane, setFilesPanelLane] = React.useState<DeepResearchPanelLane | null>(
@@ -166,9 +193,22 @@ export function MachiChatView({
     setFilesPanelFocusId(null);
   }, [activeSessionId]);
 
+  // 切换会话时必须停掉所有重连流：否则旧流继续轮询并把事件追加到别条消息上。
+  React.useEffect(() => {
+    return () => {
+      abortAllDeepResearchReconnects();
+    };
+  }, [activeSessionId]);
+
   const handleDeepResearchRecover = React.useCallback((run: ActiveDeepResearchRun) => {
     const sessionId = run.sessionId;
     const state = useChatStore.getState();
+    // 原始聊天流仍活着时，它就是事件的唯一来源；此时再走重连回放会把同一批
+    // live 事件追加两遍（撰写报告卡片翻倍的根因之一）。只把视图带回去即可。
+    if (isSessionStreaming(state, sessionId)) {
+      console.info("[deep-research] recover skipped: original stream still live for", run.runId);
+      return;
+    }
     const existing = [...state.messages]
       .reverse()
       .find(
@@ -201,7 +241,7 @@ export function MachiChatView({
       }));
     }
 
-    void consumeDeepResearchReconnectStream(run.runId, {
+    void startDeepResearchReconnect(run.runId, {
       onEvent: (event) => {
         if (!targetId) return;
         useChatStore.setState((prev) => ({
@@ -209,14 +249,45 @@ export function MachiChatView({
             if (m.id !== targetId) return m;
             const prevDr = m.deep_research;
             let status: NonNullable<typeof prevDr>["status"] = prevDr?.status ?? "running";
-            if (event.type === "clarify") status = "awaiting_clarify";
-            else if (event.type === "phase" && event.phase === "done") status = "completed";
-            else if (status === "awaiting_clarify") status = "running";
+            if (event.type === "clarify" || event.type === "clarify_chat") status = "awaiting_clarify";
+            else if (event.type === "research_plan" && event.action === "proposed") {
+              status = "awaiting_clarify";
+            } else if (
+              event.type === "research_plan" &&
+              (event.action === "approved" || event.action === "updated")
+            ) {
+              status = "running";
+            } else if (event.type === "phase" && event.phase === "done") status = "completed";
+            else if (status === "awaiting_clarify") {
+              // 与 store.applyDeepResearchEvent 对齐：plan proposed 期间 narrative 不解除 awaiting。
+              const eventsSoFar = [...(prevDr?.events ?? []), event];
+              const latestPlan = [...eventsSoFar]
+                .reverse()
+                .find((e) => e.type === "research_plan");
+              const planGateOpen =
+                latestPlan?.type === "research_plan" && latestPlan.action === "proposed";
+              if (!(event.type === "narrative" && planGateOpen)) {
+                status = "running";
+              }
+            }
             const events = [...(prevDr?.events ?? []), event].slice(-400);
             const artifactIds = [...(prevDr?.artifactIds ?? [])];
             if (event.type === "artifact" && !artifactIds.includes(event.id)) {
               artifactIds.push(event.id);
             }
+            const nextProfile =
+              event.type === "research_profile"
+                ? {
+                    researchDepth: event.researchDepth,
+                    clarifyMode: event.clarifyMode,
+                    clarifyBudget: event.clarifyBudget,
+                    planVisibility: event.planVisibility,
+                    assumptions: event.assumptions,
+                  }
+                : prevDr?.profile;
+            const nextPlan = event.type === "research_plan" ? event.plan : prevDr?.plan;
+            const nextPlanVersion =
+              event.type === "research_plan" ? event.version : prevDr?.planVersion;
             return {
               ...m,
               deep_research: {
@@ -225,6 +296,12 @@ export function MachiChatView({
                 events,
                 artifactIds,
                 clarifyAnswers: prevDr?.clarifyAnswers,
+                ...(nextProfile ? { profile: nextProfile } : {}),
+                ...(nextPlan ? { plan: nextPlan } : {}),
+                ...(nextPlanVersion ? { planVersion: nextPlanVersion } : {}),
+                ...(nextProfile?.assumptions?.length
+                  ? { assumptions: nextProfile.assumptions }
+                  : {}),
               },
             };
           }),
@@ -261,6 +338,28 @@ export function MachiChatView({
       console.warn("[deep-research] reconnect failed:", error);
     });
   }, []);
+
+  // 计划确认提交后（含进程重启后的孤儿续跑）：若原 SSE 已死，拉起 reconnect 吃 run-store 事件。
+  React.useEffect(() => {
+    const onPlanResumed = (event: Event) => {
+      const runId = (event as CustomEvent<{ runId?: string }>).detail?.runId?.trim();
+      const sessionId = useChatStore.getState().activeSessionId?.trim();
+      if (!runId || !sessionId) return;
+      if (isSessionStreaming(useChatStore.getState(), sessionId)) return;
+      handleDeepResearchRecover({
+        runId,
+        sessionId,
+        status: "running",
+        phase: "lanes",
+        topic: "",
+        updatedAt: new Date().toISOString(),
+      });
+    };
+    window.addEventListener("agx-deep-research-plan-resumed", onPlanResumed);
+    return () => {
+      window.removeEventListener("agx-deep-research-plan-resumed", onPlanResumed);
+    };
+  }, [handleDeepResearchRecover]);
 
   const filesPanelSources = React.useMemo(() => {
     if (!filesPanelSessionId) return [];
@@ -431,6 +530,24 @@ export function MachiChatView({
     return messages.filter((message) => message.session_id === activeSessionId);
   }, [messages, activeSessionId]);
 
+  /** 工作台已有事件的 run：用户正在看，不必再挂「继续查看」。空壳（刷新未回放）仍要露出横条。 */
+  const visibleDeepResearchRunIds = React.useMemo(() => {
+    const ids = new Set<string>();
+    for (const message of visibleMessages) {
+      if (message.role !== "assistant" || !message.deep_research?.runId) continue;
+      const runId = message.deep_research.runId;
+      if (runId === "pending") continue;
+      if ((message.deep_research.events?.length ?? 0) > 0) ids.add(runId);
+    }
+    return ids;
+  }, [visibleMessages]);
+
+  const streamStateBySessionId = useChatStore((s) => s.streamStateBySessionId);
+  const suppressRecoverWhileStreaming = isSessionStreaming(
+    { streamStateBySessionId },
+    activeSessionId,
+  );
+
   const userIdsInActiveSession = React.useMemo(() => {
     return new Set(visibleMessages.filter((message) => message.role === "user").map((message) => message.id));
   }, [visibleMessages]);
@@ -548,24 +665,37 @@ export function MachiChatView({
       const trimmed = draft.trim();
       const messageAttachments = toMessageAttachments();
       if (!trimmed && messageAttachments.length === 0) return;
-      void sendMessage(
-        client,
-        {
-          content: trimmed,
-          attachments: messageAttachments,
-          webSearch: webSearchMode === "auto",
-          deepResearch: deepResearchMode,
-        },
-        opts?.forceSend ? { forceSend: true } : undefined,
-      );
       setDraft("");
       clearAttachments();
+      // 计划卡仍在时：主输入只改方案，绝不排队 / forceSend 开新对话。
+      void (async () => {
+        const store = useChatStore.getState();
+        const sid = store.activeSessionId;
+        if (sid && findActivePlanChatGate(store.messages, sid)) {
+          await resumePlanChatFromComposer(trimmed);
+          return;
+        }
+        // 计划对齐中禁止 forceSend：会 cancel 原 SSE，模型会「直接开写」而不是改计划卡。
+        const gateStillOpen =
+          !!sid && Boolean(findActivePlanChatGate(useChatStore.getState().messages, sid));
+        await sendMessage(
+          client,
+          {
+            content: trimmed,
+            attachments: messageAttachments,
+            webSearch: webSearchMode === "auto",
+            deepResearch: deepResearchMode,
+          },
+          opts?.forceSend && !gateStillOpen ? { forceSend: true } : undefined,
+        );
+      })();
     },
     [
       clearAttachments,
       client,
       deepResearchMode,
       draft,
+      resumePlanChatFromComposer,
       sendMessage,
       toMessageAttachments,
       webSearchMode,
@@ -576,6 +706,11 @@ export function MachiChatView({
     if (!activeSessionId) return [];
     return pendingMessages.filter((message) => message.sessionId === activeSessionId);
   }, [activeSessionId, pendingMessages]);
+
+  const planChatGateActive = React.useMemo(() => {
+    if (!activeSessionId) return false;
+    return Boolean(findActivePlanChatGate(messages, activeSessionId));
+  }, [activeSessionId, messages]);
 
   const activeHistorySync = activeSessionId
     ? historySyncBySessionId[activeSessionId]
@@ -678,7 +813,10 @@ export function MachiChatView({
 
       <InputArea
         value={draft}
-        status={status}
+        // 计划对齐：空闲时隐藏停止钮；正在改计划时显示 sending，避免「发出去没反应」。
+        status={
+          planChatRevising ? "sending" : planChatGateActive ? "idle" : status
+        }
         onChange={setDraft}
         onSend={() => handleSend()}
         onForceSend={() => handleSend({ forceSend: true })}
@@ -691,7 +829,11 @@ export function MachiChatView({
             : undefined
         }
         placeholder={
-          deepResearchMode ? tw("deepResearchPlaceholder") : "发送消息给 Near..."
+          planChatGateActive
+            ? "修改研究计划，例如：侧重性能 / 增加成本分析 / 去掉某方向…"
+            : deepResearchMode
+              ? tw("deepResearchPlaceholder")
+              : "发送消息给 Near..."
         }
         attachments={Object.values(attachments)}
         onAddFiles={handleAddFiles}
@@ -706,23 +848,80 @@ export function MachiChatView({
               onPickFiles={() => fileInputRef.current?.click()}
               menuSide={isEmpty ? "bottom" : "top"}
             />
-            {deepResearchMode ? (
+            {deepResearchMode || planChatGateActive ? (
               <span
                 key="deep-research-chip"
-                className="group/dr-chip inline-flex h-8 items-center gap-1.5 rounded-full bg-primary-soft/70 px-2.5 text-xs font-medium text-primary"
-                aria-label={tw("deepResearchChip")}
+                className="group/dr-chip inline-flex h-8 max-w-full items-center gap-1.5 rounded-full bg-primary-soft/70 px-2.5 text-xs font-medium text-primary"
+                aria-label={`${tw("deepResearchChip")} · ${labelForDeepResearchInteractionPref(interactionPref)}`}
               >
                 <button
                   type="button"
-                  onClick={() => setDeepResearchMode(false)}
+                  onClick={() => {
+                    // 计划对齐等待中不允许关掉标签，否则后续输入会误开成普通对话。
+                    if (planChatGateActive) return;
+                    setDeepResearchMode(false);
+                  }}
                   className="relative flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-primary/15 text-primary transition-colors hover:bg-primary hover:text-primary-foreground"
                   aria-label={tw("exitDeepResearch")}
-                  title={tw("exitDeepResearch")}
+                  title={
+                    planChatGateActive
+                      ? "请先确认或继续修改研究计划"
+                      : tw("exitDeepResearch")
+                  }
                 >
                   <Microscope className="h-3.5 w-3.5 group-hover/dr-chip:hidden" />
                   <X className="hidden h-3.5 w-3.5 group-hover/dr-chip:block" strokeWidth={2.5} />
                 </button>
-                <span>{tw("deepResearchChip")}</span>
+                <span className="shrink-0">{tw("deepResearchChip")}</span>
+                <div ref={prefMenuRef} className="relative min-w-0">
+                  <button
+                    type="button"
+                    onClick={() => setPrefMenuOpen((v) => !v)}
+                    className="inline-flex h-5 max-w-[7.5rem] items-center gap-0.5 rounded-full bg-primary/12 px-1.5 text-[11px] font-medium text-primary transition-colors hover:bg-primary/20"
+                    aria-label={`确认方式：${labelForDeepResearchInteractionPref(interactionPref)}`}
+                    title={`澄清与计划确认方式：${labelForDeepResearchInteractionPref(interactionPref)}（点击切换）`}
+                    data-testid="deep-research-pref-trigger"
+                  >
+                    <span className="truncate" data-testid="deep-research-pref-tag">
+                      {labelForDeepResearchInteractionPref(interactionPref)}
+                    </span>
+                    <ChevronDown className="h-3 w-3 shrink-0 opacity-70" />
+                  </button>
+                  {prefMenuOpen ? (
+                    <div
+                      className="absolute left-0 top-7 z-50 w-64 rounded-xl border border-border bg-popover p-1.5 text-popover-foreground shadow-xl"
+                      data-testid="deep-research-pref-menu"
+                    >
+                      <div className="px-2.5 pb-1.5 pt-1 text-[11px] font-medium text-muted-foreground">
+                        澄清与计划确认方式
+                      </div>
+                      {DEEP_RESEARCH_INTERACTION_OPTIONS.map((opt) => (
+                        <button
+                          key={opt.id}
+                          type="button"
+                          onClick={() => {
+                            setInteractionPref(opt.id);
+                            setDeepResearchInteractionPref(opt.id);
+                            setPrefMenuOpen(false);
+                          }}
+                          className={`flex w-full items-center justify-between gap-2 rounded-lg px-2.5 py-2 text-left hover:bg-muted ${
+                            interactionPref === opt.id ? "bg-muted" : ""
+                          }`}
+                        >
+                          <span className="flex flex-col">
+                            <span className="text-xs font-medium text-foreground">
+                              {opt.label}
+                            </span>
+                            <span className="text-[11px] text-muted-foreground">{opt.hint}</span>
+                          </span>
+                          {interactionPref === opt.id ? (
+                            <Check className="h-3.5 w-3.5 shrink-0 text-primary" />
+                          ) : null}
+                        </button>
+                      ))}
+                    </div>
+                  ) : null}
+                </div>
               </span>
             ) : null}
           </>
@@ -905,6 +1104,8 @@ export function MachiChatView({
                   <DeepResearchRecoverBanner
                     sessionId={activeSessionId}
                     onRecover={handleDeepResearchRecover}
+                    visibleRunIds={visibleDeepResearchRunIds}
+                    suppressWhileStreaming={suppressRecoverWhileStreaming}
                   />
                 </div>
                 <MessageList

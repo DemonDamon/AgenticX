@@ -26,6 +26,22 @@ describe("parseClarifyResumeResponse", () => {
     }
   });
 
+  it("uses plan-specific copy when gate is plan", () => {
+    const result = parseClarifyResumeResponse(
+      200,
+      JSON.stringify({
+        code: "00000",
+        data: { runId: "r1", resumed: false, alreadyContinued: true },
+      }),
+      "plan",
+    );
+    expect(result.kind).toBe("already_continued");
+    if (result.kind === "already_continued") {
+      expect(result.message).toContain("计划确认已结束");
+      expect(result.message).not.toContain("澄清窗口");
+    }
+  });
+
   it("maps legacy 40401 JSON to soft success instead of raw dump", () => {
     const raw = JSON.stringify({
       error: { code: "40401", message: "no pending clarify for runId" },
