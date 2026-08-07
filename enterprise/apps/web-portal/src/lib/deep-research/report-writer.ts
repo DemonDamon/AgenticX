@@ -4,6 +4,7 @@
  */
 
 import { parseLlmJson } from "./llm-json";
+import { parseChartSpec } from "./report-chart";
 
 export const MIN_SECTIONS = 5;
 export const MAX_SECTIONS = 9;
@@ -14,6 +15,7 @@ export type SectionFormat =
   | "comparison_table"
   | "timeline"
   | "mermaid"
+  | "chart"
   | "tradeoff";
 
 const FORMAT_SET = new Set<SectionFormat>([
@@ -21,6 +23,7 @@ const FORMAT_SET = new Set<SectionFormat>([
   "comparison_table",
   "timeline",
   "mermaid",
+  "chart",
   "tradeoff",
 ]);
 
@@ -52,10 +55,10 @@ const OUTLINE_SYSTEM = [
   '格式：{"title":"...","sections":[{"id":"s1","title":"...","brief":"...","citation_indexes":[1,4,7],"format":"prose"}]}',
   `章节数 ${MIN_SECTIONS}-${MAX_SECTIONS}，按证据密度决定，宁少勿滥。`,
   "必须包含首节「核心结论」与末节「不确定性与信息缺口」，中间为分项分析。",
-  "format 取值：prose | comparison_table | timeline | mermaid | tradeoff",
+  "format 取值：prose | comparison_table | timeline | mermaid | chart | tradeoff",
   "首节「核心结论」与末节「不确定性与信息缺口」必须 format=prose。",
-  "中间章节按证据选择形态：对比/选型/竞品至少 1 节 comparison_table；演进/版本/时间节点至少 1 节 timeline；架构/关系/流程可用 1 节 mermaid。",
-  "全篇中间节不得全部为 prose（至少 1 节为 comparison_table / timeline / mermaid / tradeoff 之一）。",
+  "中间章节按证据选择形态：对比/选型/竞品至少 1 节 comparison_table；演进/版本/时间节点至少 1 节 timeline；架构/关系/流程可用 1 节 mermaid；含明显数值对比（市场规模/性能指标/份额/价格）时至少 1 节 chart。",
+  "全篇中间节不得全部为 prose（至少 1 节为 comparison_table / timeline / mermaid / chart / tradeoff 之一）。",
   "citation_indexes 只能引用证据包中真实存在的编号。",
   "使用与用户提问相同的语言。",
 ].join("\n");
@@ -86,6 +89,10 @@ const FORMAT_DIRECTIVES: Record<SectionFormat, string> = {
     "表达形态 timeline：必须用 GFM 表或有序时间线列出 ≥4 个带时间/版本节点的事件，每行带 [N]。",
   mermaid:
     "表达形态 mermaid：必须含一个 ```mermaid 代码块（flowchart 或 mindmap）；节点标签短；图后 3–6 句解读；禁止只写「如下图所示」而无代码块。",
+  chart:
+    "表达形态 chart：必须含一个 ```chart 代码块，内容为合法 JSON：" +
+    '{"type":"bar|line|pie|scatter","title":"...","x":["类目A","类目B"],"series":[{"name":"系列名","data":[1,2]}]}；' +
+    "x 与每条 series.data 必须等长；数值必须来自正文已引用的来源并就近标注 [N]，禁止编造；图后 2–4 句解读。",
   tradeoff:
     "表达形态 tradeoff：必须含「方案 × 维度」GFM 对比表，并另起一段写清推荐/不推荐/风险。",
 };
@@ -148,7 +155,25 @@ function normalizeSection(
   return { id, title, brief, citationIndexes, format: normalizeFormat(obj.format) };
 }
 
-/** 中间节不得全是 prose：否则把第二节强制改为 comparison_table。 */
+/** 中间节不得全是 prose：按主题关键词路由到最匹配的非 prose 形态。 */
+const RICH_FORMAT_HINTS: Array<{ re: RegExp; format: SectionFormat; briefHint: string }> = [
+  {
+    re: /(规模|份额|占比|价格|成本|营收|销量|性能指标|数值|数据对比)/,
+    format: "chart",
+    briefHint: "请用 ```chart 数据图呈现关键数值对比（数据须来自引用来源）",
+  },
+  {
+    re: /(演进|发展|历程|时间线|版本|历史)/,
+    format: "timeline",
+    briefHint: "请用时间线呈现关键节点",
+  },
+  {
+    re: /(架构|流程|机制|原理|关系|链路)/,
+    format: "mermaid",
+    briefHint: "请用 Mermaid 图呈现结构/流程关系",
+  },
+];
+
 export function ensureRichOutlineFormats(outline: ReportOutline): ReportOutline {
   if (outline.sections.length < 3) return outline;
   const middle = outline.sections.slice(1, -1);
@@ -156,12 +181,17 @@ export function ensureRichOutlineFormats(outline: ReportOutline): ReportOutline 
   if (middle.some((s) => s.format !== "prose")) return outline;
 
   const targetIndex = 1;
+  const topicText = `${outline.title} ${middle.map((s) => `${s.title} ${s.brief}`).join(" ")}`;
+  const matched = RICH_FORMAT_HINTS.find((hint) => hint.re.test(topicText));
+  const format: SectionFormat = matched?.format ?? "comparison_table";
+  const briefHint = matched?.briefHint ?? "请用 Markdown 对比表呈现关键维度";
+
   const sections = outline.sections.map((section, i) => {
     if (i !== targetIndex) return section;
-    const brief = section.brief.includes("请用 Markdown 对比表")
+    const brief = section.brief.includes(briefHint)
       ? section.brief
-      : `${section.brief.replace(/。$/, "")}。请用 Markdown 对比表呈现关键维度`;
-    return { ...section, format: "comparison_table" as const, brief };
+      : `${section.brief.replace(/。$/, "")}。${briefHint}`;
+    return { ...section, format, brief };
   });
   return { ...outline, sections };
 }
@@ -265,6 +295,12 @@ function hasMermaidFence(body: string): boolean {
   return /```mermaid[\s\S]*?```/i.test(body);
 }
 
+function hasValidChartFence(body: string): boolean {
+  const match = body.match(/```chart([\s\S]*?)```/i);
+  if (!match?.[1]) return false;
+  return parseChartSpec(match[1].trim()) !== null;
+}
+
 /** 轻量结构校验：不满足也不阻断落盘，供 orchestrator warn。 */
 export function sectionMeetsFormat(section: ReportSection, body: string): boolean {
   switch (section.format) {
@@ -277,6 +313,8 @@ export function sectionMeetsFormat(section: ReportSection, body: string): boolea
       return hasTimelineHeuristic(body);
     case "mermaid":
       return hasMermaidFence(body);
+    case "chart":
+      return hasValidChartFence(body);
     default: {
       const _exhaustive: never = section.format;
       void _exhaustive;

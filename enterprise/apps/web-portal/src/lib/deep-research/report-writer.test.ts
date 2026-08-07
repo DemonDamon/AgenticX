@@ -236,6 +236,39 @@ describe("ensureRichOutlineFormats", () => {
     expect(fixed.sections[1]?.format).toBe("comparison_table");
     expect(fixed.sections[1]?.brief).toContain("请用 Markdown 对比表");
   });
+
+  it("数值对比主题路由到 chart", () => {
+    const outline: ReportOutline = {
+      title: "向量数据库市场份额与性能指标对比",
+      sections: [
+        { id: "s1", title: "核心结论", brief: "b", citationIndexes: [], format: "prose" },
+        { id: "s2", title: "数据分析", brief: "展开", citationIndexes: [], format: "prose" },
+        { id: "s3", title: "更多", brief: "展开", citationIndexes: [], format: "prose" },
+        { id: "s4", title: "缺口", brief: "b", citationIndexes: [], format: "prose" },
+      ],
+    };
+    const fixed = ensureRichOutlineFormats(outline);
+    expect(fixed.sections[1]?.format).toBe("chart");
+    expect(fixed.sections[1]?.brief).toContain("chart");
+  });
+
+  it("演进主题路由到 timeline，架构主题路由到 mermaid", () => {
+    const mk = (title: string): ReportOutline => ({
+      title,
+      sections: [
+        { id: "s1", title: "核心结论", brief: "b", citationIndexes: [], format: "prose" },
+        { id: "s2", title: "分析", brief: "展开", citationIndexes: [], format: "prose" },
+        { id: "s3", title: "更多", brief: "展开", citationIndexes: [], format: "prose" },
+        { id: "s4", title: "缺口", brief: "b", citationIndexes: [], format: "prose" },
+      ],
+    });
+    expect(ensureRichOutlineFormats(mk("Transformer 架构演进历程")).sections[1]?.format).toBe(
+      "timeline",
+    );
+    expect(ensureRichOutlineFormats(mk("RAG 系统架构与检索链路")).sections[1]?.format).toBe(
+      "mermaid",
+    );
+  });
 });
 
 describe("sectionMeetsFormat", () => {
@@ -270,6 +303,21 @@ describe("sectionMeetsFormat", () => {
 
   it("rejects missing mermaid fence", () => {
     expect(sectionMeetsFormat({ ...base, format: "mermaid" }, "如下图所示")).toBe(false);
+  });
+
+  it("accepts valid chart fence for chart format", () => {
+    const spec = JSON.stringify({
+      type: "bar",
+      x: ["A", "B"],
+      series: [{ name: "s", data: [1, 2] }],
+    });
+    const body = `解读\n\n\`\`\`chart\n${spec}\n\`\`\`\n\n数据说明 [1]`;
+    expect(sectionMeetsFormat({ ...base, format: "chart" }, body)).toBe(true);
+  });
+
+  it("rejects invalid chart fence for chart format", () => {
+    const body = "```chart\n{\"type\":\"bar\"}\n```";
+    expect(sectionMeetsFormat({ ...base, format: "chart" }, body)).toBe(false);
   });
 });
 
