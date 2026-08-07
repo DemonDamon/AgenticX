@@ -119,6 +119,18 @@ export function scorePool(topic: string, pool: PooledHit[]): ScoredHit[] {
   });
 }
 
+/**
+ * 单域名配额随候选池大小放宽。
+ *
+ * 固定 3 条在大池子里能防单站刷屏，但一个车道只搜出六七个候选时，官网
+ * 连续几页文档就会被直接丢掉——池子越小，多样性约束的代价越高。
+ */
+export function adaptiveMaxPerDomain(poolSize: number): number {
+  if (poolSize <= 12) return 5;
+  if (poolSize <= 24) return 4;
+  return 3;
+}
+
 /** 取 TopN，并强制单域名不超过 maxPerDomain 条。 */
 export function selectTopSources(
   scored: ScoredHit[],

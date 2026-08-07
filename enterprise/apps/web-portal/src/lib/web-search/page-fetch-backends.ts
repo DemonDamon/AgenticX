@@ -202,7 +202,20 @@ export function resolveBackend(name: PageFetchBackendName): PageFetchBackend {
   }
 }
 
-/** Deterministic failures: do not try subsequent backends. */
+/**
+ * Deterministic failures: do not try subsequent backends.
+ *
+ * `unsupported_content_type` is deliberately NOT terminal. Only the native
+ * backend judges content types, and it rejects anything outside text/html and
+ * text/plain — which means every PDF (arxiv papers, tech reports, government
+ * filings, i.e. exactly the authority sources we score highest) used to abort
+ * the chain before jina reader, which extracts PDFs fine, ever got a turn.
+ */
 export function isTerminalFailure(reason: PageFetchFailure): boolean {
-  return reason === "invalid_url" || reason === "unsupported_content_type";
+  return reason === "invalid_url";
+}
+
+/** Transient failures worth one same-backend retry before moving on. */
+export function isTransientFailure(reason: PageFetchFailure): boolean {
+  return reason === "timeout" || reason === "network_error";
 }
