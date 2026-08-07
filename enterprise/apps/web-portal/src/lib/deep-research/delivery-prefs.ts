@@ -27,11 +27,11 @@ const SHAPE_OPTIONS: Array<{ id: DeliveryShapeId; label: string }> = [
   { id: "decision", label: "决策建议——推荐什么、不推荐什么、风险在哪" },
 ];
 
-const FORMAT_OPTIONS: Array<{ id: DeliveryFormat; label: string }> = [
+/** Formats offered in clarify UI. PDF is intentionally omitted until real PDF generation ships. */
+const FORMAT_OPTIONS: Array<{ id: Exclude<DeliveryFormat, "pdf">; label: string }> = [
   { id: "md", label: "Markdown（.md）" },
   { id: "html", label: "可视化网页（.html）" },
   { id: "docx", label: "Word（.doc）" },
-  { id: "pdf", label: "PDF（打印导出）" },
 ];
 
 const SHAPE_LABELS: Record<DeliveryShapeId, string> = {

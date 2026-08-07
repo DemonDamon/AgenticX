@@ -20,7 +20,11 @@ describe("deliveryClarifyQuestions", () => {
     expect(qs[0]!.options.length).toBe(4);
     expect(qs[1]!.id).toBe(DELIVERY_FORMAT_QUESTION_ID);
     expect(qs[1]!.multiSelect).toBe(false);
-    expect(qs[1]!.options.length).toBe(4);
+    expect(qs[1]!.options.length).toBe(3);
+    expect(qs[1]!.options.map((o) => o.id)).toEqual(["md", "html", "docx"]);
+    expect(qs[1]!.options.some((o) => /pdf/i.test(o.id) || /PDF/.test(o.label))).toBe(
+      false,
+    );
   });
 });
 

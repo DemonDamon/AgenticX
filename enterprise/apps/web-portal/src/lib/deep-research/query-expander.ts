@@ -4,8 +4,8 @@
 
 import { parseLlmJson } from "./llm-json";
 
-export const MIN_VARIANTS_PER_LANE = 3;
-export const MAX_VARIANTS_PER_LANE = 6;
+export const MIN_VARIANTS_PER_LANE = 2;
+export const MAX_VARIANTS_PER_LANE = 4;
 
 const CJK_CHAR = /[\u3040-\u30ff\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff]/;
 

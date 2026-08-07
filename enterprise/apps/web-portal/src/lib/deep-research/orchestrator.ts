@@ -78,14 +78,15 @@ import {
   scorePool,
   selectTopSources,
 } from "./source-pool";
-import { reflectOnGaps, type ResearchGap } from "./reflector";
+import { MAX_GAPS, reflectOnGaps, type ResearchGap } from "./reflector";
 import type { DeepResearchEvent } from "@agenticx/sdk-ts";
 
 export const SEARCH_CONCURRENCY = 3;
 /** Default per-lane result count; the live path uses resolveResultsPerLane(). */
 export const RESULTS_PER_QUESTION = 5;
 export const MAX_SOURCES = 40;
-export const MAX_LANES = 8;
+/** Hard cap on parallel research lanes (planner truncates to the same bound). */
+export const MAX_LANES = 5;
 export const MIN_RESULTS_PER_LANE = 4;
 export const MAX_RESULTS_PER_LANE = 10;
 export const RECON_TIMEOUT_MS = 15_000;
@@ -1204,6 +1205,8 @@ export async function runDeepResearchTurn(
           } catch {
             gaps = [];
           }
+          // Hard cap: at most one gap → one follow-up lane (search cost control).
+          gaps = gaps.slice(0, MAX_GAPS);
 
           if (gaps.length > 0) {
             // The gap card is itself the "发现 N 处信息缺口" announcement, and the
