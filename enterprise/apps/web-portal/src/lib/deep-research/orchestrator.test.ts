@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import {
   DEEP_RESEARCH_SEARCH_FAILED,
+  MAX_LANES,
   MAX_RESULTS_PER_LANE,
   MAX_SOURCES,
   MIN_RESULTS_PER_LANE,
@@ -971,9 +972,10 @@ describe("adaptive lane count", () => {
     expect(resolveResultsPerLane(40)).toBe(MIN_RESULTS_PER_LANE);
   });
 
-  it("runs one lane per planned sub-question instead of a fixed five", async () => {
+  it("runs one lane per planned sub-question up to MAX_LANES", async () => {
     const subQuestions = ["q1", "q2", "q3", "q4", "q5", "q6", "q7"];
     const requestedResults: number[] = [];
+    const expectedLaneCount = Math.min(subQuestions.length, MAX_LANES);
 
     const response = await runDeepResearchTurn(
       { model: "m", messages: [{ role: "user", content: "q" }] },
@@ -1006,8 +1008,9 @@ describe("adaptive lane count", () => {
     const researchLanes = events.filter(
       (e) => e.type === "lane_started" && e.laneId !== "recon-cold-start",
     );
-    expect(researchLanes).toHaveLength(subQuestions.length);
-    expect(new Set(requestedResults)).toEqual(new Set([resolveResultsPerLane(subQuestions.length)]));
+    expect(researchLanes).toHaveLength(expectedLaneCount);
+    expect(expectedLaneCount).toBe(MAX_LANES);
+    expect(new Set(requestedResults)).toEqual(new Set([resolveResultsPerLane(expectedLaneCount)]));
   });
 
   it("keeps a simple plan narrow instead of padding to five lanes", async () => {
