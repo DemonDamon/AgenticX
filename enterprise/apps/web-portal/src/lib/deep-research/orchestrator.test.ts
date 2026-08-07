@@ -469,6 +469,76 @@ describe("runDeepResearchTurn", () => {
     expect(row?.reportMarkdown?.length ?? 0).toBeGreaterThan(0);
   });
 
+  it("survives client cancelling the response body (AC-3 safe close)", async () => {
+    const runStore = createMemoryRunStore();
+    let searchStarts = 0;
+    const plan: ResearchPlan = {
+      topic: "T",
+      complexity: "moderate",
+      subQuestions: ["q1", "q2", "q3", "q4"],
+    };
+    const runId = "runac3safeclose01";
+    const unhandled: unknown[] = [];
+    const onUnhandled = (reason: unknown) => {
+      unhandled.push(reason);
+    };
+    process.on("unhandledRejection", onUnhandled);
+
+    try {
+      const response = await runDeepResearchTurn(
+        { model: "m", messages: [{ role: "user", content: "q" }] },
+        {
+          ...baseDeps({
+            runId,
+            runStore,
+            fetchImpl: vi.fn(async (_url: string, init?: RequestInit) => {
+              const body = JSON.parse(String(init?.body ?? "{}")) as { stream?: boolean };
+              if (body.stream === false) {
+                return {
+                  ok: true,
+                  json: async () => ({
+                    choices: [{ message: { content: "memo" } }],
+                  }),
+                } as Response;
+              }
+              return synthUpstream("报告正文");
+            }) as unknown as typeof fetch,
+            buildPlan: async () => plan,
+            executeSearch: async () => {
+              searchStarts += 1;
+              await new Promise((r) => setTimeout(r, 30));
+              return [
+                {
+                  title: "t",
+                  url: `https://ex.com/${searchStarts}`,
+                  snippet: "s",
+                },
+              ];
+            },
+          }),
+        },
+      );
+
+      // Cancel the body without aborting a transport signal — covers Controller is already closed.
+      await response.body!.cancel();
+
+      const deadline = Date.now() + 10_000;
+      let row = await runStore.get("t1", "u1", runId);
+      while (
+        Date.now() < deadline &&
+        (!row || row.status === "running" || row.status === "awaiting_clarify")
+      ) {
+        await new Promise((r) => setTimeout(r, 50));
+        row = await runStore.get("t1", "u1", runId);
+      }
+
+      expect(row?.status).toBe("completed");
+      expect(unhandled).toEqual([]);
+    } finally {
+      process.off("unhandledRejection", onUnhandled);
+    }
+  });
+
   it("still produces a report when total budget is exhausted after planning", async () => {
     let clock = 0;
     const plan: ResearchPlan = { topic: "T", complexity: "moderate", subQuestions: ["q1", "q2"] };

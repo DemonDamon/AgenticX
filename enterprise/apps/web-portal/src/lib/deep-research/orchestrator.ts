@@ -360,7 +360,11 @@ async function pipeWithPrefix(upstream: Response, prefixText: string): Promise<R
         if (done) break;
         if (value) controller.enqueue(value);
       }
-      controller.close();
+      try {
+        controller.close();
+      } catch {
+        // client may have cancelled the body first
+      }
     },
   });
   return eventStreamResponse(stream);
@@ -372,7 +376,11 @@ function textOnlyDoneStream(content: string): Response {
       const encoder = new TextEncoder();
       if (content) controller.enqueue(encoder.encode(sseDelta(content)));
       controller.enqueue(encoder.encode("data: [DONE]\n\n"));
-      controller.close();
+      try {
+        controller.close();
+      } catch {
+        // client may have cancelled the body first
+      }
     },
   });
   return eventStreamResponse(stream);
@@ -538,6 +546,18 @@ export async function runDeepResearchTurn(
           controller.enqueue(chunk);
         } catch {
           transportClosed = true;
+        }
+      };
+
+      /** 客户端已 cancel Response body 时 close() 会抛 "Controller is already closed"。 */
+      const safeClose = () => {
+        // Always attempt close: transport abort sets transportClosed without closing
+        // the controller (writes stop, but the consumer may still be reading).
+        transportClosed = true;
+        try {
+          controller.close();
+        } catch {
+          // 客户端先断开，忽略。
         }
       };
 
@@ -1155,7 +1175,7 @@ export async function runDeepResearchTurn(
           enqueueDelta(DEEP_RESEARCH_SEARCH_FAILED);
           await persistFinish("failed", DEEP_RESEARCH_SEARCH_FAILED);
           safeControllerEnqueue(encoder.encode("data: [DONE]\n\n"));
-          controller.close();
+          safeClose();
           return;
         }
 
@@ -1553,7 +1573,7 @@ export async function runDeepResearchTurn(
         );
         await persistFinish("completed");
         safeControllerEnqueue(encoder.encode("data: [DONE]\n\n"));
-        controller.close();
+        safeClose();
       } catch (error) {
         if (error instanceof DOMException && error.name === "AbortError") {
           enqueueEvent(
@@ -1562,7 +1582,7 @@ export async function runDeepResearchTurn(
           );
           await persistFinish("cancelled");
           safeControllerEnqueue(encoder.encode("data: [DONE]\n\n"));
-          controller.close();
+          safeClose();
           return;
         }
         console.warn("[deep-research] pipeline failed:", error);
@@ -1597,7 +1617,7 @@ export async function runDeepResearchTurn(
           await persistFinish("failed", message);
         }
         safeControllerEnqueue(encoder.encode("data: [DONE]\n\n"));
-        controller.close();
+        safeClose();
       } finally {
         clearInterval(heartbeat);
       }

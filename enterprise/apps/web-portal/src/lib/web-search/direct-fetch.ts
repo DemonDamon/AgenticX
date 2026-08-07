@@ -304,9 +304,15 @@ async function httpsViaProxy(
   method: string,
   headers: Record<string, string>,
   bodyBuf: Buffer | undefined,
+  timeoutMs: number,
   signal?: AbortSignal | null,
 ): Promise<Response> {
-  const socket = await connectViaHttpProxy(proxy, url.hostname, Number(url.port || 443), 15_000);
+  const socket = await connectViaHttpProxy(
+    proxy,
+    url.hostname,
+    Number(url.port || 443),
+    Math.min(15_000, timeoutMs),
+  );
   return new Promise((resolve, reject) => {
     const onAbort = () => {
       socket.destroy();
@@ -327,6 +333,8 @@ async function httpsViaProxy(
       method,
       headers: { ...headers, host: url.host },
     });
+    // CONNECT success does not bound the response phase; hard-cap it.
+    req.setTimeout(timeoutMs, onAbort);
     req.on("response", (res) => {
       const chunks: Buffer[] = [];
       res.on("data", (c) => chunks.push(c));
@@ -352,6 +360,7 @@ function requestDirect(
   method: string,
   headers: Record<string, string>,
   bodyBuf: Buffer | undefined,
+  timeoutMs: number,
   signal?: AbortSignal | null,
 ): Promise<Response> {
   const isHttps = url.protocol === "https:";
@@ -392,7 +401,8 @@ function requestDirect(
       },
     );
     signal?.addEventListener("abort", onAbort, { once: true });
-    if (!signal) req.setTimeout(20_000, onAbort);
+    // Production passes a long-lived runSignal; always set a per-request bound.
+    req.setTimeout(timeoutMs, onAbort);
     req.on("error", reject);
     if (bodyBuf) req.write(bodyBuf);
     req.end();
@@ -409,6 +419,13 @@ export const directFetch: DirectFetch = async (input, init = {}) => {
   }
   const timeoutMs = resolveTimeoutMs(init);
 
+  // runSignal 等长生命周期 signal 不代表单次抓取超时；必须叠一个硬上界，
+  // 否则 curl 失败后掉进 CONNECT / 直连时没有任何时间约束。
+  const timeoutSignal = AbortSignal.timeout(timeoutMs);
+  const effectiveSignal = init.signal
+    ? AbortSignal.any([init.signal, timeoutSignal])
+    : timeoutSignal;
+
   // 1) curl — best proxy/SOCKS compatibility with shell env
   if (await isCurlAvailable()) {
     try {
@@ -418,7 +435,7 @@ export const directFetch: DirectFetch = async (input, init = {}) => {
         headers,
         bodyBuf,
         timeoutMs,
-        init.signal,
+        effectiveSignal,
       );
     } catch {
       // fall through
@@ -429,12 +446,20 @@ export const directFetch: DirectFetch = async (input, init = {}) => {
   const proxy = resolveHttpProxyUrl();
   if (proxy && url.protocol === "https:") {
     try {
-      return await httpsViaProxy(proxy, url, method, headers, bodyBuf, init.signal);
+      return await httpsViaProxy(
+        proxy,
+        url,
+        method,
+        headers,
+        bodyBuf,
+        timeoutMs,
+        effectiveSignal,
+      );
     } catch {
       // fall through
     }
   }
 
   // 3) direct
-  return requestDirect(url, method, headers, bodyBuf, init.signal);
+  return requestDirect(url, method, headers, bodyBuf, timeoutMs, effectiveSignal);
 };
