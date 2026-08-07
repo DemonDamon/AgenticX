@@ -20,6 +20,11 @@ import {
   clampFilesPanelWidth,
   defaultFilesPanelWidth,
 } from "./deep-research-files-panel-resize";
+import {
+  artifactRequestErrorMessage,
+  normalizeArtifactRequestError,
+  readArtifactErrorCode,
+} from "./deep-research-artifact-errors";
 import { buildStoreZip } from "./zip-store";
 import { laneSourceHost, type LaneSource } from "./deep-research-lane-sources";
 import { WebSearchFavicon } from "./WebSearchFavicon";
@@ -599,7 +604,11 @@ export function DeepResearchFilesPanel({
     void (async () => {
       try {
         const res = await fetch(`/api/chat/sessions/${encodeURIComponent(sessionId)}/artifacts`);
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        if (!res.ok) {
+          throw new Error(
+            artifactRequestErrorMessage(res.status, "list", await readArtifactErrorCode(res)),
+          );
+        }
         const json = (await res.json()) as { data?: { artifacts?: ArtifactListItem[] } };
         if (cancelled) return;
         const list = json.data?.artifacts ?? [];
@@ -622,7 +631,7 @@ export function DeepResearchFilesPanel({
           setFullscreen(false);
         }
       } catch (err) {
-        if (!cancelled) setError(err instanceof Error ? err.message : "加载失败");
+        if (!cancelled) setError(normalizeArtifactRequestError(err, "list"));
       } finally {
         if (!cancelled) setLoading(false);
       }
@@ -647,7 +656,11 @@ export function DeepResearchFilesPanel({
     void (async () => {
       try {
         const res = await fetch(`/api/chat/artifacts/${encodeURIComponent(selectedId)}`);
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        if (!res.ok) {
+          throw new Error(
+            artifactRequestErrorMessage(res.status, "preview", await readArtifactErrorCode(res)),
+          );
+        }
         const json = (await res.json()) as {
           data?: { artifact?: { content?: string } };
         };
@@ -655,7 +668,7 @@ export function DeepResearchFilesPanel({
       } catch (err) {
         if (!cancelled) {
           setPreviewRaw("");
-          setPreviewError(err instanceof Error ? err.message : "预览加载失败");
+          setPreviewError(normalizeArtifactRequestError(err, "preview"));
         }
       } finally {
         if (!cancelled) setPreviewLoading(false);
@@ -744,7 +757,11 @@ export function DeepResearchFilesPanel({
   const fetchArtifactText = React.useCallback(
     async (id: string, itemHint?: ArtifactListItem): Promise<string> => {
       const res = await fetch(`/api/chat/artifacts/${encodeURIComponent(id)}`);
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      if (!res.ok) {
+        throw new Error(
+          artifactRequestErrorMessage(res.status, "download", await readArtifactErrorCode(res)),
+        );
+      }
       const json = (await res.json()) as {
         data?: {
           artifact?: { content?: string; path?: string; mimeType?: string };
@@ -773,12 +790,13 @@ export function DeepResearchFilesPanel({
     (id: string) => {
       const item = artifacts.find((a) => a.id === id);
       if (!item) return;
+      setError(null);
       void (async () => {
         try {
           const text = await fetchArtifactText(id, item);
           if (text) downloadTextFile(item, text);
-        } catch {
-          // ignore
+        } catch (err) {
+          setError(normalizeArtifactRequestError(err, "download"));
         }
       })();
     },
@@ -788,9 +806,11 @@ export function DeepResearchFilesPanel({
   const downloadAllAsZip = React.useCallback(() => {
     if (artifacts.length === 0 || zipping) return;
     setZipping(true);
+    setError(null);
     void (async () => {
       try {
         const entries = [];
+        let lastDownloadError: unknown = null;
         for (const item of artifacts) {
           try {
             const text = await fetchArtifactText(item.id, item);
@@ -798,14 +818,24 @@ export function DeepResearchFilesPanel({
               path: artifactZipEntryPath(item, artifacts),
               data: new TextEncoder().encode(text),
             });
-          } catch {
-            // skip failed item
+          } catch (err) {
+            lastDownloadError = err;
+            // skip failed item; surface if nothing ends up packable
           }
         }
-        if (entries.length === 0) return;
+        if (entries.length === 0) {
+          setError(
+            lastDownloadError
+              ? normalizeArtifactRequestError(lastDownloadError, "download")
+              : "文件下载失败，请稍后重试",
+          );
+          return;
+        }
         const zipBlob = buildStoreZip(entries);
         const stamp = new Date().toISOString().slice(0, 10);
         triggerBlobDownload(zipBlob, `deep-research-files-${stamp}.zip`);
+      } catch (err) {
+        setError(normalizeArtifactRequestError(err, "download"));
       } finally {
         setZipping(false);
       }
@@ -1012,11 +1042,19 @@ export function DeepResearchFilesPanel({
           data-testid="deep-research-browse-list"
         >
           {loading ? <p className="px-3 text-xs text-muted-foreground">加载中…</p> : null}
-          {error ? <p className="px-3 text-xs text-destructive">{error}</p> : null}
-          {!loading && !error && tree.length === 0 ? (
+          {error ? (
+            <p
+              className="mb-2 px-3 text-xs text-destructive"
+              role="alert"
+              data-testid="deep-research-files-error"
+            >
+              {error}
+            </p>
+          ) : null}
+          {!loading && tree.length === 0 && !error ? (
             <p className="px-3 text-xs text-muted-foreground">暂无文件</p>
           ) : null}
-          {!loading && !error && tree.length > 0 ? (
+          {!loading && tree.length > 0 ? (
             <ul className="m-0 list-none space-y-0.5 p-0">
               {tree.map((node) => (
                 <ArtifactBrowseRow
@@ -1032,6 +1070,7 @@ export function DeepResearchFilesPanel({
                     });
                   }}
                   onOpenFile={(id) => {
+                    setError(null);
                     setSelectedId(id);
                     setView("preview");
                   }}
