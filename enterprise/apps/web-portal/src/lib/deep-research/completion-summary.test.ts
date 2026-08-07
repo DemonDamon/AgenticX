@@ -123,6 +123,24 @@ describe("selectSummaryArtifacts", () => {
     expect(out).toHaveLength(1);
     expect(out[0]!.id).toBe("art-html");
   });
+
+  it("keeps report.doc primary for docx prefs", () => {
+    const artifacts = [
+      ...baseInput.artifacts,
+      {
+        id: "art-doc",
+        path: "research/r1/report.doc",
+        title: "DeepSeek V4 核心技术点.doc",
+        kind: "report",
+      },
+    ];
+    const out = selectSummaryArtifacts(artifacts, {
+      shapes: ["structured"],
+      format: "docx",
+    });
+    expect(out).toHaveLength(1);
+    expect(out[0]!.id).toBe("art-doc");
+  });
 });
 
 describe("linkifyArtifactMentions", () => {

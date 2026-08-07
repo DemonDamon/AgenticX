@@ -34,10 +34,16 @@ describe("isPrimaryDeliveryArtifactPath", () => {
     expect(isPrimaryDeliveryArtifactPath("research/r1/report.html", "pdf")).toBe(true);
   });
 
-  it("picks final-report.md for md/docx and hides report.md", () => {
+  it("picks final-report.md for md and hides report.md", () => {
     expect(isPrimaryDeliveryArtifactPath("research/r1/final-report.md", "md")).toBe(true);
     expect(isPrimaryDeliveryArtifactPath("research/r1/report.html", "md")).toBe(false);
     expect(isPrimaryDeliveryArtifactPath("research/r1/report.md", "md")).toBe(false);
+  });
+
+  it("picks report.doc for docx prefs", () => {
+    expect(isPrimaryDeliveryArtifactPath("research/r1/report.doc", "docx")).toBe(true);
+    expect(isPrimaryDeliveryArtifactPath("research/r1/final-report.md", "docx")).toBe(false);
+    expect(isPrimaryDeliveryArtifactPath("research/r1/report.html", "docx")).toBe(false);
   });
 });
 
@@ -55,5 +61,11 @@ describe("displayDeliveryFileName", () => {
         title: "DeepSeek V4.html",
       }),
     ).toBe("DeepSeek V4.html");
+    expect(
+      displayDeliveryFileName({
+        path: "research/r1/report.doc",
+        title: "竞品调研",
+      }),
+    ).toBe("竞品调研.doc");
   });
 });
