@@ -111,6 +111,8 @@ async function curlFetchWithBody(
       "--max-time",
       // curl accepts fractional seconds (e.g. 1.2); keep aligned with AbortSignal budget.
       String(Math.max(0.2, Math.round(timeoutMs) / 1000)),
+      "--connect-timeout",
+      String(Math.max(0.2, Math.min(5, Math.round(timeoutMs) / 1000 / 2))),
       // Trailer stays ASCII; body stays binary — never decode the whole stdout as utf8.
       "-w",
       "\n__CURL_META__%{http_code}\n%{content_type}",
@@ -194,6 +196,57 @@ async function curlFetchWithBody(
   });
 }
 
+/**
+ * curl 是否可用只探测一次并缓存。
+ * 运行镜像若不含 curl，每次抓取都 spawn 一个必然 ENOENT 的子进程，
+ * 在 deep-research 的并发下会变成 fork 风暴（上百次/轮）。
+ */
+let curlAvailable: Promise<boolean> | null = null;
+
+export function resetCurlProbeForTests(): void {
+  curlAvailable = null;
+}
+
+function probeCurl(): Promise<boolean> {
+  return new Promise((resolve) => {
+    let settled = false;
+    const done = (ok: boolean) => {
+      if (settled) return;
+      settled = true;
+      resolve(ok);
+    };
+    try {
+      const child = spawn("curl", ["--version"], { env: process.env });
+      const timer = setTimeout(() => {
+        try {
+          child.kill("SIGKILL");
+        } catch {
+          // ignore
+        }
+        done(false);
+      }, 2_000);
+      child.on("error", () => {
+        clearTimeout(timer);
+        done(false);
+      });
+      child.on("close", (code) => {
+        clearTimeout(timer);
+        done(code === 0);
+      });
+      child.stdout.resume();
+      child.stderr.resume();
+    } catch {
+      done(false);
+    }
+  });
+}
+
+function isCurlAvailable(): Promise<boolean> {
+  if (process.env.AGX_DISABLE_CURL_FETCH === "1") return Promise.resolve(false);
+  curlAvailable ??= probeCurl();
+  return curlAvailable;
+}
+
 function connectViaHttpProxy(
   proxy: URL,
   targetHost: string,
@@ -251,9 +304,15 @@ async function httpsViaProxy(
   method: string,
   headers: Record<string, string>,
   bodyBuf: Buffer | undefined,
+  timeoutMs: number,
   signal?: AbortSignal | null,
 ): Promise<Response> {
-  const socket = await connectViaHttpProxy(proxy, url.hostname, Number(url.port || 443), 15_000);
+  const socket = await connectViaHttpProxy(
+    proxy,
+    url.hostname,
+    Number(url.port || 443),
+    Math.min(15_000, timeoutMs),
+  );
   return new Promise((resolve, reject) => {
     const onAbort = () => {
       socket.destroy();
@@ -274,6 +333,8 @@ async function httpsViaProxy(
       method,
       headers: { ...headers, host: url.host },
     });
+    // CONNECT success does not bound the response phase; hard-cap it.
+    req.setTimeout(timeoutMs, onAbort);
     req.on("response", (res) => {
       const chunks: Buffer[] = [];
       res.on("data", (c) => chunks.push(c));
@@ -299,6 +360,7 @@ function requestDirect(
   method: string,
   headers: Record<string, string>,
   bodyBuf: Buffer | undefined,
+  timeoutMs: number,
   signal?: AbortSignal | null,
 ): Promise<Response> {
   const isHttps = url.protocol === "https:";
@@ -339,7 +401,8 @@ function requestDirect(
       },
     );
     signal?.addEventListener("abort", onAbort, { once: true });
-    if (!signal) req.setTimeout(20_000, onAbort);
+    // Production passes a long-lived runSignal; always set a per-request bound.
+    req.setTimeout(timeoutMs, onAbort);
     req.on("error", reject);
     if (bodyBuf) req.write(bodyBuf);
     req.end();
@@ -356,30 +419,47 @@ export const directFetch: DirectFetch = async (input, init = {}) => {
   }
   const timeoutMs = resolveTimeoutMs(init);
 
+  // runSignal 等长生命周期 signal 不代表单次抓取超时；必须叠一个硬上界，
+  // 否则 curl 失败后掉进 CONNECT / 直连时没有任何时间约束。
+  const timeoutSignal = AbortSignal.timeout(timeoutMs);
+  const effectiveSignal = init.signal
+    ? AbortSignal.any([init.signal, timeoutSignal])
+    : timeoutSignal;
+
   // 1) curl — best proxy/SOCKS compatibility with shell env
-  try {
-    return await curlFetchWithBody(
-      url.toString(),
-      method,
-      headers,
-      bodyBuf,
-      timeoutMs,
-      init.signal,
-    );
-  } catch {
-    // fall through
+  if (await isCurlAvailable()) {
+    try {
+      return await curlFetchWithBody(
+        url.toString(),
+        method,
+        headers,
+        bodyBuf,
+        timeoutMs,
+        effectiveSignal,
+      );
+    } catch {
+      // fall through
+    }
   }
 
   // 2) HTTP CONNECT when an http(s) proxy is configured
   const proxy = resolveHttpProxyUrl();
   if (proxy && url.protocol === "https:") {
     try {
-      return await httpsViaProxy(proxy, url, method, headers, bodyBuf, init.signal);
+      return await httpsViaProxy(
+        proxy,
+        url,
+        method,
+        headers,
+        bodyBuf,
+        timeoutMs,
+        effectiveSignal,
+      );
     } catch {
       // fall through
     }
   }
 
   // 3) direct
-  return requestDirect(url, method, headers, bodyBuf, init.signal);
+  return requestDirect(url, method, headers, bodyBuf, timeoutMs, effectiveSignal);
 };

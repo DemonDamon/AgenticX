@@ -560,13 +560,14 @@ export function WorkspaceShell({ userEmail, userScopes }: WorkspaceShellProps) {
                 </DropdownMenuItem>
                 {showAdminEntry ? (
                   <DropdownMenuItem
-                    onClick={() =>
-                      window.open(
-                        process.env.NEXT_PUBLIC_ADMIN_CONSOLE_URL ?? "http://localhost:3001",
-                        "_blank",
-                        "noopener,noreferrer",
-                      )
-                    }
+                    onClick={() => {
+                      const isTestPortal = window.location.hostname === "test.pal.cmccfund.com";
+                      const adminConsoleUrl = isTestPortal
+                        ? `${window.location.protocol}//${window.location.hostname}:3001`
+                        : (process.env.NEXT_PUBLIC_ADMIN_CONSOLE_URL ?? "http://localhost:3001");
+
+                      window.open(adminConsoleUrl, "_blank", "noopener,noreferrer");
+                    }}
                   >
                     <LayoutDashboard className="mr-2 h-4 w-4" />
                     {t("adminConsole")}

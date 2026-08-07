@@ -46,12 +46,12 @@ describe("parseResearchPlanJson", () => {
   });
 
   it("keeps up to MAX_SUB_QUESTIONS lanes for complex topics", () => {
-    const many = Array.from({ length: 8 }, (_, i) => `q${i + 1}`);
+    const many = Array.from({ length: MAX_SUB_QUESTIONS }, (_, i) => `q${i + 1}`);
     const plan = parseResearchPlanJson(
       JSON.stringify({ topic: "T", complexity: "complex", sub_questions: many }),
       "fallback",
     );
-    expect(plan.subQuestions).toHaveLength(8);
+    expect(plan.subQuestions).toHaveLength(MAX_SUB_QUESTIONS);
     expect(plan.complexity).toBe("complex");
   });
 

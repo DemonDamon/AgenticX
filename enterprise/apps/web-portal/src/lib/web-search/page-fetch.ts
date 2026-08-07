@@ -24,6 +24,8 @@ export {
 
 export const PAGE_FETCH_TIMEOUT_MS = 12_000;
 export const PAGE_FETCH_CONCURRENCY = 4;
+/** Same-host network/timeout failures before skipping remaining URLs in a batch. */
+export const HOST_FAILURE_THRESHOLD = 3;
 
 export type PageContent = {
   url: string;
@@ -77,6 +79,14 @@ export function summarizeFetchFailures(stats: FetchStats): string {
   return ranked.map(([reason, n]) => `${n} ${FAILURE_LABELS[reason]}`).join(" · ");
 }
 
+function safeHost(url: string): string {
+  try {
+    return new URL(url).host;
+  } catch {
+    return "";
+  }
+}
+
 type PageFetchAttempt = {
   page: PageContent | null;
   failure?: PageFetchFailure;
@@ -128,7 +138,7 @@ async function fetchPageContentWithReason(
     }
   }
 
-  if (lastFailure) {
+  if (lastFailure && process.env.AGX_PAGE_FETCH_VERBOSE === "1") {
     console.warn("[page-fetch]", url, lastFailure);
   }
   return { page: null, failure: lastFailure };
@@ -142,6 +152,7 @@ export async function fetchPagesBatch(
   const concurrency = Math.max(1, deps?.concurrency ?? PAGE_FETCH_CONCURRENCY);
   const pages: Array<PageContent | null> = new Array(urls.length).fill(null);
   const stats = emptyFetchStats();
+  const hostFailures = new Map<string, number>();
   let cursor = 0;
 
   async function worker(): Promise<void> {
@@ -154,10 +165,27 @@ export async function fetchPagesBatch(
         pages[index] = null;
         continue;
       }
+
+      const host = safeHost(target);
+      if (host && (hostFailures.get(host) ?? 0) >= HOST_FAILURE_THRESHOLD) {
+        // 同一 host 已连续失败达阈值，本批次直接跳过，把预算留给还可能通的源。
+        pages[index] = null;
+        stats.network_error += 1;
+        continue;
+      }
+
       const attempt = await fetchPageContentWithReason(target, deps);
       pages[index] = attempt.page;
       if (!attempt.page && attempt.failure) {
         stats[attempt.failure] += 1;
+        if (
+          host &&
+          (attempt.failure === "network_error" || attempt.failure === "timeout")
+        ) {
+          hostFailures.set(host, (hostFailures.get(host) ?? 0) + 1);
+        }
+      } else if (host) {
+        hostFailures.delete(host);
       }
     }
   }
@@ -165,5 +193,10 @@ export async function fetchPagesBatch(
   await Promise.all(
     Array.from({ length: Math.min(concurrency, Math.max(1, urls.length)) }, () => worker()),
   );
+
+  const summary = summarizeFetchFailures(stats);
+  if (summary) {
+    console.warn(`[page-fetch] batch: ${urls.length} urls, ${summary}`);
+  }
   return { pages, stats };
 }

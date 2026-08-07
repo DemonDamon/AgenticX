@@ -4,8 +4,10 @@
 
 import { parseLlmJson } from "./llm-json";
 
-export const MAX_GAPS = 4;
-export const MAX_FOLLOWUP_QUERIES = 8;
+/** At most one information-gap follow-up lane (cost control). */
+export const MAX_GAPS = 1;
+/** Query budget for the single follow-up gap. */
+export const MAX_FOLLOWUP_QUERIES = 3;
 
 export type ResearchGap = {
   id: string;

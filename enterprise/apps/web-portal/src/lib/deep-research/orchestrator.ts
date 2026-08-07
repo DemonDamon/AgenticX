@@ -19,6 +19,8 @@ import {
   PAGE_FETCH_TIMEOUT_MS,
   summarizeFetchFailures,
 } from "../web-search/page-fetch";
+import { directFetch } from "../web-search/direct-fetch";
+import { probeEgress } from "../web-search/egress-probe";
 import { archivePage, pageArchivePath } from "./page-archive";
 import { buildCompletionSummary, fallbackSummary } from "./completion-summary";
 import { buildResearchPlan, enforcePlanBreadth, type ResearchPlan } from "./planner";
@@ -76,21 +78,28 @@ import {
   scorePool,
   selectTopSources,
 } from "./source-pool";
-import { reflectOnGaps, type ResearchGap } from "./reflector";
+import { MAX_GAPS, reflectOnGaps, type ResearchGap } from "./reflector";
 import type { DeepResearchEvent } from "@agenticx/sdk-ts";
 
 export const SEARCH_CONCURRENCY = 3;
 /** Default per-lane result count; the live path uses resolveResultsPerLane(). */
 export const RESULTS_PER_QUESTION = 5;
 export const MAX_SOURCES = 40;
-export const MAX_LANES = 8;
+/** Hard cap on parallel research lanes (planner truncates to the same bound). */
+export const MAX_LANES = 5;
 export const MIN_RESULTS_PER_LANE = 4;
 export const MAX_RESULTS_PER_LANE = 10;
 export const RECON_TIMEOUT_MS = 15_000;
+
+function envMs(key: string, fallback: number): number {
+  const raw = Number(process.env[key]);
+  return Number.isFinite(raw) && raw > 0 ? raw : fallback;
+}
+
 /** route.ts maxDuration = 1500s；留 300s 给收尾与网络抖动。 */
-export const TOTAL_BUDGET_MS = 1_200_000;
+export const TOTAL_BUDGET_MS = envMs("DEEP_RESEARCH_TOTAL_BUDGET_MS", 1_200_000);
 /** 车道内抓正文的时间上限，超出则该车道剩余来源只保留 snippet。 */
-export const FETCH_BUDGET_MS = 180_000;
+export const FETCH_BUDGET_MS = envMs("DEEP_RESEARCH_FETCH_BUDGET_MS", 180_000);
 /** 低于此预算则跳过反思补搜，直接进综述。 */
 export const REFLECT_MIN_BUDGET_MS = 150_000;
 /**
@@ -135,6 +144,8 @@ export type DeepResearchDeps = {
   fetchPagesFn?: typeof fetchPagesBatch;
   expandQueriesFn?: typeof expandQueries;
   reflectFn?: typeof reflectOnGaps;
+  /** Optional injected egress probe (tests). */
+  probeEgressFn?: typeof probeEgress;
   artifactStore?: ArtifactStore;
   /** Optional injected run store (tests / custom backends). */
   runStore?: RunStore;
@@ -350,7 +361,11 @@ async function pipeWithPrefix(upstream: Response, prefixText: string): Promise<R
         if (done) break;
         if (value) controller.enqueue(value);
       }
-      controller.close();
+      try {
+        controller.close();
+      } catch {
+        // client may have cancelled the body first
+      }
     },
   });
   return eventStreamResponse(stream);
@@ -362,7 +377,11 @@ function textOnlyDoneStream(content: string): Response {
       const encoder = new TextEncoder();
       if (content) controller.enqueue(encoder.encode(sseDelta(content)));
       controller.enqueue(encoder.encode("data: [DONE]\n\n"));
-      controller.close();
+      try {
+        controller.close();
+      } catch {
+        // client may have cancelled the body first
+      }
     },
   });
   return eventStreamResponse(stream);
@@ -531,6 +550,18 @@ export async function runDeepResearchTurn(
         }
       };
 
+      /** 客户端已 cancel Response body 时 close() 会抛 "Controller is already closed"。 */
+      const safeClose = () => {
+        // Always attempt close: transport abort sets transportClosed without closing
+        // the controller (writes stop, but the consumer may still be reading).
+        transportClosed = true;
+        try {
+          controller.close();
+        } catch {
+          // 客户端先断开，忽略。
+        }
+      };
+
       const enqueueDelta = (text: string) => {
         if (!text) return;
         writer?.pushReport(text);
@@ -569,6 +600,14 @@ export async function runDeepResearchTurn(
         safeControllerEnqueue(encoder.encode(`: ping\n\n${" ".repeat(2048)}\n`));
       };
 
+      /** 代理按读超时切流；lanes / synthesize 有分钟级静默窗口，必须定时喂字节。 */
+      const HEARTBEAT_MS = 15_000;
+      const heartbeat = setInterval(() => {
+        enqueueFlush();
+      }, HEARTBEAT_MS);
+      // Node 侧不因心跳定时器阻止退出。
+      (heartbeat as unknown as { unref?: () => void }).unref?.();
+
       let artifactsWritten = 0;
       /** Separate from memo/report quota — page full-text archives. */
       let pagesArchived = 0;
@@ -590,6 +629,17 @@ export async function runDeepResearchTurn(
 
         enqueueEvent({ type: "run_started", runId });
         enqueueFlush();
+
+        // deps.fetchImpl 是「调 gateway」的实现，不能用来探外站；出网探测固定走
+        // directFetch，需要替身时只允许注入 probeEgressFn。
+        const egressOk = await (deps.probeEgressFn ?? probeEgress)(directFetch);
+        if (!egressOk) {
+          enqueueEvent({
+            type: "narrative",
+            text: "当前环境无法访问外部网站，深度调研已切换为「仅基于已有资料」模式，结论不含外部实时来源。",
+          });
+          enqueueFlush();
+        }
 
         // --- Recon (knowledge cold-start) ---
         // Without this, clarify/plan reason from stale parametric knowledge and can
@@ -932,7 +982,7 @@ export async function runDeepResearchTurn(
             let pagesFetched = 0;
             const fetchedUrls = new Set<string>();
             const archivedUrls = new Set<string>();
-            if (questionCitations.length > 0 && searchBudgetLeft() > 0) {
+            if (questionCitations.length > 0 && searchBudgetLeft() > 0 && egressOk) {
               try {
                 const { pages, stats } = await fetchPages(
                   questionCitations.map((c) => c.url),
@@ -1039,9 +1089,10 @@ export async function runDeepResearchTurn(
             }
 
             let artifactPath: string | undefined;
-            // Reserve slots for final-report.md + report.html so lane memos cannot
-            // exhaust the run quota before primary deliverables are written.
-            const memoQuota = Math.max(0, MAX_ARTIFACTS_PER_RUN - 2);
+            // Reserve slots for final-report.md + report.html (+ report.doc when Word)
+            // so lane memos cannot exhaust the run quota before primary deliverables.
+            const reservedPrimarySlots = deliveryPrefs.format === "docx" ? 3 : 2;
+            const memoQuota = Math.max(0, MAX_ARTIFACTS_PER_RUN - reservedPrimarySlots);
             if (memo.trim() && artifactsWritten < memoQuota) {
               const path = `research/${runId}/lanes/${laneId}/memo.md`;
               const record = await artifactStore.write({
@@ -1126,7 +1177,7 @@ export async function runDeepResearchTurn(
           enqueueDelta(DEEP_RESEARCH_SEARCH_FAILED);
           await persistFinish("failed", DEEP_RESEARCH_SEARCH_FAILED);
           safeControllerEnqueue(encoder.encode("data: [DONE]\n\n"));
-          controller.close();
+          safeClose();
           return;
         }
 
@@ -1154,6 +1205,8 @@ export async function runDeepResearchTurn(
           } catch {
             gaps = [];
           }
+          // Hard cap: at most one gap → one follow-up lane (search cost control).
+          gaps = gaps.slice(0, MAX_GAPS);
 
           if (gaps.length > 0) {
             // The gap card is itself the "发现 N 处信息缺口" announcement, and the
@@ -1349,7 +1402,10 @@ export async function runDeepResearchTurn(
               previousSummaries,
             }),
           );
-          if (!sectionMeetsFormat(section, sectionBody)) {
+          const tableLike =
+            section.format === "comparison_table" || section.format === "tradeoff";
+          const noEvidence = registrySnapshot().length === 0;
+          if (!sectionMeetsFormat(section, sectionBody) && !(tableLike && noEvidence)) {
             console.warn(
               "[deep-research] section format miss",
               section.id,
@@ -1521,7 +1577,7 @@ export async function runDeepResearchTurn(
         );
         await persistFinish("completed");
         safeControllerEnqueue(encoder.encode("data: [DONE]\n\n"));
-        controller.close();
+        safeClose();
       } catch (error) {
         if (error instanceof DOMException && error.name === "AbortError") {
           enqueueEvent(
@@ -1530,7 +1586,7 @@ export async function runDeepResearchTurn(
           );
           await persistFinish("cancelled");
           safeControllerEnqueue(encoder.encode("data: [DONE]\n\n"));
-          controller.close();
+          safeClose();
           return;
         }
         console.warn("[deep-research] pipeline failed:", error);
@@ -1565,7 +1621,9 @@ export async function runDeepResearchTurn(
           await persistFinish("failed", message);
         }
         safeControllerEnqueue(encoder.encode("data: [DONE]\n\n"));
-        controller.close();
+        safeClose();
+      } finally {
+        clearInterval(heartbeat);
       }
     },
   });

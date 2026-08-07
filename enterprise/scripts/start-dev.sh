@@ -75,9 +75,12 @@ set -a
 # shellcheck disable=SC1090
 source "$ENV_FILE"
 set +a
+_ENV_FILE_DATABASE_URL="${DATABASE_URL:-}"
+_INFRA_PINNED=0
 if [ -n "$_INFRA_DIALECT" ] && [ -n "$_INFRA_URL" ]; then
   export DATABASE_DIALECT="$_INFRA_DIALECT"
   export DATABASE_URL="$_INFRA_URL"
+  _INFRA_PINNED=1
   echo "[start-dev] honor infra pin: DATABASE_DIALECT=$DATABASE_DIALECT"
 fi
 unset _INFRA_DIALECT _INFRA_URL
@@ -126,6 +129,35 @@ case "$DATABASE_URL" in
     fi
     ;;
 esac
+
+# --- DB 自检（启动前）：打印本脚本最终生效的库，避免 portal/gateway 串库导致 40300 ---
+redact_db_url() {
+  # mysql://user:pass@host/db → mysql://user:***@host/db
+  sed -E 's#://([^:/@]+):([^@/]+)@#://\1:***@#'
+}
+_db_name_of_url() {
+  # .../agenticx_hc0730?x=1 → agenticx_hc0730
+  local u="${1%%\?*}"
+  echo "${u##*/}"
+}
+_EFFECTIVE_DB_URL_REDACTED="$(printf '%s' "$DATABASE_URL" | redact_db_url)"
+_EFFECTIVE_DB_NAME="$(_db_name_of_url "$DATABASE_URL")"
+# 留给服务起来后的进程对齐检查
+EXPECTED_DB_NAME="$_EFFECTIVE_DB_NAME"
+EXPECTED_DATABASE_URL="$DATABASE_URL"
+echo "[start-dev] DB check: dialect=$DATABASE_DIALECT db=${EXPECTED_DB_NAME}"
+echo "[start-dev] DB check: effective DATABASE_URL=${_EFFECTIVE_DB_URL_REDACTED}"
+if [ "$_INFRA_PINNED" -eq 1 ]; then
+  _ENV_FILE_DB_NAME="$(_db_name_of_url "${_ENV_FILE_DATABASE_URL:-}")"
+  if [ -n "${_ENV_FILE_DATABASE_URL:-}" ] && [ "$_ENV_FILE_DB_NAME" != "$EXPECTED_DB_NAME" ]; then
+    echo "[start-dev] DB check: AGX_INFRA_* 覆盖了 .env.local（文件库=${_ENV_FILE_DB_NAME} → 生效库=${EXPECTED_DB_NAME}）"
+  else
+    echo "[start-dev] DB check: AGX_INFRA_* pin 已生效（与 .env.local 同库或未写库名）"
+  fi
+else
+  echo "[start-dev] DB check: 未设置 AGX_INFRA_*，使用 .env.local / 默认值"
+fi
+unset _ENV_FILE_DATABASE_URL _INFRA_PINNED _ENV_FILE_DB_NAME _EFFECTIVE_DB_NAME _EFFECTIVE_DB_URL_REDACTED
 
 # 2) PEM -> 环境变量（PEM 多行不能直接写进 .env.local）
 if [ -n "${AUTH_JWT_PRIVATE_KEY_FILE:-}" ] && [ -f "$AUTH_JWT_PRIVATE_KEY_FILE" ]; then
@@ -302,6 +334,59 @@ if ! wait_for_http "gateway" "${GATEWAY_BASE_URL:-http://127.0.0.1:8088}/healthz
   echo "[start-dev] 请检查上方 gateway 日志（常见：admin internal 401 / 端口占用 / go 不在 PATH）。" >&2
   echo "[start-dev] 手动探活：curl --noproxy '*' http://127.0.0.1:8088/healthz" >&2
 fi
+
+# --- DB 自检（启动后）：核对 :3000 / :3001 / :8088 监听进程的 DATABASE_URL 是否与本脚本一致 ---
+# portal JWT scopes=[]，gateway 靠 session_grants 补权限；两边连不同库会出现 40300 missing workspace:chat。
+_process_env_var() {
+  local pid="$1" key="$2"
+  if [ -r "/proc/${pid}/environ" ]; then
+    tr '\0' '\n' < "/proc/${pid}/environ" | sed -n "s/^${key}=//p" | head -1
+    return 0
+  fi
+  # macOS: ps -E 把环境变量附在 command 后
+  ps -Eww -p "$pid" -o command= 2>/dev/null | tr ' ' '\n' | sed -n "s/^${key}=//p" | head -1
+}
+_db_url_of_listen_port() {
+  local port="$1" pid
+  pid="$(lsof -nP -iTCP:"$port" -sTCP:LISTEN -t 2>/dev/null | head -1 || true)"
+  if [ -z "${pid:-}" ]; then
+    return 1
+  fi
+  _process_env_var "$pid" "DATABASE_URL"
+}
+echo
+echo "[start-dev] DB check: 核对监听进程 DATABASE_URL（期望库=${EXPECTED_DB_NAME}）…"
+_DB_MISMATCH=0
+_DB_UNREADABLE=0
+for _pair in "web-portal:3000" "admin-console:3001" "gateway:8088"; do
+  _svc="${_pair%%:*}"
+  _port="${_pair##*:}"
+  _got_url="$(_db_url_of_listen_port "$_port" || true)"
+  if [ -z "${_got_url:-}" ]; then
+    echo "[start-dev] DB check: ${_svc} (:${_port}) 未读到 DATABASE_URL（未监听或进程环境不可读）" >&2
+    _DB_UNREADABLE=1
+    continue
+  fi
+  _got_name="$(_db_name_of_url "$_got_url")"
+  _got_redacted="$(printf '%s' "$_got_url" | redact_db_url)"
+  if [ "$_got_name" = "$EXPECTED_DB_NAME" ] || [ "$_got_url" = "$EXPECTED_DATABASE_URL" ]; then
+    echo "[start-dev] DB check: ${_svc} (:${_port}) ok db=${_got_name}"
+  else
+    echo "[start-dev] DB check: ${_svc} (:${_port}) MISMATCH 期望=${EXPECTED_DB_NAME} 实际=${_got_name}" >&2
+    echo "[start-dev]          ${_svc} DATABASE_URL=${_got_redacted}" >&2
+    _DB_MISMATCH=1
+  fi
+done
+if [ "$_DB_MISMATCH" -eq 1 ]; then
+  echo "[start-dev] DB check: ❌ portal/admin/gateway 连了不同库 → 登录后易出现 40300 missing workspace:chat。" >&2
+  echo "[start-dev]          处理：杀掉占用端口的旧进程后，用同一套 AGX_INFRA_*（或同一 .env.local）重新启动；然后重新登录。" >&2
+elif [ "$_DB_UNREADABLE" -eq 1 ]; then
+  echo "[start-dev] DB check: ⚠️ 部分进程未读到 DATABASE_URL，请对照上方 effective 行自行确认。" >&2
+else
+  echo "[start-dev] DB check: ✅ portal / admin / gateway 均指向 ${EXPECTED_DB_NAME}"
+fi
+unset _DB_MISMATCH _DB_UNREADABLE _pair _svc _port _got_url _got_name _got_redacted
+unset EXPECTED_DB_NAME EXPECTED_DATABASE_URL
 
 echo
 echo "[start-dev] all services launching. Ctrl+C 结束（约 1s 内退出；卡住可再按一次强制杀进程树）。"
