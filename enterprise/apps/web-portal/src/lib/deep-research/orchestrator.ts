@@ -97,6 +97,13 @@ export const MAX_RESULTS_PER_LANE = 10;
  * 却只准采用 8 个，采用率天花板被锁在 25% 左右，且车道越多天花板越低。
  */
 export const LANE_ADOPT_CAP = 12;
+/**
+ * 一个车道先跑几条检索式作为探针，再决定要不要跑完剩下的。
+ *
+ * 候选数已超过本车道采用额度时，后续检索式只会挤动候选名单顺序，却照样按
+ * 请求次数计费——观测到 19 条检索式仅去重出 31 个唯一 URL，边际收益极低。
+ */
+export const EARLY_STOP_PROBE_VARIANTS = 2;
 export const RECON_TIMEOUT_MS = 15_000;
 
 function envMs(key: string, fallback: number): number {
@@ -944,29 +951,52 @@ export async function runDeepResearchTurn(
 
             const pool = new SourcePool();
             let variantFailures = 0;
-            await mapPool(
-              variants,
-              SEARCH_CONCURRENCY,
-              async (variant) => {
-                try {
-                  if (searchBudgetLeft() <= 0) return;
-                  const hits = await searchFn(
-                    variant.query,
-                    resultsPerLane,
-                    searchCfg,
-                    deps.fetchImpl,
-                  );
-                  for (const hit of hits) pool.add(hit, variant.query);
-                } catch (error) {
-                  variantFailures += 1;
-                  console.warn(
-                    "[deep-research] variant search failed:",
-                    error instanceof Error ? error.message : error,
-                  );
-                }
-              },
-              runSignal,
-            );
+            let variantsRun = 0;
+            const runSearchWave = async (wave: QueryVariant[]): Promise<void> => {
+              if (wave.length === 0) return;
+              await mapPool(
+                wave,
+                SEARCH_CONCURRENCY,
+                async (variant) => {
+                  try {
+                    if (searchBudgetLeft() <= 0) return;
+                    variantsRun += 1;
+                    const hits = await searchFn(
+                      variant.query,
+                      resultsPerLane,
+                      searchCfg,
+                      deps.fetchImpl,
+                    );
+                    for (const hit of hits) pool.add(hit, variant.query);
+                  } catch (error) {
+                    variantFailures += 1;
+                    console.warn(
+                      "[deep-research] variant search failed:",
+                      error instanceof Error ? error.message : error,
+                    );
+                  }
+                },
+                runSignal,
+              );
+            };
+
+            // Probe with the first couple of queries, then stop if the pool
+            // already exceeds what this lane is allowed to adopt — extra queries
+            // cost money per request and would only shuffle the shortlist.
+            await runSearchWave(variants.slice(0, EARLY_STOP_PROBE_VARIANTS));
+            const laneAdoptCap = resolveLaneAdoptCap(registry.size);
+            const deferredVariants = variants.slice(EARLY_STOP_PROBE_VARIANTS);
+            if (deferredVariants.length > 0) {
+              if (pool.size >= laneAdoptCap) {
+                enqueueEvent({
+                  type: "lane_progress",
+                  laneId,
+                  message: `候选已够用，实际检索 ${variantsRun} 条，省去 ${deferredVariants.length} 条检索式`,
+                });
+              } else {
+                await runSearchWave(deferredVariants);
+              }
+            }
 
             enqueueEvent({
               type: "lane_progress",
@@ -974,10 +1004,10 @@ export async function runDeepResearchTurn(
               message: `发现 ${pool.size} 个候选来源`,
             });
 
-            if (pool.size === 0 && variantFailures >= variants.length) {
+            if (pool.size === 0 && variantsRun > 0 && variantFailures >= variantsRun) {
               searchFailures += 1;
               enqueueEvent({ type: "lane_done", laneId, status: "failed" });
-              return { ...empty, queriesPlanned: variants.length };
+              return { ...empty, queriesPlanned: variantsRun };
             }
 
             const scored = scorePool(plan.topic || originalUserQuery, pool.list());
@@ -1154,7 +1184,7 @@ export async function runDeepResearchTurn(
               question,
               citations: questionCitations,
               memo,
-              queriesPlanned: variants.length,
+              queriesPlanned: variantsRun,
               urlsDiscovered: pool.size,
               sourcesSelected: questionCitations.length,
               pagesFetched,

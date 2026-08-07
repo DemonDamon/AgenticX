@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import {
   DEEP_RESEARCH_SEARCH_FAILED,
   MAX_LANES,
+  EARLY_STOP_PROBE_VARIANTS,
   LANE_ADOPT_CAP,
   MAX_RESULTS_PER_LANE,
   MAX_SOURCES,
@@ -852,7 +853,7 @@ describe("recon cold-start", () => {
           buildPlan: async () => ({
             topic: "T",
             complexity: "simple" as const,
-            subQuestions: ["q1"],
+            subQuestions: ["q1", "q2"],
           }),
           executeSearch: async () => [{ title: "t", url: "https://ex.com/1", snippet: "s" }],
         }),
@@ -1134,6 +1135,102 @@ describe("P1 multi-variant + reflect", () => {
     );
     await readSsePayload(response);
     expect(calls).toHaveLength(6);
+  });
+
+  it("skips remaining queries once a lane has more candidates than it can adopt", async () => {
+    const calls: string[] = [];
+    const response = await runDeepResearchTurn(
+      { model: "m", messages: [{ role: "user", content: "主题调研" }] },
+      {
+        ...baseDeps({
+          fetchImpl: vi.fn(async (_url: string, init?: RequestInit) => {
+            const body = JSON.parse(String(init?.body ?? "{}")) as { stream?: boolean };
+            if (body.stream === false) {
+              return {
+                ok: true,
+                json: async () => ({ choices: [{ message: { content: "memo" } }] }),
+              } as Response;
+            }
+            return synthUpstream("ok");
+          }) as unknown as typeof fetch,
+          buildPlan: async () => ({
+            topic: "主题调研",
+            complexity: "moderate" as const,
+            subQuestions: ["q1", "q2"],
+          }),
+          expandQueriesFn: async ({ subQuestion }: { subQuestion: string }) => [
+            { query: subQuestion, kind: "primary" as const },
+            { query: `${subQuestion} paper`, kind: "authority" as const },
+            { query: `${subQuestion} english`, kind: "english" as const },
+            { query: `${subQuestion} 质疑`, kind: "contrarian" as const },
+          ],
+          executeSearch: async (query: string) => {
+            calls.push(query);
+            // Each probe query alone already fills the lane's adopt budget.
+            return Array.from({ length: LANE_ADOPT_CAP }, (_, i) => ({
+              title: `${query}-${i}`,
+              url: `https://ex.com/${encodeURIComponent(query)}/${i}`,
+              snippet: "s",
+            }));
+          },
+        }),
+      },
+    );
+
+    const { events } = await readSsePayload(response);
+    const laneCalls = calls.filter((q) => q.startsWith("q1"));
+    expect(laneCalls).toHaveLength(EARLY_STOP_PROBE_VARIANTS);
+    expect(laneCalls.some((q) => q.includes("english"))).toBe(false);
+
+    const earlyStop = events.find(
+      (e) => e.type === "lane_progress" && String(e.message ?? "").includes("省去"),
+    );
+    expect(String(earlyStop?.message ?? "")).toContain(`实际检索 ${EARLY_STOP_PROBE_VARIANTS} 条`);
+
+    const stats = events.find((e) => e.type === "research_stats");
+    // Reported spend must be what actually ran (2 lanes × probe), not the 4
+    // queries each lane expanded.
+    expect(stats?.queriesPlanned).toBe(EARLY_STOP_PROBE_VARIANTS * 2);
+  });
+
+  it("runs every query when candidates stay below the adopt budget", async () => {
+    const calls: string[] = [];
+    const response = await runDeepResearchTurn(
+      { model: "m", messages: [{ role: "user", content: "主题调研" }] },
+      {
+        ...baseDeps({
+          fetchImpl: vi.fn(async (_url: string, init?: RequestInit) => {
+            const body = JSON.parse(String(init?.body ?? "{}")) as { stream?: boolean };
+            if (body.stream === false) {
+              return {
+                ok: true,
+                json: async () => ({ choices: [{ message: { content: "memo" } }] }),
+              } as Response;
+            }
+            return synthUpstream("ok");
+          }) as unknown as typeof fetch,
+          buildPlan: async () => ({
+            topic: "主题调研",
+            complexity: "moderate" as const,
+            subQuestions: ["q1", "q2"],
+          }),
+          expandQueriesFn: async ({ subQuestion }: { subQuestion: string }) => [
+            { query: subQuestion, kind: "primary" as const },
+            { query: `${subQuestion} paper`, kind: "authority" as const },
+            { query: `${subQuestion} english`, kind: "english" as const },
+          ],
+          executeSearch: async (query: string) => {
+            calls.push(query);
+            return [
+              { title: query, url: `https://ex.com/${encodeURIComponent(query)}`, snippet: "s" },
+            ];
+          },
+        }),
+      },
+    );
+
+    await readSsePayload(response);
+    expect(calls.filter((q) => q.startsWith("q1"))).toHaveLength(3);
   });
 
   it("runs gap lanes once when reflect returns gaps", async () => {

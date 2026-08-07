@@ -65,6 +65,17 @@ describe("parseLaneMetrics", () => {
     expect(metrics.map((m) => m.text)).toContain("已达来源上限");
   });
 
+  it("counts the queries that actually ran when a lane stops early", () => {
+    const metrics = parseLaneMetrics([
+      "已展开 4 条检索式",
+      "候选已够用，实际检索 2 条，省去 2 条检索式",
+      "发现 24 个候选来源",
+      "已收集 12 个来源，正在读取正文…",
+    ]);
+    expect(metrics.map((m) => m.text)).toContain("搜索 2 次");
+    expect(metrics.map((m) => m.text)).not.toContain("搜索 4 次");
+  });
+
   it("falls back to the shortlist when no 已收集 line exists", () => {
     expect(
       parseLaneMetrics(["筛选出 7/30 个高质量来源"]).map((m) => m.text),

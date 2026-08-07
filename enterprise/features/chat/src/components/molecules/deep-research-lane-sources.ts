@@ -48,7 +48,11 @@ export function parseLaneMetrics(detailLines: string[]): LaneMetric[] {
   if (detailLines.length === 0) return [];
   const joined = detailLines.join("\n");
 
-  const queries = firstNumber(joined, /已展开\s*(\d+)\s*条检索式/u);
+  // A lane may stop early once candidates outnumber what it can adopt, so the
+  // expanded count overstates spend — prefer the line reporting what actually ran.
+  const expanded = firstNumber(joined, /已展开\s*(\d+)\s*条检索式/u);
+  const actuallyRan = firstNumber(joined, /实际检索\s*(\d+)\s*条/u);
+  const queries = actuallyRan ?? expanded;
   const found = firstNumber(joined, /发现\s*(\d+)\s*个候选来源/u);
   const shortlisted = firstNumber(joined, /筛选出\s*(\d+)\s*\/\s*\d+\s*个高质量来源/u);
   const collected = firstNumber(joined, /已收集\s*(\d+)\s*个来源/u);
