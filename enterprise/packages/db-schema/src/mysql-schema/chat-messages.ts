@@ -1,5 +1,5 @@
 import { sql } from "drizzle-orm";
-import { check, foreignKey, index, json, mysqlTable, text, varchar } from "drizzle-orm/mysql-core";
+import { check, foreignKey, index, json, mediumtext, mysqlTable, varchar } from "drizzle-orm/mysql-core";
 import { tenants } from "./tenants";
 import { users } from "./users";
 import { auditColumns, ulid } from "./_shared";
@@ -19,7 +19,7 @@ export const chatMessages = mysqlTable(
       .notNull()
       .references(() => users.id, { onDelete: "restrict" }),
     role: varchar("role", { length: 32 }).notNull(),
-    content: text("content").notNull(),
+    content: mediumtext("content").notNull(),
     model: varchar("model", { length: 160 }),
     status: varchar("status", { length: 32 }).notNull().default("complete"),
     metadata: json("metadata"),
