@@ -7,14 +7,17 @@ export type ArtifactListItem = {
   mimeType?: string;
 };
 
-/** True for HTML report deliverables that must render in an iframe, not as markdown. */
+/** True for HTML / Word-HTML (.doc) deliverables that must render in an iframe, not as markdown. */
 export function isHtmlArtifact(
   item: Pick<ArtifactListItem, "path" | "mimeType"> | null | undefined,
 ): boolean {
   if (!item) return false;
   const mime = (item.mimeType ?? "").toLowerCase();
-  if (mime.includes("html")) return true;
-  return item.path.toLowerCase().endsWith(".html");
+  if (mime.includes("html") || mime.includes("msword") || mime.includes("word")) {
+    return true;
+  }
+  const path = item.path.toLowerCase();
+  return path.endsWith(".html") || path.endsWith(".doc");
 }
 
 /**
@@ -231,7 +234,8 @@ function isPrimaryReportFileName(fileName: string): boolean {
   return (
     lower === "final-report.md" ||
     lower === "report.md" ||
-    lower === "report.html"
+    lower === "report.html" ||
+    lower === "report.doc"
   );
 }
 

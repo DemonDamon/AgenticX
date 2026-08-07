@@ -107,7 +107,7 @@ describe("sanitizeResearchTopic", () => {
 });
 
 describe("primaryReportPathSuffix / title", () => {
-  it("maps html/pdf to report.html and md/docx to final-report.md", () => {
+  it("maps html/pdf to report.html, docx to report.doc, md to final-report.md", () => {
     expect(primaryReportPathSuffix({ shapes: ["structured"], format: "html" })).toBe(
       "report.html",
     );
@@ -118,7 +118,7 @@ describe("primaryReportPathSuffix / title", () => {
       "final-report.md",
     );
     expect(primaryReportPathSuffix({ shapes: ["structured"], format: "docx" })).toBe(
-      "final-report.md",
+      "report.doc",
     );
   });
 
@@ -128,6 +128,9 @@ describe("primaryReportPathSuffix / title", () => {
     );
     expect(primaryArtifactTitle("DeepSeek V4", { shapes: ["structured"], format: "html" })).toBe(
       "DeepSeek V4.html",
+    );
+    expect(primaryArtifactTitle("DeepSeek V4", { shapes: ["structured"], format: "docx" })).toBe(
+      "DeepSeek V4.doc",
     );
   });
 });

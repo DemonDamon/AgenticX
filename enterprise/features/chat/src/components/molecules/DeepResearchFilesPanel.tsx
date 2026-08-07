@@ -727,14 +727,18 @@ export function DeepResearchFilesPanel({
   };
 
   const downloadTextFile = (item: ArtifactListItem, text: string) => {
+    const pathLower = item.path.toLowerCase();
+    const mime = (item.mimeType ?? "").toLowerCase();
+    const isDoc =
+      pathLower.endsWith(".doc") || mime.includes("msword") || mime.includes("ms-word");
     const html = isHtmlArtifact(item);
-    const blob = new Blob([text], {
-      type: html ? "text/html;charset=utf-8" : "text/markdown;charset=utf-8",
-    });
-    triggerBlobDownload(
-      blob,
-      item.path.split("/").pop() || (html ? "report.html" : "artifact.md"),
-    );
+    const blobType = isDoc
+      ? "application/vnd.ms-word;charset=utf-8"
+      : html
+        ? "text/html;charset=utf-8"
+        : "text/markdown;charset=utf-8";
+    const fallbackName = isDoc ? "report.doc" : html ? "report.html" : "artifact.md";
+    triggerBlobDownload(new Blob([text], { type: blobType }), item.path.split("/").pop() || fallbackName);
   };
 
   const fetchArtifactText = React.useCallback(

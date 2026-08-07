@@ -1088,9 +1088,10 @@ export async function runDeepResearchTurn(
             }
 
             let artifactPath: string | undefined;
-            // Reserve slots for final-report.md + report.html so lane memos cannot
-            // exhaust the run quota before primary deliverables are written.
-            const memoQuota = Math.max(0, MAX_ARTIFACTS_PER_RUN - 2);
+            // Reserve slots for final-report.md + report.html (+ report.doc when Word)
+            // so lane memos cannot exhaust the run quota before primary deliverables.
+            const reservedPrimarySlots = deliveryPrefs.format === "docx" ? 3 : 2;
+            const memoQuota = Math.max(0, MAX_ARTIFACTS_PER_RUN - reservedPrimarySlots);
             if (memo.trim() && artifactsWritten < memoQuota) {
               const path = `research/${runId}/lanes/${laneId}/memo.md`;
               const record = await artifactStore.write({
