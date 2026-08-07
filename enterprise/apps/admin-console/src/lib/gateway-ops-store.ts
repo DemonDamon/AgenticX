@@ -44,6 +44,36 @@ export async function fetchGatewayPerfConfig() {
   return res.json();
 }
 
+export type GatewayPolicyStatus = {
+  code: string;
+  message: string;
+  data?: {
+    source?: "remote" | "file" | "manifest";
+    updatedAt?: string;
+    checkedAt?: string;
+    tenant?: {
+      tenantId: string;
+      version: number;
+      publishId: string;
+      publishedAt?: string;
+    } | null;
+  };
+};
+
+export async function fetchGatewayPolicyStatus(tenantId: string): Promise<GatewayPolicyStatus> {
+  const qs = `?tenant_id=${encodeURIComponent(tenantId)}`;
+  const res = await fetch(`${base().replace(/\/$/, "")}/internal/policy-status${qs}`, {
+    headers: authHeaders(),
+    cache: "no-store",
+    signal: AbortSignal.timeout(2_000),
+  });
+  if (!res.ok) {
+    const text = await res.text().catch(() => "");
+    throw new Error(text || "fetch policy status failed");
+  }
+  return res.json() as Promise<GatewayPolicyStatus>;
+}
+
 export async function probeGatewayChannel(channelId: string) {
   const res = await fetch(`${base().replace(/\/$/, "")}/internal/channels/${channelId}/probe`, {
     method: "POST",

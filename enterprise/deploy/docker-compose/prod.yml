@@ -33,9 +33,11 @@ services:
       DEFAULT_TENANT_ID: ${DEFAULT_TENANT_ID:?DEFAULT_TENANT_ID is required}
       DEFAULT_DEPT_ID: ${DEFAULT_DEPT_ID:-default}
       AUTH_JWT_PUBLIC_KEY: ${JWT_PUBLIC_KEY}
+      GATEWAY_INTERNAL_TOKEN: ${GATEWAY_INTERNAL_TOKEN:?GATEWAY_INTERNAL_TOKEN is required}
       GATEWAY_CONFIG_PATH: /app/config/policies.yaml
       GATEWAY_QUOTA_CONFIG_FILE: /runtime/admin/quotas.json
       GATEWAY_QUOTA_USAGE_FILE: /runtime/gateway/quota-usage.json
+      GATEWAY_REMOTE_POLICY_SNAPSHOT_URL: ${GATEWAY_REMOTE_POLICY_SNAPSHOT_URL:-http://admin-console:3001/api/internal/policy-snapshot}
       GATEWAY_POLICY_SNAPSHOT_FILE: /runtime/admin/policy-snapshot.json
       GATEWAY_POLICY_OVERRIDE_FILE: /runtime/admin/policy-overrides.json
     volumes:
@@ -57,9 +59,11 @@ services:
       DEFAULT_TENANT_ID: ${DEFAULT_TENANT_ID:?DEFAULT_TENANT_ID is required}
       DEFAULT_DEPT_ID: ${DEFAULT_DEPT_ID:-default}
       AUTH_JWT_PUBLIC_KEY: ${JWT_PUBLIC_KEY}
+      GATEWAY_INTERNAL_TOKEN: ${GATEWAY_INTERNAL_TOKEN:?GATEWAY_INTERNAL_TOKEN is required}
       GATEWAY_CONFIG_PATH: /app/config/policies.yaml
       GATEWAY_QUOTA_CONFIG_FILE: /runtime/admin/quotas.json
       GATEWAY_QUOTA_USAGE_FILE: /runtime/gateway/quota-usage.json
+      GATEWAY_REMOTE_POLICY_SNAPSHOT_URL: ${GATEWAY_REMOTE_POLICY_SNAPSHOT_URL:-http://admin-console:3001/api/internal/policy-snapshot}
       GATEWAY_POLICY_SNAPSHOT_FILE: /runtime/admin/policy-snapshot.json
       GATEWAY_POLICY_OVERRIDE_FILE: /runtime/admin/policy-overrides.json
     volumes:
@@ -98,6 +102,8 @@ services:
       DATABASE_URL: ${DATABASE_URL:?DATABASE_URL is required}
       AUTH_COOKIE_SECURE: ${AUTH_COOKIE_SECURE:-true}
       GATEWAY_BASE_URL: ${GATEWAY_BASE_URL:-http://gateway-a:8088}
+      GATEWAY_INTERNAL_BASE_URL: ${GATEWAY_INTERNAL_BASE_URL:-http://gateway-a:8088}
+      GATEWAY_INTERNAL_TOKEN: ${GATEWAY_INTERNAL_TOKEN:?GATEWAY_INTERNAL_TOKEN is required}
       AUTH_JWT_PUBLIC_KEY: ${JWT_PUBLIC_KEY}
       AUTH_JWT_PRIVATE_KEY: ${JWT_PRIVATE_KEY}
       ADMIN_CONSOLE_LOGIN_PASSWORD: ${ADMIN_CONSOLE_LOGIN_PASSWORD:?ADMIN_CONSOLE_LOGIN_PASSWORD is required}

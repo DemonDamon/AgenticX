@@ -81,6 +81,7 @@ import {
 } from "./source-pool";
 import { MAX_GAPS, reflectOnGaps, type ResearchGap } from "./reflector";
 import type { DeepResearchEvent } from "@agenticx/sdk-ts";
+import { isPolicyErrorCode, toComplianceMessage } from "@agenticx/core-api";
 
 export const SEARCH_CONCURRENCY = 3;
 /** Default per-lane result count; the live path uses resolveResultsPerLane(). */
@@ -135,6 +136,50 @@ export const DEEP_RESEARCH_SEARCH_FAILED =
 /** 检索已成功、终稿已落盘，但 HTML/摘要等收尾步骤失败时的文案（勿误报成检索失败）。 */
 export const DEEP_RESEARCH_WRAPUP_DEGRADED =
   "> 完整报告已生成并可下载；部分收尾步骤未成功，摘要为系统兜底。";
+
+type GatewayFailure = {
+  code?: string;
+  message: string;
+  rawText: string;
+};
+
+class DeepResearchPolicyError extends Error {
+  readonly code: string;
+  readonly userMessage: string;
+
+  constructor(code: string, fallbackMessage: string) {
+    const userMessage = toComplianceMessage(code, fallbackMessage);
+    super(userMessage);
+    this.name = "DeepResearchPolicyError";
+    this.code = code;
+    this.userMessage = userMessage;
+  }
+}
+
+async function readGatewayFailure(response: Response): Promise<GatewayFailure> {
+  const rawText = await response.text().catch(() => "");
+  let code: string | undefined;
+  let message = rawText.trim() || `gateway returned HTTP ${response.status || 502}`;
+  try {
+    const payload = JSON.parse(rawText) as {
+      error?: { code?: unknown; message?: unknown };
+      code?: unknown;
+      message?: unknown;
+    };
+    const rawCode = payload.error?.code ?? payload.code;
+    const rawMessage = payload.error?.message ?? payload.message;
+    if (typeof rawCode === "string") code = rawCode;
+    if (typeof rawMessage === "string" && rawMessage.trim()) message = rawMessage.trim();
+  } catch {
+    // Preserve the existing generic non-policy failure path for non-JSON responses.
+  }
+  return { code, message, rawText };
+}
+
+function policyErrorFromFailure(failure: GatewayFailure): DeepResearchPolicyError | null {
+  if (!isPolicyErrorCode(failure.code)) return null;
+  return new DeepResearchPolicyError(failure.code!, failure.message);
+}
 
 const LANE_SUMMARY_SYSTEM =
   "你是调研备忘助手。根据检索摘录写一段简洁 Markdown 备忘（≤400 字），保留关键事实与 [N] 引用。只输出正文。";
@@ -365,7 +410,12 @@ async function callGatewayJson(
     body: JSON.stringify({ ...body, stream: false }),
     signal: deps.signal,
   });
-  if (!response.ok) return "";
+  if (!response.ok) {
+    const failure = await readGatewayFailure(response);
+    const policyError = policyErrorFromFailure(failure);
+    if (policyError) throw policyError;
+    return "";
+  }
   const payload = (await response.json()) as {
     choices?: Array<{ message?: { content?: unknown } }>;
   };
@@ -933,15 +983,26 @@ export async function runDeepResearchTurn(
 
             let variants = args.variants;
             if (!variants) {
+              let expandPolicyError: DeepResearchPolicyError | null = null;
               variants = args.skipExpand
                 ? [{ query: question, kind: "primary" }]
                 : await expandFn({
                     topic: plan.topic || originalUserQuery,
                     subQuestion: question,
                     todayLine,
-                    callJson: async (messages) =>
-                      callGatewayJson(toolDeps, { ...baseBody, messages }),
+                    callJson: async (messages) => {
+                      try {
+                        return await callGatewayJson(toolDeps, { ...baseBody, messages });
+                      } catch (error) {
+                        if (error instanceof DeepResearchPolicyError) {
+                          expandPolicyError = error;
+                          return "";
+                        }
+                        throw error;
+                      }
+                    },
                   });
+              if (expandPolicyError) throw expandPolicyError;
             }
             enqueueEvent({
               type: "lane_progress",
@@ -1191,6 +1252,7 @@ export async function runDeepResearchTurn(
             };
           } catch (error) {
             if (error instanceof DOMException && error.name === "AbortError") throw error;
+            if (error instanceof DeepResearchPolicyError) throw error;
             searchFailures += 1;
             console.warn(
               "[deep-research] lane failed:",
@@ -1248,6 +1310,7 @@ export async function runDeepResearchTurn(
             message: "正在复盘已收集证据，识别信息缺口…",
           });
           let gaps: ResearchGap[] = [];
+          let reflectPolicyError: DeepResearchPolicyError | null = null;
           try {
             gaps = await reflectFn({
               topic: plan.topic || originalUserQuery,
@@ -1256,12 +1319,23 @@ export async function runDeepResearchTurn(
                 question: r.question,
                 memo: r.memo,
               })),
-              callJson: async (messages) =>
-                callGatewayJson(toolDeps, { ...baseBody, messages }),
+              callJson: async (messages) => {
+                try {
+                  return await callGatewayJson(toolDeps, { ...baseBody, messages });
+                } catch (error) {
+                  if (error instanceof DeepResearchPolicyError) {
+                    reflectPolicyError = error;
+                    return "";
+                  }
+                  throw error;
+                }
+              },
             });
-          } catch {
+          } catch (error) {
+            if (error instanceof DeepResearchPolicyError) reflectPolicyError = error;
             gaps = [];
           }
+          if (reflectPolicyError) throw reflectPolicyError;
           // Hard cap: at most one gap → one follow-up lane (search cost control).
           gaps = gaps.slice(0, MAX_GAPS);
 
@@ -1336,18 +1410,28 @@ export async function runDeepResearchTurn(
 
         const evidence = [
           prefsWritingHint,
-          "",
           formatEvidencePack(plan, citationsByQuestion, reconCitations),
         ].join("\n");
+        let outlinePolicyError: DeepResearchPolicyError | null = null;
         const outline = await buildReportOutline({
           topic: sanitizeResearchTopic(plan.topic || originalUserQuery || "调研报告"),
           evidence,
-          callJson: async (messages) =>
-            callGatewayJson(toolDeps, {
-              ...baseBody,
-              messages,
-            }),
+          callJson: async (messages) => {
+            try {
+              return await callGatewayJson(toolDeps, {
+                ...baseBody,
+                messages,
+              });
+            } catch (error) {
+              if (error instanceof DeepResearchPolicyError) {
+                outlinePolicyError = error;
+                return "";
+              }
+              throw error;
+            }
+          },
         });
+        if (outlinePolicyError) throw outlinePolicyError;
         outline.title = sanitizeResearchTopic(outline.title);
 
         const streamSectionInto = async (
@@ -1359,8 +1443,10 @@ export async function runDeepResearchTurn(
             messages,
           });
           if (!upstream.ok || !upstream.body) {
-            const errText = await upstream.text().catch(() => "gateway error");
-            const note = `\n\n> 本节撰写失败：${errText.slice(0, 200)}`;
+            const failure = await readGatewayFailure(upstream);
+            const policyError = policyErrorFromFailure(failure);
+            if (policyError) throw policyError;
+            const note = `\n\n> 本节撰写失败：${(failure.rawText || failure.message).slice(0, 200)}`;
             enqueueDelta(note);
             reportContentParts.push(note);
             return "";
@@ -1399,19 +1485,37 @@ export async function runDeepResearchTurn(
               const data = dataLine.replace(/^data:\s*/, "");
               if (data === "[DONE]") continue;
               let isContentDelta = false;
+              type GatewayStreamFrame = {
+                choices?: Array<{ delta?: { content?: string } }>;
+                error?: { code?: unknown; message?: unknown };
+              };
+              let parsed: GatewayStreamFrame | null = null;
               try {
-                const parsed = JSON.parse(data) as {
-                  choices?: Array<{ delta?: { content?: string } }>;
-                };
-                const piece = parsed.choices?.[0]?.delta?.content;
-                if (typeof piece === "string") {
-                  sectionParts.push(piece);
-                  reportContentParts.push(piece);
-                  writer?.pushReport(piece);
-                  isContentDelta = true;
-                }
+                parsed = JSON.parse(data) as GatewayStreamFrame;
               } catch {
                 // forward non-delta frames as-is
+              }
+              const streamErrorCode = parsed?.error?.code;
+              if (typeof streamErrorCode === "string" && isPolicyErrorCode(streamErrorCode)) {
+                try {
+                  await reader.cancel();
+                } catch {
+                  // Gateway may already have closed the stream after the error frame.
+                }
+                const streamErrorMessage = parsed?.error?.message;
+                throw new DeepResearchPolicyError(
+                  streamErrorCode,
+                  typeof streamErrorMessage === "string"
+                    ? streamErrorMessage
+                    : "响应触发合规策略，网关已阻断返回。",
+                );
+              }
+              const piece = parsed?.choices?.[0]?.delta?.content;
+              if (typeof piece === "string") {
+                sectionParts.push(piece);
+                reportContentParts.push(piece);
+                writer?.pushReport(piece);
+                isContentDelta = true;
               }
               // Report content deltas are NOT forwarded to the chat transport —
               // the chat area shows only a completion summary, not the full report.
@@ -1594,18 +1698,30 @@ export async function runDeepResearchTurn(
 
         // Completion summary: LLM-generated natural-language wrap-up (not the full report).
         // The chat area shows only this summary; the full report lives in artifacts.
+        let summaryPolicyError: DeepResearchPolicyError | null = null;
         try {
           summaryInput.artifacts = producedArtifacts;
           summaryInput.deliveryPrefs = deliveryPrefs;
           const summary = await buildCompletionSummary(summaryInput, {
-            callJson: (messages) =>
-              callGatewayJson(toolDeps, { ...baseBody, messages }),
+            callJson: async (messages) => {
+              try {
+                return await callGatewayJson(toolDeps, { ...baseBody, messages });
+              } catch (error) {
+                if (error instanceof DeepResearchPolicyError) {
+                  summaryPolicyError = error;
+                  return "";
+                }
+                throw error;
+              }
+            },
           });
+          if (summaryPolicyError) throw summaryPolicyError;
           if (summary.trim()) {
             enqueueDelta(summary);
             summarySent = true;
           }
         } catch (summaryError) {
+          if (summaryError instanceof DeepResearchPolicyError) throw summaryError;
           console.warn(
             "[deep-research] completion summary failed:",
             summaryError instanceof Error ? summaryError.message : summaryError,
@@ -1650,7 +1766,18 @@ export async function runDeepResearchTurn(
         const message = error instanceof Error ? error.message : "pipeline failed";
         // If the markdown report already landed, degrade gracefully instead of
         // claiming "检索失败" (which is wrong after synthesize has finished).
-        if (finalReportReady) {
+        if (error instanceof DeepResearchPolicyError) {
+          enqueueDelta(`\n\n> 深度研究已停止：${error.userMessage}`);
+          enqueueEvent(
+            {
+              type: "phase",
+              phase: "done",
+              message: "合规策略已拦截报告撰写",
+            },
+            { status: "failed", phase: "done" },
+          );
+          await persistFinish("failed", error.userMessage);
+        } else if (finalReportReady) {
           try {
             if (!summarySent && wrapupFallback) {
               wrapupFallback.artifacts = producedArtifacts;

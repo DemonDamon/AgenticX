@@ -416,6 +416,129 @@ describe("runDeepResearchTurn", () => {
     expect(events.some((e) => e.type === "phase" && e.phase === "done")).toBe(true);
   });
 
+  it.each([
+    {
+      label: "non-2xx request rejection",
+      code: "90001",
+      sectionResponse: () =>
+        new Response(
+          JSON.stringify({
+            error: {
+              code: "90001",
+              message: "请求触发合规拦截（命中策略: pii-email）",
+              hits: [{ rule_id: "pii-email", matched: "private@example.com" }],
+            },
+          }),
+          { status: 403, headers: { "content-type": "application/json" } },
+        ),
+    },
+    {
+      label: "in-stream response rejection",
+      code: "90002",
+      sectionResponse: () => {
+        const encoder = new TextEncoder();
+        const stream = new ReadableStream<Uint8Array>({
+          start(controller) {
+            controller.enqueue(
+              encoder.encode(
+                `event: error\ndata: ${JSON.stringify({
+                  error: {
+                    code: "90002",
+                    message: "响应触发合规拦截（命中策略: pii-email）",
+                    hits: [{ rule_id: "pii-email", matched: "private@example.com" }],
+                  },
+                })}\n\n`,
+              ),
+            );
+            controller.close();
+          },
+        });
+        return new Response(stream, {
+          status: 200,
+          headers: { "content-type": "text/event-stream" },
+        });
+      },
+    },
+  ])("stops after the first policy-blocked section without publishing a false report ($label)", async ({
+    code,
+    sectionResponse,
+  }) => {
+    const runStore = createMemoryRunStore();
+    const runId = `run-policy-blocked-section-${code}`;
+    let sectionCalls = 0;
+    const fetchImpl = vi.fn(async (_url: string, init?: RequestInit) => {
+      const body = JSON.parse(String(init?.body ?? "{}")) as {
+        stream?: boolean;
+        messages?: Array<{ role: string; content?: string }>;
+      };
+      if (body.stream === false) {
+        const userText = body.messages?.find((message) => message.role === "user")?.content ?? "";
+        if (userText.includes("证据包")) {
+          return new Response(
+            JSON.stringify({
+              choices: [
+                {
+                  message: {
+                    content: JSON.stringify({
+                      title: "测试调研",
+                      sections: [
+                        { id: "s1", title: "核心结论", brief: "结论", citation_indexes: [1], format: "prose" },
+                        { id: "s2", title: "分项分析", brief: "分析", citation_indexes: [1], format: "comparison_table" },
+                        { id: "s3", title: "不确定性与信息缺口", brief: "缺口", citation_indexes: [1], format: "prose" },
+                      ],
+                    }),
+                  },
+                },
+              ],
+            }),
+            { status: 200, headers: { "content-type": "application/json" } },
+          );
+        }
+        return new Response(
+          JSON.stringify({ choices: [{ message: { content: "车道备忘" } }] }),
+          { status: 200, headers: { "content-type": "application/json" } },
+        );
+      }
+
+      sectionCalls += 1;
+      return sectionResponse();
+    }) as unknown as typeof fetch;
+
+    const response = await runDeepResearchTurn(
+      { model: "m", messages: [{ role: "user", content: "查询某项指标的最新值" }] },
+      baseDeps({
+        runId,
+        runStore,
+        fetchImpl,
+        buildPlan: async () => ({
+          topic: "测试调研",
+          complexity: "simple" as const,
+          subQuestions: ["指标最新值"],
+        }),
+        executeSearch: async () => [
+          { title: "来源", url: "https://example.com/source", snippet: "公开指标" },
+        ],
+      }),
+    );
+
+    const { text, events, raw } = await readSsePayload(response);
+    const row = await runStore.get("t1", "u1", runId);
+
+    expect(sectionCalls).toBe(1);
+    expect(row?.status).toBe("failed");
+    expect(events.some((event) => event.type === "artifact" && String(event.path).endsWith("final-report.md"))).toBe(false);
+    expect(events).toContainEqual(
+      expect.objectContaining({ type: "phase", phase: "done", message: "合规策略已拦截报告撰写" }),
+    );
+    expect(text).toContain("深度研究已停止");
+    expect(text).toContain("命中策略: pii-email");
+    expect(text).not.toContain("本节撰写失败");
+    expect(raw).not.toContain("private@example.com");
+    expect(raw).not.toContain('"hits"');
+    expect(raw).not.toContain(`"code":"${code}"`);
+    expect(text).not.toContain("深度调研完成");
+  });
+
   it("keeps running after transport abort and persists completed run (AC-3)", async () => {
     const controller = new AbortController();
     const runStore = createMemoryRunStore();

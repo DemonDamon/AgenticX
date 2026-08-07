@@ -35,6 +35,7 @@ import {
 } from "@agenticx/ui";
 import { useTranslations } from "next-intl";
 import { Pencil, Plus, PowerOff, RotateCcw, Send, ShieldCheck, ShieldX, TestTube2, Trash2 } from "lucide-react";
+import { matchesPublishedSnapshot } from "./policy-sync";
 
 type PolicyAppliesTo = {
   departmentIds: string[];
@@ -75,6 +76,25 @@ type PublishEvent = {
   publishedAt: string;
   status: "published" | "rolled_back";
 };
+
+type GatewayPolicyStatusResponse = {
+  message?: string;
+  data?: {
+    tenant?: {
+      tenantId: string;
+      version: number;
+      publishId: string;
+      publishedAt?: string;
+    } | null;
+  };
+};
+
+async function readGatewayPolicyVersion() {
+  const response = await adminFetch("/api/gateway/policy-status", { cache: "no-store" });
+  const body = (await response.json()) as GatewayPolicyStatusResponse;
+  if (!response.ok) throw new Error(body.message ?? "gateway policy status unavailable");
+  return body.data?.tenant ?? null;
+}
 
 type RuleForm = {
   id?: string;
@@ -193,8 +213,26 @@ export default function PolicyPage() {
       const nextPacks = packsJson.data?.packs ?? [];
       setPacks(nextPacks);
       setRules(rulesJson.data?.rules ?? []);
-      setPublishes(publishJson.data?.events ?? []);
+      const nextPublishes = publishJson.data?.events ?? [];
+      setPublishes(nextPublishes);
       setForm((prev) => ({ ...prev, packId: prev.packId || nextPacks[0]?.id || "" }));
+      const nextLatestPublish = nextPublishes[0] ?? null;
+      if (!nextLatestPublish) {
+        setSyncStatus("unknown");
+      } else {
+        try {
+          const loaded = await readGatewayPolicyVersion();
+          setSyncStatus(
+            loaded
+              ? matchesPublishedSnapshot(nextLatestPublish, loaded)
+                ? "synced"
+                : "pending"
+              : "unknown",
+          );
+        } catch {
+          setSyncStatus("unknown");
+        }
+      }
     } catch (error) {
       toast.error(error instanceof Error ? error.message : t("toast.loadFailed"));
     } finally {
@@ -319,22 +357,38 @@ export default function PolicyPage() {
 
   const triggerPublish = async () => {
     const res = await adminFetch("/api/policy/publish", { method: "POST", headers: { "content-type": "application/json" }, body: "{}" });
-    const json = (await res.json()) as { message?: string };
+    const json = (await res.json()) as { message?: string; data?: { event?: PublishEvent } };
     if (!res.ok) {
       toast.error(json.message ?? t("toast.publishFailed"));
       return;
     }
     toast.success(t("toast.published"));
+    const published = json.data?.event;
+    if (published) {
+      setPublishes((current) => [published, ...current.filter((event) => event.id !== published.id)]);
+    }
     setSyncStatus("pending");
-    for (let i = 0; i < 5; i += 1) {
-      const health = await fetch("/healthz", { cache: "no-store" }).catch(() => null);
-      if (health?.ok) {
-        setSyncStatus("synced");
-        return;
+    if (!published) {
+      setSyncStatus("unknown");
+      return;
+    }
+    let gatewayReached = false;
+    let gatewayReturnedTenant = false;
+    for (let i = 0; i < 8; i += 1) {
+      try {
+        const loaded = await readGatewayPolicyVersion();
+        gatewayReached = true;
+        gatewayReturnedTenant ||= loaded !== null;
+        if (loaded && matchesPublishedSnapshot(published, loaded)) {
+          setSyncStatus("synced");
+          return;
+        }
+      } catch {
+        // Keep polling: Gateway may be reloading or temporarily unreachable.
       }
       await new Promise((resolve) => setTimeout(resolve, 1000));
     }
-    setSyncStatus("unknown");
+    setSyncStatus(gatewayReached && gatewayReturnedTenant ? "pending" : "unknown");
   };
 
   const deleteRule = async (id: string): Promise<boolean> => {

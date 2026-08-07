@@ -50,6 +50,7 @@ Content-Type: application/json
 | 方法 | 路径 | 认证 | 说明 |
 |---|---|---|---|
 | GET | `/internal/channel-stats` | `GATEWAY_INTERNAL_TOKEN` | Channel 运行统计 |
+| GET | `/internal/policy-status?tenant_id=<id>` | `GATEWAY_INTERNAL_TOKEN` | 查询指定租户实际加载的策略发布版本；不返回规则正文 |
 
 ---
 

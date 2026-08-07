@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/agenticx/enterprise/gateway/internal/gatewayinternal"
+	"github.com/agenticx/enterprise/gateway/internal/openai"
 )
 
 type readinessCheck struct {
@@ -49,6 +50,59 @@ func (s *Server) handleReady(w http.ResponseWriter, r *http.Request) {
 			"time":    time.Now().UTC().Format(time.RFC3339),
 		},
 	})
+}
+
+func (s *Server) handleInternalPolicyStatus(w http.ResponseWriter, r *http.Request) {
+	if !gatewayInternalAuthorized(r) {
+		writeAPIError(w, openai.Unauthorized("unauthorized"))
+		return
+	}
+	tenantID := strings.TrimSpace(r.URL.Query().Get("tenant_id"))
+	if tenantID == "" {
+		writeAPIError(w, openai.BadRequest("tenant_id is required"))
+		return
+	}
+
+	// A status check must observe the same throttled reload path used by policy
+	// evaluation, otherwise admin could compare against stale in-memory metadata.
+	s.reloadPolicyIfNeeded()
+	s.policyMu.RLock()
+	status := s.policySnapshotStatus
+	tenant, found := status.Tenants[tenantID]
+	checkedAt := s.policyRemoteCheckedAt
+	if checkedAt.IsZero() {
+		checkedAt = s.policySnapshotMod
+	}
+	snapshotPath := s.policySnapshot
+	s.policyMu.RUnlock()
+
+	data := map[string]any{
+		"source":    policySnapshotSource(snapshotPath),
+		"updatedAt": status.UpdatedAt,
+		"tenant":    nil,
+	}
+	if !checkedAt.IsZero() {
+		data["checkedAt"] = checkedAt.UTC().Format(time.RFC3339Nano)
+	}
+	if found {
+		data["tenant"] = tenant
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"code":    "00000",
+		"message": "ok",
+		"data":    data,
+	})
+}
+
+func policySnapshotSource(path string) string {
+	value := strings.TrimSpace(path)
+	if gatewayinternal.IsHTTPURL(value) {
+		return "remote"
+	}
+	if value != "" {
+		return "file"
+	}
+	return "manifest"
 }
 
 func (s *Server) runReadinessChecks(ctx context.Context) (map[string]readinessCheck, bool) {
