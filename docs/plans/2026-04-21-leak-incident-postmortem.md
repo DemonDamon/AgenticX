@@ -63,7 +63,7 @@
 
 历史 tracked 文件另外修复 2 处轻度泄露：
 - `tests/test_agent_tools.py`（1 处 taskspace label）
-- `docs/plans/2026-04-14-machi-knowledge-base-product-plan.md`（1 处注释路径）
+- `docs/plans/2026-04-14-near-knowledge-base-product-plan.md`（1 处注释路径）
 
 ### 4.2 Lockfile 策略调整
 

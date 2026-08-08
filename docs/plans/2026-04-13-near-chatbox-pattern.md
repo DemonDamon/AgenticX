@@ -1,12 +1,12 @@
-# Machi 借鉴 ChatBox「单仓多平台」模式 — 实施规划
+# Near 借鉴 ChatBox「单仓多平台」模式 — 实施规划
 
-> **目标读者：** 熟悉 AgenticX / Machi 的工程师；实施时可配合 `@superpowers/executing-plans` 分任务执行。
+> **目标读者：** 熟悉 AgenticX / Near 的工程师；实施时可配合 `@superpowers/executing-plans` 分任务执行。
 
 **Goal：** 在不大改产品形态的前提下，引入与 [ChatBox](https://github.com/ChatBoxAI/ChatBox) 类似的 **共享前端 + 平台抽象层**，使同一套 `desktop/src` UI 既能打 **Electron 安装包**，又可选产出 **可部署在内网的 Web 静态入口**（对接远端 `agx serve` / Studio），并与现有「远程服务器连接」能力对齐。
 
 **与 ChatBox 的关键差异（必须先接受）：**
 
-| 维度 | ChatBox Community | Machi / AgenticX |
+| 维度 | ChatBox Community | Near / AgenticX |
 |------|-------------------|------------------|
 | 运行时 | 偏「纯客户端 + 各厂商 API」 | **必须**有 Python `agx serve`（工具、分身、会话、MCP 等） |
 | Web 版能力 | 静态 SPA + IndexedDB，无本地文件系统 | Web 仅能覆盖「浏览器允许」的子集；终端/node-pty/本地 spawn 等需降级或禁用 |
@@ -120,7 +120,7 @@ ChatBox README 提到团队共享 API 资源（`team-sharing/`）。AgenticX 侧
 
 - ChatBox：**一套 React Renderer**，`DesktopPlatform` vs `WebPlatform`，**非两套技术栈**。
 - 构建：`CHATBOX_BUILD_PLATFORM=web` 产出静态文件，可上企业服务器。
-- 对 Machi：**桌面 exe/dmg 与内网 Web 入口可以并行存在**，但 Machi 的「智能体后端」仍需部署 `agx serve`（或集群），Web 只是 **UI 入口**，这与 ChatBox「纯静态 + 直连公网 API」的假设不同，必须在对外话术里写清楚。
+- 对 Near：**桌面 exe/dmg 与内网 Web 入口可以并行存在**，但 Near 的「智能体后端」仍需部署 `agx serve`（或集群），Web 只是 **UI 入口**，这与 ChatBox「纯静态 + 直连公网 API」的假设不同，必须在对外话术里写清楚。
 
 ---
 

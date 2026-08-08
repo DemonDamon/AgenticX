@@ -1,5 +1,3 @@
-> Machi 是 Near 的前身名称；本文档文件名保留旧称以便历史链接不断链。
-
 # Near / 任意 MCP 客户端接入 Enterprise Gateway 远程 MCP
 
 ## 前置
