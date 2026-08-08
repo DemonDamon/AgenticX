@@ -1,0 +1,381 @@
+{
+  "schema_version": 1,
+  "layout": "custom",
+  "tracked_ref": "HEAD",
+  "index_path": "conclusions/README.md",
+  "exclude_paths": [
+    ".cursor",
+    ".githooks",
+    ".github",
+    "assets",
+    "deploy",
+    "desktop",
+    "docs",
+    "enterprise",
+    "examples",
+    "packaging",
+    "research",
+    "scripts",
+    "tests",
+    "conclusions",
+    ".gitignore",
+    ".gitmodules",
+    "AGENTS.md",
+    "INSTALL.md",
+    "install.sh",
+    "LICENSE",
+    "MANIFEST.in",
+    "mkdocs.yml",
+    "README.md",
+    "README_ZN.md",
+    "requirements.lock",
+    "setup.py"
+  ],
+  "modules": [
+    {
+      "id": "agents",
+      "name": "Agents",
+      "roots": ["agenticx/agents"],
+      "shared_paths": [],
+      "summary_path": "conclusions/agents_module_conclusion.md",
+      "mapping_revision": 1
+    },
+    {
+      "id": "avatar",
+      "name": "Avatar",
+      "roots": ["agenticx/avatar"],
+      "shared_paths": [],
+      "summary_path": "conclusions/avatar_module_conclusion.md",
+      "mapping_revision": 1
+    },
+    {
+      "id": "brain",
+      "name": "Brain",
+      "roots": ["agenticx/brain"],
+      "shared_paths": [],
+      "summary_path": "conclusions/brain_module_conclusion.md",
+      "mapping_revision": 1
+    },
+    {
+      "id": "cc-bridge",
+      "name": "CC Bridge",
+      "roots": ["agenticx/cc_bridge"],
+      "shared_paths": [],
+      "summary_path": "conclusions/cc_bridge_module_conclusion.md",
+      "mapping_revision": 1
+    },
+    {
+      "id": "cli",
+      "name": "CLI",
+      "roots": ["agenticx/cli"],
+      "shared_paths": [],
+      "summary_path": "conclusions/cli_conclusion.md",
+      "mapping_revision": 1
+    },
+    {
+      "id": "code-index",
+      "name": "Code Index",
+      "roots": ["agenticx/code_index"],
+      "shared_paths": [],
+      "summary_path": "conclusions/code_index_module_conclusion.md",
+      "mapping_revision": 1
+    },
+    {
+      "id": "collaboration",
+      "name": "Collaboration",
+      "roots": ["agenticx/collaboration"],
+      "shared_paths": [],
+      "summary_path": "conclusions/collaboration_module_conclusion.md",
+      "mapping_revision": 1
+    },
+    {
+      "id": "core",
+      "name": "Core",
+      "roots": ["agenticx/core"],
+      "shared_paths": [],
+      "summary_path": "conclusions/core_module_conclusion.md",
+      "mapping_revision": 1
+    },
+    {
+      "id": "deploy",
+      "name": "Deploy",
+      "roots": ["agenticx/deploy"],
+      "shared_paths": [],
+      "summary_path": "conclusions/deploy_module_conclusion.md",
+      "mapping_revision": 1
+    },
+    {
+      "id": "embeddings",
+      "name": "Embeddings",
+      "roots": ["agenticx/embeddings"],
+      "shared_paths": [],
+      "summary_path": "conclusions/embeddings_module_conclusion.md",
+      "mapping_revision": 1
+    },
+    {
+      "id": "embodiment",
+      "name": "Embodiment",
+      "roots": ["agenticx/embodiment"],
+      "shared_paths": [],
+      "summary_path": "conclusions/embodiment_conclusion.md",
+      "mapping_revision": 1
+    },
+    {
+      "id": "evaluation",
+      "name": "Evaluation",
+      "roots": ["agenticx/evaluation"],
+      "shared_paths": [],
+      "summary_path": "conclusions/evaluation_module_conclusion.md",
+      "mapping_revision": 1
+    },
+    {
+      "id": "extensions",
+      "name": "Extensions",
+      "roots": ["agenticx/extensions"],
+      "shared_paths": [],
+      "summary_path": "conclusions/extensions_module_conclusion.md",
+      "mapping_revision": 1
+    },
+    {
+      "id": "gateway",
+      "name": "Gateway",
+      "roots": ["agenticx/gateway"],
+      "shared_paths": [],
+      "summary_path": "conclusions/gateway_module_conclusion.md",
+      "mapping_revision": 1
+    },
+    {
+      "id": "learning",
+      "name": "Learning",
+      "roots": ["agenticx/learning"],
+      "shared_paths": [],
+      "summary_path": "conclusions/learning_module_conclusion.md",
+      "mapping_revision": 1
+    },
+    {
+      "id": "llms",
+      "name": "LLMs",
+      "roots": ["agenticx/llms"],
+      "shared_paths": [],
+      "summary_path": "conclusions/llms_module_conclusion.md",
+      "mapping_revision": 1
+    },
+    {
+      "id": "longrun",
+      "name": "Longrun",
+      "roots": ["agenticx/longrun"],
+      "shared_paths": [],
+      "summary_path": "conclusions/longrun_module_conclusion.md",
+      "mapping_revision": 1
+    },
+    {
+      "id": "memory",
+      "name": "Memory",
+      "roots": ["agenticx/memory"],
+      "shared_paths": [],
+      "summary_path": "conclusions/memory_module_conclusion.md",
+      "mapping_revision": 1
+    },
+    {
+      "id": "observability",
+      "name": "Observability",
+      "roots": ["agenticx/observability"],
+      "shared_paths": [],
+      "summary_path": "conclusions/observability_module_conclusion.md",
+      "mapping_revision": 1
+    },
+    {
+      "id": "planner",
+      "name": "Planner",
+      "roots": ["agenticx/planner"],
+      "shared_paths": [],
+      "summary_path": "conclusions/planner_module_conclusion.md",
+      "mapping_revision": 1
+    },
+    {
+      "id": "project-state",
+      "name": "Project State",
+      "roots": ["agenticx/project_state"],
+      "shared_paths": [],
+      "summary_path": "conclusions/project_state_module_conclusion.md",
+      "mapping_revision": 1
+    },
+    {
+      "id": "protocols",
+      "name": "Protocols",
+      "roots": ["agenticx/protocols"],
+      "shared_paths": [],
+      "summary_path": "conclusions/protocols_module_conclusion.md",
+      "mapping_revision": 1
+    },
+    {
+      "id": "retrieval",
+      "name": "Retrieval",
+      "roots": ["agenticx/retrieval"],
+      "shared_paths": [],
+      "summary_path": "conclusions/retrieval_module_conclusion.md",
+      "mapping_revision": 1
+    },
+    {
+      "id": "runtime",
+      "name": "Runtime",
+      "roots": ["agenticx/runtime"],
+      "shared_paths": [],
+      "summary_path": "conclusions/runtime_module_conclusion.md",
+      "mapping_revision": 1
+    },
+    {
+      "id": "safety",
+      "name": "Safety",
+      "roots": ["agenticx/safety"],
+      "shared_paths": [],
+      "summary_path": "conclusions/safety_module_conclusion.md",
+      "mapping_revision": 1
+    },
+    {
+      "id": "sandbox",
+      "name": "Sandbox",
+      "roots": ["agenticx/sandbox"],
+      "shared_paths": [],
+      "summary_path": "conclusions/sandbox_module_conclusion.md",
+      "mapping_revision": 1
+    },
+    {
+      "id": "server",
+      "name": "Server",
+      "roots": ["agenticx/server"],
+      "shared_paths": [],
+      "summary_path": "conclusions/server_module_conclusion.md",
+      "mapping_revision": 1
+    },
+    {
+      "id": "sessions",
+      "name": "Sessions",
+      "roots": ["agenticx/sessions"],
+      "shared_paths": [],
+      "summary_path": "conclusions/sessions_module_conclusion.md",
+      "mapping_revision": 1
+    },
+    {
+      "id": "skills",
+      "name": "Skills",
+      "roots": ["agenticx/skills"],
+      "shared_paths": [],
+      "summary_path": "conclusions/skills_module_conclusion.md",
+      "mapping_revision": 1
+    },
+    {
+      "id": "storage",
+      "name": "Storage",
+      "roots": ["agenticx/storage"],
+      "shared_paths": [],
+      "summary_path": "conclusions/storage_module_conclusion.md",
+      "mapping_revision": 1
+    },
+    {
+      "id": "studio",
+      "name": "Studio",
+      "roots": ["agenticx/studio"],
+      "shared_paths": [],
+      "summary_path": "conclusions/studio_module_conclusion.md",
+      "mapping_revision": 1
+    },
+    {
+      "id": "tools",
+      "name": "Tools",
+      "roots": ["agenticx/tools"],
+      "shared_paths": [],
+      "summary_path": "conclusions/tools_module_summary.md",
+      "mapping_revision": 1
+    },
+    {
+      "id": "configs",
+      "name": "Configs",
+      "roots": ["agenticx/configs"],
+      "shared_paths": [],
+      "summary_path": "conclusions/configs_module_conclusion.md",
+      "mapping_revision": 1
+    },
+    {
+      "id": "data-sources",
+      "name": "Data Sources",
+      "roots": ["agenticx/data_sources"],
+      "shared_paths": [],
+      "summary_path": "conclusions/data_sources_module_conclusion.md",
+      "mapping_revision": 1
+    },
+    {
+      "id": "delivery",
+      "name": "Delivery",
+      "roots": ["agenticx/delivery"],
+      "shared_paths": [],
+      "summary_path": "conclusions/delivery_module_conclusion.md",
+      "mapping_revision": 1
+    },
+    {
+      "id": "flow",
+      "name": "Flow",
+      "roots": ["agenticx/flow"],
+      "shared_paths": [],
+      "summary_path": "conclusions/flow_module_conclusion.md",
+      "mapping_revision": 1
+    },
+    {
+      "id": "hooks",
+      "name": "Hooks",
+      "roots": ["agenticx/hooks"],
+      "shared_paths": [],
+      "summary_path": "conclusions/hooks_module_conclusion.md",
+      "mapping_revision": 1
+    },
+    {
+      "id": "integrations",
+      "name": "Integrations",
+      "roots": ["agenticx/integrations"],
+      "shared_paths": [],
+      "summary_path": "conclusions/integrations_module_conclusion.md",
+      "mapping_revision": 1
+    },
+    {
+      "id": "knowledge",
+      "name": "Knowledge",
+      "roots": ["agenticx/knowledge"],
+      "shared_paths": [],
+      "summary_path": "conclusions/knowledge_module_conclusion.md",
+      "mapping_revision": 1
+    },
+    {
+      "id": "trainer",
+      "name": "Trainer",
+      "roots": ["agenticx/trainer"],
+      "shared_paths": [],
+      "summary_path": "conclusions/trainer_module_conclusion.md",
+      "mapping_revision": 1
+    },
+    {
+      "id": "utils",
+      "name": "Utils",
+      "roots": ["agenticx/utils"],
+      "shared_paths": [],
+      "summary_path": "conclusions/utils_module_conclusion.md",
+      "mapping_revision": 1
+    },
+    {
+      "id": "workspace",
+      "name": "Workspace",
+      "roots": ["agenticx/workspace"],
+      "shared_paths": [],
+      "summary_path": "conclusions/workspace_module_conclusion.md",
+      "mapping_revision": 1
+    },
+    {
+      "id": "package-root",
+      "name": "Package Root",
+      "roots": ["agenticx"],
+      "shared_paths": ["pyproject.toml", "requirements.txt"],
+      "summary_path": "conclusions/package_root_conclusion.md",
+      "mapping_revision": 1
+    }
+  ],
+  "retired_modules": []
+}

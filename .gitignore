@@ -35,7 +35,7 @@ htmlcov/
 build/
 markmap/
 progress/
-conclusions/
+examples/**/conclusions/
 discussions/
 exps/
 thirdparty/
