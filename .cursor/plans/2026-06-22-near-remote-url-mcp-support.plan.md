@@ -32,7 +32,7 @@ Plan-File: .cursor/plans/2026-06-22-near-remote-url-mcp-support.plan.md
 **有利的现状：**
 - `agenticx/cli/mcp_schema.json` 已定义 `command` 或 `url` 二选一（含 `headers`），即配置层 Schema 已支持，运行时未实现 ——「断层」需要补齐。
 - 项目已依赖 `mcp>=1.0.0,<2`（见 `pyproject.toml` L101-104），官方 SDK 自带 `mcp.client.streamable_http.streamablehttp_client` 与 `mcp.client.sse.sse_client`，无需新增依赖。
-- Enterprise Gateway 侧 Streamable HTTP 托管已通（见 `docs/guides/machi-remote-mcp.md`、`.cursor/plans/2026-06-08-gateway-mcp-server-hosting.plan.md`），现有 Cursor / `@modelcontextprotocol/inspector` 可用，缺的就是 Near 客户端 transport。
+- Enterprise Gateway 侧 Streamable HTTP 托管已通（见 `docs/guides/near-remote-mcp.md`、`.cursor/plans/2026-06-08-gateway-mcp-server-hosting.plan.md`），现有 Cursor / `@modelcontextprotocol/inspector` 可用，缺的就是 Near 客户端 transport。
 
 **Goal:** 让 Near 在 `~/.agenticx/mcp.json` 中能写 `url + headers` 条目，直接连远程 MCP 服务器（含 Tushare、Enterprise Gateway `/v1/mcp/{server_id}/streamable-http`），与 stdio MCP 在 UI / `/api/mcp/*` / 工具调用链路上完全对等。
 
@@ -314,7 +314,7 @@ init_result = await session.initialize()
 
 ## 文档与发布
 
-- Modify: `docs/guides/machi-remote-mcp.md`，新增「Near 直接配置 remote URL MCP」章节，与现有「Cursor / Inspector」章节并列。
+- Modify: `docs/guides/near-remote-mcp.md`，新增「Near 直接配置 remote URL MCP」章节，与现有「Cursor / Inspector」章节并列。
 - Release Notes（下次版本）：`feat(mcp): Near now supports remote URL MCPs (Streamable HTTP / SSE) — Tushare and Enterprise Gateway hosted MCPs can be added directly in ~/.agenticx/mcp.json.`
 
 ---

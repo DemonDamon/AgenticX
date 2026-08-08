@@ -235,7 +235,7 @@ Python 后端 `group_router.py` / `feishu_longconn.py` / `wechat_ilink.py` 同�
 
 ### P4：验收与文档收尾（30 min）
 
-- FR-4.1：更新 `desktop/README.md`、`README.md` / `README_ZN.md`、`docs/guides/machi-remote-mcp.md`（**文件名保留**，内部正文 `Machi` → `Near`，并在顶部加一行 "Machi 是 Near 的前身名称，本文为旧文档保留"）。
+- FR-4.1：更新 `desktop/README.md`、`README.md` / `README_ZN.md`、`docs/guides/near-remote-mcp.md`（**文件名保留**，内部正文 `Machi` → `Near`，并在顶部加一行 "Machi 是 Near 的前身名称，本文为旧文档保留"）。
 - FR-4.2：`AGENTS.md` 顶部加一段 "Brand note: The desktop app was renamed from Machi to Near on 2026-05-24. Existing references to 'Machi' in plan files, conclusions, and historical docs are intentionally preserved."
 - AC-4.1：`npm --prefix desktop run build:mac:arm64` 本机出包（如本机有 arm64 mac），DMG 文件名为 `Near-${version}-arm64.dmg`。
 - AC-4.2：从全新用户身份打开新装包，未导入 `~/.agenticx` 时显示 `Near`；有旧 `~/.agenticx` 时，历史会话/分身/绑定全部保留可见。
@@ -269,7 +269,7 @@ Python 后端 `group_router.py` / `feishu_longconn.py` / `wechat_ilink.py` 同�
 
 - **延伸 1**：`enterprise/` 与 `AgenticX-Website/` 的 `MachiAvatar` / `MachiChatView` / `messages/{zh,en}.json` / `machi-grid-bg` 同步改名 → 独立 plan（涉及客户文档、SEO 与 i18n 词条更新，影响面更大）。
 - **延伸 2**：Desktop 内部状态机字段 `mode: "machi"` / `target: "machi"` 重命名为 `"meta"` → 独立小 PR，纯内存态，零持久化风险。
-- **延伸 3**：bundled skills 与 `docs/` 历史文档（如 `docs/plans/2026-04-13-machi-chatbox-pattern.md`）的全面更名 → 视需要单独清扫，不影响功能。
+- **延伸 3**：bundled skills 与 `docs/` 历史文档（如 `docs/plans/2026-04-13-near-chatbox-pattern.md`）的全面更名 → 视需要单独清扫，不影响功能。
 - **延伸 4**：应用图标视觉刷新（与改名解耦） → Owner 评估后另开 plan。
 - **延伸 5**：商标/域名/官网域名注册与冲突评估（near.ai / nearapp.com 等） → 业务侧动作，非本仓库 plan。
 - **延伸 6**：把磁盘上已持久化的 `avatar_name: "Machi"` 一次性 backfill 为 `"Near"` → 不必要；兼容层已足够，且 backfill 有写入风险。

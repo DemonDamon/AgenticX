@@ -1,6 +1,6 @@
-# Happy Coder × Machi（AgenticX）集成：研读结论
+# Happy Coder × Near（AgenticX）集成：研读结论
 
-本文档落实「Machi × HappyCoder × Claude Code：学习与集成路径」计划中的 **阶段 A 研读** 与 **上游沟通要点**，源码依据为本地克隆的 `slopus/happy-server`、`slopus/happy-cli`（置于被 gitignore 的 `research/` 下，需自行 `git clone`）。
+本文档落实「Near × HappyCoder × Claude Code：学习与集成路径」计划中的 **阶段 A 研读** 与 **上游沟通要点**，源码依据为本地克隆的 `slopus/happy-server`、`slopus/happy-cli`（置于被 gitignore 的 `research/` 下，需自行 `git clone`）。
 
 ## 1. 组件与仓库
 
@@ -36,21 +36,21 @@
 | `/spawn-session` | body: `{ directory, sessionId? }`，可 409 要求目录创建审批 |
 | `/stop` | 关闭 daemon |
 
-**安全注意**：未见 Bearer token；仅靠 **回环绑定**。任何本机进程均可调用 → 与 Machi `bash_exec` 同机时等价于「本机高权限」，需在 AgenticX 侧 **勿远程暴露** 该端口。
+**安全注意**：未见 Bearer token；仅靠 **回环绑定**。任何本机进程均可调用 → 与 Near `bash_exec` 同机时等价于「本机高权限」，需在 AgenticX 侧 **勿远程暴露** 该端口。
 
-**缺口**：上述 API **不能**向已运行的 Claude Code 会话 **注入一条用户消息**或订阅完整终端流；要实现计划中的「Machi 发指令 → 同一 CC 会话内执行」，仍需 **上游增加受控 IPC**（例如在 daemon 上增加鉴权后的 `enqueue-input`）或走完整 **C1 协议客户端**。
+**缺口**：上述 API **不能**向已运行的 Claude Code 会话 **注入一条用户消息**或订阅完整终端流；要实现计划中的「Near 发指令 → 同一 CC 会话内执行」，仍需 **上游增加受控 IPC**（例如在 daemon 上增加鉴权后的 `enqueue-input`）或走完整 **C1 协议客户端**。
 
 ## 5. 第三方桌面接入点结论
 
 | 路径 | 是否具备「第二桌面控制端」 | 说明 |
 |------|---------------------------|------|
 | **C1** 复用 Socket + 加密 | 理论上可行 | 需对齐移动端/CLI 的握手、密钥与事件类型；维护成本高 |
-| **C2** 扩展 daemon HTTP | **推荐争取** | 在 `controlServer.ts` 增加鉴权 + 与 tmux/CC 输入路径挂钩，Machi 仅连 `127.0.0.1` |
+| **C2** 扩展 daemon HTTP | **推荐争取** | 在 `controlServer.ts` 增加鉴权 + 与 tmux/CC 输入路径挂钩，Near 仅连 `127.0.0.1` |
 | **C3** `happy-mcp` | 仅窄场景 | 当前为 Codex HTTP MCP 的 STDIO 桥，且工具几乎只有 `change_title`；**不是**通用 CC 会话控制台 |
 
-## 6. 与 Machi（AgenticX）现状的衔接
+## 6. 与 Near（AgenticX）现状的衔接
 
-- **共享工作目录**：Machi 侧 **taskspace** 与 `happy` 启动目录指向同一仓库即可（文件级一致）。
+- **共享工作目录**：Near 侧 **taskspace** 与 `happy` 启动目录指向同一仓库即可（文件级一致）。
 - **共享会话 transcript**：必须通过 **Happy 协议或 daemon 扩展**，不能仅靠 `bash_exec` 起新 `claude` 进程。
 - **`claude` 与 SAFE_COMMANDS**：AgenticX 中 `claude` 不在白名单；即便 `bash_exec` 调用，也是 **新进程** 与 **确认流**，与 Happy 会话无关。
 
@@ -62,7 +62,7 @@
 
 正文建议包含：
 
-1. **场景**：另一桌面应用（Machi）与本机 `happy` daemon 同机，希望在用户已授权前提下向 **当前 Happy 管理的 CC 会话** 提交输入或拉取状态。
+1. **场景**：另一桌面应用（Near）与本机 `happy` daemon 同机，希望在用户已授权前提下向 **当前 Happy 管理的 CC 会话** 提交输入或拉取状态。
 2. **约束**：仅 `127.0.0.1`、**随机 token** 写入 `daemon.state.json` 或独立文件、与现有无鉴权 `/list` 兼容迁移。
 3. **非目标**：不弱化 E2E；不把明文交给 relay。
 

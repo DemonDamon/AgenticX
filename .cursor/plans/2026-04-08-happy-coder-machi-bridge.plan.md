@@ -22,7 +22,7 @@ isProject: false
 
 # Happy Coder × Machi 桥接（后续实施规格）
 
-**前置阅读**：[docs/guides/happy-coder-machi-integration.md](docs/guides/happy-coder-machi-integration.md)
+**前置阅读**：[docs/guides/happy-coder-near-integration.md](docs/guides/happy-coder-near-integration.md)
 
 ## 背景
 

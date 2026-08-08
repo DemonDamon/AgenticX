@@ -211,7 +211,7 @@ OpenAPI 后端转换规则（节选）：
 ## 8. 文档与归档
 
 - 实施同步：`enterprise/docs/runbooks/mcp-hosting.md`（运维）+ `enterprise/docs/architecture/mcp-hosting.md`（架构）
-- 用户引导：`docs/guides/machi-remote-mcp.md`（Machi 客户端如何接入）
+- 用户引导：`docs/guides/near-remote-mcp.md`（Machi 客户端如何接入）
 - 合规：实现不复制 Higress 源码；以 MCP 官方规范 + OpenAPI 3.x 规范为准
 
 ## 9. 待澄清问题

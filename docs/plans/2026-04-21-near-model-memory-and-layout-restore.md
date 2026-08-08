@@ -1,11 +1,11 @@
-# Machi 模型记忆 + 窗口布局恢复 · 设计与实施 Plan
+# Near 模型记忆 + 窗口布局恢复 · 设计与实施 Plan
 
 日期: 2026-04-21  
 作者: @damonli
 
 ## 问题
 
-1. 每次冷启动 Machi 桌面端，聊天框左下角显示「未选模型」。  
+1. 每次冷启动 Near 桌面端，聊天框左下角显示「未选模型」。  
    根因: `useAppStore.activeProvider/activeModel` 初始化为 `""`，且 store 没有任何持久化层；`panes[]` 亦只在内存中。
 2. 同一个分身下不同 session 可能想用不同模型，但切换到旧 session 时前端无法回显上次用的模型。
 3. 分身（Avatar）缺少"默认模型"概念；新建 session 时只能回退到全局 `settings.defaultProvider`。
@@ -14,7 +14,7 @@
 
 ## 目标
 
-启动 Machi 后，用户看到的状态 ≈ 上次关闭时的状态：窗口位置尺寸、pane 布局、每个 pane 绑定的 avatar/session、每个 session 用的模型。
+启动 Near 后，用户看到的状态 ≈ 上次关闭时的状态：窗口位置尺寸、pane 布局、每个 pane 绑定的 avatar/session、每个 session 用的模型。
 
 ## 非目标
 

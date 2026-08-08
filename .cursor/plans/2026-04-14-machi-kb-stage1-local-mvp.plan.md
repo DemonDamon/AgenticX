@@ -60,7 +60,7 @@ isProject: false
 
 > Plan-Id: `machi-kb-stage1-local-mvp`
 > Plan-File: `.cursor/plans/2026-04-14-machi-kb-stage1-local-mvp.plan.md`
-> 回溯产品规划：`docs/plans/2026-04-14-machi-knowledge-base-product-plan.md` (v2.1 §6.1)
+> 回溯产品规划：`docs/plans/2026-04-14-near-knowledge-base-product-plan.md` (v2.1 §6.1)
 
 ## 0. 强约束（照搬产品 plan §6.1，不松口）
 

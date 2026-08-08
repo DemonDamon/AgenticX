@@ -1,8 +1,8 @@
-# Machi 知识库能力 — 产品规划 (v2)
+# Near 知识库能力 — 产品规划 (v2)
 
 > **目标读者：** 产品 / 架构 / 前后端工程师；进入编码阶段请在 `.cursor/plans/` 建立同名或子模块实现计划，并以 `Plan-Id` / `Plan-File` 追溯。
 
-**Goal：** 为 Machi 提供可演进的 **知识库（Knowledge Base, KB）** 能力。产品形态对标 **AnythingLLM**（桌面拖拽 + 工作区绑定 + 零配置本地 RAG），切片与调试体验对标 **Dify**（可预览的分段与召回调试），工程上 **复用 `agenticx.knowledge / retrieval / storage / embeddings` 既有模块**，不重造轮子。
+**Goal：** 为 Near 提供可演进的 **知识库（Knowledge Base, KB）** 能力。产品形态对标 **AnythingLLM**（桌面拖拽 + 工作区绑定 + 零配置本地 RAG），切片与调试体验对标 **Dify**（可预览的分段与召回调试），工程上 **复用 `agenticx.knowledge / retrieval / storage / embeddings` 既有模块**，不重造轮子。
 
 **非目标（首期明确不做）：**
 
@@ -15,13 +15,13 @@
 
 ## 1. 背景与问题陈述
 
-用户在 Machi 内需要：
+用户在 Near 内需要：
 
 1. **把本地资料变成可长期检索的知识**（拖拽 / 选定目录 → 解析 → 入库 → 问答），而不是每轮把 `context_files` 全文塞进提示词。
 2. **连接已有远端知识库**（自建、AgenticX 生态、第三方云 KB），避免重复索引与权限模型。
 3. 未来扩展 **连接器同步**（云盘 / 在线文档）与 **多源融合**（本地 + 多个远端统一检索）。
 
-仓库现有积木（见 §2），使得 Machi 一期工程可以 **收敛为「桌面产品层 + 胶水 API + 配置/作用域」** 三件事。
+仓库现有积木（见 §2），使得 Near 一期工程可以 **收敛为「桌面产品层 + 胶水 API + 配置/作用域」** 三件事。
 
 ---
 
@@ -34,14 +34,14 @@
 | **切片** | `agenticx.knowledge.chunkers` | `fixed_size / recursive / semantic / agentic / document / csv_row`，预留 Dify 式"切片预览"所需 |
 | **文档对象** | `agenticx.knowledge.document` | `Document / DocumentMetadata / ChunkMetadata` 统一模型 |
 | **处理流水线** | `agenticx.knowledge.processing` + `extractor` | `ProcessingBackend`（Simple/Structured/VLMLayout），带指标 |
-| **知识库门面** | `agenticx.knowledge.Knowledge` | 上层统一知识库对象，Machi 直接消费 |
+| **知识库门面** | `agenticx.knowledge.Knowledge` | 上层统一知识库对象，Near 直接消费 |
 | **检索器** | `agenticx.retrieval` | `VectorRetriever / BM25Retriever / HybridRetriever / GraphRetriever / AutoRetriever / Reranker` |
 | **检索工具** | `agenticx.retrieval.tools` | `DocumentIndexingTool / RetrievalTool / RerankingTool / …` 可直接作为 Agent 工具 |
 | **向量库** | `agenticx.storage.vectordb_storages` | `chroma / faiss / qdrant / milvus / pgvector / pinecone / weaviate` |
 | **Embedding** | `agenticx.embeddings` | `openai / siliconflow / bailian / litellm / router` |
 | **图谱（远期）** | `agenticx.knowledge.graphers` | GraphRAG / SPO 抽取 / Neo4j 导出；一期**不启用**但 schema 预留 |
 
-**结论：** Machi 侧**不做** ingestion / chunk / embedding / vector store / retriever 的从零实现；只做 **桌面 UI、Studio API 胶水、作用域与配置管理**。
+**结论：** Near 侧**不做** ingestion / chunk / embedding / vector store / retriever 的从零实现；只做 **桌面 UI、Studio API 胶水、作用域与配置管理**。
 
 ---
 
@@ -65,7 +65,7 @@
 
 | 子模式 | 说明 |
 |--------|------|
-| **B1：MCP（消费方）** | 远端以 MCP Server 暴露 `search / get_chunk / list_sources`。Machi 走现有 MCP Hub，无需主进程硬编码。 |
+| **B1：MCP（消费方）** | 远端以 MCP Server 暴露 `search / get_chunk / list_sources`。Near 走现有 MCP Hub，无需主进程硬编码。 |
 | **B2：HTTP 适配器** | 非 MCP 云 KB / 内网网关，通过 **适配器** 映射到统一 `RetrievalHit` 结构。 |
 | **B3：AgenticX 自有远端 KB（可选产品）** | 若未来提供托管 KB，仍走 MCP / OpenAPI，与 B1/B2 同抽象。 |
 
@@ -75,7 +75,7 @@
 
 | 模式 | 价值 / 落点 |
 |------|-------------|
-| **把 Machi 本机 KB 暴露为 MCP** | 外部 Agent / Claude Desktop 等复用我们的索引；**差异化** |
+| **把 Near 本机 KB 暴露为 MCP** | 外部 Agent / Claude Desktop 等复用我们的索引；**差异化** |
 | **连接器同步** | Notion / 飞书 / S3 / 网盘等定期拉取与增量 |
 | **会话内临时 KB（@file）** | 与长期 KB 明确分层，避免产品语义混淆 |
 | **多源混合检索** | 本地 + 多 MCP 并行；需 **去重 / 配额 / 超时 / 部分成功** |
@@ -180,7 +180,7 @@
 | **Embedding 云依赖** | 云 embedding 的安全/合规 | 默认本地 Ollama；云 Provider 需用户显式启用 |
 | **远端 KB `source_uri` 不可达** | 第三方返回的 URI 未必可点 | UI 优雅降级：展示文本来源而非强制可点链接 |
 | **与会话 FTS 边界** | 会话 FTS 面向聊天记录，KB 面向文档块 | 两者不混表；检索接口分离 |
-| **Web 端 Machi** | Web 版无法本机向量库 | Web 版只消费远端 KB（或受限 IndexedDB），桌面版保留完整能力 |
+| **Web 端 Near** | Web 版无法本机向量库 | Web 版只消费远端 KB（或受限 IndexedDB），桌面版保留完整能力 |
 
 ---
 

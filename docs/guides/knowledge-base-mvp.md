@@ -2,7 +2,7 @@
 
 > Plan-Id: `machi-kb-stage1-local-mvp`
 > Plan-File: [`.cursor/plans/2026-04-14-machi-kb-stage1-local-mvp.plan.md`](../../.cursor/plans/2026-04-14-machi-kb-stage1-local-mvp.plan.md)
-> 产品规划：[`docs/plans/2026-04-14-machi-knowledge-base-product-plan.md`](../plans/2026-04-14-machi-knowledge-base-product-plan.md) (v2.1)
+> 产品规划：[`docs/plans/2026-04-14-near-knowledge-base-product-plan.md`](../plans/2026-04-14-near-knowledge-base-product-plan.md) (v2.1)
 
 Machi 桌面的「知识库」面板管理多个独立的 **知识脑（Brain）**：
 文档脑（docs）用于 `knowledge_search`，代码脑（code）用于 `code_search`。
