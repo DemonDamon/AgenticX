@@ -1,4 +1,4 @@
-# AgenticX: Multi-Agent Framework, Desktop Workspace, and Enterprise Governance
+# AgenticX
 
 <div align="center">
 <img src="assets/agenticx-banner.gif" alt="AgenticX — Unified Multi-Agent Platform" width="800" />

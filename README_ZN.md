@@ -1,4 +1,4 @@
-# AgenticX：多智能体框架、桌面工作台与企业治理平台
+# AgenticX
 
 <div align="center">
 <img src="assets/agenticx-banner.gif" alt="AgenticX — Unified Multi-Agent Platform" width="800" />
