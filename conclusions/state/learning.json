@@ -1,0 +1,12 @@
+{
+  "schema_version": 1,
+  "module_id": "learning",
+  "generation": "b6858568c6764750804f4bb3d4179654",
+  "mapping_revision": 1,
+  "baseline_commit": "f3ba65001c29bbbf146b97c4247b112c912fd4e1",
+  "baseline_tree": "c9e03baae37a048c006a4074ace9e41711a4090f",
+  "source_fingerprint": "sha256:7d0c2909e801760d0c9b512cb6333dd2ebd1e9db7f6b14722dde8d7052296ef7",
+  "summary_path": "conclusions/learning_module_conclusion.md",
+  "summary_sha256": "sha256:f22ff5500f442249cc6ec496d9a20aa6392814e98547593fd13983b8c821ff31",
+  "updated_at": "2026-08-08T01:37:13.809211+00:00"
+}

@@ -1,0 +1,12 @@
+{
+  "schema_version": 1,
+  "module_id": "flow",
+  "generation": "4ab130dc8afe426eaacc9272afae623f",
+  "mapping_revision": 1,
+  "baseline_commit": "f3ba65001c29bbbf146b97c4247b112c912fd4e1",
+  "baseline_tree": "c9e03baae37a048c006a4074ace9e41711a4090f",
+  "source_fingerprint": "sha256:586c5885d20dedebcd08ea5c5a145942080192c42370bd0e80ebf7ff9aaa72a2",
+  "summary_path": "conclusions/flow_module_conclusion.md",
+  "summary_sha256": "sha256:0dadceb0da1b1e4f6645e456659042f2c4c6308d2a104c1034c4a6b3fe37792e",
+  "updated_at": "2026-08-08T01:39:54.728825+00:00"
+}

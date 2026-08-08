@@ -1,0 +1,12 @@
+{
+  "schema_version": 1,
+  "module_id": "code-index",
+  "generation": "34b585b84bb94a4c93b8039d921cf5bb",
+  "mapping_revision": 1,
+  "baseline_commit": "f3ba65001c29bbbf146b97c4247b112c912fd4e1",
+  "baseline_tree": "c9e03baae37a048c006a4074ace9e41711a4090f",
+  "source_fingerprint": "sha256:8231579db6a4e0e444e09bed57ae00dd1497c6bf0abb21de5524ac9a5d16cdcf",
+  "summary_path": "conclusions/code_index_module_conclusion.md",
+  "summary_sha256": "sha256:41383688ecf72c248f32c74571f0f0d073f9e083cff6ee163f472db9315e3e44",
+  "updated_at": "2026-08-08T01:37:11.321073+00:00"
+}

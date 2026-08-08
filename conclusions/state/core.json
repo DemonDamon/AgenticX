@@ -1,0 +1,12 @@
+{
+  "schema_version": 1,
+  "module_id": "core",
+  "generation": "22a7c8ce7c4d4db3a83db2055b6111e4",
+  "mapping_revision": 1,
+  "baseline_commit": "f3ba65001c29bbbf146b97c4247b112c912fd4e1",
+  "baseline_tree": "c9e03baae37a048c006a4074ace9e41711a4090f",
+  "source_fingerprint": "sha256:f0ad08a132b09b1b4795bb69aff4146312cf32e2fdf857d38839e437522e95fd",
+  "summary_path": "conclusions/core_module_conclusion.md",
+  "summary_sha256": "sha256:8db3277707d2e6c2a0a1cace9fc4f124783f9dd665c791d0d1c40516a334316a",
+  "updated_at": "2026-08-08T01:37:11.871366+00:00"
+}
