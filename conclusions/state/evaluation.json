@@ -1,0 +1,12 @@
+{
+  "schema_version": 1,
+  "module_id": "evaluation",
+  "generation": "39c2c82a052c4e15899b54aeea6fbdea",
+  "mapping_revision": 1,
+  "baseline_commit": "f3ba65001c29bbbf146b97c4247b112c912fd4e1",
+  "baseline_tree": "c9e03baae37a048c006a4074ace9e41711a4090f",
+  "source_fingerprint": "sha256:cf9923b3d0b2e69713a12c8708c065e0c4124b63cec3a87b6bcfc031fecf2a0d",
+  "summary_path": "conclusions/evaluation_module_conclusion.md",
+  "summary_sha256": "sha256:1366f1958ff8e1ea186fda6cb69b05b7eb09ca6d0b6f73ff4fcfca12eac55474",
+  "updated_at": "2026-08-08T01:37:12.986172+00:00"
+}

@@ -1,0 +1,12 @@
+{
+  "schema_version": 1,
+  "module_id": "server",
+  "generation": "3790ce4cf0ac4b45b57d69c7aace14cc",
+  "mapping_revision": 1,
+  "baseline_commit": "f3ba65001c29bbbf146b97c4247b112c912fd4e1",
+  "baseline_tree": "c9e03baae37a048c006a4074ace9e41711a4090f",
+  "source_fingerprint": "sha256:f12708c88368590d5afb26ad59a09907afe4a0b136320b38fc6c4164f3a4a752",
+  "summary_path": "conclusions/server_module_conclusion.md",
+  "summary_sha256": "sha256:f45d3cba543505919c1c84f9ee860877bd46dd22582cd6969df175f2fe96a016",
+  "updated_at": "2026-08-08T01:37:17.106858+00:00"
+}

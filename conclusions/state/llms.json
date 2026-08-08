@@ -1,0 +1,12 @@
+{
+  "schema_version": 1,
+  "module_id": "llms",
+  "generation": "ab07bd87cd7f45b0afe5a8b34f87312d",
+  "mapping_revision": 1,
+  "baseline_commit": "f3ba65001c29bbbf146b97c4247b112c912fd4e1",
+  "baseline_tree": "c9e03baae37a048c006a4074ace9e41711a4090f",
+  "source_fingerprint": "sha256:d2b3128ad5645c60b135465c5f6fcb3e6e4c5b78811c973115c64074308074e5",
+  "summary_path": "conclusions/llms_module_conclusion.md",
+  "summary_sha256": "sha256:8de303199a147d18a835afa9eeec2a5e8a344e4ceadce7b6be5682bc96764f7d",
+  "updated_at": "2026-08-08T01:37:14.087621+00:00"
+}

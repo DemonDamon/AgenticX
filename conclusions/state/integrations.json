@@ -1,0 +1,12 @@
+{
+  "schema_version": 1,
+  "module_id": "integrations",
+  "generation": "fc8a4bf3612a444b885428158a26a9c3",
+  "mapping_revision": 1,
+  "baseline_commit": "f3ba65001c29bbbf146b97c4247b112c912fd4e1",
+  "baseline_tree": "c9e03baae37a048c006a4074ace9e41711a4090f",
+  "source_fingerprint": "sha256:becda7074d7452d2e673b6d3c5e5a4b1f03ae15f5e3a271b5d17027dda9ed7bb",
+  "summary_path": "conclusions/integrations_module_conclusion.md",
+  "summary_sha256": "sha256:2cc1171e8858fb51d7ec47fd3217809581892da7ef21a4f5b1daff899022c29c",
+  "updated_at": "2026-08-08T01:39:55.545850+00:00"
+}

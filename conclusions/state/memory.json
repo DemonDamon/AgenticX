@@ -1,0 +1,12 @@
+{
+  "schema_version": 1,
+  "module_id": "memory",
+  "generation": "3b95c2342003464badbbd61efb45cb34",
+  "mapping_revision": 1,
+  "baseline_commit": "f3ba65001c29bbbf146b97c4247b112c912fd4e1",
+  "baseline_tree": "c9e03baae37a048c006a4074ace9e41711a4090f",
+  "source_fingerprint": "sha256:b5127160491f528e680f0c13b25272bcbdca7de1b251dadf00226b7b5f944864",
+  "summary_path": "conclusions/memory_module_conclusion.md",
+  "summary_sha256": "sha256:2bb1ee285102fb9573be229f74d680ace821198d523bd39f9a11857a2a2920a9",
+  "updated_at": "2026-08-08T01:37:14.644803+00:00"
+}

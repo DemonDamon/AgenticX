@@ -1,0 +1,12 @@
+{
+  "schema_version": 1,
+  "module_id": "delivery",
+  "generation": "b837e9181437416e9ecabbe2a5468bd3",
+  "mapping_revision": 1,
+  "baseline_commit": "f3ba65001c29bbbf146b97c4247b112c912fd4e1",
+  "baseline_tree": "c9e03baae37a048c006a4074ace9e41711a4090f",
+  "source_fingerprint": "sha256:fd2c594c589138c6d259fb52df3e49e8c79dc9ef3ba893530381bf5f689adc40",
+  "summary_path": "conclusions/delivery_module_conclusion.md",
+  "summary_sha256": "sha256:380a4efdcece61dd0d8948906bf02d75221b99dffbe8c2793bef0f04ce6b0751",
+  "updated_at": "2026-08-08T01:39:54.341455+00:00"
+}

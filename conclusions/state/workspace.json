@@ -1,0 +1,12 @@
+{
+  "schema_version": 1,
+  "module_id": "workspace",
+  "generation": "a2bf106cf076407e8f5dae6431dd78ee",
+  "mapping_revision": 1,
+  "baseline_commit": "f3ba65001c29bbbf146b97c4247b112c912fd4e1",
+  "baseline_tree": "c9e03baae37a048c006a4074ace9e41711a4090f",
+  "source_fingerprint": "sha256:76d7b3dd201d7c1d3023d12bdeab7ed56a8a692e7c50d9ab515c17ae0ce86fad",
+  "summary_path": "conclusions/workspace_module_conclusion.md",
+  "summary_sha256": "sha256:66a6e849ff99bfb9afb9905d1b22f903a6163b7dc58c86c46ee96d39ddb72f87",
+  "updated_at": "2026-08-08T01:39:57.299370+00:00"
+}

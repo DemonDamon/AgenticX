@@ -1,0 +1,12 @@
+{
+  "schema_version": 1,
+  "module_id": "collaboration",
+  "generation": "9f76b7d2b2b149c8be1ade147f9663e4",
+  "mapping_revision": 1,
+  "baseline_commit": "f3ba65001c29bbbf146b97c4247b112c912fd4e1",
+  "baseline_tree": "c9e03baae37a048c006a4074ace9e41711a4090f",
+  "source_fingerprint": "sha256:70c07f614641bb2e85ffdb39cd6c51d5e13aef7d269ab3fdc4911a15454297da",
+  "summary_path": "conclusions/collaboration_module_conclusion.md",
+  "summary_sha256": "sha256:a62c39d9d345e0a2252cc4972e627a99a7a0ae2ff8c9f8f4a941a1f2b95feaae",
+  "updated_at": "2026-08-08T01:37:11.595402+00:00"
+}

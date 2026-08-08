@@ -1,0 +1,12 @@
+{
+  "schema_version": 1,
+  "module_id": "skills",
+  "generation": "2db7da36dc5d421d82565c5da339aa04",
+  "mapping_revision": 1,
+  "baseline_commit": "f3ba65001c29bbbf146b97c4247b112c912fd4e1",
+  "baseline_tree": "c9e03baae37a048c006a4074ace9e41711a4090f",
+  "source_fingerprint": "sha256:4c8f65236a56f252277fd79a8e8ddf2841f998a1100558316ac36c7ca04b96d9",
+  "summary_path": "conclusions/skills_module_conclusion.md",
+  "summary_sha256": "sha256:7b96057a272a8574d232919e1efeeea7de1ffa75e2a14ba25f753a121e2b9fdd",
+  "updated_at": "2026-08-08T01:37:17.649528+00:00"
+}
