@@ -1,0 +1,12 @@
+{
+  "schema_version": 1,
+  "module_id": "utils",
+  "generation": "521e5bde337c4ccc8e56802e6eca5f3c",
+  "mapping_revision": 1,
+  "baseline_commit": "f3ba65001c29bbbf146b97c4247b112c912fd4e1",
+  "baseline_tree": "c9e03baae37a048c006a4074ace9e41711a4090f",
+  "source_fingerprint": "sha256:bc566ce5dfa28e2b6811109392bafdabc33e3d87213c1e83e5fda4be06651cda",
+  "summary_path": "conclusions/utils_module_conclusion.md",
+  "summary_sha256": "sha256:d1d176e514a6427f423862919240d85006b86c5f8bdadeb42108307219f669f0",
+  "updated_at": "2026-08-08T01:39:56.840548+00:00"
+}

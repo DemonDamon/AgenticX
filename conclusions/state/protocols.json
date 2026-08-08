@@ -1,0 +1,12 @@
+{
+  "schema_version": 1,
+  "module_id": "protocols",
+  "generation": "5f8be47a51254e81b62cdc0876b478cc",
+  "mapping_revision": 1,
+  "baseline_commit": "f3ba65001c29bbbf146b97c4247b112c912fd4e1",
+  "baseline_tree": "c9e03baae37a048c006a4074ace9e41711a4090f",
+  "source_fingerprint": "sha256:f74fbffb1916aebdbcf5648091fa9fce354af1b40467b096b24e5c2e650dea1a",
+  "summary_path": "conclusions/protocols_module_conclusion.md",
+  "summary_sha256": "sha256:af7818bec5aeba990994a640db2d098512f2f2323e8efb33aec4ef854fb794a8",
+  "updated_at": "2026-08-08T01:37:15.748014+00:00"
+}

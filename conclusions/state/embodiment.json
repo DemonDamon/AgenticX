@@ -1,0 +1,12 @@
+{
+  "schema_version": 1,
+  "module_id": "embodiment",
+  "generation": "84e5c513cd7b4202a668c87ca7202345",
+  "mapping_revision": 1,
+  "baseline_commit": "f3ba65001c29bbbf146b97c4247b112c912fd4e1",
+  "baseline_tree": "c9e03baae37a048c006a4074ace9e41711a4090f",
+  "source_fingerprint": "sha256:eda76b61a87717d44f9bd9cba75bef5c0df32f92bb5e32c07a1a8154e6310f71",
+  "summary_path": "conclusions/embodiment_conclusion.md",
+  "summary_sha256": "sha256:b283fa8e8f670adeb0df1a9dce444ce60f4c326f7ff8fa0e43582109f31d05ad",
+  "updated_at": "2026-08-08T01:37:12.707660+00:00"
+}

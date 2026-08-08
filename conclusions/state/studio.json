@@ -1,0 +1,12 @@
+{
+  "schema_version": 1,
+  "module_id": "studio",
+  "generation": "44982d24836c4569b658520eb8a38c70",
+  "mapping_revision": 1,
+  "baseline_commit": "f3ba65001c29bbbf146b97c4247b112c912fd4e1",
+  "baseline_tree": "c9e03baae37a048c006a4074ace9e41711a4090f",
+  "source_fingerprint": "sha256:e99562ccf1a6b450621ad8ef89c4a4c38969d10fca80f623bcb1765eb477e069",
+  "summary_path": "conclusions/studio_module_conclusion.md",
+  "summary_sha256": "sha256:49733b003b16e5ff29c857137ef0647584aea0aa40d4d69c4815f4d55234472f",
+  "updated_at": "2026-08-08T01:37:18.191698+00:00"
+}

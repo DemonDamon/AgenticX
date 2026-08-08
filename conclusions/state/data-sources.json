@@ -1,0 +1,12 @@
+{
+  "schema_version": 1,
+  "module_id": "data-sources",
+  "generation": "188c3e364c104211aef7ced4ce81f3da",
+  "mapping_revision": 1,
+  "baseline_commit": "f3ba65001c29bbbf146b97c4247b112c912fd4e1",
+  "baseline_tree": "c9e03baae37a048c006a4074ace9e41711a4090f",
+  "source_fingerprint": "sha256:1742da204427c30d38e9fe01cf026b50401a5c3665428e019d08c264994e9129",
+  "summary_path": "conclusions/data_sources_module_conclusion.md",
+  "summary_sha256": "sha256:09f06160bcf6ea5ad2357d722a1cc0c2cdbdeacc8cc6650a04678db2685dbfd8",
+  "updated_at": "2026-08-08T01:39:53.936204+00:00"
+}

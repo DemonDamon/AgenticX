@@ -1,0 +1,12 @@
+{
+  "schema_version": 1,
+  "module_id": "knowledge",
+  "generation": "0d0f566652bc4d85b76f757eea050579",
+  "mapping_revision": 1,
+  "baseline_commit": "f3ba65001c29bbbf146b97c4247b112c912fd4e1",
+  "baseline_tree": "c9e03baae37a048c006a4074ace9e41711a4090f",
+  "source_fingerprint": "sha256:8d9148997e99f321ef6dc95b91b0ff1a47fa74d768a50960bef7d6c1f7a3f478",
+  "summary_path": "conclusions/knowledge_module_conclusion.md",
+  "summary_sha256": "sha256:ed30981f4497d76b48820e1780dc90389c0773d5c9116d427a4d49197644271d",
+  "updated_at": "2026-08-08T01:39:55.961169+00:00"
+}

@@ -1,0 +1,12 @@
+{
+  "schema_version": 1,
+  "module_id": "embeddings",
+  "generation": "83eaf1364c39419ba2b58eddaf4ab4a4",
+  "mapping_revision": 1,
+  "baseline_commit": "f3ba65001c29bbbf146b97c4247b112c912fd4e1",
+  "baseline_tree": "c9e03baae37a048c006a4074ace9e41711a4090f",
+  "source_fingerprint": "sha256:c97e28626e6dbd7cc839e395680b1b6478f86d4945c8746f9b3a5c47c531662a",
+  "summary_path": "conclusions/embeddings_module_conclusion.md",
+  "summary_sha256": "sha256:a1e359cbc23f55c6c2e608c406daed17538b58458053ec10cbd13a0119013323",
+  "updated_at": "2026-08-08T01:37:12.433479+00:00"
+}

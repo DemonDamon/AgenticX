@@ -1,0 +1,12 @@
+{
+  "schema_version": 1,
+  "module_id": "observability",
+  "generation": "03f74c5037f14431af156acf9d5e31ef",
+  "mapping_revision": 1,
+  "baseline_commit": "f3ba65001c29bbbf146b97c4247b112c912fd4e1",
+  "baseline_tree": "c9e03baae37a048c006a4074ace9e41711a4090f",
+  "source_fingerprint": "sha256:3c7df79221060e7065223a392bcc10c1f19ba35760f196a8ca9f01bde5de8fd5",
+  "summary_path": "conclusions/observability_module_conclusion.md",
+  "summary_sha256": "sha256:47ae5195713f55139b446d564592adabf6959d73967030b552f0b6cde78ae0e5",
+  "updated_at": "2026-08-08T01:37:14.922393+00:00"
+}

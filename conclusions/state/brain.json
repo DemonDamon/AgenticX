@@ -1,0 +1,12 @@
+{
+  "schema_version": 1,
+  "module_id": "brain",
+  "generation": "6601cb8c2fdb47378370f6f5c61aaee9",
+  "mapping_revision": 1,
+  "baseline_commit": "f3ba65001c29bbbf146b97c4247b112c912fd4e1",
+  "baseline_tree": "c9e03baae37a048c006a4074ace9e41711a4090f",
+  "source_fingerprint": "sha256:df9a760b5861601e4416bea0706261159e9454c0864706b410a75dac35ba4648",
+  "summary_path": "conclusions/brain_module_conclusion.md",
+  "summary_sha256": "sha256:affad6e3573bb74e39f9e9e7c05c4e6e34c3a88cba8d92c017e4504460c98f13",
+  "updated_at": "2026-08-08T01:37:10.485591+00:00"
+}

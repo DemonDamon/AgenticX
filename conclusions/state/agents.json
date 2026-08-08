@@ -1,0 +1,12 @@
+{
+  "schema_version": 1,
+  "module_id": "agents",
+  "generation": "ec65ce376d7446229d6726aaa2715f72",
+  "mapping_revision": 1,
+  "baseline_commit": "f3ba65001c29bbbf146b97c4247b112c912fd4e1",
+  "baseline_tree": "c9e03baae37a048c006a4074ace9e41711a4090f",
+  "source_fingerprint": "sha256:0c582e3a161d42bfa9694e178c71b9b24a664ed7ffbb62b8b4897c615db0b5ea",
+  "summary_path": "conclusions/agents_module_conclusion.md",
+  "summary_sha256": "sha256:b6da307a2aa5ae13718fdc3e890675c9c9d9f4fe343528f1f37ae0b3c213fe55",
+  "updated_at": "2026-08-08T01:37:09.922276+00:00"
+}

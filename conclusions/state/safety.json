@@ -1,0 +1,12 @@
+{
+  "schema_version": 1,
+  "module_id": "safety",
+  "generation": "4d6a4cee22f24832b18a4d5afedb16aa",
+  "mapping_revision": 1,
+  "baseline_commit": "f3ba65001c29bbbf146b97c4247b112c912fd4e1",
+  "baseline_tree": "c9e03baae37a048c006a4074ace9e41711a4090f",
+  "source_fingerprint": "sha256:7304bae3988be197cd7105b340a40d670450492e12fc9595063a9c5f88cc149a",
+  "summary_path": "conclusions/safety_module_conclusion.md",
+  "summary_sha256": "sha256:d9757cf2011b779a1e67c86672900b56fb2c1b762920e26204d247bc87a95c17",
+  "updated_at": "2026-08-08T01:37:16.564617+00:00"
+}

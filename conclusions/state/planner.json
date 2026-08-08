@@ -1,0 +1,12 @@
+{
+  "schema_version": 1,
+  "module_id": "planner",
+  "generation": "85590a10fbfa4979bac74603bf1e696d",
+  "mapping_revision": 1,
+  "baseline_commit": "f3ba65001c29bbbf146b97c4247b112c912fd4e1",
+  "baseline_tree": "c9e03baae37a048c006a4074ace9e41711a4090f",
+  "source_fingerprint": "sha256:b5460f7b91c8542c2f5382b98216256e40e6e49812bbeea3d4c2c37cca7a1ffd",
+  "summary_path": "conclusions/planner_module_conclusion.md",
+  "summary_sha256": "sha256:9fd52892d11aa0f3a201b72f387d61bbf77e32c011c8c7268fe9025f9d9f437b",
+  "updated_at": "2026-08-08T01:37:15.199953+00:00"
+}

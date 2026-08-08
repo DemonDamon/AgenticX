@@ -1,0 +1,12 @@
+{
+  "schema_version": 1,
+  "module_id": "tools",
+  "generation": "4fe849fe13a948c6af53f745bdc8450f",
+  "mapping_revision": 1,
+  "baseline_commit": "f3ba65001c29bbbf146b97c4247b112c912fd4e1",
+  "baseline_tree": "c9e03baae37a048c006a4074ace9e41711a4090f",
+  "source_fingerprint": "sha256:21bd43578cd7e6d8967aa51fa7804bfe77c7123971642188ab177b8523bd294c",
+  "summary_path": "conclusions/tools_module_summary.md",
+  "summary_sha256": "sha256:db6fdd8478e6fa71534564ec402dd463ba01304ec6c2c4f7f6fd01a56cc64a32",
+  "updated_at": "2026-08-08T01:37:18.462446+00:00"
+}

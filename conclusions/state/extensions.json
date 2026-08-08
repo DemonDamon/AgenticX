@@ -1,0 +1,12 @@
+{
+  "schema_version": 1,
+  "module_id": "extensions",
+  "generation": "d0e9214d192d479db67331715ad124ae",
+  "mapping_revision": 1,
+  "baseline_commit": "f3ba65001c29bbbf146b97c4247b112c912fd4e1",
+  "baseline_tree": "c9e03baae37a048c006a4074ace9e41711a4090f",
+  "source_fingerprint": "sha256:d93c69d0b62d406dbb8df38794275455367869a9a8f902afaf5788e6b1b70f0c",
+  "summary_path": "conclusions/extensions_module_conclusion.md",
+  "summary_sha256": "sha256:7c8a7a2391ac7fc8db76c4cdfcf9518e27fa77dbee7e8be7e9f3cda3d7ee6aa1",
+  "updated_at": "2026-08-08T01:37:13.263145+00:00"
+}

@@ -1,0 +1,12 @@
+{
+  "schema_version": 1,
+  "module_id": "longrun",
+  "generation": "4ce4fe31e7bd461e928f9a6fd363236c",
+  "mapping_revision": 1,
+  "baseline_commit": "f3ba65001c29bbbf146b97c4247b112c912fd4e1",
+  "baseline_tree": "c9e03baae37a048c006a4074ace9e41711a4090f",
+  "source_fingerprint": "sha256:37ac56981039decbf064f7421a943b998efd8f6fd03a9296cfa124098ce15760",
+  "summary_path": "conclusions/longrun_module_conclusion.md",
+  "summary_sha256": "sha256:eb229e8ab7c1edf67942f2cf7a0cb538de6fd89e8b960c094fe75a046a78596f",
+  "updated_at": "2026-08-08T01:37:14.364874+00:00"
+}

@@ -1,0 +1,12 @@
+{
+  "schema_version": 1,
+  "module_id": "cli",
+  "generation": "94873fcf5bf848b98f54c58fd1308e3b",
+  "mapping_revision": 1,
+  "baseline_commit": "f3ba65001c29bbbf146b97c4247b112c912fd4e1",
+  "baseline_tree": "c9e03baae37a048c006a4074ace9e41711a4090f",
+  "source_fingerprint": "sha256:f2ace9b6a05b6dd3a7188915b370cc5d04e4e0b86977f0620b87731dbac86392",
+  "summary_path": "conclusions/cli_conclusion.md",
+  "summary_sha256": "sha256:db2b4ebff014dd75254ecc7e65315ad625735e7322e4df890fb5a9b8d57cbaf8",
+  "updated_at": "2026-08-08T01:37:11.051569+00:00"
+}

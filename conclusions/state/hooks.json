@@ -1,0 +1,12 @@
+{
+  "schema_version": 1,
+  "module_id": "hooks",
+  "generation": "fc9d8ca35a3c4cd0914b881b64e5ea4a",
+  "mapping_revision": 1,
+  "baseline_commit": "f3ba65001c29bbbf146b97c4247b112c912fd4e1",
+  "baseline_tree": "c9e03baae37a048c006a4074ace9e41711a4090f",
+  "source_fingerprint": "sha256:710e4ed0a378b5e3e550da1c9580e08d95dc257efe225b9ba1e7acda091a5cfc",
+  "summary_path": "conclusions/hooks_module_conclusion.md",
+  "summary_sha256": "sha256:db55ce4b5b7ee3f0aceff91497b4a1e67dd1f8ec4bc8c9ddb3a9871b3a63c94f",
+  "updated_at": "2026-08-08T01:39:55.123382+00:00"
+}

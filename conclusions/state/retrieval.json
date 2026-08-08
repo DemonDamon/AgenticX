@@ -1,0 +1,12 @@
+{
+  "schema_version": 1,
+  "module_id": "retrieval",
+  "generation": "c6b3ec3482ce4e2b843d817d65dbb4af",
+  "mapping_revision": 1,
+  "baseline_commit": "f3ba65001c29bbbf146b97c4247b112c912fd4e1",
+  "baseline_tree": "c9e03baae37a048c006a4074ace9e41711a4090f",
+  "source_fingerprint": "sha256:e6f6126ce5cb2774cd7cbab3d1072b06925e2966e19c67699c63a629fee9aad3",
+  "summary_path": "conclusions/retrieval_module_conclusion.md",
+  "summary_sha256": "sha256:b0dc99fa641cb18f8e75fa1b4a7f23fc4289dd8cac04b126cb3ce449120d76c9",
+  "updated_at": "2026-08-08T01:37:16.021027+00:00"
+}
