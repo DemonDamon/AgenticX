@@ -1,16 +1,15 @@
-# AgenticX: 统一的多智能体框架
+# AgenticX：多智能体框架、桌面工作台与企业治理平台
 
 <div align="center">
-<!-- <img src="assets/agenticx-logo-2025.png" alt="AgenticX Logo" width="240" style="margin-bottom:20px;" /> -->
-<img src="assets/agenticx-logo-2025.png" alt="AgenticX Logo" width="800" style="margin-bottom:20px;" />
+<img src="assets/agenticx-banner.gif" alt="AgenticX — Unified Multi-Agent Platform" width="800" />
 
 [![Python](https://img.shields.io/badge/Python-3.10+-blue.svg)](https://www.python.org/downloads/)
 [![License: Apache-2.0](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](https://www.apache.org/licenses/LICENSE-2.0)
 [![Documentation](https://img.shields.io/badge/docs-coming_soon-green.svg)](#)
 
-**一个统一、可扩展、生产就绪的多智能体应用开发框架**
+**从 Python Agent Runtime 到 Near Desktop 与 Enterprise 的统一智能体技术栈**
 
-[系统架构](#系统架构) • [功能特性](#核心功能) • [快速开始](#快速开始) • [示例](#完整示例) • [进展](#开发进展)
+[产品架构](#系统架构) • [核心能力](#核心功能) • [快速开始](#快速开始) • [示例](#完整示例) • [进展](#开发进展)
 
 </div>
 
@@ -28,7 +27,7 @@
 
 ## 愿景
 
-AgenticX 旨在打造一个统一、可扩展、生产就绪的多智能体应用开发框架，赋予开发者构建从简单自动化助手到复杂协作式智能体系统的全部能力。
+AgenticX 旨在提供一套统一、可扩展、生产就绪的智能体技术栈：开发者可以独立使用 Python SDK 与 `agx` CLI 构建智能体，也可以使用 **Near Desktop** 获得本机优先的多智能体工作台，或使用 **AgenticX Enterprise** 建设企业访问、治理、合规网关与审计能力。
 
 ## 系统架构
 
@@ -36,7 +35,15 @@ AgenticX 旨在打造一个统一、可扩展、生产就绪的多智能体应�
 <img src="assets/AgenticX 系统架构总览图.png" alt="AgenticX 系统架构总览图 — 涵盖 UI 层、Studio 运行时、核心框架、平台服务、领域扩展五大层级" width="900" />
 </div>
 
-框架采用 5 层架构：**用户界面层**（桌面应用 / CLI / SDK）→ **Studio 运行时层**（会话管理器、Meta-Agent、团队管理器、分身与群聊）→ **核心框架层**（编排与执行、智能体、记忆、工具、LLM 提供方、Hooks 钩子）→ **平台服务层**（可观测性、通信协议、安全治理、存储）→ **领域扩展层**（GUI Agent、知识系统 & GraphRAG、AgentKit 集成）。
+整体架构由一个共享能力内核和两种产品形态构成：
+
+- **AgenticX Core / Runtime**：Python SDK、Studio Server 与 Agent Runtime，提供编排、工具、MCP、记忆、知识库、Skills、Hooks、模型适配、安全沙箱、可观测性与评估。
+- **Near Desktop**：Electron + React 本机优先工作台。默认链路连接本机 `agx serve / agx-server`，支持多窗格、分身与群聊、工作区、终端、自动化、语音焦点模式，以及可选的远程单实例后端。
+- **AgenticX Enterprise**：面向企业的 Web Portal、Admin Console 与 Go AI Gateway。员工聊天经 Portal BFF 进入 Gateway；Gateway 负责鉴权、策略、配额、模型中继、响应治理、审计与用量，**不等同于完整 Agent Runtime**。
+
+Near 与 Enterprise 共享 AgenticX 的抽象与能力，但当前部署链路相互独立：Near 默认使用本机 Python Runtime；Enterprise 当前在线主链路使用 Go Gateway。Enterprise Edge Agent 已达 MVP 但未进入默认链路，Cluster Agent Runtime 仍是规划方向。
+
+> 架构图重绘提示词：[总架构（中文）](docs/prompt-for-pics/overall_cn.md) · [Near Desktop（中文）](docs/prompt-for-pics/desktop_cn.md) · [Enterprise（中文）](docs/prompt-for-pics/enterprise_cn.md)
 
 ## 核心功能
 
@@ -72,17 +79,29 @@ AgenticX 旨在打造一个统一、可扩展、生产就绪的多智能体应�
 - **长任务编排**: 多任务源（手动队列 / Cron / Linear / 项目特性）轮询、每任务隔离工作区、停滞自愈、续跑 / 失败双轨退避、增量 Token 计量
 - **项目状态机**: 磁盘级单一事实来源，版本化特性状态机、文件锁 / 原子写，支撑「初始化 → 实现 → 验证 → 提交」可审计闭环
 
-### 开发者体验
-- **CLI 工具** (`agx`): serve、studio、loop、run、project、deploy、codegen、docs、skills、hooks、debug、scaffold、config 等 15+ 命令
-- **Web UI (Studio)**: 基于 FastAPI 的管理服务器，支持会话管理、实时 WebSocket、协议对接
-- **桌面应用**: Electron + React + Zustand + Vite，Pro/Lite 双模式（多窗格 / 单窗格），含命令面板、设置面板、分身侧栏、子智能体面板、会话历史、工作区面板
-- **IM 远程网关**: 飞书 / 企业微信 / 钉钉 / 个人微信(iLink) → 云端 → 本机 Agent 的远程指令中继与回复下发
-- **Claude Code 桥接**: 受 Token 保护的本机 HTTP / NDJSON 控制面，headless（stream-json）与可见 TUI（PTY）双模驱动本地 Claude Code
+### 开发者入口
+- **CLI 工具** (`agx`): serve、studio、gateway、feishu、loop、project、agent、workflow、deploy、monitor、docs、mineru、sandbox、skills、hooks、config、cc-bridge、memory-graph、generate、tools 等命令
+- **Studio Server**: FastAPI REST API + SSE 后端，承载会话、消息、分身、群聊、MCP、Skills、Hooks、知识库与运行时接线
+- **可嵌入 SDK**: Core `Agent` / `Task` / `Tool` / `AgentExecutor` 与独立 `ReActAgent` 路径，可脱离桌面端使用
+- **扩展协议**: A2A、MCP、AG-UI、OpenAPI 与远程工具
 
-### 企业级安全
-- **安全层**: 泄露检测、输入清洗器、高级注入检测器、策略引擎（规则 / 严重级别 / 动作）、输入验证器、沙箱策略、审计日志
-- **沙箱**: Docker / Microsandbox / Subprocess / 远端 HTTP 四种后端（三档模式工厂自动选择）；Jupyter 内核管理器、有状态代码解释器、沙箱模板、JSONL 执行审计
-- **会话安全**: 数据库级会话、写锁、内存会话、会话级多租户（tenant_id）隔离
+### Near Desktop
+- **本机优先**: Electron + React + Zustand + Vite；Electron 启动并管理本机 `agx serve / agx-server`，通过 REST API + SSE 通信
+- **多智能体工作台**: 多窗格对话、Meta-Agent、分身、群聊、子智能体状态、会话历史与独立模型选择
+- **工作区与执行**: 工作目录、文件引用、内嵌终端、Computer Use、MCP、Skills、Hooks、知识库与数据源
+- **扩展体验**: Automation、Voice Focus、Claude Code Bridge、飞书与个人微信 Sidecar
+- **可选远程模式**: 已支持连接单一远程 `agx serve`；Cluster / HA 多副本运行时仍属规划
+
+### AgenticX Enterprise
+- **企业入口与控制面**: Web Portal、Portal BFF、Admin Console；支持身份权限、模型与通道、策略、配额、审计与运维配置
+- **Go AI Gateway**: JWT / PAT 鉴权、主体识别、缓存、限流、策略评估、模型与通道路由、流式响应治理、审计链与 Token 用量
+- **真实数据基础设施**: PostgreSQL 默认、MySQL 可选，Redis 用于缓存与分布式限流，JSONL 提供必须成功的追加式审计兜底
+- **运行时边界**: Gateway 是企业合规与模型请求中继，不等同于 Python Agent Runtime；Enterprise Edge Agent 为非默认 MVP，Cluster Runtime 尚未开始
+
+### 安全与沙箱
+- **安全基础组件**: 泄露检测、输入清洗、注入检测、策略引擎、输入验证、工具 Guardrails、权限确认与审计；Studio 主链路组合使用 Hooks、权限与路径防护，尚未统一经过完整 `SafetyLayer`
+- **沙箱**: Docker / Microsandbox / Subprocess / 远端 HTTP 后端；Jupyter 内核管理器、有状态代码解释器、沙箱模板、JSONL 执行审计
+- **会话持久化**: Studio 默认写入 `~/.agenticx/sessions` 文件树，可选 Redis 会话后端；数据库会话服务属于独立 SDK 模块，并非 Studio 默认路径
 
 ### 可观测性与评估
 - **监控**: 完整回调系统、实时指标、Prometheus/OpenTelemetry 集成、轨迹分析、Span Tree、WebSocket 流式推送
@@ -90,11 +109,9 @@ AgenticX 旨在打造一个统一、可扩展、生产就绪的多智能体应�
 - **数据导出**: 多格式导出（JSON / CSV / Prometheus）、时间序列分析
 
 ### 存储层
-- **键值存储**: SQLite、Redis、PostgreSQL、MongoDB、InMemory
-- **向量存储**: Milvus、Qdrant、Chroma、Faiss、PgVector、Pinecone、Weaviate
-- **图存储**: Neo4j、Nebula
-- **对象存储**: S3、GCS、Azure
-- **统一管理**: 存储路由器、迁移支持、统一存储接口
+- **默认持久化**: `~/.agenticx` 文件树承载配置、会话与工作区；SQLite 用于会话索引 / FTS，Studio 可选 Redis 会话后端
+- **知识库向量存储**: Chroma 为 Desktop 知识库默认后端，Qdrant、Milvus、Faiss、PgVector 等按可选依赖与具体模块接入
+- **统一存储抽象**: 提供键值、向量、图与对象存储接口；部分第三方适配器仍处于接口占位或未接入 Studio 主路径，不能视为全部生产完备
 
 ### GUI Agent / 具身智能
 - **动作反思机制**: A/B/C 动作结果分类，支持启发式和 VLM 两种反思模式
@@ -423,10 +440,45 @@ python examples/agenticx-for-guiagent/AgenticX-GUIAgent/main.py
 
 ## 技术架构
 
+### 产品与运行链路
+
+```mermaid
+flowchart TB
+    subgraph Entry["产品与开发入口"]
+        Near["Near Desktop<br/>本机优先工作台"]
+        Dev["Python SDK · agx CLI<br/>REST API + SSE"]
+        Enterprise["AgenticX Enterprise<br/>Portal · Admin · Go Gateway"]
+    end
+
+    subgraph PythonRuntime["AgenticX Python Runtime"]
+        Studio["Studio Server<br/>会话 · 分身 · 群聊"]
+        Runtime["Agent Runtime<br/>编排 · 委派 · 流式事件"]
+        Capabilities["Tools · MCP · Memory · KB<br/>LLM · Skills · Hooks"]
+        Studio <--> Runtime
+        Runtime <--> Capabilities
+    end
+
+    subgraph EnterprisePath["Enterprise 当前在线链路"]
+        Portal["Web Portal"] --> BFF["Portal BFF"]
+        BFF --> Gateway["Go AI Gateway<br/>合规 · 路由 · 审计"]
+        Gateway --> Models["兼容模型服务"]
+    end
+
+    Near <-->|"本机 HTTP / SSE"| Studio
+    Dev --> Studio
+    Dev --> Runtime
+    Enterprise --> Portal
+    Gateway -.->|"未来能力复用"| Runtime
+```
+
+> Near 默认使用本机 Python Runtime；Enterprise 当前使用独立 Go Gateway 在线链路。虚线只表示演进关系，不代表默认生产调用。
+
+### 核心框架内部结构
+
 ```mermaid
 graph TD
     subgraph "用户界面层"
-        Desktop["桌面应用 (Electron + React)"]
+        Desktop["Near Desktop (Electron + React)"]
         CLI["CLI 命令行 (agx serve / loop / run / project)"]
         SDK[Python SDK]
     end
@@ -530,22 +582,22 @@ graph TD
 | **M7** | ✅ | 编排引擎 — 图式工作流引擎 + Flow 系统（装饰器、执行计划），条件路由、并行执行 |
 | **M8** | ✅ | 通信协议 — A2A（客户端 / 服务端 / AgentCard / 技能即工具）、MCP 资源访问、AGUI 协议 |
 | **M9** | ✅ | 可观测性 — 回调系统、实时监控、轨迹分析、Span Tree、WebSocket 流式推送、Prometheus / OpenTelemetry 集成 |
-| **M10** | ✅ | 开发者体验 — CLI（`agx` 含 15+ 命令）、Studio Server（FastAPI）、桌面应用（Electron + React + Zustand，Pro/Lite 双模式） |
-| **M11** | ✅ | 企业安全 — 安全层（泄露检测 / 清洗器 / 注入检测 / 策略 / 审计）、沙箱（Docker / Microsandbox / Subprocess / Jupyter 内核 / 代码解释器） |
+| **M10** | ✅ | 开发者体验 — CLI（`agx` 含 15+ 命令）、Studio Server（FastAPI REST + SSE）、Near Desktop（Electron + React + Zustand，多窗格） |
+| **M11** | ✅ | 安全基础组件 — 泄露检测、清洗、注入检测、策略、Guardrails、Hooks、权限确认与多后端沙箱；Studio 尚未统一接入完整 `SafetyLayer` 管线 |
 | **M13** | ✅ | 知识与检索 — 知识库（文档处理、分块器、图构建器 GraphRAG、读取器）；检索（向量 / BM25 / 图 / 混合 / 自动）；嵌入（OpenAI / 百炼 / SiliconFlow / LiteLLM） |
 | **M14** | ✅ | 分身与协作 — 分身注册中心、群聊（用户指定 / 智能路由 / 轮流回复）、委派、角色扮演、会话模式、团队管理 |
 | **M15** | ✅ | 评估框架 — EvalSet、LLM 裁判、组合裁判、Span 评估器、轨迹匹配器、Trace 转换器 |
 | **M16** | ✅ | 具身智能 — GUI Agent 框架，含动作反思、卡住检测、动作缓存、REACT 解析、Device-Cloud 路由、DAG 验证、人机协作 |
-| **M17** | ✅ | 存储层 — 键值（SQLite / Redis / PostgreSQL / MongoDB）、向量（Milvus / Qdrant / Chroma / Faiss / PgVector / Pinecone / Weaviate）、图（Neo4j / Nebula）、对象（S3 / GCS / Azure） |
+| **M17** | ✅ | 存储抽象与主要适配器 — 默认文件 / SQLite、可选 Redis、Chroma 知识库及多类向量 / 图 / 对象接口；部分第三方适配器仍为占位实现 |
 
 ### 🚧 规划中模块
 
 | 模块 | 状态 | 功能描述 |
 |------|------|----------|
 | **M12** | 🚧 | 智能体进化 — 架构搜索、知识蒸馏、自适应规划 |
-| **M18** | 🚧 | 多租户与 RBAC — 会话级 `tenant_id` 隔离已落地，细粒度权限控制进行中 |
+| **M18** | 🚧 | Core / Studio 多租户与 RBAC — 细粒度 `tenant_id` 隔离尚未进入 Studio 主链路；Enterprise IAM 为独立产品线实现 |
 
-### 🆕 近期能力增量（2026 上半年）
+### 🆕 v0.5.0 能力快照
 
 | 能力 | 状态 | 功能描述 |
 |------|------|----------|
