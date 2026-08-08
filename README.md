@@ -1,9 +1,7 @@
-# AgenticX: Unified Multi-Agent Framework
+# AgenticX: Multi-Agent Framework, Desktop Workspace, and Enterprise Governance
 
 <div align="center">
-<!-- <img src="assets/agenticx-logo-2025.png" alt="AgenticX Logo" width="240" style="margin-bottom:20px;" /> -->
-<img src="assets/agenticx-logo-2025.png" alt="AgenticX Logo" width="800" style="margin-bottom:20px;" />
-
+<img src="assets/agenticx-banner.gif" alt="AgenticX — Unified Multi-Agent Platform" width="800" />
 
 <!-- [![Python](https://img.shields.io/badge/Python-3.10+-blue.svg)](https://www.python.org/downloads/) -->
 [![License: Apache-2.0](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](https://www.apache.org/licenses/LICENSE-2.0)
@@ -11,7 +9,9 @@
 [![PyPI - Python Version](https://img.shields.io/pypi/pyversions/agenticx)](https://pypi.org/project/agenticx/)
 [![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/DemonDamon/AgenticX)
 
-[Architecture](#system-architecture) • [Features](#core-features) • [Quick Start](#quick-start) • [Examples](#complete-examples) • [Progress](#development-progress)
+**A unified agent technology stack spanning the Python Agent Runtime, Near Desktop, and Enterprise**
+
+[Product Architecture](#system-architecture) • [Core Capabilities](#core-features) • [Quick Start](#quick-start) • [Examples](#complete-examples) • [Progress](#development-progress)
 
 </div>
 
@@ -29,7 +29,7 @@
 
 ## Vision
 
-**AgenticX** aims to create a unified, scalable, production-ready multi-agent application development framework, empowering developers to build everything from simple automation assistants to complex collaborative intelligent agent systems.
+**AgenticX** provides a unified, scalable, production-ready agent technology stack. Developers can build directly with the Python SDK and `agx` CLI, use **Near Desktop** as a local-first multi-agent workspace, or deploy **AgenticX Enterprise** for enterprise access, governance, compliance gateway, and audit capabilities.
 
 ## System Architecture
 
@@ -37,7 +37,15 @@
 <img src="assets/AgenticX System Architecture.png" alt="AgenticX System Architecture — 5-tier overview covering UI, Studio Runtime, Core Framework, Platform Services, and Domain Extensions" width="900" />
 </div>
 
-The framework is organized into 5 tiers: **User Interface** (Desktop / CLI / SDK) → **Studio Runtime** (Session Manager, Meta-Agent, Team Manager, Avatar & Group Chat) → **Core Framework** (Orchestration, Execution, Agent, Memory, Tools, LLM Providers, Hooks) → **Platform Services** (Observability, Protocols, Security, Storage) → **Domain Extensions** (GUI Agent, Knowledge & GraphRAG, AgentKit Integration).
+The architecture consists of one shared capability core and two product forms:
+
+- **AgenticX Core / Runtime**: Python SDK, Studio Server, and Agent Runtime for orchestration, tools, MCP, memory, knowledge bases, Skills, Hooks, model adapters, secure sandboxes, observability, and evaluation.
+- **Near Desktop**: An Electron + React local-first workspace. Its default path connects to a local `agx serve / agx-server`, with multi-pane chat, avatars and group chat, workspaces, terminal, automation, Voice Focus, and an optional remote single-server backend.
+- **AgenticX Enterprise**: Web Portal, Admin Console, and Go AI Gateway for enterprise use. Employee chat passes through Portal BFF before the Gateway. The Gateway handles authentication, policy, quota, model relay, response governance, audit, and usage; it is **not a full Agent Runtime**.
+
+Near and Enterprise share AgenticX abstractions and capabilities, but their current deployment paths are independent. Near defaults to the local Python Runtime; Enterprise uses the Go Gateway for its current online path. Enterprise Edge Agent is an MVP outside the default path, while Cluster Agent Runtime remains planned.
+
+> Architecture drawing prompts: [Overall (English)](docs/prompt-for-pics/overall_en.md) · [Near Desktop (English)](docs/prompt-for-pics/desktop_en.md) · [Enterprise (English)](docs/prompt-for-pics/enterprise_en.md)
 
 ## Core Features
 
@@ -73,17 +81,29 @@ The framework is organized into 5 tiers: **User Interface** (Desktop / CLI / SDK
 - **Long-Run Orchestration**: Polls multiple task sources (manual queue / Cron / Linear / project features), per-task isolated workspaces, stall self-healing, continuation/failure dual-track backoff, incremental token accounting
 - **Project State Machine**: Disk-backed single source of truth with a versioned feature state machine, file locks / atomic writes, powering an auditable "init → implement → verify → commit" loop
 
-### Developer Experience
-- **CLI Tools** (`agx`): serve, studio, loop, run, project, deploy, codegen, docs, skills, hooks, debug, scaffold, and config management
-- **Web UI (Studio)**: FastAPI-based management server with session management, real-time WebSocket, and protocol support
-- **Desktop App**: Electron + React + Zustand + Vite, Pro/Lite dual mode (multi-pane / single-pane), command palette, settings panel, avatar sidebar, sub-agent panel, session history, and workspace panel
-- **IM Remote Gateway**: Remote command relay and reply delivery for Feishu / WeCom / DingTalk / personal WeChat (iLink) → cloud → local Agent
-- **Claude Code Bridge**: Token-protected local HTTP / NDJSON control plane driving local Claude Code in headless (stream-json) or visible TUI (PTY) modes
+### Developer Entry Points
+- **CLI Tools** (`agx`): serve, studio, gateway, feishu, loop, project, agent, workflow, deploy, monitor, docs, mineru, sandbox, skills, hooks, config, cc-bridge, memory-graph, generate, and tools
+- **Studio Server**: FastAPI REST API + SSE backend wiring sessions, messages, avatars, group chat, MCP, Skills, Hooks, knowledge bases, and runtime execution
+- **Embeddable SDK**: Core `Agent` / `Task` / `Tool` / `AgentExecutor` plus an independent `ReActAgent` path that does not depend on the desktop app
+- **Extension Protocols**: A2A, MCP, AG-UI, OpenAPI, and remote tools
 
-### Enterprise Security
-- **Safety Layer**: Leak detection, input sanitizer, advanced injection detector, policy engine (rules / severity / actions), input validator, sandbox policy, and audit logging
-- **Sandbox**: Docker / Microsandbox / Subprocess / remote HTTP backends (tiered factory auto-selection); Jupyter kernel manager, stateful code interpreter, sandbox templates, JSONL execution audit
-- **Session Security**: Database-backed sessions, write locks, in-memory sessions, session-level multi-tenant (tenant_id) isolation
+### Near Desktop
+- **Local-first**: Electron + React + Zustand + Vite; Electron starts and manages local `agx serve / agx-server` over REST API + SSE
+- **Multi-agent Workspace**: Multi-pane chat, Meta-Agent, avatars, group chat, sub-agent status, session history, and per-pane model selection
+- **Workspace and Execution**: Working directories, file references, embedded terminal, Computer Use, MCP, Skills, Hooks, knowledge bases, and data sources
+- **Extended Experiences**: Automation, Voice Focus, Claude Code Bridge, and Feishu / personal WeChat sidecars
+- **Optional Remote Mode**: A single remote `agx serve` backend is implemented; Cluster / HA multi-replica runtime remains planned
+
+### AgenticX Enterprise
+- **Enterprise Entry and Control Plane**: Web Portal, Portal BFF, and Admin Console for identity, models and channels, policy, quota, audit, and operations
+- **Go AI Gateway**: JWT / PAT authentication, subject identity, cache, rate limiting, policy evaluation, model and channel routing, streaming response governance, audit chain, and token usage
+- **Real Data Infrastructure**: PostgreSQL by default, optional MySQL, Redis for cache and distributed limits, and a must-succeed append-only JSONL audit fallback
+- **Runtime Boundary**: The Gateway is an enterprise compliance and model relay, not the Python Agent Runtime. Enterprise Edge Agent is a non-default MVP; Cluster Runtime has not started
+
+### Security and Sandbox
+- **Safety Building Blocks**: Leak detection, sanitization, injection detection, policy engine, input validation, tool guardrails, approval, and audit. The Studio path combines hooks, permissions, and path protection; it does not yet route every operation through the complete `SafetyLayer`
+- **Sandbox**: Docker / Microsandbox / Subprocess / remote HTTP backends; Jupyter kernel manager, stateful code interpreter, sandbox templates, and JSONL execution audit
+- **Session Persistence**: Studio writes to the `~/.agenticx/sessions` file tree by default, with an optional Redis session backend. The database session service is a separate SDK module, not the default Studio path
 
 ### Observability & Evaluation
 - **Monitoring**: Complete callback system, real-time metrics, Prometheus/OpenTelemetry integration, trajectory analysis, span tree, WebSocket streaming
@@ -91,11 +111,9 @@ The framework is organized into 5 tiers: **User Interface** (Desktop / CLI / SDK
 - **Data Export**: Multi-format export (JSON / CSV / Prometheus), time series analysis
 
 ### Storage Layer
-- **Key-Value**: SQLite, Redis, PostgreSQL, MongoDB, InMemory
-- **Vector**: Milvus, Qdrant, Chroma, Faiss, PgVector, Pinecone, Weaviate
-- **Graph**: Neo4j, Nebula
-- **Object**: S3, GCS, Azure
-- **Unified Manager**: Storage router, migration support, unified storage interface
+- **Default Persistence**: The `~/.agenticx` file tree stores configuration, sessions, and workspaces; SQLite powers session metadata / FTS, and Studio can optionally use Redis for sessions
+- **Knowledge Base Vectors**: Chroma is the default Desktop knowledge-base backend; Qdrant, Milvus, Faiss, PgVector, and others depend on optional packages and specific module wiring
+- **Unified Storage Abstractions**: Key-value, vector, graph, and object interfaces are available, but some third-party adapters remain placeholders or are not wired into the Studio main path
 
 ### GUI Agent / Embodiment
 - **Action Reflection**: A/B/C result classification with heuristic and VLM reflection modes
@@ -426,10 +444,45 @@ See: [examples/agenticx-for-guiagent/](examples/agenticx-for-guiagent/)
 
 ## Technical Architecture
 
+### Product and Runtime Paths
+
+```mermaid
+flowchart TB
+    subgraph Entry["Product and Developer Entry Points"]
+        Near["Near Desktop<br/>Local-first Workspace"]
+        Dev["Python SDK · agx CLI<br/>REST API + SSE"]
+        Enterprise["AgenticX Enterprise<br/>Portal · Admin · Go Gateway"]
+    end
+
+    subgraph PythonRuntime["AgenticX Python Runtime"]
+        Studio["Studio Server<br/>Sessions · Avatars · Group Chat"]
+        Runtime["Agent Runtime<br/>Orchestration · Delegation · Events"]
+        Capabilities["Tools · MCP · Memory · KB<br/>LLM · Skills · Hooks"]
+        Studio <--> Runtime
+        Runtime <--> Capabilities
+    end
+
+    subgraph EnterprisePath["Current Enterprise Online Path"]
+        Portal["Web Portal"] --> BFF["Portal BFF"]
+        BFF --> Gateway["Go AI Gateway<br/>Compliance · Routing · Audit"]
+        Gateway --> Models["Compatible Model Services"]
+    end
+
+    Near <-->|"Local HTTP / SSE"| Studio
+    Dev --> Studio
+    Dev --> Runtime
+    Enterprise --> Portal
+    Gateway -.->|"Future capability reuse"| Runtime
+```
+
+> Near defaults to the local Python Runtime. Enterprise currently uses an independent Go Gateway online path. The dashed line indicates evolution only, not a default production call.
+
+### Core Framework Internals
+
 ```mermaid
 graph TD
     subgraph "User Interface Layer"
-        Desktop["Desktop App (Electron + React)"]
+        Desktop["Near Desktop (Electron + React)"]
         CLI["CLI (agx serve / loop / run / project)"]
         SDK[Python SDK]
     end
@@ -533,22 +586,22 @@ graph TD
 | **M7** | ✅ | Orchestration Engine — Graph-based workflow engine + Flow system with decorators, execution plans, conditional routing, parallel execution |
 | **M8** | ✅ | Communication Protocols — A2A (client / server / AgentCard / skill-as-tool), MCP resource access, AGUI protocol |
 | **M9** | ✅ | Observability — Callbacks, real-time monitoring, trajectory analysis, span tree, WebSocket streaming, Prometheus / OpenTelemetry integration |
-| **M10** | ✅ | Developer Experience — CLI (`agx` with 15+ commands), Studio Server (FastAPI), Desktop App (Electron + React + Zustand, Pro/Lite dual mode) |
-| **M11** | ✅ | Enterprise Security — Safety layer (leak detection / sanitizer / injection detector / policy / audit), Sandbox (Docker / Microsandbox / Subprocess / Jupyter kernel / code interpreter) |
+| **M10** | ✅ | Developer Experience — CLI (`agx` with 15+ commands), Studio Server (FastAPI REST + SSE), Near Desktop (Electron + React + Zustand, multi-pane) |
+| **M11** | ✅ | Safety building blocks — Leak detection, sanitization, injection detection, policy, guardrails, hooks, approval, and multi-backend sandbox; Studio does not yet use one complete `SafetyLayer` pipeline |
 | **M13** | ✅ | Knowledge & Retrieval — Knowledge base with document processing, chunkers, graphers (GraphRAG), readers; retrieval (vector / BM25 / graph / hybrid / auto); embeddings (OpenAI / Bailian / SiliconFlow / LiteLLM) |
 | **M14** | ✅ | Avatar & Collaboration — Avatar registry, group chat (user-directed / meta-routed / round-robin), delegation, role-playing, conversation patterns, team management |
 | **M15** | ✅ | Evaluation Framework — EvalSet, LLM judge, composite judge, span evaluator, trajectory matcher, trace converter |
 | **M16** | ✅ | Embodiment — GUI Agent framework with action reflection, stuck detection, action caching, REACT parsing, device-cloud routing, DAG verification, human-in-the-loop |
-| **M17** | ✅ | Storage Layer — Key-Value (SQLite / Redis / PostgreSQL / MongoDB), Vector (Milvus / Qdrant / Chroma / Faiss / PgVector / Pinecone / Weaviate), Graph (Neo4j / Nebula), Object (S3 / GCS / Azure) |
+| **M17** | ✅ | Storage abstractions and primary adapters — Default file / SQLite, optional Redis, Chroma knowledge base, and multiple vector / graph / object interfaces; some third-party adapters remain placeholders |
 
 ### 🚧 Planned Modules
 
 | Module | Status | Description |
 |---------|--------|-------------|
 | **M12** | 🚧 | Agent Evolution — Architecture search, knowledge distillation, adaptive planning |
-| **M18** | 🚧 | Multi-tenancy & RBAC — Session-level `tenant_id` isolation landed; fine-grained permission control in progress |
+| **M18** | 🚧 | Core / Studio multi-tenancy and RBAC — Fine-grained `tenant_id` isolation is not wired into the Studio main path; Enterprise IAM is implemented on a separate product line |
 
-### 🆕 Recent Capability Additions (H1 2026)
+### 🆕 v0.5.0 Capability Snapshot
 
 | Capability | Status | Description |
 |------------|--------|-------------|
