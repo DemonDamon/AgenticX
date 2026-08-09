@@ -1,5 +1,3 @@
-# AgenticX
-
 <div align="center">
 <img src="assets/agenticx-logo.svg" alt="AgenticX — Unified Multi-Agent Platform" width="600" />
 
