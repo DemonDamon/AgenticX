@@ -12,8 +12,6 @@
 
 Near 是本机优先的多智能体桌面工作台：默认链路由 Electron 桌面壳与本机 `agx serve / agx-server` 构成；已支持可选远程单实例后端，Cluster / HA 仍为规划方向。
 
-> 架构图重绘提示词：[Near Desktop（中文）](../assets/prompt-for-pics/desktop_cn.md)
-
 ```text
 Electron Main
   ├─ 启动/停止 agx serve

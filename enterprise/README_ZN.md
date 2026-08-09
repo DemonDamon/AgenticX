@@ -7,12 +7,10 @@
 ## 架构
 
 <div align="center">
-<img src="assets/AgenticX Enterprise 架构中文信息图.png" alt="AgenticX Enterprise 架构 — 企业访问层、控制面、Portal BFF、Go AI Gateway、数据基础设施与 Agent Runtime 演进区" width="900" />
+<img src="assets/enterprise-architecture-zh.png" alt="AgenticX Enterprise 架构 — 企业访问层、控制面、Portal BFF、Go AI Gateway、数据基础设施与 Agent Runtime 演进区" width="900" />
 </div>
 
 当前生产主链路由企业访问层、Portal BFF、控制面、Go AI Gateway、数据基础设施和上游兼容模型组成；Go Gateway 是合规与模型中继，**不等同于完整 Agent Runtime**。Edge Agent 已达 MVP 但未进入默认链路，Cluster Runtime 仍是未来方向。
-
-> 架构图重绘提示词：[Enterprise（中文）](../assets/prompt-for-pics/enterprise_cn.md)
 
 ### 仓库结构
 

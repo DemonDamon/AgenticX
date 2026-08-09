@@ -7,12 +7,10 @@
 ## Architecture
 
 <div align="center">
-<img src="assets/AgenticX Enterprise Architecture Infographic.png" alt="AgenticX Enterprise Architecture — enterprise access, control plane, Portal BFF, Go AI Gateway, data infrastructure, and Agent Runtime evolution area" width="900" />
+<img src="assets/enterprise-architecture-en.png" alt="AgenticX Enterprise Architecture — enterprise access, control plane, Portal BFF, Go AI Gateway, data infrastructure, and Agent Runtime evolution area" width="900" />
 </div>
 
 The current production path consists of the enterprise access layer, Portal BFF, control plane, Go AI Gateway, data infrastructure, and upstream compatible models. The Go Gateway provides compliance and model relay; it is **not a full Agent Runtime**. Edge Agent has reached MVP but is not on the default path; Cluster Runtime remains a future direction.
-
-> Architecture drawing prompts: [Enterprise (English)](../assets/prompt-for-pics/enterprise_en.md)
 
 ### Repository layout
 

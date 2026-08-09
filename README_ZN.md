@@ -34,10 +34,6 @@ AgenticX 旨在提供一套统一、可扩展、生产就绪的智能体技术�
 
 ## 系统架构
 
-<div align="center">
-<img src="assets/AgenticX 产品与技术架构信息图.png" alt="AgenticX 产品与技术架构 — 产品入口、Studio / Agent / Core SDK Runtime、协议生态与平台支撑层" width="900" />
-</div>
-
 整体架构由一个共享能力内核和两种产品形态构成：
 
 - **AgenticX Core / Runtime**：Python SDK、Studio Server 与 Agent Runtime，提供编排、工具、MCP、记忆、知识库、Skills、Hooks、模型适配、安全沙箱、可观测性与评估。
@@ -46,7 +42,23 @@ AgenticX 旨在提供一套统一、可扩展、生产就绪的智能体技术�
 
 Near 与 Enterprise 共享 AgenticX 的抽象与能力，但当前部署链路相互独立：Near 默认使用本机 Python Runtime；Enterprise 当前在线主链路使用 Go Gateway。Enterprise Edge Agent 已达 MVP 但未进入默认链路，Cluster Agent Runtime 仍是规划方向。
 
-> 架构图重绘提示词：[总架构（中文）](assets/prompt-for-pics/overall_cn.md) · [Near Desktop（中文）](assets/prompt-for-pics/desktop_cn.md) · [Enterprise（中文）](assets/prompt-for-pics/enterprise_cn.md)
+### 产品与技术总览
+
+<div align="center">
+<img src="assets/AgenticX 产品与技术架构信息图.png" alt="AgenticX 产品与技术架构 — 产品入口、Studio / Agent / Core SDK Runtime、协议生态与平台支撑层" width="900" />
+</div>
+
+### Near Desktop
+
+<div align="center">
+<img src="desktop/assets/near-desktop-architecture-zh.png" alt="Near Desktop 架构 — 本机优先多智能体桌面工作台" width="900" />
+</div>
+
+### AgenticX Enterprise
+
+<div align="center">
+<img src="enterprise/assets/enterprise-architecture-zh.png" alt="AgenticX Enterprise 架构 — 访问层、控制面、Portal BFF、Go AI Gateway 与数据基础设施" width="900" />
+</div>
 
 ## 核心功能
 
