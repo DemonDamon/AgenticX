@@ -1,77 +1,79 @@
 # Near Desktop — macOS Alpha Preview
 
-> **注意：当前为 Alpha 预览版，macOS 签名/公证尚未接入，首次打开需要手动放行（见下方说明）。**
+**Language / 语言**: [English](README.md) | [中文](README_ZN.md)
 
-## 安装步骤（用户版）
+> **Note: This is an Alpha preview. macOS signing / notarization is not wired up yet. First launch requires a manual Gatekeeper bypass (see below).**
 
-> **远程模式说明（可选）**：在 `~/.agenticx/config.yaml` 中配置 `remote_server` 并启用后，可连接远程 `agx serve`，无需本机安装 Python/agx。详见仓库内 `.cursor/plans/2026-03-24-desktop-remote-backend.plan.md`。
+## Install (end users)
 
-### Step 1 — 下载正确的安装包
+> **Optional remote mode**: Configure and enable `remote_server` in `~/.agenticx/config.yaml` to connect to a remote `agx serve` without installing Python / `agx` locally. See `.cursor/plans/2026-03-24-desktop-remote-backend.plan.md` in the repo.
 
-| 机型 | 下载文件 |
+### Step 1 — Download the correct package
+
+| Machine | Download |
 |------|---------|
-| Apple M1 / M2 / M3 / M4（ARM） | `Near-x.x.x-arm64.dmg` |
-| Intel Mac（2020 年前机型） | `Near-x.x.x-x64.dmg` |
+| Apple M1 / M2 / M3 / M4 (ARM) | `Near-x.x.x-arm64.dmg` |
+| Intel Mac (pre-2020) | `Near-x.x.x-x64.dmg` |
 
-**如何判断我的 Mac 是哪种芯片？**  
-点击左上角苹果菜单 → 关于本机，查看"芯片"一栏。
+**How do I know which chip I have?**  
+Apple menu → About This Mac → Chip.
 
-### Step 2 — 本地后端（二选一）
+### Step 2 — Local backend (pick one)
 
-**方式 A — 官方 DMG 自包含版（推荐）**  
+**Option A — Official self-contained DMG (recommended)**
 
-使用通过 `packaging/build_dmg.sh` 打出的安装包时，应用内已嵌入 `agx-server`（PyInstaller），**无需**再安装 Python 或 `agx` CLI。若你从源码目录执行 `npm run build:mac:*` 且未先放入 `bundled-backend/<arch>/agx-server`，则仍需要方式 B。
+DMGs built with `packaging/build_dmg.sh` embed `agx-server` (PyInstaller). You do **not** need Python or the `agx` CLI. If you run `npm run build:mac:*` from source without placing `bundled-backend/<arch>/agx-server` first, use Option B.
 
-**方式 B — 自行安装 agx CLI**
+**Option B — Install the `agx` CLI yourself**
 
-若未使用自包含 DMG，Near 需要 `agx` 命令行工具来运行本地 AI 服务。打开终端，运行：
+If you are not using a self-contained DMG, Near needs the `agx` CLI for the local AI service. In a terminal:
 
 ```bash
 curl -sSL https://raw.githubusercontent.com/agenticx/agenticx/main/install.sh | bash
 ```
 
-或通过 pip 安装：
+Or via pip:
 
 ```bash
 pip install agenticx
 ```
 
-安装后验证：
+Verify:
 
 ```bash
 agx --version
 ```
 
-### Step 3 — 绕过 macOS Gatekeeper（Alpha 版无签名）
+### Step 3 — Bypass macOS Gatekeeper (unsigned Alpha)
 
-由于当前版本未经过 Apple 签名公证，macOS 默认会阻止打开。有两种方式放行：
+The current build is not Apple-notarized, so macOS may block open. Two ways to allow it:
 
-**方式 A（推荐，图形化）：**
+**Option A (recommended, GUI):**
 
-1. 双击 `.dmg` 将 Near.app 拖入 Applications
-2. 在 Finder 里找到 Near.app，**右键 → 打开**
-3. 在弹窗中点击"打开"确认（只需第一次）
+1. Double-click the `.dmg` and drag Near.app into Applications
+2. In Finder, find Near.app → **right-click → Open**
+3. Confirm **Open** in the dialog (first time only)
 
-**方式 B（终端命令）：**
+**Option B (terminal):**
 
 ```bash
 xattr -cr /Applications/Near.app
 ```
 
-### Step 4 — 启动 Near
+### Step 4 — Launch Near
 
-双击 Near.app，等待约 5-15 秒完成初始化即可使用。
+Double-click Near.app and wait about 5–15 seconds for initialization.
 
 ---
 
-## 环境要求（开发者）
+## Requirements (developers)
 
 - Node.js 20+
 - Python 3.10+
-- 已安装 `agx` CLI（`agx --version` 可正常执行）
-- macOS 13+（Windows/Linux 仅做基础兼容，未完整验证）
+- `agx` CLI installed (`agx --version` works)
+- macOS 13+ (Windows / Linux have basic compatibility only; not fully verified)
 
-## 快速启动（开发）
+## Quick start (development)
 
 ```bash
 cd desktop
@@ -79,163 +81,170 @@ npm install
 npm run dev
 ```
 
-启动后 Electron 主进程会自动拉起 `agx serve --host 127.0.0.1 --port <随机端口>`，渲染层通过 IPC 获取 API 基址，不需要手工再开一个终端。
+The Electron main process starts `agx serve --host 127.0.0.1 --port <random>` automatically. The renderer gets the API base via IPC — you do not need a second terminal.
 
-## 打包
+## Packaging
 
-### 图标规范化（保证 dev 与 DMG 一致）
+### Icon sync (dev vs DMG)
 
-使用同一母图导出 `icon.png`（Dock/dev）与 `icon.icns`（DMG/App），避免两套图标视觉尺寸不一致：
+Export `icon.png` (Dock / dev) and `icon.icns` (DMG / App) from the same master art so visual size stays consistent:
 
 ```bash
 cd desktop
 npm run icons:sync
-# 或指定母图
+# or specify a master image
 bash ./scripts/sync-icons.sh assets/icon-master.png
 ```
 
-建议母图为 `1024x1024` 的正方形 PNG，并控制主体留白一致（推荐主体占比 80%~85%）。
+Prefer a `1024x1024` square PNG with consistent subject padding (about 80%–85% of the canvas).
 
-### 自包含 DMG（内嵌 Python 后端，用户无需安装 agx）
+### Self-contained DMG (embedded Python backend; users need no `agx`)
 
-在仓库根目录执行（需 Python ≥3.10、Node 20；首次会创建 `packaging/.venv-packaging`）：
+From the repo root (Python ≥3.10, Node 20; creates `packaging/.venv-packaging` on first run):
 
 ```bash
 # Apple Silicon
 ./packaging/build_dmg.sh arm64
 
-# Intel Mac（需在 x64 runner 或 Rosetta 环境构建 x64 后端）
+# Intel Mac (build x64 backend on an x64 runner or under Rosetta)
 ./packaging/build_dmg.sh x64
 
-# Universal：先分别构建 arm64 与 x64 后端，再 lipo 合并
+# Universal: build arm64 + x64 backends, then lipo
 ./packaging/build_dmg.sh universal
 ```
 
-跳过重新打包 Python、仅复用已有 `packaging/dist/<arch>/agx-server`：
+Skip rebuilding Python and reuse an existing `packaging/dist/<arch>/agx-server`:
 
 ```bash
 SKIP_BACKEND=1 ./packaging/build_dmg.sh arm64
 ```
 
-产物在 `desktop/release/` 下的 `.dmg` / `.zip`。
+Artifacts land under `desktop/release/` as `.dmg` / `.zip`.
 
-**可选：签名与公证**（分发给别人时建议配置）  
-在构建环境中设置 `APPLE_ID`、`APPLE_ID_PASSWORD`（App 专用密码）、`APPLE_TEAM_ID`，以及 `CSC_LINK` / `CSC_KEY_PASSWORD`（Developer ID 证书）。未设置时走 `electron-builder.yml` 免签名构建；注入 `CSC_LINK` 后 CI 自动切换 `electron-builder.signing.yml` 并尝试公证（`desktop/scripts/mac/notarize.js` 在缺 `APPLE_*` 时 skip）。
+**Optional: signing and notarization** (recommended for distribution)  
+Set `APPLE_ID`, `APPLE_ID_PASSWORD` (app-specific password), `APPLE_TEAM_ID`, and `CSC_LINK` / `CSC_KEY_PASSWORD` (Developer ID cert). Without them, `electron-builder.yml` builds unsigned. With `CSC_LINK`, CI switches to `electron-builder.signing.yml` and attempts notarization (`desktop/scripts/mac/notarize.js` skips when `APPLE_*` is missing).
 
-**GitHub Actions Secrets**（必须在 **Repository secrets** 里配置，不要只建在 Environment 里除非 workflow 绑了 `environment:`）：
+**GitHub Actions Secrets** (configure under **Repository secrets**, not only Environments unless the workflow binds `environment:`):
 
-路径：**仓库首页 → Settings → Secrets and variables → Actions → Repository secrets → New repository secret**
+Path: **Repo → Settings → Secrets and variables → Actions → Repository secrets → New repository secret**
 
-| Secret | 值 |
+| Secret | Value |
 |--------|-----|
-| `CSC_LINK` | `base64 -i ~/Documents/AppleCerts/DeveloperID.p12` 的完整输出 |
-| `CSC_KEY_PASSWORD` | `.p12` 导出密码 |
-| `APPLE_ID` | Apple ID 邮箱（如 `zli221@hawk.iit.edu`） |
-| `APPLE_ID_PASSWORD` | [App 专用密码](https://appleid.apple.com)（`xxxx-xxxx-xxxx-xxxx`）；CI 会同步注入为 `APPLE_APP_SPECIFIC_PASSWORD`（electron-builder 25 内置公证变量名） |
-| `APPLE_TEAM_ID` | `57B7L2XXTJ` |
+| `CSC_LINK` | Full output of `base64 -i ~/Documents/AppleCerts/DeveloperID.p12` |
+| `CSC_KEY_PASSWORD` | `.p12` export password |
+| `APPLE_ID` | Apple ID email |
+| `APPLE_ID_PASSWORD` | [App-specific password](https://appleid.apple.com) (`xxxx-xxxx-xxxx-xxxx`); CI also injects it as `APPLE_APP_SPECIFIC_PASSWORD` (electron-builder 25) |
+| `APPLE_TEAM_ID` | Your Team ID |
 
-触发构建：推送 tag `desktop-v*` / `v*`，或在 Actions 页手动 **Run workflow**（`workflow_dispatch`）。产物在对应 run 的 **Artifacts**（`near-arm64` / `near-x64`）。
+Trigger: push tag `desktop-v*` / `v*`, or **Run workflow** (`workflow_dispatch`) on the Actions page. Artifacts: `near-arm64` / `near-x64`.
 
-**常见 CI 报错**
+**Common CI errors**
 
-| 日志 | 原因 | 处理 |
+| Log | Cause | Fix |
 |------|------|------|
-| `CSC_KEY_PASSWORD is not defined` | 只配了 `CSC_LINK` 没配密码 | 新增 Secret `CSC_KEY_PASSWORD`（`.p12` 导出密码） |
-| `desktop not a file` / base64 解码失败 | `CSC_LINK` 不是合法 base64 | 本机执行 `base64 -i ~/Documents/AppleCerts/DeveloperID.p12`，**整段**粘贴到 Secret |
-| `Cannot open .p12` | 密码与导出时不一致 | 核对 `CSC_KEY_PASSWORD` 或重新导出 `.p12` |
-| `code has no resources but signature indicates they must be present` / `Signature=adhoc` | `electron-builder.signing.yml` 写了 `identity: null` 导致整包跳过签名 | 删除 `identity: null`，由 `CSC_LINK` 自动匹配 Developer ID |
-| `APPLE_APP_SPECIFIC_PASSWORD env var needs to be set` | electron-builder 25 内置公证变量名与 `APPLE_ID_PASSWORD` 不同 | 确保 workflow 注入 `APPLE_APP_SPECIFIC_PASSWORD`（可与 `APPLE_ID_PASSWORD` 同值） |
+| `CSC_KEY_PASSWORD is not defined` | `CSC_LINK` set without password | Add Secret `CSC_KEY_PASSWORD` |
+| `desktop not a file` / base64 decode failed | Invalid `CSC_LINK` base64 | Re-run `base64 -i …p12` and paste the **entire** string |
+| `Cannot open .p12` | Wrong password | Check `CSC_KEY_PASSWORD` or re-export `.p12` |
+| `code has no resources…` / `Signature=adhoc` | `identity: null` skipped signing | Remove `identity: null`; let `CSC_LINK` match Developer ID |
+| `APPLE_APP_SPECIFIC_PASSWORD env var needs to be set` | electron-builder 25 name differs from `APPLE_ID_PASSWORD` | Ensure workflow injects `APPLE_APP_SPECIFIC_PASSWORD` (same value is fine) |
 
-五个 Secret 须**同时**存在：`CSC_LINK`、`CSC_KEY_PASSWORD`、`APPLE_ID`、`APPLE_ID_PASSWORD`、`APPLE_TEAM_ID`。
+All five secrets must exist together: `CSC_LINK`, `CSC_KEY_PASSWORD`, `APPLE_ID`, `APPLE_ID_PASSWORD`, `APPLE_TEAM_ID`.
 
-### Windows 自包含 NSIS（内嵌 agx-server.exe + 微信 sidecar）
+### Windows self-contained NSIS (embedded `agx-server.exe` + WeChat sidecar)
 
-| 项目 | macOS | Windows（本方案） |
+| Item | macOS | Windows (this path) |
 |------|--------|-------------------|
-| 一体脚本 | `packaging/build_dmg.sh` | `packaging/build_windows_installer.ps1` |
-| 预置目录 | `desktop/bundled-backend/<arch>/` | `desktop/bundled-backend/win-amd64/` |
-| 产物 | `.dmg` | `Near-<version>-win-x64.exe`（NSIS） |
-| 本机要求 | bash、Python、Node、Go | **Windows**、PowerShell 7+（`pwsh`）、Python ≥3.10、Node 20、Go 1.22+；`curl.exe`（系统自带）用于冒烟 |
+| One-shot script | `packaging/build_dmg.sh` | `packaging/build_windows_installer.ps1` |
+| Bundled dir | `desktop/bundled-backend/<arch>/` | `desktop/bundled-backend/win-amd64/` |
+| Artifact | `.dmg` | `Near-<version>-win-x64.exe` (NSIS) |
+| Host requirements | bash, Python, Node, Go | **Windows**, PowerShell 7+ (`pwsh`), Python ≥3.10, Node 20, Go 1.22+; `curl.exe` for smoke |
 
-在**仓库根目录**打开 PowerShell：
+From the **repo root** in PowerShell:
 
 ```powershell
-# 首次会创建 packaging\.venv-packaging 并执行 PyInstaller + Go + electron-builder
 ./packaging/build_windows_installer.ps1
 ```
 
-或在 `desktop` 目录：
+Or from `desktop`:
 
 ```powershell
 cd desktop
 npm run build:win:bundled
 ```
 
-仅复用已构建的 `packaging\dist\win-amd64\agx-server.exe`、跳过 PyInstaller（仍会冒烟并重新打 sidecar 与安装包）：
+Reuse an existing `packaging\dist\win-amd64\agx-server.exe` and skip PyInstaller (still smokes, rebuilds sidecar + installer):
 
 ```powershell
 $env:SKIP_BACKEND = '1'
 ./packaging/build_windows_installer.ps1
 ```
 
-**注意**：`electron-builder` 的 `win.extraResources` 指向 `bundled-backend/win-amd64`。若未先运行上述脚本就执行 `npm run build:win`，会因缺少该目录而打包失败——与 mac 侧未预置 `bundled-backend/<arch>` 时类似。
+**Note**: `electron-builder` `win.extraResources` points at `bundled-backend/win-amd64`. Running `npm run build:win` without that directory fails — same idea as missing `bundled-backend/<arch>` on macOS.
 
-**CI**：推送 `v*` tag 或手动 `workflow_dispatch` 选择 `windows-amd64` 时，会运行同一脚本并上传 `Near-*-win-x64.exe` 构件。Windows 代码签名未接入（与 mac 无证书构建一致）。
+**CI**: Push a `v*` tag or manually `workflow_dispatch` with `windows-amd64` to run the same script and upload `Near-*-win-x64.exe`. Windows code signing is not wired (same as unsigned mac builds).
 
-### 仅 Electron 壳（不含内嵌后端）
+### Electron shell only (no embedded backend)
 
-分架构单独打包（需本机已安装 `agx`）：
+Per-arch packages (requires local `agx`):
 
 ```bash
 cd desktop
-npm run build:mac:arm64   # M 系列芯片 → Near-x.x.x-arm64.dmg
-npm run build:mac:x64     # Intel 芯片  → Near-x.x.x-x64.dmg
+npm run build:mac:arm64   # Apple Silicon → Near-x.x.x-arm64.dmg
+npm run build:mac:x64     # Intel → Near-x.x.x-x64.dmg
 ```
 
-或同时打出两个包：
+Or both:
 
 ```bash
 npm run build:mac:all
 ```
 
-产物均在 `desktop/release/`。  
-如需 Windows/Linux（**不含**内嵌后端，需本机已安装 `agx`）：
+Artifacts are under `desktop/release/`.  
+For Windows / Linux (**without** embedded backend; local `agx` required):
 
 ```bash
 npm run build:win
 npm run build:linux
 ```
 
-Windows 若要内嵌后端，请使用上一节 `build:win:bundled` 或 `packaging/build_windows_installer.ps1`。
+For Windows with an embedded backend, use `build:win:bundled` or `packaging/build_windows_installer.ps1` above.
 
-## 架构说明
+## Architecture
+
+<div align="center">
+<img src="assets/Near Desktop Architecture Infographic.png" alt="Near Desktop Architecture — local-first multi-agent desktop workspace: Electron shell, local Agent Runtime, execution plane, local data plane, and optional remote backend" width="900" />
+</div>
+
+Near is a local-first multi-agent desktop workspace. The default path combines the Electron shell with a local `agx serve / agx-server`. An optional remote single-server backend is implemented; Cluster / HA remains planned.
+
+> Architecture drawing prompts: [Near Desktop (English)](../assets/prompt-for-pics/desktop_en.md)
 
 ```text
 Electron Main
-  ├─ 启动/停止 agx serve
+  ├─ Start / stop agx serve
   ├─ IPC: get-api-base / save-config / native-say
   └─ Tray + Native Menu
 
 Renderer (React + Zustand)
-  ├─ ChatView（主智能体对话流，SSE token 流式）
-  ├─ SubAgentPanel（Agent Team 进度与事件）
-  ├─ ConfirmDialog（按 agent_id 路由确认）
-  └─ SettingsPanel（provider/model/apiKey）
+  ├─ ChatView (meta-agent chat, SSE token stream)
+  ├─ SubAgentPanel (Agent Team progress and events)
+  ├─ ConfirmDialog (routed by agent_id)
+  └─ SettingsPanel (provider / model / apiKey)
 ```
 
 ## Meta-Agent + Agent Team
 
-当前 Desktop 已支持“主智能体 + 子智能体团队”协作模型：
+Desktop already supports a “meta-agent + sub-agent team” collaboration model:
 
-- 主聊天区只展示 `meta`（主智能体）消息，用户可持续对话，不被子任务阻塞。
-- 右侧 `SubAgentPanel` 展示子智能体列表、状态（running/completed/failed/cancelled）与最近事件。
-- SSE 事件带 `agent_id`，前端按来源路由到主对话或对应子智能体卡片。
-- 子智能体卡片支持“中断”，会调用 `POST /api/subagent/cancel`。
-- 确认弹窗会显示来源智能体，并在提交 `/api/confirm` 时携带 `agent_id`。
+- The main chat shows only `meta` messages so the user can keep talking without being blocked by sub-tasks.
+- The right-hand `SubAgentPanel` lists sub-agents, status (`running` / `completed` / `failed` / `cancelled`), and recent events.
+- SSE events carry `agent_id`; the UI routes them to the main thread or the matching sub-agent card.
+- Sub-agent cards support cancel via `POST /api/subagent/cancel`.
+- Confirm dialogs show the source agent and send `agent_id` with `/api/confirm`.
 
-## 已知限制
+## Known limitations
 
-- macOS 签名/公证暂未接入（开发版可运行，发行版建议后续补）
-- STT 优先尝试 Whisper WASM，失败时回退到 Web Speech API
-- `native say` 仅 macOS 使用，其他平台回退浏览器 TTS
-- Playwright Electron E2E 为基础冒烟用例，暂未覆盖完整语音链路
+- macOS signing / notarization not yet integrated (dev builds run; release builds should add this later)
+- STT prefers Whisper WASM and falls back to the Web Speech API
+- `native say` is macOS-only; other platforms fall back to browser TTS
+- Playwright Electron E2E covers basic smoke only, not the full voice path

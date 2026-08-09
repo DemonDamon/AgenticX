@@ -37,7 +37,7 @@
 ## System Architecture
 
 <div align="center">
-<img src="assets/AgenticX System Architecture.png" alt="AgenticX System Architecture — 5-tier overview covering UI, Studio Runtime, Core Framework, Platform Services, and Domain Extensions" width="900" />
+<img src="assets/AgenticX Product and Technology Architecture.png" alt="AgenticX Product and Technology Architecture — product entries, Studio / Agent / Core SDK Runtime, protocol ecosystem, and platform foundation" width="900" />
 </div>
 
 The architecture consists of one shared capability core and two product forms:
@@ -48,7 +48,7 @@ The architecture consists of one shared capability core and two product forms:
 
 Near and Enterprise share AgenticX abstractions and capabilities, but their current deployment paths are independent. Near defaults to the local Python Runtime; Enterprise uses the Go Gateway for its current online path. Enterprise Edge Agent is an MVP outside the default path, while Cluster Agent Runtime remains planned.
 
-> Architecture drawing prompts: [Overall (English)](docs/prompt-for-pics/overall_en.md) · [Near Desktop (English)](docs/prompt-for-pics/desktop_en.md) · [Enterprise (English)](docs/prompt-for-pics/enterprise_en.md)
+> Architecture drawing prompts: [Overall (English)](assets/prompt-for-pics/overall_en.md) · [Near Desktop (English)](assets/prompt-for-pics/desktop_en.md) · [Enterprise (English)](assets/prompt-for-pics/enterprise_en.md)
 
 ## Core Features
 
