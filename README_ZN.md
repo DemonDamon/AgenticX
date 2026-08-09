@@ -1,7 +1,7 @@
 # AgenticX
 
 <div align="center">
-<img src="assets/agenticx-banner.gif" alt="AgenticX — Unified Multi-Agent Platform" width="800" />
+<img src="assets/agenticx-logo.png" alt="AgenticX — Unified Multi-Agent Platform" width="600" />
 
 [![Python](https://img.shields.io/badge/Python-3.10+-blue.svg)](https://www.python.org/downloads/)
 [![License: Apache-2.0](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](https://www.apache.org/licenses/LICENSE-2.0)
