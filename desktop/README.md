@@ -12,8 +12,6 @@
 
 Near is a local-first multi-agent desktop workspace. The default path combines the Electron shell with a local `agx serve / agx-server`. An optional remote single-server backend is implemented; Cluster / HA remains planned.
 
-> Architecture drawing prompts: [Near Desktop (English)](../assets/prompt-for-pics/desktop_en.md)
-
 ```text
 Electron Main
   ├─ Start / stop agx serve
