@@ -57,7 +57,9 @@ type PersistedPaneState = {
   contextInherited: boolean;
   taskspacePanelOpen: boolean;
   membersPanelOpen: boolean;
-  sidePanelTab: "workspace" | "members";
+  graphPanelOpen?: boolean;
+  activeGraphRunId?: string | null;
+  sidePanelTab: "workspace" | "members" | "graph";
   activeTaskspaceId: string | null;
   spawnsColumnOpen?: boolean;
   spawnsColumnSuppressAuto?: boolean;
@@ -158,7 +160,17 @@ function normalizePersistedWorkspaceState(raw: unknown): PersistedWorkspaceState
         contextInherited: Boolean(row.contextInherited),
         taskspacePanelOpen: Boolean(row.taskspacePanelOpen),
         membersPanelOpen: Boolean(row.membersPanelOpen),
-        sidePanelTab: row.sidePanelTab === "members" ? ("members" as const) : ("workspace" as const),
+        graphPanelOpen: Boolean(row.graphPanelOpen),
+        activeGraphRunId:
+          row.activeGraphRunId == null || row.activeGraphRunId === ""
+            ? null
+            : String(row.activeGraphRunId),
+        sidePanelTab:
+          row.sidePanelTab === "members"
+            ? ("members" as const)
+            : row.sidePanelTab === "graph"
+              ? ("graph" as const)
+              : ("workspace" as const),
         activeTaskspaceId: row.activeTaskspaceId == null ? null : String(row.activeTaskspaceId),
         spawnsColumnOpen: typeof row.spawnsColumnOpen === "boolean" ? row.spawnsColumnOpen : undefined,
         spawnsColumnSuppressAuto:
@@ -827,6 +839,8 @@ export function App() {
                 modelProvider: pane.modelProvider ?? "",
                 modelName: pane.modelName ?? "",
                 membersPanelOpen: pane.membersPanelOpen ?? false,
+                graphPanelOpen: pane.graphPanelOpen ?? false,
+                activeGraphRunId: pane.activeGraphRunId ?? null,
                 memoryGraphOpen: pane.memoryGraphOpen ?? false,
                 sidePanelTab: pane.sidePanelTab ?? "workspace",
                 spawnsColumnOpen: pane.spawnsColumnOpen ?? false,
@@ -1033,6 +1047,8 @@ export function App() {
         contextInherited: pane.contextInherited,
         taskspacePanelOpen: pane.taskspacePanelOpen,
         membersPanelOpen: pane.membersPanelOpen,
+        graphPanelOpen: pane.graphPanelOpen ?? false,
+        activeGraphRunId: pane.activeGraphRunId ?? null,
         sidePanelTab: pane.sidePanelTab,
         activeTaskspaceId: pane.activeTaskspaceId,
         spawnsColumnOpen: pane.spawnsColumnOpen,

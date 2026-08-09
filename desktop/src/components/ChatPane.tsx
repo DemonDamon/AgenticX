@@ -36,7 +36,9 @@ import {
   type MessageAttachment,
   type PendingConfirm,
   type QueuedMessage,
+  type SidePanelTab,
 } from "../store";
+import { useGraphRunStore } from "./graph/useGraphRun";
 import {
   appendDictationText,
   cancelDictation,
@@ -87,7 +89,7 @@ import { resolveSubAgentOutputPaths } from "../utils/subagent-output-files";
 import { TurnToolGroupCard } from "./messages/TurnToolGroupCard";
 import { ReactWorkCollapse } from "./messages/ReactWorkCollapse";
 import { WorkingIndicator } from "./messages/WorkingIndicator";
-import { ChatImAvatar, ImBubble } from "./messages/ImBubble";
+import { ImBubble } from "./messages/ImBubble";
 import { MessageTimestamp } from "./messages/MessageTimestamp";
 import {
   ASSISTANT_ACTION_ICON_ROW_CLASS,
@@ -467,7 +469,7 @@ const CHATPANE_SIDE_OVERLAY_BREAK = 760;
 function openWorkspaceSidebarForPane(
   paneId: string,
   paneOuterWidthPx: number,
-  openSidePanel: (paneId: string, tab: "workspace" | "members") => void,
+  openSidePanel: (paneId: string, tab: SidePanelTab) => void,
 ) {
   const compact =
     paneOuterWidthPx > 0 && paneOuterWidthPx < CHATPANE_SIDE_OVERLAY_BREAK;
@@ -486,6 +488,7 @@ function openWorkspaceSidebarForPane(
             historyOpen: false,
             memoryGraphOpen: false,
             membersPanelOpen: false,
+            graphPanelOpen: false,
             spawnsColumnOpen: false,
           },
     ),
@@ -505,6 +508,8 @@ const FALLBACK_PANE: ChatPaneState = {
   contextInherited: false,
   taskspacePanelOpen: false,
   membersPanelOpen: false,
+  graphPanelOpen: false,
+  activeGraphRunId: null,
   sidePanelTab: "workspace",
   activeTaskspaceId: null,
   spawnsColumnOpen: false,
@@ -2800,6 +2805,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
   const [pendingForwardMessages, setPendingForwardMessages] = useState<ForwardPendingMessage[]>([]);
   const [contextFiles, setContextFiles] = useState<Record<string, AttachedFile>>({});
   const [attachToastOpen, setAttachToastOpen] = useState(false);
+  const [debateNudgeText, setDebateNudgeText] = useState("");
   const [favoriteToastOpen, setFavoriteToastOpen] = useState(false);
   const [favoriteToastMsg, setFavoriteToastMsg] = useState("");
   const [feishuDesktopBound, setFeishuDesktopBound] = useState(false);
@@ -8991,6 +8997,8 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
               const progressCallId = `${groupProgressRunId}:group-progress:${eventAgentId}`;
               setGroupTyping((prev) => ({ ...prev, [eventAgentId]: avatarName }));
               if (!progressText) continue;
+              // Round-start chatter is covered by expert label + stream dots.
+              if (/^开始处理任务/.test(progressText) || /^已接收任务/.test(progressText)) continue;
               const prevText = lastGroupProgressRef.current[eventAgentId] ?? "";
               if (prevText === progressText) continue;
               lastGroupProgressRef.current[eventAgentId] = progressText;
@@ -9146,6 +9154,49 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
                 delete next[eventAgentId];
                 return next;
               });
+              continue;
+            }
+            // Graph Runtime events → Run Graph panel store (do not render as chat bubbles).
+            // Group SSE wraps graph payloads as { type, data: { content: "<json>" } }.
+            if (typeof payload.type === "string" && payload.type.startsWith("graph.")) {
+              let graphPayload: Record<string, unknown> = { type: payload.type };
+              const rawContent = payload.data?.content;
+              if (typeof rawContent === "string" && rawContent.trim().startsWith("{")) {
+                try {
+                  const inner = JSON.parse(rawContent) as Record<string, unknown>;
+                  graphPayload = { ...inner, type: payload.type || inner.type };
+                } catch {
+                  graphPayload = { type: payload.type, content: rawContent };
+                }
+              } else if (payload.data && typeof payload.data === "object") {
+                graphPayload = { type: payload.type, ...(payload.data as Record<string, unknown>) };
+              }
+              useGraphRunStore.getState().applyEvent(pane.id, graphPayload);
+              const rid = String(graphPayload.run_id || "").trim();
+              if (payload.type === "graph.run_created" && rid) {
+                useAppStore.setState((s) => ({
+                  panes: s.panes.map((row) =>
+                    row.id === pane.id ? { ...row, activeGraphRunId: rid } : row,
+                  ),
+                }));
+                try {
+                  if (localStorage.getItem("agx-graph-panel-autopen-v1") !== "done") {
+                    openWorkspaceSidebarForPane(
+                      pane.id,
+                      paneRef.current?.clientWidth ?? paneWidth,
+                      openSidePanel,
+                    );
+                    setWorkPanelFocus({ kind: "graph" });
+                    localStorage.setItem("agx-graph-panel-autopen-v1", "done");
+                  }
+                } catch {
+                  /* ignore */
+                }
+              }
+              if (payload.type === "graph.debate_nudge") {
+                const tip = String(payload.data?.content ?? "").trim();
+                if (tip) setDebateNudgeText(tip);
+              }
               continue;
             }
             // ── workforce.* events (routing="team") ──────────────────────
@@ -10968,42 +11019,34 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
 
   const paneTint = (() => {
     if (!pane.avatarId) return undefined;
-    if (pane.avatarId.startsWith("group:")) {
-      const rawId = pane.avatarId.slice(6);
-      const idx = groups.findIndex((g) => g.id === rawId);
-      if (idx >= 0) {
-        // reuse GROUP_TINT colors in same order as groupColorByIndex
-        const GROUP_TINT_LIST = [
-          "rgba(99,102,241,0.07)",   // indigo
-          "rgba(20,184,166,0.07)",   // teal
-          "rgba(236,72,153,0.07)",   // pink
-          "rgba(132,204,22,0.07)",   // lime
-          "rgba(239,68,68,0.07)",    // red
-          "rgba(59,130,246,0.07)",   // blue
-          "rgba(234,179,8,0.07)",    // yellow
-          "rgba(168,85,247,0.07)",   // purple
-        ];
-        return GROUP_TINT_LIST[idx % GROUP_TINT_LIST.length];
-      }
-    }
+    // Group chat: same as Meta — page surface, no per-group tint wash.
+    if (pane.avatarId.startsWith("group:")) return undefined;
     const avatarColor = avatars.find((a) => a.id === pane.avatarId)?.color;
     return avatarTintBg(pane.avatarId, avatarColor);
   })();
 
   useEffect(() => {
     // 历史面板已改为不挤占布局的锚定浮层（不再计入互斥占位），此处仅在工作区/记忆图谱/
-    // 成员列表/Spawns/落盘 drawer 之间做单选互斥（窄窗格 overlay 模式）。
+    // 成员列表/运行图/Spawns/落盘 drawer 之间做单选互斥（窄窗格 overlay 模式）。
     if (!compactSidePanels) return;
     const p = pane;
     const stacked =
       Number(!!p.taskspacePanelOpen) +
       Number(!!p.memoryGraphOpen) +
       Number(!!p.membersPanelOpen) +
+      Number(!!p.graphPanelOpen) +
       Number(!!p.spawnsColumnOpen) +
       Number(!!p.runDrawerOpen);
     if (stacked <= 1) return;
-    let keep: "workspace" | "memory-graph" | "members" | "spawns" | "run-drawer" = "run-drawer";
+    let keep:
+      | "workspace"
+      | "memory-graph"
+      | "members"
+      | "graph"
+      | "spawns"
+      | "run-drawer" = "run-drawer";
     if (p.runDrawerOpen) keep = "run-drawer";
+    else if (p.graphPanelOpen) keep = "graph";
     else if (p.taskspacePanelOpen) keep = "workspace";
     else if (p.memoryGraphOpen) keep = "memory-graph";
     else if (p.membersPanelOpen) keep = "members";
@@ -11012,6 +11055,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
       taskspacePanelOpen: keep === "workspace",
       memoryGraphOpen: keep === "memory-graph",
       membersPanelOpen: keep === "members",
+      graphPanelOpen: keep === "graph",
       spawnsColumnOpen: keep === "spawns",
       runDrawerOpen: keep === "run-drawer",
     };
@@ -11022,6 +11066,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
         row.taskspacePanelOpen === desired.taskspacePanelOpen &&
         row.memoryGraphOpen === desired.memoryGraphOpen &&
         row.membersPanelOpen === desired.membersPanelOpen &&
+        !!row.graphPanelOpen === desired.graphPanelOpen &&
         row.spawnsColumnOpen === desired.spawnsColumnOpen &&
         row.runDrawerOpen === desired.runDrawerOpen
       ) {
@@ -11037,6 +11082,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
     pane.taskspacePanelOpen,
     pane.memoryGraphOpen,
     pane.membersPanelOpen,
+    pane.graphPanelOpen,
     pane.spawnsColumnOpen,
     pane.runDrawerOpen,
   ]);
@@ -11052,6 +11098,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
               historyOpen: false,
               memoryGraphOpen: false,
               membersPanelOpen: false,
+              graphPanelOpen: false,
               spawnsColumnOpen: false,
               runDrawerOpen: false,
             }
@@ -11113,6 +11160,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
               historyOpen: false,
               memoryGraphOpen: false,
               membersPanelOpen: false,
+              graphPanelOpen: false,
               spawnsColumnOpen: false,
             }
           : { ...p, taskspacePanelOpen: false };
@@ -11165,6 +11213,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
                 historyOpen: false,
                 memoryGraphOpen: false,
                 membersPanelOpen: false,
+                graphPanelOpen: false,
                 spawnsColumnOpen: false,
               }
             : { ...p, taskspacePanelOpen: false };
@@ -11211,6 +11260,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
               taskspacePanelOpen: false,
               historyOpen: false,
               memoryGraphOpen: false,
+              graphPanelOpen: false,
               spawnsColumnOpen: false,
             }
           : { ...p, membersPanelOpen: false };
@@ -11515,6 +11565,37 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
               {renderedMessages}
             </div>
           )}
+          {debateNudgeText ? (
+            <div className="pointer-events-none absolute inset-x-0 bottom-3 z-30 flex justify-center px-4">
+              <div className="pointer-events-auto flex max-w-md items-center gap-2 rounded-lg border border-amber-500/35 bg-surface-card-strong/95 px-3 py-2 text-[11px] text-amber-700 shadow-lg backdrop-blur-sm dark:text-amber-200">
+                <span className="min-w-0 flex-1 leading-relaxed">{debateNudgeText}</span>
+                <button
+                  type="button"
+                  className="shrink-0 rounded px-2 py-1 text-[11px] text-white"
+                  style={{ background: "var(--ui-btn-primary-bg)" }}
+                  onClick={() => {
+                    setDebateNudgeText("");
+                    openWorkspaceSidebarForPane(
+                      pane.id,
+                      paneRef.current?.clientWidth ?? paneWidth,
+                      openSidePanel,
+                    );
+                    setWorkPanelFocus({ kind: "graph" });
+                  }}
+                >
+                  打开运行图
+                </button>
+                <button
+                  type="button"
+                  className="shrink-0 rounded p-1 text-text-faint hover:bg-surface-hover"
+                  aria-label="关闭提示"
+                  onClick={() => setDebateNudgeText("")}
+                >
+                  <X className="h-3.5 w-3.5" />
+                </button>
+              </div>
+            </div>
+          ) : null}
           <Toast
             placement="inline-bottom-center"
             variant="warning"

@@ -25,11 +25,13 @@ import {
   PanelRight,
   Plus,
   RefreshCw,
+  Share2,
   Terminal as TerminalIcon,
   X,
 } from "lucide-react";
-import { useAppStore, type Message, type PaneTerminalTab, type SubAgent } from "../../store";
+import { useAppStore, type ChatPane, type Message, type PaneTerminalTab, type SubAgent } from "../../store";
 import { WorkspacePanel } from "../WorkspacePanel";
+import { RunGraphPanel } from "../graph/RunGraphPanel";
 import {
   loadAbsoluteFilePreview,
   type WorkspacePreview,
@@ -374,7 +376,13 @@ function RemoteBrowserPane({
   );
 }
 
-export type WorkPanelTabKind = "summary" | "workspace" | "terminal" | "browser" | "preview";
+export type WorkPanelTabKind =
+  | "summary"
+  | "workspace"
+  | "terminal"
+  | "browser"
+  | "preview"
+  | "graph";
 
 export type SummarySectionId = "todo" | "artifacts" | "spawns" | "refs";
 
@@ -398,6 +406,8 @@ export type WorkPanelFocus =
       title?: string;
       lineRange?: WorkspacePreviewLineRange;
     }
+  /** Run Graph God-View tab (same shell as browser / summary). */
+  | { kind: "graph" }
   | null;
 
 type BrowserHistoryEntry = {
@@ -684,6 +694,10 @@ export function WorkPanel({
   const [activePreviewId, setActivePreviewId] = useState<string | null>(null);
   const [previewTabs, setPreviewTabs] = useState<PreviewTab[]>([]);
   const [workspaceTabOpen, setWorkspaceTabOpen] = useState(false);
+  const [graphTabOpen, setGraphTabOpen] = useState(false);
+  const paneForGraph = useAppStore(
+    (s) => s.panes.find((p) => p.id === paneId) ?? null,
+  );
   const [plusOpen, setPlusOpen] = useState(false);
   const [plusPos, setPlusPos] = useState<{ left: number; top: number } | null>(null);
   const plusBtnRef = useRef<HTMLButtonElement | null>(null);
@@ -856,6 +870,7 @@ export function WorkPanel({
   const hasAnyTab =
     summaryTabOpen ||
     workspaceTabOpen ||
+    graphTabOpen ||
     terminalTabs.length > 0 ||
     browserTabs.length > 0 ||
     previewTabs.length > 0;
@@ -863,11 +878,13 @@ export function WorkPanel({
   const resolveFallbackKind = (opts?: {
     excludeSummary?: boolean;
     excludeWorkspace?: boolean;
+    excludeGraph?: boolean;
     excludeTerminalId?: string;
     excludeBrowserId?: string;
     excludePreviewId?: string;
   }): WorkPanelTabKind | null => {
     if (!opts?.excludeSummary && summaryTabOpen) return "summary";
+    if (!opts?.excludeGraph && graphTabOpen) return "graph";
     const nextPreview = previewTabs.find((t) => t.id !== opts?.excludePreviewId);
     if (nextPreview) {
       setActivePreviewId(nextPreview.id);
@@ -1069,6 +1086,9 @@ export function WorkPanel({
       setActiveKind("browser");
     } else if (focusRequest.kind === "preview") {
       openLocalFilePreview(focusRequest.absolutePath, focusRequest.title, focusRequest.lineRange);
+    } else if (focusRequest.kind === "graph") {
+      setGraphTabOpen(true);
+      setActiveKind("graph");
     }
     onFocusRequestHandled?.();
   }, [focusRequest, onFocusRequestHandled, paneId, setActivePaneTerminalTab]);
@@ -1139,6 +1159,19 @@ export function WorkPanel({
     setSummaryTabOpen(false);
     if (activeKind === "summary") {
       setActiveKind(resolveFallbackKind({ excludeSummary: true }));
+    }
+  };
+
+  const openGraphTab = () => {
+    setGraphTabOpen(true);
+    setActiveKind("graph");
+    closePlus();
+  };
+
+  const closeGraphTab = () => {
+    setGraphTabOpen(false);
+    if (activeKind === "graph") {
+      setActiveKind(resolveFallbackKind({ excludeGraph: true }));
     }
   };
 
@@ -1363,6 +1396,14 @@ export function WorkPanel({
             <button
               type="button"
               className="flex w-full items-center gap-2.5 px-3 py-2 text-left text-[13px] text-text-strong hover:bg-surface-hover"
+              onClick={openGraphTab}
+            >
+              <Share2 className="h-4 w-4 text-text-subtle" strokeWidth={1.7} />
+              运行图
+            </button>
+            <button
+              type="button"
+              className="flex w-full items-center gap-2.5 px-3 py-2 text-left text-[13px] text-text-strong hover:bg-surface-hover"
               onClick={openTerminalTab}
             >
               <TerminalIcon className="h-4 w-4 text-text-subtle" strokeWidth={1.7} />
@@ -1395,6 +1436,13 @@ export function WorkPanel({
       title: "浏览器",
       subtitle: "浏览及调试网页",
       onClick: openBrowserTab,
+    },
+    {
+      key: "graph",
+      icon: <Share2 className="h-5 w-5 shrink-0 text-text-subtle" strokeWidth={1.6} />,
+      title: "运行图",
+      subtitle: "观察协作节点、专家状态，并做注入 / 改派干预",
+      onClick: openGraphTab,
     },
     {
       key: "terminal",
@@ -1477,6 +1525,40 @@ export function WorkPanel({
                 }
               }}
               aria-label="关闭工作区标签"
+            >
+              <X className="h-3 w-3" strokeWidth={2} />
+            </span>
+          </button>
+        ) : null}
+
+        {graphTabOpen ? (
+          <button
+            type="button"
+            className={`flex h-7 max-w-[110px] items-center gap-1.5 rounded-full px-2 text-[12px] ${
+              activeKind === "graph"
+                ? "bg-surface-card-strong text-text-strong"
+                : "text-text-subtle hover:bg-surface-hover hover:text-text-strong"
+            }`}
+            onClick={() => setActiveKind("graph")}
+          >
+            <Share2 className="h-3.5 w-3.5 shrink-0" strokeWidth={1.8} />
+            <span className="truncate">运行图</span>
+            <span
+              role="button"
+              tabIndex={0}
+              className="rounded p-0.5 text-text-faint hover:bg-surface-hover hover:text-text-strong"
+              onClick={(e) => {
+                e.stopPropagation();
+                closeGraphTab();
+              }}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" || e.key === " ") {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  closeGraphTab();
+                }
+              }}
+              aria-label="关闭运行图标签"
             >
               <X className="h-3 w-3" strokeWidth={2} />
             </span>
@@ -1605,7 +1687,7 @@ export function WorkPanel({
           ref={plusBtnRef}
           type="button"
           className="agx-topbar-btn !px-[5px]"
-          title="打开任务摘要 / 浏览器 / 终端 / 工作区"
+          title="打开任务摘要 / 浏览器 / 运行图 / 终端 / 工作区"
           aria-label="新建工作台标签"
           onClick={openPlusMenu}
         >
@@ -1870,6 +1952,15 @@ export function WorkPanel({
             previewOpenRequest={previewOpenRequest}
             onPreviewOpenRequestHandled={onPreviewOpenRequestHandled}
             onEnsureSessionForWorkspace={onEnsureSessionForWorkspace}
+          />
+        ) : null}
+
+        {hasAnyTab && activeKind === "graph" && graphTabOpen && paneForGraph ? (
+          <RunGraphPanel
+            pane={paneForGraph}
+            onClose={closeGraphTab}
+            tintColor={tintColor}
+            embedded
           />
         ) : null}
 
