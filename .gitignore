@@ -2,8 +2,7 @@
 .cursor/*
 .vscode/
 !.cursor/plans/
-!.cursor/commands/
-!.cursor/commands/**
+.cursor/commands/
 .qoder/
 .trae/
 .kiro/
@@ -97,6 +96,9 @@ customers/
 # Temporary planning files
 task_plan.md
 **/task_plan.md
+
+# Local release archives produced by /genreleasenote (notes + source zips + tags metadata)
+.releases/
 
 # Desktop app build artifacts
 **/node_modules/
