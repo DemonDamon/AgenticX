@@ -4,6 +4,29 @@
 
 > **注意：当前为 Alpha 预览版，macOS 签名/公证尚未接入，首次打开需要手动放行（见下方说明）。**
 
+## 架构说明
+
+<div align="center">
+<img src="assets/near-desktop-architecture-zh.png" alt="Near Desktop 架构 — 本机优先多智能体桌面工作台：Electron 壳、本机 Agent Runtime、执行面、本地数据面与可选远程后端" width="100%" />
+</div>
+
+Near 是本机优先的多智能体桌面工作台：默认链路由 Electron 桌面壳与本机 `agx serve / agx-server` 构成；已支持可选远程单实例后端，Cluster / HA 仍为规划方向。
+
+> 架构图重绘提示词：[Near Desktop（中文）](../assets/prompt-for-pics/desktop_cn.md)
+
+```text
+Electron Main
+  ├─ 启动/停止 agx serve
+  ├─ IPC: get-api-base / save-config / native-say
+  └─ Tray + Native Menu
+
+Renderer (React + Zustand)
+  ├─ ChatView（主智能体对话流，SSE token 流式）
+  ├─ SubAgentPanel（Agent Team 进度与事件）
+  ├─ ConfirmDialog（按 agent_id 路由确认）
+  └─ SettingsPanel（provider/model/apiKey）
+```
+
 ## 安装步骤（用户版）
 
 > **远程模式说明（可选）**：在 `~/.agenticx/config.yaml` 中配置 `remote_server` 并启用后，可连接远程 `agx serve`，无需本机安装 Python/agx。详见仓库内 `.cursor/plans/2026-03-24-desktop-remote-backend.plan.md`。
@@ -209,29 +232,6 @@ npm run build:linux
 ```
 
 Windows 若要内嵌后端，请使用上一节 `build:win:bundled` 或 `packaging/build_windows_installer.ps1`。
-
-## 架构说明
-
-<div align="center">
-<img src="assets/Near Desktop 架构中文信息图.png" alt="Near Desktop 架构 — 本机优先多智能体桌面工作台：Electron 壳、本机 Agent Runtime、执行面、本地数据面与可选远程后端" width="900" />
-</div>
-
-Near 是本机优先的多智能体桌面工作台：默认链路由 Electron 桌面壳与本机 `agx serve / agx-server` 构成；已支持可选远程单实例后端，Cluster / HA 仍为规划方向。
-
-> 架构图重绘提示词：[Near Desktop（中文）](../assets/prompt-for-pics/desktop_cn.md)
-
-```text
-Electron Main
-  ├─ 启动/停止 agx serve
-  ├─ IPC: get-api-base / save-config / native-say
-  └─ Tray + Native Menu
-
-Renderer (React + Zustand)
-  ├─ ChatView（主智能体对话流，SSE token 流式）
-  ├─ SubAgentPanel（Agent Team 进度与事件）
-  ├─ ConfirmDialog（按 agent_id 路由确认）
-  └─ SettingsPanel（provider/model/apiKey）
-```
 
 ## Meta-Agent + Agent Team
 

@@ -4,6 +4,29 @@
 
 > **Note: This is an Alpha preview. macOS signing / notarization is not wired up yet. First launch requires a manual Gatekeeper bypass (see below).**
 
+## Architecture
+
+<div align="center">
+<img src="assets/near-desktop-architecture-en.png" alt="Near Desktop Architecture — local-first multi-agent desktop workspace: Electron shell, local Agent Runtime, execution plane, local data plane, and optional remote backend" width="100%" />
+</div>
+
+Near is a local-first multi-agent desktop workspace. The default path combines the Electron shell with a local `agx serve / agx-server`. An optional remote single-server backend is implemented; Cluster / HA remains planned.
+
+> Architecture drawing prompts: [Near Desktop (English)](../assets/prompt-for-pics/desktop_en.md)
+
+```text
+Electron Main
+  ├─ Start / stop agx serve
+  ├─ IPC: get-api-base / save-config / native-say
+  └─ Tray + Native Menu
+
+Renderer (React + Zustand)
+  ├─ ChatView (meta-agent chat, SSE token stream)
+  ├─ SubAgentPanel (Agent Team progress and events)
+  ├─ ConfirmDialog (routed by agent_id)
+  └─ SettingsPanel (provider / model / apiKey)
+```
+
 ## Install (end users)
 
 > **Optional remote mode**: Configure and enable `remote_server` in `~/.agenticx/config.yaml` to connect to a remote `agx serve` without installing Python / `agx` locally. See `.cursor/plans/2026-03-24-desktop-remote-backend.plan.md` in the repo.
@@ -208,29 +231,6 @@ npm run build:linux
 ```
 
 For Windows with an embedded backend, use `build:win:bundled` or `packaging/build_windows_installer.ps1` above.
-
-## Architecture
-
-<div align="center">
-<img src="assets/Near Desktop Architecture Infographic.png" alt="Near Desktop Architecture — local-first multi-agent desktop workspace: Electron shell, local Agent Runtime, execution plane, local data plane, and optional remote backend" width="900" />
-</div>
-
-Near is a local-first multi-agent desktop workspace. The default path combines the Electron shell with a local `agx serve / agx-server`. An optional remote single-server backend is implemented; Cluster / HA remains planned.
-
-> Architecture drawing prompts: [Near Desktop (English)](../assets/prompt-for-pics/desktop_en.md)
-
-```text
-Electron Main
-  ├─ Start / stop agx serve
-  ├─ IPC: get-api-base / save-config / native-say
-  └─ Tray + Native Menu
-
-Renderer (React + Zustand)
-  ├─ ChatView (meta-agent chat, SSE token stream)
-  ├─ SubAgentPanel (Agent Team progress and events)
-  ├─ ConfirmDialog (routed by agent_id)
-  └─ SettingsPanel (provider / model / apiKey)
-```
 
 ## Meta-Agent + Agent Team
 
